@@ -8,16 +8,16 @@ PROTOCOL_VERSION ?= 1
 DEFAULT_SERVER_URL ?= https://api.pprbt.dev
 # The configured control-plane origin also serves current.json and TUF.
 DEFAULT_RELEASE_URL ?= $(DEFAULT_SERVER_URL)
-GO_VERSION  := 1.27.1
+GO_VERSION  := $(shell awk '$$1 == "go" { print $$2; exit }' go.mod)
 SQLC_VERSION := v1.30.0
 GO_ROOT     := $(shell GOTOOLCHAIN=go$(GO_VERSION) go env GOROOT)
 export PATH := $(GO_ROOT)/bin:$(PATH)
 GO          := GOTOOLCHAIN=local go
 GOFMT       := $(GO_ROOT)/bin/gofmt
-GO_FILES    := $(shell find . -path ./.git -prune -o -name '*.go' -print)
+GO_FILES    := $(shell find . \( -path ./.git -o -path ./upstream/tailcat \) -prune -o -name '*.go' -print)
 LDFLAGS     := -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=$(VERSION) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=$(COMMIT) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=$(PROTOCOL_VERSION) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=$(DEFAULT_SERVER_URL) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=$(DEFAULT_RELEASE_URL)
 
-.PHONY: binary-size-check build check clean codex-path-manifest complete container-compose-check cross-build dependencies fmt fmt-check fuzz generate generate-check hosted-image-check install license-check lint metrics-check metrics-generate preflight race release-assets release-binaries release-macos-pkg reproducible-builds source-policy static-analysis test tidy tidy-check uninstall verification verify-toolchain vet vulnerability-check
+.PHONY: binary-size-check build check clean codex-path-manifest complete container-compose-check cross-build dependencies fmt fmt-check fuzz generate generate-check hosted-image-check install license-check lint metrics-check metrics-generate preflight race release-assets release-binaries release-macos-pkg reproducible-builds source-policy static-analysis test tidy tidy-check uninstall upstream-foundations verification verify-toolchain vet vulnerability-check
 
 dependencies:
 	@./tools/verify-peer-dependencies.sh
@@ -66,8 +66,11 @@ release-macos-pkg: verify-toolchain
 	@mkdir -p dist
 	@rm -f dist/pb-darwin-arm64.stage dist/pb-darwin-arm64.pkg
 	@./tools/build-release-asset.sh --platform darwin --architecture arm64 --output dist/pb-darwin-arm64.stage --version "$(VERSION)" --server-url "$(DEFAULT_SERVER_URL)" --release-url "$(DEFAULT_RELEASE_URL)"
-	@test -n "$(MACOS_INSTALLER_SIGNING_IDENTITY)" || { echo 'MACOS_INSTALLER_SIGNING_IDENTITY is required' >&2; exit 1; }
-	@./tools/build-macos-pkg.sh --binary dist/pb-darwin-arm64.stage --output dist/pb-darwin-arm64.pkg --version "$(VERSION)" --signing-identity "$(MACOS_INSTALLER_SIGNING_IDENTITY)"
+	@if test -n "$(MACOS_INSTALLER_SIGNING_IDENTITY)"; then \
+		./tools/build-macos-pkg.sh --binary dist/pb-darwin-arm64.stage --output dist/pb-darwin-arm64.pkg --version "$(VERSION)" --signing-identity "$(MACOS_INSTALLER_SIGNING_IDENTITY)"; \
+	else \
+		./tools/build-macos-pkg.sh --binary dist/pb-darwin-arm64.stage --output dist/pb-darwin-arm64.pkg --version "$(VERSION)"; \
+	fi
 	@rm -f dist/pb-darwin-arm64.stage
 
 release-assets: release-binaries release-macos-pkg
@@ -90,6 +93,9 @@ fuzz: verify-toolchain
 
 reproducible-builds: verify-toolchain
 	@VERSION="$(VERSION)" COMMIT="$(COMMIT)" PROTOCOL_VERSION="$(PROTOCOL_VERSION)" ./tools/verify-reproducible-builds.sh
+
+upstream-foundations:
+	@./tools/verify-upstream-foundations.sh
 
 static-analysis: verify-toolchain source-policy
 	@./tools/verify-static-analysis.sh

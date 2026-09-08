@@ -30,10 +30,11 @@ require_module github.com/quic-go/quic-go v0.61.0
 require_module github.com/tailscale/peercred v0.0.0-20250107143737-35a0c7bd7edc
 require_module github.com/tailscale/squibble v0.0.0-20260411062017-141f5d618bc4
 require_module go.uber.org/goleak v1.3.0
-require_module golang.org/x/crypto v0.54.0
+require_module golang.org/x/crypto v0.55.0
 require_module howett.net/plist v1.0.1
 require_module pgregory.net/rapid v1.3.0
-require_module tailscale.com v1.102.1
+require_module tailscale.com v1.103.0-pre.0.20260904030409-31d8badb3bfb
+require_module github.com/tailscale/tailcat v0.6.1-0.20260905044447-5a83b9f9e119
 
 v3_edges=$(go mod graph | awk '$2 ~ /^github.com\/pion\/transport\/v3@/ { print }')
 [ "$v3_edges" = "github.com/pion/mdns/v2@v2.1.0 github.com/pion/transport/v3@v3.1.1" ] || {
@@ -47,17 +48,17 @@ if go list -deps -test ./... | grep -q '^github.com/pion/transport/v3\($\|/\)'; 
   exit 1
 fi
 
-if rg -n --glob '*.go' 'github\.com/pion/(turn|mdns)|github\.com/pion/transport/v3' .; then
+if rg -n --glob '*.go' --glob '!upstream/tailcat/**' 'github\.com/pion/(turn|mdns)|github\.com/pion/transport/v3' .; then
   echo "owned source imports a forbidden Pion package" >&2
   exit 1
 fi
 
-if rg -n --glob '*.go' 'github\.com/gorilla/websocket' .; then
+if rg -n --glob '*.go' --glob '!upstream/tailcat/**' 'github\.com/gorilla/websocket' .; then
   echo "owned source imports forbidden Gorilla WebSocket package" >&2
   exit 1
 fi
 
-if rg -n --glob '*.go' --glob '!**/*_test.go' 'Getsockopt(Ucred|Xucred)|SO_PEERCRED|LOCAL_PEERCRED' internal cmd; then
+if rg -n --glob '*.go' --glob '!upstream/tailcat/**' --glob '!**/*_test.go' 'Getsockopt(Ucred|Xucred)|SO_PEERCRED|LOCAL_PEERCRED' internal cmd; then
   echo "owned source bypasses the peercred facade" >&2
   exit 1
 fi
@@ -67,7 +68,7 @@ if go list -deps -test ./... | grep -q '^github.com/gorilla/websocket$'; then
   exit 1
 fi
 
-default_http=$(rg -n --glob '*.go' --glob '!**/*_test.go' 'http\.(DefaultClient|DefaultTransport|Get|Post)\b' internal cmd || true)
+default_http=$(rg -n --glob '*.go' --glob '!upstream/tailcat/**' --glob '!**/*_test.go' 'http\.(DefaultClient|DefaultTransport|Get|Post)\b' internal cmd || true)
 unexpected_default_http=$(printf '%s\n' "$default_http" | grep -Ev '^internal/hostruntime/preview/proxy\.go:[0-9]+:[[:space:]]*config\.Transport = http\.DefaultTransport$' || true)
 if [ -n "$unexpected_default_http" ]; then
   echo "owned external HTTP path bypasses the shared transport:" >&2
@@ -75,14 +76,14 @@ if [ -n "$unexpected_default_http" ]; then
   exit 1
 fi
 
-if rg -n --glob '*.go' '\.(UnsafeKey|Cipher|SetNonce)\(' internal/peertransport; then
+if rg -n --glob '*.go' --glob '!upstream/tailcat/**' '\.(UnsafeKey|Cipher|SetNonce)\(' internal/peertransport; then
   echo "owned E2EE source uses a forbidden Noise cipher API" >&2
   exit 1
 fi
 
-for import in $(rg -o --no-filename --glob '*.go' 'tailscale\.com/[^"[:space:]]+' . | sort -u); do
+for import in $(rg -o --no-filename --glob '*.go' --glob '!upstream/tailcat/**' 'tailscale\.com/[^"[:space:]]+' . | sort -u); do
   case "$import" in
-    tailscale.com/net/netmon|tailscale.com/net/portmapper|tailscale.com/net/portmapper/portmappertype|tailscale.com/net/wsconn|tailscale.com/util/eventbus|tailscale.com/util/winutil|tailscale.com/util/winutil/conpty) ;;
+    tailscale.com/tailcfg|tailscale.com/types/key|tailscale.com/wgengine/filter|tailscale.com/tstest/integration|tailscale.com/net/netmon|tailscale.com/net/portmapper|tailscale.com/net/portmapper/portmappertype|tailscale.com/net/wsconn|tailscale.com/util/eventbus|tailscale.com/util/winutil|tailscale.com/util/winutil/conpty) ;;
     *)
       echo "owned source imports forbidden Tailscale package: $import" >&2
       exit 1
@@ -90,25 +91,32 @@ for import in $(rg -o --no-filename --glob '*.go' 'tailscale\.com/[^"[:space:]]+
   esac
 done
 
-unexpected_winutil=$(rg -n --glob '*.go' 'tailscale\.com/util/winutil' . || true)
+unexpected_winutil=$(rg -n --glob '*.go' --glob '!upstream/tailcat/**' 'tailscale\.com/util/winutil' . || true)
 if [ -n "$unexpected_winutil" ]; then
   echo "owned source imports Tailscale winutil outside the Windows ConPTY parity test:" >&2
   printf '%s\n' "$unexpected_winutil" >&2
   exit 1
 fi
 
-unexpected_eventbus=$(rg -n --glob '*.go' 'tailscale\.com/util/eventbus' . | grep -Ev '^\./internal/peertransport/networkmonitor/(monitor|renewal)(_test)?\.go:[0-9]+:' || true)
+unexpected_eventbus=$(rg -n --glob '*.go' --glob '!upstream/tailcat/**' 'tailscale\.com/util/eventbus' . | grep -Ev '^\./internal/peertransport/networkmonitor/(monitor|renewal)(_test)?\.go:[0-9]+:' || true)
 if [ -n "$unexpected_eventbus" ]; then
 	echo "owned source imports Tailscale eventbus outside the network-monitor facade:" >&2
   printf '%s\n' "$unexpected_eventbus" >&2
 	exit 1
 fi
 
-unexpected_portmappertype=$(rg -n --glob '*.go' 'tailscale\.com/net/portmapper/portmappertype' . | grep -Ev '^\./internal/peertransport/networkmonitor/renewal(_test)?\.go:[0-9]+:' || true)
+unexpected_portmappertype=$(rg -n --glob '*.go' --glob '!upstream/tailcat/**' 'tailscale\.com/net/portmapper/portmappertype' . | grep -Ev '^\./internal/peertransport/networkmonitor/renewal(_test)?\.go:[0-9]+:' || true)
 if [ -n "$unexpected_portmappertype" ]; then
 	echo "owned source imports Tailscale port-mapping event types outside the renewal facade:" >&2
 	printf '%s\n' "$unexpected_portmappertype" >&2
 	exit 1
+fi
+
+unexpected_tailnet=$(rg -n --glob '*.go' --glob '!upstream/tailcat/**' '"tailscale\.com/(tailcfg|types/key|wgengine/filter|tstest/integration)"' . | grep -Ev '^\./internal/peertransport/(tailnet/(udp|authority|authorized_udp)(_test)?|peerquic/tailcat_integration_test)\.go:[0-9]+:' || true)
+if [ -n "$unexpected_tailnet" ]; then
+  echo "owned source imports Tailcat support packages outside the virtual UDP boundary:" >&2
+  printf '%s\n' "$unexpected_tailnet" >&2
+  exit 1
 fi
 
 echo "peer dependencies: valid"

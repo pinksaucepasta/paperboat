@@ -33,13 +33,18 @@ func CredentialStreamAuthorizer(factory server.AuthorizerFactory) StreamAuthoriz
 		if closer, ok := authorizer.(server.AuthorizationCloser); ok {
 			defer closer.CloseAuthorization()
 		}
-		capability := map[string]string{"terminal": "terminal.v1", "exec": "exec.v1", "ssh": "ssh.v1", "private_preview": "preview.launch.v1", "codex": "codex.connect.v1"}[header.Consumer]
+		capability := map[string]string{"terminal": "terminal.v1", "exec": "exec.v1", "ssh": "ssh.v1", "file_transfer": "file-transfer.v1", "private_preview": "preview.launch.v1", "private_http": "private.access.v1", "private_tcp": "private.access.v1", "codex": "codex.connect.v1"}[header.Consumer]
 		if capability == "" {
 			return server.Authorization{}, ErrStreamDispatch
 		}
 		authorization, err := authorizer.Authorize(ctx, protocol.Frame{Type: "request", RequestID: header.StreamID, Version: protocol.ProtocolVersion, OperationID: header.OperationID, Capability: capability})
 		if err != nil {
 			return server.Authorization{}, errors.Join(ErrStreamDispatch, err)
+		}
+		if header.Consumer == "private_http" || header.Consumer == "private_tcp" {
+			if _, err := server.RevalidateNativePrivate(authorization, header.Target, authorization.MachineID, time.Now().UTC()); err != nil {
+				return server.Authorization{}, errors.Join(ErrStreamDispatch, err)
+			}
 		}
 		return authorization, nil
 	}

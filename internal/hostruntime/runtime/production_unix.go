@@ -48,7 +48,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hosted"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/observability"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/peerattempt"
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/peerrelay"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
@@ -58,7 +57,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/endpointidentity"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/networkcheck"
-	peerpreview "github.com/pinksaucepasta/paperboat/internal/peertransport/privatepreview"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/relayselection"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/signaling"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
@@ -89,7 +87,6 @@ type productionClientPeerDependencies struct {
 }
 
 func newProductionClientPeerService(dependencies productionClientPeerDependencies, serve func(net.Conn) error, transferHandler http.Handler) (Service, error) {
-	previewDialer := &net.Dialer{Timeout: 10 * time.Second}
 	service, err := dependencies.build(peerrelay.Config{
 		Source:             dependencies.attempts,
 		Fingerprints:       dependencies.networkChanges,
@@ -99,19 +96,11 @@ func newProductionClientPeerService(dependencies productionClientPeerDependencie
 		TLS:                &tls.Config{MinVersion: tls.VersionTLS13},
 		HTTPClient:         &http.Client{Transport: dependencies.transport},
 		Serve:              serve,
-		ServePreview: func(ctx context.Context, stream net.Conn) error {
-			return peerpreview.Serve(ctx, stream, previewDialer.DialContext)
-		},
 		ServeTransfer: func(ctx context.Context, stream net.Conn) error {
 			return server.ServeHTTPConnection(ctx, stream, transferHandler)
 		},
-		AuthorizeStream: peerrelay.CredentialStreamAuthorizer(dependencies.authorizer),
-		ServeStream: func(ctx context.Context, header streamauth.Header, stream net.Conn) error {
-			if header.Consumer != "private_preview" {
-				return peerrelay.ErrInvalid
-			}
-			return peerpreview.Serve(ctx, stream, previewDialer.DialContext)
-		},
+		AuthorizeStream:     peerrelay.CredentialStreamAuthorizer(dependencies.authorizer),
+		ServeStream:         func(context.Context, streamauth.Header, net.Conn) error { return peerrelay.ErrInvalid },
 		TransferKeys:        dependencies.transferKeys,
 		ObserveRelaySuccess: dependencies.observeRelaySuccess,
 		ObserveTransferKeyAcknowledged: func() {
@@ -712,6 +701,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		return nil, err
 	}
 	dependencies := HostDependencies{Authorizer: authorizer, AuthorizationService: authorizationRefresh, Connector: connectorService, PreviewDispatcher: previewAssembly, PreviewRecovery: previewAssembly, PreviewOwnerSessions: previewAssembly.OwnerSessionLeases(), RuntimeObservationService: runtimeService, ManagedEnvironment: managedEnvironment, Metrics: metrics, CodexSessions: codexManager, LocalControlToken: localControlToken, ManagedSSH: managedSSHHost, ManagedSSHService: managedSSHService, TransferKeys: transferKeys}
+	nativePrivateValidators := []productionNativePrivateValidator{previewAssembly.dispatcher}
 	if tunnelProvider == nil {
 		tunnelEnrollment, enrollmentErr := newProductionTunnelEnrollmentService(controlURL.String(), runtimeConfig.StateRoot, machineID, localControlToken, transport)
 		if enrollmentErr != nil {
@@ -730,6 +720,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 			return nil, errors.Join(ErrProductionInvalid, assemblyErr)
 		}
 		dependencies.TunnelManager = tunnelAssembly
+		nativePrivateValidators = append(nativePrivateValidators, tunnelAssembly.Manager.Manager)
 		updateGate, gateErr := tunnelmanager.NewUpdateGate(tunnelmanager.UpdateGateConfig{MachineID: machineID, Manager: tunnelAssembly.Manager.Manager, StatePath: filepath.Join(runtimeConfig.StateRoot, "updates", "deployment-gate.json")})
 		if gateErr != nil {
 			return nil, errors.Join(ErrProductionInvalid, gateErr)
@@ -738,66 +729,8 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		networkHandler.SetCanonical(tunnelAssembly)
 	}
 	if managedSSHIdentity != nil {
-		attempts, attemptErr := peerattempt.New(peerattempt.Config{ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport, Timeout: 15 * time.Second}, managedSSHIdentity)
-		if attemptErr != nil {
-			return nil, attemptErr
-		}
 		dependencies.NativePeerFactory = func(serve func(net.Conn) error, transferHandler, codexHandler http.Handler) (Service, error) {
-			previewDialer := &net.Dialer{Timeout: 10 * time.Second}
-			service, serviceErr := peerrelay.New(peerrelay.Config{Source: attempts, Fingerprints: networkChanges, SocketMapping: networkChanges, SignalingSubstrate: signalingSubstrate, StateRoot: runtimeConfig.StateRoot, TLS: &tls.Config{MinVersion: tls.VersionTLS13}, HTTPClient: &http.Client{Transport: transport}, Serve: serve, ServePreview: func(ctx context.Context, stream net.Conn) error {
-				return peerpreview.Serve(ctx, stream, previewDialer.DialContext)
-			}, ServeTransfer: func(ctx context.Context, stream net.Conn) error {
-				return server.ServeHTTPConnection(ctx, stream, transferHandler)
-			}, ServeCodex: func(ctx context.Context, stream net.Conn) error {
-				if codexHandler == nil {
-					return peerrelay.ErrInvalid
-				}
-				return server.ServeHTTPConnection(ctx, stream, codexHandler)
-			}, ServeSSH: func(ctx context.Context, stream net.Conn) error {
-				if managedSSHHost == nil {
-					return peerrelay.ErrInvalid
-				}
-				target, ok := managedSSHHost.Target()
-				if !ok {
-					return managedssh.ErrSSHHostStale
-				}
-				result, err := managedSSHHost.Serve(ctx, target.Generation, stream)
-				slog.Info("managed SSH raw stream closed", "to_sshd_bytes", result.ToSSHD, "from_sshd_bytes", result.FromSSHD, "error", err)
-				return err
-			}, AuthorizeStream: peerrelay.CredentialStreamAuthorizer(authorizer), ServeStream: func(ctx context.Context, header streamauth.Header, stream net.Conn) error {
-				switch header.Consumer {
-				case "terminal", "exec":
-					return serve(stream)
-				case "ssh":
-					if managedSSHHost == nil {
-						return peerrelay.ErrInvalid
-					}
-					target, ok := managedSSHHost.Target()
-					if !ok {
-						return managedssh.ErrSSHHostStale
-					}
-					result, err := managedSSHHost.Serve(ctx, target.Generation, stream)
-					slog.Info("managed SSH raw stream closed", "to_sshd_bytes", result.ToSSHD, "from_sshd_bytes", result.FromSSHD, "error", err)
-					return err
-				case "private_preview":
-					return peerpreview.Serve(ctx, stream, previewDialer.DialContext)
-				case "codex":
-					if codexHandler == nil {
-						return peerrelay.ErrInvalid
-					}
-					return server.ServeHTTPConnection(ctx, stream, codexHandler)
-				default:
-					return peerrelay.ErrInvalid
-				}
-			}, TransferKeys: transferKeys, ObserveRelaySuccess: relayRegion.Observe, ObserveTransferKeyAcknowledged: func() {
-				recordProductionPeerOutcome(runtimeConfig.StateRoot, "transfer_key_ack_written")
-			}, ObserveError: func(err error) {
-				observeProductionPeerError(runtimeConfig.StateRoot, err)
-			}})
-			if serviceErr == nil {
-				directNetwork.Set(service)
-			}
-			return service, serviceErr
+			return newProductionNativePeerService(productionNativePeerConfig{controlURL: controlURL.String(), issuer: issuer, stateRoot: runtimeConfig.StateRoot, machineID: machineID, generation: uint64(machineRegistration.InstallationGeneration), transport: transport, identity: managedSSHIdentity, keys: cache, authorizer: authorizer, serve: serve, transfer: transferHandler, codex: codexHandler, ssh: managedSSHHost, privateCurrent: productionNativeCurrent(nativePrivateValidators...), privateDial: productionNativePrivateDial})
 		}
 	}
 	if runtimeConfig.Profile == runtimeconfig.Hosted {
@@ -1123,24 +1056,9 @@ func newProductionClientCoordinator(ctx context.Context, version string, environ
 	if err != nil {
 		return nil, err
 	}
-	attempts, err := peerattempt.New(peerattempt.Config{ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport, Timeout: 15 * time.Second}, runtimeIdentity)
-	if err != nil {
-		return nil, err
-	}
-	peerDependencies := productionClientPeerDependencies{
-		attempts:            attempts,
-		networkChanges:      networkChanges,
-		signalingSubstrate:  signalingSubstrate,
-		stateRoot:           runtimeConfig.StateRoot,
-		transport:           transport,
-		authorizer:          authorizer,
-		transferKeys:        transferKeys,
-		observeRelaySuccess: relayRegion.Observe,
-		directNetwork:       directNetwork,
-		build:               peerrelay.New,
-	}
-	nativePeerFactory := func(serve func(net.Conn) error, transferHandler, _ http.Handler) (Service, error) {
-		return newProductionClientPeerService(peerDependencies, serve, transferHandler)
+	var nativePrivateValidators []productionNativePrivateValidator
+	nativePeerFactory := func(serve func(net.Conn) error, transferHandler, codexHandler http.Handler) (Service, error) {
+		return newProductionNativePeerService(productionNativePeerConfig{controlURL: controlURL.String(), issuer: issuer, stateRoot: runtimeConfig.StateRoot, machineID: registration.MachineID, generation: uint64(registration.InstallationGeneration), transport: transport, identity: runtimeIdentity, keys: cache, authorizer: authorizer, serve: serve, transfer: transferHandler, codex: codexHandler, privateCurrent: productionNativeCurrent(nativePrivateValidators...), privateDial: productionNativePrivateDial})
 	}
 	dependencies := HostDependencies{Authorizer: authorizer, AuthorizationService: authorizationRefresh, Connector: connectorService, PreviewRecovery: nil, RuntimeObservationService: serviceGroup{regionalMonitor, observation}, Metrics: metrics, LocalControlToken: localControlToken, TransferKeys: transferKeys, NativePeerFactory: nativePeerFactory}
 	if tunnelProvider == nil {
@@ -1161,6 +1079,7 @@ func newProductionClientCoordinator(ctx context.Context, version string, environ
 			return nil, errors.Join(ErrProductionInvalid, assemblyErr)
 		}
 		dependencies.TunnelManager = tunnelAssembly
+		nativePrivateValidators = append(nativePrivateValidators, tunnelAssembly.Manager.Manager)
 		updateGate, gateErr := tunnelmanager.NewUpdateGate(tunnelmanager.UpdateGateConfig{MachineID: registration.MachineID, Manager: tunnelAssembly.Manager.Manager, StatePath: filepath.Join(runtimeConfig.StateRoot, "updates", "deployment-gate.json")})
 		if gateErr != nil {
 			return nil, errors.Join(ErrProductionInvalid, gateErr)

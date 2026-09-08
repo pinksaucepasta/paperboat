@@ -130,3 +130,53 @@ func TestSchedulerRejectsUnsafeBounds(t *testing.T) {
 		}
 	}
 }
+
+func TestSchedulerReportsBusyAndRetriesWithoutFailureBackoff(t *testing.T) {
+	now := time.Now().UTC()
+	busy := true
+	scheduler, err := New(Config{Now: func() time.Time { return now }, Check: func(context.Context) (Result, error) {
+		if busy {
+			return Result{}, &ActiveTerminalSessionsError{RequiredVersion: "2026.09.07.1"}
+		}
+		return Result{Version: "2026.09.07.1", Updated: true}, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err = scheduler.CheckNow(context.Background()); err == nil {
+			t.Fatal("busy omitted")
+		}
+		state := scheduler.Snapshot()
+		if state.BlockedReason != BlockedActiveTerminalSessions || state.RequiredVersion != "2026.09.07.1" || state.Failures != 0 || state.Failure != "" || state.Updated || !state.NextCheckAt.Equal(now.Add(DefaultRetryFloor)) {
+			t.Fatalf("state=%+v", state)
+		}
+	}
+	busy = false
+	if _, err = scheduler.CheckNow(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	state := scheduler.Snapshot()
+	if state.BlockedReason != "" || state.RequiredVersion != "" || !state.Updated {
+		t.Fatalf("success=%+v", state)
+	}
+}
+
+func TestSchedulerRunHonorsRestoredBusyDeadline(t *testing.T) {
+	var calls atomic.Uint32
+	scheduler, err := New(Config{Check: func(context.Context) (Result, error) { calls.Add(1); return Result{}, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = scheduler.SeedBlockedActiveTerminalSessions("2026.09.07.1", time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err = scheduler.Run(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal(err)
+	}
+	if calls.Load() != 0 {
+		t.Fatal("restart ignored restored retry deadline")
+	}
+}

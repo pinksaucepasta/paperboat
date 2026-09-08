@@ -7,8 +7,11 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 )
 
 func TestWindowsControllerReclaimsStaleRollbackReady(t *testing.T) {
@@ -228,5 +231,33 @@ func TestWindowsControllerRecoveryMatchesStartupResume(t *testing.T) {
 				t.Fatalf("needs recovery=%t, want %t", got, test.want)
 			}
 		})
+	}
+}
+
+func TestWindowsControllerPreservesBusyHandoff(t *testing.T) {
+	journal := testWindowsActivationJournal()
+	journal.Stage = windowsActivationBusyReady
+	journal.PreDrainRollback = true
+	journal.BlockedReason = autoupdate.BlockedActiveTerminalSessions
+	journal.BlockedRetryAt = time.Now().Add(time.Minute)
+	oldLoad := loadWindowsActivationJournalForController
+	t.Cleanup(func() { loadWindowsActivationJournalForController = oldLoad })
+	loadWindowsActivationJournalForController = func(WindowsConfig) (windowsActivationJournal, error) { return journal, nil }
+	controller, err := newWindowsController(WindowsConfig{ActiveVersion: journal.PreviousVersion, ResolveRelease: func(context.Context) (workerupdate.Release, bool, error) {
+		t.Fatal("startup resolved instead of honoring busy retry")
+		return workerupdate.Release{}, false, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := controller.scheduler.Snapshot()
+	if state.BlockedReason != autoupdate.BlockedActiveTerminalSessions || state.RequiredVersion != journal.Version || state.Failures != 0 || !state.NextCheckAt.Equal(journal.BlockedRetryAt) {
+		t.Fatalf("busy observation=%+v", state)
+	}
+	journal.Stage = windowsActivationRolledBack
+	journal.PreDrainRollback = false
+	transaction := windowsTransactionState(journal)
+	if transaction.Stage != updateflow.StageIdle || transaction.Quarantined || transaction.Failure != "" {
+		t.Fatalf("busy transaction=%+v", transaction)
 	}
 }

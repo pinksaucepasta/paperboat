@@ -48,6 +48,27 @@ func TestActiveVersionPermittedEnforcesSignedRevocations(t *testing.T) {
 	}
 }
 
+func TestRecoveryPermittedEnforcesCurrentSignedPolicy(t *testing.T) {
+	index, now := validEligibilityIndex(t)
+	previous := "2026.08.30.9"
+	if !recoveryPermitted(index, now, previous, "linux", "amd64") {
+		t.Fatal("permitted authenticated previous release was rejected")
+	}
+	revoked := index
+	revoked.RevokedVersions = []string{previous}
+	if recoveryPermitted(revoked, now, previous, "linux", "amd64") {
+		t.Fatal("revoked recovery release was permitted")
+	}
+	minimum := index
+	minimum.MinimumVersion = index.Version
+	if recoveryPermitted(minimum, now, previous, "linux", "amd64") {
+		t.Fatal("recovery release below signed minimum was permitted")
+	}
+	if recoveryPermitted(index, now, previous, "darwin", "arm64") {
+		t.Fatal("recovery release for wrong platform was permitted")
+	}
+}
+
 func TestCurrentRevokedReleaseRemainsIdentifiableButNotActivatable(t *testing.T) {
 	plan, err := releasepolicy.Default("2026.08.27.56", strings.Repeat("b", 64), 1, "security", "revoked-test", []releasepolicy.PlatformTarget{{Platform: "linux", Architecture: "amd64"}})
 	if err != nil {

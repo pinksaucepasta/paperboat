@@ -14,6 +14,7 @@ import (
 	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
 )
 
 func standaloneGateRequest(operation string, target *hostdproto.UpdateGateTargetBinding) hostdproto.UpdateGateRequest {
@@ -82,25 +83,71 @@ func TestStandaloneUpdateGateCompletesWithNoProtectedWorkloads(t *testing.T) {
 	}
 }
 
-func TestStandaloneUpdateGateFencesProtectedWorkloadsAcrossCutover(t *testing.T) {
+func TestStandaloneUpdateGateDefersTerminalsAndRestoresAdmissionFence(t *testing.T) {
 	health := http.NewServeMux()
 	registerHostLivenessAndDiagnostics(health, nil, nil, nil, nil)
+	busy, held := true, ""
 	workloads := hostdproto.WorkloadStatus{Generation: 2, Protected: 3}
-	gate, err := newStandaloneUpdateGate(standaloneUpdateGateConfig{MachineID: "machine_01", StatePath: filepath.Join(t.TempDir(), "gate.json"), Health: health, Workloads: func() hostdproto.WorkloadStatus { return workloads }})
+	config := standaloneUpdateGateConfig{MachineID: "machine_01", StatePath: filepath.Join(t.TempDir(), "gate.json"), Health: health,
+		Workloads: func() hostdproto.WorkloadStatus { return workloads },
+		BeginUpdate: func(id string) error {
+			if busy {
+				return session.ErrUpdateBusy
+			}
+			if held != "" && held != id {
+				return session.ErrUpdateInProgress
+			}
+			held = id
+			return nil
+		},
+		EndUpdate: func(id string) error {
+			if held != id {
+				return session.ErrUpdateInProgress
+			}
+			held = ""
+			return nil
+		}}
+	gate, err := newStandaloneUpdateGate(config)
 	if err != nil {
 		t.Fatal(err)
 	}
-	targetResponse, _ := gate.HandleUpdateGate(context.Background(), standaloneGateRequest(hostdproto.UpdateGateTarget, nil))
-	target := targetResponse.Target
-	if _, err := gate.HandleUpdateGate(context.Background(), standaloneGateRequest(hostdproto.UpdateGateCandidate, &target)); err != nil {
+	response, err := gate.HandleUpdateGate(context.Background(), standaloneGateRequest(hostdproto.UpdateGateTarget, nil))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := gate.HandleUpdateGate(context.Background(), standaloneGateRequest(hostdproto.UpdateGateDrain, &target)); err != nil {
-		t.Fatalf("stable workload drain: %v", err)
+	target := response.Target
+	if _, err = gate.HandleUpdateGate(context.Background(), standaloneGateRequest(hostdproto.UpdateGateCandidate, &target)); err != nil {
+		t.Fatal(err)
 	}
-	workloads.Generation++
-	if _, err := gate.HandleUpdateGate(context.Background(), standaloneGateRequest(hostdproto.UpdateGateStability, &target)); !errors.Is(err, errStandaloneUpdateGate) {
-		t.Fatalf("changed workload fence error=%v", err)
+	response, err = gate.HandleUpdateGate(context.Background(), standaloneGateRequest(hostdproto.UpdateGateDrain, &target))
+	if err != nil || response.BlockedReason != hostdproto.UpdateGateBlockedActiveTerminalSessions || held != "" || gate.transactions["transaction_01"].Drained {
+		t.Fatalf("busy response=%+v held=%q err=%v", response, held, err)
+	}
+	busy = false
+	if _, err = gate.HandleUpdateGate(context.Background(), standaloneGateRequest(hostdproto.UpdateGateDrain, &target)); err != nil {
+		t.Fatal(err)
+	}
+	if held != "transaction_01" {
+		t.Fatal("missing admission fence")
+	}
+	// A restarted host restores the fence before admitting new shells. Transfer
+	// counts may change across restart; they cannot stand in for a terminal fence.
+	held = ""
+	workloads = hostdproto.WorkloadStatus{Generation: 1}
+	gate, err = newStandaloneUpdateGate(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if held != "transaction_01" {
+		t.Fatal("restart lost admission fence")
+	}
+	for _, op := range []string{hostdproto.UpdateGateStability, hostdproto.UpdateGateCommit} {
+		if _, err = gate.HandleUpdateGate(context.Background(), standaloneGateRequest(op, &target)); err != nil {
+			t.Fatalf("%s: %v", op, err)
+		}
+	}
+	if held != "" {
+		t.Fatal("commit retained admission fence")
 	}
 }
 
@@ -168,8 +215,20 @@ func TestStandaloneUpdateGateRollsBackAfterInvalidWorkloadSnapshot(t *testing.T)
 	if _, err := gate.HandleUpdateGate(context.Background(), standaloneGateRequest(hostdproto.UpdateGateRollback, &target)); err != nil {
 		t.Fatalf("rollback after failed drain: %v", err)
 	}
-	if len(gate.transactions) != 0 {
-		t.Fatalf("rollback retained transaction: %+v", gate.transactions)
+	if !gate.transactions["transaction_01"].RolledBack {
+		t.Fatal("rollback did not retain exact completion receipt")
+	}
+	gate, err = newStandaloneUpdateGate(gate.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = gate.HandleUpdateGate(context.Background(), standaloneGateRequest(hostdproto.UpdateGateRollback, &target)); err != nil {
+		t.Fatalf("rollback retry after restart: %v", err)
+	}
+	wrong := standaloneGateRequest(hostdproto.UpdateGateRollback, &target)
+	wrong.ManifestSHA256 = strings.Repeat("b", 64)
+	if _, err = gate.HandleUpdateGate(context.Background(), wrong); !errors.Is(err, errStandaloneUpdateGate) {
+		t.Fatalf("wrong rollback receipt accepted: %v", err)
 	}
 }
 

@@ -54,17 +54,17 @@ func approveEndpoint(ctx context.Context, request ApprovalRequest, wantRole endp
 	if err != nil {
 		return Result{}, err
 	}
-	keys, err := request.Store.PeerIdentityKeysForExistingRoot(request.Issuer, request.AccountID, request.CLIClientSessionID)
+	signer, err := request.Store.PeerApprovalSigningKey(request.Issuer, request.AccountID, request.CLIClientSessionID)
 	if err != nil {
 		return Result{}, err
 	}
-	defer clearKeys(&keys)
+	defer clear(signer)
 	rootKeys, rootErr := trustedkeys.Root(root)
 	if rootErr != nil {
 		return Result{}, ErrInvalid
 	}
 	defer trustedkeys.Clear(rootKeys)
-	rootPublic, ok := keys.RootPrivate.Public().(ed25519.PublicKey)
+	rootPublic, ok := signer.Public().(ed25519.PublicKey)
 	if !ok {
 		return Result{}, ErrInvalid
 	}
@@ -112,7 +112,7 @@ func approveEndpoint(ctx context.Context, request ApprovalRequest, wantRole endp
 	// using the same bounded skew as fresh bootstrap issuance.
 	issuedAt := now.Add(-CertificateClockSkew)
 	expiresAt := now.Add(CertificateLifetime)
-	certificate, err := endpointidentity.Sign(keys.RootPrivate, endpointidentity.Claims{AccountID: request.AccountID, Role: wantRole, EndpointID: selected.EndpointID, NoisePublicKey: noisePublic, QUICPublicKey: ed25519.PublicKey(quic), Generation: selected.Generation, Serial: 1, IssuedAt: issuedAt, ExpiresAt: expiresAt})
+	certificate, err := endpointidentity.Sign(signer, endpointidentity.Claims{AccountID: request.AccountID, Role: wantRole, EndpointID: selected.EndpointID, NoisePublicKey: noisePublic, QUICPublicKey: ed25519.PublicKey(quic), Generation: selected.Generation, Serial: 1, IssuedAt: issuedAt, ExpiresAt: expiresAt})
 	clear(noise)
 	clear(quic)
 	if err != nil {

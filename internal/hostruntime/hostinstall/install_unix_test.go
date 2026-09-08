@@ -50,7 +50,11 @@ func TestRemoveInstalledFilesDeletesOnlyAllowlistedHostState(t *testing.T) {
 	if err := os.Mkdir(updateRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	removed := []string{paths.worker, paths.metadata, filepath.Join(state, "power-baseline.json"), filepath.Join(state, "availability-policy.json"), filepath.Join(state, "update-current.json"), filepath.Join(state, "update-journal.json"), filepath.Join(state, "update-rollbacks.json"), filepath.Join(updateRoot, "update-current.json"), filepath.Join(updateRoot, "update-journal.json"), filepath.Join(updateRoot, "update-rollbacks.json")}
+	fenceRoot := filepath.Join(state, "hostd")
+	if err := os.Mkdir(fenceRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	removed := []string{filepath.Join(fenceRoot, "fence.json"), paths.worker, paths.metadata, filepath.Join(state, "power-baseline.json"), filepath.Join(state, "availability-policy.json"), filepath.Join(state, "update-current.json"), filepath.Join(state, "update-journal.json"), filepath.Join(state, "update-rollbacks.json"), filepath.Join(updateRoot, "update-current.json"), filepath.Join(updateRoot, "update-journal.json"), filepath.Join(updateRoot, "update-rollbacks.json")}
 	for _, path := range removed {
 		if err := os.WriteFile(path, []byte("owned"), 0o600); err != nil {
 			t.Fatal(err)
@@ -106,22 +110,46 @@ func TestComponentLayoutUsesDedicatedReleaseSlots(t *testing.T) {
 	}
 }
 
+func TestPlatformPathsUseAuthoritativeServiceLayout(t *testing.T) {
+	paths := platformPaths()
+	layout, err := service.DefaultLayout(runtime.GOOS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paths.root != layout.InstallRoot || paths.worker != layout.Binary || paths.workerNext != layout.BinaryStaged || paths.workerRollback != layout.BinaryRollback || paths.updateState != layout.UpdateStateRoot || paths.hostdSocket != layout.HostdSocket {
+		t.Fatalf("platform paths diverge from service layout: paths=%+v layout=%+v", paths, layout)
+	}
+	if filepath.Dir(paths.workerPrevious) != layout.ReleasesRoot {
+		t.Fatalf("previous slot escaped authoritative release root: %q", paths.workerPrevious)
+	}
+}
+
+func TestLoadEnrolledOwnerRequiresRoot(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("authorization rejection requires an unprivileged test process")
+	}
+	if _, err := LoadEnrolledOwner(os.Getuid()); !errors.Is(err, ErrNotPrivileged) {
+		t.Fatalf("error=%v want=%v", err, ErrNotPrivileged)
+	}
+}
+
 func TestPendingInstallersAllowRecoveryBeforeBinaryPublication(t *testing.T) {
 	request := validRequest(t)
 	root := t.TempDir()
 	paths := installPaths{
-		root:           root,
-		installerState: filepath.Join(root, "installer"),
-		runtimeState:   filepath.Join(root, "runtime"),
-		worker:         filepath.Join(root, "bin", "pb"),
-		workerNext:     filepath.Join(root, "releases", "pb.next"),
-		workerRollback: filepath.Join(root, "releases", "pb.rollback"),
-		workerPrevious: filepath.Join(root, "releases", "pb.previous"),
-		journal:        filepath.Join(root, "installer", "install-journal.json"),
-		metadata:       filepath.Join(root, "installer", "install-metadata.json"),
-		hostdToken:     filepath.Join(root, "runtime", "hostd.token"),
-		hostdSocket:    filepath.Join(root, "runtime", "hostd.sock"),
-		updateState:    filepath.Join(root, "runtime", "updates"),
+		root:                  root,
+		installerState:        filepath.Join(root, "installer"),
+		runtimeState:          filepath.Join(root, "runtime"),
+		worker:                filepath.Join(root, "bin", "pb"),
+		workerNext:            filepath.Join(root, "releases", "pb.next"),
+		workerRollback:        filepath.Join(root, "releases", "pb.rollback"),
+		workerPrevious:        filepath.Join(root, "releases", "pb.previous"),
+		journal:               filepath.Join(root, "installer", "install-journal.json"),
+		metadata:              filepath.Join(root, "installer", "install-metadata.json"),
+		hostdToken:            filepath.Join(root, "runtime", "hostd.token"),
+		hostdSocket:           filepath.Join(root, "runtime", "hostd.sock"),
+		updateState:           filepath.Join(root, "runtime", "updates"),
+		environmentCredential: filepath.Join(root, "installer", "environment", "host-key.cred"),
 	}
 	request.Executable = paths.worker
 	request.StateRoot = paths.runtimeState
@@ -335,6 +363,9 @@ func validRequest(t *testing.T) Request {
 	}
 	manifest := bootstrap.ArtifactTarget{Schema: bootstrap.ArtifactTargetSchemaV1, Kind: bootstrap.ArtifactKindPB, Version: "test", Platform: runtime.GOOS, Architecture: runtime.GOARCH, RepositoryURL: "https://updates.example.test/paperboat", TargetPath: releaseindex.AssetName(runtime.GOOS, runtime.GOARCH)}
 	state := t.TempDir()
+	if err := os.Chmod(state, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	state, err = filepath.EvalSymlinks(state)
 	if err != nil {
 		t.Fatal(err)
@@ -350,5 +381,44 @@ func validRequest(t *testing.T) Request {
 		Home: account.HomeDir, Path: "/usr/bin:/bin", StateRoot: state, WorkspaceRoot: account.HomeDir,
 		ControlURL: "https://control.example.test", UserMachineID: "um_test", Shell: shell,
 		HelperListenAddress: "127.0.0.1:8080",
+	}
+}
+
+func TestUninstallRetiresActivationBeforeRemovingInstallation(t *testing.T) {
+	var order []string
+	failure := errors.New("recovery helper still running")
+	err := uninstallWithActivation(context.Background(), func(context.Context) error { order = append(order, "helper"); return failure }, func(context.Context) error { order = append(order, "installation"); return nil })
+	if !errors.Is(err, failure) || len(order) != 1 {
+		t.Fatalf("uninstall continued while recovery owner remained: %v, %v", err, order)
+	}
+	order = nil
+	err = uninstallWithActivation(context.Background(), func(context.Context) error { order = append(order, "helper"); return nil }, func(context.Context) error { order = append(order, "installation"); return nil })
+	if err != nil || len(order) != 2 || order[0] != "helper" || order[1] != "installation" {
+		t.Fatalf("uninstall order=%v err=%v", order, err)
+	}
+}
+
+func TestManagedDirectoriesProvisionProtectedCanonicalBinaryParent(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("root-owned installation fixture requires bounded root test executable")
+	}
+	root := t.TempDir()
+	paths := installPaths{root: filepath.Join(root, "install"), worker: filepath.Join(root, "install", "bin", "pb"), hostdSocket: filepath.Join(root, "hostd", "control.sock"), updaterSocket: filepath.Join(root, "updated-control", "control.sock"), updateState: filepath.Join(root, "update-state")}
+	if err := ensureManagedDirectories(paths, Request{UID: 1001, GID: 1001}); err != nil {
+		t.Fatal(err)
+	}
+	parent := filepath.Dir(paths.worker)
+	info, err := os.Lstat(parent)
+	if err != nil {
+		t.Fatalf("canonical binary parent was not provisioned: %v", err)
+	}
+	if !info.IsDir() || ownerUID(info) != 0 || info.Mode().Perm() != 0755 {
+		t.Fatalf("unsafe canonical binary parent: %v", info)
+	}
+	if err := os.Chown(parent, 1001, 1001); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureManagedDirectories(paths, Request{UID: 1001, GID: 1001}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("accepted user-owned canonical binary parent: %v", err)
 	}
 }

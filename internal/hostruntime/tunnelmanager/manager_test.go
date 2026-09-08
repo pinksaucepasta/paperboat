@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
+	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
 )
 
 const (
@@ -505,6 +506,32 @@ func TestManagerRejectsReconcileOutsideLifecycle(t *testing.T) {
 	manager := newTestManager(t, &memoryStateStore{state: tunnelState(t, 1, 1)}, &fakeFactory{candidates: map[uint64][]*fakeCandidate{}, err: map[uint64]error{}}, time.Now(), func(Observation) {})
 	if err := manager.ReconcileNow(context.Background()); !errors.Is(err, ErrNotStarted) {
 		t.Fatalf("reconcile before start error=%v", err)
+	}
+}
+
+func TestValidateNativePrivateTargetUsesDurableAndLiveGeneration(t *testing.T) {
+	state := tunnelState(t, 1, 1)
+	payload := []byte(`{"schema":"paperboat.preview-tunnel/v1","kind":"tunnel_config_snapshot","tunnel_id":"tunnel_01","generation":1,"name":"demo","desired_state":"active","access_mode":"private","stable_endpoint":"https://123e4567-e89b-12d3-a456-426614174000.tunnel.example.test","expires_at":null,"routes":[{"id":"route_01","name":"default","protocol":"http","match_type":"catch_all","path_prefix":null,"origin_scheme":"http","origin_address":"127.0.0.1:3000","preserve_host":true,"host_override":null,"tls_verification":"not_applicable","tls_server_name":null,"ca_reference":null,"mtls_credential_reference":null,"connect_timeout_ms":10000,"idle_timeout_ms":90000,"max_concurrent_streams":128,"desired_state":"active"}]}`)
+	snapshot, err := hoststate.NewConfigSnapshot("tunnel_01", 1, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Tunnels[0].DesiredSnapshot, state.Tunnels[0].LastKnownGood = snapshot, &snapshot
+	store := &memoryStateStore{state: state}
+	manager := newTestManager(t, store, &fakeFactory{}, time.Now(), func(Observation) {})
+	manager.active["tunnel_01"] = &fakeActive{tunnelID: "tunnel_01", generation: 1}
+	binding := nativeprivate.Binding{Schema: nativeprivate.SchemaV1, ResourceKind: "tunnel", ResourceID: "tunnel_01", ResourceGeneration: 1, RouteID: "route_01", RouteGeneration: 1, TargetGeneration: 1, OwnerEndpointID: "host_01", Protocol: "http", TargetScheme: "http", TargetAddress: "127.0.0.1:3000", ExpiresAt: time.Now().Add(time.Minute)}
+	if err := manager.ValidateNativePrivateTarget(binding); err != nil {
+		t.Fatal(err)
+	}
+	binding.RouteGeneration++
+	if err := manager.ValidateNativePrivateTarget(binding); !errors.Is(err, ErrOriginUnavailable) {
+		t.Fatalf("stale route generation = %v", err)
+	}
+	binding.RouteGeneration, binding.TargetGeneration = 1, 1
+	manager.active["tunnel_01"] = &fakeActive{tunnelID: "tunnel_01", generation: 2}
+	if err := manager.ValidateNativePrivateTarget(binding); !errors.Is(err, ErrOriginUnavailable) {
+		t.Fatalf("stale active runtime = %v", err)
 	}
 }
 

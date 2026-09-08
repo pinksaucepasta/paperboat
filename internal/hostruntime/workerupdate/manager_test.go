@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
 )
@@ -175,57 +176,6 @@ func TestOlderExecutableCannotSupersedeBlockedWorkerTransaction(t *testing.T) {
 	}
 }
 
-func TestActiveReleaseFromLegacyMonitoringJournalUsesVerifiedCandidate(t *testing.T) {
-	root := t.TempDir()
-	path := filepath.Join(root, "transaction.json")
-	candidate := release("2026.08.27.55", []byte("signed package"))
-	journal := updateflow.Journal{
-		Schema: updateflow.SchemaV1, TransactionID: "txn-legacy", Stage: updateflow.StageMonitoring,
-		ActiveVersion: "2026.08.27.52", CandidateVersion: candidate.Version,
-		CandidateDigest: candidate.SHA256, CandidateLength: candidate.Length,
-		StagedPath: filepath.Join(root, "pb"), HostdAPIMin: candidate.HostdAPIMin, HostdAPIMax: candidate.HostdAPIMax,
-		RuntimeAPIMin: candidate.RuntimeAPIMin, RuntimeAPIMax: candidate.RuntimeAPIMax,
-		WorkerID: "runtime-2026.08.27.55", WorkerEpoch: 2, BootID: "hostd",
-		StageUpdatedAt: time.Now().Add(-time.Minute).UTC(), HealthDeadline: time.Now().Add(time.Minute).UTC(),
-	}
-	if err := updateflow.Write(path, journal, os.Geteuid(), os.Getegid()); err != nil {
-		t.Fatal(err)
-	}
-	recovered, err := ActiveReleaseFromJournal(path, candidate.Version)
-	if err != nil || !sameReleaseTargets(recovered, candidate) {
-		t.Fatalf("recovered=%+v err=%v", recovered, err)
-	}
-	if _, err := ActiveReleaseFromJournal(path, journal.ActiveVersion); !errors.Is(err, ErrInvalidRelease) {
-		t.Fatalf("legacy active release error=%v", err)
-	}
-}
-
-func TestRecoverLegacyPromotedCandidateCommitsHealthyTransaction(t *testing.T) {
-	fixture := newFixture(t)
-	now := time.Now().UTC()
-	journal := updateflow.Journal{
-		Schema: updateflow.SchemaV1, TransactionID: "txn-legacy", Stage: updateflow.StageMonitoring,
-		ActiveVersion: fixture.active.Version, CandidateVersion: fixture.candidate.Version,
-		CandidateDigest: fixture.candidate.SHA256, CandidateLength: fixture.candidate.Length,
-		StagedPath: fixture.paths.current, HostdAPIMin: fixture.candidate.HostdAPIMin, HostdAPIMax: fixture.candidate.HostdAPIMax,
-		RuntimeAPIMin: fixture.candidate.RuntimeAPIMin, RuntimeAPIMax: fixture.candidate.RuntimeAPIMax,
-		WorkerID: workerID(fixture.candidate.Version), WorkerEpoch: 2, BootID: "hostd",
-		StageUpdatedAt: now.Add(-2 * time.Minute), HealthDeadline: now.Add(-time.Minute),
-	}
-	if err := updateflow.Write(fixture.paths.journal, journal, os.Geteuid(), os.Getegid()); err != nil {
-		t.Fatal(err)
-	}
-	fixture.manager.active = fixture.candidate
-	fixture.hostd.active = hostdproto.Status{State: hostdproto.StateActive, WorkerID: workerID(fixture.candidate.Version), APIVersion: 1, Epoch: 2, LastHeartbeatUnixMilli: now.UnixMilli()}
-	if err := fixture.manager.Recover(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	committed, err := updateflow.Load(fixture.paths.journal)
-	if err != nil || committed.Stage != updateflow.StageIdle || committed.ActiveVersion != fixture.candidate.Version || committed.ActiveDigest != fixture.candidate.SHA256 {
-		t.Fatalf("journal=%+v err=%v", committed, err)
-	}
-}
-
 func TestRuntimeStagingPatternPreservesDarwinPackageSuffix(t *testing.T) {
 	if got := runtimeStagingPattern("darwin"); got != ".paperboat-runtime-*.pkg" {
 		t.Fatalf("darwin staging pattern = %q", got)
@@ -296,6 +246,14 @@ func retainedFiles(paths fixturePaths) (int, error) {
 
 func TestWorkerUpdateRollsBackWithoutRestartingHostd(t *testing.T) {
 	fixture := newFixture(t)
+	// Different releases must exercise actual file restoration, not merely
+	// two version labels for identical test-executable bytes.
+	fixture.fetcher.body = append(append([]byte(nil), fixture.fetcher.body...), []byte("candidate release")...)
+	fixture.candidate = release(fixture.candidate.Version, fixture.fetcher.body)
+	if err := os.WriteFile(filepath.Join(fixture.paths.root, "installed", "pb"), fixture.fetcher.body, 0700); err != nil {
+		t.Fatal(err)
+	}
+
 	fixture.health.err = errors.New("relay unavailable")
 	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
 	if err == nil || err.Error() != "relay unavailable" {
@@ -319,6 +277,73 @@ func TestWorkerUpdateRollsBackWithoutRestartingHostd(t *testing.T) {
 	}
 }
 
+func TestWorkerUpdateRefusesCutoverWithoutAuthorizedRecovery(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.fetcher.recoveryError = ErrReleaseRevoked
+	result, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	if !errors.Is(err, ErrReleaseRevoked) || result.Updated {
+		t.Fatalf("result=%+v error=%v", result, err)
+	}
+	if fixture.hostd.activations != 0 || fixture.hostd.active.WorkerID != workerID(fixture.active.Version) {
+		t.Fatalf("running worker changed: %+v", fixture.hostd)
+	}
+	if !regularMatches(fixture.paths.current, fixture.active.Length, fixture.active.SHA256) {
+		t.Fatal("active executable changed after recovery authorization failed")
+	}
+}
+
+func TestWorkerUpdateReverifiesRollbackBytesBeforeStart(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.health.check = func() {
+		if err := os.WriteFile(fixture.paths.rollback, []byte("wrong rollback bytes"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fixture.health.err = errors.New("candidate unhealthy")
+	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	if !errors.Is(err, ErrInvalidRelease) || !errors.Is(err, ErrBlocked) {
+		t.Fatalf("error=%v, want invalid release and blocked", err)
+	}
+	if fixture.starter.starts != 1 || fixture.hostd.activations != 1 {
+		t.Fatalf("unverified rollback started: starts=%d activations=%d", fixture.starter.starts, fixture.hostd.activations)
+	}
+}
+
+func TestWorkerUpdateAuthorizesSuccessfulRollback(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.health.err = errors.New("candidate unhealthy")
+	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	if err == nil || fixture.fetcher.recoveryCalls != 4 {
+		t.Fatalf("error=%v recovery calls=%d", err, fixture.fetcher.recoveryCalls)
+	}
+	for _, version := range fixture.fetcher.recoveryVersions {
+		if version != fixture.active.Version {
+			t.Fatalf("authorized version=%q want=%q", version, fixture.active.Version)
+		}
+	}
+}
+
+func TestWorkerUpdateRecoveryAuthorizationHonorsCancellation(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.fetcher.recovery = func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	started := time.Now()
+	_, err := fixture.manager.Activate(ctx, fixture.candidate)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error=%v, want canceled", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("canceled recovery authorization took %s", elapsed)
+	}
+	if fixture.hostd.activations != 0 {
+		t.Fatalf("activation occurred after cancellation")
+	}
+}
+
 func TestWorkerUpdateLeavesUncertainCutoverForRecovery(t *testing.T) {
 	fixture := newFixture(t)
 	fixture.starter.activateError = errors.New("activation response lost")
@@ -337,6 +362,26 @@ func TestWorkerUpdateLeavesUncertainCutoverForRecovery(t *testing.T) {
 	}
 	if fixture.manager.ActiveVersion() != fixture.candidate.Version || fixture.hostd.active.WorkerID != workerID(fixture.candidate.Version) {
 		t.Fatalf("version=%s hostd=%+v", fixture.manager.ActiveVersion(), fixture.hostd)
+	}
+}
+
+func TestCrashRecoveryRechecksRollbackAuthorization(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.starter.activateError = errors.New("activation response lost")
+	if _, err := fixture.manager.Activate(context.Background(), fixture.candidate); err == nil {
+		t.Fatal("activation unexpectedly succeeded")
+	}
+	fixture.starter.activateError = nil
+	fixture.health.err = errors.New("candidate unhealthy after restart")
+	fixture.fetcher.recoveryError = ErrReleaseRevoked
+	if err := fixture.manager.Recover(context.Background()); !errors.Is(err, ErrReleaseRevoked) || !errors.Is(err, ErrBlocked) {
+		t.Fatalf("recover error=%v, want revoked blocked recovery", err)
+	}
+	if fixture.starter.starts != 1 {
+		t.Fatalf("revoked rollback started during crash recovery: starts=%d", fixture.starter.starts)
+	}
+	if fixture.hostd.active.WorkerID != workerID(fixture.candidate.Version) {
+		t.Fatalf("recovery guessed a different running worker: %+v", fixture.hostd.active)
 	}
 }
 
@@ -405,6 +450,252 @@ func TestSchedulerAdapterOnlyRunsSafeManagerTransaction(t *testing.T) {
 	}
 }
 
+func TestActiveTerminalBusyRestoresOldWorkerWithoutQuarantine(t *testing.T) {
+	fixture := newFixture(t)
+	busy := &autoupdate.ActiveTerminalSessionsError{RequiredVersion: fixture.candidate.Version}
+	gate := &busyActivationGate{drainErr: busy}
+	fixture.manager.config.Gate = gate
+
+	result, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	var gotBusy *autoupdate.ActiveTerminalSessionsError
+	if !errors.As(err, &gotBusy) || gotBusy.RequiredVersion != fixture.candidate.Version {
+		t.Fatalf("error=%v", err)
+	}
+	if result.Updated || result.Version != fixture.active.Version {
+		t.Fatalf("result=%+v", result)
+	}
+	if gate.rollbacks != 1 {
+		t.Fatalf("rollbacks=%d want 1", gate.rollbacks)
+	}
+	if _, err := os.Stat(fixture.paths.staged); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("staged candidate remains: %v", err)
+	}
+	state, err := fixture.manager.TransactionState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Stage != updateflow.StageIdle || state.Quarantined || state.CandidateVersion != "" {
+		t.Fatalf("state=%+v", state)
+	}
+	journal, err := updateflow.Load(fixture.paths.journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if journal.BlockedReason != autoupdate.BlockedActiveTerminalSessions || journal.RequiredVersion != fixture.candidate.Version || journal.NextCheckAt.IsZero() {
+		t.Fatalf("blocked journal=%+v", journal)
+	}
+	if journal.LastFailure != updateflow.FailureNone || journal.RollbackCount != 0 {
+		t.Fatalf("expected busy recorded as failed rollback: %+v", journal)
+	}
+}
+
+func TestActiveTerminalBusyDoesNotHideRollbackFailure(t *testing.T) {
+	fixture := newFixture(t)
+	rollbackErr := errors.New("gate rollback failed")
+	gate := &busyActivationGate{
+		drainErr:    &autoupdate.ActiveTerminalSessionsError{RequiredVersion: fixture.candidate.Version},
+		rollbackErr: rollbackErr,
+	}
+	fixture.manager.config.Gate = gate
+
+	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	var busy *autoupdate.ActiveTerminalSessionsError
+	if !errors.Is(err, rollbackErr) || !errors.Is(err, ErrBlocked) || errors.As(err, &busy) {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestNativeRuntimeActivationAdoptsRestartedHostdFence(t *testing.T) {
+	fixture := newFixture(t)
+	var activated []string
+	var monitoring updateflow.Journal
+	fixture.manager.config.ActivateRuntime = func(_ context.Context, version string) (hostdproto.Status, error) {
+		activated = append(activated, version)
+		status := hostdproto.Status{State: hostdproto.StateActive, WorkerID: workerID(version), APIVersion: 1, Epoch: 41}
+		fixture.hostd.active = status
+		return status, nil
+	}
+	fixture.manager.config.WriteJournal = func(path string, journal updateflow.Journal, uid, gid int) error {
+		if journal.Stage == updateflow.StageMonitoring {
+			monitoring = journal
+		}
+		return updateflow.Write(path, journal, uid, gid)
+	}
+
+	result, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	if err != nil || !result.Updated {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if len(activated) != 1 || activated[0] != fixture.candidate.Version || monitoring.WorkerID != workerID(fixture.candidate.Version) || monitoring.WorkerEpoch != 41 {
+		t.Fatalf("activated=%v monitoring=%+v", activated, monitoring)
+	}
+	if fixture.hostd.activations != 0 {
+		t.Fatal("used stale candidate IPC after native host restart")
+	}
+	if fixture.starter.stops != 1 {
+		t.Fatalf("candidate stops=%d", fixture.starter.stops)
+	}
+}
+
+func TestNativeRuntimeHealthyRollbackRestartsRestoredCanonicalHostd(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.health.err = errors.New("candidate unhealthy")
+	var activated []string
+	fixture.manager.config.ActivateRuntime = func(_ context.Context, version string) (hostdproto.Status, error) {
+		activated = append(activated, version)
+		status := hostdproto.Status{State: hostdproto.StateActive, WorkerID: workerID(version), APIVersion: 1, Epoch: uint64(len(activated) + 10)}
+		fixture.hostd.active = status
+		return status, nil
+	}
+	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	if err == nil || errors.Is(err, ErrBlocked) {
+		t.Fatalf("error=%v", err)
+	}
+	if len(activated) != 2 || activated[0] != fixture.candidate.Version || activated[1] != fixture.active.Version || fixture.hostd.activations != 0 {
+		t.Fatalf("activated=%v stale activations=%d", activated, fixture.hostd.activations)
+	}
+}
+
+func TestNativeRuntimeBusyDoesNotRestartHostd(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.manager.config.Gate = &busyActivationGate{drainErr: &autoupdate.ActiveTerminalSessionsError{RequiredVersion: fixture.candidate.Version}}
+	calls := 0
+	fixture.manager.config.ActivateRuntime = func(context.Context, string) (hostdproto.Status, error) {
+		calls++
+		return hostdproto.Status{}, nil
+	}
+	if _, err := fixture.manager.Activate(context.Background(), fixture.candidate); err == nil {
+		t.Fatal("busy activation succeeded")
+	}
+	if calls != 0 {
+		t.Fatalf("hostd restarts=%d", calls)
+	}
+}
+
+func TestNativeRuntimeCrashAtCutoverRestoresSignedPreviousHostd(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.starter.activateError = errors.New("activation response lost")
+	if _, err := fixture.manager.Activate(context.Background(), fixture.candidate); err == nil {
+		t.Fatal("cutover did not remain interrupted")
+	}
+	fixture.hostd.activeErr = errors.New("new hostd unavailable")
+	var activated []string
+	fixture.manager.config.ActivateRuntime = func(_ context.Context, version string) (hostdproto.Status, error) {
+		activated = append(activated, version)
+		status := hostdproto.Status{State: hostdproto.StateActive, WorkerID: workerID(version), APIVersion: 1, Epoch: 91}
+		fixture.hostd.active, fixture.hostd.activeErr = status, nil
+		return status, nil
+	}
+	if err := fixture.manager.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(activated) != 1 || activated[0] != fixture.active.Version || !regularMatches(fixture.paths.current, fixture.active.Length, fixture.active.SHA256) {
+		t.Fatalf("activated=%v previous restored=%v", activated, regularMatches(fixture.paths.current, fixture.active.Length, fixture.active.SHA256))
+	}
+}
+
+func TestNativeRuntimeCutoverHookIsBoundedAndFailureRestoresPrevious(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.manager.config.RollbackTimeout = 25 * time.Millisecond
+	var activated []string
+	var forwardAllowance time.Duration
+	fixture.manager.config.ActivateRuntime = func(ctx context.Context, version string) (hostdproto.Status, error) {
+		activated = append(activated, version)
+		if version == fixture.candidate.Version {
+			deadline, _ := ctx.Deadline()
+			forwardAllowance = time.Until(deadline)
+			<-ctx.Done()
+			return hostdproto.Status{}, ctx.Err()
+		}
+		status := hostdproto.Status{State: hostdproto.StateActive, WorkerID: workerID(version), APIVersion: 1, Epoch: 92}
+		fixture.hostd.active = status
+		return status, nil
+	}
+	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrBlocked) {
+		t.Fatalf("error=%v", err)
+	}
+	if forwardAllowance <= 0 || forwardAllowance > 50*time.Millisecond {
+		t.Fatalf("forward hook allowance=%v", forwardAllowance)
+	}
+	if len(activated) != 2 || activated[0] != fixture.candidate.Version || activated[1] != fixture.active.Version || !regularMatches(fixture.paths.current, fixture.active.Length, fixture.active.SHA256) {
+		t.Fatalf("activated=%v previous restored=%v", activated, regularMatches(fixture.paths.current, fixture.active.Length, fixture.active.SHA256))
+	}
+}
+
+func TestNativeRuntimeCandidateStopFailureRestoresPrevious(t *testing.T) {
+	fixture := newFixture(t)
+	stopErr := errors.New("candidate did not exit")
+	fixture.starter.stopError = stopErr
+	var activated []string
+	fixture.manager.config.ActivateRuntime = func(_ context.Context, version string) (hostdproto.Status, error) {
+		activated = append(activated, version)
+		status := hostdproto.Status{State: hostdproto.StateActive, WorkerID: workerID(version), APIVersion: 1, Epoch: 93}
+		fixture.hostd.active = status
+		return status, nil
+	}
+	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	if !errors.Is(err, stopErr) || !errors.Is(err, ErrBlocked) {
+		t.Fatalf("error=%v", err)
+	}
+	if len(activated) != 1 || activated[0] != fixture.active.Version || fixture.hostd.activations != 0 || !regularMatches(fixture.paths.current, fixture.active.Length, fixture.active.SHA256) {
+		t.Fatalf("activated=%v stale activations=%d previous restored=%v", activated, fixture.hostd.activations, regularMatches(fixture.paths.current, fixture.active.Length, fixture.active.SHA256))
+	}
+}
+
+func TestNativeRuntimeParentCancellationStillRestoresPrevious(t *testing.T) {
+	fixture := newFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	var activated []string
+	fixture.manager.config.ActivateRuntime = func(hookCtx context.Context, version string) (hostdproto.Status, error) {
+		activated = append(activated, version)
+		if version == fixture.candidate.Version {
+			cancel()
+			return hostdproto.Status{}, context.Canceled
+		}
+		if hookCtx.Err() != nil {
+			return hostdproto.Status{}, hookCtx.Err()
+		}
+		status := hostdproto.Status{State: hostdproto.StateActive, WorkerID: workerID(version), APIVersion: 1, Epoch: 94}
+		fixture.hostd.active = status
+		return status, nil
+	}
+	_, err := fixture.manager.Activate(ctx, fixture.candidate)
+	if !errors.Is(err, context.Canceled) || errors.Is(err, ErrBlocked) {
+		t.Fatalf("error=%v", err)
+	}
+	if len(activated) != 2 || activated[1] != fixture.active.Version || !regularMatches(fixture.paths.current, fixture.active.Length, fixture.active.SHA256) {
+		t.Fatalf("activated=%v previous restored=%v", activated, regularMatches(fixture.paths.current, fixture.active.Length, fixture.active.SHA256))
+	}
+}
+
+func TestNativeRuntimePromotedJournalFailureStopsCandidateBeforeRestore(t *testing.T) {
+	fixture := newFixture(t)
+	writeErr := errors.New("promoted journal unavailable")
+	failed := false
+	fixture.manager.config.WriteJournal = func(path string, journal updateflow.Journal, uid, gid int) error {
+		if !failed && journal.Stage == updateflow.StageCutover && journal.StagedPath == fixture.paths.current {
+			failed = true
+			return writeErr
+		}
+		return updateflow.Write(path, journal, uid, gid)
+	}
+	var activated []string
+	fixture.manager.config.ActivateRuntime = func(_ context.Context, version string) (hostdproto.Status, error) {
+		activated = append(activated, version)
+		status := hostdproto.Status{State: hostdproto.StateActive, WorkerID: workerID(version), APIVersion: 1, Epoch: 95}
+		fixture.hostd.active = status
+		return status, nil
+	}
+	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	if !errors.Is(err, writeErr) || errors.Is(err, ErrBlocked) {
+		t.Fatalf("error=%v", err)
+	}
+	if fixture.starter.stops != 1 || len(activated) != 1 || activated[0] != fixture.active.Version || fixture.hostd.activations != 0 {
+		t.Fatalf("stops=%d activated=%v stale activations=%d", fixture.starter.stops, activated, fixture.hostd.activations)
+	}
+}
+
 type fixturePaths struct{ root, current, rollback, staged, journal string }
 type fixture struct {
 	manager           *Manager
@@ -450,7 +741,7 @@ func newFixture(t *testing.T) fixture {
 	if workerUID == 0 {
 		workerUID = 1
 	}
-	manager, err := New(Config{StatePath: paths.journal, Binary: paths.current, BinaryRollback: paths.rollback, BinaryStaged: paths.staged, Active: active, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), WorkerUID: workerUID, WorkerGID: os.Getegid(), HostdEndpoint: "private-hostd", Capability: bytes.Repeat([]byte{1}, 32), Fetcher: fetcher, Starter: starter, Hostd: hostd, Health: health, Gate: fakeActivationGate{}, NativeVerifier: nativeVerifierFunc(func(context.Context, string, string, string) error { return nil }), InstallPackage: func(context.Context, string) (string, error) { return installed, nil }, MonitorWindow: time.Millisecond, HealthInterval: time.Millisecond})
+	manager, err := New(Config{StatePath: paths.journal, Binary: paths.current, BinaryRollback: paths.rollback, BinaryStaged: paths.staged, Active: active, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), WorkerUID: workerUID, WorkerGID: os.Getegid(), HostdEndpoint: "private-hostd", Capability: bytes.Repeat([]byte{1}, 32), Fetcher: fetcher, Starter: starter, Hostd: hostd, Health: health, Gate: fakeActivationGate{}, NativeVerifier: nativeVerifierFunc(func(context.Context, string, string, string) error { return nil }), ExtractPackage: func(context.Context, string, string) (string, error) { return installed, nil }, MonitorWindow: time.Millisecond, HealthInterval: time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -479,24 +770,42 @@ func TestValidWorkerIdentitySupportsExactRootEnrollment(t *testing.T) {
 	}
 }
 
-type fakeFetcher struct{ body []byte }
+type fakeFetcher struct {
+	body             []byte
+	recoveryError    error
+	recoveryCalls    int
+	recoveryVersions []string
+	recovery         func(context.Context) error
+}
 
 func (f *fakeFetcher) Fetch(context.Context, Release) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(f.body)), nil
 }
 
+func (f *fakeFetcher) AuthorizeRecovery(ctx context.Context, version, _, _ string) error {
+	f.recoveryCalls++
+	f.recoveryVersions = append(f.recoveryVersions, version)
+	if f.recovery != nil {
+		return f.recovery(ctx)
+	}
+	return f.recoveryError
+}
+
 type fakeHostd struct {
 	active      hostdproto.Status
+	activeErr   error
 	activations int
 }
 
-func (h *fakeHostd) Active(context.Context) (hostdproto.Status, error) { return h.active, nil }
+func (h *fakeHostd) Active(context.Context) (hostdproto.Status, error) { return h.active, h.activeErr }
 
 type fakeStarter struct {
 	hostd         *fakeHostd
 	starts        int
 	requests      []StartRequest
 	activateError error
+	stopError     error
+	stops         int
 }
 
 func (s *fakeStarter) Start(_ context.Context, request StartRequest) (Worker, error) {
@@ -523,11 +832,22 @@ func (w *fakeWorker) Activate(context.Context) (hostdproto.Status, error) {
 	}
 	return w.starter.hostd.active, nil
 }
-func (*fakeWorker) Stop(context.Context) error { return nil }
+func (w *fakeWorker) Stop(context.Context) error {
+	w.starter.stops++
+	return w.starter.stopError
+}
 
-type fakeHealth struct{ err error }
+type fakeHealth struct {
+	err   error
+	check func()
+}
 
-func (h *fakeHealth) Check(context.Context, hostdproto.Status, Release) error { return h.err }
+func (h *fakeHealth) Check(context.Context, hostdproto.Status, Release) error {
+	if h.check != nil {
+		h.check()
+	}
+	return h.err
+}
 
 type fakeActivationGate struct{}
 
@@ -536,6 +856,21 @@ func (fakeActivationGate) Drain(context.Context, GateRequest) error     { return
 func (fakeActivationGate) Active(context.Context, GateRequest) error    { return nil }
 func (fakeActivationGate) Commit(context.Context, GateRequest) error    { return nil }
 func (fakeActivationGate) Rollback(context.Context, GateRequest) error  { return nil }
+
+type busyActivationGate struct {
+	drainErr    error
+	rollbackErr error
+	rollbacks   int
+}
+
+func (*busyActivationGate) Candidate(context.Context, GateRequest) error { return nil }
+func (g *busyActivationGate) Drain(context.Context, GateRequest) error   { return g.drainErr }
+func (*busyActivationGate) Active(context.Context, GateRequest) error    { return nil }
+func (*busyActivationGate) Commit(context.Context, GateRequest) error    { return nil }
+func (g *busyActivationGate) Rollback(context.Context, GateRequest) error {
+	g.rollbacks++
+	return g.rollbackErr
+}
 
 type blockingHealth struct {
 	entered chan struct{}
@@ -555,4 +890,24 @@ type nativeVerifierFunc func(context.Context, string, string, string) error
 
 func (f nativeVerifierFunc) Verify(ctx context.Context, path, platform, architecture string) error {
 	return f(ctx, path, platform, architecture)
+}
+
+func TestCanceledHealthCheckRestoresPolicyValidInstallation(t *testing.T) {
+	fixture := newFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	fixture.health.check = cancel
+	fixture.health.err = context.Canceled
+	fixture.fetcher.recovery = func(ctx context.Context) error { return ctx.Err() }
+	_, err := fixture.manager.Activate(ctx, fixture.candidate)
+	if !errors.Is(err, context.Canceled) || errors.Is(err, ErrBlocked) {
+		t.Fatalf("error=%v", err)
+	}
+	if fixture.hostd.active.WorkerID != workerID(fixture.active.Version) || !regularMatches(fixture.paths.current, fixture.active.Length, fixture.active.SHA256) {
+		t.Fatal("canceled health check did not recover the permitted previous installation")
+	}
+	journal, loadErr := updateflow.Load(fixture.paths.journal)
+	if loadErr != nil || journal.Stage != updateflow.StageIdle {
+		t.Fatalf("journal=%+v error=%v", journal, loadErr)
+	}
 }

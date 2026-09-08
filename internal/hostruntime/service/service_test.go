@@ -114,7 +114,7 @@ func TestSystemdInstallUpgradeAndUninstallAreDeterministic(t *testing.T) {
 		t.Fatal(err)
 	}
 	second, _ := os.ReadFile(installer.DefinitionPath())
-	if string(first) != string(second) || len(control.applied) != 2 || control.applied[0] || !control.applied[1] {
+	if string(first) != string(second) || len(control.applied) != 2 || control.applied[0] || control.applied[1] {
 		t.Fatalf("applied=%v", control.applied)
 	}
 	if err := installer.Uninstall(context.Background()); err != nil {
@@ -246,7 +246,7 @@ func TestLocalDaemonDefinitionsUsePerUserDomains(t *testing.T) {
 				if !strings.HasSuffix(installer.DefinitionPath(), "/Library/LaunchAgents/"+DaemonLabel+".plist") || !strings.Contains(definition, "<string>"+DaemonLabel+"</string>") {
 					t.Fatalf("path=%s body=%s", installer.DefinitionPath(), body)
 				}
-			} else if !strings.HasSuffix(installer.DefinitionPath(), "/.config/systemd/user/paperboat-local-daemon.service") || !strings.Contains(definition, "Description=Paperboat local daemon") || !strings.Contains(definition, "WantedBy=default.target") || strings.Contains(definition, "User=test") {
+			} else if !strings.HasSuffix(installer.DefinitionPath(), "/.config/systemd/user/paperboatd.service") || !strings.Contains(definition, "Description=Paperboat local daemon") || !strings.Contains(definition, "WantedBy=default.target") || strings.Contains(definition, "User=test") {
 				t.Fatalf("path=%s body=%s", installer.DefinitionPath(), body)
 			}
 		})
@@ -506,5 +506,57 @@ func TestExecRunnerReturnsBoundedNativeDiagnostics(t *testing.T) {
 	data := []byte("0123456789abcdef")
 	if written, err := output.Write(data); err != nil || written != len(data) || output.String() != "01234567" {
 		t.Fatalf("written=%d output=%q err=%v", written, output.String(), err)
+	}
+}
+
+func TestRemoveMissingExecutablePreservesDefinitionOnManagerFailure(t *testing.T) {
+	root := t.TempDir()
+	managerErr := errors.New("fixture manager unavailable")
+	control := &controller{removeErr: managerErr}
+	cfg := Config{Platform: "linux", Kind: DaemonKind, ConfigRoot: root, Executable: filepath.Join(root, "missing-pb"), Arguments: []string{"daemon"}, User: "test", Group: "staff", Controller: control}
+	definition := filepath.Join(root, ".config", "systemd", "user", "paperboatd.service")
+	if err := os.MkdirAll(filepath.Dir(definition), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(definition, []byte("existing"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Remove(context.Background(), cfg); !errors.Is(err, managerErr) {
+		t.Fatalf("remove error=%v", err)
+	}
+	if _, err := os.Stat(definition); err != nil {
+		t.Fatalf("lost definition after manager failure: %v", err)
+	}
+	if len(control.applied) != 0 || control.removed != 1 {
+		t.Fatalf("unexpected manager calls: %+v", control)
+	}
+}
+
+func TestRemoveRejectsSymlinkDefinitionWithMissingExecutable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix symlink fixture")
+	}
+	root := t.TempDir()
+	control := &controller{}
+	cfg := Config{Platform: "linux", Kind: DaemonKind, ConfigRoot: root, Executable: filepath.Join(root, "missing-pb"), Arguments: []string{"daemon"}, User: "test", Group: "staff", Controller: control}
+	definition := filepath.Join(root, ".config", "systemd", "user", "paperboatd.service")
+	if err := os.MkdirAll(filepath.Dir(definition), 0700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "other-service")
+	if err := os.WriteFile(target, []byte("preserve"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, definition); err != nil {
+		t.Fatal(err)
+	}
+	if err := Remove(context.Background(), cfg); !errors.Is(err, ErrInvalidDefinition) {
+		t.Fatalf("symlink removal=%v", err)
+	}
+	if control.removed != 0 {
+		t.Fatal("unsafe declaration reached service manager")
+	}
+	if body, err := os.ReadFile(target); err != nil || string(body) != "preserve" {
+		t.Fatalf("changed unrelated declaration: %v", err)
 	}
 }

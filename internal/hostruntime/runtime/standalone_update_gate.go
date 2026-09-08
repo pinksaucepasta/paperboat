@@ -16,6 +16,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
 )
 
 var errStandaloneUpdateGate = errors.New("standalone update gate unavailable")
@@ -23,17 +24,20 @@ var errStandaloneUpdateGate = errors.New("standalone update gate unavailable")
 const standaloneUpdateGateSchema = "paperboat.standalone-update-gate/v1"
 
 type standaloneUpdateGateConfig struct {
-	MachineID string
-	StatePath string
-	Health    http.Handler
-	Workloads func() hostdproto.WorkloadStatus
-	Now       func() time.Time
+	MachineID   string
+	StatePath   string
+	Health      http.Handler
+	Workloads   func() hostdproto.WorkloadStatus
+	BeginUpdate func(string) error
+	EndUpdate   func(string) error
+	Now         func() time.Time
 }
 
 type standaloneUpdateGate struct {
-	config       standaloneUpdateGateConfig
-	mu           sync.Mutex
-	transactions map[string]standaloneUpdateTransaction
+	config          standaloneUpdateGateConfig
+	mu              sync.Mutex
+	transactions    map[string]standaloneUpdateTransaction
+	heldTransaction string
 }
 
 type standaloneUpdateTransaction struct {
@@ -47,6 +51,7 @@ type standaloneUpdateTransaction struct {
 	PolicyBound        bool
 	Drained            bool
 	Committed          bool
+	RolledBack         bool `json:",omitempty"`
 	WorkloadGeneration uint64
 	ProtectedWorkloads uint64
 }
@@ -60,6 +65,9 @@ func newStandaloneUpdateGate(config standaloneUpdateGateConfig) (*standaloneUpda
 	if config.MachineID == "" || !filepath.IsAbs(config.StatePath) || config.Health == nil || config.Workloads == nil {
 		return nil, errStandaloneUpdateGate
 	}
+	if (config.BeginUpdate == nil) != (config.EndUpdate == nil) {
+		return nil, errStandaloneUpdateGate
+	}
 	if config.Now == nil {
 		config.Now = time.Now
 	}
@@ -69,6 +77,17 @@ func newStandaloneUpdateGate(config standaloneUpdateGateConfig) (*standaloneUpda
 	gate := &standaloneUpdateGate{config: config, transactions: make(map[string]standaloneUpdateTransaction)}
 	if err := gate.load(); err != nil {
 		return nil, err
+	}
+	for id, transaction := range gate.transactions {
+		if transaction.Drained && !transaction.Committed && config.BeginUpdate != nil {
+			if gate.heldTransaction != "" {
+				return nil, errStandaloneUpdateGate
+			}
+			if err := config.BeginUpdate(id); err != nil {
+				return nil, err
+			}
+			gate.heldTransaction = id
+		}
 	}
 	return gate, nil
 }
@@ -92,7 +111,7 @@ func (g *standaloneUpdateGate) HandleUpdateGate(ctx context.Context, request hos
 	switch request.Operation {
 	case hostdproto.UpdateGateTarget:
 		if exists {
-			if transaction.Version != request.Version || transaction.Manifest != request.ManifestSHA256 {
+			if transaction.RolledBack || transaction.Version != request.Version || transaction.Manifest != request.ManifestSHA256 {
 				return hostdproto.UpdateGateResponse{}, errStandaloneUpdateGate
 			}
 			return hostdproto.UpdateGateResponse{Target: target}, nil
@@ -102,7 +121,7 @@ func (g *standaloneUpdateGate) HandleUpdateGate(ctx context.Context, request hos
 		}
 		g.transactions[request.TransactionID] = standaloneUpdateTransaction{Version: request.Version, Manifest: request.ManifestSHA256, Target: target, Created: g.config.Now().UTC()}
 	case hostdproto.UpdateGateCandidate:
-		if !exists || transaction.Committed || transaction.Version != request.Version || transaction.Manifest != request.ManifestSHA256 || transaction.Target != target || transaction.PolicyBound && (transaction.Path != request.Path || transaction.Status != request.ExpectedStatus || transaction.Samples != request.Samples) {
+		if !exists || (transaction.Committed || transaction.RolledBack) || transaction.Version != request.Version || transaction.Manifest != request.ManifestSHA256 || transaction.Target != target || transaction.PolicyBound && (transaction.Path != request.Path || transaction.Status != request.ExpectedStatus || transaction.Samples != request.Samples) {
 			return hostdproto.UpdateGateResponse{}, errStandaloneUpdateGate
 		}
 		if err := g.probe(ctx, request); err != nil {
@@ -111,27 +130,33 @@ func (g *standaloneUpdateGate) HandleUpdateGate(ctx context.Context, request hos
 		transaction.Path, transaction.Status, transaction.Samples, transaction.PolicyBound = request.Path, request.ExpectedStatus, request.Samples, true
 		g.transactions[request.TransactionID] = transaction
 	case hostdproto.UpdateGateDrain:
-		if !exists || transaction.Committed || !transaction.PolicyBound || transaction.Version != request.Version || transaction.Manifest != request.ManifestSHA256 || transaction.Target != target {
+		if !exists || (transaction.Committed || transaction.RolledBack) || !transaction.PolicyBound || transaction.Version != request.Version || transaction.Manifest != request.ManifestSHA256 || transaction.Target != target {
 			return hostdproto.UpdateGateResponse{}, errStandaloneUpdateGate
+		}
+		if g.config.BeginUpdate != nil {
+			if err := g.config.BeginUpdate(request.TransactionID); err != nil {
+				if errors.Is(err, session.ErrUpdateBusy) {
+					return hostdproto.UpdateGateResponse{Target: target, BlockedReason: hostdproto.UpdateGateBlockedActiveTerminalSessions}, nil
+				}
+				return hostdproto.UpdateGateResponse{}, err
+			}
+			g.heldTransaction = request.TransactionID
 		}
 		workloads := g.config.Workloads()
 		if workloads.Generation == 0 && workloads.Protected != 0 {
 			return hostdproto.UpdateGateResponse{}, errStandaloneUpdateGate
 		}
-		// Sessions, previews, tunnels, and transfers are owned by stable hostd,
-		// not by the replaceable worker. Their presence must therefore fence the
-		// cutover, not block every update forever. Record the exact stable-host
-		// snapshot and require it to remain unchanged through activation.
+		// Executable activation restarts hostd. Nonresumable terminal admission
+		// is fenced above; resumable workloads retain their existing recovery gate.
 		transaction.Drained = true
 		transaction.WorkloadGeneration = workloads.Generation
 		transaction.ProtectedWorkloads = workloads.Protected
 		g.transactions[request.TransactionID] = transaction
 	case hostdproto.UpdateGateStability:
-		if !exists || transaction.Committed || !transaction.Drained || transaction.Version != request.Version || transaction.Manifest != request.ManifestSHA256 || transaction.Path != request.Path || transaction.Status != request.ExpectedStatus || transaction.Samples != request.Samples || transaction.Target != target {
+		if !exists || (transaction.Committed || transaction.RolledBack) || !transaction.Drained || transaction.Version != request.Version || transaction.Manifest != request.ManifestSHA256 || transaction.Path != request.Path || transaction.Status != request.ExpectedStatus || transaction.Samples != request.Samples || transaction.Target != target {
 			return hostdproto.UpdateGateResponse{}, errStandaloneUpdateGate
 		}
-		workloads := g.config.Workloads()
-		if workloads.Generation != transaction.WorkloadGeneration || workloads.Protected != transaction.ProtectedWorkloads {
+		if g.config.BeginUpdate != nil && g.heldTransaction != request.TransactionID {
 			return hostdproto.UpdateGateResponse{}, errStandaloneUpdateGate
 		}
 		deadline := g.config.Now().Add(time.Duration(request.WindowMillis) * time.Millisecond)
@@ -162,19 +187,19 @@ func (g *standaloneUpdateGate) HandleUpdateGate(ctx context.Context, request hos
 		if err := g.probe(ctx, request); err != nil {
 			return hostdproto.UpdateGateResponse{}, err
 		}
-		delete(g.transactions, request.TransactionID)
+		transaction.Drained, transaction.RolledBack = false, true
+		g.transactions[request.TransactionID] = transaction
 	case hostdproto.UpdateGateCommit:
 		if exists && transaction.Committed {
 			if transaction.Version == request.Version && transaction.Manifest == request.ManifestSHA256 && transaction.Target == target {
-				return hostdproto.UpdateGateResponse{Target: target}, nil
+				return hostdproto.UpdateGateResponse{Target: target}, g.releaseAdmission(request.TransactionID)
 			}
 			return hostdproto.UpdateGateResponse{}, errStandaloneUpdateGate
 		}
 		if !exists || !transaction.PolicyBound || !transaction.Drained || transaction.Version != request.Version || transaction.Manifest != request.ManifestSHA256 || transaction.Target != target {
 			return hostdproto.UpdateGateResponse{}, errStandaloneUpdateGate
 		}
-		workloads := g.config.Workloads()
-		if workloads.Generation != transaction.WorkloadGeneration || workloads.Protected != transaction.ProtectedWorkloads {
+		if g.config.BeginUpdate != nil && g.heldTransaction != request.TransactionID {
 			return hostdproto.UpdateGateResponse{}, errStandaloneUpdateGate
 		}
 		transaction.Drained, transaction.Committed = false, true
@@ -185,7 +210,23 @@ func (g *standaloneUpdateGate) HandleUpdateGate(ctx context.Context, request hos
 	if err := g.persist(); err != nil {
 		return hostdproto.UpdateGateResponse{}, err
 	}
+	if request.Operation == hostdproto.UpdateGateCommit || request.Operation == hostdproto.UpdateGateRollback {
+		if err := g.releaseAdmission(request.TransactionID); err != nil {
+			return hostdproto.UpdateGateResponse{}, err
+		}
+	}
 	return hostdproto.UpdateGateResponse{Target: target}, nil
+}
+
+func (g *standaloneUpdateGate) releaseAdmission(id string) error {
+	if g.heldTransaction != id {
+		return nil
+	}
+	if err := g.config.EndUpdate(id); err != nil {
+		return err
+	}
+	g.heldTransaction = ""
+	return nil
 }
 
 func (g *standaloneUpdateGate) probe(ctx context.Context, request hostdproto.UpdateGateRequest) error {
@@ -262,7 +303,7 @@ func (g *standaloneUpdateGate) load() error {
 	}
 	for id, transaction := range disk.Transactions {
 		request := hostdproto.UpdateGateRequest{Operation: hostdproto.UpdateGateTarget, TransactionID: id, Version: transaction.Version, ManifestSHA256: transaction.Manifest}
-		if request.Validate() != nil || transaction.Target != g.target() || transaction.Target.Validate() != nil || transaction.Created.IsZero() || transaction.Committed && transaction.Drained || transaction.Drained && (!transaction.PolicyBound || transaction.WorkloadGeneration == 0 && transaction.ProtectedWorkloads != 0) || !transaction.Drained && !transaction.Committed && (transaction.WorkloadGeneration != 0 || transaction.ProtectedWorkloads != 0) {
+		if request.Validate() != nil || transaction.Target != g.target() || transaction.Target.Validate() != nil || transaction.Created.IsZero() || (transaction.Committed || transaction.RolledBack) && transaction.Drained || transaction.Committed && transaction.RolledBack || transaction.Drained && (!transaction.PolicyBound || transaction.WorkloadGeneration == 0 && transaction.ProtectedWorkloads != 0) || !transaction.Drained && !transaction.Committed && !transaction.RolledBack && (transaction.WorkloadGeneration != 0 || transaction.ProtectedWorkloads != 0) {
 			return errStandaloneUpdateGate
 		}
 	}

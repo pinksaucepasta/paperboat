@@ -164,9 +164,21 @@ pb access tunnel api --listen 127.0.0.1:0
 pb access tunnel database --listen 127.0.0.1:0 --json
 ```
 
-The listener accepts only local connections and each carrier stream is bound to
-the current renewable machine session and exact route generations. Closing the
+The listener accepts only local connections. Each accepted connection obtains
+a fresh short-lived grant and opens a native peer stream bound to the current
+machine access session and exact route and target generations. The host checks
+current desired state before dialing the exact origin; pause, deletion,
+revocation, expiry, or a generation change closes active access. Closing the
 command closes the local listener; it does not change the durable route.
+
+Native private HTTP keeps the existing loopback PAC/CONNECT experience but
+uses a dedicated preview-class Paperboat QUIC session. The session is admitted
+for the current machine-access grant and then owned exclusively by HTTP/3; the
+CONNECT request carries the exact signed preview/tunnel route and target
+binding. Paperboat revalidates current state before dialing the literal-loopback
+origin. A broken request is not replayed: the next browser connection obtains a
+fresh grant and session. This native path never enters `paperboat-tunnel` and
+does not silently fall back to the edge-decrypted browser path.
 
 ## Diagnostics and support
 

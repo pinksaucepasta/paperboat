@@ -7,8 +7,8 @@ import (
 )
 
 // Layout is the fixed, root-owned layout used by Paperboat host installations.
-// There is exactly one executable. Services invoke Binary with an internal
-// role argument, and the updater atomically rotates Binary through the two
+// There is exactly one executable. Services invoke Binary through the explicit
+// daemon entry point, and the updater atomically rotates Binary through the two
 // release slots below. Callers cannot provide an install root: accepting one
 // would turn the privileged updater into a generic file writer.
 type Layout struct {
@@ -96,8 +96,17 @@ func (l Layout) Validate() error {
 	if !withinForPlatform(l.Platform, l.InstallRoot, l.ReleasesRoot) || !withinForPlatform(l.Platform, l.InstallRoot, l.Binary) {
 		return ErrInvalidDefinition
 	}
-	if l.Binary == l.BinaryRollback || l.Binary == l.BinaryStaged || l.BinaryRollback == l.BinaryStaged {
-		return ErrInvalidDefinition
+	paths := []string{l.Binary, l.BinaryRollback, l.BinaryStaged}
+	seen := make(map[string]struct{}, len(paths))
+	for _, value := range paths {
+		key := value
+		if l.Platform == "windows" {
+			key = strings.ToLower(value)
+		}
+		if _, ok := seen[key]; ok {
+			return ErrInvalidDefinition
+		}
+		seen[key] = struct{}{}
 	}
 	return nil
 }

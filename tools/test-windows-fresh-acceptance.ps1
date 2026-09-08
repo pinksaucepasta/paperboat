@@ -270,7 +270,7 @@ function Assert-ServiceRecord([string]$Name, [string]$Argument, [pscustomobject]
     if ($null -eq $service) {
         Fail 'An expected Paperboat Windows service is missing.'
     }
-    $expectedCommand = '"' + $Paths.Binary + '" ' + $Argument
+    $expectedCommand = '"' + $Paths.Binary + '" daemon ' + $Argument
     if ([string]$service.PathName -ne $expectedCommand) {
         Fail 'A Paperboat Windows service points at an unexpected executable or role.'
     }
@@ -304,7 +304,7 @@ function Assert-ServiceSet([pscustomobject]$Paths, [bool]$RequireRunning) {
     Assert-ServiceRecord 'PaperboatLocalDaemon' '__runtime-local-daemon' $Paths $RequireRunning
     Assert-ServiceRecord 'PaperboatUpdated' '__runtime-updated' $Paths $RequireRunning
     if ($RequireRunning) {
-        Check 'PaperboatUpdated is persistent, active, and runs the unified pb __runtime-updated role'
+        Check 'PaperboatUpdated is persistent, active, and runs the unified pb daemon __runtime-updated role'
     }
     foreach ($name in @('PaperboatHost', 'PaperboatRuntimeConfig', 'PaperboatRuntime')) {
         if ($null -ne (Get-ServiceRecord $name)) {

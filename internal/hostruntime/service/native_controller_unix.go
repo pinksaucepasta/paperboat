@@ -4,21 +4,11 @@ package service
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
 )
-
-const nativeServiceOperationTimeout = 30 * time.Second
-
-func nativeServiceContext(ctx context.Context) (context.Context, context.CancelFunc, error) {
-	if ctx == nil {
-		return nil, nil, ErrLifecycleInvalid
-	}
-	operationCtx, cancel := context.WithTimeout(ctx, nativeServiceOperationTimeout)
-	return operationCtx, cancel, nil
-}
 
 func (c SystemdController) Inspect(ctx context.Context, _ string) (NativeControllerStatus, error) {
 	runner, ok := c.Runner.(OutputRunner)
@@ -200,7 +190,8 @@ func (c LaunchdController) Disable(ctx context.Context, _ string) error {
 }
 
 func (c LaunchdController) Start(ctx context.Context, path string) error {
-	if c.Runner == nil || c.UID < 0 {
+	runner, ok := c.Runner.(OutputRunner)
+	if !ok || c.UID < 0 {
 		return ErrLifecycleInvalid
 	}
 	operationCtx, cancel, err := nativeServiceContext(ctx)
@@ -208,21 +199,26 @@ func (c LaunchdController) Start(ctx context.Context, path string) error {
 		return err
 	}
 	defer cancel()
-	if err := c.Runner.Run(operationCtx, "launchctl", "kickstart", "-k", c.service()); err != nil {
-		// Stop deliberately bootstraps the service out of launchd so KeepAlive
-		// cannot restart it behind the transaction's back. Re-register the same
-		// declaration before retrying the kickstart on the next Start/Repair.
-		if path == "" {
-			return err
+	if err := c.startJob(operationCtx, path, false, false); err != nil {
+		return err
+	}
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		output, printErr := runner.Output(operationCtx, "launchctl", "print", c.service())
+		if printErr != nil {
+			return printErr
 		}
-		if bootstrapErr := c.Runner.Run(operationCtx, "launchctl", "bootstrap", c.domain(), path); bootstrapErr != nil {
-			return fmt.Errorf("kickstart %s: %w (bootstrap: %v)", c.service(), err, bootstrapErr)
+		status := parseLaunchdPrintStatus(output)
+		if status.state == "running" || status.state != "spawn scheduled" && status.activeCount > 0 && status.pid > 0 {
+			return nil
 		}
-		if err := c.Runner.Run(operationCtx, "launchctl", "kickstart", "-k", c.service()); err != nil {
-			return err
+		select {
+		case <-operationCtx.Done():
+			return errors.Join(ErrLifecycleNotReady, operationCtx.Err())
+		case <-ticker.C:
 		}
 	}
-	return c.Runner.Run(operationCtx, "launchctl", "print", c.service())
 }
 
 func (c LaunchdController) Stop(ctx context.Context, _ string) error {
@@ -243,15 +239,6 @@ func (c LaunchdController) Stop(ctx context.Context, _ string) error {
 	}
 	return err
 }
-
-func (c LaunchdController) domain() string {
-	if c.UserDomain {
-		return fmt.Sprintf("gui/%d", c.UID)
-	}
-	return "system"
-}
-
-func (c LaunchdController) service() string { return c.domain() + "/" + c.label() }
 
 type launchdPrintStatus struct {
 	state       string

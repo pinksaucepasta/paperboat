@@ -167,18 +167,23 @@ func NewClientCoordinator(ctx context.Context, config HostConfig, dependencies H
 	if err != nil {
 		return nil, err
 	}
-	transferHandler, err := server.NewFileTransferHandler(server.FileTransferHandlerConfig{
+	transferHandlerConfig := server.FileTransferHandlerConfig{
 		Service: transferService, Journal: journal, Authorizer: dependencies.Authorizer, TransferKeys: dependencies.TransferKeys,
 		AuthorizeCreate: func(authorization server.Authorization, request server.CreateFileTransferRequest) bool {
 			return authorization.MachineID == config.MachineID && authorization.UserID != "" && request.SourceMachineID == authorization.SourceMachineID && request.InitiatingUserID == authorization.UserID && request.DestinationMachineID == config.MachineID && request.SessionID == ""
 		},
-	})
+	}
+	transferHandler, err := server.NewFileTransferHandler(transferHandlerConfig)
+	if err != nil {
+		return nil, err
+	}
+	nativeTransferHandler, err := server.NewNativeFileTransferHandler(transferHandlerConfig)
 	if err != nil {
 		return nil, err
 	}
 	var nativePeerService Service
 	if dependencies.NativePeerFactory != nil {
-		nativePeerService, err = dependencies.NativePeerFactory(func(net.Conn) error { return ErrHostInvalid }, transferHandler, nil)
+		nativePeerService, err = dependencies.NativePeerFactory(func(net.Conn) error { return ErrHostInvalid }, nativeTransferHandler, nil)
 		if err != nil || nativePeerService == nil {
 			return nil, errors.Join(ErrHostInvalid, err)
 		}
@@ -414,7 +419,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	if err != nil {
 		return nil, err
 	}
-	transferHandler, err := server.NewFileTransferHandler(server.FileTransferHandlerConfig{
+	transferHandlerConfig := server.FileTransferHandlerConfig{
 		Service: transferService, Journal: journal, Authorizer: dependencies.Authorizer, TransferKeys: dependencies.TransferKeys,
 		AuthorizeCreate: func(authorization server.Authorization, request server.CreateFileTransferRequest) bool {
 			return authorization.MachineID == config.MachineID && authorization.UserID != "" &&
@@ -427,7 +432,12 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 			}
 			return writers.Recipient(request.SessionID, request.DestinationMachineID)
 		},
-	})
+	}
+	transferHandler, err := server.NewFileTransferHandler(transferHandlerConfig)
+	if err != nil {
+		return nil, err
+	}
+	nativeTransferHandler, err := server.NewNativeFileTransferHandler(transferHandlerConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -470,7 +480,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	}
 	var nativePeerService Service
 	if dependencies.NativePeerFactory != nil {
-		nativePeerService, err = dependencies.NativePeerFactory(nativeManager.Serve, transferHandler, codexHTTPHandler)
+		nativePeerService, err = dependencies.NativePeerFactory(nativeManager.Serve, nativeTransferHandler, codexHTTPHandler)
 		if err != nil || nativePeerService == nil {
 			return nil, errors.Join(ErrHostInvalid, err)
 		}
@@ -502,14 +512,12 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	}
 	mux.Handle("/v1/file-transfers", transferHandler)
 	mux.Handle("/v1/file-transfers/", transferHandler)
-	if dependencies.TransferKeys != nil {
-		localTransferHandler, localTransferErr := server.NewLocalFileTransferHandler(server.LocalFileTransferConfig{Token: agentToken, MachineID: config.MachineID, Service: transferService, TransferKeys: dependencies.TransferKeys, ResolveRecipient: writers.Recipient})
-		if localTransferErr != nil {
-			return nil, localTransferErr
-		}
-		mux.Handle("/v1/local-file-transfers", localTransferHandler)
-		mux.Handle("/v1/local-file-transfers/", localTransferHandler)
+	localTransferHandler, localTransferErr := server.NewNativeLocalFileTransferHandler(server.LocalFileTransferConfig{Token: agentToken, MachineID: config.MachineID, Service: transferService, ResolveRecipient: writers.Recipient})
+	if localTransferErr != nil {
+		return nil, localTransferErr
 	}
+	mux.Handle("/v1/local-file-transfers", localTransferHandler)
+	mux.Handle("/v1/local-file-transfers/", localTransferHandler)
 	if dependencies.PreviewDispatcher != nil {
 		previewDispatchHandler, dispatchErr := server.NewPreviewDispatchHandler(server.PreviewDispatchHandlerConfig{Authorizer: dependencies.Authorizer, Dispatcher: dependencies.PreviewDispatcher, MachineID: config.MachineID})
 		if dispatchErr != nil {
@@ -606,7 +614,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	healthSource.set(runtime, workerComponents)
 	host := &Host{runtime: runtime, hostd: daemon, workers: workers, http: httpService, handler: mux, sessions: sessions, executions: executions, health: healthSource, transferRoot: filepath.Join(config.Runtime.StateRoot, "file-transfers"), cleanupUnstarted: durable.Close, updateGate: dependencies.UpdateGate}
 	if host.updateGate == nil {
-		host.updateGate, err = newStandaloneUpdateGate(standaloneUpdateGateConfig{MachineID: config.MachineID, StatePath: filepath.Join(config.Runtime.StateRoot, "updates", "standalone-deployment-gate.json"), Health: mux, Workloads: host.WorkloadStatus})
+		host.updateGate, err = newStandaloneUpdateGate(standaloneUpdateGateConfig{MachineID: config.MachineID, StatePath: filepath.Join(config.Runtime.StateRoot, "updates", "standalone-deployment-gate.json"), Health: mux, Workloads: host.WorkloadStatus, BeginUpdate: sessions.BeginUpdate, EndUpdate: sessions.EndUpdate})
 		if err != nil {
 			return nil, errors.Join(ErrHostInvalid, err)
 		}

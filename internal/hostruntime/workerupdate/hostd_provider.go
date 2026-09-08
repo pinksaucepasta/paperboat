@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 )
 
@@ -34,7 +35,10 @@ func (p HostdDeploymentProvider) ProbeCandidate(ctx context.Context, request Can
 
 func (p HostdDeploymentProvider) Drain(ctx context.Context, request DrainRequest) error {
 	target := hostdTarget(request.Target)
-	_, err := p.call(ctx, hostdproto.UpdateGateRequest{Operation: hostdproto.UpdateGateDrain, TransactionID: request.TransactionID, Version: request.Candidate, PreviousVersion: request.Previous, ManifestSHA256: request.ManifestSHA256, TimeoutMillis: request.Timeout.Milliseconds(), ExpectedTarget: &target})
+	response, err := p.call(ctx, hostdproto.UpdateGateRequest{Operation: hostdproto.UpdateGateDrain, TransactionID: request.TransactionID, Version: request.Candidate, PreviousVersion: request.Previous, ManifestSHA256: request.ManifestSHA256, TimeoutMillis: request.Timeout.Milliseconds(), ExpectedTarget: &target})
+	if err == nil && response.BlockedReason == hostdproto.UpdateGateBlockedActiveTerminalSessions {
+		return &autoupdate.ActiveTerminalSessionsError{RequiredVersion: request.Candidate}
+	}
 	return err
 }
 
@@ -66,6 +70,9 @@ func (p HostdDeploymentProvider) call(ctx context.Context, request hostdproto.Up
 	}
 	if _, err := deploymentTargetFromHostd(response.Target); err != nil {
 		return hostdproto.UpdateGateResponse{}, err
+	}
+	if response.BlockedReason != "" && (request.Operation != hostdproto.UpdateGateDrain || response.BlockedReason != hostdproto.UpdateGateBlockedActiveTerminalSessions) {
+		return hostdproto.UpdateGateResponse{}, ErrHostdActivationProvider
 	}
 	return response, nil
 }

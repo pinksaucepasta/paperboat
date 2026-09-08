@@ -148,3 +148,15 @@ func TestPlanRejectsUnsafeDeferralPolicyShape(t *testing.T) {
 		t.Fatal("security policy without approval accepted")
 	}
 }
+
+func TestCanarySampleBoundsMatchActivation(t *testing.T) {
+	for _, samples := range []uint16{0, 1, 2, 32, 33, 1000} {
+		plan := testPolicy(t)
+		plan.Canary.Samples = samples
+		err := plan.Validate()
+		valid := samples >= 2 && samples <= 32
+		if valid && err != nil || !valid && !errors.Is(err, ErrInvalidPolicy) {
+			t.Errorf("canary samples %d: valid=%v, error=%v", samples, valid, err)
+		}
+	}
+}

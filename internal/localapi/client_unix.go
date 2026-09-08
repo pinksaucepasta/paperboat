@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -18,13 +17,19 @@ import (
 )
 
 type FileTransferLease struct {
-	PeerContext []byte
-	Handle      string
-	control     net.Conn
-	client      *Client
-	transport   *http.Transport
-	once        sync.Once
-	err         error
+	Handle    string
+	control   net.Conn
+	client    *Client
+	transport *http.Transport
+	once      sync.Once
+	err       error
+}
+
+func (l *FileTransferLease) OpenTransferStream(ctx context.Context) (net.Conn, error) {
+	if l == nil || l.client == nil || !safeValue(l.Handle) {
+		return nil, net.ErrClosed
+	}
+	return l.client.OpenFileTransferStream(ctx, l.Handle)
 }
 
 func (l *FileTransferLease) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -183,7 +188,7 @@ func (c *Client) OpenPeerStream(ctx context.Context, value PeerStreamRequest) (n
 	return &peerStreamConn{Conn: connection, reader: response.Body}, nil
 }
 
-func (c *Client) PrepareFileTransfer(ctx context.Context, value FileTransferKeyRequest) (*FileTransferLease, error) {
+func (c *Client) PrepareFileTransfer(ctx context.Context, value FileTransferRequest) (*FileTransferLease, error) {
 	if c == nil || ctx == nil || value.Validate(time.Now().UTC()) != nil {
 		return nil, ErrInvalidConfig
 	}
@@ -195,7 +200,7 @@ func (c *Client) PrepareFileTransfer(ctx context.Context, value FileTransferKeyR
 	if err != nil {
 		return nil, err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://paperboat.local/v1/file-transfer-keys", bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://paperboat.local/v1/file-transfers", bytes.NewReader(body))
 	if err != nil {
 		_ = connection.Close()
 		return nil, err
@@ -220,20 +225,13 @@ func (c *Client) PrepareFileTransfer(ctx context.Context, value FileTransferKeyR
 		}
 		return nil, ErrVersionMismatch
 	}
-	peerContext, err := base64.RawURLEncoding.Strict().DecodeString(response.Header.Get("X-Paperboat-Peer-Context"))
-	if err != nil || len(peerContext) == 0 {
+	handle := response.Header.Get("X-Paperboat-Transfer-Handle")
+	if !safeValue(handle) {
 		_ = response.Body.Close()
 		_ = connection.Close()
 		return nil, ErrInvalidResponse
 	}
-	handle := response.Header.Get("X-Paperboat-Transfer-Handle")
-	lease := &FileTransferLease{PeerContext: peerContext, Handle: handle, control: connection, client: c}
-	if handle == "" {
-		_ = response.Body.Close()
-		_ = connection.Close()
-		lease.control = nil
-		return lease, nil
-	}
+	lease := &FileTransferLease{Handle: handle, control: connection, client: c}
 	lease.transport = &http.Transport{
 		Proxy:                 nil,
 		ForceAttemptHTTP2:     false,
@@ -561,6 +559,9 @@ func decodeRemoteErrorReader(status int, reader io.Reader) error {
 	var cause error
 	if status == http.StatusForbidden {
 		cause = ErrPermission
+	}
+	if remote.Code == "deadline_exceeded" {
+		cause = context.DeadlineExceeded
 	}
 	if remote.Code == "stale_observation" {
 		cause = ErrStaleObservation

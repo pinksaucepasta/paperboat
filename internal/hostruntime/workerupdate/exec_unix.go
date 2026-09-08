@@ -43,7 +43,7 @@ func (ExecStarter) Start(ctx context.Context, request StartRequest) (Worker, err
 		return nil, err
 	}
 	command := exec.CommandContext(ctx, request.Executable,
-		"__runtime-worker", "--socket", request.HostdEndpoint, "--token-fd", "3",
+		"daemon", "__runtime-worker", "--socket", request.HostdEndpoint, "--token-fd", "3",
 		"--worker-id", request.WorkerID, "--version", request.Release.Version,
 		"--api-min", strconv.FormatUint(uint64(request.Release.HostdAPIMin), 10),
 		"--api-max", strconv.FormatUint(uint64(request.Release.HostdAPIMax), 10), "--wait-activation")

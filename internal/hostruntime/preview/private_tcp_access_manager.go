@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/privatepreviewproxy"
 )
@@ -33,13 +34,16 @@ var (
 )
 
 type PrivateTCPAccessManagerConfig struct {
-	Runtime       *MachinePreviewRuntime
-	ControlToken  string
-	RunContext    context.Context
-	MaximumActive int
-	resolve       func(context.Context, string) (string, string, error)
-	start         func(context.Context, PrivateTCPAccessRequest) (privateTCPAccessProxy, error)
-	newID         func() (string, error)
+	Runtime           *MachinePreviewRuntime
+	Native            *NativePrivateTCPAccess
+	ControlToken      string
+	RunContext        context.Context
+	MaximumActive     int
+	resolve           func(context.Context, string) (string, string, error)
+	start             func(context.Context, PrivateTCPAccessRequest) (privateTCPAccessProxy, error)
+	validate          func(context.Context, string, string) (time.Time, error)
+	newID             func() (string, error)
+	ReconcileInterval time.Duration
 }
 
 type privateTCPAccessProxy interface {
@@ -52,21 +56,24 @@ func (p machinePrivateTCPProxy) Close() error      { return p.proxy.Close() }
 func (p machinePrivateTCPProxy) AccessURL() string { return p.proxy.URL }
 
 type PrivateTCPAccessManager struct {
-	token      string
-	runContext context.Context
-	maximum    int
-	resolve    func(context.Context, string) (string, string, error)
-	start      func(context.Context, PrivateTCPAccessRequest) (privateTCPAccessProxy, error)
-	newID      func() (string, error)
-	mu         sync.Mutex
-	closed     bool
-	pending    int
-	active     map[string]*privateTCPAccessSession
+	token             string
+	runContext        context.Context
+	maximum           int
+	resolve           func(context.Context, string) (string, string, error)
+	start             func(context.Context, PrivateTCPAccessRequest) (privateTCPAccessProxy, error)
+	validate          func(context.Context, string, string) (time.Time, error)
+	newID             func() (string, error)
+	reconcileInterval time.Duration
+	mu                sync.Mutex
+	closed            bool
+	pending           int
+	active            map[string]*privateTCPAccessSession
 }
 
 type privateTCPAccessSession struct {
 	ID, TunnelID, RouteID, ListenAddress string
 	proxy                                privateTCPAccessProxy
+	verifiedUntil                        time.Time
 }
 type privateTCPAccessRequestDocument struct {
 	Schema        string `json:"schema"`
@@ -94,6 +101,10 @@ func NewPrivateTCPAccessManager(config PrivateTCPAccessManagerConfig) (*PrivateT
 		return nil, ErrPrivateTCPAccessInvalid
 	}
 	resolve, start := config.resolve, config.start
+	validate := config.validate
+	if config.Native != nil {
+		resolve, start, validate = config.Native.Resolve, config.Native.Start, config.Native.Validate
+	}
 	if config.Runtime != nil {
 		if resolve == nil {
 			resolve = config.Runtime.resolvePrivateTCPRoute
@@ -111,12 +122,21 @@ func NewPrivateTCPAccessManager(config PrivateTCPAccessManagerConfig) (*PrivateT
 	if resolve == nil || start == nil {
 		return nil, ErrPrivateTCPAccessInvalid
 	}
+	if config.ReconcileInterval == 0 {
+		config.ReconcileInterval = 30 * time.Second
+	}
+	if config.ReconcileInterval < 10*time.Millisecond || config.ReconcileInterval > time.Minute {
+		return nil, ErrPrivateTCPAccessInvalid
+	}
 	newID := config.newID
 	if newID == nil {
 		newID = newPrivateAccessIdentifier
 	}
-	manager := &PrivateTCPAccessManager{token: strings.TrimSpace(config.ControlToken), runContext: config.RunContext, maximum: config.MaximumActive, resolve: resolve, start: start, newID: newID, active: make(map[string]*privateTCPAccessSession)}
+	manager := &PrivateTCPAccessManager{token: strings.TrimSpace(config.ControlToken), runContext: config.RunContext, maximum: config.MaximumActive, resolve: resolve, start: start, validate: validate, newID: newID, reconcileInterval: config.ReconcileInterval, active: make(map[string]*privateTCPAccessSession)}
 	go func() { <-config.RunContext.Done(); _ = manager.Close() }()
+	if validate != nil {
+		go manager.reconcile(config.RunContext)
+	}
 	return manager, nil
 }
 
@@ -241,7 +261,17 @@ func (m *PrivateTCPAccessManager) handleStart(w http.ResponseWriter, r *http.Req
 		writeMappedPrivateTCPAccessError(w, err)
 		return
 	}
-	proxy, err := m.start(r.Context(), PrivateTCPAccessRequest{RouteID: routeID, ListenPort: listenPort, MaximumConnections: 128})
+	verifiedUntil := time.Now().UTC().Add(5 * time.Minute)
+	if m.validate != nil {
+		verifiedUntil, err = m.validate(r.Context(), tunnelID, routeID)
+		if err != nil || !verifiedUntil.After(time.Now().UTC()) {
+			writeMappedPrivateTCPAccessError(w, mapPrivateTCPAccessError(err))
+			return
+		}
+	}
+	// The listener is owned by stable hostd, not by the request that created it.
+	// The post-start closed check below cleans up a concurrent shutdown.
+	proxy, err := m.start(m.runContext, PrivateTCPAccessRequest{RouteID: routeID, ListenPort: listenPort, ListenAddress: strings.TrimSpace(document.ListenAddress), MaximumConnections: 128})
 	if err != nil {
 		writeMappedPrivateTCPAccessError(w, mapPrivateTCPAccessError(err))
 		return
@@ -258,7 +288,7 @@ func (m *PrivateTCPAccessManager) handleStart(w http.ResponseWriter, r *http.Req
 		writePrivateTCPAccessError(w, http.StatusServiceUnavailable, "runtime_unavailable", "The access session could not be created.")
 		return
 	}
-	session := &privateTCPAccessSession{ID: "access_" + id, TunnelID: tunnelID, RouteID: routeID, ListenAddress: listenAddress, proxy: proxy}
+	session := &privateTCPAccessSession{ID: "access_" + id, TunnelID: tunnelID, RouteID: routeID, ListenAddress: listenAddress, proxy: proxy, verifiedUntil: verifiedUntil}
 	m.mu.Lock()
 	m.pending--
 	reserved = false
@@ -272,6 +302,45 @@ func (m *PrivateTCPAccessManager) handleStart(w http.ResponseWriter, r *http.Req
 	m.mu.Unlock()
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(privateTCPAccessResponseDocument{Schema: PrivateTCPAccessSchema, Kind: "private_tcp_access", ID: session.ID, TunnelID: tunnelID, RouteID: routeID, ListenAddress: listenAddress})
+}
+
+func (m *PrivateTCPAccessManager) reconcile(ctx context.Context) {
+	ticker := time.NewTicker(m.reconcileInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.reconcileOnce(ctx, time.Now().UTC())
+		}
+	}
+}
+
+func (m *PrivateTCPAccessManager) reconcileOnce(ctx context.Context, now time.Time) {
+	m.mu.Lock()
+	sessions := make([]*privateTCPAccessSession, 0, len(m.active))
+	for _, session := range m.active {
+		sessions = append(sessions, session)
+	}
+	m.mu.Unlock()
+	for _, session := range sessions {
+		until, err := m.validate(ctx, session.TunnelID, session.RouteID)
+		definitive := errors.Is(err, ErrPrivateTCPAccessForbidden) || errors.Is(err, ErrPrivateTCPAccessNotFound)
+		m.mu.Lock()
+		current := m.active[session.ID]
+		if current == session && err == nil && until.After(now) {
+			current.verifiedUntil = until
+		}
+		withdraw := current == session && (definitive || !current.verifiedUntil.After(now))
+		if withdraw {
+			delete(m.active, session.ID)
+		}
+		m.mu.Unlock()
+		if withdraw {
+			_ = session.proxy.Close()
+		}
+	}
 }
 
 func (m *PrivateTCPAccessManager) handleDelete(w http.ResponseWriter, id string) {
@@ -338,14 +407,14 @@ func privateTCPProxyAddress(raw string) (string, error) {
 		return "", ErrPrivateTCPAccessUnavailable
 	}
 	host, port, err := net.SplitHostPort(endpoint.Host)
-	if err != nil || host != "127.0.0.1" {
+	if err != nil || host != "127.0.0.1" && host != "::1" {
 		return "", ErrPrivateTCPAccessUnavailable
 	}
 	parsed, err := strconv.ParseUint(port, 10, 16)
 	if err != nil || parsed == 0 {
 		return "", ErrPrivateTCPAccessUnavailable
 	}
-	return endpoint.Host, nil
+	return net.JoinHostPort(host, port), nil
 }
 func mapPrivateTCPAccessError(err error) error {
 	switch {

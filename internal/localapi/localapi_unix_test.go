@@ -645,7 +645,7 @@ func (f observationSinkFunc) PublishObservation(ctx context.Context, peer Peer, 
 
 func validSnapshot() Snapshot {
 	return Snapshot{
-		Schema: SnapshotSchemaV1, Generation: 7, ObservedAt: time.Date(2026, 8, 4, 1, 2, 3, 0, time.UTC), DaemonState: "ready",
+		Schema: SnapshotSchemaV1, Generation: 7, ObservedAt: time.Date(2026, 8, 4, 1, 2, 3, 0, time.UTC), DaemonState: "ready", DaemonVersion: "dev",
 		Machines: []MachineStatus{{ID: "machine_1", Alias: "studio", Eligible: true, RuntimeState: "ready", Generation: 4, SelectedPath: "relay", RelayRegion: "bom", TransferReadiness: "ready", PreviewReadiness: "degraded", SSHReadiness: "unavailable", NATMappingIPv4: "unknown", NATMappingIPv6: "unknown", CaptivePortal: "unknown", PMTU: "unknown", RouterProtocol: "unknown", RouterMapping: "unknown", MappingLifetime: "unknown", UpdateHealth: "unknown", Health: []HealthItem{{Code: "ssh_unavailable", Severity: "warning", Title: "SSH is unavailable", Recovery: "Run pb ssh doctor", ETag: "etag_1"}}}},
 	}
 }
@@ -983,7 +983,7 @@ func TestLocalAPINeverRemovesReplacementAtSocketPath(t *testing.T) {
 
 func TestLocalAPIClientRejectsUnknownFieldsAndVersion(t *testing.T) {
 	unknown := `{"schema":"paperboat.status/v1","generation":1,"observed_at":"2026-08-04T01:02:03Z","daemon_state":"ready","machines":[],"unknown":true}`
-	valid := `{"schema":"paperboat.status/v1","generation":1,"observed_at":"2026-08-04T01:02:03Z","daemon_state":"ready","machines":[]}`
+	valid := `{"schema":"paperboat.status/v1","generation":1,"observed_at":"2026-08-04T01:02:03Z","daemon_state":"ready","daemon_version":"dev","machines":[]}`
 	for name, response := range map[string]string{
 		"unknown field": rawHTTPResponse(ProtocolV1, unknown),
 		"wrong version": rawHTTPResponse("paperboat.local-api/v2", valid),

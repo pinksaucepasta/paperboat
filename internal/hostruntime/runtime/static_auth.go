@@ -123,6 +123,11 @@ func (r staticPolicyResolver) Policy(frame protocol.Frame) (auth.Policy, error) 
 		base.OperationID = frame.OperationID
 		base.MaxLifetime = 5 * time.Minute
 		base.SingleUse = true
+	case "private.access.v1":
+		base.CredentialClass = "native_private"
+		base.Scopes = []string{"private:native"}
+		base.OperationID = frame.OperationID
+		base.MaxLifetime = 5 * time.Minute
 	case "file-transfer.v1":
 		base.CredentialClass = "file_transfer"
 		base.Scopes = []string{"file:transfer"}

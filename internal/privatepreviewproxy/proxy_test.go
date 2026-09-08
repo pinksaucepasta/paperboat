@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -43,20 +44,21 @@ func TestProxyPreflightsAndForwardsFreshTCPConnections(t *testing.T) {
 			t.Fatalf("request %d body=%q err=%v", index, body, err)
 		}
 	}
-	if dials.Load() != 2 {
-		t.Fatalf("dials=%d, want preflight plus one fresh stream", dials.Load())
+	if dials.Load() != 3 {
+		t.Fatalf("dials=%d, want preflight plus one fresh stream per connection", dials.Load())
 	}
 }
 
 func TestProxyCancellationClosesListenerAndActiveStreams(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	remoteClosed := make(chan struct{})
+	var remoteClosedOnce sync.Once
 	proxy, err := Start(ctx, Config{Dial: func(context.Context) (io.ReadWriteCloser, error) {
 		client, server := net.Pipe()
 		go func() {
 			_, _ = io.Copy(io.Discard, server)
 			_ = server.Close()
-			close(remoteClosed)
+			remoteClosedOnce.Do(func() { close(remoteClosed) })
 		}()
 		return client, nil
 	}})
@@ -79,6 +81,28 @@ func TestProxyCancellationClosesListenerAndActiveStreams(t *testing.T) {
 	}
 	if _, err := net.DialTimeout("tcp4", strings.TrimPrefix(proxy.URL, "http://"), 100*time.Millisecond); err == nil {
 		t.Fatal("loopback listener remained reachable")
+	}
+}
+
+func TestProxyPreservesExactIPv6LoopbackListener(t *testing.T) {
+	probe, err := net.Listen("tcp6", "[::1]:0")
+	if err != nil {
+		t.Skip("IPv6 loopback unavailable")
+	}
+	_ = probe.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	proxy, err := Start(ctx, Config{ListenAddress: "[::1]:0", Dial: func(context.Context) (io.ReadWriteCloser, error) {
+		left, right := net.Pipe()
+		go right.Close()
+		return left, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer proxy.Close()
+	if !strings.HasPrefix(proxy.URL, "http://[::1]:") {
+		t.Fatalf("url=%q", proxy.URL)
 	}
 }
 

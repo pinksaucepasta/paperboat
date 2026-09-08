@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -22,7 +23,7 @@ const (
 	Label         = "com.pinksaucepasta.paperboat.runtime-host"
 	HostLabel     = "com.pinksaucepasta.paperboat.runtime-privileged"
 	ConfigLabel   = "com.pinksaucepasta.paperboat.runtime-config"
-	DaemonLabel   = "com.pinksaucepasta.paperboat.local-daemon"
+	DaemonLabel   = "com.pinksaucepasta.paperboatd"
 	HostdLabel    = "com.pinksaucepasta.paperboat.hostd"
 	UpdaterLabel  = "com.pinksaucepasta.paperboat.updated"
 	WorkerKind    = "worker"
@@ -78,10 +79,10 @@ func NewPending(config Config) (*Installer, error) {
 	return newInstaller(config, true)
 }
 
-// newInstaller is also used by the host-install recovery boundary before the
-// first binary slot exists. It still validates the fixed path and every
-// declaration field; allowMissing only permits the one expected pre-stage
-// condition and is never exposed through the ordinary New constructor.
+// newInstaller also serves host-install recovery before the first binary slot
+// exists and removal after an executable is lost. It still validates the fixed
+// path and every declaration field; allowMissing is never exposed through the
+// ordinary New constructor.
 func newInstaller(config Config, allowMissingExecutable bool) (*Installer, error) {
 	if config.Kind == "" {
 		config.Kind = WorkerKind
@@ -148,7 +149,7 @@ func newInstaller(config Config, allowMissingExecutable bool) (*Installer, error
 		} else if config.Kind == ConfigKind {
 			path = filepath.Join(config.ConfigRoot, ".config", "systemd", "user", "paperboat-runtime-config.service")
 		} else if config.Kind == DaemonKind {
-			path = filepath.Join(config.ConfigRoot, ".config", "systemd", "user", "paperboat-local-daemon.service")
+			path = filepath.Join(config.ConfigRoot, ".config", "systemd", "user", "paperboatd.service")
 		} else if config.Kind != WorkerKind && config.Kind != HostdKind && config.Kind != UpdaterKind {
 			return nil, ErrInvalidDefinition
 		}
@@ -192,7 +193,11 @@ func (i *Installer) Install(ctx context.Context) error {
 	if upgrading && i.config.UpgradeMode == UpgradeReload {
 		return nil
 	}
-	activateUpgrade := upgrading && i.config.UpgradeMode != UpgradeReload
+	definition, renderErr := i.render()
+	if renderErr != nil {
+		return renderErr
+	}
+	activateUpgrade := upgrading && !bytes.Equal(previous, definition) && i.config.UpgradeMode != UpgradeReload
 	if err := i.config.Controller.Apply(ctx, i.definitionPath, activateUpgrade); err != nil {
 		rollbackErr := i.rollback(ctx, previous, upgrading)
 		return errors.Join(fmt.Errorf("apply service declaration: %w", err), rollbackErr)
@@ -223,6 +228,11 @@ func (i *Installer) writeDefinition(ctx context.Context) (previous []byte, upgra
 	definition, err := i.render()
 	if err != nil {
 		return nil, false, fmt.Errorf("render service declaration: %w", err)
+	}
+	if i.config.Platform == "darwin" {
+		if err := prepareNativeServiceLogs(i.config, definition); err != nil {
+			return nil, false, fmt.Errorf("prepare service diagnostics: %w", err)
+		}
 	}
 	info, statErr := os.Lstat(i.definitionPath)
 	upgrading = statErr == nil
@@ -258,6 +268,31 @@ func (i *Installer) rollback(ctx context.Context, previous []byte, upgrading boo
 	}
 	return i.config.Controller.Apply(ctx, i.definitionPath, i.config.UpgradeMode != UpgradeReload)
 }
+
+// Remove removes an existing service when its executable may already be gone.
+// It never returns an installer or starts a process; declaration validation and
+// the configured service-manager identity remain identical to normal removal.
+func Remove(ctx context.Context, config Config) error {
+	if ctx == nil {
+		return ErrInvalidDefinition
+	}
+	installer, err := newInstaller(config, true)
+	if err != nil {
+		return err
+	}
+	info, err := os.Lstat(installer.definitionPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return ErrInvalidDefinition
+	}
+	return installer.Uninstall(ctx)
+}
+
 func (i *Installer) Uninstall(ctx context.Context) error {
 	if err := i.config.Controller.Remove(ctx, i.definitionPath); err != nil {
 		return err

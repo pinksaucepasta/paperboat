@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 )
 
@@ -109,7 +110,7 @@ func (i *Inventory) Refresh(ctx context.Context) error {
 
 	now := i.clock().UTC()
 	if _, err := i.store.Update(now, func(current *localapi.Snapshot) (localapi.Snapshot, error) {
-		desired := localapi.Snapshot{DaemonState: "ready"}
+		desired := localapi.Snapshot{DaemonState: "ready", DaemonVersion: buildinfo.Version}
 		if current != nil {
 			desired.Machines = current.Machines
 		}

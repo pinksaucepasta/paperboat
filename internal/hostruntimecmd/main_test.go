@@ -73,7 +73,7 @@ func TestHelpDoesNotExposeStandaloneRuntimeCommands(t *testing.T) {
 	if code := run([]string{"help"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, stderr.String())
 	}
-	if strings.Contains(stdout.String(), "bootstrap") || strings.Contains(stdout.String(), "preview create") || !strings.Contains(stdout.String(), "pb __runtime-host") {
+	if strings.Contains(stdout.String(), "bootstrap") || strings.Contains(stdout.String(), "preview create") || !strings.Contains(stdout.String(), "pb daemon __runtime-host") {
 		t.Fatalf("help=%q", stdout.String())
 	}
 }

@@ -167,3 +167,34 @@ func machineSafetyCode(endpointID string, generation uint64, noise [32]byte, qui
 	encoded := hex.EncodeToString(digest[:5])
 	return encoded[:5] + "-" + encoded[5:]
 }
+
+func TestFreshSignerApprovesMachineWithoutAccountRoot(t *testing.T) {
+	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	root := t.TempDir()
+	store := config.ProfileStore{Path: root, Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}}
+	keys, err := store.FreshPeerIdentityKeys("https://api.example.test", "account_1", "cli_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootPublic := keys.RootPrivate.Public().(ed25519.PublicKey)
+	rootFingerprint := sha256.Sum256(rootPublic)
+	clearKeys(&keys)
+	noise := sha256.Sum256([]byte("machine-noise"))
+	quicPublic, _, _ := ed25519.GenerateKey(nil)
+	code := machineSafetyCode("machine_1", 2, noise, quicPublic)
+	client := &approvalClient{root: api.E2EERoot{Version: 1, PublicKey: base64.RawURLEncoding.EncodeToString(rootPublic), Fingerprint: hex.EncodeToString(rootFingerprint[:]), Generation: 1}, pending: []api.PendingEndpointIdentity{{RequestID: "per_0123456789abcdef", EndpointID: "machine_1", State: "pending", Generation: 2, NoisePublicKey: base64.RawURLEncoding.EncodeToString(noise[:]), QUICPublicKey: base64.RawURLEncoding.EncodeToString(quicPublic), CreatedAt: now.Add(-time.Minute), ExpiresAt: now.Add(4 * time.Minute), SafetyCode: code}}}
+	request := ApprovalRequest{Store: store, Client: client, Issuer: "https://api.example.test", AccountID: "account_1", CLIClientSessionID: "cli_1", RequestID: "per_0123456789abcdef", SafetyCode: code, Now: func() time.Time { return now }}
+	result, err := ApproveMachine(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := base64.RawURLEncoding.DecodeString(client.registered.Certificate)
+	certificate, err := endpointidentity.Verify(raw, rootPublic, endpointidentity.Expected{AccountID: "account_1", Role: endpointidentity.RoleMachine, EndpointID: "machine_1", Generation: 2}, now)
+	if err != nil || certificate.Claims.NoisePublicKey != noise || string(certificate.Claims.QUICPublicKey) != string(quicPublic) || result.CertificateFingerprint != client.registered.CertificateFingerprint {
+		t.Fatalf("certificate=%+v result=%+v err=%v", certificate, result, err)
+	}
+	request.SafetyCode = "00000-00000"
+	if _, err := ApproveMachine(context.Background(), request); err == nil {
+		t.Fatal("mismatched safety code accepted")
+	}
+}

@@ -20,14 +20,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 )
 
@@ -43,6 +41,7 @@ var (
 	ErrAlreadyTerminal    = errors.New("connector rotation is already terminal")
 	ErrJournalCorrupt     = errors.New("connector rotation journal is corrupt")
 	ErrJournalUncertain   = errors.New("connector rotation journal outcome is uncertain")
+	errJournalSecurity    = errors.New("connector rotation journal security is invalid")
 )
 
 const (
@@ -830,20 +829,10 @@ func OpenFileJournal(path string) (*FileJournal, error) {
 		return nil, ErrInvalidConfig
 	}
 	parent := filepath.Dir(path)
-	if err := os.MkdirAll(parent, 0o700); err != nil {
-		return nil, err
-	}
-	if info, err := os.Lstat(parent); err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 {
+	if err := ensurePrivateJournalDirectory(parent); err != nil {
 		return nil, ErrInvalidConfig
 	}
 	journal := &FileJournal{path: path, records: make(map[string]Record)}
-	if info, err := os.Lstat(path); err == nil {
-		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o600 {
-			return nil, ErrJournalCorrupt
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, ErrJournalCorrupt
-	}
 	records, exists, err := readJournalRecords(path)
 	if err == nil && exists {
 		journal.records = records
@@ -859,6 +848,9 @@ func OpenFileJournal(path string) (*FileJournal, error) {
 			journal.needsRepair = true
 		}
 		return journal, nil
+	}
+	if errors.Is(err, errJournalSecurity) {
+		return nil, ErrJournalCorrupt
 	}
 	backupRecords, backupExists, backupErr := readJournalRecords(journal.backupPath())
 	if backupErr != nil || !backupExists {
@@ -928,22 +920,19 @@ func (j *FileJournal) Save(ctx context.Context, record Record) error {
 		return ErrJournalUncertain
 	}
 	if !j.needsRepair {
-		if _, exists, err := readJournalRecords(j.path); err != nil {
-			return errors.Join(ErrJournalUncertain, err)
-		} else if exists {
-			previous, readErr := os.ReadFile(j.path)
-			if readErr != nil {
-				return errors.Join(ErrJournalUncertain, readErr)
+		previous, readErr := readPrivateJournalFile(j.path, maxJournalBytes)
+		if readErr == nil {
+			if _, decodeErr := decodeJournalRecords(previous); decodeErr != nil {
+				return errors.Join(ErrJournalUncertain, decodeErr)
 			}
-			if len(previous) > maxJournalBytes {
-				return ErrJournalUncertain
-			}
-			if err := atomicfile.Write(j.backupPath(), previous, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1}); err != nil {
+			if err := writePrivateJournalFile(j.backupPath(), previous); err != nil {
 				return errors.Join(ErrJournalUncertain, err)
 			}
+		} else if !errors.Is(readErr, errJournalFileNotExist) {
+			return errors.Join(ErrJournalUncertain, readErr)
 		}
 	}
-	if err := atomicfile.Write(j.path, encoded, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1}); err != nil {
+	if err := writePrivateJournalFile(j.path, encoded); err != nil {
 		return errors.Join(ErrJournalUncertain, err)
 	}
 	j.records = next
@@ -967,48 +956,53 @@ func marshalJournalDocument(payload fileDocumentPayload) ([]byte, error) {
 }
 
 func readJournalRecords(path string) (map[string]Record, bool, error) {
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
+	data, err := readPrivateJournalFile(path, maxJournalBytes)
+	if errors.Is(err, errJournalFileNotExist) {
 		return nil, false, nil
 	}
-	if err != nil || len(data) == 0 || len(data) > maxJournalBytes {
+	if err != nil {
+		return nil, false, err
+	}
+	if len(data) == 0 {
 		return nil, false, ErrJournalCorrupt
 	}
-	if info, statErr := os.Lstat(path); statErr != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o600 {
-		return nil, false, ErrJournalCorrupt
-	}
+	records, err := decodeJournalRecords(data)
+	return records, true, err
+}
+
+func decodeJournalRecords(data []byte) (map[string]Record, error) {
 	if err := rejectDuplicateJSONKeys(data); err != nil {
-		return nil, false, ErrJournalCorrupt
+		return nil, ErrJournalCorrupt
 	}
 	var document fileDocument
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&document); err != nil || document.Version != journalVersion || len(document.Records) > maxJournalRecords || !validSHA256Hash(document.Checksum) {
-		return nil, false, ErrJournalCorrupt
+		return nil, ErrJournalCorrupt
 	}
 	var extra any
 	if decoder.Decode(&extra) != io.EOF {
-		return nil, false, ErrJournalCorrupt
+		return nil, ErrJournalCorrupt
 	}
 	payload, err := json.Marshal(fileDocumentPayload{Version: document.Version, Records: document.Records})
 	if err != nil {
-		return nil, false, ErrJournalCorrupt
+		return nil, ErrJournalCorrupt
 	}
 	digest := sha256.Sum256(payload)
 	if document.Checksum != "sha256:"+hex.EncodeToString(digest[:]) {
-		return nil, false, ErrJournalCorrupt
+		return nil, ErrJournalCorrupt
 	}
 	records := make(map[string]Record, len(document.Records))
 	for _, record := range document.Records {
 		if record.Validate(time.Time{}) != nil {
-			return nil, false, ErrJournalCorrupt
+			return nil, ErrJournalCorrupt
 		}
 		if _, exists := records[record.OperationID]; exists {
-			return nil, false, ErrJournalCorrupt
+			return nil, ErrJournalCorrupt
 		}
 		records[record.OperationID] = record.clone()
 	}
-	return records, true, nil
+	return records, nil
 }
 
 var _ Journal = (*MemoryJournal)(nil)

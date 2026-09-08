@@ -1,4 +1,4 @@
-// Package peerquic owns native Paperboat QUIC over an ICE-nominated path.
+// Package peerquic owns native Paperboat QUIC over authorized packet sockets.
 package peerquic
 
 import (
@@ -18,7 +18,10 @@ import (
 	"github.com/quic-go/quic-go/qlogwriter"
 )
 
-const ALPN = "paperboat-peer-v1"
+const (
+	ALPN             = "paperboat-peer-v1"
+	PrivateHTTP3ALPN = "paperboat-private-http-v1"
+)
 
 type Class uint8
 
@@ -30,6 +33,7 @@ const (
 
 type SessionConfig struct {
 	Class             Class
+	AcceptsHTTP3      bool
 	KeepAlivePeriod   time.Duration
 	MaxIdleTimeout    time.Duration
 	InitialPacketSize uint16
@@ -104,11 +108,15 @@ func dial(ctx context.Context, iceConn net.Conn, tlsConfig *tls.Config, quicConf
 	if err != nil {
 		return nil, err
 	}
+	return dialPacket(ctx, packetConn, packetConn.RemoteAddr(), tlsConfig, quicConfig)
+}
+
+func dialPacket(ctx context.Context, packetConn net.PacketConn, remote net.Addr, tlsConfig *tls.Config, quicConfig *quic.Config) (*Session, error) {
 	transport := &quic.Transport{Conn: packetConn, ConnectionIDLength: 8, DisableVersionNegotiationPackets: true}
 	pto := newPTOTrace()
 	configured := quicConfig.Clone()
 	configured.Tracer = func(context.Context, bool, quic.ConnectionID) qlogwriter.Trace { return pto }
-	connection, err := transport.Dial(ctx, packetConn.RemoteAddr(), tlsConfig.Clone(), configured)
+	connection, err := transport.Dial(ctx, remote, tlsConfig.Clone(), configured)
 	if err != nil {
 		_ = transport.Close()
 		return nil, fmt.Errorf("dial peer QUIC: %w", err)
@@ -161,12 +169,17 @@ func listen(iceConn net.Conn, tlsConfig *tls.Config, quicConfig *quic.Config) (*
 		return nil, err
 	}
 	timing["packet_adapter_ready"] = time.Since(started).Microseconds()
+	listener, err := listenPacket(packetConn, tlsConfig, quicConfig)
+	timing["transport_listen_returned"] = time.Since(started).Microseconds()
+	return listener, err
+}
+
+func listenPacket(packetConn net.PacketConn, tlsConfig *tls.Config, quicConfig *quic.Config) (*Listener, error) {
 	transport := &quic.Transport{Conn: packetConn, ConnectionIDLength: 8, DisableVersionNegotiationPackets: true}
 	pto := newPTOTrace()
 	configured := quicConfig.Clone()
 	configured.Tracer = func(context.Context, bool, quic.ConnectionID) qlogwriter.Trace { return pto }
 	listener, err := transport.Listen(tlsConfig.Clone(), configured)
-	timing["transport_listen_returned"] = time.Since(started).Microseconds()
 	if err != nil {
 		_ = transport.Close()
 		return nil, fmt.Errorf("listen peer QUIC: %w", err)
@@ -293,6 +306,9 @@ func config(class Class) *quic.Config {
 func quicConfig(sessionConfig SessionConfig) *quic.Config {
 	maximumStreams := int64(64)
 	maximumUniStreams := int64(-1)
+	if sessionConfig.AcceptsHTTP3 {
+		maximumUniStreams = 16
+	}
 	switch sessionConfig.Class {
 	case ClassPreview:
 		maximumStreams = 128
@@ -350,7 +366,8 @@ func validateCommonTLS(config *tls.Config) error {
 	if config == nil || config.MinVersion != tls.VersionTLS13 || config.MaxVersion != 0 && config.MaxVersion != tls.VersionTLS13 {
 		return errors.New("peer QUIC requires TLS 1.3")
 	}
-	if len(config.NextProtos) != 1 || config.NextProtos[0] != ALPN {
+	validALPN := len(config.NextProtos) == 1 && (config.NextProtos[0] == ALPN || config.NextProtos[0] == PrivateHTTP3ALPN) || len(config.NextProtos) == 2 && config.NextProtos[0] == ALPN && config.NextProtos[1] == PrivateHTTP3ALPN
+	if !validALPN {
 		return errors.New("peer QUIC requires the Paperboat v1 ALPN")
 	}
 	return nil

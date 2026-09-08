@@ -65,6 +65,12 @@ type Claims struct {
 	OwnerSessionID         string              `json:"owner_session_id,omitempty"`
 	TargetScheme           string              `json:"target_scheme,omitempty"`
 	TargetAddress          string              `json:"target_address,omitempty"`
+	ResourceKind           string              `json:"resource_kind,omitempty"`
+	ResourceID             string              `json:"resource_id,omitempty"`
+	RouteID                string              `json:"route_id,omitempty"`
+	Protocol               string              `json:"protocol,omitempty"`
+	RouteGeneration        int64               `json:"route_generation,omitempty"`
+	TargetGeneration       int64               `json:"target_generation,omitempty"`
 	AccessMode             string              `json:"access_mode,omitempty"`
 	Endpoint               string              `json:"endpoint,omitempty"`
 	LeaseDeadline          int64               `json:"lease_deadline,omitempty"`

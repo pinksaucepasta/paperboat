@@ -23,17 +23,21 @@ func TestStartPrivateTCPProxyUsesAuthorizedCarrierAndLiteralLoopback(t *testing.
 	targetPort := uint16(target.Addr().(*net.TCPAddr).Port)
 	targetDone := make(chan error, 1)
 	go func() {
-		connection, acceptErr := target.Accept()
-		if acceptErr != nil {
-			targetDone <- acceptErr
-			return
+		for attempt := 0; attempt < 2; attempt++ {
+			connection, acceptErr := target.Accept()
+			if acceptErr != nil {
+				targetDone <- acceptErr
+				return
+			}
+			line, readErr := bufio.NewReader(connection).ReadString('\n')
+			if attempt == 1 && readErr == nil {
+				_, readErr = io.WriteString(connection, "echo:"+line)
+			}
+			_ = connection.Close()
+			if attempt == 1 {
+				targetDone <- readErr
+			}
 		}
-		defer connection.Close()
-		line, readErr := bufio.NewReader(connection).ReadString('\n')
-		if readErr == nil {
-			_, readErr = io.WriteString(connection, "echo:"+line)
-		}
-		targetDone <- readErr
 	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -72,6 +76,9 @@ func TestStartPrivateTCPProxyUsesAuthorizedCarrierAndLiteralLoopback(t *testing.
 	_ = connection.Close()
 	if err != nil || line != "echo:private-canary\n" {
 		t.Fatalf("private TCP response=%q error=%v", line, err)
+	}
+	if opens.Load() != 2 {
+		t.Fatalf("authorized carrier opens=%d, want distinct preflight and connection grants", opens.Load())
 	}
 	select {
 	case err := <-targetDone:

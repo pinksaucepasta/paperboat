@@ -495,7 +495,7 @@ func validateOwnedWindowsDaemon(identity windowsDaemonProcessIdentity, lock wind
 	if err != nil || identity.PID == 0 || identity.PID != record.PID || !strings.EqualFold(identity.OwnerSID, ownerSID) || identity.CreationTime.IsZero() || identity.CreationTime.UnixNano() != record.CreationTimeUnixNano || executable != record.Executable || digest != record.ArgumentsSHA256 {
 		return errUnsafeWindowsDaemonProcess
 	}
-	if len(identity.Arguments) < 2 || identity.Arguments[1] != "__local-daemon" {
+	if len(identity.Arguments) < 2 || identity.Arguments[1] != "daemon" {
 		return errUnsafeWindowsDaemonProcess
 	}
 	remaining := identity.Arguments[2:]

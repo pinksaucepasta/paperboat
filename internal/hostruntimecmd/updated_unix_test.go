@@ -7,7 +7,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -162,29 +161,6 @@ func TestRunNotifiedUpdaterRejectsExitBeforeReadiness(t *testing.T) {
 		t.Fatalf("notification events=%v", got)
 	}
 }
-func TestResolveUpdatedActiveRecoversVerifiedMonitoringCandidate(t *testing.T) {
-	root := t.TempDir()
-	path := filepath.Join(root, "transaction.json")
-	version := "2026.08.27.55"
-	journal := updateflow.Journal{
-		Schema: updateflow.SchemaV1, TransactionID: "txn-monitor", Stage: updateflow.StageMonitoring,
-		ActiveVersion: "2026.08.27.52", CandidateVersion: version,
-		CandidateDigest: strings.Repeat("a", 64), CandidateLength: 1024, StagedPath: filepath.Join(root, "pb"),
-		HostdAPIMin: 1, HostdAPIMax: 1, RuntimeAPIMin: 1, RuntimeAPIMax: 1,
-		WorkerID: "runtime-2026.08.27.55", WorkerEpoch: 2, BootID: "hostd",
-		StageUpdatedAt: time.Now().Add(-time.Minute).UTC(), HealthDeadline: time.Now().Add(time.Minute).UTC(),
-	}
-	if err := updateflow.Write(path, journal, os.Geteuid(), os.Getegid()); err != nil {
-		t.Fatal(err)
-	}
-	active, err := resolveUpdatedActive(context.Background(), path, version, func(context.Context, string) (workerupdate.Release, error) {
-		return workerupdate.Release{}, workerupdate.ErrInvalidRelease
-	})
-	if err != nil || active.Version != version || active.Platform != runtime.GOOS || active.Architecture != runtime.GOARCH {
-		t.Fatalf("active=%+v err=%v", active, err)
-	}
-}
-
 func TestResolveUpdatedActiveDoesNotBypassSignedRevocation(t *testing.T) {
 	called := false
 	_, err := resolveUpdatedActive(context.Background(), filepath.Join(t.TempDir(), "transaction.json"), "2026.08.27.55", func(context.Context, string) (workerupdate.Release, error) {

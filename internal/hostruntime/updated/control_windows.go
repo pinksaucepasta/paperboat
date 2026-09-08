@@ -76,6 +76,13 @@ func newWindowsController(config WindowsConfig) (*windowsController, error) {
 		return nil, err
 	}
 	controller.scheduler = scheduler
+	if journal, loadErr := loadWindowsActivationJournalForController(config); loadErr == nil && journal.PreviousVersion == config.ActiveVersion && journal.BlockedReason == autoupdate.BlockedActiveTerminalSessions && (journal.Stage == windowsActivationBusyReady || journal.Stage == windowsActivationRolledBack) {
+		if err := scheduler.SeedBlockedActiveTerminalSessions(journal.Version, journal.BlockedRetryAt); err != nil {
+			return nil, err
+		}
+	} else if loadErr != nil && !errors.Is(loadErr, os.ErrNotExist) {
+		return nil, loadErr
+	}
 	return controller, nil
 }
 
@@ -317,14 +324,14 @@ func windowsTransactionState(journal windowsActivationJournal) workerupdate.Tran
 		state.Stage = updateflow.StageDraining
 	case windowsActivationSwitching:
 		state.Stage = updateflow.StageCutover
-	case windowsActivationServicesLive:
+	case windowsActivationServicesLive, windowsActivationCommitReady:
 		state.Stage = updateflow.StageMonitoring
 	case windowsActivationCommitted:
 		state.Stage, state.ActiveVersion = updateflow.StageCommitted, journal.Version
-	case windowsActivationRollingBack, windowsActivationRollbackReady:
+	case windowsActivationRollingBack, windowsActivationRollbackReady, windowsActivationBusyReady:
 		state.Stage = updateflow.StageRollback
 	case windowsActivationRolledBack:
-		state.Stage, state.Quarantined = updateflow.StageIdle, true
+		state.Stage, state.Quarantined = updateflow.StageIdle, journal.BlockedReason == ""
 	}
 	if journal.Failure != "" {
 		state.Failure = updateflow.FailureHealth
@@ -453,6 +460,10 @@ func (c *windowsController) activationBlockedContext(ctx context.Context) (bool,
 }
 
 func controlErrorCodeWindows(err error) string {
+	var busy *autoupdate.ActiveTerminalSessionsError
+	if errors.As(err, &busy) {
+		return autoupdate.BlockedActiveTerminalSessions
+	}
 	if errors.Is(err, ErrWindowsActivationUnavailable) {
 		return "activation_unavailable"
 	}

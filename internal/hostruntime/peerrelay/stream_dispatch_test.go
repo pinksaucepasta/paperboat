@@ -2,30 +2,64 @@ package peerrelay
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	hostauth "github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
+	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 )
 
 type streamCredentialAuthorizer struct {
 	frame  protocol.Frame
 	closed bool
+	value  any
 }
 
 func (a *streamCredentialAuthorizer) Authorize(_ context.Context, frame protocol.Frame) (server.Authorization, error) {
 	a.frame = frame
-	return server.Authorization{ClientID: "cli_1", UserID: "account_1", MachineID: "machine_1"}, nil
+	return server.Authorization{ClientID: "cli_1", UserID: "account_1", MachineID: "machine_1", Value: a.value}, nil
+}
+
+func TestCredentialStreamAuthorizerValidatesNativePrivateBindingBeforeDispatch(t *testing.T) {
+	now := time.Now().UTC()
+	expiresAt := now.Add(time.Minute).Truncate(time.Second)
+	binding := nativeprivate.Binding{Schema: nativeprivate.SchemaV1, ResourceKind: "tunnel", ResourceID: "tun_1", ResourceGeneration: 2, RouteID: "route_1", RouteGeneration: 3, TargetGeneration: 4, OwnerEndpointID: "machine_1", Protocol: "tcp", TargetScheme: "tcp", TargetAddress: "127.0.0.1:5432", ExpiresAt: expiresAt}
+	target, _ := json.Marshal(binding)
+	claims := hostauth.Claims{CredentialClass: "native_private", MachineID: "machine_1", ResourceKind: "tunnel", ResourceID: "tun_1", ExpectedGeneration: 2, RouteID: "route_1", RouteGeneration: 3, TargetGeneration: 4, Protocol: "tcp", TargetScheme: "tcp", TargetAddress: "127.0.0.1:5432", ExpiresAt: expiresAt.Unix()}
+	for name, testCase := range map[string]struct {
+		mutate    func(*hostauth.Claims)
+		wantError bool
+	}{
+		"valid":               {func(*hostauth.Claims) {}, false},
+		"stale generation":    {func(c *hostauth.Claims) { c.RouteGeneration-- }, true},
+		"target substitution": {func(c *hostauth.Claims) { c.TargetAddress = "127.0.0.1:22" }, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := claims
+			testCase.mutate(&changed)
+			authorize := CredentialStreamAuthorizer(func(string) (server.Authorizer, error) { return &streamCredentialAuthorizer{value: changed}, nil })
+			header, err := streamauth.NewNativePrivate("operation_1", "private_tcp", "stream_1", "credential", now.Add(time.Minute), 1024, target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = authorize(context.Background(), header)
+			if (err != nil) != testCase.wantError {
+				t.Fatalf("error=%v wantError=%t", err, testCase.wantError)
+			}
+		})
+	}
 }
 func (a *streamCredentialAuthorizer) CloseAuthorization() { a.closed = true }
 
 func TestCredentialStreamAuthorizerUsesCanonicalApplicationPolicy(t *testing.T) {
-	for consumer, capability := range map[string]string{"terminal": "terminal.v1", "exec": "exec.v1", "ssh": "ssh.v1", "private_preview": "preview.launch.v1", "codex": "codex.connect.v1"} {
+	for consumer, capability := range map[string]string{"terminal": "terminal.v1", "exec": "exec.v1", "ssh": "ssh.v1", "file_transfer": "file-transfer.v1", "private_preview": "preview.launch.v1", "codex": "codex.connect.v1"} {
 		t.Run(consumer, func(t *testing.T) {
 			var created *streamCredentialAuthorizer
 			authorize := CredentialStreamAuthorizer(func(token string) (server.Authorizer, error) {

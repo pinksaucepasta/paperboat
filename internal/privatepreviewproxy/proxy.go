@@ -3,9 +3,10 @@ package privatepreviewproxy
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net"
+	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -15,6 +16,7 @@ type Dial func(context.Context) (io.ReadWriteCloser, error)
 
 type Config struct {
 	ListenPort         uint16
+	ListenAddress      string
 	Dial               Dial
 	MaximumConnections int
 }
@@ -38,20 +40,35 @@ func Start(ctx context.Context, config Config) (*Proxy, error) {
 	if ctx == nil || config.Dial == nil || config.MaximumConnections < 1 || config.MaximumConnections > 4096 {
 		return nil, ErrInvalid
 	}
-	// This proves the selected peer path and remote loopback target before a URL
-	// can be exposed. It is consumed by the first accepted browser connection.
+	// Prove the selected peer path and remote loopback target before exposing a
+	// listener, but never reuse this authorization for a later local connection.
 	preflight, err := config.Dial(ctx)
 	if err != nil {
 		return nil, err
 	}
-	listener, err := net.Listen("tcp4", fmt.Sprintf("127.0.0.1:%d", config.ListenPort))
+	if err := preflight.Close(); err != nil {
+		return nil, err
+	}
+	listenAddress := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(config.ListenPort)))
+	listenNetwork := "tcp4"
+	if config.ListenAddress != "" {
+		host, port, splitErr := net.SplitHostPort(strings.TrimSpace(config.ListenAddress))
+		parsedPort, portErr := strconv.ParseUint(port, 10, 16)
+		if splitErr != nil || portErr != nil || strconv.FormatUint(parsedPort, 10) != port || host != "127.0.0.1" && host != "::1" {
+			return nil, ErrInvalid
+		}
+		listenAddress = net.JoinHostPort(host, port)
+		if host == "::1" {
+			listenNetwork = "tcp6"
+		}
+	}
+	listener, err := net.Listen(listenNetwork, listenAddress)
 	if err != nil {
-		return nil, errors.Join(err, preflight.Close())
+		return nil, err
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	proxy := &Proxy{URL: "http://" + listener.Addr().String(), listener: listener, dial: config.Dial, permits: make(chan struct{}, config.MaximumConnections), cancel: cancel, done: make(chan error, 1), active: make(map[io.Closer]struct{})}
-	proxy.track(preflight, true)
-	go proxy.run(runCtx, preflight)
+	go proxy.run(runCtx)
 	go func() {
 		<-runCtx.Done()
 		_ = proxy.Close()
@@ -87,7 +104,7 @@ func (p *Proxy) Close() error {
 	return result
 }
 
-func (p *Proxy) run(ctx context.Context, preflight io.ReadWriteCloser) {
+func (p *Proxy) run(ctx context.Context) {
 	var workers sync.WaitGroup
 	var result error
 	defer func() {
@@ -99,7 +116,6 @@ func (p *Proxy) run(ctx context.Context, preflight io.ReadWriteCloser) {
 		p.done <- result
 		close(p.done)
 	}()
-	first := preflight
 	for {
 		local, err := p.listener.Accept()
 		if err != nil {
@@ -115,11 +131,7 @@ func (p *Proxy) run(ctx context.Context, preflight io.ReadWriteCloser) {
 			_ = local.Close()
 			return
 		}
-		remote := first
-		first = nil
-		if remote == nil {
-			remote, err = p.dial(ctx)
-		}
+		remote, err := p.dial(ctx)
 		if err != nil {
 			_ = local.Close()
 			<-p.permits

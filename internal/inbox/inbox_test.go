@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,6 +22,63 @@ type fakeClient struct {
 	data         []byte
 	contentCalls int
 	offsets      []int64
+}
+
+type interruptedClient struct {
+	fakeClient
+	item     filetransfer.Manifest
+	cancel   context.CancelFunc
+	receipts []string
+}
+
+func (c *interruptedClient) Pending(ctx context.Context, _ string, _ int) ([]filetransfer.Manifest, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return []filetransfer.Manifest{c.item}, nil
+}
+
+func (c *interruptedClient) Content(ctx context.Context, item filetransfer.Manifest, offset int64) (*http.Response, error) {
+	response, err := c.fakeClient.Content(ctx, item, offset)
+	if len(c.offsets) == 1 {
+		response.Body = io.NopCloser(io.MultiReader(bytes.NewReader(c.data[:3]), failureReader{}))
+	}
+	return response, err
+}
+
+type failureReader struct{}
+
+func (failureReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
+
+func (c *interruptedClient) Receipt(_ context.Context, _, code, _ string) error {
+	c.receipts = append(c.receipts, code)
+	c.cancel()
+	return nil
+}
+
+func TestRunResumesInterruptedDownloadBeforeSendingReceipt(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	data := []byte("resume these bytes")
+	client := &interruptedClient{fakeClient: fakeClient{data: data}, item: manifest("ft_interrupted", "file.bin", data), cancel: cancel}
+	root := filepath.Join(t.TempDir(), "Paperboat Inbox")
+	receiver, err := New(Config{Client: client, MachineID: "machine_local", SessionID: "session_1", Path: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := receiver.Run(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(client.receipts) != 1 || client.receipts[0] != "stored" {
+		t.Fatalf("interruption produced terminal receipt: %v", client.receipts)
+	}
+	if len(client.offsets) != 2 || client.offsets[1] != 3 {
+		t.Fatalf("resume offsets: %v", client.offsets)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "file.bin"))
+	if err != nil || !bytes.Equal(got, data) {
+		t.Fatalf("published content mismatch: %v", err)
+	}
 }
 
 func (f *fakeClient) Pending(context.Context, string, int) ([]filetransfer.Manifest, error) {

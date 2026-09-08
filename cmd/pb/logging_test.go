@@ -19,19 +19,6 @@ func TestConfigureProcessLoggingSuppressesInteractiveTransportLogs(t *testing.T)
 	}
 }
 
-func TestConfigureProcessLoggingKeepsRuntimeDiagnostics(t *testing.T) {
-	previous := slog.Default()
-	defer slog.SetDefault(previous)
-
-	var output bytes.Buffer
-	slog.SetDefault(slog.New(slog.NewTextHandler(&output, nil)))
-	configureProcessLogging([]string{"__runtime-host"})
-	slog.Info("runtime diagnostic")
-	if output.Len() == 0 {
-		t.Fatal("runtime diagnostic was suppressed")
-	}
-}
-
 func TestConfigureProcessLoggingSuppressesSSHProxyLogs(t *testing.T) {
 	previous := slog.Default()
 	defer slog.SetDefault(previous)

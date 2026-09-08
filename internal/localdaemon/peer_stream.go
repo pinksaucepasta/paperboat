@@ -30,7 +30,7 @@ func TunnelPeerStreamOpener(peerTunnel *tunnel.PeerTerminalTunnel) func(context.
 				return nil, err
 			}
 		}
-		target := &resolver.TerminalTarget{Protocol: terminalPayload.Protocol, Debug: terminalPayload.Debug, EnvironmentID: request.EnvironmentID, Auth: resolver.AuthTarget{Token: request.Credential, ExpiresAt: request.Deadline.UTC().Format("2006-01-02T15:04:05Z07:00")}, ThreadID: terminalPayload.ThreadID, TerminalID: terminalPayload.TerminalID, SessionID: terminalPayload.SessionID, CWD: terminalPayload.CWD, Env: terminalPayload.Environment, Cols: terminalPayload.Columns, Rows: terminalPayload.Rows, RestartIfNotRunning: terminalPayload.RestartIfNotRunning, ReplayHistory: terminalPayload.ReplayHistory, AfterSequence: terminalPayload.AfterSequence, InputAttachmentID: terminalPayload.InputAttachmentID}
+		target := &resolver.TerminalTarget{Protocol: terminalPayload.Protocol, Debug: terminalPayload.Debug, EnvironmentID: request.EnvironmentID, Auth: resolver.AuthTarget{Token: request.Credential, ExpiresAt: request.Deadline.UTC().Format("2006-01-02T15:04:05Z07:00"), ResourceID: request.AccessSessionID}, ThreadID: terminalPayload.ThreadID, TerminalID: terminalPayload.TerminalID, SessionID: terminalPayload.SessionID, CWD: terminalPayload.CWD, Env: terminalPayload.Environment, Cols: terminalPayload.Columns, Rows: terminalPayload.Rows, RestartIfNotRunning: terminalPayload.RestartIfNotRunning, ReplayHistory: terminalPayload.ReplayHistory, AfterSequence: terminalPayload.AfterSequence, InputAttachmentID: terminalPayload.InputAttachmentID}
 		target.QUICEndpoint, target.WSSEndpoint = request.QUICEndpoint, request.WSSEndpoint
 		info := resolver.ConnectInfo{TargetKind: "machine", ProjectID: request.MachineID, MachineGeneration: request.MachineGeneration, Transport: request.Transport, Terminal: target}
 		// Setup is part of the local API request and must stop when the caller
@@ -69,12 +69,6 @@ func TunnelPeerStreamOpener(peerTunnel *tunnel.PeerTerminalTunnel) func(context.
 				return peerTunnel.DialExec(lifetime, info, value)
 			case "ssh":
 				return peerTunnel.DialSSH(lifetime, info, request.OperationID)
-			case "private_preview":
-				var value localapi.PeerPreviewPayload
-				if json.Unmarshal(request.Payload, &value) != nil || value.Port == 0 {
-					return nil, ErrInvalidInventoryConfig
-				}
-				return peerTunnel.DialPrivatePreview(lifetime, info, value.Port)
 			case "codex":
 				connection, dialErr := peerTunnel.DialCodexHTTP(lifetime, info)
 				if dialErr != nil {
@@ -110,7 +104,7 @@ func TunnelPeerStreamOpener(peerTunnel *tunnel.PeerTerminalTunnel) func(context.
 			return nil, context.Canceled
 		}
 		diagnosticlog.TryInfo("local peer stream opened", "consumer", request.Consumer, "machine_id", request.MachineID, "elapsed_ms", time.Since(started).Milliseconds())
-		if request.Consumer == "ssh" || request.Consumer == "private_preview" {
+		if request.Consumer == "ssh" {
 			return &rawPeerConn{Conn: remote, cancel: cancelLifetime}, nil
 		}
 		client, server := net.Pipe()
@@ -145,7 +139,7 @@ func TunnelPeerProbe(peerTunnel *tunnel.PeerTerminalTunnel) func(context.Context
 		}
 		if err != nil {
 			diagnosticlog.TryInfo("local peer probe failed", "machine_id", request.MachineID, "error", err)
-			return localapi.PeerProbeResult{}, err
+			return localapi.PeerProbeResult{}, localProbeError(err)
 		}
 		path := "unknown"
 		switch result.Path {
@@ -158,6 +152,15 @@ func TunnelPeerProbe(peerTunnel *tunnel.PeerTerminalTunnel) func(context.Context
 		}
 		return localapi.PeerProbeResult{Transport: path, RelayRegion: result.RelayRegion, ConnectionNanoseconds: result.Connection.Nanoseconds(), RTTNanoseconds: result.RTT.Nanoseconds(), PTOs: result.PTOs}, nil
 	}
+}
+
+// localProbeError preserves terminal authority failures across the local IPC boundary.
+func localProbeError(err error) error {
+	var failure *connectionmanager.Failure
+	if errors.As(err, &failure) && failure.Class >= connectionmanager.FailureAuthentication && failure.Class <= connectionmanager.FailureGeneration {
+		return errors.Join(localapi.ErrPermission, err)
+	}
+	return err
 }
 
 func retryablePeerProbe(ctx context.Context, err error) bool {

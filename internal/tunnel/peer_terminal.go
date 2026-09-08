@@ -100,7 +100,14 @@ type PeerTerminalTunnel struct {
 	relaySuccessRegion   string
 	relaySuccessAt       time.Time
 	authorities          *clientauthority.Cache
+	nativeMu             sync.Mutex
+	nativeRuntime        *cliNativeRuntime
+	nativeClosed         bool
 	networkMu            sync.Mutex
+	substrateMu          sync.Mutex
+	substrateCancel      context.CancelFunc
+	substrateDone        chan struct{}
+	substrateClosed      bool
 	sharedMonitor        *networkmonitor.Monitor
 	sharedFingerprint    networkadaptation.Fingerprint
 	sharedFingerprintOK  bool
@@ -149,11 +156,20 @@ func NewPeerTerminalTunnel(config PeerTerminalConfig) (*PeerTerminalTunnel, erro
 }
 
 // Start establishes the daemon-owned network substrate. It is intentionally
-// independent of any machine session; machine carriers are still created only
-// while an application has an active lease.
+// independent of credentials or control-plane reachability. Remote discovery and
+// warming recover through the existing regional monitor; machine carriers are
+// created only while an authorized application has an active lease.
 func (t *PeerTerminalTunnel) Start(ctx context.Context) error {
 	if t == nil || ctx == nil {
 		return ErrPeerTerminalInvalid
+	}
+	t.substrateMu.Lock()
+	defer t.substrateMu.Unlock()
+	if t.substrateClosed {
+		return net.ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	t.networkMu.Lock()
 	if t.sharedMonitor != nil {
@@ -161,6 +177,14 @@ func (t *PeerTerminalTunnel) Start(ctx context.Context) error {
 		return nil
 	}
 	t.networkMu.Unlock()
+	regional, err := t.regionalLatencyMonitor(func() string {
+		t.relaySuccessMu.RLock()
+		defer t.relaySuccessMu.RUnlock()
+		return t.relaySuccessRegion
+	})
+	if err != nil {
+		return err
+	}
 	secret, err := t.config.Store.NetworkFingerprintSecret()
 	if err != nil {
 		return err
@@ -215,59 +239,13 @@ func (t *PeerTerminalTunnel) Start(ctx context.Context) error {
 	t.sharedMonitor, t.sharedFingerprint, t.sharedFingerprintOK = monitor, fingerprint, fingerprintErr == nil && fingerprint.Valid()
 	t.networkMu.Unlock()
 	t.observeNetworkFingerprint(fingerprint, fingerprintErr == nil && fingerprint.Valid())
-	credential, err := t.config.Auth.Credential()
-	if err != nil {
-		_ = t.Close()
-		return err
-	}
-	client := api.New(t.config.Issuer, credential, t.config.HTTPClient)
-	regionsDocument, err := client.NetworkCheckRegions(ctx)
-	if err != nil || len(regionsDocument.Regions) == 0 {
-		_ = t.Close()
-		return errors.Join(ErrPeerTerminalInvalid, err)
-	}
-	var warmWait sync.WaitGroup
-	var warmMu sync.Mutex
-	var warmErr error
-	for _, region := range regionsDocument.Regions[:min(len(regionsDocument.Regions), 16)] {
-		signalingURL, urlErr := signalingURLFromProbe(region.HTTPSURL)
-		if urlErr != nil {
-			_ = t.Close()
-			return urlErr
-		}
-		warmWait.Add(1)
-		go func() {
-			defer warmWait.Done()
-			warmCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			defer cancel()
-			if currentErr := t.signalingSubstrate.Warm(warmCtx, signalingURL, t.config.TLS); currentErr != nil {
-				warmMu.Lock()
-				warmErr = errors.Join(warmErr, currentErr)
-				warmMu.Unlock()
-			}
-		}()
-	}
-	warmWait.Wait()
-	if warmErr != nil {
-		_ = t.Close()
-		return warmErr
-	}
-	regional, err := t.regionalLatencyMonitor(client, func() string {
-		t.relaySuccessMu.RLock()
-		defer t.relaySuccessMu.RUnlock()
-		return t.relaySuccessRegion
-	})
-	if err != nil {
-		_ = t.Close()
-		return err
-	}
-	// Readiness includes control-plane TLS, relay discovery, and reachability.
-	// This scan does not create a machine data carrier.
-	_ = regional.Scan(ctx, true)
 	t.regionalMu.Lock()
 	t.sharedRegional = regional
 	t.regionalMu.Unlock()
-	go func() { _ = regional.RunAfterInitialScan(ctx) }()
+	lifetime, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	t.substrateCancel, t.substrateDone = cancel, done
+	go func() { defer close(done); _ = regional.Run(lifetime) }()
 	return nil
 }
 
@@ -330,6 +308,21 @@ func (t *PeerTerminalTunnel) Close() error {
 	if t == nil {
 		return nil
 	}
+	t.substrateMu.Lock()
+	defer t.substrateMu.Unlock()
+	if t.substrateClosed {
+		return nil
+	}
+	t.substrateClosed = true
+	t.nativeMu.Lock()
+	t.nativeClosed = true
+	nativeRuntime := t.nativeRuntime
+	t.nativeRuntime = nil
+	t.nativeMu.Unlock()
+	if t.substrateCancel != nil {
+		t.substrateCancel()
+		<-t.substrateDone
+	}
 	t.networkMu.Lock()
 	monitor := t.sharedMonitor
 	t.sharedMonitor = nil
@@ -337,8 +330,12 @@ func (t *PeerTerminalTunnel) Close() error {
 	t.regionalMu.Lock()
 	t.sharedRegional = nil
 	t.regionalMu.Unlock()
+	var nativeErr error
+	if nativeRuntime != nil {
+		nativeErr = nativeRuntime.Close()
+	}
 	if monitor != nil {
-		err := errors.Join(monitor.Close(), t.signalingSubstrate.Close())
+		err := errors.Join(nativeErr, monitor.Close(), t.signalingSubstrate.Close())
 		if t.authorities != nil {
 			t.authorities.Close()
 		}
@@ -347,7 +344,7 @@ func (t *PeerTerminalTunnel) Close() error {
 	if t.authorities != nil {
 		t.authorities.Close()
 	}
-	return t.signalingSubstrate.Close()
+	return errors.Join(nativeErr, t.signalingSubstrate.Close())
 }
 
 // InvalidateMachine clears only cached authority metadata for one machine.
@@ -906,7 +903,7 @@ func (t *PeerTerminalTunnel) dial(ctx context.Context, info resolver.ConnectInfo
 	}, attempts: make(map[string]directpath.AttemptDescriptor)}
 	mark("profile_ready")
 	var pool *connectionmanager.Pool
-	regionalMonitor, _ := t.regionalLatencyMonitor(client, func() string {
+	regionalMonitor, _ := t.regionalLatencyMonitor(func() string {
 		if pool == nil {
 			return ""
 		}
@@ -933,6 +930,24 @@ func (t *PeerTerminalTunnel) dial(ctx context.Context, info resolver.ConnectInfo
 			authority.Clear()
 		}
 	}()
+	// Ordinary terminal, exec, SSH, and Codex streams are native-only after the
+	// migration gate. Returning the native failure preserves the trust boundary;
+	// constructing a legacy carrier here would silently undo the cutover.
+	if keyDelivery == nil && !application.health && application.quic == nil {
+		nativeRuntime, consumedAuthority, nativeErr := t.acquireNativeRuntime(dialCtx, profile.Account.ID, profile.CLIClientSessionID, authority)
+		if consumedAuthority {
+			authorityOwned = true
+		}
+		if nativeErr != nil {
+			return nil, &terminalTransportError{transport: "native runtime", cause: nativeErr}
+		}
+		nativeConnection, openErr := nativeRuntime.openApplication(dialCtx, info.ProjectID, consumer, application, info.Terminal, t.config.Now)
+		if openErr != nil {
+			return nil, &terminalTransportError{transport: "native application", cause: openErr}
+		}
+		mark("native_ready")
+		return nativeConnection, nil
+	}
 	localFingerprint := sha256.Sum256(authority.LocalCertificateRaw)
 	peerFingerprint := sha256.Sum256(authority.MachineCertificateRaw)
 	purpose, descriptorConsumer := peerDescriptorScope(consumer, application, keyDelivery != nil)
@@ -3966,8 +3981,8 @@ func (t *PeerTerminalTunnel) warmIPv6Viability(ctx context.Context, regions []ne
 	}()
 }
 
-func (t *PeerTerminalTunnel) regionalLatencyMonitor(client *api.Client, currentRegion func() string) (*networkcheck.RegionalMonitor, error) {
-	if t == nil || client == nil || currentRegion == nil || t.regionalCache == nil {
+func (t *PeerTerminalTunnel) regionalLatencyMonitor(currentRegion func() string) (*networkcheck.RegionalMonitor, error) {
+	if t == nil || currentRegion == nil || t.regionalCache == nil {
 		return nil, ErrPeerTerminalInvalid
 	}
 	httpClient := t.config.HTTPClient
@@ -3980,7 +3995,16 @@ func (t *PeerTerminalTunnel) regionalLatencyMonitor(client *api.Client, currentR
 	}
 	monitor, err := networkcheck.NewRegionalMonitor(networkcheck.RegionalMonitorConfig{
 		Inventory: func(ctx context.Context) ([]networkcheck.ProbeRegion, error) {
-			document, inventoryErr := client.NetworkCheckRegions(ctx)
+			// Reload credentials on every scan so sign-in and token renewal
+			// recover without restarting the local daemon.
+			credential, credentialErr := t.config.Auth.Credential()
+			if credentialErr != nil {
+				return nil, credentialErr
+			}
+			client := api.New(t.config.Issuer, credential, t.config.HTTPClient)
+			scanCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			document, inventoryErr := client.NetworkCheckRegions(scanCtx)
+			cancel()
 			if inventoryErr != nil {
 				return nil, inventoryErr
 			}

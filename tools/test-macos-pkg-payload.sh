@@ -44,9 +44,17 @@ test "$package_version" = "$version"
 test ! -e "$expanded/Scripts"
 
 payload_files=$(pkgutil --payload-files "$package")
+while IFS= read -r path; do
+  case "$path" in
+    .|./usr|./usr/local|./usr/local/bin|./usr/local/bin/pb|./Library|./Library/PrivilegedHelperTools|./Library/PrivilegedHelperTools/Paperboat|./Library/PrivilegedHelperTools/Paperboat/bin|./Library/PrivilegedHelperTools/Paperboat/bin/pb) ;;
+    *) echo "macOS PKG payload contains unexpected path $path" >&2; exit 1 ;;
+  esac
+done <<EOF
+$payload_files
+EOF
 for expected in \
   './usr/local/bin/pb' \
-  './Library/PrivilegedHelperTools/Paperboat/pb'
+  './Library/PrivilegedHelperTools/Paperboat/bin/pb'
 do
   if ! printf '%s\n' "$payload_files" | grep -Fqx "$expected"; then
     echo "macOS PKG payload is missing $expected" >&2
@@ -59,8 +67,8 @@ if printf '%s\n' "$payload_files" | grep -Eq '(^|/)(Application Support|LaunchDa
 fi
 
 # Inspect the actual archived payload, rather than only the package BOM. This
-# proves both destinations contain the same release bytes and independently
-# verify as complete ad-hoc Mach-O signatures.
+# proves the CLI is the exact intended link and the sole executable has a
+# complete ad-hoc Mach-O signature.
 mkdir -p "$payload"
 (
   cd "$payload"
@@ -68,20 +76,19 @@ mkdir -p "$payload"
 )
 
 cli="$payload/usr/local/bin/pb"
-helper="$payload/Library/PrivilegedHelperTools/Paperboat/pb"
-test -f "$cli" && test ! -L "$cli"
+helper="$payload/Library/PrivilegedHelperTools/Paperboat/bin/pb"
+test -L "$cli"
+test "$(readlink "$cli")" = '/Library/PrivilegedHelperTools/Paperboat/bin/pb'
 test -f "$helper" && test ! -L "$helper"
-cmp -s "$cli" "$helper"
-
-for executable in "$cli" "$helper"; do
-  codesign --verify --strict "$executable"
-  signature=$(codesign -dvvv "$executable" 2>&1)
-  printf '%s\n' "$signature" | grep -Fqx 'Signature=adhoc'
-  if printf '%s\n' "$signature" | grep -Fq 'linker-signed'; then
-    echo "macOS PKG payload retained a linker-only signature: $executable" >&2
-    exit 1
-  fi
-done
+executable_count=$(find "$payload" -type f -perm -111 | wc -l | tr -d ' ')
+test "$executable_count" = 1
+codesign --verify --strict "$helper"
+signature=$(codesign -dvvv "$helper" 2>&1)
+printf '%s\n' "$signature" | grep -Fqx 'Signature=adhoc'
+if printf '%s\n' "$signature" | grep -Fq 'linker-signed'; then
+  echo "macOS PKG payload retained a linker-only signature: $helper" >&2
+  exit 1
+fi
 
 # The package intentionally carries one executable, while setup writes the
 # durable launchd updater declaration that invokes that executable with its
@@ -89,7 +96,7 @@ done
 # so a package cannot silently lose the updater entry point.
 service_components="$repository_root/internal/hostruntime/service/components.go"
 grep -F 'UpdaterLabel' "$service_components" >/dev/null
-grep -F 'Arguments: []string{"__runtime-updated"}' "$service_components" >/dev/null
-grep -F 'install -m 0755 "$cli_payload" "$helper_payload"' "$repository_root/tools/build-macos-pkg.sh" >/dev/null
+grep -F 'Arguments: []string{"daemon", "__runtime-updated"}' "$service_components" >/dev/null
+grep -F 'ln -s "$canonical_helper" "$cli_payload"' "$repository_root/tools/build-macos-pkg.sh" >/dev/null
 
-echo 'macOS PKG payload: unified CLI/helper bytes, updater role, version, and ad-hoc signatures verified'
+echo 'macOS PKG payload: canonical executable, exact CLI link, updater role, version, and ad-hoc signature verified'

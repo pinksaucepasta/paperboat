@@ -7,11 +7,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 )
 
@@ -50,6 +54,38 @@ func TestValidUnixWorkerIdentitySupportsOnlyExactPairs(t *testing.T) {
 		if got := validUnixWorkerIdentity(test.uid, test.gid); got != test.want {
 			t.Fatalf("validUnixWorkerIdentity(%d, %d)=%v want %v", test.uid, test.gid, got, test.want)
 		}
+	}
+}
+
+func TestSeedUnixBlockedUpdateSurvivesHelperRetirement(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("protected updater state requires root")
+	}
+	root := t.TempDir()
+	if err := os.Chmod(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	next := time.Now().UTC().Add(5 * time.Minute)
+	journal := updateflow.Journal{
+		Schema: updateflow.SchemaV1, TransactionID: "txn_busy", Stage: updateflow.StageIdle,
+		ActiveVersion: "2026.08.27.46", ActiveDigest: strings.Repeat("a", 64), ActiveLength: 1,
+		ActiveHostdAPIMin: 1, ActiveHostdAPIMax: 1, ActiveRuntimeAPIMin: 1, ActiveRuntimeAPIMax: 1,
+		BootID: "hostd", StageUpdatedAt: time.Now().UTC(), LastFailure: updateflow.FailureDrain,
+		BlockedReason: autoupdate.BlockedActiveTerminalSessions, RequiredVersion: "2026.08.27.47", NextCheckAt: next,
+	}
+	if err := updateflow.Write(filepath.Join(root, "transaction.json"), journal, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	scheduler, err := autoupdate.New(autoupdate.Config{Check: func(context.Context) (autoupdate.Result, error) { return autoupdate.Result{}, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = seedUnixBlockedUpdate(root, scheduler); err != nil {
+		t.Fatal(err)
+	}
+	state := scheduler.Snapshot()
+	if state.BlockedReason != autoupdate.BlockedActiveTerminalSessions || state.RequiredVersion != journal.RequiredVersion || !state.NextCheckAt.Equal(next) {
+		t.Fatalf("scheduler state=%+v", state)
 	}
 }
 

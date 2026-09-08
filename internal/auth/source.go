@@ -12,8 +12,9 @@ import (
 const refreshBefore = 60 * time.Second
 
 type Source struct {
-	Store  config.ProfileStore
-	Issuer string
+	lifetime context.Context
+	Store    config.ProfileStore
+	Issuer   string
 }
 
 func NewSource(cfg *config.Config) (*Source, error) {
@@ -22,6 +23,14 @@ func NewSource(cfg *config.Config) (*Source, error) {
 		return nil, err
 	}
 	return &Source{Store: store, Issuer: cfg.ServerURL}, nil
+}
+
+// WithContext binds refresh work to the owning runtime's lifetime. The returned
+// source shares durable credential storage, but does not outlive daemon shutdown.
+func (s *Source) WithContext(ctx context.Context) *Source {
+	copy := *s
+	copy.lifetime = ctx
+	return &copy
 }
 
 func (s *Source) Credential() (config.Credential, error) {
@@ -34,7 +43,11 @@ func (s *Source) Refresh() (config.Credential, error) {
 
 func (s *Source) credential(refreshWindow time.Duration) (config.Credential, error) {
 	return s.Store.CredentialWithRefresh(s.Issuer, refreshWindow, func(current config.Credential) (config.Credential, string, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		parent := s.lifetime
+		if parent == nil {
+			parent = context.Background()
+		}
+		ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 		defer cancel()
 		tokens, err := api.RefreshToken(ctx, s.Issuer, current.RefreshToken, nil)
 		if err != nil {

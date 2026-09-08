@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/supervisorupdate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
@@ -27,6 +28,7 @@ const maxUpdateControlTimeout = 15 * time.Minute
 var (
 	ErrInvalidControl = errors.New("invalid paperboat-updated control request")
 	ErrControlDenied  = errors.New("paperboat-updated control peer is not the enrolled user")
+	ErrRecoveryState  = errors.New("update recovery state cannot be read; update completion is unknown; retry status after recovery")
 )
 
 // ControlRequest intentionally has no artifact, path, command, environment,
@@ -40,6 +42,7 @@ type ControlRequest struct {
 }
 
 type ControlResponse struct {
+	UpdaterVersion    string                        `json:"updater_version,omitempty"`
 	Schema            string                        `json:"schema"`
 	Status            string                        `json:"status"`
 	Version           string                        `json:"version,omitempty"`
@@ -178,13 +181,15 @@ func validControlRequest(request ControlRequest) bool {
 
 func controlErrorCode(err error) string {
 	switch {
+	case errors.As(err, new(*autoupdate.ActiveTerminalSessionsError)):
+		return autoupdate.BlockedActiveTerminalSessions
 	case errors.Is(err, supervisorupdate.ErrMaintenanceRequired):
 		return "maintenance_required"
 	case errors.Is(err, supervisorupdate.ErrApprovalExpired):
 		return "approval_expired"
 	case errors.Is(err, supervisorupdate.ErrStaleWorkloads):
 		return "stale_workloads"
-	case errors.Is(err, supervisorupdate.ErrBlocked):
+	case errors.Is(err, supervisorupdate.ErrBlocked), errors.Is(err, ErrRecoveryState):
 		return "recovery_required"
 	case errors.Is(err, supervisorupdate.ErrInvalidRelease):
 		return "release_not_found"
@@ -206,28 +211,50 @@ func (s *controlServer) respond(writer io.Writer, response ControlResponse) erro
 func (s *Service) controlRequestWithRequest(ctx context.Context, request ControlRequest) (ControlResponse, error) {
 	switch request.Operation {
 	case "status":
-		response := ControlResponse{Schema: ControlProtocolV1, Status: "ok", Observation: s.Snapshot()}
-		response.Version = s.manager.ActiveVersion()
-		response.Transaction, _ = s.manager.TransactionState()
-		return response, nil
+		response := ControlResponse{Schema: ControlProtocolV1, Status: "ok", Observation: s.Snapshot(), UpdaterVersion: buildinfo.Version}
+		response.Version = s.currentManager().ActiveVersion()
+		err := s.populateControlState(&response)
+		if response.Transaction.ActiveVersion != "" {
+			response.Version = response.Transaction.ActiveVersion
+		}
+		return response, err
 	case "check":
-		response := ControlResponse{Schema: ControlProtocolV1, Status: "ok", Observation: s.Snapshot()}
+		response := ControlResponse{Schema: ControlProtocolV1, Status: "ok", Observation: s.Snapshot(), UpdaterVersion: buildinfo.Version}
 		result, err := s.Check(ctx)
 		response.Version, response.Updated = result.Version, result.Updated
-		response.Transaction, _ = s.manager.TransactionState()
-		return response, err
+		stateErr := s.populateControlState(&response)
+		return response, errors.Join(err, stateErr)
 	case "update":
 		s.controlMu.Lock()
 		defer s.controlMu.Unlock()
-		response := ControlResponse{Schema: ControlProtocolV1, Status: "ok", Observation: s.Snapshot()}
+		response := ControlResponse{Schema: ControlProtocolV1, Status: "ok", Observation: s.Snapshot(), UpdaterVersion: buildinfo.Version}
 		result, err := s.UpdateNow(ctx)
 		response.Version, response.Updated = result.Version, result.Updated
 		response.Observation = s.Snapshot()
-		response.Transaction, _ = s.manager.TransactionState()
-		return response, err
+		stateErr := s.populateControlState(&response)
+		return response, errors.Join(err, stateErr)
 	case "approve-maintenance":
 		return ControlResponse{Schema: ControlProtocolV1, Status: "error"}, ErrInvalidControl
 	default:
 		return ControlResponse{}, ErrInvalidControl
 	}
+}
+
+// All control operations report the durable activation outcome. A missing
+// handoff means complete only when both state records were read successfully.
+func (s *Service) populateControlState(response *ControlResponse) error {
+	state, err := s.currentManager().TransactionState()
+	if err != nil {
+		return ErrRecoveryState
+	}
+	response.Transaction = state
+	response.ActivationFailure = string(state.Failure)
+	if s.config.StateRoot != "" {
+		handoff, err := readUnixHandoff(s.config.StateRoot)
+		if err != nil {
+			return ErrRecoveryState
+		}
+		response.Pending = handoff != nil
+	}
+	return nil
 }

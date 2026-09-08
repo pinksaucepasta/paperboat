@@ -159,7 +159,7 @@ func TestStopOwnedWindowsDaemonTerminatesOnlyExactRecordedProcess(t *testing.T) 
 	if err := os.WriteFile(executable, []byte("fixture"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	identity := windowsDaemonProcessIdentity{PID: 4242, OwnerSID: "S-1-5-21-100", Executable: executable, Arguments: []string{executable, "__local-daemon"}, CreationTime: time.Now().UTC()}
+	identity := windowsDaemonProcessIdentity{PID: 4242, OwnerSID: "S-1-5-21-100", Executable: executable, Arguments: []string{executable, "daemon"}, CreationTime: time.Now().UTC()}
 	record := testWindowsDaemonLock(t, identity)
 	process := &fakeWindowsDaemonProcess{identity: identity}
 	previousRead, previousOpen := readWindowsDaemonPIDLock, openWindowsDaemonProcess
@@ -187,7 +187,7 @@ func TestWindowsOwnerServiceLifecycleStopsLegacyButRequiresManagedStart(t *testi
 	if err := os.WriteFile(executable, []byte("fixture"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	identity := windowsDaemonProcessIdentity{PID: 4243, OwnerSID: "S-1-5-21-101", Executable: executable, Arguments: []string{executable, "__local-daemon"}, CreationTime: time.Now().UTC()}
+	identity := windowsDaemonProcessIdentity{PID: 4243, OwnerSID: "S-1-5-21-101", Executable: executable, Arguments: []string{executable, "daemon"}, CreationTime: time.Now().UTC()}
 	record := testWindowsDaemonLock(t, identity)
 	process := &fakeWindowsDaemonProcess{identity: identity}
 	previousRead, previousOpen, previousTask := readWindowsDaemonPIDLock, openWindowsDaemonProcess, runWindowsTaskCommand
@@ -237,7 +237,7 @@ func TestWindowsDaemonOwnerRecordRoundTripsExactIdentity(t *testing.T) {
 	if err := os.WriteFile(executable, []byte("fixture"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	identity := windowsDaemonProcessIdentity{PID: 8181, Executable: executable, Arguments: []string{executable, "__local-daemon", "--server", "https://api.example.test"}, CreationTime: time.Now().UTC()}
+	identity := windowsDaemonProcessIdentity{PID: 8181, Executable: executable, Arguments: []string{executable, "daemon", "--server", "https://api.example.test"}, CreationTime: time.Now().UTC()}
 	lock := testWindowsDaemonLock(t, identity)
 	path := filepath.Join(t.TempDir(), "daemon.lock.owner.json")
 	if err := writeWindowsDaemonOwnerRecord(path, ownerSID, lock.Record); err != nil {
@@ -306,7 +306,7 @@ func TestValidateOwnedWindowsDaemonRejectsForeignSIDPathCommandAndPIDReuse(t *te
 			t.Fatal(err)
 		}
 	}
-	valid := windowsDaemonProcessIdentity{PID: 42, OwnerSID: "S-1-5-21-100", Executable: executable, Arguments: []string{executable, "__local-daemon"}, CreationTime: time.Now().UTC()}
+	valid := windowsDaemonProcessIdentity{PID: 42, OwnerSID: "S-1-5-21-100", Executable: executable, Arguments: []string{executable, "daemon"}, CreationTime: time.Now().UTC()}
 	record := testWindowsDaemonLock(t, valid)
 	tests := map[string]windowsDaemonProcessIdentity{
 		"foreign SID": func() windowsDaemonProcessIdentity { value := valid; value.OwnerSID = "S-1-5-21-200"; return value }(),
@@ -317,7 +317,7 @@ func TestValidateOwnedWindowsDaemonRejectsForeignSIDPathCommandAndPIDReuse(t *te
 		}(),
 		"wrong command": func() windowsDaemonProcessIdentity {
 			value := valid
-			value.Arguments = []string{executable, "serve"}
+			value.Arguments = []string{executable, "run"}
 			return value
 		}(),
 		"PID reuse": func() windowsDaemonProcessIdentity {
@@ -358,7 +358,7 @@ func TestValidateOwnedWindowsDaemonAcceptsCanonicalRollbackRename(t *testing.T) 
 		PID:          43,
 		OwnerSID:     "S-1-5-21-100",
 		Executable:   layout.Binary,
-		Arguments:    []string{layout.Binary, "__local-daemon", "--server", "https://api.example.test"},
+		Arguments:    []string{layout.Binary, "daemon", "--server", "https://api.example.test"},
 		CreationTime: time.Now().UTC(),
 	}
 	record := testWindowsDaemonLock(t, identity)
@@ -398,7 +398,7 @@ func TestStopOwnedWindowsDaemonPropagatesBoundedWaitTimeout(t *testing.T) {
 	if err := os.WriteFile(executable, []byte("fixture"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	identity := windowsDaemonProcessIdentity{PID: 77, OwnerSID: "S-1-5-21-100", Executable: executable, Arguments: []string{executable, "__local-daemon"}, CreationTime: time.Now().UTC()}
+	identity := windowsDaemonProcessIdentity{PID: 77, OwnerSID: "S-1-5-21-100", Executable: executable, Arguments: []string{executable, "daemon"}, CreationTime: time.Now().UTC()}
 	process := &fakeWindowsDaemonProcess{identity: identity, terminateErr: context.DeadlineExceeded}
 	previousRead, previousOpen := readWindowsDaemonPIDLock, openWindowsDaemonProcess
 	t.Cleanup(func() { readWindowsDaemonPIDLock, openWindowsDaemonProcess = previousRead, previousOpen })

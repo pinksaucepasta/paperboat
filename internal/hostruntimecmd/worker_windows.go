@@ -114,7 +114,7 @@ func runWindowsHostdService(install hostinstall.WindowsRuntimeConfig) error {
 	return service.RunWindowsService(service.ServiceEntryConfig{
 		Name:        "PaperboatHostd",
 		Executable:  hostdExecutable,
-		Arguments:   []string{"__runtime-hostd"},
+		Arguments:   []string{"daemon", "__runtime-hostd"},
 		EnrolledSID: install.OwnerSID,
 		Environment: environment,
 		LaunchFailure: func(err error) {
@@ -269,7 +269,7 @@ func runOwnerHostd(ctx context.Context, output io.Writer, install hostinstall.Wi
 		shutdownWindowsStableHost(host)
 		return err
 	}
-	fmt.Fprintln(output, "pb hostd ready")
+	fmt.Fprintln(output, "pb daemon hostd ready")
 	<-ctx.Done()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -500,7 +500,7 @@ func startWindowsRuntimeWorkerForRelease(ctx context.Context, executable, socket
 	if sidErr != nil || sid == nil || !sid.IsValid() || sid.String() != ownerSID || version == "" || apiMin == 0 || apiMin > apiMax || apiMax > 1024 {
 		return nil, errors.New("Windows runtime worker release parameters are invalid")
 	}
-	command := exec.CommandContext(ctx, executable, "__runtime-worker", "--socket", socket, "--token-file", tokenPath, "--owner-sid", ownerSID, "--worker-id", workerID, "--version", version, "--api-min", strconv.FormatUint(uint64(apiMin), 10), "--api-max", strconv.FormatUint(uint64(apiMax), 10), "--wait-activation")
+	command := exec.CommandContext(ctx, executable, "daemon", "__runtime-worker", "--socket", socket, "--token-file", tokenPath, "--owner-sid", ownerSID, "--worker-id", workerID, "--version", version, "--api-min", strconv.FormatUint(uint64(apiMin), 10), "--api-max", strconv.FormatUint(uint64(apiMax), 10), "--wait-activation")
 	processlaunch.ConfigureBackground(command)
 	control, err := command.StdinPipe()
 	if err != nil {

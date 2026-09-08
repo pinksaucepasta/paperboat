@@ -122,6 +122,9 @@ func TestRecoveryCommitsFullyRotatedSupervisor(t *testing.T) {
 func testFixture(t *testing.T) (string, []byte, []byte, workerupdate.Release, workerupdate.Release) {
 	t.Helper()
 	root := t.TempDir()
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	old := validELF(0x11)
 	next := validELF(0x22)
 	active := workerupdate.Release{Version: "2026.08.18.1", Platform: runtime.GOOS, Architecture: runtime.GOARCH, Hostd: target(old), Updater: target(old), Launcher: target(old)}

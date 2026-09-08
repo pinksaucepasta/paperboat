@@ -23,12 +23,14 @@ import (
 func TestApproveOwnedPeerEnrollmentsAutomaticCLIApproval(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
+		fresh        bool
 		mutate       func(*api.E2EERoot, *api.PendingEndpointIdentity)
 		mutateResult func(*api.EndpointCertificateDocument)
 		wantErr      bool
 		wantAttempts int32
 	}{
 		{name: "success", wantAttempts: 1},
+		{name: "fresh signer", fresh: true, wantAttempts: 1},
 		{name: "expired", mutate: func(_ *api.E2EERoot, p *api.PendingEndpointIdentity) {
 			p.ExpiresAt = time.Now().UTC().Add(-time.Minute)
 		}, wantErr: true},
@@ -52,7 +54,11 @@ func TestApproveOwnedPeerEnrollmentsAutomaticCLIApproval(t *testing.T) {
 			serverNow := time.Now().UTC().Truncate(time.Second)
 			server := httptest.NewServer(nil)
 			defer server.Close()
-			keys, err := store.PeerIdentityKeys(server.URL, accountID, daemonID)
+			loadKeys := store.PeerIdentityKeys
+			if tc.fresh {
+				loadKeys = store.FreshPeerIdentityKeys
+			}
+			keys, err := loadKeys(server.URL, accountID, daemonID)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -47,8 +47,10 @@ import (
 	codexsession "github.com/pinksaucepasta/paperboat/internal/codexsession"
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/daemoncmd"
 	"github.com/pinksaucepasta/paperboat/internal/diagnosticlog"
 	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
+	"github.com/pinksaucepasta/paperboat/internal/endpointbinary"
 	"github.com/pinksaucepasta/paperboat/internal/fileindex"
 	filetransfer "github.com/pinksaucepasta/paperboat/internal/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
@@ -58,7 +60,6 @@ import (
 	service "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntimeentry"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 	"github.com/pinksaucepasta/paperboat/internal/inbox"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
@@ -72,7 +73,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/networkcheck"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/recoverykey"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/transfercrypto"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/transportmanager"
 	"github.com/pinksaucepasta/paperboat/internal/processlifetime"
 	"github.com/pinksaucepasta/paperboat/internal/prompt"
 	"github.com/pinksaucepasta/paperboat/internal/remotepath"
@@ -84,7 +84,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/telemetry"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 	"github.com/pinksaucepasta/paperboat/internal/userpaths"
-	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -98,14 +97,8 @@ func main() {
 
 var quietProcessLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
-// configureProcessLogging keeps transport implementation details out of
-// normal CLI output. Internal runtime/service entry points retain the default
-// logger because their stderr is owned by the service manager and is part of
-// runtime diagnostics, not an interactive terminal.
-func configureProcessLogging(args []string) {
-	if len(args) > 0 && (strings.HasPrefix(args[0], "__runtime-") || args[0] == "__local-daemon" || args[0] == "__windows-sshd-service") {
-		return
-	}
+// configureProcessLogging keeps transport details out of CLI output.
+func configureProcessLogging(_ []string) {
 	slog.SetDefault(quietProcessLogger)
 }
 
@@ -213,7 +206,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.SetArgs(args)
-	err := root.ExecuteContext(ctx)
+	executed, err := root.ExecuteContextC(ctx)
 	if err == nil {
 		return 0
 	}
@@ -221,6 +214,13 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	if errors.Is(err, context.Canceled) {
+		// A daemon stop is an orderly lifecycle transition, while cancellation of
+		// a short-lived CLI operation retains its interrupted exit status.
+		for command := executed; command != nil; command = command.Parent() {
+			if command.Name() == "daemon" && command.Parent() == root {
+				return 0
+			}
+		}
 		fmt.Fprintln(stderr, "pb: Operation canceled.")
 		return 130
 	}
@@ -286,10 +286,10 @@ func userFacingError(err error) string {
 		}
 		return message
 	}
-	// os.PathError satisfies net.Error on some platforms. Do not misreport a
+	// Path and bare syscall permission errors can satisfy net.Error. Do not misreport a
 	// local filesystem or named-pipe failure as an Internet outage.
 	var pathErr *os.PathError
-	if errors.As(err, &pathErr) {
+	if errors.As(err, &pathErr) || errors.Is(err, os.ErrPermission) {
 		return err.Error()
 	}
 	var netErr net.Error
@@ -342,211 +342,6 @@ func isCobraUsageError(err error) bool {
 		strings.Contains(message, " accepts ") ||
 		strings.Contains(message, " requires at least ") ||
 		strings.Contains(message, " requires at most ")
-}
-
-func hostRuntimeCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:    "__runtime-host",
-		Hidden: true,
-		Args:   commandArgs(cobra.NoArgs),
-		RunE: func(command *cobra.Command, _ []string) error {
-			code := hostruntimecmd.Execute(
-				command.Context(), []string{"run"}, command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr(),
-			)
-			if code != 0 {
-				return exitCodeError{code: code}
-			}
-			return nil
-		},
-		SilenceUsage:  true,
-		SilenceErrors: true,
-	}
-}
-
-func hostdRuntimeCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:    "__runtime-hostd",
-		Hidden: true,
-		Args:   commandArgs(cobra.NoArgs),
-		RunE: func(command *cobra.Command, _ []string) error {
-			code := hostruntimecmd.Execute(command.Context(), []string{"hostd"}, command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr())
-			if code != 0 {
-				return exitCodeError{code: code}
-			}
-			return nil
-		},
-		SilenceUsage:  true,
-		SilenceErrors: true,
-	}
-}
-
-func runtimeWorkerCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:                "__runtime-worker",
-		Hidden:             true,
-		DisableFlagParsing: true,
-		RunE: func(command *cobra.Command, args []string) error {
-			code := hostruntimecmd.Execute(command.Context(), append([]string{"worker"}, args...), command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr())
-			if code != 0 {
-				return exitCodeError{code: code}
-			}
-			return nil
-		},
-		SilenceUsage:  true,
-		SilenceErrors: true,
-	}
-}
-
-func updatedRuntimeCommand() *cobra.Command {
-	return &cobra.Command{Use: "__runtime-updated", Hidden: true, DisableFlagParsing: true, RunE: func(command *cobra.Command, args []string) error {
-		code := hostruntimecmd.Execute(command.Context(), append([]string{"updated"}, args...), command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr())
-		if code != 0 {
-			return exitCodeError{code: code}
-		}
-		return nil
-	}, SilenceUsage: true, SilenceErrors: true}
-}
-
-func activatorRuntimeCommand() *cobra.Command {
-	return &cobra.Command{Use: "__runtime-activate", Hidden: true, DisableFlagParsing: true, RunE: func(command *cobra.Command, args []string) error {
-		code := hostruntimecmd.Execute(command.Context(), append([]string{"activate"}, args...), command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr())
-		if code != 0 {
-			return exitCodeError{code: code}
-		}
-		return nil
-	}, SilenceUsage: true, SilenceErrors: true}
-}
-
-func localDaemonRuntimeCommand() *cobra.Command {
-	return &cobra.Command{Use: "__runtime-local-daemon", Hidden: true, DisableFlagParsing: true, RunE: func(command *cobra.Command, args []string) error {
-		code := hostruntimecmd.Execute(command.Context(), append([]string{"local-daemon-service"}, args...), command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr())
-		if code != 0 {
-			return exitCodeError{code: code}
-		}
-		return nil
-	}, SilenceUsage: true, SilenceErrors: true}
-}
-
-func windowsSSHDServiceCommand() *cobra.Command {
-	command := &cobra.Command{
-		Use:    "__windows-sshd-service",
-		Hidden: true,
-		Args:   commandArgs(cobra.NoArgs),
-		RunE: func(command *cobra.Command, _ []string) error {
-			sshdPath, err := command.Flags().GetString("sshd")
-			if err != nil {
-				return err
-			}
-			configPath, err := command.Flags().GetString("config")
-			if err != nil {
-				return err
-			}
-			return windowsopenssh.RunServiceHost(sshdPath, configPath)
-		},
-		SilenceUsage: true, SilenceErrors: true,
-	}
-	command.Flags().String("sshd", "", "managed sshd executable")
-	command.Flags().String("config", "", "managed sshd configuration")
-	_ = command.MarkFlagRequired("sshd")
-	_ = command.MarkFlagRequired("config")
-	return command
-}
-
-func localDaemonCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:    "__local-daemon",
-		Hidden: true,
-		Args:   commandArgs(cobra.NoArgs),
-		RunE: func(command *cobra.Command, _ []string) error {
-			cfg, err := config.Load(configPathFlag(command))
-			if err != nil {
-				return err
-			}
-			if server, _ := command.Flags().GetString("server"); strings.TrimSpace(server) != "" {
-				cfg.ServerURL, err = config.NormalizeServerURL(server)
-				if err != nil {
-					return err
-				}
-			}
-			if strings.TrimSpace(cfg.ServerURL) == "" {
-				return errors.New("Paperboat server is not configured")
-			}
-			authSource, err := sessionauth.NewSource(cfg)
-			if err != nil {
-				return err
-			}
-			paths, err := currentLocalDaemonPaths()
-			if err != nil {
-				return err
-			}
-			source := &localdaemon.AuthenticatedMachineSource{ServerURL: cfg.ServerURL, Auth: authSource}
-			source.ReportPeerApprovalSignerUnavailable = localdaemon.RateLimitedPeerApprovalReporter(time.Now, time.Minute, func(issue localdaemon.PeerApprovalSignerUnavailableError) {
-				diagnosticlog.TryInfo("peer enrollment signer unavailable", "reason", "verifier_only", "pending_requests", issue.PendingRequests)
-			})
-			source.SourceMachineID, err = configuredMachineID()
-			if err != nil {
-				return err
-			}
-			var managedConfig *localdaemon.ManagedSSHConfig
-			if store, storeErr := config.ProfileStoreFor(cfg); storeErr == nil {
-				if profile, profileErr := store.Load(cfg.ServerURL); profileErr == nil {
-					source.AutoApprovePeerEnrollments = func(ctx context.Context, client *api.Client, machines []api.UserMachine) error {
-						return localdaemon.ApproveOwnedPeerEnrollments(ctx, store, profile, client, machines)
-					}
-					if executable, executableErr := os.Executable(); executableErr == nil {
-						home, homeErr := os.UserHomeDir()
-						if homeErr == nil {
-							managedConfig = &localdaemon.ManagedSSHConfig{ServerURL: cfg.ServerURL, Auth: authSource, Store: store, CLIClientSessionID: profile.CLIClientSessionID, Home: home, RuntimeDirectory: paths.RuntimeRoot, Executable: executable, OwnerUID: uint32(os.Geteuid()), InheritedAgentSocket: os.Getenv("SSH_AUTH_SOCK")}
-						}
-					}
-				}
-			}
-			store, err := config.ProfileStoreFor(cfg)
-			if err != nil {
-				return err
-			}
-			transportConfig := httptransport.DevelopmentConfig()
-			if transportConfig.TLSConfig == nil {
-				transportConfig.TLSConfig = &tls.Config{}
-			}
-			transportConfig.TLSConfig.MinVersion = tls.VersionTLS13
-			peerHTTPTransport, err := httptransport.New(transportConfig)
-			if err != nil {
-				return err
-			}
-			source.HTTPClient = &http.Client{Transport: peerHTTPTransport}
-			peerManager, err := transportmanager.New()
-			if err != nil {
-				return err
-			}
-			transportMode, err := tunnel.ParseTerminalTransport(cfg.Connect.TerminalTransport)
-			if err != nil {
-				_ = peerManager.Close()
-				return err
-			}
-			peerTunnel, err := tunnel.NewPeerTerminalTunnel(tunnel.PeerTerminalConfig{Issuer: cfg.ServerURL, Store: store, Auth: authSource, TLS: transportConfig.TLSConfig, HTTPClient: &http.Client{Transport: peerHTTPTransport}, OutputQueueChunks: cfg.Connect.TerminalOutputQueueChunks, Mode: peerConnectionMode(transportMode), PublishLocalStatus: true, TransportManager: peerManager, Race: peerRacePolicy()})
-			if err != nil {
-				_ = peerManager.Close()
-				return err
-			}
-			if err := peerTunnel.Start(command.Context()); err != nil {
-				_ = peerManager.Close()
-				return err
-			}
-			defer peerTunnel.Close()
-			fileTransfers, err := localdaemon.NewFileTransferBroker(peerTunnel)
-			if err != nil {
-				return err
-			}
-			return localdaemon.Run(command.Context(), localdaemon.DaemonConfig{
-				Paths: paths, Source: source, ManagedSSH: managedConfig, IssuePeerStream: source.IssuePeerStream,
-				OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(),
-				TransportManager: peerManager, OpenPeerStream: localdaemon.TunnelPeerStreamOpener(peerTunnel), ProbePeer: localdaemon.TunnelPeerProbe(peerTunnel), FileTransfers: fileTransfers, InvalidatePeerAuthority: peerTunnel.InvalidateMachine, WarmPeerMetadata: peerTunnel.WarmMachines,
-			})
-		},
-		SilenceUsage:  true,
-		SilenceErrors: true,
-	}
 }
 
 func statusCommand() *cobra.Command {
@@ -736,7 +531,7 @@ func doctorPathReachabilityProbes(command *cobra.Command, machineID string) []do
 		if err != nil {
 			return nil, err
 		}
-		if dependencies.peerTunnel == nil {
+		if dependencies.peerLocal == nil {
 			return nil, errors.New("peer tunnel is unavailable")
 		}
 		client, err := backendClient(commandContext)
@@ -751,7 +546,7 @@ func doctorPathReachabilityProbes(command *cobra.Command, machineID string) []do
 			return nil, errors.New("selected machine is offline")
 		}
 		target := resolver.ConnectInfo{TargetKind: "machine", ProjectID: machine.ID, Project: machine.DisplayName, MachineGeneration: uint64(machine.InstallationGeneration), Terminal: &resolver.TerminalTarget{Protocol: "paperboat.health-probe.v1", EnvironmentID: machine.EnvironmentID}}
-		return dependencies.peerTunnel.ProbePathReachability(ctx, target), nil
+		return probeDaemonPaths(ctx, dependencies.peerLocal, target), nil
 	})
 }
 
@@ -1326,7 +1121,7 @@ func waitForAuthenticatedTransport(ctx context.Context, command *cobra.Command, 
 	if err != nil {
 		return localwait.Result{}, err
 	}
-	if dependencies.peerTunnel == nil {
+	if dependencies.peerLocal == nil {
 		return localwait.Result{}, errors.New("authenticated peer transport is unavailable")
 	}
 	backend, err := backendClient(actionContext(command, []string{target}))
@@ -1347,7 +1142,7 @@ func waitForAuthenticatedTransport(ctx context.Context, command *cobra.Command, 
 			if machineErr == nil && machine.Online {
 				info := resolver.ConnectInfo{TargetKind: "machine", ProjectID: machine.ID, Project: machine.DisplayName, MachineGeneration: uint64(machine.InstallationGeneration), Terminal: &resolver.TerminalTarget{Protocol: "paperboat.health-probe.v1", EnvironmentID: machine.EnvironmentID}}
 				probeCtx, cancelProbe := context.WithTimeout(ctx, 10*time.Second)
-				probe, probeErr := dependencies.peerTunnel.PingOnce(probeCtx, info)
+				probe, probeErr := probeDaemonPeer(probeCtx, client, info, string(tunnel.TerminalTransportAuto), "wait_transport")
 				cancelProbe()
 				if probeErr == nil {
 					for index := range snapshot.Machines {
@@ -1359,7 +1154,7 @@ func waitForAuthenticatedTransport(ctx context.Context, command *cobra.Command, 
 					return localwait.WaitTargetFromSnapshot(ctx, client, snapshot, localMachine.ID, condition)
 				}
 				var failure *connectionmanager.Failure
-				if errors.As(probeErr, &failure) && !failure.AllowsFallback() {
+				if errors.Is(probeErr, localapi.ErrPermission) || errors.As(probeErr, &failure) && !failure.AllowsFallback() {
 					return localwait.Result{}, probeErr
 				}
 			}
@@ -1684,23 +1479,6 @@ func waitExitCode(result localwait.Result) int {
 	}
 }
 
-func privilegedHostServiceCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:                "__runtime-host-service",
-		Hidden:             true,
-		DisableFlagParsing: true,
-		RunE: func(command *cobra.Command, args []string) error {
-			code := hostruntimecmd.ExecuteHostService(command.Context(), args, command.ErrOrStderr())
-			if code != 0 {
-				return exitCodeError{code: code}
-			}
-			return nil
-		},
-		SilenceUsage:  true,
-		SilenceErrors: true,
-	}
-}
-
 func privilegedServiceOperationCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:                "__runtime-service",
@@ -1716,63 +1494,6 @@ func privilegedServiceOperationCommand() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-}
-
-func configRuntimeCommand() *cobra.Command {
-	command := &cobra.Command{
-		Use:    "__runtime-config",
-		Hidden: true,
-		Args:   commandArgs(cobra.NoArgs),
-		RunE: func(command *cobra.Command, _ []string) error {
-			stateRoot, err := command.Flags().GetString("state-root")
-			if err != nil {
-				return err
-			}
-			if stateRoot == "" {
-				stateRoot = os.Getenv("PAPERBOAT_RUNTIME_STATE_ROOT")
-			}
-			if stateRoot == "" {
-				stateRoot, err = helperconfig.DefaultStateRoot(os.Getenv)
-				if err != nil {
-					return err
-				}
-			}
-			handled, err := enterWindowsConfigService(stateRoot)
-			if err != nil {
-				return err
-			}
-			if handled {
-				return nil
-			}
-			store, err := identity.Open(identity.Config{StateRoot: stateRoot})
-			if err != nil {
-				return fmt.Errorf("open machine identity: %w", err)
-			}
-			registration, err := store.Registration()
-			if err != nil {
-				return fmt.Errorf("load machine registration: %w", err)
-			}
-			homeRoot, err := os.UserHomeDir()
-			if err != nil {
-				return err
-			}
-			chezmoi := strings.TrimSpace(os.Getenv("PAPERBOAT_CHEZMOI_PATH"))
-			if chezmoi == "" {
-				chezmoi = defaultChezmoiPath()
-			}
-			hosts := []string{"github.com"}
-			if raw := strings.TrimSpace(os.Getenv("PAPERBOAT_CONFIG_REPOSITORY_HOSTS")); raw != "" {
-				hosts = strings.Split(raw, ",")
-			}
-			return hostruntimeentry.RunConfigWorker(command.Context(), hostruntimeentry.ConfigWorkerConfig{
-				ControlURL: registration.ServerURL, StateRoot: stateRoot, HomeRoot: filepath.Clean(homeRoot),
-				ChezmoiBinary: chezmoi, RepositoryHosts: hosts,
-			})
-		},
-		SilenceUsage: true, SilenceErrors: true,
-	}
-	command.Flags().String("state-root", "", "runtime state directory")
-	return command
 }
 
 func pairCommand() *cobra.Command {
@@ -2770,22 +2491,13 @@ func newRootCommand() *cobra.Command {
 	root.AddCommand(uninstallCommand())
 	root.AddCommand(sendCommand())
 	root.AddCommand(transferCommand())
-	root.AddCommand(hostRuntimeCommand())
-	root.AddCommand(hostdRuntimeCommand())
-	root.AddCommand(runtimeWorkerCommand())
-	root.AddCommand(updatedRuntimeCommand())
-	root.AddCommand(activatorRuntimeCommand())
-	root.AddCommand(localDaemonRuntimeCommand())
-	root.AddCommand(windowsSSHDServiceCommand())
-	root.AddCommand(localDaemonCommand())
 	root.AddCommand(statusCommand())
 	root.AddCommand(waitCommand())
 	root.AddCommand(bugreportCommand())
-	root.AddCommand(privilegedHostServiceCommand())
+	root.AddCommand(daemoncmd.NewCommand())
 	root.AddCommand(privilegedServiceOperationCommand())
 	root.AddCommand(platformInstallCommand())
 	root.AddCommand(platformUninstallHelperCommand())
-	root.AddCommand(configRuntimeCommand())
 	configureShellCompletion(root)
 	return root
 }
@@ -2822,6 +2534,29 @@ type updateCheckResult struct {
 }
 
 var updateControlSocketForCommand = updatedControlSocket
+
+const updateDaemonSnapshotTimeout = 2 * time.Second
+
+// readLocalDaemonSnapshot is deliberately a direct read-only probe. Update
+// status must report whether the authenticated daemon is actually present; it
+// must not use localDaemonSnapshot, whose recovery path can install and start
+// a daemon as a side effect.
+var readLocalDaemonSnapshot = func(ctx context.Context) (localapi.Snapshot, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	paths, err := currentLocalDaemonPaths()
+	if err != nil {
+		return localapi.Snapshot{}, err
+	}
+	client, err := localapi.NewClient(paths.SocketPath, updateDaemonSnapshotTimeout)
+	if err != nil {
+		return localapi.Snapshot{}, err
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, updateDaemonSnapshotTimeout)
+	defer cancel()
+	return client.Snapshot(probeCtx)
+}
 
 func actionUpdateCheck(command *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithTimeout(command.Context(), 30*time.Second)
@@ -2867,9 +2602,12 @@ func signedUpdateAvailable(installed, latest string) (bool, error) {
 }
 
 type updateStatusResult struct {
+	BlockedReason     string    `json:"blocked_reason,omitempty"`
+	RequiredVersion   string    `json:"required_version,omitempty"`
 	CLIVersion        string    `json:"cli_version"`
 	RuntimeVersion    string    `json:"runtime_version"`
 	RuntimeAvailable  bool      `json:"runtime_available"`
+	RuntimeState      string    `json:"runtime_state,omitempty"`
 	ActivationPending bool      `json:"activation_pending"`
 	ActivationFailure string    `json:"activation_failure,omitempty"`
 	LastCheck         time.Time `json:"last_check,omitempty"`
@@ -2887,14 +2625,30 @@ func actionUpdateStatus(command *cobra.Command, _ []string) error {
 	}
 	response, err := client.Status(ctx)
 	if err == nil {
-		result := updateStatusCommandResult(buildinfo.Version, response)
+		var snapshot *localapi.Snapshot
+		if daemonSnapshot, snapshotErr := readLocalDaemonSnapshot(ctx); snapshotErr == nil {
+			snapshot = &daemonSnapshot
+		}
+		result := updateStatusCommandResult(buildinfo.Version, response, snapshot)
 		return writeUpdateStatusResult(command, result, response.Supervisor.MaintenanceRequired, response.Supervisor.StagedVersion)
 	}
 	return fmt.Errorf("read paperboat-updated status: %w", err)
 }
 
-func updateStatusCommandResult(cliVersion string, response updated.ControlResponse) updateStatusResult {
-	return updateStatusResult{CLIVersion: cliVersion, RuntimeVersion: response.Version, RuntimeAvailable: response.Version != "", ActivationPending: response.Pending, ActivationFailure: response.ActivationFailure, LastCheck: response.Observation.CheckedAt, NextCheck: response.Observation.NextCheckAt, LastFailure: response.Observation.Failure, Supervisor: response.Supervisor}
+func updateStatusCommandResult(cliVersion string, response updated.ControlResponse, snapshot *localapi.Snapshot) updateStatusResult {
+	result := updateStatusResult{BlockedReason: response.Observation.BlockedReason, RequiredVersion: response.Observation.RequiredVersion, CLIVersion: cliVersion, ActivationPending: response.Pending, ActivationFailure: response.ActivationFailure, LastCheck: response.Observation.CheckedAt, NextCheck: response.Observation.NextCheckAt, LastFailure: response.Observation.Failure, Supervisor: response.Supervisor}
+	if snapshot != nil {
+		result.RuntimeState = snapshot.DaemonState
+		if daemonSnapshotAvailable(*snapshot) {
+			result.RuntimeVersion = snapshot.DaemonVersion
+			result.RuntimeAvailable = true
+		}
+	}
+	return result
+}
+
+func daemonSnapshotAvailable(snapshot localapi.Snapshot) bool {
+	return snapshot.DaemonVersion != "" && (snapshot.DaemonState == "ready" || snapshot.DaemonState == "degraded")
 }
 
 func writeUpdateStatusResult(command *cobra.Command, result updateStatusResult, maintenanceRequired bool, stagedVersion string) error {
@@ -2908,7 +2662,12 @@ func writeUpdateStatusResult(command *cobra.Command, result updateStatusResult, 
 	} else {
 		fmt.Fprintln(command.OutOrStdout(), "Runtime: unavailable")
 	}
-	if result.ActivationPending {
+	if result.RuntimeState != "" {
+		fmt.Fprintf(command.OutOrStdout(), "Runtime state: %s\n", result.RuntimeState)
+	}
+	if result.BlockedReason == "active_terminal_sessions" {
+		fmt.Fprintf(command.OutOrStdout(), "Activation: waiting for running or detached terminal sessions to finish; required version %s. Existing sessions remain usable.\n", result.RequiredVersion)
+	} else if result.ActivationPending {
 		fmt.Fprintln(command.OutOrStdout(), "Activation: pending")
 	} else if result.ActivationFailure != "" {
 		fmt.Fprintf(command.OutOrStdout(), "Activation: failed (%s)\n", result.ActivationFailure)
@@ -2936,13 +2695,21 @@ func actionUpdate(command *cobra.Command, _ []string) error {
 	}
 	response, err := updateWithProgress(command, ctx, client.Update)
 	if err == nil {
-		return writeUpdateResult(command, updateCommandResult(runtime.GOOS, buildinfo.Version, response), response.Version)
+		var snapshot *localapi.Snapshot
+		if response.Updated && !response.Pending {
+			if daemonSnapshot, snapshotErr := readLocalDaemonSnapshot(ctx); snapshotErr == nil {
+				snapshot = &daemonSnapshot
+			}
+		}
+		return writeUpdateResult(command, updateCommandResult(buildinfo.Version, response, snapshot), response.Version)
 	}
 	return fmt.Errorf("update with paperboat-updated: %w", err)
 }
 
-func updateCommandResult(platform, previousVersion string, response updated.ControlResponse) updateResult {
-	return updateResult{PreviousVersion: previousVersion, Version: response.Version, CLIUpdated: response.Updated, RuntimeUpdated: response.Updated, SupervisorUpdated: response.Supervisor.Applied, ActivationPending: platform == "windows" && response.Pending}
+func updateCommandResult(previousVersion string, response updated.ControlResponse, snapshot *localapi.Snapshot) updateResult {
+	completed := response.Updated && !response.Pending
+	runtimeUpdated := completed && snapshot != nil && daemonSnapshotAvailable(*snapshot) && snapshot.DaemonVersion == response.Version
+	return updateResult{PreviousVersion: previousVersion, Version: response.Version, CLIUpdated: completed, RuntimeUpdated: runtimeUpdated, SupervisorUpdated: response.Supervisor.Applied, ActivationPending: response.Pending}
 }
 
 var updateProgressInterval = 5 * time.Second
@@ -2997,7 +2764,7 @@ func writeUpdateResult(command *cobra.Command, result updateResult, version stri
 		return json.NewEncoder(command.OutOrStdout()).Encode(map[string]any{"schema_version": "1.0", "ok": true, "data": result})
 	}
 	if result.ActivationPending {
-		fmt.Fprintf(command.OutOrStdout(), "Paperboat %s is staged. Windows will activate it in the background. Wait a few seconds, then run `pb update status` to confirm.\n", version)
+		fmt.Fprintf(command.OutOrStdout(), "Paperboat %s is staged. Activation is in progress; run `pb update status` to confirm completion.\n", version)
 		return nil
 	}
 	if !result.CLIUpdated && !result.RuntimeUpdated && !result.SupervisorUpdated {
@@ -4449,7 +4216,7 @@ func sendCommand() *cobra.Command {
 			target := &resolver.FileTransferTarget{
 				Endpoint: descriptor.Endpoint, SourceMachineID: descriptor.SourceMachineID,
 				DestinationMachineID: descriptor.DestinationMachineID, InitiatingUserID: descriptor.InitiatingUserID,
-				Auth:   resolver.AuthTarget{Method: descriptor.Auth.Method, Token: descriptor.Auth.Token, ExpiresAt: descriptor.Auth.ExpiresAt.UTC().Format(time.RFC3339Nano)},
+				Auth:   resolver.AuthTarget{Method: descriptor.Auth.Method, Token: descriptor.Auth.Token, ExpiresAt: descriptor.Auth.ExpiresAt.UTC().Format(time.RFC3339Nano), ResourceID: descriptor.Auth.AccessSessionID},
 				Policy: descriptor.Policy,
 			}
 			transferClient := fileTransferClientForTarget(target)
@@ -4484,29 +4251,21 @@ func sendCommand() *cobra.Command {
 				if sessionID == "" {
 					return errors.New("host-local file delivery requires a Paperboat terminal session")
 				}
-				batch, err = localSender.SendBatch(ctx.Context, batchID, sourceMachineID, destination.ID, descriptor.InitiatingUserID, sessionID, prepared.Sources, 1, expiresAt)
+				batch, err = localSender.SendNativeBatch(ctx.Context, batchID, sourceMachineID, destination.ID, descriptor.InitiatingUserID, sessionID, prepared.Sources, expiresAt)
 			} else {
 				if dependencies.peerLocal == nil {
-					return errors.New("local daemon transport is unavailable for encrypted file transfer")
+					return errors.New("local daemon transport is unavailable for native file transfer")
 				}
-				profileStore, storeErr := config.ProfileStoreFor(dependencies.cfg)
-				if storeErr != nil {
-					return storeErr
+				lease, leaseErr := dependencies.peerLocal.PrepareFileTransfer(ctx.Context, localapi.FileTransferRequest{Schema: localapi.FileTransferSchemaV1, MachineID: destination.ID, EnvironmentID: destination.EnvironmentID, MachineGeneration: uint64(destination.InstallationGeneration), OperationID: batchID, Credential: target.Auth.Token, AccessSessionID: target.Auth.ResourceID, Deadline: parseAuthExpiry(target.Auth.ExpiresAt), MaximumBytes: uint64(target.Policy.MaxFileBytes)})
+				if leaseErr != nil {
+					return leaseErr
 				}
-				keyVault, vaultErr := transfercrypto.NewKeyVault(profileStore.Secrets)
-				if vaultErr != nil {
-					return vaultErr
+				defer lease.Close()
+				nativeClient, nativeErr := filetransfer.NewNativeClient(target.Endpoint, filetransfer.Auth{Token: target.Auth.Token, ExpiresAt: parseAuthExpiry(target.Auth.ExpiresAt)}, filetransfer.Binding{SourceMachineID: target.SourceMachineID, DestinationMachineID: target.DestinationMachineID, InitiatingUserID: target.InitiatingUserID}, lease.OpenTransferStream)
+				if nativeErr != nil {
+					return nativeErr
 				}
-				keyCoordinator, coordinatorErr := filetransfer.NewKeyCoordinator(keyVault, filetransfer.DaemonKeyDeliverer{Client: dependencies.peerLocal})
-				if coordinatorErr != nil {
-					return coordinatorErr
-				}
-				peerTarget := resolver.ConnectInfo{TargetKind: "machine", ProjectID: destination.ID, MachineGeneration: uint64(destination.InstallationGeneration), Transport: string(tunnel.TerminalTransportAuto), Terminal: &resolver.TerminalTarget{EnvironmentID: destination.EnvironmentID}}
-				uploader := &filetransfer.EncryptedUploader{
-					Client: transferClient, Keys: keyCoordinator, Target: peerTarget, Retention: retention, Generation: 1,
-					CleanupWarning: func(error) { writeDeliveredTransferKeyCleanupWarning(cobraCommand.ErrOrStderr()) },
-				}
-				batch, err = uploader.SendBatch(ctx.Context, batchID, sessionID, prepared.Sources)
+				batch, err = nativeClient.SendBatch(ctx.Context, batchID, sessionID, prepared.Sources)
 			}
 			if err != nil {
 				return err
@@ -4700,7 +4459,7 @@ func transferClientForCommand(cobraCommand *cobra.Command, args []string) (*file
 	if err != nil {
 		return nil, api.UserMachine{}, friendlyCommandError(err)
 	}
-	target := &resolver.FileTransferTarget{Endpoint: descriptor.Endpoint, SourceMachineID: descriptor.SourceMachineID, DestinationMachineID: descriptor.DestinationMachineID, InitiatingUserID: descriptor.InitiatingUserID, Auth: resolver.AuthTarget{Method: descriptor.Auth.Method, Token: descriptor.Auth.Token, ExpiresAt: descriptor.Auth.ExpiresAt.UTC().Format(time.RFC3339Nano)}, Policy: descriptor.Policy}
+	target := &resolver.FileTransferTarget{Endpoint: descriptor.Endpoint, SourceMachineID: descriptor.SourceMachineID, DestinationMachineID: descriptor.DestinationMachineID, InitiatingUserID: descriptor.InitiatingUserID, Auth: resolver.AuthTarget{Method: descriptor.Auth.Method, Token: descriptor.Auth.Token, ExpiresAt: descriptor.Auth.ExpiresAt.UTC().Format(time.RFC3339Nano), ResourceID: descriptor.Auth.AccessSessionID}, Policy: descriptor.Policy}
 	client := newTransferClient(target)
 	if client == nil {
 		return nil, api.UserMachine{}, errors.New("server returned an invalid file transfer descriptor")
@@ -5926,23 +5685,22 @@ func deleteTerminalSessionForTarget(ctx context.Context, client *api.Client, tar
 
 // deps bundles production dependencies for a command.
 type deps struct {
-	cfg              *config.Config
-	transportMode    tunnel.TerminalTransport
-	auth             config.AuthSource
-	resolver         resolver.ProjectResolver
-	tunnel           tunnel.Tunnel
-	terminalSelector *tunnel.TerminalTransportSelector
-	peerTunnel       *tunnel.PeerTerminalTunnel
-	peerLocal        *localapi.Client
-	peerApplications peerApplicationTunnel
-	telemetry        telemetry.Sink
+	cfg                *config.Config
+	transportMode      tunnel.TerminalTransport
+	auth               config.AuthSource
+	resolver           resolver.ProjectResolver
+	tunnel             tunnel.Tunnel
+	terminalSelector   *tunnel.TerminalTransportSelector
+	hostedTransferKeys *tunnel.PeerTerminalTunnel
+	peerLocal          *localapi.Client
+	peerApplications   peerApplicationTunnel
+	telemetry          telemetry.Sink
 }
 
 type peerApplicationTunnel interface {
 	Dial(context.Context, resolver.ConnectInfo) (tunnel.Conn, error)
 	DialExec(context.Context, resolver.ConnectInfo, tunnel.ExecRequest) (tunnel.ExecConn, error)
 	DialSSH(context.Context, resolver.ConnectInfo, string) (tunnel.Conn, error)
-	DialPrivatePreview(context.Context, resolver.ConnectInfo, uint16) (tunnel.Conn, error)
 	DialCodexHTTP(context.Context, resolver.ConnectInfo) (net.Conn, error)
 }
 
@@ -5991,6 +5749,7 @@ func buildDeps(c *command.Context) (*deps, error) {
 		}
 	}
 	selectedTunnel := tunnel.Tunnel(termTunnel)
+	// Hosted key exchange remains on its Task 34 transport; construction starts no native engine.
 	var peerTunnel *tunnel.PeerTerminalTunnel
 	var peerApplications peerApplicationTunnel
 	var peerLocal *localapi.Client
@@ -6028,15 +5787,15 @@ func buildDeps(c *command.Context) (*deps, error) {
 		selectedTunnel = tunnel.TargetTunnel{Machine: localPeer, Other: termTunnel}
 	}
 	return &deps{
-		cfg:              cfg,
-		transportMode:    mode,
-		auth:             authSource,
-		resolver:         nil,
-		tunnel:           selectedTunnel,
-		terminalSelector: termTunnel,
-		peerTunnel:       peerTunnel,
-		peerLocal:        peerLocal,
-		peerApplications: peerApplications,
+		cfg:                cfg,
+		transportMode:      mode,
+		auth:               authSource,
+		resolver:           nil,
+		tunnel:             selectedTunnel,
+		terminalSelector:   termTunnel,
+		hostedTransferKeys: peerTunnel,
+		peerLocal:          peerLocal,
+		peerApplications:   peerApplications,
 	}, nil
 }
 
@@ -6089,6 +5848,67 @@ type pingReport struct {
 	Samples      []pingSample `json:"samples"`
 }
 
+// peerProber is the existing authenticated daemon probe boundary.
+type peerProber interface {
+	ProbePeer(context.Context, localapi.PeerStreamRequest) (localapi.PeerProbeResult, error)
+}
+
+func probeDaemonPeer(ctx context.Context, client peerProber, target resolver.ConnectInfo, transport, operation string) (tunnel.PingResult, error) {
+	if client == nil || target.Terminal == nil {
+		return tunnel.PingResult{}, errors.New("authenticated daemon probe is unavailable")
+	}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return tunnel.PingResult{}, errors.New("daemon probe requires a deadline")
+	}
+	request, err := localapi.NewPeerStreamRequest(target.ProjectID, target.Terminal.EnvironmentID, target.MachineGeneration, "health_probe", operation, "local-health-probe", deadline, 1<<20, nil)
+	if err != nil {
+		return tunnel.PingResult{}, err
+	}
+	request.Transport = transport
+	probe, err := client.ProbePeer(ctx, request)
+	if err != nil {
+		return tunnel.PingResult{}, err
+	}
+	path, err := parsePingPath(probe.Transport)
+	if err != nil {
+		return tunnel.PingResult{}, err
+	}
+	return tunnel.PingResult{Path: path, RelayRegion: probe.RelayRegion, Connection: time.Duration(probe.ConnectionNanoseconds), RTT: time.Duration(probe.RTTNanoseconds), PTOs: probe.PTOs}, nil
+}
+
+func probeDaemonPaths(ctx context.Context, client peerProber, target resolver.ConnectInfo) map[connectionmanager.Path]tunnel.PathReachability {
+	type outcome struct {
+		path  connectionmanager.Path
+		value tunnel.PathReachability
+	}
+	paths := []struct {
+		path      connectionmanager.Path
+		transport string
+	}{
+		{connectionmanager.PathDirectQUIC, string(tunnel.TerminalTransportDirect)},
+		{connectionmanager.PathRelayQUIC, string(tunnel.TerminalTransportRelayQUIC)},
+		{connectionmanager.PathWSS, string(tunnel.TerminalTransportRelayWSS)},
+	}
+	results := make(chan outcome, len(paths))
+	for _, item := range paths {
+		go func() {
+			probe, err := probeDaemonPeer(ctx, client, target, item.transport, "doctor_"+item.transport)
+			value := tunnel.PathReachability{}
+			if err == nil && probe.Path == item.path {
+				value = tunnel.PathReachability{Reachable: true, RTT: probe.RTT, PTOs: probe.PTOs, RelayRegion: probe.RelayRegion}
+			}
+			results <- outcome{item.path, value}
+		}()
+	}
+	result := make(map[connectionmanager.Path]tunnel.PathReachability, len(paths))
+	for range paths {
+		item := <-results
+		result[item.path] = item.value
+	}
+	return result
+}
+
 func actionPing(command *cobra.Command, args []string) error {
 	count, _ := command.Flags().GetInt("count")
 	timeout, _ := command.Flags().GetDuration("timeout")
@@ -6108,7 +5928,7 @@ func actionPing(command *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if dependencies.peerTunnel == nil {
+	if dependencies.peerLocal == nil {
 		return errors.New("pb ping requires an authenticated Paperboat server")
 	}
 	client, err := backendClient(ctx)
@@ -6131,29 +5951,7 @@ func actionPing(command *cobra.Command, args []string) error {
 	var total time.Duration
 	for sequence := 1; sequence <= count; sequence++ {
 		sampleCtx, cancel := context.WithTimeout(command.Context(), timeout)
-		var result tunnel.PingResult
-		var pingErr error
-		if dependencies.peerLocal != nil {
-			deadline := time.Now().UTC().Add(timeout)
-			request, requestErr := localapi.NewPeerStreamRequest(target.ProjectID, target.Terminal.EnvironmentID, target.MachineGeneration, "health_probe", fmt.Sprintf("ping_%d", sequence), "local-health-probe", deadline, 1<<20, nil)
-			if requestErr == nil {
-				request.Transport = transport
-				var probe localapi.PeerProbeResult
-				probe, pingErr = dependencies.peerLocal.ProbePeer(sampleCtx, request)
-				if pingErr == nil {
-					path, pathErr := parsePingPath(probe.Transport)
-					if pathErr != nil {
-						pingErr = pathErr
-					} else {
-						result = tunnel.PingResult{Path: path, RelayRegion: probe.RelayRegion, Connection: time.Duration(probe.ConnectionNanoseconds), RTT: time.Duration(probe.RTTNanoseconds), PTOs: probe.PTOs}
-					}
-				}
-			} else {
-				pingErr = requestErr
-			}
-		} else {
-			result, pingErr = dependencies.peerTunnel.PingTransport(sampleCtx, target, transport)
-		}
+		result, pingErr := probeDaemonPeer(sampleCtx, dependencies.peerLocal, target, transport, fmt.Sprintf("ping_%d", sequence))
 		cancel()
 		if pingErr != nil {
 			if command.Context().Err() != nil {
@@ -7310,7 +7108,7 @@ func sshConnectInfo(machine api.UserMachine, descriptor api.SSHDescriptor) resol
 	return resolver.ConnectInfo{
 		TargetKind: "machine", ProjectID: machine.ID, Project: machine.DisplayName, ProjectState: machine.State,
 		MachineGeneration: uint64(machine.InstallationGeneration), TunnelTarget: descriptor.Endpoints.WSS,
-		Terminal: &resolver.TerminalTarget{Protocol: "paperboat.ssh.v1", EnvironmentID: descriptor.Environment.ID, QUICEndpoint: descriptor.Endpoints.QUIC, WSSEndpoint: descriptor.Endpoints.WSS, Auth: resolver.AuthTarget{Method: descriptor.Auth.Method, Token: descriptor.Auth.Token, ExpiresAt: descriptor.Auth.ExpiresAt.Format(time.RFC3339Nano), Scopes: descriptor.Auth.Scopes}, CWD: descriptor.Environment.Root},
+		Terminal: &resolver.TerminalTarget{Protocol: "paperboat.ssh.v1", EnvironmentID: descriptor.Environment.ID, QUICEndpoint: descriptor.Endpoints.QUIC, WSSEndpoint: descriptor.Endpoints.WSS, Auth: resolver.AuthTarget{Method: descriptor.Auth.Method, Token: descriptor.Auth.Token, ExpiresAt: descriptor.Auth.ExpiresAt.Format(time.RFC3339Nano), Scopes: descriptor.Auth.Scopes, ResourceID: descriptor.Auth.AccessSessionID}, CWD: descriptor.Environment.Root},
 	}
 }
 
@@ -7749,7 +7547,7 @@ func execConnectInfo(machine api.UserMachine, descriptor api.ExecDescriptor, tra
 	return resolver.ConnectInfo{
 		TargetKind: "machine", ProjectID: machine.ID, Project: machine.DisplayName, ProjectState: machine.State,
 		MachineGeneration: uint64(machine.InstallationGeneration), Transport: transport, TunnelTarget: descriptor.Endpoints.WSS,
-		Terminal: &resolver.TerminalTarget{Protocol: "paperboat.exec.v1", EnvironmentID: descriptor.Environment.ID, QUICEndpoint: descriptor.Endpoints.QUIC, WSSEndpoint: descriptor.Endpoints.WSS, Auth: resolver.AuthTarget{Method: descriptor.Auth.Method, Token: descriptor.Auth.Token, ExpiresAt: descriptor.Auth.ExpiresAt.Format(time.RFC3339Nano), Scopes: descriptor.Auth.Scopes}, CWD: descriptor.Environment.Root},
+		Terminal: &resolver.TerminalTarget{Protocol: "paperboat.exec.v1", EnvironmentID: descriptor.Environment.ID, QUICEndpoint: descriptor.Endpoints.QUIC, WSSEndpoint: descriptor.Endpoints.WSS, Auth: resolver.AuthTarget{Method: descriptor.Auth.Method, Token: descriptor.Auth.Token, ExpiresAt: descriptor.Auth.ExpiresAt.Format(time.RFC3339Nano), Scopes: descriptor.Auth.Scopes, ResourceID: descriptor.Auth.AccessSessionID}, CWD: descriptor.Environment.Root},
 	}
 }
 
@@ -7970,7 +7768,7 @@ func actionCodex(c *command.Context) error {
 			if descriptor.Session.ID == "" || descriptor.Session.MachineID == "" || descriptor.Session.EnvironmentID != identity.EnvironmentID || descriptor.MachineGeneration == 0 || descriptor.ConnectCredential == "" || descriptor.CredentialsExpireAt.IsZero() {
 				return nil, errors.New("Codex returned an invalid peer target")
 			}
-			target := resolver.ConnectInfo{TargetKind: identity.Kind, ProjectID: descriptor.Session.MachineID, Project: identity.Name, ProjectState: "running", MachineGeneration: descriptor.MachineGeneration, Terminal: &resolver.TerminalTarget{Protocol: "paperboat.codex.v1", EnvironmentID: identity.EnvironmentID, SessionID: descriptor.Session.ID, Auth: resolver.AuthTarget{Method: "bearer", Token: descriptor.ConnectCredential, ExpiresAt: descriptor.CredentialsExpireAt.Format(time.RFC3339Nano), Scopes: []string{"codex:connect"}}}}
+			target := resolver.ConnectInfo{TargetKind: identity.Kind, ProjectID: descriptor.Session.MachineID, Project: identity.Name, ProjectState: "running", MachineGeneration: descriptor.MachineGeneration, Terminal: &resolver.TerminalTarget{Protocol: "paperboat.codex.v1", EnvironmentID: identity.EnvironmentID, SessionID: descriptor.Session.ID, Auth: resolver.AuthTarget{Method: "bearer", Token: descriptor.ConnectCredential, ExpiresAt: descriptor.CredentialsExpireAt.Format(time.RFC3339Nano), Scopes: []string{"codex:connect"}, ResourceID: descriptor.Session.ID}}}
 			target.Transport = c.String("transport")
 			return d.peerApplications.DialCodexHTTP(ctx, target)
 		},
@@ -8150,12 +7948,11 @@ func actionConnectTarget(c *command.Context, requested string) error {
 	var info resolver.ConnectInfo
 	var conn tunnel.Conn
 	var keyCoordinator *filetransfer.KeyCoordinator
-	if d.peerTunnel != nil {
-		profileStore, storeErr := config.ProfileStoreFor(d.cfg)
-		if storeErr == nil {
-			keyVault, vaultErr := transfercrypto.NewKeyVault(profileStore.Secrets)
-			if vaultErr == nil {
-				keyCoordinator, _ = filetransfer.NewKeyCoordinator(keyVault, d.peerTunnel)
+	if d.hostedTransferKeys != nil {
+		defer d.hostedTransferKeys.Close()
+		if profileStore, storeErr := config.ProfileStoreFor(d.cfg); storeErr == nil {
+			if keyVault, vaultErr := transfercrypto.NewKeyVault(profileStore.Secrets); vaultErr == nil {
+				keyCoordinator, _ = filetransfer.NewKeyCoordinator(keyVault, d.hostedTransferKeys)
 			}
 		}
 	}
@@ -8181,30 +7978,9 @@ func actionConnectTarget(c *command.Context, requested string) error {
 			d.telemetry.Record(event)
 		}
 	}
-	configureFileTransferRefresh := func(client *filetransfer.Client) {
-		if client == nil {
-			return
-		}
-		client.RefreshAuth = func(refreshCtx context.Context) (filetransfer.Auth, error) {
-			freshCred, err := d.auth.Credential()
-			if err != nil {
-				return filetransfer.Auth{}, err
-			}
-			projectToken := project
-			if info.ProjectID != "" {
-				projectToken = info.ProjectID
-			}
-			freshInfo, err := newResolver(freshCred).Resolve(refreshCtx, resolver.ConnectRequest{Project: projectToken, Credential: freshCred, TerminalSessionID: terminalSessionID})
-			if err != nil {
-				return filetransfer.Auth{}, fmt.Errorf("refresh file transfer descriptor: %w", err)
-			}
-			if freshInfo.FileTransfer == nil {
-				return filetransfer.Auth{}, errors.New("refresh file transfer descriptor: target missing")
-			}
-			return filetransfer.Auth{Token: freshInfo.FileTransfer.Auth.Token, ExpiresAt: parseAuthExpiry(freshInfo.FileTransfer.Auth.ExpiresAt)}, nil
-		}
-	}
-	var transferClient *filetransfer.Client
+	var transferClient *filetransfer.NativeClient
+	var legacyTransferClient *filetransfer.Client
+	var transferLease *localapi.FileTransferLease
 	for attempt := 0; attempt <= d.cfg.Connect.DialRetries; attempt++ {
 		resolveRequest := resolver.ConnectRequest{Project: project, Credential: cred, TerminalSessionID: terminalSessionID, CreateTerminalSession: createSession}
 		if target.kind == environmentUserMachine && resolvedMachine.ID != "" && resolvedMachine.InstallationGeneration > 0 {
@@ -8234,33 +8010,52 @@ func actionConnectTarget(c *command.Context, requested string) error {
 				info.Terminal.Env = forwardedTerminalEnv(config.TerminalEnv)
 				info.Terminal.Cols, info.Terminal.Rows = remoteSize()
 			}
-			if transferClient != nil {
-				_ = transferClient.Close()
+			if transferLease != nil {
+				_ = transferLease.Close()
+				transferLease = nil
 			}
-			transferClient = fileTransferClientForTarget(info.FileTransfer)
-			configureFileTransferRefresh(transferClient)
+			transferClient = nil
+			if legacyTransferClient != nil {
+				_ = legacyTransferClient.Close()
+				legacyTransferClient = nil
+			}
+			if info.TargetKind == "machine" && info.FileTransfer != nil && d.peerLocal != nil {
+				transferClient, transferLease, _ = nativeFileTransferClient(ctx, d.peerLocal, info, newIdempotencyKey())
+			} else if info.FileTransfer != nil {
+				legacyTransferClient = fileTransferClientForTarget(info.FileTransfer)
+			}
 			// The file-transfer policy check runs concurrently with the
 			// transport dial. Paste availability is decided before any input
 			// is accepted, but the health check round trip never delays the
 			// shell becoming interactive.
-			verifyDone := make(chan struct{})
+			verifyDone := make(chan error, 1)
+			clientToVerify := legacyTransferClient
 			if transferClient != nil {
-				go func() {
-					defer close(verifyDone)
-					if policyErr := transferClient.VerifyPolicy(ctx, descriptorFileTransferPolicy(info.FileTransfer)); policyErr != nil {
-						transferClient = nil
-						if useStatusBar {
-							bar.FailureFor("file_transfer", "File transfer unavailable")
-						} else {
-							fmt.Fprintln(os.Stderr, "File transfer is unavailable for this connection. Terminal access will continue.")
-						}
-					}
-				}()
+				clientToVerify = transferClient.Client
+			}
+			if clientToVerify != nil {
+				policyToVerify := descriptorFileTransferPolicy(info.FileTransfer)
+				go func() { verifyDone <- clientToVerify.VerifyPolicy(ctx, policyToVerify) }()
 			} else {
-				close(verifyDone)
+				verifyDone <- nil
 			}
 			conn, err = d.tunnel.Dial(ctx, info)
-			<-verifyDone
+			if policyErr := <-verifyDone; policyErr != nil {
+				transferClient = nil
+				if legacyTransferClient != nil {
+					_ = legacyTransferClient.Close()
+					legacyTransferClient = nil
+				}
+				if transferLease != nil {
+					_ = transferLease.Close()
+					transferLease = nil
+				}
+				if useStatusBar {
+					bar.FailureFor("file_transfer", "File transfer unavailable")
+				} else {
+					fmt.Fprintln(os.Stderr, "File transfer is unavailable for this connection. Terminal access will continue.")
+				}
+			}
 		}
 		if err == nil {
 			break
@@ -8297,8 +8092,11 @@ func actionConnectTarget(c *command.Context, requested string) error {
 		bar.SetDebugVersions(buildinfo.Version, tunnel.TerminalRuntimeVersion(conn))
 	}
 	defer func() {
-		if transferClient != nil {
-			_ = transferClient.Close()
+		if transferLease != nil {
+			_ = transferLease.Close()
+		}
+		if legacyTransferClient != nil {
+			_ = legacyTransferClient.Close()
 		}
 	}()
 	if d.cfg.LastEnvironmentID != info.ProjectID {
@@ -8351,7 +8149,7 @@ func actionConnectTarget(c *command.Context, requested string) error {
 			return
 		}
 		inboxConfig := inbox.Config{Client: client, MachineID: machineID, SessionID: sessionID, Path: inboxPath, Notify: notify}
-		if keyCoordinator != nil && target.Terminal != nil {
+		if target.TargetKind != "machine" && keyCoordinator != nil && target.Terminal != nil {
 			inboxConfig.Encrypted = client
 			inboxConfig.Keys = keyCoordinator
 			inboxConfig.Target = target
@@ -8408,21 +8206,44 @@ func actionConnectTarget(c *command.Context, requested string) error {
 			bar.SetDebugVersions(buildinfo.Version, tunnel.TerminalRuntimeVersion(freshConn))
 		}
 		if pastePolicy != nil {
-			freshTransfer := transferClient
-			if freshInfo.FileTransfer == nil {
-				freshTransfer = nil
-			} else if freshTransfer == nil {
-				freshTransfer = fileTransferClientForTarget(freshInfo.FileTransfer)
-				transferClient = freshTransfer
-				configureFileTransferRefresh(freshTransfer)
-			} else {
-				freshTransfer.UpdateAuth(filetransfer.Auth{Token: freshInfo.FileTransfer.Auth.Token, ExpiresAt: parseAuthExpiry(freshInfo.FileTransfer.Auth.ExpiresAt)})
-				if policyErr := freshTransfer.VerifyPolicy(reconnectCtx, descriptorFileTransferPolicy(freshInfo.FileTransfer)); policyErr != nil {
-					freshTransfer = nil
+			var freshTransfer *filetransfer.NativeClient
+			var freshLegacy *filetransfer.Client
+			var freshLease *localapi.FileTransferLease
+			if freshInfo.TargetKind == "machine" {
+				freshTransfer, freshLease, _ = nativeFileTransferClient(reconnectCtx, d.peerLocal, freshInfo, newIdempotencyKey())
+				if freshTransfer != nil && freshTransfer.VerifyPolicy(reconnectCtx, descriptorFileTransferPolicy(freshInfo.FileTransfer)) != nil {
+					_ = freshLease.Close()
+					freshTransfer, freshLease = nil, nil
+				}
+			} else if freshInfo.FileTransfer != nil {
+				freshLegacy = fileTransferClientForTarget(freshInfo.FileTransfer)
+				if freshLegacy != nil && freshLegacy.VerifyPolicy(reconnectCtx, descriptorFileTransferPolicy(freshInfo.FileTransfer)) != nil {
+					_ = freshLegacy.Close()
+					freshLegacy = nil
 				}
 			}
-			pastePolicy.Update(encryptedPasteUploader(freshTransfer, keyCoordinator, freshInfo), freshInfo.Terminal.SessionID, fileTransferLimits(freshInfo.FileTransfer))
-			startInbox(freshTransfer, freshInfo, freshInfo.Terminal.SessionID)
+			oldLease := transferLease
+			oldLegacy := legacyTransferClient
+			transferClient, transferLease = freshTransfer, freshLease
+			legacyTransferClient = freshLegacy
+			var freshUploader paste.BatchUploader = freshTransfer
+			if freshLegacy != nil {
+				freshUploader = encryptedPasteUploader(freshLegacy, keyCoordinator, freshInfo)
+			}
+			pastePolicy.Update(freshUploader, freshInfo.Terminal.SessionID, fileTransferLimits(freshInfo.FileTransfer))
+			if oldLease != nil {
+				_ = oldLease.Close()
+			}
+			if oldLegacy != nil {
+				_ = oldLegacy.Close()
+			}
+			if freshTransfer != nil {
+				startInbox(freshTransfer.Client, freshInfo, freshInfo.Terminal.SessionID)
+			} else if freshLegacy != nil {
+				startInbox(freshLegacy, freshInfo, freshInfo.Terminal.SessionID)
+			} else {
+				startInbox(nil, freshInfo, freshInfo.Terminal.SessionID)
+			}
 		}
 		return freshConn, nil
 	}, d.telemetry, nil, tunnel.TelemetryContext{ProjectID: info.ProjectID, EnvironmentID: info.Terminal.EnvironmentID}, tunnel.WithReconnectingOutput(
@@ -8452,7 +8273,11 @@ func actionConnectTarget(c *command.Context, requested string) error {
 	}))
 
 	// Wrap remote input with the file-paste interceptor.
-	pastePolicy = paste.NewPolicy(encryptedPasteUploader(transferClient, keyCoordinator, info), info.Terminal.SessionID, fileTransferLimits(info.FileTransfer))
+	var pasteUploader paste.BatchUploader = transferClient
+	if legacyTransferClient != nil {
+		pasteUploader = encryptedPasteUploader(legacyTransferClient, keyCoordinator, info)
+	}
+	pastePolicy = paste.NewPolicy(pasteUploader, info.Terminal.SessionID, fileTransferLimits(info.FileTransfer))
 	interceptor := paste.NewWithPolicy(conn, pastePolicy,
 		paste.WithDirectInput(),
 		paste.WithNotifier(statusNotifier(useStatusBar)),
@@ -8477,7 +8302,11 @@ func actionConnectTarget(c *command.Context, requested string) error {
 		paste.WithMaxQueuedBytes(d.cfg.FilePaste.MaxQueuedInputBytes),
 		paste.WithPartialFlushDelay(time.Duration(d.cfg.Connect.InputPartialFlushMilliseconds)*time.Millisecond),
 	)
-	startInbox(transferClient, info, info.Terminal.SessionID)
+	if transferClient != nil {
+		startInbox(transferClient.Client, info, info.Terminal.SessionID)
+	} else if legacyTransferClient != nil {
+		startInbox(legacyTransferClient, info, info.Terminal.SessionID)
+	}
 
 	if useStatusBar && info.TargetKind == "project" {
 		pollCtx, cancelPoll := context.WithCancel(ctx)
@@ -8808,6 +8637,26 @@ func localFileTransferSenderFromEnvironment() (*filetransfer.LocalSender, error)
 		return nil, errors.New("Paperboat host-local file transfer token is invalid")
 	}
 	return &filetransfer.LocalSender{Endpoint: endpoint, Token: value}, nil
+}
+
+func nativeFileTransferClient(ctx context.Context, local *localapi.Client, target resolver.ConnectInfo, operationID string) (*filetransfer.NativeClient, *localapi.FileTransferLease, error) {
+	if ctx == nil || local == nil || target.TargetKind != "machine" || target.ProjectID == "" || target.MachineGeneration == 0 || target.Terminal == nil || target.Terminal.EnvironmentID == "" || target.FileTransfer == nil || target.FileTransfer.Auth.ResourceID == "" || operationID == "" {
+		return nil, nil, errors.New("native file transfer target is invalid")
+	}
+	deadline := parseAuthExpiry(target.FileTransfer.Auth.ExpiresAt)
+	lease, err := local.PrepareFileTransfer(ctx, localapi.FileTransferRequest{Schema: localapi.FileTransferSchemaV1, MachineID: target.ProjectID, EnvironmentID: target.Terminal.EnvironmentID, MachineGeneration: target.MachineGeneration, OperationID: operationID, Credential: target.FileTransfer.Auth.Token, AccessSessionID: target.FileTransfer.Auth.ResourceID, Deadline: deadline, MaximumBytes: uint64(target.FileTransfer.Policy.MaxFileBytes)})
+	if err != nil {
+		return nil, nil, err
+	}
+	client, err := filetransfer.NewNativeClient(target.FileTransfer.Endpoint, filetransfer.Auth{Token: target.FileTransfer.Auth.Token, ExpiresAt: deadline}, filetransfer.Binding{SourceMachineID: target.FileTransfer.SourceMachineID, DestinationMachineID: target.FileTransfer.DestinationMachineID, InitiatingUserID: target.FileTransfer.InitiatingUserID}, lease.OpenTransferStream)
+	if err != nil {
+		_ = lease.Close()
+		return nil, nil, err
+	}
+	if target.FileTransfer.Policy.DeliveryTimeoutSeconds > 0 {
+		client.DeliveryTimeout = time.Duration(target.FileTransfer.Policy.DeliveryTimeoutSeconds) * time.Second
+	}
+	return client, lease, nil
 }
 
 func encryptedPasteUploader(client *filetransfer.Client, keys *filetransfer.KeyCoordinator, target resolver.ConnectInfo) paste.BatchUploader {
@@ -9373,7 +9222,11 @@ func manageConfigService(ctx context.Context, machineID string, install bool) er
 	if err != nil {
 		return err
 	}
-	executable, err = filepath.EvalSymlinks(executable)
+	if install {
+		executable, err = endpointbinary.Daemon(executable)
+	} else {
+		executable, err = endpointbinary.DaemonPathForRemoval(executable)
+	}
 	if err != nil {
 		return err
 	}
@@ -9399,14 +9252,15 @@ func manageConfigService(ctx context.Context, machineID string, install bool) er
 	default:
 		return service.ErrUnsupportedPlatform
 	}
-	installer, err := service.New(service.Config{Platform: runtime.GOOS, Kind: service.ConfigKind, ConfigRoot: home, Executable: executable, User: account.Username, Group: group.Name, Arguments: []string{"__runtime-config", "--state-root", stateRoot}, Environment: map[string]string{"HOME": home}, Controller: controller})
+	definition := service.Config{Platform: runtime.GOOS, Kind: service.ConfigKind, ConfigRoot: home, Executable: executable, User: account.Username, Group: group.Name, Arguments: []string{"daemon", "__runtime-config", "--state-root", stateRoot}, Environment: map[string]string{"HOME": home}, Controller: controller}
+	if !install {
+		return service.Remove(ctx, definition)
+	}
+	installer, err := service.New(definition)
 	if err != nil {
 		return err
 	}
-	if install {
-		return installer.Install(ctx)
-	}
-	return installer.Uninstall(ctx)
+	return installer.Install(ctx)
 }
 
 func configStatus(c *command.Context) error {

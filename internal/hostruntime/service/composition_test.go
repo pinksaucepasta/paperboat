@@ -181,14 +181,14 @@ func TestHostLifecycleManagerRollsBackExactBothComponentStateAfterProbeFailure(t
 	updaterControl := &fakeNativeController{status: NativeControllerStatus{Registered: true, Enabled: true, Running: true, Ready: true}}
 	hostd, err := New(Config{
 		Platform: "linux", Kind: HostdKind, ConfigRoot: root, Executable: layout.Binary,
-		User: "alice", Group: "staff", Arguments: []string{"__runtime-hostd"}, Controller: hostdControl,
+		User: "alice", Group: "staff", Arguments: []string{"daemon", "__runtime-hostd"}, Controller: hostdControl,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	updater, err := New(Config{
 		Platform: "linux", Kind: UpdaterKind, ConfigRoot: root, Executable: layout.Binary,
-		User: "root", Group: "root", Arguments: []string{"__runtime-updated"}, Controller: updaterControl,
+		User: "root", Group: "root", Arguments: []string{"daemon", "__runtime-updated"}, Controller: updaterControl,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -249,15 +249,15 @@ func TestHostLifecycleManagerIncludesPrivilegedHostBeforeSupervisor(t *testing.T
 	hostControl := &fakeNativeController{}
 	hostdControl := &fakeNativeController{}
 	updaterControl := &fakeNativeController{}
-	host, err := New(Config{Platform: "linux", Kind: HostKind, ConfigRoot: root, Executable: layout.Binary, User: "root", Group: "root", Arguments: []string{"__runtime-host-service"}, Controller: hostControl})
+	host, err := New(Config{Platform: "linux", Kind: HostKind, ConfigRoot: root, Executable: layout.Binary, User: "root", Group: "root", Arguments: []string{"daemon", "__runtime-host-service"}, Controller: hostControl})
 	if err != nil {
 		t.Fatal(err)
 	}
-	hostd, err := New(Config{Platform: "linux", Kind: HostdKind, ConfigRoot: root, Executable: layout.Binary, User: "alice", Group: "staff", Arguments: []string{"__runtime-hostd"}, Controller: hostdControl})
+	hostd, err := New(Config{Platform: "linux", Kind: HostdKind, ConfigRoot: root, Executable: layout.Binary, User: "alice", Group: "staff", Arguments: []string{"daemon", "__runtime-hostd"}, Controller: hostdControl})
 	if err != nil {
 		t.Fatal(err)
 	}
-	updater, err := New(Config{Platform: "linux", Kind: UpdaterKind, ConfigRoot: root, Executable: layout.Binary, User: "root", Group: "root", Arguments: []string{"__runtime-updated"}, Controller: updaterControl})
+	updater, err := New(Config{Platform: "linux", Kind: UpdaterKind, ConfigRoot: root, Executable: layout.Binary, User: "root", Group: "root", Arguments: []string{"daemon", "__runtime-updated"}, Controller: updaterControl})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 )
 
@@ -81,6 +82,50 @@ func TestInventoryPublishesSortedAuthoritativeMachines(t *testing.T) {
 	}
 	if stopped.ID != "machine_2" || stopped.RuntimeState != "stopped" || stopped.Eligible || stopped.Generation != 0 || stopped.TransferReadiness != "degraded" || stopped.PreviewReadiness != "unavailable" {
 		t.Fatalf("stopped=%#v", stopped)
+	}
+}
+
+func TestInventoryRefreshRetainsDaemonVersionAcrossPublications(t *testing.T) {
+	now := time.Date(2026, 8, 4, 8, 0, 0, 0, time.UTC)
+	controlPlaneErr := errors.New("control plane unavailable")
+	source := &scriptedMachineSource{results: []machineResult{
+		{machines: []api.UserMachine{{ID: "machine_1", DisplayName: "before", InstallationGeneration: 1}}},
+		{err: controlPlaneErr},
+		{machines: []api.UserMachine{{ID: "machine_1", DisplayName: "after", InstallationGeneration: 1}}},
+	}}
+	inventory, store := newTestInventory(t, source, func() time.Time { return now })
+
+	if err := inventory.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.DaemonVersion != buildinfo.Version {
+		t.Fatalf("first daemon version=%q want=%q", first.DaemonVersion, buildinfo.Version)
+	}
+
+	if err := inventory.Refresh(context.Background()); !errors.Is(err, controlPlaneErr) {
+		t.Fatalf("degraded refresh err=%v", err)
+	}
+	degraded, err := store.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if degraded.Generation != first.Generation+1 || degraded.DaemonVersion != buildinfo.Version {
+		t.Fatalf("degraded snapshot=%#v want generation=%d version=%q", degraded, first.Generation+1, buildinfo.Version)
+	}
+
+	if err := inventory.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := store.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered.Generation != degraded.Generation+1 || recovered.DaemonVersion != buildinfo.Version {
+		t.Fatalf("recovered snapshot=%#v want generation=%d version=%q", recovered, degraded.Generation+1, buildinfo.Version)
 	}
 }
 

@@ -80,7 +80,7 @@ func TestLayoutRejectsEscapingBinary(t *testing.T) {
 	}
 }
 
-func TestHostdAndUpdaterInstallersUseOneStableBinary(t *testing.T) {
+func TestHostdAndUpdaterInstallersUseStableDaemon(t *testing.T) {
 	for _, platform := range []string{"linux", "darwin"} {
 		t.Run(platform, func(t *testing.T) {
 			layout := canonicalLayout(t, platform)
@@ -109,12 +109,12 @@ func TestHostdAndUpdaterInstallersUseOneStableBinary(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				for _, expected := range []string{"User=alice", "Group=staff", "RuntimeDirectory=paperboat-hostd", "RuntimeDirectoryMode=0700", "NoNewPrivileges=true", "PAPERBOAT_BINARY=" + layout.Binary, "PAPERBOAT_RUNTIME_CURRENT=" + layout.Binary, "PAPERBOAT_HOSTD_SOCKET=" + layout.HostdSocket} {
+				for _, expected := range []string{"User=alice", "Group=staff", "RuntimeDirectory=paperboat-hostd", "RuntimeDirectoryMode=0700", "NoNewPrivileges=true", "PAPERBOAT_BINARY=" + layout.Binary, "PAPERBOAT_RUNTIME_CURRENT=" + layout.Binary, "PAPERBOAT_HOSTD_SOCKET=" + layout.HostdSocket, `"daemon" "__runtime-hostd"`} {
 					if !strings.Contains(string(hostdDefinition), expected) {
 						t.Fatalf("hostd missing %q:\n%s", expected, hostdDefinition)
 					}
 				}
-				for _, expected := range []string{"User=root", "Group=root", "RuntimeDirectory=paperboat-updated", "After=local-fs.target network-online.target", "Wants=network-online.target", "PAPERBOAT_RELEASE_ROOT=" + layout.ReleasesRoot, "PAPERBOAT_BINARY=" + layout.Binary, "PAPERBOAT_BINARY_ROLLBACK=" + layout.BinaryRollback, "PAPERBOAT_BINARY_STAGED=" + layout.BinaryStaged, "PAPERBOAT_UPDATED_SOCKET=" + updaterControlSocket(platform)} {
+				for _, expected := range []string{"User=root", "Group=root", "RuntimeDirectory=paperboat-updated", "After=local-fs.target network-online.target", "Wants=network-online.target", "PAPERBOAT_RELEASE_ROOT=" + layout.ReleasesRoot, "PAPERBOAT_BINARY=" + layout.Binary, "PAPERBOAT_BINARY_ROLLBACK=" + layout.BinaryRollback, "PAPERBOAT_BINARY_STAGED=" + layout.BinaryStaged, "PAPERBOAT_UPDATED_SOCKET=" + updaterControlSocket(platform), `"daemon" "__runtime-updated"`} {
 					if !strings.Contains(string(updaterDefinition), expected) {
 						t.Fatalf("updater missing %q:\n%s", expected, updaterDefinition)
 					}

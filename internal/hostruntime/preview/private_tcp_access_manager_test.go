@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/privatepreviewproxy"
 )
@@ -69,7 +70,7 @@ func TestPrivateTCPAccessManagerAuthorizesBeforePublishingAndDeleteIsReplaySafe(
 		if !resolved {
 			t.Fatal("listener started before route authorization")
 		}
-		if request.RouteID != "route_tcp_1" || request.ListenPort != 0 || request.MaximumConnections != 128 {
+		if request.RouteID != "route_tcp_1" || request.ListenPort != 0 || request.ListenAddress != "127.0.0.1:0" || request.MaximumConnections != 128 {
 			t.Fatalf("request=%#v", request)
 		}
 		return proxy, nil
@@ -101,6 +102,33 @@ func TestPrivateTCPAccessManagerAuthorizesBeforePublishingAndDeleteIsReplaySafe(
 	defer proxy.mu.Unlock()
 	if proxy.closed != 1 {
 		t.Fatalf("closed=%d", proxy.closed)
+	}
+}
+
+func TestPrivateTCPAccessManagerListenerLifetimeAndExactIPv6AddressAreHostOwned(t *testing.T) {
+	proxy := &privateTCPAccessTestProxy{rawURL: "http://[::1]:24001"}
+	var startContext context.Context
+	manager, _ := newPrivateTCPAccessTestManager(t, 1, func(context.Context, string) (string, string, error) {
+		return "route_tcp_1", "tun_1", nil
+	}, func(ctx context.Context, request PrivateTCPAccessRequest) (privateTCPAccessProxy, error) {
+		startContext = ctx
+		if request.ListenAddress != "[::1]:0" {
+			t.Fatalf("listen address=%q", request.ListenAddress)
+		}
+		return proxy, nil
+	})
+	requestContext, cancelRequest := context.WithCancel(context.Background())
+	request := httptest.NewRequest(http.MethodPost, "/v1/private-tcp-access", strings.NewReader(`{"schema":"paperboat.private-tcp-access/v1","kind":"private_tcp_access_request","selector":"tun_1","listen_address":"[::1]:0"}`)).WithContext(requestContext)
+	request.Header.Set("Authorization", "Bearer local-token")
+	recorder := httptest.NewRecorder()
+	manager.ServeHTTP(recorder, request)
+	cancelRequest()
+	var startErr error
+	if startContext != nil {
+		startErr = startContext.Err()
+	}
+	if recorder.Code != http.StatusCreated || startContext == nil || startErr != nil || !strings.Contains(recorder.Body.String(), `"listen_address":"[::1]:24001"`) {
+		t.Fatalf("status=%d startErr=%v body=%s", recorder.Code, startErr, recorder.Body.String())
 	}
 }
 
@@ -184,6 +212,80 @@ func TestPrivateTCPAccessManagerShutdownClosesEverySessionAndRejectsNew(t *testi
 	response := privateTCPAccessRequest(t, manager, http.MethodPost, "/v1/private-tcp-access", "local-token", validPrivateTCPAccessBody("tun_1"))
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status=%d", response.Code)
+	}
+}
+
+func TestPrivateTCPAccessManagerReconcilesDefinitiveDenialAndOutageExpiry(t *testing.T) {
+	for name, testCase := range map[string]struct {
+		secondError error
+		reconcileAt time.Duration
+	}{
+		"paused or deleted":            {ErrPrivateTCPAccessForbidden, time.Second},
+		"outage past authority expiry": {ErrPrivateTCPAccessUnavailable, 2 * time.Minute},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			proxy := &privateTCPAccessTestProxy{rawURL: "http://127.0.0.1:24001"}
+			calls := 0
+			now := time.Now().UTC()
+			manager, err := NewPrivateTCPAccessManager(PrivateTCPAccessManagerConfig{ControlToken: "local-token", RunContext: ctx, ReconcileInterval: time.Minute,
+				resolve: func(context.Context, string) (string, string, error) { return "route_1", "tun_1", nil },
+				start:   func(context.Context, PrivateTCPAccessRequest) (privateTCPAccessProxy, error) { return proxy, nil },
+				validate: func(context.Context, string, string) (time.Time, error) {
+					calls++
+					if calls > 1 {
+						return time.Time{}, testCase.secondError
+					}
+					return now.Add(time.Minute), nil
+				}, newID: func() (string, error) { return "reconcile", nil }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer manager.Close()
+			if response := privateTCPAccessRequest(t, manager, http.MethodPost, "/v1/private-tcp-access", "local-token", validPrivateTCPAccessBody("tun_1")); response.Code != http.StatusCreated {
+				t.Fatalf("create=%d %s", response.Code, response.Body.String())
+			}
+			manager.reconcileOnce(ctx, now.Add(testCase.reconcileAt))
+			proxy.mu.Lock()
+			closed := proxy.closed
+			proxy.mu.Unlock()
+			if closed != 1 {
+				t.Fatalf("closed=%d", closed)
+			}
+		})
+	}
+}
+
+func TestPrivateTCPAccessManagerRetainsListenerDuringBoundedOutage(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	proxy := &privateTCPAccessTestProxy{rawURL: "http://127.0.0.1:24002"}
+	now := time.Now().UTC()
+	calls := 0
+	manager, err := NewPrivateTCPAccessManager(PrivateTCPAccessManagerConfig{ControlToken: "local-token", RunContext: ctx, ReconcileInterval: time.Minute,
+		resolve: func(context.Context, string) (string, string, error) { return "route_1", "tun_1", nil },
+		start:   func(context.Context, PrivateTCPAccessRequest) (privateTCPAccessProxy, error) { return proxy, nil },
+		validate: func(context.Context, string, string) (time.Time, error) {
+			calls++
+			if calls > 1 {
+				return time.Time{}, ErrPrivateTCPAccessUnavailable
+			}
+			return now.Add(time.Minute), nil
+		}, newID: func() (string, error) { return "bounded-outage", nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	if response := privateTCPAccessRequest(t, manager, http.MethodPost, "/v1/private-tcp-access", "local-token", validPrivateTCPAccessBody("tun_1")); response.Code != http.StatusCreated {
+		t.Fatalf("create=%d %s", response.Code, response.Body.String())
+	}
+	manager.reconcileOnce(ctx, now.Add(30*time.Second))
+	proxy.mu.Lock()
+	closed := proxy.closed
+	proxy.mu.Unlock()
+	if closed != 0 {
+		t.Fatalf("closed during bounded outage=%d", closed)
 	}
 }
 

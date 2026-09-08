@@ -3,7 +3,6 @@ package localapi
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -45,7 +44,7 @@ type PeerProbeBroker interface {
 }
 
 type FileTransferBroker interface {
-	PrepareFileTransfer(context.Context, Peer, FileTransferKeyRequest) (FileTransferKeyResult, error)
+	PrepareFileTransfer(context.Context, Peer, FileTransferRequest) (FileTransferResult, error)
 	OpenFileTransferStream(context.Context, Peer, string) (net.Conn, error)
 	ReleaseFileTransfer(Peer, string) error
 }
@@ -118,6 +117,8 @@ func NewServer(config ServerConfig) (*Server, error) {
 }
 
 func (s *Server) Run(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	listener, err := s.listen(ctx)
 	if err != nil {
 		return err
@@ -152,6 +153,7 @@ func (s *Server) Run(ctx context.Context) error {
 		// lifetime and are closed by their transport lease.
 		_ = httpServer.Close()
 	}()
+	defer func() { cancel(); <-shutdownDone }()
 	err = httpServer.Serve(listener)
 	if ctx.Err() != nil && errors.Is(err, http.ErrServerClosed) {
 		<-shutdownDone
@@ -201,8 +203,8 @@ func (s *Server) handler() http.Handler {
 			s.peerProbe(writer, request, requestID, peer)
 			return
 		}
-		if request.URL.Path == "/v1/file-transfer-keys" {
-			s.fileTransferKey(writer, request, requestID, peer)
+		if request.URL.Path == "/v1/file-transfers" {
+			s.fileTransfer(writer, request, requestID, peer)
 			return
 		}
 		if request.URL.Path == "/v1/file-transfer-streams" {
@@ -240,22 +242,22 @@ func (s *Server) handler() http.Handler {
 	})
 }
 
-func (s *Server) fileTransferKey(writer http.ResponseWriter, request *http.Request, requestID string, peer Peer) {
+func (s *Server) fileTransfer(writer http.ResponseWriter, request *http.Request, requestID string, peer Peer) {
 	if request.Method != http.MethodPost || request.URL.RawQuery != "" || request.Header.Get("Content-Type") != "application/json" || request.ContentLength < 0 || request.ContentLength > maxJSONBytes || s.config.FileTransfers == nil {
-		writeError(writer, http.StatusBadRequest, requestID, "invalid_request", "file transfer key request is invalid")
+		writeError(writer, http.StatusBadRequest, requestID, "invalid_request", "file transfer request is invalid")
 		return
 	}
-	var value FileTransferKeyRequest
+	var value FileTransferRequest
 	if decodeStrictJSON(io.LimitReader(request.Body, maxJSONBytes+1), &value) != nil || value.Validate(time.Now().UTC()) != nil {
 		writeError(writer, http.StatusBadRequest, requestID, "invalid_file_transfer", "file transfer key request is invalid")
 		return
 	}
 	result, err := s.config.FileTransfers.PrepareFileTransfer(request.Context(), peer, value)
-	if err != nil || len(result.PeerContext) == 0 {
+	if err != nil || result.Handle == "" {
 		if result.Handle != "" {
 			_ = s.config.FileTransfers.ReleaseFileTransfer(peer, result.Handle)
 		}
-		message := "file transfer key delivery is unavailable"
+		message := "file transfer is unavailable"
 		if err != nil {
 			message += ": " + safeErrorMessage(err)
 		}
@@ -284,20 +286,12 @@ func (s *Server) fileTransferKey(writer http.ResponseWriter, request *http.Reque
 		}
 		return
 	}
-	encodedContext := base64.RawURLEncoding.EncodeToString(result.PeerContext)
-	headers := "HTTP/1.1 200 OK\r\nX-Paperboat-Protocol: " + ProtocolV1 + "\r\nX-Paperboat-Peer-Context: " + encodedContext + "\r\nConnection: close\r\n"
-	if result.Handle != "" {
-		headers += "X-Paperboat-Transfer-Handle: " + result.Handle + "\r\n"
-	}
+	headers := "HTTP/1.1 200 OK\r\nX-Paperboat-Protocol: " + ProtocolV1 + "\r\nX-Paperboat-Transfer-Handle: " + result.Handle + "\r\nConnection: close\r\n"
 	if _, err = buffered.WriteString(headers + "\r\n"); err != nil || buffered.Flush() != nil {
 		_ = local.Close()
 		if result.Handle != "" {
 			_ = s.config.FileTransfers.ReleaseFileTransfer(peer, result.Handle)
 		}
-		return
-	}
-	if result.Handle == "" {
-		_ = local.Close()
 		return
 	}
 	go func() {
@@ -371,6 +365,14 @@ func (s *Server) peerProbe(writer http.ResponseWriter, request *http.Request, re
 	defer cancel()
 	result, err := s.config.PeerProbes.ProbePeer(ctx, peer, value)
 	if err != nil {
+		if errors.Is(err, ErrPermission) {
+			writeError(writer, http.StatusForbidden, requestID, "permission_denied", "peer probe authority was denied; refresh the target and its authorization")
+			return
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			writeError(writer, http.StatusGatewayTimeout, requestID, "deadline_exceeded", "peer probe deadline expired")
+			return
+		}
 		writeError(writer, http.StatusServiceUnavailable, requestID, "peer_probe_unavailable", "peer probe is unavailable: "+safeErrorMessage(err))
 		return
 	}

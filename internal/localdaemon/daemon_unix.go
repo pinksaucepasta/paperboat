@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/transportmanager"
@@ -35,6 +36,8 @@ type DaemonConfig struct {
 }
 
 func Run(ctx context.Context, config DaemonConfig) error {
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
 	if config.Source == nil || config.OwnerUID < 0 || config.OwnerGID < 0 || config.Paths.SocketPath == "" || config.Paths.LockPath == "" {
 		return ErrInvalidInventoryConfig
 	}
@@ -50,10 +53,13 @@ func Run(ctx context.Context, config DaemonConfig) error {
 			return err
 		}
 	}
+	transportStopped := make(chan struct{})
 	go func() {
+		defer close(transportStopped)
 		<-ctx.Done()
 		_ = peerTransports.Close()
 	}()
+	defer func() { stop(); <-transportStopped }()
 	defer peerTransports.Close()
 	if closer, ok := config.FileTransfers.(interface{ Close() error }); ok {
 		defer closer.Close()
@@ -85,13 +91,17 @@ func Run(ctx context.Context, config DaemonConfig) error {
 		}()
 	}
 
-	store, err := localapi.NewSnapshotStore(nil)
-	if err != nil {
-		return err
-	}
 	diagnosticClock := config.Clock
 	if diagnosticClock == nil {
 		diagnosticClock = time.Now
+	}
+	// Local diagnostics must be available while remote inventory is reconciling.
+	store, err := localapi.NewSnapshotStore(&localapi.Snapshot{
+		Schema: localapi.SnapshotSchemaV1, Generation: 1,
+		ObservedAt: diagnosticClock().UTC(), DaemonState: "starting", DaemonVersion: buildinfo.Version,
+	})
+	if err != nil {
+		return err
 	}
 	diagnosticAPI := &diagnosticService{recorder: recorder, store: store, stateRoot: config.Paths.StateRoot, ownerUID: config.OwnerUID, clock: diagnosticClock}
 	inventory, err := NewInventory(InventoryConfig{Source: config.Source, Store: store, RefreshInterval: config.RefreshInterval, RequestTimeout: config.RequestTimeout, Clock: config.Clock, OnMachines: func(refreshCtx context.Context, machines []api.UserMachine) {
@@ -125,19 +135,6 @@ func Run(ctx context.Context, config DaemonConfig) error {
 	if err != nil {
 		return err
 	}
-	// A degraded snapshot is still authoritative local state and allows the API
-	// to start while the control plane is temporarily unavailable.
-	refreshErr := inventory.Refresh(ctx)
-	refreshOutcome := "ready"
-	refreshSeverity := "info"
-	if refreshErr != nil {
-		refreshOutcome = "degraded"
-		refreshSeverity = "warning"
-	}
-	_ = recorder.Record("reconciliation", "inventory_refresh", refreshSeverity, map[string]string{"outcome": refreshOutcome})
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
 	server, err := localapi.NewServer(localapi.ServerConfig{
 		SocketPath:           config.Paths.SocketPath,
 		OwnerUID:             config.OwnerUID,
@@ -160,7 +157,19 @@ func Run(ctx context.Context, config DaemonConfig) error {
 	defer cancel()
 	results := make(chan error, 3)
 	go func() { results <- server.Run(runCtx) }()
-	go func() { results <- inventory.runTicker(runCtx) }()
+	go func() {
+		refreshErr := inventory.Refresh(runCtx)
+		refreshOutcome, refreshSeverity := "ready", "info"
+		if refreshErr != nil {
+			refreshOutcome, refreshSeverity = "degraded", "warning"
+		}
+		_ = recorder.Record("reconciliation", "inventory_refresh", refreshSeverity, map[string]string{"outcome": refreshOutcome})
+		if runCtx.Err() != nil {
+			results <- runCtx.Err()
+			return
+		}
+		results <- inventory.runTicker(runCtx)
+	}()
 	go func() { results <- observations.Run(runCtx) }()
 	first := <-results
 	cancel()

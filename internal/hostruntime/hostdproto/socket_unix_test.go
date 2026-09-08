@@ -17,6 +17,13 @@ import (
 
 func TestSocketLifecyclePersistsFenceAndRejectsSupersededWorker(t *testing.T) {
 	config := testSocketConfig(t)
+	// Native service restart may remove its entire ephemeral socket directory.
+	// The epoch fence belongs to the private persistent installation directory.
+	runtimeState := t.TempDir()
+	if err := os.Chmod(runtimeState, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config.StatePath = filepath.Join(runtimeState, "hostd", "fence.json")
 	server, cancel, done := startSocketServer(t, config)
 	client := testSocketClient(t, config)
 
@@ -59,12 +66,18 @@ func TestSocketLifecyclePersistsFenceAndRejectsSupersededWorker(t *testing.T) {
 	if err != nil || state.Epoch != 2 || state.WorkerID != "runtime-new" {
 		t.Fatalf("fence state=%+v err=%v", state, err)
 	}
+	if err := os.RemoveAll(filepath.Dir(config.SocketPath)); err != nil {
+		t.Fatal(err)
+	}
 	_, cancel, done = startSocketServer(t, config)
 	defer stopSocketServer(t, cancel, done)
 	restarted := testSocketClient(t, config)
 	next := negotiateSocket(t, restarted, "runtime-next")
 	if next.Epoch != second.Epoch+1 {
 		t.Fatalf("restart epoch=%d, want %d", next.Epoch, second.Epoch+1)
+	}
+	if err := clientHeartbeat(restarted, second); !errors.Is(err, ErrFenced) {
+		t.Fatalf("old lease survived native restart: %v", err)
 	}
 }
 

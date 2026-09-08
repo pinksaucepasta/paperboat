@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 )
 
@@ -22,15 +23,19 @@ func runLocalDaemonService(_ context.Context, args []string, _ io.Writer, _ io.W
 	if err != nil {
 		return err
 	}
-	return service.RunWindowsService(service.ServiceEntryConfig{
+	return service.RunWindowsService(localDaemonServiceConfig(install, layout.Binary))
+}
+
+func localDaemonServiceConfig(install hostinstall.WindowsRuntimeConfig, executable string) service.ServiceEntryConfig {
+	return service.ServiceEntryConfig{
 		Name:        "PaperboatLocalDaemon",
-		Executable:  layout.Binary,
-		Arguments:   []string{"__local-daemon", "--server", install.ControlURL},
+		Executable:  executable,
+		Arguments:   []string{"daemon", "--server", install.ControlURL},
 		EnrolledSID: install.OwnerSID,
 		LaunchFailure: func(err error) {
 			recordWindowsServiceLaunchFailure("PaperboatLocalDaemon", err)
 		},
-	})
+	}
 }
 
 func executeLocalDaemonService(ctx context.Context, args []string, stdout, stderr io.Writer) int {

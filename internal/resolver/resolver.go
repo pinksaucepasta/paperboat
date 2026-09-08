@@ -187,6 +187,9 @@ type AuthTarget struct {
 	Token     string
 	ExpiresAt string
 	Scopes    []string
+	// ResourceID is the authoritative machine-access grant shared by the
+	// operation credential and signed native network scope.
+	ResourceID string
 }
 
 // TerminalTarget is the client-safe environment WebSocket endpoint returned

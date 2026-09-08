@@ -49,6 +49,7 @@ func (t LocalPeerTunnel) request(info resolver.ConnectInfo, consumer, operationI
 	if err != nil {
 		return localapi.PeerStreamRequest{}, err
 	}
+	request.AccessSessionID = info.Terminal.Auth.ResourceID
 	request.Transport = string(t.Transport)
 	if request.Transport == "" {
 		request.Transport = string(TerminalTransportAuto)

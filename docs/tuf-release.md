@@ -8,7 +8,7 @@ Paperboat publishes exactly five native release assets. Every asset is the compl
 - `pb-linux-arm64`
 - `pb-darwin-arm64.pkg`
 
-Linux assets are raw ELF executables. Windows assets are PE executables. The macOS asset is a signed and notarized arm64 installer package. The installed executable handles CLI, services, runtime, updates, and background roles through internal arguments.
+Linux assets are raw ELF executables. Windows assets are PE executables. The macOS asset is an arm64 installer package containing one ad-hoc-signed executable at `/Library/PrivilegedHelperTools/Paperboat/bin/pb`; `/usr/local/bin/pb` is an absolute symlink to that canonical executable. Publisher signing and notarization are optional; TUF authenticates every release asset. The installed executable handles CLI commands and explicit `pb daemon` service invocations.
 
 ## Distribution contract
 
@@ -29,6 +29,13 @@ Each TUF target is one of the five canonical asset names. Its custom metadata ha
 - the signed `release_index` policy
 
 Clients refresh and verify TUF metadata, select their canonical asset target, validate the custom metadata, and download the bytes from its immutable GitHub URL. They verify the downloaded length and SHA-256 against the TUF target before installing or activating it.
+
+On Unix, `pb update status` reports a recorded activation failure after recovery.
+If the transaction or activation record cannot be read, it returns
+`recovery_required` instead of reporting activation complete; completion remains
+unknown until the updater can read its recovery state. The transaction preserves the signed canary policy and activation/recovery deadlines across helper restarts. Canary policies require 2–32 samples. macOS bootstrap verifies and extracts the package without modifying installed paths or receipts; the native installer transaction owns executable cutover. Completed Unix bootstrap binds the enrolled user daemon to the canonical installed executable; activation and rollback verify the running daemon and updater versions.
+
+If an older activation helper cannot recover, a verified newer native reinstall can supersede its transaction. The updater verifies the installed executable against the signed payload and requires a strictly newer version before recording the new installation as idle and retiring the obsolete handoff. Recovery does not require editing the journal or replacing the helper by hand, and reinstall does not waive TUF verification or rollback protection.
 
 ## current.json
 
@@ -55,7 +62,7 @@ Users start with:
 
 `curl -fsSL https://get.pprbt.dev/install | sh`
 
-The shell installer fetches `current.json`, selects the Linux or macOS asset, downloads that asset from GitHub, verifies its length and SHA-256, and installs it. On macOS, the package installer places `pb` in `/usr/local/bin/pb`. On Linux, the raw executable is installed as `pb` in the selected directory.
+The shell installer fetches `current.json`, selects the Linux or macOS asset, downloads that asset from GitHub, verifies its length and SHA-256, and installs it. On macOS, the package installer places the executable at `/Library/PrivilegedHelperTools/Paperboat/bin/pb` and links `/usr/local/bin/pb` to it. On Linux, the raw executable is installed as `pb` in the selected directory.
 
 PowerShell uses the same `current.json` and GitHub-only flow. It selects `pb-windows-amd64.exe` or `pb-windows-arm64.exe`, verifies it, and invokes that downloaded executable with `__install` for the elevated atomic installation. Services must point at the installed `pb.exe`.
 

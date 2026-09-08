@@ -307,9 +307,9 @@ func TestUpdateWithProgressHonorsCancellation(t *testing.T) {
 	}
 }
 
-func TestWindowsUpdateReturnsStagedResultSoCanonicalCallerCanExit(t *testing.T) {
+func TestUpdateReturnsStagedResultSoCanonicalCallerCanExit(t *testing.T) {
 	response := updated.ControlResponse{Version: "2026.08.27.50", Pending: true}
-	result := updateCommandResult("windows", "2026.08.27.46", response)
+	result := updateCommandResult("2026.08.27.46", response, nil)
 	if !result.ActivationPending || result.CLIUpdated || result.RuntimeUpdated {
 		t.Fatalf("result = %+v", result)
 	}
@@ -322,14 +322,14 @@ func TestWindowsUpdateReturnsStagedResultSoCanonicalCallerCanExit(t *testing.T) 
 	if err := writeUpdateResult(command, result, response.Version); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "staged") || !strings.Contains(output.String(), "Wait a few seconds") || !strings.Contains(output.String(), "pb update status") {
+	if !strings.Contains(output.String(), "staged") || !strings.Contains(output.String(), "Activation is in progress") || !strings.Contains(output.String(), "pb update status") {
 		t.Fatalf("output = %q", output.String())
 	}
 }
 
 func TestUpdateStatusPreservesWindowsActivationState(t *testing.T) {
 	response := updated.ControlResponse{Version: "2026.08.27.50", Pending: true, ActivationFailure: "activation_failed"}
-	result := updateStatusCommandResult("2026.08.27.46", response)
+	result := updateStatusCommandResult("2026.08.27.46", response, nil)
 	if !result.ActivationPending || result.ActivationFailure != "activation_failed" {
 		t.Fatalf("result = %+v", result)
 	}
@@ -352,6 +352,109 @@ func TestUpdateStatusPreservesWindowsActivationState(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "Activation: failed (activation_failed)") {
 		t.Fatalf("output = %q", output.String())
+	}
+}
+
+func TestUpdateStatusUsesAuthenticatedDaemonVersion(t *testing.T) {
+	response := updated.ControlResponse{Version: "owner-build", Pending: false}
+	snapshot := &localapi.Snapshot{DaemonState: "ready", DaemonVersion: "daemon-build"}
+	result := updateStatusCommandResult("cli-build", response, snapshot)
+	if result.RuntimeVersion != "daemon-build" || !result.RuntimeAvailable || result.RuntimeState != "ready" {
+		t.Fatalf("result=%+v", result)
+	}
+
+	result = updateStatusCommandResult("cli-build", response, nil)
+	if result.RuntimeVersion != "" || result.RuntimeAvailable || result.RuntimeState != "" {
+		t.Fatalf("absent daemon result=%+v", result)
+	}
+
+	starting := &localapi.Snapshot{DaemonState: "starting", DaemonVersion: "daemon-build"}
+	result = updateStatusCommandResult("cli-build", response, starting)
+	if result.RuntimeVersion != "" || result.RuntimeAvailable || result.RuntimeState != "starting" {
+		t.Fatalf("starting daemon result=%+v", result)
+	}
+}
+
+func TestUpdateCommandResultRequiresCompletedMatchingDaemon(t *testing.T) {
+	matching := &localapi.Snapshot{DaemonState: "ready", DaemonVersion: "candidate"}
+	for _, test := range []struct {
+		name     string
+		response updated.ControlResponse
+		snapshot *localapi.Snapshot
+		wantCLI  bool
+		wantRun  bool
+	}{
+		{name: "pending", response: updated.ControlResponse{Version: "candidate", Updated: true, Pending: true}, snapshot: matching},
+		{name: "missing daemon", response: updated.ControlResponse{Version: "candidate", Updated: true}, wantCLI: true},
+		{name: "wrong daemon version", response: updated.ControlResponse{Version: "candidate", Updated: true}, snapshot: &localapi.Snapshot{DaemonState: "ready", DaemonVersion: "previous"}, wantCLI: true},
+		{name: "matching daemon", response: updated.ControlResponse{Version: "candidate", Updated: true}, snapshot: matching, wantCLI: true, wantRun: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := updateCommandResult("previous", test.response, test.snapshot)
+			if result.CLIUpdated != test.wantCLI || result.RuntimeUpdated != test.wantRun {
+				t.Fatalf("result=%+v, want cli=%t runtime=%t", result, test.wantCLI, test.wantRun)
+			}
+		})
+	}
+}
+
+func TestReadLocalDaemonSnapshotIsReadOnly(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
+		t.Skip("local API transport is platform-specific")
+	}
+	root := commandRuntimeTestRoot(t)
+	if runtime.GOOS != "windows" {
+		home, runtimeRoot := filepath.Join(root, "home"), filepath.Join(root, "runtime")
+		for _, directory := range []string{home, runtimeRoot} {
+			if err := os.MkdirAll(directory, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		t.Setenv("HOME", home)
+		t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
+		t.Setenv("XDG_RUNTIME_DIR", runtimeRoot)
+		t.Setenv("TMPDIR", runtimeRoot)
+	}
+	paths, err := currentLocalDaemonPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	store, err := localapi.NewSnapshotStore(&localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now, DaemonState: "ready", DaemonVersion: "daemon-build"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverConfig, err := commandLocalAPIServerConfig(paths.SocketPath, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := localapi.NewServer(serverConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverCtx, cancelServer := context.WithCancel(context.Background())
+	defer cancelServer()
+	done := make(chan error, 1)
+	go func() { done <- server.Run(serverCtx) }()
+	waitForCommandSocket(t, paths.SocketPath)
+
+	previousInstaller := installLocalDaemonService
+	installCalls := 0
+	installLocalDaemonService = func(context.Context, string, string, string) error {
+		installCalls++
+		return errors.New("unexpected daemon installation")
+	}
+	t.Cleanup(func() { installLocalDaemonService = previousInstaller })
+	snapshot, err := readLocalDaemonSnapshot(context.Background())
+	if err != nil || snapshot.DaemonVersion != "daemon-build" || snapshot.DaemonState != "ready" {
+		t.Fatalf("snapshot=%+v err=%v", snapshot, err)
+	}
+	if installCalls != 0 {
+		t.Fatalf("read-only probe invoked installer %d times", installCalls)
+	}
+	cancelServer()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("server err=%v", err)
 	}
 }
 
@@ -1222,6 +1325,12 @@ func TestUserFacingErrorSanitizesInfrastructureFailures(t *testing.T) {
 			want: "daemon.lock",
 		},
 		{
+			name:   "local permission failure",
+			err:    fmt.Errorf("start local daemon: %w", syscall.EACCES),
+			want:   "start local daemon:",
+			forbid: []string{"unreachable", "network connection"},
+		},
+		{
 			name: "operation deadline",
 			err:  fmt.Errorf("peer stream setup: %w", context.DeadlineExceeded),
 			want: "peer stream setup: context deadline exceeded",
@@ -1653,20 +1762,27 @@ func TestCollectLocalDoctorReportsMachineInboxCredential(t *testing.T) {
 	}
 }
 
-func TestHostRuntimeEntryPointIsHiddenAndStrict(t *testing.T) {
+func TestCLIExposesDaemonWithNestedRuntimeEntryPoints(t *testing.T) {
 	root := newRootCommand()
-	command, _, err := root.Find([]string{"__runtime-host"})
-	if err != nil || command == nil || !command.Hidden {
-		t.Fatalf("runtime command = %#v, %v", command, err)
+	daemon, _, err := root.Find([]string{"daemon"})
+	if err != nil || daemon == root || daemon.Hidden {
+		t.Fatalf("explicit daemon command missing: %v", err)
 	}
+	worker, _, err := root.Find([]string{"daemon", "__runtime-worker"})
+	if err != nil || worker.Parent() != daemon {
+		t.Fatalf("worker is not owned by daemon: %v", err)
+	}
+	for _, command := range root.Commands() {
+		if command.Name() == "__local-daemon" || command.Name() == "__windows-sshd-service" || strings.HasPrefix(command.Name(), "__runtime-") && command.Name() != "__runtime-service" {
+			t.Fatalf("CLI exposes daemon runtime %s", command.Name())
+		}
+	}
+}
+
+func TestDaemonHelpThroughCLI(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if code := run(context.Background(), []string{"__runtime-host", "extra"}, &stdout, &stderr); code != 2 {
-		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
-	}
-	stdout.Reset()
-	stderr.Reset()
-	if code := run(context.Background(), []string{"help"}, &stdout, &stderr); code != 0 || strings.Contains(stdout.String(), "__runtime-host") {
-		t.Fatalf("help exposed runtime command: code=%d output=%q", code, stdout.String())
+	if code := run(context.Background(), []string{"daemon", "--help"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "pb daemon") || stderr.Len() != 0 {
+		t.Fatalf("daemon help: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }
 
@@ -3626,7 +3742,7 @@ func TestSelectStatusMachinePrefersIDAndRejectsAmbiguousAlias(t *testing.T) {
 func TestWriteStatusIncludesOperationalFieldsAndSafeHealth(t *testing.T) {
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	snapshot := localapi.Snapshot{
-		Schema: localapi.SnapshotSchemaV1, Generation: 3, ObservedAt: now, DaemonState: "degraded",
+		Schema: localapi.SnapshotSchemaV1, Generation: 3, ObservedAt: now, DaemonState: "degraded", DaemonVersion: "dev",
 		Health:   []localapi.HealthItem{{Code: "control_plane_unavailable", Severity: "error", Title: "Control plane is unavailable", Recovery: "Check network access", ETag: "control_plane_unavailable"}},
 		Machines: []localapi.MachineStatus{{ID: "machine_1", Alias: "Studio Mac", Eligible: true, RuntimeState: "ready", Generation: 4, LastObservedAt: &now, ActiveConsumers: 2, SelectedPath: "relay", RelayRegion: "bom", TransferReadiness: "ready", PreviewReadiness: "degraded", SSHReadiness: "unavailable"}},
 	}
@@ -3667,7 +3783,7 @@ func TestDoctorCommandUsesOwnerSocketAndStableJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 8, 4, 15, 0, 0, 0, time.UTC)
-	snapshot := localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now, DaemonState: "ready", Machines: []localapi.MachineStatus{}}
+	snapshot := localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now, DaemonState: "ready", DaemonVersion: "dev", Machines: []localapi.MachineStatus{}}
 	store, err := localapi.NewSnapshotStore(&snapshot)
 	if err != nil {
 		t.Fatal(err)
@@ -3729,7 +3845,7 @@ func TestWaitCommandUsesLocalWatchAndStableExitResults(t *testing.T) {
 	}
 	now := time.Date(2026, 8, 4, 13, 0, 0, 0, time.UTC)
 	snapshot := localapi.Snapshot{
-		Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now, DaemonState: "ready",
+		Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now, DaemonState: "ready", DaemonVersion: "dev",
 		Machines: []localapi.MachineStatus{{ID: "machine_1", Alias: "Studio Mac", Eligible: true, RuntimeState: "ready", Generation: 4, SelectedPath: "none", TransferReadiness: "ready", PreviewReadiness: "ready", SSHReadiness: "unavailable", NATMappingIPv4: "unknown", NATMappingIPv6: "unknown", CaptivePortal: "unknown", PMTU: "unknown", RouterProtocol: "unknown", RouterMapping: "unknown", MappingLifetime: "unknown", UpdateHealth: "unknown"}},
 	}
 	store, err := localapi.NewSnapshotStore(&snapshot)
@@ -3796,7 +3912,7 @@ func TestBugreportCommandUsesDaemonBundleAndStableJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 8, 4, 15, 0, 0, 0, time.UTC)
-	snapshot := localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now, DaemonState: "ready"}
+	snapshot := localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now, DaemonState: "ready", DaemonVersion: "dev"}
 	store, _ := localapi.NewSnapshotStore(&snapshot)
 	bundlePath := filepath.Join(root, "bugreport-pb-0123456789abcdef0123456789abcdef.zip")
 	content := []byte("PK command bundle")
@@ -3896,7 +4012,7 @@ func TestLocalDaemonSnapshotInstallsOnlyForUnavailableSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 8, 4, 14, 0, 0, 0, time.UTC)
-	snapshot := localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now, DaemonState: "ready", Machines: []localapi.MachineStatus{}}
+	snapshot := localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now, DaemonState: "ready", DaemonVersion: "dev", Machines: []localapi.MachineStatus{}}
 	store, _ := localapi.NewSnapshotStore(&snapshot)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -4116,7 +4232,7 @@ func TestRebindLocalDaemonStopsStartsAndWaitsForReadySnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
-	snapshot := localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now, DaemonState: "ready", Machines: []localapi.MachineStatus{}}
+	snapshot := localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now, DaemonState: "ready", DaemonVersion: "dev", Machines: []localapi.MachineStatus{}}
 	store, err := localapi.NewSnapshotStore(&snapshot)
 	if err != nil {
 		t.Fatal(err)
@@ -4279,7 +4395,7 @@ func TestResolveSSHCommandTargetFastUsesWarmSnapshotAndCache(t *testing.T) {
 	}
 	now := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
 	snapshot := localapi.Snapshot{
-		Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now, DaemonState: "ready",
+		Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now, DaemonState: "ready", DaemonVersion: "dev",
 		Machines: []localapi.MachineStatus{{ID: "mch_1", EnvironmentID: "env_1", WorkspaceRoot: "/root", Alias: "hn-byod-ready", Eligible: true, RuntimeState: "ready", Generation: 4, SelectedPath: "none", TransferReadiness: "unavailable", PreviewReadiness: "unavailable", SSHReadiness: "ready", NATMappingIPv4: "unknown", NATMappingIPv6: "unknown", CaptivePortal: "unknown", PMTU: "unknown", RouterProtocol: "unknown", RouterMapping: "unknown", MappingLifetime: "unknown", UpdateHealth: "unknown"}},
 	}
 	store, err := localapi.NewSnapshotStore(&snapshot)
@@ -4362,7 +4478,7 @@ func TestSelectTerminalSessionPrefersWarmMachineSnapshot(t *testing.T) {
 
 	now := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
 	snapshot := localapi.Snapshot{
-		Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now, DaemonState: "ready",
+		Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now, DaemonState: "ready", DaemonVersion: "dev",
 		Machines: []localapi.MachineStatus{{ID: "mch_1", EnvironmentID: "env_1", WorkspaceRoot: "/root", Alias: "hn-byod-ready", Eligible: true, RuntimeState: "ready", Generation: 4, SelectedPath: "none", TransferReadiness: "unavailable", PreviewReadiness: "unavailable", SSHReadiness: "unavailable", NATMappingIPv4: "unknown", NATMappingIPv6: "unknown", CaptivePortal: "unknown", PMTU: "unknown", RouterProtocol: "unknown", RouterMapping: "unknown", MappingLifetime: "unknown", UpdateHealth: "unknown"}},
 	}
 	previous := loadWarmMachineSnapshot
@@ -4452,5 +4568,25 @@ func TestResolveSSHCommandTargetFastFallsBackWithoutWarmSnapshot(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&sshTargetCalls); got != 1 {
 		t.Fatalf("fallback path fetched SSH target %d times, want 1", got)
+	}
+}
+
+func TestUpdateStatusReportsActiveTerminalBlock(t *testing.T) {
+	response := updated.ControlResponse{}
+	response.Observation.BlockedReason = "active_terminal_sessions"
+	response.Observation.RequiredVersion = "2026.09.07.1"
+	result := updateStatusCommandResult("2026.09.06.1", response, nil)
+	if result.BlockedReason != "active_terminal_sessions" || result.RequiredVersion != "2026.09.07.1" {
+		t.Fatalf("status=%+v", result)
+	}
+	var output bytes.Buffer
+	command := &cobra.Command{}
+	command.SetOut(&output)
+	command.Flags().Bool("json", false, "")
+	if err := writeUpdateStatusResult(command, result, false, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "waiting for running or detached terminal sessions") || !strings.Contains(output.String(), result.RequiredVersion) || strings.Contains(output.String(), "Activation: complete") {
+		t.Fatalf("output=%s", output.String())
 	}
 }

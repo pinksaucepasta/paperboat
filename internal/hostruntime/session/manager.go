@@ -21,12 +21,14 @@ import (
 )
 
 var (
-	ErrSessionExists  = errors.New("session name already exists")
-	ErrSessionUnknown = errors.New("session not found")
-	ErrSessionRunning = errors.New("session is running")
-	ErrInvalidSession = errors.New("invalid session")
-	ErrManagerStopped = errors.New("session manager stopped")
-	ErrResourceLimit  = errors.New("session resource limit")
+	ErrSessionExists    = errors.New("session name already exists")
+	ErrSessionUnknown   = errors.New("session not found")
+	ErrSessionRunning   = errors.New("session is running")
+	ErrInvalidSession   = errors.New("invalid session")
+	ErrManagerStopped   = errors.New("session manager stopped")
+	ErrResourceLimit    = errors.New("session resource limit")
+	ErrUpdateBusy       = errors.New("session update blocked by live PTY")
+	ErrUpdateInProgress = errors.New("session update already in progress")
 )
 
 // initialReplayBytes bounds attach replay to a terminal-sized recent tail while
@@ -65,11 +67,13 @@ type ManagerConfig struct {
 }
 
 type Manager struct {
-	mu       sync.RWMutex
-	config   ManagerConfig
-	sessions map[string]*managedSession
-	names    map[string]string
-	stopping bool
+	admission         sync.RWMutex
+	mu                sync.RWMutex
+	config            ManagerConfig
+	sessions          map[string]*managedSession
+	names             map[string]string
+	stopping          bool
+	updateTransaction string
 }
 
 type managedSession struct {
@@ -195,6 +199,11 @@ func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, 
 	if err := ctx.Err(); err != nil {
 		return Snapshot{}, err
 	}
+	m.admission.RLock()
+	defer m.admission.RUnlock()
+	if m.updateTransaction != "" {
+		return Snapshot{}, ErrUpdateInProgress
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.stopping {
@@ -262,6 +271,55 @@ func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, 
 	snapshot := session.snapshotLocked()
 	go m.capture(session, process)
 	return snapshot, nil
+}
+
+// BeginUpdate atomically excludes new PTY creation and restart while checking
+// that the stable host owns no live PTY process. The caller persists ownership.
+func (m *Manager) BeginUpdate(transactionID string) error {
+	if m == nil || transactionID == "" {
+		return ErrInvalidSession
+	}
+	m.admission.Lock()
+	defer m.admission.Unlock()
+	if m.updateTransaction != "" {
+		if m.updateTransaction == transactionID {
+			return nil
+		}
+		return ErrUpdateInProgress
+	}
+	m.mu.RLock()
+	sessions := make([]*managedSession, 0, len(m.sessions))
+	for _, session := range m.sessions {
+		sessions = append(sessions, session)
+	}
+	stopping := m.stopping
+	m.mu.RUnlock()
+	if stopping {
+		return ErrManagerStopped
+	}
+	for _, session := range sessions {
+		session.opMu.Lock()
+		live := session.process != nil
+		session.opMu.Unlock()
+		if live {
+			return ErrUpdateBusy
+		}
+	}
+	m.updateTransaction = transactionID
+	return nil
+}
+
+func (m *Manager) EndUpdate(transactionID string) error {
+	if m == nil || transactionID == "" {
+		return ErrInvalidSession
+	}
+	m.admission.Lock()
+	defer m.admission.Unlock()
+	if m.updateTransaction == "" || m.updateTransaction != transactionID {
+		return ErrUpdateInProgress
+	}
+	m.updateTransaction = ""
+	return nil
 }
 
 func (m *Manager) Attach(sessionID, attachmentID string, fromSequence uint64) (AttachResult, error) {
@@ -648,6 +706,17 @@ func (m *Manager) finishClosing(session *managedSession, process PTYProcess) {
 }
 
 func (m *Manager) Restart(sessionID string) (Snapshot, error) {
+	m.admission.RLock()
+	defer m.admission.RUnlock()
+	if m.updateTransaction != "" {
+		return Snapshot{}, ErrUpdateInProgress
+	}
+	m.mu.RLock()
+	stopping := m.stopping
+	m.mu.RUnlock()
+	if stopping {
+		return Snapshot{}, ErrManagerStopped
+	}
 	session, err := m.get(sessionID)
 	if err != nil {
 		return Snapshot{}, err
@@ -769,9 +838,11 @@ func (m *Manager) List() []Snapshot {
 }
 
 func (m *Manager) Shutdown(ctx context.Context) error {
+	m.admission.Lock()
 	m.mu.Lock()
 	if m.stopping {
 		m.mu.Unlock()
+		m.admission.Unlock()
 		return nil
 	}
 	m.stopping = true
@@ -780,6 +851,7 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 		ids = append(ids, id)
 	}
 	m.mu.Unlock()
+	m.admission.Unlock()
 	results := make(chan error, len(ids))
 	for _, id := range ids {
 		go func(sessionID string) {

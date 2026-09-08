@@ -37,7 +37,7 @@ func InstallService(ctx context.Context, serviceExecutable, sshdPath, configPath
 	}
 	defer manager.Disconnect()
 	service, err := manager.OpenService(ServiceName)
-	arguments := []string{"__windows-sshd-service", "--sshd", sshdPath, "--config", configPath}
+	arguments := []string{"daemon", "__windows-sshd-service", "--sshd", sshdPath, "--config", configPath}
 	restartRequired := false
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		service, err = manager.CreateService(ServiceName, serviceExecutable, mgr.Config{
@@ -51,7 +51,7 @@ func InstallService(ctx context.Context, serviceExecutable, sshdPath, configPath
 			service.Close()
 			return configErr
 		}
-		expectedCommand := windows.EscapeArg(serviceExecutable) + " __windows-sshd-service --sshd " + windows.EscapeArg(sshdPath) + " --config " + windows.EscapeArg(configPath)
+		expectedCommand := windows.EscapeArg(serviceExecutable) + " daemon __windows-sshd-service --sshd " + windows.EscapeArg(sshdPath) + " --config " + windows.EscapeArg(configPath)
 		if !samePaperboatServiceCommand(current.BinaryPathName, sshdPath, configPath) && !sameLegacyServiceCommand(current.BinaryPathName, sshdPath, configPath) {
 			service.Close()
 			return ErrServiceOwnership
@@ -134,15 +134,15 @@ func waitForServiceState(ctx context.Context, service *mgr.Service, wanted svc.S
 
 func sameServiceCommand(command, serviceExecutable, sshdPath, configPath string) bool {
 	arguments, err := windows.DecomposeCommandLine(command)
-	return err == nil && len(arguments) == 6 && sameWindowsPath(arguments[0], serviceExecutable) &&
-		arguments[1] == "__windows-sshd-service" && arguments[2] == "--sshd" && sameWindowsPath(arguments[3], sshdPath) &&
-		arguments[4] == "--config" && sameWindowsPath(arguments[5], configPath)
+	return err == nil && len(arguments) == 7 && sameWindowsPath(arguments[0], serviceExecutable) &&
+		arguments[1] == "daemon" && arguments[2] == "__windows-sshd-service" && arguments[3] == "--sshd" && sameWindowsPath(arguments[4], sshdPath) &&
+		arguments[5] == "--config" && sameWindowsPath(arguments[6], configPath)
 }
 
 func samePaperboatServiceCommand(command, sshdPath, configPath string) bool {
 	arguments, err := windows.DecomposeCommandLine(command)
-	return err == nil && len(arguments) == 6 && arguments[1] == "__windows-sshd-service" && arguments[2] == "--sshd" &&
-		sameWindowsPath(arguments[3], sshdPath) && arguments[4] == "--config" && sameWindowsPath(arguments[5], configPath)
+	return err == nil && len(arguments) == 7 && arguments[1] == "daemon" && arguments[2] == "__windows-sshd-service" && arguments[3] == "--sshd" &&
+		sameWindowsPath(arguments[4], sshdPath) && arguments[5] == "--config" && sameWindowsPath(arguments[6], configPath)
 }
 
 func sameLegacyServiceCommand(command, sshdPath, configPath string) bool {

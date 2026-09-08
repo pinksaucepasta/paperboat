@@ -49,19 +49,20 @@ trap cleanup EXIT HUP INT TERM
 
 payload="$root/payload"
 cli_payload="$payload/usr/local/bin/pb"
-helper_payload="$payload/Library/PrivilegedHelperTools/Paperboat/pb"
+canonical_helper=/Library/PrivilegedHelperTools/Paperboat/bin/pb
+helper_payload="$payload$canonical_helper"
 mkdir -p "$(dirname -- "$cli_payload")" "$(dirname -- "$helper_payload")"
-install -m 0755 "$binary" "$cli_payload"
+install -m 0755 "$binary" "$helper_payload"
 
 # macOS refuses Go's linker-only signature when launchd starts the executable
 # from a privileged helper location. TUF authenticates the development release
 # bytes; replace that linker signature with a complete ad-hoc Mach-O signature
 # so the installed hostd/updater can run when Developer ID material is absent.
-# Sign one staged copy, then install those signed bytes at both runtime paths.
-# This keeps the CLI and privileged helper byte-identical across upgrades.
-codesign --force --sign - --timestamp=none "$cli_payload"
-install -m 0755 "$cli_payload" "$helper_payload"
-codesign --verify --strict "$cli_payload"
+# Sign the single canonical executable used by the CLI and launchd services.
+# The CLI path is an exact absolute link so every invocation resolves to the
+# same file that the updater atomically rotates.
+codesign --force --sign - --timestamp=none "$helper_payload"
+ln -s "$canonical_helper" "$cli_payload"
 codesign --verify --strict "$helper_payload"
 
 pkgbuild \

@@ -2,15 +2,15 @@ package localdaemon
 
 import (
 	"context"
+	"errors"
 	"net"
-	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/peercontext"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/transfercrypto"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 )
 
 type transferPreparerFake struct {
@@ -18,18 +18,15 @@ type transferPreparerFake struct {
 	lifetime chan context.Context
 }
 
-func (f transferPreparerFake) PrepareTransferKey(lifetime context.Context, _ resolver.ConnectInfo, _ transfercrypto.KeyControlBinding, _ transfercrypto.KeyMaterial) (peercontext.Context, http.RoundTripper, error) {
+func (f transferPreparerFake) PrepareNativeFileTransfer(lifetime context.Context, _ resolver.ConnectInfo, _ string) (tunnel.DirectTransferStreamOpener, error) {
 	if f.lifetime != nil {
 		f.lifetime <- lifetime
 	}
-	return validTransferPeerContext(), f.direct, nil
+	return f.direct, nil
 }
 
 type transferDirectFake struct{ closed bool }
 
-func (*transferDirectFake) RoundTrip(*http.Request) (*http.Response, error) {
-	return nil, net.ErrClosed
-}
 func (f *transferDirectFake) Close() error { f.closed = true; return nil }
 func (*transferDirectFake) OpenTransferStream(context.Context) (net.Conn, error) {
 	client, server := net.Pipe()
@@ -46,20 +43,11 @@ func TestFileTransferBrokerBindsHandleToUnixPeer(t *testing.T) {
 		t.Fatal(err)
 	}
 	broker.now = func() time.Time { return now }
-	material, err := transfercrypto.GenerateKeyMaterial()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer material.Destroy()
-	encoded, err := material.MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := localapi.FileTransferKeyRequest{Schema: localapi.FileTransferKeySchemaV1, MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, Transport: "d", OperationID: "operation_1", TransferID: "transfer_1", Generation: 1, ExpiresAt: now.Add(time.Hour), Material: encoded}
+	request := localapi.FileTransferRequest{Schema: localapi.FileTransferSchemaV1, MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, OperationID: "operation_1", Credential: "credential_1", AccessSessionID: "access_1", Deadline: now.Add(time.Hour), MaximumBytes: 1 << 20}
 	owner := localapi.Peer{UID: 1000, GID: 1000, PID: 41}
 	setupCtx, cancelSetup := context.WithCancel(context.Background())
 	result, err := broker.PrepareFileTransfer(setupCtx, owner, request)
-	if err != nil || result.Handle == "" || len(result.PeerContext) == 0 {
+	if err != nil || result.Handle == "" {
 		t.Fatalf("prepare result=%+v err=%v", result, err)
 	}
 	lifetime := <-lifetimes
@@ -87,9 +75,44 @@ func TestFileTransferBrokerBindsHandleToUnixPeer(t *testing.T) {
 	}
 }
 
-func validTransferPeerContext() peercontext.Context {
-	value := peercontext.Context{AccountID: "account_1", UserID: "user_1", DeviceID: "device_1", MachineID: "machine_1", HostGeneration: 1, AuthorizationGeneration: 1, IntentID: "intent_1", OperationID: "operation_1", Consumer: "file_transfer_key", InitiatorRole: "initiating", ResponderRole: "controlled", AttemptGeneration: 1}
-	value.InitiatorCertificateHash[0] = 1
-	value.ResponderCertificateHash[0] = 2
-	return value
+func TestFileTransferBrokerExpiresAndBoundsNativeLeases(t *testing.T) {
+	now := time.Unix(20_000, 0).UTC()
+	directs := make([]*transferDirectFake, 0, maxNativeTransferLeases+1)
+	preparer := nativeTransferPreparerFunc(func(context.Context, resolver.ConnectInfo, string) (tunnel.DirectTransferStreamOpener, error) {
+		direct := &transferDirectFake{}
+		directs = append(directs, direct)
+		return direct, nil
+	})
+	broker, err := NewFileTransferBroker(preparer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	broker.now = func() time.Time { return now }
+	peer := localapi.Peer{UID: 1000, GID: 1000, PID: 41}
+	request := localapi.FileTransferRequest{Schema: localapi.FileTransferSchemaV1, MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, OperationID: "operation_1", Credential: "credential_1", AccessSessionID: "access_1", Deadline: now.Add(time.Hour), MaximumBytes: 1 << 20}
+	var first string
+	for index := 0; index < maxNativeTransferLeases; index++ {
+		request.OperationID = "operation_" + strconv.Itoa(index)
+		result, prepareErr := broker.PrepareFileTransfer(context.Background(), peer, request)
+		if prepareErr != nil {
+			t.Fatal(prepareErr)
+		}
+		if index == 0 {
+			first = result.Handle
+		}
+	}
+	request.OperationID = "operation_overflow"
+	if _, err := broker.PrepareFileTransfer(context.Background(), peer, request); err == nil || !directs[len(directs)-1].closed {
+		t.Fatal("lease bound did not close rejected native session")
+	}
+	broker.now = func() time.Time { return now.Add(2 * time.Hour) }
+	if _, err := broker.OpenFileTransferStream(context.Background(), peer, first); !errors.Is(err, localapi.ErrPermission) || !directs[0].closed {
+		t.Fatalf("expired lease err=%v closed=%t", err, directs[0].closed)
+	}
+}
+
+type nativeTransferPreparerFunc func(context.Context, resolver.ConnectInfo, string) (tunnel.DirectTransferStreamOpener, error)
+
+func (f nativeTransferPreparerFunc) PrepareNativeFileTransfer(ctx context.Context, info resolver.ConnectInfo, operationID string) (tunnel.DirectTransferStreamOpener, error) {
+	return f(ctx, info, operationID)
 }

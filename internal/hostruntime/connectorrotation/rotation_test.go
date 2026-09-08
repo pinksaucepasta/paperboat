@@ -793,7 +793,7 @@ func TestFileJournalRejectsCorruptionAndUnsafePermissions(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			path := secureJournalPath(t)
-			if err := os.WriteFile(path, []byte(test.data), 0o600); err != nil {
+			if err := writePrivateJournalFile(path, []byte(test.data)); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := OpenFileJournal(path); !errors.Is(err, ErrJournalCorrupt) {
@@ -824,9 +824,6 @@ func TestFileJournalRejectsCorruptionAndUnsafePermissions(t *testing.T) {
 }
 
 func TestFileJournalRecoversLastKnownGoodAndRepairsAtomically(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("file permission and rename semantics are platform-specific")
-	}
 	path := secureJournalPath(t)
 	journal, err := OpenFileJournal(path)
 	if err != nil {
@@ -846,14 +843,10 @@ func TestFileJournalRecoversLastKnownGoodAndRepairsAtomically(t *testing.T) {
 	}
 	// The install transition creates a last-known-good backup of proof acceptance.
 	backupPath := path + ".bak"
-	backupInfo, err := os.Stat(backupPath)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := readPrivateJournalFile(backupPath, maxJournalBytes); err != nil {
+		t.Fatalf("backup security: %v", err)
 	}
-	if backupInfo.Mode().Perm() != 0o600 {
-		t.Fatalf("backup mode=%o, want 600", backupInfo.Mode().Perm())
-	}
-	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+	if err := writePrivateJournalFile(path, []byte("{")); err != nil {
 		t.Fatal(err)
 	}
 	recoveredJournal, err := OpenFileJournal(path)

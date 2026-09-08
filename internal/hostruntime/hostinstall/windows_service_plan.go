@@ -3,6 +3,7 @@ package hostinstall
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -114,15 +115,15 @@ func executeWindowsServiceStepsWithHook(
 			created = append(created, step)
 		}
 		if err := step.Install(ctx); err != nil {
-			return nil, errors.Join(err, rollback())
+			return nil, errors.Join(fmt.Errorf("install Windows %s service: %w", definition.kind, err), rollback())
 		}
 		if startAfterInstall {
 			if err := step.Start(ctx); err != nil {
-				return nil, errors.Join(err, rollback())
+				return nil, errors.Join(fmt.Errorf("start Windows %s service: %w", definition.kind, err), rollback())
 			}
 			if afterStart != nil {
 				if err := afterStart(index, definition); err != nil {
-					return nil, errors.Join(err, rollback())
+					return nil, errors.Join(fmt.Errorf("verify Windows %s service readiness: %w", definition.kind, err), rollback())
 				}
 			}
 		}
@@ -132,9 +133,9 @@ func executeWindowsServiceStepsWithHook(
 
 func windowsRuntimeServiceDefinitions(layout service.Layout) []windowsRuntimeServiceDefinition {
 	return []windowsRuntimeServiceDefinition{
-		{kind: service.HostdKind, executable: layout.Binary, arguments: []string{"__runtime-hostd"}},
-		{kind: service.DaemonKind, executable: layout.Binary, arguments: []string{"__runtime-local-daemon"}},
-		{kind: service.UpdaterKind, executable: layout.Binary, arguments: []string{"__runtime-updated"}},
+		{kind: service.HostdKind, executable: layout.Binary, arguments: []string{"daemon", "__runtime-hostd"}},
+		{kind: service.DaemonKind, executable: layout.Binary, arguments: []string{"daemon", "__runtime-local-daemon"}},
+		{kind: service.UpdaterKind, executable: layout.Binary, arguments: []string{"daemon", "__runtime-updated"}},
 	}
 }
 
@@ -227,5 +228,5 @@ func windowsActivatorExecutableOwned(layout service.Layout, executable string) b
 }
 
 func windowsActivatorServiceOwned(layout service.Layout, executable string, arguments []string, account string) bool {
-	return windowsActivatorExecutableOwned(layout, executable) && len(arguments) == 1 && arguments[0] == "__runtime-activate" && strings.EqualFold(strings.TrimSpace(account), "LocalSystem")
+	return windowsActivatorExecutableOwned(layout, executable) && len(arguments) == 2 && arguments[0] == "daemon" && arguments[1] == "__runtime-activate" && strings.EqualFold(strings.TrimSpace(account), "LocalSystem")
 }

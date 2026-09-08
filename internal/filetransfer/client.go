@@ -115,6 +115,7 @@ type Client struct {
 	refreshMu       sync.Mutex
 	auth            Auth
 	binding         Binding
+	native          bool
 }
 
 func NewClient(endpoint string, auth Auth, binding Binding, client *http.Client) *Client {
@@ -135,6 +136,7 @@ func (c *Client) WithTransport(transport http.RoundTripper) *Client {
 	clone.MaxConcurrent = c.MaxConcurrent
 	clone.DeliveryTimeout = c.DeliveryTimeout
 	clone.retryWait = c.retryWait
+	clone.native = c.native
 	return clone
 }
 
@@ -189,10 +191,27 @@ func (c *Client) sendBatchPlaintext(ctx context.Context, batchID, sessionID stri
 	payload, _ := json.Marshal(map[string]any{"batch_id": batchID, "source_machine_id": c.binding.SourceMachineID, "destination_machine_id": c.binding.DestinationMachineID, "initiating_user_id": c.binding.InitiatingUserID, "session_id": sessionID, "files": files})
 	var batch Batch
 	if err := c.retryJSONRequest(ctx, http.MethodPost, c.Endpoint, operationID("create", batchID), "application/json", 0, payload, &batch); err != nil {
+		if c.native {
+			var remote *Error
+			if errors.As(err, &remote) && !transientHTTPStatus(remote.StatusCode) {
+				return Batch{}, err
+			}
+			return Batch{BatchID: batchID}, &ResumeRequiredError{BatchID: batchID, Err: err}
+		}
 		return Batch{}, err
 	}
 	if len(batch.Transfers) != len(sources) {
 		return Batch{}, errors.New("file transfer create returned wrong manifest count")
+	}
+	if c.native {
+		seen := make(map[string]bool, len(batch.Transfers))
+		for index, manifest := range batch.Transfers {
+			source := sources[index]
+			if batch.BatchID != batchID || manifest.TransferID == "" || seen[manifest.TransferID] || manifest.BatchID != batchID || manifest.SourceMachineID != c.binding.SourceMachineID || manifest.DestinationMachineID != c.binding.DestinationMachineID || manifest.InitiatingUserID != c.binding.InitiatingUserID || manifest.SessionID != sessionID || manifest.Basename != source.Basename || manifest.Size != source.Size || manifest.SHA256 != hex.EncodeToString(source.SHA256[:]) {
+				return batch, errors.New("file transfer manifest does not match the requested batch")
+			}
+			seen[manifest.TransferID] = true
+		}
 	}
 	workers := c.MaxConcurrent
 	if workers < 1 {
@@ -232,19 +251,24 @@ func (c *Client) sendBatchPlaintext(ctx context.Context, batchID, sessionID stri
 	wg.Wait()
 	close(errs)
 	if err := <-errs; err != nil {
-		c.cancelBatch(batch.Transfers)
-		return Batch{}, err
+		return c.failedBatch(ctx, batch, err)
 	}
 	batch.Paths = make([]string, len(batch.Transfers))
 	for i := range batch.Transfers {
 		var completed completion
 		if err := c.retryJSONRequest(ctx, http.MethodPost, c.Endpoint+"/"+batch.Transfers[i].TransferID+"/complete", operationID("complete", batch.Transfers[i].TransferID), "", 0, nil, &completed); err != nil {
-			c.cancelBatch(batch.Transfers)
-			return Batch{}, err
+			return c.failedBatch(ctx, batch, err)
 		}
 		if completed.Result.Code != "published" && completed.Result.Code != "pending" {
 			c.cancelBatch(batch.Transfers)
 			return Batch{}, errors.New("helper rejected completed transfer")
+		}
+		if c.native {
+			prior := batch.Transfers[i]
+			current := completed.Transfer
+			if current.TransferID != prior.TransferID || current.BatchID != prior.BatchID || current.SourceMachineID != prior.SourceMachineID || current.DestinationMachineID != prior.DestinationMachineID || current.InitiatingUserID != prior.InitiatingUserID || current.SessionID != prior.SessionID || current.Basename != prior.Basename || current.Size != prior.Size || current.SHA256 != prior.SHA256 || current.CommittedOffset != prior.Size {
+				return batch, errors.New("completed transfer does not match the requested file")
+			}
 		}
 		batch.Transfers[i] = completed.Transfer
 		batch.Paths[i] = completed.Result.Path
@@ -257,8 +281,7 @@ func (c *Client) sendBatchPlaintext(ctx context.Context, batchID, sessionID stri
 			delivered, waitErr := c.WaitReceipt(waitCtx, completed.Transfer.TransferID)
 			cancel()
 			if waitErr != nil {
-				c.cancelBatch(batch.Transfers)
-				return Batch{}, waitErr
+				return c.failedBatch(ctx, batch, waitErr)
 			}
 			batch.Transfers[i] = delivered
 			batch.Paths[i] = delivered.ReceiptPath
@@ -401,6 +424,9 @@ func (c *Client) requestWithHeaders(ctx context.Context, method, target, operati
 }
 
 func (c *Client) uploadOne(ctx context.Context, manifest Manifest, source Source) error {
+	if c.native {
+		return c.uploadNative(ctx, manifest, source)
+	}
 	for attempts := 0; attempts < 4; attempts++ {
 		offset, err := c.Offset(ctx, manifest.TransferID)
 		if err != nil {
@@ -498,8 +524,16 @@ func (c *Client) jsonRequest(ctx context.Context, method, url, operation, mediaT
 }
 
 func (c *Client) retryJSONRequest(ctx context.Context, method, url, operation, mediaType string, offset int64, body []byte, target any) error {
-	retryCtx, cancel := context.WithTimeout(ctx, operationRecoveryWindow)
-	defer cancel()
+	// Initial connection and authorization use the caller and HTTP deadlines.
+	// The recovery budget bounds replay after a failure, not first connection
+	// establishment while the peer acquires newly granted authority.
+	retryCtx := ctx
+	var cancel context.CancelFunc
+	defer func() {
+		if cancel != nil {
+			cancel()
+		}
+	}()
 	for attempt := 0; ; attempt++ {
 		var reader io.Reader
 		if body != nil {
@@ -512,6 +546,9 @@ func (c *Client) retryJSONRequest(ctx context.Context, method, url, operation, m
 		var responseErr *Error
 		if errors.As(err, &responseErr) && !transientHTTPStatus(responseErr.StatusCode) {
 			return err
+		}
+		if cancel == nil {
+			retryCtx, cancel = context.WithTimeout(ctx, operationRecoveryWindow)
 		}
 		wait := c.retryWait
 		if wait == nil {
@@ -573,7 +610,7 @@ func (c *Client) request(ctx context.Context, method, url, operation, mediaType 
 	})
 }
 
-func (c *Client) requestWithBody(ctx context.Context, method, url, operation, mediaType string, offset int64, body func() (io.Reader, error)) (*http.Response, error) {
+func (c *Client) requestWithBody(ctx context.Context, method, url, operation, mediaType string, offset int64, body func() (io.Reader, error), headers ...http.Header) (*http.Response, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		if err := c.refreshIfExpiring(ctx); err != nil {
 			return nil, err
@@ -589,6 +626,11 @@ func (c *Client) requestWithBody(ctx context.Context, method, url, operation, me
 		request.Header.Set("Authorization", "Bearer "+c.currentAuth().Token)
 		request.Header.Set("X-Paperboat-Request-ID", operation)
 		request.Header.Set("X-Paperboat-Operation-ID", operation)
+		for _, values := range headers {
+			for key, value := range values {
+				request.Header[key] = append([]string(nil), value...)
+			}
+		}
 		if mediaType != "" {
 			request.Header.Set("Content-Type", mediaType)
 		}

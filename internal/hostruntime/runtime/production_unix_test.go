@@ -117,7 +117,7 @@ func TestProductionClientPeerServiceBindsCompleteClientTransport(t *testing.T) {
 	if captured.HTTPClient == nil || captured.HTTPClient.Transport != transport || captured.TLS == nil || captured.TLS.MinVersion != tls.VersionTLS13 {
 		t.Fatal("production Client peer service did not bind its authenticated transport contract")
 	}
-	if captured.Serve == nil || captured.ServePreview == nil || captured.ServeTransfer == nil || captured.AuthorizeStream == nil || captured.ServeStream == nil {
+	if captured.Serve == nil || captured.ServePreview != nil || captured.ServeTransfer == nil || captured.AuthorizeStream == nil || captured.ServeStream == nil {
 		t.Fatal("production Client peer service omitted a required serving contract")
 	}
 	captured.ObserveRelaySuccess("bom")
@@ -127,12 +127,6 @@ func TestProductionClientPeerServiceBindsCompleteClientTransport(t *testing.T) {
 	if err := captured.ServeStream(t.Context(), streamauth.Header{Consumer: "terminal"}, nil); !errors.Is(err, peerrelay.ErrInvalid) {
 		t.Fatalf("non-preview stream error = %v, want peerrelay.ErrInvalid", err)
 	}
-	previewServer, previewClient := net.Pipe()
-	_ = previewClient.Close()
-	if err := captured.ServeStream(t.Context(), streamauth.Header{Consumer: "private_preview"}, previewServer); errors.Is(err, peerrelay.ErrInvalid) {
-		t.Fatalf("private preview was rejected by Client dispatch: %v", err)
-	}
-
 	serverConn, clientConn := net.Pipe()
 	done := make(chan error, 1)
 	go func() { done <- captured.ServeTransfer(t.Context(), serverConn) }()

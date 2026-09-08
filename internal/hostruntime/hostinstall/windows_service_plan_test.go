@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
@@ -188,7 +189,7 @@ func TestWindowsServiceStepsStartFailureRollsBackInReverseOrderWithLiveContext(t
 	cancel()
 }
 
-func TestWindowsRuntimeServicesUseCanonicalBinary(t *testing.T) {
+func TestWindowsRuntimeServicesUseCanonicalDaemon(t *testing.T) {
 	layout, err := service.DefaultLayout("windows")
 	if err != nil {
 		t.Fatal(err)
@@ -205,7 +206,7 @@ func TestWindowsRuntimeServicesUseCanonicalBinary(t *testing.T) {
 			t.Fatalf("service %q executable=%q want=%q", definition.kind, definition.executable, layout.Binary)
 		}
 	}
-	if !reflect.DeepEqual(definitions[0].arguments, []string{"__runtime-hostd"}) || !reflect.DeepEqual(definitions[1].arguments, []string{"__runtime-local-daemon"}) || !reflect.DeepEqual(definitions[2].arguments, []string{"__runtime-updated"}) {
+	if !reflect.DeepEqual(definitions[0].arguments, []string{"daemon", "__runtime-hostd"}) || !reflect.DeepEqual(definitions[1].arguments, []string{"daemon", "__runtime-local-daemon"}) || !reflect.DeepEqual(definitions[2].arguments, []string{"daemon", "__runtime-updated"}) {
 		t.Fatalf("definitions=%+v", definitions)
 	}
 }
@@ -374,7 +375,7 @@ func TestWindowsActivatorOwnershipAcceptsOnlyVersionedReleaseBinary(t *testing.T
 		t.Fatal(err)
 	}
 	valid := layout.ReleasesRoot + `\versions\2026.08.28.1\pb.exe`
-	if !windowsActivatorServiceOwned(layout, valid, []string{"__runtime-activate"}, "LocalSystem") {
+	if !windowsActivatorServiceOwned(layout, valid, []string{"daemon", "__runtime-activate"}, "LocalSystem") {
 		t.Fatalf("owned activator target rejected: %q", valid)
 	}
 	for _, invalid := range []string{layout.Binary, layout.BinaryRollback, layout.ReleasesRoot + `\versions\..\pb.exe`, layout.ReleasesRoot + `\versions\2026.08.28.1\other.exe`} {
@@ -382,7 +383,18 @@ func TestWindowsActivatorOwnershipAcceptsOnlyVersionedReleaseBinary(t *testing.T
 			t.Fatalf("unowned activator target accepted: %q", invalid)
 		}
 	}
-	if windowsActivatorServiceOwned(layout, valid, []string{"__runtime-updated"}, "LocalSystem") || windowsActivatorServiceOwned(layout, valid, []string{"__runtime-activate"}, "User") {
+	if windowsActivatorServiceOwned(layout, valid, []string{"daemon", "__runtime-updated"}, "LocalSystem") || windowsActivatorServiceOwned(layout, valid, []string{"daemon", "__runtime-activate"}, "User") {
 		t.Fatal("unowned activator service command accepted")
+	}
+}
+
+func TestWindowsServiceStartFailureIdentifiesRoleAndRetainsCause(t *testing.T) {
+	var events []string
+	cause := context.DeadlineExceeded
+	_, err := executeWindowsServiceSteps(context.Background(), []windowsRuntimeServiceDefinition{{kind: service.HostdKind}}, func(definition windowsRuntimeServiceDefinition) (windowsServicePlanStep, error) {
+		return &fakeWindowsServicePlanStep{path: definition.kind, events: &events, startErr: cause}, nil
+	}, func(context.Context, string) (bool, error) { return true, nil }, true)
+	if !errors.Is(err, cause) || !strings.Contains(err.Error(), "start Windows hostd service") {
+		t.Fatalf("lost service failure context: %v", err)
 	}
 }

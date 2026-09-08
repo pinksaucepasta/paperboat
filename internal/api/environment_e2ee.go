@@ -352,6 +352,9 @@ func environmentNoStoreRequestHeaders(headers http.Header) http.Header {
 	} else {
 		headers = headers.Clone()
 	}
+	// ENV compares strong version ETags for authenticated compare-and-swap.
+	// Content-coding intermediaries may weaken those tags during compression.
+	headers.Set("Accept-Encoding", "identity")
 	headers.Set("Cache-Control", "no-store")
 	headers.Set("Pragma", "no-cache")
 	return headers

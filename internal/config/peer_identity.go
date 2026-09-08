@@ -13,6 +13,53 @@ import (
 	"fmt"
 )
 
+// PeerApprovalSigningKey loads an existing signing capability without creating
+// keys or changing account-root custody. Fresh enrollment stores its signer on
+// the session; a root-owning session can instead use its existing account seed.
+func (s ProfileStore) PeerApprovalSigningKey(issuer, accountID, endpointID string) (key ed25519.PrivateKey, resultErr error) {
+	if s.Path == "" || s.Secrets == nil || !validCredentialID(accountID) || !validCredentialID(endpointID) {
+		return nil, ErrCredentialStoreUnavailable
+	}
+	issuer, err := NormalizeIssuer(issuer)
+	if err != nil {
+		return nil, err
+	}
+	lock := newSharedLock(s.profilePath(issuer) + ".peer-identity.lock")
+	if err := lock.Lock(); err != nil {
+		return nil, fmt.Errorf("lock peer identity: %w", err)
+	}
+	defer func() {
+		resultErr = errors.Join(resultErr, lock.Unlock())
+		if resultErr != nil {
+			clear(key)
+			key = nil
+		}
+	}()
+	seed, exists, err := loadPeerKey(s.Secrets, peerIdentitySecretRef(issuer, endpointID, "endpoint-signing"), "endpoint_signing_seed")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { clear(seed) }()
+	if exists {
+		for _, item := range []struct{ suffix, kind string }{{"endpoint-noise", "endpoint_noise_x25519"}, {"endpoint-quic", "endpoint_quic_seed"}} {
+			transport, present, err := loadPeerKey(s.Secrets, peerIdentitySecretRef(issuer, endpointID, item.suffix), item.kind)
+			clear(transport)
+			if err != nil || !present {
+				return nil, errors.Join(errors.New("fresh peer endpoint identity is incomplete"), err)
+			}
+		}
+	} else {
+		seed, exists, err = loadPeerKey(s.Secrets, peerIdentitySecretRef(issuer, accountID, "account-root"), "account_root_seed")
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, ErrSecretNotFound
+		}
+	}
+	return ed25519.NewKeyFromSeed(seed), nil
+}
+
 func (s ProfileStore) ExportPeerAccountRootSeed(issuer, accountID string) (seed []byte, resultErr error) {
 	if s.Path == "" || s.Secrets == nil || !validCredentialID(accountID) {
 		return nil, ErrCredentialStoreUnavailable

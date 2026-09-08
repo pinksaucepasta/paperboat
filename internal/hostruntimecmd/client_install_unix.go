@@ -50,9 +50,8 @@ func InstallClient(ctx context.Context, config ClientInstallConfig, stdin io.Rea
 		return err
 	}
 	// Darwin release artifacts are signed PKGs, not executable runtime images.
-	// Materialize them through installer(8) before handing the executable path
-	// to the privileged service installer. Linux artifacts are already native
-	// executables and pass through unchanged.
+	// Materialize the canonical payload before handing it to the privileged
+	// service installer. Linux artifacts already pass through unchanged.
 	artifactPath, err = materializeBootstrapArtifact(ctx, artifactPath)
 	if err != nil {
 		return err
@@ -91,6 +90,9 @@ func InstallClient(ctx context.Context, config ClientInstallConfig, stdin io.Rea
 				return errors.Join(err, authorizeServiceOperation(ctx, artifactPath, "uninstall", request, stdout, stderr), workerCommand.Rollback())
 			}
 			if err := workerCommand.Commit(); err != nil {
+				return err
+			}
+			if err := bindBootstrapDaemon(readyCtx, config.ControlURL, config.Artifact.Version); err != nil {
 				return err
 			}
 			fmt.Fprintln(stdout, "Paperboat Client service is ready.")

@@ -41,7 +41,22 @@ type FileTransferHandlerConfig struct {
 	TransferKeys          *transfercrypto.KeyVault
 }
 
-type FileTransferHandler struct{ config FileTransferHandlerConfig }
+type FileTransferHandler struct {
+	config FileTransferHandlerConfig
+	native bool
+}
+
+// NewNativeFileTransferHandler preserves the application protocol above native
+// QUIC, requiring a bounded hash-verified commit instead of encrypted records.
+func NewNativeFileTransferHandler(config FileTransferHandlerConfig) (*FileTransferHandler, error) {
+	config.TransferKeys = nil
+	handler, err := NewFileTransferHandler(config)
+	if err != nil {
+		return nil, err
+	}
+	handler.native = true
+	return handler, nil
+}
 
 type CreateFileTransferRequest struct {
 	BatchID              string              `json:"batch_id"`
@@ -265,6 +280,10 @@ func (h *FileTransferHandler) serveCollection(writer http.ResponseWriter, reques
 		return
 	}
 	if input.E2EE != nil {
+		if h.native {
+			writeHTTPError(writer, requestID, "invalid_request", http.StatusBadRequest, false)
+			return
+		}
 		if err := h.openEncryptedCreate(input.E2EE, &input, authorization); err != nil {
 			writeHTTPError(writer, requestID, "e2ee_authentication_failed", http.StatusBadRequest, false)
 			return
@@ -489,7 +508,19 @@ func (h *FileTransferHandler) serveContent(writer http.ResponseWriter, request *
 			case <-stopClose:
 			}
 		}()
-		updated, err := h.config.Service.Append(request.Context(), id, offset, request.Body)
+		var updated store.FileTransfer
+		if h.native {
+			digestText := strings.TrimPrefix(request.Header.Get(HeaderUploadDigest), "sha256=")
+			decoded, decodeErr := hex.DecodeString(digestText)
+			if decodeErr != nil || len(decoded) != sha256.Size || len(request.Header.Values(HeaderUploadDigest)) != 1 || request.Header.Get(HeaderUploadDigest) != "sha256="+hex.EncodeToString(decoded) {
+				close(stopClose)
+				writeHTTPError(writer, requestID, "digest_mismatch", http.StatusBadRequest, false)
+				return
+			}
+			updated, err = h.config.Service.AppendVerified(request.Context(), id, offset, request.Body, [sha256.Size]byte(decoded))
+		} else {
+			updated, err = h.config.Service.Append(request.Context(), id, offset, request.Body)
+		}
 		close(stopClose)
 		if err != nil {
 			writeFileTransferError(writer, requestID, err)

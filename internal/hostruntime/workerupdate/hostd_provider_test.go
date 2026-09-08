@@ -2,6 +2,8 @@ package workerupdate
 
 import (
 	"context"
+	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
 	"strings"
 	"testing"
 	"time"
@@ -10,13 +12,14 @@ import (
 )
 
 type recordingHostdGateClient struct {
+	blocked  string
 	requests []hostdproto.UpdateGateRequest
 	target   hostdproto.UpdateGateTargetBinding
 }
 
 func (c *recordingHostdGateClient) UpdateGate(_ context.Context, request hostdproto.UpdateGateRequest) (hostdproto.UpdateGateResponse, error) {
 	c.requests = append(c.requests, request)
-	return hostdproto.UpdateGateResponse{Target: c.target}, nil
+	return hostdproto.UpdateGateResponse{Target: c.target, BlockedReason: c.blocked}, nil
 }
 
 func TestHostdDeploymentProviderCarriesExactSignedPolicyAndTargetFence(t *testing.T) {
@@ -41,5 +44,27 @@ func TestHostdDeploymentProviderCarriesExactSignedPolicyAndTargetFence(t *testin
 	commit := client.requests[2]
 	if commit.Operation != hostdproto.UpdateGateCommit || commit.Version != "2026.08.31.1" || commit.ManifestSHA256 != strings.Repeat("a", 64) || commit.ExpectedTarget == nil || *commit.ExpectedTarget != target {
 		t.Fatalf("commit=%+v", commit)
+	}
+}
+
+func TestHostdDeploymentProviderOnlyAcceptsTypedDrainBlock(t *testing.T) {
+	client := &recordingHostdGateClient{target: hostdproto.UpdateGateTargetBinding{Scope: hostdproto.UpdateGateScopeStandalone, MachineID: "machine_01", FailureDomain: "standalone"}, blocked: hostdproto.UpdateGateBlockedActiveTerminalSessions}
+	provider := HostdDeploymentProvider{Client: client}
+	target, err := deploymentTargetFromHostd(client.target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := DrainRequest{TransactionID: "transaction_01", Candidate: "2026.09.07.1", Previous: "2026.09.06.1", ManifestSHA256: strings.Repeat("a", 64), Timeout: time.Second, Target: target}
+	err = provider.Drain(context.Background(), request)
+	var busy *autoupdate.ActiveTerminalSessionsError
+	if !errors.As(err, &busy) || busy.RequiredVersion != request.Candidate {
+		t.Fatalf("busy=%+v err=%v", busy, err)
+	}
+	if _, err = provider.CurrentTarget(context.Background(), TargetRequest{}); !errors.Is(err, ErrHostdActivationProvider) {
+		t.Fatalf("non-drain accepted busy: %v", err)
+	}
+	client.blocked = "unknown"
+	if err = provider.Drain(context.Background(), request); !errors.Is(err, ErrHostdActivationProvider) {
+		t.Fatalf("unknown busy accepted: %v", err)
 	}
 }

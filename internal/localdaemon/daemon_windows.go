@@ -10,12 +10,15 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/transportmanager"
 )
 
 func runWindowsDaemon(ctx context.Context, config DaemonConfig) error {
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -39,10 +42,13 @@ func runWindowsDaemon(ctx context.Context, config DaemonConfig) error {
 			return err
 		}
 	}
+	transportStopped := make(chan struct{})
 	go func() {
+		defer close(transportStopped)
 		<-ctx.Done()
 		_ = peerTransports.Close()
 	}()
+	defer func() { stop(); <-transportStopped }()
 	defer peerTransports.Close()
 	if closer, ok := config.FileTransfers.(interface{ Close() error }); ok {
 		defer closer.Close()
@@ -100,10 +106,11 @@ func runWindowsDaemon(ctx context.Context, config DaemonConfig) error {
 	// enough for the first command after logon or reboot to fail. Inventory.Run
 	// replaces this starting snapshot as soon as reconciliation completes.
 	store, err := localapi.NewSnapshotStore(&localapi.Snapshot{
-		Schema:      localapi.SnapshotSchemaV1,
-		Generation:  1,
-		ObservedAt:  diagnosticClock().UTC(),
-		DaemonState: "starting",
+		Schema:        localapi.SnapshotSchemaV1,
+		Generation:    1,
+		ObservedAt:    diagnosticClock().UTC(),
+		DaemonState:   "starting",
+		DaemonVersion: buildinfo.Version,
 	})
 	if err != nil {
 		return err

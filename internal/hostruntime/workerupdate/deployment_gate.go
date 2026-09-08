@@ -5,12 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"net/url"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
 )
 
 var ErrInvalidDeploymentGate = errors.New("invalid signed update deployment gate")
@@ -190,8 +190,11 @@ func (g *deploymentActivationGate) currentTarget(ctx context.Context, request Ga
 	return target, nil
 }
 
+func activationPolicy(release Release) updateflow.ActivationPolicy {
+	return updateflow.ActivationPolicy{CanaryPath: release.CanaryPath, CanaryStatus: release.CanaryStatus, CanarySamples: release.CanarySamples, CanaryTimeout: release.CanaryTimeout, DrainTimeout: release.DrainTimeout, StabilityWindow: release.StabilityWindow, StabilityInterval: release.StabilityInterval, RollbackTimeout: release.RollbackTimeout}
+}
 func validateActivationPolicy(release Release) error {
-	if !lowerDigest(release.ManifestSHA256) || !validCanaryPath(release.CanaryPath) || release.CanaryStatus < 200 || release.CanaryStatus > 299 || release.CanarySamples < 2 || release.CanarySamples > 32 || release.CanaryTimeout <= 0 || release.CanaryTimeout > 5*time.Minute || release.DrainTimeout <= 0 || release.DrainTimeout > 5*time.Minute || release.StabilityWindow <= 0 || release.StabilityWindow > 30*time.Minute || release.StabilityInterval <= 0 || release.StabilityInterval > release.StabilityWindow || release.RollbackTimeout <= 0 || release.RollbackTimeout > 5*time.Minute {
+	if !lowerDigest(release.ManifestSHA256) || activationPolicy(release).Validate() != nil {
 		return ErrInvalidDeploymentGate
 	}
 	return nil
@@ -252,14 +255,6 @@ func validateDeploymentTarget(target DeploymentTarget) error {
 func lowerDigest(value string) bool {
 	decoded, err := hex.DecodeString(value)
 	return err == nil && len(decoded) == sha256.Size && value == strings.ToLower(value)
-}
-
-func validCanaryPath(value string) bool {
-	if len(value) < 1 || len(value) > 512 || value[0] != '/' || strings.HasPrefix(value, "//") || strings.ContainsAny(value, "\x00\r\n") {
-		return false
-	}
-	parsed, err := url.ParseRequestURI(value)
-	return err == nil && !parsed.IsAbs() && parsed.Host == "" && parsed.Fragment == ""
 }
 
 func deadlineBudget(ctx context.Context) time.Duration {

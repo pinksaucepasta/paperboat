@@ -127,6 +127,6 @@ func paperboatServiceConflicts(service ServiceRecord, config Config) bool {
 	command := strings.ToLower(service.PathName)
 	configPath := strings.ToLower(filepath.Clean(filepath.Join(config.StateRoot, "sshd_config")))
 	legacy := strings.Contains(command, " -d -f ")
-	wrapper := strings.Contains(command, " __windows-sshd-service ") && strings.Contains(command, " --sshd ") && strings.Contains(command, " --config ")
+	wrapper := strings.Contains(command, " daemon __windows-sshd-service ") && strings.Contains(command, " --sshd ") && strings.Contains(command, " --config ")
 	return !strings.Contains(command, expected) || !strings.Contains(command, configPath) || (!legacy && !wrapper)
 }

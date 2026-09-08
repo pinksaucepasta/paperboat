@@ -106,11 +106,17 @@ func (m UpdateGateTargetBinding) Validate() error { return m.validate() }
 func (m UpdateGateTargetBinding) validate() error { return (UpdateGateResponse{Target: m}).validate() }
 
 type UpdateGateResponse struct {
-	Target UpdateGateTargetBinding `json:"target"`
+	Target        UpdateGateTargetBinding `json:"target"`
+	BlockedReason string                  `json:"blocked_reason,omitempty"`
 }
+
+const UpdateGateBlockedActiveTerminalSessions = "active_terminal_sessions"
 
 func (UpdateGateResponse) messageType() Type { return TypeUpdateGateResponse }
 func (m UpdateGateResponse) validate() error {
+	if m.BlockedReason != "" && m.BlockedReason != UpdateGateBlockedActiveTerminalSessions {
+		return ErrInvalidFrame
+	}
 	for _, value := range []string{m.Target.MachineID, m.Target.FailureDomain} {
 		if !updateGateIDPattern.MatchString(value) {
 			return ErrInvalidFrame

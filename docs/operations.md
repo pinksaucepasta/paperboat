@@ -59,14 +59,23 @@ The complete v1 preview and tunnel workflow is in
 
 ## Machine runtime services
 
+`make build` builds the single `bin/pb` executable. For a foreground development
+run, use `bin/pb daemon --config /absolute/path/to/config.json`; another terminal
+can use `bin/pb status --json`. SIGTERM drains local requests and closes the daemon's
+transport leases before releasing its process lock. A crash leaves a stale socket;
+the next daemon may remove it only after acquiring the exclusive owner lock.
+Service-owned host, config and update roles run beneath `pb daemon`; `paperboatd`
+is the logical service name. Platform package/layout qualification and packaged update
+recovery remain the following migration gates.
+
 `pb status` and `pb wait` use one per-user local daemon. When its owner-only Unix socket is
 already healthy, commands only read the local API. If the socket is absent or refusing
-connections, the CLI atomically installs and starts `paperboat-local-daemon.service` under
+connections, the CLI atomically installs and starts `paperboatd.service` under
 the Linux user systemd manager or
-`com.pinksaucepasta.paperboat.local-daemon` under the macOS GUI launchd domain, then waits
+`com.pinksaucepasta.paperboatd` under the macOS GUI launchd domain, then waits
 up to five seconds for a validated snapshot. Permission, protocol-version, and invalid-state
-failures never trigger service replacement. The service runs the exact installed `pb`
-executable with `__local-daemon`, preserves an explicit config/server selection, uses the
+failures never trigger service replacement. The service resolves the installed executable itself
+and runs it with `daemon`, preserves an explicit config/server selection, uses the
 canonical user state/runtime paths, and holds the process lock that authorizes stale-socket
 cleanup. `pb uninstall` stops and unloads this service before removing its definition or
 user state.
@@ -105,6 +114,74 @@ same ProxyCommand, public selector for the credential-store-backed managed ident
 strict host-key source for native `ssh`, `scp`, `sftp`, `rsync`, Git-over-SSH, and OpenSSH
 forwarding. Native ecosystem commands should spell the registered user explicitly, for
 example `scp file root@hn.pprbt:/tmp/file`.
+
+### Native editor remoting
+
+Native editors use the installed managed OpenSSH configuration. They must invoke the
+system `ssh` client against the canonical host, not replace it with `pb ssh`: editor
+backends need OpenSSH's normal command, dynamic-forwarding, file-operation, and reconnect
+behavior. The daemon owns the `~/.ssh/paperboat_config` include, the per-machine
+`<alias>.pprbt` target block, the Paperboat `ProxyCommand`, the managed identity agent,
+and the generation-bound `KnownHostsCommand`.
+
+The setup flow is:
+
+1. Complete `pb setup`/`pb pair` and wait for the machine's runtime and SSH readiness.
+   `pb machine list --json` exposes the server-owned alias; do not substitute the
+   display name. `pb ssh doctor <machine>` checks OpenSSH parsing, the managed agent,
+   current host-key authority, and the native SSH path.
+2. In the editor's native SSH or remote-development connection flow, select
+   `<registered-os-user>@<alias>.pprbt`. Keep the editor on its normal system OpenSSH
+   executable so it reads the Paperboat include and preserves OpenSSH forwarding.
+3. Allow the editor to start its remote backend in a task-owned workspace. Verify a
+   file create/edit/save/reopen, one editor port-forward, and a reconnect after the
+   Paperboat connection is interrupted. Independently verify the saved remote bytes.
+4. If the editor reports a host-key change, authorization failure, or SSH readiness
+   error, stop and run `pb ssh doctor`; never enable `StrictHostKeyChecking=no`, replace
+   `KnownHostsCommand`, copy the managed private key, or expose the machine's SSH port.
+
+`pb ssh doctor` checks prerequisites. Task 16's user-refined acceptance verifies the SSH
+operations used by VS Code Remote-SSH directly through the native adapter. This establishes
+the SSH compatibility boundary; it is not a claim that every editor lifecycle or deployed
+account workflow has been qualified.
+
+Remote-SSH 0.128.0's installed `package.json` and `out/extension.js` were inspected alongside
+Microsoft's [Remote-SSH documentation](https://code.visualstudio.com/docs/remote/ssh) and
+[troubleshooting guidance](https://code.visualstudio.com/docs/remote/troubleshooting).
+Its default Linux path uses system SSH, disables PTY allocation (`-T`), feeds a shell
+bootstrap through stdin and enables dynamic forwarding (`-D`). Local server downloads
+can be copied with SCP. Optional socket mode uses `-L`; optional PTY allocation uses
+ordinary SSH PTY support. `useExecServer` changes the remote backend/bootstrap, not the
+underlying SSH operations. File editing runs in the remote backend over the forwarded
+connection; it does not require an additional Paperboat file protocol.
+
+| SSH requirement | Native-adapter evidence |
+| --- | --- |
+| Host selection, user/port, authentication and host-key enforcement | Managed config parse tests; real OpenSSH authentication, wrong-host-key rejection and revoked-access rejection. |
+| Non-PTY bootstrap and command streams | Piped shell script, quoted path with spaces, detached backend process, binary stdin/stdout including EOF, separate stderr and exact remote exit status. |
+| TCP forwarding | `-T -D … host sh` with a live bootstrap channel and four concurrent binary SOCKS channels; existing local TCP `-L` check. |
+| File transfer | Existing real SCP upload and SFTP download with exact saved bytes. |
+| Disconnect and fresh connection | Closing the native session terminates the SSH process; new SSH/SOCKS channels work, and the detached backend survives. |
+| Optional Unix-socket forwarding and PTY | Real `-L` forwarding to a Unix socket with concurrent channels; explicit PTY allocation. |
+
+Run the focused operation suite with `go test ./internal/peertransport/native -run
+'^TestSystemOpenSSHOverNativeTailnet$' -count=1 -timeout=60s`; its `-race` run uses
+`-timeout=90s`. The checks use real OpenSSH/sshd and authenticated native streams with
+generated fixture identities. Production enrollment, managed-agent integration and
+generation-bound `KnownHostsCommand` cutover remain separate Task 20 evidence.
+
+| Editor/client | Intended first qualification | Status | Limitation |
+| --- | --- | --- | --- |
+| VS Code Desktop + Remote-SSH | Linux client/backend | SSH operations verified | VS Code 1.136.1 / Remote-SSH 0.128.0 also started a backend, saved/reopened a file and forwarded a port through the native fixture on Ubuntu24 amd64. The automation exited after forced disconnection; full editor reconnect is unverified. |
+| JetBrains Gateway | Linux amd64 client to an approved Linux machine | Unqualified | Gateway's OpenSSH-config, host-key, backend, and reconnect behavior has not been measured. |
+| Zed | Linux amd64 client to an approved Linux machine | Unqualified | No Zed client was available for the required end-to-end scenario. |
+| Cursor | Linux amd64 client to an approved Linux machine | Unqualified | No Cursor client was available; VS Code compatibility cannot be inferred. |
+
+The operation suite ran in the Linux arm64 workspace; the partial desktop scenario ran
+with client and backend on Ubuntu24 amd64 under Xvfb. It does not establish a separate
+HP-to-Ubuntu24 network scenario. Windows amd64 and macOS arm64 editor combinations remain
+unqualified. Compatibility with the verified SSH operations is expected; universal
+native-editor compatibility and full editor recovery are not claimed.
 
 Machine runtime services may set `PAPERBOAT_HTTP_PROXY`, `PAPERBOAT_HTTPS_PROXY`, and
 `PAPERBOAT_NO_PROXY` as administrator policy. These settings take precedence over the

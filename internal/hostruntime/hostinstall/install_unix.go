@@ -27,6 +27,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/environmentkey"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostservice"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 )
 
 const SchemaV1 = "paperboat.host-install/v1"
@@ -367,6 +368,14 @@ func uninstallValidated(ctx context.Context, request Request, paths installPaths
 	if err != nil {
 		return errors.Join(ErrInvalidRequest, err)
 	}
+	activationLock, err := updated.LockUnixActivationForUninstall(paths.updateState)
+	if err != nil {
+		return err
+	}
+	if activationLock != nil {
+		defer activationLock.Close()
+	}
+
 	// Recovery is intentionally before the first stop/remove operation. A
 	// malformed or stale journal therefore leaves native declarations intact
 	// for an explicit repair decision.
@@ -379,7 +388,10 @@ func uninstallValidated(ctx context.Context, request Request, paths installPaths
 			return hostservice.NewPlatformApplier(filepath.Join(paths.runtimeState, "power-baseline.json")).Apply(restoreCtx, hostservice.AllowSleep)
 		}
 	}
-	return finalizeUninstall(ctx, request, paths, lifecycle.Uninstall, restorePower)
+	return finalizeUninstall(ctx, request, paths, func(ctx context.Context) error {
+		controller := service.UnixUpdateActivator{Platform: request.Platform, UID: request.UID, Runner: service.ExecRunner{}}
+		return uninstallWithActivation(ctx, controller.RemoveForUninstall, lifecycle.Uninstall)
+	}, restorePower)
 }
 
 // finalizeUninstall is the only path allowed to remove installed binaries and
@@ -488,7 +500,7 @@ func legacyWorkerInstaller(request Request, paths installPaths) (*service.Instal
 	}
 	return service.New(service.Config{
 		Platform: request.Platform, Kind: service.WorkerKind, ConfigRoot: string(os.PathSeparator), Executable: paths.worker,
-		User: request.User, Group: request.Group, Arguments: []string{"__runtime-host"}, Controller: controller,
+		User: request.User, Group: request.Group, Arguments: []string{"daemon", "__runtime-host"}, Controller: controller,
 		Environment: workerEnvironment(request),
 	})
 }
@@ -525,7 +537,7 @@ func hostInstallerWithMissing(request Request, paths installPaths, allowMissingE
 	config := service.Config{
 		Platform: request.Platform, Kind: service.HostKind, ConfigRoot: string(os.PathSeparator), Executable: paths.worker,
 		User: "root", Group: rootGroup, Arguments: []string{
-			"__runtime-host-service", "--uid", strconv.Itoa(request.UID), "--gid", strconv.Itoa(request.GID),
+			"daemon", "__runtime-host-service", "--uid", strconv.Itoa(request.UID), "--gid", strconv.Itoa(request.GID),
 			"--listen-address", request.HelperListenAddress,
 		}, Controller: hostController,
 	}
@@ -558,38 +570,49 @@ type installJournal struct {
 }
 
 func platformPaths() installPaths {
-	root := "/usr/local/libexec/paperboat"
+	layout, err := service.DefaultLayout(runtime.GOOS)
+	if err != nil {
+		panic("hostinstall: unsupported Unix service layout: " + err.Error())
+	}
+	root := layout.InstallRoot
 	installerState, runtimeState := "/var/lib/paperboat-installer", "/var/lib/paperboat"
 	legacyMetadata := filepath.Join(runtimeState, "install-metadata.json")
 	if runtime.GOOS == "darwin" {
-		root = "/Library/PrivilegedHelperTools/Paperboat"
 		installerState = "/Library/Application Support/Paperboat"
 		runtimeState = installerState
 		legacyMetadata = ""
 	}
 	p := installPaths{root: root, installerState: installerState, runtimeState: runtimeState, legacyMetadata: legacyMetadata}
-	p.worker = filepath.Join(root, "pb")
+	p.worker = layout.Binary
 	// Release slots are kept in a dedicated root-owned directory so the
 	// updater can atomically stage, promote, and roll back without touching the
 	// command path or relying on a caller-controlled location.
-	releases := filepath.Join(root, "releases")
-	p.workerNext = filepath.Join(releases, "pb.staged")
-	p.workerRollback = filepath.Join(releases, "pb.rollback")
+	releases := layout.ReleasesRoot
+	p.workerNext = layout.BinaryStaged
+	p.workerRollback = layout.BinaryRollback
 	p.workerPrevious = filepath.Join(releases, "pb.previous")
 	p.journal = filepath.Join(installerState, "install-journal.json")
 	p.metadata = filepath.Join(installerState, "install-metadata.json")
 	p.hostdToken = filepath.Join(runtimeState, "hostd.token")
-	p.hostdSocket = "/var/run/paperboat-hostd/hostd.sock"
+	p.hostdSocket = layout.HostdSocket
 	p.updaterSocket = "/var/run/paperboat-updated/control.sock"
-	p.updateState = "/var/lib/paperboat-updated"
-	if runtime.GOOS == "darwin" {
-		p.updateState = filepath.Join(runtimeState, "updated")
-	} else {
+	p.updateState = layout.UpdateStateRoot
+	if runtime.GOOS != "darwin" {
 		p.environmentCredentialDirectory = filepath.Join(installerState, "environment")
 		p.environmentCredential = filepath.Join(p.environmentCredentialDirectory, "host-key.cred")
 		p.environmentCredentialMetadata = filepath.Join(p.environmentCredentialDirectory, "host-key.json")
 	}
 	return p
+}
+
+// LoadEnrolledOwner returns the committed, root-protected installation
+// identity for the requested Unix account. The privileged updater uses this
+// to launch owner-scoped readiness probes without trusting caller input.
+func LoadEnrolledOwner(uid int) (Request, error) {
+	if os.Geteuid() != 0 {
+		return Request{}, ErrNotPrivileged
+	}
+	return loadInstallMetadata(platformPaths().metadata, uid)
 }
 
 func ensureHostdToken(paths installPaths, request Request) error {
@@ -620,9 +643,10 @@ func ensureHostdToken(paths installPaths, request Request) error {
 func ensureManagedDirectories(paths installPaths, request Request) error {
 	// hostd runs as the enrolled account and must be able to create its
 	// authenticated socket and fence state. The updater remains root-owned.
-	hostdDir := filepath.Dir(paths.hostdSocket)
-	if err := secureManagedUserDirectory(hostdDir, 0o700, request.UID, request.GID); err != nil {
-		return err
+	for _, directory := range []string{filepath.Dir(paths.hostdSocket), filepath.Join(paths.runtimeState, "hostd")} {
+		if err := secureManagedUserDirectory(directory, 0o700, request.UID, request.GID); err != nil {
+			return err
+		}
 	}
 	for _, item := range []struct {
 		path string
@@ -631,6 +655,7 @@ func ensureManagedDirectories(paths installPaths, request Request) error {
 		{filepath.Dir(paths.updaterSocket), 0o755},
 		{paths.updateState, 0o700},
 		{filepath.Join(paths.root, "releases"), 0o755},
+		{filepath.Dir(paths.worker), 0o755},
 	} {
 		if err := secureRootDirectory(item.path, item.mode); err != nil {
 			return err
@@ -870,6 +895,8 @@ func removeInstalledFiles(paths installPaths) error {
 		paths.worker, paths.workerNext, paths.workerRollback, paths.workerPrevious,
 		paths.metadata, paths.legacyMetadata,
 		paths.hostdToken, paths.hostdSocket, paths.updaterSocket,
+		filepath.Join(paths.runtimeState, "hostd", "fence.json"),
+		filepath.Join(paths.runtimeState, "hostd"),
 		paths.environmentCredential, paths.environmentCredentialMetadata,
 		filepath.Join(paths.runtimeState, "power-baseline.json"),
 		filepath.Join(paths.runtimeState, "availability-policy.json"),
@@ -1006,7 +1033,8 @@ func verifyArtifact(path string, uid int, platform string) error {
 		return ErrInvalidRequest
 	}
 	lstat, err := os.Lstat(path)
-	rootOwnedDarwinPackageBinary := platform == "darwin" && filepath.Clean(path) == "/usr/local/bin/pb" && ownerUID(lstat) == 0
+	layout, layoutErr := service.DefaultLayout(platform)
+	rootOwnedDarwinPackageBinary := platform == "darwin" && layoutErr == nil && path == layout.Binary && lstat != nil && ownerUID(lstat) == 0
 	if err != nil || !lstat.Mode().IsRegular() || lstat.Mode()&os.ModeSymlink != 0 || lstat.Mode().Perm()&0o022 != 0 || (ownerUID(lstat) != uid && !rootOwnedDarwinPackageBinary) {
 		return ErrInvalidRequest
 	}
@@ -1064,4 +1092,11 @@ func ownerUID(info os.FileInfo) int {
 
 func (r Request) String() string {
 	return fmt.Sprintf("%s for uid %d", r.Schema, r.UID)
+}
+
+func uninstallWithActivation(ctx context.Context, retire, uninstall func(context.Context) error) error {
+	if err := retire(ctx); err != nil {
+		return err
+	}
+	return uninstall(ctx)
 }

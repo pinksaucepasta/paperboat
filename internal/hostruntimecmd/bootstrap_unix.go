@@ -255,6 +255,9 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 			if err := workerCommand.Commit(); err != nil {
 				return &installationStageError{Stage: "service_install", Cause: fmt.Errorf("remove previous pb command backup: %w", err)}
 			}
+			if err := bindBootstrapDaemon(readyCtx, material.ControlURL, material.Artifact.Version); err != nil {
+				return &installationStageError{Stage: "daemon_readiness", Cause: err}
+			}
 			if err := bootstrap.ClearResume(*stateRoot); err != nil {
 				return fmt.Errorf("clear completed machine enrollment resume state: %w", err)
 			}

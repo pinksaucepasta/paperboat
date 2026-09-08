@@ -1,6 +1,7 @@
 package filetransfer
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -16,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/transfercrypto"
 )
@@ -307,6 +309,16 @@ func (w *CleanupWorker) Shutdown(ctx context.Context) error {
 }
 
 func (s *Service) Append(ctx context.Context, id string, offset int64, body io.Reader) (store.FileTransfer, error) {
+	return s.append(ctx, id, offset, body, nil)
+}
+
+// AppendVerified commits at most one independently verified native chunk. The
+// existing writer slots bound both buffering and storage work for all callers.
+func (s *Service) AppendVerified(ctx context.Context, id string, offset int64, body io.Reader, digest [sha256.Size]byte) (store.FileTransfer, error) {
+	return s.append(ctx, id, offset, body, &digest)
+}
+
+func (s *Service) append(ctx context.Context, id string, offset int64, body io.Reader, digest *[sha256.Size]byte) (store.FileTransfer, error) {
 	if err := s.acquire(ctx); err != nil {
 		return store.FileTransfer{}, err
 	}
@@ -325,6 +337,27 @@ func (s *Service) Append(ctx context.Context, id string, offset int64, body io.R
 	}
 	if offset != transfer.CommittedOffset {
 		return transfer, &Error{Code: OffsetConflict}
+	}
+	if digest != nil {
+		chunk, readErr := io.ReadAll(io.LimitReader(&contextReader{ctx: ctx, reader: body, canceled: s.cancelSignal(id)}, protocol.FileTransferChunkBytes+1))
+		if readErr != nil {
+			if ctx.Err() != nil {
+				return transfer, ctx.Err()
+			}
+			select {
+			case <-s.cancelSignal(id):
+				return transfer, &Error{Code: Canceled}
+			default:
+			}
+			return transfer, classifyIO(readErr)
+		}
+		if len(chunk) > protocol.FileTransferChunkBytes {
+			return transfer, &Error{Code: InvalidSize}
+		}
+		if sha256.Sum256(chunk) != *digest {
+			return transfer, &Error{Code: DigestMismatch}
+		}
+		body = bytes.NewReader(chunk)
 	}
 	file, err := os.OpenFile(s.partialPath(id), os.O_WRONLY, 0)
 	if err != nil {

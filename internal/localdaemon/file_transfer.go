@@ -7,16 +7,15 @@ import (
 	"errors"
 	"io"
 	"net"
-	"net/http"
 	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/peercontext"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/transfercrypto"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 )
+
+const maxNativeTransferLeases = 64
 
 type daemonTransferLease struct {
 	peer    localapi.Peer
@@ -46,7 +45,7 @@ func (c *transferLeaseCloser) Close() error {
 // FileTransferBroker keeps direct file carriers inside the daemon and gives a
 // local process only a PID-bound capability for opening application streams.
 type FileTransferBroker struct {
-	tunnel transferKeyPreparer
+	tunnel nativeTransferPreparer
 	now    func() time.Time
 
 	mu     sync.Mutex
@@ -54,94 +53,80 @@ type FileTransferBroker struct {
 	leases map[string]daemonTransferLease
 }
 
-type transferKeyPreparer interface {
-	PrepareTransferKey(context.Context, resolver.ConnectInfo, transfercrypto.KeyControlBinding, transfercrypto.KeyMaterial) (peercontext.Context, http.RoundTripper, error)
+type nativeTransferPreparer interface {
+	PrepareNativeFileTransfer(context.Context, resolver.ConnectInfo, string) (tunnel.DirectTransferStreamOpener, error)
 }
 
-func NewFileTransferBroker(peerTunnel transferKeyPreparer) (*FileTransferBroker, error) {
+func NewFileTransferBroker(peerTunnel nativeTransferPreparer) (*FileTransferBroker, error) {
 	if peerTunnel == nil {
 		return nil, ErrInvalidInventoryConfig
 	}
 	return &FileTransferBroker{tunnel: peerTunnel, now: time.Now, leases: make(map[string]daemonTransferLease)}, nil
 }
 
-func (b *FileTransferBroker) PrepareFileTransfer(ctx context.Context, peer localapi.Peer, request localapi.FileTransferKeyRequest) (localapi.FileTransferKeyResult, error) {
+func (b *FileTransferBroker) PrepareFileTransfer(ctx context.Context, peer localapi.Peer, request localapi.FileTransferRequest) (localapi.FileTransferResult, error) {
 	if b == nil || ctx == nil || peer.PID <= 0 || request.Validate(b.now().UTC()) != nil {
-		return localapi.FileTransferKeyResult{}, ErrInvalidInventoryConfig
+		return localapi.FileTransferResult{}, ErrInvalidInventoryConfig
 	}
-	material, err := transfercrypto.ParseKeyMaterial(request.Material)
-	if err != nil {
-		return localapi.FileTransferKeyResult{}, err
-	}
-	defer material.Destroy()
-	info := resolver.ConnectInfo{
-		TargetKind: "machine", ProjectID: request.MachineID, MachineGeneration: request.MachineGeneration, Transport: request.Transport,
-		Terminal: &resolver.TerminalTarget{EnvironmentID: request.EnvironmentID},
-	}
-	binding := transfercrypto.KeyControlBinding{OperationID: request.OperationID, TransferID: request.TransferID, Generation: request.Generation, ExpiresAt: request.ExpiresAt}
+	info := resolver.ConnectInfo{TargetKind: "machine", ProjectID: request.MachineID, MachineGeneration: request.MachineGeneration, Terminal: &resolver.TerminalTarget{EnvironmentID: request.EnvironmentID, Auth: resolver.AuthTarget{Method: "bearer", Token: request.Credential, ExpiresAt: request.Deadline.UTC().Format(time.RFC3339Nano), ResourceID: request.AccessSessionID}}}
 	leaseCtx, cancelLease := context.WithCancel(context.Background())
 	stopSetupCancel := context.AfterFunc(ctx, cancelLease)
-	peerCtx, direct, err := b.tunnel.PrepareTransferKey(leaseCtx, info, binding, material)
+	opener, err := b.tunnel.PrepareNativeFileTransfer(leaseCtx, info, request.OperationID)
 	if err != nil {
 		stopSetupCancel()
 		cancelLease()
-		return localapi.FileTransferKeyResult{}, err
+		return localapi.FileTransferResult{}, err
 	}
 	if !stopSetupCancel() || ctx.Err() != nil || leaseCtx.Err() != nil {
 		cancelLease()
-		if closer, ok := direct.(io.Closer); ok {
+		if closer, ok := opener.(io.Closer); ok {
 			_ = closer.Close()
 		}
-		return localapi.FileTransferKeyResult{}, context.Canceled
+		return localapi.FileTransferResult{}, context.Canceled
 	}
-	encoded, err := peerCtx.MarshalBinary()
-	if err != nil {
+	closer, ok := opener.(io.Closer)
+	if !ok {
 		cancelLease()
-		if closer, ok := direct.(io.Closer); ok {
-			_ = closer.Close()
-		}
-		return localapi.FileTransferKeyResult{}, err
-	}
-	result := localapi.FileTransferKeyResult{PeerContext: encoded}
-	if direct == nil {
-		cancelLease()
-		return result, nil
-	}
-	opener, ok := direct.(tunnel.DirectTransferStreamOpener)
-	closer, closeOK := direct.(io.Closer)
-	if !ok || !closeOK {
-		cancelLease()
-		if closeOK {
-			_ = closer.Close()
-		}
-		return localapi.FileTransferKeyResult{}, errors.New("direct file transfer carrier lacks stream ownership")
+		return localapi.FileTransferResult{}, errors.New("native file transfer lease lacks ownership")
 	}
 	handle, err := newTransferHandle()
 	if err != nil {
 		cancelLease()
 		_ = closer.Close()
-		return localapi.FileTransferKeyResult{}, err
+		return localapi.FileTransferResult{}, err
 	}
 	b.mu.Lock()
 	if b.closed {
 		b.mu.Unlock()
 		cancelLease()
 		_ = closer.Close()
-		return localapi.FileTransferKeyResult{}, net.ErrClosed
+		return localapi.FileTransferResult{}, net.ErrClosed
 	}
-	b.leases[handle] = daemonTransferLease{peer: peer, expires: request.ExpiresAt, opener: opener, closer: &transferLeaseCloser{closer: closer, cancel: cancelLease}}
+	if len(b.leases) >= maxNativeTransferLeases {
+		b.mu.Unlock()
+		cancelLease()
+		_ = closer.Close()
+		return localapi.FileTransferResult{}, errors.New("native file transfer lease limit reached")
+	}
+	b.leases[handle] = daemonTransferLease{peer: peer, expires: request.Deadline, opener: opener, closer: &transferLeaseCloser{closer: closer, cancel: cancelLease}}
 	b.mu.Unlock()
-	result.Handle = handle
-	return result, nil
+	return localapi.FileTransferResult{Handle: handle}, nil
 }
 
 func (b *FileTransferBroker) OpenFileTransferStream(ctx context.Context, peer localapi.Peer, handle string) (net.Conn, error) {
 	b.mu.Lock()
 	lease, ok := b.leases[handle]
-	if ok && (!samePeer(lease.peer, peer) || !lease.expires.After(b.now().UTC())) {
+	expired := ok && !lease.expires.After(b.now().UTC())
+	if expired {
+		delete(b.leases, handle)
+	}
+	if ok && (!samePeer(lease.peer, peer) || expired) {
 		ok = false
 	}
 	b.mu.Unlock()
+	if expired {
+		_ = lease.closer.Close()
+	}
 	if !ok {
 		return nil, localapi.ErrPermission
 	}

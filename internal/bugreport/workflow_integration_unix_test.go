@@ -50,7 +50,7 @@ func TestWorkflowAcrossLocalAndControlAPIsUploadsExactDaemonBundle(t *testing.T)
 	}
 	now := time.Now().UTC()
 	diagnosticsService := &unixDiagnosticService{bundle: diagnostics.Bundle{Schema: diagnostics.BundleSchemaV1, Correlation: "pb-0123456789abcdef0123456789abcdef", CreatedAt: now, Path: bundlePath, Bytes: int64(len(bundleBytes)), Categories: []string{"manifest", "recent_events", "redacted_events", "status"}}}
-	snapshot, _ := localapi.NewSnapshotStore(&localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now, DaemonState: "ready"})
+	snapshot, _ := localapi.NewSnapshotStore(&localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now, DaemonState: "ready", DaemonVersion: "dev"})
 	socket := filepath.Join(root, "daemon.sock")
 	localServer, err := localapi.NewServer(localapi.ServerConfig{SocketPath: socket, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), Source: snapshot, Diagnostics: diagnosticsService})
 	if err != nil {

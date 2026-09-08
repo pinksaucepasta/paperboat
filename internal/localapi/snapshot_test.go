@@ -9,6 +9,18 @@ import (
 	"time"
 )
 
+func TestSnapshotValidateRequiresDaemonVersion(t *testing.T) {
+	snapshot := validSnapshot()
+	snapshot.DaemonVersion = ""
+	if err := snapshot.Validate(); !errors.Is(err, ErrInvalidResponse) {
+		t.Fatalf("missing daemon version err=%v", err)
+	}
+	snapshot.DaemonVersion = "dev"
+	if err := snapshot.Validate(); err != nil {
+		t.Fatalf("dev daemon version err=%v", err)
+	}
+}
+
 func TestSnapshotStorePublishesMonotonicImmutableSnapshots(t *testing.T) {
 	initial := validSnapshot()
 	store, err := NewSnapshotStore(&initial)
@@ -98,7 +110,7 @@ func TestSnapshotStoreUpdateOwnsGenerationAndCoalescesSemanticState(t *testing.T
 		if current != nil {
 			t.Fatal("unexpected current snapshot")
 		}
-		return Snapshot{DaemonState: "ready", Machines: []MachineStatus{}}, nil
+		return Snapshot{DaemonState: "ready", DaemonVersion: "dev", Machines: []MachineStatus{}}, nil
 	})
 	if err != nil || !changed {
 		t.Fatalf("first changed=%v err=%v", changed, err)

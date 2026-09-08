@@ -626,7 +626,7 @@ func EnsureWindowsLocalDaemonService(ctx context.Context) error {
 		installer, err := service.New(service.Config{
 			Platform: "windows", Kind: service.DaemonKind, ConfigRoot: WindowsProgramDataRoot(),
 			Executable: layout.Binary, User: "Paperboat", Group: "Paperboat",
-			Arguments: []string{"__runtime-local-daemon"}, Controller: service.WindowsController{},
+			Arguments: []string{"daemon", "__runtime-local-daemon"}, Controller: service.WindowsController{},
 		})
 		if err != nil {
 			return err
@@ -668,7 +668,7 @@ func WindowsLocalDaemonServiceReady(ownerSID, stateRoot string) bool {
 	installer, err := service.New(service.Config{
 		Platform: "windows", Kind: service.DaemonKind, ConfigRoot: WindowsProgramDataRoot(),
 		Executable: layout.Binary, User: "Paperboat", Group: "Paperboat",
-		Arguments: []string{"__runtime-local-daemon"}, Controller: service.WindowsController{},
+		Arguments: []string{"daemon", "__runtime-local-daemon"}, Controller: service.WindowsController{},
 	})
 	if err != nil {
 		return false
@@ -681,14 +681,21 @@ func WindowsLocalDaemonServiceReady(ownerSID, stateRoot string) bool {
 // activation journal. Serialize their idempotent service migration so one
 // caller cannot stop an SCM service while the other is waiting for readiness.
 func lockWindowsLocalDaemonMigration(ctx context.Context) (func(), error) {
+	return lockWindowsLocalDaemonMigrationNamed(ctx, `Global\PaperboatLocalDaemonMigration`)
+}
+
+func lockWindowsLocalDaemonMigrationNamed(ctx context.Context, mutexName string) (func(), error) {
 	if ctx == nil {
 		return nil, ErrInvalidRequest
 	}
-	name, err := windows.UTF16PtrFromString(`Global\PaperboatLocalDaemonMigration`)
+	name, err := windows.UTF16PtrFromString(mutexName)
 	if err != nil {
 		return nil, err
 	}
-	descriptor, err := windows.SecurityDescriptorFromString(`O:SYG:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)`)
+	// Let Windows assign the caller's valid default owner. Access remains limited
+	// to SYSTEM and administrators; assigning SYSTEM as owner rejects elevated
+	// user tokens before the migration lock can be acquired.
+	descriptor, err := windows.SecurityDescriptorFromString(`D:P(A;;GA;;;SY)(A;;GA;;;BA)`)
 	if err != nil {
 		return nil, err
 	}
@@ -1070,7 +1077,7 @@ func reconcileWindowsRepairVersion(ctx context.Context, config WindowsRuntimeCon
 			return config, errors.Join(configErr, closeErr)
 		}
 		arguments, err := windows.DecomposeCommandLine(definition.BinaryPathName)
-		if err != nil || len(arguments) != 2 || arguments[1] != item.argument {
+		if err != nil || len(arguments) != 3 || arguments[1] != "daemon" || arguments[2] != item.argument {
 			return config, ErrInvalidRequest
 		}
 		if !strings.EqualFold(filepath.Clean(arguments[0]), filepath.Clean(layout.Binary)) {
@@ -1341,10 +1348,10 @@ func removeWindowsActivatorService(ctx context.Context, layout service.Layout) e
 		return errors.Join(configErr, closeErr, disconnectErr)
 	}
 	arguments, err := windows.DecomposeCommandLine(config.BinaryPathName)
-	if err != nil || len(arguments) != 2 || !windowsActivatorServiceOwned(layout, filepath.Clean(arguments[0]), arguments[1:], config.ServiceStartName) {
+	if err != nil || len(arguments) != 3 || !windowsActivatorServiceOwned(layout, filepath.Clean(arguments[0]), arguments[1:], config.ServiceStartName) {
 		return errors.Join(service.ErrInvalidDefinition, err)
 	}
-	return removeOrphanWindowsService(ctx, "PaperboatUpdateActivator", filepath.Clean(arguments[0]), []string{"__runtime-activate"})
+	return removeOrphanWindowsService(ctx, "PaperboatUpdateActivator", filepath.Clean(arguments[0]), []string{"daemon", "__runtime-activate"})
 }
 
 func installWindowsRoleServices(ctx context.Context, request Request, layout service.Layout, upgradeMode string) error {
@@ -1513,15 +1520,15 @@ func windowsRoleInstallers(layout service.Layout, allowMissingExecutable bool) (
 		}
 		return service.New(config)
 	}
-	hostd, err := newInstaller(service.HostdKind, []string{"__runtime-hostd"})
+	hostd, err := newInstaller(service.HostdKind, []string{"daemon", "__runtime-hostd"})
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	updater, err := newInstaller(service.UpdaterKind, []string{"__runtime-updated"})
+	updater, err := newInstaller(service.UpdaterKind, []string{"daemon", "__runtime-updated"})
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	daemon, err := newInstaller(service.DaemonKind, []string{"__runtime-local-daemon"})
+	daemon, err := newInstaller(service.DaemonKind, []string{"daemon", "__runtime-local-daemon"})
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -2508,7 +2515,9 @@ func repairWindowsTreeACL(root, ownerSID string) error {
 		if err := applyWindowsACL(path, ownerSID, entry.IsDir()); err != nil {
 			return err
 		}
-		return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION, owner, nil, nil, nil)
+		return windowssecurity.WithRestorePrivilege(func() error {
+			return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION, owner, nil, nil, nil)
+		})
 	})
 }
 func isAdministrator() bool {

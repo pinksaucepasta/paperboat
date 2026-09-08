@@ -68,6 +68,28 @@ type journal struct {
 	Entries map[string]receipt `json:"entries"`
 }
 
+// interruptedDownload retains the endpoint-owned partial for the next poll.
+// It must never be acknowledged as a permanent delivery failure.
+type interruptedDownload struct{ cause error }
+
+func (e *interruptedDownload) Error() string {
+	return "file download interrupted; partial retained for resume"
+}
+func (e *interruptedDownload) Unwrap() error { return e.cause }
+
+type downloadReader struct {
+	io.Reader
+	err error
+}
+
+func (r *downloadReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if err != nil && err != io.EOF {
+		r.err = err
+	}
+	return n, err
+}
+
 func New(config Config) (*Inbox, error) {
 	if config.Client == nil || config.MachineID == "" || config.SessionID == "" {
 		return nil, errors.New("invalid inbox configuration")
@@ -128,6 +150,18 @@ func (i *Inbox) Run(ctx context.Context) error {
 		for _, transfer := range transfers {
 			path, deliveryErr := i.Deliver(ctx, transfer)
 			if deliveryErr != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				var interrupted *interruptedDownload
+				if errors.As(deliveryErr, &interrupted) {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case <-time.After(time.Second):
+					}
+					continue
+				}
 				code := errorCode(deliveryErr)
 				_ = i.config.Client.Receipt(ctx, transfer.TransferID, code, "")
 				continue
@@ -214,7 +248,11 @@ func (i *Inbox) Deliver(ctx context.Context, manifest filetransfer.Manifest) (st
 	if offset < manifest.Size {
 		response, err := i.config.Client.Content(ctx, manifest, offset)
 		if err != nil {
-			return "", err
+			var failure *filetransfer.Error
+			if errors.As(err, &failure) && failure.StatusCode != http.StatusBadGateway && failure.StatusCode != http.StatusServiceUnavailable && failure.StatusCode != http.StatusGatewayTimeout {
+				return "", err
+			}
+			return "", &interruptedDownload{cause: err}
 		}
 		defer response.Body.Close()
 		if offset > 0 && response.StatusCode != http.StatusPartialContent || offset == 0 && response.StatusCode != http.StatusOK {
@@ -224,11 +262,25 @@ func (i *Inbox) Deliver(ctx context.Context, manifest filetransfer.Manifest) (st
 			return "", storageError(err)
 		}
 		remaining := manifest.Size - offset
-		written, copyErr := io.Copy(io.MultiWriter(file, hash), io.LimitReader(response.Body, remaining+1))
+		reader := &downloadReader{Reader: response.Body}
+		written, copyErr := io.Copy(io.MultiWriter(file, hash), io.LimitReader(reader, remaining+1))
 		if copyErr != nil {
-			return "", copyErr
+			if reader.err == nil || !errors.Is(copyErr, reader.err) {
+				return "", storageError(copyErr)
+			}
+			if err := file.Sync(); err != nil {
+				return "", storageError(err)
+			}
+			return "", &interruptedDownload{cause: copyErr}
 		}
-		if written != remaining {
+		if written < remaining {
+			if err := file.Sync(); err != nil {
+				return "", storageError(err)
+			}
+			return "", &interruptedDownload{cause: io.ErrUnexpectedEOF}
+		}
+		if written > remaining {
+			keepTemp = false
 			return "", errors.New("invalid_size")
 		}
 	}

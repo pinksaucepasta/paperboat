@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/binarytarget"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesignature"
@@ -91,6 +92,11 @@ type Resolver func(context.Context) (release Release, found bool, err error)
 // and native-format-checked it in its root-owned staging path.
 type Fetcher interface {
 	Fetch(context.Context, Release) (io.ReadCloser, error)
+	// AuthorizeRecovery rechecks the current signed rollback policy for an
+	// already authenticated local executable. Artifact identity is verified
+	// independently from the local bytes because Darwin signs a package whose
+	// installed payload has a different digest.
+	AuthorizeRecovery(context.Context, string, string, string) error
 }
 
 // ComponentFetcher is implemented by the TUF source. The CLI target is
@@ -165,10 +171,13 @@ type Config struct {
 	Gate           ActivationGate
 	Events         EventSink
 	NativeVerifier NativeVerifier
-	// InstallPackage is the privileged macOS package boundary. A pkg is never
+	// ActivateRuntime restarts the fixed native host service after the verified
+	// canonical binary changes and returns its newly active fence.
+	ActivateRuntime func(context.Context, string) (hostdproto.Status, error)
+	// ExtractPackage is the macOS package extraction boundary. A pkg is never
 	// renamed into an executable slot; the installer returns the executable
 	// installed by the verified package so it can be staged atomically.
-	InstallPackage  func(context.Context, string) (string, error)
+	ExtractPackage  func(context.Context, string, string) (string, error)
 	MonitorWindow   time.Duration
 	HealthInterval  time.Duration
 	CanaryTimeout   time.Duration
@@ -219,8 +228,8 @@ func New(config Config) (*Manager, error) {
 	if config.NativeVerifier == nil {
 		config.NativeVerifier = nativesignature.New(nil)
 	}
-	if config.InstallPackage == nil && runtime.GOOS == "darwin" {
-		config.InstallPackage = installDarwinPackage
+	if config.ExtractPackage == nil && runtime.GOOS == "darwin" {
+		config.ExtractPackage = ExtractDarwinPackage
 	}
 	if err := validateConfig(config); err != nil {
 		return nil, err
@@ -289,7 +298,8 @@ func (m *Manager) Activate(ctx context.Context, release Release) (Result, error)
 	if err = m.write(journal); err != nil {
 		return Result{Version: m.active.Version}, err
 	}
-	if err = m.stage(ctx, release); err != nil {
+	localRelease, err := m.stage(ctx, release)
+	if err != nil {
 		// No candidate has started and no live state has changed. Return the
 		// durable transaction to idle so a transient download, proxy, or
 		// signature-source failure cannot strand the updater in "checking"
@@ -300,7 +310,7 @@ func (m *Manager) Activate(ctx context.Context, release Release) (Result, error)
 		return Result{Version: m.active.Version}, errors.Join(err, cleanupErr, writeErr)
 	}
 	m.record(ctx, EventDownloading, journal, release, "")
-	journal = withRelease(journal, release, m.config.BinaryStaged)
+	journal = withRelease(journal, localRelease, m.config.BinaryStaged)
 	if journal, err = m.transition(journal, updateflow.StageStaged); err != nil {
 		return Result{Version: m.active.Version}, err
 	}
@@ -349,6 +359,9 @@ func (m *Manager) Activate(ctx context.Context, release Release) (Result, error)
 	if err = m.write(journal); err != nil {
 		return Result{Version: m.active.Version}, err
 	}
+	if err = m.authorizeRecovery(ctx, m.active, m.config.Binary); err != nil {
+		return Result{Version: m.active.Version}, m.failBeforeCutover(journal, worker, updateflow.FailureDrain, err)
+	}
 	if journal, err = m.transition(journal, updateflow.StageDraining); err != nil {
 		return Result{Version: m.active.Version}, err
 	}
@@ -374,6 +387,9 @@ func (m *Manager) Activate(ctx context.Context, release Release) (Result, error)
 	if err = m.write(journal); err != nil {
 		return Result{Version: m.active.Version}, m.restoreAfterDrain(ctx, journal, release, worker, err)
 	}
+	if err = m.authorizeRecovery(ctx, m.active, m.config.Binary); err != nil {
+		return Result{Version: m.active.Version}, m.restoreAfterDrain(ctx, journal, release, worker, err)
+	}
 	m.record(ctx, EventActivating, journal, release, "")
 	if err = m.promoteStorage(); err != nil {
 		if restoreErr := m.restoreStorage(); restoreErr != nil {
@@ -383,20 +399,42 @@ func (m *Manager) Activate(ctx context.Context, release Release) (Result, error)
 	}
 	journal.StagedPath = m.config.Binary
 	if err = m.write(journal); err != nil {
+		if m.config.ActivateRuntime != nil {
+			cause := err
+			if stopErr := m.stopCandidateForNative(ctx, worker); stopErr != nil {
+				cause = errors.Join(cause, stopErr)
+				return Result{Version: m.active.Version}, errors.Join(m.restoreCanonicalRuntime(ctx, journal, release, cause), ErrBlocked)
+			}
+			return Result{Version: m.active.Version}, m.restoreCanonicalRuntime(ctx, journal, release, cause)
+		}
 		if restoreErr := m.restoreStorage(); restoreErr != nil {
 			return Result{Version: m.active.Version}, m.restoreAfterDrain(ctx, journal, release, worker, errors.Join(err, errStorageRestoreFailed, restoreErr))
 		}
 		return Result{Version: m.active.Version}, m.restoreAfterDrain(ctx, journal, release, worker, err)
 	}
-	active, err := worker.Activate(ctx)
-	if err != nil || !matches(active, hostdproto.StateActive, request.WorkerID, ready.Epoch) {
+	if m.config.ActivateRuntime != nil {
+		if err = m.stopCandidateForNative(ctx, worker); err != nil {
+			restoreErr := m.restoreCanonicalRuntime(ctx, journal, release, err)
+			return Result{Version: m.active.Version}, errors.Join(restoreErr, ErrBlocked)
+		}
+		worker = nil
+	}
+	var active hostdproto.Status
+	if m.config.ActivateRuntime != nil {
+		active, err = m.activateRuntime(ctx, release)
+	} else {
+		active, err = worker.Activate(ctx)
+	}
+	if err != nil || !m.validActiveRuntime(active, release, request.WorkerID, ready.Epoch) {
 		if err == nil {
 			err = ErrInvalidRelease
 		}
-		// The hostd result is now uncertain. Leave StageCutover durable so
-		// recovery queries the persisted fence rather than guessing.
+		if m.config.ActivateRuntime != nil {
+			return Result{Version: m.active.Version}, m.restoreCanonicalRuntime(ctx, journal, release, err)
+		}
 		return Result{Version: m.active.Version}, err
 	}
+	journal.WorkerID, journal.WorkerEpoch = active.WorkerID, active.Epoch
 	if journal, err = m.transition(journal, updateflow.StageMonitoring); err != nil {
 		return Result{Version: m.active.Version}, err
 	}
@@ -417,14 +455,14 @@ func (m *Manager) Activate(ctx context.Context, release Release) (Result, error)
 	if err = m.commitGate(ctx, journal, release); err != nil {
 		return Result{Version: m.active.Version}, err
 	}
-	m.setActive(release)
+	m.setActive(localRelease)
 	m.record(ctx, EventCommitted, journal, release, "")
 	return Result{Version: release.Version, Updated: true}, m.finishCommitted(journal)
 }
 
-// Recover applies the durable recovery decision. It never restarts hostd and
-// never guesses whether a candidate cut over: StageCutover is resolved only by
-// querying hostd's persisted active epoch.
+// Recover applies the durable recovery decision. StageCutover either adopts
+// the exact persisted active fence or restores and restarts the signed prior
+// installation through the configured native activation boundary.
 func (m *Manager) Recover(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -453,9 +491,6 @@ func (m *Manager) recoverLocked(ctx context.Context) error {
 			}
 			return m.write(m.newJournal())
 		}
-		if journal.ActiveDigest == "" && journal.CandidateVersion == m.active.Version && (journal.Stage == updateflow.StageMonitoring || journal.Stage == updateflow.StageCommitted) {
-			return m.recoverLegacyPromotedCandidate(ctx, journal)
-		}
 		return ErrBlocked
 	}
 	switch journal.Recovery() {
@@ -470,10 +505,10 @@ func (m *Manager) recoverLocked(ctx context.Context) error {
 		return m.restoreAfterDrain(ctx, journal, releaseFromJournal(journal), nil, errInterruptedDrainRecovery)
 	case updateflow.RecoveryQueryHostd:
 		status, statusErr := m.config.Hostd.Active(ctx)
-		if statusErr != nil {
+		if statusErr != nil && m.config.ActivateRuntime == nil {
 			return statusErr
 		}
-		if matches(status, hostdproto.StateActive, journal.WorkerID, journal.WorkerEpoch) {
+		if m.config.ActivateRuntime == nil && statusErr == nil && matches(status, hostdproto.StateActive, journal.WorkerID, journal.WorkerEpoch) {
 			if err := m.ensurePromoted(journal); err != nil {
 				return err
 			}
@@ -487,8 +522,20 @@ func (m *Manager) recoverLocked(ctx context.Context) error {
 			}
 			return m.monitorAndCommitRecovered(ctx, next)
 		}
+		if err := m.authorizeStorageRestore(ctx, m.active); err != nil {
+			return errors.Join(errInterruptedDrainRecovery, err, ErrBlocked)
+		}
 		if err := m.restoreStorage(); err != nil {
 			return m.restoreAfterDrain(ctx, journal, releaseFromJournal(journal), nil, errors.Join(errInterruptedDrainRecovery, errStorageRestoreFailed, err))
+		}
+		if m.config.ActivateRuntime != nil {
+			active, activateErr := m.activateRuntime(ctx, m.active)
+			if activateErr != nil || !m.validActiveRuntime(active, m.active, "", 0) {
+				if activateErr == nil {
+					activateErr = ErrInvalidRelease
+				}
+				return errors.Join(errInterruptedDrainRecovery, activateErr, ErrBlocked)
+			}
 		}
 		return m.restoreAfterDrain(ctx, journal, releaseFromJournal(journal), nil, errInterruptedDrainRecovery)
 	case updateflow.RecoveryContinueMonitor:
@@ -531,31 +578,6 @@ func (m *Manager) restoreBlockedTransaction(ctx context.Context, journal updatef
 	return nil
 }
 
-// recoverLegacyPromotedCandidate completes a transaction written before the
-// journal retained the previous active release metadata. The promoted,
-// verified candidate can commit after its health hold, but a failed health
-// check remains blocked because reconstructing rollback identity from local
-// bytes would weaken the signed release boundary.
-func (m *Manager) recoverLegacyPromotedCandidate(ctx context.Context, journal updateflow.Journal) error {
-	if journal.Stage == updateflow.StageMonitoring {
-		if err := m.monitor(ctx, journal, m.active); err != nil {
-			return errors.Join(err, ErrBlocked)
-		}
-		next, err := m.transition(journal, updateflow.StageCommitted)
-		if err != nil {
-			return err
-		}
-		if err := m.write(next); err != nil {
-			return err
-		}
-		journal = next
-	}
-	if err := m.commitGate(ctx, journal, releaseFromJournal(journal)); err != nil {
-		return err
-	}
-	return m.finishCommitted(journal)
-}
-
 func (m *Manager) monitorAndCommitRecovered(ctx context.Context, journal updateflow.Journal) error {
 	release := releaseFromJournal(journal)
 	if err := m.monitor(ctx, journal, release); err != nil {
@@ -587,11 +609,65 @@ func (m *Manager) commitGate(ctx context.Context, journal updateflow.Journal, re
 	})
 }
 
+func (m *Manager) validActiveRuntime(status hostdproto.Status, release Release, expectedWorkerID string, epoch uint64) bool {
+	if m.config.ActivateRuntime == nil {
+		return matches(status, hostdproto.StateActive, expectedWorkerID, epoch)
+	}
+	return status.State == hostdproto.StateActive && status.WorkerID == workerID(release.Version) && status.Epoch > 0 && status.APIVersion > 0 && status.APIVersion >= release.HostdAPIMin && status.APIVersion <= release.HostdAPIMax
+}
+
+func (m *Manager) activateRuntime(ctx context.Context, release Release) (hostdproto.Status, error) {
+	hookCtx, cancel := context.WithTimeout(ctx, releaseDuration(release.RollbackTimeout, m.config.RollbackTimeout))
+	defer cancel()
+	return m.config.ActivateRuntime(hookCtx, release.Version)
+}
+
+func (m *Manager) stopCandidateForNative(ctx context.Context, worker Worker) error {
+	if worker == nil {
+		return nil
+	}
+	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return worker.Stop(stopCtx)
+}
+
+func (m *Manager) restoreCanonicalRuntime(ctx context.Context, journal updateflow.Journal, failed Release, cause error) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseDuration(failed.RollbackTimeout, m.config.RollbackTimeout))
+	defer cancel()
+	previous := m.active
+	if err := m.authorizeStorageRestore(ctx, previous); err != nil {
+		return errors.Join(cause, err, ErrBlocked)
+	}
+	if err := m.restoreStorage(); err != nil {
+		return errors.Join(cause, errStorageRestoreFailed, err, ErrBlocked)
+	}
+	status, err := m.activateRuntime(ctx, previous)
+	if err != nil || !m.validActiveRuntime(status, previous, "", 0) {
+		if err == nil {
+			err = ErrInvalidRelease
+		}
+		return errors.Join(cause, err, ErrBlocked)
+	}
+	return m.restoreAfterDrain(ctx, journal, failed, nil, cause)
+}
+
 // restoreAfterDrain compensates an uncertain or interrupted drain before any
 // binary cutover. The old worker remains the only active worker, but its edge
 // route may already reject new streams. Recovery therefore proves the exact
 // current tuple and restored end-to-end path before discarding the candidate.
 func (m *Manager) restoreAfterDrain(ctx context.Context, journal updateflow.Journal, failed Release, candidate Worker, cause error) error {
+	var activeSessions *autoupdate.ActiveTerminalSessionsError
+	expectedBusy := errors.As(cause, &activeSessions)
+	failureCause := cause
+	if expectedBusy {
+		// Once expected admission denial has selected this compensation path,
+		// cleanup failures are operational failures rather than scheduler busy.
+		failureCause = nil
+	}
+	// Recovery owns a bounded lifetime independent of the failed request.
+	// Canceling activation must not strand already-drained work or the slots.
+	ctx, cancelRecovery := context.WithTimeout(context.WithoutCancel(ctx), releaseDuration(failed.RollbackTimeout, m.config.RollbackTimeout))
+	defer cancelRecovery()
 	next, transitionErr := m.transition(journal, updateflow.StageRollback)
 	if transitionErr != nil {
 		next = journal
@@ -620,28 +696,44 @@ func (m *Manager) restoreAfterDrain(ctx context.Context, journal updateflow.Jour
 		if blockErr == nil {
 			blockErr = m.write(blocked)
 		}
-		return errors.Join(cause, journalErr, restoreErr, blockErr, ErrBlocked)
+		return errors.Join(failureCause, journalErr, restoreErr, blockErr, ErrBlocked)
 	}
 	if journalErr != nil || errors.Is(cause, errStorageRestoreFailed) {
 		blocked, blockErr := m.transition(next, updateflow.StageBlocked)
 		if blockErr == nil {
 			blockErr = m.write(blocked)
 		}
-		return errors.Join(cause, journalErr, blockErr, ErrBlocked)
+		return errors.Join(failureCause, journalErr, blockErr, ErrBlocked)
 	}
 	if candidate != nil {
 		m.stopWorker(candidate)
 	}
 	if err := m.removeStaged(); err != nil {
-		return errors.Join(cause, err, ErrBlocked)
+		return errors.Join(failureCause, err, ErrBlocked)
 	}
-	idle := m.idleJournal(next, updateflow.FailureDrain, failed.Version)
+	quarantine := failed.Version
+	if expectedBusy {
+		quarantine = ""
+	}
+	failure := updateflow.FailureDrain
+	if expectedBusy {
+		failure = updateflow.FailureNone
+	}
+	idle := m.idleJournal(next, failure, quarantine)
+	if expectedBusy {
+		idle.BlockedReason = autoupdate.BlockedActiveTerminalSessions
+		idle.RequiredVersion = activeSessions.RequiredVersion
+		idle.NextCheckAt = m.now().Add(autoupdate.DefaultRetryFloor)
+	}
 	if err := m.write(idle); err != nil {
-		return errors.Join(cause, err, ErrBlocked)
+		return errors.Join(failureCause, err, ErrBlocked)
 	}
 	m.record(ctx, EventRolledBack, idle, failed, safeFailure(cause))
 	if errors.Is(cause, errInterruptedDrainRecovery) {
 		return nil
+	}
+	if expectedBusy {
+		return activeSessions
 	}
 	return cause
 }
@@ -661,6 +753,18 @@ func releaseDuration(signed, fallback time.Duration) time.Duration {
 	return fallback
 }
 
+// Match the native Windows observation allowance: at least one second for
+// completion, no more than thirty seconds regardless of the probe interval.
+func stabilityCompletionMargin(interval time.Duration) time.Duration {
+	if interval < time.Second {
+		return time.Second
+	}
+	if interval > 30*time.Second {
+		return 30 * time.Second
+	}
+	return interval
+}
+
 func (m *Manager) monitor(ctx context.Context, journal updateflow.Journal, release Release) error {
 	deadline := journal.HealthDeadline
 	if deadline.IsZero() {
@@ -676,14 +780,19 @@ func (m *Manager) monitor(ctx context.Context, journal updateflow.Journal, relea
 	if err := m.config.Health.Check(ctx, status, release); err != nil {
 		return err
 	}
-	remaining := time.Until(deadline)
 	interval := releaseDuration(release.StabilityInterval, m.config.HealthInterval)
+	window := releaseDuration(release.StabilityWindow, m.config.MonitorWindow)
+	// The signed window is observation time, not an RPC completion timeout.
+	// Include bounded setup, final-probe and response time, anchored to the
+	// persisted deadline so a restarted updater cannot renew this allowance.
+	completionDeadline := deadline.Add(stabilityCompletionMargin(interval))
+	remaining := completionDeadline.Sub(m.now())
 	if remaining <= 0 {
-		remaining = interval
+		return errors.Join(ErrActivationGate, context.DeadlineExceeded)
 	}
 	if err := m.gate(ctx, remaining, func(gateCtx context.Context) error {
 		request := m.gateRequest(journal, release, status)
-		request.Window, request.Interval = releaseDuration(release.StabilityWindow, remaining), interval
+		request.Window, request.Interval = window, interval
 		if request.Interval > request.Window {
 			request.Interval = request.Window
 		}
@@ -708,6 +817,10 @@ func (m *Manager) monitor(ctx context.Context, journal updateflow.Journal, relea
 }
 
 func (m *Manager) rollbackActive(ctx context.Context, journal updateflow.Journal, failed Release, candidate Worker, cause error) error {
+	// Recovery owns a bounded lifetime independent of the failed request.
+	// Canceling activation must not strand already-drained work or the slots.
+	ctx, cancelRecovery := context.WithTimeout(context.WithoutCancel(ctx), releaseDuration(failed.RollbackTimeout, m.config.RollbackTimeout))
+	defer cancelRecovery()
 	next, err := m.transition(journal, updateflow.StageRollback)
 	if err != nil {
 		return err
@@ -718,22 +831,33 @@ func (m *Manager) rollbackActive(ctx context.Context, journal updateflow.Journal
 		return err
 	}
 	previous := m.active
-	rollbackRequest := m.startRequest(previous, m.config.BinaryRollback)
-	rollbackWorker, startErr := m.config.Starter.Start(ctx, rollbackRequest)
-	if startErr == nil {
-		ready, readyErr := rollbackWorker.Ready(ctx)
-		if readyErr != nil || !matches(ready, hostdproto.StateCandidate, rollbackRequest.WorkerID, 0) {
-			if readyErr == nil {
-				readyErr = ErrInvalidRelease
-			}
-			startErr = readyErr
-		} else {
-			active, activateErr := rollbackWorker.Activate(ctx)
-			if activateErr != nil || !matches(active, hostdproto.StateActive, rollbackRequest.WorkerID, ready.Epoch) {
-				if activateErr == nil {
-					activateErr = ErrInvalidRelease
+	if err := m.authorizeRecovery(ctx, previous, m.config.BinaryRollback); err != nil {
+		next.LastFailure = updateflow.FailureRollback
+		if blocked, transitionErr := m.transition(next, updateflow.StageBlocked); transitionErr == nil {
+			_ = m.write(blocked)
+		}
+		return errors.Join(cause, err, ErrBlocked)
+	}
+	var startErr error
+	if m.config.ActivateRuntime == nil {
+		rollbackRequest := m.startRequest(previous, m.config.BinaryRollback)
+		rollbackWorker, rollbackStartErr := m.config.Starter.Start(ctx, rollbackRequest)
+		startErr = rollbackStartErr
+		if startErr == nil {
+			ready, readyErr := rollbackWorker.Ready(ctx)
+			if readyErr != nil || !matches(ready, hostdproto.StateCandidate, rollbackRequest.WorkerID, 0) {
+				if readyErr == nil {
+					readyErr = ErrInvalidRelease
 				}
-				startErr = activateErr
+				startErr = readyErr
+			} else {
+				active, activateErr := rollbackWorker.Activate(ctx)
+				if activateErr != nil || !matches(active, hostdproto.StateActive, rollbackRequest.WorkerID, ready.Epoch) {
+					if activateErr == nil {
+						activateErr = ErrInvalidRelease
+					}
+					startErr = activateErr
+				}
 			}
 		}
 	}
@@ -745,10 +869,23 @@ func (m *Manager) rollbackActive(ctx context.Context, journal updateflow.Journal
 		}
 		return errors.Join(cause, startErr, ErrBlocked)
 	}
+	if err := m.authorizeRecovery(ctx, previous, m.config.BinaryRollback); err != nil {
+		return errors.Join(cause, err, ErrBlocked)
+	}
 	if err := m.restoreStorage(); err != nil {
 		return errors.Join(cause, err, ErrBlocked)
 	}
-	rollbackStatus, statusErr := m.config.Hostd.Active(ctx)
+	var rollbackStatus hostdproto.Status
+	var statusErr error
+	if m.config.ActivateRuntime != nil {
+		rollbackStatus, statusErr = m.activateRuntime(ctx, previous)
+		candidate = nil // the host restart invalidated the old candidate process handle
+		if statusErr == nil && !m.validActiveRuntime(rollbackStatus, previous, "", 0) {
+			statusErr = ErrInvalidRelease
+		}
+	} else {
+		rollbackStatus, statusErr = m.config.Hostd.Active(ctx)
+	}
 	if statusErr != nil {
 		return errors.Join(cause, statusErr, ErrBlocked)
 	}
@@ -854,88 +991,146 @@ func (m *Manager) finishCommitted(journal updateflow.Journal) error {
 	return m.write(m.idleJournal(journal, updateflow.FailureNone, ""))
 }
 
-func (m *Manager) stage(ctx context.Context, release Release) error {
+func (m *Manager) stage(ctx context.Context, release Release) (Release, error) {
 	stream, err := m.config.Fetcher.Fetch(ctx, release)
 	if err != nil {
-		return err
+		return Release{}, err
 	}
 	defer stream.Close()
 	directory := filepath.Dir(m.config.BinaryStaged)
 	//paperboat:allow-source-policy atomic-replacement owner=worker-update reason=same-directory-verified-runtime-download-staging
 	pending, err := os.CreateTemp(directory, runtimeStagingPattern(release.Platform))
 	if err != nil {
-		return err
+		return Release{}, err
 	}
 	pendingPath := pending.Name()
 	defer os.Remove(pendingPath)
-	// The downloaded Darwin package stays private until installer(8) consumes
-	// it. Native executable targets must be traversable by the enrolled worker
-	// UID when hostd launches the candidate.
+	// The downloaded Darwin package stays private while its canonical payload
+	// is extracted. Native executable targets must be traversable by the
+	// enrolled worker UID when hostd launches the candidate.
 	stagingMode := os.FileMode(0o755)
 	if release.Platform == "darwin" {
 		stagingMode = 0o600
 	}
 	if err := pending.Chmod(stagingMode); err != nil {
 		pending.Close()
-		return err
+		return Release{}, err
 	}
 	if err := pending.Chown(m.config.OwnerUID, m.config.OwnerGID); err != nil {
 		pending.Close()
-		return err
+		return Release{}, err
 	}
 	hash := sha256.New()
 	written, copyErr := io.Copy(io.MultiWriter(pending, hash), io.LimitReader(stream, release.Length+1))
 	if copyErr != nil || written != release.Length || !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), release.SHA256) {
 		pending.Close()
-		return ErrInvalidRelease
+		return Release{}, ErrInvalidRelease
 	}
 	if err := pending.Sync(); err != nil {
 		pending.Close()
-		return err
+		return Release{}, err
 	}
 	if err := pending.Close(); err != nil {
-		return err
+		return Release{}, err
 	}
 	if release.Platform == "darwin" {
-		if m.config.InstallPackage == nil {
-			return ErrInvalidConfig
+		if m.config.ExtractPackage == nil {
+			return Release{}, ErrInvalidConfig
 		}
 		if err := m.config.NativeVerifier.Verify(ctx, pendingPath, release.Platform, release.Architecture); err != nil {
-			return ErrInvalidRelease
+			return Release{}, ErrInvalidRelease
 		}
-		installedPath, err := m.config.InstallPackage(ctx, pendingPath)
+		extractionRoot, err := os.MkdirTemp(directory, ".paperboat-package-extraction-")
 		if err != nil {
-			return ErrInvalidRelease
+			return Release{}, err
+		}
+		defer os.RemoveAll(extractionRoot)
+		if err := os.Chmod(extractionRoot, 0o700); err != nil {
+			return Release{}, err
+		}
+		installedPath, err := m.config.ExtractPackage(ctx, pendingPath, extractionRoot)
+		if err != nil {
+			return Release{}, ErrInvalidRelease
 		}
 		if err := stageInstalledDarwinExecutable(installedPath, m.config.BinaryStaged, m.config.OwnerUID, m.config.OwnerGID); err != nil {
-			return ErrInvalidRelease
+			return Release{}, ErrInvalidRelease
 		}
 		if err := binarytarget.Validate(m.config.BinaryStaged, release.Platform, release.Architecture); err != nil {
-			return ErrInvalidRelease
+			return Release{}, ErrInvalidRelease
 		}
 		if err := m.config.NativeVerifier.Verify(ctx, m.config.BinaryStaged, release.Platform, release.Architecture); err != nil {
-			return ErrInvalidRelease
+			return Release{}, ErrInvalidRelease
 		}
-		return syncDirectories(directory, filepath.Dir(m.config.BinaryStaged))
+		if err := syncDirectories(directory, filepath.Dir(m.config.BinaryStaged)); err != nil {
+			return Release{}, err
+		}
+		return localReleaseIdentity(release, m.config.BinaryStaged)
 	}
 	if err := binarytarget.Validate(pendingPath, release.Platform, release.Architecture); err != nil {
-		return ErrInvalidRelease
+		return Release{}, ErrInvalidRelease
 	}
 	if err := m.config.NativeVerifier.Verify(ctx, pendingPath, release.Platform, release.Architecture); err != nil {
-		return ErrInvalidRelease
+		return Release{}, ErrInvalidRelease
 	}
 	//paperboat:allow-source-policy atomic-replacement owner=worker-update reason=verified-runtime-download-publication
 	if err := os.Rename(pendingPath, m.config.BinaryStaged); err != nil {
+		return Release{}, err
+	}
+	if err := syncDirectories(directory); err != nil {
+		return Release{}, err
+	}
+	return release, nil
+}
+
+func localReleaseIdentity(release Release, path string) (Release, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return Release{}, err
+	}
+	hash := sha256.New()
+	written, copyErr := io.Copy(hash, io.LimitReader(file, maxRuntimeBytes+1))
+	closeErr := file.Close()
+	if copyErr != nil || closeErr != nil || written < 1 || written > maxRuntimeBytes {
+		return Release{}, ErrInvalidRelease
+	}
+	release.SHA256 = hex.EncodeToString(hash.Sum(nil))
+	release.Length = written
+	return release, nil
+}
+
+func (m *Manager) authorizeRecovery(ctx context.Context, release Release, path string) error {
+	if err := validateRelease(release); err != nil {
+		return ErrInvalidRelease
+	}
+	if err := m.config.Fetcher.AuthorizeRecovery(ctx, release.Version, release.Platform, release.Architecture); err != nil {
 		return err
 	}
-	return syncDirectories(directory)
+	if err := safeRuntimeFile(path, m.config.OwnerUID, true); err != nil {
+		return ErrUnsafeStorage
+	}
+	if !regularMatches(path, release.Length, release.SHA256) {
+		return ErrInvalidRelease
+	}
+	if err := binarytarget.Validate(path, release.Platform, release.Architecture); err != nil {
+		return ErrInvalidRelease
+	}
+	if err := m.config.NativeVerifier.Verify(ctx, path, release.Platform, release.Architecture); err != nil {
+		return ErrInvalidRelease
+	}
+	return nil
+}
+
+func (m *Manager) authorizeStorageRestore(ctx context.Context, release Release) error {
+	if regularMatches(m.config.Binary, release.Length, release.SHA256) {
+		return m.authorizeRecovery(ctx, release, m.config.Binary)
+	}
+	return m.authorizeRecovery(ctx, release, m.config.BinaryRollback)
 }
 
 // runtimeStagingPattern preserves native package extensions while a verified
 // artifact is held in the private staging directory. macOS signature
 // validation distinguishes a signed installer package (.pkg) from an
-// executable, so the temporary package must retain that suffix until
-// installer(8) consumes it.
+// executable, so the temporary package must retain that suffix during extraction.
 func runtimeStagingPattern(platform string) string {
 	if platform == "darwin" {
 		return ".paperboat-runtime-*.pkg"
@@ -1002,8 +1197,12 @@ func (m *Manager) promoteStorage() error {
 	if err := removeRuntimeFile(m.config.BinaryRollback, m.config.OwnerUID); err != nil {
 		return err
 	}
-	//paperboat:allow-source-policy atomic-replacement owner=worker-update reason=current-runtime-to-rollback-slot-transition
-	if err := os.Rename(m.config.Binary, m.config.BinaryRollback); err != nil {
+	// Keep the canonical executable present until the atomic replacement.
+	// Both release slots already require the same filesystem for rename.
+	if err := os.Link(m.config.Binary, m.config.BinaryRollback); err != nil {
+		return err
+	}
+	if err := syncDirectories(filepath.Dir(m.config.BinaryRollback)); err != nil {
 		return err
 	}
 	//paperboat:allow-source-policy atomic-replacement owner=worker-update reason=verified-staged-runtime-slot-activation
@@ -1016,12 +1215,6 @@ func (m *Manager) promoteStorage() error {
 }
 
 func (m *Manager) ensurePromoted(journal updateflow.Journal) error {
-	if m.active.Platform == "darwin" || runtime.GOOS == "darwin" {
-		if err := binarytarget.Validate(m.config.Binary, "darwin", "arm64"); err != nil {
-			return err
-		}
-		return nil
-	}
 	if regularMatches(m.config.Binary, journal.CandidateLength, journal.CandidateDigest) {
 		return nil
 	}
@@ -1029,28 +1222,32 @@ func (m *Manager) ensurePromoted(journal updateflow.Journal) error {
 }
 
 func (m *Manager) restoreStorage() error {
-	// Before activation, current is old and staged is candidate, so there is
-	// nothing to restore. After promotion, current is candidate and rollback is
-	// old; move only the verified candidate into the quarantined staged slot.
-	if _, err := os.Lstat(m.config.BinaryStaged); err == nil {
-		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
 	if err := safeRuntimeFile(m.config.Binary, m.config.OwnerUID, true); err != nil {
 		return err
+	}
+	if regularMatches(m.config.Binary, m.active.Length, m.active.SHA256) {
+		return nil
 	}
 	if err := safeRuntimeFile(m.config.BinaryRollback, m.config.OwnerUID, true); err != nil {
 		return err
 	}
-	//paperboat:allow-source-policy atomic-replacement owner=worker-update reason=quarantine-current-runtime-before-rollback
-	if err := os.Rename(m.config.Binary, m.config.BinaryStaged); err != nil {
+	if !regularMatches(m.config.BinaryRollback, m.active.Length, m.active.SHA256) {
+		return ErrInvalidRelease
+	}
+	// Retain the failed candidate without moving the canonical executable.
+	// A crash after this link is distinguished by current's recorded identity,
+	// not by the mere presence of the staged quarantine slot.
+	if err := safeRuntimeFile(m.config.BinaryStaged, m.config.OwnerUID, false); err != nil {
+		return err
+	}
+	if err := os.Link(m.config.Binary, m.config.BinaryStaged); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	if err := syncDirectories(filepath.Dir(m.config.BinaryStaged)); err != nil {
 		return err
 	}
 	//paperboat:allow-source-policy atomic-replacement owner=worker-update reason=verified-runtime-rollback-slot-activation
 	if err := os.Rename(m.config.BinaryRollback, m.config.Binary); err != nil {
-		//paperboat:allow-source-policy atomic-replacement owner=worker-update reason=restore-current-runtime-after-rollback-failure
-		_ = os.Rename(m.config.BinaryStaged, m.config.Binary)
 		return err
 	}
 	return syncDirectories(filepath.Dir(m.config.Binary), filepath.Dir(m.config.BinaryRollback), filepath.Dir(m.config.BinaryStaged))
@@ -1107,6 +1304,11 @@ func (m *Manager) startRequest(release Release, executable string) StartRequest 
 func withRelease(journal updateflow.Journal, release Release, path string) updateflow.Journal {
 	journal.CandidateVersion, journal.CandidateDigest, journal.CandidateLength, journal.StagedPath = release.Version, release.SHA256, release.Length, path
 	journal.CandidateManifestDigest = release.ManifestSHA256
+	journal.CandidatePolicy = nil
+	if release.ManifestSHA256 != "" {
+		policy := activationPolicy(release)
+		journal.CandidatePolicy = &policy
+	}
 	journal.HostdAPIMin, journal.HostdAPIMax, journal.RuntimeAPIMin, journal.RuntimeAPIMax = release.HostdAPIMin, release.HostdAPIMax, release.RuntimeAPIMin, release.RuntimeAPIMax
 	return journal
 }
@@ -1121,18 +1323,15 @@ func withActiveRelease(journal updateflow.Journal, release Release) updateflow.J
 
 // ActiveReleaseFromJournal returns release identity that was previously
 // derived from signed metadata and durably bound to the update transaction.
-// Journals written before active metadata was retained remain recoverable only
-// while their verified candidate is at or beyond cutover.
 func ActiveReleaseFromJournal(path, version string) (Release, error) {
 	journal, err := updateflow.Load(path)
 	if err != nil {
 		return Release{}, err
 	}
-	release, err := releaseForVersion(journal, version)
-	if err != nil {
-		return Release{}, err
+	if journal.ActiveVersion != version || journal.ActiveDigest == "" {
+		return Release{}, ErrInvalidRelease
 	}
-	return completeJournalRelease(release)
+	return completeJournalRelease(activeReleaseFromJournal(journal))
 }
 
 // RecoveryReleaseFromJournal returns the logical pre-transaction active
@@ -1144,24 +1343,10 @@ func RecoveryReleaseFromJournal(path, executableVersion string) (Release, error)
 	if err != nil {
 		return Release{}, err
 	}
-	if journal.ActiveDigest != "" && (journal.ActiveVersion == executableVersion || journal.CandidateVersion == executableVersion && candidateMayBeActive(journal.Stage)) {
-		return completeJournalRelease(activeReleaseFromJournal(journal))
+	if journal.ActiveDigest == "" || journal.ActiveVersion != executableVersion && !(journal.CandidateVersion == executableVersion && candidateMayBeActive(journal.Stage)) {
+		return Release{}, ErrInvalidRelease
 	}
-	release, err := releaseForVersion(journal, executableVersion)
-	if err != nil {
-		return Release{}, err
-	}
-	return completeJournalRelease(release)
-}
-
-func releaseForVersion(journal updateflow.Journal, version string) (Release, error) {
-	if journal.ActiveVersion == version && journal.ActiveDigest != "" {
-		return activeReleaseFromJournal(journal), nil
-	}
-	if journal.CandidateVersion == version && candidateMayBeActive(journal.Stage) {
-		return releaseFromJournal(journal), nil
-	}
-	return Release{}, ErrInvalidRelease
+	return completeJournalRelease(activeReleaseFromJournal(journal))
 }
 
 func activeReleaseFromJournal(journal updateflow.Journal) Release {
@@ -1188,7 +1373,12 @@ func candidateMayBeActive(stage updateflow.Stage) bool {
 }
 
 func releaseFromJournal(j updateflow.Journal) Release {
-	return Release{Version: j.CandidateVersion, SHA256: j.CandidateDigest, ManifestSHA256: j.CandidateManifestDigest, Length: j.CandidateLength, Platform: runtime.GOOS, Architecture: runtime.GOARCH, HostdAPIMin: j.HostdAPIMin, HostdAPIMax: j.HostdAPIMax, RuntimeAPIMin: j.RuntimeAPIMin, RuntimeAPIMax: j.RuntimeAPIMax}
+	release := Release{Version: j.CandidateVersion, SHA256: j.CandidateDigest, ManifestSHA256: j.CandidateManifestDigest, Length: j.CandidateLength, Platform: runtime.GOOS, Architecture: runtime.GOARCH, HostdAPIMin: j.HostdAPIMin, HostdAPIMax: j.HostdAPIMax, RuntimeAPIMin: j.RuntimeAPIMin, RuntimeAPIMax: j.RuntimeAPIMax}
+	if p := j.CandidatePolicy; p != nil {
+		release.CanaryPath, release.CanaryStatus, release.CanarySamples = p.CanaryPath, p.CanaryStatus, p.CanarySamples
+		release.CanaryTimeout, release.DrainTimeout, release.StabilityWindow, release.StabilityInterval, release.RollbackTimeout = p.CanaryTimeout, p.DrainTimeout, p.StabilityWindow, p.StabilityInterval, p.RollbackTimeout
+	}
+	return release
 }
 func workerID(version string) string { return "runtime-" + version }
 func matches(status hostdproto.Status, state hostdproto.State, id string, epoch uint64) bool {
@@ -1214,20 +1404,35 @@ func validateConfig(config Config) error {
 	if err := safeRuntimeFile(config.Binary, config.OwnerUID, true); err != nil {
 		return err
 	}
-	activeMatches := regularMatches(config.Binary, config.Active.Length, config.Active.SHA256)
-	if config.Active.Platform == "darwin" {
-		// The signed Darwin release target is a PKG. The installed active
-		// executable is the package payload, so its bytes cannot match the
-		// package digest. Format validation remains mandatory.
-		activeMatches = true
-	}
-	if !activeMatches || binarytarget.Validate(config.Binary, config.Active.Platform, config.Active.Architecture) != nil {
+	if binarytarget.Validate(config.Binary, config.Active.Platform, config.Active.Architecture) != nil {
 		return ErrUnsafeStorage
 	}
-	if config.Active.Platform == "darwin" && config.InstallPackage == nil {
+	if !regularMatches(config.Binary, config.Active.Length, config.Active.SHA256) && !matchesInterruptedCandidate(config) {
+		return ErrUnsafeStorage
+	}
+	if config.Active.Platform == "darwin" && config.ExtractPackage == nil {
 		return ErrUnsafeStorage
 	}
 	return nil
+}
+
+// A restarted updater still owns the previous logical release until recovery
+// resolves hostd's fence. Permit only the exact candidate durably bound to that
+// previous release in a protected post-cutover journal.
+func matchesInterruptedCandidate(config Config) bool {
+	info, err := os.Lstat(config.StatePath)
+	if err != nil || !info.Mode().IsRegular() || fileOwner(info) != config.OwnerUID || info.Mode().Perm() != 0600 || info.Size() > 64<<10 {
+		return false
+	}
+	journal, err := updateflow.Load(config.StatePath)
+	if err != nil || !(candidateMayBeActive(journal.Stage) || journal.Stage == updateflow.StageRollback || journal.Stage == updateflow.StageBlocked) {
+		return false
+	}
+	if journal.ActiveVersion != config.Active.Version || journal.ActiveDigest != config.Active.SHA256 || journal.ActiveLength != config.Active.Length {
+		return false
+	}
+	candidate := releaseFromJournal(journal)
+	return validateRelease(candidate) == nil && regularMatches(config.Binary, candidate.Length, candidate.SHA256)
 }
 
 func validateRelease(release Release) error {

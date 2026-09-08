@@ -15,7 +15,7 @@ var ErrPeerApprovalSignerUnavailable = errors.New("peer enrollment signer is una
 
 // PeerApprovalSignerUnavailableError is a non-fatal local capability result:
 // this authenticated profile can verify the account root, but it does not
-// possess the root seed required to sign pending endpoint certificates.
+// possess a signing key required to sign pending endpoint certificates.
 type PeerApprovalSignerUnavailableError struct {
 	PendingRequests int
 }
@@ -64,7 +64,7 @@ func ApproveOwnedPeerEnrollments(ctx context.Context, store config.ProfileStore,
 	if len(eligible) == 0 {
 		return nil
 	}
-	seed, err := store.ExportPeerAccountRootSeed(profile.Issuer, profile.Account.ID)
+	seed, err := store.PeerApprovalSigningKey(profile.Issuer, profile.Account.ID, profile.CLIClientSessionID)
 	if errors.Is(err, config.ErrSecretNotFound) {
 		if err := validateVerifierOnlyRoot(ctx, store, profile, client); err != nil {
 			return err

@@ -12,6 +12,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
+	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
 )
 
 var (
@@ -792,6 +793,60 @@ func (m *Manager) ActiveForTunnel(tunnelID string) (Active, bool) {
 	active, ok := m.active[tunnelID]
 	m.mu.RUnlock()
 	return active, ok && active != nil
+}
+
+// ValidateNativePrivateTarget verifies a server-bound native target against
+// both durable last-known-good state and the exact currently published
+// runtime. A grant alone never makes an obsolete origin current.
+func (m *Manager) ValidateNativePrivateTarget(binding nativeprivate.Binding) error {
+	if m == nil || binding.Validate(m.config.Clock()) != nil || binding.ResourceKind != "tunnel" || binding.OwnerEndpointID != m.config.HostID || binding.TargetGeneration != binding.RouteGeneration {
+		return ErrOriginUnavailable
+	}
+	active, ok := m.ActiveForTunnel(binding.ResourceID)
+	if !ok || active.Generation() != binding.ResourceGeneration {
+		return ErrOriginUnavailable
+	}
+	state, _, err := m.config.Store.Snapshot()
+	if err != nil {
+		return err
+	}
+	var tunnel *hoststate.Tunnel
+	for i := range state.Tunnels {
+		if state.Tunnels[i].ID == binding.ResourceID {
+			tunnel = &state.Tunnels[i]
+			break
+		}
+	}
+	if tunnel == nil || tunnel.DesiredState != "active" || tunnel.AppliedGeneration != binding.ResourceGeneration || tunnel.LastKnownGood == nil || tunnel.LastKnownGood.Generation != binding.ResourceGeneration {
+		return ErrOriginUnavailable
+	}
+	decoded, err := hoststate.ParseTunnelConfigSnapshot(tunnel.LastKnownGood.Payload, tunnel.ID, tunnel.LastKnownGood.Generation)
+	if err != nil {
+		return err
+	}
+	if decoded.AccessMode != "private" {
+		return ErrOriginUnavailable
+	}
+	var route *hoststate.TunnelConfigRoute
+	for i := range decoded.Routes {
+		if decoded.Routes[i].ID == binding.RouteID {
+			route = &decoded.Routes[i]
+			break
+		}
+	}
+	wantProtocol := "http"
+	if binding.Protocol == "tcp" {
+		wantProtocol = "private_tcp"
+	}
+	if route == nil || route.DesiredState != "active" || route.Protocol != wantProtocol || route.OriginScheme != binding.TargetScheme || route.OriginAddress != binding.TargetAddress {
+		return ErrOriginUnavailable
+	}
+	for _, generation := range state.RouteGenerations {
+		if generation.TunnelID == binding.ResourceID && generation.RouteID == binding.RouteID && generation.Generation == binding.RouteGeneration {
+			return nil
+		}
+	}
+	return ErrOriginUnavailable
 }
 
 // ActiveSnapshot returns a point-in-time copy of the manager's published

@@ -48,6 +48,8 @@ type productionPreviewAssemblyConfig struct {
 	Carrier           connector.DataCarrierPoolConfig
 	OriginDial        preview.PreviewOriginDialer
 	PrivatePAC        privatepreviewproxy.PACConfigurator
+	NativePrivateTCP  *preview.NativePrivateTCPAccess
+	NativePrivateHTTP *preview.NativePrivateHTTPAccess
 }
 
 func newProductionPreviewAssembly(config productionPreviewAssemblyConfig) (*productionPreviewAssembly, error) {
@@ -82,8 +84,12 @@ func newProductionPreviewAssembly(config productionPreviewAssemblyConfig) (*prod
 			return nil, errors.Join(ErrProductionInvalid, err)
 		}
 	}
+	privateHTTPSource := privatepreviewproxy.AccessSource(privateSource)
+	if config.NativePrivateHTTP != nil {
+		privateHTTPSource = config.NativePrivateHTTP
+	}
 	privateService, err := privatepreviewproxy.NewAccessService(privatepreviewproxy.AccessServiceConfig{
-		Proxy: privatepreviewproxy.AccessProxyConfig{Source: privateSource}, Configurator: privatePAC,
+		Proxy: privatepreviewproxy.AccessProxyConfig{Source: privateHTTPSource}, Configurator: privatePAC,
 	})
 	if err != nil {
 		_ = runtime.Close(context.WithoutCancel(config.RunContext))
@@ -147,7 +153,7 @@ func newProductionPreviewAssembly(config productionPreviewAssemblyConfig) (*prod
 		_ = runtime.Close(context.WithoutCancel(config.RunContext))
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
-	privateTCP, err := preview.NewPrivateTCPAccessManager(preview.PrivateTCPAccessManagerConfig{Runtime: runtime, ControlToken: config.LocalControlToken, RunContext: ctx})
+	privateTCP, err := preview.NewPrivateTCPAccessManager(preview.PrivateTCPAccessManagerConfig{Runtime: runtime, Native: config.NativePrivateTCP, ControlToken: config.LocalControlToken, RunContext: ctx})
 	if err != nil {
 		_ = dispatcher.Shutdown(context.WithoutCancel(config.RunContext))
 		_ = ownerLeases.Close()

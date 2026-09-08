@@ -6,7 +6,29 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
 )
+
+func TestDispatchManagerValidatesCurrentNativePrivatePreview(t *testing.T) {
+	now := time.Now().UTC()
+	done := make(chan struct{})
+	session := &Session{lease: Lease{ID: "preview_1", OwnerDeviceID: "machine_1", AccessMode: "private", Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, LeaseDeadline: now.Add(time.Minute), Generation: 2}, done: done}
+	manager := &DispatchManager{config: DispatchManagerConfig{MachineID: "machine_1", Now: func() time.Time { return now }}, operations: map[string]dispatchOperation{"operation_1": {session: session}}}
+	binding := nativeprivate.Binding{Schema: nativeprivate.SchemaV1, ResourceKind: "preview", ResourceID: "preview_1", ResourceGeneration: 2, RouteID: "preview_1", RouteGeneration: 2, TargetGeneration: 2, OwnerEndpointID: "machine_1", Protocol: "http", TargetScheme: "http", TargetAddress: "127.0.0.1:3000", ExpiresAt: now.Add(time.Minute)}
+	if err := manager.ValidateNativePrivateTarget(binding); err != nil {
+		t.Fatal(err)
+	}
+	binding.TargetGeneration++
+	if err := manager.ValidateNativePrivateTarget(binding); !errors.Is(err, ErrDispatchUnavailable) {
+		t.Fatalf("stale target generation = %v", err)
+	}
+	binding.TargetGeneration = 2
+	close(done)
+	if err := manager.ValidateNativePrivateTarget(binding); !errors.Is(err, ErrDispatchUnavailable) {
+		t.Fatalf("stopped preview = %v", err)
+	}
+}
 
 type dispatchResolver struct {
 	mu      sync.Mutex

@@ -19,7 +19,7 @@ import (
 )
 
 func ExecuteHostService(ctx context.Context, args []string, stderr io.Writer) int {
-	flags := flag.NewFlagSet("pb __runtime-host-service", flag.ContinueOnError)
+	flags := flag.NewFlagSet("pb daemon __runtime-host-service", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	uid := flags.Int("uid", -1, "enrolled user ID")
 	gid := flags.Int("gid", -1, "enrolled group ID")

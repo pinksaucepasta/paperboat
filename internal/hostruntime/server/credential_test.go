@@ -68,6 +68,18 @@ func TestCredentialAuthorizerFailsClosedWithoutPolicy(t *testing.T) {
 	}
 }
 
+func TestCredentialAuthorizerUsesCodexSessionAsResource(t *testing.T) {
+	claims := auth.Claims{Issuer: "https://api.test", Subject: "usr_1", JTI: "jti_1", IssuedAt: 1, ExpiresAt: 100, Scope: []string{"codex:connect"}, CredentialClass: "codex_connect", EnvironmentID: "env_1", MachineID: "machine_1", UserID: "usr_1", CLIClientSessionID: "cli_1", SessionID: "cdx_1"}
+	authorizer := CredentialAuthorizer{Token: "signed-token", Resolver: resolverFunc(func(protocol.Frame) (auth.Policy, error) { return auth.Policy{}, nil }), Verifier: verifierFunc(func(context.Context, string, auth.Policy) (auth.Claims, error) { return claims, nil })}
+	got, err := authorizer.Authorize(context.Background(), protocol.Frame{Capability: "codex.connect.v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ResourceID != "cdx_1" {
+		t.Fatalf("resource id=%q", got.ResourceID)
+	}
+}
+
 func TestStableClaimsBindingKeepsExecRenewalButSeparatesOperations(t *testing.T) {
 	claims := auth.Claims{Issuer: "https://api.test", Subject: "usr_1", JTI: "jti_1", IssuedAt: 1, ExpiresAt: 100, Scope: []string{"exec:operate"}, CredentialClass: "exec_operation", EnvironmentID: "env_1", MachineID: "machine_1", UserID: "usr_1", CLIClientSessionID: "cli_1", OperationID: "operation_exec_1"}
 	first, err := stableClaimsBinding(claims)

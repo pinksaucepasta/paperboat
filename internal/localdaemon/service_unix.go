@@ -5,6 +5,7 @@ package localdaemon
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/endpointbinary"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -29,10 +30,15 @@ type serviceConfig struct {
 }
 
 func InstallCurrentUserService(ctx context.Context, executable, configPath, serverURL string) error {
+	resolved, err := endpointbinary.Daemon(executable)
+	if err != nil {
+		return err
+	}
 	config, err := currentUserServiceConfig(executable)
 	if err != nil {
 		return err
 	}
+	config.Executable = resolved
 	config.ConfigPath, config.ServerURL = configPath, serverURL
 	return installService(ctx, config)
 }
@@ -42,16 +48,15 @@ func RemoveCurrentUserService(ctx context.Context, executable string) error {
 	if err != nil {
 		return err
 	}
-	installer, err := newServiceInstaller(config)
+	return removeService(ctx, config)
+}
+
+func removeService(ctx context.Context, config serviceConfig) error {
+	definition, err := serviceDefinition(config)
 	if err != nil {
 		return err
 	}
-	if _, err := os.Lstat(installer.DefinitionPath()); errors.Is(err, os.ErrNotExist) {
-		return nil
-	} else if err != nil {
-		return err
-	}
-	return installer.Uninstall(ctx)
+	return hostservice.Remove(ctx, definition)
 }
 
 func currentUserServiceConfig(executable string) (serviceConfig, error) {
@@ -71,12 +76,12 @@ func currentUserServiceConfig(executable string) (serviceConfig, error) {
 	if err != nil {
 		return serviceConfig{}, err
 	}
-	resolvedExecutable, err := filepath.EvalSymlinks(executable)
+	resolvedExecutable, err := endpointbinary.DaemonPathForRemoval(executable)
 	if err != nil {
 		return serviceConfig{}, err
 	}
 	environment := map[string]string{"HOME": home}
-	for _, key := range []string{"XDG_STATE_HOME", "XDG_RUNTIME_DIR", "TMPDIR"} {
+	for _, key := range []string{"XDG_STATE_HOME", "XDG_RUNTIME_DIR", "TMPDIR", "PAPERBOAT_RUNTIME_STATE_ROOT"} {
 		if value := strings.TrimSpace(os.Getenv(key)); value != "" && filepath.IsAbs(value) {
 			environment[key] = filepath.Clean(value)
 		}
@@ -103,10 +108,18 @@ func installService(ctx context.Context, config serviceConfig) error {
 }
 
 func newServiceInstaller(config serviceConfig) (*hostservice.Installer, error) {
-	if !filepath.IsAbs(config.Home) || !filepath.IsAbs(config.Executable) || config.Username == "" || config.Group == "" || config.UID < 0 || config.Runner == nil || config.ConfigPath != "" && !filepath.IsAbs(config.ConfigPath) {
-		return nil, ErrInvalidInventoryConfig
+	definition, err := serviceDefinition(config)
+	if err != nil {
+		return nil, err
 	}
-	arguments := []string{"__local-daemon"}
+	return hostservice.New(definition)
+}
+
+func serviceDefinition(config serviceConfig) (hostservice.Config, error) {
+	if !filepath.IsAbs(config.Home) || !filepath.IsAbs(config.Executable) || config.Username == "" || config.Group == "" || config.UID < 0 || config.Runner == nil || config.ConfigPath != "" && !filepath.IsAbs(config.ConfigPath) {
+		return hostservice.Config{}, ErrInvalidInventoryConfig
+	}
+	arguments := []string{"daemon"}
 	if config.ConfigPath != "" {
 		arguments = append(arguments, "--config", filepath.Clean(config.ConfigPath))
 	}
@@ -118,13 +131,13 @@ func newServiceInstaller(config serviceConfig) (*hostservice.Installer, error) {
 	case "darwin":
 		controller = hostservice.LaunchdController{Runner: config.Runner, UID: config.UID, Label: hostservice.DaemonLabel, UserDomain: true}
 	case "linux":
-		controller = hostservice.SystemdController{Runner: config.Runner, Unit: "paperboat-local-daemon.service", User: true}
+		controller = hostservice.SystemdController{Runner: config.Runner, Unit: "paperboatd.service", User: true}
 	default:
-		return nil, hostservice.ErrUnsupportedPlatform
+		return hostservice.Config{}, hostservice.ErrUnsupportedPlatform
 	}
-	return hostservice.New(hostservice.Config{
+	return hostservice.Config{
 		Platform: config.Platform, Kind: hostservice.DaemonKind, ConfigRoot: config.Home,
 		Executable: config.Executable, User: config.Username, Group: config.Group,
 		Arguments: arguments, Environment: config.Environment, Controller: controller,
-	})
+	}, nil
 }

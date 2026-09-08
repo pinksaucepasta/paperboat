@@ -459,6 +459,7 @@ verify() {
     [[ "$active" == active ]] || die "$unit is not active"
     exec_start=$(systemctl show -p ExecStart --value "$unit" 2>/dev/null || true)
     [[ "$exec_start" == *"$pb"* ]] || die "$unit does not invoke the canonical pb binary"
+    [[ "$exec_start" == *'"daemon"'* ]] || die "$unit does not invoke the explicit pb daemon entry point"
     [[ "$exec_start" == *"$expected_argument"* ]] || die "$unit does not invoke the expected runtime role"
     printf 'unit=%s exec_start=%s\n' "$unit" "$(printf '%s' "$exec_start" | one_line)"
     pid=$(systemctl show -p MainPID --value "$unit" 2>/dev/null || true)

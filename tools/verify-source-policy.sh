@@ -13,7 +13,7 @@ fi
 check() {
 	rule=$1
 	pattern=$2
-	matches=$(rg -n --no-heading --glob '*.go' --glob '!**/*_test.go' "$pattern" . || true)
+	matches=$(rg -n --no-heading --glob '*.go' --glob '!upstream/tailcat/**' --glob '!upstream/tailscale/**' --glob '!**/*_test.go' "$pattern" . || true)
 	[ -z "$matches" ] && return 0
 	violations=$(printf '%s\n' "$matches" | while IFS=: read -r file line rest; do
 		previous=$((line - 1))

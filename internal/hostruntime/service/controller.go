@@ -160,6 +160,18 @@ func launchdServiceAbsent(err error) bool {
 		strings.Contains(message, "does not exist")
 }
 
+func launchdStartRetryable(err error) bool {
+	if launchdServiceAbsent(err) {
+		return true
+	}
+	var commandErr *CommandError
+	if !errors.As(err, &commandErr) {
+		return false
+	}
+	var exitError interface{ ExitCode() int }
+	return errors.As(commandErr.Cause, &exitError) && exitError.ExitCode() == 37
+}
+
 func (c LaunchdController) label() string {
 	if c.Label != "" {
 		return c.Label
@@ -167,42 +179,79 @@ func (c LaunchdController) label() string {
 	return Label
 }
 
+func (c LaunchdController) domain() string {
+	if c.UserDomain {
+		return fmt.Sprintf("gui/%d", c.UID)
+	}
+	return "system"
+}
+
+func (c LaunchdController) service() string { return c.domain() + "/" + c.label() }
+
 func (c LaunchdController) Apply(ctx context.Context, path string, upgrading bool) error {
 	if c.Runner == nil || c.UID < 0 {
 		return ErrInvalidDefinition
 	}
+	operationCtx, cancel, err := nativeServiceContext(ctx)
+	if err != nil {
+		return err
+	}
+	defer cancel()
 	domain := "system"
 	if c.UserDomain {
 		domain = fmt.Sprintf("gui/%d", c.UID)
 	}
 	service := domain + "/" + c.label()
 	if upgrading {
-		if err := c.Runner.Run(ctx, "launchctl", "bootout", service); err != nil && !launchdServiceAbsent(err) {
+		if err := c.Runner.Run(operationCtx, "launchctl", "bootout", service); err != nil && !launchdServiceAbsent(err) {
 			return err
 		}
 	}
+	return c.startJob(operationCtx, path, true, true)
+}
+
+// startJob owns launchd's bootout/bootstrap reservation race for both install
+// and transactional restart paths. A successful stale print is not sufficient:
+// the label must still accept kickstart before the job is considered started.
+func (c LaunchdController) startJob(ctx context.Context, path string, bootstrap, verify bool) error {
+	service := c.service()
 	for {
-		err := c.Runner.Run(ctx, "launchctl", "bootstrap", domain, path)
+		if bootstrap {
+			if err := c.Runner.Run(ctx, "launchctl", "bootstrap", c.domain(), path); err != nil {
+				if c.Runner.Run(ctx, "launchctl", "print", service) != nil {
+					if waitErr := waitLaunchdRetry(ctx, err); waitErr != nil {
+						return waitErr
+					}
+					continue
+				}
+			}
+		}
+		err := c.Runner.Run(ctx, "launchctl", "kickstart", "-k", service)
 		if err == nil {
-			break
+			if verify {
+				return c.Runner.Run(ctx, "launchctl", "print", service)
+			}
+			return nil
 		}
-		// launchd can keep a recently booted-out label reserved briefly. It can
-		// also return an error after loading the job, so verify state before retrying.
-		if c.Runner.Run(ctx, "launchctl", "print", service) == nil {
-			break
+		if !launchdStartRetryable(err) || path == "" {
+			return err
 		}
-		timer := time.NewTimer(500 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return errors.Join(err, ctx.Err())
-		case <-timer.C:
+		bootstrap = true
+		if waitErr := waitLaunchdRetry(ctx, ErrLifecycleNotReady); waitErr != nil {
+			return waitErr
 		}
 	}
-	if err := c.Runner.Run(ctx, "launchctl", "kickstart", "-k", service); err != nil {
-		return err
+}
+
+func waitLaunchdRetry(ctx context.Context, cause error) error {
+	timer := time.NewTimer(500 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return errors.Join(cause, ctx.Err())
+	case <-timer.C:
+		return nil
 	}
-	return c.Runner.Run(ctx, "launchctl", "print", service)
 }
 
 func (c LaunchdController) Remove(ctx context.Context, _ string) error {

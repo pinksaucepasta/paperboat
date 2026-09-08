@@ -19,7 +19,7 @@ import (
 // native named-pipe server. New installations use hostd, but keeping this
 // entry real is required for idempotent repair of existing installations.
 func ExecuteHostService(ctx context.Context, args []string, stderr io.Writer) int {
-	flags := flag.NewFlagSet("pb __runtime-host-service", flag.ContinueOnError)
+	flags := flag.NewFlagSet("pb daemon __runtime-host-service", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	if flags.Parse(args) != nil || flags.NArg() != 0 {
 		fmt.Fprintln(stderr, "pb: invalid host-service invocation")

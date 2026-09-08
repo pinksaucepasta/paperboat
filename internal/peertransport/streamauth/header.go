@@ -15,6 +15,7 @@ const (
 	Version           = 1
 	MaximumHeaderSize = 24 << 10
 	MaximumCredential = 16 << 10
+	MaximumTarget     = 4 << 10
 )
 
 var ErrInvalid = errors.New("invalid peer stream authorization header")
@@ -28,6 +29,18 @@ type Header struct {
 	DeadlineUnix int64  `json:"deadline_unix"`
 	MaximumBytes uint64 `json:"maximum_bytes"`
 	Resumable    bool   `json:"resumable"`
+	// Target is a canonical server-owned binding for native private streams.
+	// It is empty for every other consumer and is revalidated with Credential
+	// by the receiving host before application dispatch.
+	Target string `json:"target,omitempty"`
+}
+
+func NewNativePrivate(operationID, consumer, streamID, credential string, deadline time.Time, maximumBytes uint64, target []byte) (Header, error) {
+	value := Header{Version: Version, OperationID: operationID, Consumer: consumer, StreamID: streamID, Credential: credential, DeadlineUnix: deadline.UTC().Unix(), MaximumBytes: maximumBytes, Target: string(target)}
+	if value.Validate(time.Time{}) != nil {
+		return Header{}, ErrInvalid
+	}
+	return value, nil
 }
 
 func New(operationID, consumer, streamID, credential string, deadline time.Time, maximumBytes uint64) (Header, error) {
@@ -39,7 +52,11 @@ func New(operationID, consumer, streamID, credential string, deadline time.Time,
 }
 
 func (h Header) Validate(now time.Time) error {
-	if h.Version != Version || h.OperationID == "" || len(h.OperationID) > 128 || h.Consumer == "" || len(h.Consumer) > 128 || h.StreamID == "" || len(h.StreamID) > 128 || h.Credential == "" || len(h.Credential) > MaximumCredential || h.DeadlineUnix <= 0 || h.MaximumBytes == 0 {
+	if h.Version != Version || h.OperationID == "" || len(h.OperationID) > 128 || h.Consumer == "" || len(h.Consumer) > 128 || h.StreamID == "" || len(h.StreamID) > 128 || h.Credential == "" || len(h.Credential) > MaximumCredential || h.DeadlineUnix <= 0 || h.MaximumBytes == 0 || len(h.Target) > MaximumTarget {
+		return ErrInvalid
+	}
+	private := h.Consumer == "private_http" || h.Consumer == "private_tcp"
+	if private != (h.Target != "") || h.Target != "" && !json.Valid([]byte(h.Target)) {
 		return ErrInvalid
 	}
 	deadline := time.Unix(h.DeadlineUnix, 0)

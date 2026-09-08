@@ -794,6 +794,8 @@ func domainResult(value any, err error) operation.Outcome {
 		return failure("not_found_or_forbidden")
 	case errors.Is(err, session.ErrSessionExists):
 		return failure("session_exists")
+	case errors.Is(err, session.ErrUpdateInProgress):
+		return failure("update_in_progress")
 	case errors.Is(err, session.ErrSessionRunning):
 		return failure("session_running")
 	case errors.Is(err, session.ErrStaleGeneration):

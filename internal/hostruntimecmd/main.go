@@ -9,14 +9,14 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 )
 
-const usage = `pb internal host runtime.
+const usage = `pb daemon internal host runtime.
 
 Usage:
-  pb __runtime-hostd
-  pb __runtime-worker
-  pb __runtime-updated
-  pb __runtime-activate
-  pb __runtime-local-daemon
+  pb daemon __runtime-hostd
+  pb daemon __runtime-worker
+  pb daemon __runtime-updated
+  pb daemon __runtime-activate
+  pb daemon __runtime-local-daemon
 
 This entry point is managed by Paperboat services and is not a user command.`
 
@@ -24,7 +24,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	return execute(context.Background(), args, os.Stdin, stdout, stderr)
 }
 
-// Execute runs a validated host-runtime mode from the unified pb command.
+// Execute runs a validated host-runtime mode from the endpoint daemon or short-lived service management command.
 func Execute(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if ctx == nil || stdin == nil || stdout == nil || stderr == nil {
 		return 2

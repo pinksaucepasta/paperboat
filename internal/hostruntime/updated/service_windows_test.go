@@ -12,6 +12,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
+	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc/mgr"
 )
@@ -50,6 +51,31 @@ func TestWaitForWindowsUpdaterVersionWaitsForApplicationReadiness(t *testing.T) 
 func TestWaitForWindowsUpdaterVersionReturnsExactMismatch(t *testing.T) {
 	err := waitForWindowsUpdaterVersion(context.Background(), "2026.08.28.2", 5*time.Millisecond, time.Millisecond, func(context.Context) (ControlResponse, error) {
 		return ControlResponse{Version: "2026.08.28.1"}, nil
+	})
+	if !errors.Is(err, errInvalidWindowsActivation) || !strings.Contains(err.Error(), `got "2026.08.28.1", want "2026.08.28.2"`) {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestWaitForWindowsDaemonVersionWaitsForExactCandidate(t *testing.T) {
+	versions := []string{"2026.08.28.1", "2026.08.28.2"}
+	calls := 0
+	err := waitForWindowsDaemonVersion(context.Background(), "2026.08.28.2", time.Second, time.Millisecond, func(context.Context) (localapi.Snapshot, error) {
+		version := versions[calls]
+		calls++
+		return localapi.Snapshot{DaemonVersion: version}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("snapshot calls=%d want=2", calls)
+	}
+}
+
+func TestWaitForWindowsDaemonVersionReturnsExactMismatch(t *testing.T) {
+	err := waitForWindowsDaemonVersion(context.Background(), "2026.08.28.2", 5*time.Millisecond, time.Millisecond, func(context.Context) (localapi.Snapshot, error) {
+		return localapi.Snapshot{DaemonVersion: "2026.08.28.1"}, nil
 	})
 	if !errors.Is(err, errInvalidWindowsActivation) || !strings.Contains(err.Error(), `got "2026.08.28.1", want "2026.08.28.2"`) {
 		t.Fatalf("error=%v", err)
@@ -134,12 +160,12 @@ func TestWindowsRecoveryPolicyIsServiceSpecific(t *testing.T) {
 }
 
 func TestWindowsSSHCommandContractIsExact(t *testing.T) {
-	valid := []string{"__windows-sshd-service", "--sshd", `C:\Program Files\OpenSSH\sshd.exe`, "--config", `C:\ProgramData\Paperboat\ssh\sshd_config`}
+	valid := []string{"daemon", "__windows-sshd-service", "--sshd", `C:\Program Files\OpenSSH\sshd.exe`, "--config", `C:\ProgramData\Paperboat\ssh\sshd_config`}
 	if !validWindowsSSHArguments(valid) {
 		t.Fatal("valid fixed PaperboatSshd command rejected")
 	}
 	mutated := append([]string(nil), valid...)
-	mutated[2] = `C:\Temp\sshd.exe`
+	mutated[3] = `C:\Temp\sshd.exe`
 	if validWindowsSSHArguments(mutated) {
 		t.Fatal("mutable sshd executable accepted")
 	}
@@ -176,8 +202,8 @@ func TestNormalizeWindowsRollbackTargetsRestartsUpdaterFromCanonicalPath(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	hostd := windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"__runtime-hostd"}}
-	updater := windowsServiceTarget{Executable: layout.BinaryRollback, Arguments: []string{"__runtime-updated"}, WasRunning: true}
+	hostd := windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-hostd"}}
+	updater := windowsServiceTarget{Executable: layout.BinaryRollback, Arguments: []string{"daemon", "__runtime-updated"}, WasRunning: true}
 	ssh := windowsServiceTarget{}
 	_, normalized, _, err := normalizeWindowsRollbackTargets(hostd, updater, ssh)
 	if err != nil {
@@ -204,10 +230,10 @@ func TestWindowsActivationPathsAcceptRollbackUpdaterDuringRecovery(t *testing.T)
 		PreviousVersion: config.ActiveVersion, Version: "2026.08.24.1", Architecture: config.Architecture,
 		Stage: windowsActivationStaged, Runtime: component, CLI: component, Hostd: component, Updater: component,
 		PreviousBinary: windowsActivationComponent{Path: layout.Binary, SHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Length: 1},
-		OldHostd:       windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"__runtime-hostd"}},
-		NewHostd:       windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"__runtime-hostd"}},
-		OldUpdater:     windowsServiceTarget{Executable: layout.BinaryRollback, Arguments: []string{"__runtime-updated"}},
-		NewUpdater:     windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"__runtime-updated"}},
+		OldHostd:       windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-hostd"}},
+		NewHostd:       windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-hostd"}},
+		OldUpdater:     windowsServiceTarget{Executable: layout.BinaryRollback, Arguments: []string{"daemon", "__runtime-updated"}},
+		NewUpdater:     windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-updated"}},
 	}
 	if !validWindowsActivationPaths(config, journal) {
 		t.Fatal("staged journal with rollback updater was rejected")

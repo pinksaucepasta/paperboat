@@ -74,7 +74,7 @@ func runHostdWith(ctx context.Context, output io.Writer, newHost hostdHostFactor
 		_ = notifier.Degraded("hostd startup failed")
 		return err
 	}
-	server, err := hostdproto.NewServer(hostdproto.SocketConfig{SocketPath: socket, StatePath: filepath.Join(filepath.Dir(socket), "fence.json"), UID: os.Geteuid(), GID: os.Getegid(), Token: token, APIMin: 1, APIMax: 1, Workloads: host.WorkloadStatus, UpdateGate: host.UpdateGate(), RequestTimeout: 31 * time.Minute})
+	server, err := hostdproto.NewServer(hostdproto.SocketConfig{SocketPath: socket, StatePath: filepath.Join(filepath.Dir(tokenPath), "hostd", "fence.json"), UID: os.Geteuid(), GID: os.Getegid(), Token: token, APIMin: 1, APIMax: 1, Workloads: host.WorkloadStatus, UpdateGate: host.UpdateGate(), RequestTimeout: 31 * time.Minute})
 	if err != nil {
 		shutdownHostd(host)
 		return err
@@ -105,7 +105,7 @@ func runHostdWith(ctx context.Context, output io.Writer, newHost hostdHostFactor
 		shutdownHostd(host)
 		return err
 	}
-	fmt.Fprintln(output, "pb hostd ready")
+	fmt.Fprintln(output, "pb daemon hostd ready")
 	watchdogInterval := notifier.WatchdogInterval()
 	var watchdog <-chan time.Time
 	var watchdogTicker *time.Ticker

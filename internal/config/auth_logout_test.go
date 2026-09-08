@@ -32,8 +32,8 @@ func TestTakeLogoutCredentialsAtomicallyRemovesActiveAndHistoricalSessions(t *te
 	if records, err := store.PendingRevocations(issuer); err != nil || len(records) != 0 {
 		t.Fatalf("pending revocations remain: %#v, %v", records, err)
 	}
-	if _, ok := store.Secrets.(*faultSecretStore).values[environmentRef]; ok {
-		t.Fatal("ENV manager private keys remain after logout")
+	if _, ok := store.Secrets.(*faultSecretStore).values[environmentRef]; !ok {
+		t.Fatal("logout destroyed ENV decryption custody")
 	}
 }
 

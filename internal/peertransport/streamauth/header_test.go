@@ -45,3 +45,29 @@ func TestHeaderRejectsExpiredNoncanonicalUnknownAndOversizedInput(t *testing.T) 
 		t.Fatal("accepted expired header")
 	}
 }
+
+func TestNativePrivateHeaderRequiresBoundedCanonicalTarget(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	target := []byte(`{"schema":"paperboat.native-private-target/v1"}`)
+	header, err := NewNativePrivate("operation_private", "private_tcp", "stream_private", "credential", now.Add(time.Minute), 1024, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := header.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := Parse(encoded, now)
+	if err != nil || parsed.Target != string(target) {
+		t.Fatalf("parsed=%+v err=%v", parsed, err)
+	}
+	header.Target = ""
+	if header.Validate(now) == nil {
+		t.Fatal("private stream without target accepted")
+	}
+	normal, _ := New("operation_terminal", "terminal", "stream_terminal", "credential", now.Add(time.Minute), 1024)
+	normal.Target = string(target)
+	if normal.Validate(now) == nil {
+		t.Fatal("non-private stream with target accepted")
+	}
+}

@@ -12,7 +12,7 @@ import (
 
 func observationSnapshot(now time.Time) localapi.Snapshot {
 	return localapi.Snapshot{
-		Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now, DaemonState: "ready",
+		Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now, DaemonState: "ready", DaemonVersion: "dev",
 		Machines: []localapi.MachineStatus{{ID: "machine_1", Alias: "Studio", Eligible: true, RuntimeState: "ready", Generation: 4, SelectedPath: "none", TransferReadiness: "ready", PreviewReadiness: "ready", SSHReadiness: "unavailable", NATMappingIPv4: "unknown", NATMappingIPv6: "unknown", CaptivePortal: "unknown", PMTU: "unknown", RouterProtocol: "unknown", RouterMapping: "unknown", MappingLifetime: "unknown", UpdateHealth: "unknown"}},
 	}
 }

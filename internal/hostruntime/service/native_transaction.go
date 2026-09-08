@@ -4,9 +4,19 @@ import (
 	"context"
 	"errors"
 	"os"
+	"time"
 )
 
 const maxNativeServiceDefinitionSize = 128 << 10
+const nativeServiceOperationTimeout = 30 * time.Second
+
+func nativeServiceContext(ctx context.Context) (context.Context, context.CancelFunc, error) {
+	if ctx == nil {
+		return nil, nil, ErrLifecycleInvalid
+	}
+	operationCtx, cancel := context.WithTimeout(ctx, nativeServiceOperationTimeout)
+	return operationCtx, cancel, nil
+}
 
 type NativeControllerStatus struct {
 	Registered bool
@@ -135,7 +145,24 @@ func (c *NativeTransactionalComponent) CheckReadiness(ctx context.Context) error
 	if c.probe == nil {
 		return nil
 	}
-	return c.probe(ctx)
+	operationCtx, cancel, err := nativeServiceContext(ctx)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	for {
+		err = c.probe(operationCtx)
+		if err == nil || !errors.Is(err, ErrLifecycleNotReady) {
+			return err
+		}
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-operationCtx.Done():
+			timer.Stop()
+			return errors.Join(err, operationCtx.Err())
+		case <-timer.C:
+		}
+	}
 }
 
 func (c *NativeTransactionalComponent) Restore(ctx context.Context, status NativeComponentStatus) error {

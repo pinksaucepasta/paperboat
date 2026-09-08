@@ -39,8 +39,8 @@ type windowsFileBroker struct {
 	released chan string
 }
 
-func (b windowsFileBroker) PrepareFileTransfer(context.Context, Peer, FileTransferKeyRequest) (FileTransferKeyResult, error) {
-	return FileTransferKeyResult{PeerContext: []byte("peer-context"), Handle: "transferhandle"}, nil
+func (b windowsFileBroker) PrepareFileTransfer(context.Context, Peer, FileTransferRequest) (FileTransferResult, error) {
+	return FileTransferResult{Handle: "transferhandle"}, nil
 }
 
 func (b windowsFileBroker) OpenFileTransferStream(context.Context, Peer, string) (net.Conn, error) {
@@ -201,23 +201,22 @@ func TestWindowsNamedPipePreservesFileTransferUpgradeAndLeaseCleanup(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := FileTransferKeyRequest{
-		Schema:            FileTransferKeySchemaV1,
+	request := FileTransferRequest{
+		Schema:            FileTransferSchemaV1,
 		MachineID:         "machine_1",
 		EnvironmentID:     "environment_1",
 		MachineGeneration: 1,
-		Transport:         "q",
 		OperationID:       "operation_1",
-		TransferID:        "transfer_1",
-		Generation:        1,
-		ExpiresAt:         time.Now().Add(time.Minute),
-		Material:          make([]byte, 45),
+		Credential:        "credential_1",
+		AccessSessionID:   "access_1",
+		Deadline:          time.Now().Add(time.Minute),
+		MaximumBytes:      1 << 20,
 	}
 	lease, err := client.PrepareFileTransfer(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(lease.PeerContext) != "peer-context" || lease.Handle != "transferhandle" {
+	if lease.Handle != "transferhandle" {
 		t.Fatalf("lease=%#v", lease)
 	}
 	stream, err := client.OpenFileTransferStream(context.Background(), lease.Handle)
@@ -282,5 +281,5 @@ func waitForWindowsClient(path string, timeout time.Duration) (*Client, error) {
 }
 
 func windowsValidSnapshot(generation uint64) Snapshot {
-	return Snapshot{Schema: SnapshotSchemaV1, Generation: generation, ObservedAt: time.Now().UTC(), DaemonState: "ready"}
+	return Snapshot{Schema: SnapshotSchemaV1, Generation: generation, ObservedAt: time.Now().UTC(), DaemonState: "ready", DaemonVersion: "dev"}
 }

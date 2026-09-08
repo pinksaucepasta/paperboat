@@ -108,6 +108,143 @@ func TestManagerTracksTerminalModesFromPTYOutput(t *testing.T) {
 	_, _ = manager.Close(context.Background(), created.ID)
 }
 
+func TestManagerUpdateFenceRejectsLiveDetachedPTYAndOwnsRelease(t *testing.T) {
+	manager, root, shell := realManager(t)
+	created, err := manager.Create(context.Background(), CreateRequest{Name: "update-live", Command: shellCommand(shell, root, "read line")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = manager.Attach(created.ID, "detached", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err = manager.Detach(created.ID, "detached"); err != nil {
+		t.Fatal(err)
+	}
+	if err = manager.BeginUpdate("update_1"); !errors.Is(err, ErrUpdateBusy) {
+		t.Fatalf("detached live PTY fence error=%v", err)
+	}
+	if _, err = manager.Close(context.Background(), created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = manager.BeginUpdate("update_1"); err != nil {
+		t.Fatal(err)
+	}
+	if err = manager.BeginUpdate("update_1"); err != nil {
+		t.Fatalf("same update was not idempotent: %v", err)
+	}
+	if err = manager.BeginUpdate("update_2"); !errors.Is(err, ErrUpdateInProgress) {
+		t.Fatalf("competing update error=%v", err)
+	}
+	if err = manager.EndUpdate("update_2"); !errors.Is(err, ErrUpdateInProgress) {
+		t.Fatalf("mismatched end error=%v", err)
+	}
+	if _, err = manager.Create(context.Background(), CreateRequest{Name: "fenced", Command: shellCommand(shell, root, "exit")}); !errors.Is(err, ErrUpdateInProgress) {
+		t.Fatalf("create during update error=%v", err)
+	}
+	if _, err = manager.Restart(created.ID); !errors.Is(err, ErrUpdateInProgress) {
+		t.Fatalf("restart during update error=%v", err)
+	}
+	if err = manager.EndUpdate("update_1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = manager.Restart(created.ID); err != nil {
+		t.Fatalf("restart after release: %v", err)
+	}
+	_, _ = manager.Close(context.Background(), created.ID)
+}
+
+func TestManagerUpdateFenceSerializesConcurrentCreateAdmission(t *testing.T) {
+	manager, root, shell := realManager(t)
+	originalLaunch := manager.config.Launch
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	manager.config.Launch = func(command pty.Command) (PTYProcess, error) {
+		close(entered)
+		<-release
+		return originalLaunch(command)
+	}
+	createDone := make(chan error, 1)
+	go func() {
+		_, err := manager.Create(context.Background(), CreateRequest{Name: "concurrent", Command: shellCommand(shell, root, "read line")})
+		createDone <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("create did not enter launcher")
+	}
+	beginDone := make(chan error, 1)
+	go func() { beginDone <- manager.BeginUpdate("update_concurrent") }()
+	select {
+	case err := <-beginDone:
+		t.Fatalf("update crossed in-flight create: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	if err := <-createDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-beginDone; !errors.Is(err, ErrUpdateBusy) {
+		t.Fatalf("post-create update error=%v", err)
+	}
+	_ = manager.Shutdown(context.Background())
+}
+
+func TestManagerUpdateFenceSerializesConcurrentRestartAdmission(t *testing.T) {
+	manager, root, shell := realManager(t)
+	created, err := manager.Create(context.Background(), CreateRequest{Name: "restart-race", Command: shellCommand(shell, root, "exit")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		snapshot, snapshotErr := manager.Snapshot(created.ID)
+		if snapshotErr != nil {
+			t.Fatal(snapshotErr)
+		}
+		if snapshot.State == Exited {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("session did not exit: %+v", snapshot)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	originalLaunch := manager.config.Launch
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	manager.config.Launch = func(command pty.Command) (PTYProcess, error) {
+		close(entered)
+		<-release
+		return originalLaunch(command)
+	}
+	restartDone := make(chan error, 1)
+	go func() {
+		_, restartErr := manager.Restart(created.ID)
+		restartDone <- restartErr
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("restart did not enter launcher")
+	}
+	beginDone := make(chan error, 1)
+	go func() { beginDone <- manager.BeginUpdate("update_restart") }()
+	select {
+	case beginErr := <-beginDone:
+		t.Fatalf("update crossed in-flight restart: %v", beginErr)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	if restartErr := <-restartDone; restartErr != nil {
+		t.Fatal(restartErr)
+	}
+	if beginErr := <-beginDone; !errors.Is(beginErr, ErrUpdateBusy) {
+		t.Fatalf("post-restart update error=%v", beginErr)
+	}
+	_ = manager.Shutdown(context.Background())
+}
+
 func TestManagerStreamInputPreservesBytesWithoutIdempotencyRows(t *testing.T) {
 	manager, root, shell := realManager(t)
 	created, err := manager.Create(context.Background(), CreateRequest{Name: "stream-input", Command: shellCommand(shell, root, "read line; printf 'got:%s' \"$line\"; read line")})

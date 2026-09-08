@@ -42,8 +42,8 @@ lazy-start attempt.
 
 1. Verify the socket path and parent directory are owned by the current user and are not
    symlinks or group/world writable. Do not delete an unfamiliar socket or lock file.
-2. Check `systemctl --user status paperboat-local-daemon.service` on Linux or
-   `launchctl print gui/<uid>/com.pinksaucepasta.paperboat.local-daemon` on macOS.
+2. Check `systemctl --user status paperboatd.service` on Linux or
+   `launchctl print gui/<uid>/com.pinksaucepasta.paperboatd` on macOS.
 3. If the service is active, preserve its typed health state and inspect only bounded,
    redacted service diagnostics. Do not bypass the local API with direct control-plane
    polling.

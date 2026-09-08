@@ -36,6 +36,7 @@ type PrivateTCPProxyConfig struct {
 type PrivateTCPAccessRequest struct {
 	RouteID            string
 	ListenPort         uint16
+	ListenAddress      string
 	MaximumConnections int
 }
 
@@ -54,7 +55,7 @@ func (r *MachinePreviewRuntime) StartPrivateTCPAccess(ctx context.Context, reque
 	source := r.private
 	r.mu.Unlock()
 	return privatepreviewproxy.Start(ctx, privatepreviewproxy.Config{
-		ListenPort: request.ListenPort, MaximumConnections: request.MaximumConnections,
+		ListenPort: request.ListenPort, ListenAddress: request.ListenAddress, MaximumConnections: request.MaximumConnections,
 		Dial: func(openContext context.Context) (io.ReadWriteCloser, error) {
 			stream, err := source.OpenPrivateTCP(openContext, request.RouteID)
 			if err != nil {

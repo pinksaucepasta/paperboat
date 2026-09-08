@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
 )
 
 const PreviewDispatchKind = "preview_dispatch"
@@ -154,6 +156,35 @@ type dispatchOperation struct {
 	session *Session
 	expires time.Time
 	state   string
+}
+
+// ValidateNativePrivateTarget resolves only a currently ready, private
+// foreground preview. The in-memory session is the authoritative owner; a
+// stopped or replaced session cannot be revived by an unexpired grant.
+func (m *DispatchManager) ValidateNativePrivateTarget(binding nativeprivate.Binding) error {
+	if m == nil || binding.Validate(m.config.Now()) != nil || binding.ResourceKind != "preview" || binding.OwnerEndpointID != m.config.MachineID || binding.ResourceID != binding.RouteID || binding.ResourceGeneration != binding.RouteGeneration || binding.RouteGeneration != binding.TargetGeneration {
+		return ErrDispatchUnavailable
+	}
+	m.mu.Lock()
+	sessions := make([]*Session, 0, len(m.operations))
+	for _, operation := range m.operations {
+		if operation.session != nil {
+			sessions = append(sessions, operation.session)
+		}
+	}
+	m.mu.Unlock()
+	for _, session := range sessions {
+		select {
+		case <-session.done:
+			continue
+		default:
+		}
+		lease := session.currentLease()
+		if lease.ID == binding.ResourceID && lease.Generation > 0 && uint64(lease.Generation) == binding.ResourceGeneration && lease.AccessMode == "private" && lease.Target.Scheme == binding.TargetScheme && lease.Target.Address == binding.TargetAddress && lease.LeaseDeadline.After(m.config.Now()) {
+			return nil
+		}
+	}
+	return ErrDispatchUnavailable
 }
 
 func NewDispatchManager(config DispatchManagerConfig) (*DispatchManager, error) {

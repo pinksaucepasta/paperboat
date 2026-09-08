@@ -25,12 +25,14 @@ type Result struct {
 type Check func(context.Context) (Result, error)
 
 type Observation struct {
-	CheckedAt   time.Time
-	NextCheckAt time.Time
-	Version     string
-	Updated     bool
-	Failure     string
-	Failures    uint32
+	CheckedAt       time.Time
+	NextCheckAt     time.Time
+	Version         string
+	Updated         bool
+	Failure         string
+	Failures        uint32
+	BlockedReason   string `json:",omitempty"`
+	RequiredVersion string `json:",omitempty"`
 }
 
 type Config struct {
@@ -80,11 +82,25 @@ func (s *Scheduler) Snapshot() Observation {
 	return s.state
 }
 
+// SeedBlockedActiveTerminalSessions restores a durable expected admission
+// result before Run starts, preventing a restarted updater from immediately
+// retrying the same activation through a recovery helper.
+func (s *Scheduler) SeedBlockedActiveTerminalSessions(requiredVersion string, nextCheckAt time.Time) error {
+	if requiredVersion == "" || nextCheckAt.IsZero() {
+		return ErrInvalidConfig
+	}
+	s.mu.Lock()
+	s.state.BlockedReason = BlockedActiveTerminalSessions
+	s.state.RequiredVersion = requiredVersion
+	s.state.NextCheckAt = nextCheckAt.UTC()
+	s.state.Failure = ""
+	s.state.Failures = 0
+	s.mu.Unlock()
+	return nil
+}
+
 func (s *Scheduler) Run(ctx context.Context) error {
 	for {
-		if err := s.runOnce(ctx); err != nil && ctx.Err() != nil {
-			return ctx.Err()
-		}
 		next := s.Snapshot().NextCheckAt
 		delay := next.Sub(s.config.Now())
 		if delay < 0 {
@@ -96,6 +112,9 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			timer.Stop()
 			return ctx.Err()
 		case <-timer.C:
+		}
+		if err := s.runOnce(ctx); err != nil && ctx.Err() != nil {
+			return ctx.Err()
 		}
 	}
 }
@@ -127,7 +146,13 @@ func (s *Scheduler) runCheck(ctx context.Context, check Check) (Result, error) {
 	state := s.state
 	state.CheckedAt = checkedAt
 	state.Version, state.Updated = result.Version, result.Updated
-	if err == nil {
+	state.BlockedReason, state.RequiredVersion = "", ""
+	var active *ActiveTerminalSessionsError
+	if errors.As(err, &active) {
+		state.Failure, state.Failures = "", 0
+		state.BlockedReason, state.RequiredVersion = BlockedActiveTerminalSessions, active.RequiredVersion
+		state.NextCheckAt = checkedAt.Add(s.config.RetryFloor)
+	} else if err == nil {
 		state.Failure, state.Failures = "", 0
 		state.NextCheckAt = checkedAt.Add(s.jitteredInterval())
 	} else {

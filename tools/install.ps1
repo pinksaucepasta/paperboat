@@ -41,10 +41,10 @@ if (-not [IO.Path]::IsPathRooted($tempRoot)) { throw 'Paperboat temporary direct
 $dir = Join-Path $tempRoot ('Paperboat\bootstrap-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
 $download = Join-Path $dir $asset
-$partial = "$download.download"
 $installedPb = Join-Path ${env:ProgramFiles} 'Paperboat\bin\pb.exe'
 
 function Download-ReleaseFile([string]$Url, [string]$Output) {
+  $partial = "$Output.download"
   for ($attempt = 1; $attempt -le 4; $attempt++) {
     Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue
     try {

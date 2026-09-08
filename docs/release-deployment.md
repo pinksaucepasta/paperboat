@@ -95,6 +95,22 @@ The updater must reject an input whose target tuple changes between phases. A
 reconnect, route replacement, or configuration replacement therefore obtains a
 fresh provider input rather than reusing a stale one.
 
+Standalone executable activation restarts the host daemon. While it owns a running
+or detached terminal process, activation waits and `pb update status` reports
+`active_terminal_sessions` and the required version. Existing terminals remain usable;
+finish those shells to permit activation at the next automatic check. This does not
+quarantine the candidate or change signed eligibility or user-deferral deadlines.
+Once no terminal remains, the host atomically fences new terminal creation and restart
+until verified commit or rollback. The persisted exact transaction restores this fence
+on host restart. Resumable transfers use their application recovery protocol; workload
+counters are not proof of continuity across a daemon restart.
+
+On Linux and macOS, the existing update transaction replaces the verified executable,
+restarts the fixed native host service, and adopts its authenticated worker identity and
+persistent epoch before checking stability. Restart and recovery have signed timeout
+bounds. A failed cutover restores an artifact still permitted by the update trust policy
+and restarts that previous host runtime before releasing the admission fence.
+
 ## Journal and operator actions
 
 Initialize a crash-safe deployment state before starting work:

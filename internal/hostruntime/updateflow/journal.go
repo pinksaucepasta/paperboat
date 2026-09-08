@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
@@ -55,36 +57,62 @@ const (
 	FailureContradictoryJournal Failure = "recovery_required"
 )
 
+// ActivationPolicy is the verified static policy needed to resume a transaction.
+// It is persisted with the candidate's manifest and artifact identity, never inferred
+// from a later release or local defaults during recovery.
+type ActivationPolicy struct {
+	CanaryPath        string        `json:"canary_path"`
+	CanaryStatus      int           `json:"canary_status"`
+	CanarySamples     uint16        `json:"canary_samples"`
+	CanaryTimeout     time.Duration `json:"canary_timeout"`
+	DrainTimeout      time.Duration `json:"drain_timeout"`
+	StabilityWindow   time.Duration `json:"stability_window"`
+	StabilityInterval time.Duration `json:"stability_interval"`
+	RollbackTimeout   time.Duration `json:"rollback_timeout"`
+}
+
+func (p ActivationPolicy) Validate() error {
+	parsed, err := url.ParseRequestURI(p.CanaryPath)
+	if len(p.CanaryPath) < 1 || len(p.CanaryPath) > 512 || p.CanaryPath[0] != '/' || strings.HasPrefix(p.CanaryPath, "//") || strings.ContainsAny(p.CanaryPath, "\x00\r\n") || err != nil || parsed.IsAbs() || parsed.Host != "" || parsed.Fragment != "" || p.CanaryStatus < 200 || p.CanaryStatus > 299 || p.CanarySamples < 2 || p.CanarySamples > 32 || p.CanaryTimeout <= 0 || p.CanaryTimeout > 5*time.Minute || p.DrainTimeout <= 0 || p.DrainTimeout > 5*time.Minute || p.StabilityWindow <= 0 || p.StabilityWindow > 30*time.Minute || p.StabilityInterval <= 0 || p.StabilityInterval > p.StabilityWindow || p.RollbackTimeout <= 0 || p.RollbackTimeout > 5*time.Minute {
+		return ErrInvalidJournal
+	}
+	return nil
+}
+
 type Journal struct {
-	Schema                  string    `json:"schema"`
-	TransactionID           string    `json:"transaction_id"`
-	Stage                   Stage     `json:"stage"`
-	ActiveVersion           string    `json:"active_version"`
-	ActiveDigest            string    `json:"active_digest,omitempty"`
-	ActiveLength            int64     `json:"active_length,omitempty"`
-	ActiveHostdAPIMin       uint16    `json:"active_hostd_api_min,omitempty"`
-	ActiveHostdAPIMax       uint16    `json:"active_hostd_api_max,omitempty"`
-	ActiveRuntimeAPIMin     uint16    `json:"active_runtime_api_min,omitempty"`
-	ActiveRuntimeAPIMax     uint16    `json:"active_runtime_api_max,omitempty"`
-	RollbackVersion         string    `json:"rollback_version,omitempty"`
-	CandidateVersion        string    `json:"candidate_version,omitempty"`
-	CandidateDigest         string    `json:"candidate_digest,omitempty"`
-	CandidateManifestDigest string    `json:"candidate_manifest_digest,omitempty"`
-	CandidateLength         int64     `json:"candidate_length,omitempty"`
-	StagedPath              string    `json:"staged_path,omitempty"`
-	HostdAPIMin             uint16    `json:"hostd_api_min,omitempty"`
-	HostdAPIMax             uint16    `json:"hostd_api_max,omitempty"`
-	RuntimeAPIMin           uint16    `json:"runtime_api_min,omitempty"`
-	RuntimeAPIMax           uint16    `json:"runtime_api_max,omitempty"`
-	WorkerID                string    `json:"worker_id,omitempty"`
-	WorkerEpoch             uint64    `json:"worker_epoch,omitempty"`
-	BootID                  string    `json:"boot_id"`
-	StageUpdatedAt          time.Time `json:"stage_updated_at"`
-	HealthDeadline          time.Time `json:"health_deadline,omitempty"`
-	AttemptCount            uint32    `json:"attempt_count"`
-	RollbackCount           uint32    `json:"rollback_count"`
-	LastFailure             Failure   `json:"last_failure,omitempty"`
-	CleanupComplete         bool      `json:"cleanup_complete"`
+	Schema                  string            `json:"schema"`
+	TransactionID           string            `json:"transaction_id"`
+	Stage                   Stage             `json:"stage"`
+	ActiveVersion           string            `json:"active_version"`
+	ActiveDigest            string            `json:"active_digest,omitempty"`
+	ActiveLength            int64             `json:"active_length,omitempty"`
+	ActiveHostdAPIMin       uint16            `json:"active_hostd_api_min,omitempty"`
+	ActiveHostdAPIMax       uint16            `json:"active_hostd_api_max,omitempty"`
+	ActiveRuntimeAPIMin     uint16            `json:"active_runtime_api_min,omitempty"`
+	ActiveRuntimeAPIMax     uint16            `json:"active_runtime_api_max,omitempty"`
+	RollbackVersion         string            `json:"rollback_version,omitempty"`
+	CandidateVersion        string            `json:"candidate_version,omitempty"`
+	CandidateDigest         string            `json:"candidate_digest,omitempty"`
+	CandidateManifestDigest string            `json:"candidate_manifest_digest,omitempty"`
+	CandidatePolicy         *ActivationPolicy `json:"candidate_policy,omitempty"`
+	CandidateLength         int64             `json:"candidate_length,omitempty"`
+	StagedPath              string            `json:"staged_path,omitempty"`
+	HostdAPIMin             uint16            `json:"hostd_api_min,omitempty"`
+	HostdAPIMax             uint16            `json:"hostd_api_max,omitempty"`
+	RuntimeAPIMin           uint16            `json:"runtime_api_min,omitempty"`
+	RuntimeAPIMax           uint16            `json:"runtime_api_max,omitempty"`
+	WorkerID                string            `json:"worker_id,omitempty"`
+	WorkerEpoch             uint64            `json:"worker_epoch,omitempty"`
+	BootID                  string            `json:"boot_id"`
+	StageUpdatedAt          time.Time         `json:"stage_updated_at"`
+	HealthDeadline          time.Time         `json:"health_deadline,omitempty"`
+	AttemptCount            uint32            `json:"attempt_count"`
+	RollbackCount           uint32            `json:"rollback_count"`
+	LastFailure             Failure           `json:"last_failure,omitempty"`
+	CleanupComplete         bool              `json:"cleanup_complete"`
+	BlockedReason           string            `json:"blocked_reason,omitempty"`
+	RequiredVersion         string            `json:"required_version,omitempty"`
+	NextCheckAt             time.Time         `json:"next_check_at,omitempty,omitzero"`
 }
 
 func (j Journal) Validate() error {
@@ -97,11 +125,14 @@ func (j Journal) Validate() error {
 	if j.RollbackVersion != "" && !validVersion(j.RollbackVersion) || j.CandidateVersion != "" && !validVersion(j.CandidateVersion) {
 		return ErrInvalidJournal
 	}
-	hasActiveMetadata := j.ActiveDigest != "" || j.ActiveLength != 0 || j.ActiveHostdAPIMin != 0 || j.ActiveHostdAPIMax != 0 || j.ActiveRuntimeAPIMin != 0 || j.ActiveRuntimeAPIMax != 0
-	if hasActiveMetadata && (!digestPattern.MatchString(j.ActiveDigest) || j.ActiveLength < 1 || invalidRange(j.ActiveHostdAPIMin, j.ActiveHostdAPIMax) || j.ActiveHostdAPIMin == 0 || invalidRange(j.ActiveRuntimeAPIMin, j.ActiveRuntimeAPIMax) || j.ActiveRuntimeAPIMin == 0) {
+	if !digestPattern.MatchString(j.ActiveDigest) || j.ActiveLength < 1 || invalidRange(j.ActiveHostdAPIMin, j.ActiveHostdAPIMax) || j.ActiveHostdAPIMin == 0 || invalidRange(j.ActiveRuntimeAPIMin, j.ActiveRuntimeAPIMax) || j.ActiveRuntimeAPIMin == 0 {
 		return ErrInvalidJournal
 	}
 	if j.CandidateDigest != "" && !digestPattern.MatchString(j.CandidateDigest) || j.CandidateManifestDigest != "" && !digestPattern.MatchString(j.CandidateManifestDigest) || j.CandidateLength < 0 {
+		return ErrInvalidJournal
+	}
+	// A signed deployment manifest must carry its complete activation policy.
+	if j.CandidateManifestDigest != "" && j.CandidatePolicy == nil || j.CandidatePolicy != nil && (j.CandidateManifestDigest == "" || j.CandidatePolicy.Validate() != nil) {
 		return ErrInvalidJournal
 	}
 	if j.StagedPath != "" && (!filepath.IsAbs(j.StagedPath) || filepath.Clean(j.StagedPath) != j.StagedPath) {
@@ -111,6 +142,10 @@ func (j Journal) Validate() error {
 		return ErrInvalidJournal
 	}
 	if (j.Stage == StageCutover || j.Stage == StageMonitoring || j.Stage == StageCommitted) && (j.WorkerEpoch == 0 || !validID(j.WorkerID)) {
+		return ErrInvalidJournal
+	}
+	blocked := j.BlockedReason != "" || j.RequiredVersion != "" || !j.NextCheckAt.IsZero()
+	if blocked && (j.Stage != StageIdle || j.BlockedReason != "active_terminal_sessions" || !validVersion(j.RequiredVersion) || j.NextCheckAt.IsZero()) {
 		return ErrInvalidJournal
 	}
 	return nil

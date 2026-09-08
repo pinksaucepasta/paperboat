@@ -993,11 +993,12 @@ type TerminalSessionPage struct {
 // AuthMaterial is short-lived auth material scoped by paperboat-server for a
 // specific connect descriptor. The protocol contract defines the exact token format.
 type AuthMaterial struct {
-	Method    string    `json:"method"`
-	Ticket    string    `json:"ticket,omitempty"`
-	Token     string    `json:"token,omitempty"`
-	ExpiresAt time.Time `json:"expires_at"`
-	Scopes    []string  `json:"scopes,omitempty"`
+	Method          string    `json:"method"`
+	Ticket          string    `json:"ticket,omitempty"`
+	Token           string    `json:"token,omitempty"`
+	ExpiresAt       time.Time `json:"expires_at"`
+	Scopes          []string  `json:"scopes,omitempty"`
+	AccessSessionID string    `json:"access_session_id,omitempty"`
 }
 
 const ConnectionSchemaV1 = "paperboat.environment-connection/v1"

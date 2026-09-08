@@ -3,6 +3,7 @@
 package updateflow
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -13,11 +14,54 @@ import (
 
 func validJournal(root string, stage Stage) Journal {
 	return Journal{Schema: SchemaV1, TransactionID: "txn_1", Stage: stage,
-		ActiveVersion: "2026.08.18.3", RollbackVersion: "2026.08.17.1",
+		ActiveVersion: "2026.08.18.3", ActiveDigest: strings.Repeat("c", 64), ActiveLength: 900,
+		ActiveHostdAPIMin: 1, ActiveHostdAPIMax: 2, ActiveRuntimeAPIMin: 1, ActiveRuntimeAPIMax: 2,
+		RollbackVersion:  "2026.08.17.1",
 		CandidateVersion: "2026.08.19.1", CandidateDigest: strings.Repeat("a", 64),
 		CandidateLength: 1024, StagedPath: filepath.Join(root, "runtime.staged"),
 		HostdAPIMin: 1, HostdAPIMax: 2, WorkerID: "runtime_4", WorkerEpoch: 4, BootID: "boot_1",
 		StageUpdatedAt: time.Date(2026, 8, 18, 1, 0, 0, 0, time.UTC)}
+}
+
+func TestJournalRequiresActiveReleaseMetadata(t *testing.T) {
+	j := validJournal(t.TempDir(), StageIdle)
+	j.ActiveDigest = ""
+	if err := j.Validate(); !errors.Is(err, ErrInvalidJournal) {
+		t.Fatalf("validation error=%v, want invalid journal", err)
+	}
+}
+
+func TestJournalValidatesDurableActiveTerminalBlock(t *testing.T) {
+	j := validJournal(t.TempDir(), StageIdle)
+	j.CandidateVersion, j.CandidateDigest, j.CandidateLength, j.StagedPath = "", "", 0, ""
+	j.BlockedReason = "active_terminal_sessions"
+	j.RequiredVersion = "2026.08.19.1"
+	j.NextCheckAt = time.Now().UTC().Add(5 * time.Minute)
+	if err := j.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	j.Stage = StageChecking
+	if err := j.Validate(); !errors.Is(err, ErrInvalidJournal) {
+		t.Fatalf("non-idle blocked journal error=%v", err)
+	}
+	j.Stage = StageIdle
+	j.RequiredVersion = ""
+	if err := j.Validate(); !errors.Is(err, ErrInvalidJournal) {
+		t.Fatalf("incomplete blocked journal error=%v", err)
+	}
+}
+
+func TestOrdinaryJournalOmitsActiveTerminalBlockFields(t *testing.T) {
+	j := validJournal(t.TempDir(), StageIdle)
+	body, err := json.Marshal(j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"blocked_reason", "required_version", "next_check_at"} {
+		if strings.Contains(string(body), `"`+field+`"`) {
+			t.Fatalf("ordinary journal contains %q: %s", field, body)
+		}
+	}
 }
 
 func TestJournalTransitionAndCrashRecovery(t *testing.T) {

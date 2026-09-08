@@ -253,3 +253,21 @@ func mustJSON(value any) []byte {
 	}
 	return encoded
 }
+
+func TestEnvironmentAuthorityRequestsIdentityEncodingForStrongETag(t *testing.T) {
+	raw := []byte{0xd2, 0x84, 0x41, 0x02, 0xa0, 0x40, 0x40}
+	id := environmentDocumentID(raw)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		etag := `"environment-authority-2-` + strings.TrimPrefix(id, "sha256:") + `"`
+		if r.Header.Get("Accept-Encoding") != "identity" {
+			etag = "W/" + etag
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("ETag", etag)
+		writeData(w, http.StatusOK, map[string]any{"schema": EnvironmentAuthorityStateSchemaV1, "generation": 2, "authority_id": id, "authority": base64.RawURLEncoding.EncodeToString(raw)})
+	}))
+	defer server.Close()
+	if _, err := New(server.URL, config.Credential{}, server.Client()).GetEnvironmentAuthority(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}

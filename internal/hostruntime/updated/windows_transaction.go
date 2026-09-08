@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 )
 
@@ -22,9 +23,11 @@ const (
 	windowsActivationSwitching           windowsActivationStage = "switching"
 	windowsActivationServicesLive        windowsActivationStage = "services_live"
 	windowsActivationCommitted           windowsActivationStage = "committed"
+	windowsActivationCommitReady         windowsActivationStage = "commit_ready"
 	windowsActivationRollingBack         windowsActivationStage = "rolling_back"
 	windowsActivationRollbackReady       windowsActivationStage = "rollback_ready"
 	windowsActivationRolledBack          windowsActivationStage = "rolled_back"
+	windowsActivationBusyReady           windowsActivationStage = "busy_ready"
 )
 
 type windowsActivationComponent struct {
@@ -46,6 +49,8 @@ type windowsActivationJournal struct {
 	PreviousCLIRecord, NewCLIRecord                               string
 	LocalDaemonWasRunning                                         bool
 	PreDrainRollback                                              bool
+	BlockedReason                                                 string    `json:",omitempty"`
+	BlockedRetryAt                                                time.Time `json:",omitzero"`
 	Failure                                                       string
 	ManifestSHA256                                                string
 	CanaryPath                                                    string
@@ -61,6 +66,7 @@ var errInvalidWindowsActivation = errors.New("invalid Windows activation transac
 // windowsActivationBackend is deliberately narrow so the crash choreography
 // has deterministic tests without pretending a macOS filesystem models SCM.
 type windowsActivationBackend interface {
+	AuthorizeRecovery(context.Context, windowsActivationJournal) error
 	WriteJournal(windowsActivationJournal) error
 	ProbeCandidate(context.Context, windowsActivationJournal) error
 	StopCandidate(context.Context, windowsActivationJournal) error
@@ -72,7 +78,9 @@ type windowsActivationBackend interface {
 	VerifyHealth(context.Context, windowsActivationJournal) error
 	Drain(context.Context, windowsActivationJournal) error
 	VerifyRollback(context.Context, windowsActivationJournal) error
+	RollbackDrain(context.Context, windowsActivationJournal) error
 	CommitCLI(context.Context, windowsActivationJournal) error
+	CommitGate(context.Context, windowsActivationJournal) error
 	Quarantine(context.Context, windowsActivationJournal) error
 	FinalizeServices(context.Context, windowsActivationJournal) error
 }
@@ -86,14 +94,23 @@ func executeWindowsActivation(ctx context.Context, backend windowsActivationBack
 	}
 	if journal.Stage == windowsActivationCommitted || journal.Stage == windowsActivationRolledBack {
 		if journal.Stage == windowsActivationCommitted {
-			return journal, backend.FinalizeServices(ctx, journal)
+			return completeWindowsCommit(ctx, backend, journal)
 		}
-		return journal, nil
+		if err := backend.AuthorizeRecovery(ctx, journal); err != nil {
+			return journal, err
+		}
+		return journal, backend.WriteJournal(journal)
+	}
+	if journal.Stage == windowsActivationCommitReady {
+		return completeWindowsCommit(ctx, backend, journal)
 	}
 	// A candidate can fail before the durable drain boundary. Persisting that
 	// fact keeps crash recovery from asking the rollback gate to verify a drain
 	// that never happened. Post-drain and legacy ambiguous journals retain the
 	// strict rollback-gate path below.
+	if journal.BlockedReason == autoupdate.BlockedActiveTerminalSessions {
+		return compensateWindowsBusy(ctx, backend, journal)
+	}
 	if journal.PreDrainRollback {
 		return rollbackWindowsCandidate(ctx, backend, journal, errors.New("interrupted pre-drain rollback recovered"))
 	}
@@ -107,11 +124,22 @@ func executeWindowsActivation(ctx context.Context, backend windowsActivationBack
 	if journal.Stage == windowsActivationCandidateValidating || journal.Stage == windowsActivationCandidateReady {
 		return rollbackWindowsCandidate(ctx, backend, journal, errors.New("interrupted candidate validation recovered"))
 	}
+	// Draining is durably recorded before the RPC and before any canonical
+	// process is stopped. Reconcile its exact admission fence without turning
+	// a lost busy response into termination of the user's live terminal.
+	if journal.Stage == windowsActivationDraining {
+		return rollbackWindowsDrain(ctx, backend, journal, errors.New("interrupted drain recovered before cutover"))
+	}
 	// Once a previous activator may have changed SCM, recovery always restores
 	// the old exact commands first. It never guesses which candidate process
 	// survived a power loss.
 	if journal.Stage != windowsActivationStaged {
 		return rollbackWindowsActivation(ctx, backend, journal, errors.New("interrupted activation recovered"))
+	}
+	// Refuse cutover before touching services when the trusted previous
+	// installation is no longer permitted by signed recovery policy.
+	if err := backend.AuthorizeRecovery(ctx, journal); err != nil {
+		return journal, err
 	}
 	journal.Stage = windowsActivationCandidateValidating
 	if err = backend.WriteJournal(journal); err != nil {
@@ -129,10 +157,14 @@ func executeWindowsActivation(ctx context.Context, backend windowsActivationBack
 		return rollbackWindowsCandidate(ctx, backend, journal, err)
 	}
 	if err = backend.Drain(ctx, journal); err != nil {
-		return rollbackWindowsActivation(ctx, backend, journal, err)
+		var busy *autoupdate.ActiveTerminalSessionsError
+		if errors.As(err, &busy) {
+			return compensateWindowsBusy(ctx, backend, journal)
+		}
+		return rollbackWindowsDrain(ctx, backend, journal, err)
 	}
 	if err = backend.StopCandidate(ctx, journal); err != nil {
-		return rollbackWindowsActivation(ctx, backend, journal, err)
+		return rollbackWindowsDrain(ctx, backend, journal, err)
 	}
 	// Draining is now durable. The old route must be restored if any later
 	// service, binary, or health operation fails.
@@ -149,10 +181,9 @@ func executeWindowsActivation(ctx context.Context, backend windowsActivationBack
 	if err = backend.SetServiceTargets(ctx, journal.NewHostd, journal.NewUpdater, journal.NewSSH); err != nil {
 		return rollbackWindowsActivation(ctx, backend, journal, err)
 	}
-	// The legacy LocalDaemon task is intentionally kept stopped during the
-	// reversible portion of activation. After the new binary is committed,
-	// FinalizeServices installs the silent SCM replacement and removes the task.
-	if err = backend.StartServices(ctx, true, true, journal.NewSSH.WasRunning, false); err != nil {
+	// Every canonical participant must run the new binary before health can
+	// verify its version. Rollback restores the recorded prior running state.
+	if err = backend.StartServices(ctx, true, true, journal.NewSSH.WasRunning, true); err != nil {
 		return rollbackWindowsActivation(ctx, backend, journal, err)
 	}
 	journal.Stage = windowsActivationServicesLive
@@ -165,21 +196,57 @@ func executeWindowsActivation(ctx context.Context, backend windowsActivationBack
 	if err = backend.CommitCLI(ctx, journal); err != nil {
 		return rollbackWindowsActivation(ctx, backend, journal, err)
 	}
-	journal.Stage, journal.Failure = windowsActivationCommitted, ""
+	journal.Stage, journal.Failure = windowsActivationCommitReady, ""
 	if err = backend.WriteJournal(journal); err != nil {
-		// CLI publication is the final atomic commit. Failure to record that fact
-		// must still restore both services and the previous CLI pointer.
-		return rollbackWindowsActivation(ctx, backend, journal, err)
+		return journal, err
 	}
-	return journal, backend.FinalizeServices(ctx, journal)
+	return completeWindowsCommit(ctx, backend, journal)
+}
+
+// completeWindowsCommit never rolls back a healthy published installation.
+// The durable commit-ready stage retains ownership until hostd releases its
+// exact admission fence; a failed RPC is retried after helper restart.
+func completeWindowsCommit(ctx context.Context, backend windowsActivationBackend, journal windowsActivationJournal) (windowsActivationJournal, error) {
+	if journal.Stage == windowsActivationCommitted {
+		journal.Stage = windowsActivationCommitReady
+		if err := backend.WriteJournal(journal); err != nil {
+			return journal, err
+		}
+	}
+	if err := backend.CommitGate(ctx, journal); err != nil {
+		return journal, err
+	}
+	committed := journal
+	committed.Stage = windowsActivationCommitted
+	if err := backend.WriteJournal(committed); err != nil {
+		return journal, err
+	}
+	return committed, backend.FinalizeServices(ctx, committed)
+}
+
+// rollbackWindowsDrain never actuates the canonical process set. Until the
+// switching boundary, a missing RPC response may mean a busy live terminal.
+func rollbackWindowsDrain(ctx context.Context, backend windowsActivationBackend, journal windowsActivationJournal, cause error) (windowsActivationJournal, error) {
+	bounded, cancel := context.WithTimeout(context.WithoutCancel(ctx), journal.RollbackTimeout)
+	defer cancel()
+	if err := backend.AuthorizeRecovery(bounded, journal); err != nil {
+		return journal, errors.Join(cause, err)
+	}
+	if err := backend.RollbackDrain(bounded, journal); err != nil {
+		return journal, errors.Join(cause, err)
+	}
+	return rollbackWindowsCandidate(bounded, backend, journal, cause)
 }
 
 func rollbackWindowsActivation(ctx context.Context, backend windowsActivationBackend, journal windowsActivationJournal, cause error) (windowsActivationJournal, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), journal.RollbackTimeout)
 	defer cancel()
+	if err := backend.AuthorizeRecovery(ctx, journal); err != nil {
+		return journal, errors.Join(cause, err)
+	}
 	journal.Stage, journal.Failure = windowsActivationRollingBack, boundedWindowsActivationFailure(cause)
 	journalErr := backend.WriteJournal(journal)
 	stopErr := backend.StopServices(ctx, journal.LocalDaemonWasRunning)
@@ -230,6 +297,42 @@ func rollbackWindowsActivation(ctx context.Context, backend windowsActivationBac
 	return result, errors.Join(startErr, cleanupErr)
 }
 
+// compensateWindowsBusy retires only the staged candidate. The host and its
+// terminal processes never stopped, so neither binary rollback nor quarantine
+// is appropriate. The durable marker makes interrupted cleanup repeatable.
+func compensateWindowsBusy(ctx context.Context, backend windowsActivationBackend, journal windowsActivationJournal) (windowsActivationJournal, error) {
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), journal.RollbackTimeout)
+	defer cancel()
+	journal.Stage, journal.PreDrainRollback = windowsActivationRollingBack, true
+	journal.BlockedReason, journal.Failure = autoupdate.BlockedActiveTerminalSessions, ""
+	if journal.BlockedRetryAt.IsZero() {
+		journal.BlockedRetryAt = time.Now().UTC().Add(autoupdate.DefaultRetryFloor)
+	}
+	if err := backend.WriteJournal(journal); err != nil {
+		return journal, err
+	}
+	if err := backend.StopCandidate(cleanup, journal); err != nil {
+		return journal, err
+	}
+	if err := backend.AuthorizeRecovery(cleanup, journal); err != nil {
+		return journal, err
+	}
+	journal.Stage = windowsActivationBusyReady
+	if err := backend.WriteJournal(journal); err != nil {
+		return journal, err
+	}
+	// Only the updater exited for the activator handoff. Do not touch hostd,
+	// managed SSH, or the enrolled user's daemon while its sessions are live.
+	if err := backend.StartServices(cleanup, false, journal.OldUpdater.WasRunning, false, false); err != nil {
+		return journal, err
+	}
+	journal.Stage, journal.PreDrainRollback = windowsActivationRolledBack, false
+	if err := backend.WriteJournal(journal); err != nil {
+		return journal, err
+	}
+	return journal, &autoupdate.ActiveTerminalSessionsError{RequiredVersion: journal.Version}
+}
+
 // rollbackWindowsCandidate aborts a pre-drain candidate without touching the
 // currently active services or route. This is intentionally separate from the
 // full rollback path: a failed canary must not cause an unnecessary outage or
@@ -250,13 +353,17 @@ func rollbackWindowsCandidate(ctx context.Context, backend windowsActivationBack
 	}
 	// The updater that received the update request deliberately hands the
 	// transaction to the one-shot activator and exits before this function runs.
-	// A pre-drain candidate failure therefore has to bring the previously live
-	// services back before it can publish a terminal rollback. Without this
+	// A pre-drain candidate failure therefore has to restart only the updater
+	// before it can publish a terminal rollback. Without this
 	// restart, a failed canary leaves PaperboatUpdated stopped even though no
 	// binary or service target was changed. Use an independent bounded cleanup
 	// context so an activator cancellation cannot strand the old service set.
-	startCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	startErr := backend.StartServices(startCtx, journal.OldHostd.WasRunning, journal.OldUpdater.WasRunning, journal.OldSSH.WasRunning, journal.LocalDaemonWasRunning)
+	startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), journal.RollbackTimeout)
+	defer cancel()
+	if err := backend.AuthorizeRecovery(startCtx, journal); err != nil {
+		return journal, errors.Join(cause, err, quarantineErr)
+	}
+	startErr := backend.StartServices(startCtx, false, journal.OldUpdater.WasRunning, false, false)
 	cancel()
 	if startErr != nil {
 		return journal, errors.Join(cause, startErr, quarantineErr)
@@ -270,10 +377,13 @@ func rollbackWindowsCandidate(ctx context.Context, backend windowsActivationBack
 }
 
 func completeWindowsRollback(_ context.Context, backend windowsActivationBackend, journal windowsActivationJournal, cause error) (windowsActivationJournal, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), journal.RollbackTimeout)
 	defer cancel()
 	if journal.Stage != windowsActivationRollbackReady {
 		return journal, errors.Join(cause, errInvalidWindowsActivation)
+	}
+	if err := backend.AuthorizeRecovery(ctx, journal); err != nil {
+		return journal, errors.Join(cause, err)
 	}
 	if err := backend.StartServices(ctx, journal.OldHostd.WasRunning, journal.OldUpdater.WasRunning, journal.OldSSH.WasRunning, journal.LocalDaemonWasRunning); err != nil {
 		return journal, errors.Join(cause, err)
@@ -289,6 +399,15 @@ func completeWindowsRollback(_ context.Context, backend windowsActivationBackend
 }
 
 func validWindowsActivationJournal(j windowsActivationJournal) bool {
+	if (j.BlockedReason != "" && j.BlockedRetryAt.IsZero()) || (j.BlockedReason == "" && !j.BlockedRetryAt.IsZero()) {
+		return false
+	}
+	if j.Stage == windowsActivationBusyReady && j.BlockedReason != autoupdate.BlockedActiveTerminalSessions {
+		return false
+	}
+	if j.BlockedReason != "" && (j.BlockedReason != autoupdate.BlockedActiveTerminalSessions || j.Failure != "" || !((j.Stage == windowsActivationRollingBack || j.Stage == windowsActivationBusyReady) && j.PreDrainRollback || j.Stage == windowsActivationRolledBack && !j.PreDrainRollback)) {
+		return false
+	}
 	if j.Schema != windowsActivationJournalSchema || len(j.TransactionID) != 32 || !lowerHex(j.TransactionID) || !exactReleasePattern.MatchString(j.Version) || !exactReleasePattern.MatchString(j.PreviousVersion) || !validWindowsActivationStage(j.Stage) || j.Architecture != "amd64" && j.Architecture != "arm64" || len(j.Failure) > 4096 || invalidWindowsAPIRange(j.HostdAPIMin, j.HostdAPIMax) || invalidWindowsAPIRange(j.RuntimeAPIMin, j.RuntimeAPIMax) || workerupdate.ValidateActivationPolicy(windowsCandidateRelease(j)) != nil {
 		return false
 	}
@@ -298,12 +417,12 @@ func validWindowsActivationJournal(j windowsActivationJournal) bool {
 		}
 	}
 	for _, target := range []windowsServiceTarget{j.OldHostd, j.NewHostd} {
-		if target.Executable == "" || len(target.Arguments) != 1 || target.Arguments[0] != "__runtime-hostd" {
+		if target.Executable == "" || len(target.Arguments) != 2 || target.Arguments[0] != "daemon" || target.Arguments[1] != "__runtime-hostd" {
 			return false
 		}
 	}
 	for _, target := range []windowsServiceTarget{j.OldUpdater, j.NewUpdater} {
-		if target.Executable == "" || len(target.Arguments) != 1 || target.Arguments[0] != "__runtime-updated" {
+		if target.Executable == "" || len(target.Arguments) != 2 || target.Arguments[0] != "daemon" || target.Arguments[1] != "__runtime-updated" {
 			return false
 		}
 	}
@@ -321,7 +440,7 @@ func invalidWindowsAPIRange(minimum, maximum uint16) bool {
 }
 
 func validWindowsSSHArguments(arguments []string) bool {
-	return len(arguments) == 5 && arguments[0] == "__windows-sshd-service" && arguments[1] == "--sshd" && strings.EqualFold(arguments[2], `C:\Program Files\OpenSSH\sshd.exe`) && arguments[3] == "--config" && strings.EqualFold(arguments[4], `C:\ProgramData\Paperboat\ssh\sshd_config`)
+	return len(arguments) == 6 && arguments[0] == "daemon" && arguments[1] == "__windows-sshd-service" && arguments[2] == "--sshd" && strings.EqualFold(arguments[3], `C:\Program Files\OpenSSH\sshd.exe`) && arguments[4] == "--config" && strings.EqualFold(arguments[5], `C:\ProgramData\Paperboat\ssh\sshd_config`)
 }
 
 func boundedWindowsActivationFailure(cause error) string {
@@ -343,7 +462,7 @@ func boundedWindowsActivationFailure(cause error) string {
 
 func validWindowsActivationStage(stage windowsActivationStage) bool {
 	switch stage {
-	case windowsActivationStaged, windowsActivationCandidateValidating, windowsActivationCandidateReady, windowsActivationDraining, windowsActivationSwitching, windowsActivationServicesLive, windowsActivationCommitted, windowsActivationRollingBack, windowsActivationRollbackReady, windowsActivationRolledBack:
+	case windowsActivationCommitReady, windowsActivationBusyReady, windowsActivationStaged, windowsActivationCandidateValidating, windowsActivationCandidateReady, windowsActivationDraining, windowsActivationSwitching, windowsActivationServicesLive, windowsActivationCommitted, windowsActivationRollingBack, windowsActivationRollbackReady, windowsActivationRolledBack:
 		return true
 	default:
 		return false
@@ -403,6 +522,9 @@ func windowsActivationNeedsControllerRecovery(journal windowsActivationJournal, 
 }
 
 func windowsActivationNeedsResume(journal windowsActivationJournal, activeVersion string, activatorOwnsTransaction bool) bool {
+	if journal.Stage == windowsActivationCommitReady {
+		return !activatorOwnsTransaction
+	}
 	if journal.Stage == windowsActivationCommitted || journal.Stage == windowsActivationRolledBack || activeVersion == journal.Version {
 		return false
 	}

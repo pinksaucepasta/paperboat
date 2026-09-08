@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 type outputCommandRunner struct {
@@ -116,7 +117,7 @@ func TestSystemdNativeLifecycleAbsentAndCancellation(t *testing.T) {
 
 func TestLaunchdNativeLifecycleStopBootsOutAndStartReRegistersDeclaration(t *testing.T) {
 	absent := errors.New("launchctl: service not found")
-	runner := &outputCommandRunner{outputs: []string{"state = running\n"}, errors: []error{nil, nil, nil, absent}}
+	runner := &outputCommandRunner{outputs: []string{"state = running\n", "", "", "", "", "", "state = running\n"}, errors: []error{nil, nil, nil, absent}}
 	controller := LaunchdController{Runner: runner, UID: 501, Label: "com.pinksaucepasta.paperboat.hostd"}
 	status, err := controller.Inspect(context.Background(), "/Library/LaunchDaemons/com.pinksaucepasta.paperboat.hostd.plist")
 	if err != nil || !status.Registered || !status.Enabled || !status.Running || !status.Ready {
@@ -147,6 +148,119 @@ func TestLaunchdNativeLifecycleStopBootsOutAndStartReRegistersDeclaration(t *tes
 		if got := strings.Join(call, " "); got != want[index] {
 			t.Fatalf("call %d=%q want %q", index, got, want[index])
 		}
+	}
+}
+
+func TestLaunchdStartWaitsForThrottledJobToRun(t *testing.T) {
+	runner := &outputCommandRunner{outputs: []string{
+		"",
+		"state = spawn scheduled\nactive count = 0\n",
+		"state = running\nactive count = 1\npid = 42\n",
+	}}
+	controller := LaunchdController{Runner: runner, UID: 501, Label: HostdLabel}
+	if err := controller.Start(context.Background(), "/Library/LaunchDaemons/"+HostdLabel+".plist"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"launchctl kickstart -k system/" + HostdLabel,
+		"launchctl print system/" + HostdLabel,
+		"launchctl print system/" + HostdLabel,
+	}
+	if len(runner.calls) != len(want) {
+		t.Fatalf("calls=%v", runner.calls)
+	}
+	for index, call := range runner.calls {
+		if got := strings.Join(call, " "); got != want[index] {
+			t.Fatalf("call %d=%q want %q", index, got, want[index])
+		}
+	}
+}
+
+func TestLaunchdStartRetriesReservedLabelAfterStalePrint(t *testing.T) {
+	absent := errors.New("launchctl: exit status 113: Could not find service")
+	reserved := errors.New("launchctl: bootstrap failed: service already loaded")
+	runner := &outputCommandRunner{
+		outputs: []string{"", "", "", "", "", "", "state = running\nactive count = 1\npid = 42\n"},
+		errors:  []error{absent, reserved, nil, absent, nil, nil},
+	}
+	controller := LaunchdController{Runner: runner, UID: 501, Label: DaemonLabel, UserDomain: true}
+	path := "/Users/test/Library/LaunchAgents/" + DaemonLabel + ".plist"
+	if err := controller.Start(context.Background(), path); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"launchctl kickstart -k gui/501/" + DaemonLabel,
+		"launchctl bootstrap gui/501 " + path,
+		"launchctl print gui/501/" + DaemonLabel,
+		"launchctl kickstart -k gui/501/" + DaemonLabel,
+		"launchctl bootstrap gui/501 " + path,
+		"launchctl kickstart -k gui/501/" + DaemonLabel,
+		"launchctl print gui/501/" + DaemonLabel,
+	}
+	if len(runner.calls) != len(want) {
+		t.Fatalf("calls=%v", runner.calls)
+	}
+	for index, call := range runner.calls {
+		if got := strings.Join(call, " "); got != want[index] {
+			t.Fatalf("call %d=%q want %q", index, got, want[index])
+		}
+	}
+}
+
+type launchdExitError int
+
+func (e launchdExitError) Error() string { return "launchd exit" }
+func (e launchdExitError) ExitCode() int { return int(e) }
+
+func TestLaunchdStartRetriesOperationInProgress(t *testing.T) {
+	inProgress := &CommandError{Tool: "launchctl", Cause: launchdExitError(37)}
+	runner := &outputCommandRunner{
+		outputs: []string{"", "", "state = running\nactive count = 1\npid = 42\n", "", "state = running\nactive count = 1\npid = 43\n"},
+		errors:  []error{inProgress, errors.New("service already loaded"), nil, nil},
+	}
+	controller := LaunchdController{Runner: runner, UID: 501, Label: DaemonLabel, UserDomain: true}
+	path := "/Users/test/Library/LaunchAgents/" + DaemonLabel + ".plist"
+	if err := controller.Start(context.Background(), path); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"launchctl kickstart -k gui/501/" + DaemonLabel,
+		"launchctl bootstrap gui/501 " + path,
+		"launchctl print gui/501/" + DaemonLabel,
+		"launchctl kickstart -k gui/501/" + DaemonLabel,
+		"launchctl print gui/501/" + DaemonLabel,
+	}
+	if len(runner.calls) != len(want) {
+		t.Fatalf("calls=%v", runner.calls)
+	}
+	for index, call := range runner.calls {
+		if got := strings.Join(call, " "); got != want[index] {
+			t.Fatalf("call %d=%q want %q", index, got, want[index])
+		}
+	}
+}
+
+func TestNativeComponentReadinessWaitsForApplication(t *testing.T) {
+	attempts := 0
+	component := &NativeTransactionalComponent{probe: func(context.Context) error {
+		attempts++
+		if attempts < 2 {
+			return ErrLifecycleNotReady
+		}
+		return nil
+	}}
+	if err := component.CheckReadiness(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 2 {
+		t.Fatalf("probe attempts = %d", attempts)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	component.probe = func(context.Context) error { return ErrLifecycleNotReady }
+	if err := component.CheckReadiness(ctx); !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, ErrLifecycleNotReady) {
+		t.Fatalf("bounded readiness error = %v", err)
 	}
 }
 

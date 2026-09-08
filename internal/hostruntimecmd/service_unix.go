@@ -15,6 +15,7 @@ import (
 	"strconv"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 )
 
 func runServiceCommand(ctx context.Context, args []string, stdin io.Reader, _, _ io.Writer) error {
@@ -76,10 +77,9 @@ func authorizePersistedUninstall(ctx context.Context) error {
 }
 
 func systemWorkerExecutable() string {
-	if runtime.GOOS == "darwin" {
-		return "/Library/PrivilegedHelperTools/Paperboat/pb"
-	}
-	return "/usr/local/libexec/paperboat/pb"
+	// This file only builds on the two Unix platforms supported by Layout.
+	layout, _ := service.DefaultLayout(runtime.GOOS)
+	return layout.Binary
 }
 
 func removeSystemWorkerCommand() error {

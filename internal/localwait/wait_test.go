@@ -51,7 +51,7 @@ func (f *fakeClient) Watch(ctx context.Context, _ uint64) (<-chan localapi.Snaps
 }
 
 func waitSnapshot(generation uint64, machine localapi.MachineStatus) localapi.Snapshot {
-	return localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: generation, ObservedAt: time.Date(2026, 8, 4, 12, 0, int(generation), 0, time.UTC), DaemonState: "ready", Machines: []localapi.MachineStatus{machine}}
+	return localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: generation, ObservedAt: time.Date(2026, 8, 4, 12, 0, int(generation), 0, time.UTC), DaemonState: "ready", DaemonVersion: "dev", Machines: []localapi.MachineStatus{machine}}
 }
 
 func waitMachine() localapi.MachineStatus {
@@ -98,7 +98,7 @@ func TestWaitReturnsTypedTerminalAndRemovalResults(t *testing.T) {
 		code string
 	}{
 		{"failed", waitSnapshot(2, failed), "machine_unavailable"},
-		{"removed", localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: 2, ObservedAt: initial.ObservedAt.Add(time.Second), DaemonState: "ready", Machines: []localapi.MachineStatus{}}, "machine_removed"},
+		{"removed", localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: 2, ObservedAt: initial.ObservedAt.Add(time.Second), DaemonState: "ready", DaemonVersion: "dev", Machines: []localapi.MachineStatus{}}, "machine_removed"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			client := &fakeClient{initial: initial, batches: []watchBatch{{snapshots: []localapi.Snapshot{test.next}, err: io.EOF}}}

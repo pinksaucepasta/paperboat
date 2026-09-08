@@ -32,8 +32,7 @@ func (r Result) Validate() error {
 	if r.Schema != ResultSchemaV1 || !validCondition(r.Condition) || r.SnapshotGeneration == 0 || r.ObservedAt.IsZero() {
 		return errors.New("invalid local wait result")
 	}
-	snapshot := localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: r.SnapshotGeneration, ObservedAt: r.ObservedAt, DaemonState: "ready", Machines: []localapi.MachineStatus{r.Machine}}
-	if snapshot.Validate() != nil {
+	if r.Machine.Validate() != nil {
 		return errors.New("invalid local wait result")
 	}
 	switch r.Outcome {

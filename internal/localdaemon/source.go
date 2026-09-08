@@ -88,6 +88,7 @@ func (s AuthenticatedMachineSource) IssuePeerStream(ctx context.Context, request
 		return request, errors.New("operation descriptor expired")
 	}
 	request.Credential, request.Deadline = token, expires.UTC()
+	request.AccessSessionID = descriptor.Auth.AccessSessionID
 	request.QUICEndpoint, request.WSSEndpoint = quicEndpoint, wssEndpoint
 	if err := request.Validate(time.Now().UTC()); err != nil {
 		return request, err

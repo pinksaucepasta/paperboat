@@ -114,9 +114,9 @@ export PAPERBOAT_TEST_FAKE_BIN="$temporary/bin"
 
 seed_managed_state() {
   /bin/rm -rf "$PAPERBOAT_TEST_STATE"
-  mkdir -p "$PAPERBOAT_TEST_STATE/helper" "$PAPERBOAT_TEST_STATE/application-support"
+  mkdir -p "$PAPERBOAT_TEST_STATE/helper/bin" "$PAPERBOAT_TEST_STATE/application-support"
   touch "$PAPERBOAT_TEST_STATE/hostd.plist" "$PAPERBOAT_TEST_STATE/updated.plist" \
-    "$PAPERBOAT_TEST_STATE/helper/pb" "$PAPERBOAT_TEST_STATE/application-support/config" \
+    "$PAPERBOAT_TEST_STATE/helper/bin/pb" "$PAPERBOAT_TEST_STATE/application-support/config" \
     "$PAPERBOAT_TEST_STATE/cli" "$PAPERBOAT_TEST_STATE/legacy-helper" \
     "$PAPERBOAT_TEST_STATE/hostd.sock" "$PAPERBOAT_TEST_STATE/updated.sock"
 }
@@ -145,7 +145,7 @@ for marker in hostd.plist updated.plist cli legacy-helper hostd.sock updated.soc
   test -e "$PAPERBOAT_TEST_STATE/$marker" || { echo "install-only removed $marker" >&2; exit 1; }
 done
 test -d "$PAPERBOAT_TEST_STATE/helper"
-test -f "$PAPERBOAT_TEST_STATE/helper/pb"
+test -f "$PAPERBOAT_TEST_STATE/helper/bin/pb"
 test -d "$PAPERBOAT_TEST_STATE/application-support"
 test -f "$PAPERBOAT_TEST_STATE/application-support/config"
 if grep -Eq 'launchctl bootout|com\.pinksaucepasta\.paperboat\.(hostd|updated)|/Library/PrivilegedHelperTools/Paperboat|/Library/Application Support/Paperboat|/var/run/paperboat-(hostd|updated)|/usr/local/bin/pb' "$temporary/install-only-sudo.log" "$temporary/install-only-rm.log" "$temporary/install-only-launchctl.log" 2>/dev/null; then

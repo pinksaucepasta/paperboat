@@ -8,40 +8,38 @@ import (
 )
 
 const (
-	ProtocolV1              = "paperboat.local-api/v1"
-	SnapshotSchemaV1        = "paperboat.status/v1"
-	StatusEventSchemaV1     = "paperboat.status-event/v1"
-	ObservationSchemaV1     = "paperboat.transport-observation/v1"
-	CompletionSchemaV1      = "paperboat.completion/v1"
-	PeerStreamSchemaV1      = "paperboat.peer-stream-request/v1"
-	FileTransferKeySchemaV1 = "paperboat.file-transfer-key-request/v1"
-	maxMachines             = 10_000
-	maxUnixSocketPath       = 100
+	ProtocolV1           = "paperboat.local-api/v1"
+	SnapshotSchemaV1     = "paperboat.status/v1"
+	StatusEventSchemaV1  = "paperboat.status-event/v1"
+	ObservationSchemaV1  = "paperboat.transport-observation/v1"
+	CompletionSchemaV1   = "paperboat.completion/v1"
+	PeerStreamSchemaV1   = "paperboat.peer-stream-request/v1"
+	FileTransferSchemaV1 = "paperboat.file-transfer-request/v1"
+	maxMachines          = 10_000
+	maxUnixSocketPath    = 100
 )
 
-type FileTransferKeyRequest struct {
+type FileTransferRequest struct {
 	Schema            string    `json:"schema"`
 	MachineID         string    `json:"machine_id"`
 	EnvironmentID     string    `json:"environment_id"`
 	MachineGeneration uint64    `json:"machine_generation"`
-	Transport         string    `json:"transport"`
 	OperationID       string    `json:"operation_id"`
-	TransferID        string    `json:"transfer_id"`
-	Generation        uint64    `json:"generation"`
-	ExpiresAt         time.Time `json:"expires_at"`
-	Material          []byte    `json:"material"`
+	Credential        string    `json:"credential"`
+	AccessSessionID   string    `json:"access_session_id"`
+	Deadline          time.Time `json:"deadline"`
+	MaximumBytes      uint64    `json:"maximum_bytes"`
 }
 
-func (r FileTransferKeyRequest) Validate(now time.Time) error {
-	if r.Schema != FileTransferKeySchemaV1 || !safeValue(r.MachineID) || !safeValue(r.EnvironmentID) || r.MachineGeneration == 0 || !oneOf(r.Transport, "a", "d", "q", "w", "r") || !safeValue(r.OperationID) || !safeValue(r.TransferID) || r.Generation == 0 || r.ExpiresAt.IsZero() || !r.ExpiresAt.After(now) || r.ExpiresAt.Sub(now) > 7*24*time.Hour || len(r.Material) != 45 {
+func (r FileTransferRequest) Validate(now time.Time) error {
+	if r.Schema != FileTransferSchemaV1 || !safeValue(r.MachineID) || !safeValue(r.EnvironmentID) || r.MachineGeneration == 0 || !safeValue(r.OperationID) || r.Credential == "" || len(r.Credential) > 16<<10 || !safeValue(r.AccessSessionID) || r.Deadline.IsZero() || !r.Deadline.After(now) || r.Deadline.Sub(now) > 24*time.Hour || r.MaximumBytes == 0 || r.MaximumBytes > 1<<40 {
 		return ErrInvalidConfig
 	}
 	return nil
 }
 
-type FileTransferKeyResult struct {
-	PeerContext []byte
-	Handle      string
+type FileTransferResult struct {
+	Handle string
 }
 
 type PeerStreamRequest struct {
@@ -52,6 +50,7 @@ type PeerStreamRequest struct {
 	Consumer          string          `json:"consumer"`
 	OperationID       string          `json:"operation_id"`
 	Credential        string          `json:"credential"`
+	AccessSessionID   string          `json:"access_session_id,omitempty"`
 	Deadline          time.Time       `json:"deadline"`
 	MaximumBytes      uint64          `json:"maximum_bytes"`
 	Transport         string          `json:"transport"`
@@ -226,12 +225,13 @@ type TransportConsumer struct {
 }
 
 type Snapshot struct {
-	Schema      string          `json:"schema"`
-	Generation  uint64          `json:"generation"`
-	ObservedAt  time.Time       `json:"observed_at"`
-	DaemonState string          `json:"daemon_state"`
-	Health      []HealthItem    `json:"health"`
-	Machines    []MachineStatus `json:"machines"`
+	Schema        string          `json:"schema"`
+	Generation    uint64          `json:"generation"`
+	ObservedAt    time.Time       `json:"observed_at"`
+	DaemonState   string          `json:"daemon_state"`
+	DaemonVersion string          `json:"daemon_version"`
+	Health        []HealthItem    `json:"health"`
+	Machines      []MachineStatus `json:"machines"`
 }
 
 type StatusEvent struct {
@@ -268,7 +268,7 @@ func (o TransportObservation) Validate() error {
 }
 
 func (s Snapshot) Validate() error {
-	if s.Schema != SnapshotSchemaV1 || s.Generation == 0 || s.ObservedAt.IsZero() || !oneOf(s.DaemonState, "starting", "ready", "degraded", "draining", "stopping") || len(s.Machines) > maxMachines {
+	if s.Schema != SnapshotSchemaV1 || s.Generation == 0 || s.ObservedAt.IsZero() || !oneOf(s.DaemonState, "starting", "ready", "degraded", "draining", "stopping") || !safeValue(s.DaemonVersion) || len(s.Machines) > maxMachines {
 		return ErrInvalidResponse
 	}
 	for _, item := range s.Health {
@@ -278,14 +278,24 @@ func (s Snapshot) Validate() error {
 	}
 	seen := make(map[string]bool, len(s.Machines))
 	for _, machine := range s.Machines {
-		if !safeValue(machine.ID) || !safeText(machine.Alias) || seen[machine.ID] || !oneOf(machine.RuntimeState, "starting", "ready", "degraded", "offline", "stopped", "failed") || !transportSummary(machine.SelectedPath, machine.ActiveConsumers, machine.TransportConsumers, machine.StandbyPath, machine.RelayRegion) || !readiness(machine.TransferReadiness) || !readiness(machine.PreviewReadiness) || !readiness(machine.SSHReadiness) || !natMapping(machine.NATMappingIPv4) || !natMapping(machine.NATMappingIPv6) || !captivePortal(machine.CaptivePortal) || !pmtu(machine.PMTU) || !routerProtocol(machine.RouterProtocol) || !routerMapping(machine.RouterMapping) || !mappingLifetime(machine.MappingLifetime) || !oneOf(machine.UpdateHealth, "unknown", "healthy", "recovery_required") {
+		if seen[machine.ID] || machine.Validate() != nil {
 			return ErrInvalidResponse
 		}
 		seen[machine.ID] = true
-		for _, item := range machine.Health {
-			if !validHealth(item) {
-				return ErrInvalidResponse
-			}
+	}
+	return nil
+}
+
+// Validate checks the machine portion of a snapshot independently from its
+// daemon-owned envelope. Consumers of derived contracts can validate the
+// machine without manufacturing an authenticated Snapshot.
+func (m MachineStatus) Validate() error {
+	if !safeValue(m.ID) || !safeText(m.Alias) || !oneOf(m.RuntimeState, "starting", "ready", "degraded", "offline", "stopped", "failed") || !transportSummary(m.SelectedPath, m.ActiveConsumers, m.TransportConsumers, m.StandbyPath, m.RelayRegion) || !readiness(m.TransferReadiness) || !readiness(m.PreviewReadiness) || !readiness(m.SSHReadiness) || !natMapping(m.NATMappingIPv4) || !natMapping(m.NATMappingIPv6) || !captivePortal(m.CaptivePortal) || !pmtu(m.PMTU) || !routerProtocol(m.RouterProtocol) || !routerMapping(m.RouterMapping) || !mappingLifetime(m.MappingLifetime) || !oneOf(m.UpdateHealth, "unknown", "healthy", "recovery_required") {
+		return ErrInvalidResponse
+	}
+	for _, item := range m.Health {
+		if !validHealth(item) {
+			return ErrInvalidResponse
 		}
 	}
 	return nil

@@ -419,7 +419,7 @@ func windowsServiceConfigurationTrustedForTransition(config mgr.Config, definiti
 		return false
 	}
 	arguments, err := windows.DecomposeCommandLine(config.BinaryPathName)
-	if err != nil || len(arguments) != 2 {
+	if err != nil || len(arguments) != 3 || arguments[1] != "daemon" {
 		return false
 	}
 	layout, err := DefaultLayout("windows")
@@ -427,7 +427,7 @@ func windowsServiceConfigurationTrustedForTransition(config mgr.Config, definiti
 		return false
 	}
 	wantArgument := windowsServiceRoleArgument(definition.Name)
-	return wantArgument != "" && arguments[1] == wantArgument
+	return wantArgument != "" && arguments[2] == wantArgument
 }
 
 func windowsServiceRoleArgument(name string) string {

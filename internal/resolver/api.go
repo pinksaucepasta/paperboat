@@ -669,11 +669,12 @@ func statusReason(resp api.ConnectionDescriptor) string {
 
 func mapAuth(auth api.AuthMaterial) AuthTarget {
 	return AuthTarget{
-		Method:    auth.Method,
-		Ticket:    auth.Ticket,
-		Token:     auth.Token,
-		ExpiresAt: auth.ExpiresAt.Format(time.RFC3339),
-		Scopes:    auth.Scopes,
+		Method:     auth.Method,
+		Ticket:     auth.Ticket,
+		Token:      auth.Token,
+		ExpiresAt:  auth.ExpiresAt.Format(time.RFC3339),
+		Scopes:     auth.Scopes,
+		ResourceID: auth.AccessSessionID,
 	}
 }
 

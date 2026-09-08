@@ -193,6 +193,44 @@ func TestGeneratedOpenSSHConfigIsAcceptedByInstalledClient(t *testing.T) {
 	}
 }
 
+func TestInstalledOpenSSHConfigResolvesEditorHostAlias(t *testing.T) {
+	executable, err := exec.LookPath("ssh")
+	if err != nil {
+		t.Skip("OpenSSH client is not installed")
+	}
+	home := openSSHTestHome(t)
+	config := openSSHTestConfig(home, "pprbt")
+	config.Targets = []OpenSSHAliasTarget{{Alias: "editor-host", User: "remote-user", Port: 38222}}
+	if _, err := InstallOpenSSHConfig(config); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(executable, "-G", "-F", filepath.Join(home, ".ssh", "config"), "editor-host.pprbt")
+	command.Env = openSSHTestEnvironment(home)
+	var stderr bytes.Buffer
+	var stdout bytes.Buffer
+	command.Stdout, command.Stderr = &stdout, &stderr
+	if err := command.Run(); err != nil {
+		t.Fatalf("OpenSSH rejected the installed editor target: %v: %s", err, stderr.String())
+	}
+	effective := strings.ToLower(stdout.String())
+	for _, required := range []string{"user remote-user\n", "port 38222\n", "canonicalizehostname true\n"} {
+		if !strings.Contains(effective, required) {
+			t.Fatalf("effective editor target missing %q:\n%s", required, stdout.String())
+		}
+	}
+}
+
+func openSSHTestEnvironment(home string) []string {
+	environment := make([]string, 0, len(os.Environ())+1)
+	for _, value := range os.Environ() {
+		if strings.HasPrefix(value, "HOME=") {
+			continue
+		}
+		environment = append(environment, value)
+	}
+	return append(environment, "HOME="+home)
+}
+
 func TestOpenSSHConfigRejectsConflictsSymlinksAndModifiedOwnedState(t *testing.T) {
 	home := openSSHTestHome(t)
 	directory := filepath.Join(home, ".ssh")

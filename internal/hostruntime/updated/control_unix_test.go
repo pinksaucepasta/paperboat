@@ -7,9 +7,53 @@ import (
 	"errors"
 	"net"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 )
+
+func TestControlStatusRejectsUnreadableActivationState(t *testing.T) {
+	root := t.TempDir()
+	// An activation directory replaced by a regular file must never be
+	// interpreted as a completed update, regardless of the caller's UID.
+	if err := os.WriteFile(filepath.Join(root, "activation"), []byte("invalid"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s := &Service{manager: &workerupdate.Manager{}, config: Config{StateRoot: root}}
+	_, err := s.controlRequestWithRequest(context.Background(), ControlRequest{Schema: ControlProtocolV1, Operation: "status"})
+	if !errors.Is(err, ErrRecoveryState) {
+		t.Fatal("status accepted unreadable activation state as completed")
+	}
+	path := testSocketPath(t)
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	server := controlServer{uid: os.Geteuid(), gid: os.Getegid(), invokeRequest: s.controlRequestWithRequest}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		connection, err := listener.AcceptUnix()
+		if err == nil {
+			defer connection.Close()
+			_ = server.handle(connection)
+		}
+	}()
+	client, err := NewClient(path, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Status(context.Background())
+	var controlErr *ControlError
+	if !errors.As(err, &controlErr) || controlErr.Code != "recovery_required" || controlErr.Message != ErrRecoveryState.Error() {
+		t.Fatalf("client did not receive actionable recovery error: %v", err)
+	}
+	<-done
+}
 
 func TestControlClientMarksMissingUpdaterAsUnavailable(t *testing.T) {
 	client, err := NewClient("/tmp/paperboat-updated-does-not-exist.sock", time.Second)
@@ -123,6 +167,13 @@ func TestControlRejectsUnknownFields(t *testing.T) {
 	<-done
 }
 
+func TestControlErrorCodeReportsActiveTerminalAdmission(t *testing.T) {
+	err := errors.Join(ErrParticipantReadiness, &autoupdate.ActiveTerminalSessionsError{RequiredVersion: "2026.08.27.47"})
+	if code := controlErrorCode(err); code != autoupdate.BlockedActiveTerminalSessions {
+		t.Fatalf("code=%q", code)
+	}
+}
+
 func TestControlStatusRemainsResponsiveDuringUpdate(t *testing.T) {
 	path := testSocketPath(t)
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
@@ -168,24 +219,6 @@ func TestControlStatusRemainsResponsiveDuringUpdate(t *testing.T) {
 	close(releaseUpdate)
 	if err := <-updateDone; err != nil {
 		t.Fatal(err)
-	}
-}
-
-type channelRestarter chan struct{}
-
-func (r channelRestarter) Restart(context.Context) error {
-	close(r)
-	return nil
-}
-
-func TestCommittedUpdateSchedulesUpdaterRestartAfterResponse(t *testing.T) {
-	restarted := make(channelRestarter)
-	service := &Service{restarter: restarted}
-	service.afterControlResponse(ControlRequest{Operation: "update"}, ControlResponse{Status: "ok", Updated: true})
-	select {
-	case <-restarted:
-	case <-time.After(time.Second):
-		t.Fatal("committed update did not schedule updater restart")
 	}
 }
 

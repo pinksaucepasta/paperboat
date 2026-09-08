@@ -57,10 +57,11 @@ func localDaemonReadinessServer(t *testing.T) (*localapi.Server, localapi.Snapsh
 		t.Fatal(err)
 	}
 	snapshot := localapi.Snapshot{
-		Schema:      localapi.SnapshotSchemaV1,
-		Generation:  1,
-		ObservedAt:  time.Date(2026, 8, 24, 7, 35, 0, 0, time.UTC),
-		DaemonState: "ready",
+		Schema:        localapi.SnapshotSchemaV1,
+		Generation:    1,
+		ObservedAt:    time.Date(2026, 8, 24, 7, 35, 0, 0, time.UTC),
+		DaemonState:   "ready",
+		DaemonVersion: "dev",
 	}
 	store, err := localapi.NewSnapshotStore(&snapshot)
 	if err != nil {
@@ -255,7 +256,7 @@ func TestRecoverLocalDaemonSnapshotConcurrentCallersConvergeOnOneLaunch(t *testi
 		bothInitial: make(chan struct{}),
 		snapshot: localapi.Snapshot{
 			Schema: localapi.SnapshotSchemaV1, Generation: 1,
-			ObservedAt: time.Date(2026, 8, 24, 7, 35, 0, 0, time.UTC), DaemonState: "ready",
+			ObservedAt: time.Date(2026, 8, 24, 7, 35, 0, 0, time.UTC), DaemonState: "ready", DaemonVersion: "dev",
 		},
 	}
 	clients := []*concurrentLocalDaemonReadinessClient{{state: state}, {state: state}}

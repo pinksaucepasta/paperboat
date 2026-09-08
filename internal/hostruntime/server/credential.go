@@ -76,6 +76,10 @@ func (a *CredentialAuthorizer) Authorize(ctx context.Context, frame protocol.Fra
 	if err != nil {
 		return Authorization{}, err
 	}
+	resourceID := claims.AssignmentID
+	if (claims.CredentialClass == "codex_manage" || claims.CredentialClass == "codex_connect") && resourceID == "" {
+		resourceID = claims.SessionID
+	}
 	return Authorization{
 		JournalBinding:  binding,
 		EnvironmentID:   claims.EnvironmentID,
@@ -84,7 +88,7 @@ func (a *CredentialAuthorizer) Authorize(ctx context.Context, frame protocol.Fra
 		UserID:          claims.UserID,
 		ClientID:        claims.CLIClientSessionID,
 		SessionID:       claims.SessionID,
-		ResourceID:      claims.AssignmentID,
+		ResourceID:      resourceID,
 		ExpiresAt:       time.Unix(claims.ExpiresAt, 0).UTC(),
 		Revoked:         revoked,
 		RevokedSignal:   a.revokedSignal,

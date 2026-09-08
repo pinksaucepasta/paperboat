@@ -25,7 +25,8 @@ type ComponentConfig struct {
 }
 
 // ComponentController returns the one service-manager controller permitted for
-// a service role. Both roles invoke the same installed pb executable.
+// a service role. Durable roles invoke the installed pb executable through its
+// explicit daemon entry point.
 func ComponentController(platform, kind string, enrolledUID int, runner Runner) (Controller, error) {
 	if runner == nil || enrolledUID < 0 {
 		return nil, ErrInvalidDefinition
@@ -88,7 +89,7 @@ func newHostdInstaller(config ComponentConfig, allowMissingExecutable bool) (*In
 	environment["PAPERBOAT_HOSTD_TOKEN_FILE"] = config.HostdTokenFile
 	serviceConfig := Config{
 		Platform: config.Layout.Platform, Kind: HostdKind, ConfigRoot: "/", Executable: binary,
-		User: config.User, Group: config.Group, Arguments: []string{"__runtime-hostd"}, Environment: environment,
+		User: config.User, Group: config.Group, Arguments: []string{"daemon", "__runtime-hostd"}, Environment: environment,
 		EncryptedCredentials: config.EncryptedCredentials,
 		UpgradeMode:          UpgradeReload, Controller: config.Controller,
 	}
@@ -136,7 +137,7 @@ func newUpdaterInstaller(config ComponentConfig, allowMissingExecutable bool) (*
 	environment["PAPERBOAT_UPDATED_SOCKET"] = updaterControlSocket(config.Layout.Platform)
 	serviceConfig := Config{
 		Platform: config.Layout.Platform, Kind: UpdaterKind, ConfigRoot: "/", Executable: binary,
-		User: "root", Group: group, Arguments: []string{"__runtime-updated"}, Environment: environment,
+		User: "root", Group: group, Arguments: []string{"daemon", "__runtime-updated"}, Environment: environment,
 		UpgradeMode: UpgradeReload, Controller: config.Controller,
 	}
 	if allowMissingExecutable {

@@ -166,17 +166,18 @@ for value in (
 for value in (
     'paperboat-updated.service',
     'UpdaterLabel',
-    'Arguments: []string{"__runtime-updated"}',
+    'Arguments: []string{"daemon", "__runtime-updated"}',
 ):
     if value not in service_components:
         raise SystemExit(f'native service declarations omit the updater role: {value}')
 for value in (
-    '{kind: service.UpdaterKind, executable: layout.Binary, arguments: []string{"__runtime-updated"}}',
+    '{kind: service.UpdaterKind, executable: layout.Binary, arguments: []string{"daemon", "__runtime-updated"}}',
 ):
     if value not in windows_service_plan:
         raise SystemExit(f'Windows service declarations omit the unified updater role: {value}')
 for value in (
     'systemctl show -p ExecStart --value "$unit"',
+    "*'\"daemon\"'*",
     'expected_argument=__runtime-updated',
     'paperboat-updated.service',
     'systemctl restart paperboat-hostd.service paperboat-updated.service',
@@ -186,6 +187,7 @@ for value in (
 for value in (
     "'PaperboatUpdated'",
     "'__runtime-updated'",
+    "'\"' + $Paths.Binary + '\" daemon ' + $Argument",
     "[string]$service.StartMode -ne 'Auto'",
     'Restart-Hostd',
     'Invoke-Update',
