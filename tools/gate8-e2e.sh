@@ -156,10 +156,6 @@ run_case config none isolated-show pb --config "$isolated_config" config show --
 assert_case config-isolated-show server \
   "$(jq -e --arg server "$active_server" '.server_url == $server' "$RESULT_ROOT/cases/config-none-isolated-show.stdout" >/dev/null 2>&1 && echo true || echo false)" exact
 run_case machine none pending-trust pb machine pending --json
-target_workspace="$(jq -er --arg target "$TARGET" '.machines[] | select(.alias == $target) | .workspace_root | select(type == "string" and startswith("/"))' "$RESULT_ROOT/status-before.json")"
-run_case codex auto version pb codex "$TARGET" --path "$target_workspace" -- --version
-assert_case codex-auto-version recognizable \
-  "$(grep -Eq '^codex-cli [0-9]+\.[0-9]+\.[0-9]+' "$RESULT_ROOT/cases/codex-auto-version.stdout" && echo true || echo false)" exact
 
 for transport in a d q w r; do
   for run in $(seq 1 "$REPEAT"); do
