@@ -12,7 +12,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"math/big"
 	"net"
@@ -24,7 +23,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	clienttransfer "github.com/pinksaucepasta/paperboat/internal/filetransfer"
 	hostconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
@@ -310,33 +308,12 @@ func runRealTerminalAndFileProtocols(t *testing.T, clientOwner, serverOwner *nat
 		writer.Header().Set("ETag", `"sha256:`+hex.EncodeToString(digest[:])+`"`)
 		_, _ = writer.Write(payload)
 	})
-	codexHandler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Header.Get("Authorization") != "Bearer codex-token" || request.URL.Path != "/v1/codex-sessions/cdx_slice/ws" {
-			http.Error(writer, "denied", http.StatusUnauthorized)
-			return
-		}
-		socket, acceptErr := websocket.Accept(writer, request, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
-		if acceptErr != nil {
-			return
-		}
-		defer socket.CloseNow()
-		messageType, body, readErr := socket.Read(request.Context())
-		if readErr == nil {
-			_ = socket.Write(request.Context(), messageType, append([]byte("paperboat-codex-host:"), body...))
-		}
-	})
 	service, err := nativesession.New(nativesession.Config{Authorize: func(_ context.Context, header streamauth.Header) (string, error) {
-		if header.Credential != "terminal-token" && header.Credential != "file-token" && header.Credential != "exec-token" && header.Credential != "codex-token" {
+		if header.Credential != "terminal-token" && header.Credential != "file-token" && header.Credential != "exec-token" {
 			return "", errors.New("credential rejected")
-		}
-		if header.Consumer == "codex" {
-			return "cdx_slice", nil
 		}
 		return "grant_test", nil
 	}, ServeStream: func(ctx context.Context, header streamauth.Header, connection net.Conn) error {
-		if header.Consumer == "codex" {
-			return hostserver.ServeHTTPConnection(ctx, connection, codexHandler)
-		}
 		return association.Serve(connection)
 	}, ServeTransfer: func(ctx context.Context, connection net.Conn) error {
 		return hostserver.ServeHTTPConnection(ctx, connection, transferHandler)
@@ -463,38 +440,6 @@ func runRealTerminalAndFileProtocols(t *testing.T, clientOwner, serverOwner *nat
 	_ = cancelConn.Close()
 	for _, check := range afterProtocol {
 		check("exec cancellation")
-	}
-
-	codexTarget := resolver.ConnectInfo{Terminal: &resolver.TerminalTarget{EnvironmentID: "env_slice", SessionID: "cdx_slice", Auth: resolver.AuthTarget{Method: "bearer", Token: "codex-token", ExpiresAt: expires.Format(time.RFC3339), ResourceID: "cdx_slice"}}}
-	wrongCodexTarget := codexTarget
-	wrongTerminal := *codexTarget.Terminal
-	wrongTerminal.Auth.ResourceID = "grant_test"
-	wrongCodexTarget.Terminal = &wrongTerminal
-	if connection, dialErr := terminalTunnel.DialCodexHTTP(t.Context(), wrongCodexTarget); dialErr == nil {
-		_ = connection.Close()
-		t.Fatal("Codex stream used a machine-access grant")
-	}
-	for attempt := 1; attempt <= 2; attempt++ {
-		codexTransport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return terminalTunnel.DialCodexHTTP(ctx, codexTarget)
-		}}
-		socket, _, dialErr := websocket.Dial(t.Context(), "ws://machine.slice/v1/codex-sessions/cdx_slice/ws", &websocket.DialOptions{HTTPClient: &http.Client{Transport: codexTransport}, HTTPHeader: http.Header{"Authorization": []string{"Bearer codex-token"}}, CompressionMode: websocket.CompressionDisabled})
-		if dialErr != nil {
-			t.Fatalf("Codex connection %d: %v", attempt, dialErr)
-		}
-		canary := []byte(fmt.Sprintf("canary-%d", attempt))
-		if err := socket.Write(t.Context(), websocket.MessageText, canary); err != nil {
-			t.Fatal(err)
-		}
-		messageType, body, readErr := socket.Read(t.Context())
-		if readErr != nil || messageType != websocket.MessageText || string(body) != "paperboat-codex-host:"+string(canary) {
-			t.Fatalf("Codex connection %d type=%d body=%q error=%v", attempt, messageType, body, readErr)
-		}
-		_ = socket.Close(websocket.StatusNormalClosure, "reconnect")
-		codexTransport.CloseIdleConnections()
-	}
-	for _, check := range afterProtocol {
-		check("codex reconnect")
 	}
 
 	fileSession, err := dialSession(t.Context(), resolver.ConnectInfo{})
@@ -686,7 +631,6 @@ func testPeers(peer tailnet.NetworkBinding, direction string, expires int64) []t
 		{ResourceKind: "machine_access", ResourceID: "grant_test", ResourceGeneration: 1, Capability: "terminal", Direction: direction, Port: tailnet.NetworkPort, ExpiresAt: expires},
 		{ResourceKind: "machine_access", ResourceID: "grant_test", ResourceGeneration: 1, Capability: "file_transfer", Direction: direction, Port: tailnet.NetworkPort, ExpiresAt: expires},
 		{ResourceKind: "machine_access", ResourceID: "grant_test", ResourceGeneration: 1, Capability: "private_access", Direction: direction, Port: tailnet.NetworkPort, ExpiresAt: expires},
-		{ResourceKind: "codex_session", ResourceID: "cdx_slice", ResourceGeneration: 1, Capability: "codex", Direction: direction, Port: tailnet.NetworkPort, ExpiresAt: expires},
 	}}}
 }
 
