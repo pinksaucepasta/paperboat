@@ -2561,7 +2561,7 @@ func TestMachineHomeActionsFollowConfiguredCapabilities(t *testing.T) {
 	for _, action := range actions {
 		ids = append(ids, action.ID)
 	}
-	if !slices.Equal(ids, []string{"rename", "environment-variables", "terminal", "codex", "send", "sessions", "allow-sleep", "keep-awake"}) {
+	if !slices.Equal(ids, []string{"rename", "environment-variables", "terminal", "send", "sessions", "allow-sleep", "keep-awake"}) {
 		t.Fatalf("host actions=%v", ids)
 	}
 }
@@ -2786,8 +2786,8 @@ func TestCompatibilityOnlyCommandsAreAbsent(t *testing.T) {
 	}
 	root = newRootCommand()
 	for _, child := range root.Commands() {
-		if child.Name() == "e2ee" {
-			t.Fatal("internal transport encryption is still exposed as a public command")
+		if child.Name() == "e2ee" || child.Name() == "codex" || child.Name() == "opencode" {
+			t.Fatalf("removed/deferred command %q is still exposed", child.Name())
 		}
 	}
 	for parentName, removed := range map[string][]string{

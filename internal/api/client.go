@@ -692,7 +692,6 @@ type MachineCapabilities struct {
 	FileReceive          MachineCapability `json:"file_receive"`
 	PreviewLaunch        MachineCapability `json:"preview_launch"`
 	TerminalHost         MachineCapability `json:"terminal_host"`
-	CodexHost            MachineCapability `json:"codex_host"`
 	SessionHost          MachineCapability `json:"session_host"`
 	KeepAwake            MachineCapability `json:"keep_awake"`
 	EnvironmentInjection MachineCapability `json:"environment_injection"`
@@ -1030,44 +1029,6 @@ type Environment struct {
 	UserMachineID string `json:"machine_id"`
 	DisplayName   string `json:"display_name"`
 	ProjectRoot   string `json:"project_root"`
-}
-
-type CodexSession struct {
-	ID                 string    `json:"id"`
-	EnvironmentID      string    `json:"environment_id"`
-	MachineID          string    `json:"machine_id"`
-	State              string    `json:"state"`
-	LeaseExpiresAt     time.Time `json:"lease_expires_at"`
-	RemoteCodexVersion string    `json:"remote_codex_version,omitempty"`
-	FailureCode        string    `json:"failure_code,omitempty"`
-}
-type CodexDescriptor struct {
-	Session             CodexSession `json:"session"`
-	MachineGeneration   uint64       `json:"machine_generation"`
-	ManagementURL       string       `json:"management_url"`
-	WebSocketURL        string       `json:"websocket_url"`
-	ManageCredential    string       `json:"manage_credential"`
-	ConnectCredential   string       `json:"connect_credential"`
-	CredentialsExpireAt time.Time    `json:"credentials_expire_at"`
-}
-
-func (c *Client) CreateCodexSession(ctx context.Context, environmentID, idempotencyKey string) (CodexSession, error) {
-	var out CodexSession
-	err := c.doWithHeaders(ctx, http.MethodPost, "/v1/codex-sessions", map[string]string{"environment_id": environmentID}, &out, http.Header{"Idempotency-Key": []string{idempotencyKey}})
-	return out, err
-}
-func (c *Client) CodexSessionDescriptor(ctx context.Context, id string) (CodexDescriptor, error) {
-	var out CodexDescriptor
-	err := c.do(ctx, http.MethodGet, "/v1/codex-sessions/"+url.PathEscape(id)+"/descriptor", nil, &out)
-	return out, err
-}
-func (c *Client) RenewCodexSession(ctx context.Context, id string) (CodexSession, error) {
-	var out CodexSession
-	err := c.do(ctx, http.MethodPost, "/v1/codex-sessions/"+url.PathEscape(id)+"/renew", nil, &out)
-	return out, err
-}
-func (c *Client) DeleteCodexSession(ctx context.Context, id string) error {
-	return c.do(ctx, http.MethodDelete, "/v1/codex-sessions/"+url.PathEscape(id), nil, nil)
 }
 
 // Terminal is the CLI-safe Paperboat WebSocket attach descriptor from

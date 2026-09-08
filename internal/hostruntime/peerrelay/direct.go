@@ -363,25 +363,6 @@ func (s *Service) serveDirect(setupCtx, lifetime context.Context, document api.P
 		defer server.Close()
 		return true, server.ServeQUICConn(session.Connection)
 	}
-	if authority.Context.Consumer == "codex" {
-		stream, acceptErr := router.Accept(ownerCtx)
-		if acceptErr != nil {
-			return false, acceptErr
-		}
-		connection, bindErr := newBoundResponderConn(ownerCtx, stream, binding, authority.LocalEndpointID(), authority.PeerEndpointID())
-		if bindErr != nil {
-			_ = stream.Close()
-			return false, bindErr
-		}
-		defer connection.Close()
-		if s.config.ServeCodex == nil {
-			return false, ErrInvalid
-		}
-		if !claim() {
-			return false, context.Canceled
-		}
-		return true, s.config.ServeCodex(ownerCtx, connection)
-	}
 	if authority.Context.Consumer == "ssh" {
 		stream, acceptErr := router.Accept(ownerCtx)
 		if acceptErr != nil {

@@ -44,7 +44,6 @@ import (
 	sessionauth "github.com/pinksaucepasta/paperboat/internal/auth"
 	bugreportpkg "github.com/pinksaucepasta/paperboat/internal/bugreport"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
-	codexsession "github.com/pinksaucepasta/paperboat/internal/codexsession"
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/daemoncmd"
@@ -2398,21 +2397,6 @@ func newRootCommand() *cobra.Command {
 	sshKnownHostsCommand.Flags().String("host", "", "")
 	sshKnownHostsCommand.Flags().String("port", "", "")
 	root.AddCommand(sshKnownHostsCommand)
-	codex := &cobra.Command{Use: "codex [environment] [-- <codex-args...>]", Short: "Run local Codex against a remote environment", Args: commandArgs(cobra.ArbitraryArgs), RunE: func(command *cobra.Command, args []string) error {
-		selectTarget := len(args) == 0 || command.ArgsLenAtDash() == 0
-		_ = command.Flags().Set("select-environment", strconv.FormatBool(selectTarget))
-		if selectTarget {
-			// Preserve the omitted environment as a positional boundary so the
-			// injected flag set cannot consume forwarded Codex flags.
-			args = append([]string{""}, args...)
-		}
-		return actionRun(actionCodex)(command, args)
-	}}
-	codex.Flags().String("path", "", "remote working directory")
-	codex.Flags().String("transport", "", "peer transport: a, d, q, w, or r")
-	codex.Flags().Bool("select-environment", false, "")
-	_ = codex.Flags().MarkHidden("select-environment")
-	root.AddCommand(codex)
 
 	environments := &cobra.Command{Use: "environments", Short: "List machines available to this account", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, args []string) error {
 		jsonOutput, _ := command.Flags().GetBool("json")
@@ -2814,7 +2798,7 @@ func configureShellCompletion(root *cobra.Command) {
 		return
 	}
 	machine := machineCompletion
-	for _, path := range [][]string{{"connect"}, {"exec"}, {"ssh"}, {"codex"}, {"ping"}, {"doctor"}, {"wait"}, {"machine", "revoke"}} {
+	for _, path := range [][]string{{"connect"}, {"exec"}, {"ssh"}, {"ping"}, {"doctor"}, {"wait"}, {"machine", "revoke"}} {
 		if command, _, err := root.Find(path); err == nil && command != nil {
 			command.ValidArgsFunction = machine
 		}
@@ -2974,7 +2958,7 @@ func actionHome(command *cobra.Command) error {
 			Actions:       map[string]string{"ctrl+e": "toggle-email"},
 			HeaderActions: map[int]string{2: "toggle-email"},
 			Items: []selector.Item{
-				{ID: "machines", Title: "Machines", Description: "Open terminals, run Codex, create previews, send files, or manage computers"},
+				{ID: "machines", Title: "Machines", Description: "Open terminals, create previews, send files, or manage computers"},
 				{ID: "sessions", Title: "Terminal sessions", Description: "Attach, inspect, close, rename, or delete durable sessions"},
 				{ID: "environment-variables", Title: "ENV Injection", Description: "Manage redacted global and per-machine variables for new processes"},
 				{ID: "config", Title: "Configuration", Description: "Inspect sync status, CLI settings, and status bar preferences"},
@@ -3485,8 +3469,6 @@ func actionHomeMachines(command *cobra.Command) error {
 			switch action.ID {
 			case "terminal":
 				runErr = executeInteractiveCommand(command, []string{"connect", machine.ID, "new"})
-			case "codex":
-				runErr = executeInteractiveCommand(command, []string{"codex", machine.ID})
 			case "sessions":
 				runErr = actionHomeMachineSessions(command, client, machine)
 				if errors.Is(runErr, selector.ErrCanceled) {
@@ -3538,7 +3520,6 @@ func machineHomeActions(machine api.UserMachine) []selector.Item {
 	if machine.Capabilities.TerminalHost.Configured {
 		actions = append(actions,
 			selector.Item{ID: "terminal", Title: "Create terminal session", Description: "Start and attach to a new durable session"},
-			selector.Item{ID: "codex", Title: "Create Codex session", Description: "Choose a remote folder and start a managed Codex session"},
 		)
 	}
 	if machine.Capabilities.FileReceive.Configured {
@@ -5703,7 +5684,6 @@ type peerApplicationTunnel interface {
 	Dial(context.Context, resolver.ConnectInfo) (tunnel.Conn, error)
 	DialExec(context.Context, resolver.ConnectInfo, tunnel.ExecRequest) (tunnel.ExecConn, error)
 	DialSSH(context.Context, resolver.ConnectInfo, string) (tunnel.Conn, error)
-	DialCodexHTTP(context.Context, resolver.ConnectInfo) (net.Conn, error)
 }
 
 func buildDeps(c *command.Context) (*deps, error) {
@@ -7725,56 +7705,6 @@ func newExecOperationID() string {
 		return fmt.Sprintf("exec-%d", time.Now().UnixNano())
 	}
 	return "exec-" + hex.EncodeToString(value[:])
-}
-
-func actionCodex(c *command.Context) error {
-	selectTarget := c.Bool("select-environment")
-	forwardedStart := 1
-	forwarded := make([]string, 0, max(0, c.Args().Len()-forwardedStart))
-	for index := forwardedStart; index < c.Args().Len(); index++ {
-		forwarded = append(forwarded, c.Args().Get(index))
-	}
-	if err := codexsession.ValidateForwardedArgs(forwarded); err != nil {
-		return invocationError(err)
-	}
-	d, err := buildDeps(c)
-	if err != nil {
-		return err
-	}
-	credential, err := d.auth.Credential()
-	if errors.Is(err, config.ErrNoCredentials) {
-		return errors.New("not signed in to Paperboat; run `pb login`, then retry")
-	}
-	if err != nil {
-		return err
-	}
-	backend := api.New(d.cfg.ServerURL, credential, nil)
-	requested := c.Args().First()
-	if selectTarget {
-		requested, err = selectEnvironment(c.Context, backend, "Choose where Codex should run")
-		if err != nil {
-			return err
-		}
-	}
-	identity, err := resolver.NewAPIResolver(backend, d.cfg).ResolveEnvironment(c.Context, requested)
-	if err != nil {
-		return friendlyCommandError(err)
-	}
-	if d.peerApplications == nil {
-		return errors.New("private peer transport is unavailable")
-	}
-	return codexsession.Run(c.Context, codexsession.Options{
-		Backend: backend, EnvironmentID: identity.EnvironmentID, Path: c.String("path"), Args: forwarded,
-		Stdin: os.Stdin, Stdout: c.Writer, Stderr: c.ErrWriter,
-		PeerDial: func(ctx context.Context, descriptor api.CodexDescriptor) (net.Conn, error) {
-			if descriptor.Session.ID == "" || descriptor.Session.MachineID == "" || descriptor.Session.EnvironmentID != identity.EnvironmentID || descriptor.MachineGeneration == 0 || descriptor.ConnectCredential == "" || descriptor.CredentialsExpireAt.IsZero() {
-				return nil, errors.New("Codex returned an invalid peer target")
-			}
-			target := resolver.ConnectInfo{TargetKind: identity.Kind, ProjectID: descriptor.Session.MachineID, Project: identity.Name, ProjectState: "running", MachineGeneration: descriptor.MachineGeneration, Terminal: &resolver.TerminalTarget{Protocol: "paperboat.codex.v1", EnvironmentID: identity.EnvironmentID, SessionID: descriptor.Session.ID, Auth: resolver.AuthTarget{Method: "bearer", Token: descriptor.ConnectCredential, ExpiresAt: descriptor.CredentialsExpireAt.Format(time.RFC3339Nano), Scopes: []string{"codex:connect"}, ResourceID: descriptor.Session.ID}}}
-			target.Transport = c.String("transport")
-			return d.peerApplications.DialCodexHTTP(ctx, target)
-		},
-	})
 }
 
 func actionConnectTarget(c *command.Context, requested string) error {

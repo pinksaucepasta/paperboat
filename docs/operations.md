@@ -13,8 +13,6 @@ retry.
 - During outages, use `pb doctor`; never bypass the common Paperboat transport or expose a raw
   machine port. `pb ssh` is allowed only when its stream succeeds through the normal selected
   direct/relay/WSS carrier and terminates at the machine's system `sshd`.
-- `pb codex` credentials, remote paths, command arguments, and Codex output are never
-  written to logs. The remote environment owns its Codex login and configuration.
 
 Production connection metrics are written as validated JSONL to
 `observability.event_log_path`, or `telemetry.jsonl` beside the CLI config by

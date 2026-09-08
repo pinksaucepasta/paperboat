@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/codexsession"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
@@ -73,7 +72,6 @@ type Workloads struct {
 	Executions *execprocess.Manager
 	Transfers  *filetransfer.Service
 	Previews   *preview.Registry
-	Codex      *codexsession.Manager
 	ManagedSSH *managedssh.Host
 	Tunnels    TunnelWorkloads
 }
@@ -224,7 +222,7 @@ func (c *WorkerController) Start(ctx context.Context, worker Service) error {
 
 // Replace starts a ready candidate, then stops the prior coordination worker.
 // It never calls into daemon workloads and therefore cannot terminate a PTY,
-// Codex process, transfer, preview, serve listener, or managed SSH stream.
+// transfer, preview, serve listener, or managed SSH stream.
 func (c *WorkerController) Replace(ctx context.Context, candidate Service) error {
 	if candidate == nil {
 		return ErrInvalidState

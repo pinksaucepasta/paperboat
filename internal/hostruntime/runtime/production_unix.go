@@ -35,7 +35,6 @@ import (
 	clientconfig "github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/availability"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/codexsession"
 	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
@@ -524,7 +523,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		if scope != "system" && scope != "user" {
 			scope = "unknown"
 		}
-		capabilities := []string{"file_receive", "preview_launch", "terminal_host", "codex_host", "session_host", "keep_awake"}
+		capabilities := []string{"file_receive", "preview_launch", "terminal_host", "session_host", "keep_awake"}
 		// Presence must not queue behind the work-plane token source. Managed
 		// SSH, peer enrollment, and availability all share renewingTokens and a
 		// single renewal mutex; when one of those calls is slow, a liveness
@@ -608,14 +607,6 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, err
 	}
-	codexManager, err := codexsession.New(codexsession.Config{
-		StateRoot: filepath.Join(runtimeConfig.StateRoot, "codex"), WorkspaceRoot: workspaceRoot,
-		Environment: agentEnvironment, ManagedEnvironment: managedEnvironmentFunction(managedEnvironment),
-		CodexPath: valueOrRuntime(environ("PAPERBOAT_CODEX_PATH"), "codex"), MaxSessions: 4,
-	})
-	if err != nil {
-		return nil, err
-	}
 	managedSSHHost, managedSSHService, err := productionManagedSSH(ctx, controlURL.String(), transport, machineRegistration, managedSSHIdentity, uint64(bootState.Generation))
 	if err != nil {
 		return nil, err
@@ -624,7 +615,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, err
 	}
-	dependencies := HostDependencies{Authorizer: authorizer, AuthorizationService: authorizationRefresh, Connector: connectorService, PreviewDispatcher: previewAssembly, PreviewRecovery: previewAssembly, PreviewOwnerSessions: previewAssembly.OwnerSessionLeases(), RuntimeObservationService: runtimeService, ManagedEnvironment: managedEnvironment, Metrics: metrics, CodexSessions: codexManager, LocalControlToken: localControlToken, ManagedSSH: managedSSHHost, ManagedSSHService: managedSSHService, TransferKeys: transferKeys, Capabilities: capabilityController}
+	dependencies := HostDependencies{Authorizer: authorizer, AuthorizationService: authorizationRefresh, Connector: connectorService, PreviewDispatcher: previewAssembly, PreviewRecovery: previewAssembly, PreviewOwnerSessions: previewAssembly.OwnerSessionLeases(), RuntimeObservationService: runtimeService, ManagedEnvironment: managedEnvironment, Metrics: metrics, LocalControlToken: localControlToken, ManagedSSH: managedSSHHost, ManagedSSHService: managedSSHService, TransferKeys: transferKeys, Capabilities: capabilityController}
 	nativePrivateValidators := []productionNativePrivateValidator{previewAssembly.dispatcher}
 	if tunnelProvider == nil {
 		tunnelEnrollment, enrollmentErr := newProductionTunnelEnrollmentService(controlURL.String(), runtimeConfig.StateRoot, machineID, localControlToken, transport)
@@ -656,8 +647,8 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		networkHandler.SetCanonical(tunnelAssembly)
 	}
 	if managedSSHIdentity != nil {
-		dependencies.NativePeerFactory = func(serve func(net.Conn) error, transferHandler, codexHandler http.Handler) (Service, error) {
-			return newProductionNativePeerService(productionNativePeerConfig{controlURL: controlURL.String(), issuer: issuer, stateRoot: runtimeConfig.StateRoot, machineID: machineID, generation: uint64(machineRegistration.InstallationGeneration), transport: transport, identity: managedSSHIdentity, keys: cache, authorizer: authorizer, serve: serve, transfer: transferHandler, codex: codexHandler, ssh: managedSSHHost, privateCurrent: productionNativeCurrent(nativePrivateValidators...), privateDial: productionNativePrivateDial})
+		dependencies.NativePeerFactory = func(serve func(net.Conn) error, transferHandler http.Handler) (Service, error) {
+			return newProductionNativePeerService(productionNativePeerConfig{controlURL: controlURL.String(), issuer: issuer, stateRoot: runtimeConfig.StateRoot, machineID: machineID, generation: uint64(machineRegistration.InstallationGeneration), transport: transport, identity: managedSSHIdentity, keys: cache, authorizer: authorizer, serve: serve, transfer: transferHandler, ssh: managedSSHHost, privateCurrent: productionNativeCurrent(nativePrivateValidators...), privateDial: productionNativePrivateDial})
 		}
 	}
 	if runtimeConfig.Profile == runtimeconfig.Hosted {
@@ -967,8 +958,8 @@ func newProductionClientCoordinator(ctx context.Context, version string, environ
 		return nil, err
 	}
 	var nativePrivateValidators []productionNativePrivateValidator
-	nativePeerFactory := func(serve func(net.Conn) error, transferHandler, codexHandler http.Handler) (Service, error) {
-		return newProductionNativePeerService(productionNativePeerConfig{controlURL: controlURL.String(), issuer: issuer, stateRoot: runtimeConfig.StateRoot, machineID: registration.MachineID, generation: uint64(registration.InstallationGeneration), transport: transport, identity: runtimeIdentity, keys: cache, authorizer: authorizer, serve: serve, transfer: transferHandler, codex: codexHandler, privateCurrent: productionNativeCurrent(nativePrivateValidators...), privateDial: productionNativePrivateDial})
+	nativePeerFactory := func(serve func(net.Conn) error, transferHandler http.Handler) (Service, error) {
+		return newProductionNativePeerService(productionNativePeerConfig{controlURL: controlURL.String(), issuer: issuer, stateRoot: runtimeConfig.StateRoot, machineID: registration.MachineID, generation: uint64(registration.InstallationGeneration), transport: transport, identity: runtimeIdentity, keys: cache, authorizer: authorizer, serve: serve, transfer: transferHandler, privateCurrent: productionNativeCurrent(nativePrivateValidators...), privateDial: productionNativePrivateDial})
 	}
 	dependencies := HostDependencies{Authorizer: authorizer, AuthorizationService: authorizationRefresh, Connector: connectorService, PreviewRecovery: nil, RuntimeObservationService: serviceGroup{regionalMonitor, observation}, Metrics: metrics, LocalControlToken: localControlToken, TransferKeys: transferKeys, NativePeerFactory: nativePeerFactory, Capabilities: capabilityController}
 	if tunnelProvider == nil {
@@ -1665,7 +1656,7 @@ func (s *runtimeObservationSender) runtimeDiagnostics(observedAt time.Time, envi
 	}
 	capabilities := append([]string(nil), s.capabilities...)
 	if len(capabilities) == 0 {
-		capabilities = []string{"file_receive", "preview_launch", "terminal_host", "codex_host", "session_host", "keep_awake"}
+		capabilities = []string{"file_receive", "preview_launch", "terminal_host", "session_host", "keep_awake"}
 	}
 	if environmentEnabled && !slices.Contains(capabilities, "environment_injection") {
 		capabilities = append(capabilities, "environment_injection")

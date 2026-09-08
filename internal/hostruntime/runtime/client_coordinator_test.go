@@ -73,7 +73,7 @@ func TestClientCoordinatorSupportsStableHostLifecycle(t *testing.T) {
 	}, HostDependencies{
 		Authorizer: func(string) (server.Authorizer, error) { return hostAuthorizer{}, nil },
 		Connector:  clientServiceStub{}, RuntimeObservationService: clientServiceStub{},
-		NativePeerFactory: func(func(net.Conn) error, http.Handler, http.Handler) (Service, error) { return peer, nil },
+		NativePeerFactory: func(func(net.Conn) error, http.Handler) (Service, error) { return peer, nil },
 	})
 	if err != nil {
 		t.Fatal(err)

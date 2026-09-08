@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
-	"net"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
@@ -91,25 +90,6 @@ func (t TailnetTerminalTunnel) DialSSH(ctx context.Context, info resolver.Connec
 		return nil, errors.Join(err, session.Close())
 	}
 	return &sshStreamConn{ReadWriteCloser: stream}, nil
-}
-
-// DialCodexHTTP opens one authenticated HTTP/WebSocket connection through the
-// unified native session. Codex reconnects by opening a fresh connection with
-// the same server-owned session ID; an indeterminate stream is never replayed.
-func (t TailnetTerminalTunnel) DialCodexHTTP(ctx context.Context, info resolver.ConnectInfo) (net.Conn, error) {
-	if t.DialSession == nil || info.Terminal == nil || info.Terminal.SessionID == "" || info.Terminal.Auth.Token == "" || info.Terminal.Auth.ResourceID == "" {
-		return nil, ErrPeerTerminalInvalid
-	}
-	session, err := t.DialSession(ctx, info)
-	if err != nil {
-		return nil, err
-	}
-	group := &tailnetTerminalStreams{session: session, operationID: info.Terminal.SessionID, consumer: "codex", credential: info.Terminal.Auth.Token, resourceID: info.Terminal.Auth.ResourceID, deadline: info.Terminal.Auth.ExpiresAt}
-	stream, err := group.OpenStream(ctx)
-	if err != nil {
-		return nil, errors.Join(err, session.Close())
-	}
-	return &codexHTTPConn{Conn: &sshStreamConn{ReadWriteCloser: stream}}, nil
 }
 
 type tailnetTerminalStreams struct {

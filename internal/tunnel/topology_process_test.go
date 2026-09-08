@@ -66,14 +66,9 @@ type topologyTerminalCredential struct {
 	Token string `json:"token"`
 }
 
-type topologyCodexCredential struct {
-	ManageToken  string `json:"manage_token"`
-	ConnectToken string `json:"connect_token"`
-}
-
 func TestTopologyPeerTerminalPingProcess(t *testing.T) {
 	role := os.Getenv("PAPERBOAT_TOPOLOGY_TERMINAL_ROLE")
-	if role != "terminal-ping-wss-initiator" && role != "terminal-ping-auto-initiator" && role != "terminal-ping-auto-fenced-initiator" && role != "terminal-wss-initiator" && role != "terminal-cancel-wss-initiator" && role != "terminal-relay-quic-initiator" && role != "terminal-cancel-relay-quic-initiator" && role != "terminal-direct-quic-initiator" && role != "terminal-cancel-direct-quic-initiator" && role != "exec-wss-initiator" && role != "exec-relay-quic-initiator" && role != "exec-direct-quic-initiator" && role != "ssh-wss-initiator" && role != "ssh-relay-quic-initiator" && role != "ssh-direct-quic-initiator" && role != "codex-wss-initiator" && role != "codex-relay-quic-initiator" && role != "codex-direct-quic-initiator" && role != "preview-wss-initiator" && role != "preview-relay-quic-initiator" && role != "preview-direct-quic-initiator" && role != "file-direct-quic-initiator" && role != "file-reverse-relay-h3-initiator" && role != "file-reverse-direct-quic-initiator" && role != "file-reverse-relay-h2-initiator" && role != "file-relay-h3-initiator" && role != "file-relay-h2-initiator" {
+	if role != "terminal-ping-wss-initiator" && role != "terminal-ping-auto-initiator" && role != "terminal-ping-auto-fenced-initiator" && role != "terminal-wss-initiator" && role != "terminal-cancel-wss-initiator" && role != "terminal-relay-quic-initiator" && role != "terminal-cancel-relay-quic-initiator" && role != "terminal-direct-quic-initiator" && role != "terminal-cancel-direct-quic-initiator" && role != "exec-wss-initiator" && role != "exec-relay-quic-initiator" && role != "exec-direct-quic-initiator" && role != "ssh-wss-initiator" && role != "ssh-relay-quic-initiator" && role != "ssh-direct-quic-initiator" && role != "preview-wss-initiator" && role != "preview-relay-quic-initiator" && role != "preview-direct-quic-initiator" && role != "file-direct-quic-initiator" && role != "file-reverse-relay-h3-initiator" && role != "file-reverse-direct-quic-initiator" && role != "file-reverse-relay-h2-initiator" && role != "file-relay-h3-initiator" && role != "file-relay-h2-initiator" {
 		t.Skip("topology peer terminal process mode is not configured")
 	}
 	processTimeout := 30 * time.Second
@@ -148,11 +143,6 @@ func TestTopologyPeerTerminalPingProcess(t *testing.T) {
 	}
 	if strings.HasPrefix(role, "ssh-") {
 		runTopologySSH(t, ctx, peer)
-		waitTopologyExitGate(t, ctx)
-		return
-	}
-	if strings.HasPrefix(role, "codex-") {
-		runTopologyCodex(t, ctx, peer)
 		waitTopologyExitGate(t, ctx)
 		return
 	}
@@ -371,53 +361,6 @@ func newTopologyPeerTunnel(t *testing.T, role string, store config.ProfileStore,
 		t.Fatal(err)
 	}
 	return peer
-}
-
-func runTopologyCodex(t *testing.T, ctx context.Context, peer *PeerTerminalTunnel) {
-	t.Helper()
-	var credential topologyCodexCredential
-	readTopologyJSON(t, ctx, "/authority/codex-credential.json", &credential)
-	if credential.ManageToken == "" || credential.ConnectToken == "" {
-		t.Fatal("topology Codex credentials are empty")
-	}
-	info := resolver.ConnectInfo{TargetKind: "machine", ProjectID: "endpoint-host", Project: "host-topology", ProjectState: "running", MachineGeneration: 1, Terminal: &resolver.TerminalTarget{Protocol: "paperboat.peer.v1", EnvironmentID: "environment-topology"}}
-	transport := &http.Transport{Proxy: nil, ForceAttemptHTTP2: false, MaxConnsPerHost: 1, MaxIdleConnsPerHost: 1, ResponseHeaderTimeout: 10 * time.Second}
-	transport.DialTLSContext = func(dialCtx context.Context, _, _ string) (net.Conn, error) {
-		return peer.DialCodexHTTP(dialCtx, info)
-	}
-	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, Timeout: 15 * time.Second}
-	lease := time.Now().UTC().Add(5 * time.Minute).Format(time.RFC3339Nano)
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://machine.paperboat.invalid/v1/codex-sessions/cdx_topology", strings.NewReader(`{"path":"/workspace","lease_expires_at":"`+lease+`"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	request.Header.Set("Authorization", "Bearer "+credential.ManageToken)
-	request.Header.Set("Content-Type", "application/json")
-	response, err := client.Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	body, readErr := io.ReadAll(io.LimitReader(response.Body, 64<<10))
-	_ = response.Body.Close()
-	if readErr != nil || response.StatusCode != http.StatusOK || !bytes.Contains(body, []byte(`"codex_version":"0.146.0"`)) {
-		t.Fatalf("Codex prepare status=%s body=%q error=%v", response.Status, body, readErr)
-	}
-	ws, _, err := websocket.Dial(ctx, "wss://machine.paperboat.invalid/v1/codex-sessions/cdx_topology/ws", &websocket.DialOptions{HTTPClient: &http.Client{Transport: transport}, HTTPHeader: http.Header{"Authorization": []string{"Bearer " + credential.ConnectToken}}, CompressionMode: websocket.CompressionDisabled})
-	if err != nil {
-		t.Fatal(err)
-	}
-	const canary = "paperboat-codex-client-canary"
-	if err := ws.Write(ctx, websocket.MessageText, []byte(canary)); err != nil {
-		t.Fatal(err)
-	}
-	messageType, payload, err := ws.Read(ctx)
-	if err != nil || messageType != websocket.MessageText || string(payload) != "paperboat-codex-host:"+canary {
-		t.Fatalf("Codex websocket type=%d payload=%q error=%v", messageType, payload, err)
-	}
-	_ = ws.Close(websocket.StatusNormalClosure, "complete")
-	writeTopologyJSON(t, "/authority/codex-ok.json", true)
-	fmt.Println("PAPERBOAT_TOPOLOGY_PEER_CODEX_OK")
 }
 
 func runTopologyPrivatePreview(t *testing.T, ctx context.Context, peer *PeerTerminalTunnel) {

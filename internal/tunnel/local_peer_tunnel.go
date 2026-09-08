@@ -145,27 +145,6 @@ func (t LocalPeerTunnel) DialPrivatePreview(ctx context.Context, info resolver.C
 	return &previewStreamConn{ReadWriteCloser: stream}, nil
 }
 
-func (t LocalPeerTunnel) DialCodexHTTP(ctx context.Context, info resolver.ConnectInfo) (net.Conn, error) {
-	operationID := info.Terminal.SessionID
-	if operationID == "" {
-		operationID = "operation_codex_connect"
-	}
-	request, err := t.request(info, "codex", operationID, terminalLocalPayload(info.Terminal))
-	if err != nil {
-		return nil, err
-	}
-	stream, err := t.Client.OpenPeerStream(ctx, request)
-	if err != nil {
-		return nil, err
-	}
-	connection, err := NewLocalPeerConn(stream, nil, nil)
-	if err != nil {
-		_ = stream.Close()
-		return nil, err
-	}
-	return &localPeerNetConn{Conn: connection, raw: stream}, nil
-}
-
 type localPeerNetConn struct {
 	Conn
 	raw net.Conn

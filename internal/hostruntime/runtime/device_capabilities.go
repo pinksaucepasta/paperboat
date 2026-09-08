@@ -99,7 +99,7 @@ func (c *deviceCapabilityController) Enabled(capability string) bool {
 	desired := c.desired
 	c.mu.RUnlock()
 	switch capability {
-	case "terminal.v1", "exec.v1", "codex.connect.v1":
+	case "terminal.v1", "exec.v1":
 		return desired.Terminal
 	case "ssh.v1":
 		return desired.ManagedSSH

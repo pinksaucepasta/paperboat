@@ -10,7 +10,7 @@
 - The CLI treats environment descriptors, route URLs, machine paths, and server error
   messages as untrusted input. Descriptor validation and issuer binding happen
   before a terminal or file-transfer connection is opened.
-- Private terminal, exec, preview, Codex, SSH, and file content is end-to-end encrypted
+- Private terminal, exec, preview, SSH, and file content is end-to-end encrypted
   between the initiating CLI endpoint and the target machine endpoint. Direct QUIC, relay
   QUIC, WSS, relay HTTP/3, and relay HTTP/2 carry only authenticated ciphertext. WSS never
   carries file bytes. `paperboat-server` and `paperboat-tunnel` have no content-decryption

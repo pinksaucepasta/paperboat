@@ -58,7 +58,6 @@ type Config struct {
 	HTTPClient                     *http.Client
 	Serve                          func(net.Conn) error
 	ServePreview                   func(context.Context, net.Conn) error
-	ServeCodex                     func(context.Context, net.Conn) error
 	ServeSSH                       func(context.Context, net.Conn) error
 	ServeTransfer                  func(context.Context, net.Conn) error
 	AuthorizeStream                StreamAuthorizer
@@ -915,33 +914,6 @@ func (s *Service) serveRelay(setupCtx, lifetime context.Context, connection *rel
 		select {
 		case previewErr := <-previewDone:
 			return true, previewErr
-		case healthErr := <-healthDone:
-			return true, healthErr
-		case <-lifetime.Done():
-			return true, lifetime.Err()
-		}
-	}
-	if authority.Context.Consumer == "codex" {
-		stream, acceptErr := responder.Accept(lifetime, "codex-http")
-		if acceptErr != nil {
-			return false, acceptErr
-		}
-		defer stream.Close()
-		if s.config.ServeCodex == nil || !claimRelay() {
-			return false, ErrInvalid
-		}
-		healthSource := relaycarrier.HealthResponderConfigSourceFunc(func(_ context.Context, handle [16]byte) (relaycarrier.ResponderConfig, error) {
-			periodicAuthority := healthAuthority
-			periodicAuthority.Handle = handle
-			return relaycarrier.PeerResponderConfig(periodicAuthority, connection.Carrier(), "native-health", func(context.Context, []byte) ([]byte, error) { return nil, nil })
-		})
-		codexDone := make(chan error, 1)
-		healthDone := make(chan error, 1)
-		go func() { codexDone <- s.config.ServeCodex(lifetime, stream) }()
-		go func() { healthDone <- connection.ServeHealth(lifetime, initial.Prefix, healthSource) }()
-		select {
-		case codexErr := <-codexDone:
-			return true, codexErr
 		case healthErr := <-healthDone:
 			return true, healthErr
 		case <-lifetime.Done():

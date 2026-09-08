@@ -38,7 +38,7 @@ type productionNativePeerConfig struct {
 	keys                                     tailnet.NetworkKeys
 	authorizer                               server.AuthorizerFactory
 	serve                                    func(net.Conn) error
-	transfer, codex                          http.Handler
+	transfer                                 http.Handler
 	ssh                                      *managedssh.Host
 	privateCurrent                           server.NativePrivateTCPCurrent
 	privateDial                              server.NativePrivateTCPDial
@@ -415,11 +415,6 @@ func (s *productionNativePeerService) serveStream(ctx context.Context, header st
 		}
 		_, err := s.config.ssh.Serve(ctx, target.Generation, stream)
 		return err
-	case "codex":
-		if s.config.codex == nil {
-			return ErrProductionInvalid
-		}
-		return server.ServeHTTPConnection(ctx, stream, s.config.codex)
 	case "private_tcp":
 		if s.config.privateCurrent == nil || s.config.privateDial == nil {
 			return ErrProductionInvalid

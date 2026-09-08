@@ -17,7 +17,7 @@ GOFMT       := $(GO_ROOT)/bin/gofmt
 GO_FILES    := $(shell find . \( -path ./.git -o -path ./upstream/tailcat \) -prune -o -name '*.go' -print)
 LDFLAGS     := -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=$(VERSION) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=$(COMMIT) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=$(PROTOCOL_VERSION) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=$(DEFAULT_SERVER_URL) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=$(DEFAULT_RELEASE_URL)
 
-.PHONY: binary-size-check build check clean codex-path-manifest complete container-compose-check cross-build dependencies fmt fmt-check fuzz generate generate-check hosted-image-check install license-check lint metrics-check metrics-generate preflight race release-assets release-binaries release-macos-pkg reproducible-builds source-policy static-analysis test tidy tidy-check uninstall upstream-foundations verification verify-toolchain vet vulnerability-check
+.PHONY: binary-size-check build check clean complete container-compose-check cross-build dependencies fmt fmt-check fuzz generate generate-check hosted-image-check install license-check lint metrics-check metrics-generate preflight race release-assets release-binaries release-macos-pkg reproducible-builds source-policy static-analysis test tidy tidy-check uninstall upstream-foundations verification verify-toolchain vet vulnerability-check
 
 dependencies:
 	@./tools/verify-peer-dependencies.sh
@@ -121,13 +121,6 @@ fmt-check:
 generate:
 	$(GO) run github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION) generate
 	$(GO) generate ./...
-
-# This manifest is pinned to an official OpenAI Codex checkout and is not part
-# of routine repository generation. Regenerate it only when intentionally
-# updating the pinned Codex protocol version.
-codex-path-manifest:
-	@test -n "$(CODEX_SOURCE)" || { echo 'CODEX_SOURCE must point to the pinned official openai/codex checkout' >&2; exit 2; }
-	$(GO) run ./tools/codex-path-manifest -source "$(CODEX_SOURCE)" -output internal/codexsession/codex_path_manifest_0_149_1.json
 
 generate-check:
 	@before="$$(git diff -- internal/hostruntime/store/storesqlc)"; $(MAKE) generate >/dev/null; test "$$(git diff -- internal/hostruntime/store/storesqlc)" = "$$before" || { echo "generated sqlc output is stale; run make generate" >&2; git diff -- internal/hostruntime/store/storesqlc; exit 1; }

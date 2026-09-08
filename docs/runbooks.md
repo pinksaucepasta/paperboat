@@ -53,15 +53,6 @@ lazy-start attempt.
 5. Verify one snapshot read, one watch transition, service restart, stale-socket recovery,
    and `pb uninstall` unloading the service before state removal.
 
-## Codex session interruption
-
-Detection: `pb codex` reports a bridge interruption or Codex exits after a remote WebSocket loss.
-
-1. Do not replay app-server frames or expose a fallback TCP/SSH route.
-2. Confirm the environment connector and authenticated runtime route are healthy without recording paths, arguments, credentials, or Codex output.
-3. Refresh the descriptor, relaunch local Codex, and use its normal resume picker.
-4. If the abandoned lease expired, create a new session and verify the previous runtime state was cleaned.
-
 ## Fly start or machine failure
 
 Detection: readiness remains in a machine-starting state, reports machine failure,

@@ -70,16 +70,6 @@ func TunnelPeerStreamOpener(peerTunnel *tunnel.PeerTerminalTunnel) func(context.
 				return peerTunnel.DialExec(lifetime, info, value)
 			case "ssh":
 				return peerTunnel.DialSSH(lifetime, info, request.OperationID)
-			case "codex":
-				connection, dialErr := peerTunnel.DialCodexHTTP(lifetime, info)
-				if dialErr != nil {
-					return nil, dialErr
-				}
-				remote, ok := connection.(tunnel.Conn)
-				if !ok {
-					return nil, errors.New("codex peer connection does not implement tunnel contract")
-				}
-				return remote, nil
 			default:
 				return nil, ErrInvalidInventoryConfig
 			}

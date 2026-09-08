@@ -31,7 +31,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	clientconfig "github.com/pinksaucepasta/paperboat/internal/config"
 	hostauth "github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
-	hostcodex "github.com/pinksaucepasta/paperboat/internal/hostruntime/codexsession"
 	hostconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
 	hostfiletransfer "github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
@@ -142,7 +141,7 @@ func TestTopologyHostServiceProcess(t *testing.T) {
 		serve = newTopologyTerminalServe(t, ctx, stateRoot, sshHost)
 	}
 	var fingerprints *networkmonitor.Monitor
-	if role == "terminal-direct-quic-responder" || role == "terminal-cancel-direct-quic-responder" || role == "exec-direct-quic-responder" || role == "ssh-direct-quic-responder" || role == "codex-direct-quic-responder" || role == "preview-direct-quic-responder" || role == "file-direct-quic-responder" || role == "file-reverse-direct-quic-responder" {
+	if role == "terminal-direct-quic-responder" || role == "terminal-cancel-direct-quic-responder" || role == "exec-direct-quic-responder" || role == "ssh-direct-quic-responder" || role == "preview-direct-quic-responder" || role == "file-direct-quic-responder" || role == "file-reverse-direct-quic-responder" {
 		store, err := identitystore.Open(identitystore.Config{StateRoot: stateRoot})
 		if err != nil {
 			t.Fatal(err)
@@ -186,36 +185,32 @@ func TestTopologyHostServiceProcess(t *testing.T) {
 	if strings.HasPrefix(role, "file-reverse-") {
 		descriptor = topologyFinishPingHostDescriptor(t, ctx, stateRoot)
 	}
-	var serveCodex func(context.Context, net.Conn) error
-	if strings.HasPrefix(role, "codex-") {
-		serveCodex = newTopologyCodexServe(t, stateRoot)
-	}
 	var servePreview func(context.Context, net.Conn) error
 	if strings.HasPrefix(role, "preview-") {
 		servePreview = newTopologyPrivatePreviewServe(t, ctx)
 	}
 	var dialWSS func(context.Context, relaycarrier.WSSDialConfig) (*relaycarrier.Connection, error)
 	var dialQUIC func(context.Context, relaycarrier.QUICDialConfig) (*relaycarrier.Connection, error)
-	if role != "terminal-relay-quic-responder" && role != "terminal-cancel-relay-quic-responder" && role != "exec-relay-quic-responder" && role != "ssh-relay-quic-responder" && role != "codex-relay-quic-responder" && role != "preview-relay-quic-responder" {
+	if role != "terminal-relay-quic-responder" && role != "terminal-cancel-relay-quic-responder" && role != "exec-relay-quic-responder" && role != "ssh-relay-quic-responder" && role != "preview-relay-quic-responder" {
 		dialQUIC = func(dialCtx context.Context, _ relaycarrier.QUICDialConfig) (*relaycarrier.Connection, error) {
 			<-dialCtx.Done()
 			return nil, dialCtx.Err()
 		}
 	}
-	if role == "terminal-direct-quic-responder" || role == "terminal-cancel-direct-quic-responder" || role == "exec-direct-quic-responder" || role == "ssh-direct-quic-responder" || role == "codex-direct-quic-responder" || role == "preview-direct-quic-responder" || role == "file-direct-quic-responder" || role == "file-reverse-direct-quic-responder" {
+	if role == "terminal-direct-quic-responder" || role == "terminal-cancel-direct-quic-responder" || role == "exec-direct-quic-responder" || role == "ssh-direct-quic-responder" || role == "preview-direct-quic-responder" || role == "file-direct-quic-responder" || role == "file-reverse-direct-quic-responder" {
 		dialWSS = func(dialCtx context.Context, _ relaycarrier.WSSDialConfig) (*relaycarrier.Connection, error) {
 			<-dialCtx.Done()
 			return nil, dialCtx.Err()
 		}
 	}
 	descriptorSource := &topologyDescriptorSource{descriptor: descriptor}
-	if strings.HasPrefix(role, "codex-") || strings.HasPrefix(role, "preview-") || strings.HasPrefix(role, "ssh-") {
+	if strings.HasPrefix(role, "preview-") || strings.HasPrefix(role, "ssh-") {
 		descriptorSource.directory = "/authority"
 		descriptorSource.seen = map[string]bool{descriptor.IntentID: true}
 	}
 	service, err := New(Config{
 		Source: descriptorSource, Fingerprints: fingerprints,
-		StateRoot: stateRoot, TLS: topologyRelayTLS(t), Serve: serve, ServeTransfer: serveTransfer, ServeCodex: serveCodex, ServePreview: servePreview, TransferKeys: transferKeys, Dial: dialWSS, DialQUIC: dialQUIC, AttemptLimit: 32,
+		StateRoot: stateRoot, TLS: topologyRelayTLS(t), Serve: serve, ServeTransfer: serveTransfer, ServePreview: servePreview, TransferKeys: transferKeys, Dial: dialWSS, DialQUIC: dialQUIC, AttemptLimit: 32,
 		ObserveError: func(err error) { fmt.Printf("PAPERBOAT_TOPOLOGY_HOST_ATTEMPT_ERROR %v\n", err) },
 	})
 	if err != nil {
@@ -240,9 +235,7 @@ func TestTopologyHostServiceProcess(t *testing.T) {
 	} else if topologyTerminalResponderRole(role) {
 		var workflowOK bool
 		completionPath := topologyTerminalOKPath()
-		if strings.HasPrefix(role, "codex-") {
-			completionPath = "/authority/codex-ok.json"
-		} else if strings.HasPrefix(role, "preview-") {
+		if strings.HasPrefix(role, "preview-") {
 			completionPath = "/authority/preview-ok.json"
 		}
 		readTopologyJSON(t, ctx, completionPath, &workflowOK)
@@ -264,8 +257,6 @@ func TestTopologyHostServiceProcess(t *testing.T) {
 			if err != nil || string(content) != "paperboat-file-canary" {
 				t.Fatalf("file content=%q error=%v", content, err)
 			}
-		} else if strings.HasPrefix(role, "codex-") {
-			fmt.Println("PAPERBOAT_TOPOLOGY_CODEX_HOST_OK")
 		} else if strings.HasPrefix(role, "ssh-") {
 			fmt.Println("PAPERBOAT_TOPOLOGY_SSH_HOST_OK")
 		} else if strings.HasPrefix(role, "preview-") {
@@ -290,7 +281,7 @@ func TestTopologyHostServiceProcess(t *testing.T) {
 
 func topologyTerminalResponderRole(role string) bool {
 	switch role {
-	case "terminal-wss-responder", "terminal-cancel-wss-responder", "terminal-relay-quic-responder", "terminal-cancel-relay-quic-responder", "terminal-direct-quic-responder", "terminal-cancel-direct-quic-responder", "exec-wss-responder", "exec-relay-quic-responder", "exec-direct-quic-responder", "ssh-wss-responder", "ssh-relay-quic-responder", "ssh-direct-quic-responder", "codex-wss-responder", "codex-relay-quic-responder", "codex-direct-quic-responder", "preview-wss-responder", "preview-relay-quic-responder", "preview-direct-quic-responder", "file-direct-quic-responder", "file-reverse-relay-h3-responder", "file-reverse-direct-quic-responder", "file-reverse-relay-h2-responder", "file-relay-h3-responder", "file-relay-h2-responder":
+	case "terminal-wss-responder", "terminal-cancel-wss-responder", "terminal-relay-quic-responder", "terminal-cancel-relay-quic-responder", "terminal-direct-quic-responder", "terminal-cancel-direct-quic-responder", "exec-wss-responder", "exec-relay-quic-responder", "exec-direct-quic-responder", "ssh-wss-responder", "ssh-relay-quic-responder", "ssh-direct-quic-responder", "preview-wss-responder", "preview-relay-quic-responder", "preview-direct-quic-responder", "file-direct-quic-responder", "file-reverse-relay-h3-responder", "file-reverse-direct-quic-responder", "file-reverse-relay-h2-responder", "file-relay-h3-responder", "file-relay-h2-responder":
 		return true
 	default:
 		return false
@@ -319,12 +310,6 @@ func (topologyCredentialKeys) Refresh(context.Context) error { return nil }
 type topologyTerminalPolicy struct{}
 
 func (topologyTerminalPolicy) Policy(frame protocol.Frame) (hostauth.Policy, error) {
-	if frame.Capability == "codex.manage.v1" {
-		return hostauth.Policy{Issuer: "https://authority.paperboat.test:9445", Audience: "paperboat-machine", CredentialClass: "codex_manage", Scopes: []string{"codex:prepare", "codex:browse", "codex:renew", "codex:stop"}, EnvironmentID: "environment-topology", UserID: "account-topology", CLIClientSessionID: "endpoint-cli", MachineID: "endpoint-host", SessionID: "cdx_topology", MaxLifetime: 5 * time.Minute}, nil
-	}
-	if frame.Capability == "codex.connect.v1" {
-		return hostauth.Policy{Issuer: "https://authority.paperboat.test:9445", Audience: "paperboat-machine", CredentialClass: "codex_connect", Scopes: []string{"codex:connect"}, EnvironmentID: "environment-topology", UserID: "account-topology", CLIClientSessionID: "endpoint-cli", MachineID: "endpoint-host", SessionID: "cdx_topology", MaxLifetime: 5 * time.Minute}, nil
-	}
 	if frame.Capability == "file-transfer.v1" {
 		return hostauth.Policy{Issuer: "https://authority.paperboat.test:9445", Audience: "paperboat-machine", CredentialClass: "file_transfer", Scopes: []string{"file:transfer"}, EnvironmentID: "environment-topology", UserID: "account-topology", CLIClientSessionID: "endpoint-cli", MachineID: "endpoint-host", SourceMachineID: "endpoint-cli", MaxLifetime: 5 * time.Minute}, nil
 	}
@@ -338,79 +323,6 @@ func (topologyTerminalPolicy) Policy(frame protocol.Frame) (hostauth.Policy, err
 		return hostauth.Policy{}, server.ErrCredentialPolicy
 	}
 	return hostauth.Policy{Issuer: "https://authority.paperboat.test:9445", Audience: "paperboat-machine", CredentialClass: "terminal_operation", Scopes: []string{"terminal:operate"}, EnvironmentID: "environment-topology", MachineID: "endpoint-host", MaxLifetime: 5 * time.Minute}, nil
-}
-
-type topologyCodexCommand struct {
-	socket   string
-	listener net.Listener
-	done     chan error
-}
-
-func (c *topologyCodexCommand) Start() error {
-	listener, err := net.Listen("unix", c.socket)
-	if err != nil {
-		return err
-	}
-	c.listener = listener
-	c.done = make(chan error, 1)
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		connection, acceptErr := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
-		if acceptErr != nil {
-			return
-		}
-		defer connection.Close(websocket.StatusNormalClosure, "complete")
-		messageType, payload, readErr := connection.Read(r.Context())
-		if readErr == nil {
-			_ = connection.Write(r.Context(), messageType, append([]byte("paperboat-codex-host:"), payload...))
-		}
-	})
-	go func() { c.done <- http.Serve(listener, handler) }()
-	return nil
-}
-
-func (c *topologyCodexCommand) Wait() error            { return <-c.done }
-func (c *topologyCodexCommand) Signal(os.Signal) error { return c.listener.Close() }
-func (c *topologyCodexCommand) Kill() error            { return c.listener.Close() }
-
-func newTopologyCodexServe(t *testing.T, stateRoot string) func(context.Context, net.Conn) error {
-	t.Helper()
-	workspace := "/workspace"
-	if err := os.MkdirAll(workspace, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	manager, err := hostcodex.New(hostcodex.Config{
-		StateRoot: filepath.Join(stateRoot, "codex"), WorkspaceRoot: workspace,
-		Preflight: func(context.Context) (string, error) { return "0.146.0", nil },
-		Command: func(_ context.Context, _ string, args ...string) hostcodex.Command {
-			socket := strings.TrimPrefix(args[len(args)-1], "unix://")
-			return &topologyCodexCommand{socket: socket}
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	public := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{'i'}, ed25519.SeedSize)).Public().(ed25519.PublicKey)
-	verifier := hostauth.Verifier{Keys: topologyCredentialKeys{public: public}, Clock: topologyClock{}, ClockSkew: time.Minute}
-	authorizer := func(token string) (server.Authorizer, error) {
-		return &server.CredentialAuthorizer{Verifier: verifier, Resolver: topologyTerminalPolicy{}, Token: token}, nil
-	}
-	websocketHandler, err := hostcodex.NewHandler(hostcodex.HandlerConfig{Manager: manager, Authorizer: authorizer})
-	if err != nil {
-		t.Fatal(err)
-	}
-	managementHandler, err := hostcodex.NewManagementHandler(manager, authorizer)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mux := http.NewServeMux()
-	mux.Handle("/v1/codex-sessions/{session_id}/ws", websocketHandler)
-	mux.Handle("POST /v1/codex-sessions/{session_id}", managementHandler)
-	mux.Handle("POST /v1/codex-sessions/{session_id}/renew", managementHandler)
-	mux.Handle("GET /v1/codex-sessions/{session_id}/directories", managementHandler)
-	mux.Handle("DELETE /v1/codex-sessions/{session_id}", managementHandler)
-	return func(ctx context.Context, connection net.Conn) error {
-		return server.ServeHTTPConnection(ctx, connection, mux)
-	}
 }
 
 func newTopologyFileTransferHandler(t *testing.T, ctx context.Context, stateRoot string) (*transfercrypto.KeyVault, *hostfiletransfer.Service, http.Handler) {

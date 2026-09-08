@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/codexsession"
 	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configapply"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
@@ -79,7 +78,6 @@ type HostDependencies struct {
 	HealthTracker             *health.HealthTracker
 	Metrics                   *observability.Registry
 	EventLog                  *observability.EventLog
-	CodexSessions             *codexsession.Manager
 	LocalControlToken         string
 	TunnelEnrollment          http.Handler
 	TunnelEnrollmentLifecycle Service
@@ -87,7 +85,7 @@ type HostDependencies struct {
 	ManagedSSHService         Service
 	TunnelManager             stablehostd.TunnelWorkloads
 	UpdateGate                hostdproto.UpdateGateHandler
-	NativePeerFactory         func(func(net.Conn) error, http.Handler, http.Handler) (Service, error)
+	NativePeerFactory         func(func(net.Conn) error, http.Handler) (Service, error)
 	TransferKeys              *transfercrypto.KeyVault
 	Capabilities              server.CapabilityGate
 }
@@ -189,7 +187,7 @@ func NewClientCoordinator(ctx context.Context, config HostConfig, dependencies H
 	}
 	var nativePeerService Service
 	if dependencies.NativePeerFactory != nil {
-		nativePeerService, err = dependencies.NativePeerFactory(func(net.Conn) error { return ErrHostInvalid }, nativeTransferHandler, nil)
+		nativePeerService, err = dependencies.NativePeerFactory(func(net.Conn) error { return ErrHostInvalid }, nativeTransferHandler)
 		if err != nil || nativePeerService == nil {
 			return nil, errors.Join(ErrHostInvalid, err)
 		}
@@ -484,13 +482,9 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	if err != nil {
 		return nil, err
 	}
-	codexHTTPHandler, err := hostCodexHTTPHandler(dependencies.CodexSessions, dependencies.Authorizer)
-	if err != nil {
-		return nil, err
-	}
 	var nativePeerService Service
 	if dependencies.NativePeerFactory != nil {
-		nativePeerService, err = dependencies.NativePeerFactory(nativeManager.Serve, nativeTransferHandler, codexHTTPHandler)
+		nativePeerService, err = dependencies.NativePeerFactory(nativeManager.Serve, nativeTransferHandler)
 		if err != nil || nativePeerService == nil {
 			return nil, errors.Join(ErrHostInvalid, err)
 		}
@@ -517,9 +511,6 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		mux.Handle("/v1/private-tcp-access/", handler)
 	}
 	mux.Handle("/v1/runtime", websocketHandler)
-	if codexHTTPHandler != nil {
-		mux.Handle("/v1/codex-sessions/", codexHTTPHandler)
-	}
 	mux.Handle("/v1/file-transfers", transferHandler)
 	mux.Handle("/v1/file-transfers/", transferHandler)
 	localTransferHandler, localTransferErr := server.NewNativeLocalFileTransferHandler(server.LocalFileTransferConfig{Token: agentToken, MachineID: config.MachineID, Service: transferService, ResolveRecipient: writers.Recipient})
@@ -554,9 +545,6 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		stablehostd.Component{Name: "sessions", Required: true, Service: shutdownService{shutdown: sessions.Shutdown}},
 		stablehostd.Component{Name: "file_transfer_cleanup", Required: true, Service: transferCleanup},
 	)
-	if dependencies.CodexSessions != nil {
-		stableComponents = append(stableComponents, stablehostd.Component{Name: "codex.v1", Required: false, Service: &codexSessionService{manager: dependencies.CodexSessions}})
-	}
 	workerComponents := []Component{{Capability: "worker_lifecycle", Required: true, Service: workerLifecycleService{}}}
 	if dependencies.AuthorizationService != nil {
 		// Authorization refresh and ENV recipient registration belong to the
@@ -609,7 +597,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	}
 	stableComponents = append(stableComponents, stablehostd.Component{Name: "control_plane", Required: true, Service: httpService})
 	daemon, err := stablehostd.New(stablehostd.Config{
-		Workloads:  stablehostd.Workloads{Sessions: sessions, Executions: executions, Transfers: transferService, Previews: dependencies.Previews, Codex: dependencies.CodexSessions, ManagedSSH: dependencies.ManagedSSH, Tunnels: dependencies.TunnelManager},
+		Workloads:  stablehostd.Workloads{Sessions: sessions, Executions: executions, Transfers: transferService, Previews: dependencies.Previews, ManagedSSH: dependencies.ManagedSSH, Tunnels: dependencies.TunnelManager},
 		Components: stableComponents, ShutdownTimeout: config.ShutdownTimeout,
 	})
 	if err != nil {
