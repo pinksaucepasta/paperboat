@@ -363,11 +363,12 @@ func secureChild(parent, name string) (string, error) {
 }
 
 func (s *Service) newManager(active workerupdate.Release) (*workerupdate.Manager, error) {
-	return s.newManagerWithGate(active, s.config.ActivationGate)
+	return s.newManagerWithGate(active, s.config.ActivationGate, false)
 }
-func (s *Service) newManagerWithGate(active workerupdate.Release, gate workerupdate.ActivationGate) (*workerupdate.Manager, error) {
+func (s *Service) newManagerWithGate(active workerupdate.Release, gate workerupdate.ActivationGate, manual bool) (*workerupdate.Manager, error) {
 	config := s.managerConfig
 	config.Active = active
 	config.Gate = gate
+	config.ManualActivation = manual
 	return workerupdate.New(config)
 }

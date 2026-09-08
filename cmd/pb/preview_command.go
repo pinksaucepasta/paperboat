@@ -50,6 +50,11 @@ var previewMachineID = configuredMachineID
 
 var previewOwnerSessionClientForCommand = newProductionPreviewOwnerSessionClient
 
+const (
+	previewBackgroundDefaultTTL = 30 * time.Minute
+	previewMaximumTTL           = 24 * time.Hour
+)
+
 func newProductionPreviewCarrier(ctx context.Context, target preview.LeaseTarget, machineID, ownerSessionID string) (preview.Carrier, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("%w: context is required", ErrPreviewMachineNotConfigured)
@@ -144,18 +149,21 @@ func newProductionPreviewOwnerSessionClient() (*preview.LocalOwnerSessionClient,
 
 // previewCobraCommandV1 is the only public preview command tree.
 func previewCobraCommandV1() *cobra.Command {
+	return ephemeralTunnelCommand("preview <port|url|path>", "Expose a local target through a temporary preview")
+}
+
+// ephemeralTunnelCommand is the sole parser and handler tree for both
+// `pb preview` and `pb tunnel --ephemeral`.
+func ephemeralTunnelCommand(use, short string) *cobra.Command {
 	command := &cobra.Command{
-		Use:           "preview <port|url|path>",
-		Short:         "Expose a local target through a temporary preview",
+		Use:           use,
+		Short:         short,
 		Args:          commandArgs(previewTargetArgs),
 		RunE:          runPreviewCobra,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	command.Flags().Bool("private", false, "limit the preview to this account")
-	command.Flags().Duration("duration", 0, "maximum preview lifetime")
-	command.Flags().StringArray("domain", nil, "attach a verified custom domain (repeatable)")
-	command.Flags().Bool("json", false, "print the canonical preview resource as JSON")
+	configureEphemeralLaunchFlags(command)
 
 	list := &cobra.Command{
 		Use:           "list",
@@ -176,8 +184,23 @@ func previewCobraCommandV1() *cobra.Command {
 		SilenceErrors: true,
 	}
 	stop.Flags().Bool("json", false, "print the stopped canonical preview resource as JSON")
-	command.AddCommand(list, stop)
+	status := &cobra.Command{Use: "status <preview>", Short: "Show temporary preview status", Args: commandArgs(cobra.ExactArgs(1)), RunE: runPreviewStatusCobra, SilenceUsage: true, SilenceErrors: true}
+	status.Flags().Bool("json", false, "print the canonical preview resource as JSON")
+	deleteCommand := &cobra.Command{Use: "delete <preview>", Short: "Delete a temporary preview", Args: commandArgs(cobra.ExactArgs(1)), RunE: runPreviewStopCobra, SilenceUsage: true, SilenceErrors: true}
+	deleteCommand.Flags().Bool("json", false, "print the deleted canonical preview resource as JSON")
+	command.AddCommand(list, status, stop, deleteCommand)
 	return command
+}
+
+func configureEphemeralLaunchFlags(command *cobra.Command) {
+	command.Flags().Bool("private", false, "limit the preview to this account")
+	command.Flags().Bool("team", false, "require an explicit team grant for browser access")
+	command.MarkFlagsMutuallyExclusive("private", "team")
+	command.Flags().Duration("ttl", 0, "bounded preview lifetime (maximum 24h)")
+	command.Flags().Duration("duration", 0, "maximum preview lifetime (deprecated: use --ttl)")
+	command.Flags().Bool("background", false, "transfer ownership to paperboatd and return after readiness")
+	command.Flags().StringArray("domain", nil, "attach a verified custom domain (repeatable)")
+	command.Flags().Bool("json", false, "print the canonical preview resource as JSON")
 }
 
 func previewTargetArgs(_ *cobra.Command, args []string) error {
@@ -193,9 +216,23 @@ func runPreviewCobra(command *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	duration, err := command.Flags().GetDuration("duration")
-	if err != nil || duration < 0 {
-		return fmt.Errorf("%w: duration must be zero or a positive duration", ErrPreviewInvalidDuration)
+	ttl, err := command.Flags().GetDuration("ttl")
+	if err != nil || ttl < 0 {
+		return fmt.Errorf("%w: ttl must be zero or a positive duration", ErrPreviewInvalidDuration)
+	}
+	legacyDuration, _ := command.Flags().GetDuration("duration")
+	if command.Flags().Changed("ttl") && command.Flags().Changed("duration") {
+		return fmt.Errorf("%w: use only --ttl", ErrPreviewInvalidDuration)
+	}
+	if command.Flags().Changed("duration") {
+		ttl = legacyDuration
+	}
+	background, _ := command.Flags().GetBool("background")
+	if background && ttl == 0 {
+		ttl = previewBackgroundDefaultTTL
+	}
+	if ttl > previewMaximumTTL {
+		return fmt.Errorf("%w: ttl must not exceed 24h", ErrPreviewInvalidDuration)
 	}
 	private, err := command.Flags().GetBool("private")
 	if err != nil {
@@ -213,10 +250,14 @@ func runPreviewCobra(command *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return runPreviewForegroundWithDomains(command, target, private, duration, jsonOutput, domains)
+	return runPreviewWithDomains(command, target, private, ttl, background, jsonOutput, domains)
 }
 
 func runPreviewForegroundWithDomains(command *cobra.Command, target preview.LeaseTarget, private bool, duration time.Duration, jsonOutput bool, domains []string) (resultErr error) {
+	return runPreviewWithDomains(command, target, private, duration, false, jsonOutput, domains)
+}
+
+func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, private bool, duration time.Duration, background bool, jsonOutput bool, domains []string) (resultErr error) {
 	machineID, err := previewMachineID()
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrPreviewMachineNotConfigured, err)
@@ -272,6 +313,7 @@ func runPreviewForegroundWithDomains(command *cobra.Command, target preview.Leas
 	var heartbeatCancel context.CancelFunc
 	var heartbeatDone chan struct{}
 	var heartbeatErrors chan error
+	retainOwnerLease := false
 	cleanupOwnerLease := func() error {
 		var cleanupErr error
 		if heartbeatCancel != nil {
@@ -293,7 +335,7 @@ func runPreviewForegroundWithDomains(command *cobra.Command, target preview.Leas
 			}
 		}
 		var releaseErr error
-		if ownerLeaseClient != nil && ownerLease.ID != "" {
+		if ownerLeaseClient != nil && ownerLease.ID != "" && !retainOwnerLease {
 			releaseCtx, releaseCancel := context.WithTimeout(context.WithoutCancel(command.Context()), 2*time.Second)
 			releaseErr = ownerLeaseClient.Release(releaseCtx, ownerLease)
 			releaseCancel()
@@ -312,13 +354,22 @@ func runPreviewForegroundWithDomains(command *cobra.Command, target preview.Leas
 	if marker, ok := carrier.(interface{ NeedsOwnerSessionLease() bool }); ok {
 		needsOwnerLease = marker.NeedsOwnerSessionLease()
 	}
+	if background && !needsOwnerLease {
+		_ = carrier.Close(context.WithoutCancel(command.Context()))
+		return fmt.Errorf("%w: background mode requires paperboatd ownership", ErrPreviewOwnerSessionUnavailable)
+	}
 	if needsOwnerLease {
 		ownerLeaseClient, err = previewOwnerSessionClientForCommand()
 		if err != nil {
 			_ = carrier.Close(context.WithoutCancel(command.Context()))
 			return err
 		}
-		ownerLease, err = ownerLeaseClient.Acquire(foregroundCtx, "", target)
+		if background {
+			expiresAt := time.Now().UTC().Add(duration)
+			ownerLease, err = ownerLeaseClient.AcquireBackground(foregroundCtx, "", target, expiresAt)
+		} else {
+			ownerLease, err = ownerLeaseClient.Acquire(foregroundCtx, "", target)
+		}
 		if err != nil {
 			_ = carrier.Close(context.WithoutCancel(command.Context()))
 			return fmt.Errorf("%w: acquire: %v", ErrPreviewOwnerSessionUnavailable, err)
@@ -328,18 +379,20 @@ func runPreviewForegroundWithDomains(command *cobra.Command, target preview.Leas
 			return fmt.Errorf("%w: hostd leased machine %q, selected machine is %q", ErrPreviewOwnerSessionUnavailable, ownerLease.MachineID, machineID)
 		}
 		ownerSessionID = ownerLease.OwnerSessionID
-		heartbeatContext, heartbeatStop := context.WithCancel(foregroundCtx)
-		heartbeatCancel = heartbeatStop
-		heartbeatDone = make(chan struct{})
-		heartbeatErrors = make(chan error, 1)
-		go func() {
-			err := ownerLeaseClient.KeepAlive(heartbeatContext, ownerLease)
-			if err != nil {
-				heartbeatErrors <- err
-				cancel()
-			}
-			close(heartbeatDone)
-		}()
+		if !background {
+			heartbeatContext, heartbeatStop := context.WithCancel(foregroundCtx)
+			heartbeatCancel = heartbeatStop
+			heartbeatDone = make(chan struct{})
+			heartbeatErrors = make(chan error, 1)
+			go func() {
+				err := ownerLeaseClient.KeepAlive(heartbeatContext, ownerLease)
+				if err != nil {
+					heartbeatErrors <- err
+					cancel()
+				}
+				close(heartbeatDone)
+			}()
+		}
 	} else {
 		ownerSessionID, err = newPreviewOwnerSessionID()
 		if err != nil {
@@ -350,11 +403,22 @@ func runPreviewForegroundWithDomains(command *cobra.Command, target preview.Leas
 	if private {
 		accessMode = "private"
 	}
+	if team, _ := command.Flags().GetBool("team"); team {
+		accessMode = "team"
+	}
 	targetCopy := target
+	sessionDuration := duration
+	var userDeadline *time.Time
+	if background {
+		deadline := ownerLease.ExpiresAt.UTC()
+		userDeadline = &deadline
+		sessionDuration = 0
+	}
 	foreground, err := servepkg.StartForeground(foregroundCtx, servepkg.ForegroundConfig{
 		Name:           "preview",
 		Target:         &targetCopy,
-		Duration:       duration,
+		Duration:       sessionDuration,
+		UserDeadline:   userDeadline,
 		LeaseClient:    leaseClient,
 		Carrier:        carrier,
 		OwnerDeviceID:  machineID,
@@ -406,12 +470,34 @@ func runPreviewForegroundWithDomains(command *cobra.Command, target preview.Leas
 			observePreviewDomains(observerCtx, client, foreground.Lease.ID, domains, writer)
 		}()
 	}
+	if background {
+		retainOwnerLease = true
+		cancel()
+		_ = foreground.Wait()
+		return nil
+	}
 	waitErr := foreground.Wait()
 	if domainObserverCancel != nil {
 		domainObserverCancel()
 		<-domainObserverDone
 	}
 	return waitErr
+}
+
+func runPreviewStatusCobra(command *cobra.Command, args []string) error {
+	client, err := previewClientForCommand(command)
+	if err != nil {
+		return err
+	}
+	lease, err := client.GetPreviewLease(command.Context(), args[0])
+	if err != nil {
+		return err
+	}
+	jsonOutput, _ := command.Flags().GetBool("json")
+	if jsonOutput {
+		return encodePreviewAPILease(command.OutOrStdout(), lease)
+	}
+	return writePreviewLeaseTable(command.OutOrStdout(), []api.PreviewLease{lease})
 }
 
 func runPreviewListCobra(command *cobra.Command, _ []string) error {

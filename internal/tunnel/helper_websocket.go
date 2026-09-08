@@ -149,6 +149,7 @@ type helperTerminalConn struct {
 	resizeSeq                 atomic.Uint64
 	ackLatest                 atomic.Uint64
 	ackSent                   atomic.Uint64
+	finalSequence             atomic.Uint64
 	ackNotify                 chan struct{}
 	ackMu                     sync.Mutex
 	inputResults              chan TerminalInputResult
@@ -839,9 +840,7 @@ func (c *helperTerminalConn) handleEvent(frame helperFrame) bool {
 		c.finish(1, errors.Join(ErrTransportLost, errors.New("invalid helper terminal event")))
 		return true
 	}
-	if c.target.SequenceSink != nil {
-		c.target.SequenceSink(int(event.FinalSequence))
-	}
+	c.finalSequence.Store(event.FinalSequence)
 	c.flushAck()
 	code := 0
 	if event.Exit != nil {
@@ -882,6 +881,9 @@ func (c *helperTerminalConn) Read(p []byte) (int, error) {
 	for c.current == nil {
 		output, ok := <-c.out
 		if !ok {
+			if sequence := c.finalSequence.Swap(0); sequence > 0 && c.target.SequenceSink != nil {
+				c.target.SequenceSink(int(sequence))
+			}
 			return 0, io.EOF
 		}
 		c.current = &output

@@ -452,6 +452,7 @@ func TestSchedulerAdapterOnlyRunsSafeManagerTransaction(t *testing.T) {
 
 func TestActiveTerminalBusyRestoresOldWorkerWithoutQuarantine(t *testing.T) {
 	fixture := newFixture(t)
+	fixture.manager.config.ManualActivation = true
 	busy := &autoupdate.ActiveTerminalSessionsError{RequiredVersion: fixture.candidate.Version}
 	gate := &busyActivationGate{drainErr: busy}
 	fixture.manager.config.Gate = gate
@@ -484,9 +485,22 @@ func TestActiveTerminalBusyRestoresOldWorkerWithoutQuarantine(t *testing.T) {
 	if journal.BlockedReason != autoupdate.BlockedActiveTerminalSessions || journal.RequiredVersion != fixture.candidate.Version || journal.NextCheckAt.IsZero() {
 		t.Fatalf("blocked journal=%+v", journal)
 	}
+	if !journal.DeferredManual {
+		t.Fatal("manual intent not persisted")
+	}
 	if journal.LastFailure != updateflow.FailureNone || journal.RollbackCount != 0 {
 		t.Fatalf("expected busy recorded as failed rollback: %+v", journal)
 	}
+	gate.drainErr = nil
+	result, err = fixture.manager.Activate(context.Background(), fixture.candidate)
+	if err != nil || !result.Updated {
+		t.Fatalf("deferred activation: %+v %v", result, err)
+	}
+	journal, err = updateflow.Load(fixture.paths.journal)
+	if err != nil || journal.DeferredManual || journal.RequiredVersion != "" || journal.BlockedReason != "" {
+		t.Fatalf("completed intent remains: %+v %v", journal, err)
+	}
+
 }
 
 func TestActiveTerminalBusyDoesNotHideRollbackFailure(t *testing.T) {

@@ -84,14 +84,23 @@ func TestOpenSSHArgumentsPlacesRemoteCommandAfterDestination(t *testing.T) {
 	}
 }
 
-func TestEnsureCLIIdentityForLoginFailsClosedForEstablishedLocalRoot(t *testing.T) {
+func TestEnsureCLIIdentityForLoginReplacesObsoleteVerifierWithDeviceIdentity(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/e2ee/root" {
+		if r.URL.Path == "/v1/e2ee/root" {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":{"code":"not_found","message":"root unavailable"}}`))
+			return
+		}
+		if r.URL.Path != "/v1/e2ee/bootstrap" {
 			http.NotFound(w, r)
 			return
 		}
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"error":{"code":"not_found","message":"root unavailable"}}`))
+		var input api.E2EEBootstrapInput
+		_ = json.NewDecoder(r.Body).Decode(&input)
+		public, _ := base64.RawURLEncoding.Strict().DecodeString(input.RootPublicKey)
+		fingerprint := sha256.Sum256(public)
+		keyID := "aek_" + hex.EncodeToString(fingerprint[:])
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": api.E2EEBootstrapResult{KeyID: keyID, TrustedKeys: []api.E2EEKey{{KeyID: keyID, PublicKey: input.RootPublicKey, Fingerprint: hex.EncodeToString(fingerprint[:]), Generation: 1}}, Certificate: input.Certificate}})
 	}))
 	defer server.Close()
 	root := t.TempDir()
@@ -108,8 +117,12 @@ func TestEnsureCLIIdentityForLoginFailsClosedForEstablishedLocalRoot(t *testing.
 	ctx := command.NewContext(flags)
 	profile := config.Profile{Issuer: server.URL, Account: config.Account{ID: "account_1"}, CLIClientSessionID: "cli_1"}
 	err = ensureCLIIdentityForLogin(ctx, store, profile, config.Credential{})
-	if !errors.Is(err, identitybootstrap.ErrEstablishedRootUnavailable) {
+	if err != nil {
 		t.Fatalf("login enrollment error = %v", err)
+	}
+	current, err := store.LoadPeerAccountRootPublic(server.URL, "account_1")
+	if err != nil || bytes.Equal(current, public) {
+		t.Fatalf("device verifier was not installed: %v", err)
 	}
 }
 
@@ -124,6 +137,9 @@ func TestEnsureCLIIdentityForLoginBootstrapsNewAccount(t *testing.T) {
 		if r.URL.Path != "/v1/e2ee/bootstrap" {
 			http.NotFound(w, r)
 			return
+		}
+		if r.Header.Get("X-Paperboat-Fresh-Enrollment") != "1" {
+			t.Error("device enrollment header missing")
 		}
 		var input api.E2EEBootstrapInput
 		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
@@ -157,8 +173,13 @@ func TestEnsureCLIIdentityForLoginBootstrapsNewAccount(t *testing.T) {
 	if err := ensureCLIIdentityForLogin(ctx, store, profile, config.Credential{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.ExportPeerAccountRootSeed(server.URL, profile.Account.ID); err != nil {
-		t.Fatalf("new root seed was not persisted: %v", err)
+	if _, err := store.ExportPeerAccountRootSeed(server.URL, profile.Account.ID); !errors.Is(err, config.ErrSecretNotFound) {
+		t.Fatalf("account root seed was persisted: %v", err)
+	}
+	if signer, err := store.PeerApprovalSigningKey(server.URL, profile.Account.ID, profile.CLIClientSessionID); err != nil {
+		t.Fatalf("device signing key was not persisted: %v", err)
+	} else {
+		clear(signer)
 	}
 	if _, err := store.LoadPeerCertificate(server.URL, profile.CLIClientSessionID); err != nil {
 		t.Fatalf("new endpoint certificate was not persisted: %v", err)
@@ -1757,7 +1778,7 @@ func TestCollectLocalDoctorReportsMachineInboxCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	report := collectLocalDoctor()
-	if report.SetupState != "configured" || report.IdentityState != "valid" || report.MachineID != "machine_local" || report.InstallationGeneration != 4 || !slices.Equal(report.SetupRoles, []string{"interactive", "host"}) || report.InboxState != "ready" || report.CredentialState != "valid" {
+	if report.SetupState != "configured" || report.IdentityState != "valid" || report.MachineID != "machine_local" || report.InstallationGeneration != 4 || report.InboxState != "ready" || report.CredentialState != "valid" {
 		t.Fatalf("report=%+v", report)
 	}
 }
@@ -2521,21 +2542,6 @@ func TestResolveMachineTargetRejectsAmbiguousNames(t *testing.T) {
 	}
 }
 
-func TestResolveSetupModeRequiresExplicitModeWithoutTTY(t *testing.T) {
-	if _, err := resolveSetupMode("", false, io.Discard); err == nil || !strings.Contains(err.Error(), "requires --mode") {
-		t.Fatalf("err=%v, want non-interactive mode requirement", err)
-	}
-	for _, mode := range []string{"client", "host"} {
-		got, err := resolveSetupMode(mode, false, io.Discard)
-		if err != nil || got != mode {
-			t.Fatalf("resolveSetupMode(%q)=(%q,%v)", mode, got, err)
-		}
-	}
-	if _, err := resolveSetupMode("session", false, io.Discard); err == nil || !strings.Contains(err.Error(), "client or host") {
-		t.Fatalf("err=%v, want supported modes", err)
-	}
-}
-
 func TestMachineHomeActionsFollowConfiguredCapabilities(t *testing.T) {
 	machine := api.UserMachine{ID: "machine_actions", SetupMode: "client", Capabilities: api.MachineCapabilities{
 		FileReceive: api.MachineCapability{Configured: true}, PreviewLaunch: api.MachineCapability{Configured: true},
@@ -2545,11 +2551,11 @@ func TestMachineHomeActionsFollowConfiguredCapabilities(t *testing.T) {
 	for index, action := range actions {
 		ids[index] = action.ID
 	}
-	if !slices.Equal(ids, []string{"rename", "send"}) {
+	if !slices.Equal(ids, []string{"rename", "send", "allow-sleep", "keep-awake"}) {
 		t.Fatalf("receive actions=%v", ids)
 	}
-	machine.SetupMode = "host"
 	machine.Capabilities.TerminalHost.Configured = true
+	machine.Capabilities.EnvironmentInjection.Configured = true
 	actions = machineHomeActions(machine)
 	ids = ids[:0]
 	for _, action := range actions {
@@ -2560,31 +2566,26 @@ func TestMachineHomeActionsFollowConfiguredCapabilities(t *testing.T) {
 	}
 }
 
-func TestMachineStatusSummarySeparatesAvailabilityFromMode(t *testing.T) {
+func TestMachineStatusSummaryShowsIncomingCapabilityCount(t *testing.T) {
 	tests := []struct {
 		name    string
 		machine api.UserMachine
 		want    string
 	}{
 		{
-			name:    "online host",
-			machine: api.UserMachine{Online: true, SetupMode: "host", Platform: "linux", Architecture: "arm64"},
-			want:    "Online  ·  Host",
+			name:    "online defaults",
+			machine: api.UserMachine{Online: true, DeviceCapabilities: api.DeviceCapabilityPolicy{Desired: api.DeviceCapabilitySelection{Terminal: true, ManagedSSH: true, FileReceive: true, PreviewTunnel: true}}},
+			want:    "Online  ·  4 incoming services",
 		},
 		{
-			name:    "offline client",
-			machine: api.UserMachine{SetupMode: "client", Platform: "darwin", Architecture: "arm64"},
-			want:    "Offline  ·  Client",
+			name:    "offline disabled",
+			machine: api.UserMachine{},
+			want:    "Offline  ·  0 incoming services",
 		},
 		{
-			name:    "legacy session is shown as client",
-			machine: api.UserMachine{SetupMode: "session"},
-			want:    "Offline  ·  Client",
-		},
-		{
-			name:    "legacy host inferred from capability",
-			machine: api.UserMachine{State: "disconnected", Capabilities: api.MachineCapabilities{TerminalHost: api.MachineCapability{Configured: true}}},
-			want:    "Offline  ·  Host",
+			name:    "relay only",
+			machine: api.UserMachine{DeviceCapabilities: api.DeviceCapabilityPolicy{Desired: api.DeviceCapabilitySelection{PeerRelay: true}}},
+			want:    "Offline  ·  1 incoming services",
 		},
 	}
 	for _, test := range tests {
@@ -2694,7 +2695,7 @@ func TestAuthenticatedHostFailureRestoresPreviousClientRegistrationControlAndSer
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": api.UserMachine{
 				ID: "mch_rollback", EnvironmentID: "env_rollback", DisplayName: "Victus",
 				Platform: runtime.GOOS, Architecture: runtime.GOARCH, WorkspaceRoot: filepath.Dir(stateRoot),
-				SetupMode: "client", SetupRoles: []string{"interactive"}, PublicIdentityKey: publicIdentityKey,
+				SetupMode: "host", SetupRoles: []string{"host", "interactive"}, PublicIdentityKey: publicIdentityKey,
 				InstallationGeneration: 5,
 				Installation: &api.ClientInstallation{ControlURL: "https://api.example.test", HelperListenAddress: "127.0.0.1:38080", Artifact: api.MachineArtifact{
 					Schema: bootstrap.ArtifactTargetSchemaV1, Kind: bootstrap.ArtifactKindPB, Version: "2026.08.24.1",
@@ -3058,7 +3059,7 @@ func TestMachineAddPrintsOneShotEnrollmentCommands(t *testing.T) {
 	writeTestProfile(t, dir, configPath, srv.URL)
 
 	var output bytes.Buffer
-	if code := run(context.Background(), []string{"--config", configPath, "machine", "add", "--role", "client", "--name", "Victus"}, &output, &output); code != 0 {
+	if code := run(context.Background(), []string{"--config", configPath, "machine", "add", "--name", "Victus"}, &output, &output); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, output.String())
 	}
 	if !strings.Contains(output.String(), "Victus-one-shot-token") || !strings.Contains(output.String(), "get.pprbt.dev/install?p=") || !strings.Contains(output.String(), "PowerShell or Command Prompt") || !strings.Contains(output.String(), `powershell -c "iex (irm '`) || !strings.Contains(output.String(), `')"`) || strings.Contains(output.String(), `| iex`) || strings.Contains(output.String(), "iwr '") || strings.Contains(output.String(), "-OutFile") || strings.Contains(output.String(), "powershell -NoLogo") || strings.Contains(output.String(), "--setup-mode") || strings.Contains(output.String(), "PAPERBOAT_SERVER") {
@@ -4199,7 +4200,7 @@ func TestRequireLocalDaemonServiceRejectsMissingRegistrationWithoutLaunching(t *
 	t.Cleanup(func() { installLocalDaemonService = previous })
 
 	err := requireLocalDaemonService(context.Background(), cfg)
-	if err == nil || !strings.Contains(err.Error(), "pb setup --mode client") {
+	if err == nil || !strings.Contains(err.Error(), "pb setup") {
 		t.Fatalf("missing registration error=%v", err)
 	}
 }

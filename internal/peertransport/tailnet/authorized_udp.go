@@ -78,7 +78,7 @@ func (a *Authority) replaceLocked() error {
 func (a *Authority) Listen(region *tailcfg.DERPRegion) (*UDPServer, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.closed || !a.usableLocked() || a.current.Self.Role != "machine" || region == nil {
+	if a.closed || !a.usableLocked() || a.current.Self.Role != "machine" {
 		return nil, ErrAuthority
 	}
 	if a.server != nil {
@@ -91,7 +91,7 @@ func (a *Authority) Listen(region *tailcfg.DERPRegion) (*UDPServer, error) {
 		a.server = nil
 	}
 	peers, admitted := a.peersLocked()
-	server := &tailcat.Server{OnRelayControl: a.relayControl, DERPCarrierFactory: a.relay.factory, PeerRelayNodes: a.relay.peerNodes, TestOnlyPacketListener: a.options.TestOnlyPacketListener, Key: a.private, DisablePresharedKey: true, LocalAddr: netip.MustParseAddr(a.current.Self.VirtualAddress), AllowedPeers: peers, Region: region, ServedUDPPorts: []filter.PortRange{{First: NetworkPort, Last: NetworkPort}}, Logf: func(string, ...any) {}}
+	server := &tailcat.Server{OnRelayControl: a.relayControl, DERPCarrierFactory: a.relay.factory, PeerRelayNodes: a.relay.peerNodes, RelayControlPeers: a.relay.controlPeers, TestOnlyPacketListener: a.options.TestOnlyPacketListener, Key: a.private, DisablePresharedKey: true, LocalAddr: netip.MustParseAddr(a.current.Self.VirtualAddress), AllowedPeers: peers, Region: region, ServedUDPPorts: []filter.PortRange{{First: NetworkPort, Last: NetworkPort}}, Logf: func(string, ...any) {}}
 	var err error
 	a.server, err = listenUDP(server, NetworkPort, admitted)
 	return a.server, err
@@ -122,10 +122,10 @@ func (a *Authority) Descriptor(peerID string) (tailcat.Addr, error) {
 		}
 		a.relay.mu.Unlock()
 		sort.Slice(regions, func(i, j int) bool { return regions[i].RegionID < regions[j].RegionID })
-		if len(regions) == 0 {
-			return "", ErrAuthority
+		if len(regions) > 1 {
+			regions = regions[:1]
 		}
-		return (&tailcat.ConnInfo{ServerPublic: tailcat.NodePublic{NodePublic: node}, ServerDiscoPublic: tailcat.DiscoPublic{DiscoPublic: disco}, Region: regions[:1]}).Addr(), nil
+		return (&tailcat.ConnInfo{ServerPublic: tailcat.NodePublic{NodePublic: node}, ServerDiscoPublic: tailcat.DiscoPublic{DiscoPublic: disco}, Region: regions}).Addr(), nil
 	}
 	return "", ErrAdmission
 }
@@ -197,12 +197,14 @@ func (a *Authority) Client(descriptor tailcat.Addr, peerID string) (*UDPClient, 
 				}
 			}
 			factory, peerNodes := a.relay.factory, append([]*tailcfg.Node(nil), a.relay.peerNodes...)
+			controlPeers := append([]key.NodePublic(nil), a.relay.controlPeers...)
 			a.relay.mu.Unlock()
 			sort.Slice(regions, func(i, j int) bool { return regions[i].RegionID < regions[j].RegionID })
-			if len(regions) == 0 {
-				return nil, ErrAuthority
+			var firstRegion *tailcfg.DERPRegion
+			if len(regions) != 0 {
+				firstRegion = regions[0]
 			}
-			a.clientEngine = &tailcat.Server{OnRelayControl: a.relayControl, DERPCarrierFactory: factory, PeerRelayNodes: peerNodes, TestOnlyPacketListener: a.options.TestOnlyPacketListener, Key: a.private, DisablePresharedKey: true, LocalAddr: netip.MustParseAddr(a.current.Self.VirtualAddress), AllowedPeers: peers, Region: regions[0], Logf: func(string, ...any) {}}
+			a.clientEngine = &tailcat.Server{OnRelayControl: a.relayControl, DERPCarrierFactory: factory, PeerRelayNodes: peerNodes, RelayControlPeers: controlPeers, TestOnlyPacketListener: a.options.TestOnlyPacketListener, Key: a.private, DisablePresharedKey: true, LocalAddr: netip.MustParseAddr(a.current.Self.VirtualAddress), AllowedPeers: peers, Region: firstRegion, Logf: func(string, ...any) {}}
 			if err := a.clientEngine.Start(); err != nil {
 				a.clientEngine = nil
 				return nil, err

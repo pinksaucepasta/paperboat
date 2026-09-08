@@ -146,7 +146,10 @@ func (s *Scheduler) runCheck(ctx context.Context, check Check) (Result, error) {
 	state := s.state
 	state.CheckedAt = checkedAt
 	state.Version, state.Updated = result.Version, result.Updated
-	state.BlockedReason, state.RequiredVersion = "", ""
+	pending := state.BlockedReason == BlockedActiveTerminalSessions && state.RequiredVersion != "" && (err != nil || !result.Updated)
+	if !pending {
+		state.BlockedReason, state.RequiredVersion = "", ""
+	}
 	var active *ActiveTerminalSessionsError
 	if errors.As(err, &active) {
 		state.Failure, state.Failures = "", 0
@@ -154,7 +157,11 @@ func (s *Scheduler) runCheck(ctx context.Context, check Check) (Result, error) {
 		state.NextCheckAt = checkedAt.Add(s.config.RetryFloor)
 	} else if err == nil {
 		state.Failure, state.Failures = "", 0
-		state.NextCheckAt = checkedAt.Add(s.jitteredInterval())
+		if pending {
+			state.NextCheckAt = checkedAt.Add(s.config.RetryFloor)
+		} else {
+			state.NextCheckAt = checkedAt.Add(s.jitteredInterval())
+		}
 	} else {
 		state.Failures++
 		state.Failure = "check_failed"

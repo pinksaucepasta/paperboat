@@ -138,10 +138,10 @@ func ResolveUsernameForPlatform(requested, openSSH, registered, local string, ha
 	if !validSSHUsername(selected) {
 		return "", ErrSSHUsernameInvalid
 	}
-	if hasRegistered && !equal(selected, registered) {
-		return "", ErrSSHUsernameNotAllowed
+	if hasRegistered && requested == "" && openSSH == "" {
+		return registered, nil
 	}
-	if hasRegistered {
+	if hasRegistered && equal(selected, registered) {
 		return registered, nil
 	}
 	return selected, nil

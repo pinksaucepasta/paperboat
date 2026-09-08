@@ -741,8 +741,8 @@ func validatePreviewLeaseCreateInput(input PreviewLeaseCreateRequest) error {
 		return fmt.Errorf("%w: owner device and session are required", ErrPreviewLeaseInvalid)
 	}
 	mode := strings.ToLower(strings.TrimSpace(input.AccessMode))
-	if mode != "" && mode != "public" && mode != "private" {
-		return fmt.Errorf("%w: access mode must be public or private", ErrPreviewLeaseInvalid)
+	if mode != "" && mode != "public" && mode != "private" && mode != "team" {
+		return fmt.Errorf("%w: access mode must be public, private, or team", ErrPreviewLeaseInvalid)
 	}
 	if input.ExpiresAt != nil && !input.ExpiresAt.After(time.Now().UTC()) {
 		return fmt.Errorf("%w: expiration must be in the future", ErrPreviewLeaseInvalid)
@@ -796,7 +796,7 @@ func validatePreviewLease(lease PreviewLease) error {
 	if lease.Schema != PreviewTunnelSchemaV1 || lease.Kind != "preview_lease" || !validPreviewID(lease.ID) || !validPreviewID(lease.AccountID) || !validPreviewID(lease.ActorID) || !validPreviewID(lease.OwnerDeviceID) || !validPreviewID(lease.OwnerSessionID) {
 		return fmt.Errorf("%w: required identity fields are missing", ErrPreviewLeaseInvalid)
 	}
-	if lease.AccessMode != "public" && lease.AccessMode != "private" {
+	if lease.AccessMode != "public" && lease.AccessMode != "private" && lease.AccessMode != "team" {
 		return fmt.Errorf("%w: unsupported access mode %q", ErrPreviewLeaseInvalid, lease.AccessMode)
 	}
 	if lease.Persistent {

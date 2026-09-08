@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/hashicorp/yamux"
+	yamux "github.com/libp2p/go-yamux/v5"
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 )
 
@@ -344,16 +346,17 @@ func newYamuxDataCarrierSession(link io.ReadWriteCloser, config DataCarrierConfi
 	yamuxConfig.KeepAliveInterval = config.KeepAliveInterval
 	yamuxConfig.ConnectionWriteTimeout = config.ConnectionWriteLimit
 	yamuxConfig.MaxStreamWindowSize = config.StreamWindow
-	yamuxConfig.StreamOpenTimeout = config.StreamOpenLimit
-	yamuxConfig.StreamCloseTimeout = config.StreamCloseLimit
+	yamuxConfig.InitialStreamWindowSize = config.StreamWindow
+	yamuxConfig.MaxIncomingStreams = uint32(config.MaximumStreams)
+	connection := asDataCarrierNetConn(link)
 	var (
 		session *yamux.Session
 		err     error
 	)
 	if client {
-		session, err = yamux.Client(link, yamuxConfig)
+		session, err = yamux.Client(connection, yamuxConfig, nil)
 	} else {
-		session, err = yamux.Server(link, yamuxConfig)
+		session, err = yamux.Server(connection, yamuxConfig, nil)
 	}
 	if err != nil {
 		return nil, err
@@ -365,26 +368,42 @@ func (s *yamuxDataCarrierSession) OpenStream(ctx context.Context) (DataCarrierSt
 	if s == nil || s.session == nil || ctx == nil {
 		return nil, ErrInvalidDataCarrierConfig
 	}
-	result := make(chan struct {
-		stream *yamux.Stream
-		err    error
-	}, 1)
-	go func() {
-		stream, err := s.session.OpenStream()
-		result <- struct {
-			stream *yamux.Stream
-			err    error
-		}{stream: stream, err: err}
-	}()
-	select {
-	case opened := <-result:
-		return opened.stream, opened.err
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-s.session.CloseChan():
-		return nil, ErrDataCarrierClosed
-	}
+	return s.session.OpenStream(ctx)
 }
+
+type dataCarrierNetConn struct{ io.ReadWriteCloser }
+
+func asDataCarrierNetConn(link io.ReadWriteCloser) net.Conn {
+	if connection, ok := link.(net.Conn); ok {
+		return connection
+	}
+	return &dataCarrierNetConn{ReadWriteCloser: link}
+}
+func (c *dataCarrierNetConn) LocalAddr() net.Addr  { return dataCarrierAddr("local") }
+func (c *dataCarrierNetConn) RemoteAddr() net.Addr { return dataCarrierAddr("remote") }
+func (c *dataCarrierNetConn) SetDeadline(t time.Time) error {
+	if v, ok := c.ReadWriteCloser.(interface{ SetDeadline(time.Time) error }); ok {
+		return v.SetDeadline(t)
+	}
+	return nil
+}
+func (c *dataCarrierNetConn) SetReadDeadline(t time.Time) error {
+	if v, ok := c.ReadWriteCloser.(interface{ SetReadDeadline(time.Time) error }); ok {
+		return v.SetReadDeadline(t)
+	}
+	return nil
+}
+func (c *dataCarrierNetConn) SetWriteDeadline(t time.Time) error {
+	if v, ok := c.ReadWriteCloser.(interface{ SetWriteDeadline(time.Time) error }); ok {
+		return v.SetWriteDeadline(t)
+	}
+	return nil
+}
+
+type dataCarrierAddr string
+
+func (a dataCarrierAddr) Network() string { return "carrier" }
+func (a dataCarrierAddr) String() string  { return string(a) }
 
 func (s *yamuxDataCarrierSession) AcceptStream(ctx context.Context) (DataCarrierStreamLink, error) {
 	if s == nil || s.session == nil || ctx == nil {
@@ -738,7 +757,7 @@ func (c *DataCarrier) wrapStream(raw DataCarrierStreamLink, ctx context.Context,
 	}
 	if ctx != nil && ctx != context.Background() {
 		stream.cancelMu.Lock()
-		stream.stopCancel = context.AfterFunc(ctx, func() { _ = stream.Close() })
+		stream.stopCancel = context.AfterFunc(ctx, func() { _ = stream.abort() })
 		stream.cancelMu.Unlock()
 	}
 	return stream
@@ -791,6 +810,7 @@ func closedDataCarrierChannel() <-chan struct{} {
 // DataCarrierStream owns one stream permit.  Closing it is required even
 // after receiving EOF so the carrier can admit another stream.
 type DataCarrierStream struct {
+	edgeTarget DataCarrierTarget
 	raw        DataCarrierStreamLink
 	Open       StreamOpen
 	release    func()
@@ -800,6 +820,9 @@ type DataCarrierStream struct {
 	closeOnce  sync.Once
 	closeErr   error
 }
+
+// EdgeTarget is the authenticated endpoint selected for the accepting carrier.
+func (s *DataCarrierStream) EdgeTarget() DataCarrierTarget { return s.edgeTarget }
 
 func (s *DataCarrierStream) Read(p []byte) (int, error) {
 	if s == nil || s.raw == nil {
@@ -827,6 +850,38 @@ func (s *DataCarrierStream) Close() error {
 			stopCancel()
 		}
 		s.closeErr = s.raw.Close()
+		if s.release != nil {
+			s.release()
+		}
+		if s.onClose != nil {
+			s.onClose()
+		}
+	})
+	return s.closeErr
+}
+
+// CloseWrite sends the native stream FIN while retaining the stream permit and
+// cancellation tracking until Close releases the complete stream.
+func (s *DataCarrierStream) CloseWrite() error {
+	if s == nil || s.raw == nil {
+		return ErrDataCarrierClosed
+	}
+	if closer, ok := s.raw.(interface{ CloseWrite() error }); ok {
+		return closer.CloseWrite()
+	}
+	return s.raw.Close()
+}
+
+func (s *DataCarrierStream) abort() error {
+	if s == nil || s.raw == nil {
+		return nil
+	}
+	s.closeOnce.Do(func() {
+		if resetter, ok := s.raw.(interface{ Reset() error }); ok {
+			s.closeErr = resetter.Reset()
+		} else {
+			s.closeErr = s.raw.Close()
+		}
 		if s.release != nil {
 			s.release()
 		}
@@ -903,7 +958,16 @@ func transportFallbackAllowed(err error) bool {
 	return errors.As(err, &networkErr)
 }
 
+type DataCarrierTarget struct {
+	EdgeID        string
+	ProcessEpoch  string
+	FailureDomain string
+}
+
 type DataCarrierPoolConfig struct {
+	Targets         []DataCarrierTarget
+	RefreshTargets  func(context.Context) ([]DataCarrierTarget, time.Time, error)
+	TargetsExpireAt time.Time
 	MaximumCarriers int
 	QueueDepth      int
 	Preferred       Transport
@@ -960,11 +1024,11 @@ func (c DataCarrierPoolConfig) Validate() error {
 	if c.QueueDepth <= 0 || c.QueueDepth > maxDataCarrierQueue {
 		return fmt.Errorf("%w: pool queue depth must be in [1,%d]", ErrInvalidDataCarrierConfig, maxDataCarrierQueue)
 	}
-	if c.Preferred != QUIC && c.Preferred != TCPMux {
-		return fmt.Errorf("%w: preferred transport must be quic or tcp mux", ErrInvalidDataCarrierConfig)
+	if c.Preferred != QUIC && c.Preferred != TCPMux && c.Preferred != HTTP3 && c.Preferred != HTTP2 {
+		return fmt.Errorf("%w: unsupported preferred transport", ErrInvalidDataCarrierConfig)
 	}
-	if c.Fallback != QUIC && c.Fallback != TCPMux {
-		return fmt.Errorf("%w: fallback transport must be quic or tcp mux", ErrInvalidDataCarrierConfig)
+	if c.Fallback != QUIC && c.Fallback != TCPMux && c.Fallback != HTTP3 && c.Fallback != HTTP2 {
+		return fmt.Errorf("%w: unsupported fallback transport", ErrInvalidDataCarrierConfig)
 	}
 	if c.Preferred == c.Fallback && !c.SingleTransport {
 		return fmt.Errorf("%w: equal preferred and fallback require single transport", ErrInvalidDataCarrierConfig)
@@ -975,8 +1039,20 @@ func (c DataCarrierPoolConfig) Validate() error {
 	if !validDataCarrierIdentifier(c.EdgeID, 128) {
 		return fmt.Errorf("%w: edge identity is required", ErrInvalidDataCarrierConfig)
 	}
-	if len(c.FailureDomains) < c.MaximumCarriers {
+	if len(c.Targets) == 0 && len(c.FailureDomains) < c.MaximumCarriers {
 		return fmt.Errorf("%w: one failure domain is required per carrier slot", ErrInvalidDataCarrierConfig)
+	}
+	if len(c.Targets) != 0 {
+		if len(c.Targets) != c.MaximumCarriers || len(c.Targets) > 2 {
+			return ErrInvalidDataCarrierConfig
+		}
+		seen := map[string]bool{}
+		for _, target := range c.Targets {
+			if !validDataCarrierIdentifier(target.EdgeID, 128) || !validDataCarrierIdentifier(target.ProcessEpoch, 128) || !validDataCarrierIdentifier(target.FailureDomain, 128) || seen[target.EdgeID] {
+				return ErrInvalidDataCarrierConfig
+			}
+			seen[target.EdgeID] = true
+		}
 	}
 	if err := c.Session.validate(); err != nil {
 		return fmt.Errorf("%w: authenticated session identity is required", ErrInvalidDataCarrierConfig)
@@ -986,7 +1062,7 @@ func (c DataCarrierPoolConfig) Validate() error {
 		if !validDataCarrierIdentifier(domain, 128) {
 			return fmt.Errorf("%w: failure domain is required", ErrInvalidDataCarrierConfig)
 		}
-		if _, exists := seenDomains[domain]; exists {
+		if _, exists := seenDomains[domain]; exists && len(c.Targets) == 0 {
 			return fmt.Errorf("%w: failure domains must be distinct", ErrInvalidDataCarrierConfig)
 		}
 		seenDomains[domain] = struct{}{}
@@ -1013,6 +1089,7 @@ func validDataCarrierIdentifier(value string, maximum int) bool {
 // failure domain.  A dialer must not silently reuse a different slot or
 // domain, because the pool uses those identities for failover diagnostics.
 type DataCarrierDialRequest struct {
+	ProcessEpoch  string
 	Transport     Transport
 	Slot          int
 	Attempt       int
@@ -1046,6 +1123,7 @@ const (
 )
 
 type DataCarrierInfo struct {
+	ProcessEpoch  string
 	ID            string
 	Identity      DataCarrierIdentity
 	Transport     Transport
@@ -1058,6 +1136,7 @@ type DataCarrierInfo struct {
 }
 
 type pooledDataCarrier struct {
+	target        DataCarrierTarget
 	transport     Transport
 	edgeID        string
 	failureDomain string
@@ -1069,6 +1148,11 @@ type pooledDataCarrier struct {
 // DataCarrierPool maintains a small set of independently dialed carriers.
 // Connect publishes Ready only after at least one preferred/fallback carrier
 // has completed a yamux Ping round trip.
+type carrierSlotRetry struct {
+	failures int
+	next     time.Time
+}
+
 type DataCarrierPool struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -1087,6 +1171,15 @@ type DataCarrierPool struct {
 	closeOnce      sync.Once
 	control        *DataCarrierStream
 	controlOpening bool
+	accepted       chan dataCarrierAcceptResult
+	workers        sync.WaitGroup
+	repairOnce     sync.Once
+	refreshedAt    time.Time
+	// Placement fields are owned exclusively by connectMu; transport config is immutable.
+	targets         []DataCarrierTarget
+	targetExpiry    time.Time
+	maximumCarriers int
+	retries         map[int]carrierSlotRetry
 }
 
 // Identity returns a copy of the exact authenticated session binding used by
@@ -1113,14 +1206,20 @@ func NewDataCarrierPool(ctx context.Context, config DataCarrierPoolConfig, diale
 	}
 	poolCtx, cancel := context.WithCancel(ctx)
 	return &DataCarrierPool{
-		ctx:    poolCtx,
-		cancel: cancel,
-		dial:   dialer,
-		config: config,
-		queue:  make(chan struct{}, config.QueueDepth),
-		done:   make(chan struct{}),
-		ready:  make(chan struct{}),
-		state:  DataCarrierPoolDisconnected,
+		ctx:             poolCtx,
+		cancel:          cancel,
+		dial:            dialer,
+		config:          config,
+		queue:           make(chan struct{}, config.QueueDepth),
+		accepted:        make(chan dataCarrierAcceptResult, config.QueueDepth),
+		done:            make(chan struct{}),
+		ready:           make(chan struct{}),
+		state:           DataCarrierPoolDisconnected,
+		refreshedAt:     time.Now(),
+		targets:         append([]DataCarrierTarget(nil), config.Targets...),
+		targetExpiry:    config.TargetsExpireAt,
+		maximumCarriers: config.MaximumCarriers,
+		retries:         make(map[int]carrierSlotRetry),
 	}, nil
 }
 
@@ -1142,22 +1241,92 @@ func (p *DataCarrierPool) Connect(ctx context.Context) error {
 		p.mu.Unlock()
 		return ErrDataCarrierDraining
 	}
-	p.state = DataCarrierPoolConnecting
+	if len(p.carriers) == 0 {
+		p.state = DataCarrierPoolConnecting
+	}
 	p.mu.Unlock()
 
 	var errs []error
-	for {
-		p.mu.RLock()
-		slot := p.nextSlotLocked()
-		remaining := p.config.MaximumCarriers - len(p.carriers)
-		p.mu.RUnlock()
-		if remaining <= 0 {
-			break
-		}
-		result, transport, attempt, err := p.dialWithFallback(ctx, slot)
+	if p.config.RefreshTargets != nil && time.Since(p.refreshedAt) >= 4*time.Second {
+		refreshCtx, stopRefresh := context.WithTimeout(ctx, 5*time.Second)
+		stopPool := context.AfterFunc(p.ctx, stopRefresh)
+		targets, expiry, err := p.config.RefreshTargets(refreshCtx)
+		stopPool()
+		stopRefresh()
+		p.refreshedAt = time.Now()
 		if err != nil {
 			errs = append(errs, err)
+		} else {
+			next := p.config
+			next.Targets, next.MaximumCarriers, next.TargetsExpireAt = targets, len(targets), expiry
+			if err := next.Validate(); err != nil || !expiry.After(time.Now()) {
+				errs = append(errs, ErrInvalidDataCarrierConfig)
+			} else {
+				p.mu.Lock()
+				if !slices.Equal(p.targets, targets) {
+					clear(p.retries)
+				}
+				p.targets = append([]DataCarrierTarget(nil), targets...)
+				p.targetExpiry = expiry
+				p.maximumCarriers = len(targets)
+				kept := p.carriers[:0]
+				var removed []*DataCarrier
+				for _, carrier := range p.carriers {
+					found := false
+					for slot, target := range targets {
+						if carrier.target == target {
+							carrier.slot = slot
+							found = true
+							break
+						}
+					}
+					if found {
+						kept = append(kept, carrier)
+					} else {
+						removed = append(removed, carrier.carrier)
+					}
+				}
+				p.carriers = kept
+				p.mu.Unlock()
+				for _, carrier := range removed {
+					_ = carrier.Close()
+				}
+			}
+		}
+	}
+	p.removeClosed()
+	for slot := 0; slot < p.maximumCarriers; slot++ {
+		if !p.targetExpiry.IsZero() && !p.targetExpiry.After(time.Now()) {
 			break
+		}
+		p.mu.RLock()
+		present := false
+		for _, carrier := range p.carriers {
+			if carrier.slot == slot {
+				present = true
+			}
+		}
+		p.mu.RUnlock()
+		if present {
+			continue
+		}
+		if retry := p.retries[slot]; len(p.targets) > 0 && time.Now().Before(retry.next) {
+			continue
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		if !p.targetExpiry.IsZero() && p.targetExpiry.Before(deadline) {
+			deadline = p.targetExpiry
+		}
+		attemptCtx, stopAttempt := context.WithDeadline(ctx, deadline)
+		result, transport, attempt, err := p.dialSlot(attemptCtx, slot)
+		if err != nil {
+			stopAttempt()
+			errs = append(errs, err)
+			p.retrySlot(slot)
+			if len(p.targets) == 0 {
+				break
+			}
+			continue
 		}
 		var carrier *DataCarrier
 		if result.Session != nil {
@@ -1166,21 +1335,31 @@ func (p *DataCarrierPool) Connect(ctx context.Context) error {
 			carrier, err = NewDataCarrierClient(p.ctx, result.Link, p.config.Carrier, p.config.Session)
 		}
 		if err != nil {
+			stopAttempt()
 			if result.Session != nil {
 				_ = result.Session.Close()
 			} else if result.Link != nil {
 				_ = result.Link.Close()
 			}
 			errs = append(errs, err)
-			break
+			p.retrySlot(slot)
+			if len(p.targets) == 0 {
+				break
+			}
+			continue
 		}
-		pingCtx, cancel := context.WithTimeout(ctx, p.config.Carrier.ConnectionWriteLimit)
+		pingCtx, cancel := context.WithTimeout(attemptCtx, p.config.Carrier.ConnectionWriteLimit)
 		err = carrier.Ping(pingCtx)
 		cancel()
+		stopAttempt()
 		if err != nil {
 			_ = carrier.Close()
 			errs = append(errs, err)
-			break
+			p.retrySlot(slot)
+			if len(p.targets) == 0 {
+				break
+			}
+			continue
 		}
 		p.mu.Lock()
 		if p.state == DataCarrierPoolClosed {
@@ -1188,9 +1367,16 @@ func (p *DataCarrierPool) Connect(ctx context.Context) error {
 			_ = carrier.Close()
 			return ErrDataCarrierClosed
 		}
-		p.carriers = append(p.carriers, &pooledDataCarrier{transport: transport, edgeID: result.EdgeID, failureDomain: result.FailureDomain, slot: slot, attempt: attempt, carrier: carrier})
+		delete(p.retries, slot)
+		p.carriers = append(p.carriers, &pooledDataCarrier{target: p.target(slot), transport: transport, edgeID: result.EdgeID, failureDomain: result.FailureDomain, slot: slot, attempt: attempt, carrier: carrier})
 		if p.selected == "" {
 			p.selected = transport
+		}
+		p.workers.Add(1)
+		go p.acceptCarrier(carrier, p.target(slot))
+		if transport == HTTP3 || transport == HTTP2 {
+			p.workers.Add(1)
+			go p.monitorCarrier(carrier, 5*time.Second, 2*time.Second)
 		}
 		p.mu.Unlock()
 	}
@@ -1204,6 +1390,7 @@ func (p *DataCarrierPool) Connect(ctx context.Context) error {
 	state := p.state
 	p.mu.Unlock()
 	if state == DataCarrierPoolReady {
+		p.repairOnce.Do(func() { p.workers.Add(1); go p.repair() })
 		return nil
 	}
 	if len(errs) == 0 {
@@ -1212,25 +1399,107 @@ func (p *DataCarrierPool) Connect(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (p *DataCarrierPool) nextSlotLocked() int {
-	for slot := 0; slot < p.config.MaximumCarriers; slot++ {
-		used := false
-		for _, pooled := range p.carriers {
-			if pooled != nil && pooled.slot == slot {
-				used = true
-				break
-			}
+func (p *DataCarrierPool) target(slot int) DataCarrierTarget {
+	if len(p.targets) > 0 {
+		return p.targets[slot]
+	}
+	return DataCarrierTarget{EdgeID: p.config.EdgeID, FailureDomain: p.config.FailureDomains[slot]}
+}
+func (p *DataCarrierPool) dialSlot(ctx context.Context, slot int) (DataCarrierDialResult, Transport, int, error) {
+	bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
+	stop := context.AfterFunc(p.ctx, cancel)
+	defer cancel()
+	defer stop()
+	return p.dialWithFallback(bounded, slot)
+}
+func (p *DataCarrierPool) acceptCarrier(carrier *DataCarrier, target DataCarrierTarget) {
+	defer p.workers.Done()
+	for {
+		stream, open, err := carrier.AcceptStream(p.ctx)
+		if err != nil {
+			return
 		}
-		if !used {
-			return slot
+		stream.edgeTarget = target
+		select {
+		case p.accepted <- dataCarrierAcceptResult{stream: stream, open: open}:
+		case <-p.ctx.Done():
+			_ = stream.Close()
+			return
 		}
 	}
-	return p.config.MaximumCarriers
+}
+
+// HTTP carriers use yamux Ping request/ack frames over their authenticated
+// connection. Each probe is below 1 KiB and never reaches an application origin.
+func (p *DataCarrierPool) monitorCarrier(carrier *DataCarrier, interval, timeout time.Duration) {
+	defer p.workers.Done()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	lastResponse := time.Now()
+	misses := 0
+	for {
+		select {
+		case <-p.ctx.Done():
+			return
+		case <-carrier.Done():
+			return
+		case <-ticker.C:
+		}
+		deadline := time.Now().Add(timeout)
+		staleAt := lastResponse.Add(3 * interval)
+		if staleAt.Before(deadline) {
+			deadline = staleAt
+		}
+		probe, cancel := context.WithDeadline(p.ctx, deadline)
+		err := carrier.Ping(probe)
+		cancel()
+		if p.ctx.Err() != nil {
+			return
+		}
+		if err == nil {
+			misses = 0
+			lastResponse = time.Now()
+			continue
+		}
+		misses++
+		if misses >= 3 || !time.Now().Before(staleAt) {
+			_ = carrier.Close()
+			p.removeClosed()
+			return
+		}
+	}
+}
+
+func (p *DataCarrierPool) retrySlot(slot int) {
+	retry := p.retries[slot]
+	retry.failures++
+	limit := min(time.Second<<min(retry.failures-1, 5), 30*time.Second)
+	retry.next = time.Now().Add(time.Duration(rand.Int64N(int64(limit))) + time.Millisecond)
+	p.retries[slot] = retry
+}
+func (p *DataCarrierPool) repair() {
+	defer p.workers.Done()
+	timer := time.NewTicker(time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case <-p.ctx.Done():
+			return
+		case <-timer.C:
+		}
+		p.mu.RLock()
+		state := p.state
+		p.mu.RUnlock()
+		if state == DataCarrierPoolDraining || state == DataCarrierPoolClosed {
+			return
+		}
+		_ = p.Connect(p.ctx)
+	}
 }
 
 func (p *DataCarrierPool) dialWithFallback(ctx context.Context, slot int) (DataCarrierDialResult, Transport, int, error) {
 	preferred := p.config.Preferred
-	preferredRequest := DataCarrierDialRequest{Transport: preferred, Slot: slot, Attempt: 1, EdgeID: p.config.EdgeID, FailureDomain: p.config.FailureDomains[slot], Identity: p.config.Session}
+	preferredRequest := DataCarrierDialRequest{Transport: preferred, Slot: slot, Attempt: 1, EdgeID: p.target(slot).EdgeID, ProcessEpoch: p.target(slot).ProcessEpoch, FailureDomain: p.target(slot).FailureDomain, Identity: p.config.Session}
 	result, err := p.dial(ctx, preferredRequest)
 	if err == nil {
 		if err := validateDataCarrierDialResult(preferredRequest, result); err != nil {
@@ -1241,7 +1510,7 @@ func (p *DataCarrierPool) dialWithFallback(ctx context.Context, slot int) (DataC
 	if p.config.Fallback == preferred || !transportFallbackAllowed(err) {
 		return DataCarrierDialResult{}, preferred, 1, &TransportDialError{Transport: preferred, Err: err, Fallback: false}
 	}
-	fallbackRequest := DataCarrierDialRequest{Transport: p.config.Fallback, Slot: slot, Attempt: 2, EdgeID: p.config.EdgeID, FailureDomain: p.config.FailureDomains[slot], Identity: p.config.Session}
+	fallbackRequest := DataCarrierDialRequest{Transport: p.config.Fallback, Slot: slot, Attempt: 2, EdgeID: p.target(slot).EdgeID, ProcessEpoch: p.target(slot).ProcessEpoch, FailureDomain: p.target(slot).FailureDomain, Identity: p.config.Session}
 	fallbackResult, fallbackErr := p.dial(ctx, fallbackRequest)
 	if fallbackErr == nil {
 		if err := validateDataCarrierDialResult(fallbackRequest, fallbackResult); err != nil {
@@ -1304,7 +1573,7 @@ func (p *DataCarrierPool) Snapshot() []DataCarrierInfo {
 		if pooled == nil || pooled.carrier == nil {
 			continue
 		}
-		result = append(result, DataCarrierInfo{ID: pooled.carrier.ID(), Identity: pooled.carrier.Identity(), Transport: pooled.transport, EdgeID: pooled.edgeID, FailureDomain: pooled.failureDomain, Slot: pooled.slot, Attempt: pooled.attempt, ActiveStreams: pooled.carrier.ActiveStreams(), State: pooled.carrier.State()})
+		result = append(result, DataCarrierInfo{ProcessEpoch: pooled.target.ProcessEpoch, ID: pooled.carrier.ID(), Identity: pooled.carrier.Identity(), Transport: pooled.transport, EdgeID: pooled.edgeID, FailureDomain: pooled.failureDomain, Slot: pooled.slot, Attempt: pooled.attempt, ActiveStreams: pooled.carrier.ActiveStreams(), State: pooled.carrier.State()})
 	}
 	return result
 }
@@ -1434,8 +1703,8 @@ func (p *DataCarrierPool) openStream(ctx context.Context, control bool, open *St
 }
 
 // AcceptStream waits for an edge-opened data stream on any healthy carrier.
-// Each carrier gets one bounded waiter, and cancellation tears down the
-// unselected waiters without closing healthy sessions.
+// Pool-owned waiters preserve every accepted stream in a bounded queue.
+// Caller cancellation never consumes another carrier's stream.
 func (p *DataCarrierPool) AcceptStream(ctx context.Context) (*DataCarrierStream, StreamOpen, error) {
 	if p == nil || ctx == nil {
 		return nil, StreamOpen{}, ErrInvalidDataCarrierConfig
@@ -1449,43 +1718,21 @@ func (p *DataCarrierPool) AcceptStream(ctx context.Context) (*DataCarrierStream,
 	if state == DataCarrierPoolClosed {
 		return nil, StreamOpen{}, ErrDataCarrierClosed
 	}
-	if err := p.ensureConnected(ctx); err != nil {
-		return nil, StreamOpen{}, err
-	}
-	p.removeClosed()
-	p.mu.RLock()
-	carriers := append([]*pooledDataCarrier(nil), p.carriers...)
-	p.mu.RUnlock()
-	if len(carriers) == 0 {
-		return nil, StreamOpen{}, ErrDataCarrierUnavailable
-	}
-	waitContext, cancel := context.WithCancel(ctx)
-	defer cancel()
-	results := make(chan dataCarrierAcceptResult, len(carriers))
-	for _, pooled := range carriers {
-		go func(carrier *DataCarrier) {
-			stream, open, err := carrier.AcceptStream(waitContext)
-			results <- dataCarrierAcceptResult{stream: stream, open: open, err: err}
-		}(pooled.carrier)
-	}
-	var lastErr error
-	for range carriers {
-		select {
-		case result := <-results:
-			if result.err == nil && result.stream != nil {
-				return result.stream, result.open, nil
-			}
-			lastErr = result.err
-		case <-ctx.Done():
-			return nil, StreamOpen{}, ctx.Err()
-		case <-p.done:
-			return nil, StreamOpen{}, ErrDataCarrierClosed
+	select {
+	case <-p.ready: // After first readiness the repair owner recovers missing carriers.
+	default:
+		if err := p.ensureConnected(ctx); err != nil {
+			return nil, StreamOpen{}, err
 		}
 	}
-	if lastErr == nil {
-		lastErr = ErrDataCarrierUnavailable
+	select {
+	case result := <-p.accepted:
+		return result.stream, result.open, result.err
+	case <-ctx.Done():
+		return nil, StreamOpen{}, ctx.Err()
+	case <-p.done:
+		return nil, StreamOpen{}, ErrDataCarrierClosed
 	}
-	return nil, StreamOpen{}, lastErr
 }
 
 func (p *DataCarrierPool) clearControl() {
@@ -1596,16 +1843,30 @@ func (p *DataCarrierPool) Close() error {
 		return nil
 	}
 	p.closeOnce.Do(func() {
+		p.cancel()
+		p.connectMu.Lock()
 		p.mu.Lock()
 		p.state = DataCarrierPoolClosed
 		carriers := append([]*pooledDataCarrier(nil), p.carriers...)
 		p.mu.Unlock()
+		p.connectMu.Unlock()
 		close(p.done)
 		p.cancel()
 		p.readyOnce.Do(func() { close(p.ready) })
 		for _, pooled := range carriers {
 			if pooled != nil && pooled.carrier != nil {
 				_ = pooled.carrier.Close()
+			}
+		}
+		p.workers.Wait()
+		for {
+			select {
+			case result := <-p.accepted:
+				if result.stream != nil {
+					_ = result.stream.Close()
+				}
+			default:
+				return
 			}
 		}
 	})

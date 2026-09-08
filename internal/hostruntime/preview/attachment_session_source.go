@@ -148,10 +148,10 @@ func NewMachineAttachmentSessionSource(config MachineAttachmentSessionSourceConf
 
 // newMachineAttachmentNetworkSessionSource is the production factory for
 // admitted preview carriers. Each transport attempt receives its own bounded
-// context, so a black-holed QUIC path cannot consume the complete foreground
-// readiness deadline before the authenticated TLS/TCP fallback is tried.
+// context, so a black-holed HTTP/3 path cannot consume the complete foreground
+// readiness deadline before the authenticated HTTP/2 fallback is tried.
 func newMachineAttachmentNetworkSessionSource(identity connector.DataCarrierIdentity, config connector.DataCarrierPoolConfig, endpoints connector.NetworkDialerConfig) (connector.DataCarrierSessionSource, error) {
-	networkDialer := connector.NewNetworkDialer(endpoints)
+	networkDialer := connector.NewHTTPNetworkDialer(endpoints)
 	return connector.NewDataCarrierSessionSource(identity, config, boundedMachineAttachmentDialer(networkDialer, defaultMachineAttachmentDialAttemptTimeout))
 }
 
@@ -196,7 +196,7 @@ func boundedMachineAttachmentDialer(base connector.DataCarrierDialer, timeout ti
 		return connector.DataCarrierDialResult{}, &connector.TransportDialError{
 			Transport: request.Transport,
 			Err:       machineAttachmentDialTimeoutError{transport: request.Transport, timeout: timeout},
-			Fallback:  request.Transport == connector.QUIC,
+			Fallback:  request.Transport == connector.HTTP3,
 		}
 	}
 }
@@ -462,7 +462,7 @@ func (s *MachineAttachmentSessionSource) prepareCarrier(accountID, hostID, machi
 	if err != nil {
 		return machineAttachmentSessionKey{}, connector.DataCarrierIdentity{}, tls.Certificate{}, connector.NetworkDialerConfig{}, connector.DataCarrierPoolConfig{}, errors.Join(ErrMachineAttachmentSessionInvalid, err)
 	}
-	endpoints, hasTCP, hasQUIC, err := s.endpointConfigsValues(edgeEndpoints, liveIdentity, edgeNodeID, edgeProcessEpoch, edgeCarrierServerSPKISHA256, edgeCarrierServerCertificateChainPEM, leaf)
+	endpoints, hasHTTP2, hasHTTP3, err := s.endpointConfigsValues(edgeEndpoints, liveIdentity, edgeNodeID, edgeProcessEpoch, edgeCarrierServerSPKISHA256, edgeCarrierServerCertificateChainPEM, leaf)
 	if err != nil {
 		return machineAttachmentSessionKey{}, connector.DataCarrierIdentity{}, tls.Certificate{}, connector.NetworkDialerConfig{}, connector.DataCarrierPoolConfig{}, err
 	}
@@ -472,12 +472,12 @@ func (s *MachineAttachmentSessionSource) prepareCarrier(accountID, hostID, machi
 	poolConfig.FailureDomains = []string{edgeNodeID}
 	poolConfig.Session = liveIdentity
 	switch {
-	case hasQUIC && hasTCP:
-		poolConfig.Preferred, poolConfig.Fallback, poolConfig.SingleTransport = connector.QUIC, connector.TCPMux, false
-	case hasQUIC:
-		poolConfig.Preferred, poolConfig.Fallback, poolConfig.SingleTransport = connector.QUIC, connector.QUIC, true
-	case hasTCP:
-		poolConfig.Preferred, poolConfig.Fallback, poolConfig.SingleTransport = connector.TCPMux, connector.TCPMux, true
+	case hasHTTP3 && hasHTTP2:
+		poolConfig.Preferred, poolConfig.Fallback, poolConfig.SingleTransport = connector.HTTP3, connector.HTTP2, false
+	case hasHTTP3:
+		poolConfig.Preferred, poolConfig.Fallback, poolConfig.SingleTransport = connector.HTTP3, connector.HTTP3, true
+	case hasHTTP2:
+		poolConfig.Preferred, poolConfig.Fallback, poolConfig.SingleTransport = connector.HTTP2, connector.HTTP2, true
 	default:
 		return machineAttachmentSessionKey{}, connector.DataCarrierIdentity{}, tls.Certificate{}, connector.NetworkDialerConfig{}, connector.DataCarrierPoolConfig{}, ErrMachineAttachmentSessionInvalid
 	}
@@ -503,16 +503,16 @@ func (s *MachineAttachmentSessionSource) endpointConfigsValues(edgeEndpoints []s
 		return connector.NetworkDialerConfig{}, false, false, err
 	}
 	var result connector.NetworkDialerConfig
-	var hasTCP, hasQUIC bool
+	var hasHTTP2, hasHTTP3 bool
 	seen := make(map[connector.Transport]struct{}, 2)
 	for _, raw := range edgeEndpoints {
 		scheme, address, serverName, err := normalizeCarrierEndpoint(raw)
 		if err != nil {
 			return connector.NetworkDialerConfig{}, false, false, fmt.Errorf("%w: edge endpoint: %v", ErrMachineAttachmentSessionInvalid, err)
 		}
-		transport := connector.TCPMux
-		if scheme == "quic" {
-			transport = connector.QUIC
+		transport := connector.HTTP2
+		if scheme == "h3" {
+			transport = connector.HTTP3
 		}
 		if _, exists := seen[transport]; exists {
 			return connector.NetworkDialerConfig{}, false, false, fmt.Errorf("%w: duplicate %s endpoint", ErrMachineAttachmentSessionInvalid, transport)
@@ -534,13 +534,13 @@ func (s *MachineAttachmentSessionSource) endpointConfigsValues(edgeEndpoints []s
 			NextProtos: []string{connector.DataCarrierALPN}, InsecureSkipVerify: false,
 		}
 		endpoint := connector.DataCarrierEndpointConfig{Address: address, TLS: tlsConfig, PeerBinding: peerBinding, ExpectedIdentity: expected}
-		if transport == connector.QUIC {
-			result.QUIC, hasQUIC = endpoint, true
+		if transport == connector.HTTP3 {
+			result.QUIC, hasHTTP3 = endpoint, true
 		} else {
-			result.TCPMux, hasTCP = endpoint, true
+			result.TCPMux, hasHTTP2 = endpoint, true
 		}
 	}
-	return result, hasTCP, hasQUIC, nil
+	return result, hasHTTP2, hasHTTP3, nil
 }
 
 func edgeCarrierServerRoots(chainPEM, pin string) (*x509.CertPool, error) {
@@ -570,11 +570,7 @@ func normalizeCarrierEndpoint(raw string) (string, string, string, error) {
 		return "", "", "", ErrMachineAttachmentSessionInvalid
 	}
 	scheme := strings.ToLower(parsed.Scheme)
-	// Edge carrier endpoints are raw authenticated carrier transports. They
-	// are not HTTP or WebSocket URLs: TCPMux is TLS-over-TCP and QUIC is QUIC
-	// with the same connector-v1 admission. Keeping the schemes explicit
-	// prevents accidentally treating an HTTP endpoint as a carrier socket.
-	if scheme != "tls" && scheme != "quic" {
+	if scheme != "h2" && scheme != "h3" {
 		return "", "", "", ErrMachineAttachmentSessionInvalid
 	}
 	port := parsed.Port()

@@ -139,6 +139,8 @@ type TunnelRoute struct {
 	DesiredState         string               `json:"desired_state"`
 	Generation           int64                `json:"generation"`
 	ETag                 string               `json:"etag"`
+	PublicTCPListenerID  string               `json:"public_tcp_listener_id,omitempty"`
+	PublicTCPPort        int32                `json:"public_tcp_port,omitempty"`
 }
 type TunnelRoutePage struct {
 	Items      []TunnelRoute `json:"items"`
@@ -261,6 +263,7 @@ type TunnelDNSInstructions struct {
 	Records             []TunnelDNSRecord `json:"records"`
 	CertificateStrategy string            `json:"certificate_strategy"`
 	VerificationState   string            `json:"verification_state"`
+	PublicTCPPort       int32             `json:"public_tcp_port,omitempty"`
 	Note                string            `json:"note"`
 }
 
@@ -587,8 +590,8 @@ func validateTunnelCreateInput(in TunnelCreateInput) error {
 	if in.AccessMode == "" {
 		in.AccessMode = "public"
 	}
-	if in.AccessMode != "public" && in.AccessMode != "private" {
-		return errors.New("access mode must be public or private")
+	if in.AccessMode != "public" && in.AccessMode != "private" && in.AccessMode != "team" {
+		return errors.New("access mode must be public, private, or team")
 	}
 	if err := validateTunnelOrigin(in.Origin.Scheme, in.Origin.Address); err != nil {
 		return err
@@ -679,8 +682,8 @@ func validateTunnelRouteInput(in TunnelRouteInput, allowDefaults bool) error {
 	if !tunnelRouteNamePatternV1.MatchString(in.Name) {
 		return errors.New("route name is invalid")
 	}
-	if in.Protocol != "http" && in.Protocol != "tcp_private" {
-		return errors.New("route protocol must be http or tcp_private")
+	if in.Protocol != "http" && in.Protocol != "tcp" && in.Protocol != "tcp_private" {
+		return errors.New("route protocol must be http, tcp, or tcp_private")
 	}
 	if err := validateHostMatch(in.HostMatch); err != nil {
 		return err
@@ -690,6 +693,9 @@ func validateTunnelRouteInput(in TunnelRouteInput, allowDefaults bool) error {
 	}
 	if in.Protocol == "tcp_private" && (in.HostMatch.Type != "catch_all" || in.PathPrefix != nil || in.Origin.Scheme != "tcp") {
 		return errors.New("private TCP routes require catch-all matching and a tcp origin")
+	}
+	if in.Protocol == "tcp" && (in.HostMatch.Type != "managed_exact" || in.HostMatch.Hostname == "" || in.PathPrefix != nil || in.Origin.Scheme != "tcp") {
+		return errors.New("public TCP routes require managed hostname matching and a tcp origin")
 	}
 	if err := validateRouteOrigin(in.Origin); err != nil {
 		return err
@@ -798,7 +804,7 @@ func requiredTunnelMutationHeaders(etag, key string) (http.Header, error) {
 	return mutationHeaders(etag, key)
 }
 func validateTunnel(v Tunnel) error {
-	if v.Schema != TunnelV1Schema || v.Kind != "tunnel" || !validTunnelID(v.ID) || !validTunnelID(v.AccountID) || !validTunnelID(v.CreatedByHostID) || !validTunnelID(v.CreatedByActorID) || !tunnelNamePatternV1.MatchString(v.Name) || (v.AccessMode != "public" && v.AccessMode != "private") || (v.DesiredState != "active" && v.DesiredState != "paused" && v.DesiredState != "deleted") || v.Generation < 1 || !validTunnelETag(v.ETag) || len(v.SummaryCode) > 128 || strings.ContainsAny(v.SummaryCode, "\x00\r\n") {
+	if v.Schema != TunnelV1Schema || v.Kind != "tunnel" || !validTunnelID(v.ID) || !validTunnelID(v.AccountID) || !validTunnelID(v.CreatedByHostID) || !validTunnelID(v.CreatedByActorID) || !tunnelNamePatternV1.MatchString(v.Name) || (v.AccessMode != "public" && v.AccessMode != "private" && v.AccessMode != "team") || (v.DesiredState != "active" && v.DesiredState != "paused" && v.DesiredState != "deleted") || v.Generation < 1 || !validTunnelETag(v.ETag) || len(v.SummaryCode) > 128 || strings.ContainsAny(v.SummaryCode, "\x00\r\n") {
 		return ErrUnsafeTunnelResponse
 	}
 	u, err := url.Parse(v.StableEndpoint)
@@ -813,6 +819,13 @@ func validateTunnel(v Tunnel) error {
 }
 func validateRoute(v TunnelRoute) error {
 	if v.Schema != TunnelV1Schema || v.Kind != "route" || !validTunnelID(v.ID) || !validTunnelID(v.TunnelID) || v.Generation < 1 || !validTunnelETag(v.ETag) || validateTunnelRouteInput(TunnelRouteInput{Name: v.Name, Protocol: v.Protocol, HostMatch: v.HostMatch, PathPrefix: v.PathPrefix, Origin: v.Origin, Priority: v.Priority, ConnectTimeoutMS: v.ConnectTimeoutMS, IdleTimeoutMS: v.IdleTimeoutMS, MaxConcurrentStreams: v.MaxConcurrentStreams}, false) != nil || (v.DesiredState != "active" && v.DesiredState != "disabled" && v.DesiredState != "deleted") {
+		return ErrUnsafeTunnelResponse
+	}
+	if v.Protocol == "tcp" {
+		if !validTunnelID(v.PublicTCPListenerID) || v.PublicTCPPort < 1024 || v.PublicTCPPort > 65535 {
+			return ErrUnsafeTunnelResponse
+		}
+	} else if v.PublicTCPListenerID != "" || v.PublicTCPPort != 0 {
 		return ErrUnsafeTunnelResponse
 	}
 	return nil
@@ -834,8 +847,11 @@ func validateDomain(v *TunnelDomain) error {
 		return ErrUnsafeTunnelResponse
 	}
 	switch v.Certificate.State {
-	case "not_requested", "issuing", "ready", "renewing", "failed", "expired", "revoked":
+	case "not_requested", "issuing", "ready", "renewing", "failed", "expired", "revoked", "not_applicable":
 	default:
+		return ErrUnsafeTunnelResponse
+	}
+	if (v.CertificateStrategy == "none") != (v.Certificate.State == "not_applicable") {
 		return ErrUnsafeTunnelResponse
 	}
 	if v.Certificate.Failure != nil {
@@ -1455,8 +1471,8 @@ func (c *Client) PatchTunnelV1(ctx context.Context, id, etag, key string, in Tun
 			return TunnelMutation{}, err
 		}
 	}
-	if in.AccessMode != nil && *in.AccessMode != "public" && *in.AccessMode != "private" {
-		return TunnelMutation{}, errors.New("access mode must be public or private")
+	if in.AccessMode != nil && *in.AccessMode != "public" && *in.AccessMode != "private" && *in.AccessMode != "team" {
+		return TunnelMutation{}, errors.New("access mode must be public, private, or team")
 	}
 	return c.tunnelMutation(ctx, http.MethodPatch, id, "", etag, key, in)
 }
@@ -1738,7 +1754,7 @@ func (c *Client) TunnelDomainInstructionsV1(ctx context.Context, tunnel, id stri
 	var out TunnelDNSInstructions
 	e = c.doStrict(ctx, http.MethodGet, p+"/instructions", nil, &out)
 	if e == nil {
-		if out.Schema != TunnelV1Schema || out.Kind != "dns_instructions" || out.TunnelID != tunnel || out.DomainID != id || validateDomainHostname(out.Hostname) != nil || out.Provider == "" || len(out.Provider) > 64 || out.CertificateStrategy == "" || len(out.CertificateStrategy) > 64 || out.VerificationState == "" || len(out.VerificationState) > 64 || len(out.Records) > 32 || len(out.Note) > 2000 || containsTunnelControl(out.Provider+out.CertificateStrategy+out.VerificationState+out.Note) {
+		if out.Schema != TunnelV1Schema || out.Kind != "dns_instructions" || out.TunnelID != tunnel || out.DomainID != id || validateDomainHostname(out.Hostname) != nil || out.Provider == "" || len(out.Provider) > 64 || out.CertificateStrategy == "" || len(out.CertificateStrategy) > 64 || out.VerificationState == "" || len(out.VerificationState) > 64 || len(out.Records) > 32 || len(out.Note) > 2000 || out.PublicTCPPort < 0 || out.PublicTCPPort > 65535 || (out.PublicTCPPort > 0 && out.PublicTCPPort < 1024) || containsTunnelControl(out.Provider+out.CertificateStrategy+out.VerificationState+out.Note) {
 			e = ErrUnsafeTunnelResponse
 		}
 		for _, record := range out.Records {

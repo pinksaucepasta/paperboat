@@ -46,12 +46,13 @@ type RuntimeOwnerSessionRegistryConfig struct {
 }
 
 type runtimeOwnerSession struct {
-	done         chan struct{}
-	refs         int
-	closed       bool
-	boundAccount string
-	target       LeaseTarget
-	hasTarget    bool
+	done           chan struct{}
+	refs           int
+	closed         bool
+	everDispatched bool
+	boundAccount   string
+	target         LeaseTarget
+	hasTarget      bool
 }
 
 type runtimeOwnerSessionKey struct {
@@ -127,6 +128,7 @@ func (r *RuntimeOwnerSessionRegistry) OwnerSessionDone(accountID, machineID, own
 			return nil, fmt.Errorf("%w: owner session is closed or bound to another account", ErrOwnerSessionBinding)
 		}
 		existing.boundAccount = accountID
+		existing.everDispatched = true
 		existing.refs++
 		return existing.done, nil
 	}
@@ -179,6 +181,7 @@ func (r *RuntimeOwnerSessionRegistry) OwnerSessionDoneForTarget(accountID, machi
 			return nil, fmt.Errorf("%w: owner session target or account differs", ErrOwnerSessionBinding)
 		}
 		existing.boundAccount = accountID
+		existing.everDispatched = true
 		existing.refs++
 		return existing.done, nil
 	}
@@ -285,6 +288,22 @@ func (r *RuntimeOwnerSessionRegistry) ReleaseMachineOwnerSession(machineID, owne
 		delete(r.unbound, key)
 	}
 	return nil
+}
+
+// MachineOwnerSessionDispatchState reports whether a hostd-minted owner has
+// an active daemon dispatch reference or has already released one.
+// It exposes no account, target, token, or other capability material.
+func (r *RuntimeOwnerSessionRegistry) MachineOwnerSessionDispatchState(machineID, ownerSessionID string) (attached, ended bool) {
+	if r == nil || machineID != r.machineID || !validLeaseID(ownerSessionID) {
+		return false, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	session := r.unbound[ownerSessionID]
+	if session == nil || session.closed {
+		return false, false
+	}
+	return session.refs > 1, session.everDispatched && session.refs <= 1
 }
 
 func newOwnerSessionID() (string, error) {

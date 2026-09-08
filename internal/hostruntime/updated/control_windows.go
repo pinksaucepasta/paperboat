@@ -270,7 +270,7 @@ func (c *windowsController) invoke(ctx context.Context, request ControlRequest) 
 		if comparison == 0 {
 			return response, nil
 		}
-		if _, err := stageWindowsActivation(ctx, c.config, release); err != nil {
+		if _, err := stageWindowsActivation(ctx, c.config, release, "update"); err != nil {
 			return response, err
 		}
 		response.Version, response.Pending = release.Version, true
@@ -296,7 +296,7 @@ func (c *windowsController) invoke(ctx context.Context, request ControlRequest) 
 		if compareErr != nil || comparison <= 0 {
 			return response, workerupdate.ErrInvalidRelease
 		}
-		if _, err := stageWindowsActivation(ctx, c.config, release); err != nil {
+		if _, err := stageWindowsActivation(ctx, c.config, release, "maintenance"); err != nil {
 			return response, err
 		}
 		response.Version, response.Pending = release.Version, true
@@ -358,7 +358,19 @@ func (c *windowsController) checkRelease(ctx context.Context) (autoupdate.Result
 	if blocked {
 		return autoupdate.Result{Version: c.activeVersion}, nil
 	}
-	release, found, err := c.resolve(ctx)
+	journal, loadErr := loadWindowsActivationJournalForController(c.config)
+	if loadErr != nil && !errors.Is(loadErr, os.ErrNotExist) {
+		return autoupdate.Result{Version: c.activeVersion}, loadErr
+	}
+	manualResolver, maintenanceResolver := c.resolve, c.resolve
+	if journal.BlockedReason == autoupdate.BlockedActiveTerminalSessions && journal.ManualMode != "" {
+		source, sourceErr := c.tufSource()
+		if sourceErr != nil {
+			return autoupdate.Result{Version: c.activeVersion}, sourceErr
+		}
+		manualResolver, maintenanceResolver = source.ResolveManual, source.ResolveSupervisorManual
+	}
+	release, found, manualMode, err := resolveWindowsQueuedRelease(ctx, journal, c.resolve, manualResolver, maintenanceResolver)
 	if err != nil {
 		return autoupdate.Result{Version: c.activeVersion}, err
 	}
@@ -373,7 +385,7 @@ func (c *windowsController) checkRelease(ctx context.Context) (autoupdate.Result
 		if comparison == 0 {
 			return autoupdate.Result{Version: c.activeVersion}, nil
 		}
-		if _, err := stageWindowsActivation(ctx, c.config, release); err != nil {
+		if _, err := stageWindowsActivation(ctx, c.config, release, manualMode); err != nil {
 			return autoupdate.Result{Version: c.activeVersion}, err
 		}
 		if err := startWindowsActivatorService(); err != nil {
@@ -468,4 +480,24 @@ func controlErrorCodeWindows(err error) string {
 		return "activation_unavailable"
 	}
 	return "check_failed"
+}
+
+func resolveWindowsQueuedRelease(ctx context.Context, journal windowsActivationJournal, automatic, manual, maintenance workerupdate.Resolver) (workerupdate.Release, bool, string, error) {
+	resolver := automatic
+	mode := ""
+	if journal.BlockedReason == autoupdate.BlockedActiveTerminalSessions {
+		switch journal.ManualMode {
+		case "update":
+			resolver = manual
+			mode = "update"
+		case "maintenance":
+			resolver = maintenance
+			mode = "maintenance"
+		}
+	}
+	release, found, err := resolver(ctx)
+	if err == nil && mode != "" && (!found || release.Version != journal.Version) {
+		return workerupdate.Release{}, false, mode, errors.New("deferred manual update is no longer the current eligible signed release; run pb update to choose a new release")
+	}
+	return release, found, mode, err
 }

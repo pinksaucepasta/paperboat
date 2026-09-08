@@ -80,7 +80,7 @@ func TestPreviewCommandSurfaceAndHelp(t *testing.T) {
 			t.Fatalf("removed command %q is discoverable: command=%v remaining=%v err=%v", removed, entry, remaining, err)
 		}
 	}
-	for _, flagName := range []string{"private", "duration", "domain", "json"} {
+	for _, flagName := range []string{"private", "team", "ttl", "duration", "background", "domain", "json"} {
 		if previewCommand.Flags().Lookup(flagName) == nil {
 			t.Fatalf("preview missing --%s", flagName)
 		}
@@ -100,7 +100,7 @@ func TestPreviewCommandSurfaceAndHelp(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := help.String()
-	for _, want := range []string{"pb preview <port|url|path>", "--private", "--duration", "--domain", "--json", "list", "stop"} {
+	for _, want := range []string{"pb preview <port|url|path>", "--private", "--team", "--ttl", "--duration", "--background", "--domain", "--json", "list", "status", "stop", "delete"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("help missing %q: %s", want, text)
 		}
@@ -114,6 +114,23 @@ func TestPreviewCommandSurfaceAndHelp(t *testing.T) {
 	stop, _, err := root.Find([]string{"preview", "stop"})
 	if err != nil || stop.ValidArgsFunction == nil {
 		t.Fatalf("preview stop completion missing: command=%v err=%v", stop, err)
+	}
+}
+
+func TestPreviewAndEphemeralTunnelUseEquivalentLaunchValidation(t *testing.T) {
+	previewCommand := previewCobraCommandV1()
+	previewCommand.SetOut(io.Discard)
+	previewCommand.SetErr(io.Discard)
+	previewCommand.SetArgs([]string{"3000", "--background", "--ttl", "24h1s"})
+	previewErr := previewCommand.Execute()
+
+	tunnelCommand := tunnelCobraCommandV1()
+	tunnelCommand.SetOut(io.Discard)
+	tunnelCommand.SetErr(io.Discard)
+	tunnelCommand.SetArgs([]string{"--ephemeral", "3000", "--background", "--ttl", "24h1s"})
+	tunnelErr := tunnelCommand.Execute()
+	if previewErr == nil || tunnelErr == nil || previewErr.Error() != tunnelErr.Error() {
+		t.Fatalf("preview error=%v, tunnel error=%v", previewErr, tunnelErr)
 	}
 }
 
@@ -317,7 +334,75 @@ func TestPreviewForegroundProductionOwnerLeaseBindsCreateAndReleasesOnExit(t *te
 	}
 }
 
-func TestPreviewForegroundProductionOwnerLeaseFailureCancelsAndReleases(t *testing.T) {
+func TestPreviewBackgroundReturnsAfterReadyAndLeavesOwnershipWithDaemon(t *testing.T) {
+	apiServer := newPreviewCommandServer(t, func(r *http.Request, body map[string]any) (any, string, int) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/previews" {
+			t.Fatalf("unexpected API request %s %s", r.Method, r.URL.Path)
+		}
+		owner, _ := body["owner_session_id"].(string)
+		expires, ok := body["expires_at"].(string)
+		if !ok || expires == "" {
+			t.Fatalf("missing background deadline: %#v", body)
+		}
+		deadline, err := time.Parse(time.RFC3339Nano, expires)
+		if err != nil || time.Until(deadline) < 29*time.Minute || time.Until(deadline) > 31*time.Minute {
+			t.Fatalf("default background deadline=%q err=%v", expires, err)
+		}
+		value := previewCommandLease("prv_background_1", "device_cli", owner, "http", "127.0.0.1:3000", "connecting")
+		value["lease_deadline"], value["user_deadline"] = expires, expires
+		return value, `"ptv1:preview_lease:cHJ2X2JhY2tncm91bmRfMQ:1"`, http.StatusOK
+	})
+	defer apiServer.Close()
+	registry, err := preview.NewRuntimeOwnerSessionRegistry(preview.RuntimeOwnerSessionRegistryConfig{MachineID: "device_cli", RuntimeDone: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerHandler := &recordingOwnerLeaseHandler{}
+	ownerManager, err := preview.NewOwnerSessionLeaseManager(preview.OwnerSessionLeaseManagerConfig{MachineID: "device_cli", ControlToken: "control_secret", Registry: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerHandler.next = ownerManager
+	ownerServer := httptest.NewServer(ownerHandler)
+	defer ownerServer.Close()
+	ownerClient, err := preview.NewLocalOwnerSessionClient(ownerServer.URL, "control_secret", ownerServer.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	apiClient := api.New(apiServer.URL, config.Credential{AccessToken: "test-token"}, apiServer.Client())
+	carrier := &backgroundOwnerLeaseCarrier{productionOwnerLeaseCarrier: productionOwnerLeaseCarrier{ready: make(chan struct{}), owner: make(chan string, 1)}}
+	previousClient, previousMachine, previousCarrier, previousOwnerClient := previewClientForCommand, previewMachineID, newPreviewCarrier, previewOwnerSessionClientForCommand
+	t.Cleanup(func() {
+		previewClientForCommand, previewMachineID, newPreviewCarrier, previewOwnerSessionClientForCommand = previousClient, previousMachine, previousCarrier, previousOwnerClient
+		_ = ownerManager.Close()
+	})
+	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return apiClient, nil }
+	previewMachineID = func() (string, error) { return "device_cli", nil }
+	newPreviewCarrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
+		return carrier, nil
+	}
+	previewOwnerSessionClientForCommand = func() (*preview.LocalOwnerSessionClient, error) { return ownerClient, nil }
+	command := previewCobraCommandV1()
+	command.SetOut(io.Discard)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{"3000", "--background"})
+	if err := command.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if ownerHandler.count(http.MethodPost) != 1 || ownerHandler.count(http.MethodDelete) != 0 {
+		t.Fatalf("local owner calls = %v", ownerHandler.methods())
+	}
+	select {
+	case owner := <-carrier.owner:
+		if owner == "" {
+			t.Fatal("empty daemon owner")
+		}
+	default:
+		t.Fatal("daemon carrier did not receive owner")
+	}
+}
+
+func TestPreviewBackgroundStartupFailureCancelsAndReleasesDaemonOwnership(t *testing.T) {
 	apiServer := newPreviewCommandServer(t, func(r *http.Request, _ map[string]any) (any, string, int) {
 		if r.Method == http.MethodPost && r.URL.Path == "/v1/previews" {
 			return map[string]any{"error": map[string]string{"code": "preview_unavailable"}}, "", http.StatusServiceUnavailable
@@ -365,7 +450,7 @@ func TestPreviewForegroundProductionOwnerLeaseFailureCancelsAndReleases(t *testi
 	command := previewCobraCommandV1()
 	command.SetOut(io.Discard)
 	command.SetErr(io.Discard)
-	command.SetArgs([]string{"3000"})
+	command.SetArgs([]string{"3000", "--background", "--ttl", "30m"})
 	if err := command.ExecuteContext(context.Background()); err == nil {
 		t.Fatal("preview create unexpectedly succeeded")
 	}
@@ -517,6 +602,12 @@ type productionOwnerLeaseCarrier struct {
 	once  sync.Once
 }
 
+type backgroundOwnerLeaseCarrier struct{ productionOwnerLeaseCarrier }
+
+func (*backgroundOwnerLeaseCarrier) LeaseLifecycleOwnership() preview.LeaseLifecycleOwnership {
+	return preview.LeaseLifecycleObserved
+}
+
 func (*productionOwnerLeaseCarrier) NeedsOwnerSessionLease() bool { return true }
 
 func (c *productionOwnerLeaseCarrier) Run(ctx context.Context, lease preview.Lease, ready func(preview.Lease) error) error {
@@ -661,5 +752,17 @@ func previewCommandLease(id, device, session, scheme, address, state string) map
 		"access_mode": "public", "persistent": false, "endpoint": "https://quiet-river-7.preview.example.test", "lease_deadline": now.Add(time.Hour),
 		"state": state, "allocation_state": map[bool]string{true: "ready", false: "pending"}[state == "ready"], "edge_state": map[bool]string{true: "ready", false: "pending"}[state == "ready"],
 		"origin_state": map[bool]string{true: "ready", false: "unknown"}[state == "ready"], "created_at": now, "last_renewed_at": now,
+	}
+}
+
+func TestTeamAndPrivateAudienceFlagsAreMutuallyExclusive(t *testing.T) {
+	for _, args := range [][]string{{"preview", "3000", "--team", "--private"}, {"tunnel", "--ephemeral", "3000", "--team", "--private"}, {"tunnel", "create", "demo", "--port", "3000", "--team", "--private"}} {
+		command := newRootCommand()
+		command.SetArgs(args)
+		command.SetOut(io.Discard)
+		command.SetErr(io.Discard)
+		if err := command.Execute(); err == nil || !strings.Contains(err.Error(), "team") || !strings.Contains(err.Error(), "private") {
+			t.Fatalf("args=%v error=%v", args, err)
+		}
 	}
 }

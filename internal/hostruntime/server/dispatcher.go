@@ -29,6 +29,7 @@ type HealthSource interface{ Snapshot() health.Snapshot }
 type SessionLauncher interface {
 	Launch(context.Context, process.LaunchRequest) (session.Snapshot, error)
 }
+type CapabilityGate interface{ Enabled(string) bool }
 
 type DispatcherConfig struct {
 	Sessions        *session.Manager
@@ -41,6 +42,7 @@ type DispatcherConfig struct {
 	Writers         *filetransfer.WriterRegistry
 	Exec            *execprocess.Manager
 	SSH             *managedssh.Host
+	Capabilities    CapabilityGate
 }
 
 type Dispatcher struct {
@@ -68,7 +70,8 @@ func NewDispatcher(config DispatcherConfig) (*Dispatcher, error) {
 }
 
 func (d *Dispatcher) Capabilities() []string {
-	capabilities := []string{"terminal.v1", "health.v1"}
+	capabilities := []string{"health.v1"}
+	capabilities = append(capabilities, "terminal.v1")
 	if d.config.ConfigApply != nil {
 		capabilities = append(capabilities, "config.apply.v1")
 	}
@@ -82,6 +85,9 @@ func (d *Dispatcher) Capabilities() []string {
 }
 
 func (d *Dispatcher) Handle(ctx context.Context, authorization Authorization, capability string, payload json.RawMessage) operation.Outcome {
+	if capability != "health.v1" && !d.capabilityEnabled(capability) {
+		return failure("capability_disabled")
+	}
 	switch capability {
 	case "terminal.v1":
 		return d.terminal(ctx, authorization, payload)
@@ -97,6 +103,14 @@ func (d *Dispatcher) Handle(ctx context.Context, authorization Authorization, ca
 		return failure("capability_required")
 	}
 }
+
+func (d *Dispatcher) capabilityEnabled(capability string) bool {
+	return d.config.Capabilities == nil || d.config.Capabilities.Enabled(capability)
+}
+
+// CloseSSHStreams terminates active managed-SSH streams when that capability
+// is disabled. The host remains available for a later re-enable.
+func (d *Dispatcher) CloseSSHStreams() error { return d.ssh.closeAll() }
 
 func (d *Dispatcher) HandleOperation(ctx context.Context, authorization Authorization, capability, operationID string, payload json.RawMessage) operation.Outcome {
 	if capability == "exec.v1" {

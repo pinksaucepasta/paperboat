@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -428,13 +429,28 @@ type tunnelCreateOutput struct {
 	Tunnel    api.Tunnel                  `json:"tunnel"`
 	Operation api.TunnelOperation         `json:"operation"`
 	Connector tunnelConnectorCreateOutput `json:"connector"`
+	Route     *api.TunnelRoute            `json:"route,omitempty"`
 	Domains   []tunnelCreateDomainOutput  `json:"domains"`
 	Replayed  bool                        `json:"replayed"`
 	Changed   bool                        `json:"changed"`
 }
 
 func tunnelCobraCommandV1() *cobra.Command {
-	root := tunnelCommand("tunnel", "Manage durable tunnels", cobra.NoArgs, nil)
+	root := &cobra.Command{Use: "tunnel [--ephemeral] [<port|url|path>]", Short: "Manage durable tunnels or start an ephemeral tunnel", Args: func(command *cobra.Command, args []string) error {
+		ephemeral, _ := command.Flags().GetBool("ephemeral")
+		if ephemeral {
+			return previewTargetArgs(command, args)
+		}
+		return cobra.NoArgs(command, args)
+	}, RunE: func(command *cobra.Command, args []string) error {
+		ephemeral, _ := command.Flags().GetBool("ephemeral")
+		if !ephemeral {
+			return command.Help()
+		}
+		return runPreviewCobra(command, args)
+	}, SilenceUsage: true, SilenceErrors: true}
+	root.PersistentFlags().Bool("ephemeral", false, "use the temporary preview lifecycle")
+	configureEphemeralLaunchFlags(root)
 	root.AddCommand(tunnelCreateCommand(), tunnelListCommand(), tunnelShowCommand())
 	root.AddCommand(tunnelStatusCommand(), tunnelDoctorCommand(), tunnelLogsCommand())
 	for _, action := range []string{"pause", "resume", "delete"} {
@@ -442,11 +458,26 @@ func tunnelCobraCommandV1() *cobra.Command {
 	}
 	root.AddCommand(tunnelRouteCommand(), tunnelDomainCommand(), tunnelConnectorCommand())
 	root.AddCommand(tunnelCredentialsCommand())
+	root.AddCommand(tunnelPolicyCommand())
+	stop := &cobra.Command{Use: "stop <preview>", Short: "Stop an ephemeral tunnel", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(command *cobra.Command, args []string) error {
+		ephemeral, _ := command.Flags().GetBool("ephemeral")
+		if !ephemeral {
+			return errors.New("tunnel stop requires --ephemeral; use tunnel pause or delete for a durable tunnel")
+		}
+		return runPreviewStopCobra(command, args)
+	}, SilenceUsage: true, SilenceErrors: true}
+	stop.Flags().Bool("json", false, "print the stopped canonical resource as JSON")
+	root.AddCommand(stop)
 	return root
 }
 
 func tunnelStatusCommand() *cobra.Command {
-	command := tunnelCommand("status <tunnel>", "Show tunnel health", cobra.ExactArgs(1), runTunnelStatus)
+	command := tunnelCommand("status <tunnel>", "Show tunnel health", cobra.ExactArgs(1), func(command *cobra.Command, args []string) error {
+		if ephemeral, _ := command.Flags().GetBool("ephemeral"); ephemeral {
+			return runPreviewStatusCobra(command, args)
+		}
+		return runTunnelStatus(command, args)
+	})
 	command.Flags().Bool("watch", false, "watch for health changes")
 	command.Flags().Duration("interval", time.Second, "watch polling interval (250ms-1m)")
 	tunnelJSONFlag(command)
@@ -1302,6 +1333,10 @@ func tunnelCreateHumanOutput(result tunnelCreateOutput, origin string) string {
 	fmt.Fprintf(&output, "%s tunnel %s (%s)\n", verb, result.Tunnel.Name, result.Tunnel.ID)
 	fmt.Fprintf(&output, "Connector %s is ready\n", result.Connector.ConnectorID)
 	fmt.Fprintf(&output, "%s -> %s\n", result.Tunnel.StableEndpoint, origin)
+	if result.Route != nil && result.Route.PublicTCPPort != 0 {
+		host, _ := url.Parse(result.Tunnel.StableEndpoint)
+		fmt.Fprintf(&output, "TCP endpoint: %s\n", net.JoinHostPort(host.Hostname(), strconv.Itoa(int(result.Route.PublicTCPPort))))
+	}
 	fmt.Fprintf(&output, "Status: %s", tunnelOperationHuman(result.Operation))
 	for _, domain := range result.Domains {
 		fmt.Fprintf(&output, "\nDNS for %s:", domain.Domain.Hostname)
@@ -1344,6 +1379,9 @@ func tunnelCreateCommand() *cobra.Command {
 		mode := "public"
 		if private {
 			mode = "private"
+		}
+		if team, _ := command.Flags().GetBool("team"); team {
+			mode = "team"
 		}
 		var expires *time.Time
 		if expiry > 0 {
@@ -1434,7 +1472,7 @@ func tunnelCreateCommand() *cobra.Command {
 			return tunnelCreateJournalError(out.Tunnel.ID, "tunnel readiness", "pb tunnel status "+out.Tunnel.ID, err)
 		}
 		result := tunnelCreateOutput{Schema: api.TunnelV1Schema, Kind: "tunnel_create", Tunnel: out.Tunnel, Operation: out.Operation, Connector: connector, Domains: make([]tunnelCreateDomainOutput, 0, len(domains)), Replayed: out.Replayed, Changed: out.Changed}
-		if len(domains) > 0 {
+		if len(domains) > 0 || scheme == "tcp" {
 			routes, listErr := retryTunnelRead(ctx, func() (api.TunnelRoutePage, error) {
 				return client.ListTunnelRoutesV1(ctx, out.Tunnel.ID, "", 1)
 			})
@@ -1443,6 +1481,13 @@ func tunnelCreateCommand() *cobra.Command {
 					listErr = errors.New("initial route was not returned")
 				}
 				return tunnelCreateDomainError(out.Tunnel.ID, strings.Join(domains, ","), "default", "route resolution", listErr)
+			}
+			result.Route = &routes.Items[0]
+			if scheme == "tcp" && (!private && (result.Route.Protocol != "tcp" || result.Route.PublicTCPPort == 0) || private && result.Route.Protocol != "tcp_private") {
+				return api.ErrUnsafeTunnelResponse
+			}
+			if len(domains) == 0 {
+				goto createOutput
 			}
 			journal = workflow.Snapshot()
 			for index, hostname := range domains {
@@ -1475,6 +1520,7 @@ func tunnelCreateCommand() *cobra.Command {
 				result.Domains = append(result.Domains, tunnelCreateDomainOutput{Domain: domain.Domain, Operation: domain.Operation, Instructions: instructions, Replayed: domain.Replayed, Changed: domain.Changed})
 			}
 		}
+	createOutput:
 		if err := tunnelOutput(command, result, tunnelCreateHumanOutput(result, origin)); err != nil {
 			return err
 		}
@@ -1484,9 +1530,11 @@ func tunnelCreateCommand() *cobra.Command {
 		return nil
 	})
 	command.Flags().Int("port", 0, "local TCP port")
-	command.Flags().String("from", "", "origin URL (http, https, h2c, or unix)")
+	command.Flags().String("from", "", "origin URL (http, https, h2c, tcp, or unix)")
 	command.Flags().StringSlice("domain", nil, "custom domain to add after creation")
 	command.Flags().Bool("private", false, "require authenticated private access")
+	command.Flags().Bool("team", false, "require an explicit team grant for browser access")
+	command.MarkFlagsMutuallyExclusive("private", "team")
 	command.Flags().Duration("duration", 0, "optional tunnel lifetime")
 	tunnelMutationWaitFlags(command)
 	tunnelJSONFlag(command)
@@ -1806,6 +1854,9 @@ func applyTunnelRouteOriginFlags(command *cobra.Command, origin api.TunnelRouteO
 
 func tunnelListCommand() *cobra.Command {
 	command := tunnelCommand("list", "List durable tunnels", cobra.NoArgs, func(command *cobra.Command, _ []string) error {
+		if ephemeral, _ := command.Flags().GetBool("ephemeral"); ephemeral {
+			return runPreviewListCobra(command, nil)
+		}
 		cursor, _ := command.Flags().GetString("cursor")
 		limit, _ := command.Flags().GetInt("limit")
 		if limit < 1 || limit > 200 {
@@ -1872,6 +1923,11 @@ func tunnelStateCommand(action string) *cobra.Command {
 		short = "Delete endpoints and routes and revoke connectors while preserving user DNS records"
 	}
 	command := tunnelCommand(action+" <tunnel>", short, cobra.ExactArgs(1), func(command *cobra.Command, args []string) error {
+		if action == "delete" {
+			if ephemeral, _ := command.Flags().GetBool("ephemeral"); ephemeral {
+				return runPreviewStopCobra(command, args)
+			}
+		}
 		if action == "delete" {
 			yes, _ := command.Flags().GetBool("yes")
 			if !yes {
@@ -1973,7 +2029,11 @@ func routeListCommand() *cobra.Command {
 			if route.PathPrefix != nil {
 				match += *route.PathPrefix
 			}
-			if _, err := fmt.Fprintf(command.OutOrStdout(), "%s\t%s\t%s\t%s\t%s://%s\t%s\n", route.ID, route.Name, route.Protocol, match, route.Origin.Scheme, route.Origin.Address, route.DesiredState); err != nil {
+			endpoint := match
+			if route.PublicTCPPort != 0 {
+				endpoint = net.JoinHostPort(route.HostMatch.Hostname, strconv.Itoa(int(route.PublicTCPPort)))
+			}
+			if _, err := fmt.Fprintf(command.OutOrStdout(), "%s\t%s\t%s\t%s\t%s://%s\t%s\n", route.ID, route.Name, route.Protocol, endpoint, route.Origin.Scheme, route.Origin.Address, route.DesiredState); err != nil {
 				return err
 			}
 		}
@@ -1996,8 +2056,8 @@ func routeAddCommand() *cobra.Command {
 		if !validTunnelCLIName(name, 80) {
 			return errors.New("route name is invalid")
 		}
-		if protocol != "http" && protocol != "tcp_private" {
-			return errors.New("protocol must be http or tcp_private")
+		if protocol != "http" && protocol != "tcp" && protocol != "tcp_private" {
+			return errors.New("protocol must be http, tcp, or tcp_private")
 		}
 		pathPrefix, _ := command.Flags().GetString("path")
 		var pathValue *string
@@ -2043,6 +2103,9 @@ func routeAddCommand() *cobra.Command {
 		if protocol == "tcp_private" && (host != "" || pathValue != nil || scheme != "tcp") {
 			return errors.New("tcp_private routes require tcp:// origin without domain or path matching")
 		}
+		if protocol == "tcp" && (host != "" || pathValue != nil || scheme != "tcp") {
+			return errors.New("public tcp routes use the tunnel managed hostname and require tcp:// origin without --domain or --path")
+		}
 		if protocol == "http" && scheme == "tcp" {
 			return errors.New("HTTP routes cannot target a tcp origin")
 		}
@@ -2063,6 +2126,17 @@ func routeAddCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
+		if protocol == "tcp" {
+			tunnel, getErr := c.GetTunnelV1(ctx, tunnelID)
+			if getErr != nil {
+				return getErr
+			}
+			u, parseErr := url.Parse(tunnel.StableEndpoint)
+			if parseErr != nil || u.Hostname() == "" {
+				return api.ErrUnsafeTunnelResponse
+			}
+			hostMatch = api.TunnelRouteHostMatch{Type: "managed_exact", Hostname: u.Hostname()}
+		}
 		out, e := retryTunnelRead(ctx, func() (api.TunnelRouteMutation, error) {
 			return c.CreateTunnelRouteV1(ctx, tunnelID, key, api.TunnelRouteInput{Name: name, Protocol: protocol, HostMatch: hostMatch, PathPrefix: pathValue, Origin: originValue, Priority: priority, ConnectTimeoutMS: int32(connectTimeout / time.Millisecond), IdleTimeoutMS: int32(idleTimeout / time.Millisecond), MaxConcurrentStreams: maxStreams})
 		})
@@ -2081,7 +2155,7 @@ func routeAddCommand() *cobra.Command {
 	}
 	command.Flags().String("domain", "", "exact hostname or one-label wildcard match")
 	command.Flags().String("path", "", "HTTP path prefix, optionally ending in *")
-	command.Flags().String("protocol", "http", "route protocol (http or tcp_private)")
+	command.Flags().String("protocol", "http", "route protocol (http, tcp, or tcp_private)")
 	tunnelRouteOriginFlags(command, true)
 	command.Flags().Int32("priority", 0, "route priority")
 	command.Flags().Duration("connect-timeout", 10*time.Second, "origin connect timeout")
@@ -2364,6 +2438,11 @@ func domainInstructionsCommand() *cobra.Command {
 		writer := command.OutOrStdout()
 		for _, record := range instructions.Records {
 			if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%d\n", record.Name, record.Type, record.Value, record.TTL); err != nil {
+				return err
+			}
+		}
+		if instructions.PublicTCPPort > 0 {
+			if _, err := fmt.Fprintf(writer, "TCP endpoint\t%s:%d\n", strings.TrimPrefix(instructions.Hostname, "*."), instructions.PublicTCPPort); err != nil {
 				return err
 			}
 		}

@@ -4,6 +4,7 @@ package localapi
 
 import (
 	"context"
+	"errors"
 
 	"golang.org/x/sys/windows"
 )
@@ -15,7 +16,14 @@ func watchProcessExit(pid int) (<-chan struct{}, func()) {
 	}
 	process, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(pid))
 	if err != nil {
-		close(done)
+		// Access to query a same-user client can still be denied across Windows
+		// service/session boundaries. That means the optional lifetime watcher is
+		// unavailable, not that the client exited. Only an invalid PID proves the
+		// process is already gone; the pipe hangup remains the cleanup boundary in
+		// every other failure case.
+		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
+			close(done)
+		}
 		return done, func() {}
 	}
 	ctx, cancel := context.WithCancel(context.Background())

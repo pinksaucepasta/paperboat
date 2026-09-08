@@ -80,8 +80,8 @@ func TestResolveUsernameRejectsConflictAndUnsafeValues(t *testing.T) {
 	if _, err := ResolveUsername("", "", "", "local", true); !errors.Is(err, ErrSSHUsernameMissing) {
 		t.Fatalf("registered-user absence error = %v", err)
 	}
-	if _, err := ResolveUsername("root", "", "deploy", "local", true); !errors.Is(err, ErrSSHUsernameNotAllowed) {
-		t.Fatalf("unregistered user error = %v", err)
+	if got, err := ResolveUsername("root", "", "deploy", "local", true); err != nil || got != "root" {
+		t.Fatalf("explicit user override = %q, %v", got, err)
 	}
 	for _, value := range []string{"-oProxyCommand=x", "user@host", "bad user", "bad;user", "bad\nuser", ""} {
 		_, err := ResolveUsername(value, "", "", "", false)
@@ -100,8 +100,8 @@ func TestResolveUsernameWindowsIsCaseInsensitiveAndCanonical(t *testing.T) {
 	if err != nil || got != "Pujan" {
 		t.Fatalf("ResolveUsernameForPlatform() = %q, %v", got, err)
 	}
-	if _, err := ResolveUsernameForPlatform("pujan", "", "Pujan", "local", true, "linux"); !errors.Is(err, ErrSSHUsernameNotAllowed) {
-		t.Fatalf("Linux username comparison error = %v", err)
+	if got, err := ResolveUsernameForPlatform("pujan", "", "Pujan", "local", true, "linux"); err != nil || got != "pujan" {
+		t.Fatalf("Linux explicit override = %q, %v", got, err)
 	}
 }
 

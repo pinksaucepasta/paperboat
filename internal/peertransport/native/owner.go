@@ -32,21 +32,23 @@ type Event struct {
 }
 
 type Config struct {
-	Authority *tailnet.Authority
-	TLS       *tls.Config
-	Observe   func(Event)
+	Authority        *tailnet.Authority
+	TLS              *tls.Config
+	Observe          func(Event)
+	RefreshAuthority func(context.Context) error
 }
 
 type Owner struct {
-	authority *tailnet.Authority
-	tls       *tls.Config
-	observe   func(Event)
-	ctx       context.Context
-	cancel    context.CancelFunc
-	mu        sync.Mutex
-	closed    bool
-	sessions  map[*Session]struct{}
-	workers   sync.WaitGroup
+	authority        *tailnet.Authority
+	tls              *tls.Config
+	observe          func(Event)
+	refreshAuthority func(context.Context) error
+	ctx              context.Context
+	cancel           context.CancelFunc
+	mu               sync.Mutex
+	closed           bool
+	sessions         map[*Session]struct{}
+	workers          sync.WaitGroup
 }
 
 func NewOwner(config Config) (*Owner, error) {
@@ -54,7 +56,7 @@ func NewOwner(config Config) (*Owner, error) {
 		return nil, ErrInvalid
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Owner{authority: config.Authority, tls: config.TLS.Clone(), observe: config.Observe, ctx: ctx, cancel: cancel, sessions: make(map[*Session]struct{})}, nil
+	return &Owner{authority: config.Authority, tls: config.TLS.Clone(), observe: config.Observe, refreshAuthority: config.RefreshAuthority, ctx: ctx, cancel: cancel, sessions: make(map[*Session]struct{})}, nil
 }
 
 func (o *Owner) emit(event Event) {

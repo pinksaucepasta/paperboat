@@ -859,3 +859,51 @@ func TestWindowsCredentialErrorClassification(t *testing.T) {
 		t.Fatalf("service error = %v, want ErrCredentialStoreUnavailable", err)
 	}
 }
+
+func TestWindowsPasswordVaultDPAPIBounds(t *testing.T) {
+	ref := passwordVaultSecretRef("https://vault.example", fmt.Sprintf("native-%d", time.Now().UnixNano()))
+	store := KeyringStore{}
+	t.Cleanup(func() { cleanupWindowsKeyringFixture(ref) })
+	value := string(bytes.Repeat([]byte("v"), passwordVaultRecordBytes))
+	if err := store.Set(ref, value); err != nil {
+		t.Fatalf("store maximum vault record: %v", err)
+	}
+	actual, err := store.Get(ref)
+	if err != nil || actual != value {
+		t.Fatalf("maximum vault round trip failed: bytes=%d err=%v", len(actual), err)
+	}
+	if err := store.Set(ref, value+"x"); !errors.Is(err, ErrCredentialStoreUnavailable) {
+		t.Fatalf("oversize vault accepted: %v", err)
+	}
+	actual, err = store.Get(ref)
+	if err != nil || actual != value {
+		t.Fatalf("rejected write changed authoritative record: %v", err)
+	}
+	for _, other := range []string{"ordinary-auth", ref + "x", "environment-password-vault-v1-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"} {
+		if windowsSecretMaxBytes(other) != windowsCredentialBlobMaxBytes {
+			t.Fatal("noncanonical reference received expanded allowance")
+		}
+		if err := store.Set(other, string(bytes.Repeat([]byte("a"), windowsCredentialBlobMaxBytes+1))); !errors.Is(err, ErrCredentialStoreUnavailable) {
+			t.Fatalf("oversize ordinary credential accepted: %v", err)
+		}
+	}
+	protected, err := protectKeyringDPAPIV2(ref, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(protected)
+	otherRef := passwordVaultSecretRef("https://vault.example", "other")
+	if _, err := unprotectKeyringDPAPIV2(otherRef, protected); !errors.Is(err, ErrCredentialStoreUnavailable) {
+		t.Fatalf("cross-reference vault accepted: %v", err)
+	}
+	path, _, err := dpapiSecretPath(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, make([]byte, keyringDPAPIMaxBytes(ref)+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Get(ref); !errors.Is(err, ErrCredentialStoreUnavailable) {
+		t.Fatalf("oversize protected record accepted: %v", err)
+	}
+}

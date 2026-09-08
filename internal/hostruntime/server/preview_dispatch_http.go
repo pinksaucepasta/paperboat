@@ -25,10 +25,11 @@ type PreviewDispatcher interface {
 }
 
 type PreviewDispatchHandlerConfig struct {
-	Authorizer AuthorizerFactory
-	Dispatcher PreviewDispatcher
-	MachineID  string
-	Now        func() time.Time
+	Authorizer   AuthorizerFactory
+	Dispatcher   PreviewDispatcher
+	MachineID    string
+	Now          func() time.Time
+	Capabilities CapabilityGate
 }
 
 func NewPreviewDispatchHandler(config PreviewDispatchHandlerConfig) (http.Handler, error) {
@@ -83,6 +84,10 @@ func NewPreviewDispatchHandler(config PreviewDispatchHandlerConfig) (http.Handle
 		claims, ok := authorized.Value.(auth.Claims)
 		if !ok {
 			rejectPreviewDispatch(writer, http.StatusForbidden, "claims")
+			return
+		}
+		if config.Capabilities != nil && !config.Capabilities.Enabled("preview.launch.v1") {
+			rejectPreviewDispatch(writer, http.StatusConflict, "capability_disabled")
 			return
 		}
 		dispatchAuthorization, err := previewDispatchAuthorization(claims, input)

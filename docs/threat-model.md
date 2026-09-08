@@ -17,9 +17,28 @@
   key or support decryption path. Public-preview content is intentionally public and outside
   this claim.
 - Endpoint certificates bind account, endpoint ID, role, generation, Noise key, QUIC key,
-  serial, and expiry under the account root signature. Private root and endpoint keys stay in
+  serial, and expiry under an authenticated registered signing key. CLI enrollment registers
+  an independent device signing identity under its account session; it does not require an
+  older device or download its private identity. Private signing and endpoint keys stay in
   their endpoint credential boundary and never enter a server/tunnel request, database, log,
   metric, diagnostic bundle, or audit record.
+
+### Password-unlocked ENV vault
+
+The master password and optional recovery code unlock the same encrypted personal/team
+key inventory locally. Neither credential nor plaintext key inventory is sent to the
+control plane. Each encrypted head authenticates its account, generations, credential
+delegations and writer. Recovery requires normal account authentication and cannot grant
+team membership or restore a revoked device identity. Device private identities are not
+part of the vault. Password/recovery rotation cannot erase an already stolen historical
+encrypted snapshot or previously disclosed keys and values.
+
+Unlocked client custody uses the OS credential boundary. On macOS, Keychain holds a small
+random wrapping key and an owner-only authenticated ciphertext file holds the bounded
+record. Linux uses Secret Service; Windows uses the existing owner-protected DPAPI store.
+Lock removes unlocked payloads while preserving encrypted recovery and pending publication.
+Explicit removal is separate from logout and token cleanup. Hosts receive only selected
+materialized values encrypted to their own recipient identity, never personal/team keys.
 
 ### ENV host-recipient custody
 
@@ -52,7 +71,7 @@ terminal output, preview bodies, SSH payloads, or file manifests/chunks in plain
 | Device-code phishing or brute force | Server-authoritative expiry/interval; user sees the complete URL and short code; no token in output | Server/dashboard rate limits and approval UX |
 | Token theft or refresh replay | OS credential store, issuer-namespaced profiles, refresh rotation, durable revoke queue | Server session-family revocation |
 | Malicious route or descriptor | Scheme, issuer, environment, endpoint, scope, generation, and expiry validation; no raw VM/public-TCP fallback | Server route authorization and `paperboat-tunnel` enforcement |
-| Compromised relay or control plane | Root-signed endpoint certificates, endpoint-authenticated QUIC/Noise handshakes, encrypted stream headers and records, replay/generation fencing | Traffic timing, endpoint addressing, ciphertext length, and authorized routing metadata remain observable |
+| Compromised relay or control plane | Authenticated registered signing keys and endpoint certificates, endpoint-authenticated QUIC/Noise handshakes, encrypted stream headers and records, replay/generation fencing | Traffic timing, endpoint addressing, ciphertext length, and authorized routing metadata remain observable |
 | Carrier downgrade | Authentication, authorization, certificate, protocol, revocation, and generation failures are terminal; only availability failures may select the next equally encrypted carrier | A network observer can block preferred carriers and force an allowed encrypted fallback |
 | Terminal injection | Non-file bytes pass through unchanged; rewriting is limited to a bracketed paste frame | `pb` host-runtime terminal authorization |
 | Compression side channel or decompression exhaustion | Each output event is an independent Zstandard frame with no dictionary or cross-session state; declared decoded size, frame content size, decoder memory, and concurrent codecs are bounded before delivery or ACK | A user controlling and observing the same authenticated terminal can still correlate its own input and output sizes |

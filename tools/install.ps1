@@ -453,8 +453,6 @@ if ($freshEnrollment) {
     $name = [string]$env:COMPUTERNAME
   }
   $name = $name.Trim().ToLowerInvariant()
-  $first = $token.Substring(0, 1)
-  $setupMode = if ('02468BDFHJLNPRTVXZ'.Contains($first)) { 'host' } else { 'client' }
   Remove-Item Env:PAPERBOAT_ENROLLMENT_TOKEN -ErrorAction SilentlyContinue
   # Pair in the original user's security context, but use an isolated child so
   # the dashboard shell's stdin/stdout/stderr pipes cannot keep the installer
@@ -465,7 +463,7 @@ if ($freshEnrollment) {
   $tokenCleanupError = $null
   try {
     $tokenFile = New-EnrollmentTokenFile $token
-    $pairArguments = @('pair', '--server', $server, '--enrollment-token-file', $tokenFile, '--name', $name, "--setup-mode=$setupMode")
+    $pairArguments = @('pair', '--server', $server, '--enrollment-token-file', $tokenFile, '--name', $name)
     if ([string]$pairArguments[4] -match '\s') { $pairArguments[4] = '"' + $pairArguments[4] + '"' }
     if ([string]$pairArguments[6] -match '\s') { $pairArguments[6] = '"' + $pairArguments[6] + '"' }
     $pairInput = Join-Path $dir 'pair.stdin'

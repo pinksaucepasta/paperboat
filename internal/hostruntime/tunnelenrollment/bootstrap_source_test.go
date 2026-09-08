@@ -213,8 +213,8 @@ func TestHTTPSProductionAssemblySourceBootstrapBindsProofDescriptorAndLazySessio
 		StableEndpointID: request.StableEndpointID,
 		SessionID:        "session_live_01", ProcessGeneration: 2, CredentialGeneration: 3,
 		ConfigGeneration: 7, ConfigContentHash: "sha256:" + strings.Repeat("a", 64),
-		Carriers: []carrierBootstrapNode{{EdgeNodeID: "edge_01", EdgeProcessEpoch: "epoch_0001", FailureDomain: "zone_a", Endpoints: []string{"tls://127.0.0.1:4443", "quic://127.0.0.1:4444"}, ServerSPKISHA256: "sha256:" + hex.EncodeToString(spki[:]), ServerCertificateChainPEM: string(chainPEM)}},
-		IssuedAt: now, ExpiresAt: now.Add(time.Minute),
+		Carriers: []carrierBootstrapNode{{EdgeNodeID: "edge_01", EdgeProcessEpoch: "epoch_0001", FailureDomain: "zone_a", Endpoints: []string{"h2://127.0.0.1:4443", "h3://127.0.0.1:4444"}, ServerSPKISHA256: "sha256:" + hex.EncodeToString(spki[:]), ServerCertificateChainPEM: string(chainPEM)}},
+		IssuedAt: now, ExpiresAt: now.Add(15 * time.Second),
 	}
 	source := newBootstrapSourceForTest(t, server, now, auth)
 	identity := ControlIdentity{AccountID: "account_01", ProcessGeneration: 2, CredentialGeneration: 3}
@@ -360,7 +360,7 @@ func TestCarrierBootstrapDescriptorRequiresExactStableEndpointUUID(t *testing.T)
 		StableEndpointID: request.StableEndpointID, SessionID: "session_live_01",
 		ProcessGeneration: request.ProcessGeneration, CredentialGeneration: request.CredentialGeneration,
 		ConfigGeneration: 7, ConfigContentHash: "sha256:" + strings.Repeat("a", 64),
-		IssuedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Minute),
+		IssuedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(14 * time.Second),
 	}
 	welcome := connectorprotocol.Welcome{SessionID: base.SessionID}
 	apply := tunnelmanager.ApplyRequest{Snapshot: hoststate.ConfigSnapshot{Generation: base.ConfigGeneration, ContentHash: base.ConfigContentHash}}

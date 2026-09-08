@@ -242,7 +242,7 @@ func providerTestLeaseAttachment(t *testing.T, now time.Time, previewID, operati
 		Schema: PreviewTunnelSchemaV1, Kind: PreviewCarrierAttachmentKind,
 		Binding:        Binding{AccountID: accountID, PreviewID: previewID, OperationID: operationID, OwnerDeviceID: identity.HostID, OwnerSessionID: request.OwnerSessionID, HostID: identity.HostID, LeaseGeneration: leaseGeneration, TunnelID: identity.TunnelID, ConnectorID: identity.ConnectorID, SessionID: identity.SessionID, ProcessGeneration: identity.ProcessGeneration, ConfigGeneration: identity.Generation, RouteID: routeID, RouteGeneration: 1, EdgeNodeID: "edge_node_01", EdgeProcessEpoch: "edge_epoch_01", MachineIdentityPublicKey: machinePublicKey, MachineIdentityThumbprint: machineIdentityThumbprint(machinePublicKey)},
 		IdempotencyKey: operationID, RequestID: request.RequestID, CorrelationID: request.CorrelationID, RequestHash: hash,
-		Endpoint: lease.Endpoint, Target: lease.Target, AccessMode: lease.AccessMode, ConfigContentHash: "sha256:" + hex.EncodeToString(configHash[:]), EdgeEndpoints: []string{"tls://edge.example.test"}, AttachmentGeneration: 1,
+		Endpoint: lease.Endpoint, Target: lease.Target, AccessMode: lease.AccessMode, ConfigContentHash: "sha256:" + hex.EncodeToString(configHash[:]), EdgeEndpoints: []string{"h2://edge.example.test"}, AttachmentGeneration: 1,
 		IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(30 * time.Minute), State: "edge_ready", EdgeReady: true,
 	}
 	_, edgeCertificate := testEdgeServerCertificate(t, now, identity, attachment.Binding.EdgeProcessEpoch)

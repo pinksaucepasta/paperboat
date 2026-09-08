@@ -38,7 +38,7 @@ const (
 	carrierBootstrapSchema      = "paperboat.connector-bootstrap/v1"
 	carrierBootstrapErrorSchema = "paperboat.preview-tunnel/v1"
 	controlSubprotocol          = "paperboat.connector.v1"
-	bootstrapResponseLimit      = 320 << 10
+	bootstrapResponseLimit      = 16 << 20
 	controlDialTimeout          = 15 * time.Second
 )
 
@@ -106,6 +106,7 @@ type HTTPSProductionAssemblySource struct {
 	clock                 connectorprotocol.Clock
 	origins               tunnelmanager.OriginProber
 	originStreams         *tunnelmanager.OriginStreamForwarder
+	browserIngress        tunnelmanager.IngressAuthorityFunc
 	drainer               connectorprotocol.Drainer
 	renewal               connectorrotation.CredentialRenewalSource
 	report                func(tunnelmanager.Observation)
@@ -125,11 +126,15 @@ func NewHTTPSProductionAssemblySource(config HTTPSProductionAssemblySourceConfig
 	if err != nil || base.Scheme != "https" || base.Hostname() == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" || !filepath.IsAbs(config.StateRoot) || filepath.Clean(config.StateRoot) != config.StateRoot || connectorprotocol.ValidateIdentifier(config.HostID) != nil || config.Auth == nil || config.Clock == nil || config.Origins == nil || config.MachineTLSCertificate == nil {
 		return nil, ErrInvalid
 	}
+	browserIngress, err := tunnelmanager.NewBrowserIngressAuthority(config.ControlURL, config.Auth, config.Transport)
+	if err != nil {
+		return nil, err
+	}
 	client := &http.Client{Transport: config.Transport, Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}
 	if config.Report == nil {
 		config.Report = func(tunnelmanager.Observation) {}
 	}
-	return &HTTPSProductionAssemblySource{base: base, stateRoot: config.StateRoot, hostID: config.HostID, http: client, auth: config.Auth, clock: config.Clock, origins: config.Origins, originStreams: config.OriginStreams, drainer: config.Drainer, renewal: config.Renewal, report: config.Report, machineTLSCertificate: config.MachineTLSCertificate, drainers: make(map[string]*assemblyDrainer), rotations: make(map[string]*productionRotationRuntime)}, nil
+	return &HTTPSProductionAssemblySource{base: base, stateRoot: config.StateRoot, hostID: config.HostID, http: client, auth: config.Auth, clock: config.Clock, origins: config.Origins, originStreams: config.OriginStreams, browserIngress: browserIngress, drainer: config.Drainer, renewal: config.Renewal, report: config.Report, machineTLSCertificate: config.MachineTLSCertificate, drainers: make(map[string]*assemblyDrainer), rotations: make(map[string]*productionRotationRuntime)}, nil
 }
 
 func (s *HTTPSProductionAssemblySource) BindCredentialStore(store *FileCredentialStore) error {
@@ -218,7 +223,15 @@ func (s *HTTPSProductionAssemblySource) resolveProductionAssembly(ctx context.Co
 	controlStream := func(streamCtx context.Context) (io.ReadWriteCloser, error) {
 		return s.openControlStream(streamCtx, request)
 	}
+	ingress := &assemblyIngressAuthority{source: s, request: request}
+	originStreams := s.originStreams
+	if originStreams != nil {
+		copy := *originStreams
+		copy.IngressAuthority = ingress.lookup
+		originStreams = &copy
+	}
 	descriptors := func(descriptorCtx context.Context, welcome connectorprotocol.Welcome, apply tunnelmanager.ApplyRequest) (connector.DataCarrierSessionSource, error) {
+		ingress.bind(welcome, apply)
 		return s.carrierSessionSource(descriptorCtx, request, identity, hello, welcome, apply, signer)
 	}
 	controlFactory := func(factoryCtx context.Context, _ *tunnelmanager.CoordinatedConfigApplier) (connectorrotation.ControlSessionConfig, error) {
@@ -241,7 +254,7 @@ func (s *HTTPSProductionAssemblySource) resolveProductionAssembly(ctx context.Co
 			Report: s.report,
 		},
 		StableEndpointID: request.StableEndpointID,
-		Clock:            s.clock, Origins: s.origins, OriginStreams: s.originStreams,
+		Clock:            s.clock, Origins: s.origins, OriginStreams: originStreams,
 		CarrierDescriptorSource: descriptors,
 		InitialConnector: &hoststate.Connector{
 			ID: request.ConnectorID, TunnelID: request.TunnelID, HostID: request.HostID,
@@ -405,21 +418,22 @@ type carrierBootstrapNode struct {
 }
 
 type carrierBootstrapDescriptor struct {
-	Schema               string                 `json:"schema"`
-	Kind                 string                 `json:"kind"`
-	AccountID            string                 `json:"account_id"`
-	TunnelID             string                 `json:"tunnel_id"`
-	ConnectorID          string                 `json:"connector_id"`
-	HostID               string                 `json:"host_id"`
-	StableEndpointID     string                 `json:"stable_endpoint_id"`
-	SessionID            string                 `json:"session_id"`
-	ProcessGeneration    uint64                 `json:"process_generation"`
-	CredentialGeneration uint64                 `json:"credential_generation"`
-	ConfigGeneration     uint64                 `json:"config_generation"`
-	ConfigContentHash    string                 `json:"config_content_hash"`
-	Carriers             []carrierBootstrapNode `json:"carriers"`
-	IssuedAt             time.Time              `json:"issued_at"`
-	ExpiresAt            time.Time              `json:"expires_at"`
+	Schema               string                              `json:"schema"`
+	Kind                 string                              `json:"kind"`
+	AccountID            string                              `json:"account_id"`
+	TunnelID             string                              `json:"tunnel_id"`
+	ConnectorID          string                              `json:"connector_id"`
+	HostID               string                              `json:"host_id"`
+	StableEndpointID     string                              `json:"stable_endpoint_id"`
+	SessionID            string                              `json:"session_id"`
+	ProcessGeneration    uint64                              `json:"process_generation"`
+	CredentialGeneration uint64                              `json:"credential_generation"`
+	ConfigGeneration     uint64                              `json:"config_generation"`
+	ConfigContentHash    string                              `json:"config_content_hash"`
+	Carriers             []carrierBootstrapNode              `json:"carriers"`
+	IngressDecisions     []connectorprotocol.IngressDecision `json:"ingress_decisions"`
+	IssuedAt             time.Time                           `json:"issued_at"`
+	ExpiresAt            time.Time                           `json:"expires_at"`
 }
 
 // carrierBootstrapErrorPayload mirrors only the structured error fields
@@ -457,6 +471,7 @@ func (s *HTTPSProductionAssemblySource) carrierSessionSource(ctx context.Context
 		return connector.DataCarrierSessionSource{}, err
 	}
 	identity := connector.DataCarrierIdentity{AccountID: descriptor.AccountID, HostID: descriptor.HostID, TunnelID: descriptor.TunnelID, ConnectorID: descriptor.ConnectorID, SessionID: descriptor.SessionID, SessionGeneration: descriptor.CredentialGeneration, ProcessGeneration: descriptor.ProcessGeneration, Generation: descriptor.ConfigGeneration}
+	var endpointsMu sync.RWMutex
 	endpoints := make(map[string]connector.NetworkDialerConfig, len(descriptor.Carriers))
 	failureDomains := make([]string, 0, len(descriptor.Carriers))
 	for _, node := range descriptor.Carriers {
@@ -464,27 +479,53 @@ func (s *HTTPSProductionAssemblySource) carrierSessionSource(ctx context.Context
 		if err != nil {
 			return connector.DataCarrierSessionSource{}, err
 		}
-		endpoints[node.FailureDomain] = configs
+		endpoints[node.EdgeNodeID+"\x00"+node.EdgeProcessEpoch] = configs
 		failureDomains = append(failureDomains, node.FailureDomain)
 	}
 	pool := connector.DefaultDataCarrierPoolConfig()
 	pool.MaximumCarriers = len(failureDomains)
+	for _, node := range descriptor.Carriers {
+		pool.Targets = append(pool.Targets, connector.DataCarrierTarget{EdgeID: node.EdgeNodeID, ProcessEpoch: node.EdgeProcessEpoch, FailureDomain: node.FailureDomain})
+	}
 	pool.EdgeID = descriptor.Carriers[0].EdgeNodeID
 	pool.FailureDomains = failureDomains
-	// TCP mux is the universally reachable production baseline. QUIC remains
-	// an immediate typed fallback; preferring it here allowed a UDP path that
-	// completed its initial ping but disappeared behind common NAT/firewall
-	// mappings before the edge could publish the durable route.
-	pool.Preferred = connector.TCPMux
-	pool.Fallback = connector.QUIC
+	pool.Preferred = connector.HTTP3
+	pool.Fallback = connector.HTTP2
 	pool.SingleTransport = false
 	pool.Session = connector.DataCarrierIdentity{}
+	pool.TargetsExpireAt = descriptor.ExpiresAt
+	pool.RefreshTargets = func(refreshCtx context.Context) ([]connector.DataCarrierTarget, time.Time, error) {
+		fresh, err := s.fetchCarrierDescriptor(refreshCtx, request, body)
+		if err != nil {
+			return nil, time.Time{}, err
+		}
+		if err := validateCarrierDescriptor(fresh, s.clock.Now().UTC(), request, controlIdentity, welcome, apply); err != nil {
+			return nil, time.Time{}, err
+		}
+		next := make(map[string]connector.NetworkDialerConfig, len(fresh.Carriers))
+		targets := make([]connector.DataCarrierTarget, 0, len(fresh.Carriers))
+		for _, node := range fresh.Carriers {
+			endpoint, err := carrierNodeEndpoints(fresh, node, identity, s.clock.Now().UTC(), s.machineTLSCertificate)
+			if err != nil {
+				return nil, time.Time{}, err
+			}
+			next[node.EdgeNodeID+"\x00"+node.EdgeProcessEpoch] = endpoint
+			targets = append(targets, connector.DataCarrierTarget{EdgeID: node.EdgeNodeID, ProcessEpoch: node.EdgeProcessEpoch, FailureDomain: node.FailureDomain})
+		}
+		endpointsMu.Lock()
+		endpoints = next
+		endpointsMu.Unlock()
+		return targets, fresh.ExpiresAt, nil
+	}
+
 	dialer := connector.DataCarrierDialer(func(dialCtx context.Context, dialRequest connector.DataCarrierDialRequest) (connector.DataCarrierDialResult, error) {
-		configured, ok := endpoints[dialRequest.FailureDomain]
+		endpointsMu.RLock()
+		configured, ok := endpoints[dialRequest.EdgeID+"\x00"+dialRequest.ProcessEpoch]
+		endpointsMu.RUnlock()
 		if !ok {
 			return connector.DataCarrierDialResult{}, connector.ErrInvalidDataCarrierEndpoint
 		}
-		return connector.NewNetworkDialer(configured)(dialCtx, dialRequest)
+		return connector.NewHTTPNetworkDialer(configured)(dialCtx, dialRequest)
 	})
 	return connector.NewDataCarrierSessionSource(identity, pool, dialer)
 }
@@ -634,18 +675,25 @@ func knownCarrierBootstrapErrorCode(code string) bool {
 }
 
 func validateCarrierDescriptor(descriptor carrierBootstrapDescriptor, now time.Time, request ActivationRequest, identity ControlIdentity, welcome connectorprotocol.Welcome, apply tunnelmanager.ApplyRequest) error {
-	if descriptor.Schema != carrierBootstrapSchema || descriptor.Kind != "carrier_bootstrap_descriptor" || descriptor.AccountID != identity.AccountID || descriptor.TunnelID != request.TunnelID || descriptor.ConnectorID != request.ConnectorID || descriptor.HostID != request.HostID || descriptor.StableEndpointID != request.StableEndpointID || hoststate.ValidateStableEndpointID(descriptor.StableEndpointID) != nil || descriptor.SessionID != welcome.SessionID || descriptor.ProcessGeneration != identity.ProcessGeneration || descriptor.CredentialGeneration != identity.CredentialGeneration || descriptor.ConfigGeneration != apply.Snapshot.Generation || descriptor.ConfigContentHash != apply.Snapshot.ContentHash || len(descriptor.Carriers) == 0 || len(descriptor.Carriers) > 4 || descriptor.IssuedAt.IsZero() || descriptor.ExpiresAt.IsZero() || !descriptor.ExpiresAt.After(descriptor.IssuedAt) || descriptor.ExpiresAt.Sub(descriptor.IssuedAt) > 2*time.Minute || descriptor.IssuedAt.After(now.Add(connectorprotocol.MaxClockSkew)) || !descriptor.ExpiresAt.After(now) {
+	if descriptor.Schema != carrierBootstrapSchema || descriptor.Kind != "carrier_bootstrap_descriptor" || descriptor.AccountID != identity.AccountID || descriptor.TunnelID != request.TunnelID || descriptor.ConnectorID != request.ConnectorID || descriptor.HostID != request.HostID || descriptor.StableEndpointID != request.StableEndpointID || hoststate.ValidateStableEndpointID(descriptor.StableEndpointID) != nil || descriptor.SessionID != welcome.SessionID || descriptor.ProcessGeneration != identity.ProcessGeneration || descriptor.CredentialGeneration != identity.CredentialGeneration || descriptor.ConfigGeneration != apply.Snapshot.Generation || descriptor.ConfigContentHash != apply.Snapshot.ContentHash || len(descriptor.Carriers) == 0 || len(descriptor.Carriers) > 2 || descriptor.IssuedAt.IsZero() || descriptor.ExpiresAt.IsZero() || !descriptor.ExpiresAt.After(descriptor.IssuedAt) || descriptor.ExpiresAt.Sub(descriptor.IssuedAt) > 15*time.Second || descriptor.IssuedAt.After(now.Add(connectorprotocol.MaxClockSkew)) || !descriptor.ExpiresAt.After(now) {
 		return ErrConflict
 	}
-	seenNodes, seenDomains := map[string]bool{}, map[string]bool{}
+	seenNodes := map[string]bool{}
 	for _, node := range descriptor.Carriers {
-		if connectorprotocol.ValidateIdentifier(node.EdgeNodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(node.EdgeProcessEpoch) != nil || connectorprotocol.ValidateIdentifier(node.FailureDomain) != nil || len(node.Endpoints) != 2 || seenNodes[node.EdgeNodeID+"\x00"+node.EdgeProcessEpoch] || seenDomains[node.FailureDomain] {
+		if connectorprotocol.ValidateIdentifier(node.EdgeNodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(node.EdgeProcessEpoch) != nil || connectorprotocol.ValidateIdentifier(node.FailureDomain) != nil || len(node.Endpoints) != 2 || seenNodes[node.EdgeNodeID+"\x00"+node.EdgeProcessEpoch] {
 			return ErrConflict
 		}
 		seenNodes[node.EdgeNodeID+"\x00"+node.EdgeProcessEpoch] = true
-		seenDomains[node.FailureDomain] = true
 		if _, _, _, err := parseCarrierNode(node); err != nil {
 			return err
+		}
+	}
+	if len(descriptor.IngressDecisions) > 4096 {
+		return ErrConflict
+	}
+	for _, ingress := range descriptor.IngressDecisions {
+		if ingress.Validate(now) != nil || ingress.Binding.AccountID != descriptor.AccountID || ingress.Binding.TunnelID != descriptor.TunnelID || ingress.Binding.HostID != descriptor.HostID || ingress.ConnectorID != descriptor.ConnectorID || ingress.SessionID != descriptor.SessionID || ingress.ProcessGeneration != descriptor.ProcessGeneration || ingress.ConfigGeneration != descriptor.ConfigGeneration {
+			return ErrConflict
 		}
 	}
 	return nil
@@ -655,12 +703,12 @@ func parseCarrierNode(node carrierBootstrapNode) (map[string]*url.URL, *x509.Cer
 	parsedEndpoints := make(map[string]*url.URL, 2)
 	for _, raw := range node.Endpoints {
 		parsed, err := url.Parse(raw)
-		if err != nil || (parsed.Scheme != "tls" && parsed.Scheme != "quic") || parsed.User != nil || parsed.Hostname() == "" || parsed.Port() == "" || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsedEndpoints[parsed.Scheme] != nil {
+		if err != nil || (parsed.Scheme != "h2" && parsed.Scheme != "h3") || parsed.User != nil || parsed.Hostname() == "" || parsed.Port() == "" || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsedEndpoints[parsed.Scheme] != nil {
 			return nil, nil, nil, ErrConflict
 		}
 		parsedEndpoints[parsed.Scheme] = parsed
 	}
-	if parsedEndpoints["tls"] == nil || parsedEndpoints["quic"] == nil || !strings.HasPrefix(node.ServerSPKISHA256, "sha256:") || len(node.ServerSPKISHA256) != 71 {
+	if parsedEndpoints["h2"] == nil || parsedEndpoints["h3"] == nil || !strings.HasPrefix(node.ServerSPKISHA256, "sha256:") || len(node.ServerSPKISHA256) != 71 {
 		return nil, nil, nil, ErrConflict
 	}
 	decodedSPKI, err := hex.DecodeString(strings.TrimPrefix(node.ServerSPKISHA256, "sha256:"))
@@ -726,7 +774,7 @@ func carrierNodeEndpoints(descriptor carrierBootstrapDescriptor, node carrierBoo
 		}
 		return connector.DataCarrierEndpointConfig{Address: parsed.Host, TLS: tlsConfig, ExpectedIdentity: identity, PeerBinding: func(tls.ConnectionState) (connector.DataCarrierIdentity, error) { return identity, nil }}
 	}
-	return connector.NetworkDialerConfig{TCPMux: newEndpoint(parsed["tls"]), QUIC: newEndpoint(parsed["quic"])}, nil
+	return connector.NetworkDialerConfig{TCPMux: newEndpoint(parsed["h2"]), QUIC: newEndpoint(parsed["h3"])}, nil
 }
 
 type referenceCryptoSigner struct {

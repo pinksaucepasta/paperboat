@@ -1,4 +1,4 @@
-// Package identitybootstrap creates and registers the first account-rooted CLI identity.
+// Package identitybootstrap creates and registers device-owned CLI identities.
 package identitybootstrap
 
 import (
@@ -60,6 +60,7 @@ type ExistingRootClient interface {
 // requests an endpoint certificate from a paired verifier.
 type CLIClient interface {
 	Client
+	FreshClient
 	ExistingRootClient
 }
 
@@ -102,32 +103,15 @@ type CLIRequest struct {
 	Fresh              bool
 }
 
-// EnrollCLI selects the enrollment ceremony for the account. A dashboard
-// enrollment is a deliberate fresh install: it replaces any local identity
-// and uses the one-shot authorization to bootstrap a new account root without
-// requiring another endpoint to approve the machine.
+// EnrollCLI registers an identity owned by this authenticated CLI session.
+// Every device has a distinct signing key as well as distinct Noise and QUIC
+// keys; enrollment never loads an account-wide private key or waits for an
+// existing endpoint to approve the new device.
 func EnrollCLI(ctx context.Context, request CLIRequest) (Result, error) {
-	existing := ExistingRootRequest{
-		Store: request.Store, Client: request.Client, Issuer: request.Issuer,
-		AccountID: request.AccountID, CLIClientSessionID: request.CLIClientSessionID,
-		Now: request.Now, PollInterval: request.PollInterval, Timeout: request.Timeout,
-	}
-	if request.Fresh {
-		return Bootstrap(ctx, Request{Store: request.Store, Client: request.Client, Issuer: request.Issuer, AccountID: request.AccountID, CLIClientSessionID: request.CLIClientSessionID, Now: request.Now, AllowRootReplacement: true})
-	}
-	result, err := EnrollExistingRoot(ctx, existing)
-	if err == nil || !api.IsNotFound(err) {
-		return result, err
-	}
-	if established, stateErr := hasEstablishedRootState(request.Store, request.Issuer, request.AccountID); stateErr != nil {
-		return Result{}, stateErr
-	} else if established {
-		return Result{}, ErrEstablishedRootUnavailable
-	}
 	return Bootstrap(ctx, Request{
 		Store: request.Store, Client: request.Client, Issuer: request.Issuer,
 		AccountID: request.AccountID, CLIClientSessionID: request.CLIClientSessionID,
-		Now: request.Now,
+		Now: request.Now, AllowRootReplacement: true,
 	})
 }
 
@@ -446,13 +430,10 @@ func Bootstrap(ctx context.Context, request Request) (Result, error) {
 	var response api.E2EEBootstrapResult
 	if request.AllowRootReplacement {
 		fresh, ok := request.Client.(FreshClient)
-		if ok {
-			response, err = fresh.BootstrapE2EEFresh(ctx, operationID, input)
-		} else {
-			// A client that has no explicit fresh endpoint can still perform the
-			// initial bootstrap when the server has no root yet.
-			response, err = request.Client.BootstrapE2EE(ctx, operationID, input)
+		if !ok {
+			return Result{}, invalidResponseError{Stage: "device_enrollment_client"}
 		}
+		response, err = fresh.BootstrapE2EEFresh(ctx, operationID, input)
 	} else {
 		response, err = request.Client.BootstrapE2EE(ctx, operationID, input)
 	}
@@ -483,7 +464,7 @@ func Bootstrap(ctx context.Context, request Request) (Result, error) {
 		}
 		return Result{}, err
 	}
-	if err := request.Store.SavePeerAccountRootPublic(request.Issuer, request.AccountID, rootPublic); err != nil {
+	if err := request.Store.SavePeerDeviceSigningPublic(request.Issuer, request.AccountID, rootPublic); err != nil {
 		return Result{}, err
 	}
 	if _, err := request.Store.SavePeerCertificate(request.Issuer, request.CLIClientSessionID, raw); err != nil {

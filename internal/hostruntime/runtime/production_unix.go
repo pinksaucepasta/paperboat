@@ -33,7 +33,6 @@ import (
 	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	clientconfig "github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/environmente2ee"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/availability"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/codexsession"
@@ -41,10 +40,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/environmentenrollment"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/environmentkey"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hosted"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/observability"
@@ -55,7 +52,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/endpointidentity"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/networkcheck"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/relayselection"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/signaling"
@@ -307,6 +303,12 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 			}
 		}
 	}
+	lazyBootBytes := make([]byte, 24)
+	if _, err := rand.Read(lazyBootBytes); err != nil {
+		return nil, errors.Join(ErrProductionInvalid, err)
+	}
+	lazyBootID := hex.EncodeToString(lazyBootBytes)
+	lazyStartedAt := time.Now().UTC()
 	var hostedConfig hosted.Config
 	if runtimeConfig.Profile == runtimeconfig.Hosted {
 		hostedConfig, err = hosted.FromEnv(environ)
@@ -441,70 +443,11 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		return nil, err
 	}
 	var managedEnvironment envinject.EnvironmentSource
-	var runtimeEnvironment interface {
-		NextObservation(time.Time) (envinject.Observation, error)
-		Apply(context.Context, envinject.Bundle) error
-		BindingState() envinject.BindingState
-	}
+	var runtimeProjection *projectionEnvironmentService
 	var environmentBootstrap Service
-	var environmentObservationOnce sync.Once
-	environmentObservationReady := make(chan struct{})
-	markEnvironmentObservationReady := func() { environmentObservationOnce.Do(func() { close(environmentObservationReady) }) }
 	if environmentInjectionEligible(runtimeConfig.Profile, machineRegistration) {
-		provider := &envinject.Provider{}
-		managedEnvironment, runtimeEnvironment = provider, provider
-		initialize := func(initializeCtx context.Context) (*envinject.Store, error) {
-			return openProductionEnvironment(initializeCtx, runtimeConfig.StateRoot, controlURL.String(), transport, machineRegistration, managedSSHIdentity)
-		}
-		reconcile := func(context.Context) (environmentenrollment.BindingState, error) {
-			switch provider.BindingState() {
-			case envinject.BindingActive:
-				return environmentenrollment.BindingActive, nil
-			case envinject.BindingInactive:
-				return environmentenrollment.BindingInactive, nil
-			default:
-				return environmentenrollment.BindingUnknown, nil
-			}
-		}
-		ensure := func(ensureCtx context.Context) error {
-			enrollmentClient, enrollmentErr := newProductionEnvironmentEnrollment(runtimeConfig.StateRoot, controlURL.String(), transport, machineRegistration, managedSSHIdentity, reconcile)
-			if enrollmentErr != nil {
-				return enrollmentErr
-			}
-			return enrollmentClient.Ensure(ensureCtx)
-		}
-		commit := func(commitCtx context.Context) error {
-			enrollmentClient, enrollmentErr := newProductionEnvironmentEnrollment(runtimeConfig.StateRoot, controlURL.String(), transport, machineRegistration, managedSSHIdentity, reconcile)
-			if enrollmentErr != nil {
-				return enrollmentErr
-			}
-			return enrollmentClient.MarkApproved(commitCtx)
-		}
-		store, initializeErr := initialize(ctx)
-		if initializeErr == nil {
-			if err := provider.Attach(store); err != nil {
-				return nil, err
-			}
-			_, environmentErr := store.Environment()
-			if errors.Is(environmentErr, envinject.ErrNotReady) || errors.Is(environmentErr, envinject.ErrRevoked) {
-				environmentBootstrap = newEnvironmentBootstrapService(provider, initialize, 2*time.Second)
-				environmentBootstrap.(*environmentBootstrapService).store = store
-				environmentBootstrap.(*environmentBootstrapService).ensure = ensure
-				environmentBootstrap.(*environmentBootstrapService).commit = commit
-				environmentBootstrap.(*environmentBootstrapService).observationReady = environmentObservationReady
-			} else if environmentErr != nil {
-				return nil, environmentErr
-			} else if err := commit(ctx); err != nil {
-				return nil, err
-			}
-		} else if errors.Is(initializeErr, errEnvironmentEndpointPending) {
-			environmentBootstrap = newEnvironmentBootstrapService(provider, initialize, 2*time.Second)
-			environmentBootstrap.(*environmentBootstrapService).ensure = ensure
-			environmentBootstrap.(*environmentBootstrapService).commit = commit
-			environmentBootstrap.(*environmentBootstrapService).observationReady = environmentObservationReady
-		} else {
-			return nil, initializeErr
-		}
+		runtimeProjection = newProjectionEnvironmentService(runtimeConfig.StateRoot, controlURL, transport, machineRegistration, managedSSHIdentity)
+		managedEnvironment, environmentBootstrap = runtimeProjection, runtimeProjection
 	}
 	fetcher, err := auth.NewHTTPJWKSFetcher(controlURL.ResolveReference(&url.URL{Path: "/.well-known/jwks.json"}).String(), []string{controlURL.Hostname()}, transport)
 	if err != nil {
@@ -531,33 +474,11 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, err
 	}
-	source, err := connector.NewHTTPSAdmissionSource(connector.AdmissionSourceConfig{
-		Endpoint: controlURL.ResolveReference(&url.URL{Path: "/v1/connectors/admission"}).String(), AllowedHosts: []string{controlURL.Hostname()},
-		Tokens: renewingTokens, Proofs: enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}, Verifier: verifier,
-		Clock: productionClock{}, Issuer: issuer, EnvironmentID: identity.EnvironmentID, MachineID: machineID, ConnectorID: "runtime", EdgePool: valueOrRuntime(environ("PAPERBOAT_EDGE_POOL"), "default"), OperationID: operationID, Transport: transport,
-	})
-	if err != nil {
-		return nil, err
-	}
-	readyTimeout := durationRuntime(environ("PAPERBOAT_CONNECTOR_READY_TIMEOUT_SECONDS"), 15*time.Second)
-	preferencePath := filepath.Join(runtimeConfig.StateRoot, "connector", "transport.json")
-	dialer, err := connector.NewFRPDialer(connector.FRPDialerConfig{ReadyTimeout: readyTimeout, RouteKinds: []string{"runtime_https_wss"}, PreferencePath: preferencePath})
-	if err != nil {
-		return nil, err
-	}
-	transferPolicy := filetransfer.NewPolicyStore(filetransfer.DefaultPolicy)
-	manager, err := connector.New(connector.Config{EnvironmentID: identity.EnvironmentID, MachineID: machineID, ConnectorID: "runtime", EdgePool: valueOrRuntime(environ("PAPERBOAT_EDGE_POOL"), "default"), Dialer: dialer, DrainTimeout: 10 * time.Second, Transport: productionConnectorTransport(environ("PAPERBOAT_CONNECTOR_TERMINAL_TRANSPORT")), AdmissionAccepted: func(policy auth.FileTransferPolicy) {
-		_ = transferPolicy.Update(filetransfer.Policy{Revision: policy.Revision, MaxFileBytes: policy.MaxFileBytes, MaxBatchFiles: policy.MaxBatchFiles, MaxBatchBytes: policy.MaxBatchBytes, MaxConcurrentTransfers: policy.MaxConcurrentTransfers, RetentionSeconds: policy.RetentionSeconds, DeliveryTimeoutSeconds: policy.DeliveryTimeoutSeconds, MaxPendingSpoolBytes: policy.MaxPendingSpoolBytes})
-	}})
-	if err != nil {
-		return nil, err
-	}
-	supervisor, err := connector.NewSupervisor(connector.SupervisorConfig{Manager: manager, Admissions: source, InitialBackoff: time.Second, MaxBackoff: 45 * time.Second, Metrics: metrics})
-	if err != nil {
-		return nil, err
-	}
+	// No transfer is admitted until the authenticated heartbeat supplies policy.
+	transferPolicy := &filetransfer.PolicyStore{}
+	capabilityController := newDeviceCapabilityController(nil)
 	directNetwork := &directNetworkProxy{}
-	networkHandler, err := newNetworkChangeHandler(supervisor, directNetwork, metrics)
+	networkHandler, err := newNetworkChangeHandler(nil, directNetwork, metrics)
 	if err != nil {
 		return nil, err
 	}
@@ -573,7 +494,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err := networkChanges.ConfigurePortMapping(networkcheck.MappingVerifier{Resolver: net.DefaultResolver, Timeout: 500 * time.Millisecond}); err != nil {
 		return nil, err
 	}
-	connectorService := &connectorReadinessService{supervisor: supervisor, manager: manager, networkChanges: networkChanges}
+	connectorService := &dedicatedConnectorService{networkChanges: networkChanges}
 	relayRegion := &currentRelayRegion{}
 	signalingSubstrate := &signaling.SubstrateManager{}
 	regionalMonitor, regionalCache, err := newProductionRegionalMonitor(controlURL, transport, relayRegion.Current, signalingSubstrate, &tls.Config{MinVersion: tls.VersionTLS13}, nil)
@@ -617,13 +538,16 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		if observationTokensErr != nil {
 			return nil, observationTokensErr
 		}
-		sender := &runtimeObservationSender{endpoint: runtimeEndpoint, tokens: observationTokens, proofs: enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}, operationID: operationID, environmentID: identity.EnvironmentID, machineID: machineID, reporterVersion: version, client: &http.Client{Transport: transport, Timeout: 10 * time.Second}, availability: availabilityService, environment: runtimeEnvironment, onEnvironmentObservation: markEnvironmentObservationReady, receiptPath: filepath.Join(runtimeConfig.StateRoot, "runtime", "server-heartbeat.json"), installationGeneration: uint64(machineRegistration.InstallationGeneration), workerGeneration: bootState.Generation, osBootID: bootState.OSBootID, serviceScope: scope, connector: manager, capabilities: capabilities, relayLatency: regionalCache, relaySuccess: relayRegion}
+		sender := &runtimeObservationSender{endpoint: runtimeEndpoint, tokens: observationTokens, proofs: enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}, operationID: operationID, environmentID: identity.EnvironmentID, machineID: machineID, reporterVersion: version, client: &http.Client{Transport: transport, Timeout: 10 * time.Second, CheckRedirect: rejectRuntimePolicyRedirect}, availability: availabilityService, receiptPath: filepath.Join(runtimeConfig.StateRoot, "runtime", "server-heartbeat.json"), installationGeneration: uint64(machineRegistration.InstallationGeneration), workerGeneration: bootState.Generation, osBootID: bootState.OSBootID, lazyBootID: lazyBootID, lazyStartedAt: lazyStartedAt, serviceScope: scope, connector: connectorService, transferPolicy: transferPolicy, capabilitiesController: capabilityController, capabilities: capabilities, relayLatency: regionalCache, relaySuccess: relayRegion}
+		if runtimeProjection != nil {
+			sender.projection = runtimeProjection
+		}
 		updaterClient, updaterErr := newProductionUpdaterClient()
 		if updaterErr != nil {
 			return nil, updaterErr
 		}
 		sender.updater = updaterClient
-		runtimeObservation = &runtimeObservationService{sender: sender, interval: runtimeConfig.Limits.HeartbeatInterval, timeout: 10 * time.Second}
+		runtimeObservation = &runtimeObservationService{sender: sender, interval: 10 * time.Second, timeout: 10 * time.Second}
 	}
 	var hostedLifecycle *hosted.Lifecycle
 	workspaceRoot := environ("PAPERBOAT_WORKSPACE_ROOT")
@@ -678,7 +602,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		runtimeService = serviceGroup{availabilityService, regionalMonitor, runtimeObservation}
 	}
 	previewAssembly, err := newProductionPreviewAssembly(productionPreviewAssemblyConfig{
-		ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, MachineID: machineID,
+		ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, MachineID: machineID, InstallationGeneration: machineRegistration.InstallationGeneration, BootID: lazyBootID,
 		LocalControlToken: localControlToken, Transport: transport, RunContext: ctx,
 	})
 	if err != nil {
@@ -700,7 +624,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, err
 	}
-	dependencies := HostDependencies{Authorizer: authorizer, AuthorizationService: authorizationRefresh, Connector: connectorService, PreviewDispatcher: previewAssembly, PreviewRecovery: previewAssembly, PreviewOwnerSessions: previewAssembly.OwnerSessionLeases(), RuntimeObservationService: runtimeService, ManagedEnvironment: managedEnvironment, Metrics: metrics, CodexSessions: codexManager, LocalControlToken: localControlToken, ManagedSSH: managedSSHHost, ManagedSSHService: managedSSHService, TransferKeys: transferKeys}
+	dependencies := HostDependencies{Authorizer: authorizer, AuthorizationService: authorizationRefresh, Connector: connectorService, PreviewDispatcher: previewAssembly, PreviewRecovery: previewAssembly, PreviewOwnerSessions: previewAssembly.OwnerSessionLeases(), RuntimeObservationService: runtimeService, ManagedEnvironment: managedEnvironment, Metrics: metrics, CodexSessions: codexManager, LocalControlToken: localControlToken, ManagedSSH: managedSSHHost, ManagedSSHService: managedSSHService, TransferKeys: transferKeys, Capabilities: capabilityController}
 	nativePrivateValidators := []productionNativePrivateValidator{previewAssembly.dispatcher}
 	if tunnelProvider == nil {
 		tunnelEnrollment, enrollmentErr := newProductionTunnelEnrollmentService(controlURL.String(), runtimeConfig.StateRoot, machineID, localControlToken, transport)
@@ -710,6 +634,8 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		dependencies.TunnelEnrollment = tunnelEnrollment
 		dependencies.TunnelEnrollmentLifecycle = platformTunnelEnrollmentLifecycle(tunnelEnrollment)
 		dependencies.TunnelManager = tunnelEnrollment
+		connectorService.status = tunnelEnrollment.Status
+		networkHandler.SetCanonical(tunnelEnrollment)
 	} else {
 		tunnelAssembly, assemblyErr := productionTunnelAssembly(ctx, tunnelProvider, ProductionTunnelAssemblyInputs{
 			StateRoot: runtimeConfig.StateRoot, ControlURL: controlURL.String(), ControlTransport: transport,
@@ -720,6 +646,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 			return nil, errors.Join(ErrProductionInvalid, assemblyErr)
 		}
 		dependencies.TunnelManager = tunnelAssembly
+		connectorService.status = tunnelAssembly.ConnectorStatus
 		nativePrivateValidators = append(nativePrivateValidators, tunnelAssembly.Manager.Manager)
 		updateGate, gateErr := tunnelmanager.NewUpdateGate(tunnelmanager.UpdateGateConfig{MachineID: machineID, Manager: tunnelAssembly.Manager.Manager, StatePath: filepath.Join(runtimeConfig.StateRoot, "updates", "deployment-gate.json")})
 		if gateErr != nil {
@@ -736,7 +663,11 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if runtimeConfig.Profile == runtimeconfig.Hosted {
 		dependencies.HostedLifecycle = hostedLifecycle
 	}
-	return NewHost(ctx, HostConfig{Runtime: runtimeConfig, ListenAddress: listen, WorkspaceRoot: workspaceRoot, ShellPath: agentShell, AgentEnvironment: agentEnvironment, EnvironmentID: identity.EnvironmentID, MachineID: machineID, InboxPath: inboxPath, ShutdownTimeout: shutdownTimeout, RecoveryExitSignal: recoveryExitSignal, FileTransferPolicy: transferPolicy}, dependencies)
+	result, err := NewHost(ctx, HostConfig{Runtime: runtimeConfig, ListenAddress: listen, WorkspaceRoot: workspaceRoot, ShellPath: agentShell, AgentEnvironment: agentEnvironment, EnvironmentID: identity.EnvironmentID, MachineID: machineID, InboxPath: inboxPath, ShutdownTimeout: shutdownTimeout, RecoveryExitSignal: recoveryExitSignal, FileTransferPolicy: transferPolicy}, dependencies)
+	if err == nil {
+		capabilityController.SetReconciler(result.reconcileDeviceCapabilities)
+	}
+	return result, err
 }
 
 func environmentInjectionEligible(profile runtimeconfig.Profile, registration runtimeidentity.Registration) bool {
@@ -981,31 +912,10 @@ func newProductionClientCoordinator(ctx context.Context, version string, environ
 	if err != nil {
 		return nil, err
 	}
-	admissions, err := connector.NewHTTPSAdmissionSource(connector.AdmissionSourceConfig{
-		Endpoint: controlURL.ResolveReference(&url.URL{Path: "/v1/connectors/admission"}).String(), AllowedHosts: []string{controlURL.Hostname()}, Tokens: runtimeTokens, Proofs: runtimeProofs,
-		Verifier: verifier, Clock: productionClock{}, Issuer: issuer, EnvironmentID: registration.EnvironmentID, MachineID: registration.MachineID,
-		ConnectorID: "runtime", EdgePool: valueOrRuntime(environ("PAPERBOAT_EDGE_POOL"), "default"), OperationID: operationID, Transport: transport,
-	})
-	if err != nil {
-		return nil, err
-	}
-	dialer, err := connector.NewFRPDialer(connector.FRPDialerConfig{ReadyTimeout: durationRuntime(environ("PAPERBOAT_CONNECTOR_READY_TIMEOUT_SECONDS"), 15*time.Second), RouteKinds: []string{"runtime_https_wss"}, PreferencePath: filepath.Join(runtimeConfig.StateRoot, "connector", "transport.json")})
-	if err != nil {
-		return nil, err
-	}
-	transferPolicy := filetransfer.NewPolicyStore(filetransfer.DefaultPolicy)
-	manager, err := connector.New(connector.Config{EnvironmentID: registration.EnvironmentID, MachineID: registration.MachineID, ConnectorID: "runtime", EdgePool: valueOrRuntime(environ("PAPERBOAT_EDGE_POOL"), "default"), Dialer: dialer, DrainTimeout: 10 * time.Second, Transport: productionConnectorTransport(environ("PAPERBOAT_CONNECTOR_TERMINAL_TRANSPORT")), AdmissionAccepted: func(policy auth.FileTransferPolicy) {
-		_ = transferPolicy.Update(filetransfer.Policy{Revision: policy.Revision, MaxFileBytes: policy.MaxFileBytes, MaxBatchFiles: policy.MaxBatchFiles, MaxBatchBytes: policy.MaxBatchBytes, MaxConcurrentTransfers: policy.MaxConcurrentTransfers, RetentionSeconds: policy.RetentionSeconds, DeliveryTimeoutSeconds: policy.DeliveryTimeoutSeconds, MaxPendingSpoolBytes: policy.MaxPendingSpoolBytes})
-	}})
-	if err != nil {
-		return nil, err
-	}
-	supervisor, err := connector.NewSupervisor(connector.SupervisorConfig{Manager: manager, Admissions: admissions, InitialBackoff: time.Second, MaxBackoff: 45 * time.Second, Metrics: metrics})
-	if err != nil {
-		return nil, err
-	}
+	transferPolicy := &filetransfer.PolicyStore{}
+	capabilityController := newDeviceCapabilityController(nil)
 	directNetwork := &directNetworkProxy{}
-	networkHandler, err := newNetworkChangeHandler(supervisor, directNetwork, metrics)
+	networkHandler, err := newNetworkChangeHandler(nil, directNetwork, metrics)
 	if err != nil {
 		return nil, err
 	}
@@ -1025,7 +935,7 @@ func newProductionClientCoordinator(ctx context.Context, version string, environ
 	if err := networkChanges.ConfigurePortMapping(networkcheck.MappingVerifier{Resolver: net.DefaultResolver, Timeout: 500 * time.Millisecond}); err != nil {
 		return nil, err
 	}
-	connectorService := &connectorReadinessService{supervisor: supervisor, manager: manager, networkChanges: networkChanges}
+	connectorService := &dedicatedConnectorService{networkChanges: networkChanges}
 	relayRegion := &currentRelayRegion{}
 	signalingSubstrate := &signaling.SubstrateManager{}
 	regionalMonitor, regionalCache, err := newProductionRegionalMonitor(controlURL, transport, relayRegion.Current, signalingSubstrate, &tls.Config{MinVersion: tls.VersionTLS13}, nil)
@@ -1037,7 +947,7 @@ func newProductionClientCoordinator(ctx context.Context, version string, environ
 	if scope != "system" && scope != "user" {
 		scope = "unknown"
 	}
-	sender := &runtimeObservationSender{endpoint: controlURL.ResolveReference(&url.URL{Path: "/v1/runtime-observations"}).String(), tokens: runtimeTokens, proofs: runtimeProofs, operationID: operationID, environmentID: registration.EnvironmentID, machineID: registration.MachineID, reporterVersion: version, client: &http.Client{Transport: transport, Timeout: 10 * time.Second}, receiptPath: filepath.Join(runtimeConfig.StateRoot, "runtime", "server-heartbeat.json"), installationGeneration: uint64(registration.InstallationGeneration), workerGeneration: bootState.Generation, osBootID: bootState.OSBootID, serviceScope: scope, connector: manager, capabilities: []string{"file_receive", "preview_launch"}, relayLatency: regionalCache, relaySuccess: relayRegion}
+	sender := &runtimeObservationSender{endpoint: controlURL.ResolveReference(&url.URL{Path: "/v1/runtime-observations"}).String(), tokens: runtimeTokens, proofs: runtimeProofs, operationID: operationID, environmentID: registration.EnvironmentID, machineID: registration.MachineID, reporterVersion: version, client: &http.Client{Transport: transport, Timeout: 10 * time.Second, CheckRedirect: rejectRuntimePolicyRedirect}, receiptPath: filepath.Join(runtimeConfig.StateRoot, "runtime", "server-heartbeat.json"), installationGeneration: uint64(registration.InstallationGeneration), workerGeneration: bootState.Generation, osBootID: bootState.OSBootID, serviceScope: scope, connector: connectorService, transferPolicy: transferPolicy, capabilitiesController: capabilityController, capabilities: []string{"file_receive", "preview_launch"}, relayLatency: regionalCache, relaySuccess: relayRegion}
 	updaterClient, updaterErr := newProductionUpdaterClient()
 	if updaterErr != nil {
 		return nil, updaterErr
@@ -1060,7 +970,7 @@ func newProductionClientCoordinator(ctx context.Context, version string, environ
 	nativePeerFactory := func(serve func(net.Conn) error, transferHandler, codexHandler http.Handler) (Service, error) {
 		return newProductionNativePeerService(productionNativePeerConfig{controlURL: controlURL.String(), issuer: issuer, stateRoot: runtimeConfig.StateRoot, machineID: registration.MachineID, generation: uint64(registration.InstallationGeneration), transport: transport, identity: runtimeIdentity, keys: cache, authorizer: authorizer, serve: serve, transfer: transferHandler, codex: codexHandler, privateCurrent: productionNativeCurrent(nativePrivateValidators...), privateDial: productionNativePrivateDial})
 	}
-	dependencies := HostDependencies{Authorizer: authorizer, AuthorizationService: authorizationRefresh, Connector: connectorService, PreviewRecovery: nil, RuntimeObservationService: serviceGroup{regionalMonitor, observation}, Metrics: metrics, LocalControlToken: localControlToken, TransferKeys: transferKeys, NativePeerFactory: nativePeerFactory}
+	dependencies := HostDependencies{Authorizer: authorizer, AuthorizationService: authorizationRefresh, Connector: connectorService, PreviewRecovery: nil, RuntimeObservationService: serviceGroup{regionalMonitor, observation}, Metrics: metrics, LocalControlToken: localControlToken, TransferKeys: transferKeys, NativePeerFactory: nativePeerFactory, Capabilities: capabilityController}
 	if tunnelProvider == nil {
 		tunnelEnrollment, enrollmentErr := newProductionTunnelEnrollmentService(controlURL.String(), runtimeConfig.StateRoot, registration.MachineID, localControlToken, transport)
 		if enrollmentErr != nil {
@@ -1069,6 +979,8 @@ func newProductionClientCoordinator(ctx context.Context, version string, environ
 		dependencies.TunnelEnrollment = tunnelEnrollment
 		dependencies.TunnelEnrollmentLifecycle = platformTunnelEnrollmentLifecycle(tunnelEnrollment)
 		dependencies.TunnelManager = tunnelEnrollment
+		connectorService.status = tunnelEnrollment.Status
+		networkHandler.SetCanonical(tunnelEnrollment)
 	} else {
 		tunnelAssembly, assemblyErr := productionTunnelAssembly(ctx, tunnelProvider, ProductionTunnelAssemblyInputs{
 			StateRoot: runtimeConfig.StateRoot, ControlURL: controlURL.String(), ControlTransport: transport,
@@ -1079,6 +991,7 @@ func newProductionClientCoordinator(ctx context.Context, version string, environ
 			return nil, errors.Join(ErrProductionInvalid, assemblyErr)
 		}
 		dependencies.TunnelManager = tunnelAssembly
+		connectorService.status = tunnelAssembly.ConnectorStatus
 		nativePrivateValidators = append(nativePrivateValidators, tunnelAssembly.Manager.Manager)
 		updateGate, gateErr := tunnelmanager.NewUpdateGate(tunnelmanager.UpdateGateConfig{MachineID: registration.MachineID, Manager: tunnelAssembly.Manager.Manager, StatePath: filepath.Join(runtimeConfig.StateRoot, "updates", "deployment-gate.json")})
 		if gateErr != nil {
@@ -1087,7 +1000,11 @@ func newProductionClientCoordinator(ctx context.Context, version string, environ
 		dependencies.UpdateGate = updateGate
 		networkHandler.SetCanonical(tunnelAssembly)
 	}
-	return NewClientCoordinator(ctx, HostConfig{Runtime: runtimeConfig, ListenAddress: listen, WorkspaceRoot: registration.InboxPath, EnvironmentID: registration.EnvironmentID, MachineID: registration.MachineID, InboxPath: registration.InboxPath, ShutdownTimeout: 30 * time.Second, RecoveryExitSignal: recoveryExitSignal, FileTransferPolicy: transferPolicy}, dependencies)
+	result, err := NewClientCoordinator(ctx, HostConfig{Runtime: runtimeConfig, ListenAddress: listen, WorkspaceRoot: registration.InboxPath, EnvironmentID: registration.EnvironmentID, MachineID: registration.MachineID, InboxPath: registration.InboxPath, ShutdownTimeout: 30 * time.Second, RecoveryExitSignal: recoveryExitSignal, FileTransferPolicy: transferPolicy}, dependencies)
+	if err == nil {
+		capabilityController.SetReconciler(result.reconcileDeviceCapabilities)
+	}
+	return result, err
 }
 
 type peerEnrollmentEnsurer interface {
@@ -1151,214 +1068,6 @@ func runtimeEnvironmentEndpoint(stateRoot string) (runtimeidentity.PeerEndpoint,
 	return store.PeerEndpoint()
 }
 
-func openProductionEnvironment(ctx context.Context, stateRoot, controlURL string, transport http.RoundTripper, registration runtimeidentity.Registration, credentials managedSSHIdentitySource) (*envinject.Store, error) {
-	endpoint, err := runtimeEnvironmentEndpoint(stateRoot)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) || errors.Is(err, runtimeidentity.ErrInvalidStore) {
-			return nil, errEnvironmentEndpointPending
-		}
-		return nil, err
-	}
-	if len(endpoint.Certificate) == 0 {
-		return nil, errEnvironmentEndpointPending
-	}
-	keySource, err := productionEnvironmentKeySourceForState(stateRoot, registration)
-	if err != nil {
-		return nil, err
-	}
-	genesisMarker, ok := keySource.(environmentkey.GenesisMarker)
-	if !ok {
-		return nil, errors.Join(ErrProductionInvalid, environmentkey.ErrUnavailable)
-	}
-	material, err := keySource.Load(ctx)
-	if err != nil {
-		return nil, err
-	}
-	public, publicErr := material.Public()
-	integrityKey, integrityErr := material.StateIntegrityKey()
-	hostKeyGeneration := material.Generation
-	material.Destroy()
-	if publicErr != nil {
-		return nil, publicErr
-	}
-	if integrityErr != nil {
-		return nil, integrityErr
-	}
-	defer clear(integrityKey[:])
-	keyID, err := environmente2ee.KeyIDX25519(public[:])
-	if err != nil {
-		return nil, err
-	}
-	certificate, err := verifyStoredEnvironmentEndpoint(endpoint, registration.MachineID)
-	if err != nil || certificate.Claims.AccountID == "" {
-		return nil, errors.Join(ErrProductionInvalid, err)
-	}
-	processor, err := envinject.NewCryptoProcessor(envinject.CryptoProcessorConfig{
-		AccountID: certificate.Claims.AccountID, MachineID: registration.MachineID,
-		InstallationGeneration: uint64(registration.InstallationGeneration), HostKeyGeneration: hostKeyGeneration,
-		HostRecipientKeyID: keyID, RootKeyID: endpoint.RootKeyID, RootPublicKey: endpoint.RootPublicKey,
-		TrustedKeys: endpoint.TrustedKeys, Keys: keySource,
-	})
-	if err != nil {
-		return nil, err
-	}
-	store, err := envinject.Open(ctx, envinject.Config{
-		Path: filepath.Join(stateRoot, "environment", "cache.json"), HighWaterPath: filepath.Join(stateRoot, "environment-high-water.json"), IntegrityKey: integrityKey[:], AllowHighWaterInitialize: true, AccountID: certificate.Claims.AccountID, MachineID: registration.MachineID,
-		InstallationGeneration: uint64(registration.InstallationGeneration), HostKeyGeneration: hostKeyGeneration,
-		HostRecipientKeyID: keyID, GenesisMarker: genesisMarker, Processor: processor,
-	})
-	if runtime.GOOS == "darwin" && errors.Is(err, envinject.ErrInvalidSnapshot) {
-		// Older macOS hosts encrypted this cache with a login-Keychain recipient
-		// that a pre-login LaunchDaemon cannot load. The cache contains only
-		// encrypted LKG material; discard both authenticated state files together
-		// and re-open against the identity-wrapped portable recipient.
-		if resetErr := resetLegacyEnvironmentCacheForPortableSource(stateRoot); resetErr != nil {
-			return nil, errors.Join(err, resetErr)
-		}
-		store, err = envinject.Open(ctx, envinject.Config{
-			Path: filepath.Join(stateRoot, "environment", "cache.json"), HighWaterPath: filepath.Join(stateRoot, "environment-high-water.json"), IntegrityKey: integrityKey[:], AllowHighWaterInitialize: true, AccountID: certificate.Claims.AccountID, MachineID: registration.MachineID,
-			InstallationGeneration: uint64(registration.InstallationGeneration), HostKeyGeneration: hostKeyGeneration,
-			HostRecipientKeyID: keyID, GenesisMarker: genesisMarker, Processor: processor,
-		})
-	}
-	if err != nil {
-		return nil, err
-	}
-	if _, environmentErr := store.Environment(); environmentErr == nil || errors.Is(environmentErr, envinject.ErrRevoked) {
-		return store, nil
-	} else if !errors.Is(environmentErr, envinject.ErrNotReady) {
-		return nil, environmentErr
-	}
-	return store, nil
-}
-
-func newProductionEnvironmentEnrollment(stateRoot, controlURL string, transport http.RoundTripper, registration runtimeidentity.Registration, credentials managedSSHIdentitySource, reconcile func(context.Context) (environmentenrollment.BindingState, error)) (*environmentenrollment.Client, error) {
-	keySource, err := productionEnvironmentKeySourceForState(stateRoot, registration)
-	if err != nil {
-		return nil, err
-	}
-	return environmentenrollment.New(environmentenrollment.Config{ControlURL: controlURL, StateRoot: stateRoot, Transport: transport, Timeout: 15 * time.Second, Keys: keySource, Reconcile: reconcile}, credentials)
-}
-
-func verifyStoredEnvironmentEndpoint(endpoint runtimeidentity.PeerEndpoint, machineID string) (endpointidentity.Certificate, error) {
-	parsed, err := endpointidentity.Parse(endpoint.Certificate)
-	if err != nil {
-		return endpointidentity.Certificate{}, errors.Join(ErrProductionInvalid, err)
-	}
-	// An accepted encrypted cache remains usable after the network PBEC
-	// expires. Verify the stored certificate's signature and identity at its
-	// issuance instant here; environment enrollment separately requires a
-	// currently valid PBEC before making any network request.
-	return endpointidentity.Verify(endpoint.Certificate, endpoint.RootPublicKey, endpointidentity.Expected{Role: endpointidentity.RoleMachine, EndpointID: machineID, Generation: endpoint.Generation}, parsed.Claims.IssuedAt)
-}
-
-type environmentBootstrapService struct {
-	provider         *envinject.Provider
-	initialize       func(context.Context) (*envinject.Store, error)
-	store            *envinject.Store
-	ensure           func(context.Context) error
-	commit           func(context.Context) error
-	observationReady <-chan struct{}
-	interval         time.Duration
-	cancel           context.CancelFunc
-	done             chan struct{}
-}
-
-func newEnvironmentBootstrapService(provider *envinject.Provider, initialize func(context.Context) (*envinject.Store, error), interval time.Duration) *environmentBootstrapService {
-	return &environmentBootstrapService{provider: provider, initialize: initialize, interval: interval, done: make(chan struct{})}
-}
-
-func (s *environmentBootstrapService) Start(ctx context.Context) error {
-	if s == nil || s.provider == nil || s.initialize == nil || s.interval <= 0 || ctx == nil || s.cancel != nil {
-		return ErrProductionInvalid
-	}
-	runCtx, cancel := context.WithCancel(ctx)
-	s.cancel = cancel
-	// Attach the local store before returning. Runtime observation starts after
-	// authorization and must be able to send the first authenticated bundle
-	// without racing this service's goroutine.
-	if s.store == nil {
-		store, err := s.initialize(runCtx)
-		if err == nil {
-			if attachErr := s.provider.Attach(store); attachErr != nil {
-				cancel()
-				return attachErr
-			}
-			s.store = store
-		}
-	}
-	go func() {
-		defer close(s.done)
-		reportedFailure := false
-		reportedPending := false
-		for {
-			if s.store == nil {
-				store, err := s.initialize(runCtx)
-				if err == nil {
-					if attachErr := s.provider.Attach(store); attachErr != nil {
-						slog.Error("ENV runtime attachment failed", "error_code", "environment_attach_failed")
-					} else {
-						s.store = store
-					}
-				}
-			}
-			if s.ensure == nil {
-				if s.store != nil {
-					return
-				}
-				if !waitEnvironmentBootstrap(runCtx, s.interval) {
-					return
-				}
-				continue
-			}
-			if s.store == nil {
-				if !waitEnvironmentBootstrap(runCtx, s.interval) {
-					return
-				}
-				continue
-			}
-			if s.observationReady != nil {
-				select {
-				case <-runCtx.Done():
-					return
-				case <-s.observationReady:
-					s.observationReady = nil
-				}
-			} else if !waitEnvironmentBootstrap(runCtx, s.interval) {
-				return
-			}
-			switch s.provider.BindingState() {
-			case envinject.BindingActive:
-				if s.commit == nil || s.commit(runCtx) == nil {
-					return
-				}
-			case envinject.BindingUnknown, envinject.BindingInactive:
-			}
-			err := s.ensure(runCtx)
-			if err == nil {
-				if s.provider.BindingState() == envinject.BindingActive && (s.commit == nil || s.commit(runCtx) == nil) {
-					return
-				}
-			} else if errors.Is(err, environmentenrollment.ErrPending) {
-				if !reportedPending {
-					var pending *environmentenrollment.PendingError
-					if errors.As(err, &pending) {
-						slog.Warn("ENV key authorization required", "request_id", pending.RequestID, "safety_code", pending.SafetyCode, "expires_at", pending.ExpiresAt)
-					}
-					reportedPending = true
-				}
-			} else if !reportedFailure {
-				slog.Warn("ENV key enrollment could not initialize", "error_code", "environment_enrollment_failed")
-				reportedFailure = true
-			}
-			if !waitEnvironmentBootstrap(runCtx, s.interval) {
-				return
-			}
-		}
-	}()
-	return nil
-}
-
 func waitEnvironmentBootstrap(ctx context.Context, interval time.Duration) bool {
 	timer := time.NewTimer(interval)
 	defer timer.Stop()
@@ -1367,19 +1076,6 @@ func waitEnvironmentBootstrap(ctx context.Context, interval time.Duration) bool 
 		return false
 	case <-timer.C:
 		return true
-	}
-}
-
-func (s *environmentBootstrapService) Shutdown(ctx context.Context) error {
-	if s == nil || ctx == nil || s.cancel == nil {
-		return ErrProductionInvalid
-	}
-	s.cancel()
-	select {
-	case <-s.done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
 	}
 }
 
@@ -1635,14 +1331,23 @@ type runtimeObservationSender struct {
 		Apply(context.Context, envinject.Bundle) error
 		BindingState() envinject.BindingState
 	}
+	projection interface {
+		NextObservation(time.Time) (envinject.ProjectionObservation, error)
+		Apply(context.Context, envinject.ProjectionBundle) error
+		BindingState() envinject.BindingState
+	}
 	onEnvironmentObservation func()
 	receiptPath              string
 	installationGeneration   uint64
 	workerGeneration         uint64
 	osBootID                 string
+	lazyBootID               string
+	lazyStartedAt            time.Time
 	serviceScope             string
 	connector                interface{ Status() connector.Status }
+	transferPolicy           *filetransfer.PolicyStore
 	capabilities             []string
+	capabilitiesController   *deviceCapabilityController
 	relayLatency             interface {
 		Vector(time.Time) relayselection.Vector
 	}
@@ -1654,6 +1359,7 @@ type runtimeObservationSender struct {
 func (s *runtimeObservationSender) Send(ctx context.Context) error {
 	now := time.Now().UTC()
 	var environmentObservation *envinject.Observation
+	var projectionObservation *envinject.ProjectionObservation
 	environmentObservationSent := false
 	if s.environment != nil {
 		observation, err := s.environment.NextObservation(now)
@@ -1669,6 +1375,19 @@ func (s *runtimeObservationSender) Send(ctx context.Context) error {
 			environmentObservationSent = true
 		}
 	}
+	if s.projection != nil {
+		observation, err := s.projection.NextObservation(now)
+		if err == nil {
+			projectionObservation = &observation
+		}
+	}
+	var observationPayload any
+	if projectionObservation != nil {
+		observationPayload = projectionObservation
+	} else if environmentObservation != nil {
+		observationPayload = environmentObservation
+	}
+	environmentReady := s.projection != nil && s.projection.BindingState() == envinject.BindingActive || environmentObservation != nil && s.environment.BindingState() == envinject.BindingActive
 	relayLatency := s.nextRelayLatency(now)
 	availabilityState := availabilityObservation(s.availability)
 	var updaterState *updated.ControlResponse
@@ -1682,25 +1401,29 @@ func (s *runtimeObservationSender) Send(ctx context.Context) error {
 		}
 	}
 	body, err := json.Marshal(struct {
+		LazyRuntime        *lazyRuntimeObservation         `json:"lazy_runtime,omitempty"`
 		EnvironmentID      string                          `json:"environment_id"`
 		ResourceID         string                          `json:"resource_id"`
 		ReporterVersion    string                          `json:"reporter_version"`
 		SampledAt          time.Time                       `json:"sampled_at"`
-		Environment        *envinject.Observation          `json:"environment,omitempty"`
+		Environment        any                             `json:"environment,omitempty"`
 		Availability       *availability.Observation       `json:"availability,omitempty"`
 		RuntimeDiagnostics *runtimeDiagnosticsObservation  `json:"runtime_diagnostics,omitempty"`
 		RelayLatency       *runtimeRelayLatencyObservation `json:"relay_latency,omitempty"`
 		Update             *runtimeUpdateObservation       `json:"update,omitempty"`
+		DeviceCapabilities *deviceCapabilitiesObservation  `json:"device_capabilities,omitempty"`
 	}{
+		LazyRuntime:        s.lazyRuntimeObservation(),
 		EnvironmentID:      s.environmentID,
 		ResourceID:         s.machineID,
 		ReporterVersion:    s.reporterVersion,
 		SampledAt:          now,
-		Environment:        environmentObservation,
+		Environment:        observationPayload,
 		Availability:       availabilityState,
-		RuntimeDiagnostics: s.runtimeDiagnostics(now, environmentObservation != nil && s.environment.BindingState() == envinject.BindingActive),
+		RuntimeDiagnostics: s.runtimeDiagnostics(now, environmentReady),
 		RelayLatency:       relayLatency,
 		Update:             s.updateObservationFrom(now, availabilityState, updaterState, updaterErr),
+		DeviceCapabilities: s.capabilitiesController.Observation(now),
 	})
 	if err != nil {
 		return err
@@ -1741,6 +1464,28 @@ func (s *runtimeObservationSender) Send(ctx context.Context) error {
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("runtime observation rejected with status %d", response.StatusCode)
 	}
+	if s.transferPolicy != nil {
+		if err := applyRuntimeTransferPolicy(responseBody, s.transferPolicy); err != nil {
+			return err
+		}
+	}
+	if s.capabilitiesController != nil {
+		if err := applyRuntimeDeviceCapabilities(ctx, responseBody, s.capabilitiesController); err != nil {
+			return err
+		}
+	}
+	if projectionObservation != nil {
+		bundle, err := envinject.DecodeProjectionResponse(responseBody, "environment_bundle")
+		if err != nil {
+			return err
+		}
+		if bundle != nil {
+			if err := s.projection.Apply(ctx, *bundle); err != nil {
+				return err
+			}
+		}
+	}
+
 	if environmentObservation != nil {
 		bundle, err := envinject.DecodeRuntimeResponse(responseBody)
 		if err != nil {
@@ -1758,6 +1503,20 @@ func (s *runtimeObservationSender) Send(ctx context.Context) error {
 		return nil
 	}
 	return writeServerHeartbeatReceipt(s.receiptPath, serverHeartbeatReceipt{Schema: "paperboat.server-heartbeat/v1", WorkerGeneration: s.workerGeneration, ReporterVersion: s.reporterVersion, AcceptedAt: time.Now().UTC()})
+}
+
+type lazyRuntimeObservation struct {
+	Schema                 string    `json:"schema"`
+	BootID                 string    `json:"boot_id"`
+	InstallationGeneration uint64    `json:"installation_generation"`
+	StartedAt              time.Time `json:"started_at"`
+}
+
+func (s *runtimeObservationSender) lazyRuntimeObservation() *lazyRuntimeObservation {
+	if s.lazyBootID == "" || s.installationGeneration == 0 || s.lazyStartedAt.IsZero() {
+		return nil
+	}
+	return &lazyRuntimeObservation{Schema: "paperboat.lazy-runtime/v1", BootID: s.lazyBootID, InstallationGeneration: s.installationGeneration, StartedAt: s.lazyStartedAt.UTC()}
 }
 
 type runtimeUpdateObservation struct {
@@ -1949,31 +1708,6 @@ func availabilityObservation(source interface {
 	return source.Observation()
 }
 
-type connectorReadinessService struct {
-	supervisor     *connector.Supervisor
-	manager        *connector.Manager
-	networkChanges Service
-}
-
-func (s *connectorReadinessService) Start(ctx context.Context) error {
-	if err := s.supervisor.Start(ctx); err != nil {
-		return err
-	}
-	if s.networkChanges != nil {
-		if err := s.networkChanges.Start(ctx); err != nil {
-			return errors.Join(err, s.supervisor.Shutdown(context.Background()))
-		}
-	}
-	return nil
-}
-func (s *connectorReadinessService) Shutdown(ctx context.Context) error {
-	var networkErr error
-	if s.networkChanges != nil {
-		networkErr = s.networkChanges.Shutdown(ctx)
-	}
-	return errors.Join(networkErr, s.supervisor.Shutdown(ctx))
-}
-
 type jwksRefreshService struct {
 	cache    *auth.JWKSCache
 	interval time.Duration
@@ -2018,17 +1752,6 @@ func (s *jwksRefreshService) Shutdown(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-}
-
-func (s *connectorReadinessService) CapabilityHealth() health.Capability {
-	status := s.manager.Status()
-	if status.Stopping {
-		return health.Capability{State: health.Unavailable, Reason: "stopped"}
-	}
-	if status.Connected {
-		return health.Capability{State: health.Ready}
-	}
-	return health.Capability{State: health.Unavailable, Reason: "connector_unavailable", RetryAfterMs: 1000}
 }
 
 func validatedControlURL(raw string) (*url.URL, error) {
@@ -2089,9 +1812,7 @@ func valueOrRuntime(value, fallback string) string {
 	}
 	return strings.TrimSpace(value)
 }
-func productionConnectorTransport(value string) connector.Transport {
-	return connector.Transport(valueOrRuntime(value, string(connector.Auto)))
-}
+
 func durationRuntime(value string, fallback time.Duration) time.Duration {
 	if value == "" {
 		return fallback

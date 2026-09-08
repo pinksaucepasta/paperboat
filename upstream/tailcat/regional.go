@@ -240,6 +240,14 @@ func (b *locoBackend) setPeerRelayRegion(peer key.NodePublic, id tailcfg.DERPReg
 func (b *locoBackend) relayPeerAdmitted(peer key.NodePublic) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.relayControlPeers[peer] {
+		return true
+	}
+	for _, relay := range b.peerRelayNodes {
+		if relay != nil && relay.Key == peer {
+			return true
+		}
+	}
 	if b.serverPub.IsZero() {
 		if b.authority {
 			return b.allowedPeers[peer].IsValid()
@@ -248,6 +256,41 @@ func (b *locoBackend) relayPeerAdmitted(peer key.NodePublic) bool {
 		return ok
 	}
 	return peer == b.serverPub
+}
+
+func (b *locoBackend) setRelayControlPeers(peers []key.NodePublic) error {
+	if len(peers) > 16 {
+		return errors.New("tailcat: too many relay control peers")
+	}
+	next := make(map[key.NodePublic]bool, len(peers))
+	for _, peer := range peers {
+		if peer.IsZero() || peer == b.pub || next[peer] {
+			return errors.New("tailcat: invalid relay control peer")
+		}
+		next[peer] = true
+	}
+	b.relayControlPeers = next
+	return nil
+}
+
+func (s *Server) SetRelayControlPeers(peers []key.NodePublic) error {
+	if s.lb == nil {
+		s.RelayControlPeers = append([]key.NodePublic(nil), peers...)
+		return nil
+	}
+	s.lb.mu.Lock()
+	defer s.lb.mu.Unlock()
+	return s.lb.setRelayControlPeers(peers)
+}
+
+func (c *Client) SetRelayControlPeers(peers []key.NodePublic) error {
+	if c.lb == nil {
+		c.RelayControlPeers = append([]key.NodePublic(nil), peers...)
+		return nil
+	}
+	c.lb.mu.Lock()
+	defer c.lb.mu.Unlock()
+	return c.lb.setRelayControlPeers(peers)
 }
 
 func (s *Server) SendRelayControl(peer key.NodePublic, id tailcfg.DERPRegionID, payload []byte) error {

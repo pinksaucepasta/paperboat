@@ -40,6 +40,141 @@ type localPeerExecRemote struct {
 	signal              string
 }
 
+type cursorPeerRemote struct {
+	*localPeerRemote
+	cursor *LocalPeerCursorBridge
+	reads  int
+}
+
+func (c *cursorPeerRemote) Read(value []byte) (int, error) {
+	c.reads++
+	switch c.reads {
+	case 1:
+		copy(value, "abcdef")
+		c.cursor.RecordSequence(6)
+		return 6, nil
+	default:
+		c.cursor.RecordSequence(9)
+		return 0, io.EOF
+	}
+}
+
+func TestLocalPeerCursorAdvancesOnlyAfterOutputConsumption(t *testing.T) {
+	localClient, localServer := net.Pipe()
+	remoteServer, remotePeer := net.Pipe()
+	defer remotePeer.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cursor := &LocalPeerCursorBridge{}
+	cursor.RecordSequence(2)
+	cursor.RecordReplayGap(1, 2, 2)
+	served := make(chan error, 1)
+	go func() {
+		served <- ServeLocalPeerTerminalConn(ctx, localServer, &cursorPeerRemote{localPeerRemote: &localPeerRemote{Conn: remoteServer}, cursor: cursor}, cursor)
+	}()
+	sequences := make(chan int, 4)
+	gaps := make(chan localPeerReplayGapPayload, 1)
+	connection, err := NewLocalPeerConn(localClient, func(sequence int) { sequences <- sequence }, func(requested, earliest, latest uint64) {
+		gaps <- localPeerReplayGapPayload{requested, earliest, latest}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := connection.Read(nil); n != 0 || err != nil || len(sequences) != 0 {
+		t.Fatalf("zero read=(%d,%v) pending sequences=%d", n, err, len(sequences))
+	}
+	buffer := make([]byte, 1)
+	for index := 0; index < 5; index++ {
+		if _, err := io.ReadFull(connection, buffer); err != nil {
+			t.Fatal(err)
+		}
+		if index == 0 {
+			if sequence := <-sequences; sequence != 2 {
+				t.Fatalf("baseline sequence=%d", sequence)
+			}
+		}
+		if len(sequences) != 0 {
+			t.Fatalf("cursor advanced before data drained")
+		}
+	}
+	if _, err := io.ReadFull(connection, buffer); err != nil {
+		t.Fatal(err)
+	}
+	if sequence := <-sequences; sequence != 6 {
+		t.Fatalf("data sequence=%d", sequence)
+	}
+	readDone := make(chan error, 1)
+	go func() { _, readErr := connection.Read(buffer); readDone <- readErr }()
+	select {
+	case sequence := <-sequences:
+		if sequence != 9 {
+			t.Fatalf("final sequence=%d", sequence)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("final sequence was not delivered")
+	}
+	cancel()
+	select {
+	case readErr := <-readDone:
+		if !errors.Is(readErr, io.EOF) {
+			t.Fatalf("final read error=%v", readErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("final read did not unblock")
+	}
+	select {
+	case gap := <-gaps:
+		if gap != (localPeerReplayGapPayload{1, 2, 2}) {
+			t.Fatalf("gap=%v", gap)
+		}
+	default:
+		t.Fatal("gap was not delivered")
+	}
+	_ = connection.Close()
+	select {
+	case <-served:
+	case <-time.After(time.Second):
+		t.Fatal("bridge did not stop")
+	}
+}
+
+func TestLocalPeerDebugConnCarriesCursor(t *testing.T) {
+	localClient, localServer := net.Pipe()
+	remoteServer, remotePeer := net.Pipe()
+	defer remotePeer.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cursor := &LocalPeerCursorBridge{}
+	cursor.RecordSequence(2)
+	served := make(chan error, 1)
+	go func() {
+		remote := &cursorPeerRemote{localPeerRemote: &localPeerRemote{Conn: remoteServer, runtimeVersion: "runtime-1"}, cursor: cursor}
+		served <- ServeLocalPeerDebugTerminalConn(ctx, localServer, remote, cursor)
+	}()
+	sequences := []int{}
+	connection, err := newLocalPeerDebugConn(localClient, func(sequence int) { sequences = append(sequences, sequence) }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := TerminalRuntimeVersion(connection); got != "runtime-1" {
+		t.Fatalf("runtime version=%q", got)
+	}
+	output := make([]byte, 6)
+	if _, err := io.ReadFull(connection, output); err != nil || string(output) != "abcdef" {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	if len(sequences) != 2 || sequences[0] != 2 || sequences[1] != 6 {
+		t.Fatalf("sequences=%v", sequences)
+	}
+	cancel()
+	_ = connection.Close()
+	select {
+	case <-served:
+	case <-time.After(time.Second):
+		t.Fatal("debug bridge did not stop")
+	}
+}
+
 type recordingOwnedLease struct{ calls int }
 
 func (l *recordingOwnedLease) Release() { l.calls++ }
@@ -175,7 +310,7 @@ func TestOwnedAndLocalPeerConnectionsPreserveRuntimeVersion(t *testing.T) {
 	}
 	served := make(chan error, 1)
 	go func() { served <- ServeLocalPeerDebugConn(context.Background(), localServer, owned) }()
-	connection, err := newLocalPeerDebugConn(localClient)
+	connection, err := newLocalPeerDebugConn(localClient, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +334,7 @@ func TestLocalPeerDebugConnPreservesFirstFrameFromDaemonWithoutMetadata(t *testi
 		served <- ServeLocalPeerConn(context.Background(), localServer, &localPeerRemote{Conn: remoteServer})
 	}()
 	go func() { _, _ = remotePeer.Write([]byte("banner")) }()
-	connection, err := newLocalPeerDebugConn(localClient)
+	connection, err := newLocalPeerDebugConn(localClient, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +363,7 @@ func TestLocalPeerConnPreservesDataResizeAndWait(t *testing.T) {
 	defer cancel()
 	served := make(chan error, 1)
 	go func() { served <- ServeLocalPeerConn(ctx, localServer, remote) }()
-	connection, err := NewLocalPeerConn(localClient)
+	connection, err := NewLocalPeerConn(localClient, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +443,7 @@ func TestServeLocalPeerConnWaitDoesNotBlockControlFrames(t *testing.T) {
 	defer cancel()
 	served := make(chan error, 1)
 	go func() { served <- ServeLocalPeerConn(ctx, localServer, remote) }()
-	connection, err := NewLocalPeerConn(localClient)
+	connection, err := NewLocalPeerConn(localClient, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

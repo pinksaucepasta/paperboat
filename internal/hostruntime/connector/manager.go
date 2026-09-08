@@ -17,6 +17,8 @@ const (
 	QUIC         Transport = "quic"
 	TCPDedicated Transport = "tcp_dedicated"
 	TCPMux       Transport = "tcp_mux"
+	HTTP3        Transport = "http3"
+	HTTP2        Transport = "http2"
 	TCPTLS       Transport = TCPMux
 )
 

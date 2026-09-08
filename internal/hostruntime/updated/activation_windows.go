@@ -64,7 +64,7 @@ func windowsActivationJournalPath(stateRoot string) string {
 	return filepath.Join(stateRoot, "activation", "journal.json")
 }
 
-func stageWindowsActivation(ctx context.Context, config WindowsConfig, release workerupdate.Release) (windowsActivationJournal, error) {
+func stageWindowsActivation(ctx context.Context, config WindowsConfig, release workerupdate.Release, manualMode string) (windowsActivationJournal, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -180,7 +180,8 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 		return windowsActivationJournal{}, err
 	}
 	journal := windowsActivationJournal{
-		Schema: windowsActivationJournalSchema, TransactionID: hex.EncodeToString(transaction[:]), PreviousVersion: config.ActiveVersion, Version: release.Version, Architecture: config.Architecture, Stage: windowsActivationStaged,
+		ManualMode: manualMode,
+		Schema:     windowsActivationJournalSchema, TransactionID: hex.EncodeToString(transaction[:]), PreviousVersion: config.ActiveVersion, Version: release.Version, Architecture: config.Architecture, Stage: windowsActivationStaged,
 		Runtime: staged, CLI: staged, Hostd: staged, Updater: staged, PreviousBinary: previousBinary,
 		OldHostd: oldHostd, OldUpdater: oldUpdater, OldSSH: oldSSH, NewSSH: newSSH,
 		LocalDaemonWasRunning: localDaemonWasRunning,

@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
 )
 
 var (
@@ -318,16 +321,18 @@ func (h *DataCarrierPreviewHub) closeRegistrations(err error) {
 // It probes the local origin before reporting readiness and then forwards
 // admitted streams without buffering application bytes.
 type DataCarrierPreviewCarrier struct {
-	hub       *DataCarrierPreviewHub
-	active    *connector.ActiveDataCarrier
-	identity  connector.DataCarrierIdentity
-	routeID   string
-	dialer    PreviewOriginDialer
-	max       int
-	dialWait  time.Duration
-	closeWait time.Duration
-	observe   func(error)
-	ownHub    bool
+	hub                    *DataCarrierPreviewHub
+	active                 *connector.ActiveDataCarrier
+	identity               connector.DataCarrierIdentity
+	routeID                string
+	dialer                 PreviewOriginDialer
+	browserIngress         tunnelmanager.IngressAuthorityFunc
+	browserRouteGeneration uint64
+	max                    int
+	dialWait               time.Duration
+	closeWait              time.Duration
+	observe                func(error)
+	ownHub                 bool
 
 	mu        sync.Mutex
 	closed    bool
@@ -344,12 +349,14 @@ type DataCarrierPreviewCarrierConfig struct {
 	// from the preview lease ID when a preview is attached to an ephemeral
 	// route. An empty value keeps the direct carrier constructor compatible
 	// with leases whose route and lease IDs are identical.
-	RouteID            string
-	DialOrigin         PreviewOriginDialer
-	MaxStreams         int
-	OriginDialTimeout  time.Duration
-	OriginCloseTimeout time.Duration
-	ObserveStreamError func(error)
+	RouteID                string
+	DialOrigin             PreviewOriginDialer
+	BrowserIngress         tunnelmanager.IngressAuthorityFunc
+	BrowserRouteGeneration uint64
+	MaxStreams             int
+	OriginDialTimeout      time.Duration
+	OriginCloseTimeout     time.Duration
+	ObserveStreamError     func(error)
 }
 
 func NewDataCarrierPreviewCarrier(config DataCarrierPreviewCarrierConfig) (*DataCarrierPreviewCarrier, error) {
@@ -392,7 +399,7 @@ func NewDataCarrierPreviewCarrier(config DataCarrierPreviewCarrierConfig) (*Data
 	if config.OriginDialTimeout <= 0 || config.OriginCloseTimeout <= 0 {
 		return nil, ErrDataCarrierPreviewInvalid
 	}
-	return &DataCarrierPreviewCarrier{hub: config.Hub, active: config.Active, identity: config.Identity, routeID: config.RouteID, dialer: config.DialOrigin, max: config.MaxStreams, dialWait: config.OriginDialTimeout, closeWait: config.OriginCloseTimeout, observe: config.ObserveStreamError, ownHub: ownHub}, nil
+	return &DataCarrierPreviewCarrier{hub: config.Hub, active: config.Active, identity: config.Identity, routeID: config.RouteID, dialer: config.DialOrigin, browserIngress: config.BrowserIngress, browserRouteGeneration: config.BrowserRouteGeneration, max: config.MaxStreams, dialWait: config.OriginDialTimeout, closeWait: config.OriginCloseTimeout, observe: config.ObserveStreamError, ownHub: ownHub}, nil
 }
 
 func (c *DataCarrierPreviewCarrier) Run(ctx context.Context, lease Lease, ready func(Lease) error) error {
@@ -444,13 +451,27 @@ func (c *DataCarrierPreviewCarrier) Run(ctx context.Context, lease Lease, ready 
 		c.mu.Unlock()
 	}()
 
-	probeCtx, cancelProbe := context.WithTimeout(runCtx, c.dialWait)
-	origin, err := c.dialOrigin(probeCtx, lease.Target)
+	dialWait := c.dialWait
+	if lease.LazyLifecycle != nil && dialWait > LazyOriginConnectTimeout {
+		dialWait = LazyOriginConnectTimeout
+	}
+	probeCtx, cancelProbe := context.WithTimeout(runCtx, dialWait)
+	if lease.LazyLifecycle != nil {
+		err = c.probeLazyHTTP(probeCtx, lease)
+	} else {
+		var origin io.ReadWriteCloser
+		origin, err = c.dialOrigin(probeCtx, lease.Target)
+		if origin != nil {
+			_ = closeWithTimeout(origin, c.closeWait)
+		}
+	}
 	cancelProbe()
 	if err != nil {
+		if lease.LazyLifecycle != nil {
+			return errors.Join(ErrDataCarrierPreviewOrigin, err)
+		}
 		return &RetryableCarrierError{Err: errors.Join(ErrDataCarrierPreviewOrigin, err)}
 	}
-	_ = closeWithTimeout(origin, c.closeWait)
 	observed := lease
 	observed.State, observed.AllocationState, observed.EdgeState, observed.OriginState = "ready", "ready", "ready", "ready"
 	if err := ready(observed); err != nil {
@@ -471,7 +492,7 @@ func (c *DataCarrierPreviewCarrier) Run(ctx context.Context, lease Lease, ready 
 			}
 			return err
 		}
-		if open.RouteID != routeID || !previewIdentityMatches(c.identity, open) {
+		if open.RouteID != routeID || !previewIdentityMatches(c.identity, open) || lease.AccessMode == "team" && open.Kind != "http_browser" {
 			_ = stream.Close()
 			continue
 		}
@@ -481,7 +502,25 @@ func (c *DataCarrierPreviewCarrier) Run(ctx context.Context, lease Lease, ready 
 			go func(stream *connector.DataCarrierStream) {
 				defer streams.Done()
 				defer func() { <-permits }()
-				if err := c.forward(runCtx, stream, lease.Target); err != nil && c.observe != nil {
+				streamCtx := runCtx
+				streamDone := func() {}
+				if lease.LazyLifecycle != nil {
+					deadline := time.Time{}
+					if open.Kind == "http_browser" {
+						// Browser ingress revalidates and enforces its own shorter
+						// authorization deadline inside forwardBrowser.
+						deadline = lease.LeaseDeadline
+					}
+					streamCtx, streamDone = lease.LazyLifecycle.BeginStream(runCtx, deadline)
+				}
+				defer streamDone()
+				var err error
+				if open.Kind == "http_browser" {
+					err = c.forwardBrowser(streamCtx, stream, open, lease)
+				} else {
+					err = c.forward(streamCtx, stream, lease.Target, lease.LazyLifecycle != nil)
+				}
+				if err != nil && c.observe != nil {
 					c.observe(err)
 				}
 			}(stream)
@@ -489,6 +528,34 @@ func (c *DataCarrierPreviewCarrier) Run(ctx context.Context, lease Lease, ready 
 			_ = stream.Close()
 		}
 	}
+}
+
+func (c *DataCarrierPreviewCarrier) probeLazyHTTP(ctx context.Context, lease Lease) error {
+	verification := "not_applicable"
+	if lease.Target.Scheme == "https" {
+		verification = "system"
+	}
+	route := hoststate.TunnelConfigRoute{ID: c.routeID, Protocol: "http", OriginScheme: lease.Target.Scheme, OriginAddress: lease.Target.Address, TLSVerification: verification, PreserveHost: false, ConnectTimeoutMs: int32(LazyOriginConnectTimeout / time.Millisecond), IdleTimeoutMs: 1000, DesiredState: "active"}
+	transport := &tunnelmanager.OriginHTTPTransport{}
+	if c.dialer != nil {
+		transport.Dialer = previewBrowserDialer{carrier: c, target: lease.Target}
+	}
+	defer transport.CloseIdleConnections()
+	request, err := http.NewRequestWithContext(ctx, http.MethodHead, "http://paperboat-origin.invalid/", nil)
+	if err != nil {
+		return err
+	}
+	response, err := transport.RoundTrip(ctx, route, request)
+	if err != nil {
+		return err
+	}
+	if response.Body != nil {
+		_ = response.Body.Close()
+	}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusInternalServerError {
+		return ErrDataCarrierPreviewOrigin
+	}
+	return nil
 }
 
 func (c *DataCarrierPreviewCarrier) Close(ctx context.Context) error {
@@ -586,13 +653,19 @@ func (c *DataCarrierPreviewCarrier) dialOrigin(ctx context.Context, target Lease
 	return tlsConnection, nil
 }
 
-func (c *DataCarrierPreviewCarrier) forward(ctx context.Context, stream *connector.DataCarrierStream, target LeaseTarget) error {
+func (c *DataCarrierPreviewCarrier) forward(ctx context.Context, stream *connector.DataCarrierStream, target LeaseTarget, lazy bool) error {
 	if stream == nil {
 		return ErrDataCarrierPreviewInvalid
 	}
 	originCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	origin, err := c.dialOrigin(originCtx, target)
+	dialCtx := originCtx
+	dialCancel := func() {}
+	if lazy {
+		dialCtx, dialCancel = context.WithTimeout(originCtx, LazyOriginConnectTimeout)
+	}
+	origin, err := c.dialOrigin(dialCtx, target)
+	dialCancel()
 	if err != nil {
 		_ = stream.Close()
 		return err

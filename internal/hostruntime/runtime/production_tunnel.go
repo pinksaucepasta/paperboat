@@ -7,9 +7,11 @@ import (
 	"sync"
 
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/observability"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelenrollment"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/networkmonitor"
 )
 
 var (
@@ -358,4 +360,16 @@ func productionTunnelAssembly(ctx context.Context, provider ProductionTunnelAsse
 		return nil, ErrProductionTunnelAssemblyUnavailable
 	}
 	return assembly, nil
+}
+
+func (s *ProductionTunnelEnrollment) HandleNetworkEvent(event networkmonitor.Event) {
+	if target, ok := s.lifecycle.(interface{ HandleNetworkEvent(networkmonitor.Event) }); ok {
+		target.HandleNetworkEvent(event)
+	}
+}
+func (s *ProductionTunnelEnrollment) Status() connector.Status {
+	if target, ok := s.lifecycle.(interface{ Status() connector.Status }); ok {
+		return target.Status()
+	}
+	return connector.Status{}
 }

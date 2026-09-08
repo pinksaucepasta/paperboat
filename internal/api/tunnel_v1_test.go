@@ -21,6 +21,17 @@ func tunnelTestClient(t *testing.T, handler http.HandlerFunc) *Client {
 	return New(server.URL, config.Credential{AccessToken: "client-token"}, server.Client())
 }
 
+func TestValidatePublicTCPRouteRequiresReservedEndpoint(t *testing.T) {
+	route := TunnelRoute{Schema: TunnelV1Schema, Kind: "route", ID: "route_tcp_1", TunnelID: "tun_1", Name: "postgres", Protocol: "tcp", HostMatch: TunnelRouteHostMatch{Type: "managed_exact", Hostname: "123e4567-e89b-42d3-a456-426614174000.tunnels.example.test"}, Origin: TunnelRouteOrigin{Scheme: "tcp", Address: "127.0.0.1:5432"}, ConnectTimeoutMS: 10000, IdleTimeoutMS: 300000, MaxConcurrentStreams: 128, DesiredState: "active", Generation: 1, ETag: `"route:route_tcp_1:1"`, PublicTCPListenerID: "listener_1", PublicTCPPort: 24567}
+	if err := validateRoute(route); err != nil {
+		t.Fatalf("valid public TCP route rejected: %v", err)
+	}
+	route.PublicTCPListenerID = ""
+	if err := validateRoute(route); !errors.Is(err, ErrUnsafeTunnelResponse) {
+		t.Fatalf("missing listener error=%v", err)
+	}
+}
+
 func validTunnelHealthTestValue() TunnelHealth {
 	dimension := TunnelHealthDimension{Status: "healthy", Code: "ready"}
 	return TunnelHealth{Schema: TunnelV1Schema, Kind: "health", ResourceKind: "tunnel", ResourceID: "tun_1", OverallCode: "ready", Summary: "Tunnel is ready.", Since: time.Unix(1, 0).UTC(), Dimensions: TunnelHealthDimensions{Service: dimension, Edge: dimension, Config: dimension, Route: dimension, Origin: dimension, DNS: dimension, Certificate: dimension, Access: dimension, Update: dimension}}

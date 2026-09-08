@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connectorrotation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/networkmonitor"
 )
 
 // CredentialSigner is a reference-backed signing boundary. Implementations
@@ -341,3 +343,36 @@ var _ interface {
 	Shutdown(context.Context) error
 	ResourceCounts() map[string]uint64
 } = (*ProductionAssemblyActivator)(nil)
+
+func (a *ProductionAssemblyActivator) HandleNetworkEvent(event networkmonitor.Event) {
+	a.mu.Lock()
+	assemblies := make([]*tunnelmanager.ProductionAssembly, 0, len(a.assemblies))
+	for _, current := range a.assemblies {
+		if current.assembly != nil {
+			assemblies = append(assemblies, current.assembly)
+		}
+	}
+	a.mu.Unlock()
+	for _, assembly := range assemblies {
+		assembly.HandleNetworkEvent(event)
+	}
+}
+func (a *ProductionAssemblyActivator) Status() connector.Status {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	result := connector.Status{Stopping: a.closed}
+	for _, current := range a.assemblies {
+		if current.assembly == nil {
+			continue
+		}
+		status := current.assembly.ConnectorStatus()
+		if status.Connected {
+			result.Connected = true
+			if status.Generation >= result.Generation {
+				result.Generation = status.Generation
+				result.Transport = status.Transport
+			}
+		}
+	}
+	return result
+}

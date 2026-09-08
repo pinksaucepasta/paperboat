@@ -134,7 +134,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	var material bootstrap.Material
 	if authenticatedResume {
 		config := bootstrap.Config{ServerURL: *serverURL, DisplayName: *name, WorkspaceRoot: workspace, Verifier: resume.Verifier, PublicIdentityKey: publicIdentityKey, RuntimeVersions: map[string]string{"pb": buildinfo.Version}}
-		fmt.Fprintln(stderr, "Completing authenticated Host setup...")
+		fmt.Fprintln(stderr, "Completing authenticated device setup...")
 		material, err = bootstrap.RecoverMaterial(ctx, config, resume.RuntimeEnrolled)
 		if err == nil {
 			err = bootstrap.ValidateAuthenticatedSetupMaterial(resume, material)
@@ -145,7 +145,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		resume.PairingStarted = true
 		resume.Material = &material
 		if err := bootstrap.SaveResume(*stateRoot, resume); err != nil {
-			return fmt.Errorf("persist authenticated Host setup material: %w", err)
+			return fmt.Errorf("persist authenticated device setup material: %w", err)
 		}
 	} else {
 		material, resume, err = resumeOneShotEnrollment(ctx, oneShotResumeInput{
@@ -174,9 +174,9 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		return errors.New("enrollment setup mode does not install a managed runtime")
 	}
 	if material.SetupMode == "client" {
-		fmt.Fprintln(stderr, "Enrollment accepted. Setting up the managed client service...")
+		fmt.Fprintln(stderr, "Enrollment accepted. Setting up the device service...")
 	} else {
-		fmt.Fprintln(stderr, "Enrollment accepted. Setting up the managed host service...")
+		fmt.Fprintln(stderr, "Enrollment accepted. Setting up the device service...")
 	}
 	client, err := enrollment.NewClient(nil, 15*time.Second)
 	if err != nil {

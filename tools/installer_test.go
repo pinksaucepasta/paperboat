@@ -6,25 +6,24 @@ import (
 	"testing"
 )
 
-func TestWindowsReleaseTemplateUsesCanonicalModes(t *testing.T) {
+func TestWindowsReleaseTemplateUsesUnifiedEnrollment(t *testing.T) {
 	body, err := os.ReadFile("install.ps1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	template := strings.ToLower(string(body))
 	for _, required := range []string{
-		"'host'", "'client'", "--setup-mode=$setupmode",
 		"$server -notmatch '^https://'", "paperboat.release-current/v1", "pb-windows-$arch.exe", "__install", "releases/download",
 		"function assert-installedversion", "function test-administrator", "if ($freshenrollment) { $arguments += '--fresh' }", "'paperboat\\bin\\pb.exe'", "assert-installedversion $download $version",
 		"$name = [string]$env:computername", "$name = $name.trim().tolowerinvariant()",
-		"$pairarguments = @('pair', '--server', $server, '--enrollment-token-file', $tokenfile, '--name', $name, \"--setup-mode=$setupmode\")",
+		"$pairarguments = @('pair', '--server', $server, '--enrollment-token-file', $tokenfile, '--name', $name)",
 		"function invoke-freshpairrollback", "function start-isolatedinstallerprocess", "--enrollment-token-file", "wait-installerprocess",
 	} {
 		if !strings.Contains(template, required) {
 			t.Fatalf("Windows release template is missing canonical mode contract %q", required)
 		}
 	}
-	for _, removed := range []string{"'receive'", "'session'", "--setup-mode=receive", "--setup-mode=session"} {
+	for _, removed := range []string{"--setup-mode", "$setupmode"} {
 		if strings.Contains(template, removed) {
 			t.Fatalf("Windows release template contains removed mode %q", removed)
 		}

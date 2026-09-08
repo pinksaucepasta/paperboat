@@ -22,7 +22,7 @@ import (
 
 // Compatibility names keep the existing Windows contract tests attached to
 // the full production composition rather than the retired reduced runtime.
-type windowsConnectorService = connectorReadinessService
+type windowsConnectorService = dedicatedConnectorService
 
 func windowsWorkspace(environ func(string) string) (string, error) {
 	workspace := strings.TrimSpace(environ("PAPERBOAT_WORKSPACE_ROOT"))

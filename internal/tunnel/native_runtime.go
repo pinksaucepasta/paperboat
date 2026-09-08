@@ -155,7 +155,13 @@ type nativeApplicationSession interface {
 
 func (g *cliNativeStreamGroup) OpenStream(ctx context.Context) (nativeStream, error) {
 	streamID := "native_" + strconv.FormatUint(g.sequence.Add(1), 10)
-	header, err := g.application.authorizationHeader(g.target, g.consumer, g.application.operationID, streamID, g.now().UTC())
+	// A terminal attachment is the durable server-created session operation.
+	// Other applications must retain their explicit operation binding.
+	fallbackOperation := ""
+	if g.consumer == "terminal" && g.target != nil {
+		fallbackOperation = g.target.SessionID
+	}
+	header, err := g.application.authorizationHeader(g.target, g.consumer, fallbackOperation, streamID, g.now().UTC())
 	if err != nil {
 		return nil, err
 	}

@@ -249,11 +249,12 @@ func (s *Service) queueActivation(ctx context.Context, manual bool) (workerupdat
 	}
 	manager := s.currentManager()
 	result.Version = manager.ActiveVersion()
-	resolver := s.source.Resolve
-	if manual {
-		resolver = s.source.ResolveManual
+	journal, journalErr := updateflow.Load(filepath.Join(s.config.StateRoot, "transaction.json"))
+	if journalErr != nil && !errors.Is(journalErr, os.ErrNotExist) {
+		return result, journalErr
 	}
-	release, found, err := resolver(ctx)
+	release, found, resolvedManual, err := resolveQueuedRelease(ctx, manual, journal, s.source.Resolve, s.source.ResolveManual)
+	manual = resolvedManual
 	if err != nil || !found || release.Version == result.Version {
 		return result, err
 	}
@@ -345,7 +346,7 @@ func (s *Service) RunActivationHelper(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	manager, err := s.newManagerWithGate(active, gate)
+	manager, err := s.newManagerWithGate(active, gate, handoff.Manual)
 	if err != nil {
 		return err
 	}
@@ -628,4 +629,21 @@ func retireUnixHandoff(ctx context.Context, root string, controller UnixActivati
 		return err
 	}
 	return removeUnixHandoff(root)
+}
+
+// A busy manual activation retains only its original version's cohort override.
+// Every retry resolves fresh signed metadata and still enforces revocation,
+// deferral, expiry, hashes and the current deployment policy.
+func resolveQueuedRelease(ctx context.Context, manual bool, journal updateflow.Journal, automatic, explicit workerupdate.Resolver) (workerupdate.Release, bool, bool, error) {
+	deferred := journal.BlockedReason == autoupdate.BlockedActiveTerminalSessions && journal.DeferredManual
+	effectiveManual := manual || deferred
+	resolver := automatic
+	if effectiveManual {
+		resolver = explicit
+	}
+	release, found, err := resolver(ctx)
+	if err == nil && deferred && !manual && (!found || release.Version != journal.RequiredVersion) {
+		return workerupdate.Release{}, false, effectiveManual, errors.New("deferred manual update is no longer the current eligible signed release; run pb update to choose a new release")
+	}
+	return release, found, effectiveManual, err
 }

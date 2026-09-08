@@ -50,6 +50,9 @@ func (s *Service) Serve(ctx context.Context, session *native.Session) error {
 			authorizationResource, authorizeErr = s.config.Authorize(authorizeCtx, value)
 			return authorizationResource, authorizeErr
 		})
+		if errors.Is(err, native.ErrStreamRejected) {
+			continue
+		}
 		if err != nil {
 			return err
 		}

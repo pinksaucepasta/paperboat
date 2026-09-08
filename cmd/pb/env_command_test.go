@@ -3,14 +3,17 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/base64"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/environmente2ee"
 	"github.com/pinksaucepasta/paperboat/internal/environmentmanager"
 	"github.com/spf13/cobra"
 )
@@ -24,14 +27,62 @@ func TestEnvironmentVariableCommandSurfaceKeepsValuesOutOfArguments(t *testing.T
 		}
 	}
 	setCommand, _, _ := root.Find([]string{"env", "set"})
-	if setCommand.Flags().Lookup("value") != nil || setCommand.Flags().Lookup("value-stdin") == nil || setCommand.Flags().Lookup("machine") == nil {
+	if setCommand.Flags().Lookup("value") != nil || setCommand.Flags().Lookup("value-stdin") == nil || setCommand.Flags().Lookup("value-file") == nil || setCommand.Flags().Lookup("team") == nil || setCommand.Flags().Lookup("machine") == nil {
 		t.Fatalf("set flags expose an unsafe value input: %v", setCommand.Flags().FlagUsages())
 	}
 	if unsetCommand, _, _ := root.Find([]string{"env", "unset"}); unsetCommand.Flags().Lookup("yes") == nil || unsetCommand.Flags().Lookup("value") != nil {
 		t.Fatalf("unset flags are incorrect: %v", unsetCommand.Flags().FlagUsages())
 	}
-	if listCommand, _, _ := root.Find([]string{"env", "list"}); listCommand.Flags().Lookup("json") == nil || listCommand.Flags().Lookup("machine") == nil {
+	if listCommand, _, _ := root.Find([]string{"env", "list"}); listCommand.Flags().Lookup("json") == nil || listCommand.Flags().Lookup("team") == nil || listCommand.Flags().Lookup("machine") == nil {
 		t.Fatalf("list flags are incorrect: %v", listCommand.Flags().FlagUsages())
+	}
+	for _, path := range [][]string{
+		{"env", "rotate"}, {"env", "rotate", "cancel"},
+		{"env", "team", "create"}, {"env", "team", "grant"}, {"env", "team", "rotate"}, {"env", "team", "revoke"}, {"env", "team", "reset"},
+		{"env", "grants", "sync"}, {"env", "host", "provision"}, {"env", "vault", "remove"}, {"env", "vault", "reset"},
+	} {
+		command, _, err := root.Find(path)
+		if err != nil || command == nil {
+			t.Fatalf("find new command %v: command=%v err=%v", path, command, err)
+		}
+	}
+	if cancel, _, _ := root.Find([]string{"env", "rotate", "cancel"}); cancel.Flags().Lookup("confirm") == nil {
+		t.Fatal("rotation cancel omitted typed confirmation")
+	}
+	if remove, _, _ := root.Find([]string{"env", "vault", "remove"}); remove.Flags().Lookup("confirm") == nil {
+		t.Fatal("vault remove omitted local-custody confirmation")
+	}
+	if reset, _, _ := root.Find([]string{"env", "vault", "reset"}); reset.Flags().Lookup("confirm") == nil || reset.Flags().Lookup("recovery-file") == nil {
+		t.Fatal("vault reset omitted confirmation or recovery file")
+	}
+	for _, path := range [][]string{{"env", "init"}, {"env", "manager"}, {"env", "root"}, {"env", "recovery"}} {
+		if command, _, err := root.Find(path); err == nil && command != nil && command.Use != "env" {
+			t.Fatalf("legacy ENV command remains registered at %v: %q", path, command.Use)
+		}
+	}
+}
+
+func TestVaultHostSelectionParsingIsExplicitAndRedacted(t *testing.T) {
+	selection, err := parseVaultHostSelections([]string{"personal:API_MODE", "team:team_1:DEPLOY_TOKEN"}, "account_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(selection) != 2 || selection[0] != (api.VaultHostSelection{OwnerKind: "personal", OwnerID: "account_1", Name: "API_MODE"}) || selection[1] != (api.VaultHostSelection{OwnerKind: "team", OwnerID: "team_1", Name: "DEPLOY_TOKEN"}) {
+		t.Fatalf("selection=%+v", selection)
+	}
+	for _, references := range [][]string{
+		{"personal:api-mode"}, {"team:team_1:bad-name"}, {"team:team_1:API_MODE", "team:team_1:API_MODE"}, {"team:team_1"},
+	} {
+		if _, err := parseVaultHostSelections(references, "account_1"); err == nil {
+			t.Fatalf("references %q unexpectedly accepted", references)
+		}
+	}
+}
+
+func TestVaultScopeTargetRejectsMixedTeamMachineSelection(t *testing.T) {
+	target, err := vaultScopeTargetForCommand(newEnvironmentTestCommand(strings.NewReader(""), io.Discard), nil, "account_1", "team_1", "machine_1")
+	if err == nil || target.owner != "" || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("target=%+v err=%v", target, err)
 	}
 }
 
@@ -57,28 +108,45 @@ func TestEnvironmentVariableStdinIsRawBoundedAndAllowsEmpty(t *testing.T) {
 	}
 }
 
-func TestEnvironmentVariableSetCommandEncryptsLocallyAndClearsInput(t *testing.T) {
+func TestEnvironmentVariableValueFileIsBoundedAndRequiresAbsolutePath(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "value.txt")
+	const canary = "file-secret-canary"
+	if err := os.WriteFile(path, []byte(canary), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	value, err := readEnvironmentVariableValueFile(newEnvironmentTestCommand(strings.NewReader(""), io.Discard), false, path)
+	if err != nil || string(value) != canary {
+		t.Fatalf("value=%q err=%v", value, err)
+	}
+	clear(value)
+	if _, err := readEnvironmentVariableValueFile(newEnvironmentTestCommand(strings.NewReader(""), io.Discard), false, "relative-value.txt"); err == nil || !strings.Contains(err.Error(), "absolute") {
+		t.Fatalf("relative value-file error=%v", err)
+	}
+	if _, err := readEnvironmentVariableValueFile(newEnvironmentTestCommand(strings.NewReader("stdin"), io.Discard), true, path); err == nil || !strings.Contains(err.Error(), "choose") {
+		t.Fatalf("combined value input error=%v", err)
+	}
+}
+
+func TestEnvironmentVariableSetCommandEncryptsLocallyAndHidesInput(t *testing.T) {
 	const canary = "command-secret-canary"
-	var received, receivedBacking []byte
-	mutator := fakeEnvironmentVariableMutator{set: func(_ context.Context, machineID, name string, value []byte) (environmentmanager.MutationResult, error) {
-		if machineID != "" || name != "API_MODE" {
-			t.Fatalf("target=%q name=%q", machineID, name)
-		}
-		received = append([]byte(nil), value...)
-		receivedBacking = value
-		return environmentmanager.MutationResult{Name: name, Version: 7, ManifestID: "sha256:opaque"}, nil
-	}}
+	fixture := newCommandVaultFixture(t)
+	password := []byte("command test password")
+	defer clear(password)
+	if err := fixture.manager.Initialize(context.Background(), password); err != nil {
+		t.Fatal(err)
+	}
 	previousBackend := environmentVariableBackendForCommand
-	previousManager := environmentVariableManagerForCommand
+	previousVault := passwordVaultForCommand
 	environmentVariableBackendForCommand = func(*cobra.Command) (*api.Client, error) {
 		return api.New("https://api.example.test", config.Credential{AccessToken: "token"}, nil), nil
 	}
-	environmentVariableManagerForCommand = func(*cobra.Command) (environmentVariableMutator, error) {
-		return mutator, nil
+	passwordVaultForCommand = func(*cobra.Command) (environmentmanager.PasswordVault, error) {
+		return fixture.manager, nil
 	}
 	t.Cleanup(func() {
 		environmentVariableBackendForCommand = previousBackend
-		environmentVariableManagerForCommand = previousManager
+		passwordVaultForCommand = previousVault
 	})
 
 	var output bytes.Buffer
@@ -86,10 +154,56 @@ func TestEnvironmentVariableSetCommandEncryptsLocallyAndClearsInput(t *testing.T
 	if err := setEnvironmentVariable(command, "", "API_MODE", true); err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(received, []byte(canary)) || !allZero(receivedBacking) || strings.Contains(output.String(), canary) || !strings.Contains(output.String(), "Set API_MODE") || !strings.Contains(output.String(), "encrypted manifest version 7") {
-		t.Fatalf("received=%q cleared=%t output=%q", received, allZero(receivedBacking), output.String())
+	scope := fixture.control.scopes[commandVaultScopeKey("personal", commandVaultAccount, "")]
+	raw, err := base64.RawURLEncoding.Strict().DecodeString(scope.Envelope)
+	if err != nil {
+		t.Fatal(err)
 	}
-	clear(received)
+	if bytes.Contains(raw, []byte(canary)) || strings.Contains(output.String(), canary) || !strings.Contains(output.String(), "Set API_MODE") || !strings.Contains(output.String(), "encrypted vault scope") {
+		t.Fatalf("ciphertext or output exposed input: output=%q", output.String())
+	}
+}
+
+func TestEnvironmentVariableSetCommandRoutesTeamScopeWithoutPlaintext(t *testing.T) {
+	const canary = "team-command-secret"
+	fixture := newCommandVaultFixture(t)
+	password := []byte("team command password")
+	defer clear(password)
+	if err := fixture.manager.Initialize(context.Background(), password); err != nil {
+		t.Fatal(err)
+	}
+	teamKey := bytes.Repeat([]byte{0x42}, 32)
+	defer clear(teamKey)
+	if err := fixture.manager.UpdateKeys(context.Background(), func(keys *environmente2ee.VaultKeys) error {
+		keys.Teams = append(keys.Teams, environmente2ee.VaultTeamKey{TeamID: "team_1", Epoch: 1, MembershipGeneration: 1, Key: bytes.Clone(teamKey)})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	previousBackend := environmentVariableBackendForCommand
+	previousVault := passwordVaultForCommand
+	environmentVariableBackendForCommand = func(*cobra.Command) (*api.Client, error) {
+		return api.New("https://api.example.test", config.Credential{}, nil), nil
+	}
+	passwordVaultForCommand = func(*cobra.Command) (environmentmanager.PasswordVault, error) {
+		return fixture.manager, nil
+	}
+	t.Cleanup(func() {
+		environmentVariableBackendForCommand = previousBackend
+		passwordVaultForCommand = previousVault
+	})
+	var output bytes.Buffer
+	if err := setEnvironmentVariableForScope(newEnvironmentTestCommand(strings.NewReader(canary), &output), "team_1", "", "API_MODE", true, ""); err != nil {
+		t.Fatal(err)
+	}
+	scope := fixture.control.scopes[commandVaultScopeKey("team", "team_1", "")]
+	raw, err := base64.RawURLEncoding.Strict().DecodeString(scope.Envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte(canary)) || strings.Contains(output.String(), canary) || !strings.Contains(output.String(), "team team_1") {
+		t.Fatalf("team scope or output exposed plaintext: output=%q", output.String())
+	}
 }
 
 func TestEnvironmentVariableSetCommandHidesServerEcho(t *testing.T) {
@@ -108,59 +222,83 @@ func TestEnvironmentVariableSetConflictErrorUsesOnlyStableCode(t *testing.T) {
 }
 
 func TestEnvironmentVariableUnsetCommandUsesEncryptedManagerAndYes(t *testing.T) {
-	var unsetSeen bool
-	mutator := fakeEnvironmentVariableMutator{unset: func(_ context.Context, machineID, name string) (environmentmanager.MutationResult, error) {
-		if machineID != "" || name != "API_MODE" {
-			t.Fatalf("target=%q name=%q", machineID, name)
-		}
-		unsetSeen = true
-		return environmentmanager.MutationResult{Name: "API_MODE", Version: 6}, nil
-	}}
+	fixture := newCommandVaultFixture(t)
+	password := []byte("command test password")
+	defer clear(password)
+	if err := fixture.manager.Initialize(context.Background(), password); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.manager.MutateScope(context.Background(), "personal", commandVaultAccount, "", func(values map[string][]byte) error {
+		values["API_MODE"] = []byte("secret")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	previousBackend := environmentVariableBackendForCommand
-	previousManager := environmentVariableManagerForCommand
+	previousVault := passwordVaultForCommand
 	environmentVariableBackendForCommand = func(*cobra.Command) (*api.Client, error) {
 		return api.New("https://api.example.test", config.Credential{}, nil), nil
 	}
-	environmentVariableManagerForCommand = func(*cobra.Command) (environmentVariableMutator, error) {
-		return mutator, nil
+	passwordVaultForCommand = func(*cobra.Command) (environmentmanager.PasswordVault, error) {
+		return fixture.manager, nil
 	}
 	t.Cleanup(func() {
 		environmentVariableBackendForCommand = previousBackend
-		environmentVariableManagerForCommand = previousManager
+		passwordVaultForCommand = previousVault
 	})
 
 	var output bytes.Buffer
 	if err := unsetEnvironmentVariable(newEnvironmentTestCommand(strings.NewReader(""), &output), "", "API_MODE", true); err != nil {
 		t.Fatal(err)
 	}
-	if !unsetSeen || !strings.Contains(output.String(), "Unset API_MODE") || !strings.Contains(output.String(), "encrypted manifest version 6") {
-		t.Fatalf("unsetSeen=%t output=%q", unsetSeen, output.String())
+	if !strings.Contains(output.String(), "Unset API_MODE") || !strings.Contains(output.String(), "encrypted vault scope") {
+		t.Fatalf("output=%q", output.String())
 	}
 	if err := unsetEnvironmentVariable(newEnvironmentTestCommand(strings.NewReader(""), &bytes.Buffer{}), "", "API_MODE", false); !errors.Is(err, errUsage) {
 		t.Fatalf("missing --yes error=%v", err)
 	}
 }
 
-func TestEnvironmentVariableJSONOutputContainsOnlyRedactedMetadata(t *testing.T) {
-	const canary = "json-canary"
-	snapshot := api.EnvironmentVariableCollection{Scope: api.EnvironmentVariableScopeGlobal, Version: 2, ETag: `"environment-global-2"`, Variables: []api.EnvironmentVariable{{Scope: api.EnvironmentVariableScopeGlobal, Name: "API_MODE", Configured: true, Version: 2}}}
-	var output bytes.Buffer
-	if err := writeEnvironmentVariableJSON(&output, snapshot); err != nil {
+func TestEnvironmentVariableListCommandReportsNamesWithoutValues(t *testing.T) {
+	const canary = "list-secret-canary"
+	fixture := newCommandVaultFixture(t)
+	password := []byte("command list password")
+	defer clear(password)
+	if err := fixture.manager.Initialize(context.Background(), password); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(output.String(), canary) || strings.Contains(output.String(), "value") || !strings.Contains(output.String(), "etag") {
-		t.Fatalf("unsafe JSON=%q", output.String())
+	if err := fixture.manager.MutateScope(context.Background(), "personal", commandVaultAccount, "", func(values map[string][]byte) error {
+		values["API_SECRET"] = []byte(canary)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
-	var envelope map[string]any
-	if err := json.Unmarshal(output.Bytes(), &envelope); err != nil || envelope["ok"] != true {
-		t.Fatalf("envelope=%#v err=%v", envelope, err)
+	previousBackend := environmentVariableBackendForCommand
+	previousVault := passwordVaultForCommand
+	environmentVariableBackendForCommand = func(*cobra.Command) (*api.Client, error) {
+		return api.New("https://api.example.test", config.Credential{}, nil), nil
+	}
+	passwordVaultForCommand = func(*cobra.Command) (environmentmanager.PasswordVault, error) {
+		return fixture.manager, nil
+	}
+	t.Cleanup(func() {
+		environmentVariableBackendForCommand = previousBackend
+		passwordVaultForCommand = previousVault
+	})
+	var output bytes.Buffer
+	command := newEnvironmentTestCommand(strings.NewReader(""), &output)
+	if err := listEnvironmentVariablesForScope(command, "", "", true); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "API_SECRET") || strings.Contains(output.String(), canary) || strings.Contains(output.String(), "value") {
+		t.Fatalf("metadata output exposed value: %q", output.String())
 	}
 }
 
 func TestEnvironmentVariableHostFilteringAndCaseInsensitiveNames(t *testing.T) {
-	clientOnly := api.UserMachine{ID: "client", DisplayName: "Client", SetupMode: "client", SetupRoles: []string{"interactive"}}
-	hostByMode := api.UserMachine{ID: "host-mode", DisplayName: "Host mode", SetupMode: "host"}
-	hostByRole := api.UserMachine{ID: "host-role", DisplayName: "Host role", SetupMode: "client", SetupRoles: []string{"interactive", "HOST"}}
+	clientOnly := api.UserMachine{ID: "client", DisplayName: "Client"}
+	hostByMode := api.UserMachine{ID: "host-mode", DisplayName: "Device one", Capabilities: api.MachineCapabilities{EnvironmentInjection: api.MachineCapability{Configured: true}}}
+	hostByRole := api.UserMachine{ID: "host-role", DisplayName: "Device two", Capabilities: api.MachineCapabilities{EnvironmentInjection: api.MachineCapability{Configured: true}}}
 	filtered := environmentVariableMachines([]api.UserMachine{clientOnly, hostByMode, hostByRole})
 	if len(filtered) != 2 || filtered[0].ID != hostByMode.ID || filtered[1].ID != hostByRole.ID {
 		t.Fatalf("filtered machines=%+v", filtered)
@@ -176,27 +314,46 @@ func TestEnvironmentVariableHostFilteringAndCaseInsensitiveNames(t *testing.T) {
 	}
 }
 
+func TestEnvironmentVariableScopePickerUsesPersonalScopeAndExplicitHostSelections(t *testing.T) {
+	items := environmentVariableScopePickerItems([]api.UserMachine{{ID: "host_1", DisplayName: "Host one", Capabilities: api.MachineCapabilities{EnvironmentInjection: api.MachineCapability{Configured: true}}}})
+	if len(items) != 2 || items[0].ID != "personal" || items[0].Title != "Personal" || strings.Contains(items[0].Description, "every connected") || !strings.Contains(items[0].Description, "explicit host selections") {
+		t.Fatalf("personal picker item=%+v", items[0])
+	}
+	if items[1].ID != "host_1" || items[1].Title != "Host one" {
+		t.Fatalf("host picker item=%+v", items[1])
+	}
+}
+
+func TestSafeEnvironmentVariableCommandErrorUsesCurrentVaultRecoveryActions(t *testing.T) {
+	grantErr := safeEnvironmentVariableCommandError(environmentmanager.ErrVaultTeamGrantRequired)
+	if !strings.Contains(grantErr.Error(), "pb env grants sync") || strings.Contains(grantErr.Error(), "locked") {
+		t.Fatalf("missing team grant recovery: %v", grantErr)
+	}
+	for _, test := range []struct {
+		code string
+		want string
+	}{
+		{code: "vault_conflict", want: "unlock the current vault"},
+		{code: "rotation_required", want: "pb env rotate"},
+		{code: "key_authorization_required", want: "pb env grants sync"},
+	} {
+		err := safeEnvironmentVariableCommandError(&api.APIError{Code: test.code, Message: "must not escape"})
+		if err == nil || !strings.Contains(err.Error(), test.want) || strings.Contains(err.Error(), "manager") || strings.Contains(err.Error(), "authority") {
+			t.Fatalf("code=%s error=%v", test.code, err)
+		}
+	}
+}
+
 func TestEnvironmentVariableTargetRejectsClientMachineLocally(t *testing.T) {
 	previous := environmentVariableResolveMachine
 	environmentVariableResolveMachine = func(context.Context, *api.Client, string) (api.UserMachine, error) {
-		return api.UserMachine{ID: "client", DisplayName: "Client", SetupMode: "client"}, nil
+		return api.UserMachine{ID: "client", DisplayName: "Client"}, nil
 	}
 	defer func() { environmentVariableResolveMachine = previous }()
 
 	target, err := environmentVariableTargetForCommand(newEnvironmentTestCommand(strings.NewReader(""), io.Discard), nil, "client")
-	if err == nil || !strings.Contains(err.Error(), "only for host-capable machines") || target.machineID != "" {
+	if err == nil || !strings.Contains(err.Error(), "disabled on this device") || target.machineID != "" {
 		t.Fatalf("target=%+v err=%v", target, err)
-	}
-}
-
-func TestEnvironmentVariableGlobalTableDoesNotReportMachineStatus(t *testing.T) {
-	var output bytes.Buffer
-	snapshot := api.EnvironmentVariableCollection{Scope: api.EnvironmentVariableScopeGlobal, Version: 2, Variables: []api.EnvironmentVariable{{Scope: api.EnvironmentVariableScopeGlobal, Name: "API_MODE", Configured: true, Version: 2}}}
-	if err := writeEnvironmentVariableTable(&output, snapshot, environmentVariableTarget{}); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(output.String(), "not reported") || !strings.Contains(output.String(), "STATUS  -") {
-		t.Fatalf("global table=%q", output.String())
 	}
 }
 
@@ -212,25 +369,6 @@ func newEnvironmentTestCommand(input io.Reader, output io.Writer) *cobra.Command
 type errorReader struct{}
 
 func (errorReader) Read([]byte) (int, error) { return 0, errors.New("read failed") }
-
-type fakeEnvironmentVariableMutator struct {
-	set   func(context.Context, string, string, []byte) (environmentmanager.MutationResult, error)
-	unset func(context.Context, string, string) (environmentmanager.MutationResult, error)
-}
-
-func (fake fakeEnvironmentVariableMutator) Set(ctx context.Context, machineID, name string, value []byte) (environmentmanager.MutationResult, error) {
-	if fake.set == nil {
-		return environmentmanager.MutationResult{}, errors.New("unexpected set")
-	}
-	return fake.set(ctx, machineID, name, value)
-}
-
-func (fake fakeEnvironmentVariableMutator) Unset(ctx context.Context, machineID, name string) (environmentmanager.MutationResult, error) {
-	if fake.unset == nil {
-		return environmentmanager.MutationResult{}, errors.New("unexpected unset")
-	}
-	return fake.unset(ctx, machineID, name)
-}
 
 func allZero(value []byte) bool {
 	for _, item := range value {

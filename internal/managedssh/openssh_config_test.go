@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -87,7 +88,7 @@ func TestOpenSSHConfigInstallRepairAndExactUninstall(t *testing.T) {
 	}
 }
 
-func TestOpenSSHConfigRendersCanonicalAndDisplayAliasUserPort(t *testing.T) {
+func TestOpenSSHConfigRendersCanonicalAndDisplayAliasPortWithoutUser(t *testing.T) {
 	home := openSSHTestHome(t)
 	config := openSSHTestConfig(home, "pprbt")
 	config.Targets = []OpenSSHAliasTarget{{Alias: "victus-windows-e2e-fresh", DisplayName: "Victus-Windows-E2E-Fresh", User: "Pujan", Port: 38222}}
@@ -95,12 +96,55 @@ func TestOpenSSHConfigRendersCanonicalAndDisplayAliasUserPort(t *testing.T) {
 		t.Fatal(err)
 	}
 	owned := string(readOpenSSHTestFile(t, filepath.Join(home, ".ssh", "paperboat_config")))
-	want := "Host victus-windows-e2e-fresh.pprbt Victus-Windows-E2E-Fresh.pprbt\n    User Pujan\n    Port 38222\n"
+	want := "Host victus-windows-e2e-fresh.pprbt Victus-Windows-E2E-Fresh.pprbt\n    Port 38222\n"
 	if !strings.Contains(owned, want) {
 		t.Fatalf("owned config missing authoritative target: %q", owned)
 	}
+	if strings.Contains(owned, "\n    User ") {
+		t.Fatalf("managed config must not override the invoking OpenSSH user: %q", owned)
+	}
 	if err := ValidateOpenSSHConfig(config); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOpenSSHConfigMigratesOwnedTargetUsersWithoutChangingUserConfig(t *testing.T) {
+	home := openSSHTestHome(t)
+	config := openSSHTestConfig(home, "pprbt")
+	config.Targets = []OpenSSHAliasTarget{{Alias: "mac", User: "adam", Port: 22}}
+	if _, err := InstallOpenSSHConfig(config); err != nil {
+		t.Fatal(err)
+	}
+	directory := filepath.Join(home, ".ssh")
+	ownedPath := filepath.Join(directory, "paperboat_config")
+	owned := readOpenSSHTestFile(t, ownedPath)
+	oldOwned := bytes.Replace(owned, []byte("Host mac.pprbt\n    Port 22\n"), []byte("Host mac.pprbt\n    User adam\n    Port 22\n"), 1)
+	if bytes.Equal(oldOwned, owned) {
+		t.Fatal("failed to construct preceding owned format")
+	}
+	if err := os.WriteFile(ownedPath, oldOwned, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recordPath := filepath.Join(directory, ".paperboat-config-install-v1.json")
+	var record openSSHInstallRecord
+	if err := json.Unmarshal(readOpenSSHTestFile(t, recordPath), &record); err != nil {
+		t.Fatal(err)
+	}
+	record.OwnedHash = hashOpenSSHBytes(oldOwned)
+	recordJSON, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(recordPath, append(recordJSON, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := InstallOpenSSHConfig(config)
+	if err != nil || !result.Changed {
+		t.Fatalf("migrate target user: result=%+v error=%v", result, err)
+	}
+	migrated := readOpenSSHTestFile(t, ownedPath)
+	if bytes.Contains(migrated, []byte("\n    User ")) {
+		t.Fatalf("target user survived migration: %q", migrated)
 	}
 }
 
@@ -213,10 +257,17 @@ func TestInstalledOpenSSHConfigResolvesEditorHostAlias(t *testing.T) {
 		t.Fatalf("OpenSSH rejected the installed editor target: %v: %s", err, stderr.String())
 	}
 	effective := strings.ToLower(stdout.String())
-	for _, required := range []string{"user remote-user\n", "port 38222\n", "canonicalizehostname true\n"} {
+	current, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{"user " + strings.ToLower(current.Username) + "\n", "port 38222\n", "canonicalizehostname true\n"} {
 		if !strings.Contains(effective, required) {
 			t.Fatalf("effective editor target missing %q:\n%s", required, stdout.String())
 		}
+	}
+	if strings.Contains(effective, "user remote-user\n") {
+		t.Fatalf("plain OpenSSH unexpectedly inherited the target setup user:\n%s", stdout.String())
 	}
 }
 

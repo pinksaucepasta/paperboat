@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 )
 
 func TestWindowsProductionHostRejectsIncompleteConfiguration(t *testing.T) {
@@ -32,10 +31,10 @@ func TestWindowsWorkspaceRejectsRelativePath(t *testing.T) {
 }
 
 func TestWindowsConnectorServiceReportsDisconnected(t *testing.T) {
-	service := &windowsConnectorService{manager: &connector.Manager{}}
-	capability := service.CapabilityHealth()
-	if capability.State != health.Unavailable || capability.Reason != "connector_unavailable" || capability.RetryAfterMs == 0 {
-		t.Fatalf("capability = %#v", capability)
+	service := &windowsConnectorService{status: func() connector.Status { return connector.Status{} }}
+	status := service.Status()
+	if status.Connected || status.Stopping || status.Generation != 0 {
+		t.Fatalf("status = %#v", status)
 	}
 }
 

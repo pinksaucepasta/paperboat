@@ -335,6 +335,7 @@ func NewPrivateKey() *PrivateKey {
 type locoBackend struct {
 	testOnlyPacketListener nettype.PacketListener
 	peerRelayNodes         []*tailcfg.Node
+	relayControlPeers      map[key.NodePublic]bool
 	derpCarrierFactory     magicsock.DERPCarrierFactory
 	sys                    tsd.System
 	priv                   key.NodePrivate
@@ -440,8 +441,9 @@ type Server struct {
 
 	// PeerRelayNodes are authority-verified discovery-only relay services.
 	// Nodes are cloned before use; set before startup or first use.
-	PeerRelayNodes []*tailcfg.Node
-	OnRelayControl func(tailcfg.DERPRegionID, key.NodePublic, []byte) bool
+	PeerRelayNodes    []*tailcfg.Node
+	RelayControlPeers []key.NodePublic
+	OnRelayControl    func(tailcfg.DERPRegionID, key.NodePublic, []byte) bool
 
 	// DERPCarrierFactory replaces native DERP. Set before Start.
 	DERPCarrierFactory magicsock.DERPCarrierFactory
@@ -622,7 +624,9 @@ func (s *Server) Start() error {
 		psk = NewPresharedKey()
 	}
 	reg := s.Region
-	if reg == nil {
+	// Explicit authority mode may have no authorized relays. Never fetch a
+	// public DERP map for that signed, direct-only configuration.
+	if reg == nil && !s.LocalAddr.IsValid() {
 		ci := &ConnInfo{RegionID: cmp.Or(s.RegionID, -1)}
 		opts := []any{ExpandForServer}
 		if s.DERPMapURL != "" {
@@ -636,7 +640,7 @@ func (s *Server) Start() error {
 		}
 		reg = ci.Region[0]
 	}
-	if reg.RegionID == 0 {
+	if reg != nil && reg.RegionID == 0 {
 		return fmt.Errorf("missing RegionID in %v", logger.AsJSON(reg))
 	}
 
@@ -651,16 +655,21 @@ func (s *Server) Start() error {
 	if err := lb.setPeerRelayNodes(s.PeerRelayNodes); err != nil {
 		return err
 	}
+	if err := lb.setRelayControlPeers(s.RelayControlPeers); err != nil {
+		return err
+	}
 	lb.logf = logf
 	lb.dm = &tailcfg.DERPMap{}
 	regions := s.relayRegions
-	if len(regions) == 0 {
+	if len(regions) == 0 && reg != nil {
 		regions = []*tailcfg.DERPRegion{reg}
 	}
 	for _, region := range regions {
 		mak.Set(&lb.dm.Regions, region.RegionID, region)
 	}
-	lb.homeDERP = reg.RegionID
+	if reg != nil {
+		lb.homeDERP = reg.RegionID
+	}
 	for _, k := range s.AllowedClients {
 		mak.Set(&lb.allowedClients, k, true)
 	}
@@ -1945,6 +1954,26 @@ func (b *locoBackend) setPeerRelayNodes(nodes []*tailcfg.Node) error {
 
 func (b *locoBackend) appendRelayNodes(nm *netmap.NetworkMap) {
 	for _, relay := range b.peerRelayNodes {
+		merged := false
+		for index, existing := range nm.Peers {
+			if existing.Key() != relay.Key {
+				continue
+			}
+			node := existing.AsStruct().Clone()
+			node.DiscoKey, node.HomeDERP = relay.DiscoKey, relay.HomeDERP
+			if node.CapMap == nil {
+				node.CapMap = make(tailcfg.NodeCapMap)
+			}
+			for capability, values := range relay.CapMap {
+				node.CapMap[capability] = slices.Clone(values)
+			}
+			nm.Peers[index] = node.View()
+			merged = true
+			break
+		}
+		if merged {
+			continue
+		}
 		nm.Peers = append(nm.Peers, relay.View())
 	}
 }
@@ -2096,8 +2125,9 @@ type Client struct {
 
 	// PeerRelayNodes are authority-verified discovery-only relay services.
 	// Nodes are cloned before use; set before startup or first use.
-	PeerRelayNodes []*tailcfg.Node
-	OnRelayControl func(tailcfg.DERPRegionID, key.NodePublic, []byte) bool
+	PeerRelayNodes    []*tailcfg.Node
+	RelayControlPeers []key.NodePublic
+	OnRelayControl    func(tailcfg.DERPRegionID, key.NodePublic, []byte) bool
 
 	// DERPCarrierFactory replaces native DERP. Set before first use.
 	DERPCarrierFactory magicsock.DERPCarrierFactory
@@ -2208,6 +2238,9 @@ func (c *Client) initLocked() error {
 	lb.serverPub = ci.ServerPublic.NodePublic
 	lb.serverDiscoPub = ci.ServerDiscoPublic.DiscoPublic
 	if err := lb.setPeerRelayNodes(c.PeerRelayNodes); err != nil {
+		return err
+	}
+	if err := lb.setRelayControlPeers(c.RelayControlPeers); err != nil {
 		return err
 	}
 
@@ -2835,6 +2868,10 @@ func discoPrivateForNode(k key.NodePrivate) key.DiscoPrivate {
 	discoRaw[31] |= 64
 	return key.DiscoPrivateFromRaw32(go4mem.B(discoRaw))
 }
+
+// DiscoPrivateForNode returns the deterministic discovery key used by this
+// engine. Callers use it only to host an authority-approved UDP relay service.
+func DiscoPrivateForNode(k key.NodePrivate) key.DiscoPrivate { return discoPrivateForNode(k) }
 
 // DiscoPublicForNode returns the path-discovery public key derived from a
 // node private key. Code constructing a [ConnInfo] directly must include it

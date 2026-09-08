@@ -55,12 +55,10 @@ func (s *Session) AuthorizeHTTP3(ctx context.Context, header streamauth.Header, 
 	if !s.IsPrivateHTTP3() || authorize == nil {
 		return ErrInvalid
 	}
-	resourceID, err := authorize(ctx, header)
-	if err != nil || !s.owner.authority.Allows(s.peerID, resourceID, "private_access", "accept") {
-		return errors.Join(tailnet.ErrAdmission, err)
-	}
-	return nil
+	return s.authorizeIncoming(ctx, header, "private_access", authorize)
 }
+
+var ErrStreamRejected = errors.New("native application stream rejected")
 
 var _ http.RoundTripper = (*http3.ClientConn)(nil)
 
@@ -138,10 +136,10 @@ func (s *Session) AcceptAuthorized(ctx context.Context, authorize func(context.C
 		_ = connection.Close()
 		return nil, streamauth.Header{}, tailnet.ErrAdmission
 	}
-	resourceID, err := authorize(ctx, header)
-	if err != nil || !s.owner.authority.Allows(s.peerID, resourceID, capability, "accept") {
+	err = s.authorizeIncoming(ctx, header, capability, authorize)
+	if err != nil {
 		_ = connection.Close()
-		return nil, streamauth.Header{}, errors.Join(tailnet.ErrAdmission, err)
+		return nil, streamauth.Header{}, errors.Join(ErrStreamRejected, err)
 	}
 	return newLimitedConn(connection, header.MaximumBytes), header, nil
 }
@@ -320,3 +318,24 @@ func (c *routedConn) CloseWrite() error    { return c.RoutedStream.Close() }
 var _ net.Conn = (*streamConn)(nil)
 var _ net.Conn = (*routedConn)(nil)
 var _ interface{ CloseWrite() error } = (*streamConn)(nil)
+
+// Credential validation precedes any control-plane refresh. A new, valid
+// operation may have committed after the host's last signed network snapshot.
+func (s *Session) authorizeIncoming(ctx context.Context, header streamauth.Header, capability string, authorize func(context.Context, streamauth.Header) (string, error)) error {
+	resourceID, err := authorize(ctx, header)
+	if err != nil {
+		return errors.Join(tailnet.ErrAdmission, err)
+	}
+	if s.owner.authority.Allows(s.peerID, resourceID, capability, "accept") {
+		return nil
+	}
+	if s.owner.refreshAuthority != nil {
+		if err := s.owner.refreshAuthority(ctx); err != nil {
+			return errors.Join(tailnet.ErrAdmission, err)
+		}
+	}
+	if !s.owner.authority.Allows(s.peerID, resourceID, capability, "accept") {
+		return tailnet.ErrAdmission
+	}
+	return nil
+}

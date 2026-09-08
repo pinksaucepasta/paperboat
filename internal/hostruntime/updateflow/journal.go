@@ -111,6 +111,7 @@ type Journal struct {
 	LastFailure             Failure           `json:"last_failure,omitempty"`
 	CleanupComplete         bool              `json:"cleanup_complete"`
 	BlockedReason           string            `json:"blocked_reason,omitempty"`
+	DeferredManual          bool              `json:"deferred_manual,omitempty"`
 	RequiredVersion         string            `json:"required_version,omitempty"`
 	NextCheckAt             time.Time         `json:"next_check_at,omitempty,omitzero"`
 }
@@ -142,6 +143,9 @@ func (j Journal) Validate() error {
 		return ErrInvalidJournal
 	}
 	if (j.Stage == StageCutover || j.Stage == StageMonitoring || j.Stage == StageCommitted) && (j.WorkerEpoch == 0 || !validID(j.WorkerID)) {
+		return ErrInvalidJournal
+	}
+	if j.DeferredManual && j.BlockedReason != "active_terminal_sessions" {
 		return ErrInvalidJournal
 	}
 	blocked := j.BlockedReason != "" || j.RequiredVersion != "" || !j.NextCheckAt.IsZero()

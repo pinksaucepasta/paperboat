@@ -3,6 +3,7 @@ package tunnelmanager
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -139,5 +140,136 @@ func TestOriginStreamForwarderRejectsUnknownRouteBeforeOrigin(t *testing.T) {
 	}
 	if !validOriginStreamKind("grpc") || !validOriginStreamKind("websocket") {
 		t.Fatal("supported streaming HTTP kind rejected")
+	}
+}
+
+func TestOriginStreamWebSocketUpgradeIsDuplexAndPreservesBufferedBytes(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	originDone := make(chan error, 1)
+	go func() {
+		connection, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			originDone <- acceptErr
+			return
+		}
+		defer connection.Close()
+		request, readErr := http.ReadRequest(bufio.NewReader(connection))
+		if readErr != nil {
+			originDone <- readErr
+			return
+		}
+		if !validWebSocketUpgrade(request) {
+			originDone <- fmt.Errorf("origin received invalid upgrade: %v", request.Header)
+			return
+		}
+		if _, writeErr := io.WriteString(connection, "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n"); writeErr != nil {
+			originDone <- writeErr
+			return
+		}
+		payload := make([]byte, len("earlylate"))
+		if _, readErr = io.ReadFull(connection, payload); readErr == nil {
+			_, readErr = connection.Write(payload)
+		}
+		originDone <- readErr
+	}()
+
+	client, daemon := net.Pipe()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	route := hoststate.TunnelConfigRoute{ID: "route_ws", Protocol: "http", OriginScheme: "http", OriginAddress: listener.Addr().String(), PreserveHost: true, TLSVerification: "not_applicable", ConnectTimeoutMs: 1000, IdleTimeoutMs: 2000, DesiredState: "active"}
+	serveDone := make(chan error, 1)
+	transport := (&OriginHTTPTransport{}).newGeneration()
+	defer transport.CloseIdleConnections()
+	go func() { serveDone <- (OriginStreamForwarder{}).serveHTTP(ctx, daemon, route, transport) }()
+	if _, err := io.WriteString(client, "GET /socket HTTP/1.1\r\nHost: public.example.test\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\nearly"); err != nil {
+		t.Fatal(err)
+	}
+	clientReader := bufio.NewReader(client)
+	response, err := http.ReadResponse(clientReader, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusSwitchingProtocols || response.Header.Get("Upgrade") != "websocket" {
+		t.Fatalf("upgrade response=%+v", response)
+	}
+	if _, err = client.Write([]byte("late")); err != nil {
+		t.Fatal(err)
+	}
+	payload := make([]byte, len("earlylate"))
+	if _, err = io.ReadFull(clientReader, payload); err != nil || string(payload) != "earlylate" {
+		t.Fatalf("duplex payload=%q err=%v", payload, err)
+	}
+	_ = client.Close()
+	select {
+	case err = <-originDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("origin upgrade did not finish")
+	}
+	select {
+	case <-serveDone:
+	case <-ctx.Done():
+		t.Fatal("upgrade forwarding did not clean up")
+	}
+}
+
+func TestOriginStreamForwardsRequestBodyAsItArrives(t *testing.T) {
+	firstChunk := make(chan struct{})
+	origin := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		first := make([]byte, len("first"))
+		if _, err := io.ReadFull(request.Body, first); err != nil || string(first) != "first" {
+			t.Errorf("first streamed chunk=%q err=%v", first, err)
+			return
+		}
+		close(firstChunk)
+		rest, err := io.ReadAll(request.Body)
+		if err != nil || string(rest) != "second" {
+			t.Errorf("remaining streamed body=%q err=%v", rest, err)
+		}
+		_, _ = writer.Write([]byte("received"))
+	}))
+	defer origin.Close()
+	client, daemon := net.Pipe()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	route := hoststate.TunnelConfigRoute{ID: "route_stream", Protocol: "http", OriginScheme: "http", OriginAddress: origin.Listener.Addr().String(), PreserveHost: true, TLSVerification: "not_applicable", ConnectTimeoutMs: 1000, IdleTimeoutMs: 2000, DesiredState: "active"}
+	transport := (&OriginHTTPTransport{}).newGeneration()
+	defer transport.CloseIdleConnections()
+	done := make(chan error, 1)
+	go func() { done <- (OriginStreamForwarder{}).serveHTTP(ctx, daemon, route, transport) }()
+	if _, err := io.WriteString(client, "POST /upload HTTP/1.1\r\nHost: public.example.test\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nfirst\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-firstChunk:
+	case <-ctx.Done():
+		t.Fatal("origin did not receive first chunk before request completed")
+	}
+	if _, err := io.WriteString(client, "6\r\nsecond\r\n0\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.ReadResponse(bufio.NewReader(client), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if err != nil || string(body) != "received" {
+		t.Fatalf("response body=%q err=%v", body, err)
+	}
+	_ = client.Close()
+	select {
+	case err = <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("streaming request did not finish")
 	}
 }

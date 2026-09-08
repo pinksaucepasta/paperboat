@@ -83,7 +83,7 @@ func (a accessorAdmission) validate(now time.Time) error {
 	if err != nil || thumb != a.AccessorThumbprint {
 		return ErrPrivateAccessInvalid
 	}
-	for index, scheme := range []string{"tls", "quic"} {
+	for index, scheme := range []string{"h2", "h3"} {
 		u, err := url.Parse(a.EdgeEndpoints[index])
 		port, portErr := strconv.ParseUint(u.Port(), 10, 16)
 		if err != nil || u.Scheme != scheme || u.Hostname() == "" || portErr != nil || port == 0 || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {

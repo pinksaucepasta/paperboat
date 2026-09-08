@@ -105,7 +105,7 @@ func TestTunnelCommandSurfaceIsExplicitAndSecretSafe(t *testing.T) {
 			t.Fatalf("unsafe connector command %q exists", forbidden)
 		}
 	}
-	wantRoot := []string{"connector", "create", "credentials", "delete", "doctor", "domain", "list", "logs", "pause", "resume", "route", "show", "status"}
+	wantRoot := []string{"connector", "create", "credentials", "delete", "doctor", "domain", "list", "logs", "pause", "policy", "resume", "route", "show", "status", "stop"}
 	var gotRoot []string
 	for _, child := range root.Commands() {
 		if !child.Hidden {
@@ -1138,6 +1138,35 @@ func TestTunnelMutationRejectsInvalidWaitBeforeRequest(t *testing.T) {
 }
 
 func TestTunnelRoutePrivateTCPAndPathClearUseCanonicalWireShapes(t *testing.T) {
+	t.Run("public tcp add", func(t *testing.T) {
+		withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet && r.URL.Path == "/v1/tunnels/tun_1" {
+				tunnel := validCommandTunnel()
+				tunnel.AccessMode = "public"
+				w.Header().Set("ETag", tunnel.ETag)
+				_ = json.NewEncoder(w).Encode(map[string]any{"data": tunnel})
+				return
+			}
+			var input api.TunnelRouteInput
+			if r.Method != http.MethodPost || r.URL.Path != "/v1/tunnels/tun_1/routes" || json.NewDecoder(r.Body).Decode(&input) != nil {
+				t.Fatalf("request=%s %s", r.Method, r.URL.Path)
+			}
+			host := "123e4567-e89b-42d3-a456-426614174000.tunnels.example.test"
+			if input.Protocol != "tcp" || input.HostMatch.Type != "managed_exact" || input.HostMatch.Hostname != host || input.Origin.Scheme != "tcp" {
+				t.Fatalf("public TCP input=%+v", input)
+			}
+			route := validCommandRoute("route_tcp_1", "postgres")
+			route.Protocol, route.HostMatch, route.Origin = "tcp", input.HostMatch, input.Origin
+			route.PublicTCPListenerID, route.PublicTCPPort = "listener_1", 24567
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelRouteMutation{Route: route, Operation: validCommandOperation("route", route.ID), Changed: true}})
+		})
+		command := tunnelCobraCommandV1()
+		command.SetArgs([]string{"route", "add", "tun_1", "--name", "postgres", "--protocol", "tcp", "--to", "tcp://127.0.0.1:5432", "--json"})
+		if err := command.Execute(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
 	t.Run("private tcp add", func(t *testing.T) {
 		withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
 			var input api.TunnelRouteInput
@@ -1297,6 +1326,31 @@ func TestTunnelDomainInstructionsResolveHostnameAndRenderAuthoritativeRecords(t 
 	}
 }
 
+func TestTunnelDomainInstructionsRenderPublicTCPPortSeparately(t *testing.T) {
+	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+		domain := api.TunnelDomain{Schema: api.TunnelV1Schema, Kind: "domain_binding", ID: "domain_tcp", AccountID: "account_1", TunnelID: "tun_1", RouteID: "route_tcp", Hostname: "db.example.test", MatchType: "exact", CertificateStrategy: "none", State: "verified", DNS: api.TunnelDomainDNS{Target: "edge.example.test"}, Certificate: api.TunnelDomainCertificate{State: "not_applicable"}, Generation: 1, ETag: `"domain:domain_tcp:1"`}
+		switch r.URL.Path {
+		case "/v1/tunnels/tun_1/domains":
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelDomainPage{Items: []api.TunnelDomain{domain}}})
+		case "/v1/tunnels/tun_1/domains/domain_tcp/instructions":
+			instructions := api.TunnelDNSInstructions{Schema: api.TunnelV1Schema, Kind: "dns_instructions", TunnelID: "tun_1", DomainID: domain.ID, Hostname: domain.Hostname, Provider: "generic", Records: []api.TunnelDNSRecord{{Name: domain.Hostname, Type: "CNAME", Value: "edge.example.test", TTL: 300}}, CertificateStrategy: "none", VerificationState: "verified", PublicTCPPort: 25432, Note: "Application TLS is passed through unchanged."}
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": instructions})
+		default:
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+	})
+	var output bytes.Buffer
+	command := tunnelCobraCommandV1()
+	command.SetOut(&output)
+	command.SetArgs([]string{"domain", "instructions", "tun_1", "db.example.test"})
+	if err := command.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if output.String() != "db.example.test\tCNAME\tedge.example.test\t300\nTCP endpoint\tdb.example.test:25432\nApplication TLS is passed through unchanged.\n" {
+		t.Fatalf("output=%q", output.String())
+	}
+}
+
 func TestTunnelRouteMutationRetriesTransientFailureWithSameIdempotencyKey(t *testing.T) {
 	oldDelay := tunnelRequestRetryDelay
 	tunnelRequestRetryDelay = func(int) time.Duration { return 0 }
@@ -1442,5 +1496,39 @@ func TestTunnelCreateReadyConnectorJournalRecoversWithoutReenrollment(t *testing
 	}
 	if !strings.Contains(output.String(), `"connector_id":"connector_1"`) || !strings.Contains(output.String(), `"replayed":true`) {
 		t.Fatalf("output=%q", output.String())
+	}
+}
+
+func TestTunnelCreateTeamAudienceUsesCanonicalAPI(t *testing.T) {
+	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/tunnels" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("Idempotency-Key") != "idem_test" {
+			t.Fatalf("idempotency = %q", r.Header.Get("Idempotency-Key"))
+		}
+		var body api.TunnelCreateInput
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.AccessMode != "team" || body.Origin.Scheme != "https" || body.Origin.Address != "origin.example:443" {
+			t.Fatalf("body = %#v", body)
+		}
+		value := validCommandTunnel()
+		value.Generation = 1
+		value.ETag = `"tunnel:tun_1:1"`
+		value.Name = body.Name
+		value.AccessMode = body.AccessMode
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelMutation{Tunnel: value, Operation: validCommandOperation("tunnel", value.ID)}})
+	})
+	var output bytes.Buffer
+	command := tunnelCobraCommandV1()
+	command.SetOut(&output)
+	command.SetArgs([]string{"create", "demo", "--from", "https://origin.example:443", "--team", "--json"})
+	if err := command.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), `"id":"tun_1"`) {
+		t.Fatalf("output = %s", output.String())
 	}
 }

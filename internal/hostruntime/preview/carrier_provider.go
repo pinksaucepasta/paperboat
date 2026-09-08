@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
 )
 
 var (
@@ -58,6 +59,7 @@ type PreviewCarrierProvider interface {
 type AttachmentPreviewCarrierProviderConfig struct {
 	Sessions           AttachmentSessionSource
 	PrivateAccess      *PrivateAccessSource
+	BrowserIngress     tunnelmanager.IngressAuthorityFunc
 	RunContext         context.Context
 	QueueDepth         int
 	MaxStreams         int
@@ -72,16 +74,17 @@ type AttachmentPreviewCarrierProviderConfig struct {
 // tunnel manager, so replacing a carrier cannot accidentally close a shared
 // transport used by other routes.
 type AttachmentPreviewCarrierProvider struct {
-	sessions  AttachmentSessionSource
-	private   *PrivateAccessSource
-	ctx       context.Context
-	cancel    context.CancelFunc
-	queue     int
-	max       int
-	dial      PreviewOriginDialer
-	dialWait  time.Duration
-	closeWait time.Duration
-	observe   func(error)
+	sessions       AttachmentSessionSource
+	private        *PrivateAccessSource
+	browserIngress tunnelmanager.IngressAuthorityFunc
+	ctx            context.Context
+	cancel         context.CancelFunc
+	queue          int
+	max            int
+	dial           PreviewOriginDialer
+	dialWait       time.Duration
+	closeWait      time.Duration
+	observe        func(error)
 
 	mu         sync.Mutex
 	closed     bool
@@ -132,7 +135,7 @@ func NewAttachmentPreviewCarrierProvider(config AttachmentPreviewCarrierProvider
 	}
 	ctx, cancel := context.WithCancel(config.RunContext)
 	return &AttachmentPreviewCarrierProvider{
-		sessions: config.Sessions, private: config.PrivateAccess, ctx: ctx, cancel: cancel,
+		browserIngress: config.BrowserIngress, sessions: config.Sessions, private: config.PrivateAccess, ctx: ctx, cancel: cancel,
 		queue: config.QueueDepth, max: config.MaxStreams, dial: config.OriginDial,
 		dialWait: config.OriginDialTimeout, closeWait: config.OriginCloseTimeout,
 		observe: config.ObserveStreamError,
@@ -192,7 +195,7 @@ func (p *AttachmentPreviewCarrierProvider) CarrierForAttachment(ctx context.Cont
 		Hub: entry.hub, Identity: session.Identity, RouteID: admission.Binding.RouteID,
 		DialOrigin: p.dial, MaxStreams: p.max, OriginDialTimeout: p.dialWait,
 		OriginCloseTimeout: p.closeWait,
-		ObserveStreamError: p.observe,
+		ObserveStreamError: p.observe, BrowserIngress: p.browserIngress, BrowserRouteGeneration: admission.Binding.RouteGeneration,
 	})
 	if err != nil {
 		_ = releaseAttachmentSession(ctx, session)

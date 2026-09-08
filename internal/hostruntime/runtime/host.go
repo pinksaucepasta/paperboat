@@ -89,6 +89,7 @@ type HostDependencies struct {
 	UpdateGate                hostdproto.UpdateGateHandler
 	NativePeerFactory         func(func(net.Conn) error, http.Handler, http.Handler) (Service, error)
 	TransferKeys              *transfercrypto.KeyVault
+	Capabilities              server.CapabilityGate
 }
 
 func previewPrivateTCPAccessHandler(value any) http.Handler {
@@ -112,14 +113,19 @@ type HostedLifecycle interface {
 }
 
 type Host struct {
-	workerMu            sync.RWMutex
-	runtime             *Runtime
-	hostd               *stablehostd.Daemon
-	workers             *stablehostd.WorkerController
-	http                *HTTPService
-	handler             http.Handler
-	sessions            *session.Manager
-	executions          *execprocess.Manager
+	workerMu    sync.RWMutex
+	runtime     *Runtime
+	hostd       *stablehostd.Daemon
+	workers     *stablehostd.WorkerController
+	http        *HTTPService
+	handler     http.Handler
+	sessions    *session.Manager
+	executions  *execprocess.Manager
+	dispatcher  *server.Dispatcher
+	transfers   *filetransfer.Service
+	deviceRelay interface {
+		ReconcilePeerRelay(context.Context, bool) error
+	}
 	health              *runtimeHealthSource
 	transferRoot        string
 	cleanupUnstarted    func() error
@@ -170,7 +176,7 @@ func NewClientCoordinator(ctx context.Context, config HostConfig, dependencies H
 	transferHandlerConfig := server.FileTransferHandlerConfig{
 		Service: transferService, Journal: journal, Authorizer: dependencies.Authorizer, TransferKeys: dependencies.TransferKeys,
 		AuthorizeCreate: func(authorization server.Authorization, request server.CreateFileTransferRequest) bool {
-			return authorization.MachineID == config.MachineID && authorization.UserID != "" && request.SourceMachineID == authorization.SourceMachineID && request.InitiatingUserID == authorization.UserID && request.DestinationMachineID == config.MachineID && request.SessionID == ""
+			return (dependencies.Capabilities == nil || dependencies.Capabilities.Enabled("file-transfer.v1")) && authorization.MachineID == config.MachineID && authorization.UserID != "" && request.SourceMachineID == authorization.SourceMachineID && request.InitiatingUserID == authorization.UserID && request.DestinationMachineID == config.MachineID && request.SessionID == ""
 		},
 	}
 	transferHandler, err := server.NewFileTransferHandler(transferHandlerConfig)
@@ -203,7 +209,7 @@ func NewClientCoordinator(ctx context.Context, config HostConfig, dependencies H
 	mux.Handle("/v1/file-transfers", transferHandler)
 	mux.Handle("/v1/file-transfers/", transferHandler)
 	if dependencies.PreviewDispatcher != nil {
-		handler, dispatchErr := server.NewPreviewDispatchHandler(server.PreviewDispatchHandlerConfig{Authorizer: dependencies.Authorizer, Dispatcher: dependencies.PreviewDispatcher, MachineID: config.MachineID})
+		handler, dispatchErr := server.NewPreviewDispatchHandler(server.PreviewDispatchHandlerConfig{Authorizer: dependencies.Authorizer, Dispatcher: dependencies.PreviewDispatcher, MachineID: config.MachineID, Capabilities: dependencies.Capabilities})
 		if dispatchErr != nil {
 			return nil, dispatchErr
 		}
@@ -266,7 +272,10 @@ func NewClientCoordinator(ctx context.Context, config HostConfig, dependencies H
 		return nil, errors.Join(ErrHostInvalid, err)
 	}
 	healthSource.set(runtime, workerComponents)
-	host := &Host{runtime: runtime, hostd: daemon, workers: workers, http: httpService, handler: mux, health: healthSource, transferRoot: filepath.Join(config.Runtime.StateRoot, "file-transfers"), cleanupUnstarted: durable.Close, updateGate: dependencies.UpdateGate}
+	relayReconciler, _ := nativePeerService.(interface {
+		ReconcilePeerRelay(context.Context, bool) error
+	})
+	host := &Host{runtime: runtime, hostd: daemon, workers: workers, http: httpService, handler: mux, transfers: transferService, deviceRelay: relayReconciler, health: healthSource, transferRoot: filepath.Join(config.Runtime.StateRoot, "file-transfers"), cleanupUnstarted: durable.Close, updateGate: dependencies.UpdateGate}
 	if host.updateGate == nil {
 		host.updateGate, err = newStandaloneUpdateGate(standaloneUpdateGateConfig{MachineID: config.MachineID, StatePath: filepath.Join(config.Runtime.StateRoot, "updates", "standalone-deployment-gate.json"), Health: mux, Workloads: host.WorkloadStatus})
 		if err != nil {
@@ -408,6 +417,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		WorkspaceRoot: config.WorkspaceRoot, Random: random,
 		ConfigApply: dependencies.ConfigApply,
 		Writers:     writers, Exec: executions,
+		SSH: dependencies.ManagedSSH, Capabilities: dependencies.Capabilities,
 	})
 	if err != nil {
 		return nil, err
@@ -422,7 +432,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	transferHandlerConfig := server.FileTransferHandlerConfig{
 		Service: transferService, Journal: journal, Authorizer: dependencies.Authorizer, TransferKeys: dependencies.TransferKeys,
 		AuthorizeCreate: func(authorization server.Authorization, request server.CreateFileTransferRequest) bool {
-			return authorization.MachineID == config.MachineID && authorization.UserID != "" &&
+			return (dependencies.Capabilities == nil || dependencies.Capabilities.Enabled("file-transfer.v1")) && authorization.MachineID == config.MachineID && authorization.UserID != "" &&
 				request.SourceMachineID == authorization.SourceMachineID && request.InitiatingUserID == authorization.UserID &&
 				(request.DestinationMachineID == config.MachineID || request.SessionID != "" && authorization.SessionID == request.SessionID)
 		},
@@ -519,7 +529,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	mux.Handle("/v1/local-file-transfers", localTransferHandler)
 	mux.Handle("/v1/local-file-transfers/", localTransferHandler)
 	if dependencies.PreviewDispatcher != nil {
-		previewDispatchHandler, dispatchErr := server.NewPreviewDispatchHandler(server.PreviewDispatchHandlerConfig{Authorizer: dependencies.Authorizer, Dispatcher: dependencies.PreviewDispatcher, MachineID: config.MachineID})
+		previewDispatchHandler, dispatchErr := server.NewPreviewDispatchHandler(server.PreviewDispatchHandlerConfig{Authorizer: dependencies.Authorizer, Dispatcher: dependencies.PreviewDispatcher, MachineID: config.MachineID, Capabilities: dependencies.Capabilities})
 		if dispatchErr != nil {
 			return nil, dispatchErr
 		}
@@ -549,7 +559,9 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	}
 	workerComponents := []Component{{Capability: "worker_lifecycle", Required: true, Service: workerLifecycleService{}}}
 	if dependencies.AuthorizationService != nil {
-		workerComponents = append(workerComponents, Component{Capability: "authorization", Required: false, Service: dependencies.AuthorizationService})
+		// Authorization refresh and ENV recipient registration belong to the
+		// stable host, including packaged startup without an in-process worker.
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "authorization", Required: false, Service: dependencies.AuthorizationService})
 	}
 	if dependencies.ConfigSync != nil {
 		if stableHostOwnsCoordination() {
@@ -575,7 +587,10 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		stableComponents = append(stableComponents, stablehostd.Component{Name: "runtime_observation", Required: false, Service: dependencies.RuntimeObservationService})
 	}
 	if dependencies.ManagedSSHService != nil {
-		stableComponents = append(stableComponents, stablehostd.Component{Name: "managed_ssh_authority", Required: true, Service: dependencies.ManagedSSHService})
+		// Managed SSH is an independently selectable incoming capability. An
+		// unavailable target authority must fail SSH closed without taking the
+		// terminal, file-transfer, preview, or peer-relay services down with it.
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "managed_ssh_authority", Required: false, Service: dependencies.ManagedSSHService})
 	}
 	if dependencies.TunnelManager != nil {
 		stableComponents = append(stableComponents, stablehostd.Component{Name: "tunnel_manager", Required: true, Service: dependencies.TunnelManager})
@@ -612,7 +627,10 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		return nil, errors.Join(ErrHostInvalid, err)
 	}
 	healthSource.set(runtime, workerComponents)
-	host := &Host{runtime: runtime, hostd: daemon, workers: workers, http: httpService, handler: mux, sessions: sessions, executions: executions, health: healthSource, transferRoot: filepath.Join(config.Runtime.StateRoot, "file-transfers"), cleanupUnstarted: durable.Close, updateGate: dependencies.UpdateGate}
+	relayReconciler, _ := nativePeerService.(interface {
+		ReconcilePeerRelay(context.Context, bool) error
+	})
+	host := &Host{runtime: runtime, hostd: daemon, workers: workers, http: httpService, handler: mux, sessions: sessions, executions: executions, dispatcher: dispatcher, transfers: transferService, deviceRelay: relayReconciler, health: healthSource, transferRoot: filepath.Join(config.Runtime.StateRoot, "file-transfers"), cleanupUnstarted: durable.Close, updateGate: dependencies.UpdateGate}
 	if host.updateGate == nil {
 		host.updateGate, err = newStandaloneUpdateGate(standaloneUpdateGateConfig{MachineID: config.MachineID, StatePath: filepath.Join(config.Runtime.StateRoot, "updates", "standalone-deployment-gate.json"), Health: mux, Workloads: host.WorkloadStatus, BeginUpdate: sessions.BeginUpdate, EndUpdate: sessions.EndUpdate})
 		if err != nil {

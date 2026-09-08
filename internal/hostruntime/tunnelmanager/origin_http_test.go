@@ -279,3 +279,57 @@ func TestOriginHTTPTransportUsesRealH2C(t *testing.T) {
 		t.Fatalf("response protocol/status=%s %d", response.Proto, response.StatusCode)
 	}
 }
+
+func TestOriginHTTPHeaderSanitizationPreservesApplicationCredentials(t *testing.T) {
+	request := http.Header{
+		"Authorization":       {"Bearer application"},
+		"Proxy-Authorization": {"Bearer proxy"},
+		"Forwarded":           {"for=attacker"},
+		"X-Forwarded-For":     {"attacker"},
+		"X-Paperboat-Grant":   {"secret"},
+		"Paperboat-Grant":     {"secret"},
+		"Cookie":              {"session=application; Paperboat-access=secret; __Host-Paperboat_csrf=secret; theme=dark"},
+	}
+	sanitizeOriginRequestHeaders(request, false)
+	if request.Get("Authorization") != "Bearer application" || request.Get("Cookie") != "session=application; theme=dark" {
+		t.Fatalf("application credentials changed: auth=%q cookie=%q", request.Get("Authorization"), request.Get("Cookie"))
+	}
+	for _, name := range []string{"Proxy-Authorization", "Forwarded", "X-Forwarded-For", "X-Paperboat-Grant", "Paperboat-Grant"} {
+		if request.Get(name) != "" {
+			t.Fatalf("reserved request header %s survived", name)
+		}
+	}
+
+	response := http.Header{
+		"X-Paperboat-Decision": {"secret"},
+		"Paperboat-Decision":   {"secret"},
+		"Set-Cookie":           {"session=application; Path=/", "Paperboat-access=secret; Path=/", "__Secure-Paperboat_csrf=secret; Path=/"},
+	}
+	sanitizeOriginResponseHeaders(response, false)
+	if got := response.Values("Set-Cookie"); len(got) != 1 || got[0] != "session=application; Path=/" {
+		t.Fatalf("sanitized response cookies=%q", got)
+	}
+	if response.Get("X-Paperboat-Decision") != "" || response.Get("Paperboat-Decision") != "" {
+		t.Fatalf("reserved response headers survived: %v", response)
+	}
+}
+
+func TestOriginHTTPOnlyPreservesValidatedWebSocketUpgrade(t *testing.T) {
+	valid, _ := http.NewRequest(http.MethodGet, "http://public.example.test/socket", nil)
+	valid.Header.Set("Connection", "keep-alive, Upgrade")
+	valid.Header.Set("Upgrade", "WebSocket")
+	valid.Header.Set("Sec-WebSocket-Version", "13")
+	valid.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+	if !validWebSocketUpgrade(valid) {
+		t.Fatal("valid WebSocket upgrade rejected")
+	}
+	invalid := valid.Clone(context.Background())
+	invalid.Header.Set("Sec-WebSocket-Key", "attacker")
+	if validWebSocketUpgrade(invalid) {
+		t.Fatal("invalid WebSocket upgrade accepted")
+	}
+	sanitizeOriginRequestHeaders(invalid.Header, false)
+	if invalid.Header.Get("Connection") != "" || invalid.Header.Get("Upgrade") != "" {
+		t.Fatal("invalid upgrade survived sanitization")
+	}
+}

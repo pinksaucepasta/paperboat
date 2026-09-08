@@ -2,6 +2,54 @@ package config
 
 import "testing"
 
+func TestAuthenticationCleanupPreservesENVKeyCustody(t *testing.T) {
+	for _, action := range []string{"remove", "queue_active", "complete", "discard_all", "replace"} {
+		t.Run(action, func(t *testing.T) {
+			store := ProfileStore{Path: t.TempDir(), Secrets: &faultSecretStore{values: map[string]string{}}}
+			issuer, account, session := "https://api.example.com", "account_1", "cls_1"
+			if err := store.Save(Profile{Issuer: issuer, Account: Account{ID: account}, CLIClientSessionID: session}, Credential{AccessToken: "test-access", RefreshToken: "test-refresh"}); err != nil {
+				t.Fatal(err)
+			}
+			ref := environmentManagerIdentitySecretRef(issuer, account, session)
+			if err := store.Secrets.Set(ref, "test-encrypted-key-record"); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			switch action {
+			case "remove":
+				_, err = store.Remove(issuer)
+			case "queue_active":
+				err = store.QueueActiveRevocation(issuer)
+			case "replace":
+				err = store.Replace(Profile{Issuer: issuer, Account: Account{ID: account}, CLIClientSessionID: "cls_2"}, Credential{AccessToken: "replacement-access", RefreshToken: "replacement-refresh"})
+			default:
+				if err = store.QueueRevocation(issuer, "cls_old", "test-refresh-old", account); err != nil {
+					t.Fatal(err)
+				}
+				ref = environmentManagerIdentitySecretRef(issuer, account, "cls_old")
+				if err = store.Secrets.Set(ref, "test-encrypted-key-record"); err != nil {
+					t.Fatal(err)
+				}
+				if action == "discard_all" {
+					err = store.DiscardPendingRevocations(issuer)
+				} else {
+					records, loadErr := store.PendingRevocations(issuer)
+					if loadErr != nil || len(records) != 1 {
+						t.Fatal("missing revocation fixture")
+					}
+					err = store.CompleteRevocation(records[0])
+				}
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.Secrets.Get(ref); err != nil {
+				t.Fatal("authentication cleanup destroyed ENV custody")
+			}
+		})
+	}
+}
+
 func TestTakeLogoutCredentialsAtomicallyRemovesActiveAndHistoricalSessions(t *testing.T) {
 	dir := t.TempDir()
 	store := ProfileStore{Path: dir, Secrets: &faultSecretStore{values: map[string]string{}}}

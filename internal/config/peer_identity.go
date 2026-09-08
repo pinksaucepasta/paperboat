@@ -180,6 +180,25 @@ func (s ProfileStore) SavePeerAccountRootPublic(issuer, accountID string, public
 	return storePeerKey(s.Secrets, ref, "account_root_public", public)
 }
 
+// SavePeerDeviceSigningPublic records the verifier for the current device's
+// certificate. Reauthentication may replace an obsolete account-root verifier
+// in the same local profile, but never changes any private signing material.
+func (s ProfileStore) SavePeerDeviceSigningPublic(issuer, accountID string, public ed25519.PublicKey) (resultErr error) {
+	if s.Path == "" || s.Secrets == nil || !validCredentialID(accountID) || len(public) != ed25519.PublicKeySize {
+		return ErrCredentialStoreUnavailable
+	}
+	issuer, err := NormalizeIssuer(issuer)
+	if err != nil {
+		return err
+	}
+	lock := newSharedLock(s.profilePath(issuer) + ".peer-identity.lock")
+	if err := lock.Lock(); err != nil {
+		return err
+	}
+	defer func() { resultErr = errors.Join(resultErr, lock.Unlock()) }()
+	return storePeerKey(s.Secrets, peerIdentitySecretRef(issuer, accountID, "account-root-public"), "account_root_public", public)
+}
+
 type PeerIdentityKeys struct {
 	RootPrivate  ed25519.PrivateKey
 	NoisePrivate [32]byte

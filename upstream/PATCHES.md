@@ -20,6 +20,8 @@ No fork has been published. No upstream application builds are required.
 
 | Tailcat / Tailscale magicsock | Same pinned bases above | `regional.go`, `regional_status.go`, `tailcat.go`, `magicsock/derp.go`, `paperboat_regional_status.go`: replace signed regional inventories live, prepare and send control through an exact node, promote an admitted peer after pair proof, expose actual carrier legs, and preserve connection state during inventory updates. Bootstrap follows the promoted peer region. Injected carriers use liveness probes on socket rebind; stale probes cannot close newer carriers. | Task 13 / Codex | Required until equivalent upstream APIs exist. Pair authorization and ranking stay in Paperboat; WireGuard identity, direct discovery and peer-relay path selection stay in the existing engine. Focused regional, authority and carrier-rebind tests accompany these seams. |
 
+| Tailcat | `5a83b9f9e119aad6b558cbc122d94efdca87452d` | `tailcat.go`: explicit authority-owned local addresses may start with an empty authenticated relay map; absent relays never trigger public DERP discovery in authority mode. Ordinary upstream discovery remains unchanged. Direct client/host startup and later signed relay admission are covered by `tailnet/relay_empty_test.go`. | Task 23.5 / Codex | Retain until upstream supports direct-only authority startup with no implicit relay trust. |
+
 Except for the listed patches and their tests, snapshot files match the pinned upstream commit. Regression coverage is
 Paperboat's real `TestTailcatQUIC` close/restart test with goroutine leak detection;
 `tailnet` admission tests verify denied keys/ports and bounded flow release. No

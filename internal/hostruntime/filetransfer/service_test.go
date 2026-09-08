@@ -594,7 +594,7 @@ func TestCancelIsIdempotentAndRemovesPartial(t *testing.T) {
 	}
 }
 
-func TestCancelWaitsForActiveAppendBeforeRemovingPartial(t *testing.T) {
+func TestCancelActiveWaitsForAppendBeforeRemovingPartial(t *testing.T) {
 	service, _, root := newService(t)
 	created, err := service.Create(context.Background(), requestFor([]byte("x")))
 	if err != nil {
@@ -613,7 +613,7 @@ func TestCancelWaitsForActiveAppendBeforeRemovingPartial(t *testing.T) {
 		t.Fatal("append did not begin reading")
 	}
 	cancelDone := make(chan error, 1)
-	go func() { cancelDone <- service.Cancel(context.Background(), id) }()
+	go func() { cancelDone <- service.CancelActive(context.Background()) }()
 	select {
 	case err := <-cancelDone:
 		t.Fatalf("cancel returned before active append closed: %v", err)

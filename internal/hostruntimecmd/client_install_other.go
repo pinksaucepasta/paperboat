@@ -16,5 +16,5 @@ type ClientInstallConfig struct {
 }
 
 func InstallClient(context.Context, ClientInstallConfig, io.Reader, io.Writer, io.Writer) error {
-	return errors.New("Client service installation is supported only on macOS, Linux, and Windows")
+	return errors.New("device service installation is supported only on macOS, Linux, and Windows")
 }

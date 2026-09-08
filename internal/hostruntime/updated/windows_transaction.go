@@ -42,6 +42,7 @@ type windowsServiceTarget struct {
 }
 
 type windowsActivationJournal struct {
+	ManualMode                                                    string `json:",omitempty"`
 	Schema, TransactionID, PreviousVersion, Version, Architecture string
 	Stage                                                         windowsActivationStage
 	Runtime, CLI, Hostd, Updater, PreviousBinary                  windowsActivationComponent
@@ -399,6 +400,9 @@ func completeWindowsRollback(_ context.Context, backend windowsActivationBackend
 }
 
 func validWindowsActivationJournal(j windowsActivationJournal) bool {
+	if j.ManualMode != "" && j.ManualMode != "update" && j.ManualMode != "maintenance" {
+		return false
+	}
 	if (j.BlockedReason != "" && j.BlockedRetryAt.IsZero()) || (j.BlockedReason == "" && !j.BlockedRetryAt.IsZero()) {
 		return false
 	}

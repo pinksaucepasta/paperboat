@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/netip"
 	"path/filepath"
 	"sync"
 	"time"
@@ -25,6 +26,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=optional-authorized-relay-region
+	"tailscale.com/tailcfg"
 )
 
 type productionNativePeerConfig struct {
@@ -58,6 +61,8 @@ type productionNativePeerGeneration struct {
 	apps                *nativesession.Service
 	errors              chan error
 	identityFingerprint string
+	authority           *tailnet.Authority
+	control             tailnet.NetworkAPI
 	done                sync.WaitGroup
 	once                sync.Once
 }
@@ -201,12 +206,20 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 		_ = authority.Close()
 		return nil, err
 	}
+	if err := authority.ConfigureDeviceRelay(deviceRelayAddresses(41642)); err != nil {
+		_ = authority.Close()
+		return nil, errors.Join(ErrProductionInvalid, errors.New("device peer relay requires a usable unicast network address on UDP port 41642"), err)
+	}
 	regions, err := authority.ConfigureRegionalRelays(relayTLS)
-	if err != nil || len(regions) == 0 {
+	if err != nil {
 		_ = authority.Close()
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
-	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig})
+	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, RefreshAuthority: func(refreshCtx context.Context) error {
+		request, cancel := context.WithTimeout(refreshCtx, 15*time.Second)
+		defer cancel()
+		return authority.Refresh(request, control)
+	}})
 	if err != nil {
 		_ = authority.Close()
 		return nil, err
@@ -224,12 +237,16 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 		_ = owner.Close()
 		return nil, err
 	}
-	if _, err := authority.Listen(regions[0]); err != nil {
+	var firstRegion *tailcfg.DERPRegion
+	if len(regions) != 0 {
+		firstRegion = regions[0]
+	}
+	if _, err := authority.Listen(firstRegion); err != nil {
 		_ = owner.Close()
 		return nil, err
 	}
 	runCtx, cancel := context.WithCancel(ctx)
-	generation := &productionNativePeerGeneration{cancel: cancel, owner: owner, apps: apps, errors: make(chan error, 2), identityFingerprint: certificate.Fingerprint()}
+	generation := &productionNativePeerGeneration{cancel: cancel, owner: owner, apps: apps, errors: make(chan error, 2), identityFingerprint: certificate.Fingerprint(), authority: authority, control: control}
 	generation.done.Add(2)
 	go func() {
 		defer generation.done.Done()
@@ -237,9 +254,37 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 	}()
 	go func() {
 		defer generation.done.Done()
-		generation.errors <- owner.Listen(runCtx, regions[0], apps.Serve)
+		generation.errors <- owner.Listen(runCtx, firstRegion, apps.Serve)
 	}()
 	return generation, nil
+}
+
+func (s *productionNativePeerService) ReconcilePeerRelay(ctx context.Context, _ bool) error {
+	s.mu.Lock()
+	generation := s.current
+	s.mu.Unlock()
+	if generation == nil || generation.authority == nil || generation.control == nil {
+		return ErrProductionInvalid
+	}
+	request, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	return generation.authority.Refresh(request, generation.control)
+}
+
+func deviceRelayAddresses(port uint16) []netip.AddrPort {
+	addresses, _ := net.InterfaceAddrs()
+	result := make([]netip.AddrPort, 0, 4)
+	for _, value := range addresses {
+		prefix, err := netip.ParsePrefix(value.String())
+		if err != nil || !prefix.Addr().IsValid() || prefix.Addr().IsLoopback() || prefix.Addr().IsUnspecified() || prefix.Addr().IsMulticast() {
+			continue
+		}
+		result = append(result, netip.AddrPortFrom(prefix.Addr().Unmap(), port))
+		if len(result) == 4 {
+			break
+		}
+	}
+	return result
 }
 
 func (g *productionNativePeerGeneration) stop() error {

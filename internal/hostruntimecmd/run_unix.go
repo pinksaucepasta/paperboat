@@ -37,7 +37,7 @@ func runProduction(ctx context.Context, output io.Writer) error {
 		defer cancel()
 		return errors.Join(err, host.Shutdown(shutdownCtx))
 	}
-	fmt.Fprintln(output, "pb host runtime ready")
+	fmt.Fprintln(output, "pb device runtime ready")
 	watchdogInterval := notifier.WatchdogInterval()
 	var watchdog <-chan time.Time
 	var ticker *time.Ticker

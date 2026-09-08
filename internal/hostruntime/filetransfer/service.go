@@ -761,6 +761,23 @@ func (s *Service) Cancel(ctx context.Context, id string) error {
 	return s.cancelBatchLocked(ctx, transfers)
 }
 
+// CancelActive stops every transfer currently writing on this receiver. New
+// admission is closed by the capability gate before this cleanup begins.
+func (s *Service) CancelActive(ctx context.Context) error {
+	ids := make([]string, 0)
+	s.writes.Range(func(key, _ any) bool {
+		if id, ok := key.(string); ok {
+			ids = append(ids, id)
+		}
+		return true
+	})
+	var result error
+	for _, id := range ids {
+		result = errors.Join(result, s.Cancel(ctx, id))
+	}
+	return result
+}
+
 func (s *Service) cancelBatch(ctx context.Context, transfers []store.FileTransfer) error {
 	if len(transfers) == 0 {
 		return nil

@@ -683,7 +683,7 @@ func (s ProfileStore) removeCredential(issuer string, lock credentialLock) (cred
 	}
 	cred, credentialErr := s.credentialForProfile(p)
 	var errs []error
-	errs = append(errs, s.Secrets.Delete(p.AccessSecretRef), s.Secrets.Delete(p.RefreshSecretRef), s.DeleteManagedSSHIdentity(p.Issuer, p.CLIClientSessionID), s.DeletePeerEndpointIdentity(p.Issuer, p.CLIClientSessionID), s.deleteEnvironmentManagerIdentityForProfile(p.Issuer, p.Account.ID, p.CLIClientSessionID), s.DeletePeerAccountRoot(p.Issuer, p.Account.ID))
+	errs = append(errs, s.Secrets.Delete(p.AccessSecretRef), s.Secrets.Delete(p.RefreshSecretRef), s.DeleteManagedSSHIdentity(p.Issuer, p.CLIClientSessionID), s.DeletePeerEndpointIdentity(p.Issuer, p.CLIClientSessionID), s.DeletePeerAccountRoot(p.Issuer, p.Account.ID))
 	for _, ref := range p.ObsoleteSecretRefs {
 		errs = append(errs, s.Secrets.Delete(ref))
 	}
@@ -858,9 +858,6 @@ func (s ProfileStore) CompleteRevocation(record PendingRevocation) (resultErr er
 		if err := s.DeletePeerEndpointIdentity(record.Issuer, record.CLIClientSessionID); err != nil {
 			return err
 		}
-		if err := s.deleteEnvironmentManagerIdentityForProfile(record.Issuer, record.AccountID, record.CLIClientSessionID); err != nil {
-			return err
-		}
 	}
 	if record.AccountID != "" {
 		if errors.Is(activeErr, ErrNoCredentials) || activeErr == nil && active.Account.ID != record.AccountID {
@@ -970,7 +967,6 @@ func (s ProfileStore) DiscardPendingRevocations(issuer string) (resultErr error)
 			}
 			if record.CLIClientSessionID != "" {
 				errs = append(errs, s.DeleteManagedSSHIdentity(issuer, record.CLIClientSessionID))
-				errs = append(errs, s.deleteEnvironmentManagerIdentityForProfile(issuer, record.AccountID, record.CLIClientSessionID))
 			}
 			if removeErr := os.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
 				errs = append(errs, removeErr)
@@ -1039,7 +1035,7 @@ func (s ProfileStore) QueueActiveRevocation(issuer string) (resultErr error) {
 		return err
 	}
 	var deleteErrs []error
-	deleteErrs = append(deleteErrs, s.Secrets.Delete(p.AccessSecretRef), s.Secrets.Delete(p.RefreshSecretRef), s.DeleteManagedSSHIdentity(p.Issuer, p.CLIClientSessionID), s.deleteEnvironmentManagerIdentityForProfile(p.Issuer, p.Account.ID, p.CLIClientSessionID))
+	deleteErrs = append(deleteErrs, s.Secrets.Delete(p.AccessSecretRef), s.Secrets.Delete(p.RefreshSecretRef), s.DeleteManagedSSHIdentity(p.Issuer, p.CLIClientSessionID))
 	for _, ref := range p.ObsoleteSecretRefs {
 		deleteErrs = append(deleteErrs, s.Secrets.Delete(ref))
 	}

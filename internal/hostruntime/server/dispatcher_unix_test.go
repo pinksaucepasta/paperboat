@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +31,26 @@ import (
 type testSessionLauncher struct {
 	sessions *session.Manager
 	args     []string
+}
+
+type testCapabilityGate map[string]bool
+
+func (g testCapabilityGate) Enabled(capability string) bool { return g[capability] }
+
+func TestDispatcherRejectsDisabledCapabilityBeforeSideEffects(t *testing.T) {
+	dispatcher, root := execDispatcher(t)
+	dispatcher.config.Capabilities = testCapabilityGate{"terminal.v1": true}
+	payload, _ := json.Marshal(map[string]any{"action": "start", "operation_id": "operation_disabled", "argv": []string{"/bin/sh", "-c", "touch disabled-side-effect"}, "cwd": root})
+	outcome := dispatcher.Handle(context.Background(), Authorization{ClientID: "cli_1"}, "exec.v1", payload)
+	if outcome.ErrorCode != "capability_disabled" {
+		t.Fatalf("outcome=%#v", outcome)
+	}
+	if _, err := os.Stat(filepath.Join(root, "disabled-side-effect")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("disabled operation created side effect: %v", err)
+	}
+	if got := dispatcher.Capabilities(); !slices.Contains(got, "exec.v1") || !slices.Contains(got, "terminal.v1") {
+		t.Fatalf("implemented capabilities were not advertised for negotiation=%q", got)
+	}
 }
 
 func execDispatcher(t *testing.T) (*Dispatcher, string) {

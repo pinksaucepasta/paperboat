@@ -3,8 +3,10 @@
 package config
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -73,12 +75,24 @@ func windowsUTF16(value string) (*uint16, error) {
 	return &encoded[0], nil
 }
 
+// Only the canonical hashed ENV vault namespace permits larger DPAPI records.
+func windowsSecretMaxBytes(ref string) int {
+	const prefix = "environment-password-vault-v1-"
+	suffix := strings.TrimPrefix(ref, prefix)
+	if strings.HasPrefix(ref, prefix) && len(suffix) == 32 && suffix == strings.ToLower(suffix) {
+		if _, err := hex.DecodeString(suffix); err == nil {
+			return passwordVaultRecordBytes
+		}
+	}
+	return windowsCredentialBlobMaxBytes
+}
+
 func (KeyringStore) Set(ref, value string) error {
 	if value == "" {
 		return fmt.Errorf("%w: refusing to store an empty credential", ErrCredentialStoreUnavailable)
 	}
-	if len(value) > windowsCredentialBlobMaxBytes {
-		return fmt.Errorf("%w: credential exceeds %d bytes", ErrCredentialStoreUnavailable, windowsCredentialBlobMaxBytes)
+	if len(value) > windowsSecretMaxBytes(ref) {
+		return fmt.Errorf("%w: credential exceeds %d bytes", ErrCredentialStoreUnavailable, windowsSecretMaxBytes(ref))
 	}
 	// DPAPI is the sole write authority. Credential Manager is read only as a
 	// one-time migration source in Get. A Set therefore has one atomic replace
@@ -114,6 +128,9 @@ func (KeyringStore) Get(ref string) (string, error) {
 	// present but corrupt, unreadable, or has an invalid ACL.
 	if !errors.Is(dpapiErr, ErrSecretNotFound) {
 		return "", dpapiErr
+	}
+	if windowsSecretMaxBytes(ref) == passwordVaultRecordBytes {
+		return "", ErrSecretNotFound
 	}
 	target, err := windowsUTF16(windowsCredentialTarget(ref))
 	if err != nil {

@@ -919,3 +919,38 @@ var _ interface {
 	Shutdown(context.Context) error
 	ResourceCounts() map[string]uint64
 } = (*ProductionAssembly)(nil)
+
+// ConnectorStatus describes only published carriers that are currently usable.
+func (a *ProductionAssembly) ConnectorStatus() connector.Status {
+	var result connector.Status
+	if a == nil || a.Manager == nil || a.Manager.Manager == nil {
+		return result
+	}
+	for _, active := range a.Manager.Manager.ActiveSnapshot() {
+		provider, ok := active.(ActiveCarrierProvider)
+		if !ok || provider.ActiveDataCarrier() == nil {
+			continue
+		}
+		carrier := provider.ActiveDataCarrier()
+		pool := carrier.Pool()
+		if pool == nil || pool.State() != connector.DataCarrierPoolReady {
+			continue
+		}
+		var transport connector.Transport
+		for _, current := range carrier.Snapshot() {
+			if current.State == connector.DataCarrierReady {
+				transport = current.Transport
+				break
+			}
+		}
+		if transport == "" || pool.State() != connector.DataCarrierPoolReady {
+			continue
+		}
+		result.Connected = true
+		if active.Generation() >= result.Generation {
+			result.Generation = active.Generation()
+			result.Transport = transport
+		}
+	}
+	return result
+}

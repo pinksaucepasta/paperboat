@@ -289,6 +289,64 @@ func TestDispatchCarrierFailureDoesNotReserveOperation(t *testing.T) {
 	}
 }
 
+func TestLazyDispatchFencesBootAndSkipsForegroundOwner(t *testing.T) {
+	now := time.Now().UTC()
+	carrier := &sessionCarrier{run: func(ctx context.Context, lease Lease, ready func(Lease) error) error {
+		if lease.LazyLifecycle == nil {
+			return errors.New("lazy lifecycle missing")
+		}
+		if err := ready(sessionReadyLease(lease)); err != nil {
+			return err
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}}
+	resolver := &dispatchResolver{carrier: carrier}
+	manager, err := NewDispatchManager(DispatchManagerConfig{
+		MachineID: "machine_1", InstallationGeneration: 7, BootID: "0123456789abcdef0123456789abcdef",
+		Leases: &sessionLeaseClient{}, Carriers: resolver, Readiness: &dispatchObserver{}, Owners: dispatchOwners{},
+		Now: func() time.Time { return time.Now().UTC() }, LazyIdleTimeout: 30 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = manager.Shutdown(context.Background()) })
+	request := testDispatchRequest(t, now)
+	request.AccessMode = "team"
+	request.OwnerSessionID = "lazy_0123456789abcdef0123456789abcdef"
+	request.Lazy = &LazyBinding{PolicyID: "policy_1", PolicyGeneration: 2, InstallationGeneration: 7, BootID: "wrong-boot-identifier"}
+	request.RequestHash, err = request.ComputeRequestHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Dispatch(context.Background(), testDispatchAuthorization(request, now), request); !errors.Is(err, ErrDispatchInvalid) {
+		t.Fatalf("wrong boot dispatch = %v", err)
+	}
+	resolver.mu.Lock()
+	count := resolver.count
+	resolver.mu.Unlock()
+	if count != 0 {
+		t.Fatalf("wrong boot probed carrier %d times", count)
+	}
+	request.Lazy.BootID = manager.config.BootID
+	request.RequestHash, err = request.ComputeRequestHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Dispatch(context.Background(), testDispatchAuthorization(request, now), request); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(time.Second)
+	for manager.config.Sessions.Count() != 0 {
+		select {
+		case <-deadline:
+			t.Fatal("idle lazy lease was not stopped")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+}
+
 func TestDispatchRejectsAuthorizationMismatchAndPendingReadiness(t *testing.T) {
 	now := time.Date(2098, 1, 2, 3, 4, 5, 0, time.UTC)
 	pendingAttempted := make(chan struct{})

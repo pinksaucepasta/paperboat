@@ -15,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
 )
 
 var (
@@ -84,6 +85,10 @@ func NewMachinePreviewRuntime(config MachinePreviewRuntimeConfig) (*MachinePrevi
 	if err != nil {
 		return nil, errors.Join(ErrMachinePreviewRuntimeInvalid, err)
 	}
+	browserIngress, err := tunnelmanager.NewBrowserIngressAuthority(control.String(), auth, config.Transport)
+	if err != nil {
+		return nil, err
+	}
 	grantClient, err := newPrivateAccessGrantClient(control.String(), auth, config.Transport)
 	if err != nil {
 		return nil, errors.Join(ErrMachinePreviewRuntimeInvalid, err)
@@ -116,7 +121,7 @@ func NewMachinePreviewRuntime(config MachinePreviewRuntimeConfig) (*MachinePrevi
 		return nil, errors.Join(ErrMachinePreviewRuntimeInvalid, err)
 	}
 	provider, err := NewAttachmentPreviewCarrierProvider(AttachmentPreviewCarrierProviderConfig{
-		Sessions: sessions, PrivateAccess: privateAccess, RunContext: config.RunContext, QueueDepth: config.QueueDepth, MaxStreams: config.MaxStreams,
+		BrowserIngress: browserIngress, Sessions: sessions, PrivateAccess: privateAccess, RunContext: config.RunContext, QueueDepth: config.QueueDepth, MaxStreams: config.MaxStreams,
 		OriginDial: config.OriginDial, OriginDialTimeout: config.OriginDialTimeout, OriginCloseTimeout: config.OriginCloseTimeout,
 		ObserveStreamError: config.ObserveStreamError,
 	})

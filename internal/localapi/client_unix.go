@@ -9,12 +9,22 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 )
+
+var ErrTransportUnavailable = errors.New("local API transport unavailable")
+
+func localDialFailure(err error) error {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, os.ErrPermission) {
+		return err
+	}
+	return errors.Join(ErrTransportUnavailable, err)
+}
 
 type FileTransferLease struct {
 	Handle    string
@@ -149,7 +159,7 @@ func (c *Client) OpenPeerStream(ctx context.Context, value PeerStreamRequest) (n
 	}
 	connection, err := c.dial(ctx)
 	if err != nil {
-		return nil, err
+		return nil, localDialFailure(err)
 	}
 	watchDone := make(chan struct{})
 	go func() {

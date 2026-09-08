@@ -35,6 +35,7 @@ func TestRuntimeObservationRemainsStableAcrossWorkerReplacement(t *testing.T) {
 	observation := &runtimeObservationService{sender: sender, interval: 15 * time.Millisecond, timeout: 250 * time.Millisecond}
 	listener := &hostListener{closed: make(chan struct{})}
 	root := t.TempDir()
+	authorization := &clientLifecycleService{}
 	runtimeConfig := runtimeconfig.Config{
 		Profile:   runtimeconfig.BYOD,
 		StateRoot: root,
@@ -49,6 +50,7 @@ func TestRuntimeObservationRemainsStableAcrossWorkerReplacement(t *testing.T) {
 		EnvironmentID: "env_runtime_observation_hostd",
 		MachineID:     "machine_runtime_observation_hostd",
 	}, HostDependencies{
+		AuthorizationService:      authorization,
 		Authorizer:                func(string) (server.Authorizer, error) { return hostAuthorizer{}, nil },
 		Listener:                  func() (net.Listener, error) { return listener, nil },
 		ConfigApply:               configapply.ConformanceHandler{},
@@ -86,6 +88,9 @@ func TestRuntimeObservationRemainsStableAcrossWorkerReplacement(t *testing.T) {
 	if err := host.ReplaceWorker(context.Background(), candidate); err != nil {
 		t.Fatal(err)
 	}
+	if authorization.starts != 1 || authorization.shutdowns != 0 {
+		t.Fatalf("worker replacement changed stable authorization: starts=%d shutdowns=%d", authorization.starts, authorization.shutdowns)
+	}
 	// A broken composition puts observation in the worker. Replacement would
 	// then emit one final observation and stop; requiring two subsequent ticks
 	// distinguishes stable ownership from that false-positive final send.
@@ -97,6 +102,9 @@ func TestRuntimeObservationRemainsStableAcrossWorkerReplacement(t *testing.T) {
 		t.Fatal(err)
 	}
 	cancelShutdown()
+	if authorization.shutdowns != 1 {
+		t.Fatalf("authorization shutdowns=%d, want 1", authorization.shutdowns)
+	}
 	stoppedAt := transport.calls.Load()
 	time.Sleep(4 * observation.interval)
 	if got := transport.calls.Load(); got != stoppedAt {
@@ -125,6 +133,7 @@ func TestStartHostdKeepsProductionObservationGroupAlive(t *testing.T) {
 	}
 	observation := &runtimeObservationService{sender: sender, interval: 15 * time.Millisecond, timeout: 250 * time.Millisecond}
 	root := t.TempDir()
+	authorization := &clientLifecycleService{}
 	host, err := NewHost(context.Background(), HostConfig{
 		Runtime: runtimeconfig.Config{
 			Profile:   runtimeconfig.BYOD,
@@ -138,6 +147,7 @@ func TestStartHostdKeepsProductionObservationGroupAlive(t *testing.T) {
 		EnvironmentID: "env_runtime_observation_hostd_only",
 		MachineID:     "machine_runtime_observation_hostd_only",
 	}, HostDependencies{
+		AuthorizationService:      authorization,
 		Authorizer:                func(string) (server.Authorizer, error) { return hostAuthorizer{}, nil },
 		Listener:                  func() (net.Listener, error) { return &hostListener{closed: make(chan struct{})}, nil },
 		ConfigApply:               configapply.ConformanceHandler{},
@@ -153,6 +163,10 @@ func TestStartHostdKeepsProductionObservationGroupAlive(t *testing.T) {
 		t.Fatal(err)
 	}
 	cancelStartup()
+	t.Cleanup(func() { _ = host.ShutdownHostd(context.Background()) })
+	if authorization.starts != 1 || authorization.shutdowns != 0 {
+		t.Fatalf("hostd authorization lifecycle: starts=%d shutdowns=%d", authorization.starts, authorization.shutdowns)
+	}
 	if state := host.State(); state != New {
 		t.Fatalf("replaceable runtime state = %q, want %q", state, New)
 	}
@@ -161,6 +175,9 @@ func TestStartHostdKeepsProductionObservationGroupAlive(t *testing.T) {
 	defer cancelShutdown()
 	if err := host.ShutdownHostd(shutdownCtx); err != nil {
 		t.Fatal(err)
+	}
+	if authorization.shutdowns != 1 {
+		t.Fatalf("authorization shutdowns=%d, want 1", authorization.shutdowns)
 	}
 	stoppedAt := transport.calls.Load()
 	time.Sleep(4 * observation.interval)

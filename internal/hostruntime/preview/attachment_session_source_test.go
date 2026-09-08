@@ -13,9 +13,12 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
+	"io"
 	"math/big"
 	"net"
+	"net/http"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -23,6 +26,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
+	"golang.org/x/net/http2"
 )
 
 func TestMachineAttachmentSessionSourceSharesAndReleasesMachineCarrier(t *testing.T) {
@@ -30,7 +34,7 @@ func TestMachineAttachmentSessionSourceSharesAndReleasesMachineCarrier(t *testin
 	stateRoot, store := newMachineAttachmentIdentity(t)
 	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
 	identityValue := testPreviewCarrierIdentity(1)
-	admission := machineAttachmentAdmission(t, store, now, identityValue, []string{"tls://edge.example.test:8443", "quic://edge.example.test:9443"})
+	admission := machineAttachmentAdmission(t, store, now, identityValue, []string{"h2://edge.example.test:8443", "h3://edge.example.test:9443"})
 
 	var mu sync.Mutex
 	var calls int
@@ -87,7 +91,7 @@ func TestMachineAttachmentSessionSourceSharesAndReleasesMachineCarrier(t *testin
 	}
 	capturedEndpoint, capturedPool := endpointConfig, poolConfig
 	mu.Unlock()
-	if capturedPool.MaximumCarriers != 1 || capturedPool.Preferred != connector.QUIC || capturedPool.Fallback != connector.TCPMux || capturedPool.SingleTransport {
+	if capturedPool.MaximumCarriers != 1 || capturedPool.Preferred != connector.HTTP3 || capturedPool.Fallback != connector.HTTP2 || capturedPool.SingleTransport {
 		t.Fatalf("pool config = %+v", capturedPool)
 	}
 	if capturedPool.EdgeID != admission.Binding.EdgeNodeID || len(capturedPool.FailureDomains) != 1 || capturedPool.FailureDomains[0] != admission.Binding.EdgeNodeID {
@@ -158,13 +162,13 @@ func TestMachineAttachmentSessionSourceSharesAndReleasesMachineCarrier(t *testin
 	}
 }
 
-func TestMachineAttachmentNetworkSourceFallsBackAfterStalledQUIC(t *testing.T) {
+func TestMachineAttachmentNetworkSourceFallsBackAfterStalledHTTP3(t *testing.T) {
 	identityValue := testPreviewCarrierIdentity(1)
 	config := connector.DefaultDataCarrierPoolConfig()
 	config.MaximumCarriers = 1
 	config.QueueDepth = 1
-	config.Preferred = connector.QUIC
-	config.Fallback = connector.TCPMux
+	config.Preferred = connector.HTTP3
+	config.Fallback = connector.HTTP2
 	config.SingleTransport = false
 	config.EdgeID = "edge_fallback"
 	config.FailureDomains = []string{"edge_fallback"}
@@ -177,7 +181,7 @@ func TestMachineAttachmentNetworkSourceFallsBackAfterStalledQUIC(t *testing.T) {
 		mu.Lock()
 		attempts = append(attempts, request)
 		mu.Unlock()
-		if request.Transport == connector.QUIC {
+		if request.Transport == connector.HTTP3 {
 			<-ctx.Done()
 			return connector.DataCarrierDialResult{}, &connector.TransportDialError{Transport: request.Transport, Err: context.DeadlineExceeded, Fallback: true}
 		}
@@ -205,19 +209,117 @@ func TestMachineAttachmentNetworkSourceFallsBackAfterStalledQUIC(t *testing.T) {
 	if got := prepared.State(); got != connector.DataCarrierLifecyclePrepared {
 		t.Fatalf("prepared state = %s", got)
 	}
-	if transport, ok := prepared.SelectedTransport(); !ok || transport != connector.TCPMux {
+	if transport, ok := prepared.SelectedTransport(); !ok || transport != connector.HTTP2 {
 		t.Fatalf("selected transport = %s, ok=%v, want TCPMux", transport, ok)
 	}
 	mu.Lock()
 	gotAttempts := append([]connector.DataCarrierDialRequest(nil), attempts...)
 	mu.Unlock()
-	if len(gotAttempts) != 2 || gotAttempts[0].Transport != connector.QUIC || gotAttempts[0].Attempt != 1 || gotAttempts[1].Transport != connector.TCPMux || gotAttempts[1].Attempt != 2 {
+	if len(gotAttempts) != 2 || gotAttempts[0].Transport != connector.HTTP3 || gotAttempts[0].Attempt != 1 || gotAttempts[1].Transport != connector.HTTP2 || gotAttempts[1].Attempt != 2 {
 		t.Fatalf("dial attempts = %#v, want bounded QUIC then TCP fallback", gotAttempts)
 	}
 	if gotAttempts[0].Identity != identityValue || gotAttempts[1].Identity != identityValue {
 		t.Fatalf("dial identity was not preserved across fallback: %#v", gotAttempts)
 	}
 }
+
+func TestMachineAttachmentProductionSourceUsesAuthenticatedHTTP2CONNECT(t *testing.T) {
+	stateRoot, store := newMachineAttachmentIdentity(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	identityValue := testPreviewCarrierIdentity(1)
+	admission := machineAttachmentAdmission(t, store, now, identityValue, []string{"h2://edge.example.test:443"})
+	_, serverCertificate := testEdgeServerCertificate(t, now, identityValue, "edge_epoch_01")
+	admission.Binding.EdgeCarrierServerSPKISHA256, admission.Binding.EdgeCarrierServerCertificateChainPEM = testEdgeServerTrust(t, serverCertificate)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	serverTLS := &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{serverCertificate}, ClientAuth: tls.RequireAnyClientCert, NextProtos: []string{"h2"}}
+	handlerErrors := make(chan error, 1)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodConnect {
+			http.Error(w, "invalid method", http.StatusMethodNotAllowed)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		carrier, err := connector.NewDataCarrierServer(r.Context(), &previewHTTPLink{Reader: r.Body, writer: w}, connector.DefaultDataCarrierConfig(), connector.DataCarrierAdmission{Identity: identityValue, Authorize: func(context.Context, connector.StreamOpen) error { return nil }})
+		if err != nil {
+			handlerErrors <- err
+			return
+		}
+		defer carrier.Close()
+		stream, _, err := carrier.AcceptStream(r.Context())
+		if err != nil {
+			handlerErrors <- err
+			return
+		}
+		defer stream.Close()
+		_, err = io.Copy(stream, stream)
+		handlerErrors <- err
+	})
+	httpServer := &http.Server{Handler: handler, TLSConfig: serverTLS}
+	if err := http2.ConfigureServer(httpServer, &http2.Server{}); err != nil {
+		t.Fatal(err)
+	}
+	go httpServer.Serve(tls.NewListener(listener, serverTLS))
+	defer httpServer.Close()
+
+	admission.EdgeEndpoints = []string{"h2://edge.example.test:" + strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)}
+	sourceConfig := MachineAttachmentSessionSourceConfig{StateRoot: stateRoot, Clock: func() time.Time { return now }}
+	source, err := NewMachineAttachmentSessionSource(sourceConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, endpoints, poolConfig, err := source.prepareAdmission(admission, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoints.TCPMux.Address = listener.Addr().String()
+	sessionSource, err := newMachineAttachmentNetworkSessionSource(identityValue, poolConfig, endpoints)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	prepared, err := sessionSource.Prepare(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := prepared.Activate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer active.Close(context.Background())
+	stream, err := active.Pool().OpenStream(ctx, connector.StreamOpen{Protocol: "paperboat.connector", Version: "1.0", AccountID: identityValue.AccountID, TunnelID: identityValue.TunnelID, ConnectorID: identityValue.ConnectorID, SessionID: identityValue.SessionID, ProcessGeneration: identityValue.ProcessGeneration, Generation: identityValue.Generation, RouteID: "route_h2_preview", RequestID: "request_h2_preview", Kind: "http"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	if _, err := stream.Write([]byte("h2-preview")); err != nil {
+		t.Fatal(err)
+	}
+	got := make([]byte, len("h2-preview"))
+	if _, err := io.ReadFull(stream, got); err != nil || string(got) != "h2-preview" {
+		t.Fatalf("echo = %q, %v", got, err)
+	}
+}
+
+type previewHTTPLink struct {
+	io.Reader
+	writer http.ResponseWriter
+}
+
+func (l *previewHTTPLink) Write(p []byte) (int, error) {
+	n, err := l.writer.Write(p)
+	if err == nil {
+		l.writer.(http.Flusher).Flush()
+	}
+	return n, err
+}
+func (*previewHTTPLink) Close() error { return nil }
 
 type previewTestDataCarrierSession struct {
 	done      chan struct{}
@@ -279,7 +381,7 @@ func TestMachineAttachmentSessionSourceRejectsMachineAndEndpointMismatch(t *test
 	stateRoot, store := newMachineAttachmentIdentity(t)
 	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
 	identityValue := testPreviewCarrierIdentity(1)
-	valid := machineAttachmentAdmission(t, store, now, identityValue, []string{"tls://edge.example.test"})
+	valid := machineAttachmentAdmission(t, store, now, identityValue, []string{"h2://edge.example.test"})
 	source, err := NewMachineAttachmentSessionSource(MachineAttachmentSessionSourceConfig{
 		StateRoot: stateRoot,
 		Clock:     func() time.Time { return now },
@@ -307,7 +409,7 @@ func TestMachineAttachmentSessionSourceRequiresPinnedTrustAndExactEdgeTuple(t *t
 	stateRoot, store := newMachineAttachmentIdentity(t)
 	now := time.Now().UTC()
 	identityValue := testPreviewCarrierIdentity(1)
-	admission := machineAttachmentAdmission(t, store, now, identityValue, []string{"tls://edge.example.test"})
+	admission := machineAttachmentAdmission(t, store, now, identityValue, []string{"h2://edge.example.test"})
 	base := MachineAttachmentSessionSourceConfig{StateRoot: stateRoot, Clock: func() time.Time { return now }}
 	source, err := NewMachineAttachmentSessionSource(base)
 	if err != nil {
@@ -339,13 +441,13 @@ func TestMachineAttachmentSessionSourceRequiresPinnedTrustAndExactEdgeTuple(t *t
 	}
 }
 
-func TestNormalizeCarrierEndpointIsStrictAndUsesTLSDefaultPort(t *testing.T) {
+func TestNormalizeCarrierEndpointIsStrictAndUsesHTTPSDefaultPort(t *testing.T) {
 	tests := []struct {
 		name, value, scheme, address, serverName string
 	}{
-		{name: "tls", value: "tls://edge.example.test", scheme: "tls", address: "edge.example.test:443", serverName: "edge.example.test"},
-		{name: "tls-explicit", value: "tls://edge.example.test:9443/", scheme: "tls", address: "edge.example.test:9443", serverName: "edge.example.test"},
-		{name: "quic", value: "quic://[::1]:7443", scheme: "quic", address: "[::1]:7443", serverName: "::1"},
+		{name: "h2", value: "h2://edge.example.test", scheme: "h2", address: "edge.example.test:443", serverName: "edge.example.test"},
+		{name: "h2-explicit", value: "h2://edge.example.test:9443/", scheme: "h2", address: "edge.example.test:9443", serverName: "edge.example.test"},
+		{name: "h3", value: "h3://[::1]:7443", scheme: "h3", address: "[::1]:7443", serverName: "::1"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -359,10 +461,12 @@ func TestNormalizeCarrierEndpointIsStrictAndUsesTLSDefaultPort(t *testing.T) {
 		"http://edge.example.test",
 		"https://edge.example.test",
 		"wss://edge.example.test",
-		"tls://user:secret@edge.example.test",
-		"tls://edge.example.test/carrier",
-		"tls://edge.example.test?token=secret",
-		"tls://edge.example.test:bad",
+		"tls://edge.example.test:443",
+		"quic://edge.example.test:443",
+		"h2://user:secret@edge.example.test",
+		"h2://edge.example.test/carrier",
+		"h2://edge.example.test?token=secret",
+		"h2://edge.example.test:bad",
 	} {
 		if _, _, _, err := normalizeCarrierEndpoint(value); !errors.Is(err, ErrMachineAttachmentSessionInvalid) {
 			t.Fatalf("%q error = %v", value, err)
@@ -381,7 +485,7 @@ func TestMachineAttachmentSessionSourceUsesStandardTLSHostnameAndRoots(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	admission := machineAttachmentAdmission(t, store, now, identityValue, []string{"tls://edge.example.test"})
+	admission := machineAttachmentAdmission(t, store, now, identityValue, []string{"h2://edge.example.test"})
 	admission.Binding.EdgeCarrierServerSPKISHA256, admission.Binding.EdgeCarrierServerCertificateChainPEM = testEdgeServerTrust(t, serverCertificate)
 	key := store.Current()
 	leaf, err := store.CurrentTLSCertificate(now, time.Minute)

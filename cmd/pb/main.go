@@ -1378,7 +1378,7 @@ func requireLocalDaemonService(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 	if !matches {
-		return errors.New("this device is not set up for the active Paperboat server; run `pb setup --mode client`")
+		return errors.New("this device is not set up for the active Paperboat server; run `pb setup`")
 	}
 	_, _, err = startLocalDaemonAndWait(ctx, cfg, installLocalDaemonService)
 	return err
@@ -1499,7 +1499,7 @@ func privilegedServiceOperationCommand() *cobra.Command {
 func pairCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "pair",
-		Short: "Pair this machine for hosting",
+		Short: "Enroll this device with a one-shot token",
 		Args:  commandArgs(cobra.NoArgs),
 		RunE: func(command *cobra.Command, _ []string) error {
 			stateRoot, err := command.Flags().GetString("state-root")
@@ -1565,7 +1565,7 @@ func pairCommand() *cobra.Command {
 				serverURL = registration.ServerURL
 			}
 			arguments := []string{"bootstrap", "--server", serverURL}
-			for _, name := range []string{"enrollment-token", "enrollment-token-file", "name", "shell", "state-root", "setup-mode"} {
+			for _, name := range []string{"enrollment-token", "enrollment-token-file", "name", "shell", "state-root"} {
 				value, err := command.Flags().GetString(name)
 				if err != nil {
 					return err
@@ -1588,7 +1588,6 @@ func pairCommand() *cobra.Command {
 	command.Flags().String("name", "", "machine name")
 	command.Flags().String("shell", "", "absolute login shell")
 	command.Flags().String("state-root", "", "runtime state directory")
-	command.Flags().String("setup-mode", "host", "enrollment role: host or client")
 	return command
 }
 
@@ -1598,14 +1597,8 @@ func setupCommand() *cobra.Command {
 		Short: "Set up this machine for Paperboat",
 		Args:  commandArgs(cobra.NoArgs),
 		RunE: func(command *cobra.Command, _ []string) error {
-			mode, err := command.Flags().GetString("mode")
-			if err != nil {
-				return err
-			}
-			mode, err = resolveSetupMode(mode, term.IsTerminal(int(os.Stdin.Fd())), command.ErrOrStderr())
-			if err != nil {
-				return err
-			}
+			mode := "host" // internal service composition; no user-facing device role
+			var err error
 			if mode == "host" && runtime.GOOS == "windows" {
 				sshPort, setupErr := setupPlatformHostPrerequisites(command.Context())
 				if setupErr != nil {
@@ -1624,7 +1617,7 @@ func setupCommand() *cobra.Command {
 					return invocationError(errors.New("--ssh-port must be between 1 and 65535"))
 				}
 			} else if command.Flags().Changed("ssh-port") {
-				return invocationError(errors.New("--ssh-port is available only with --mode host"))
+				return invocationError(errors.New("--ssh-port is available only when managed SSH is enabled"))
 			}
 			account, err := user.Current()
 			if err != nil || strings.TrimSpace(account.Username) == "" {
@@ -1700,6 +1693,15 @@ func setupCommand() *cobra.Command {
 				}
 				return err
 			}
+			desiredCapabilities := api.DeviceCapabilitySelection{}
+			desiredCapabilities.Terminal, _ = command.Flags().GetBool("terminal")
+			desiredCapabilities.ManagedSSH, _ = command.Flags().GetBool("managed-ssh")
+			desiredCapabilities.FileReceive, _ = command.Flags().GetBool("file-receive")
+			desiredCapabilities.PreviewTunnel, _ = command.Flags().GetBool("preview-tunnel")
+			desiredCapabilities.PeerRelay, _ = command.Flags().GetBool("peer-relay")
+			if _, err := client.SetUserMachineCapabilities(command.Context(), machine.ID, newIdempotencyKey(), desiredCapabilities, machine.DeviceCapabilities.DesiredVersion); err != nil {
+				return fmt.Errorf("save incoming device capabilities: %w", err)
+			}
 			rollbackHostFailure := func(cause error) error {
 				if mode != "host" || previousMode == "host" {
 					return cause
@@ -1720,14 +1722,14 @@ func setupCommand() *cobra.Command {
 			}
 			if mode == "host" {
 				if err := verifySetupHostArtifact(command.Context(), stateRoot, artifact); err != nil {
-					return rollbackHostFailure(fmt.Errorf("verify Host installation artifact: %w", err))
+					return rollbackHostFailure(fmt.Errorf("verify device installation artifact: %w", err))
 				}
 				if _, err := client.RegisterManagedSSHTarget(command.Context(), machine.ID, uint64(machine.InstallationGeneration), account.Username, uint16(sshPortValue), "managed-ssh-target-"+strings.TrimPrefix(newIdempotencyKey(), "pb-")); err != nil {
 					return rollbackHostFailure(fmt.Errorf("register SSH target: %w", err))
 				}
 				resume, err := bootstrap.PrepareAuthenticatedSetupResume(stateRoot, d.cfg.ServerURL, publicIdentityKey, strings.TrimSpace(name), machine.ID, machine.InstallationGeneration, artifact, time.Now().UTC())
 				if err != nil {
-					return rollbackHostFailure(fmt.Errorf("prepare authenticated Host setup recovery: %w", err))
+					return rollbackHostFailure(fmt.Errorf("prepare authenticated device setup recovery: %w", err))
 				}
 				_, reusableIdentityErr := enrollment.LoadRuntimeIdentityForRenewal(stateRoot, time.Now().UTC())
 				prepared, err := client.PrepareAuthenticatedHostSetup(command.Context(), machine.ID, resume.SetupOperationID, api.AuthenticatedHostSetupInput{
@@ -1738,12 +1740,12 @@ func setupCommand() *cobra.Command {
 					CanReuseRuntimeIdentity: reusableIdentityErr == nil,
 				})
 				if err != nil {
-					return rollbackHostFailure(fmt.Errorf("prepare authenticated Host installation: %w", err))
+					return rollbackHostFailure(fmt.Errorf("prepare authenticated device installation: %w", err))
 				}
 				resume.PairingStarted = true
 				resume.PairingExpiresAt = prepared.ExpiresAt
 				if err := bootstrap.SaveResume(stateRoot, resume); err != nil {
-					return rollbackHostFailure(fmt.Errorf("persist authenticated Host installation: %w", err))
+					return rollbackHostFailure(fmt.Errorf("persist authenticated device installation: %w", err))
 				}
 			}
 			registration := identity.Registration{
@@ -1770,10 +1772,10 @@ func setupCommand() *cobra.Command {
 					Artifact: artifact,
 				}, command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr())
 				if installErr != nil {
-					return fmt.Errorf("install client service: %w; retry `pb setup --mode client`", installErr)
+					return fmt.Errorf("install device service: %w; retry `pb setup`", installErr)
 				}
 				if err := rebindLocalDaemonService(command.Context(), d.cfg); err != nil {
-					return fmt.Errorf("start Client local daemon: %w; retry `pb setup --mode client`", err)
+					return fmt.Errorf("start device local daemon: %w; retry `pb setup`", err)
 				}
 			}
 			if mode == "host" {
@@ -1795,42 +1797,21 @@ func setupCommand() *cobra.Command {
 					return fmt.Errorf("save host registration: %w", err)
 				}
 			}
-			fmt.Fprintf(command.OutOrStdout(), "Set up %s (%s) in %s mode\n", machine.DisplayName, machine.ID, mode)
+			fmt.Fprintf(command.OutOrStdout(), "Set up %s (%s)\n", machine.DisplayName, machine.ID)
 			return exportSetupRecoveryKey(command)
 		},
 		SilenceUsage: true, SilenceErrors: true,
 	}
 	command.Flags().String("name", "", "machine name")
-	command.Flags().String("mode", "", "installation mode: client or host")
 	command.Flags().String("state-root", "", "runtime state directory")
 	command.Flags().Uint("ssh-port", 22, "existing loopback sshd port")
+	command.Flags().Bool("terminal", true, "accept Paperboat terminal and exec")
+	command.Flags().Bool("managed-ssh", true, "accept managed SSH tools")
+	command.Flags().Bool("file-receive", true, "accept native Inbox transfers")
+	command.Flags().Bool("preview-tunnel", true, "serve previews and tunnels")
+	command.Flags().Bool("peer-relay", false, "relay encrypted traffic for your devices")
 	command.Flags().String("recovery-output", "", "new absolute file for the account recovery key")
 	return command
-}
-
-func resolveSetupMode(value string, interactive bool, output io.Writer) (string, error) {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value != "" {
-		if slices.Contains([]string{"client", "host"}, value) {
-			return value, nil
-		}
-		return "", invocationError(errors.New("--mode must be client or host"))
-	}
-	if !interactive {
-		return "", invocationError(errors.New("non-interactive setup requires --mode client or host"))
-	}
-	choice, err := selector.Choose(selector.Options{
-		Title: "Set up this machine", Subtitle: "Choose what Paperboat may do on this machine",
-		Items: []selector.Item{
-			{ID: "client", Title: "Client", Description: "Receive files and launch previews in the background"},
-			{ID: "host", Title: "Host", Description: "Run terminals and Codex, receive files, and launch previews"},
-		},
-		Stdin: os.Stdin, Output: output, Footer: "enter select  esc cancel",
-	})
-	if err != nil {
-		return "", err
-	}
-	return choice.ID, nil
 }
 
 func setupRollbackContext(parent context.Context) (context.Context, context.CancelFunc) {
@@ -1873,8 +1854,8 @@ func rollbackAuthenticatedHostSetup(ctx context.Context, client *api.Client, ide
 	if err != nil {
 		return fmt.Errorf("restore previous Client server state: %w", err)
 	}
-	if rolledBack.SetupMode != "client" || rolledBack.ID == "" || rolledBack.EnvironmentID == "" || rolledBack.PublicIdentityKey != publicIdentityKey || rolledBack.InstallationGeneration < 1 {
-		return errors.New("restore previous Client server state: server returned mismatched machine state")
+	if rolledBack.ID == "" || rolledBack.EnvironmentID == "" || rolledBack.PublicIdentityKey != publicIdentityKey || rolledBack.InstallationGeneration < 1 {
+		return errors.New("refresh unified device server state: server returned mismatched machine state")
 	}
 	registration := previous
 	if !hadPrevious {
@@ -1898,7 +1879,7 @@ func rollbackAuthenticatedHostSetup(ctx context.Context, client *api.Client, ide
 		return fmt.Errorf("restore previous Client control credential: %w", err)
 	}
 	if rolledBack.Installation == nil {
-		return errors.New("restore previous Client service: server did not return installation material")
+		return errors.New("restore previous device service: server did not return installation material")
 	}
 	artifact := bootstrap.ArtifactTarget{
 		Schema: rolledBack.Installation.Artifact.Schema, Kind: rolledBack.Installation.Artifact.Kind,
@@ -1910,10 +1891,10 @@ func rollbackAuthenticatedHostSetup(ctx context.Context, client *api.Client, ide
 		StateRoot: stateRoot, WorkspaceRoot: workspaceRoot, ControlURL: rolledBack.Installation.ControlURL,
 		MachineID: rolledBack.ID, ListenAddress: rolledBack.Installation.HelperListenAddress, Artifact: artifact,
 	}, stdin, stdout, stderr); err != nil {
-		return fmt.Errorf("restore previous Client service: %w", err)
+		return fmt.Errorf("restore previous device service: %w", err)
 	}
 	if err := bootstrap.ClearResume(stateRoot); err != nil {
-		return fmt.Errorf("clear failed Host setup recovery state: %w", err)
+		return fmt.Errorf("clear failed device setup recovery state: %w", err)
 	}
 	return nil
 }
@@ -1983,7 +1964,7 @@ func unpairCommand() *cobra.Command {
 			clientSetup.SetErr(command.ErrOrStderr())
 			clientSetup.SetArgs([]string{"--mode", "client", "--name", machine.DisplayName, "--state-root", stateRoot})
 			if err := clientSetup.ExecuteContext(command.Context()); err != nil {
-				return fmt.Errorf("host authority was revoked, but client service setup failed: %w", err)
+				return fmt.Errorf("incoming-service authority was revoked, but device service setup failed: %w", err)
 			}
 			fmt.Fprintf(command.OutOrStdout(), "Unpaired %s (%s)\n", machine.DisplayName, machine.ID)
 			return nil
@@ -2404,6 +2385,9 @@ func newRootCommand() *cobra.Command {
 	sshCommand.AddCommand(sshTrustHost)
 	sshCommand.AddCommand(&cobra.Command{Use: "doctor <machine>", Short: "Check SSH integration for a machine", Args: commandArgs(cobra.ExactArgs(1)), RunE: actionSSHDoctor})
 	root.AddCommand(sshCommand)
+	root.AddCommand(newManagedSSHToolCommand("scp"))
+	root.AddCommand(newManagedSSHToolCommand("sftp"))
+	root.AddCommand(newManagedSSHToolCommand("rsync"))
 	sshProxyCommand := &cobra.Command{Use: "__ssh-proxy", Hidden: true, Args: commandArgs(cobra.NoArgs), RunE: actionSSHProxy}
 	sshProxyCommand.Flags().String("host", "", "")
 	sshProxyCommand.Flags().String("port", "", "")
@@ -2440,6 +2424,7 @@ func newRootCommand() *cobra.Command {
 	environments.Flags().Bool("json", false, "print JSON")
 	root.AddCommand(environments)
 	root.AddCommand(environmentVariablesCobraCommand())
+	root.AddCommand(teamCobraCommand())
 
 	root.AddCommand(doctorCommandV1())
 	ping := &cobra.Command{Use: "ping <machine>", Short: "Measure authenticated connectivity to a machine", Args: commandArgs(cobra.ExactArgs(1)), RunE: actionPing}
@@ -2487,7 +2472,6 @@ func newRootCommand() *cobra.Command {
 	root.AddCommand(pairCommand())
 	root.AddCommand(setupCommand())
 	root.AddCommand(updateCommand())
-	root.AddCommand(unpairCommand())
 	root.AddCommand(uninstallCommand())
 	root.AddCommand(sendCommand())
 	root.AddCommand(transferCommand())
@@ -3565,12 +3549,10 @@ func machineHomeActions(machine api.UserMachine) []selector.Item {
 	if machine.Capabilities.TerminalHost.Configured {
 		actions = append(actions, selector.Item{ID: "sessions", Title: "Sessions", Description: "List durable terminal sessions on this machine"})
 	}
-	if machine.SetupMode == "host" {
-		actions = append(actions,
-			selector.Item{ID: "allow-sleep", Title: "Allow sleep", Description: "Let normal operating-system sleep policy apply"},
-			selector.Item{ID: "keep-awake", Title: "Keep awake", Description: "Request availability even when idle"},
-		)
-	}
+	actions = append(actions,
+		selector.Item{ID: "allow-sleep", Title: "Allow sleep", Description: "Let normal operating-system sleep policy apply"},
+		selector.Item{ID: "keep-awake", Title: "Keep awake", Description: "Request availability even when idle"},
+	)
 	return actions
 }
 
@@ -3579,11 +3561,11 @@ func chooseMachineHomeAction(command *cobra.Command, machine api.UserMachine) (s
 }
 
 func machineStatusSummary(machine api.UserMachine) string {
-	return machineAvailabilityLabel(machine) + "  ·  " + machineModeLabel(machine)
+	return machineAvailabilityLabel(machine) + "  ·  " + machineCapabilityLabel(machine)
 }
 
 func machineStatusSearch(machine api.UserMachine) string {
-	return strings.Join([]string{machineAvailabilityLabel(machine), machineModeLabel(machine), machine.SetupMode}, " ")
+	return strings.Join([]string{machineAvailabilityLabel(machine), machineCapabilityLabel(machine)}, " ")
 }
 
 func machineAvailabilityLabel(machine api.UserMachine) string {
@@ -3598,15 +3580,14 @@ func machineAvailabilityLabel(machine api.UserMachine) string {
 	}
 }
 
-func machineModeLabel(machine api.UserMachine) string {
-	switch effectiveMachineMode(machine) {
-	case "host":
-		return "Host"
-	case "client":
-		return "Client"
-	default:
-		return "Limited"
+func machineCapabilityLabel(machine api.UserMachine) string {
+	count := 0
+	for _, enabled := range []bool{machine.DeviceCapabilities.Desired.Terminal, machine.DeviceCapabilities.Desired.ManagedSSH, machine.DeviceCapabilities.Desired.FileReceive, machine.DeviceCapabilities.Desired.PreviewTunnel, machine.DeviceCapabilities.Desired.PeerRelay} {
+		if enabled {
+			count++
+		}
 	}
+	return fmt.Sprintf("%d incoming services", count)
 }
 
 func machineDisplayTitle(machine api.UserMachine, currentMachineID string) string {
@@ -3627,22 +3608,6 @@ func sortMachinesForDisplay(machines []api.UserMachine, favorites favoriteSet, c
 		}
 		return compareFavorites(favorites.IsFavorite("machine", a.ID), favorites.IsFavorite("machine", b.ID))
 	})
-}
-
-func effectiveMachineMode(machine api.UserMachine) string {
-	switch machine.SetupMode {
-	case "host", "client":
-		return machine.SetupMode
-	case "session":
-		return "client"
-	}
-	if machine.Capabilities.TerminalHost.Configured || machine.Capabilities.CodexHost.Configured {
-		return "host"
-	}
-	if machine.Capabilities.FileReceive.Configured || machine.Capabilities.PreviewLaunch.Configured {
-		return "client"
-	}
-	return ""
 }
 
 func actionHomeSendToMachine(command *cobra.Command, machine api.UserMachine) error {
@@ -4735,11 +4700,7 @@ func userMachineCobraCommand() *cobra.Command {
 		if strings.TrimSpace(cfg.ServerURL) == "" {
 			return errors.New("Paperboat server is not configured; set server_url or use --server")
 		}
-		role, _ := command.Flags().GetString("role")
 		name, _ := command.Flags().GetString("name")
-		if role != "host" && role != "client" {
-			return errors.New("--role must be host or client")
-		}
 		authSource, err := sessionauth.NewSource(cfg)
 		if err != nil {
 			return err
@@ -4750,7 +4711,7 @@ func userMachineCobraCommand() *cobra.Command {
 		}
 		client := api.New(cfg.ServerURL, credential, nil)
 		shell, _ := command.Flags().GetString("shell")
-		result, err := client.StartMachineEnrollment(ctx.Context, fmt.Sprintf("cli-%d", time.Now().UnixNano()), role, shell)
+		result, err := client.StartMachineEnrollment(ctx.Context, fmt.Sprintf("cli-%d", time.Now().UnixNano()), shell)
 		if err != nil {
 			return friendlyCommandError(err)
 		}
@@ -4762,7 +4723,6 @@ func userMachineCobraCommand() *cobra.Command {
 		fmt.Fprintf(command.OutOrStdout(), "Linux/macOS:\ncurl -fsSL 'https://get.pprbt.dev/install?p=%s' | bash\n\nWindows (PowerShell or Command Prompt):\n%s\n", parameter, windowsEnrollmentCommand(windowsURL))
 		return nil
 	}}
-	add.Flags().String("role", "host", "machine role: host or client")
 	add.Flags().String("shell", "posix", "installer shell: posix or powershell")
 	add.Flags().String("name", "", "optional machine hostname")
 	list := &cobra.Command{Use: "list", Short: "List enrolled machines", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, args []string) error {
@@ -4886,7 +4846,48 @@ func userMachineCobraCommand() *cobra.Command {
 	availability.Flags().String("mode", "", "availability mode: allow-sleep or keep-awake")
 	availability.Flags().Bool("yes", false, "confirm keep-awake power behavior")
 	availability.Flags().Bool("json", false, "print JSON")
-	machine.AddCommand(add, list, rename, revoke, availability)
+	capabilities := &cobra.Command{Use: "capabilities <machine>", Short: "Set incoming services for a device", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(command *cobra.Command, args []string) error {
+		ctx := actionContext(command, args)
+		client, err := backendClient(ctx)
+		if err != nil {
+			return err
+		}
+		machineValue, err := resolveUserMachine(ctx.Context, client, args[0])
+		if err != nil {
+			return friendlyCommandError(err)
+		}
+		desired := machineValue.DeviceCapabilities.Desired
+		changed := false
+		for name, destination := range map[string]*bool{"terminal": &desired.Terminal, "managed-ssh": &desired.ManagedSSH, "file-receive": &desired.FileReceive, "preview-tunnel": &desired.PreviewTunnel, "peer-relay": &desired.PeerRelay} {
+			if command.Flags().Changed(name) {
+				value, flagErr := command.Flags().GetBool(name)
+				if flagErr != nil {
+					return flagErr
+				}
+				*destination, changed = value, true
+			}
+		}
+		if !changed {
+			return errors.New("set at least one capability flag")
+		}
+		policy, err := client.SetUserMachineCapabilities(ctx.Context, machineValue.ID, newIdempotencyKey(), desired, machineValue.DeviceCapabilities.DesiredVersion)
+		if err != nil {
+			return friendlyCommandError(err)
+		}
+		jsonOutput, _ := command.Flags().GetBool("json")
+		if jsonOutput {
+			return json.NewEncoder(command.OutOrStdout()).Encode(map[string]any{"version": "1", "machine": map[string]string{"id": machineValue.ID, "display_name": machineValue.DisplayName}, "device_capabilities": policy})
+		}
+		fmt.Fprintf(command.OutOrStdout(), "Incoming capabilities saved for %s; application is %s.\n", machineValue.DisplayName, policy.Status)
+		return nil
+	}}
+	capabilities.Flags().Bool("terminal", false, "accept Paperboat terminal and exec")
+	capabilities.Flags().Bool("managed-ssh", false, "accept managed SSH/SCP/SFTP/rsync")
+	capabilities.Flags().Bool("file-receive", false, "accept native Inbox transfers")
+	capabilities.Flags().Bool("preview-tunnel", false, "serve preview and tunnel routes")
+	capabilities.Flags().Bool("peer-relay", false, "relay encrypted traffic for your devices")
+	capabilities.Flags().Bool("json", false, "print JSON")
+	machine.AddCommand(add, list, rename, revoke, availability, capabilities)
 	return machine
 }
 
@@ -5280,7 +5281,8 @@ func e2eeClient(c *command.Context) (*api.Client, config.ProfileStore, config.Pr
 	if err != nil {
 		return nil, config.ProfileStore{}, config.Profile{}, err
 	}
-	credential, err := store.CredentialFor(cfg.ServerURL)
+	source := (&sessionauth.Source{Store: store, Issuer: cfg.ServerURL}).WithContext(c.Context)
+	credential, err := source.Credential()
 	if err != nil {
 		return nil, config.ProfileStore{}, config.Profile{}, err
 	}
@@ -5541,7 +5543,7 @@ func selectEnvironment(ctx context.Context, client *api.Client, title string) (s
 		}
 		items = append(items, selector.Item{ID: machine.ID, Title: machine.DisplayName, Description: machineStatusSummary(machine), Search: "machine " + machineStatusSearch(machine)})
 	}
-	selected, err := selector.Choose(selector.Options{Title: title, Subtitle: "Terminal-capable machines", Items: items, Empty: "no terminal hosts are available; run `pb setup --mode host` or `pb machine add`", Stdin: os.Stdin, Output: os.Stderr})
+	selected, err := selector.Choose(selector.Options{Title: title, Subtitle: "Terminal-capable machines", Items: items, Empty: "no terminal-capable devices are available; run `pb setup` or `pb machine add`", Stdin: os.Stdin, Output: os.Stderr})
 	return selected.ID, err
 }
 
@@ -5584,7 +5586,7 @@ func defaultEnvironment(ctx context.Context, client *api.Client, rememberedID st
 		return machines[0].ID, nil
 	}
 	if len(machines) == 0 {
-		return "", errors.New("no terminal hosts are available; run `pb setup --mode host` or `pb machine add`")
+		return "", errors.New("no terminal-capable devices are available; run `pb setup` or `pb machine add`")
 	}
 	choices := make([]string, 0, len(machines))
 	for _, machine := range machines {
@@ -9551,8 +9553,6 @@ type localDoctorReport struct {
 	MachineID              string   `json:"machine_id,omitempty"`
 	EnvironmentID          string   `json:"environment_id,omitempty"`
 	InstallationGeneration int64    `json:"installation_generation,omitempty"`
-	SetupRoles             []string `json:"setup_roles,omitempty"`
-	SetupMode              string   `json:"setup_mode,omitempty"`
 	IdentityState          string   `json:"identity_state"`
 	CredentialState        string   `json:"machine_control_credential"`
 	InboxPath              string   `json:"inbox_path,omitempty"`
@@ -9606,8 +9606,6 @@ func collectLocalDoctor() localDoctorReport {
 	report.SetupState, report.IdentityState = "configured", "valid"
 	report.MachineID, report.EnvironmentID = registration.MachineID, registration.EnvironmentID
 	report.InstallationGeneration = registration.InstallationGeneration
-	report.SetupRoles = append([]string(nil), registration.SetupRoles...)
-	report.SetupMode = registration.SetupMode
 	report.InboxPath = registration.InboxPath
 	if err := inbox.ValidatePath(registration.InboxPath); err != nil {
 		report.InboxState = "unsafe_or_unavailable"
@@ -9621,7 +9619,7 @@ func collectLocalDoctor() localDoctorReport {
 		} else {
 			report.CredentialState = "valid"
 		}
-	} else if registration.SetupMode == "host" || registration.SetupMode == "client" {
+	} else if registration.MachineID != "" {
 		report.CredentialState = "invalid_or_expired"
 		report.RecoveryActions = append(report.RecoveryActions, "run pb pair to renew host authority")
 	}

@@ -152,3 +152,45 @@ func TestCLINativeTransferLeaseRedialsFailedAssociation(t *testing.T) {
 		t.Fatalf("replacement closed=%t headers=%#v resources=%#v capabilities=%#v", replacement.closed, replacement.headers, replacement.resources, replacement.capabilities)
 	}
 }
+
+func TestCLINativeStreamGroupOperationBinding(t *testing.T) {
+	now := time.Now().UTC()
+	for _, tc := range []struct {
+		name, consumer, operation, sessionID, want string
+		nilTarget                                  bool
+	}{
+		{name: "terminal session", consumer: "terminal", sessionID: "umts_terminal", want: "umts_terminal"},
+		{name: "explicit exec", consumer: "exec", operation: "exec_operation", sessionID: "umts_terminal", want: "exec_operation"},
+		{name: "missing terminal session", consumer: "terminal"},
+		{name: "exec requires operation", consumer: "exec", sessionID: "umts_terminal"},
+		{name: "nil target", consumer: "terminal", nilTarget: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			session := &capturedNativeApplicationSession{}
+			defer session.Close()
+			target := &resolver.TerminalTarget{SessionID: tc.sessionID, Auth: resolver.AuthTarget{Token: "operation-token", ExpiresAt: now.Add(time.Minute).Format(time.RFC3339), ResourceID: "access_session"}}
+			if tc.nilTarget {
+				target = nil
+			}
+			group := &cliNativeStreamGroup{session: session, target: target, application: peerApplication{operationID: tc.operation}, consumer: tc.consumer, now: func() time.Time { return now }}
+			stream, err := group.OpenStream(t.Context())
+			if tc.want == "" {
+				if err == nil {
+					stream.Close()
+					t.Fatal("missing operation binding accepted")
+				}
+				if len(session.headers) != 0 {
+					t.Fatal("unauthorized stream opened")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stream.Close()
+			if len(session.headers) != 1 || session.headers[0].OperationID != tc.want || session.resources[0] != "access_session" {
+				t.Fatal("stream did not retain exact operation and resource bindings")
+			}
+		})
+	}
+}

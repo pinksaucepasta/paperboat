@@ -230,8 +230,15 @@ func TestNetworkChangeHandlerSuppressesNonRebindAndInvalidGeneration(t *testing.
 	if metrics.records[0].value != 3 || metrics.records[1].labels["reason"] != "viability" || metrics.records[1].labels["action"] != "observe" {
 		t.Fatalf("metrics=%+v", metrics.records)
 	}
-	if _, err := newNetworkChangeHandler(nil, direct, metrics); !errors.Is(err, ErrProductionInvalid) {
-		t.Fatalf("nil connector error=%v", err)
+	canonicalOnly, err := newNetworkChangeHandler(nil, direct, metrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical := &recordingCanonicalRecovery{mu: &mu}
+	canonicalOnly.SetCanonical(canonical)
+	canonicalOnly.Handle(networkmonitor.Event{Generation: 4, Rebind: true, Reasons: networkmonitor.ReasonDefaultRoute})
+	if len(canonical.events) != 1 || canonical.events[0].Generation != 4 {
+		t.Fatal("dedicated connector missed network change")
 	}
 	if _, err := newNetworkChangeHandler(recordingConnectorRecovery{mu: &mu, actions: &actions}, direct, nil); !errors.Is(err, ErrProductionInvalid) {
 		t.Fatalf("nil metrics error=%v", err)

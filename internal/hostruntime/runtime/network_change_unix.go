@@ -98,8 +98,7 @@ type networkChangeHandler struct {
 func (h *networkChangeHandler) SetObserver(observer func()) { h.changed = observer }
 
 // SetCanonical attaches the durable connector-v1 recovery path after the
-// tunnel assembly is constructed. The legacy connector remains the fallback
-// for hosts that do not opt into canonical tunnel-manager composition.
+// tunnel assembly is constructed. Production uses only this canonical path.
 func (h *networkChangeHandler) SetCanonical(recovery canonicalNetworkRecovery) {
 	if h != nil {
 		h.connector = recovery
@@ -107,7 +106,7 @@ func (h *networkChangeHandler) SetCanonical(recovery canonicalNetworkRecovery) {
 }
 
 func newNetworkChangeHandler(connector connectorNetworkRecovery, direct directNetworkRecovery, metrics networkMetricRecorder) (*networkChangeHandler, error) {
-	if connector == nil || metrics == nil {
+	if metrics == nil {
 		return nil, ErrProductionInvalid
 	}
 	return &networkChangeHandler{legacy: connector, direct: direct, metrics: metrics}, nil

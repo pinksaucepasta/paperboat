@@ -259,17 +259,6 @@ func (s ProfileStore) DeleteEnvironmentManagerIdentity(issuer, accountID, subjec
 	return s.Secrets.Delete(environmentManagerIdentitySecretRef(issuer, accountID, subjectID))
 }
 
-// deleteEnvironmentManagerIdentityForProfile is used by auth cleanup paths
-// where older profiles may legitimately have no account ID. A missing or
-// malformed identity coordinate means there cannot be a valid ENV identity
-// record for that profile and must not prevent logout.
-func (s ProfileStore) deleteEnvironmentManagerIdentityForProfile(issuer, accountID, subjectID string) error {
-	if !validCredentialID(accountID) || !validCredentialID(subjectID) {
-		return nil
-	}
-	return s.DeleteEnvironmentManagerIdentity(issuer, accountID, subjectID)
-}
-
 func environmentIdentityFromRecord(record environmentManagerIdentityRecord) (EnvironmentManagerIdentity, error) {
 	signing, err := decodeEnvironmentIdentityKey(record.SigningSeed)
 	if err != nil {

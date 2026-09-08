@@ -9,7 +9,6 @@ version=${PAPERBOAT_VERSION:-latest}
 release_metadata_url=${PAPERBOAT_RELEASE_METADATA_URL:-https://api.pprbt.dev/current.json}
 install_dir=${PAPERBOAT_INSTALL_DIR:-"${HOME}/.local/bin"}
 setup_mode=
-pair_mode=host
 pair=false
 enrollment_token=
 enrollment_token_file=
@@ -31,13 +30,12 @@ Usage:
 Options:
   --version VERSION             Install the version named by current.json
   --install-dir DIRECTORY       Install Linux pb here (default: ~/.local/bin)
-  --setup MODE                  Run setup after install: client or host
+  --setup                       Set up this unified device after install
   --pair                        Pair this machine after install
   --enrollment-token TOKEN      Use a dashboard-issued single-use pairing token
   --enrollment-token-file FILE  Read the token from an absolute owner-only file
-  --setup-mode MODE             Pair as host or client (default: host)
   --name NAME                   Set the machine name
-  --ssh-port PORT               Existing SSH port; valid only with --setup host
+  --ssh-port PORT               Existing SSH port used by managed SSH
   --recovery-output FILE        Save the account recovery key during setup
   --no-setup                    Install only (the default)
   -h, --help                    Show this help
@@ -50,13 +48,11 @@ EOF
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --version|--install-dir|--setup|--setup-mode|--enrollment-token|--enrollment-token-file|--name|--ssh-port|--recovery-output)
+    --version|--install-dir|--enrollment-token|--enrollment-token-file|--name|--ssh-port|--recovery-output)
       [ "$#" -ge 2 ] || { echo "pb installer: $1 requires a value" >&2; exit 2; }
       case "$1" in
         --version) version=$2 ;;
         --install-dir) install_dir=$2; install_dir_requested=true ;;
-        --setup) setup_mode=$2 ;;
-        --setup-mode) pair_mode=$2 ;;
         --enrollment-token) enrollment_token=$2 ;;
         --enrollment-token-file) enrollment_token_file=$2 ;;
         --name) machine_name=$2 ;;
@@ -65,6 +61,7 @@ while [ "$#" -gt 0 ]; do
       esac
       shift 2
       ;;
+    --setup) setup_mode=unified; shift ;;
     --pair) pair=true; shift ;;
     --no-setup) setup_mode=; pair=false; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -72,16 +69,8 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-case "$setup_mode" in
-  ""|client|host) ;;
-  *) echo "pb installer: --setup must be client or host" >&2; exit 2 ;;
-esac
-case "$pair_mode" in
-  host|client) ;;
-  *) echo "pb installer: --setup-mode must be host or client" >&2; exit 2 ;;
-esac
-if [ -n "$ssh_port" ] && [ "$setup_mode" != host ]; then
-  echo "pb installer: --ssh-port is valid only with --setup host" >&2
+if [ -n "$ssh_port" ] && [ -z "$setup_mode" ] && [ "$pair" != true ]; then
+  echo "pb installer: --ssh-port requires --setup or --pair" >&2
   exit 2
 fi
 if [ -n "$recovery_output" ] && [ -z "$setup_mode" ]; then
@@ -163,7 +152,7 @@ prepare_privileges() {
   needs_sudo=false
   if [ "$os" = darwin ]; then
     needs_sudo=true
-  elif [ "$setup_mode" = host ] || { [ "$pair" = true ] && [ "$pair_mode" = host ]; }; then
+  elif [ -n "$setup_mode" ] || [ "$pair" = true ]; then
     needs_sudo=true
   elif [ -e /usr/local/bin/pb ] || [ -L /usr/local/bin/pb ] || \
        [ -e /usr/local/libexec/paperboat/pb ] || [ -L /usr/local/libexec/paperboat/pb ] || \
@@ -328,15 +317,6 @@ else
 fi
 [ "$actual" = "$expected" ] || { echo "pb installer: release asset digest verification failed" >&2; exit 1; }
 
-# Resolve token metadata before privilege preflight so dashboard Host tokens
-# get the same behavior as explicit --setup host installs.
-if [ "$pair" = true ]; then
-  first=${enrollment_token%${enrollment_token#?}}
-  case "$first" in
-    0|2|4|6|8|B|D|F|H|J|L|N|P|R|T|V|X|Z) pair_mode=host ;;
-    *) pair_mode=client ;;
-  esac
-fi
 prepare_privileges
 
 # Preserve the existing installation if download or verification fails. Only
@@ -371,9 +351,6 @@ esac
 set --
 if [ -n "$machine_name" ]; then set -- "$@" --name "$machine_name"; fi
 if [ "$pair" = true ]; then
-  first=${enrollment_token%${enrollment_token#?}}
-  case "$first" in 0|2|4|6|8|B|D|F|H|J|L|N|P|R|T|V|X|Z) pair_mode=host ;; *) pair_mode=client ;; esac
-  set -- "$@" --setup-mode "$pair_mode"
   [ -z "$enrollment_token" ] || set -- "$@" --enrollment-token "$enrollment_token"
   [ -z "$enrollment_token_file" ] || set -- "$@" --enrollment-token-file "$enrollment_token_file"
   # Pairing is the final step of a fresh replacement. Do not exec here:
@@ -392,7 +369,6 @@ if [ "$pair" = true ]; then
   fi
 fi
 if [ -n "$setup_mode" ]; then
-  set -- "$@" --mode "$setup_mode"
   [ -z "$ssh_port" ] || set -- "$@" --ssh-port "$ssh_port"
   [ -z "$recovery_output" ] || set -- "$@" --recovery-output "$recovery_output"
   exec "$target" setup "$@"

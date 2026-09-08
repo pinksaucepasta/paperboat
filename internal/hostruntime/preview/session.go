@@ -71,6 +71,9 @@ type Lease struct {
 	CreateOperationID string `json:"-"`
 	ETag              string `json:"-"`
 	Generation        int64  `json:"-"`
+	// LazyLifecycle is daemon-local stream and idle accounting. It is never
+	// serialized or accepted from an untrusted lease response.
+	LazyLifecycle *LazyLifecycle `json:"-"`
 }
 
 // LeaseRequest contains only create-time owner and target information. The
@@ -342,8 +345,8 @@ func validateSessionConfig(config SessionConfig) error {
 	if err := validateLeaseTarget(config.Target); err != nil {
 		return err
 	}
-	if config.AccessMode != "" && config.AccessMode != "public" && config.AccessMode != "private" {
-		return fmt.Errorf("%w: access mode must be public or private", ErrSessionInvalid)
+	if config.AccessMode != "" && config.AccessMode != "public" && config.AccessMode != "private" && config.AccessMode != "team" {
+		return fmt.Errorf("%w: access mode must be public, private, or team", ErrSessionInvalid)
 	}
 	if config.LeaseLifecycle != LeaseLifecycleOwned && config.LeaseLifecycle != LeaseLifecycleObserved {
 		return fmt.Errorf("%w: lease lifecycle ownership is invalid", ErrSessionInvalid)
@@ -712,6 +715,7 @@ func (s *Session) acceptRenewal(renewed, previous Lease) error {
 	}
 	s.mu.Lock()
 	renewed.Generation = newGeneration
+	renewed.LazyLifecycle = previous.LazyLifecycle
 	s.lease = renewed
 	s.mu.Unlock()
 	s.managerMu.Lock()
@@ -746,6 +750,7 @@ func (s *Session) markReady(lease Lease) error {
 	if lease.ETag == "" {
 		lease.ETag = current.ETag
 	}
+	lease.LazyLifecycle = current.LazyLifecycle
 	lease.Generation = leaseGenerationForID(lease.ID, lease.ETag)
 	if err := validateSessionLease(lease, s.config, s.config.Now()); err != nil {
 		return err

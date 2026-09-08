@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -556,6 +557,13 @@ func migrateTrustedLegacyDPAPIObject(path, sddl string) error {
 }
 
 func dpapiTransformWithEntropy(value, entropyBytes []byte, protect bool, protectFlags uint32) ([]byte, error) {
+	return dpapiTransformBounded(value, entropyBytes, protect, protectFlags, windowsCredentialBlobMaxBytes*4)
+}
+
+func dpapiTransformBounded(value, entropyBytes []byte, protect bool, protectFlags uint32, maxBytes int) ([]byte, error) {
+	if len(value) > maxBytes || len(entropyBytes) == 0 {
+		return nil, ErrCredentialStoreUnavailable
+	}
 	input := windows.DataBlob{Size: uint32(len(value))}
 	if len(value) > 0 {
 		input.Data = &value[0]
@@ -572,7 +580,7 @@ func dpapiTransformWithEntropy(value, entropyBytes []byte, protect bool, protect
 		return nil, err
 	}
 	defer windows.LocalFree(windows.Handle(uintptr(unsafe.Pointer(output.Data))))
-	if output.Size > windowsCredentialBlobMaxBytes*4 || output.Size > 0 && output.Data == nil {
+	if uint64(output.Size) > uint64(maxBytes) || output.Size > 0 && output.Data == nil {
 		return nil, ErrCredentialStoreUnavailable
 	}
 	result := append([]byte(nil), unsafe.Slice(output.Data, int(output.Size))...)
@@ -612,14 +620,22 @@ func keyringDPAPIV2Header(ref string, inner bool) []byte {
 	return header
 }
 
+// Retain the existing 15 KiB protection allowance for framing and DPAPI overhead.
+func keyringDPAPIMaxBytes(ref string) int {
+	return windowsSecretMaxBytes(ref) + 3*windowsCredentialBlobMaxBytes
+}
+
 func protectKeyringDPAPIV2(ref, value string) ([]byte, error) {
+	if len(value) == 0 || len(value) > windowsSecretMaxBytes(ref) {
+		return nil, ErrCredentialStoreUnavailable
+	}
 	innerHeader := keyringDPAPIV2Header(ref, true)
 	plain := make([]byte, 0, len(innerHeader)+4+len(value))
 	plain = append(plain, innerHeader...)
 	plain = binary.LittleEndian.AppendUint32(plain, uint32(len(value)))
 	plain = append(plain, value...)
 	defer clear(plain)
-	protected, err := dpapiTransformWithEntropy(plain, keyringDPAPIV2Entropy(ref), true, cryptProtectLocalMachine)
+	protected, err := dpapiTransformBounded(plain, keyringDPAPIV2Entropy(ref), true, cryptProtectLocalMachine, keyringDPAPIMaxBytes(ref)-keyringDPAPIV2FixedHeaderSize)
 	if err != nil {
 		return nil, err
 	}
@@ -635,7 +651,7 @@ func unprotectKeyringDPAPIV2(ref string, protected []byte) (string, error) {
 	if len(protected) <= len(outerHeader) || !bytes.Equal(protected[:len(outerHeader)], outerHeader) {
 		return "", fmt.Errorf("%w: unsupported DPAPI credential scope or schema", ErrCredentialStoreUnavailable)
 	}
-	plain, err := dpapiTransformWithEntropy(protected[len(outerHeader):], keyringDPAPIV2Entropy(ref), false, 0)
+	plain, err := dpapiTransformBounded(protected[len(outerHeader):], keyringDPAPIV2Entropy(ref), false, 0, keyringDPAPIMaxBytes(ref)-keyringDPAPIV2FixedHeaderSize)
 	if err != nil {
 		return "", fmt.Errorf("%w: decrypt machine-scope DPAPI credential: %v", ErrCredentialStoreUnavailable, err)
 	}
@@ -646,7 +662,7 @@ func unprotectKeyringDPAPIV2(ref string, protected []byte) (string, error) {
 	}
 	valueLength := int(binary.LittleEndian.Uint32(plain[len(innerHeader) : len(innerHeader)+4]))
 	value := plain[len(innerHeader)+4:]
-	if valueLength == 0 || valueLength != len(value) || valueLength > windowsCredentialBlobMaxBytes {
+	if valueLength == 0 || valueLength != len(value) || valueLength > windowsSecretMaxBytes(ref) {
 		return "", fmt.Errorf("%w: invalid machine-scope DPAPI credential length", ErrCredentialStoreUnavailable)
 	}
 	return string(value), nil
@@ -772,8 +788,14 @@ func getDPAPISecret(ref string, credentialErr error) (string, error) {
 	if err != nil || attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		return "", errors.Join(ErrCredentialStoreUnavailable, err)
 	}
-	protected, err := os.ReadFile(path)
-	if err != nil || len(protected) == 0 || len(protected) > windowsCredentialBlobMaxBytes*4 {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", errors.Join(ErrCredentialStoreUnavailable, err)
+	}
+	protected, err := io.ReadAll(io.LimitReader(file, int64(keyringDPAPIMaxBytes(ref))+1))
+	closeErr := file.Close()
+	err = errors.Join(err, closeErr)
+	if err != nil || len(protected) == 0 || len(protected) > keyringDPAPIMaxBytes(ref) {
 		return "", fmt.Errorf("%w: read DPAPI credential: %v", ErrCredentialStoreUnavailable, err)
 	}
 	defer clear(protected)
@@ -782,6 +804,9 @@ func getDPAPISecret(ref string, credentialErr error) (string, error) {
 	}
 	if bytes.HasPrefix(protected, []byte{'P', 'B', 'K', 'R'}) {
 		return unprotectKeyringDPAPIV2(ref, protected)
+	}
+	if windowsSecretMaxBytes(ref) == passwordVaultRecordBytes {
+		return "", ErrCredentialStoreUnavailable
 	}
 	plain, err := dpapiTransform(protected, false)
 	if err != nil {

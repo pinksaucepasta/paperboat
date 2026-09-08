@@ -311,7 +311,7 @@ func (a Attachment) Validate(now time.Time) error {
 	if err := a.Binding.Validate(); err != nil {
 		return err
 	}
-	if a.AccessMode != "public" && a.AccessMode != "private" {
+	if a.AccessMode != "public" && a.AccessMode != "private" && a.AccessMode != "team" {
 		return fmt.Errorf("%w: unsupported access mode %q", ErrAttachmentBinding, a.AccessMode)
 	}
 	if a.IdempotencyKey != a.OperationID || !validAttachmentID(a.IdempotencyKey) || len(a.RequestID) < 3 || len(a.RequestID) > 128 || len(a.CorrelationID) < 3 || len(a.CorrelationID) > 128 || hasAttachmentControl(a.RequestID) || hasAttachmentControl(a.CorrelationID) {
@@ -834,7 +834,7 @@ func validateAttachmentEndpoint(value string, edge bool) error {
 	}
 	if edge {
 		switch strings.ToLower(parsed.Scheme) {
-		case "tls", "quic":
+		case "h2", "h3":
 		default:
 			return fmt.Errorf("%w: unsupported edge endpoint scheme", ErrAttachmentBinding)
 		}

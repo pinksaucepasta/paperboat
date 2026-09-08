@@ -52,6 +52,6 @@ func InstallClient(ctx context.Context, config ClientInstallConfig, _ io.Reader,
 	if err := elevation.RunRuntimeService(ctx, executable, elevation.ActionInstallCommit, request); err != nil {
 		return err
 	}
-	fmt.Fprintln(stdout, "Paperboat Windows Client service is ready.")
+	fmt.Fprintln(stdout, "Paperboat Windows device service is ready.")
 	return nil
 }

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,18 +32,21 @@ import (
 )
 
 type relayAuthority struct {
-	mu        sync.Mutex
-	tokens    map[string]string
-	grants    map[string]derpquic.Grant
-	config    *tls.Config
-	node      RegionalNode
-	factory   magicsock.DERPCarrierFactory
-	peerNodes []*tailcfg.Node
-	nodes     map[tailcfg.DERPRegionID]RegionalNode
-	recovery  *regionalRecovery
+	mu           sync.Mutex
+	tokens       map[string]string
+	grants       map[string]derpquic.Grant
+	config       *tls.Config
+	node         RegionalNode
+	factory      magicsock.DERPCarrierFactory
+	peerNodes    []*tailcfg.Node
+	controlPeers []key.NodePublic
+	nodes        map[tailcfg.DERPRegionID]RegionalNode
+	recovery     *regionalRecovery
 	// regionalRecoveryConfigured distinguishes dynamic regional recovery from
 	// the single fixed-node mode when a stopped worker has been detached.
 	regionalRecoveryConfigured bool
+	device                     *deviceRelay
+	deviceAddresses            []netip.AddrPort
 }
 
 // ApplyRelayGrants consumes only signed grants from the same network refresh.
@@ -58,6 +62,7 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 	a.mu.Unlock()
 	next := map[string]string{}
 	grants := map[string]derpquic.Grant{}
+	controlSet := map[key.NodePublic]bool{}
 	defer func() {
 		a.mu.Lock()
 		defer a.mu.Unlock()
@@ -69,7 +74,18 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 		a.relay.mu.Lock()
 		a.relay.tokens = next
 		a.relay.grants = grants
+		a.relay.controlPeers = a.relay.controlPeers[:0]
+		for peer := range controlSet {
+			a.relay.controlPeers = append(a.relay.controlPeers, peer)
+		}
+		controlPeers := append([]key.NodePublic(nil), a.relay.controlPeers...)
 		a.relay.mu.Unlock()
+		if a.server != nil {
+			_ = a.server.server.SetRelayControlPeers(controlPeers)
+		}
+		if a.clientEngine != nil {
+			_ = a.clientEngine.SetRelayControlPeers(controlPeers)
+		}
 	}()
 	if len(tokens) > MaxRegionalCandidates || regional == nil {
 		return ErrRegionalAuthority
@@ -142,6 +158,18 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 			grants = nil
 			return ErrAuthority
 		}
+		if len(g.RelayControlPeers) > 16 {
+			return ErrAuthority
+		}
+		seenControl := map[string]bool{}
+		for _, peerKey := range g.RelayControlPeers {
+			peer, err := publicKey(peerKey)
+			if err != nil || peerKey == g.WireGuardPublicKey || seenControl[peerKey] {
+				return ErrAuthority
+			}
+			seenControl[peerKey] = true
+			controlSet[peer] = true
+		}
 		for i, p := range g.Peers {
 			if p.WireGuardPublicKey != cfg.Peers[i].Identity.WireGuardPublicKey {
 				next = nil
@@ -209,6 +237,7 @@ func (a *Authority) configureRegionalRelays(config *tls.Config, only string) ([]
 	a.relay.mu.Lock()
 	defer a.relay.mu.Unlock()
 	selected := make(map[tailcfg.DERPRegionID]RegionalNode)
+	controlSet := map[key.NodePublic]bool{}
 	var regions []*tailcfg.DERPRegion
 	var services []*tailcfg.Node
 	for _, node := range nodes {
@@ -221,6 +250,13 @@ func (a *Authority) configureRegionalRelays(config *tls.Config, only string) ([]
 		g, ok := a.relay.grants[node.NodeID]
 		if !ok || g.ExpiresAt <= time.Now().Unix() {
 			continue
+		}
+		for _, value := range g.RelayControlPeers {
+			peer, parseErr := publicKey(value)
+			if parseErr != nil {
+				return nil, parseErr
+			}
+			controlSet[peer] = true
 		}
 		parts := strings.Split(a.relay.tokens[node.NodeID], ".")
 		if len(parts) != 3 {
@@ -253,12 +289,20 @@ func (a *Authority) configureRegionalRelays(config *tls.Config, only string) ([]
 		selected[id] = node
 		regions = append(regions, regionForNode(node))
 	}
-	if len(regions) == 0 {
+	if len(regions) == 0 && only != "" {
 		return nil, ErrRegionalAuthority
 	}
 	a.relay.nodes = selected
-	a.relay.node = selected[regions[0].RegionID]
+	a.relay.node = RegionalNode{}
+	if len(regions) != 0 {
+		a.relay.node = selected[regions[0].RegionID]
+	}
 	a.relay.peerNodes = services
+	a.relay.controlPeers = a.relay.controlPeers[:0]
+	for peer := range controlSet {
+		a.relay.controlPeers = append(a.relay.controlPeers, peer)
+	}
+	sort.Slice(a.relay.controlPeers, func(i, j int) bool { return a.relay.controlPeers[i].Compare(a.relay.controlPeers[j]) < 0 })
 	a.relay.config = config.Clone()
 	if only == "" {
 		a.relay.regionalRecoveryConfigured = true
@@ -317,8 +361,12 @@ func (a *Authority) relayServiceLocked(node RegionalNode, g derpquic.Grant) (*ta
 		return nil, ErrAuthority
 	}
 	for _, p := range a.current.Peers {
-		if p.Identity.VirtualAddress == g.PeerRelay.VirtualAddress || p.Identity.WireGuardPublicKey == g.PeerRelay.WireGuardPublicKey {
-			return nil, ErrAuthority
+		sameAddress := p.Identity.VirtualAddress == g.PeerRelay.VirtualAddress
+		sameKey := p.Identity.WireGuardPublicKey == g.PeerRelay.WireGuardPublicKey
+		if sameAddress || sameKey {
+			if !sameAddress || !sameKey || p.Identity.DiscoPublicKey != g.PeerRelay.DiscoPublicKey {
+				return nil, ErrAuthority
+			}
 		}
 	}
 	return &tailcfg.Node{ID: 1 << 60, StableID: tailcfg.StableNodeID(node.NodeID), Name: node.NodeID, Key: relayKey, DiscoKey: discoKey, Addresses: []netip.Prefix{netip.PrefixFrom(netip.MustParseAddr(g.PeerRelay.VirtualAddress), 128)}, HomeDERP: regionalID(node.NodeID), Cap: tailcfg.CurrentCapabilityVersion}, nil

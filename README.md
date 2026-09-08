@@ -51,13 +51,17 @@ keeps the server lease, route, and origin readiness synchronized.
 ```sh
 pb preview 3000
 pb preview http://127.0.0.1:8080
-pb preview ./report.html --duration 1h
+pb preview ./report.html --ttl 1h
+pb tunnel --ephemeral 3000
+pb preview 3000 --background --ttl 1h
 pb preview ./dist --domain preview.example.com
 pb preview 3000 --private
 ```
 
-Use `pb preview list` to inspect active previews and `pb preview stop <preview>` to stop
-one. `--domain` attaches a verified custom domain and may be repeated. Private preview
+Use `pb preview list` or `pb preview status <preview>` to inspect ephemeral tunnels;
+`stop` and `delete` both withdraw one. Background ownership defaults to 30 minutes, is
+capped at 24 hours, and is not restored after reboot. `--domain` attaches a verified
+custom domain and may be repeated. Private preview
 hostnames are routed through the narrow local Paperboat proxy; browsers receive no
 Paperboat credential, cookie, or redirect flow.
 
@@ -132,13 +136,14 @@ receipt. Inbox files remain until the user removes them.
 
 ## Machines
 
-Run `pb setup` to register the interactive installation and its Paperboat Inbox. Run
-`pb pair` to add the host role to the same stable machine identity. Pairing verifies the
-server-selected TUF target, installs the minimum launchd or systemd services,
-and waits for authenticated readiness.
+Run `pb setup` to register this device, create its Paperboat Inbox, verify the
+server-selected TUF target, and install the Paperboat service. A device can initiate
+authorized operations and can receive the incoming services enabled in its capability
+settings. Terminal, managed SSH, native file receiving, and preview/tunnel serving are
+enabled by default; account peer relay is opt-in.
 
-Interactive-only setup does not run a terminal host or connector. After pairing, machines
-use the same `pb <environment>` and durable terminal-session workflow as hosted projects.
+`pb pair` performs the same unified-device enrollment when invoked by a dashboard-issued
+one-shot install command. It does not select a permanent host or client role.
 
 When no observability path is configured, metadata-only events are appended to
 `telemetry.jsonl` beside the CLI config with mode `0600`. Set

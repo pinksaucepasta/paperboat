@@ -122,6 +122,70 @@ func TestOwnerSessionLeaseManagerLocalAndDispatchReferencesAreIndependent(t *tes
 	_ = manager.Close()
 }
 
+func TestOwnerSessionLeaseManagerBackgroundOwnershipIsAbsoluteAndIsolated(t *testing.T) {
+	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	registry, err := NewRuntimeOwnerSessionRegistry(RuntimeOwnerSessionRegistryConfig{MachineID: "machine_01", RuntimeDone: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewOwnerSessionLeaseManager(OwnerSessionLeaseManagerConfig{MachineID: "machine_01", ControlToken: "control_secret", Registry: registry, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}
+	expiresAt := now.Add(30 * time.Minute)
+	lease, err := manager.Acquire(OwnerSessionLeaseRequest{Target: target, Background: true, ExpiresAt: &expiresAt}, "background_01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !lease.Background || !lease.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("background lease = %+v", lease)
+	}
+	if _, err := manager.Heartbeat(lease.ID, lease.Token); !errors.Is(err, ErrOwnerSessionLeaseConflict) {
+		t.Fatalf("background heartbeat = %v", err)
+	}
+	if _, err := registry.OwnerSessionDoneForTarget("account_01", "machine_01", lease.OwnerSessionID, target); err != nil {
+		t.Fatal(err)
+	}
+	manager.Sweep(now.Add(time.Second)) // observes the attached daemon session
+	other, err := manager.Acquire(OwnerSessionLeaseRequest{Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3001"}}, "foreground_02")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Release(other.ID, other.Token); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.ReleaseOwnerSession("account_01", "machine_01", lease.OwnerSessionID); err != nil {
+		t.Fatal(err)
+	}
+	manager.Sweep(now.Add(2 * time.Second))
+	if _, err := manager.Heartbeat(lease.ID, lease.Token); !errors.Is(err, ErrOwnerSessionLeaseLost) {
+		t.Fatalf("stopped background lease = %v", err)
+	}
+	now = expiresAt.Add(time.Millisecond)
+	manager.Sweep(now)
+	if _, err := registry.OwnerSessionDoneForTarget("account_01", "machine_01", lease.OwnerSessionID, target); !errors.Is(err, ErrOwnerSessionBinding) {
+		t.Fatalf("expired background dispatch = %v", err)
+	}
+	if err := manager.Release(lease.ID, lease.Token); err != nil {
+		t.Fatalf("idempotent expired release = %v", err)
+	}
+}
+
+func TestOwnerSessionLeaseManagerRejectsUnboundedBackgroundOwnership(t *testing.T) {
+	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	registry, _ := NewRuntimeOwnerSessionRegistry(RuntimeOwnerSessionRegistryConfig{MachineID: "machine_01", RuntimeDone: make(chan struct{})})
+	manager, _ := NewOwnerSessionLeaseManager(OwnerSessionLeaseManagerConfig{MachineID: "machine_01", ControlToken: "control_secret", Registry: registry, Now: func() time.Time { return now }})
+	target := LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}
+	tooLate := now.Add(BackgroundPreviewMaximumTTL + time.Second)
+	if _, err := manager.Acquire(OwnerSessionLeaseRequest{Target: target, Background: true}, "background_missing"); !errors.Is(err, ErrOwnerSessionLeaseInvalid) {
+		t.Fatalf("missing expiry = %v", err)
+	}
+	if _, err := manager.Acquire(OwnerSessionLeaseRequest{Target: target, Background: true, ExpiresAt: &tooLate}, "background_long"); !errors.Is(err, ErrOwnerSessionLeaseInvalid) {
+		t.Fatalf("long expiry = %v", err)
+	}
+}
+
 func TestOwnerSessionLeaseRetirementRejectsDelayedDispatch(t *testing.T) {
 	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
 	registry, err := NewRuntimeOwnerSessionRegistry(RuntimeOwnerSessionRegistryConfig{MachineID: "machine_01", RuntimeDone: make(chan struct{})})

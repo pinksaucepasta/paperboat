@@ -5,7 +5,9 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"maps"
+	"reflect"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -63,6 +65,10 @@ type regionalRecovery struct {
 	readyOnce sync.Once
 	inbox     chan regionalInbound
 	status    RegionalStatus
+	// Protected by authority.mu; renewal timestamps do not revoke an unchanged pair.
+	semanticGeneration uint64
+	semanticSelf       NetworkBinding
+	semanticPeers      map[NetworkBinding]map[NetworkScope]struct{}
 }
 
 // newRegionalRecoveryLocked returns recovery state bound to the current node
@@ -84,7 +90,11 @@ func (a *Authority) regionalRecoveryLocked() (*regionalRecovery, bool) {
 func (a *Authority) relayControl(id tailcfg.DERPRegionID, peer key.NodePublic, packet []byte) bool {
 	a.relay.mu.Lock()
 	r := a.relay.recovery
+	device := a.relay.device
 	a.relay.mu.Unlock()
+	if device != nil && device.handle(id, peer, packet) {
+		return true
+	}
 	if r == nil || !bytes.HasPrefix(packet, regionalControlMagic) {
 		return false
 	}
@@ -175,7 +185,94 @@ func (a *Authority) PrepareRegional(ctx context.Context, peerID string) error {
 		return ErrRegionalAuthority
 	case <-ready:
 		return nil
+	case <-time.After(regionalProbeTimeout):
+		return r.prepareProvisional(ctx)
 	}
+}
+
+// prepareProvisional prevents regional reachability coordination from becoming
+// a prerequisite for an otherwise authorized native connection. The signed
+// relay grant and exact application peer scope remain the authorization
+// boundary; this only chooses a current DERP rendezvous while the recovery
+// worker continues looking for an acknowledged common route.
+func (r *regionalRecovery) prepareProvisional(ctx context.Context) error {
+	nodes, peers, _, err := r.snapshot()
+	if err != nil {
+		return fmt.Errorf("provisional regional snapshot: %w", err)
+	}
+	if len(nodes) == 0 {
+		return fmt.Errorf("%w: no current regional relay grant", ErrRegionalAuthority)
+	}
+	peer, err := publicKeyForEndpoint(peers, r.peerID)
+	if err != nil {
+		return fmt.Errorf("%w: target peer scope is unavailable", ErrRegionalAuthority)
+	}
+	r.mu.Lock()
+	if r.status.Reason == "regional_admission_denied" {
+		r.mu.Unlock()
+		return fmt.Errorf("%w: regional admission was denied", ErrRegionalAuthority)
+	}
+	if r.status.NodeID != "" {
+		r.mu.Unlock()
+		return nil
+	}
+	r.mu.Unlock()
+	node := nodes[0]
+	prepareCtx, cancel := context.WithTimeout(ctx, regionalProbeTimeout)
+	defer cancel()
+	if err := r.engine.PrepareRelay(prepareCtx, regionalID(node.NodeID)); err != nil {
+		return fmt.Errorf("prepare provisional regional relay: %w", err)
+	}
+	// Revalidate after the network operation so expiry, revocation, or a newer
+	// acknowledged promotion cannot be overwritten by the provisional route.
+	freshNodes, freshPeers, _, err := r.snapshot()
+	if err != nil || !sameRegionalNode(freshNodes, node) {
+		return fmt.Errorf("%w: regional relay grant changed during preparation", ErrRegionalAuthority)
+	}
+	freshPeer, err := publicKeyForEndpoint(freshPeers, r.peerID)
+	if err != nil || freshPeer != peer {
+		return fmt.Errorf("%w: target peer scope changed during preparation", ErrRegionalAuthority)
+	}
+	r.mu.Lock()
+	denied := r.status.Reason == "regional_admission_denied"
+	promoted := r.status.NodeID != ""
+	r.mu.Unlock()
+	if denied {
+		return ErrRegionalAuthority
+	}
+	if promoted {
+		return nil
+	}
+	server, ok := r.engine.(*tailcat.Server)
+	if !ok {
+		return ErrRegionalAuthority
+	}
+	disco, err := derpquic.ParseDiscoKey(freshPeers[freshPeer].Identity.DiscoPublicKey)
+	if err != nil {
+		return err
+	}
+	if err := server.EnsureRelayPeer(freshPeer, disco); err != nil {
+		return err
+	}
+	return r.engine.SetPeerRelayRegion(freshPeer, regionalID(node.NodeID))
+}
+
+func publicKeyForEndpoint(peers map[key.NodePublic]NetworkPeer, endpointID string) (key.NodePublic, error) {
+	for peer, value := range peers {
+		if value.Identity.EndpointID == endpointID {
+			return peer, nil
+		}
+	}
+	return key.NodePublic{}, ErrRegionalAuthority
+}
+
+func sameRegionalNode(nodes []RegionalNode, wanted RegionalNode) bool {
+	for _, node := range nodes {
+		if node.NodeID == wanted.NodeID && node.NodeGeneration == wanted.NodeGeneration && node.ProcessEpoch == wanted.ProcessEpoch {
+			return true
+		}
+	}
+	return false
 }
 func (a *Authority) RegionalStatus() RegionalStatus {
 	a.relay.mu.Lock()
@@ -239,7 +336,7 @@ func (r *regionalRecovery) snapshot() ([]RegionalNode, map[key.NodePublic]Networ
 			peers[k] = p
 		}
 	}
-	return eligible, peers, a.current.Generation, nil
+	return eligible, peers, r.authorityGeneration(a.current.Self, peers, time.Now().Unix()), nil
 }
 func (r *regionalRecovery) receive(ctx context.Context) {
 	for {
@@ -367,7 +464,15 @@ func (r *regionalRecovery) run(ctx context.Context) {
 			timer.Reset(regionalProbeDelay())
 			continue
 		}
-		if deniedGeneration != 0 && generation <= deniedGeneration {
+		// A fresh signed grant may recover relay admission even when its pair
+		// permissions are unchanged. Keep this fence on issuance generation.
+		r.authority.mu.Lock()
+		leaseGeneration := uint64(0)
+		if r.authority.current != nil {
+			leaseGeneration = r.authority.current.Generation
+		}
+		r.authority.mu.Unlock()
+		if deniedGeneration != 0 && leaseGeneration <= deniedGeneration {
 			timer.Reset(regionalProbeDelay())
 			continue
 		}
@@ -492,7 +597,7 @@ func (r *regionalRecovery) run(ctx context.Context) {
 			}
 		}
 		if denied.Load() {
-			deniedGeneration = generation
+			deniedGeneration = leaseGeneration
 			_ = r.engine.SetRelayRegions(nil)
 			r.mu.Lock()
 			r.status = RegionalStatus{Redundancy: RedundancyNone, Reason: "regional_admission_denied", ProbeFailures: failures}
@@ -635,4 +740,30 @@ func (r regionalRetry) failed(n RegionalNode, now time.Time) regionalRetry {
 	}
 	r.next = now.Add(regionalProbeInterval * time.Duration(1<<(r.attempts-1)))
 	return r
+}
+
+// authorityGeneration fences changes to authorization, not issuance of a renewed
+// signed lease. snapshot still checks current authority, scope and relay expiry.
+// The caller holds authority.mu.
+func (r *regionalRecovery) authorityGeneration(self NetworkBinding, peers map[key.NodePublic]NetworkPeer, now int64) uint64 {
+	projection := make(map[NetworkBinding]map[NetworkScope]struct{}, len(peers))
+	for _, peer := range peers {
+		scopes := make(map[NetworkScope]struct{})
+		for _, scope := range peer.Scopes {
+			if scope.ExpiresAt <= now {
+				continue
+			}
+			scope.ExpiresAt = 0
+			scopes[scope] = struct{}{}
+		}
+		if len(scopes) != 0 {
+			projection[peer.Identity] = scopes
+		}
+	}
+	if r.semanticGeneration == 0 || self != r.semanticSelf || !reflect.DeepEqual(projection, r.semanticPeers) {
+		r.semanticGeneration++
+		r.semanticSelf = self
+		r.semanticPeers = projection
+	}
+	return r.semanticGeneration
 }

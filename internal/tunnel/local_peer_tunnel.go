@@ -3,6 +3,7 @@ package tunnel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"time"
@@ -81,13 +82,16 @@ func (t LocalPeerTunnel) Dial(ctx context.Context, info resolver.ConnectInfo) (C
 	}
 	stream, err := t.Client.OpenPeerStream(ctx, request)
 	if err != nil {
+		if errors.Is(err, localapi.ErrTransportUnavailable) {
+			return nil, &terminalTransportError{transport: "local", cause: err}
+		}
 		return nil, err
 	}
 	var connection Conn
 	if info.Terminal.Debug {
-		connection, err = newLocalPeerDebugConn(stream)
+		connection, err = newLocalPeerDebugConn(stream, info.Terminal.SequenceSink, info.Terminal.ReplayGapSink)
 	} else {
-		connection, err = NewLocalPeerConn(stream)
+		connection, err = NewLocalPeerConn(stream, info.Terminal.SequenceSink, info.Terminal.ReplayGapSink)
 	}
 	if err != nil {
 		_ = stream.Close()
@@ -154,7 +158,7 @@ func (t LocalPeerTunnel) DialCodexHTTP(ctx context.Context, info resolver.Connec
 	if err != nil {
 		return nil, err
 	}
-	connection, err := NewLocalPeerConn(stream)
+	connection, err := NewLocalPeerConn(stream, nil, nil)
 	if err != nil {
 		_ = stream.Close()
 		return nil, err

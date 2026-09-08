@@ -267,6 +267,7 @@ type previewCarrierPair struct {
 func newPreviewCarrierPair(t *testing.T, ctx context.Context, identity connector.DataCarrierIdentity) *previewCarrierPair {
 	t.Helper()
 	poolConfig := connector.DefaultDataCarrierPoolConfig()
+	poolConfig.Targets = []connector.DataCarrierTarget{{EdgeID: "edge-browser", ProcessEpoch: "epoch-1234567890123456789012345678", FailureDomain: "domain-a"}}
 	poolConfig.MaximumCarriers = 1
 	poolConfig.Preferred = connector.TCPMux
 	poolConfig.Fallback = connector.TCPMux

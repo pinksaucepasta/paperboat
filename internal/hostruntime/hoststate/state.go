@@ -209,7 +209,7 @@ func parseTunnelConfigSnapshot(canonical []byte, tunnelID string, generation uin
 	if snapshot.DesiredState != "active" && snapshot.DesiredState != "paused" && snapshot.DesiredState != "deleted" {
 		return TunnelConfigSnapshot{}, ErrInvalidState
 	}
-	if snapshot.AccessMode != "public" && snapshot.AccessMode != "private" {
+	if snapshot.AccessMode != "public" && snapshot.AccessMode != "private" && snapshot.AccessMode != "team" {
 		return TunnelConfigSnapshot{}, ErrInvalidState
 	}
 	if !validStableEndpoint(snapshot.StableEndpoint) || snapshot.Routes == nil {

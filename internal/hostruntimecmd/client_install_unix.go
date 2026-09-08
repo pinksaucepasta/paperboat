@@ -69,7 +69,7 @@ func InstallClient(ctx context.Context, config ClientInstallConfig, stdin io.Rea
 		HelperListenAddress: config.ListenAddress, SetupMode: "client",
 	}
 	previousGeneration := workerGeneration(config.StateRoot)
-	fmt.Fprintln(stderr, "Administrator approval is required to install the Client service.")
+	fmt.Fprintln(stderr, "Administrator approval is required to install the device service.")
 	installCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	if err := authorizeServiceInstall(installCtx, artifactPath, request, stdin, stdout, stderr); err != nil {
@@ -95,7 +95,7 @@ func InstallClient(ctx context.Context, config ClientInstallConfig, stdin io.Rea
 			if err := bindBootstrapDaemon(readyCtx, config.ControlURL, config.Artifact.Version); err != nil {
 				return err
 			}
-			fmt.Fprintln(stdout, "Paperboat Client service is ready.")
+			fmt.Fprintln(stdout, "Paperboat device service is ready.")
 			return nil
 		}
 		if response != nil && response.Body != nil {
@@ -103,7 +103,7 @@ func InstallClient(ctx context.Context, config ClientInstallConfig, stdin io.Rea
 		}
 		select {
 		case <-readyCtx.Done():
-			return errors.Join(errors.New("Client service did not become ready"), authorizeServiceOperation(ctx, artifactPath, "uninstall", request, stdout, stderr), workerCommand.Rollback())
+			return errors.Join(errors.New("device service did not become ready"), authorizeServiceOperation(ctx, artifactPath, "uninstall", request, stdout, stderr), workerCommand.Rollback())
 		case <-time.After(time.Second):
 		}
 	}

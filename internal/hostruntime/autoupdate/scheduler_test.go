@@ -180,3 +180,48 @@ func TestSchedulerRunHonorsRestoredBusyDeadline(t *testing.T) {
 		t.Fatal("restart ignored restored retry deadline")
 	}
 }
+
+func TestSchedulerRetainsDeferredIntentWhenCheckMakesNoProgress(t *testing.T) {
+	now := time.Now().UTC()
+	scheduler, err := New(Config{Now: func() time.Time { return now }, Check: func(context.Context) (Result, error) { return Result{Version: "14"}, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = scheduler.SeedBlockedActiveTerminalSessions("15", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = scheduler.CheckNow(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	state := scheduler.Snapshot()
+	if state.RequiredVersion != "15" || state.BlockedReason != BlockedActiveTerminalSessions || !state.NextCheckAt.Equal(now.Add(DefaultRetryFloor)) {
+		t.Fatalf("deferred intent lost: %+v", state)
+	}
+}
+
+func TestSchedulerClearsDeferredIntentOnlyAfterSuccessfulActivation(t *testing.T) {
+	for _, tc := range []struct {
+		name, version        string
+		updated, wantPending bool
+	}{
+		{"required merely found", "15", false, true},
+		{"newer activated", "16", true, false},
+		{"required activated", "15", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			scheduler, err := New(Config{Check: func(context.Context) (Result, error) { return Result{Version: tc.version, Updated: tc.updated}, nil }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = scheduler.SeedBlockedActiveTerminalSessions("15", time.Now()); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = scheduler.CheckNow(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if pending := scheduler.Snapshot().RequiredVersion != ""; pending != tc.wantPending {
+				t.Fatalf("pending=%t", pending)
+			}
+		})
+	}
+}

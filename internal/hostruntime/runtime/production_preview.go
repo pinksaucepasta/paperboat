@@ -39,17 +39,19 @@ type productionPreviewAssembly struct {
 }
 
 type productionPreviewAssemblyConfig struct {
-	ControlURL        string
-	StateRoot         string
-	MachineID         string
-	LocalControlToken string
-	Transport         http.RoundTripper
-	RunContext        context.Context
-	Carrier           connector.DataCarrierPoolConfig
-	OriginDial        preview.PreviewOriginDialer
-	PrivatePAC        privatepreviewproxy.PACConfigurator
-	NativePrivateTCP  *preview.NativePrivateTCPAccess
-	NativePrivateHTTP *preview.NativePrivateHTTPAccess
+	ControlURL             string
+	StateRoot              string
+	MachineID              string
+	InstallationGeneration int64
+	BootID                 string
+	LocalControlToken      string
+	Transport              http.RoundTripper
+	RunContext             context.Context
+	Carrier                connector.DataCarrierPoolConfig
+	OriginDial             preview.PreviewOriginDialer
+	PrivatePAC             privatepreviewproxy.PACConfigurator
+	NativePrivateTCP       *preview.NativePrivateTCPAccess
+	NativePrivateHTTP      *preview.NativePrivateHTTPAccess
 }
 
 func newProductionPreviewAssembly(config productionPreviewAssemblyConfig) (*productionPreviewAssembly, error) {
@@ -139,12 +141,14 @@ func newProductionPreviewAssembly(config productionPreviewAssemblyConfig) (*prod
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
 	dispatcher, err := preview.NewDispatchManager(preview.DispatchManagerConfig{
-		MachineID:  config.MachineID,
-		Leases:     leases,
-		Carriers:   runtime,
-		Readiness:  readiness,
-		Owners:     owners,
-		RunContext: ctx,
+		MachineID:              config.MachineID,
+		InstallationGeneration: config.InstallationGeneration,
+		BootID:                 config.BootID,
+		Leases:                 leases,
+		Carriers:               runtime,
+		Readiness:              readiness,
+		Owners:                 owners,
+		RunContext:             ctx,
 	})
 	if err != nil {
 		_ = ownerLeases.Close()

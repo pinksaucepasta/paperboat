@@ -42,6 +42,9 @@ func (freshBootstrapClientFunc) EndpointCertificate(context.Context, string, uin
 func (bootstrapClientFunc) E2EERoot(context.Context) (api.E2EERoot, error) {
 	return api.E2EERoot{}, &api.APIError{Status: 404, Code: "not_found"}
 }
+func (f bootstrapClientFunc) BootstrapE2EEFresh(ctx context.Context, operation string, input api.E2EEBootstrapInput) (api.E2EEBootstrapResult, error) {
+	return f(ctx, operation, input)
+}
 func (bootstrapClientFunc) RequestCLIEndpoint(context.Context, api.CLIEndpointRequestInput) (api.PendingEndpointIdentity, error) {
 	return api.PendingEndpointIdentity{}, errors.New("existing-root enrollment must not run")
 }
@@ -82,6 +85,9 @@ func (c *newRootReplayClient) BootstrapE2EE(ctx context.Context, operation strin
 	}
 	return result, err
 }
+func (c *newRootReplayClient) BootstrapE2EEFresh(ctx context.Context, operation string, input api.E2EEBootstrapInput) (api.E2EEBootstrapResult, error) {
+	return c.BootstrapE2EE(ctx, operation, input)
+}
 
 func (c *newRootReplayClient) RequestCLIEndpoint(context.Context, api.CLIEndpointRequestInput) (api.PendingEndpointIdentity, error) {
 	c.requests++
@@ -121,35 +127,27 @@ func (c *existingEnrollmentClient) EndpointCertificate(context.Context, string, 
 	return c.certificate, nil
 }
 
-func TestEnrollCLIExistingRootStoresVerifierOnlyIdentityAndIsIdempotent(t *testing.T) {
+func TestEnrollCLIExistingAccountCreatesIndependentDeviceIdentity(t *testing.T) {
 	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
-	rootPublic, rootPrivate, _ := ed25519.GenerateKey(nil)
-	root := rootDocument(rootPublic)
+	rootPublic, _, _ := ed25519.GenerateKey(nil)
 	rootDir := t.TempDir()
 	store := config.ProfileStore{Path: rootDir, Secrets: config.FileSecretStore{Dir: filepath.Join(rootDir, "secrets")}}
-	keys, err := store.PeerEndpointKeys("https://api.example.test", "account_1", "cli_1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	quicPublic := keys.QUICPrivate.Public().(ed25519.PublicKey)
-	certificate, err := endpointidentity.Sign(rootPrivate, endpointidentity.Claims{AccountID: "account_1", Role: endpointidentity.RoleCLI, EndpointID: "cli_1", NoisePublicKey: keys.NoisePublic, QUICPublicKey: quicPublic, Generation: 1, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, _ := certificate.MarshalBinary()
-	certificateFingerprint := sha256.Sum256(raw)
-	client := &existingEnrollmentClient{root: root, pending: api.PendingEndpointIdentity{RequestID: "per_0123456789abcdef", EndpointID: "cli_1", Role: "cli", State: "pending", Generation: 1, NoisePublicKey: base64.RawURLEncoding.EncodeToString(keys.NoisePublic[:]), QUICPublicKey: base64.RawURLEncoding.EncodeToString(quicPublic), CreatedAt: now.Add(-time.Minute), ExpiresAt: now.Add(4 * time.Minute), SafetyCode: "abcde-fghij"}, certificate: api.EndpointCertificateDocument{Version: 1, AccountID: "account_1", KeyID: rootKeyID(rootPublic), EndpointID: "cli_1", Role: "cli", Generation: 1, Serial: 1, IssuedAt: certificate.Claims.IssuedAt.Format(time.RFC3339), ExpiresAt: certificate.Claims.ExpiresAt.Format(time.RFC3339), Certificate: base64.RawURLEncoding.EncodeToString(raw), CertificateFingerprint: hex.EncodeToString(certificateFingerprint[:])}}
+	var enrolledPublic []byte
+	client := freshBootstrapClientFunc(func(_ context.Context, _ string, input api.E2EEBootstrapInput) (api.E2EEBootstrapResult, error) {
+		enrolledPublic, _ = base64.RawURLEncoding.Strict().DecodeString(input.RootPublicKey)
+		return bootstrapResult(input), nil
+	})
 	request := CLIRequest{Store: store, Client: client, Issuer: "https://api.example.test", AccountID: "account_1", CLIClientSessionID: "cli_1", Now: func() time.Time { return now }, PollInterval: time.Millisecond, Timeout: time.Second}
 	first, err := EnrollCLI(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	second, err := EnrollCLI(context.Background(), request)
-	if err != nil || client.requests != 1 || second.RootFingerprint != first.RootFingerprint || second.CertificateFingerprint != first.CertificateFingerprint {
-		t.Fatalf("second enrollment failed: requests=%d result=%+v err=%v", client.requests, second, err)
+	if err != nil || second.RootFingerprint != first.RootFingerprint || second.CertificateFingerprint != first.CertificateFingerprint {
+		t.Fatalf("second enrollment failed: result=%+v err=%v", second, err)
 	}
 	storedRoot, err := store.LoadPeerAccountRootPublic(request.Issuer, request.AccountID)
-	if err != nil || !bytes.Equal(storedRoot, rootPublic) {
+	if err != nil || !bytes.Equal(storedRoot, enrolledPublic) || bytes.Equal(enrolledPublic, rootPublic) {
 		t.Fatalf("stored root=%x err=%v", storedRoot, err)
 	}
 	clear(storedRoot)
@@ -344,7 +342,7 @@ func TestFreshBootstrapBackdatesCertificateForBoundedWindowsClockSkew(t *testing
 	}
 }
 
-func TestEnrollCLIFailsClosedWhenEstablishedRootIsUnavailable(t *testing.T) {
+func TestEnrollCLIReplacesObsoleteLocalAccountRootWithDeviceIdentity(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		seed bool
@@ -371,17 +369,12 @@ func TestEnrollCLIFailsClosedWhenEstablishedRootIsUnavailable(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			bootstrapped := false
-			client := bootstrapClientFunc(func(context.Context, string, api.E2EEBootstrapInput) (api.E2EEBootstrapResult, error) {
-				bootstrapped = true
-				return api.E2EEBootstrapResult{}, nil
+			client := freshBootstrapClientFunc(func(_ context.Context, _ string, input api.E2EEBootstrapInput) (api.E2EEBootstrapResult, error) {
+				return bootstrapResult(input), nil
 			})
 			_, err := EnrollCLI(context.Background(), CLIRequest{Store: store, Client: client, Issuer: issuer, AccountID: accountID, CLIClientSessionID: endpointID})
-			if !errors.Is(err, ErrEstablishedRootUnavailable) {
+			if err != nil {
 				t.Fatalf("err=%v", err)
-			}
-			if bootstrapped {
-				t.Fatal("created a replacement root after server root disappeared")
 			}
 		})
 	}

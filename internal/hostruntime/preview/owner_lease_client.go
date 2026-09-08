@@ -69,24 +69,42 @@ func (c *LocalOwnerSessionClient) Acquire(ctx context.Context, ownerSessionID st
 	if err != nil {
 		return OwnerSessionLease{}, err
 	}
-	return c.AcquireWithKey(ctx, ownerSessionID, target, key)
+	return c.acquireWithKey(ctx, OwnerSessionLeaseRequest{OwnerSessionID: ownerSessionID, Target: target}, key)
+}
+
+// AcquireBackground atomically transfers the local owner lifetime to hostd
+// until the absolute deadline. It requires no CLI heartbeat and is lost when
+// hostd exits, so it cannot be mistaken for durable tunnel ownership.
+func (c *LocalOwnerSessionClient) AcquireBackground(ctx context.Context, ownerSessionID string, target LeaseTarget, expiresAt time.Time) (OwnerSessionLease, error) {
+	key, err := newSessionIdempotencyKey(nil)
+	if err != nil {
+		return OwnerSessionLease{}, err
+	}
+	expiresAt = expiresAt.UTC()
+	return c.acquireWithKey(ctx, OwnerSessionLeaseRequest{OwnerSessionID: ownerSessionID, Target: target, Background: true, ExpiresAt: &expiresAt}, key)
 }
 
 // AcquireWithKey is the retry-safe form of Acquire. Callers that observe an
 // uncertain POST can replay the exact idempotency key and body; hostd will
 // return the original lease rather than minting another owner session.
 func (c *LocalOwnerSessionClient) AcquireWithKey(ctx context.Context, ownerSessionID string, target LeaseTarget, key string) (OwnerSessionLease, error) {
+	return c.acquireWithKey(ctx, OwnerSessionLeaseRequest{OwnerSessionID: ownerSessionID, Target: target}, key)
+}
+
+func (c *LocalOwnerSessionClient) acquireWithKey(ctx context.Context, request OwnerSessionLeaseRequest, key string) (OwnerSessionLease, error) {
 	if c == nil || ctx == nil || !validLocalTrace(key) {
 		return OwnerSessionLease{}, ErrOwnerSessionLeaseInvalid
 	}
-	ownerSessionID = strings.TrimSpace(ownerSessionID)
+	ownerSessionID := strings.TrimSpace(request.OwnerSessionID)
+	target := request.Target
 	if ownerSessionID != "" && !validLeaseID(ownerSessionID) {
 		return OwnerSessionLease{}, ErrOwnerSessionLeaseInvalid
 	}
 	if err := validateLeaseTarget(target); err != nil {
 		return OwnerSessionLease{}, ErrOwnerSessionLeaseInvalid
 	}
-	body, err := json.Marshal(OwnerSessionLeaseRequest{OwnerSessionID: ownerSessionID, Target: target})
+	request.OwnerSessionID = ownerSessionID
+	body, err := json.Marshal(request)
 	if err != nil {
 		return OwnerSessionLease{}, ErrOwnerSessionLeaseInvalid
 	}
@@ -101,7 +119,7 @@ func (c *LocalOwnerSessionClient) AcquireWithKey(ctx context.Context, ownerSessi
 			if decodeErr != nil {
 				return OwnerSessionLease{}, decodeErr
 			}
-			if lease.Target != target || lease.MachineID == "" || !lease.ExpiresAt.After(c.now().UTC()) {
+			if lease.Target != target || lease.MachineID == "" || lease.Background != request.Background || !lease.ExpiresAt.After(c.now().UTC()) || request.Background && (request.ExpiresAt == nil || !lease.ExpiresAt.Equal(request.ExpiresAt.UTC())) {
 				return OwnerSessionLease{}, ErrOwnerSessionLeaseInvalid
 			}
 			lease.idempotencyKey = key

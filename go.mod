@@ -81,6 +81,7 @@ require (
 	github.com/klauspost/reedsolomon v1.12.0 // indirect
 	github.com/kortschak/wol v0.0.0-20200729010619-da482cc4850a // indirect
 	github.com/kr/fs v0.1.0 // indirect
+	github.com/libp2p/go-buffer-pool v0.0.2 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
 	github.com/mattn/go-isatty v0.0.23 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
@@ -200,6 +201,7 @@ require (
 	github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02
 	github.com/junegunn/fzf v0.72.0
 	github.com/klauspost/compress v1.19.1
+	github.com/libp2p/go-yamux/v5 v5.1.0
 	github.com/pinksaucepasta/paperboat-relay v0.0.0
 	github.com/pion/ice/v4 v4.4.0
 	github.com/pion/logging v0.2.4

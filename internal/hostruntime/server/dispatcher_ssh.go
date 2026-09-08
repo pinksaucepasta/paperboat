@@ -106,6 +106,20 @@ func (r *sshStreamRegistry) remove(operationID string) {
 	r.mu.Unlock()
 }
 
+func (r *sshStreamRegistry) closeAll() error {
+	r.mu.RLock()
+	streams := make([]*sshOutputStream, 0, len(r.streams))
+	for _, stream := range r.streams {
+		streams = append(streams, stream)
+	}
+	r.mu.RUnlock()
+	var result error
+	for _, stream := range streams {
+		result = errors.Join(result, stream.Close())
+	}
+	return result
+}
+
 type sshDuplex struct {
 	input  *io.PipeReader
 	output *io.PipeWriter

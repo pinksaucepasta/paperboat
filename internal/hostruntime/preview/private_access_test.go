@@ -206,8 +206,8 @@ func TestAccessorAdmissionRejectsMalformedWireFields(t *testing.T) {
 	for name, mutate := range map[string]func(*accessorAdmission){
 		"uppercase hash": func(a *accessorAdmission) { a.ConfigContentHash = "sha256:" + strings.Repeat("A", 64) },
 		"nonhex hash":    func(a *accessorAdmission) { a.ConfigContentHash = "sha256:" + strings.Repeat("z", 64) },
-		"missing port":   func(a *accessorAdmission) { a.EdgeEndpoints[0] = "tls://edge.example.test" },
-		"zero port":      func(a *accessorAdmission) { a.EdgeEndpoints[0] = "tls://edge.example.test:0" },
+		"missing port":   func(a *accessorAdmission) { a.EdgeEndpoints[0] = "h2://edge.example.test" },
+		"zero port":      func(a *accessorAdmission) { a.EdgeEndpoints[0] = "h2://edge.example.test:0" },
 		"unknown match":  func(a *accessorAdmission) { a.MatchType = "recursive" },
 		"http catch all": func(a *accessorAdmission) { a.MatchType = "catch_all" },
 		"missing tunnel name": func(a *accessorAdmission) {
@@ -310,7 +310,7 @@ func TestAccessorDiscoveryRejectsAmbiguousURLContentTypeAndDuplicates(t *testing
 
 func validAccessorAdmission(t *testing.T, now time.Time, protocol string) accessorAdmission {
 	t.Helper()
-	a := accessorAdmission{Schema: connectorprotocol.PrivateAccessSchema, Kind: "private_access_carrier_admission", AccountID: "account_01", DeviceID: "device_02", InstallationGeneration: 7, AccessorPublicKey: "ugS1P3D8QWeKLIzyLOMZD8l_wp1lo6uY6NdicTbDz58", AccessorThumbprint: "ACVmA_IRxdrb0sXXfLqW6uB5U1oI6rRLPxHcQ0jimlg", ResourceKind: "tunnel", ResourceID: "tunnel_01", TunnelName: "payments", RouteName: "postgres", ConnectorID: "connector_01", CarrierSessionID: "session_01", RouteID: "route_tcp_01", RouteGeneration: 7, SessionGeneration: 4, ProcessGeneration: 2, ConfigGeneration: 3, AssignmentGeneration: 9, AssignmentID: "assignment_09", ConfigContentHash: "sha256:" + strings.Repeat("a", 64), EdgeNodeID: "edge_01", EdgeProcessEpoch: "epoch_001", Protocol: protocol, Hostname: "web.example.test", MatchType: "exact", EdgeEndpoints: []string{"tls://edge.example.test:25001", "quic://edge.example.test:25002"}, ExpiresAt: now.Add(time.Minute), TunnelID: "tunnel_01", CarrierConnectorID: "connector_01"}
+	a := accessorAdmission{Schema: connectorprotocol.PrivateAccessSchema, Kind: "private_access_carrier_admission", AccountID: "account_01", DeviceID: "device_02", InstallationGeneration: 7, AccessorPublicKey: "ugS1P3D8QWeKLIzyLOMZD8l_wp1lo6uY6NdicTbDz58", AccessorThumbprint: "ACVmA_IRxdrb0sXXfLqW6uB5U1oI6rRLPxHcQ0jimlg", ResourceKind: "tunnel", ResourceID: "tunnel_01", TunnelName: "payments", RouteName: "postgres", ConnectorID: "connector_01", CarrierSessionID: "session_01", RouteID: "route_tcp_01", RouteGeneration: 7, SessionGeneration: 4, ProcessGeneration: 2, ConfigGeneration: 3, AssignmentGeneration: 9, AssignmentID: "assignment_09", ConfigContentHash: "sha256:" + strings.Repeat("a", 64), EdgeNodeID: "edge_01", EdgeProcessEpoch: "epoch_001", Protocol: protocol, Hostname: "web.example.test", MatchType: "exact", EdgeEndpoints: []string{"h2://edge.example.test:25001", "h3://edge.example.test:25002"}, ExpiresAt: now.Add(time.Minute), TunnelID: "tunnel_01", CarrierConnectorID: "connector_01"}
 	_, certificate := testEdgeServerCertificate(t, now, testPreviewCarrierIdentity(1), a.EdgeProcessEpoch)
 	a.EdgeCarrierServerSPKISHA256, a.EdgeCarrierServerCertificateChainPEM = testEdgeServerTrust(t, certificate)
 	if protocol == "private_tcp" {

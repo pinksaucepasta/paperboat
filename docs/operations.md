@@ -197,12 +197,15 @@ names through the authenticated local Paperboat proxy.
 separate per-user `__runtime-config` service and starts only while the local machine has an
 assignment. Neither process initializes preview monitoring.
 
-`pb preview <port|url|path>` creates one temporary server lease and dispatches it to the
+`pb preview <port|url|path>` and `pb tunnel --ephemeral <port|url|path>` use the same
+handler and create one temporary server lease, then dispatch it to the
 stable host runtime. The host runtime owns the machine-wide authenticated carrier, origin
 probe, owner-session heartbeat, recovery, and cleanup. CLI processes observe the lease and
 never create competing carriers or per-preview operating-system services.
 
-`pb preview list` reads canonical server resources. `pb preview stop <preview>` revokes the
+`--background` transfers owner lifetime to the daemon only after readiness; its `--ttl`
+defaults to 30 minutes, cannot exceed 24 hours, and never implies reboot restoration.
+`pb preview list` and `status` read canonical server resources. `stop` and `delete` revoke the
 lease and converges the route, carrier registration, and owner session. `--domain` attaches
 a verified custom domain. `--private` uses the hostd-owned narrow local proxy/PAC route so
 browser traffic carries no Paperboat credential or browser login state.

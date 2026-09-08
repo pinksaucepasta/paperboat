@@ -74,8 +74,16 @@ func TestPrepareAuthenticatedHostSetupBindsMachineOperationAndGeneration(t *test
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/machines/mch_1/host-setup-installations" || r.Header.Get("Authorization") != "Bearer token" || r.Header.Get("Idempotency-Key") != "host-setup-operation-1" {
 			t.Fatalf("request=%s %s headers=%v", r.Method, r.URL.Path, r.Header)
 		}
-		var input AuthenticatedHostSetupInput
-		if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input.SetupMode != "host" || input.InstallationGeneration != 7 || input.PublicIdentityKey != "public-key" || input.Verifier != "verifier-012345678901234567890123" || input.Artifact.Version != "2026.08.24.1" || input.Artifact.TargetPath != "pb-windows-amd64" || input.SSHUser != "pujan" || input.SSHPort != 22 || !input.CanReuseRuntimeIdentity {
+		var input struct {
+			Verifier                string          `json:"verifier"`
+			PublicIdentityKey       string          `json:"public_identity_key"`
+			InstallationGeneration  int64           `json:"installation_generation"`
+			Artifact                MachineArtifact `json:"artifact"`
+			SSHUser                 string          `json:"ssh_user"`
+			SSHPort                 uint16          `json:"ssh_port"`
+			CanReuseRuntimeIdentity bool            `json:"can_reuse_runtime_identity"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input.InstallationGeneration != 7 || input.PublicIdentityKey != "public-key" || input.Verifier != "verifier-012345678901234567890123" || input.Artifact.Version != "2026.08.24.1" || input.Artifact.TargetPath != "pb-windows-amd64" || input.SSHUser != "pujan" || input.SSHPort != 22 || !input.CanReuseRuntimeIdentity {
 			t.Fatalf("input=%+v err=%v", input, err)
 		}
 		writeData(w, http.StatusCreated, AuthenticatedHostSetupInstallation{ExpiresAt: expiresAt})
@@ -83,7 +91,7 @@ func TestPrepareAuthenticatedHostSetupBindsMachineOperationAndGeneration(t *test
 	defer server.Close()
 	result, err := New(server.URL, config.Credential{AccessToken: "token"}, server.Client()).PrepareAuthenticatedHostSetup(context.Background(), "mch_1", "host-setup-operation-1", AuthenticatedHostSetupInput{
 		Verifier: "verifier-012345678901234567890123", PublicIdentityKey: "public-key",
-		InstallationGeneration: 7, SetupMode: "host", SSHUser: "pujan", SSHPort: 22, CanReuseRuntimeIdentity: true,
+		InstallationGeneration: 7, SSHUser: "pujan", SSHPort: 22, CanReuseRuntimeIdentity: true,
 		Artifact: MachineArtifact{Schema: "paperboat.tuf-target/v1", Kind: "pb", Version: "2026.08.24.1", Platform: "windows", Architecture: "amd64", RepositoryURL: "https://updates.example.test/paperboat", TargetPath: "pb-windows-amd64"},
 	})
 	if err != nil || !result.ExpiresAt.Equal(expiresAt) {

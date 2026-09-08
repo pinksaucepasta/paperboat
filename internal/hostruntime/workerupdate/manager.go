@@ -153,24 +153,26 @@ type NativeVerifier interface {
 }
 
 type Config struct {
-	StatePath      string
-	Binary         string
-	BinaryRollback string
-	BinaryStaged   string
-	Active         Release
-	OwnerUID       int
-	OwnerGID       int
-	WorkerUID      int
-	WorkerGID      int
-	HostdEndpoint  string
-	Capability     []byte
-	Fetcher        Fetcher
-	Starter        Starter
-	Hostd          Hostd
-	Health         HealthChecker
-	Gate           ActivationGate
-	Events         EventSink
-	NativeVerifier NativeVerifier
+	// ManualActivation retains explicit user intent when terminal admission defers activation.
+	ManualActivation bool
+	StatePath        string
+	Binary           string
+	BinaryRollback   string
+	BinaryStaged     string
+	Active           Release
+	OwnerUID         int
+	OwnerGID         int
+	WorkerUID        int
+	WorkerGID        int
+	HostdEndpoint    string
+	Capability       []byte
+	Fetcher          Fetcher
+	Starter          Starter
+	Hostd            Hostd
+	Health           HealthChecker
+	Gate             ActivationGate
+	Events           EventSink
+	NativeVerifier   NativeVerifier
 	// ActivateRuntime restarts the fixed native host service after the verified
 	// canonical binary changes and returns its newly active fence.
 	ActivateRuntime func(context.Context, string) (hostdproto.Status, error)
@@ -723,6 +725,7 @@ func (m *Manager) restoreAfterDrain(ctx context.Context, journal updateflow.Jour
 	if expectedBusy {
 		idle.BlockedReason = autoupdate.BlockedActiveTerminalSessions
 		idle.RequiredVersion = activeSessions.RequiredVersion
+		idle.DeferredManual = m.config.ManualActivation
 		idle.NextCheckAt = m.now().Add(autoupdate.DefaultRetryFloor)
 	}
 	if err := m.write(idle); err != nil {

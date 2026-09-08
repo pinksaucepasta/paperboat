@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 )
 
@@ -306,6 +307,83 @@ func TestOrdinaryUnixHandoffOmitsActiveTerminalBlockFields(t *testing.T) {
 	for _, field := range []string{"active_terminal_busy", "busy_required_version", "busy_next_check_at"} {
 		if strings.Contains(string(body), `"`+field+`"`) {
 			t.Fatalf("ordinary handoff contains %q: %s", field, body)
+		}
+	}
+}
+
+func TestDeferredManualUpdateSurvivesRestartAndAutomaticRetry(t *testing.T) {
+	journal := updateflow.Journal{BlockedReason: autoupdate.BlockedActiveTerminalSessions, RequiredVersion: "15", DeferredManual: true}
+	encoded, err := json.Marshal(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal = updateflow.Journal{}
+	if err = json.Unmarshal(encoded, &journal); err != nil {
+		t.Fatal(err)
+	}
+	automaticCalls, manualCalls := 0, 0
+	automatic := func(context.Context) (workerupdate.Release, bool, error) {
+		automaticCalls++
+		return workerupdate.Release{}, false, nil
+	}
+	explicit := func(context.Context) (workerupdate.Release, bool, error) {
+		manualCalls++
+		return workerupdate.Release{Version: "15"}, true, nil
+	}
+	now := time.Now().UTC()
+	busy := true
+	scheduler, err := autoupdate.New(autoupdate.Config{Now: func() time.Time { return now }, Check: func(ctx context.Context) (autoupdate.Result, error) {
+		release, found, manual, e := resolveQueuedRelease(ctx, false, journal, automatic, explicit)
+		if e != nil {
+			return autoupdate.Result{}, e
+		}
+		if !found || !manual {
+			return autoupdate.Result{}, errors.New("manual retry intent lost")
+		}
+		if busy {
+			return autoupdate.Result{Version: "14"}, &autoupdate.ActiveTerminalSessionsError{RequiredVersion: release.Version}
+		}
+		return autoupdate.Result{Version: release.Version, Updated: true}, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = scheduler.SeedBlockedActiveTerminalSessions("15", now); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		_, err = scheduler.CheckNow(context.Background())
+		var blocked *autoupdate.ActiveTerminalSessionsError
+		if !errors.As(err, &blocked) || scheduler.Snapshot().RequiredVersion != "15" {
+			t.Fatal("busy intent lost")
+		}
+		now = now.Add(autoupdate.DefaultRetryFloor)
+	}
+	busy = false
+	if _, err = scheduler.CheckNow(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if state := scheduler.Snapshot(); state.RequiredVersion != "" || state.BlockedReason != "" || !state.Updated {
+		t.Fatalf("activation did not clear intent: %+v", state)
+	}
+	if automaticCalls != 0 || manualCalls != 3 {
+		t.Fatalf("resolver calls automatic=%d manual=%d", automaticCalls, manualCalls)
+	}
+	journal.DeferredManual = false
+	_, found, manual, err := resolveQueuedRelease(context.Background(), false, journal, automatic, explicit)
+	if err != nil || found || manual || automaticCalls != 1 {
+		t.Fatal("automatic request bypassed cohort")
+	}
+}
+
+func TestDeferredManualUpdateStillRequiresCurrentExactSignedRelease(t *testing.T) {
+	journal := updateflow.Journal{BlockedReason: autoupdate.BlockedActiveTerminalSessions, RequiredVersion: "15", DeferredManual: true}
+	for _, candidate := range []string{"", "16"} {
+		resolver := func(context.Context) (workerupdate.Release, bool, error) {
+			return workerupdate.Release{Version: candidate}, candidate != "", nil
+		}
+		if _, _, _, err := resolveQueuedRelease(context.Background(), false, journal, resolver, resolver); err == nil {
+			t.Fatal("missing/replaced signed release accepted")
 		}
 	}
 }

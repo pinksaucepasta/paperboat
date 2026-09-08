@@ -78,7 +78,7 @@ func (a *reconnectCarrierActive) ActiveDataCarrier() *connector.ActiveDataCarrie
 	return a.carrier
 }
 
-func newConnectedReconnectCarrier(t *testing.T, identity connector.DataCarrierIdentity) (*connector.ActiveDataCarrier, func()) {
+func newConnectedReconnectCarrier(t *testing.T, identity connector.DataCarrierIdentity, edgeOutput ...**connector.DataCarrier) (*connector.ActiveDataCarrier, func()) {
 	t.Helper()
 	carrierConfig := connector.DefaultDataCarrierConfig()
 	poolConfig := connector.DefaultDataCarrierPoolConfig()
@@ -115,6 +115,9 @@ func newConnectedReconnectCarrier(t *testing.T, identity connector.DataCarrierId
 	if err != nil {
 		_ = prepared.Abort(context.Background())
 		t.Fatalf("activate reconnect carrier: %v", err)
+	}
+	if len(edgeOutput) > 0 {
+		*edgeOutput[0] = edge
 	}
 	cleanup := func() {
 		_ = active.Close(context.Background())

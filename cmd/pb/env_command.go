@@ -2,15 +2,12 @@ package main
 
 import (
 	"bytes"
-	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
-	"text/tabwriter"
-	"time"
 	"unicode/utf8"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -21,7 +18,7 @@ import (
 	"golang.org/x/term"
 )
 
-const environmentVariableScopeGlobal = "global"
+const environmentVariableScopePersonal = "personal"
 
 type environmentVariableTarget struct {
 	machineID   string
@@ -30,29 +27,6 @@ type environmentVariableTarget struct {
 
 var environmentVariableBackendForCommand = backendForCommand
 var environmentVariableResolveMachine = resolveUserMachine
-var environmentVariableManagerForCommand = defaultEnvironmentVariableManagerForCommand
-
-type environmentVariableMutator interface {
-	Set(context.Context, string, string, []byte) (environmentmanager.MutationResult, error)
-	Unset(context.Context, string, string) (environmentmanager.MutationResult, error)
-}
-
-func defaultEnvironmentVariableManagerForCommand(command *cobra.Command) (environmentVariableMutator, error) {
-	client, store, profile, err := e2eeClient(actionContext(command, nil))
-	if err != nil {
-		return nil, err
-	}
-	if err := store.RequireEnvironmentSecureStore(); err != nil {
-		return nil, err
-	}
-	return environmentmanager.Manager{
-		Client:    client,
-		Store:     store,
-		Issuer:    profile.Issuer,
-		AccountID: profile.Account.ID,
-		SubjectID: profile.CLIClientSessionID,
-	}, nil
-}
 
 func environmentVariablesCobraCommand() *cobra.Command {
 	root := &cobra.Command{
@@ -72,12 +46,14 @@ func environmentVariablesCobraCommand() *cobra.Command {
 		Short: "List configured environment-variable metadata",
 		Args:  commandArgs(cobra.NoArgs),
 		RunE: func(command *cobra.Command, _ []string) error {
+			team, _ := command.Flags().GetString("team")
 			machine, _ := command.Flags().GetString("machine")
 			jsonOutput, _ := command.Flags().GetBool("json")
-			return listEnvironmentVariables(command, machine, jsonOutput)
+			return listEnvironmentVariablesForScope(command, team, machine, jsonOutput)
 		},
 	}
-	list.Flags().String("machine", "", "machine name or ID; defaults to the global scope")
+	list.Flags().String("team", "", "team scope; defaults to this account's personal scope")
+	list.Flags().String("machine", "", "machine name or ID; defaults to the personal scope")
 	list.Flags().Bool("json", false, "print redacted JSON metadata")
 
 	set := &cobra.Command{
@@ -85,29 +61,36 @@ func environmentVariablesCobraCommand() *cobra.Command {
 		Short: "Set one environment variable through a hidden prompt or bounded stdin",
 		Args:  commandArgs(cobra.ExactArgs(1)),
 		RunE: func(command *cobra.Command, args []string) error {
+			team, _ := command.Flags().GetString("team")
 			machine, _ := command.Flags().GetString("machine")
 			valueStdin, _ := command.Flags().GetBool("value-stdin")
-			return setEnvironmentVariable(command, machine, args[0], valueStdin)
+			valueFile, _ := command.Flags().GetString("value-file")
+			return setEnvironmentVariableForScope(command, team, machine, args[0], valueStdin, valueFile)
 		},
 	}
-	set.Flags().String("machine", "", "machine name or ID; defaults to the global scope")
+	set.Flags().String("team", "", "team scope; cannot be combined with --machine")
+	set.Flags().String("machine", "", "machine name or ID; defaults to the personal scope")
 	set.Flags().Bool("value-stdin", false, "read the raw value from non-interactive stdin")
+	set.Flags().String("value-file", "", "read the raw value from an absolute file path")
 
 	unset := &cobra.Command{
 		Use:   "unset <name>",
 		Short: "Remove one environment variable",
 		Args:  commandArgs(cobra.ExactArgs(1)),
 		RunE: func(command *cobra.Command, args []string) error {
+			team, _ := command.Flags().GetString("team")
 			machine, _ := command.Flags().GetString("machine")
 			yes, _ := command.Flags().GetBool("yes")
-			return unsetEnvironmentVariable(command, machine, args[0], yes)
+			return unsetEnvironmentVariableForScope(command, team, machine, args[0], yes)
 		},
 	}
-	unset.Flags().String("machine", "", "machine name or ID; defaults to the global scope")
+	unset.Flags().String("team", "", "team scope; cannot be combined with --machine")
+	unset.Flags().String("machine", "", "machine name or ID; defaults to the personal scope")
 	unset.Flags().Bool("yes", false, "confirm removal")
 
 	root.AddCommand(list, set, unset)
-	addEnvironmentControlCommands(root)
+	addVaultScopeCommands(root)
+	addPasswordVaultCommands(root)
 	return root
 }
 
@@ -128,21 +111,13 @@ func environmentVariableTargetForCommand(command *cobra.Command, client *api.Cli
 		return environmentVariableTarget{}, friendlyCommandError(err)
 	}
 	if !machineSupportsEnvironmentInjection(machine) {
-		return environmentVariableTarget{}, errors.New("ENV Injection is available only for host-capable machines")
+		return environmentVariableTarget{}, errors.New("ENV Injection is disabled on this device")
 	}
 	return environmentVariableTarget{machineID: machine.ID, machineName: machine.DisplayName}, nil
 }
 
 func machineSupportsEnvironmentInjection(machine api.UserMachine) bool {
-	if strings.EqualFold(strings.TrimSpace(machine.SetupMode), "host") {
-		return true
-	}
-	for _, role := range machine.SetupRoles {
-		if strings.EqualFold(strings.TrimSpace(role), "host") {
-			return true
-		}
-	}
-	return false
+	return machine.Capabilities.EnvironmentInjection.Configured
 }
 
 func environmentVariableMachines(machines []api.UserMachine) []api.UserMachine {
@@ -155,134 +130,34 @@ func environmentVariableMachines(machines []api.UserMachine) []api.UserMachine {
 	return filtered
 }
 
-func listEnvironmentVariables(command *cobra.Command, requestedMachine string, jsonOutput bool) error {
-	client, err := environmentVariableBackendForCommand(command)
-	if err != nil {
-		return err
-	}
-	target, err := environmentVariableTargetForCommand(command, client, requestedMachine)
-	if err != nil {
-		return err
-	}
-	snapshot, err := client.ListEnvironmentVariables(command.Context(), target.machineID)
-	if err != nil {
-		return friendlyCommandError(err)
-	}
-	if jsonOutput {
-		return writeEnvironmentVariableJSON(command.OutOrStdout(), snapshot)
-	}
-	return writeEnvironmentVariableTable(command.OutOrStdout(), snapshot, target)
-}
-
-func writeEnvironmentVariableTable(output io.Writer, snapshot api.EnvironmentVariableCollection, target environmentVariableTarget) error {
-	scope := environmentVariableScopeLabel(target)
-	writer := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintf(writer, "SCOPE\t%s\tVERSION\t%d\tSTATUS\t%s\n", scope, snapshot.Version, environmentVariableStatusForScope(snapshot)); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintln(writer, "NAME\tCONFIGURED\tVERSION\tSTATUS\tUPDATED"); err != nil {
-		return err
-	}
-	for _, item := range snapshot.Variables {
-		status := environmentVariableStatusForScope(snapshot)
-		updated := "-"
-		if !item.UpdatedAt.IsZero() {
-			updated = item.UpdatedAt.Local().Format(time.RFC3339)
-		}
-		if _, err := fmt.Fprintf(writer, "%s\t%s\t%d\t%s\t%s\n", item.Name, yesNo(item.Configured), item.Version, status, updated); err != nil {
-			return err
-		}
-	}
-	return writer.Flush()
-}
-
-func writeEnvironmentVariableJSON(output io.Writer, snapshot api.EnvironmentVariableCollection) error {
-	// Keep the transport ETag visible to automation while the metadata type
-	// itself remains impossible to serialize with a value field.
-	result := struct {
-		Scope                 api.EnvironmentVariableScope `json:"scope"`
-		MachineID             string                       `json:"machine_id,omitempty"`
-		ScopeState            string                       `json:"scope_state,omitempty"`
-		KeyState              string                       `json:"key_state"`
-		Version               int64                        `json:"version"`
-		KeyEpoch              int64                        `json:"key_epoch,omitempty"`
-		ManifestID            string                       `json:"manifest_id,omitempty"`
-		Variables             []api.EnvironmentVariable    `json:"variables"`
-		ETag                  string                       `json:"etag"`
-		Status                string                       `json:"status,omitempty"`
-		AppliedGlobalVersion  *int64                       `json:"applied_global_version,omitempty"`
-		AppliedMachineVersion *int64                       `json:"applied_machine_version,omitempty"`
-		AppliedState          string                       `json:"applied_state,omitempty"`
-		ErrorCode             string                       `json:"error_code,omitempty"`
-		ObservedAt            *time.Time                   `json:"observed_at,omitempty"`
-	}{
-		Scope: snapshot.Scope, MachineID: snapshot.MachineID, ScopeState: snapshot.ScopeState, KeyState: snapshot.KeyState,
-		Version: snapshot.Version, KeyEpoch: snapshot.KeyEpoch, ManifestID: snapshot.ManifestID,
-		Variables: snapshot.Variables, ETag: snapshot.ETag, Status: snapshot.Status,
-		AppliedGlobalVersion: snapshot.AppliedGlobalVersion, AppliedMachineVersion: snapshot.AppliedMachineVersion,
-		AppliedState: snapshot.AppliedState,
-		ErrorCode:    snapshot.ErrorCode, ObservedAt: snapshot.ObservedAt,
-	}
-	return json.NewEncoder(output).Encode(map[string]any{"schema_version": "1.0", "ok": true, "data": result})
-}
-
 func setEnvironmentVariable(command *cobra.Command, requestedMachine, name string, valueStdin bool) error {
-	if err := validateEnvironmentVariableNameForCLI(name); err != nil {
-		return invocationError(err)
-	}
-	client, err := environmentVariableBackendForCommand(command)
-	if err != nil {
-		return err
-	}
-	target, err := environmentVariableTargetForCommand(command, client, requestedMachine)
-	if err != nil {
-		return err
-	}
-	manager, err := environmentVariableManagerForCommand(command)
-	if err != nil {
-		return safeEnvironmentVariableCommandError(err)
-	}
-	value, err := readEnvironmentVariableValue(command, valueStdin)
-	if err != nil {
-		return err
-	}
-	defer clear(value)
-	result, err := manager.Set(command.Context(), target.machineID, name, value)
-	if err != nil {
-		return safeEnvironmentVariableCommandError(err)
-	}
-	_, err = fmt.Fprintf(command.OutOrStdout(), "Set %s on %s (encrypted manifest version %d, pending).\n", result.Name, environmentVariableScopeLabel(target), result.Version)
-	return err
+	return setEnvironmentVariableForScope(command, "", requestedMachine, name, valueStdin, "")
 }
 
 func unsetEnvironmentVariable(command *cobra.Command, requestedMachine, name string, yes bool) error {
-	if !yes {
-		return invocationError(errors.New("environment variable removal requires --yes"))
-	}
-	if err := validateEnvironmentVariableNameForCLI(name); err != nil {
-		return invocationError(err)
-	}
-	client, err := environmentVariableBackendForCommand(command)
-	if err != nil {
-		return err
-	}
-	target, err := environmentVariableTargetForCommand(command, client, requestedMachine)
-	if err != nil {
-		return err
-	}
-	manager, err := environmentVariableManagerForCommand(command)
-	if err != nil {
-		return safeEnvironmentVariableCommandError(err)
-	}
-	result, err := manager.Unset(command.Context(), target.machineID, name)
-	if err != nil {
-		return safeEnvironmentVariableCommandError(err)
-	}
-	_, err = fmt.Fprintf(command.OutOrStdout(), "Unset %s from %s (encrypted manifest version %d, pending).\n", result.Name, environmentVariableScopeLabel(target), result.Version)
-	return err
+	return unsetEnvironmentVariableForScope(command, "", requestedMachine, name, yes)
 }
 
 func readEnvironmentVariableValue(command *cobra.Command, valueStdin bool) ([]byte, error) {
+	return readEnvironmentVariableValueFile(command, valueStdin, "")
+}
+
+func readEnvironmentVariableValueFile(command *cobra.Command, valueStdin bool, valueFile string) ([]byte, error) {
+	valueFile = strings.TrimSpace(valueFile)
+	if valueStdin && valueFile != "" {
+		return nil, invocationError(errors.New("choose --value-stdin or --value-file, not both"))
+	}
+	if valueFile != "" {
+		if !filepath.IsAbs(valueFile) {
+			return nil, invocationError(errors.New("--value-file requires an absolute path"))
+		}
+		file, err := os.Open(valueFile)
+		if err != nil {
+			return nil, errors.New("could not read environment variable value file")
+		}
+		defer file.Close()
+		return readBoundedEnvironmentVariableStdin(file)
+	}
 	input := command.InOrStdin()
 	isTTY := environmentVariableTerminal(command)
 	if valueStdin {
@@ -329,23 +204,70 @@ func readBoundedEnvironmentVariableStdin(input io.Reader) ([]byte, error) {
 	return value, nil
 }
 
+func writeEnvironmentRecoveryFile(path string, value []byte) (resultErr error) {
+	path = strings.TrimSpace(path)
+	if !filepath.IsAbs(path) || len(value) == 0 || bytes.ContainsAny(value, "\x00\r\n") {
+		return errors.New("ENV recovery output is invalid")
+	}
+	parent := filepath.Dir(path)
+	info, err := os.Lstat(parent)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("ENV recovery output directory is invalid")
+	}
+	file, err := createEnvironmentRecoveryFile(path)
+	if err != nil {
+		return fmt.Errorf("create ENV recovery-key file: %w", err)
+	}
+	created := true
+	defer func() {
+		if file != nil {
+			resultErr = errors.Join(resultErr, file.Close())
+		}
+		if resultErr != nil && created {
+			_ = os.Remove(path)
+		}
+	}()
+	payload := make([]byte, 0, len(value)+1)
+	payload = append(payload, value...)
+	payload = append(payload, '\n')
+	defer clear(payload)
+	if _, err := file.Write(payload); err != nil {
+		return fmt.Errorf("write ENV recovery-key file: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		return fmt.Errorf("sync ENV recovery-key file: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		file = nil
+		return fmt.Errorf("close ENV recovery-key file: %w", err)
+	}
+	file = nil
+	if err := syncEnvironmentRecoveryDirectory(parent); err != nil {
+		return fmt.Errorf("sync ENV recovery-key directory: %w", err)
+	}
+	created = false
+	return nil
+}
+
 func safeEnvironmentVariableCommandError(err error) error {
 	if err == nil {
 		return nil
 	}
 	switch {
-	case errors.Is(err, environmentmanager.ErrKeyAuthorizationRequired):
-		return errors.New("ENV key authorization required; enroll this client with an existing trusted manager")
-	case errors.Is(err, environmentmanager.ErrRecoveryExportRequired):
-		return errors.New("export and confirm the ENV recovery key before changing variables")
+	case errors.Is(err, environmentmanager.ErrVaultPending):
+		return errors.New("ENV vault publication is pending; run `pb env vault resume` before retrying")
+	case errors.Is(err, environmentmanager.ErrVaultTeamGrantRequired):
+		return errors.New("ENV team access needs a key grant; ask a surviving team member to regrant access, then run `pb env grants sync`")
+	case errors.Is(err, environmentmanager.ErrVaultLocked):
+		return errors.New("ENV vault is locked; run `pb env vault unlock` before changing variables")
+	case errors.Is(err, environmentmanager.ErrVaultChanged):
+		return errors.New("ENV vault changed; unlock the current vault and retry")
 	case errors.Is(err, environmentmanager.ErrVariableNotConfigured):
 		return errors.New("environment variable is not configured")
-	case errors.Is(err, environmentmanager.ErrPendingMutationReconciled):
-		return errors.New("a previous uncertain encrypted ENV update was reconciled; rerun this command")
-	case errors.Is(err, environmentmanager.ErrPendingMutationSuperseded):
-		return errors.New("a previous uncertain encrypted ENV update was superseded; fetch the scope and retry")
-	case errors.Is(err, environmentmanager.ErrAuthorityFork), errors.Is(err, environmentmanager.ErrIntegrity):
-		return errors.New("encrypted ENV authority or manifest verification failed; no change was sent")
+	case errors.Is(err, environmentmanager.ErrAuthorityFork):
+		return errors.New("encrypted ENV vault history conflicts with the server; unlock the current vault and retry")
+	case errors.Is(err, environmentmanager.ErrIntegrity):
+		return errors.New("encrypted ENV vault verification failed; no change was sent")
 	}
 	var apiErr *api.APIError
 	if errors.As(err, &apiErr) {
@@ -353,12 +275,16 @@ func safeEnvironmentVariableCommandError(err error) error {
 		// helper. Keep conflict recovery useful, but derive the text only from
 		// the stable code so arbitrary server details can never be printed.
 		switch apiErr.Code {
-		case "version_conflict", "precondition_failed", "authority_conflict":
+		case "version_conflict", "precondition_failed":
 			return errors.New("environment variable scope changed; fetch it and retry")
+		case "vault_conflict":
+			return errors.New("ENV vault changed on the server; unlock the current vault and retry")
+		case "rotation_required":
+			return errors.New("ENV key rotation is required; use `pb env rotate` for personal ENV or `pb env team rotate <team>` for team ENV before retrying")
 		case "key_authorization_required":
-			return errors.New("ENV key authorization required; approve this client or host from a trusted manager")
-		case "transition_in_progress":
-			return errors.New("an ENV key rotation is in progress; finish or abort it before retrying")
+			return errors.New("ENV recipient authorization is unavailable; run `pb env grants sync` and retry")
+		case "operation_conflict":
+			return errors.New("the ENV operation conflicts with an existing operation; run `pb env vault resume` before retrying")
 		}
 	}
 	// A submitted value must not be retained in arbitrary transport or server
@@ -368,28 +294,12 @@ func safeEnvironmentVariableCommandError(err error) error {
 
 func environmentVariableScopeLabel(target environmentVariableTarget) string {
 	if target.machineID == "" {
-		return environmentVariableScopeGlobal
+		return environmentVariableScopePersonal
 	}
 	if target.machineName == "" {
 		return target.machineID
 	}
 	return target.machineName + " (" + target.machineID + ")"
-}
-
-func environmentVariableStatus(status string) string {
-	if strings.TrimSpace(status) == "" {
-		return "-"
-	}
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "pending", "applied", "offline", "failed":
-		return strings.ToLower(strings.TrimSpace(status))
-	default:
-		return "unknown"
-	}
-}
-
-func environmentVariableStatusForScope(snapshot api.EnvironmentVariableCollection) string {
-	return environmentVariableStatus(snapshot.Status)
 }
 
 func environmentVariableConfigured(items []api.EnvironmentVariable, name string) bool {
@@ -417,10 +327,7 @@ func runEnvironmentVariablesTUI(command *cobra.Command) error {
 	if err != nil {
 		return friendlyCommandError(err)
 	}
-	items := []selector.Item{{ID: "global", Title: "Global", Description: "Applied to every connected host machine", Search: "account all host machines"}}
-	for _, machine := range environmentVariableMachines(machines) {
-		items = append(items, selector.Item{ID: machine.ID, Title: machine.DisplayName, Description: machineStatusSummary(machine), Search: machine.ID + " " + machine.DisplayName})
-	}
+	items := environmentVariableScopePickerItems(machines)
 	for {
 		selection, selectErr := selector.Choose(selector.Options{
 			Title:    "ENV Injection",
@@ -435,7 +342,7 @@ func runEnvironmentVariablesTUI(command *cobra.Command) error {
 			return selectErr
 		}
 		target := environmentVariableTarget{}
-		if selection.ID != "global" {
+		if selection.ID != "personal" {
 			for _, machine := range machines {
 				if machine.ID == selection.ID {
 					target = environmentVariableTarget{machineID: machine.ID, machineName: machine.DisplayName}
@@ -449,31 +356,32 @@ func runEnvironmentVariablesTUI(command *cobra.Command) error {
 	}
 }
 
-func runEnvironmentVariableScopeTUI(command *cobra.Command, client *api.Client, target environmentVariableTarget) error {
-	var manager environmentVariableMutator
-	managerForMutation := func() (environmentVariableMutator, error) {
-		if manager != nil {
-			return manager, nil
-		}
-		resolved, err := environmentVariableManagerForCommand(command)
-		if err != nil {
-			return nil, safeEnvironmentVariableCommandError(err)
-		}
-		manager = resolved
-		return manager, nil
+func environmentVariableScopePickerItems(machines []api.UserMachine) []selector.Item {
+	items := []selector.Item{{ID: "personal", Title: "Personal", Description: "Personal encrypted values; provision explicit host selections", Search: "account personal encrypted"}}
+	for _, machine := range environmentVariableMachines(machines) {
+		items = append(items, selector.Item{ID: machine.ID, Title: machine.DisplayName, Description: machineStatusSummary(machine), Search: machine.ID + " " + machine.DisplayName})
 	}
+	return items
+}
+
+func runEnvironmentVariableScopeTUI(command *cobra.Command, _ *api.Client, target environmentVariableTarget) error {
+	manager, err := passwordVaultForCommand(command)
+	if err != nil {
+		return safeEnvironmentVariableCommandError(err)
+	}
+	scope := vaultScopeTarget{kind: "personal", owner: manager.AccountID, machine: target.machineID, label: environmentVariableScopeLabel(target)}
 	for {
-		snapshot, err := client.ListEnvironmentVariables(command.Context(), target.machineID)
+		metadata, err := readVaultScopeMetadata(command.Context(), manager, scope)
 		if err != nil {
-			return friendlyCommandError(err)
+			return safeEnvironmentVariableCommandError(err)
 		}
 		items := []selector.Item{{ID: "set", Title: "Set variable", Description: "Add or replace a variable with hidden input", Search: "add update"}}
-		for _, variable := range snapshot.Variables {
-			items = append(items, selector.Item{ID: "unset:" + variable.Name, Title: variable.Name, Description: "configured  ·  version " + fmt.Sprint(variable.Version) + "  ·  " + environmentVariableStatus(snapshot.Status), Search: variable.Name + " remove unset"})
+		for _, name := range metadata.Names {
+			items = append(items, selector.Item{ID: "unset:" + name, Title: name, Description: "configured  ·  revision " + fmt.Sprint(metadata.Revision), Search: name + " remove unset"})
 		}
 		selection, selectErr := selector.Choose(selector.Options{
 			Title:    "ENV Injection",
-			Subtitle: environmentVariableScopeLabel(target) + "  ·  scope version " + fmt.Sprint(snapshot.Version),
+			Subtitle: scope.label + "  ·  scope revision " + fmt.Sprint(metadata.Revision),
 			Items:    items,
 			Empty:    "No variables configured",
 			Footer:   "↑/↓ move  enter select  esc back",
@@ -484,10 +392,6 @@ func runEnvironmentVariableScopeTUI(command *cobra.Command, client *api.Client, 
 			return selectErr
 		}
 		if selection.ID == "set" {
-			manager, managerErr := managerForMutation()
-			if managerErr != nil {
-				return managerErr
-			}
 			name, promptErr := prompt.Text(prompt.TextOptions{
 				Title:       "Variable name",
 				Description: "Letters, numbers, and underscores; values stay hidden",
@@ -511,12 +415,21 @@ func runEnvironmentVariableScopeTUI(command *cobra.Command, client *api.Client, 
 			if valueErr != nil {
 				return valueErr
 			}
-			result, setErr := manager.Set(command.Context(), target.machineID, name, value)
+			setErr := manager.MutateScope(command.Context(), scope.kind, scope.owner, scope.machine, func(values map[string][]byte) error {
+				canonical, exists := vaultScopeConfiguredName(values, name)
+				if exists {
+					clear(values[canonical])
+					values[canonical] = append([]byte(nil), value...)
+					return nil
+				}
+				values[name] = append([]byte(nil), value...)
+				return nil
+			})
 			clear(value)
 			if setErr != nil {
 				return safeEnvironmentVariableCommandError(setErr)
 			}
-			_, _ = fmt.Fprintf(command.ErrOrStderr(), "Set %s on %s (encrypted manifest version %d, pending).\n", result.Name, environmentVariableScopeLabel(target), result.Version)
+			_, _ = fmt.Fprintf(command.ErrOrStderr(), "Set %s on %s (encrypted vault scope). Run `pb env host provision` to refresh host selections.\n", name, scope.label)
 			continue
 		}
 		name := strings.TrimPrefix(selection.ID, "unset:")
@@ -530,15 +443,19 @@ func runEnvironmentVariableScopeTUI(command *cobra.Command, client *api.Client, 
 		if !confirmed {
 			continue
 		}
-		manager, managerErr := managerForMutation()
-		if managerErr != nil {
-			return managerErr
-		}
-		result, deleteErr := manager.Unset(command.Context(), target.machineID, name)
+		deleteErr := manager.MutateScope(command.Context(), scope.kind, scope.owner, scope.machine, func(values map[string][]byte) error {
+			canonical, exists := vaultScopeConfiguredName(values, name)
+			if !exists {
+				return environmentmanager.ErrVariableNotConfigured
+			}
+			clear(values[canonical])
+			delete(values, canonical)
+			return nil
+		})
 		if deleteErr != nil {
 			return safeEnvironmentVariableCommandError(deleteErr)
 		}
-		_, _ = fmt.Fprintf(command.ErrOrStderr(), "Unset %s from %s (encrypted manifest version %d, pending).\n", result.Name, environmentVariableScopeLabel(target), result.Version)
+		_, _ = fmt.Fprintf(command.ErrOrStderr(), "Unset %s from %s (encrypted vault scope). Run `pb env host provision` to refresh host selections.\n", name, scope.label)
 	}
 }
 

@@ -3,6 +3,7 @@ package tunnelmanager
 import (
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"errors"
 	"net"
 	"net/http"
@@ -69,11 +70,14 @@ func (t *OriginHTTPTransport) RoundTrip(ctx context.Context, route hoststate.Tun
 	} else if !route.PreserveHost {
 		out.Host = route.OriginAddress
 	}
-	sanitizeOriginHeaders(out.Header)
+	webSocketUpgrade := validWebSocketUpgrade(out)
+	sanitizeOriginRequestHeaders(out.Header, webSocketUpgrade)
 	response, err := transport.RoundTrip(out)
 	if err != nil {
 		return nil, errors.Join(ErrOriginUnavailable, err)
 	}
+	responseUpgrade := webSocketUpgrade && response.StatusCode == http.StatusSwitchingProtocols && headerHasToken(response.Header, "Connection", "upgrade") && strings.EqualFold(strings.TrimSpace(response.Header.Get("Upgrade")), "websocket")
+	sanitizeOriginResponseHeaders(response.Header, responseUpgrade)
 	return response, nil
 }
 
@@ -98,14 +102,15 @@ func (t *OriginHTTPTransport) transportFor(ctx context.Context, route hoststate.
 	}
 	var transport originRoundTripper
 	standard := &http.Transport{
-		Proxy:                 nil,
-		DialContext:           dialer.DialContext,
-		ForceAttemptHTTP2:     route.OriginScheme == "https",
-		DisableCompression:    true,
-		IdleConnTimeout:       time.Duration(route.IdleTimeoutMs) * time.Millisecond,
-		TLSHandshakeTimeout:   time.Duration(route.ConnectTimeoutMs) * time.Millisecond,
-		ExpectContinueTimeout: time.Second,
-		MaxIdleConnsPerHost:   2,
+		Proxy:                  nil,
+		DialContext:            dialer.DialContext,
+		ForceAttemptHTTP2:      route.OriginScheme == "https",
+		DisableCompression:     true,
+		IdleConnTimeout:        time.Duration(route.IdleTimeoutMs) * time.Millisecond,
+		TLSHandshakeTimeout:    time.Duration(route.ConnectTimeoutMs) * time.Millisecond,
+		ExpectContinueTimeout:  time.Second,
+		MaxIdleConnsPerHost:    2,
+		MaxResponseHeaderBytes: maximumOriginResponseHeaderBytes,
 	}
 	if route.OriginScheme == "unix" {
 		standard.DialContext = func(dialCtx context.Context, _, _ string) (net.Conn, error) {
@@ -128,7 +133,7 @@ func (t *OriginHTTPTransport) transportFor(ctx context.Context, route hoststate.
 	}
 	transport = standard
 	if route.OriginScheme == "h2c" {
-		transport = &http2.Transport{AllowHTTP: true, DialTLSContext: func(dialCtx context.Context, network, _ string, _ *tls.Config) (net.Conn, error) {
+		transport = &http2.Transport{AllowHTTP: true, MaxHeaderListSize: maximumOriginResponseHeaderBytes, DialTLSContext: func(dialCtx context.Context, network, _ string, _ *tls.Config) (net.Conn, error) {
 			return dialer.DialContext(dialCtx, network, route.OriginAddress)
 		}}
 	}
@@ -181,6 +186,10 @@ func (t *OriginHTTPTransport) CloseIdleConnections() {
 }
 
 func sanitizeOriginHeaders(header http.Header) {
+	sanitizeOriginRequestHeaders(header, false)
+}
+
+func sanitizeOriginRequestHeaders(header http.Header, preserveWebSocketUpgrade bool) {
 	if header == nil {
 		return
 	}
@@ -190,12 +199,94 @@ func sanitizeOriginHeaders(header http.Header) {
 			header.Del(token)
 		}
 	}
+	for _, name := range []string{"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "TE", "Trailer", "Transfer-Encoding", "Upgrade", "Forwarded"} {
+		header.Del(name)
+	}
+	for name := range header {
+		lower := strings.ToLower(name)
+		if strings.HasPrefix(lower, "x-paperboat-") || strings.HasPrefix(lower, "paperboat-") || strings.HasPrefix(lower, "x-forwarded-") {
+			header.Del(name)
+		}
+	}
+	sanitizeCookieHeader(header)
+	if preserveWebSocketUpgrade {
+		header.Set("Connection", "Upgrade")
+		header.Set("Upgrade", "websocket")
+	}
+}
+
+func sanitizeOriginResponseHeaders(header http.Header, preserveWebSocketUpgrade bool) {
+	if header == nil {
+		return
+	}
+	for _, token := range strings.Split(header.Get("Connection"), ",") {
+		if token = strings.TrimSpace(token); token != "" {
+			header.Del(token)
+		}
+	}
 	for _, name := range []string{"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "TE", "Trailer", "Transfer-Encoding", "Upgrade"} {
 		header.Del(name)
 	}
 	for name := range header {
-		if strings.HasPrefix(strings.ToLower(name), "x-paperboat-") {
+		lower := strings.ToLower(name)
+		if strings.HasPrefix(lower, "x-paperboat-") || strings.HasPrefix(lower, "paperboat-") {
 			header.Del(name)
 		}
 	}
+	values := header.Values("Set-Cookie")
+	header.Del("Set-Cookie")
+	for _, value := range values {
+		name := strings.TrimSpace(strings.SplitN(value, "=", 2)[0])
+		if !isReservedPaperboatCookie(name) {
+			header.Add("Set-Cookie", value)
+		}
+	}
+	if preserveWebSocketUpgrade {
+		header.Set("Connection", "Upgrade")
+		header.Set("Upgrade", "websocket")
+	}
+}
+
+func sanitizeCookieHeader(header http.Header) {
+	values := header.Values("Cookie")
+	header.Del("Cookie")
+	var kept []string
+	for _, value := range values {
+		for _, cookie := range strings.Split(value, ";") {
+			cookie = strings.TrimSpace(cookie)
+			name := strings.TrimSpace(strings.SplitN(cookie, "=", 2)[0])
+			if cookie != "" && !isReservedPaperboatCookie(name) {
+				kept = append(kept, cookie)
+			}
+		}
+	}
+	if len(kept) > 0 {
+		header.Set("Cookie", strings.Join(kept, "; "))
+	}
+}
+
+func isReservedPaperboatCookie(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	lower = strings.TrimPrefix(lower, "__host-")
+	lower = strings.TrimPrefix(lower, "__secure-")
+	return strings.HasPrefix(lower, "paperboat-") || strings.HasPrefix(lower, "paperboat_")
+}
+
+func validWebSocketUpgrade(request *http.Request) bool {
+	if request == nil || request.Method != http.MethodGet || !headerHasToken(request.Header, "Connection", "upgrade") || !strings.EqualFold(strings.TrimSpace(request.Header.Get("Upgrade")), "websocket") || strings.TrimSpace(request.Header.Get("Sec-WebSocket-Version")) != "13" {
+		return false
+	}
+	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(request.Header.Get("Sec-WebSocket-Key")))
+	return err == nil && len(key) == 16
+}
+
+func headerHasToken(header http.Header, name, token string) bool {
+	for _, value := range header.Values(name) {
+		for _, candidate := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(candidate), token) {
+				return true
+			}
+		}
+	}
+	return false
 }

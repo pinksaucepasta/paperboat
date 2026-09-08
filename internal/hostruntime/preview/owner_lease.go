@@ -23,6 +23,10 @@ const (
 	OwnerSessionLeaseSchema     = "paperboat.preview-owner-session/v1"
 	defaultOwnerSessionLeaseTTL = 15 * time.Second
 	maxOwnerSessionLeaseTTL     = 5 * time.Minute
+	// BackgroundPreviewMaximumTTL is shared with the control-plane preview
+	// lease ceiling. Background ownership is intentionally bounded and is
+	// never restored after the daemon exits.
+	BackgroundPreviewMaximumTTL = 24 * time.Hour
 	defaultOwnerSessionLeaseMax = 1024
 	ownerSessionLeaseBodyLimit  = 16 << 10
 )
@@ -46,6 +50,7 @@ type OwnerSessionLease struct {
 	Target         LeaseTarget `json:"target"`
 	ExpiresAt      time.Time   `json:"expires_at"`
 	Token          string      `json:"token"`
+	Background     bool        `json:"background"`
 	// idempotencyKey is local transport metadata used for replay after an
 	// uncertain POST. It is not part of the wire response.
 	idempotencyKey string
@@ -84,6 +89,7 @@ type OwnerSessionLeaseManager struct {
 type ownerSessionLeaseEntry struct {
 	lease    OwnerSessionLease
 	closed   bool
+	attached bool
 	retireAt time.Time
 }
 
@@ -137,6 +143,9 @@ func (m *OwnerSessionLeaseManager) watchContext() {
 	if interval < 100*time.Millisecond {
 		interval = 100 * time.Millisecond
 	}
+	if interval > time.Second {
+		interval = time.Second
+	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -168,6 +177,13 @@ func (m *OwnerSessionLeaseManager) Acquire(request OwnerSessionLeaseRequest, ide
 		return OwnerSessionLease{}, err
 	}
 	now := m.now().UTC()
+	if request.Background {
+		if request.ExpiresAt == nil || !request.ExpiresAt.After(now) || request.ExpiresAt.Sub(now) > BackgroundPreviewMaximumTTL {
+			return OwnerSessionLease{}, ErrOwnerSessionLeaseInvalid
+		}
+	} else if request.ExpiresAt != nil {
+		return OwnerSessionLease{}, ErrOwnerSessionLeaseInvalid
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sweepLocked(now)
@@ -222,7 +238,11 @@ func (m *OwnerSessionLeaseManager) Acquire(request OwnerSessionLeaseRequest, ide
 		_ = m.registry.ReleaseMachineOwnerSession(m.machineID, ownerSessionID)
 		return OwnerSessionLease{}, err
 	}
-	lease := OwnerSessionLease{Schema: OwnerSessionLeaseSchema, ID: leaseID, MachineID: m.machineID, OwnerSessionID: ownerSessionID, Target: request.Target, ExpiresAt: now.Add(m.ttl), Token: token, idempotencyKey: idempotencyKey}
+	expiresAt := now.Add(m.ttl)
+	if request.Background {
+		expiresAt = request.ExpiresAt.UTC()
+	}
+	lease := OwnerSessionLease{Schema: OwnerSessionLeaseSchema, ID: leaseID, MachineID: m.machineID, OwnerSessionID: ownerSessionID, Target: request.Target, ExpiresAt: expiresAt, Token: token, Background: request.Background, idempotencyKey: idempotencyKey}
 	m.leases[leaseID] = &ownerSessionLeaseEntry{lease: lease}
 	m.idempotency[idempotencyKey] = ownerSessionLeaseReplay{hash: hash, leaseID: leaseID}
 	return lease, nil
@@ -243,6 +263,9 @@ func (m *OwnerSessionLeaseManager) Heartbeat(leaseID, token string) (OwnerSessio
 	}
 	if entry.closed {
 		return OwnerSessionLease{}, ErrOwnerSessionLeaseLost
+	}
+	if entry.lease.Background {
+		return OwnerSessionLease{}, ErrOwnerSessionLeaseConflict
 	}
 	if !entry.lease.ExpiresAt.After(now) {
 		m.closeEntryLocked(entry, now)
@@ -287,6 +310,14 @@ func (m *OwnerSessionLeaseManager) Sweep(now time.Time) {
 
 func (m *OwnerSessionLeaseManager) sweepLocked(now time.Time) {
 	for leaseID, entry := range m.leases {
+		if entry.lease.Background && !entry.closed {
+			attached, ended := m.registry.MachineOwnerSessionDispatchState(m.machineID, entry.lease.OwnerSessionID)
+			if attached {
+				entry.attached = true
+			} else if entry.attached || ended {
+				m.closeEntryLocked(entry, now)
+			}
+		}
 		if !entry.closed && !entry.lease.ExpiresAt.After(now) {
 			m.closeEntryLocked(entry, now)
 		}
@@ -345,6 +376,8 @@ func (m *OwnerSessionLeaseManager) Close() error {
 type OwnerSessionLeaseRequest struct {
 	OwnerSessionID string      `json:"owner_session_id,omitempty"`
 	Target         LeaseTarget `json:"target"`
+	Background     bool        `json:"background,omitempty"`
+	ExpiresAt      *time.Time  `json:"expires_at,omitempty"`
 }
 
 // ServeHTTP handles one authenticated owner-session lease request over hostd's

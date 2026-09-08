@@ -1,7 +1,8 @@
 # Previews And Tunnels
 
-Paperboat has two exposure models. A preview is temporary and owned by the
-foreground session that created it. A tunnel is durable and survives connector,
+Paperboat has one tunnel workflow with two lifecycle modes. An ephemeral tunnel
+(`pb preview` or `pb tunnel --ephemeral`) is temporary and normally owned by the
+foreground session that created it. A durable tunnel survives connector,
 network, service, and host restarts. Both keep one stable endpoint while their
 live connector or edge assignment changes.
 
@@ -13,6 +14,7 @@ Expose a local port, URL, or directory:
 pb preview 3000
 pb preview http://127.0.0.1:8080
 pb preview ./dist
+pb tunnel --ephemeral 3000
 ```
 
 The command waits for origin and edge readiness before printing the managed
@@ -23,13 +25,17 @@ Set an optional maximum lifetime, request account-private access, or attach
 custom domains:
 
 ```console
-pb preview 3000 --duration 2h
+pb preview 3000 --ttl 2h
+pb preview 3000 --background --ttl 1h
 pb preview 3000 --private
 pb preview 3000 --domain demo.example.com --domain '*.apps.example.com'
 pb preview 3000 --json
 ```
 
-`--domain` is repeatable. The managed Paperboat URL becomes usable as soon as
+Background mode transfers ownership to the running daemon before returning. It
+defaults to 30 minutes, is capped at 24 hours, and is not restored after reboot.
+`--duration` remains a deprecated spelling of `--ttl`. `--domain` is repeatable.
+The managed Paperboat URL becomes usable as soon as
 the preview is ready; a custom alias remains pending until its ownership, DNS,
 and certificate checks finish. Wildcards match one label only.
 
@@ -38,7 +44,9 @@ List or stop previews:
 ```console
 pb preview list
 pb preview list --json
+pb preview status <preview>
 pb preview stop <preview>
+pb preview delete <preview>
 ```
 
 ## Private previews
@@ -93,10 +101,11 @@ pb tunnel delete api --yes --wait
 
 ## Routes and origins
 
-A tunnel can have multiple HTTP or private TCP routes:
+A tunnel can have multiple HTTP, public TCP, or private TCP routes:
 
 ```console
 pb tunnel route add api --name web --to http://127.0.0.1:3000 --domain api.example.com --path / --wait
+pb tunnel route add api --name database --to 127.0.0.1:5432 --protocol tcp --wait
 pb tunnel route add api --name database --to 127.0.0.1:5432 --protocol tcp_private --wait
 pb tunnel route list api
 ```
@@ -108,8 +117,11 @@ the defaults; use `--tls-verification insecure` only with an explicit reviewed
 exception.
 
 Exact hosts beat one-label wildcards. Within one host, the longest path prefix
-then route priority wins. A `tcp_private` route has no HTTP hostname or path
-matcher and never enters the public HTTP route table.
+then route priority wins. A public `tcp` route reserves a stable managed-hostname
+port and carries opaque bytes; the application supplies its own authentication and
+optional TLS. It has no HTTP path and does not use Paperboat's private-access helper.
+A `tcp_private` route has no public listener or HTTP hostname/path matcher and never
+enters the public route table.
 
 ## Custom domains, DNS, and TLS
 
@@ -196,3 +208,28 @@ private hostname, path, header, payload, or local address.
 
 For recovery procedures, see
 [`runbooks-preview-tunnels.md`](runbooks-preview-tunnels.md).
+
+### On-demand private/team ports
+
+Approve a port once, then use its reserved URL while the policy is valid:
+
+```sh
+pb tunnel policy allow <machine-id> 3000 --expires 8h
+pb tunnel policy get <policy-id>
+pb tunnel policy allow <machine-id> 3000 --id <policy-id> --generation 1 --expires 24h
+pb tunnel policy revoke <policy-id> --generation 2
+```
+
+Sharing follows replacement applications at the same authorized port. Paperboat
+connects to an already-running service; it does not start an application or wake
+the machine. Use `--access team` only with an owner-issued team policy binding and
+resource grant. Default access is private. Commands support `--json`.
+
+Concurrent authorized visits share one activation. Idle forwarding closes after
+five minutes without requests or streams, while the reserved name remains. Each
+activation lasts at most eight hours, shortened by policy and authorization
+expiry; streams last at most one hour. Revocation ends permission and permanently
+tombstones the name. Re-enrollment requires explicit owner reapproval.
+
+Production browser access remains subject to the managed hostname isolation gate;
+reserving a policy does not bypass that requirement.

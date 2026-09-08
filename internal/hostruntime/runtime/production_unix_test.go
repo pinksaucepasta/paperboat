@@ -31,12 +31,10 @@ import (
 	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/environmentenrollment"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/peerrelay"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/endpointidentity"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/networkcheck"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/signaling"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
@@ -488,33 +486,6 @@ func TestRuntimeObservationUsesRenewableIdentityAndExactBodyProof(t *testing.T) 
 	}
 }
 
-func TestStoredEnvironmentEndpointRemainsVerifiableAfterNetworkExpiry(t *testing.T) {
-	rootPublic, rootPrivate, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	issuedAt := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
-	certificate, err := endpointidentity.Sign(rootPrivate, endpointidentity.Claims{
-		AccountID: "acct_1", Role: endpointidentity.RoleMachine, EndpointID: "mach_1", Generation: 3, Serial: 1,
-		NoisePublicKey: [32]byte{1}, QUICPublicKey: ed25519.NewKeyFromSeed(bytes.Repeat([]byte{2}, 32)).Public().(ed25519.PublicKey),
-		IssuedAt: issuedAt, ExpiresAt: issuedAt.Add(time.Hour),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, err := certificate.MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := endpointidentity.Verify(raw, rootPublic, endpointidentity.Expected{Role: endpointidentity.RoleMachine, EndpointID: "mach_1", Generation: 3}, time.Now().UTC()); err == nil {
-		t.Fatal("fixture PBEC is not expired")
-	}
-	verified, err := verifyStoredEnvironmentEndpoint(runtimeidentity.PeerEndpoint{Generation: 3, RootPublicKey: rootPublic, Certificate: raw}, "mach_1")
-	if err != nil || verified.Claims.AccountID != "acct_1" {
-		t.Fatalf("stored certificate=%+v error=%v", verified.Claims, err)
-	}
-}
-
 func TestEnvironmentInjectionSupportsHostProfilesWithLocalKeyCustody(t *testing.T) {
 	registration := runtimeidentity.Registration{SetupMode: "host", MachineID: "mach_1", InstallationGeneration: 1}
 	if !environmentInjectionEligible(runtimeconfig.Hosted, registration) {
@@ -609,58 +580,6 @@ func TestRuntimeObservationAppliesEncryptedBundleAndAcknowledgesIt(t *testing.T)
 	}
 	if got, err := store.Environment(); err != nil || !reflect.DeepEqual(got, []string{"GLOBAL_TOKEN=global-secret", "MACHINE_TOKEN=machine-secret"}) {
 		t.Fatalf("environment=%q err=%v", got, err)
-	}
-}
-
-func TestEnvironmentBootstrapCommitsActiveBindingWithoutEnrollment(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "environment-cache.json")
-	store, err := envinject.Open(context.Background(), envinject.Config{
-		Path: path, HighWaterPath: path + ".high-water", IntegrityKey: bytes.Repeat([]byte{0x42}, 32), AllowHighWaterInitialize: true,
-		AccountID: "acct_1", MachineID: "mach_1", InstallationGeneration: 1, HostKeyGeneration: 1, HostRecipientKeyID: runtimeTestHostRecipientKeyID,
-		GenesisMarker: runtimeTestGenesisMarkerFor(t, path), Processor: runtimeTestEnvironmentProcessor{variables: map[string]string{"TOKEN": "secret"}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Apply(context.Background(), envinject.Bundle{Schema: envinject.BundleSchema}); err != nil {
-		t.Fatal(err)
-	}
-	provider := &envinject.Provider{}
-	if err := provider.Attach(store); err != nil {
-		t.Fatal(err)
-	}
-	if provider.BindingState() != envinject.BindingActive {
-		t.Fatalf("binding state=%d, want active", provider.BindingState())
-	}
-	ready := make(chan struct{})
-	close(ready)
-	ensureCalls, commitCalls := 0, 0
-	bootstrap := newEnvironmentBootstrapService(provider, func(context.Context) (*envinject.Store, error) {
-		return nil, errors.New("unexpected store initialization")
-	}, time.Millisecond)
-	bootstrap.store = store
-	bootstrap.ensure = func(context.Context) error {
-		ensureCalls++
-		return environmentenrollment.ErrPending
-	}
-	bootstrap.commit = func(context.Context) error {
-		commitCalls++
-		return nil
-	}
-	bootstrap.observationReady = ready
-	if err := bootstrap.Start(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-bootstrap.done:
-	case <-time.After(time.Second):
-		t.Fatal("environment bootstrap did not finish after active binding reconciliation")
-	}
-	if ensureCalls != 0 || commitCalls != 1 {
-		t.Fatalf("ensure calls=%d commit calls=%d", ensureCalls, commitCalls)
-	}
-	if err := bootstrap.Shutdown(context.Background()); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -866,16 +785,5 @@ func TestPeerEnrollmentRuntimeServicePersistsApprovalAfterStartup(t *testing.T) 
 	}
 	if err := service.Shutdown(context.Background()); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestProductionConnectorTransportDefaultsToAuto(t *testing.T) {
-	for _, value := range []string{"", "  "} {
-		if got := productionConnectorTransport(value); got != connector.Auto {
-			t.Fatalf("transport(%q) = %q", value, got)
-		}
-	}
-	if got := productionConnectorTransport("quic"); got != connector.QUIC {
-		t.Fatalf("explicit transport = %q", got)
 	}
 }

@@ -481,9 +481,9 @@ func (c *Client) BootstrapE2EE(ctx context.Context, operationID string, input E2
 	return c.bootstrapE2EE(ctx, operationID, input, false)
 }
 
-// BootstrapE2EEFresh authorizes the one-shot dashboard enrollment ceremony to
-// establish a new account root on this freshly wiped machine. The server
-// accepts this only for the short-lived enrollment CLI session it issued.
+// BootstrapE2EEFresh registers public identity material owned by the current
+// authenticated CLI session. The historical method name is retained on the
+// v1 client surface while all CLI enrollments use this device-scoped ceremony.
 func (c *Client) BootstrapE2EEFresh(ctx context.Context, operationID string, input E2EEBootstrapInput) (E2EEBootstrapResult, error) {
 	return c.bootstrapE2EE(ctx, operationID, input, true)
 }
@@ -579,28 +579,47 @@ type ProjectPage struct {
 // connector rather than a Paperboat-managed Fly VM. The control plane owns its
 // lifecycle and authorization; the CLI only needs enough metadata to select it.
 type UserMachine struct {
-	ID                     string              `json:"id"`
-	EnvironmentID          string              `json:"environment_id"`
-	DisplayName            string              `json:"display_name"`
-	Alias                  string              `json:"alias"`
-	State                  string              `json:"state"`
-	Online                 bool                `json:"online"`
-	Platform               string              `json:"platform"`
-	Architecture           string              `json:"architecture"`
-	WorkspaceRoot          string              `json:"workspace_root"`
-	SetupRoles             []string            `json:"setup_roles"`
-	SetupMode              string              `json:"setup_mode"`
-	Capabilities           MachineCapabilities `json:"capabilities"`
-	PublicIdentityKey      string              `json:"public_identity_key"`
-	InstallationGeneration int64               `json:"installation_generation"`
-	Availability           AvailabilityPolicy  `json:"availability"`
-	RuntimeDiagnostics     RuntimeDiagnostics  `json:"runtime_diagnostics"`
-	Installation           *ClientInstallation `json:"installation,omitempty"`
-	SSHAuthority           SSHAuthority        `json:"-"`
-	SSHLocalReady          bool                `json:"-"`
-	SSHLocalCode           string              `json:"-"`
-	SSHUser                string              `json:"-"`
-	SSHPort                uint16              `json:"-"`
+	ID                     string                 `json:"id"`
+	EnvironmentID          string                 `json:"environment_id"`
+	DisplayName            string                 `json:"display_name"`
+	Alias                  string                 `json:"alias"`
+	State                  string                 `json:"state"`
+	Online                 bool                   `json:"online"`
+	Platform               string                 `json:"platform"`
+	Architecture           string                 `json:"architecture"`
+	WorkspaceRoot          string                 `json:"workspace_root"`
+	SetupRoles             []string               `json:"-"`
+	SetupMode              string                 `json:"-"`
+	Capabilities           MachineCapabilities    `json:"capabilities"`
+	DeviceCapabilities     DeviceCapabilityPolicy `json:"device_capabilities"`
+	PublicIdentityKey      string                 `json:"public_identity_key"`
+	InstallationGeneration int64                  `json:"installation_generation"`
+	Availability           AvailabilityPolicy     `json:"availability"`
+	RuntimeDiagnostics     RuntimeDiagnostics     `json:"runtime_diagnostics"`
+	Installation           *ClientInstallation    `json:"installation,omitempty"`
+	SSHAuthority           SSHAuthority           `json:"-"`
+	SSHLocalReady          bool                   `json:"-"`
+	SSHLocalCode           string                 `json:"-"`
+	SSHUser                string                 `json:"-"`
+	SSHPort                uint16                 `json:"-"`
+}
+
+type DeviceCapabilitySelection struct {
+	Terminal      bool `json:"terminal"`
+	ManagedSSH    bool `json:"managed_ssh"`
+	FileReceive   bool `json:"file_receive"`
+	PreviewTunnel bool `json:"preview_tunnel"`
+	PeerRelay     bool `json:"peer_relay"`
+}
+
+type DeviceCapabilityPolicy struct {
+	Schema         string                    `json:"schema"`
+	Desired        DeviceCapabilitySelection `json:"desired"`
+	DesiredVersion int64                     `json:"desired_version"`
+	Applied        DeviceCapabilitySelection `json:"applied"`
+	AppliedVersion int64                     `json:"applied_version"`
+	Status         string                    `json:"status"`
+	ErrorCode      string                    `json:"error_code,omitempty"`
 }
 
 type SSHAuthority struct {
@@ -680,7 +699,7 @@ type MachineCapabilities struct {
 }
 
 type MachineSetupInput struct {
-	SetupMode         string            `json:"setup_mode"`
+	SetupMode         string            `json:"-"`
 	DisplayName       string            `json:"display_name"`
 	Platform          string            `json:"platform"`
 	Architecture      string            `json:"architecture"`
@@ -698,19 +717,15 @@ type MachineEnrollmentStart struct {
 
 // StartMachineEnrollment creates the single-use credential used by the
 // dashboard, CLI, and TUI one-shot installers.
-func (c *Client) StartMachineEnrollment(ctx context.Context, idempotencyKey string, options ...string) (MachineEnrollmentStart, error) {
+func (c *Client) StartMachineEnrollment(ctx context.Context, idempotencyKey, shell string) (MachineEnrollmentStart, error) {
 	var out MachineEnrollmentStart
 	if strings.TrimSpace(idempotencyKey) == "" {
 		return out, errors.New("machine enrollment idempotency key is required")
 	}
-	role, shell := "host", "posix"
-	if len(options) > 0 && options[0] != "" {
-		role = options[0]
+	if shell == "" {
+		shell = "posix"
 	}
-	if len(options) > 1 && options[1] != "" {
-		shell = options[1]
-	}
-	err := c.doWithHeaders(ctx, http.MethodPost, "/v1/machine-enrollments", map[string]string{"role": role, "shell": shell}, &out, http.Header{"Idempotency-Key": []string{idempotencyKey}})
+	err := c.doWithHeaders(ctx, http.MethodPost, "/v1/machine-enrollments", map[string]string{"shell": shell}, &out, http.Header{"Idempotency-Key": []string{idempotencyKey}})
 	return out, err
 }
 
@@ -724,7 +739,7 @@ type AuthenticatedHostSetupInput struct {
 	Verifier                string          `json:"verifier"`
 	PublicIdentityKey       string          `json:"public_identity_key"`
 	InstallationGeneration  int64           `json:"installation_generation"`
-	SetupMode               string          `json:"setup_mode"`
+	SetupMode               string          `json:"-"`
 	Artifact                MachineArtifact `json:"artifact"`
 	SSHUser                 string          `json:"ssh_user,omitempty"`
 	SSHPort                 uint16          `json:"ssh_port,omitempty"`
@@ -1465,6 +1480,16 @@ func (c *Client) SetUserMachineAvailability(ctx context.Context, machineID, mode
 	var out AvailabilityPolicy
 	path := "/v1/machines/" + url.PathEscape(machineID) + "/availability-policy"
 	err := c.doWithHeaders(ctx, http.MethodPut, path, map[string]any{"expected_version": expectedVersion, "mode": mode}, &out, http.Header{"Idempotency-Key": []string{idempotencyKey}})
+	return out, err
+}
+
+func (c *Client) SetUserMachineCapabilities(ctx context.Context, machineID, idempotencyKey string, desired DeviceCapabilitySelection, expectedVersion int64) (DeviceCapabilityPolicy, error) {
+	if strings.TrimSpace(machineID) == "" || strings.TrimSpace(idempotencyKey) == "" || expectedVersion < 1 {
+		return DeviceCapabilityPolicy{}, errors.New("valid machine capability input is required")
+	}
+	var out DeviceCapabilityPolicy
+	path := "/v1/machines/" + url.PathEscape(machineID) + "/capabilities"
+	err := c.doWithHeaders(ctx, http.MethodPut, path, map[string]any{"expected_version": expectedVersion, "desired": desired}, &out, http.Header{"Idempotency-Key": []string{idempotencyKey}})
 	return out, err
 }
 
