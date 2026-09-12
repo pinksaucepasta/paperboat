@@ -4,9 +4,7 @@ package hostruntimecmd
 
 import (
 	"context"
-	"errors"
 	"io"
-	"path/filepath"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
@@ -17,22 +15,26 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 )
 
-// runUpdated is the SCM entry point. It rejects arguments so the service can
-// never turn the update boundary into a general command runner.
 func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Writer) error {
-	if len(args) != 0 {
-		return errors.New("updated does not accept arguments")
-	}
-	workerConfig, err := windowsUpdatedConfig()
+	instance, err := resolveWindowsRuntimeInstance(args)
 	if err != nil {
-		recordWindowsServiceLaunchFailure("PaperboatUpdated", err)
 		return err
 	}
-	err = service.RunWindowsSystemServiceWithReady("PaperboatUpdated", func(serviceCtx context.Context, ready func() error) error {
-		return updated.RunWindowsWithReady(serviceCtx, workerConfig, ready)
+	workerConfig, err := windowsUpdatedConfig(instance)
+	if err != nil {
+		recordWindowsServiceLaunchFailure(windowsInstanceServiceName("PaperboatUpdated", instance.name), err)
+		return err
+	}
+	serviceName := windowsInstanceServiceName("PaperboatUpdated", instance.name)
+	err = service.RunWindowsSystemServiceWithReady(serviceName, func(serviceCtx context.Context, ready func() error) error {
+		runErr := updated.RunWindowsWithReady(serviceCtx, workerConfig, ready)
+		if runErr != nil {
+			recordWindowsServiceLaunchFailure(serviceName, runErr)
+		}
+		return runErr
 	})
 	if err != nil {
-		recordWindowsServiceLaunchFailure("PaperboatUpdated", err)
+		recordWindowsServiceLaunchFailure(serviceName, err)
 		if stderr != nil {
 			_, _ = io.WriteString(stderr, "PaperboatUpdated startup failed: "+err.Error()+"\n")
 		}
@@ -41,27 +43,21 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 }
 
 func runActivator(_ context.Context, args []string, _ io.Writer, _ io.Writer) error {
-	if len(args) != 0 {
-		return errors.New("activator does not accept arguments")
-	}
-	config, err := windowsUpdatedConfig()
+	instance, err := resolveWindowsRuntimeInstance(args)
 	if err != nil {
 		return err
 	}
-	return service.RunWindowsSystemService("PaperboatUpdateActivator", func(serviceCtx context.Context) error {
+	config, err := windowsUpdatedConfig(instance)
+	if err != nil {
+		return err
+	}
+	return service.RunWindowsSystemService(windowsInstanceServiceName("PaperboatUpdateActivator", instance.name), func(serviceCtx context.Context) error {
 		return updated.RunWindowsActivator(serviceCtx, config)
 	})
 }
 
-func windowsUpdatedConfig() (updated.WindowsConfig, error) {
-	config, err := windowsRuntimeInstallConfig()
-	if err != nil {
-		return updated.WindowsConfig{}, err
-	}
-	layout, err := service.DefaultLayout("windows")
-	if err != nil {
-		return updated.WindowsConfig{}, err
-	}
+func windowsUpdatedConfig(instance windowsRuntimeInstance) (updated.WindowsConfig, error) {
+	config, layout := instance.config, instance.layout
 	result := windowsUpdatedConfigFor(config, layout, buildinfo.Version)
 	token, err := readWindowsHostdTokenForSID(config.TokenFile, config.OwnerSID)
 	if err != nil {
@@ -85,7 +81,8 @@ func windowsUpdatedConfigFor(config hostinstall.WindowsRuntimeConfig, layout ser
 	// health verification commits the transaction, so using its version here
 	// makes every candidate updater report the old version and forces rollback.
 	tokenFile := config.TokenFile
-	return updated.WindowsConfig{StateRoot: layout.UpdateStateRoot, RuntimeStateRoot: config.StateRoot, Binary: layout.Binary, BinaryRollback: layout.BinaryRollback, BinaryStaged: layout.BinaryStaged, OwnerSID: config.OwnerSID, MachineID: config.MachineID, RepositoryURL: config.Artifact.RepositoryURL, TokenFile: tokenFile, InstallState: filepath.Join(hostinstall.WindowsProgramDataRoot(), "runtime-install.json"), ControlSocket: `\\.\pipe\PaperboatUpdatedControl`, HostdSocket: layout.HostdSocket, HealthURL: "http://" + config.ListenAddress + "/healthz", ActiveVersion: runningVersion, Architecture: config.Artifact.Architecture, AutomaticActivation: true, SetupMode: config.SetupMode,
+	installState, _ := hostinstall.WindowsInstanceConfigPath(config.Instance)
+	return updated.WindowsConfig{StateRoot: layout.UpdateStateRoot, RuntimeStateRoot: config.StateRoot, Binary: layout.Binary, BinaryRollback: layout.BinaryRollback, BinaryStaged: layout.BinaryStaged, OwnerSID: config.OwnerSID, MachineID: config.MachineID, RepositoryURL: config.Artifact.RepositoryURL, TokenFile: tokenFile, InstallState: installState, ControlSocket: layout.UpdaterSocket, HostdSocket: layout.HostdSocket, HealthURL: "http://" + config.ListenAddress + "/healthz", ActiveVersion: runningVersion, Architecture: config.Artifact.Architecture, AutomaticActivation: true, SetupMode: config.SetupMode,
 		CandidateStarter: func(ctx context.Context, request workerupdate.StartRequest) (workerupdate.Worker, error) {
 			return startWindowsRuntimeWorkerForRelease(ctx, request.Executable, request.HostdEndpoint, tokenFile, config.OwnerSID, request.WorkerID, request.Release.Version, request.Release.HostdAPIMin, request.Release.HostdAPIMax)
 		},

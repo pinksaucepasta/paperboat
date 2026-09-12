@@ -82,11 +82,7 @@ func execute(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 		return 0
 	}
 	if args[0] == "hostd" {
-		if len(args) != 1 {
-			writeError(stderr, fmt.Errorf("hostd does not accept arguments"))
-			return 2
-		}
-		if err := runHostd(ctx, stdout); err != nil {
+		if err := runHostd(ctx, args[1:], stdout); err != nil {
 			writeError(stderr, err)
 			return 1
 		}

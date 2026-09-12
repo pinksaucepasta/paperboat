@@ -5,6 +5,7 @@
 package session
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -28,8 +29,16 @@ type runOptions struct {
 	outputBufferBytes int
 	output            io.Writer
 	remoteSize        func() (uint16, uint16)
+	readOnly          bool
 	bracketedPaste    bool
 }
+
+// WithReadOnly keeps input and resize local. Ctrl-C detaches without signaling the shell.
+func WithReadOnly() RunOption {
+	return func(options *runOptions) { options.readOnly = true }
+}
+
+var errViewerDetached = errors.New("viewer detached")
 
 func WithOutputBufferBytes(size int) RunOption {
 	return func(options *runOptions) {
@@ -94,7 +103,10 @@ func Run(ctx context.Context, conn tunnel.Conn, stdinSink io.WriteCloser, opts .
 	}
 
 	// Propagate the initial size and subsequent resizes.
-	stopResize := watchResize(conn, options.remoteSize)
+	stopResize := func() {}
+	if !options.readOnly {
+		stopResize = watchResize(conn, options.remoteSize)
+	}
 	defer stopResize()
 
 	// Remote -> local. Ends when the remote PTY closes; that is normal EOF, not
@@ -129,6 +141,16 @@ func Run(ctx context.Context, conn tunnel.Conn, stdinSink io.WriteCloser, opts .
 		buf := make([]byte, 32*1024)
 		for {
 			n, readErr := readLocalInput(inputCtx, os.Stdin, buf)
+			if options.readOnly {
+				if bytes.IndexByte(buf[:n], 3) >= 0 {
+					streamErr <- errViewerDetached
+					return
+				}
+				if readErr != nil {
+					return
+				}
+				continue
+			}
 			if n > 0 {
 				started := time.Now()
 				if _, writeErr := stdinSink.Write(buf[:n]); writeErr != nil {
@@ -199,6 +221,9 @@ func Run(ctx context.Context, conn tunnel.Conn, stdinSink io.WriteCloser, opts .
 		<-outputDone
 		<-inputDone
 		<-done
+		if errors.Is(streamError, errViewerDetached) {
+			return 0, nil
+		}
 		return 1, streamError
 	case sinkError := <-sinkErrors:
 		stopInput()

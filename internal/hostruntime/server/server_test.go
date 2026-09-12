@@ -53,13 +53,32 @@ func TestTerminalBindingSurvivesCredentialExpiry(t *testing.T) {
 	outcome := operation.Outcome{Result: json.RawMessage(`{"attachment_id":"att_1","session":{"snapshot":{"generation":1}}}`)}
 
 	state := newTerminalConnectionState()
-	if _, err := state.bind(Authorization{ClientID: "cli_1", ExpiresAt: time.Now().Add(time.Second)}, attach, outcome); err != nil {
+	if _, err := state.bind(Authorization{ClientID: "cli_1", ExpiresAt: time.Now().Add(20 * time.Millisecond)}, attach, outcome); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case <-state.expired:
 		t.Fatal("credential expiry closed an established terminal binding")
-	case <-time.After(30 * time.Millisecond):
+	case <-time.After(60 * time.Millisecond):
+	}
+}
+
+func TestSharedTerminalBindingClosesAtCredentialExpiry(t *testing.T) {
+	attach := protocol.Frame{Type: "request", RequestID: "req_attach", Version: "1.0", OperationID: "op_attach_0001", Capability: "terminal.v1", DeadlineMS: 1000, Payload: json.RawMessage(`{"action":"attach","session_id":"ses_1"}`)}
+	outcome := operation.Outcome{Result: json.RawMessage(`{"attachment_id":"att_1","session":{"snapshot":{"generation":1}}}`)}
+	for _, role := range []TerminalRole{TerminalRoleViewer, TerminalRoleInteractive} {
+		state := newTerminalConnectionState()
+		done := make(chan struct{})
+		state.done = done
+		if _, err := state.bind(Authorization{ClientID: "cli_1", TerminalRole: role, ExpiresAt: time.Now().Add(20 * time.Millisecond)}, attach, outcome); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-state.expired:
+		case <-time.After(time.Second):
+			t.Fatalf("%s binding survived credential expiry", role)
+		}
+		close(done)
 	}
 }
 

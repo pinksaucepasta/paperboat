@@ -71,19 +71,34 @@ type Authorizer interface {
 type Authorization struct {
 	// JournalBinding is a stable, non-secret identity and resource binding. It is
 	// included in idempotency hashing so operation IDs cannot cross principals.
-	JournalBinding  string
-	EnvironmentID   string
-	MachineID       string
-	SourceMachineID string
-	UserID          string
-	ClientID        string
-	SessionID       string
-	ResourceID      string
-	ExpiresAt       time.Time
-	Revoked         *atomic.Bool
-	RevokedSignal   <-chan struct{}
-	Value           any
+	JournalBinding     string
+	EnvironmentID      string
+	MachineID          string
+	SourceMachineID    string
+	UserID             string
+	AccountID          string
+	ClientID           string
+	SessionID          string
+	TerminalRole       TerminalRole
+	TerminalGeneration uint64
+	ResourceID         string
+	OperationID        string
+	RequestID          string
+	RequestHash        string
+	IdempotencyKey     string
+	ExpiresAt          time.Time
+	Revoked            *atomic.Bool
+	RevokedSignal      <-chan struct{}
+	Value              any
 }
+
+type TerminalRole string
+
+const (
+	TerminalRoleOwner       TerminalRole = "owner"
+	TerminalRoleViewer      TerminalRole = "viewer"
+	TerminalRoleInteractive TerminalRole = "interactive"
+)
 
 type AuthorizationCloser interface{ CloseAuthorization() }
 
@@ -165,15 +180,16 @@ type terminalStreamBinding struct {
 }
 
 type terminalConnectionState struct {
-	mu         sync.RWMutex
-	nextID     uint32
-	streams    map[uint32]*terminalStreamBinding
-	closed     map[uint32]struct{}
-	closedIDs  []uint32
-	revoked    *atomic.Bool
-	expired    chan struct{}
-	expireOnce sync.Once
-	done       <-chan struct{}
+	mu              sync.RWMutex
+	nextID          uint32
+	streams         map[uint32]*terminalStreamBinding
+	closed          map[uint32]struct{}
+	closedIDs       []uint32
+	revoked         *atomic.Bool
+	expired         chan struct{}
+	expireOnce      sync.Once
+	expiryWatchOnce sync.Once
+	done            <-chan struct{}
 }
 
 func newTerminalConnectionState(revoked ...*atomic.Bool) *terminalConnectionState {
@@ -862,6 +878,20 @@ func (s *terminalConnectionState) bind(authorization Authorization, frame protoc
 				case <-s.done:
 				}
 			}(authorization.RevokedSignal)
+		}
+		if authorization.TerminalRole == TerminalRoleViewer || authorization.TerminalRole == TerminalRoleInteractive {
+			deadline := authorization.ExpiresAt
+			s.expiryWatchOnce.Do(func() {
+				go func() {
+					timer := time.NewTimer(time.Until(deadline))
+					defer timer.Stop()
+					select {
+					case <-timer.C:
+						s.expireOnce.Do(func() { close(s.expired) })
+					case <-s.done:
+					}
+				}()
+			})
 		}
 		return streamID, nil
 	}

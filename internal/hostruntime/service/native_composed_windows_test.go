@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -41,6 +42,10 @@ var (
 	nativeWindowsWorkloadRoleFlag           = flag.String("paperboat-native-workload-role", "", "native Windows qualification workload role")
 	nativeWindowsWorkloadHealthFlag         = flag.String("paperboat-native-workload-health", "", "native Windows qualification workload health address")
 	nativeWindowsWorkloadFailureFlag        = flag.String("paperboat-native-workload-failure", "", "native Windows qualification workload failure path")
+	nativeWindowsPrepareExecutableFlag      = flag.String("paperboat-task39-prepare-executable", "", "Task39 user fixture executable")
+	nativeWindowsPrepareOriginFlag          = flag.String("paperboat-task39-prepare-origin", "", "Task39 signed fixture origin")
+	nativeWindowsPrepareUserFlag            = flag.String("paperboat-task39-prepare-user", "", "Task39 disposable account")
+	nativeWindowsPrepareHomeFlag            = flag.String("paperboat-task39-prepare-home", "", "Task39 disposable profile")
 )
 
 const (
@@ -84,7 +89,7 @@ func TestNativeWindowsServiceProcess(t *testing.T) {
 	if role == "" {
 		t.Skip("native Windows service child only")
 	}
-	if role != "hostd" && role != "updater" {
+	if role != "hostd" && role != "updater" && role != "prepare" && role != "debug-daemon" && role != "port-check" && role != "port-debug" {
 		t.Fatalf("unknown native Windows service role %q", role)
 	}
 	if *nativeWindowsServiceNameFlag == "" || *nativeWindowsServiceOwnerSIDFlag == "" || *nativeWindowsServiceHealthFlag == "" || *nativeWindowsServiceFailureFlag == "" || *nativeWindowsServiceWorkloadFailureFlag == "" {
@@ -117,6 +122,10 @@ func TestNativeWindowsServiceProcess(t *testing.T) {
 			"-paperboat-native-workload-role=" + role,
 			"-paperboat-native-workload-health=" + *nativeWindowsServiceHealthFlag,
 			"-paperboat-native-workload-failure=" + *nativeWindowsServiceWorkloadFailureFlag,
+			"-paperboat-task39-prepare-executable=" + *nativeWindowsPrepareExecutableFlag,
+			"-paperboat-task39-prepare-origin=" + *nativeWindowsPrepareOriginFlag,
+			"-paperboat-task39-prepare-user=" + *nativeWindowsPrepareUserFlag,
+			"-paperboat-task39-prepare-home=" + *nativeWindowsPrepareHomeFlag,
 		},
 		Environment: map[string]string{
 			"PAPERBOAT_NATIVE_WORKLOAD_ROLE":    role,
@@ -142,8 +151,45 @@ func TestNativeWindowsServiceWorkload(t *testing.T) {
 	if role == "" {
 		t.Skip("native Windows workload child only")
 	}
-	if role != "hostd" && role != "updater" {
+	if role != "hostd" && role != "updater" && role != "prepare" && role != "debug-daemon" && role != "port-check" && role != "port-debug" {
 		t.Fatalf("unknown native Windows workload role %q", role)
+	}
+	if role == "prepare" {
+		command := exec.Command(*nativeWindowsPrepareExecutableFlag, "-test.run=^TestTask39PrepareWindowsUser$", "-test.v", "-task39-windows-prepare", "-task39-windows-origin="+*nativeWindowsPrepareOriginFlag, "-task39-windows-user="+*nativeWindowsPrepareUserFlag, "-task39-windows-home="+*nativeWindowsPrepareHomeFlag)
+		output, err := command.CombinedOutput()
+		appendNativeWindowsFailure(*nativeWindowsWorkloadFailureFlag, string(output))
+		if err != nil {
+			t.Fatalf("prepare fixture: %v: %s", err, output)
+		}
+		return
+	}
+	if role == "port-check" {
+		command := exec.Command(*nativeWindowsPrepareExecutableFlag, "-test.run=^TestWindowsBootstrapPortRetryOnNativeInstance$", "-test.v", "-task39-native-port-check")
+		output, err := command.CombinedOutput()
+		appendNativeWindowsFailure(*nativeWindowsWorkloadFailureFlag, string(output))
+		if err != nil {
+			t.Fatalf("port preflight fixture: %v: %s", err, output)
+		}
+		return
+	}
+	if role == "port-debug" {
+		command := exec.Command("powershell.exe", "-NoProfile", "-File", *nativeWindowsPrepareExecutableFlag)
+		output, err := command.CombinedOutput()
+		appendNativeWindowsFailure(*nativeWindowsWorkloadFailureFlag, string(output))
+		if err != nil {
+			t.Fatalf("port diagnostic fixture: %v: %s", err, output)
+		}
+		return
+	}
+	if role == "debug-daemon" {
+		appendNativeWindowsFailure(*nativeWindowsWorkloadFailureFlag, "env USERPROFILE="+os.Getenv("USERPROFILE")+" LOCALAPPDATA="+os.Getenv("LOCALAPPDATA")+" APPDATA="+os.Getenv("APPDATA"))
+		command := exec.Command(*nativeWindowsPrepareExecutableFlag, "daemon", "--server", *nativeWindowsPrepareOriginFlag)
+		output, err := command.CombinedOutput()
+		appendNativeWindowsFailure(*nativeWindowsWorkloadFailureFlag, string(output))
+		if err != nil {
+			t.Fatalf("daemon fixture: %v: %s", err, output)
+		}
+		return
 	}
 	healthAddress := *nativeWindowsWorkloadHealthFlag
 	if healthAddress == "" {

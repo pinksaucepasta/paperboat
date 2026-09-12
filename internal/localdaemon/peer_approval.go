@@ -45,7 +45,7 @@ func ApproveOwnedPeerEnrollments(ctx context.Context, store config.ProfileStore,
 	}
 	pending, err := client.PendingE2EEEndpoints(ctx)
 	if err != nil {
-		return err
+		return inventorySourceFailure("peer_pending", err)
 	}
 	eligible := make([]api.PendingEndpointIdentity, 0, len(pending))
 	for _, request := range pending {
@@ -67,12 +67,12 @@ func ApproveOwnedPeerEnrollments(ctx context.Context, store config.ProfileStore,
 	seed, err := store.PeerApprovalSigningKey(profile.Issuer, profile.Account.ID, profile.CLIClientSessionID)
 	if errors.Is(err, config.ErrSecretNotFound) {
 		if err := validateVerifierOnlyRoot(ctx, store, profile, client); err != nil {
-			return err
+			return inventorySourceFailure("peer_root", err)
 		}
 		return &PeerApprovalSignerUnavailableError{PendingRequests: len(eligible)}
 	}
 	if err != nil {
-		return err
+		return inventorySourceFailure("peer_signer", err)
 	}
 	clear(seed)
 	for _, request := range eligible {
@@ -86,7 +86,7 @@ func ApproveOwnedPeerEnrollments(ctx context.Context, store config.ProfileStore,
 			_, err = identitybootstrap.ApproveMachine(ctx, approval)
 		}
 		if err != nil {
-			return err
+			return inventorySourceFailure("peer_approve", err)
 		}
 	}
 	return nil

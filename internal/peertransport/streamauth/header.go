@@ -55,7 +55,7 @@ func (h Header) Validate(now time.Time) error {
 	if h.Version != Version || h.OperationID == "" || len(h.OperationID) > 128 || h.Consumer == "" || len(h.Consumer) > 128 || h.StreamID == "" || len(h.StreamID) > 128 || h.Credential == "" || len(h.Credential) > MaximumCredential || h.DeadlineUnix <= 0 || h.MaximumBytes == 0 || len(h.Target) > MaximumTarget {
 		return ErrInvalid
 	}
-	private := h.Consumer == "private_http" || h.Consumer == "private_tcp"
+	private := h.Consumer == "private_http" || h.Consumer == "private_tcp" || h.Consumer == "inspector"
 	if private != (h.Target != "") || h.Target != "" && !json.Valid([]byte(h.Target)) {
 		return ErrInvalid
 	}

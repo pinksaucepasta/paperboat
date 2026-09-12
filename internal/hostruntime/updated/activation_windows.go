@@ -41,6 +41,22 @@ const (
 	windowsSSHService       = "PaperboatSshd"
 )
 
+func windowsInstanceServiceNames(ownerSID string) (hostd, updater string, err error) {
+	instance, err := service.WindowsUserInstance(ownerSID)
+	if err != nil {
+		return "", "", err
+	}
+	return windowsHostdService + "-" + instance, windowsUpdaterService + "-" + instance, nil
+}
+
+func windowsInstanceNames(ownerSID string) (instance, hostd, updater, ssh, activator string, err error) {
+	instance, err = service.WindowsUserInstance(ownerSID)
+	if err != nil {
+		return "", "", "", "", "", err
+	}
+	return instance, windowsHostdService + "-" + instance, windowsUpdaterService + "-" + instance, windowsSSHService + "-" + instance, windowsActivatorService + "-" + instance, nil
+}
+
 // windowsReleasePaths is retained only as an internal transaction view while
 // the Windows service controller is being collapsed onto the canonical pb
 // slot. It is never exposed by service.Layout or written into service
@@ -77,7 +93,7 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 	if err := workerupdate.ValidateActivationRelease(release); err != nil {
 		return windowsActivationJournal{}, err
 	}
-	layout, err := service.DefaultLayout("windows")
+	layout, err := service.WindowsUserLayout(config.OwnerSID)
 	if err != nil {
 		return windowsActivationJournal{}, err
 	}
@@ -92,17 +108,25 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 	}
 	// Resolve and validate every mutable SCM dependency before downloading any
 	// release bytes. An inconsistent installation fails cheaply and unchanged.
-	oldHostd, err := queryWindowsServiceTarget(windowsHostdService, "__runtime-hostd")
+	hostdName, updaterName, err := windowsInstanceServiceNames(config.OwnerSID)
 	if err != nil {
 		return windowsActivationJournal{}, err
 	}
-	oldUpdater, err := queryWindowsServiceTarget(windowsUpdaterService, "__runtime-updated")
+	oldHostd, err := queryWindowsServiceTarget(hostdName, "__runtime-hostd")
+	if err != nil {
+		return windowsActivationJournal{}, err
+	}
+	oldUpdater, err := queryWindowsServiceTarget(updaterName, "__runtime-updated")
+	if err != nil {
+		return windowsActivationJournal{}, err
+	}
+	instance, _, _, sshName, _, err := windowsInstanceNames(config.OwnerSID)
 	if err != nil {
 		return windowsActivationJournal{}, err
 	}
 	oldSSH := windowsServiceTarget{}
 	if config.SetupMode == "host" {
-		oldSSH, err = queryOptionalWindowsServiceTarget(windowsSSHService)
+		oldSSH, err = queryOptionalWindowsServiceTarget(sshName)
 		if err != nil {
 			return windowsActivationJournal{}, err
 		}
@@ -113,7 +137,7 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 			return windowsActivationJournal{}, errInvalidWindowsActivation
 		}
 	} else {
-		unexpectedSSH, queryErr := queryOptionalWindowsServiceTarget(windowsSSHService)
+		unexpectedSSH, queryErr := queryOptionalWindowsServiceTarget(sshName)
 		if queryErr != nil {
 			return windowsActivationJournal{}, queryErr
 		}
@@ -132,7 +156,7 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 	if err != nil {
 		return windowsActivationJournal{}, err
 	}
-	localDaemonServiceRunning, err := localdaemon.WindowsLocalDaemonServiceRunning()
+	localDaemonServiceRunning, err := localdaemon.WindowsLocalDaemonServiceRunning(config.OwnerSID)
 	if err != nil {
 		return windowsActivationJournal{}, err
 	}
@@ -188,8 +212,8 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 		ManifestSHA256:        release.ManifestSHA256, CanaryPath: release.CanaryPath, CanaryStatus: release.CanaryStatus, CanarySamples: release.CanarySamples,
 		CanaryTimeout: release.CanaryTimeout, DrainTimeout: release.DrainTimeout, StabilityWindow: release.StabilityWindow, StabilityInterval: release.StabilityInterval, RollbackTimeout: release.RollbackTimeout,
 		HostdAPIMin: release.HostdAPIMin, HostdAPIMax: release.HostdAPIMax, RuntimeAPIMin: release.RuntimeAPIMin, RuntimeAPIMax: release.RuntimeAPIMax,
-		NewHostd:   windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-hostd"}, WasRunning: oldHostd.WasRunning},
-		NewUpdater: windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-updated"}, WasRunning: oldUpdater.WasRunning},
+		NewHostd:   windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-hostd", "--instance", instance}, WasRunning: oldHostd.WasRunning},
+		NewUpdater: windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-updated", "--instance", instance}, WasRunning: oldUpdater.WasRunning},
 	}
 	backend := newWindowsSCMActivationBackend(config)
 	if err := backend.AuthorizeRecovery(ctx, journal); err != nil {
@@ -198,7 +222,7 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 	if err := backend.WriteJournal(journal); err != nil {
 		return windowsActivationJournal{}, err
 	}
-	if err := installWindowsActivatorService(paths.Updater); err != nil {
+	if err := installWindowsActivatorService(paths.Updater, config.OwnerSID); err != nil {
 		return windowsActivationJournal{}, err
 	}
 	return journal, nil
@@ -422,8 +446,8 @@ func queryWindowsServiceTarget(name, expectedArgument string) (windowsServiceTar
 	if err != nil {
 		return windowsServiceTarget{}, err
 	}
-	args, err := windows.DecomposeCommandLine(config.BinaryPathName)
-	if err != nil || len(args) != 3 || args[1] != "daemon" || args[2] != expectedArgument || !filepath.IsAbs(args[0]) || !validPrivilegedWindowsServiceConfig(config, mgr.StartAutomatic, mgr.ErrorNormal) {
+	target, err := parseWindowsRuntimeServiceTarget(name, expectedArgument, config.BinaryPathName)
+	if err != nil || !validPrivilegedWindowsServiceConfig(config, mgr.StartAutomatic, mgr.ErrorNormal) {
 		return windowsServiceTarget{}, errInvalidWindowsActivation
 	}
 	if err := validateWindowsRecovery(item); err != nil {
@@ -433,7 +457,25 @@ func queryWindowsServiceTarget(name, expectedArgument string) (windowsServiceTar
 	if err != nil {
 		return windowsServiceTarget{}, err
 	}
-	return windowsServiceTarget{Executable: filepath.Clean(args[0]), Arguments: []string{"daemon", expectedArgument}, WasRunning: status.State != svc.Stopped}, nil
+	target.WasRunning = status.State != svc.Stopped
+	return target, nil
+}
+
+func parseWindowsRuntimeServiceTarget(name, role, command string) (windowsServiceTarget, error) {
+	base := ""
+	switch role {
+	case "__runtime-hostd":
+		base = windowsHostdService
+	case "__runtime-updated":
+		base = windowsUpdaterService
+	default:
+		return windowsServiceTarget{}, errInvalidWindowsActivation
+	}
+	args, err := windows.DecomposeCommandLine(command)
+	if err != nil || len(args) != 5 || !filepath.IsAbs(args[0]) || args[1] != "daemon" || args[2] != role || args[3] != "--instance" || len(args[4]) != 25 || args[4][0] != 'u' || !lowerHex(args[4][1:]) || name != base+"-"+args[4] {
+		return windowsServiceTarget{}, errInvalidWindowsActivation
+	}
+	return windowsServiceTarget{Executable: filepath.Clean(args[0]), Arguments: append([]string(nil), args[1:]...)}, nil
 }
 
 func queryOptionalWindowsServiceTarget(name string) (windowsServiceTarget, error) {
@@ -469,19 +511,23 @@ func validPrivilegedWindowsServiceConfig(config mgr.Config, startType, errorCont
 	return strings.EqualFold(config.ServiceStartName, "LocalSystem") && config.StartType == startType && config.ErrorControl == errorControl && config.SidType == windows.SERVICE_SID_TYPE_UNRESTRICTED && !config.DelayedAutoStart
 }
 
-func installWindowsActivatorService(executable string) error {
+func installWindowsActivatorService(executable, ownerSID string) error {
+	instance, _, _, _, name, err := windowsInstanceNames(ownerSID)
+	if err != nil {
+		return err
+	}
 	manager, err := mgr.Connect()
 	if err != nil {
 		return err
 	}
 	defer manager.Disconnect()
-	if current, openErr := manager.OpenService(windowsActivatorService); openErr == nil {
+	if current, openErr := manager.OpenService(name); openErr == nil {
 		defer current.Close()
 		config, e := current.Config()
 		if e != nil {
 			return e
 		}
-		config.BinaryPathName = windows.ComposeCommandLine([]string{executable, "daemon", "__runtime-activate"})
+		config.BinaryPathName = windows.ComposeCommandLine([]string{executable, "daemon", "__runtime-activate", "--instance", instance})
 		config.StartType = mgr.StartAutomatic
 		config.ErrorControl = mgr.ErrorSevere
 		config.ServiceStartName = "LocalSystem"
@@ -501,7 +547,7 @@ func installWindowsActivatorService(executable string) error {
 	} else if !errors.Is(openErr, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return openErr
 	}
-	item, err := manager.CreateService(windowsActivatorService, executable, mgr.Config{DisplayName: "Paperboat Update Activator", Description: "Paperboat one-shot verified update activation", StartType: mgr.StartAutomatic, ErrorControl: mgr.ErrorSevere, ServiceStartName: "LocalSystem", SidType: windows.SERVICE_SID_TYPE_UNRESTRICTED}, "daemon", "__runtime-activate")
+	item, err := manager.CreateService(name, executable, mgr.Config{DisplayName: "Paperboat Update Activator", Description: "Paperboat one-shot verified update activation", StartType: mgr.StartAutomatic, ErrorControl: mgr.ErrorSevere, ServiceStartName: "LocalSystem", SidType: windows.SERVICE_SID_TYPE_UNRESTRICTED}, "daemon", "__runtime-activate", "--instance", instance)
 	if err != nil {
 		return err
 	}
@@ -528,7 +574,7 @@ func standardWindowsRecoveryActions() []mgr.RecoveryAction {
 }
 
 func windowsRecoveryActionsForService(name string) []mgr.RecoveryAction {
-	if name == windowsSSHService {
+	if isWindowsSSHInstanceService(name) {
 		return windowsopenssh.ServiceRecoveryActions()
 	}
 	return standardWindowsRecoveryActions()
@@ -558,13 +604,17 @@ func windowsRecoveryActionsMatch(actual, expected []mgr.RecoveryAction) bool {
 	return true
 }
 
-func startWindowsActivatorService() error {
+func startWindowsActivatorService(ownerSID string) error {
+	_, _, _, _, name, err := windowsInstanceNames(ownerSID)
+	if err != nil {
+		return err
+	}
 	manager, err := mgr.Connect()
 	if err != nil {
 		return err
 	}
 	defer manager.Disconnect()
-	item, err := manager.OpenService(windowsActivatorService)
+	item, err := manager.OpenService(name)
 	if err != nil {
 		return err
 	}
@@ -673,7 +723,11 @@ func (b *windowsSCMActivationBackend) StopServices(ctx context.Context, localDae
 	// stopping SCM services so it cannot race the old route or survive an
 	// owner-service teardown with an ambiguous lease.
 	candidateErr := b.StopCandidate(ctx, windowsActivationJournal{})
-	serviceErr := stopNamedWindowsServices(ctx, windowsActivationServiceNames(b.config.SetupMode)...)
+	instance, err := service.WindowsUserInstance(b.config.OwnerSID)
+	if err != nil {
+		return errors.Join(candidateErr, err)
+	}
+	serviceErr := stopNamedWindowsServices(ctx, windowsActivationServiceNames(b.config.SetupMode, instance)...)
 	lockPath, err := windowsLocalDaemonLockPath(b.config.RuntimeStateRoot)
 	if err != nil {
 		return errors.Join(candidateErr, serviceErr, err)
@@ -720,7 +774,7 @@ func (b *windowsSCMActivationBackend) AuthorizeRecovery(ctx context.Context, jou
 }
 
 func (b *windowsSCMActivationBackend) ActivateBinary(ctx context.Context, journal windowsActivationJournal) error {
-	layout, err := service.DefaultLayout("windows")
+	layout, err := service.WindowsUserLayout(b.config.OwnerSID)
 	if err != nil || b.config.Binary != layout.Binary || b.config.BinaryRollback != layout.BinaryRollback || b.config.BinaryStaged != layout.BinaryStaged {
 		return errInvalidWindowsActivation
 	}
@@ -764,7 +818,7 @@ func (b *windowsSCMActivationBackend) ActivateBinary(ctx context.Context, journa
 }
 
 func (b *windowsSCMActivationBackend) RestoreBinary(ctx context.Context, journal windowsActivationJournal) error {
-	layout, err := service.DefaultLayout("windows")
+	layout, err := service.WindowsUserLayout(b.config.OwnerSID)
 	if err != nil || b.config.Binary != layout.Binary || b.config.BinaryRollback != layout.BinaryRollback || b.config.BinaryStaged != layout.BinaryStaged {
 		return errInvalidWindowsActivation
 	}
@@ -900,14 +954,22 @@ func retryWindowsFileOperation(ctx context.Context, operation func() error) erro
 }
 
 func (b *windowsSCMActivationBackend) SetServiceTargets(_ context.Context, hostd, updater, ssh windowsServiceTarget) error {
-	if err := setWindowsServiceTarget(windowsHostdService, hostd); err != nil {
+	hostdName, updaterName, err := windowsInstanceServiceNames(b.config.OwnerSID)
+	if err != nil {
 		return err
 	}
-	if err := setWindowsServiceTarget(windowsUpdaterService, updater); err != nil {
+	if err := setWindowsServiceTarget(hostdName, hostd); err != nil {
+		return err
+	}
+	if err := setWindowsServiceTarget(updaterName, updater); err != nil {
 		return err
 	}
 	if b.config.SetupMode == "host" && ssh.Executable != "" {
-		return setWindowsServiceTarget(windowsSSHService, ssh)
+		_, _, _, sshName, _, err := windowsInstanceNames(b.config.OwnerSID)
+		if err != nil {
+			return err
+		}
+		return setWindowsServiceTarget(sshName, ssh)
 	}
 	return nil
 }
@@ -918,12 +980,12 @@ func (b *windowsSCMActivationBackend) SetServiceTargets(_ context.Context, hostd
 // rollback path. Once RestoreBinary succeeds that path no longer exists, so
 // restarting it verbatim leaves every service stopped and strands recovery.
 func normalizeWindowsRollbackTargets(hostd, updater, ssh windowsServiceTarget) (windowsServiceTarget, windowsServiceTarget, windowsServiceTarget, error) {
-	layout, err := service.DefaultLayout("windows")
-	if err != nil {
-		return windowsServiceTarget{}, windowsServiceTarget{}, windowsServiceTarget{}, err
+	if !filepath.IsAbs(hostd.Executable) {
+		return windowsServiceTarget{}, windowsServiceTarget{}, windowsServiceTarget{}, errInvalidWindowsActivation
 	}
-	if strings.EqualFold(updater.Executable, layout.BinaryRollback) {
-		updater.Executable = layout.Binary
+	rollback := filepath.Join(filepath.Dir(hostd.Executable), "pb.rollback.exe")
+	if strings.EqualFold(updater.Executable, rollback) {
+		updater.Executable = hostd.Executable
 	}
 	return hostd, updater, ssh, nil
 }
@@ -936,7 +998,11 @@ func (b *windowsSCMActivationBackend) StartServices(ctx context.Context, hostd, 
 	// Hostd validates its managed SSH loopback target during startup. Start SSH
 	// first so both activation and rollback can bring a host runtime up from a
 	// fully stopped service set without a dependency deadlock.
-	for _, name := range windowsActivationServiceStartNames(b.config.SetupMode, hostd, updater, ssh) {
+	instance, err := service.WindowsUserInstance(b.config.OwnerSID)
+	if err != nil {
+		return err
+	}
+	for _, name := range windowsActivationServiceStartNames(b.config.SetupMode, instance, hostd, updater, ssh) {
 		if err := startNamedWindowsService(ctx, name); err != nil {
 			return err
 		}
@@ -977,7 +1043,7 @@ func (b *windowsSCMActivationBackend) FinalizeServices(ctx context.Context, jour
 	if journal.Stage != windowsActivationCommitted {
 		return errInvalidWindowsActivation
 	}
-	return hostinstall.EnsureWindowsLocalDaemonService(ctx)
+	return hostinstall.EnsureWindowsLocalDaemonService(ctx, b.config.OwnerSID)
 }
 
 func (b *windowsSCMActivationBackend) Drain(ctx context.Context, journal windowsActivationJournal) error {
@@ -1040,7 +1106,11 @@ func (b *windowsSCMActivationBackend) VerifyHealth(ctx context.Context, journal 
 	if b == nil || b.config.ActivationGate == nil {
 		return errInvalidWindowsActivation
 	}
-	if err := requireNamedWindowsServicesRunning(windowsHostdService, windowsUpdaterService); err != nil {
+	hostdName, updaterName, err := windowsInstanceServiceNames(b.config.OwnerSID)
+	if err != nil {
+		return err
+	}
+	if err := requireNamedWindowsServicesRunning(hostdName, updaterName); err != nil {
 		return fmt.Errorf("verify Windows runtime services: %w", err)
 	}
 	token, err := os.ReadFile(b.config.TokenFile)
@@ -1091,7 +1161,11 @@ func (b *windowsSCMActivationBackend) VerifyHealth(ctx context.Context, journal 
 		return errors.Join(errors.New("verify staged Windows CLI component"), errInvalidWindowsActivation)
 	}
 	if journal.NewSSH.WasRunning {
-		if err := requireNamedWindowsServicesRunning(windowsSSHService); err != nil {
+		_, _, _, sshName, _, err := windowsInstanceNames(b.config.OwnerSID)
+		if err != nil {
+			return err
+		}
+		if err := requireNamedWindowsServicesRunning(sshName); err != nil {
 			return err
 		}
 	}
@@ -1118,7 +1192,11 @@ func (b *windowsSCMActivationBackend) VerifyHealth(ctx context.Context, journal 
 }
 
 func (b *windowsSCMActivationBackend) verifyWindowsRuntimeVersions(ctx context.Context, version string) error {
-	if err := requireNamedWindowsServicesRunning(windowsHostdService, windowsUpdaterService); err != nil {
+	hostdName, updaterName, err := windowsInstanceServiceNames(b.config.OwnerSID)
+	if err != nil {
+		return err
+	}
+	if err := requireNamedWindowsServicesRunning(hostdName, updaterName); err != nil {
 		return fmt.Errorf("verify Windows runtime services: %w", err)
 	}
 	updater, err := NewClient(b.config.ControlSocket, 2*time.Second)
@@ -1132,7 +1210,7 @@ func (b *windowsSCMActivationBackend) verifyWindowsRuntimeVersions(ctx context.C
 	if err != nil {
 		return err
 	}
-	paths, err := localapi.CurrentPaths(0)
+	paths, err := localapi.WindowsPaths(b.config.RuntimeStateRoot, b.config.OwnerSID)
 	if err != nil {
 		return fmt.Errorf("resolve Paperboat local daemon endpoint: %w", err)
 	}
@@ -1390,10 +1468,10 @@ func setWindowsServiceTarget(name string, target windowsServiceTarget) error {
 	if !filepath.IsAbs(target.Executable) || len(target.Arguments) == 0 || len(target.Arguments) > 16 {
 		return errInvalidWindowsActivation
 	}
-	if name == windowsHostdService && (len(target.Arguments) != 2 || target.Arguments[0] != "daemon" || target.Arguments[1] != "__runtime-hostd") || name == windowsUpdaterService && (len(target.Arguments) != 2 || target.Arguments[0] != "daemon" || target.Arguments[1] != "__runtime-updated") {
+	if strings.HasPrefix(name, windowsHostdService+"-") && (len(target.Arguments) != 4 || target.Arguments[0] != "daemon" || target.Arguments[1] != "__runtime-hostd" || target.Arguments[2] != "--instance" || name != windowsHostdService+"-"+target.Arguments[3]) || strings.HasPrefix(name, windowsUpdaterService+"-") && (len(target.Arguments) != 4 || target.Arguments[0] != "daemon" || target.Arguments[1] != "__runtime-updated" || target.Arguments[2] != "--instance" || name != windowsUpdaterService+"-"+target.Arguments[3]) {
 		return errInvalidWindowsActivation
 	}
-	if name == windowsSSHService && !validWindowsSSHArguments(target.Arguments) {
+	if strings.HasPrefix(name, windowsSSHService+"-") && !validWindowsSSHArguments(target.Arguments) {
 		return errInvalidWindowsActivation
 	}
 	manager, err := mgr.Connect()
@@ -1524,7 +1602,7 @@ func resumeWindowsActivation(ctx context.Context, config WindowsConfig) (bool, e
 	if !windowsActivationNeedsResume(journal, config.ActiveVersion, false) {
 		return false, nil
 	}
-	activatorOwnsTransaction, err := windowsActivatorOwnsTransaction()
+	activatorOwnsTransaction, err := windowsActivatorOwnsTransaction(config.OwnerSID)
 	if err != nil {
 		return false, err
 	}
@@ -1544,29 +1622,33 @@ func resumeWindowsActivation(ctx context.Context, config WindowsConfig) (bool, e
 	// already starting to become visible in SCM. Re-check ownership immediately
 	// before mutating the activator service so this updater never steals a live
 	// transaction during that handoff window.
-	activatorOwnsTransaction, err = windowsActivatorOwnsTransaction()
+	activatorOwnsTransaction, err = windowsActivatorOwnsTransaction(config.OwnerSID)
 	if err != nil {
 		return false, err
 	}
 	if activatorOwnsTransaction {
 		return false, nil
 	}
-	if err := installWindowsActivatorService(journal.Updater.Path); err != nil {
+	if err := installWindowsActivatorService(journal.Updater.Path, config.OwnerSID); err != nil {
 		return false, err
 	}
-	if err := startWindowsActivatorService(); err != nil && !errors.Is(err, windows.ERROR_SERVICE_ALREADY_RUNNING) {
+	if err := startWindowsActivatorService(config.OwnerSID); err != nil && !errors.Is(err, windows.ERROR_SERVICE_ALREADY_RUNNING) {
 		return false, err
 	}
 	return true, nil
 }
 
-func windowsActivatorOwnsTransaction() (bool, error) {
+func windowsActivatorOwnsTransaction(ownerSID string) (bool, error) {
+	_, _, _, _, name, err := windowsInstanceNames(ownerSID)
+	if err != nil {
+		return false, err
+	}
 	manager, err := mgr.Connect()
 	if err != nil {
 		return false, err
 	}
 	defer manager.Disconnect()
-	item, err := manager.OpenService(windowsActivatorService)
+	item, err := manager.OpenService(name)
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return false, nil
 	}
@@ -1585,7 +1667,7 @@ func validWindowsActivationPaths(config WindowsConfig, journal windowsActivation
 	if config.SetupMode == "client" && (journal.OldSSH.Executable != "" || journal.NewSSH.Executable != "") {
 		return false
 	}
-	layout, err := service.DefaultLayout("windows")
+	layout, err := service.WindowsUserLayout(config.OwnerSID)
 	if err != nil {
 		return false
 	}
@@ -1604,11 +1686,11 @@ func validWindowsActivationPaths(config WindowsConfig, journal windowsActivation
 	if !exactReleasePattern.MatchString(journal.PreviousVersion) || !strings.EqualFold(journal.OldHostd.Executable, layout.Binary) || !windowsUpdaterExecutableMatches(layout, journal.OldUpdater.Executable) || journal.OldSSH.Executable != "" && !strings.EqualFold(journal.OldSSH.Executable, layout.Binary) {
 		return false
 	}
-	for _, target := range []windowsServiceTarget{journal.OldHostd, journal.OldUpdater, journal.OldSSH} {
+	for _, target := range []windowsServiceTarget{journal.OldHostd, journal.NewHostd, journal.OldUpdater, journal.NewUpdater, journal.OldSSH, journal.NewSSH} {
 		if target.Executable == "" {
 			continue
 		}
-		if !filepath.IsAbs(target.Executable) || filepath.Clean(target.Executable) != target.Executable || len(target.Arguments) == 0 || len(target.Arguments) > 16 {
+		if !filepath.IsAbs(target.Executable) || filepath.Clean(target.Executable) != target.Executable || len(target.Arguments) != 4 || target.Arguments[2] != "--instance" || target.Arguments[3] != layout.Instance {
 			return false
 		}
 		for _, argument := range target.Arguments {
@@ -1633,7 +1715,8 @@ func RunWindowsActivator(ctx context.Context, config WindowsConfig) error {
 		var manager *mgr.Mgr
 		manager, connectErr = mgr.Connect()
 		if connectErr == nil {
-			if item, openErr := manager.OpenService(windowsActivatorService); openErr == nil {
+			_, _, _, _, name, _ := windowsInstanceNames(config.OwnerSID)
+			if item, openErr := manager.OpenService(name); openErr == nil {
 				_ = item.Delete()
 				_ = item.Close()
 			}

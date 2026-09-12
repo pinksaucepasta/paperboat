@@ -146,8 +146,14 @@ func (s *Session) AcceptAuthorized(ctx context.Context, authorize func(context.C
 
 func capabilityForConsumer(consumer string) string {
 	switch consumer {
-	case "terminal", "exec", "ssh":
+	case "inspector":
+		return "inspector"
+	case "terminal":
 		return "terminal"
+	case "exec":
+		return "exec"
+	case "ssh":
+		return "managed_ssh"
 	case "codex":
 		return "codex"
 	case "file_transfer", "file_transfer_key":

@@ -88,6 +88,10 @@ func TestGitRepositoryFetchPublishAndObserve(t *testing.T) {
 	if err != nil || remote.Revision == "" {
 		t.Fatalf("remote = %#v, %v", remote, err)
 	}
+	if revision, review, reviewErr := repository.Review(context.Background(), ""); reviewErr != nil || revision != remote.Revision ||
+		len(review) != 1 || review[0].Path != ".pbinclude" || review[0].Reason != "added" {
+		t.Fatalf("initial review = %q %#v, %v", revision, review, reviewErr)
+	}
 	prepared, err := repository.Reconcile(context.Background(), remote)
 	if err != nil {
 		t.Fatal(err)
@@ -108,6 +112,14 @@ func TestGitRepositoryFetchPublishAndObserve(t *testing.T) {
 	result, err := repository.Publish(context.Background(), prepared, 1)
 	if err != nil || !result.Landed {
 		t.Fatalf("publish = %#v, %v", result, err)
+	}
+	updated, err := repository.Fetch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revision, review, reviewErr := repository.Review(context.Background(), remote.Revision); reviewErr != nil || revision != updated.Revision ||
+		len(review) != 1 || review[0].Path != "dot_config" || review[0].Reason != "changed" {
+		t.Fatalf("incremental review = %q %#v, %v", revision, review, reviewErr)
 	}
 	landed, head, err := repository.ObserveCommit(context.Background(), prepared.CommitID)
 	if err != nil || !landed || head != prepared.CommitID {

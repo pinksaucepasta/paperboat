@@ -11,6 +11,26 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 )
 
+func TestCapabilityForConsumerIsExact(t *testing.T) {
+	want := map[string]string{
+		"terminal":          "terminal",
+		"exec":              "exec",
+		"ssh":               "managed_ssh",
+		"file_transfer":     "file_transfer",
+		"file_transfer_key": "file_transfer",
+		"private_http":      "private_access",
+		"private_tcp":       "private_access",
+	}
+	for consumer, capability := range want {
+		if got := capabilityForConsumer(consumer); got != capability {
+			t.Fatalf("consumer %q capability=%q want=%q", consumer, got, capability)
+		}
+	}
+	if got := capabilityForConsumer("preview_manage"); got != "" {
+		t.Fatalf("management-only consumer received native capability %q", got)
+	}
+}
+
 type shortWriter struct{ bytes.Buffer }
 
 func (w *shortWriter) Write(value []byte) (int, error) {

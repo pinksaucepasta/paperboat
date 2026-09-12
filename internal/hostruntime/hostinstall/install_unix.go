@@ -86,7 +86,10 @@ func Install(ctx context.Context, request Request) error {
 	if err := Validate(request, invokingUID()); err != nil {
 		return err
 	}
-	paths := platformPaths()
+	paths := platformPaths(request.UID)
+	if err := ensureSharedUserParents(paths); err != nil {
+		return err
+	}
 	var err error
 	var legacyHost *service.Installer
 	// hostd now owns the runtime control plane. The separate privileged host
@@ -207,7 +210,7 @@ func Commit(request Request) error {
 	if err := Validate(request, invokingUID()); err != nil {
 		return err
 	}
-	paths := platformPaths()
+	paths := platformPaths(request.UID)
 	journal, err := loadJournal(paths.journal)
 	if err != nil || journal.Stage != "services_started" {
 		return ErrInvalidRequest
@@ -230,18 +233,16 @@ func Uninstall(ctx context.Context, request Request) error {
 	if err := Validate(request, invokingUID()); err != nil {
 		return err
 	}
-	return uninstallValidated(ctx, request, platformPaths())
+	return uninstallValidated(ctx, request, platformPaths(request.UID))
 }
 
 func UninstallPersisted(ctx context.Context) error {
 	if os.Geteuid() != 0 {
 		return ErrNotPrivileged
 	}
-	paths := platformPaths()
-	request, err := loadInstallMetadata(paths.metadata, invokingUID())
-	if errors.Is(err, os.ErrNotExist) && paths.legacyMetadata != "" {
-		request, err = loadInstallMetadata(paths.legacyMetadata, invokingUID())
-	}
+	uid := invokingUID()
+	paths := platformPaths(uid)
+	request, err := loadInstallMetadata(paths.metadata, uid)
 	if err != nil {
 		return err
 	}
@@ -258,7 +259,10 @@ func Repair(ctx context.Context, request Request) error {
 	if err := Validate(request, invokingUID()); err != nil {
 		return err
 	}
-	paths := platformPaths()
+	paths := platformPaths(request.UID)
+	if err := ensureSharedUserParents(paths); err != nil {
+		return err
+	}
 	hostd, updater, err := pendingInstallers(request, paths)
 	if err != nil {
 		return errors.Join(ErrInvalidRequest, err)
@@ -309,11 +313,9 @@ func RepairPersisted(ctx context.Context) error {
 	if os.Geteuid() != 0 {
 		return ErrNotPrivileged
 	}
-	paths := platformPaths()
-	request, err := loadInstallMetadata(paths.metadata, invokingUID())
-	if errors.Is(err, os.ErrNotExist) && paths.legacyMetadata != "" {
-		request, err = loadInstallMetadata(paths.legacyMetadata, invokingUID())
-	}
+	uid := invokingUID()
+	paths := platformPaths(uid)
+	request, err := loadInstallMetadata(paths.metadata, uid)
 	if err != nil {
 		return err
 	}
@@ -330,7 +332,7 @@ func Stop(ctx context.Context, request Request) error {
 	if err := Validate(request, invokingUID()); err != nil {
 		return err
 	}
-	paths := platformPaths()
+	paths := platformPaths(request.UID)
 	hostd, updater, err := pendingInstallers(request, paths)
 	if err != nil {
 		return errors.Join(ErrInvalidRequest, err)
@@ -510,6 +512,7 @@ func componentLayout(paths installPaths) (service.Layout, error) {
 	if err != nil {
 		return service.Layout{}, err
 	}
+	layout.Instance = paths.instance
 	layout.InstallRoot = paths.root
 	layout.ReleasesRoot = filepath.Join(paths.root, "releases")
 	layout.Binary = paths.worker
@@ -528,14 +531,15 @@ func hostInstaller(request Request, paths installPaths) (*service.Installer, err
 }
 
 func hostInstallerWithMissing(request Request, paths installPaths, allowMissingExecutable bool) (*service.Installer, error) {
-	hostController := service.Controller(service.SystemdController{Runner: service.ExecRunner{}, Unit: "paperboat-runtime-privileged.service"})
+	instance := "u" + strconv.Itoa(request.UID)
+	hostController := service.Controller(service.SystemdController{Runner: service.ExecRunner{}, Unit: "paperboat-runtime-privileged-" + instance + ".service"})
 	rootGroup := "root"
 	if runtime.GOOS == "darwin" {
 		rootGroup = "wheel"
-		hostController = service.LaunchdController{Runner: service.ExecRunner{}, UID: request.UID, Label: service.HostLabel}
+		hostController = service.LaunchdController{Runner: service.ExecRunner{}, UID: request.UID, Label: service.HostLabel + "." + instance}
 	}
 	config := service.Config{
-		Platform: request.Platform, Kind: service.HostKind, ConfigRoot: string(os.PathSeparator), Executable: paths.worker,
+		Platform: request.Platform, Kind: service.HostKind, Instance: instance, ConfigRoot: string(os.PathSeparator), Executable: paths.worker,
 		User: "root", Group: rootGroup, Arguments: []string{
 			"daemon", "__runtime-host-service", "--uid", strconv.Itoa(request.UID), "--gid", strconv.Itoa(request.GID),
 			"--listen-address", request.HelperListenAddress,
@@ -555,9 +559,10 @@ func hostInstallerWithMissing(request Request, paths installPaths, allowMissingE
 }
 
 type installPaths struct {
+	instance                                             string
 	root, installerState, runtimeState                   string
 	worker, workerNext, workerRollback, workerPrevious   string
-	journal, metadata, legacyMetadata                    string
+	journal, metadata                                    string
 	hostdToken, hostdSocket, updaterSocket, updateState  string
 	environmentCredentialDirectory                       string
 	environmentCredential, environmentCredentialMetadata string
@@ -569,20 +574,19 @@ type installJournal struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-func platformPaths() installPaths {
-	layout, err := service.DefaultLayout(runtime.GOOS)
+func platformPaths(uid int) installPaths {
+	layout, err := service.UserLayout(runtime.GOOS, uid)
 	if err != nil {
 		panic("hostinstall: unsupported Unix service layout: " + err.Error())
 	}
 	root := layout.InstallRoot
-	installerState, runtimeState := "/var/lib/paperboat-installer", "/var/lib/paperboat"
-	legacyMetadata := filepath.Join(runtimeState, "install-metadata.json")
+	instance := "u" + strconv.Itoa(uid)
+	installerState, runtimeState := filepath.Join("/var/lib/paperboat-installer/users", instance), filepath.Join("/var/lib/paperboat/users", instance)
 	if runtime.GOOS == "darwin" {
-		installerState = "/Library/Application Support/Paperboat"
+		installerState = filepath.Join("/Library/Application Support/Paperboat/users", instance)
 		runtimeState = installerState
-		legacyMetadata = ""
 	}
-	p := installPaths{root: root, installerState: installerState, runtimeState: runtimeState, legacyMetadata: legacyMetadata}
+	p := installPaths{instance: instance, root: root, installerState: installerState, runtimeState: runtimeState}
 	p.worker = layout.Binary
 	// Release slots are kept in a dedicated root-owned directory so the
 	// updater can atomically stage, promote, and roll back without touching the
@@ -595,7 +599,7 @@ func platformPaths() installPaths {
 	p.metadata = filepath.Join(installerState, "install-metadata.json")
 	p.hostdToken = filepath.Join(runtimeState, "hostd.token")
 	p.hostdSocket = layout.HostdSocket
-	p.updaterSocket = "/var/run/paperboat-updated/control.sock"
+	p.updaterSocket = layout.UpdaterSocket
 	p.updateState = layout.UpdateStateRoot
 	if runtime.GOOS != "darwin" {
 		p.environmentCredentialDirectory = filepath.Join(installerState, "environment")
@@ -612,7 +616,7 @@ func LoadEnrolledOwner(uid int) (Request, error) {
 	if os.Geteuid() != 0 {
 		return Request{}, ErrNotPrivileged
 	}
-	return loadInstallMetadata(platformPaths().metadata, uid)
+	return loadInstallMetadata(platformPaths(uid).metadata, uid)
 }
 
 func ensureHostdToken(paths installPaths, request Request) error {
@@ -638,6 +642,20 @@ func ensureHostdToken(paths installPaths, request Request) error {
 		return err
 	}
 	return os.Chmod(paths.hostdToken, 0o600)
+}
+
+func ensureSharedUserParents(paths installPaths) error {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	users := filepath.Dir(paths.runtimeState)
+	root := filepath.Dir(users)
+	for _, path := range []string{root, users} {
+		if err := secureRootDirectory(path, 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func ensureManagedDirectories(paths installPaths, request Request) error {
@@ -893,7 +911,7 @@ func removeInstalledFiles(paths installPaths) error {
 	var result error
 	for _, path := range []string{
 		paths.worker, paths.workerNext, paths.workerRollback, paths.workerPrevious,
-		paths.metadata, paths.legacyMetadata,
+		paths.metadata,
 		paths.hostdToken, paths.hostdSocket, paths.updaterSocket,
 		filepath.Join(paths.runtimeState, "hostd", "fence.json"),
 		filepath.Join(paths.runtimeState, "hostd"),

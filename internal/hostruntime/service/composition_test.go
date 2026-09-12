@@ -167,6 +167,7 @@ func TestHostLifecycleManagerRollsBackExactBothComponentStateAfterProbeFailure(t
 		BinaryStaged:    filepath.Join(root, "install", "releases", "staged"),
 		UpdateStateRoot: filepath.Join(root, "updated"),
 		HostdSocket:     filepath.Join(root, "hostd", "hostd.sock"),
+		UpdaterSocket:   filepath.Join(root, "updated-runtime", "control.sock"),
 	}
 	if err := os.MkdirAll(filepath.Dir(layout.Binary), 0o755); err != nil {
 		t.Fatal(err)
@@ -239,6 +240,7 @@ func TestHostLifecycleManagerIncludesPrivilegedHostBeforeSupervisor(t *testing.T
 		BinaryStaged:    filepath.Join(root, "install", "releases", "staged"),
 		UpdateStateRoot: filepath.Join(root, "updated"),
 		HostdSocket:     filepath.Join(root, "hostd", "hostd.sock"),
+		UpdaterSocket:   filepath.Join(root, "updated-runtime", "control.sock"),
 	}
 	if err := os.MkdirAll(filepath.Dir(layout.Binary), 0o755); err != nil {
 		t.Fatal(err)
@@ -281,6 +283,7 @@ func TestHostLifecycleManagerRollsBackPrivilegedHostWithSupervisorAndUpdater(t *
 		BinaryStaged:    filepath.Join(root, "install", "releases", "staged"),
 		UpdateStateRoot: filepath.Join(root, "updated"),
 		HostdSocket:     filepath.Join(root, "hostd", "hostd.sock"),
+		UpdaterSocket:   filepath.Join(root, "updated-runtime", "control.sock"),
 	}
 	if err := os.MkdirAll(filepath.Dir(layout.Binary), 0o755); err != nil {
 		t.Fatal(err)

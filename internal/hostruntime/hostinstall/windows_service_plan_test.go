@@ -370,12 +370,12 @@ func TestWindowsClientRepairPlanRepairsBeforeSSHCleanup(t *testing.T) {
 }
 
 func TestWindowsActivatorOwnershipAcceptsOnlyVersionedReleaseBinary(t *testing.T) {
-	layout, err := service.DefaultLayout("windows")
+	layout, err := service.WindowsUserLayout("S-1-5-21-196874002-3579808280-620482841-1030")
 	if err != nil {
 		t.Fatal(err)
 	}
 	valid := layout.ReleasesRoot + `\versions\2026.08.28.1\pb.exe`
-	if !windowsActivatorServiceOwned(layout, valid, []string{"daemon", "__runtime-activate"}, "LocalSystem") {
+	if !windowsActivatorServiceOwned(layout, valid, []string{"daemon", "__runtime-activate", "--instance", layout.Instance}, "LocalSystem") {
 		t.Fatalf("owned activator target rejected: %q", valid)
 	}
 	for _, invalid := range []string{layout.Binary, layout.BinaryRollback, layout.ReleasesRoot + `\versions\..\pb.exe`, layout.ReleasesRoot + `\versions\2026.08.28.1\other.exe`} {
@@ -383,8 +383,16 @@ func TestWindowsActivatorOwnershipAcceptsOnlyVersionedReleaseBinary(t *testing.T
 			t.Fatalf("unowned activator target accepted: %q", invalid)
 		}
 	}
-	if windowsActivatorServiceOwned(layout, valid, []string{"daemon", "__runtime-updated"}, "LocalSystem") || windowsActivatorServiceOwned(layout, valid, []string{"daemon", "__runtime-activate"}, "User") {
+	if windowsActivatorServiceOwned(layout, valid, []string{"daemon", "__runtime-updated", "--instance", layout.Instance}, "LocalSystem") || windowsActivatorServiceOwned(layout, valid, []string{"daemon", "__runtime-activate", "--instance", layout.Instance}, "User") || windowsActivatorServiceOwned(layout, valid, []string{"daemon", "__runtime-activate", "--instance", "u000000000000000000000000"}, "LocalSystem") {
 		t.Fatal("unowned activator service command accepted")
+	}
+	if windowsActivatorServiceOwned(layout, valid, []string{"daemon", "__runtime-activate"}, "LocalSystem") || windowsActivatorServiceOwned(layout, valid, []string{"daemon", "__runtime-activate", "--instance", ""}, "LocalSystem") {
+		t.Fatal("missing instance accepted")
+	}
+	empty := layout
+	empty.Instance = ""
+	if windowsActivatorServiceOwned(empty, valid, []string{"daemon", "__runtime-activate", "--instance", ""}, "LocalSystem") {
+		t.Fatal("unscoped activator accepted")
 	}
 }
 

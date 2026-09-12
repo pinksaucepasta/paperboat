@@ -27,3 +27,7 @@ func deriveServiceSID(serviceName string) string {
 		binary.LittleEndian.Uint32(digest[16:20]),
 	)
 }
+
+// ServiceSID returns the deterministic SCM SID for an exact Paperboat service
+// name so per-user services never share filesystem ACL principals.
+func ServiceSID(serviceName string) string { return deriveServiceSID(serviceName) }

@@ -6,11 +6,14 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
+	"net/http"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 )
 
@@ -36,13 +39,23 @@ func (s *managedSSHKeyReconciler) Start(ctx context.Context) error {
 	if ctx == nil || s.client == nil || s.identity == nil || s.registration.MachineID == "" || s.registration.InstallationGeneration < 1 || s.workerGeneration == 0 || s.setID == "" || len(s.publicKeys) == 0 || s.home == "" || s.interval <= 0 || s.timeout <= 0 {
 		return ErrProductionInvalid
 	}
-	if err := s.reconcile(ctx); err != nil {
-		return errors.Join(ErrManagedSSHUnavailable, err)
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.cancel != nil {
 		return errors.New("managed SSH key reconciliation is already running")
+	}
+	initialCtx, initialCancel := context.WithTimeout(ctx, s.timeout)
+	err := s.reconcile(initialCtx)
+	initialCancel()
+	if ctx.Err() != nil {
+		return errors.Join(ErrManagedSSHUnavailable, ctx.Err(), err)
+	}
+	if err != nil {
+		var unavailable *managedSSHAuthorityUnavailable
+		if !errors.As(err, &unavailable) {
+			return errors.Join(ErrManagedSSHUnavailable, err)
+		}
+		slog.Warn("managed SSH authority unavailable at startup; managed keys removed, retrying")
 	}
 	workerCtx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
@@ -66,7 +79,7 @@ func (s *managedSSHKeyReconciler) run(ctx context.Context, done chan<- struct{})
 				// current authority response. Retaining it after a failed refresh
 				// would turn a temporary control-plane failure into unbounded
 				// revocation latency.
-				slog.Warn("managed SSH authority refresh failed; removed managed authorized keys", "error", err)
+				slog.Warn("managed SSH authority refresh failed", "error", err)
 			}
 			cancel()
 		}
@@ -79,6 +92,9 @@ func (s *managedSSHKeyReconciler) reconcile(ctx context.Context) error {
 	keys, active, err := reconcileManagedSSHAuthorityWithOperations(ctx, s.client, s.identity, s.registration, s.workerGeneration, s.setID, s.publicKeys, "managed-ssh-observe-"+suffix, "managed-ssh-keys-"+suffix)
 	if err != nil {
 		_, cleanupErr := reconcilePlatformAuthorizedKeys(s.home, s.ownerUID, nil)
+		if cleanupErr == nil && retryableManagedSSHAuthorityError(err) {
+			return &managedSSHAuthorityUnavailable{cause: err}
+		}
 		return errors.Join(err, cleanupErr)
 	}
 	if !active {
@@ -104,4 +120,28 @@ func (s *managedSSHKeyReconciler) Shutdown(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// Only availability failures may keep initial reconciliation alive. Explicit
+// authentication/authorization rejection and invalid local or protocol state
+// still fail startup; no previous keys survive an unavailable authority.
+type managedSSHAuthorityUnavailable struct{ cause error }
+
+func (e *managedSSHAuthorityUnavailable) Error() string {
+	return "managed SSH authority is temporarily unavailable"
+}
+func (e *managedSSHAuthorityUnavailable) Unwrap() error { return e.cause }
+func retryableManagedSSHAuthorityError(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, clientapi.ErrUnauthenticated) {
+		return false
+	}
+	var response *clientapi.APIError
+	if errors.As(err, &response) {
+		return response.Status == http.StatusRequestTimeout || response.Status == http.StatusTooManyRequests || response.Status >= 500 && response.Status <= 599
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var network *net.OpError
+	return errors.As(err, &network)
 }

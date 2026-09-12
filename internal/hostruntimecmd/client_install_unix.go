@@ -69,6 +69,7 @@ func InstallClient(ctx context.Context, config ClientInstallConfig, stdin io.Rea
 		HelperListenAddress: config.ListenAddress, SetupMode: "client",
 	}
 	previousGeneration := workerGeneration(config.StateRoot)
+	readinessStarted := time.Now().UTC()
 	fmt.Fprintln(stderr, "Administrator approval is required to install the device service.")
 	installCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
@@ -85,14 +86,17 @@ func InstallClient(ctx context.Context, config ClientInstallConfig, stdin io.Rea
 	for {
 		requestHTTP, _ := http.NewRequestWithContext(readyCtx, http.MethodGet, "http://"+config.ListenAddress+"/healthz", nil)
 		response, requestErr := client.Do(requestHTTP)
-		if requestErr == nil && bootstrapWorkerReady(readyCtx, response, config.StateRoot, config.Artifact.Version, previousGeneration, false) {
+		if requestErr == nil && bootstrapWorkerReady(readyCtx, response, config.StateRoot, config.Artifact.Version, previousGeneration+1, readinessStarted, false) {
 			if err := authorizeServiceOperation(ctx, artifactPath, "commit", request, stdout, stderr); err != nil {
 				return errors.Join(err, authorizeServiceOperation(ctx, artifactPath, "uninstall", request, stdout, stderr), workerCommand.Rollback())
 			}
 			if err := workerCommand.Commit(); err != nil {
 				return err
 			}
-			if err := bindBootstrapDaemon(readyCtx, config.ControlURL, config.Artifact.Version); err != nil {
+			daemonCtx, daemonCancel := context.WithTimeout(ctx, 45*time.Second)
+			err := bindBootstrapDaemon(daemonCtx, config.ControlURL, config.Artifact.Version)
+			daemonCancel()
+			if err != nil {
 				return err
 			}
 			fmt.Fprintln(stdout, "Paperboat device service is ready.")

@@ -27,20 +27,27 @@ func ServiceRecoveryActions() []mgr.RecoveryAction {
 	return append([]mgr.RecoveryAction(nil), paperboatServiceRecovery...)
 }
 
-func InstallService(ctx context.Context, serviceExecutable, sshdPath, configPath string) error {
-	if ctx == nil || !filepath.IsAbs(serviceExecutable) || !filepath.IsAbs(sshdPath) || !filepath.IsAbs(configPath) {
+func InstallService(ctx context.Context, serviceName, serviceExecutable, sshdPath, configPath, ownerSID string) error {
+	if ctx == nil || serviceName == "" || !filepath.IsAbs(serviceExecutable) || !filepath.IsAbs(sshdPath) || !filepath.IsAbs(configPath) {
 		return ErrInvalidConfig
+	}
+	if _, err := validatedServiceQueryOwner(serviceName, ownerSID); err != nil {
+		return err
 	}
 	manager, err := mgr.Connect()
 	if err != nil {
 		return err
 	}
 	defer manager.Disconnect()
-	service, err := manager.OpenService(ServiceName)
-	arguments := []string{"daemon", "__windows-sshd-service", "--sshd", sshdPath, "--config", configPath}
+	service, err := manager.OpenService(serviceName)
+	instance := strings.TrimPrefix(serviceName, ServiceName+"-")
+	if len(instance) != 25 || instance[0] != 'u' {
+		return ErrInvalidConfig
+	}
+	arguments := []string{"daemon", "__windows-sshd-service", "--instance", instance}
 	restartRequired := false
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
-		service, err = manager.CreateService(ServiceName, serviceExecutable, mgr.Config{
+		service, err = manager.CreateService(serviceName, serviceExecutable, mgr.Config{
 			DisplayName: "Paperboat OpenSSH Server", Description: "Loopback-only OpenSSH endpoint managed by Paperboat",
 			StartType: mgr.StartAutomatic, ErrorControl: mgr.ErrorNormal, ServiceStartName: "LocalSystem",
 			SidType: windows.SERVICE_SID_TYPE_UNRESTRICTED,
@@ -51,12 +58,12 @@ func InstallService(ctx context.Context, serviceExecutable, sshdPath, configPath
 			service.Close()
 			return configErr
 		}
-		expectedCommand := windows.EscapeArg(serviceExecutable) + " daemon __windows-sshd-service --sshd " + windows.EscapeArg(sshdPath) + " --config " + windows.EscapeArg(configPath)
-		if !samePaperboatServiceCommand(current.BinaryPathName, sshdPath, configPath) && !sameLegacyServiceCommand(current.BinaryPathName, sshdPath, configPath) {
+		expectedCommand := windows.ComposeCommandLine(append([]string{serviceExecutable}, arguments...))
+		if !samePaperboatServiceCommand(current.BinaryPathName, serviceName, sshdPath, configPath) && !sameLegacyServiceCommand(current.BinaryPathName, sshdPath, configPath) {
 			service.Close()
 			return ErrServiceOwnership
 		}
-		restartRequired = !sameServiceCommand(current.BinaryPathName, serviceExecutable, sshdPath, configPath)
+		restartRequired = !sameServiceCommand(current.BinaryPathName, serviceName, serviceExecutable, sshdPath, configPath)
 		current.BinaryPathName = expectedCommand
 		current.StartType = mgr.StartAutomatic
 		current.ErrorControl = mgr.ErrorNormal
@@ -75,8 +82,11 @@ func InstallService(ctx context.Context, serviceExecutable, sshdPath, configPath
 		return err
 	}
 	installed, err := service.Config()
-	if err != nil || !sameServiceCommand(installed.BinaryPathName, serviceExecutable, sshdPath, configPath) || !strings.EqualFold(installed.ServiceStartName, "LocalSystem") || installed.StartType != mgr.StartAutomatic || installed.ErrorControl != mgr.ErrorNormal || installed.SidType != windows.SERVICE_SID_TYPE_UNRESTRICTED {
+	if err != nil || !sameServiceCommand(installed.BinaryPathName, serviceName, serviceExecutable, sshdPath, configPath) || !strings.EqualFold(installed.ServiceStartName, "LocalSystem") || installed.StartType != mgr.StartAutomatic || installed.ErrorControl != mgr.ErrorNormal || installed.SidType != windows.SERVICE_SID_TYPE_UNRESTRICTED {
 		return errors.Join(ErrServiceOwnership, err)
+	}
+	if err := grantServiceOwnerQuery(service.Handle, serviceName, ownerSID); err != nil {
+		return err
 	}
 	if restartRequired {
 		if status, queryErr := service.Query(); queryErr == nil && status.State != svc.Stopped {
@@ -132,17 +142,16 @@ func waitForServiceState(ctx context.Context, service *mgr.Service, wanted svc.S
 	}
 }
 
-func sameServiceCommand(command, serviceExecutable, sshdPath, configPath string) bool {
+func sameServiceCommand(command, serviceName, serviceExecutable, sshdPath, configPath string) bool {
 	arguments, err := windows.DecomposeCommandLine(command)
-	return err == nil && len(arguments) == 7 && sameWindowsPath(arguments[0], serviceExecutable) &&
-		arguments[1] == "daemon" && arguments[2] == "__windows-sshd-service" && arguments[3] == "--sshd" && sameWindowsPath(arguments[4], sshdPath) &&
-		arguments[5] == "--config" && sameWindowsPath(arguments[6], configPath)
+	instance := strings.TrimPrefix(serviceName, ServiceName+"-")
+	return err == nil && len(arguments) == 5 && sameWindowsPath(arguments[0], serviceExecutable) && arguments[1] == "daemon" && arguments[2] == "__windows-sshd-service" && arguments[3] == "--instance" && arguments[4] == instance
 }
 
-func samePaperboatServiceCommand(command, sshdPath, configPath string) bool {
+func samePaperboatServiceCommand(command, serviceName, sshdPath, configPath string) bool {
 	arguments, err := windows.DecomposeCommandLine(command)
-	return err == nil && len(arguments) == 7 && arguments[1] == "daemon" && arguments[2] == "__windows-sshd-service" && arguments[3] == "--sshd" &&
-		sameWindowsPath(arguments[4], sshdPath) && arguments[5] == "--config" && sameWindowsPath(arguments[6], configPath)
+	instance := strings.TrimPrefix(serviceName, ServiceName+"-")
+	return err == nil && len(arguments) == 5 && arguments[1] == "daemon" && arguments[2] == "__windows-sshd-service" && arguments[3] == "--instance" && arguments[4] == instance
 }
 
 func sameLegacyServiceCommand(command, sshdPath, configPath string) bool {
@@ -167,7 +176,7 @@ func RemoveServiceOwned(ctx context.Context, config Config) error {
 		return err
 	}
 	defer manager.Disconnect()
-	service, err := manager.OpenService(ServiceName)
+	service, err := manager.OpenService(config.ServiceName)
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return nil
 	}
@@ -207,5 +216,5 @@ func RemoveServiceOwned(ctx context.Context, config Config) error {
 func sameOwnedServiceCommand(command, serviceExecutable string, config Config) bool {
 	sshdPath := filepath.Join(config.InstallRoot, "sshd.exe")
 	configPath := filepath.Join(config.StateRoot, "sshd_config")
-	return sameServiceCommand(command, serviceExecutable, sshdPath, configPath) || sameLegacyServiceCommand(command, sshdPath, configPath)
+	return sameServiceCommand(command, config.ServiceName, serviceExecutable, sshdPath, configPath) || sameLegacyServiceCommand(command, sshdPath, configPath)
 }

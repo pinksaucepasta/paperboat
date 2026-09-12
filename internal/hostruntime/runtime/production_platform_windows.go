@@ -5,7 +5,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,7 +14,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/availability"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
+	hostruntimeservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"golang.org/x/sys/windows"
 )
@@ -85,11 +86,20 @@ func productionManagedSSH(ctx context.Context, controlURL string, transport http
 	if err != nil {
 		return nil, nil, err
 	}
-	programData := strings.TrimSpace(os.Getenv("ProgramData"))
-	if programData == "" {
-		return nil, nil, errors.Join(ErrProductionInvalid, errors.New("ProgramData is unavailable"))
+	user, sidErr := windows.GetCurrentProcessToken().GetTokenUser()
+	if sidErr != nil || user == nil || user.User.Sid == nil {
+		return nil, nil, errors.Join(ErrManagedSSHUnavailable, sidErr)
 	}
-	paths := []string{filepath.Join(programData, "Paperboat", "ssh", "hostkeys", "ssh_host_ed25519_key.pub")}
+	instance, instanceErr := hostruntimeservice.WindowsUserInstance(user.User.Sid.String())
+	if instanceErr != nil {
+		return nil, nil, errors.Join(ErrManagedSSHUnavailable, instanceErr)
+	}
+	instanceRoot, rootErr := hostinstall.WindowsInstanceRoot(instance)
+	if rootErr != nil {
+		return nil, nil, errors.Join(ErrManagedSSHUnavailable, rootErr)
+	}
+	sshStateRoot := filepath.Join(instanceRoot, "ssh")
+	paths := []string{filepath.Join(sshStateRoot, "hostkeys", "ssh_host_ed25519_key.pub")}
 	inventory, err := managedssh.ReadHostPublicKeys(paths, 0)
 	if err != nil {
 		return nil, nil, errors.Join(ErrManagedSSHUnavailable, errors.New("read Windows Paperboat host keys"), err)
@@ -108,21 +118,6 @@ func productionManagedSSH(ctx context.Context, controlURL string, transport http
 	// a distinct set identity.
 	setID := "sshks_" + fmtHex(inventory.Fingerprint[:16]) + "_" + fmtHexUint(uint64(registration.InstallationGeneration))
 	client := api.New(controlURL, config.Credential{}, &http.Client{Transport: transport, Timeout: 15 * time.Second})
-	keys, active, err := reconcileManagedSSHAuthorityWithFingerprint(ctx, client, identity, registration, generation, setID, inventory.Fingerprint, publicKeys)
-	if err != nil {
-		var apiErr *api.APIError
-		if errors.As(err, &apiErr) {
-			return nil, nil, errors.Join(ErrManagedSSHUnavailable, fmt.Errorf("Windows managed SSH authority reconciliation failed: code=%s status=%d request=%s", apiErr.Code, apiErr.Status, apiErr.RequestID), err)
-		}
-		return nil, nil, err
-	}
-	if !active {
-		keys.Keys = nil
-	}
-	sshStateRoot := filepath.Join(programData, "Paperboat", "ssh")
-	if _, err := reconcilePlatformAuthorizedKeys(sshStateRoot, 0, keys.Keys); err != nil {
-		return nil, nil, err
-	}
 	return host, &managedSSHKeyReconciler{client: client, identity: identity, registration: registration, workerGeneration: generation, setID: setID, publicKeys: publicKeys, home: sshStateRoot, interval: 30 * time.Second, timeout: 10 * time.Second}, nil
 }
 

@@ -77,9 +77,24 @@ func authorizePersistedUninstall(ctx context.Context) error {
 }
 
 func systemWorkerExecutable() string {
-	// This file only builds on the two Unix platforms supported by Layout.
-	layout, _ := service.DefaultLayout(runtime.GOOS)
+	uid := os.Getuid()
+	if os.Geteuid() == 0 {
+		uid = invokingServiceUID()
+	}
+	layout, _ := service.UserLayout(runtime.GOOS, uid)
 	return layout.Binary
+}
+
+func invokingServiceUID() int {
+	value := os.Getenv("PAPERBOAT_INVOKING_UID")
+	if value == "" {
+		value = os.Getenv("SUDO_UID")
+	}
+	uid, err := strconv.Atoi(value)
+	if err != nil || uid < 0 {
+		return 0
+	}
+	return uid
 }
 
 func removeSystemWorkerCommand() error {

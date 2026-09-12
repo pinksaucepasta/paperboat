@@ -23,5 +23,9 @@ func runPurgeCommand(ctx context.Context, args []string, _ io.Reader, _, _ io.Wr
 		}
 		return elevation.RunRuntimeService(ctx, executable, elevation.ActionPurge, nil)
 	}
-	return hostinstall.Purge(ctx)
+	ownerSID, err := currentWindowsSID()
+	if err != nil {
+		return err
+	}
+	return hostinstall.Purge(ctx, ownerSID)
 }

@@ -5,6 +5,7 @@ package updated
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc/mgr"
 )
@@ -84,11 +86,12 @@ func TestWaitForWindowsDaemonVersionReturnsExactMismatch(t *testing.T) {
 
 func testWindowsUpdaterConfig(t *testing.T) WindowsConfig {
 	t.Helper()
-	layout, err := service.DefaultLayout("windows")
+	layout, err := service.WindowsUserLayout("S-1-5-21-1-2-3-1001")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return WindowsConfig{StateRoot: layout.UpdateStateRoot, RuntimeStateRoot: `C:\Users\Pujan\AppData\Local\Paperboat\runtime`, Binary: layout.Binary, BinaryRollback: layout.BinaryRollback, BinaryStaged: layout.BinaryStaged, OwnerSID: "S-1-5-21-1-2-3-1001", MachineID: "machine", RepositoryURL: "https://get.pprbt.dev", TokenFile: hostinstall.WindowsHostdTokenPath(), InstallState: hostinstall.WindowsInstallConfigPath(), ControlSocket: `\\.\pipe\PaperboatUpdatedControl`, HostdSocket: layout.HostdSocket, HealthURL: "http://127.0.0.1:8080/healthz", ActiveVersion: "2026.08.23.1", Architecture: "amd64", SetupMode: "client", ActivationGate: noopWindowsActivationGate{}, CandidateStarter: func(context.Context, workerupdate.StartRequest) (workerupdate.Worker, error) {
+	instanceRoot, _ := hostinstall.WindowsInstanceRoot(layout.Instance)
+	return WindowsConfig{StateRoot: layout.UpdateStateRoot, RuntimeStateRoot: `C:\Users\Pujan\AppData\Local\Paperboat\runtime`, Binary: layout.Binary, BinaryRollback: layout.BinaryRollback, BinaryStaged: layout.BinaryStaged, OwnerSID: "S-1-5-21-1-2-3-1001", MachineID: "machine", RepositoryURL: "https://get.pprbt.dev", TokenFile: filepath.Join(instanceRoot, "hostd.token"), InstallState: filepath.Join(instanceRoot, "runtime-install.json"), ControlSocket: `\\.\pipe\PaperboatUpdatedControl-` + layout.Instance, HostdSocket: layout.HostdSocket, HealthURL: "http://127.0.0.1:8080/healthz", ActiveVersion: "2026.08.23.1", Architecture: "amd64", SetupMode: "client", ActivationGate: noopWindowsActivationGate{}, CandidateStarter: func(context.Context, workerupdate.StartRequest) (workerupdate.Worker, error) {
 		return nil, errors.New("candidate test stub")
 	}}
 }
@@ -160,12 +163,12 @@ func TestWindowsRecoveryPolicyIsServiceSpecific(t *testing.T) {
 }
 
 func TestWindowsSSHCommandContractIsExact(t *testing.T) {
-	valid := []string{"daemon", "__windows-sshd-service", "--sshd", `C:\Program Files\OpenSSH\sshd.exe`, "--config", `C:\ProgramData\Paperboat\ssh\sshd_config`}
+	valid := []string{"daemon", "__windows-sshd-service", "--instance", "u0123456789abcdef01234567"}
 	if !validWindowsSSHArguments(valid) {
 		t.Fatal("valid fixed PaperboatSshd command rejected")
 	}
 	mutated := append([]string(nil), valid...)
-	mutated[3] = `C:\Temp\sshd.exe`
+	mutated[3] = "u1"
 	if validWindowsSSHArguments(mutated) {
 		t.Fatal("mutable sshd executable accepted")
 	}
@@ -216,7 +219,7 @@ func TestNormalizeWindowsRollbackTargetsRestartsUpdaterFromCanonicalPath(t *test
 
 func TestWindowsActivationPathsAcceptRollbackUpdaterDuringRecovery(t *testing.T) {
 	config := testWindowsUpdaterConfig(t)
-	layout, err := service.DefaultLayout("windows")
+	layout, err := service.WindowsUserLayout(config.OwnerSID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,16 +233,60 @@ func TestWindowsActivationPathsAcceptRollbackUpdaterDuringRecovery(t *testing.T)
 		PreviousVersion: config.ActiveVersion, Version: "2026.08.24.1", Architecture: config.Architecture,
 		Stage: windowsActivationStaged, Runtime: component, CLI: component, Hostd: component, Updater: component,
 		PreviousBinary: windowsActivationComponent{Path: layout.Binary, SHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Length: 1},
-		OldHostd:       windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-hostd"}},
-		NewHostd:       windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-hostd"}},
-		OldUpdater:     windowsServiceTarget{Executable: layout.BinaryRollback, Arguments: []string{"daemon", "__runtime-updated"}},
-		NewUpdater:     windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-updated"}},
+		OldHostd:       windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-hostd", "--instance", layout.Instance}},
+		NewHostd:       windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-hostd", "--instance", layout.Instance}},
+		OldUpdater:     windowsServiceTarget{Executable: layout.BinaryRollback, Arguments: []string{"daemon", "__runtime-updated", "--instance", layout.Instance}},
+		NewUpdater:     windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-updated", "--instance", layout.Instance}},
 	}
 	if !validWindowsActivationPaths(config, journal) {
 		t.Fatal("staged journal with rollback updater was rejected")
 	}
+	journal.NewHostd.Arguments[3] = "u0123456789abcdef01234567"
+	if validWindowsActivationPaths(config, journal) {
+		t.Fatal("foreign instance accepted in owner transaction")
+	}
+	journal.NewHostd.Arguments[3] = layout.Instance
 	journal.OldUpdater.Executable = `C:\Temp\pb.exe`
 	if validWindowsActivationPaths(config, journal) {
 		t.Fatal("mutable updater executable was accepted")
+	}
+}
+
+func TestWindowsRuntimeServiceTargetPreservesExactInstance(t *testing.T) {
+	const instance = "u0123456789abcdef01234567"
+	executable := `C:\Program Files\Paperboat\users\` + instance + `\bin\pb.exe`
+	for _, role := range []struct{ name, command string }{{windowsHostdService, "__runtime-hostd"}, {windowsUpdaterService, "__runtime-updated"}} {
+		args := []string{executable, "daemon", role.command, "--instance", instance}
+		name := role.name + "-" + instance
+		target, err := parseWindowsRuntimeServiceTarget(name, role.command, windows.ComposeCommandLine(args))
+		if err != nil || target.Executable != executable || strings.Join(target.Arguments, "|") != strings.Join(args[1:], "|") {
+			t.Fatalf("per-user service target lost its binding: %+v, %v", target, err)
+		}
+		for _, wrong := range [][]string{
+			args[:3], append(append([]string(nil), args...), "extra"),
+			{executable, "daemon", role.command, "--instance", "u1123456789abcdef01234567"},
+			{executable, "daemon", role.command, "--instance", "unot-a-valid-instance0000"},
+			{executable, "daemon", "__runtime-other", "--instance", instance},
+		} {
+			if _, err := parseWindowsRuntimeServiceTarget(name, role.command, windows.ComposeCommandLine(wrong)); !errors.Is(err, errInvalidWindowsActivation) {
+				t.Fatalf("accepted wrong instance/role arguments %q: %v", wrong, err)
+			}
+		}
+		if _, err := parseWindowsRuntimeServiceTarget(role.name+"-u1123456789abcdef01234567", role.command, windows.ComposeCommandLine(args)); !errors.Is(err, errInvalidWindowsActivation) {
+			t.Fatal("accepted another user's service name")
+		}
+	}
+}
+
+func TestWindowsInstanceServiceRecoveryPolicy(t *testing.T) {
+	const instance = "u4c8e2991570c314b650297e5"
+	ssh := windowsRecoveryActionsForService("PaperboatSshd-" + instance)
+	if !windowsRecoveryActionsMatch(ssh, windowsopenssh.ServiceRecoveryActions()) {
+		t.Fatalf("instance SSH must retain its bounded restart policy: %v", ssh)
+	}
+	for _, name := range []string{"PaperboatHostd-" + instance, "PaperboatUpdated-" + instance, "PaperboatSshd-" + instance + "-foreign"} {
+		if !windowsRecoveryActionsMatch(windowsRecoveryActionsForService(name), standardWindowsRecoveryActions()) {
+			t.Errorf("unexpected recovery policy for %q", name)
+		}
 	}
 }

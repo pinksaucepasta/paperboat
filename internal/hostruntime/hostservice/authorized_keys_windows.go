@@ -15,8 +15,12 @@ import (
 // SID-restricted host-service pipe, but it can never select a filesystem path.
 type WindowsAuthorizedKeys struct{ stateRoot string }
 
-func NewWindowsAuthorizedKeys() (*WindowsAuthorizedKeys, error) {
-	return newWindowsAuthorizedKeys(filepath.Join(hostinstall.WindowsProgramDataRoot(), "ssh"))
+func NewWindowsAuthorizedKeys(instance string) (*WindowsAuthorizedKeys, error) {
+	root, err := hostinstall.WindowsInstanceRoot(instance)
+	if err != nil {
+		return nil, err
+	}
+	return newWindowsAuthorizedKeys(filepath.Join(root, "ssh"))
 }
 
 func newWindowsAuthorizedKeys(stateRoot string) (*WindowsAuthorizedKeys, error) {

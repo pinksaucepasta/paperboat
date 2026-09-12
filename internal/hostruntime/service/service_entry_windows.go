@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -302,14 +303,20 @@ func (s *serviceEntry) Execute(_ []string, requests <-chan svc.ChangeRequest, st
 		select {
 		case sidecarErr := <-sidecar.Done:
 			sidecarExited = true
-			if sidecarErr != nil && !onlyContextCanceled(sidecarErr) {
+			if sidecarErr == nil || onlyContextCanceled(sidecarErr) {
+				sidecarExitErr = errors.New("privileged sidecar exited before service shutdown")
+			} else {
 				sidecarExitErr = sidecarErr
 			}
 			return finish(1, true)
 		case exit := <-done:
 			code := exit.code
-			if exit.err != nil && s.config.LaunchFailure != nil {
-				s.config.LaunchFailure(exit.err)
+			if s.config.LaunchFailure != nil {
+				if exit.err != nil {
+					s.config.LaunchFailure(exit.err)
+				} else if code != 0 {
+					s.config.LaunchFailure(fmt.Errorf("enrolled owner workload exited with code %d", code))
+				}
 			}
 			failed := exit.err != nil || code != 0 || workloadInterrupted
 			if failed && code == 0 {

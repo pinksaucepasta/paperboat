@@ -84,20 +84,31 @@ func TestPlatformPathsKeepLinuxInstallerStateOutsideSystemdStateDirectory(t *tes
 	if runtime.GOOS != "linux" {
 		t.Skip("systemd path contract is Linux-specific")
 	}
-	paths := platformPaths()
+	paths := platformPaths(os.Getuid())
 	if paths.installerState == paths.runtimeState || filepath.Dir(paths.journal) != paths.installerState || filepath.Dir(paths.metadata) != paths.installerState {
 		t.Fatalf("installer state overlaps runtime state: %+v", paths)
-	}
-	if paths.legacyMetadata != filepath.Join(paths.runtimeState, "install-metadata.json") {
-		t.Fatalf("legacy metadata path=%q", paths.legacyMetadata)
 	}
 	if filepath.Dir(paths.environmentCredential) != paths.environmentCredentialDirectory || filepath.Dir(paths.environmentCredentialDirectory) != paths.installerState || filepath.Dir(paths.environmentCredential) == paths.runtimeState {
 		t.Fatalf("encrypted ENV credential is not isolated in root-only installer state: %+v", paths)
 	}
 }
 
+func TestPlatformPathsIsolateUnixUsers(t *testing.T) {
+	first := platformPaths(1001)
+	second := platformPaths(1002)
+	for name, pair := range map[string][2]string{
+		"install root": {first.root, second.root}, "installer state": {first.installerState, second.installerState},
+		"runtime state": {first.runtimeState, second.runtimeState}, "hostd socket": {first.hostdSocket, second.hostdSocket},
+		"updater socket": {first.updaterSocket, second.updaterSocket},
+	} {
+		if pair[0] == pair[1] {
+			t.Fatalf("%s is shared by different OS users: %q", name, pair[0])
+		}
+	}
+}
+
 func TestComponentLayoutUsesDedicatedReleaseSlots(t *testing.T) {
-	paths := platformPaths()
+	paths := platformPaths(os.Getuid())
 	layout, err := componentLayout(paths)
 	if err != nil {
 		t.Fatal(err)
@@ -111,8 +122,8 @@ func TestComponentLayoutUsesDedicatedReleaseSlots(t *testing.T) {
 }
 
 func TestPlatformPathsUseAuthoritativeServiceLayout(t *testing.T) {
-	paths := platformPaths()
-	layout, err := service.DefaultLayout(runtime.GOOS)
+	paths := platformPaths(os.Getuid())
+	layout, err := service.UserLayout(runtime.GOOS, os.Getuid())
 	if err != nil {
 		t.Fatal(err)
 	}

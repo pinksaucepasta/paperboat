@@ -7,7 +7,7 @@ import (
 	"io"
 )
 
-func runHostd(context.Context, io.Writer) error { return errHostRuntimeUnsupported }
+func runHostd(context.Context, []string, io.Writer) error { return errHostRuntimeUnsupported }
 func runWorker(context.Context, []string, io.Reader, io.Writer, io.Writer) error {
 	return errHostRuntimeUnsupported
 }

@@ -35,6 +35,7 @@ type InventoryConfig struct {
 	RequestTimeout  time.Duration
 	Clock           func() time.Time
 	OnMachines      func(context.Context, []api.UserMachine)
+	OnRefresh       func(error)
 }
 
 type Inventory struct {
@@ -44,6 +45,7 @@ type Inventory struct {
 	requestTimeout  time.Duration
 	clock           func() time.Time
 	onMachines      func(context.Context, []api.UserMachine)
+	onRefresh       func(error)
 	mu              sync.Mutex
 	completionMu    sync.RWMutex
 	completion      localapi.CompletionSnapshot
@@ -72,6 +74,7 @@ func NewInventory(config InventoryConfig) (*Inventory, error) {
 		requestTimeout:  config.RequestTimeout,
 		clock:           config.Clock,
 		onMachines:      config.OnMachines,
+		onRefresh:       config.OnRefresh,
 	}, nil
 }
 
@@ -99,6 +102,9 @@ func (i *Inventory) Refresh(ctx context.Context) error {
 
 	requestCtx, cancel := context.WithTimeout(ctx, i.requestTimeout)
 	machines, sourceErr := i.source.ListUserMachines(requestCtx)
+	if i.onRefresh != nil {
+		i.onRefresh(sourceErr)
+	}
 	var completionItems []localapi.CompletionItem
 	var completionErr error
 	if sourceErr == nil {

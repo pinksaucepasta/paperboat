@@ -95,6 +95,7 @@ func TestLocalPeerTunnelTerminalPreservesFramingAndWaitLifecycle(t *testing.T) {
 			Debug:         true,
 			Auth: resolver.AuthTarget{
 				Token:     "credential",
+				Scopes:    []string{"terminal:control"},
 				ExpiresAt: time.Now().Add(time.Minute).UTC().Format(time.RFC3339),
 			},
 		},
@@ -112,7 +113,7 @@ func TestLocalPeerTunnelTerminalPreservesFramingAndWaitLifecycle(t *testing.T) {
 			t.Fatalf("peer request consumer=%q operation=%q", request.Consumer, request.OperationID)
 		}
 		var payload localapi.PeerTerminalPayload
-		if json.Unmarshal(request.Payload, &payload) != nil || !payload.Debug {
+		if json.Unmarshal(request.Payload, &payload) != nil || !payload.Debug || len(payload.Scopes) != 1 || payload.Scopes[0] != "terminal:control" {
 			t.Fatalf("peer terminal debug payload=%s", request.Payload)
 		}
 	case <-time.After(time.Second):

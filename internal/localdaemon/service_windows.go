@@ -185,15 +185,23 @@ func StopWindowsLegacyService(ctx context.Context, lockPath, ownerSID string) er
 // WindowsLocalDaemonServiceInstalled reports whether the dedicated SCM
 // service exists. It is used by migration to avoid terminating a process that
 // is already owned by the new service when a stale legacy task remains.
-func WindowsLocalDaemonServiceInstalled() (bool, error) {
-	return probeWindowsLocalDaemonService()
+func WindowsLocalDaemonServiceInstalled(ownerSID string) (bool, error) {
+	name, err := windowsOwnerServiceName(ownerSID)
+	if err != nil {
+		return false, err
+	}
+	return probeWindowsLocalDaemonServiceNamed(name)
 }
 
 // WindowsLocalDaemonServiceRunning reports the authoritative SCM state. It is
 // independent of the child lock so an updater can stop a service that is still
 // starting and has not published its owner record yet.
-func WindowsLocalDaemonServiceRunning() (bool, error) {
-	state, installed, err := windowsLocalDaemonServiceState()
+func WindowsLocalDaemonServiceRunning(ownerSID string) (bool, error) {
+	name, err := windowsOwnerServiceName(ownerSID)
+	if err != nil {
+		return false, err
+	}
+	state, installed, err := windowsLocalDaemonServiceStateNamed(name)
 	return err == nil && installed && state == svc.Running, err
 }
 
@@ -201,18 +209,22 @@ func WindowsLocalDaemonServiceRunning() (bool, error) {
 // transitioning service process. Migration must not terminate the SID-bound
 // owner lock while SCM is in StartPending or StopPending: that lock can
 // already belong to the managed service rather than the retired task.
-func WindowsLocalDaemonServiceActive() (bool, error) {
-	state, installed, err := windowsLocalDaemonServiceState()
+func WindowsLocalDaemonServiceActive(ownerSID string) (bool, error) {
+	name, err := windowsOwnerServiceName(ownerSID)
+	if err != nil {
+		return false, err
+	}
+	state, installed, err := windowsLocalDaemonServiceStateNamed(name)
 	return err == nil && installed && state != svc.Stopped, err
 }
 
-func windowsLocalDaemonServiceState() (svc.State, bool, error) {
+func windowsLocalDaemonServiceStateNamed(name string) (svc.State, bool, error) {
 	manager, err := mgr.Connect()
 	if err != nil {
 		return svc.Stopped, false, err
 	}
 	defer manager.Disconnect()
-	item, err := manager.OpenService(windowsLocalDaemonServiceName)
+	item, err := manager.OpenService(name)
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return svc.Stopped, false, nil
 	}
@@ -329,8 +341,12 @@ func stopWindowsOwnerService(ctx context.Context, lockPath, ownerSID string) err
 	if ctx == nil || !filepath.IsAbs(lockPath) || filepath.Clean(lockPath) != lockPath || ownerSID == "" {
 		return ErrInvalidInventoryConfig
 	}
-	installed, probeErr := probeWindowsLocalDaemonService()
-	serviceErr := stopWindowsLocalDaemonService(ctx)
+	name, nameErr := windowsOwnerServiceName(ownerSID)
+	if nameErr != nil {
+		return nameErr
+	}
+	installed, probeErr := probeWindowsLocalDaemonServiceNamed(name)
+	serviceErr := stopWindowsLocalDaemonServiceNamed(ctx, name)
 	var taskErr error
 	if !installed && probeErr == nil {
 		taskErr = StopWindowsLegacyTask(ctx, ownerSID)
@@ -342,7 +358,19 @@ func startWindowsOwnerService(ctx context.Context, ownerSID string) error {
 	if ctx == nil || !validWindowsOwnerSID(ownerSID) {
 		return ErrInvalidInventoryConfig
 	}
-	return startWindowsLocalDaemonService(ctx)
+	name, err := windowsOwnerServiceName(ownerSID)
+	if err != nil {
+		return err
+	}
+	return startWindowsLocalDaemonServiceNamed(ctx, name)
+}
+
+func windowsOwnerServiceName(ownerSID string) (string, error) {
+	instance, err := hostruntimeservice.WindowsUserInstance(ownerSID)
+	if err != nil {
+		return "", ErrInvalidInventoryConfig
+	}
+	return "PaperboatLocalDaemon-" + instance, nil
 }
 
 func validWindowsOwnerSID(ownerSID string) bool {
@@ -351,12 +379,16 @@ func validWindowsOwnerSID(ownerSID string) bool {
 }
 
 func defaultProbeWindowsLocalDaemonService() (bool, error) {
+	return probeWindowsLocalDaemonServiceNamed(windowsLocalDaemonServiceName)
+}
+
+func probeWindowsLocalDaemonServiceNamed(name string) (bool, error) {
 	manager, err := mgr.Connect()
 	if err != nil {
 		return false, err
 	}
 	defer manager.Disconnect()
-	item, err := manager.OpenService(windowsLocalDaemonServiceName)
+	item, err := manager.OpenService(name)
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return false, nil
 	}
@@ -367,6 +399,10 @@ func defaultProbeWindowsLocalDaemonService() (bool, error) {
 }
 
 func defaultStartWindowsLocalDaemonService(ctx context.Context) error {
+	return startWindowsLocalDaemonServiceNamed(ctx, windowsLocalDaemonServiceName)
+}
+
+func startWindowsLocalDaemonServiceNamed(ctx context.Context, name string) error {
 	if ctx == nil {
 		return ErrInvalidInventoryConfig
 	}
@@ -380,7 +416,7 @@ func defaultStartWindowsLocalDaemonService(ctx context.Context) error {
 		return err
 	}
 	defer manager.Disconnect()
-	item, err := manager.OpenService(windowsLocalDaemonServiceName)
+	item, err := manager.OpenService(name)
 	if err != nil {
 		return err
 	}
@@ -393,6 +429,10 @@ func defaultStartWindowsLocalDaemonService(ctx context.Context) error {
 }
 
 func defaultStopWindowsLocalDaemonService(ctx context.Context) error {
+	return stopWindowsLocalDaemonServiceNamed(ctx, windowsLocalDaemonServiceName)
+}
+
+func stopWindowsLocalDaemonServiceNamed(ctx context.Context, name string) error {
 	if ctx == nil {
 		return ErrInvalidInventoryConfig
 	}
@@ -401,7 +441,7 @@ func defaultStopWindowsLocalDaemonService(ctx context.Context) error {
 		return err
 	}
 	defer manager.Disconnect()
-	item, err := manager.OpenService(windowsLocalDaemonServiceName)
+	item, err := manager.OpenService(name)
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return nil
 	}

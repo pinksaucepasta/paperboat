@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,10 +47,15 @@ type ResumeRecord struct {
 	Material                *Material `json:"material,omitempty"`
 	ClientInstalled         bool      `json:"client_installed,omitempty"`
 	RuntimeEnrolled         bool      `json:"runtime_enrolled,omitempty"`
-	AuthenticatedSetup      bool      `json:"authenticated_setup,omitempty"`
-	SetupOperationID        string    `json:"setup_operation_id,omitempty"`
-	ExpectedUserMachineID   string    `json:"expected_user_machine_id,omitempty"`
-	ExpectedGeneration      int64     `json:"expected_installation_generation,omitempty"`
+	// RuntimeReady checkpoints local finalization before privileged commit.
+	// Recovery uses the existing runtime identity, never expired enrollment authority.
+	RuntimeReady bool `json:"runtime_ready,omitempty"`
+	// RuntimeListenAddress is selected locally and survives renewed server material.
+	RuntimeListenAddress  string `json:"runtime_listen_address,omitempty"`
+	AuthenticatedSetup    bool   `json:"authenticated_setup,omitempty"`
+	SetupOperationID      string `json:"setup_operation_id,omitempty"`
+	ExpectedUserMachineID string `json:"expected_user_machine_id,omitempty"`
+	ExpectedGeneration    int64  `json:"expected_installation_generation,omitempty"`
 	// RequestedArtifact binds an authenticated setup operation to the signed
 	// release target that the server was asked to issue. Material.Artifact is
 	// retained as the authoritative binding after issuance; this field closes
@@ -317,6 +323,15 @@ func (record ResumeRecord) RequiresEnrollmentTokenForRetry(token string) bool {
 }
 
 func validateResumeRecord(record ResumeRecord, loaded bool) error {
+	if record.RuntimeReady && (!record.RuntimeEnrolled || !record.ClientInstalled || record.Material == nil || record.RuntimeListenAddress == "") {
+		return ErrResumeBinding
+	}
+	if record.RuntimeListenAddress != "" {
+		address, err := netip.ParseAddrPort(record.RuntimeListenAddress)
+		if err != nil || !address.Addr().IsLoopback() || address.Port() == 0 || record.Material == nil {
+			return ErrResumeBinding
+		}
+	}
 	if record.Schema != resumeSchema || !validResumeServer(record.ServerURL) || record.PublicIdentityKey == "" || len(record.EnrollmentTokenSHA) != sha256.Size*2 || record.DisplayName == "" || record.SetupMode != "host" && record.SetupMode != "client" || len(record.Verifier) < 32 || record.PairingExpiresAt.IsZero() {
 		return ErrResumeBinding
 	}
@@ -342,7 +357,7 @@ func validateResumeRecord(record ResumeRecord, loaded bool) error {
 		if !record.PairingStarted {
 			return fmt.Errorf("%w: material exists before pairing started", ErrResumeBinding)
 		}
-		if err := validateMaterialFreshness(*record.Material, !loaded); err != nil {
+		if err := validateMaterialFreshness(*record.Material, !loaded && !record.RuntimeReady); err != nil {
 			return fmt.Errorf("%w: material validation: %v", ErrResumeBinding, err)
 		}
 		if record.Material.SetupMode != record.SetupMode {

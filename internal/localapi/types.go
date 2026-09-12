@@ -60,6 +60,7 @@ type PeerStreamRequest struct {
 }
 
 type PeerTerminalPayload struct {
+	Scopes              []string          `json:"scopes,omitempty"`
 	Protocol            string            `json:"protocol"`
 	Debug               bool              `json:"debug,omitempty"`
 	ThreadID            string            `json:"thread_id,omitempty"`

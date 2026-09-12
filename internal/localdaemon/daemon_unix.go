@@ -104,7 +104,10 @@ func Run(ctx context.Context, config DaemonConfig) error {
 		return err
 	}
 	diagnosticAPI := &diagnosticService{recorder: recorder, store: store, stateRoot: config.Paths.StateRoot, ownerUID: config.OwnerUID, clock: diagnosticClock}
-	inventory, err := NewInventory(InventoryConfig{Source: config.Source, Store: store, RefreshInterval: config.RefreshInterval, RequestTimeout: config.RequestTimeout, Clock: config.Clock, OnMachines: func(refreshCtx context.Context, machines []api.UserMachine) {
+	inventory, err := NewInventory(InventoryConfig{Source: config.Source, Store: store, RefreshInterval: config.RefreshInterval, RequestTimeout: config.RequestTimeout, Clock: config.Clock, OnRefresh: func(err error) {
+		severity, fields := inventoryRefreshDiagnostic(err)
+		_ = recorder.Record("reconciliation", "inventory_refresh", severity, fields)
+	}, OnMachines: func(refreshCtx context.Context, machines []api.UserMachine) {
 		transportInvalidator.Observe(machines)
 		if managedSSHRuntime != nil {
 			sshCtx, cancelSSH := context.WithTimeout(refreshCtx, 15*time.Second)
@@ -158,12 +161,7 @@ func Run(ctx context.Context, config DaemonConfig) error {
 	results := make(chan error, 3)
 	go func() { results <- server.Run(runCtx) }()
 	go func() {
-		refreshErr := inventory.Refresh(runCtx)
-		refreshOutcome, refreshSeverity := "ready", "info"
-		if refreshErr != nil {
-			refreshOutcome, refreshSeverity = "degraded", "warning"
-		}
-		_ = recorder.Record("reconciliation", "inventory_refresh", refreshSeverity, map[string]string{"outcome": refreshOutcome})
+		_ = inventory.Refresh(runCtx)
 		if runCtx.Err() != nil {
 			results <- runCtx.Err()
 			return

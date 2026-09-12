@@ -1,6 +1,7 @@
 package preview
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
+	"github.com/pinksaucepasta/paperboat/internal/inspector"
 )
 
 var (
@@ -320,6 +322,13 @@ func (h *DataCarrierPreviewHub) closeRegistrations(err error) {
 // DataCarrierPreviewCarrier adapts one route registration to preview.Carrier.
 // It probes the local origin before reporting readiness and then forwards
 // admitted streams without buffering application bytes.
+//
+// Inspector and Registry thread the daemon's one shared capture store and
+// replay bindings through ephemeral browser forwarding. Both are optional:
+// nil keeps the exact previous behavior. When set, stopping the lease's
+// carrier unregisters replay; revocation/purge additionally follows an ended
+// lease (canceled context, passed deadline or closed carrier) while transient
+// forwarding errors keep retained records for the retry.
 type DataCarrierPreviewCarrier struct {
 	hub                    *DataCarrierPreviewHub
 	active                 *connector.ActiveDataCarrier
@@ -328,6 +337,9 @@ type DataCarrierPreviewCarrier struct {
 	dialer                 PreviewOriginDialer
 	browserIngress         tunnelmanager.IngressAuthorityFunc
 	browserRouteGeneration uint64
+	inspector              *inspector.Store
+	registry               *inspector.Registry
+	inspectorHTTP          tunnelmanager.AuthenticatedInspectorHTTP
 	max                    int
 	dialWait               time.Duration
 	closeWait              time.Duration
@@ -353,10 +365,15 @@ type DataCarrierPreviewCarrierConfig struct {
 	DialOrigin             PreviewOriginDialer
 	BrowserIngress         tunnelmanager.IngressAuthorityFunc
 	BrowserRouteGeneration uint64
-	MaxStreams             int
-	OriginDialTimeout      time.Duration
-	OriginCloseTimeout     time.Duration
-	ObserveStreamError     func(error)
+	// Inspector and Registry are the daemon's shared capture store and
+	// replay bindings. Nil disables ephemeral HTTP capture/replay.
+	Inspector          *inspector.Store
+	Registry           *inspector.Registry
+	InspectorHTTP      tunnelmanager.AuthenticatedInspectorHTTP
+	MaxStreams         int
+	OriginDialTimeout  time.Duration
+	OriginCloseTimeout time.Duration
+	ObserveStreamError func(error)
 }
 
 func NewDataCarrierPreviewCarrier(config DataCarrierPreviewCarrierConfig) (*DataCarrierPreviewCarrier, error) {
@@ -399,7 +416,7 @@ func NewDataCarrierPreviewCarrier(config DataCarrierPreviewCarrierConfig) (*Data
 	if config.OriginDialTimeout <= 0 || config.OriginCloseTimeout <= 0 {
 		return nil, ErrDataCarrierPreviewInvalid
 	}
-	return &DataCarrierPreviewCarrier{hub: config.Hub, active: config.Active, identity: config.Identity, routeID: config.RouteID, dialer: config.DialOrigin, browserIngress: config.BrowserIngress, browserRouteGeneration: config.BrowserRouteGeneration, max: config.MaxStreams, dialWait: config.OriginDialTimeout, closeWait: config.OriginCloseTimeout, observe: config.ObserveStreamError, ownHub: ownHub}, nil
+	return &DataCarrierPreviewCarrier{hub: config.Hub, active: config.Active, identity: config.Identity, routeID: config.RouteID, dialer: config.DialOrigin, browserIngress: config.BrowserIngress, browserRouteGeneration: config.BrowserRouteGeneration, inspector: config.Inspector, registry: config.Registry, inspectorHTTP: config.InspectorHTTP, max: config.MaxStreams, dialWait: config.OriginDialTimeout, closeWait: config.OriginCloseTimeout, observe: config.ObserveStreamError, ownHub: ownHub}, nil
 }
 
 func (c *DataCarrierPreviewCarrier) Run(ctx context.Context, lease Lease, ready func(Lease) error) error {
@@ -448,7 +465,21 @@ func (c *DataCarrierPreviewCarrier) Run(ctx context.Context, lease Lease, ready 
 			c.runDone = nil
 			c.runCancel = nil
 		}
+		registry, store := c.registry, c.inspector
 		c.mu.Unlock()
+		// The lease no longer has an active target: deliberate replay must
+		// stop immediately. Captures are keyed by the owner-visible lease ID
+		// (the carrier route is an opaque server hash). Retained captures are
+		// additionally purged when the lease itself ended (canceled owner
+		// context, passed deadline or closed carrier); transient forwarding
+		// errors keep them for the retry instead of forcing the owner to
+		// re-enable capture.
+		if registry != nil && strings.TrimSpace(lease.ID) != "" {
+			registry.Unregister(lease.ID)
+		}
+		if store != nil && strings.TrimSpace(lease.ID) != "" && (ctx.Err() != nil || !time.Now().UTC().Before(lease.LeaseDeadline) || c.isClosed()) {
+			store.Revoke(lease.ID)
+		}
 	}()
 
 	dialWait := c.dialWait
@@ -477,8 +508,24 @@ func (c *DataCarrierPreviewCarrier) Run(ctx context.Context, lease Lease, ready 
 	if err := ready(observed); err != nil {
 		return err
 	}
+	// Publish the lease's replay binding once the target is ready, so public
+	// HTTP (which carries no per-stream decision) replays against current
+	// lease authority. Browser streams use the same lease identity.
+	if identity := previewCaptureIdentity(lease, c.browserRouteGeneration); identity != nil && c.registry != nil && c.inspector != nil && isPreviewHTTPScheme(lease.Target.Scheme) {
+		target := normalizePreviewTarget(lease.Target)
+		dialWait := c.dialWait
+		if lease.LazyLifecycle != nil && dialWait > LazyOriginConnectTimeout {
+			dialWait = LazyOriginConnectTimeout
+		}
+		verification := "not_applicable"
+		if target.Scheme == "https" {
+			verification = "system"
+		}
+		c.registerReplay(c.previewHTTPRoute(lease.ID, target, verification, dialWait), target, identity)
+	}
 
 	permits := make(chan struct{}, c.max)
+	inspectorPermits := make(chan struct{}, 4)
 	var streams sync.WaitGroup
 	for {
 		stream, open, err := registration.Accept(runCtx)
@@ -492,7 +539,33 @@ func (c *DataCarrierPreviewCarrier) Run(ctx context.Context, lease Lease, ready 
 			}
 			return err
 		}
-		if open.RouteID != routeID || !previewIdentityMatches(c.identity, open) || lease.AccessMode == "team" && open.Kind != "http_browser" {
+		if open.RouteID != routeID || !previewIdentityMatches(c.identity, open) {
+			_ = stream.Close()
+			continue
+		}
+		if open.Kind == connectorprotocol.InspectorHTTP {
+			if c.inspectorHTTP == nil {
+				_ = stream.Close()
+				continue
+			}
+			select {
+			case inspectorPermits <- struct{}{}:
+				streams.Add(1)
+				go func(stream *connector.DataCarrierStream, open connectorprotocol.StreamOpen) {
+					defer streams.Done()
+					defer func() { <-inspectorPermits }()
+					defer stream.Close()
+					err := tunnelmanager.ServeInspectorStream(runCtx, stream, open, c.inspectorHTTP)
+					if err != nil && c.observe != nil {
+						c.observe(err)
+					}
+				}(stream, open)
+			default:
+				_ = stream.Close()
+			}
+			continue
+		}
+		if lease.AccessMode == "team" && open.Kind != "http_browser" {
 			_ = stream.Close()
 			continue
 		}
@@ -518,7 +591,7 @@ func (c *DataCarrierPreviewCarrier) Run(ctx context.Context, lease Lease, ready 
 				if open.Kind == "http_browser" {
 					err = c.forwardBrowser(streamCtx, stream, open, lease)
 				} else {
-					err = c.forward(streamCtx, stream, lease.Target, lease.LazyLifecycle != nil)
+					err = c.forward(streamCtx, stream, lease.Target, lease.LazyLifecycle != nil, lease)
 				}
 				if err != nil && c.observe != nil {
 					c.observe(err)
@@ -653,10 +726,49 @@ func (c *DataCarrierPreviewCarrier) dialOrigin(ctx context.Context, target Lease
 	return tlsConnection, nil
 }
 
-func (c *DataCarrierPreviewCarrier) forward(ctx context.Context, stream *connector.DataCarrierStream, target LeaseTarget, lazy bool) error {
+func (c *DataCarrierPreviewCarrier) forward(ctx context.Context, stream *connector.DataCarrierStream, target LeaseTarget, lazy bool, lease Lease) error {
 	if stream == nil {
 		return ErrDataCarrierPreviewInvalid
 	}
+	// Public HTTP traffic is inspectable like browser traffic: sniff the
+	// start line without consuming bytes, and only then take the capturing
+	// path. Non-HTTP bytes (including TCP/unix origins, which stay opaque)
+	// keep the exact raw path below.
+	if c != nil && c.inspector != nil && isPreviewHTTPScheme(target.Scheme) {
+		if identity := previewCaptureIdentity(lease, c.browserRouteGeneration); identity != nil && c.inspector.Enabled(identity.ResourceID) {
+			buffered := bufio.NewReader(stream)
+			if peekHTTPExchange(buffered) {
+				return c.forwardPublicHTTP(ctx, stream, buffered, target, lease, *identity)
+			}
+			return c.forwardRaw(ctx, stream, buffered, target, lazy)
+		}
+	}
+	return c.forwardRaw(ctx, stream, stream, target, lazy)
+}
+
+// forwardPublicHTTP forwards one public HTTP request with inspector capture
+// under the lease identity. Malformed HTTP gets a minimal 400; the raw path
+// never sees partial parses because sniffing consumed nothing.
+func (c *DataCarrierPreviewCarrier) forwardPublicHTTP(ctx context.Context, stream *connector.DataCarrierStream, buffered *bufio.Reader, target LeaseTarget, lease Lease, identity tunnelmanager.CaptureIdentity) error {
+	defer stream.Close()
+	target = normalizePreviewTarget(target)
+	dialWait := c.dialWait
+	if lease.LazyLifecycle != nil && dialWait > LazyOriginConnectTimeout {
+		dialWait = LazyOriginConnectTimeout
+	}
+	verification := "not_applicable"
+	if target.Scheme == "https" {
+		verification = "system"
+	}
+	route := c.previewHTTPRoute(lease.ID, target, verification, dialWait)
+	c.registerReplay(route, target, &identity)
+	transport := c.previewHTTPTransport(target)
+	defer transport.CloseIdleConnections()
+	forwarder := tunnelmanager.OriginStreamForwarder{Transport: transport, Inspector: c.inspector}
+	return forwarder.ServePublicHTTP(ctx, stream, buffered, route, identity)
+}
+
+func (c *DataCarrierPreviewCarrier) forwardRaw(ctx context.Context, stream *connector.DataCarrierStream, source io.Reader, target LeaseTarget, lazy bool) error {
 	originCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	dialCtx := originCtx
@@ -678,7 +790,7 @@ func (c *DataCarrierPreviewCarrier) forward(ctx context.Context, stream *connect
 	defer stopClose()
 	copyDone := make(chan error, 2)
 	go func() {
-		_, copyErr := io.Copy(origin, stream)
+		_, copyErr := io.Copy(origin, source)
 		copyDone <- copyErr
 	}()
 	go func() {

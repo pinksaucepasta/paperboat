@@ -27,7 +27,7 @@ type unixUpdateParticipants struct {
 }
 
 func newUnixUpdateParticipants(binary string, uid, gid int) (updated.UnixParticipants, error) {
-	layout, err := service.DefaultLayout(runtime.GOOS)
+	layout, err := service.UserLayout(runtime.GOOS, uid)
 	if err != nil || binary != layout.Binary {
 		return nil, errors.Join(updated.ErrInvalidConfig, err)
 	}

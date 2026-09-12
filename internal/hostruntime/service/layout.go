@@ -1,8 +1,11 @@
 package service
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -13,6 +16,9 @@ import (
 // would turn the privileged updater into a generic file writer.
 type Layout struct {
 	Platform string
+	// Instance is the immutable OS-user identity suffix for an enrolled host.
+	// Empty is retained only for tests and migration inspection.
+	Instance string
 
 	InstallRoot    string
 	ReleasesRoot   string
@@ -22,6 +28,66 @@ type Layout struct {
 
 	UpdateStateRoot string
 	HostdSocket     string
+	UpdaterSocket   string
+}
+
+// WindowsUserInstance returns the fixed service/path suffix for an already
+// validated Windows owner SID. Callers must validate the SID before using it.
+func WindowsUserInstance(ownerSID string) (string, error) {
+	if !strings.HasPrefix(ownerSID, "S-") || strings.ContainsAny(ownerSID, "\x00\r\n/\\") {
+		return "", ErrInvalidDefinition
+	}
+	digest := sha256.Sum256([]byte(ownerSID))
+	return "u" + hex.EncodeToString(digest[:12]), nil
+}
+
+func WindowsUserLayout(ownerSID string) (Layout, error) {
+	instance, err := WindowsUserInstance(ownerSID)
+	if err != nil {
+		return Layout{}, err
+	}
+	layout, err := DefaultLayout("windows")
+	if err != nil {
+		return Layout{}, err
+	}
+	layout.Instance = instance
+	layout.InstallRoot = windowsPathJoin(layout.InstallRoot, "users", instance)
+	layout.ReleasesRoot = windowsPathJoin(layout.InstallRoot, "releases")
+	layout.Binary = windowsPathJoin(layout.InstallRoot, "bin", "pb.exe")
+	layout.BinaryRollback = windowsPathJoin(layout.ReleasesRoot, "pb.rollback.exe")
+	layout.BinaryStaged = windowsPathJoin(layout.ReleasesRoot, "pb.staged.exe")
+	layout.UpdateStateRoot = windowsPathJoin(layout.UpdateStateRoot, "users", instance)
+	layout.HostdSocket += "-" + instance
+	layout.UpdaterSocket = `\\.\pipe\PaperboatUpdatedControl-` + instance
+	return layout, layout.Validate()
+}
+
+// UserLayout returns an independently owned privileged runtime layout for one
+// Unix OS user. The numeric uid is supplied by the privileged enrollment
+// boundary and cannot be redirected through account names or environment.
+func UserLayout(platform string, uid int) (Layout, error) {
+	if (platform != "linux" && platform != "darwin") || uid < 0 {
+		return Layout{}, ErrInvalidDefinition
+	}
+	layout, err := DefaultLayout(platform)
+	if err != nil {
+		return Layout{}, err
+	}
+	instance := "u" + strconv.Itoa(uid)
+	layout.Instance = instance
+	layout.InstallRoot = filepath.Join(layout.InstallRoot, "users", instance)
+	layout.ReleasesRoot = filepath.Join(layout.InstallRoot, "releases")
+	layout.Binary = filepath.Join(layout.InstallRoot, "bin", "pb")
+	layout.BinaryRollback = filepath.Join(layout.ReleasesRoot, "pb.rollback")
+	layout.BinaryStaged = filepath.Join(layout.ReleasesRoot, "pb.staged")
+	layout.UpdateStateRoot += "-" + instance
+	layout.HostdSocket = filepath.Join(filepath.Dir(layout.HostdSocket)+"-"+instance, "hostd.sock")
+	runtimeRoot := "/run"
+	if platform == "darwin" {
+		runtimeRoot = "/var/run"
+	}
+	layout.UpdaterSocket = filepath.Join(runtimeRoot, "paperboat-updated-"+instance, "control.sock")
+	return layout, layout.Validate()
 }
 
 // DefaultLayout returns the fixed, supported native host layout. Windows uses
@@ -60,12 +126,14 @@ func DefaultLayout(platform string) (Layout, error) {
 
 		UpdateStateRoot: updateStateRoot,
 		HostdSocket:     join(socketRoot, "hostd.sock"),
+		UpdaterSocket:   join(updateStateRoot, "control.sock"),
 	}
 	if platform == "windows" {
 		layout.Binary += ".exe"
 		layout.BinaryRollback += ".exe"
 		layout.BinaryStaged += ".exe"
 		layout.HostdSocket = `\\.\pipe\PaperboatHostd`
+		layout.UpdaterSocket = `\\.\pipe\PaperboatUpdatedControl`
 	}
 	if err := layout.Validate(); err != nil {
 		return Layout{}, err
@@ -79,7 +147,7 @@ func (l Layout) Validate() error {
 	}
 	for _, path := range []string{
 		l.InstallRoot, l.ReleasesRoot, l.Binary, l.BinaryRollback, l.BinaryStaged,
-		l.UpdateStateRoot, l.HostdSocket,
+		l.UpdateStateRoot, l.HostdSocket, l.UpdaterSocket,
 	} {
 		if !absoluteForPlatform(l.Platform, path) {
 			return ErrInvalidDefinition

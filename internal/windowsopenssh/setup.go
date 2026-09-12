@@ -16,6 +16,9 @@ type SetupResult struct {
 }
 
 func Setup(ctx context.Context, config Config) (SetupResult, error) {
+	if config.ServiceName == "" {
+		config.ServiceName = ServiceName
+	}
 	inventory, err := Inventory(ctx, config)
 	if err != nil {
 		return SetupResult{}, err
@@ -79,7 +82,7 @@ func setupFromResult(ctx context.Context, config Config, result Result) (SetupRe
 	if err != nil {
 		return SetupResult{}, err
 	}
-	if err := InstallService(ctx, serviceExecutable, result.SSHDPath, configPath); err != nil {
+	if err := InstallService(ctx, config.ServiceName, serviceExecutable, result.SSHDPath, configPath, config.OwnerSID); err != nil {
 		return SetupResult{}, err
 	}
 	result.ConfigPath = configPath

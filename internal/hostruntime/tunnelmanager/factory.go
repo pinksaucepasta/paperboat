@@ -208,10 +208,26 @@ type runtimeActive struct {
 	running RunningCarrier
 }
 
-func (a *runtimeActive) TunnelID() string                { return a.request.Tunnel.ID }
-func (a *runtimeActive) ConnectorID() string             { return a.request.Connector.ID }
-func (a *runtimeActive) Generation() uint64              { return a.request.Snapshot.Generation }
-func (a *runtimeActive) ContentHash() string             { return a.request.Snapshot.ContentHash }
+func (a *runtimeActive) TunnelID() string    { return a.request.Tunnel.ID }
+func (a *runtimeActive) ConnectorID() string { return a.request.Connector.ID }
+func (a *runtimeActive) Generation() uint64  { return a.request.Snapshot.Generation }
+func (a *runtimeActive) ContentHash() string { return a.request.Snapshot.ContentHash }
+
+// activeRouteIDs exposes the currently forwarding routes for inspector
+// lifecycle hooks: only active-desired routes count as live, so disabling a
+// route purges its captures while untouched routes keep their history.
+func (a *runtimeActive) activeRouteIDs() []string {
+	if a == nil {
+		return nil
+	}
+	var ids []string
+	for _, route := range a.request.Decoded.Routes {
+		if route.DesiredState == "active" && route.ID != "" {
+			ids = append(ids, route.ID)
+		}
+	}
+	return ids
+}
 func (a *runtimeActive) Drain(ctx context.Context) error { return a.running.Drain(ctx) }
 func (a *runtimeActive) Close(ctx context.Context) error { return a.running.Close(ctx) }
 

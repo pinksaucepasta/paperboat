@@ -14,7 +14,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
-	hostservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
 	"golang.org/x/sys/windows"
 )
@@ -67,13 +66,13 @@ func runProduction(ctx context.Context, output io.Writer) error {
 
 func windowsHostdClient() (*hostdproto.Client, error) {
 	endpoint := os.Getenv("PAPERBOAT_HOSTD_SOCKET")
-	config, configErr := hostinstall.LoadWindowsRuntimeConfig()
+	instance, configErr := currentWindowsRuntimeInstance()
+	config := instance.config
 	if endpoint == "" {
-		layout, err := hostservice.DefaultLayout("windows")
-		if err != nil {
-			return nil, err
+		if configErr != nil {
+			return nil, configErr
 		}
-		endpoint = layout.HostdSocket
+		endpoint = instance.layout.HostdSocket
 	}
 	tokenPath, tokenPathSet := os.LookupEnv("PAPERBOAT_HOSTD_TOKEN_FILE")
 	if !tokenPathSet && configErr == nil {
@@ -91,11 +90,11 @@ func windowsHostdClient() (*hostdproto.Client, error) {
 }
 
 func windowsRuntimeInstallConfig() (hostinstall.WindowsRuntimeConfig, error) {
-	config, err := hostinstall.LoadWindowsRuntimeConfig()
+	instance, err := currentWindowsRuntimeInstance()
 	if err != nil {
 		return hostinstall.WindowsRuntimeConfig{}, fmt.Errorf("load protected Windows runtime installation: %w", err)
 	}
-	return config, nil
+	return instance.config, nil
 }
 
 func readWindowsHostdToken(path string) ([]byte, error) { return readWindowsHostdTokenForSID(path, "") }

@@ -228,6 +228,20 @@ func TestWindowsOwnerServiceLifecycleStopsLegacyButRequiresManagedStart(t *testi
 	}
 }
 
+func TestWindowsOwnerServiceNameIsolatedBySID(t *testing.T) {
+	first, err := windowsOwnerServiceName("S-1-5-21-1-2-3-1001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := windowsOwnerServiceName("S-1-5-21-1-2-3-1002")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second || !strings.HasPrefix(first, "PaperboatLocalDaemon-u") || !strings.HasPrefix(second, "PaperboatLocalDaemon-u") {
+		t.Fatalf("owner services are not isolated: %q %q", first, second)
+	}
+}
+
 func TestWindowsDaemonOwnerRecordRoundTripsExactIdentity(t *testing.T) {
 	ownerSID, err := currentWindowsUserSID()
 	if err != nil {

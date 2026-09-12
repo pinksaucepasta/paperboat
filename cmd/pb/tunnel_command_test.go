@@ -105,7 +105,7 @@ func TestTunnelCommandSurfaceIsExplicitAndSecretSafe(t *testing.T) {
 			t.Fatalf("unsafe connector command %q exists", forbidden)
 		}
 	}
-	wantRoot := []string{"connector", "create", "credentials", "delete", "doctor", "domain", "list", "logs", "pause", "policy", "resume", "route", "show", "status", "stop"}
+	wantRoot := []string{"connector", "create", "credentials", "delete", "doctor", "domain", "inspect", "list", "logs", "pause", "policy", "replay", "resume", "route", "show", "status", "stop"}
 	var gotRoot []string
 	for _, child := range root.Commands() {
 		if !child.Hidden {

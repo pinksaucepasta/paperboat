@@ -6,6 +6,7 @@
 /bin/
 /dist/
 /.codex-build/
+/.build/
 /pb
 /diag
 /cmd/pb-peerprobe/

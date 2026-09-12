@@ -97,6 +97,7 @@ type managedSession struct {
 	persistDone   chan error
 	persistErr    error
 	modes         terminalModeTracker
+	participants  map[string]Participant
 }
 
 // liveProcess is immutable after publication. Terminal v1 input can therefore
@@ -123,6 +124,15 @@ type Snapshot struct {
 	LatestSequence   uint64          `json:"latest_sequence"`
 	Exit             *pty.ExitResult `json:"exit,omitempty"`
 	TerminalModes    TerminalModes   `json:"terminal_modes"`
+	Participants     []Participant   `json:"participants,omitempty"`
+}
+
+type Participant struct {
+	AttachmentID string    `json:"attachment_id"`
+	AccountID    string    `json:"account_id"`
+	ClientID     string    `json:"client_id"`
+	Role         string    `json:"role"`
+	ConnectedAt  time.Time `json:"connected_at"`
 }
 
 type AttachResult struct {
@@ -238,7 +248,7 @@ func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, 
 		return Snapshot{}, ErrSessionExists
 	}
 	retained, _ := history.New(m.config.HistoryBytes)
-	session := &managedSession{id: id, name: request.Name, command: request.Command, lifecycle: NewLifecycle(), history: retained, fanout: NewFanout()}
+	session := &managedSession{id: id, name: request.Name, command: request.Command, lifecycle: NewLifecycle(), history: retained, fanout: NewFanout(), participants: make(map[string]Participant)}
 	if m.config.Store != nil {
 		if err := m.config.Store.CreateSession(ctx, store.Session{ID: id, Name: request.Name, CWD: request.Command.CWD, CommandPath: request.Command.Path, CommandArgs: request.Command.Args, CommandEnv: request.Command.Env, Columns: request.Command.Dimensions.Columns, Rows: request.Command.Dimensions.Rows, State: string(Creating), Generation: 0}); err != nil {
 			return Snapshot{}, err
@@ -332,6 +342,54 @@ func (m *Manager) Attach(sessionID, attachmentID string, fromSequence uint64) (A
 	return m.attachLocked(session, attachmentID, fromSequence)
 }
 
+func (m *Manager) AttachParticipant(sessionID string, participant Participant, fromSequence uint64) (AttachResult, error) {
+	return m.AttachParticipantAtGeneration(sessionID, participant, fromSequence, 0)
+}
+
+func (m *Manager) AttachParticipantAtGeneration(sessionID string, participant Participant, fromSequence, expectedGeneration uint64) (AttachResult, error) {
+	session, err := m.get(sessionID)
+	if err != nil {
+		return AttachResult{}, err
+	}
+	session.opMu.Lock()
+	defer session.opMu.Unlock()
+	if participant.AttachmentID == "" || participant.Role != "owner" && (participant.AccountID == "" || participant.ClientID == "" || participant.Role != "viewer" && participant.Role != "interactive") {
+		return AttachResult{}, ErrInvalidInput
+	}
+	if participant.ConnectedAt.IsZero() {
+		return AttachResult{}, ErrInvalidInput
+	}
+	_, generation := session.lifecycle.Snapshot()
+	if participant.Role != "owner" && (expectedGeneration == 0 || expectedGeneration != generation) {
+		return AttachResult{}, &StaleGenerationError{CurrentGeneration: generation}
+	}
+	m.pruneParticipantsLocked(session)
+	if fromSequence == 0 {
+		fromSequence, _, _ = session.history.Bounds()
+	}
+	result, err := m.attachLocked(session, participant.AttachmentID, fromSequence)
+	if err == nil {
+		if session.participants == nil {
+			session.participants = make(map[string]Participant)
+		}
+		session.participants[participant.AttachmentID] = participant
+		result.Snapshot = session.snapshotLocked()
+	}
+	return result, err
+}
+
+func (m *Manager) pruneParticipantsLocked(session *managedSession) {
+	for attachmentID := range session.participants {
+		state, _, err := session.fanout.Status(attachmentID)
+		if err != nil || state != Attached {
+			if err == nil {
+				_ = session.fanout.Detach(attachmentID)
+			}
+			delete(session.participants, attachmentID)
+		}
+	}
+}
+
 // AttachLive resolves the current output boundary and registers the attachment
 // while holding the same session lock. High-output terminals therefore cannot
 // compact past a boundary observed by a separate snapshot request.
@@ -344,6 +402,29 @@ func (m *Manager) AttachLive(sessionID, attachmentID string) (AttachResult, erro
 	defer session.opMu.Unlock()
 	_, latest, _ := session.history.Bounds()
 	return m.attachLocked(session, attachmentID, latest)
+}
+
+func (m *Manager) AttachLiveParticipant(sessionID string, participant Participant) (AttachResult, error) {
+	session, err := m.get(sessionID)
+	if err != nil {
+		return AttachResult{}, err
+	}
+	session.opMu.Lock()
+	defer session.opMu.Unlock()
+	_, latest, _ := session.history.Bounds()
+	if participant.AttachmentID == "" || participant.ConnectedAt.IsZero() {
+		return AttachResult{}, ErrInvalidInput
+	}
+	m.pruneParticipantsLocked(session)
+	result, err := m.attachLocked(session, participant.AttachmentID, latest)
+	if err == nil {
+		if session.participants == nil {
+			session.participants = make(map[string]Participant)
+		}
+		session.participants[participant.AttachmentID] = participant
+		result.Snapshot = session.snapshotLocked()
+	}
+	return result, err
 }
 
 func (m *Manager) attachLocked(session *managedSession, attachmentID string, fromSequence uint64) (AttachResult, error) {
@@ -415,7 +496,42 @@ func (m *Manager) Detach(sessionID, attachmentID string) error {
 	if err != nil {
 		return err
 	}
-	return session.fanout.Detach(attachmentID)
+	session.opMu.Lock()
+	defer session.opMu.Unlock()
+	err = session.fanout.Detach(attachmentID)
+	if err == nil {
+		delete(session.participants, attachmentID)
+	}
+	return err
+}
+
+func (m *Manager) DetachParticipantAtGeneration(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64) error {
+	session, err := m.get(sessionID)
+	if err != nil {
+		return err
+	}
+	session.opMu.Lock()
+	defer session.opMu.Unlock()
+	_, generation := session.lifecycle.Snapshot()
+	p, ok := session.participants[attachmentID]
+	if expectedGeneration == 0 || generation != expectedGeneration || !ok || p.AccountID != accountID || p.ClientID != clientID {
+		return ErrStaleGeneration
+	}
+	if err = session.fanout.Detach(attachmentID); err == nil {
+		delete(session.participants, attachmentID)
+	}
+	return err
+}
+
+func (m *Manager) AttachmentOwnedBy(sessionID, attachmentID, accountID, clientID string) bool {
+	session, err := m.get(sessionID)
+	if err != nil {
+		return false
+	}
+	session.opMu.Lock()
+	defer session.opMu.Unlock()
+	p, ok := session.participants[attachmentID]
+	return ok && p.AccountID == accountID && p.ClientID == clientID
 }
 
 func (m *Manager) Next(sessionID, attachmentID string) (history.Event, bool, error) {
@@ -560,12 +676,27 @@ func (m *Manager) QueryInput(sessionID string, key InputKey) (InputDecision, err
 }
 
 func (m *Manager) Resize(sessionID, attachmentID string, dimensions pty.Dimensions, activeAt time.Time) error {
+	return m.resize(sessionID, attachmentID, "", "", 0, dimensions, activeAt)
+}
+
+func (m *Manager) ResizeParticipantAtGeneration(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64, dimensions pty.Dimensions, activeAt time.Time) error {
+	return m.resize(sessionID, attachmentID, accountID, clientID, expectedGeneration, dimensions, activeAt)
+}
+
+func (m *Manager) resize(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64, dimensions pty.Dimensions, activeAt time.Time) error {
 	session, err := m.get(sessionID)
 	if err != nil {
 		return err
 	}
 	session.opMu.Lock()
 	defer session.opMu.Unlock()
+	if expectedGeneration != 0 {
+		_, generation := session.lifecycle.Snapshot()
+		p, ok := session.participants[attachmentID]
+		if generation != expectedGeneration || !ok || p.AccountID != accountID || p.ClientID != clientID {
+			return ErrStaleGeneration
+		}
+	}
 	attachmentState, _, statusErr := session.fanout.Status(attachmentID)
 	if statusErr != nil || attachmentState != Attached || session.process == nil {
 		return ErrInvalidInput
@@ -727,6 +858,12 @@ func (m *Manager) Restart(sessionID string) (Snapshot, error) {
 	if state != Exited && state != Closed {
 		return Snapshot{}, ErrSessionRunning
 	}
+	for attachmentID, participant := range session.participants {
+		if participant.Role != "owner" {
+			_ = session.fanout.Detach(attachmentID)
+			delete(session.participants, attachmentID)
+		}
+	}
 	if err := session.lifecycle.Transition(Restarting); err != nil {
 		return Snapshot{}, err
 	}
@@ -811,12 +948,20 @@ func (m *Manager) Delete(sessionID string) (resultErr error) {
 }
 
 func (m *Manager) Snapshot(sessionID string) (Snapshot, error) {
+	return m.SnapshotAtGeneration(sessionID, 0)
+}
+
+func (m *Manager) SnapshotAtGeneration(sessionID string, expectedGeneration uint64) (Snapshot, error) {
 	session, err := m.get(sessionID)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	session.opMu.Lock()
 	defer session.opMu.Unlock()
+	_, generation := session.lifecycle.Snapshot()
+	if expectedGeneration != 0 && generation != expectedGeneration {
+		return Snapshot{}, &StaleGenerationError{CurrentGeneration: generation}
+	}
 	return session.snapshotLocked(), nil
 }
 
@@ -1092,6 +1237,15 @@ func (s *managedSession) snapshotLocked() Snapshot {
 	state, generation := s.lifecycle.Snapshot()
 	earliest, latest, _ := s.history.Bounds()
 	snapshot := Snapshot{ID: s.id, Name: s.name, CWD: s.command.CWD, Dimensions: s.command.Dimensions, State: state, Generation: generation, EarliestSequence: earliest, LatestSequence: latest, TerminalModes: s.modes.Modes()}
+	for _, participant := range s.participants {
+		state, _, err := s.fanout.Status(participant.AttachmentID)
+		if err == nil && state == Attached {
+			snapshot.Participants = append(snapshot.Participants, participant)
+		}
+	}
+	sort.Slice(snapshot.Participants, func(i, j int) bool {
+		return snapshot.Participants[i].AttachmentID < snapshot.Participants[j].AttachmentID
+	})
 	if s.exit != nil {
 		exit := *s.exit
 		snapshot.Exit = &exit
@@ -1189,7 +1343,7 @@ func (m *Manager) recover(ctx context.Context) error {
 				return err
 			}
 		}
-		session := &managedSession{id: record.ID, name: record.Name, command: pty.Command{Path: record.CommandPath, Args: record.CommandArgs, Env: record.CommandEnv, CWD: record.CWD, Dimensions: pty.Dimensions{Columns: record.Columns, Rows: record.Rows}}, lifecycle: lifecycle, history: retained, fanout: NewFanout(), inputs: inputJournal}
+		session := &managedSession{id: record.ID, name: record.Name, command: pty.Command{Path: record.CommandPath, Args: record.CommandArgs, Env: record.CommandEnv, CWD: record.CWD, Dimensions: pty.Dimensions{Columns: record.Columns, Rows: record.Rows}}, lifecycle: lifecycle, history: retained, fanout: NewFanout(), inputs: inputJournal, participants: make(map[string]Participant)}
 		if record.ExitCode != nil {
 			session.exit = &pty.ExitResult{Code: *record.ExitCode, Signal: record.ExitSignal}
 			if record.ExitedAt != nil {

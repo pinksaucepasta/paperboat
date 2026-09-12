@@ -111,7 +111,10 @@ func (g *standaloneUpdateGate) HandleUpdateGate(ctx context.Context, request hos
 	switch request.Operation {
 	case hostdproto.UpdateGateTarget:
 		if exists {
-			if transaction.RolledBack || transaction.Version != request.Version || transaction.Manifest != request.ManifestSHA256 {
+			// Rollback retries resolve their target before presenting the exact
+			// completion receipt. Lookup must remain available after rollback;
+			// mutating operations enforce their own terminal-state checks below.
+			if transaction.Version != request.Version || transaction.Manifest != request.ManifestSHA256 {
 				return hostdproto.UpdateGateResponse{}, errStandaloneUpdateGate
 			}
 			return hostdproto.UpdateGateResponse{Target: target}, nil

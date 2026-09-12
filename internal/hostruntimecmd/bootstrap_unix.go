@@ -30,6 +30,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 	"github.com/pinksaucepasta/paperboat/internal/machinename"
@@ -127,12 +128,21 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	}
 	publicIdentityKey := base64.RawURLEncoding.EncodeToString(identityStore.Current().Public())
 	resume, resumeErr := bootstrap.LoadResume(*stateRoot, *serverURL, publicIdentityKey, token, *name, *setupMode, time.Now().UTC())
+	if err := rejectFreshBootstrapOverEnrollment(identityStore, resumeErr); err != nil {
+		return err
+	}
 	authenticatedResume := resume.AuthenticatedSetup && (resumeErr == nil || errors.Is(resumeErr, bootstrap.ErrResumeExpired) && resume.PairingStarted)
 	if resume.AuthenticatedSetup && !authenticatedResume {
 		return bootstrap.ErrResumeExpired
 	}
 	var material bootstrap.Material
-	if authenticatedResume {
+	if resume.RuntimeReady && (resumeErr == nil || errors.Is(resumeErr, bootstrap.ErrResumeExpired)) {
+		if err := validateBootstrapFinalization(identityStore, resume); err != nil {
+			return err
+		}
+		material = *resume.Material
+		fmt.Fprintln(stderr, "Finishing the existing machine enrollment...")
+	} else if authenticatedResume {
 		config := bootstrap.Config{ServerURL: *serverURL, DisplayName: *name, WorkspaceRoot: workspace, Verifier: resume.Verifier, PublicIdentityKey: publicIdentityKey, RuntimeVersions: map[string]string{"pb": buildinfo.Version}}
 		fmt.Fprintln(stderr, "Completing authenticated device setup...")
 		material, err = bootstrap.RecoverMaterial(ctx, config, resume.RuntimeEnrolled)
@@ -183,6 +193,16 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		return failBootstrapBeforeRuntime(ctx, err, material, *stateRoot, "artifact_verification")
 	}
 	artifactHTTP := artifactHTTPClient()
+	wasRuntimeEnrolled := resume.RuntimeEnrolled
+	if err := prepareBootstrapListener(*stateRoot, &material, &resume); err != nil {
+		return err
+	}
+	if resume.RuntimeReady {
+		// The journal preserves its original binding, but expired one-shot
+		// credentials must never be used to create a replacement runtime.
+		material.ReuseIdentity = true
+		material.EnrollmentCredential = ""
+	}
 	artifactPath, err := prepareUnixBootstrapRuntime(ctx, &material, *stateRoot, artifactHTTP, client, resume.RuntimeEnrolled, func() error {
 		resume.RuntimeEnrolled = true
 		return bootstrap.SaveResume(*stateRoot, resume)
@@ -206,6 +226,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 			return fmt.Errorf("persist machine control credential: %w", err)
 		}
 	}
+
 	executable := artifactPath
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -224,6 +245,12 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		SetupMode: material.SetupMode, InstallationGeneration: material.InstallationGeneration,
 	}
 	previousGeneration := workerGeneration(*stateRoot)
+	minimumGeneration := previousGeneration + 1
+	resumingWorker := wasRuntimeEnrolled && previousGeneration > 0
+	if resumingWorker {
+		minimumGeneration = previousGeneration
+	}
+	readinessStarted := time.Now().UTC()
 	fmt.Fprintln(stderr, "Paperboat must run before login and while this account is logged out.")
 	fmt.Fprintln(stderr, "Paperboat will keep this machine awake by default, including on battery and with the lid closed; this can increase battery use and heat.")
 	fmt.Fprintln(stderr, "Administrator approval is required to install its durable system service.")
@@ -237,6 +264,9 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	}
 	workerCommand, err := installWorkerCommand(commandDirectory, systemWorkerExecutable())
 	if err != nil {
+		if resumingWorker {
+			return &installationStageError{Stage: "service_install", Cause: err}
+		}
 		failureErr := errors.Join(err, authorizeServiceOperation(ctx, executable, "uninstall", installRequest, stdout, stderr))
 		return failBootstrapInstallation(ctx, failureErr, material, *stateRoot, "service_install")
 	}
@@ -246,16 +276,28 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	for {
 		request, _ := http.NewRequestWithContext(readyCtx, http.MethodGet, "http://"+material.HelperListenAddress+"/healthz", nil)
 		response, requestErr := healthClient.Do(request)
-		if requestErr == nil && bootstrapWorkerReady(readyCtx, response, *stateRoot, material.Artifact.Version, previousGeneration, material.SetupMode == "host") &&
-			bootstrapUpdaterReady(readyCtx, material.Artifact.Version) {
+		if requestErr == nil && bootstrapWorkerReady(readyCtx, response, *stateRoot, material.Artifact.Version, minimumGeneration, readinessStarted, material.SetupMode == "host") &&
+			bootstrapUpdaterReady(readyCtx, material.Artifact.Version, uid) {
+			resume.RuntimeReady = true
+			if err := bootstrap.SaveResume(*stateRoot, resume); err != nil {
+				return &installationStageError{Stage: "service_readiness", Cause: fmt.Errorf("checkpoint existing runtime finalization: %w", err)}
+			}
 			if err := authorizeServiceOperation(ctx, executable, "commit", installRequest, stdout, stderr); err != nil {
+				if resumingWorker {
+					return &installationStageError{Stage: "service_readiness", Cause: fmt.Errorf("existing installation retained; retry enrollment: %w", err)}
+				}
 				failureErr := errors.Join(err, authorizeServiceOperation(ctx, executable, "uninstall", installRequest, stdout, stderr), workerCommand.Rollback())
 				return failBootstrapInstallation(ctx, failureErr, material, *stateRoot, "service_readiness")
 			}
 			if err := workerCommand.Commit(); err != nil {
 				return &installationStageError{Stage: "service_install", Cause: fmt.Errorf("remove previous pb command backup: %w", err)}
 			}
-			if err := bindBootstrapDaemon(readyCtx, material.ControlURL, material.Artifact.Version); err != nil {
+			// Runtime startup and commit may consume their readiness budget.
+			// Canonical daemon cutover gets its own bounded readiness window.
+			daemonCtx, daemonCancel := context.WithTimeout(ctx, 45*time.Second)
+			err := bindBootstrapDaemon(daemonCtx, material.ControlURL, material.Artifact.Version)
+			daemonCancel()
+			if err != nil {
 				return &installationStageError{Stage: "daemon_readiness", Cause: err}
 			}
 			if err := bootstrap.ClearResume(*stateRoot); err != nil {
@@ -273,6 +315,9 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		}
 		select {
 		case <-readyCtx.Done():
+			if resumingWorker {
+				return &installationStageError{Stage: "service_readiness", Cause: errors.New("existing installation retained; retry enrollment after restoring runtime readiness")}
+			}
 			failureErr := errors.Join(errors.New("host service did not become ready"), authorizeServiceOperation(ctx, executable, "uninstall", installRequest, stdout, stderr), workerCommand.Rollback())
 			return failBootstrapInstallation(ctx, failureErr, material, *stateRoot, "service_readiness")
 		case <-time.After(time.Second):
@@ -284,12 +329,13 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 // actually serving its authenticated control socket before enrollment is
 // reported complete. A client runtime must not return with pb update/check
 // pointing at a service that has not started yet.
-func bootstrapUpdaterReady(ctx context.Context, expectedVersion string) bool {
-	socket := "/run/paperboat-updated/control.sock"
-	if runtime.GOOS == "darwin" {
-		socket = "/var/run/paperboat-updated/control.sock"
+
+func bootstrapUpdaterReady(ctx context.Context, expectedVersion string, uid int) bool {
+	layout, layoutErr := service.UserLayout(runtime.GOOS, uid)
+	if layoutErr != nil {
+		return false
 	}
-	client, err := updated.NewClient(socket, 2*time.Second)
+	client, err := updated.NewClient(layout.UpdaterSocket, 2*time.Second)
 	if err != nil {
 		return false
 	}
@@ -297,12 +343,13 @@ func bootstrapUpdaterReady(ctx context.Context, expectedVersion string) bool {
 	return err == nil && response.Status == "ok" && response.Version == expectedVersion
 }
 
-func bootstrapWorkerReady(ctx context.Context, response *http.Response, stateRoot, expectedVersion string, previousGeneration uint64, requireSystemService bool) bool {
+func bootstrapWorkerReady(ctx context.Context, response *http.Response, stateRoot, expectedVersion string, minimumGeneration uint64, acceptedAfter time.Time, requireSystemService bool) bool {
 	if response == nil || response.Body == nil {
 		return false
 	}
 	defer response.Body.Close()
-	if !bootstrapHealthMatches(response, expectedVersion) || workerGeneration(stateRoot) <= previousGeneration || !serverHeartbeatReady(stateRoot, expectedVersion, previousGeneration) {
+	generation := workerGeneration(stateRoot)
+	if !bootstrapHealthMatches(response, expectedVersion) || generation == 0 || generation < minimumGeneration || !serverHeartbeatReady(stateRoot, expectedVersion, generation, acceptedAfter) {
 		return false
 	}
 	if !requireSystemService {
@@ -312,7 +359,7 @@ func bootstrapWorkerReady(ctx context.Context, response *http.Response, stateRoo
 	return err == nil
 }
 
-func serverHeartbeatReady(stateRoot, expectedVersion string, previousGeneration uint64) bool {
+func serverHeartbeatReady(stateRoot, expectedVersion string, generation uint64, acceptedAfter time.Time) bool {
 	var receipt struct {
 		Schema           string    `json:"schema"`
 		WorkerGeneration uint64    `json:"worker_generation"`
@@ -322,7 +369,7 @@ func serverHeartbeatReady(stateRoot, expectedVersion string, previousGeneration 
 	if decodeStrictFile(filepath.Join(stateRoot, "runtime", "server-heartbeat.json"), 4096, &receipt) != nil {
 		return false
 	}
-	return receipt.Schema == "paperboat.server-heartbeat/v1" && receipt.WorkerGeneration > previousGeneration && receipt.ReporterVersion == expectedVersion && !receipt.AcceptedAt.IsZero()
+	return receipt.Schema == "paperboat.server-heartbeat/v1" && generation > 0 && receipt.WorkerGeneration == generation && receipt.ReporterVersion == expectedVersion && !receipt.AcceptedAt.IsZero() && !receipt.AcceptedAt.Before(acceptedAfter)
 }
 
 func bootstrapHealthMatches(response *http.Response, expectedVersion string) bool {
@@ -379,7 +426,7 @@ func (e *installationStageError) Unwrap() error { return e.Cause }
 func failBootstrapInstallation(ctx context.Context, cause error, material bootstrap.Material, stateRoot, stage string) error {
 	reportErr := reportInstallationFailure(ctx, material, stateRoot, stage)
 	var cleanupErr error
-	if !material.ReuseIdentity {
+	if !material.ReuseIdentity && reportErr == nil {
 		cleanupErr = removeNewEnrollmentCredentials(stateRoot)
 	}
 	var clearErr error

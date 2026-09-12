@@ -18,13 +18,16 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelenrollment"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
+	"github.com/pinksaucepasta/paperboat/internal/inspector"
 )
 
 // newProductionTunnelEnrollmentService composes the connector-add local RPC,
 // reference-backed key custody, signed WSS control, TLS/QUIC carrier bootstrap,
 // durable tunnel manager, rotation, renewal, drain, and origin readiness under
-// the one stable hostd lifecycle.
-func newProductionTunnelEnrollmentService(controlURL, stateRoot, hostID, localControlToken string, transport http.RoundTripper) (*ProductionTunnelEnrollment, error) {
+// the one stable hostd lifecycle. inspectorStore/inspectorRegistry thread the
+// daemon's one shared inspector capture store and replay bindings into durable
+// forwarding; nil disables durable HTTP capture/replay.
+func newProductionTunnelEnrollmentService(controlURL, stateRoot, hostID, localControlToken string, transport http.RoundTripper, inspectorStore *inspector.Store, inspectorRegistry *inspector.Registry, inspectorHTTP tunnelmanager.AuthenticatedInspectorHTTP) (*ProductionTunnelEnrollment, error) {
 	identityStore, err := runtimeidentity.Open(runtimeidentity.Config{StateRoot: stateRoot})
 	if err != nil {
 		return nil, err
@@ -41,10 +44,27 @@ func newProductionTunnelEnrollmentService(controlURL, stateRoot, hostID, localCo
 	if err != nil {
 		return nil, err
 	}
+	// One shared daemon store/registry for durable HTTP capture and replay.
+	// Nil keeps the exact previous forwarding behavior.
+	originStreams.Inspector = inspectorStore
+	originStreams.Registry = inspectorRegistry
+	originStreams.InspectorHTTP = inspectorHTTP
 	source, err := tunnelenrollment.NewHTTPSProductionAssemblySource(tunnelenrollment.HTTPSProductionAssemblySourceConfig{
 		ControlURL: controlURL, StateRoot: stateRoot, HostID: hostID, Transport: transport,
 		Auth: auth, Clock: productionClock{}, Origins: origins, OriginStreams: originStreams,
 		MachineTLSCertificate: identityStore.CurrentTLSCertificateWithURIs,
+		InspectorPurge: func(routeIDs []string) {
+			// Best-effort lifecycle purge: routes that stopped forwarding
+			// lose retrieval/replay and their retained captures immediately.
+			for _, id := range routeIDs {
+				if inspectorRegistry != nil {
+					inspectorRegistry.Unregister(id)
+				}
+				if inspectorStore != nil {
+					inspectorStore.Revoke(id)
+				}
+			}
+		},
 		Report: func(observation tunnelmanager.Observation) {
 			if observation.Err != nil {
 				diagnostic := tunnelenrollment.ActivationDiagnosticCodeOf(observation.Err)

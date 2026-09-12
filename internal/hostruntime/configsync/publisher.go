@@ -10,6 +10,7 @@ var (
 	ErrRemoteRevisionChanged = errors.New("config repository remote revision changed")
 	ErrConfigConflict        = errors.New("configuration conflict requires explicit resolution")
 	ErrSyncUncertain         = errors.New("configuration publication outcome is uncertain")
+	ErrReviewRequired        = errors.New("configuration revision requires review")
 )
 
 type LeaseAuthority interface {
@@ -33,6 +34,7 @@ type PublishResult struct {
 	RemoteRevision string
 	Landed         bool
 	Uncertain      bool
+	Review         []PathSummary
 }
 
 type Repository interface {
@@ -40,6 +42,10 @@ type Repository interface {
 	Reconcile(context.Context, RemoteSnapshot) (PreparedPublication, error)
 	Publish(context.Context, PreparedPublication, int64) (PublishResult, error)
 	ObserveCommit(context.Context, string) (bool, string, error)
+}
+
+type RevisionReviewSource interface {
+	Review(context.Context, string) (string, []PathSummary, error)
 }
 
 type PublicationObserver interface {
@@ -58,6 +64,9 @@ type PublisherConfig struct {
 	ReleaseTimeout    time.Duration
 	PublicationMargin time.Duration
 	Clock             func() time.Time
+	AutomaticUpdates  bool
+	ApprovedRevision  string
+	RequireReview     bool
 }
 
 type Publisher struct {
@@ -67,6 +76,9 @@ type Publisher struct {
 	releaseTimeout    time.Duration
 	publicationMargin time.Duration
 	clock             func() time.Time
+	automaticUpdates  bool
+	approvedRevision  string
+	requireReview     bool
 }
 
 func NewPublisher(config PublisherConfig) (*Publisher, error) {
@@ -98,6 +110,7 @@ func NewPublisher(config PublisherConfig) (*Publisher, error) {
 		authority: config.Authority, repository: config.Repository,
 		leaseTTL: config.LeaseTTL, releaseTimeout: config.ReleaseTimeout,
 		publicationMargin: config.PublicationMargin, clock: config.Clock,
+		automaticUpdates: config.AutomaticUpdates, approvedRevision: config.ApprovedRevision, requireReview: config.RequireReview,
 	}, nil
 }
 
@@ -112,6 +125,18 @@ func (p *Publisher) Sync(ctx context.Context, _ string) (result PublishResult, r
 	}
 	if remote.Revision == "" {
 		return PublishResult{}, ErrRemoteRevisionChanged
+	}
+	reviewRevision := remote.Revision
+	var review []PathSummary
+	if source, ok := p.repository.(RevisionReviewSource); ok {
+		var reviewErr error
+		reviewRevision, review, reviewErr = source.Review(ctx, p.approvedRevision)
+		if reviewErr != nil {
+			return PublishResult{}, reviewErr
+		}
+	}
+	if p.requireReview && !p.automaticUpdates && p.approvedRevision != reviewRevision {
+		return PublishResult{RemoteRevision: reviewRevision, Review: review}, ErrReviewRequired
 	}
 	// Pull and conflict observation do not require a writer lease. Revalidate
 	// current authorization immediately before the reconciler may mutate the

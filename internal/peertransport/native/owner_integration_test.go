@@ -51,8 +51,8 @@ import (
 
 type testKeys map[string]ed25519.PublicKey
 
-func (k testKeys) Lookup(context.Context, string) (ed25519.PublicKey, bool, error) {
-	p, ok := k["native_test"]
+func (k testKeys) Lookup(_ context.Context, keyID string) (ed25519.PublicKey, bool, error) {
+	p, ok := k[keyID]
 	return p, ok, nil
 }
 
@@ -482,8 +482,17 @@ func runRealTerminalAndFileProtocols(t *testing.T, clientOwner, serverOwner *nat
 	return assertTransfer
 }
 
-func readTerminalUntil(t *testing.T, connection tunnel.Conn, marker string) string {
+func readTerminalUntil(t *testing.T, connection tunnel.Conn, markers ...string) string {
 	t.Helper()
+	marker := strings.Join(markers, ", ")
+	complete := func(output string) bool {
+		for _, item := range markers {
+			if !strings.Contains(output, item) {
+				return false
+			}
+		}
+		return true
+	}
 	result := make(chan struct {
 		value string
 		err   error
@@ -491,7 +500,7 @@ func readTerminalUntil(t *testing.T, connection tunnel.Conn, marker string) stri
 	go func() {
 		var output strings.Builder
 		buffer := make([]byte, 1024)
-		for !strings.Contains(output.String(), marker) {
+		for !complete(output.String()) {
 			count, err := connection.Read(buffer)
 			if count > 0 {
 				output.Write(buffer[:count])
@@ -557,13 +566,18 @@ func startTestServer(t *testing.T, owner *native.Owner, authority *tailnet.Autho
 }
 
 func capability(consumer string) string {
-	if consumer == "file_transfer" {
+	switch consumer {
+	case "exec":
+		return "exec"
+	case "ssh":
+		return "managed_ssh"
+	case "file_transfer":
 		return "file_transfer"
-	}
-	if consumer == "private_tcp" || consumer == "private_http" {
+	case "private_tcp", "private_http":
 		return "private_access"
+	default:
+		return "terminal"
 	}
-	return "terminal"
 }
 
 func testAuthority(t *testing.T, self tailnet.NetworkBinding, keys testKeys, listeners ...nettype.PacketListener) *tailnet.Authority {
@@ -629,6 +643,8 @@ func testPeers(peer tailnet.NetworkBinding, direction string, expires int64) []t
 	}
 	return []tailnet.NetworkPeer{{Identity: peer, Scopes: []tailnet.NetworkScope{
 		{ResourceKind: "machine_access", ResourceID: "grant_test", ResourceGeneration: 1, Capability: "terminal", Direction: direction, Port: tailnet.NetworkPort, ExpiresAt: expires},
+		{ResourceKind: "machine_access", ResourceID: "grant_test", ResourceGeneration: 1, Capability: "exec", Direction: direction, Port: tailnet.NetworkPort, ExpiresAt: expires},
+		{ResourceKind: "machine_access", ResourceID: "grant_test", ResourceGeneration: 1, Capability: "managed_ssh", Direction: direction, Port: tailnet.NetworkPort, ExpiresAt: expires},
 		{ResourceKind: "machine_access", ResourceID: "grant_test", ResourceGeneration: 1, Capability: "file_transfer", Direction: direction, Port: tailnet.NetworkPort, ExpiresAt: expires},
 		{ResourceKind: "machine_access", ResourceID: "grant_test", ResourceGeneration: 1, Capability: "private_access", Direction: direction, Port: tailnet.NetworkPort, ExpiresAt: expires},
 	}}}

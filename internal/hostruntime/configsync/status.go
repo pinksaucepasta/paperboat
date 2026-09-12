@@ -59,6 +59,7 @@ type Status struct {
 	UpdatedAt        time.Time     `json:"updated_at"`
 	Skipped          []PathSummary `json:"skipped,omitempty"`
 	Conflicts        []PathSummary `json:"conflicts,omitempty"`
+	Review           []PathSummary `json:"review,omitempty"`
 	ErrorCode        string        `json:"error_code,omitempty"`
 	RecoveryActions  []string      `json:"recovery_actions,omitempty"`
 }
@@ -71,7 +72,7 @@ func (s Status) Validate(summaryLimit int) error {
 		len(s.LeaseID) > 128 || len(s.ErrorCode) > 64 || len(s.ManifestRevision) > 64 ||
 		len(s.LastAppliedRevision) > 256 || len(s.LastPublishedRevision) > 256 ||
 		(s.ErrorCode != "" && !safeStatusCode.MatchString(s.ErrorCode)) ||
-		len(s.Skipped) > summaryLimit || len(s.Conflicts) > summaryLimit ||
+		len(s.Skipped) > summaryLimit || len(s.Conflicts) > summaryLimit || len(s.Review) > summaryLimit ||
 		len(s.RecoveryActions) > 8 {
 		return ErrStatusInvalid
 	}
@@ -79,7 +80,7 @@ func (s Status) Validate(summaryLimit int) error {
 		s.ManifestHealth != "missing" && s.ManifestHealth != "invalid" {
 		return ErrStatusInvalid
 	}
-	for _, group := range [][]PathSummary{s.Skipped, s.Conflicts} {
+	for _, group := range [][]PathSummary{s.Skipped, s.Conflicts, s.Review} {
 		for _, item := range group {
 			if !safeRelativeStatusPath(item.Path) || item.Bytes < 0 || !safeStatusCode.MatchString(item.Reason) ||
 				(item.Revision != "" && !safeConflictRevision(item.Revision)) {

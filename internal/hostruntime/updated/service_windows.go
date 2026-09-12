@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/url"
 	"os"
@@ -63,25 +64,25 @@ func RunWindowsWithReady(ctx context.Context, config WindowsConfig, ready func()
 		return ErrInvalidWindowsConfig
 	}
 	if err := validateWindowsReadOnlyOwnerFile(config.TokenFile, config.OwnerSID); err != nil {
-		return err
+		return fmt.Errorf("validate updater token permissions: %w", err)
 	}
 	if err := validateWindowsReadOnlyOwnerFile(config.InstallState, config.OwnerSID); err != nil {
-		return err
+		return fmt.Errorf("validate updater installation permissions: %w", err)
 	}
 	if err := validateWindowsPrivilegedInstallConfig(config); err != nil {
-		return err
+		return fmt.Errorf("validate updater installation binding: %w", err)
 	}
 	if err := secureWindowsPrivilegedTree(config.StateRoot); err != nil {
-		return err
+		return fmt.Errorf("secure updater state: %w", err)
 	}
 	if err := reconcileWindowsInstallVersion(ctx, config); err != nil {
-		return err
+		return fmt.Errorf("reconcile installed updater version: %w", err)
 	}
 	if err := recoverWindowsSlots(ctx, config); err != nil {
-		return err
+		return fmt.Errorf("recover updater binary slots: %w", err)
 	}
 	if resumed, err := resumeWindowsActivation(ctx, config); err != nil {
-		return err
+		return fmt.Errorf("resume updater activation: %w", err)
 	} else if resumed {
 		if ready != nil {
 			return service.ErrWindowsServiceHandoff
@@ -98,7 +99,11 @@ func RunWindowsWithReady(ctx context.Context, config WindowsConfig, ready func()
 	} else if !errors.Is(journalErr, os.ErrNotExist) {
 		return journalErr
 	}
-	persisted, err := hostinstall.LoadWindowsRuntimeConfig()
+	instance, err := service.WindowsUserInstance(config.OwnerSID)
+	if err != nil {
+		return err
+	}
+	persisted, err := hostinstall.LoadWindowsRuntimeConfigForInstance(instance)
 	if err != nil {
 		return err
 	}
@@ -108,7 +113,7 @@ func RunWindowsWithReady(ctx context.Context, config WindowsConfig, ready func()
 	// updater to publish readiness. Only an updater started outside that
 	// protected path must run the legacy migration itself.
 	if finalizeLocalDaemon && persisted.Committed && !config.LocalDaemonReady() {
-		if err := hostinstall.EnsureWindowsLocalDaemonService(ctx); err != nil {
+		if err := hostinstall.EnsureWindowsLocalDaemonService(ctx, config.OwnerSID); err != nil {
 			return err
 		}
 	}
@@ -148,13 +153,19 @@ func validWindowsConfig(config WindowsConfig) bool {
 			return false
 		}
 	}
-	layout, layoutErr := service.DefaultLayout("windows")
+	layout, layoutErr := service.WindowsUserLayout(config.OwnerSID)
+	instance, instanceErr := service.WindowsUserInstance(config.OwnerSID)
+	instanceRoot := filepath.Join(hostinstall.WindowsProgramDataRoot(), "users", instance)
 	sid, err := windows.StringToSid(config.OwnerSID)
-	return layoutErr == nil && err == nil && sid != nil && sid.IsValid() && config.MachineID != "" && config.RepositoryURL != "" && config.ActivationGate != nil && config.CandidateStarter != nil && config.StateRoot == layout.UpdateStateRoot && filepath.Base(config.RuntimeStateRoot) == "runtime" && strings.EqualFold(filepath.Base(filepath.Dir(config.RuntimeStateRoot)), "Paperboat") && config.Binary == layout.Binary && config.BinaryRollback == layout.BinaryRollback && config.BinaryStaged == layout.BinaryStaged && config.TokenFile == hostinstall.WindowsHostdTokenPath() && config.InstallState == hostinstall.WindowsInstallConfigPath() && config.ControlSocket == `\\.\pipe\PaperboatUpdatedControl` && config.HostdSocket == layout.HostdSocket && validLoopbackHealthURL(config.HealthURL) && exactReleasePattern.MatchString(config.ActiveVersion) && (config.Architecture == "amd64" || config.Architecture == "arm64") && (config.SetupMode == "host" || config.SetupMode == "client")
+	return layoutErr == nil && instanceErr == nil && err == nil && sid != nil && sid.IsValid() && config.MachineID != "" && config.RepositoryURL != "" && config.ActivationGate != nil && config.CandidateStarter != nil && config.StateRoot == layout.UpdateStateRoot && filepath.Base(config.RuntimeStateRoot) == "runtime" && config.Binary == layout.Binary && config.BinaryRollback == layout.BinaryRollback && config.BinaryStaged == layout.BinaryStaged && config.TokenFile == filepath.Join(instanceRoot, "hostd.token") && config.InstallState == filepath.Join(instanceRoot, "runtime-install.json") && config.ControlSocket == layout.UpdaterSocket && config.HostdSocket == layout.HostdSocket && validLoopbackHealthURL(config.HealthURL) && exactReleasePattern.MatchString(config.ActiveVersion) && (config.Architecture == "amd64" || config.Architecture == "arm64") && (config.SetupMode == "host" || config.SetupMode == "client")
 }
 
 func validateWindowsPrivilegedInstallConfig(config WindowsConfig) error {
-	persisted, err := hostinstall.LoadWindowsRuntimeConfig()
+	instance, err := service.WindowsUserInstance(config.OwnerSID)
+	if err != nil {
+		return ErrInvalidWindowsConfig
+	}
+	persisted, err := hostinstall.LoadWindowsRuntimeConfigForInstance(instance)
 	if err != nil {
 		return ErrInvalidWindowsConfig
 	}

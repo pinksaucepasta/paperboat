@@ -407,7 +407,9 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 		}
 	}
 	if len(applyPaths) > 0 {
-		if err := os.Remove(journalPath); err != nil {
+		// Retain exactly one bounded, private pre-apply image for deliberate
+		// rollback. A later successful apply atomically replaces it.
+		if err := os.Rename(journalPath, filepath.Join(r.stateRoot, "rollback.json")); err != nil {
 			return PreparedPublication{}, err
 		}
 	}
@@ -474,6 +476,23 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 	return PreparedPublication{
 		ExpectedRemoteRevision: remote.Revision, CommitID: commit.String(), HasChanges: true,
 	}, nil
+}
+
+// Rollback restores the last successfully displaced managed paths. It clears
+// the reconciliation baseline so the next sync must be reviewed/reconciled
+// against the restored local state instead of silently accepting stale state.
+func (r *PlaintextWorkspaceReconciler) Rollback() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	err := recoverApplyJournal(filepath.Join(r.stateRoot, "rollback.json"), r.homeRoot, r.descriptor.RepositoryID, r.descriptor.AssignmentID, r.descriptor.Policy.MaxBatchBytes)
+	if err != nil {
+		return err
+	}
+	if removeErr := os.Remove(r.baselinePath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		return removeErr
+	}
+	r.pending = nil
+	return nil
 }
 
 func partitionFrozenConflicts(conflicts []PathSummary, frozen map[string]FrozenPath) ([]PathSummary, []PathSummary) {

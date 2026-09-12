@@ -145,3 +145,47 @@ func TestRuntimeOwnerSessionRegistryMachineWideKeysIncludeAccount(t *testing.T) 
 		t.Fatal("released second account lifetime did not close")
 	}
 }
+
+func TestSignedSharedPreviewOwnerSessionCannotClaimLocalSession(t *testing.T) {
+	runtimeDone := make(chan struct{})
+	defer close(runtimeDone)
+	registry, err := NewRuntimeOwnerSessionRegistry(RuntimeOwnerSessionRegistryConfig{AccountID: "enroller", MachineID: "machine_01", RuntimeDone: runtimeDone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}
+	_, localID, err := registry.RegisterMachineOwnerSession("machine_01", "", target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = registry.OwnerSessionDoneForTarget("teammate", "machine_01", localID, target); !errors.Is(err, ErrOwnerSessionBinding) {
+		t.Fatalf("foreign account claimed local session: %v", err)
+	}
+	first, err := registry.OwnerSessionDoneForTarget("teammate", "machine_01", "browser_nonce", target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := registry.OwnerSessionDoneForTarget("another", "machine_01", "browser_nonce", target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatal("different accounts shared session lifetime")
+	}
+	if _, err = registry.OwnerSessionDoneForTarget("teammate", "machine_01", "browser_nonce", LeaseTarget{Scheme: "http", Address: "127.0.0.1:4000"}); !errors.Is(err, ErrOwnerSessionBinding) {
+		t.Fatalf("session target changed: %v", err)
+	}
+	if err = registry.ReleaseOwnerSession("teammate", "machine_01", "browser_nonce"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-first:
+	default:
+		t.Fatal("shared session not cleaned")
+	}
+	select {
+	case <-second:
+		t.Fatal("unrelated shared session closed")
+	default:
+	}
+}

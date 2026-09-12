@@ -110,10 +110,7 @@ func (g *tailnetTerminalStreams) OpenStream(ctx context.Context) (nativeStream, 
 	if err != nil {
 		return nil, err
 	}
-	capability := g.consumer
-	if capability == "exec" || capability == "ssh" {
-		capability = "terminal"
-	}
+	capability := nativeCapability(g.consumer)
 	connection, err := g.session.OpenAuthorized(ctx, header, g.resourceID, capability)
 	if err != nil {
 		return nil, err

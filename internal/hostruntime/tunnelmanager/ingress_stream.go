@@ -16,6 +16,11 @@ import (
 
 type ingressBindingKey struct{}
 
+// ingressExpiryKey carries the current ingress decision expiry alongside the
+// binding. The inspector replay registry uses it to fence deliberate replay
+// without trusting retained bytes.
+type ingressExpiryKey struct{}
+
 func (f OriginStreamForwarder) admitIngress(parent context.Context, stream io.ReadWriteCloser, open connectorprotocol.StreamOpen, route hoststate.TunnelConfigRoute) (context.Context, context.CancelFunc, error) {
 	ctx, cancel := context.WithCancel(parent)
 	fail := func(err error) (context.Context, context.CancelFunc, error) { cancel(); return nil, nil, err }
@@ -42,6 +47,7 @@ func (f OriginStreamForwarder) admitIngress(parent context.Context, stream io.Re
 		return fail(connectorprotocol.ErrIngressDenied)
 	}
 	ctx = context.WithValue(ctx, ingressBindingKey{}, current.Binding)
+	ctx = context.WithValue(ctx, ingressExpiryKey{}, current.ExpiresAt)
 	expire := time.AfterFunc(time.Until(current.ExpiresAt), func() { cancel(); _ = stream.Close() })
 	done := make(chan struct{})
 	go func() {

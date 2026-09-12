@@ -35,7 +35,10 @@ type hostdWorkerFactory func(context.Context, workerupdate.StartRequest) (worker
 // runHostd starts hostd-owned workloads first, then launches the active
 // runtime artifact as a separately fenced child. No coordination runtime is
 // started in-process here.
-func runHostd(ctx context.Context, output io.Writer) error {
+func runHostd(ctx context.Context, args []string, output io.Writer) error {
+	if len(args) != 0 {
+		return errors.New("hostd does not accept arguments")
+	}
 	return runHostdWith(ctx, output,
 		func(ctx context.Context, version string, environ func(string) string) (hostdHost, error) {
 			return hostruntime.NewProductionHost(ctx, version, environ)

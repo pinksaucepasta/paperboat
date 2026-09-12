@@ -109,6 +109,25 @@ func TestVerifierAcceptsSignedContractVector(t *testing.T) {
 	}
 }
 
+func TestVerifierAcceptsOnlyExactConfiguredScopeAlternative(t *testing.T) {
+	fixture, private, public := loadFixture(t)
+	keys := &keySource{keys: map[string]ed25519.PublicKey{"test-key-1": public}}
+	v := Verifier{Keys: keys, Clock: fixedClock{time.Unix(fixture.Claims.IssuedAt+1, 0)}, ClockSkew: time.Minute}
+	policy := terminalPolicy(fixture.Claims)
+	policy.Scopes = nil
+	policy.AnyScopes = [][]string{{"terminal:operate"}, {"terminal:view"}, {"terminal:control"}}
+	for _, scopes := range [][]string{{"terminal:view"}, {"terminal:control"}, {"terminal:view", "terminal:control"}, {"terminal:unknown"}} {
+		claims := fixture.Claims
+		claims.Scope = scopes
+		token := signToken(t, fixture.Header, claims, private)
+		_, err := v.Verify(context.Background(), token, policy)
+		wantOK := len(scopes) == 1 && (scopes[0] == "terminal:view" || scopes[0] == "terminal:control")
+		if (err == nil) != wantOK {
+			t.Fatalf("scopes=%q err=%v wantOK=%v", scopes, err, wantOK)
+		}
+	}
+}
+
 func TestVerifierRejectsAudienceScopeBindingTimeAndRevocation(t *testing.T) {
 	fixture, private, public := loadFixture(t)
 	base := terminalPolicy(fixture.Claims)

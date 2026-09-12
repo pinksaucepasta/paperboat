@@ -255,16 +255,40 @@ func waitLaunchdRetry(ctx context.Context, cause error) error {
 }
 
 func (c LaunchdController) Remove(ctx context.Context, _ string) error {
+	return c.bootoutAndWait(ctx)
+}
+
+// bootout returns before launchd has necessarily reaped the process. Keep the
+// declaration until the exact job is absent; SIGTERMed is still registered.
+func (c LaunchdController) bootoutAndWait(ctx context.Context) error {
 	if c.Runner == nil || c.UID < 0 {
 		return ErrInvalidDefinition
 	}
-	domain := "system"
-	if c.UserDomain {
-		domain = fmt.Sprintf("gui/%d", c.UID)
+	operationCtx, cancel, err := nativeServiceContext(ctx)
+	if err != nil {
+		return err
 	}
-	err := c.Runner.Run(ctx, "launchctl", "bootout", domain+"/"+c.label())
-	if err != nil && launchdServiceAbsent(err) {
-		return nil
+	defer cancel()
+	if err = c.Runner.Run(operationCtx, "launchctl", "bootout", c.service()); err != nil {
+		if launchdServiceAbsent(err) {
+			return nil
+		}
+		return err
 	}
-	return err
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		err = c.Runner.Run(operationCtx, "launchctl", "print", c.service())
+		if launchdServiceAbsent(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		select {
+		case <-operationCtx.Done():
+			return operationCtx.Err()
+		case <-ticker.C:
+		}
+	}
 }

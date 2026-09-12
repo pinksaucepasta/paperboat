@@ -19,6 +19,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesession"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/peerrelay"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
+	"github.com/pinksaucepasta/paperboat/internal/inspector"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/endpointidentity"
@@ -42,6 +43,8 @@ type productionNativePeerConfig struct {
 	ssh                                      *managedssh.Host
 	privateCurrent                           server.NativePrivateTCPCurrent
 	privateDial                              server.NativePrivateTCPDial
+	inspector                                http.Handler
+	inspectorStore                           *inspector.Store
 }
 
 type productionNativePeerService struct {
@@ -224,12 +227,12 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 		_ = authority.Close()
 		return nil, err
 	}
-	appsConfig := nativesession.Config{Authorize: nativeNetworkAuthorizer(s.config.authorizer), ServeTransfer: func(serveCtx context.Context, connection net.Conn) error {
+	appsConfig := nativesession.Config{Authorize: s.inspectorNetworkAuthorizer(), ServeTransfer: func(serveCtx context.Context, connection net.Conn) error {
 		return server.ServeHTTPConnection(serveCtx, connection, s.config.transfer)
 	}, ServeStream: s.serveStream}
 	if s.config.privateCurrent != nil && s.config.privateDial != nil {
 		appsConfig.ServeHTTP3 = func(serveCtx context.Context, session *native.Session, authorize func(context.Context, streamauth.Header) (string, error)) error {
-			return server.ServeNativePrivateHTTP3(serveCtx, session, authorize, s.config.privateCurrent, s.config.privateDial)
+			return server.ServeNativePrivateHTTP3(serveCtx, session, authorize, s.config.privateCurrent, s.config.privateDial, s.config.inspectorStore)
 		}
 	}
 	apps, err := nativesession.New(appsConfig)
@@ -403,6 +406,8 @@ func (s *productionNativePeerService) currentIdentityFingerprint() (string, erro
 
 func (s *productionNativePeerService) serveStream(ctx context.Context, header streamauth.Header, stream net.Conn) error {
 	switch header.Consumer {
+	case "inspector":
+		return s.serveInspector(ctx, header, stream)
 	case "terminal", "exec":
 		return s.config.serve(stream)
 	case "ssh":

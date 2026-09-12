@@ -21,6 +21,34 @@ type PreparedBatch struct {
 	files   []*os.File
 }
 
+// ValidateSources applies a server-returned policy to an already opened and
+// hashed batch without reopening caller paths after an approval wait.
+func ValidateSources(sources []Source, limits Limits) error {
+	if limits.MaxFileBytes <= 0 {
+		limits.MaxFileBytes = 50 << 20
+	}
+	if limits.MaxBatchFiles <= 0 {
+		limits.MaxBatchFiles = 10
+	}
+	if limits.MaxBatchBytes <= 0 {
+		limits.MaxBatchBytes = 500 << 20
+	}
+	if len(sources) < 1 || len(sources) > limits.MaxBatchFiles {
+		return fmt.Errorf("file batch contains %d files; limit is %d", len(sources), limits.MaxBatchFiles)
+	}
+	var total int64
+	for _, source := range sources {
+		if source.Reader == nil || source.Size < 0 || source.Size > limits.MaxFileBytes {
+			return fmt.Errorf("file %s is %d bytes; limit is %d", source.Basename, source.Size, limits.MaxFileBytes)
+		}
+		total += source.Size
+		if total > limits.MaxBatchBytes {
+			return fmt.Errorf("file batch is %d bytes; limit is %d", total, limits.MaxBatchBytes)
+		}
+	}
+	return nil
+}
+
 func (b *PreparedBatch) Close() error {
 	var result error
 	for _, file := range b.files {

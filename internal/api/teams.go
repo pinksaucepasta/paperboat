@@ -23,12 +23,15 @@ type TeamGrant struct {
 	Active       bool   `json:"active"`
 }
 type Team struct {
-	TeamID       string       `json:"team_id"`
-	OwnerAccount string       `json:"owner_account"`
-	Generation   uint64       `json:"generation"`
-	Deleted      bool         `json:"deleted"`
-	Members      []TeamMember `json:"members"`
-	Grants       []TeamGrant  `json:"grants"`
+	ENVStatus     string               `json:"env_status"`
+	TeamID        string               `json:"team_id"`
+	OwnerAccount  string               `json:"owner_account"`
+	Generation    uint64               `json:"generation"`
+	Deleted       bool                 `json:"deleted"`
+	Members       []TeamMember         `json:"members"`
+	Grants        []TeamGrant          `json:"grants"`
+	Machines      []TeamMachineBinding `json:"machines"`
+	MachineGrants []TeamMachineGrant   `json:"machine_grants"`
 }
 type TeamCreateRequest struct {
 	OperationID string `json:"operation_id"`
@@ -124,3 +127,70 @@ func teamHeaders(operation string) http.Header {
 	return http.Header{"Idempotency-Key": []string{operation}}
 }
 func TeamGenerationString(generation uint64) string { return strconv.FormatUint(generation, 10) }
+
+type TeamMachineBinding struct {
+	MachineID              string   `json:"machine_id"`
+	OwnerAccount           string   `json:"owner_account"`
+	OwnerTeamID            string   `json:"owner_team_id,omitempty"`
+	DisplayName            string   `json:"display_name"`
+	State                  string   `json:"state"`
+	Online                 bool     `json:"online"`
+	ConfiguredCapabilities []string `json:"configured_capabilities"`
+	Generation             uint64   `json:"generation"`
+	Active                 bool     `json:"active"`
+}
+type TeamMachineGrant struct {
+	MachineID    string   `json:"machine_id"`
+	Audience     string   `json:"audience"`
+	AccountID    string   `json:"account_id,omitempty"`
+	Capabilities []string `json:"capabilities"`
+	Generation   uint64   `json:"generation"`
+	Active       bool     `json:"active"`
+}
+type TeamMachineRequest struct {
+	OperationID        string `json:"operation_id"`
+	ExpectedGeneration uint64 `json:"expected_generation"`
+	MachineID          string `json:"machine_id"`
+	Action             string `json:"action"`
+	Confirmation       string `json:"confirmation,omitempty"`
+}
+type TeamMachineGrantRequest struct {
+	OperationID        string   `json:"operation_id"`
+	ExpectedGeneration uint64   `json:"expected_generation"`
+	MachineID          string   `json:"machine_id"`
+	Audience           string   `json:"audience"`
+	AccountID          string   `json:"account_id,omitempty"`
+	Capabilities       []string `json:"capabilities"`
+	Active             bool     `json:"active"`
+}
+
+func (c *Client) MutateTeamMachine(ctx context.Context, team string, in TeamMachineRequest) (Team, error) {
+	var out Team
+	err := c.doWithHeaders(ctx, http.MethodPost, "/v1/teams/"+url.PathEscape(team)+"/machines", in, &out, teamHeaders(in.OperationID))
+	return out, err
+}
+func (c *Client) GrantTeamMachine(ctx context.Context, team string, in TeamMachineGrantRequest) (Team, error) {
+	var out Team
+	err := c.doWithHeaders(ctx, http.MethodPost, "/v1/teams/"+url.PathEscape(team)+"/machine-grants", in, &out, teamHeaders(in.OperationID))
+	return out, err
+}
+
+// TeamActivity contains administrative metadata only, never resource payloads.
+type TeamActivity struct {
+	ID           string         `json:"id"`
+	ActorAccount string         `json:"actor_account"`
+	Action       string         `json:"action"`
+	CreatedAt    time.Time      `json:"created_at"`
+	Metadata     map[string]any `json:"metadata"`
+}
+type TeamActivityPage struct {
+	Items      []TeamActivity `json:"items"`
+	NextCursor string         `json:"next_cursor"`
+}
+
+func (c *Client) TeamActivity(ctx context.Context, team, cursor string, limit int) (TeamActivityPage, error) {
+	var out TeamActivityPage
+	query := url.Values{"cursor": {cursor}, "limit": {strconv.Itoa(limit)}}
+	err := c.do(ctx, http.MethodGet, "/v1/teams/"+url.PathEscape(team)+"/activity?"+query.Encode(), nil, &out)
+	return out, err
+}

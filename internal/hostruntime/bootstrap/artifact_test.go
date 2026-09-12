@@ -17,12 +17,14 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseindex"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releasepolicy"
+	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
 	"github.com/sigstore/sigstore/pkg/signature"
 	"github.com/theupdateframework/go-tuf/v2/metadata"
 )
@@ -33,16 +35,34 @@ type testTUFRepository struct {
 }
 
 func newTestTUFRepository(t *testing.T, body []byte, version string, expires time.Time) testTUFRepository {
+	return newTestTUFRepositoryFor(t, body, version, expires, runtime.GOOS, runtime.GOARCH, nil)
+}
+
+func newTestTUFRepositoryFor(t *testing.T, body []byte, version string, expires time.Time, platform, architecture string, keys map[string]ed25519.PrivateKey, customize ...func(*releasepolicy.Plan)) testTUFRepository {
+	return newTestTUFRepositoryForMetadataVersion(t, body, version, expires, platform, architecture, keys, 1, customize...)
+}
+
+func newTestTUFRepositoryForMetadataVersion(t *testing.T, body []byte, version string, expires time.Time, platform, architecture string, keys map[string]ed25519.PrivateKey, metadataVersion int64, customize ...func(*releasepolicy.Plan)) testTUFRepository {
 	t.Helper()
-	keys := map[string]ed25519.PrivateKey{}
+	if metadataVersion < 1 {
+		t.Fatal("metadata version must be positive")
+	}
+	if keys == nil {
+		keys = map[string]ed25519.PrivateKey{}
+	}
 	root := metadata.Root(time.Now().UTC().Add(24 * time.Hour))
+	root.Signed.Version = metadataVersion
 	root.Signed.ConsistentSnapshot = true
 	for _, role := range []string{"root", "targets", "snapshot", "timestamp"} {
-		_, private, err := ed25519.GenerateKey(rand.Reader)
-		if err != nil {
-			t.Fatal(err)
+		private := keys[role]
+		if len(private) == 0 {
+			_, generated, err := ed25519.GenerateKey(rand.Reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			private = generated
+			keys[role] = private
 		}
-		keys[role] = private
 		key, err := metadata.KeyFromPublicKey(private.Public())
 		if err != nil {
 			t.Fatal(err)
@@ -51,22 +71,28 @@ func newTestTUFRepository(t *testing.T, body []byte, version string, expires tim
 			t.Fatal(err)
 		}
 	}
-	targetPath := releaseindex.AssetName(runtime.GOOS, runtime.GOARCH)
+	targetPath := releaseindex.AssetName(platform, architecture)
 	targets := metadata.Targets(time.Now().UTC().Add(24 * time.Hour))
+	targets.Signed.Version = metadataVersion
 	info, err := metadata.TargetFile().FromBytes(targetPath, body, "sha256")
 	if err != nil {
 		t.Fatal(err)
 	}
 	digestBytes := sha256.Sum256(body)
 	format := "elf"
-	if runtime.GOOS == "darwin" {
+	if platform == "darwin" {
 		format = "pkg"
+	} else if platform == "windows" {
+		format = "pe"
 	}
 	repository := "pinksaucepasta/paperboat-cli"
 	manifest := strings.Repeat("b", 64)
-	plan, err := releasepolicy.Default(version, manifest, 1, "routine", "release-"+version, []releasepolicy.PlatformTarget{{Platform: runtime.GOOS, Architecture: runtime.GOARCH}})
+	plan, err := releasepolicy.Default(version, manifest, 1, "routine", "release-"+version, []releasepolicy.PlatformTarget{{Platform: platform, Architecture: architecture}})
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, apply := range customize {
+		apply(&plan)
 	}
 	planDigest, err := plan.PlanSHA256()
 	if err != nil {
@@ -74,19 +100,32 @@ func newTestTUFRepository(t *testing.T, body []byte, version string, expires tim
 	}
 	index := releaseindex.Index{
 		Schema: releaseindex.SchemaV1, ReleaseID: "rel_" + version, Version: version, Channel: "stable", Severity: "routine",
-		CreatedAt: time.Now().UTC(), Platform: runtime.GOOS, Architecture: runtime.GOARCH, BinaryFormat: format,
-		Targets:     []releaseindex.Target{{Component: "pb", TargetPath: targetPath, AssetName: targetPath, Repository: repository, DownloadURL: "https://github.com/" + repository + "/releases/download/" + version + "/" + targetPath, SHA256: hex.EncodeToString(digestBytes[:]), Length: int64(len(body)), Platform: runtime.GOOS, Architecture: runtime.GOARCH, BinaryFormat: format}},
+		CreatedAt: time.Now().UTC(), Platform: platform, Architecture: architecture, BinaryFormat: format,
+		Targets:     []releaseindex.Target{{Component: "pb", TargetPath: targetPath, AssetName: targetPath, Repository: repository, DownloadURL: "https://github.com/" + repository + "/releases/download/" + version + "/" + targetPath, SHA256: hex.EncodeToString(digestBytes[:]), Length: int64(len(body)), Platform: platform, Architecture: architecture, BinaryFormat: format}},
 		HostdAPIMin: 1, HostdAPIMax: 2, RuntimeAPIMin: 1, RuntimeAPIMax: 2, RolloutPolicyRevision: plan.PolicyRevision,
 		ManifestSHA256: manifest, DeploymentPlanSHA256: planDigest, DeploymentPlan: &plan,
 	}
-	custom, _ := json.Marshal(tufAssetCustom{Schema: "paperboat.tuf-asset/v1", Kind: "github-release-asset", Version: version, Platform: runtime.GOOS, Architecture: runtime.GOARCH, Format: format, AssetName: targetPath, Repository: repository, URL: index.Targets[0].DownloadURL, SHA256: hex.EncodeToString(digestBytes[:]), Length: int64(len(body)), ReleaseIndex: index})
+	if platform == "windows" {
+		compatibility := windowsopenssh.CompatibilityMetadata()
+		index.OpenSSHPackageID = compatibility.PackageID
+		index.OpenSSHApprovedVersion = compatibility.ApprovedVersion
+		index.TestedWindowsBuilds = compatibility.TestedWindowsBuilds
+		// This is synthetic signed verifier input, not release qualification evidence.
+		index.Stability, index.NativeTested = "stable", true
+	}
+	if err := index.Validate(time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	custom, _ := json.Marshal(tufAssetCustom{Schema: "paperboat.tuf-asset/v1", Kind: "github-release-asset", Version: version, Platform: platform, Architecture: architecture, Format: format, AssetName: targetPath, Repository: repository, URL: index.Targets[0].DownloadURL, SHA256: hex.EncodeToString(digestBytes[:]), Length: int64(len(body)), ReleaseIndex: index})
 	raw := json.RawMessage(custom)
 	info.Custom, info.Path = &raw, targetPath
 	targets.Signed.Targets[targetPath] = info
 	snapshot := metadata.Snapshot(time.Now().UTC().Add(24 * time.Hour))
-	snapshot.Signed.Meta["targets.json"] = metadata.MetaFile(1)
+	snapshot.Signed.Version = metadataVersion
+	snapshot.Signed.Meta["targets.json"] = metadata.MetaFile(metadataVersion)
 	timestamp := metadata.Timestamp(expires)
-	timestamp.Signed.Meta["snapshot.json"] = metadata.MetaFile(1)
+	timestamp.Signed.Version = metadataVersion
+	timestamp.Signed.Meta["snapshot.json"] = metadata.MetaFile(metadataVersion)
 	for _, item := range []struct {
 		role  string
 		value interface {
@@ -109,11 +148,11 @@ func newTestTUFRepository(t *testing.T, body []byte, version string, expires tim
 	timestampBytes, _ := timestamp.ToBytes(false)
 	targetDigest := hex.EncodeToString(info.Hashes["sha256"])
 	return testTUFRepository{root: rootBytes, files: map[string][]byte{
-		"/metadata/timestamp.json":                                            timestampBytes,
-		"/metadata/1.snapshot.json":                                           snapshotBytes,
-		"/metadata/1.targets.json":                                            targetsBytes,
-		"/targets/" + targetDigest + "." + targetPath:                         body,
-		"/" + repository + "/releases/download/" + version + "/" + targetPath: body,
+		"/metadata/timestamp.json": timestampBytes,
+		"/metadata/" + strconv.FormatInt(metadataVersion, 10) + ".snapshot.json": snapshotBytes,
+		"/metadata/" + strconv.FormatInt(metadataVersion, 10) + ".targets.json":  targetsBytes,
+		"/targets/" + targetDigest + "." + targetPath:                            body,
+		"/" + repository + "/releases/download/" + version + "/" + targetPath:    body,
 	}}
 }
 

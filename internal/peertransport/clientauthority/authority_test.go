@@ -65,6 +65,14 @@ func TestResolveBindsLocalCustodyAndRemoteCertificateToOneRoot(t *testing.T) {
 	if len(authority.RootPublic) != 0 || len(authority.LocalKeys.RootPrivate) != 0 || len(authority.MachineCertificateRaw) != 0 {
 		t.Fatal("authority was not cleared")
 	}
+	localOnly, localErr := ResolveLocal(context.Background(), Request{Store: store, Client: certificateClientFunc(func(context.Context, string, uint64) (api.EndpointCertificateDocument, error) {
+		t.Fatal("local native authority fetched a machine certificate")
+		return api.EndpointCertificateDocument{}, nil
+	}), Issuer: issuer, AccountID: accountID, CLIClientSessionID: cliID, Now: now})
+	if localErr != nil || localOnly.LocalCertificate.Claims.EndpointID != cliID || len(localOnly.MachineCertificateRaw) != 0 {
+		t.Fatalf("local native authority: %v", localErr)
+	}
+	localOnly.Clear()
 	document.CertificateFingerprint = hex.EncodeToString(make([]byte, 32))
 	if _, err := Resolve(context.Background(), Request{Store: store, Client: certificateClientFunc(func(context.Context, string, uint64) (api.EndpointCertificateDocument, error) { return document, nil }), Issuer: issuer, AccountID: accountID, CLIClientSessionID: cliID, MachineID: machineID, MachineGeneration: 3, Now: now}); err == nil {
 		t.Fatal("metadata substitution was accepted")

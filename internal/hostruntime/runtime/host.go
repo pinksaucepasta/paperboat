@@ -26,6 +26,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	stablehostd "github.com/pinksaucepasta/paperboat/internal/hostruntime/hostd"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/inspectorapi"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/observability"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
@@ -58,6 +59,7 @@ type HostConfig struct {
 }
 
 type HostDependencies struct {
+	RecordTerminalJoin        server.TerminalJoinRecorder
 	Authorizer                server.AuthorizerFactory
 	AuthorizationService      Service
 	Listener                  ListenerFactory
@@ -79,6 +81,10 @@ type HostDependencies struct {
 	Metrics                   *observability.Registry
 	EventLog                  *observability.EventLog
 	LocalControlToken         string
+	// Inspector is the daemon-local inspector HTTP service (bounded
+	// sanitized retrieval and deliberate audited replay). It is mounted at
+	// /v1/inspector/ only with a control token, on the loopback service.
+	Inspector                 *inspectorapi.Service
 	TunnelEnrollment          http.Handler
 	TunnelEnrollmentLifecycle Service
 	ManagedSSH                *managedssh.Host
@@ -174,7 +180,7 @@ func NewClientCoordinator(ctx context.Context, config HostConfig, dependencies H
 	transferHandlerConfig := server.FileTransferHandlerConfig{
 		Service: transferService, Journal: journal, Authorizer: dependencies.Authorizer, TransferKeys: dependencies.TransferKeys,
 		AuthorizeCreate: func(authorization server.Authorization, request server.CreateFileTransferRequest) bool {
-			return (dependencies.Capabilities == nil || dependencies.Capabilities.Enabled("file-transfer.v1")) && authorization.MachineID == config.MachineID && authorization.UserID != "" && request.SourceMachineID == authorization.SourceMachineID && request.InitiatingUserID == authorization.UserID && request.DestinationMachineID == config.MachineID && request.SessionID == ""
+			return (dependencies.Capabilities == nil || dependencies.Capabilities.Enabled("file-transfer.v1")) && authorization.MachineID == config.MachineID && authorization.UserID != "" && request.SourceMachineID == authorization.SourceMachineID && request.InitiatingUserID == authorization.UserID && request.DestinationMachineID == config.MachineID && request.SessionID == "" && (authorization.RequestHash == "" || authorization.RequestID != "" && authorization.IdempotencyKey == request.BatchID && authorization.RequestHash == server.FileTransferManifestDigest(request.Files))
 		},
 	}
 	transferHandler, err := server.NewFileTransferHandler(transferHandlerConfig)
@@ -199,6 +205,9 @@ func NewClientCoordinator(ctx context.Context, config HostConfig, dependencies H
 	}
 	if dependencies.TunnelEnrollment != nil && dependencies.LocalControlToken != "" {
 		mux.Handle("/v1/tunnel-connectors/enroll", dependencies.TunnelEnrollment)
+	}
+	if dependencies.Inspector != nil && dependencies.LocalControlToken != "" {
+		mux.Handle("/v1/inspector/", dependencies.Inspector)
 	}
 	if handler := previewPrivateTCPAccessHandler(dependencies.PreviewDispatcher); handler != nil {
 		mux.Handle("/v1/private-tcp-access", handler)
@@ -225,6 +234,9 @@ func NewClientCoordinator(ctx context.Context, config HostConfig, dependencies H
 	components := []stablehostd.Component{
 		{Name: "storage", Required: true, Service: shutdownService{shutdown: func(context.Context) error { return durable.Close() }}},
 		{Name: "file_transfer_cleanup", Required: true, Service: &filetransfer.CleanupWorker{Service: transferService}},
+	}
+	if dependencies.Inspector != nil {
+		components = append(components, stablehostd.Component{Name: "inspector_retention", Required: true, Service: dependencies.Inspector})
 	}
 	if dependencies.AuthorizationService != nil {
 		components = append(components, stablehostd.Component{Name: "authorization", Required: false, Service: dependencies.AuthorizationService})
@@ -411,7 +423,8 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		return nil, err
 	}
 	dispatcher, err := server.NewDispatcher(server.DispatcherConfig{
-		Sessions: sessions, Health: healthSource, SessionLauncher: sessionLauncher,
+		RecordTerminalJoin: dependencies.RecordTerminalJoin,
+		Sessions:           sessions, Health: healthSource, SessionLauncher: sessionLauncher,
 		WorkspaceRoot: config.WorkspaceRoot, Random: random,
 		ConfigApply: dependencies.ConfigApply,
 		Writers:     writers, Exec: executions,
@@ -432,7 +445,8 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		AuthorizeCreate: func(authorization server.Authorization, request server.CreateFileTransferRequest) bool {
 			return (dependencies.Capabilities == nil || dependencies.Capabilities.Enabled("file-transfer.v1")) && authorization.MachineID == config.MachineID && authorization.UserID != "" &&
 				request.SourceMachineID == authorization.SourceMachineID && request.InitiatingUserID == authorization.UserID &&
-				(request.DestinationMachineID == config.MachineID || request.SessionID != "" && authorization.SessionID == request.SessionID)
+				(request.DestinationMachineID == config.MachineID || request.SessionID != "" && authorization.SessionID == request.SessionID) &&
+				(authorization.RequestHash == "" || authorization.RequestID != "" && authorization.IdempotencyKey == request.BatchID && authorization.RequestHash == server.FileTransferManifestDigest(request.Files))
 		},
 		ResolveDeliveryClient: func(_ server.Authorization, request server.CreateFileTransferRequest) (string, error) {
 			if request.DestinationMachineID == config.MachineID {
@@ -506,6 +520,9 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	if dependencies.TunnelEnrollment != nil && dependencies.LocalControlToken != "" {
 		mux.Handle("/v1/tunnel-connectors/enroll", dependencies.TunnelEnrollment)
 	}
+	if dependencies.Inspector != nil && dependencies.LocalControlToken != "" {
+		mux.Handle("/v1/inspector/", dependencies.Inspector)
+	}
 	if handler := previewPrivateTCPAccessHandler(dependencies.PreviewDispatcher); handler != nil {
 		mux.Handle("/v1/private-tcp-access", handler)
 		mux.Handle("/v1/private-tcp-access/", handler)
@@ -545,6 +562,9 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		stablehostd.Component{Name: "sessions", Required: true, Service: shutdownService{shutdown: sessions.Shutdown}},
 		stablehostd.Component{Name: "file_transfer_cleanup", Required: true, Service: transferCleanup},
 	)
+	if dependencies.Inspector != nil {
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "inspector_retention", Required: true, Service: dependencies.Inspector})
+	}
 	workerComponents := []Component{{Capability: "worker_lifecycle", Required: true, Service: workerLifecycleService{}}}
 	if dependencies.AuthorizationService != nil {
 		// Authorization refresh and ENV recipient registration belong to the

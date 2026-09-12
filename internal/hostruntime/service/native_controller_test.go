@@ -117,7 +117,7 @@ func TestSystemdNativeLifecycleAbsentAndCancellation(t *testing.T) {
 
 func TestLaunchdNativeLifecycleStopBootsOutAndStartReRegistersDeclaration(t *testing.T) {
 	absent := errors.New("launchctl: service not found")
-	runner := &outputCommandRunner{outputs: []string{"state = running\n", "", "", "", "", "", "state = running\n"}, errors: []error{nil, nil, nil, absent}}
+	runner := &outputCommandRunner{outputs: []string{"state = running\n", "", "", "", "", "", "", "state = running\n"}, errors: []error{nil, nil, absent, absent, absent}}
 	controller := LaunchdController{Runner: runner, UID: 501, Label: "com.pinksaucepasta.paperboat.hostd"}
 	status, err := controller.Inspect(context.Background(), "/Library/LaunchDaemons/com.pinksaucepasta.paperboat.hostd.plist")
 	if err != nil || !status.Registered || !status.Enabled || !status.Running || !status.Ready {
@@ -135,6 +135,7 @@ func TestLaunchdNativeLifecycleStopBootsOutAndStartReRegistersDeclaration(t *tes
 	want := []string{
 		"launchctl print system/com.pinksaucepasta.paperboat.hostd",
 		"launchctl bootout system/com.pinksaucepasta.paperboat.hostd",
+		"launchctl print system/com.pinksaucepasta.paperboat.hostd",
 		"launchctl bootout system/com.pinksaucepasta.paperboat.hostd",
 		"launchctl kickstart -k system/com.pinksaucepasta.paperboat.hostd",
 		"launchctl bootstrap system /Library/LaunchDaemons/com.pinksaucepasta.paperboat.hostd.plist",
@@ -351,7 +352,7 @@ last exit code = 1
 
 func TestLaunchdNativeLifecycleAbsentIsIdempotent(t *testing.T) {
 	absent := errors.New("launchctl: service not found")
-	runner := &outputCommandRunner{errors: []error{absent}}
+	runner := &outputCommandRunner{errors: []error{absent, absent, absent}}
 	controller := LaunchdController{Runner: runner, UID: 501}
 	status, err := controller.Inspect(context.Background(), "")
 	if err != nil || status != (NativeControllerStatus{}) {
@@ -362,5 +363,40 @@ func TestLaunchdNativeLifecycleAbsentIsIdempotent(t *testing.T) {
 	}
 	if err := controller.Disable(context.Background(), ""); err != nil {
 		t.Fatalf("disable absent=%v", err)
+	}
+}
+
+func TestLaunchdRemovalWaitsForTerminatingJobToDisappear(t *testing.T) {
+	for _, operation := range []string{"stop", "disable", "remove"} {
+		t.Run(operation, func(t *testing.T) {
+			// bootout succeeds, but the next print still represents SIGTERMed.
+			runner := &outputCommandRunner{outputs: []string{"", "state = SIGTERMed\npid = 42\n"}, errors: []error{nil, nil, errors.New("launchctl: service not found")}}
+			controller := LaunchdController{Runner: runner, UID: 5391, Label: HostdLabel + ".u5391"}
+			var err error
+			switch operation {
+			case "stop":
+				err = controller.Stop(context.Background(), "")
+			case "disable":
+				err = controller.Disable(context.Background(), "")
+			case "remove":
+				err = controller.Remove(context.Background(), "")
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(runner.calls) != 3 || runner.calls[2][1] != "print" {
+				t.Fatalf("did not wait for exact service absence: %v", runner.calls)
+			}
+		})
+	}
+}
+
+func TestLaunchdRemovalHonorsDeadlineWhileJobRemainsRegistered(t *testing.T) {
+	runner := &outputCommandRunner{}
+	controller := LaunchdController{Runner: runner, UID: 5391, Label: HostdLabel + ".u5391"}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := controller.Remove(ctx, ""); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("terminating job falsely removed: %v", err)
 	}
 }

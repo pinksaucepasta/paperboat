@@ -419,15 +419,48 @@ func windowsServiceConfigurationTrustedForTransition(config mgr.Config, definiti
 		return false
 	}
 	arguments, err := windows.DecomposeCommandLine(config.BinaryPathName)
-	if err != nil || len(arguments) != 3 || arguments[1] != "daemon" {
+	instance := windowsServiceInstanceFromName(definition.Name)
+	if err != nil || len(arguments) != 5 || arguments[1] != "daemon" || arguments[3] != "--instance" || arguments[4] != instance {
 		return false
 	}
-	layout, err := DefaultLayout("windows")
+	layout, err := windowsLayoutForInstance(instance)
 	if err != nil || !exactWindowsPath(filepath.Clean(arguments[0]), layout.Binary) {
 		return false
 	}
 	wantArgument := windowsServiceRoleArgument(definition.Name)
 	return wantArgument != "" && arguments[2] == wantArgument
+}
+
+func windowsServiceInstanceFromName(name string) string {
+	base := windowsServiceBaseNameFromName(name)
+	if base == "" || len(name) <= len(base)+1 || name[len(base)] != '-' {
+		return ""
+	}
+	return name[len(base)+1:]
+}
+
+func windowsLayoutForInstance(instance string) (Layout, error) {
+	if len(instance) != 25 || instance[0] != 'u' {
+		return Layout{}, ErrInvalidDefinition
+	}
+	for _, c := range instance[1:] {
+		if c < '0' || c > '9' && c < 'a' || c > 'f' {
+			return Layout{}, ErrInvalidDefinition
+		}
+	}
+	layout, err := DefaultLayout("windows")
+	if err != nil {
+		return Layout{}, err
+	}
+	layout.Instance = instance
+	layout.InstallRoot = windowsPathJoin(layout.InstallRoot, "users", instance)
+	layout.ReleasesRoot = windowsPathJoin(layout.InstallRoot, "releases")
+	layout.Binary = windowsPathJoin(layout.InstallRoot, "bin", "pb.exe")
+	layout.BinaryRollback = windowsPathJoin(layout.ReleasesRoot, "pb.rollback.exe")
+	layout.BinaryStaged = windowsPathJoin(layout.ReleasesRoot, "pb.staged.exe")
+	layout.UpdateStateRoot = windowsPathJoin(layout.UpdateStateRoot, "users", instance)
+	layout.HostdSocket += "-" + instance
+	return layout, layout.Validate()
 }
 
 func windowsServiceRoleArgument(name string) string {
@@ -800,6 +833,13 @@ func readWindowsServiceDefinitionWithExecutablePolicy(path string, allowMissingE
 	executableErr := validateWindowsExecutable(definition.Executable, allowMissingExecutable)
 	if decodeErr != nil || trailingErr != io.EOF || nameErr != nil || !strings.EqualFold(definition.Name, expectedName) || definition.Schema != "paperboat.windows-service/v1" || definition.Name == "" || executableErr != nil || len(definition.Arguments) == 0 || !safeValues(definition.Arguments) || !safeEnvironment(definition.Environment) {
 		return windowsServiceDefinition{}, ErrInvalidDefinition
+	}
+	if instance := windowsServiceInstanceFromName(definition.Name); instance != "" {
+		layout, layoutErr := windowsLayoutForInstance(instance)
+		role := windowsServiceRoleArgument(definition.Name)
+		if layoutErr != nil || !exactWindowsPath(definition.Executable, layout.Binary) || len(definition.Arguments) != 4 || definition.Arguments[0] != "daemon" || definition.Arguments[1] != role || definition.Arguments[2] != "--instance" || definition.Arguments[3] != instance {
+			return windowsServiceDefinition{}, ErrInvalidDefinition
+		}
 	}
 	return definition, nil
 }

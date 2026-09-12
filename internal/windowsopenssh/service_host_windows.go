@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -20,18 +21,21 @@ import (
 // RunServiceHost runs the PaperboatSshd SCM entry point. sshd itself cannot be
 // registered under an arbitrary service name, so the signed Paperboat binary
 // owns the service and supervises the pinned sshd child.
-func RunServiceHost(sshdPath, configPath string) error {
-	if !filepath.IsAbs(sshdPath) || !filepath.IsAbs(configPath) {
+func RunServiceHost(serviceName, sshdPath, configPath, ownerSID string) error {
+	if !strings.HasPrefix(serviceName, ServiceName+"-u") || !filepath.IsAbs(sshdPath) || !filepath.IsAbs(configPath) {
 		return ErrInvalidConfig
+	}
+	if _, err := validatedServiceQueryOwner(serviceName, ownerSID); err != nil {
+		return err
 	}
 	isService, err := svc.IsWindowsService()
 	if err != nil || !isService {
 		return errors.Join(ErrServiceOwnership, err)
 	}
-	return svc.Run(ServiceName, &sshdServiceHandler{sshdPath: sshdPath, configPath: configPath})
+	return svc.Run(serviceName, &sshdServiceHandler{sshdPath: sshdPath, configPath: configPath, serviceName: serviceName, ownerSID: ownerSID})
 }
 
-type sshdServiceHandler struct{ sshdPath, configPath string }
+type sshdServiceHandler struct{ sshdPath, configPath, serviceName, ownerSID string }
 
 func (h *sshdServiceHandler) Execute(_ []string, requests <-chan svc.ChangeRequest, status chan<- svc.Status) (bool, uint32) {
 	status <- svc.Status{State: svc.StartPending}
@@ -68,7 +72,7 @@ func (h *sshdServiceHandler) Execute(_ []string, requests <-chan svc.ChangeReque
 		status <- svc.Status{State: svc.Stopped}
 		return true, 1
 	}
-	processHandle, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(command.Process.Pid))
+	processHandle, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE|windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.READ_CONTROL|windows.WRITE_DAC, false, uint32(command.Process.Pid))
 	if err != nil {
 		_ = command.Process.Kill()
 		_ = command.Wait()
@@ -76,6 +80,9 @@ func (h *sshdServiceHandler) Execute(_ []string, requests <-chan svc.ChangeReque
 		return true, 1
 	}
 	assignErr := windows.AssignProcessToJobObject(job, processHandle)
+	if assignErr == nil {
+		assignErr = grantSSHDProcessOwnerQuery(processHandle, h.serviceName, h.ownerSID)
+	}
 	windows.Close(processHandle)
 	if assignErr != nil {
 		_ = command.Process.Kill()

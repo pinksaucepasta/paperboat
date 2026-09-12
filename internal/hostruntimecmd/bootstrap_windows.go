@@ -15,6 +15,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,12 +26,28 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 	"github.com/pinksaucepasta/paperboat/internal/machinename"
 	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
 	"golang.org/x/sys/windows"
 )
+
+func windowsOpenSSHBootstrapConfig(config windowsopenssh.Config, instance string) windowsopenssh.Config {
+	config.ServiceName = "PaperboatSshd-" + instance
+	config.ServiceSID = windowsopenssh.ServiceSID(config.ServiceName)
+	if root, err := hostinstall.WindowsInstanceRoot(instance); err == nil {
+		config.StateRoot = filepath.Join(root, "ssh")
+	}
+	if layout, err := hostinstall.WindowsLayoutForInstance(instance); err == nil {
+		config.ServiceExecutable = layout.Binary
+	}
+	if value, err := strconv.ParseUint(instance[1:5], 16, 16); err == nil {
+		config.Port = uint16(40000 + value%20000)
+	}
+	return config
+}
 
 func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("bootstrap", flag.ContinueOnError)
@@ -102,6 +119,9 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	}
 	publicIdentityKey := base64.RawURLEncoding.EncodeToString(identityStore.Current().Public())
 	resume, resumeErr := bootstrap.LoadResume(*stateRoot, *serverURL, publicIdentityKey, token, *name, *setupMode, time.Now().UTC())
+	if err := rejectFreshBootstrapOverEnrollment(identityStore, resumeErr); err != nil {
+		return err
+	}
 	resumeExpired := errors.Is(resumeErr, bootstrap.ErrResumeExpired)
 	if errors.Is(resumeErr, bootstrap.ErrResumeExpired) {
 		if !resume.PairingStarted {
@@ -133,6 +153,14 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	// below before it is treated as ready for machine-control bootstrap.
 	_, reusableIdentityErr := enrollment.LoadRuntimeIdentityForRenewal(*stateRoot, time.Now().UTC())
 	sshConfig := windowsopenssh.DefaultConfig(nil)
+	instance, instanceErr := service.WindowsUserInstance(account.Uid)
+	if instanceErr != nil {
+		return instanceErr
+	}
+	sshConfig = windowsOpenSSHBootstrapConfig(sshConfig, instance)
+	if err := checkWindowsBootstrapSSHPort(ctx, sshConfig); err != nil {
+		return err
+	}
 	if errors.Is(resumeErr, bootstrap.ErrResumeNotFound) {
 		verifier := make([]byte, 32)
 		if _, err := rand.Read(verifier); err != nil {
@@ -224,9 +252,6 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 			return err
 		}
 	}
-	if err := saveBootstrapRegistration(identityStore, *serverURL, material, windowsAccountName(account.Username), sshConfig.Port); err != nil {
-		return fmt.Errorf("save machine registration: %w", err)
-	}
 	// Both modes receive the local CLI profile and daemon, then install the same
 	// managed hostd/updater runtime below. Host mode additionally provisions
 	// machine-control authority; the server-issued CLI session is bound to this
@@ -240,8 +265,14 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 			return fmt.Errorf("persist CLI enrollment progress: %w", err)
 		}
 	}
+	if err := saveBootstrapRegistration(identityStore, *serverURL, material, windowsAccountName(account.Username), sshConfig.Port); err != nil {
+		return fmt.Errorf("save machine registration: %w", err)
+	}
 	if !shouldInstallBootstrapHostRuntime(material) {
 		return errors.New("enrollment setup mode does not install a managed runtime")
+	}
+	if err := prepareBootstrapListener(*stateRoot, &material, &resume); err != nil {
+		return err
 	}
 	artifactPath, err := prepareWindowsBootstrapRuntime(ctx, material.ReuseIdentity, resume.RuntimeEnrolled, func(ctx context.Context) error {
 		return ensureWindowsRuntimeEnrollment(ctx, material, *stateRoot)
@@ -262,6 +293,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	if err != nil {
 		return err
 	}
+
 	request := hostinstall.Request{Schema: hostinstall.SchemaV1, Platform: runtime.GOOS, User: windowsAccountName(account.Username), Group: "Paperboat", OwnerSID: sid, Executable: artifactPath, Artifact: *material.Artifact, Home: home, Path: os.Getenv("PATH"), StateRoot: *stateRoot, WorkspaceRoot: home, ControlURL: material.ControlURL, UserMachineID: material.UserMachineID, Shell: filepath.Join(os.Getenv("WINDIR"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), HelperListenAddress: material.HelperListenAddress, SetupMode: *setupMode}
 	if err := hostinstall.Validate(request, 0); err != nil {
 		return fmt.Errorf("validate Windows host installation request: %w", err)

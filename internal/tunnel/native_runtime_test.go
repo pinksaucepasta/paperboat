@@ -106,7 +106,7 @@ func TestCLINativeStreamGroupAuthorizesEveryApplicationStream(t *testing.T) {
 		t.Fatalf("headers = %#v", session.headers)
 	}
 	for i, header := range session.headers {
-		if header.Consumer != "ssh" || header.OperationID != "operation_1" || !header.Resumable || session.resources[i] != "access_session_1" || session.capabilities[i] != "terminal" {
+		if header.Consumer != "ssh" || header.OperationID != "operation_1" || !header.Resumable || session.resources[i] != "access_session_1" || session.capabilities[i] != "managed_ssh" {
 			t.Fatalf("stream %d header=%#v resource=%q capability=%q", i, header, session.resources[i], session.capabilities[i])
 		}
 	}

@@ -133,6 +133,12 @@ func newInstaller(config Config, allowMissingExecutable bool) (*Installer, error
 		} else if config.Kind != WorkerKind {
 			return nil, ErrInvalidDefinition
 		}
+		if config.Instance != "" {
+			if !safeInstance(config.Instance) || config.Kind == ConfigKind || config.Kind == DaemonKind {
+				return nil, ErrInvalidDefinition
+			}
+			label += "." + config.Instance
+		}
 		directory := "LaunchDaemons"
 		if config.Kind == ConfigKind || config.Kind == DaemonKind {
 			directory = "LaunchAgents"
@@ -153,6 +159,13 @@ func newInstaller(config Config, allowMissingExecutable bool) (*Installer, error
 		} else if config.Kind != WorkerKind && config.Kind != HostdKind && config.Kind != UpdaterKind {
 			return nil, ErrInvalidDefinition
 		}
+		if config.Instance != "" {
+			if !safeInstance(config.Instance) || config.Kind == ConfigKind || config.Kind == DaemonKind {
+				return nil, ErrInvalidDefinition
+			}
+			unit = strings.TrimSuffix(unit, ".service") + "-" + config.Instance + ".service"
+			path = filepath.Join(config.ConfigRoot, "etc", "systemd", "system", unit)
+		}
 		if path == "" {
 			path = filepath.Join(config.ConfigRoot, "etc", "systemd", "system", unit)
 		}
@@ -168,6 +181,19 @@ func newInstaller(config Config, allowMissingExecutable bool) (*Installer, error
 		return nil, ErrUnsupportedPlatform
 	}
 	return &Installer{config: config, definitionPath: path}, nil
+}
+
+func safeInstance(value string) bool {
+	if value == "" || len(value) > 64 {
+		return false
+	}
+	for _, character := range value {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '-' || character == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func safeExecutableForInstall(path string, allowMissing bool) error {
@@ -327,6 +353,9 @@ func renderLaunchd(config Config) ([]byte, error) {
 	} else if config.Kind == DaemonKind {
 		label = DaemonLabel
 	}
+	if config.Instance != "" {
+		label += "." + config.Instance
+	}
 	definition := struct {
 		Label                string            `plist:"Label"`
 		ProcessType          string            `plist:"ProcessType"`
@@ -426,6 +455,9 @@ func renderSystemd(config Config) ([]byte, error) {
 	}
 	if systemService {
 		directory := systemDirectoryName(config.Kind)
+		if config.Instance != "" {
+			directory += "-" + config.Instance
+		}
 		runtimeDirectoryMode := "0755"
 		if config.Kind == HostdKind {
 			// hostdproto requires its socket directory to be private to the

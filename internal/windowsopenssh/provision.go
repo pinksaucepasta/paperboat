@@ -71,6 +71,7 @@ type Config struct {
 	OwnerSID          string
 	ServiceSID        string
 	ServiceExecutable string
+	ServiceName       string
 	Port              uint16
 	Runner            Runner
 }
@@ -107,7 +108,7 @@ func DefaultConfig(runner Runner) Config {
 		Platform: runtime.GOOS, Architecture: runtime.GOARCH,
 		InstallRoot: filepath.Join(programFiles, "OpenSSH"),
 		StateRoot:   filepath.Join(programData, "Paperboat", "ssh"), ApprovedVersion: ApprovedVersion,
-		ExpectedPublisher: compatibility.ExpectedPublisher, OwnerSID: platformOwnerSID(), ServiceSID: platformServiceSID(), Port: 38222, Runner: runner,
+		ExpectedPublisher: compatibility.ExpectedPublisher, OwnerSID: platformOwnerSID(), ServiceSID: platformServiceSID(), ServiceName: ServiceName, Port: 38222, Runner: runner,
 	}
 }
 

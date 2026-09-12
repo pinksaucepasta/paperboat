@@ -117,22 +117,13 @@ func newProductionConfigSync(config productionConfigSyncConfig) (*configsync.Sup
 			if err != nil {
 				return nil, err
 			}
-			repositoryRoot := filepath.Join(assignmentRoot, "repository")
-			reconciler, err := configsync.NewPlaintextWorkspaceReconciler(configsync.WorkspaceReconcilerConfig{
-				HomeRoot: config.HomeRoot, StateRoot: assignmentRoot, Descriptor: descriptor,
-				Resolutions: client, ChezmoiBinary: chezmoiBinary,
-			})
-			if err != nil {
-				return nil, err
-			}
-			repository, err := configsync.NewGitRepository(configsync.GitRepositoryConfig{
-				Root: repositoryRoot, Access: client, Reconciler: reconciler,
-			})
+			repository, reconciler, err := productionConfigRepository(config.HomeRoot, assignmentRoot, chezmoiBinary, descriptor, client)
 			if err != nil {
 				return nil, err
 			}
 			publisher, err := configsync.NewPublisher(configsync.PublisherConfig{
-				Authority: client, Repository: repository,
+				Authority: client, Repository: repository, AutomaticUpdates: descriptor.AutomaticUpdates,
+				ApprovedRevision: descriptor.ApprovedPullRevision, RequireReview: descriptor.PullRepositoryID != "",
 			})
 			if err != nil {
 				return nil, err
@@ -144,6 +135,65 @@ func newProductionConfigSync(config productionConfigSyncConfig) (*configsync.Sup
 			})
 		},
 	})
+}
+
+type productionConfigReconciler interface {
+	configsync.DiagnosticsSource
+	configsync.ManifestSource
+}
+
+func productionConfigRepository(homeRoot, assignmentRoot, chezmoiBinary string, descriptor configsync.RuntimeDescriptor, client *configsync.ControlClient) (configsync.Repository, productionConfigReconciler, error) {
+	if descriptor.PullRepositoryID == "" && descriptor.PushRepositoryID == "" {
+		if descriptor.Mode != configsync.ModePushOnly {
+			descriptor.PullRepositoryID = descriptor.RepositoryID
+		}
+		if descriptor.Mode != configsync.ModePullOnly {
+			descriptor.PushRepositoryID = descriptor.RepositoryID
+		}
+	}
+	makeRepository := func(name, repositoryID string, mode configsync.AssignmentMode, direction string) (*configsync.GitRepository, *configsync.PlaintextWorkspaceReconciler, error) {
+		stateRoot := filepath.Join(assignmentRoot, name)
+		if err := os.MkdirAll(stateRoot, 0o700); err != nil {
+			return nil, nil, err
+		}
+		child := descriptor
+		child.RepositoryID, child.Mode = repositoryID, mode
+		reconciler, err := configsync.NewPlaintextWorkspaceReconciler(configsync.WorkspaceReconcilerConfig{HomeRoot: homeRoot, StateRoot: stateRoot, Descriptor: child, Resolutions: client, ChezmoiBinary: chezmoiBinary})
+		if err != nil {
+			return nil, nil, err
+		}
+		repository, err := configsync.NewGitRepository(configsync.GitRepositoryConfig{Root: filepath.Join(stateRoot, "repository"), Access: configsync.DirectionalRepositoryAccess{Client: client, Direction: direction}, Reconciler: reconciler, PushTarget: direction == "push"})
+		return repository, reconciler, err
+	}
+	if descriptor.Mode == configsync.ModePullOnly {
+		return makeRepository("pull", descriptor.PullRepositoryID, configsync.ModePullOnly, "pull")
+	}
+	if descriptor.Mode == configsync.ModePushOnly {
+		return makeRepository("push", descriptor.PushRepositoryID, configsync.ModePushOnly, "push")
+	}
+	pull, pullReconciler, err := makeRepository("pull", descriptor.PullRepositoryID, configsync.ModePullOnly, "pull")
+	if err != nil {
+		return nil, nil, err
+	}
+	push, pushReconciler, err := makeRepository("push", descriptor.PushRepositoryID, configsync.ModePushOnly, "push")
+	if err != nil {
+		return nil, nil, err
+	}
+	return &configsync.SplitRepository{Pull: pull, Push: push}, combinedConfigDiagnostics{pullReconciler, pushReconciler}, nil
+}
+
+type combinedConfigDiagnostics struct {
+	pull, push *configsync.PlaintextWorkspaceReconciler
+}
+
+func (d combinedConfigDiagnostics) Diagnostics() configsync.ReconciliationDiagnostics {
+	pull, push := d.pull.Diagnostics(), d.push.Diagnostics()
+	push.LastAppliedRevision = pull.LastAppliedRevision
+	push.Skipped = append(pull.Skipped, push.Skipped...)
+	return push
+}
+func (d combinedConfigDiagnostics) CurrentManifest() configsync.Manifest {
+	return d.pull.CurrentManifest()
 }
 
 func protectConfigSyncRuntimeState(

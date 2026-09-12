@@ -1,6 +1,7 @@
 package configsync
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -57,6 +58,33 @@ func TestApplyJournalRestoresOriginalsAndRemovesCreatedPaths(t *testing.T) {
 	}
 	if _, err := os.Lstat(journal); !os.IsNotExist(err) {
 		t.Fatalf("journal remains: %v", err)
+	}
+}
+
+func TestWorkspaceRollbackRestoresLastSuccessfulPreimage(t *testing.T) {
+	home := t.TempDir()
+	state := t.TempDir()
+	target := filepath.Join(home, "config.txt")
+	if err := os.WriteFile(target, []byte("before\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	journal := filepath.Join(state, "rollback.json")
+	if err := beginApplyJournal(journal, home, "repo", "assignment", "revision", []string{"config.txt"}, 1024); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("after\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := &PlaintextWorkspaceReconciler{homeRoot: home, stateRoot: state, baselinePath: filepath.Join(state, "baseline.json"), descriptor: RuntimeDescriptor{RepositoryID: "repo", AssignmentID: "assignment", Policy: RuntimePolicy{MaxBatchBytes: 1024}}}
+	if err := r.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil || string(got) != "before\n" {
+		t.Fatalf("restored=%q err=%v", got, err)
+	}
+	if _, err := os.Stat(journal); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rollback record retained: %v", err)
 	}
 }
 

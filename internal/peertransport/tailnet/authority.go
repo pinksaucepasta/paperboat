@@ -124,6 +124,7 @@ type authorizedClient struct {
 	client     *UDPClient
 	peer       NetworkBinding
 	descriptor [sha256.Size]byte
+	scopes     []NetworkScope
 	node       key.NodePublic
 }
 
@@ -253,7 +254,7 @@ func (a *Authority) verify(ctx context.Context, token string, now time.Time) (Ne
 	scopes := 0
 	for _, p := range cfg.Peers {
 		b := p.Identity
-		if !validBinding(b) || b.AccountID != s.AccountID || b.Role == s.Role || ids[b.EndpointID] || addresses[b.VirtualAddress] || keys[b.WireGuardPublicKey] || len(p.Scopes) == 0 {
+		if !validBinding(b) || b.Role == s.Role || ids[b.EndpointID] || addresses[b.VirtualAddress] || keys[b.WireGuardPublicKey] || len(p.Scopes) == 0 {
 			return cfg, "", ErrAuthority
 		}
 		ids[b.EndpointID] = true
@@ -262,7 +263,7 @@ func (a *Authority) verify(ctx context.Context, token string, now time.Time) (Ne
 		seen := map[string]bool{}
 		for _, scope := range p.Scopes {
 			scopes++
-			validResource := scope.ResourceKind == "machine_access" && (scope.Capability == "terminal" || scope.Capability == "file_transfer" || scope.Capability == "private_access") || scope.ResourceKind == "codex_session" && scope.Capability == "codex"
+			validResource := scope.ResourceKind == "inspector" && scope.Capability == "inspector" || scope.ResourceKind == "machine_access" && (scope.Capability == "terminal" || scope.Capability == "exec" || scope.Capability == "managed_ssh" || scope.Capability == "file_transfer" || scope.Capability == "private_access") || scope.ResourceKind == "codex_session" && scope.Capability == "codex"
 			if scopes > 128 || !validResource || !validID(scope.ResourceID) || scope.ResourceGeneration != 1 || scope.Port != NetworkPort || scope.ExpiresAt < cfg.ExpiresAt || scope.Direction != "dial" && scope.Direction != "accept" || s.Role == "cli" && scope.Direction != "dial" || s.Role == "machine" && scope.Direction != "accept" {
 				return cfg, "", ErrAuthority
 			}

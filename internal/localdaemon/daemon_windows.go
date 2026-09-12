@@ -128,7 +128,10 @@ func runWindowsDaemon(ctx context.Context, config DaemonConfig) error {
 		RefreshInterval: config.RefreshInterval,
 		RequestTimeout:  config.RequestTimeout,
 		Clock:           config.Clock,
-		OnMachines: func(refreshCtx context.Context, machines []api.UserMachine) {
+		OnRefresh: func(err error) {
+			severity, fields := inventoryRefreshDiagnostic(err)
+			_ = recorder.Record("reconciliation", "inventory_refresh", severity, fields)
+		}, OnMachines: func(refreshCtx context.Context, machines []api.UserMachine) {
 			if transportInvalidator != nil {
 				transportInvalidator.Observe(machines)
 			}
@@ -187,12 +190,7 @@ func runWindowsDaemon(ctx context.Context, config DaemonConfig) error {
 	results := make(chan error, 3)
 	go func() { results <- server.Run(runCtx) }()
 	go func() {
-		refreshErr := inventory.Refresh(runCtx)
-		refreshOutcome, refreshSeverity := "ready", "info"
-		if refreshErr != nil {
-			refreshOutcome, refreshSeverity = "degraded", "warning"
-		}
-		_ = recorder.Record("reconciliation", "inventory_refresh", refreshSeverity, map[string]string{"outcome": refreshOutcome})
+		_ = inventory.Refresh(runCtx)
 		if runCtx.Err() != nil {
 			results <- runCtx.Err()
 			return

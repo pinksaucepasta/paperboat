@@ -83,6 +83,11 @@ func approvedProgramFilesInstall(record InventoryRecord, config Config) bool {
 
 func inventoryPowerShell(config Config) string {
 	installRoot := quotePowerShell(config.InstallRoot)
+	name := config.ServiceName
+	if name == "" {
+		name = ServiceName
+	}
+	serviceName := quotePowerShell(name)
 	return strings.Join([]string{
 		"$ErrorActionPreference='Stop'",
 		securityModuleImport,
@@ -91,7 +96,7 @@ func inventoryPowerShell(config Config) string {
 		"function S($n){$x=Get-CimInstance Win32_Service -Filter (\"Name='\"+$n+\"'\") -ErrorAction SilentlyContinue;if($null -eq $x){return [pscustomobject]@{name=$n;exists=$false;state='';process_id=0;path_name=''}};[pscustomobject]@{name=$n;exists=$true;state=([string]$x.State);process_id=[uint32]$x.ProcessId;path_name=([string]$x.PathName)}}",
 		"$cap=Get-WindowsCapability -Online -Name 'OpenSSH.Server*' -ErrorAction SilentlyContinue|Where-Object {$_.State -eq 'Installed'}|Select-Object -First 1",
 		"$root=" + installRoot,
-		"[pscustomobject]@{winget_registered=$false;winget_version='';capability_present=($null -ne $cap);system_sshd=(B (Join-Path $env:WINDIR 'System32\\OpenSSH\\sshd.exe'));program_files_sshd=(B (Join-Path $root 'sshd.exe'));system_service=(S 'sshd');paperboat_service=(S 'PaperboatSshd')}|ConvertTo-Json -Compress -Depth 4",
+		"[pscustomobject]@{winget_registered=$false;winget_version='';capability_present=($null -ne $cap);system_sshd=(B (Join-Path $env:WINDIR 'System32\\OpenSSH\\sshd.exe'));program_files_sshd=(B (Join-Path $root 'sshd.exe'));system_service=(S 'sshd');paperboat_service=(S " + serviceName + ")}|ConvertTo-Json -Compress -Depth 4",
 	}, ";")
 }
 

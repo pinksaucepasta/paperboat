@@ -186,6 +186,32 @@ func TestEnsureCLIIdentityForLoginBootstrapsNewAccount(t *testing.T) {
 	}
 }
 
+func TestEnrolledRuntimeBlocksAccountSwitch(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("PAPERBOAT_RUNTIME_STATE_ROOT", root)
+	identityStore, err := identity.Open(identity.Config{StateRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := identityStore.Current()
+	if err := identityStore.SaveRegistration(identity.Registration{ServerURL: "https://api.example.test", AccountID: "account_a", MachineID: "machine_1", EnvironmentID: "env_1", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, SetupRoles: []string{"interactive"}, UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	previous := &config.Profile{Issuer: "https://api.example.test", Account: config.Account{ID: "account_a"}}
+	if err := enrolledRuntimeAccountSwitchError(config.Profile{Issuer: previous.Issuer, Account: config.Account{ID: "account_b"}}); err == nil || !strings.Contains(err.Error(), "pb uninstall") {
+		t.Fatalf("switch error=%v", err)
+	}
+	if err := enrolledRuntimeAccountSwitchError(config.Profile{Issuer: previous.Issuer, Account: config.Account{ID: "account_a"}}); err != nil {
+		t.Fatalf("same-account login blocked: %v", err)
+	}
+	if err := enrolledRuntimeAccountSwitchError(config.Profile{Issuer: previous.Issuer, Account: config.Account{ID: "account_b"}}); err == nil {
+		t.Fatal("logged-out account switch was allowed")
+	}
+	if err := enrolledRuntimeAccountSwitchError(config.Profile{Issuer: "https://other.example.test", Account: config.Account{ID: "account_a"}}); err == nil {
+		t.Fatal("server switch was allowed")
+	}
+}
+
 func TestResolveSSHRequestedUser(t *testing.T) {
 	for _, test := range []struct{ target, flag, want string }{
 		{target: "root", want: "root"},

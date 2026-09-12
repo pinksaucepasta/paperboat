@@ -43,10 +43,10 @@ func CheckLoopbackHealth(ctx context.Context, config Config, result Result) (Ser
 }
 
 func ValidateLoopbackHealth(health ServiceHealth, config Config, result Result) error {
-	if !health.Service.Exists || !strings.EqualFold(health.Service.Name, ServiceName) || !strings.EqualFold(health.Service.State, "running") || health.Service.ProcessID == 0 {
+	if !health.Service.Exists || !strings.EqualFold(health.Service.Name, config.ServiceName) || !strings.EqualFold(health.Service.State, "running") || health.Service.ProcessID == 0 {
 		return ErrServiceUnhealthy
 	}
-	if !strings.Contains(strings.ToLower(health.Service.PathName), strings.ToLower(filepath.Clean(result.SSHDPath))) {
+	if !validLoopbackServiceCommand(config, result, health.Service.PathName) {
 		return ErrServiceOwnership
 	}
 	seen := map[string]bool{}

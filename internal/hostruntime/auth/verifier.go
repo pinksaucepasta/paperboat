@@ -113,10 +113,13 @@ type FileTransferPolicy struct {
 }
 
 type Policy struct {
-	Issuer              string
-	Audience            string
-	CredentialClass     string
-	Scopes              []string
+	Issuer          string
+	Audience        string
+	CredentialClass string
+	Scopes          []string
+	// AnyScopes permits one of several exact scope sets. It is mutually
+	// exclusive with Scopes and never performs subset matching.
+	AnyScopes           [][]string
 	EnvironmentID       string
 	UserID              string
 	CLIClientSessionID  string
@@ -213,7 +216,7 @@ func (v Verifier) Verify(ctx context.Context, token string, policy Policy) (Clai
 	if claims.CredentialClass != policy.CredentialClass || !bindingsMatch(claims, policy) || claims.UserID != "" && claims.Subject != claims.UserID {
 		return Claims{}, &Error{Code: BindingInvalid}
 	}
-	if !exactScopes(claims.Scope, policy.Scopes) {
+	if !policyScopesMatch(claims.Scope, policy) {
 		return Claims{}, &Error{Code: ScopeInvalid}
 	}
 	now := v.Clock.Now()
@@ -244,6 +247,21 @@ func (v Verifier) Verify(ctx context.Context, token string, policy Policy) (Clai
 		}
 	}
 	return claims, nil
+}
+
+func policyScopesMatch(actual []string, policy Policy) bool {
+	if len(policy.AnyScopes) == 0 {
+		return exactScopes(actual, policy.Scopes)
+	}
+	if len(policy.Scopes) != 0 {
+		return false
+	}
+	for _, alternative := range policy.AnyScopes {
+		if exactScopes(actual, alternative) {
+			return true
+		}
+	}
+	return false
 }
 
 func decodeSegment(segment string, target any) error {

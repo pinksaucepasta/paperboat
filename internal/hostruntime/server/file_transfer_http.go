@@ -68,6 +68,25 @@ type CreateFileTransferRequest struct {
 	E2EE                 *fileTransferE2EE   `json:"e2ee,omitempty"`
 }
 
+// FileTransferManifestDigest is the canonical approval binding shared with
+// the control plane. Transport-only IDs and ordinals are intentionally absent.
+func FileTransferManifestDigest(files []filetransfer.File) string {
+	projected := make([]struct {
+		Basename string `json:"basename"`
+		Size     int64  `json:"size"`
+		SHA256   string `json:"sha256"`
+	}, len(files))
+	for i, file := range files {
+		projected[i].Basename, projected[i].Size, projected[i].SHA256 = file.Basename, file.Size, file.SHA256
+	}
+	payload, err := json.Marshal(projected)
+	if err != nil {
+		return ""
+	}
+	digest := sha256.Sum256(payload)
+	return hex.EncodeToString(digest[:])
+}
+
 type fileTransferE2EE struct {
 	Version            int    `json:"version"`
 	TransferID         string `json:"transfer_id"`

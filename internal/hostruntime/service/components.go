@@ -33,18 +33,20 @@ func ComponentController(platform, kind string, enrolledUID int, runner Runner) 
 	}
 	switch platform {
 	case "linux":
+		instance := "u" + strconv.Itoa(enrolledUID)
 		switch kind {
 		case HostdKind:
-			return SystemdController{Runner: runner, Unit: "paperboat-hostd.service"}, nil
+			return SystemdController{Runner: runner, Unit: "paperboat-hostd-" + instance + ".service"}, nil
 		case UpdaterKind:
-			return SystemdController{Runner: runner, Unit: "paperboat-updated.service"}, nil
+			return SystemdController{Runner: runner, Unit: "paperboat-updated-" + instance + ".service"}, nil
 		}
 	case "darwin":
+		instance := ".u" + strconv.Itoa(enrolledUID)
 		switch kind {
 		case HostdKind:
-			return LaunchdController{Runner: runner, UID: enrolledUID, Label: HostdLabel}, nil
+			return LaunchdController{Runner: runner, UID: enrolledUID, Label: HostdLabel + instance}, nil
 		case UpdaterKind:
-			return LaunchdController{Runner: runner, UID: enrolledUID, Label: UpdaterLabel}, nil
+			return LaunchdController{Runner: runner, UID: enrolledUID, Label: UpdaterLabel + instance}, nil
 		}
 	case "windows":
 		switch kind {
@@ -88,7 +90,7 @@ func newHostdInstaller(config ComponentConfig, allowMissingExecutable bool) (*In
 	environment["PAPERBOAT_HOSTD_SOCKET"] = config.Layout.HostdSocket
 	environment["PAPERBOAT_HOSTD_TOKEN_FILE"] = config.HostdTokenFile
 	serviceConfig := Config{
-		Platform: config.Layout.Platform, Kind: HostdKind, ConfigRoot: "/", Executable: binary,
+		Platform: config.Layout.Platform, Kind: HostdKind, Instance: config.Layout.Instance, ConfigRoot: "/", Executable: binary,
 		User: config.User, Group: config.Group, Arguments: []string{"daemon", "__runtime-hostd"}, Environment: environment,
 		EncryptedCredentials: config.EncryptedCredentials,
 		UpgradeMode:          UpgradeReload, Controller: config.Controller,
@@ -134,9 +136,9 @@ func newUpdaterInstaller(config ComponentConfig, allowMissingExecutable bool) (*
 	environment["PAPERBOAT_UPDATE_HEALTH_URL"] = config.HealthURL
 	environment["PAPERBOAT_ENROLLED_UID"] = strconv.Itoa(config.UID)
 	environment["PAPERBOAT_ENROLLED_GID"] = strconv.Itoa(config.GID)
-	environment["PAPERBOAT_UPDATED_SOCKET"] = updaterControlSocket(config.Layout.Platform)
+	environment["PAPERBOAT_UPDATED_SOCKET"] = updaterControlSocket(config.Layout.Platform, config.Layout.Instance)
 	serviceConfig := Config{
-		Platform: config.Layout.Platform, Kind: UpdaterKind, ConfigRoot: "/", Executable: binary,
+		Platform: config.Layout.Platform, Kind: UpdaterKind, Instance: config.Layout.Instance, ConfigRoot: "/", Executable: binary,
 		User: "root", Group: group, Arguments: []string{"daemon", "__runtime-updated"}, Environment: environment,
 		UpgradeMode: UpgradeReload, Controller: config.Controller,
 	}
@@ -153,14 +155,18 @@ func validEnrolledIdentity(user, group string, uid, gid int) bool {
 	return user != "" && user != "root" && group != "" && group != "root" && group != "wheel" && uid > 0 && gid > 0
 }
 
-func updaterControlSocket(platform string) string {
+func updaterControlSocket(platform, instance string) string {
 	if platform == "windows" {
 		return `\\.\pipe\PaperboatUpdated`
 	}
-	if platform == "darwin" {
-		return "/var/run/paperboat-updated/control.sock"
+	suffix := ""
+	if instance != "" {
+		suffix = "-" + instance
 	}
-	return "/run/paperboat-updated/control.sock"
+	if platform == "darwin" {
+		return filepath.Join("/var/run/paperboat-updated"+suffix, "control.sock")
+	}
+	return filepath.Join("/run/paperboat-updated"+suffix, "control.sock")
 }
 
 func copyEnvironment(values map[string]string) map[string]string {

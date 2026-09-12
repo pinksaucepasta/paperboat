@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"regexp"
 	"time"
 
 	"github.com/Microsoft/go-winio"
@@ -14,6 +15,15 @@ import (
 )
 
 const defaultSocketPath = `\\.\pipe\PaperboatHostService`
+
+var windowsInstancePattern = regexp.MustCompile(`^u[0-9a-f]{24}$`)
+
+func WindowsSocketPath(instance string) (string, error) {
+	if !windowsInstancePattern.MatchString(instance) {
+		return "", ErrInvalidConfig
+	}
+	return defaultSocketPath + "-" + instance, nil
+}
 
 type Client struct {
 	socketPath string

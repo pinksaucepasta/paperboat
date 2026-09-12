@@ -10,6 +10,8 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostservice"
+	hostruntimeservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"golang.org/x/sys/windows"
 )
 
 type windowsAuthorizedKeysClient interface {
@@ -17,11 +19,35 @@ type windowsAuthorizedKeysClient interface {
 }
 
 var newWindowsAuthorizedKeysClient = func(timeout time.Duration) (windowsAuthorizedKeysClient, error) {
-	return hostservice.NewClient(hostservice.DefaultSocketPath(), timeout)
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil || user == nil || user.User.Sid == nil {
+		return nil, ErrProductionInvalid
+	}
+	instance, err := hostruntimeservice.WindowsUserInstance(user.User.Sid.String())
+	if err != nil {
+		return nil, err
+	}
+	path, err := hostservice.WindowsSocketPath(instance)
+	if err != nil {
+		return nil, err
+	}
+	return hostservice.NewClient(path, timeout)
 }
 
 func reconcilePlatformAuthorizedKeys(stateRoot string, _ uint32, keys []string) (bool, error) {
-	expectedRoot := filepath.Join(hostinstall.WindowsProgramDataRoot(), "ssh")
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil || user == nil || user.User.Sid == nil {
+		return false, ErrProductionInvalid
+	}
+	instance, err := hostruntimeservice.WindowsUserInstance(user.User.Sid.String())
+	if err != nil {
+		return false, ErrProductionInvalid
+	}
+	instanceRoot, err := hostinstall.WindowsInstanceRoot(instance)
+	if err != nil {
+		return false, ErrProductionInvalid
+	}
+	expectedRoot := filepath.Join(instanceRoot, "ssh")
 	if !filepath.IsAbs(stateRoot) || filepath.Clean(stateRoot) != stateRoot || !strings.EqualFold(stateRoot, expectedRoot) {
 		return false, ErrProductionInvalid
 	}

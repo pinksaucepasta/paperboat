@@ -87,7 +87,7 @@ func testWindowsActivationJournal() windowsActivationJournal {
 	c := windowsActivationComponent{Path: `C:\Paperboat\candidate.exe`, SHA256: strings.Repeat("a", 64), Length: 1}
 	previous := c
 	previous.Path = `C:\Program Files\Paperboat\bin\pb.exe`
-	return windowsActivationJournal{Schema: windowsActivationJournalSchema, TransactionID: strings.Repeat("1", 32), PreviousVersion: "2026.08.22.1", Version: "2026.08.23.1", Architecture: "amd64", Stage: windowsActivationStaged, Runtime: c, CLI: c, Hostd: c, Updater: c, PreviousBinary: previous, OldHostd: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-hostd"}, WasRunning: true}, NewHostd: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-hostd"}}, OldUpdater: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-updated"}, WasRunning: true}, NewUpdater: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-updated"}}, ManifestSHA256: strings.Repeat("b", 64), CanaryPath: "/_paperboat/update-canary", CanaryStatus: 204, CanarySamples: 3, CanaryTimeout: time.Second, DrainTimeout: time.Second, StabilityWindow: time.Second, StabilityInterval: time.Second, RollbackTimeout: time.Second, HostdAPIMin: 1, HostdAPIMax: 2, RuntimeAPIMin: 1, RuntimeAPIMax: 2}
+	return windowsActivationJournal{Schema: windowsActivationJournalSchema, TransactionID: strings.Repeat("1", 32), PreviousVersion: "2026.08.22.1", Version: "2026.08.23.1", Architecture: "amd64", Stage: windowsActivationStaged, Runtime: c, CLI: c, Hostd: c, Updater: c, PreviousBinary: previous, OldHostd: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-hostd", "--instance", "u0123456789abcdef01234567"}, WasRunning: true}, NewHostd: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-hostd", "--instance", "u0123456789abcdef01234567"}}, OldUpdater: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-updated", "--instance", "u0123456789abcdef01234567"}, WasRunning: true}, NewUpdater: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-updated", "--instance", "u0123456789abcdef01234567"}}, ManifestSHA256: strings.Repeat("b", 64), CanaryPath: "/_paperboat/update-canary", CanaryStatus: 204, CanarySamples: 3, CanaryTimeout: time.Second, DrainTimeout: time.Second, StabilityWindow: time.Second, StabilityInterval: time.Second, RollbackTimeout: time.Second, HostdAPIMin: 1, HostdAPIMax: 2, RuntimeAPIMin: 1, RuntimeAPIMax: 2}
 }
 
 func TestWindowsActivationCommitsCLIOnlyAfterHealth(t *testing.T) {
@@ -287,22 +287,22 @@ func TestWindowsActivationRollbackNeverRestartsAfterTargetFailure(t *testing.T) 
 }
 
 func TestWindowsActivationServiceSetIsRoleScoped(t *testing.T) {
-	if got, want := windowsActivationServiceNames("client"), []string{"PaperboatHostd", "PaperboatUpdated"}; !reflect.DeepEqual(got, want) {
+	if got, want := windowsActivationServiceNames("client", "u0123456789abcdef01234567"), []string{"PaperboatHostd-u0123456789abcdef01234567", "PaperboatUpdated-u0123456789abcdef01234567"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("client=%q want=%q", got, want)
 	}
-	if got, want := windowsActivationServiceNames("host"), []string{"PaperboatSshd", "PaperboatHostd", "PaperboatUpdated"}; !reflect.DeepEqual(got, want) {
+	if got, want := windowsActivationServiceNames("host", "u0123456789abcdef01234567"), []string{"PaperboatSshd-u0123456789abcdef01234567", "PaperboatHostd-u0123456789abcdef01234567", "PaperboatUpdated-u0123456789abcdef01234567"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("host=%q want=%q", got, want)
 	}
-	if got, want := windowsActivationServiceStartNames("host", true, true, true), []string{"PaperboatSshd", "PaperboatHostd", "PaperboatUpdated"}; !reflect.DeepEqual(got, want) {
+	if got, want := windowsActivationServiceStartNames("host", "u0123456789abcdef01234567", true, true, true), []string{"PaperboatSshd-u0123456789abcdef01234567", "PaperboatHostd-u0123456789abcdef01234567", "PaperboatUpdated-u0123456789abcdef01234567"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("host start order=%q want=%q", got, want)
 	}
-	if got, want := windowsActivationServiceStartNames("client", true, true, true), []string{"PaperboatHostd", "PaperboatUpdated"}; !reflect.DeepEqual(got, want) {
+	if got, want := windowsActivationServiceStartNames("client", "u0123456789abcdef01234567", true, true, true), []string{"PaperboatHostd-u0123456789abcdef01234567", "PaperboatUpdated-u0123456789abcdef01234567"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("client start order=%q want=%q", got, want)
 	}
-	if got, want := windowsActivationServiceStartNames("host", false, true, true), []string{"PaperboatSshd", "PaperboatUpdated"}; !reflect.DeepEqual(got, want) {
+	if got, want := windowsActivationServiceStartNames("host", "u0123456789abcdef01234567", false, true, true), []string{"PaperboatSshd-u0123456789abcdef01234567", "PaperboatUpdated-u0123456789abcdef01234567"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("filtered host start order=%q want=%q", got, want)
 	}
-	sshArguments := []string{"daemon", "__windows-sshd-service", "--sshd", `C:\Program Files\OpenSSH\sshd.exe`, "--config", `C:\ProgramData\Paperboat\ssh\sshd_config`}
+	sshArguments := []string{"daemon", "__windows-sshd-service", "--instance", "u0123456789abcdef01234567"}
 	if validWindowsSSHArguments(sshArguments[1:]) || validWindowsSSHArguments(append(append([]string(nil), sshArguments...), "extra")) {
 		t.Fatal("SSH runtime accepted a missing daemon entry point or extra arguments")
 	}
@@ -316,7 +316,7 @@ func TestWindowsActivationServiceSetIsRoleScoped(t *testing.T) {
 		t.Fatal("exact PaperboatSshd journal rejected")
 	}
 	journal.NewSSH.Arguments = append([]string(nil), sshArguments...)
-	journal.NewSSH.Arguments[3] = `C:\Temp\sshd.exe`
+	journal.NewSSH.Arguments[3] = "u1"
 	if validWindowsActivationJournal(journal) {
 		t.Fatal("malformed PaperboatSshd journal accepted")
 	}
@@ -543,5 +543,53 @@ func TestWindowsCommitFailureResumesWithoutRollback(t *testing.T) {
 				t.Fatalf("resume=%s err=%v events=%v", result.Stage, err, b.events)
 			}
 		})
+	}
+}
+
+func TestWindowsActivationJournalRejectsCrossInstanceTargets(t *testing.T) {
+	for _, target := range []string{"hostd", "old SSH", "new SSH"} {
+		t.Run(target, func(t *testing.T) {
+			journal := testWindowsActivationJournal()
+			journal.OldSSH = windowsServiceTarget{Executable: journal.OldHostd.Executable, Arguments: []string{"daemon", "__windows-sshd-service", "--instance", journal.OldHostd.Arguments[3]}}
+			journal.NewSSH = windowsServiceTarget{Executable: journal.NewHostd.Executable, Arguments: append([]string(nil), journal.OldSSH.Arguments...)}
+			if !validWindowsActivationJournal(journal) {
+				t.Fatal("invalid test fixture")
+			}
+			const foreign = "u1123456789abcdef01234567"
+			switch target {
+			case "hostd":
+				journal.NewHostd.Arguments = append([]string(nil), journal.NewHostd.Arguments...)
+				journal.NewHostd.Arguments[3] = foreign
+			case "old SSH":
+				journal.OldSSH.Arguments = append([]string(nil), journal.OldSSH.Arguments...)
+				journal.OldSSH.Arguments[3] = foreign
+			case "new SSH":
+				journal.NewSSH.Arguments = append([]string(nil), journal.NewSSH.Arguments...)
+				journal.NewSSH.Arguments[3] = foreign
+			}
+			if validWindowsActivationJournal(journal) {
+				t.Fatal("accepted cross-user service target")
+			}
+		})
+	}
+}
+
+func TestWindowsSSHInstanceServiceRecoverySelection(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		want bool
+	}{
+		{"PaperboatSshd-u4c8e2991570c314b650297e5", true},
+		{"PaperboatSshd-u000000000000000000000000", true},
+		{"PaperboatSshd", false},
+		{"PaperboatUpdated-u4c8e2991570c314b650297e5", false},
+		{"PaperboatSshd-u4c8e2991570c314b650297e5-extra", false},
+		{"PaperboatSshd-u4C8e2991570c314b650297e5", false},
+		{"PaperboatSshd-u4c8e2991570c314b650297e", false},
+		{"PaperboatSshd-", false},
+	} {
+		if got := isWindowsSSHInstanceService(test.name); got != test.want {
+			t.Errorf("service %q: got %v, want %v", test.name, got, test.want)
+		}
 	}
 }

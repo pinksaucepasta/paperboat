@@ -11,8 +11,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 )
 
-func TestLinuxPurgeStopsAndRemovesCurrentAndLegacyServices(t *testing.T) {
-	plan, err := newUnixPurgePlan("linux")
+func TestLinuxPurgeRemovesOnlyEnrolledUserServices(t *testing.T) {
+	plan, err := newUnixPurgePlan("linux", 1001)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,13 +31,9 @@ func TestLinuxPurgeStopsAndRemovesCurrentAndLegacyServices(t *testing.T) {
 	}
 
 	wantUnits := []string{
-		"paperboat-runtime-host.service",
-		"paperboat-runtime-privileged.service",
-		"paperboat-hostd.service",
-		"paperboat-updated.service",
-		"paperboat-helper.service",
-		"paperboat-host-service.service",
-		"paperboat-console.service",
+		"paperboat-runtime-privileged-u1001.service",
+		"paperboat-hostd-u1001.service",
+		"paperboat-updated-u1001.service",
 	}
 	for _, unit := range wantUnits {
 		if !strings.Contains(commands[0], unit) || !strings.Contains(commands[1], unit) {
@@ -53,15 +49,15 @@ func TestLinuxPurgeStopsAndRemovesCurrentAndLegacyServices(t *testing.T) {
 	}) {
 		t.Fatalf("systemd post-removal commands=%v", commands[2:])
 	}
-	for _, path := range []string{"/var/lib/paperboat-updated", "/var/run/paperboat-hostd", "/var/run/paperboat-updated"} {
+	for _, path := range []string{"/var/lib/paperboat-updated-u1001", "/var/run/paperboat-hostd-u1001", "/var/run/paperboat-updated-u1001"} {
 		if !containsString(removed, path) {
 			t.Fatalf("current updater/hostd state path %q was not removed: %v", path, removed)
 		}
 	}
 }
 
-func TestDarwinPurgeStopsAndRemovesCurrentAndLegacyLaunchDaemons(t *testing.T) {
-	plan, err := newUnixPurgePlan("darwin")
+func TestDarwinPurgeRemovesOnlyEnrolledUserServices(t *testing.T) {
+	plan, err := newUnixPurgePlan("darwin", 1001)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +75,7 @@ func TestDarwinPurgeStopsAndRemovesCurrentAndLegacyLaunchDaemons(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wantLabels := []string{service.Label, service.HostLabel, service.HostdLabel, service.UpdaterLabel}
+	wantLabels := []string{service.HostLabel + ".u1001", service.HostdLabel + ".u1001", service.UpdaterLabel + ".u1001"}
 	wantCommands := make([]string, 0, len(wantLabels))
 	for _, label := range wantLabels {
 		wantCommands = append(wantCommands, "/bin/launchctl bootout system/"+label)
@@ -90,7 +86,7 @@ func TestDarwinPurgeStopsAndRemovesCurrentAndLegacyLaunchDaemons(t *testing.T) {
 	if !reflect.DeepEqual(commands, wantCommands) {
 		t.Fatalf("launchd bootout commands=%v want=%v", commands, wantCommands)
 	}
-	if !containsString(removed, "/var/run/paperboat-updated") || !containsString(removed, "/var/run/paperboat-hostd") {
+	if !containsString(removed, "/var/run/paperboat-updated-u1001") || !containsString(removed, "/var/run/paperboat-hostd-u1001") {
 		t.Fatalf("current updater/hostd runtime paths were not removed: %v", removed)
 	}
 }

@@ -52,7 +52,18 @@ type Authority struct {
 }
 
 func Resolve(ctx context.Context, request Request) (Authority, error) {
-	if ctx == nil || request.Client == nil || request.AccountID == "" || request.CLIClientSessionID == "" || request.MachineID == "" || request.MachineGeneration == 0 || request.Now.IsZero() {
+	return resolve(ctx, request, false)
+}
+
+// ResolveLocal loads only the authenticated CLI identity. Native networking
+// authenticates remote peers using server-signed key bindings, including
+// inspector grants to another account's daemon.
+func ResolveLocal(ctx context.Context, request Request) (Authority, error) {
+	return resolve(ctx, request, true)
+}
+
+func resolve(ctx context.Context, request Request, localOnly bool) (Authority, error) {
+	if ctx == nil || request.Client == nil || request.AccountID == "" || request.CLIClientSessionID == "" || (!localOnly && (request.MachineID == "" || request.MachineGeneration == 0)) || request.Now.IsZero() {
 		return Authority{}, ErrInvalid
 	}
 	var keys config.PeerIdentityKeys
@@ -121,6 +132,11 @@ func Resolve(ctx context.Context, request Request) (Authority, error) {
 	if err != nil || !bytes.Equal(local.Claims.NoisePublicKey[:], keys.NoisePublic[:]) || !bytes.Equal(local.Claims.QUICPublicKey, keys.QUICPrivate.Public().(ed25519.PublicKey)) {
 		clear(localState.Raw)
 		return fail(ErrInvalid)
+	}
+	if localOnly {
+		localRootPublic := append(ed25519.PublicKey(nil), localKey.PublicKey...)
+		clear(rootPublic)
+		return Authority{RootPublic: localRootPublic, TrustedKeys: trusted, LocalKeys: keys, LocalCertificate: local, LocalCertificateRaw: localState.Raw}, nil
 	}
 	document, err := request.Client.EndpointCertificate(ctx, request.MachineID, request.MachineGeneration)
 	if err != nil {

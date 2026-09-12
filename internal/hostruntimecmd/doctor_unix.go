@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -161,29 +162,30 @@ func systemServiceScope(ctx context.Context) (string, error) {
 // runtime-host service is intentionally removed during installation and must
 // never be used as a readiness requirement.
 func systemServiceScopeFor(ctx context.Context, hostMode bool) (string, error) {
-	return systemServiceScopeWithRunner(ctx, runtime.GOOS, hostMode, runSystemServiceCommand)
+	return systemServiceScopeWithRunner(ctx, runtime.GOOS, os.Getuid(), hostMode, runSystemServiceCommand)
 }
 
 type systemServiceCommandRunner func(context.Context, string, ...string) ([]byte, error)
 
-func systemServiceScopeWithRunner(ctx context.Context, platform string, hostMode bool, run systemServiceCommandRunner) (string, error) {
-	if ctx == nil || run == nil {
+func systemServiceScopeWithRunner(ctx context.Context, platform string, uid int, hostMode bool, run systemServiceCommandRunner) (string, error) {
+	if ctx == nil || run == nil || uid < 0 {
 		return "system", errors.New("inactive")
 	}
+	instance := "u" + strconv.Itoa(uid)
 	var commands [][]string
 	switch platform {
 	case "linux":
 		commands = append(commands,
-			[]string{"/usr/bin/systemctl", "is-active", "paperboat-hostd.service"},
-			[]string{"/usr/bin/systemctl", "is-active", "paperboat-updated.service"},
+			[]string{"/usr/bin/systemctl", "is-active", "paperboat-hostd-" + instance + ".service"},
+			[]string{"/usr/bin/systemctl", "is-active", "paperboat-updated-" + instance + ".service"},
 		)
 		if hostMode {
-			commands = append(commands, []string{"/usr/bin/systemctl", "is-active", "paperboat-runtime-privileged.service"})
+			commands = append(commands, []string{"/usr/bin/systemctl", "is-active", "paperboat-runtime-privileged-" + instance + ".service"})
 		}
 	case "darwin":
 		commands = append(commands,
-			[]string{"/bin/launchctl", "print", "system/com.pinksaucepasta.paperboat.hostd"},
-			[]string{"/bin/launchctl", "print", "system/com.pinksaucepasta.paperboat.updated"},
+			[]string{"/bin/launchctl", "print", "system/com.pinksaucepasta.paperboat.hostd." + instance},
+			[]string{"/bin/launchctl", "print", "system/com.pinksaucepasta.paperboat.updated." + instance},
 		)
 		if hostMode && platform != "darwin" {
 			commands = append(commands, []string{"/bin/launchctl", "print", "system/com.pinksaucepasta.paperboat.runtime-privileged"})

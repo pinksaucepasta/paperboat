@@ -16,6 +16,7 @@ import (
 type Registration struct {
 	Version                int       `json:"version"`
 	ServerURL              string    `json:"server_url"`
+	AccountID              string    `json:"account_id,omitempty"`
 	MachineID              string    `json:"machine_id"`
 	EnvironmentID          string    `json:"environment_id"`
 	PublicKeyID            string    `json:"public_key_id"`

@@ -35,14 +35,22 @@ func bindBootstrapDaemon(ctx context.Context, serverURL, expectedVersion string)
 	}
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
+	var lastProbe localdaemon.UpdateProbe
+	var lastErr error
 	for {
 		probe, err := localdaemon.ProbeCurrentUserForUpdate(ctx)
 		if err == nil && probe.Running && probe.Version == expectedVersion && probe.State == "ready" {
 			return nil
 		}
+		if ctx.Err() == nil {
+			lastProbe, lastErr = probe, err
+		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("installed daemon did not become ready at version %s: %w", expectedVersion, ctx.Err())
+			if lastErr != nil {
+				return fmt.Errorf("installed daemon readiness probe failed: %w; retry enrollment: %w", lastErr, ctx.Err())
+			}
+			return fmt.Errorf("installed daemon did not become ready at version %s (running=%t state=%q version=%q); retry enrollment: %w", expectedVersion, lastProbe.Running, lastProbe.State, lastProbe.Version, ctx.Err())
 		case <-ticker.C:
 		}
 	}

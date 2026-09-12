@@ -453,6 +453,7 @@ func tunnelCobraCommandV1() *cobra.Command {
 	configureEphemeralLaunchFlags(root)
 	root.AddCommand(tunnelCreateCommand(), tunnelListCommand(), tunnelShowCommand())
 	root.AddCommand(tunnelStatusCommand(), tunnelDoctorCommand(), tunnelLogsCommand())
+	root.AddCommand(tunnelInspectCommand(), tunnelReplayCommand())
 	for _, action := range []string{"pause", "resume", "delete"} {
 		root.AddCommand(tunnelStateCommand(action))
 	}

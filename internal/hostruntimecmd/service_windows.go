@@ -30,22 +30,38 @@ func runServiceCommand(ctx context.Context, args []string, stdin io.Reader, _, _
 		if !elevation.IsCurrentProcessElevated() {
 			return runElevatedServiceOperation(ctx, elevation.ActionUninstallPersist)
 		}
-		return uninstallPersistedWindowsRuntime(ctx)
+		ownerSID, err := currentWindowsSID()
+		if err != nil {
+			return err
+		}
+		return uninstallPersistedWindowsRuntime(ctx, ownerSID)
 	case "purge":
 		if !elevation.IsCurrentProcessElevated() {
 			return runElevatedServiceOperation(ctx, elevation.ActionPurge)
 		}
-		return hostinstall.Purge(ctx)
+		ownerSID, err := currentWindowsSID()
+		if err != nil {
+			return err
+		}
+		return hostinstall.Purge(ctx, ownerSID)
 	case "repair":
 		if !elevation.IsCurrentProcessElevated() {
 			return runElevatedServiceOperation(ctx, elevation.ActionRepair)
 		}
-		return repairWindowsInstallation(ctx)
+		ownerSID, err := currentWindowsSID()
+		if err != nil {
+			return err
+		}
+		return repairWindowsInstallation(ctx, ownerSID)
 	case "stop":
 		if !elevation.IsCurrentProcessElevated() {
 			return runElevatedServiceOperation(ctx, elevation.ActionStop)
 		}
-		return hostinstall.Stop(ctx)
+		ownerSID, err := currentWindowsSID()
+		if err != nil {
+			return err
+		}
+		return hostinstall.Stop(ctx, ownerSID)
 	case "install", "commit", "uninstall":
 		request, err := hostinstall.Decode(stdin)
 		if err != nil {
@@ -96,13 +112,13 @@ func dispatchElevatedOperation(ctx context.Context, request elevation.Request) e
 	case elevation.OperationRuntimeService:
 		switch request.Action {
 		case elevation.ActionUninstallPersist:
-			return uninstallPersistedWindowsRuntime(ctx)
+			return uninstallPersistedWindowsRuntime(ctx, request.OwnerSID)
 		case elevation.ActionPurge:
-			return hostinstall.Purge(ctx)
+			return hostinstall.Purge(ctx, request.OwnerSID)
 		case elevation.ActionRepair:
-			return repairWindowsInstallation(ctx)
+			return repairWindowsInstallation(ctx, request.OwnerSID)
 		case elevation.ActionStop:
-			return hostinstall.Stop(ctx)
+			return hostinstall.Stop(ctx, request.OwnerSID)
 		case elevation.ActionInstall, elevation.ActionInstallCommit, elevation.ActionCommit, elevation.ActionUninstall:
 			installRequest, err := hostinstall.Decode(bytes.NewReader(request.Payload))
 			if err != nil {
@@ -142,8 +158,8 @@ func dispatchElevatedOperation(ctx context.Context, request elevation.Request) e
 	return errors.New("unsupported elevated Windows operation")
 }
 
-func repairWindowsInstallation(ctx context.Context) error {
-	err := hostinstall.Repair(ctx)
+func repairWindowsInstallation(ctx context.Context, ownerSID string) error {
+	err := hostinstall.Repair(ctx, ownerSID)
 	if errors.Is(err, hostinstall.ErrNotInstalled) {
 		return nil
 	}
@@ -154,8 +170,8 @@ func repairWindowsInstallation(ctx context.Context) error {
 	return err
 }
 
-func uninstallPersistedWindowsRuntime(ctx context.Context) error {
-	return hostinstall.UninstallPersisted(ctx)
+func uninstallPersistedWindowsRuntime(ctx context.Context, ownerSID string) error {
+	return hostinstall.UninstallPersisted(ctx, ownerSID)
 }
 
 func uninstallWindowsRuntime(ctx context.Context, request hostinstall.Request) error {

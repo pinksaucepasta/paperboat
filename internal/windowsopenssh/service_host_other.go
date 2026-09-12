@@ -2,4 +2,4 @@
 
 package windowsopenssh
 
-func RunServiceHost(string, string) error { return ErrInstallerUnavailable }
+func RunServiceHost(string, string, string, string) error { return ErrInstallerUnavailable }

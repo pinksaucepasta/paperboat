@@ -11,6 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	hostpreview "github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	hostserver "github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
+	"github.com/pinksaucepasta/paperboat/internal/inspector"
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
@@ -74,7 +75,9 @@ func TestNativePrivateHTTP3AuthorizedDERPWorkflow(t *testing.T) {
 		_, _ = connection.Write(append([]byte("http-origin:"), payload...))
 	}()
 
-	descriptor, serverReady := startNativeHTTP3Server(t, serverOwner, serverAuthority, dm.Regions[1], originListener.Addr().String())
+	captureStore := inspector.NewStore()
+	_ = captureStore.SetPolicy("prv_http", inspector.ResourcePolicy{Enabled: true, CaptureRaw: true, CaptureRequestBody: true, CaptureResponseBody: true})
+	descriptor, serverReady := startNativeHTTP3Server(t, serverOwner, serverAuthority, dm.Regions[1], originListener.Addr().String(), captureStore)
 	issuer := nativeHTTPGrantIssuer(func(_ context.Context, request api.NativePrivateGrantRequest) (api.NativePrivateGrant, error) {
 		var grant api.NativePrivateGrant
 		grant.Target.AccountID, grant.Target.UserID, grant.Target.EnvironmentID = "account_test", "account_test", "env_test"
@@ -120,9 +123,19 @@ func TestNativePrivateHTTP3AuthorizedDERPWorkflow(t *testing.T) {
 	if err != nil || string(response) != "http-origin:"+string(payload) {
 		t.Fatalf("response=%q err=%v", response, err)
 	}
+	observedAt := time.Now().UTC()
+	page, err := captureStore.List(t.Context(), inspector.Credential{PrincipalID: "account_test", Action: inspector.ActionInspect, ResourceID: "prv_http", ResourceGeneration: 1, RouteGeneration: 1, TargetGeneration: 1, AuthorityReadAt: observedAt, ExpiresAt: observedAt.Add(time.Minute)}, "", 10)
+	if err != nil || len(page.Records) != 1 {
+		t.Fatalf("native observation unavailable: %v records=%d", err, len(page.Records))
+	}
+	record := page.Records[0]
+	if record.Method != "CONNECT" || record.State != inspector.StateUnsupported || len(record.RequestBody) != 0 || len(record.ResponseBody) != 0 || record.ReplayIneligible == "" {
+		t.Fatal("opaque native connection presented as replayable HTTP")
+	}
+
 }
 
-func startNativeHTTP3Server(t *testing.T, owner *native.Owner, authority *tailnet.Authority, region *tailcfg.DERPRegion, origin string) (tailcat.Addr, <-chan struct{}) {
+func startNativeHTTP3Server(t *testing.T, owner *native.Owner, authority *tailnet.Authority, region *tailcfg.DERPRegion, origin string, captureStore *inspector.Store) (tailcat.Addr, <-chan struct{}) {
 	t.Helper()
 	server, err := authority.Listen(region)
 	if err != nil {
@@ -146,7 +159,7 @@ func startNativeHTTP3Server(t *testing.T, owner *native.Owner, authority *tailne
 				return binding.ExpiresAt, make(chan struct{}), nil
 			}, func(ctx context.Context, network, address string) (net.Conn, error) {
 				return (&net.Dialer{}).DialContext(ctx, network, address)
-			})
+			}, captureStore)
 		})
 	}()
 	return server.Address(), ready

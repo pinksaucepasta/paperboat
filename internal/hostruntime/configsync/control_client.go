@@ -64,15 +64,17 @@ type ControlClient struct {
 	mu         sync.Mutex
 	credential Credential
 	access     RepositoryAccess
+	accesses   map[string]RepositoryAccess
 }
 
 type Credential struct {
-	Value           string    `json:"credential"`
-	EnvironmentID   string    `json:"environment_id"`
-	MachineID       string    `json:"machine_id"`
-	AssignmentID    string    `json:"assignment_id"`
-	WarningRevision string    `json:"warning_revision"`
-	ExpiresAt       time.Time `json:"expires_at"`
+	Value             string    `json:"credential"`
+	EnvironmentID     string    `json:"environment_id"`
+	MachineID         string    `json:"machine_id"`
+	AssignmentID      string    `json:"assignment_id"`
+	AssignmentVersion int64     `json:"assignment_version"`
+	WarningRevision   string    `json:"warning_revision"`
+	ExpiresAt         time.Time `json:"expires_at"`
 }
 
 type Lease struct {
@@ -127,6 +129,10 @@ type RuntimeDescriptor struct {
 	WriteMode              string         `json:"write_mode"`
 	Mode                   AssignmentMode `json:"mode"`
 	RepositoryID           string         `json:"repository_id"`
+	PullRepositoryID       string         `json:"pull_repository_id,omitempty"`
+	PushRepositoryID       string         `json:"push_repository_id,omitempty"`
+	AutomaticUpdates       bool           `json:"automatic_updates"`
+	ApprovedPullRevision   string         `json:"approved_pull_revision,omitempty"`
 	AssignmentID           string         `json:"assignment_id"`
 	EnvironmentID          string         `json:"environment_id"`
 	MachineID              string         `json:"machine_id"`
@@ -216,12 +222,13 @@ func (c *ControlClient) Credential(ctx context.Context) (Credential, error) {
 	defer response.Body.Close()
 	var envelope struct {
 		Data struct {
-			Credential      string    `json:"credential"`
-			EnvironmentID   string    `json:"environment_id"`
-			MachineID       string    `json:"machine_id"`
-			AssignmentID    string    `json:"assignment_id"`
-			WarningRevision string    `json:"warning_revision"`
-			ExpiresAt       time.Time `json:"expires_at"`
+			Credential        string    `json:"credential"`
+			EnvironmentID     string    `json:"environment_id"`
+			MachineID         string    `json:"machine_id"`
+			AssignmentID      string    `json:"assignment_id"`
+			AssignmentVersion int64     `json:"assignment_version"`
+			WarningRevision   string    `json:"warning_revision"`
+			ExpiresAt         time.Time `json:"expires_at"`
 		} `json:"data"`
 	}
 	if response.StatusCode != http.StatusOK || decodeBoundedJSON(response.Body, &envelope) != nil ||
@@ -232,7 +239,7 @@ func (c *ControlClient) Credential(ctx context.Context) (Credential, error) {
 	}
 	c.credential = Credential{
 		Value: envelope.Data.Credential, EnvironmentID: envelope.Data.EnvironmentID, MachineID: envelope.Data.MachineID,
-		AssignmentID: envelope.Data.AssignmentID, WarningRevision: envelope.Data.WarningRevision, ExpiresAt: envelope.Data.ExpiresAt.UTC(),
+		AssignmentID: envelope.Data.AssignmentID, AssignmentVersion: envelope.Data.AssignmentVersion, WarningRevision: envelope.Data.WarningRevision, ExpiresAt: envelope.Data.ExpiresAt.UTC(),
 	}
 	return c.credential, nil
 }
@@ -241,6 +248,7 @@ func (c *ControlClient) InvalidateCredential() {
 	c.mu.Lock()
 	c.credential = Credential{}
 	c.access = RepositoryAccess{}
+	c.accesses = nil
 	c.mu.Unlock()
 }
 
@@ -254,10 +262,30 @@ func (c *ControlClient) RevalidateCredential() {
 }
 
 func (c *ControlClient) RepositoryAccess(ctx context.Context) (RepositoryAccess, error) {
+	return c.repositoryAccess(ctx, "")
+}
+
+type DirectionalRepositoryAccess struct {
+	Client    *ControlClient
+	Direction string
+}
+
+func (s DirectionalRepositoryAccess) RepositoryAccess(ctx context.Context) (RepositoryAccess, error) {
+	if s.Client == nil || (s.Direction != "pull" && s.Direction != "push") {
+		return RepositoryAccess{}, ErrControlClientInvalid
+	}
+	return s.Client.repositoryAccess(ctx, s.Direction)
+}
+
+func (c *ControlClient) repositoryAccess(ctx context.Context, direction string) (RepositoryAccess, error) {
 	c.mu.Lock()
 	now := c.clock().UTC()
-	if c.access.Password != "" && c.access.ExpiresAt.After(now.Add(time.Minute)) {
-		result := c.access
+	cached := c.access
+	if direction != "" && c.accesses != nil {
+		cached = c.accesses[direction]
+	}
+	if cached.Password != "" && cached.ExpiresAt.After(now.Add(time.Minute)) {
+		result := cached
 		c.mu.Unlock()
 		return result, nil
 	}
@@ -266,9 +294,11 @@ func (c *ControlClient) RepositoryAccess(ctx context.Context) (RepositoryAccess,
 	if err != nil {
 		return RepositoryAccess{}, err
 	}
-	body, err := json.Marshal(struct {
+	requestBody := struct {
 		OperationID string `json:"operation_id"`
-	}{operationID})
+		Direction   string `json:"direction,omitempty"`
+	}{operationID, direction}
+	body, err := json.Marshal(requestBody)
 	if err != nil {
 		return RepositoryAccess{}, err
 	}
@@ -308,7 +338,14 @@ func (c *ControlClient) RepositoryAccess(ctx context.Context) (RepositoryAccess,
 		return RepositoryAccess{}, ErrControlClientInvalid
 	}
 	c.mu.Lock()
-	c.access = envelope.Data
+	if direction == "" {
+		c.access = envelope.Data
+	} else {
+		if c.accesses == nil {
+			c.accesses = make(map[string]RepositoryAccess)
+		}
+		c.accesses[direction] = envelope.Data
+	}
 	c.mu.Unlock()
 	return envelope.Data, nil
 }

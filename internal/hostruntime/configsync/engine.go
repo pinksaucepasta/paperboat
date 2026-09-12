@@ -294,6 +294,9 @@ func (e *Engine) syncNow(ctx context.Context) error {
 		e.remoteRevision = result.RemoteRevision
 		e.status.RemoteRevision = result.RemoteRevision
 	}
+	if result.Review != nil {
+		e.status.Review = boundPathSummaries(result.Review, e.descriptor.Policy.SummaryLimit)
+	}
 	switch {
 	case err == nil && result.Landed && len(diagnostics.Conflicts) > 0:
 		e.remoteRevision = result.RemoteRevision
@@ -340,6 +343,10 @@ func (e *Engine) syncNow(ctx context.Context) error {
 		e.status.State = "pending"
 		e.status.ErrorCode = "remote_revision_changed"
 		e.status.RecoveryActions = []string{"retry"}
+	case errors.Is(err, ErrReviewRequired):
+		e.status.State = "pending"
+		e.status.ErrorCode = "review_required"
+		e.status.RecoveryActions = []string{"review_revision"}
 	case errors.Is(err, ErrManifestMissing):
 		e.status.State = "error"
 		e.status.ErrorCode = "manifest_missing"
@@ -388,6 +395,7 @@ func retryableSyncError(err error) bool {
 		!errors.Is(err, ErrSyncUncertain) &&
 		!errors.Is(err, ErrAuthorization) &&
 		!errors.Is(err, ErrWritesDisabled) &&
+		!errors.Is(err, ErrReviewRequired) &&
 		!errors.Is(err, ErrManifestMissing) &&
 		!errors.Is(err, ErrManifestInvalid) &&
 		!errors.Is(err, ErrManifestUnsafePath) &&

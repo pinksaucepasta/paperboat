@@ -538,13 +538,18 @@ func (r *APIResolver) validateDescriptor(resp api.ConnectionDescriptor, target t
 		}
 	}
 	validTerminalAuth := resp.Terminal.Auth.Method == "websocket_ticket" && resp.Terminal.Auth.Ticket != "" || resp.Terminal.Auth.Method == "bearer" && resp.Terminal.Auth.Token != ""
-	if !validTerminalAuth || !exactScopes(resp.Terminal.Auth.Scopes, "terminal:operate") {
+	if !validTerminalAuth || !(exactScopes(resp.Terminal.Auth.Scopes, "terminal:operate") || exactScopes(resp.Terminal.Auth.Scopes, "terminal:view") || exactScopes(resp.Terminal.Auth.Scopes, "terminal:control")) {
 		return api.ConnectionDescriptor{}, errors.New("terminal descriptor has invalid scope or auth")
 	}
 	if resp.Terminal.Auth.ExpiresAt.IsZero() || !time.Now().Before(resp.Terminal.Auth.ExpiresAt) || resp.Terminal.Auth.ExpiresAt.After(resp.ExpiresAt) {
 		return api.ConnectionDescriptor{}, errors.New("terminal credential is expired")
 	}
-	if err := r.validateFileTransfer(resp.FileTransfer, wsURL, resp.ExpiresAt); err != nil {
+	sharedTerminal := exactScopes(resp.Terminal.Auth.Scopes, "terminal:view") || exactScopes(resp.Terminal.Auth.Scopes, "terminal:control")
+	if sharedTerminal {
+		if resp.FileTransfer != nil {
+			return api.ConnectionDescriptor{}, errors.New("shared terminal descriptor must not include file transfer authority")
+		}
+	} else if err := r.validateFileTransfer(resp.FileTransfer, wsURL, resp.ExpiresAt); err != nil {
 		return api.ConnectionDescriptor{}, err
 	}
 	return resp, nil

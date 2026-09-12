@@ -13,12 +13,12 @@ import (
 )
 
 func teamCobraCommand() *cobra.Command {
-	root := &cobra.Command{Use: "team", Short: "Manage teams and explicit resource permissions", Args: commandArgs(cobra.NoArgs)}
+	root := &cobra.Command{Use: "team", Short: "Manage teams and explicit resource permissions", Long: "Manage teams and explicit resource permissions. Owners appoint admins, transfer ownership, delete teams and reset ENV. Admins manage ordinary members and grants; ENV rotation requires authorized keys. Owners must transfer ownership before leaving. Removal ends team access and adopted defaults; independently granted Git access and previously received files or secrets remain. Team deletion revokes team-owned machines and preserves personal resources.", Args: commandArgs(cobra.NoArgs)}
 	root.AddCommand(
-		teamReadCommand("list"), teamReadCommand("get"), teamCreateCommand(), teamInviteCommand(),
+		teamActivityCommand(), teamReadCommand("list"), teamReadCommand("get"), teamCreateCommand(), teamInviteCommand(),
 		teamAcceptCommand(), teamCancelInviteCommand(), teamMutationCommand("role"),
 		teamMutationCommand("remove"), teamMutationCommand("leave"), teamMutationCommand("transfer"),
-		teamMutationCommand("delete"), teamGrantCommand(), teamAttachCommand(),
+		teamMutationCommand("delete"), teamGrantCommand(), teamAttachCommand(), teamMachineCommand(),
 	)
 	return root
 }
@@ -306,16 +306,85 @@ func validateTeamResource(kind, permission string) error {
 			return nil
 		}
 	case "preview", "tunnel":
-		if permission == "use" || permission == "manage" {
+		// Inspector actions are exact-match: use/manage imply neither
+		// inspect nor replay, and inspect does not imply replay.
+		if permission == "use" || permission == "manage" || permission == "inspect" || permission == "replay" {
 			return nil
 		}
 	}
-	return errors.New("permission must be read/write for env or use/manage for preview/tunnel")
+	return errors.New("permission must be read/write for env or use/manage/inspect/replay for preview/tunnel")
 }
 func writeTeamOutput(c *cobra.Command, jsonOutput bool, team api.Team) error {
 	if jsonOutput {
 		return json.NewEncoder(c.OutOrStdout()).Encode(team)
 	}
 	_, err := fmt.Fprintf(c.OutOrStdout(), "TEAM\t%s\tOWNER\t%s\tGENERATION\t%d\n", team.TeamID, team.OwnerAccount, team.Generation)
-	return err
+	if err != nil {
+		return err
+	}
+	if team.ENVStatus != "" {
+		fmt.Fprintf(c.OutOrStdout(), "ENV\t%s\n", team.ENVStatus)
+		if team.ENVStatus == "rotation_pending" {
+			fmt.Fprintln(c.OutOrStdout(), "An owner/admin with authorized ENV keys must run pb env team rotate <team>. Access remains fenced until rotation completes.")
+		}
+	}
+	for _, machine := range team.Machines {
+		owner := machine.OwnerAccount
+		ownership := "personal"
+		if machine.OwnerTeamID != "" {
+			owner = machine.OwnerTeamID
+			ownership = "team"
+		}
+		if _, err = fmt.Fprintf(c.OutOrStdout(), "MACHINE\t%s\t%s\tOWNER\t%s:%s\tSTATE\t%s\tONLINE\t%t\tSHARED\t%t\n", machine.MachineID, machine.DisplayName, ownership, owner, machine.State, machine.Online, machine.Active); err != nil {
+			return err
+		}
+	}
+	for _, grant := range team.MachineGrants {
+		if !grant.Active {
+			continue
+		}
+		subject := grant.AccountID
+		if grant.Audience == "all_members" {
+			subject = "all members"
+		}
+		if _, err = fmt.Fprintf(c.OutOrStdout(), "MACHINE GRANT\t%s\t%s\t%s\n", grant.MachineID, subject, strings.Join(grant.Capabilities, ",")); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func teamActivityCommand() *cobra.Command {
+	c := &cobra.Command{Use: "activity <team>", Short: "View owner/admin activity from the last 90 days", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(c *cobra.Command, args []string) error {
+		limit, _ := c.Flags().GetInt("limit")
+		cursor, _ := c.Flags().GetString("cursor")
+		if !validTeamCLIIdentifier(args[0]) || limit < 1 || limit > 200 {
+			return invocationError(errors.New("use a valid team and limit between 1 and 200"))
+		}
+		client, err := backendForCommand(c)
+		if err != nil {
+			return err
+		}
+		page, err := client.TeamActivity(c.Context(), args[0], cursor, limit)
+		if err != nil {
+			return err
+		}
+		jsonOutput, _ := c.Flags().GetBool("json")
+		if jsonOutput {
+			return json.NewEncoder(c.OutOrStdout()).Encode(page)
+		}
+		for _, item := range page.Items {
+			if _, err = fmt.Fprintf(c.OutOrStdout(), "%s\t%s\t%s\n", item.CreatedAt.Format("2006-01-02T15:04:05Z07:00"), item.ActorAccount, item.Action); err != nil {
+				return err
+			}
+		}
+		if page.NextCursor != "" {
+			_, err = fmt.Fprintf(c.OutOrStdout(), "Next page: pb team activity %s --cursor %s --limit %d\n", args[0], page.NextCursor, limit)
+		}
+		return err
+	}}
+	c.Flags().Int("limit", 50, "maximum events, 1–200")
+	c.Flags().String("cursor", "", "next_cursor from the previous page")
+	c.Flags().Bool("json", false, "print canonical JSON including metadata and next_cursor")
+	return c
 }

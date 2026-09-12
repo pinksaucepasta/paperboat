@@ -10,16 +10,18 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/inspector"
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/quic-go/quic-go/http3"
+	"net/url"
 )
 
 // ServeNativePrivateHTTP3 hands one authenticated preview-class native
 // session exclusively to HTTP/3 and forwards exactly one CONNECT request.
 // Retrying or replaying an HTTP request is intentionally left to the caller.
-func ServeNativePrivateHTTP3(ctx context.Context, session *native.Session, authorize func(context.Context, streamauth.Header) (string, error), current NativePrivateTCPCurrent, dial NativePrivateTCPDial) error {
+func ServeNativePrivateHTTP3(ctx context.Context, session *native.Session, authorize func(context.Context, streamauth.Header) (string, error), current NativePrivateTCPCurrent, dial NativePrivateTCPDial, captureStore *inspector.Store) error {
 	if ctx == nil || session == nil || authorize == nil || current == nil || dial == nil {
 		return ErrNativePrivateBinding
 	}
@@ -51,6 +53,24 @@ func ServeNativePrivateHTTP3(ctx context.Context, session *native.Session, autho
 		}
 		if binding.ExpiresAt.Before(validUntil) {
 			validUntil = binding.ExpiresAt
+		}
+		// CONNECT preserves origin-owned application TLS. Observe only the
+		// authenticated connection binding; never retain ciphertext or pretend
+		// that an encrypted stream is a replayable HTTP request.
+		if captureStore != nil {
+			resourceID := binding.RouteID
+			if binding.ResourceKind == "preview" {
+				resourceID = binding.ResourceID
+			}
+			if pending, err := captureStore.TryBegin(resourceID); err == nil {
+				defer func() {
+					_, _ = captureStore.Finish(pending, inspector.CompletedCapture{
+						Method: http.MethodConnect, RawURL: (&url.URL{Scheme: binding.TargetScheme, Host: binding.TargetAddress}).String(),
+						ResourceGeneration: binding.ResourceGeneration, RouteGeneration: binding.RouteGeneration, TargetGeneration: binding.TargetGeneration,
+						RequestUnsupported: true, ResponseUnsupported: true, ErrorCode: "opaque_native_connection",
+					})
+				}()
+			}
 		}
 		origin, dialErr := dial(request.Context(), "tcp", binding.TargetAddress)
 		if dialErr != nil {

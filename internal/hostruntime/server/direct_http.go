@@ -6,15 +6,28 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"time"
 )
 
 func ServeHTTPConnection(ctx context.Context, connection net.Conn, handler http.Handler) error {
+	return serveHTTPConnection(ctx, connection, handler, &http.Server{})
+}
+
+// ServeInspectorHTTPConnection serves exactly one bounded inspector exchange on
+// an already authenticated stream. It never opens a listener or a target socket.
+func ServeInspectorHTTPConnection(ctx context.Context, connection net.Conn, handler http.Handler) error {
+	server := &http.Server{MaxHeaderBytes: 16 << 10, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 45 * time.Second, WriteTimeout: 45 * time.Second}
+	server.SetKeepAlivesEnabled(false)
+	return serveHTTPConnection(ctx, connection, handler, server)
+}
+func serveHTTPConnection(ctx context.Context, connection net.Conn, handler http.Handler, server *http.Server) error {
 	if ctx == nil || connection == nil || handler == nil {
 		return ErrInvalidConfiguration
 	}
 	tracked := &trackedHTTPConn{Conn: connection, closed: make(chan struct{})}
 	listener := &singleHTTPListener{ctx: ctx, connection: tracked}
-	server := &http.Server{Handler: handler, BaseContext: func(net.Listener) context.Context { return ctx }}
+	server.Handler = handler
+	server.BaseContext = func(net.Listener) context.Context { return ctx }
 	stop := context.AfterFunc(ctx, func() { _ = tracked.Close() })
 	err := server.Serve(listener)
 	stop()

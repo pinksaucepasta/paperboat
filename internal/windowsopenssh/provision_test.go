@@ -123,7 +123,7 @@ func TestWriteServiceConfigIsLoopbackOnlyAndKeyOnly(t *testing.T) {
 
 func TestClassifyInventoryPreservesSystemSSHDAndClassifiesEveryDisposition(t *testing.T) {
 	root := t.TempDir()
-	config := Config{Platform: "windows", InstallRoot: filepath.Join(root, "OpenSSH"), StateRoot: filepath.Join(root, "state"), ApprovedVersion: ApprovedVersion, ExpectedPublisher: "Microsoft", Port: 38222, Runner: &fakeRunner{}}
+	config := Config{Platform: "windows", ServiceName: ServiceName, ServiceExecutable: filepath.Join(root, "paperboat.exe"), InstallRoot: filepath.Join(root, "OpenSSH"), StateRoot: filepath.Join(root, "state"), ApprovedVersion: ApprovedVersion, ExpectedPublisher: "Microsoft", Port: 38222, Runner: &fakeRunner{}}
 	approved := BinaryRecord{Path: filepath.Join(config.InstallRoot, "sshd.exe"), Exists: true, Regular: true, SignatureValid: true, Publisher: "CN=Microsoft Corporation", Version: ApprovedVersion}
 	cases := []struct {
 		name   string
@@ -163,10 +163,11 @@ func TestClassifyInventoryRejectsWrongPEArchitecture(t *testing.T) {
 
 func TestValidateLoopbackHealthRequiresPaperboatOwnedDualStackListeners(t *testing.T) {
 	root := t.TempDir()
-	config := Config{Platform: "windows", InstallRoot: filepath.Join(root, "OpenSSH"), StateRoot: filepath.Join(root, "state"), ApprovedVersion: ApprovedVersion, ExpectedPublisher: "Microsoft", Port: 38222, Runner: &fakeRunner{}}
+	const instance = "u0123456789abcdef01234567"
+	config := Config{Platform: "windows", ServiceName: ServiceName + "-" + instance, ServiceExecutable: filepath.Join(root, "paperboat.exe"), InstallRoot: filepath.Join(root, "OpenSSH"), StateRoot: filepath.Join(root, "state"), ApprovedVersion: ApprovedVersion, ExpectedPublisher: "Microsoft", Port: 38222, Runner: &fakeRunner{}}
 	result := Result{SSHDPath: filepath.Join(config.InstallRoot, "sshd.exe"), Port: config.Port}
 	health := ServiceHealth{
-		Service: ServiceRecord{Name: ServiceName, Exists: true, State: "Running", ProcessID: 41, PathName: `"` + result.SSHDPath + `" -D -f "` + filepath.Join(config.StateRoot, "sshd_config") + `"`},
+		Service: ServiceRecord{Name: config.ServiceName, Exists: true, State: "Running", ProcessID: 41, PathName: `"` + config.ServiceExecutable + `" daemon __windows-sshd-service --instance ` + instance},
 		Listeners: []ListenerRecord{
 			{Address: "127.0.0.1", Port: config.Port, ProcessID: 41, ExecutablePath: result.SSHDPath},
 			{Address: "::1", Port: config.Port, ProcessID: 41, ExecutablePath: result.SSHDPath},

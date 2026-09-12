@@ -233,6 +233,16 @@ type TerminalTarget struct {
 	InputQueue        *TerminalInputQueue
 }
 
+// Shared reports a role-scoped session attachment. Runtime authorization remains
+// authoritative; this metadata only selects the client interaction behavior.
+func (t *TerminalTarget) Shared() bool {
+	return t != nil && len(t.Auth.Scopes) == 1 && (t.Auth.Scopes[0] == "terminal:view" || t.Auth.Scopes[0] == "terminal:control")
+}
+
+func (t *TerminalTarget) ViewOnly() bool {
+	return t != nil && len(t.Auth.Scopes) == 1 && t.Auth.Scopes[0] == "terminal:view"
+}
+
 type FileTransferTarget struct {
 	Endpoint             string
 	SourceMachineID      string

@@ -158,6 +158,34 @@ func TestPublisherAppliesReadOnlyPullWithoutWriterLease(t *testing.T) {
 	}
 }
 
+func TestPublisherRequiresApprovalBeforeReconcile(t *testing.T) {
+	events := []string{}
+	repository := &fakeRepository{events: &events, fetches: []RemoteSnapshot{{Revision: "review-head"}}}
+	publisher, err := NewPublisher(PublisherConfig{Authority: &fakeLeaseAuthority{events: &events}, Repository: repository, RequireReview: true, ApprovedRevision: "old-head"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := publisher.Sync(context.Background(), "")
+	if !errors.Is(err, ErrReviewRequired) || result.RemoteRevision != "review-head" {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if !reflect.DeepEqual(events, []string{"fetch"}) {
+		t.Fatalf("review gate mutated before approval: %v", events)
+	}
+}
+
+func TestPublisherAutomaticUpdatesExplicitlyBypassRevisionApproval(t *testing.T) {
+	events := []string{}
+	repository := &fakeRepository{events: &events, fetches: []RemoteSnapshot{{Revision: "new-head"}}, prepared: PreparedPublication{ExpectedRemoteRevision: "new-head", CommitID: "new-head"}}
+	publisher, _ := NewPublisher(PublisherConfig{Authority: &fakeLeaseAuthority{events: &events}, Repository: repository, RequireReview: true, AutomaticUpdates: true})
+	if _, err := publisher.Sync(context.Background(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(events, []string{"fetch", "credential", "reconcile:new-head"}) {
+		t.Fatalf("events=%v", events)
+	}
+}
+
 func TestPublisherStopsOnConflictAndLostAuthority(t *testing.T) {
 	for name, testCase := range map[string]struct {
 		configure func(*fakeLeaseAuthority, *fakeRepository)

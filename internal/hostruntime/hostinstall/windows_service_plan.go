@@ -132,10 +132,14 @@ func executeWindowsServiceStepsWithHook(
 }
 
 func windowsRuntimeServiceDefinitions(layout service.Layout) []windowsRuntimeServiceDefinition {
+	var instanceArgs []string
+	if layout.Instance != "" {
+		instanceArgs = []string{"--instance", layout.Instance}
+	}
 	return []windowsRuntimeServiceDefinition{
-		{kind: service.HostdKind, executable: layout.Binary, arguments: []string{"daemon", "__runtime-hostd"}},
-		{kind: service.DaemonKind, executable: layout.Binary, arguments: []string{"daemon", "__runtime-local-daemon"}},
-		{kind: service.UpdaterKind, executable: layout.Binary, arguments: []string{"daemon", "__runtime-updated"}},
+		{kind: service.HostdKind, executable: layout.Binary, arguments: append([]string{"daemon", "__runtime-hostd"}, instanceArgs...)},
+		{kind: service.DaemonKind, executable: layout.Binary, arguments: append([]string{"daemon", "__runtime-local-daemon"}, instanceArgs...)},
+		{kind: service.UpdaterKind, executable: layout.Binary, arguments: append([]string{"daemon", "__runtime-updated"}, instanceArgs...)},
 	}
 }
 
@@ -228,5 +232,5 @@ func windowsActivatorExecutableOwned(layout service.Layout, executable string) b
 }
 
 func windowsActivatorServiceOwned(layout service.Layout, executable string, arguments []string, account string) bool {
-	return windowsActivatorExecutableOwned(layout, executable) && len(arguments) == 2 && arguments[0] == "daemon" && arguments[1] == "__runtime-activate" && strings.EqualFold(strings.TrimSpace(account), "LocalSystem")
+	return layout.Instance != "" && windowsActivatorExecutableOwned(layout, executable) && len(arguments) == 4 && arguments[0] == "daemon" && arguments[1] == "__runtime-activate" && arguments[2] == "--instance" && arguments[3] == layout.Instance && strings.EqualFold(strings.TrimSpace(account), "LocalSystem")
 }

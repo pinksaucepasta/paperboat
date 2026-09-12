@@ -174,19 +174,7 @@ func (c LaunchdController) Enable(ctx context.Context, path string) error {
 }
 
 func (c LaunchdController) Disable(ctx context.Context, _ string) error {
-	if c.Runner == nil || c.UID < 0 {
-		return ErrLifecycleInvalid
-	}
-	operationCtx, cancel, err := nativeServiceContext(ctx)
-	if err != nil {
-		return err
-	}
-	defer cancel()
-	err = c.Runner.Run(operationCtx, "launchctl", "bootout", c.service())
-	if launchdServiceAbsent(err) {
-		return nil
-	}
-	return err
+	return c.bootoutAndWait(ctx)
 }
 
 func (c LaunchdController) Start(ctx context.Context, path string) error {
@@ -222,22 +210,7 @@ func (c LaunchdController) Start(ctx context.Context, path string) error {
 }
 
 func (c LaunchdController) Stop(ctx context.Context, _ string) error {
-	if c.Runner == nil || c.UID < 0 {
-		return ErrLifecycleInvalid
-	}
-	operationCtx, cancel, err := nativeServiceContext(ctx)
-	if err != nil {
-		return err
-	}
-	defer cancel()
-	// launchd KeepAlive/RunAtLoad would restart a merely killed service. Boot
-	// the job out to make Stop durable, while leaving the declaration plist in
-	// place so Start/Repair can bootstrap the exact same bytes again.
-	err = c.Runner.Run(operationCtx, "launchctl", "bootout", c.service())
-	if launchdServiceAbsent(err) {
-		return nil
-	}
-	return err
+	return c.bootoutAndWait(ctx)
 }
 
 type launchdPrintStatus struct {

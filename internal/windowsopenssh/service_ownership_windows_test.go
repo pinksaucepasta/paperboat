@@ -9,8 +9,10 @@ import (
 
 func TestOwnedServiceCommandRequiresExactPaperboatExecutable(t *testing.T) {
 	config := DefaultConfig(nil)
+	config.ServiceName = "PaperboatSshd-u0123456789abcdef01234567"
+	config.StateRoot = `C:\ProgramData\Paperboat\users\u0123456789abcdef01234567\ssh`
 	expected := `C:\Program Files\Paperboat\bin\pb.exe`
-	command := `"` + expected + `" daemon __windows-sshd-service --sshd "C:\Program Files\OpenSSH\sshd.exe" --config C:\ProgramData\Paperboat\ssh\sshd_config`
+	command := `"` + expected + `" daemon __windows-sshd-service --instance u0123456789abcdef01234567`
 	if !sameOwnedServiceCommand(command, expected, config) {
 		t.Fatal("exact Paperboat service command was rejected")
 	}

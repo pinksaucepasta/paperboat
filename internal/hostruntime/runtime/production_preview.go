@@ -19,6 +19,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/privateproxyconfig"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
+	"github.com/pinksaucepasta/paperboat/internal/inspector"
 	"github.com/pinksaucepasta/paperboat/internal/privatepreviewproxy"
 )
 
@@ -52,6 +54,12 @@ type productionPreviewAssemblyConfig struct {
 	PrivatePAC             privatepreviewproxy.PACConfigurator
 	NativePrivateTCP       *preview.NativePrivateTCPAccess
 	NativePrivateHTTP      *preview.NativePrivateHTTPAccess
+	// InspectorStore and InspectorRegistry thread the daemon's one shared
+	// inspector capture store and replay bindings into ephemeral carriers.
+	// Nil disables ephemeral HTTP capture/replay.
+	InspectorStore    *inspector.Store
+	InspectorRegistry *inspector.Registry
+	InspectorHTTP     tunnelmanager.AuthenticatedInspectorHTTP
 }
 
 func newProductionPreviewAssembly(config productionPreviewAssemblyConfig) (*productionPreviewAssembly, error) {
@@ -59,12 +67,15 @@ func newProductionPreviewAssembly(config productionPreviewAssemblyConfig) (*prod
 		return nil, errors.Join(ErrProductionInvalid, preview.ErrMachinePreviewRuntimeInvalid)
 	}
 	runtime, err := preview.NewMachinePreviewRuntime(preview.MachinePreviewRuntimeConfig{
-		ControlURL: config.ControlURL,
-		StateRoot:  config.StateRoot,
-		RunContext: config.RunContext,
-		Transport:  config.Transport,
-		Carrier:    config.Carrier,
-		OriginDial: config.OriginDial,
+		ControlURL:    config.ControlURL,
+		StateRoot:     config.StateRoot,
+		RunContext:    config.RunContext,
+		Transport:     config.Transport,
+		Carrier:       config.Carrier,
+		OriginDial:    config.OriginDial,
+		Inspector:     config.InspectorStore,
+		Registry:      config.InspectorRegistry,
+		InspectorHTTP: config.InspectorHTTP,
 	})
 	if err != nil {
 		return nil, errors.Join(ErrProductionInvalid, err)

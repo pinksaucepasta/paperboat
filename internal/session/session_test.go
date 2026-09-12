@@ -150,3 +150,21 @@ func TestPushSizeUsesReservedRemoteViewport(t *testing.T) {
 		t.Fatalf("resize = %dx%d, want 120x39", conn.cols, conn.rows)
 	}
 }
+
+func TestRunViewerKeepsInputLocalAndDetachesWithoutSignal(t *testing.T) {
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdin
+	os.Stdin = inR
+	defer func() { os.Stdin = old; _ = inR.Close(); _ = inW.Close() }()
+	_, _ = inW.Write([]byte("do not forward\x03"))
+	c := &testConn{Reader: bytes.NewBufferString("recent"), wait: make(chan struct{})}
+	var out bytes.Buffer
+	s := &sink{}
+	code, err := Run(context.Background(), c, s, WithReadOnly(), WithOutput(&out))
+	if err != nil || code != 0 || s.Len() != 0 || c.halfClosed.Load() || !c.closed.Load() {
+		t.Fatalf("viewer code=%d err=%v input bytes=%d halfclose=%v", code, err, s.Len(), c.halfClosed.Load())
+	}
+}

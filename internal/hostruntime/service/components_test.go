@@ -24,6 +24,7 @@ func canonicalLayout(t *testing.T, platform string) Layout {
 		BinaryStaged:    filepath.Join(releases, "pb.staged"),
 		UpdateStateRoot: filepath.Join(t.TempDir(), "updated"),
 		HostdSocket:     filepath.Join(t.TempDir(), "hostd", "hostd.sock"),
+		UpdaterSocket:   filepath.Join(t.TempDir(), "updated-runtime", "control.sock"),
 	}
 	if runtime.GOOS == "windows" {
 		layout.Binary += ".exe"
@@ -54,6 +55,30 @@ func TestDefaultLayoutsAreFixedAndBounded(t *testing.T) {
 				t.Fatalf("release retention paths overlap: %+v", layout)
 			}
 		})
+	}
+}
+
+func TestWindowsUserLayoutIsStableAndIsolated(t *testing.T) {
+	first, err := WindowsUserLayout("S-1-5-21-1-2-3-1001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repeat, err := WindowsUserLayout("S-1-5-21-1-2-3-1001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := WindowsUserLayout("S-1-5-21-1-2-3-1002")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Instance != repeat.Instance || first.Binary != repeat.Binary {
+		t.Fatal("same SID produced unstable Windows layout")
+	}
+	if first.Instance == second.Instance || first.Binary == second.Binary || first.HostdSocket == second.HostdSocket || first.UpdateStateRoot == second.UpdateStateRoot {
+		t.Fatalf("different SIDs share Windows runtime layout: first=%+v second=%+v", first, second)
+	}
+	if len(first.Instance) != 25 || first.Instance[0] != 'u' {
+		t.Fatalf("instance=%q", first.Instance)
 	}
 }
 
@@ -114,7 +139,7 @@ func TestHostdAndUpdaterInstallersUseStableDaemon(t *testing.T) {
 						t.Fatalf("hostd missing %q:\n%s", expected, hostdDefinition)
 					}
 				}
-				for _, expected := range []string{"User=root", "Group=root", "RuntimeDirectory=paperboat-updated", "After=local-fs.target network-online.target", "Wants=network-online.target", "PAPERBOAT_RELEASE_ROOT=" + layout.ReleasesRoot, "PAPERBOAT_BINARY=" + layout.Binary, "PAPERBOAT_BINARY_ROLLBACK=" + layout.BinaryRollback, "PAPERBOAT_BINARY_STAGED=" + layout.BinaryStaged, "PAPERBOAT_UPDATED_SOCKET=" + updaterControlSocket(platform), `"daemon" "__runtime-updated"`} {
+				for _, expected := range []string{"User=root", "Group=root", "RuntimeDirectory=paperboat-updated", "After=local-fs.target network-online.target", "Wants=network-online.target", "PAPERBOAT_RELEASE_ROOT=" + layout.ReleasesRoot, "PAPERBOAT_BINARY=" + layout.Binary, "PAPERBOAT_BINARY_ROLLBACK=" + layout.BinaryRollback, "PAPERBOAT_BINARY_STAGED=" + layout.BinaryStaged, "PAPERBOAT_UPDATED_SOCKET=" + updaterControlSocket(platform, layout.Instance), `"daemon" "__runtime-updated"`} {
 					if !strings.Contains(string(updaterDefinition), expected) {
 						t.Fatalf("updater missing %q:\n%s", expected, updaterDefinition)
 					}
@@ -179,10 +204,10 @@ func TestComponentControllerUsesStableRoleServiceNames(t *testing.T) {
 		kind     string
 		want     string
 	}{
-		{platform: "linux", kind: HostdKind, want: "paperboat-hostd.service"},
-		{platform: "linux", kind: UpdaterKind, want: "paperboat-updated.service"},
-		{platform: "darwin", kind: HostdKind, want: HostdLabel},
-		{platform: "darwin", kind: UpdaterKind, want: UpdaterLabel},
+		{platform: "linux", kind: HostdKind, want: "paperboat-hostd-u501.service"},
+		{platform: "linux", kind: UpdaterKind, want: "paperboat-updated-u501.service"},
+		{platform: "darwin", kind: HostdKind, want: HostdLabel + ".u501"},
+		{platform: "darwin", kind: UpdaterKind, want: UpdaterLabel + ".u501"},
 	} {
 		t.Run(test.platform+"_"+test.kind, func(t *testing.T) {
 			controller, err := ComponentController(test.platform, test.kind, 501, ExecRunner{})

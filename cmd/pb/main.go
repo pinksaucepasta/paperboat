@@ -2959,6 +2959,7 @@ func actionHome(command *cobra.Command) error {
 			HeaderActions: map[int]string{2: "toggle-email"},
 			Items: []selector.Item{
 				{ID: "machines", Title: "Machines", Description: "Open terminals, create previews, send files, or manage computers"},
+				{ID: "inbox", Title: "Team Inbox", Description: "Review and approve exact teammate file requests"},
 				{ID: "sessions", Title: "Terminal sessions", Description: "Attach, inspect, close, rename, or delete durable sessions"},
 				{ID: "environment-variables", Title: "ENV Injection", Description: "Manage redacted global and per-machine variables for new processes"},
 				{ID: "config", Title: "Configuration", Description: "Inspect sync status, CLI settings, and status bar preferences"},
@@ -3083,6 +3084,8 @@ func runHomeAction(command *cobra.Command, action string) error {
 		return runEnvironmentVariablesTUI(command)
 	case "machines":
 		return actionHomeMachines(command)
+	case "inbox":
+		return actionHomeInbox(command)
 	case "config":
 		return actionHomeConfig(command)
 	case "doctor":
@@ -3091,6 +3094,53 @@ func runHomeAction(command *cobra.Command, action string) error {
 		return actionHomeAccount(command)
 	default:
 		return errors.New("unknown Paperboat action")
+	}
+}
+
+func actionHomeInbox(command *cobra.Command) error {
+	ctx := actionContext(command, nil)
+	client, err := backendClient(ctx)
+	if err != nil {
+		return err
+	}
+	me, err := client.Me(ctx.Context)
+	if err != nil {
+		return friendlyCommandError(err)
+	}
+	for {
+		requests, listErr := client.TeamInboxRequests(ctx.Context)
+		if listErr != nil {
+			return friendlyCommandError(listErr)
+		}
+		pending := slices.DeleteFunc(requests, func(request api.TeamInboxRequest) bool {
+			return request.RecipientAccount != me.ID || request.Status != "pending"
+		})
+		if len(pending) == 0 {
+			return showInformation(command, "Team Inbox", "No file requests are waiting for your approval.", nil)
+		}
+		items := make([]selector.Item, len(pending))
+		for i, request := range pending {
+			items[i] = selector.Item{ID: request.RequestID, Title: fmt.Sprintf("%d file(s) from %s", len(request.Files), request.SenderAccount), Description: "Expires " + relativeTimestamp(request.ExpiresAt)}
+		}
+		selection, selectErr := selector.ChooseWithAction(selector.Options{Title: "Team Inbox approvals", Subtitle: "Approval applies only to the listed names, sizes, hashes, recipient and transfer", Items: items, Footer: "enter review  esc back", Stdin: os.Stdin, Output: command.ErrOrStderr()})
+		if selectErr != nil {
+			return selectErr
+		}
+		request := pending[slices.IndexFunc(pending, func(request api.TeamInboxRequest) bool { return request.RequestID == selection.Item.ID })]
+		lines := make([]string, len(request.Files))
+		for i, file := range request.Files {
+			lines[i] = fmt.Sprintf("%s — %d bytes — SHA-256 %s", file.Basename, file.Size, file.SHA256)
+		}
+		action, actionErr := chooseHomeAction(command, "File request from "+request.SenderAccount, []selector.Item{{ID: "approve", Title: "Approve exact files", Description: strings.Join(lines, "; ")}, {ID: "decline", Title: "Decline", Description: "No file bytes will be accepted"}})
+		if actionErr != nil {
+			if errors.Is(actionErr, selector.ErrCanceled) {
+				continue
+			}
+			return actionErr
+		}
+		if _, err = client.DecideTeamInboxRequest(ctx.Context, request.RequestID, action.ID, request.DecisionGeneration); err != nil {
+			return friendlyCommandError(err)
+		}
 	}
 }
 
@@ -4155,7 +4205,53 @@ func sendCommand() *cobra.Command {
 				return &api.APIError{Code: "machine_offline", Message: "The destination machine is offline."}
 			}
 			fmt.Fprintf(cobraCommand.ErrOrStderr(), "Sending to %s (%s)\n", destination.DisplayName, destination.ID)
-			descriptor, err := client.MachineFileTransferDescriptor(ctx.Context, destination.ID, sourceMachineID, sessionID)
+			preparedPaths := make([]string, len(paths))
+			for i, path := range paths {
+				preparedPaths[i], err = filepath.Abs(path)
+				if err != nil {
+					return err
+				}
+			}
+			prepared, err := filetransfer.Prepare(preparedPaths, filetransfer.Limits{})
+			if err != nil {
+				return err
+			}
+			defer prepared.Close()
+			batchID, err := filetransfer.NewBatchID()
+			if err != nil {
+				return err
+			}
+			requestFiles := make([]api.TeamInboxFile, len(prepared.Sources))
+			for i, source := range prepared.Sources {
+				requestFiles[i] = api.TeamInboxFile{Basename: source.Basename, Size: source.Size, SHA256: hex.EncodeToString(source.SHA256[:])}
+			}
+			requestID := "tir_" + strings.TrimPrefix(batchID, "fb_")
+			acceptance, err := client.CreateTeamInboxRequest(ctx.Context, api.TeamInboxRequest{RequestID: requestID, SourceMachineID: sourceMachineID, DestinationMachineID: destination.ID, BatchID: batchID, Files: requestFiles, ExpiresAt: time.Now().UTC().Add(10 * time.Minute)}, batchID)
+			if err != nil {
+				return friendlyCommandError(err)
+			}
+			if acceptance.Status == "pending" {
+				fmt.Fprintf(cobraCommand.ErrOrStderr(), "Waiting for recipient approval (%s).\n", acceptance.RequestID)
+				for acceptance.Status == "pending" {
+					select {
+					case <-ctx.Context.Done():
+						return ctx.Context.Err()
+					case <-time.After(2 * time.Second):
+					}
+					acceptance, err = client.TeamInboxRequest(ctx.Context, acceptance.RequestID)
+					if err != nil {
+						return friendlyCommandError(err)
+					}
+				}
+			}
+			if acceptance.Status != "approved" && acceptance.Status != "not_required" {
+				return fmt.Errorf("file transfer was not accepted: %s", acceptance.Status)
+			}
+			descriptorRequestID, descriptorDigest := acceptance.RequestID, acceptance.ManifestDigest
+			if acceptance.Status == "not_required" {
+				descriptorRequestID, descriptorDigest = "", ""
+			}
+			descriptor, err := client.MachineFileTransferDescriptorForRequest(ctx.Context, destination.ID, sourceMachineID, sessionID, descriptorRequestID, descriptorDigest)
 			if err != nil {
 				return friendlyCommandError(err)
 			}
@@ -4165,25 +4261,12 @@ func sendCommand() *cobra.Command {
 				Auth:   resolver.AuthTarget{Method: descriptor.Auth.Method, Token: descriptor.Auth.Token, ExpiresAt: descriptor.Auth.ExpiresAt.UTC().Format(time.RFC3339Nano), ResourceID: descriptor.Auth.AccessSessionID},
 				Policy: descriptor.Policy,
 			}
+			if err := filetransfer.ValidateSources(prepared.Sources, fileTransferLimits(target)); err != nil {
+				return err
+			}
 			transferClient := fileTransferClientForTarget(target)
 			if transferClient == nil {
 				return errors.New("server returned an invalid file transfer descriptor")
-			}
-			preparedPaths := make([]string, len(paths))
-			for i, path := range paths {
-				preparedPaths[i], err = filepath.Abs(path)
-				if err != nil {
-					return err
-				}
-			}
-			prepared, err := filetransfer.Prepare(preparedPaths, fileTransferLimits(target))
-			if err != nil {
-				return err
-			}
-			defer prepared.Close()
-			batchID, err := filetransfer.NewBatchID()
-			if err != nil {
-				return err
 			}
 			retention := time.Duration(target.Policy.RetentionSeconds) * time.Second
 			if retention <= 0 || retention > 7*24*time.Hour {
@@ -4215,6 +4298,11 @@ func sendCommand() *cobra.Command {
 			}
 			if err != nil {
 				return err
+			}
+			if acceptance.Status == "approved" {
+				if err := client.CompleteTeamInboxRequest(ctx.Context, acceptance.RequestID, acceptance.ManifestDigest); err != nil {
+					fmt.Fprintf(cobraCommand.ErrOrStderr(), "Warning: delivery succeeded, but receipt status could not be updated: %v\n", friendlyCommandError(err))
+				}
 			}
 			jsonOutput, _ := cobraCommand.Flags().GetBool("json")
 			if jsonOutput {
@@ -4473,6 +4561,8 @@ func specTree(source *command.Spec, use string) *cobra.Command {
 				entry.Flags().String(configuredFlag.Name, "", configuredFlag.Usage)
 			case *command.BoolFlag:
 				entry.Flags().Bool(configuredFlag.Name, false, configuredFlag.Usage)
+			case *command.UintFlag:
+				entry.Flags().Uint(configuredFlag.Name, 0, configuredFlag.Usage)
 			case *command.Float64Flag:
 				entry.Flags().Float64(configuredFlag.Name, 0, configuredFlag.Usage)
 			}
@@ -4485,6 +4575,9 @@ func specTree(source *command.Spec, use string) *cobra.Command {
 		}
 		if use == "config" && child.Name == "assign" {
 			entry.Flags().String("mode", "pull-only", "sync mode: pull-only, push-only, or bidirectional")
+			entry.Flags().String("pull-repository", "", "repository used for pulls (defaults to positional repository)")
+			entry.Flags().String("push-repository", "", "repository used for pushes (defaults to positional repository)")
+			entry.Flags().Bool("automatic-updates", false, "apply later reviewed-scope updates automatically")
 			entry.Flags().Bool("yes", false, "acknowledge plaintext private-Git storage and history")
 		}
 		if use == "config" && child.Name == "unassign" {
@@ -4514,6 +4607,12 @@ func specCommandArgs(parent, name string) cobra.PositionalArgs {
 			return cobra.ExactArgs(2)
 		case "unassign", "disable":
 			return cobra.ExactArgs(1)
+		case "approve", "team-default-adopt":
+			return cobra.ExactArgs(1)
+		case "team-default-set":
+			return cobra.ExactArgs(2)
+		case "team-default-unadopt":
+			return cobra.NoArgs
 		case "status":
 			return cobra.MaximumNArgs(1)
 		}
@@ -4656,6 +4755,7 @@ func sessionCobraCommand() *cobra.Command {
 		}
 		command.AddCommand(entry)
 	}
+	addTerminalSharingCommands(command)
 	return command
 }
 
@@ -4721,13 +4821,24 @@ func userMachineCobraCommand() *cobra.Command {
 			return json.NewEncoder(command.OutOrStdout()).Encode(map[string]any{"version": "1", "machines": machines})
 		}
 		writer := tabwriter.NewWriter(command.OutOrStdout(), 0, 4, 2, ' ', 0)
-		fmt.Fprintln(writer, "NAME\tKIND\tSTATE\tID")
+		fmt.Fprintln(writer, "NAME\tOWNERSHIP\tSTATE\tPERMISSIONS\tID")
 		for _, item := range machines {
 			state := item.State
 			if item.Online {
 				state = "online"
 			}
-			fmt.Fprintf(writer, "%s\tBYOD\t%s\t%s\n", item.DisplayName, state, item.ID)
+			ownership := item.Ownership
+			if item.OwnerTeamID != "" {
+				ownership = "team:" + item.OwnerTeamID
+			}
+			permissions := strings.Join(item.Permissions, ",")
+			if item.CanManage {
+				permissions = strings.Trim(permissions+",manage", ",")
+			}
+			if permissions == "" {
+				permissions = "none"
+			}
+			fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\n", item.DisplayName, ownership, state, permissions, item.ID)
 		}
 		return writer.Flush()
 	}}
@@ -4938,14 +5049,14 @@ func actionRun(action command.Action) func(*cobra.Command, []string) error {
 func actionContext(cobraCommand *cobra.Command, args []string) *command.Context {
 	set := flag.NewFlagSet("pb", flag.ContinueOnError)
 	values := map[string]string{}
-	for _, name := range []string{"config", "server", "name", "machine", "session", "status-bar", "status-bar-fullscreen", "status-bar-theme", "mode", "path", "transport", "code", "input", "output", "keep", "recovery-key"} {
+	for _, name := range []string{"config", "server", "name", "machine", "session", "status-bar", "status-bar-fullscreen", "status-bar-theme", "mode", "pull-repository", "push-repository", "path", "transport", "code", "input", "output", "keep", "recovery-key"} {
 		value, _ := cobraCommand.Flags().GetString(name)
 		values[name] = value
 		set.String(name, value, "")
 	}
 	hours, _ := cobraCommand.Flags().GetFloat64("hours")
 	set.Float64("hours", hours, "")
-	for _, name := range []string{"json", "wide", "yes", "clear", "all", "indefinite", "public", "detach", "select-environment", "debug"} {
+	for _, name := range []string{"json", "wide", "yes", "automatic-updates", "clear", "all", "indefinite", "public", "detach", "select-environment", "debug"} {
 		value, _ := cobraCommand.Flags().GetBool(name)
 		values[name] = strconv.FormatBool(value)
 		set.Bool(name, value, "")
@@ -4954,6 +5065,8 @@ func actionContext(cobraCommand *cobra.Command, args []string) *command.Context 
 	set.Uint("port", port, "")
 	listenPort, _ := cobraCommand.Flags().GetUint("listen-port")
 	set.Uint("listen-port", listenPort, "")
+	generation, _ := cobraCommand.Flags().GetUint("generation")
+	set.Uint("generation", generation, "")
 	duration, _ := cobraCommand.Flags().GetDuration("duration")
 	set.Duration("duration", duration, "")
 	set.Bool("duration-set", cobraCommand.Flags().Changed("duration"), "")
@@ -5128,6 +5241,9 @@ func authLoginMode(c *command.Context, replace bool) error {
 			return errors.Join(fmt.Errorf("validate new session: %w", err), cleanupIssuedSession(cfg.ServerURL, tokens.CLIClientSessionID, tokens.RefreshToken, store))
 		}
 		p := config.Profile{Issuer: cfg.ServerURL, CLIClientSessionID: tokens.CLIClientSessionID, AccessExpiresAt: expires, Account: config.Account{ID: me.ID, Email: me.Email, DisplayName: me.DisplayName}}
+		if custodyErr := enrolledRuntimeAccountSwitchError(p); custodyErr != nil {
+			return errors.Join(custodyErr, cleanupIssuedSession(cfg.ServerURL, tokens.CLIClientSessionID, tokens.RefreshToken, store))
+		}
 		var saveErr error
 		if repairProfile {
 			saveErr = committedProfileMutation(store, p, cred, store.Repair(previous.CLIClientSessionID, p, cred))
@@ -5160,6 +5276,24 @@ func authLoginMode(c *command.Context, replace bool) error {
 		fmt.Fprintf(os.Stdout, "Signed in as %s\n", firstNonEmpty(me.Email, me.DisplayName, me.ID))
 		return nil
 	}
+}
+
+func enrolledRuntimeAccountSwitchError(next config.Profile) error {
+	identityStore, err := runtimeIdentityStore()
+	if err != nil {
+		return fmt.Errorf("inspect enrolled runtime before account switch: %w", err)
+	}
+	registration, err := identityStore.Registration()
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect enrolled runtime before account switch: %w", err)
+	}
+	if registration.MachineID != "" && (registration.AccountID == "" || registration.AccountID != next.Account.ID || strings.TrimRight(registration.ServerURL, "/") != strings.TrimRight(next.Issuer, "/")) {
+		return errors.New("cannot switch Paperboat accounts while this OS user has an enrolled runtime; run `pb uninstall` before signing in to another account")
+	}
+	return nil
 }
 
 func ensureCLIIdentityForLogin(c *command.Context, store config.ProfileStore, profile config.Profile, credential config.Credential) error {
@@ -6083,7 +6217,95 @@ func inboxCommand() *command.Spec {
 		{Name: "path", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: inboxPathCommand},
 		{Name: "set", ArgsUsage: "<directory>", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: inboxSetCommand},
 		{Name: "reset", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: inboxResetCommand},
+		{Name: "requests", Usage: "List team file requests", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: inboxRequestsCommand},
+		{Name: "approve", ArgsUsage: "<request-id>", Usage: "Approve an exact team file request", Flags: []command.Flag{&command.UintFlag{Name: "generation"}, &command.BoolFlag{Name: "json"}}, Action: func(c *command.Context) error { return inboxDecisionCommand(c, "approve") }},
+		{Name: "decline", ArgsUsage: "<request-id>", Usage: "Decline an exact team file request", Flags: []command.Flag{&command.UintFlag{Name: "generation"}, &command.BoolFlag{Name: "json"}}, Action: func(c *command.Context) error { return inboxDecisionCommand(c, "decline") }},
+		{Name: "policy", ArgsUsage: "[manual|automatic]", Usage: "Show or update team file acceptance", Flags: []command.Flag{&command.BoolFlag{Name: "receipt-email"}, &command.BoolFlag{Name: "json"}}, Action: inboxPolicyCommand},
 	}}
+}
+
+func inboxRequestsCommand(c *command.Context) error {
+	if c.Args().Len() != 0 {
+		return errors.New("pb inbox requests does not accept arguments")
+	}
+	client, err := backendClient(c)
+	if err != nil {
+		return err
+	}
+	requests, err := client.TeamInboxRequests(c.Context)
+	if err != nil {
+		return friendlyCommandError(err)
+	}
+	if c.Bool("json") {
+		return json.NewEncoder(c.Writer).Encode(map[string]any{"schema_version": "1.0", "ok": true, "data": map[string]any{"requests": requests}})
+	}
+	if len(requests) == 0 {
+		fmt.Fprintln(c.Writer, "No team file requests.")
+		return nil
+	}
+	w := tabwriter.NewWriter(c.Writer, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "REQUEST\tSENDER\tFILES\tSTATUS\tEXPIRES")
+	for _, request := range requests {
+		fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\n", request.RequestID, request.SenderAccount, len(request.Files), request.Status, relativeTimestamp(request.ExpiresAt))
+	}
+	return w.Flush()
+}
+
+func inboxDecisionCommand(c *command.Context, action string) error {
+	if c.Args().Len() != 1 {
+		return fmt.Errorf("usage: pb inbox %s <request-id> --generation <generation>", action)
+	}
+	client, err := backendClient(c)
+	if err != nil {
+		return err
+	}
+	generation := uint64(c.Uint("generation"))
+	if generation == 0 {
+		request, getErr := client.TeamInboxRequest(c.Context, c.Args().First())
+		if getErr != nil {
+			return friendlyCommandError(getErr)
+		}
+		generation = request.DecisionGeneration
+	}
+	request, err := client.DecideTeamInboxRequest(c.Context, c.Args().First(), action, generation)
+	if err != nil {
+		return friendlyCommandError(err)
+	}
+	if c.Bool("json") {
+		return json.NewEncoder(c.Writer).Encode(map[string]any{"schema_version": "1.0", "ok": true, "data": request})
+	}
+	fmt.Fprintf(c.Writer, "%s: %s\n", request.RequestID, request.Status)
+	return nil
+}
+
+func inboxPolicyCommand(c *command.Context) error {
+	if c.Args().Len() > 1 {
+		return errors.New("usage: pb inbox policy [manual|automatic] [--receipt-email]")
+	}
+	client, err := backendClient(c)
+	if err != nil {
+		return err
+	}
+	policy, err := client.TeamInboxPolicy(c.Context)
+	if err != nil {
+		return friendlyCommandError(err)
+	}
+	if c.Args().Len() == 1 {
+		acceptance := c.Args().First()
+		if acceptance != "manual" && acceptance != "automatic" {
+			return errors.New("acceptance must be manual or automatic")
+		}
+		policy.Acceptance, policy.ReceiptEmail = acceptance, c.Bool("receipt-email")
+		policy, err = client.SetTeamInboxPolicy(c.Context, policy)
+		if err != nil {
+			return friendlyCommandError(err)
+		}
+	}
+	if c.Bool("json") {
+		return json.NewEncoder(c.Writer).Encode(map[string]any{"schema_version": "1.0", "ok": true, "data": policy})
+	}
+	fmt.Fprintf(c.Writer, "Acceptance: %s\nReceipt email: %t\n", policy.Acceptance, policy.ReceiptEmail)
+	return nil
 }
 
 func runtimeIdentityStore() (*identity.Store, error) {
@@ -7071,9 +7293,25 @@ func resolveSSHMachine(ctx context.Context, client *api.Client, requested string
 		return api.UserMachine{}, err
 	}
 	for _, machine := range machines {
-		if machine.ID == requested || strings.EqualFold(machine.Alias, requested) {
+		if machine.ID == requested {
 			return machine, nil
 		}
+	}
+	var matches []api.UserMachine
+	for _, machine := range machines {
+		if strings.EqualFold(machine.Alias, requested) {
+			matches = append(matches, machine)
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	if len(matches) > 1 {
+		ids := make([]string, 0, len(matches))
+		for _, machine := range matches {
+			ids = append(ids, machine.ID)
+		}
+		return api.UserMachine{}, fmt.Errorf("%w: %q matches machine IDs %s; use an exact ID", resolver.ErrProjectAmbiguous, requested, strings.Join(ids, ", "))
 	}
 	return resolveUserMachine(ctx, client, requested)
 }
@@ -8687,6 +8925,10 @@ func configCommand() *command.Spec {
 				Name: "unassign", ArgsUsage: "<environment>", Usage: "Remove a config repository assignment",
 				Action: configUnassign,
 			},
+			{Name: "approve", ArgsUsage: "<environment>", Usage: "Approve the currently reviewed pull revision", Action: configApproveRevision},
+			{Name: "team-default-set", ArgsUsage: "<team> <repository>", Usage: "Set a team's default pull repository", Action: configTeamDefaultSet},
+			{Name: "team-default-adopt", ArgsUsage: "<team>", Usage: "Adopt a team default using your provider access", Action: configTeamDefaultAdopt},
+			{Name: "team-default-unadopt", Usage: "Stop inheriting a team configuration default", Action: configTeamDefaultUnadopt},
 			{
 				Name: "set", ArgsUsage: "<key> <value>", Usage: "Set a local configuration value",
 				Action: func(c *command.Context) error {
@@ -9030,6 +9272,26 @@ func configAssign(c *command.Context) error {
 	if mode != "pull_only" && mode != "push_only" && mode != "bidirectional" {
 		return errors.New("config assign --mode must be pull-only, push-only, or bidirectional")
 	}
+	pullRepository, pushRepository := repository, repository
+	if requested := strings.TrimSpace(c.String("pull-repository")); requested != "" {
+		pullRepository, err = resolveConfigRepository(repositories, requested)
+		if err != nil {
+			return err
+		}
+	}
+	if requested := strings.TrimSpace(c.String("push-repository")); requested != "" {
+		pushRepository, err = resolveConfigRepository(repositories, requested)
+		if err != nil {
+			return err
+		}
+	}
+	pullID, pushID := pullRepository.ID, pushRepository.ID
+	if mode == "pull_only" {
+		pushID = ""
+	}
+	if mode == "push_only" {
+		pullID = ""
+	}
 	if target.kind == environmentUserMachine && !c.Bool("yes") {
 		fmt.Fprintf(c.ErrWriter, "Machine: %s (%s)\nRepository: %s\n", target.name, target.id, repository.DisplayName)
 		return errors.New("config enablement requires --yes: selected content is ordinary plaintext in the private Git repository, Git history may retain removed versions, and repository access can expose that history")
@@ -9041,7 +9303,7 @@ func configAssign(c *command.Context) error {
 	} else if !api.IsNotFound(getErr) {
 		return friendlyCommandError(getErr)
 	}
-	assignment, err := client.AssignConfig(c.Context, machineID, repository.ID, mode, expectedVersion)
+	assignment, err := client.AssignConfigTargets(c.Context, machineID, pullID, pushID, mode, c.Bool("automatic-updates"), expectedVersion)
 	if err != nil {
 		return friendlyCommandError(err)
 	}
@@ -9070,7 +9332,7 @@ func configAssign(c *command.Context) error {
 		}
 		return json.NewEncoder(c.Writer).Encode(result)
 	}
-	fmt.Fprintf(c.Writer, "Assigned config repository %s to %s in %s mode.\n", repository.DisplayName, target.name, strings.ReplaceAll(mode, "_", "-"))
+	fmt.Fprintf(c.Writer, "Assigned pull repository %s and push repository %s to %s in %s mode.\n", pullRepository.DisplayName, pushRepository.DisplayName, target.name, strings.ReplaceAll(mode, "_", "-"))
 	return nil
 }
 
@@ -9105,6 +9367,100 @@ func configUnassign(c *command.Context) error {
 		return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "environment": map[string]string{"id": target.id, "kind": target.kind, "display_name": target.name}, "state": "unassigned", "outcome": "confirmed"})
 	}
 	fmt.Fprintf(c.Writer, "Removed config assignment from %s.\n", target.name)
+	return nil
+}
+
+func configApproveRevision(c *command.Context) error {
+	client, err := backendClient(c)
+	if err != nil {
+		return err
+	}
+	target, err := resolveEnvironmentTarget(c.Context, client, c.Args().First())
+	if err != nil {
+		return err
+	}
+	if target.kind != environmentUserMachine {
+		return errors.New("config approval requires a machine target")
+	}
+	status, err := client.ConfigSyncStatus(c.Context)
+	if err != nil {
+		return friendlyCommandError(err)
+	}
+	items, err := selectConfigEnvironments(status.Environments, target.id)
+	if err != nil || len(items) != 1 {
+		return errors.Join(errors.New("configuration revision is unavailable"), err)
+	}
+	item := items[0]
+	if item.RemoteRevision == "" || item.AssignmentVersion < 1 {
+		return errors.New("no reviewed configuration revision is pending")
+	}
+	if len(item.Review) > 0 {
+		fmt.Fprintf(c.Writer, "Revision %s changes:\n", item.RemoteRevision)
+		for _, change := range item.Review {
+			fmt.Fprintf(c.Writer, "  %s  %s\n", change.Reason, change.Path)
+		}
+	}
+	approved, err := client.ApproveConfigPullRevision(c.Context, target.id, item.RemoteRevision, item.AssignmentVersion)
+	if err != nil {
+		return friendlyCommandError(err)
+	}
+	fmt.Fprintf(c.Writer, "Approved configuration revision %s for %s (assignment version %d).\n", item.RemoteRevision, target.name, approved.Version)
+	return nil
+}
+
+func configTeamDefaultSet(c *command.Context) error {
+	client, err := backendClient(c)
+	if err != nil {
+		return err
+	}
+	repositories, err := client.ListConfigRepositories(c.Context)
+	if err != nil {
+		return friendlyCommandError(err)
+	}
+	repository, err := resolveConfigRepository(repositories, c.Args().Get(1))
+	if err != nil {
+		return err
+	}
+	version := int64(0)
+	if current, getErr := client.ConfigTeamDefault(c.Context, c.Args().First()); getErr == nil {
+		version = current.Version
+	} else if !api.IsNotFound(getErr) {
+		return friendlyCommandError(getErr)
+	}
+	item, err := client.SetConfigTeamDefault(c.Context, c.Args().First(), repository.ID, version)
+	if err != nil {
+		return friendlyCommandError(err)
+	}
+	fmt.Fprintf(c.Writer, "Team %s default pull repository is %s (version %d).\n", item.TeamID, item.DisplayName, item.Version)
+	return nil
+}
+
+func configTeamDefaultAdopt(c *command.Context) error {
+	client, err := backendClient(c)
+	if err != nil {
+		return err
+	}
+	item, err := client.ConfigTeamDefault(c.Context, c.Args().First())
+	if err != nil {
+		return friendlyCommandError(err)
+	}
+	adoption, err := client.AdoptConfigTeamDefault(c.Context, item.TeamID, item.Version)
+	if err != nil {
+		return friendlyCommandError(err)
+	}
+	fmt.Fprintf(c.Writer, "Adopted %s from team %s at version %d; personal machine assignments still take precedence.\n", adoption.DisplayName, adoption.TeamID, adoption.AdoptedVersion)
+	return nil
+}
+
+func configTeamDefaultUnadopt(c *command.Context) error {
+	client, err := backendClient(c)
+	if err != nil {
+		return err
+	}
+	if err := client.UnadoptConfigTeamDefault(c.Context); err != nil {
+		return friendlyCommandError(err)
+	}
+	fmt.Fprintln(c.Writer, "Stopped inheriting the team configuration default; personal assignments were unchanged.")
 	return nil
 }
 
@@ -9403,7 +9759,7 @@ func selectConfigEnvironments(items []api.ConfigSyncEnvironmentState, requested 
 	}
 	matches := make([]api.ConfigSyncEnvironmentState, 0, 1)
 	for _, item := range items {
-		if item.EnvironmentID == requested || strings.EqualFold(item.DisplayName, requested) {
+		if item.EnvironmentID == requested || item.MachineID == requested || strings.EqualFold(item.DisplayName, requested) {
 			matches = append(matches, item)
 		}
 	}

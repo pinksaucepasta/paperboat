@@ -22,53 +22,53 @@ func TestSystemServiceScopeUsesCurrentLinuxUnits(t *testing.T) {
 			name:     "host current units",
 			hostMode: true,
 			active: map[string]bool{
-				"paperboat-hostd.service":              true,
-				"paperboat-updated.service":            true,
-				"paperboat-runtime-privileged.service": true,
+				"paperboat-hostd-u1001.service":              true,
+				"paperboat-updated-u1001.service":            true,
+				"paperboat-runtime-privileged-u1001.service": true,
 			},
 			wantCalls: []string{
-				"/usr/bin/systemctl is-active paperboat-hostd.service",
-				"/usr/bin/systemctl is-active paperboat-updated.service",
-				"/usr/bin/systemctl is-active paperboat-runtime-privileged.service",
+				"/usr/bin/systemctl is-active paperboat-hostd-u1001.service",
+				"/usr/bin/systemctl is-active paperboat-updated-u1001.service",
+				"/usr/bin/systemctl is-active paperboat-runtime-privileged-u1001.service",
 			},
 		},
 		{
 			name:   "client current units",
-			active: map[string]bool{"paperboat-hostd.service": true, "paperboat-updated.service": true},
+			active: map[string]bool{"paperboat-hostd-u1001.service": true, "paperboat-updated-u1001.service": true},
 			wantCalls: []string{
-				"/usr/bin/systemctl is-active paperboat-hostd.service",
-				"/usr/bin/systemctl is-active paperboat-updated.service",
+				"/usr/bin/systemctl is-active paperboat-hostd-u1001.service",
+				"/usr/bin/systemctl is-active paperboat-updated-u1001.service",
 			},
 		},
 		{
 			name:      "missing hostd",
 			hostMode:  true,
-			active:    map[string]bool{"paperboat-runtime-privileged.service": true},
+			active:    map[string]bool{"paperboat-runtime-privileged-u1001.service": true},
 			wantErr:   true,
-			wantCalls: []string{"/usr/bin/systemctl is-active paperboat-hostd.service"},
+			wantCalls: []string{"/usr/bin/systemctl is-active paperboat-hostd-u1001.service"},
 		},
 		{
 			name:     "missing updater",
 			hostMode: true,
 			active: map[string]bool{
-				"paperboat-hostd.service":              true,
-				"paperboat-runtime-privileged.service": true,
+				"paperboat-hostd-u1001.service":              true,
+				"paperboat-runtime-privileged-u1001.service": true,
 			},
 			wantErr: true,
 			wantCalls: []string{
-				"/usr/bin/systemctl is-active paperboat-hostd.service",
-				"/usr/bin/systemctl is-active paperboat-updated.service",
+				"/usr/bin/systemctl is-active paperboat-hostd-u1001.service",
+				"/usr/bin/systemctl is-active paperboat-updated-u1001.service",
 			},
 		},
 		{
 			name:     "degraded privileged service",
 			hostMode: true,
-			active:   map[string]bool{"paperboat-hostd.service": true, "paperboat-updated.service": true},
+			active:   map[string]bool{"paperboat-hostd-u1001.service": true, "paperboat-updated-u1001.service": true},
 			wantErr:  true,
 			wantCalls: []string{
-				"/usr/bin/systemctl is-active paperboat-hostd.service",
-				"/usr/bin/systemctl is-active paperboat-updated.service",
-				"/usr/bin/systemctl is-active paperboat-runtime-privileged.service",
+				"/usr/bin/systemctl is-active paperboat-hostd-u1001.service",
+				"/usr/bin/systemctl is-active paperboat-updated-u1001.service",
+				"/usr/bin/systemctl is-active paperboat-runtime-privileged-u1001.service",
 			},
 		},
 	}
@@ -84,7 +84,7 @@ func TestSystemServiceScopeUsesCurrentLinuxUnits(t *testing.T) {
 				}
 				return []byte("active\n"), nil
 			}
-			scope, err := systemServiceScopeWithRunner(context.Background(), "linux", test.hostMode, run)
+			scope, err := systemServiceScopeWithRunner(context.Background(), "linux", 1001, test.hostMode, run)
 			if (err != nil) != test.wantErr {
 				t.Fatalf("error=%v, wantErr=%t", err, test.wantErr)
 			}
@@ -109,47 +109,47 @@ func TestSystemServiceScopeUsesCurrentDarwinLaunchdJobs(t *testing.T) {
 		{
 			name: "client current jobs",
 			active: map[string]bool{
-				"system/com.pinksaucepasta.paperboat.hostd":   true,
-				"system/com.pinksaucepasta.paperboat.updated": true,
+				"system/com.pinksaucepasta.paperboat.hostd.u1001":   true,
+				"system/com.pinksaucepasta.paperboat.updated.u1001": true,
 			},
 			wantCalls: []string{
-				"/bin/launchctl print system/com.pinksaucepasta.paperboat.hostd",
-				"/bin/launchctl print system/com.pinksaucepasta.paperboat.updated",
+				"/bin/launchctl print system/com.pinksaucepasta.paperboat.hostd.u1001",
+				"/bin/launchctl print system/com.pinksaucepasta.paperboat.updated.u1001",
 			},
 		},
 		{
 			name:     "host current jobs",
 			hostMode: true,
 			active: map[string]bool{
-				"system/com.pinksaucepasta.paperboat.hostd":   true,
-				"system/com.pinksaucepasta.paperboat.updated": true,
+				"system/com.pinksaucepasta.paperboat.hostd.u1001":   true,
+				"system/com.pinksaucepasta.paperboat.updated.u1001": true,
 			},
 			wantCalls: []string{
-				"/bin/launchctl print system/com.pinksaucepasta.paperboat.hostd",
-				"/bin/launchctl print system/com.pinksaucepasta.paperboat.updated",
+				"/bin/launchctl print system/com.pinksaucepasta.paperboat.hostd.u1001",
+				"/bin/launchctl print system/com.pinksaucepasta.paperboat.updated.u1001",
 			},
 		},
 		{
 			name: "client missing updater",
 			active: map[string]bool{
-				"system/com.pinksaucepasta.paperboat.hostd": true,
+				"system/com.pinksaucepasta.paperboat.hostd.u1001": true,
 			},
 			wantErr: true,
 			wantCalls: []string{
-				"/bin/launchctl print system/com.pinksaucepasta.paperboat.hostd",
-				"/bin/launchctl print system/com.pinksaucepasta.paperboat.updated",
+				"/bin/launchctl print system/com.pinksaucepasta.paperboat.hostd.u1001",
+				"/bin/launchctl print system/com.pinksaucepasta.paperboat.updated.u1001",
 			},
 		},
 		{
 			name:     "host missing updater",
 			hostMode: true,
 			active: map[string]bool{
-				"system/com.pinksaucepasta.paperboat.hostd": true,
+				"system/com.pinksaucepasta.paperboat.hostd.u1001": true,
 			},
 			wantErr: true,
 			wantCalls: []string{
-				"/bin/launchctl print system/com.pinksaucepasta.paperboat.hostd",
-				"/bin/launchctl print system/com.pinksaucepasta.paperboat.updated",
+				"/bin/launchctl print system/com.pinksaucepasta.paperboat.hostd.u1001",
+				"/bin/launchctl print system/com.pinksaucepasta.paperboat.updated.u1001",
 			},
 		},
 	}
@@ -165,7 +165,7 @@ func TestSystemServiceScopeUsesCurrentDarwinLaunchdJobs(t *testing.T) {
 				}
 				return []byte("state = running\n"), nil
 			}
-			scope, err := systemServiceScopeWithRunner(context.Background(), "darwin", test.hostMode, run)
+			scope, err := systemServiceScopeWithRunner(context.Background(), "darwin", 1001, test.hostMode, run)
 			if (err != nil) != test.wantErr {
 				t.Fatalf("error=%v, wantErr=%t", err, test.wantErr)
 			}
@@ -186,10 +186,10 @@ func TestSystemServiceScopeRejectsLegacyOnlyAndMissingPlatformServices(t *testin
 		}
 		return nil, errors.New("unit missing")
 	}
-	if _, err := systemServiceScopeWithRunner(context.Background(), "linux", true, legacyOnly); err == nil {
+	if _, err := systemServiceScopeWithRunner(context.Background(), "linux", 1001, true, legacyOnly); err == nil {
 		t.Fatal("legacy runtime-host service satisfied host readiness")
 	}
-	if _, err := systemServiceScopeWithRunner(context.Background(), "linux", true, func(context.Context, string, ...string) ([]byte, error) {
+	if _, err := systemServiceScopeWithRunner(context.Background(), "linux", 1001, true, func(context.Context, string, ...string) ([]byte, error) {
 		return nil, errors.New("unit missing")
 	}); err == nil {
 		t.Fatal("missing current unit satisfied host readiness")

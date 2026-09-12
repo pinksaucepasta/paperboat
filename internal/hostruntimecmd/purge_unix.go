@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 )
@@ -27,7 +28,7 @@ func runPurgeCommand(ctx context.Context, args []string, _ io.Reader, _, _ io.Wr
 	if err != nil {
 		return err
 	}
-	command := exec.CommandContext(ctx, "/usr/bin/sudo", "--", executable, "__runtime-service", "purge")
+	command := exec.CommandContext(ctx, "/usr/bin/sudo", "--", "/usr/bin/env", "PAPERBOAT_INVOKING_UID="+strconv.Itoa(os.Getuid()), executable, "__runtime-service", "purge")
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
 	if err := command.Run(); err != nil {
@@ -40,7 +41,7 @@ func purgeSystemInstallation(ctx context.Context) error {
 	if os.Geteuid() != 0 {
 		return errors.New("complete uninstall requires administrator approval")
 	}
-	plan, err := newUnixPurgePlan(runtime.GOOS)
+	plan, err := newUnixPurgePlan(runtime.GOOS, invokingServiceUID())
 	if err != nil {
 		return err
 	}
@@ -63,35 +64,33 @@ type unixPurgePlan struct {
 	payloadPaths       []string
 }
 
-func newUnixPurgePlan(platform string) (unixPurgePlan, error) {
+func newUnixPurgePlan(platform string, uid int) (unixPurgePlan, error) {
+	if uid < 0 {
+		return unixPurgePlan{}, errors.New("invalid enrolled user")
+	}
+	instance := "u" + strconv.Itoa(uid)
 	switch platform {
 	case "linux":
 		units := []string{
-			"paperboat-runtime-host.service",
-			"paperboat-runtime-privileged.service",
-			"paperboat-hostd.service",
-			"paperboat-updated.service",
-			"paperboat-helper.service",
-			"paperboat-host-service.service",
-			"paperboat-console.service",
+			"paperboat-runtime-privileged-" + instance + ".service",
+			"paperboat-hostd-" + instance + ".service",
+			"paperboat-updated-" + instance + ".service",
 		}
 		return unixPurgePlan{
 			platform:           platform,
 			systemdUnits:       units,
 			systemdDefinitions: appendSystemdDefinitions(units),
 			payloadPaths: []string{
-				"/usr/local/libexec/paperboat",
-				"/var/lib/paperboat-installer",
-				"/var/lib/paperboat",
-				"/var/lib/paperboat-updated",
-				"/var/run/paperboat",
-				"/var/run/paperboat-hostd",
-				"/var/run/paperboat-updated",
-				"/usr/local/bin/pb",
+				filepath.Join("/usr/local/libexec/paperboat/users", instance),
+				filepath.Join("/var/lib/paperboat-installer/users", instance),
+				filepath.Join("/var/lib/paperboat/users", instance),
+				"/var/lib/paperboat-updated-" + instance,
+				"/var/run/paperboat-hostd-" + instance,
+				"/var/run/paperboat-updated-" + instance,
 			},
 		}, nil
 	case "darwin":
-		labels := []string{service.Label, service.HostLabel, service.HostdLabel, service.UpdaterLabel}
+		labels := []string{service.HostLabel + "." + instance, service.HostdLabel + "." + instance, service.UpdaterLabel + "." + instance}
 		definitions := make([]string, 0, len(labels))
 		for _, label := range labels {
 			definitions = append(definitions, filepath.Join("/Library", "LaunchDaemons", label+".plist"))
@@ -101,12 +100,10 @@ func newUnixPurgePlan(platform string) (unixPurgePlan, error) {
 			launchdLabels:      labels,
 			launchdDefinitions: definitions,
 			payloadPaths: []string{
-				"/Library/PrivilegedHelperTools/Paperboat",
-				"/Library/Application Support/Paperboat",
-				"/var/run/paperboat",
-				"/var/run/paperboat-hostd",
-				"/var/run/paperboat-updated",
-				"/usr/local/bin/pb",
+				filepath.Join("/Library/PrivilegedHelperTools/Paperboat/users", instance),
+				filepath.Join("/Library/Application Support/Paperboat/users", instance),
+				"/var/run/paperboat-hostd-" + instance,
+				"/var/run/paperboat-updated-" + instance,
 			},
 		}, nil
 	default:

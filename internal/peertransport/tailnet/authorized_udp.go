@@ -24,18 +24,26 @@ func (a *Authority) peersLocked() (map[key.NodePublic]netip.Addr, map[netip.Addr
 		pub, _ := publicKey(p.Identity.WireGuardPublicKey)
 		address := netip.MustParseAddr(p.Identity.VirtualAddress)
 		peers[pub] = address
-		raw, _ := json.Marshal(p.Identity)
+		// Include exact scopes in the opaque admission fence. A refresh that
+		// withdraws one peer capability closes that peer's active flows while
+		// leaving unrelated peer sessions intact.
+		raw, _ := json.Marshal(p)
 		admitted[address] = string(raw)
 	}
 	return peers, admitted
 }
 func (a *Authority) replaceLocked() error {
-	allowed := make(map[string]NetworkBinding, len(a.current.Peers))
+	type admittedPeer struct {
+		binding NetworkBinding
+		scopes  []NetworkScope
+	}
+	allowed := make(map[string]admittedPeer, len(a.current.Peers))
 	for _, p := range a.current.Peers {
-		allowed[p.Identity.EndpointID] = p.Identity
+		allowed[p.Identity.EndpointID] = admittedPeer{binding: p.Identity, scopes: p.Scopes}
 	}
 	for id, lease := range a.clients {
-		if allowed[id] != lease.peer {
+		peer := allowed[id]
+		if peer.binding != lease.peer || !scopesRetained(lease.scopes, peer.scopes) {
 			_ = lease.client.Close()
 			if a.clientEngine != nil {
 				a.clientEngine.InvalidateAuthorizedPeer(lease.node)
@@ -55,6 +63,16 @@ func (a *Authority) replaceLocked() error {
 	peers, admitted := a.peersLocked()
 	a.server.mu.Lock()
 	previous := a.server.admitted
+	for address, oldFence := range previous {
+		newFence := admitted[address]
+		if newFence == "" || oldFence == newFence {
+			continue
+		}
+		var oldPeer, newPeer NetworkPeer
+		if json.Unmarshal([]byte(oldFence), &oldPeer) == nil && json.Unmarshal([]byte(newFence), &newPeer) == nil && oldPeer.Identity == newPeer.Identity && scopesRetained(oldPeer.Scopes, newPeer.Scopes) {
+			admitted[address] = oldFence
+		}
+	}
 	a.server.admitted = admitted
 	var removed []*Packet
 	for p := range a.server.flows {
@@ -173,7 +191,7 @@ func (a *Authority) Client(descriptor tailcat.Addr, peerID string) (*UDPClient, 
 			lease.client.mu.Lock()
 			closed := lease.client.closed
 			lease.client.mu.Unlock()
-			if !closed && lease.peer == p.Identity && lease.descriptor == digest {
+			if !closed && lease.peer == p.Identity && lease.descriptor == digest && scopesRetained(lease.scopes, p.Scopes) {
 				return lease.client, nil
 			}
 			_ = lease.client.Close()
@@ -224,10 +242,26 @@ func (a *Authority) Client(descriptor tailcat.Addr, peerID string) (*UDPClient, 
 		client := &UDPClient{dial: func(ctx context.Context) (tailcat.ConnPacketConn, error) {
 			return a.clientEngine.DialAuthorizedUDP(ctx, pub, disco, peerAddr)
 		}, slots: a.clientSlots, port: NetworkPort, flows: make(map[*Packet]struct{}), ctx: ctx, cancel: cancel}
-		a.clients[peerID] = authorizedClient{client: client, peer: p.Identity, descriptor: digest, node: pub}
+		a.clients[peerID] = authorizedClient{client: client, peer: p.Identity, descriptor: digest, scopes: append([]NetworkScope(nil), p.Scopes...), node: pub}
 		return client, nil
 	}
 	return nil, ErrAdmission
+}
+
+func scopesRetained(old, current []NetworkScope) bool {
+	for _, prior := range old {
+		found := false
+		for _, next := range current {
+			if prior == next {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 // InvalidateClient closes the exact cached client after its transport has

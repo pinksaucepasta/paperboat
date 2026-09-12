@@ -55,6 +55,10 @@ func (a *CredentialAuthorizer) Authorize(ctx context.Context, frame protocol.Fra
 	if frame.Capability == "file-transfer.v1" && claims.SourceMachineID == "" {
 		return Authorization{}, ErrCredentialPolicy
 	}
+	role := terminalRole(claims)
+	if claims.CredentialClass == "terminal_operation" && (role == "" || claims.SessionID == "" || claims.CLIClientSessionID == "" || role != TerminalRoleOwner && (claims.AccountID == "" || claims.ExpectedGeneration < 1)) {
+		return Authorization{}, ErrCredentialPolicy
+	}
 	var revoked *atomic.Bool
 	if a.Revocations != nil {
 		a.mu.Lock()
@@ -77,23 +81,50 @@ func (a *CredentialAuthorizer) Authorize(ctx context.Context, frame protocol.Fra
 		return Authorization{}, err
 	}
 	resourceID := claims.AssignmentID
+	accountID := claims.AccountID
+	if accountID == "" && role == TerminalRoleOwner {
+		accountID = claims.UserID
+	}
 	if (claims.CredentialClass == "codex_manage" || claims.CredentialClass == "codex_connect") && resourceID == "" {
 		resourceID = claims.SessionID
 	}
 	return Authorization{
-		JournalBinding:  binding,
-		EnvironmentID:   claims.EnvironmentID,
-		MachineID:       claims.MachineID,
-		SourceMachineID: claims.SourceMachineID,
-		UserID:          claims.UserID,
-		ClientID:        claims.CLIClientSessionID,
-		SessionID:       claims.SessionID,
-		ResourceID:      resourceID,
-		ExpiresAt:       time.Unix(claims.ExpiresAt, 0).UTC(),
-		Revoked:         revoked,
-		RevokedSignal:   a.revokedSignal,
-		Value:           claims,
+		JournalBinding:     binding,
+		EnvironmentID:      claims.EnvironmentID,
+		MachineID:          claims.MachineID,
+		SourceMachineID:    claims.SourceMachineID,
+		UserID:             claims.UserID,
+		AccountID:          accountID,
+		ClientID:           claims.CLIClientSessionID,
+		SessionID:          claims.SessionID,
+		TerminalRole:       role,
+		TerminalGeneration: uint64(claims.ExpectedGeneration),
+		ResourceID:         resourceID,
+		OperationID:        claims.OperationID,
+		RequestID:          claims.RequestID,
+		RequestHash:        claims.RequestHash,
+		IdempotencyKey:     claims.IdempotencyKey,
+		ExpiresAt:          time.Unix(claims.ExpiresAt, 0).UTC(),
+		Revoked:            revoked,
+		RevokedSignal:      a.revokedSignal,
+		Value:              claims,
 	}, nil
+}
+
+func terminalRole(claims auth.Claims) TerminalRole {
+	if claims.CredentialClass != "terminal_operation" || len(claims.Scope) != 1 {
+		return ""
+	}
+	switch claims.Scope[0] {
+	case "terminal:operate":
+		return TerminalRoleOwner
+	case "terminal:view":
+		return TerminalRoleViewer
+	case "terminal:control":
+		return TerminalRoleInteractive
+	default:
+		return ""
+	}
 }
 
 func (a *CredentialAuthorizer) CloseAuthorization() {

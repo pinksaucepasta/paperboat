@@ -252,6 +252,9 @@ func helperCheck(ctx context.Context, message helperMessageConnection) error {
 // an already-running one, so the common fresh-session startup needs two round
 // trips (create, attach) instead of three (snapshot, create, attach).
 func (c *helperTerminalConn) initialize(ctx context.Context) error {
+	if c.target.Shared() {
+		return c.initializeShared(ctx)
+	}
 	if c.target.SessionID == "" {
 		return errors.New("canonical terminal descriptor is missing session ID")
 	}
@@ -332,6 +335,10 @@ func (c *helperTerminalConn) initialize(ctx context.Context) error {
 		}
 		frame, err = attach(remote.Details.LatestSequence, true)
 	}
+	return c.finishAttachment(frame, existingSession, snapshotLatest, fromSequence)
+}
+
+func (c *helperTerminalConn) finishAttachment(frame helperFrame, existingSession bool, snapshotLatest, fromSequence uint64) error {
 	var response struct {
 		Result struct {
 			StreamID      uint32 `json:"stream_id"`
@@ -964,6 +971,9 @@ func (c *helperTerminalConn) sendAck(sequence uint64) error {
 }
 
 func (c *helperTerminalConn) Write(p []byte) (int, error) {
+	if c.target.ViewOnly() {
+		return 0, ErrTerminalViewOnly
+	}
 	if len(p) == 0 {
 		return 0, nil
 	}
@@ -998,6 +1008,9 @@ func (c *helperTerminalConn) Write(p []byte) (int, error) {
 }
 
 func (c *helperTerminalConn) Resize(rows, cols uint16) error {
+	if c.target.ViewOnly() {
+		return ErrTerminalViewOnly
+	}
 	if rows == 0 || cols == 0 {
 		return nil
 	}

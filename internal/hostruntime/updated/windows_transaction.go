@@ -421,16 +421,22 @@ func validWindowsActivationJournal(j windowsActivationJournal) bool {
 		}
 	}
 	for _, target := range []windowsServiceTarget{j.OldHostd, j.NewHostd} {
-		if target.Executable == "" || len(target.Arguments) != 2 || target.Arguments[0] != "daemon" || target.Arguments[1] != "__runtime-hostd" {
+		if target.Executable == "" || len(target.Arguments) != 4 || target.Arguments[0] != "daemon" || target.Arguments[1] != "__runtime-hostd" || target.Arguments[2] != "--instance" || len(target.Arguments[3]) != 25 || target.Arguments[3][0] != 'u' || !lowerHex(target.Arguments[3][1:]) {
 			return false
 		}
 	}
 	for _, target := range []windowsServiceTarget{j.OldUpdater, j.NewUpdater} {
-		if target.Executable == "" || len(target.Arguments) != 2 || target.Arguments[0] != "daemon" || target.Arguments[1] != "__runtime-updated" {
+		if target.Executable == "" || len(target.Arguments) != 4 || target.Arguments[0] != "daemon" || target.Arguments[1] != "__runtime-updated" || target.Arguments[2] != "--instance" || target.Arguments[3] != j.OldHostd.Arguments[3] {
 			return false
 		}
 	}
+	if j.NewHostd.Arguments[3] != j.OldHostd.Arguments[3] {
+		return false
+	}
 	if (j.OldSSH.Executable == "") != (j.NewSSH.Executable == "") || j.OldSSH.Executable != "" && (!validWindowsSSHArguments(j.OldSSH.Arguments) || !validWindowsSSHArguments(j.NewSSH.Arguments)) {
+		return false
+	}
+	if j.OldSSH.Executable != "" && (j.OldSSH.Arguments[3] != j.OldHostd.Arguments[3] || j.NewSSH.Arguments[3] != j.OldHostd.Arguments[3]) {
 		return false
 	}
 	// The stable layout.Binary path is the sole CLI/runtime entry point. These
@@ -444,7 +450,13 @@ func invalidWindowsAPIRange(minimum, maximum uint16) bool {
 }
 
 func validWindowsSSHArguments(arguments []string) bool {
-	return len(arguments) == 6 && arguments[0] == "daemon" && arguments[1] == "__windows-sshd-service" && arguments[2] == "--sshd" && strings.EqualFold(arguments[3], `C:\Program Files\OpenSSH\sshd.exe`) && arguments[4] == "--config" && strings.EqualFold(arguments[5], `C:\ProgramData\Paperboat\ssh\sshd_config`)
+	return len(arguments) == 4 && arguments[0] == "daemon" && arguments[1] == "__windows-sshd-service" && arguments[2] == "--instance" && len(arguments[3]) == 25 && arguments[3][0] == 'u' && lowerHex(arguments[3][1:])
+}
+
+func isWindowsSSHInstanceService(name string) bool {
+	const prefix = "PaperboatSshd-"
+	instance, ok := strings.CutPrefix(name, prefix)
+	return ok && len(instance) == 25 && instance[0] == 'u' && lowerHex(instance[1:])
 }
 
 func boundedWindowsActivationFailure(cause error) string {
@@ -486,23 +498,23 @@ func lowerHex(value string) bool {
 	return true
 }
 
-func windowsActivationServiceNames(setupMode string) []string {
+func windowsActivationServiceNames(setupMode, instance string) []string {
 	if setupMode == "host" {
-		return []string{"PaperboatSshd", "PaperboatHostd", "PaperboatUpdated"}
+		return []string{"PaperboatSshd-" + instance, "PaperboatHostd-" + instance, "PaperboatUpdated-" + instance}
 	}
-	return []string{"PaperboatHostd", "PaperboatUpdated"}
+	return []string{"PaperboatHostd-" + instance, "PaperboatUpdated-" + instance}
 }
 
-func windowsActivationServiceStartNames(setupMode string, hostd, updater, ssh bool) []string {
+func windowsActivationServiceStartNames(setupMode, instance string, hostd, updater, ssh bool) []string {
 	names := make([]string, 0, 3)
 	if setupMode == "host" && ssh {
-		names = append(names, "PaperboatSshd")
+		names = append(names, "PaperboatSshd-"+instance)
 	}
 	if hostd {
-		names = append(names, "PaperboatHostd")
+		names = append(names, "PaperboatHostd-"+instance)
 	}
 	if updater {
-		names = append(names, "PaperboatUpdated")
+		names = append(names, "PaperboatUpdated-"+instance)
 	}
 	return names
 }

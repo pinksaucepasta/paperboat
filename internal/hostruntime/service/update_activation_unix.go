@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -30,10 +31,18 @@ type UnixUpdateActivator struct {
 
 func (a UnixUpdateActivator) definition() string {
 	if a.Platform == "darwin" {
-		return "/Library/LaunchDaemons/" + UnixUpdateActivatorLabel + ".plist"
+		return "/Library/LaunchDaemons/" + a.activatorLabel() + ".plist"
 	}
-	return "/etc/systemd/system/" + UnixUpdateActivatorUnit
+	return "/etc/systemd/system/" + a.activatorUnit()
 }
+func (a UnixUpdateActivator) instance() string { return "u" + strconv.Itoa(a.UID) }
+func (a UnixUpdateActivator) activatorUnit() string {
+	return strings.TrimSuffix(UnixUpdateActivatorUnit, ".service") + "-" + a.instance() + ".service"
+}
+func (a UnixUpdateActivator) activatorLabel() string {
+	return UnixUpdateActivatorLabel + "." + a.instance()
+}
+
 func (a UnixUpdateActivator) Install(ctx context.Context, binary string, environment map[string]string) error {
 	if a.Runner == nil || a.Platform != runtime.GOOS || a.UID < 0 || os.Geteuid() != 0 {
 		return ErrInvalidDefinition
@@ -44,7 +53,7 @@ func (a UnixUpdateActivator) Install(ctx context.Context, binary string, environ
 	if environment["PAPERBOAT_UPDATE_STATE_ROOT"] == "" || binary != filepath.Join(environment["PAPERBOAT_UPDATE_STATE_ROOT"], "activation", "pb") {
 		return ErrInvalidDefinition
 	}
-	data, err := unixUpdateActivatorDefinition(a.Platform, binary, environment)
+	data, err := unixUpdateActivatorDefinition(a.Platform, a.UID, binary, environment)
 	if err != nil {
 		return err
 	}
@@ -71,15 +80,15 @@ func (a UnixUpdateActivator) Install(ctx context.Context, binary string, environ
 		if err = a.Runner.Run(ctx, "systemctl", "daemon-reload"); err != nil {
 			return err
 		}
-		if err = a.Runner.Run(ctx, "systemctl", "enable", UnixUpdateActivatorUnit); err != nil {
+		if err = a.Runner.Run(ctx, "systemctl", "enable", a.activatorUnit()); err != nil {
 			return err
 		}
-		return a.Runner.Run(ctx, "systemctl", "start", "--no-block", UnixUpdateActivatorUnit)
+		return a.Runner.Run(ctx, "systemctl", "start", "--no-block", a.activatorUnit())
 	}
-	if err = a.Runner.Run(ctx, "launchctl", "enable", "system/"+UnixUpdateActivatorLabel); err != nil {
+	if err = a.Runner.Run(ctx, "launchctl", "enable", "system/"+a.activatorLabel()); err != nil {
 		return err
 	}
-	controller := LaunchdController{Runner: a.Runner, UID: a.UID, Label: UnixUpdateActivatorLabel}
+	controller := LaunchdController{Runner: a.Runner, UID: a.UID, Label: a.activatorLabel()}
 	status, err := controller.Inspect(ctx, path)
 	if err != nil {
 		return err
@@ -88,7 +97,7 @@ func (a UnixUpdateActivator) Install(ctx context.Context, binary string, environ
 		return nil
 	}
 	if status.Registered {
-		return a.Runner.Run(ctx, "launchctl", "kickstart", "system/"+UnixUpdateActivatorLabel)
+		return a.Runner.Run(ctx, "launchctl", "kickstart", "system/"+a.activatorLabel())
 	}
 	return a.Runner.Run(ctx, "launchctl", "bootstrap", "system", path)
 }
@@ -112,12 +121,12 @@ func (a UnixUpdateActivator) Retire(ctx context.Context) error {
 		return ErrInvalidDefinition
 	}
 	if a.Platform == "linux" {
-		if err := a.Runner.Run(ctx, "systemctl", "disable", UnixUpdateActivatorUnit); err != nil {
+		if err := a.Runner.Run(ctx, "systemctl", "disable", a.activatorUnit()); err != nil {
 			return err
 		}
 	}
 	if a.Platform == "darwin" {
-		if err := a.Runner.Run(ctx, "launchctl", "disable", "system/"+UnixUpdateActivatorLabel); err != nil {
+		if err := a.Runner.Run(ctx, "launchctl", "disable", "system/"+a.activatorLabel()); err != nil {
 			return err
 		}
 	}
@@ -141,9 +150,9 @@ func (a UnixUpdateActivator) RestartUpdater(ctx context.Context) error {
 		return ErrInvalidDefinition
 	}
 	if a.Platform == "linux" {
-		return a.Runner.Run(ctx, "systemctl", "restart", "paperboat-updated.service")
+		return a.Runner.Run(ctx, "systemctl", "restart", "paperboat-updated-"+a.instance()+".service")
 	}
-	return a.Runner.Run(ctx, "launchctl", "kickstart", "-k", "system/"+UpdaterLabel)
+	return a.Runner.Run(ctx, "launchctl", "kickstart", "-k", "system/"+UpdaterLabel+"."+a.instance())
 }
 
 // RestartHostd actuates the canonical runtime after verified slot rotation.
@@ -153,15 +162,15 @@ func (a UnixUpdateActivator) RestartHostd(ctx context.Context) error {
 		return ErrInvalidDefinition
 	}
 	if a.Platform == "linux" {
-		return a.Runner.Run(ctx, "systemctl", "restart", "paperboat-hostd.service")
+		return a.Runner.Run(ctx, "systemctl", "restart", "paperboat-hostd-"+a.instance()+".service")
 	}
 	if a.Platform == "darwin" {
-		return a.Runner.Run(ctx, "launchctl", "kickstart", "-k", "system/"+HostdLabel)
+		return a.Runner.Run(ctx, "launchctl", "kickstart", "-k", "system/"+HostdLabel+"."+a.instance())
 	}
 	return ErrUnsupportedPlatform
 }
 
-func unixUpdateActivatorDefinition(platform, binary string, environment map[string]string) ([]byte, error) {
+func unixUpdateActivatorDefinition(platform string, uid int, binary string, environment map[string]string) ([]byte, error) {
 	if !filepath.IsAbs(binary) || filepath.Clean(binary) != binary || strings.ContainsAny(binary, "\x00\r\n") {
 		return nil, ErrInvalidDefinition
 	}
@@ -178,13 +187,13 @@ func unixUpdateActivatorDefinition(platform, binary string, environment map[stri
 	}
 	arguments := []string{binary, "daemon", "__runtime-updated", "--activation-helper"}
 	if platform == "darwin" {
-		return plist.Marshal(map[string]any{"Label": UnixUpdateActivatorLabel, "ProgramArguments": arguments, "EnvironmentVariables": values, "UserName": "root", "RunAtLoad": true, "KeepAlive": map[string]bool{"SuccessfulExit": false}, "ThrottleInterval": 5}, plist.XMLFormat)
+		return plist.Marshal(map[string]any{"Label": UnixUpdateActivatorLabel + ".u" + strconv.Itoa(uid), "ProgramArguments": arguments, "EnvironmentVariables": values, "UserName": "root", "RunAtLoad": true, "KeepAlive": map[string]bool{"SuccessfulExit": false}, "ThrottleInterval": 5}, plist.XMLFormat)
 	}
 	if platform != "linux" {
 		return nil, ErrUnsupportedPlatform
 	}
 	var body strings.Builder
-	body.WriteString("[Unit]\nDescription=Paperboat verified update activation\nAfter=paperboat-hostd.service\n[Service]\nType=simple\nExecStart=")
+	body.WriteString("[Unit]\nDescription=Paperboat verified update activation\nAfter=paperboat-hostd-u" + strconv.Itoa(uid) + ".service\n[Service]\nType=simple\nExecStart=")
 	for i, value := range arguments {
 		if i > 0 {
 			body.WriteByte(' ')
@@ -211,7 +220,7 @@ func (a UnixUpdateActivator) RemoveForUninstall(ctx context.Context) error {
 		return err
 	}
 	if a.Platform == "linux" {
-		return (SystemdController{Runner: a.Runner, Unit: UnixUpdateActivatorUnit}).Stop(ctx, a.definition())
+		return (SystemdController{Runner: a.Runner, Unit: a.activatorUnit()}).Stop(ctx, a.definition())
 	}
-	return (LaunchdController{Runner: a.Runner, UID: a.UID, Label: UnixUpdateActivatorLabel}).Stop(ctx, a.definition())
+	return (LaunchdController{Runner: a.Runner, UID: a.UID, Label: a.activatorLabel()}).Stop(ctx, a.definition())
 }

@@ -23,17 +23,17 @@ func (r *recordingRunner) Output(context.Context, string, ...string) (string, er
 
 func TestFixedSupervisorActivatorReloadsHostdBeforeUpdater(t *testing.T) {
 	runner := &recordingRunner{}
-	if err := (FixedSupervisorActivator{Platform: runtime.GOOS, Runner: runner}).Activate(context.Background()); err != nil {
+	if err := (FixedSupervisorActivator{Platform: runtime.GOOS, UID: 501, Runner: runner}).Activate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
-		"launchctl kickstart -k system/com.pinksaucepasta.paperboat.hostd",
-		"launchctl kickstart -k system/com.pinksaucepasta.paperboat.updated",
+		"launchctl kickstart -k system/com.pinksaucepasta.paperboat.hostd.u501",
+		"launchctl kickstart -k system/com.pinksaucepasta.paperboat.updated.u501",
 	}
 	if runtime.GOOS == "linux" {
 		want = []string{
-			"systemctl restart paperboat-hostd.service",
-			"systemctl restart paperboat-updated.service",
+			"systemctl restart paperboat-hostd-u501.service",
+			"systemctl restart paperboat-updated-u501.service",
 		}
 	}
 	if !reflect.DeepEqual(runner.calls, want) {

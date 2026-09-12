@@ -43,6 +43,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hosted"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/inspectorapi"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/inspectorauth"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/observability"
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/peerrelay"
@@ -50,6 +53,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
+	"github.com/pinksaucepasta/paperboat/internal/inspector"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/networkcheck"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/relayselection"
@@ -537,7 +541,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		if observationTokensErr != nil {
 			return nil, observationTokensErr
 		}
-		sender := &runtimeObservationSender{endpoint: runtimeEndpoint, tokens: observationTokens, proofs: enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}, operationID: operationID, environmentID: identity.EnvironmentID, machineID: machineID, reporterVersion: version, client: &http.Client{Transport: transport, Timeout: 10 * time.Second, CheckRedirect: rejectRuntimePolicyRedirect}, availability: availabilityService, receiptPath: filepath.Join(runtimeConfig.StateRoot, "runtime", "server-heartbeat.json"), installationGeneration: uint64(machineRegistration.InstallationGeneration), workerGeneration: bootState.Generation, osBootID: bootState.OSBootID, lazyBootID: lazyBootID, lazyStartedAt: lazyStartedAt, serviceScope: scope, connector: connectorService, transferPolicy: transferPolicy, capabilitiesController: capabilityController, capabilities: capabilities, relayLatency: regionalCache, relaySuccess: relayRegion}
+		sender := &runtimeObservationSender{endpoint: runtimeEndpoint, tokens: observationTokens, proofs: enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}, operationID: operationID, environmentID: identity.EnvironmentID, machineID: machineID, reporterVersion: version, client: &http.Client{Transport: transport, Timeout: 10 * time.Second, CheckRedirect: rejectRuntimePolicyRedirect}, availability: availabilityService, receiptPath: filepath.Join(runtimeConfig.StateRoot, "runtime", "server-heartbeat.json"), installationGeneration: uint64(machineRegistration.InstallationGeneration), workerGeneration: bootState.Generation, osBootID: bootState.OSBootID, setupMode: machineRegistration.SetupMode, lazyBootID: lazyBootID, lazyStartedAt: lazyStartedAt, serviceScope: scope, connector: connectorService, transferPolicy: transferPolicy, capabilitiesController: capabilityController, capabilities: capabilities, relayLatency: regionalCache, relaySuccess: relayRegion}
 		if runtimeProjection != nil {
 			sender.projection = runtimeProjection
 		}
@@ -593,6 +597,10 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, err
 	}
+	inspectorService, inspectorStore, inspectorRegistry, err := newInspectorService(controlURL.String(), runtimeConfig.StateRoot, transport)
+	if err != nil {
+		return nil, err
+	}
 	if err := writeWorkerLocal(runtimeConfig.StateRoot, listen); err != nil {
 		return nil, err
 	}
@@ -603,6 +611,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	previewAssembly, err := newProductionPreviewAssembly(productionPreviewAssemblyConfig{
 		ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, MachineID: machineID, InstallationGeneration: machineRegistration.InstallationGeneration, BootID: lazyBootID,
 		LocalControlToken: localControlToken, Transport: transport, RunContext: ctx,
+		InspectorStore: inspectorStore, InspectorRegistry: inspectorRegistry, InspectorHTTP: inspectorService,
 	})
 	if err != nil {
 		return nil, err
@@ -615,10 +624,10 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, err
 	}
-	dependencies := HostDependencies{Authorizer: authorizer, AuthorizationService: authorizationRefresh, Connector: connectorService, PreviewDispatcher: previewAssembly, PreviewRecovery: previewAssembly, PreviewOwnerSessions: previewAssembly.OwnerSessionLeases(), RuntimeObservationService: runtimeService, ManagedEnvironment: managedEnvironment, Metrics: metrics, LocalControlToken: localControlToken, ManagedSSH: managedSSHHost, ManagedSSHService: managedSSHService, TransferKeys: transferKeys, Capabilities: capabilityController}
+	dependencies := HostDependencies{Authorizer: authorizer, AuthorizationService: authorizationRefresh, Connector: connectorService, PreviewDispatcher: previewAssembly, PreviewRecovery: previewAssembly, PreviewOwnerSessions: previewAssembly.OwnerSessionLeases(), RuntimeObservationService: runtimeService, RecordTerminalJoin: runtimeObservation.sender.RecordTerminalJoin, ManagedEnvironment: managedEnvironment, Metrics: metrics, LocalControlToken: localControlToken, Inspector: inspectorService, ManagedSSH: managedSSHHost, ManagedSSHService: managedSSHService, TransferKeys: transferKeys, Capabilities: capabilityController}
 	nativePrivateValidators := []productionNativePrivateValidator{previewAssembly.dispatcher}
 	if tunnelProvider == nil {
-		tunnelEnrollment, enrollmentErr := newProductionTunnelEnrollmentService(controlURL.String(), runtimeConfig.StateRoot, machineID, localControlToken, transport)
+		tunnelEnrollment, enrollmentErr := newProductionTunnelEnrollmentService(controlURL.String(), runtimeConfig.StateRoot, machineID, localControlToken, transport, inspectorStore, inspectorRegistry, inspectorService)
 		if enrollmentErr != nil {
 			return nil, errors.Join(ErrProductionInvalid, enrollmentErr)
 		}
@@ -648,7 +657,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	}
 	if managedSSHIdentity != nil {
 		dependencies.NativePeerFactory = func(serve func(net.Conn) error, transferHandler http.Handler) (Service, error) {
-			return newProductionNativePeerService(productionNativePeerConfig{controlURL: controlURL.String(), issuer: issuer, stateRoot: runtimeConfig.StateRoot, machineID: machineID, generation: uint64(machineRegistration.InstallationGeneration), transport: transport, identity: managedSSHIdentity, keys: cache, authorizer: authorizer, serve: serve, transfer: transferHandler, ssh: managedSSHHost, privateCurrent: productionNativeCurrent(nativePrivateValidators...), privateDial: productionNativePrivateDial})
+			return newProductionNativePeerService(productionNativePeerConfig{controlURL: controlURL.String(), issuer: issuer, stateRoot: runtimeConfig.StateRoot, machineID: machineID, generation: uint64(machineRegistration.InstallationGeneration), transport: transport, identity: managedSSHIdentity, keys: cache, authorizer: authorizer, serve: serve, transfer: transferHandler, ssh: managedSSHHost, privateCurrent: productionNativeCurrent(nativePrivateValidators...), privateDial: productionNativePrivateDial, inspector: http.HandlerFunc(inspectorService.ServeAuthenticatedHTTP), inspectorStore: inspectorStore})
 		}
 	}
 	if runtimeConfig.Profile == runtimeconfig.Hosted {
@@ -950,6 +959,10 @@ func newProductionClientCoordinator(ctx context.Context, version string, environ
 	if err != nil {
 		return nil, err
 	}
+	clientInspectorService, clientInspectorStore, clientInspectorRegistry, err := newInspectorService(controlURL.String(), runtimeConfig.StateRoot, transport)
+	if err != nil {
+		return nil, err
+	}
 	if err := writeWorkerLocal(runtimeConfig.StateRoot, listen); err != nil {
 		return nil, err
 	}
@@ -959,11 +972,11 @@ func newProductionClientCoordinator(ctx context.Context, version string, environ
 	}
 	var nativePrivateValidators []productionNativePrivateValidator
 	nativePeerFactory := func(serve func(net.Conn) error, transferHandler http.Handler) (Service, error) {
-		return newProductionNativePeerService(productionNativePeerConfig{controlURL: controlURL.String(), issuer: issuer, stateRoot: runtimeConfig.StateRoot, machineID: registration.MachineID, generation: uint64(registration.InstallationGeneration), transport: transport, identity: runtimeIdentity, keys: cache, authorizer: authorizer, serve: serve, transfer: transferHandler, privateCurrent: productionNativeCurrent(nativePrivateValidators...), privateDial: productionNativePrivateDial})
+		return newProductionNativePeerService(productionNativePeerConfig{controlURL: controlURL.String(), issuer: issuer, stateRoot: runtimeConfig.StateRoot, machineID: registration.MachineID, generation: uint64(registration.InstallationGeneration), transport: transport, identity: runtimeIdentity, keys: cache, authorizer: authorizer, serve: serve, transfer: transferHandler, privateCurrent: productionNativeCurrent(nativePrivateValidators...), privateDial: productionNativePrivateDial, inspector: http.HandlerFunc(clientInspectorService.ServeAuthenticatedHTTP), inspectorStore: clientInspectorStore})
 	}
-	dependencies := HostDependencies{Authorizer: authorizer, AuthorizationService: authorizationRefresh, Connector: connectorService, PreviewRecovery: nil, RuntimeObservationService: serviceGroup{regionalMonitor, observation}, Metrics: metrics, LocalControlToken: localControlToken, TransferKeys: transferKeys, NativePeerFactory: nativePeerFactory, Capabilities: capabilityController}
+	dependencies := HostDependencies{Authorizer: authorizer, AuthorizationService: authorizationRefresh, Connector: connectorService, PreviewRecovery: nil, RuntimeObservationService: serviceGroup{regionalMonitor, observation}, Metrics: metrics, LocalControlToken: localControlToken, Inspector: clientInspectorService, TransferKeys: transferKeys, NativePeerFactory: nativePeerFactory, Capabilities: capabilityController}
 	if tunnelProvider == nil {
-		tunnelEnrollment, enrollmentErr := newProductionTunnelEnrollmentService(controlURL.String(), runtimeConfig.StateRoot, registration.MachineID, localControlToken, transport)
+		tunnelEnrollment, enrollmentErr := newProductionTunnelEnrollmentService(controlURL.String(), runtimeConfig.StateRoot, registration.MachineID, localControlToken, transport, clientInspectorStore, clientInspectorRegistry, clientInspectorService)
 		if enrollmentErr != nil {
 			return nil, errors.Join(ErrProductionInvalid, enrollmentErr)
 		}
@@ -1105,6 +1118,29 @@ func waitForPeerEnrollment(ctx context.Context, enrollment peerEnrollmentEnsurer
 		case <-timer.C:
 		}
 	}
+}
+
+// newInspectorService creates the daemon's one shared inspector capture
+// store, replay registry and loopback HTTP service. Captures stay in memory;
+// a restart deletes them. Every operation re-verifies the caller's grant
+// against live server authority over the host's machine identity; there is no
+// local-owner substitution.
+func newInspectorService(controlURL, stateRoot string, transport http.RoundTripper) (*inspectorapi.Service, *inspector.Store, *inspector.Registry, error) {
+	source, err := machinecontrol.NewSource(machinecontrol.Config{ControlURL: controlURL, StateRoot: stateRoot, Transport: transport})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	authorize, err := inspectorauth.Config{BaseURL: controlURL, Source: source}.AuthorizeFunc()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	store := inspector.NewStore()
+	registry := inspector.NewRegistry()
+	service, err := inspectorapi.New(inspectorapi.Config{Store: store, Registry: registry, Authorize: authorize})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return service, store, registry, nil
 }
 
 func writeLocalControlToken(stateRoot string) (string, error) {
@@ -1332,6 +1368,7 @@ type runtimeObservationSender struct {
 	installationGeneration   uint64
 	workerGeneration         uint64
 	osBootID                 string
+	setupMode                string
 	lazyBootID               string
 	lazyStartedAt            time.Time
 	serviceScope             string
@@ -1504,7 +1541,7 @@ type lazyRuntimeObservation struct {
 }
 
 func (s *runtimeObservationSender) lazyRuntimeObservation() *lazyRuntimeObservation {
-	if s.lazyBootID == "" || s.installationGeneration == 0 || s.lazyStartedAt.IsZero() {
+	if s.setupMode != "host" || s.lazyBootID == "" || s.installationGeneration == 0 || s.lazyStartedAt.IsZero() {
 		return nil
 	}
 	return &lazyRuntimeObservation{Schema: "paperboat.lazy-runtime/v1", BootID: s.lazyBootID, InstallationGeneration: s.installationGeneration, StartedAt: s.lazyStartedAt.UTC()}

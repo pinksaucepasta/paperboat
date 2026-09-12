@@ -119,6 +119,7 @@ func (c *fakeCandidate) Abort(context.Context) error { c.aborted++; return nil }
 type fakeActive struct {
 	tunnelID, connectorID, hash string
 	generation                  uint64
+	routes                      []string
 	drains, closes              int
 	closeFn                     func(context.Context) error
 }

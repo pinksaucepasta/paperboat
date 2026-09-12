@@ -25,7 +25,7 @@ func TestUpdateProbeOutputBoundIncludesCopy(t *testing.T) {
 }
 
 func TestUnixParticipantsConstructionBeforeInstallCommit(t *testing.T) {
-	layout, err := service.DefaultLayout(runtime.GOOS)
+	layout, err := service.UserLayout(runtime.GOOS, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}

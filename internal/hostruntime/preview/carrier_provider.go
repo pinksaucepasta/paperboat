@@ -9,6 +9,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
+	"github.com/pinksaucepasta/paperboat/internal/inspector"
 )
 
 var (
@@ -67,6 +68,11 @@ type AttachmentPreviewCarrierProviderConfig struct {
 	OriginDialTimeout  time.Duration
 	OriginCloseTimeout time.Duration
 	ObserveStreamError func(error)
+	// Inspector and Registry thread the daemon's shared capture store and
+	// replay bindings into ephemeral carriers. Nil disables capture/replay.
+	Inspector     *inspector.Store
+	Registry      *inspector.Registry
+	InspectorHTTP tunnelmanager.AuthenticatedInspectorHTTP
 }
 
 // AttachmentPreviewCarrierProvider owns only hubs and route registrations.
@@ -85,6 +91,9 @@ type AttachmentPreviewCarrierProvider struct {
 	dialWait       time.Duration
 	closeWait      time.Duration
 	observe        func(error)
+	inspector      *inspector.Store
+	registry       *inspector.Registry
+	inspectorHTTP  tunnelmanager.AuthenticatedInspectorHTTP
 
 	mu         sync.Mutex
 	closed     bool
@@ -138,8 +147,8 @@ func NewAttachmentPreviewCarrierProvider(config AttachmentPreviewCarrierProvider
 		browserIngress: config.BrowserIngress, sessions: config.Sessions, private: config.PrivateAccess, ctx: ctx, cancel: cancel,
 		queue: config.QueueDepth, max: config.MaxStreams, dial: config.OriginDial,
 		dialWait: config.OriginDialTimeout, closeWait: config.OriginCloseTimeout,
-		observe: config.ObserveStreamError,
-		hubs:    make(map[attachmentHubKey]*attachmentHubEntry), allEntries: make(map[*attachmentHubEntry]struct{}),
+		observe: config.ObserveStreamError, inspector: config.Inspector, registry: config.Registry, inspectorHTTP: config.InspectorHTTP,
+		hubs: make(map[attachmentHubKey]*attachmentHubEntry), allEntries: make(map[*attachmentHubEntry]struct{}),
 	}, nil
 }
 
@@ -196,6 +205,7 @@ func (p *AttachmentPreviewCarrierProvider) CarrierForAttachment(ctx context.Cont
 		DialOrigin: p.dial, MaxStreams: p.max, OriginDialTimeout: p.dialWait,
 		OriginCloseTimeout: p.closeWait,
 		ObserveStreamError: p.observe, BrowserIngress: p.browserIngress, BrowserRouteGeneration: admission.Binding.RouteGeneration,
+		Inspector: p.inspector, Registry: p.registry, InspectorHTTP: p.inspectorHTTP,
 	})
 	if err != nil {
 		_ = releaseAttachmentSession(ctx, session)

@@ -162,7 +162,7 @@ func (r *RuntimeOwnerSessionRegistry) OwnerSessionDoneForTarget(accountID, machi
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.accountID != "" && accountID != r.accountID || machineID != r.machineID {
+	if machineID != r.machineID {
 		return nil, fmt.Errorf("%w: account or machine does not match authenticated runtime", ErrOwnerSessionBinding)
 	}
 	if r.closed {
@@ -177,6 +177,9 @@ func (r *RuntimeOwnerSessionRegistry) OwnerSessionDoneForTarget(accountID, machi
 		return existing.done, nil
 	}
 	if existing := r.unbound[ownerSessionID]; existing != nil {
+		if r.accountID != "" && accountID != r.accountID {
+			return nil, fmt.Errorf("%w: foreign dispatch cannot claim a local owner session", ErrOwnerSessionBinding)
+		}
 		if existing.closed || existing.boundAccount != "" && existing.boundAccount != accountID || existing.hasTarget && existing.target != target {
 			return nil, fmt.Errorf("%w: owner session target or account differs", ErrOwnerSessionBinding)
 		}
@@ -337,11 +340,14 @@ func (r *RuntimeOwnerSessionRegistry) ReleaseOwnerSession(accountID, machineID, 
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.accountID != "" && accountID != r.accountID || machineID != r.machineID {
+	if machineID != r.machineID {
 		return fmt.Errorf("%w: account or machine does not match authenticated runtime", ErrOwnerSessionBinding)
 	}
 	session := r.sessions[runtimeOwnerSessionKey{accountID: accountID, ownerSessionID: ownerSessionID}]
 	if session == nil {
+		if r.accountID != "" && accountID != r.accountID {
+			return ErrOwnerSessionBinding
+		}
 		session = r.unbound[ownerSessionID]
 		if session != nil && session.boundAccount != "" && session.boundAccount != accountID {
 			return fmt.Errorf("%w: account does not match owner session", ErrOwnerSessionBinding)

@@ -200,25 +200,25 @@ func completionDescription(values ...string) string {
 
 func (s AuthenticatedMachineSource) ListUserMachines(ctx context.Context) ([]api.UserMachine, error) {
 	if strings.TrimSpace(s.ServerURL) == "" || s.Auth == nil {
-		return nil, ErrInvalidInventoryConfig
+		return nil, inventorySourceFailure("configuration", ErrInvalidInventoryConfig)
 	}
 	credential, err := s.Auth.Credential()
 	if err != nil {
-		return nil, err
+		return nil, inventorySourceFailure("credential", err)
 	}
 	if strings.TrimSpace(credential.AccessToken) == "" {
-		return nil, errors.New("Paperboat authentication is unavailable")
+		return nil, inventorySourceFailure("credential", api.ErrUnauthenticated)
 	}
 	client := api.New(s.ServerURL, credential, nil)
 	machines, err := client.ListUserMachines(ctx)
 	if err != nil {
-		return nil, err
+		return nil, inventorySourceFailure("machine_list", err)
 	}
 	if s.AutoApprovePeerEnrollments != nil {
 		if err := s.AutoApprovePeerEnrollments(ctx, client, machines); err != nil {
 			var unavailable *PeerApprovalSignerUnavailableError
 			if !errors.As(err, &unavailable) {
-				return nil, err
+				return nil, inventorySourceFailure("peer_approval", err)
 			}
 			if s.ReportPeerApprovalSignerUnavailable != nil {
 				s.ReportPeerApprovalSignerUnavailable(*unavailable)
@@ -227,7 +227,7 @@ func (s AuthenticatedMachineSource) ListUserMachines(ctx context.Context) ([]api
 	}
 	for index := range machines {
 		if _, err := managedssh.AliasHost(machines[index].Alias, managedssh.AliasSuffix); err != nil {
-			return nil, errors.New("paperboat-server returned an invalid machine alias")
+			return nil, inventorySourceFailure("machine_alias", errors.New("invalid machine alias"))
 		}
 		machines[index].SSHLocalReady = s.SSHLocalReady
 		machines[index].SSHLocalCode = s.SSHLocalCode
@@ -291,7 +291,7 @@ func reconcileSSHAuthorities(ctx context.Context, client *api.Client, machines [
 				return
 			}
 			if targetErr != nil {
-				recordSSHLookupError(&errMu, &firstErr, cancel, targetErr)
+				recordSSHLookupError(&errMu, &firstErr, cancel, inventorySourceFailure("ssh_target", targetErr))
 				return
 			}
 			machine.SSHUser, machine.SSHPort = target.OSUser, target.Port
@@ -301,7 +301,7 @@ func reconcileSSHAuthorities(ctx context.Context, client *api.Client, machines [
 				return
 			}
 			if keysErr != nil {
-				recordSSHLookupError(&errMu, &firstErr, cancel, keysErr)
+				recordSSHLookupError(&errMu, &firstErr, cancel, inventorySourceFailure("ssh_host_keys", keysErr))
 				return
 			}
 			machine.SSHAuthority = api.SSHAuthority{TargetGeneration: target.MachineGeneration, HostKeyGeneration: keys.MachineGeneration}

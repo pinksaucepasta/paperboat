@@ -188,7 +188,11 @@ func ephemeralTunnelCommand(use, short string) *cobra.Command {
 	status.Flags().Bool("json", false, "print the canonical preview resource as JSON")
 	deleteCommand := &cobra.Command{Use: "delete <preview>", Short: "Delete a temporary preview", Args: commandArgs(cobra.ExactArgs(1)), RunE: runPreviewStopCobra, SilenceUsage: true, SilenceErrors: true}
 	deleteCommand.Flags().Bool("json", false, "print the deleted canonical preview resource as JSON")
-	command.AddCommand(list, status, stop, deleteCommand)
+	// Inspector views and deliberate replay share the exact tunnel
+	// implementation: the alias exposes the same controls, not a second path.
+	inspect := previewInspectCommand()
+	replay := previewReplayCommand()
+	command.AddCommand(list, status, stop, deleteCommand, inspect, replay)
 	return command
 }
 

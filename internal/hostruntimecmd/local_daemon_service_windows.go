@@ -4,7 +4,6 @@ package hostruntimecmd
 
 import (
 	"context"
-	"errors"
 	"io"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
@@ -12,28 +11,21 @@ import (
 )
 
 func runLocalDaemonService(_ context.Context, args []string, _ io.Writer, _ io.Writer) error {
-	if len(args) != 0 {
-		return errors.New("local daemon service does not accept arguments")
-	}
-	install, err := windowsRuntimeInstallConfig()
+	instance, err := resolveWindowsRuntimeInstance(args)
 	if err != nil {
 		return err
 	}
-	layout, err := service.DefaultLayout("windows")
-	if err != nil {
-		return err
-	}
-	return service.RunWindowsService(localDaemonServiceConfig(install, layout.Binary))
+	return service.RunWindowsService(localDaemonServiceConfig(instance.config, instance.layout.Binary))
 }
 
 func localDaemonServiceConfig(install hostinstall.WindowsRuntimeConfig, executable string) service.ServiceEntryConfig {
 	return service.ServiceEntryConfig{
-		Name:        "PaperboatLocalDaemon",
+		Name:        windowsInstanceServiceName("PaperboatLocalDaemon", install.Instance),
 		Executable:  executable,
 		Arguments:   []string{"daemon", "--server", install.ControlURL},
 		EnrolledSID: install.OwnerSID,
 		LaunchFailure: func(err error) {
-			recordWindowsServiceLaunchFailure("PaperboatLocalDaemon", err)
+			recordWindowsServiceLaunchFailure(windowsInstanceServiceName("PaperboatLocalDaemon", install.Instance), err)
 		},
 	}
 }

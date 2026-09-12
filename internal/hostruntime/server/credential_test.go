@@ -68,6 +68,19 @@ func TestCredentialAuthorizerFailsClosedWithoutPolicy(t *testing.T) {
 	}
 }
 
+func TestCredentialAuthorizerDerivesSharedRoleAndRequiresBindings(t *testing.T) {
+	claims := auth.Claims{CredentialClass: "terminal_operation", Scope: []string{"terminal:view"}, SessionID: "ses_shared", AccountID: "acc_1", CLIClientSessionID: "cli_1", ExpectedGeneration: 3, ExpiresAt: 100}
+	authorizer := CredentialAuthorizer{Token: "signed", Resolver: resolverFunc(func(protocol.Frame) (auth.Policy, error) { return auth.Policy{}, nil }), Verifier: verifierFunc(func(context.Context, string, auth.Policy) (auth.Claims, error) { return claims, nil })}
+	got, err := authorizer.Authorize(context.Background(), protocol.Frame{Capability: "terminal.v1"})
+	if err != nil || got.TerminalRole != TerminalRoleViewer || got.SessionID != "ses_shared" || got.AccountID != "acc_1" || got.TerminalGeneration != 3 {
+		t.Fatalf("authorization=%#v err=%v", got, err)
+	}
+	claims.SessionID = ""
+	if _, err := authorizer.Authorize(context.Background(), protocol.Frame{Capability: "terminal.v1"}); !errors.Is(err, ErrCredentialPolicy) {
+		t.Fatalf("empty session err=%v", err)
+	}
+}
+
 func TestCredentialAuthorizerUsesCodexSessionAsResource(t *testing.T) {
 	claims := auth.Claims{Issuer: "https://api.test", Subject: "usr_1", JTI: "jti_1", IssuedAt: 1, ExpiresAt: 100, Scope: []string{"codex:connect"}, CredentialClass: "codex_connect", EnvironmentID: "env_1", MachineID: "machine_1", UserID: "usr_1", CLIClientSessionID: "cli_1", SessionID: "cdx_1"}
 	authorizer := CredentialAuthorizer{Token: "signed-token", Resolver: resolverFunc(func(protocol.Frame) (auth.Policy, error) { return auth.Policy{}, nil }), Verifier: verifierFunc(func(context.Context, string, auth.Policy) (auth.Claims, error) { return claims, nil })}

@@ -31,18 +31,26 @@ type SessionLauncher interface {
 }
 type CapabilityGate interface{ Enabled(string) bool }
 
+type TerminalJoin struct {
+	AccessSessionID   string `json:"access_session_id"`
+	TerminalSessionID string `json:"terminal_session_id"`
+	AttachmentID      string `json:"attachment_id"`
+}
+type TerminalJoinRecorder func(context.Context, TerminalJoin) error
+
 type DispatcherConfig struct {
-	Sessions        *session.Manager
-	ConfigApply     configapply.Handler
-	Health          HealthSource
-	SessionLauncher SessionLauncher
-	WorkspaceRoot   string
-	Random          io.Reader
-	Now             func() time.Time
-	Writers         *filetransfer.WriterRegistry
-	Exec            *execprocess.Manager
-	SSH             *managedssh.Host
-	Capabilities    CapabilityGate
+	RecordTerminalJoin TerminalJoinRecorder
+	Sessions           *session.Manager
+	ConfigApply        configapply.Handler
+	Health             HealthSource
+	SessionLauncher    SessionLauncher
+	WorkspaceRoot      string
+	Random             io.Reader
+	Now                func() time.Time
+	Writers            *filetransfer.WriterRegistry
+	Exec               *execprocess.Manager
+	SSH                *managedssh.Host
+	Capabilities       CapabilityGate
 }
 
 type Dispatcher struct {
@@ -157,7 +165,7 @@ type attachmentControl struct {
 }
 
 func (d *Dispatcher) HandleTerminalInput(_ context.Context, authorization Authorization, sessionID, attachmentID string, generation, inputSequence uint64, data []byte) (session.InputDecision, error) {
-	if authorization.ClientID == "" || sessionID == "" || attachmentID == "" || generation == 0 || (authorization.SessionID != "" && authorization.SessionID != sessionID) {
+	if authorization.ClientID == "" || sessionID == "" || attachmentID == "" || generation == 0 || (authorization.SessionID != "" && authorization.SessionID != sessionID) || authorization.TerminalRole == TerminalRoleViewer || isSharedTerminal(authorization) && !d.config.Sessions.AttachmentOwnedBy(sessionID, attachmentID, authorization.AccountID, authorization.ClientID) {
 		return session.InputDecision{InputSequence: inputSequence}, session.ErrInvalidInput
 	}
 	decision, err := d.config.Sessions.Write(sessionID, session.InputKey{ClientID: authorization.ClientID, AttachmentID: attachmentID, Generation: generation, InputSequence: inputSequence}, data)
@@ -171,14 +179,14 @@ func (d *Dispatcher) HandleTerminalInput(_ context.Context, authorization Author
 }
 
 func (d *Dispatcher) HandleTerminalACK(_ context.Context, authorization Authorization, sessionID, attachmentID string, nextSequence uint64) error {
-	if authorization.ClientID == "" || sessionID == "" || attachmentID == "" || (authorization.SessionID != "" && authorization.SessionID != sessionID) {
+	if authorization.ClientID == "" || sessionID == "" || attachmentID == "" || (authorization.SessionID != "" && authorization.SessionID != sessionID) || isSharedTerminal(authorization) && !d.config.Sessions.AttachmentOwnedBy(sessionID, attachmentID, authorization.AccountID, authorization.ClientID) {
 		return session.ErrInvalidInput
 	}
 	return d.config.Sessions.Acknowledge(sessionID, attachmentID, nextSequence)
 }
 
 func (d *Dispatcher) HandleTerminalResize(_ context.Context, authorization Authorization, sessionID, attachmentID string, columns, rows uint16) error {
-	if authorization.ClientID == "" || sessionID == "" || attachmentID == "" || columns == 0 || rows == 0 || (authorization.SessionID != "" && authorization.SessionID != sessionID) {
+	if authorization.ClientID == "" || sessionID == "" || attachmentID == "" || columns == 0 || rows == 0 || (authorization.SessionID != "" && authorization.SessionID != sessionID) || authorization.TerminalRole == TerminalRoleViewer || isSharedTerminal(authorization) && !d.config.Sessions.AttachmentOwnedBy(sessionID, attachmentID, authorization.AccountID, authorization.ClientID) {
 		return session.ErrInvalidInput
 	}
 	return d.config.Sessions.Resize(sessionID, attachmentID, pty.Dimensions{Columns: columns, Rows: rows}, d.config.Now())
@@ -212,7 +220,7 @@ func (d *Dispatcher) HandleControl(_ context.Context, authorization Authorizatio
 	if decodeStrict(frame.Payload, &control) != nil || control.SessionID == "" || control.AttachmentID == "" || authorization.ClientID == "" {
 		return failure("invalid_request")
 	}
-	if authorization.SessionID != "" && authorization.SessionID != control.SessionID {
+	if authorization.SessionID != "" && authorization.SessionID != control.SessionID || isSharedTerminal(authorization) && !d.config.Sessions.AttachmentOwnedBy(control.SessionID, control.AttachmentID, authorization.AccountID, authorization.ClientID) {
 		return failure("not_found_or_forbidden")
 	}
 	var err error
@@ -548,10 +556,20 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 	if authorization.SessionID != "" && request.SessionID != "" && authorization.SessionID != request.SessionID {
 		return failure("not_found_or_forbidden")
 	}
+	shared := isSharedTerminal(authorization)
+	if shared && (authorization.SessionID == "" || request.SessionID != "" && request.SessionID != authorization.SessionID) {
+		return failure("not_found_or_forbidden")
+	}
+	if shared && !sharedTerminalActionAllowed(authorization.TerminalRole, request) {
+		return failure("not_found_or_forbidden")
+	}
+	if shared && request.SessionID == "" {
+		request.SessionID = authorization.SessionID
+	}
 	switch request.Action {
 	case "list":
 		if authorization.SessionID != "" {
-			value, err := d.config.Sessions.Snapshot(authorization.SessionID)
+			value, err := d.config.Sessions.SnapshotAtGeneration(authorization.SessionID, authorization.TerminalGeneration)
 			if err != nil {
 				return domainResult(nil, err)
 			}
@@ -563,7 +581,7 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 			Sessions []session.Snapshot `json:"sessions"`
 		}{d.config.Sessions.List()})
 	case "get", "snapshot":
-		value, err := d.config.Sessions.Snapshot(request.SessionID)
+		value, err := d.config.Sessions.SnapshotAtGeneration(request.SessionID, authorization.TerminalGeneration)
 		return domainResult(value, err)
 	case "transfer-destinations":
 		value, err := d.config.Sessions.Snapshot(request.SessionID)
@@ -618,33 +636,69 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 		}
 		var value session.AttachResult
 		var err error
-		if request.Action == "attach" && request.AtLiveBoundary {
-			value, err = d.config.Sessions.AttachLive(request.SessionID, attachmentID)
+		if shared {
+			value, err = d.config.Sessions.AttachParticipantAtGeneration(request.SessionID, session.Participant{AttachmentID: attachmentID, AccountID: authorization.AccountID, ClientID: authorization.ClientID, Role: string(authorization.TerminalRole), ConnectedAt: d.config.Now()}, request.FromSequence, authorization.TerminalGeneration)
+		} else if request.Action == "attach" && request.AtLiveBoundary {
+			value, err = d.config.Sessions.AttachLiveParticipant(request.SessionID, session.Participant{AttachmentID: attachmentID, AccountID: authorization.AccountID, ClientID: authorization.ClientID, Role: string(TerminalRoleOwner), ConnectedAt: d.config.Now()})
 		} else {
-			value, err = d.config.Sessions.Attach(request.SessionID, attachmentID, request.FromSequence)
+			value, err = d.config.Sessions.AttachParticipant(request.SessionID, session.Participant{AttachmentID: attachmentID, AccountID: authorization.AccountID, ClientID: authorization.ClientID, Role: string(TerminalRoleOwner), ConnectedAt: d.config.Now()}, request.FromSequence)
 		}
 		if err != nil {
 			return domainResult(nil, err)
 		}
 		attachResponse := newTerminalAttachResponse(attachmentID, value)
 		if attachResponse.InputSequence, err = d.config.Sessions.InputSequence(request.SessionID, authorization.ClientID, attachmentID, value.Snapshot.Generation); err != nil {
+			if shared {
+				_ = d.config.Sessions.DetachParticipantAtGeneration(request.SessionID, attachmentID, authorization.AccountID, authorization.ClientID, authorization.TerminalGeneration)
+			}
 			return domainResult(nil, err)
+		}
+		if shared {
+			joinCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			if d.config.RecordTerminalJoin == nil {
+				err = errors.New("terminal join recording unavailable")
+			} else {
+				err = d.config.RecordTerminalJoin(joinCtx, TerminalJoin{AccessSessionID: authorization.ResourceID, TerminalSessionID: request.SessionID, AttachmentID: attachmentID})
+			}
+			if err == nil {
+				err = joinCtx.Err()
+			}
+			cancel()
+			if err != nil {
+				// A concurrent restart/removal already clears the old-generation participant.
+				_ = d.config.Sessions.DetachParticipantAtGeneration(request.SessionID, attachmentID, authorization.AccountID, authorization.ClientID, authorization.TerminalGeneration)
+				return failure("unavailable")
+			}
 		}
 		// Replay bytes travel as binary frames after this control response. Keeping
 		// them out of JSON prevents a terminal-sized replay from overflowing the
 		// structured-frame limit and avoids delivering the same output twice.
 		return result(attachResponse)
 	case "detach":
-		err := d.config.Sessions.Detach(request.SessionID, request.AttachmentID)
+		var err error
+		if shared {
+			err = d.config.Sessions.DetachParticipantAtGeneration(request.SessionID, request.AttachmentID, authorization.AccountID, authorization.ClientID, authorization.TerminalGeneration)
+		} else {
+			err = d.config.Sessions.Detach(request.SessionID, request.AttachmentID)
+		}
 		if err == nil && d.config.Writers != nil {
 			d.config.Writers.Detach(request.SessionID, request.AttachmentID)
 		}
 		return domainResult(struct{}{}, err)
 	case "resize":
-		err := d.config.Sessions.Resize(request.SessionID, request.AttachmentID, pty.Dimensions{Columns: request.Columns, Rows: request.Rows}, d.config.Now())
+		var err error
+		if shared {
+			err = d.config.Sessions.ResizeParticipantAtGeneration(request.SessionID, request.AttachmentID, authorization.AccountID, authorization.ClientID, authorization.TerminalGeneration, pty.Dimensions{Columns: request.Columns, Rows: request.Rows}, d.config.Now())
+		} else {
+			err = d.config.Sessions.Resize(request.SessionID, request.AttachmentID, pty.Dimensions{Columns: request.Columns, Rows: request.Rows}, d.config.Now())
+		}
 		return domainResult(struct{}{}, err)
 	case "signal":
-		err := d.config.Sessions.Signal(request.SessionID, request.Generation, pty.Signal(request.Signal))
+		generation := request.Generation
+		if shared {
+			generation = authorization.TerminalGeneration
+		}
+		err := d.config.Sessions.Signal(request.SessionID, generation, pty.Signal(request.Signal))
 		return domainResult(struct{}{}, err)
 	case "clear":
 		sequence, err := d.config.Sessions.Clear(request.SessionID)
@@ -668,6 +722,21 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 		return domainResult(struct{}{}, err)
 	default:
 		return failure("invalid_request")
+	}
+}
+
+func isSharedTerminal(authorization Authorization) bool {
+	return authorization.TerminalRole == TerminalRoleViewer || authorization.TerminalRole == TerminalRoleInteractive
+}
+
+func sharedTerminalActionAllowed(role TerminalRole, request terminalRequest) bool {
+	switch request.Action {
+	case "list", "get", "snapshot", "attach", "replay", "detach":
+		return !request.AtLiveBoundary
+	case "resize", "signal":
+		return role == TerminalRoleInteractive
+	default:
+		return false
 	}
 }
 

@@ -160,7 +160,7 @@ func (c *windowsController) run(ctx context.Context, ready func() error) error {
 				case <-timer.C:
 				}
 			}
-			if err := startWindowsActivator(); err != nil {
+			if err := startWindowsActivator(c.config.OwnerSID); err != nil {
 				continue
 			}
 			c.handoffOnce.Do(func() { close(c.handoff) })
@@ -388,7 +388,7 @@ func (c *windowsController) checkRelease(ctx context.Context) (autoupdate.Result
 		if _, err := stageWindowsActivation(ctx, c.config, release, manualMode); err != nil {
 			return autoupdate.Result{Version: c.activeVersion}, err
 		}
-		if err := startWindowsActivatorService(); err != nil {
+		if err := startWindowsActivatorService(c.config.OwnerSID); err != nil {
 			return autoupdate.Result{Version: c.activeVersion}, err
 		}
 		c.handoffOnce.Do(func() { close(c.handoff) })

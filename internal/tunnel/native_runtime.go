@@ -197,8 +197,12 @@ func (s *cliNativeAuthorizedStream) Close() error {
 
 func nativeCapability(consumer string) string {
 	switch consumer {
-	case "terminal", "exec", "ssh":
+	case "terminal":
 		return "terminal"
+	case "exec":
+		return "exec"
+	case "ssh":
+		return "managed_ssh"
 	case "codex":
 		return "codex"
 	case "file_transfer":

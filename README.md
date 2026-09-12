@@ -197,3 +197,93 @@ Windows amd64 and arm64 are stable after native release qualification.
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Team machines
+
+Each OS user enrolls their own machine identity and keeps their own local PB credentials.
+Teammates use their own accounts and devices to connect; do not copy private keys or add
+another target-side enrollment for each teammate. Work on one enrollment runs as its OS
+user. Separate terminals are the default, but OS files and processes remain accessible
+under that same OS user's permissions. Machine grants are not OS isolation and do not
+allow attaching to another person's terminal.
+
+A personal owner can share and withdraw their machine. Sharing creates no use grants.
+Read the current team generation with `pb team get` before each mutation:
+
+```sh
+pb team get research
+pb team machine share research MACHINE_ID --generation CURRENT_GENERATION
+pb team machine grant research MACHINE_ID --member ACCOUNT_ID \
+  --capability terminal,exec,files --generation CURRENT_GENERATION
+pb team machine grant research MACHINE_ID --all-members \
+  --capability managed_ssh --generation CURRENT_GENERATION
+pb team machine unshare research MACHINE_ID --generation CURRENT_GENERATION
+```
+
+The six exact capabilities are `terminal`, `exec`, `managed_ssh` (including SCP, SFTP and
+rsync), `files`, `preview_manage`, and `tunnel_manage`. All-member grants apply to current
+and future accepted members; selected-member grants apply to one accepted account.
+Their capabilities combine. Saving a grant replaces that audience's capability list;
+`--active=false` revokes it. Device incoming toggles must also allow the requested operation.
+Tunnel management covers existing private/team tunnels: routes, desired state, deletion, and connector status and controls. Create tunnels locally on the target machine; a teammate’s grant does not copy its enrollment proof or launch a remote connector. Public publication, domains, and connector enrollment require separate owner authority.
+
+No machine grant implies ENV administration, public publication or resharing.
+
+A personal owner who is also a team owner/admin can explicitly transfer the enrollment:
+
+```sh
+pb team machine transfer-to-team research MACHINE_ID \
+  --generation CURRENT_GENERATION --confirm MACHINE_ID
+```
+
+The team then controls the enrollment, other personal team shares are withdrawn, and the
+enroller loses implicit personal control. Remaining authorized members can keep using it
+when the enroller leaves. Team owner/admin roles govern management; machine use still
+requires a grant. Transferring the team to a new owner preserves its machine ownership.
+`pb team machine remove` requires the same exact confirmation and revokes the team-owned
+enrollment. Deleting the team also revokes its team-owned enrollments, without converting
+them to personal property. Personal machines remain personal; withdrawing a share or
+leaving the team removes that team's access. Use the dashboard's Teams page for the same
+ownership and grant controls; Machines shows current ownership and your permissions.
+
+## Shared terminals
+
+Terminal sessions are private by default. Machine access or team membership does not
+allow joining someone else's session. The session owner can explicitly grant access:
+
+```sh
+pb session shared
+pb session share SESSION_ID --team TEAM_ID --member ACCOUNT_ID --role viewer
+pb session share SESSION_ID --team TEAM_ID --all --role interactive
+pb session join SESSION_ID
+pb session participants SESSION_ID
+pb session remove SESSION_ID ACCOUNT_ID
+pb session unshare SESSION_ID
+```
+
+The dashboard's **Terminals** page provides the same sharing and participant controls.
+Only the session owner administers sharing; a team administrator does not automatically
+control personal sessions. A selected member's role overrides the all-team default.
+Removing a participant also excludes them from all-team access until explicitly regranted.
+
+Viewers receive output but cannot type, resize or signal the shell. Ctrl-C detaches the
+local viewer. Interactive participants use the shell's OS permissions: their input is
+serialized in host receive order, but simultaneous typing may interleave. They can send
+signals and commands that end the shell. Paperboat identities do not isolate processes
+or files shared by the same OS user.
+
+Joining includes the existing recent output, at most 64 KiB and further bounded by
+attachment capacity, followed by live output. That output may contain secrets regardless
+of ENV permissions. It is neither unlimited history nor an exact screen snapshot.
+Reconnect checks current access and resumes within the retained output; a gap is reported
+when the earlier output is no longer retained. Shared joins cannot create or restart the
+owner's shell. Disconnecting a participant leaves the shell and other participants alone.
+Ending sharing withdraws teammate access while preserving the owner's session.
+Sharing is tied to the current shell process. Restarting the shell detaches shared
+participants, and old grants cannot read or control its replacement. The owner must
+explicitly share the new shell. Closed or exited sharing is retired when the control
+plane observes the runtime; a new shared connection checks the runtime first.
+New connection credentials always require a current grant. Active connections close when
+the runtime receives revocation or their credential expires. Revocation refresh uses
+a 15-second interval and a 10-second request timeout; shared credentials last
+at most five minutes, bounding access if the control plane cannot be reached.

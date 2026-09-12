@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"strconv"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 )
@@ -16,6 +17,7 @@ import (
 // updater itself may be restarted by the second operation.
 type FixedSupervisorActivator struct {
 	Platform string
+	UID      int
 	Runner   service.Runner
 }
 
@@ -28,20 +30,22 @@ func (a FixedSupervisorActivator) Rollback(ctx context.Context) error {
 }
 
 func (a FixedSupervisorActivator) restart(ctx context.Context) error {
-	if a.Runner == nil || a.Platform != runtime.GOOS {
+	if a.Runner == nil || a.Platform != runtime.GOOS || a.UID < 0 {
 		return errors.New("invalid fixed supervisor activator")
 	}
 	switch a.Platform {
 	case "linux":
-		if err := a.Runner.Run(ctx, "systemctl", "restart", "paperboat-hostd.service"); err != nil {
+		instance := "u" + strconv.Itoa(a.UID)
+		if err := a.Runner.Run(ctx, "systemctl", "restart", "paperboat-hostd-"+instance+".service"); err != nil {
 			return err
 		}
-		return a.Runner.Run(ctx, "systemctl", "restart", "paperboat-updated.service")
+		return a.Runner.Run(ctx, "systemctl", "restart", "paperboat-updated-"+instance+".service")
 	case "darwin":
-		if err := a.Runner.Run(ctx, "launchctl", "kickstart", "-k", "system/com.pinksaucepasta.paperboat.hostd"); err != nil {
+		instance := "u" + strconv.Itoa(a.UID)
+		if err := a.Runner.Run(ctx, "launchctl", "kickstart", "-k", "system/com.pinksaucepasta.paperboat.hostd."+instance); err != nil {
 			return err
 		}
-		return a.Runner.Run(ctx, "launchctl", "kickstart", "-k", "system/com.pinksaucepasta.paperboat.updated")
+		return a.Runner.Run(ctx, "launchctl", "kickstart", "-k", "system/com.pinksaucepasta.paperboat.updated."+instance)
 	default:
 		return errors.New("unsupported supervisor platform")
 	}

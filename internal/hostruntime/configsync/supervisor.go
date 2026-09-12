@@ -169,6 +169,7 @@ func sameCredentialBinding(expected, current Credential) bool {
 		expected.EnvironmentID == current.EnvironmentID &&
 		expected.MachineID == current.MachineID &&
 		expected.AssignmentID == current.AssignmentID &&
+		expected.AssignmentVersion == current.AssignmentVersion &&
 		expected.WarningRevision == current.WarningRevision
 }
 

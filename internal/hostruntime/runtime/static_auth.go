@@ -97,7 +97,7 @@ func (r staticPolicyResolver) Policy(frame protocol.Frame) (auth.Policy, error) 
 	switch frame.Capability {
 	case "terminal.v1", "health.v1":
 		base.CredentialClass = "terminal_operation"
-		base.Scopes = []string{"terminal:operate"}
+		base.AnyScopes = [][]string{{"terminal:operate"}, {"terminal:view"}, {"terminal:control"}}
 		base.MaxLifetime = 5 * time.Minute
 	case "exec.v1":
 		base.CredentialClass = "exec_operation"

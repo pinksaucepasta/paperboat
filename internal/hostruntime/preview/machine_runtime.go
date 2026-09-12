@@ -16,6 +16,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
+	"github.com/pinksaucepasta/paperboat/internal/inspector"
 )
 
 var (
@@ -43,6 +44,11 @@ type MachinePreviewRuntimeConfig struct {
 	OriginDialTimeout  time.Duration
 	OriginCloseTimeout time.Duration
 	ObserveStreamError func(error)
+	// Inspector and Registry thread the daemon's shared capture store and
+	// replay bindings into ephemeral carriers. Nil disables capture/replay.
+	Inspector     *inspector.Store
+	Registry      *inspector.Registry
+	InspectorHTTP tunnelmanager.AuthenticatedInspectorHTTP
 }
 
 // MachinePreviewRuntime owns one authenticated machine carrier source and
@@ -124,6 +130,8 @@ func NewMachinePreviewRuntime(config MachinePreviewRuntimeConfig) (*MachinePrevi
 		BrowserIngress: browserIngress, Sessions: sessions, PrivateAccess: privateAccess, RunContext: config.RunContext, QueueDepth: config.QueueDepth, MaxStreams: config.MaxStreams,
 		OriginDial: config.OriginDial, OriginDialTimeout: config.OriginDialTimeout, OriginCloseTimeout: config.OriginCloseTimeout,
 		ObserveStreamError: config.ObserveStreamError,
+		Inspector:          config.Inspector, Registry: config.Registry,
+		InspectorHTTP: config.InspectorHTTP,
 	})
 	if err != nil {
 		_ = sessions.Close(context.WithoutCancel(config.RunContext))

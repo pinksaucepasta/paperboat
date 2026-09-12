@@ -31,12 +31,15 @@ type GitRepositoryConfig struct {
 	Root       string
 	Access     RepositoryAccessSource
 	Reconciler WorkspaceReconciler
+	PushTarget bool
 }
 
 type GitRepository struct {
 	root       string
 	access     RepositoryAccessSource
 	reconciler WorkspaceReconciler
+	pushTarget bool
+	lastRemote string
 	mu         sync.Mutex
 }
 
@@ -50,7 +53,7 @@ func NewGitRepository(config GitRepositoryConfig) (*GitRepository, error) {
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return nil, errors.Join(ErrGitRepositoryInvalid, err)
 	}
-	return &GitRepository{root: config.Root, access: config.Access, reconciler: config.Reconciler}, nil
+	return &GitRepository{root: config.Root, access: config.Access, reconciler: config.Reconciler, pushTarget: config.PushTarget}, nil
 }
 
 func (r *GitRepository) Fetch(ctx context.Context) (RemoteSnapshot, error) {
@@ -73,7 +76,69 @@ func (r *GitRepository) Fetch(ctx context.Context) (RemoteSnapshot, error) {
 	if err != nil || reference.Hash().IsZero() {
 		return RemoteSnapshot{}, errors.Join(ErrGitRepositoryInvalid, sanitizeGitError(err))
 	}
-	return RemoteSnapshot{Revision: reference.Hash().String()}, nil
+	r.lastRemote = reference.Hash().String()
+	return RemoteSnapshot{Revision: r.lastRemote}, nil
+}
+
+func (r *GitRepository) Review(_ context.Context, base string) (string, []PathSummary, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.lastRemote == "" {
+		return "", nil, ErrRemoteRevisionChanged
+	}
+	repository, err := git.PlainOpen(r.root)
+	if err != nil {
+		return "", nil, ErrGitRepositoryInvalid
+	}
+	headCommit, err := repository.CommitObject(plumbing.NewHash(r.lastRemote))
+	if err != nil {
+		return "", nil, sanitizeGitError(err)
+	}
+	headTree, err := headCommit.Tree()
+	if err != nil {
+		return "", nil, sanitizeGitError(err)
+	}
+	result := make([]PathSummary, 0)
+	if plumbing.IsHash(base) {
+		baseCommit, baseErr := repository.CommitObject(plumbing.NewHash(base))
+		if baseErr == nil {
+			baseTree, treeErr := baseCommit.Tree()
+			if treeErr != nil {
+				return "", nil, sanitizeGitError(treeErr)
+			}
+			changes, diffErr := object.DiffTree(baseTree, headTree)
+			if diffErr != nil {
+				return "", nil, sanitizeGitError(diffErr)
+			}
+			for _, change := range changes {
+				path := change.To.Name
+				if path == "" {
+					path = change.From.Name
+				}
+				if safeRelativeStatusPath(path) {
+					result = append(result, PathSummary{Path: path, Reason: "changed"})
+				}
+				if len(result) == 1000 {
+					break
+				}
+			}
+			return r.lastRemote, result, nil
+		}
+	}
+	files := headTree.Files()
+	err = files.ForEach(func(file *object.File) error {
+		if safeRelativeStatusPath(file.Name) {
+			result = append(result, PathSummary{Path: file.Name, Reason: "added"})
+		}
+		if len(result) == 1000 {
+			return io.EOF
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", nil, sanitizeGitError(err)
+	}
+	return r.lastRemote, result, nil
 }
 
 func (r *GitRepository) Reconcile(ctx context.Context, remote RemoteSnapshot) (PreparedPublication, error) {
@@ -180,11 +245,15 @@ func (r *GitRepository) open(ctx context.Context) (RepositoryAccess, *git.Reposi
 		(access.Capability != "repository_contents_read" && access.Capability != "repository_contents_write") {
 		return RepositoryAccess{}, nil, ErrGitRepositoryInvalid
 	}
+	repositoryURL := access.CloneURL
+	if r.pushTarget {
+		repositoryURL = access.PublishURL
+	}
 	info, statErr := os.Lstat(r.root)
 	switch {
 	case errors.Is(statErr, os.ErrNotExist):
 		repository, cloneErr := git.PlainCloneContext(ctx, r.root, false, &git.CloneOptions{
-			URL: access.CloneURL, Auth: &http.BasicAuth{Username: access.Username, Password: access.Password},
+			URL: repositoryURL, Auth: &http.BasicAuth{Username: access.Username, Password: access.Password},
 			RemoteName: "origin", ReferenceName: plumbing.NewBranchReferenceName(access.Branch),
 			SingleBranch: true, NoCheckout: false, Tags: git.NoTags,
 		})
@@ -200,7 +269,7 @@ func (r *GitRepository) open(ctx context.Context) (RepositoryAccess, *git.Reposi
 		return RepositoryAccess{}, nil, ErrGitRepositoryInvalid
 	}
 	remote, err := repository.Remote("origin")
-	if err != nil || len(remote.Config().URLs) != 1 || remote.Config().URLs[0] != access.CloneURL {
+	if err != nil || len(remote.Config().URLs) != 1 || remote.Config().URLs[0] != repositoryURL {
 		return RepositoryAccess{}, nil, ErrGitRepositoryInvalid
 	}
 	return access, repository, nil

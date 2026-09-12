@@ -29,6 +29,9 @@ func validateRuntimeDescriptor(descriptor RuntimeDescriptor, credential Credenti
 	policy := descriptor.Policy
 	if (descriptor.WriteMode != "read_only" && descriptor.WriteMode != "leased_writes") || !descriptor.Mode.Valid() ||
 		descriptor.RepositoryID == "" || descriptor.AssignmentID != credential.AssignmentID ||
+		((descriptor.PullRepositoryID != "" || descriptor.PushRepositoryID != "") &&
+			((descriptor.Mode != ModePushOnly && descriptor.PullRepositoryID == "") ||
+				(descriptor.Mode != ModePullOnly && descriptor.PushRepositoryID == ""))) ||
 		descriptor.EnvironmentID != credential.EnvironmentID || descriptor.MachineID != credential.MachineID ||
 		descriptor.InstallationGeneration < 1 || descriptor.SyncRevisionFloor < 0 ||
 		descriptor.WarningRevision != credential.WarningRevision ||

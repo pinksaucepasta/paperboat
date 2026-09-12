@@ -26,7 +26,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/connectionmanager"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/transportmanager"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
-	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
 	"github.com/spf13/cobra"
 )
 
@@ -92,11 +91,11 @@ func hostRuntimeCommand() *cobra.Command {
 
 func hostdRuntimeCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:    "__runtime-hostd",
-		Hidden: true,
-		Args:   commandArgs(cobra.NoArgs),
-		RunE: func(command *cobra.Command, _ []string) error {
-			code := hostruntimecmd.Execute(command.Context(), []string{"hostd"}, command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr())
+		Use:                "__runtime-hostd",
+		Hidden:             true,
+		DisableFlagParsing: true,
+		RunE: func(command *cobra.Command, args []string) error {
+			code := hostruntimecmd.Execute(command.Context(), append([]string{"hostd"}, args...), command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr())
 			if code != 0 {
 				return exitCodeError{code: code}
 			}
@@ -160,22 +159,16 @@ func windowsSSHDServiceCommand() *cobra.Command {
 		Hidden: true,
 		Args:   commandArgs(cobra.NoArgs),
 		RunE: func(command *cobra.Command, _ []string) error {
-			sshdPath, err := command.Flags().GetString("sshd")
+			instance, err := command.Flags().GetString("instance")
 			if err != nil {
 				return err
 			}
-			configPath, err := command.Flags().GetString("config")
-			if err != nil {
-				return err
-			}
-			return windowsopenssh.RunServiceHost(sshdPath, configPath)
+			return runWindowsSSHService(instance)
 		},
 		SilenceUsage: true, SilenceErrors: true,
 	}
-	command.Flags().String("sshd", "", "managed sshd executable")
-	command.Flags().String("config", "", "managed sshd configuration")
-	_ = command.MarkFlagRequired("sshd")
-	_ = command.MarkFlagRequired("config")
+	command.Flags().String("instance", "", "enrolled OS-user instance")
+	_ = command.MarkFlagRequired("instance")
 	return command
 }
 

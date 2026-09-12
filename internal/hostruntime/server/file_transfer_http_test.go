@@ -123,6 +123,23 @@ func transferDigest(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+func TestFileTransferManifestDigestRejectsSubstitution(t *testing.T) {
+	files := []filetransfer.File{{Basename: "approved.txt", Size: 7, SHA256: strings.Repeat("a", 64)}}
+	approved := FileTransferManifestDigest(files)
+	files[0].Basename = "substituted.txt"
+	if approved == "" || approved == FileTransferManifestDigest(files) {
+		t.Fatal("filename substitution retained approval digest")
+	}
+	files[0].Basename, files[0].Size = "approved.txt", 8
+	if approved == FileTransferManifestDigest(files) {
+		t.Fatal("size substitution retained approval digest")
+	}
+	files[0].Size, files[0].SHA256 = 7, strings.Repeat("b", 64)
+	if approved == FileTransferManifestDigest(files) {
+		t.Fatal("content digest substitution retained approval digest")
+	}
+}
+
 func TestFileTransferHTTPResumesCompletesAndRangesOpaqueContent(t *testing.T) {
 	handler, _ := fileTransferTestHandler(t)
 	data := []byte("abcdefgh")

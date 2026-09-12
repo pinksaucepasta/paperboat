@@ -91,6 +91,9 @@ type HTTPSProductionAssemblySourceConfig struct {
 	Renewal               connectorrotation.CredentialRenewalSource
 	Report                func(tunnelmanager.Observation)
 	MachineTLSCertificate func(time.Time, time.Duration, []*url.URL) (tls.Certificate, error)
+	// InspectorPurge revokes daemon-local inspector captures for routes that
+	// stopped forwarding. Nil disables purge notification.
+	InspectorPurge func(routeIDs []string)
 }
 
 // HTTPSProductionAssemblySource is the production control/bootstrap client.
@@ -106,6 +109,7 @@ type HTTPSProductionAssemblySource struct {
 	clock                 connectorprotocol.Clock
 	origins               tunnelmanager.OriginProber
 	originStreams         *tunnelmanager.OriginStreamForwarder
+	inspectorPurge        func(routeIDs []string)
 	browserIngress        tunnelmanager.IngressAuthorityFunc
 	drainer               connectorprotocol.Drainer
 	renewal               connectorrotation.CredentialRenewalSource
@@ -134,7 +138,7 @@ func NewHTTPSProductionAssemblySource(config HTTPSProductionAssemblySourceConfig
 	if config.Report == nil {
 		config.Report = func(tunnelmanager.Observation) {}
 	}
-	return &HTTPSProductionAssemblySource{base: base, stateRoot: config.StateRoot, hostID: config.HostID, http: client, auth: config.Auth, clock: config.Clock, origins: config.Origins, originStreams: config.OriginStreams, browserIngress: browserIngress, drainer: config.Drainer, renewal: config.Renewal, report: config.Report, machineTLSCertificate: config.MachineTLSCertificate, drainers: make(map[string]*assemblyDrainer), rotations: make(map[string]*productionRotationRuntime)}, nil
+	return &HTTPSProductionAssemblySource{base: base, stateRoot: config.StateRoot, hostID: config.HostID, http: client, auth: config.Auth, clock: config.Clock, origins: config.Origins, originStreams: config.OriginStreams, inspectorPurge: config.InspectorPurge, browserIngress: browserIngress, drainer: config.Drainer, renewal: config.Renewal, report: config.Report, machineTLSCertificate: config.MachineTLSCertificate, drainers: make(map[string]*assemblyDrainer), rotations: make(map[string]*productionRotationRuntime)}, nil
 }
 
 func (s *HTTPSProductionAssemblySource) BindCredentialStore(store *FileCredentialStore) error {
@@ -251,7 +255,7 @@ func (s *HTTPSProductionAssemblySource) resolveProductionAssembly(ctx context.Co
 	return tunnelmanager.ProductionAssemblyConfig{
 		Production: tunnelmanager.ProductionConfig{
 			StateRoot: filepath.Join(s.stateRoot, "tunnel-connectors", request.ConnectorID, "process-"+strconv.FormatUint(request.ProcessGeneration, 10)), HostID: request.HostID,
-			Report: s.report,
+			Report: s.report, InspectorPurge: s.inspectorPurge,
 		},
 		StableEndpointID: request.StableEndpointID,
 		Clock:            s.clock, Origins: s.origins, OriginStreams: originStreams,

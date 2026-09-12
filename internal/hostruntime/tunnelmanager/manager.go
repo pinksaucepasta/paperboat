@@ -157,6 +157,12 @@ type Config struct {
 	// path so observation order matches durable generation order.
 	Report         func(Observation)
 	ActiveObserver func(ActiveChange)
+	// InspectorPurge revokes daemon-local inspector captures for routes that
+	// stopped forwarding (removed/disabled routes, paused or deleted
+	// tunnels). It runs on the reconciliation path and must return promptly
+	// like Report. Nil disables purge notification; captures then expire by
+	// retention and replay stays fenced by authority lifetime.
+	InspectorPurge func(routeIDs []string)
 }
 
 type Manager struct {
@@ -588,6 +594,7 @@ func (m *Manager) apply(ctx context.Context, tunnel hoststate.Tunnel, connector 
 		return ErrNotStarted
 	}
 	if old != nil && old != active {
+		m.purgeRemovedInspectorRoutes(activeRouteIDs(old), activeRouteIDs(active))
 		m.drain(ctx, old)
 		_ = m.closeActive(context.Background(), old)
 	}
@@ -923,12 +930,53 @@ func (m *Manager) removeAndDrain(ctx context.Context, tunnelID string, active Ac
 		delete(m.active, tunnelID)
 	}
 	observer := m.config.ActiveObserver
+	purge := m.config.InspectorPurge
+	routes := activeRouteIDs(active)
 	m.mu.Unlock()
 	if removed && observer != nil {
 		observer(ActiveChange{TunnelID: tunnelID, Previous: active})
 	}
+	// A removed active no longer forwards: deny retrieval/replay and purge
+	// its retained captures immediately (pause, deletion, unwanted tunnel).
+	if removed && purge != nil && len(routes) > 0 {
+		purge(routes)
+	}
 	m.drain(ctx, active)
 	_ = m.closeActive(context.Background(), active)
+}
+
+// purgeRemovedInspectorRoutes purges captures for previously live routes that
+// the replacement no longer serves. Unchanged routes keep their history.
+func (m *Manager) purgeRemovedInspectorRoutes(oldRoutes, newRoutes []string) {
+	if m == nil || m.config.InspectorPurge == nil || len(oldRoutes) == 0 {
+		return
+	}
+	live := make(map[string]struct{}, len(newRoutes))
+	for _, id := range newRoutes {
+		live[id] = struct{}{}
+	}
+	var removed []string
+	for _, id := range oldRoutes {
+		if _, ok := live[id]; !ok {
+			removed = append(removed, id)
+		}
+	}
+	if len(removed) > 0 {
+		m.config.InspectorPurge(removed)
+	}
+}
+
+// activeRouteIDs returns the currently forwarding (active-desired) route IDs
+// of an active generation. Unknown implementations yield nothing, never an
+// over-broad purge.
+func activeRouteIDs(active Active) []string {
+	if active == nil {
+		return nil
+	}
+	if lister, ok := active.(interface{ activeRouteIDs() []string }); ok {
+		return lister.activeRouteIDs()
+	}
+	return nil
 }
 
 func (m *Manager) closeAll(ctx context.Context) error {

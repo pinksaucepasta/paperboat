@@ -222,6 +222,23 @@ func TestStandaloneUpdateGateRollsBackAfterInvalidWorkloadSnapshot(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The production deployment provider resolves CurrentTarget again before
+	// replaying rollback; retaining a cached target would miss this boundary.
+	replayedTarget, err := gate.HandleUpdateGate(context.Background(), standaloneGateRequest(hostdproto.UpdateGateTarget, nil))
+	if err != nil || replayedTarget.Target != target {
+		t.Fatalf("resolve completed rollback target after restart: target=%+v err=%v", replayedTarget.Target, err)
+	}
+	for _, field := range []string{"manifest", "version"} {
+		wrongTarget := standaloneGateRequest(hostdproto.UpdateGateTarget, nil)
+		if field == "manifest" {
+			wrongTarget.ManifestSHA256 = strings.Repeat("b", 64)
+		} else {
+			wrongTarget.Version = "2026.09.08.999"
+		}
+		if _, err := gate.HandleUpdateGate(context.Background(), wrongTarget); !errors.Is(err, errStandaloneUpdateGate) {
+			t.Fatalf("wrong %s accepted for completed target lookup: %v", field, err)
+		}
+	}
 	if _, err = gate.HandleUpdateGate(context.Background(), standaloneGateRequest(hostdproto.UpdateGateRollback, &target)); err != nil {
 		t.Fatalf("rollback retry after restart: %v", err)
 	}

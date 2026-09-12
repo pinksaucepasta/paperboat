@@ -48,6 +48,7 @@ type windowsUninstallPlan struct {
 	ProcessIDs []uint32  `json:"process_ids"`
 	StatusPath string    `json:"status_path"`
 	InboxPaths []string  `json:"inbox_paths"`
+	OwnerSID   string    `json:"owner_sid"`
 	CreatedAt  time.Time `json:"created_at"`
 	ExpiresAt  time.Time `json:"expires_at"`
 }
@@ -134,7 +135,11 @@ func launchWindowsUninstallHelper(ctx context.Context, inboxPaths []string) (str
 		processIDs = append(processIDs, parent)
 	}
 	now := time.Now().UTC()
-	plan := windowsUninstallPlan{Schema: windowsUninstallPlanSchema, ProcessIDs: processIDs, StatusPath: statusPath, InboxPaths: append([]string(nil), inboxPaths...), CreatedAt: now, ExpiresAt: now.Add(5 * time.Minute)}
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil || user == nil || user.User.Sid == nil {
+		return "", errors.New("resolve Windows uninstall owner")
+	}
+	plan := windowsUninstallPlan{Schema: windowsUninstallPlanSchema, ProcessIDs: processIDs, StatusPath: statusPath, InboxPaths: append([]string(nil), inboxPaths...), OwnerSID: user.User.Sid.String(), CreatedAt: now, ExpiresAt: now.Add(5 * time.Minute)}
 	if err := writeProtectedWindowsUninstallJSON(planPath, plan); err != nil {
 		return "", err
 	}
@@ -428,7 +433,7 @@ func runWindowsUninstallHelper(ctx context.Context, planPath string) error {
 	cleanupCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	completed := make(chan error, 1)
-	go func() { completed <- performWindowsSystemUninstall(cleanupCtx, plan.InboxPaths) }()
+	go func() { completed <- performWindowsSystemUninstall(cleanupCtx, plan.OwnerSID, plan.InboxPaths) }()
 	var result error
 	select {
 	case result = <-completed:
@@ -450,23 +455,31 @@ func runWindowsUninstallHelper(ctx context.Context, planPath string) error {
 	return nil
 }
 
-func performWindowsSystemUninstall(ctx context.Context, inboxPaths []string) error {
+func performWindowsSystemUninstall(ctx context.Context, ownerSID string, inboxPaths []string) error {
 	var result error
-	result = errors.Join(result, performWindowsRegisteredCleanup(ctx))
-	if layout, layoutErr := service.DefaultLayout("windows"); layoutErr != nil {
+	result = errors.Join(result, performWindowsRegisteredCleanup(ctx, ownerSID))
+	instance, instanceErr := service.WindowsUserInstance(ownerSID)
+	if instanceErr != nil {
+		return errors.Join(result, instanceErr)
+	}
+	if layout, layoutErr := hostinstall.WindowsLayoutForInstance(instance); layoutErr != nil {
 		result = errors.Join(result, layoutErr)
 	} else {
 		result = errors.Join(result, retryWindowsRemoval(ctx, layout.InstallRoot, inboxPaths))
 	}
-	result = errors.Join(result, retryWindowsRemoval(ctx, hostinstall.WindowsProgramDataRoot(), inboxPaths))
+	if root, rootErr := hostinstall.WindowsInstanceRoot(instance); rootErr != nil {
+		result = errors.Join(result, rootErr)
+	} else {
+		result = errors.Join(result, retryWindowsRemoval(ctx, root, inboxPaths))
+	}
 	return result
 }
 
-func performWindowsRegisteredCleanup(ctx context.Context) error {
+func performWindowsRegisteredCleanup(ctx context.Context, ownerSID string) error {
 	// The installed unified executable owns the host runtime directly. Purge
 	// that runtime before removing the installation root; no split cleanup
 	// action is needed.
-	return purgeWindowsHostRuntime(ctx)
+	return purgeWindowsHostRuntime(ctx, ownerSID)
 }
 
 func readWindowsUninstallPlan(planPath string) (windowsUninstallPlan, error) {

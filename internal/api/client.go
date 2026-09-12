@@ -579,6 +579,12 @@ type ProjectPage struct {
 // connector rather than a Paperboat-managed Fly VM. The control plane owns its
 // lifecycle and authorization; the CLI only needs enough metadata to select it.
 type UserMachine struct {
+	Ownership              string                 `json:"ownership"`
+	OwnerAccount           string                 `json:"owner_account,omitempty"`
+	OwnerTeamID            string                 `json:"owner_team_id,omitempty"`
+	Permissions            []string               `json:"permissions"`
+	CanManage              bool                   `json:"can_manage"`
+	Shared                 bool                   `json:"shared"`
 	ID                     string                 `json:"id"`
 	EnvironmentID          string                 `json:"environment_id"`
 	DisplayName            string                 `json:"display_name"`
@@ -816,14 +822,17 @@ type ConfigRepository struct {
 }
 
 type ConfigAssignment struct {
-	ID              string  `json:"id"`
-	MachineID       string  `json:"machine_id"`
-	EnvironmentID   string  `json:"environment_id"`
-	RepositoryID    *string `json:"repository_id"`
-	ConsentState    string  `json:"consent_state"`
-	Mode            string  `json:"mode"`
-	WarningRevision *string `json:"warning_revision"`
-	Version         int64   `json:"version"`
+	ID               string  `json:"id"`
+	MachineID        string  `json:"machine_id"`
+	EnvironmentID    string  `json:"environment_id"`
+	RepositoryID     *string `json:"repository_id"`
+	PullRepositoryID *string `json:"pull_repository_id"`
+	PushRepositoryID *string `json:"push_repository_id"`
+	AutomaticUpdates bool    `json:"automatic_updates"`
+	ConsentState     string  `json:"consent_state"`
+	Mode             string  `json:"mode"`
+	WarningRevision  *string `json:"warning_revision"`
+	Version          int64   `json:"version"`
 }
 
 type ConfigWarningFacts struct {
@@ -916,6 +925,49 @@ func (c *Client) AssignConfig(ctx context.Context, machineID, repositoryID, mode
 	var out ConfigAssignment
 	err := c.do(ctx, http.MethodPut, "/v1/machines/"+url.PathEscape(machineID)+"/config-assignment", map[string]any{"repository_id": repositoryID, "mode": mode, "warning_revision": "", "expected_version": expectedVersion}, &out)
 	return out, err
+}
+
+func (c *Client) AssignConfigTargets(ctx context.Context, machineID, pullRepositoryID, pushRepositoryID, mode string, automaticUpdates bool, expectedVersion int64) (ConfigAssignment, error) {
+	var out ConfigAssignment
+	err := c.do(ctx, http.MethodPut, "/v1/machines/"+url.PathEscape(machineID)+"/config-assignment", map[string]any{"pull_repository_id": pullRepositoryID, "push_repository_id": pushRepositoryID, "mode": mode, "automatic_updates": automaticUpdates, "warning_revision": "", "expected_version": expectedVersion}, &out)
+	return out, err
+}
+
+func (c *Client) ApproveConfigPullRevision(ctx context.Context, machineID, revision string, expectedVersion int64) (ConfigAssignment, error) {
+	var out ConfigAssignment
+	err := c.do(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/config-assignment/approve", map[string]any{"remote_revision": revision, "expected_version": expectedVersion}, &out)
+	return out, err
+}
+
+type ConfigTeamDefault struct {
+	TeamID               string `json:"team_id"`
+	Provider             string `json:"provider"`
+	ExternalRepositoryID string `json:"external_repository_id"`
+	DisplayName          string `json:"display_name"`
+	Branch               string `json:"branch"`
+	Version              int64  `json:"version"`
+	RepositoryID         string `json:"repository_id,omitempty"`
+	AdoptedVersion       int64  `json:"adopted_version,omitempty"`
+	UpdatePending        bool   `json:"update_pending,omitempty"`
+}
+
+func (c *Client) ConfigTeamDefault(ctx context.Context, teamID string) (ConfigTeamDefault, error) {
+	var out ConfigTeamDefault
+	err := c.do(ctx, http.MethodGet, "/v1/teams/"+url.PathEscape(teamID)+"/config-default", nil, &out)
+	return out, err
+}
+func (c *Client) SetConfigTeamDefault(ctx context.Context, teamID, repositoryID string, expectedVersion int64) (ConfigTeamDefault, error) {
+	var out ConfigTeamDefault
+	err := c.do(ctx, http.MethodPut, "/v1/teams/"+url.PathEscape(teamID)+"/config-default", map[string]any{"repository_id": repositoryID, "expected_version": expectedVersion}, &out)
+	return out, err
+}
+func (c *Client) AdoptConfigTeamDefault(ctx context.Context, teamID string, version int64) (ConfigTeamDefault, error) {
+	var out ConfigTeamDefault
+	err := c.do(ctx, http.MethodPut, "/v1/config-sync/team-default-adoption", map[string]any{"team_id": teamID, "default_version": version}, &out)
+	return out, err
+}
+func (c *Client) UnadoptConfigTeamDefault(ctx context.Context) error {
+	return c.do(ctx, http.MethodDelete, "/v1/config-sync/team-default-adoption", nil, nil)
 }
 
 func (c *Client) UnassignConfig(ctx context.Context, machineID string, expectedVersion int64) error {
@@ -1073,6 +1125,7 @@ type FileTransfer struct {
 // Connectable is false the machine is not ready yet; Status/Reason explain why
 // and the caller should poll ConnectionReadiness.
 type ConnectionDescriptor struct {
+	MachineGeneration uint64        `json:"machine_generation,omitempty"`
 	Schema            string        `json:"schema"`
 	Issuer            string        `json:"issuer,omitempty"`
 	ProjectID         string        `json:"project_id"`
@@ -1143,6 +1196,7 @@ type ConfigSyncStatus struct {
 }
 
 type ConfigSyncEnvironmentState struct {
+	MachineID             string                  `json:"machine_id"`
 	EnvironmentID         string                  `json:"environment_id"`
 	DisplayName           string                  `json:"display_name"`
 	State                 string                  `json:"state"`
@@ -1156,6 +1210,7 @@ type ConfigSyncEnvironmentState struct {
 	LastAppliedRevision   string                  `json:"last_applied_revision"`
 	LastPublishedRevision string                  `json:"last_published_revision"`
 	Conflicts             []ConfigSyncPathSummary `json:"conflicts"`
+	Review                []ConfigSyncPathSummary `json:"review"`
 }
 
 type ConfigSyncPathSummary struct {
@@ -1587,14 +1642,22 @@ func validateOperationDescriptor(out ExecDescriptor, machineID, operationID, exp
 }
 
 func (c *Client) MachineFileTransferDescriptor(ctx context.Context, destinationMachineID, sourceMachineID, sessionID string) (FileTransfer, error) {
+	return c.MachineFileTransferDescriptorForRequest(ctx, destinationMachineID, sourceMachineID, sessionID, "", "")
+}
+
+func (c *Client) MachineFileTransferDescriptorForRequest(ctx context.Context, destinationMachineID, sourceMachineID, sessionID, requestID, manifestDigest string) (FileTransfer, error) {
 	if strings.TrimSpace(destinationMachineID) == "" || strings.TrimSpace(sourceMachineID) == "" {
 		return FileTransfer{}, errors.New("source and destination machine IDs are required")
 	}
 	var out FileTransfer
-	err := c.do(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(destinationMachineID)+"/file-transfer-descriptor", map[string]string{
+	body := map[string]string{
 		"source_machine_id": sourceMachineID,
 		"session_id":        sessionID,
-	}, &out)
+	}
+	if requestID != "" || manifestDigest != "" {
+		body["request_id"], body["manifest_digest"] = requestID, manifestDigest
+	}
+	err := c.do(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(destinationMachineID)+"/file-transfer-descriptor", body, &out)
 	return out, err
 }
 

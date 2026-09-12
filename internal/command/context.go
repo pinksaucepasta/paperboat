@@ -82,6 +82,10 @@ type BoolFlag struct{ Name, Usage string }
 
 func (*BoolFlag) isFlag() {}
 
+type UintFlag struct{ Name, Usage string }
+
+func (*UintFlag) isFlag() {}
+
 type Float64Flag struct{ Name, Usage string }
 
 func (*Float64Flag) isFlag() {}

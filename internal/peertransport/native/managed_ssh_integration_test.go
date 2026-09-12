@@ -298,7 +298,7 @@ func startNativeTestSSHD(t *testing.T) (uint16, string, string, string) {
 	return port, identity, knownHosts, filepath.Join(root, "remote-file")
 }
 
-func startNativeSSHProxy(t *testing.T, ctx context.Context, adapter tunnel.TailnetTerminalTunnel, info resolver.ConnectInfo) (string, func()) {
+func startNativeSSHProxy(t *testing.T, ctx context.Context, adapter tunnel.TailnetTerminalTunnel, info resolver.ConnectInfo, fixedOperation ...string) (string, func()) {
 	t.Helper()
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
@@ -311,7 +311,11 @@ func startNativeSSHProxy(t *testing.T, ctx context.Context, adapter tunnel.Tailn
 			if acceptErr != nil {
 				return
 			}
-			remote, dialErr := adapter.DialSSH(ctx, info, fmt.Sprintf("operation_ssh_%d", operation.Add(1)))
+			operationID := fmt.Sprintf("operation_ssh_%d", operation.Add(1))
+			if len(fixedOperation) == 1 {
+				operationID = fixedOperation[0]
+			}
+			remote, dialErr := adapter.DialSSH(ctx, info, operationID)
 			if dialErr != nil {
 				_ = local.Close()
 				continue

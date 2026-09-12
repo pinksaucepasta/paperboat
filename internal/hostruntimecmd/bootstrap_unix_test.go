@@ -359,7 +359,7 @@ func TestWorkerGenerationRequiresStrictDurableState(t *testing.T) {
 	}
 }
 
-func TestServerHeartbeatReadinessBindsVersionAndNewGeneration(t *testing.T) {
+func TestServerHeartbeatReadinessBindsVersionGenerationAndFreshness(t *testing.T) {
 	root := t.TempDir()
 	runtimeRoot := filepath.Join(root, "runtime")
 	if err := os.Mkdir(runtimeRoot, 0o700); err != nil {
@@ -375,11 +375,57 @@ func TestServerHeartbeatReadinessBindsVersionAndNewGeneration(t *testing.T) {
 		}
 	}
 	write(5, "2026.07.25.4")
-	if !serverHeartbeatReady(root, "2026.07.25.4", 4) {
+	accepted := time.Date(2026, 7, 26, 0, 0, 0, 0, time.UTC)
+	if !serverHeartbeatReady(root, "2026.07.25.4", 5, accepted) {
 		t.Fatal("new generation heartbeat was not ready")
 	}
-	if serverHeartbeatReady(root, "2026.07.25.5", 4) || serverHeartbeatReady(root, "2026.07.25.4", 5) {
+	if serverHeartbeatReady(root, "2026.07.25.5", 5, accepted) || serverHeartbeatReady(root, "2026.07.25.4", 4, accepted) || serverHeartbeatReady(root, "2026.07.25.4", 5, accepted.Add(time.Second)) {
 		t.Fatal("stale or wrong-version heartbeat was accepted")
+	}
+}
+
+func TestBootstrapReadinessReusesCurrentWorkerOnlyWithFreshReceipt(t *testing.T) {
+	root, now := t.TempDir(), time.Now().UTC()
+	if err := os.Mkdir(filepath.Join(root, "runtime"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name string, value any) {
+		body, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "runtime", name), body, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("worker-boot.json", map[string]any{"schema": "paperboat.worker-boot/v1", "os_boot_id": "boot", "generation": 5, "started_at": now.Add(-time.Hour)})
+	write("server-heartbeat.json", map[string]any{"schema": "paperboat.server-heartbeat/v1", "worker_generation": 5, "reporter_version": "2026.07.25.4", "accepted_at": now})
+	ready := func(minimum uint64, since time.Time) bool {
+		response := &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"live":true}`))}
+		return bootstrapWorkerReady(context.Background(), response, root, "2026.07.25.4", minimum, since, false)
+	}
+	if !ready(5, now) {
+		t.Fatal("resumed healthy worker was rejected")
+	}
+	if ready(6, now) {
+		t.Fatal("fresh install accepted an old worker")
+	}
+	if ready(5, now.Add(time.Second)) {
+		t.Fatal("retry accepted stale server readiness")
+	}
+}
+
+func TestFailedInstallationReportPreservesRecoveryCredential(t *testing.T) {
+	root := enrolledStateRoot(t, "helper_preserve", "env_preserve")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusConflict) }))
+	defer server.Close()
+	material := bootstrap.Material{ControlURL: server.URL, HelperID: "helper_preserve", EnvironmentID: "env_preserve", UserMachineEnrollmentID: "ume_preserve"}
+	err := failBootstrapInstallation(context.Background(), errors.New("not ready"), material, root, "service_readiness")
+	if err == nil || !strings.Contains(err.Error(), "409") {
+		t.Fatalf("failure report = %v", err)
+	}
+	if _, err := enrollment.LoadRuntimeIdentityForRenewal(root, time.Now().UTC()); err != nil {
+		t.Fatalf("recovery credential removed: %v", err)
 	}
 }
 

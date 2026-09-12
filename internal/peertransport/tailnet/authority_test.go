@@ -235,7 +235,6 @@ func TestNetworkAuthorityRejectsInvalidBindingsAndScopes(t *testing.T) {
 			p := key.NewNode().Public().Raw32()
 			c.Self.WireGuardPublicKey = base64.RawURLEncoding.EncodeToString(p[:])
 		},
-		"cross_account":           func(c *NetworkConfiguration) { c.Peers[0].Identity.AccountID = "other" },
 		"ungranted":               func(c *NetworkConfiguration) { c.Peers[0].Scopes = nil },
 		"wrong_direction":         func(c *NetworkConfiguration) { c.Peers[0].Scopes[0].Direction = "accept" },
 		"wrong_port":              func(c *NetworkConfiguration) { c.Peers[0].Scopes[0].Port = 22 },
@@ -271,6 +270,17 @@ func TestNetworkAuthorityRejectsInvalidBindingsAndScopes(t *testing.T) {
 	token = token[:len(token)-4] + "AAAA"
 	if a.Apply(context.Background(), token) == nil {
 		t.Fatal("invalid signature accepted")
+	}
+}
+
+func TestNetworkAuthorityAcceptsSignedCrossAccountPeer(t *testing.T) {
+	a, cfg, private, _ := networkTestAuthority(t)
+	cfg.Peers[0].Identity.AccountID = "shared_machine_owner"
+	if err := a.Apply(t.Context(), networkToken(t, private, cfg)); err != nil {
+		t.Fatal(err)
+	}
+	if !a.Allows("machine_test", "grant_test", "terminal", "dial") {
+		t.Fatal("signed cross-account machine scope was not installed")
 	}
 }
 
