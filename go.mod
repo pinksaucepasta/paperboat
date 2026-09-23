@@ -2,7 +2,7 @@ module github.com/pinksaucepasta/paperboat
 
 go 1.27.1
 
-replace tailscale.com => ./upstream/tailscale
+replace tailscale.com => github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20260923014721-77d76f6fe81c
 
 require (
 	github.com/Microsoft/go-winio v0.6.2
