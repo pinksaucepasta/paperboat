@@ -33,5 +33,4 @@ pb auth [flags]
 * [pb auth login](pb_auth_login.md)	 - Sign in with a 26-character enrollment token
 * [pb auth logout](pb_auth_logout.md)	 - Revoke and remove the active client session
 * [pb auth status](pb_auth_status.md)	 - Show the active Paperboat account
-* [pb auth switch](pb_auth_switch.md)	 - Show dashboard enrollment instructions
 

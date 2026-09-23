@@ -4096,11 +4096,10 @@ func actionHomeAccount(command *cobra.Command) error {
 		if err != nil {
 			return err
 		}
-		items := []selector.Item{{ID: "status", Title: "Account status", Description: "Not signed in"}, {ID: "login", Title: "Sign in", Description: "Show dashboard enrollment instructions"}}
+		items := []selector.Item{{ID: "status", Title: "Account status", Description: "Not signed in"}, {ID: "login", Title: "Sign in", Description: "Enter an enrollment token"}}
 		if _, credentialErr := d.auth.Credential(); credentialErr == nil {
 			items = []selector.Item{
 				{ID: "status", Title: "Account status", Description: "Signed in"},
-				{ID: "switch", Title: "Switch account", Description: "Replace the account used for this server"},
 				{ID: "logout", Title: "Sign out", Description: "Revoke this CLI session"},
 			}
 		}
@@ -4131,10 +4130,6 @@ func actionHomeAccount(command *cobra.Command) error {
 			}
 		case "login":
 			if err := executeInteractiveCommand(command, []string{"auth", "login"}); err != nil {
-				return err
-			}
-		case "switch":
-			if err := executeInteractiveCommand(command, []string{"auth", "switch"}); err != nil {
 				return err
 			}
 		case "logout":
@@ -5443,7 +5438,6 @@ func newApp() *command.App {
 func authCommand() *command.Spec {
 	return &command.Spec{Name: "auth", Usage: "Manage Paperboat sign-in", Subcommands: []*command.Spec{
 		{Name: "login", Usage: "Sign in with a 26-character enrollment token", Flags: []command.Flag{&command.StringFlag{Name: "token-file", Usage: "absolute protected file containing the enrollment token"}, &command.BoolFlag{Name: "json", Usage: "print sign-in result as JSON"}}, Action: authTokenLogin},
-		{Name: "switch", Usage: "Show dashboard enrollment instructions", Flags: []command.Flag{&command.BoolFlag{Name: "json", Usage: "print enrollment instructions as JSON"}}, Action: authLogin},
 		{Name: "status", Usage: "Show the active Paperboat account", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: authStatus},
 		{Name: "logout", Usage: "Revoke and remove the active client session", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: authLogout},
 	}}
@@ -5465,32 +5459,6 @@ func requireAuthConfig(c *command.Context) (*config.Config, config.ProfileStore,
 }
 
 const dashboardEnrollmentGuidance = "To sign in, copy the enrollment command from the Paperboat dashboard and run it on this machine.\nAn already authenticated machine can also generate install commands with `pb machine add`.\nTo authenticate this installation directly, run `pb auth login` and enter the enrollment token."
-
-func authLogin(c *command.Context) error {
-	server := strings.TrimSpace(c.String("server"))
-	if server == "" {
-		cfg, err := config.Load(c.String("config"))
-		if err != nil {
-			return fmt.Errorf("%s\nCannot determine the dashboard URL; check your CLI configuration: %w", dashboardEnrollmentGuidance, err)
-		}
-		server = cfg.ServerURL
-	}
-	server, err := config.NormalizeServerURL(server)
-	if err != nil {
-		return fmt.Errorf("%s\nCannot determine the dashboard URL; check --server: %w", dashboardEnrollmentGuidance, err)
-	}
-	// Public metadata only: never load credentials or start device authorization.
-	metadata, err := api.New(server, config.Credential{}, nil).ClientConfiguration(c.Context)
-	if err != nil {
-		return fmt.Errorf("%s\nCannot retrieve the dashboard URL from the configured server; retry when it is reachable: %w", dashboardEnrollmentGuidance, err)
-	}
-	message := dashboardEnrollmentGuidance + "\n" + metadata.MachinesURL
-	if c.Bool("json") {
-		return writeCLIJSON(c.Writer, map[string]string{"message": message})
-	}
-	_, err = fmt.Fprintln(c.Writer, message)
-	return err
-}
 
 func exportSetupRecoveryKey(command *cobra.Command) error {
 	output, err := command.Flags().GetString("recovery-output")

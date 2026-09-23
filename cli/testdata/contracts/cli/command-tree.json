@@ -14,7 +14,6 @@
     {"name":"logout","aliases":["auth logout"],"args":[],"interactive":false},
     {"name":"auth login","aliases":[],"args":[],"flags":["--token-file <absolute-path>","--json"],"interactive":true},
     {"name":"auth status","aliases":[],"args":[],"json":true},
-    {"name":"auth switch","aliases":[],"args":[],"flags":["--json"],"interactive":false},
     {"name":"machine pending","aliases":[],"args":[],"flags":["--json"],"json":true},
     {"name":"machine approve","aliases":[],"args":["<request-id>"],"flags":["--code <trust-code>","--json"],"json":true},
     {"name":"environment list","aliases":["environments"],"args":[],"json":true},

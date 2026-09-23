@@ -15,7 +15,6 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb auth login](pb_auth_login.md) | Sign in with a 26-character enrollment token |
 | [pb auth logout](pb_auth_logout.md) | Revoke and remove the active client session |
 | [pb auth status](pb_auth_status.md) | Show the active Paperboat account |
-| [pb auth switch](pb_auth_switch.md) | Show dashboard enrollment instructions |
 | [pb bugreport](pb_bugreport.md) | Create a redacted Paperboat diagnostic bundle |
 | [pb completion](pb_completion.md) | Generate the autocompletion script for the specified shell |
 | [pb completion bash](pb_completion_bash.md) | Generate the autocompletion script for bash |

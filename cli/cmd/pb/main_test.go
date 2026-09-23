@@ -910,7 +910,6 @@ func TestSpecTreeExecutesDeclaredFlagsIntoActions(t *testing.T) {
 		wantBools   map[string]bool
 	}{
 		{name: "auth login json", source: authCommand, child: "login", args: []string{"login", "--json"}, wantBools: map[string]bool{"json": true}},
-		{name: "auth switch json", source: authCommand, child: "switch", args: []string{"switch", "--json"}, wantBools: map[string]bool{"json": true}},
 		{name: "auth status json", source: authCommand, child: "status", args: []string{"status", "--json"}, wantBools: map[string]bool{"json": true}},
 		{name: "config show json", source: configCommand, child: "show", args: []string{"show", "--json"}, wantBools: map[string]bool{"json": true}},
 	}
@@ -2131,6 +2130,10 @@ func TestCanonicalCommandsAreDiscoverable(t *testing.T) {
 		if err != nil || command != root || len(remaining) != 1 {
 			t.Fatalf("removed command %q is still discoverable: command=%v remaining=%q err=%v", removed, command, remaining, err)
 		}
+	}
+	auth, remaining, err := root.Find([]string{"auth", "switch"})
+	if err != nil || auth.CommandPath() != "pb auth" || len(remaining) != 1 {
+		t.Fatalf("deferred auth switch command is still discoverable: command=%v remaining=%q err=%v", auth, remaining, err)
 	}
 }
 
