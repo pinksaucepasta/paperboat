@@ -122,8 +122,9 @@ Interrupted login resumes using protected local recovery state when you rerun
 fresh token. `pb auth logout` cancels pending login and removes local sessions;
 if cancellation cannot reach the server, retry logout when connectivity returns.
 
-`pb login` and `pb auth switch` print enrollment guidance and the dashboard URL
-supplied by the configured server. Use `pb auth status` to inspect the current
+`pb auth switch` currently prints enrollment guidance and the dashboard URL
+supplied by the configured server; it does not retain or activate another
+account session. Use `pb auth status` to inspect the current
 account and `pb doctor` for diagnostics. `--server` selects the control plane;
 use only the intended server and account.
 

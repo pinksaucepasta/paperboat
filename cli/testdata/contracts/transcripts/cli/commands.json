@@ -124,17 +124,6 @@
       "exit": 0
     },
     {
-      "command": "login",
-      "argv": [
-        "pb",
-        "login"
-      ],
-      "stdin": "",
-      "stdout": "To sign in, copy the enrollment command from the Paperboat dashboard and run it on this machine.\nAn already authenticated machine can also generate install commands with `pb machine add`.\nTo authenticate this installation directly, run `pb auth login` and enter the enrollment token.\nhttps://console.example.test/dashboard/machines\n",
-      "stderr": "",
-      "exit": 0
-    },
-    {
       "command": "logout",
       "argv": [
         "pb",

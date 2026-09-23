@@ -11,7 +11,6 @@
     {"name":"config customize explain","aliases":[],"args":["-- <arguments...>"],"flags":["--json"],"json":true,"interactive":false},
     {"name":"config customize import","aliases":[],"args":["<file>"],"flags":["--json"],"json":true,"interactive":false},
     {"name":"config customize reset","aliases":[],"args":[],"flags":["--json","--yes"],"json":true,"interactive":false},
-    {"name":"login","aliases":[],"args":[],"flags":["--json"],"interactive":false},
     {"name":"logout","aliases":["auth logout"],"args":[],"interactive":false},
     {"name":"auth login","aliases":[],"args":[],"flags":["--token-file <absolute-path>","--json"],"interactive":true},
     {"name":"auth status","aliases":[],"args":[],"json":true},

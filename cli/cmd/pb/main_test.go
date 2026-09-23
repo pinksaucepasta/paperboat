@@ -2120,13 +2120,13 @@ func TestMachineTransportSnapshotRetainsAutoMarkerForMixedPaths(t *testing.T) {
 
 func TestCanonicalCommandsAreDiscoverable(t *testing.T) {
 	root := newRootCommand()
-	for _, path := range [][]string{{"login"}, {"logout"}, {"pair"}, {"session", "attach"}, {"session", "list"}, {"machine", "add"}, {"machine", "list"}, {"machine", "rename"}, {"machine", "revoke"}, {"machine", "availability"}, {"preview", "list"}, {"preview", "stop"}} {
+	for _, path := range [][]string{{"auth", "login"}, {"logout"}, {"pair"}, {"session", "attach"}, {"session", "list"}, {"machine", "add"}, {"machine", "list"}, {"machine", "rename"}, {"machine", "revoke"}, {"machine", "availability"}, {"preview", "list"}, {"preview", "stop"}} {
 		command, remaining, err := root.Find(path)
 		if err != nil || len(remaining) != 0 || command == root {
 			t.Fatalf("command %q not discoverable: command=%v remaining=%q err=%v", path, command, remaining, err)
 		}
 	}
-	for _, removed := range []string{"create", "projects"} {
+	for _, removed := range []string{"create", "projects", "login"} {
 		command, remaining, err := root.Find([]string{removed})
 		if err != nil || command != root || len(remaining) != 1 {
 			t.Fatalf("removed command %q is still discoverable: command=%v remaining=%q err=%v", removed, command, remaining, err)

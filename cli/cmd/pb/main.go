@@ -2587,7 +2587,7 @@ Numeric invocations such as pb 3000 select the configured preview or tunnel acti
 
 Run pb doctor for diagnostics. Check command output for partial changes and
 recovery instructions before retrying an operation that may have created resources.`,
-		Example: "  pb\n  pb login\n  pb environments\n  pb connect Studio\n  pb ssh Studio\n  pb preview 3000\n  pb tunnel create demo --port 3000\n  pb config customize\n  pb --no-customization environments --json",
+		Example: "  pb\n  pb auth login\n  pb environments\n  pb connect Studio\n  pb ssh Studio\n  pb preview 3000\n  pb tunnel create demo --port 3000\n  pb config customize\n  pb --no-customization environments --json",
 		Args: commandArgs(func(command *cobra.Command, args []string) error {
 			if command.ArgsLenAtDash() == 1 && len(args) >= 2 {
 				return nil
@@ -2728,9 +2728,6 @@ recovery instructions before retrying an operation that may have created resourc
 		return actionHomeAccount(command)
 	}
 	root.AddCommand(authTree)
-	login := &cobra.Command{Use: "login", Short: "Show dashboard enrollment instructions", Args: commandArgs(cobra.NoArgs), RunE: actionRun(authLogin)}
-	login.Flags().Bool("json", false, "print enrollment instructions as JSON")
-	root.AddCommand(login)
 	logout := &cobra.Command{Use: "logout", Short: "Revoke and remove the active client session", Args: commandArgs(cobra.NoArgs), RunE: actionRun(authLogout)}
 	logout.Flags().Bool("json", false, "print JSON")
 	root.AddCommand(logout)

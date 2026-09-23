@@ -31,7 +31,7 @@ pb [environment] [new] [flags]
 
 ```
   pb
-  pb login
+  pb auth login
   pb environments
   pb connect Studio
   pb ssh Studio
@@ -76,7 +76,6 @@ pb [environment] [new] [flags]
 * [pb exec](pb_exec.md)	 - Execute an exact command on a machine
 * [pb inbox](pb_inbox.md)	 - Manage the Paperboat Inbox
 * [pb install](pb_install.md)	 - Install this executable and its local service
-* [pb login](pb_login.md)	 - Show dashboard enrollment instructions
 * [pb logout](pb_logout.md)	 - Revoke and remove the active client session
 * [pb machine](pb_machine.md)	 - Manage machines
 * [pb pair](pb_pair.md)	 - Enroll this device with a one-shot token

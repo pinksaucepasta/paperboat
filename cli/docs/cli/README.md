@@ -105,7 +105,6 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb inbox reset](pb_inbox_reset.md) |  |
 | [pb inbox set](pb_inbox_set.md) |  |
 | [pb install](pb_install.md) | Install this executable and its local service |
-| [pb login](pb_login.md) | Show dashboard enrollment instructions |
 | [pb logout](pb_logout.md) | Revoke and remove the active client session |
 | [pb machine](pb_machine.md) | Manage machines |
 | [pb machine add](pb_machine_add.md) | Print Linux/macOS and Windows machine enrollment commands |

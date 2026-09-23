@@ -26,7 +26,6 @@ macOS PKG install bundled manuals automatically. For source installs, use
 ```sh
 pb <environment>             # attach a hosted project or machine terminal
 pb environments               # list hosted projects and machines
-pb login                     # show dashboard and machine-add enrollment guidance
 pb auth login                # enter the enrollment token directly
 pb machine add               # print Linux/macOS and Windows install commands
 pb auth status               # show the active account for the configured server

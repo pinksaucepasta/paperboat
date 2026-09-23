@@ -404,7 +404,7 @@ func interactiveStreaming(args []string) bool {
 		return true
 	}
 	switch args[0] {
-	case "connect", "ssh", "scp", "sftp", "exec", "preview", "access", "auth", "login", "setup", "pair", "uninstall":
+	case "connect", "ssh", "scp", "sftp", "exec", "preview", "access", "auth", "setup", "pair", "uninstall":
 		return true
 	}
 	for _, arg := range args {
