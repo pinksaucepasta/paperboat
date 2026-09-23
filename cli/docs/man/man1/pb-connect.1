@@ -1,0 +1,70 @@
+.nh
+.TH "PB-CONNECT" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-connect - Create and attach to an environment terminal session
+
+
+.SH SYNOPSIS
+\fBpb connect  [new] [flags]\fP
+
+
+.SH DESCRIPTION
+Create and attach to an environment terminal session
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB--debug\fP[=false]
+	show the pb versions used by this terminal session
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for connect
+
+.PP
+\fB--name\fP=""
+	name for the fresh terminal session
+
+.PP
+\fB--session\fP=""
+	attach an existing terminal session by name or ID
+
+.PP
+\fB--status-bar\fP=""
+	status bar for this attach: auto, on, or off
+
+.PP
+\fB--status-bar-fullscreen\fP=""
+	status bar in full-screen applications: hide or show
+
+.PP
+\fB--status-bar-theme\fP=""
+	status bar theme: terminal, dark, light, or mono
+
+.PP
+\fB--transport\fP=""
+	peer transport: a (auto), d (direct QUIC), q (relay QUIC), w (relay WSS), or r (relay race)
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb(1)\fP

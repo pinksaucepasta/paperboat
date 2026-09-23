@@ -1,0 +1,46 @@
+.nh
+.TH "PB-DAEMON-DEVICE-GUARD-INSTALL" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-daemon-device-guard-install - Install the root-owned device guard service
+
+
+.SH SYNOPSIS
+\fBpb daemon device-guard install [flags]\fP
+
+
+.SH DESCRIPTION
+Install the root-owned device guard service
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for install
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--loopback-cidr\fP=""
+	validated local device loopback /16
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	configuration file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	Paperboat server URL
+
+
+.SH SEE ALSO
+\fBpb-daemon-device-guard(1)\fP

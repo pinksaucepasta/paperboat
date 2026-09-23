@@ -1,0 +1,10 @@
+.git
+**/.git
+**/.env
+**/.env.*
+**/.build
+**/.codex-build
+**/bin
+**/build
+**/dist
+**/__pycache__

@@ -1,0 +1,50 @@
+.nh
+.TH "PB-TEAM-ACTIVITY" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-activity - View owner/admin activity from the last 90 days
+
+
+.SH SYNOPSIS
+\fBpb team activity  [flags]\fP
+
+
+.SH DESCRIPTION
+View owner/admin activity from the last 90 days
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--cursor\fP=""
+	next_cursor from the previous page
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for activity
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON including metadata and next_cursor
+
+.PP
+\fB--limit\fP=50
+	maximum events, 1–200
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-team(1)\fP

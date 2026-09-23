@@ -1,0 +1,46 @@
+.nh
+.TH "PB-AUTH-LOGIN" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-auth-login - Sign in with a 26-character enrollment token
+
+
+.SH SYNOPSIS
+\fBpb auth login [flags]\fP
+
+
+.SH DESCRIPTION
+Sign in with a 26-character enrollment token
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for login
+
+.PP
+\fB--json\fP[=false]
+	print sign-in result as JSON
+
+.PP
+\fB--token-file\fP=""
+	absolute protected file containing the enrollment token
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-auth(1)\fP

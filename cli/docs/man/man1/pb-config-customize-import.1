@@ -1,0 +1,42 @@
+.nh
+.TH "PB-CONFIG-CUSTOMIZE-IMPORT" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-customize-import - Validate and replace local preferences from a JSON file
+
+
+.SH SYNOPSIS
+\fBpb config customize import  [flags]\fP
+
+
+.SH DESCRIPTION
+Validate and replace local preferences from a JSON file
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for import
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-config-customize(1)\fP

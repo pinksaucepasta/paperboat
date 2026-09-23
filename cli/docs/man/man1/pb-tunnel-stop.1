@@ -1,0 +1,46 @@
+.nh
+.TH "PB-TUNNEL-STOP" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel-stop - Stop an ephemeral tunnel
+
+
+.SH SYNOPSIS
+\fBpb tunnel stop  [flags]\fP
+
+
+.SH DESCRIPTION
+Stop an ephemeral tunnel
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for stop
+
+.PP
+\fB--json\fP[=false]
+	print the stopped canonical resource as JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-tunnel(1)\fP

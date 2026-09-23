@@ -1,0 +1,42 @@
+.nh
+.TH "PB-SERVICE-STATUS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-service-status - Show Paperboat daemon current-user service status
+
+
+.SH SYNOPSIS
+\fBpb service status [flags]\fP
+
+
+.SH DESCRIPTION
+Show Paperboat daemon current-user service status
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for status
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-service(1)\fP

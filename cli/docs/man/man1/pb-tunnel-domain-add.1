@@ -1,0 +1,62 @@
+.nh
+.TH "PB-TUNNEL-DOMAIN-ADD" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel-domain-add - Add a tunnel domain
+
+
+.SH SYNOPSIS
+\fBpb tunnel domain add   [flags]\fP
+
+
+.SH DESCRIPTION
+Add a tunnel domain
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for add
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+.PP
+\fB--provider\fP="generic"
+	DNS provider
+
+.PP
+\fB--route\fP=""
+	route
+
+.PP
+\fB--timeout\fP=2m0s
+	maximum time to wait for operation completion
+
+.PP
+\fB--wait\fP[=false]
+	wait for the operation to reach a terminal state
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-tunnel-domain(1)\fP

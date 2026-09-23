@@ -1,0 +1,50 @@
+.nh
+.TH "PB-SESSIONS-CLOSE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-sessions-close - Close one or all terminal sessions
+
+
+.SH SYNOPSIS
+\fBpb sessions close  [] [flags]\fP
+
+
+.SH DESCRIPTION
+Close one or all terminal sessions
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--all\fP[=false]
+	close all sessions in the environment
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for close
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--yes\fP[=false]
+	confirm close
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-sessions(1)\fP

@@ -1,0 +1,54 @@
+.nh
+.TH "PB-TUNNEL-ROUTE-LIST" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel-route-list - List tunnel routes
+
+
+.SH SYNOPSIS
+\fBpb tunnel route list  [flags]\fP
+
+
+.SH DESCRIPTION
+List tunnel routes
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--cursor\fP=""
+	continue a previous page
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for list
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+.PP
+\fB--limit\fP=100
+	maximum results (1-200)
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-tunnel-route(1)\fP

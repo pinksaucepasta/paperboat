@@ -1,0 +1,54 @@
+.nh
+.TH "PB-TUNNEL-STATUS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel-status - Show tunnel health
+
+
+.SH SYNOPSIS
+\fBpb tunnel status  [flags]\fP
+
+
+.SH DESCRIPTION
+Show tunnel health
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for status
+
+.PP
+\fB--interval\fP=1s
+	watch polling interval (250ms-1m)
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+.PP
+\fB--watch\fP[=false]
+	watch for health changes
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-tunnel(1)\fP

@@ -1,0 +1,78 @@
+.nh
+.TH "PB-TUNNEL-CREATE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel-create - Create a durable tunnel
+
+
+.SH SYNOPSIS
+\fBpb tunnel create  [flags]\fP
+
+
+.SH DESCRIPTION
+Create a durable tunnel
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--domain\fP=[]
+	custom domain to add after creation
+
+.PP
+\fB--duration\fP=0s
+	optional tunnel lifetime
+
+.PP
+\fB--from\fP=""
+	origin URL (http, https, h2c, tcp, or unix)
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for create
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+.PP
+\fB--port\fP=0
+	local TCP port
+
+.PP
+\fB--private\fP[=false]
+	require authenticated private access
+
+.PP
+\fB--team\fP[=false]
+	require an explicit team grant for browser access
+
+.PP
+\fB--timeout\fP=2m0s
+	maximum time to wait for operation completion
+
+.PP
+\fB--wait\fP[=false]
+	wait for the operation to reach a terminal state
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-tunnel(1)\fP

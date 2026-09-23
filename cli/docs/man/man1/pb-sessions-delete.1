@@ -1,0 +1,50 @@
+.nh
+.TH "PB-SESSIONS-DELETE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-sessions-delete - Delete a terminal session and its history
+
+
+.SH SYNOPSIS
+\fBpb sessions delete  [] [flags]\fP
+
+
+.SH DESCRIPTION
+Delete a terminal session and its history
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--all\fP[=false]
+	delete all sessions in the environment
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for delete
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--yes\fP[=false]
+	confirm delete
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-sessions(1)\fP

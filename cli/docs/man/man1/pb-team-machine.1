@@ -1,0 +1,42 @@
+.nh
+.TH "PB-TEAM-MACHINE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-machine - Share machines and manage exact team access
+
+
+.SH SYNOPSIS
+\fBpb team machine [flags]\fP
+
+
+.SH DESCRIPTION
+Share a personal enrollment or explicitly transfer it to a team. Each teammate uses their own PB account and starts separate terminal sessions. All remote work runs as the enrolled OS user, so it shares that user's OS file and process permissions. Tunnel management covers existing private/team tunnels; create tunnels locally on the target machine. Machine grants do not grant ENV administration, public publication, resharing, or attachment to another person's terminal.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for machine
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-team(1)\fP, \fBpb-team-machine-grant(1)\fP, \fBpb-team-machine-remove(1)\fP, \fBpb-team-machine-share(1)\fP, \fBpb-team-machine-transfer-to-team(1)\fP, \fBpb-team-machine-unshare(1)\fP

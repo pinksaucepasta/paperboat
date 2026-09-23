@@ -1,0 +1,41 @@
+.nh
+.TH "PB-CONFIG-SHOW" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-show - Print the effective config
+
+
+.SH SYNOPSIS
+\fBpb config show [flags]\fP
+
+
+.SH DESCRIPTION
+Print the effective config
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for show
+
+.PP
+\fB--json\fP[=false]
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-config(1)\fP

@@ -1,0 +1,142 @@
+.nh
+.TH "PB-TUNNEL-ROUTE-UPDATE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel-route-update - Update a tunnel route
+
+
+.SH SYNOPSIS
+\fBpb tunnel route update   [flags]\fP
+
+
+.SH DESCRIPTION
+Update a tunnel route
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--ca-reference\fP=""
+	protected custom CA reference
+
+.PP
+\fB--clear-ca-reference\fP[=false]
+	remove the custom CA reference
+
+.PP
+\fB--clear-client-credential-reference\fP[=false]
+	remove the origin mTLS credential reference
+
+.PP
+\fB--clear-host-header\fP[=false]
+	remove the origin Host override
+
+.PP
+\fB--clear-path\fP[=false]
+	remove the HTTP path prefix
+
+.PP
+\fB--clear-tls-server-name\fP[=false]
+	remove the explicit origin TLS server name
+
+.PP
+\fB--client-credential-reference\fP=""
+	protected origin mTLS credential reference
+
+.PP
+\fB--connect-timeout\fP=0s
+	new origin connect timeout
+
+.PP
+\fB--disable\fP[=false]
+	disable the route
+
+.PP
+\fB--domain\fP=""
+	new exact hostname, wildcard, or empty catch-all
+
+.PP
+\fB--enable\fP[=false]
+	enable the route
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for update
+
+.PP
+\fB--host-header\fP=""
+	override the origin Host header
+
+.PP
+\fB--idle-timeout\fP=0s
+	new stream idle timeout
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+.PP
+\fB--max-streams\fP=0
+	new maximum concurrent streams
+
+.PP
+\fB--name\fP=""
+	new route name
+
+.PP
+\fB--path\fP=""
+	new HTTP path prefix
+
+.PP
+\fB--preserve-host\fP[=true]
+	preserve the incoming Host header
+
+.PP
+\fB--priority\fP=0
+	new route priority
+
+.PP
+\fB--protocol\fP=""
+	new route protocol (http or tcp_private)
+
+.PP
+\fB--timeout\fP=2m0s
+	maximum time to wait for operation completion
+
+.PP
+\fB--tls-server-name\fP=""
+	explicit origin TLS server name
+
+.PP
+\fB--tls-verification\fP=""
+	origin TLS verification (system, custom_ca, or insecure_development)
+
+.PP
+\fB--to\fP=""
+	new origin URL
+
+.PP
+\fB--wait\fP[=false]
+	wait for the operation to reach a terminal state
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-tunnel-route(1)\fP

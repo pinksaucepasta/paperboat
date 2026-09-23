@@ -1,0 +1,62 @@
+.nh
+.TH "PB-TEAM-MACHINE-GRANT" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-machine-grant - Set all-member or selected-member machine capabilities
+
+
+.SH SYNOPSIS
+\fBpb team machine grant   [flags]\fP
+
+
+.SH DESCRIPTION
+Set the complete capability list for one all-member or selected-member grant. Effective access is the union of both grants. Use --active=false to revoke this grant. Team roles alone do not grant machine use.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--active\fP[=true]
+	set false to revoke this grant
+
+.PP
+\fB--all-members\fP[=false]
+	grant every current and future accepted team member
+
+.PP
+\fB--capability\fP=[]
+	exact capabilities: terminal,exec,managed_ssh,files,preview_manage,tunnel_manage
+
+.PP
+\fB--generation\fP=0
+	expected current team generation
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for grant
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+.PP
+\fB--member\fP=""
+	grant only this accepted member account
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-team-machine(1)\fP

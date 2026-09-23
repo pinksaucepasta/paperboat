@@ -1,0 +1,676 @@
+package tunnel
+
+import (
+	"context"
+	"encoding/binary"
+	"encoding/json"
+	"errors"
+	"io"
+	"net"
+	"sync"
+	"time"
+)
+
+const localPeerMaximumFrame = 1 << 20
+
+const (
+	localPeerData byte = iota + 1
+	localPeerResize
+	localPeerCloseWrite
+	localPeerWait
+	localPeerClose
+	localPeerResult
+	localPeerFailure
+	localPeerExecEvent
+	localPeerExecCancel
+	localPeerExecSignal
+	localPeerExecDetach
+	localPeerClosed
+	localPeerMetadata
+	localPeerTerminalData
+	localPeerTerminalSequence
+	localPeerReplayGap
+)
+
+type localPeerReplayGapPayload struct{ requested, earliest, latest uint64 }
+
+// LocalPeerCursorBridge carries terminal output ordering across the daemon IPC
+// boundary. A sequence recorded while Read is active belongs to that returned
+// data; a sequence recorded outside Read is an attachment baseline.
+type LocalPeerCursorBridge struct {
+	mu       sync.Mutex
+	inRead   bool
+	baseline uint64
+	read     uint64
+	gaps     []localPeerReplayGapPayload
+}
+
+func (b *LocalPeerCursorBridge) RecordSequence(sequence int) {
+	if b == nil || sequence < 0 {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.inRead {
+		b.read = max(b.read, uint64(sequence))
+	} else {
+		b.baseline = max(b.baseline, uint64(sequence))
+	}
+}
+func (b *LocalPeerCursorBridge) RecordReplayGap(requested, earliest, latest uint64) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	if len(b.gaps) < 4 {
+		b.gaps = append(b.gaps, localPeerReplayGapPayload{requested, earliest, latest})
+	}
+	b.mu.Unlock()
+}
+func (b *LocalPeerCursorBridge) beginRead() {
+	if b != nil {
+		b.mu.Lock()
+		b.inRead = true
+		b.read = 0
+		b.mu.Unlock()
+	}
+}
+func (b *LocalPeerCursorBridge) endRead() uint64 {
+	if b == nil {
+		return 0
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.inRead = false
+	return b.read
+}
+func (b *LocalPeerCursorBridge) takeBaselineAndGaps() (uint64, []localPeerReplayGapPayload) {
+	if b == nil {
+		return 0, nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	sequence := b.baseline
+	b.baseline = 0
+	gaps := append([]localPeerReplayGapPayload(nil), b.gaps...)
+	b.gaps = nil
+	return sequence, gaps
+}
+
+type localPeerMetadataPayload struct {
+	RuntimeVersion string `json:"runtime_version,omitempty"`
+}
+
+type localPeerWriter struct {
+	writer io.Writer
+	mu     sync.Mutex
+}
+
+func (w *localPeerWriter) write(kind byte, payload []byte) error {
+	if w == nil || w.writer == nil || len(payload) > localPeerMaximumFrame {
+		return ErrPeerTerminalInvalid
+	}
+	header := [5]byte{kind}
+	binary.BigEndian.PutUint32(header[1:], uint32(len(payload)))
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if err := writeNativeFull(w.writer, header[:]); err != nil {
+		return err
+	}
+	return writeNativeFull(w.writer, payload)
+}
+
+func readLocalPeerFrame(reader io.Reader) (byte, []byte, error) {
+	var header [5]byte
+	if _, err := io.ReadFull(reader, header[:]); err != nil {
+		return 0, nil, err
+	}
+	size := binary.BigEndian.Uint32(header[1:])
+	if size > localPeerMaximumFrame || header[0] < localPeerData || header[0] > localPeerReplayGap {
+		return 0, nil, ErrPeerTerminalInvalid
+	}
+	payload := make([]byte, size)
+	if _, err := io.ReadFull(reader, payload); err != nil {
+		return 0, nil, err
+	}
+	return header[0], payload, nil
+}
+
+// ServeLocalPeerConn projects the terminal connection contract over one
+// authenticated local Unix stream. The remote carrier remains daemon-owned.
+func ServeLocalPeerConn(ctx context.Context, local net.Conn, remote Conn) error {
+	return serveLocalPeerConn(ctx, local, remote, false, nil)
+}
+
+func ServeLocalPeerTerminalConn(ctx context.Context, local net.Conn, remote Conn, cursor *LocalPeerCursorBridge) error {
+	return serveLocalPeerConn(ctx, local, remote, false, cursor)
+}
+
+// ServeLocalPeerDebugConn includes one negotiated metadata frame before the
+// terminal byte stream. Normal terminal and exec streams remain unchanged.
+func ServeLocalPeerDebugConn(ctx context.Context, local net.Conn, remote Conn) error {
+	return serveLocalPeerConn(ctx, local, remote, true, nil)
+}
+
+func ServeLocalPeerDebugTerminalConn(ctx context.Context, local net.Conn, remote Conn, cursor *LocalPeerCursorBridge) error {
+	return serveLocalPeerConn(ctx, local, remote, true, cursor)
+}
+
+func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includeMetadata bool, cursor *LocalPeerCursorBridge) error {
+	if ctx == nil || local == nil || remote == nil {
+		return ErrPeerTerminalInvalid
+	}
+	defer local.Close()
+	defer remote.Close()
+	writer := &localPeerWriter{writer: local}
+	if includeMetadata {
+		metadata, err := json.Marshal(localPeerMetadataPayload{RuntimeVersion: TerminalRuntimeVersion(remote)})
+		if err != nil || len(metadata) > localPeerMaximumFrame {
+			return ErrPeerTerminalInvalid
+		}
+		if err := writer.write(localPeerMetadata, metadata); err != nil {
+			return err
+		}
+	}
+	remoteExec, isExec := remote.(ExecConn)
+	done := make(chan error, 3)
+	outputDone := make(chan struct{})
+	waitStarted := false
+	if isExec {
+		go func() {
+			defer close(outputDone)
+			terminal := false
+			for event := range remoteExec.Events() {
+				if event.Stream == "" && event.State != "" && event.State != "started" {
+					terminal = true
+				}
+				encoded, err := json.Marshal(event)
+				if err != nil || len(encoded) > localPeerMaximumFrame {
+					done <- ErrPeerTerminalInvalid
+					return
+				}
+				if err := writer.write(localPeerExecEvent, encoded); err != nil {
+					done <- err
+					return
+				}
+			}
+			// An exec event stream can close normally only after its terminal
+			// event. Without one, the remote operation outcome is unknown and
+			// Wait may never unblock after a carrier or host failure.
+			if !terminal {
+				done <- ErrTransportLost
+			}
+		}()
+	} else {
+		go func() {
+			defer close(outputDone)
+			sequence, gaps := cursor.takeBaselineAndGaps()
+			for _, gap := range gaps {
+				payload := make([]byte, 24)
+				binary.BigEndian.PutUint64(payload, gap.requested)
+				binary.BigEndian.PutUint64(payload[8:], gap.earliest)
+				binary.BigEndian.PutUint64(payload[16:], gap.latest)
+				if err := writer.write(localPeerReplayGap, payload); err != nil {
+					done <- err
+					return
+				}
+			}
+			if sequence > 0 {
+				payload := make([]byte, 8)
+				binary.BigEndian.PutUint64(payload, sequence)
+				if err := writer.write(localPeerTerminalSequence, payload); err != nil {
+					done <- err
+					return
+				}
+			}
+			buffer := make([]byte, 32<<10)
+			for {
+				cursor.beginRead()
+				count, err := remote.Read(buffer)
+				sequence := cursor.endRead()
+				if count > 0 {
+					payload := make([]byte, 8+count)
+					binary.BigEndian.PutUint64(payload, sequence)
+					copy(payload[8:], buffer[:count])
+					if writeErr := writer.write(localPeerTerminalData, payload); writeErr != nil {
+						done <- writeErr
+						return
+					}
+				}
+				if err != nil {
+					if count == 0 && sequence > 0 {
+						payload := make([]byte, 8)
+						binary.BigEndian.PutUint64(payload, sequence)
+						if writeErr := writer.write(localPeerTerminalSequence, payload); writeErr != nil {
+							done <- writeErr
+							return
+						}
+					}
+					if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrClosedPipe) && !errors.Is(err, net.ErrClosed) {
+						done <- err
+					}
+					return
+				}
+			}
+		}()
+	}
+	go func() {
+		for {
+			kind, payload, err := readLocalPeerFrame(local)
+			if err != nil {
+				done <- err
+				return
+			}
+			switch kind {
+			case localPeerData:
+				if _, err := remote.Write(payload); err != nil {
+					done <- err
+					return
+				}
+			case localPeerResize:
+				if len(payload) != 4 {
+					done <- ErrPeerTerminalInvalid
+					return
+				}
+				rows, cols := binary.BigEndian.Uint16(payload[:2]), binary.BigEndian.Uint16(payload[2:])
+				if resizeErr := remote.Resize(rows, cols); resizeErr != nil {
+					done <- ErrPeerTerminalInvalid
+					return
+				}
+			case localPeerCloseWrite:
+				closer, ok := remote.(InputHalfCloser)
+				if !ok || closer.CloseWrite() != nil {
+					done <- ErrInputEOFUnsupported
+					return
+				}
+			case localPeerWait:
+				if waitStarted {
+					done <- ErrPeerTerminalInvalid
+					return
+				}
+				waitStarted = true
+				go func() {
+					code, waitErr := remote.Wait()
+					if !isExec {
+						<-outputDone
+					}
+					result := make([]byte, 4)
+					binary.BigEndian.PutUint32(result, uint32(int32(code)))
+					kind := localPeerResult
+					if waitErr != nil {
+						kind, result = localPeerFailure, nil
+					}
+					if err := writer.write(kind, result); err != nil {
+						done <- err
+					}
+				}()
+			case localPeerClose:
+				closeErr := remote.Close()
+				ackErr := writer.write(localPeerClosed, nil)
+				done <- errors.Join(closeErr, ackErr)
+				return
+			case localPeerExecCancel:
+				if !isExec || remoteExec.Cancel() != nil {
+					done <- ErrPeerTerminalInvalid
+					return
+				}
+			case localPeerExecSignal:
+				if !isExec || len(payload) == 0 || len(payload) > 64 || remoteExec.Signal(string(payload)) != nil {
+					done <- ErrPeerTerminalInvalid
+					return
+				}
+			case localPeerExecDetach:
+				if !isExec || remoteExec.Detach() != nil {
+					done <- ErrPeerTerminalInvalid
+					return
+				}
+			default:
+				done <- ErrPeerTerminalInvalid
+				return
+			}
+		}
+	}()
+	select {
+	case err := <-done:
+		if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
+			return nil
+		}
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+type localPeerConn struct {
+	connection        net.Conn
+	writer            *localPeerWriter
+	runtimeVersion    string
+	initialKind       byte
+	initialPayload    []byte
+	data              chan localPeerOutput
+	result            chan localPeerWaitResult
+	done              chan struct{}
+	closed            chan struct{}
+	stop              chan struct{}
+	events            chan ExecEvent
+	exec              bool
+	mu                sync.Mutex
+	pending           []byte
+	pendingSequence   uint64
+	committedSequence uint64
+	sequenceSink      func(int)
+	replayGapSink     func(uint64, uint64, uint64)
+	once              sync.Once
+	stopOnce          sync.Once
+}
+
+type localPeerOutput struct {
+	data     []byte
+	sequence uint64
+}
+
+type localPeerWaitResult struct {
+	code int
+	err  error
+}
+
+func NewLocalPeerConn(connection net.Conn, sequenceSink func(int), replayGapSink func(uint64, uint64, uint64)) (Conn, error) {
+	value, err := newLocalPeerConn(connection, false, false, sequenceSink, replayGapSink)
+	if err != nil {
+		return nil, err
+	}
+	return &localBasicPeerConn{inner: value.(*localPeerConn)}, nil
+}
+
+func newLocalPeerDebugConn(connection net.Conn, sequenceSink func(int), replayGapSink func(uint64, uint64, uint64)) (Conn, error) {
+	value, err := newLocalPeerConn(connection, false, true, sequenceSink, replayGapSink)
+	if err != nil {
+		return nil, err
+	}
+	return &localBasicPeerConn{inner: value.(*localPeerConn)}, nil
+}
+
+type localBasicPeerConn struct{ inner *localPeerConn }
+
+func (c *localBasicPeerConn) Read(v []byte) (int, error)     { return c.inner.Read(v) }
+func (c *localBasicPeerConn) Write(v []byte) (int, error)    { return c.inner.Write(v) }
+func (c *localBasicPeerConn) Close() error                   { return c.inner.Close() }
+func (c *localBasicPeerConn) Resize(rows, cols uint16) error { return c.inner.Resize(rows, cols) }
+func (c *localBasicPeerConn) Wait() (int, error)             { return c.inner.Wait() }
+func (c *localBasicPeerConn) CloseWrite() error              { return c.inner.CloseWrite() }
+
+func NewLocalExecPeerConn(connection net.Conn) (ExecConn, error) {
+	value, err := newLocalPeerConn(connection, true, false, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	return value.(*localPeerConn), nil
+}
+
+func newLocalPeerConn(connection net.Conn, exec, expectMetadata bool, sequenceSink func(int), replayGapSink func(uint64, uint64, uint64)) (Conn, error) {
+	if connection == nil {
+		return nil, ErrPeerTerminalInvalid
+	}
+	value := &localPeerConn{connection: connection, writer: &localPeerWriter{writer: connection}, data: make(chan localPeerOutput, 16), result: make(chan localPeerWaitResult, 1), done: make(chan struct{}), closed: make(chan struct{}), stop: make(chan struct{}), events: make(chan ExecEvent, 256), exec: exec, sequenceSink: sequenceSink, replayGapSink: replayGapSink}
+	if expectMetadata {
+		_ = connection.SetReadDeadline(time.Now().Add(time.Second))
+		kind, payload, err := readLocalPeerFrame(connection)
+		_ = connection.SetReadDeadline(time.Time{})
+		if err != nil {
+			var networkError net.Error
+			if !errors.As(err, &networkError) || !networkError.Timeout() {
+				return nil, err
+			}
+		} else if kind == localPeerMetadata {
+			var metadata localPeerMetadataPayload
+			if json.Unmarshal(payload, &metadata) != nil {
+				return nil, ErrPeerTerminalInvalid
+			}
+			value.runtimeVersion = metadata.RuntimeVersion
+		} else {
+			value.initialKind, value.initialPayload = kind, payload
+		}
+	}
+	go value.readLoop()
+	return value, nil
+}
+
+func (c *localBasicPeerConn) TerminalRuntimeVersion() string { return c.inner.runtimeVersion }
+
+func (c *localPeerConn) readLoop() {
+	defer close(c.done)
+	defer close(c.data)
+	defer close(c.events)
+	for {
+		kind, payload, err := c.initialKind, c.initialPayload, error(nil)
+		c.initialKind, c.initialPayload = 0, nil
+		if kind == 0 {
+			kind, payload, err = readLocalPeerFrame(c.connection)
+		}
+		if err != nil {
+			if !errors.Is(err, ErrPeerTerminalInvalid) {
+				err = errors.Join(ErrTransportLost, err)
+			}
+			select {
+			case c.result <- localPeerWaitResult{err: err}:
+			default:
+			}
+			return
+		}
+		switch kind {
+		case localPeerTerminalData:
+			if c.exec || len(payload) < 8 {
+				c.result <- localPeerWaitResult{err: ErrPeerTerminalInvalid}
+				return
+			}
+			if !c.enqueue(localPeerOutput{data: payload[8:], sequence: binary.BigEndian.Uint64(payload)}) {
+				return
+			}
+		case localPeerTerminalSequence:
+			if c.exec || len(payload) != 8 {
+				c.result <- localPeerWaitResult{err: ErrPeerTerminalInvalid}
+				return
+			}
+			if !c.enqueue(localPeerOutput{sequence: binary.BigEndian.Uint64(payload)}) {
+				return
+			}
+		case localPeerReplayGap:
+			if c.exec || len(payload) != 24 {
+				c.result <- localPeerWaitResult{err: ErrPeerTerminalInvalid}
+				return
+			}
+			requested, earliest, latest := binary.BigEndian.Uint64(payload), binary.BigEndian.Uint64(payload[8:]), binary.BigEndian.Uint64(payload[16:])
+			if earliest > latest {
+				c.result <- localPeerWaitResult{err: ErrPeerTerminalInvalid}
+				return
+			}
+			if c.replayGapSink != nil {
+				c.replayGapSink(requested, earliest, latest)
+			}
+		case localPeerResult:
+			if len(payload) != 4 {
+				c.result <- localPeerWaitResult{err: ErrPeerTerminalInvalid}
+				return
+			}
+			c.result <- localPeerWaitResult{code: int(int32(binary.BigEndian.Uint32(payload)))}
+		case localPeerFailure:
+			c.result <- localPeerWaitResult{err: ErrTransportLost}
+		case localPeerExecEvent:
+			if !c.exec {
+				c.result <- localPeerWaitResult{err: ErrPeerTerminalInvalid}
+				return
+			}
+			var event ExecEvent
+			if json.Unmarshal(payload, &event) != nil || event.OperationID == "" {
+				c.result <- localPeerWaitResult{err: ErrPeerTerminalInvalid}
+				return
+			}
+			c.events <- event
+			if event.Stream == "" && event.State != "" && event.State != "started" {
+				result := localPeerWaitResult{}
+				if event.Result != nil {
+					result.code = event.Result.Code
+					if result.code == 0 && event.Result.Signal != "" {
+						result.code = signalExitCode(event.Result.Signal)
+					}
+				}
+				if event.State == "failed" || event.State == "canceled" {
+					result.err = &RemoteExecError{Code: firstNonEmptyExec(event.ErrorCode, event.State)}
+				}
+				select {
+				case c.result <- result:
+				default:
+				}
+			}
+		case localPeerClosed:
+			close(c.closed)
+			return
+		default:
+			c.result <- localPeerWaitResult{err: ErrPeerTerminalInvalid}
+			return
+		}
+	}
+}
+
+func (c *localPeerConn) enqueue(output localPeerOutput) bool {
+	select {
+	case c.data <- output:
+		return true
+	case <-c.stop:
+		return false
+	}
+}
+
+func (c *localPeerConn) commitSequence(sequence uint64) error {
+	if sequence == 0 {
+		return nil
+	}
+	if sequence < c.committedSequence || sequence > uint64(^uint(0)>>1) {
+		return ErrPeerTerminalInvalid
+	}
+	if sequence == c.committedSequence {
+		return nil
+	}
+	c.committedSequence = sequence
+	if c.sequenceSink != nil {
+		c.sequenceSink(int(sequence))
+	}
+	return nil
+}
+
+func (c *localPeerConn) Read(value []byte) (int, error) {
+	if len(value) == 0 {
+		return 0, nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.pending) > 0 {
+		count := copy(value, c.pending)
+		c.pending = c.pending[count:]
+		if len(c.pending) == 0 && c.pendingSequence > 0 {
+			if err := c.commitSequence(c.pendingSequence); err != nil {
+				c.pendingSequence = 0
+				return 0, err
+			}
+			c.pendingSequence = 0
+		}
+		return count, nil
+	}
+	var output localPeerOutput
+	for {
+		var ok bool
+		output, ok = <-c.data
+		if !ok {
+			return 0, io.EOF
+		}
+		if len(output.data) > 0 {
+			break
+		}
+		if err := c.commitSequence(output.sequence); err != nil {
+			return 0, err
+		}
+	}
+	count := copy(value, output.data)
+	if count < len(output.data) {
+		c.pending = append(c.pending, output.data[count:]...)
+		c.pendingSequence = output.sequence
+	} else if err := c.commitSequence(output.sequence); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+func (c *localPeerConn) Write(value []byte) (int, error) {
+	if err := c.writer.write(localPeerData, value); err != nil {
+		return 0, err
+	}
+	return len(value), nil
+}
+func (c *localPeerConn) Resize(rows, cols uint16) error {
+	payload := make([]byte, 4)
+	binary.BigEndian.PutUint16(payload, rows)
+	binary.BigEndian.PutUint16(payload[2:], cols)
+	return c.writer.write(localPeerResize, payload)
+}
+func (c *localPeerConn) CloseWrite() error { return c.writer.write(localPeerCloseWrite, nil) }
+func (c *localPeerConn) Wait() (int, error) {
+	select {
+	case result := <-c.result:
+		return result.code, result.err
+	default:
+	}
+	if err := c.writer.write(localPeerWait, nil); err != nil {
+		select {
+		case result := <-c.result:
+			return result.code, result.err
+		default:
+		}
+		return 1, err
+	}
+	result := <-c.result
+	return result.code, result.err
+}
+func (c *localPeerConn) Close() error {
+	var err error
+	c.once.Do(func() {
+		c.stopOnce.Do(func() { close(c.stop) })
+		deadline := time.Now().Add(3 * time.Second)
+		// Bound the request and any preceding writer before taking its mutex.
+		if deadlineErr := c.connection.SetWriteDeadline(deadline); deadlineErr != nil {
+			err = errors.Join(deadlineErr, c.connection.Close())
+			return
+		}
+		if writeErr := c.writer.write(localPeerClose, nil); writeErr == nil {
+			select {
+			case <-c.closed:
+			case <-c.done:
+			case <-time.After(time.Until(deadline)):
+			}
+		}
+		err = c.connection.Close()
+	})
+	return err
+}
+
+func (c *localPeerConn) Events() <-chan ExecEvent { return c.events }
+func (c *localPeerConn) Cancel() error {
+	if !c.exec {
+		return ErrPeerTerminalInvalid
+	}
+	return c.writer.write(localPeerExecCancel, nil)
+}
+func (c *localPeerConn) Signal(signal string) error {
+	if !c.exec || signal == "" || len(signal) > 64 {
+		return ErrPeerTerminalInvalid
+	}
+	return c.writer.write(localPeerExecSignal, []byte(signal))
+}
+func (c *localPeerConn) Detach() error {
+	if !c.exec {
+		return ErrPeerTerminalInvalid
+	}
+	return c.writer.write(localPeerExecDetach, nil)
+}
+
+var _ Conn = (*localPeerConn)(nil)
+var _ InputHalfCloser = (*localPeerConn)(nil)
+var _ ExecConn = (*localPeerConn)(nil)

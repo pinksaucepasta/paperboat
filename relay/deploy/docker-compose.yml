@@ -1,0 +1,29 @@
+services:
+  relay:
+    image: ${PAPERBOAT_RELAY_IMAGE:?set an immutable ghcr.io/pinksaucepasta/paperboat-relay@sha256 digest}
+    restart: unless-stopped
+    stop_grace_period: 10s
+    command: ["run", "--state-dir", "/var/lib/paperboat-relay/operator"]
+    environment:
+      PAPERBOAT_SENTRY_ENABLED: ${PAPERBOAT_SENTRY_ENABLED:-}
+      PAPERBOAT_SENTRY_DSN: ${PAPERBOAT_SENTRY_DSN:-}
+      PAPERBOAT_SENTRY_RELEASE: ${PAPERBOAT_SENTRY_RELEASE:-}
+    ports:
+      - "${PAPERBOAT_RELAY_TCP_PORT:-443}:${PAPERBOAT_RELAY_TCP_PORT:-443}/tcp"
+      - "${PAPERBOAT_RELAY_QUIC_PORT:-443}:${PAPERBOAT_RELAY_QUIC_PORT:-443}/udp"
+    volumes:
+      - ./operator/runtime.args:/var/lib/paperboat-relay/operator/runtime.args:ro
+      - ./operator/runtime.credential:/var/lib/paperboat-relay/operator/runtime.credential:ro
+      - ./operator/jwks.json:/var/lib/paperboat-relay/operator/jwks.json:ro
+      - ./tls:/run/paperboat-relay:ro
+      - relay-state:/var/lib/paperboat-relay/state
+
+  relay-admin:
+    profiles: ["admin"]
+    image: ${PAPERBOAT_RELAY_IMAGE:?set an immutable ghcr.io/pinksaucepasta/paperboat-relay@sha256 digest}
+    volumes:
+      - ./operator:/var/lib/paperboat-relay/operator
+      - ./tls:/run/paperboat-relay:ro
+
+volumes:
+  relay-state:

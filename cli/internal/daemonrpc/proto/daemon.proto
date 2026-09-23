@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package daemonrpc;
+option go_package = "github.com/pinksaucepasta/paperboat/internal/daemonrpc/proto;proto";
+
+message Empty {}
+
+message StatusResponse {
+  string daemon_state = 1;
+  string daemon_version = 2;
+  uint64 generation = 3;
+  int64 observed_at_unix = 4;
+  repeated PeerStatus peers = 5;
+  repeated DERPStatus derp_relays = 6;
+}
+
+message PeerStatus {
+  string peer_id = 1;
+  string alias = 2;
+  string assigned_ip = 3;
+  bool online = 4;
+  int64 latency_ms = 5;
+  string connection_mode = 6;
+  repeated string tags = 7;
+  bool approved = 8;
+  repeated int32 forwarded_ports = 9;
+  map<int32, string> browser_urls = 10;
+}
+
+message DERPStatus {
+  string region_code = 1;
+  string region_name = 2;
+  bool reachable = 3;
+  int64 latency_ms = 4;
+}
+
+message DeviceQuery {
+  string query = 1;
+}
+
+message DeviceAddress {
+  string device_id = 1;
+  string alias = 2;
+  string assigned_ip = 3;
+  repeated int32 forwarded_ports = 4;
+  repeated string tags = 5;
+  map<int32, string> browser_urls = 6;
+}
+
+message SetDeviceTagsRequest {
+  string device_id = 1;
+  repeated string tags = 2;
+}
+
+message SetDeviceTagsResponse {
+  string device_id = 1;
+  repeated string tags = 2;
+  bool success = 3;
+}
+
+message ApprovePeerRequest {
+  string device_id = 1;
+  bool approved = 2;
+}
+
+message ApprovePeerResponse {
+  string device_id = 1;
+  bool approved = 2;
+  bool success = 3;
+}
+
+service DaemonService {
+  rpc StreamStatus(Empty) returns (stream StatusResponse);
+  rpc ResolveDevice(DeviceQuery) returns (DeviceAddress);
+  rpc SetDeviceTags(SetDeviceTagsRequest) returns (SetDeviceTagsResponse);
+  rpc ApprovePeer(ApprovePeerRequest) returns (ApprovePeerResponse);
+}

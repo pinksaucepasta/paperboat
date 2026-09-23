@@ -1,0 +1,42 @@
+.nh
+.TH "PB-UPDATE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-update - Update pb from the signed Paperboat release
+
+
+.SH SYNOPSIS
+\fBpb update [flags]\fP
+
+
+.SH DESCRIPTION
+Update pb from the signed Paperboat release
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for update
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb(1)\fP, \fBpb-update-approve-maintenance(1)\fP, \fBpb-update-check(1)\fP, \fBpb-update-status(1)\fP

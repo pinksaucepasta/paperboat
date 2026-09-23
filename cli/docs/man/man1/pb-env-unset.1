@@ -1,0 +1,54 @@
+.nh
+.TH "PB-ENV-UNSET" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-env-unset - Remove one environment variable
+
+
+.SH SYNOPSIS
+\fBpb env unset  [flags]\fP
+
+
+.SH DESCRIPTION
+Remove one environment variable
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for unset
+
+.PP
+\fB--json\fP[=false]
+	print redacted JSON metadata
+
+.PP
+\fB--machine\fP=""
+	machine name or ID; defaults to the personal scope
+
+.PP
+\fB--team\fP=""
+	team scope; cannot be combined with --machine
+
+.PP
+\fB--yes\fP[=false]
+	confirm removal
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-env(1)\fP

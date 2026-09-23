@@ -1,0 +1,46 @@
+.nh
+.TH "PB-UPDATE-APPROVE-MAINTENANCE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-update-approve-maintenance - Approve one exact supervisor release for a protected-workload interruption
+
+
+.SH SYNOPSIS
+\fBpb update approve-maintenance [flags]\fP
+
+
+.SH DESCRIPTION
+Approve one exact supervisor release for a protected-workload interruption
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for approve-maintenance
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--release\fP=""
+	exact signed release version to approve
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-update(1)\fP

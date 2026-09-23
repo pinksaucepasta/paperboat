@@ -1,0 +1,13 @@
+**
+!go.mod
+!go.sum
+!LICENSE
+!cmd/
+!cmd/paperboat-tunnel/
+!cmd/paperboat-tunnel/**
+!internal/
+!internal/**
+**/*_test.go
+
+!vendor/
+!vendor/**

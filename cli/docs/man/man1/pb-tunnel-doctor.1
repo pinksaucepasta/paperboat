@@ -1,0 +1,58 @@
+.nh
+.TH "PB-TUNNEL-DOCTOR" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel-doctor - Diagnose tunnel health
+
+
+.SH SYNOPSIS
+\fBpb tunnel doctor  [flags]\fP
+
+
+.SH DESCRIPTION
+Diagnose tunnel health
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--bundle\fP=""
+	absolute path for a local support-bundle preview
+
+.PP
+\fB--bundle-max-bytes\fP=2097152
+	maximum bundle bytes (64KiB-8MiB)
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for doctor
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+.PP
+\fB--write-bundle\fP[=false]
+	write the exact previewed bundle (requires --bundle)
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-tunnel(1)\fP

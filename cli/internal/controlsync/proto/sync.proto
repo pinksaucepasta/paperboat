@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package sync;
+option go_package = "github.com/pinksaucepasta/paperboat/internal/controlsync/proto;proto";
+
+message DeviceCapabilities {
+  bool can_host_terminals = 1;
+  bool can_mount_ssh = 2;
+  bool can_export_ports = 3;
+  repeated int32 exported_ports = 4;
+}
+
+message DevicePosture {
+  string os = 1;
+  string os_version = 2;
+  string hostname = 3;
+  DeviceCapabilities requested_capabilities = 4;
+}
+
+message DevicePostureCheck {
+  bool allowed = 1;
+  string rejection_reason = 2;
+  DeviceCapabilities granted_capabilities = 3;
+  bool requires_approval = 4;
+  bool approved = 5;
+}
+
+message SyncRequest {
+  string device_id = 1;
+  string auth_token = 2;
+  string alias = 3;
+  DevicePosture posture = 4;
+  repeated string endpoints = 5;
+  repeated string tags = 6;
+}
+
+message PeerUpdate {
+  string peer_id = 1;
+  string alias = 2;
+  string assigned_ip = 3;
+  repeated string endpoints = 4;
+  DeviceCapabilities capabilities = 5;
+  repeated string tags = 6;
+  bool online = 7;
+  bool approved = 8;
+  repeated int32 exported_ports = 9;
+}
+
+message SyncResponse {
+  uint64 revision = 1;
+  string assigned_ip = 2;
+  DevicePostureCheck posture_check = 3;
+  repeated PeerUpdate peers = 4;
+  repeated string revoked_peers = 5;
+}
+
+message SetTagsRequest {
+  string device_id = 1;
+  repeated string tags = 2;
+}
+
+message SetTagsResponse {
+  string device_id = 1;
+  repeated string tags = 2;
+  bool success = 3;
+}
+
+service SyncService {
+  rpc Sync(stream SyncRequest) returns (stream SyncResponse);
+  rpc SetTags(SetTagsRequest) returns (SetTagsResponse);
+}

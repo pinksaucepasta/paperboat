@@ -1,0 +1,62 @@
+.nh
+.TH "PB-MACHINE-CAPABILITIES" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-machine-capabilities - Set incoming services for a device
+
+
+.SH SYNOPSIS
+\fBpb machine capabilities  [flags]\fP
+
+
+.SH DESCRIPTION
+Set incoming services for a device
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--file-receive\fP[=false]
+	accept native Inbox transfers
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for capabilities
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--managed-ssh\fP[=false]
+	accept managed SSH/SCP/SFTP/rsync
+
+.PP
+\fB--peer-relay\fP[=false]
+	relay encrypted traffic for your devices
+
+.PP
+\fB--preview-tunnel\fP[=false]
+	serve preview and tunnel routes
+
+.PP
+\fB--terminal\fP[=false]
+	accept Paperboat terminal and exec
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-machine(1)\fP

@@ -1,0 +1,46 @@
+.nh
+.TH "PB-PREVIEW-REPLAY" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-preview-replay - Deliberately replay one retained HTTP request to the same origin
+
+
+.SH SYNOPSIS
+\fBpb preview replay   [flags]\fP
+
+
+.SH DESCRIPTION
+Deliberately replay one retained HTTP request to the same origin
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for replay
+
+.PP
+\fB--idempotency-key\fP=""
+	explicit idempotency key for safe retry (generated when omitted)
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-preview(1)\fP

@@ -1,0 +1,58 @@
+.nh
+.TH "PB-TUNNEL-DELETE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel-delete - Delete endpoints and routes and revoke connectors while preserving user DNS records
+
+
+.SH SYNOPSIS
+\fBpb tunnel delete  [flags]\fP
+
+
+.SH DESCRIPTION
+Delete endpoints and routes and revoke connectors while preserving user DNS records
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for delete
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+.PP
+\fB--timeout\fP=2m0s
+	maximum time to wait for operation completion
+
+.PP
+\fB--wait\fP[=false]
+	wait for the operation to reach a terminal state
+
+.PP
+\fB--yes\fP[=false]
+	confirm endpoint, route, domain-binding, and connector-credential removal
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-tunnel(1)\fP

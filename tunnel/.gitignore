@@ -1,0 +1,9 @@
+/bin/
+/dist/
+/.codex-build/
+/.build/
+/coverage.out
+/paperboat-tunnel
+/deploy/.env
+/deploy/deployment.json
+/deploy/secrets/

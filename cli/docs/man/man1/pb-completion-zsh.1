@@ -1,0 +1,77 @@
+.nh
+.TH "PB-COMPLETION-ZSH" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-completion-zsh - Generate the autocompletion script for zsh
+
+
+.SH SYNOPSIS
+\fBpb completion zsh [flags]\fP
+
+
+.SH DESCRIPTION
+Generate the autocompletion script for the zsh shell.
+
+.PP
+If shell completion is not already enabled in your environment you will need
+to enable it.  You can execute the following once:
+
+.EX
+echo "autoload -U compinit; compinit" >> ~/.zshrc
+.EE
+
+.PP
+To load completions in your current shell session:
+
+.EX
+source <(pb completion zsh)
+.EE
+
+.PP
+To load completions for every new session, execute once:
+
+.SS Linux:
+.EX
+pb completion zsh > "${fpath[1]}/_pb"
+.EE
+
+.SS macOS:
+.EX
+pb completion zsh > $(brew --prefix)/share/zsh/site-functions/_pb
+.EE
+
+.PP
+You will need to start a new shell for this setup to take effect.
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for zsh
+
+.PP
+\fB--no-descriptions\fP[=false]
+	disable completion descriptions
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-completion(1)\fP

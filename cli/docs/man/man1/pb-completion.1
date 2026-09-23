@@ -1,0 +1,43 @@
+.nh
+.TH "PB-COMPLETION" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-completion - Generate the autocompletion script for the specified shell
+
+
+.SH SYNOPSIS
+\fBpb completion [flags]\fP
+
+
+.SH DESCRIPTION
+Generate the autocompletion script for pb for the specified shell.
+See each sub-command's help for details on how to use the generated script.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for completion
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb(1)\fP, \fBpb-completion-bash(1)\fP, \fBpb-completion-fish(1)\fP, \fBpb-completion-powershell(1)\fP, \fBpb-completion-zsh(1)\fP

@@ -1,0 +1,73 @@
+.nh
+.TH "PB-COMPLETION-BASH" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-completion-bash - Generate the autocompletion script for bash
+
+
+.SH SYNOPSIS
+\fBpb completion bash\fP
+
+
+.SH DESCRIPTION
+Generate the autocompletion script for the bash shell.
+
+.PP
+This script depends on the 'bash-completion' package.
+If it is not installed already, you can install it via your OS's package manager.
+
+.PP
+To load completions in your current shell session:
+
+.EX
+source <(pb completion bash)
+.EE
+
+.PP
+To load completions for every new session, execute once:
+
+.SS Linux:
+.EX
+pb completion bash > /etc/bash_completion.d/pb
+.EE
+
+.SS macOS:
+.EX
+pb completion bash > $(brew --prefix)/etc/bash_completion.d/pb
+.EE
+
+.PP
+You will need to start a new shell for this setup to take effect.
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for bash
+
+.PP
+\fB--no-descriptions\fP[=false]
+	disable completion descriptions
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-completion(1)\fP

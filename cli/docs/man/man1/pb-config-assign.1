@@ -1,0 +1,62 @@
+.nh
+.TH "PB-CONFIG-ASSIGN" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-assign - Assign a config repository to a machine
+
+
+.SH SYNOPSIS
+\fBpb config assign   [flags]\fP
+
+
+.SH DESCRIPTION
+Assign a config repository to a machine
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--automatic-updates\fP[=false]
+	apply later reviewed-scope updates automatically
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for assign
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--mode\fP="pull-only"
+	sync mode: pull-only, push-only, or bidirectional
+
+.PP
+\fB--pull-repository\fP=""
+	repository used for pulls (defaults to positional repository)
+
+.PP
+\fB--push-repository\fP=""
+	repository used for pushes (defaults to positional repository)
+
+.PP
+\fB--yes\fP[=false]
+	acknowledge plaintext private-Git storage and history
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-config(1)\fP

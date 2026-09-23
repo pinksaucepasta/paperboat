@@ -1,0 +1,170 @@
+package configsync
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
+	"testing"
+)
+
+func TestApplyJournalRestoresOriginalsAndRemovesCreatedPaths(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(root, "home")
+	state := filepath.Join(root, "state")
+	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(state, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	original := filepath.Join(home, ".config", "original")
+	if err := os.WriteFile(original, []byte("before\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	journal := filepath.Join(state, "apply-journal.json")
+	paths := []string{".config/original", ".config/created"}
+	if err := beginApplyJournal(
+		journal, home, "repo", "assignment", "revision",
+		paths, 1<<20,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(original, []byte("after\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	created := filepath.Join(home, ".config", "created")
+	if err := os.WriteFile(created, []byte("created\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := recoverApplyJournal(
+		journal, home, "repo", "assignment", 1<<20,
+	); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(original)
+	if err != nil || string(content) != "before\n" {
+		t.Fatalf("original = %q, %v", content, err)
+	}
+	info, err := os.Stat(original)
+	if err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0o640 || runtime.GOOS == "windows" && !privateControlFile(original, info) {
+		t.Fatalf("original mode = %v, %v", info.Mode().Perm(), err)
+	}
+	if _, err := os.Lstat(created); !os.IsNotExist(err) {
+		t.Fatalf("created path remains: %v", err)
+	}
+	if _, err := os.Lstat(journal); !os.IsNotExist(err) {
+		t.Fatalf("journal remains: %v", err)
+	}
+}
+
+func TestWorkspaceRollbackRestoresLastSuccessfulPreimage(t *testing.T) {
+	home := t.TempDir()
+	state := t.TempDir()
+	target := filepath.Join(home, "config.txt")
+	if err := os.WriteFile(target, []byte("before\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	journal := filepath.Join(state, "rollback.json")
+	if err := beginApplyJournal(journal, home, "repo", "assignment", "revision", []string{"config.txt"}, 1024); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("after\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := &PlaintextWorkspaceReconciler{homeRoot: home, stateRoot: state, baselinePath: filepath.Join(state, "baseline.json"), descriptor: RuntimeDescriptor{RepositoryID: "repo", AssignmentID: "assignment", Policy: RuntimePolicy{MaxBatchBytes: 1024}}}
+	if err := r.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil || string(got) != "before\n" {
+		t.Fatalf("restored=%q err=%v", got, err)
+	}
+	if _, err := os.Stat(journal); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rollback record retained: %v", err)
+	}
+}
+
+func TestApplyJournalRejectsWrongAssignmentWithoutMutation(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(root, "home")
+	state := filepath.Join(root, "state")
+	if err := os.Mkdir(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(state, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(home, "value")
+	if err := os.WriteFile(target, []byte("before"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	journal := filepath.Join(state, "apply-journal.json")
+	if err := beginApplyJournal(
+		journal, home, "repo", "assignment", "revision",
+		[]string{"value"}, 1<<20,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("after"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := recoverApplyJournal(journal, home, "repo", "other", 1<<20); err == nil {
+		t.Fatal("wrong assignment journal was accepted")
+	}
+	content, err := os.ReadFile(target)
+	if err != nil || string(content) != "after" {
+		t.Fatalf("target mutated = %q, %v", content, err)
+	}
+}
+
+func TestApplyJournalRecoversValidBase64ExpandedBatch(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(root, "home")
+	state := filepath.Join(root, "state")
+	if err := os.Mkdir(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(state, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const maxBatchBytes = 4 << 20
+	target := filepath.Join(home, "value")
+	original := make([]byte, maxBatchBytes)
+	for index := range original {
+		original[index] = byte(index)
+	}
+	if err := os.WriteFile(target, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	journal := filepath.Join(state, "apply-journal.json")
+	if err := beginApplyJournal(journal, home, "repo", "assignment", "revision", []string{"value"}, maxBatchBytes); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() <= maxBatchBytes+(1<<20) {
+		t.Fatalf("journal size = %d, expected base64 expansion beyond former recovery limit", info.Size())
+	}
+	if err := os.WriteFile(target, []byte("changed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := recoverApplyJournal(journal, home, "repo", "assignment", maxBatchBytes); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := os.ReadFile(target)
+	if err != nil || string(restored) != string(original) {
+		t.Fatalf("restored content mismatch: %d bytes, %v", len(restored), err)
+	}
+}

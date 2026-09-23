@@ -1,0 +1,50 @@
+.nh
+.TH "PB-SSH" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-ssh - Connect to a machine with OpenSSH
+
+
+.SH SYNOPSIS
+\fBpb ssh [user@] [-- ] [flags]\fP
+
+
+.SH DESCRIPTION
+Connect to a machine with OpenSSH
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for ssh
+
+.PP
+\fB--transport\fP=""
+	peer transport: a, d, q, w, or r
+
+.PP
+\fB--user\fP=""
+	remote operating-system user
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb(1)\fP, \fBpb-ssh-doctor(1)\fP, \fBpb-ssh-trust-host(1)\fP
