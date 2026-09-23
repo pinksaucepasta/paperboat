@@ -14,25 +14,158 @@ an actionable upgrade error instead of malformed session data. See
 
 ## Usage
 
+Install and enroll with a command from the dashboard or from `pb machine add` on
+an authenticated machine. If Paperboat is already installed, `pb auth login`
+accepts the same 26-character token directly for CLI authentication.
+
+See the [CLI guide](docs/cli.md), [complete command reference](docs/cli/README.md),
+and [man pages](docs/man/man1) for all public commands. The Linux installer and
+macOS PKG install bundled manuals automatically. For source installs, use
+`make install` or `make install-man`; see the guide for custom manual paths.
+
 ```sh
 pb <environment>             # attach a hosted project or machine terminal
 pb environments               # list hosted projects and machines
-pb auth login                # approve this installation in the dashboard
+pb login                     # show dashboard and machine-add enrollment guidance
+pb auth login                # enter the enrollment token directly
+pb machine add               # print Linux/macOS and Windows install commands
 pb auth status               # show the active account for the configured server
-pb auth switch               # replace the active account for this server
 pb auth logout               # revoke and remove this installation's session
 pb doctor                    # check auth + environment connectivity
 pb Studio -- git status      # execute an exact argv vector on a machine
 pb exec Studio --cwd /src -- make test
 pb config path|show          # inspect the local config
 pb preview 3000              # publish a local port
-pb preview ./dist            # publish a local file or directory
+pb preview unix:///tmp/app.sock # publish a local Unix socket
 pb preview 3000 --private    # require the local Paperboat runtime
 ```
 
 Flags may appear before or after the environment name.
 Hosted projects and machines use the same durable terminal-session workflow:
 `--new`, `--session`, and `pb sessions` apply to either environment type.
+
+## Interactive CLI
+
+Run `pb` to open the home screen. Machines, terminal sessions, previews and tunnels,
+ENV, team approvals, configuration, and diagnostics are available there. **All commands**
+searches the current command tree, shows command-specific help, and validates arguments
+before running them. Arguments use shell-style quoting, but are passed directly to `pb`;
+no shell expansion or shell execution occurs. Explicit `--config` and `--server` settings
+carry through every nested action.
+
+Type to filter lists, use arrow keys to move, Enter to select, and Escape to go back.
+Input validation stays beside the field. Long results have a scrollable view with
+Page Up/Page Down. Errors leave the menu available for recovery. Interactive selectors
+require terminal input; scripts should use explicit commands and `--json`.
+
+`pb preview` without a target opens guided setup: choose a local target, access policy,
+and foreground, bounded background, or durable ownership. Foreground previews in a
+terminal display a live console: `o` opens the URL, `b` hands ownership to the daemon,
+`t` creates a durable tunnel, and `s` or Ctrl+C stops the preview. Background handoff
+requires an updated daemon and preserves the URL. Durable creation waits for readiness
+before ending the preview and produces a new URL. Custom domains cannot be moved
+between those resources automatically. Redirected and JSON output do not start a TUI.
+
+## Make the CLI yours
+
+Open **Customize** from the home screen, or run `pb config customize`. The guided
+editor covers shortcuts, command defaults, themes and accent colors, keybindings,
+list density, home order/visibility, favorite shortcut actions, list detail columns,
+and live preview panels. Changes remain in a draft until **Save changes**; the home
+preview never runs an action. Escape returns to the previous screen. Leaving a changed
+draft offers to discard it. Saving checks for edits made by another process.
+
+Preferences are local to this device. Find the editable JSON file with
+`pb config customize path`; it lives alongside the selected CLI config as
+`config.preferences.json` (a different `--config` basename gets its own preferences).
+Account synchronization is deferred. This file configures existing Paperboat commands
+and built-in UI elements; it cannot add external command plugins or custom widgets.
+
+For example:
+
+```json
+{
+  "version": 1,
+  "shortcuts": {
+    "mac": {"command": ["ssh"], "args": ["mac", "{args}"]},
+    "upload": {"command": ["scp"], "args": ["{args}", "{1}", "mac:{2}"]}
+  },
+  "port_action": "preview",
+  "defaults": {"preview": {"ttl": "30m"}},
+  "tui": {
+    "theme": "dark",
+    "accent": "#7C9CFF",
+    "density": "comfortable",
+    "home_order": ["previews", "machines", "sessions"],
+    "home_hidden": ["team"],
+    "favorites": ["mac", "upload"],
+    "keys": {"up": "alt+k", "down": "alt+j"},
+    "columns": {"machines": ["status", "platform"], "previews": ["access", "state"]},
+    "preview_panels": ["access", "target", "expiry", "domains"]
+  }
+}
+```
+
+`pb mac` runs `pb ssh mac`. Change its command to `connect` for a Paperboat terminal
+or use the editor's SFTP/SCP/rsync presets. `pb upload ./report.txt /tmp/report.txt`
+uploads to that machine. Shortcut names only apply at the top level; explicit
+`pb ssh mac` continues to resolve a machine normally. Built-in command names are reserved. Shell completion offers local shortcuts at the
+first argument alongside machine names.
+
+`{1}`, `{2}`, etc. substitute positional arguments as literal text, including inside
+`machine:{2}`. `{args}` must occupy a whole argument and inserts the remaining arguments
+in their original order. Missing or unused arguments fail before execution. There is
+no shell evaluation, environment expansion, or recursive shortcut expansion. Arguments
+after `--` remain opaque command payload. Use **explain** to check the exact invocation:
+
+```sh
+pb config customize explain -- upload ./report.txt /tmp/report.txt
+pb config customize explain --json -- mac -- uptime
+pb config customize validate --json
+pb config customize import ./my-preferences.json --json
+pb --no-customization config path --json
+pb config customize reset --yes
+```
+
+Typing `pb 3000` starts a preview. Setting `port_action` to `tunnel` selects durable
+creation and asks for a tunnel name interactively; scripts use the explicit
+`pb tunnel create NAME --port 3000` command. Explicit command flags override configured
+defaults, which override built-in defaults. Authentication, secret inputs, confirmations,
+JSON output, and config/server selection cannot be supplied as command defaults.
+`--no-customization` bypasses the preference file entirely for predictable automation
+or recovery. Human help/version and the customization commands remain available if
+preferences are invalid. JSON results and raw remote terminal content are never themed.
+
+Themes are `terminal`, `dark`, `light`, and `mono`; accents accept `#RRGGBB` or ANSI
+color numbers 0–255. Arrow keys, Enter, Escape, and Ctrl+C remain available. Navigation
+bindings accept supported modifier/function keys without consuming ordinary filter text;
+preview actions can use letters. The editor validates conflicting and reserved keys.
+Hidden home sections remain available as explicit commands; **Customize** and **All
+commands** cannot be hidden. An explicit empty column/panel array hides optional details;
+preview URL, status, errors, and controls remain visible. Preferences are bounded to
+128 KiB, 64 shortcuts and 64 command-default entries. The adjacent `.lock` file is an
+OS-managed concurrency lock; its presence does not mean an editor is still running.
+
+## Machine-readable output
+
+Use `--json` before or after a command. Management commands return structured data;
+errors use the v1 CLI error envelope with a stable code, category, state-change and
+uncertain-outcome fields. Existing canonical resource schemas stay intact. `pb --json`
+lists current command capabilities, and command help is available in JSON as well.
+
+JSON mode never opens a TUI or asks for confirmation. Supply explicit arguments and
+confirmation flags; otherwise the command returns a structured error before the action.
+Foreground preview domain changes emit JSON Lines after the initial lease projection.
+Login emits JSON Lines with the approval URL/code and final account result without
+opening a browser. Execution and other documented streaming commands also use JSON Lines.
+Vault commands accept `--password-file` (an absolute, owner-only file) or
+`--password-stdin` in JSON mode. Passwords are bounded to 1024 bytes and preserved
+exactly, including trailing newlines. Recovery uses a separate `--recovery-input-file`;
+destructive operations retain their explicit confirmation requirements.
+
+Raw terminal/SSH streams, shell-completion scripts, the visual status-bar preview, and
+long-running daemon entrypoints are not JSON data commands; requesting JSON returns a
+structured unsupported-output error.
 
 ## Remote execution
 
@@ -44,17 +177,17 @@ PTY mode merges them and forwards terminal resize events. JSON mode emits the ve
 
 ## Preview a local target
 
-`pb preview <port|url|path>` exposes one local HTTP service, file, or directory through a
+`pb preview <port|url|path>` exposes a local service through a
 temporary Paperboat preview. The stable host runtime owns the authenticated carrier and
 keeps the server lease, route, and origin readiness synchronized.
 
 ```sh
 pb preview 3000
 pb preview http://127.0.0.1:8080
-pb preview ./report.html --ttl 1h
+pb preview unix:///tmp/app.sock --ttl 1h
 pb tunnel --ephemeral 3000
 pb preview 3000 --background --ttl 1h
-pb preview ./dist --domain preview.example.com
+pb preview 3000 --domain preview.example.com
 pb preview 3000 --private
 ```
 
@@ -136,8 +269,10 @@ receipt. Inbox files remain until the user removes them.
 
 ## Machines
 
-Run `pb setup` to register this device, create its Paperboat Inbox, verify the
-server-selected TUF target, and install the Paperboat service. A device can initiate
+Run `pb setup` to register this device, create its Paperboat Inbox, and install
+the running executable as the Paperboat service. Enrollment contacts the account
+server without downloading another runtime. Downloaded updates require TUF
+verification; source/shared builds disable automatic updates by default. A device can initiate
 authorized operations and can receive the incoming services enabled in its capability
 settings. Terminal, managed SSH, native file receiving, and preview/tunnel serving are
 enabled by default; account peer relay is opt-in.
@@ -174,9 +309,9 @@ tags have no `v` prefix.
 Releases contain one complete `pb` asset per supported platform and architecture:
 Windows amd64/arm64 PE executables, Linux amd64/arm64 raw ELF executables, and one signed
 and notarized macOS arm64 installer package. Users install through
-[`https://get.pprbt.dev/install`](https://get.pprbt.dev/install); the installer verifies
-`current.json`, downloads the selected bytes from the immutable GitHub release URL, and
-checks the declared length and SHA-256 before installation.
+[`https://get.pprbt.dev/install`](https://get.pprbt.dev/install). The installer checks a
+pinned bootstrap verifier downloaded from GitHub. That verifier authenticates the
+signed TUF release metadata and downloads the selected product once from GitHub.
 
 ## Stack
 

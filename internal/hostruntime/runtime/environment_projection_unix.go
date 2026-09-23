@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/environmentkey"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
@@ -255,7 +256,7 @@ func (s *projectionEnvironmentService) ensure(ctx context.Context) error {
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("Cache-Control", "no-store")
-	client := &http.Client{Transport: s.transport, Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrProductionInvalid }}
+	client := &http.Client{Transport: errorreport.TransportOperation(s.transport, s.base.String(), "environment_enrollment"), Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrProductionInvalid }}
 	response, err := client.Do(request)
 	if err != nil {
 		return err

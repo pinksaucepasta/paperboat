@@ -20,6 +20,13 @@ type NativePrivateGrantRequest struct {
 }
 type NativePrivateGrant struct {
 	Target struct {
+		CLIClientSessionID string `json:"cli_client_session_id,omitempty"`
+
+		InstallationGeneration int64  `json:"installation_generation,omitempty"`
+		BootID                 string `json:"boot_id,omitempty"`
+		PolicyGeneration       int64  `json:"policy_generation,omitempty"`
+		AnnouncementGeneration int64  `json:"announcement_generation,omitempty"`
+
 		AccountID          string `json:"account_id"`
 		UserID             string `json:"user_id"`
 		EnvironmentID      string `json:"environment_id"`
@@ -45,7 +52,12 @@ func (c *Client) IssueNativePrivateGrant(ctx context.Context, request NativePriv
 		return NativePrivateGrant{}, err
 	}
 	t := grant.Target
-	binding := nativeprivate.Binding{Schema: nativeprivate.SchemaV1, ResourceKind: t.ResourceKind, ResourceID: t.ResourceID, ResourceGeneration: t.ResourceGeneration, RouteID: t.RouteID, RouteGeneration: t.RouteGeneration, TargetGeneration: t.TargetGeneration, OwnerEndpointID: t.MachineID, Protocol: t.Protocol, TargetScheme: t.TargetScheme, TargetAddress: t.TargetAddress, ExpiresAt: grant.ExpiresAt}
+	binding := nativeprivate.Binding{Schema: nativeprivate.SchemaV1, InstallationGeneration: t.InstallationGeneration, BootID: t.BootID, PolicyGeneration: t.PolicyGeneration, AnnouncementGeneration: t.AnnouncementGeneration, ResourceKind: t.ResourceKind, ResourceID: t.ResourceID, ResourceGeneration: t.ResourceGeneration, RouteID: t.RouteID, RouteGeneration: t.RouteGeneration, TargetGeneration: t.TargetGeneration, OwnerEndpointID: t.MachineID, Protocol: t.Protocol, TargetScheme: t.TargetScheme, TargetAddress: t.TargetAddress, ExpiresAt: grant.ExpiresAt}
+	if t.ResourceKind == "device_service" {
+		binding.UserID = t.UserID
+		binding.CLIClientSessionID = t.CLIClientSessionID
+		binding.AccessSessionID = t.AccessSessionID
+	}
 	if grant.Credential == "" || len(grant.Credential) > 16<<10 || binding.Validate(time.Now().UTC()) != nil || t.AccountID == "" || t.UserID == "" || t.EnvironmentID == "" || t.AccessSessionID == "" {
 		return NativePrivateGrant{}, errors.New("unsafe native private grant")
 	}
@@ -54,5 +66,11 @@ func (c *Client) IssueNativePrivateGrant(ctx context.Context, request NativePriv
 
 func (g NativePrivateGrant) Binding() ([]byte, error) {
 	t := g.Target
-	return json.Marshal(nativeprivate.Binding{Schema: nativeprivate.SchemaV1, ResourceKind: t.ResourceKind, ResourceID: t.ResourceID, ResourceGeneration: t.ResourceGeneration, RouteID: t.RouteID, RouteGeneration: t.RouteGeneration, TargetGeneration: t.TargetGeneration, OwnerEndpointID: t.MachineID, Protocol: t.Protocol, TargetScheme: t.TargetScheme, TargetAddress: t.TargetAddress, ExpiresAt: g.ExpiresAt})
+	binding := nativeprivate.Binding{Schema: nativeprivate.SchemaV1, InstallationGeneration: t.InstallationGeneration, BootID: t.BootID, PolicyGeneration: t.PolicyGeneration, AnnouncementGeneration: t.AnnouncementGeneration, ResourceKind: t.ResourceKind, ResourceID: t.ResourceID, ResourceGeneration: t.ResourceGeneration, RouteID: t.RouteID, RouteGeneration: t.RouteGeneration, TargetGeneration: t.TargetGeneration, OwnerEndpointID: t.MachineID, Protocol: t.Protocol, TargetScheme: t.TargetScheme, TargetAddress: t.TargetAddress, ExpiresAt: g.ExpiresAt}
+	if t.ResourceKind == "device_service" {
+		binding.UserID = t.UserID
+		binding.CLIClientSessionID = t.CLIClientSessionID
+		binding.AccessSessionID = t.AccessSessionID
+	}
+	return json.Marshal(binding)
 }

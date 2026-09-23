@@ -6,14 +6,10 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"sync/atomic"
+	"time"
 
-	"github.com/tailscale/tailcat"
-	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=virtual-udp-admission
-	"tailscale.com/tailcfg"
-	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=virtual-udp-admission
-	"tailscale.com/types/key"
-	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=virtual-udp-admission
-	"tailscale.com/wgengine/filter"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 )
 
 // MaxFlows bounds queued and leased sockets per engine. The initial two-peer,
@@ -23,40 +19,28 @@ const MaxFlows = 64
 var ErrAdmission = errors.New("virtual UDP requires explicit peer and port admission")
 var ErrFlowLimit = errors.New("virtual UDP flow limit reached")
 
-// UDPServer serves one explicitly admitted application port. ListenUDP retains
-// static transport admission; Authority.Listen installs verified, replaceable
+// UDPServer serves the application port admitted by verified, replaceable
 // Paperboat authority. Application operation grants remain separate.
 type UDPServer struct {
-	server   *tailcat.Server
-	mu       sync.Mutex
-	closed   bool
-	flows    map[*Packet]struct{}
-	admitted map[netip.Addr]string
-	slots    chan struct{}
-	ready    chan *Packet
-	done     chan struct{}
-	handlers sync.WaitGroup
-	once     sync.Once
+	expiresAt *atomic.Int64
+	server    *mesh.Server
+	mu        sync.Mutex
+	closed    bool
+	flows     map[*Packet]struct{}
+	admitted  map[netip.Addr]string
+	slots     chan struct{}
+	ready     chan *Packet
+	done      chan struct{}
+	handlers  sync.WaitGroup
+	once      sync.Once
 }
 
-func ListenUDP(region *tailcfg.DERPRegion, allowed []key.NodePublic, port uint16) (*UDPServer, error) {
-	if region == nil || len(allowed) == 0 || port == 0 {
-		return nil, ErrAdmission
-	}
-	for _, k := range allowed {
-		if k.IsZero() {
-			return nil, ErrAdmission
-		}
-	}
-	return listenUDP(&tailcat.Server{Region: region, AllowedClients: append([]key.NodePublic(nil), allowed...), ServedUDPPorts: []filter.PortRange{{First: port, Last: port}}, Logf: func(string, ...any) {}}, port, nil)
-}
-
-func listenUDP(server *tailcat.Server, port uint16, admitted map[netip.Addr]string) (*UDPServer, error) {
-	s := &UDPServer{server: server, admitted: admitted, flows: make(map[*Packet]struct{}), slots: make(chan struct{}, MaxFlows), ready: make(chan *Packet, MaxFlows), done: make(chan struct{})}
-	s.server.OnUDP = func(p uint16) func(tailcat.ConnPacketConn) {
+func listenUDP(server *mesh.Server, port uint16, admitted map[netip.Addr]string, expiresAt *atomic.Int64) (*UDPServer, error) {
+	s := &UDPServer{expiresAt: expiresAt, server: server, admitted: admitted, flows: make(map[*Packet]struct{}), slots: make(chan struct{}, MaxFlows), ready: make(chan *Packet, MaxFlows), done: make(chan struct{})}
+	s.server.OnUDP = func(p uint16) func(mesh.ConnPacketConn) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if s.closed || p != port {
+		if s.closed || !validExpiry(s.expiresAt) || p != port {
 			return nil
 		}
 		select {
@@ -65,14 +49,14 @@ func listenUDP(server *tailcat.Server, port uint16, admitted map[netip.Addr]stri
 			return nil
 		}
 		s.handlers.Add(1)
-		return func(c tailcat.ConnPacketConn) {
+		return func(c mesh.ConnPacketConn) {
 			defer s.handlers.Done()
 			var packet *Packet
 			packet = newPacket(c, func() { s.mu.Lock(); delete(s.flows, packet); s.mu.Unlock(); <-s.slots })
 			s.mu.Lock()
 			address, _ := netip.ParseAddrPort(packet.RemoteAddr().String())
 			binding := s.admitted[address.Addr()]
-			if s.closed || s.admitted != nil && binding == "" {
+			if s.closed || !validExpiry(s.expiresAt) || s.admitted != nil && binding == "" {
 				s.mu.Unlock()
 				_ = packet.Close()
 				return
@@ -81,7 +65,7 @@ func listenUDP(server *tailcat.Server, port uint16, admitted map[netip.Addr]stri
 				packet.permit = func() bool {
 					s.mu.Lock()
 					defer s.mu.Unlock()
-					return !s.closed && binding != "" && s.admitted[address.Addr()] == binding
+					return validExpiry(s.expiresAt) && !s.closed && binding != "" && s.admitted[address.Addr()] == binding
 				}
 			}
 			s.flows[packet] = struct{}{}
@@ -94,7 +78,7 @@ func listenUDP(server *tailcat.Server, port uint16, admitted map[netip.Addr]stri
 	}
 	return s, nil
 }
-func (s *UDPServer) Address() tailcat.Addr { return s.server.ConnBlob() }
+func (s *UDPServer) Address() mesh.Addr { return s.server.TailcatAddr() }
 
 // Accept transfers one flow lease to the caller. Handle QUIC handshakes
 // concurrently: late packets can reopen a retired UDP tuple without completing
@@ -149,35 +133,26 @@ func (s *UDPServer) Close() error {
 	return nil
 }
 
-// UDPClient owns one Tailcat engine and a bounded set of outgoing socket leases.
-// It admits only its configured server and application port.
+// UDPClient owns bounded outgoing socket leases on an authority-owned engine.
+// It admits only its configured peer and application port.
 type UDPClient struct {
-	client      *tailcat.Client // standalone compatibility owner
-	dial        func(context.Context) (tailcat.ConnPacketConn, error)
-	slots       chan struct{}
-	closeEngine bool
-	port        uint16
-	mu          sync.Mutex
-	closed      bool
-	flows       map[*Packet]struct{}
-	count       int
-	opens       sync.WaitGroup
-	ctx         context.Context
-	cancel      context.CancelFunc
-	once        sync.Once
+	expiresAt *atomic.Int64
+	dial      func(context.Context) (mesh.ConnPacketConn, error)
+	slots     chan struct{}
+	port      uint16
+	mu        sync.Mutex
+	closed    bool
+	flows     map[*Packet]struct{}
+	count     int
+	opens     sync.WaitGroup
+	ctx       context.Context
+	cancel    context.CancelFunc
+	once      sync.Once
 }
 
-func NewUDPClient(server tailcat.Addr, private key.NodePrivate, port uint16) (*UDPClient, error) {
-	if private.IsZero() || port == 0 {
-		return nil, ErrAdmission
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	engine := &tailcat.Client{Server: server, Key: private, Logf: func(string, ...any) {}}
-	return &UDPClient{client: engine, dial: func(ctx context.Context) (tailcat.ConnPacketConn, error) { return engine.DialUDPPort(ctx, port) }, slots: make(chan struct{}, MaxFlows), closeEngine: true, port: port, flows: make(map[*Packet]struct{}), ctx: ctx, cancel: cancel}, nil
-}
 func (c *UDPClient) Dial(ctx context.Context) (*Packet, error) {
 	c.mu.Lock()
-	if c.closed {
+	if c.closed || !validExpiry(c.expiresAt) {
 		c.mu.Unlock()
 		return nil, net.ErrClosed
 	}
@@ -205,8 +180,9 @@ func (c *UDPClient) Dial(ctx context.Context) (*Packet, error) {
 	}
 	var p *Packet
 	p = newPacket(conn, func() { c.mu.Lock(); delete(c.flows, p); c.count--; c.mu.Unlock(); <-c.slots })
+	p.permit = func() bool { return validExpiry(c.expiresAt) }
 	c.mu.Lock()
-	if c.closed || op.Err() != nil {
+	if c.closed || op.Err() != nil || !validExpiry(c.expiresAt) {
 		c.mu.Unlock()
 		_ = p.Close()
 		if err := op.Err(); err != nil {
@@ -234,9 +210,12 @@ func (c *UDPClient) Close() error {
 		for _, p := range packets {
 			_ = p.Close()
 		}
-		if c.closeEngine && c.client != nil {
-			c.client.Close()
-		}
 	})
 	return nil
+}
+
+// A nil fence is used only by isolated engine fixtures. Production leases always
+// share their authority's atomically refreshed expiry.
+func validExpiry(deadline *atomic.Int64) bool {
+	return deadline == nil || time.Now().Unix() < deadline.Load()
 }

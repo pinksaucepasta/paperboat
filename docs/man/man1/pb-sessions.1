@@ -1,0 +1,43 @@
+.nh
+.TH "PB-SESSIONS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-sessions -
+
+
+.SH SYNOPSIS
+\fBpb sessions [environment] [flags]\fP
+
+
+.SH DESCRIPTION
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for sessions
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--wide\fP[=false]
+	include immutable IDs
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb(1)\fP, \fBpb-sessions-close(1)\fP, \fBpb-sessions-delete(1)\fP, \fBpb-sessions-rename(1)\fP

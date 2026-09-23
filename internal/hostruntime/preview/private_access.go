@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
@@ -90,7 +91,7 @@ func newPrivateAccessGrantClient(controlURL string, auth privateAccessMachineAut
 	}
 	return &privateAccessGrantClient{
 		endpoint: endpoint, auth: auth, now: func() time.Time { return time.Now().UTC() },
-		client: &http.Client{Transport: transport, Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrPrivateAccessInvalid }},
+		client: &http.Client{Transport: errorreport.TransportOperation(transport, endpoint.String(), "private_authorization"), Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrPrivateAccessInvalid }},
 	}, nil
 }
 

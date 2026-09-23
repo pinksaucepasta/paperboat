@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 )
 
@@ -42,7 +43,8 @@ type windowsServiceTarget struct {
 }
 
 type windowsActivationJournal struct {
-	ManualMode                                                    string `json:",omitempty"`
+	PreviousSource                                                *installsource.Source `json:",omitempty"`
+	ManualMode                                                    string                `json:",omitempty"`
 	Schema, TransactionID, PreviousVersion, Version, Architecture string
 	Stage                                                         windowsActivationStage
 	Runtime, CLI, Hostd, Updater, PreviousBinary                  windowsActivationComponent
@@ -412,7 +414,10 @@ func validWindowsActivationJournal(j windowsActivationJournal) bool {
 	if j.BlockedReason != "" && (j.BlockedReason != autoupdate.BlockedActiveTerminalSessions || j.Failure != "" || !((j.Stage == windowsActivationRollingBack || j.Stage == windowsActivationBusyReady) && j.PreDrainRollback || j.Stage == windowsActivationRolledBack && !j.PreDrainRollback)) {
 		return false
 	}
-	if j.Schema != windowsActivationJournalSchema || len(j.TransactionID) != 32 || !lowerHex(j.TransactionID) || !exactReleasePattern.MatchString(j.Version) || !exactReleasePattern.MatchString(j.PreviousVersion) || !validWindowsActivationStage(j.Stage) || j.Architecture != "amd64" && j.Architecture != "arm64" || len(j.Failure) > 4096 || invalidWindowsAPIRange(j.HostdAPIMin, j.HostdAPIMax) || invalidWindowsAPIRange(j.RuntimeAPIMin, j.RuntimeAPIMax) || workerupdate.ValidateActivationPolicy(windowsCandidateRelease(j)) != nil {
+	if j.PreviousSource != nil && !validWindowsLocalPrevious(j) {
+		return false
+	}
+	if j.Schema != windowsActivationJournalSchema || len(j.TransactionID) != 32 || !lowerHex(j.TransactionID) || !exactReleasePattern.MatchString(j.Version) || !(exactReleasePattern.MatchString(j.PreviousVersion) || validWindowsLocalPrevious(j)) || !validWindowsActivationStage(j.Stage) || j.Architecture != "amd64" && j.Architecture != "arm64" || len(j.Failure) > 4096 || invalidWindowsAPIRange(j.HostdAPIMin, j.HostdAPIMax) || invalidWindowsAPIRange(j.RuntimeAPIMin, j.RuntimeAPIMax) || workerupdate.ValidateActivationPolicy(windowsCandidateRelease(j)) != nil {
 		return false
 	}
 	for _, component := range []windowsActivationComponent{j.Runtime, j.CLI, j.Hostd, j.Updater, j.PreviousBinary} {
@@ -545,4 +550,13 @@ func windowsActivationNeedsResume(journal windowsActivationJournal, activeVersio
 		return false
 	}
 	return !activatorOwnsTransaction
+}
+
+func validWindowsLocalPrevious(j windowsActivationJournal) bool {
+	s := j.PreviousSource
+	return s != nil && s.Validate() == nil && s.Version == j.PreviousVersion && s.Platform == "windows" && s.Architecture == j.Architecture && s.SHA256 == j.PreviousBinary.SHA256 && s.Length == j.PreviousBinary.Length
+}
+
+func nativeWindowsJournalRetirable(j windowsActivationJournal) bool {
+	return validWindowsActivationJournal(j) && (j.Stage == windowsActivationCommitted || j.Stage == windowsActivationRolledBack) && j.BlockedReason == ""
 }

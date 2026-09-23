@@ -1,9 +1,11 @@
 package prompt
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestConfirmModelAcceptsConfirmationKeys(t *testing.T) {
@@ -26,6 +28,15 @@ func TestConfirmModelAcceptsCancellationKeys(t *testing.T) {
 		result := updated.(confirmModel)
 		if command == nil || !result.done || result.yes {
 			t.Fatalf("key %q = command %v, done %t, yes %t", key.String(), command, result.done, result.yes)
+		}
+	}
+}
+
+func TestConfirmViewFitsNarrowWidth(t *testing.T) {
+	model := confirmModel{options: ConfirmOptions{Title: strings.Repeat("confirm", 8), Description: strings.Repeat("description", 8)}, width: 7}
+	for _, line := range strings.Split(model.View(), "\n") {
+		if width := ansi.StringWidth(line); width > 7 {
+			t.Fatalf("line width=%d: %q", width, line)
 		}
 	}
 }

@@ -253,6 +253,42 @@ func TestApproveOwnedPeerEnrollmentsVerifierOnlyWithoutPendingNeedsNoSigner(t *t
 	}
 }
 
+func TestApproveOwnedMachineEnrollmentRequiresExactOwnedPendingMachine(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		machines   []api.UserMachine
+		pending    []api.PendingEndpointIdentity
+		wantSigner bool
+	}{
+		{name: "exact", machines: []api.UserMachine{{ID: "machine_1", State: "active"}}, pending: []api.PendingEndpointIdentity{{RequestID: "per_machine_012345", EndpointID: "machine_1", Role: "machine", State: "pending", SafetyCode: "abcde-fghij"}}, wantSigner: true},
+		{name: "not owned", machines: []api.UserMachine{{ID: "machine_2", State: "active"}}, pending: []api.PendingEndpointIdentity{{RequestID: "per_machine_012345", EndpointID: "machine_1", Role: "machine", State: "pending", SafetyCode: "abcde-fghij"}}},
+		{name: "cli request excluded", machines: []api.UserMachine{{ID: "machine_1", State: "active"}}, pending: []api.PendingEndpointIdentity{{RequestID: "per_machine_012345", EndpointID: "machine_1", Role: "cli", State: "pending", SafetyCode: "abcde-fghij"}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/v1/machines":
+					_ = json.NewEncoder(w).Encode(map[string]any{"data": api.UserMachinePage{Items: test.machines}})
+				case "/v1/e2ee/pending-endpoints":
+					_ = json.NewEncoder(w).Encode(map[string]any{"data": test.pending})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			rootDir := t.TempDir()
+			store := config.ProfileStore{Path: rootDir, Secrets: config.FileSecretStore{Dir: filepath.Join(rootDir, "secrets")}}
+			profile := config.Profile{Issuer: server.URL, Account: config.Account{ID: "account_1"}, CLIClientSessionID: "cli_daemon"}
+			err := ApproveOwnedMachineEnrollment(t.Context(), store, profile, api.New(server.URL, config.Credential{AccessToken: "token"}, server.Client()), "machine_1")
+			var unavailable *PeerApprovalSignerUnavailableError
+			if got := errors.As(err, &unavailable); got != test.wantSigner {
+				t.Fatalf("signer unavailable=%v want=%v err=%v", got, test.wantSigner, err)
+			}
+		})
+	}
+}
+
 func clearPeerKeysForTest(keys *config.PeerIdentityKeys) {
 	for i := range keys.RootPrivate {
 		keys.RootPrivate[i] = 0

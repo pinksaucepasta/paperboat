@@ -1,6 +1,11 @@
 package diagnostics
 
-import "sync"
+import (
+	"context"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
+	"sync"
+)
 
 const MemoryCapacity = 512
 
@@ -22,6 +27,11 @@ func (r *MemoryRing) Record(event Event) error {
 		r.count++
 	}
 	r.mu.Unlock()
+	outcome := "state_change"
+	if event.Severity == "error" {
+		outcome = "failed"
+	}
+	errorreport.Current().Observe(supportref.WithContext(context.Background(), event.SupportReference), "paperboat-daemon", "diagnostic", outcome, -1)
 	return nil
 }
 

@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 )
@@ -57,7 +58,7 @@ func NewSource(config Config) (*Source, error) {
 	if config.OperationID == nil {
 		config.OperationID = randomOperationID
 	}
-	return &Source{config: config, endpoint: endpoint, client: &http.Client{Transport: config.Transport, Timeout: config.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}}, nil
+	return &Source{config: config, endpoint: endpoint, client: &http.Client{Transport: errorreport.TransportOperation(config.Transport, endpoint.String(), "machine_control"), Timeout: config.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}}, nil
 }
 
 func (s *Source) Token(ctx context.Context) (string, error) {

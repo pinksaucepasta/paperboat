@@ -139,7 +139,11 @@ func TestNativeRegionalFailoverPreservesSession(t *testing.T) {
 		applyRegionalAuthority(t, serverAuthority, signer, serverConfig, serverTLS, serverDisco, clientDisco, fresh)
 	}
 	descriptor := startRelayEchoServer(t, serverOwner, serverAuthority, serverRegions[0])
-	session, err := clientOwner.Dial(ctx, descriptor, serverBinding.EndpointID, peerquic.ClassInteractive)
+	// Establish before the 15-second candidate freshness window expires so
+	// a failure reports the actual startup state, not later lease withdrawal.
+	dialCtx, stopDial := context.WithTimeout(ctx, 10*time.Second)
+	session, err := clientOwner.Dial(dialCtx, descriptor, serverBinding.EndpointID, peerquic.ClassInteractive)
+	stopDial()
 	if err != nil {
 		t.Fatalf("initial regional dial: %v; client=%+v server=%+v", err, clientAuthority.RegionalStatus(), serverAuthority.RegionalStatus())
 	}

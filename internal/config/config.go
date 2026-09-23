@@ -15,6 +15,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 	"github.com/pinksaucepasta/paperboat/internal/userpaths"
 )
 
@@ -49,6 +50,14 @@ type Favorite struct {
 type Config struct {
 	// ServerURL is the paperboat-server base URL. It is required for production commands.
 	ServerURL string `json:"server_url,omitempty"`
+	// ControlSyncAddress is the optional authenticated topology stream endpoint.
+	// It must be an HTTPS host:port and is never inferred from the public API URL.
+	ControlSyncAddress string `json:"control_sync_address,omitempty"`
+	// DeviceSuffix is the private device-name suffix. A daemon restart applies changes.
+	DeviceSuffix string `json:"device_suffix,omitempty"`
+	// DeviceLoopbackCIDR selects the local /16 used to project canonical
+	// server-assigned device addresses. A daemon and device-guard restart applies it.
+	DeviceLoopbackCIDR string `json:"device_loopback_cidr,omitempty"`
 	// LastEnvironmentID is the last successfully connected stable project or
 	// user machine ID. Names are never persisted because they may become
 	// ambiguous or change ownership.
@@ -273,6 +282,12 @@ func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.ServerURL) == "" {
 		c.ServerURL = strings.TrimSpace(buildinfo.DefaultServerURL)
 	}
+	if strings.TrimSpace(c.DeviceSuffix) == "" {
+		c.DeviceSuffix = "pprbt"
+	}
+	if strings.TrimSpace(c.DeviceLoopbackCIDR) == "" {
+		c.DeviceLoopbackCIDR = DefaultDeviceLoopbackCIDR
+	}
 	if strings.TrimSpace(c.Connect.TerminalTransport) == "" {
 		c.Connect.TerminalTransport = DefaultTerminalTransport
 	}
@@ -348,6 +363,30 @@ func normalizeStatusWidgets(values []string) []string {
 // Validate checks the complete effective configuration. Callers that mutate a
 // loaded Config can use it before presenting success.
 func (c *Config) Validate() error {
+	deviceSuffix, err := splitdns.ValidateSuffix(c.DeviceSuffix)
+	if err != nil {
+		return fmt.Errorf("device_suffix: %w", err)
+	}
+	c.DeviceSuffix = deviceSuffix
+	loopbackCIDR, err := NormalizeDeviceLoopbackCIDR(c.DeviceLoopbackCIDR)
+	if err != nil {
+		return fmt.Errorf("device_loopback_cidr: %w", err)
+	}
+	c.DeviceLoopbackCIDR = loopbackCIDR
+	if c.ControlSyncAddress != "" {
+		value := strings.TrimSpace(c.ControlSyncAddress)
+		if !strings.HasPrefix(value, "https://") {
+			value = "https://" + value
+		}
+		u, err := url.Parse(value)
+		if err != nil || u.Scheme != "https" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+			return errors.New("control_sync_address must be an HTTPS host:port")
+		}
+		if _, port, err := net.SplitHostPort(u.Host); err != nil || port == "" {
+			return errors.New("control_sync_address must be an HTTPS host:port")
+		}
+		c.ControlSyncAddress = u.Host
+	}
 	if len(c.Favorites) > MaxFavorites {
 		return fmt.Errorf("favorites cannot contain more than %d items", MaxFavorites)
 	}

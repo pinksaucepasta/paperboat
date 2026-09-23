@@ -33,6 +33,9 @@ var windowsDaemonLayout = hostruntimeservice.DefaultLayout
 var probeWindowsLocalDaemonService = defaultProbeWindowsLocalDaemonService
 var stopWindowsLocalDaemonService = defaultStopWindowsLocalDaemonService
 var startWindowsLocalDaemonService = defaultStartWindowsLocalDaemonService
+var currentWindowsServiceSID = currentWindowsUserSID
+var windowsOwnerServiceInstalled = WindowsLocalDaemonServiceInstalled
+var invokeWindowsOwnerServiceStart = StartWindowsOwnerService
 
 var errUnsafeWindowsDaemonProcess = errors.New("unsafe Windows local daemon process identity")
 
@@ -71,7 +74,14 @@ func installWindowsCurrentUserService(ctx context.Context, executable, configPat
 	if ctx == nil || !validWindowsExecutable(executable) || configPath != "" && !validWindowsConfigPath(configPath) || !validTaskText(serverURL) {
 		return ErrInvalidInventoryConfig
 	}
-	installed, err := probeWindowsLocalDaemonService()
+	if configPath != "" || strings.TrimSpace(serverURL) != "" {
+		return errors.New("the managed Windows local daemon owns its configuration; --config and --server are unsupported")
+	}
+	ownerSID, err := currentWindowsServiceSID()
+	if err != nil {
+		return err
+	}
+	installed, err := windowsOwnerServiceInstalled(ownerSID)
 	if err != nil {
 		return err
 	}
@@ -79,9 +89,9 @@ func installWindowsCurrentUserService(ctx context.Context, executable, configPat
 		// Managed installations own one silent SCM service. Never recreate the
 		// old interactive ONLOGON task after migration merely because a CLI
 		// command observed a cold local pipe.
-		return startWindowsLocalDaemonService(ctx)
+		return invokeWindowsOwnerServiceStart(ctx, ownerSID)
 	}
-	return windows.ERROR_SERVICE_DOES_NOT_EXIST
+	return fmt.Errorf("managed Paperboat local daemon service is not installed; repair the Paperboat installation: %w", windows.ERROR_SERVICE_DOES_NOT_EXIST)
 }
 
 // RemoveWindowsLegacyTask removes the pre-SCM ONLOGON task for exactly one

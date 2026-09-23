@@ -1,0 +1,74 @@
+.nh
+.TH "PB-CONFIG-CUSTOMIZE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-customize - Customize local shortcuts, command defaults, and TUI appearance
+
+
+.SH SYNOPSIS
+\fBpb config customize [flags]\fP
+
+
+.SH DESCRIPTION
+Customize local shortcuts, command defaults, themes, accent colors, keybindings,
+list density, home order and visibility, favorite actions, columns and preview panels.
+Changes stay in a draft until Save changes; leaving a changed draft offers discard.
+Preferences are stored alongside the selected CLI config in a .preferences.json file.
+They are local only and are not synchronized to the account.
+
+.PP
+Shortcuts invoke supported PB commands only. {1}, {2}, etc. substitute positional
+arguments literally; {args} inserts remaining arguments as a whole template token.
+There is no shell evaluation or recursive shortcut expansion. Built-in names are
+reserved. Explicit flags override configured defaults. Use explain to inspect an
+invocation without executing it. Use --no-customization to bypass preferences.
+
+.PP
+Themes are terminal, dark, light and mono. Arrow keys, Enter, Escape and Ctrl+C stay
+available. Customize and All commands cannot be hidden. Preview URL, status, errors
+and controls remain visible even when optional panels are hidden.
+
+.PP
+The editor validates changes and detects concurrent saves. Invalid preferences can
+be repaired with import or reset; these commands remain available without loading
+the invalid file. --json displays preferences without starting the editor.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for customize
+
+.PP
+\fB--json\fP[=false]
+	print local preferences instead of opening the editor
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH EXAMPLE
+.EX
+  pb config customize
+  pb config customize path
+  pb config customize show --json
+  pb config customize explain -- mac -- uptime
+  pb config customize import ./preferences.json
+  pb config customize reset --yes
+.EE
+
+
+.SH SEE ALSO
+\fBpb-config(1)\fP, \fBpb-config-customize-explain(1)\fP, \fBpb-config-customize-import(1)\fP, \fBpb-config-customize-path(1)\fP, \fBpb-config-customize-reset(1)\fP, \fBpb-config-customize-show(1)\fP, \fBpb-config-customize-validate(1)\fP

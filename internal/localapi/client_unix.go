@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 var ErrTransportUnavailable = errors.New("local API transport unavailable")
@@ -74,6 +75,16 @@ type Client struct {
 	http    *http.Client
 	timeout time.Duration
 	socket  string
+}
+
+type supportReferenceTransport struct{ base http.RoundTripper }
+
+func (t supportReferenceTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	request = request.Clone(request.Context())
+	if reference := supportref.FromContext(request.Context()); reference != "" {
+		request.Header.Set(supportref.Header, reference)
+	}
+	return t.base.RoundTrip(request)
 }
 
 func (c *Client) Watch(ctx context.Context, after uint64) (<-chan Snapshot, <-chan error) {
@@ -137,7 +148,7 @@ func newClient(socketPath string, timeout time.Duration) *Client {
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return dialLocal(ctx, socketPath, timeout)
 	}, DisableCompression: true, MaxConnsPerHost: 4, MaxIdleConnsPerHost: 4, IdleConnTimeout: timeout}
-	return &Client{http: &http.Client{Transport: transport}, timeout: timeout, socket: socketPath}
+	return &Client{http: &http.Client{Transport: supportReferenceTransport{base: transport}}, timeout: timeout, socket: socketPath}
 }
 
 func (c *Client) dial(ctx context.Context) (net.Conn, error) {
@@ -177,6 +188,9 @@ func (c *Client) OpenPeerStream(ctx context.Context, value PeerStreamRequest) (n
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Paperboat-Request-ID", localRequestID())
+	if reference := supportref.FromContext(ctx); reference != "" {
+		request.Header.Set(supportref.Header, reference)
+	}
 	request.Header.Set("Connection", "close")
 	if err := request.Write(connection); err != nil {
 		_ = connection.Close()

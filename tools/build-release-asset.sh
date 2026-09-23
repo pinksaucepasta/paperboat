@@ -54,6 +54,16 @@ esac
 # accepted so older workflow invocations remain parse-compatible.
 release_url="$server_url"
 
+# Release-only configuration: never place a Paperboat DSN in source defaults.
+# Restrict characters before composing Go linker flags (a DSN is a public key).
+case "${SENTRY_DSN:-}" in
+  *[!A-Za-z0-9:/@.-]*) echo "invalid characters in SENTRY_DSN" >&2; exit 1 ;;
+esac
+printf '%s\n' "${SENTRY_DSN:-}" | LC_ALL=C grep -Eq '^https://[A-Za-z0-9]+@[A-Za-z0-9.-]+(:[0-9]+)?/[0-9]+$' || {
+  echo "official release requires a valid HTTPS SENTRY_DSN" >&2
+  exit 1
+}
+
 output_dir=$(dirname -- "$output")
 mkdir -p "$output_dir"
 if [ -e "$output" ] || [ -L "$output" ]; then
@@ -61,7 +71,7 @@ if [ -e "$output" ] || [ -L "$output" ]; then
   exit 1
 fi
 
-ldflags="-s -w -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=$version -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=${GITHUB_SHA:-unknown} -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=$server_url -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=$release_url"
+ldflags="-s -w -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryDSN=$SENTRY_DSN -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryRelease=paperboat:$version -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Distribution=official -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=$version -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=${GITHUB_SHA:-unknown} -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=$server_url -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=$release_url"
 CGO_ENABLED=0 GOOS="$platform" GOARCH="$architecture" go build \
   -buildvcs=false \
   -trimpath \

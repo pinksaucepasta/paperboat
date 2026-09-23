@@ -27,6 +27,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/binarytarget"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesignature"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseindex"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
@@ -68,6 +69,7 @@ type Request struct {
 	OwnerSID            string                   `json:"owner_sid,omitempty"`
 	Executable          string                   `json:"executable"`
 	Artifact            bootstrap.ArtifactTarget `json:"artifact"`
+	Source              installsource.Source     `json:"source"`
 	Home                string                   `json:"home"`
 	Path                string                   `json:"path"`
 	StateRoot           string                   `json:"state_root"`
@@ -82,20 +84,22 @@ type Request struct {
 // WindowsRuntimeConfig is the protected input consumed by Paperboat SCM
 // entries. It contains no command line and cannot redirect an SCM service.
 type WindowsRuntimeConfig struct {
-	Schema        string                   `json:"schema"`
-	Instance      string                   `json:"instance"`
-	OwnerSID      string                   `json:"owner_sid"`
-	User          string                   `json:"user"`
-	StateRoot     string                   `json:"state_root"`
-	Workspace     string                   `json:"workspace_root"`
-	ControlURL    string                   `json:"control_url"`
-	ListenAddress string                   `json:"listen_address"`
-	MachineID     string                   `json:"machine_id"`
-	SetupMode     string                   `json:"setup_mode"`
-	TokenFile     string                   `json:"token_file"`
-	InstalledAt   time.Time                `json:"installed_at"`
-	Committed     bool                     `json:"committed"`
-	Artifact      bootstrap.ArtifactTarget `json:"artifact"`
+	Schema         string                   `json:"schema"`
+	Instance       string                   `json:"instance"`
+	OwnerSID       string                   `json:"owner_sid"`
+	User           string                   `json:"user"`
+	StateRoot      string                   `json:"state_root"`
+	Workspace      string                   `json:"workspace_root"`
+	ControlURL     string                   `json:"control_url"`
+	ListenAddress  string                   `json:"listen_address"`
+	MachineID      string                   `json:"machine_id"`
+	SetupMode      string                   `json:"setup_mode"`
+	TokenFile      string                   `json:"token_file"`
+	InstalledAt    time.Time                `json:"installed_at"`
+	Committed      bool                     `json:"committed"`
+	Artifact       bootstrap.ArtifactTarget `json:"artifact"`
+	Source         installsource.Source     `json:"source"`
+	RollbackSource *installsource.Source    `json:"rollback_source,omitempty"`
 }
 
 const windowsConfigSchema = "paperboat.windows-runtime-install/v1"
@@ -247,9 +251,14 @@ func installStandaloneBinary(ctx context.Context, source, version string, fresh 
 	}
 	rollback := filepath.Join(layout.ReleasesRoot, "pb.rollback")
 	if fresh {
-		return stageWindowsBinary(ctx, source, layout.Binary, rollback, artifact, "", &verifiedTarget)
+		installSource := installsource.Source{Version: version, Platform: "windows", Architecture: runtime.GOARCH, SHA256: verifiedTarget.SHA256, Length: verifiedTarget.Length, Distribution: installsource.Official, AutomaticUpdates: true}
+		return stageWindowsBinary(ctx, source, layout.Binary, rollback, installSource, "", &verifiedTarget)
 	}
-	return stageWindowsBinary(ctx, source, layout.Binary, rollback, artifact, "", nil)
+	installSource, err := installsource.Inspect(source, version, installsource.Official)
+	if err != nil {
+		return err
+	}
+	return stageWindowsBinary(ctx, source, layout.Binary, rollback, installSource, "", nil)
 }
 
 func verifyStandaloneRelease(ctx context.Context, source string, artifact bootstrap.ArtifactTarget) (releaseindex.Target, error) {
@@ -510,6 +519,9 @@ func Install(ctx context.Context, request Request) error {
 	if !isAdministrator() {
 		return ErrNotPrivileged
 	}
+	if request.SetupMode == "awaiting_enrollment" {
+		return installUnboundWindowsBinary(ctx, request)
+	}
 	if err := Validate(request, 0); err != nil {
 		return err
 	}
@@ -525,6 +537,11 @@ func Install(ctx context.Context, request Request) error {
 	layout, err := WindowsLayoutForInstance(instance)
 	if err != nil {
 		return err
+	}
+	var rollbackSource *installsource.Source
+	if previous, loadErr := LoadWindowsRuntimeConfigForInstance(instance); loadErr == nil {
+		prior := previous.Source
+		rollbackSource = &prior
 	}
 	lifecycle, err := newWindowsLifecycleManager(request, layout, true)
 	if err != nil {
@@ -573,7 +590,7 @@ func Install(ctx context.Context, request Request) error {
 	}
 	runtimeCurrent, runtimeRollback, _ := windowsRuntimePaths(layout)
 	if err := runWindowsInstallPhase(ctx, "stage verified Paperboat runtime", func() error {
-		return stageWindowsBinary(ctx, request.Executable, runtimeCurrent, runtimeRollback, request.Artifact, request.OwnerSID, nil)
+		return stageWindowsBinary(ctx, request.Executable, runtimeCurrent, runtimeRollback, request.Source, request.OwnerSID, nil)
 	}); err != nil {
 		return err
 	}
@@ -581,7 +598,7 @@ func Install(ctx context.Context, request Request) error {
 	if err := runWindowsInstallPhase(ctx, "prepare Paperboat host token", func() error { return ensureWindowsTokenAt(tokenPath, request.OwnerSID) }); err != nil {
 		return err
 	}
-	config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: instance, OwnerSID: request.OwnerSID, User: request.User, StateRoot: request.StateRoot, Workspace: request.WorkspaceRoot, ControlURL: request.ControlURL, ListenAddress: request.HelperListenAddress, MachineID: request.UserMachineID, SetupMode: request.SetupMode, TokenFile: tokenPath, InstalledAt: time.Now().UTC(), Artifact: request.Artifact}
+	config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: instance, OwnerSID: request.OwnerSID, User: request.User, StateRoot: request.StateRoot, Workspace: request.WorkspaceRoot, ControlURL: request.ControlURL, ListenAddress: request.HelperListenAddress, MachineID: request.UserMachineID, SetupMode: request.SetupMode, TokenFile: tokenPath, InstalledAt: time.Now().UTC(), Artifact: request.Artifact, Source: request.Source, RollbackSource: rollbackSource}
 	if err := runWindowsInstallPhase(ctx, "write Paperboat runtime configuration", func() error { return writeWindowsConfigAt(config, instanceRoot) }); err != nil {
 		return err
 	}
@@ -595,6 +612,89 @@ func Install(ctx context.Context, request Request) error {
 		return err
 	}
 	return nil
+}
+
+// installUnboundWindowsBinary installs only the administrator-approved bytes
+// into the fixed per-user slot. Enrollment later supplies the account-bound
+// runtime declaration before hostd or the updater are registered.
+func installUnboundWindowsBinary(ctx context.Context, request Request) error {
+	if request.Schema != SchemaV1 || request.Platform != "windows" || request.SetupMode != "awaiting_enrollment" || request.User == "" || !validSID(request.OwnerSID) || !safeAbsolute(request.Executable) || !safeAbsolute(request.StateRoot) || !safeAbsolute(request.WorkspaceRoot) {
+		return ErrInvalidRequest
+	}
+	if err := request.Source.Validate(); err != nil || request.Source.Platform != "windows" || request.Source.Architecture != runtime.GOARCH {
+		return fmt.Errorf("%w: source", ErrInvalidRequest)
+	}
+	if err := request.Source.Verify(request.Executable); err != nil {
+		return fmt.Errorf("%w: source bytes", ErrInvalidRequest)
+	}
+	instance, err := WindowsInstanceForSID(request.OwnerSID)
+	if err != nil {
+		return err
+	}
+	layout, err := WindowsLayoutForInstance(instance)
+	if err != nil {
+		return err
+	}
+	instanceRoot, _ := WindowsInstanceRoot(instance)
+	for _, sharedRoot := range []string{WindowsProgramDataRoot(), filepath.Join(WindowsProgramDataRoot(), "users")} {
+		if err := ensureWindowsExecutableDirectory(sharedRoot, ""); err != nil {
+			return fmt.Errorf("prepare shared Windows install directory: %w", err)
+		}
+	}
+	if err := ensureWindowsMachineDirectory(instanceRoot, request.OwnerSID); err != nil {
+		return fmt.Errorf("prepare awaiting-enrollment instance root: %w", err)
+	}
+	if err := ensureWindowsExecutableDirectory(filepath.Dir(layout.Binary), request.OwnerSID); err != nil {
+		return fmt.Errorf("prepare awaiting-enrollment binary directory: %w", err)
+	}
+	if err := ensureWindowsExecutableDirectory(layout.ReleasesRoot, request.OwnerSID); err != nil {
+		return fmt.Errorf("prepare awaiting-enrollment releases directory: %w", err)
+	}
+	newInstaller := func() (*service.Installer, error) {
+		return service.New(service.Config{Platform: "windows", Kind: service.DaemonKind, Instance: instance, ConfigRoot: filepath.Dir(layout.UpdateStateRoot), Executable: layout.Binary, User: "Paperboat", Group: "Paperboat", Arguments: []string{"daemon", "__runtime-local-daemon", "--instance", instance}, Controller: service.WindowsController{}})
+	}
+	var installer *service.Installer
+	var rollbackSource *installsource.Source
+	if existing, loadErr := LoadWindowsRuntimeConfigForInstance(instance); loadErr == nil {
+		if existing.SetupMode != "awaiting_enrollment" || existing.OwnerSID != request.OwnerSID {
+			return fmt.Errorf("%w: enrolled installation requires its persisted runtime declaration", ErrInvalidRequest)
+		}
+		installer, err = newInstaller()
+		if err != nil {
+			return err
+		}
+		if err := (service.WindowsController{}).Stop(ctx, installer.DefinitionPath()); err != nil {
+			return err
+		}
+		prior := existing.Source
+		rollbackSource = &prior
+	} else if !errors.Is(loadErr, os.ErrNotExist) {
+		return loadErr
+	}
+	if err := winenv.EnsureMachinePath(filepath.Dir(layout.Binary)); err != nil {
+		return fmt.Errorf("register Paperboat command path: %w", err)
+	}
+	if err := ensureWindowsDirectory(request.StateRoot, request.OwnerSID); err != nil {
+		return err
+	}
+	if err := stageWindowsBinary(ctx, request.Executable, layout.Binary, layout.BinaryRollback, request.Source, request.OwnerSID, nil); err != nil {
+		return err
+	}
+	if installer == nil {
+		installer, err = newInstaller()
+		if err != nil {
+			return err
+		}
+	}
+	tokenPath, _ := WindowsInstanceTokenPath(instance)
+	if err := ensureWindowsTokenAt(tokenPath, request.OwnerSID); err != nil {
+		return err
+	}
+	config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: instance, OwnerSID: request.OwnerSID, User: request.User, StateRoot: request.StateRoot, Workspace: request.WorkspaceRoot, ControlURL: request.ControlURL, ListenAddress: "127.0.0.1:8080", SetupMode: "awaiting_enrollment", TokenFile: tokenPath, InstalledAt: time.Now().UTC(), Source: request.Source, RollbackSource: rollbackSource}
+	if err := writeWindowsConfigAt(config, instanceRoot); err != nil {
+		return err
+	}
+	return installer.Install(ctx)
 }
 
 // runWindowsInstallPhase turns an uninterruptible Windows filesystem or SCM
@@ -934,6 +1034,79 @@ func Commit(request Request) error {
 	return writeWindowsConfigAt(config, instanceRoot)
 }
 
+// EnsureCommittedWindowsHostdReady checks the enrolled-owner workload after
+// the final config write. SCM can report a successful service start before its
+// child exits; the local daemon's readiness does not cover hostd or presence.
+func EnsureCommittedWindowsHostdReady(ctx context.Context, request Request) error {
+	if ctx == nil || !isAdministrator() {
+		return ErrNotPrivileged
+	}
+	instance, err := WindowsInstanceForSID(request.OwnerSID)
+	if err != nil {
+		return err
+	}
+	config, err := LoadWindowsRuntimeConfigForInstance(instance)
+	if err != nil {
+		return err
+	}
+	if !config.Committed || config.MachineID != request.UserMachineID || config.ListenAddress != request.HelperListenAddress || config.SetupMode != request.SetupMode {
+		return ErrInvalidRequest
+	}
+	layout, err := WindowsLayoutForInstance(instance)
+	if err != nil {
+		return err
+	}
+	hostd, _, _, err := windowsRoleInstallers(layout, false)
+	if err != nil {
+		return err
+	}
+	probe, err := service.NewHTTPReadinessProbe("http://" + config.ListenAddress + "/healthz")
+	if err != nil {
+		return err
+	}
+	controller := service.WindowsController{}
+	readyCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	defer cancel()
+	var healthySince time.Time
+	restarted := false
+	var lastErr error
+	for {
+		status, inspectErr := controller.Inspect(readyCtx, hostd.DefinitionPath())
+		if inspectErr != nil {
+			return fmt.Errorf("inspect Paperboat host service: %w", inspectErr)
+		}
+		if !status.Registered || !status.Enabled {
+			return errors.New("Paperboat host service is not registered and enabled")
+		}
+		if !status.Running {
+			healthySince = time.Time{}
+			if restarted {
+				return errors.New("Paperboat host service exited after restart; inspect its owner startup log")
+			}
+			if err := controller.Start(readyCtx, hostd.DefinitionPath()); err != nil {
+				return fmt.Errorf("restart Paperboat host service after first launch exited: %w", err)
+			}
+			restarted = true
+		} else if err := probe(readyCtx); err == nil {
+			if healthySince.IsZero() {
+				healthySince = time.Now()
+			} else if time.Since(healthySince) >= 5*time.Second {
+				return nil
+			}
+		} else {
+			healthySince = time.Time{}
+			lastErr = err
+		}
+		timer := time.NewTimer(250 * time.Millisecond)
+		select {
+		case <-readyCtx.Done():
+			timer.Stop()
+			return fmt.Errorf("Paperboat host service health check did not stabilize: %w", errors.Join(readyCtx.Err(), lastErr))
+		case <-timer.C:
+		}
+	}
+}
+
 func windowsRuntimeServiceExists(instance string) bool {
 	if !validWindowsInstance(instance) {
 		return true
@@ -1216,6 +1389,7 @@ func windowsRepairRequest(config WindowsRuntimeConfig) Request {
 		OwnerSID:            config.OwnerSID,
 		StateRoot:           config.StateRoot,
 		HelperListenAddress: config.ListenAddress,
+		Source:              config.Source,
 	}
 }
 
@@ -1789,12 +1963,15 @@ func Validate(request Request, _ int) error {
 	if err := bootstrap.VerifyArtifactTarget(request.Artifact); err != nil || request.Artifact.Platform != "windows" {
 		return fmt.Errorf("%w: artifact descriptor", ErrInvalidRequest)
 	}
+	if err := request.Source.Validate(); err != nil || request.Source.Platform != "windows" || request.Source.Architecture != runtime.GOARCH {
+		return fmt.Errorf("%w: source", ErrInvalidRequest)
+	}
 	for _, item := range []struct{ name, path string }{{"executable", request.Executable}, {"home", request.Home}, {"state root", request.StateRoot}, {"workspace root", request.WorkspaceRoot}} {
 		if !safeAbsolute(item.path) {
 			return fmt.Errorf("%w: %s", ErrInvalidRequest, item.name)
 		}
 	}
-	if err := binarytarget.Validate(request.Executable, request.Platform, request.Artifact.Architecture); err != nil {
+	if err := request.Source.Verify(request.Executable); err != nil {
 		return fmt.Errorf("%w: executable format", ErrInvalidRequest)
 	}
 	return nil
@@ -1836,7 +2013,10 @@ func validWindowsConfig(config WindowsRuntimeConfig) bool {
 		token, tokenErr := WindowsInstanceTokenPath(config.Instance)
 		tokenValid = err == nil && tokenErr == nil && want == config.Instance && config.TokenFile == token
 	}
-	return config.Schema == windowsConfigSchema && validSID(config.OwnerSID) && tokenValid && config.User != "" && safeAbsolute(config.StateRoot) && safeAbsolute(config.Workspace) && config.MachineID != "" && (config.SetupMode == "host" || config.SetupMode == "client") && bootstrap.VerifyArtifactTarget(config.Artifact) == nil && config.Artifact.Platform == "windows" && config.Artifact.Architecture == runtime.GOARCH && listenErr == nil && port != "" && net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback()
+	bound := config.MachineID != "" && (config.SetupMode == "host" || config.SetupMode == "client") && bootstrap.VerifyArtifactTarget(config.Artifact) == nil && config.Artifact.Platform == "windows" && config.Artifact.Architecture == runtime.GOARCH
+	unbound := config.MachineID == "" && config.SetupMode == "awaiting_enrollment"
+	rollbackValid := config.RollbackSource == nil || config.RollbackSource.Validate() == nil && config.RollbackSource.Platform == "windows" && config.RollbackSource.Architecture == runtime.GOARCH
+	return config.Schema == windowsConfigSchema && validSID(config.OwnerSID) && tokenValid && config.User != "" && safeAbsolute(config.StateRoot) && safeAbsolute(config.Workspace) && (bound || unbound) && config.Source.Validate() == nil && config.Source.Platform == "windows" && config.Source.Architecture == runtime.GOARCH && rollbackValid && listenErr == nil && port != "" && net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback()
 }
 func safeAbsolute(path string) bool {
 	return filepath.IsAbs(path) && filepath.Clean(path) == path && !strings.ContainsAny(path, "\x00\r\n")
@@ -2230,7 +2410,7 @@ func windowsRuntimePaths(layout service.Layout) (current, rollback, staged strin
 	return layout.Binary, layout.BinaryRollback, layout.BinaryStaged
 }
 
-func stageWindowsBinary(ctx context.Context, source, current, rollback string, artifact bootstrap.ArtifactTarget, ownerSID string, expectedTarget *releaseindex.Target) error {
+func stageWindowsBinary(ctx context.Context, source, current, rollback string, installSource installsource.Source, ownerSID string, expectedTarget *releaseindex.Target) error {
 	if err := ensureWindowsExecutableDirectory(filepath.Dir(current), ownerSID); err != nil {
 		return fmt.Errorf("prepare runtime slot: %w", err)
 	}
@@ -2240,10 +2420,15 @@ func stageWindowsBinary(ctx context.Context, source, current, rollback string, a
 	if err := secureWindowsFile(source, ""); err != nil {
 		return fmt.Errorf("validate downloaded runtime file: %w", err)
 	}
-	sourceVerifyCtx, cancelSourceVerify := context.WithTimeout(ctx, 30*time.Second)
-	defer cancelSourceVerify()
-	if err := nativesignature.New(nil).Verify(sourceVerifyCtx, source, "windows", artifact.Architecture); err != nil {
-		return fmt.Errorf("%w: downloaded runtime Authenticode: %v", ErrInvalidRequest, err)
+	if err := installSource.Verify(source); err != nil {
+		return fmt.Errorf("%w: supplied runtime bytes changed", ErrInvalidRequest)
+	}
+	if installSource.Distribution == installsource.Official {
+		sourceVerifyCtx, cancelSourceVerify := context.WithTimeout(ctx, 30*time.Second)
+		defer cancelSourceVerify()
+		if err := nativesignature.New(nil).Verify(sourceVerifyCtx, source, "windows", installSource.Architecture); err != nil {
+			return fmt.Errorf("%w: downloaded runtime Authenticode: %v", ErrInvalidRequest, err)
+		}
 	}
 	// The dashboard bootstrap may execute the verified binary directly from the
 	// installed active slot. That process necessarily keeps the image open on
@@ -2279,13 +2464,18 @@ func stageWindowsBinary(ctx context.Context, source, current, rollback string, a
 	}); err != nil {
 		return err
 	}
-	if err := binarytarget.Validate(temporaryPath, "windows", artifact.Architecture); err != nil {
+	if err := binarytarget.Validate(temporaryPath, "windows", installSource.Architecture); err != nil {
 		return fmt.Errorf("%w: staged runtime executable format", ErrInvalidRequest)
 	}
-	verifyCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	if err := nativesignature.New(nil).Verify(verifyCtx, temporaryPath, "windows", artifact.Architecture); err != nil {
-		return fmt.Errorf("%w: staged runtime Authenticode: %v", ErrInvalidRequest, err)
+	if err := installSource.Verify(temporaryPath); err != nil {
+		return fmt.Errorf("%w: staged runtime bytes changed", ErrInvalidRequest)
+	}
+	if installSource.Distribution == installsource.Official {
+		verifyCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		if err := nativesignature.New(nil).Verify(verifyCtx, temporaryPath, "windows", installSource.Architecture); err != nil {
+			return fmt.Errorf("%w: staged runtime Authenticode: %v", ErrInvalidRequest, err)
+		}
 	}
 	trustedOwner, err := windowsRuntimeTrustedOwner()
 	if err != nil {
@@ -2362,11 +2552,32 @@ func ensureWindowsExecutableDirectory(path, readerSID string) error {
 func repairWindowsRuntimeBinary(ctx context.Context, config WindowsRuntimeConfig, layout service.Layout) error {
 	current, rollback, _ := windowsRuntimePaths(layout)
 	quarantine := current + ".repair-quarantine"
-	if verifyWindowsInstalledBinary(ctx, current, config.Artifact.Architecture) == nil {
+	verifyCandidate := func(path string) error {
+		if config.Source.Distribution == installsource.Custom {
+			if err := secureWindowsFile(path, ""); err != nil {
+				return err
+			}
+			return config.Source.Verify(path)
+		}
+		return verifyWindowsInstalledBinary(ctx, path, config.Source.Architecture)
+	}
+	verifyRollback := func(path string) error {
+		if config.RollbackSource == nil {
+			return ErrInvalidRequest
+		}
+		if config.RollbackSource.Distribution == installsource.Custom {
+			if err := secureWindowsFile(path, ""); err != nil {
+				return err
+			}
+			return config.RollbackSource.Verify(path)
+		}
+		return verifyWindowsInstalledBinary(ctx, path, config.RollbackSource.Architecture)
+	}
+	if verifyCandidate(current) == nil {
 		_ = os.Remove(quarantine)
 		return applyWindowsACL(current, config.OwnerSID, false)
 	}
-	if _, err := os.Stat(current); errors.Is(err, os.ErrNotExist) && verifyWindowsInstalledBinary(ctx, quarantine, config.Artifact.Architecture) == nil {
+	if _, err := os.Stat(current); errors.Is(err, os.ErrNotExist) && verifyCandidate(quarantine) == nil {
 		//paperboat:allow-source-policy atomic-replacement owner=windows-host-repair reason=verified-quarantine-runtime-restoration
 		if err := os.Rename(quarantine, current); err != nil {
 			return err
@@ -2390,7 +2601,7 @@ func repairWindowsRuntimeBinary(ctx context.Context, config WindowsRuntimeConfig
 			_ = os.Rename(quarantine, current)
 		}
 	}
-	if verifyWindowsInstalledBinary(ctx, rollback, config.Artifact.Architecture) == nil {
+	if verifyRollback(rollback) == nil {
 		//paperboat:allow-source-policy atomic-replacement owner=windows-host-repair reason=verified-rollback-runtime-activation
 		if err := os.Rename(rollback, current); err != nil {
 			restoreCurrent()
@@ -2399,13 +2610,17 @@ func repairWindowsRuntimeBinary(ctx context.Context, config WindowsRuntimeConfig
 		_ = os.Remove(quarantine)
 		return applyWindowsACL(current, config.OwnerSID, false)
 	}
+	if config.Source.Distribution == installsource.Custom {
+		restoreCurrent()
+		return fmt.Errorf("custom Paperboat runtime has no verified local recovery slot: %w", ErrInvalidRequest)
+	}
 	repairState := filepath.Join(layout.UpdateStateRoot, "repair-tuf")
 	artifactPath, err := bootstrap.FetchVerifiedArtifact(ctx, config.Artifact, repairState, nil)
 	if err != nil {
 		restoreCurrent()
 		return err
 	}
-	if err := stageWindowsBinary(ctx, artifactPath, current, rollback, config.Artifact, config.OwnerSID, nil); err != nil {
+	if err := stageWindowsBinary(ctx, artifactPath, current, rollback, config.Source, config.OwnerSID, nil); err != nil {
 		restoreCurrent()
 		return err
 	}

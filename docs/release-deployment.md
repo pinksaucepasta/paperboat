@@ -1,5 +1,29 @@
 # Signed release deployment
 
+Official builds require the `SENTRY_DSN` repository variable. The native and shared
+service release workflows validate it before building and embed it together with the
+exact release identity. Missing or malformed configuration fails the build; the API
+read/write token is never embedded. Source code contains no default ingestion DSN,
+and ordinary builds remain disabled until explicitly configured for their own Sentry.
+The release DSN is public in shipped binaries, so these are distribution defaults,
+not authentication of the executable sending an event. Explicit runtime disable and
+custom destination overrides remain supported. Previously published artifacts do not
+change until a new release is built and installed.
+
+When `SENTRY_ORG` and `SENTRY_PROJECT` repository or organization variables and
+the `SENTRY_AUTH_TOKEN` secret are configured, the release workflow creates and
+finalizes `paperboat:<version>` in Sentry only after the GitHub assets and TUF
+origin have been published successfully. It associates the full GitHub repository
+and exact source commit. Production telemetry must use that exact identifier as
+`PAPERBOAT_SENTRY_RELEASE`. The token needs Sentry `org:ci` (or
+`project:releases`) access. Configure all three values or none; a partial
+configuration fails the workflow.
+
+Artifact publication does not create a Sentry deploy. A rollout owner may run
+`tools/sentry-release.py deploy` only after the rollout's own checks succeed. The
+tool also requires the deployed service's HTTPS `--readiness-url` to return 200
+and JSON whose `release` field exactly matches the release being recorded.
+
 Paperboat updates are signed publication transactions. The host updater accepts
 only metadata obtained through the embedded TUF root and the threshold-signed
 TUF roles. `tools/release-plan` creates deterministic inputs for the signer and

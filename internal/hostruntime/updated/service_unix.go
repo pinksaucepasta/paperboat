@@ -30,6 +30,7 @@ import (
 var ErrInvalidConfig = errors.New("invalid paperboat-updated configuration")
 
 type Config struct {
+	AutomaticUpdates     bool
 	StateRoot            string
 	Binary               string
 	BinaryRollback       string
@@ -47,6 +48,9 @@ type Config struct {
 	ActivationController UnixActivationController
 	Participants         UnixParticipants
 	Environment          map[string]string
+	// RefreshManuals runs the committed executable's bundled-manual extractor.
+	// Failure keeps the existing committed transaction pending for recovery.
+	RefreshManuals func(context.Context) error
 	// ControlSocket is the fixed local socket exposed to the enrolled user for
 	// pb update, check, and status. It is not an updater command channel.
 	ControlSocket string
@@ -180,6 +184,13 @@ func (s *Service) run(ctx context.Context, ready func() error) error {
 		return ErrInvalidConfig
 	}
 	if lock, lockErr := unixActivationLock(s.config.StateRoot); lockErr == nil {
+		if pending, err := nativeInstallPending(s.config.StateRoot); err != nil {
+			lock.Close()
+			return err
+		} else if pending {
+			lock.Close()
+			goto serveControl
+		}
 		handoff, handoffErr := readUnixHandoff(s.config.StateRoot)
 		if handoffErr != nil {
 			lock.Close()
@@ -222,6 +233,11 @@ func (s *Service) run(ctx context.Context, ready func() error) error {
 					lock.Close()
 					return err
 				}
+			} else if !s.config.AutomaticUpdates && !handoff.Manual && !handoff.Started {
+				if err = retireUnixHandoff(ctx, s.config.StateRoot, s.config.ActivationController); err != nil {
+					lock.Close()
+					return err
+				}
 			} else if err = s.config.ActivationController.Install(ctx, filepath.Join(s.config.StateRoot, "activation", "pb"), s.config.Environment); err != nil {
 				lock.Close()
 				return err
@@ -231,6 +247,7 @@ func (s *Service) run(ctx context.Context, ready func() error) error {
 	} else if !errors.Is(lockErr, ErrActivationPending) {
 		return lockErr
 	}
+serveControl:
 	listener, err := s.control.listen()
 	if err != nil {
 		return err
@@ -244,6 +261,10 @@ func (s *Service) run(ctx context.Context, ready func() error) error {
 		if err := ready(); err != nil {
 			return err
 		}
+	}
+	if !s.config.AutomaticUpdates {
+		<-ctx.Done()
+		return ctx.Err()
 	}
 	return s.scheduler.Run(ctx)
 }
@@ -366,6 +387,7 @@ func (s *Service) newManager(active workerupdate.Release) (*workerupdate.Manager
 	return s.newManagerWithGate(active, s.config.ActivationGate, false)
 }
 func (s *Service) newManagerWithGate(active workerupdate.Release, gate workerupdate.ActivationGate, manual bool) (*workerupdate.Manager, error) {
+	gate = s.manualCommitGate(gate)
 	config := s.managerConfig
 	config.Active = active
 	config.Gate = gate

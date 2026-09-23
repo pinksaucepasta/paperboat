@@ -41,15 +41,22 @@ func TestInstallWindowsCurrentUserServiceRequiresManagedService(t *testing.T) {
 	if err := os.WriteFile(executable, []byte("fixture"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	configPath := filepath.Join(t.TempDir(), "config.json")
-
-	previousProbe := probeWindowsLocalDaemonService
+	previousSID, previousProbe := currentWindowsServiceSID, windowsOwnerServiceInstalled
 	t.Cleanup(func() {
-		probeWindowsLocalDaemonService = previousProbe
+		currentWindowsServiceSID, windowsOwnerServiceInstalled = previousSID, previousProbe
 	})
-	probeWindowsLocalDaemonService = func() (bool, error) { return false, nil }
-	if err := installWindowsCurrentUserService(context.Background(), executable, configPath, "https://api.example.test"); !errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+	currentWindowsServiceSID = func() (string, error) { return "S-1-5-21-1-2-3-1001", nil }
+	windowsOwnerServiceInstalled = func(owner string) (bool, error) {
+		if owner != "S-1-5-21-1-2-3-1001" {
+			t.Fatalf("owner=%q", owner)
+		}
+		return false, nil
+	}
+	if err := installWindowsCurrentUserService(context.Background(), executable, "", ""); !errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		t.Fatalf("error=%v want missing managed service", err)
+	}
+	if err := installWindowsCurrentUserService(context.Background(), executable, filepath.Join(t.TempDir(), "config.json"), ""); err == nil || !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("configuration override error=%v", err)
 	}
 }
 
@@ -58,20 +65,27 @@ func TestInstallWindowsCurrentUserServiceUsesManagedServiceWithoutLegacyTask(t *
 	if err := os.WriteFile(executable, []byte("fixture"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	previousProbe, previousStart := probeWindowsLocalDaemonService, startWindowsLocalDaemonService
+	previousSID, previousProbe, previousStart := currentWindowsServiceSID, windowsOwnerServiceInstalled, invokeWindowsOwnerServiceStart
 	previousTask := runWindowsTaskCommand
 	t.Cleanup(func() {
-		probeWindowsLocalDaemonService, startWindowsLocalDaemonService = previousProbe, previousStart
+		currentWindowsServiceSID, windowsOwnerServiceInstalled, invokeWindowsOwnerServiceStart = previousSID, previousProbe, previousStart
 		runWindowsTaskCommand = previousTask
 	})
-	probeWindowsLocalDaemonService = func() (bool, error) { return true, nil }
+	currentWindowsServiceSID = func() (string, error) { return "S-1-5-21-1-2-3-1001", nil }
+	windowsOwnerServiceInstalled = func(owner string) (bool, error) { return owner == "S-1-5-21-1-2-3-1001", nil }
 	started := false
-	startWindowsLocalDaemonService = func(context.Context) error { started = true; return nil }
+	invokeWindowsOwnerServiceStart = func(_ context.Context, owner string) error {
+		if owner != "S-1-5-21-1-2-3-1001" {
+			t.Fatalf("owner=%q", owner)
+		}
+		started = true
+		return nil
+	}
 	runWindowsTaskCommand = func(context.Context, ...string) error {
 		t.Fatal("managed install created a legacy scheduled task")
 		return nil
 	}
-	if err := installWindowsCurrentUserService(context.Background(), executable, "", "https://api.example.test"); err != nil {
+	if err := installWindowsCurrentUserService(context.Background(), executable, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if !started {

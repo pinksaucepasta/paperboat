@@ -19,7 +19,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"tailscale.com/tstest/integration"
-	"tailscale.com/types/key"
 )
 
 var tailcatOperationTimeout = flag.Duration("tailcat-operation-timeout", 30*time.Second, "Tailcat stream workload deadline; allow instrumentation overhead under -race")
@@ -32,12 +31,8 @@ func TestTailcatQUIC(t *testing.T) {
 	var maximum atomic.Uint32
 	t.Setenv("IN_TS_TEST", "true")
 	dm := integration.RunDERPAndSTUN(t, func(string, ...any) {}, "127.0.0.1")
-	keys := []key.NodePrivate{key.NewNode(), key.NewNode()}
-	allowed := []key.NodePublic{keys[0].Public(), keys[1].Public()}
-	server, err := tailnet.ListenUDP(dm.Regions[1], allowed, 4242)
-	if err != nil {
-		t.Fatal(err)
-	}
+	server, authorities := meshQUICFixture(t, dm.Regions[1], 2)
+	var err error
 	defer server.Close()
 	clientTLS, serverTLS := probeTLSConfigs(t)
 	// Unlike the historical probe helper, acceptance pins both real certificates.
@@ -54,7 +49,7 @@ func TestTailcatQUIC(t *testing.T) {
 	config := peerquic.DevelopmentSessionConfig(peerquic.ClassTransfer)
 	clients := make([]*tailnet.UDPClient, 2)
 	for i := range clients {
-		clients[i], err = tailnet.NewUDPClient(server.Address(), keys[i], 4242)
+		clients[i], err = authorities[i].authority.Client(server.Address(), "machine_test")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -115,12 +110,15 @@ func TestTailcatQUIC(t *testing.T) {
 	}()
 	badTLS := clientTLS.Clone()
 	badTLS.VerifyConnection = func(tls.ConnectionState) error { return errors.New("wrong pinned identity") }
-	denied, stopDenied := context.WithTimeout(t.Context(), 3*time.Second)
-	badSocket, e := clients[0].Dial(denied)
+	// Establish the admitted transport under the normal workload deadline;
+	// the short rejection deadline measures only the wrong QUIC identity.
+	setup, stopSetup := context.WithTimeout(t.Context(), *tailcatOperationTimeout)
+	badSocket, e := clients[0].Dial(setup)
+	stopSetup()
 	if e != nil {
-		stopDenied()
 		t.Fatal(e)
 	}
+	denied, stopDenied := context.WithTimeout(t.Context(), 3*time.Second)
 	if session, e := peerquic.DialPacket(denied, badSocket, badTLS, config); e == nil {
 		session.Close()
 		t.Fatal("wrong QUIC identity accepted")
@@ -207,7 +205,8 @@ func TestTailcatQUIC(t *testing.T) {
 		}
 		if round == 0 {
 			_ = clients[0].Close()
-			clients[0], err = tailnet.NewUDPClient(server.Address(), keys[0], 4242)
+			authorities[0].restart(t)
+			clients[0], err = authorities[0].authority.Client(server.Address(), "machine_test")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -281,16 +280,9 @@ func exchangeTailcat(s tailcatStream, value byte) error {
 func TestTailcatPacketContract(t *testing.T) {
 	t.Setenv("IN_TS_TEST", "true")
 	dm := integration.RunDERPAndSTUN(t, func(string, ...any) {}, "127.0.0.1")
-	if _, err := tailnet.ListenUDP(dm.Regions[1], nil, 4242); !errors.Is(err, tailnet.ErrAdmission) {
-		t.Fatal("empty policy accepted")
-	}
-	k := key.NewNode()
-	server, err := tailnet.ListenUDP(dm.Regions[1], []key.NodePublic{k.Public()}, 4242)
-	if err != nil {
-		t.Fatal(err)
-	}
+	server, authorities := meshQUICFixture(t, dm.Regions[1], 1)
 	defer server.Close()
-	client, err := tailnet.NewUDPClient(server.Address(), k, 4242)
+	client, err := authorities[0].authority.Client(server.Address(), "machine_test")
 	if err != nil {
 		t.Fatal(err)
 	}

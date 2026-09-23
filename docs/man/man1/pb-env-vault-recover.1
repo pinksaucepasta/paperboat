@@ -1,0 +1,58 @@
+.nh
+.TH "PB-ENV-VAULT-RECOVER" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-env-vault-recover - Recover vault access and replace the password and recovery code
+
+
+.SH SYNOPSIS
+\fBpb env vault recover [flags]\fP
+
+
+.SH DESCRIPTION
+Recover vault access and replace the password and recovery code
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for recover
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+.PP
+\fB--password-file\fP=""
+	read the raw master password from an absolute owner-only file
+
+.PP
+\fB--password-stdin\fP[=false]
+	read the raw master password from non-interactive stdin
+
+.PP
+\fB--recovery-file\fP=""
+	save a newly generated recovery code to a new absolute file path
+
+.PP
+\fB--recovery-input-file\fP=""
+	read the old recovery code from an absolute owner-only file
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-env-vault(1)\fP

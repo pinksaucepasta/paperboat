@@ -5,10 +5,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -39,19 +37,12 @@ func TestStagedTUFRepository(t *testing.T) {
 	if !cleanAbsoluteDirectory(releaseRoot) || !cleanAbsoluteDirectory(githubRoot) {
 		t.Fatal("staged release paths must be absolute, clean directories")
 	}
-	currentBody := readStagedRegularFile(t, filepath.Join(releaseRoot, "current.json"))
-	var current struct {
-		Schema  string `json:"schema"`
-		Version string `json:"version"`
+	for _, name := range []string{"install", "windows"} {
+		body := readStagedRegularFile(t, filepath.Join(releaseRoot, name))
+		if !bytes.Contains(body, []byte("pb-bootstrap")) || !bytes.Contains(body, []byte(version)) || bytes.Contains(body, []byte("@PAPERBOAT_BOOTSTRAP_")) {
+			t.Fatalf("staged %s has invalid bootstrap verifier pins", name)
+		}
 	}
-	decoder := json.NewDecoder(bytes.NewReader(currentBody))
-	decoder.DisallowUnknownFields()
-	var extra any
-	if decoder.Decode(&current) != nil || decoder.Decode(&extra) != io.EOF || current.Schema != "paperboat.release-current/v1" || current.Version != version {
-		t.Fatal("staged current.json does not select the verified release")
-	}
-	assertStagedFileEquals(t, filepath.Join(releaseRoot, "install"), filepath.Join(githubRoot, "install.sh"))
-	assertStagedFileEquals(t, filepath.Join(releaseRoot, "windows"), filepath.Join(githubRoot, "install.ps1"))
 
 	repositoryRoot := filepath.Join(releaseRoot, "tuf")
 	server := stagedTUFServer(t, repositoryRoot)

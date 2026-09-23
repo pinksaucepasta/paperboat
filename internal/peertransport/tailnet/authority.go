@@ -14,11 +14,12 @@ import (
 	"net/netip"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/tailscale/tailcat"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=network-key-custody
 	"tailscale.com/types/key"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=network-fault-injection
@@ -102,6 +103,8 @@ type AuthorityOptions struct {
 // Authority owns verified configuration and every engine attached through it.
 // Application operation credentials and QUIC certificate validation remain mandatory.
 type Authority struct {
+	// expiresAt fences packet I/O independently of timer scheduling and teardown.
+	expiresAt       atomic.Int64
 	mu              sync.Mutex
 	updateMu        sync.Mutex // custody I/O must never hold the expiry/lifecycle lock
 	options         AuthorityOptions
@@ -111,7 +114,7 @@ type Authority struct {
 	closed          bool
 	done            chan struct{}
 	server          *UDPServer
-	clientEngine    *tailcat.Server
+	clientEngine    *mesh.Server
 	clients         map[string]authorizedClient
 	clientSlots     chan struct{}
 	regional        *RegionalCandidates
@@ -406,6 +409,7 @@ func (a *Authority) Apply(ctx context.Context, token string) error {
 		a.dropLocked()
 	}
 	a.current = &cfg
+	a.expiresAt.Store(cfg.ExpiresAt)
 	a.private = selected
 	a.relay.mu.Lock()
 	device, addresses := a.relay.device, append([]netip.AddrPort(nil), a.relay.deviceAddresses...)
@@ -444,6 +448,7 @@ func (a *Authority) Apply(ctx context.Context, token string) error {
 }
 
 func (a *Authority) dropLocked() {
+	a.expiresAt.Store(0)
 	a.relay.mu.Lock()
 	recovery := a.relay.recovery
 	a.relay.recovery = nil

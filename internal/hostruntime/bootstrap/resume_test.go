@@ -70,6 +70,23 @@ func TestResumeRecordSurvivesMaterialDeliveryAndRequiresExactBinding(t *testing.
 	}
 }
 
+func TestResumeMatchesEnrollmentTokenDistinguishesRetryFromNewEnrollment(t *testing.T) {
+	root := t.TempDir()
+	if matched, err := ResumeMatchesEnrollmentToken(root, "token-one"); err != nil || matched {
+		t.Fatalf("missing resume = %v, %v", matched, err)
+	}
+	record := NewResumeRecord("https://api.example.test", "public-key", "token-one", "device", "host", "verifier-012345678901234567890123456789", time.Now().Add(time.Hour))
+	if err := SaveResume(root, record); err != nil {
+		t.Fatal(err)
+	}
+	if matched, err := ResumeMatchesEnrollmentToken(root, "token-one"); err != nil || !matched {
+		t.Fatalf("same token = %v, %v", matched, err)
+	}
+	if matched, err := ResumeMatchesEnrollmentToken(root, "token-two"); err != nil || matched {
+		t.Fatalf("new token = %v, %v", matched, err)
+	}
+}
+
 func TestTokenBackedResumeCannotDowngradeBeforePairing(t *testing.T) {
 	root := t.TempDir()
 	now := time.Date(2099, 8, 22, 12, 0, 0, 0, time.UTC)
@@ -207,7 +224,7 @@ func TestAuthenticatedHostSetupResumeReusesLiveAndReplacesOnlyExactExpiredEmptyJ
 	if err := ClearResume(root); err != nil {
 		t.Fatal(err)
 	}
-	legacy.DisplayName = "Other"
+	legacy.Alias = "Other"
 	if err := SaveResume(root, legacy); err != nil {
 		t.Fatal(err)
 	}
@@ -406,5 +423,37 @@ func TestAuthenticatedHostSetupResumeRejectsUnknownActiveArtifact(t *testing.T) 
 	loaded, err := loadResumeDocument(root)
 	if err != nil || loaded.SetupOperationID != record.SetupOperationID {
 		t.Fatalf("unknown active journal changed: %+v err=%v", loaded, err)
+	}
+}
+
+func TestResumeJournalUsesAliasAndRejectsObsoleteDisplayName(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now().UTC()
+	record := NewResumeRecord("https://api.example.test", testPublicIdentityKey, "token", "studio", "host", "verifier-012345678901234567890123456789", now.Add(time.Hour))
+	if err := SaveResume(root, record); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(ResumePath(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(body, &document); err != nil {
+		t.Fatal(err)
+	}
+	if document["alias"] != "studio" || document["display_name"] != nil {
+		t.Fatal("journal must store alias only")
+	}
+	document["display_name"] = document["alias"]
+	delete(document, "alias")
+	body, err = json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ResumePath(root), body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadResume(root, record.ServerURL, record.PublicIdentityKey, "token", "studio", "host", now); !errors.Is(err, ErrResumeBinding) {
+		t.Fatalf("obsolete journal error = %v", err)
 	}
 }

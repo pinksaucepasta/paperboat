@@ -189,7 +189,7 @@ func TestAuthenticatedMachineSourceReconcilesSSHAuthority(t *testing.T) {
 		writer.Header().Set("Content-Type", "application/json")
 		switch request.URL.Path {
 		case "/v1/machines":
-			_, _ = writer.Write([]byte(`{"data":{"items":[{"id":"machine_1","display_name":"Studio","alias":"studio","state":"active","online":true,"installation_generation":4}],"pagination":{"limit":200,"offset":0,"total":1,"next_offset":null}}}`))
+			_, _ = writer.Write([]byte(`{"data":{"items":[{"id":"machine_1","alias":"studio","state":"active","online":true,"installation_generation":4}],"pagination":{"limit":200,"offset":0,"total":1,"next_offset":null}}}`))
 		case "/v1/machines/machine_1/ssh-target":
 			_, _ = writer.Write([]byte(`{"data":{"type":"machine_target","version":1,"machine_id":"machine_1","machine_generation":4,"os_user":"deploy","port":22,"reconciliation_version":2}}`))
 		case "/v1/machines/machine_1/ssh-host-keys":

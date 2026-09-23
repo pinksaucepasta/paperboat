@@ -22,6 +22,15 @@ const (
 var ErrInvalid = errors.New("invalid native private target binding")
 
 type Binding struct {
+	UserID             string `json:"user_id,omitempty"`
+	CLIClientSessionID string `json:"cli_client_session_id,omitempty"`
+	AccessSessionID    string `json:"access_session_id,omitempty"`
+
+	InstallationGeneration int64  `json:"installation_generation,omitempty"`
+	BootID                 string `json:"boot_id,omitempty"`
+	PolicyGeneration       int64  `json:"policy_generation,omitempty"`
+	AnnouncementGeneration int64  `json:"announcement_generation,omitempty"`
+
 	Schema             string    `json:"schema"`
 	ResourceKind       string    `json:"resource_kind"`
 	ResourceID         string    `json:"resource_id"`
@@ -40,7 +49,7 @@ func (b Binding) Validate(now time.Time) error {
 	if b.Schema != SchemaV1 || !id(b.ResourceID) || !id(b.RouteID) || !id(b.OwnerEndpointID) || b.ResourceGeneration == 0 || b.RouteGeneration == 0 || b.TargetGeneration == 0 || !b.ExpiresAt.After(now) || b.ExpiresAt.Sub(now) > 5*time.Minute {
 		return ErrInvalid
 	}
-	if b.ResourceKind != "preview" && b.ResourceKind != "tunnel" || b.Protocol != "http" && b.Protocol != "tcp" {
+	if b.ResourceKind != "preview" && b.ResourceKind != "tunnel" && b.ResourceKind != "device_service" || b.Protocol != "http" && b.Protocol != "tcp" {
 		return ErrInvalid
 	}
 	if b.ResourceKind == "preview" && b.Protocol != "http" {
@@ -48,6 +57,15 @@ func (b Binding) Validate(now time.Time) error {
 	}
 	wantScheme := map[string]map[string]bool{"http": {"http": true, "https": true, "h2c": true}, "tcp": {"tcp": true}}
 	if !wantScheme[b.Protocol][b.TargetScheme] || !literalLoopback(b.TargetAddress) {
+		return ErrInvalid
+	}
+
+	if b.ResourceKind == "device_service" {
+		_, port, _ := net.SplitHostPort(b.TargetAddress)
+		if b.ResourceID != b.OwnerEndpointID || b.RouteID != "tcp:"+port || b.Protocol != "tcp" || !id(b.UserID) || !id(b.CLIClientSessionID) || !id(b.AccessSessionID) || b.InstallationGeneration < 1 || !id(b.BootID) || b.PolicyGeneration < 1 || b.AnnouncementGeneration < 1 {
+			return ErrInvalid
+		}
+	} else if b.UserID != "" || b.CLIClientSessionID != "" || b.AccessSessionID != "" || b.InstallationGeneration != 0 || b.BootID != "" || b.PolicyGeneration != 0 || b.AnnouncementGeneration != 0 {
 		return ErrInvalid
 	}
 	return nil

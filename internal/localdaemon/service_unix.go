@@ -43,6 +43,25 @@ func InstallCurrentUserService(ctx context.Context, executable, configPath, serv
 	return installService(ctx, config)
 }
 
+// ReplaceCurrentUserService retains the previous declaration until the supplied
+// binary installation passes readiness. Rollback also removes a new service.
+func ReplaceCurrentUserService(ctx context.Context, executable, configPath, serverURL string) (func(context.Context) error, error) {
+	resolved, err := endpointbinary.Daemon(executable)
+	if err != nil {
+		return nil, err
+	}
+	config, err := currentUserServiceConfig(executable)
+	if err != nil {
+		return nil, err
+	}
+	config.Executable, config.ConfigPath, config.ServerURL = resolved, configPath, serverURL
+	installer, err := newServiceInstaller(config)
+	if err != nil {
+		return nil, err
+	}
+	return installer.Replace(ctx)
+}
+
 func RemoveCurrentUserService(ctx context.Context, executable string) error {
 	config, err := currentUserServiceConfig(executable)
 	if err != nil {

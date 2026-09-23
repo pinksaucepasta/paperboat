@@ -8,7 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 const (
@@ -351,6 +353,10 @@ func (l *EventLog) drain() {
 }
 
 func (l *EventLog) append(event Event) {
+	ctx := supportref.WithContext(context.Background(), event.CorrelationID)
+	reporter := errorreport.Current()
+	reporter.Lifecycle(ctx, event.Component, event.Name, event.Code, string(event.Outcome))
+
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if len(l.events) == l.capacity {

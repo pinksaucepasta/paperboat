@@ -1,0 +1,50 @@
+.nh
+.TH "PB-TRANSFER-STATUS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-transfer-status - Inspect a file transfer
+
+
+.SH SYNOPSIS
+\fBpb transfer status  [flags]\fP
+
+
+.SH DESCRIPTION
+Inspect a file transfer
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for status
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--on\fP=""
+	destination machine name or ID
+
+.PP
+\fB--session\fP=""
+	terminal session ID for destination context
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-transfer(1)\fP

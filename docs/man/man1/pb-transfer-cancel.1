@@ -1,0 +1,50 @@
+.nh
+.TH "PB-TRANSFER-CANCEL" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-transfer-cancel - Cancel a file transfer batch
+
+
+.SH SYNOPSIS
+\fBpb transfer cancel  [flags]\fP
+
+
+.SH DESCRIPTION
+Cancel a file transfer batch
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for cancel
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--on\fP=""
+	destination machine name or ID
+
+.PP
+\fB--session\fP=""
+	terminal session ID for destination context
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-transfer(1)\fP

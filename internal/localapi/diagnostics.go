@@ -38,7 +38,7 @@ type BugreportMarker struct {
 }
 
 func (m BugreportMarker) Validate() error {
-	if m.Schema != BugreportMarkerSchemaV1 || m.Phase != "start" && m.Phase != "end" {
+	if m.Schema != BugreportMarkerSchemaV1 || m.Phase != "start" && m.Phase != "end" && m.Phase != "unexpected_cli_failure" && m.Phase != "process_panic" {
 		return ErrInvalidResponse
 	}
 	return nil

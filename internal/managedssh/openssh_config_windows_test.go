@@ -20,8 +20,8 @@ func TestValidateInstalledOpenSSHConfigAcceptsTargetBlocks(t *testing.T) {
 		AgentSocket:       agentSocket,
 		IdentityFile:      ManagedIdentityPublicKeyPath(home),
 		Targets: []OpenSSHAliasTarget{
-			{Alias: "hn", DisplayName: "hn", User: "root", Port: 22},
-			{Alias: "victus", DisplayName: "Victus", User: "Pujan", Port: 38222},
+			{Alias: "hn", User: "root", Port: 22},
+			{Alias: "victus", User: "Pujan", Port: 38222},
 		},
 	}
 	if _, err := InstallOpenSSHConfig(config); err != nil {

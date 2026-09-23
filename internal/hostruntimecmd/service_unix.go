@@ -19,7 +19,7 @@ import (
 )
 
 func runServiceCommand(ctx context.Context, args []string, stdin io.Reader, _, _ io.Writer) error {
-	if len(args) != 1 || args[0] != "install" && args[0] != "commit" && args[0] != "repair" && args[0] != "repair-persisted" && args[0] != "stop" && args[0] != "uninstall" && args[0] != "uninstall-persisted" && args[0] != "purge" {
+	if len(args) != 1 || args[0] != "install" && args[0] != "commit" && args[0] != "repair" && args[0] != "repair-persisted" && args[0] != "stop" && args[0] != "uninstall" && args[0] != "uninstall-persisted" && args[0] != "purge" && args[0] != "install-supplied" && args[0] != "commit-supplied" && args[0] != "rollback-supplied" {
 		return errors.New("service requires install, commit, repair, repair-persisted, stop, or uninstall")
 	}
 	if args[0] == "uninstall" && os.Geteuid() != 0 {
@@ -48,6 +48,9 @@ func runServiceCommand(ctx context.Context, args []string, stdin io.Reader, _, _
 	request, err := hostinstall.Decode(stdin)
 	if err != nil {
 		return err
+	}
+	if args[0] == "install-supplied" || args[0] == "commit-supplied" || args[0] == "rollback-supplied" {
+		return hostinstall.SuppliedBinary(ctx, request, args[0])
 	}
 	if args[0] == "uninstall" {
 		return hostinstall.Uninstall(ctx, request)

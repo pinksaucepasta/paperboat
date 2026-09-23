@@ -73,24 +73,32 @@ type productionNativePeerGeneration struct {
 const productionNativePeerRestartDelay = time.Second
 const productionNativePrivateCurrentInterval = time.Second
 
-type productionNativePrivateValidator interface {
+var errNativePeerPending = errors.New("machine endpoint certificate is pending")
+
+type productionNativePrivateValidator func(context.Context, nativeprivate.Binding) error
+
+func localNativePrivateValidator(target interface {
 	ValidateNativePrivateTarget(nativeprivate.Binding) error
+}) productionNativePrivateValidator {
+	return func(_ context.Context, binding nativeprivate.Binding) error {
+		return target.ValidateNativePrivateTarget(binding)
+	}
 }
 
 func productionNativeCurrent(validators ...productionNativePrivateValidator) server.NativePrivateTCPCurrent {
 	if len(validators) == 0 {
 		return nil
 	}
-	validate := func(binding nativeprivate.Binding) error {
+	validate := func(ctx context.Context, binding nativeprivate.Binding) error {
 		for _, validator := range validators {
-			if validator != nil && validator.ValidateNativePrivateTarget(binding) == nil {
+			if validator != nil && validator(ctx, binding) == nil {
 				return nil
 			}
 		}
 		return server.ErrNativePrivateBinding
 	}
 	return func(ctx context.Context, binding nativeprivate.Binding) (time.Time, <-chan struct{}, error) {
-		if ctx == nil || validate(binding) != nil {
+		if ctx == nil || validate(ctx, binding) != nil {
 			return time.Time{}, nil, server.ErrNativePrivateBinding
 		}
 		revoked := make(chan struct{})
@@ -107,7 +115,7 @@ func productionNativeCurrent(validators ...productionNativePrivateValidator) ser
 					close(revoked)
 					return
 				case <-timer.C:
-					if validate(binding) != nil {
+					if validate(ctx, binding) != nil {
 						close(revoked)
 						return
 					}
@@ -148,6 +156,13 @@ func (s *productionNativePeerService) Start(ctx context.Context) error {
 	s.mu.Unlock()
 	generation, err := s.startGeneration(runCtx)
 	if err != nil {
+		if errors.Is(err, errNativePeerPending) {
+			s.mu.Lock()
+			s.lastErr = err
+			s.mu.Unlock()
+			go s.supervise(runCtx, nil)
+			return nil
+		}
 		cancel()
 		s.mu.Lock()
 		s.cancel = nil
@@ -168,6 +183,12 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 	endpoint, err := runtimeEnvironmentEndpoint(s.config.stateRoot)
 	if err != nil || endpoint.Generation != s.config.generation {
 		return nil, errors.Join(ErrProductionInvalid, err)
+	}
+	if len(endpoint.Certificate) == 0 {
+		// Approval is asynchronous. Keep the host runtime alive while the
+		// enrollment service polls; no peer listener or relay is exposed until
+		// a certificate can be verified for this exact machine generation.
+		return nil, errNativePeerPending
 	}
 	certificate, err := endpointidentity.Verify(endpoint.Certificate, endpoint.RootPublicKey, endpointidentity.Expected{Role: endpointidentity.RoleMachine, EndpointID: s.config.machineID, Generation: endpoint.Generation}, time.Now().UTC())
 	if err != nil {
@@ -311,7 +332,10 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 	identityCheck := time.NewTicker(tailnet.RefreshInterval)
 	defer identityCheck.Stop()
 	defer func() {
-		cleanupErr := generation.stop()
+		var cleanupErr error
+		if generation != nil {
+			cleanupErr = generation.stop()
+		}
 		s.mu.Lock()
 		s.current = nil
 		s.cancel = nil
@@ -319,6 +343,29 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 		close(s.done)
 		s.mu.Unlock()
 	}()
+	if generation == nil {
+		// Initial approval uses the same bounded retry loop as a renewed
+		// certificate. Cancellation interrupts the wait and closes done.
+		ticker := time.NewTicker(productionNativePeerRestartDelay)
+		defer ticker.Stop()
+		for generation == nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+			next, err := s.startGeneration(ctx)
+			s.mu.Lock()
+			if err == nil {
+				generation = next
+				s.current = next
+				s.lastErr = nil
+			} else {
+				s.lastErr = err
+			}
+			s.mu.Unlock()
+		}
+	}
 	for {
 		select {
 		case <-ctx.Done():

@@ -51,8 +51,8 @@ type ArtifactTarget struct {
 
 // tufAssetCustom is the signed contract published for every release asset.
 // The release policy is embedded in the asset target metadata so bootstrap and
-// the updater have one TUF target to verify and download. There is no separate
-// launcher, runtime, CLI, updater, or release-index artifact.
+// the updater have one product TUF target to verify and download. The small
+// first-install verifier is a script-pinned GitHub asset, not a product target.
 type tufAssetCustom struct {
 	Schema       string             `json:"schema"`
 	Kind         string             `json:"kind"`

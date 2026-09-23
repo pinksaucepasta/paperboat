@@ -99,7 +99,7 @@ func resumeOneShotEnrollment(ctx context.Context, input oneShotResumeInput, oper
 		if err != nil {
 			return bootstrap.Material{}, resume, err
 		}
-		resume = bootstrap.NewResumeRecord(input.Config.ServerURL, input.Config.PublicIdentityKey, input.Config.EnrollmentToken, input.Config.DisplayName, input.SetupMode, verifier, now.Add(15*time.Minute))
+		resume = bootstrap.NewResumeRecord(input.Config.ServerURL, input.Config.PublicIdentityKey, input.Config.EnrollmentToken, input.Config.Alias, input.SetupMode, verifier, now.Add(15*time.Minute))
 		if err := operations.SaveResume(input.StateRoot, resume); err != nil {
 			return bootstrap.Material{}, resume, fmt.Errorf("persist machine enrollment resume state: %w", err)
 		}
@@ -115,7 +115,7 @@ func resumeOneShotEnrollment(ctx context.Context, input oneShotResumeInput, oper
 	}
 	config := input.Config
 	config.ServerURL = resume.ServerURL
-	config.DisplayName = resume.DisplayName
+	config.Alias = resume.Alias
 	config.Verifier = resume.Verifier
 	if resume.PairingStarted && input.Status != nil {
 		fmt.Fprintln(input.Status, "Resuming one-shot machine enrollment...")
@@ -168,8 +168,14 @@ func resumeOneShotEnrollment(ctx context.Context, input oneShotResumeInput, oper
 		if err := bootstrap.ValidateRecoveredMaterial(*resume.Material, material, resume.RuntimeEnrolled); err != nil {
 			return bootstrap.Material{}, resume, err
 		}
-		if resume.ClientInstalled && !sameDurableClientSession(resume.Material.ClientSession, material.ClientSession) {
+		if resume.ClientInstalled && !sameBoundClientSession(resume.Material.ClientSession, material.ClientSession) {
 			return bootstrap.Material{}, resume, bootstrap.ErrResumeBinding
+		}
+		if resume.ClientInstalled && !sameClientCredentials(resume.Material.ClientSession, material.ClientSession) {
+			// The server may rotate both tokens when recovering an expired
+			// pairing. Persist the new material and the pending CLI install in
+			// one journal write so a crash retries the same-session refresh.
+			resume.ClientInstalled = false
 		}
 	}
 	resume.PairingStarted = true
@@ -223,14 +229,17 @@ func recoverAuthenticatedSetupMaterial(ctx context.Context, config bootstrap.Con
 	return material, nil
 }
 
-func sameDurableClientSession(previous, recovered *bootstrap.ClientSession) bool {
+func sameBoundClientSession(previous, recovered *bootstrap.ClientSession) bool {
 	if previous == nil || recovered == nil {
 		return previous == nil && recovered == nil
 	}
 	return previous.SessionID == recovered.SessionID &&
-		previous.RefreshToken == recovered.RefreshToken &&
 		previous.TokenType == recovered.TokenType &&
 		strings.TrimSpace(previous.Scope) == strings.TrimSpace(recovered.Scope)
+}
+
+func sameClientCredentials(previous, recovered *bootstrap.ClientSession) bool {
+	return sameBoundClientSession(previous, recovered) && previous.AccessToken == recovered.AccessToken && previous.RefreshToken == recovered.RefreshToken
 }
 
 func validateOneShotResumeOperations(operations oneShotResumeOperations) error {

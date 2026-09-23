@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	identitystore "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/endpointidentity"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/trustedkeys"
@@ -62,7 +63,7 @@ func New(config Config, credentials CredentialSource) (*Client, error) {
 		config.Clock = func() time.Time { return time.Now().UTC() }
 	}
 	endpoint := base.ResolveReference(&url.URL{Path: "/v1/machine-peer-attempts/next"})
-	return &Client{config: config, url: endpoint.String(), creds: credentials, http: &http.Client{Transport: config.Transport, Timeout: config.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}}, nil
+	return &Client{config: config, url: endpoint.String(), creds: credentials, http: &http.Client{Transport: errorreport.TransportOperation(config.Transport, endpoint.String(), "peer_attempt"), Timeout: config.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}}, nil
 }
 
 func (c *Client) Next(ctx context.Context) (api.PeerAttemptDescriptor, error) {

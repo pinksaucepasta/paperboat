@@ -14,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/transportmanager"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 func runWindowsDaemon(ctx context.Context, config DaemonConfig) error {
@@ -72,12 +73,13 @@ func runWindowsDaemon(ctx context.Context, config DaemonConfig) error {
 	if transportInvalidator != nil {
 		transportInvalidator.authority = config.InvalidatePeerAuthority
 	}
-	if err := recorder.Record("daemon", "lifecycle", "info", map[string]string{"state": "starting"}); err != nil {
+	reference := supportref.FromContext(ctx)
+	if err := recorder.RecordWithSupportReference("daemon", "lifecycle", "info", reference, map[string]string{"state": "starting"}); err != nil {
 		_ = recorder.Close()
 		return err
 	}
 	defer func() {
-		_ = recorder.Record("daemon", "lifecycle", "info", map[string]string{"state": "stopping"})
+		_ = recorder.RecordWithSupportReference("daemon", "lifecycle", "info", reference, map[string]string{"state": "stopping"})
 		_ = recorder.Close()
 	}()
 
@@ -106,11 +108,13 @@ func runWindowsDaemon(ctx context.Context, config DaemonConfig) error {
 	// enough for the first command after logon or reboot to fail. Inventory.Run
 	// replaces this starting snapshot as soon as reconciliation completes.
 	store, err := localapi.NewSnapshotStore(&localapi.Snapshot{
-		Schema:        localapi.SnapshotSchemaV1,
-		Generation:    1,
-		ObservedAt:    diagnosticClock().UTC(),
-		DaemonState:   "starting",
-		DaemonVersion: buildinfo.Version,
+		Schema:             localapi.SnapshotSchemaV1,
+		Generation:         1,
+		ObservedAt:         diagnosticClock().UTC(),
+		DaemonState:        "starting",
+		DaemonVersion:      buildinfo.Version,
+		DeviceSuffix:       config.DeviceSuffix,
+		DeviceLoopbackCIDR: config.DeviceLoopbackCIDR,
 	})
 	if err != nil {
 		return err

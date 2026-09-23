@@ -1,4 +1,4 @@
-// Package tailnet owns Paperboat's virtual UDP boundary over Tailcat.
+// Package tailnet owns Paperboat's authorized virtual UDP boundary over mesh.
 package tailnet
 
 import (
@@ -8,20 +8,20 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tailscale/tailcat"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 )
 
-const MaxPayload = tailcat.MaxUDPPayload
+const MaxPayload = mesh.MaxUDPPayload
 
 var (
 	ErrWrongPeer       = errors.New("virtual UDP destination is not the authorized peer")
 	ErrPayloadTooLarge = errors.New("virtual UDP payload exceeds MTU")
 )
 
-// Packet owns a connected Tailcat flow. It adds no queue and delegates deadlines
+// Packet owns a connected mesh flow. It adds no queue and delegates deadlines
 // and concurrent I/O to the underlying netstack socket.
 type Packet struct {
-	conn          tailcat.ConnPacketConn
+	conn          mesh.ConnPacketConn
 	once          sync.Once
 	closeErr      error
 	release       func()
@@ -30,7 +30,7 @@ type Packet struct {
 	local, remote net.Addr
 }
 
-func newPacket(c tailcat.ConnPacketConn, release func()) *Packet {
+func newPacket(c mesh.ConnPacketConn, release func()) *Packet {
 	return &Packet{conn: c, release: release, local: c.LocalAddr(), remote: c.RemoteAddr()}
 }
 func (p *Packet) LocalAddr() net.Addr  { return p.local }

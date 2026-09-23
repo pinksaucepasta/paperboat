@@ -12,10 +12,25 @@ import (
 	hostservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 )
 
-type serviceRunner struct{ calls []string }
+type serviceRunner struct {
+	calls          []string
+	launchdRunning bool
+}
 
 func (r *serviceRunner) Run(_ context.Context, name string, arguments ...string) error {
 	r.calls = append(r.calls, strings.Join(append([]string{name}, arguments...), " "))
+	if name == "launchctl" && len(arguments) > 0 {
+		switch arguments[0] {
+		case "bootstrap", "kickstart":
+			r.launchdRunning = true
+		case "bootout":
+			r.launchdRunning = false
+		case "print":
+			if !r.launchdRunning {
+				return &hostservice.CommandError{Tool: name, Output: "could not find service", Cause: os.ErrNotExist}
+			}
+		}
+	}
 	return nil
 }
 

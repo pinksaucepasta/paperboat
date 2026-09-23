@@ -45,8 +45,7 @@ func addVaultScopeCommands(root *cobra.Command) {
 			if err := manager.RotatePersonal(command.Context()); err != nil {
 				return safeEnvironmentVariableCommandError(err)
 			}
-			_, err = fmt.Fprintln(command.OutOrStdout(), "Rotated personal encrypted ENV scope keys.")
-			return err
+			return writeVaultMutationResult(command, map[string]any{"scope": "personal", "rotated": true}, "Rotated personal encrypted ENV scope keys.")
 		},
 	}
 	cancel := &cobra.Command{
@@ -66,11 +65,12 @@ func addVaultScopeCommands(root *cobra.Command) {
 			if err := manager.AbortPersonalRotation(command.Context()); err != nil {
 				return safeEnvironmentVariableCommandError(err)
 			}
-			_, err = fmt.Fprintln(command.OutOrStdout(), "Canceled the personal encrypted ENV key rotation.")
-			return err
+			return writeVaultMutationResult(command, map[string]any{"scope": "personal", "rotation_canceled": true}, "Canceled the personal encrypted ENV key rotation.")
 		},
 	}
 	cancel.Flags().String("confirm", "", "exact confirmation phrase: CANCEL ENV ROTATE <account_id>")
+	rotate.Flags().Bool("json", false, "print JSON")
+	cancel.Flags().Bool("json", false, "print JSON")
 	rotate.AddCommand(cancel)
 	root.AddCommand(rotate)
 
@@ -131,16 +131,18 @@ func addVaultScopeCommands(root *cobra.Command) {
 			if err := manager.RotateTeam(command.Context(), teamID, nil, true); err != nil {
 				return safeEnvironmentVariableCommandError(err)
 			}
-			_, err = fmt.Fprintf(command.OutOrStdout(), "Reset encrypted ENV team %s; previous values were discarded.\n", teamID)
-			return err
+			return writeVaultMutationResult(command, map[string]any{"team": teamID, "reset": true}, fmt.Sprintf("Reset encrypted ENV team %s; previous values were discarded.", teamID))
 		},
 	}
 	reset.Flags().String("confirm", "", "exact confirmation phrase: RESET ENV TEAM <team>")
+	for _, command := range []*cobra.Command{create, grant, teamRotate, revoke, reset} {
+		command.Flags().Bool("json", false, "print JSON")
+	}
 	team.AddCommand(create, grant, teamRotate, revoke, reset)
 	root.AddCommand(team)
 
 	grants := &cobra.Command{Use: "grants", Short: "Reconcile encrypted ENV team grants", Args: commandArgs(cobra.NoArgs)}
-	grants.AddCommand(&cobra.Command{
+	syncGrants := &cobra.Command{
 		Use:   "sync",
 		Short: "Accept pending team grants into this account's encrypted vault",
 		Args:  commandArgs(cobra.NoArgs),
@@ -152,10 +154,11 @@ func addVaultScopeCommands(root *cobra.Command) {
 			if err := manager.SyncTeamGrants(command.Context()); err != nil {
 				return safeEnvironmentVariableCommandError(err)
 			}
-			_, err = fmt.Fprintln(command.OutOrStdout(), "ENV team grants synchronized into encrypted vault custody.")
-			return err
+			return writeVaultMutationResult(command, map[string]any{"grants_synchronized": true}, "ENV team grants synchronized into encrypted vault custody.")
 		},
-	})
+	}
+	syncGrants.Flags().Bool("json", false, "print JSON")
+	grants.AddCommand(syncGrants)
 	root.AddCommand(grants)
 
 	host := &cobra.Command{Use: "host", Short: "Manage encrypted host ENV projections", Args: commandArgs(cobra.NoArgs)}
@@ -173,6 +176,7 @@ func addVaultScopeCommands(root *cobra.Command) {
 	provision.Flags().String("machine", "", "machine name or ID")
 	provision.Flags().StringArray("select", nil, "selection reference personal:NAME or team:TEAM:NAME; repeat to select more values")
 	provision.Flags().Bool("empty", false, "explicitly provision an empty selection")
+	provision.Flags().Bool("json", false, "print JSON")
 	host.AddCommand(provision)
 	root.AddCommand(host)
 }
@@ -213,6 +217,9 @@ func setEnvironmentVariableForScope(command *cobra.Command, team, requestedMachi
 	}); err != nil {
 		return safeEnvironmentVariableCommandError(err)
 	}
+	if jsonOutputRequested(command) {
+		return nil
+	}
 	_, err = fmt.Fprintf(command.OutOrStdout(), "Set %s in %s (encrypted vault scope).\n", name, target.label)
 	return err
 }
@@ -249,6 +256,9 @@ func unsetEnvironmentVariableForScope(command *cobra.Command, team, requestedMac
 		return nil
 	}); err != nil {
 		return safeEnvironmentVariableCommandError(err)
+	}
+	if jsonOutputRequested(command) {
+		return nil
 	}
 	_, err = fmt.Fprintf(command.OutOrStdout(), "Unset %s from %s (encrypted vault scope).\n", name, target.label)
 	return err
@@ -396,6 +406,14 @@ func writeVaultScopeMetadataJSON(output io.Writer, metadata vaultScopeMetadata) 
 	})
 }
 
+func writeVaultMutationResult(command *cobra.Command, data any, message string) error {
+	if jsonOutputRequested(command) {
+		return writeCLIJSON(command.OutOrStdout(), data)
+	}
+	_, err := fmt.Fprintln(command.OutOrStdout(), message)
+	return err
+}
+
 func runVaultTeamCreate(command *cobra.Command, teamID string) error {
 	if !vaultCommandIdentifier(teamID) {
 		return invocationError(errors.New("team must be a valid account identifier"))
@@ -428,8 +446,7 @@ func runVaultTeamCreate(command *cobra.Command, teamID string) error {
 	if err := manager.CreateTeamAt(command.Context(), teamID, expectedGeneration, membershipGeneration); err != nil {
 		return safeEnvironmentVariableCommandError(err)
 	}
-	_, err = fmt.Fprintf(command.OutOrStdout(), "Created encrypted ENV team %s.\n", teamID)
-	return err
+	return writeVaultMutationResult(command, map[string]any{"team": teamID, "created": true}, "Created encrypted ENV team "+teamID+".")
 }
 
 func runVaultTeamGrant(command *cobra.Command, teamID, accountID string) error {
@@ -443,8 +460,7 @@ func runVaultTeamGrant(command *cobra.Command, teamID, accountID string) error {
 	if err := manager.GrantTeam(command.Context(), teamID, accountID); err != nil {
 		return safeEnvironmentVariableCommandError(err)
 	}
-	_, err = fmt.Fprintf(command.OutOrStdout(), "Granted account %s access to encrypted ENV team %s.\n", accountID, teamID)
-	return err
+	return writeVaultMutationResult(command, map[string]any{"team": teamID, "account": accountID, "granted": true}, fmt.Sprintf("Granted account %s access to encrypted ENV team %s.", accountID, teamID))
 }
 
 func runVaultTeamRotate(command *cobra.Command, teamID string) error {
@@ -462,8 +478,7 @@ func runVaultTeamRotate(command *cobra.Command, teamID string) error {
 	if err := manager.RotateTeam(command.Context(), teamID, nil, false); err != nil {
 		return safeEnvironmentVariableCommandError(err)
 	}
-	_, err = fmt.Fprintf(command.OutOrStdout(), "Rotated encrypted ENV team %s while preserving values.\n", teamID)
-	return err
+	return writeVaultMutationResult(command, map[string]any{"team": teamID, "rotated": true, "values_preserved": true}, fmt.Sprintf("Rotated encrypted ENV team %s while preserving values.", teamID))
 }
 
 func runVaultTeamRevoke(command *cobra.Command, teamID string, remove []string, totalLoss bool, confirmation string) error {
@@ -496,8 +511,7 @@ func runVaultTeamRevoke(command *cobra.Command, teamID string, remove []string, 
 	if err := manager.RotateTeam(command.Context(), teamID, append([]string(nil), remove...), totalLoss); err != nil {
 		return safeEnvironmentVariableCommandError(err)
 	}
-	_, err = fmt.Fprintf(command.OutOrStdout(), "Rotated encrypted ENV team %s.\n", teamID)
-	return err
+	return writeVaultMutationResult(command, map[string]any{"team": teamID, "rotated": true, "removed_accounts": remove, "values_discarded": totalLoss}, fmt.Sprintf("Rotated encrypted ENV team %s.", teamID))
 }
 
 func runVaultHostProvision(command *cobra.Command, requestedMachine string, references []string, explicitEmpty bool) error {
@@ -530,8 +544,7 @@ func runVaultHostProvision(command *cobra.Command, requestedMachine string, refe
 	if err := manager.ProvisionHost(command.Context(), target.machineID, selection); err != nil {
 		return safeEnvironmentVariableCommandError(err)
 	}
-	_, err = fmt.Fprintf(command.OutOrStdout(), "Provisioned encrypted ENV selection for %s.\n", environmentVariableScopeLabel(target))
-	return err
+	return writeVaultMutationResult(command, map[string]any{"machine_id": target.machineID, "selection_count": len(selection), "provisioned": true}, fmt.Sprintf("Provisioned encrypted ENV selection for %s.", environmentVariableScopeLabel(target)))
 }
 
 func parseVaultHostSelections(references []string, accountID string) ([]api.VaultHostSelection, error) {

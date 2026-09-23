@@ -8,9 +8,12 @@ import (
 
 	"github.com/pinksaucepasta/paperboat-relay/derpquic"
 	relayservice "github.com/pinksaucepasta/paperboat-relay/peerrelay"
-	"github.com/tailscale/tailcat"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-device-relay-protocol
 	"tailscale.com/disco"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-device-relay-protocol
 	"tailscale.com/tailcfg"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-device-relay-protocol
 	"tailscale.com/types/key"
 )
 
@@ -154,7 +157,7 @@ func (a *Authority) ConfigureDeviceRelay(addresses []netip.AddrPort) error {
 
 func (a *Authority) startDeviceRelayLocked(addresses []netip.AddrPort) error {
 	port := addresses[0].Port()
-	discoPrivate := tailcat.DiscoPrivateForNode(a.private)
+	discoPrivate := mesh.DiscoPrivateForNode(a.private)
 	descriptor := derpquic.ServiceDescriptor{WireGuardPublicKey: derpquic.KeyString(a.private.Public()), DiscoPublicKey: derpquic.DiscoKeyString(discoPrivate.Public()), VirtualAddress: a.current.Self.VirtualAddress}
 	server, err := relayservice.New(relayservice.Config{Service: descriptor, DiscoPrivate: discoPrivate, Port: port, Addresses: addresses})
 	if err != nil {

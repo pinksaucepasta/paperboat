@@ -14,7 +14,7 @@ import (
 const ClientID = "paperboat"
 
 var ClientScopes = []string{
-	"account:read", "clients:revoke", "projects:read", "projects:connect", "session:refresh", "diagnostics:upload",
+	"account:read", "clients:revoke", "machines:read", "machines:connect", "session:refresh", "diagnostics:upload",
 	"previews:read", "previews:write", "tunnels:read", "tunnels:write", "operations:read", "operations:write",
 }
 

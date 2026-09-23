@@ -92,6 +92,62 @@ func ApproveOwnedPeerEnrollments(ctx context.Context, store config.ProfileStore,
 	return nil
 }
 
+// ApproveOwnedMachineEnrollment approves exactly one pending machine endpoint.
+// Ownership and the pending request are refreshed inside the mutation so a
+// stale daemon snapshot cannot authorize a different or revoked machine.
+func ApproveOwnedMachineEnrollment(ctx context.Context, store config.ProfileStore, profile config.Profile, client *api.Client, machineID string) error {
+	if client == nil || profile.Account.ID == "" || profile.CLIClientSessionID == "" || profile.Issuer == "" || machineID == "" {
+		return errors.New("machine enrollment approval is not configured")
+	}
+	machines, err := client.ListUserMachines(ctx)
+	if err != nil {
+		return inventorySourceFailure("peer_machines", err)
+	}
+	owned := false
+	for _, machine := range machines {
+		if machine.ID == machineID && machine.State != "revoked" && machine.State != "deleted" {
+			owned = true
+			break
+		}
+	}
+	if !owned {
+		return errors.New("machine is not an active machine owned by this account")
+	}
+	pending, err := client.PendingE2EEEndpoints(ctx)
+	if err != nil {
+		return inventorySourceFailure("peer_pending", err)
+	}
+	var selected *api.PendingEndpointIdentity
+	for index := range pending {
+		request := &pending[index]
+		if request.EndpointID != machineID || (request.Role != "" && request.Role != "machine") {
+			continue
+		}
+		if selected != nil {
+			return errors.New("multiple pending enrollment requests exist for this machine")
+		}
+		selected = request
+	}
+	if selected == nil {
+		return errors.New("no pending machine enrollment exists for this machine")
+	}
+	seed, err := store.PeerApprovalSigningKey(profile.Issuer, profile.Account.ID, profile.CLIClientSessionID)
+	if errors.Is(err, config.ErrSecretNotFound) {
+		return &PeerApprovalSignerUnavailableError{PendingRequests: 1}
+	} else if err != nil {
+		return inventorySourceFailure("peer_signer", err)
+	}
+	clear(seed)
+	_, err = identitybootstrap.ApproveMachine(ctx, identitybootstrap.ApprovalRequest{
+		Store: store, Client: client, Issuer: profile.Issuer, AccountID: profile.Account.ID,
+		CLIClientSessionID: profile.CLIClientSessionID, RequestID: selected.RequestID, SafetyCode: selected.SafetyCode,
+	})
+	if err != nil {
+		return inventorySourceFailure("peer_approve", err)
+	}
+	return nil
+}
+
 func validateVerifierOnlyRoot(ctx context.Context, store config.ProfileStore, profile config.Profile, client *api.Client) error {
 	local, err := store.LoadPeerAccountRootPublic(profile.Issuer, profile.Account.ID)
 	if err != nil {

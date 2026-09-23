@@ -16,11 +16,11 @@ import (
 
 	"github.com/pinksaucepasta/paperboat-relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
-	"github.com/tailscale/tailcat"
 	"tailscale.com/tailcfg"
 )
 
@@ -187,7 +187,7 @@ func TestNativeSessionOverAuthenticatedDERPQUIC(t *testing.T) {
 	_ = reconnectStream.Close()
 }
 
-func startRelayEchoServer(t *testing.T, owner *native.Owner, authority *tailnet.Authority, region *tailcfg.DERPRegion) tailcat.Addr {
+func startRelayEchoServer(t *testing.T, owner *native.Owner, authority *tailnet.Authority, region *tailcfg.DERPRegion) mesh.Addr {
 	t.Helper()
 	server, err := authority.Listen(region)
 	if err != nil {

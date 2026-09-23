@@ -28,6 +28,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connectorrotation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
@@ -134,7 +135,7 @@ func NewHTTPSProductionAssemblySource(config HTTPSProductionAssemblySourceConfig
 	if err != nil {
 		return nil, err
 	}
-	client := &http.Client{Transport: config.Transport, Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}
+	client := &http.Client{Transport: errorreport.TransportOperation(config.Transport, base.String(), "tunnel_bootstrap"), Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}
 	if config.Report == nil {
 		config.Report = func(tunnelmanager.Observation) {}
 	}

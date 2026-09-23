@@ -30,26 +30,30 @@ func newManagedSSHToolCommand(name string) *cobra.Command {
 
 func actionManagedSSHTool(cobraCommand *cobra.Command, tool string, args []string) error {
 	ctx := actionContext(cobraCommand, args)
+	suffix, err := configuredDeviceSuffix(cobraCommand)
+	if err != nil {
+		return err
+	}
 	resolve := func(ctx *command.Context, target, requestedUser string) (managedssh.Destination, error) {
 		_, machine, sshTarget, err := resolveSSHCommandTargetFast(ctx, target)
 		if err != nil {
 			return managedssh.Destination{}, friendlyCommandError(err)
 		}
 		return managedssh.ResolveDestination(managedssh.DestinationInput{
-			Alias: machine.Alias, AliasSuffix: managedssh.AliasSuffix,
+			Alias: machine.Alias, AliasSuffix: suffix,
 			RegisteredPort: sshTarget.Port, RequestedUser: requestedUser, RegisteredUser: sshTarget.OSUser,
 			HasRegisteredUser: true, Platform: machine.Platform,
 		})
 	}
-	rewritten, err := rewriteManagedToolArguments(ctx, tool, args, resolve)
+	rewritten, err := rewriteManagedToolArguments(ctx, tool, args, suffix, resolve)
 	if err != nil {
 		return err
 	}
 	return executeManagedSSHTool(tool, rewritten, os.Environ())
 }
 
-func rewriteManagedToolArguments(ctx *command.Context, tool string, args []string, resolve managedToolTargetResolver) ([]string, error) {
-	if ctx == nil || resolve == nil || len(args) == 0 {
+func rewriteManagedToolArguments(ctx *command.Context, tool string, args []string, suffix string, resolve managedToolTargetResolver) ([]string, error) {
+	if ctx == nil || resolve == nil || suffix == "" || len(args) == 0 {
 		return nil, errManagedToolOperand
 	}
 	result := append([]string(nil), args...)
@@ -65,8 +69,8 @@ func rewriteManagedToolArguments(ctx *command.Context, tool string, args []strin
 			if err != nil {
 				continue
 			}
-			target = strings.TrimSuffix(strings.ToLower(target), "."+managedssh.AliasSuffix)
-			if _, err := managedssh.AliasHost(strings.ToLower(target), managedssh.AliasSuffix); err != nil {
+			target = strings.TrimSuffix(strings.ToLower(target), "."+suffix)
+			if _, err := managedssh.AliasHost(strings.ToLower(target), suffix); err != nil {
 				continue
 			}
 			destination, err := resolve(ctx, target, requestedUser)
@@ -92,7 +96,7 @@ func rewriteManagedToolArguments(ctx *command.Context, tool string, args []strin
 		if err != nil {
 			return nil, err
 		}
-		target = strings.TrimSuffix(strings.ToLower(target), "."+managedssh.AliasSuffix)
+		target = strings.TrimSuffix(strings.ToLower(target), "."+suffix)
 		destination, err := resolve(ctx, target, requestedUser)
 		if err != nil {
 			return nil, err

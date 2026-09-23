@@ -8,7 +8,7 @@ import (
 	"sort"
 
 	"github.com/pinksaucepasta/paperboat-relay/derpquic"
-	"github.com/tailscale/tailcat"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-virtual-udp
 	"tailscale.com/tailcfg"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-virtual-udp
@@ -109,16 +109,16 @@ func (a *Authority) Listen(region *tailcfg.DERPRegion) (*UDPServer, error) {
 		a.server = nil
 	}
 	peers, admitted := a.peersLocked()
-	server := &tailcat.Server{OnRelayControl: a.relayControl, DERPCarrierFactory: a.relay.factory, PeerRelayNodes: a.relay.peerNodes, RelayControlPeers: a.relay.controlPeers, TestOnlyPacketListener: a.options.TestOnlyPacketListener, Key: a.private, DisablePresharedKey: true, LocalAddr: netip.MustParseAddr(a.current.Self.VirtualAddress), AllowedPeers: peers, Region: region, ServedUDPPorts: []filter.PortRange{{First: NetworkPort, Last: NetworkPort}}, Logf: func(string, ...any) {}}
+	server := &mesh.Server{OnRelayControl: a.relayControl, DERPCarrierFactory: a.relay.factory, PeerRelayNodes: a.relay.peerNodes, RelayControlPeers: a.relay.controlPeers, TestOnlyPacketListener: a.options.TestOnlyPacketListener, Key: a.private, LocalAddr: netip.MustParseAddr(a.current.Self.VirtualAddress), AllowedPeers: peers, Region: region, ServedUDPPorts: []filter.PortRange{{First: NetworkPort, Last: NetworkPort}}, Logf: func(string, ...any) {}}
 	var err error
-	a.server, err = listenUDP(server, NetworkPort, admitted)
+	a.server, err = listenUDP(server, NetworkPort, admitted, &a.expiresAt)
 	return a.server, err
 }
 
 // Descriptor derives a peer address from current signed network authority.
 // Paperboat authority mode uses explicit peer admission, pinned QUIC identity
 // and operation grants rather than Tailcat's optional address PSK.
-func (a *Authority) Descriptor(peerID string) (tailcat.Addr, error) {
+func (a *Authority) Descriptor(peerID string) (mesh.Addr, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.closed || !a.usableLocked() || a.current.Self.Role != "cli" {
@@ -143,21 +143,21 @@ func (a *Authority) Descriptor(peerID string) (tailcat.Addr, error) {
 		if len(regions) > 1 {
 			regions = regions[:1]
 		}
-		return (&tailcat.ConnInfo{ServerPublic: tailcat.NodePublic{NodePublic: node}, ServerDiscoPublic: tailcat.DiscoPublic{DiscoPublic: disco}, Region: regions}).Addr(), nil
+		return (&mesh.ConnInfo{ServerPublic: mesh.NodePublic{NodePublic: node}, ServerDiscoPublic: mesh.DiscoPublic{DiscoPublic: disco}, Region: regions}).Addr(), nil
 	}
 	return "", ErrAdmission
 }
 
 // Client binds a connection descriptor to the exact signed peer key before any
-// network work. All peer leases share one authority-mode Tailcat engine and
+// network work. All peer leases share one authority-owned mesh engine and
 // one aggregate flow bound; revoking a peer closes only that peer's leases.
-func (a *Authority) Client(descriptor tailcat.Addr, peerID string) (*UDPClient, error) {
+func (a *Authority) Client(descriptor mesh.Addr, peerID string) (*UDPClient, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.closed || !a.usableLocked() || a.current.Self.Role != "cli" {
 		return nil, ErrAuthority
 	}
-	info, err := tailcat.ParseAddr(descriptor)
+	info, err := mesh.ParseAddr(descriptor)
 	if err != nil {
 		return nil, ErrAuthority
 	}
@@ -222,7 +222,7 @@ func (a *Authority) Client(descriptor tailcat.Addr, peerID string) (*UDPClient, 
 			if len(regions) != 0 {
 				firstRegion = regions[0]
 			}
-			a.clientEngine = &tailcat.Server{OnRelayControl: a.relayControl, DERPCarrierFactory: factory, PeerRelayNodes: peerNodes, RelayControlPeers: controlPeers, TestOnlyPacketListener: a.options.TestOnlyPacketListener, Key: a.private, DisablePresharedKey: true, LocalAddr: netip.MustParseAddr(a.current.Self.VirtualAddress), AllowedPeers: peers, Region: firstRegion, Logf: func(string, ...any) {}}
+			a.clientEngine = &mesh.Server{OnRelayControl: a.relayControl, DERPCarrierFactory: factory, PeerRelayNodes: peerNodes, RelayControlPeers: controlPeers, TestOnlyPacketListener: a.options.TestOnlyPacketListener, Key: a.private, LocalAddr: netip.MustParseAddr(a.current.Self.VirtualAddress), AllowedPeers: peers, Region: firstRegion, Logf: func(string, ...any) {}}
 			if err := a.clientEngine.Start(); err != nil {
 				a.clientEngine = nil
 				return nil, err
@@ -239,7 +239,7 @@ func (a *Authority) Client(descriptor tailcat.Addr, peerID string) (*UDPClient, 
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		peerAddr := netip.AddrPortFrom(netip.MustParseAddr(p.Identity.VirtualAddress), NetworkPort)
-		client := &UDPClient{dial: func(ctx context.Context) (tailcat.ConnPacketConn, error) {
+		client := &UDPClient{expiresAt: &a.expiresAt, dial: func(ctx context.Context) (mesh.ConnPacketConn, error) {
 			return a.clientEngine.DialAuthorizedUDP(ctx, pub, disco, peerAddr)
 		}, slots: a.clientSlots, port: NetworkPort, flows: make(map[*Packet]struct{}), ctx: ctx, cancel: cancel}
 		a.clients[peerID] = authorizedClient{client: client, peer: p.Identity, descriptor: digest, scopes: append([]NetworkScope(nil), p.Scopes...), node: pub}

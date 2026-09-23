@@ -1,10 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/pinksaucepasta/paperboat/internal/environmente2ee"
 	"github.com/pinksaucepasta/paperboat/internal/environmentmanager"
@@ -28,7 +28,7 @@ var passwordVaultPrompt = func(command *cobra.Command, title string) ([]byte, er
 	if !ok || !environmentVariableTerminal(command) {
 		return nil, errors.New("vault passwords require an interactive hidden prompt")
 	}
-	return prompt.Secret(prompt.SecretOptions{Title: title, Stdin: input, Output: command.ErrOrStderr(), MaxBytes: 1024})
+	return prompt.Secret(prompt.SecretOptions{Context: command.Context(), Title: title, Stdin: input, Output: command.ErrOrStderr(), MaxBytes: 1024})
 }
 
 func addPasswordVaultCommands(root *cobra.Command) {
@@ -58,8 +58,47 @@ func addPasswordVaultCommands(root *cobra.Command) {
 		if action == "recovery" {
 			cmd.Flags().Bool("disable", false, "disable recovery-code access to the current vault")
 		}
+		if action == "recover" {
+			cmd.Flags().String("recovery-input-file", "", "read the old recovery code from an absolute owner-only file")
+		}
+		if action == "init" || action == "unlock" || action == "password" || action == "recover" {
+			addVaultPasswordFlags(cmd)
+		}
+		addVaultJSONFlag(cmd)
 		cmd.RunE = func(command *cobra.Command, _ []string) error {
 			recoverySaved := false
+			var password, oldCode []byte
+			var err error
+			if action == "init" || action == "unlock" || action == "password" {
+				password, err = vaultPasswordForOperation(command, "Master password", action != "unlock")
+				if err != nil {
+					return err
+				}
+				defer clear(password)
+			}
+			if action == "recover" {
+				path, pathErr := command.Flags().GetString("recovery-file")
+				if pathErr != nil || strings.TrimSpace(path) == "" {
+					return errors.New("recovery requires --recovery-file for the replacement code")
+				}
+				oldCode, err = readVaultRecoveryInput(command)
+				if err != nil {
+					return err
+				}
+				defer clear(oldCode)
+				password, err = vaultPasswordForOperation(command, "New master password", true)
+				if err != nil {
+					return err
+				}
+				defer clear(password)
+			}
+			if action == "recovery" {
+				disabled, flagErr := command.Flags().GetBool("disable")
+				path, pathErr := command.Flags().GetString("recovery-file")
+				if flagErr != nil || pathErr != nil || disabled && strings.TrimSpace(path) != "" || !disabled && strings.TrimSpace(path) == "" {
+					return errors.New("choose --disable or --recovery-file")
+				}
+			}
 			manager, err := passwordVaultForCommand(command)
 			if err != nil {
 				return err
@@ -72,9 +111,6 @@ func addPasswordVaultCommands(root *cobra.Command) {
 			case "recovery":
 				disabled, _ := command.Flags().GetBool("disable")
 				path, _ := command.Flags().GetString("recovery-file")
-				if disabled && path != "" || !disabled && path == "" {
-					return errors.New("choose --disable or --recovery-file")
-				}
 				var code []byte
 				if !disabled {
 					code, err = saveNewVaultRecoveryCode(path)
@@ -87,19 +123,6 @@ func addPasswordVaultCommands(root *cobra.Command) {
 				err = manager.ReplaceRecovery(command.Context(), code)
 			case "recover":
 				path, _ := command.Flags().GetString("recovery-file")
-				if path == "" {
-					return errors.New("recovery requires --recovery-file for the replacement code")
-				}
-				oldCode, promptErr := passwordVaultPrompt(command, "Recovery code")
-				if promptErr != nil {
-					return promptErr
-				}
-				defer clear(oldCode)
-				password, promptErr := confirmedVaultPassword(command)
-				if promptErr != nil {
-					return promptErr
-				}
-				defer clear(password)
 				replacement, saveErr := saveNewVaultRecoveryCode(path)
 				if saveErr != nil {
 					return saveErr
@@ -108,25 +131,6 @@ func addPasswordVaultCommands(root *cobra.Command) {
 				recoverySaved = true
 				err = manager.Recover(command.Context(), oldCode, password, replacement)
 			default:
-				password, promptErr := passwordVaultPrompt(command, "Master password")
-				if promptErr != nil {
-					return promptErr
-				}
-				defer clear(password)
-				if len(password) == 0 {
-					return errors.New("master password cannot be empty")
-				}
-				if action != "unlock" {
-					confirmation, promptErr := passwordVaultPrompt(command, "Confirm master password")
-					if promptErr != nil {
-						return promptErr
-					}
-					match := bytes.Equal(password, confirmation)
-					clear(confirmation)
-					if !match {
-						return errors.New("master passwords do not match; vault unchanged")
-					}
-				}
 				switch action {
 				case "init":
 					path, _ := command.Flags().GetString("recovery-file")
@@ -152,8 +156,38 @@ func addPasswordVaultCommands(root *cobra.Command) {
 				}
 				return err
 			}
-			_, err = fmt.Fprintln(command.OutOrStdout(), "ENV vault operation completed.")
-			return err
+			fields := map[string]any{}
+			switch action {
+			case "lock":
+				fields["locked"] = true
+			case "resume":
+				fields["reconciled"] = true
+			case "recovery":
+				disabled, _ := command.Flags().GetBool("disable")
+				path, _ := command.Flags().GetString("recovery-file")
+				fields["recovery_enabled"] = !disabled
+				if !disabled {
+					fields["recovery_file"] = path
+				}
+			case "recover":
+				path, _ := command.Flags().GetString("recovery-file")
+				fields["recovery_file"] = path
+				fields["recovered"] = true
+			default:
+				switch action {
+				case "init":
+					fields["initialized"] = true
+					path, _ := command.Flags().GetString("recovery-file")
+					if strings.TrimSpace(path) != "" {
+						fields["recovery_file"] = path
+					}
+				case "unlock":
+					fields["unlocked"] = true
+				case "password":
+					fields["password_updated"] = true
+				}
+			}
+			return writeVaultResult(command, action, "ENV vault operation completed.", fields)
 		}
 		vault.AddCommand(cmd)
 	}
@@ -166,6 +200,7 @@ func addPasswordVaultCommands(root *cobra.Command) {
 		},
 	}
 	remove.Flags().String("confirm", "", "exact confirmation phrase: REMOVE LOCAL ENV <account_id>")
+	addVaultJSONFlag(remove)
 	vault.AddCommand(remove)
 	reset := &cobra.Command{
 		Use:   "reset",
@@ -177,11 +212,20 @@ func addPasswordVaultCommands(root *cobra.Command) {
 	}
 	reset.Flags().String("confirm", "", "exact confirmation phrase: RESET ENV <account_id>")
 	reset.Flags().String("recovery-file", "", "save a newly generated recovery code to a new absolute file path")
+	addVaultPasswordFlags(reset)
+	addVaultJSONFlag(reset)
 	vault.AddCommand(reset)
 	root.AddCommand(vault)
 }
 
 func runPasswordVaultReset(command *cobra.Command) error {
+	passwordPath, passwordStdin, err := vaultPasswordSource(command)
+	if err != nil {
+		return err
+	}
+	if jsonOutputRequested(command) && passwordPath == "" && !passwordStdin {
+		return errors.New("--json requires --password-file or --password-stdin")
+	}
 	manager, err := passwordVaultForCommand(command)
 	if err != nil {
 		return err
@@ -190,11 +234,23 @@ func runPasswordVaultReset(command *cobra.Command) error {
 	if confirmation != "RESET ENV "+manager.AccountID {
 		return invocationError(errors.New("--confirm must exactly match `RESET ENV <account_id>`"))
 	}
-	password, err := confirmedVaultPassword(command)
+	password, explicit, err := readVaultPasswordSource(command)
 	if err != nil {
 		return err
 	}
-	defer clear(password)
+	if explicit {
+		if len(password) == 0 {
+			clear(password)
+			return errors.New("master password cannot be empty")
+		}
+		defer clear(password)
+	} else {
+		password, err = confirmedVaultPassword(command)
+		if err != nil {
+			return err
+		}
+		defer clear(password)
+	}
 	recoveryPath, _ := command.Flags().GetString("recovery-file")
 	var recovery []byte
 	recoverySaved := false
@@ -213,8 +269,11 @@ func runPasswordVaultReset(command *cobra.Command) error {
 		}
 		return safeEnvironmentVariableCommandError(err)
 	}
-	_, err = fmt.Fprintln(command.OutOrStdout(), "ENV personal vault reset completed.")
-	return err
+	fields := map[string]any{"reset": true}
+	if recoveryPath != "" {
+		fields["recovery_file"] = recoveryPath
+	}
+	return writeVaultResult(command, "reset", "ENV personal vault reset completed.", fields)
 }
 
 func runPasswordVaultRemove(command *cobra.Command) error {
@@ -229,8 +288,7 @@ func runPasswordVaultRemove(command *cobra.Command) error {
 	if err := manager.Store.RemovePasswordVault(manager.Issuer, manager.AccountID); err != nil {
 		return safeEnvironmentVariableCommandError(err)
 	}
-	_, err = fmt.Fprintln(command.OutOrStdout(), "Removed local ENV vault custody; cloud personal and team ciphertext was not changed.")
-	return err
+	return writeVaultResult(command, "remove", "Removed local ENV vault custody; cloud personal and team ciphertext was not changed.", map[string]any{"removed": true, "remote_unchanged": true})
 }
 
 func saveNewVaultRecoveryCode(path string) ([]byte, error) {
@@ -245,19 +303,5 @@ func saveNewVaultRecoveryCode(path string) ([]byte, error) {
 	return code, nil
 }
 func confirmedVaultPassword(command *cobra.Command) ([]byte, error) {
-	password, err := passwordVaultPrompt(command, "New master password")
-	if err != nil {
-		return nil, err
-	}
-	confirmation, err := passwordVaultPrompt(command, "Confirm new master password")
-	if err != nil {
-		clear(password)
-		return nil, err
-	}
-	defer clear(confirmation)
-	if len(password) == 0 || !bytes.Equal(password, confirmation) {
-		clear(password)
-		return nil, errors.New("master passwords must be nonempty and match; vault unchanged")
-	}
-	return password, nil
+	return vaultPasswordForOperation(command, "New master password", true)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -32,7 +33,8 @@ func inspectorIssueServer(t *testing.T, status int, body string, seen *map[strin
 
 func TestIssueInspectorCredential(t *testing.T) {
 	var seen map[string]any
-	server := inspectorIssueServer(t, http.StatusOK, `{"data":{"credential_id":"iac_01","token":"iat_secret","expires_at":"2026-09-09T01:00:00Z"}}`, &seen)
+	expiresAt := time.Now().UTC().Add(time.Hour)
+	server := inspectorIssueServer(t, http.StatusOK, fmt.Sprintf(`{"data":{"credential_id":"iac_01","token":"iat_secret","expires_at":%q}}`, expiresAt.Format(time.RFC3339Nano)), &seen)
 	defer server.Close()
 	client := New(server.URL, config.Credential{AccessToken: "user-token"}, server.Client())
 	credential, err := client.IssueInspectorCredential(context.Background(), "tunnel", "tun_01", "rte_01", "replay")
@@ -45,7 +47,7 @@ func TestIssueInspectorCredential(t *testing.T) {
 	if seen["resource_kind"] != "tunnel" || seen["resource_id"] != "tun_01" || seen["route_id"] != "rte_01" || seen["action"] != "replay" {
 		t.Fatalf("issuance scope = %v", seen)
 	}
-	if credential.ExpiresAt.Before(time.Now().UTC()) {
+	if !credential.ExpiresAt.Equal(expiresAt) {
 		t.Fatalf("credential already expired: %+v", credential)
 	}
 }

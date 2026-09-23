@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"io"
 	"net/url"
 	"os"
@@ -80,50 +81,54 @@ func (p ActivationPolicy) Validate() error {
 }
 
 type Journal struct {
-	Schema                  string            `json:"schema"`
-	TransactionID           string            `json:"transaction_id"`
-	Stage                   Stage             `json:"stage"`
-	ActiveVersion           string            `json:"active_version"`
-	ActiveDigest            string            `json:"active_digest,omitempty"`
-	ActiveLength            int64             `json:"active_length,omitempty"`
-	ActiveHostdAPIMin       uint16            `json:"active_hostd_api_min,omitempty"`
-	ActiveHostdAPIMax       uint16            `json:"active_hostd_api_max,omitempty"`
-	ActiveRuntimeAPIMin     uint16            `json:"active_runtime_api_min,omitempty"`
-	ActiveRuntimeAPIMax     uint16            `json:"active_runtime_api_max,omitempty"`
-	RollbackVersion         string            `json:"rollback_version,omitempty"`
-	CandidateVersion        string            `json:"candidate_version,omitempty"`
-	CandidateDigest         string            `json:"candidate_digest,omitempty"`
-	CandidateManifestDigest string            `json:"candidate_manifest_digest,omitempty"`
-	CandidatePolicy         *ActivationPolicy `json:"candidate_policy,omitempty"`
-	CandidateLength         int64             `json:"candidate_length,omitempty"`
-	StagedPath              string            `json:"staged_path,omitempty"`
-	HostdAPIMin             uint16            `json:"hostd_api_min,omitempty"`
-	HostdAPIMax             uint16            `json:"hostd_api_max,omitempty"`
-	RuntimeAPIMin           uint16            `json:"runtime_api_min,omitempty"`
-	RuntimeAPIMax           uint16            `json:"runtime_api_max,omitempty"`
-	WorkerID                string            `json:"worker_id,omitempty"`
-	WorkerEpoch             uint64            `json:"worker_epoch,omitempty"`
-	BootID                  string            `json:"boot_id"`
-	StageUpdatedAt          time.Time         `json:"stage_updated_at"`
-	HealthDeadline          time.Time         `json:"health_deadline,omitempty"`
-	AttemptCount            uint32            `json:"attempt_count"`
-	RollbackCount           uint32            `json:"rollback_count"`
-	LastFailure             Failure           `json:"last_failure,omitempty"`
-	CleanupComplete         bool              `json:"cleanup_complete"`
-	BlockedReason           string            `json:"blocked_reason,omitempty"`
-	DeferredManual          bool              `json:"deferred_manual,omitempty"`
-	RequiredVersion         string            `json:"required_version,omitempty"`
-	NextCheckAt             time.Time         `json:"next_check_at,omitempty,omitzero"`
+	ActiveSource            *installsource.Source `json:"active_source,omitempty"`
+	Schema                  string                `json:"schema"`
+	TransactionID           string                `json:"transaction_id"`
+	Stage                   Stage                 `json:"stage"`
+	ActiveVersion           string                `json:"active_version"`
+	ActiveDigest            string                `json:"active_digest,omitempty"`
+	ActiveLength            int64                 `json:"active_length,omitempty"`
+	ActiveHostdAPIMin       uint16                `json:"active_hostd_api_min,omitempty"`
+	ActiveHostdAPIMax       uint16                `json:"active_hostd_api_max,omitempty"`
+	ActiveRuntimeAPIMin     uint16                `json:"active_runtime_api_min,omitempty"`
+	ActiveRuntimeAPIMax     uint16                `json:"active_runtime_api_max,omitempty"`
+	RollbackVersion         string                `json:"rollback_version,omitempty"`
+	CandidateVersion        string                `json:"candidate_version,omitempty"`
+	CandidateDigest         string                `json:"candidate_digest,omitempty"`
+	CandidateManifestDigest string                `json:"candidate_manifest_digest,omitempty"`
+	CandidatePolicy         *ActivationPolicy     `json:"candidate_policy,omitempty"`
+	CandidateLength         int64                 `json:"candidate_length,omitempty"`
+	StagedPath              string                `json:"staged_path,omitempty"`
+	HostdAPIMin             uint16                `json:"hostd_api_min,omitempty"`
+	HostdAPIMax             uint16                `json:"hostd_api_max,omitempty"`
+	RuntimeAPIMin           uint16                `json:"runtime_api_min,omitempty"`
+	RuntimeAPIMax           uint16                `json:"runtime_api_max,omitempty"`
+	WorkerID                string                `json:"worker_id,omitempty"`
+	WorkerEpoch             uint64                `json:"worker_epoch,omitempty"`
+	BootID                  string                `json:"boot_id"`
+	StageUpdatedAt          time.Time             `json:"stage_updated_at"`
+	HealthDeadline          time.Time             `json:"health_deadline,omitempty"`
+	AttemptCount            uint32                `json:"attempt_count"`
+	RollbackCount           uint32                `json:"rollback_count"`
+	LastFailure             Failure               `json:"last_failure,omitempty"`
+	CleanupComplete         bool                  `json:"cleanup_complete"`
+	BlockedReason           string                `json:"blocked_reason,omitempty"`
+	DeferredManual          bool                  `json:"deferred_manual,omitempty"`
+	RequiredVersion         string                `json:"required_version,omitempty"`
+	NextCheckAt             time.Time             `json:"next_check_at,omitempty,omitzero"`
 }
 
 func (j Journal) Validate() error {
-	if j.Schema != SchemaV1 || !validID(j.TransactionID) || !validVersion(j.ActiveVersion) || !validID(j.BootID) || j.StageUpdatedAt.IsZero() {
+	if j.Schema != SchemaV1 || !validID(j.TransactionID) || !(validVersion(j.ActiveVersion) || j.validLocalActive()) || !validID(j.BootID) || j.StageUpdatedAt.IsZero() {
+		return ErrInvalidJournal
+	}
+	if j.ActiveSource != nil && !j.validLocalActive() {
 		return ErrInvalidJournal
 	}
 	if !knownStage(j.Stage) || !knownFailure(j.LastFailure) || invalidRange(j.HostdAPIMin, j.HostdAPIMax) || invalidRange(j.RuntimeAPIMin, j.RuntimeAPIMax) {
 		return ErrInvalidJournal
 	}
-	if j.RollbackVersion != "" && !validVersion(j.RollbackVersion) || j.CandidateVersion != "" && !validVersion(j.CandidateVersion) {
+	if j.RollbackVersion != "" && !validVersion(j.RollbackVersion) && !(j.validLocalActive() && j.RollbackVersion == j.ActiveVersion) || j.CandidateVersion != "" && !validVersion(j.CandidateVersion) {
 		return ErrInvalidJournal
 	}
 	if !digestPattern.MatchString(j.ActiveDigest) || j.ActiveLength < 1 || invalidRange(j.ActiveHostdAPIMin, j.ActiveHostdAPIMax) || j.ActiveHostdAPIMin == 0 || invalidRange(j.ActiveRuntimeAPIMin, j.ActiveRuntimeAPIMax) || j.ActiveRuntimeAPIMin == 0 {
@@ -290,4 +295,9 @@ func knownFailure(f Failure) bool {
 		}
 	}
 	return false
+}
+
+func (j Journal) validLocalActive() bool {
+	s := j.ActiveSource
+	return s != nil && s.Validate() == nil && s.Version == j.ActiveVersion && s.SHA256 == j.ActiveDigest && s.Length == j.ActiveLength
 }

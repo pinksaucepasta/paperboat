@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
@@ -132,15 +133,15 @@ func (d *Daemon) Start(ctx context.Context) error {
 		return ErrInvalidState
 	}
 	for _, component := range d.config.Components {
-		if err := component.Service.Start(ctx); err != nil {
+		if err := invokeComponent(ctx, component, "component_start", component.Service.Start); err != nil {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), d.config.ShutdownTimeout)
-			failedCleanupErr := component.Service.Shutdown(cleanupCtx)
+			failedCleanupErr := invokeComponent(cleanupCtx, component, "component_rollback", component.Service.Shutdown)
 			cancel()
 			if !component.Required && failedCleanupErr == nil {
 				continue
 			}
 			cleanupCtx, cancel = context.WithTimeout(context.Background(), d.config.ShutdownTimeout)
-			cleanupErr := d.shutdownStarted(cleanupCtx)
+			cleanupErr := d.shutdownStarted(cleanupCtx, "component_rollback")
 			cancel()
 			return errors.Join(fmt.Errorf("start stable %s: %w", component.Name, err), failedCleanupErr, cleanupErr)
 		}
@@ -161,16 +162,16 @@ func (d *Daemon) Shutdown(ctx context.Context) error {
 	}
 	shutdownCtx, cancel := context.WithTimeout(ctx, d.config.ShutdownTimeout)
 	defer cancel()
-	err := d.shutdownStarted(shutdownCtx)
+	err := d.shutdownStarted(shutdownCtx, "component_shutdown")
 	d.running, d.stopped = false, true
 	return err
 }
 
-func (d *Daemon) shutdownStarted(ctx context.Context) error {
+func (d *Daemon) shutdownStarted(ctx context.Context, stage string) error {
 	var result error
 	for index := len(d.started) - 1; index >= 0; index-- {
 		component := d.started[index]
-		result = errors.Join(result, component.Service.Shutdown(ctx))
+		result = errors.Join(result, invokeComponent(ctx, component, stage, component.Service.Shutdown))
 	}
 	d.started = nil
 	return result
@@ -260,4 +261,10 @@ func (c *WorkerController) Shutdown(ctx context.Context) error {
 	worker := c.active
 	c.active = nil
 	return worker.Shutdown(ctx)
+}
+
+func invokeComponent(ctx context.Context, component Component, stage string, run func(context.Context) error) error {
+	err := run(ctx)
+	errorreport.Current().ServiceLifecycle(ctx, component.Name, stage, err)
+	return err
 }

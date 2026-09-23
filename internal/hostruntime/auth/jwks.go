@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"io"
 	"net/http"
 	"net/url"
@@ -60,7 +61,7 @@ func NewHTTPJWKSFetcher(endpoint string, allowedHosts []string, transport http.R
 	if transport == nil {
 		transport = httptransport.Default()
 	}
-	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrJWKSInvalid }}
+	client := &http.Client{Transport: errorreport.TransportOperation(transport, parsed.String(), "authorization_keys"), CheckRedirect: func(*http.Request, []*http.Request) error { return ErrJWKSInvalid }}
 	return &HTTPJWKSFetcher{endpoint: parsed, client: client}, nil
 }
 

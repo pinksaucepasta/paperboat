@@ -1,0 +1,50 @@
+.nh
+.TH "PB-WAIT" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-wait - Wait for a machine readiness condition
+
+
+.SH SYNOPSIS
+\fBpb wait  [flags]\fP
+
+
+.SH DESCRIPTION
+Wait for a machine readiness condition
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--for\fP="transport"
+	readiness condition: runtime, transport, or ssh
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for wait
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--timeout\fP=5m0s
+	maximum time to wait
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb(1)\fP

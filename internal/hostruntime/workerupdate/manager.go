@@ -23,6 +23,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/binarytarget"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesignature"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
 )
@@ -38,11 +39,13 @@ var (
 	ErrUnsafeStorage  = errors.New("unsafe worker release storage")
 )
 
-// Release is derived from a verified, signed release index. Fetch transports
+// Release describes a verified signed candidate or a typed installed baseline. Fetch transports
 // its bytes but does not establish its identity: the updater independently
 // checks this exact version, hash, length, platform, and architecture before
 // making it executable.
 type Release struct {
+	// LocalSource binds an administrator-approved installed baseline. It is never an update candidate or signed manifest.
+	LocalSource       *installsource.Source `json:",omitempty"`
 	Version           string
 	SHA256            string
 	Length            int64
@@ -272,10 +275,13 @@ func (m *Manager) Activate(ctx context.Context, release Release) (Result, error)
 	if err := m.recoverLocked(ctx); err != nil {
 		return Result{Version: m.active.Version}, err
 	}
-	if err := validateRelease(release); err != nil {
-		return Result{Version: m.active.Version}, err
+	if err := validateRelease(release); err != nil || release.LocalSource != nil {
+		return Result{Version: m.active.Version}, ErrInvalidRelease
 	}
-	comparison := compareVersion(release.Version, m.active.Version)
+	comparison := 1
+	if m.active.LocalSource == nil || m.active.LocalSource.Distribution == installsource.Official {
+		comparison = compareVersion(release.Version, m.active.Version)
+	}
 	if comparison == 0 {
 		return Result{Version: m.active.Version}, nil
 	}
@@ -486,7 +492,7 @@ func (m *Manager) recoverLocked(ctx context.Context) error {
 		// pre-cutover worker transaction. Retire only transactions for an older
 		// active version; never use this path for rollback or an equal/older
 		// executable, where the journal remains the recovery authority.
-		if compareVersion(m.active.Version, journal.ActiveVersion) > 0 &&
+		if m.active.LocalSource == nil && journal.ActiveSource == nil && compareVersion(m.active.Version, journal.ActiveVersion) > 0 &&
 			(journal.Stage == updateflow.StageIdle || journal.Stage == updateflow.StageChecking || journal.Stage == updateflow.StageStaged || journal.Stage == updateflow.StageCandidateStarted || journal.Stage == updateflow.StageCandidateValidating || journal.Stage == updateflow.StageCandidateReady || journal.Stage == updateflow.StageDraining || journal.Stage == updateflow.StageRollback || journal.Stage == updateflow.StageBlocked) {
 			if err := m.removeStaged(); err != nil {
 				return err
@@ -1105,8 +1111,10 @@ func (m *Manager) authorizeRecovery(ctx context.Context, release Release, path s
 	if err := validateRelease(release); err != nil {
 		return ErrInvalidRelease
 	}
-	if err := m.config.Fetcher.AuthorizeRecovery(ctx, release.Version, release.Platform, release.Architecture); err != nil {
-		return err
+	if release.LocalSource == nil {
+		if err := m.config.Fetcher.AuthorizeRecovery(ctx, release.Version, release.Platform, release.Architecture); err != nil {
+			return err
+		}
 	}
 	if err := safeRuntimeFile(path, m.config.OwnerUID, true); err != nil {
 		return ErrUnsafeStorage
@@ -1318,6 +1326,7 @@ func withRelease(journal updateflow.Journal, release Release, path string) updat
 
 func withActiveRelease(journal updateflow.Journal, release Release) updateflow.Journal {
 	journal.ActiveVersion = release.Version
+	journal.ActiveSource = release.LocalSource
 	journal.ActiveDigest, journal.ActiveLength = release.SHA256, release.Length
 	journal.ActiveHostdAPIMin, journal.ActiveHostdAPIMax = release.HostdAPIMin, release.HostdAPIMax
 	journal.ActiveRuntimeAPIMin, journal.ActiveRuntimeAPIMax = release.RuntimeAPIMin, release.RuntimeAPIMax
@@ -1354,7 +1363,7 @@ func RecoveryReleaseFromJournal(path, executableVersion string) (Release, error)
 
 func activeReleaseFromJournal(journal updateflow.Journal) Release {
 	return Release{
-		Version: journal.ActiveVersion, SHA256: journal.ActiveDigest, Length: journal.ActiveLength,
+		Version: journal.ActiveVersion, SHA256: journal.ActiveDigest, Length: journal.ActiveLength, LocalSource: journal.ActiveSource,
 		Platform: runtime.GOOS, Architecture: runtime.GOARCH,
 		HostdAPIMin: journal.ActiveHostdAPIMin, HostdAPIMax: journal.ActiveHostdAPIMax,
 		RuntimeAPIMin: journal.ActiveRuntimeAPIMin, RuntimeAPIMax: journal.ActiveRuntimeAPIMax,
@@ -1439,7 +1448,7 @@ func matchesInterruptedCandidate(config Config) bool {
 }
 
 func validateRelease(release Release) error {
-	if !validVersion(release.Version) || len(release.SHA256) != 64 || release.Length < 1 || release.Length > maxRuntimeBytes || release.Platform != runtime.GOOS || release.Architecture != runtime.GOARCH || !hexDigest(release.SHA256) || invalidRequiredAPIRange(release.HostdAPIMin, release.HostdAPIMax) || invalidRequiredAPIRange(release.RuntimeAPIMin, release.RuntimeAPIMax) {
+	if !(validVersion(release.Version) || validLocalRelease(release)) || release.LocalSource != nil && !validLocalRelease(release) || len(release.SHA256) != 64 || release.Length < 1 || release.Length > maxRuntimeBytes || release.Platform != runtime.GOOS || release.Architecture != runtime.GOARCH || !hexDigest(release.SHA256) || invalidRequiredAPIRange(release.HostdAPIMin, release.HostdAPIMax) || invalidRequiredAPIRange(release.RuntimeAPIMin, release.RuntimeAPIMax) {
 		return ErrInvalidRelease
 	}
 	return nil

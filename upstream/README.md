@@ -1,8 +1,10 @@
 # Paperboat upstream foundations
 
 This directory records the upstream networking inputs that the Paperboat transport work
-is allowed to consume. It contains pins, notices, and the consumed Tailcat and Tailscale source snapshots
-with the narrow integration patches recorded in `PATCHES.md`.
+is allowed to consume. It contains pins, notices, and the consumed Tailscale source snapshot
+with integration patches recorded in `PATCHES.md`. Tailcat is retained as source
+provenance for the owned assembly in `internal/peertransport/mesh`, not a separate
+module or maintained upstream application snapshot.
 
 `foundations.tsv` records each source's origin, exact Git commit, Go module version,
 license notice and declared Go version. The Tailcat pin is
@@ -34,6 +36,6 @@ policy must stay behind the adapters owned by later tasks.
 
 Task 11 consumes the pinned Tailscale module snapshot in `tailscale/` through the
 module replacement. Its BSD-3-Clause license and other upstream notices are retained.
-Only the carrier seam listed in `PATCHES.md` is maintained downstream; no upstream
+Only the explicit patches listed in `PATCHES.md` are maintained downstream; no upstream
 application is built as part of this intake. The private relay is in the sibling
 `paperboat-relay` module, consumed through a local module replacement until publication.

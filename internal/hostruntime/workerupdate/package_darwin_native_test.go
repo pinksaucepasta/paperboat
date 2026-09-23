@@ -3,6 +3,7 @@
 package workerupdate
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -14,6 +15,26 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/binarytarget"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesignature"
 )
+
+// Test the package inventory/extraction boundary with a real native fixture.
+// Distribution signing is independently checked by the existing test below.
+func TestDarwinManualPayloadExtraction(t *testing.T) {
+	path := os.Getenv("PAPERBOAT_TEST_CANDIDATE_PKG")
+	if path == "" {
+		t.Skip("native package fixture not selected")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	root := t.TempDir()
+	if _, err := ExtractDarwinPackage(ctx, path, root); err != nil {
+		t.Fatal(err)
+	}
+	page := filepath.Join(root, "expanded", "Payload", "usr", "local", "share", "man", "man1", "pb.1")
+	body, err := os.ReadFile(page)
+	if err != nil || !bytes.HasPrefix(body, []byte(".\\\" Paperboat managed manual v1\n")) {
+		t.Fatalf("bundled manual missing: %v", err)
+	}
+}
 
 // The fixture is a real PKG produced from the candidate pb executable. This
 // exercises pkgutil without writing any live installation or service path.

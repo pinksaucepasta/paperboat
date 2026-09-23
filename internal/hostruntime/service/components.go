@@ -1,6 +1,9 @@
 package service
 
 import (
+	"encoding/base64"
+	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -10,6 +13,7 @@ import (
 // install root and all binaries come from Layout, so callers cannot redirect a
 // privileged service to a user-controlled executable.
 type ComponentConfig struct {
+	Source               installsource.Source
 	Layout               Layout
 	User                 string
 	Group                string
@@ -137,6 +141,11 @@ func newUpdaterInstaller(config ComponentConfig, allowMissingExecutable bool) (*
 	environment["PAPERBOAT_ENROLLED_UID"] = strconv.Itoa(config.UID)
 	environment["PAPERBOAT_ENROLLED_GID"] = strconv.Itoa(config.GID)
 	environment["PAPERBOAT_UPDATED_SOCKET"] = updaterControlSocket(config.Layout.Platform, config.Layout.Instance)
+	sourceBody, err := json.Marshal(config.Source)
+	if err != nil {
+		return nil, err
+	}
+	environment["PAPERBOAT_INSTALL_SOURCE"] = base64.RawStdEncoding.EncodeToString(sourceBody)
 	serviceConfig := Config{
 		Platform: config.Layout.Platform, Kind: UpdaterKind, Instance: config.Layout.Instance, ConfigRoot: "/", Executable: binary,
 		User: "root", Group: group, Arguments: []string{"daemon", "__runtime-updated"}, Environment: environment,

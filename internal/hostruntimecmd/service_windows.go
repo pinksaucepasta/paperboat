@@ -7,12 +7,17 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
+	"golang.org/x/sys/windows"
 )
 
 // runServiceCommand is the sole privileged command bridge used by the MSI,
@@ -124,19 +129,37 @@ func dispatchElevatedOperation(ctx context.Context, request elevation.Request) e
 			if err != nil {
 				return err
 			}
+			if !strings.EqualFold(request.OwnerSID, installRequest.OwnerSID) {
+				return errors.New("elevated Windows request owner does not match installation owner")
+			}
+			var unlock func()
+			if request.Action == elevation.ActionInstall || request.Action == elevation.ActionInstallCommit {
+				unlock, err = lockWindowsNativeInstall(ctx)
+				if err != nil {
+					return err
+				}
+				defer unlock()
+			}
 			switch request.Action {
 			case elevation.ActionInstall:
-				return hostinstall.Install(ctx, installRequest)
+				return installWindowsRuntimeFromSuppliedBytes(ctx, installRequest)
 			case elevation.ActionCommit:
 				return hostinstall.Commit(installRequest)
 			case elevation.ActionUninstall:
 				return uninstallWindowsRuntime(ctx, installRequest)
 			case elevation.ActionInstallCommit:
-				if err := hostinstall.Install(ctx, installRequest); err != nil {
+				if err := installWindowsRuntimeFromSuppliedBytes(ctx, installRequest); err != nil {
 					return err
 				}
 				if err := hostinstall.Commit(installRequest); err != nil {
 					return errors.Join(err, hostinstall.Uninstall(ctx, installRequest))
+				}
+				// Service registration can succeed before the enrolled-owner
+				// workload finishes startup. Check hostd after the durable commit;
+				// a stopped first launch may recover when started with final state.
+				// Leave the installation intact on failure so pairing can resume.
+				if err := hostinstall.EnsureCommittedWindowsHostdReady(ctx, installRequest); err != nil {
+					return fmt.Errorf("Paperboat host service did not become ready after installation: %w", err)
 				}
 				return nil
 			}
@@ -156,6 +179,74 @@ func dispatchElevatedOperation(ctx context.Context, request elevation.Request) e
 		}
 	}
 	return errors.New("unsupported elevated Windows operation")
+}
+
+func installWindowsRuntimeFromSuppliedBytes(ctx context.Context, request hostinstall.Request) error {
+	instance, err := hostinstall.WindowsInstanceForSID(request.OwnerSID)
+	if err != nil {
+		return err
+	}
+	previous, loadErr := hostinstall.LoadWindowsRuntimeConfigForInstance(instance)
+	if loadErr != nil && !errors.Is(loadErr, os.ErrNotExist) {
+		return loadErr
+	}
+	restoreServices := func() error {
+		if loadErr != nil {
+			return nil
+		}
+		if previous.SetupMode == "awaiting_enrollment" {
+			return hostinstall.EnsureWindowsLocalDaemonService(context.Background(), previous.OwnerSID)
+		}
+		return hostinstall.Repair(context.Background(), previous.OwnerSID)
+	}
+	if loadErr == nil {
+		if err := hostinstall.Stop(ctx, request.OwnerSID); err != nil {
+			return err
+		}
+	}
+	restoreJournal, err := updated.PrepareWindowsNativeInstall(ctx, request.OwnerSID)
+	if err != nil {
+		return errors.Join(fmt.Errorf("prepare Windows updater for supplied install: %w", err), restoreServices())
+	}
+	if err := hostinstall.Install(ctx, request); err != nil {
+		return errors.Join(fmt.Errorf("install supplied Windows runtime: %w", err), restoreJournal(), restoreServices())
+	}
+	return nil
+}
+
+func lockWindowsNativeInstall(ctx context.Context) (func(), error) {
+	if ctx == nil {
+		return nil, errors.New("nil Windows native install context")
+	}
+	name, err := windows.UTF16PtrFromString(`Global\PaperboatNativeInstall`)
+	if err != nil {
+		return nil, err
+	}
+	handle, err := windows.CreateMutex(nil, false, name)
+	if err != nil && !errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
+		return nil, err
+	}
+	if handle == 0 {
+		return nil, errors.New("create Windows native install mutex")
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			windows.CloseHandle(handle)
+			return nil, err
+		}
+		state, waitErr := windows.WaitForSingleObject(handle, uint32((100 * time.Millisecond).Milliseconds()))
+		if waitErr != nil {
+			windows.CloseHandle(handle)
+			return nil, waitErr
+		}
+		if state == windows.WAIT_OBJECT_0 || state == windows.WAIT_ABANDONED {
+			return func() { _ = windows.ReleaseMutex(handle); _ = windows.CloseHandle(handle) }, nil
+		}
+		if state != uint32(windows.WAIT_TIMEOUT) {
+			windows.CloseHandle(handle)
+			return nil, errors.New("wait for Windows native install mutex")
+		}
+	}
 }
 
 func repairWindowsInstallation(ctx context.Context, ownerSID string) error {

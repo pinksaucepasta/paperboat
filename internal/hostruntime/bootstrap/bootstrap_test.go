@@ -37,7 +37,7 @@ func TestDashboardTokenPairingAndMaterialExchange(t *testing.T) {
 		case "/v1/machines/pairings":
 			pairingCalls++
 			var body map[string]any
-			if json.NewDecoder(request.Body).Decode(&body) != nil || body["enrollment_token"] != "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP" || body["platform"] != runtime.GOOS || body["architecture"] != runtime.GOARCH || body["workspace_root"] != workspace {
+			if json.NewDecoder(request.Body).Decode(&body) != nil || body["enrollment_token"] != "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP" || body["platform"] != runtime.GOOS || body["architecture"] != runtime.GOARCH || body["workspace_root"] != workspace || body["alias"] != "studio" || body["display_name"] != nil {
 				t.Fatalf("pairing body=%v", body)
 			}
 			_ = json.NewEncoder(writer).Encode(map[string]any{"data": Pairing{ID: "cmp_1", UserCode: "ABCD1234", ExpiresAt: expires}})
@@ -55,7 +55,7 @@ func TestDashboardTokenPairingAndMaterialExchange(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	config := Config{ServerURL: server.URL, EnrollmentToken: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", DisplayName: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", PublicIdentityKey: testPublicIdentityKey, HTTP: server.Client()}
+	config := Config{ServerURL: server.URL, EnrollmentToken: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", Alias: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", PublicIdentityKey: testPublicIdentityKey, HTTP: server.Client()}
 	pairing, err := CreatePairing(context.Background(), config)
 	if err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestIdentityPairingDoesNotRequireEnrollmentToken(t *testing.T) {
 	}))
 	defer server.Close()
 
-	config := Config{ServerURL: server.URL, DisplayName: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", PublicIdentityKey: testPublicIdentityKey, HTTP: server.Client()}
+	config := Config{ServerURL: server.URL, Alias: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", PublicIdentityKey: testPublicIdentityKey, HTTP: server.Client()}
 	if _, err := CreatePairing(context.Background(), config); err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestDashboardEnrollmentTokenLengthContract(t *testing.T) {
 	}))
 	defer server.Close()
 
-	config := Config{ServerURL: server.URL, EnrollmentToken: "8GXDIGUWR4E6YIGL0D6X0H3FNA", DisplayName: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", PublicIdentityKey: testPublicIdentityKey, HTTP: server.Client()}
+	config := Config{ServerURL: server.URL, EnrollmentToken: "8GXDIGUWR4E6YIGL0D6X0H3FNA", Alias: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", PublicIdentityKey: testPublicIdentityKey, HTTP: server.Client()}
 	if _, err := CreatePairing(context.Background(), config); err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestCreatePairingSurfacesServerErrorBody(t *testing.T) {
 	}))
 	defer server.Close()
 
-	config := Config{ServerURL: server.URL, EnrollmentToken: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", DisplayName: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", PublicIdentityKey: testPublicIdentityKey, HTTP: server.Client()}
+	config := Config{ServerURL: server.URL, EnrollmentToken: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", Alias: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", PublicIdentityKey: testPublicIdentityKey, HTTP: server.Client()}
 	_, err = CreatePairing(context.Background(), config)
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("error = %v, want ErrInvalid", err)
@@ -161,7 +161,7 @@ func TestCreatePairingRetriesOnlyBeforeRequestIsWritten(t *testing.T) {
 	})
 	config := Config{
 		ServerURL: server.URL, EnrollmentToken: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP",
-		DisplayName: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP",
+		Alias: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP",
 		PublicIdentityKey: testPublicIdentityKey, HTTP: &http.Client{Transport: transport, Timeout: 2 * time.Second},
 	}
 	pairing, err := CreatePairing(context.Background(), config)
@@ -190,7 +190,7 @@ func TestCreatePairingDoesNotRetryAfterRequestIsWritten(t *testing.T) {
 	})
 	config := Config{
 		ServerURL: "https://api.example.test", EnrollmentToken: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP",
-		DisplayName: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP",
+		Alias: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP",
 		PublicIdentityKey: testPublicIdentityKey, HTTP: &http.Client{Transport: transport, Timeout: 2 * time.Second},
 	}
 	if _, err := CreatePairing(context.Background(), config); !errors.Is(err, os.ErrDeadlineExceeded) {
@@ -213,7 +213,7 @@ func TestBootstrapServerErrorDiagnosticIsBounded(t *testing.T) {
 	}))
 	defer server.Close()
 
-	config := Config{ServerURL: server.URL, EnrollmentToken: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", DisplayName: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", PublicIdentityKey: testPublicIdentityKey, HTTP: server.Client()}
+	config := Config{ServerURL: server.URL, EnrollmentToken: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", Alias: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", PublicIdentityKey: testPublicIdentityKey, HTTP: server.Client()}
 	_, err = CreatePairing(context.Background(), config)
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("error = %v, want ErrInvalid", err)
@@ -255,7 +255,7 @@ func TestWaitForMaterialStopsOnTerminalServerErrors(t *testing.T) {
 				_ = json.NewEncoder(writer).Encode(map[string]any{"error": map[string]string{"code": test.code, "message": "test"}})
 			}))
 			defer server.Close()
-			config := Config{ServerURL: server.URL, EnrollmentToken: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", DisplayName: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", PublicIdentityKey: testPublicIdentityKey, HTTP: server.Client()}
+			config := Config{ServerURL: server.URL, EnrollmentToken: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", Alias: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", PublicIdentityKey: testPublicIdentityKey, HTTP: server.Client()}
 			_, err = WaitForMaterial(context.Background(), config, time.Now().UTC().Add(time.Minute), time.Millisecond)
 			if !errors.Is(err, test.want) {
 				t.Fatalf("error = %v, want %v", err, test.want)
@@ -290,7 +290,7 @@ func TestWaitForMaterialToleratesTransientNetworkErrors(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	config := Config{ServerURL: server.URL, EnrollmentToken: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", DisplayName: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", PublicIdentityKey: testPublicIdentityKey, HTTP: server.Client()}
+	config := Config{ServerURL: server.URL, EnrollmentToken: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", Alias: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", PublicIdentityKey: testPublicIdentityKey, HTTP: server.Client()}
 	material, err := WaitForMaterial(context.Background(), config, expires, time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
@@ -309,7 +309,7 @@ func TestWaitForMaterialExpiresAfterTransientErrors(t *testing.T) {
 		panic(http.ErrAbortHandler)
 	}))
 	defer server.Close()
-	config := Config{ServerURL: server.URL, EnrollmentToken: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", DisplayName: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", PublicIdentityKey: testPublicIdentityKey, HTTP: server.Client()}
+	config := Config{ServerURL: server.URL, EnrollmentToken: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", Alias: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", PublicIdentityKey: testPublicIdentityKey, HTTP: server.Client()}
 	_, err = WaitForMaterial(context.Background(), config, time.Now().UTC().Add(40*time.Millisecond), time.Millisecond)
 	if !errors.Is(err, ErrPairingExpired) {
 		t.Fatalf("error = %v, want %v", err, ErrPairingExpired)
@@ -343,7 +343,7 @@ func TestRecoverMaterialIgnoresLocalPairingExpiry(t *testing.T) {
 		}})
 	}))
 	defer server.Close()
-	config := Config{ServerURL: server.URL, EnrollmentToken: "", DisplayName: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", PublicIdentityKey: testPublicIdentityKey, HTTP: server.Client()}
+	config := Config{ServerURL: server.URL, EnrollmentToken: "", Alias: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", PublicIdentityKey: testPublicIdentityKey, HTTP: server.Client()}
 	material, err := RecoverMaterial(context.Background(), config, true)
 	if err != nil || calls != 1 || !material.ExpiresAt.Equal(materialExpiry) {
 		t.Fatalf("material=%+v requests=%d err=%v", material, calls, err)

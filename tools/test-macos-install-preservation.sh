@@ -2,10 +2,33 @@
 set -eu
 
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-installer="$repository_root/tools/install.sh"
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/paperboat-macos-install.XXXXXX")
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 mkdir -p "$temporary/bin" "$temporary/home" "$temporary/state"
+mkdir -p "$temporary/package/Library/PrivilegedHelperTools/Paperboat/bin"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "$PAPERBOAT_TEST_PB_LOG"\nexit 97\n' > "$temporary/package/Library/PrivilegedHelperTools/Paperboat/bin/pb"
+chmod 0755 "$temporary/package/Library/PrivilegedHelperTools/Paperboat/bin/pb"
+(cd "$temporary/package" && find . -type f | cpio -o -H odc 2>/dev/null | gzip -c) > "$temporary/Payload"
+cat > "$temporary/verifier" <<'EOF'
+#!/bin/sh
+set -eu
+while [ "$#" -gt 0 ]; do
+  case "$1" in --state-dir) state=$2; shift 2 ;; *) shift ;; esac
+done
+mkdir -p "$state/product"
+printf 'pkg\n' > "$state/product/pb-darwin-arm64.pkg"
+printf '{"path":"%s","version":"2026.09.02.0"}\n' "$state/product/pb-darwin-arm64.pkg"
+EOF
+chmod 0700 "$temporary/verifier"
+verifier_sha=$(sha256sum "$temporary/verifier" | awk '{print $1}')
+verifier_length=$(wc -c < "$temporary/verifier" | tr -d ' ')
+installer="$temporary/install"
+sed -e 's/@PAPERBOAT_BOOTSTRAP_VERSION@/2026.09.02.0/g' \
+  -e 's|@PAPERBOAT_BOOTSTRAP_REPOSITORY@|example/paperboat-cli|g' \
+  -e "s/@PAPERBOAT_BOOTSTRAP_DARWIN_ARM64_SHA256@/$verifier_sha/g" \
+  -e "s/@PAPERBOAT_BOOTSTRAP_DARWIN_ARM64_LENGTH@/$verifier_length/g" \
+  "$repository_root/tools/install.sh" > "$installer"
+chmod 0700 "$installer"
 
 cat > "$temporary/bin/uname" <<'EOF'
 #!/bin/sh
@@ -30,19 +53,21 @@ while [ "$#" -gt 0 ]; do
 done
 printf '%s\n' "$url" >> "$PAPERBOAT_TEST_CURL_LOG"
 case "$url" in
-  https://release.example/current.json)
-    body='{"schema":"paperboat.release-current/v1","version":"2026.09.02.0","repository":"example/paperboat-cli","assets":{"pb-darwin-arm64.pkg":{"platform":"darwin","architecture":"arm64","format":"pkg","url":"https://github.com/example/paperboat-cli/releases/download/2026.09.02.0/pb-darwin-arm64.pkg","sha256":"f238df2ae16f95a3461bb262b8db52df5808bb03a6f2d85471442835bb31c65b","length":4}}}'
-    ;;
-  https://github.com/example/paperboat-cli/releases/download/2026.09.02.0/pb-darwin-arm64.pkg)
-    body='pkg'
+  https://github.com/example/paperboat-cli/releases/download/2026.09.02.0/pb-bootstrap-darwin-arm64)
+    [ -n "$output" ] || exit 1
+    cp "$PAPERBOAT_TEST_VERIFIER" "$output"
+    exit 0
     ;;
   *) echo "unexpected curl URL: $url" >&2; exit 1 ;;
 esac
-if [ -n "$output" ]; then
-  printf '%s\n' "$body" > "$output"
-else
-  printf '%s\n' "$body"
-fi
+exit 1
+EOF
+cat > "$temporary/bin/pkgutil" <<'EOF'
+#!/bin/sh
+set -eu
+test "$1" = --expand
+mkdir -p "$3"
+cp "$PAPERBOAT_TEST_PAYLOAD" "$3/Payload"
 EOF
 cat > "$temporary/bin/id" <<'EOF'
 #!/bin/sh
@@ -107,10 +132,13 @@ case "${1:-}" in
   *) echo "unexpected sudo command: $*" >&2; exit 1 ;;
 esac
 EOF
-chmod 0700 "$temporary/bin/uname" "$temporary/bin/curl" "$temporary/bin/id" "$temporary/bin/launchctl" "$temporary/bin/rm" "$temporary/bin/sudo"
+chmod 0700 "$temporary/bin/uname" "$temporary/bin/curl" "$temporary/bin/pkgutil" "$temporary/bin/id" "$temporary/bin/launchctl" "$temporary/bin/rm" "$temporary/bin/sudo"
 
 export PAPERBOAT_TEST_STATE="$temporary/state"
 export PAPERBOAT_TEST_FAKE_BIN="$temporary/bin"
+export PAPERBOAT_TEST_VERIFIER="$temporary/verifier"
+export PAPERBOAT_TEST_PAYLOAD="$temporary/Payload"
+export PAPERBOAT_TEST_PB_LOG="$temporary/pb.log"
 
 seed_managed_state() {
   /bin/rm -rf "$PAPERBOAT_TEST_STATE"
@@ -128,9 +156,7 @@ run_installer() {
   PAPERBOAT_TEST_LAUNCHCTL_LOG="$temporary/$scenario-launchctl.log" \
   PAPERBOAT_TEST_RM_LOG="$temporary/$scenario-rm.log" \
   PAPERBOAT_TEST_SUDO_LOG="$temporary/$scenario-sudo.log" \
-  PAPERBOAT_RELEASE_METADATA_URL=https://release.example/current.json \
   PAPERBOAT_GITHUB_REPOSITORY=example/paperboat-cli \
-  PAPERBOAT_INSTALL_DIR="$temporary/install-$scenario" \
   HOME="$temporary/home" \
   PATH="$temporary/bin:/usr/bin:/bin" \
   "$installer" "$@" >"$temporary/$scenario-output" 2>"$temporary/$scenario-error"
@@ -154,17 +180,13 @@ if grep -Eq 'launchctl bootout|com\.pinksaucepasta\.paperboat\.(hostd|updated)|/
 fi
 
 seed_managed_state
-if run_installer explicit-setup --setup client; then
+if run_installer explicit-setup --setup; then
   echo 'explicit setup test expected the fake package installer to fail' >&2
   exit 1
 fi
-grep -q 'launchctl bootout system/com.pinksaucepasta.paperboat.hostd' "$temporary/explicit-setup-sudo.log"
-grep -q 'launchctl bootout system/com.pinksaucepasta.paperboat.updated' "$temporary/explicit-setup-sudo.log"
-grep -q '/Library/LaunchDaemons/com.pinksaucepasta.paperboat.hostd.plist' "$temporary/explicit-setup-sudo.log"
-grep -q '/Library/LaunchDaemons/com.pinksaucepasta.paperboat.updated.plist' "$temporary/explicit-setup-sudo.log"
-test ! -e "$PAPERBOAT_TEST_STATE/hostd.plist"
-test ! -e "$PAPERBOAT_TEST_STATE/updated.plist"
-test ! -e "$PAPERBOAT_TEST_STATE/helper"
-test ! -e "$PAPERBOAT_TEST_STATE/application-support"
+grep -q '^install --json$' "$PAPERBOAT_TEST_PB_LOG"
+for marker in hostd.plist updated.plist cli legacy-helper hostd.sock updated.sock; do
+  test -e "$PAPERBOAT_TEST_STATE/$marker" || { echo "failed install removed $marker" >&2; exit 1; }
+done
 
 echo 'macOS install preservation: ok'

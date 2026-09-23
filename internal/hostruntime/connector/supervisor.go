@@ -126,7 +126,7 @@ func (s *Supervisor) NetworkChanged() {
 // NetworkChangedEvent records a monotonic network generation, fences the
 // manager's active carrier, and wakes both admission backoff and the active
 // connection wait. A route signal is deliberately used for rebind events so
-// recovery does not wait for a long TCP/FRP timeout.
+// recovery does not wait for a long TCP timeout.
 func (s *Supervisor) NetworkChangedEvent(change NetworkChange) {
 	if s == nil {
 		return
@@ -197,7 +197,7 @@ func (s *Supervisor) loop(ctx context.Context) {
 	for ctx.Err() == nil {
 		admission, err := s.config.Admissions.Admission(ctx)
 		if err == nil {
-			// QUIC probing is bounded separately, but TCP FRP login and proxy
+			// QUIC probing is bounded separately, but TCP login and proxy
 			// publication can legitimately take several seconds on a cold edge.
 			// Keep the acceptance bound below the hosted service readiness budget
 			// while leaving enough time for that control exchange to settle.

@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseindex"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 )
@@ -270,7 +271,7 @@ func TestSecureManagedUserDirectoryAdoptsExistingUserOwnedDirectory(t *testing.T
 	}
 }
 
-func TestValidateBindsSignedArtifactAndInvokingUID(t *testing.T) {
+func TestValidateBindsSuppliedBinaryAndInvokingUID(t *testing.T) {
 	request := validRequest(t)
 	if err := Validate(request, request.UID); err != nil {
 		t.Fatal(err)
@@ -385,10 +386,14 @@ func validRequest(t *testing.T) Request {
 	if err != nil {
 		t.Fatal(err)
 	}
+	source, err := installsource.Inspect(executable, "test", installsource.Custom)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return Request{
 		SetupMode: "host", InstallationGeneration: 1,
 		Schema: SchemaV1, Platform: runtime.GOOS, User: account.Username, UID: uid, Group: group.Name, GID: gid,
-		Executable: executable, Artifact: manifest,
+		Executable: executable, Artifact: manifest, Source: source,
 		Home: account.HomeDir, Path: "/usr/bin:/bin", StateRoot: state, WorkspaceRoot: account.HomeDir,
 		ControlURL: "https://control.example.test", UserMachineID: "um_test", Shell: shell,
 		HelperListenAddress: "127.0.0.1:8080",

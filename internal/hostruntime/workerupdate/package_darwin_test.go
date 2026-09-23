@@ -5,8 +5,10 @@ package workerupdate
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -145,5 +147,72 @@ func writeDarwinExpandedPackage(t *testing.T, root, identifier, cliTarget string
 	}
 	if err := os.WriteFile(filepath.Join(payloadRoot, "Library/PrivilegedHelperTools/Paperboat/bin/pb"), []byte("signed pb"), 0o755); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDarwinPackageManualInventory(t *testing.T) {
+	for _, tc := range []struct {
+		name, suffix string
+		reject       bool
+	}{
+		{"manuals", "./usr/local/share\n./usr/local/share/man\n./usr/local/share/man/man1\n./usr/local/share/man/man1/pb.1\n./usr/local/share/man/man1/pb-future-command.1\n", false},
+		{"duplicate", "./usr/local/share/man/man1/pb.1\n./usr/local/share/man/man1/pb.1\n", true},
+		{"nested", "./usr/local/share/man/man1/pb-dir/file.1\n", true},
+		{"overflow", manualInventory(maxPackageManualCount + 1), true},
+		{"limit", manualInventory(maxPackageManualCount), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withPkgutilStub(t, func(context.Context, ...string) ([]byte, error) {
+				return []byte(darwinPackageCLIPath + "\n" + darwinPackageHelperPath + "\n" + tc.suffix), nil
+			})
+			if err := validateDarwinPayload(context.Background(), "verified.pkg"); (err != nil) != tc.reject {
+				t.Fatalf("error=%v, reject=%v", err, tc.reject)
+			}
+		})
+	}
+}
+
+func manualInventory(count int) string {
+	var inventory strings.Builder
+	for i := 0; i < count; i++ {
+		fmt.Fprintf(&inventory, "./usr/local/share/man/man1/pb-command-%d.1\n", i)
+	}
+	return inventory.String()
+}
+
+func TestDarwinPackageExpandedManuals(t *testing.T) {
+	for _, kind := range []string{"regular", "oversized", "symlink", "directory", "overflow"} {
+		t.Run(kind, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "expanded")
+			writeDarwinExpandedPackage(t, root, darwinPackageIdentifier, "")
+			dir := filepath.Join(root, "Payload/usr/local/share/man/man1")
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(dir, "pb.1")
+			var err error
+			switch kind {
+			case "symlink":
+				err = os.Symlink("/tmp/outside", path)
+			case "directory":
+				err = os.Mkdir(path, 0755)
+			case "oversized":
+				err = os.WriteFile(path, make([]byte, maxPackageManualBytes+1), 0644)
+			case "regular":
+				err = os.WriteFile(path, []byte("manual"), 0644)
+			case "overflow":
+				for i := 0; i <= maxPackageManualCount; i++ {
+					if err = os.WriteFile(filepath.Join(dir, fmt.Sprintf("pb-command-%d.1", i)), nil, 0644); err != nil {
+						break
+					}
+				}
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := validateDarwinExtraction(root); (err != nil) != (kind != "regular") {
+				t.Fatalf("error=%v for %s", err, kind)
+			}
+		})
 	}
 }

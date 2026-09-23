@@ -1,0 +1,46 @@
+.nh
+.TH "PB-SSH-TRUST-HOST" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-ssh-trust-host - Approve a changed SSH host identity
+
+
+.SH SYNOPSIS
+\fBpb ssh trust-host  [flags]\fP
+
+
+.SH DESCRIPTION
+Approve a changed SSH host identity
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--fingerprint\fP=""
+	exact pending SHA256 fingerprint
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for trust-host
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-ssh(1)\fP

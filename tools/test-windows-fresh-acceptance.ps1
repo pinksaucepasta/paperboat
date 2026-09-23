@@ -34,7 +34,7 @@
 
 .NOTES
     This is an acceptance harness, not an installer replacement. It invokes
-    the repository's signed tools/install.ps1 and the installed pb commands.
+    a release-rendered install.ps1 and the installed pb commands.
     It intentionally does not accept a token value as a PowerShell parameter.
     EnrollmentBootstrapFile also accepts the aliases EnrollmentURLFile and
     EnrollmentCommandFile.
@@ -47,7 +47,7 @@ param(
     [string]$PbPath = '',
     [string]$InstallerPath = '',
     [string]$Server = 'https://api.pprbt.dev',
-    [string]$ReleaseMetadataUrl = '',
+    [string]$TUFUrl = '',
     [string]$ExpectedVersion = '',
     [string]$MachineName = '',
     [ValidateSet('host', 'client')]
@@ -965,10 +965,13 @@ function Invoke-FreshInstaller([pscustomobject]$Paths) {
         return
     }
     if ([string]::IsNullOrWhiteSpace($InstallerPath)) {
-        $InstallerPath = Join-Path $ScriptRoot 'install.ps1'
+        Fail 'Specify -InstallerPath with the release-rendered Windows installer.'
     }
     if (-not (Test-Path -LiteralPath $InstallerPath -PathType Leaf) -or (Test-ReparsePoint $InstallerPath)) {
         Fail 'The Windows bootstrap installer script is missing or unsafe.'
+    }
+    if ((Get-Content -LiteralPath $InstallerPath -Raw).Contains('@PAPERBOAT_BOOTSTRAP_')) {
+        Fail 'The Windows bootstrap installer must be the release-rendered script from the published origin.'
     }
     $token = Read-EnrollmentToken $EnrollmentTokenFile
     $powershell = Join-Path $PSHOME 'powershell.exe'
@@ -984,14 +987,14 @@ function Invoke-FreshInstaller([pscustomobject]$Paths) {
         PAPERBOAT_SERVER = $env:PAPERBOAT_SERVER
         PAPERBOAT_MACHINE_NAME = $env:PAPERBOAT_MACHINE_NAME
         PAPERBOAT_VERSION = $env:PAPERBOAT_VERSION
-        PAPERBOAT_RELEASE_METADATA_URL = $env:PAPERBOAT_RELEASE_METADATA_URL
+        PAPERBOAT_TUF_URL = $env:PAPERBOAT_TUF_URL
     }
     $hadValues = @{
         PAPERBOAT_ENROLLMENT_TOKEN = Test-Path Env:PAPERBOAT_ENROLLMENT_TOKEN
         PAPERBOAT_SERVER = Test-Path Env:PAPERBOAT_SERVER
         PAPERBOAT_MACHINE_NAME = Test-Path Env:PAPERBOAT_MACHINE_NAME
         PAPERBOAT_VERSION = Test-Path Env:PAPERBOAT_VERSION
-        PAPERBOAT_RELEASE_METADATA_URL = Test-Path Env:PAPERBOAT_RELEASE_METADATA_URL
+        PAPERBOAT_TUF_URL = Test-Path Env:PAPERBOAT_TUF_URL
     }
     try {
         # The token exists in this process only for the installer child and is
@@ -1000,12 +1003,12 @@ function Invoke-FreshInstaller([pscustomobject]$Paths) {
         $env:PAPERBOAT_SERVER = $Server
         if (-not [string]::IsNullOrWhiteSpace($MachineName)) { $env:PAPERBOAT_MACHINE_NAME = $MachineName }
         if (-not [string]::IsNullOrWhiteSpace($ExpectedVersion)) { $env:PAPERBOAT_VERSION = $ExpectedVersion }
-        if (-not [string]::IsNullOrWhiteSpace($ReleaseMetadataUrl)) { $env:PAPERBOAT_RELEASE_METADATA_URL = $ReleaseMetadataUrl }
+        if (-not [string]::IsNullOrWhiteSpace($TUFUrl)) { $env:PAPERBOAT_TUF_URL = $TUFUrl }
         $argumentLine = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ($InstallerPath -replace '"', '\"') + '"'
         Invoke-WindowsInstallerProcess $powershell $argumentLine $stdoutPath $stderrPath $Paths 'The signed Windows bootstrap installer failed.'
     } finally {
         Remove-Item Env:PAPERBOAT_ENROLLMENT_TOKEN -ErrorAction SilentlyContinue
-        foreach ($name in @('PAPERBOAT_SERVER', 'PAPERBOAT_MACHINE_NAME', 'PAPERBOAT_VERSION', 'PAPERBOAT_RELEASE_METADATA_URL')) {
+        foreach ($name in @('PAPERBOAT_SERVER', 'PAPERBOAT_MACHINE_NAME', 'PAPERBOAT_VERSION', 'PAPERBOAT_TUF_URL')) {
             Remove-Item ("Env:" + $name) -ErrorAction SilentlyContinue
         }
         foreach ($name in $oldValues.Keys) {
@@ -1103,7 +1106,7 @@ function Invoke-Acceptance {
         $PbPath = Join-Path $paths.InstallRoot 'bin\pb.exe'
     }
     if ([string]::IsNullOrWhiteSpace($InstallerPath)) {
-        $InstallerPath = Join-Path $ScriptRoot 'install.ps1'
+        Fail 'Specify -InstallerPath with the release-rendered Windows installer.'
     }
     if (-not [IO.Path]::IsPathRooted($PbPath) -or $PbPath -ne [IO.Path]::GetFullPath($PbPath) -or
         -not [IO.Path]::IsPathRooted($InstallerPath) -or $InstallerPath -ne [IO.Path]::GetFullPath($InstallerPath)) {

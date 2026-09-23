@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	identitystore "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/endpointidentity"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/trustedkeys"
@@ -71,7 +72,7 @@ func New(config Config, credentials CredentialSource) (*Client, error) {
 	if config.Clock == nil {
 		config.Clock = func() time.Time { return time.Now().UTC() }
 	}
-	return &Client{config: config, base: base, creds: credentials, http: &http.Client{Transport: config.Transport, Timeout: config.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}}, nil
+	return &Client{config: config, base: base, creds: credentials, http: &http.Client{Transport: errorreport.TransportOperation(config.Transport, base.String(), "peer_identity"), Timeout: config.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}}, nil
 }
 
 func (c *Client) Ensure(ctx context.Context) error {
@@ -85,7 +86,7 @@ func (c *Client) Ensure(ctx context.Context) error {
 	}
 	registration, err := store.Registration()
 	if err != nil || registration.InstallationGeneration < 1 || uint64(registration.InstallationGeneration) != endpoint.Generation {
-		return ErrInvalid
+		return fmt.Errorf("local machine endpoint generation: %w", ErrInvalid)
 	}
 	// Newer endpoint state persists the complete root set alongside the
 	// certificate. Older state only has the certificate issuer, so refresh the
@@ -120,10 +121,10 @@ func (c *Client) Ensure(ctx context.Context) error {
 		status, err = c.post(ctx, "/v1/machine-peer-identity", requestOperation, requestBody, &pending)
 		requestConflict = status == http.StatusConflict
 		if err != nil && !requestConflict {
-			return err
+			return fmt.Errorf("request machine endpoint: %w", err)
 		}
 		if !requestConflict && (status != http.StatusCreated || pending.EndpointID != registration.MachineID || pending.Generation != endpoint.Generation || pending.NoiseKey != base64.RawURLEncoding.EncodeToString(noisePublic[:]) || pending.QUICKey != base64.RawURLEncoding.EncodeToString(quicPublic) || pending.SafetyCode != safetyCode(registration.MachineID, endpoint.Generation, noisePublic, quicPublic)) {
-			return ErrInvalid
+			return fmt.Errorf("machine endpoint request response: %w", ErrInvalid)
 		}
 	}
 	statusOperation := operationID("op_peer_machine_status_", registration.MachineID, endpoint.Generation, nil, nil)
@@ -138,7 +139,7 @@ func (c *Client) Ensure(ctx context.Context) error {
 	}
 	status, err = c.post(ctx, "/v1/machine-peer-identity/status", statusOperation, statusBody, &approved)
 	if err != nil {
-		return err
+		return fmt.Errorf("check machine endpoint approval: %w", err)
 	}
 	if status == http.StatusAccepted && approved.State == "pending" {
 		if refreshing {
@@ -151,7 +152,7 @@ func (c *Client) Ensure(ctx context.Context) error {
 	}
 	trusted, trustedErr := trustedkeys.FromAPI(approved.TrustedKeys)
 	if trustedErr != nil {
-		return ErrInvalid
+		return fmt.Errorf("machine endpoint trusted roots: %w", ErrInvalid)
 	}
 	defer trustedkeys.Clear(trusted)
 	key, keyOK := endpointidentity.TrustedKeyFor(trusted, approved.Certificate.KeyID)
@@ -162,7 +163,7 @@ func (c *Client) Ensure(ctx context.Context) error {
 	verified, verifyErr := endpointidentity.VerifyWithTrustedKey(certificate, approved.Certificate.KeyID, trusted, endpointidentity.Expected{Role: endpointidentity.RoleMachine, EndpointID: registration.MachineID, Generation: endpoint.Generation}, c.config.Clock().UTC())
 	if status != http.StatusOK || approved.State != "approved" || !keyOK || certificateErr != nil || len(certificate) == 0 || base64.RawURLEncoding.EncodeToString(certificate) != approved.Certificate.Certificate || issuedErr != nil || expiresErr != nil || fingerprintErr != nil || certificateFingerprint != sha256.Sum256(certificate) || verifyErr != nil || approved.Certificate.Version != 1 || approved.Certificate.AccountID != verified.Claims.AccountID || approved.Certificate.KeyID != key.KeyID || approved.Certificate.EndpointID != verified.Claims.EndpointID || approved.Certificate.Role != "machine" || approved.Certificate.Generation != verified.Claims.Generation || approved.Certificate.Serial != verified.Claims.Serial || issuedAt != verified.Claims.IssuedAt || expiresAt != verified.Claims.ExpiresAt {
 		clear(certificate)
-		return ErrInvalid
+		return fmt.Errorf("approved machine endpoint certificate: %w", ErrInvalid)
 	}
 	if refreshing && !bytes.Equal(endpoint.Certificate, certificate) {
 		clear(certificate)
@@ -217,7 +218,7 @@ func (c *Client) post(ctx context.Context, path, operationID string, body []byte
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusAccepted && response.StatusCode != http.StatusCreated {
 		_, _ = io.CopyN(io.Discard, response.Body, 32<<10)
-		return response.StatusCode, ErrInvalid
+		return response.StatusCode, fmt.Errorf("HTTP %d: %w", response.StatusCode, ErrInvalid)
 	}
 	var envelope struct {
 		Data json.RawMessage `json:"data"`
@@ -225,7 +226,7 @@ func (c *Client) post(ctx context.Context, path, operationID string, body []byte
 	decoder := json.NewDecoder(io.LimitReader(response.Body, 32<<10))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&envelope) != nil || decoder.Decode(&struct{}{}) != io.EOF || len(envelope.Data) == 0 || json.Unmarshal(envelope.Data, out) != nil {
-		return response.StatusCode, ErrInvalid
+		return response.StatusCode, fmt.Errorf("HTTP %d response format: %w", response.StatusCode, ErrInvalid)
 	}
 	return response.StatusCode, nil
 }

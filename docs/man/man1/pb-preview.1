@@ -1,0 +1,66 @@
+.nh
+.TH "PB-PREVIEW" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-preview - Expose a local target through a temporary preview
+
+
+.SH SYNOPSIS
+\fBpb preview  [flags]\fP
+
+
+.SH DESCRIPTION
+Expose a local target through a temporary preview
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--background\fP[=false]
+	transfer ownership to paperboatd and return after readiness
+
+.PP
+\fB--domain\fP=[]
+	attach a verified custom domain (repeatable)
+
+.PP
+\fB--duration\fP=0s
+	maximum preview lifetime (deprecated: use --ttl)
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for preview
+
+.PP
+\fB--json\fP[=false]
+	print the canonical preview resource as JSON
+
+.PP
+\fB--private\fP[=false]
+	limit the preview to this account
+
+.PP
+\fB--team\fP[=false]
+	require an explicit team grant for browser access
+
+.PP
+\fB--ttl\fP=0s
+	bounded preview lifetime (maximum 24h)
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb(1)\fP, \fBpb-preview-delete(1)\fP, \fBpb-preview-inspect(1)\fP, \fBpb-preview-list(1)\fP, \fBpb-preview-replay(1)\fP, \fBpb-preview-status(1)\fP, \fBpb-preview-stop(1)\fP

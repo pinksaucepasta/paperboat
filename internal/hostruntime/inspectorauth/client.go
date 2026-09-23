@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/inspectorapi"
 )
 
@@ -61,6 +62,9 @@ func (c Config) AuthorizeFunc() (inspectorapi.AuthorizeFunc, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 15 * time.Second}
 	}
+	copyClient := *client
+	copyClient.Transport = errorreport.TransportOperation(client.Transport, base, "inspector_authorization")
+	client = &copyClient
 	return func(ctx context.Context, grantToken, kind, resource, route, action string) (inspectorapi.Decision, error) {
 		if ctx == nil || strings.TrimSpace(grantToken) == "" || (kind != "preview" && kind != "tunnel") || strings.TrimSpace(resource) == "" || strings.TrimSpace(route) == "" || (action != "inspect" && action != "replay") {
 			return inspectorapi.Decision{}, inspectorapi.ErrInvalid

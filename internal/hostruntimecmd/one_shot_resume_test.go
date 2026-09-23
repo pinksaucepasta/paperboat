@@ -183,6 +183,82 @@ func TestBootstrapCLIResumeRetriesTimeoutAndCrashBeforeCheckpoint(t *testing.T) 
 	}
 }
 
+func TestExpiredOneShotResumeInstallsRotatedSameSession(t *testing.T) {
+	now := time.Now().UTC()
+	loadNow := now.Add(2 * time.Hour)
+	root := t.TempDir()
+	server := "https://api.example.test"
+	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	previous := testClientBootstrapMaterial(server, now.Add(time.Hour))
+	record := bootstrap.NewResumeRecord(server, publicKey, "token", "Laptop", "client", "verifier-012345678901234567890123456789", now.Add(-time.Minute))
+	record.PairingStarted, record.Material, record.ClientInstalled, record.RuntimeEnrolled = true, &previous, true, true
+	if err := bootstrap.SaveResume(root, record); err != nil {
+		t.Fatal(err)
+	}
+	loaded, loadErr := bootstrap.LoadResume(root, server, publicKey, "", "Laptop", "client", loadNow)
+	if !errors.Is(loadErr, bootstrap.ErrResumeExpired) {
+		t.Fatalf("load error = %v", loadErr)
+	}
+	recovered := testClientBootstrapMaterial(server, loadNow.Add(time.Hour))
+	recovered.ClientSession.AccessToken = "rotated-access-012345678901234567890123456789"
+	recovered.ClientSession.RefreshToken = "rotated-refresh-012345678901234567890123456789"
+	operations := testOneShotResumeOperations(loadNow)
+	operations.RecoverMaterial = func(_ context.Context, _ bootstrap.Config, runtimeEnrolled bool) (bootstrap.Material, error) {
+		if !runtimeEnrolled {
+			t.Fatal("lost runtime enrollment progress")
+		}
+		return recovered, nil
+	}
+	material, journal, err := resumeOneShotEnrollment(context.Background(), testOneShotResumeInput(root, server, publicKey, "", loaded, loadErr), operations)
+	if err != nil || journal.ClientInstalled || material.ClientSession.AccessToken != recovered.ClientSession.AccessToken {
+		t.Fatalf("recovery did not checkpoint pending credential install: installed=%t err=%v", journal.ClientInstalled, err)
+	}
+	reloaded, reloadErr := bootstrap.LoadResume(root, server, publicKey, "", "Laptop", "client", loadNow)
+	if reloadErr != nil || reloaded.ClientInstalled || reloaded.Material.ClientSession.RefreshToken != recovered.ClientSession.RefreshToken {
+		t.Fatalf("durable rotated material missing: installed=%t err=%v", reloaded.ClientInstalled, reloadErr)
+	}
+	installed := 0
+	install := func(_ context.Context, session *bootstrap.ClientSession, _ string) error {
+		installed++
+		if session.RefreshToken != recovered.ClientSession.RefreshToken {
+			t.Fatal("installed stale credentials")
+		}
+		return nil
+	}
+	if err := completeBootstrapCLIResume(context.Background(), root, server, material, &journal, install, bootstrap.SaveResume); err != nil {
+		t.Fatal(err)
+	}
+	if installed != 1 || !journal.ClientInstalled {
+		t.Fatalf("installed=%d checkpoint=%t", installed, journal.ClientInstalled)
+	}
+}
+
+func TestExpiredOneShotResumeRejectsDifferentClientSession(t *testing.T) {
+	now := time.Now().UTC()
+	loadNow := now.Add(2 * time.Hour)
+	root := t.TempDir()
+	server := "https://api.example.test"
+	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	previous := testClientBootstrapMaterial(server, now.Add(time.Hour))
+	record := bootstrap.NewResumeRecord(server, publicKey, "token", "Laptop", "client", "verifier-012345678901234567890123456789", now.Add(-time.Minute))
+	record.PairingStarted, record.Material, record.ClientInstalled, record.RuntimeEnrolled = true, &previous, true, true
+	if err := bootstrap.SaveResume(root, record); err != nil {
+		t.Fatal(err)
+	}
+	loaded, loadErr := bootstrap.LoadResume(root, server, publicKey, "", "Laptop", "client", loadNow)
+	recovered := testClientBootstrapMaterial(server, loadNow.Add(time.Hour))
+	recovered.ClientSession.SessionID = "cli_other"
+	operations := testOneShotResumeOperations(loadNow)
+	operations.RecoverMaterial = func(context.Context, bootstrap.Config, bool) (bootstrap.Material, error) { return recovered, nil }
+	if _, _, err := resumeOneShotEnrollment(context.Background(), testOneShotResumeInput(root, server, publicKey, "", loaded, loadErr), operations); !errors.Is(err, bootstrap.ErrResumeBinding) {
+		t.Fatalf("different session recovery error = %v", err)
+	}
+	reloaded, _ := bootstrap.LoadResume(root, server, publicKey, "", "Laptop", "client", loadNow)
+	if !reloaded.ClientInstalled || reloaded.Material.ClientSession.SessionID != previous.ClientSession.SessionID {
+		t.Fatal("rejected recovery changed durable journal")
+	}
+}
+
 func TestAuthenticatedSetupRecoveryNeverCreatesPairingAndPreservesFailedJournal(t *testing.T) {
 	now := time.Now().UTC()
 	server := "https://api.example.test"
@@ -228,7 +304,7 @@ func TestAuthenticatedSetupRecoveryNeverCreatesPairingAndPreservesFailedJournal(
 				recoverCalls++
 				return bootstrap.Material{}, bootstrap.ErrInstallationUnavailable
 			}
-			config := bootstrap.Config{ServerURL: server, DisplayName: "Laptop", WorkspaceRoot: root, Verifier: loaded.Verifier, PublicIdentityKey: publicKey}
+			config := bootstrap.Config{ServerURL: server, Alias: "Laptop", WorkspaceRoot: root, Verifier: loaded.Verifier, PublicIdentityKey: publicKey}
 			if _, err := recoverAuthenticatedSetupMaterial(context.Background(), config, loaded, test.expired, operations); !errors.Is(err, test.wantErr) {
 				t.Fatalf("recovery error = %v, want %v", err, test.wantErr)
 			}
@@ -258,7 +334,7 @@ func testOneShotResumeOperations(now time.Time) oneShotResumeOperations {
 func testOneShotResumeInput(root, server, publicKey, token string, resume bootstrap.ResumeRecord, resumeErr error) oneShotResumeInput {
 	return oneShotResumeInput{
 		StateRoot: root, SetupMode: "client",
-		Config: bootstrap.Config{ServerURL: server, EnrollmentToken: token, DisplayName: "Laptop", WorkspaceRoot: root, PublicIdentityKey: publicKey},
+		Config: bootstrap.Config{ServerURL: server, EnrollmentToken: token, Alias: "Laptop", WorkspaceRoot: root, PublicIdentityKey: publicKey},
 		Resume: resume, ResumeErr: resumeErr, PollInterval: time.Millisecond,
 	}
 }
@@ -269,6 +345,6 @@ func testClientBootstrapMaterial(server string, expiresAt time.Time) bootstrap.M
 		ControlURL: server, HelperID: "helper_client", EnrollmentID: "henr_client", EnrollmentCredential: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP",
 		ExpiresAt: expiresAt, Artifact: &bootstrap.ArtifactTarget{Schema: bootstrap.ArtifactTargetSchemaV1, Kind: bootstrap.ArtifactKindPB, Version: "2026.08.24.1", Platform: runtime.GOOS, Architecture: runtime.GOARCH, RepositoryURL: server, TargetPath: releaseindex.AssetName(runtime.GOOS, runtime.GOARCH)},
 		HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 1, SetupRoles: []string{"interactive"}, SetupMode: "client",
-		ClientSession: &bootstrap.ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cli_client", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600, Scope: "machines:read projects:read projects:connect"},
+		ClientSession: &bootstrap.ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cli_client", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600, Scope: "machines:read machines:connect"},
 	}
 }

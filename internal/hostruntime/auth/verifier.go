@@ -42,6 +42,10 @@ func (e *Error) Error() string {
 func (e *Error) Unwrap() error { return e.Cause }
 
 type Claims struct {
+	BootID                 string `json:"boot_id,omitempty"`
+	PolicyGeneration       int64  `json:"policy_generation,omitempty"`
+	AnnouncementGeneration int64  `json:"announcement_generation,omitempty"`
+
 	Issuer                 string              `json:"iss"`
 	Audience               string              `json:"aud"`
 	Subject                string              `json:"sub"`

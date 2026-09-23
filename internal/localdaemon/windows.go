@@ -23,6 +23,7 @@ type ManagedSSHConfig struct {
 	Executable           string
 	OwnerUID             uint32
 	InheritedAgentSocket string
+	AliasSuffix          string
 }
 
 type DaemonConfig struct {
@@ -42,6 +43,8 @@ type DaemonConfig struct {
 	WarmPeerMetadata        func(context.Context, []api.UserMachine) error
 	IssuePeerStream         func(context.Context, localapi.PeerStreamRequest) (localapi.PeerStreamRequest, error)
 	FileTransfers           localapi.FileTransferBroker
+	DeviceSuffix            string
+	DeviceLoopbackCIDR      string
 }
 
 func Run(ctx context.Context, config DaemonConfig) error { return runWindowsDaemon(ctx, config) }

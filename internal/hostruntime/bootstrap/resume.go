@@ -39,7 +39,7 @@ type ResumeRecord struct {
 	PublicIdentityKey       string    `json:"public_identity_key"`
 	EnrollmentTokenSHA      string    `json:"enrollment_token_sha256"`
 	EnrollmentTokenRequired bool      `json:"enrollment_token_required,omitempty"`
-	DisplayName             string    `json:"display_name"`
+	Alias                   string    `json:"alias"`
 	SetupMode               string    `json:"setup_mode"`
 	Verifier                string    `json:"verifier"`
 	PairingExpiresAt        time.Time `json:"pairing_expires_at"`
@@ -71,14 +71,14 @@ func ResumePath(stateRoot string) string {
 // NewResumeRecord creates the pre-pairing journal. Keeping the verifier lets
 // a process that dies after server pairing but before material delivery resume
 // polling without attempting a second pairing.
-func NewResumeRecord(serverURL, publicIdentityKey, enrollmentToken, displayName, setupMode, verifier string, expiresAt time.Time) ResumeRecord {
+func NewResumeRecord(serverURL, publicIdentityKey, enrollmentToken, alias, setupMode, verifier string, expiresAt time.Time) ResumeRecord {
 	return ResumeRecord{
 		Schema:                  resumeSchema,
 		ServerURL:               strings.TrimRight(strings.TrimSpace(serverURL), "/"),
 		PublicIdentityKey:       strings.TrimSpace(publicIdentityKey),
 		EnrollmentTokenSHA:      enrollmentTokenDigest(enrollmentToken),
 		EnrollmentTokenRequired: strings.TrimSpace(enrollmentToken) != "",
-		DisplayName:             strings.TrimSpace(displayName),
+		Alias:                   strings.TrimSpace(alias),
 		SetupMode:               strings.TrimSpace(setupMode),
 		Verifier:                strings.TrimSpace(verifier),
 		PairingExpiresAt:        expiresAt,
@@ -104,7 +104,7 @@ func SaveResume(stateRoot string, record ResumeRecord) error {
 // necessary when a token-file installer consumed the local file before a
 // later process failed. Before pairing, a token-backed journal must still be
 // given its original token so it cannot silently become an identity pairing.
-func LoadResume(stateRoot, serverURL, publicIdentityKey, enrollmentToken, displayName, setupMode string, now time.Time) (ResumeRecord, error) {
+func LoadResume(stateRoot, serverURL, publicIdentityKey, enrollmentToken, alias, setupMode string, now time.Time) (ResumeRecord, error) {
 	if !filepath.IsAbs(stateRoot) || now.IsZero() {
 		return ResumeRecord{}, ErrResumeBinding
 	}
@@ -114,7 +114,7 @@ func LoadResume(stateRoot, serverURL, publicIdentityKey, enrollmentToken, displa
 	}
 	if strings.TrimRight(strings.TrimSpace(serverURL), "/") != record.ServerURL ||
 		strings.TrimSpace(publicIdentityKey) != record.PublicIdentityKey ||
-		strings.TrimSpace(displayName) != record.DisplayName ||
+		strings.TrimSpace(alias) != record.Alias ||
 		strings.TrimSpace(setupMode) != record.SetupMode {
 		return ResumeRecord{}, ErrResumeBinding
 	}
@@ -133,14 +133,32 @@ func LoadResume(stateRoot, serverURL, publicIdentityKey, enrollmentToken, displa
 	return record, nil
 }
 
+// ResumeMatchesEnrollmentToken classifies a fresh-installer retry without
+// weakening the journal's normal machine and enrollment binding checks. A
+// missing journal or a different valid token requests a new reset; malformed
+// protected state fails closed so recoverable material is never deleted.
+func ResumeMatchesEnrollmentToken(stateRoot, enrollmentToken string) (bool, error) {
+	if !filepath.IsAbs(stateRoot) || strings.TrimSpace(enrollmentToken) == "" {
+		return false, ErrResumeBinding
+	}
+	record, err := loadResumeDocument(stateRoot)
+	if errors.Is(err, ErrResumeNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return enrollmentTokenDigest(enrollmentToken) == record.EnrollmentTokenSHA, nil
+}
+
 // PrepareAuthenticatedSetupResume creates or reuses the protected verifier
 // journal for an authenticated Host setup. It replaces an older journal only
 // when every immutable machine binding matches and the journal is expired with
 // no material or locally committed installation progress.
-func PrepareAuthenticatedSetupResume(stateRoot, serverURL, publicIdentityKey, displayName, machineID string, installationGeneration int64, artifact ArtifactTarget, now time.Time) (ResumeRecord, error) {
+func PrepareAuthenticatedSetupResume(stateRoot, serverURL, publicIdentityKey, alias, machineID string, installationGeneration int64, artifact ArtifactTarget, now time.Time) (ResumeRecord, error) {
 	serverURL = strings.TrimRight(strings.TrimSpace(serverURL), "/")
-	publicIdentityKey, displayName, machineID = strings.TrimSpace(publicIdentityKey), strings.TrimSpace(displayName), strings.TrimSpace(machineID)
-	if !filepath.IsAbs(stateRoot) || !validResumeServer(serverURL) || publicIdentityKey == "" || displayName == "" || machineID == "" || installationGeneration < 1 || now.IsZero() {
+	publicIdentityKey, alias, machineID = strings.TrimSpace(publicIdentityKey), strings.TrimSpace(alias), strings.TrimSpace(machineID)
+	if !filepath.IsAbs(stateRoot) || !validResumeServer(serverURL) || publicIdentityKey == "" || alias == "" || machineID == "" || installationGeneration < 1 || now.IsZero() {
 		return ResumeRecord{}, ErrResumeBinding
 	}
 	if err := VerifyArtifactTarget(artifact); err != nil {
@@ -148,7 +166,7 @@ func PrepareAuthenticatedSetupResume(stateRoot, serverURL, publicIdentityKey, di
 	}
 	existing, err := loadResumeDocument(stateRoot)
 	if err == nil {
-		exactBase := existing.ServerURL == serverURL && existing.PublicIdentityKey == publicIdentityKey && existing.DisplayName == displayName && existing.SetupMode == "host"
+		exactBase := existing.ServerURL == serverURL && existing.PublicIdentityKey == publicIdentityKey && existing.Alias == alias && existing.SetupMode == "host"
 		exactAuthenticatedBinding := exactBase && existing.ExpectedUserMachineID == machineID && existing.ExpectedGeneration == installationGeneration
 		expired := !now.UTC().Before(existing.PairingExpiresAt)
 		if existing.Material != nil && !now.UTC().Before(existing.Material.ExpiresAt) {
@@ -197,7 +215,7 @@ func PrepareAuthenticatedSetupResume(stateRoot, serverURL, publicIdentityKey, di
 	if _, err := io.ReadFull(rand.Reader, operationBytes); err != nil {
 		return ResumeRecord{}, err
 	}
-	record := NewResumeRecord(serverURL, publicIdentityKey, "", displayName, "host", base64.RawURLEncoding.EncodeToString(verifierBytes), now.UTC().Add(15*time.Minute))
+	record := NewResumeRecord(serverURL, publicIdentityKey, "", alias, "host", base64.RawURLEncoding.EncodeToString(verifierBytes), now.UTC().Add(15*time.Minute))
 	record.AuthenticatedSetup = true
 	record.SetupOperationID = "host-setup-" + base64.RawURLEncoding.EncodeToString(operationBytes)
 	record.ExpectedUserMachineID = machineID
@@ -332,7 +350,7 @@ func validateResumeRecord(record ResumeRecord, loaded bool) error {
 			return ErrResumeBinding
 		}
 	}
-	if record.Schema != resumeSchema || !validResumeServer(record.ServerURL) || record.PublicIdentityKey == "" || len(record.EnrollmentTokenSHA) != sha256.Size*2 || record.DisplayName == "" || record.SetupMode != "host" && record.SetupMode != "client" || len(record.Verifier) < 32 || record.PairingExpiresAt.IsZero() {
+	if record.Schema != resumeSchema || !validResumeServer(record.ServerURL) || record.PublicIdentityKey == "" || len(record.EnrollmentTokenSHA) != sha256.Size*2 || record.Alias == "" || record.SetupMode != "host" && record.SetupMode != "client" || len(record.Verifier) < 32 || record.PairingExpiresAt.IsZero() {
 		return ErrResumeBinding
 	}
 	if _, err := hex.DecodeString(record.EnrollmentTokenSHA); err != nil {

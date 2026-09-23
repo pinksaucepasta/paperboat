@@ -1,0 +1,58 @@
+.nh
+.TH "PB-SESSION-ATTACH" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-session-attach - Choose and attach to a durable terminal session
+
+
+.SH SYNOPSIS
+\fBpb session attach [environment] [session] [flags]\fP
+
+
+.SH DESCRIPTION
+Choose and attach to a durable terminal session
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB--debug\fP[=false]
+	show the pb versions used by this terminal session
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for attach
+
+.PP
+\fB--status-bar\fP=""
+	status bar for this attach: auto, on, or off
+
+.PP
+\fB--status-bar-fullscreen\fP=""
+	status bar in full-screen applications: hide or show
+
+.PP
+\fB--status-bar-theme\fP=""
+	status bar theme: terminal, dark, light, or mono
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-session(1)\fP

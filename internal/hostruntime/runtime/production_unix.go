@@ -33,6 +33,8 @@ import (
 	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	clientconfig "github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/deviceservices"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/availability"
 	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
@@ -521,6 +523,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 			return nil, err
 		}
 	}
+	var deviceServiceObserver *runtimeObservationSender
 	{
 		runtimeEndpoint := controlURL.ResolveReference(&url.URL{Path: "/v1/runtime-observations"}).String()
 		scope := environ("PAPERBOAT_RUNTIME_SERVICE_SCOPE")
@@ -541,7 +544,8 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		if observationTokensErr != nil {
 			return nil, observationTokensErr
 		}
-		sender := &runtimeObservationSender{endpoint: runtimeEndpoint, tokens: observationTokens, proofs: enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}, operationID: operationID, environmentID: identity.EnvironmentID, machineID: machineID, reporterVersion: version, client: &http.Client{Transport: transport, Timeout: 10 * time.Second, CheckRedirect: rejectRuntimePolicyRedirect}, availability: availabilityService, receiptPath: filepath.Join(runtimeConfig.StateRoot, "runtime", "server-heartbeat.json"), installationGeneration: uint64(machineRegistration.InstallationGeneration), workerGeneration: bootState.Generation, osBootID: bootState.OSBootID, setupMode: machineRegistration.SetupMode, lazyBootID: lazyBootID, lazyStartedAt: lazyStartedAt, serviceScope: scope, connector: connectorService, transferPolicy: transferPolicy, capabilitiesController: capabilityController, capabilities: capabilities, relayLatency: regionalCache, relaySuccess: relayRegion}
+		sender := &runtimeObservationSender{endpoint: runtimeEndpoint, tokens: observationTokens, proofs: enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}, operationID: operationID, environmentID: identity.EnvironmentID, machineID: machineID, reporterVersion: version, client: &http.Client{Transport: errorreport.TransportOperation(transport, controlURL.String(), "runtime_observation"), Timeout: 10 * time.Second, CheckRedirect: rejectRuntimePolicyRedirect}, availability: availabilityService, receiptPath: filepath.Join(runtimeConfig.StateRoot, "runtime", "server-heartbeat.json"), installationGeneration: uint64(machineRegistration.InstallationGeneration), workerGeneration: bootState.Generation, osBootID: bootState.OSBootID, setupMode: machineRegistration.SetupMode, lazyBootID: lazyBootID, lazyStartedAt: lazyStartedAt, serviceScope: scope, connector: connectorService, transferPolicy: transferPolicy, capabilitiesController: capabilityController, capabilities: capabilities, relayLatency: regionalCache, relaySuccess: relayRegion}
+		deviceServiceObserver = sender
 		if runtimeProjection != nil {
 			sender.projection = runtimeProjection
 		}
@@ -625,7 +629,10 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		return nil, err
 	}
 	dependencies := HostDependencies{Authorizer: authorizer, AuthorizationService: authorizationRefresh, Connector: connectorService, PreviewDispatcher: previewAssembly, PreviewRecovery: previewAssembly, PreviewOwnerSessions: previewAssembly.OwnerSessionLeases(), RuntimeObservationService: runtimeService, RecordTerminalJoin: runtimeObservation.sender.RecordTerminalJoin, ManagedEnvironment: managedEnvironment, Metrics: metrics, LocalControlToken: localControlToken, Inspector: inspectorService, ManagedSSH: managedSSHHost, ManagedSSHService: managedSSHService, TransferKeys: transferKeys, Capabilities: capabilityController}
-	nativePrivateValidators := []productionNativePrivateValidator{previewAssembly.dispatcher}
+	nativePrivateValidators := []productionNativePrivateValidator{localNativePrivateValidator(previewAssembly.dispatcher)}
+	if deviceServiceObserver != nil {
+		nativePrivateValidators = append(nativePrivateValidators, deviceServiceObserver.validateDeviceService)
+	}
 	if tunnelProvider == nil {
 		tunnelEnrollment, enrollmentErr := newProductionTunnelEnrollmentService(controlURL.String(), runtimeConfig.StateRoot, machineID, localControlToken, transport, inspectorStore, inspectorRegistry, inspectorService)
 		if enrollmentErr != nil {
@@ -647,7 +654,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		}
 		dependencies.TunnelManager = tunnelAssembly
 		connectorService.status = tunnelAssembly.ConnectorStatus
-		nativePrivateValidators = append(nativePrivateValidators, tunnelAssembly.Manager.Manager)
+		nativePrivateValidators = append(nativePrivateValidators, localNativePrivateValidator(tunnelAssembly.Manager.Manager))
 		updateGate, gateErr := tunnelmanager.NewUpdateGate(tunnelmanager.UpdateGateConfig{MachineID: machineID, Manager: tunnelAssembly.Manager.Manager, StatePath: filepath.Join(runtimeConfig.StateRoot, "updates", "deployment-gate.json")})
 		if gateErr != nil {
 			return nil, errors.Join(ErrProductionInvalid, gateErr)
@@ -947,7 +954,7 @@ func newProductionClientCoordinator(ctx context.Context, version string, environ
 	if scope != "system" && scope != "user" {
 		scope = "unknown"
 	}
-	sender := &runtimeObservationSender{endpoint: controlURL.ResolveReference(&url.URL{Path: "/v1/runtime-observations"}).String(), tokens: runtimeTokens, proofs: runtimeProofs, operationID: operationID, environmentID: registration.EnvironmentID, machineID: registration.MachineID, reporterVersion: version, client: &http.Client{Transport: transport, Timeout: 10 * time.Second, CheckRedirect: rejectRuntimePolicyRedirect}, receiptPath: filepath.Join(runtimeConfig.StateRoot, "runtime", "server-heartbeat.json"), installationGeneration: uint64(registration.InstallationGeneration), workerGeneration: bootState.Generation, osBootID: bootState.OSBootID, serviceScope: scope, connector: connectorService, transferPolicy: transferPolicy, capabilitiesController: capabilityController, capabilities: []string{"file_receive", "preview_launch"}, relayLatency: regionalCache, relaySuccess: relayRegion}
+	sender := &runtimeObservationSender{endpoint: controlURL.ResolveReference(&url.URL{Path: "/v1/runtime-observations"}).String(), tokens: runtimeTokens, proofs: runtimeProofs, operationID: operationID, environmentID: registration.EnvironmentID, machineID: registration.MachineID, reporterVersion: version, client: &http.Client{Transport: errorreport.TransportOperation(transport, controlURL.String(), "runtime_observation"), Timeout: 10 * time.Second, CheckRedirect: rejectRuntimePolicyRedirect}, receiptPath: filepath.Join(runtimeConfig.StateRoot, "runtime", "server-heartbeat.json"), installationGeneration: uint64(registration.InstallationGeneration), workerGeneration: bootState.Generation, osBootID: bootState.OSBootID, serviceScope: scope, connector: connectorService, transferPolicy: transferPolicy, capabilitiesController: capabilityController, capabilities: []string{"file_receive", "preview_launch"}, relayLatency: regionalCache, relaySuccess: relayRegion}
 	updaterClient, updaterErr := newProductionUpdaterClient()
 	if updaterErr != nil {
 		return nil, updaterErr
@@ -996,7 +1003,7 @@ func newProductionClientCoordinator(ctx context.Context, version string, environ
 		}
 		dependencies.TunnelManager = tunnelAssembly
 		connectorService.status = tunnelAssembly.ConnectorStatus
-		nativePrivateValidators = append(nativePrivateValidators, tunnelAssembly.Manager.Manager)
+		nativePrivateValidators = append(nativePrivateValidators, localNativePrivateValidator(tunnelAssembly.Manager.Manager))
 		updateGate, gateErr := tunnelmanager.NewUpdateGate(tunnelmanager.UpdateGateConfig{MachineID: registration.MachineID, Manager: tunnelAssembly.Manager.Manager, StatePath: filepath.Join(runtimeConfig.StateRoot, "updates", "deployment-gate.json")})
 		if gateErr != nil {
 			return nil, errors.Join(ErrProductionInvalid, gateErr)
@@ -1338,6 +1345,11 @@ func (s *runtimeObservationService) Shutdown(ctx context.Context) error {
 }
 
 type runtimeObservationSender struct {
+	deviceServicesDiscover                              func(context.Context) ([]deviceservices.Service, error)
+	deviceServicesMu                                    sync.Mutex
+	deviceServicesPolicy                                clientapi.DeviceServicesPolicy
+	deviceServicesPorts                                 []clientapi.DeviceServicePort
+	deviceServicesGeneration                            uint64
 	endpoint, environmentID, machineID, reporterVersion string
 	tokens                                              interface {
 		Token(context.Context) (string, error)
@@ -1429,18 +1441,20 @@ func (s *runtimeObservationSender) Send(ctx context.Context) error {
 		}
 	}
 	body, err := json.Marshal(struct {
-		LazyRuntime        *lazyRuntimeObservation         `json:"lazy_runtime,omitempty"`
-		EnvironmentID      string                          `json:"environment_id"`
-		ResourceID         string                          `json:"resource_id"`
-		ReporterVersion    string                          `json:"reporter_version"`
-		SampledAt          time.Time                       `json:"sampled_at"`
-		Environment        any                             `json:"environment,omitempty"`
-		Availability       *availability.Observation       `json:"availability,omitempty"`
-		RuntimeDiagnostics *runtimeDiagnosticsObservation  `json:"runtime_diagnostics,omitempty"`
-		RelayLatency       *runtimeRelayLatencyObservation `json:"relay_latency,omitempty"`
-		Update             *runtimeUpdateObservation       `json:"update,omitempty"`
-		DeviceCapabilities *deviceCapabilitiesObservation  `json:"device_capabilities,omitempty"`
+		DeviceServices     *clientapi.DeviceServicesSnapshot `json:"device_services,omitempty"`
+		LazyRuntime        *lazyRuntimeObservation           `json:"lazy_runtime,omitempty"`
+		EnvironmentID      string                            `json:"environment_id"`
+		ResourceID         string                            `json:"resource_id"`
+		ReporterVersion    string                            `json:"reporter_version"`
+		SampledAt          time.Time                         `json:"sampled_at"`
+		Environment        any                               `json:"environment,omitempty"`
+		Availability       *availability.Observation         `json:"availability,omitempty"`
+		RuntimeDiagnostics *runtimeDiagnosticsObservation    `json:"runtime_diagnostics,omitempty"`
+		RelayLatency       *runtimeRelayLatencyObservation   `json:"relay_latency,omitempty"`
+		Update             *runtimeUpdateObservation         `json:"update,omitempty"`
+		DeviceCapabilities *deviceCapabilitiesObservation    `json:"device_capabilities,omitempty"`
 	}{
+		DeviceServices:     s.deviceServicesObservation(ctx),
 		LazyRuntime:        s.lazyRuntimeObservation(),
 		EnvironmentID:      s.environmentID,
 		ResourceID:         s.machineID,
@@ -1490,8 +1504,10 @@ func (s *runtimeObservationSender) Send(ctx context.Context) error {
 		return errors.New("runtime observation response is invalid")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		s.applyDeviceServicesPolicy(nil)
 		return fmt.Errorf("runtime observation rejected with status %d", response.StatusCode)
 	}
+	s.applyDeviceServicesPolicy(responseBody)
 	if s.transferPolicy != nil {
 		if err := applyRuntimeTransferPolicy(responseBody, s.transferPolicy); err != nil {
 			return err

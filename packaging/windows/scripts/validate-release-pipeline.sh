@@ -8,7 +8,6 @@ python3 - \
   "$repository_root/tools/build-release-asset.sh" \
   "$repository_root/tools/build-macos-pkg.sh" \
   "$repository_root/tools/test-macos-pkg-payload.sh" \
-  "$repository_root/tools/accept-linux-final-release.sh" \
   "$repository_root/tools/test-windows-fresh-acceptance.ps1" \
   "$repository_root/internal/hostruntime/service/components.go" \
   "$repository_root/internal/hostruntime/hostinstall/windows_service_plan.go" \
@@ -24,7 +23,6 @@ import sys
     release_builder_path,
     pkg_builder_path,
     macos_pkg_test_path,
-    linux_acceptance_path,
     windows_acceptance_path,
     service_components_path,
     windows_service_plan_path,
@@ -36,7 +34,6 @@ workflow = workflow_path.read_text(encoding='utf-8')
 release_builder = release_builder_path.read_text(encoding='utf-8')
 pkg_builder = pkg_builder_path.read_text(encoding='utf-8')
 macos_pkg_test = macos_pkg_test_path.read_text(encoding='utf-8')
-linux_acceptance = linux_acceptance_path.read_text(encoding='utf-8')
 windows_acceptance = windows_acceptance_path.read_text(encoding='utf-8')
 service_components = service_components_path.read_text(encoding='utf-8')
 windows_service_plan = windows_service_plan_path.read_text(encoding='utf-8')
@@ -69,8 +66,9 @@ required = {
     'PAPERBOAT_GITHUB_REPOSITORY: ${{ github.repository }}',
     '-windows-amd64-native-evidence',
     '-windows-arm64-native-evidence',
-    'paperboat.release-current/v1',
-    "'assets': assets",
+    'go build -buildvcs=false -trimpath',
+    'tools/render-installers.py',
+    'bootstrap-dist',
     'publish-tuf-origin.sh',
     'PAPERBOAT_RELEASE_BUNDLE_SHA256',
     'gh release view "$RELEASE_VERSION" --json tagName,assets',
@@ -145,16 +143,16 @@ for value in ('pkgbuild', 'productsign', '--sign', 'pkgutil --expand'):
     if value not in pkg_builder:
         raise SystemExit(f'macOS package builder is missing {value}')
 for value in (
-    "helper_payload=\"$payload/Library/PrivilegedHelperTools/Paperboat/pb\"",
-    'install -m 0755 "$cli_payload" "$helper_payload"',
+    'canonical_helper=/Library/PrivilegedHelperTools/Paperboat/bin/pb',
+    'install -m 0755 "$binary" "$helper_payload"',
     'codesign --verify --strict "$helper_payload"',
 ):
     if value not in pkg_builder:
         raise SystemExit(f'macOS package does not carry the unified privileged runtime: {value}')
 for value in (
     "'./usr/local/bin/pb'",
-    "'./Library/PrivilegedHelperTools/Paperboat/pb'",
-    "cmp -s \"$cli\" \"$helper\"",
+    "'./Library/PrivilegedHelperTools/Paperboat/bin/pb'",
+    "test \"$(readlink \"$cli\")\" = '/Library/PrivilegedHelperTools/Paperboat/bin/pb'",
 ):
     if value not in macos_pkg_test:
         raise SystemExit(f'macOS package payload test does not verify the unified runtime: {value}')
@@ -164,26 +162,17 @@ for value in (
 # role, and the acceptance checks must prove that declaration is persistent,
 # active, and still points at that binary after a restart/update boundary.
 for value in (
-    'paperboat-updated.service',
+    'paperboat-updated-" + instance + ".service',
     'UpdaterLabel',
     'Arguments: []string{"daemon", "__runtime-updated"}',
 ):
     if value not in service_components:
         raise SystemExit(f'native service declarations omit the updater role: {value}')
 for value in (
-    '{kind: service.UpdaterKind, executable: layout.Binary, arguments: []string{"daemon", "__runtime-updated"}}',
+    '{kind: service.UpdaterKind, executable: layout.Binary, arguments: append([]string{"daemon", "__runtime-updated"}, instanceArgs...)},',
 ):
     if value not in windows_service_plan:
         raise SystemExit(f'Windows service declarations omit the unified updater role: {value}')
-for value in (
-    'systemctl show -p ExecStart --value "$unit"',
-    "*'\"daemon\"'*",
-    'expected_argument=__runtime-updated',
-    'paperboat-updated.service',
-    'systemctl restart paperboat-hostd.service paperboat-updated.service',
-):
-    if value not in linux_acceptance:
-        raise SystemExit(f'Linux acceptance does not verify persistent unified updater service: {value}')
 for value in (
     "'PaperboatUpdated'",
     "'__runtime-updated'",
@@ -202,7 +191,7 @@ if 'needs: [release-authority, release-contract]' not in workflow:
     raise SystemExit('platform builds must wait for the authority and focused contract gates')
 if 'needs: [release-authority, release-contract, release-linux, release-windows, release-macos]' not in workflow:
     raise SystemExit('publication must wait for all five assets')
-if not (workflow.index('Publish release assets without changing Latest') < workflow.index('Atomically activate current.json and TUF on the server') < workflow.index('Mark the verified GitHub release latest')):
+if not (workflow.index('Publish release assets without changing Latest') < workflow.index('Atomically activate installers and TUF on the server') < workflow.index('Mark the verified GitHub release latest')):
     raise SystemExit('GitHub assets must be public before origin activation, while Latest is marked only after the exchange')
 build_and_publish = workflow.split('  release-contract:', 1)[1]
 if 'vars.PAPERBOAT_DEFAULT_SERVER_URL' in build_and_publish or 'vars.PAPERBOAT_DEFAULT_RELEASE_URL' in build_and_publish:

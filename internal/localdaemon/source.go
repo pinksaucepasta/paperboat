@@ -108,7 +108,7 @@ func (s AuthenticatedMachineSource) ListCompletionItems(ctx context.Context, mac
 	client := api.New(s.ServerURL, credential, nil)
 	items := make([]localapi.CompletionItem, 0, len(machines)*3)
 	for _, machine := range machines {
-		description := completionDescription(machine.DisplayName, machine.State)
+		description := completionDescription(machine.Alias, machine.State)
 		if machine.Alias != "" {
 			items = append(items, localapi.CompletionItem{Kind: "machine", Value: machine.Alias, Description: description, EnvironmentID: machine.EnvironmentID})
 		}

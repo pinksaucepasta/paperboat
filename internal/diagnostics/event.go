@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 const EventSchemaV1 = "paperboat.diagnostic-event/v1"
@@ -18,12 +20,13 @@ var allowedFields = map[string]bool{
 }
 
 type Event struct {
-	Schema   string            `json:"schema"`
-	At       time.Time         `json:"at"`
-	Category string            `json:"category"`
-	Code     string            `json:"code"`
-	Severity string            `json:"severity"`
-	Fields   map[string]string `json:"fields,omitempty"`
+	Schema           string            `json:"schema"`
+	At               time.Time         `json:"at"`
+	Category         string            `json:"category"`
+	Code             string            `json:"code"`
+	Severity         string            `json:"severity"`
+	SupportReference string            `json:"support_reference,omitempty"`
+	Fields           map[string]string `json:"fields,omitempty"`
 }
 
 func NewEvent(at time.Time, category, code, severity string, fields map[string]string) (Event, error) {
@@ -34,8 +37,20 @@ func NewEvent(at time.Time, category, code, severity string, fields map[string]s
 	return event, nil
 }
 
+func NewEventWithSupportReference(at time.Time, category, code, severity, reference string, fields map[string]string) (Event, error) {
+	event, err := NewEvent(at, category, code, severity, fields)
+	if err != nil {
+		return Event{}, err
+	}
+	event.SupportReference = reference
+	if event.Validate() != nil {
+		return Event{}, ErrInvalid
+	}
+	return event, nil
+}
+
 func (e Event) Validate() error {
-	if e.Schema != EventSchemaV1 || e.At.IsZero() || e.At.Location() != time.UTC || !safeIdentifier(e.Category, 32) || !safeIdentifier(e.Code, 64) || e.Severity != "info" && e.Severity != "warning" && e.Severity != "error" || len(e.Fields) > 12 {
+	if e.Schema != EventSchemaV1 || e.At.IsZero() || e.At.Location() != time.UTC || !safeIdentifier(e.Category, 32) || !safeIdentifier(e.Code, 64) || e.Severity != "info" && e.Severity != "warning" && e.Severity != "error" || len(e.Fields) > 12 || e.SupportReference != "" && !supportref.Valid(e.SupportReference) {
 		return ErrInvalid
 	}
 	for key, value := range e.Fields {

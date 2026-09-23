@@ -20,6 +20,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseindex"
 )
 
@@ -117,7 +118,7 @@ func TestCanonicalUserHomeAndRemovedWorkspaceOverride(t *testing.T) {
 	}
 }
 
-func TestPrepareInstallationVerifiesArtifactBeforeEnrollment(t *testing.T) {
+func TestPrepareInstallationValidatesSuppliedBinaryBeforeEnrollment(t *testing.T) {
 	expected := []byte("expected helper")
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("tampered helper"))
@@ -127,12 +128,12 @@ func TestPrepareInstallationVerifiesArtifactBeforeEnrollment(t *testing.T) {
 	material := bootstrap.Material{Artifact: &manifest, EnrollmentCredential: "credential-that-must-not-be-consumed", ControlURL: "https://control.example.test"}
 	root := t.TempDir()
 	client := &recordingEnrollmentClient{}
-	previousFetcher := fetchBootstrapArtifact
-	fetchBootstrapArtifact = func(context.Context, bootstrap.ArtifactTarget, string, *http.Client) (string, error) {
-		return "", bootstrap.ErrArtifactMismatch
+	previousSource := currentInstallSource
+	currentInstallSource = func() (string, installsource.Source, error) {
+		return "", installsource.Source{}, installsource.ErrInvalid
 	}
-	defer func() { fetchBootstrapArtifact = previousFetcher }()
-	if _, err := prepareInstallation(context.Background(), &material, root, server.Client(), client); err != bootstrap.ErrArtifactMismatch {
+	defer func() { currentInstallSource = previousSource }()
+	if _, err := prepareInstallation(context.Background(), &material, root, server.Client(), client); err != installsource.ErrInvalid {
 		t.Fatalf("error = %v", err)
 	}
 	if client.calls != 0 || material.EnrollmentCredential == "" {
@@ -169,23 +170,10 @@ func TestPrepareInstallationReusesMatchingPersistedIdentity(t *testing.T) {
 	manifest, _, _ := signedBootstrapArtifacts(t, artifactServer.URL+"/pb", body)
 	material := bootstrap.Material{UserMachineID: "machine_env_reuse", UserMachineEnrollmentID: "ume_reuse", EnvironmentID: "env_reuse", HelperID: "helper_reuse", ReuseIdentity: true, Artifact: &manifest}
 	client := &recordingEnrollmentClient{}
-	artifactPath := filepath.Join(stateRoot, "tuf", "targets", "pb")
-	if err := os.MkdirAll(filepath.Dir(artifactPath), 0o700); err != nil {
+	artifactPath, _, err := installsource.Current()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(artifactPath, body, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	previousFetcher := fetchBootstrapArtifact
-	previousMaterializer := materializeBootstrapArtifact
-	fetchBootstrapArtifact = func(context.Context, bootstrap.ArtifactTarget, string, *http.Client) (string, error) {
-		return artifactPath, nil
-	}
-	materializeBootstrapArtifact = func(_ context.Context, path string) (string, error) { return path, nil }
-	defer func() {
-		fetchBootstrapArtifact = previousFetcher
-		materializeBootstrapArtifact = previousMaterializer
-	}()
 	path, err := prepareInstallation(context.Background(), &material, stateRoot, artifactServer.Client(), client)
 	if err != nil {
 		t.Fatal(err)

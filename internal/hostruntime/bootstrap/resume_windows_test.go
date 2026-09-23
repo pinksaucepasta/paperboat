@@ -38,7 +38,7 @@ func TestSaveResumeAcceptsRealShapedWindowsClientMaterial(t *testing.T) {
 	if err := SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := LoadResume(root, server, publicKey, "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", record.DisplayName, record.SetupMode, now)
+	loaded, err := LoadResume(root, server, publicKey, "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", record.Alias, record.SetupMode, now)
 	if err != nil {
 		t.Fatal(err)
 	}

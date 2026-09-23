@@ -9,6 +9,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 )
 
@@ -119,6 +120,8 @@ func (i *Inventory) Refresh(ctx context.Context) error {
 		desired := localapi.Snapshot{DaemonState: "ready", DaemonVersion: buildinfo.Version}
 		if current != nil {
 			desired.Machines = current.Machines
+			desired.DeviceSuffix = current.DeviceSuffix
+			desired.DeviceLoopbackCIDR = current.DeviceLoopbackCIDR
 		}
 		if sourceErr == nil {
 			desired.Machines = preserveLocalObservations(mapMachines(machines), current)
@@ -136,6 +139,11 @@ func (i *Inventory) Refresh(ctx context.Context) error {
 				Recovery:    "Check network access and Paperboat authentication",
 				ETag:        "control_plane_unavailable",
 			}}
+			if errors.Is(sourceErr, config.ErrNoCredentials) || errors.Is(sourceErr, config.ErrSecretNotFound) || errors.Is(sourceErr, api.ErrUnauthenticated) {
+				desired.DaemonState = "awaiting_enrollment"
+				desired.Machines = nil
+				desired.Health = []localapi.HealthItem{{Code: "authentication_required", Severity: "info", Title: "Paperboat is installed and waiting for sign-in", Recovery: "Enroll this device from the Paperboat dashboard", ETag: "authentication_required"}}
+			}
 		}
 		return desired, nil
 	}); err != nil {
@@ -202,18 +210,11 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 		if machine.InstallationGeneration > 0 {
 			generation = uint64(machine.InstallationGeneration)
 		}
-		alias := machine.Alias
-		if alias == "" {
-			alias = machine.DisplayName
-		}
-		if alias == "" {
-			alias = machine.ID
-		}
 		status := localapi.MachineStatus{
 			ID:                machine.ID,
 			EnvironmentID:     machine.EnvironmentID,
 			WorkspaceRoot:     machine.WorkspaceRoot,
-			Alias:             alias,
+			Alias:             machine.Alias,
 			Platform:          machine.Platform,
 			Eligible:          generation > 0 && machine.State != "revoked" && machine.State != "deleted",
 			RuntimeState:      runtimeState(machine, generation),

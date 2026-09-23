@@ -1,0 +1,46 @@
+.nh
+.TH "PB-TUNNEL-DOMAIN-INSTRUCTIONS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel-domain-instructions - Show authoritative DNS instructions for a tunnel domain
+
+
+.SH SYNOPSIS
+\fBpb tunnel domain instructions   [flags]\fP
+
+
+.SH DESCRIPTION
+Show authoritative DNS instructions for a tunnel domain
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for instructions
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-tunnel-domain(1)\fP

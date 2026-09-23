@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 )
 
@@ -88,7 +89,7 @@ func NewHTTPSender(config HTTPSenderConfig) (*HTTPSender, error) {
 	if transport == nil {
 		transport = httptransport.Default()
 	}
-	return &HTTPSender{endpoint: endpoint, tokens: config.Tokens, identities: config.Identities, proofs: config.Proofs, operationID: config.OperationID, client: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrHTTPSenderInvalid }}, maxResponseBytes: config.MaxResponseBytes}, nil
+	return &HTTPSender{endpoint: endpoint, tokens: config.Tokens, identities: config.Identities, proofs: config.Proofs, operationID: config.OperationID, client: &http.Client{Transport: errorreport.TransportOperation(transport, endpoint.String(), "preview_observation"), CheckRedirect: func(*http.Request, []*http.Request) error { return ErrHTTPSenderInvalid }}, maxResponseBytes: config.MaxResponseBytes}, nil
 }
 
 func (s *HTTPSender) Send(ctx context.Context, observation Observation) error {

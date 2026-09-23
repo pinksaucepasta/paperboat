@@ -42,6 +42,9 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig) (*ManagedSSHRunt
 	if ctx == nil || strings.TrimSpace(cfg.ServerURL) == "" || cfg.Auth == nil || cfg.Store.Path == "" || strings.TrimSpace(cfg.CLIClientSessionID) == "" || !filepath.IsAbs(cfg.Home) || !filepath.IsAbs(cfg.RuntimeDirectory) || !filepath.IsAbs(cfg.Executable) {
 		return nil, ErrInvalidInventoryConfig
 	}
+	if cfg.AliasSuffix == "" {
+		cfg.AliasSuffix = managedssh.AliasSuffix
+	}
 	identity, err := cfg.Store.ManagedSSHIdentity(cfg.ServerURL, cfg.CLIClientSessionID)
 	if err != nil {
 		return nil, err
@@ -194,7 +197,7 @@ func installWindowsOpenSSHConfig(cfg ManagedSSHConfig, agentSocket, publicKey st
 	identityFile := managedssh.ManagedIdentityPublicKeyPath(cfg.Home)
 	executable := quoteWindowsOpenSSH(cfg.Executable)
 	_, err := managedssh.InstallOpenSSHConfig(managedssh.OpenSSHConfig{
-		Home: cfg.Home, OwnerUID: cfg.OwnerUID, AliasSuffix: managedssh.AliasSuffix,
+		Home: cfg.Home, OwnerUID: cfg.OwnerUID, AliasSuffix: cfg.AliasSuffix,
 		ProxyCommand:      executable + " __ssh-proxy --host %h --port %p --user %r",
 		KnownHostsCommand: executable + " __ssh-known-hosts --host %h --port %p",
 		AgentSocket:       agentSocket,

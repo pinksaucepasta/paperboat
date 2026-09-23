@@ -20,6 +20,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/environmentkey"
 	identitystore "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/endpointidentity"
@@ -93,7 +94,7 @@ func New(config Config, credentials CredentialSource) (*Client, error) {
 	if config.Clock == nil {
 		config.Clock = func() time.Time { return time.Now().UTC() }
 	}
-	return &Client{config: config, base: base, creds: credentials, http: &http.Client{Transport: config.Transport, Timeout: config.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}}, nil
+	return &Client{config: config, base: base, creds: credentials, http: &http.Client{Transport: errorreport.TransportOperation(config.Transport, base.String(), "environment_enrollment"), Timeout: config.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}}, nil
 }
 
 type enrollmentState struct {

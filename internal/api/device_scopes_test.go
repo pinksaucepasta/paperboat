@@ -4,7 +4,7 @@ import "testing"
 
 func TestClientScopesMatchPreviewTunnelAuthorizationContract(t *testing.T) {
 	want := map[string]bool{
-		"account:read": true, "clients:revoke": true, "projects:read": true, "projects:connect": true,
+		"account:read": true, "clients:revoke": true, "machines:read": true, "machines:connect": true,
 		"session:refresh": true, "diagnostics:upload": true, "previews:read": true, "previews:write": true,
 		"tunnels:read": true, "tunnels:write": true, "operations:read": true, "operations:write": true,
 	}

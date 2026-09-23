@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"io"
 	"net/http"
 	"net/url"
@@ -41,7 +42,7 @@ func newRevocationRefreshService(endpoint string, tokens revocationTokenSource, 
 	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Hostname() == "" || parsed.RawQuery != "" || parsed.Fragment != "" || tokens == nil || proofs == nil || operationID == nil || cache == nil || transport == nil || interval <= 0 {
 		return nil, ErrProductionInvalid
 	}
-	return &revocationRefreshService{endpoint: parsed, tokens: tokens, proofs: proofs, operationID: operationID, cache: cache, client: &http.Client{Transport: transport, Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrProductionInvalid }}, interval: interval}, nil
+	return &revocationRefreshService{endpoint: parsed, tokens: tokens, proofs: proofs, operationID: operationID, cache: cache, client: &http.Client{Transport: errorreport.TransportOperation(transport, parsed.String(), "revocation_refresh"), Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrProductionInvalid }}, interval: interval}, nil
 }
 
 func (s *revocationRefreshService) refresh(ctx context.Context) error {

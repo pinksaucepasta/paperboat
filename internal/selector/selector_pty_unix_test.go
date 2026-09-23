@@ -132,3 +132,36 @@ func TestChooseRecognizesBracketedPasteFromTerminal(t *testing.T) {
 		t.Fatal("selector did not recognize bracketed paste")
 	}
 }
+
+func TestChooserInsideSuspendedScreenOwnsItsTerminal(t *testing.T) {
+	master, slave, err := pty.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer master.Close()
+	defer slave.Close()
+	var output bytes.Buffer
+	end := BeginScreen(&output)
+	defer end()
+	restore := SuspendScreen(&output)
+	defer restore()
+	output.Reset()
+	done := make(chan error, 1)
+	go func() {
+		_, err := Choose(Options{Title: "Nested prompt", Items: []Item{{ID: "one", Title: "One"}}, Stdin: slave, Output: &output})
+		done <- err
+	}()
+	time.Sleep(100 * time.Millisecond)
+	_, _ = master.Write([]byte{'\r'})
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("nested selector did not finish")
+	}
+	if !strings.Contains(output.String(), "\x1b[?1049h") || !strings.Contains(output.String(), "\x1b[?1049l") {
+		t.Fatal("nested selector failed to own and restore its alternate screen")
+	}
+}

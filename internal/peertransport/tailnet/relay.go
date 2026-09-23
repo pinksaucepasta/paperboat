@@ -21,7 +21,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat-relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/tailscale/tailcat"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"net/netip"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-derp-carrier
 	"tailscale.com/tailcfg"
@@ -345,7 +345,7 @@ func (a *Authority) relayServiceLocked(node RegionalNode, g derpquic.Grant) (*ta
 	if g.PeerRelay == nil {
 		return nil, nil
 	}
-	ownDisco := tailcat.DiscoPublicForNode(a.private).DiscoPublic
+	ownDisco := mesh.DiscoPublicForNode(a.private).DiscoPublic
 	if g.DiscoPublicKey != derpquic.DiscoKeyString(ownDisco) || !g.PeerRelay.Valid() {
 		return nil, ErrAuthority
 	}
@@ -389,7 +389,7 @@ func (a *Authority) discoveryPublicKey(expected string) (string, error) {
 		if expected != "" && derpquic.KeyString(private.Public()) != expected {
 			return ErrStaleAuthority
 		}
-		result = derpquic.DiscoKeyString(tailcat.DiscoPublicForNode(private).DiscoPublic)
+		result = derpquic.DiscoKeyString(mesh.DiscoPublicForNode(private).DiscoPublic)
 		return nil
 	})
 	return result, err

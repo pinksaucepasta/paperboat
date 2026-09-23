@@ -1,97 +1,1534 @@
-{"version":"1.0.0","inputs":{"clock":"2026-01-01T00:00:00Z","terminal_width":80,"environment":{"NO_COLOR":"1"}},"cases":[
-{"command":"login","argv":["pb","login"],"stdin":"","stdout":"Signed in as test@example.test.\n","stderr":"Approve Paperboat CLI access in your browser.\n","exit":0},
-{"command":"logout","argv":["pb","logout"],"stdin":"","stdout":"Revoked this CLI session.\n","stderr":"","exit":0},
-{"command":"auth status","argv":["pb","auth","status","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"state\":\"active\",\"account\":\"test@example.test\"}}\n","stderr":"","exit":0},
-{"command":"auth switch","argv":["pb","auth","switch"],"stdin":"","stdout":"Active account: other@example.test\n","stderr":"Approve the account switch in your browser.\n","exit":0},
-{"command":"environment list","argv":["pb","environment","list","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"environments\":[]}}\n","stderr":"","exit":0},
-{"command":"env list","argv":["pb","env","list","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"owner_kind\":\"personal\",\"owner_id\":\"acct_test_01\",\"key_epoch\":0,\"revision\":0,\"names\":[]}}\n","stderr":"","exit":0},
-{"command":"env set","argv":["pb","env","set","API_MODE","--value-stdin"],"stdin":"","stdout":"Set API_MODE in personal (encrypted vault scope).\n","stderr":"","exit":0},
-{"command":"env unset","argv":["pb","env","unset","API_MODE","--yes"],"stdin":"","stdout":"Unset API_MODE from personal (encrypted vault scope).\n","stderr":"","exit":0},
-{"command":"env rotate","argv":["pb","env","rotate"],"stdin":"","stdout":"Rotated personal encrypted ENV scope keys.\n","stderr":"","exit":0},
-{"command":"env rotate cancel","argv":["pb","env","rotate","cancel","--confirm","CANCEL ENV ROTATE acct_test_01"],"stdin":"","stdout":"Canceled the personal encrypted ENV key rotation.\n","stderr":"","exit":0},
-{"command":"env vault init","argv":["pb","env","vault","init","--recovery-file","/secure/offline/env-recovery.txt"],"stdin":"","stdout":"ENV vault operation completed.\n","stderr":"","exit":0},
-{"command":"env vault unlock","argv":["pb","env","vault","unlock"],"stdin":"","stdout":"ENV vault operation completed.\n","stderr":"","exit":0},
-{"command":"env vault password","argv":["pb","env","vault","password"],"stdin":"","stdout":"ENV vault operation completed.\n","stderr":"","exit":0},
-{"command":"env vault lock","argv":["pb","env","vault","lock"],"stdin":"","stdout":"ENV vault operation completed.\n","stderr":"","exit":0},
-{"command":"env vault resume","argv":["pb","env","vault","resume"],"stdin":"","stdout":"ENV vault operation completed.\n","stderr":"","exit":0},
-{"command":"env vault recovery","argv":["pb","env","vault","recovery","--disable"],"stdin":"","stdout":"ENV vault operation completed.\n","stderr":"","exit":0},
-{"command":"env vault recover","argv":["pb","env","vault","recover","--recovery-file","/secure/offline/env-recovery-next.txt"],"stdin":"","stdout":"ENV vault operation completed.\n","stderr":"","exit":0},
-{"command":"env vault remove","argv":["pb","env","vault","remove","--confirm","REMOVE LOCAL ENV acct_test_01"],"stdin":"","stdout":"Removed local ENV vault custody; cloud personal and team ciphertext was not changed.\n","stderr":"","exit":0},
-{"command":"env vault reset","argv":["pb","env","vault","reset","--confirm","RESET ENV acct_test_01","--recovery-file","/secure/offline/env-reset-recovery.txt"],"stdin":"","stdout":"ENV personal vault reset completed.\n","stderr":"","exit":0},
-{"command":"env team create","argv":["pb","env","team","create","team_test_01"],"stdin":"","stdout":"Created encrypted ENV team team_test_01.\n","stderr":"","exit":0},
-{"command":"env team grant","argv":["pb","env","team","grant","team_test_01","acct_member_01"],"stdin":"","stdout":"Granted account acct_member_01 access to encrypted ENV team team_test_01.\n","stderr":"","exit":0},
-{"command":"env team rotate","argv":["pb","env","team","rotate","team_test_01","--confirm","ROTATE ENV TEAM team_test_01"],"stdin":"","stdout":"Rotated encrypted ENV team team_test_01 while preserving values.\n","stderr":"","exit":0},
-{"command":"env team revoke","argv":["pb","env","team","revoke","team_test_01","--remove","acct_member_01","--confirm","ROTATE ENV TEAM team_test_01"],"stdin":"","stdout":"Rotated encrypted ENV team team_test_01.\n","stderr":"","exit":0},
-{"command":"env team reset","argv":["pb","env","team","reset","team_test_01","--confirm","RESET ENV TEAM team_test_01"],"stdin":"","stdout":"Reset encrypted ENV team team_test_01; previous values were discarded.\n","stderr":"","exit":0},
-{"command":"env grants sync","argv":["pb","env","grants","sync"],"stdin":"","stdout":"ENV team grants synchronized into encrypted vault custody.\n","stderr":"","exit":0},
-{"command":"env host provision","argv":["pb","env","host","provision","--machine","machine_01","--select","personal:API_MODE"],"stdin":"","stdout":"Provisioned encrypted ENV selection for machine_01 (machine_01).\n","stderr":"","exit":0},
-{"command":"connect","argv":["pb","connect","env_test_01"],"stdin":"","stdout":"","stderr":"Target: demo (hosted)\n","terminal_control":["enter_raw","restore"],"exit":0},
-{"command":"session list","argv":["pb","session","list","env_test_01","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"sessions\":[]}}\n","stderr":"","exit":0},
-{"command":"session rename","argv":["pb","session","rename","env_test_01","work","agent","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"name\":\"agent\"}}\n","stderr":"Target: demo (hosted)\n","exit":0},
-{"command":"session close","argv":["pb","sessions","close","env_test_01","--all","--yes"],"stdin":"","stdout":"Closed 2 sessions in demo. Session history was retained.\n","stderr":"Environment: demo (env_test_01)\nOpen sessions to close: 2\n","exit":0},
-{"command":"session delete","argv":["pb","session","delete","env_test_01","agent","--yes","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"session_id\":\"ses_00000001\"}}\n","stderr":"Target: demo (hosted)\n","exit":0},
-{"command":"preview","argv":["pb","preview","3000","--duration","1h","--json"],"stdin":"","stdout":"{\"schema\":\"paperboat.preview-tunnel/v1\",\"kind\":\"preview_lease\",\"id\":\"prv_test_01\",\"state\":\"ready\"}\n","stderr":"","exit":0},
-{"command":"preview list","argv":["pb","preview","list","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"previews\":[]}}\n","stderr":"","exit":0},
-{"command":"preview stop","argv":["pb","preview","stop","prv_test_01","--json"],"stdin":"","stdout":"{\"schema\":\"paperboat.preview-tunnel/v1\",\"kind\":\"preview_lease\",\"id\":\"prv_test_01\",\"state\":\"terminal\"}\n","stderr":"","exit":0},
-{"command":"machine add","argv":["pb","machine","add","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"machine_id\":\"um_test_01\"}}\n","stderr":"Approve this machine and workspace in your browser.\n","exit":0},
-{"command":"machine list","argv":["pb","machine","list","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"machines\":[]}}\n","stderr":"","exit":0},
-{"command":"machine availability","argv":["pb","machine","availability","um_test_01","--mode","keep-awake","--yes","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"machine_id\":\"um_test_01\",\"mode\":\"keep_awake\",\"desired_version\":2,\"status\":\"pending\"}}\n","stderr":"Machine: Studio (um_test_01)\n","exit":0},
-{"command":"machine capabilities","argv":["pb","machine","capabilities","um_test_01","--terminal","--managed-ssh","--file-receive","--preview-tunnel","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"machine_id\":\"um_test_01\",\"desired_version\":2,\"status\":\"pending\"}}\n","stderr":"Machine: Studio (um_test_01)\n","exit":0},
-{"command":"machine revoke","argv":["pb","machine","revoke","um_test_01","--yes","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"machine_id\":\"um_test_01\",\"state\":\"revoked\"}}\n","stderr":"","exit":0},
-{"command":"config assign","argv":["pb","config","assign","cfg_test_01","env_test_01","--json"],"stdin":"yes\n","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"assignment_id\":\"asg_test_01\",\"revision\":1}}\n","stderr":"Target: demo (BYOD)\nConfig sync can overwrite local files. Continue? [y/N] ","exit":0},
-{"command":"config unassign","argv":["pb","config","unassign","env_test_01","--yes","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"assignment_id\":\"asg_test_01\",\"state\":\"revoked\"}}\n","stderr":"Target: demo (BYOD)\n","exit":0},
-{"command":"config show","argv":["pb","config","show","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"server\":\"https://api.paperboat.test\"}}\n","stderr":"","exit":0},
-{"command":"config path","argv":["pb","config","path"],"stdin":"","stdout":"/home/test/.config/paperboat/config.json\n","stderr":"","exit":0},
-{"command":"send","argv":["pb","send","report.txt","--to","mch_destination","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"batch_id\":\"fb_test_01\",\"transfers\":[]}}\n","stderr":"Sending to Studio (mch_destination)\n","exit":0},
-{"command":"transfer destination","argv":["pb","transfer","destination","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"configured\":true,\"machine\":{\"id\":\"mch_destination\",\"display_name\":\"Studio\"}}}\n","stderr":"","exit":0},
-{"command":"transfer destination set","argv":["pb","transfer","destination","set","mch_destination","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"configured\":true,\"machine_id\":\"mch_destination\"}}\n","stderr":"","exit":0},
-{"command":"transfer destination clear","argv":["pb","transfer","destination","clear","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"configured\":false}}\n","stderr":"","exit":0},
-{"command":"transfer list","argv":["pb","transfer","list","--on","mch_destination","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"items\":[]}}\n","stderr":"","exit":0},
-{"command":"transfer status","argv":["pb","transfer","status","ft_test_01","--on","mch_destination","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"transfer_id\":\"ft_test_01\",\"state\":\"published\"}}\n","stderr":"","exit":0},
-{"command":"transfer cancel","argv":["pb","transfer","cancel","ft_test_01","--on","mch_destination","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"transfer_id\":\"ft_test_01\",\"state\":\"canceled\",\"destination_machine_id\":\"mch_destination\"}}\n","stderr":"","exit":0},
-{"command":"setup","argv":["pb","setup","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"machine_id\":\"mch_local\",\"capabilities\":[\"terminal\",\"managed_ssh\",\"file_receive\",\"preview_tunnel\"]}}\n","stderr":"","exit":0},
-{"command":"update","argv":["pb","update","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"previous_version\":\"2026.08.18.0\",\"version\":\"2026.08.18.1\",\"cli_updated\":true,\"runtime_updated\":true}}\n","stderr":"","exit":0},
-{"command":"pair","argv":["pb","pair","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"machine_id\":\"mch_local\",\"capabilities\":[\"terminal\",\"managed_ssh\",\"file_receive\",\"preview_tunnel\"]}}\n","stderr":"Approve this device in your browser.\n","exit":0},
-{"command":"uninstall","argv":["pb","uninstall"],"stdin":"UNINSTALL PAPERBOAT\ntest-host\n","stdout":"Paperboat was completely removed. The Paperboat Inbox was preserved.\n","stderr":"This permanently removes Paperboat services, binaries, credentials, configuration, and runtime state. The Paperboat Inbox is preserved.\nType UNINSTALL PAPERBOAT to continue: Type this machine hostname (test-host) to confirm: ","exit":0},
-{"command":"inbox path","argv":["pb","inbox","path","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"path\":\"/home/test/Downloads/Paperboat Inbox\"}}\n","stderr":"","exit":0},
-{"command":"inbox set","argv":["pb","inbox","set","/home/test/Inbox","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"path\":\"/home/test/Inbox\"}}\n","stderr":"","exit":0},
-{"command":"inbox reset","argv":["pb","inbox","reset","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"path\":\"/home/test/Downloads/Paperboat Inbox\"}}\n","stderr":"","exit":0},
-{"command":"ssh","argv":["pb","ssh","studio"],"stdin":"","stdout":"","stderr":"Target: studio.pprbt\n","exit":0},
-{"command":"scp","argv":["pb","scp","./artifact","studio:/tmp/artifact"],"stdin":"","stdout":"","stderr":"","exit":0},
-{"command":"sftp","argv":["pb","sftp","studio"],"stdin":"quit\n","stdout":"Connected to studio.pprbt.\n","stderr":"","exit":0},
-{"command":"rsync","argv":["pb","rsync","-a","./workspace/","studio:workspace/"],"stdin":"","stdout":"","stderr":"","exit":0},
-{"command":"ssh trust-host","argv":["pb","ssh","trust-host","studio","--fingerprint","SHA256:testfingerprint"],"stdin":"","stdout":"Trusted studio.pprbt (SHA256:testfingerprint).\n","stderr":"","exit":0},
-{"command":"ssh doctor","argv":["pb","ssh","doctor","studio"],"stdin":"","stdout":"SSH is ready for studio.pprbt.\n","stderr":"","exit":0},
-{"command":"status","argv":["pb","status","machine_1"],"stdin":"","stdout":"Daemon: ready  Generation: 12  Observed: 2026-01-01T00:00:00Z\n\nStudio Mac (machine_1)\n  Runtime: ready  Eligible: true  Generation: 4  Last observed: 2026-01-01T00:00:00Z\n  Path: relay/bom  Consumers: 1  Transfer: ready  Preview: ready  SSH: unavailable\n","stderr":"","exit":0},
-{"command":"wait","argv":["pb","wait","machine_1","--for","runtime"],"stdin":"","stdout":"Studio Mac is ready for runtime (ready, generation 12).\n","stderr":"","exit":0},
-{"command":"ping","argv":["pb","ping","machine_1","--count","1"],"stdin":"","stdout":"1  direct  18ms\n1/1 replies, 0% loss, min/avg/max 18ms/18ms/18ms\n","stderr":"","exit":0},
-{"command":"relay list","argv":["pb","relay","list","--json"],"stdin":"","stdout":"{\"schema\":\"paperboat.relay-list/v1\",\"relays\":[{\"relay_id\":\"pprbt-helsinki\",\"name\":\"Helsinki\",\"region\":\"helsinki\",\"status\":\"healthy\",\"rtt_ms\":42}]}\n","stderr":"","exit":0},
-{"command":"bugreport","argv":["pb","bugreport"],"stdin":"","stdout":"Bundle: /home/test/.local/state/paperboat/bugreports/bugreport-pb-0123456789abcdef0123456789abcdef.zip\nCategories: manifest, recent_events, redacted_events, status\nSize: 4096 bytes\n","stderr":"","exit":0},
-{"command":"doctor","argv":["pb","doctor","machine_01","--json"],"stdin":"","stdout":"{\"schema\":\"paperboat.doctor/v1\",\"correlation_id\":\"pb-doctor-0123456789abcdef\",\"checked_at\":\"2026-08-04T12:00:00Z\",\"overall\":\"healthy\",\"machine\":{\"id\":\"machine_01\",\"alias\":\"Studio\"},\"checks\":[{\"category\":\"control\",\"code\":\"authentication\",\"status\":\"pass\",\"summary\":\"The Paperboat server accepted the current credential.\"}]}\n","stderr":"","exit":0},
-{"command":"machine pending","argv":["pb","machine","pending","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"pending\":[]}}\n","stderr":"","exit":0},
-{"command":"machine approve","argv":["pb","machine","approve","req_test_01","--code","12345-67890","--json"],"stdin":"","stdout":"{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"approved\":true,\"request_id\":\"req_test_01\"}}\n","stderr":"","exit":0},
-{"command":"tunnel create","argv":["pb","tunnel","create","demo","--port","8080"],"stdin":"","stdout":"","stderr":"tunnel tun_1 was created, but connector activation has an uncertain outcome; the tunnel was preserved; recover with `pb tunnel connector add tun_1`: tunnel connector enrollment temporarily unavailable\n","exit":1},
-{"command":"tunnel list","argv":["pb","tunnel","list"],"stdin":"","stdout":"tun_1\tdemo\tprivate\tactive\n","stderr":"","exit":0},
-{"command":"tunnel show","argv":["pb","tunnel","show","tun_1"],"stdin":"","stdout":"tun_1\tdemo\tprivate\tactive\n","stderr":"","exit":0},
-{"command":"tunnel status","argv":["pb","tunnel","status","tun_1"],"stdin":"","stdout":"tun_1\tready\tTunnel is ready.\n","stderr":"","exit":0},
-{"command":"tunnel logs","argv":["pb","tunnel","logs","tun_1","--limit","1"],"stdin":"","stdout":"2026-01-01T00:00:00Z\tinfo\tconnector\tconnector_ready\tconnector ready\n","stderr":"","exit":0},
-{"command":"tunnel pause","argv":["pb","tunnel","pause","tun_1","--wait","--timeout","30s"],"stdin":"","stdout":"Paused tunnel tun_1; status: ready\n","stderr":"","exit":0},
-{"command":"tunnel resume","argv":["pb","tunnel","resume","tun_1","--wait","--timeout","30s"],"stdin":"","stdout":"Resumed tunnel tun_1; status: ready\n","stderr":"","exit":0},
-{"command":"tunnel delete","argv":["pb","tunnel","delete","tun_1","--yes","--wait","--timeout","30s"],"stdin":"","stdout":"Deleted tunnel tun_1; status: ready\n","stderr":"","exit":0},
-{"command":"tunnel doctor","argv":["pb","tunnel","doctor","tun_1"],"stdin":"","stdout":"Tunnel tun_1: ready\nTunnel is ready.\nservice      ready\nedge         ready\nconfig       ready\nroute        ready\norigin       ready\ndns          ready\ncertificate  ready\naccess       ready\nupdate       ready\n","stderr":"","exit":0},
-{"command":"tunnel route list","argv":["pb","tunnel","route","list","tun_1"],"stdin":"","stdout":"route_1\tapp\thttp\tcatch_all\thttp://127.0.0.1:8080\tactive\n","stderr":"","exit":0},
-{"command":"tunnel route add","argv":["pb","tunnel","route","add","tun_1","--name","app","--to","http://127.0.0.1:8080","--wait","--timeout","30s"],"stdin":"","stdout":"Created route route_1; status: ready\n","stderr":"","exit":0},
-{"command":"tunnel route update","argv":["pb","tunnel","route","update","tun_1","route_1","--clear-path","--wait","--timeout","30s"],"stdin":"","stdout":"Updated route route_1; status: ready\n","stderr":"","exit":0},
-{"command":"tunnel route remove","argv":["pb","tunnel","route","remove","tun_1","route_1","--yes","--wait","--timeout","30s"],"stdin":"","stdout":"Removed route route_1; tunnel and connector are preserved; status: ready\n","stderr":"","exit":0},
-{"command":"tunnel domain list","argv":["pb","tunnel","domain","list","tun_1"],"stdin":"","stdout":"domain_1\tapp.example.test\twaiting_dns\tnot_requested\n","stderr":"","exit":0},
-{"command":"tunnel domain add","argv":["pb","tunnel","domain","add","tun_1","app.example.test","--route","route_1","--wait","--timeout","30s"],"stdin":"","stdout":"Added domain domain_1; status: ready\n","stderr":"","exit":0},
-{"command":"tunnel domain verify","argv":["pb","tunnel","domain","verify","tun_1","app.example.test","--wait","--timeout","30s"],"stdin":"","stdout":"Verified domain domain_1; status: ready\n","stderr":"","exit":0},
-{"command":"tunnel domain remove","argv":["pb","tunnel","domain","remove","tun_1","app.example.test","--yes","--wait","--timeout","30s"],"stdin":"","stdout":"Removed domain domain_1; user-owned DNS records are preserved; status: ready\n","stderr":"","exit":0},
-{"command":"tunnel domain instructions","argv":["pb","tunnel","domain","instructions","tun_1","app.example.test"],"stdin":"","stdout":"app.example.test\tCNAME\tedge.paperboat.test\t300\n","stderr":"","exit":0},
-{"command":"tunnel connector list","argv":["pb","tunnel","connector","list","tun_1"],"stdin":"","stdout":"connector_1\thost_1\tactive\tnot_draining\t2026-01-01T00:00:00Z\n","stderr":"","exit":0},
-{"command":"tunnel connector add","argv":["pb","tunnel","connector","add","tun_1"],"stdin":"","stdout":"Added connector connector_1 to tunnel tun_1\n","stderr":"","exit":0},
-{"command":"tunnel connector drain","argv":["pb","tunnel","connector","drain","tun_1","connector_1","--wait","--timeout","30s"],"stdin":"","stdout":"Drained connector connector_1; tunnel identity is preserved; status: ready\n","stderr":"","exit":0},
-{"command":"tunnel connector revoke","argv":["pb","tunnel","connector","revoke","tun_1","connector_1","--yes","--wait","--timeout","30s"],"stdin":"","stdout":"Revoked connector connector_1; tunnel identity is preserved; status: ready\n","stderr":"","exit":0},
-{"command":"tunnel credentials rotate","argv":["pb","tunnel","credentials","rotate","tun_1","--yes","--wait","--timeout","30s"],"stdin":"","stdout":"Rotated tunnel credentials; tunnel identity and routes are preserved; status: ready\n","stderr":"","exit":0},
-{"command":"access tunnel","argv":["pb","access","tunnel","tun_1","--listen","127.0.0.1:49152"],"stdin":"","stdout":"Private access for route route_1 is listening on 127.0.0.1:49152\n","stderr":"Canceled; the private access session was released.\n","exit":130}
-]}
+{
+  "version": "1.0.0",
+  "inputs": {
+    "clock": "2026-01-01T00:00:00Z",
+    "terminal_width": 80,
+    "environment": {
+      "NO_COLOR": "1"
+    }
+  },
+  "cases": [
+    {
+      "command": "config customize",
+      "argv": [
+        "pb",
+        "--config",
+        "/tmp/pb-preferences/config.json",
+        "config",
+        "customize",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"path\":\"/tmp/pb-preferences/config.preferences.json\",\"preferences\":{\"version\":1,\"port_action\":\"preview\",\"tui\":{\"theme\":\"terminal\",\"density\":\"comfortable\",\"keys\":{\"back\":\"esc\",\"down\":\"down\",\"preview_background\":\"b\",\"preview_open\":\"o\",\"preview_stop\":\"s\",\"preview_tunnel\":\"t\",\"select\":\"enter\",\"up\":\"up\"},\"columns\":{\"machines\":[\"status\",\"platform\"],\"previews\":[\"state\",\"access\"],\"sessions\":[\"machine\",\"state\"],\"tunnels\":[\"state\",\"access\",\"endpoint\"]},\"preview_panels\":[\"target\",\"access\",\"expiry\",\"domains\"]}},\"scope\":\"local\"}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "config customize show",
+      "argv": [
+        "pb",
+        "--config",
+        "/tmp/pb-preferences/config.json",
+        "config",
+        "customize",
+        "--json",
+        "show"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"path\":\"/tmp/pb-preferences/config.preferences.json\",\"preferences\":{\"version\":1,\"port_action\":\"preview\",\"tui\":{\"theme\":\"terminal\",\"density\":\"comfortable\",\"keys\":{\"back\":\"esc\",\"down\":\"down\",\"preview_background\":\"b\",\"preview_open\":\"o\",\"preview_stop\":\"s\",\"preview_tunnel\":\"t\",\"select\":\"enter\",\"up\":\"up\"},\"columns\":{\"machines\":[\"status\",\"platform\"],\"previews\":[\"state\",\"access\"],\"sessions\":[\"machine\",\"state\"],\"tunnels\":[\"state\",\"access\",\"endpoint\"]},\"preview_panels\":[\"target\",\"access\",\"expiry\",\"domains\"]}},\"scope\":\"local\"}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "config customize path",
+      "argv": [
+        "pb",
+        "--config",
+        "/tmp/pb-preferences/config.json",
+        "config",
+        "customize",
+        "--json",
+        "path"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"path\":\"/tmp/pb-preferences/config.preferences.json\"}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "config customize validate",
+      "argv": [
+        "pb",
+        "--config",
+        "/tmp/pb-preferences/config.json",
+        "config",
+        "customize",
+        "--json",
+        "validate"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"path\":\"/tmp/pb-preferences/config.preferences.json\",\"valid\":true}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "config customize explain",
+      "argv": [
+        "pb",
+        "--config",
+        "/tmp/pb-preferences/config.json",
+        "config",
+        "customize",
+        "--json",
+        "explain",
+        "--",
+        "3000"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"argv\":[\"--config\",\"/tmp/pb-preferences/config.json\",\"preview\",\"3000\"],\"defaults\":null,\"executes\":false,\"shortcut\":\"3000\"}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "config customize import",
+      "argv": [
+        "pb",
+        "--config",
+        "/tmp/pb-preferences/config.json",
+        "config",
+        "customize",
+        "--json",
+        "import",
+        "/tmp/pb-preferences/incoming.json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"path\":\"/tmp/pb-preferences/config.preferences.json\",\"saved\":true}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "config customize reset",
+      "argv": [
+        "pb",
+        "--config",
+        "/tmp/pb-preferences/config.json",
+        "config",
+        "customize",
+        "--json",
+        "reset",
+        "--yes"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"path\":\"/tmp/pb-preferences/config.preferences.json\",\"reset\":true}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "login",
+      "argv": [
+        "pb",
+        "login"
+      ],
+      "stdin": "",
+      "stdout": "To sign in, copy the enrollment command from the Paperboat dashboard and run it on this machine.\nAn already authenticated machine can also generate install commands with `pb machine add`.\nTo authenticate this installation directly, run `pb auth login` and enter the enrollment token.\nhttps://console.example.test/dashboard/machines\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "logout",
+      "argv": [
+        "pb",
+        "logout"
+      ],
+      "stdin": "",
+      "stdout": "Revoked this CLI session.\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "auth login",
+      "argv": [
+        "pb",
+        "auth",
+        "login"
+      ],
+      "stdin": "<hidden enrollment token>",
+      "stdout": "Signed in as test@example.test\n",
+      "stderr": "Enrollment token\n",
+      "exit": 0
+    },
+    {
+      "command": "auth status",
+      "argv": [
+        "pb",
+        "auth",
+        "status",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"state\":\"active\",\"account\":\"test@example.test\"}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "auth switch",
+      "argv": [
+        "pb",
+        "auth",
+        "switch"
+      ],
+      "stdin": "",
+      "stdout": "To sign in, copy the enrollment command from the Paperboat dashboard and run it on this machine.\nAn already authenticated machine can also generate install commands with `pb machine add`.\nTo authenticate this installation directly, run `pb auth login` and enter the enrollment token.\nhttps://console.example.test/dashboard/machines\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "environment list",
+      "argv": [
+        "pb",
+        "environment",
+        "list",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"environments\":[]}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "env list",
+      "argv": [
+        "pb",
+        "env",
+        "list",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"owner_kind\":\"personal\",\"owner_id\":\"acct_test_01\",\"key_epoch\":0,\"revision\":0,\"names\":[]}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "env set",
+      "argv": [
+        "pb",
+        "env",
+        "set",
+        "API_MODE",
+        "--value-stdin"
+      ],
+      "stdin": "",
+      "stdout": "Set API_MODE in personal (encrypted vault scope).\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "env unset",
+      "argv": [
+        "pb",
+        "env",
+        "unset",
+        "API_MODE",
+        "--yes"
+      ],
+      "stdin": "",
+      "stdout": "Unset API_MODE from personal (encrypted vault scope).\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "env rotate",
+      "argv": [
+        "pb",
+        "env",
+        "rotate"
+      ],
+      "stdin": "",
+      "stdout": "Rotated personal encrypted ENV scope keys.\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "env rotate cancel",
+      "argv": [
+        "pb",
+        "env",
+        "rotate",
+        "cancel",
+        "--confirm",
+        "CANCEL ENV ROTATE acct_test_01"
+      ],
+      "stdin": "",
+      "stdout": "Canceled the personal encrypted ENV key rotation.\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "env vault init",
+      "argv": [
+        "pb",
+        "env",
+        "vault",
+        "init",
+        "--recovery-file",
+        "/secure/offline/env-recovery.txt"
+      ],
+      "stdin": "",
+      "stdout": "ENV vault operation completed.\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "env vault unlock",
+      "argv": [
+        "pb",
+        "env",
+        "vault",
+        "unlock"
+      ],
+      "stdin": "",
+      "stdout": "ENV vault operation completed.\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "env vault password",
+      "argv": [
+        "pb",
+        "env",
+        "vault",
+        "password"
+      ],
+      "stdin": "",
+      "stdout": "ENV vault operation completed.\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "env vault lock",
+      "argv": [
+        "pb",
+        "env",
+        "vault",
+        "lock"
+      ],
+      "stdin": "",
+      "stdout": "ENV vault operation completed.\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "env vault resume",
+      "argv": [
+        "pb",
+        "env",
+        "vault",
+        "resume"
+      ],
+      "stdin": "",
+      "stdout": "ENV vault operation completed.\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "env vault recovery",
+      "argv": [
+        "pb",
+        "env",
+        "vault",
+        "recovery",
+        "--disable"
+      ],
+      "stdin": "",
+      "stdout": "ENV vault operation completed.\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "env vault recover",
+      "argv": [
+        "pb",
+        "env",
+        "vault",
+        "recover",
+        "--recovery-file",
+        "/secure/offline/env-recovery-next.txt"
+      ],
+      "stdin": "",
+      "stdout": "ENV vault operation completed.\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "env vault remove",
+      "argv": [
+        "pb",
+        "env",
+        "vault",
+        "remove",
+        "--confirm",
+        "REMOVE LOCAL ENV acct_test_01"
+      ],
+      "stdin": "",
+      "stdout": "Removed local ENV vault custody; cloud personal and team ciphertext was not changed.\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "env vault reset",
+      "argv": [
+        "pb",
+        "env",
+        "vault",
+        "reset",
+        "--confirm",
+        "RESET ENV acct_test_01",
+        "--recovery-file",
+        "/secure/offline/env-reset-recovery.txt"
+      ],
+      "stdin": "",
+      "stdout": "ENV personal vault reset completed.\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "env team create",
+      "argv": [
+        "pb",
+        "env",
+        "team",
+        "create",
+        "team_test_01"
+      ],
+      "stdin": "",
+      "stdout": "Created encrypted ENV team team_test_01.\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "env team grant",
+      "argv": [
+        "pb",
+        "env",
+        "team",
+        "grant",
+        "team_test_01",
+        "acct_member_01"
+      ],
+      "stdin": "",
+      "stdout": "Granted account acct_member_01 access to encrypted ENV team team_test_01.\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "env team rotate",
+      "argv": [
+        "pb",
+        "env",
+        "team",
+        "rotate",
+        "team_test_01",
+        "--confirm",
+        "ROTATE ENV TEAM team_test_01"
+      ],
+      "stdin": "",
+      "stdout": "Rotated encrypted ENV team team_test_01 while preserving values.\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "env team revoke",
+      "argv": [
+        "pb",
+        "env",
+        "team",
+        "revoke",
+        "team_test_01",
+        "--remove",
+        "acct_member_01",
+        "--confirm",
+        "ROTATE ENV TEAM team_test_01"
+      ],
+      "stdin": "",
+      "stdout": "Rotated encrypted ENV team team_test_01.\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "env team reset",
+      "argv": [
+        "pb",
+        "env",
+        "team",
+        "reset",
+        "team_test_01",
+        "--confirm",
+        "RESET ENV TEAM team_test_01"
+      ],
+      "stdin": "",
+      "stdout": "Reset encrypted ENV team team_test_01; previous values were discarded.\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "env grants sync",
+      "argv": [
+        "pb",
+        "env",
+        "grants",
+        "sync"
+      ],
+      "stdin": "",
+      "stdout": "ENV team grants synchronized into encrypted vault custody.\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "env host provision",
+      "argv": [
+        "pb",
+        "env",
+        "host",
+        "provision",
+        "--machine",
+        "machine_01",
+        "--select",
+        "personal:API_MODE"
+      ],
+      "stdin": "",
+      "stdout": "Provisioned encrypted ENV selection for machine_01 (machine_01).\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "connect",
+      "argv": [
+        "pb",
+        "connect",
+        "env_test_01"
+      ],
+      "stdin": "",
+      "stdout": "",
+      "stderr": "Target: demo (hosted)\n",
+      "terminal_control": [
+        "enter_raw",
+        "restore"
+      ],
+      "exit": 0
+    },
+    {
+      "command": "session list",
+      "argv": [
+        "pb",
+        "session",
+        "list",
+        "env_test_01",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"sessions\":[]}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "session rename",
+      "argv": [
+        "pb",
+        "session",
+        "rename",
+        "env_test_01",
+        "work",
+        "agent",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"name\":\"agent\"}}\n",
+      "stderr": "Target: demo (hosted)\n",
+      "exit": 0
+    },
+    {
+      "command": "session close",
+      "argv": [
+        "pb",
+        "sessions",
+        "close",
+        "env_test_01",
+        "--all",
+        "--yes"
+      ],
+      "stdin": "",
+      "stdout": "Closed 2 sessions in demo. Session history was retained.\n",
+      "stderr": "Environment: demo (env_test_01)\nOpen sessions to close: 2\n",
+      "exit": 0
+    },
+    {
+      "command": "session delete",
+      "argv": [
+        "pb",
+        "session",
+        "delete",
+        "env_test_01",
+        "agent",
+        "--yes",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"session_id\":\"ses_00000001\"}}\n",
+      "stderr": "Target: demo (hosted)\n",
+      "exit": 0
+    },
+    {
+      "command": "preview",
+      "argv": [
+        "pb",
+        "preview",
+        "3000",
+        "--duration",
+        "1h",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema\":\"paperboat.preview-tunnel/v1\",\"kind\":\"preview_lease\",\"id\":\"prv_test_01\",\"state\":\"ready\"}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "preview list",
+      "argv": [
+        "pb",
+        "preview",
+        "list",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"previews\":[]}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "preview stop",
+      "argv": [
+        "pb",
+        "preview",
+        "stop",
+        "prv_test_01",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema\":\"paperboat.preview-tunnel/v1\",\"kind\":\"preview_lease\",\"id\":\"prv_test_01\",\"state\":\"terminal\"}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "machine add",
+      "argv": [
+        "pb",
+        "machine",
+        "add",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"machine_id\":\"um_test_01\"}}\n",
+      "stderr": "Approve this machine and workspace in your browser.\n",
+      "exit": 0
+    },
+    {
+      "command": "machine list",
+      "argv": [
+        "pb",
+        "machine",
+        "list",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"machines\":[]}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "machine availability",
+      "argv": [
+        "pb",
+        "machine",
+        "availability",
+        "um_test_01",
+        "--mode",
+        "keep-awake",
+        "--yes",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"machine_id\":\"um_test_01\",\"mode\":\"keep_awake\",\"desired_version\":2,\"status\":\"pending\"}}\n",
+      "stderr": "Machine: Studio (um_test_01)\n",
+      "exit": 0
+    },
+    {
+      "command": "machine capabilities",
+      "argv": [
+        "pb",
+        "machine",
+        "capabilities",
+        "um_test_01",
+        "--terminal",
+        "--managed-ssh",
+        "--file-receive",
+        "--preview-tunnel",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"machine_id\":\"um_test_01\",\"desired_version\":2,\"status\":\"pending\"}}\n",
+      "stderr": "Machine: Studio (um_test_01)\n",
+      "exit": 0
+    },
+    {
+      "command": "machine revoke",
+      "argv": [
+        "pb",
+        "machine",
+        "revoke",
+        "um_test_01",
+        "--yes",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"machine_id\":\"um_test_01\",\"state\":\"revoked\"}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "config assign",
+      "argv": [
+        "pb",
+        "config",
+        "assign",
+        "cfg_test_01",
+        "env_test_01",
+        "--json"
+      ],
+      "stdin": "yes\n",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"assignment_id\":\"asg_test_01\",\"revision\":1}}\n",
+      "stderr": "Target: demo (BYOD)\nConfig sync can overwrite local files. Continue? [y/N] ",
+      "exit": 0
+    },
+    {
+      "command": "config unassign",
+      "argv": [
+        "pb",
+        "config",
+        "unassign",
+        "env_test_01",
+        "--yes",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"assignment_id\":\"asg_test_01\",\"state\":\"revoked\"}}\n",
+      "stderr": "Target: demo (BYOD)\n",
+      "exit": 0
+    },
+    {
+      "command": "config show",
+      "argv": [
+        "pb",
+        "config",
+        "show",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"server\":\"https://api.paperboat.test\"}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "config path",
+      "argv": [
+        "pb",
+        "config",
+        "path"
+      ],
+      "stdin": "",
+      "stdout": "/home/test/.config/paperboat/config.json\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "send",
+      "argv": [
+        "pb",
+        "send",
+        "report.txt",
+        "--to",
+        "mch_destination",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"batch_id\":\"fb_test_01\",\"transfers\":[]}}\n",
+      "stderr": "Sending to Studio (mch_destination)\n",
+      "exit": 0
+    },
+    {
+      "command": "transfer destination",
+      "argv": [
+        "pb",
+        "transfer",
+        "destination",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"configured\":true,\"machine\":{\"id\":\"mch_destination\",\"alias\":\"studio\"}}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "transfer destination set",
+      "argv": [
+        "pb",
+        "transfer",
+        "destination",
+        "set",
+        "mch_destination",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"configured\":true,\"machine_id\":\"mch_destination\"}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "transfer destination clear",
+      "argv": [
+        "pb",
+        "transfer",
+        "destination",
+        "clear",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"configured\":false}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "transfer list",
+      "argv": [
+        "pb",
+        "transfer",
+        "list",
+        "--on",
+        "mch_destination",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"items\":[]}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "transfer status",
+      "argv": [
+        "pb",
+        "transfer",
+        "status",
+        "ft_test_01",
+        "--on",
+        "mch_destination",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"transfer_id\":\"ft_test_01\",\"state\":\"published\"}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "transfer cancel",
+      "argv": [
+        "pb",
+        "transfer",
+        "cancel",
+        "ft_test_01",
+        "--on",
+        "mch_destination",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"transfer_id\":\"ft_test_01\",\"state\":\"canceled\",\"destination_machine_id\":\"mch_destination\"}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "setup",
+      "argv": [
+        "pb",
+        "setup",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"machine_id\":\"mch_local\",\"capabilities\":[\"terminal\",\"managed_ssh\",\"file_receive\",\"preview_tunnel\"]}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "update",
+      "argv": [
+        "pb",
+        "update",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"previous_version\":\"2026.08.18.0\",\"version\":\"2026.08.18.1\",\"cli_updated\":true,\"runtime_updated\":true}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "pair",
+      "argv": [
+        "pb",
+        "pair",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"machine_id\":\"mch_local\",\"capabilities\":[\"terminal\",\"managed_ssh\",\"file_receive\",\"preview_tunnel\"]}}\n",
+      "stderr": "Approve this device in your browser.\n",
+      "exit": 0
+    },
+    {
+      "command": "uninstall",
+      "argv": [
+        "pb",
+        "uninstall"
+      ],
+      "stdin": "UNINSTALL PAPERBOAT\ntest-host\n",
+      "stdout": "Paperboat was completely removed. The Paperboat Inbox was preserved.\n",
+      "stderr": "This permanently removes Paperboat services, binaries, credentials, configuration, and runtime state. The Paperboat Inbox is preserved.\nType UNINSTALL PAPERBOAT to continue: Type this machine hostname (test-host) to confirm: ",
+      "exit": 0
+    },
+    {
+      "command": "inbox path",
+      "argv": [
+        "pb",
+        "inbox",
+        "path",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"path\":\"/home/test/Downloads/Paperboat Inbox\"}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "inbox set",
+      "argv": [
+        "pb",
+        "inbox",
+        "set",
+        "/home/test/Inbox",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"path\":\"/home/test/Inbox\"}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "inbox reset",
+      "argv": [
+        "pb",
+        "inbox",
+        "reset",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"path\":\"/home/test/Downloads/Paperboat Inbox\"}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "ssh",
+      "argv": [
+        "pb",
+        "ssh",
+        "studio"
+      ],
+      "stdin": "",
+      "stdout": "",
+      "stderr": "Target: studio.pprbt\n",
+      "exit": 0
+    },
+    {
+      "command": "scp",
+      "argv": [
+        "pb",
+        "scp",
+        "./artifact",
+        "studio:/tmp/artifact"
+      ],
+      "stdin": "",
+      "stdout": "",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "sftp",
+      "argv": [
+        "pb",
+        "sftp",
+        "studio"
+      ],
+      "stdin": "quit\n",
+      "stdout": "Connected to studio.pprbt.\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "rsync",
+      "argv": [
+        "pb",
+        "rsync",
+        "-a",
+        "./workspace/",
+        "studio:workspace/"
+      ],
+      "stdin": "",
+      "stdout": "",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "ssh trust-host",
+      "argv": [
+        "pb",
+        "ssh",
+        "trust-host",
+        "studio",
+        "--fingerprint",
+        "SHA256:testfingerprint"
+      ],
+      "stdin": "",
+      "stdout": "Trusted studio.pprbt (SHA256:testfingerprint).\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "ssh doctor",
+      "argv": [
+        "pb",
+        "ssh",
+        "doctor",
+        "studio"
+      ],
+      "stdin": "",
+      "stdout": "SSH is ready for studio.pprbt.\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "status",
+      "argv": [
+        "pb",
+        "status",
+        "machine_1"
+      ],
+      "stdin": "",
+      "stdout": "Daemon: ready  Generation: 12  Observed: 2026-01-01T00:00:00Z\n\nStudio Mac (machine_1)\n  Runtime: ready  Eligible: true  Generation: 4  Last observed: 2026-01-01T00:00:00Z\n  Path: relay/bom  Consumers: 1  Transfer: ready  Preview: ready  SSH: unavailable\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "wait",
+      "argv": [
+        "pb",
+        "wait",
+        "machine_1",
+        "--for",
+        "runtime"
+      ],
+      "stdin": "",
+      "stdout": "Studio Mac is ready for runtime (ready, generation 12).\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "ping",
+      "argv": [
+        "pb",
+        "ping",
+        "machine_1",
+        "--count",
+        "1"
+      ],
+      "stdin": "",
+      "stdout": "1  direct  18ms\n1/1 replies, 0% loss, min/avg/max 18ms/18ms/18ms\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "relay list",
+      "argv": [
+        "pb",
+        "relay",
+        "list",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema\":\"paperboat.relay-list/v1\",\"relays\":[{\"relay_id\":\"pprbt-helsinki\",\"name\":\"Helsinki\",\"region\":\"helsinki\",\"status\":\"healthy\",\"rtt_ms\":42}]}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "bugreport",
+      "argv": [
+        "pb",
+        "bugreport"
+      ],
+      "stdin": "",
+      "stdout": "Bundle: /home/test/.local/state/paperboat/bugreports/bugreport-pb-0123456789abcdef0123456789abcdef.zip\nCategories: manifest, recent_events, redacted_events, status\nSize: 4096 bytes\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "doctor",
+      "argv": [
+        "pb",
+        "doctor",
+        "machine_01",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema\":\"paperboat.doctor/v1\",\"correlation_id\":\"pb-doctor-0123456789abcdef\",\"checked_at\":\"2026-08-04T12:00:00Z\",\"overall\":\"healthy\",\"machine\":{\"id\":\"machine_01\",\"alias\":\"Studio\"},\"checks\":[{\"category\":\"control\",\"code\":\"authentication\",\"status\":\"pass\",\"summary\":\"The Paperboat server accepted the current credential.\"}]}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "machine pending",
+      "argv": [
+        "pb",
+        "machine",
+        "pending",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"pending\":[]}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "machine approve",
+      "argv": [
+        "pb",
+        "machine",
+        "approve",
+        "req_test_01",
+        "--code",
+        "12345-67890",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"schema_version\":\"1.0\",\"ok\":true,\"data\":{\"approved\":true,\"request_id\":\"req_test_01\"}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "tunnel create",
+      "argv": [
+        "pb",
+        "tunnel",
+        "create",
+        "demo",
+        "--port",
+        "8080"
+      ],
+      "stdin": "",
+      "stdout": "",
+      "stderr": "tunnel tun_1 was created, but connector activation has an uncertain outcome; the tunnel was preserved; recover with `pb tunnel connector add tun_1`: tunnel connector enrollment temporarily unavailable\n",
+      "exit": 1
+    },
+    {
+      "command": "tunnel list",
+      "argv": [
+        "pb",
+        "tunnel",
+        "list"
+      ],
+      "stdin": "",
+      "stdout": "tun_1\tdemo\tprivate\tactive\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "tunnel show",
+      "argv": [
+        "pb",
+        "tunnel",
+        "show",
+        "tun_1"
+      ],
+      "stdin": "",
+      "stdout": "tun_1\tdemo\tprivate\tactive\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "tunnel status",
+      "argv": [
+        "pb",
+        "tunnel",
+        "status",
+        "tun_1"
+      ],
+      "stdin": "",
+      "stdout": "tun_1\tready\tTunnel is ready.\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "tunnel logs",
+      "argv": [
+        "pb",
+        "tunnel",
+        "logs",
+        "tun_1",
+        "--limit",
+        "1"
+      ],
+      "stdin": "",
+      "stdout": "2026-01-01T00:00:00Z\tinfo\tconnector\tconnector_ready\tconnector ready\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "tunnel pause",
+      "argv": [
+        "pb",
+        "tunnel",
+        "pause",
+        "tun_1",
+        "--wait",
+        "--timeout",
+        "30s"
+      ],
+      "stdin": "",
+      "stdout": "Paused tunnel tun_1; status: ready\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "tunnel resume",
+      "argv": [
+        "pb",
+        "tunnel",
+        "resume",
+        "tun_1",
+        "--wait",
+        "--timeout",
+        "30s"
+      ],
+      "stdin": "",
+      "stdout": "Resumed tunnel tun_1; status: ready\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "tunnel delete",
+      "argv": [
+        "pb",
+        "tunnel",
+        "delete",
+        "tun_1",
+        "--yes",
+        "--wait",
+        "--timeout",
+        "30s"
+      ],
+      "stdin": "",
+      "stdout": "Deleted tunnel tun_1; status: ready\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "tunnel doctor",
+      "argv": [
+        "pb",
+        "tunnel",
+        "doctor",
+        "tun_1"
+      ],
+      "stdin": "",
+      "stdout": "Tunnel tun_1: ready\nTunnel is ready.\nservice      ready\nedge         ready\nconfig       ready\nroute        ready\norigin       ready\ndns          ready\ncertificate  ready\naccess       ready\nupdate       ready\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "tunnel route list",
+      "argv": [
+        "pb",
+        "tunnel",
+        "route",
+        "list",
+        "tun_1"
+      ],
+      "stdin": "",
+      "stdout": "route_1\tapp\thttp\tcatch_all\thttp://127.0.0.1:8080\tactive\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "tunnel route add",
+      "argv": [
+        "pb",
+        "tunnel",
+        "route",
+        "add",
+        "tun_1",
+        "--name",
+        "app",
+        "--to",
+        "http://127.0.0.1:8080",
+        "--wait",
+        "--timeout",
+        "30s"
+      ],
+      "stdin": "",
+      "stdout": "Created route route_1; status: ready\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "tunnel route update",
+      "argv": [
+        "pb",
+        "tunnel",
+        "route",
+        "update",
+        "tun_1",
+        "route_1",
+        "--clear-path",
+        "--wait",
+        "--timeout",
+        "30s"
+      ],
+      "stdin": "",
+      "stdout": "Updated route route_1; status: ready\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "tunnel route remove",
+      "argv": [
+        "pb",
+        "tunnel",
+        "route",
+        "remove",
+        "tun_1",
+        "route_1",
+        "--yes",
+        "--wait",
+        "--timeout",
+        "30s"
+      ],
+      "stdin": "",
+      "stdout": "Removed route route_1; tunnel and connector are preserved; status: ready\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "tunnel domain list",
+      "argv": [
+        "pb",
+        "tunnel",
+        "domain",
+        "list",
+        "tun_1"
+      ],
+      "stdin": "",
+      "stdout": "domain_1\tapp.example.test\twaiting_dns\tnot_requested\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "tunnel domain add",
+      "argv": [
+        "pb",
+        "tunnel",
+        "domain",
+        "add",
+        "tun_1",
+        "app.example.test",
+        "--route",
+        "route_1",
+        "--wait",
+        "--timeout",
+        "30s"
+      ],
+      "stdin": "",
+      "stdout": "Added domain domain_1; status: ready\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "tunnel domain verify",
+      "argv": [
+        "pb",
+        "tunnel",
+        "domain",
+        "verify",
+        "tun_1",
+        "app.example.test",
+        "--wait",
+        "--timeout",
+        "30s"
+      ],
+      "stdin": "",
+      "stdout": "Verified domain domain_1; status: ready\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "tunnel domain remove",
+      "argv": [
+        "pb",
+        "tunnel",
+        "domain",
+        "remove",
+        "tun_1",
+        "app.example.test",
+        "--yes",
+        "--wait",
+        "--timeout",
+        "30s"
+      ],
+      "stdin": "",
+      "stdout": "Removed domain domain_1; user-owned DNS records are preserved; status: ready\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "tunnel domain instructions",
+      "argv": [
+        "pb",
+        "tunnel",
+        "domain",
+        "instructions",
+        "tun_1",
+        "app.example.test"
+      ],
+      "stdin": "",
+      "stdout": "app.example.test\tCNAME\tedge.paperboat.test\t300\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "tunnel connector list",
+      "argv": [
+        "pb",
+        "tunnel",
+        "connector",
+        "list",
+        "tun_1"
+      ],
+      "stdin": "",
+      "stdout": "connector_1\thost_1\tactive\tnot_draining\t2026-01-01T00:00:00Z\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "tunnel connector add",
+      "argv": [
+        "pb",
+        "tunnel",
+        "connector",
+        "add",
+        "tun_1"
+      ],
+      "stdin": "",
+      "stdout": "Added connector connector_1 to tunnel tun_1\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "tunnel connector drain",
+      "argv": [
+        "pb",
+        "tunnel",
+        "connector",
+        "drain",
+        "tun_1",
+        "connector_1",
+        "--wait",
+        "--timeout",
+        "30s"
+      ],
+      "stdin": "",
+      "stdout": "Drained connector connector_1; tunnel identity is preserved; status: ready\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "tunnel connector revoke",
+      "argv": [
+        "pb",
+        "tunnel",
+        "connector",
+        "revoke",
+        "tun_1",
+        "connector_1",
+        "--yes",
+        "--wait",
+        "--timeout",
+        "30s"
+      ],
+      "stdin": "",
+      "stdout": "Revoked connector connector_1; tunnel identity is preserved; status: ready\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "tunnel credentials rotate",
+      "argv": [
+        "pb",
+        "tunnel",
+        "credentials",
+        "rotate",
+        "tun_1",
+        "--yes",
+        "--wait",
+        "--timeout",
+        "30s"
+      ],
+      "stdin": "",
+      "stdout": "Rotated tunnel credentials; tunnel identity and routes are preserved; status: ready\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "command": "access tunnel",
+      "argv": [
+        "pb",
+        "access",
+        "tunnel",
+        "tun_1",
+        "--listen",
+        "127.0.0.1:49152"
+      ],
+      "stdin": "",
+      "stdout": "Private access for route route_1 is listening on 127.0.0.1:49152\n",
+      "stderr": "Canceled; the private access session was released.\n",
+      "exit": 130
+    },
+    {
+      "command": "access device",
+      "argv": [
+        "pb",
+        "access",
+        "device",
+        "machine_01",
+        "--port",
+        "5432",
+        "--listen",
+        "127.0.0.1:49153"
+      ],
+      "stdin": "",
+      "stdout": "Device access to machine_01 port 5432 is listening on 127.0.0.1:49153\n",
+      "stderr": "",
+      "exit": 0
+    }
+  ]
+}

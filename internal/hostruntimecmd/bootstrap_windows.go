@@ -19,12 +19,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
@@ -80,7 +80,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	}
 	if strings.TrimSpace(*name) == "" {
 		// One-shot installers must never pause for input. Windows' computer
-		// name is the default display name when the dashboard leaves it blank.
+		// name is the default alias when the dashboard leaves it blank.
 		if detected, detectErr := os.Hostname(); detectErr == nil {
 			*name = strings.TrimSpace(detected)
 		}
@@ -100,6 +100,10 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	}
 	if !filepath.IsAbs(*stateRoot) || filepath.Clean(*stateRoot) != *stateRoot {
 		return errors.New("Windows runtime state root is invalid")
+	}
+	runningPath, sourceIdentity, err := installsource.Current()
+	if err != nil {
+		return fmt.Errorf("inspect running Paperboat executable: %w", err)
 	}
 	account, err := user.Current()
 	if err != nil || account.Username == "" {
@@ -166,7 +170,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		if _, err := rand.Read(verifier); err != nil {
 			return err
 		}
-		config := bootstrap.Config{ServerURL: *serverURL, EnrollmentToken: token, DisplayName: *name, WorkspaceRoot: home, Verifier: base64.RawURLEncoding.EncodeToString(verifier), PublicIdentityKey: publicIdentityKey, RuntimeVersions: map[string]string{"pb": buildinfo.Version}, SSHUser: windowsAccountName(account.Username), SSHPort: sshConfig.Port, CanReuseRuntimeIdentity: reusableIdentityErr == nil}
+		config := bootstrap.Config{ServerURL: *serverURL, EnrollmentToken: token, Alias: *name, WorkspaceRoot: home, Verifier: base64.RawURLEncoding.EncodeToString(verifier), PublicIdentityKey: publicIdentityKey, RuntimeVersions: map[string]string{"pb": sourceIdentity.Version}, SSHUser: windowsAccountName(account.Username), SSHPort: sshConfig.Port, CanReuseRuntimeIdentity: reusableIdentityErr == nil}
 		resume = bootstrap.NewResumeRecord(*serverURL, publicIdentityKey, token, *name, *setupMode, config.Verifier, time.Now().UTC().Add(15*time.Minute))
 		if err := bootstrap.SaveResume(*stateRoot, resume); err != nil {
 			return fmt.Errorf("persist machine enrollment resume state: %w", err)
@@ -176,7 +180,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	if resume.Material != nil && !resumeExpired {
 		material = *resume.Material
 	} else {
-		config := bootstrap.Config{ServerURL: resume.ServerURL, EnrollmentToken: token, DisplayName: resume.DisplayName, WorkspaceRoot: home, Verifier: resume.Verifier, PublicIdentityKey: publicIdentityKey, RuntimeVersions: map[string]string{"pb": buildinfo.Version}, SSHUser: windowsAccountName(account.Username), SSHPort: sshConfig.Port, CanReuseRuntimeIdentity: reusableIdentityErr == nil}
+		config := bootstrap.Config{ServerURL: resume.ServerURL, EnrollmentToken: token, Alias: resume.Alias, WorkspaceRoot: home, Verifier: resume.Verifier, PublicIdentityKey: publicIdentityKey, RuntimeVersions: map[string]string{"pb": sourceIdentity.Version}, SSHUser: windowsAccountName(account.Username), SSHPort: sshConfig.Port, CanReuseRuntimeIdentity: reusableIdentityErr == nil}
 		if resume.PairingStarted {
 			fmt.Fprintln(stderr, "Resuming one-shot machine enrollment...")
 		}
@@ -229,6 +233,12 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		if resume.Material != nil {
 			if err := bootstrap.ValidateRecoveredMaterial(*resume.Material, material, resume.RuntimeEnrolled); err != nil {
 				return err
+			}
+			if resume.ClientInstalled && !sameBoundClientSession(resume.Material.ClientSession, material.ClientSession) {
+				return bootstrap.ErrResumeBinding
+			}
+			if resume.ClientInstalled && !sameClientCredentials(resume.Material.ClientSession, material.ClientSession) {
+				resume.ClientInstalled = false
 			}
 		}
 		if resume.AuthenticatedSetup {
@@ -288,13 +298,16 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		}
 		return nil
 	}, func(ctx context.Context) (string, error) {
-		return bootstrap.FetchVerifiedArtifact(ctx, *material.Artifact, filepath.Join(*stateRoot, "tuf"), windowsArtifactHTTPClient())
+		if err := sourceIdentity.Verify(runningPath); err != nil {
+			return "", err
+		}
+		return runningPath, nil
 	})
 	if err != nil {
 		return err
 	}
 
-	request := hostinstall.Request{Schema: hostinstall.SchemaV1, Platform: runtime.GOOS, User: windowsAccountName(account.Username), Group: "Paperboat", OwnerSID: sid, Executable: artifactPath, Artifact: *material.Artifact, Home: home, Path: os.Getenv("PATH"), StateRoot: *stateRoot, WorkspaceRoot: home, ControlURL: material.ControlURL, UserMachineID: material.UserMachineID, Shell: filepath.Join(os.Getenv("WINDIR"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), HelperListenAddress: material.HelperListenAddress, SetupMode: *setupMode}
+	request := hostinstall.Request{Schema: hostinstall.SchemaV1, Platform: runtime.GOOS, User: windowsAccountName(account.Username), Group: "Paperboat", OwnerSID: sid, Executable: artifactPath, Artifact: *material.Artifact, Source: sourceIdentity, Home: home, Path: os.Getenv("PATH"), StateRoot: *stateRoot, WorkspaceRoot: home, ControlURL: material.ControlURL, UserMachineID: material.UserMachineID, Shell: filepath.Join(os.Getenv("WINDIR"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), HelperListenAddress: material.HelperListenAddress, SetupMode: *setupMode}
 	if err := hostinstall.Validate(request, 0); err != nil {
 		return fmt.Errorf("validate Windows host installation request: %w", err)
 	}

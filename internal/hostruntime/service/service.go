@@ -207,6 +207,20 @@ func safeExecutableForInstall(path string, allowMissing bool) error {
 	return nil
 }
 
+// Replace activates replaced executable bytes even when the declaration is
+// unchanged. The caller restores its binary before invoking the returned rollback.
+func (i *Installer) Replace(ctx context.Context) (func(context.Context) error, error) {
+	previous, upgrading, err := i.writeDefinition(ctx)
+	if err != nil {
+		return nil, err
+	}
+	restore := func(recovery context.Context) error { return i.rollback(recovery, previous, upgrading) }
+	if err := i.config.Controller.Apply(ctx, i.definitionPath, upgrading); err != nil {
+		return restore, fmt.Errorf("activate replacement service: %w", err)
+	}
+	return restore, nil
+}
+
 func (i *Installer) Install(ctx context.Context) error {
 	previous, upgrading, err := i.writeDefinition(ctx)
 	if err != nil {

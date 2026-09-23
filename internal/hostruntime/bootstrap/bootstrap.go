@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 )
 
@@ -44,12 +45,12 @@ const (
 )
 
 type Config struct {
-	ServerURL, EnrollmentToken, DisplayName, WorkspaceRoot, Verifier, PublicIdentityKey string
-	SSHUser                                                                             string
-	SSHPort                                                                             uint16
-	CanReuseRuntimeIdentity                                                             bool
-	RuntimeVersions                                                                     map[string]string
-	HTTP                                                                                *http.Client
+	ServerURL, EnrollmentToken, Alias, WorkspaceRoot, Verifier, PublicIdentityKey string
+	SSHUser                                                                       string
+	SSHPort                                                                       uint16
+	CanReuseRuntimeIdentity                                                       bool
+	RuntimeVersions                                                               map[string]string
+	HTTP                                                                          *http.Client
 }
 
 type Pairing struct {
@@ -94,7 +95,7 @@ func CreatePairing(ctx context.Context, config Config) (Pairing, error) {
 	}
 	body, err := json.Marshal(map[string]any{
 		"enrollment_token": config.EnrollmentToken, "verifier": config.Verifier,
-		"display_name": config.DisplayName, "platform": runtime.GOOS, "architecture": runtime.GOARCH,
+		"alias": strings.ToLower(config.Alias), "platform": runtime.GOOS, "architecture": runtime.GOARCH,
 		"workspace_root": config.WorkspaceRoot, "runtime_versions": config.RuntimeVersions, "public_identity_key": config.PublicIdentityKey,
 		"can_reuse_runtime_identity": config.CanReuseRuntimeIdentity,
 		"ssh_user":                   strings.TrimSpace(config.SSHUser), "ssh_port": config.SSHPort,
@@ -280,17 +281,20 @@ func validate(config Config) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(config.ServerURL))
 	publicKey, keyErr := base64.RawURLEncoding.DecodeString(strings.TrimSpace(config.PublicIdentityKey))
 	token := strings.TrimSpace(config.EnrollmentToken)
-	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Hostname() == "" || parsed.RawQuery != "" || parsed.Fragment != "" || token != "" && (len(token) < 26 || len(token) > 256) || len(config.Verifier) < 32 || strings.TrimSpace(config.DisplayName) == "" || ValidateWorkspace(config.WorkspaceRoot) != nil || keyErr != nil || len(publicKey) != ed25519.PublicKeySize {
+	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Hostname() == "" || parsed.RawQuery != "" || parsed.Fragment != "" || token != "" && (len(token) < 26 || len(token) > 256) || len(config.Verifier) < 32 || strings.TrimSpace(config.Alias) == "" || ValidateWorkspace(config.WorkspaceRoot) != nil || keyErr != nil || len(publicKey) != ed25519.PublicKeySize {
 		return "", ErrInvalid
 	}
 	return strings.TrimRight(parsed.String(), "/"), nil
 }
 
 func client(config Config) *http.Client {
-	if config.HTTP != nil {
-		return config.HTTP
+	base := config.HTTP
+	if base == nil {
+		base = &http.Client{Transport: httptransport.Default(), Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}
 	}
-	return &http.Client{Transport: httptransport.Default(), Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}
+	copyClient := *base
+	copyClient.Transport = errorreport.TransportOperation(base.Transport, config.ServerURL, "machine_pairing")
+	return &copyClient
 }
 
 func request(ctx context.Context, client *http.Client, method, target string, body []byte, output any) error {

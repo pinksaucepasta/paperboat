@@ -47,6 +47,7 @@ func TestWindowsDaemonServesStartingSnapshotBeforeInitialRefresh(t *testing.T) {
 		done <- runWindowsDaemon(ctx, DaemonConfig{
 			Paths: paths, Source: blockingWindowsMachineSource{started: started}, OwnerSID: ownerSID,
 			RefreshInterval: time.Second, RequestTimeout: 30 * time.Second,
+			DeviceSuffix: "mydev", DeviceLoopbackCIDR: "127.212.0.0/16",
 		})
 	}()
 	select {
@@ -69,7 +70,7 @@ func TestWindowsDaemonServesStartingSnapshotBeforeInitialRefresh(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if err != nil || snapshot.DaemonState != "starting" || snapshot.Generation != 1 {
+	if err != nil || snapshot.DaemonState != "starting" || snapshot.Generation != 1 || snapshot.DeviceSuffix != "mydev" || snapshot.DeviceLoopbackCIDR != "127.212.0.0/16" {
 		cancel()
 		t.Fatalf("startup snapshot=%+v error=%v", snapshot, err)
 	}

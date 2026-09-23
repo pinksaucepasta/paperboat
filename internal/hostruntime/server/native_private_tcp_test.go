@@ -139,3 +139,48 @@ func TestServeNativePrivateTCPRevocationClosesActiveStream(t *testing.T) {
 		t.Fatal("handler did not stop after revocation")
 	}
 }
+
+func TestServeNativePrivateTCPCancelsBeforeReadiness(t *testing.T) {
+	for _, stage := range []string{"dial", "readiness"} {
+		t.Run(stage, func(t *testing.T) {
+			binding := nativeprivate.Binding{Schema: nativeprivate.SchemaV1, ResourceKind: "tunnel", ResourceID: "tun_1", ResourceGeneration: 1, RouteID: "route_1", RouteGeneration: 1, TargetGeneration: 1, OwnerEndpointID: "machine_1", Protocol: "tcp", TargetScheme: "tcp", TargetAddress: "127.0.0.1:3000", ExpiresAt: time.Now().Add(time.Minute)}
+			target, _ := json.Marshal(binding)
+			header, err := streamauth.NewNativePrivate("operation_1", "private_tcp", "stream_1", "credential", binding.ExpiresAt, 1<<20, target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			host, user := net.Pipe()
+			defer host.Close()
+			defer user.Close()
+			origin, remote := net.Pipe()
+			defer origin.Close()
+			defer remote.Close()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			dialed := make(chan struct{})
+			done := make(chan error, 1)
+			go func() {
+				done <- ServeNativePrivateTCP(ctx, header, host, func(context.Context, nativeprivate.Binding) (time.Time, <-chan struct{}, error) {
+					return binding.ExpiresAt, nil, nil
+				}, func(ctx context.Context, _, _ string) (net.Conn, error) {
+					close(dialed)
+					if stage == "dial" {
+						<-ctx.Done()
+						return nil, ctx.Err()
+					}
+					return origin, nil
+				})
+			}()
+			<-dialed
+			cancel()
+			select {
+			case err := <-done:
+				if err == nil {
+					t.Fatal("canceled setup reported success")
+				}
+			case <-time.After(time.Second):
+				t.Fatal("cancellation did not interrupt setup")
+			}
+		})
+	}
+}

@@ -1,0 +1,50 @@
+.nh
+.TH "PB-ENV-VAULT-RECOVERY" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-env-vault-recovery - Enable, replace, or disable the optional recovery code
+
+
+.SH SYNOPSIS
+\fBpb env vault recovery [flags]\fP
+
+
+.SH DESCRIPTION
+Enable, replace, or disable the optional recovery code
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--disable\fP[=false]
+	disable recovery-code access to the current vault
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for recovery
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+.PP
+\fB--recovery-file\fP=""
+	save a newly generated recovery code to a new absolute file path
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-env-vault(1)\fP

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 )
 
 type RenewingTokenConfig struct {
@@ -51,7 +53,7 @@ func NewRenewingTokenSource(config RenewingTokenConfig) (*RenewingTokenSource, e
 		return nil, ErrInvalid
 	}
 	base.Path = strings.TrimRight(base.Path, "/") + "/v1/helper-identity-renewals"
-	return &RenewingTokenSource{config: config, endpoint: base, client: &http.Client{Transport: config.Transport, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}}, nil
+	return &RenewingTokenSource{config: config, endpoint: base, client: &http.Client{Transport: errorreport.TransportOperation(config.Transport, base.String(), "identity_renewal"), CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}}, nil
 }
 
 func (s *RenewingTokenSource) Token(ctx context.Context) (token string, resultErr error) {

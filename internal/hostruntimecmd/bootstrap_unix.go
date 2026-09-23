@@ -29,14 +29,13 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 	"github.com/pinksaucepasta/paperboat/internal/machinename"
 )
-
-var fetchBootstrapArtifact = bootstrap.FetchVerifiedArtifact
 
 func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("bootstrap", flag.ContinueOnError)
@@ -77,7 +76,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 			detected = strings.TrimSpace(detected)
 			// macOS commonly reports a fully-qualified local hostname (for
 			// example, apple.lan), while machine names are single DNS labels.
-			// Keep the stable first label as the dashboard display name.
+			// Keep the stable first label as the machine alias.
 			if dot := strings.IndexByte(detected, '.'); dot > 0 {
 				detected = detected[:dot]
 			}
@@ -143,7 +142,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		material = *resume.Material
 		fmt.Fprintln(stderr, "Finishing the existing machine enrollment...")
 	} else if authenticatedResume {
-		config := bootstrap.Config{ServerURL: *serverURL, DisplayName: *name, WorkspaceRoot: workspace, Verifier: resume.Verifier, PublicIdentityKey: publicIdentityKey, RuntimeVersions: map[string]string{"pb": buildinfo.Version}}
+		config := bootstrap.Config{ServerURL: *serverURL, Alias: *name, WorkspaceRoot: workspace, Verifier: resume.Verifier, PublicIdentityKey: publicIdentityKey, RuntimeVersions: map[string]string{"pb": buildinfo.Version}}
 		fmt.Fprintln(stderr, "Completing authenticated device setup...")
 		material, err = bootstrap.RecoverMaterial(ctx, config, resume.RuntimeEnrolled)
 		if err == nil {
@@ -160,7 +159,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	} else {
 		material, resume, err = resumeOneShotEnrollment(ctx, oneShotResumeInput{
 			StateRoot: *stateRoot, SetupMode: *setupMode, TokenFile: *tokenFile, TokenFileErr: tokenFileErr,
-			Config: bootstrap.Config{ServerURL: *serverURL, EnrollmentToken: token, DisplayName: *name, WorkspaceRoot: workspace, PublicIdentityKey: publicIdentityKey, RuntimeVersions: map[string]string{"pb": buildinfo.Version}},
+			Config: bootstrap.Config{ServerURL: *serverURL, EnrollmentToken: token, Alias: *name, WorkspaceRoot: workspace, PublicIdentityKey: publicIdentityKey, RuntimeVersions: map[string]string{"pb": buildinfo.Version}},
 			Resume: resume, ResumeErr: resumeErr, Status: stderr,
 		}, defaultOneShotResumeOperations())
 		if err != nil {
@@ -227,6 +226,10 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		}
 	}
 
+	source, err := installsource.Inspect(artifactPath, buildinfo.Version, buildinfo.Distribution)
+	if err != nil {
+		return err
+	}
 	executable := artifactPath
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -239,7 +242,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	}
 	installRequest := hostinstall.Request{
 		Schema: hostinstall.SchemaV1, Platform: runtime.GOOS, User: account.Username, UID: uid, Group: group.Name, GID: gid,
-		Executable: executable, Artifact: *material.Artifact,
+		Executable: executable, Artifact: *material.Artifact, Source: source,
 		Home: home, Path: servicePath, StateRoot: *stateRoot, WorkspaceRoot: workspace, ControlURL: material.ControlURL,
 		UserMachineID: material.UserMachineID, Shell: resolvedShell, HelperListenAddress: material.HelperListenAddress,
 		SetupMode: material.SetupMode, InstallationGeneration: material.InstallationGeneration,
@@ -276,8 +279,8 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	for {
 		request, _ := http.NewRequestWithContext(readyCtx, http.MethodGet, "http://"+material.HelperListenAddress+"/healthz", nil)
 		response, requestErr := healthClient.Do(request)
-		if requestErr == nil && bootstrapWorkerReady(readyCtx, response, *stateRoot, material.Artifact.Version, minimumGeneration, readinessStarted, material.SetupMode == "host") &&
-			bootstrapUpdaterReady(readyCtx, material.Artifact.Version, uid) {
+		if requestErr == nil && bootstrapWorkerReady(readyCtx, response, *stateRoot, source.Version, minimumGeneration, readinessStarted, material.SetupMode == "host") &&
+			bootstrapUpdaterReady(readyCtx, source.Version, uid) {
 			resume.RuntimeReady = true
 			if err := bootstrap.SaveResume(*stateRoot, resume); err != nil {
 				return &installationStageError{Stage: "service_readiness", Cause: fmt.Errorf("checkpoint existing runtime finalization: %w", err)}
@@ -295,7 +298,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 			// Runtime startup and commit may consume their readiness budget.
 			// Canonical daemon cutover gets its own bounded readiness window.
 			daemonCtx, daemonCancel := context.WithTimeout(ctx, 45*time.Second)
-			err := bindBootstrapDaemon(daemonCtx, material.ControlURL, material.Artifact.Version)
+			err := bindBootstrapDaemon(daemonCtx, material.ControlURL, source.Version)
 			daemonCancel()
 			if err != nil {
 				return &installationStageError{Stage: "daemon_readiness", Cause: err}

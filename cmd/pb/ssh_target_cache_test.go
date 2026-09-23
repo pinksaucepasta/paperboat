@@ -9,7 +9,7 @@ import (
 )
 
 func testSSHTargetCacheMachine() api.UserMachine {
-	return api.UserMachine{ID: "mch_1", Alias: "hn-byod-ready", DisplayName: "hn-byod-ready", InstallationGeneration: 4, EnvironmentID: "env_1", WorkspaceRoot: "/root"}
+	return api.UserMachine{ID: "mch_1", Alias: "hn-byod-ready", InstallationGeneration: 4, EnvironmentID: "env_1", WorkspaceRoot: "/root"}
 }
 
 func TestSSHTargetCacheRoundTrip(t *testing.T) {

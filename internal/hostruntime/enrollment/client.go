@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 )
@@ -230,7 +231,7 @@ func (c *Client) HostedBootstrap(ctx context.Context, config Config) (HostedBoot
 		}
 	}
 	client := &http.Client{
-		Transport: transport, Timeout: c.timeout,
+		Transport: errorreport.TransportOperation(transport, base.String(), "helper_enrollment"), Timeout: c.timeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid },
 	}
 	response, err := client.Do(request)
@@ -308,7 +309,7 @@ func (c *Client) enroll(ctx context.Context, config Config, endpointPath string,
 			return RuntimeIdentity{}, err
 		}
 	}
-	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}
+	client := &http.Client{Transport: errorreport.TransportOperation(transport, base.String(), "helper_enrollment"), CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}
 	var responseBody []byte
 	for attempt := 0; attempt < enrollmentExchangeAttempts; attempt++ {
 		status, value, exchangeErr := c.enrollmentExchangeAttempt(ctx, client, base.String(), body)

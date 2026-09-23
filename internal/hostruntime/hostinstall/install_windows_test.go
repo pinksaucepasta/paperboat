@@ -8,16 +8,39 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseindex"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
 	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
 	"golang.org/x/sys/windows"
 )
+
+func TestWindowsAwaitingEnrollmentConfigRequiresSuppliedSource(t *testing.T) {
+	ownerSID := "S-1-5-21-1-2-3-1001"
+	instance, err := WindowsInstanceForSID(ownerSID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := installsource.Source{Version: "dev", Platform: "windows", Architecture: runtime.GOARCH, SHA256: strings.Repeat("0", 64), Length: 1, Distribution: installsource.Custom}
+	tokenPath, err := WindowsInstanceTokenPath(instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: instance, OwnerSID: ownerSID, User: "tester", StateRoot: `C:\State`, Workspace: `C:\Users\tester`, ListenAddress: "127.0.0.1:8080", SetupMode: "awaiting_enrollment", TokenFile: tokenPath, Source: source}
+	if !validWindowsConfig(config) {
+		t.Fatal("valid awaiting-enrollment declaration was rejected")
+	}
+	config.Source = installsource.Source{}
+	if validWindowsConfig(config) {
+		t.Fatal("runtime declaration without supplied source was accepted")
+	}
+}
 
 func TestFreshStandaloneInstallVerifiesBeforeCleanup(t *testing.T) {
 	previousAdministrator := isAdministratorForStandaloneInstall

@@ -1,0 +1,50 @@
+.nh
+.TH "PB-SEND" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-send - Send files to a machine's Paperboat Inbox
+
+
+.SH SYNOPSIS
+\fBpb send \&... --to  [flags]\fP
+
+
+.SH DESCRIPTION
+Send files to a machine's Paperboat Inbox
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for send
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--session\fP=""
+	terminal session ID for destination context
+
+.PP
+\fB--to\fP=""
+	destination machine name or ID
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb(1)\fP

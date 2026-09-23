@@ -82,7 +82,7 @@ func TestLinuxExecutableLifecycle(t *testing.T) {
 		t.Cleanup(func() { _ = cmd.Process.Kill(); <-reaped })
 		deadline := time.Now().Add(10 * time.Second)
 		for time.Now().Before(deadline) {
-			if snapshot, err := client.Snapshot(context.Background()); err == nil && snapshot.DaemonState == "degraded" {
+			if snapshot, err := client.Snapshot(context.Background()); err == nil && snapshot.DaemonState == "awaiting_enrollment" {
 				return cmd, done
 			}
 			select {
@@ -110,7 +110,7 @@ func TestLinuxExecutableLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 		// Missing control-plane credentials must be surfaced, never falsely declared ready.
-		if snapshot.DaemonState != "degraded" {
+		if snapshot.DaemonState != "awaiting_enrollment" {
 			t.Fatalf("uncredentialed fixture state = %q", snapshot.DaemonState)
 		}
 	}

@@ -8,9 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Microsoft/go-winio"
-	"golang.org/x/sys/windows"
+	"github.com/pinksaucepasta/paperboat/internal/windows/pipeauth"
 )
+
+var dialTrustedLocalPipe = pipeauth.DialCurrentUser
 
 // NewClient connects to the same HTTP/1.1 local API contract as Unix, using
 // a byte-mode local named pipe. A pipe name is not a network address: the
@@ -28,10 +29,7 @@ func dialLocal(ctx context.Context, socketPath string, timeout time.Duration) (n
 	}
 	dialCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	// Identification is required for the server to obtain the authenticated
-	// client token from the pipe. Anonymous pipe dialing defeats the token
-	// boundary even when the pipe DACL is correct.
-	return winio.DialPipeAccessImpLevel(dialCtx, socketPath, windows.GENERIC_READ|windows.GENERIC_WRITE, winio.PipeImpLevelIdentification)
+	return dialTrustedLocalPipe(dialCtx, socketPath)
 }
 
 func validPipePath(path string) bool {

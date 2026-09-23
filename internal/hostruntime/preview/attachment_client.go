@@ -20,6 +20,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 )
 
@@ -488,7 +489,7 @@ func NewAttachmentClient(config AttachmentClientConfig) (*AttachmentClient, erro
 		transport = httptransport.Default()
 	}
 	base.Path, base.RawPath = "", ""
-	return &AttachmentClient{base: base, tokens: config.Tokens, identities: config.Identities, proofs: config.Proofs, maxResponseBytes: config.MaxResponseBytes, admissionPoll: config.AdmissionPollInterval, client: &http.Client{Transport: transport, Timeout: config.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrAttachmentClientInvalid }}}, nil
+	return &AttachmentClient{base: base, tokens: config.Tokens, identities: config.Identities, proofs: config.Proofs, maxResponseBytes: config.MaxResponseBytes, admissionPoll: config.AdmissionPollInterval, client: &http.Client{Transport: errorreport.TransportOperation(transport, base.String(), "preview_attachment"), Timeout: config.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrAttachmentClientInvalid }}}, nil
 }
 
 // Allocate posts one exact operation. Replaying the same request is safe at

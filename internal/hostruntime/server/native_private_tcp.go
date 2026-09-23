@@ -26,32 +26,44 @@ func ServeNativePrivateTCP(ctx context.Context, header streamauth.Header, client
 	if err != nil || binding.Protocol != "tcp" || binding.TargetScheme != "tcp" {
 		return ErrNativePrivateBinding
 	}
-	validUntil, revoked, err := current(ctx, binding)
+	runCtx, cancel := context.WithDeadline(ctx, binding.ExpiresAt)
+	defer cancel()
+	validUntil, revoked, err := current(runCtx, binding)
 	if err != nil || !validUntil.After(time.Now().UTC()) {
 		return ErrNativePrivateBinding
 	}
 	if binding.ExpiresAt.Before(validUntil) {
 		validUntil = binding.ExpiresAt
 	}
-	origin, err := dial(ctx, "tcp", binding.TargetAddress)
+	deadlineCtx, deadlineCancel := context.WithDeadline(runCtx, validUntil)
+	defer deadlineCancel()
+	go func() {
+		select {
+		case <-deadlineCtx.Done():
+		case <-revoked:
+			cancel()
+		}
+	}()
+	stopClient := context.AfterFunc(deadlineCtx, func() { _ = client.Close() })
+	defer stopClient()
+	select {
+	case <-revoked:
+		return ErrNativePrivateBinding
+	default:
+	}
+	if err := deadlineCtx.Err(); err != nil {
+		return err
+	}
+	origin, err := dial(deadlineCtx, "tcp", binding.TargetAddress)
 	if err != nil {
 		return err
 	}
 	defer origin.Close()
+	stopOrigin := context.AfterFunc(deadlineCtx, func() { _ = origin.Close() })
+	defer stopOrigin()
 	if _, err = client.Write([]byte{0}); err != nil {
 		return err
 	}
-	runCtx, cancel := context.WithDeadline(ctx, validUntil)
-	defer cancel()
-	go func() {
-		select {
-		case <-runCtx.Done():
-		case <-revoked:
-			cancel()
-		}
-		_ = client.Close()
-		_ = origin.Close()
-	}()
 	return bridgeNativePrivateTCP(client, origin)
 }
 

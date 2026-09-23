@@ -18,6 +18,7 @@ import (
 	"github.com/Microsoft/go-winio"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseeligibility"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
@@ -133,7 +134,9 @@ func (c *windowsController) run(ctx context.Context, ready func() error) error {
 		}
 		_ = listener.Close()
 	}()
-	go func() { _ = c.scheduler.Run(ctx) }()
+	if c.config.AutomaticActivation {
+		go func() { _ = c.scheduler.Run(ctx) }()
+	}
 	if ready != nil {
 		if err := ready(); err != nil {
 			return err
@@ -263,7 +266,7 @@ func (c *windowsController) invoke(ctx context.Context, request ControlRequest) 
 		if err != nil || !found {
 			return response, err
 		}
-		comparison, compareErr := selfupdate.CompareVersions(release.Version, c.activeVersion)
+		comparison, compareErr := compareWindowsInstalledVersion(release.Version, c.activeVersion, c.config.Source)
 		if compareErr != nil || comparison < 0 {
 			return response, workerupdate.ErrInvalidRelease
 		}
@@ -292,7 +295,7 @@ func (c *windowsController) invoke(ctx context.Context, request ControlRequest) 
 		if release.Version != request.Release {
 			return response, workerupdate.ErrInvalidRelease
 		}
-		comparison, compareErr := selfupdate.CompareVersions(release.Version, c.activeVersion)
+		comparison, compareErr := compareWindowsInstalledVersion(release.Version, c.activeVersion, c.config.Source)
 		if compareErr != nil || comparison <= 0 {
 			return response, workerupdate.ErrInvalidRelease
 		}
@@ -349,6 +352,9 @@ func activationRequested(channel <-chan struct{}) bool {
 }
 
 func (c *windowsController) checkRelease(ctx context.Context) (autoupdate.Result, error) {
+	if !c.config.AutomaticActivation {
+		return autoupdate.Result{Version: c.activeVersion}, nil
+	}
 	c.checkMu.Lock()
 	defer c.checkMu.Unlock()
 	blocked, err := c.activationBlockedContext(ctx)
@@ -378,7 +384,7 @@ func (c *windowsController) checkRelease(ctx context.Context) (autoupdate.Result
 		return autoupdate.Result{Version: c.activeVersion}, nil
 	}
 	if c.config.AutomaticActivation {
-		comparison, compareErr := selfupdate.CompareVersions(release.Version, c.activeVersion)
+		comparison, compareErr := compareWindowsInstalledVersion(release.Version, c.activeVersion, c.config.Source)
 		if compareErr != nil || comparison < 0 {
 			return autoupdate.Result{Version: c.activeVersion}, workerupdate.ErrInvalidRelease
 		}
@@ -500,4 +506,11 @@ func resolveWindowsQueuedRelease(ctx context.Context, journal windowsActivationJ
 		return workerupdate.Release{}, false, mode, errors.New("deferred manual update is no longer the current eligible signed release; run pb update to choose a new release")
 	}
 	return release, found, mode, err
+}
+
+func compareWindowsInstalledVersion(candidate, active string, source installsource.Source) (int, error) {
+	if source.Validate() == nil && source.Version == active && source.Distribution == installsource.Custom {
+		return 1, nil
+	}
+	return selfupdate.CompareVersions(candidate, active)
 }

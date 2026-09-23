@@ -98,13 +98,14 @@ func validateDarwinPayload(ctx context.Context, packagePath string) error {
 		return errPackageInstall
 	}
 	seen := make(map[string]struct{}, 2)
+	manualCount := 0
 	for _, line := range strings.Split(string(output), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
 		switch line {
-		case ".", "./usr", "./usr/local", "./usr/local/bin", "./Library", "./Library/PrivilegedHelperTools", "./Library/PrivilegedHelperTools/Paperboat", "./Library/PrivilegedHelperTools/Paperboat/bin":
+		case "./usr/local/share", "./usr/local/share/man", "./usr/local/share/man/man1", ".", "./usr", "./usr/local", "./usr/local/bin", "./Library", "./Library/PrivilegedHelperTools", "./Library/PrivilegedHelperTools/Paperboat", "./Library/PrivilegedHelperTools/Paperboat/bin":
 			// pkgbuild includes the canonical parent directories in its BOM.
 			// No other directory or payload path belongs to this package.
 			continue
@@ -114,10 +115,22 @@ func validateDarwinPayload(ctx context.Context, packagePath string) error {
 			}
 			seen[line] = struct{}{}
 		default:
-			return errPackageInstall
+			if !validPackageManualPath(strings.TrimPrefix(line, "./")) || !strings.HasPrefix(line, "./") {
+				return errPackageInstall
+			}
+			if _, duplicate := seen[line]; duplicate {
+				return errPackageInstall
+			}
+			seen[line] = struct{}{}
+			manualCount++
+			if manualCount > maxPackageManualCount {
+				return errPackageInstall
+			}
 		}
 	}
-	if len(seen) != 2 {
+	_, hasCLI := seen[darwinPackageCLIPath]
+	_, hasHelper := seen[darwinPackageHelperPath]
+	if !hasCLI || !hasHelper {
 		return errPackageInstall
 	}
 	return nil
@@ -129,6 +142,7 @@ func validateDarwinExtraction(root string) error {
 	}
 	directories := map[string]struct{}{
 		".": {}, "Payload": {}, "Payload/usr": {}, "Payload/usr/local": {}, "Payload/usr/local/bin": {},
+		"Payload/usr/local/share": {}, "Payload/usr/local/share/man": {}, "Payload/usr/local/share/man/man1": {},
 		"Payload/Library": {}, "Payload/Library/PrivilegedHelperTools": {},
 		"Payload/Library/PrivilegedHelperTools/Paperboat":     {},
 		"Payload/Library/PrivilegedHelperTools/Paperboat/bin": {},
@@ -137,6 +151,7 @@ func validateDarwinExtraction(root string) error {
 		"Bom": {}, "PackageInfo": {},
 		"Payload/Library/PrivilegedHelperTools/Paperboat/bin/pb": {},
 	}
+	manualCount := 0
 	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return errPackageInstall
@@ -166,7 +181,14 @@ func validateDarwinExtraction(root string) error {
 			return errPackageInstall
 		}
 		if _, allowed := regularFiles[relative]; !allowed {
-			return errPackageInstall
+			info, err := entry.Info()
+			if err != nil || !strings.HasPrefix(relative, "Payload/") || !validPackageManual(strings.TrimPrefix(relative, "Payload/"), info) {
+				return errPackageInstall
+			}
+			manualCount++
+			if manualCount > maxPackageManualCount {
+				return errPackageInstall
+			}
 		}
 		return nil
 	})

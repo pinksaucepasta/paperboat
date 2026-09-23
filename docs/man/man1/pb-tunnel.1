@@ -1,0 +1,70 @@
+.nh
+.TH "PB-TUNNEL" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel - Manage durable tunnels or start an ephemeral tunnel
+
+
+.SH SYNOPSIS
+\fBpb tunnel [--ephemeral] [] [flags]\fP
+
+
+.SH DESCRIPTION
+Manage durable tunnels or start an ephemeral tunnel
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--background\fP[=false]
+	transfer ownership to paperboatd and return after readiness
+
+.PP
+\fB--domain\fP=[]
+	attach a verified custom domain (repeatable)
+
+.PP
+\fB--duration\fP=0s
+	maximum preview lifetime (deprecated: use --ttl)
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for tunnel
+
+.PP
+\fB--json\fP[=false]
+	print the canonical preview resource as JSON
+
+.PP
+\fB--private\fP[=false]
+	limit the preview to this account
+
+.PP
+\fB--team\fP[=false]
+	require an explicit team grant for browser access
+
+.PP
+\fB--ttl\fP=0s
+	bounded preview lifetime (maximum 24h)
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb(1)\fP, \fBpb-tunnel-connector(1)\fP, \fBpb-tunnel-create(1)\fP, \fBpb-tunnel-credentials(1)\fP, \fBpb-tunnel-delete(1)\fP, \fBpb-tunnel-doctor(1)\fP, \fBpb-tunnel-domain(1)\fP, \fBpb-tunnel-inspect(1)\fP, \fBpb-tunnel-list(1)\fP, \fBpb-tunnel-logs(1)\fP, \fBpb-tunnel-pause(1)\fP, \fBpb-tunnel-policy(1)\fP, \fBpb-tunnel-replay(1)\fP, \fBpb-tunnel-resume(1)\fP, \fBpb-tunnel-route(1)\fP, \fBpb-tunnel-show(1)\fP, \fBpb-tunnel-status(1)\fP, \fBpb-tunnel-stop(1)\fP

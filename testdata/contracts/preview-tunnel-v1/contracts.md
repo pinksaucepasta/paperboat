@@ -730,7 +730,7 @@ these owning cutovers, not a license to retain two production paths.
 | Current “random lease only” URL and public/private-only `access_mode` declarations, validation and connector snapshots | Tasks 25–27 replace with explicit/lazy endpoint identity and separate audience/method in server, daemon, edge and web projections; existing explicit managed URL shape stays |
 | Inspector and replay declarations in this section | Tasks 31–32 implement daemon store, authenticated retrieval, redaction, audit and replay with positive/negative budget/authority tests; current log_entry is not evidence of an inspector |
 
-Task 3c owns the broader FRP/Caddy deployment/binary inventory and regional budgets.
+Task 3c owns the broader historical edge deployment/binary inventory and regional budgets.
 Task 26 gates cross-account/sibling-domain cookies, forged return/Origin/state,
 duplicate handoff/cookies, team removal, active-stream expiry, partitions and alias
 fencing. Task 27 gates cancellation, coalescing across nodes, replacement/reboot,

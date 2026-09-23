@@ -33,6 +33,7 @@ assets = {
     "pb-windows-amd64.exe": ("windows", "amd64", "pe"),
     "pb-windows-arm64.exe": ("windows", "arm64", "pe"),
 }
+
 body = {
     "schema": "paperboat.release-current/v1",
     "version": version,
@@ -51,6 +52,12 @@ body = {
 }
 pathlib.Path(sys.argv[1]).write_text(json.dumps(body, separators=(",", ":")) + "\n")
 PY
+}
+
+write_installers() {
+  local root=$1 version=$2
+  printf "#!/bin/sh\nbootstrap_version='%s'\nrepository=\${PAPERBOAT_GITHUB_REPOSITORY:-pinksaucepasta/paperboat-cli}\n" "$version" > "$root/install"
+  printf "\$bootstrapVersion = '%s'\n\$repo = if (\$env:PAPERBOAT_GITHUB_REPOSITORY) { \$env:PAPERBOAT_GITHUB_REPOSITORY } else { 'pinksaucepasta/paperboat-cli' }\n" "$version" > "$root/windows"
 }
 
 write_matching_targets_metadata() {
@@ -337,20 +344,20 @@ test "$before" = "$(snapshot)"
 candidate="$temporary/candidate"
 mkdir -p "$candidate/tuf/metadata" "$candidate/tuf/targets"
 write_current_manifest "$candidate/current.json" wrong
-printf x > "$candidate/install"
-printf x > "$candidate/windows"
+write_installers "$candidate" 2026.08.22.23
 for name in root targets snapshot timestamp; do printf x > "$candidate/tuf/metadata/$name.json"; done
 bundle="$temporary/candidate.tgz"
-tar -C "$candidate" -czf "$bundle" current.json install windows tuf
+tar -C "$candidate" -czf "$bundle" install windows tuf
 digest=$(run_checksum "$checksum_backend" "$bundle" | awk '{print $1}')
 if run_test_publisher "$bundle" "$release_root" 2026.08.22.23 "$digest" >/dev/null 2>&1; then
-  echo 'publisher accepted an invalid current.json' >&2
+  echo 'publisher accepted invalid TUF metadata' >&2
   exit 1
 fi
 test "$before" = "$(snapshot)"
 
 candidate_version=2026.08.22.23
 write_current_manifest "$candidate/current.json" "$candidate_version"
+write_installers "$candidate" "$candidate_version"
 write_matching_targets_metadata "$candidate/current.json" "$candidate/tuf/metadata/targets.json"
 python3 - "$candidate/tuf/metadata/targets.json" <<'PY'
 import json
@@ -363,10 +370,10 @@ body["signed"]["targets"]["pb-linux-amd64"]["custom"]["version"] = "2026.08.22.2
 path.write_text(json.dumps(body) + "\n")
 PY
 mismatch_bundle="$temporary/mismatch.tgz"
-tar -C "$candidate" -czf "$mismatch_bundle" current.json install windows tuf
+tar -C "$candidate" -czf "$mismatch_bundle" install windows tuf
 mismatch_digest=$(run_checksum "$checksum_backend" "$mismatch_bundle" | awk '{print $1}')
 if run_test_publisher "$mismatch_bundle" "$release_root" "$candidate_version" "$mismatch_digest" >/dev/null 2>&1; then
-  echo 'publisher accepted current.json and TUF version drift' >&2
+  echo 'publisher accepted TUF version drift' >&2
   exit 1
 fi
 test "$before" = "$(snapshot)"
@@ -385,7 +392,7 @@ del body["signed"]["targets"]["pb-linux-arm64"]["custom"]["release_index"][field
 path.write_text(json.dumps(body) + "\n")
 PY
   incomplete_bundle="$temporary/incomplete-$field.tgz"
-  tar -C "$candidate" -czf "$incomplete_bundle" current.json install windows tuf
+  tar -C "$candidate" -czf "$incomplete_bundle" install windows tuf
   incomplete_digest=$(run_checksum "$checksum_backend" "$incomplete_bundle" | awk '{print $1}')
   if run_test_publisher "$incomplete_bundle" "$release_root" "$candidate_version" "$incomplete_digest" >/dev/null 2>&1; then
     echo "publisher accepted release metadata missing $field" >&2
@@ -396,7 +403,7 @@ done
 
 write_matching_targets_metadata "$candidate/current.json" "$candidate/tuf/metadata/targets.json"
 bundle="$temporary/candidate.tgz"
-tar -C "$candidate" -czf "$bundle" current.json install windows tuf
+tar -C "$candidate" -czf "$bundle" install windows tuf
 digest=$(run_checksum "$checksum_backend" "$bundle" | awk '{print $1}')
 
 # renameat2(RENAME_EXCHANGE) is a Linux deployment requirement. Exercise the
@@ -440,6 +447,7 @@ EOF
 
   expected="$temporary/expected"
   cp -R "$candidate" "$expected"
+  rm -f "$expected/current.json"
   expected_candidate=$(snapshot_directory "$expected")
   PATH="$temporary/bin:$PATH" PAPERBOAT_TEST_DOCKER_MODE=good PAPERBOAT_TEST_RELEASE_ROOT="$release_root" run_test_publisher "$bundle" "$release_root" "$candidate_version" "$digest"
   set -- "$release_root"/staging/activation-*
@@ -451,12 +459,11 @@ EOF
   next="$temporary/next"
   mkdir -p "$next/tuf/metadata" "$next/tuf/targets"
   write_current_manifest "$next/current.json" 2026.08.22.24
-  printf x > "$next/install"
-  printf x > "$next/windows"
+  write_installers "$next" 2026.08.22.24
   for name in root targets snapshot timestamp; do printf x > "$next/tuf/metadata/$name.json"; done
   write_matching_targets_metadata "$next/current.json" "$next/tuf/metadata/targets.json"
   next_bundle="$temporary/next.tgz"
-  tar -C "$next" -czf "$next_bundle" current.json install windows tuf
+  tar -C "$next" -czf "$next_bundle" install windows tuf
   next_digest=$(run_checksum "$checksum_backend" "$next_bundle" | awk '{print $1}')
   live_before_wrong_env=$(snapshot)
   if PATH="$temporary/bin:$PATH" PAPERBOAT_TEST_DOCKER_MODE=wrong-env PAPERBOAT_TEST_RELEASE_ROOT="$release_root" run_test_publisher "$next_bundle" "$release_root" 2026.08.22.24 "$next_digest" >/dev/null 2>&1; then

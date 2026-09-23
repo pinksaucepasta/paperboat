@@ -1,0 +1,74 @@
+.nh
+.TH "PB-PREVIEW-INSPECT" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-preview-inspect - Show daemon-local HTTP captures
+
+
+.SH SYNOPSIS
+\fBpb preview inspect  [flags]\fP
+
+
+.SH DESCRIPTION
+Show daemon-local HTTP captures
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--body\fP[=false]
+	capture redacted request/response bodies with --enable
+
+.PP
+\fB--cursor\fP=""
+	continue after a capture cursor
+
+.PP
+\fB--disable\fP[=false]
+	disable capture for this resource
+
+.PP
+\fB--enable\fP[=false]
+	enable capture for this resource
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for inspect
+
+.PP
+\fB--id\fP=""
+	show one capture by ID
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+.PP
+\fB--limit\fP=20
+	maximum captures per request (1-100)
+
+.PP
+\fB--purge\fP[=false]
+	purge retained captures for this resource
+
+.PP
+\fB--raw\fP[=false]
+	retain exact raw requests for replay with --enable
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-preview(1)\fP

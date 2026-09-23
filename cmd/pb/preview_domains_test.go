@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -82,7 +83,8 @@ func TestPreviewCommandDomainsUsesCanonicalRequestAndSafeProjection(t *testing.T
 	command := previewCobraCommandV1()
 	var output lockedPreviewWriter
 	command.SetOut(&output)
-	command.SetErr(io.Discard)
+	var errorOutput lockedPreviewWriter
+	command.SetErr(&errorOutput)
 	command.SetArgs([]string{"3000", "--domain", "BÜCHER.Example.", "--domain", "APP.Example.com.", "--json"})
 	result := make(chan error, 1)
 	go func() { result <- command.ExecuteContext(ctx) }()
@@ -98,7 +100,7 @@ func TestPreviewCommandDomainsUsesCanonicalRequestAndSafeProjection(t *testing.T
 		}
 	}
 	deadline := time.After(2 * time.Second)
-	for output.Len() == 0 {
+	for bytes.Count(output.Bytes(), []byte("\n")) < 3 {
 		select {
 		case <-deadline:
 			t.Fatal("preview command did not publish JSON")
@@ -108,7 +110,7 @@ func TestPreviewCommandDomainsUsesCanonicalRequestAndSafeProjection(t *testing.T
 	}
 
 	var lease api.PreviewLease
-	if err := json.Unmarshal(output.Bytes(), &lease); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(output.Bytes())).Decode(&lease); err != nil {
 		t.Fatalf("JSON output = %q: %v", output.String(), err)
 	}
 	if lease.ID != "prv_domains" || lease.State != "ready" || lease.Endpoint == "" || len(lease.Domains) != 2 {
@@ -132,6 +134,32 @@ func TestPreviewCommandDomainsUsesCanonicalRequestAndSafeProjection(t *testing.T
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("preview command did not stop")
+	}
+	if errorOutput.Len() != 0 {
+		t.Fatalf("JSON emitted prose on stderr: %q", errorOutput.String())
+	}
+	decoder := json.NewDecoder(bytes.NewReader(output.Bytes()))
+	if err := decoder.Decode(&lease); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		var event struct {
+			OK   bool `json:"ok"`
+			Data struct {
+				Event     string                   `json:"event"`
+				PreviewID string                   `json:"preview_id"`
+				Domain    api.PreviewDomainSummary `json:"domain"`
+			} `json:"data"`
+		}
+		if err := decoder.Decode(&event); err != nil {
+			t.Fatal(err)
+		}
+		if !event.OK || event.Data.Event != "domain_status" || event.Data.PreviewID != lease.ID || event.Data.Domain.State != "ready" {
+			t.Fatalf("invalid domain event: %#v", event)
+		}
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		t.Fatalf("unexpected trailing output: %v", err)
 	}
 	mu.Lock()
 	gotRequests := append([]string(nil), requests...)
@@ -246,4 +274,70 @@ func (w *previewDomainTestWriter) String() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.buf.String()
+}
+
+type previewDomainFailWriter struct {
+	writes int
+	err    error
+}
+
+func (w *previewDomainFailWriter) Write(p []byte) (int, error) {
+	w.writes++
+	if w.writes > 1 {
+		return 0, w.err
+	}
+	return len(p), nil
+}
+func TestPreviewDomainJSONOutputFailureStopsSession(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var mu sync.Mutex
+	stopped := false
+	server := newPreviewCommandServer(t, func(r *http.Request, body map[string]any) (any, string, int) {
+		state, owner := "ready", "session_cli"
+		if r.Method == http.MethodPost {
+			state = "connecting"
+			owner = body["owner_session_id"].(string)
+		}
+		if r.Method == http.MethodDelete {
+			mu.Lock()
+			stopped = true
+			mu.Unlock()
+			state = "stopped"
+		}
+		value := previewDomainCommandLease(now, state, owner)
+		value["domains"] = value["domains"].([]map[string]any)[:1]
+		if state == "stopped" {
+			value["allocation_state"], value["edge_state"] = "released", "down"
+		}
+		return value, `"ptv1:preview_lease:cHJ2X2RvbWFpbnM:1"`, http.StatusOK
+	})
+	defer server.Close()
+	client := api.New(server.URL, config.Credential{AccessToken: "test-token"}, server.Client())
+	oldClient, oldMachine, oldCarrier := previewClientForCommand, previewMachineID, newPreviewCarrier
+	defer func() {
+		previewClientForCommand, previewMachineID, newPreviewCarrier = oldClient, oldMachine, oldCarrier
+	}()
+	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return client, nil }
+	previewMachineID = func() (string, error) { return "device_cli", nil }
+	newPreviewCarrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
+		return &cliPreviewCarrier{ready: make(chan struct{})}, nil
+	}
+	sentinel := errors.New("domain output failed")
+	output := &previewDomainFailWriter{err: sentinel}
+	command := previewCobraCommandV1()
+	command.SetOut(output)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{"3000", "--domain", "app.example.com", "--json"})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := command.ExecuteContext(ctx)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("output failure was lost: %v", err)
+	}
+	mu.Lock()
+	wasStopped := stopped
+	mu.Unlock()
+	if !wasStopped {
+		t.Fatal("output failure left preview active")
+	}
 }

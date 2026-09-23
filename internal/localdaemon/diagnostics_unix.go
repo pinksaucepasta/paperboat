@@ -10,6 +10,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 type diagnosticService struct {
@@ -25,7 +26,10 @@ func (s *diagnosticService) Diagnostics(context.Context) (localapi.DiagnosticSna
 	return localapi.DiagnosticSnapshot{Schema: localapi.DiagnosticSnapshotSchemaV1, ObservedAt: s.clock().UTC(), Recent: s.recorder.Recent(), DroppedRecords: stats.DroppedRecords, DroppedBytes: stats.DroppedBytes}, nil
 }
 
-func (s *diagnosticService) RecordBugreportMarker(_ context.Context, phase string) error {
+func (s *diagnosticService) RecordBugreportMarker(ctx context.Context, phase string) error {
+	if phase == "unexpected_cli_failure" || phase == "process_panic" {
+		return s.recorder.RecordWithSupportReference("cli", phase, "error", supportref.FromContext(ctx), nil)
+	}
 	return s.recorder.Record("bugreport", "reproduction_marker", "info", map[string]string{"phase": phase})
 }
 

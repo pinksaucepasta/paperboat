@@ -30,7 +30,7 @@ type fakeClient struct {
 
 func terminalHost(id, name, state string) api.UserMachine {
 	available := api.MachineCapability{Configured: true, Observed: true}
-	return api.UserMachine{ID: id, DisplayName: name, State: state, Online: state == "online", Capabilities: api.MachineCapabilities{TerminalHost: available}}
+	return api.UserMachine{ID: id, Alias: name, State: state, Online: state == "online", Capabilities: api.MachineCapabilities{TerminalHost: available}}
 }
 
 func (f *fakeClient) ListProjects(context.Context) ([]api.Project, error) {
@@ -117,7 +117,7 @@ func newTestResolver(fc *fakeClient) *APIResolver {
 func TestFindTargetAllowsUserMachineWithoutHostedPlan(t *testing.T) {
 	fc := &fakeClient{
 		projectsErr: &api.APIError{Code: "payment_required"},
-		machines:    []api.UserMachine{terminalHost("um_1", "Studio Mac", "online")},
+		machines:    []api.UserMachine{terminalHost("um_1", "studio-mac", "online")},
 	}
 	target, err := newTestResolver(fc).findTarget(context.Background(), "um_1")
 	if err != nil {
@@ -259,28 +259,28 @@ func TestResolveMatchesByID(t *testing.T) {
 	}
 }
 
-func TestResolveUserMachineByDisplayName(t *testing.T) {
+func TestResolveUserMachineByAlias(t *testing.T) {
 	term := readyTerminal()
 	term.Endpoints = api.TerminalEndpoints{QUIC: "quic://edge.paperboat.test:443", WSS: "wss://edge.paperboat.test/v1/runtime"}
 	fc := &fakeClient{
-		machines:   []api.UserMachine{terminalHost("um_1", "Studio Mac", "online")},
+		machines:   []api.UserMachine{terminalHost("um_1", "studio-mac", "online")},
 		connectSeq: []api.ConnectionDescriptor{readyUserMachineResponse(term)},
 	}
-	info, err := newTestResolver(fc).Resolve(context.Background(), ConnectRequest{Project: "studio mac"})
+	info, err := newTestResolver(fc).Resolve(context.Background(), ConnectRequest{Project: "studio-mac"})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if info.TargetKind != targetUserMachine || info.ProjectID != "um_1" || info.Project != "Studio Mac" || info.ProjectState != "online" {
+	if info.TargetKind != targetUserMachine || info.ProjectID != "um_1" || info.Project != "studio-mac" || info.ProjectState != "online" {
 		t.Fatalf("info = %+v", info)
 	}
 }
 
 func TestResolveUserMachineRevocationStopsWithoutPolling(t *testing.T) {
 	fc := &fakeClient{
-		machines:   []api.UserMachine{terminalHost("um_1", "Studio Mac", "disconnected")},
+		machines:   []api.UserMachine{terminalHost("um_1", "studio-mac", "disconnected")},
 		connectSeq: []api.ConnectionDescriptor{{UserMachineID: "um_1", UserMachineState: "disconnected", Status: "machine_revoked", Reason: "access_revoked"}},
 	}
-	_, err := newTestResolver(fc).Resolve(context.Background(), ConnectRequest{Project: "Studio Mac"})
+	_, err := newTestResolver(fc).Resolve(context.Background(), ConnectRequest{Project: "studio-mac"})
 	var apiErr *api.APIError
 	if !errors.As(err, &apiErr) || apiErr.Code != "machine_revoked" {
 		t.Fatalf("err=%v", err)
@@ -296,7 +296,7 @@ func TestResolveRejectsUserMachineDescriptorForDifferentMachine(t *testing.T) {
 	response := readyUserMachineResponse(term)
 	response.UserMachineID = "um_other"
 	fc := &fakeClient{
-		machines:   []api.UserMachine{terminalHost("um_1", "Studio Mac", "online")},
+		machines:   []api.UserMachine{terminalHost("um_1", "studio-mac", "online")},
 		connectSeq: []api.ConnectionDescriptor{response},
 	}
 	_, err := newTestResolver(fc).Resolve(context.Background(), ConnectRequest{Project: "um_1"})
@@ -309,7 +309,7 @@ func TestResolveUserMachineRebrokersAfterReadiness(t *testing.T) {
 	term := readyTerminal()
 	term.Endpoints = api.TerminalEndpoints{QUIC: "quic://edge.paperboat.test:443", WSS: "wss://edge.paperboat.test/v1/runtime"}
 	fc := &fakeClient{
-		machines: []api.UserMachine{terminalHost("um_1", "Studio Mac", "online")},
+		machines: []api.UserMachine{terminalHost("um_1", "studio-mac", "online")},
 		connectSeq: []api.ConnectionDescriptor{
 			{UserMachineID: "um_1", Connectable: false, Status: "connector_connecting"},
 			readyUserMachineResponse(term),
@@ -329,7 +329,7 @@ func TestResolveKeepsSelectedUserMachineSessionThroughReadinessPolling(t *testin
 	term := readyTerminal()
 	term.Endpoints = api.TerminalEndpoints{QUIC: "quic://edge.paperboat.test:443", WSS: "wss://edge.paperboat.test/v1/runtime"}
 	fc := &fakeClient{
-		machines: []api.UserMachine{terminalHost("um_1", "Studio Mac", "online")},
+		machines: []api.UserMachine{terminalHost("um_1", "studio-mac", "online")},
 		connectSeq: []api.ConnectionDescriptor{
 			{UserMachineID: "um_1", Connectable: false, Status: "connector_connecting"},
 			readyUserMachineResponse(term),
@@ -634,7 +634,7 @@ func TestResolveSkipsTargetLookupForResolvedMachine(t *testing.T) {
 	// resolved the machine: any listing result would contradict the request.
 	fc := &fakeClient{
 		projectsErr: errors.New("listing must not be called"),
-		machines:    []api.UserMachine{{ID: "um_other", DisplayName: "Other"}},
+		machines:    []api.UserMachine{{ID: "um_other", Alias: "other"}},
 		connectSeq:  []api.ConnectionDescriptor{readyUserMachineResponse(term)},
 	}
 	info, err := newTestResolver(fc).Resolve(context.Background(), ConnectRequest{

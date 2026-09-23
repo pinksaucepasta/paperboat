@@ -1,0 +1,58 @@
+.nh
+.TH "PB-ENV-SET" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-env-set - Set one environment variable through a hidden prompt or bounded stdin
+
+
+.SH SYNOPSIS
+\fBpb env set  [flags]\fP
+
+
+.SH DESCRIPTION
+Set one environment variable through a hidden prompt or bounded stdin
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for set
+
+.PP
+\fB--json\fP[=false]
+	print redacted JSON metadata
+
+.PP
+\fB--machine\fP=""
+	machine name or ID; defaults to the personal scope
+
+.PP
+\fB--team\fP=""
+	team scope; cannot be combined with --machine
+
+.PP
+\fB--value-file\fP=""
+	read the raw value from an absolute file path
+
+.PP
+\fB--value-stdin\fP[=false]
+	read the raw value from non-interactive stdin
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-env(1)\fP

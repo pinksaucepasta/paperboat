@@ -29,6 +29,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelcreatejournal"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelenrollment"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
+	"github.com/pinksaucepasta/paperboat/internal/prompt"
 	"github.com/spf13/cobra"
 )
 
@@ -321,11 +322,12 @@ func (e *TunnelOperationWaitTimeoutError) Error() string {
 // TunnelCreateChangedError means durable tunnel state exists and must not be
 // silently recreated or rolled back after a later local/domain step failed.
 type TunnelCreateChangedError struct {
-	TunnelID        string
-	Stage           string
-	Outcome         string
-	RecoveryCommand string
-	Cause           error
+	TunnelID         string
+	Stage            string
+	Outcome          string
+	OutcomeUncertain bool
+	RecoveryCommand  string
+	Cause            error
 }
 
 // TunnelCreateExistingError reports the exact durable tunnel that already
@@ -445,6 +447,12 @@ func tunnelCobraCommandV1() *cobra.Command {
 	}, RunE: func(command *cobra.Command, args []string) error {
 		ephemeral, _ := command.Flags().GetBool("ephemeral")
 		if !ephemeral {
+			if jsonOutputRequested(command) {
+				return invocationError(errors.New("tunnel --json requires a subcommand or --ephemeral target"))
+			}
+			if previewInteractiveTerminal(command) {
+				return actionHomeTunnelList(command)
+			}
 			return command.Help()
 		}
 		return runPreviewCobra(command, args)
@@ -1308,7 +1316,7 @@ func tunnelCreateConnectorError(tunnelID string, err error) error {
 	if errors.Is(err, tunnelenrollment.ErrUnavailable) || errors.Is(err, tunnelenrollment.ErrActivation) || errors.Is(err, context.DeadlineExceeded) {
 		outcome = "has an uncertain outcome"
 	}
-	return &TunnelCreateChangedError{TunnelID: tunnelID, Stage: "connector activation", Outcome: outcome, RecoveryCommand: "pb tunnel connector add " + tunnelID, Cause: err}
+	return &TunnelCreateChangedError{TunnelID: tunnelID, Stage: "connector activation", Outcome: outcome, OutcomeUncertain: outcome != "failed", RecoveryCommand: "pb tunnel connector add " + tunnelID, Cause: err}
 }
 
 func tunnelCreateDomainError(tunnelID, hostname, routeID, stage string, err error) error {
@@ -1317,11 +1325,12 @@ func tunnelCreateDomainError(tunnelID, hostname, routeID, stage string, err erro
 
 func tunnelCreateJournalError(tunnelID, stage, recovery string, err error) error {
 	return &TunnelCreateChangedError{
-		TunnelID:        tunnelID,
-		Stage:           stage,
-		Outcome:         "has an uncertain outcome",
-		RecoveryCommand: recovery,
-		Cause:           err,
+		TunnelID:         tunnelID,
+		Stage:            stage,
+		Outcome:          "has an uncertain outcome",
+		OutcomeUncertain: true,
+		RecoveryCommand:  recovery,
+		Cause:            err,
 	}
 }
 
@@ -1351,11 +1360,42 @@ func tunnelCreateHumanOutput(result tunnelCreateOutput, origin string) string {
 	return output.String()
 }
 
+var promptTunnelCreateName = prompt.Text
+
+func tunnelCreateNameArgs(command *cobra.Command, args []string) error {
+	if len(args) == 1 {
+		return nil
+	}
+	if len(args) == 0 && !jsonOutputRequested(command) && previewInteractiveTerminal(command) {
+		return nil
+	}
+	return invocationError(errors.New("tunnel create requires one name; use `pb tunnel create NAME --port PORT`"))
+}
+func validateTunnelCreateName(name string) error {
+	if !validTunnelCLIName(name, 63) {
+		return errors.New("name must be 1-63 ASCII letters, digits, '.', '_' or '-' and cannot start with punctuation")
+	}
+	return nil
+}
 func tunnelCreateCommand() *cobra.Command {
-	command := tunnelCommand("create <name>", "Create a durable tunnel", cobra.ExactArgs(1), func(command *cobra.Command, args []string) (runErr error) {
+	command := tunnelCommand("create <name>", "Create a durable tunnel", tunnelCreateNameArgs, func(command *cobra.Command, args []string) (runErr error) {
+		if len(args) == 0 {
+			if err := tunnelCreateNameArgs(command, args); err != nil {
+				return err
+			}
+			input, _ := command.InOrStdin().(*os.File)
+			name, err := promptTunnelCreateName(prompt.TextOptions{Context: command.Context(), Title: "Create a durable tunnel", Description: "Choose a name for this tunnel. It keeps running after this command exits.", Placeholder: "my-app", Stdin: input, Output: command.ErrOrStderr(), Validate: validateTunnelCreateName})
+			if interactiveCanceled(err) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			args = []string{name}
+		}
 		name := args[0]
-		if !validTunnelCLIName(name, 63) {
-			return errors.New("name must be 1-63 ASCII letters, digits, '.', '_' or '-' and cannot start with punctuation")
+		if err := validateTunnelCreateName(name); err != nil {
+			return err
 		}
 		origin, _ := command.Flags().GetString("from")
 		port, _ := command.Flags().GetInt("port")

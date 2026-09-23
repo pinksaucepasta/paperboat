@@ -25,10 +25,14 @@ func NewRecorder(config DiskConfig) (*Recorder, error) {
 }
 
 func (r *Recorder) Record(category, code, severity string, fields map[string]string) error {
+	return r.RecordWithSupportReference(category, code, severity, "", fields)
+}
+
+func (r *Recorder) RecordWithSupportReference(category, code, severity, reference string, fields map[string]string) error {
 	if r == nil || r.memory == nil || r.disk == nil || r.clock == nil {
 		return ErrInvalid
 	}
-	event, err := NewEvent(r.clock().UTC(), category, code, severity, fields)
+	event, err := NewEventWithSupportReference(r.clock().UTC(), category, code, severity, reference, fields)
 	if err != nil {
 		return err
 	}

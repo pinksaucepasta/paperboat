@@ -7,7 +7,7 @@ versioned `User-Agent`. Unsupported protocols must be rejected with HTTP 426 or
 retry.
 
 - Never put device, access, or refresh tokens in URLs or logs.
-- A rejected access token requires `pb auth login`; there is no local-shell fallback.
+- A rejected session requires enrollment using the command from the dashboard; there is no local-shell fallback.
 - Upload failures are fail-open only for the affected paste. Image bytes and paths are never logged.
 - For a stolen device, revoke its client session in the dashboard, then run `pb auth logout`.
 - During outages, use `pb doctor`; never bypass the common Paperboat transport or expose a raw
@@ -46,7 +46,7 @@ owning repositories.
 
 Pushing a validated `YYYY.MM.DD.X` tag runs `.github/workflows/release.yml`. It builds the
 five native assets, verifies their GitHub API-reported size and digest, signs the five TUF
-asset targets, and atomically publishes `current.json`, installers, and TUF metadata. The
+asset targets, and atomically publishes installers and TUF metadata. The
 server publishes metadata only; installers and runtime updates download executable bytes from
 the immutable GitHub release URLs recorded in the signed metadata.
 
@@ -230,3 +230,69 @@ definitions. Keep `/var/lib/paperboat` and `/workspace` persistent, distinct, an
 only to the Paperboat container. The supplied definitions make the root filesystem read-only
 and do not publish any host port. A pod eviction, image replacement, node failure, or an
 administrator container restart is supervisor-class maintenance, not an invisible update.
+
+### Native operational telemetry
+
+Official native releases report by default using release-injected DSN/release values;
+`PB_SENTRY_ENABLED=false` disables export. Ordinary source builds have no destination
+and require `PB_SENTRY_ENABLED=true`, their own HTTPS `PB_SENTRY_DSN`, and
+`PB_SENTRY_RELEASE`. Explicit destination/release settings override build defaults.
+These defaults are not an attestation mechanism: client reports remain untrusted.
+When enabled, safe operational logs and
+metrics default on; `PB_SENTRY_LOGS_ENABLED=false` and
+`PB_SENTRY_METRICS_ENABLED=false` independently disable them.
+`PB_SENTRY_TRACES_SAMPLE_RATE` defaults to `0.1`; use `0` to disable sampled
+traces. Values must be finite numbers from zero through one.
+`PB_SENTRY_ENVIRONMENT` defaults to `production`. Boolean overrides accept only
+`true` or `false`; malformed signal configuration disables the exporter.
+
+The command boundary records fixed command families and success, failure,
+rejection or cancellation. The owned control API client records request outcomes
+and sampled child spans without URL paths, arguments, bodies or headers. It sends
+`sentry-trace` only to its configured Paperboat server origin and never sends
+baggage; uploads to other origins receive neither. Runtime lifecycle events export
+approved lifecycle stages (`component_start`, `component_shutdown`,
+`component_rollback`), fixed failure/cancel/deadline codes, health dimensions and
+outcomes. Stable daemon startup, failed-start cleanup, retry recovery and shutdown
+export directly at their owning lifecycle boundary even when no EventLog is
+configured; component names use a fixed allowlist. Diagnostic records export only a fixed
+operational category and severity-derived outcome. Failure capture includes a
+sanitized stack and support reference. Runtime events outside an active request
+use the process support reference, rather than inventing distributed parentage.
+
+The built-in native metric registry is sampled every 30 seconds and on shutdown.
+Gauges keep their names; cumulative counters become `<name>_snapshot` gauges;
+histograms export `<name>_sum_snapshot` and `<name>_count_snapshot`. Fixed registry
+labels use `dimension.<label>`. Custom metric schemas and histogram buckets remain
+local. These snapshots preserve cumulative evidence across missed deliveries.
+`paperboat.operation.count` and `paperboat.operation.duration` provide bounded
+operation samples; duration is in seconds. References and trace IDs are excluded
+from metric dimensions.
+
+Each process limits operational logs to 120/minute, operation metric observations
+to 600/minute, trace starts to 120/minute, and errors to 3/minute. Registry sampling
+has its own budget of 100 observations per flush (one SDK metric batch), independent
+of the operation budget. At most four registries and 8,192 candidate samples per
+registry are considered. Sorted series rotate across flushes so large registries
+do not permanently hide later series; cumulative values are never converted into
+sampled increments. `Reporter.SnapshotDropped()` counts omitted snapshot
+observations, including budget overflow; a later rotation can export their newer
+cumulative value. The SDK transport queue holds eight envelopes; overflow and provider
+outages can lose exported telemetry. `Reporter.Dropped()` exposes local signal
+budget drops; it is not a provider-delivery receipt. Shutdown flush waits at most
+two seconds for SDK delivery. Local diagnostics remain available when export is
+disabled. Export never reads terminal contents, files, environment values or raw
+logs. SDK hostname/default attributes are removed before export.
+
+Coverage is operational rather than function-level: request traces cover the
+configured control API and command execution, including machine pairing, helper
+and machine identity renewal, environment/peer/tunnel enrollment, config sync,
+connector admission, runtime/preview observations, preview attachments, private
+and browser authorization, inspector authorization, JWKS and revocation refresh.
+The same origin restriction applies to these independent native clients.
+Encrypted peer transport and
+customer tunneled HTTP are not transparently traced. Lifecycle logs describe
+failure/recovery, while registry snapshots preserve application/resource state.
+Actual SaaS delivery requires a configured project and must be verified separately;
+local envelope tests establish serialization and correlation, not delivery to a
+live Sentry account.

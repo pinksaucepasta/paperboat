@@ -20,7 +20,7 @@ func TestBootstrapFinalizationRetainsExpiredMaterialWithoutRenewingAuthority(t *
 	if err := bootstrap.SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}
-	reloaded, err := bootstrap.LoadResume(root, record.ServerURL, record.PublicIdentityKey, "", record.DisplayName, record.SetupMode, now)
+	reloaded, err := bootstrap.LoadResume(root, record.ServerURL, record.PublicIdentityKey, "", record.Alias, record.SetupMode, now)
 	if !errors.Is(err, bootstrap.ErrResumeExpired) || !reloaded.RuntimeReady {
 		t.Fatalf("finalization checkpoint lost: ready=%t err=%v", reloaded.RuntimeReady, err)
 	}

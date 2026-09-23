@@ -13,11 +13,11 @@ import (
 	hostserver "github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
-	"github.com/tailscale/tailcat"
 	"tailscale.com/tailcfg"
 	"tailscale.com/tstest/integration"
 )
@@ -135,7 +135,7 @@ func TestNativePrivateHTTP3AuthorizedDERPWorkflow(t *testing.T) {
 
 }
 
-func startNativeHTTP3Server(t *testing.T, owner *native.Owner, authority *tailnet.Authority, region *tailcfg.DERPRegion, origin string, captureStore *inspector.Store) (tailcat.Addr, <-chan struct{}) {
+func startNativeHTTP3Server(t *testing.T, owner *native.Owner, authority *tailnet.Authority, region *tailcfg.DERPRegion, origin string, captureStore *inspector.Store) (mesh.Addr, <-chan struct{}) {
 	t.Helper()
 	server, err := authority.Listen(region)
 	if err != nil {

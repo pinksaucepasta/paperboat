@@ -9,13 +9,12 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 )
 
 type countingRuntimeEnrollmentClient struct {
@@ -52,20 +51,10 @@ func TestUnixRuntimeEnrollmentResumesCrashBeforeCheckpointWithoutCredentialRepla
 	if err := bootstrap.SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}
-	artifactPath := filepath.Join(t.TempDir(), "pb")
-	if err := os.WriteFile(artifactPath, []byte("verified"), 0o700); err != nil {
+	artifactPath, _, err := installsource.Current()
+	if err != nil {
 		t.Fatal(err)
 	}
-	previousFetcher := fetchBootstrapArtifact
-	previousMaterializer := materializeBootstrapArtifact
-	fetchBootstrapArtifact = func(context.Context, bootstrap.ArtifactTarget, string, *http.Client) (string, error) {
-		return artifactPath, nil
-	}
-	materializeBootstrapArtifact = func(_ context.Context, path string) (string, error) { return path, nil }
-	defer func() {
-		fetchBootstrapArtifact = previousFetcher
-		materializeBootstrapArtifact = previousMaterializer
-	}()
 	crash := errors.New("simulated crash before runtime checkpoint")
 	_, err = prepareUnixBootstrapRuntime(context.Background(), &material, root, server.Client(), counting, false, func() error {
 		record.RuntimeEnrolled = true

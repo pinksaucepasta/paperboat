@@ -124,10 +124,9 @@ jobs:
           live_bundle="$RUNNER_TEMP/paperboat-live-release.tgz"
           staged="$RUNNER_TEMP/paperboat-tuf-refresh"
           ssh -i "$HOME/.ssh/paperboat-release" -o BatchMode=yes -o StrictHostKeyChecking=yes "root@$RELEASE_HOST" \
-            'tar -C /opt/paperboat/releases/current -czf - current.json install windows tuf' > "$live_bundle"
+            'tar -C /opt/paperboat/releases/current -czf - install windows tuf' > "$live_bundle"
           mkdir -p "$staged"
           tar -C "$staged" -xzf "$live_bundle"
-          test -f "$staged/current.json"
           test -f "$staged/install"
           test -f "$staged/windows"
           test -d "$staged/tuf/metadata"
@@ -149,21 +148,25 @@ jobs:
           if new_timestamp['signed']['version'] <= old_timestamp['signed']['version']:
               raise SystemExit('refreshed timestamp version is not strictly greater than the live version')
           PY
-          release_version=$(python3 - "$staged/current.json" <<'PY'
+          release_version=$(python3 - "$staged/tuf/metadata/targets.json" <<'PY'
           import json
           import pathlib
           import re
           import sys
 
           value = json.loads(pathlib.Path(sys.argv[1]).read_text())
-          version = value.get('version')
-          if value.get('schema') != 'paperboat.release-current/v1' or not isinstance(version, str) or not re.fullmatch(r'20[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.(0|[1-9][0-9]*)', version):
-              raise SystemExit('live current.json has an invalid release identity')
+          targets = value.get('signed', {}).get('targets', {})
+          versions = {target.get('custom', {}).get('version') for target in targets.values()}
+          if len(targets) != 5 or len(versions) != 1:
+              raise SystemExit('live TUF targets have an invalid release identity')
+          version = versions.pop()
+          if not isinstance(version, str) or not re.fullmatch(r'20[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.(0|[1-9][0-9]*)', version):
+              raise SystemExit('live TUF targets have an invalid release version')
           print(version)
           PY
           )
           bundle="$RUNNER_TEMP/paperboat-tuf-refresh-$release_version.tgz"
-          tar -C "$staged" -czf "$bundle" current.json install windows tuf
+          tar -C "$staged" -czf "$bundle" install windows tuf
           digest=$(sha256sum "$bundle" | awk '{print $1}')
           {
             printf 'PAPERBOAT_REFRESH_VERSION=%s\n' "$release_version"

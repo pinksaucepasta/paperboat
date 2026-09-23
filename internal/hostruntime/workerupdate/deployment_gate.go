@@ -201,7 +201,7 @@ func validateActivationPolicy(release Release) error {
 }
 
 func ValidateActivationRelease(release Release) error {
-	if validateRelease(release) != nil || ValidateActivationPolicy(release) != nil {
+	if release.LocalSource != nil || validateRelease(release) != nil || ValidateActivationPolicy(release) != nil {
 		return ErrInvalidDeploymentGate
 	}
 	return nil

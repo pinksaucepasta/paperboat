@@ -226,13 +226,15 @@ type TransportConsumer struct {
 }
 
 type Snapshot struct {
-	Schema        string          `json:"schema"`
-	Generation    uint64          `json:"generation"`
-	ObservedAt    time.Time       `json:"observed_at"`
-	DaemonState   string          `json:"daemon_state"`
-	DaemonVersion string          `json:"daemon_version"`
-	Health        []HealthItem    `json:"health"`
-	Machines      []MachineStatus `json:"machines"`
+	Schema             string          `json:"schema"`
+	Generation         uint64          `json:"generation"`
+	ObservedAt         time.Time       `json:"observed_at"`
+	DaemonState        string          `json:"daemon_state"`
+	DaemonVersion      string          `json:"daemon_version"`
+	DeviceSuffix       string          `json:"device_suffix,omitempty"`
+	DeviceLoopbackCIDR string          `json:"device_loopback_cidr,omitempty"`
+	Health             []HealthItem    `json:"health"`
+	Machines           []MachineStatus `json:"machines"`
 }
 
 type StatusEvent struct {
@@ -269,7 +271,7 @@ func (o TransportObservation) Validate() error {
 }
 
 func (s Snapshot) Validate() error {
-	if s.Schema != SnapshotSchemaV1 || s.Generation == 0 || s.ObservedAt.IsZero() || !oneOf(s.DaemonState, "starting", "ready", "degraded", "draining", "stopping") || !safeValue(s.DaemonVersion) || len(s.Machines) > maxMachines {
+	if s.Schema != SnapshotSchemaV1 || s.Generation == 0 || s.ObservedAt.IsZero() || !oneOf(s.DaemonState, "starting", "ready", "degraded", "draining", "stopping", "awaiting_enrollment") || !safeValue(s.DaemonVersion) || len(s.Machines) > maxMachines {
 		return ErrInvalidResponse
 	}
 	for _, item := range s.Health {

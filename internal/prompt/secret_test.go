@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestSecretModelPreservesRawWhitespaceAndAllowsEmpty(t *testing.T) {
@@ -40,5 +41,33 @@ func TestSecretModelRejectsValueOverByteLimit(t *testing.T) {
 	result := updated.(secretModel)
 	if command != nil || result.confirmed || result.err == nil || !strings.Contains(result.err.Error(), "3 bytes") {
 		t.Fatalf("oversized value accepted: confirmed=%t err=%v command=%v", result.confirmed, result.err, command)
+	}
+}
+
+func TestSecretModelClearsLimitErrorWhenEdited(t *testing.T) {
+	model := secretModel{options: SecretOptions{MaxBytes: 3}, width: 24}
+	model.input = textinput.New()
+	model.input.Focus()
+	model.input.SetValue("1234")
+	updated, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	result := updated.(secretModel)
+	if command != nil || result.err == nil {
+		t.Fatalf("oversized value command=%v error=%v", command, result.err)
+	}
+	updated, _ = result.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	result = updated.(secretModel)
+	if result.err != nil {
+		t.Fatalf("editing left stale limit error: %v", result.err)
+	}
+}
+
+func TestSecretViewFitsNarrowWidth(t *testing.T) {
+	model := secretModel{options: SecretOptions{Title: strings.Repeat("secret", 8), Description: strings.Repeat("description", 8)}, width: 7}
+	model.input = textinput.New()
+	model.input.Placeholder = strings.Repeat("value", 8)
+	for _, line := range strings.Split(model.View(), "\n") {
+		if width := ansi.StringWidth(line); width > 7 {
+			t.Fatalf("line width=%d: %q", width, line)
+		}
 	}
 }

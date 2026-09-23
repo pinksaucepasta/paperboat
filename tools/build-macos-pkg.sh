@@ -65,6 +65,10 @@ codesign --force --sign - --timestamp=none "$helper_payload"
 ln -s "$canonical_helper" "$cli_payload"
 codesign --verify --strict "$helper_payload"
 
+# Keep direct PKG installs complete, with manuals from this exact signed binary.
+"$helper_payload" --no-customization __man-pages --directory "$payload/usr/local/share/man"
+chmod 0755 "$payload/usr/local/share" "$payload/usr/local/share/man" "$payload/usr/local/share/man/man1"
+
 pkgbuild \
   --root "$payload" \
   --identifier dev.pprbt.paperboat \

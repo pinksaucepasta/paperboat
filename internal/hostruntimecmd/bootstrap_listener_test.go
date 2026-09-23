@@ -21,7 +21,7 @@ func TestFreshBootstrapCannotReplaceExistingEnrollment(t *testing.T) {
 	if err := store.SaveRegistration(identity.Registration{ServerURL: "https://api.example.test", MachineID: "machine_1", EnvironmentID: "env_1", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, SetupRoles: []string{"interactive"}, UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
-	if err := rejectFreshBootstrapOverEnrollment(store, bootstrap.ErrResumeNotFound); err == nil || !strings.Contains(err.Error(), "pb uninstall") {
+	if err := rejectFreshBootstrapOverEnrollment(store, bootstrap.ErrResumeNotFound); err == nil || !strings.Contains(err.Error(), "pb uninstall") || !strings.Contains(err.Error(), "pb setup --name <device-alias>") {
 		t.Fatalf("guard error=%v", err)
 	}
 	if err := rejectFreshBootstrapOverEnrollment(store, nil); err != nil {

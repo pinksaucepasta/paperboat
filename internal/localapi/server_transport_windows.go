@@ -70,7 +70,7 @@ func validSID(value string) bool {
 }
 
 func pipeSecurityDescriptor(ownerSID string) string {
-	return "D:P(A;;GWGR;;;SY)(A;;GWGR;;;" + ownerSID + ")"
+	return "O:" + ownerSID + "D:P(A;;GWGR;;;SY)(A;;GWGR;;;" + ownerSID + ")"
 }
 
 type pipeListener struct {

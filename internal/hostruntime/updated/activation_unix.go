@@ -224,6 +224,9 @@ func syncUnixDirectory(path string) error {
 }
 
 func (s *Service) queueActivation(ctx context.Context, manual bool) (workerupdate.Result, error) {
+	if !manual && !s.config.AutomaticUpdates {
+		return workerupdate.Result{Version: s.config.Active.Version}, nil
+	}
 	result := workerupdate.Result{Version: s.currentManager().ActiveVersion()}
 	lock, err := unixActivationLock(s.config.StateRoot)
 	if errors.Is(err, ErrActivationPending) {
@@ -233,6 +236,9 @@ func (s *Service) queueActivation(ctx context.Context, manual bool) (workerupdat
 		return result, err
 	}
 	defer lock.Close()
+	if pending, err := nativeInstallPending(s.config.StateRoot); err != nil || pending {
+		return result, errors.Join(ErrActivationPending, err)
+	}
 	handoff, err := readUnixHandoff(s.config.StateRoot)
 	if err != nil {
 		return result, err
@@ -265,7 +271,11 @@ func (s *Service) queueActivation(ctx context.Context, manual bool) (workerupdat
 	if state.Quarantined && state.CandidateVersion == release.Version {
 		return result, workerupdate.ErrQuarantined
 	}
-	if err = s.source.AuthorizeRecovery(ctx, s.config.Active.Version, s.config.Active.Platform, s.config.Active.Architecture); err != nil {
+	if s.config.Active.LocalSource == nil {
+		if err = s.source.AuthorizeRecovery(ctx, s.config.Active.Version, s.config.Active.Platform, s.config.Active.Architecture); err != nil {
+			return result, err
+		}
+	} else if err = s.config.Active.LocalSource.Verify(s.config.Binary); err != nil {
 		return result, err
 	}
 	baseline, err := s.config.Participants.Probe(ctx)
@@ -328,6 +338,9 @@ func (s *Service) RunActivationHelper(ctx context.Context) error {
 	}
 	if handoff == nil {
 		return s.config.ActivationController.Retire(ctx)
+	}
+	if !s.config.AutomaticUpdates && !handoff.Manual && !handoff.Started {
+		return retireUnixHandoff(ctx, s.config.StateRoot, s.config.ActivationController)
 	}
 	executable, err := os.Executable()
 	if err != nil {

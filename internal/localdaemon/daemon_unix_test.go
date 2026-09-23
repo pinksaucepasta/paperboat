@@ -98,11 +98,11 @@ func TestProcessLockIsExclusiveAndRejectsUnsafePath(t *testing.T) {
 
 func TestDaemonPublishesSnapshotServesAPIAndStopsCleanly(t *testing.T) {
 	paths := daemonTestPaths(t)
-	source := &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_1", DisplayName: "Studio Mac", Online: true, InstallationGeneration: 4}}}}}
+	source := &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio-mac", Online: true, InstallationGeneration: 4}}}}}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(ctx, DaemonConfig{Paths: paths, Source: source, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), RefreshInterval: time.Second, RequestTimeout: time.Second})
+		done <- Run(ctx, DaemonConfig{Paths: paths, Source: source, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), RefreshInterval: time.Second, RequestTimeout: time.Second, DeviceSuffix: "mydev", DeviceLoopbackCIDR: "127.212.0.0/16"})
 	}()
 	waitForDaemonSocket(t, paths.SocketPath)
 	client, err := localapi.NewClient(paths.SocketPath, time.Second)
@@ -110,7 +110,7 @@ func TestDaemonPublishesSnapshotServesAPIAndStopsCleanly(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot, err := client.Snapshot(context.Background())
-	if err != nil || snapshot.DaemonState != "ready" || len(snapshot.Machines) != 1 || snapshot.Machines[0].Alias != "Studio Mac" {
+	if err != nil || snapshot.DaemonState != "ready" || len(snapshot.Machines) != 1 || snapshot.Machines[0].Alias != "studio-mac" || snapshot.DeviceSuffix != "mydev" || snapshot.DeviceLoopbackCIDR != "127.212.0.0/16" {
 		t.Fatalf("snapshot=%#v err=%v", snapshot, err)
 	}
 	now := time.Now().UTC()
@@ -188,7 +188,7 @@ func TestDaemonNativeFileTransferIPCResumesLostCommitExactly(t *testing.T) {
 		t.Fatal(err)
 	}
 	paths := daemonTestPaths(t)
-	source := &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_destination", DisplayName: "Destination", Online: true, InstallationGeneration: 1}}}}}
+	source := &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_destination", Alias: "destination", Online: true, InstallationGeneration: 1}}}}}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
@@ -269,7 +269,7 @@ func (s *managedSSHReadinessTestSource) SetManagedSSHReadiness(ready bool, code 
 
 func (s *managedSSHReadinessTestSource) ListUserMachines(context.Context) ([]api.UserMachine, error) {
 	return []api.UserMachine{{
-		ID: "machine_1", DisplayName: "Studio Mac", Online: true, InstallationGeneration: 4,
+		ID: "machine_1", Alias: "studio-mac", Online: true, InstallationGeneration: 4,
 		SSHLocalReady: s.ready, SSHLocalCode: s.code,
 		SSHAuthority: api.SSHAuthority{TargetGeneration: 4, HostKeyGeneration: 4},
 	}}, nil

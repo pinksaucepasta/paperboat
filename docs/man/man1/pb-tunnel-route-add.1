@@ -1,0 +1,130 @@
+.nh
+.TH "PB-TUNNEL-ROUTE-ADD" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel-route-add - Add a tunnel route
+
+
+.SH SYNOPSIS
+\fBpb tunnel route add  [flags]\fP
+
+
+.SH DESCRIPTION
+Add a tunnel route
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--ca-reference\fP=""
+	protected custom CA reference
+
+.PP
+\fB--clear-ca-reference\fP[=false]
+	remove the custom CA reference
+
+.PP
+\fB--clear-client-credential-reference\fP[=false]
+	remove the origin mTLS credential reference
+
+.PP
+\fB--clear-host-header\fP[=false]
+	remove the origin Host override
+
+.PP
+\fB--clear-tls-server-name\fP[=false]
+	remove the explicit origin TLS server name
+
+.PP
+\fB--client-credential-reference\fP=""
+	protected origin mTLS credential reference
+
+.PP
+\fB--connect-timeout\fP=10s
+	origin connect timeout
+
+.PP
+\fB--domain\fP=""
+	exact hostname or one-label wildcard match
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for add
+
+.PP
+\fB--host-header\fP=""
+	override the origin Host header
+
+.PP
+\fB--idle-timeout\fP=5m0s
+	stream idle timeout
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+.PP
+\fB--max-streams\fP=128
+	maximum concurrent streams
+
+.PP
+\fB--name\fP=""
+	name
+
+.PP
+\fB--path\fP=""
+	HTTP path prefix, optionally ending in *
+
+.PP
+\fB--preserve-host\fP[=true]
+	preserve the incoming Host header
+
+.PP
+\fB--priority\fP=0
+	route priority
+
+.PP
+\fB--protocol\fP="http"
+	route protocol (http, tcp, or tcp_private)
+
+.PP
+\fB--timeout\fP=2m0s
+	maximum time to wait for operation completion
+
+.PP
+\fB--tls-server-name\fP=""
+	explicit origin TLS server name
+
+.PP
+\fB--tls-verification\fP=""
+	origin TLS verification (system, custom_ca, or insecure_development)
+
+.PP
+\fB--to\fP=""
+	to
+
+.PP
+\fB--wait\fP[=false]
+	wait for the operation to reach a terminal state
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-tunnel-route(1)\fP

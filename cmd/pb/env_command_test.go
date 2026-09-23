@@ -296,9 +296,9 @@ func TestEnvironmentVariableListCommandReportsNamesWithoutValues(t *testing.T) {
 }
 
 func TestEnvironmentVariableHostFilteringAndCaseInsensitiveNames(t *testing.T) {
-	clientOnly := api.UserMachine{ID: "client", DisplayName: "Client"}
-	hostByMode := api.UserMachine{ID: "host-mode", DisplayName: "Device one", Capabilities: api.MachineCapabilities{EnvironmentInjection: api.MachineCapability{Configured: true}}}
-	hostByRole := api.UserMachine{ID: "host-role", DisplayName: "Device two", Capabilities: api.MachineCapabilities{EnvironmentInjection: api.MachineCapability{Configured: true}}}
+	clientOnly := api.UserMachine{ID: "client", Alias: "client"}
+	hostByMode := api.UserMachine{ID: "host-mode", Alias: "device-one", Capabilities: api.MachineCapabilities{EnvironmentInjection: api.MachineCapability{Configured: true}}}
+	hostByRole := api.UserMachine{ID: "host-role", Alias: "device-two", Capabilities: api.MachineCapabilities{EnvironmentInjection: api.MachineCapability{Configured: true}}}
 	filtered := environmentVariableMachines([]api.UserMachine{clientOnly, hostByMode, hostByRole})
 	if len(filtered) != 2 || filtered[0].ID != hostByMode.ID || filtered[1].ID != hostByRole.ID {
 		t.Fatalf("filtered machines=%+v", filtered)
@@ -315,11 +315,11 @@ func TestEnvironmentVariableHostFilteringAndCaseInsensitiveNames(t *testing.T) {
 }
 
 func TestEnvironmentVariableScopePickerUsesPersonalScopeAndExplicitHostSelections(t *testing.T) {
-	items := environmentVariableScopePickerItems([]api.UserMachine{{ID: "host_1", DisplayName: "Host one", Capabilities: api.MachineCapabilities{EnvironmentInjection: api.MachineCapability{Configured: true}}}})
+	items := environmentVariableScopePickerItems([]api.UserMachine{{ID: "host_1", Alias: "host-one", Capabilities: api.MachineCapabilities{EnvironmentInjection: api.MachineCapability{Configured: true}}}})
 	if len(items) != 2 || items[0].ID != "personal" || items[0].Title != "Personal" || strings.Contains(items[0].Description, "every connected") || !strings.Contains(items[0].Description, "explicit host selections") {
 		t.Fatalf("personal picker item=%+v", items[0])
 	}
-	if items[1].ID != "host_1" || items[1].Title != "Host one" {
+	if items[1].ID != "host_1" || items[1].Title != "host-one" {
 		t.Fatalf("host picker item=%+v", items[1])
 	}
 }
@@ -347,7 +347,7 @@ func TestSafeEnvironmentVariableCommandErrorUsesCurrentVaultRecoveryActions(t *t
 func TestEnvironmentVariableTargetRejectsClientMachineLocally(t *testing.T) {
 	previous := environmentVariableResolveMachine
 	environmentVariableResolveMachine = func(context.Context, *api.Client, string) (api.UserMachine, error) {
-		return api.UserMachine{ID: "client", DisplayName: "Client"}, nil
+		return api.UserMachine{ID: "client", Alias: "client"}, nil
 	}
 	defer func() { environmentVariableResolveMachine = previous }()
 

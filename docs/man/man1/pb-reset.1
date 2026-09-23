@@ -1,0 +1,58 @@
+.nh
+.TH "PB-RESET" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-reset - Remove the current Paperboat setup before fresh enrollment
+
+
+.SH SYNOPSIS
+\fBpb reset [flags]\fP
+
+
+.SH DESCRIPTION
+Remove the current Paperboat setup before fresh enrollment
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--confirmation\fP=""
+	exact confirmation phrase: RESET PAPERBOAT
+
+.PP
+\fB--enrollment-token-file\fP=""
+	absolute owner-only dashboard enrollment token file
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for reset
+
+.PP
+\fB--hostname\fP=""
+	exact current hostname confirmation
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--state-root\fP=""
+	additional Paperboat runtime state directory to remove
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb(1)\fP

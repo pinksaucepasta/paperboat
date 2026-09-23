@@ -276,7 +276,7 @@ func renderOwnedOpenSSHConfig(config OpenSSHConfig) ([]byte, error) {
 			return nil, ErrOpenSSHConfigConflict
 		}
 		seen[host] = struct{}{}
-		fmt.Fprintf(&targets, "Host %s\n    Port %d\n", openSSHHostPatterns(host, target.DisplayName, config.AliasSuffix), target.Port)
+		fmt.Fprintf(&targets, "Host %s\n    Port %d\n", host, target.Port)
 	}
 	return []byte(openSSHBeginMarker + "\n" + targets.String() + "Host *." + config.AliasSuffix + "\n" + "    ProxyCommand " + config.ProxyCommand + "\n" + "    KnownHostsCommand " + config.KnownHostsCommand + "\n" + "    IdentityAgent \"" + strings.ReplaceAll(config.AgentSocket, "\\", "\\\\") + "\"\n" + "    IdentityFile \"" + strings.ReplaceAll(config.IdentityFile, "\\", "\\\\") + "\"\n" + "    IdentitiesOnly yes\n    BatchMode yes\n    PasswordAuthentication no\n    KbdInteractiveAuthentication no\n    StrictHostKeyChecking yes\n    CheckHostIP no\n    UserKnownHostsFile none\n    GlobalKnownHostsFile none\n    CanonicalizeHostname yes\n" + openSSHEndMarker + "\n"), nil
 }

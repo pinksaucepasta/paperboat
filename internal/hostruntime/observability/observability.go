@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 )
@@ -231,6 +232,19 @@ func NewRegistry(descriptors []Descriptor) (*Registry, error) {
 		}
 		registry.descriptors[descriptor.Name] = cloneDescriptor(descriptor)
 	}
+	exportDescriptors := []errorreport.MetricDescriptor{}
+	for _, d := range DefaultDescriptors() {
+		names := []string{d.Name}
+		if d.Kind == Counter {
+			names = []string{d.Name + "_snapshot"}
+		} else if d.Kind == Histogram {
+			names = []string{d.Name + "_sum_snapshot", d.Name + "_count_snapshot"}
+		}
+		for _, name := range names {
+			exportDescriptors = append(exportDescriptors, errorreport.MetricDescriptor{Name: name, Labels: d.Labels})
+		}
+	}
+	errorreport.Current().RegisterMetrics(registry.exportSamples, exportDescriptors)
 	return registry, nil
 }
 func (r *Registry) Record(name string, value float64, labels map[string]string) error {
@@ -566,4 +580,47 @@ func cloneDescriptor(descriptor Descriptor) Descriptor {
 func seriesKey(series Series) string {
 	encoded, _ := json.Marshal(series.Labels)
 	return fmt.Sprintf("%s:%s", series.Name, encoded)
+}
+
+// exportSamples exports only built-in, bounded metric schemas. Cumulative values
+// remain useful after export loss; histogram buckets stay in local diagnostics.
+func (r *Registry) exportSamples() []errorreport.MetricSample {
+	defaults := map[string]Descriptor{}
+	for _, d := range DefaultDescriptors() {
+		defaults[d.Name] = d
+	}
+	out := []errorreport.MetricSample{}
+	for _, sample := range r.Snapshot() {
+		name := sample.Name
+		d, ok := defaults[name]
+		if !ok {
+			for _, suffix := range []string{"_sum", "_count"} {
+				if strings.HasSuffix(name, suffix) {
+					d, ok = defaults[strings.TrimSuffix(name, suffix)]
+					if ok && d.Kind == Histogram {
+						break
+					}
+					ok = false
+				}
+			}
+		}
+		if !ok || len(sample.Labels) != len(d.Labels) {
+			continue
+		}
+		valid := true
+		for k, v := range sample.Labels {
+			if !d.Labels[k][v] {
+				valid = false
+				break
+			}
+		}
+		if !valid {
+			continue
+		}
+		if d.Kind != Gauge {
+			name += "_snapshot"
+		}
+		out = append(out, errorreport.MetricSample{Name: name, Value: sample.Value, Labels: sample.Labels})
+	}
+	return out
 }

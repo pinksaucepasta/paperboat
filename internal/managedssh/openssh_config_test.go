@@ -88,17 +88,20 @@ func TestOpenSSHConfigInstallRepairAndExactUninstall(t *testing.T) {
 	}
 }
 
-func TestOpenSSHConfigRendersCanonicalAndDisplayAliasPortWithoutUser(t *testing.T) {
+func TestOpenSSHConfigRendersCanonicalAliasPortWithoutUser(t *testing.T) {
 	home := openSSHTestHome(t)
 	config := openSSHTestConfig(home, "pprbt")
-	config.Targets = []OpenSSHAliasTarget{{Alias: "victus-windows-e2e-fresh", DisplayName: "Victus-Windows-E2E-Fresh", User: "Pujan", Port: 38222}}
+	config.Targets = []OpenSSHAliasTarget{{Alias: "victus-windows-e2e-fresh", User: "Pujan", Port: 38222}}
 	if _, err := InstallOpenSSHConfig(config); err != nil {
 		t.Fatal(err)
 	}
 	owned := string(readOpenSSHTestFile(t, filepath.Join(home, ".ssh", "paperboat_config")))
-	want := "Host victus-windows-e2e-fresh.pprbt Victus-Windows-E2E-Fresh.pprbt\n    Port 38222\n"
+	want := "Host victus-windows-e2e-fresh.pprbt\n    Port 38222\n"
 	if !strings.Contains(owned, want) {
 		t.Fatalf("owned config missing authoritative target: %q", owned)
+	}
+	if strings.Contains(owned, "Victus-Windows-E2E-Fresh.pprbt") {
+		t.Fatalf("managed config contains a noncanonical machine name: %q", owned)
 	}
 	if strings.Contains(owned, "\n    User ") {
 		t.Fatalf("managed config must not override the invoking OpenSSH user: %q", owned)

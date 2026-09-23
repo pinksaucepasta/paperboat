@@ -515,7 +515,7 @@ func TestUserMachineRequestsUseScopedRoutes(t *testing.T) {
 		paths = append(paths, r.Method+" "+r.URL.RequestURI())
 		switch r.URL.Path {
 		case "/v1/machines":
-			writeData(w, http.StatusOK, UserMachinePage{Items: []UserMachine{{ID: "um_1", DisplayName: "Studio Mac", Online: true}}, Pagination: Pagination{}})
+			writeData(w, http.StatusOK, UserMachinePage{Items: []UserMachine{{ID: "um_1", Alias: "studio-mac", Online: true}}, Pagination: Pagination{}})
 		case "/v1/machines/um_1/connection-descriptor":
 			body, _ := io.ReadAll(r.Body)
 			connectBodies = append(connectBodies, string(body))
@@ -552,7 +552,7 @@ func TestUserMachineRequestsUseScopedRoutes(t *testing.T) {
 	if descriptor, err := c.MachineFileTransferDescriptor(context.Background(), "um_1", "um_source", "pts_1"); err != nil || descriptor.SourceMachineID != "um_source" {
 		t.Fatalf("transfer descriptor=%+v err=%v", descriptor, err)
 	}
-	if got := strings.Join(paths, ","); !strings.Contains(got, "GET /v1/machines?limit=200&offset=0&sort=display_name") || !strings.Contains(got, "POST /v1/machines/um_1/connection-descriptor") || !strings.Contains(got, "GET /v1/machines/um_1/connection-readiness?terminal_session_id=pts_1") {
+	if got := strings.Join(paths, ","); !strings.Contains(got, "GET /v1/machines?limit=200&offset=0&sort=alias") || !strings.Contains(got, "POST /v1/machines/um_1/connection-descriptor") || !strings.Contains(got, "GET /v1/machines/um_1/connection-readiness?terminal_session_id=pts_1") {
 		t.Fatalf("paths=%q", got)
 	}
 	if got := strings.Join(connectBodies, ","); got != `,{"terminal_session_id":"pts_1"},{"session_id":"pts_1","source_machine_id":"um_source"}` {
@@ -680,15 +680,15 @@ func TestRenameUserMachine(t *testing.T) {
 		if r.Method != http.MethodPatch || r.URL.Path != "/v1/machines/um_1" || r.Header.Get("Authorization") != "Bearer token" {
 			t.Fatalf("request=%s %s auth=%q", r.Method, r.URL.Path, r.Header.Get("Authorization"))
 		}
-		var body map[string]string
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["display_name"] != "New Studio" {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["alias"] != "new-studio" || body["display_name"] != nil {
 			t.Fatalf("body=%v err=%v", body, err)
 		}
-		writeData(w, http.StatusOK, UserMachine{ID: "um_1", DisplayName: "New Studio"})
+		writeData(w, http.StatusOK, UserMachine{ID: "um_1", Alias: "new-studio"})
 	}))
 	defer server.Close()
-	result, err := New(server.URL, config.Credential{AccessToken: "token"}, server.Client()).RenameUserMachine(context.Background(), "um_1", " New Studio ")
-	if err != nil || result.ID != "um_1" || result.DisplayName != "New Studio" {
+	result, err := New(server.URL, config.Credential{AccessToken: "token"}, server.Client()).RenameUserMachine(context.Background(), "um_1", " New-Studio ")
+	if err != nil || result.ID != "um_1" || result.Alias != "new-studio" {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }
@@ -964,7 +964,7 @@ func TestNormalizeCanonicalConnectionDescriptor(t *testing.T) {
 	expires := time.Now().Add(time.Minute).UTC()
 	response := ConnectionDescriptor{
 		Schema: ConnectionSchemaV1, Issuer: "https://api.paperboat.test", Connectable: true, ExpiresAt: expires,
-		Environment:  &Environment{ID: "env_1", Kind: "byod", ResourceID: "um_1", DisplayName: "Studio", State: "ready", Root: "/Users/paperboat"},
+		Environment:  &Environment{ID: "env_1", Kind: "byod", ResourceID: "um_1", Alias: "studio", State: "ready", Root: "/Users/paperboat"},
 		Terminal:     &Terminal{Protocol: "paperboat.terminal.v1", Endpoints: TerminalEndpoints{QUIC: "quic://edge.paperboat.test:443", WSS: "wss://edge.paperboat.test/v1/runtime"}, SessionID: "session_1"},
 		FileTransfer: &FileTransfer{Endpoint: "https://edge.paperboat.test/v1/file-transfers"},
 	}

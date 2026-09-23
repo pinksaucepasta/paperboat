@@ -1110,6 +1110,14 @@ func (s *Server) allocateEndpoint(discoA, discoB key.DiscoPublic, expiresAt time
 		return endpoint.ServerEndpoint{}, ErrServerClosed
 	}
 
+	if discoA.IsZero() || discoB.IsZero() {
+		// DiscoPrivate.Shared, called below for each client key, rejects
+		// zero keys. A zero key indicates a malformed or malicious
+		// [disco.AllocateUDPRelayEndpointRequest], whose ClientDisco values
+		// are attacker-chosen.
+		return endpoint.ServerEndpoint{}, errors.New("zero client disco key")
+	}
+
 	if s.staticAddrPorts.Len() == 0 && len(s.dynamicAddrPorts) == 0 {
 		return endpoint.ServerEndpoint{}, ErrServerNotReady{RetryAfter: endpoint.ServerRetryAfter}
 	}

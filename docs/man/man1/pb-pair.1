@@ -1,0 +1,62 @@
+.nh
+.TH "PB-PAIR" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-pair - Enroll this device with a one-shot token
+
+
+.SH SYNOPSIS
+\fBpb pair [flags]\fP
+
+
+.SH DESCRIPTION
+Enroll this device with a one-shot token
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--enrollment-token\fP=""
+	single-use pairing token
+
+.PP
+\fB--enrollment-token-file\fP=""
+	absolute protected file containing a single-use pairing token
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for pair
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--name\fP=""
+	machine name
+
+.PP
+\fB--shell\fP=""
+	absolute login shell
+
+.PP
+\fB--state-root\fP=""
+	runtime state directory
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb(1)\fP

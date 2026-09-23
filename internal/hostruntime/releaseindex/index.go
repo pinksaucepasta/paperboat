@@ -201,6 +201,17 @@ func (i Index) Component(name string) (Target, bool) {
 	}
 	return Target{}, false
 }
+
+// AvailableForNewInstall applies signed global release controls before a
+// machine identity exists. Cohort and failure-domain gates belong to updates
+// of enrolled machines; they cannot select a first-install artifact.
+func (i Index) AvailableForNewInstall(now time.Time) bool {
+	if i.Validate(now) != nil || i.Revoked || versionRevoked(i.Version, i.RevokedVersions) || i.DeploymentPlan.RolloutState != releasepolicy.RolloutStateActive || now.Before(i.CreatedAt) {
+		return false
+	}
+	return i.MinimumVersion == "" || compareVersion(i.Version, i.MinimumVersion) >= 0
+}
+
 func validPlatform(platform, arch, format string) bool {
 	if arch != "amd64" && arch != "arm64" {
 		return false

@@ -164,7 +164,7 @@ func TestWindowsLocalAPIPipeParitySnapshotWatchAndPeerStream(t *testing.T) {
 
 func TestWindowsPipeContractRejectsInvalidNamesAndUsesExactProtectedDACL(t *testing.T) {
 	ownerSID := testCurrentSID(t)
-	if got, want := pipeSecurityDescriptor(ownerSID), "D:P(A;;GWGR;;;SY)(A;;GWGR;;;"+ownerSID+")"; got != want {
+	if got, want := pipeSecurityDescriptor(ownerSID), "O:"+ownerSID+"D:P(A;;GWGR;;;SY)(A;;GWGR;;;"+ownerSID+")"; got != want {
 		t.Fatalf("DACL=%q want=%q", got, want)
 	}
 	for _, path := range []string{"", `\\server\pipe\paperboat`, `\\.\pipe\paperboat/other`, `\\.\pipe\bad\nname`} {

@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 )
 
@@ -183,7 +184,7 @@ func NewControlClient(config ControlClientConfig) (*ControlClient, error) {
 	return &ControlClient{
 		base: base, identities: config.Identities, proofs: config.Proofs, operationID: config.OperationID,
 		client: &http.Client{
-			Transport: transport, Timeout: config.Timeout,
+			Transport: errorreport.TransportOperation(transport, base.String(), "config_sync"), Timeout: config.Timeout,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return ErrControlClientInvalid },
 		},
 		clock: config.Clock, repositoryHosts: repositoryHosts,

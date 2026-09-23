@@ -1,0 +1,42 @@
+.nh
+.TH "PB-SCP" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-scp - Run scp with Paperboat machine resolution
+
+
+.SH SYNOPSIS
+\fBpb scp  [flags]\fP
+
+
+.SH DESCRIPTION
+Run scp with Paperboat machine resolution
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for scp
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb(1)\fP

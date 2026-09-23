@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
-	"github.com/tailscale/tailcat"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=native-regional-carrier
 	"tailscale.com/tailcfg"
 )
@@ -65,7 +65,7 @@ func (o *Owner) emit(event Event) {
 	}
 }
 
-func (o *Owner) Dial(ctx context.Context, descriptor tailcat.Addr, peerID string, class peerquic.Class) (*Session, error) {
+func (o *Owner) Dial(ctx context.Context, descriptor mesh.Addr, peerID string, class peerquic.Class) (*Session, error) {
 	peer, err := o.authority.Peer(peerID)
 	if err != nil {
 		return nil, err

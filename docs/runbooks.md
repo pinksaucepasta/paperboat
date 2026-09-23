@@ -6,13 +6,13 @@ file/preview bytes, private keys, candidate addresses, or local/machine paths.
 
 ## WorkOS outage
 
-Detection: device authorization cannot reach approval or authenticated dashboard
-requests fail while existing client sessions remain otherwise healthy.
+Detection: dashboard sign-in or enrollment fails while existing client sessions
+remain otherwise healthy.
 
-1. Stop device-login retries that could amplify the outage; honor server retry hints.
+1. Stop repeated dashboard sign-in or enrollment attempts that could amplify the outage; honor server retry hints.
 2. Confirm the failure is isolated to browser identity rather than Paperboat API reachability.
 3. Keep existing sessions operating until their normal expiry; do not bypass WorkOS.
-4. After recovery, complete one fresh device flow and verify denial and expiry still work.
+4. After recovery, enroll using a fresh dashboard command and verify invalid and expired enrollment tokens are rejected.
 
 ## Signing-key rotation or rollback
 
@@ -139,3 +139,35 @@ production-shaped environment before release.
 Preview, durable tunnel, custom-domain, connector, private-access, and update
 procedures are collected in
 [runbooks-preview-tunnels.md](runbooks-preview-tunnels.md).
+
+## One support reference and optional Sentry
+
+Each CLI invocation carries one `pb-` plus 32 lowercase hexadecimal support reference.
+The same reference crosses PB control API requests, local daemon HTTP IPC and daemon RPC;
+human and JSON errors show this reference, while request IDs remain internal. Keep the
+reference and the safe error explanation when contacting support. It is not a credential.
+
+Official release binaries enable sanitized error, log, trace and metric reporting using
+release-injected defaults. Set `PB_SENTRY_ENABLED=false` to disable it. Ordinary source
+builds have no default destination: explicitly set `PB_SENTRY_ENABLED=true`, your own
+`PB_SENTRY_DSN` (HTTPS, without a query or fragment), and `PB_SENTRY_RELEASE` (the exact
+artifact revision) to enable reporting. Runtime DSN/release settings override defaults.
+Build defaults prevent accidental reporting by source installations; they do not prove
+binary origin or stop deliberate spoofing. Treat client reports as untrusted diagnostics. No
+terminal/file/ENV payload, command arguments, raw error text, request data, URLs or log
+stream is submitted. Reports contain approved classification/component/reference/release
+and sanitized code frames. Expected cancellations, input and authorization outcomes are
+filtered. Reporting has an eight-event queue, three-event/minute process budget and a
+two-second send/flush bound. Flush is not proof of Sentry acceptance.
+
+With reporting disabled or the network offline, unexpected CLI failures/panics make a
+best-effort, 250 ms local diagnostic-marker request to the running daemon. Its existing
+50 MiB, seven-day diagnostic ring retains the same reference and the standard safe
+bugreport export includes it. If the daemon/local IPC is also unavailable, the terminal
+or JSON error remains available but the reference has no guaranteed local retained
+record. Keep that output and reproduction details; do not infer that a report was sent.
+The CLI does not write concurrently into the daemon-owned ring or silently upload raw logs.
+
+PB staff can look up the one reference through the server's audited support API. Sentry
+project access, retention and deletion are deployment/operator responsibilities. Enabling
+reporting does not grant terminal/file access or weaken native end-to-end encryption.

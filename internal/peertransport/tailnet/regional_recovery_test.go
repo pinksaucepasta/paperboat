@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tailscale/tailcat"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=regional-recovery-test
 	"tailscale.com/types/key"
 )
@@ -59,7 +59,7 @@ func TestRegionalRecoveryRecreatedAfterAuthorityDrop(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.mu.Lock()
-	a.clientEngine = &tailcat.Server{}
+	a.clientEngine = &mesh.Server{}
 	a.mu.Unlock()
 	if err := a.PrepareRegional(t.Context(), ""); err != nil {
 		t.Fatal(err)

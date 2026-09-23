@@ -27,6 +27,7 @@ type ManagedSSHConfig struct {
 	Executable           string
 	OwnerUID             uint32
 	InheritedAgentSocket string
+	AliasSuffix          string
 }
 
 type ManagedSSHRuntime struct {
@@ -38,6 +39,9 @@ type ManagedSSHRuntime struct {
 func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig) (*ManagedSSHRuntime, error) {
 	if ctx == nil || strings.TrimSpace(cfg.ServerURL) == "" || cfg.Auth == nil || cfg.Store.Path == "" || strings.TrimSpace(cfg.CLIClientSessionID) == "" || !filepath.IsAbs(cfg.Home) || !filepath.IsAbs(cfg.RuntimeDirectory) || !filepath.IsAbs(cfg.Executable) {
 		return nil, ErrInvalidInventoryConfig
+	}
+	if cfg.AliasSuffix == "" {
+		cfg.AliasSuffix = managedssh.AliasSuffix
 	}
 	identity, err := cfg.Store.ManagedSSHIdentity(cfg.ServerURL, cfg.CLIClientSessionID)
 	if err != nil {
@@ -73,7 +77,7 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig) (*ManagedSSHRunt
 			return err
 		}
 		_, err = managedssh.InstallOpenSSHConfig(managedssh.OpenSSHConfig{
-			Home: cfg.Home, OwnerUID: cfg.OwnerUID, AliasSuffix: managedssh.AliasSuffix,
+			Home: cfg.Home, OwnerUID: cfg.OwnerUID, AliasSuffix: cfg.AliasSuffix,
 			ProxyCommand:      command + " __ssh-proxy --host %h --port %p --user %r",
 			KnownHostsCommand: command + " __ssh-known-hosts --host %h --port %p",
 			AgentSocket:       agent.Socket(),

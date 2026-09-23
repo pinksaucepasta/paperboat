@@ -248,6 +248,42 @@ func (m *OwnerSessionLeaseManager) Acquire(request OwnerSessionLeaseRequest, ide
 	return lease, nil
 }
 
+// TransferBackground keeps the existing dispatch capability and owner channel alive.
+// Repeating the same absolute deadline reconciles an uncertain response safely.
+func (m *OwnerSessionLeaseManager) TransferBackground(leaseID, token string, expiresAt time.Time) (OwnerSessionLease, error) {
+	if m == nil || !validLeaseID(leaseID) || strings.TrimSpace(token) == "" {
+		return OwnerSessionLease{}, ErrOwnerSessionLeaseInvalid
+	}
+	now := m.now().UTC()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sweepLocked(now)
+	entry := m.leases[leaseID]
+	if entry == nil || !secureTokenEqual(entry.lease.Token, token) {
+		return OwnerSessionLease{}, ErrOwnerSessionLeaseUnauthorized
+	}
+	if m.closed || entry.closed {
+		return OwnerSessionLease{}, ErrOwnerSessionLeaseLost
+	}
+	if !expiresAt.After(now) || expiresAt.Sub(now) > BackgroundPreviewMaximumTTL {
+		return OwnerSessionLease{}, ErrOwnerSessionLeaseInvalid
+	}
+	if entry.lease.Background {
+		if entry.lease.ExpiresAt.Equal(expiresAt) {
+			return entry.lease, nil
+		}
+		return OwnerSessionLease{}, ErrOwnerSessionLeaseConflict
+	}
+	attached, _ := m.registry.MachineOwnerSessionDispatchState(m.machineID, entry.lease.OwnerSessionID)
+	if !attached {
+		return OwnerSessionLease{}, ErrOwnerSessionLeaseConflict
+	}
+	entry.lease.Background = true
+	entry.lease.ExpiresAt = expiresAt.UTC()
+	entry.attached = true
+	return entry.lease, nil
+}
+
 // Heartbeat extends a live lease. A closed or expired lease cannot be revived.
 func (m *OwnerSessionLeaseManager) Heartbeat(leaseID, token string) (OwnerSessionLease, error) {
 	if m == nil || !validLeaseID(strings.TrimSpace(leaseID)) || strings.TrimSpace(token) == "" {
@@ -409,6 +445,25 @@ func (m *OwnerSessionLeaseManager) ServeHTTP(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		writeOwnerSessionLeaseJSON(w, http.StatusCreated, lease)
+	case r.Method == http.MethodPatch && validLeaseID(path):
+		token := strings.TrimSpace(r.Header.Get("X-Paperboat-Owner-Session-Token"))
+		if token == "" {
+			writeOwnerSessionLeaseError(w, http.StatusUnauthorized, ErrOwnerSessionLeaseUnauthorized)
+			return
+		}
+		var request struct {
+			ExpiresAt time.Time `json:"expires_at"`
+		}
+		if err := decodeOwnerSessionLeaseJSON(r.Body, &request); err != nil {
+			writeOwnerSessionLeaseError(w, http.StatusBadRequest, err)
+			return
+		}
+		lease, err := m.TransferBackground(path, token, request.ExpiresAt)
+		if err != nil {
+			writeOwnerSessionLeaseError(w, ownerSessionLeaseStatus(err), err)
+			return
+		}
+		writeOwnerSessionLeaseJSON(w, http.StatusOK, lease)
 	case (r.Method == http.MethodPut || r.Method == http.MethodDelete) && validLeaseID(path):
 		token := strings.TrimSpace(r.Header.Get("X-Paperboat-Owner-Session-Token"))
 		if token == "" {

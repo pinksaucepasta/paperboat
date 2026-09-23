@@ -146,7 +146,7 @@ func managedSSHWindowsTestConfig(home string) OpenSSHConfig {
 		KnownHostsCommand: `"C:\Program Files\Paperboat\bin\pb.exe" __ssh-known-hosts --host %h --port %p`,
 		AgentSocket:       `\\.\pipe\paperboat-ssh-agent-test`,
 		IdentityFile:      ManagedIdentityPublicKeyPath(home),
-		Targets:           []OpenSSHAliasTarget{{Alias: "hn", DisplayName: "hn", User: "root", Port: 22}},
+		Targets:           []OpenSSHAliasTarget{{Alias: "hn", User: "root", Port: 22}},
 	}
 }
 

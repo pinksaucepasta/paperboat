@@ -1,28 +1,49 @@
-# Paperboat upstream patch ledger
+# Paperboat networking provenance and patches
 
-Tailcat's exact source snapshot in `tailcat/` is based on
-`5a83b9f9e119aad6b558cbc122d94efdca87452d`. The Go module replacement consumes this
-snapshot; the reference checkout stays unchanged. Its existing LICENSE is retained.
-No fork has been published. No upstream application builds are required.
+The owned assembly in `internal/peertransport/mesh` is adapted from Tailcat
+`5a83b9f9e119aad6b558cbc122d94efdca87452d`. Its BSD-3-Clause copyright headers
+and `upstream/licenses/tailcat-LICENSE.txt` are retained. The original compatible
+source/module/toolchain facts remain in `foundations.tsv`; Tailcat is no longer
+a consumed module. `references/tailcat` remains read-only provenance.
 
-| Source | Upstream base | Downstream patch | Owner | Disposition/removal condition |
-| --- | --- | --- | --- | --- |
-| Tailcat | `5a83b9f9e119aad6b558cbc122d94efdca87452d` | `tailcat.go`: client `GetUDPHandlerForFlow` rejects new inbound flows, matching its TCP policy. Late replies to retired ports previously created host UDP forwarders that survived client shutdown. | Task 6 / Codex | Required; remove the snapshot/replacement when a reviewed upstream pin includes this fix and passes the same QUIC restart/leak gate. |
-| Tailcat | `5a83b9f9e119aad6b558cbc122d94efdca87452d` | `tailcat.go`: optional allocated IPv6 addresses and atomic explicit peer/address replacement, including active WireGuard removal through `SyncDevicePeer`; authority mode denies empty policies, filters allocated source addresses, and disables proxy routes. Secret connection-address debug logging is removed. Focused coverage in `authority_test.go`. | Task 7 / Codex | Required until a reviewed upstream API supports authority-owned addresses and live peer revocation. Adapted from pinned Tailscale `wgengine/userspace.go` and `magicsock` network-map removal/rotation behavior (`TestPeerDERPStateCleanup`); upstream licenses retained. |
-| Tailscale DERP | `31d8badb3bfb88618dc8ea8e6a5c3bce0cd6cc9f` | `wgengine/userspace.go`, `wgengine/magicsock/{magicsock,derp}.go`: injectable region carrier, reliable discovery/bootstrap send hook, fatal receive-error classification; preserve the exact carrier’s fatal authority error after reader cleanup so regional recovery can retire it and require newer signed authority, with late-reader replacement fencing (`derp_terminal_error_test.go`, Task 23); packet-body debug logging removed. | Task 11 / Codex | Required until upstream exposes an equivalent carrier seam; ordinary upstream transport remains the default only when no factory is configured. |
-| Tailcat | `5a83b9f9e119aad6b558cbc122d94efdca87452d` | `tailcat.go`: thread endpoint-owned DERPCarrierFactory from Server/Client into wgengine. | Task 11 / Codex | Remove when a reviewed upstream release provides the equivalent injection API. |
+The consumed Tailscale snapshot remains based on
+`31d8badb3bfb88618dc8ea8e6a5c3bce0cd6cc9f`, through the existing `go.mod`
+replacement. Its LICENSE, PATENTS and other notices remain intact. No fork or
+release has been published; no upstream applications need building.
 
+## Owned Tailcat-derived assembly
 
-| Tailscale UDP relay | `31d8badb3bfb88618dc8ea8e6a5c3bce0cd6cc9f` | `net/udprelay/server.go`: trusted allocation policy API with absolute expiry, allocation capacity, immediate per-packet authorization, post-source-validation forwarding quota hook, bounded packet size, safe per-endpoint revocation, and remaining-authority endpoint lifetimes. | Task 10 / Codex | Required until upstream supports equivalent scoped lifecycle hooks; existing Geneve/disco bind protocol and forwarding remain upstream. Focused `paperboat_policy_test.go` covers real UDP bind/forwarding, denial, expiry, revoke, renewal and bounds. |
-| Tailcat / wgengine | Same pinned Tailcat and Tailscale bases above | `tailcat.go`: immutable discovery-only PeerRelayNodes, native RelayTarget capabilities installed in both TUN and magicsock filters, and capability versions; preserve application authorization. `wgengine/userspace.go`: thread existing magicsock TestOnlyPacketListener through Tailcat for real socket path/failure fixtures. | Task 10 / Codex | Required until upstream exposes equivalent signed relay discovery configuration and test socket plumbing. Focused `peer_relay_test.go` verifies copied discovery state and no application grants. |
+The limited extraction replaces `tailcat.go` with `mesh/{engine,packet,descriptor,keys}.go`
+and retains `disco.go`, `wire.go`, `regional.go`, `regional_status.go` and applicable
+tests. Standalone Client, SSH/SFTP/TCP/host forwarding, implicit identities,
+key-derived addresses, public relay lookup/cache, deprecated aliases and application
+build/demo machinery are removed. Discovery derivation and descriptor wire semantics
+remain pinned; these are not branding strings to rename.
 
-| Tailscale magicsock | `31d8badb3bfb88618dc8ea8e6a5c3bce0cd6cc9f` | `endpoint.go`: connectivity changes clear the relay-discovery throttle with the stale selected route, allowing immediate discovery and source rebinding instead of waiting 30 seconds. `paperboat_rebind_test.go` covers the failure and repeated allocation binding generation. | Task 10 / Codex | Remove when the consumed upstream pin provides equivalent relay recovery after rebind. |
+Previously downstream Tailcat patches remain owned behavior:
 
-| Tailcat / Tailscale magicsock | Same pinned bases above | `regional.go`, `regional_status.go`, `tailcat.go`, `magicsock/derp.go`, `paperboat_regional_status.go`: replace signed regional inventories live, prepare and send control through an exact node, promote an admitted peer after pair proof, expose actual carrier legs, and preserve connection state during inventory updates. Bootstrap follows the promoted peer region. Injected carriers use liveness probes on socket rebind; stale probes cannot close newer carriers. | Task 13 / Codex | Required until equivalent upstream APIs exist. Pair authorization and ranking stay in Paperboat; WireGuard identity, direct discovery and peer-relay path selection stay in the existing engine. Focused regional, authority and carrier-rebind tests accompany these seams. |
+| Origin/owner | Preserved behavior and evidence |
+| --- | --- |
+| Task 6 | No fallback host UDP forwarding for late replies to retired client ports. Outbound-only engines reject new inbound flows. Real QUIC restart and goroutine-leak regression retained on signed-authority fixtures. |
+| Task 7 | Explicit allocated IPv6 addresses, empty-deny peer maps, exact source/UDP-port filtering, live WireGuard removal through `SyncDevicePeer`. Adapted from Tailscale `wgengine/userspace.go` and magicsock peer removal/rotation (`TestPeerDERPStateCleanup`). Authority tests retained. |
+| Task 10 | Discovery-only peer relay nodes, RelayTarget capability installed in both TUN and magicsock filters, immutable metadata/capability versions, test socket injection. Application authority stays above mesh. |
+| Task 11 | Endpoint-owned `DERPCarrierFactory` passed into wgengine. |
+| Task 13 | Live signed regional inventories, exact-node control/preparation, peer promotion after pair proof, actual carrier status and promoted bootstrap region. Authority and regional tests retained. |
+| Task 23.5 | Direct-only authority startup with an empty relay map, without public relay discovery. Existing `tailnet/relay_empty_test.go` retained. |
+| Limited extraction, 2026-09-19 | Authority-only symmetric engine, no TCP or unspecified-port admission, zero discovery-key rejection at bootstrap, explicit identity and self-key validation; source/descriptor tests retained. Bootstrap retries follow the currently promoted peer region instead of retaining an unreachable provisional relay; regional failover regression retained. Default engine logging is silent and descriptor parse errors do not echo preshared-key input. `tailnet` packet I/O additionally checks an atomic authority-expiry fence independently of timer cleanup. |
 
-| Tailcat | `5a83b9f9e119aad6b558cbc122d94efdca87452d` | `tailcat.go`: explicit authority-owned local addresses may start with an empty authenticated relay map; absent relays never trigger public DERP discovery in authority mode. Ordinary upstream discovery remains unchanged. Direct client/host startup and later signed relay admission are covered by `tailnet/relay_empty_test.go`. | Task 23.5 / Codex | Retain until upstream supports direct-only authority startup with no implicit relay trust. |
+## Maintained Tailscale patches
 
-Except for the listed patches and their tests, snapshot files match the pinned upstream commit. Regression coverage is
-Paperboat's real `TestTailcatQUIC` close/restart test with goroutine leak detection;
-`tailnet` admission tests verify denied keys/ports and bounded flow release. No
-Paperboat identity or application authorization is moved into the upstream source.
+| Files | Patch and owner | Removal condition |
+| --- | --- | --- |
+| `wgengine/userspace.go`, `wgengine/magicsock/{magicsock,derp}.go` | Injectable region carrier, reliable discovery/bootstrap send hook, fatal receive-error classification; preserve exact fatal authority errors after reader cleanup and fence late replacement readers (`derp_terminal_error_test.go`, Tasks 11/23). Packet-body debug logging removed. | Reviewed upstream equivalent carrier API and passing authority/recovery regressions. |
+| `net/udprelay/server.go` | Trusted allocation policy with absolute expiry/capacity, immediate per-packet authorization, post-source-validation forwarding quota, packet bounds, safe endpoint revocation and remaining-authority lifetimes. Existing Geneve/disco protocol retained (`paperboat_policy_test.go`, Task 10). | Reviewed upstream equivalent scoped lifecycle API. |
+| `wgengine/userspace.go` | Thread magicsock packet-listener test injection through the engine for real path/failure fixtures (Task 10). | Equivalent upstream test seam. |
+| `wgengine/magicsock/endpoint.go` | Clear relay-discovery throttle with stale selected route on connectivity changes, allowing immediate rebind (`paperboat_rebind_test.go`, Task 10). | Reviewed upstream equivalent recovery behavior. |
+| `wgengine/magicsock/{derp.go,paperboat_regional_status.go}` | Preserve live inventory/carrier state, prepare/send through exact region, expose actual carrier legs; injected carriers probe liveness on socket rebind, with stale probes fenced from newer carriers (Task 13). | Equivalent upstream regional/carrier seams. |
+| `wgengine/magicsock/relaymanager.go`, `net/udprelay/server.go` | Port upstream security fix `2a4ce5ba3b415331438ad5db1c18b2e916159e4d`: reject zero relay/server or client disco keys before shared-secret derivation. Tests `TestRelayManagerZeroServerDisco` and `TestAllocateEndpointZeroClientDisco` retained. The allocator guard is placed in the shared allocator to protect both ordinary and policy APIs (2026-09-19). | Consumed pin includes this fix and both regressions pass. |
+
+Current upstream review: Tailcat main
+`15ab9e68bfc6534a61797d7af28cedd42b54a3a5` has newer Tailscale/WireGuard/gVisor
+pins, but does not replace our authority and regional API patches. Only the focused
+zero-key security fix above is ported; module versions are not silently advanced.

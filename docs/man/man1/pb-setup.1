@@ -1,0 +1,78 @@
+.nh
+.TH "PB-SETUP" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-setup - Set up this machine for Paperboat
+
+
+.SH SYNOPSIS
+\fBpb setup [flags]\fP
+
+
+.SH DESCRIPTION
+Set up this machine for Paperboat
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--file-receive\fP[=true]
+	accept native Inbox transfers
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for setup
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--managed-ssh\fP[=true]
+	accept managed SSH tools
+
+.PP
+\fB--name\fP=""
+	machine name
+
+.PP
+\fB--peer-relay\fP[=false]
+	relay encrypted traffic for your devices
+
+.PP
+\fB--preview-tunnel\fP[=true]
+	serve previews and tunnels
+
+.PP
+\fB--recovery-output\fP=""
+	new absolute file for the account recovery key
+
+.PP
+\fB--ssh-port\fP=22
+	existing loopback sshd port
+
+.PP
+\fB--state-root\fP=""
+	runtime state directory
+
+.PP
+\fB--terminal\fP[=true]
+	accept Paperboat terminal and exec
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb(1)\fP

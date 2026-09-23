@@ -1,0 +1,50 @@
+.nh
+.TH "PB-ACCESS-DEVICE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-access-device - Forward a local port to an authorized device service
+
+
+.SH SYNOPSIS
+\fBpb access device  [flags]\fP
+
+
+.SH DESCRIPTION
+Forward a loopback TCP port in this process's network namespace to one authorized device service. The forward runs in the foreground; processes sharing the namespace can connect to it.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for device
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+.PP
+\fB--listen\fP="127.0.0.1:0"
+	literal-loopback listen address
+
+.PP
+\fB--port\fP=0
+	remote device TCP port
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-access(1)\fP

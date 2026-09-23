@@ -148,6 +148,41 @@ func waitOwnerSessionLeaseRetry(ctx context.Context) error {
 	}
 }
 
+// TransferBackground transfers a live owner without changing its dispatch identity.
+func (c *LocalOwnerSessionClient) TransferBackground(ctx context.Context, lease OwnerSessionLease, expiresAt time.Time) (OwnerSessionLease, error) {
+	if c == nil || ctx == nil || !validLeaseID(lease.ID) || lease.Token == "" {
+		return OwnerSessionLease{}, ErrOwnerSessionLeaseInvalid
+	}
+	body, _ := json.Marshal(struct {
+		ExpiresAt time.Time `json:"expires_at"`
+	}{expiresAt.UTC()})
+	for attempt := 0; attempt < ownerSessionLeaseAcquireAttempts; attempt++ {
+		response, data, err := c.do(ctx, http.MethodPatch, "/v1/preview-owner-sessions/"+url.PathEscape(lease.ID), bytes.NewReader(body), "", lease.Token)
+		if err != nil {
+			var transportErr *ownerSessionLeaseTransportError
+			if errors.As(err, &transportErr) && attempt+1 < ownerSessionLeaseAcquireAttempts {
+				if err := waitOwnerSessionLeaseRetry(ctx); err != nil {
+					return OwnerSessionLease{}, err
+				}
+				continue
+			}
+			return OwnerSessionLease{}, err
+		}
+		if response.StatusCode != http.StatusOK {
+			return OwnerSessionLease{}, ownerSessionLeaseHTTPError(response.StatusCode, data)
+		}
+		updated, err := decodeOwnerSessionLease(data)
+		if err != nil {
+			return OwnerSessionLease{}, err
+		}
+		if updated.ID != lease.ID || updated.Token != lease.Token || updated.OwnerSessionID != lease.OwnerSessionID || updated.MachineID != lease.MachineID || updated.Target != lease.Target || !updated.Background || !updated.ExpiresAt.Equal(expiresAt) {
+			return OwnerSessionLease{}, ErrOwnerSessionLeaseInvalid
+		}
+		return updated, nil
+	}
+	return OwnerSessionLease{}, ErrOwnerSessionLeaseInvalid
+}
+
 func (c *LocalOwnerSessionClient) Heartbeat(ctx context.Context, lease OwnerSessionLease) (OwnerSessionLease, error) {
 	if c == nil || ctx == nil || !validLeaseID(lease.ID) || strings.TrimSpace(lease.Token) == "" {
 		return OwnerSessionLease{}, ErrOwnerSessionLeaseInvalid

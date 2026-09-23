@@ -126,6 +126,80 @@ func TestProductionNativePeerStartFailureCanRetry(t *testing.T) {
 	}
 }
 
+func TestProductionNativePeerWaitsForInitialCertificateWithoutServingUnsignedPeer(t *testing.T) {
+	approved := make(chan struct{})
+	var starts atomic.Int32
+	service := &productionNativePeerService{}
+	service.startGeneration = func(context.Context) (*productionNativePeerGeneration, error) {
+		starts.Add(1)
+		select {
+		case <-approved:
+			return &productionNativePeerGeneration{cancel: func() {}, errors: make(chan error, 1)}, nil
+		default:
+			return nil, errNativePeerPending
+		}
+	}
+	if err := service.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	service.mu.Lock()
+	current, pending := service.current, service.lastErr
+	service.mu.Unlock()
+	if current != nil || !errors.Is(pending, errNativePeerPending) {
+		t.Fatalf("unsigned peer became active: current=%t pending=%v", current != nil, pending)
+	}
+	close(approved)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		service.mu.Lock()
+		current, pending = service.current, service.lastErr
+		service.mu.Unlock()
+		if current != nil && pending == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if current == nil || pending != nil || starts.Load() < 2 {
+		t.Fatalf("approved peer did not start: current=%t pending=%v starts=%d", current != nil, pending, starts.Load())
+	}
+	if err := service.Shutdown(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProductionNativePeerPendingShutdownClosesSupervisor(t *testing.T) {
+	service := &productionNativePeerService{startGeneration: func(context.Context) (*productionNativePeerGeneration, error) {
+		return nil, errNativePeerPending
+	}}
+	if err := service.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := service.Shutdown(ctx); err != nil {
+		t.Fatalf("pending supervisor did not stop: %v", err)
+	}
+}
+
+func TestProductionNativePeerBuildGenerationClassifiesUnsignedEndpointAsPending(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "identity")
+	store, err := runtimeidentity.Open(runtimeidentity.Config{StateRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := store.Current()
+	if err := store.SaveRegistration(runtimeidentity.Registration{ServerURL: "https://api.example.test", MachineID: "machine_1", EnvironmentID: "environment_1", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, SetupMode: "client", SetupRoles: []string{"interactive"}, UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.PeerEndpoint(); err != nil {
+		t.Fatal(err)
+	}
+	service := &productionNativePeerService{config: productionNativePeerConfig{stateRoot: root, machineID: "machine_1", generation: 1}}
+	if _, err := service.buildGeneration(t.Context()); !errors.Is(err, errNativePeerPending) {
+		t.Fatalf("unsigned endpoint error = %v", err)
+	}
+}
+
 func TestProductionNativePeerReloadsRenewedEndpointIdentity(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "identity")
 	store, err := runtimeidentity.Open(runtimeidentity.Config{StateRoot: root})
@@ -186,15 +260,10 @@ func TestNativeNetworkAuthorizerUsesVerifiedAccessSessionInsteadOfJournalHash(t 
 		"exec":          {"exec_operation", "exec:operate"},
 		"ssh":           {"ssh_operation", "ssh:operate"},
 		"file_transfer": {"file_transfer", "file:transfer"},
-		"codex":         {"codex_connect", "codex:connect"},
 	} {
 		t.Run(consumer, func(t *testing.T) {
 			class, scope := policy[0], policy[1]
 			claims := auth.Claims{Issuer: "https://control.test", Audience: "paperboat-machine", Subject: "user_test", JTI: "jti_test", IssuedAt: now.Add(-time.Minute).Unix(), ExpiresAt: now.Add(time.Minute).Unix(), Scope: []string{scope}, CredentialClass: class, EnvironmentID: "env_test", MachineID: "machine_test", SourceMachineID: "source_test", UserID: "user_test", CLIClientSessionID: "cli_test", SessionID: "terminal_session_test", AssignmentID: "access_test", OperationID: "operation_test"}
-			if consumer == "codex" {
-				claims.AssignmentID = ""
-				claims.SessionID = "access_test"
-			}
 			header, err := streamauth.New("operation_test", consumer, "stream_test", signStaticCredential(t, private, "key-1", claims), now.Add(time.Minute), 1024)
 			if err != nil {
 				t.Fatal(err)
@@ -205,9 +274,6 @@ func TestNativeNetworkAuthorizerUsesVerifiedAccessSessionInsteadOfJournalHash(t 
 			}
 			missing := claims
 			missing.AssignmentID = ""
-			if consumer == "codex" {
-				missing.SessionID = ""
-			}
 			header.Credential = signStaticCredential(t, private, "key-1", missing)
 			if resource, err = authorize(context.Background(), header); err == nil || resource != "" {
 				t.Fatalf("missing network resource accepted resource=%q err=%v", resource, err)

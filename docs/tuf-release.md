@@ -1,6 +1,6 @@
 # TUF release operations
 
-Paperboat publishes exactly five native release assets. Every asset is the complete unified `pb` executable for its platform and architecture:
+Paperboat publishes five native product assets. Each is the complete unified `pb` executable or package for its platform and architecture:
 
 - `pb-windows-amd64.exe`
 - `pb-windows-arm64.exe`
@@ -8,13 +8,12 @@ Paperboat publishes exactly five native release assets. Every asset is the compl
 - `pb-linux-arm64`
 - `pb-darwin-arm64.pkg`
 
-Linux assets are raw ELF executables. Windows assets are PE executables. The macOS asset is an arm64 installer package containing one ad-hoc-signed executable at `/Library/PrivilegedHelperTools/Paperboat/bin/pb`; `/usr/local/bin/pb` is an absolute symlink to that canonical executable. Publisher signing and notarization are optional; TUF authenticates every release asset. The installed executable handles CLI commands and explicit `pb daemon` service invocations.
+Linux assets are raw ELF executables. Windows assets are PE executables. The macOS asset is an arm64 package containing one ad-hoc-signed executable in its `Library/PrivilegedHelperTools/Paperboat/bin/pb` payload path. The bootstrap extracts that payload without installing the package, and the executable's public `install` command selects the invoking owner's canonical service path and links `~/.local/bin/pb`. Windows installation likewise selects the owner-scoped, SID-derived path rather than a machine-global executable. Publisher signing and notarization are optional; TUF authenticates every release asset. The installed executable handles CLI commands and explicit `pb daemon` service invocations.
 
 ## Distribution contract
 
-GitHub Releases is the only binary distribution. The release origin serves only:
+GitHub Releases hosts those five product assets and five small bootstrap-verifier executables. The release origin serves only:
 
-- `current.json`
 - the shell installer at `/install`
 - the PowerShell installer selected by the PowerShell user agent
 - signed TUF metadata under `/tuf/metadata/`
@@ -28,7 +27,7 @@ Each TUF target is one of the five canonical asset names. Its custom metadata ha
 - `sha256` and `length`
 - the signed `release_index` policy
 
-Clients refresh and verify TUF metadata, select their canonical asset target, validate the custom metadata, and download the bytes from its immutable GitHub URL. They verify the downloaded length and SHA-256 against the TUF target before installing or activating it.
+Installed clients refresh and verify TUF metadata, select their canonical asset target, validate the custom metadata, and download the bytes from its immutable GitHub URL. They verify the downloaded length and SHA-256 against the TUF target before activating it. For first installation, the shell and PowerShell scripts download a release-pinned verifier from GitHub and check its length and SHA-256 before executing it. The verifier embeds the trusted TUF root, authenticates the current signed target, then downloads and verifies the product once from GitHub before the installer executes `pb`.
 
 On Unix, `pb update status` reports a recorded activation failure after recovery.
 If the transaction or activation record cannot be read, it returns
@@ -37,22 +36,16 @@ unknown until the updater can read its recovery state. The transaction preserves
 
 If an older activation helper cannot recover, a verified newer native reinstall can supersede its transaction. The updater verifies the installed executable against the signed payload and requires a strictly newer version before recording the new installation as idle and retiring the obsolete handoff. Recovery does not require editing the journal or replacing the helper by hand, and reinstall does not waive TUF verification or rollback protection.
 
-## current.json
-
-`current.json` uses `paperboat.release-current/v1` and is the discovery document for installers. It contains `schema`, `version`, `repository`, and an `assets` object with exactly the five asset names above. Every asset entry contains `platform`, `architecture`, `format`, `url`, `sha256`, and `length`. URLs must be of the form:
-
-`https://github.com/<owner>/<repo>/releases/download/<version>/<asset>`
-
-The server validates this shape before activating a release. The installer also validates the selected platform, architecture, URL, digest, and length.
+The installer script is the bootstrap trust anchor. A compromised script origin could replace its verifier pin; TUF protects the product against compromise of GitHub assets or signed-metadata storage when the installer itself is authentic. A first-time client has no prior TUF version state, so expiration bounds stale metadata but cannot prove absolute freshness.
 
 ## Release sequence
 
 1. Create and push a release tag.
 2. The workflow runs the release checks and native platform tests.
-3. It builds exactly the five assets and verifies their local bytes.
-4. It creates or updates the GitHub release through the GitHub API, uploads exactly those five assets, and verifies the API-reported size and digest.
+3. It builds and verifies the five product assets and five bootstrap-verifier assets.
+4. It creates or updates the GitHub release through the GitHub API, uploads the five product and five bootstrap-verifier assets, and verifies the API-reported size and digest.
 5. The TUF signer publishes five signed asset targets with the GitHub URLs and inline release policy.
-6. The workflow stages `current.json`, both installers, and TUF metadata, then atomically activates the server origin.
+6. The workflow renders both installers with verifier pins and stages them with TUF metadata for atomic activation on the server origin.
 
 All pull requests run the reusable checks. The tag workflow repeats the small release contract checks and the required native checks before spending time on publication. No separate binary transfer or checksum-file handoff is part of the release.
 
@@ -62,9 +55,9 @@ Users start with:
 
 `curl -fsSL https://get.pprbt.dev/install | sh`
 
-The shell installer fetches `current.json`, selects the Linux or macOS asset, downloads that asset from GitHub, verifies its length and SHA-256, and installs it. On macOS, the package installer places the executable at `/Library/PrivilegedHelperTools/Paperboat/bin/pb` and links `/usr/local/bin/pb` to it. On Linux, the raw executable is installed as `pb` in the selected directory.
+The shell installer verifies its pinned bootstrap executable, which selects the Linux or macOS asset through TUF and downloads that product once from GitHub before executing it. Linux invokes the verified executable as `pb install --install-dir ABSOLUTE_DIRECTORY --json`. On macOS, the bootstrap expands the verified package in its task-owned temporary directory and invokes the canonical payload at `Library/PrivilegedHelperTools/Paperboat/bin/pb install --json`; it does not run the package installer. The PowerShell bootstrap follows the same boundary with the verified Windows executable and lets `pb install --json` own UAC while preserving the invoking user. Each bootstrap validates the owner-scoped absolute executable path returned in `data.executable`. Ordinary installation preserves enrollment and settings. A dashboard/token pairing securely stages the required token, then asks the verified binary to classify the protected resume journal. The same token resumes the existing partial pairing without reset or a replacement install. A new token runs confirmed `pb reset`, which synchronously removes Paperboat-owned services, configuration, credentials, keys, runtime state, and the prior installation while preserving Inbox payloads; any incomplete cleanup aborts before the token is consumed. It then installs and pairs through the returned installed binary without downloading a second artifact.
 
-PowerShell uses the same `current.json` and GitHub-only flow. It selects `pb-windows-amd64.exe` or `pb-windows-arm64.exe`, verifies it, and invokes that downloaded executable with `__install` for the elevated atomic installation. Services must point at the installed `pb.exe`.
+`pb install` installs the running executable without contacting a release server. Source/shared builds default to automatic updates disabled. Official release builds enable automatic updates, whose downloaded replacements still require TUF verification. Enrollment contacts the account server independently and does not download another runtime.
 
 ## Windows qualification
 
@@ -124,4 +117,4 @@ sets `quarantined`. Automatic consumers are eligible only while the signed
 state is active. The quarantine command does not use the release index's
 cryptographic revocation flag.
 
-Before publication, verify that the GitHub release contains exactly the five expected asset names, that every URL in `current.json` and TUF points to that release, and that the origin's TUF target directory is empty.
+Before publication, verify that the GitHub release contains the five product and five verifier assets, that each signed product URL points to that release, and that the origin's TUF target directory is empty.

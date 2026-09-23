@@ -18,6 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 )
 
@@ -40,7 +41,7 @@ func newServerClient(raw string, auth MachineAuth, transport http.RoundTripper) 
 	if err != nil || base.Scheme != "https" || base.Hostname() == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" || auth == nil {
 		return nil, ErrInvalid
 	}
-	return &serverClient{base: base, auth: auth, http: &http.Client{Transport: transport, Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}}, nil
+	return &serverClient{base: base, auth: auth, http: &http.Client{Transport: errorreport.TransportOperation(transport, base.String(), "tunnel_enrollment"), Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}}, nil
 }
 func (c *serverClient) issue(ctx context.Context, tunnel, host, key string) (serverEnrollment, error) {
 	path := "/v1/tunnels/" + url.PathEscape(tunnel) + "/connectors/enrollments"

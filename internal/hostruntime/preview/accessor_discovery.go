@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"io"
 	"net/http"
 	"net/url"
@@ -148,7 +149,7 @@ func newAccessorDiscoveryClient(controlURL string, auth privateAccessMachineAuth
 	if transport == nil {
 		transport = httptransport.Default()
 	}
-	return &accessorDiscoveryClient{endpoint: u, auth: auth, client: &http.Client{Transport: transport, Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrPrivateAccessInvalid }}}, nil
+	return &accessorDiscoveryClient{endpoint: u, auth: auth, client: &http.Client{Transport: errorreport.TransportOperation(transport, u.String(), "accessor_discovery"), Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrPrivateAccessInvalid }}}, nil
 }
 
 func (c *accessorDiscoveryClient) snapshot(ctx context.Context) ([]accessorAdmission, error) {

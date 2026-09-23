@@ -40,7 +40,7 @@ func managedSSHAliasTargets(ctx context.Context, client *api.Client) ([]manageds
 			mu.Lock()
 			defer mu.Unlock()
 			if targetErr == nil {
-				targets = append(targets, managedssh.OpenSSHAliasTarget{Alias: machine.Alias, DisplayName: machine.DisplayName, User: target.OSUser, Port: target.Port})
+				targets = append(targets, managedssh.OpenSSHAliasTarget{Alias: machine.Alias, User: target.OSUser, Port: target.Port})
 			} else if !api.IsNotFound(targetErr) {
 				resultErr = errors.Join(resultErr, targetErr)
 			}

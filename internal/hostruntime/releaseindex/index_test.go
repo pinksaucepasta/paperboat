@@ -34,6 +34,33 @@ func TestDecodeAndEligibility(t *testing.T) {
 		t.Fatal("pb target missing")
 	}
 }
+
+func TestNewInstallRejectsSignedGlobalStops(t *testing.T) {
+	now := time.Now().UTC()
+	base := fixture()
+	if !base.AvailableForNewInstall(now) {
+		t.Fatal("active release rejected for new installation")
+	}
+	for _, state := range []string{releasepolicy.RolloutStatePaused, releasepolicy.RolloutStateQuarantined} {
+		index := fixture()
+		index.DeploymentPlan.RolloutState = state
+		index.DeploymentPlanSHA256, _ = index.DeploymentPlan.PlanSHA256()
+		if index.AvailableForNewInstall(now) {
+			t.Fatalf("%s release accepted for new installation", state)
+		}
+	}
+	for _, edit := range []func(*Index){
+		func(i *Index) { i.Revoked = true },
+		func(i *Index) { i.RevokedVersions = []string{i.Version} },
+		func(i *Index) { i.MinimumVersion = "2026.08.18.8" },
+	} {
+		index := fixture()
+		edit(&index)
+		if index.AvailableForNewInstall(now) {
+			t.Fatal("globally stopped release accepted for new installation")
+		}
+	}
+}
 func TestRejectsMissingDuplicateAndUnknown(t *testing.T) {
 	i := fixture()
 	i.Targets = nil

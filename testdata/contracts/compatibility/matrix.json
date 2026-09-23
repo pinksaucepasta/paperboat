@@ -30,12 +30,6 @@
         "1.0"
       ],
       "owner": "paperboat-server,paperboat-tunnel"
-    },
-    "frp_wire": {
-      "supported": [
-        "v0.70.1@fa3bcca2ed54bcf80a5d98c8c76f40f72c6b5291"
-      ],
-      "owner": "paperboat-tunnel"
     }
   },
   "consumers": {
@@ -51,9 +45,6 @@
       ],
       "edge_control": [
         "1.0"
-      ],
-      "frp_wire": [
-        "v0.70.1@fa3bcca2ed54bcf80a5d98c8c76f40f72c6b5291"
       ]
     },
     "paperboat-server": {
@@ -67,9 +58,6 @@
     "paperboat-tunnel": {
       "edge_control": [
         "1.0"
-      ],
-      "frp_wire": [
-        "v0.70.1@fa3bcca2ed54bcf80a5d98c8c76f40f72c6b5291"
       ]
     }
   },
@@ -112,14 +100,6 @@
       "interface": "edge_control",
       "versions": [
         "1.0"
-      ]
-    },
-    {
-      "producer": "paperboat",
-      "consumer": "paperboat-tunnel",
-      "interface": "frp_wire",
-      "versions": [
-        "v0.70.1@fa3bcca2ed54bcf80a5d98c8c76f40f72c6b5291"
       ]
     }
   ],

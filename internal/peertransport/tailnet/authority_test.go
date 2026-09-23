@@ -17,7 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/tailscale/tailcat"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"tailscale.com/tailcfg"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authority-tests
 	"tailscale.com/tstest/integration"
@@ -188,7 +188,7 @@ func networkToken(t *testing.T, priv ed25519.PrivateKey, c NetworkConfiguration)
 func networkTestBinding(role, id, addr string, k key.NodePrivate) NetworkBinding {
 	p := k.Public().Raw32()
 	fp := sha256.Sum256([]byte("quic:" + id))
-	disco := tailcat.DiscoPublicForNode(k).AppendTo(nil)
+	disco := mesh.DiscoPublicForNode(k).AppendTo(nil)
 	b := NetworkBinding{AccountID: "account_test", EndpointID: id, Role: role, EndpointGeneration: 1, KeyGeneration: 1, WireGuardPublicKey: base64.RawURLEncoding.EncodeToString(p[:]), DiscoPublicKey: base64.RawURLEncoding.EncodeToString(disco), QUICCertificateFingerprint: hex.EncodeToString(fp[:]), QUICPublicKey: base64.RawURLEncoding.EncodeToString(fp[:]), VirtualAddress: addr}
 	if role == "machine" {
 		b.MachineID = id
@@ -555,8 +555,13 @@ func TestNetworkAllocatedUDPRotationRemovalAndExpiry(t *testing.T) {
 	m.Generation++
 	m.ExpiresAt = time.Now().Unix() + 1
 	apply(machine, m)
+	// Hold the lifecycle lock so the expiry timer cannot close the engine yet.
+	// Packet authorization must expire independently of cleanup scheduling.
+	machine.mu.Lock()
 	time.Sleep(time.Until(time.Unix(m.ExpiresAt, 0)) + 20*time.Millisecond)
-	if _, err := in.Write([]byte("expired")); err == nil {
+	_, expiryErr := in.Write([]byte("expired"))
+	machine.mu.Unlock()
+	if expiryErr == nil {
 		t.Fatal("partition retained expired socket")
 	}
 }
@@ -576,7 +581,7 @@ func TestNetworkDescriptorUsesSignedPeerAndAdmittedRegion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parsed, err := tailcat.ParseAddr(descriptor)
+	parsed, err := mesh.ParseAddr(descriptor)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -585,6 +585,7 @@
         "retryable": { "type": "boolean" },
         "retry_at": { "$ref": "#/definitions/nullable_timestamp" },
         "repair_action": { "type": "string", "minLength": 1 },
+        "support_reference": { "type": "string", "pattern": "^pb-[0-9a-f]{32}$" },
         "request_id": { "$ref": "#/definitions/id" },
         "correlation_id": { "$ref": "#/definitions/id" }
       },

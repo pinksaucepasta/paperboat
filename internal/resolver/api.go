@@ -381,12 +381,12 @@ func (r *APIResolver) findTarget(ctx context.Context, requested string) (target,
 			if err := terminalCapabilityError(machine); err != nil {
 				return target{}, err
 			}
-			return target{kind: targetUserMachine, id: machine.ID, name: machine.DisplayName, state: machine.State, generation: uint64(machine.InstallationGeneration)}, nil
+			return target{kind: targetUserMachine, id: machine.ID, name: machine.Alias, state: machine.State, generation: uint64(machine.InstallationGeneration)}, nil
 		}
 	}
 	var matches []api.UserMachine
 	for _, machine := range machines {
-		if strings.EqualFold(machine.DisplayName, want) {
+		if strings.EqualFold(machine.Alias, want) {
 			matches = append(matches, machine)
 		}
 	}
@@ -395,7 +395,7 @@ func (r *APIResolver) findTarget(ctx context.Context, requested string) (target,
 		if err := terminalCapabilityError(machine); err != nil {
 			return target{}, err
 		}
-		return target{kind: targetUserMachine, id: machine.ID, name: machine.DisplayName, state: machine.State, generation: uint64(machine.InstallationGeneration)}, nil
+		return target{kind: targetUserMachine, id: machine.ID, name: machine.Alias, state: machine.State, generation: uint64(machine.InstallationGeneration)}, nil
 	}
 	if len(matches) > 1 {
 		ids := make([]string, 0, len(matches))

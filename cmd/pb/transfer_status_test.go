@@ -49,7 +49,7 @@ func TestTransferStatusJSONPreservesSourceVisibleEncryptedManifest(t *testing.T)
 	backend := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.Method + " " + request.URL.Path {
 		case "GET /v1/machines":
-			writeAPIData(t, writer, api.UserMachinePage{Items: []api.UserMachine{{ID: "machine_host", EnvironmentID: "environment_host", DisplayName: "hn", Alias: "hn", State: "ready", Online: true, Platform: "linux", Architecture: "amd64", WorkspaceRoot: "/root", InstallationGeneration: 1}}, Pagination: api.Pagination{}})
+			writeAPIData(t, writer, api.UserMachinePage{Items: []api.UserMachine{{ID: "machine_host", EnvironmentID: "environment_host", Alias: "hn", State: "ready", Online: true, Platform: "linux", Architecture: "amd64", WorkspaceRoot: "/root", InstallationGeneration: 1}}, Pagination: api.Pagination{}})
 		case "POST /v1/machines/machine_host/file-transfer-descriptor":
 			body, _ := io.ReadAll(request.Body)
 			if !bytes.Contains(body, []byte(`"source_machine_id":"machine_source"`)) {

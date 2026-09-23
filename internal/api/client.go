@@ -17,7 +17,10 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/machinename"
 	"github.com/pinksaucepasta/paperboat/internal/remotepath"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 // ErrUnauthenticated means the server rejected the reused credential. Callers
@@ -61,11 +64,12 @@ func responseRequestID(header http.Header) string {
 // server's stable error code so command logic can branch without string
 // matching on messages.
 type APIError struct {
-	Status    int
-	Code      string
-	Message   string
-	RequestID string
-	Details   map[string]any
+	Status           int
+	Code             string
+	Message          string
+	RequestID        string
+	SupportReference string
+	Details          map[string]any
 }
 
 // IsNotFound reports whether the control plane explicitly rejected a request
@@ -146,6 +150,9 @@ func New(baseURL string, cred config.Credential, httpClient *http.Client) *Clien
 	if httpClient == nil {
 		httpClient = defaultHTTPClient()
 	}
+	clientCopy := *httpClient
+	clientCopy.Transport = errorreport.Transport(httpClient.Transport, baseURL)
+	httpClient = &clientCopy
 	return &Client{
 		baseURL:     strings.TrimRight(baseURL, "/"),
 		cred:        cred,
@@ -587,7 +594,7 @@ type UserMachine struct {
 	Shared                 bool                   `json:"shared"`
 	ID                     string                 `json:"id"`
 	EnvironmentID          string                 `json:"environment_id"`
-	DisplayName            string                 `json:"display_name"`
+	Description            string                 `json:"description"`
 	Alias                  string                 `json:"alias"`
 	State                  string                 `json:"state"`
 	Online                 bool                   `json:"online"`
@@ -705,7 +712,7 @@ type MachineCapabilities struct {
 
 type MachineSetupInput struct {
 	SetupMode         string            `json:"-"`
-	DisplayName       string            `json:"display_name"`
+	Alias             string            `json:"alias"`
 	Platform          string            `json:"platform"`
 	Architecture      string            `json:"architecture"`
 	WorkspaceRoot     string            `json:"workspace_root"`
@@ -722,20 +729,18 @@ type MachineEnrollmentStart struct {
 
 // StartMachineEnrollment creates the single-use credential used by the
 // dashboard, CLI, and TUI one-shot installers.
-func (c *Client) StartMachineEnrollment(ctx context.Context, idempotencyKey, shell string) (MachineEnrollmentStart, error) {
+func (c *Client) StartMachineEnrollment(ctx context.Context, idempotencyKey string) (MachineEnrollmentStart, error) {
 	var out MachineEnrollmentStart
 	if strings.TrimSpace(idempotencyKey) == "" {
 		return out, errors.New("machine enrollment idempotency key is required")
 	}
-	if shell == "" {
-		shell = "posix"
-	}
-	err := c.doWithHeaders(ctx, http.MethodPost, "/v1/machine-enrollments", map[string]string{"shell": shell}, &out, http.Header{"Idempotency-Key": []string{idempotencyKey}})
+	err := c.doWithHeaders(ctx, http.MethodPost, "/v1/machine-enrollments", map[string]string{}, &out, http.Header{"Idempotency-Key": []string{idempotencyKey}})
 	return out, err
 }
 
 func (c *Client) SetupMachine(ctx context.Context, input MachineSetupInput) (UserMachine, error) {
 	var out UserMachine
+	input.Alias = strings.ToLower(strings.TrimSpace(input.Alias))
 	err := c.do(ctx, http.MethodPost, "/v1/machines/setup", input, &out)
 	return out, err
 }
@@ -1079,7 +1084,7 @@ type Environment struct {
 	EnvironmentID string `json:"environment_id"`
 	ProjectID     string `json:"project_id"`
 	UserMachineID string `json:"machine_id"`
-	DisplayName   string `json:"display_name"`
+	Alias         string `json:"alias"`
 	ProjectRoot   string `json:"project_root"`
 }
 
@@ -1198,7 +1203,7 @@ type ConfigSyncStatus struct {
 type ConfigSyncEnvironmentState struct {
 	MachineID             string                  `json:"machine_id"`
 	EnvironmentID         string                  `json:"environment_id"`
-	DisplayName           string                  `json:"display_name"`
+	Alias                 string                  `json:"alias"`
 	State                 string                  `json:"state"`
 	Mode                  string                  `json:"mode"`
 	AssignmentVersion     int64                   `json:"assignment_version"`
@@ -1324,7 +1329,7 @@ func (c *Client) ListUserMachines(ctx context.Context) ([]UserMachine, error) {
 	offset := 0
 	for {
 		var page UserMachinePage
-		path := fmt.Sprintf("/v1/machines?limit=%d&offset=%d&sort=display_name", pageSize, offset)
+		path := fmt.Sprintf("/v1/machines?limit=%d&offset=%d&sort=alias", pageSize, offset)
 		if err := c.do(ctx, http.MethodGet, path, nil, &page); err != nil {
 			return nil, err
 		}
@@ -1478,14 +1483,17 @@ func (c *Client) DisconnectUserMachine(ctx context.Context, machineID string) er
 	return c.do(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/disconnect", nil, nil)
 }
 
-func (c *Client) RenameUserMachine(ctx context.Context, machineID, displayName string) (UserMachine, error) {
+func (c *Client) RenameUserMachine(ctx context.Context, machineID, alias string) (UserMachine, error) {
 	machineID = strings.TrimSpace(machineID)
-	displayName = strings.TrimSpace(displayName)
-	if machineID == "" || displayName == "" {
-		return UserMachine{}, errors.New("machine ID and display name are required")
+	alias = strings.ToLower(strings.TrimSpace(alias))
+	if machineID == "" || alias == "" {
+		return UserMachine{}, errors.New("machine ID and alias are required")
+	}
+	if err := machinename.Validate(alias); err != nil {
+		return UserMachine{}, err
 	}
 	var out UserMachine
-	err := c.do(ctx, http.MethodPatch, "/v1/machines/"+url.PathEscape(machineID), map[string]string{"display_name": displayName}, &out)
+	err := c.do(ctx, http.MethodPatch, "/v1/machines/"+url.PathEscape(machineID), map[string]string{"alias": alias}, &out)
 	return out, err
 }
 
@@ -1830,6 +1838,10 @@ func (c *Client) doRequestMeta(ctx context.Context, method, path string, body, o
 	req.Header.Set("User-Agent", "paperboat/"+buildinfo.Version)
 	req.Header.Set("X-Paperboat-Client", "paperboat")
 	req.Header.Set("X-Paperboat-Protocol", buildinfo.ProtocolVersion)
+	requestSupportReference := supportref.FromContext(ctx)
+	if requestSupportReference != "" {
+		req.Header.Set(supportref.Header, requestSupportReference)
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -1877,9 +1889,10 @@ func (c *Client) doRequestMeta(ctx context.Context, method, path string, body, o
 	var envelope struct {
 		Data  json.RawMessage `json:"data"`
 		Error struct {
-			Code    string         `json:"code"`
-			Message string         `json:"message"`
-			Details map[string]any `json:"details"`
+			Code             string         `json:"code"`
+			Message          string         `json:"message"`
+			SupportReference string         `json:"support_reference"`
+			Details          map[string]any `json:"details"`
 		} `json:"error"`
 	}
 	// A body is expected for every documented response; a decode failure on a
@@ -1894,7 +1907,14 @@ func (c *Client) doRequestMeta(ctx context.Context, method, path string, body, o
 		if resp.StatusCode == http.StatusUnauthorized {
 			return ErrUnauthenticated
 		}
-		return &APIError{Status: resp.StatusCode, Code: envelope.Error.Code, Message: envelope.Error.Message, RequestID: responseRequestID(resp.Header), Details: envelope.Error.Details}
+		responseSupportReference := resp.Header.Get(supportref.Header)
+		if !supportref.Valid(responseSupportReference) {
+			responseSupportReference = envelope.Error.SupportReference
+		}
+		if !supportref.Valid(responseSupportReference) {
+			responseSupportReference = requestSupportReference
+		}
+		return &APIError{Status: resp.StatusCode, Code: envelope.Error.Code, Message: envelope.Error.Message, RequestID: responseRequestID(resp.Header), SupportReference: responseSupportReference, Details: envelope.Error.Details}
 	}
 	if decodeErr != nil {
 		return fmt.Errorf("decode %s %s response: %w", method, path, decodeErr)

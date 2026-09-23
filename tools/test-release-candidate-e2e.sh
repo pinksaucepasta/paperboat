@@ -88,41 +88,6 @@ printf '#!/bin/sh\nexit 0\n' > "$release_tree/install"
 printf 'exit 0\r\n' > "$release_tree/windows"
 chmod 0755 "$release_tree/install"
 
-python3 - "$release_tree/current.json" "$version" "$artifacts" <<'PY'
-import hashlib
-import json
-import pathlib
-import sys
-
-output = pathlib.Path(sys.argv[1])
-version = sys.argv[2]
-artifacts = pathlib.Path(sys.argv[3])
-expected = {
-    "pb-darwin-arm64.pkg": ("darwin", "arm64", "pkg"),
-    "pb-linux-amd64": ("linux", "amd64", "elf"),
-    "pb-linux-arm64": ("linux", "arm64", "elf"),
-    "pb-windows-amd64.exe": ("windows", "amd64", "pe"),
-    "pb-windows-arm64.exe": ("windows", "arm64", "pe"),
-}
-assets = {}
-for name, (platform, architecture, format_) in expected.items():
-    body = (artifacts / name).read_bytes()
-    assets[name] = {
-        "platform": platform,
-        "architecture": architecture,
-        "format": format_,
-        "url": f"https://github.com/example/paperboat/releases/download/{version}/{name}",
-        "sha256": hashlib.sha256(body).hexdigest(),
-        "length": len(body),
-    }
-output.write_text(json.dumps({
-    "schema": "paperboat.release-current/v1",
-    "version": version,
-    "repository": "example/paperboat",
-    "assets": assets,
-}, separators=(",", ":")) + "\n", encoding="utf-8")
-PY
-
 (
   cd "$workspace_root/paperboat-server"
   PAPERBOAT_TRK35_RELEASE_BUNDLE="$release_tree" \

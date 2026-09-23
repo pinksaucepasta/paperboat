@@ -65,13 +65,24 @@ func environmentVariablesCobraCommand() *cobra.Command {
 			machine, _ := command.Flags().GetString("machine")
 			valueStdin, _ := command.Flags().GetBool("value-stdin")
 			valueFile, _ := command.Flags().GetString("value-file")
-			return setEnvironmentVariableForScope(command, team, machine, args[0], valueStdin, valueFile)
+			jsonOutput, _ := command.Flags().GetBool("json")
+			if jsonOutput && !valueStdin && strings.TrimSpace(valueFile) == "" {
+				return invocationError(errors.New("env set with --json requires --value-stdin or --value-file"))
+			}
+			if err := setEnvironmentVariableForScope(command, team, machine, args[0], valueStdin, valueFile); err != nil {
+				return err
+			}
+			if jsonOutput {
+				return writeCLIJSON(command.OutOrStdout(), map[string]any{"name": args[0], "team": team, "machine": machine, "configured": true})
+			}
+			return nil
 		},
 	}
 	set.Flags().String("team", "", "team scope; cannot be combined with --machine")
 	set.Flags().String("machine", "", "machine name or ID; defaults to the personal scope")
 	set.Flags().Bool("value-stdin", false, "read the raw value from non-interactive stdin")
 	set.Flags().String("value-file", "", "read the raw value from an absolute file path")
+	set.Flags().Bool("json", false, "print redacted JSON metadata")
 
 	unset := &cobra.Command{
 		Use:   "unset <name>",
@@ -81,12 +92,19 @@ func environmentVariablesCobraCommand() *cobra.Command {
 			team, _ := command.Flags().GetString("team")
 			machine, _ := command.Flags().GetString("machine")
 			yes, _ := command.Flags().GetBool("yes")
-			return unsetEnvironmentVariableForScope(command, team, machine, args[0], yes)
+			if err := unsetEnvironmentVariableForScope(command, team, machine, args[0], yes); err != nil {
+				return err
+			}
+			if jsonOutput, _ := command.Flags().GetBool("json"); jsonOutput {
+				return writeCLIJSON(command.OutOrStdout(), map[string]any{"name": args[0], "team": team, "machine": machine, "configured": false})
+			}
+			return nil
 		},
 	}
 	unset.Flags().String("team", "", "team scope; cannot be combined with --machine")
 	unset.Flags().String("machine", "", "machine name or ID; defaults to the personal scope")
 	unset.Flags().Bool("yes", false, "confirm removal")
+	unset.Flags().Bool("json", false, "print redacted JSON metadata")
 
 	root.AddCommand(list, set, unset)
 	addVaultScopeCommands(root)
@@ -113,7 +131,7 @@ func environmentVariableTargetForCommand(command *cobra.Command, client *api.Cli
 	if !machineSupportsEnvironmentInjection(machine) {
 		return environmentVariableTarget{}, errors.New("ENV Injection is disabled on this device")
 	}
-	return environmentVariableTarget{machineID: machine.ID, machineName: machine.DisplayName}, nil
+	return environmentVariableTarget{machineID: machine.ID, machineName: machine.Alias}, nil
 }
 
 func machineSupportsEnvironmentInjection(machine api.UserMachine) bool {
@@ -173,7 +191,7 @@ func readEnvironmentVariableValueFile(command *cobra.Command, valueStdin bool, v
 	if !ok || file == nil {
 		return nil, errors.New("set requires an interactive terminal for hidden input")
 	}
-	return prompt.Secret(prompt.SecretOptions{
+	return prompt.Secret(prompt.SecretOptions{Context: command.Context(),
 		Title:       "Set ENV Injection variable",
 		Description: "Value is hidden and can be empty",
 		Placeholder: "value",
@@ -329,7 +347,7 @@ func runEnvironmentVariablesTUI(command *cobra.Command) error {
 	}
 	items := environmentVariableScopePickerItems(machines)
 	for {
-		selection, selectErr := selector.Choose(selector.Options{
+		selection, selectErr := selector.Choose(selector.Options{Context: command.Context(),
 			Title:    "ENV Injection",
 			Subtitle: "Choose a scope",
 			Items:    items,
@@ -345,7 +363,7 @@ func runEnvironmentVariablesTUI(command *cobra.Command) error {
 		if selection.ID != "personal" {
 			for _, machine := range machines {
 				if machine.ID == selection.ID {
-					target = environmentVariableTarget{machineID: machine.ID, machineName: machine.DisplayName}
+					target = environmentVariableTarget{machineID: machine.ID, machineName: machine.Alias}
 					break
 				}
 			}
@@ -359,7 +377,7 @@ func runEnvironmentVariablesTUI(command *cobra.Command) error {
 func environmentVariableScopePickerItems(machines []api.UserMachine) []selector.Item {
 	items := []selector.Item{{ID: "personal", Title: "Personal", Description: "Personal encrypted values; provision explicit host selections", Search: "account personal encrypted"}}
 	for _, machine := range environmentVariableMachines(machines) {
-		items = append(items, selector.Item{ID: machine.ID, Title: machine.DisplayName, Description: machineStatusSummary(machine), Search: machine.ID + " " + machine.DisplayName})
+		items = append(items, selector.Item{ID: machine.ID, Title: machine.Alias, Description: machineStatusSummary(machine), Search: machine.ID + " " + machine.Alias})
 	}
 	return items
 }
@@ -379,7 +397,7 @@ func runEnvironmentVariableScopeTUI(command *cobra.Command, _ *api.Client, targe
 		for _, name := range metadata.Names {
 			items = append(items, selector.Item{ID: "unset:" + name, Title: name, Description: "configured  ·  revision " + fmt.Sprint(metadata.Revision), Search: name + " remove unset"})
 		}
-		selection, selectErr := selector.Choose(selector.Options{
+		selection, selectErr := selector.Choose(selector.Options{Context: command.Context(),
 			Title:    "ENV Injection",
 			Subtitle: scope.label + "  ·  scope revision " + fmt.Sprint(metadata.Revision),
 			Items:    items,
@@ -392,7 +410,7 @@ func runEnvironmentVariableScopeTUI(command *cobra.Command, _ *api.Client, targe
 			return selectErr
 		}
 		if selection.ID == "set" {
-			name, promptErr := prompt.Text(prompt.TextOptions{
+			name, promptErr := prompt.Text(prompt.TextOptions{Context: command.Context(),
 				Title:       "Variable name",
 				Description: "Letters, numbers, and underscores; values stay hidden",
 				Placeholder: "NAME",
@@ -408,7 +426,7 @@ func runEnvironmentVariableScopeTUI(command *cobra.Command, _ *api.Client, targe
 			if promptErr != nil {
 				return promptErr
 			}
-			value, valueErr := prompt.Secret(prompt.SecretOptions{Title: "Variable value", Description: "The value is hidden; press Enter to store an empty value", Stdin: os.Stdin, Output: command.ErrOrStderr(), MaxBytes: api.MaximumEnvironmentVariableValueBytes})
+			value, valueErr := prompt.Secret(prompt.SecretOptions{Context: command.Context(), Title: "Variable value", Description: "The value is hidden; press Enter to store an empty value", Stdin: os.Stdin, Output: command.ErrOrStderr(), MaxBytes: api.MaximumEnvironmentVariableValueBytes})
 			if errors.Is(valueErr, prompt.ErrCanceled) {
 				continue
 			}
@@ -433,7 +451,7 @@ func runEnvironmentVariableScopeTUI(command *cobra.Command, _ *api.Client, targe
 			continue
 		}
 		name := strings.TrimPrefix(selection.ID, "unset:")
-		confirmed, confirmErr := prompt.Confirm(prompt.ConfirmOptions{Title: "Unset " + name + "?", Description: "New processes on this scope will no longer receive it.", Stdin: os.Stdin, Output: command.ErrOrStderr()})
+		confirmed, confirmErr := prompt.Confirm(prompt.ConfirmOptions{Context: command.Context(), Title: "Unset " + name + "?", Description: "New processes on this scope will no longer receive it.", Stdin: os.Stdin, Output: command.ErrOrStderr()})
 		if errors.Is(confirmErr, prompt.ErrCanceled) || confirmErr != nil {
 			if confirmErr != nil && !errors.Is(confirmErr, prompt.ErrCanceled) {
 				return confirmErr

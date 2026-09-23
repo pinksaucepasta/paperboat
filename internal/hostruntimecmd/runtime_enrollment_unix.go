@@ -5,17 +5,16 @@ package hostruntimecmd
 import (
 	"context"
 	"net/http"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/enrollment"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 )
 
 type runtimeEnrollmentCheckpointError struct{ cause error }
 
-var materializeBootstrapArtifact = materializeUnixBootstrapArtifact
+var currentInstallSource = installsource.Current
 
 func (e *runtimeEnrollmentCheckpointError) Error() string {
 	return "persist runtime enrollment progress: " + e.cause.Error()
@@ -23,7 +22,7 @@ func (e *runtimeEnrollmentCheckpointError) Error() string {
 
 func (e *runtimeEnrollmentCheckpointError) Unwrap() error { return e.cause }
 
-// prepareUnixBootstrapRuntime verifies the artifact before consuming a new
+// prepareUnixBootstrapRuntime validates the supplied binary before consuming a new
 // runtime credential and checkpoints enrollment before service installation.
 // If a process dies between Enroll and the checkpoint, the next run recognizes
 // the matching durable identity and records progress without replaying the
@@ -38,20 +37,14 @@ func prepareUnixBootstrapRuntime(ctx context.Context, material *bootstrap.Materi
 			return "", bootstrap.ErrInvalid
 		}
 	}
-	artifactPath, err := fetchBootstrapArtifact(ctx, *material.Artifact, filepath.Join(stateRoot, "tuf"), artifactHTTP)
+	artifactPath, _, err := currentInstallSource()
 	if err != nil {
-		return "", err
-	}
-	artifactPath, err = materializeBootstrapArtifact(ctx, artifactPath)
-	if err != nil {
-		_ = os.Remove(artifactPath)
 		return "", err
 	}
 	if !material.ReuseIdentity {
 		identity, loadErr := enrollment.LoadRuntimeIdentityForRenewal(stateRoot, time.Now().UTC())
 		if loadErr != nil || !runtimeIdentityMatches(identity, *material) {
 			if _, err := client.Enroll(ctx, enrollment.Config{ControlURL: material.ControlURL, StateRoot: stateRoot, EnrollmentCredential: material.EnrollmentCredential}); err != nil {
-				_ = os.Remove(artifactPath)
 				return "", err
 			}
 		}

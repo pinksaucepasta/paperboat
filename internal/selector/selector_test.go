@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestPersistentScreenIsOwnedAcrossNestedControls(t *testing.T) {
@@ -31,6 +32,47 @@ func TestPersistentScreenIsOwnedAcrossNestedControls(t *testing.T) {
 	}
 }
 
+func TestSuspendScreenRestoresExactlyOnce(t *testing.T) {
+	var output bytes.Buffer
+	end := BeginScreen(&output)
+	defer end()
+	output.Reset()
+
+	restore := SuspendScreen(&output)
+	if !ScreenActive() {
+		t.Fatal("suspending screen changed ownership")
+	}
+	if got := output.String(); got != leaveAlternateScreen {
+		t.Fatalf("suspend output=%q", got)
+	}
+	restore()
+	restore()
+	if got := output.String(); got != leaveAlternateScreen+enterAlternateScreen {
+		t.Fatalf("restore output=%q", got)
+	}
+}
+
+func TestNestedSuspendScreenEmitsOnePair(t *testing.T) {
+	var output bytes.Buffer
+	end := BeginScreen(&output)
+	defer end()
+	output.Reset()
+
+	first := SuspendScreen(&output)
+	second := SuspendScreen(&output)
+	if got := output.String(); got != leaveAlternateScreen {
+		t.Fatalf("nested suspend output=%q", got)
+	}
+	first()
+	if got := output.String(); got != leaveAlternateScreen {
+		t.Fatalf("early restore output=%q", got)
+	}
+	second()
+	if got := output.String(); got != leaveAlternateScreen+enterAlternateScreen {
+		t.Fatalf("nested restore output=%q", got)
+	}
+}
+
 func TestLoadingReturnsWorkerError(t *testing.T) {
 	reader, writer, err := os.Pipe()
 	if err != nil {
@@ -41,6 +83,19 @@ func TestLoadingReturnsWorkerError(t *testing.T) {
 	want := errors.New("load failed")
 	if got := Loading(context.Background(), "Machines", "Loading", reader, io.Discard, func(context.Context) error { return want }); !errors.Is(got, want) {
 		t.Fatalf("loading error=%v", got)
+	}
+}
+
+func TestChooseRejectsNonTerminalInput(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	defer writer.Close()
+
+	if _, err := Choose(Options{Title: "Choose", Items: []Item{{ID: "one"}}, Stdin: reader, Output: io.Discard}); !errors.Is(err, ErrNotTerminal) {
+		t.Fatalf("choose error=%v, want ErrNotTerminal", err)
 	}
 }
 
@@ -81,6 +136,19 @@ func TestLoadingViewUsesSimplePaperboatMark(t *testing.T) {
 	}
 }
 
+func TestLoadingViewFitsNarrowTerminal(t *testing.T) {
+	model := loadingModel{title: strings.Repeat("title", 8), detail: strings.Repeat("detail", 8), width: 7, height: 4}
+	view := model.View()
+	if lines := strings.Count(view, "\n") + 1; lines > 4 {
+		t.Fatalf("loading lines=%d view=%q", lines, view)
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if width := ansi.StringWidth(line); width > 7 {
+			t.Fatalf("loading line width=%d: %q", width, line)
+		}
+	}
+}
+
 func TestModelFiltersMetadataAndWraps(t *testing.T) {
 	m := NewModel([]Item{
 		{ID: "env_1", Title: "api", Description: "hosted project · ready"},
@@ -103,7 +171,7 @@ func TestModelFiltersMetadataAndWraps(t *testing.T) {
 
 func TestModelSupportsFuzzySubsequenceFiltering(t *testing.T) {
 	m := NewModel([]Item{{ID: "one", Title: "screenshots/final-report.pdf"}, {ID: "two", Title: "notes.txt"}}, 3)
-	for _, r := range "frpdf" {
+	for _, r := range "rptdf" {
 		m.Type(r)
 	}
 	if selected, ok := m.Selected(); !ok || selected.ID != "one" {
@@ -283,6 +351,41 @@ func TestChooserRendersActionItemsDistinctly(t *testing.T) {
 	view := model.View()
 	if !strings.Contains(view, actionStyle.Render("     + Add machine")) {
 		t.Fatalf("action item was not accented: %q", view)
+	}
+}
+
+func TestChooserViewFitsNarrowTerminal(t *testing.T) {
+	model := chooserModel{
+		options: Options{Header: strings.Repeat("header", 8), Title: strings.Repeat("title", 8), Subtitle: strings.Repeat("subtitle", 8), Footer: strings.Repeat("footer", 8)},
+		choices: NewModel([]Item{{Title: strings.Repeat("item", 8), Description: strings.Repeat("description", 8)}}, 8),
+		width:   7,
+		height:  4,
+	}
+	view := model.View()
+	if lines := strings.Count(view, "\n") + 1; lines > 4 {
+		t.Fatalf("chooser lines=%d view=%q", lines, view)
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if width := ansi.StringWidth(line); width > 7 {
+			t.Fatalf("chooser line width=%d: %q", width, line)
+		}
+	}
+}
+
+func TestChooserSanitizesTerminalControlsInItemText(t *testing.T) {
+	malicious := "\x1b[31mowned\x1b]8;;https://evil.example\x07click\x1b]8;;\x07"
+	model := chooserModel{
+		options: Options{Title: "Machines"},
+		choices: NewModel([]Item{{Title: malicious, Description: malicious}}, 8),
+		width:   80,
+		height:  12,
+	}
+	view := model.View()
+	if strings.ContainsAny(view, "\x1b\x07") {
+		t.Fatalf("item text injected terminal controls: %q", view)
+	}
+	if !strings.Contains(view, "owned") || !strings.Contains(view, "click") {
+		t.Fatalf("sanitizing removed visible item text: %q", view)
 	}
 }
 

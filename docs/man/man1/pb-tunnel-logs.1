@@ -1,0 +1,62 @@
+.nh
+.TH "PB-TUNNEL-LOGS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel-logs - Show tunnel logs
+
+
+.SH SYNOPSIS
+\fBpb tunnel logs  [flags]\fP
+
+
+.SH DESCRIPTION
+Show tunnel logs
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--cursor\fP=""
+	continue after a log cursor
+
+.PP
+\fB--follow\fP[=false]
+	wait for new log entries
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for logs
+
+.PP
+\fB--interval\fP=1s
+	follow polling interval (250ms-1m)
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+.PP
+\fB--limit\fP=100
+	maximum entries per request (1-200)
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-tunnel(1)\fP

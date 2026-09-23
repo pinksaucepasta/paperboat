@@ -207,7 +207,11 @@ func configureEphemeralLaunchFlags(command *cobra.Command) {
 	command.Flags().Bool("json", false, "print the canonical preview resource as JSON")
 }
 
-func previewTargetArgs(_ *cobra.Command, args []string) error {
+func previewTargetArgs(command *cobra.Command, args []string) error {
+	jsonOutput, _ := command.Flags().GetBool("json")
+	if len(args) == 0 && !jsonOutput && previewInteractiveTerminal(command) {
+		return nil
+	}
 	if len(args) != 1 {
 		return fmt.Errorf("accepts 1 arg(s), received %d; usage: pb preview <port|url|path>", len(args))
 	}
@@ -216,6 +220,9 @@ func previewTargetArgs(_ *cobra.Command, args []string) error {
 }
 
 func runPreviewCobra(command *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return actionHomePreviewLaunch(command)
+	}
 	target, err := parsePreviewTarget(args[0])
 	if err != nil {
 		return err
@@ -317,6 +324,7 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 	var heartbeatCancel context.CancelFunc
 	var heartbeatDone chan struct{}
 	var heartbeatErrors chan error
+	var startHeartbeat func()
 	retainOwnerLease := false
 	cleanupOwnerLease := func() error {
 		var cleanupErr error
@@ -383,7 +391,7 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 			return fmt.Errorf("%w: hostd leased machine %q, selected machine is %q", ErrPreviewOwnerSessionUnavailable, ownerLease.MachineID, machineID)
 		}
 		ownerSessionID = ownerLease.OwnerSessionID
-		if !background {
+		startHeartbeat = func() {
 			heartbeatContext, heartbeatStop := context.WithCancel(foregroundCtx)
 			heartbeatCancel = heartbeatStop
 			heartbeatDone = make(chan struct{})
@@ -396,6 +404,9 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 				}
 				close(heartbeatDone)
 			}()
+		}
+		if !background {
+			startHeartbeat()
 		}
 	} else {
 		ownerSessionID, err = newPreviewOwnerSessionID()
@@ -434,8 +445,59 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 	if err != nil {
 		return err
 	}
+	if !background && !jsonOutput && previewInteractiveTerminal(command) {
+		ended := make(chan error, 1)
+		go func() { ended <- foreground.Wait(); close(ended) }()
+		transfer := func(ctx context.Context, ttl time.Duration) (time.Time, error) {
+			if ownerLeaseClient == nil || startHeartbeat == nil {
+				return time.Time{}, ErrPreviewOwnerSessionUnavailable
+			}
+			deadline := time.Now().UTC().Add(ttl)
+			if foreground.Lease.UserDeadline != nil && foreground.Lease.UserDeadline.Before(deadline) {
+				deadline = *foreground.Lease.UserDeadline
+			}
+			heartbeatCancel()
+			<-heartbeatDone
+			// Drain errors before replacing the heartbeat channels.
+			select {
+			case err := <-heartbeatErrors:
+				return time.Time{}, err
+			default:
+			}
+			updated, err := ownerLeaseClient.TransferBackground(ctx, ownerLease, deadline)
+			if err != nil {
+				// A heartbeat reconciles a definitive failure. If transfer actually
+				// committed, heartbeat conflicts; stop this preview and release its owner
+				// rather than claiming or abandoning uncertain background ownership.
+				reconcileCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+				_, reconcileErr := ownerLeaseClient.Heartbeat(reconcileCtx, ownerLease)
+				stop()
+				if reconcileErr != nil {
+					cancel()
+					return time.Time{}, errors.Join(err, reconcileErr)
+				}
+				startHeartbeat()
+				return time.Time{}, err
+			}
+			ownerLease = updated
+			retainOwnerLease = true
+			return updated.ExpiresAt, nil
+		}
+		outcome, consoleErr := runPreviewConsoleForCommand(command, foreground.Lease, target, accessMode, domains, client, ended, transfer)
+		// A canceled UI may not have received a successful handoff response.
+		// Only a displayed successful action relinquishes foreground ownership.
+		if outcome.action != "background" {
+			retainOwnerLease = false
+		}
+		cancel()
+		waitErr := <-ended
+		if outcome.output != "" {
+			_, err = fmt.Fprint(command.OutOrStdout(), outcome.output)
+		}
+		return errors.Join(consoleErr, outcome.err, waitErr, err)
+	}
 	var domainObserverCancel context.CancelFunc
-	var domainObserverDone <-chan struct{}
+	var domainObserverDone <-chan error
 	if jsonOutput {
 		value := api.PreviewLease{}
 		if len(domains) > 0 {
@@ -460,32 +522,46 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 			return err
 		}
 	}
-	if len(domains) > 0 {
+	// Background output is one canonical lease, including its domain projection.
+	// Only the foreground process owns a stream of subsequent domain events.
+	if len(domains) > 0 && !background {
 		observerCtx, observerCancel := context.WithCancel(foregroundCtx)
 		domainObserverCancel = observerCancel
-		done := make(chan struct{})
+		done := make(chan error, 1)
 		domainObserverDone = done
-		writer := command.OutOrStdout()
+		observe := func(domain api.PreviewDomainSummary) error {
+			return writePreviewDomainStatus(command.OutOrStdout(), domain)
+		}
 		if jsonOutput {
-			writer = command.ErrOrStderr()
+			observe = func(domain api.PreviewDomainSummary) error {
+				return writePreviewDomainJSON(command.OutOrStdout(), foreground.Lease.ID, domain)
+			}
 		}
 		go func() {
-			defer close(done)
-			observePreviewDomains(observerCtx, client, foreground.Lease.ID, domains, writer)
+			observeErr := observePreviewDomainChanges(observerCtx, client, foreground.Lease.ID, domains, observe)
+			if observeErr != nil {
+				cancel()
+			}
+			done <- observeErr
+			close(done)
 		}()
 	}
 	if background {
-		retainOwnerLease = true
 		cancel()
-		_ = foreground.Wait()
-		return nil
 	}
 	waitErr := foreground.Wait()
+	var observerErr error
 	if domainObserverCancel != nil {
 		domainObserverCancel()
-		<-domainObserverDone
+		observerErr = <-domainObserverDone
 	}
-	return waitErr
+	if err := errors.Join(waitErr, observerErr); err != nil {
+		return err
+	}
+	if background {
+		retainOwnerLease = true
+	}
+	return nil
 }
 
 func runPreviewStatusCobra(command *cobra.Command, args []string) error {
@@ -817,13 +893,23 @@ func previewLeaseGeneration(etag string) int64 {
 	return 0
 }
 
-func observePreviewDomains(ctx context.Context, client *api.Client, previewID string, requested []string, writer io.Writer) {
-	if ctx == nil || client == nil || writer == nil || len(requested) == 0 {
-		return
+func observePreviewDomains(ctx context.Context, client *api.Client, previewID string, requested []string, writer io.Writer) error {
+	if writer == nil {
+		return errors.New("preview domain writer is required")
+	}
+	return observePreviewDomainChanges(ctx, client, previewID, requested, func(domain api.PreviewDomainSummary) error { return writePreviewDomainStatus(writer, domain) })
+}
+
+func observePreviewDomainChanges(ctx context.Context, client *api.Client, previewID string, requested []string, observe func(api.PreviewDomainSummary) error) error {
+	if ctx == nil || client == nil || observe == nil {
+		return errors.New("preview domain observer is not configured")
+	}
+	if len(requested) == 0 {
+		return nil
 	}
 	requested, err := api.NormalizePreviewDomains(requested)
 	if err != nil {
-		return
+		return err
 	}
 	seen := make(map[string]string, len(requested))
 	for {
@@ -841,7 +927,9 @@ func observePreviewDomains(ctx context.Context, client *api.Client, previewID st
 				key := previewDomainObservationKey(domain)
 				if seen[hostname] != key {
 					seen[hostname] = key
-					writePreviewDomainStatus(writer, domain)
+					if err := observe(domain); err != nil {
+						return fmt.Errorf("write preview domain status: %w", err)
+					}
 				}
 				if previewDomainReady(domain) {
 					continue
@@ -854,7 +942,7 @@ func observePreviewDomains(ctx context.Context, client *api.Client, previewID st
 				}
 			}
 			if ready || terminal {
-				return
+				return nil
 			}
 		}
 		timer := time.NewTimer(500 * time.Millisecond)
@@ -862,7 +950,7 @@ func observePreviewDomains(ctx context.Context, client *api.Client, previewID st
 		case <-timer.C:
 		case <-ctx.Done():
 			timer.Stop()
-			return
+			return nil
 		}
 	}
 }
@@ -890,16 +978,28 @@ func previewDomainObservationKey(domain api.PreviewDomainSummary) string {
 	return string(data)
 }
 
-func writePreviewDomainStatus(writer io.Writer, domain api.PreviewDomainSummary) {
-	_, _ = fmt.Fprintf(writer, "Domain %s: state=%s certificate=%s\n", domain.Hostname, domain.State, domain.Certificate.State)
+func writePreviewDomainJSON(writer io.Writer, previewID string, domain api.PreviewDomainSummary) error {
+	return writeCLIJSON(writer, struct {
+		Event     string                   `json:"event"`
+		PreviewID string                   `json:"preview_id"`
+		Domain    api.PreviewDomainSummary `json:"domain"`
+	}{"domain_status", previewID, domain})
+}
+
+func writePreviewDomainStatus(writer io.Writer, domain api.PreviewDomainSummary) error {
+	var output strings.Builder
+	_, _ = fmt.Fprintf(&output, "Domain %s: state=%s certificate=%s\n", domain.Hostname, domain.State, domain.Certificate.State)
 	if domain.Instructions == nil {
-		return
+		_, err := io.WriteString(writer, output.String())
+		return err
 	}
-	_, _ = fmt.Fprintf(writer, "DNS instructions for %s (%s):\n", domain.Hostname, domain.Instructions.VerificationState)
+	_, _ = fmt.Fprintf(&output, "DNS instructions for %s (%s):\n", domain.Hostname, domain.Instructions.VerificationState)
 	for _, record := range domain.Instructions.Records {
-		_, _ = fmt.Fprintf(writer, "  %s %s -> %s (TTL %d)\n", record.Type, record.Name, record.Value, record.TTL)
+		_, _ = fmt.Fprintf(&output, "  %s %s -> %s (TTL %d)\n", record.Type, record.Name, record.Value, record.TTL)
 	}
 	if domain.Instructions.Note != "" {
-		_, _ = fmt.Fprintf(writer, "  %s\n", domain.Instructions.Note)
+		_, _ = fmt.Fprintf(&output, "  %s\n", domain.Instructions.Note)
 	}
+	_, err := io.WriteString(writer, output.String())
+	return err
 }

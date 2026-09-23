@@ -56,6 +56,6 @@ func (r *APIResolver) ResolveShared(ctx context.Context, sessionID string) (Conn
 		if !terminal.Shared() || terminal.Auth.ResourceID == "" {
 			return ConnectInfo{}, errors.New("server returned invalid shared terminal role")
 		}
-		return ConnectInfo{TargetKind: targetUserMachine, ProjectID: resp.UserMachineID, Project: resp.Environment.DisplayName, ProjectState: resp.UserMachineState, MachineGeneration: resp.MachineGeneration, TunnelTarget: resp.Terminal.Endpoints.WSS, Terminal: terminal}, nil
+		return ConnectInfo{TargetKind: targetUserMachine, ProjectID: resp.UserMachineID, Project: resp.Environment.Alias, ProjectState: resp.UserMachineState, MachineGeneration: resp.MachineGeneration, TunnelTarget: resp.Terminal.Endpoints.WSS, Terminal: terminal}, nil
 	}
 }

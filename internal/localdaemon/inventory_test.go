@@ -58,9 +58,9 @@ func TestInventoryPublishesSortedAuthoritativeMachines(t *testing.T) {
 	now := time.Date(2026, 8, 4, 8, 0, 0, 0, time.UTC)
 	observed := now.Add(-time.Minute)
 	source := &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{
-		{ID: "machine_2", DisplayName: "Studio Mac", InstallationGeneration: 0, Capabilities: api.MachineCapabilities{FileReceive: api.MachineCapability{Configured: true}}},
-		{ID: "machine_1", DisplayName: "Build Host", Online: true, InstallationGeneration: 7, SSHAuthority: api.SSHAuthority{TargetGeneration: 7, HostKeyGeneration: 7}, SSHLocalReady: true, RuntimeDiagnostics: api.RuntimeDiagnostics{ObservedAt: &observed}, Capabilities: api.MachineCapabilities{FileReceive: api.MachineCapability{Configured: true, Observed: true}, PreviewLaunch: api.MachineCapability{Configured: true, Observed: true}}},
-		{ID: "machine_3", DisplayName: "Build Host", State: "revoked", InstallationGeneration: 2},
+		{ID: "machine_2", Alias: "studio-mac", InstallationGeneration: 0, Capabilities: api.MachineCapabilities{FileReceive: api.MachineCapability{Configured: true}}},
+		{ID: "machine_1", Alias: "build-host", Online: true, InstallationGeneration: 7, SSHAuthority: api.SSHAuthority{TargetGeneration: 7, HostKeyGeneration: 7}, SSHLocalReady: true, RuntimeDiagnostics: api.RuntimeDiagnostics{ObservedAt: &observed}, Capabilities: api.MachineCapabilities{FileReceive: api.MachineCapability{Configured: true, Observed: true}, PreviewLaunch: api.MachineCapability{Configured: true, Observed: true}}},
+		{ID: "machine_3", Alias: "build-host", State: "revoked", InstallationGeneration: 2},
 	}}}}
 	inventory, store := newTestInventory(t, source, func() time.Time { return now })
 	if err := inventory.Refresh(context.Background()); err != nil {
@@ -89,9 +89,9 @@ func TestInventoryRefreshRetainsDaemonVersionAcrossPublications(t *testing.T) {
 	now := time.Date(2026, 8, 4, 8, 0, 0, 0, time.UTC)
 	controlPlaneErr := errors.New("control plane unavailable")
 	source := &scriptedMachineSource{results: []machineResult{
-		{machines: []api.UserMachine{{ID: "machine_1", DisplayName: "before", InstallationGeneration: 1}}},
+		{machines: []api.UserMachine{{ID: "machine_1", Alias: "before", InstallationGeneration: 1}}},
 		{err: controlPlaneErr},
-		{machines: []api.UserMachine{{ID: "machine_1", DisplayName: "after", InstallationGeneration: 1}}},
+		{machines: []api.UserMachine{{ID: "machine_1", Alias: "after", InstallationGeneration: 1}}},
 	}}
 	inventory, store := newTestInventory(t, source, func() time.Time { return now })
 
@@ -131,7 +131,7 @@ func TestInventoryRefreshRetainsDaemonVersionAcrossPublications(t *testing.T) {
 
 func TestInventoryPublishesBoundedCompletionProjection(t *testing.T) {
 	now := time.Date(2026, 8, 4, 8, 0, 0, 0, time.UTC)
-	source := completionMachineSource{&scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio", DisplayName: "Studio", EnvironmentID: "environment_1"}}}}}}
+	source := completionMachineSource{&scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio", EnvironmentID: "environment_1"}}}}}}
 	inventory, _ := newTestInventory(t, source, func() time.Time { return now })
 	if err := inventory.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
@@ -148,7 +148,7 @@ func TestInventoryPublishesBoundedCompletionProjection(t *testing.T) {
 }
 
 func TestInventoryClassifiesSSHAuthorityTransitions(t *testing.T) {
-	base := api.UserMachine{ID: "machine_1", DisplayName: "Studio", Online: true, InstallationGeneration: 4, SSHLocalReady: true}
+	base := api.UserMachine{ID: "machine_1", Alias: "studio", Online: true, InstallationGeneration: 4, SSHLocalReady: true}
 	tests := []struct {
 		name      string
 		machine   api.UserMachine
@@ -197,7 +197,7 @@ func TestInventoryClassifiesSSHAuthorityTransitions(t *testing.T) {
 
 func TestInventoryProjectsOnlyTypedUpdateHealth(t *testing.T) {
 	observed := time.Now().UTC()
-	base := api.UserMachine{ID: "machine_1", DisplayName: "Studio", Availability: api.AvailabilityPolicy{Schema: "paperboat.availability-policy/v1", ObservedAt: &observed}}
+	base := api.UserMachine{ID: "machine_1", Alias: "studio", Availability: api.AvailabilityPolicy{Schema: "paperboat.availability-policy/v1", ObservedAt: &observed}}
 	for name, test := range map[string]struct {
 		value string
 		want  string
@@ -223,7 +223,7 @@ func TestInventoryPublishesOnlySemanticTransitionsAndPreservesLastGoodMachines(t
 		clockCalls++
 		return now.Add(time.Duration(clockCalls) * time.Minute)
 	}
-	machines := []api.UserMachine{{ID: "machine_1", DisplayName: "studio", Online: true, InstallationGeneration: 3}}
+	machines := []api.UserMachine{{ID: "machine_1", Alias: "studio", Online: true, InstallationGeneration: 3}}
 	unavailable := errors.New("control plane unavailable")
 	source := &scriptedMachineSource{results: []machineResult{{machines: machines}, {machines: machines}, {err: unavailable}, {err: unavailable}, {machines: machines}, {machines: machines}}}
 	inventory, store := newTestInventory(t, source, clock)

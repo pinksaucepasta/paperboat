@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/observability"
 )
@@ -362,6 +363,7 @@ func (r *Runtime) recordLifecycle(component Component, operation, code string, s
 		})
 	}
 	if r.eventLog == nil {
+		errorreport.Current().Lifecycle(context.Background(), string(dimension), operation, code, string(outcome))
 		return
 	}
 	now := r.telemetryNow()

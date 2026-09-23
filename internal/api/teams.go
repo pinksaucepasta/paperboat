@@ -132,7 +132,7 @@ type TeamMachineBinding struct {
 	MachineID              string   `json:"machine_id"`
 	OwnerAccount           string   `json:"owner_account"`
 	OwnerTeamID            string   `json:"owner_team_id,omitempty"`
-	DisplayName            string   `json:"display_name"`
+	Alias                  string   `json:"alias"`
 	State                  string   `json:"state"`
 	Online                 bool     `json:"online"`
 	ConfiguredCapabilities []string `json:"configured_capabilities"`

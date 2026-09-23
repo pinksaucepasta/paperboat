@@ -269,7 +269,7 @@ No unmeasured fleet revocation latency guarantee is implied here.
 
 Task 7 adds `peersessions.NetworkService`, the authenticated `/v1/peer-network/{register,config}`
 CLI POST routes, and `/v1/machine-peer-network/{register,config}` machine POST routes.
-CLI identity comes from the bearer session with `projects:connect`; machine identity
+CLI identity comes from the bearer session with `machines:connect`; machine identity
 comes from the current machine credential and proof of the exact request. Registration
 accepts only `operation_id`, `wireguard_public_key` and the independent
 `disco_public_key` (each canonical raw base64url, 32 bytes), `expected_key_generation`

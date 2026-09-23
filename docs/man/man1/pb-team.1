@@ -1,0 +1,42 @@
+.nh
+.TH "PB-TEAM" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team - Manage teams and explicit resource permissions
+
+
+.SH SYNOPSIS
+\fBpb team [flags]\fP
+
+
+.SH DESCRIPTION
+Manage teams and explicit resource permissions. Owners appoint admins, transfer ownership, delete teams and reset ENV. Admins manage ordinary members and grants; ENV rotation requires authorized keys. Owners must transfer ownership before leaving. Removal ends team access and adopted defaults; independently granted Git access and previously received files or secrets remain. Team deletion revokes team-owned machines and preserves personal resources.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for team
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb(1)\fP, \fBpb-team-accept(1)\fP, \fBpb-team-activity(1)\fP, \fBpb-team-attach(1)\fP, \fBpb-team-cancel-invite(1)\fP, \fBpb-team-create(1)\fP, \fBpb-team-delete(1)\fP, \fBpb-team-get(1)\fP, \fBpb-team-grant(1)\fP, \fBpb-team-invite(1)\fP, \fBpb-team-leave(1)\fP, \fBpb-team-list(1)\fP, \fBpb-team-machine(1)\fP, \fBpb-team-remove(1)\fP, \fBpb-team-role(1)\fP, \fBpb-team-transfer(1)\fP

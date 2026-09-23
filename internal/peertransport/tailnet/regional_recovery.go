@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-relay/derpquic"
-	"github.com/tailscale/tailcat"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=regional-recovery
 	"tailscale.com/tailcfg"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=regional-recovery
@@ -154,7 +154,7 @@ func (a *Authority) PrepareRegional(ctx context.Context, peerID string) error {
 		if peerID == "" {
 			return nil
 		}
-		server, ok := engine.(*tailcat.Server)
+		server, ok := engine.(*mesh.Server)
 		if !ok || peer.IsZero() || disco.IsZero() {
 			return ErrRegionalAuthority
 		}
@@ -243,7 +243,7 @@ func (r *regionalRecovery) prepareProvisional(ctx context.Context) error {
 	if promoted {
 		return nil
 	}
-	server, ok := r.engine.(*tailcat.Server)
+	server, ok := r.engine.(*mesh.Server)
 	if !ok {
 		return ErrRegionalAuthority
 	}
@@ -362,7 +362,7 @@ func (r *regionalRecovery) receive(ctx context.Context) {
 				continue
 			}
 			reply, _ := r.control.handle(in.peer, node, generation, in.packet, func() error {
-				if server, ok := r.engine.(*tailcat.Server); ok {
+				if server, ok := r.engine.(*mesh.Server); ok {
 					r.authority.relay.mu.Lock()
 					grant := r.authority.relay.grants[node.NodeID]
 					r.authority.relay.mu.Unlock()
@@ -509,12 +509,6 @@ func (r *regionalRecovery) run(ctx context.Context) {
 			timer.Reset(regionalProbeDelay())
 			continue
 		}
-		if client, ok := r.engine.(*tailcat.Client); ok {
-			if err = client.StartNetwork(ctx); err != nil {
-				timer.Reset(regionalProbeDelay())
-				continue
-			}
-		}
 		var peer key.NodePublic
 		for k, p := range peers {
 			if p.Identity.EndpointID == r.peerID {
@@ -657,7 +651,7 @@ func (r *regionalRecovery) run(ctx context.Context) {
 				// until its first meow exchange. Regional selection must precede
 				// that exchange, so install the still-authorized signed peer locally
 				// before assigning its selected region.
-				if server, ok := r.engine.(*tailcat.Server); ok {
+				if server, ok := r.engine.(*mesh.Server); ok {
 					disco, discoErr := derpquic.ParseDiscoKey(freshPeer.Identity.DiscoPublicKey)
 					if discoErr != nil {
 						err = discoErr

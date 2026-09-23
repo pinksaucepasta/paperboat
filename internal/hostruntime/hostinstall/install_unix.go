@@ -22,10 +22,10 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/binarytarget"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/environmentkey"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostservice"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 )
@@ -50,6 +50,7 @@ type Request struct {
 	GID                    int                      `json:"gid"`
 	Executable             string                   `json:"executable"`
 	Artifact               bootstrap.ArtifactTarget `json:"artifact"`
+	Source                 installsource.Source     `json:"source"`
 	Home                   string                   `json:"home"`
 	Path                   string                   `json:"path"`
 	StateRoot              string                   `json:"state_root"`
@@ -124,16 +125,29 @@ func Install(ctx context.Context, request Request) error {
 	if _, err := ensureEnvironmentHostCredential(ctx, paths, request); err != nil {
 		return err
 	}
+	activationLock, err := updated.LockUnixNativeInstall(paths.updateState)
+	if err != nil {
+		return err
+	}
+	if activationLock != nil {
+		defer activationLock.Close()
+	}
 	interrupted, err := recoverInterrupted(paths)
 	if err != nil {
 		return err
 	}
-	if err := stageBinary(request.Executable, paths.workerNext, request.Artifact); err != nil {
+	journal, err := newInstallJournal(paths, request.Source)
+	if err != nil {
 		return err
 	}
-	journal := installJournal{Schema: journalSchemaV1, Stage: "prepared", HadWorker: regularFile(paths.worker), UpdatedAt: time.Now().UTC()}
 	if err := writeJournal(paths.journal, journal); err != nil {
 		return err
+	}
+	if err := updated.PrepareUnixNativeInstall(paths.updateState); err != nil {
+		return errors.Join(err, removeJournal(paths.journal))
+	}
+	if err := stageBinary(request.Executable, paths.workerNext, request.Source); err != nil {
+		return errors.Join(err, updated.RollbackUnixNativeInstall(paths.updateState), removeJournal(paths.journal))
 	}
 	if err := activateBinary(paths.worker, paths.workerNext, paths.workerRollback); err != nil {
 		return errors.Join(err, rollbackFiles(paths, journal))
@@ -210,10 +224,22 @@ func Commit(request Request) error {
 	if err := Validate(request, invokingUID()); err != nil {
 		return err
 	}
-	paths := platformPaths(request.UID)
+	return commitPreparedInstallation(request, platformPaths(request.UID))
+}
+
+func commitPreparedInstallation(request Request, paths installPaths) error {
 	journal, err := loadJournal(paths.journal)
-	if err != nil || journal.Stage != "services_started" {
+	if err != nil || journal.Stage != "services_started" || journal.Source != request.Source {
 		return ErrInvalidRequest
+	}
+	if _, statErr := os.Lstat(paths.updateState); statErr == nil {
+		lock, lockErr := updated.LockUnixNativeInstall(paths.updateState)
+		if lockErr != nil {
+			return lockErr
+		}
+		defer lock.Close()
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return statErr
 	}
 	for _, pair := range [][2]string{{paths.workerRollback, paths.workerPrevious}} {
 		if err := replacePrevious(pair[0], pair[1]); err != nil {
@@ -223,7 +249,14 @@ func Commit(request Request) error {
 	if err := writeInstallMetadata(paths.metadata, request); err != nil {
 		return err
 	}
-	return removeJournal(paths.journal)
+	if err := removeJournal(paths.journal); err != nil {
+		return errors.Join(err, writeJournal(paths.journal, journal))
+	}
+	if err := updated.CommitUnixNativeInstall(paths.updateState); err != nil {
+		return errors.Join(err, writeJournal(paths.journal, journal))
+	}
+	_ = os.Remove(paths.workerRollback)
+	return nil
 }
 
 func Uninstall(ctx context.Context, request Request) error {
@@ -459,7 +492,7 @@ func installersWithMissing(request Request, paths installPaths, allowMissingExec
 	}
 	updaterConfig := service.ComponentConfig{
 		Layout: layout, User: request.User, Group: request.Group, UID: request.UID, GID: request.GID,
-		HostdTokenFile: paths.hostdToken, ReleaseRepository: request.Artifact.RepositoryURL, MachineID: request.UserMachineID,
+		HostdTokenFile: paths.hostdToken, ReleaseRepository: request.Artifact.RepositoryURL, MachineID: request.UserMachineID, Source: request.Source,
 		HealthURL: "http://" + request.HelperListenAddress + "/healthz", Controller: updaterController,
 	}
 	var updater *service.Installer
@@ -568,10 +601,29 @@ type installPaths struct {
 	environmentCredential, environmentCredentialMetadata string
 }
 type installJournal struct {
-	Schema    string    `json:"schema"`
-	Stage     string    `json:"stage"`
-	HadWorker bool      `json:"had_worker"`
-	UpdatedAt time.Time `json:"updated_at"`
+	PreviousMetadata []byte               `json:"previous_metadata"`
+	MetadataCaptured bool                 `json:"metadata_captured"`
+	Source           installsource.Source `json:"source"`
+	Schema           string               `json:"schema"`
+	Stage            string               `json:"stage"`
+	HadWorker        bool                 `json:"had_worker"`
+	UpdatedAt        time.Time            `json:"updated_at"`
+}
+
+func newInstallJournal(paths installPaths, source installsource.Source) (installJournal, error) {
+	journal := installJournal{Source: source, Schema: journalSchemaV1, Stage: "prepared", HadWorker: regularFile(paths.worker), UpdatedAt: time.Now().UTC(), MetadataCaptured: true}
+	info, err := os.Lstat(paths.metadata)
+	if errors.Is(err, os.ErrNotExist) {
+		return journal, nil
+	}
+	if err != nil {
+		return installJournal{}, err
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm() != 0600 || ownerUID(info) != 0 || info.Size() > 128<<10 {
+		return installJournal{}, ErrInvalidRequest
+	}
+	journal.PreviousMetadata, err = os.ReadFile(paths.metadata)
+	return journal, err
 }
 
 func platformPaths(uid int) installPaths {
@@ -761,7 +813,10 @@ func loadInstallMetadata(path string, sudoUID int) (Request, error) {
 	return request, nil
 }
 
-func stageBinary(source, destination string, manifest bootstrap.ArtifactTarget) error {
+func stageBinary(source, destination string, identity installsource.Source) error {
+	if err := identity.Verify(source); err != nil {
+		return err
+	}
 	if err := secureRootDirectory(filepath.Dir(destination), 0o755); err != nil {
 		return err
 	}
@@ -791,6 +846,9 @@ func stageBinary(source, destination string, manifest bootstrap.ArtifactTarget) 
 		return err
 	}
 	if err := temporary.Close(); err != nil {
+		return err
+	}
+	if err := identity.Verify(path); err != nil {
 		return err
 	}
 	//paperboat:allow-source-policy atomic-replacement owner=host-install reason=verified-stage-publication
@@ -841,14 +899,28 @@ func rollbackFiles(paths installPaths, journal installJournal) error {
 		}
 	}
 	_ = os.Remove(paths.workerNext)
-	return errors.Join(result, removeJournal(paths.journal))
+	if result != nil {
+		return result
+	}
+	if journal.MetadataCaptured {
+		if len(journal.PreviousMetadata) > 0 {
+			if err := atomicfile.Write(paths.metadata, journal.PreviousMetadata, atomicfile.Options{Mode: 0600, OwnerUID: 0, OwnerGID: -1}); err != nil {
+				return err
+			}
+		} else if err := os.Remove(paths.metadata); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	if err := updated.RollbackUnixNativeInstall(paths.updateState); err != nil {
+		return err
+	}
+	return removeJournal(paths.journal)
 }
 
 func recoverInterrupted(paths installPaths) (bool, error) {
 	journal, err := loadJournal(paths.journal)
 	if errors.Is(err, os.ErrNotExist) {
-		_ = os.Remove(paths.workerNext)
-		return false, nil
+		return false, updated.CommitUnixNativeInstall(paths.updateState)
 	}
 	if err != nil {
 		return false, err
@@ -872,7 +944,7 @@ func loadJournal(path string) (installJournal, error) {
 	if err != nil {
 		return installJournal{}, err
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || info.Size() > 4096 || ownerUID(info) != 0 {
+	if !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || info.Size() > 256<<10 || ownerUID(info) != 0 {
 		return installJournal{}, ErrInvalidRequest
 	}
 	body, err := os.ReadFile(path)
@@ -898,14 +970,22 @@ func replacePrevious(rollback, previous string) error {
 		return err
 	}
 	//paperboat:allow-source-policy atomic-replacement owner=host-install reason=verified-previous-retention
-	return os.Rename(rollback, previous)
+	return os.Link(rollback, previous)
 }
 func removeJournal(path string) error {
 	err := os.Remove(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	directory, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
 }
 func removeInstalledFiles(paths installPaths) error {
 	var result error
@@ -976,9 +1056,9 @@ func Validate(request Request, sudoUID int) error {
 		return fmt.Errorf("%w: TUF target descriptor", ErrInvalidRequest)
 	}
 	if err := verifyArtifact(request.Executable, request.UID, request.Platform); err != nil {
-		return fmt.Errorf("%w: TUF target file", ErrInvalidRequest)
+		return fmt.Errorf("%w: supplied executable file", ErrInvalidRequest)
 	}
-	if err := binarytarget.Validate(request.Executable, request.Platform, request.Artifact.Architecture); err != nil {
+	if err := request.Source.Verify(request.Executable); err != nil || request.Source.Platform != request.Platform || request.Source.Architecture != runtime.GOARCH {
 		return fmt.Errorf("%w: target architecture", ErrInvalidRequest)
 	}
 	for _, path := range []string{request.Home, request.StateRoot, request.WorkspaceRoot} {
@@ -1051,9 +1131,8 @@ func verifyArtifact(path string, uid int, platform string) error {
 		return ErrInvalidRequest
 	}
 	lstat, err := os.Lstat(path)
-	layout, layoutErr := service.DefaultLayout(platform)
-	rootOwnedDarwinPackageBinary := platform == "darwin" && layoutErr == nil && path == layout.Binary && lstat != nil && ownerUID(lstat) == 0
-	if err != nil || !lstat.Mode().IsRegular() || lstat.Mode()&os.ModeSymlink != 0 || lstat.Mode().Perm()&0o022 != 0 || (ownerUID(lstat) != uid && !rootOwnedDarwinPackageBinary) {
+	rootOwnedSource := lstat != nil && ownerUID(lstat) == 0
+	if err != nil || !lstat.Mode().IsRegular() || lstat.Mode()&os.ModeSymlink != 0 || lstat.Mode().Perm()&0o022 != 0 || (ownerUID(lstat) != uid && !rootOwnedSource) {
 		return ErrInvalidRequest
 	}
 	file, err := os.Open(path)
@@ -1062,7 +1141,7 @@ func verifyArtifact(path string, uid int, platform string) error {
 	}
 	defer file.Close()
 	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Size() < 1 || info.Size() > 256<<20 || (ownerUID(info) != uid && !rootOwnedDarwinPackageBinary) {
+	if err != nil || !info.Mode().IsRegular() || !os.SameFile(lstat, info) || info.Mode().Perm()&0o022 != 0 || info.Size() < 1 || info.Size() > 256<<20 || (ownerUID(info) != uid && ownerUID(info) != 0) {
 		return ErrInvalidRequest
 	}
 	return nil

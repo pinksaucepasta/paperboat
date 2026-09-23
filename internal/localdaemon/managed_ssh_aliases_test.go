@@ -23,7 +23,7 @@ func TestManagedSSHAliasTargetsReconcilesChangedAndRemovedMachines(t *testing.T)
 	}
 	state := &targetState{
 		machines: []api.UserMachine{{
-			ID: "machine_1", Alias: "victus", DisplayName: "Victus", State: "active", InstallationGeneration: 1,
+			ID: "machine_1", Alias: "victus", State: "active", InstallationGeneration: 1,
 		}},
 		targets: map[string]api.ManagedSSHTarget{
 			"machine_1": {Type: "machine_target", Version: 1, MachineID: "machine_1", MachineGeneration: 1, OSUser: "Pujan", Port: 38222, ReconciliationVersion: 1},
@@ -59,7 +59,7 @@ func TestManagedSSHAliasTargetsReconcilesChangedAndRemovedMachines(t *testing.T)
 	if err != nil {
 		t.Fatalf("initial target reconciliation: %v", err)
 	}
-	assertManagedSSHAliasTarget(t, got, managedSSHExpectedAliasTarget{alias: "victus", displayName: "Victus", user: "Pujan", port: 38222})
+	assertManagedSSHAliasTarget(t, got, managedSSHExpectedAliasTarget{alias: "victus", user: "Pujan", port: 38222})
 
 	state.mu.Lock()
 	state.machines[0].InstallationGeneration = 2
@@ -71,7 +71,7 @@ func TestManagedSSHAliasTargetsReconcilesChangedAndRemovedMachines(t *testing.T)
 	if err != nil {
 		t.Fatalf("changed target reconciliation: %v", err)
 	}
-	assertManagedSSHAliasTarget(t, got, managedSSHExpectedAliasTarget{alias: "victus", displayName: "Victus", user: "Administrator", port: 38223})
+	assertManagedSSHAliasTarget(t, got, managedSSHExpectedAliasTarget{alias: "victus", user: "Administrator", port: 38223})
 
 	state.mu.Lock()
 	state.machines = nil
@@ -86,13 +86,13 @@ func TestManagedSSHAliasTargetsReconcilesChangedAndRemovedMachines(t *testing.T)
 }
 
 type managedSSHExpectedAliasTarget struct {
-	alias, displayName, user string
-	port                     uint16
+	alias, user string
+	port        uint16
 }
 
 func assertManagedSSHAliasTarget(t *testing.T, got []managedssh.OpenSSHAliasTarget, want managedSSHExpectedAliasTarget) {
 	t.Helper()
-	if len(got) != 1 || got[0].Alias != want.alias || got[0].DisplayName != want.displayName || got[0].User != want.user || got[0].Port != want.port {
+	if len(got) != 1 || got[0].Alias != want.alias || got[0].User != want.user || got[0].Port != want.port {
 		t.Fatalf("aliases=%+v, want one target %+v", got, want)
 	}
 }

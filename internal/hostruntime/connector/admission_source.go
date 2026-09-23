@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
@@ -123,7 +124,7 @@ func NewHTTPSAdmissionSource(config AdmissionSourceConfig) (*HTTPSAdmissionSourc
 	if transport == nil {
 		transport = httptransport.Default()
 	}
-	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrAdmissionSourceInvalid }}
+	client := &http.Client{Transport: errorreport.TransportOperation(transport, endpoint.String(), "connector_admission"), CheckRedirect: func(*http.Request, []*http.Request) error { return ErrAdmissionSourceInvalid }}
 	return &HTTPSAdmissionSource{config: config, endpoint: endpoint, client: client}, nil
 }
 

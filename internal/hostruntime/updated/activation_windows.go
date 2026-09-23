@@ -22,6 +22,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/binarytarget"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesignature"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
@@ -145,7 +146,7 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 			return windowsActivationJournal{}, errInvalidWindowsActivation
 		}
 	}
-	if !activeWindowsServiceTargetsMatch(layout, config.ActiveVersion, oldHostd, oldUpdater, oldSSH) {
+	if !activeWindowsServiceTargetsMatch(layout, config.ActiveVersion, oldHostd, oldUpdater, oldSSH, config.Source) {
 		return windowsActivationJournal{}, errInvalidWindowsActivation
 	}
 	localDaemonLock, err := windowsLocalDaemonLockPath(config.RuntimeStateRoot)
@@ -215,6 +216,10 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 		NewHostd:   windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-hostd", "--instance", instance}, WasRunning: oldHostd.WasRunning},
 		NewUpdater: windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-updated", "--instance", instance}, WasRunning: oldUpdater.WasRunning},
 	}
+	if config.Source.Validate() == nil && config.Source.Version == config.ActiveVersion {
+		local := config.Source
+		journal.PreviousSource = &local
+	}
 	backend := newWindowsSCMActivationBackend(config)
 	if err := backend.AuthorizeRecovery(ctx, journal); err != nil {
 		return windowsActivationJournal{}, err
@@ -228,8 +233,9 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 	return journal, nil
 }
 
-func activeWindowsServiceTargetsMatch(layout service.Layout, version string, hostd, updater, ssh windowsServiceTarget) bool {
-	if !exactReleasePattern.MatchString(version) || !strings.EqualFold(hostd.Executable, layout.Binary) || !windowsUpdaterExecutableMatches(layout, updater.Executable) {
+func activeWindowsServiceTargetsMatch(layout service.Layout, version string, hostd, updater, ssh windowsServiceTarget, sources ...installsource.Source) bool {
+	local := len(sources) == 1 && sources[0].Validate() == nil && sources[0].Version == version
+	if !(exactReleasePattern.MatchString(version) || local) || !strings.EqualFold(hostd.Executable, layout.Binary) || !windowsUpdaterExecutableMatches(layout, updater.Executable) {
 		return false
 	}
 	return ssh.Executable == "" || strings.EqualFold(ssh.Executable, layout.Binary)
@@ -761,8 +767,12 @@ func (b *windowsSCMActivationBackend) AuthorizeRecovery(ctx context.Context, jou
 	if err != nil {
 		return err
 	}
-	if err := source.AuthorizeRecovery(ctx, journal.PreviousVersion, "windows", journal.Architecture); err != nil {
-		return err
+	if journal.PreviousSource == nil {
+		if err := source.AuthorizeRecovery(ctx, journal.PreviousVersion, "windows", journal.Architecture); err != nil {
+			return err
+		}
+	} else if !validWindowsLocalPrevious(journal) {
+		return errInvalidWindowsActivation
 	}
 	target := windowsActivationComponentTarget(journal.PreviousBinary, journal.Architecture)
 	for _, path := range []string{b.config.Binary, b.config.BinaryRollback} {
@@ -1243,7 +1253,7 @@ func windowsStabilityCallTimeout(window, interval time.Duration) time.Duration {
 }
 
 func waitForWindowsUpdaterVersion(ctx context.Context, want string, timeout, retryDelay time.Duration, status func(context.Context) (ControlResponse, error)) error {
-	if ctx == nil || !exactReleasePattern.MatchString(want) || timeout <= 0 || retryDelay <= 0 || status == nil {
+	if ctx == nil || !validObservedRuntimeVersion(want) || timeout <= 0 || retryDelay <= 0 || status == nil {
 		return errors.Join(errors.New("verify PaperboatUpdated control version"), errInvalidWindowsActivation)
 	}
 	bounded, cancel := context.WithTimeout(ctx, timeout)
@@ -1273,7 +1283,7 @@ func waitForWindowsUpdaterVersion(ctx context.Context, want string, timeout, ret
 }
 
 func waitForWindowsDaemonVersion(ctx context.Context, want string, timeout, retryDelay time.Duration, snapshot func(context.Context) (localapi.Snapshot, error)) error {
-	if ctx == nil || !exactReleasePattern.MatchString(want) || timeout <= 0 || retryDelay <= 0 || snapshot == nil {
+	if ctx == nil || !validObservedRuntimeVersion(want) || timeout <= 0 || retryDelay <= 0 || snapshot == nil {
 		return errors.Join(errors.New("verify Paperboat local daemon version"), errInvalidWindowsActivation)
 	}
 	bounded, cancel := context.WithTimeout(ctx, timeout)
@@ -1410,6 +1420,14 @@ func commitWindowsInstallVersion(config WindowsConfig, version string) error {
 }
 
 func reconcileWindowsInstallVersion(ctx context.Context, config WindowsConfig) error {
+	if config.Source.Validate() == nil && config.Source.Version == config.ActiveVersion {
+		executable, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		// During rollback the running updater can occupy the protected previous slot.
+		return config.Source.Verify(executable)
+	}
 	body, err := os.ReadFile(config.InstallState)
 	if err != nil || len(body) == 0 || len(body) > 128<<10 {
 		return errInvalidWindowsActivation
@@ -1419,7 +1437,7 @@ func reconcileWindowsInstallVersion(ctx context.Context, config WindowsConfig) e
 			Version string `json:"version"`
 		} `json:"artifact"`
 	}
-	if json.Unmarshal(body, &document) != nil || !exactReleasePattern.MatchString(document.Artifact.Version) {
+	if json.Unmarshal(body, &document) != nil {
 		return errInvalidWindowsActivation
 	}
 	if document.Artifact.Version == config.ActiveVersion {
@@ -1599,6 +1617,10 @@ func resumeWindowsActivation(ctx context.Context, config WindowsConfig) (bool, e
 	if err != nil {
 		return false, err
 	}
+	if !config.AutomaticActivation && journal.ManualMode == "" && journal.Stage == windowsActivationStaged {
+		journal.Stage = windowsActivationRolledBack
+		return false, newWindowsSCMActivationBackend(config).WriteJournal(journal)
+	}
 	if !windowsActivationNeedsResume(journal, config.ActiveVersion, false) {
 		return false, nil
 	}
@@ -1683,7 +1705,7 @@ func validWindowsActivationPaths(config WindowsConfig, journal windowsActivation
 	// the canonical binary, but accepting only layout.Binary here rejects a
 	// valid staged journal before the activator can run, leaving the updater
 	// service stopped and the transaction permanently staged.
-	if !exactReleasePattern.MatchString(journal.PreviousVersion) || !strings.EqualFold(journal.OldHostd.Executable, layout.Binary) || !windowsUpdaterExecutableMatches(layout, journal.OldUpdater.Executable) || journal.OldSSH.Executable != "" && !strings.EqualFold(journal.OldSSH.Executable, layout.Binary) {
+	if !(exactReleasePattern.MatchString(journal.PreviousVersion) || validWindowsLocalPrevious(journal)) || !strings.EqualFold(journal.OldHostd.Executable, layout.Binary) || !windowsUpdaterExecutableMatches(layout, journal.OldUpdater.Executable) || journal.OldSSH.Executable != "" && !strings.EqualFold(journal.OldSSH.Executable, layout.Binary) {
 		return false
 	}
 	for _, target := range []windowsServiceTarget{journal.OldHostd, journal.NewHostd, journal.OldUpdater, journal.NewUpdater, journal.OldSSH, journal.NewSSH} {
@@ -1709,7 +1731,16 @@ func RunWindowsActivator(ctx context.Context, config WindowsConfig) error {
 	if err != nil {
 		return err
 	}
-	result, activationErr := executeWindowsActivation(ctx, newWindowsSCMActivationBackend(config), journal)
+	backend := newWindowsSCMActivationBackend(config)
+	var result windowsActivationJournal
+	var activationErr error
+	if !config.AutomaticActivation && journal.ManualMode == "" && journal.Stage == windowsActivationStaged {
+		journal.Stage = windowsActivationRolledBack
+		result = journal
+		activationErr = backend.WriteJournal(journal)
+	} else {
+		result, activationErr = executeWindowsActivation(ctx, backend, journal)
+	}
 	var connectErr error
 	if activationErr == nil && result.Stage == windowsActivationCommitted || result.Stage == windowsActivationRolledBack {
 		var manager *mgr.Mgr
@@ -1727,4 +1758,10 @@ func RunWindowsActivator(ctx context.Context, config WindowsConfig) error {
 		activationErr = nil
 	}
 	return errors.Join(activationErr, connectErr)
+}
+
+// Runtime observations include locally-built versions; update candidates still
+// require the exact signed release version contract.
+func validObservedRuntimeVersion(value string) bool {
+	return value != "" && len(value) <= 128 && strings.TrimSpace(value) == value && !strings.ContainsAny(value, "\x00\r\n\t ")
 }

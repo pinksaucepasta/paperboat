@@ -10,13 +10,13 @@ import (
 	"net/http"
 	"os"
 	"os/user"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"path/filepath"
 )
 
 type ClientInstallConfig struct {
@@ -45,14 +45,7 @@ func InstallClient(ctx context.Context, config ClientInstallConfig, stdin io.Rea
 	if err != nil {
 		return err
 	}
-	artifactPath, err := bootstrap.FetchVerifiedArtifact(ctx, config.Artifact, filepath.Join(config.StateRoot, "tuf"), artifactHTTPClient())
-	if err != nil {
-		return err
-	}
-	// Darwin release artifacts are signed PKGs, not executable runtime images.
-	// Materialize the canonical payload before handing it to the privileged
-	// service installer. Linux artifacts already pass through unchanged.
-	artifactPath, err = materializeBootstrapArtifact(ctx, artifactPath)
+	artifactPath, source, err := currentInstallSource()
 	if err != nil {
 		return err
 	}
@@ -63,7 +56,7 @@ func InstallClient(ctx context.Context, config ClientInstallConfig, stdin io.Rea
 	}
 	request := hostinstall.Request{
 		Schema: hostinstall.SchemaV1, Platform: runtime.GOOS, User: account.Username, UID: uid, Group: group.Name, GID: gid,
-		Executable: artifactPath, Artifact: config.Artifact,
+		Executable: artifactPath, Artifact: config.Artifact, Source: source,
 		Home: account.HomeDir, Path: servicePath, StateRoot: config.StateRoot, WorkspaceRoot: config.WorkspaceRoot,
 		ControlURL: config.ControlURL, UserMachineID: config.MachineID, Shell: shell,
 		HelperListenAddress: config.ListenAddress, SetupMode: "client",
@@ -86,7 +79,7 @@ func InstallClient(ctx context.Context, config ClientInstallConfig, stdin io.Rea
 	for {
 		requestHTTP, _ := http.NewRequestWithContext(readyCtx, http.MethodGet, "http://"+config.ListenAddress+"/healthz", nil)
 		response, requestErr := client.Do(requestHTTP)
-		if requestErr == nil && bootstrapWorkerReady(readyCtx, response, config.StateRoot, config.Artifact.Version, previousGeneration+1, readinessStarted, false) {
+		if requestErr == nil && bootstrapWorkerReady(readyCtx, response, config.StateRoot, source.Version, previousGeneration+1, readinessStarted, false) {
 			if err := authorizeServiceOperation(ctx, artifactPath, "commit", request, stdout, stderr); err != nil {
 				return errors.Join(err, authorizeServiceOperation(ctx, artifactPath, "uninstall", request, stdout, stderr), workerCommand.Rollback())
 			}
@@ -94,7 +87,7 @@ func InstallClient(ctx context.Context, config ClientInstallConfig, stdin io.Rea
 				return err
 			}
 			daemonCtx, daemonCancel := context.WithTimeout(ctx, 45*time.Second)
-			err := bindBootstrapDaemon(daemonCtx, config.ControlURL, config.Artifact.Version)
+			err := bindBootstrapDaemon(daemonCtx, config.ControlURL, source.Version)
 			daemonCancel()
 			if err != nil {
 				return err

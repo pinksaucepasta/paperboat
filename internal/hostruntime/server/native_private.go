@@ -18,9 +18,13 @@ func RevalidateNativePrivate(authorization Authorization, encodedTarget string, 
 	claims, ok := authorization.Value.(auth.Claims)
 	binding, err := nativeprivate.Decode([]byte(encodedTarget), now)
 	if !ok || err != nil || claims.CredentialClass != "native_private" || binding.OwnerEndpointID != ownerEndpointID || claims.MachineID != ownerEndpointID ||
+		claims.InstallationGeneration != binding.InstallationGeneration || claims.BootID != binding.BootID || claims.PolicyGeneration != binding.PolicyGeneration || claims.AnnouncementGeneration != binding.AnnouncementGeneration ||
 		claims.ResourceKind != binding.ResourceKind || claims.ResourceID != binding.ResourceID || claims.RouteID != binding.RouteID || claims.Protocol != binding.Protocol ||
 		claims.TargetScheme != binding.TargetScheme || claims.TargetAddress != binding.TargetAddress || claims.ExpectedGeneration != int64(binding.ResourceGeneration) ||
 		claims.RouteGeneration != int64(binding.RouteGeneration) || claims.TargetGeneration != int64(binding.TargetGeneration) || time.Unix(claims.ExpiresAt, 0).Before(binding.ExpiresAt) {
+		return nativeprivate.Binding{}, ErrNativePrivateBinding
+	}
+	if binding.ResourceKind == "device_service" && (claims.UserID != binding.UserID || claims.CLIClientSessionID != binding.CLIClientSessionID || claims.AssignmentID != binding.AccessSessionID) {
 		return nativeprivate.Binding{}, ErrNativePrivateBinding
 	}
 	return binding, nil

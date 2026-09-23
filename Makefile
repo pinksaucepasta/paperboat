@@ -2,11 +2,12 @@ BINARY      := pb
 PKG         := ./cmd/pb
 PREFIX      ?= /usr/local
 BINDIR      := $(PREFIX)/bin
+MANDIR      ?= $(PREFIX)/share/man
 VERSION     ?= $(shell ./tools/release-version.sh current)
 COMMIT      ?= $(shell git rev-parse --verify HEAD 2>/dev/null || echo unknown)
 PROTOCOL_VERSION ?= 1
 DEFAULT_SERVER_URL ?= https://api.pprbt.dev
-# The configured control-plane origin also serves current.json and TUF.
+# The configured control-plane origin also serves TUF metadata.
 DEFAULT_RELEASE_URL ?= $(DEFAULT_SERVER_URL)
 GO_VERSION  := $(shell awk '$$1 == "go" { print $$2; exit }' go.mod)
 SQLC_VERSION := v1.30.0
@@ -14,7 +15,7 @@ GO_ROOT     := $(shell GOTOOLCHAIN=go$(GO_VERSION) go env GOROOT)
 export PATH := $(GO_ROOT)/bin:$(PATH)
 GO          := GOTOOLCHAIN=local go
 GOFMT       := $(GO_ROOT)/bin/gofmt
-GO_FILES    := $(shell find . \( -path ./.git -o -path ./upstream/tailcat \) -prune -o -name '*.go' -print)
+GO_FILES    := $(shell find . \( -path ./.git -o -path ./upstream -o -path ./.build -o -path ./.codex-build \) -prune -o -name '*.go' -print)
 LDFLAGS     := -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=$(VERSION) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=$(COMMIT) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=$(PROTOCOL_VERSION) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=$(DEFAULT_SERVER_URL) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=$(DEFAULT_RELEASE_URL)
 
 .PHONY: binary-size-check build check clean complete container-compose-check cross-build dependencies fmt fmt-check fuzz generate generate-check hosted-image-check install license-check lint metrics-check metrics-generate preflight race release-assets release-binaries release-macos-pkg reproducible-builds source-policy static-analysis test tidy tidy-check uninstall upstream-foundations verification verify-toolchain vet vulnerability-check
@@ -75,12 +76,25 @@ release-macos-pkg: verify-toolchain
 
 release-assets: release-binaries release-macos-pkg
 
-install: build
+cli-docs:
+	$(GO) test ./cmd/pb -run '^TestCLIReference$$' -count=1 -args -update-cli-docs
+
+cli-docs-check:
+	$(GO) test ./cmd/pb -run '^TestCLIReference$$' -count=1
+
+install-man:
+	install -d "$(DESTDIR)$(MANDIR)/man1"
+	install -m 0644 docs/man/man1/pb*.1 "$(DESTDIR)$(MANDIR)/man1/"
+
+.PHONY: cli-docs cli-docs-check install-man
+
+install: build install-man
 	install -d $(BINDIR)
 	install -m 0755 bin/$(BINARY) $(BINDIR)/$(BINARY)
 
 uninstall:
 	rm -f $(BINDIR)/$(BINARY)
+	@for page in docs/man/man1/pb*.1; do rm -f "$(DESTDIR)$(MANDIR)/man1/$${page##*/}"; done
 
 test:
 	$(GO) test -count=1 -timeout 12m ./...

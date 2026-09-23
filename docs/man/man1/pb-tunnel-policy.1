@@ -1,0 +1,46 @@
+.nh
+.TH "PB-TUNNEL-POLICY" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel-policy - Manage permission to activate a private port on demand
+
+
+.SH SYNOPSIS
+\fBpb tunnel policy [flags]\fP
+
+
+.SH DESCRIPTION
+Manage on-demand private or team access to an exact host port. A replacement application listening on the same approved port inherits access. Paperboat does not start the application.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for policy
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-tunnel(1)\fP, \fBpb-tunnel-policy-allow(1)\fP, \fBpb-tunnel-policy-get(1)\fP, \fBpb-tunnel-policy-revoke(1)\fP

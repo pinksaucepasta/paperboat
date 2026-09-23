@@ -313,7 +313,7 @@ func renderOwnedOpenSSHConfig(config OpenSSHConfig) ([]byte, error) {
 			return nil, ErrOpenSSHConfigConflict
 		}
 		seen[host] = struct{}{}
-		fmt.Fprintf(&targets, "Host %s\n    Port %d\n", openSSHHostPatterns(host, target.DisplayName, config.AliasSuffix), target.Port)
+		fmt.Fprintf(&targets, "Host %s\n    Port %d\n", host, target.Port)
 	}
 	content := openSSHBeginMarker + "\n" + targets.String() +
 		"Host *." + config.AliasSuffix + "\n" +

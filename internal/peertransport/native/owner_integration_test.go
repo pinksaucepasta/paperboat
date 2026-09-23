@@ -36,13 +36,13 @@ import (
 	hostserver "github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
-	"github.com/tailscale/tailcat"
 	"go.uber.org/goleak"
 	"tailscale.com/tailcfg"
 	"tailscale.com/tstest/integration"
@@ -249,7 +249,7 @@ func TestRealTerminalAndFileProtocolsOverNativeTailnet(t *testing.T) {
 	_ = runRealTerminalAndFileProtocols(t, clientOwner, serverOwner, serverAuthority, dm.Regions[1], nil)
 }
 
-func runRealTerminalAndFileProtocols(t *testing.T, clientOwner, serverOwner *native.Owner, serverAuthority *tailnet.Authority, region *tailcfg.DERPRegion, beforeProtocols func(tailcat.Addr), afterProtocol ...func(string)) func(context.Context) error {
+func runRealTerminalAndFileProtocols(t *testing.T, clientOwner, serverOwner *native.Owner, serverAuthority *tailnet.Authority, region *tailcfg.DERPRegion, beforeProtocols func(mesh.Addr), afterProtocol ...func(string)) func(context.Context) error {
 	t.Helper()
 	root := t.TempDir()
 	adapter, err := pty.NewAdapter(root)
@@ -531,7 +531,7 @@ func readTerminalUntil(t *testing.T, connection tunnel.Conn, markers ...string) 
 	}
 }
 
-func startTestServer(t *testing.T, owner *native.Owner, authority *tailnet.Authority, region *tailcfg.DERPRegion) tailcat.Addr {
+func startTestServer(t *testing.T, owner *native.Owner, authority *tailnet.Authority, region *tailcfg.DERPRegion) mesh.Addr {
 	t.Helper()
 	server, err := authority.Listen(region)
 	if err != nil {

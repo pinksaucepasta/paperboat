@@ -15,10 +15,10 @@ import (
 
 	"github.com/pinksaucepasta/paperboat-relay/derpquic"
 	"github.com/pinksaucepasta/paperboat-relay/peerrelay"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
-	"github.com/tailscale/tailcat"
 	"tailscale.com/net/packet"
 	"tailscale.com/types/key"
 	"tailscale.com/wgengine/magicsock"
@@ -43,7 +43,7 @@ type controlOnlyCarrier struct {
 }
 
 func (c controlOnlyCarrier) Send(k key.NodePublic, p []byte) error {
-	if c.filter.allowDERP.Load() || tailcat.IsMeowPacket(p) {
+	if c.filter.allowDERP.Load() || mesh.IsMeowPacket(p) {
 		err := c.DERPCarrier.Send(k, p)
 		if err == nil && len(p) >= 4 && binary.LittleEndian.Uint32(p) == 4 {
 			c.filter.derpData.Add(1)
@@ -244,7 +244,7 @@ func TestAutomaticPeerRelayThenDirectRecovery(t *testing.T) {
 	}
 	defer serverOwner.Close()
 	var previousClient, previousServer uint64
-	repeatTransfer := runRealTerminalAndFileProtocols(t, clientOwner, serverOwner, serverAuthority, serverRegion, func(address tailcat.Addr) {
+	repeatTransfer := runRealTerminalAndFileProtocols(t, clientOwner, serverOwner, serverAuthority, serverRegion, func(address mesh.Addr) {
 		readyCtx, cancelReady := context.WithTimeout(ctx, 8*time.Second)
 		if readyErr := serverAuthority.PrepareRegional(readyCtx, ""); readyErr != nil {
 			cancelReady()

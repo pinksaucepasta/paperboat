@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 const (
@@ -164,6 +166,9 @@ func (s *Server) Run(ctx context.Context) error {
 
 func (s *Server) handler() http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if reference := request.Header.Get(supportref.Header); supportref.Valid(reference) {
+			request = request.WithContext(supportref.WithContext(request.Context(), reference))
+		}
 		requestID := request.Header.Get("X-Paperboat-Request-ID")
 		if !validRequestID(requestID) {
 			requestID = localRequestID()

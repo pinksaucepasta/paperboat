@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"golang.org/x/sys/windows"
@@ -231,27 +232,25 @@ func TestRecoverExpiredWindowsUninstallHelpersRefusesActiveOrMalformedRecords(t 
 	}
 }
 
-func TestFreshWindowsInstallPassesRecoveryIntoVerifiedInstallBoundary(t *testing.T) {
-	previousRecovery := recoverWindowsUninstall
-	previousInstall := installStandaloneBinaryWithFreshRecovery
-	want := errors.New("recovery failed")
+func TestWindowsInstallUsesRunningBytesAndFixedLayout(t *testing.T) {
+	previousSource, previousInstall := runningInstallSource, installSuppliedExecutable
+	source := installsource.Source{Version: "dev", Platform: "windows", Architecture: "amd64", SHA256: strings.Repeat("a", 64), Length: 42, Distribution: installsource.Custom}
+	runningInstallSource = func() (string, installsource.Source, error) { return `C:\staged\pb.exe`, source, nil }
 	called := false
-	recoverWindowsUninstall = func() error { called = true; return want }
-	installStandaloneBinaryWithFreshRecovery = func(_ context.Context, _, _ string, fresh bool, recoverFresh func() error) error {
-		if !fresh {
-			t.Fatal("fresh install callback received non-fresh request")
+	installSuppliedExecutable = func(_ context.Context, path string, got installsource.Source, directory string) (string, error) {
+		called = true
+		if path != `C:\staged\pb.exe` || got != source || directory != "" {
+			t.Fatalf("install request path=%q source=%+v directory=%q", path, got, directory)
 		}
-		return recoverFresh()
+		return `C:\Program Files\Paperboat\users\owner\bin\pb.exe`, nil
 	}
-	t.Cleanup(func() {
-		recoverWindowsUninstall = previousRecovery
-		installStandaloneBinaryWithFreshRecovery = previousInstall
-	})
+	t.Cleanup(func() { runningInstallSource, installSuppliedExecutable = previousSource, previousInstall })
 	command := platformInstallCommand()
-	command.SetArgs([]string{"--source", `C:\staged\pb.exe`, "--version", "2026.09.03.10", "--fresh"})
-	err := command.ExecuteContext(context.Background())
-	if !called || !errors.Is(err, want) {
-		t.Fatalf("fresh install recovery callback called=%t error=%v", called, err)
+	command.SetArgs([]string{"--json"})
+	var output bytes.Buffer
+	command.SetOut(&output)
+	if err := command.ExecuteContext(context.Background()); err != nil || !called || !strings.Contains(output.String(), `"enrollment":"unchanged"`) {
+		t.Fatalf("called=%t output=%q error=%v", called, output.String(), err)
 	}
 }
 

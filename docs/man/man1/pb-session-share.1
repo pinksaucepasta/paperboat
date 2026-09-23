@@ -1,0 +1,58 @@
+.nh
+.TH "PB-SESSION-SHARE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-session-share - Grant a team or teammate viewer or interactive access
+
+
+.SH SYNOPSIS
+\fBpb session share  [flags]\fP
+
+
+.SH DESCRIPTION
+Sharing includes up to 64 KiB of recent output, further bounded by attachment capacity, then live output. Recent output may reveal secrets regardless of ENV permissions. Interactive typing may interleave in host receive order and uses the shell's OS permissions.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--all\fP[=false]
+	share with all team members
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for share
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+.PP
+\fB--member\fP=""
+	selected teammate account ID
+
+.PP
+\fB--role\fP="viewer"
+	viewer or interactive
+
+.PP
+\fB--team\fP=""
+	team ID
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-session(1)\fP

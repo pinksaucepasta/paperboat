@@ -19,6 +19,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/term"
 	"github.com/junegunn/fzf/src/algo"
 	"github.com/junegunn/fzf/src/util"
 )
@@ -29,8 +30,10 @@ func init() {
 
 var ErrCanceled = errors.New("selection canceled")
 var ErrInterrupted = errors.New("selection interrupted")
+var ErrNotTerminal = errors.New("interactive terminal required")
 
 var persistentScreen atomic.Int32
+var suspendedScreen atomic.Int32
 
 const enterAlternateScreen = "\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l"
 const leaveAlternateScreen = "\x1b[?25h\x1b[?1049l"
@@ -44,18 +47,57 @@ func BeginScreen(output io.Writer) func() {
 	if persistentScreen.Add(1) == 1 {
 		_, _ = io.WriteString(output, enterAlternateScreen)
 	}
+	var once sync.Once
 	return func() {
-		if persistentScreen.Add(-1) == 0 {
-			_, _ = io.WriteString(output, leaveAlternateScreen)
-		}
+		once.Do(func() {
+			if persistentScreen.Add(-1) == 0 {
+				_, _ = io.WriteString(output, leaveAlternateScreen)
+			}
+		})
 	}
+}
+
+// SuspendScreen temporarily returns the terminal to its normal screen while
+// keeping the Paperboat screen owned by the caller. This is useful when a
+// nested action needs to run a regular terminal command. The returned restore
+// function is safe to call more than once.
+func SuspendScreen(output io.Writer) func() {
+	if output == nil {
+		output = os.Stderr
+	}
+	if persistentScreen.Load() <= 0 {
+		return func() {}
+	}
+	if suspendedScreen.Add(1) == 1 {
+		_, _ = io.WriteString(output, leaveAlternateScreen)
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			if suspendedScreen.Add(-1) == 0 && persistentScreen.Load() > 0 {
+				_, _ = io.WriteString(output, enterAlternateScreen)
+			}
+		})
+	}
+}
+
+// RequireTerminal rejects redirected input before Bubble Tea can try to
+// recover a controlling /dev/tty or wait forever on a non-interactive stream.
+func RequireTerminal(input *os.File) error {
+	if input == nil || !term.IsTerminal(input.Fd()) {
+		return ErrNotTerminal
+	}
+	return nil
 }
 
 // ProgramOptions makes other Bubble Tea controls participate in the active
 // Paperboat screen instead of briefly restoring the normal terminal.
 func ProgramOptions(input *os.File, output io.Writer) []tea.ProgramOption {
+	if output == nil {
+		output = os.Stderr
+	}
 	options := []tea.ProgramOption{tea.WithInput(input), tea.WithOutput(output), tea.WithMouseAllMotion()}
-	if persistentScreen.Load() == 0 {
+	if persistentScreen.Load() == 0 || suspendedScreen.Load() > 0 {
 		return append(options, tea.WithAltScreen())
 	}
 	_, _ = io.WriteString(output, "\x1b[2J\x1b[H")
@@ -74,6 +116,7 @@ type Item struct {
 }
 
 type Options struct {
+	Context        context.Context
 	Header         string
 	Title          string
 	Subtitle       string
@@ -277,6 +320,23 @@ func ChooseWithAction(options Options) (selection Result, err error) {
 	if options.Stdin == nil {
 		options.Stdin = os.Stdin
 	}
+	if err := RequireTerminal(options.Stdin); err != nil {
+		return Result{}, err
+	}
+	options.Header = sanitizeHeader(options.Header)
+	options.Title = SanitizeText(options.Title)
+	options.Subtitle = SanitizeText(options.Subtitle)
+	options.Empty = SanitizeText(options.Empty)
+	options.Footer = SanitizeText(options.Footer)
+	options.Initial = SanitizeText(options.Initial)
+	items := make([]Item, len(options.Items))
+	copy(items, options.Items)
+	for index := range items {
+		items[index].Title = SanitizeText(items[index].Title)
+		items[index].Description = SanitizeText(items[index].Description)
+		items[index].Search = SanitizeText(items[index].Search)
+	}
+	options.Items = items
 	if options.Output == nil {
 		options.Output = os.Stderr
 	}
@@ -291,9 +351,16 @@ func ChooseWithAction(options Options) (selection Result, err error) {
 	model := chooserModel{options: options, choices: NewModel(options.Items, 8), input: input, width: 80, height: 24}
 	model.choices.requireFilter = options.RequireFilter
 	model.choices.SetFilter(options.Initial)
-	program := tea.NewProgram(model, ProgramOptions(options.Stdin, options.Output)...)
+	programOptions := ProgramOptions(options.Stdin, options.Output)
+	if options.Context != nil {
+		programOptions = append(programOptions, tea.WithContext(options.Context))
+	}
+	program := tea.NewProgram(model, programOptions...)
 	final, runErr := program.Run()
 	if runErr != nil {
+		if options.Context != nil && options.Context.Err() != nil {
+			return Result{}, options.Context.Err()
+		}
 		return Result{}, fmt.Errorf("run selector: %w", runErr)
 	}
 	result := final.(chooserModel)
@@ -310,6 +377,7 @@ type loadDoneMsg struct{ err error }
 type loadTickMsg struct{}
 
 type loadingModel struct {
+	ctx           context.Context
 	title, detail string
 	work          func(context.Context) error
 	cancel        context.CancelFunc
@@ -331,9 +399,9 @@ func loadingTick() tea.Cmd {
 func (m loadingModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
 	case tea.WindowSizeMsg:
-		m.width, m.height = max(32, message.Width), max(10, message.Height)
+		m.width, m.height = viewWidth(message.Width), viewHeight(message.Height)
 	case tea.KeyMsg:
-		if (message.String() == "ctrl+c" || message.String() == "esc") && !m.interrupted {
+		if (message.String() == "ctrl+c" || KeyMatches(m.ctx, "back", message.String())) && !m.interrupted {
 			m.interrupted = true
 			m.cancel()
 			m.detail = "Canceling"
@@ -350,17 +418,23 @@ func (m loadingModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m loadingModel) View() string {
-	lineWidth := max(20, m.width-4)
+	lineWidth := viewWidth(m.width)
+	height := viewHeight(m.height)
+	styles := stylesForContext(m.ctx)
 	boat := []string{"      ▄█▄", "  ▄▄▝▀▀▀▀▀▘▄▄", "   ▀███████▀"}
-	lines := []string{titleStyle.Render(ansi.Truncate(m.title, lineWidth, "...")), ""}
+	lines := []string{styles.title.Render(truncateLine(SanitizeText(m.title), lineWidth)), ""}
 	for _, line := range boat {
-		lines = append(lines, ansi.Truncate(line, lineWidth, "..."))
+		lines = append(lines, truncateLine(line, lineWidth))
 	}
-	lines = append(lines, "", fmt.Sprintf("  %c  %s", "|/-\\"[m.frame], ansi.Truncate(m.detail, max(1, lineWidth-5), "...")))
-	for len(lines) < m.height-1 {
+	lines = append(lines, "", truncateLine(fmt.Sprintf("  %c  %s", "|/-\\"[m.frame], SanitizeText(m.detail)), lineWidth))
+	if height == 1 {
+		return styles.help.Render(truncateLine(loadingFooter(m.ctx), lineWidth))
+	}
+	lines = lines[:min(len(lines), height-1)]
+	for len(lines) < height-1 {
 		lines = append(lines, "")
 	}
-	lines = append(lines, helpStyle.Render("esc cancel"))
+	lines = append(lines, styles.help.Render(truncateLine(loadingFooter(m.ctx), lineWidth)))
 	return strings.Join(lines, "\n")
 }
 
@@ -374,7 +448,7 @@ func Loading(ctx context.Context, title, detail string, input *os.File, output i
 	}
 	workCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	model := loadingModel{title: title, detail: detail, width: 80, height: 24, cancel: cancel, work: func(context.Context) error { return work(workCtx) }}
+	model := loadingModel{ctx: ctx, title: title, detail: detail, width: 80, height: 24, cancel: cancel, work: func(context.Context) error { return work(workCtx) }}
 	programOptions := ProgramOptions(input, output)
 	if ScreenActive() {
 		_, _ = io.WriteString(output, model.View()+"\x1b[H")
@@ -408,29 +482,39 @@ func (m chooserModel) Init() tea.Cmd { return textinput.Blink }
 func (m chooserModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
 	case tea.WindowSizeMsg:
-		m.width, m.height = max(32, message.Width), max(10, message.Height)
-		m.input.Width = max(8, m.width-24)
-		m.choices.rows = max(2, (m.height-7-headerLineCount(m.options.Header))/2)
+		m.width, m.height = viewWidth(message.Width), viewHeight(message.Height)
+		m.input.Width = filterInputWidth(m.width, m.options.RequireFilter)
+		bodyLines := headerLineCount(sanitizeHeader(m.options.Header)) + 2
+		if m.options.Subtitle != "" {
+			bodyLines++
+		}
+		m.choices.rows = max(1, (m.height-2-bodyLines)/itemRowHeight(m.options.Context))
 		m.choices.ensureVisible()
 	case tea.KeyMsg:
-		if action, ok := m.options.Actions[message.String()]; ok {
+		key := message.String()
+		// Ctrl+C remains an unconditional interrupt even when a caller or a
+		// preference maps another action to the same key.
+		if key == "ctrl+c" {
+			m.interrupted = true
+			return m, tea.Quit
+		}
+		if KeyMatches(m.options.Context, "back", key) {
+			m.canceled = true
+			return m, tea.Quit
+		}
+		if KeyMatches(m.options.Context, "select", key) {
+			if item, ok := m.choices.Selected(); ok {
+				m.selected, m.confirmed = item, true
+				return m, tea.Quit
+			}
+		}
+		if action, ok := m.options.Actions[key]; ok {
 			m.action = action
 			m.selected, _ = m.choices.Selected()
 			m.confirmed = true
 			return m, tea.Quit
 		}
 		switch message.String() {
-		case "ctrl+c":
-			m.interrupted = true
-			return m, tea.Quit
-		case "esc":
-			m.canceled = true
-			return m, tea.Quit
-		case "enter":
-			if item, ok := m.choices.Selected(); ok {
-				m.selected, m.confirmed = item, true
-				return m, tea.Quit
-			}
 		case "up", "ctrl+k":
 			m.choices.Move(-1)
 			return m, nil
@@ -438,11 +522,23 @@ func (m chooserModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.choices.Move(1)
 			return m, nil
 		}
+		if KeyMatches(m.options.Context, "up", key) {
+			m.choices.Move(-1)
+			return m, nil
+		}
+		if KeyMatches(m.options.Context, "down", key) {
+			m.choices.Move(1)
+			return m, nil
+		}
 		var command tea.Cmd
 		m.input, command = m.input.Update(message)
-		m.choices.SetFilter(m.input.Value())
+		value := SanitizeText(m.input.Value())
+		if value != m.input.Value() {
+			m.input.SetValue(value)
+		}
+		m.choices.SetFilter(value)
 		if m.options.InputSelection != nil {
-			if selected, ok := m.options.InputSelection(m.input.Value()); ok {
+			if selected, ok := m.options.InputSelection(value); ok {
 				m.selected, m.confirmed = selected, true
 				return m, tea.Quit
 			}
@@ -486,14 +582,15 @@ func (m chooserModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m chooserModel) itemAtRow(row int) (int, bool) {
-	first := headerLineCount(m.options.Header) + 2
+	first := headerLineCount(sanitizeHeader(m.options.Header)) + 2
 	if m.options.Subtitle != "" {
 		first++
 	}
 	if row < first {
 		return 0, false
 	}
-	index := m.choices.offset + (row-first)/2
+	rowHeight := itemRowHeight(m.options.Context)
+	index := m.choices.offset + (row-first)/rowHeight
 	end := min(len(m.choices.visible), m.choices.offset+m.choices.rows)
 	return index, index >= m.choices.offset && index < end
 }
@@ -511,71 +608,114 @@ var (
 )
 
 func (m chooserModel) View() string {
-	lineWidth := max(20, m.width-4)
-	lines := make([]string, 0, m.height)
-	if m.options.Header != "" {
-		for _, line := range strings.Split(m.options.Header, "\n") {
-			lines = append(lines, ansi.Truncate(line, lineWidth, "..."))
+	lineWidth := viewWidth(m.width)
+	height := viewHeight(m.height)
+	styles := stylesForContext(m.options.Context)
+	body := make([]string, 0, height)
+	header := sanitizeHeader(m.options.Header)
+	if header != "" {
+		for _, line := range strings.Split(header, "\n") {
+			body = append(body, truncateLine(line, lineWidth))
 		}
-		lines = append(lines, "")
+		body = append(body, "")
 	}
-	lines = append(lines, titleStyle.Render(ansi.Truncate(m.options.Title, lineWidth, "...")))
-	if m.options.Subtitle != "" {
-		lines = append(lines, subtitleStyle.Render(ansi.Truncate(m.options.Subtitle, lineWidth, "...")))
+	body = append(body, styles.title.Render(truncateLine(SanitizeText(m.options.Title), lineWidth)))
+	if subtitle := SanitizeText(m.options.Subtitle); subtitle != "" {
+		body = append(body, styles.subtitle.Render(truncateLine(subtitle, lineWidth)))
 	}
-	lines = append(lines, "")
+	body = append(body, "")
 	end := min(len(m.choices.visible), m.choices.offset+m.choices.rows)
+	compact := isCompact(m.options.Context)
 	for visibleIndex := m.choices.offset; visibleIndex < end; visibleIndex++ {
 		item := m.choices.items[m.choices.visible[visibleIndex]]
 		prefix := "     "
 		if visibleIndex == m.choices.selected {
 			prefix = "  >  "
 		}
-		plainTitle := prefix + item.Title
+		plainTitle := prefix + SanitizeText(item.Title)
 		if item.Favorite {
 			plainTitle += " ◆"
 		}
-		title := ansi.Truncate(plainTitle, lineWidth, "...")
-		detail := ansi.Truncate("     "+item.Description, lineWidth, "...")
+		title := truncateLine(plainTitle, lineWidth)
+		detail := truncateLine("     "+SanitizeText(item.Description), lineWidth)
 		if visibleIndex == m.choices.selected {
-			title = selectedStyle.Render(title + strings.Repeat(" ", max(0, lineWidth-ansi.StringWidth(title))))
+			title = styles.selected.Render(title + strings.Repeat(" ", max(0, lineWidth-ansi.StringWidth(title))))
 		} else if item.Action {
-			title = actionStyle.Render(title)
+			title = styles.action.Render(title)
 		} else if item.Favorite {
-			name := ansi.Truncate(prefix+item.Title, max(1, lineWidth-2), "...")
-			title = favoriteStyle.Render(name) + " " + favoriteMarker.Render("◆")
+			name := truncateLine(prefix+SanitizeText(item.Title), max(1, lineWidth-2))
+			title = styles.favorite.Render(name) + " " + styles.favoriteMarker.Render("◆")
 		}
-		lines = append(lines, title, subtitleStyle.Render(detail))
+		body = append(body, truncateLine(title, lineWidth))
+		if !compact {
+			body = append(body, styles.subtitle.Render(detail))
+		}
 	}
 	if len(m.choices.visible) == 0 {
 		if m.choices.requireFilter && m.choices.Filter() == "" {
-			lines = append(lines, subtitleStyle.Render("  Start typing a filename or path to search."), "")
+			body = append(body, styles.subtitle.Render(truncateLine("  Start typing a filename or path to search.", lineWidth)), "")
 		} else {
 			empty := "No matches"
 			if len(m.choices.items) == 0 {
 				empty = m.options.Empty
 			}
-			lines = append(lines, subtitleStyle.Render("  "+ansi.Truncate(empty, max(1, lineWidth-2), "...")), "")
+			body = append(body, styles.subtitle.Render(truncateLine("  "+SanitizeText(empty), lineWidth)), "")
 		}
-	}
-	for len(lines) < m.height-2 {
-		lines = append(lines, "")
 	}
 	footer := m.options.Footer
 	if footer == "" {
-		footer = "↑/↓ move  enter/click select  backspace filter  esc back"
+		keys := HelpKeys(m.options.Context)
+		footer = fmt.Sprintf("%s/%s move  %s/click select  backspace filter  %s back  %s interrupt", keys["up"], keys["down"], keys["select"], keys["back"], keys["interrupt"])
 	}
 	filterLabel := "Filter"
 	if m.choices.requireFilter {
 		filterLabel = "Search files"
 	}
-	filterLine := filterLabel + "  " + m.input.View()
+	input := m.input
+	input.Width = filterInputWidth(lineWidth, m.options.RequireFilter)
+	input.SetValue(SanitizeText(input.Value()))
+	filterLine := filterLabel + "  " + input.View()
+	filterLine = truncateLine(filterLine, max(1, lineWidth-2))
 	filterLine += strings.Repeat(" ", max(0, lineWidth-2-ansi.StringWidth(filterLine)))
-	lines = append(lines,
-		filterStyle.Render(ansi.Truncate(filterLine, max(1, lineWidth-2), "...")),
-		helpStyle.Render(ansi.Truncate(footer, lineWidth, "...")),
-	)
+	filter := filterLine
+	if lineWidth >= 3 {
+		filter = styles.filter.Render(filterLine)
+	}
+	bodyLimit := max(0, height-2)
+	if len(body) > bodyLimit {
+		body = body[:bodyLimit]
+	}
+	for len(body) < bodyLimit {
+		body = append(body, "")
+	}
+	lines := append(body, filter, styles.help.Render(truncateLine(SanitizeText(footer), lineWidth)))
+	if len(lines) > height {
+		lines = lines[:height]
+	}
 	return strings.Join(lines, "\n")
+}
+
+func viewWidth(width int) int {
+	return max(1, width)
+}
+
+func viewHeight(height int) int {
+	return max(1, height)
+}
+
+func truncateLine(value string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	return ansi.Truncate(value, width, "...")
+}
+
+func filterInputWidth(width int, requireFilter bool) int {
+	label := "Filter"
+	if requireFilter {
+		label = "Search files"
+	}
+	return max(1, width-2-ansi.StringWidth(label+"  "))
 }
 
 func headerLineCount(header string) int {

@@ -1,0 +1,46 @@
+.nh
+.TH "PB-MACHINE-ADD" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-machine-add - Print Linux/macOS and Windows machine enrollment commands
+
+
+.SH SYNOPSIS
+\fBpb machine add [flags]\fP
+
+
+.SH DESCRIPTION
+Print Linux/macOS and Windows machine enrollment commands
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for add
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--name\fP=""
+	optional machine hostname
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-machine(1)\fP

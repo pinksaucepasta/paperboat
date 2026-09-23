@@ -37,3 +37,22 @@ func TestRevalidateNativePrivateRejectsCredentialTargetSubstitution(t *testing.T
 		})
 	}
 }
+
+func TestRevalidateNativePrivateDeviceActorAndGenerationFences(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	binding := nativeprivate.Binding{Schema: nativeprivate.SchemaV1, ResourceKind: "device_service", ResourceID: "machine", ResourceGeneration: 1, RouteID: "tcp:5432", RouteGeneration: 2, TargetGeneration: 3, OwnerEndpointID: "machine", Protocol: "tcp", TargetScheme: "tcp", TargetAddress: "127.0.0.1:5432", ExpiresAt: now.Add(time.Minute), InstallationGeneration: 1, BootID: "boot", PolicyGeneration: 2, AnnouncementGeneration: 3, UserID: "user", CLIClientSessionID: "cli", AccessSessionID: "access"}
+	raw, _ := json.Marshal(binding)
+	claims := auth.Claims{CredentialClass: "native_private", MachineID: "machine", ResourceKind: "device_service", ResourceID: "machine", RouteID: "tcp:5432", Protocol: "tcp", TargetScheme: "tcp", TargetAddress: "127.0.0.1:5432", ExpectedGeneration: 1, RouteGeneration: 2, TargetGeneration: 3, ExpiresAt: now.Add(time.Minute).Unix(), InstallationGeneration: 1, BootID: "boot", PolicyGeneration: 2, AnnouncementGeneration: 3, UserID: "user", CLIClientSessionID: "cli", AssignmentID: "access"}
+	if _, err := RevalidateNativePrivate(Authorization{Value: claims}, string(raw), "machine", now); err != nil {
+		t.Fatal(err)
+	}
+	for name, change := range map[string]func(*auth.Claims){"user": func(c *auth.Claims) { c.UserID = "foreign" }, "cli": func(c *auth.Claims) { c.CLIClientSessionID = "foreign" }, "access": func(c *auth.Claims) { c.AssignmentID = "foreign" }, "installation": func(c *auth.Claims) { c.InstallationGeneration++ }, "boot": func(c *auth.Claims) { c.BootID = "new-boot" }, "policy": func(c *auth.Claims) { c.PolicyGeneration++ }, "announcement": func(c *auth.Claims) { c.AnnouncementGeneration++ }} {
+		t.Run(name, func(t *testing.T) {
+			altered := claims
+			change(&altered)
+			if _, err := RevalidateNativePrivate(Authorization{Value: altered}, string(raw), "machine", now); !errors.Is(err, ErrNativePrivateBinding) {
+				t.Fatal("signed device fence substitution accepted")
+			}
+		})
+	}
+}

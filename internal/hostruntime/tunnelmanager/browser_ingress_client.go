@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"io"
 	"mime"
 	"net/http"
@@ -35,7 +36,7 @@ func NewBrowserIngressAuthority(controlURL string, auth IngressMachineAuth, tran
 	endpoint := *base
 	endpoint.Path = strings.TrimRight(base.Path, "/") + "/v1/browser-access/ingress/authorize"
 	endpoint.RawPath = ""
-	client := &http.Client{Transport: transport, Timeout: connectorprotocol.IngressAuthorityLifetime, CheckRedirect: func(*http.Request, []*http.Request) error { return connectorprotocol.ErrIngressDenied }}
+	client := &http.Client{Transport: errorreport.TransportOperation(transport, base.String(), "browser_authorization"), Timeout: connectorprotocol.IngressAuthorityLifetime, CheckRedirect: func(*http.Request, []*http.Request) error { return connectorprotocol.ErrIngressDenied }}
 	return func(ctx context.Context, open connectorprotocol.StreamOpen, decision connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error) {
 		denied := connectorprotocol.IngressDecision{}
 		// The original claim may have expired while an active stream refreshes.

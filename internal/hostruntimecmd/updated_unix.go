@@ -4,6 +4,8 @@ package hostruntimecmd
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"flag"
 	"io"
@@ -15,6 +17,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseeligibility"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
@@ -74,15 +77,25 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 	if err != nil {
 		return failInitialization(err)
 	}
-	source := workerupdate.TUFSource{RepositoryURL: repository, StateRoot: filepath.Join(stateRoot, "tuf"), MachineID: machineID, FailureDomain: workerupdate.HostdFailureDomainSource{Client: hostdClient, MachineID: machineID}, Deferral: deferral}
+	var installedSource installsource.Source
+	sourceBody, sourceErr := base64.RawStdEncoding.DecodeString(os.Getenv("PAPERBOAT_INSTALL_SOURCE"))
+	if sourceErr != nil || json.Unmarshal(sourceBody, &installedSource) != nil || installedSource.Validate() != nil {
+		return failInitialization(installsource.ErrInvalid)
+	}
+	resolveActive := func(ctx context.Context, version string) (workerupdate.Release, error) {
+		if version == installedSource.Version {
+			return workerupdate.InstalledBaseline(installedSource, binary)
+		}
+		return (workerupdate.TUFSource{RepositoryURL: repository, StateRoot: filepath.Join(stateRoot, "tuf"), MachineID: machineID, FailureDomain: workerupdate.HostdFailureDomainSource{Client: hostdClient, MachineID: machineID}, Deferral: deferral}).Active(ctx, version)
+	}
 	active, pending, err := updated.UnixActivationActive(stateRoot)
 	if err == nil && pending && active.Version != buildinfo.Version {
 		// A newer native package may supersede a failed worker transaction. Resolve
 		// its exact signed payload identity before allowing the updater owner to
 		// retire the older handoff; Manager.Recover enforces the version direction.
-		active, err = resolveUpdatedActive(ctx, filepath.Join(stateRoot, "transaction.json"), buildinfo.Version, source.Active)
+		active, err = resolveUpdatedActive(ctx, filepath.Join(stateRoot, "transaction.json"), buildinfo.Version, resolveActive)
 	} else if err == nil && !pending {
-		active, err = resolveUpdatedActive(ctx, filepath.Join(stateRoot, "transaction.json"), buildinfo.Version, source.Active)
+		active, err = resolveUpdatedActive(ctx, filepath.Join(stateRoot, "transaction.json"), buildinfo.Version, resolveActive)
 	}
 	if err != nil {
 		return failInitialization(err)
@@ -92,12 +105,16 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 		return failInitialization(err)
 	}
 	environment := map[string]string{}
-	for _, key := range []string{"PAPERBOAT_UPDATE_STATE_ROOT", "PAPERBOAT_BINARY", "PAPERBOAT_BINARY_ROLLBACK", "PAPERBOAT_BINARY_STAGED", "PAPERBOAT_RELEASE_ROOT", "PAPERBOAT_HOSTD_SOCKET", "PAPERBOAT_HOSTD_TOKEN_FILE", "PAPERBOAT_RELEASE_REPOSITORY", "PAPERBOAT_MACHINE_ID", "PAPERBOAT_UPDATE_HEALTH_URL", "PAPERBOAT_ENROLLED_UID", "PAPERBOAT_ENROLLED_GID", "PAPERBOAT_UPDATED_SOCKET"} {
+	refreshManuals, err := newUnixManualRefresher(binary, uid, gid)
+	if err != nil {
+		return failInitialization(err)
+	}
+	for _, key := range []string{"PAPERBOAT_UPDATE_STATE_ROOT", "PAPERBOAT_BINARY", "PAPERBOAT_BINARY_ROLLBACK", "PAPERBOAT_BINARY_STAGED", "PAPERBOAT_RELEASE_ROOT", "PAPERBOAT_HOSTD_SOCKET", "PAPERBOAT_HOSTD_TOKEN_FILE", "PAPERBOAT_RELEASE_REPOSITORY", "PAPERBOAT_MACHINE_ID", "PAPERBOAT_UPDATE_HEALTH_URL", "PAPERBOAT_ENROLLED_UID", "PAPERBOAT_ENROLLED_GID", "PAPERBOAT_UPDATED_SOCKET", "PAPERBOAT_INSTALL_SOURCE"} {
 		if value, ok := os.LookupEnv(key); ok {
 			environment[key] = value
 		}
 	}
-	updaterService, err := updated.New(updated.Config{StateRoot: stateRoot, Binary: binary, BinaryRollback: binaryRollback, BinaryStaged: binaryStaged, Active: active, WorkerUID: uid, WorkerGID: gid, SocketPath: socket, Token: token, RepositoryURL: repository, MachineID: machineID, Health: updated.HTTPHealth{Endpoint: healthURL}, ActivationGate: gate, ControlSocket: controlSocket, Participants: participants, ActivationController: service.UnixUpdateActivator{Platform: runtime.GOOS, UID: uid, Runner: service.ExecRunner{}}, Environment: environment})
+	updaterService, err := updated.New(updated.Config{AutomaticUpdates: installedSource.AutomaticUpdates, StateRoot: stateRoot, Binary: binary, BinaryRollback: binaryRollback, BinaryStaged: binaryStaged, Active: active, WorkerUID: uid, WorkerGID: gid, SocketPath: socket, Token: token, RepositoryURL: repository, MachineID: machineID, Health: updated.HTTPHealth{Endpoint: healthURL}, ActivationGate: gate, ControlSocket: controlSocket, Participants: participants, ActivationController: service.UnixUpdateActivator{Platform: runtime.GOOS, UID: uid, Runner: service.ExecRunner{}}, Environment: environment, RefreshManuals: refreshManuals})
 	if err != nil {
 		return failInitialization(err)
 	}

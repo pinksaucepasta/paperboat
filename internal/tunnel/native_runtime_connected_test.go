@@ -192,6 +192,10 @@ func TestProductionCLINativeRuntimeConnectsOrdinaryApplicationAndReusesOwner(t *
 }
 
 func connectedProductionRuntime(t *testing.T, mode string) {
+	var device *connectedDeviceAccess
+	if mode == "device_service" || mode == "device_proxy" {
+		device = newConnectedDeviceAccess(t)
+	}
 	forcedWSS := mode == "wss_fallback"
 	mixed := mode == "quic_sender_wss_receiver"
 	refresh := mode == "receiver_authority_refresh"
@@ -286,6 +290,10 @@ func connectedProductionRuntime(t *testing.T, mode string) {
 		client := tailnet.NetworkBinding{AccountID: accountID, EndpointID: cliID, Role: "cli", EndpointGeneration: 1, KeyGeneration: request.ExpectedKeyGeneration + 1, WireGuardPublicKey: request.WireGuardPublicKey, DiscoPublicKey: request.DiscoPublicKey, QUICCertificateFingerprint: request.QUICCertificateFingerprint, QUICPublicKey: base64.RawURLEncoding.EncodeToString(identity.LocalCertificate.Claims.QUICPublicKey), VirtualAddress: "fd7a:115c:a1e0::91"}
 		clientConfig := connectedConfiguration(now, issuer, client, machineBinding, "dial")
 		machineConfig := connectedConfiguration(now, issuer, machineBinding, client, "accept")
+		if device != nil {
+			clientConfig.Peers[0].Scopes[0].Capability = "private_access"
+			machineConfig.Peers[0].Scopes[0].Capability = "private_access"
+		}
 		initialMachine := machineConfig
 		if refresh {
 			initialMachine.Peers = nil
@@ -305,6 +313,9 @@ func connectedProductionRuntime(t *testing.T, mode string) {
 		return api.PeerNetworkConfigurationResult{Configuration: state.network, CandidateSet: state.candidate, RelayGrants: state.grants}, nil
 	}}
 	clientHTTP := &http.Client{Transport: connectedRoundTripper(func(request *http.Request) (*http.Response, error) {
+		if device != nil && request.URL.Path != "/.well-known/jwks.json" {
+			return device.control(request, identity, networkAPI)
+		}
 		if request.URL.Path != "/.well-known/jwks.json" {
 			return nil, errors.New("unexpected HTTP request")
 		}
@@ -333,6 +344,9 @@ func connectedProductionRuntime(t *testing.T, mode string) {
 	listenDone := make(chan error, 1)
 	go func() {
 		listenDone <- machineOwner.Listen(ctx, regions[0], func(serveCtx context.Context, session *native.Session) error {
+			if device != nil {
+				return device.serve(serveCtx, session)
+			}
 			for {
 				stream, _, acceptErr := session.AcceptAuthorized(serveCtx, func(_ context.Context, header streamauth.Header) (string, error) {
 					if header.Consumer != "ssh" || header.Credential != "credential_ssh" {
@@ -406,6 +420,20 @@ func connectedProductionRuntime(t *testing.T, mode string) {
 		state.mu.Unlock()
 		connectedApply(t, machineAuthority, signerPrivate, machineConfig, machineNode)
 		connectedApply(t, runtime.authority, signerPrivate, clientConfig, node)
+	}
+	if device != nil {
+		if mode == "device_proxy" {
+			device.exerciseProxy(t, ctx, store, clientHTTP, runtime, identity)
+		} else {
+			device.exercise(t, ctx, store, clientHTTP, runtime, identity)
+		}
+		cancel()
+		select {
+		case <-listenDone:
+		case <-time.After(2 * time.Second):
+			t.Fatal("device receiver did not stop")
+		}
+		return
 	}
 	expires := time.Now().Add(time.Minute).UTC().Truncate(time.Second)
 	target := &resolver.TerminalTarget{EnvironmentID: "env_connected", Auth: resolver.AuthTarget{Token: "credential_ssh", ExpiresAt: expires.Format(time.RFC3339), ResourceID: "access_connected"}}

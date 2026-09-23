@@ -1,0 +1,105 @@
+.nh
+.TH "PB" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb - Open Paperboat or connect to an environment terminal
+
+
+.SH SYNOPSIS
+\fBpb [environment] [new] [flags]\fP
+
+
+.SH DESCRIPTION
+Paperboat provides remote terminals, managed SSH and file transfers, previews,
+tunnels, environment configuration, team management, and local runtime controls.
+
+.PP
+Run pb without arguments in a terminal to open the interactive home screen.
+Use explicit subcommands in scripts; pb COMMAND --help describes each operation.
+Use pb COMMAND --help --json for machine-readable command discovery.
+
+.PP
+The --json flag selects machine-readable output and suppresses interactive menus.
+Raw terminal and native transfer commands reject unsupported JSON output before
+execution. Streaming commands may emit multiple JSON records; consult their help.
+
+.PP
+Local preferences can define shortcuts, command defaults and TUI appearance.
+Run pb config customize to edit them, or use --no-customization to bypass them.
+Explicit flags override saved defaults. Built-in command names remain reserved.
+Numeric invocations such as pb 3000 select the configured preview or tunnel action.
+
+.PP
+Run pb doctor for diagnostics. Check command output for partial changes and
+recovery instructions before retrying an operation that may have created resources.
+
+
+.SH OPTIONS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--debug\fP[=false]
+	show the pb versions used by this terminal session
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for pb
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--name\fP=""
+	name for the fresh terminal session
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--session\fP=""
+	attach an existing terminal session by name or ID
+
+.PP
+\fB--status-bar\fP=""
+	status bar for this attach: auto, on, or off
+
+.PP
+\fB--status-bar-fullscreen\fP=""
+	status bar in full-screen applications: hide or show
+
+.PP
+\fB--status-bar-theme\fP=""
+	status bar theme: terminal, dark, light, or mono
+
+.PP
+\fB--transport\fP=""
+	peer transport: a (auto), d (direct QUIC), q (relay QUIC), w (relay WSS), or r (relay race)
+
+.PP
+\fB-v\fP, \fB--version\fP[=false]
+	version for pb
+
+
+.SH EXAMPLE
+.EX
+  pb
+  pb login
+  pb environments
+  pb connect Studio
+  pb ssh Studio
+  pb preview 3000
+  pb tunnel create demo --port 3000
+  pb config customize
+  pb --no-customization environments --json
+.EE
+
+
+.SH SEE ALSO
+\fBpb-access(1)\fP, \fBpb-approve(1)\fP, \fBpb-auth(1)\fP, \fBpb-bugreport(1)\fP, \fBpb-completion(1)\fP, \fBpb-config(1)\fP, \fBpb-connect(1)\fP, \fBpb-daemon(1)\fP, \fBpb-desktop(1)\fP, \fBpb-doctor(1)\fP, \fBpb-env(1)\fP, \fBpb-environments(1)\fP, \fBpb-exec(1)\fP, \fBpb-inbox(1)\fP, \fBpb-install(1)\fP, \fBpb-login(1)\fP, \fBpb-logout(1)\fP, \fBpb-machine(1)\fP, \fBpb-pair(1)\fP, \fBpb-ping(1)\fP, \fBpb-preview(1)\fP, \fBpb-relay(1)\fP, \fBpb-reset(1)\fP, \fBpb-resolve(1)\fP, \fBpb-rsync(1)\fP, \fBpb-scp(1)\fP, \fBpb-send(1)\fP, \fBpb-service(1)\fP, \fBpb-session(1)\fP, \fBpb-sessions(1)\fP, \fBpb-setup(1)\fP, \fBpb-sftp(1)\fP, \fBpb-ssh(1)\fP, \fBpb-status(1)\fP, \fBpb-tag(1)\fP, \fBpb-team(1)\fP, \fBpb-transfer(1)\fP, \fBpb-tunnel(1)\fP, \fBpb-uninstall(1)\fP, \fBpb-update(1)\fP, \fBpb-wait(1)\fP

@@ -2,52 +2,81 @@ package tools
 
 import (
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
 
-func TestWindowsReleaseTemplateUsesUnifiedEnrollment(t *testing.T) {
-	body, err := os.ReadFile("install.ps1")
+func installerSource(t *testing.T, name string) string {
+	t.Helper()
+	body, err := os.ReadFile(name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	template := strings.ToLower(string(body))
+	return strings.ToLower(string(body))
+}
+
+func requireInOrder(t *testing.T, body string, values ...string) {
+	t.Helper()
+	position := 0
+	for _, value := range values {
+		next := strings.Index(body[position:], strings.ToLower(value))
+		if next < 0 {
+			t.Fatalf("installer is missing %q after byte %d", value, position)
+		}
+		position += next + len(value)
+	}
+}
+
+func TestShellInstallerVerifiesBeforeRunningPublicInstall(t *testing.T) {
+	body := installerSource(t, "install.sh")
 	for _, required := range []string{
-		"$server -notmatch '^https://'", "paperboat.release-current/v1", "pb-windows-$arch.exe", "__install", "releases/download",
-		"function assert-installedversion", "function test-administrator", "if ($freshenrollment) { $arguments += '--fresh' }", "'paperboat\\bin\\pb.exe'", "assert-installedversion $download $version",
-		"$name = [string]$env:computername", "$name = $name.trim().tolowerinvariant()",
-		"$pairarguments = @('pair', '--server', $server, '--enrollment-token-file', $tokenfile, '--name', $name)",
-		"function invoke-freshpairrollback", "function start-isolatedinstallerprocess", "--enrollment-token-file", "wait-installerprocess",
+		"@paperboat_bootstrap_linux_amd64_sha256@", "--proto-redir '=https'", "releases/download", "bootstrap verifier length mismatch",
+		"bootstrap verifier digest mismatch", `"$verifier" --tuf-url`, `"$installer_pb" install --install-dir "$install_dir" --json`, "data.executable", "pkgutil --expand",
+		`$payload/library/privilegedhelpertools/paperboat/bin/pb`, "installer_pb=$payload_pb", "--pair requires --enrollment-token", "umask 077", "--enrollment-token-file", "resume_executable", `"$target" pair`, `"$target" setup`,
 	} {
-		if !strings.Contains(template, required) {
-			t.Fatalf("Windows release template is missing canonical mode contract %q", required)
+		if !strings.Contains(body, required) {
+			t.Fatalf("shell installer is missing %q", required)
 		}
 	}
-	for _, removed := range []string{"--setup-mode", "$setupmode"} {
-		if strings.Contains(template, removed) {
-			t.Fatalf("Windows release template contains removed mode %q", removed)
+	for _, removed := range []string{"__install", "--source", "--skip", "--fresh", "cleanup_existing", "sudo installer"} {
+		if strings.Contains(body, removed) {
+			t.Fatalf("shell installer retains obsolete behavior %q", removed)
 		}
 	}
-	pairInvocation := strings.Index(template, "$pairarguments = @('pair'")
-	if pairInvocation < 0 || strings.Index(template, "__install") > pairInvocation {
-		t.Fatal("Windows enrollment pairs before the final installed executable is staged")
+	requireInOrder(t, body, "bootstrap verifier length mismatch", "bootstrap verifier digest mismatch", `"$verifier" --tuf-url`, `"$installer_pb" install --install-dir "$install_dir" --json`, "data.executable")
+	requireInOrder(t, body, `"$installer_pb" reset`, `"$installer_pb" install`)
+	if strings.Index(body, `"$target" pair`) < strings.Index(body, "data.executable") {
+		t.Fatal("shell installer pairs before invoking the installed binary")
 	}
-	adminBranch := strings.Index(template, "if ($administrator) {")
-	directStart := strings.Index(template, "$process = start-isolatedinstallerprocess -filepath $runaspath -argumentlist $processarguments -standardinputpath")
-	runAsStart := strings.Index(template, "$process = start-isolatedinstallerprocess -filepath $runaspath -argumentlist $processarguments -elevated")
-	if adminBranch < 0 || directStart < adminBranch || runAsStart < directStart {
-		t.Fatal("Windows release template does not separate elevated direct execution from desktop UAC elevation")
+}
+
+func TestShellInstallerParses(t *testing.T) {
+	command := exec.Command("sh", "-n", "install.sh")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("sh -n install.sh: %v\n%s", err, output)
 	}
-	pairStart := strings.Index(template, "$pairarguments = @('pair'")
-	if pairStart < 0 || strings.Contains(template[pairStart:], "-verb runas") || strings.Contains(template[pairStart:], "-elevated") {
-		t.Fatal("Windows enrollment does not pair in the original user process")
+}
+
+func TestWindowsInstallerVerifiesBeforeRunningPublicInstall(t *testing.T) {
+	body := installerSource(t, "install.ps1")
+	for _, required := range []string{
+		"@paperboat_bootstrap_windows_amd64_sha256@", "'--proto-redir' '=https'", "releases/download", "bootstrap verifier length mismatch",
+		"bootstrap verifier digest mismatch", "& $verifier '--tuf-url'", "invoke-paperboatinstall $download", "result.data.executable", "[io.path]::ispathrooted",
+		"setsecuritydescriptorsddlform", "--enrollment-token-file", "resetresult.data.executable", "invoke-paperboat $installedpb @('pair'", "finally", "remove-item -literalpath $dir -recurse",
+	} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("Windows installer is missing %q", required)
+		}
 	}
-	if strings.Contains(template, "clear-existingpaperboat") || strings.Contains(template, "sc.exe stop") {
-		t.Fatal("Windows release template eagerly deletes the existing enrollment before verified installation")
+	for _, removed := range []string{"__install", "--source", "--skip", "--fresh", "invoke-freshpairrollback", "start-isolatedinstallerprocess", "-verb runas"} {
+		if strings.Contains(body, removed) {
+			t.Fatalf("Windows installer retains obsolete behavior %q", removed)
+		}
 	}
-	freshCleanup := strings.LastIndex(template, "foreach ($statepath in @(")
-	verifiedInstall := strings.LastIndex(template, "if (-not (assert-installedrelease $installedpb $version $actual))")
-	if freshCleanup < 0 || verifiedInstall < 0 || freshCleanup < verifiedInstall {
-		t.Fatal("Windows fresh enrollment does not clear user state after verified installation")
+	requireInOrder(t, body, "bootstrap verifier length mismatch", "bootstrap verifier digest mismatch", "& $verifier '--tuf-url'", "invoke-paperboatinstall $download")
+	requireInOrder(t, body, "$resetraw = & $download 'reset'", "if ($resume)", "invoke-paperboatinstall $download")
+	if strings.Index(body, "invoke-paperboat $installedpb @('pair'") < strings.Index(body, "result.data.executable") {
+		t.Fatal("Windows installer pairs before validating the returned installed executable")
 	}
 }

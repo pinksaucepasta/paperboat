@@ -13,12 +13,12 @@
     "environment": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "kind", "resource_id", "display_name", "state"],
+      "required": ["id", "kind", "resource_id", "alias", "state"],
       "properties": {
         "id": {"type": "string", "minLength": 1},
         "kind": {"enum": ["hosted", "byod"]},
         "resource_id": {"type": "string", "minLength": 1},
-        "display_name": {"type": "string", "minLength": 1},
+        "alias": {"type": "string", "minLength": 1},
         "state": {"enum": ["starting", "ready", "offline", "revoked", "deleted"]},
         "root": {"type": "string", "minLength": 1}
       }

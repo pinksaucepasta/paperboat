@@ -50,6 +50,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/diagnosticlog"
 	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
 	"github.com/pinksaucepasta/paperboat/internal/endpointbinary"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/fileindex"
 	filetransfer "github.com/pinksaucepasta/paperboat/internal/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
@@ -72,6 +73,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/networkcheck"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/recoverykey"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/transfercrypto"
+	"github.com/pinksaucepasta/paperboat/internal/preferences"
 	"github.com/pinksaucepasta/paperboat/internal/processlifetime"
 	"github.com/pinksaucepasta/paperboat/internal/prompt"
 	"github.com/pinksaucepasta/paperboat/internal/remotepath"
@@ -80,6 +82,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/selfupdate"
 	"github.com/pinksaucepasta/paperboat/internal/session"
 	"github.com/pinksaucepasta/paperboat/internal/statusbar"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 	"github.com/pinksaucepasta/paperboat/internal/telemetry"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 	"github.com/pinksaucepasta/paperboat/internal/userpaths"
@@ -88,10 +91,39 @@ import (
 )
 
 func main() {
+	os.Exit(mainExit())
+}
+
+func mainExit() (exitCode int) {
 	configureProcessLogging(os.Args[1:])
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx := supportref.WithContext(context.Background(), supportref.New())
+	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	os.Exit(run(ctx, os.Args[1:], os.Stdout, os.Stderr))
+	reporter := errorreport.FromEnvironment()
+	restoreReporter := errorreport.Install(reporter)
+	defer restoreReporter()
+	component := processComponent(os.Args[1:])
+	defer reporter.Flush(context.Background())
+	defer func() {
+		if recover() != nil {
+			persistCLIFailure(ctx, "process_panic")
+			reporter.Capture(ctx, component, "process_panic")
+			if jsonArgumentRequested(os.Args[1:]) {
+				_ = writeCLIJSONError(os.Stdout, &api.APIError{Code: "unexpected_failure", SupportReference: supportref.FromContext(ctx)})
+			} else {
+				fmt.Fprintf(os.Stderr, "pb: Paperboat stopped unexpectedly. Retry; if this continues, contact support with reference %s.\n", supportref.FromContext(ctx))
+			}
+			exitCode = 1
+		}
+	}()
+	return runWithReporter(ctx, os.Args[1:], os.Stdout, os.Stderr, reporter)
+}
+
+func processComponent(args []string) string {
+	if len(args) > 0 && (args[0] == "daemon" || strings.HasPrefix(args[0], "__runtime-")) {
+		return "paperboatd"
+	}
+	return "pb"
 }
 
 var quietProcessLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -119,7 +151,7 @@ var installLocalDaemonService localDaemonServiceInstaller = localdaemon.InstallC
 var removeLocalDaemonService localDaemonServiceRemover = localdaemon.RemoveCurrentUserService
 
 var installSetupClientService = hostruntimecmd.InstallClient
-var verifySetupHostArtifact = hostruntimecmd.VerifyHostArtifact
+var verifySetupInstallSource = hostruntimecmd.VerifyInstallSource
 
 type exitCodeError struct{ code int }
 
@@ -201,15 +233,86 @@ func terminalArgs(minimum int) cobra.PositionalArgs {
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	return runWithReporter(ctx, args, stdout, stderr, nil)
+}
+
+func runWithReporter(ctx context.Context, args []string, stdout, stderr io.Writer, reporter *errorreport.Reporter) (exitCode int) {
+	if supportref.FromContext(ctx) == "" {
+		ctx = supportref.WithContext(ctx, supportref.New())
+	}
 	root := newRootCommand()
+	operation := "command"
+	if resolved, _, err := root.Find(args); err == nil && resolved != nil {
+		for resolved.Parent() != nil && resolved.Parent() != root {
+			resolved = resolved.Parent()
+		}
+		operation = errorreport.Operation(resolved.Name())
+	}
+	ctx, finishObservation := reporter.Start(ctx, processComponent(args), operation)
+	outcome := "failed"
+	defer func() {
+		if failure := recover(); failure != nil {
+			finishObservation("failed")
+			panic(failure)
+		}
+		if exitCode != 0 && outcome == "success" {
+			outcome = "failed"
+		}
+		if exitCode == 0 && outcome == "failed" {
+			outcome = "success"
+		}
+		finishObservation(outcome)
+	}()
 	root.SetOut(stdout)
 	root.SetErr(stderr)
-	root.SetArgs(args)
-	executed, err := root.ExecuteContextC(ctx)
+	if jsonArgumentRequested(args) {
+		if cliArgumentPresent(args, "--version", "-v") {
+			outcome = "success"
+			if err := writeCLIJSON(stdout, map[string]any{"command": "pb", "version": buildinfo.Version}); err != nil {
+				return 1
+			}
+			return 0
+		}
+		if cliArgumentPresent(args, "--help", "-h") {
+			outcome = "success"
+			if err := writeCLIJSON(stdout, cliCommandHelp(root, args)); err != nil {
+				return 1
+			}
+			return 0
+		}
+	}
+	resolvedArgs, preferenceContext, preferenceErr := preparePreferences(root, args, ctx)
+	var executed *cobra.Command
+	err := preferenceErr
+	if err != nil {
+		err = invocationError(fmt.Errorf("preferences: %w; retry with --no-customization or run pb config customize", err))
+	}
 	if err == nil {
+		root.SetArgs(resolvedArgs)
+		executed, err = root.ExecuteContextC(preferenceContext)
+	}
+	if err == nil {
+		outcome = "success"
 		return 0
 	}
-	if errors.Is(err, selector.ErrCanceled) || errors.Is(err, selector.ErrInterrupted) {
+	if errors.Is(err, context.Canceled) || errors.Is(err, selector.ErrCanceled) || errors.Is(err, selector.ErrInterrupted) || errors.Is(err, prompt.ErrCanceled) {
+		outcome = "canceled"
+	} else if !unexpectedCLIError(err) {
+		outcome = "rejected"
+	}
+	if reporter != nil && unexpectedCLIError(err) {
+		persistCLIFailure(ctx, "unexpected_cli_failure")
+		reporter.Capture(ctx, processComponent(args), "unexpected_cli_failure")
+	}
+	jsonOutput := jsonArgumentRequested(args)
+	if executed != nil && jsonOutputRequested(executed) {
+		jsonOutput = true
+	}
+	if errors.Is(err, selector.ErrCanceled) || errors.Is(err, selector.ErrInterrupted) || errors.Is(err, prompt.ErrCanceled) {
+		if jsonOutput {
+			_ = writeCLIJSONError(stdout, context.Canceled)
+			return 130
+		}
 		return 0
 	}
 	if errors.Is(err, context.Canceled) {
@@ -220,25 +323,89 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 				return 0
 			}
 		}
-		fmt.Fprintln(stderr, "pb: Operation canceled.")
+		if jsonOutput {
+			_ = writeCLIJSONError(stdout, err)
+		} else {
+			fmt.Fprintln(stderr, "pb: Operation canceled.")
+		}
 		return 130
 	}
 	if errors.Is(err, errUsage) || isCobraUsageError(err) {
+		if jsonOutput {
+			_ = writeCLIJSONError(stdout, err)
+			return 2
+		}
 		fmt.Fprintln(stderr, "pb:", err)
 		root.SetOut(stderr)
 		_ = root.Usage()
 		return 2
 	}
 	if exitErr, ok := err.(interface{ ExitCode() int }); ok {
+		var jsonExit jsonFailureExitCodeError
+		if jsonOutput && errors.As(err, &jsonExit) {
+			_ = writeCLIJSONError(stdout, err)
+		}
 		if len(args) > 0 && strings.HasPrefix(args[0], "__runtime-") {
 			fmt.Fprintln(stderr, "pb:", err)
 		}
 		return exitErr.ExitCode()
 	}
+	if jsonOutput {
+		_ = writeCLIJSONError(stdout, err)
+		return 1
+	}
 	if message := userFacingError(err); message != "" {
 		fmt.Fprintln(stderr, "pb:", message)
 	}
 	return 1
+}
+
+func persistCLIFailure(ctx context.Context, classification string) {
+	reference := supportref.FromContext(ctx)
+	if ctx == nil || ctx.Err() != nil {
+		ctx = supportref.WithContext(context.Background(), reference)
+	}
+	paths, err := currentLocalDaemonPaths()
+	if err != nil {
+		return
+	}
+	client, err := localapi.NewClient(paths.SocketPath, 250*time.Millisecond)
+	if err != nil {
+		return
+	}
+	writeCtx, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
+	defer cancel()
+	_ = client.RecordBugreportMarker(writeCtx, classification)
+}
+
+func cliArgumentPresent(args []string, wanted ...string) bool {
+	for _, argument := range args {
+		if argument == "--" {
+			return false
+		}
+		if slices.Contains(wanted, argument) {
+			return true
+		}
+	}
+	return false
+}
+
+func unexpectedCLIError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errUsage) || errors.Is(err, selector.ErrCanceled) || errors.Is(err, selector.ErrInterrupted) || errors.Is(err, api.ErrUnauthenticated) || errors.Is(err, config.ErrSecretNotFound) {
+		return false
+	}
+	var apiErr *api.APIError
+	if errors.As(err, &apiErr) {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return false
+	}
+	if _, ok := err.(interface{ ExitCode() int }); ok {
+		return false
+	}
+	return !isCobraUsageError(err)
 }
 
 func userFacingError(err error) string {
@@ -259,29 +426,30 @@ func userFacingError(err error) string {
 		return "The terminal connection was lost and could not be restored. Retry `pb`; if this continues, run `pb doctor`."
 	}
 	if errors.Is(err, api.ErrUnauthenticated) {
-		return "Your Paperboat session is no longer valid. Run `pb auth login`, then retry."
+		return "Your Paperboat session is no longer valid. Run the enrollment command from the Paperboat dashboard, then retry."
 	}
 	if errors.Is(err, config.ErrSecretNotFound) {
-		return "This CLI is signed in but not paired for private transport. Run `pb auth login` and approve it from a paired device."
+		return "This CLI is signed in but not paired for private transport. Run the enrollment command from the Paperboat dashboard."
 	}
 	if errors.Is(err, identitybootstrap.ErrPairingRequired) {
-		return "This CLI needs approval from a paired device before private transport can be enabled. Rerun `pb auth login`."
+		return "This CLI needs approval from a paired device before private transport can be enabled. Run the enrollment command from the Paperboat dashboard."
 	}
 	if errors.Is(err, identitybootstrap.ErrEnrollmentExpired) {
-		return "Private transport approval expired. Keep a paired device online and rerun `pb auth login`."
+		return "Private transport approval expired. Run the enrollment command from the Paperboat dashboard."
 	}
 	var uninstallErr uninstallCleanupError
 	if errors.As(err, &uninstallErr) {
 		return uninstallErr.Error()
 	}
-	if message := friendlyAPIError(err); message != "" {
-		return sentence(message)
-	}
 	var apiErr *api.APIError
 	if errors.As(err, &apiErr) {
-		message := apiErrorFallback(apiErr)
-		if apiErr.RequestID != "" {
-			message += " Request ID: " + apiErr.RequestID + "."
+		message := friendlyAPIError(err)
+		if message == "" {
+			message = apiErrorFallback(apiErr)
+		}
+		message = sentence(message)
+		if apiErr.SupportReference != "" {
+			message += " Support reference: " + apiErr.SupportReference + "."
 		}
 		return message
 	}
@@ -349,6 +517,7 @@ func statusCommand() *cobra.Command {
 		Short: "Show local Paperboat machine status",
 		Args:  commandArgs(cobra.MaximumNArgs(1)),
 		RunE: func(command *cobra.Command, args []string) error {
+
 			_, snapshot, err := localDaemonSnapshot(command, installLocalDaemonService)
 			if err != nil {
 				return fmt.Errorf("read local Paperboat status: %w", err)
@@ -515,6 +684,7 @@ func doctorProbes(command *cobra.Command, snapshot localapi.Snapshot, machine *l
 			return probeDoctorUDP(ctx, "udp6", "[::]:0", "udp_ipv6", "IPv6")
 		}},
 	}
+	probes = append(probes, doctorSystemResolutionProbe(snapshot, machine))
 	if machine != nil {
 		probes = append(probes, doctorMachineProbes(*machine)...)
 		probes = append(probes, doctorPathReachabilityProbes(command, machine.ID)...)
@@ -544,7 +714,7 @@ func doctorPathReachabilityProbes(command *cobra.Command, machineID string) []do
 		if !machine.Online {
 			return nil, errors.New("selected machine is offline")
 		}
-		target := resolver.ConnectInfo{TargetKind: "machine", ProjectID: machine.ID, Project: machine.DisplayName, MachineGeneration: uint64(machine.InstallationGeneration), Terminal: &resolver.TerminalTarget{Protocol: "paperboat.health-probe.v1", EnvironmentID: machine.EnvironmentID}}
+		target := resolver.ConnectInfo{TargetKind: "machine", ProjectID: machine.ID, Project: machine.Alias, MachineGeneration: uint64(machine.InstallationGeneration), Terminal: &resolver.TerminalTarget{Protocol: "paperboat.health-probe.v1", EnvironmentID: machine.EnvironmentID}}
 		return probeDaemonPaths(ctx, dependencies.peerLocal, target), nil
 	})
 }
@@ -679,7 +849,7 @@ func doctorPeerCheck(result tunnel.PingResult) doctorpkg.Check {
 }
 
 func probeDoctorAuthentication(ctx context.Context, command *cobra.Command) doctorpkg.Check {
-	check := doctorpkg.Check{Category: "control", Code: "authentication", Status: doctorpkg.StatusFail, Summary: "Paperboat authentication is unavailable.", Recovery: "Run pb auth login, then run pb doctor again."}
+	check := doctorpkg.Check{Category: "control", Code: "authentication", Status: doctorpkg.StatusFail, Summary: "Paperboat authentication is unavailable.", Recovery: "Run the enrollment command from the Paperboat dashboard, then run pb doctor again."}
 	cfg, err := config.Load(configPathFlag(command))
 	if err != nil {
 		check.Summary = "The Paperboat configuration could not be loaded."
@@ -936,9 +1106,9 @@ func bugreportCommand() *cobra.Command {
 		Short: "Create a redacted Paperboat diagnostic bundle",
 		Args:  commandArgs(cobra.NoArgs),
 		RunE: func(command *cobra.Command, _ []string) error {
+			jsonOutput, _ := command.Flags().GetBool("json")
 			record, _ := command.Flags().GetBool("record")
 			upload, _ := command.Flags().GetBool("upload")
-			jsonOutput, _ := command.Flags().GetBool("json")
 			localClient, _, err := localDaemonSnapshot(command, installLocalDaemonService)
 			if err != nil {
 				return fmt.Errorf("start local Paperboat daemon: %w", err)
@@ -955,13 +1125,19 @@ func bugreportCommand() *cobra.Command {
 					return err
 				}
 			}
+			promptOutput := command.ErrOrStderr()
+			beforeUpload := func(result bugreportpkg.Result) error {
+				_, writeErr := fmt.Fprintf(command.ErrOrStderr(), "Uploading redacted categories: %s (%d bytes)\n", strings.Join(result.Categories, ", "), result.Bytes)
+				return writeErr
+			}
+			if jsonOutput {
+				promptOutput = io.Discard
+				beforeUpload = func(bugreportpkg.Result) error { return nil }
+			}
 			result, runErr := bugreportpkg.Run(command.Context(), bugreportpkg.Options{
-				Record: record, Upload: upload, Input: command.InOrStdin(), Prompt: command.ErrOrStderr(),
+				Record: record, Upload: upload, Input: command.InOrStdin(), Prompt: promptOutput,
 				Local: localClient, Server: server,
-				BeforeUpload: func(result bugreportpkg.Result) error {
-					_, writeErr := fmt.Fprintf(command.ErrOrStderr(), "Uploading redacted categories: %s (%d bytes)\n", strings.Join(result.Categories, ", "), result.Bytes)
-					return writeErr
-				},
+				BeforeUpload: beforeUpload,
 			})
 			if jsonOutput {
 				if runErr != nil {
@@ -1139,7 +1315,7 @@ func waitForAuthenticatedTransport(ctx context.Context, command *cobra.Command, 
 		if ready {
 			machine, machineErr := resolveUserMachine(ctx, backend, localMachine.ID)
 			if machineErr == nil && machine.Online {
-				info := resolver.ConnectInfo{TargetKind: "machine", ProjectID: machine.ID, Project: machine.DisplayName, MachineGeneration: uint64(machine.InstallationGeneration), Terminal: &resolver.TerminalTarget{Protocol: "paperboat.health-probe.v1", EnvironmentID: machine.EnvironmentID}}
+				info := resolver.ConnectInfo{TargetKind: "machine", ProjectID: machine.ID, Project: machine.Alias, MachineGeneration: uint64(machine.InstallationGeneration), Terminal: &resolver.TerminalTarget{Protocol: "paperboat.health-probe.v1", EnvironmentID: machine.EnvironmentID}}
 				probeCtx, cancelProbe := context.WithTimeout(ctx, 10*time.Second)
 				probe, probeErr := probeDaemonPeer(probeCtx, client, info, string(tunnel.TerminalTransportAuto), "wait_transport")
 				cancelProbe()
@@ -1501,6 +1677,7 @@ func pairCommand() *cobra.Command {
 		Short: "Enroll this device with a one-shot token",
 		Args:  commandArgs(cobra.NoArgs),
 		RunE: func(command *cobra.Command, _ []string) error {
+			jsonOutput, _ := command.Flags().GetBool("json")
 			stateRoot, err := command.Flags().GetString("state-root")
 			if err != nil {
 				return err
@@ -1564,6 +1741,11 @@ func pairCommand() *cobra.Command {
 				serverURL = registration.ServerURL
 			}
 			arguments := []string{"bootstrap", "--server", serverURL}
+			// Dashboard PowerShell enrollment tokens authorize an interactive
+			// Windows client. Keep the local resume journal in that same mode.
+			if runtime.GOOS == "windows" {
+				arguments = append(arguments, "--setup-mode", "client")
+			}
 			for _, name := range []string{"enrollment-token", "enrollment-token-file", "name", "shell", "state-root"} {
 				value, err := command.Flags().GetString(name)
 				if err != nil {
@@ -1573,9 +1755,23 @@ func pairCommand() *cobra.Command {
 					arguments = append(arguments, "--"+name, value)
 				}
 			}
-			code := hostruntimecmd.Execute(command.Context(), arguments, command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr())
+			operationOut, operationErr := command.OutOrStdout(), command.ErrOrStderr()
+			if jsonOutput {
+				operationOut, operationErr = io.Discard, io.Discard
+			}
+			code := hostruntimecmd.Execute(command.Context(), arguments, command.InOrStdin(), operationOut, operationErr)
 			if code != 0 {
+				if jsonOutput {
+					return jsonFailureExitCodeError{code: code, message: "machine pairing failed"}
+				}
 				return exitCodeError{code: code}
+			}
+			if jsonOutput {
+				paired, err := identityStore.Registration()
+				if err != nil {
+					return fmt.Errorf("read paired machine registration: %w", err)
+				}
+				return writeCLIJSON(command.OutOrStdout(), map[string]any{"machine_id": paired.MachineID, "environment_id": paired.EnvironmentID, "server_url": paired.ServerURL, "installation_generation": paired.InstallationGeneration, "setup_mode": paired.SetupMode})
 			}
 			return nil
 		},
@@ -1587,6 +1783,7 @@ func pairCommand() *cobra.Command {
 	command.Flags().String("name", "", "machine name")
 	command.Flags().String("shell", "", "absolute login shell")
 	command.Flags().String("state-root", "", "runtime state directory")
+	command.Flags().Bool("json", false, "print JSON")
 	return command
 }
 
@@ -1596,6 +1793,11 @@ func setupCommand() *cobra.Command {
 		Short: "Set up this machine for Paperboat",
 		Args:  commandArgs(cobra.NoArgs),
 		RunE: func(command *cobra.Command, _ []string) error {
+			jsonOutput, _ := command.Flags().GetBool("json")
+			operationOut, operationErr := command.OutOrStdout(), command.ErrOrStderr()
+			if jsonOutput {
+				operationOut, operationErr = io.Discard, io.Discard
+			}
 			mode := "host" // internal service composition; no user-facing device role
 			var err error
 			if mode == "host" && runtime.GOOS == "windows" {
@@ -1681,14 +1883,14 @@ func setupCommand() *cobra.Command {
 			}
 			setupAPIMode := mode
 			machine, err := client.SetupMachine(command.Context(), api.MachineSetupInput{
-				SetupMode:   setupAPIMode,
-				DisplayName: strings.TrimSpace(name), Platform: runtime.GOOS, Architecture: runtime.GOARCH,
+				SetupMode: setupAPIMode,
+				Alias:     strings.TrimSpace(name), Platform: runtime.GOOS, Architecture: runtime.GOARCH,
 				WorkspaceRoot: workspaceRoot, PublicIdentityKey: publicIdentityKey,
 				RuntimeVersions: map[string]string{"pb": buildinfo.Version},
 			})
 			if err != nil {
 				if errors.Is(err, api.ErrUnauthenticated) {
-					return errors.New("your Paperboat session was rejected; run `pb auth login`, then retry")
+					return errors.New("your Paperboat session was rejected; run the enrollment command from the Paperboat dashboard, then retry")
 				}
 				return err
 			}
@@ -1707,11 +1909,11 @@ func setupCommand() *cobra.Command {
 				}
 				rollbackCtx, cancelRollback := setupRollbackContext(command.Context())
 				defer cancelRollback()
-				rollbackErr := rollbackAuthenticatedHostSetup(rollbackCtx, client, identityStore, previousRegistration, hadPreviousRegistration, d.cfg.ServerURL, stateRoot, workspaceRoot, inboxPath, strings.TrimSpace(name), publicIdentityKey, command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr())
+				rollbackErr := rollbackAuthenticatedHostSetup(rollbackCtx, client, identityStore, previousRegistration, hadPreviousRegistration, d.cfg.ServerURL, stateRoot, workspaceRoot, inboxPath, strings.TrimSpace(name), publicIdentityKey, command.InOrStdin(), operationOut, operationErr)
 				return errors.Join(cause, rollbackErr)
 			}
 			if machine.Installation == nil {
-				return rollbackHostFailure(errors.New("server did not return TUF installation material"))
+				return rollbackHostFailure(errors.New("server did not return installation material"))
 			}
 			artifact := bootstrap.ArtifactTarget{
 				Schema: machine.Installation.Artifact.Schema, Kind: machine.Installation.Artifact.Kind,
@@ -1720,8 +1922,8 @@ func setupCommand() *cobra.Command {
 				TargetPath: machine.Installation.Artifact.TargetPath,
 			}
 			if mode == "host" {
-				if err := verifySetupHostArtifact(command.Context(), stateRoot, artifact); err != nil {
-					return rollbackHostFailure(fmt.Errorf("verify device installation artifact: %w", err))
+				if err := verifySetupInstallSource(); err != nil {
+					return rollbackHostFailure(fmt.Errorf("verify supplied installation executable: %w", err))
 				}
 				if _, err := client.RegisterManagedSSHTarget(command.Context(), machine.ID, uint64(machine.InstallationGeneration), account.Username, uint16(sshPortValue), "managed-ssh-target-"+strings.TrimPrefix(newIdempotencyKey(), "pb-")); err != nil {
 					return rollbackHostFailure(fmt.Errorf("register SSH target: %w", err))
@@ -1769,7 +1971,7 @@ func setupCommand() *cobra.Command {
 					StateRoot: stateRoot, WorkspaceRoot: workspaceRoot, ControlURL: machine.Installation.ControlURL,
 					MachineID: machine.ID, ListenAddress: machine.Installation.HelperListenAddress,
 					Artifact: artifact,
-				}, command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr())
+				}, command.InOrStdin(), operationOut, operationErr)
 				if installErr != nil {
 					return fmt.Errorf("install device service: %w; retry `pb setup`", installErr)
 				}
@@ -1779,7 +1981,7 @@ func setupCommand() *cobra.Command {
 			}
 			if mode == "host" {
 				arguments := []string{"bootstrap", "--server", d.cfg.ServerURL, "--state-root", stateRoot, "--name", strings.TrimSpace(name)}
-				if code := hostruntimecmd.Execute(command.Context(), arguments, command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr()); code != 0 {
+				if code := hostruntimecmd.Execute(command.Context(), arguments, command.InOrStdin(), operationOut, operationErr); code != 0 {
 					return rollbackHostFailure(exitCodeError{code: code})
 				}
 				machine, err = doctorUserMachine(command.Context(), client, machine.ID)
@@ -1796,8 +1998,15 @@ func setupCommand() *cobra.Command {
 					return fmt.Errorf("save host registration: %w", err)
 				}
 			}
-			fmt.Fprintf(command.OutOrStdout(), "Set up %s (%s)\n", machine.DisplayName, machine.ID)
-			return exportSetupRecoveryKey(command)
+			if err := exportSetupRecoveryKey(command); err != nil {
+				return err
+			}
+			if jsonOutput {
+				recoveryOutput, _ := command.Flags().GetString("recovery-output")
+				return writeCLIJSON(command.OutOrStdout(), map[string]any{"machine": machine, "mode": mode, "inbox_path": inboxPath, "recovery_output": strings.TrimSpace(recoveryOutput)})
+			}
+			fmt.Fprintf(command.OutOrStdout(), "Set up %s (%s)\n", machine.Alias, machine.ID)
+			return nil
 		},
 		SilenceUsage: true, SilenceErrors: true,
 	}
@@ -1810,6 +2019,7 @@ func setupCommand() *cobra.Command {
 	command.Flags().Bool("preview-tunnel", true, "serve previews and tunnels")
 	command.Flags().Bool("peer-relay", false, "relay encrypted traffic for your devices")
 	command.Flags().String("recovery-output", "", "new absolute file for the account recovery key")
+	command.Flags().Bool("json", false, "print JSON")
 	return command
 }
 
@@ -1844,9 +2054,9 @@ func saveSetupMachineControl(ctx context.Context, client *api.Client, identitySt
 	return nil
 }
 
-func rollbackAuthenticatedHostSetup(ctx context.Context, client *api.Client, identityStore *identity.Store, previous identity.Registration, hadPrevious bool, serverURL, stateRoot, workspaceRoot, inboxPath, displayName, publicIdentityKey string, stdin io.Reader, stdout, stderr io.Writer) error {
+func rollbackAuthenticatedHostSetup(ctx context.Context, client *api.Client, identityStore *identity.Store, previous identity.Registration, hadPrevious bool, serverURL, stateRoot, workspaceRoot, inboxPath, alias, publicIdentityKey string, stdin io.Reader, stdout, stderr io.Writer) error {
 	rolledBack, err := client.SetupMachine(ctx, api.MachineSetupInput{
-		SetupMode: "client", DisplayName: displayName, Platform: runtime.GOOS, Architecture: runtime.GOARCH,
+		SetupMode: "client", Alias: alias, Platform: runtime.GOOS, Architecture: runtime.GOARCH,
 		WorkspaceRoot: workspaceRoot, PublicIdentityKey: publicIdentityKey,
 		RuntimeVersions: map[string]string{"pb": buildinfo.Version},
 	})
@@ -1904,6 +2114,7 @@ func unpairCommand() *cobra.Command {
 		Short: "Stop hosting from this machine",
 		Args:  commandArgs(cobra.NoArgs),
 		RunE: func(command *cobra.Command, _ []string) error {
+			jsonOutput, _ := command.Flags().GetBool("json")
 			ctx := actionContext(command, nil)
 			client, err := backendClient(ctx)
 			if err != nil {
@@ -1959,18 +2170,27 @@ func unpairCommand() *cobra.Command {
 			}
 			clientSetup := setupCommand()
 			clientSetup.SetIn(command.InOrStdin())
-			clientSetup.SetOut(command.OutOrStdout())
-			clientSetup.SetErr(command.ErrOrStderr())
-			clientSetup.SetArgs([]string{"--mode", "client", "--name", machine.DisplayName, "--state-root", stateRoot})
+			if jsonOutput {
+				clientSetup.SetOut(io.Discard)
+				clientSetup.SetErr(io.Discard)
+			} else {
+				clientSetup.SetOut(command.OutOrStdout())
+				clientSetup.SetErr(command.ErrOrStderr())
+			}
+			clientSetup.SetArgs([]string{"--mode", "client", "--name", machine.Alias, "--state-root", stateRoot})
 			if err := clientSetup.ExecuteContext(command.Context()); err != nil {
 				return fmt.Errorf("incoming-service authority was revoked, but device service setup failed: %w", err)
 			}
-			fmt.Fprintf(command.OutOrStdout(), "Unpaired %s (%s)\n", machine.DisplayName, machine.ID)
+			if jsonOutput {
+				return writeCLIJSON(command.OutOrStdout(), map[string]any{"machine": machine, "mode": "client", "unpaired": true})
+			}
+			fmt.Fprintf(command.OutOrStdout(), "Unpaired %s (%s)\n", machine.Alias, machine.ID)
 			return nil
 		},
 		SilenceUsage: true, SilenceErrors: true,
 	}
 	command.Flags().String("state-root", "", "runtime state directory")
+	command.Flags().Bool("json", false, "print JSON")
 	return command
 }
 
@@ -1980,27 +2200,37 @@ func uninstallCommand() *cobra.Command {
 		Short: "Completely remove Paperboat from this machine",
 		Args:  commandArgs(cobra.NoArgs),
 		RunE: func(command *cobra.Command, _ []string) error {
+			jsonOutput, _ := command.Flags().GetBool("json")
 			hostname, err := os.Hostname()
 			if err != nil || strings.TrimSpace(hostname) == "" {
 				return errors.New("could not resolve this machine hostname")
 			}
-			reader := bufio.NewReader(command.InOrStdin())
-			fmt.Fprintln(command.ErrOrStderr(), "This permanently removes Paperboat services, binaries, credentials, configuration, and runtime state. The Paperboat Inbox is preserved.")
-			fmt.Fprint(command.ErrOrStderr(), "Type UNINSTALL PAPERBOAT to continue: ")
-			first, err := reader.ReadString('\n')
-			if err != nil && !errors.Is(err, io.EOF) {
-				return err
+			first, _ := command.Flags().GetString("confirmation")
+			second, _ := command.Flags().GetString("hostname")
+			if !jsonOutput {
+				reader := bufio.NewReader(command.InOrStdin())
+				fmt.Fprintln(command.ErrOrStderr(), "This permanently removes Paperboat services, binaries, credentials, configuration, and runtime state. The Paperboat Inbox is preserved.")
+				fmt.Fprint(command.ErrOrStderr(), "Type UNINSTALL PAPERBOAT to continue: ")
+				first, err = reader.ReadString('\n')
+				if err != nil && !errors.Is(err, io.EOF) {
+					return err
+				}
+				fmt.Fprintf(command.ErrOrStderr(), "Type this machine hostname (%s) to confirm: ", hostname)
+				second, err = reader.ReadString('\n')
+				if err != nil && !errors.Is(err, io.EOF) {
+					return err
+				}
 			}
 			if strings.TrimSpace(first) != "UNINSTALL PAPERBOAT" {
-				return errors.New("uninstall confirmation did not match")
-			}
-			fmt.Fprintf(command.ErrOrStderr(), "Type this machine hostname (%s) to confirm: ", hostname)
-			second, err := reader.ReadString('\n')
-			if err != nil && !errors.Is(err, io.EOF) {
-				return err
+				return invocationError(errors.New("uninstall confirmation did not match"))
 			}
 			if strings.TrimSpace(second) != hostname {
-				return errors.New("hostname confirmation did not match")
+				return invocationError(errors.New("hostname confirmation did not match"))
+			}
+			jsonWriter := command.OutOrStdout()
+			if jsonOutput {
+				command.SetOut(io.Discard)
+				command.SetErr(io.Discard)
 			}
 			preservedInboxes, inboxErr := uninstallInboxPaths(command)
 			executable, executableErr := os.Executable()
@@ -2008,6 +2238,12 @@ func uninstallCommand() *cobra.Command {
 			productHandoffReady := !platformProductHandoffRequired()
 			daemonStopConfirmed := false
 			cleanupErr := performUninstallCleanup([]uninstallCleanupStep{
+				{name: "remove installed CLI manuals", run: func() error {
+					if executableErr != nil {
+						return executableErr
+					}
+					return removeInstalledManuals(executable)
+				}},
 				{name: "resolve Paperboat Inbox preservation", run: func() error { return inboxErr }},
 				{name: "stop local daemon", run: func() error {
 					if executableErr != nil {
@@ -2063,8 +2299,13 @@ func uninstallCommand() *cobra.Command {
 				}},
 			})
 			if cleanupErr != nil {
-				fmt.Fprintln(command.OutOrStdout(), "Paperboat attempted every local removal step. The Paperboat Inbox was preserved.")
+				if !jsonOutput {
+					fmt.Fprintln(command.OutOrStdout(), "Paperboat attempted every local removal step. The Paperboat Inbox was preserved.")
+				}
 				return uninstallCleanupError{err: cleanupErr}
+			}
+			if jsonOutput {
+				return writeCLIJSON(jsonWriter, map[string]any{"uninstalled": true, "hostname": hostname, "inbox_preserved": true})
 			}
 			fmt.Fprintln(command.OutOrStdout(), platformUninstallSuccessMessage())
 			return nil
@@ -2072,6 +2313,9 @@ func uninstallCommand() *cobra.Command {
 		SilenceUsage: true, SilenceErrors: true,
 	}
 	command.Flags().String("state-root", "", "additional Paperboat runtime state directory to remove")
+	command.Flags().String("confirmation", "", "exact confirmation phrase: UNINSTALL PAPERBOAT")
+	command.Flags().String("hostname", "", "exact current hostname confirmation")
+	command.Flags().Bool("json", false, "print JSON")
 	return command
 }
 
@@ -2325,6 +2569,25 @@ func newRootCommand() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "pb [environment] [new]",
 		Short: "Open Paperboat or connect to an environment terminal",
+		Long: `Paperboat provides remote terminals, managed SSH and file transfers, previews,
+tunnels, environment configuration, team management, and local runtime controls.
+
+Run pb without arguments in a terminal to open the interactive home screen.
+Use explicit subcommands in scripts; pb COMMAND --help describes each operation.
+Use pb COMMAND --help --json for machine-readable command discovery.
+
+The --json flag selects machine-readable output and suppresses interactive menus.
+Raw terminal and native transfer commands reject unsupported JSON output before
+execution. Streaming commands may emit multiple JSON records; consult their help.
+
+Local preferences can define shortcuts, command defaults and TUI appearance.
+Run pb config customize to edit them, or use --no-customization to bypass them.
+Explicit flags override saved defaults. Built-in command names remain reserved.
+Numeric invocations such as pb 3000 select the configured preview or tunnel action.
+
+Run pb doctor for diagnostics. Check command output for partial changes and
+recovery instructions before retrying an operation that may have created resources.`,
+		Example: "  pb\n  pb login\n  pb environments\n  pb connect Studio\n  pb ssh Studio\n  pb preview 3000\n  pb tunnel create demo --port 3000\n  pb config customize\n  pb --no-customization environments --json",
 		Args: commandArgs(func(command *cobra.Command, args []string) error {
 			if command.ArgsLenAtDash() == 1 && len(args) >= 2 {
 				return nil
@@ -2336,10 +2599,36 @@ func newRootCommand() *cobra.Command {
 				return actionExecCobra(command, args, true)
 			}
 			if len(args) == 0 {
-				if server, _ := command.Flags().GetString("server"); strings.TrimSpace(server) != "" {
-					return actionConnect(actionContext(command, args))
+				serverFlag := command.Flags().Lookup("server")
+				if serverFlag != nil && serverFlag.Changed {
+					cfg, err := config.Load(configPathFlag(command))
+					if err != nil {
+						return err
+					}
+					server, _ := command.Flags().GetString("server")
+					normalized, err := config.NormalizeServerURL(server)
+					if err != nil {
+						return invocationError(err)
+					}
+					cfg.ServerURL = normalized
+					if err := cfg.Save(); err != nil {
+						return err
+					}
+					input, interactive := command.InOrStdin().(*os.File)
+					if !interactive || !term.IsTerminal(int(input.Fd())) {
+						if jsonOutputRequested(command) {
+							return writeCLIJSON(command.OutOrStdout(), map[string]any{"server": normalized, "path": cfg.Path(), "updated": true})
+						}
+						return nil
+					}
+				}
+				if jsonOutputRequested(command) {
+					return writeCLIJSON(command.OutOrStdout(), map[string]any{"command": "pb", "version": buildinfo.Version, "commands": cliCommandCatalog(command.Root())})
 				}
 				return actionHome(command)
+			}
+			if jsonOutputRequested(command) {
+				return unsupportedJSONOutputError{command: "pb terminal shorthand; use `pb exec --json` for machine output"}
 			}
 			if err := validateConnectInvocation(command); err != nil {
 				return err
@@ -2356,6 +2645,10 @@ func newRootCommand() *cobra.Command {
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return invocationError(err) })
 	root.PersistentFlags().String("config", "", "path to the CLI config file")
 	root.PersistentFlags().String("server", "", "paperboat-server base URL override")
+	root.PersistentFlags().Bool("json", false, "print machine-readable JSON")
+	root.PersistentFlags().Bool("no-customization", false, "ignore local shortcuts, command defaults, and TUI preferences")
+	root.SetHelpCommand(newCLIHelpCommand(root))
+	root.PersistentPreRunE = func(command *cobra.Command, _ []string) error { return prepareJSONCommand(command) }
 	addConnectFlags(root)
 
 	connect := &cobra.Command{Use: "connect <environment> [new]", Short: "Create and attach to an environment terminal session", Args: commandArgs(terminalArgs(1)), RunE: func(command *cobra.Command, args []string) error {
@@ -2381,8 +2674,11 @@ func newRootCommand() *cobra.Command {
 	sshCommand.Flags().String("transport", "", "peer transport: a, d, q, w, or r")
 	sshTrustHost := &cobra.Command{Use: "trust-host <machine>", Short: "Approve a changed SSH host identity", Args: commandArgs(cobra.ExactArgs(1)), RunE: actionSSHTrustHost}
 	sshTrustHost.Flags().String("fingerprint", "", "exact pending SHA256 fingerprint")
+	sshTrustHost.Flags().Bool("json", false, "print JSON")
 	sshCommand.AddCommand(sshTrustHost)
-	sshCommand.AddCommand(&cobra.Command{Use: "doctor <machine>", Short: "Check SSH integration for a machine", Args: commandArgs(cobra.ExactArgs(1)), RunE: actionSSHDoctor})
+	sshDoctor := &cobra.Command{Use: "doctor <machine>", Short: "Check SSH integration for a machine", Args: commandArgs(cobra.ExactArgs(1)), RunE: actionSSHDoctor}
+	sshDoctor.Flags().Bool("json", false, "print JSON")
+	sshCommand.AddCommand(sshDoctor)
 	root.AddCommand(sshCommand)
 	root.AddCommand(newManagedSSHToolCommand("scp"))
 	root.AddCommand(newManagedSSHToolCommand("sftp"))
@@ -2409,6 +2705,7 @@ func newRootCommand() *cobra.Command {
 	root.AddCommand(environments)
 	root.AddCommand(environmentVariablesCobraCommand())
 	root.AddCommand(teamCobraCommand())
+	root.AddCommand(desktopCommand())
 
 	root.AddCommand(doctorCommandV1())
 	ping := &cobra.Command{Use: "ping <machine>", Short: "Measure authenticated connectivity to a machine", Args: commandArgs(cobra.ExactArgs(1)), RunE: actionPing}
@@ -2431,10 +2728,12 @@ func newRootCommand() *cobra.Command {
 		return actionHomeAccount(command)
 	}
 	root.AddCommand(authTree)
-	login := &cobra.Command{Use: "login", Short: "Sign in through the Paperboat dashboard", Args: commandArgs(cobra.NoArgs), RunE: actionRun(authLogin)}
-	login.Flags().String("recovery-key", "", "absolute recovery-key file for restoring private transport")
+	login := &cobra.Command{Use: "login", Short: "Show dashboard enrollment instructions", Args: commandArgs(cobra.NoArgs), RunE: actionRun(authLogin)}
+	login.Flags().Bool("json", false, "print enrollment instructions as JSON")
 	root.AddCommand(login)
-	root.AddCommand(&cobra.Command{Use: "logout", Short: "Revoke and remove the active client session", Args: commandArgs(cobra.NoArgs), RunE: actionRun(authLogout)})
+	logout := &cobra.Command{Use: "logout", Short: "Revoke and remove the active client session", Args: commandArgs(cobra.NoArgs), RunE: actionRun(authLogout)}
+	logout.Flags().Bool("json", false, "print JSON")
+	root.AddCommand(logout)
 	configTree := specTree(configCommand(), "config")
 	configTree.RunE = func(command *cobra.Command, _ []string) error {
 		if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -2442,12 +2741,13 @@ func newRootCommand() *cobra.Command {
 		}
 		return actionHomeConfig(command)
 	}
-	configTree.AddCommand(statusBarConfigCommand(), configConflictCobraCommand(), configForceCobraCommand())
+	configTree.AddCommand(statusBarConfigCommand(), configConflictCobraCommand(), configForceCobraCommand(), customizationCommand())
 	root.AddCommand(configTree)
 	root.AddCommand(previewCobraCommandV1())
 	root.AddCommand(tunnelCobraCommandV1())
 	access := &cobra.Command{Use: "access", Short: "Open authenticated private access", Args: commandArgs(cobra.NoArgs)}
 	access.AddCommand(accessTunnelCobraCommandV1())
+	access.AddCommand(accessDeviceCobraCommandV1())
 	root.AddCommand(access)
 	root.AddCommand(specTree(inboxCommand(), "inbox"))
 	root.AddCommand(sessionCobraCommand())
@@ -2457,12 +2757,18 @@ func newRootCommand() *cobra.Command {
 	root.AddCommand(setupCommand())
 	root.AddCommand(updateCommand())
 	root.AddCommand(uninstallCommand())
+	root.AddCommand(freshEnrollmentResetCommand())
+	root.AddCommand(manualInstallCommand())
 	root.AddCommand(sendCommand())
 	root.AddCommand(transferCommand())
 	root.AddCommand(statusCommand())
 	root.AddCommand(waitCommand())
 	root.AddCommand(bugreportCommand())
 	root.AddCommand(daemoncmd.NewCommand())
+	root.AddCommand(daemoncmd.ServiceCommand())
+	root.AddCommand(daemoncmd.ResolveCommand())
+	root.AddCommand(daemoncmd.TagCommand())
+	root.AddCommand(daemoncmd.ApproveCommand())
 	root.AddCommand(privilegedServiceOperationCommand())
 	root.AddCommand(platformInstallCommand())
 	root.AddCommand(platformUninstallHelperCommand())
@@ -2828,7 +3134,7 @@ func configureShellCompletion(root *cobra.Command) {
 	if command, _, err := root.Find([]string{"transfer", "destination", "set"}); err == nil && command != nil {
 		command.ValidArgsFunction = transferTargetCompletion
 	}
-	root.ValidArgsFunction = machineCompletion
+	root.ValidArgsFunction = personalizedMachineCompletion
 }
 
 func machineCompletion(command *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -2937,6 +3243,10 @@ func actionHome(command *cobra.Command) error {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return errors.New("pb requires a command or environment when used without an interactive terminal")
 	}
+	previousContext := command.Context()
+	homeContext, cancelHome := context.WithCancel(previousContext)
+	command.SetContext(homeContext)
+	defer func() { cancelHome(); command.SetContext(previousContext) }()
 	endScreen := selector.BeginScreen(command.ErrOrStderr())
 	defer endScreen()
 	if prefetch, prefetchErr := startHomePrefetch(command); prefetchErr == nil {
@@ -2950,22 +3260,14 @@ func actionHome(command *cobra.Command) error {
 			emailAction = "ctrl+e hide email"
 		}
 		selection, err := selector.ChooseWithAction(selector.Options{
-			Header:        homeBrand(command, revealEmail),
-			Title:         "What do you want to do?",
-			Stdin:         os.Stdin,
-			Output:        command.ErrOrStderr(),
+			Header:  homeBrand(command, revealEmail),
+			Title:   "What do you want to do?",
+			Stdin:   os.Stdin,
+			Context: command.Context(), Output: command.ErrOrStderr(),
 			Footer:        "↑/↓ move  enter/click select  " + emailAction + "  esc exit",
 			Actions:       map[string]string{"ctrl+e": "toggle-email"},
 			HeaderActions: map[int]string{2: "toggle-email"},
-			Items: []selector.Item{
-				{ID: "machines", Title: "Machines", Description: "Open terminals, create previews, send files, or manage computers"},
-				{ID: "inbox", Title: "Team Inbox", Description: "Review and approve exact teammate file requests"},
-				{ID: "sessions", Title: "Terminal sessions", Description: "Attach, inspect, close, rename, or delete durable sessions"},
-				{ID: "environment-variables", Title: "ENV Injection", Description: "Manage redacted global and per-machine variables for new processes"},
-				{ID: "config", Title: "Configuration", Description: "Inspect sync status, CLI settings, and status bar preferences"},
-				{ID: "doctor", Title: "Diagnostics", Description: "Check local setup, authentication, and connectivity"},
-				{ID: "account", Title: "Account", Description: "View, sign in, switch, or sign out"},
-			},
+			Items:         personalizedHomeItems(preferences.FromContext(command.Context())),
 		})
 		if err != nil {
 			if errors.Is(err, selector.ErrCanceled) || errors.Is(err, selector.ErrInterrupted) {
@@ -2981,10 +3283,12 @@ func actionHome(command *cobra.Command) error {
 		if errors.Is(err, selector.ErrInterrupted) {
 			return nil
 		}
-		if errors.Is(err, selector.ErrCanceled) || err == nil {
+		if interactiveCanceled(err) || err == nil {
 			continue
 		}
-		_ = showInformation(command, "Could not complete that action", sentence(userFacingError(err)), nil)
+		if displayErr := showHomeFailure(command, err); displayErr != nil {
+			return displayErr
+		}
 	}
 }
 
@@ -3077,7 +3381,18 @@ func primeHomeFileIndex() {
 }
 
 func runHomeAction(command *cobra.Command, action string) error {
+	if strings.HasPrefix(action, "shortcut:") {
+		return runPreferenceFavorite(command, strings.TrimPrefix(action, "shortcut:"))
+	}
 	switch action {
+	case "customize":
+		return editPreferences(command)
+	case "previews":
+		return actionHomePreviews(command)
+	case "commands":
+		return actionHomeCommands(command, nil)
+	case "team", "transfer":
+		return actionHomeCommands(command, []string{action})
 	case "sessions":
 		return actionHomeSessions(command)
 	case "environment-variables":
@@ -3122,7 +3437,7 @@ func actionHomeInbox(command *cobra.Command) error {
 		for i, request := range pending {
 			items[i] = selector.Item{ID: request.RequestID, Title: fmt.Sprintf("%d file(s) from %s", len(request.Files), request.SenderAccount), Description: "Expires " + relativeTimestamp(request.ExpiresAt)}
 		}
-		selection, selectErr := selector.ChooseWithAction(selector.Options{Title: "Team Inbox approvals", Subtitle: "Approval applies only to the listed names, sizes, hashes, recipient and transfer", Items: items, Footer: "enter review  esc back", Stdin: os.Stdin, Output: command.ErrOrStderr()})
+		selection, selectErr := selector.ChooseWithAction(selector.Options{Title: "Team Inbox approvals", Subtitle: "Approval applies only to the listed names, sizes, hashes, recipient and transfer", Items: items, Footer: "enter review  esc back", Stdin: os.Stdin, Context: command.Context(), Output: command.ErrOrStderr()})
 		if selectErr != nil {
 			return selectErr
 		}
@@ -3215,9 +3530,9 @@ func actionEnvironmentsList(command *cobra.Command) error {
 	sortMachinesForDisplay(machines, nil, currentMachineID)
 	items := make([]selector.Item, 0, len(machines))
 	for _, machine := range machines {
-		items = append(items, selector.Item{ID: machine.ID, Title: machineDisplayTitle(machine, currentMachineID), Description: machineStatusSummary(machine), Search: machine.ID + " " + machine.WorkspaceRoot + " " + machineStatusSearch(machine)})
+		items = append(items, selector.Item{ID: machine.ID, Title: machineDisplayTitle(machine, currentMachineID), Description: preferenceDetails(command.Context(), "machines", map[string]string{"status": machineStatusSummary(machine), "platform": machine.Platform, "id": machine.ID}), Search: machine.ID + " " + machine.WorkspaceRoot + " " + machineStatusSearch(machine)})
 	}
-	_, err = selector.Choose(selector.Options{Title: "Machines", Subtitle: "Computers available to this account", Items: items, Empty: "No machines yet", Footer: "↑/↓ inspect  type to filter  esc back", Stdin: os.Stdin, Output: command.ErrOrStderr()})
+	_, err = selector.Choose(selector.Options{Title: "Machines", Subtitle: "Computers available to this account", Items: items, Empty: "No machines yet", Footer: "↑/↓ inspect  type to filter  esc back", Stdin: os.Stdin, Context: command.Context(), Output: command.ErrOrStderr()})
 	return err
 }
 
@@ -3261,7 +3576,7 @@ func actionHomeSessions(command *cobra.Command) error {
 		if listErr != nil {
 			return friendlyCommandError(listErr)
 		}
-		selected, selectErr := selectMachineSession(sessions, favorites)
+		selected, selectErr := selectMachineSession(command, sessions, favorites)
 		if errors.Is(selectErr, errFavoriteToggle) {
 			if favoriteErr := setFavorite(command.Context(), client, "session", machineSessionFavoriteID(selected), !favorites.IsFavorite("session", machineSessionFavoriteID(selected))); favoriteErr != nil {
 				return favoriteErr
@@ -3285,7 +3600,7 @@ func actionHomeSessions(command *cobra.Command) error {
 			}
 			action, actionErr := chooseHomeAction(command, session.Name, actions)
 			if errors.Is(actionErr, selector.ErrCanceled) {
-				continue
+				break
 			}
 			if actionErr != nil {
 				return actionErr
@@ -3297,7 +3612,7 @@ func actionHomeSessions(command *cobra.Command) error {
 				break
 			}
 			if action.ID == "rename" {
-				name, promptErr := prompt.Text(prompt.TextOptions{Title: "Rename session", Description: target.name + "  ·  " + session.Name, Placeholder: session.Name, Stdin: os.Stdin, Output: command.ErrOrStderr(), Validate: func(value string) error {
+				name, promptErr := prompt.Text(prompt.TextOptions{Title: "Rename session", Description: target.name + "  ·  " + session.Name, Placeholder: session.Name, Stdin: os.Stdin, Context: command.Context(), Output: command.ErrOrStderr(), Validate: func(value string) error {
 					if strings.TrimSpace(value) == "" {
 						return errors.New("session name is required")
 					}
@@ -3361,7 +3676,7 @@ func listMachineSessionsForMachines(ctx context.Context, client *api.Client, mac
 				errorsOut <- loadErr
 				return
 			}
-			target := environmentTarget{kind: environmentUserMachine, id: machine.ID, name: machine.DisplayName}
+			target := environmentTarget{kind: environmentUserMachine, id: machine.ID, name: machine.Alias}
 			mapped := make([]machineSession, 0, len(items))
 			for _, session := range items {
 				mapped = append(mapped, machineSession{target: target, session: session})
@@ -3395,7 +3710,7 @@ func (s machineSession) activity() time.Time {
 	return s.session.CreatedAt
 }
 
-func selectMachineSession(sessions []machineSession, favorites favoriteSet) (machineSession, error) {
+func selectMachineSession(command *cobra.Command, sessions []machineSession, favorites favoriteSet) (machineSession, error) {
 	slices.SortStableFunc(sessions, func(a, b machineSession) int {
 		return compareFavorites(favorites.IsFavorite("session", machineSessionFavoriteID(a)), favorites.IsFavorite("session", machineSessionFavoriteID(b)))
 	})
@@ -3408,12 +3723,12 @@ func selectMachineSession(sessions []machineSession, favorites favoriteSet) (mac
 		}
 		key := entry.target.id + ":" + entry.session.ID
 		activity := entry.activity()
-		description := strings.Join([]string{entry.target.name, entry.session.State, attached, "last active " + relativeTime(&activity)}, "  ·  ")
+		description := preferenceDetails(command.Context(), "sessions", map[string]string{"machine": entry.target.name, "state": entry.session.State + " · " + attached + " · last active " + relativeTime(&activity), "id": entry.session.ID})
 		favorite := favorites.IsFavorite("session", machineSessionFavoriteID(entry))
 		items = append(items, selector.Item{ID: key, Title: entry.session.Name, Description: description, Search: entry.target.name + " " + entry.target.id + " favorite starred", Favorite: favorite})
 		byID[key] = entry
 	}
-	selected, err := selector.ChooseWithAction(selector.Options{Title: "Terminal sessions", Subtitle: "All machine sessions, newest first", Items: items, Empty: "no terminal sessions are available", Footer: "↑/↓ move  enter open  ctrl+f favorite  esc back", Actions: map[string]string{"ctrl+f": "favorite"}, Stdin: os.Stdin, Output: os.Stderr})
+	selected, err := selector.ChooseWithAction(selector.Options{Context: command.Context(), Title: "Terminal sessions", Subtitle: "All machine sessions, newest first", Items: items, Empty: "no terminal sessions are available", Footer: "↑/↓ move  enter open  ctrl+f favorite  esc back", Actions: map[string]string{"ctrl+f": "favorite"}, Stdin: os.Stdin, Output: os.Stderr})
 	entry := byID[selected.Item.ID]
 	if err == nil && selected.Action == "favorite" {
 		err = errFavoriteToggle
@@ -3474,7 +3789,7 @@ func actionHomeMachines(command *cobra.Command) error {
 				continue
 			}
 			favorite := favorites.IsFavorite("machine", machine.ID)
-			items = append(items, selector.Item{ID: machine.ID, Title: machine.DisplayName, Description: machineStatusSummary(machine), Search: machine.WorkspaceRoot + " " + machineStatusSearch(machine) + " favorite starred", Favorite: favorite})
+			items = append(items, selector.Item{ID: machine.ID, Title: machine.Alias, Description: preferenceDetails(command.Context(), "machines", map[string]string{"status": machineStatusSummary(machine), "platform": machine.Platform, "id": machine.ID}), Search: machine.WorkspaceRoot + " " + machineStatusSearch(machine) + " favorite starred", Favorite: favorite})
 			byID[machine.ID] = machine
 		}
 		for _, machine := range machines {
@@ -3482,11 +3797,11 @@ func actionHomeMachines(command *cobra.Command) error {
 				continue
 			}
 			favorite := favorites.IsFavorite("machine", machine.ID)
-			items = append(items, selector.Item{ID: machine.ID, Title: machineDisplayTitle(machine, currentMachineID), Description: machineStatusSummary(machine), Search: machine.WorkspaceRoot + " " + machineStatusSearch(machine) + " this device favorite starred", Favorite: favorite})
+			items = append(items, selector.Item{ID: machine.ID, Title: machineDisplayTitle(machine, currentMachineID), Description: preferenceDetails(command.Context(), "machines", map[string]string{"status": machineStatusSummary(machine), "platform": machine.Platform, "id": machine.ID}), Search: machine.WorkspaceRoot + " " + machineStatusSearch(machine) + " this device favorite starred", Favorite: favorite})
 			byID[machine.ID] = machine
 		}
 		items = append(items, selector.Item{ID: "add", Title: "+ Add machine", Description: "Set up another computer", Search: "new pair enroll", Action: true})
-		selection, selectErr := selector.ChooseWithAction(selector.Options{Title: "Machines", Subtitle: "Paired computers", Items: items, Footer: "↑/↓ move  enter open  ctrl+f favorite  esc back", Actions: map[string]string{"ctrl+f": "favorite"}, Stdin: os.Stdin, Output: command.ErrOrStderr()})
+		selection, selectErr := selector.ChooseWithAction(selector.Options{Title: "Machines", Subtitle: "Paired computers", Items: items, Footer: "↑/↓ move  enter open  ctrl+f favorite  esc back", Actions: map[string]string{"ctrl+f": "favorite"}, Stdin: os.Stdin, Context: command.Context(), Output: command.ErrOrStderr()})
 		if selectErr != nil {
 			return selectErr
 		}
@@ -3521,28 +3836,22 @@ func actionHomeMachines(command *cobra.Command) error {
 				runErr = executeInteractiveCommand(command, []string{"connect", machine.ID, "new"})
 			case "sessions":
 				runErr = actionHomeMachineSessions(command, client, machine)
-				if errors.Is(runErr, selector.ErrCanceled) {
+				if interactiveCanceled(runErr) {
 					runErr = nil
 				}
 			case "environment-variables":
-				runErr = runEnvironmentVariableScopeTUI(command, client, environmentVariableTarget{machineID: machine.ID, machineName: machine.DisplayName})
+				runErr = runEnvironmentVariableScopeTUI(command, client, environmentVariableTarget{machineID: machine.ID, machineName: machine.Alias})
 			case "send":
 				runErr = actionHomeSendToMachine(command, machine)
 			case "rename":
-				fmt.Fprintf(command.ErrOrStderr(), "New name for %s: ", machine.DisplayName)
-				name, readErr := bufio.NewReader(io.LimitReader(command.InOrStdin(), 257)).ReadString('\n')
-				if readErr != nil && !errors.Is(readErr, io.EOF) {
+				name, readErr := prompt.Text(prompt.TextOptions{Title: "Rename machine", Description: machine.Alias, Initial: machine.Alias, Stdin: os.Stdin, Context: command.Context(), Output: command.ErrOrStderr(), Validate: machinename.Validate})
+				if readErr != nil {
 					runErr = readErr
-					break
-				}
-				name = strings.TrimSpace(name)
-				if name == "" {
-					runErr = errors.New("machine name must not be empty")
 					break
 				}
 				runErr = executeInteractiveCommand(command, []string{"machine", "rename", machine.ID, name})
 				if runErr == nil {
-					machine.DisplayName = name
+					machine.Alias = name
 				}
 			case "allow-sleep":
 				runErr = executeInteractiveCommand(command, []string{"machine", "availability", machine.ID, "--mode", "allow-sleep"})
@@ -3551,7 +3860,7 @@ func actionHomeMachines(command *cobra.Command) error {
 			default:
 				runErr = errors.New("unknown machine action")
 			}
-			if errors.Is(runErr, selector.ErrCanceled) {
+			if interactiveCanceled(runErr) {
 				continue
 			}
 			if runErr != nil {
@@ -3563,7 +3872,7 @@ func actionHomeMachines(command *cobra.Command) error {
 
 func machineHomeActions(machine api.UserMachine) []selector.Item {
 	actions := make([]selector.Item, 0, 8)
-	actions = append(actions, selector.Item{ID: "rename", Title: "Rename", Description: "Change this machine's display name"})
+	actions = append(actions, selector.Item{ID: "rename", Title: "Rename", Description: "Change this machine's alias"})
 	if machineSupportsEnvironmentInjection(machine) {
 		actions = append(actions, selector.Item{ID: "environment-variables", Title: "ENV Injection", Description: "Manage variables applied to new processes on this machine"})
 	}
@@ -3588,7 +3897,7 @@ func machineHomeActions(machine api.UserMachine) []selector.Item {
 }
 
 func chooseMachineHomeAction(command *cobra.Command, machine api.UserMachine) (selector.Item, error) {
-	return selector.Choose(selector.Options{Title: machine.DisplayName, Subtitle: machineStatusSummary(machine), Items: machineHomeActions(machine), Stdin: os.Stdin, Output: command.ErrOrStderr()})
+	return selector.Choose(selector.Options{Title: machine.Alias, Subtitle: machineStatusSummary(machine), Items: machineHomeActions(machine), Stdin: os.Stdin, Context: command.Context(), Output: command.ErrOrStderr()})
 }
 
 func machineStatusSummary(machine api.UserMachine) string {
@@ -3623,9 +3932,9 @@ func machineCapabilityLabel(machine api.UserMachine) string {
 
 func machineDisplayTitle(machine api.UserMachine, currentMachineID string) string {
 	if machine.ID == currentMachineID {
-		return machine.DisplayName + " (this device)"
+		return machine.Alias + " (this device)"
 	}
-	return machine.DisplayName
+	return machine.Alias
 }
 
 func sortMachinesForDisplay(machines []api.UserMachine, favorites favoriteSet, currentMachineID string) {
@@ -3686,14 +3995,14 @@ func actionHomeSendToMachine(command *cobra.Command, machine api.UserMachine) er
 		}
 		items = append(items, selector.Item{ID: path, Title: display, Description: "File"})
 	}
-	selection, err := selector.ChooseWithAction(selector.Options{Title: "Send files to " + machine.DisplayName, Subtitle: "Type to fuzzy-search files in your home folder", Items: items, Empty: "Start typing to search", RequireFilter: true, Footer: "type to search  enter/click send  ctrl+p paste or drop paths  esc back", Actions: map[string]string{"ctrl+p": "paths"}, Stdin: os.Stdin, Output: command.ErrOrStderr()})
+	selection, err := selector.ChooseWithAction(selector.Options{Title: "Send files to " + machine.Alias, Subtitle: "Type to fuzzy-search files in your home folder", Items: items, Empty: "Start typing to search", RequireFilter: true, Footer: "type to search  enter/click send  ctrl+p paste or drop paths  esc back", Actions: map[string]string{"ctrl+p": "paths"}, Stdin: os.Stdin, Context: command.Context(), Output: command.ErrOrStderr()})
 	if err != nil {
 		return err
 	}
 	if selection.Action != "paths" {
 		return executeInteractiveCommand(command, []string{"send", selection.Item.ID, "--to", machine.ID})
 	}
-	value, err := prompt.Text(prompt.TextOptions{Title: "Send files to " + machine.DisplayName, Description: "Drag files here or paste one or more file or folder paths", Placeholder: "/path/to/file", Stdin: os.Stdin, Output: command.ErrOrStderr(), Validate: func(value string) error {
+	value, err := prompt.Text(prompt.TextOptions{Title: "Send files to " + machine.Alias, Description: "Drag files here or paste one or more file or folder paths", Placeholder: "/path/to/file", Stdin: os.Stdin, Context: command.Context(), Output: command.ErrOrStderr(), Validate: func(value string) error {
 		_, parseErr := droppedFilePaths(value)
 		return parseErr
 	}})
@@ -3746,7 +4055,7 @@ func runPrefetchedHomeLoad(command *cobra.Command, title, detail string, ready b
 }
 
 func actionHomeMachineSessions(command *cobra.Command, client *api.Client, machine api.UserMachine) error {
-	target := environmentTarget{kind: environmentUserMachine, id: machine.ID, name: machine.DisplayName}
+	target := environmentTarget{kind: environmentUserMachine, id: machine.ID, name: machine.Alias}
 	var records []api.TerminalSession
 	var favorites favoriteSet
 	err := homeLoading(command, "Terminal sessions", "Loading sessions", func(ctx context.Context) error {
@@ -3766,7 +4075,7 @@ func actionHomeMachineSessions(command *cobra.Command, client *api.Client, machi
 		for _, session := range records {
 			sessions = append(sessions, machineSession{target: target, session: session})
 		}
-		selected, selectErr := selectMachineSession(sessions, favorites)
+		selected, selectErr := selectMachineSession(command, sessions, favorites)
 		if errors.Is(selectErr, errFavoriteToggle) {
 			id := machineSessionFavoriteID(selected)
 			favorite := !favorites.IsFavorite("session", id)
@@ -3790,7 +4099,7 @@ func actionHomeAccount(command *cobra.Command) error {
 		if err != nil {
 			return err
 		}
-		items := []selector.Item{{ID: "status", Title: "Account status", Description: "Not signed in"}, {ID: "login", Title: "Sign in", Description: "Authenticate through the Paperboat dashboard"}}
+		items := []selector.Item{{ID: "status", Title: "Account status", Description: "Not signed in"}, {ID: "login", Title: "Sign in", Description: "Show dashboard enrollment instructions"}}
 		if _, credentialErr := d.auth.Credential(); credentialErr == nil {
 			items = []selector.Item{
 				{ID: "status", Title: "Account status", Description: "Signed in"},
@@ -3846,6 +4155,7 @@ func actionHomeConfig(command *cobra.Command) error {
 			return loadErr
 		}
 		choice, err := chooseHomeAction(command, "Configuration", []selector.Item{
+			{ID: "customize", Title: "Customize your CLI", Description: "Shortcuts, defaults, themes, keys, and home layout"},
 			{ID: "server", Title: "Paperboat server", Description: orNone(cfg.ServerURL), Search: "edit url endpoint"},
 			{ID: "auth", Title: "File credential fallback", Description: onOff(cfg.Auth.AllowFileFallback), Search: "toggle auth credentials"},
 			{ID: "status-bar", Title: "Status bar", Description: cfg.StatusBar.Mode + "  ·  " + cfg.StatusBar.Theme + "  ·  fullscreen " + cfg.StatusBar.Fullscreen},
@@ -3856,8 +4166,12 @@ func actionHomeConfig(command *cobra.Command) error {
 			return err
 		}
 		switch choice.ID {
+		case "customize":
+			if err := editPreferences(command); err != nil && !interactiveCanceled(err) {
+				return err
+			}
 		case "server":
-			value, inputErr := prompt.Text(prompt.TextOptions{Title: "Paperboat server", Description: "Control-plane URL used by this CLI", Placeholder: "https://api.pprbt.dev", Initial: cfg.ServerURL, Stdin: os.Stdin, Output: command.ErrOrStderr(), Validate: func(value string) error {
+			value, inputErr := prompt.Text(prompt.TextOptions{Title: "Paperboat server", Description: "Control-plane URL used by this CLI", Placeholder: "https://api.pprbt.dev", Initial: cfg.ServerURL, Stdin: os.Stdin, Context: command.Context(), Output: command.ErrOrStderr(), Validate: func(value string) error {
 				if strings.TrimSpace(value) == "" {
 					return nil
 				}
@@ -3906,7 +4220,7 @@ func actionHomeConfig(command *cobra.Command) error {
 			}
 			items := make([]selector.Item, 0, len(status.Environments))
 			for _, environment := range status.Environments {
-				items = append(items, selector.Item{ID: environment.EnvironmentID, Title: environment.DisplayName, Description: fmt.Sprintf("%s  ·  %s  ·  %d managed paths  ·  %d conflicts", environment.State, environment.Mode, environment.ManagedPathCount, len(environment.Conflicts))})
+				items = append(items, selector.Item{ID: environment.EnvironmentID, Title: environment.Alias, Description: fmt.Sprintf("%s  ·  %s  ·  %d managed paths  ·  %d conflicts", environment.State, environment.Mode, environment.ManagedPathCount, len(environment.Conflicts))})
 			}
 			if infoErr := showInformation(command, "Configuration sync", "Account state  ·  "+status.State, items); infoErr != nil && !errors.Is(infoErr, selector.ErrCanceled) {
 				return infoErr
@@ -3971,7 +4285,7 @@ func chooseValue(command *cobra.Command, title, current string, values []string)
 		}
 		items = append(items, selector.Item{ID: value, Title: value, Description: description})
 	}
-	choice, err := selector.Choose(selector.Options{Title: title, Subtitle: "Choose a value", Items: items, Initial: current, Stdin: os.Stdin, Output: command.ErrOrStderr()})
+	choice, err := selector.Choose(selector.Options{Title: title, Subtitle: "Choose a value", Items: items, Initial: current, Stdin: os.Stdin, Context: command.Context(), Output: command.ErrOrStderr()})
 	return choice.ID, err
 }
 
@@ -4022,12 +4336,12 @@ func actionHomeDoctor(command *cobra.Command) error {
 }
 
 func showInformation(command *cobra.Command, title, subtitle string, items []selector.Item) error {
-	_, err := selector.Choose(selector.Options{Title: title, Subtitle: subtitle, Items: items, Empty: "Press Esc to go back", Footer: "↑/↓ inspect  type to filter  esc back", Stdin: os.Stdin, Output: command.ErrOrStderr()})
+	_, err := selector.Choose(selector.Options{Title: title, Subtitle: subtitle, Items: items, Empty: "Press Esc to go back", Footer: "↑/↓ inspect  type to filter  esc back", Stdin: os.Stdin, Context: command.Context(), Output: command.ErrOrStderr()})
 	return err
 }
 
 func chooseHomeAction(command *cobra.Command, title string, items []selector.Item) (selector.Item, error) {
-	choice, err := selector.Choose(selector.Options{Title: title, Subtitle: "Choose an action", Items: items, Stdin: os.Stdin, Output: command.ErrOrStderr()})
+	choice, err := selector.Choose(selector.Options{Title: title, Subtitle: "Choose an action", Items: items, Stdin: os.Stdin, Context: command.Context(), Output: command.ErrOrStderr()})
 	return choice, err
 }
 
@@ -4097,11 +4411,18 @@ func backendForCommand(command *cobra.Command) (*api.Client, error) {
 }
 
 func executeInteractiveCommand(parent *cobra.Command, args []string) error {
-	command := newRootCommand()
+	command := newInteractiveRootCommand()
+	command.SetIn(parent.InOrStdin())
 	command.SetOut(parent.OutOrStdout())
 	command.SetErr(parent.ErrOrStderr())
-	command.SetArgs(args)
-	return command.ExecuteContext(parent.Context())
+	resolved, ctx, err := preparePreferences(command, interactiveArgs(parent, args), parent.Context())
+	if err != nil {
+		return err
+	}
+	command.SetArgs(resolved)
+	restore := selector.SuspendScreen(parent.ErrOrStderr())
+	defer restore()
+	return command.ExecuteContext(ctx)
 }
 
 const deliveredTransferKeyCleanupWarning = "Warning: File delivery completed, but local encryption-key cleanup could not be completed.\n"
@@ -4118,6 +4439,7 @@ func sendCommand() *cobra.Command {
 		Short: "Send files to a machine's Paperboat Inbox",
 		Args:  commandArgs(cobra.MinimumNArgs(1)),
 		RunE: func(cobraCommand *cobra.Command, paths []string) error {
+			jsonOutput, _ := cobraCommand.Flags().GetBool("json")
 			destinationRef, _ := cobraCommand.Flags().GetString("to")
 			sessionID, _ := cobraCommand.Flags().GetString("session")
 			if sessionID == "" {
@@ -4172,16 +4494,16 @@ func sendCommand() *cobra.Command {
 					case 1:
 						destination = eligible[0]
 					default:
-						if !term.IsTerminal(int(os.Stdin.Fd())) {
+						if jsonOutput || !term.IsTerminal(int(os.Stdin.Fd())) {
 							summaries := make([]string, len(eligible))
 							for i, machine := range eligible {
-								summaries[i] = machine.DisplayName + " (" + machine.ID + ")"
+								summaries[i] = machine.Alias + " (" + machine.ID + ")"
 							}
 							return fmt.Errorf("transfer destination is ambiguous; use --to or set a default; eligible machines: %s", strings.Join(summaries, ", "))
 						}
-						index, promptErr := chooseIndex("Choose a transfer destination", "Eligible machines for this session", len(eligible), func(index int) selector.Item {
+						index, promptErr := chooseIndex(cobraCommand.Context(), "Choose a transfer destination", "Eligible machines for this session", len(eligible), func(index int) selector.Item {
 							machine := eligible[index]
-							return selector.Item{ID: machine.ID, Title: machine.DisplayName, Description: machineStatusSummary(machine), Search: machineStatusSearch(machine)}
+							return selector.Item{ID: machine.ID, Title: machine.Alias, Description: preferenceDetails(cobraCommand.Context(), "machines", map[string]string{"status": machineStatusSummary(machine), "platform": machine.Platform, "id": machine.ID}), Search: machineStatusSearch(machine)}
 						})
 						if promptErr != nil {
 							return promptErr
@@ -4204,7 +4526,9 @@ func sendCommand() *cobra.Command {
 			if sessionID == "" && (!destination.Online || !destination.Capabilities.FileReceive.Observed) {
 				return &api.APIError{Code: "machine_offline", Message: "The destination machine is offline."}
 			}
-			fmt.Fprintf(cobraCommand.ErrOrStderr(), "Sending to %s (%s)\n", destination.DisplayName, destination.ID)
+			if !jsonOutput {
+				fmt.Fprintf(cobraCommand.ErrOrStderr(), "Sending to %s (%s)\n", destination.Alias, destination.ID)
+			}
 			preparedPaths := make([]string, len(paths))
 			for i, path := range paths {
 				preparedPaths[i], err = filepath.Abs(path)
@@ -4231,7 +4555,9 @@ func sendCommand() *cobra.Command {
 				return friendlyCommandError(err)
 			}
 			if acceptance.Status == "pending" {
-				fmt.Fprintf(cobraCommand.ErrOrStderr(), "Waiting for recipient approval (%s).\n", acceptance.RequestID)
+				if !jsonOutput {
+					fmt.Fprintf(cobraCommand.ErrOrStderr(), "Waiting for recipient approval (%s).\n", acceptance.RequestID)
+				}
 				for acceptance.Status == "pending" {
 					select {
 					case <-ctx.Context.Done():
@@ -4300,11 +4626,10 @@ func sendCommand() *cobra.Command {
 				return err
 			}
 			if acceptance.Status == "approved" {
-				if err := client.CompleteTeamInboxRequest(ctx.Context, acceptance.RequestID, acceptance.ManifestDigest); err != nil {
+				if err := client.CompleteTeamInboxRequest(ctx.Context, acceptance.RequestID, acceptance.ManifestDigest); err != nil && !jsonOutput {
 					fmt.Fprintf(cobraCommand.ErrOrStderr(), "Warning: delivery succeeded, but receipt status could not be updated: %v\n", friendlyCommandError(err))
 				}
 			}
-			jsonOutput, _ := cobraCommand.Flags().GetBool("json")
 			if jsonOutput {
 				return json.NewEncoder(cobraCommand.OutOrStdout()).Encode(map[string]any{"schema_version": "1.0", "ok": true, "data": batch})
 			}
@@ -4313,7 +4638,7 @@ func sendCommand() *cobra.Command {
 				if i < len(batch.Paths) && batch.Paths[i] != "" {
 					path = batch.Paths[i]
 				}
-				fmt.Fprintf(cobraCommand.OutOrStdout(), "%s: delivered to %s on %s\n", item.Basename, path, destination.DisplayName)
+				fmt.Fprintf(cobraCommand.OutOrStdout(), "%s: delivered to %s on %s\n", item.Basename, path, destination.Alias)
 			}
 			return nil
 		},
@@ -4350,7 +4675,7 @@ func transferCommand() *cobra.Command {
 			fmt.Fprintln(command.OutOrStdout(), "No default transfer destination.")
 			return nil
 		}
-		fmt.Fprintf(command.OutOrStdout(), "%s (%s)\n", value.Machine.DisplayName, value.Machine.ID)
+		fmt.Fprintf(command.OutOrStdout(), "%s (%s)\n", value.Machine.Alias, value.Machine.ID)
 		return nil
 	}}
 	destination.Flags().Bool("json", false, "print JSON")
@@ -4378,7 +4703,7 @@ func transferCommand() *cobra.Command {
 		if jsonOutput {
 			return json.NewEncoder(command.OutOrStdout()).Encode(map[string]any{"schema_version": "1.0", "ok": true, "data": value})
 		}
-		fmt.Fprintf(command.OutOrStdout(), "Default transfer destination: %s (%s)\n", machine.DisplayName, machine.ID)
+		fmt.Fprintf(command.OutOrStdout(), "Default transfer destination: %s (%s)\n", machine.Alias, machine.ID)
 		return nil
 	}}
 	set.Flags().Bool("json", false, "print JSON")
@@ -4657,6 +4982,9 @@ func sessionsCobraCommand() *cobra.Command {
 			use += " <environment> [<session>]"
 		}
 		entry := &cobra.Command{Use: use, Short: child.Usage, Args: commandArgs(args), RunE: actionRun(child.Action)}
+		if child.Name == "rename" {
+			entry.Flags().Bool("json", false, "print JSON")
+		}
 		if child.Name == "close" || child.Name == "delete" {
 			entry.Flags().Bool("yes", false, "confirm "+child.Name)
 			entry.Flags().Bool("json", false, "print JSON")
@@ -4714,7 +5042,7 @@ func sessionCobraCommand() *cobra.Command {
 			if listErr != nil {
 				return friendlyCommandError(listErr)
 			}
-			selected, selectErr := selectSession(target, sessions, "Choose a terminal session")
+			selected, selectErr := selectSession(ctx.Context, target, sessions, "Choose a terminal session")
 			if selectErr != nil {
 				return selectErr
 			}
@@ -4746,6 +5074,9 @@ func sessionCobraCommand() *cobra.Command {
 			args = cobra.RangeArgs(1, 2)
 		}
 		entry := &cobra.Command{Use: child.Name, Short: child.Usage, Args: commandArgs(args), RunE: actionRun(child.Action)}
+		if child.Name == "rename" {
+			entry.Flags().Bool("json", false, "print JSON")
+		}
 		if child.Name == "close" || child.Name == "delete" {
 			entry.Flags().Bool("yes", false, "confirm "+child.Name)
 			entry.Flags().Bool("json", false, "print JSON")
@@ -4766,7 +5097,7 @@ func userMachineCobraCommand() *cobra.Command {
 		}
 		return command.Help()
 	}}
-	add := &cobra.Command{Use: "add", Short: "Print a one-shot machine enrollment command", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, args []string) error {
+	add := &cobra.Command{Use: "add", Short: "Print Linux/macOS and Windows machine enrollment commands", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, args []string) error {
 		ctx := actionContext(command, args)
 		cfg, err := config.Load(ctx.String("config"))
 		if err != nil {
@@ -4791,8 +5122,7 @@ func userMachineCobraCommand() *cobra.Command {
 			return err
 		}
 		client := api.New(cfg.ServerURL, credential, nil)
-		shell, _ := command.Flags().GetString("shell")
-		result, err := client.StartMachineEnrollment(ctx.Context, fmt.Sprintf("cli-%d", time.Now().UnixNano()), shell)
+		result, err := client.StartMachineEnrollment(ctx.Context, fmt.Sprintf("cli-%d", time.Now().UnixNano()))
 		if err != nil {
 			return friendlyCommandError(err)
 		}
@@ -4801,11 +5131,14 @@ func userMachineCobraCommand() *cobra.Command {
 			parameter = name + "-" + parameter
 		}
 		windowsURL := "https://get.pprbt.dev/install?p=" + parameter
+		if jsonOutput, _ := command.Flags().GetBool("json"); jsonOutput {
+			return writeCLIJSON(command.OutOrStdout(), map[string]any{"expires_at": result.ExpiresAt, "linux_macos_command": "curl -fsSL 'https://get.pprbt.dev/install?p=" + parameter + "' | bash", "windows_command": windowsEnrollmentCommand(windowsURL)})
+		}
 		fmt.Fprintf(command.OutOrStdout(), "Linux/macOS:\ncurl -fsSL 'https://get.pprbt.dev/install?p=%s' | bash\n\nWindows (PowerShell or Command Prompt):\n%s\n", parameter, windowsEnrollmentCommand(windowsURL))
 		return nil
 	}}
-	add.Flags().String("shell", "posix", "installer shell: posix or powershell")
 	add.Flags().String("name", "", "optional machine hostname")
+	add.Flags().Bool("json", false, "print JSON")
 	list := &cobra.Command{Use: "list", Short: "List enrolled machines", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, args []string) error {
 		ctx := actionContext(command, args)
 		client, err := backendClient(ctx)
@@ -4838,7 +5171,7 @@ func userMachineCobraCommand() *cobra.Command {
 			if permissions == "" {
 				permissions = "none"
 			}
-			fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\n", item.DisplayName, ownership, state, permissions, item.ID)
+			fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\n", item.Alias, ownership, state, permissions, item.ID)
 		}
 		return writer.Flush()
 	}}
@@ -4857,16 +5190,18 @@ func userMachineCobraCommand() *cobra.Command {
 		if err != nil {
 			return friendlyCommandError(err)
 		}
-		fmt.Fprintf(command.ErrOrStderr(), "Machine: %s (%s)\n", machine.DisplayName, machine.ID)
+		jsonOutput, _ := command.Flags().GetBool("json")
+		if !jsonOutput {
+			fmt.Fprintf(command.ErrOrStderr(), "Machine: %s (%s)\n", machine.Alias, machine.ID)
+		}
 		updated, err := client.RenameUserMachine(ctx.Context, machine.ID, newName)
 		if err != nil {
 			return friendlyCommandError(err)
 		}
-		jsonOutput, _ := command.Flags().GetBool("json")
 		if jsonOutput {
 			return json.NewEncoder(command.OutOrStdout()).Encode(map[string]any{"version": "1", "machine": updated, "outcome": "renamed"})
 		}
-		fmt.Fprintf(command.OutOrStdout(), "Renamed machine %s to %s (%s).\n", machine.DisplayName, updated.DisplayName, updated.ID)
+		fmt.Fprintf(command.OutOrStdout(), "Renamed machine %s to %s (%s).\n", machine.Alias, updated.Alias, updated.ID)
 		return nil
 	}}
 	rename.Flags().Bool("json", false, "print JSON")
@@ -4879,7 +5214,7 @@ func userMachineCobraCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		userMachineID, displayName, err := resolveUserMachineTarget(ctx.Context, client, args[0])
+		userMachineID, alias, err := resolveUserMachineTarget(ctx.Context, client, args[0])
 		if err != nil {
 			return err
 		}
@@ -4888,9 +5223,9 @@ func userMachineCobraCommand() *cobra.Command {
 		}
 		jsonOutput, _ := cobraCommand.Flags().GetBool("json")
 		if jsonOutput {
-			return json.NewEncoder(cobraCommand.OutOrStdout()).Encode(map[string]any{"version": "1", "machine": map[string]string{"id": userMachineID, "display_name": displayName, "state": "disconnected"}, "outcome": "confirmed", "retry": "not_required"})
+			return json.NewEncoder(cobraCommand.OutOrStdout()).Encode(map[string]any{"version": "1", "machine": map[string]string{"id": userMachineID, "alias": alias, "state": "disconnected"}, "outcome": "confirmed", "retry": "not_required"})
 		}
-		fmt.Fprintf(cobraCommand.OutOrStdout(), "Disconnected machine %s (%s).\n", displayName, userMachineID)
+		fmt.Fprintf(cobraCommand.OutOrStdout(), "Disconnected machine %s (%s).\n", alias, userMachineID)
 		return nil
 	}}
 	revoke.Flags().Bool("yes", false, "confirm revocation")
@@ -4914,7 +5249,10 @@ func userMachineCobraCommand() *cobra.Command {
 		if err != nil {
 			return friendlyCommandError(err)
 		}
-		fmt.Fprintf(command.ErrOrStderr(), "Machine: %s (%s)\n", machine.DisplayName, machine.ID)
+		jsonOutput, _ := command.Flags().GetBool("json")
+		if !jsonOutput {
+			fmt.Fprintf(command.ErrOrStderr(), "Machine: %s (%s)\n", machine.Alias, machine.ID)
+		}
 		policy, err := client.SetUserMachineAvailability(ctx.Context, machine.ID, mode, newIdempotencyKey(), machine.Availability.DesiredVersion)
 		if err != nil {
 			return friendlyCommandError(err)
@@ -4924,14 +5262,13 @@ func userMachineCobraCommand() *cobra.Command {
 		if policy.Status == "applied" && policy.ObservedVersion == policy.DesiredVersion && policy.ObservedMode == policy.DesiredMode {
 			outcome = "applied"
 		}
-		jsonOutput, _ := command.Flags().GetBool("json")
 		if jsonOutput {
-			return json.NewEncoder(command.OutOrStdout()).Encode(map[string]any{"version": "1", "machine": map[string]string{"id": machine.ID, "display_name": machine.DisplayName}, "availability": policy, "outcome": outcome, "retry": "automatic"})
+			return json.NewEncoder(command.OutOrStdout()).Encode(map[string]any{"version": "1", "machine": map[string]string{"id": machine.ID, "alias": machine.Alias}, "availability": policy, "outcome": outcome, "retry": "automatic"})
 		}
 		if outcome == "applied" {
-			fmt.Fprintf(command.OutOrStdout(), "Availability %s applied to %s.\n", strings.ReplaceAll(mode, "_", "-"), machine.DisplayName)
+			fmt.Fprintf(command.OutOrStdout(), "Availability %s applied to %s.\n", strings.ReplaceAll(mode, "_", "-"), machine.Alias)
 		} else {
-			fmt.Fprintf(command.OutOrStdout(), "Availability %s saved for %s; application is durably %s.\n", strings.ReplaceAll(mode, "_", "-"), machine.DisplayName, policy.Status)
+			fmt.Fprintf(command.OutOrStdout(), "Availability %s saved for %s; application is durably %s.\n", strings.ReplaceAll(mode, "_", "-"), machine.Alias, policy.Status)
 		}
 		return nil
 	}}
@@ -4968,9 +5305,9 @@ func userMachineCobraCommand() *cobra.Command {
 		}
 		jsonOutput, _ := command.Flags().GetBool("json")
 		if jsonOutput {
-			return json.NewEncoder(command.OutOrStdout()).Encode(map[string]any{"version": "1", "machine": map[string]string{"id": machineValue.ID, "display_name": machineValue.DisplayName}, "device_capabilities": policy})
+			return json.NewEncoder(command.OutOrStdout()).Encode(map[string]any{"version": "1", "machine": map[string]string{"id": machineValue.ID, "alias": machineValue.Alias}, "device_capabilities": policy})
 		}
-		fmt.Fprintf(command.OutOrStdout(), "Incoming capabilities saved for %s; application is %s.\n", machineValue.DisplayName, policy.Status)
+		fmt.Fprintf(command.OutOrStdout(), "Incoming capabilities saved for %s; application is %s.\n", machineValue.Alias, policy.Status)
 		return nil
 	}}
 	capabilities.Flags().Bool("terminal", false, "accept Paperboat terminal and exec")
@@ -5024,17 +5361,17 @@ func resolveUserMachineTarget(ctx context.Context, client *api.Client, requested
 	}
 	for _, machine := range machines {
 		if machine.ID == requested {
-			return machine.ID, machine.DisplayName, nil
+			return machine.ID, machine.Alias, nil
 		}
 	}
 	matches := make([]api.UserMachine, 0, 1)
 	for _, machine := range machines {
-		if strings.EqualFold(machine.DisplayName, requested) {
+		if strings.EqualFold(machine.Alias, requested) {
 			matches = append(matches, machine)
 		}
 	}
 	if len(matches) == 1 {
-		return matches[0].ID, matches[0].DisplayName, nil
+		return matches[0].ID, matches[0].Alias, nil
 	}
 	if len(matches) > 1 {
 		return "", "", fmt.Errorf("machine name %q is ambiguous; use a stable machine ID", requested)
@@ -5049,7 +5386,7 @@ func actionRun(action command.Action) func(*cobra.Command, []string) error {
 func actionContext(cobraCommand *cobra.Command, args []string) *command.Context {
 	set := flag.NewFlagSet("pb", flag.ContinueOnError)
 	values := map[string]string{}
-	for _, name := range []string{"config", "server", "name", "machine", "session", "status-bar", "status-bar-fullscreen", "status-bar-theme", "mode", "pull-repository", "push-repository", "path", "transport", "code", "input", "output", "keep", "recovery-key"} {
+	for _, name := range []string{"config", "server", "name", "machine", "session", "status-bar", "status-bar-fullscreen", "status-bar-theme", "mode", "pull-repository", "push-repository", "path", "transport", "code", "input", "output", "keep", "recovery-key", "token-file"} {
 		value, _ := cobraCommand.Flags().GetString(name)
 		values[name] = value
 		set.String(name, value, "")
@@ -5108,10 +5445,10 @@ func newApp() *command.App {
 
 func authCommand() *command.Spec {
 	return &command.Spec{Name: "auth", Usage: "Manage Paperboat sign-in", Subcommands: []*command.Spec{
-		{Name: "login", Usage: "Sign in through the Paperboat dashboard", Flags: []command.Flag{&command.StringFlag{Name: "recovery-key", Usage: "absolute recovery-key file for restoring private transport"}}, Action: authLogin},
-		{Name: "switch", Usage: "Replace the active account for this server", Flags: []command.Flag{&command.StringFlag{Name: "recovery-key", Usage: "absolute recovery-key file for restoring private transport"}}, Action: func(c *command.Context) error { return authLoginMode(c, true) }},
+		{Name: "login", Usage: "Sign in with a 26-character enrollment token", Flags: []command.Flag{&command.StringFlag{Name: "token-file", Usage: "absolute protected file containing the enrollment token"}, &command.BoolFlag{Name: "json", Usage: "print sign-in result as JSON"}}, Action: authTokenLogin},
+		{Name: "switch", Usage: "Show dashboard enrollment instructions", Flags: []command.Flag{&command.BoolFlag{Name: "json", Usage: "print enrollment instructions as JSON"}}, Action: authLogin},
 		{Name: "status", Usage: "Show the active Paperboat account", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: authStatus},
-		{Name: "logout", Usage: "Revoke and remove the active client session", Action: authLogout},
+		{Name: "logout", Usage: "Revoke and remove the active client session", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: authLogout},
 	}}
 }
 
@@ -5130,207 +5467,32 @@ func requireAuthConfig(c *command.Context) (*config.Config, config.ProfileStore,
 	return d.cfg, s, nil
 }
 
+const dashboardEnrollmentGuidance = "To sign in, copy the enrollment command from the Paperboat dashboard and run it on this machine.\nAn already authenticated machine can also generate install commands with `pb machine add`.\nTo authenticate this installation directly, run `pb auth login` and enter the enrollment token."
+
 func authLogin(c *command.Context) error {
-	return authLoginMode(c, false)
-}
-
-func authLoginMode(c *command.Context, replace bool) error {
-	cfg, store, err := requireAuthConfig(c)
-	if err != nil {
-		return err
-	}
-	if err := store.Recover(cfg.ServerURL); err != nil {
-		return fmt.Errorf("recover interrupted Paperboat sign-in: %w", err)
-	}
-	if err := drainPendingRevocations(c.Context, cfg.ServerURL, store); err != nil {
-		fmt.Fprintln(os.Stderr, "Warning: an earlier session is still being revoked. Paperboat will retry automatically.")
-	}
-	var previous *config.Profile
-	repairProfile := false
-	if existingProfile, existingErr := store.Load(cfg.ServerURL); existingErr == nil {
-		if !replace {
-			credential, credentialErr := store.CredentialFor(cfg.ServerURL)
-			if credentialErr == nil {
-				identityErr := ensureCLIIdentityForLogin(c, store, existingProfile, credential)
-				if identityErr == nil {
-					if err := ensureLocalDaemonService(c.Context, cfg); err != nil {
-						return fmt.Errorf("repair local SSH integration: %w", err)
-					}
-					fmt.Fprintf(os.Stdout, "Signed in as %s\n", firstNonEmpty(existingProfile.Account.Email, existingProfile.Account.DisplayName, existingProfile.Account.ID))
-					return nil
-				}
-				if !errors.Is(identityErr, api.ErrUnauthenticated) {
-					return identityErr
-				}
-				// The local pair is readable but the server rejected it. Keep the
-				// previous profile authoritative until device authorization commits;
-				// the normal Switch path atomically replaces readable credentials.
-			} else {
-				// A profile whose credential pair is missing, corrupt, or unreadable
-				// cannot repair itself. Keep it authoritative until the replacement
-				// device authorization is fully persisted, then atomically replace it.
-				repairProfile = true
-			}
-		}
-		previous = &existingProfile
-	} else if !errors.Is(existingErr, config.ErrNoCredentials) {
-		return existingErr
-	}
-	host, _ := os.Hostname()
-	label := strings.TrimSpace(host)
-	if label == "" {
-		label = "Paperboat CLI"
-	}
-	deviceType := "desktop"
-	if os.Getenv("SSH_CONNECTION") != "" {
-		deviceType = "server"
-	}
-	if _, ok := os.LookupEnv("container"); ok {
-		deviceType = "container"
-	}
-	grant, err := api.DeviceAuthorize(c.Context, cfg.ServerURL, label, deviceType, runtime.GOOS, nil)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(os.Stdout, "Open %s\nEnter code: %s\n", grant.VerificationURI, grant.UserCode)
-	complete := grant.VerificationURIComplete
-	if complete == "" {
-		complete = grant.VerificationURI
-	}
-	_ = openBrowser(complete)
-	interval := time.Duration(grant.Interval) * time.Second
-	if interval <= 0 {
-		interval = time.Second
-	}
-	deadline := time.NewTimer(time.Duration(grant.ExpiresIn) * time.Second)
-	defer deadline.Stop()
-	for {
-		select {
-		case <-c.Context.Done():
-			return errors.New("login cancelled")
-		case <-deadline.C:
-			return errors.New("device authorization expired")
-		case <-time.After(interval):
-		}
-		tokens, pollErr := api.DeviceToken(c.Context, cfg.ServerURL, grant.DeviceCode, nil)
-		if pollErr != nil {
-			var ae *api.APIError
-			if errors.As(pollErr, &ae) {
-				switch ae.Code {
-				case "authorization_pending":
-					continue
-				case "slow_down":
-					if next, ok := ae.Details["interval"].(float64); ok && next > 0 {
-						interval = time.Duration(next) * time.Second
-					} else {
-						interval += 5 * time.Second
-					}
-					continue
-				case "access_denied":
-					return errors.New("login denied")
-				case "expired_token":
-					return errors.New("device authorization expired")
-				}
-			}
-			return pollErr
-		}
-		expires := time.Now().UTC().Add(time.Duration(tokens.ExpiresIn) * time.Second)
-		cred := config.Credential{AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken, TokenType: tokens.TokenType, ExpiresAt: expires}
-		me, err := api.New(cfg.ServerURL, cred, nil).Me(c.Context)
+	server := strings.TrimSpace(c.String("server"))
+	if server == "" {
+		cfg, err := config.Load(c.String("config"))
 		if err != nil {
-			return errors.Join(fmt.Errorf("validate new session: %w", err), cleanupIssuedSession(cfg.ServerURL, tokens.CLIClientSessionID, tokens.RefreshToken, store))
+			return fmt.Errorf("%s\nCannot determine the dashboard URL; check your CLI configuration: %w", dashboardEnrollmentGuidance, err)
 		}
-		p := config.Profile{Issuer: cfg.ServerURL, CLIClientSessionID: tokens.CLIClientSessionID, AccessExpiresAt: expires, Account: config.Account{ID: me.ID, Email: me.Email, DisplayName: me.DisplayName}}
-		if custodyErr := enrolledRuntimeAccountSwitchError(p); custodyErr != nil {
-			return errors.Join(custodyErr, cleanupIssuedSession(cfg.ServerURL, tokens.CLIClientSessionID, tokens.RefreshToken, store))
-		}
-		var saveErr error
-		if repairProfile {
-			saveErr = committedProfileMutation(store, p, cred, store.Repair(previous.CLIClientSessionID, p, cred))
-		} else {
-			saveErr = persistAuthorizedProfile(store, previous, p, cred)
-		}
-		if errors.Is(saveErr, config.ErrCredentialStoreUnavailable) && previous == nil && !cfg.Auth.AllowFileFallback {
-			fallbackStore, fallbackErr := fileCredentialFallback(cfg)
-			if fallbackErr == nil {
-				store = fallbackStore
-				saveErr = store.Save(p, cred)
-			} else {
-				saveErr = errors.Join(saveErr, fallbackErr)
-			}
-		}
-		if saveErr != nil {
-			return errors.Join(saveErr, cleanupIssuedSession(cfg.ServerURL, tokens.CLIClientSessionID, tokens.RefreshToken, store))
-		}
-		if err := ensureCLIIdentityForLogin(c, store, p, cred); err != nil {
-			return fmt.Errorf("signed in, but private transport setup is incomplete; rerun `pb auth login`: %w", err)
-		}
-		if err := ensureLocalDaemonService(c.Context, cfg); err != nil {
-			return fmt.Errorf("signed in, but local SSH integration is incomplete; rerun `pb auth login`: %w", err)
-		}
-		if previous != nil {
-			if err := drainPendingRevocations(context.Background(), cfg.ServerURL, store); err != nil {
-				fmt.Fprintln(os.Stderr, "Warning: account switched, but the previous session is still being revoked. Paperboat will retry automatically.")
-			}
-		}
-		fmt.Fprintf(os.Stdout, "Signed in as %s\n", firstNonEmpty(me.Email, me.DisplayName, me.ID))
-		return nil
+		server = cfg.ServerURL
 	}
-}
-
-func enrolledRuntimeAccountSwitchError(next config.Profile) error {
-	identityStore, err := runtimeIdentityStore()
+	server, err := config.NormalizeServerURL(server)
 	if err != nil {
-		return fmt.Errorf("inspect enrolled runtime before account switch: %w", err)
+		return fmt.Errorf("%s\nCannot determine the dashboard URL; check --server: %w", dashboardEnrollmentGuidance, err)
 	}
-	registration, err := identityStore.Registration()
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
+	// Public metadata only: never load credentials or start device authorization.
+	metadata, err := api.New(server, config.Credential{}, nil).ClientConfiguration(c.Context)
 	if err != nil {
-		return fmt.Errorf("inspect enrolled runtime before account switch: %w", err)
+		return fmt.Errorf("%s\nCannot retrieve the dashboard URL from the configured server; retry when it is reachable: %w", dashboardEnrollmentGuidance, err)
 	}
-	if registration.MachineID != "" && (registration.AccountID == "" || registration.AccountID != next.Account.ID || strings.TrimRight(registration.ServerURL, "/") != strings.TrimRight(next.Issuer, "/")) {
-		return errors.New("cannot switch Paperboat accounts while this OS user has an enrolled runtime; run `pb uninstall` before signing in to another account")
+	message := dashboardEnrollmentGuidance + "\n" + metadata.MachinesURL
+	if c.Bool("json") {
+		return writeCLIJSON(c.Writer, map[string]string{"message": message})
 	}
-	return nil
-}
-
-func ensureCLIIdentityForLogin(c *command.Context, store config.ProfileStore, profile config.Profile, credential config.Credential) error {
-	if input := strings.TrimSpace(c.String("recovery-key")); input != "" {
-		if err := importRecoveryKey(store, profile, input); err != nil {
-			return err
-		}
-		_, err := identitybootstrap.Bootstrap(c.Context, identitybootstrap.Request{Store: store, Client: api.New(profile.Issuer, credential, nil), Issuer: profile.Issuer, AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID})
-		return err
-	}
-	client := api.New(profile.Issuer, credential, nil)
-	_, err := identitybootstrap.EnrollCLI(c.Context, identitybootstrap.CLIRequest{Store: store, Client: client, Issuer: profile.Issuer, AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID})
+	_, err = fmt.Fprintln(c.Writer, message)
 	return err
-}
-
-func importRecoveryKey(store config.ProfileStore, profile config.Profile, input string) error {
-	if !filepath.IsAbs(input) {
-		return invocationError(errors.New("--recovery-key must be an absolute path"))
-	}
-	info, err := os.Lstat(input)
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 {
-		return errors.New("recovery-key file must be a regular owner-only file")
-	}
-	encoded, err := os.ReadFile(input)
-	if err != nil {
-		return err
-	}
-	seed, err := recoverykey.Decode(strings.TrimSpace(string(encoded)))
-	clear(encoded)
-	if err != nil {
-		return err
-	}
-	defer clear(seed)
-	return store.ImportPeerAccountRootSeed(profile.Issuer, profile.Account.ID, seed)
 }
 
 func exportSetupRecoveryKey(command *cobra.Command) error {
@@ -5367,7 +5529,9 @@ func exportSetupRecoveryKey(command *cobra.Command) error {
 	if err = file.Close(); err != nil {
 		return fmt.Errorf("machine setup completed, but close recovery-key file: %w", err)
 	}
-	fmt.Fprintf(command.OutOrStdout(), "Recovery key written to %s\n", output)
+	if !jsonOutputRequested(command) {
+		fmt.Fprintf(command.OutOrStdout(), "Recovery key written to %s\n", output)
+	}
 	return nil
 }
 
@@ -5391,7 +5555,7 @@ func e2eeClient(c *command.Context) (*api.Client, config.ProfileStore, config.Pr
 	}
 	profile, err := store.Load(cfg.ServerURL)
 	if errors.Is(err, config.ErrNoCredentials) {
-		return nil, config.ProfileStore{}, config.Profile{}, errors.New("not signed in to Paperboat; run `pb auth login`, then retry")
+		return nil, config.ProfileStore{}, config.Profile{}, errors.New("not signed in to Paperboat; run the enrollment command from the Paperboat dashboard, then retry")
 	}
 	if err != nil {
 		return nil, config.ProfileStore{}, config.Profile{}, err
@@ -5402,53 +5566,6 @@ func e2eeClient(c *command.Context) (*api.Client, config.ProfileStore, config.Pr
 		return nil, config.ProfileStore{}, config.Profile{}, err
 	}
 	return api.New(cfg.ServerURL, credential, nil), store, profile, nil
-}
-
-func fileCredentialFallback(cfg *config.Config) (config.ProfileStore, error) {
-	cfg.Auth.AllowFileFallback = true
-	if err := cfg.Save(); err != nil {
-		return config.ProfileStore{}, fmt.Errorf("enable protected file credential storage: %w", err)
-	}
-	return config.ProfileStoreFor(cfg)
-}
-
-func cleanupIssuedSession(issuer, cliClientSessionID, refreshToken string, store config.ProfileStore) error {
-	if err := store.QueueRevocation(issuer, cliClientSessionID, refreshToken); err != nil {
-		if revokeErr := api.RevokeToken(context.Background(), issuer, refreshToken, nil); revokeErr != nil {
-			return errors.Join(fmt.Errorf("retain failed session for revocation: %w", err), fmt.Errorf("revoke unretained session: %w", revokeErr))
-		}
-		return nil
-	}
-	_ = drainPendingRevocations(context.Background(), issuer, store)
-	return nil
-}
-
-func persistAuthorizedProfile(store config.ProfileStore, previous *config.Profile, profile config.Profile, credential config.Credential) error {
-	var err error
-	if previous != nil {
-		err = store.Switch(previous.CLIClientSessionID, profile, credential)
-	} else {
-		err = store.Save(profile, credential)
-	}
-	return committedProfileMutation(store, profile, credential, err)
-}
-
-// A lock-release or post-commit cleanup failure must not make authLogin revoke
-// a newly active session. Reconcile the authoritative profile and both secret
-// values before deciding that a mutation failed.
-func committedProfileMutation(store config.ProfileStore, profile config.Profile, credential config.Credential, mutationErr error) error {
-	if mutationErr == nil {
-		return nil
-	}
-	active, err := store.Load(profile.Issuer)
-	if err != nil || active.CLIClientSessionID != profile.CLIClientSessionID {
-		return mutationErr
-	}
-	activeCredential, err := store.CredentialFor(profile.Issuer)
-	if err != nil || activeCredential.AccessToken != credential.AccessToken || activeCredential.RefreshToken != credential.RefreshToken {
-		return mutationErr
-	}
-	return nil
 }
 
 func authStatus(c *command.Context) error {
@@ -5471,12 +5588,12 @@ func authStatus(c *command.Context) error {
 		return err
 	}
 	if _, err := store.CredentialFor(cfg.ServerURL); err != nil {
-		return fmt.Errorf("Paperboat sign-in credentials are unavailable; run `pb auth login` to repair them: %w", err)
+		return fmt.Errorf("Paperboat sign-in credentials are unavailable; run the enrollment command from the Paperboat dashboard: %w", err)
 	}
 	if c.Bool("json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"signed_in": true, "issuer": p.Issuer, "cli_client_session_id": p.CLIClientSessionID, "access_expires_at": p.AccessExpiresAt, "account": p.Account})
+		return json.NewEncoder(c.Writer).Encode(map[string]any{"signed_in": true, "issuer": p.Issuer, "cli_client_session_id": p.CLIClientSessionID, "access_expires_at": p.AccessExpiresAt, "account": p.Account})
 	}
-	fmt.Printf("Signed in as %s\nServer: %s\nSession: %s\nAccess expires: %s\n", firstNonEmpty(p.Account.Email, p.Account.DisplayName, p.Account.ID), p.Issuer, p.CLIClientSessionID, p.AccessExpiresAt.Format(time.RFC3339))
+	fmt.Fprintf(c.Writer, "Signed in as %s\nServer: %s\nSession: %s\nAccess expires: %s\n", firstNonEmpty(p.Account.Email, p.Account.DisplayName, p.Account.ID), p.Issuer, p.CLIClientSessionID, p.AccessExpiresAt.Format(time.RFC3339))
 	return nil
 }
 
@@ -5488,6 +5605,15 @@ func authLogout(c *command.Context) error {
 	if err := store.Recover(cfg.ServerURL); err != nil {
 		return fmt.Errorf("recover interrupted Paperboat sign-in: %w", err)
 	}
+	return store.WithEnrollmentLogin(cfg.ServerURL, func(state *config.EnrollmentLoginState, save func() error) error {
+		cancelCtx, cancel := context.WithTimeout(c.Context, 2*time.Second)
+		cancellationErr := cancelPendingTokenLogin(cancelCtx, cfg.ServerURL, store, state, save)
+		cancel()
+		return authLogoutSessions(c, cfg, store, cancellationErr)
+	})
+}
+
+func authLogoutSessions(c *command.Context, cfg *config.Config, store config.ProfileStore, cancellationErr error) error {
 	logoutCredentials, err := store.TakeLogoutCredentials(cfg.ServerURL)
 	if err != nil {
 		return fmt.Errorf("remove local Paperboat sessions: %w", err)
@@ -5512,13 +5638,22 @@ func authLogout(c *command.Context) error {
 			case <-done:
 			case <-revokeCtx.Done():
 				cancel()
-				fmt.Println("Signed out")
+				if c.Bool("json") {
+					return writeCLIJSON(c.Writer, map[string]any{"signed_out": true, "server": cfg.ServerURL, "server_revocation": "pending"})
+				}
+				fmt.Fprintln(c.Writer, "Signed out")
 				return nil
 			}
 		}
 		cancel()
 	}
-	fmt.Println("Signed out")
+	if cancellationErr != nil {
+		return errors.New("signed out locally; cancellation of an earlier token login is pending; retry `pb auth logout` when the server is reachable")
+	}
+	if c.Bool("json") {
+		return writeCLIJSON(c.Writer, map[string]any{"signed_out": true, "server": cfg.ServerURL, "server_revocation": "complete"})
+	}
+	fmt.Fprintln(c.Writer, "Signed out")
 	return nil
 }
 
@@ -5574,7 +5709,7 @@ func backendClient(c *command.Context) (*api.Client, error) {
 	}
 	cred, err := d.auth.Credential()
 	if errors.Is(err, config.ErrNoCredentials) {
-		return nil, errors.New("not signed in to Paperboat; run `pb auth login`, then retry")
+		return nil, errors.New("not signed in to Paperboat; run the enrollment command from the Paperboat dashboard, then retry")
 	}
 	if err != nil {
 		return nil, err
@@ -5586,7 +5721,7 @@ func resolveProjectID(ctx context.Context, client *api.Client, requested string)
 	projects, err := client.ListProjects(ctx)
 	if err != nil {
 		if errors.Is(err, api.ErrUnauthenticated) {
-			return api.Project{}, errors.New("your Paperboat session was rejected; run `pb auth login`, then retry")
+			return api.Project{}, errors.New("your Paperboat session was rejected; run the enrollment command from the Paperboat dashboard, then retry")
 		}
 		if api.IsHostedEntitlementRequired(err) {
 			return api.Project{}, err
@@ -5656,13 +5791,13 @@ func selectEnvironment(ctx context.Context, client *api.Client, title string) (s
 		if !machine.Capabilities.TerminalHost.Configured || !machine.Capabilities.TerminalHost.Observed {
 			continue
 		}
-		items = append(items, selector.Item{ID: machine.ID, Title: machine.DisplayName, Description: machineStatusSummary(machine), Search: "machine " + machineStatusSearch(machine)})
+		items = append(items, selector.Item{ID: machine.ID, Title: machine.Alias, Description: preferenceDetails(ctx, "machines", map[string]string{"status": machineStatusSummary(machine), "platform": machine.Platform, "id": machine.ID}), Search: "machine " + machineStatusSearch(machine)})
 	}
-	selected, err := selector.Choose(selector.Options{Title: title, Subtitle: "Terminal-capable machines", Items: items, Empty: "no terminal-capable devices are available; run `pb setup` or `pb machine add`", Stdin: os.Stdin, Output: os.Stderr})
+	selected, err := selector.Choose(selector.Options{Context: ctx, Title: title, Subtitle: "Terminal-capable machines", Items: items, Empty: "no terminal-capable devices are available; run `pb setup` or `pb machine add`", Stdin: os.Stdin, Output: os.Stderr})
 	return selected.ID, err
 }
 
-func selectSession(target environmentTarget, sessions []api.TerminalSession, title string) (api.TerminalSession, error) {
+func selectSession(ctx context.Context, target environmentTarget, sessions []api.TerminalSession, title string) (api.TerminalSession, error) {
 	items := make([]selector.Item, 0, len(sessions))
 	byID := make(map[string]api.TerminalSession, len(sessions))
 	for _, session := range sessions {
@@ -5672,11 +5807,11 @@ func selectSession(target environmentTarget, sessions []api.TerminalSession, tit
 		}
 		activity := "last active " + relativeTime(session.LastActiveAt)
 		created := "created " + relativeTimestamp(session.CreatedAt)
-		description := strings.Join([]string{session.State, attached, activity, created}, "  ·  ")
+		description := preferenceDetails(ctx, "sessions", map[string]string{"machine": target.name, "state": strings.Join([]string{session.State, attached, activity, created}, " · "), "id": session.ID})
 		items = append(items, selector.Item{ID: session.ID, Title: session.Name, Description: description, Search: target.name + " " + session.State})
 		byID[session.ID] = session
 	}
-	selected, err := selector.Choose(selector.Options{Title: title, Subtitle: target.name + "  ·  " + target.kind, Items: items, Empty: "no terminal sessions are available", Stdin: os.Stdin, Output: os.Stderr})
+	selected, err := selector.Choose(selector.Options{Context: ctx, Title: title, Subtitle: target.name + "  ·  " + target.kind, Items: items, Empty: "no terminal sessions are available", Stdin: os.Stdin, Output: os.Stderr})
 	return byID[selected.ID], err
 }
 
@@ -5705,7 +5840,7 @@ func defaultEnvironment(ctx context.Context, client *api.Client, rememberedID st
 	}
 	choices := make([]string, 0, len(machines))
 	for _, machine := range machines {
-		choices = append(choices, fmt.Sprintf("%s (%s)", machine.DisplayName, machine.ID))
+		choices = append(choices, fmt.Sprintf("%s (%s)", machine.Alias, machine.ID))
 	}
 	return "", fmt.Errorf("multiple environments are available: %s; choose one with `pb <environment>`", strings.Join(choices, ", "))
 }
@@ -5727,7 +5862,7 @@ func resolveEnvironmentTarget(ctx context.Context, client *api.Client, requested
 		}
 		return environmentTarget{}, machineErr
 	}
-	return environmentTarget{kind: environmentUserMachine, id: machine.ID, name: machine.DisplayName}, nil
+	return environmentTarget{kind: environmentUserMachine, id: machine.ID, name: machine.Alias}, nil
 }
 
 func resolveTerminalEnvironmentTarget(ctx context.Context, client *api.Client, requested string) (environmentTarget, error) {
@@ -6061,8 +6196,8 @@ func actionPing(command *cobra.Command, args []string) error {
 	if err := requireLocalDaemonService(command.Context(), dependencies.cfg); err != nil {
 		return fmt.Errorf("prepare local peer transport: %w", err)
 	}
-	target := resolver.ConnectInfo{TargetKind: "machine", ProjectID: machine.ID, Project: machine.DisplayName, MachineGeneration: uint64(machine.InstallationGeneration), Terminal: &resolver.TerminalTarget{Protocol: "paperboat.health-probe.v1", EnvironmentID: machine.EnvironmentID}}
-	report := pingReport{Schema: "paperboat.ping/v1", MachineID: machine.ID, MachineName: machine.DisplayName, Sent: count, Samples: make([]pingSample, 0, count)}
+	target := resolver.ConnectInfo{TargetKind: "machine", ProjectID: machine.ID, Project: machine.Alias, MachineGeneration: uint64(machine.InstallationGeneration), Terminal: &resolver.TerminalTarget{Protocol: "paperboat.health-probe.v1", EnvironmentID: machine.EnvironmentID}}
+	report := pingReport{Schema: "paperboat.ping/v1", MachineID: machine.ID, MachineName: machine.Alias, Sent: count, Samples: make([]pingSample, 0, count)}
 	previousSelection := ""
 	var total time.Duration
 	for sequence := 1; sequence <= count; sequence++ {
@@ -6181,7 +6316,7 @@ func environmentsCommand() *command.Spec {
 					state = "online"
 				}
 				platform := strings.Trim(strings.Join([]string{machine.Platform, machine.Architecture}, "/"), "/")
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", machine.DisplayName, state, platform, machine.ID)
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", machine.Alias, state, platform, machine.ID)
 			}
 			return w.Flush()
 		},
@@ -6428,9 +6563,9 @@ func sessionsCommand() *command.Spec {
 			return friendlyCommandError(err)
 		}
 		if c.Bool("json") {
-			return json.NewEncoder(os.Stdout).Encode(map[string]any{"version": "1", "environment": map[string]string{"id": target.id, "kind": target.kind, "display_name": target.name}, "sessions": sessions})
+			return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "environment": map[string]string{"id": target.id, "kind": target.kind, "alias": target.name}, "sessions": sessions})
 		}
-		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		w := tabwriter.NewWriter(c.Writer, 0, 4, 2, ' ', 0)
 		if c.Bool("wide") {
 			fmt.Fprintln(w, "NAME\tID\tSTATE\tATTACHED\tLAST ACTIVE\tCREATED")
 		} else {
@@ -6450,7 +6585,7 @@ func sessionsCommand() *command.Spec {
 		return w.Flush()
 	}
 	return &command.Spec{Name: "sessions", Usage: "Manage environment terminal sessions", ArgsUsage: "<environment>", Flags: []command.Flag{&command.BoolFlag{Name: "wide"}, &command.BoolFlag{Name: "json"}}, Action: list, Subcommands: []*command.Spec{
-		{Name: "rename", ArgsUsage: "<environment> <session> <new-name>", Usage: "Rename a terminal session", Action: func(c *command.Context) error {
+		{Name: "rename", ArgsUsage: "<environment> <session> <new-name>", Usage: "Rename a terminal session", Flags: []command.Flag{&command.BoolFlag{Name: "json", Usage: "emit JSON"}}, Action: func(c *command.Context) error {
 			if c.Args().Len() != 3 {
 				return errors.New("usage: pb sessions rename <environment> <session> <new-name>")
 			}
@@ -6472,11 +6607,21 @@ func sessionsCommand() *command.Spec {
 			if session.IsDefault {
 				return errors.New("the default session cannot be renamed")
 			}
-			_, err = renameTerminalSessionForTarget(c.Context, client, target, session.ID, c.Args().Get(2))
-			return friendlyCommandError(err)
+			updated, err := renameTerminalSessionForTarget(c.Context, client, target, session.ID, c.Args().Get(2))
+			if err != nil {
+				return friendlyCommandError(err)
+			}
+			if c.Bool("json") {
+				return writeCLIJSON(c.Writer, map[string]any{"environment": map[string]string{"id": target.id, "kind": target.kind, "alias": target.name}, "session": updated})
+			}
+			fmt.Fprintf(c.Writer, "Renamed session %s to %s.\n", session.Name, updated.Name)
+			return nil
 		}},
 		{Name: "close", ArgsUsage: "<environment> [<session>]", Usage: "Close one or all terminal sessions", Action: func(c *command.Context) error {
 			all := c.Bool("all")
+			if c.Bool("json") && !c.Bool("yes") {
+				return invocationError(errors.New("session close with --json requires --yes"))
+			}
 			if c.Args().Len() < 1 || c.Args().Len() > 2 || all && c.Args().Len() != 1 {
 				return errors.New("usage: pb session close <environment> <session> --yes OR pb session close <environment> --all --yes")
 			}
@@ -6502,8 +6647,10 @@ func sessionsCommand() *command.Spec {
 						open = append(open, session)
 					}
 				}
-				fmt.Fprintf(c.ErrWriter, "Environment: %s (%s)\n", target.name, target.id)
-				fmt.Fprintf(c.ErrWriter, "Open sessions to close: %d\n", len(open))
+				if !c.Bool("json") {
+					fmt.Fprintf(c.ErrWriter, "Environment: %s (%s)\n", target.name, target.id)
+					fmt.Fprintf(c.ErrWriter, "Open sessions to close: %d\n", len(open))
+				}
 				if !c.Bool("yes") {
 					return errors.New("session close requires --yes")
 				}
@@ -6520,7 +6667,7 @@ func sessionsCommand() *command.Spec {
 					return fmt.Errorf("closed %d sessions in %s; remote state changed: %w", closed, target.name, errors.Join(closeErrors...))
 				}
 				if c.Bool("json") {
-					return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "environment": map[string]string{"id": target.id, "kind": target.kind, "display_name": target.name}, "closed": closed})
+					return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "environment": map[string]string{"id": target.id, "kind": target.kind, "alias": target.name}, "closed": closed})
 				}
 				fmt.Fprintf(c.Writer, "Closed %d sessions in %s. Session history was retained.\n", closed, target.name)
 				return nil
@@ -6531,7 +6678,7 @@ func sessionsCommand() *command.Spec {
 				if listErr != nil {
 					return friendlyCommandError(listErr)
 				}
-				session, err = selectSession(target, slices.DeleteFunc(sessions, func(item api.TerminalSession) bool { return item.State == "closed" }), "Choose a session to close")
+				session, err = selectSession(c.Context, target, slices.DeleteFunc(sessions, func(item api.TerminalSession) bool { return item.State == "closed" }), "Choose a session to close")
 			} else {
 				session, err = resolveTerminalSession(c.Context, client, target, c.Args().Get(1))
 			}
@@ -6539,7 +6686,7 @@ func sessionsCommand() *command.Spec {
 				return err
 			}
 			if !c.Bool("yes") {
-				confirmed, confirmErr := confirmAction(fmt.Sprintf("Close terminal session %q? History will be retained.", session.Name))
+				confirmed, confirmErr := confirmAction(c.Context, fmt.Sprintf("Close terminal session %q? History will be retained.", session.Name))
 				if confirmErr != nil {
 					return confirmErr
 				}
@@ -6551,12 +6698,15 @@ func sessionsCommand() *command.Spec {
 				return friendlyCommandError(err)
 			}
 			if c.Bool("json") {
-				return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "environment": map[string]string{"id": target.id, "kind": target.kind, "display_name": target.name}, "session_id": session.ID, "state": "closed"})
+				return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "environment": map[string]string{"id": target.id, "kind": target.kind, "alias": target.name}, "session_id": session.ID, "state": "closed"})
 			}
 			return nil
 		}, Flags: []command.Flag{&command.BoolFlag{Name: "yes", Usage: "confirm close"}, &command.BoolFlag{Name: "all", Usage: "close all sessions in the environment"}, &command.BoolFlag{Name: "json", Usage: "emit JSON"}}},
 		{Name: "delete", ArgsUsage: "<environment> [<session>]", Usage: "Delete a terminal session and its history", Flags: []command.Flag{&command.BoolFlag{Name: "yes", Usage: "confirm deletion"}, &command.BoolFlag{Name: "all", Usage: "delete all non-default sessions in the environment"}, &command.BoolFlag{Name: "json", Usage: "emit JSON"}}, Action: func(c *command.Context) error {
 			all := c.Bool("all")
+			if c.Bool("json") && !c.Bool("yes") {
+				return invocationError(errors.New("session deletion with --json requires --yes"))
+			}
 			if c.Args().Len() < 1 || c.Args().Len() > 2 || all && c.Args().Len() != 1 {
 				return errors.New("usage: pb session delete <environment> <session> --yes OR pb session delete <environment> --all --yes")
 			}
@@ -6574,8 +6724,10 @@ func sessionsCommand() *command.Spec {
 					return friendlyCommandError(err)
 				}
 				selected := slices.DeleteFunc(sessions, func(item api.TerminalSession) bool { return item.IsDefault })
-				fmt.Fprintf(c.ErrWriter, "Environment: %s (%s)\n", target.name, target.id)
-				fmt.Fprintf(c.ErrWriter, "Non-default sessions to delete: %d\n", len(selected))
+				if !c.Bool("json") {
+					fmt.Fprintf(c.ErrWriter, "Environment: %s (%s)\n", target.name, target.id)
+					fmt.Fprintf(c.ErrWriter, "Non-default sessions to delete: %d\n", len(selected))
+				}
 				if !c.Bool("yes") {
 					return errors.New("session deletion requires --yes")
 				}
@@ -6592,7 +6744,7 @@ func sessionsCommand() *command.Spec {
 					return fmt.Errorf("deleted %d of %d sessions in %s; remote state changed: %w", deleted, len(selected), target.name, errors.Join(deleteErrors...))
 				}
 				if c.Bool("json") {
-					return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "environment": map[string]string{"id": target.id, "kind": target.kind, "display_name": target.name}, "deleted": deleted})
+					return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "environment": map[string]string{"id": target.id, "kind": target.kind, "alias": target.name}, "deleted": deleted})
 				}
 				fmt.Fprintf(c.Writer, "Deleted %d sessions and their history in %s.\n", deleted, target.name)
 				return nil
@@ -6603,7 +6755,7 @@ func sessionsCommand() *command.Spec {
 				if listErr != nil {
 					return friendlyCommandError(listErr)
 				}
-				session, err = selectSession(target, slices.DeleteFunc(sessions, func(item api.TerminalSession) bool { return item.IsDefault }), "Choose a session to delete")
+				session, err = selectSession(c.Context, target, slices.DeleteFunc(sessions, func(item api.TerminalSession) bool { return item.IsDefault }), "Choose a session to delete")
 			} else {
 				session, err = resolveTerminalSession(c.Context, client, target, c.Args().Get(1))
 			}
@@ -6617,7 +6769,7 @@ func sessionsCommand() *command.Spec {
 				if !term.IsTerminal(int(os.Stdin.Fd())) {
 					return errors.New("refusing non-interactive deletion without --yes")
 				}
-				confirmed, confirmErr := confirmAction(fmt.Sprintf("Delete terminal session %q and its history?", session.Name))
+				confirmed, confirmErr := confirmAction(c.Context, fmt.Sprintf("Delete terminal session %q and its history?", session.Name))
 				if confirmErr != nil {
 					return confirmErr
 				}
@@ -6629,7 +6781,7 @@ func sessionsCommand() *command.Spec {
 				return friendlyCommandError(err)
 			}
 			if c.Bool("json") {
-				return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "environment": map[string]string{"id": target.id, "kind": target.kind, "display_name": target.name}, "session_id": session.ID, "deleted": true})
+				return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "environment": map[string]string{"id": target.id, "kind": target.kind, "alias": target.name}, "session_id": session.ID, "deleted": true})
 			}
 			return nil
 		}},
@@ -6669,7 +6821,7 @@ func selectTerminalSession(ctx context.Context, client *api.Client, projectRef, 
 // create and connection descriptor anyway.
 func resolveEnvironmentTargetWithMachine(ctx context.Context, client *api.Client, requested string) (environmentTarget, api.UserMachine, error) {
 	if machine, ok := resolveWarmUserMachine(ctx, requested); ok && machine.InstallationGeneration > 0 {
-		return environmentTarget{kind: environmentUserMachine, id: machine.ID, name: machine.DisplayName}, machine, nil
+		return environmentTarget{kind: environmentUserMachine, id: machine.ID, name: machine.Alias}, machine, nil
 	}
 	project, err := resolveProjectID(ctx, client, requested)
 	if err == nil {
@@ -6687,7 +6839,7 @@ func resolveEnvironmentTargetWithMachine(ctx context.Context, client *api.Client
 		}
 		return environmentTarget{}, api.UserMachine{}, machineErr
 	}
-	return environmentTarget{kind: environmentUserMachine, id: machine.ID, name: machine.DisplayName}, machine, nil
+	return environmentTarget{kind: environmentUserMachine, id: machine.ID, name: machine.Alias}, machine, nil
 }
 
 func resolveUserMachine(ctx context.Context, client *api.Client, requested string) (api.UserMachine, error) {
@@ -6702,7 +6854,7 @@ func resolveUserMachine(ctx context.Context, client *api.Client, requested strin
 	}
 	var matches []api.UserMachine
 	for _, machine := range machines {
-		if strings.EqualFold(machine.DisplayName, requested) {
+		if strings.EqualFold(machine.Alias, requested) {
 			matches = append(matches, machine)
 		}
 	}
@@ -6743,7 +6895,7 @@ func resolveWarmUserMachine(ctx context.Context, requested string) (api.UserMach
 	if err != nil || !status.Eligible || status.Generation == 0 {
 		return api.UserMachine{}, false
 	}
-	return api.UserMachine{ID: status.ID, EnvironmentID: status.EnvironmentID, WorkspaceRoot: status.WorkspaceRoot, Alias: status.Alias, DisplayName: status.Alias, Platform: status.Platform, State: "ready", Online: status.RuntimeState == "ready", InstallationGeneration: int64(status.Generation)}, true
+	return api.UserMachine{ID: status.ID, EnvironmentID: status.EnvironmentID, WorkspaceRoot: status.WorkspaceRoot, Alias: status.Alias, Platform: status.Platform, State: "ready", Online: status.RuntimeState == "ready", InstallationGeneration: int64(status.Generation)}, true
 }
 
 func resolveTerminalSession(ctx context.Context, client *api.Client, target environmentTarget, ref string) (api.TerminalSession, error) {
@@ -6896,7 +7048,11 @@ func actionSSH(command *cobra.Command, args []string) error {
 		return friendlyCommandError(err)
 	}
 	_ = client
-	destination, err := managedssh.ResolveDestination(managedssh.DestinationInput{Alias: machine.Alias, AliasSuffix: managedssh.AliasSuffix, RegisteredPort: target.Port, RequestedUser: requestedUser, RegisteredUser: target.OSUser, HasRegisteredUser: true, Platform: machine.Platform})
+	suffix, err := configuredDeviceSuffix(command)
+	if err != nil {
+		return err
+	}
+	destination, err := managedssh.ResolveDestination(managedssh.DestinationInput{Alias: machine.Alias, AliasSuffix: suffix, RegisteredPort: target.Port, RequestedUser: requestedUser, RegisteredUser: target.OSUser, HasRegisteredUser: true, Platform: machine.Platform})
 	if err != nil {
 		return err
 	}
@@ -6960,7 +7116,11 @@ func actionSSHProxy(command *cobra.Command, _ []string) error {
 	if err := managedssh.ValidateUsername(proxyUser); err != nil {
 		return err
 	}
-	alias, err := managedssh.ParseAliasHost(host, managedssh.AliasSuffix)
+	suffix, err := configuredDeviceSuffix(command)
+	if err != nil {
+		return err
+	}
+	alias, err := managedssh.ParseAliasHost(host, suffix)
 	if err != nil {
 		return err
 	}
@@ -6969,7 +7129,7 @@ func actionSSHProxy(command *cobra.Command, _ []string) error {
 	if err != nil {
 		return friendlyCommandError(err)
 	}
-	if _, err := managedssh.ResolveDestination(managedssh.DestinationInput{Alias: machine.Alias, AliasSuffix: managedssh.AliasSuffix, RegisteredPort: target.Port, RequestedUser: proxyUser, RegisteredUser: target.OSUser, HasRegisteredUser: true, Platform: machine.Platform}); err != nil {
+	if _, err := managedssh.ResolveDestination(managedssh.DestinationInput{Alias: machine.Alias, AliasSuffix: suffix, RegisteredPort: target.Port, RequestedUser: proxyUser, RegisteredUser: target.OSUser, HasRegisteredUser: true, Platform: machine.Platform}); err != nil {
 		return err
 	}
 	if _, err := managedssh.ValidateDestinationPort(portText, target.Port); err != nil {
@@ -7042,7 +7202,11 @@ func copySSHProxy(connection io.ReadWriteCloser, halfCloser interface{ CloseWrit
 func actionSSHKnownHosts(command *cobra.Command, _ []string) error {
 	host, _ := command.Flags().GetString("host")
 	portText, _ := command.Flags().GetString("port")
-	alias, err := managedssh.ParseAliasHost(host, managedssh.AliasSuffix)
+	suffix, err := configuredDeviceSuffix(command)
+	if err != nil {
+		return err
+	}
+	alias, err := managedssh.ParseAliasHost(host, suffix)
 	if err != nil {
 		return err
 	}
@@ -7085,10 +7249,14 @@ func actionSSHTrustHost(command *cobra.Command, args []string) error {
 	}
 	fingerprint, _ := command.Flags().GetString("fingerprint")
 	fingerprint = strings.TrimSpace(fingerprint)
+	jsonOutput, _ := command.Flags().GetBool("json")
 	if fingerprint != "" && fingerprint != pending.Fingerprint {
 		return errors.New("pending SSH host fingerprint does not match --fingerprint")
 	}
 	if fingerprint == "" {
+		if jsonOutput {
+			return invocationError(errors.New("ssh trust-host with --json requires the exact --fingerprint"))
+		}
 		if !term.IsTerminal(int(os.Stdin.Fd())) {
 			return errors.New("interactive confirmation is required; pass the exact --fingerprint")
 		}
@@ -7107,7 +7275,10 @@ func actionSSHTrustHost(command *cobra.Command, args []string) error {
 	if err != nil {
 		return friendlyCommandError(err)
 	}
-	fmt.Fprintf(command.OutOrStdout(), "Trusted SSH host identity for %s (%s)\n", machine.DisplayName, fingerprint)
+	if jsonOutput {
+		return writeCLIJSON(command.OutOrStdout(), map[string]any{"machine": map[string]string{"id": machine.ID, "alias": machine.Alias}, "fingerprint": fingerprint, "trusted": true})
+	}
+	fmt.Fprintf(command.OutOrStdout(), "Trusted SSH host identity for %s (%s)\n", machine.Alias, fingerprint)
 	return nil
 }
 
@@ -7145,14 +7316,14 @@ func actionSSHDoctor(command *cobra.Command, args []string) error {
 		return err
 	}
 	agentSocket := managedssh.InstalledAgentSocket(paths.RuntimeRoot)
-	if err := managedssh.ValidateInstalledOpenSSHConfig(home, uint32(os.Geteuid()), managedssh.AliasSuffix, agentSocket); err != nil {
-		return fmt.Errorf("managed OpenSSH configuration is not ready; rerun `pb auth login`: %w", err)
+	if err := managedssh.ValidateInstalledOpenSSHConfig(home, uint32(os.Geteuid()), cfg.DeviceSuffix, agentSocket); err != nil {
+		return fmt.Errorf("managed OpenSSH configuration is not ready; rerun the enrollment command from the Paperboat dashboard: %w", err)
 	}
 	if err := managedssh.ValidateManagedIdentityPublicKey(home, uint32(os.Geteuid()), identity.PublicKey); err != nil {
-		return fmt.Errorf("managed SSH public identity is not ready; rerun `pb auth login`: %w", err)
+		return fmt.Errorf("managed SSH public identity is not ready; rerun the enrollment command from the Paperboat dashboard: %w", err)
 	}
 	if err := managedssh.ProbeAgentIdentity(command.Context(), agentSocket, identity.Fingerprint, 5*time.Second); err != nil {
-		return fmt.Errorf("managed SSH agent is not ready; rerun `pb auth login`: %w", err)
+		return fmt.Errorf("managed SSH agent is not ready; rerun the enrollment command from the Paperboat dashboard: %w", err)
 	}
 	d, err := buildDeps(actionContext(command, args))
 	if err != nil {
@@ -7169,7 +7340,7 @@ func actionSSHDoctor(command *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("managed SSH transport or loopback target is not ready: %w", err)
 	}
-	host, err := managedssh.AliasHost(machine.Alias, managedssh.AliasSuffix)
+	host, err := managedssh.AliasHost(machine.Alias, cfg.DeviceSuffix)
 	if err != nil {
 		_ = connection.Close()
 		return err
@@ -7182,8 +7353,19 @@ func actionSSHDoctor(command *cobra.Command, args []string) error {
 	if closeErr != nil && !errors.Is(closeErr, net.ErrClosed) {
 		return fmt.Errorf("close managed SSH readiness probe: %w", closeErr)
 	}
-	fmt.Fprintf(command.OutOrStdout(), "OpenSSH: %s\nLocal configuration: ready\nManaged agent: ready\nMachine: %s (%s)\nTransport: ready\nTarget: ready on port %d\nHost identity: %s\nManaged keys: reconciled\n", capabilities.Version, machine.DisplayName, machine.Alias, target.Port, keys.Fingerprint)
+	if jsonOutput, _ := command.Flags().GetBool("json"); jsonOutput {
+		return writeCLIJSON(command.OutOrStdout(), map[string]any{"openssh": map[string]any{"version": capabilities.Version, "ready": true}, "local_configuration": "ready", "managed_agent": "ready", "machine": map[string]any{"id": machine.ID, "alias": machine.Alias}, "transport": "ready", "target": map[string]any{"state": "ready", "port": target.Port}, "host_identity": keys.Fingerprint, "managed_keys": "reconciled"})
+	}
+	fmt.Fprintf(command.OutOrStdout(), "OpenSSH: %s\nLocal configuration: ready\nManaged agent: ready\nMachine: %s\nTransport: ready\nTarget: ready on port %d\nHost identity: %s\nManaged keys: reconciled\n", capabilities.Version, machine.Alias, target.Port, keys.Fingerprint)
 	return nil
+}
+
+func configuredDeviceSuffix(command *cobra.Command) (string, error) {
+	cfg, err := config.Load(configPathFlag(command))
+	if err != nil {
+		return "", err
+	}
+	return cfg.DeviceSuffix, nil
 }
 
 func resolveSSHCommandTarget(ctx *command.Context, requested string) (*api.Client, api.UserMachine, api.ManagedSSHTarget, error) {
@@ -7326,7 +7508,7 @@ func newSSHOperationID() string {
 
 func sshConnectInfo(machine api.UserMachine, descriptor api.SSHDescriptor) resolver.ConnectInfo {
 	return resolver.ConnectInfo{
-		TargetKind: "machine", ProjectID: machine.ID, Project: machine.DisplayName, ProjectState: machine.State,
+		TargetKind: "machine", ProjectID: machine.ID, Project: machine.Alias, ProjectState: machine.State,
 		MachineGeneration: uint64(machine.InstallationGeneration), TunnelTarget: descriptor.Endpoints.WSS,
 		Terminal: &resolver.TerminalTarget{Protocol: "paperboat.ssh.v1", EnvironmentID: descriptor.Environment.ID, QUICEndpoint: descriptor.Endpoints.QUIC, WSSEndpoint: descriptor.Endpoints.WSS, Auth: resolver.AuthTarget{Method: descriptor.Auth.Method, Token: descriptor.Auth.Token, ExpiresAt: descriptor.Auth.ExpiresAt.Format(time.RFC3339Nano), Scopes: descriptor.Auth.Scopes, ResourceID: descriptor.Auth.AccessSessionID}, CWD: descriptor.Environment.Root},
 	}
@@ -7386,7 +7568,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 	}
 	credential, err := d.auth.Credential()
 	if errors.Is(err, config.ErrNoCredentials) {
-		err = errors.New("not signed in to Paperboat; run `pb login`, then retry")
+		err = errors.New("not signed in to Paperboat; run the enrollment command from the Paperboat dashboard, then retry")
 		return fail(255, "authentication_required", false, false, err)
 	}
 	if err != nil {
@@ -7765,7 +7947,7 @@ func safeExecError(err error) string {
 
 func execConnectInfo(machine api.UserMachine, descriptor api.ExecDescriptor, transport string) resolver.ConnectInfo {
 	return resolver.ConnectInfo{
-		TargetKind: "machine", ProjectID: machine.ID, Project: machine.DisplayName, ProjectState: machine.State,
+		TargetKind: "machine", ProjectID: machine.ID, Project: machine.Alias, ProjectState: machine.State,
 		MachineGeneration: uint64(machine.InstallationGeneration), Transport: transport, TunnelTarget: descriptor.Endpoints.WSS,
 		Terminal: &resolver.TerminalTarget{Protocol: "paperboat.exec.v1", EnvironmentID: descriptor.Environment.ID, QUICEndpoint: descriptor.Endpoints.QUIC, WSSEndpoint: descriptor.Endpoints.WSS, Auth: resolver.AuthTarget{Method: descriptor.Auth.Method, Token: descriptor.Auth.Token, ExpiresAt: descriptor.Auth.ExpiresAt.Format(time.RFC3339Nano), Scopes: descriptor.Auth.Scopes, ResourceID: descriptor.Auth.AccessSessionID}, CWD: descriptor.Environment.Root},
 	}
@@ -7991,7 +8173,7 @@ func actionConnectTarget(c *command.Context, requested string) error {
 		return err
 	}
 	if errors.Is(err, config.ErrNoCredentials) {
-		return errors.New("not signed in to Paperboat; run `pb login`, then retry")
+		return errors.New("not signed in to Paperboat; run the enrollment command from the Paperboat dashboard, then retry")
 	}
 	backend := api.New(d.cfg.ServerURL, cred, nil)
 	if project == "" {
@@ -8154,7 +8336,7 @@ func actionConnectTarget(c *command.Context, requested string) error {
 	for attempt := 0; attempt <= d.cfg.Connect.DialRetries; attempt++ {
 		resolveRequest := resolver.ConnectRequest{Project: project, Credential: cred, TerminalSessionID: terminalSessionID, CreateTerminalSession: createSession}
 		if target.kind == environmentUserMachine && resolvedMachine.ID != "" && resolvedMachine.InstallationGeneration > 0 {
-			resolveRequest.ResolvedMachine = &resolver.ResolvedMachine{ID: resolvedMachine.ID, Name: resolvedMachine.DisplayName, State: resolvedMachine.State, Generation: uint64(resolvedMachine.InstallationGeneration)}
+			resolveRequest.ResolvedMachine = &resolver.ResolvedMachine{ID: resolvedMachine.ID, Name: resolvedMachine.Alias, State: resolvedMachine.State, Generation: uint64(resolvedMachine.InstallationGeneration)}
 		}
 		info, err = d.resolver.Resolve(ctx, resolveRequest)
 		if err == nil {
@@ -8231,7 +8413,7 @@ func actionConnectTarget(c *command.Context, requested string) error {
 			break
 		}
 		if errors.Is(err, api.ErrUnauthenticated) {
-			return errors.New("your Paperboat session was rejected; run `pb auth login`, then retry")
+			return errors.New("your Paperboat session was rejected; run the enrollment command from the Paperboat dashboard, then retry")
 		}
 		if attempt == d.cfg.Connect.DialRetries || !retryableInitialConnectError(err) {
 			break
@@ -8589,7 +8771,7 @@ func forceTerminalRedraw(conn tunnel.Conn, rows, cols uint16) {
 	_ = conn.Resize(rows, cols)
 }
 
-func chooseIndex(title, subtitle string, count int, item func(int) selector.Item) (int, error) {
+func chooseIndex(ctx context.Context, title, subtitle string, count int, item func(int) selector.Item) (int, error) {
 	items := make([]selector.Item, count)
 	indexes := make(map[string]int, count)
 	for index := range count {
@@ -8599,18 +8781,18 @@ func chooseIndex(title, subtitle string, count int, item func(int) selector.Item
 		}
 		indexes[items[index].ID] = index
 	}
-	selected, err := selector.Choose(selector.Options{Title: title, Subtitle: subtitle, Items: items, Stdin: os.Stdin, Output: os.Stderr})
+	selected, err := selector.Choose(selector.Options{Context: ctx, Title: title, Subtitle: subtitle, Items: items, Stdin: os.Stdin, Output: os.Stderr})
 	if errors.Is(err, selector.ErrCanceled) {
 		return 0, errors.New("selection canceled")
 	}
 	return indexes[selected.ID], err
 }
 
-func confirmAction(message string) (bool, error) {
+func confirmAction(ctx context.Context, message string) (bool, error) {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return false, errors.New("confirmation requires --yes in non-interactive use")
 	}
-	return prompt.Confirm(prompt.ConfirmOptions{Title: "Confirm action", Description: message, Stdin: os.Stdin, Output: os.Stderr})
+	return prompt.Confirm(prompt.ConfirmOptions{Context: ctx, Title: "Confirm action", Description: message, Stdin: os.Stdin, Output: os.Stderr})
 }
 
 func statusNotifier(enabled bool) io.Writer {
@@ -8925,12 +9107,13 @@ func configCommand() *command.Spec {
 				Name: "unassign", ArgsUsage: "<environment>", Usage: "Remove a config repository assignment",
 				Action: configUnassign,
 			},
-			{Name: "approve", ArgsUsage: "<environment>", Usage: "Approve the currently reviewed pull revision", Action: configApproveRevision},
-			{Name: "team-default-set", ArgsUsage: "<team> <repository>", Usage: "Set a team's default pull repository", Action: configTeamDefaultSet},
-			{Name: "team-default-adopt", ArgsUsage: "<team>", Usage: "Adopt a team default using your provider access", Action: configTeamDefaultAdopt},
-			{Name: "team-default-unadopt", Usage: "Stop inheriting a team configuration default", Action: configTeamDefaultUnadopt},
+			{Name: "approve", ArgsUsage: "<environment>", Usage: "Approve the currently reviewed pull revision", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: configApproveRevision},
+			{Name: "team-default-set", ArgsUsage: "<team> <repository>", Usage: "Set a team's default pull repository", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: configTeamDefaultSet},
+			{Name: "team-default-adopt", ArgsUsage: "<team>", Usage: "Adopt a team default using your provider access", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: configTeamDefaultAdopt},
+			{Name: "team-default-unadopt", Usage: "Stop inheriting a team configuration default", Flags: []command.Flag{&command.BoolFlag{Name: "json"}}, Action: configTeamDefaultUnadopt},
 			{
 				Name: "set", ArgsUsage: "<key> <value>", Usage: "Set a local configuration value",
+				Flags: []command.Flag{&command.BoolFlag{Name: "json"}},
 				Action: func(c *command.Context) error {
 					if c.Args().Len() != 2 {
 						return errors.New("usage: pb config set server <url>")
@@ -8958,12 +9141,16 @@ func configCommand() *command.Spec {
 					if err := cfg.Save(); err != nil {
 						return err
 					}
-					fmt.Fprintln(os.Stdout, cfg.Path())
+					if c.Bool("json") {
+						return writeCLIJSON(c.Writer, map[string]any{"path": cfg.Path(), "key": c.Args().First(), "updated": true})
+					}
+					fmt.Fprintln(c.Writer, cfg.Path())
 					return nil
 				},
 			},
 			{
 				Name: "unset", ArgsUsage: "server", Usage: "Remove a local configuration value",
+				Flags: []command.Flag{&command.BoolFlag{Name: "json"}},
 				Action: func(c *command.Context) error {
 					if c.Args().Len() != 1 || c.Args().First() != "server" {
 						return errors.New("usage: pb config unset server")
@@ -8976,19 +9163,26 @@ func configCommand() *command.Spec {
 					if err := cfg.Save(); err != nil {
 						return err
 					}
-					fmt.Fprintln(os.Stdout, cfg.Path())
+					if c.Bool("json") {
+						return writeCLIJSON(c.Writer, map[string]any{"path": cfg.Path(), "key": "server", "unset": true})
+					}
+					fmt.Fprintln(c.Writer, cfg.Path())
 					return nil
 				},
 			},
 			{
 				Name:  "path",
 				Usage: "Print the config file path",
+				Flags: []command.Flag{&command.BoolFlag{Name: "json"}},
 				Action: func(c *command.Context) error {
 					d, err := buildDeps(c)
 					if err != nil {
 						return err
 					}
-					fmt.Println(d.cfg.Path())
+					if c.Bool("json") {
+						return writeCLIJSON(c.Writer, map[string]any{"path": d.cfg.Path()})
+					}
+					fmt.Fprintln(c.Writer, d.cfg.Path())
 					return nil
 				},
 			},
@@ -9002,14 +9196,14 @@ func configCommand() *command.Spec {
 						return err
 					}
 					if c.Bool("json") {
-						return json.NewEncoder(os.Stdout).Encode(map[string]any{"path": d.cfg.Path(), "server_url": d.cfg.ServerURL, "auth_file_fallback": d.cfg.Auth.AllowFileFallback, "file_paste": d.cfg.FilePaste, "status_bar": d.cfg.StatusBar})
+						return json.NewEncoder(c.Writer).Encode(map[string]any{"path": d.cfg.Path(), "server_url": d.cfg.ServerURL, "auth_file_fallback": d.cfg.Auth.AllowFileFallback, "file_paste": d.cfg.FilePaste, "status_bar": d.cfg.StatusBar})
 					}
-					fmt.Printf("server_url: %s\n", orNone(d.cfg.ServerURL))
-					fmt.Printf("auth.file_fallback: %t\n", d.cfg.Auth.AllowFileFallback)
-					fmt.Printf("file_paste.max_queued_input_bytes: %d\n", d.cfg.FilePaste.MaxQueuedInputBytes)
-					fmt.Printf("status_bar.mode: %s\n", d.cfg.StatusBar.Mode)
-					fmt.Printf("status_bar.fullscreen: %s\n", d.cfg.StatusBar.Fullscreen)
-					fmt.Printf("status_bar.theme: %s\n", d.cfg.StatusBar.Theme)
+					fmt.Fprintf(c.Writer, "server_url: %s\n", orNone(d.cfg.ServerURL))
+					fmt.Fprintf(c.Writer, "auth.file_fallback: %t\n", d.cfg.Auth.AllowFileFallback)
+					fmt.Fprintf(c.Writer, "file_paste.max_queued_input_bytes: %d\n", d.cfg.FilePaste.MaxQueuedInputBytes)
+					fmt.Fprintf(c.Writer, "status_bar.mode: %s\n", d.cfg.StatusBar.Mode)
+					fmt.Fprintf(c.Writer, "status_bar.fullscreen: %s\n", d.cfg.StatusBar.Fullscreen)
+					fmt.Fprintf(c.Writer, "status_bar.theme: %s\n", d.cfg.StatusBar.Theme)
 					return nil
 				},
 			},
@@ -9053,6 +9247,9 @@ func configSetSSHTargetPort(c *command.Context, port uint16) error {
 	if err := store.SaveRegistration(registration); err != nil {
 		return err
 	}
+	if c.Bool("json") {
+		return writeCLIJSON(c.Writer, map[string]any{"key": "ssh-target-port", "port": port, "updated": true})
+	}
 	fmt.Fprintf(c.Writer, "SSH target port set to %d\n", port)
 	return nil
 }
@@ -9084,12 +9281,19 @@ func statusBarConfigCommand() *cobra.Command {
 		if err := setStatusBarValue(&cfg.StatusBar, args[0], args[1]); err != nil {
 			return invocationError(err)
 		}
+		if err := cfg.Validate(); err != nil {
+			return invocationError(err)
+		}
 		if err := cfg.Save(); err != nil {
 			return err
+		}
+		if jsonOutput, _ := command.Flags().GetBool("json"); jsonOutput {
+			return writeCLIJSON(command.OutOrStdout(), map[string]any{"path": cfg.Path(), "status_bar": cfg.StatusBar})
 		}
 		fmt.Fprintln(command.OutOrStdout(), cfg.Path())
 		return nil
 	}}
+	set.Flags().Bool("json", false, "print JSON")
 	reset := &cobra.Command{Use: "reset", Short: "Restore status-bar defaults", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, _ []string) error {
 		cfg, err := config.Load(configPathFlag(command))
 		if err != nil {
@@ -9099,9 +9303,13 @@ func statusBarConfigCommand() *cobra.Command {
 		if err := cfg.Save(); err != nil {
 			return err
 		}
+		if jsonOutput, _ := command.Flags().GetBool("json"); jsonOutput {
+			return writeCLIJSON(command.OutOrStdout(), map[string]any{"path": cfg.Path(), "status_bar": cfg.StatusBar})
+		}
 		fmt.Fprintln(command.OutOrStdout(), cfg.Path())
 		return nil
 	}}
+	reset.Flags().Bool("json", false, "print JSON")
 	preview := &cobra.Command{Use: "preview", Short: "Preview the configured status bar", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, _ []string) error {
 		cfg, err := config.Load(configPathFlag(command))
 		if err != nil {
@@ -9222,8 +9430,7 @@ func setStatusBarValue(value *config.StatusBarConfig, key, raw string) error {
 	default:
 		return fmt.Errorf("unknown status-bar key %q", key)
 	}
-	probe := &config.Config{Connect: config.ConnectConfig{TerminalTransport: config.DefaultTerminalTransport}, StatusBar: *value}
-	return probe.Validate()
+	return nil
 }
 
 func parseWidgetList(raw string) []string {
@@ -9326,9 +9533,9 @@ func configAssign(c *command.Context) error {
 	if c.Bool("json") {
 		result := map[string]any{"version": "1", "repository": repository, "assignment": assignment, "outcome": "confirmed"}
 		if target.kind == environmentUserMachine {
-			result["machine"] = map[string]string{"id": target.id, "display_name": target.name}
+			result["machine"] = map[string]string{"id": target.id, "alias": target.name}
 		} else {
-			result["environment"] = map[string]string{"id": target.id, "kind": "hosted", "display_name": target.name}
+			result["environment"] = map[string]string{"id": target.id, "kind": "hosted", "alias": target.name}
 		}
 		return json.NewEncoder(c.Writer).Encode(result)
 	}
@@ -9364,7 +9571,7 @@ func configUnassign(c *command.Context) error {
 		return errors.Join(friendlyCommandError(err), repairErr)
 	}
 	if c.Bool("json") {
-		return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "environment": map[string]string{"id": target.id, "kind": target.kind, "display_name": target.name}, "state": "unassigned", "outcome": "confirmed"})
+		return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "environment": map[string]string{"id": target.id, "kind": target.kind, "alias": target.name}, "state": "unassigned", "outcome": "confirmed"})
 	}
 	fmt.Fprintf(c.Writer, "Removed config assignment from %s.\n", target.name)
 	return nil
@@ -9394,7 +9601,7 @@ func configApproveRevision(c *command.Context) error {
 	if item.RemoteRevision == "" || item.AssignmentVersion < 1 {
 		return errors.New("no reviewed configuration revision is pending")
 	}
-	if len(item.Review) > 0 {
+	if len(item.Review) > 0 && !c.Bool("json") {
 		fmt.Fprintf(c.Writer, "Revision %s changes:\n", item.RemoteRevision)
 		for _, change := range item.Review {
 			fmt.Fprintf(c.Writer, "  %s  %s\n", change.Reason, change.Path)
@@ -9403,6 +9610,9 @@ func configApproveRevision(c *command.Context) error {
 	approved, err := client.ApproveConfigPullRevision(c.Context, target.id, item.RemoteRevision, item.AssignmentVersion)
 	if err != nil {
 		return friendlyCommandError(err)
+	}
+	if c.Bool("json") {
+		return writeCLIJSON(c.Writer, map[string]any{"environment": map[string]string{"id": target.id, "kind": target.kind, "alias": target.name}, "revision": item.RemoteRevision, "assignment": approved})
 	}
 	fmt.Fprintf(c.Writer, "Approved configuration revision %s for %s (assignment version %d).\n", item.RemoteRevision, target.name, approved.Version)
 	return nil
@@ -9431,6 +9641,9 @@ func configTeamDefaultSet(c *command.Context) error {
 	if err != nil {
 		return friendlyCommandError(err)
 	}
+	if c.Bool("json") {
+		return writeCLIJSON(c.Writer, item)
+	}
 	fmt.Fprintf(c.Writer, "Team %s default pull repository is %s (version %d).\n", item.TeamID, item.DisplayName, item.Version)
 	return nil
 }
@@ -9448,6 +9661,9 @@ func configTeamDefaultAdopt(c *command.Context) error {
 	if err != nil {
 		return friendlyCommandError(err)
 	}
+	if c.Bool("json") {
+		return writeCLIJSON(c.Writer, adoption)
+	}
 	fmt.Fprintf(c.Writer, "Adopted %s from team %s at version %d; personal machine assignments still take precedence.\n", adoption.DisplayName, adoption.TeamID, adoption.AdoptedVersion)
 	return nil
 }
@@ -9459,6 +9675,9 @@ func configTeamDefaultUnadopt(c *command.Context) error {
 	}
 	if err := client.UnadoptConfigTeamDefault(c.Context); err != nil {
 		return friendlyCommandError(err)
+	}
+	if c.Bool("json") {
+		return writeCLIJSON(c.Writer, map[string]any{"adopted": false})
 	}
 	fmt.Fprintln(c.Writer, "Stopped inheriting the team configuration default; personal assignments were unchanged.")
 	return nil
@@ -9572,7 +9791,7 @@ func configStatus(c *command.Context) error {
 		return nil
 	}
 	for _, item := range items {
-		name := item.DisplayName
+		name := item.Alias
 		if name == "" {
 			name = item.EnvironmentID
 		}
@@ -9619,7 +9838,7 @@ func configConflictList(c *command.Context) error {
 	conflicts := make([]listedConflict, 0)
 	for _, item := range items {
 		for _, conflict := range item.Conflicts {
-			conflicts = append(conflicts, listedConflict{item.EnvironmentID, item.DisplayName, conflict})
+			conflicts = append(conflicts, listedConflict{item.EnvironmentID, item.Alias, conflict})
 		}
 	}
 	if c.Bool("json") {
@@ -9652,7 +9871,7 @@ func configConflictShow(c *command.Context) error {
 		return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "environment": items[0], "conflict": conflict})
 	}
 	fmt.Fprintf(c.Writer, "%s on %s\nReason: %s\nChoices: keep this machine's version or use repository version.\n",
-		conflict.Path, items[0].DisplayName, strings.ReplaceAll(conflict.Reason, "_", " "))
+		conflict.Path, items[0].Alias, strings.ReplaceAll(conflict.Reason, "_", " "))
 	return nil
 }
 
@@ -9692,7 +9911,7 @@ func configConflictResolve(c *command.Context) error {
 	if c.Bool("json") {
 		return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "operation": operation, "outcome": "queued"})
 	}
-	fmt.Fprintf(c.Writer, "Queued %s for %s on %s.\n", strings.ReplaceAll(action, "_", " "), conflict.Path, items[0].DisplayName)
+	fmt.Fprintf(c.Writer, "Queued %s for %s on %s.\n", strings.ReplaceAll(action, "_", " "), conflict.Path, items[0].Alias)
 	return nil
 }
 
@@ -9726,7 +9945,7 @@ func configForce(c *command.Context) error {
 		request.Scope, request.Path, request.ConflictRevision = "path", conflict.Path, conflict.Revision
 	}
 	if !c.Bool("yes") {
-		return fmt.Errorf("force preview: %s %s scope on %s; rerun with --yes to queue this recoverable operation", direction, request.Scope, item.DisplayName)
+		return fmt.Errorf("force preview: %s %s scope on %s; rerun with --yes to queue this recoverable operation", direction, request.Scope, item.Alias)
 	}
 	operation, err := client.ForceConfig(c.Context, item.EnvironmentID, request)
 	if err != nil {
@@ -9735,7 +9954,7 @@ func configForce(c *command.Context) error {
 	if c.Bool("json") {
 		return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "operation": operation, "outcome": "queued"})
 	}
-	fmt.Fprintf(c.Writer, "Queued force %s for %s on %s.\n", direction, request.Scope, item.DisplayName)
+	fmt.Fprintf(c.Writer, "Queued force %s for %s on %s.\n", direction, request.Scope, item.Alias)
 	return nil
 }
 
@@ -9759,7 +9978,7 @@ func selectConfigEnvironments(items []api.ConfigSyncEnvironmentState, requested 
 	}
 	matches := make([]api.ConfigSyncEnvironmentState, 0, 1)
 	for _, item := range items {
-		if item.EnvironmentID == requested || item.MachineID == requested || strings.EqualFold(item.DisplayName, requested) {
+		if item.EnvironmentID == requested || item.MachineID == requested || strings.EqualFold(item.Alias, requested) {
 			matches = append(matches, item)
 		}
 	}
@@ -9778,7 +9997,7 @@ func findConfigConflict(item api.ConfigSyncEnvironmentState, requested string) (
 			return conflict, nil
 		}
 	}
-	return api.ConfigSyncPathSummary{}, fmt.Errorf("configuration conflict %q was not found on %s", requested, item.DisplayName)
+	return api.ConfigSyncPathSummary{}, fmt.Errorf("configuration conflict %q was not found on %s", requested, item.Alias)
 }
 
 func resolveConfigRepository(items []api.ConfigRepository, requested string) (api.ConfigRepository, error) {

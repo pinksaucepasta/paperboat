@@ -15,10 +15,12 @@ import (
 	sessionauth "github.com/pinksaucepasta/paperboat/internal/auth"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/deviceguard"
 	"github.com/pinksaucepasta/paperboat/internal/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/internal/endpointbinary"
 	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
+	previewruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimeentry"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
@@ -30,6 +32,23 @@ import (
 )
 
 var platformUpdateProbeCommand func() *cobra.Command
+
+type dynamicNativePrivateGrantIssuer struct {
+	serverURL string
+	auth      *sessionauth.Source
+	client    *http.Client
+}
+
+func (i dynamicNativePrivateGrantIssuer) IssueNativePrivateGrant(ctx context.Context, request api.NativePrivateGrantRequest) (api.NativePrivateGrant, error) {
+	if i.auth == nil {
+		return api.NativePrivateGrant{}, errors.New("native private access authentication is unavailable")
+	}
+	credential, err := i.auth.WithContext(ctx).Credential()
+	if err != nil {
+		return api.NativePrivateGrant{}, err
+	}
+	return api.New(i.serverURL, credential, i.client).IssueNativePrivateGrant(ctx, request)
+}
 
 // NewCommand exposes the persistent endpoint lifecycle beneath pb daemon.
 func NewCommand() *cobra.Command {
@@ -48,6 +67,9 @@ func NewCommand() *cobra.Command {
 	root.AddCommand(windowsSSHDServiceCommand())
 	root.AddCommand(privilegedHostServiceCommand())
 	root.AddCommand(configRuntimeCommand())
+	root.AddCommand(ServiceCommand())
+	root.AddCommand(runDaemonCommand())
+	AddDeviceGuardCommand(root)
 	if platformUpdateProbeCommand != nil {
 		root.AddCommand(platformUpdateProbeCommand())
 	}
@@ -189,7 +211,7 @@ func localDaemonCommand() *cobra.Command {
 				}
 			}
 			if strings.TrimSpace(cfg.ServerURL) == "" {
-				return errors.New("Paperboat server is not configured")
+				cfg.ServerURL = buildinfo.DefaultServerURL
 			}
 			authSource, err := sessionauth.NewSource(cfg)
 			if err != nil {
@@ -205,6 +227,12 @@ func localDaemonCommand() *cobra.Command {
 				diagnosticlog.TryInfo("peer enrollment signer unavailable", "reason", "verifier_only", "pending_requests", issue.PendingRequests)
 			})
 			source.SourceMachineID, err = configuredMachineID()
+			for errors.Is(err, os.ErrNotExist) {
+				if err = runAwaitingEnrollment(command.Context(), cfg, paths); err != nil {
+					return err
+				}
+				source.SourceMachineID, err = configuredMachineID()
+			}
 			if err != nil {
 				return err
 			}
@@ -222,7 +250,7 @@ func localDaemonCommand() *cobra.Command {
 					if homeErr != nil {
 						return homeErr
 					}
-					managedConfig = &localdaemon.ManagedSSHConfig{ServerURL: cfg.ServerURL, Auth: authSource, Store: store, CLIClientSessionID: profile.CLIClientSessionID, Home: home, RuntimeDirectory: paths.RuntimeRoot, Executable: executable, OwnerUID: uint32(os.Geteuid()), InheritedAgentSocket: os.Getenv("SSH_AUTH_SOCK")}
+					managedConfig = &localdaemon.ManagedSSHConfig{ServerURL: cfg.ServerURL, Auth: authSource, Store: store, CLIClientSessionID: profile.CLIClientSessionID, Home: home, RuntimeDirectory: paths.RuntimeRoot, Executable: executable, OwnerUID: uint32(os.Geteuid()), InheritedAgentSocket: os.Getenv("SSH_AUTH_SOCK"), AliasSuffix: cfg.DeviceSuffix}
 				}
 			}
 			store, err := config.ProfileStoreFor(cfg)
@@ -258,14 +286,64 @@ func localDaemonCommand() *cobra.Command {
 				return err
 			}
 			defer peerTunnel.Close()
+			coordinatorConfig := CoordinatorConfig{SyncAddress: cfg.ControlSyncAddress, DeviceID: source.SourceMachineID, DeviceLoopbackCIDR: cfg.DeviceLoopbackCIDR, TLSConfig: transportConfig.TLSConfig, Token: func(ctx context.Context) (string, error) {
+				credential, credentialErr := authSource.WithContext(ctx).Credential()
+				return credential.AccessToken, credentialErr
+			}}
+			if profile, profileErr := store.Load(cfg.ServerURL); profileErr == nil {
+				coordinatorConfig.ApprovePeer = func(ctx context.Context, machineID string, approved bool) error {
+					credential, credentialErr := authSource.WithContext(ctx).Credential()
+					if credentialErr != nil {
+						return credentialErr
+					}
+					client := api.New(cfg.ServerURL, credential, &http.Client{Transport: peerHTTPTransport})
+					if !approved {
+						return client.DisconnectUserMachine(ctx, machineID)
+					}
+					return localdaemon.ApproveOwnedMachineEnrollment(ctx, store, profile, client, machineID)
+				}
+			}
+			if cfg.ControlSyncAddress != "" {
+				issuer := dynamicNativePrivateGrantIssuer{serverURL: cfg.ServerURL, auth: authSource, client: &http.Client{Transport: peerHTTPTransport}}
+				access, accessErr := previewruntime.NewNativePrivateTCPAccess(previewruntime.NativePrivateTCPAccessConfig{Grants: issuer, DialSession: peerTunnel.DialPrivateSession})
+				if accessErr != nil {
+					return accessErr
+				}
+				coordinatorConfig.DNSSuffix, coordinatorConfig.DialDevice = cfg.DeviceSuffix, access.DialDevice
+				coordinatorConfig.ConnectNameClient = func(ctx context.Context) (guardedNameClient, error) {
+					return deviceguard.Connect(ctx, deviceguard.DefaultSocket)
+				}
+				coordinatorConfig.IssueCertificate = func(ctx context.Context, nameClient guardedNameClient, hostname string) (tls.Certificate, error) {
+					guard, ok := nameClient.(*deviceguard.Client)
+					if !ok {
+						return tls.Certificate{}, errors.New("protected device-name certificate client is invalid")
+					}
+					bundle, certificateErr := guard.Certificate(ctx, hostname)
+					if certificateErr != nil {
+						return tls.Certificate{}, certificateErr
+					}
+					return tls.X509KeyPair(bundle.CertificatePEM, bundle.PrivateKeyPEM)
+				}
+			}
+			coordinator, err := NewCoordinator(coordinatorConfig)
+			if err != nil {
+				return err
+			}
+			if err = coordinator.Start(command.Context()); err != nil {
+				return err
+			}
+			defer coordinator.Stop()
 			fileTransfers, err := localdaemon.NewFileTransferBroker(peerTunnel)
 			if err != nil {
 				return err
 			}
-			return localdaemon.Run(command.Context(), localdaemon.DaemonConfig{
-				Paths: paths, Source: source, ManagedSSH: managedConfig, IssuePeerStream: source.IssuePeerStream,
-				OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(),
-				TransportManager: peerManager, OpenPeerStream: localdaemon.TunnelPeerStreamOpener(peerTunnel), ProbePeer: localdaemon.TunnelPeerProbe(peerTunnel), FileTransfers: fileTransfers, InvalidatePeerAuthority: peerTunnel.InvalidateMachine, WarmPeerMetadata: peerTunnel.WarmMachines,
+			return runWithSyncFailure(command.Context(), coordinator.Errors(), func(ctx context.Context) error {
+				return localdaemon.Run(ctx, localdaemon.DaemonConfig{
+					Paths: paths, Source: source, ManagedSSH: managedConfig, IssuePeerStream: source.IssuePeerStream,
+					OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(),
+					DeviceSuffix: cfg.DeviceSuffix, DeviceLoopbackCIDR: cfg.DeviceLoopbackCIDR,
+					TransportManager: peerManager, OpenPeerStream: localdaemon.TunnelPeerStreamOpener(peerTunnel), ProbePeer: localdaemon.TunnelPeerProbe(peerTunnel), FileTransfers: fileTransfers, InvalidatePeerAuthority: peerTunnel.InvalidateMachine, WarmPeerMetadata: peerTunnel.WarmMachines,
+				})
 			})
 		},
 		SilenceUsage:  true,
@@ -388,8 +466,11 @@ func configuredMachineID() (string, error) {
 		return "", err
 	}
 	registration, err := store.Registration()
-	if err != nil || registration.MachineID == "" {
-		return "", errors.New("run `pb setup` to configure this machine")
+	if err != nil {
+		return "", err
+	}
+	if registration.MachineID == "" {
+		return "", errors.New("Paperboat machine registration is invalid")
 	}
 	return registration.MachineID, nil
 }

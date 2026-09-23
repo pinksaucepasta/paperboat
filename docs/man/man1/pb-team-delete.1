@@ -1,0 +1,50 @@
+.nh
+.TH "PB-TEAM-DELETE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-delete - Delete team membership
+
+
+.SH SYNOPSIS
+\fBpb team delete  [flags]\fP
+
+
+.SH DESCRIPTION
+Delete team membership
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--confirm\fP=""
+	exact team identifier
+
+.PP
+\fB--generation\fP=0
+	expected current team generation
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for delete
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-team(1)\fP

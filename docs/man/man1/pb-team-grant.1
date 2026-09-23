@@ -1,0 +1,50 @@
+.nh
+.TH "PB-TEAM-GRANT" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-grant - Set or revoke an explicit resource permission
+
+
+.SH SYNOPSIS
+\fBpb team grant      [flags]\fP
+
+
+.SH DESCRIPTION
+Set or revoke an explicit resource permission
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--active\fP[=true]
+	grant permission; set false to revoke
+
+.PP
+\fB--generation\fP=0
+	expected current team generation
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for grant
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-team(1)\fP

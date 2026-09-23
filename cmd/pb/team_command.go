@@ -335,7 +335,7 @@ func writeTeamOutput(c *cobra.Command, jsonOutput bool, team api.Team) error {
 			owner = machine.OwnerTeamID
 			ownership = "team"
 		}
-		if _, err = fmt.Fprintf(c.OutOrStdout(), "MACHINE\t%s\t%s\tOWNER\t%s:%s\tSTATE\t%s\tONLINE\t%t\tSHARED\t%t\n", machine.MachineID, machine.DisplayName, ownership, owner, machine.State, machine.Online, machine.Active); err != nil {
+		if _, err = fmt.Fprintf(c.OutOrStdout(), "MACHINE\t%s\t%s\tOWNER\t%s:%s\tSTATE\t%s\tONLINE\t%t\tSHARED\t%t\n", machine.MachineID, machine.Alias, ownership, owner, machine.State, machine.Online, machine.Active); err != nil {
 			return err
 		}
 	}

@@ -1,0 +1,50 @@
+.nh
+.TH "PB-TEAM-MACHINE-TRANSFER-TO-TEAM" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-machine-transfer-to-team - Explicitly transfer your enrollment to team ownership
+
+
+.SH SYNOPSIS
+\fBpb team machine transfer-to-team   [flags]\fP
+
+
+.SH DESCRIPTION
+Explicitly transfer your enrollment to team ownership
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--confirm\fP=""
+	exact machine identifier acknowledging the ownership or revocation effect
+
+.PP
+\fB--generation\fP=0
+	expected current team generation
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for transfer-to-team
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-team-machine(1)\fP

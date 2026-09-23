@@ -1,0 +1,54 @@
+.nh
+.TH "PB-PING" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-ping - Measure authenticated connectivity to a machine
+
+
+.SH SYNOPSIS
+\fBpb ping  [flags]\fP
+
+
+.SH DESCRIPTION
+Measure authenticated connectivity to a machine
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--count\fP=4
+	number of authenticated health exchanges
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for ping
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--timeout\fP=10s
+	timeout for each exchange
+
+.PP
+\fB--transport\fP="a"
+	peer transport: a, d, q, w, or r
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb(1)\fP

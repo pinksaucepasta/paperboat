@@ -5,9 +5,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -94,7 +96,15 @@ func (a *NativePrivateTCPAccess) open(ctx context.Context, routeID string) (io.R
 	if err != nil {
 		return nil, err
 	}
+	return a.openGrant(ctx, operationID, grant)
+}
+
+func (a *NativePrivateTCPAccess) openGrant(ctx context.Context, operationID string, grant api.NativePrivateGrant) (net.Conn, error) {
 	binding, err := grant.Binding()
+	if err != nil {
+		return nil, err
+	}
+	header, err := streamauth.NewNativePrivate(operationID, "private_tcp", nativePrivateOperationID(), grant.Credential, grant.ExpiresAt, a.config.MaximumBytes, binding)
 	if err != nil {
 		return nil, err
 	}
@@ -102,28 +112,34 @@ func (a *NativePrivateTCPAccess) open(ctx context.Context, routeID string) (io.R
 	if err != nil {
 		return nil, err
 	}
-	header, err := streamauth.NewNativePrivate(operationID, "private_tcp", nativePrivateOperationID(), grant.Credential, grant.ExpiresAt, a.config.MaximumBytes, binding)
-	if err != nil {
-		_ = session.Close()
-		return nil, err
-	}
 	connection, err := session.OpenAuthorized(ctx, header, grant.Target.AccessSessionID, "private_access")
 	if err != nil {
 		_ = session.Close()
 		return nil, err
 	}
+	stopCancel := context.AfterFunc(ctx, func() { _ = connection.Close(); _ = session.Close() })
+	defer stopCancel()
 	deadline := a.config.Now().Add(10 * time.Second)
 	if grant.ExpiresAt.Before(deadline) {
 		deadline = grant.ExpiresAt
 	}
-	_ = connection.SetReadDeadline(deadline)
+	if err = connection.SetReadDeadline(deadline); err != nil {
+		_ = connection.Close()
+		_ = session.Close()
+		return nil, err
+	}
 	var ready [1]byte
 	_, err = io.ReadFull(connection, ready[:])
-	_ = connection.SetReadDeadline(time.Time{})
+	err = errors.Join(err, connection.SetReadDeadline(time.Time{}))
 	if err != nil || ready[0] != 0 {
 		_ = connection.Close()
 		_ = session.Close()
 		return nil, ErrPrivateTCPClientUnavailable
+	}
+	if ctx.Err() != nil {
+		_ = connection.Close()
+		_ = session.Close()
+		return nil, ctx.Err()
 	}
 	return &nativePrivateTCPConnection{Conn: connection, session: session}, nil
 }
@@ -175,9 +191,41 @@ func nativePrivateOperationID() string {
 
 type nativePrivateTCPConnection struct {
 	net.Conn
-	session NativePrivateSession
+	session  NativePrivateSession
+	once     sync.Once
+	closeErr error
 }
 
 func (c *nativePrivateTCPConnection) Close() error {
-	return errors.Join(c.Conn.Close(), c.session.Close())
+	c.once.Do(func() { c.closeErr = errors.Join(c.Conn.Close(), c.session.Close()) })
+	return c.closeErr
+}
+
+// DialDevice obtains a fresh exact-port grant before consulting network reachability.
+func (a *NativePrivateTCPAccess) DialDevice(ctx context.Context, machineID string, port int) (net.Conn, error) {
+	if a == nil || ctx == nil || machineID == "" || port < 1 || port > 65535 {
+		return nil, ErrPrivateTCPClientInvalid
+	}
+	operation := nativePrivateOperationID()
+	route := "tcp:" + strconv.Itoa(port)
+	grant, err := a.issue(ctx, api.NativePrivateGrantRequest{OperationID: operation, ResourceKind: "device_service", ResourceID: machineID, RouteID: route, Protocol: "tcp"})
+	if err != nil {
+		return nil, mapNativePrivateTCPAccessError(err)
+	}
+	raw, err := grant.Binding()
+	if err != nil {
+		return nil, err
+	}
+	binding, err := nativeprivate.Decode(raw, a.config.Now())
+	if err != nil || binding.ResourceKind != "device_service" || binding.ResourceID != machineID || binding.OwnerEndpointID != machineID || binding.RouteID != route || grant.Credential == "" || grant.Target.AccessSessionID == "" {
+		return nil, ErrPrivateTCPAccessForbidden
+	}
+	return a.openGrant(ctx, operation, grant)
+}
+
+func (c *nativePrivateTCPConnection) CloseWrite() error {
+	if half, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return half.CloseWrite()
+	}
+	return c.Close()
 }

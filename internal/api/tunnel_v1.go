@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 const TunnelV1Schema = "paperboat.preview-tunnel/v1"
@@ -992,18 +993,19 @@ func responseETag(headers http.Header, body string) error {
 // from APIError so server-owned diagnostic fields never accidentally become
 // part of a normal success response type.
 type tunnelWireError struct {
-	Schema        string         `json:"schema"`
-	Kind          string         `json:"kind"`
-	Code          string         `json:"code"`
-	Component     string         `json:"component"`
-	Message       string         `json:"message"`
-	Outcome       string         `json:"outcome"`
-	Retryable     *bool          `json:"retryable"`
-	RetryAt       *time.Time     `json:"retry_at"`
-	RepairAction  string         `json:"repair_action"`
-	RequestID     string         `json:"request_id"`
-	CorrelationID string         `json:"correlation_id"`
-	Details       map[string]any `json:"details"`
+	Schema           string         `json:"schema"`
+	Kind             string         `json:"kind"`
+	Code             string         `json:"code"`
+	Component        string         `json:"component"`
+	Message          string         `json:"message"`
+	Outcome          string         `json:"outcome"`
+	Retryable        *bool          `json:"retryable"`
+	RetryAt          *time.Time     `json:"retry_at"`
+	RepairAction     string         `json:"repair_action"`
+	RequestID        string         `json:"request_id"`
+	CorrelationID    string         `json:"correlation_id"`
+	SupportReference string         `json:"support_reference"`
+	Details          map[string]any `json:"details"`
 }
 
 type tunnelWireEnvelope struct {
@@ -1136,6 +1138,10 @@ func (c *Client) doTunnelRequest(ctx context.Context, method, requestPath string
 	req.Header.Set("User-Agent", "paperboat/"+buildinfo.Version)
 	req.Header.Set("X-Paperboat-Client", "paperboat")
 	req.Header.Set("X-Paperboat-Protocol", buildinfo.ProtocolVersion)
+	requestSupportReference := supportref.FromContext(ctx)
+	if requestSupportReference != "" {
+		req.Header.Set(supportref.Header, requestSupportReference)
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -1205,7 +1211,7 @@ func (c *Client) doTunnelRequest(ctx context.Context, method, requestPath string
 	var envelope tunnelWireEnvelope
 	if err := decodeTunnelJSONStrict(raw, &envelope); err != nil {
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return &APIError{Status: resp.StatusCode, Code: "invalid_server_response", Message: "paperboat-server returned an invalid error response", RequestID: responseRequestID(resp.Header)}
+			return &APIError{Status: resp.StatusCode, Code: "invalid_server_response", Message: "paperboat-server returned an invalid error response", RequestID: responseRequestID(resp.Header), SupportReference: responseOrRequestSupportReference(resp.Header, "", requestSupportReference)}
 		}
 		return fmt.Errorf("decode %s %s response: %w", method, requestPath, err)
 	}
@@ -1225,7 +1231,7 @@ func (c *Client) doTunnelRequest(ctx context.Context, method, requestPath string
 		if code == "" {
 			code = "server_error"
 		}
-		return &APIError{Status: resp.StatusCode, Code: code, Message: redactTunnelText(envelope.Error.Message), RequestID: responseRequestID(resp.Header), Details: details}
+		return &APIError{Status: resp.StatusCode, Code: code, Message: redactTunnelText(envelope.Error.Message), RequestID: responseRequestID(resp.Header), SupportReference: responseOrRequestSupportReference(resp.Header, envelope.Error.SupportReference, requestSupportReference), Details: details}
 	}
 	if out == nil {
 		return nil
@@ -1234,6 +1240,16 @@ func (c *Client) doTunnelRequest(ctx context.Context, method, requestPath string
 		return fmt.Errorf("decode %s %s data: %w", method, requestPath, err)
 	}
 	return nil
+}
+
+func responseOrRequestSupportReference(header http.Header, bodyReference, requestReference string) string {
+	if value := header.Get(supportref.Header); supportref.Valid(value) {
+		return value
+	}
+	if supportref.Valid(bodyReference) {
+		return bodyReference
+	}
+	return requestReference
 }
 
 func tunnelResponseKind(raw json.RawMessage) (string, error) {
