@@ -8,6 +8,7 @@ on:
         required: true
         type: choice
         options:
+          - restore-ssh-and-update-pb
           - reenroll-victus
           - inspect-recovery
           - restore-victus-qualification-state
@@ -495,3 +496,33 @@ jobs:
           }
           if ($paperboatSshd.Status -ne 'Running') { Start-Service PaperboatSshd -ErrorAction Stop }
           Get-Service PaperboatHostd,PaperboatUpdated,PaperboatSshd | Format-Table Name,Status,StartType
+
+  restore-ssh-and-update-pb:
+    if: inputs.action == 'restore-ssh-and-update-pb'
+    runs-on: [self-hosted, Windows, X64, paperboat-windows-11-iot-ltsc]
+    timeout-minutes: 5
+    steps:
+      - name: Restore OpenSSH firewall rule and update pb
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          netsh.exe advfirewall firewall add rule name="OpenSSH-Server-In-TCP" dir=in action=allow protocol=TCP localport=22 profile=any
+          netsh.exe advfirewall firewall add rule name="OpenSSH-Server-In-TCP-38222" dir=in action=allow protocol=TCP localport=38222 profile=any
+          netsh.exe advfirewall firewall add rule name="Tailscale-UDP" dir=in action=allow edge=yes protocol=UDP profile=any
+          
+          if (Test-Path 'C:\Users\pujan\pb.exe') {
+            Stop-Service PaperboatHostd*,PaperboatUpdated*,PaperboatSshd*,PaperboatLocalDaemon* -Force -ErrorAction SilentlyContinue
+            Get-Process pb -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+            
+            $dest = 'C:\Program Files\Paperboat\users\uba6bceb9290ebd807a30e102\bin\pb.exe'
+            if (Test-Path $dest) {
+              Copy-Item 'C:\Users\pujan\pb.exe' $dest -Force
+            }
+            netsh.exe advfirewall firewall add rule name="Paperboat-Process" dir=in action=allow edge=yes program="$dest" protocol=udp profile=any enable=yes
+            netsh.exe advfirewall firewall add rule name="Paperboat-Process-TCP" dir=in action=allow program="$dest" protocol=tcp profile=any enable=yes
+            netsh.exe advfirewall firewall add rule name="Paperboat-User-Pb" dir=in action=allow edge=yes program="C:\Users\pujan\pb.exe" protocol=udp profile=any enable=yes
+            
+            Start-Service PaperboatHostd*,PaperboatUpdated*,PaperboatSshd*,PaperboatLocalDaemon* -ErrorAction SilentlyContinue
+          }
+          Write-Output 'Firewall rules restored and pb updated.'
