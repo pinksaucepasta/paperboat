@@ -6,6 +6,10 @@ Deliberately replay one retained HTTP request to the same origin
 
 Deliberately replay one retained HTTP request to the same origin
 
+Replay one retained HTTP request to the same tunnel origin and route. This can repeat a side effect; use the capture identity and optional idempotency key deliberately.
+
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+
 JSON output is supported with --json.
 
 ```

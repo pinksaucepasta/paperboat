@@ -20,7 +20,7 @@ func FuzzParseCertificate(f *testing.F) {
 	now := time.Unix(1_800_000_000, 0).UTC()
 	valid, err := Sign(rootPrivate, Claims{
 		AccountID: "account_01", EndpointID: "machine_01", Role: RoleMachine,
-		NoisePublicKey: noiseKey(1), QUICPublicKey: quicPublic,
+		QUICPublicKey: quicPublic,
 		Generation: 1, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour),
 	})
 	if err != nil {
@@ -65,7 +65,7 @@ func FuzzVerifyCertificate(f *testing.F) {
 	expected := Expected{AccountID: "account_01", EndpointID: "machine_01", Role: RoleMachine, Generation: 3}
 	valid, err := Sign(rootPrivate, Claims{
 		AccountID: expected.AccountID, EndpointID: expected.EndpointID, Role: expected.Role,
-		NoisePublicKey: noiseKey(2), QUICPublicKey: quicPublic,
+		QUICPublicKey: quicPublic,
 		Generation: expected.Generation, Serial: 9, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour),
 	})
 	if err != nil {

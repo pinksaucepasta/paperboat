@@ -591,10 +591,18 @@ func TestManagerResumesActivationWithoutReplayingSingleUseExchange(t *testing.T)
 	}))
 	defer server.Close()
 	store, _ := NewFileCredentialStore(t.TempDir())
-	failed := &testActivator{err: errors.New("bootstrap unavailable")}
+	failed := &testActivator{err: errors.Join(ErrConflict, &ActivationDiagnostic{Code: ActivationDiagnosticAssemblyBinding, Cause: errors.New("bootstrap unavailable")})}
 	manager, _ := NewManager(ManagerConfig{ControlURL: server.URL, HostID: "host_01", Auth: &testAuth{}, Transport: server.Client().Transport, Credentials: store, Activator: failed, ControlToken: "local-token"})
 	if _, err := manager.Enroll(context.Background(), "tunnel_02", "local-request-02"); !errors.Is(err, ErrActivation) {
 		t.Fatalf("err=%v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/tunnel-connectors/enroll", strings.NewReader(`{"schema":"`+Schema+`","kind":"tunnel_connector_enrollment_request","tunnel_id":"tunnel_02"}`))
+	request.Header.Set("Authorization", "Bearer local-token")
+	request.Header.Set("Idempotency-Key", "local-request-02b")
+	response := httptest.NewRecorder()
+	manager.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), `"code":"activation_unavailable"`) || !strings.Contains(response.Body.String(), `"diagnostic":"assembly_binding"`) {
+		t.Fatalf("activation response status=%d body=%s", response.Code, response.Body.String())
 	}
 	success := &testActivator{}
 	manager, _ = NewManager(ManagerConfig{ControlURL: server.URL, HostID: "host_01", Auth: &testAuth{}, Transport: server.Client().Transport, Credentials: store, Activator: success, ControlToken: "local-token"})

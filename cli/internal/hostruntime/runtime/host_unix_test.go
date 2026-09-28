@@ -69,12 +69,6 @@ type hostProber struct{}
 
 func (hostProber) Probe(context.Context, preview.Target) error { return nil }
 
-type hostedLifecycleStub struct{}
-
-func (hostedLifecycleStub) Start(context.Context) error    { return nil }
-func (hostedLifecycleStub) Shutdown(context.Context) error { return nil }
-func (hostedLifecycleStub) Capabilities() []string         { return []string{"hosted.lifecycle.v1"} }
-
 type testSessionLauncher struct {
 	sessions *session.Manager
 	path     string
@@ -231,31 +225,6 @@ func TestHostCompositionRejectsMissingTrustBoundaryBeforeStateCreation(t *testin
 	}
 	if _, err := os.Stat(filepath.Join(root, "state.db")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("state file err=%v", err)
-	}
-}
-
-func TestHostCompositionEnforcesHostedProfileBoundary(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		profile runtimeconfig.Profile
-		hosted  HostedLifecycle
-	}{
-		{name: "hosted requires lifecycle", profile: runtimeconfig.Hosted},
-		{name: "byod forbids lifecycle", profile: runtimeconfig.BYOD, hosted: hostedLifecycleStub{}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			root := t.TempDir()
-			runtimeConfig := runtimeconfig.Config{Profile: tc.profile, StateRoot: root, Version: "test", Limits: runtimeconfig.DefaultLimits, Resources: runtimeconfig.DefaultResources}
-			_, err := NewHost(context.Background(), HostConfig{Runtime: runtimeConfig, ListenAddress: "127.0.0.1:0", WorkspaceRoot: root}, HostDependencies{
-				Authorizer: func(string) (server.Authorizer, error) { return hostAuthorizer{}, nil }, HostedLifecycle: tc.hosted,
-			})
-			if !errors.Is(err, ErrHostInvalid) {
-				t.Fatalf("error=%v", err)
-			}
-			if _, err := os.Stat(filepath.Join(root, "state.db")); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("state file error=%v", err)
-			}
-		})
 	}
 }
 

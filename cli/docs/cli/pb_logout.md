@@ -6,6 +6,8 @@ Revoke and remove the active client session
 
 Revoke and remove the active client session
 
+Revoke and remove the current CLI client session. This top-level command has the same account effect as pb auth logout and reports any pending server revocation.
+
 JSON output is supported with --json.
 
 ```

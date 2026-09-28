@@ -6,6 +6,10 @@ Drain a tunnel connector
 
 Drain a tunnel connector
 
+Stop assigning new work to one connector and optionally wait for existing work to finish. --timeout bounds the wait; the connector remains distinct from a revoked one.
+
+Connectors attach an enrolled host to a durable tunnel. Drain stops new work while allowing existing work to wind down; revoke removes connector authority. Inspect connector state before replacing or removing one.
+
 JSON output is supported with --json.
 
 ```

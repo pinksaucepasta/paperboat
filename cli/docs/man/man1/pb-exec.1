@@ -6,11 +6,14 @@ pb-exec - Execute an exact command on a machine
 
 
 .SH SYNOPSIS
-\fBpb exec  [flags] -- \fP
+\fBpb exec <machine> [flags] -- <argv...>\fP
 
 
 .SH DESCRIPTION
 Execute an exact command on a machine
+
+.PP
+Run the exact argv after -- on the selected device, with optional working directory, environment entries, PTY, and timeout. Output and exit status come from the remote command; use --json for structured events.
 
 .PP
 JSON output is supported with --json.
@@ -39,10 +42,6 @@ JSON output is supported with --json.
 .PP
 \fB--timeout\fP=0s
 	remote execution timeout
-
-.PP
-\fB--transport\fP=""
-	peer transport: a, d, q, w, or r
 
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS

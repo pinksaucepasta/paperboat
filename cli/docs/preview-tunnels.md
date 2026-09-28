@@ -96,8 +96,11 @@ the saved desired state. Deleting is an explicit destructive operation.
 ```console
 pb tunnel pause api --wait
 pb tunnel resume api --wait
-pb tunnel delete api --yes --wait
+pb tunnel delete api --wait
 ```
+
+Deleting and other destructive tunnel changes first show their effect and a confirmation
+command. Run the displayed command within five minutes to proceed.
 
 ## Routes and origins
 
@@ -132,7 +135,7 @@ pb tunnel domain add api api.example.com --route web
 pb tunnel domain instructions api api.example.com --json
 pb tunnel domain verify api api.example.com --wait --timeout 10m
 pb tunnel domain list api
-pb tunnel domain remove api api.example.com --yes --wait
+pb tunnel domain remove api api.example.com --wait
 ```
 
 Apply only the provider-aware instructions returned by Paperboat. For a
@@ -158,8 +161,8 @@ Make a replacement ready before draining the old connector:
 
 ```console
 pb tunnel connector drain api <connector> --wait --timeout 10m
-pb tunnel credentials rotate api --yes --wait --timeout 10m
-pb tunnel connector revoke api <connector> --yes --wait --timeout 10m
+pb tunnel credentials rotate api --wait --timeout 10m
+pb tunnel connector revoke api <connector> --wait --timeout 10m
 ```
 
 Rotation captures an immutable target set, proves the new key for each target,

@@ -57,6 +57,8 @@ type Claims struct {
 	EnvironmentID          string              `json:"environment_id,omitempty"`
 	AccountID              string              `json:"account_id,omitempty"`
 	UserID                 string              `json:"user_id,omitempty"`
+	BrowserAttachmentID    string              `json:"browser_attachment_id,omitempty"`
+	BrowserPublicKeySHA256 string              `json:"browser_public_key_sha256,omitempty"`
 	ActorID                string              `json:"actor_id,omitempty"`
 	CLIClientSessionID     string              `json:"cli_client_session_id,omitempty"`
 	HelperID               string              `json:"helper_id,omitempty"`
@@ -120,7 +122,11 @@ type Policy struct {
 	Issuer          string
 	Audience        string
 	CredentialClass string
-	Scopes          []string
+	// AllowedCredentialClasses permits exact additional classes for a narrowly
+	// shared protocol boundary. CredentialClass remains the primary class and
+	// every accepted value is matched exactly.
+	AllowedCredentialClasses []string
+	Scopes                   []string
 	// AnyScopes permits one of several exact scope sets. It is mutually
 	// exclusive with Scopes and never performs subset matching.
 	AnyScopes           [][]string
@@ -211,13 +217,20 @@ func (v Verifier) Verify(ctx context.Context, token string, policy Policy) (Clai
 	if err := decodeSegment(parts[1], &claims); err != nil {
 		return Claims{}, &Error{Code: Malformed, Cause: err}
 	}
+	if claims.CredentialClass == "browser_terminal_operation" {
+		if !validBrowserPublicKeyDigest(claims.BrowserPublicKeySHA256) {
+			return Claims{}, &Error{Code: BindingInvalid}
+		}
+	} else if claims.BrowserPublicKeySHA256 != "" {
+		return Claims{}, &Error{Code: BindingInvalid}
+	}
 	if claims.Issuer != policy.Issuer {
 		return Claims{}, &Error{Code: BindingInvalid}
 	}
 	if claims.Audience != policy.Audience {
 		return Claims{}, &Error{Code: AudienceInvalid}
 	}
-	if claims.CredentialClass != policy.CredentialClass || !bindingsMatch(claims, policy) || claims.UserID != "" && claims.Subject != claims.UserID {
+	if !credentialClassMatches(claims.CredentialClass, policy) || !bindingsMatch(claims, policy) || claims.UserID != "" && claims.Subject != claims.UserID {
 		return Claims{}, &Error{Code: BindingInvalid}
 	}
 	if !policyScopesMatch(claims.Scope, policy) {
@@ -251,6 +264,38 @@ func (v Verifier) Verify(ctx context.Context, token string, policy Policy) (Clai
 		}
 	}
 	return claims, nil
+}
+
+// validBrowserPublicKeyDigest accepts only the canonical unpadded base64url
+// encoding of a 32-byte SHA-256 digest. The digest is over the browser TLS
+// certificate's SubjectPublicKeyInfo DER bytes.
+func validBrowserPublicKeyDigest(value string) bool {
+	if len(value) != 43 {
+		return false
+	}
+	digest, err := base64.RawURLEncoding.Strict().DecodeString(value)
+	return err == nil && len(digest) == 32 && base64.RawURLEncoding.EncodeToString(digest) == value
+}
+
+func credentialClassMatches(actual string, policy Policy) bool {
+	if policy.CredentialClass == "" {
+		return false
+	}
+	classes := make(map[string]struct{}, len(policy.AllowedCredentialClasses))
+	for _, class := range policy.AllowedCredentialClasses {
+		if class == "" || class == policy.CredentialClass {
+			return false
+		}
+		if _, exists := classes[class]; exists {
+			return false
+		}
+		classes[class] = struct{}{}
+	}
+	if actual == policy.CredentialClass {
+		return true
+	}
+	_, ok := classes[actual]
+	return ok
 }
 
 func policyScopesMatch(actual []string, policy Policy) bool {

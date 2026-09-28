@@ -6,6 +6,10 @@ Revoke and remove the active client session
 
 Revoke and remove the active client session
 
+Revoke the current client session at the server and remove its local credential. If server cancellation cannot complete, the command reports the pending state so revocation can be retried.
+
+Sign-in credentials are stored in the selected local profile for its configured Paperboat server. Account commands use that profile; a missing or rejected session must be repaired with pb auth login before protected resources can be used.
+
 JSON output is supported with --json.
 
 ```

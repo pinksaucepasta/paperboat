@@ -19,14 +19,9 @@ run_compose() {
   PAPERBOAT_RELEASE_REPOSITORY=https://releases.paperboat.test \
   PAPERBOAT_MACHINE_ID=mch_container_test \
   PAPERBOAT_CONTROL_URL=https://api.paperboat.test \
-  PAPERBOAT_SSH_PORT=22 \
-  PAPERBOAT_PROJECT_ID=prj_container_test \
-  PAPERBOAT_REPOSITORY_URL=https://github.com/example/project.git \
-  PAPERBOAT_MACHINE_GENERATION=1 \
   PAPERBOAT_ENROLLMENT_CREDENTIAL=test-enrollment \
   compose -f "$1" config >/dev/null
 }
 
-run_compose deploy/hosted/compose.yaml
 run_compose deploy/self-hosted/compose.yaml
 echo "container compose: valid"

@@ -6,11 +6,14 @@ pb-connect - Create and attach to an environment terminal session
 
 
 .SH SYNOPSIS
-\fBpb connect  [new] [flags]\fP
+\fBpb connect <environment> [new] [flags]\fP
 
 
 .SH DESCRIPTION
 Create and attach to an environment terminal session
+
+.PP
+Select an environment by name, create or reattach a durable terminal session, and bridge the local terminal. Use --session for a specific session or new to start another one; connection status is reported separately from readiness.
 
 .PP
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
@@ -43,10 +46,6 @@ This command does not support --json output; it rejects that mode before executi
 .PP
 \fB--status-bar-theme\fP=""
 	status bar theme: terminal, dark, light, or mono
-
-.PP
-\fB--transport\fP=""
-	peer transport: a (auto), d (direct QUIC), q (relay QUIC), w (relay WSS), or r (relay race)
 
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS

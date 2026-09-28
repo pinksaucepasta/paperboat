@@ -54,19 +54,19 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb daemon](pb_daemon.md) | Paperboat endpoint daemon |
 | [pb daemon device-guard](pb_daemon_device-guard.md) | Manage protected device-name access |
 | [pb daemon device-guard install](pb_daemon_device-guard_install.md) | Install the root-owned device guard service |
-| [pb daemon device-guard run](pb_daemon_device-guard_run.md) |  |
+| [pb daemon device-guard run](pb_daemon_device-guard_run.md) | Run the device guard under service supervision |
 | [pb daemon device-guard uninstall](pb_daemon_device-guard_uninstall.md) | Remove device access while retaining cached-address protection |
 | [pb daemon run](pb_daemon_run.md) | Run Paperboat daemon under service supervision |
-| [pb daemon service](pb_daemon_service.md) | Manage the Paperboat background daemon service |
-| [pb daemon service install](pb_daemon_service_install.md) | Install Paperboat daemon as the current-user service |
-| [pb daemon service restart](pb_daemon_service_restart.md) | Restart Paperboat daemon current-user service |
-| [pb daemon service start](pb_daemon_service_start.md) | Start Paperboat daemon current-user service |
-| [pb daemon service status](pb_daemon_service_status.md) | Show Paperboat daemon current-user service status |
-| [pb daemon service stop](pb_daemon_service_stop.md) | Stop Paperboat daemon current-user service |
-| [pb daemon service uninstall](pb_daemon_service_uninstall.md) | Uninstall Paperboat daemon current-user service |
-| [pb desktop](pb_desktop.md) | Authenticated desktop management bridge |
-| [pb desktop request](pb_desktop_request.md) |  |
+| [pb device](pb_device.md) | Manage devices |
+| [pb device add](pb_device_add.md) | Print Linux/macOS and Windows device enrollment commands |
+| [pb device availability](pb_device_availability.md) | Set device sleep availability |
+| [pb device capabilities](pb_device_capabilities.md) | Set incoming services for a device |
+| [pb device list](pb_device_list.md) | List enrolled devices |
+| [pb device rename](pb_device_rename.md) | Rename a device |
+| [pb device revoke](pb_device_revoke.md) | Disconnect and revoke a device |
 | [pb doctor](pb_doctor.md) | Check Paperboat connectivity and readiness |
+| [pb edge](pb_edge.md) | Inspect tunnel edges |
+| [pb edge list](pb_edge_list.md) | List hosted and self-hosted tunnel edges |
 | [pb env](pb_env.md) | Manage ENV Injection for connected hosts |
 | [pb env grants](pb_env_grants.md) | Reconcile encrypted ENV team grants |
 | [pb env grants sync](pb_env_grants_sync.md) | Accept pending team grants into this account's encrypted vault |
@@ -93,7 +93,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb env vault reset](pb_env_vault_reset.md) | Replace personal ENV keys and delete every personal value |
 | [pb env vault resume](pb_env_vault_resume.md) | Reconcile an interrupted vault publication |
 | [pb env vault unlock](pb_env_vault_unlock.md) | Unlock this account's ENV vault on this device |
-| [pb environments](pb_environments.md) | List machines available to this account |
+| [pb environments](pb_environments.md) | List enrolled machines available to this account |
 | [pb exec](pb_exec.md) | Execute an exact command on a machine |
 | [pb inbox](pb_inbox.md) | Manage the Paperboat Inbox |
 | [pb inbox approve](pb_inbox_approve.md) | Approve an exact team file request |
@@ -105,13 +105,6 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb inbox set](pb_inbox_set.md) |  |
 | [pb install](pb_install.md) | Install this executable and its local service |
 | [pb logout](pb_logout.md) | Revoke and remove the active client session |
-| [pb machine](pb_machine.md) | Manage machines |
-| [pb machine add](pb_machine_add.md) | Print Linux/macOS and Windows machine enrollment commands |
-| [pb machine availability](pb_machine_availability.md) | Set machine sleep availability |
-| [pb machine capabilities](pb_machine_capabilities.md) | Set incoming services for a device |
-| [pb machine list](pb_machine_list.md) | List enrolled machines |
-| [pb machine rename](pb_machine_rename.md) | Rename a machine |
-| [pb machine revoke](pb_machine_revoke.md) | Disconnect and revoke a machine |
 | [pb pair](pb_pair.md) | Enroll this device with a one-shot token |
 | [pb ping](pb_ping.md) | Measure authenticated connectivity to a machine |
 | [pb preview](pb_preview.md) | Expose a local target through a temporary preview |
@@ -121,13 +114,19 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb preview replay](pb_preview_replay.md) | Deliberately replay one retained HTTP request to the same origin |
 | [pb preview status](pb_preview_status.md) | Show temporary preview status |
 | [pb preview stop](pb_preview_stop.md) | Stop a temporary preview |
-| [pb relay](pb_relay.md) | Inspect Paperboat relays |
-| [pb relay list](pb_relay_list.md) | List relays and measure current latency |
+| [pb relay](pb_relay.md) | Inspect hosted and self-hosted relays |
+| [pb relay list](pb_relay_list.md) | List hosted and self-hosted relays |
 | [pb reset](pb_reset.md) | Remove the current Paperboat setup before fresh enrollment |
 | [pb resolve](pb_resolve.md) | Resolve a peer device IP, port forwardings and tags over gRPC IPC |
 | [pb rsync](pb_rsync.md) | Run rsync with Paperboat machine resolution |
 | [pb scp](pb_scp.md) | Run scp with Paperboat machine resolution |
-| [pb send](pb_send.md) | Send files to a machine's Paperboat Inbox |
+| [pb send](pb_send.md) | Send files to a device's Paperboat Inbox |
+| [pb send cancel](pb_send_cancel.md) | Cancel a file transfer batch |
+| [pb send destination](pb_send_destination.md) | Show the default transfer destination |
+| [pb send destination clear](pb_send_destination_clear.md) | Clear the default transfer destination |
+| [pb send destination set](pb_send_destination_set.md) | Set the default transfer destination |
+| [pb send list](pb_send_list.md) | List file transfers |
+| [pb send status](pb_send_status.md) | Inspect a file transfer |
 | [pb service](pb_service.md) | Manage the Paperboat background daemon service |
 | [pb service install](pb_service_install.md) | Install Paperboat daemon as the current-user service |
 | [pb service restart](pb_service_restart.md) | Restart Paperboat daemon current-user service |
@@ -138,7 +137,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb session](pb_session.md) | Manage environment terminal sessions |
 | [pb session attach](pb_session_attach.md) | Choose and attach to a durable terminal session |
 | [pb session close](pb_session_close.md) | Close one or all terminal sessions |
-| [pb session delete](pb_session_delete.md) | Delete a terminal session and its history |
+| [pb session delete](pb_session_delete.md) | Delete a closed terminal session record |
 | [pb session join](pb_session_join.md) | Join an explicitly shared terminal with recent output |
 | [pb session list](pb_session_list.md) | List durable terminal sessions |
 | [pb session participants](pb_session_participants.md) | Show terminal sharing and connected participants |
@@ -147,10 +146,6 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb session share](pb_session_share.md) | Grant a team or teammate viewer or interactive access |
 | [pb session shared](pb_session_shared.md) | List owned and explicitly shared terminal sessions |
 | [pb session unshare](pb_session_unshare.md) | End sharing while preserving the owner's terminal |
-| [pb sessions](pb_sessions.md) |  |
-| [pb sessions close](pb_sessions_close.md) | Close one or all terminal sessions |
-| [pb sessions delete](pb_sessions_delete.md) | Delete a terminal session and its history |
-| [pb sessions rename](pb_sessions_rename.md) | Rename a terminal session |
 | [pb setup](pb_setup.md) | Set up this machine for Paperboat |
 | [pb sftp](pb_sftp.md) | Run sftp with Paperboat machine resolution |
 | [pb ssh](pb_ssh.md) | Connect to a machine with OpenSSH |
@@ -164,28 +159,21 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb team attach](pb_team_attach.md) | Attach or detach an explicitly selected personal resource |
 | [pb team cancel-invite](pb_team_cancel-invite.md) | Cancel an outstanding invitation |
 | [pb team create](pb_team_create.md) | Create a team |
-| [pb team delete](pb_team_delete.md) | Delete team membership |
-| [pb team get](pb_team_get.md) | Get teams |
+| [pb team delete](pb_team_delete.md) | Delete a team |
+| [pb team device](pb_team_device.md) | Share devices and manage exact team access |
+| [pb team device grant](pb_team_device_grant.md) | Set all-member or selected-member device capabilities |
+| [pb team device remove](pb_team_device_remove.md) | Revoke a team-owned device without personal takeover |
+| [pb team device share](pb_team_device_share.md) | Share your personal device with a team; grants are separate |
+| [pb team device transfer-to-team](pb_team_device_transfer-to-team.md) | Explicitly transfer your enrollment to team ownership |
+| [pb team device unshare](pb_team_device_unshare.md) | Withdraw the team's grants while retaining personal ownership |
+| [pb team get](pb_team_get.md) | Show one team and its current generation |
 | [pb team grant](pb_team_grant.md) | Set or revoke an explicit resource permission |
 | [pb team invite](pb_team_invite.md) | Invite an account as a member |
-| [pb team leave](pb_team_leave.md) | Leave team membership |
+| [pb team leave](pb_team_leave.md) | Leave a team |
 | [pb team list](pb_team_list.md) | List teams |
-| [pb team machine](pb_team_machine.md) | Share machines and manage exact team access |
-| [pb team machine grant](pb_team_machine_grant.md) | Set all-member or selected-member machine capabilities |
-| [pb team machine remove](pb_team_machine_remove.md) | Revoke a team-owned machine without personal takeover |
-| [pb team machine share](pb_team_machine_share.md) | Share your personal machine with a team; grants are separate |
-| [pb team machine transfer-to-team](pb_team_machine_transfer-to-team.md) | Explicitly transfer your enrollment to team ownership |
-| [pb team machine unshare](pb_team_machine_unshare.md) | Withdraw the team's grants while retaining personal ownership |
-| [pb team remove](pb_team_remove.md) | Remove team membership |
-| [pb team role](pb_team_role.md) | Role team membership |
-| [pb team transfer](pb_team_transfer.md) | Transfer team membership |
-| [pb transfer](pb_transfer.md) | Manage file transfers |
-| [pb transfer cancel](pb_transfer_cancel.md) | Cancel a file transfer batch |
-| [pb transfer destination](pb_transfer_destination.md) | Show the default transfer destination |
-| [pb transfer destination clear](pb_transfer_destination_clear.md) | Clear the default transfer destination |
-| [pb transfer destination set](pb_transfer_destination_set.md) | Set the default transfer destination |
-| [pb transfer list](pb_transfer_list.md) | List file transfers |
-| [pb transfer status](pb_transfer_status.md) | Inspect a file transfer |
+| [pb team remove](pb_team_remove.md) | Remove a team member |
+| [pb team role](pb_team_role.md) | Change a team member's role |
+| [pb team transfer](pb_team_transfer.md) | Transfer team ownership |
 | [pb tunnel](pb_tunnel.md) | Manage durable tunnels or start an ephemeral tunnel |
 | [pb tunnel connector](pb_tunnel_connector.md) | Manage tunnel connectors |
 | [pb tunnel connector add](pb_tunnel_connector_add.md) | Add a connector on this host |

@@ -13,6 +13,12 @@ pb-team-list - List teams
 List teams
 
 .PP
+List teams visible to the signed-in account and their basic state. Select one with pb team get to inspect its current generation and grants.
+
+.PP
+Teams use explicit membership and resource grants. Membership alone does not grant device use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+
+.PP
 JSON output is supported with --json.
 
 

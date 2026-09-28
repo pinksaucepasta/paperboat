@@ -42,11 +42,6 @@ func DeviceAuthorize(ctx context.Context, baseURL, label, deviceType, osName str
 	return out, err
 }
 
-func DeviceToken(ctx context.Context, baseURL, code string, hc *http.Client) (TokenSet, error) {
-	var out TokenSet
-	err := publicCall(ctx, baseURL, "/v1/auth/device/token", map[string]any{"client_id": ClientID, "device_code": code}, "", &out, hc)
-	return out, err
-}
 func RevokeToken(ctx context.Context, baseURL, token string, hc *http.Client) error {
 	return publicCall(ctx, baseURL, "/v1/auth/token/revoke", nil, token, nil, hc)
 }

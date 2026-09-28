@@ -38,7 +38,7 @@ pb config customize [flags]
   pb config customize show --json
   pb config customize explain -- mac -- uptime
   pb config customize import ./preferences.json
-  pb config customize reset --yes
+  pb config customize reset
 ```
 
 ### Options

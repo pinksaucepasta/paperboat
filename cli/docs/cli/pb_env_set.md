@@ -6,6 +6,10 @@ Set one environment variable through a hidden prompt or bounded stdin
 
 Set one environment variable through a hidden prompt or bounded stdin
 
+Set one exact ENV name using a hidden interactive prompt, a bounded stdin stream, or --value-file. Use --team or --machine to choose a nonpersonal scope; the value is never part of the command output.
+
+ENV values are encrypted before they leave the client. Commands select personal, team, or host scope explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
+
 JSON output is supported with --json.
 
 ```

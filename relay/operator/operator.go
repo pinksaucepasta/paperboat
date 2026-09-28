@@ -108,7 +108,10 @@ func validate(s Setup) (Setup, error) {
 	if s.TCPPort < 1 || s.TCPPort > 65535 || s.QUICPort < 1 || s.QUICPort > 65535 {
 		return Setup{}, errors.New("TCP and QUIC ports must be between 1 and 65535")
 	}
-	if s.Capability == "tunnel" && (s.TCPPort == s.QUICPort || (s.TCPPort == 80 || s.TCPPort == 443 || s.QUICPort == 80 || s.QUICPort == 443)) {
+	if s.TCPPort == s.QUICPort {
+		return Setup{}, errors.New("TCP/STUN and QUIC ports must be distinct")
+	}
+	if s.Capability == "tunnel" && (s.TCPPort == 80 || s.TCPPort == 443 || s.QUICPort == 80 || s.QUICPort == 443) {
 		return Setup{}, errors.New("carrier TCP and QUIC ports must be distinct and must not collide with tunnel HTTP/HTTPS ports 80 and 443")
 	}
 	if s.Region == "" || s.FailureDomain == "" || s.CapacityLimit < 1 {

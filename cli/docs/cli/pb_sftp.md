@@ -6,6 +6,8 @@ Run sftp with Paperboat machine resolution
 
 Run sftp with Paperboat machine resolution
 
+Run standard sftp with Paperboat device-name resolution and authorized connectivity. Interactive file operations and exit behavior remain OpenSSH-compatible; host identity checks stay enabled.
+
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
 
 ```

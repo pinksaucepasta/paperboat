@@ -113,13 +113,6 @@ func NewHTTPReadinessProbe(endpoint string) (func(context.Context) error, error)
 	return newHTTPReadinessProbe(endpoint, nil)
 }
 
-// NewHTTPReadinessProbeWithClient is the deterministic-test seam for
-// NewHTTPReadinessProbe. The supplied client is copied and redirects remain
-// disabled even when the caller provided a custom client.
-func NewHTTPReadinessProbeWithClient(endpoint string, client *http.Client) (func(context.Context) error, error) {
-	return newHTTPReadinessProbe(endpoint, client)
-}
-
 func newHTTPReadinessProbe(endpoint string, supplied *http.Client) (func(context.Context) error, error) {
 	parsed, err := validateReadinessEndpoint(endpoint)
 	if err != nil {

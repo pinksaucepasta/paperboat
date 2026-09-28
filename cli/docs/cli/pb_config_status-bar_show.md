@@ -6,6 +6,10 @@ Show the effective status-bar configuration
 
 Show the effective status-bar configuration
 
+Show the effective status-bar settings, including defaults and local overrides. This is read-only and does not attach to a session.
+
+The status bar is rendered by the interactive terminal client. Preferences affect local presentation and do not change remote sessions. Use preview to inspect the result before relying on a theme or width setting.
+
 JSON output is supported with --json.
 
 ```

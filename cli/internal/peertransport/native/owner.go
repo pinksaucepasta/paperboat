@@ -28,6 +28,7 @@ const PrivateHTTP3ALPN = peerquic.PrivateHTTP3ALPN
 type Event struct {
 	Kind   string
 	PeerID string
+	Path   string
 	Err    error
 }
 
@@ -105,7 +106,8 @@ func (o *Owner) Dial(ctx context.Context, descriptor mesh.Addr, peerID string, c
 		_ = session.Close()
 		return nil, err
 	}
-	o.emit(Event{Kind: "connected", PeerID: peerID})
+	path, _ := o.authority.PeerPath(peerID)
+	o.emit(Event{Kind: "connected", PeerID: peerID, Path: path})
 	return session, nil
 }
 

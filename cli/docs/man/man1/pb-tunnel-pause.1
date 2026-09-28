@@ -6,11 +6,17 @@ pb-tunnel-pause - Pause new traffic while preserving tunnel identity and configu
 
 
 .SH SYNOPSIS
-\fBpb tunnel pause  [flags]\fP
+\fBpb tunnel pause <tunnel> [flags]\fP
 
 
 .SH DESCRIPTION
 Pause new traffic while preserving tunnel identity and configuration
+
+.PP
+Pause new traffic for one durable tunnel while retaining its identity, routes, domains, and connector configuration. --wait observes the resulting state.
+
+.PP
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
 
 .PP
 JSON output is supported with --json.

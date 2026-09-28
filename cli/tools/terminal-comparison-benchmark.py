@@ -34,19 +34,15 @@ RAW_RESPONDER = (
 class Cell:
     name: str
     entrypoint: str
-    transport: str | None
 
 
 def cells() -> list[Cell]:
-    result = [Cell("direct_ssh", "direct_ssh", None)]
-    for entrypoint in ("pb_ssh", "openssh_alias", "pb_terminal"):
-        for transport in ("d", "q", "w"):
-            result.append(Cell(f"{entrypoint}_{transport}", entrypoint, transport))
-    return result
+    return [Cell("direct_ssh", "direct_ssh"), Cell("pb_ssh", "pb_ssh"),
+            Cell("openssh_alias", "openssh_alias"), Cell("pb_terminal", "pb_terminal")]
 
 
 def session_delete_command(pb: str, target: str, session_name: str) -> list[str]:
-    return [pb, "session", "delete", target, session_name, "--yes"]
+    return [pb, "session", "delete", target, session_name, "--json"]
 
 
 def percentile(values: list[float], percent: int) -> float:
@@ -219,12 +215,11 @@ class Runner:
         if cell.entrypoint == "direct_ssh":
             return (["ssh", *ssh_options, "-i", self.args.direct_key, self.args.direct_host], environment, False)
         if cell.entrypoint == "pb_ssh":
-            return ([self.args.pb, "ssh", self.args.target, "--transport", cell.transport], environment, False)
+            return ([self.args.pb, "ssh", self.args.target], environment, False)
         if cell.entrypoint == "openssh_alias":
-            environment["PAPERBOAT_TRANSPORT"] = cell.transport or ""
             return (["ssh", *ssh_options, f"{self.args.ssh_user}@{self.args.target}.pprbt"], environment, False)
         return (
-            [self.args.pb, self.args.target, "new", "--transport", cell.transport or "", "--name", session_name, "--status-bar", "off"],
+            [self.args.pb, self.args.target, "new", "--name", session_name, "--status-bar", "off"],
             environment,
             True,
         )
@@ -232,8 +227,15 @@ class Runner:
     def cleanup_session(self, session_name: str) -> None:
         command = session_delete_command(self.args.pb, self.args.target, session_name)
         try:
+            preview = subprocess.run(
+                command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, timeout=30, check=False, text=True,
+            )
+            if preview.returncode != 2:
+                raise RuntimeError(f"session delete preview failed for {session_name}: {preview.stderr or preview.stdout}")
+            token = json.loads(preview.stdout)["data"]["confirmation_token"]
             completed = subprocess.run(
-                command,
+                [*command, "--confirm", token],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -495,9 +497,9 @@ def parse_args() -> argparse.Namespace:
 def self_test() -> None:
     assert percentile([4, 1, 3, 2], 50) == 2
     assert percentile([4, 1, 3, 2], 95) == 4
-    assert len(cells()) == 10
+    assert len(cells()) == 4
     assert session_delete_command("/pb", "machine", "bench-1") == [
-        "/pb", "session", "delete", "machine", "bench-1", "--yes",
+        "/pb", "session", "delete", "machine", "bench-1", "--json",
     ]
     for kind in ("compressible", "entropy"):
         value = payload(kind, 5, 80)
@@ -579,7 +581,7 @@ def main() -> int:
                             "type": "sample",
                             "cell": cell.name,
                             "entrypoint": cell.entrypoint,
-                            "transport": cell.transport or "tcp",
+                            "transport": "tcp" if cell.entrypoint == "direct_ssh" else "native",
                             "run": run,
                         }
                         emit({**common, "workload": "startup", "ok": True, "startup_ms": startup_ms})
@@ -599,7 +601,7 @@ def main() -> int:
                             "workload": "startup",
                             "cell": cell.name,
                             "entrypoint": cell.entrypoint,
-                            "transport": cell.transport or "tcp",
+                            "transport": "tcp" if cell.entrypoint == "direct_ssh" else "native",
                             "run": run,
                             "ok": False,
                             "error": f"{type(error).__name__}: {error}",
@@ -615,7 +617,7 @@ def main() -> int:
                     "workload": workload,
                     "cell": cell.name,
                     "entrypoint": cell.entrypoint,
-                    "transport": cell.transport or "tcp",
+                    "transport": "tcp" if cell.entrypoint == "direct_ssh" else "native",
                     "run": run,
                 }
                 try:

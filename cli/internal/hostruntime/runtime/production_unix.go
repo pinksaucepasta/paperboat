@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	mathrand "math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
@@ -43,25 +42,21 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/environmentkey"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hosted"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/inspectorapi"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/inspectorauth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/observability"
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/peerrelay"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeattachment"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/networkcheck"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/relayselection"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/signaling"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/transfercrypto"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/endpointidentity"
 )
 
 var (
@@ -73,198 +68,6 @@ var (
 type productionClock struct{}
 
 func (productionClock) Now() time.Time { return time.Now().UTC() }
-
-type productionClientPeerDependencies struct {
-	attempts            peerrelay.Source
-	networkChanges      *networkChangeService
-	signalingSubstrate  *signaling.SubstrateManager
-	stateRoot           string
-	transport           http.RoundTripper
-	authorizer          server.AuthorizerFactory
-	transferKeys        *transfercrypto.KeyVault
-	observeRelaySuccess func(string)
-	directNetwork       *directNetworkProxy
-	build               func(peerrelay.Config) (*peerrelay.Service, error)
-}
-
-func newProductionClientPeerService(dependencies productionClientPeerDependencies, serve func(net.Conn) error, transferHandler http.Handler) (Service, error) {
-	service, err := dependencies.build(peerrelay.Config{
-		Source:             dependencies.attempts,
-		Fingerprints:       dependencies.networkChanges,
-		SocketMapping:      dependencies.networkChanges,
-		SignalingSubstrate: dependencies.signalingSubstrate,
-		StateRoot:          dependencies.stateRoot,
-		TLS:                &tls.Config{MinVersion: tls.VersionTLS13},
-		HTTPClient:         &http.Client{Transport: dependencies.transport},
-		Serve:              serve,
-		ServeTransfer: func(ctx context.Context, stream net.Conn) error {
-			return server.ServeHTTPConnection(ctx, stream, transferHandler)
-		},
-		AuthorizeStream:     peerrelay.CredentialStreamAuthorizer(dependencies.authorizer),
-		ServeStream:         func(context.Context, streamauth.Header, net.Conn) error { return peerrelay.ErrInvalid },
-		TransferKeys:        dependencies.transferKeys,
-		ObserveRelaySuccess: dependencies.observeRelaySuccess,
-		ObserveTransferKeyAcknowledged: func() {
-			recordProductionPeerOutcome(dependencies.stateRoot, "transfer_key_ack_written")
-		},
-		ObserveError: func(err error) {
-			observeProductionPeerError(dependencies.stateRoot, err)
-		},
-	})
-	if err == nil {
-		dependencies.directNetwork.Set(service)
-	}
-	return service, err
-}
-
-type regionalMonitorService struct {
-	monitor *networkcheck.RegionalMonitor
-	mu      sync.Mutex
-	cancel  context.CancelFunc
-	done    chan struct{}
-}
-
-type currentRelayRegion struct {
-	mu         sync.RWMutex
-	region     string
-	observedAt time.Time
-}
-
-func (s *currentRelayRegion) Current() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.region
-}
-
-func (s *currentRelayRegion) Observe(region string) {
-	if region == "" {
-		return
-	}
-	s.mu.Lock()
-	s.region = region
-	s.observedAt = time.Now().UTC()
-	s.mu.Unlock()
-}
-
-func (s *currentRelayRegion) Success() (string, time.Time) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.region, s.observedAt
-}
-
-func (s *regionalMonitorService) NetworkChanged() { s.monitor.NetworkChanged() }
-
-func (s *regionalMonitorService) Start(ctx context.Context) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.cancel != nil {
-		return nil
-	}
-	runCtx, cancel := context.WithCancel(ctx)
-	done := make(chan struct{})
-	s.cancel, s.done = cancel, done
-	go func() {
-		defer close(done)
-		_ = s.monitor.Run(runCtx)
-	}()
-	return nil
-}
-
-func (s *regionalMonitorService) Shutdown(ctx context.Context) error {
-	s.mu.Lock()
-	cancel, done := s.cancel, s.done
-	s.cancel, s.done = nil, nil
-	s.mu.Unlock()
-	if cancel == nil {
-		return nil
-	}
-	cancel()
-	select {
-	case <-done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func newProductionRegionalMonitor(controlURL *url.URL, transport http.RoundTripper, current func() string, substrate *signaling.SubstrateManager, signalingTLS *tls.Config, warmMapping func(context.Context, uint64, string) error) (*regionalMonitorService, *networkcheck.RegionalCache, error) {
-	if controlURL == nil || transport == nil || current == nil {
-		return nil, nil, ErrProductionInvalid
-	}
-	client := clientapi.New(controlURL.String(), clientconfig.Credential{}, &http.Client{Transport: transport, Timeout: 10 * time.Second})
-	cache := networkcheck.NewRegionalCache()
-	probe, err := networkcheck.NewRegionalProbe(networkcheck.RegionalProbeConfig{
-		Timeout: 3 * time.Second,
-		STUN:    networkcheck.STUNRegionalLatency(net.DefaultResolver, 1500*time.Millisecond),
-		HTTPS:   networkcheck.HTTPSRegionalLatency(time.Now, &http.Client{Transport: transport, Timeout: 3 * time.Second}),
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	monitor, err := networkcheck.NewRegionalMonitor(networkcheck.RegionalMonitorConfig{
-		Inventory: func(ctx context.Context) ([]networkcheck.ProbeRegion, error) {
-			document, inventoryErr := client.NetworkCheckRegions(ctx)
-			if inventoryErr != nil {
-				return nil, inventoryErr
-			}
-			regions := make([]networkcheck.ProbeRegion, 0, len(document.Regions))
-			for _, region := range document.Regions {
-				regions = append(regions, networkcheck.ProbeRegion{Region: region.Region, STUNURL: region.STUNURL, HTTPSURL: region.HTTPSURL})
-			}
-			if substrate != nil && len(regions) > 0 {
-				if warmMapping != nil {
-					warmCtx, cancel := context.WithTimeout(ctx, time.Second)
-					_ = warmMapping(warmCtx, 1, regions[0].STUNURL)
-					cancel()
-				}
-				var signalingWarm sync.WaitGroup
-				var signalingWarmMu sync.Mutex
-				var signalingWarmErr error
-				for _, region := range regions[:min(len(regions), 16)] {
-					signalingURL, urlErr := signalingURLFromRegionalProbe(region.HTTPSURL)
-					if urlErr != nil {
-						continue
-					}
-					signalingWarm.Add(1)
-					go func() {
-						defer signalingWarm.Done()
-						warmCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-						defer cancel()
-						if warmErr := substrate.Warm(warmCtx, signalingURL, signalingTLS); warmErr != nil {
-							signalingWarmMu.Lock()
-							signalingWarmErr = errors.Join(signalingWarmErr, warmErr)
-							signalingWarmMu.Unlock()
-						}
-					}()
-				}
-				signalingWarm.Wait()
-				if signalingWarmErr != nil {
-					return nil, signalingWarmErr
-				}
-			}
-			return regions, nil
-		},
-		Probe: probe, Cache: cache, Clock: time.Now, CurrentRegion: current,
-		FullInterval: 5 * time.Minute, IncrementalInterval: time.Minute,
-		Jitter: func(value time.Duration) time.Duration {
-			return time.Duration(float64(value) * (0.9 + mathrand.Float64()*0.2))
-		},
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	return &regionalMonitorService{monitor: monitor}, cache, nil
-}
-
-func signalingURLFromRegionalProbe(raw string) (string, error) {
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
-		return "", ErrProductionInvalid
-	}
-	parsed.Scheme = "wss"
-	parsed.Path, parsed.RawPath, parsed.RawQuery, parsed.Fragment = "/v1/peer-signaling", "", "", ""
-	return parsed.String(), nil
-}
 
 func NewProductionHost(ctx context.Context, version string, environ func(string) string) (*Host, error) {
 	return newProductionHost(ctx, version, environ, nil)
@@ -299,13 +102,11 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		return nil, err
 	}
 	_ = metrics.Record("paperboat_runtime_restart_total", float64(bootState.Generation), nil)
-	if runtimeConfig.Profile == runtimeconfig.BYOD {
-		store, openErr := runtimeidentity.Open(runtimeidentity.Config{StateRoot: runtimeConfig.StateRoot})
-		if openErr == nil {
-			registration, registrationErr := store.Registration()
-			if registrationErr == nil && shouldRunClientCoordinator(registration.SetupMode, environ("PAPERBOAT_SETUP_MODE")) {
-				return newProductionClientCoordinator(ctx, version, environ, runtimeConfig, bootState, recoveryExitSignal, metrics, registration, tunnelProvider)
-			}
+	store, openErr := runtimeidentity.Open(runtimeidentity.Config{StateRoot: runtimeConfig.StateRoot})
+	if openErr == nil {
+		registration, registrationErr := store.Registration()
+		if registrationErr == nil && shouldRunClientCoordinator(registration.SetupMode, environ("PAPERBOAT_SETUP_MODE")) {
+			return newProductionClientCoordinator(ctx, version, environ, runtimeConfig, bootState, recoveryExitSignal, metrics, registration, tunnelProvider)
 		}
 	}
 	lazyBootBytes := make([]byte, 24)
@@ -314,16 +115,6 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	}
 	lazyBootID := hex.EncodeToString(lazyBootBytes)
 	lazyStartedAt := time.Now().UTC()
-	var hostedConfig hosted.Config
-	if runtimeConfig.Profile == runtimeconfig.Hosted {
-		hostedConfig, err = hosted.FromEnv(environ)
-		if err != nil {
-			return nil, err
-		}
-		if setupName := environ("PAPERBOAT_SETUP_SCRIPT_ENV"); setupName != "" && safeProductionEnvironmentName(setupName) {
-			_ = os.Unsetenv(setupName)
-		}
-	}
 	controlURL, err := validatedControlURL(environ("PAPERBOAT_CONTROL_URL"))
 	if err != nil {
 		return nil, err
@@ -344,10 +135,8 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, err
 	}
-	var enrollmentClient *enrollment.Client
 	if _, loadErr := enrollment.LoadRuntimeIdentityForRenewal(runtimeConfig.StateRoot, time.Now().UTC()); loadErr != nil {
-		var clientErr error
-		enrollmentClient, clientErr = enrollment.NewClient(transport, 15*time.Second)
+		enrollmentClient, clientErr := enrollment.NewClient(transport, 15*time.Second)
 		if clientErr != nil {
 			return nil, clientErr
 		}
@@ -355,26 +144,17 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 			ControlURL: controlURL.String(), ControlCAFile: environ("PAPERBOAT_CONTROL_CA_FILE"),
 			StateRoot: runtimeConfig.StateRoot,
 		}
-		if runtimeConfig.Profile == runtimeconfig.Hosted {
-			_, err = retryHostedControl(ctx, func(attemptCtx context.Context) (enrollment.RuntimeIdentity, error) {
-				return enrollmentClient.EnrollHosted(attemptCtx, enrollmentConfig)
-			})
-		} else {
-			grantName := valueOrRuntime(environ("PAPERBOAT_ENROLLMENT_CREDENTIAL_ENV"), "PAPERBOAT_ENROLLMENT_CREDENTIAL")
-			if !safeProductionEnvironmentName(grantName) {
-				return nil, ErrProductionInvalid
-			}
-			enrollmentConfig.EnrollmentCredential = environ(grantName)
-			if enrollmentConfig.EnrollmentCredential == "" {
-				return nil, loadErr
-			}
-			_, err = enrollmentClient.Enroll(ctx, enrollmentConfig)
-			_ = os.Unsetenv(grantName)
+		grantName := valueOrRuntime(environ("PAPERBOAT_ENROLLMENT_CREDENTIAL_ENV"), "PAPERBOAT_ENROLLMENT_CREDENTIAL")
+		if !safeProductionEnvironmentName(grantName) {
+			return nil, ErrProductionInvalid
 		}
+		enrollmentConfig.EnrollmentCredential = environ(grantName)
+		if enrollmentConfig.EnrollmentCredential == "" {
+			return nil, loadErr
+		}
+		_, err = enrollmentClient.Enroll(ctx, enrollmentConfig)
+		_ = os.Unsetenv(grantName)
 		if err != nil {
-			if runtimeConfig.Profile == runtimeconfig.Hosted {
-				return nil, fmt.Errorf("hosted identity bootstrap: %w", err)
-			}
 			return nil, err
 		}
 	}
@@ -386,60 +166,22 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if machineID == "" || machineID != identity.MachineID {
 		return nil, ErrProductionInvalid
 	}
-	inboxPath := ""
-	var managedSSHIdentity managedSSHIdentitySource
-	var networkFingerprintSecret []byte
-	var machineRegistration runtimeidentity.Registration
-	if runtimeConfig.Profile == runtimeconfig.BYOD {
-		identityStore, openErr := runtimeidentity.Open(runtimeidentity.Config{StateRoot: runtimeConfig.StateRoot})
-		if openErr != nil {
-			return nil, openErr
-		}
-		registration, registrationErr := identityStore.Registration()
-		if registrationErr != nil || registration.MachineID != machineID || !filepath.IsAbs(registration.InboxPath) || filepath.Clean(registration.InboxPath) != registration.InboxPath {
-			return nil, errors.Join(ErrProductionInvalid, registrationErr)
-		}
-		inboxPath = registration.InboxPath
-		machineRegistration = registration
-		// BYOD host enrollment creates the same helper runtime identity used by
-		// hosted runtimes. A separate machine-control credential is not part of
-		// the host bootstrap contract, so managed SSH must use the renewable
-		// helper token and proof instead of requiring a nonexistent file.
-		managedSSHIdentity = hostedManagedSSHIdentity{tokens: renewingTokens, proofs: enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}}
-		networkFingerprintSecret, err = identityStore.NetworkFingerprintSecret()
-		if err != nil {
-			return nil, err
-		}
-		defer clear(networkFingerprintSecret)
+	identityStore, openErr := runtimeidentity.Open(runtimeidentity.Config{StateRoot: runtimeConfig.StateRoot})
+	if openErr != nil {
+		return nil, openErr
 	}
-	if runtimeConfig.Profile == runtimeconfig.Hosted {
-		machineGeneration, parseErr := strconv.ParseUint(environ("PAPERBOAT_MACHINE_GENERATION"), 10, 63)
-		sshPort, portErr := strconv.ParseUint(environ("PAPERBOAT_SSH_PORT"), 10, 16)
-		sshUserRaw := environ("PAPERBOAT_SSH_USER")
-		sshUser := strings.TrimSpace(sshUserRaw)
-		if parseErr != nil || machineGeneration == 0 || portErr != nil || sshPort == 0 || sshUser == "" || sshUser != sshUserRaw {
-			return nil, ErrProductionInvalid
-		}
-		machineRegistration = runtimeidentity.Registration{MachineID: machineID, InstallationGeneration: int64(machineGeneration), SSHUser: sshUser, SSHPort: uint16(sshPort)}
-		managedSSHIdentity = hostedManagedSSHIdentity{tokens: renewingTokens, proofs: enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}}
-		if enrollmentClient == nil {
-			enrollmentClient, err = enrollment.NewClient(transport, 15*time.Second)
-			if err != nil {
-				return nil, err
-			}
-		}
-		bootstrap, bootstrapErr := retryHostedControl(ctx, func(attemptCtx context.Context) (enrollment.HostedBootstrap, error) {
-			return enrollmentClient.HostedBootstrap(attemptCtx, enrollment.Config{
-				ControlURL: controlURL.String(), ControlCAFile: environ("PAPERBOAT_CONTROL_CA_FILE"),
-				StateRoot: runtimeConfig.StateRoot,
-			})
-		})
-		if bootstrapErr != nil {
-			return nil, fmt.Errorf("hosted bootstrap: %w", bootstrapErr)
-		}
-		hostedConfig.SetupScript = bootstrap.SetupScript
-		hostedConfig.GitToken = bootstrap.SourcePassword
+	machineRegistration, registrationErr := identityStore.Registration()
+	if registrationErr != nil || machineRegistration.MachineID != machineID || !filepath.IsAbs(machineRegistration.InboxPath) || filepath.Clean(machineRegistration.InboxPath) != machineRegistration.InboxPath {
+		return nil, errors.Join(ErrProductionInvalid, registrationErr)
 	}
+	inboxPath := machineRegistration.InboxPath
+	// Host enrollment uses the renewable helper token and proof for managed SSH.
+	managedSSHIdentity := managedSSHIdentitySource(renewingMachineIdentity{tokens: renewingTokens, proofs: enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}})
+	networkFingerprintSecret, err := identityStore.NetworkFingerprintSecret()
+	if err != nil {
+		return nil, err
+	}
+	defer clear(networkFingerprintSecret)
 	peerEnrollment, err := peeridentityenrollment.New(peeridentityenrollment.Config{ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport, Timeout: 15 * time.Second}, managedSSHIdentity)
 	if err != nil {
 		return nil, err
@@ -450,7 +192,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	var managedEnvironment envinject.EnvironmentSource
 	var runtimeProjection *projectionEnvironmentService
 	var environmentBootstrap Service
-	if environmentInjectionEligible(runtimeConfig.Profile, machineRegistration) {
+	if environmentInjectionEligible(machineRegistration) {
 		runtimeProjection = newProjectionEnvironmentService(runtimeConfig.StateRoot, controlURL, transport, machineRegistration, managedSSHIdentity)
 		managedEnvironment, environmentBootstrap = runtimeProjection, runtimeProjection
 	}
@@ -475,15 +217,19 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		authorizationRefresh = append(authorizationRefresh, environmentBootstrap)
 	}
 	verifier := auth.Verifier{Keys: cache, Clock: productionClock{}, Replays: auth.NewReplayCache(4096, productionClock{}), Revocations: revocations, ClockSkew: 30 * time.Second, RefreshTimeout: 2 * time.Second}
-	authorizer, err := NewCredentialAuthorizer(CredentialAuthConfig{Issuer: issuer, EnvironmentID: identity.EnvironmentID, MachineID: machineID, HelperID: identity.HelperID, Verifier: verifier, Revocations: revocations})
+	credentialConfig := CredentialAuthConfig{Issuer: issuer, EnvironmentID: identity.EnvironmentID, MachineID: machineID, HelperID: identity.HelperID, Verifier: verifier, Revocations: revocations}
+	authorizer, err := NewCredentialAuthorizer(credentialConfig)
+	if err != nil {
+		return nil, err
+	}
+	browserTerminalAuthorizer, err := NewBrowserTerminalCredentialAuthorizer(credentialConfig)
 	if err != nil {
 		return nil, err
 	}
 	// No transfer is admitted until the authenticated heartbeat supplies policy.
 	transferPolicy := &filetransfer.PolicyStore{}
 	capabilityController := newDeviceCapabilityController(nil)
-	directNetwork := &directNetworkProxy{}
-	networkHandler, err := newNetworkChangeHandler(nil, directNetwork, metrics)
+	networkHandler, err := newNetworkChangeHandler(metrics)
 	if err != nil {
 		return nil, err
 	}
@@ -496,17 +242,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, err
 	}
-	if err := networkChanges.ConfigurePortMapping(networkcheck.MappingVerifier{Resolver: net.DefaultResolver, Timeout: 500 * time.Millisecond}); err != nil {
-		return nil, err
-	}
 	connectorService := &dedicatedConnectorService{networkChanges: networkChanges}
-	relayRegion := &currentRelayRegion{}
-	signalingSubstrate := &signaling.SubstrateManager{}
-	regionalMonitor, regionalCache, err := newProductionRegionalMonitor(controlURL, transport, relayRegion.Current, signalingSubstrate, &tls.Config{MinVersion: tls.VersionTLS13}, nil)
-	if err != nil {
-		return nil, err
-	}
-	networkHandler.SetObserver(regionalMonitor.NetworkChanged)
 	var runtimeObservation *runtimeObservationService
 	var availabilityService *availability.Service
 	if runtimeConfig.Profile == runtimeconfig.BYOD {
@@ -544,7 +280,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		if observationTokensErr != nil {
 			return nil, observationTokensErr
 		}
-		sender := &runtimeObservationSender{endpoint: runtimeEndpoint, tokens: observationTokens, proofs: enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}, operationID: operationID, environmentID: identity.EnvironmentID, machineID: machineID, reporterVersion: version, client: &http.Client{Transport: errorreport.TransportOperation(transport, controlURL.String(), "runtime_observation"), Timeout: 10 * time.Second, CheckRedirect: rejectRuntimePolicyRedirect}, availability: availabilityService, receiptPath: filepath.Join(runtimeConfig.StateRoot, "runtime", "server-heartbeat.json"), installationGeneration: uint64(machineRegistration.InstallationGeneration), workerGeneration: bootState.Generation, osBootID: bootState.OSBootID, setupMode: machineRegistration.SetupMode, lazyBootID: lazyBootID, lazyStartedAt: lazyStartedAt, serviceScope: scope, connector: connectorService, transferPolicy: transferPolicy, capabilitiesController: capabilityController, capabilities: capabilities, relayLatency: regionalCache, relaySuccess: relayRegion}
+		sender := &runtimeObservationSender{endpoint: runtimeEndpoint, tokens: observationTokens, proofs: enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}, operationID: operationID, environmentID: identity.EnvironmentID, machineID: machineID, reporterVersion: version, client: &http.Client{Transport: errorreport.TransportOperation(transport, controlURL.String(), "runtime_observation"), Timeout: 10 * time.Second, CheckRedirect: rejectRuntimePolicyRedirect}, availability: availabilityService, receiptPath: filepath.Join(runtimeConfig.StateRoot, "runtime", "server-heartbeat.json"), installationGeneration: uint64(machineRegistration.InstallationGeneration), workerGeneration: bootState.Generation, osBootID: bootState.OSBootID, setupMode: machineRegistration.SetupMode, lazyBootID: lazyBootID, lazyStartedAt: lazyStartedAt, serviceScope: scope, connector: connectorService, transferPolicy: transferPolicy, capabilitiesController: capabilityController, capabilities: capabilities}
 		deviceServiceObserver = sender
 		if runtimeProjection != nil {
 			sender.projection = runtimeProjection
@@ -556,47 +292,26 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		sender.updater = updaterClient
 		runtimeObservation = &runtimeObservationService{sender: sender, interval: 10 * time.Second, timeout: 10 * time.Second}
 	}
-	var hostedLifecycle *hosted.Lifecycle
 	workspaceRoot := environ("PAPERBOAT_WORKSPACE_ROOT")
-	agentShell := "/bin/bash"
-	if runtimeConfig.Profile == runtimeconfig.BYOD {
-		if strings.TrimSpace(workspaceRoot) == "" {
-			workspaceRoot, err = os.UserHomeDir()
-			if err != nil {
-				return nil, errors.Join(ErrProductionInvalid, errors.New("resolve BYOD home workspace"), err)
-			}
-		}
-		agentShell, err = validatedBYODShell(environ("PAPERBOAT_SHELL"))
+	if strings.TrimSpace(workspaceRoot) == "" {
+		workspaceRoot, err = os.UserHomeDir()
 		if err != nil {
-			return nil, err
+			return nil, errors.Join(ErrProductionInvalid, errors.New("resolve BYOD home workspace"), err)
 		}
+	}
+	agentShell, err := validatedBYODShell(environ("PAPERBOAT_SHELL"))
+	if err != nil {
+		return nil, err
 	}
 	agentEnvironment := []string{"PATH=" + os.Getenv("PATH"), "SHELL=" + agentShell, "TERM=xterm-256color"}
 	if home, homeErr := os.UserHomeDir(); homeErr == nil && filepath.IsAbs(home) {
 		agentEnvironment = append(agentEnvironment, "HOME="+home)
 	}
 	shutdownTimeout := 30 * time.Second
-	if runtimeConfig.Profile == runtimeconfig.Hosted {
-		hostedLifecycle, err = hosted.New(hostedConfig, hosted.ConfigSyncHooks(hostedConfig, environ), nil)
-		if err != nil {
-			return nil, err
-		}
-		// Prepare the checkout before constructing the PTY adapter. The adapter
-		// validates its root eagerly, while hosted lifecycle owns creating/cloning it.
-		if err := hostedLifecycle.Start(ctx); err != nil {
-			return nil, err
-		}
-		if tokenName := environ("PAPERBOAT_GITHUB_TOKEN_ENV"); safeProductionEnvironmentName(tokenName) {
-			_ = os.Unsetenv(tokenName)
-		}
-		workspaceRoot = hostedConfig.VolumeRoot
-		shutdownTimeout = hostedConfig.FlushTimeout + 15*time.Second
-	} else {
-		if err := validateBYODWorkspace(workspaceRoot); err != nil {
-			return nil, err
-		}
+	if err := validateBYODWorkspace(workspaceRoot); err != nil {
+		return nil, err
 	}
-	listen := valueOrRuntime(environ("PAPERBOAT_RUNTIME_LISTEN_ADDRESS"), "127.0.0.1:8080")
+	listen := valueOrRuntime(environ("PAPERBOAT_RUNTIME_LISTEN_ADDRESS"), runtimeport.Primary)
 	localControlToken, err := writeLocalControlToken(runtimeConfig.StateRoot)
 	if err != nil {
 		return nil, err
@@ -608,9 +323,9 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err := writeWorkerLocal(runtimeConfig.StateRoot, listen); err != nil {
 		return nil, err
 	}
-	runtimeService := Service(serviceGroup{regionalMonitor, runtimeObservation})
+	runtimeService := Service(runtimeObservation)
 	if availabilityService != nil {
-		runtimeService = serviceGroup{availabilityService, regionalMonitor, runtimeObservation}
+		runtimeService = serviceGroup{availabilityService, runtimeObservation}
 	}
 	previewAssembly, err := newProductionPreviewAssembly(productionPreviewAssemblyConfig{
 		ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, MachineID: machineID, InstallationGeneration: machineRegistration.InstallationGeneration, BootID: lazyBootID,
@@ -624,11 +339,19 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, err
 	}
-	transferKeys, err := transfercrypto.NewKeyVault(clientconfig.FileSecretStore{Dir: filepath.Join(runtimeConfig.StateRoot, "transfer-keys")})
-	if err != nil {
-		return nil, err
+	dependencies := HostDependencies{Authorizer: authorizer, BrowserTerminalAuthorizer: browserTerminalAuthorizer, BrowserTerminalIdentity: func(identityCtx context.Context) (server.BrowserTerminalIdentity, error) {
+		if err := identityCtx.Err(); err != nil {
+			return server.BrowserTerminalIdentity{}, err
+		}
+		return productionBrowserTerminalIdentity(runtimeConfig.StateRoot, machineID, uint64(machineRegistration.InstallationGeneration))
+	}, AuthorizationService: authorizationRefresh, Connector: connectorService, PreviewDispatcher: previewAssembly, PreviewRecovery: previewAssembly, PreviewOwnerSessions: previewAssembly.OwnerSessionLeases(), RuntimeObservationService: runtimeService, RecordTerminalJoin: runtimeObservation.sender.RecordTerminalJoin, ManagedEnvironment: managedEnvironment, Metrics: metrics, LocalControlToken: localControlToken, Inspector: inspectorService, ManagedSSH: managedSSHHost, ManagedSSHService: managedSSHService, Capabilities: capabilityController}
+	if machineRegistration.SetupMode == "host" && runtimeConfig.Profile == runtimeconfig.BYOD {
+		attachment, attachErr := runtimeattachment.New(runtimeattachment.Config{ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport, DeviceID: machineID, WorkerGeneration: bootState.Generation, InstallationGeneration: uint64(machineRegistration.InstallationGeneration), ListenAddress: listen})
+		if attachErr != nil {
+			return nil, attachErr
+		}
+		dependencies.RuntimeAttachmentService = attachment
 	}
-	dependencies := HostDependencies{Authorizer: authorizer, AuthorizationService: authorizationRefresh, Connector: connectorService, PreviewDispatcher: previewAssembly, PreviewRecovery: previewAssembly, PreviewOwnerSessions: previewAssembly.OwnerSessionLeases(), RuntimeObservationService: runtimeService, RecordTerminalJoin: runtimeObservation.sender.RecordTerminalJoin, ManagedEnvironment: managedEnvironment, Metrics: metrics, LocalControlToken: localControlToken, Inspector: inspectorService, ManagedSSH: managedSSHHost, ManagedSSHService: managedSSHService, TransferKeys: transferKeys, Capabilities: capabilityController}
 	nativePrivateValidators := []productionNativePrivateValidator{localNativePrivateValidator(previewAssembly.dispatcher)}
 	if deviceServiceObserver != nil {
 		nativePrivateValidators = append(nativePrivateValidators, deviceServiceObserver.validateDeviceService)
@@ -667,9 +390,6 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 			return newProductionNativePeerService(productionNativePeerConfig{controlURL: controlURL.String(), issuer: issuer, stateRoot: runtimeConfig.StateRoot, machineID: machineID, generation: uint64(machineRegistration.InstallationGeneration), transport: transport, identity: managedSSHIdentity, keys: cache, authorizer: authorizer, serve: serve, transfer: transferHandler, ssh: managedSSHHost, privateCurrent: productionNativeCurrent(nativePrivateValidators...), privateDial: productionNativePrivateDial, inspector: http.HandlerFunc(inspectorService.ServeAuthenticatedHTTP), inspectorStore: inspectorStore})
 		}
 	}
-	if runtimeConfig.Profile == runtimeconfig.Hosted {
-		dependencies.HostedLifecycle = hostedLifecycle
-	}
 	result, err := NewHost(ctx, HostConfig{Runtime: runtimeConfig, ListenAddress: listen, WorkspaceRoot: workspaceRoot, ShellPath: agentShell, AgentEnvironment: agentEnvironment, EnvironmentID: identity.EnvironmentID, MachineID: machineID, InboxPath: inboxPath, ShutdownTimeout: shutdownTimeout, RecoveryExitSignal: recoveryExitSignal, FileTransferPolicy: transferPolicy}, dependencies)
 	if err == nil {
 		capabilityController.SetReconciler(result.reconcileDeviceCapabilities)
@@ -677,18 +397,8 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	return result, err
 }
 
-func environmentInjectionEligible(profile runtimeconfig.Profile, registration runtimeidentity.Registration) bool {
-	if registration.SetupMode != "host" {
-		return false
-	}
-	return profile == runtimeconfig.BYOD || profile == runtimeconfig.Hosted
-}
-
-func managedEnvironmentFunction(source envinject.EnvironmentSource) func() ([]string, error) {
-	if source == nil {
-		return nil
-	}
-	return source.Environment
+func environmentInjectionEligible(registration runtimeidentity.Registration) bool {
+	return registration.SetupMode == "host"
 }
 
 type managedSSHIdentitySource interface {
@@ -704,16 +414,16 @@ type managedSSHIdentityProofs interface {
 	Proof(context.Context, string, string, string, []byte) ([]byte, error)
 }
 
-type hostedManagedSSHIdentity struct {
+type renewingMachineIdentity struct {
 	tokens managedSSHIdentityTokens
 	proofs managedSSHIdentityProofs
 }
 
-func (s hostedManagedSSHIdentity) Token(ctx context.Context) (string, error) {
+func (s renewingMachineIdentity) Token(ctx context.Context) (string, error) {
 	return s.tokens.Token(ctx)
 }
 
-func (s hostedManagedSSHIdentity) Proof(ctx context.Context, operationID, method, path string, body []byte) ([]byte, error) {
+func (s renewingMachineIdentity) Proof(ctx context.Context, operationID, method, path string, body []byte) ([]byte, error) {
 	return s.proofs.Proof(ctx, operationID, method, path, body)
 }
 
@@ -777,16 +487,6 @@ func managedSSHInitialOperationIDs(registration runtimeidentity.Registration, ob
 	digest := sha256.Sum256([]byte(registration.MachineID + "\x00" + strconv.FormatUint(uint64(registration.InstallationGeneration), 10) + "\x00" + strconv.FormatUint(observationGeneration, 10) + "\x00" + hex.EncodeToString(fingerprint[:])))
 	suffix := base64.RawURLEncoding.EncodeToString(digest[:])
 	return "managed-ssh-observe-" + suffix, "managed-ssh-keys-" + suffix
-}
-
-// reconcileManagedSSHAuthority retains the original operation-ID helper for
-// callers that do not have a host-key inventory. Production host setup uses
-// reconcileManagedSSHAuthorityWithFingerprint below so retries are scoped to
-// the exact persisted host-key set.
-func reconcileManagedSSHAuthority(ctx context.Context, client managedSSHControlClient, identitySource managedSSHIdentitySource, registration runtimeidentity.Registration, observationGeneration uint64, setID string, publicKeys []string) (clientapi.ManagedSSHAuthorizedKeys, bool, error) {
-	return reconcileManagedSSHAuthorityWithOperations(ctx, client, identitySource, registration, observationGeneration, setID, publicKeys,
-		"managed-ssh-observe-"+registration.MachineID+"-"+strconv.FormatUint(uint64(registration.InstallationGeneration), 10)+"-"+strconv.FormatUint(observationGeneration, 10),
-		"managed-ssh-keys-"+registration.MachineID+"-"+strconv.FormatUint(uint64(registration.InstallationGeneration), 10)+"-"+strconv.FormatUint(observationGeneration, 10))
 }
 
 func reconcileManagedSSHAuthorityWithFingerprint(ctx context.Context, client managedSSHControlClient, identitySource managedSSHIdentitySource, registration runtimeidentity.Registration, observationGeneration uint64, setID string, fingerprint [32]byte, publicKeys []string) (clientapi.ManagedSSHAuthorizedKeys, bool, error) {
@@ -889,7 +589,7 @@ func newProductionClientCoordinator(ctx context.Context, version string, environ
 		return nil, err
 	}
 	runtimeProofs := enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}
-	runtimeIdentity := hostedManagedSSHIdentity{tokens: runtimeTokens, proofs: runtimeProofs}
+	runtimeIdentity := renewingMachineIdentity{tokens: runtimeTokens, proofs: runtimeProofs}
 	peerEnrollment, err := peeridentityenrollment.New(peeridentityenrollment.Config{ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport, Timeout: 15 * time.Second}, runtimeIdentity)
 	if err != nil {
 		return nil, err
@@ -915,14 +615,18 @@ func newProductionClientCoordinator(ctx context.Context, version string, environ
 	}
 	authorizationRefresh := serviceGroup{&jwksRefreshService{cache: cache, interval: time.Minute}, revocationRefresh, newPeerEnrollmentRuntimeService(peerEnrollment, 2*time.Second)}
 	verifier := auth.Verifier{Keys: cache, Clock: productionClock{}, Replays: auth.NewReplayCache(4096, productionClock{}), Revocations: revocations, ClockSkew: 30 * time.Second, RefreshTimeout: 2 * time.Second}
-	authorizer, err := NewCredentialAuthorizer(CredentialAuthConfig{Issuer: issuer, EnvironmentID: registration.EnvironmentID, MachineID: registration.MachineID, HelperID: identity.HelperID, Verifier: verifier, Revocations: revocations})
+	credentialConfig := CredentialAuthConfig{Issuer: issuer, EnvironmentID: registration.EnvironmentID, MachineID: registration.MachineID, HelperID: identity.HelperID, Verifier: verifier, Revocations: revocations}
+	authorizer, err := NewCredentialAuthorizer(credentialConfig)
+	if err != nil {
+		return nil, err
+	}
+	browserTerminalAuthorizer, err := NewBrowserTerminalCredentialAuthorizer(credentialConfig)
 	if err != nil {
 		return nil, err
 	}
 	transferPolicy := &filetransfer.PolicyStore{}
 	capabilityController := newDeviceCapabilityController(nil)
-	directNetwork := &directNetworkProxy{}
-	networkHandler, err := newNetworkChangeHandler(nil, directNetwork, metrics)
+	networkHandler, err := newNetworkChangeHandler(metrics)
 	if err != nil {
 		return nil, err
 	}
@@ -939,29 +643,19 @@ func newProductionClientCoordinator(ctx context.Context, version string, environ
 	if err != nil {
 		return nil, err
 	}
-	if err := networkChanges.ConfigurePortMapping(networkcheck.MappingVerifier{Resolver: net.DefaultResolver, Timeout: 500 * time.Millisecond}); err != nil {
-		return nil, err
-	}
 	connectorService := &dedicatedConnectorService{networkChanges: networkChanges}
-	relayRegion := &currentRelayRegion{}
-	signalingSubstrate := &signaling.SubstrateManager{}
-	regionalMonitor, regionalCache, err := newProductionRegionalMonitor(controlURL, transport, relayRegion.Current, signalingSubstrate, &tls.Config{MinVersion: tls.VersionTLS13}, nil)
-	if err != nil {
-		return nil, err
-	}
-	networkHandler.SetObserver(regionalMonitor.NetworkChanged)
 	scope := environ("PAPERBOAT_RUNTIME_SERVICE_SCOPE")
 	if scope != "system" && scope != "user" {
 		scope = "unknown"
 	}
-	sender := &runtimeObservationSender{endpoint: controlURL.ResolveReference(&url.URL{Path: "/v1/runtime-observations"}).String(), tokens: runtimeTokens, proofs: runtimeProofs, operationID: operationID, environmentID: registration.EnvironmentID, machineID: registration.MachineID, reporterVersion: version, client: &http.Client{Transport: errorreport.TransportOperation(transport, controlURL.String(), "runtime_observation"), Timeout: 10 * time.Second, CheckRedirect: rejectRuntimePolicyRedirect}, receiptPath: filepath.Join(runtimeConfig.StateRoot, "runtime", "server-heartbeat.json"), installationGeneration: uint64(registration.InstallationGeneration), workerGeneration: bootState.Generation, osBootID: bootState.OSBootID, serviceScope: scope, connector: connectorService, transferPolicy: transferPolicy, capabilitiesController: capabilityController, capabilities: []string{"file_receive", "preview_launch"}, relayLatency: regionalCache, relaySuccess: relayRegion}
+	sender := &runtimeObservationSender{endpoint: controlURL.ResolveReference(&url.URL{Path: "/v1/runtime-observations"}).String(), tokens: runtimeTokens, proofs: runtimeProofs, operationID: operationID, environmentID: registration.EnvironmentID, machineID: registration.MachineID, reporterVersion: version, client: &http.Client{Transport: errorreport.TransportOperation(transport, controlURL.String(), "runtime_observation"), Timeout: 10 * time.Second, CheckRedirect: rejectRuntimePolicyRedirect}, receiptPath: filepath.Join(runtimeConfig.StateRoot, "runtime", "server-heartbeat.json"), installationGeneration: uint64(registration.InstallationGeneration), workerGeneration: bootState.Generation, osBootID: bootState.OSBootID, serviceScope: scope, connector: connectorService, transferPolicy: transferPolicy, capabilitiesController: capabilityController, capabilities: []string{"file_receive", "preview_launch"}}
 	updaterClient, updaterErr := newProductionUpdaterClient()
 	if updaterErr != nil {
 		return nil, updaterErr
 	}
 	sender.updater = updaterClient
 	observation := &runtimeObservationService{sender: sender, interval: runtimeConfig.Limits.HeartbeatInterval, timeout: 10 * time.Second}
-	listen := valueOrRuntime(environ("PAPERBOAT_RUNTIME_LISTEN_ADDRESS"), "127.0.0.1:8080")
+	listen := valueOrRuntime(environ("PAPERBOAT_RUNTIME_LISTEN_ADDRESS"), runtimeport.Primary)
 	localControlToken, err := writeLocalControlToken(runtimeConfig.StateRoot)
 	if err != nil {
 		return nil, err
@@ -973,15 +667,16 @@ func newProductionClientCoordinator(ctx context.Context, version string, environ
 	if err := writeWorkerLocal(runtimeConfig.StateRoot, listen); err != nil {
 		return nil, err
 	}
-	transferKeys, err := transfercrypto.NewKeyVault(clientconfig.FileSecretStore{Dir: filepath.Join(runtimeConfig.StateRoot, "transfer-keys")})
-	if err != nil {
-		return nil, err
-	}
 	var nativePrivateValidators []productionNativePrivateValidator
 	nativePeerFactory := func(serve func(net.Conn) error, transferHandler http.Handler) (Service, error) {
 		return newProductionNativePeerService(productionNativePeerConfig{controlURL: controlURL.String(), issuer: issuer, stateRoot: runtimeConfig.StateRoot, machineID: registration.MachineID, generation: uint64(registration.InstallationGeneration), transport: transport, identity: runtimeIdentity, keys: cache, authorizer: authorizer, serve: serve, transfer: transferHandler, privateCurrent: productionNativeCurrent(nativePrivateValidators...), privateDial: productionNativePrivateDial, inspector: http.HandlerFunc(clientInspectorService.ServeAuthenticatedHTTP), inspectorStore: clientInspectorStore})
 	}
-	dependencies := HostDependencies{Authorizer: authorizer, AuthorizationService: authorizationRefresh, Connector: connectorService, PreviewRecovery: nil, RuntimeObservationService: serviceGroup{regionalMonitor, observation}, Metrics: metrics, LocalControlToken: localControlToken, Inspector: clientInspectorService, TransferKeys: transferKeys, NativePeerFactory: nativePeerFactory, Capabilities: capabilityController}
+	dependencies := HostDependencies{Authorizer: authorizer, BrowserTerminalAuthorizer: browserTerminalAuthorizer, BrowserTerminalIdentity: func(identityCtx context.Context) (server.BrowserTerminalIdentity, error) {
+		if err := identityCtx.Err(); err != nil {
+			return server.BrowserTerminalIdentity{}, err
+		}
+		return productionBrowserTerminalIdentity(runtimeConfig.StateRoot, registration.MachineID, uint64(registration.InstallationGeneration))
+	}, AuthorizationService: authorizationRefresh, Connector: connectorService, PreviewRecovery: nil, RuntimeObservationService: observation, Metrics: metrics, LocalControlToken: localControlToken, Inspector: clientInspectorService, NativePeerFactory: nativePeerFactory, Capabilities: capabilityController}
 	if tunnelProvider == nil {
 		tunnelEnrollment, enrollmentErr := newProductionTunnelEnrollmentService(controlURL.String(), runtimeConfig.StateRoot, registration.MachineID, localControlToken, transport, clientInspectorStore, clientInspectorRegistry, clientInspectorService)
 		if enrollmentErr != nil {
@@ -1077,6 +772,31 @@ func runtimeEnvironmentEndpoint(stateRoot string) (runtimeidentity.PeerEndpoint,
 		return runtimeidentity.PeerEndpoint{}, err
 	}
 	return store.PeerEndpoint()
+}
+
+func productionBrowserTerminalIdentity(stateRoot, machineID string, generation uint64) (server.BrowserTerminalIdentity, error) {
+	endpoint, err := runtimeEnvironmentEndpoint(stateRoot)
+	if err != nil || endpoint.Generation != generation || len(endpoint.Certificate) == 0 {
+		return server.BrowserTerminalIdentity{}, errors.Join(errEnvironmentEndpointPending, err)
+	}
+	rootFingerprint, err := endpointidentity.RootFingerprint(endpoint.RootPublicKey)
+	if err != nil || endpoint.RootKeyID != "aek_"+rootFingerprint {
+		return server.BrowserTerminalIdentity{}, errors.Join(ErrProductionInvalid, err)
+	}
+	certificate, err := endpointidentity.Verify(endpoint.Certificate, endpoint.RootPublicKey, endpointidentity.Expected{Role: endpointidentity.RoleMachine, EndpointID: machineID, Generation: generation}, time.Now().UTC())
+	if err != nil {
+		return server.BrowserTerminalIdentity{}, errors.Join(ErrProductionInvalid, err)
+	}
+	now := time.Now().UTC()
+	lifetime := certificate.Claims.ExpiresAt.Sub(now)
+	if lifetime > 24*time.Hour {
+		lifetime = 24 * time.Hour
+	}
+	leaf, err := endpointidentity.NewTLSCertificate(certificate, endpoint.RootPublicKey, endpoint.QUICPrivateKey, now, lifetime)
+	if err != nil {
+		return server.BrowserTerminalIdentity{}, errors.Join(ErrProductionInvalid, err)
+	}
+	return server.BrowserTerminalIdentity{Certificate: append([]byte(nil), endpoint.Certificate...), RootKeyID: endpoint.RootKeyID, TLSCertificate: leaf}, nil
 }
 
 func waitEnvironmentBootstrap(ctx context.Context, interval time.Duration) bool {
@@ -1184,33 +904,6 @@ func writeWorkerLocal(stateRoot, listenAddress string) error {
 		return err
 	}
 	return atomicfile.Write(path, body, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1})
-}
-
-func retryHostedControl[T any](ctx context.Context, operation func(context.Context) (T, error)) (T, error) {
-	var zero T
-	if operation == nil {
-		return zero, ErrProductionInvalid
-	}
-	backoff := time.Second
-	for {
-		result, err := operation(ctx)
-		if err == nil {
-			return result, nil
-		}
-		timer := time.NewTimer(backoff)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return zero, ctx.Err()
-		case <-timer.C:
-		}
-		if backoff < 5*time.Second {
-			backoff *= 2
-			if backoff > 5*time.Second {
-				backoff = 5 * time.Second
-			}
-		}
-	}
 }
 
 func validatedBYODShellUnix(path string) (string, error) {
@@ -1388,12 +1081,6 @@ type runtimeObservationSender struct {
 	transferPolicy           *filetransfer.PolicyStore
 	capabilities             []string
 	capabilitiesController   *deviceCapabilityController
-	relayLatency             interface {
-		Vector(time.Time) relayselection.Vector
-	}
-	relaySuccess    interface{ Success() (string, time.Time) }
-	relayLatencyMu  sync.Mutex
-	relayLatencyGen uint64
 }
 
 func (s *runtimeObservationSender) Send(ctx context.Context) error {
@@ -1428,7 +1115,6 @@ func (s *runtimeObservationSender) Send(ctx context.Context) error {
 		observationPayload = environmentObservation
 	}
 	environmentReady := s.projection != nil && s.projection.BindingState() == envinject.BindingActive || environmentObservation != nil && s.environment.BindingState() == envinject.BindingActive
-	relayLatency := s.nextRelayLatency(now)
 	availabilityState := availabilityObservation(s.availability)
 	var updaterState *updated.ControlResponse
 	var updaterErr error
@@ -1450,7 +1136,6 @@ func (s *runtimeObservationSender) Send(ctx context.Context) error {
 		Environment        any                               `json:"environment,omitempty"`
 		Availability       *availability.Observation         `json:"availability,omitempty"`
 		RuntimeDiagnostics *runtimeDiagnosticsObservation    `json:"runtime_diagnostics,omitempty"`
-		RelayLatency       *runtimeRelayLatencyObservation   `json:"relay_latency,omitempty"`
 		Update             *runtimeUpdateObservation         `json:"update,omitempty"`
 		DeviceCapabilities *deviceCapabilitiesObservation    `json:"device_capabilities,omitempty"`
 	}{
@@ -1463,7 +1148,6 @@ func (s *runtimeObservationSender) Send(ctx context.Context) error {
 		Environment:        observationPayload,
 		Availability:       availabilityState,
 		RuntimeDiagnostics: s.runtimeDiagnostics(now, environmentReady),
-		RelayLatency:       relayLatency,
 		Update:             s.updateObservationFrom(now, availabilityState, updaterState, updaterErr),
 		DeviceCapabilities: s.capabilitiesController.Observation(now),
 	})
@@ -1642,48 +1326,6 @@ func (s *runtimeObservationSender) updateObservationFrom(now time.Time, availabi
 		ErrorCode:              errorCode,
 		ObservedAt:             now,
 	}
-}
-
-type runtimeRelayLatencySample struct {
-	Region string `json:"region"`
-	RTTMS  int64  `json:"rtt_ms"`
-}
-
-type runtimeRelayLatencyObservation struct {
-	Generation         uint64                      `json:"generation"`
-	ObservedAt         time.Time                   `json:"observed_at"`
-	Samples            []runtimeRelayLatencySample `json:"samples"`
-	RelaySuccessRegion string                      `json:"relay_success_region,omitempty"`
-	RelaySuccessAt     time.Time                   `json:"relay_success_at,omitempty"`
-}
-
-func (s *runtimeObservationSender) nextRelayLatency(now time.Time) *runtimeRelayLatencyObservation {
-	if s.relayLatency == nil || s.workerGeneration == 0 {
-		return nil
-	}
-	vector := s.relayLatency.Vector(now)
-	if len(vector.Samples) == 0 || len(vector.Samples) > relayselection.MaximumRegions {
-		return nil
-	}
-	s.relayLatencyMu.Lock()
-	s.relayLatencyGen++
-	generation := s.relayLatencyGen
-	s.relayLatencyMu.Unlock()
-	result := &runtimeRelayLatencyObservation{Generation: generation, ObservedAt: now, Samples: make([]runtimeRelayLatencySample, 0, len(vector.Samples))}
-	if s.relaySuccess != nil {
-		region, observedAt := s.relaySuccess.Success()
-		if region != "" && !observedAt.IsZero() && !observedAt.After(now) && now.Sub(observedAt) <= 30*time.Second {
-			result.RelaySuccessRegion, result.RelaySuccessAt = region, observedAt
-		}
-	}
-	for _, sample := range vector.Samples {
-		milliseconds := (sample.RTT + time.Millisecond - 1) / time.Millisecond
-		if sample.Region == "" || milliseconds < 1 || milliseconds > 60_000 {
-			return nil
-		}
-		result.Samples = append(result.Samples, runtimeRelayLatencySample{Region: sample.Region, RTTMS: int64(milliseconds)})
-	}
-	return result
 }
 
 type runtimeDiagnosticsObservation struct {

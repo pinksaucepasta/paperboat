@@ -6,6 +6,10 @@ Add a connector on this host
 
 Add a connector on this host
 
+Add a connector for the selected durable tunnel on this host. Inspect tunnel and connector status before advertising a route through the new attachment.
+
+Connectors attach an enrolled host to a durable tunnel. Drain stops new work while allowing existing work to wind down; revoke removes connector authority. Inspect connector state before replacing or removing one.
+
 JSON output is supported with --json.
 
 ```

@@ -1,10 +1,12 @@
 ## pb relay
 
-Inspect Paperboat relays
+Inspect hosted and self-hosted relays
 
 ### Synopsis
 
-Inspect Paperboat relays
+Inspect hosted and self-hosted relays
+
+Inspect relay regions and self-hosted relay installations selected by the account's relay pool. The list measures hosted network latency and labels self-hosted readiness separately.
 
 With --json, this command group lists its available commands.
 
@@ -26,5 +28,5 @@ With --json, this command group lists its available commands.
 ### SEE ALSO
 
 * [pb](pb.md)	 - Open Paperboat or connect to an environment terminal
-* [pb relay list](pb_relay_list.md)	 - List relays and measure current latency
+* [pb relay list](pb_relay_list.md)	 - List hosted and self-hosted relays
 

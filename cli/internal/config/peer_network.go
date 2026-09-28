@@ -9,7 +9,7 @@ import (
 )
 
 // PeerNetworkState is one atomic secure-store record. Keys are independent of
-// Noise and QUIC identity. Pending custody survives an interrupted registration;
+// QUIC identity. Pending custody survives an interrupted registration;
 // the signed configuration decides when it becomes the active key.
 type PeerNetworkState struct {
 	Version        int    `json:"version"`

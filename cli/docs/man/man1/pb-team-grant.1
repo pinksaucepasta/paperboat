@@ -6,11 +6,17 @@ pb-team-grant - Set or revoke an explicit resource permission
 
 
 .SH SYNOPSIS
-\fBpb team grant      [flags]\fP
+\fBpb team grant <team> <account> <env|preview|tunnel> <resource> <permission> [flags]\fP
 
 
 .SH DESCRIPTION
 Set or revoke an explicit resource permission
+
+.PP
+Set or revoke an explicit ENV, preview, or tunnel permission for one account and resource. --active selects grant state, and --generation rejects stale team edits.
+
+.PP
+Teams use explicit membership and resource grants. Membership alone does not grant device use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
 
 .PP
 JSON output is supported with --json.

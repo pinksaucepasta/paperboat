@@ -61,19 +61,26 @@ const (
 
 	TerminalStdout byte = 1
 	TerminalStderr byte = 2
+	// Output channel 3 carries a browser screen checkpoint before live PTY
+	// output. It is never part of the PTY output sequence or ACK cursor.
+	TerminalScreenCheckpoint byte = 3
+	// Channel 4 delivers a broadcast epoch key inside authenticated inner TLS.
+	// It does not advance the PTY output cursor.
+	TerminalBroadcastKey byte = 4
 
-	terminalInputHeaderLen               = 13
-	terminalOutputHeaderLen              = 19
-	TerminalOutputHeaderBytes            = terminalOutputHeaderLen
-	TerminalOutputRaw               byte = 0
-	TerminalOutputZstd              byte = 1
-	TerminalOutputMinCompress            = 1024
-	TerminalOutputMinSavingsBytes        = 32
-	TerminalOutputMinSavingsPercent      = 5
-	MaxTerminalOutputBytes               = MaxBinaryFrame - terminalOutputHeaderLen
-	terminalACKLen                       = 13
-	terminalResizeLen                    = 17
-	terminalEOFLen                       = 13
+	terminalInputHeaderLen                = 13
+	terminalOutputHeaderLen               = 19
+	TerminalOutputHeaderBytes             = terminalOutputHeaderLen
+	TerminalOutputRaw                byte = 0
+	TerminalOutputZstd               byte = 1
+	TerminalOutputMinCompress             = 1024
+	TerminalOutputMinSavingsBytes         = 32
+	TerminalOutputMinSavingsPercent       = 5
+	MaxTerminalOutputBytes                = MaxBinaryFrame - terminalOutputHeaderLen
+	MaxTerminalScreenCheckpointBytes      = 4 << 20
+	terminalACKLen                        = 13
+	terminalResizeLen                     = 17
+	terminalEOFLen                        = 13
 )
 
 type TerminalInputFrame struct {
@@ -99,7 +106,7 @@ type TerminalOutputInfo struct {
 }
 
 func InspectTerminalOutput(message []byte) (TerminalOutputInfo, error) {
-	if len(message) <= terminalOutputHeaderLen || len(message) > MaxBinaryFrame || message[0] != TerminalOutputOpcode || (message[1] != TerminalStdout && message[1] != TerminalStderr) || (message[2] != TerminalOutputRaw && message[2] != TerminalOutputZstd) {
+	if len(message) <= terminalOutputHeaderLen || len(message) > MaxBinaryFrame || message[0] != TerminalOutputOpcode || (message[1] != TerminalStdout && message[1] != TerminalStderr && message[1] != TerminalScreenCheckpoint && message[1] != TerminalBroadcastKey) || (message[2] != TerminalOutputRaw && message[2] != TerminalOutputZstd) {
 		return TerminalOutputInfo{}, &Error{Code: InvalidFrame}
 	}
 	info := TerminalOutputInfo{Encoding: message[2], StreamID: binary.BigEndian.Uint32(message[3:7]), StartSequence: binary.BigEndian.Uint64(message[7:15]), UncompressedLength: binary.BigEndian.Uint32(message[15:19])}
@@ -168,7 +175,7 @@ func EncodeTerminalOutput(frame TerminalOutputFrame, dst []byte) ([]byte, error)
 	if declared == 0 && frame.Encoding == TerminalOutputRaw {
 		declared = uint32(len(frame.Data))
 	}
-	if (frame.Channel != TerminalStdout && frame.Channel != TerminalStderr) || frame.StreamID == 0 || len(frame.Data) == 0 || len(frame.Data) > MaxBinaryFrame-terminalOutputHeaderLen || declared == 0 || declared > MaxBinaryFrame-terminalOutputHeaderLen || uint64(declared) > math.MaxUint64-frame.StartSequence {
+	if (frame.Channel != TerminalStdout && frame.Channel != TerminalStderr && frame.Channel != TerminalScreenCheckpoint && frame.Channel != TerminalBroadcastKey) || frame.StreamID == 0 || len(frame.Data) == 0 || len(frame.Data) > MaxBinaryFrame-terminalOutputHeaderLen || declared == 0 || declared > MaxBinaryFrame-terminalOutputHeaderLen || uint64(declared) > math.MaxUint64-frame.StartSequence {
 		return nil, &Error{Code: InvalidFrame}
 	}
 	if frame.Encoding != TerminalOutputRaw && frame.Encoding != TerminalOutputZstd {

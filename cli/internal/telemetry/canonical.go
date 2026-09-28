@@ -210,10 +210,6 @@ func ProjectHealth(snapshot runtimehealth.Snapshot, resourceKind, resourceID, co
 	return NewHealthResource(HealthProjectionInput{ResourceKind: resourceKind, ResourceID: resourceID, Snapshot: snapshot, CorrelationID: correlationID})
 }
 
-func NewHealthResourceFromRuntime(snapshot runtimehealth.Snapshot, resourceKind, resourceID, correlationID string) (HealthResource, error) {
-	return ProjectHealth(snapshot, resourceKind, resourceID, correlationID)
-}
-
 func (r HealthResource) Validate() error {
 	if r.Schema != ContractSchemaV1 || r.Kind != "health" || !validHealthResourceKind(r.ResourceKind) || !validCanonicalID(r.ResourceID) || !canonicalCodePattern.MatchString(r.OverallCode) || r.Since.IsZero() || r.NextRetryAt.IsZero() || !validCanonicalID(r.CorrelationID) {
 		return ErrCanonicalInvalid
@@ -307,11 +303,6 @@ func NewCanonicalEvent(input CanonicalEventInput) (CanonicalEventResource, error
 		return CanonicalEventResource{}, err
 	}
 	return event, nil
-}
-
-// NewEventResource is an alias-friendly constructor for API adapters.
-func NewEventResource(input CanonicalEventInput) (CanonicalEventResource, error) {
-	return NewCanonicalEvent(input)
 }
 
 // ProjectEvent converts an already validated hostruntime event while requiring

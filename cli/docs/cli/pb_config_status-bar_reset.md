@@ -6,6 +6,10 @@ Restore status-bar defaults
 
 Restore status-bar defaults
 
+Restore the built-in status-bar preferences. This only changes local presentation and leaves account, terminal sessions, and remote configuration intact.
+
+The status bar is rendered by the interactive terminal client. Preferences affect local presentation and do not change remote sessions. Use preview to inspect the result before relying on a theme or width setting.
+
 JSON output is supported with --json.
 
 ```

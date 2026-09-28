@@ -15,6 +15,7 @@ var (
 	ErrAttachmentCarrierInvalid     = errors.New("invalid preview attachment carrier")
 	ErrAttachmentCarrierClosed      = errors.New("preview attachment carrier is closed")
 	ErrAttachmentCarrierUnavailable = errors.New("preview attachment carrier is unavailable")
+	ErrAttachmentPlacementChanged   = errors.New("preview attachment placement changed")
 )
 
 // AttachmentAllocator is the small request/response boundary used by the
@@ -32,9 +33,10 @@ type AttachmentCarrierConfig struct {
 	Attachments AttachmentAllocator
 	Provider    PreviewCarrierProvider
 
-	RequestID     func() (string, error)
-	CorrelationID func() (string, error)
-	CloseTimeout  time.Duration
+	RequestID             func() (string, error)
+	CorrelationID         func() (string, error)
+	CloseTimeout          time.Duration
+	PlacementPollInterval time.Duration
 }
 
 // AttachmentCarrier allocates one short-lived server attachment on the first
@@ -43,11 +45,12 @@ type AttachmentCarrierConfig struct {
 // uncertain HTTP result replays the same operation/body hash rather than
 // accidentally creating a conflicting attachment.
 type AttachmentCarrier struct {
-	attachments AttachmentAllocator
-	provider    PreviewCarrierProvider
-	requestID   func() (string, error)
-	correlation func() (string, error)
-	closeWait   time.Duration
+	attachments  AttachmentAllocator
+	provider     PreviewCarrierProvider
+	requestID    func() (string, error)
+	correlation  func() (string, error)
+	closeWait    time.Duration
+	pollInterval time.Duration
 
 	mu      sync.Mutex
 	closed  bool
@@ -66,6 +69,12 @@ func NewAttachmentCarrier(config AttachmentCarrierConfig) (*AttachmentCarrier, e
 	if config.CloseTimeout <= 0 || config.CloseTimeout > time.Minute {
 		return nil, ErrAttachmentCarrierInvalid
 	}
+	if config.PlacementPollInterval == 0 {
+		config.PlacementPollInterval = 5 * time.Second
+	}
+	if config.PlacementPollInterval < 10*time.Millisecond || config.PlacementPollInterval > time.Minute {
+		return nil, ErrAttachmentCarrierInvalid
+	}
 	if config.RequestID == nil {
 		config.RequestID = func() (string, error) { return newAttachmentTraceID("request_") }
 	}
@@ -73,18 +82,26 @@ func NewAttachmentCarrier(config AttachmentCarrierConfig) (*AttachmentCarrier, e
 		config.CorrelationID = func() (string, error) { return newAttachmentTraceID("correlation_") }
 	}
 	return &AttachmentCarrier{
-		attachments: config.Attachments,
-		provider:    config.Provider,
-		requestID:   config.RequestID,
-		correlation: config.CorrelationID,
-		closeWait:   config.CloseTimeout,
+		attachments:  config.Attachments,
+		provider:     config.Provider,
+		requestID:    config.RequestID,
+		correlation:  config.CorrelationID,
+		closeWait:    config.CloseTimeout,
+		pollInterval: config.PlacementPollInterval,
 	}, nil
 }
 
 func (c *AttachmentCarrier) Run(ctx context.Context, lease Lease, ready func(Lease) error) error {
-	if c == nil || ctx == nil || ready == nil {
+	return c.RunWithLease(ctx, func() Lease { return lease }, ready)
+}
+
+// RunWithLease observes the latest lease ETag while a ready preview is live.
+// Session renewals may advance that ETag independently of carrier placement.
+func (c *AttachmentCarrier) RunWithLease(ctx context.Context, currentLease func() Lease, ready func(Lease) error) error {
+	if c == nil || ctx == nil || currentLease == nil || ready == nil {
 		return ErrAttachmentCarrierInvalid
 	}
+	lease := currentLease()
 	request, err := c.requestForLease(lease)
 	if err != nil {
 		return err
@@ -148,11 +165,17 @@ func (c *AttachmentCarrier) Run(ctx context.Context, lease Lease, ready func(Lea
 	// edge observation. The authenticated carrier connection is what allows
 	// the edge to transition this attachment to edge_ready.
 	if attachment.State == "admitted" {
-		waiter, ok := c.attachments.(AttachmentEdgeReadyWaiter)
-		if !ok {
+		if waiter, ok := c.attachments.(interface {
+			WaitForEdgeReadyCurrent(context.Context, Attachment, func() (AttachmentRequest, error)) (Attachment, error)
+		}); ok {
+			attachment, err = waiter.WaitForEdgeReadyCurrent(ctx, attachment, func() (AttachmentRequest, error) {
+				return c.requestForLease(currentLease())
+			})
+		} else if waiter, ok := c.attachments.(AttachmentEdgeReadyWaiter); ok {
+			attachment, err = waiter.WaitForEdgeReady(ctx, request, attachment)
+		} else {
 			return classifyAttachmentCarrierError(ErrAttachmentAdmissionPending)
 		}
-		attachment, err = waiter.WaitForEdgeReady(ctx, request, attachment)
 		if err != nil {
 			return classifyAttachmentCarrierError(err)
 		}
@@ -161,7 +184,43 @@ func (c *AttachmentCarrier) Run(ctx context.Context, lease Lease, ready func(Lea
 		return classifyAttachmentCarrierError(ErrAttachmentAdmissionPending)
 	}
 	var observedAttachment = attachment
-	err = carrier.Run(ctx, lease, func(observed Lease) error {
+	carrierCtx, stopCarrier := context.WithCancel(ctx)
+	defer stopCarrier()
+	readyForPlacement := make(chan struct{})
+	placementChanged := make(chan struct{}, 1)
+	watchDone := make(chan struct{})
+	go func() {
+		defer close(watchDone)
+		select {
+		case <-readyForPlacement:
+		case <-carrierCtx.Done():
+			return
+		}
+		ticker := time.NewTicker(c.pollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-carrierCtx.Done():
+				return
+			case <-ticker.C:
+			}
+			currentRequest, err := c.requestForLease(currentLease())
+			if err != nil {
+				continue
+			}
+			latest, err := c.attachments.Allocate(carrierCtx, currentRequest)
+			if err != nil {
+				continue
+			}
+			if latest.Binding != attachment.Binding {
+				placementChanged <- struct{}{}
+				stopCarrier()
+				return
+			}
+		}
+	}()
+	var readyOnce sync.Once
+	err = carrier.Run(carrierCtx, lease, func(observed Lease) error {
 		if observedAttachment.State != "ready" || !observedAttachment.OriginReady {
 			observer, ok := c.attachments.(AttachmentReadinessObserver)
 			if !ok {
@@ -171,14 +230,37 @@ func (c *AttachmentCarrier) Run(ctx context.Context, lease Lease, ready func(Lea
 			// bounded origin probe succeeds. The observed lease is a copy of the
 			// pre-probe dispatch projection, so its old OriginState is not an
 			// observation source.
-			next, err := observer.ObserveOrigin(ctx, request, observedAttachment, true)
+			currentRequest, requestErr := c.requestForLease(currentLease())
+			if requestErr != nil {
+				return classifyAttachmentCarrierError(requestErr)
+			}
+			next, err := observer.ObserveOrigin(ctx, currentRequest, observedAttachment, true)
+			if errors.Is(err, ErrAttachmentLeaseETagStale) {
+				currentRequest, requestErr = c.requestForLease(currentLease())
+				if requestErr == nil {
+					next, err = observer.ObserveOrigin(ctx, currentRequest, observedAttachment, true)
+				}
+			}
 			if err != nil {
 				return classifyAttachmentCarrierError(err)
 			}
 			observedAttachment = next
 		}
-		return ready(observed)
+		if err := ready(observed); err != nil {
+			return err
+		}
+		readyOnce.Do(func() { close(readyForPlacement) })
+		return nil
 	})
+	stopCarrier()
+	<-watchDone
+	select {
+	case <-placementChanged:
+		if ctx.Err() == nil {
+			return &RetryableCarrierError{Err: ErrAttachmentPlacementChanged}
+		}
+	default:
+	}
 	if err != nil && errors.Is(err, ErrDataCarrierPreviewOrigin) {
 		err = c.reportOriginFailure(ctx, request, observedAttachment, err)
 	}

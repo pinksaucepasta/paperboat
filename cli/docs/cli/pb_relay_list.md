@@ -1,15 +1,29 @@
 ## pb relay list
 
-List relays and measure current latency
+List hosted and self-hosted relays
 
 ### Synopsis
 
-List relays and measure current latency
+List relay candidates from the signed native network authority and the
+signed-in account's selected self-hosted relay pool. Mixed mode shows both
+sources. Self-hosted-only mode shows only selected self-hosted relays,
+including unavailable ones. Sign-in and the local daemon are required.
+
+Reported_ready means a recent signed control-plane observation, not a live
+data connection. Use --json for paperboat.relay-list/v1 output with the pool
+mode, relays, and observation timestamps.
 
 JSON output is supported with --json.
 
 ```
 pb relay list [flags]
+```
+
+### Examples
+
+```
+  pb relay list
+  pb relay list --json
 ```
 
 ### Options
@@ -29,5 +43,5 @@ pb relay list [flags]
 
 ### SEE ALSO
 
-* [pb relay](pb_relay.md)	 - Inspect Paperboat relays
+* [pb relay](pb_relay.md)	 - Inspect hosted and self-hosted relays
 

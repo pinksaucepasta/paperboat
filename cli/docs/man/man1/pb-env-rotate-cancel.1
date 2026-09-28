@@ -13,12 +13,18 @@ pb-env-rotate-cancel - Cancel an uncommitted personal ENV key rotation
 Cancel an uncommitted personal ENV key rotation
 
 .PP
+Cancel an uncommitted personal key rotation using the exact confirmation. A completed rotation cannot be undone by this command.
+
+.PP
+ENV values are encrypted before they leave the client. Commands select personal, team, or host scope explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
+
+.PP
 JSON output is supported with --json.
 
 
 .SH OPTIONS
 \fB--confirm\fP=""
-	exact confirmation phrase: CANCEL ENV ROTATE 
+	exact confirmation phrase: CANCEL ENV ROTATE <account_id>
 
 .PP
 \fB-h\fP, \fB--help\fP[=false]

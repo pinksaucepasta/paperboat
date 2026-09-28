@@ -45,6 +45,28 @@ func TestSharedTerminalRolesAndAttachmentIdentity(t *testing.T) {
 	if got := dispatcher.Handle(context.Background(), viewer, "terminal.v1", resize); got.ErrorCode != "not_found_or_forbidden" {
 		t.Fatalf("viewer resize=%#v", got)
 	}
+	browserViewer := viewer
+	browserViewer.BrowserTerminal = true
+	browserViewer.BrowserAttachmentID = response.AttachmentID
+	cursor, _ := json.Marshal(map[string]any{"action": "cursor", "session_id": created.ID})
+	if got := dispatcher.Handle(context.Background(), browserViewer, "terminal.v1", cursor); got.ErrorCode != "" {
+		t.Fatalf("browser viewer cursor=%#v", got)
+	} else {
+		var position struct {
+			LatestSequence uint64 `json:"latest_sequence"`
+		}
+		if err := json.Unmarshal(got.Result, &position); err != nil {
+			t.Fatal(err)
+		}
+		current, err := dispatcher.config.Sessions.Snapshot(created.ID)
+		if err != nil || position.LatestSequence != current.LatestSequence {
+			t.Fatalf("browser cursor=%d current=%#v err=%v", position.LatestSequence, current, err)
+		}
+	}
+	wrongCursor, _ := json.Marshal(map[string]any{"action": "cursor", "session_id": "other_session"})
+	if got := dispatcher.Handle(context.Background(), browserViewer, "terminal.v1", wrongCursor); got.ErrorCode != "not_found_or_forbidden" {
+		t.Fatalf("cross-session browser cursor=%#v", got)
+	}
 	admin, _ := json.Marshal(map[string]any{"action": "clear", "session_id": created.ID})
 	interactive := viewer
 	interactive.TerminalRole = TerminalRoleInteractive

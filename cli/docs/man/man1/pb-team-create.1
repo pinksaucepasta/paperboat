@@ -6,11 +6,17 @@ pb-team-create - Create a team
 
 
 .SH SYNOPSIS
-\fBpb team create  [flags]\fP
+\fBpb team create <team> [flags]\fP
 
 
 .SH DESCRIPTION
 Create a team
+
+.PP
+Create a named team with this account as its initial owner. Membership and resource grants are managed separately after creation.
+
+.PP
+Teams use explicit membership and resource grants. Membership alone does not grant device use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
 
 .PP
 JSON output is supported with --json.

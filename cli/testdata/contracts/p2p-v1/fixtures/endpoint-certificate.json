@@ -1,7 +1,7 @@
 {
-  "root_public_key": "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
-  "key_id": "aek_65b60673d6ed884bf01c2c222d82ada0740f29ac3355d6a925c81f17f47a27b8",
-  "certificate": "UEJFQwEACmFjY291bnRfMDEBAAZjbGlfMDHIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t_g4eLj5OXm5wu8NGpXZnw4ASC9nH_X5R0sX9_qN80vW_QFssa_by14AAAAAAAAAAIAAAAAAAAABwAAAABqcILAAAAAAGpwkND8bhSHyNEvAYJx_8tEbrZ-SVfu07z2CuMYko7rtOdylgAF8nhvqTk1HYji_MDN08XbT5f5XF2z1qeliFm7QVID",
-  "certificate_fingerprint": "9b8553888fb56747190f6ef1b86aec19ed889a5f1f9ffb49499c628469a30954",
+  "root_public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w",
+  "key_id": "aek_34750f98bd59fcfc946da45aaabe933be154a4b5094e1c4abf42866505f3c97e",
+  "certificate": "UEJFQwEACmFjY291bnRfMDEBAAZjbGlfMDGBOXcOqH0XX1ajVGbDTH7My42KkbTuN6Jd9g9bj8mzlAAAAAAAAAACAAAAAAAAAAcAAAAAanCCwAAAAABqcJDQlXr71i8tl6sbn_uYibpsjouW_aXMmfL220IZAvfGm_bB1brfLon-Qd4wKB4yunw0mfhrjFqhjN9Z2-i36ws7CA",
+  "certificate_fingerprint": "b4fcb48e073312c1f5527107e3d9c31c0d44ec7a498451c83725ec0db073d97b",
   "now": "2026-08-03T12:30:00Z"
 }

@@ -76,6 +76,7 @@ type RouteAssignment struct {
 	PublicTCPPort              uint16          `json:"public_tcp_port,omitempty"`
 	OriginScheme               string          `json:"origin_scheme,omitempty"`
 	AccessMode                 string          `json:"access_mode,omitempty"`
+	ViewerPolicyGeneration     uint64          `json:"viewer_policy_generation,omitempty"`
 	OriginAddress              string          `json:"origin_address,omitempty"`
 	PreserveHost               bool            `json:"preserve_host,omitempty"`
 	HostOverride               string          `json:"host_override,omitempty"`
@@ -139,6 +140,8 @@ type RouteObservation struct {
 	ConnectorProcessGeneration uint64 `json:"connector_process_generation,omitempty"`
 	ConfigGeneration           uint64 `json:"config_generation,omitempty"`
 	ConfigContentHash          string `json:"config_content_hash,omitempty"`
+	AccessMode                 string `json:"access_mode,omitempty"`
+	ViewerPolicyGeneration     uint64 `json:"viewer_policy_generation,omitempty"`
 	State                      string `json:"state,omitempty"`
 	ObservedState              string `json:"observed_state,omitempty"`
 }

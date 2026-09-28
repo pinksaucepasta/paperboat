@@ -6,6 +6,10 @@ Show daemon-local HTTP captures
 
 Show daemon-local HTTP captures
 
+Read or manage bounded HTTP captures for a tunnel, optionally filtered by route. --body and --raw expose retained content; enable, disable, and purge change capture state.
+
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+
 JSON output is supported with --json.
 
 ```

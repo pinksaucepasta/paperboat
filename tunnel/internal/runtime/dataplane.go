@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 )
 
@@ -15,6 +14,7 @@ type DataPlaneSpec struct {
 	// distribution loop. It is optional for a legacy/static deployment, but
 	// when supplied it must be stopped before carrier listeners are closed.
 	Certificates    Component
+	Runtime         Component
 	Preview         Component
 	Node            Component
 	Routes          Component
@@ -59,6 +59,9 @@ func (d *DataPlane) Start(ctx context.Context) error {
 		// first connection.
 		components = append(components, d.spec.Preview)
 	}
+	if d.spec.Runtime != nil {
+		components = append(components, d.spec.Runtime)
+	}
 	if d.spec.Carrier != nil {
 		components = append(components, d.spec.Carrier)
 	}
@@ -77,7 +80,7 @@ func (d *DataPlane) Start(ctx context.Context) error {
 			}
 			d.started = nil
 			d.closed = true
-			return errors.Join(fmt.Errorf("start data-plane dependency: %w", err), errors.Join(cleanup...))
+			return errors.Join(componentStartError(component, err), errors.Join(cleanup...))
 		}
 		d.started = append(d.started, component)
 	}
@@ -98,6 +101,9 @@ func (d *DataPlane) Shutdown(ctx context.Context) error {
 		order = append(order, d.spec.PublicTCP)
 	}
 	order = append(order, d.spec.Routes)
+	if d.spec.Runtime != nil {
+		order = append(order, d.spec.Runtime)
+	}
 	if d.spec.Preview != nil {
 		// Reconcile and detach preview routes while authenticated carrier peers
 		// are still alive. Carrier shutdown follows this component.

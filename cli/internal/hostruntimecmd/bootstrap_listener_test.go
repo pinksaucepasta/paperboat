@@ -2,6 +2,7 @@ package hostruntimecmd
 
 import (
 	"encoding/base64"
+	"net"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
 )
 
 func TestFreshBootstrapCannotReplaceExistingEnrollment(t *testing.T) {
@@ -29,13 +31,44 @@ func TestFreshBootstrapCannotReplaceExistingEnrollment(t *testing.T) {
 	}
 }
 
-func TestAllocatedBootstrapListenerIsConcreteLoopback(t *testing.T) {
-	address, err := allocateBootstrapLoopbackAddress()
+func TestBootstrapListenerUsesPrimaryThenSecondary(t *testing.T) {
+	if runtimeport.Primary != "127.0.0.1:38080" || runtimeport.Secondary != "127.0.0.1:48080" {
+		t.Fatal("runtime listener defaults changed")
+	}
+	primary, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(address, "127.0.0.1:") || strings.HasSuffix(address, ":0") {
-		t.Fatalf("address=%q", address)
+	primaryAddress := primary.Addr().String()
+	if err := primary.Close(); err != nil {
+		t.Fatal(err)
+	}
+	secondary, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondaryAddress := secondary.Addr().String()
+	if err := secondary.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := chooseBootstrapLoopbackAddress(primaryAddress, secondaryAddress); err != nil || got != primaryAddress {
+		t.Fatalf("primary choice = %q, %v", got, err)
+	}
+	primary, err = net.Listen("tcp4", primaryAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer primary.Close()
+	if got, err := chooseBootstrapLoopbackAddress(primaryAddress, secondaryAddress); err != nil || got != secondaryAddress {
+		t.Fatalf("secondary choice = %q, %v", got, err)
+	}
+	secondary, err = net.Listen("tcp4", secondaryAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secondary.Close()
+	if got, err := chooseBootstrapLoopbackAddress(primaryAddress, secondaryAddress); err == nil || got != "" {
+		t.Fatalf("occupied ports choice = %q, %v", got, err)
 	}
 }
 

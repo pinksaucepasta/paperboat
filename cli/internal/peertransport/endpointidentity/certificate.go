@@ -16,7 +16,7 @@ import (
 const (
 	ProtocolVersion         = 1
 	maximumContractInteger  = 9007199254740991
-	encodedClaimsLen        = 4 + 1 + 2 + 128 + 1 + 2 + 128 + 32 + 32 + 8 + 8 + 8 + 8
+	encodedClaimsLen        = 4 + 1 + 2 + 128 + 1 + 2 + 128 + 32 + 8 + 8 + 8 + 8
 	maximumCertificateBytes = encodedClaimsLen + ed25519.SignatureSize
 )
 
@@ -30,15 +30,14 @@ const (
 )
 
 type Claims struct {
-	AccountID      string
-	Role           Role
-	EndpointID     string
-	NoisePublicKey [32]byte
-	QUICPublicKey  ed25519.PublicKey
-	Generation     uint64
-	Serial         uint64
-	IssuedAt       time.Time
-	ExpiresAt      time.Time
+	AccountID     string
+	Role          Role
+	EndpointID    string
+	QUICPublicKey ed25519.PublicKey
+	Generation    uint64
+	Serial        uint64
+	IssuedAt      time.Time
+	ExpiresAt     time.Time
 }
 
 type Certificate struct {
@@ -138,8 +137,7 @@ func marshalClaims(claims Claims) ([]byte, error) {
 	if len(claims.QUICPublicKey) != ed25519.PublicKeySize || claims.Generation == 0 || claims.Generation > maximumContractInteger || claims.Serial == 0 || claims.Serial > maximumContractInteger {
 		return nil, errors.New("invalid endpoint certificate key or version")
 	}
-	var zeroNoise [32]byte
-	if subtle.ConstantTimeCompare(claims.NoisePublicKey[:], zeroNoise[:]) == 1 || allZero(claims.QUICPublicKey) {
+	if allZero(claims.QUICPublicKey) {
 		return nil, errors.New("endpoint public keys must not be zero")
 	}
 	issued := claims.IssuedAt.UTC().Truncate(time.Second)
@@ -152,7 +150,6 @@ func marshalClaims(claims Claims) ([]byte, error) {
 	buffer = appendString(buffer, claims.AccountID)
 	buffer = append(buffer, byte(claims.Role))
 	buffer = appendString(buffer, claims.EndpointID)
-	buffer = append(buffer, claims.NoisePublicKey[:]...)
 	buffer = append(buffer, claims.QUICPublicKey...)
 	buffer = binary.BigEndian.AppendUint64(buffer, claims.Generation)
 	buffer = binary.BigEndian.AppendUint64(buffer, claims.Serial)
@@ -173,15 +170,12 @@ func unmarshalClaims(payload []byte) (Claims, error) {
 	role := Role(payload[offset])
 	offset++
 	endpointID, err := readString(payload, &offset)
-	if err != nil || len(payload)-offset != 32+32+8+8+8+8 {
+	if err != nil || len(payload)-offset != 32+8+8+8+8 {
 		return Claims{}, errors.New("invalid endpoint certificate length")
 	}
-	var noise [32]byte
-	copy(noise[:], payload[offset:offset+32])
-	offset += 32
 	quicPublic := append(ed25519.PublicKey(nil), payload[offset:offset+32]...)
 	offset += 32
-	claims := Claims{AccountID: accountID, Role: role, EndpointID: endpointID, NoisePublicKey: noise, QUICPublicKey: quicPublic}
+	claims := Claims{AccountID: accountID, Role: role, EndpointID: endpointID, QUICPublicKey: quicPublic}
 	claims.Generation = binary.BigEndian.Uint64(payload[offset:])
 	offset += 8
 	claims.Serial = binary.BigEndian.Uint64(payload[offset:])

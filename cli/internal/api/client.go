@@ -11,7 +11,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -78,14 +77,6 @@ type APIError struct {
 func IsNotFound(err error) bool {
 	var apiErr *APIError
 	return errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound
-}
-
-// IsHostedEntitlementRequired reports the hosted-project billing gate. Callers
-// that also expose separately entitled machines may skip projects
-// while preserving every other API failure.
-func IsHostedEntitlementRequired(err error) bool {
-	var apiErr *APIError
-	return errors.As(err, &apiErr) && (apiErr.Code == "payment_required" || apiErr.Code == "entitlement_lost")
 }
 
 func (e *APIError) Error() string {
@@ -170,85 +161,11 @@ type Me struct {
 	Role        string `json:"role"`
 }
 
-// Project mirrors the fields the CLI needs from the server's project payload.
-// The full server shape has more; we decode only what resolution requires so
-// added server fields never break the client.
-type Project struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	State string `json:"state"`
-}
-
-type GitHubRepository struct {
-	FullName      string `json:"full_name"`
-	CloneURL      string `json:"clone_url"`
-	DefaultBranch string `json:"default_branch"`
-}
-
 // ClientConfiguration contains server-owned URLs used by Paperboat clients.
 type ClientConfiguration struct {
 	Version            string `json:"version"`
 	CLIVerificationURL string `json:"cli_verification_url"`
 	MachinesURL        string `json:"machines_url"`
-}
-
-type NetworkCheckRegion struct {
-	RelayID  string `json:"relay_id"`
-	Region   string `json:"region"`
-	Name     string `json:"name"`
-	STUNURL  string `json:"stun_url"`
-	HTTPSURL string `json:"https_url"`
-}
-
-type NetworkCheckRegions struct {
-	Regions []NetworkCheckRegion `json:"regions"`
-}
-
-func (c *Client) NetworkCheckRegions(ctx context.Context) (NetworkCheckRegions, error) {
-	var out NetworkCheckRegions
-	if err := c.do(ctx, http.MethodGet, "/network-check/regions/v1", nil, &out); err != nil {
-		return NetworkCheckRegions{}, err
-	}
-	if len(out.Regions) > 32 {
-		return NetworkCheckRegions{}, errors.New("paperboat-server returned too many network-check regions")
-	}
-	seen := make(map[string]bool, len(out.Regions))
-	for _, region := range out.Regions {
-		if !validRegionCode(region.RelayID) || !validRegionCode(region.Region) || strings.TrimSpace(region.Name) == "" || len(region.Name) > 80 || seen[region.Region] || !validSTUNProbeURL(region.STUNURL) || !validHTTPSProbeURL(region.HTTPSURL) {
-			return NetworkCheckRegions{}, errors.New("paperboat-server returned an invalid network-check region")
-		}
-		seen[region.Region] = true
-	}
-	return out, nil
-}
-
-func validRegionCode(value string) bool {
-	if value == "" || len(value) > 63 {
-		return false
-	}
-	for _, r := range value {
-		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
-			return false
-		}
-	}
-	return value[0] != '-' && value[len(value)-1] != '-'
-}
-
-func validSTUNProbeURL(raw string) bool {
-	if !strings.HasPrefix(raw, "stun:") || strings.ContainsAny(raw, "?#") {
-		return false
-	}
-	value, err := url.Parse("//" + strings.TrimPrefix(raw, "stun:"))
-	if err != nil || value.Hostname() == "" || value.Port() == "" || value.User != nil || value.Path != "" {
-		return false
-	}
-	port, err := strconv.ParseUint(value.Port(), 10, 16)
-	return err == nil && port > 0
-}
-
-func validHTTPSProbeURL(raw string) bool {
-	value, err := url.Parse(raw)
-	return err == nil && value.Scheme == "https" && value.Hostname() != "" && value.User == nil && value.Path == "/network-check/v1" && value.RawQuery == "" && value.Fragment == ""
 }
 
 func (c *Client) ClientConfiguration(ctx context.Context) (ClientConfiguration, error) {
@@ -264,103 +181,6 @@ func (c *Client) ClientConfiguration(ctx context.Context) (ClientConfiguration, 
 		return ClientConfiguration{}, errors.New("paperboat-server returned an invalid machines URL")
 	}
 	return out, nil
-}
-
-type PeerAttemptInput struct {
-	OperationID                       string               `json:"operation_id"`
-	EnvironmentID                     string               `json:"environment_id"`
-	Purpose                           string               `json:"purpose"`
-	Consumer                          string               `json:"consumer"`
-	ControllingCertificateFingerprint string               `json:"controlling_certificate_fingerprint"`
-	ControlledCertificateFingerprint  string               `json:"controlled_certificate_fingerprint"`
-	AttemptGeneration                 uint64               `json:"attempt_generation"`
-	NetworkGeneration                 uint64               `json:"network_generation"`
-	AllowedPaths                      []string             `json:"allowed_paths"`
-	Transfer                          *PeerAttemptTransfer `json:"transfer,omitempty"`
-	RelayLatency                      *RelayLatencyVector  `json:"relay_latency,omitempty"`
-}
-
-type RelayLatencySample struct {
-	Region string `json:"region"`
-	RTTMS  int64  `json:"rtt_ms"`
-}
-
-type RelayLatencyVector struct {
-	Generation         uint64               `json:"generation"`
-	ObservedAt         time.Time            `json:"observed_at"`
-	Samples            []RelayLatencySample `json:"samples"`
-	RelaySuccessRegion string               `json:"relay_success_region,omitempty"`
-	RelaySuccessAt     time.Time            `json:"relay_success_at,omitempty"`
-}
-
-type PeerAttemptTransfer struct {
-	TransferID string    `json:"transfer_id"`
-	Generation uint64    `json:"generation"`
-	ExpiresAt  time.Time `json:"expires_at"`
-}
-
-type PeerAttemptCertificate struct {
-	EndpointID  string `json:"endpoint_id"`
-	KeyID       string `json:"key_id"`
-	Certificate string `json:"certificate"`
-}
-
-type PeerAttemptDescriptor struct {
-	Version                 int                      `json:"version"`
-	AccountID               string                   `json:"account_id"`
-	DeviceID                string                   `json:"device_id"`
-	OperationID             string                   `json:"operation_id"`
-	IntentID                string                   `json:"intent_id"`
-	EnvironmentID           string                   `json:"environment_id"`
-	Purpose                 string                   `json:"purpose"`
-	Consumer                string                   `json:"consumer"`
-	InitiatorEndpointID     string                   `json:"initiator_endpoint_id"`
-	ResponderEndpointID     string                   `json:"responder_endpoint_id"`
-	Role                    string                   `json:"role"`
-	AttemptGeneration       uint64                   `json:"attempt_generation"`
-	NetworkGeneration       uint64                   `json:"network_generation"`
-	HostGeneration          uint64                   `json:"host_generation"`
-	AuthorizationGeneration uint64                   `json:"authorization_generation"`
-	TrustedKeys             []E2EEKey                `json:"trusted_keys"`
-	IssuedAt                time.Time                `json:"issued_at"`
-	ExpiresAt               time.Time                `json:"expires_at"`
-	EndpointCertificates    []PeerAttemptCertificate `json:"endpoint_certificates"`
-	Direct                  struct {
-		ICEUfrag    string   `json:"ice_ufrag"`
-		ICEPassword string   `json:"ice_password"`
-		STUNURLs    []string `json:"stun_urls"`
-	} `json:"direct"`
-	Signaling struct {
-		URL         string `json:"url"`
-		Credential  string `json:"credential"`
-		Subprotocol string `json:"subprotocol"`
-	} `json:"signaling"`
-	Relays []PeerAttemptRelay `json:"relays"`
-	Policy struct {
-		AllowedPaths     []string `json:"allowed_paths"`
-		RelayDeadlineMS  int      `json:"relay_deadline_ms"`
-		HealthIntervalMS int      `json:"health_interval_ms"`
-		MaxCandidates    int      `json:"max_candidates"`
-	} `json:"policy"`
-	StreamPolicy *PeerAttemptStreamPolicy `json:"stream_policy,omitempty"`
-	Transfer     *PeerAttemptTransfer     `json:"transfer,omitempty"`
-}
-
-type PeerAttemptStreamPolicy struct {
-	Protocol         string   `json:"protocol"`
-	AllowedConsumers []string `json:"allowed_consumers"`
-	MaximumStreams   int      `json:"maximum_streams"`
-}
-
-type PeerAttemptRelay struct {
-	Region          string    `json:"region"`
-	RouteGeneration uint64    `json:"route_generation"`
-	QUICURL         string    `json:"quic_url,omitempty"`
-	WSSURL          string    `json:"wss_url,omitempty"`
-	RouteToken      string    `json:"route_token"`
-	PMTUToken       string    `json:"pmtu_token"`
-	PMTUURL         string    `json:"pmtu_url"`
-	ExpiresAt       time.Time `json:"expires_at"`
 }
 
 type EndpointCertificateDocument struct {
@@ -410,33 +230,48 @@ type E2EERoot struct {
 	Generation  uint64    `json:"-"`
 }
 
+// PeerTransportKeySet contains currently authorized device certificate
+// signers. It is separate from the account ENV root authority.
+type PeerTransportKeySet struct {
+	Version     int       `json:"version"`
+	TrustedKeys []E2EEKey `json:"trusted_keys"`
+}
+
 type PendingEndpointIdentity struct {
-	RequestID      string    `json:"request_id"`
-	EndpointID     string    `json:"endpoint_id"`
-	Role           string    `json:"role,omitempty"`
-	State          string    `json:"state,omitempty"`
-	Generation     uint64    `json:"generation"`
-	NoisePublicKey string    `json:"noise_public_key"`
-	QUICPublicKey  string    `json:"quic_public_key"`
-	CreatedAt      time.Time `json:"created_at"`
-	ExpiresAt      time.Time `json:"expires_at"`
-	SafetyCode     string    `json:"safety_code"`
+	RequestID     string    `json:"request_id"`
+	EndpointID    string    `json:"endpoint_id"`
+	Role          string    `json:"role,omitempty"`
+	State         string    `json:"state,omitempty"`
+	Generation    uint64    `json:"generation"`
+	QUICPublicKey string    `json:"quic_public_key"`
+	CreatedAt     time.Time `json:"created_at"`
+	ExpiresAt     time.Time `json:"expires_at"`
+	SafetyCode    string    `json:"safety_code"`
 }
 
 // CLIEndpointRequestInput contains only public endpoint keys. The request is
 // signed later by an already paired CLI and never carries a root private key.
 type CLIEndpointRequestInput struct {
-	OperationID    string `json:"operation_id"`
-	EndpointID     string `json:"endpoint_id"`
-	Generation     uint64 `json:"generation"`
-	NoisePublicKey string `json:"noise_public_key"`
-	QUICPublicKey  string `json:"quic_public_key"`
+	OperationID   string `json:"operation_id"`
+	EndpointID    string `json:"endpoint_id"`
+	Generation    uint64 `json:"generation"`
+	QUICPublicKey string `json:"quic_public_key"`
 }
 
 func (c *Client) E2EERoot(ctx context.Context) (E2EERoot, error) {
 	var out E2EERoot
 	if err := c.doStrict(ctx, http.MethodGet, "/v1/e2ee/root", nil, &out); err != nil {
 		return E2EERoot{}, err
+	}
+	return out, nil
+}
+
+// PeerTransportKeys is the current authorized endpoint signer directory.
+// These public keys grant no authority over ENV vault data.
+func (c *Client) PeerTransportKeys(ctx context.Context) (PeerTransportKeySet, error) {
+	var out PeerTransportKeySet
+	if err := c.doStrict(ctx, http.MethodGet, "/v1/peer-keys", nil, &out); err != nil {
+		return PeerTransportKeySet{}, err
 	}
 	return out, nil
 }
@@ -453,7 +288,7 @@ func (c *Client) PendingE2EEEndpoints(ctx context.Context) ([]PendingEndpointIde
 // CLI endpoint enrollment request. Unlike machine endpoint enrollment this
 // route uses the authenticated CLI session and carries no machine proof.
 func (c *Client) RequestCLIEndpoint(ctx context.Context, input CLIEndpointRequestInput) (PendingEndpointIdentity, error) {
-	if strings.TrimSpace(input.OperationID) == "" || strings.TrimSpace(input.EndpointID) == "" || input.Generation == 0 || strings.TrimSpace(input.NoisePublicKey) == "" || strings.TrimSpace(input.QUICPublicKey) == "" {
+	if strings.TrimSpace(input.OperationID) == "" || strings.TrimSpace(input.EndpointID) == "" || input.Generation == 0 || strings.TrimSpace(input.QUICPublicKey) == "" {
 		return PendingEndpointIdentity{}, errors.New("CLI endpoint enrollment request is invalid")
 	}
 	var out PendingEndpointIdentity
@@ -507,79 +342,11 @@ func (c *Client) bootstrapE2EE(ctx context.Context, operationID string, input E2
 	return out, nil
 }
 
-func (c *Client) CreatePeerAttempt(ctx context.Context, input PeerAttemptInput) (PeerAttemptDescriptor, error) {
-	var out PeerAttemptDescriptor
-	if err := c.doStrict(ctx, http.MethodPost, "/v1/peer-attempts", input, &out); err != nil {
-		return PeerAttemptDescriptor{}, err
-	}
-	return out, nil
-}
-
-func (c *Client) RevokePeerAttempt(ctx context.Context, operationID, intentID string, attemptGeneration uint64) error {
-	var out struct {
-		IntentID string `json:"intent_id"`
-	}
-	path := "/v1/peer-attempts/" + url.PathEscape(intentID) + "/" + strconv.FormatUint(attemptGeneration, 10)
-	return c.doWithHeaders(ctx, http.MethodDelete, path, nil, &out, http.Header{"Idempotency-Key": []string{operationID}})
-}
-
-type CatalogMachineType struct {
-	Code   string `json:"code"`
-	Active bool   `json:"active"`
-}
-type CatalogRegion struct {
-	Code    string `json:"code"`
-	Enabled bool   `json:"enabled"`
-}
-
-func (c *Client) ListGitHubRepositories(ctx context.Context) ([]GitHubRepository, error) {
-	var out []GitHubRepository
-	err := c.do(ctx, http.MethodGet, "/v1/github/repositories", nil, &out)
-	return out, err
-}
-
-func (c *Client) ListCatalogMachineTypes(ctx context.Context) ([]CatalogMachineType, error) {
-	var out []CatalogMachineType
-	err := c.do(ctx, http.MethodGet, "/v1/catalog/machine-types", nil, &out)
-	return out, err
-}
-
-func (c *Client) ListCatalogRegions(ctx context.Context) ([]CatalogRegion, error) {
-	var out []CatalogRegion
-	err := c.do(ctx, http.MethodGet, "/v1/catalog/regions", nil, &out)
-	return out, err
-}
-
-type CreateProjectInput struct {
-	Name            string   `json:"name"`
-	RepositoryURL   string   `json:"repository_url"`
-	DefaultBranch   string   `json:"default_branch,omitempty"`
-	StorageGB       int      `json:"storage_gb"`
-	MachineTypeCode string   `json:"machine_type_code"`
-	RegionCode      string   `json:"region_code"`
-	PresetCodes     []string `json:"preset_codes,omitempty"`
-	SetupScript     string   `json:"setup_script,omitempty"`
-}
-
-func (c *Client) CreateProject(ctx context.Context, input CreateProjectInput, idempotencyKey string) (Project, error) {
-	if strings.TrimSpace(idempotencyKey) == "" {
-		return Project{}, errors.New("project creation idempotency key is required")
-	}
-	var out Project
-	err := c.doWithHeaders(ctx, http.MethodPost, "/v1/projects", input, &out, http.Header{"Idempotency-Key": []string{idempotencyKey}})
-	return out, err
-}
-
 type Pagination struct {
 	Limit      int  `json:"limit"`
 	Offset     int  `json:"offset"`
 	Total      int  `json:"total"`
 	NextOffset *int `json:"next_offset"`
-}
-
-type ProjectPage struct {
-	Items      []Project  `json:"items"`
-	Pagination Pagination `json:"pagination"`
 }
 
 // UserMachine is a user-owned environment reached through its enrolled
@@ -783,15 +550,6 @@ func (c *Client) IssueMachineControlCredential(ctx context.Context, machineID, o
 	err := c.doWithHeaders(ctx, http.MethodPost, path, struct {
 		OperationID string `json:"operation_id"`
 	}{operationID}, &out, http.Header{"X-Paperboat-Machine-Proof": []string{base64.RawURLEncoding.EncodeToString(proof)}})
-	return out, err
-}
-
-func (c *Client) UnpairMachine(ctx context.Context, machineID string) (UserMachine, error) {
-	if strings.TrimSpace(machineID) == "" {
-		return UserMachine{}, errors.New("machine ID is required")
-	}
-	var out UserMachine
-	err := c.do(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/unpair", nil, &out)
 	return out, err
 }
 
@@ -1074,7 +832,7 @@ type AuthMaterial struct {
 
 const ConnectionSchemaV1 = "paperboat.environment-connection/v1"
 
-// Environment identifies either a hosted project or a machine.
+// Environment identifies the enrolled machine behind a terminal descriptor.
 type Environment struct {
 	ID            string `json:"id"`
 	Kind          string `json:"kind"`
@@ -1082,7 +840,6 @@ type Environment struct {
 	State         string `json:"state"`
 	Root          string `json:"root"`
 	EnvironmentID string `json:"environment_id"`
-	ProjectID     string `json:"project_id"`
 	UserMachineID string `json:"machine_id"`
 	Alias         string `json:"alias"`
 	ProjectRoot   string `json:"project_root"`
@@ -1133,8 +890,6 @@ type ConnectionDescriptor struct {
 	MachineGeneration uint64        `json:"machine_generation,omitempty"`
 	Schema            string        `json:"schema"`
 	Issuer            string        `json:"issuer,omitempty"`
-	ProjectID         string        `json:"project_id"`
-	ProjectState      string        `json:"project_state"`
 	UserMachineID     string        `json:"machine_id"`
 	UserMachineState  string        `json:"machine_state"`
 	Connectable       bool          `json:"connectable"`
@@ -1170,8 +925,6 @@ func (r *ConnectionDescriptor) NormalizeConnectionDescriptor() error {
 	e := r.Environment
 	e.EnvironmentID, e.ProjectRoot = e.ID, e.Root
 	switch e.Kind {
-	case "hosted":
-		e.ProjectID, r.ProjectID, r.ProjectState = e.ResourceID, e.ResourceID, e.State
 	case "byod":
 		e.UserMachineID, r.UserMachineID, r.UserMachineState = e.ResourceID, e.ResourceID, e.State
 	default:
@@ -1193,7 +946,7 @@ func (r *ConnectionDescriptor) NormalizeConnectionDescriptor() error {
 }
 
 // ConfigSyncStatus is the account-wide status response. The CLI selects the
-// entry matching the attached project and intentionally ignores path/error
+// entry matching the attached machine and intentionally ignores path/error
 // details when rendering its local status line.
 type ConfigSyncStatus struct {
 	State        string                       `json:"state"`
@@ -1223,21 +976,6 @@ type ConfigSyncPathSummary struct {
 	Bytes    int64  `json:"bytes,omitempty"`
 	Reason   string `json:"reason"`
 	Revision string `json:"revision,omitempty"`
-}
-
-// UsageSummary is the account-level, server-authoritative usage payload used
-// by the connected terminal's optional status widgets.
-type UsageSummary struct {
-	Credits struct {
-		Balance string `json:"balance"`
-	} `json:"credits"`
-	Storage struct {
-		AvailableGB int `json:"available_gb"`
-	} `json:"storage"`
-	Projects struct {
-		Running int `json:"running"`
-		Total   int `json:"total"`
-	} `json:"projects"`
 }
 
 // ConfigSyncStatus gets the authenticated account's configuration sync state.
@@ -1284,40 +1022,11 @@ func (c *Client) ForceConfig(ctx context.Context, machineID string, request Conf
 	return out, err
 }
 
-// UsageSummary returns account credits, available storage, and project counts.
-func (c *Client) UsageSummary(ctx context.Context) (UsageSummary, error) {
-	var out UsageSummary
-	err := c.do(ctx, http.MethodGet, "/v1/usage-summary", nil, &out)
-	return out, err
-}
-
 // Me fetches the authenticated user, validating the reused credential.
 func (c *Client) Me(ctx context.Context) (Me, error) {
 	var out Me
 	err := c.do(ctx, http.MethodGet, "/v1/me", nil, &out)
 	return out, err
-}
-
-// ListProjects returns every project page using the server-authored cursor.
-func (c *Client) ListProjects(ctx context.Context) ([]Project, error) {
-	const pageSize = 200
-	projects := make([]Project, 0)
-	offset := 0
-	for {
-		var page ProjectPage
-		path := fmt.Sprintf("/v1/projects?limit=%d&offset=%d&sort=name", pageSize, offset)
-		if err := c.do(ctx, http.MethodGet, path, nil, &page); err != nil {
-			return nil, err
-		}
-		projects = append(projects, page.Items...)
-		if page.Pagination.NextOffset == nil {
-			return projects, nil
-		}
-		if *page.Pagination.NextOffset <= offset {
-			return nil, errors.New("project pagination did not advance")
-		}
-		offset = *page.Pagination.NextOffset
-	}
 }
 
 // ListUserMachines returns every enrolled machine page using the
@@ -1524,39 +1233,6 @@ func (c *Client) DeleteUserMachine(ctx context.Context, machineID string) error 
 	return c.do(ctx, http.MethodDelete, "/v1/machines/"+url.PathEscape(machineID), nil, nil)
 }
 
-// ProjectConnectionDescriptor runs the pre-connect broker: it authorizes, provisions/reconciles
-// route resources, resumes an idle machine, and returns the helper
-// WebSocket terminal descriptor. A not-yet-ready machine returns
-// Connectable=false (HTTP 202); the caller polls ConnectionReadiness.
-func (c *Client) ProjectConnectionDescriptor(ctx context.Context, projectID string) (ConnectionDescriptor, error) {
-	return c.ProjectConnectionDescriptorForSession(ctx, projectID, "")
-}
-
-// ProjectConnectionDescriptorForSession connects the selected durable terminal session. An empty
-// session ID preserves the default-session behavior for older servers/clients.
-func (c *Client) ProjectConnectionDescriptorForSession(ctx context.Context, projectID, terminalSessionID string) (ConnectionDescriptor, error) {
-	var out ConnectionDescriptor
-	var values map[string]string
-	if c.sourceMachineID != "" {
-		values = map[string]string{"source_machine_id": c.sourceMachineID}
-	}
-	if terminalSessionID != "" {
-		if values == nil {
-			values = make(map[string]string)
-		}
-		values["terminal_session_id"] = terminalSessionID
-	}
-	var body any
-	if values != nil {
-		body = values
-	}
-	err := c.do(ctx, http.MethodPost, "/v1/projects/"+url.PathEscape(projectID)+"/connection-descriptor", body, &out)
-	if err == nil {
-		err = out.NormalizeConnectionDescriptor()
-	}
-	return out, err
-}
-
 // UserMachineConnectionDescriptor obtains the default terminal session's short-lived
 // Paperboat descriptor. It deliberately does not accept a client-supplied
 // route or connector credential.
@@ -1671,13 +1347,13 @@ func (c *Client) MachineFileTransferDescriptorForRequest(ctx context.Context, de
 
 // UserMachineConnectionReadiness polls readiness without minting a fresh
 // descriptor. Reconnects re-run UserMachineConnectionDescriptor after this reports
-// ready, matching the hosted-project flow.
+// ready, matching the machine connection flow.
 func (c *Client) UserMachineConnectionReadiness(ctx context.Context, machineID string) (ConnectionDescriptor, error) {
 	return c.UserMachineConnectionReadinessForSession(ctx, machineID, "")
 }
 
 // UserMachineConnectionReadinessForSession preserves the selected terminal
-// session through readiness polling, exactly as hosted-project polling does.
+// session through readiness polling.
 func (c *Client) UserMachineConnectionReadinessForSession(ctx context.Context, machineID, terminalSessionID string) (ConnectionDescriptor, error) {
 	var out ConnectionDescriptor
 	path := "/v1/machines/" + url.PathEscape(machineID) + "/connection-readiness"
@@ -1689,10 +1365,6 @@ func (c *Client) UserMachineConnectionReadinessForSession(ctx context.Context, m
 		err = out.NormalizeConnectionDescriptor()
 	}
 	return out, err
-}
-
-func (c *Client) ListTerminalSessions(ctx context.Context, projectID string) ([]TerminalSession, error) {
-	return c.listTerminalSessions(ctx, "/v1/projects/"+url.PathEscape(projectID)+"/terminal-sessions")
 }
 
 func (c *Client) listTerminalSessions(ctx context.Context, basePath string) ([]TerminalSession, error) {
@@ -1713,30 +1385,6 @@ func (c *Client) listTerminalSessions(ctx context.Context, basePath string) ([]T
 		}
 		offset = *page.Pagination.NextOffset
 	}
-}
-
-func (c *Client) CreateTerminalSession(ctx context.Context, projectID, name, idempotencyKey string) (TerminalSession, error) {
-	var out TerminalSession
-	body := map[string]string{}
-	if name != "" {
-		body["name"] = name
-	}
-	path := "/v1/projects/" + url.PathEscape(projectID) + "/terminal-sessions"
-	return out, c.doWithHeaders(ctx, http.MethodPost, path, body, &out, http.Header{"Idempotency-Key": []string{idempotencyKey}})
-}
-
-func (c *Client) RenameTerminalSession(ctx context.Context, projectID, sessionID, name string) (TerminalSession, error) {
-	var out TerminalSession
-	err := c.do(ctx, http.MethodPatch, "/v1/projects/"+url.PathEscape(projectID)+"/terminal-sessions/"+url.PathEscape(sessionID), map[string]string{"name": name}, &out)
-	return out, err
-}
-
-func (c *Client) CloseTerminalSession(ctx context.Context, projectID, sessionID string) error {
-	return c.do(ctx, http.MethodPost, "/v1/projects/"+url.PathEscape(projectID)+"/terminal-sessions/"+url.PathEscape(sessionID)+"/close", nil, &struct{}{})
-}
-
-func (c *Client) DeleteTerminalSession(ctx context.Context, projectID, sessionID string) error {
-	return c.do(ctx, http.MethodDelete, "/v1/projects/"+url.PathEscape(projectID)+"/terminal-sessions/"+url.PathEscape(sessionID), nil, &struct{}{})
 }
 
 // ListUserMachineTerminalSessions lists the durable Paperboat sessions
@@ -1771,27 +1419,6 @@ func (c *Client) CloseUserMachineTerminalSession(ctx context.Context, machineID,
 func (c *Client) DeleteUserMachineTerminalSession(ctx context.Context, machineID, sessionID string) error {
 	path := "/v1/machines/" + url.PathEscape(machineID) + "/terminal-sessions/" + url.PathEscape(sessionID)
 	return c.do(ctx, http.MethodDelete, path, nil, &struct{}{})
-}
-
-// ConnectionReadiness reports current tunnel readiness without re-brokering.
-func (c *Client) ConnectionReadiness(ctx context.Context, projectID string) (ConnectionDescriptor, error) {
-	return c.ProjectConnectionReadinessForSession(ctx, projectID, "")
-}
-
-// ProjectConnectionReadinessForSession polls readiness for the same durable terminal
-// session selected for cli-connect. The returned descriptor has no credential,
-// but its terminal identity must never silently fall back to the default.
-func (c *Client) ProjectConnectionReadinessForSession(ctx context.Context, projectID, terminalSessionID string) (ConnectionDescriptor, error) {
-	var out ConnectionDescriptor
-	path := "/v1/projects/" + url.PathEscape(projectID) + "/connection-readiness"
-	if terminalSessionID != "" {
-		path += "?terminal_session_id=" + url.QueryEscape(terminalSessionID)
-	}
-	err := c.do(ctx, http.MethodGet, path, nil, &out)
-	if err == nil {
-		err = out.NormalizeConnectionDescriptor()
-	}
-	return out, err
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {

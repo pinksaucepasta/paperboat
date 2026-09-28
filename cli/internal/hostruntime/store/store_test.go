@@ -114,6 +114,32 @@ func TestStorePersistsSessionAndOutputAcrossReopen(t *testing.T) {
 	}
 }
 
+func TestClearStoppedOutputRemovesDurableTailAfterWriterFallsBehind(t *testing.T) {
+	state, _ := openStore(t, nil)
+	defer state.Close()
+	ctx := context.Background()
+	if err := state.CreateSession(ctx, testSession()); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := state.AppendOutput(ctx, "ses_1", 1, 0, []byte("abc"), 64); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.ClearStoppedOutput(ctx, "ses_1", 5); err != nil {
+		t.Fatal(err)
+	}
+	events, earliest, latest, err := state.Replay(ctx, "ses_1", 5, 0)
+	if err != nil || len(events) != 0 || earliest != 5 || latest != 5 {
+		t.Fatalf("events=%d bounds=(%d,%d) err=%v", len(events), earliest, latest, err)
+	}
+	if err := state.ClearStoppedOutput(ctx, "ses_1", 3); err != nil {
+		t.Fatal(err)
+	}
+	_, earliest, latest, err = state.Replay(ctx, "ses_1", 5, 0)
+	if err != nil || earliest != 5 || latest != 5 {
+		t.Fatalf("retry bounds=(%d,%d) err=%v", earliest, latest, err)
+	}
+}
+
 func TestFileTransfersPersistOffsetsPendingRecipientAndReceipt(t *testing.T) {
 	state, root := openStore(t, nil)
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)

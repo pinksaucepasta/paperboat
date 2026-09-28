@@ -84,6 +84,76 @@ func TestManagerMirrorsReplayAndDeduplicatesInput(t *testing.T) {
 	}
 }
 
+func TestManagerSharesResizeInOutputOrder(t *testing.T) {
+	manager, root, shell := realManager(t)
+	created, err := manager.Create(context.Background(), CreateRequest{Name: "size", Command: shellCommand(shell, root, "read line")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background(), created.ID)
+	first, err := manager.Attach(created.ID, "att_first", 0)
+	if err != nil || !first.FirstAttachment {
+		t.Fatalf("first attachment=%#v err=%v", first, err)
+	}
+	second, err := manager.Attach(created.ID, "att_second", 0)
+	if err != nil || second.FirstAttachment {
+		t.Fatalf("second attachment=%#v err=%v", second, err)
+	}
+	if err := manager.Resize(created.ID, "att_first", pty.Dimensions{Columns: 120, Rows: 35}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for _, attachmentID := range []string{"att_first", "att_second"} {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		event, err := manager.WaitNext(ctx, created.ID, attachmentID)
+		cancel()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if event.Channel != 2 || string(event.Data) != "\x1b[8;35;120t" {
+			t.Fatalf("%s resize output=%q", attachmentID, event.Data)
+		}
+		event.Release()
+	}
+}
+
+func TestBrowserScreenAttachmentRestoresCurrentScreenAtLiveBoundary(t *testing.T) {
+	manager, root, shell := realManager(t)
+	created, err := manager.Create(context.Background(), CreateRequest{Name: "screen", Command: shellCommand(shell, root, "printf 'header\\r\\n\\033[38;2;126;58;242mpurple\\033[0m\\r\\n'; read line; printf 'tail'; read line")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background(), created.ID)
+	waitLatest(t, manager, created.ID, uint64(len("header\r\npurple\r\n")))
+	participant := Participant{AttachmentID: "att_browser_screen", AccountID: "acc_owner", ClientID: "cli_browser", Role: "owner", ConnectedAt: time.Now()}
+	if _, err := manager.AttachLiveParticipantAtGeneration(created.ID, participant, created.Generation); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := manager.BrowserScreenAttachment(created.ID, participant.AttachmentID, "acc_other", participant.ClientID, created.Generation); err == nil {
+		t.Fatal("another account received the screen")
+	}
+	screen, boundary, err := manager.BrowserScreenAttachment(created.ID, participant.AttachmentID, participant.AccountID, participant.ClientID, created.Generation)
+	if err != nil || !bytes.Contains(screen, []byte("header")) || !bytes.Contains(screen, []byte("purple")) {
+		t.Fatalf("screen checkpoint missing current content: bytes=%d err=%v", len(screen), err)
+	}
+	snapshot, err := manager.Snapshot(created.ID)
+	if err != nil || boundary != snapshot.LatestSequence {
+		t.Fatalf("screen boundary=%d latest=%d err=%v", boundary, snapshot.LatestSequence, err)
+	}
+	if err := manager.WriteStream(created.ID, participant.AttachmentID, created.Generation, []byte("go\n")); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	event, err := manager.WaitNext(ctx, created.ID, participant.AttachmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer event.Release()
+	if event.StartSequence != boundary || event.Channel != 1 {
+		t.Fatalf("live output began at %d on channel %d, want %d", event.StartSequence, event.Channel, boundary)
+	}
+}
+
 func TestManagerTracksTerminalModesFromPTYOutput(t *testing.T) {
 	manager, root, shell := realManager(t)
 	created, err := manager.Create(context.Background(), CreateRequest{Name: "modes", Command: shellCommand(shell, root, "printf '\\033[?1049h\\033[?1003h\\033[?1006h\\033[?2004h'; sleep 1")})
@@ -438,6 +508,55 @@ func TestCloseHonorsCanceledOperationBeforeMutation(t *testing.T) {
 		t.Fatalf("snapshot=%#v err=%v", snapshot, err)
 	}
 	if _, err := manager.Close(context.Background(), created.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBrowserLifecycleMutationsFenceRestartedGeneration(t *testing.T) {
+	manager, root, shell := realManager(t)
+	created, err := manager.Create(context.Background(), CreateRequest{Name: "generation-fence", Command: shellCommand(shell, root, "read line")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Attach(created.ID, "att_generation_fence", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.AcknowledgeAtGeneration(created.ID, "att_generation_fence", 0, created.Generation); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.CloseAtGeneration(context.Background(), created.ID, created.Generation); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := manager.RestartAtGeneration(created.ID, created.Generation)
+	if err != nil || restarted.Generation != created.Generation+1 || restarted.State != Running {
+		t.Fatalf("restarted=%#v err=%v", restarted, err)
+	}
+	if _, err := manager.ClearAtGeneration(created.ID, created.Generation); !errors.Is(err, ErrStaleGeneration) {
+		t.Fatalf("stale clear err=%v", err)
+	}
+	if err := manager.AcknowledgeAtGeneration(created.ID, "att_generation_fence", 0, created.Generation); !errors.Is(err, ErrStaleGeneration) {
+		t.Fatalf("stale ACK err=%v", err)
+	}
+	if _, err := manager.CloseAtGeneration(context.Background(), created.ID, created.Generation); !errors.Is(err, ErrStaleGeneration) {
+		t.Fatalf("stale close err=%v", err)
+	}
+	if _, err := manager.RestartAtGeneration(created.ID, created.Generation); !errors.Is(err, ErrStaleGeneration) {
+		t.Fatalf("stale restart err=%v", err)
+	}
+	if err := manager.DeleteAtGeneration(created.ID, created.Generation); !errors.Is(err, ErrStaleGeneration) {
+		t.Fatalf("stale delete err=%v", err)
+	}
+	current, err := manager.Snapshot(created.ID)
+	if err != nil || current.State != Running || current.Generation != restarted.Generation {
+		t.Fatalf("current=%#v err=%v", current, err)
+	}
+	if err := manager.DeleteAtGeneration(created.ID, restarted.Generation); !errors.Is(err, ErrSessionRunning) {
+		t.Fatalf("live delete err=%v", err)
+	}
+	if _, err := manager.CloseAtGeneration(context.Background(), created.ID, restarted.Generation); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.DeleteAtGeneration(created.ID, restarted.Generation); err != nil {
 		t.Fatal(err)
 	}
 }

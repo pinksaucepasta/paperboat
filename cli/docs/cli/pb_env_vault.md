@@ -6,6 +6,10 @@ Manage password-protected ENV key custody
 
 Manage password-protected ENV key custody
 
+Initialize, unlock, lock, recover, rewrap, or remove local custody of ENV keys. Reset is the destructive account-level path and is separate from locking or removing one device's custody.
+
+ENV values are encrypted before they leave the client. Commands select personal, team, or host scope explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
+
 With --json, this command group lists its available commands.
 
 ### Options

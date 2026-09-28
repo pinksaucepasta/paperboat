@@ -6,6 +6,10 @@ Delete a temporary preview
 
 Delete a temporary preview
 
+End the selected temporary preview and its published access. This command currently performs the same stop operation as pb preview stop; use status first if you need its current state.
+
+A preview exposes a local target through a temporary Paperboat URL or private/team access policy. Inspect its status before sharing the URL, and stop or delete it when no longer needed. Browser HTTP terminates TLS at the edge.
+
 JSON output is supported with --json.
 
 ```

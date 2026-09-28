@@ -6,11 +6,17 @@ pb-tunnel-stop - Stop an ephemeral tunnel
 
 
 .SH SYNOPSIS
-\fBpb tunnel stop  [flags]\fP
+\fBpb tunnel stop <preview> [flags]\fP
 
 
 .SH DESCRIPTION
 Stop an ephemeral tunnel
+
+.PP
+Stop an ephemeral tunnel or preview by its identity. Durable tunnels have pause, resume, and delete commands with different lifecycle effects.
+
+.PP
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
 
 .PP
 JSON output is supported with --json.

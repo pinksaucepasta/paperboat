@@ -277,6 +277,10 @@ func (r *Registry) ActivateGeneration(ctx context.Context, generation uint64, dr
 	return r.matcher.ActivateGeneration(ctx, generation, drainTimeout)
 }
 
+func (r *Registry) ActivateGenerationFencedRoutes(ctx context.Context, generation uint64, identities []RouteIdentity) error {
+	return r.matcher.ActivateGenerationFencedRoutes(ctx, generation, identities)
+}
+
 func (r *Registry) ApplyGeneration(ctx context.Context, generation uint64, rules []RouteRule, ready func(context.Context, []RouteRule) error, drainTimeout time.Duration) error {
 	return r.matcher.ApplyGeneration(ctx, generation, rules, ready, drainTimeout)
 }

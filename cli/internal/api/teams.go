@@ -126,7 +126,6 @@ func (c *Client) AttachTeamResource(ctx context.Context, id string, in TeamAttac
 func teamHeaders(operation string) http.Header {
 	return http.Header{"Idempotency-Key": []string{operation}}
 }
-func TeamGenerationString(generation uint64) string { return strconv.FormatUint(generation, 10) }
 
 type TeamMachineBinding struct {
 	MachineID              string   `json:"machine_id"`

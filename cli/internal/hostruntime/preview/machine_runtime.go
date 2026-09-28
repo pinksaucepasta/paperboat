@@ -262,6 +262,13 @@ func (c *machinePreviewCarrier) Run(ctx context.Context, lease Lease, ready func
 	return c.inner.Run(ctx, lease, ready)
 }
 
+func (c *machinePreviewCarrier) RunWithLease(ctx context.Context, currentLease func() Lease, ready func(Lease) error) error {
+	if c == nil || c.inner == nil || currentLease == nil {
+		return ErrMachinePreviewRuntimeInvalid
+	}
+	return c.inner.RunWithLease(ctx, currentLease, ready)
+}
+
 // MachineAuthSource exposes the same renewable source used by this carrier's
 // attachment client. The CLI installs it on its API client before creating the
 // lease, so the owner-session nonce can never become the machine identity.

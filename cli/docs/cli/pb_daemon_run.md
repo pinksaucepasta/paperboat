@@ -6,6 +6,10 @@ Run Paperboat daemon under service supervision
 
 Run Paperboat daemon under service supervision
 
+Run the endpoint daemon in the foreground for service supervision. It remains active until stopped and uses the selected local configuration and server; use pb service for ordinary lifecycle control.
+
+The daemon owns this device's background connectivity and local API. Normal lifecycle management uses pb service; daemon run is the foreground entrypoint used by service supervision. Its device guard subcommands manage protected local device-name access.
+
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
 
 ```

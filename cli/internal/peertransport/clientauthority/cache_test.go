@@ -12,11 +12,11 @@ func TestCacheCloneAndTargetedInvalidation(t *testing.T) {
 	authority := Authority{RootPublic: ed25519.PublicKey{1}, LocalKeys: config.PeerIdentityKeys{RootPrivate: ed25519.PrivateKey{2}, QUICPrivate: ed25519.PrivateKey{3}}, LocalCertificateRaw: []byte{4}, MachineCertificateRaw: []byte{5}}
 	firstKey := cacheKey{account: "account", client: "client", machine: "machine_1", generation: 1}
 	secondKey := cacheKey{account: "account", client: "client", machine: "machine_2", generation: 1}
-	cache.entries[firstKey] = cloneAuthority(authority)
-	cache.entries[secondKey] = cloneAuthority(authority)
-	copy := cloneAuthority(cache.entries[firstKey])
+	cache.entries[firstKey] = cacheEntry{authority: cloneAuthority(authority)}
+	cache.entries[secondKey] = cacheEntry{authority: cloneAuthority(authority)}
+	copy := cloneAuthority(cache.entries[firstKey].authority)
 	copy.RootPublic[0] = 9
-	if cache.entries[firstKey].RootPublic[0] != 1 {
+	if cache.entries[firstKey].authority.RootPublic[0] != 1 {
 		t.Fatal("authority clone shared key storage")
 	}
 	cache.InvalidateMachine("machine_1")

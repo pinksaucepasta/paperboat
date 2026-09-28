@@ -10,6 +10,33 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/environmente2ee"
 )
 
+type environmentSecureMemoryStore struct {
+	values map[string]string
+}
+
+func (*environmentSecureMemoryStore) EnvironmentSecureStore() {}
+
+func (store *environmentSecureMemoryStore) Set(ref, value string) error {
+	if store.values == nil {
+		store.values = make(map[string]string)
+	}
+	store.values[ref] = value
+	return nil
+}
+
+func (store *environmentSecureMemoryStore) Get(ref string) (string, error) {
+	value, ok := store.values[ref]
+	if !ok {
+		return "", ErrSecretNotFound
+	}
+	return value, nil
+}
+
+func (store *environmentSecureMemoryStore) Delete(ref string) error {
+	delete(store.values, ref)
+	return nil
+}
+
 func passwordVaultTestHead(issuer, accountID string, generation uint64, envelope []byte) environmente2ee.VaultHead {
 	return environmente2ee.VaultHead{
 		Issuer: issuer, AccountID: accountID, Generation: generation,

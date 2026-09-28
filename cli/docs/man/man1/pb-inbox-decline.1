@@ -6,11 +6,17 @@ pb-inbox-decline - Decline an exact team file request
 
 
 .SH SYNOPSIS
-\fBpb inbox decline  [flags]\fP
+\fBpb inbox decline <request-id> [flags]\fP
 
 
 .SH DESCRIPTION
 Decline an exact team file request
+
+.PP
+Reject one exact pending team file request at its expected generation. The sender receives a decline rather than an implicit timeout.
+
+.PP
+The Paperboat Inbox receives verified files and exact team requests. Files remain until removed by the user. The receiving path is a local device setting; team request acceptance is an account policy. A sender manages outgoing batches with pb send.
 
 .PP
 JSON output is supported with --json.

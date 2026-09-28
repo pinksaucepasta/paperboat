@@ -6,6 +6,10 @@ Sign in with a 26-character enrollment token
 
 Sign in with a 26-character enrollment token
 
+Enter the enrollment token interactively or read it from --token-file so it is not exposed in shell history. A successful redemption stores the client session for later authenticated commands.
+
+Sign-in credentials are stored in the selected local profile for its configured Paperboat server. Account commands use that profile; a missing or rejected session must be repaired with pb auth login before protected resources can be used.
+
 JSON output is supported with --json.
 
 ```

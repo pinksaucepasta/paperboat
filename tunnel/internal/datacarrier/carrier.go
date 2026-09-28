@@ -210,8 +210,8 @@ type Session interface {
 	CloseChan() <-chan struct{}
 }
 
-// Server is the edge endpoint. It never accepts data streams from a host;
-// the host's outbound carrier is the only session on which Server opens work.
+// Server is the edge endpoint. It opens edge-to-host work and demultiplexes
+// the explicitly supported host-initiated data streams on the same session.
 type Server struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -223,6 +223,9 @@ type Server struct {
 	closeOnce      sync.Once
 	closeErr       error
 	active         atomic.Int64
+	dataAcceptOnce sync.Once
+	dataAccess     chan acceptResult
+	dataTerminal   chan acceptResult
 	controlMu      sync.Mutex
 	control        *Stream
 	controlOpening bool
@@ -242,7 +245,7 @@ func NewServer(ctx context.Context, link io.ReadWriteCloser, config Config) (*Se
 		return nil, err
 	}
 	serverContext, cancel := context.WithCancel(ctx)
-	server := &Server{ctx: serverContext, cancel: cancel, session: session, config: config, permits: make(chan struct{}, config.MaximumStreams), openings: make(chan struct{}, config.QueueDepth), done: make(chan struct{})}
+	server := &Server{ctx: serverContext, cancel: cancel, session: session, config: config, permits: make(chan struct{}, config.MaximumStreams), openings: make(chan struct{}, config.QueueDepth), done: make(chan struct{}), dataAccess: make(chan acceptResult, config.QueueDepth), dataTerminal: make(chan acceptResult, config.QueueDepth)}
 	go server.watch()
 	return server, nil
 }
@@ -258,7 +261,7 @@ func NewServerWithSession(ctx context.Context, session Session, config Config) (
 		return nil, err
 	}
 	serverContext, cancel := context.WithCancel(ctx)
-	server := &Server{ctx: serverContext, cancel: cancel, session: session, config: config, permits: make(chan struct{}, config.MaximumStreams), openings: make(chan struct{}, config.QueueDepth), done: make(chan struct{})}
+	server := &Server{ctx: serverContext, cancel: cancel, session: session, config: config, permits: make(chan struct{}, config.MaximumStreams), openings: make(chan struct{}, config.QueueDepth), done: make(chan struct{}), dataAccess: make(chan acceptResult, config.QueueDepth), dataTerminal: make(chan acceptResult, config.QueueDepth)}
 	go server.watch()
 	return server, nil
 }
@@ -394,6 +397,53 @@ func (s *Server) acceptRaw(ctx context.Context) (StreamLink, error) {
 	case <-ctx.Done():
 		go s.finishCanceledAccept(result)
 		return nil, ctx.Err()
+	}
+}
+
+// acceptInboundRaw does not reserve stream capacity while waiting for a peer
+// stream. The shared demultiplexer is always listening, so holding a permit
+// during an idle accept would make every authenticated carrier appear to have
+// one active stream and reduce its usable capacity.
+func (s *Server) acceptInboundRaw(ctx context.Context) (StreamLink, error) {
+	if s.closed() {
+		return nil, ErrCarrierClosed
+	}
+	result := make(chan openResult, 1)
+	go func() {
+		raw, err := s.session.AcceptStream(ctx)
+		result <- openResult{stream: raw, err: err}
+	}()
+	var accepted openResult
+	select {
+	case accepted = <-result:
+	case <-s.done:
+		return nil, ErrCarrierClosed
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	if accepted.err != nil {
+		if s.closed() {
+			return nil, ErrCarrierClosed
+		}
+		return nil, accepted.err
+	}
+	if err := ctx.Err(); err != nil {
+		_ = accepted.stream.Close()
+		return nil, err
+	}
+	select {
+	case s.permits <- struct{}{}:
+		s.active.Add(1)
+		return accepted.stream, nil
+	case <-s.done:
+		_ = accepted.stream.Close()
+		return nil, ErrCarrierClosed
+	case <-ctx.Done():
+		_ = accepted.stream.Close()
+		return nil, ctx.Err()
+	default:
+		_ = accepted.stream.Close()
+		return nil, ErrStreamLimit
 	}
 }
 

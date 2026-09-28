@@ -594,7 +594,7 @@ func TestSafeErrorMessageBoundsDiagnostics(t *testing.T) {
 }
 
 func TestSafeErrorMessageRedactsStructuredTransportDiagnostics(t *testing.T) {
-	err := errors.New("peer path 3 failed (class 12): read Noise response (prologue=secret local=fingerprint handle=private): EOF")
+	err := errors.New("peer path 3 failed (class 12): read QUIC stream (token=secret local=fingerprint handle=private): EOF")
 	if got := safeErrorMessage(err); got != "peer path 3 failed" {
 		t.Fatalf("message=%q", got)
 	}
@@ -868,6 +868,45 @@ func TestLocalAPIRejectsUnauthorizedPeerMethodAndBody(t *testing.T) {
 		if recorder.Code != test.want {
 			t.Fatalf("method=%s content-type=%q status=%d body=%s", test.method, test.contentType, recorder.Code, recorder.Body.String())
 		}
+	}
+}
+
+func TestLocalAPIRelayInventoryRequiresOwnerAndReturnsCurrentCandidates(t *testing.T) {
+	const node = "relay_1"
+	server, err := NewServer(ServerConfig{
+		SocketPath: filepath.Join(localAPITestDir(t), "api.sock"), OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(),
+		Source: snapshotSourceFunc(func(context.Context) (Snapshot, error) { return validSnapshot(), nil }),
+		RelayInventory: func(context.Context) (RelayInventory, error) {
+			return RelayInventory{Schema: RelayInventorySchemaV1, Candidates: []RelayCandidate{{NodeID: node, Region: "fsn1", State: "ready", ObservedAt: 100, ExpiresAt: 130, Roles: []string{"relay"}, Transports: []string{"derp_quic"}}}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name   string
+		uid    int
+		method string
+		want   int
+	}{
+		{"owner", os.Geteuid(), http.MethodGet, http.StatusOK},
+		{"other-user", os.Geteuid() + 1, http.MethodGet, http.StatusForbidden},
+		{"wrong-method", os.Geteuid(), http.MethodPost, http.StatusMethodNotAllowed},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(test.method, "/v1/relay-inventory", nil).WithContext(context.WithValue(context.Background(), peerContextKey{}, Peer{UID: test.uid, GID: os.Getegid(), PID: os.Getpid()}))
+			recorder := httptest.NewRecorder()
+			server.handler().ServeHTTP(recorder, request)
+			if recorder.Code != test.want {
+				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+			if test.want == http.StatusOK {
+				var inventory RelayInventory
+				if err := json.Unmarshal(recorder.Body.Bytes(), &inventory); err != nil || inventory.Validate() != nil || len(inventory.Candidates) != 1 || inventory.Candidates[0].NodeID != node {
+					t.Fatalf("inventory=%+v err=%v", inventory, err)
+				}
+			}
+		})
 	}
 }
 

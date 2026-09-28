@@ -6,10 +6,12 @@ and `upstream/licenses/tailcat-LICENSE.txt` are retained. The original compatibl
 source/module/toolchain facts remain in `foundations.tsv`; Tailcat is no longer
 a consumed module. `references/tailcat` remains read-only provenance.
 
-The consumed Tailscale snapshot remains based on
-`31d8badb3bfb88618dc8ea8e6a5c3bce0cd6cc9f`, through the existing `go.mod`
-replacement. Its LICENSE, PATENTS and other notices remain intact. No fork or
-release has been published; no upstream applications need building.
+The consumed fork revision is `8c8b2e0dc313dd8d5db1be4a5afe7655184157b5`
+on `paperboat-stun-discovery-20260928`, based on upstream Tailscale
+`610b05c58e8dff3c5ff12ffb35d68e4697216ed6`. Both Paperboat and the relay
+pin its immutable Go module version. Its LICENSE, PATENTS and other notices
+remain intact. `foundations.tsv` retains the original Tailcat-compatible
+reference pair as provenance; no upstream application is built for this update.
 
 ## Owned Tailcat-derived assembly
 
@@ -41,9 +43,25 @@ Previously downstream Tailcat patches remain owned behavior:
 | `wgengine/userspace.go` | Thread magicsock packet-listener test injection through the engine for real path/failure fixtures (Task 10). | Equivalent upstream test seam. |
 | `wgengine/magicsock/endpoint.go` | Clear relay-discovery throttle with stale selected route on connectivity changes, allowing immediate rebind (`paperboat_rebind_test.go`, Task 10). | Reviewed upstream equivalent recovery behavior. |
 | `wgengine/magicsock/{derp.go,paperboat_regional_status.go}` | Preserve live inventory/carrier state, prepare/send through exact region, expose actual carrier legs; injected carriers probe liveness on socket rebind, with stale probes fenced from newer carriers (Task 13). | Equivalent upstream regional/carrier seams. |
-| `wgengine/magicsock/relaymanager.go`, `net/udprelay/server.go` | Port upstream security fix `2a4ce5ba3b415331438ad5db1c18b2e916159e4d`: reject zero relay/server or client disco keys before shared-secret derivation. Tests `TestRelayManagerZeroServerDisco` and `TestAllocateEndpointZeroClientDisco` retained. The allocator guard is placed in the shared allocator to protect both ordinary and policy APIs (2026-09-19). | Consumed pin includes this fix and both regressions pass. |
+| `net/udprelay/server.go` | Keep the zero client discovery-key guard in the shared allocator, protecting Paperboat policy calls as well as ordinary allocations. The newer upstream base already includes the relay-manager zero server-key guard and both regressions. | Upstream shared allocator enforces the same policy. |
 
-Current upstream review: Tailcat main
-`15ab9e68bfc6534a61797d7af28cedd42b54a3a5` has newer Tailscale/WireGuard/gVisor
-pins, but does not replace our authority and regional API patches. Only the focused
-zero-key security fix above is ported; module versions are not silently advanced.
+The 2026-09-23 update rebased the one Paperboat patch commit on current upstream
+without merge conflicts. The fork now consumes WireGuard
+`e3222a3340cd` and gVisor `a6f909f08a72`; Paperboat's QUIC transport uses
+WireGuard's UDP path, so Tailcat's gVisor TCP benchmark is not evidence of a
+Paperboat performance gain. Tailcat 0.7 peer path status informed the authorized,
+address-free `mesh.Server.PeerPath` diagnostic. Its Windows localhost fix informed
+Paperboat's private-preview IPv6 loopback fallback. Tailcat's standalone
+Listen/exit-node/SSH/SCP/browser/Android/packaging modes are not consumed by
+Paperboat's owned UDP assembly.
+
+The September 28 discovery correction preserves that upstream base. Magicsock
+advertises local IPv4/IPv6 candidates using each family's actual bound port;
+`local_endpoints_test.go` covers fallback ports and disabled families. Netcheck
+and magicsock use `DERPRegion.HasDERP` to exclude STUN-only regions from relay
+home selection, retained history, forced homes and fallback. `stun_only_test.go`
+in both packages verifies mixed inventories, unreachable relays, and continued
+STUN probing. Paperboat supplies supplementary discovery separately through
+signed regional configuration; these destinations never receive application
+traffic or relay credentials. Latest official upstream inspected was
+2d4379386a5f02342f1a52006555764a22320d6e; these fixes were absent there.

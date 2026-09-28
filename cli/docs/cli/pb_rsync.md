@@ -6,6 +6,8 @@ Run rsync with Paperboat machine resolution
 
 Run rsync with Paperboat machine resolution
 
+Run standard rsync arguments with Paperboat device-name resolution and authorized connectivity. File selection, deletion flags, and exit behavior remain rsync's responsibility; inspect its command line before synchronizing.
+
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
 
 ```

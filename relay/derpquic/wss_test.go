@@ -129,6 +129,7 @@ func TestMixedQUICWSSViaProxyAndRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	receive(t, a, kb, payload)
+	eventually(t, func() bool { return s.Snapshot().Forwarded == 2 })
 	if got := s.Snapshot(); got.Connections != 2 || got.Forwarded != 2 {
 		t.Fatalf("mixed accounting: %+v", got)
 	}

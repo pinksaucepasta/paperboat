@@ -132,7 +132,7 @@ current health and regional policy. `self-hosted-only` never falls back and repo
 unavailable pool. Relay and tunnel policies are independent; direct private P2P remains
 preferred. Run local administration through `tunnel-admin`; use `operator list` and
 `operator revoke --account-id ACCOUNT_ID` for local
-administration. `pb selfhost remove INSTALLATION_ID --yes` is distinct account-side
+administration. `pb selfhost remove INSTALLATION_ID` previews distinct account-side
 removal. Pairings are never inherited by another account. With no explicit pool policy, mixed
 mode includes all active pairings. Setting a policy makes its installation list exact;
 new pairings are not added automatically, and an empty list selects no private nodes.

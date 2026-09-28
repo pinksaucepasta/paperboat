@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
-
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/peersession"
 )
 
 const (
@@ -96,8 +94,4 @@ func Parse(encoded []byte, now time.Time) (Header, error) {
 		return Header{}, ErrInvalid
 	}
 	return value, nil
-}
-
-func (h Header) Grant() peersession.StreamGrant {
-	return peersession.StreamGrant{OperationID: h.OperationID, Consumer: h.Consumer, StreamID: h.StreamID, Credential: []byte(h.Credential), Deadline: time.Unix(h.DeadlineUnix, 0).UTC(), MaximumBytes: h.MaximumBytes}
 }

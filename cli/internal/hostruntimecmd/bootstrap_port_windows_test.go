@@ -15,6 +15,23 @@ import (
 
 var task39NativePortCheck = flag.Bool("task39-native-port-check", false, "check the current enrolled Windows account's existing managed SSH listener")
 
+func TestElevatedOpenSSHUsesEnrolledOwnerInstance(t *testing.T) {
+	const ownerSID = "S-1-5-21-111111111-222222222-333333333-1001"
+	instance, err := service.WindowsUserInstance(ownerSID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := elevatedOpenSSHConfig(ownerSID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.OwnerSID != ownerSID || config.ServiceName != windowsopenssh.ServiceName+"-"+instance ||
+		config.ServiceSID != windowsopenssh.ServiceSID(config.ServiceName) ||
+		config.ServiceExecutable == "" || config.StateRoot == "" {
+		t.Fatalf("elevated SSH setup lacks enrolled owner instance: %+v", config)
+	}
+}
+
 func TestWindowsBootstrapPortRetryRequiresExactInstalledOwner(t *testing.T) {
 	const instance = "u0123456789abcdef01234567"
 	config := windowsOpenSSHBootstrapConfig(windowsopenssh.DefaultConfig(nil), instance)

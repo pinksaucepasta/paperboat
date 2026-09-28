@@ -37,22 +37,6 @@ var safeStringRedactions = []redactionRule{
 	{regexp.MustCompile(`(?i)\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b`), RedactedValue},
 }
 
-// Redact returns a bounded, printable, secret-safe value for last-resort
-// diagnostics. It never returns an error.
-func Redact(value string) string {
-	redacted, err := safeBoundedString(value, maximumMessageBytes, false)
-	if err != nil {
-		return RedactedValue
-	}
-	return redacted
-}
-
-// SafeString applies the health package's construction-time redaction policy
-// with a caller-supplied byte bound.
-func SafeString(value string, maximum int) (string, error) {
-	return safeBoundedString(value, maximum, false)
-}
-
 func safeBoundedString(value string, maximum int, required bool) (string, error) {
 	if maximum <= 0 || !utf8.ValidString(value) {
 		return "", newError(ErrorInvalidString, "construct host health")

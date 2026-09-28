@@ -6,6 +6,10 @@ Add a tunnel route
 
 Add a tunnel route
 
+Add a route to one durable tunnel, selecting protocol, match, origin, and optional TLS behavior. The operation can remain connecting after the command returns; use --wait or status to confirm readiness.
+
+Routes map a public or private match to a specific origin and protocol. TLS and host-header options affect the trust boundary and should match the origin. Adding or updating a route may return an operation whose readiness must be checked separately.
+
 JSON output is supported with --json.
 
 ```

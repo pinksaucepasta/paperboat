@@ -59,6 +59,73 @@ func TestOneShotResumeRecoversAmbiguousPairingCommitWithoutToken(t *testing.T) {
 	}
 }
 
+func TestOneShotResumeReplacesOnlyServerClosedPairing(t *testing.T) {
+	now := time.Now().UTC()
+	root := t.TempDir()
+	server := "https://api.example.test"
+	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	oldToken := "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP"
+	newToken := "BCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPA"
+	record := bootstrap.NewResumeRecord(server, publicKey, oldToken, "Laptop", "client", "verifier-012345678901234567890123456789", now.Add(time.Hour))
+	record.PairingStarted = true
+	if err := bootstrap.SaveResume(root, record); err != nil {
+		t.Fatal(err)
+	}
+	loaded, loadErr := bootstrap.LoadResume(root, server, publicKey, newToken, "Laptop", "client", now)
+	if !errors.Is(loadErr, bootstrap.ErrResumeTokenChanged) {
+		t.Fatalf("load error = %v", loadErr)
+	}
+	input := testOneShotResumeInput(root, server, publicKey, newToken, loaded, loadErr)
+	operations := testOneShotResumeOperations(now)
+	probes := 0
+	operations.NewVerifier = func() (string, error) { return "new-verifier-012345678901234567890123456789", nil }
+	operations.RecoverMaterial = func(_ context.Context, config bootstrap.Config, _ bool) (bootstrap.Material, error) {
+		probes++
+		if config.Verifier != record.Verifier || config.EnrollmentToken != "" {
+			t.Fatal("old pairing probe lost its verifier binding")
+		}
+		return bootstrap.Material{}, bootstrap.ErrPairingExpired
+	}
+	operations.WaitForMaterial = func(context.Context, bootstrap.Config, time.Time, time.Duration) (bootstrap.Material, error) {
+		return bootstrap.Material{}, context.Canceled
+	}
+	_, _, err := resumeOneShotEnrollment(context.Background(), input, operations)
+	if !errors.Is(err, context.Canceled) || probes != 1 {
+		t.Fatalf("replacement error=%v probes=%d", err, probes)
+	}
+	replaced, err := bootstrap.LoadResume(root, server, publicKey, newToken, "Laptop", "client", now)
+	if err != nil || replaced.Verifier == record.Verifier {
+		t.Fatalf("replacement journal=%+v error=%v", replaced, err)
+	}
+}
+
+func TestOneShotResumeRetainsAmbiguousOldPairing(t *testing.T) {
+	now := time.Now().UTC()
+	root := t.TempDir()
+	server := "https://api.example.test"
+	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	oldToken := "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP"
+	newToken := "BCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPA"
+	record := bootstrap.NewResumeRecord(server, publicKey, oldToken, "Laptop", "client", "verifier-012345678901234567890123456789", now.Add(time.Hour))
+	record.PairingStarted = true
+	if err := bootstrap.SaveResume(root, record); err != nil {
+		t.Fatal(err)
+	}
+	loaded, loadErr := bootstrap.LoadResume(root, server, publicKey, newToken, "Laptop", "client", now)
+	operations := testOneShotResumeOperations(now)
+	operations.RecoverMaterial = func(context.Context, bootstrap.Config, bool) (bootstrap.Material, error) {
+		return bootstrap.Material{}, context.DeadlineExceeded
+	}
+	_, _, err := resumeOneShotEnrollment(context.Background(), testOneShotResumeInput(root, server, publicKey, newToken, loaded, loadErr), operations)
+	if !errors.Is(err, bootstrap.ErrResumeBinding) {
+		t.Fatalf("ambiguous recovery error=%v", err)
+	}
+	retained, err := bootstrap.LoadResume(root, server, publicKey, oldToken, "Laptop", "client", now)
+	if err != nil || retained.Verifier != record.Verifier {
+		t.Fatalf("retained journal=%+v error=%v", retained, err)
+	}
+}
+
 func TestOneShotResumeContinuesAfterTokenConsumptionAndApprovalTimeout(t *testing.T) {
 	now := time.Now().UTC()
 	root := t.TempDir()

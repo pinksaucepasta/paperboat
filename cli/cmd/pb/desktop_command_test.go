@@ -25,7 +25,7 @@ func TestDesktopLocalPreferenceBridgeCASAndReset(t *testing.T) {
 		c.SetIn(strings.NewReader(request))
 		c.SetOut(&out)
 		c.SetErr(&out)
-		c.SetArgs([]string{"--config", path, "desktop", "request"})
+		c.SetArgs([]string{"--config", path, "__desktop", "request"})
 		if err := c.Execute(); err != nil {
 			t.Fatal(err)
 		}

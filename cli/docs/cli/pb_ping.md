@@ -6,6 +6,8 @@ Measure authenticated connectivity to a machine
 
 Measure authenticated connectivity to a machine
 
+Send authenticated health exchanges to one enrolled device. --count and --timeout bound the measurements; a reachable transport alone is not a claim that the target service is ready.
+
 JSON output is supported with --json.
 
 ```
@@ -15,11 +17,10 @@ pb ping <machine> [flags]
 ### Options
 
 ```
-      --count int          number of authenticated health exchanges (default 4)
+      --count int          number of authenticated native connections (default 4)
   -h, --help               help for ping
       --json               print JSON
-      --timeout duration   timeout for each exchange (default 10s)
-      --transport string   peer transport: a, d, q, w, or r (default "a")
+      --timeout duration   timeout for each connection (default 10s)
 ```
 
 ### Options inherited from parent commands

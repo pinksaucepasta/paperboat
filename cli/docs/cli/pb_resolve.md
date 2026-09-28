@@ -6,6 +6,8 @@ Resolve a peer device IP, port forwardings and tags over gRPC IPC
 
 Resolve a peer device IP, port forwardings and tags over gRPC IPC
 
+Ask the local daemon to resolve a peer device query into authorized address, forwarding, and tag information. This reports locally known peer state; it does not approve a new device.
+
 JSON output is supported with --json.
 
 ```

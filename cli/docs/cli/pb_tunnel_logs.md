@@ -6,6 +6,10 @@ Show tunnel logs
 
 Show tunnel logs
 
+Read recent tunnel events and optionally follow new events at the requested interval. Cursor and limit bound retrieval; logs are diagnostic rather than a substitute for status.
+
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+
 JSON output is supported with --json.
 
 ```

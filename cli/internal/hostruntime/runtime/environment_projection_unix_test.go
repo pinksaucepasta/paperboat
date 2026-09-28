@@ -130,6 +130,163 @@ func projectionRegistration(t *testing.T) runtimeidentity.Registration {
 	return runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 11}
 }
 
+func TestProjectionEnvironmentLaunchAcceptsOnlyFreshExactUnconfiguredResponse(t *testing.T) {
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "")
+	registration := projectionRegistration(t)
+	credentials := &projectionTestCredentials{token: "test-token", proof: []byte("machine-proof")}
+	var mu sync.Mutex
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		if request.Method != http.MethodPost || request.URL.Path != "/v1/environment/hosts/machine_1/key" || request.Header.Get("Authorization") != "Bearer test-token" || request.Header.Get("X-Paperboat-Machine-Proof") != base64.RawURLEncoding.EncodeToString(credentials.proof) {
+			response.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		var requestBody projectionRegistrationRequest
+		if json.NewDecoder(request.Body).Decode(&requestBody) != nil || requestBody.InstallationGeneration != uint64(registration.InstallationGeneration) {
+			response.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		writeEnvironmentUnconfigured(response, registration.MachineID, requestBody.InstallationGeneration, requestBody.HostKeyGeneration, requestBody.HostPublic, uint64(0))
+	}))
+	defer server.Close()
+	service := newProjectionEnvironmentService(filepath.Join(t.TempDir(), "runtime"), projectionServiceURL(t, server.URL), server.Client().Transport, registration, credentials)
+	for launch := 0; launch < 2; launch++ {
+		got, err := service.EnvironmentForLaunch(context.Background())
+		if err != nil || len(got) != 0 {
+			t.Fatalf("launch %d environment=%q err=%v", launch, got, err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 2 {
+		t.Fatalf("unconfigured response was cached across launches: calls=%d", calls)
+	}
+}
+
+func TestProjectionEnvironmentLaunchRejectsOfflineAndWrongIdentityResponses(t *testing.T) {
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "")
+	registration := projectionRegistration(t)
+	for _, test := range []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{name: "machine_id", mutate: func(details map[string]any) { details["machine_id"] = "machine_other" }},
+		{name: "installation_generation", mutate: func(details map[string]any) { details["installation_generation"] = uint64(12) }},
+		{name: "host_key_generation", mutate: func(details map[string]any) { details["host_key_generation"] = uint64(99) }},
+		{name: "host_public", mutate: func(details map[string]any) {
+			details["host_public"] = base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x37}, 32))
+		}},
+		{name: "account_config_generation", mutate: func(details map[string]any) { details["account_config_generation"] = uint64(1) }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			credentials := &projectionTestCredentials{token: "test-token", proof: []byte("proof")}
+			server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+				var requestBody projectionRegistrationRequest
+				if json.NewDecoder(request.Body).Decode(&requestBody) != nil {
+					response.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				details := map[string]any{
+					"machine_id":                registration.MachineID,
+					"installation_generation":   requestBody.InstallationGeneration,
+					"host_key_generation":       requestBody.HostKeyGeneration,
+					"host_public":               requestBody.HostPublic,
+					"account_config_generation": uint64(0),
+				}
+				test.mutate(details)
+				writeEnvironmentUnconfigured(response, details["machine_id"].(string), details["installation_generation"].(uint64), details["host_key_generation"].(uint64), details["host_public"].(string), details["account_config_generation"].(uint64))
+			}))
+			defer server.Close()
+			service := newProjectionEnvironmentService(filepath.Join(t.TempDir(), "runtime"), projectionServiceURL(t, server.URL), server.Client().Transport, registration, credentials)
+			if got, err := service.EnvironmentForLaunch(context.Background()); err == nil || len(got) != 0 {
+				t.Fatalf("wrong identity authorized empty environment: values=%q err=%v", got, err)
+			}
+		})
+	}
+
+	offline := newProjectionEnvironmentService(filepath.Join(t.TempDir(), "offline"), projectionServiceURL(t, "https://control.example"), roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("offline")
+	}), registration, &projectionTestCredentials{token: "test-token", proof: []byte("proof")})
+	if got, err := offline.EnvironmentForLaunch(context.Background()); err == nil || len(got) != 0 {
+		t.Fatalf("offline launch environment=%q err=%v", got, err)
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	credentials := &projectionTestCredentials{token: "test-token", proof: []byte("proof")}
+	service := newProjectionEnvironmentService(filepath.Join(t.TempDir(), "canceled"), projectionServiceURL(t, "https://control.example"), roundTripFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("canceled launch made an HTTP request")
+		return nil, nil
+	}), registration, credentials)
+	if _, err := service.EnvironmentForLaunch(canceled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled launch error=%v", err)
+	}
+}
+
+func TestProjectionEnvironmentConfiguredPendingStateSurvivesRestartAndRejectsUnconfigured(t *testing.T) {
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "")
+	stateRoot := filepath.Join(t.TempDir(), "runtime")
+	registration := projectionRegistration(t)
+	credentials := &projectionTestCredentials{token: "test-token", proof: []byte("proof")}
+	var mu sync.Mutex
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		mu.Lock()
+		calls++
+		call := calls
+		mu.Unlock()
+		var requestBody projectionRegistrationRequest
+		if json.NewDecoder(request.Body).Decode(&requestBody) != nil {
+			response.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if call > 1 {
+			writeEnvironmentUnconfigured(response, registration.MachineID, requestBody.InstallationGeneration, requestBody.HostKeyGeneration, requestBody.HostPublic, uint64(0))
+			return
+		}
+		pending := envinject.ProjectionBundle{
+			Schema: envinject.ProjectionBundleSchema, AccountID: "account_1", MachineID: registration.MachineID,
+			InstallationGeneration: requestBody.InstallationGeneration, HostKeyGeneration: requestBody.HostKeyGeneration,
+			HostPublic: requestBody.HostPublic, WriterPublic: base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x49}, 32)), State: "pending",
+		}
+		_ = json.NewEncoder(response).Encode(map[string]any{"data": pending})
+	}))
+	defer server.Close()
+	service := newProjectionEnvironmentService(stateRoot, projectionServiceURL(t, server.URL), server.Client().Transport, registration, credentials)
+	if err := service.ensure(context.Background()); err != nil {
+		t.Fatalf("pending configured response error=%v", err)
+	}
+	if _, err := service.Environment(); !errors.Is(err, envinject.ErrNotReady) {
+		t.Fatalf("pending configured state became launchable: %v", err)
+	}
+	if _, err := os.Stat(service.configuredHighWaterPath()); err != nil {
+		t.Fatalf("configured high-water was not persisted: %v", err)
+	}
+
+	restarted := newProjectionEnvironmentService(stateRoot, projectionServiceURL(t, server.URL), server.Client().Transport, registration, &projectionTestCredentials{token: "test-token", proof: []byte("proof")})
+	if err := restarted.restore(context.Background()); err != nil {
+		t.Fatalf("restore pending configured projection: %v", err)
+	}
+	if got, err := restarted.EnvironmentForLaunch(context.Background()); err == nil || len(got) != 0 {
+		t.Fatalf("later unconfigured response authorized empty environment: values=%q err=%v", got, err)
+	}
+}
+
+func writeEnvironmentUnconfigured(response http.ResponseWriter, machineID string, installationGeneration, hostKeyGeneration uint64, hostPublic string, accountConfigGeneration uint64) {
+	response.Header().Set("Content-Type", "application/json")
+	response.WriteHeader(http.StatusConflict)
+	_ = json.NewEncoder(response).Encode(map[string]any{"error": map[string]any{
+		"code": "environment_unconfigured",
+		"details": map[string]any{
+			"machine_id": machineID, "installation_generation": installationGeneration,
+			"host_key_generation": hostKeyGeneration, "host_public": hostPublic,
+			"account_config_generation": accountConfigGeneration,
+		},
+	}})
+}
+
 func waitProjectionEnvironment(t *testing.T, service *projectionEnvironmentService, want []string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

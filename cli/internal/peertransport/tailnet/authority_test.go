@@ -50,7 +50,9 @@ func TestNetworkRegistrationLostResponseAndRefreshRecovery(t *testing.T) {
 				t.Error("interrupted registration did not replay exact operation")
 			}
 			previous = r
-			c.Self.KeyGeneration = r.ExpectedKeyGeneration + 1
+			if c.Self.WireGuardPublicKey != r.WireGuardPublicKey {
+				c.Self.KeyGeneration = r.ExpectedKeyGeneration + 1
+			}
 			c.Self.WireGuardPublicKey = r.WireGuardPublicKey
 			if calls == 1 {
 				return api.PeerNetworkRegistrationResult{}, errors.New("lost response")
@@ -68,13 +70,13 @@ func TestNetworkRegistrationLostResponseAndRefreshRecovery(t *testing.T) {
 	if err := a.Register(t.Context(), client, false); err != nil {
 		t.Fatal(err)
 	}
-	if calls != 2 {
-		t.Fatal("ordinary refresh rotated a healthy key")
+	if calls != 3 || c.Self.KeyGeneration != 1 {
+		t.Fatal("ordinary registration changed a healthy network key")
 	}
 	if err := a.Register(t.Context(), client, true); err != nil {
 		t.Fatal(err)
 	}
-	if calls != 3 || c.Self.KeyGeneration != 2 {
+	if calls != 4 || c.Self.KeyGeneration != 2 {
 		t.Fatal("deliberate rotation did not advance binding")
 	}
 	client.configuration = func(context.Context, string) (string, error) {

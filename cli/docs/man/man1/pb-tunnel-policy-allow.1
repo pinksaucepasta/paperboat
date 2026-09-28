@@ -6,11 +6,17 @@ pb-tunnel-policy-allow - Allow on-demand access to an exact machine port
 
 
 .SH SYNOPSIS
-\fBpb tunnel policy allow   [flags]\fP
+\fBpb tunnel policy allow <machine> <port|url> [flags]\fP
 
 
 .SH DESCRIPTION
 Allow on-demand access to an exact machine port
+
+.PP
+Authorize on-demand access to one machine port or URL with an exact access audience and optional expiry. --generation protects updates to an existing policy.
+
+.PP
+An on-demand policy authorizes an exact machine port for private or team access. A policy does not publish a public URL or grant every port on the device. Revocation fences subsequent activation.
 
 .PP
 JSON output is supported with --json.

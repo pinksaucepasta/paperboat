@@ -33,10 +33,22 @@ type CredentialAuthConfig struct {
 }
 
 func NewCredentialAuthorizer(config CredentialAuthConfig) (server.AuthorizerFactory, error) {
+	return newCredentialAuthorizer(config, false)
+}
+
+// NewBrowserTerminalCredentialAuthorizer creates the credential factory used
+// only by the E2EE browser-terminal transport. Plain /v1/runtime deliberately
+// keeps using NewCredentialAuthorizer and therefore cannot accept browser
+// terminal credentials.
+func NewBrowserTerminalCredentialAuthorizer(config CredentialAuthConfig) (server.AuthorizerFactory, error) {
+	return newCredentialAuthorizer(config, true)
+}
+
+func newCredentialAuthorizer(config CredentialAuthConfig, browserTerminalOnly bool) (server.AuthorizerFactory, error) {
 	if config.Issuer == "" || config.EnvironmentID == "" || config.MachineID == "" || config.HelperID == "" || config.Verifier == nil {
 		return nil, ErrStaticAuthInvalid
 	}
-	resolver := staticPolicyResolver{issuer: config.Issuer, environmentID: config.EnvironmentID, machineID: config.MachineID, helperID: config.HelperID}
+	resolver := staticPolicyResolver{issuer: config.Issuer, environmentID: config.EnvironmentID, machineID: config.MachineID, helperID: config.HelperID, browserTerminalOnly: browserTerminalOnly}
 	return func(token string) (server.Authorizer, error) {
 		if token == "" || len(token) > 16<<10 {
 			return nil, ErrStaticAuthInvalid
@@ -86,16 +98,30 @@ type staticRevocations map[string]bool
 func (r staticRevocations) Revoked(claims auth.Claims) bool { return r[claims.JTI] }
 
 type staticPolicyResolver struct {
-	issuer        string
-	environmentID string
-	machineID     string
-	helperID      string
+	issuer              string
+	environmentID       string
+	machineID           string
+	helperID            string
+	browserTerminalOnly bool
 }
 
 func (r staticPolicyResolver) Policy(frame protocol.Frame) (auth.Policy, error) {
 	base := auth.Policy{Issuer: r.issuer, Audience: "paperboat-machine", EnvironmentID: r.environmentID, MachineID: r.machineID}
+	if r.browserTerminalOnly && frame.Type != "ack" && frame.Type != "detach" && frame.Capability != "terminal.v1" {
+		return auth.Policy{}, ErrStaticAuthInvalid
+	}
+	if frame.Type == "ack" || frame.Type == "detach" {
+		base.CredentialClass = r.terminalCredentialClass()
+		base.AnyScopes = [][]string{{"terminal:operate"}, {"terminal:view"}, {"terminal:control"}}
+		base.MaxLifetime = 5 * time.Minute
+		return base, nil
+	}
 	switch frame.Capability {
-	case "terminal.v1", "health.v1":
+	case "terminal.v1":
+		base.CredentialClass = r.terminalCredentialClass()
+		base.AnyScopes = [][]string{{"terminal:operate"}, {"terminal:view"}, {"terminal:control"}}
+		base.MaxLifetime = 5 * time.Minute
+	case "health.v1":
 		base.CredentialClass = "terminal_operation"
 		base.AnyScopes = [][]string{{"terminal:operate"}, {"terminal:view"}, {"terminal:control"}}
 		base.MaxLifetime = 5 * time.Minute
@@ -132,4 +158,11 @@ func (r staticPolicyResolver) Policy(frame protocol.Frame) (auth.Policy, error) 
 		return auth.Policy{}, ErrStaticAuthInvalid
 	}
 	return base, nil
+}
+
+func (r staticPolicyResolver) terminalCredentialClass() string {
+	if r.browserTerminalOnly {
+		return "browser_terminal_operation"
+	}
+	return "terminal_operation"
 }

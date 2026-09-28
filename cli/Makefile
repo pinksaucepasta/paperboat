@@ -18,7 +18,7 @@ GOFMT       := $(GO_ROOT)/bin/gofmt
 GO_FILES    := $(shell find . \( -path ./.git -o -path ./upstream -o -path ./.build -o -path ./.codex-build \) -prune -o -name '*.go' -print)
 LDFLAGS     := -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=$(VERSION) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=$(COMMIT) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=$(PROTOCOL_VERSION) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=$(DEFAULT_SERVER_URL) -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=$(DEFAULT_RELEASE_URL)
 
-.PHONY: binary-size-check build check clean complete container-compose-check cross-build dependencies fmt fmt-check fuzz generate generate-check hosted-image-check install license-check lint metrics-check metrics-generate preflight race release-assets release-binaries release-macos-pkg reproducible-builds source-policy static-analysis test tidy tidy-check uninstall upstream-foundations verification verify-toolchain vet vulnerability-check
+.PHONY: binary-size-check build check clean complete container-compose-check container-image-check cross-build dependencies fmt fmt-check fuzz generate generate-check install license-check lint metrics-check metrics-generate preflight race release-assets release-binaries release-macos-pkg reproducible-builds source-policy static-analysis test tidy tidy-check uninstall upstream-foundations verification verify-toolchain vet vulnerability-check
 
 dependencies:
 	@./tools/verify-peer-dependencies.sh
@@ -32,8 +32,8 @@ metrics-generate:
 metrics-check:
 	$(GO) run ./tools/metric-schema docs/metrics.json
 
-hosted-image-check:
-	@./tools/verify-hosted-image.sh
+container-image-check:
+	@./tools/verify-container-image.sh
 
 container-compose-check:
 	@./tools/verify-container-compose.sh
@@ -147,7 +147,7 @@ tidy:
 tidy-check: verify-toolchain
 	@./tools/verify-tidy.sh
 
-check: verify-toolchain dependencies source-policy metrics-check hosted-image-check fmt-check generate-check tidy-check vet test build
+check: verify-toolchain dependencies source-policy metrics-check container-image-check fmt-check generate-check tidy-check vet test build
 
 complete: check race cross-build
 

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"testing"
 	"time"
 )
@@ -86,4 +87,66 @@ func TestRegionalCandidateRefreshJitterIsBounded(t *testing.T) {
 			t.Fatalf("refresh delay = %s", delay)
 		}
 	}
+}
+
+func TestSignedSTUNConfigurationRejectsInvalidAndWrongEndpoint(t *testing.T) {
+	a, network, signer, _ := networkTestAuthority(t)
+	if err := a.Apply(t.Context(), networkToken(t, signer, network)); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	c := RegionalCandidates{Schema: "paperboat.regional-candidates.v1", Issuer: network.Issuer, Audience: "paperboat-regional-candidates", AccountID: network.Self.AccountID, EndpointID: network.Self.EndpointID, AuthorizationGeneration: network.Generation, Generation: 1, IssuedAt: now, ExpiresAt: now + 60, STUNServers: []string{"stun.example.com:3478"}}
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, c)); err != nil {
+		t.Fatal(err)
+	}
+	c.STUNServers = []string{"127.0.0.1:3478"}
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, c)); !errors.Is(err, ErrRegionalAuthority) {
+		t.Fatalf("invalid discovery: %v", err)
+	}
+	if a.regional.STUNServers[0] != "stun.example.com:3478" {
+		t.Fatal("invalid update replaced configuration")
+	}
+	c.STUNServers = []string{"other.example.com:3478"}
+	c.EndpointID = "other"
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, c)); !errors.Is(err, ErrRegionalAuthority) {
+		t.Fatalf("cross-endpoint discovery: %v", err)
+	}
+	c.EndpointID = network.Self.EndpointID
+	c.STUNServers = nil
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, c)); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.regional.STUNServers) != 0 {
+		t.Fatal("discovery withdrawal ignored")
+	}
+}
+
+func TestSTUNConfigurationExpiresOnLiveEngine(t *testing.T) {
+	a, network, signer, _ := networkTestAuthority(t)
+	if err := a.Apply(t.Context(), networkToken(t, signer, network)); err != nil {
+		t.Fatal(err)
+	}
+	a.clientEngine = &mesh.Server{}
+	now := time.Now().Unix()
+	c := RegionalCandidates{Schema: "paperboat.regional-candidates.v1", Issuer: network.Issuer, Audience: "paperboat-regional-candidates", AccountID: network.Self.AccountID, EndpointID: network.Self.EndpointID, AuthorizationGeneration: network.Generation, Generation: 1, IssuedAt: now, ExpiresAt: now + 2, STUNServers: []string{"stun.example.com:3478"}}
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, c)); err != nil {
+		t.Fatal(err)
+	}
+	a.mu.Lock()
+	installed := len(a.clientEngine.STUNServers) == 1
+	a.mu.Unlock()
+	if !installed {
+		t.Fatal("live discovery not installed")
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		a.mu.Lock()
+		empty := a.clientEngine == nil || len(a.clientEngine.STUNServers) == 0
+		a.mu.Unlock()
+		if empty {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("expired discovery remains installed")
 }

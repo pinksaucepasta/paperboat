@@ -15,15 +15,22 @@ type cacheKey struct {
 	generation               uint64
 }
 
+type cacheEntry struct {
+	authority   Authority
+	refreshedAt time.Time
+}
+
+const trustRefreshInterval = 15 * time.Second
+
 // Cache retains endpoint authority metadata for the daemon lifetime. It never
 // owns a carrier; machine-specific transport state is created only by an
 // active consumer.
 type Cache struct {
 	mu      sync.Mutex
-	entries map[cacheKey]Authority
+	entries map[cacheKey]cacheEntry
 }
 
-func NewCache() *Cache { return &Cache{entries: make(map[cacheKey]Authority)} }
+func NewCache() *Cache { return &Cache{entries: make(map[cacheKey]cacheEntry)} }
 
 func (c *Cache) Resolve(ctx context.Context, request Request) (Authority, error) {
 	if c == nil {
@@ -32,8 +39,11 @@ func (c *Cache) Resolve(ctx context.Context, request Request) (Authority, error)
 	key := cacheKey{account: request.AccountID, client: request.CLIClientSessionID, machine: request.MachineID, generation: request.MachineGeneration}
 	now := request.Now.UTC()
 	c.mu.Lock()
-	if cached, ok := c.entries[key]; ok && cached.MachineCertificate.Claims.ExpiresAt.After(now.Add(time.Second)) {
-		clone := cloneAuthority(cached)
+	if cached, ok := c.entries[key]; ok && !now.Before(cached.refreshedAt) &&
+		now.Sub(cached.refreshedAt) < trustRefreshInterval &&
+		cached.authority.MachineCertificate.Claims.ExpiresAt.After(now.Add(time.Second)) &&
+		cached.authority.LocalCertificate.Claims.ExpiresAt.After(now.Add(time.Second)) {
+		clone := cloneAuthority(cached.authority)
 		c.mu.Unlock()
 		return clone, nil
 	}
@@ -44,9 +54,9 @@ func (c *Cache) Resolve(ctx context.Context, request Request) (Authority, error)
 	}
 	c.mu.Lock()
 	if previous, ok := c.entries[key]; ok {
-		previous.Clear()
+		previous.authority.Clear()
 	}
-	c.entries[key] = cloneAuthority(resolved)
+	c.entries[key] = cacheEntry{authority: cloneAuthority(resolved), refreshedAt: now}
 	c.mu.Unlock()
 	return resolved, nil
 }
@@ -59,7 +69,7 @@ func (c *Cache) InvalidateMachine(machineID string) {
 	defer c.mu.Unlock()
 	for key, authority := range c.entries {
 		if key.machine == machineID {
-			authority.Clear()
+			authority.authority.Clear()
 			delete(c.entries, key)
 		}
 	}
@@ -72,7 +82,7 @@ func (c *Cache) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for key, authority := range c.entries {
-		authority.Clear()
+		authority.authority.Clear()
 		delete(c.entries, key)
 	}
 }

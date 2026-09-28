@@ -24,6 +24,7 @@ const resumeSchema = "paperboat.byod-resume/v1"
 var (
 	ErrResumeNotFound      = errors.New("BYOD bootstrap resume state was not found")
 	ErrResumeBinding       = errors.New("BYOD bootstrap resume state does not match this machine or enrollment")
+	ErrResumeTokenChanged  = fmt.Errorf("%w: enrollment token changed", ErrResumeBinding)
 	ErrResumeExpired       = errors.New("BYOD bootstrap resume state has expired")
 	ErrResumeTokenRequired = errors.New("BYOD bootstrap resume state requires the original enrollment token")
 )
@@ -122,7 +123,7 @@ func LoadResume(stateRoot, serverURL, publicIdentityKey, enrollmentToken, alias,
 		return ResumeRecord{}, ErrResumeTokenRequired
 	}
 	if strings.TrimSpace(enrollmentToken) != "" && enrollmentTokenDigest(enrollmentToken) != record.EnrollmentTokenSHA {
-		return ResumeRecord{}, ErrResumeBinding
+		return record, ErrResumeTokenChanged
 	}
 	if record.Material != nil && !now.UTC().Before(record.Material.ExpiresAt) {
 		return record, ErrResumeExpired
@@ -280,8 +281,6 @@ func ClearResume(stateRoot string) error {
 	}
 	return os.Remove(path)
 }
-
-func ValidateMaterial(material Material) error { return validateMaterial(material) }
 
 // ValidateRecoveredMaterial binds renewed/replayed credentials to the exact
 // machine installation already stored in the protected journal. Credentials

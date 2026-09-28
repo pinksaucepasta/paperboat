@@ -25,10 +25,10 @@ func linuxSecretAttributes(ref string) map[string]string {
 	return map[string]string{"service": keyringService, "account": ref}
 }
 
-// CredentialStoreAvailable reports whether a Secret Service owner is
-// discoverable on the current login session. Headless Linux sessions often
-// have no D-Bus session at all; callers can select the protected owner-only
-// file store before attempting to persist credentials in that case.
+// CredentialStoreAvailable reports whether the current login session has a
+// usable persistent Secret Service collection. Headless Linux sessions may
+// have a D-Bus owner but no login or default collection; in that case callers
+// use the protected owner-only file store.
 func CredentialStoreAvailable() bool {
 	if os.Getenv("DBUS_SESSION_BUS_ADDRESS") == "" {
 		return false
@@ -42,7 +42,28 @@ func CredentialStoreAvailable() bool {
 	if err := bus.BusObject().Call("org.freedesktop.DBus.NameHasOwner", 0, "org.freedesktop.secrets").Store(&owned); err != nil {
 		return false
 	}
-	return owned
+	if !owned {
+		return false
+	}
+	service := bus.Object("org.freedesktop.secrets", "/org/freedesktop/secrets")
+	collections, err := service.GetProperty("org.freedesktop.Secret.Service.Collections")
+	if err != nil {
+		return false
+	}
+	paths, ok := collections.Value().([]dbus.ObjectPath)
+	if !ok {
+		return false
+	}
+	for _, path := range paths {
+		if path == "/org/freedesktop/secrets/collection/login" {
+			return true
+		}
+	}
+	var defaultCollection dbus.ObjectPath
+	if err := service.Call("org.freedesktop.Secret.Service.ReadAlias", 0, "default").Store(&defaultCollection); err != nil {
+		return false
+	}
+	return defaultCollection.IsValid() && defaultCollection != "/"
 }
 func linuxSecretItems(service *secretservice.SecretService, ref string) ([]dbus.ObjectPath, error) {
 	collection := service.GetLoginCollection()

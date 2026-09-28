@@ -548,7 +548,8 @@ function Write-FeatureCommands {
     Write-Output '  pb tunnel create win-smoke --port 8080 --private --wait --timeout 2m --json'
     Write-Output '  pb tunnel status win-smoke --json'
     Write-Output '  pb tunnel doctor win-smoke --json'
-    Write-Output '  pb tunnel delete win-smoke --yes --wait --timeout 2m --json'
+    Write-Output '  pb tunnel delete win-smoke --wait --timeout 2m --json'
+    Write-Output '  Then rerun the displayed command with its --confirm code.'
     Write-Output '  The preview/tunnel create commands are mutations and require a local fixture plus authenticated control-plane access.'
     Write-Output '  Re-run this verifier after a normal Windows restart to validate the persisted SCM declarations again; this script never reboots the machine.'
 }

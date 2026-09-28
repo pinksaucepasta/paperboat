@@ -175,9 +175,6 @@ func TestLoadAppliesDialRetryDefaultWhenOmitted(t *testing.T) {
 		cfg.Connect.TerminalOutputBufferBytes != DefaultTerminalOutputBufferBytes {
 		t.Fatalf("terminal output defaults = %+v", cfg.Connect)
 	}
-	if cfg.Connect.TerminalTransport != DefaultTerminalTransport {
-		t.Fatalf("terminal transport = %q", cfg.Connect.TerminalTransport)
-	}
 	if got := strings.Join(TerminalEnv, ","); got != "TERM,COLORTERM,TERM_PROGRAM,TERM_PROGRAM_VERSION,LANG,LC_ALL,LC_CTYPE" {
 		t.Fatalf("terminal environment = %q", got)
 	}
@@ -202,16 +199,6 @@ func TestLoadIgnoresRemovedPeerRaceOverrides(t *testing.T) {
 	}
 	if _, err := Load(path); err != nil {
 		t.Fatalf("removed peer race overrides affected config loading: %v", err)
-	}
-}
-
-func TestLoadRejectsInvalidTerminalTransport(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"connect":{"terminal_transport":"tcp"}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "terminal_transport") {
-		t.Fatalf("err=%v", err)
 	}
 }
 

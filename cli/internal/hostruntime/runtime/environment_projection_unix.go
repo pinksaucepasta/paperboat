@@ -29,18 +29,21 @@ import (
 // projectionEnvironmentService owns only host recipient custody and ciphertext
 // delivery. Account passwords and personal/team keys never enter this service.
 type projectionEnvironmentService struct {
-	mu           sync.RWMutex
-	store        *envinject.ProjectionStore
-	stateRoot    string
-	base         *url.URL
-	transport    http.RoundTripper
-	registration runtimeidentity.Registration
-	credentials  managedSSHIdentitySource
-	cancel       context.CancelFunc
-	done         chan struct{}
-	refresh      sync.Mutex
-	closed       bool
+	mu             sync.RWMutex
+	store          *envinject.ProjectionStore
+	stateRoot      string
+	base           *url.URL
+	transport      http.RoundTripper
+	registration   runtimeidentity.Registration
+	credentials    managedSSHIdentitySource
+	cancel         context.CancelFunc
+	done           chan struct{}
+	refresh        sync.Mutex
+	closed         bool
+	configuredSeen bool
 }
+
+var errEnvironmentUnconfigured = errors.New("environment account is not configured")
 
 func newProjectionEnvironmentService(stateRoot string, base *url.URL, transport http.RoundTripper, registration runtimeidentity.Registration, credentials managedSSHIdentitySource) *projectionEnvironmentService {
 	return &projectionEnvironmentService{stateRoot: stateRoot, base: base, transport: transport, registration: registration, credentials: credentials, done: make(chan struct{})}
@@ -77,7 +80,7 @@ func (s *projectionEnvironmentService) Start(ctx context.Context) error {
 			if err := s.ensure(run); err == nil {
 				return
 			}
-			if !waitEnvironmentBootstrap(run, 2*time.Second) {
+			if !waitEnvironmentBootstrap(run, 30*time.Second) {
 				return
 			}
 		}
@@ -102,8 +105,15 @@ func (s *projectionEnvironmentService) restore(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if _, err := s.restoreConfiguredHighWater(); err != nil {
+		return err
+	}
 	store, err := envinject.OpenStoredProjection(ctx, envinject.ProjectionConfig{Path: filepath.Join(s.stateRoot, "environment", "projection.json"), HighWaterPath: filepath.Join(s.stateRoot, "environment-projection-high-water.json"), Issuer: strings.TrimRight(s.base.String(), "/"), MachineID: s.registration.MachineID, InstallationGeneration: uint64(s.registration.InstallationGeneration), HostKeyGeneration: material.Generation, HostPublic: public[:], Keys: keys, GenesisMarker: marker})
 	if err != nil {
+		return err
+	}
+	if err := s.markConfiguredHighWater(); err != nil {
+		store.Close()
 		return err
 	}
 	s.mu.Lock()
@@ -165,6 +175,43 @@ func (s *projectionEnvironmentService) Environment() ([]string, error) {
 		return store.Environment()
 	}
 	return nil, envinject.ErrNotReady
+}
+
+// EnvironmentForLaunch resolves managed ENV with a fresh machine-authenticated
+// control-plane request while this installation has never seen configured
+// state. The narrowly recognized unconfigured response authorizes an empty
+// managed ENV for this launch only; no unconfigured result is cached.
+func (s *projectionEnvironmentService) EnvironmentForLaunch(ctx context.Context) ([]string, error) {
+	if ctx == nil || s == nil {
+		return nil, ErrProductionInvalid
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if store := s.current(); store != nil {
+		return store.Environment()
+	}
+	if s.hasConfiguredState() {
+		if err := s.ensure(ctx); err != nil {
+			return nil, err
+		}
+		return s.Environment()
+	}
+	if err := s.ensure(ctx); errors.Is(err, errEnvironmentUnconfigured) {
+		if s.hasConfiguredState() {
+			return nil, envinject.ErrNotReady
+		}
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	return s.Environment()
+}
+
+func (s *projectionEnvironmentService) hasConfiguredState() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.configuredSeen || s.store != nil
 }
 func (s *projectionEnvironmentService) BindingState() envinject.BindingState {
 	if store := s.current(); store != nil {
@@ -265,13 +312,24 @@ func (s *projectionEnvironmentService) ensure(ctx context.Context) error {
 	if s.isClosed() {
 		return envinject.ErrNotReady
 	}
-	if response.StatusCode != http.StatusOK {
-		_, _ = io.CopyN(io.Discard, response.Body, 8192)
-		return envinject.ErrNotReady
-	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
 	if err != nil || len(raw) > 1<<20 {
 		return envinject.ErrInvalidSnapshot
+	}
+	if response.StatusCode == http.StatusConflict && exactEnvironmentUnconfigured(raw, s.registration, uint64(material.Generation), base64.RawURLEncoding.EncodeToString(public[:])) {
+		if s.hasConfiguredState() {
+			return envinject.ErrNotReady
+		}
+		return errEnvironmentUnconfigured
+	}
+	if response.StatusCode != http.StatusOK {
+		return envinject.ErrNotReady
+	}
+	// Any online 200 is authoritative evidence that this machine is attached to
+	// configured account state, including a pending or not-yet-usable response.
+	// Persist that high-water before parsing so a later 409 can never downgrade it.
+	if err := s.markConfiguredHighWater(); err != nil {
+		return err
 	}
 	bundle, err := envinject.DecodeProjectionResponse(raw, "")
 	if err != nil || bundle == nil {

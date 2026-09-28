@@ -6,6 +6,10 @@ Set a team's default pull repository
 
 Set a team's default pull repository
 
+Set a team's default pull repository for members who explicitly adopt it. This changes the team default, not every member's current local assignment.
+
+Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
+
 JSON output is supported with --json.
 
 ```

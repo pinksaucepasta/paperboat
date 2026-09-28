@@ -20,16 +20,12 @@ const (
 var safeIdentifier = regexp.MustCompile(`^[a-z0-9][a-z0-9_.:-]{0,127}$`)
 
 type Check struct {
-	Category     string  `json:"category"`
-	Code         string  `json:"code"`
-	Status       string  `json:"status"`
-	Summary      string  `json:"summary"`
-	Recovery     string  `json:"recovery,omitempty"`
-	SelectedPath string  `json:"selected_path,omitempty"`
-	RelayRegion  string  `json:"relay_region,omitempty"`
-	RTTMS        float64 `json:"rtt_ms,omitempty"`
-	PTOs         uint32  `json:"ptos,omitempty"`
-	Fallback     string  `json:"fallback,omitempty"`
+	Category     string `json:"category"`
+	Code         string `json:"code"`
+	Status       string `json:"status"`
+	Summary      string `json:"summary"`
+	Recovery     string `json:"recovery,omitempty"`
+	SelectedPath string `json:"selected_path,omitempty"`
 }
 
 type Machine struct {
@@ -75,8 +71,7 @@ func (c Check) Validate() error {
 	if (c.Status == StatusFail || c.Status == StatusWarning) && c.Recovery == "" {
 		return errors.New("doctor warning or failure requires recovery")
 	}
-	hasTransport := c.SelectedPath != "" || c.RelayRegion != "" || c.RTTMS != 0 || c.PTOs != 0 || c.Fallback != ""
-	if hasTransport && (c.Code != "peer_reachability" || !oneOf(c.SelectedPath, "direct", "relay", "wss") || c.RTTMS <= 0 || c.RTTMS > 60_000 || c.PTOs > 1_000 || !oneOf(c.Fallback, "none", "direct_not_selected", "quic_not_selected") || c.SelectedPath == "direct" && (c.RelayRegion != "" || c.Fallback != "none") || c.SelectedPath != "direct" && !safeIdentifier.MatchString(c.RelayRegion)) {
+	if c.SelectedPath != "" && (c.Code != "peer_reachability" || !oneOf(c.SelectedPath, "direct", "peer_relay", "regional_relay", "unknown")) {
 		return errors.New("invalid doctor transport evidence")
 	}
 	return nil

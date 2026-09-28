@@ -13,6 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/endpointidentity"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/identitybootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/trustedkeys"
 )
 
@@ -22,8 +23,8 @@ type CertificateClient interface {
 	EndpointCertificate(context.Context, string, uint64) (api.EndpointCertificateDocument, error)
 }
 
-type trustedRootReader interface {
-	E2EERoot(context.Context) (api.E2EERoot, error)
+type transportKeyReader interface {
+	PeerTransportKeys(context.Context) (api.PeerTransportKeySet, error)
 }
 
 type Request struct {
@@ -66,6 +67,26 @@ func resolve(ctx context.Context, request Request, localOnly bool) (Authority, e
 	if ctx == nil || request.Client == nil || request.AccountID == "" || request.CLIClientSessionID == "" || (!localOnly && (request.MachineID == "" || request.MachineGeneration == 0)) || request.Now.IsZero() {
 		return Authority{}, ErrInvalid
 	}
+	// A long-lived CLI session renews its own certificate before expiry. The
+	// authenticated session remains the authority; no other device participates.
+	if state, err := request.Store.LoadPeerCertificate(request.Issuer, request.CLIClientSessionID); err == nil {
+		parsed, parseErr := endpointidentity.Parse(state.Raw)
+		clear(state.Raw)
+		if parseErr != nil {
+			return Authority{}, ErrInvalid
+		}
+		if !request.Now.Add(identitybootstrap.CertificateRenewBefore).Before(parsed.Claims.ExpiresAt) {
+			client, ok := request.Client.(identitybootstrap.CLIClient)
+			if !ok {
+				return Authority{}, ErrInvalid
+			}
+			if _, err := identitybootstrap.EnrollCLI(ctx, identitybootstrap.CLIRequest{Store: request.Store, Client: client, Issuer: request.Issuer, AccountID: request.AccountID, CLIClientSessionID: request.CLIClientSessionID, Now: func() time.Time { return request.Now }}); err != nil {
+				return Authority{}, err
+			}
+		}
+	} else if !errors.Is(err, config.ErrSecretNotFound) {
+		return Authority{}, err
+	}
 	var keys config.PeerIdentityKeys
 	var trusted []endpointidentity.TrustedKey
 	var rootPublic ed25519.PublicKey
@@ -74,51 +95,38 @@ func resolve(ctx context.Context, request Request, localOnly bool) (Authority, e
 		trustedkeys.Clear(trusted)
 		clear(rootPublic)
 		clear(keys.RootPrivate)
-		clear(keys.NoisePrivate[:])
-		clear(keys.NoisePublic[:])
 		clear(keys.QUICPrivate)
 		return Authority{}, err
 	}
-	if reader, ok := request.Client.(trustedRootReader); ok {
-		root, rootErr := reader.E2EERoot(ctx)
-		if rootErr != nil {
-			return fail(rootErr)
-		}
-		trusted, err = trustedkeys.Root(root)
-		if err != nil {
-			return fail(ErrInvalid)
-		}
+	reader, ok := request.Client.(transportKeyReader)
+	if !ok {
+		return fail(ErrInvalid)
 	}
-	rootPublic, rootErr := request.Store.LoadPeerAccountRootPublic(request.Issuer, request.AccountID)
-	if errors.Is(rootErr, config.ErrSecretNotFound) {
-		// Profiles created before verifier-only root custody was introduced keep
-		// the root seed. Preserve compatibility while ensuring the resolved
-		// authority never needs to retain that private key.
-		legacy, legacyErr := request.Store.PeerIdentityKeysForExistingRoot(request.Issuer, request.AccountID, request.CLIClientSessionID)
-		if legacyErr != nil {
-			return fail(legacyErr)
-		}
-		keys = legacy
-		legacyPublic, publicOK := keys.RootPrivate.Public().(ed25519.PublicKey)
-		if !publicOK {
-			return fail(ErrInvalid)
-		}
-		rootPublic = append(ed25519.PublicKey(nil), legacyPublic...)
-	} else if rootErr != nil {
+	root, rootErr := reader.PeerTransportKeys(ctx)
+	if rootErr != nil {
 		return fail(rootErr)
-	} else {
-		keys, err = request.Store.PeerEndpointKeys(request.Issuer, request.AccountID, request.CLIClientSessionID)
-		if err != nil {
-			clear(rootPublic)
-			return fail(err)
-		}
+	}
+	if root.Version != 1 {
+		return fail(ErrInvalid)
+	}
+	trusted, err = trustedkeys.FromAPI(root.TrustedKeys)
+	if err != nil {
+		return fail(ErrInvalid)
+	}
+	rootPublic, rootErr = request.Store.LoadPeerDeviceSigningPublic(request.Issuer, request.AccountID)
+	if rootErr != nil {
+		return fail(rootErr)
+	}
+	keys, err = request.Store.PeerEndpointKeys(request.Issuer, request.AccountID, request.CLIClientSessionID)
+	if err != nil {
+		clear(rootPublic)
+		return fail(err)
 	}
 	if len(rootPublic) != ed25519.PublicKeySize {
 		return fail(ErrInvalid)
 	}
 	if len(trusted) == 0 {
-		fingerprint := sha256.Sum256(rootPublic)
-		trusted = []endpointidentity.TrustedKey{{KeyID: "aek_" + hex.EncodeToString(fingerprint[:]), PublicKey: append(ed25519.PublicKey(nil), rootPublic...), Fingerprint: fingerprint, Generation: 1}}
+		return fail(ErrInvalid)
 	}
 	localKey, ok := trustedkeys.ByPublic(trusted, rootPublic)
 	if !ok {
@@ -129,7 +137,7 @@ func resolve(ctx context.Context, request Request, localOnly bool) (Authority, e
 		return fail(err)
 	}
 	local, err := endpointidentity.Verify(localState.Raw, localKey.PublicKey, endpointidentity.Expected{AccountID: request.AccountID, Role: endpointidentity.RoleCLI, EndpointID: request.CLIClientSessionID, Generation: 1}, request.Now.UTC())
-	if err != nil || !bytes.Equal(local.Claims.NoisePublicKey[:], keys.NoisePublic[:]) || !bytes.Equal(local.Claims.QUICPublicKey, keys.QUICPrivate.Public().(ed25519.PublicKey)) {
+	if err != nil || !bytes.Equal(local.Claims.QUICPublicKey, keys.QUICPrivate.Public().(ed25519.PublicKey)) {
 		clear(localState.Raw)
 		return fail(ErrInvalid)
 	}
@@ -172,8 +180,6 @@ func (a *Authority) Clear() {
 	trustedkeys.Clear(a.TrustedKeys)
 	clear(a.RootPublic)
 	clear(a.LocalKeys.RootPrivate)
-	clear(a.LocalKeys.NoisePrivate[:])
-	clear(a.LocalKeys.NoisePublic[:])
 	clear(a.LocalKeys.QUICPrivate)
 	clear(a.LocalCertificateRaw)
 	clear(a.MachineCertificateRaw)

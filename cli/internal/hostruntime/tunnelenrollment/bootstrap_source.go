@@ -3,20 +3,15 @@ package tunnelenrollment
 import (
 	"bytes"
 	"context"
-	"crypto"
-	"crypto/ed25519"
-	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"io"
-	"math/big"
 	"mime"
 	"net/http"
 	"net/url"
@@ -322,6 +317,25 @@ func (s *HTTPSProductionAssemblySource) BindProductionAssembly(request Activatio
 		return err
 	}
 	return rotation.bind(assembly)
+}
+
+// UnbindProductionAssembly releases only the failed assembly instance. The
+// credential, rotation journal and exact process-generation claim survive a
+// retry of the same durable connector.
+func (s *HTTPSProductionAssemblySource) UnbindProductionAssembly(request ActivationRequest, assembly *tunnelmanager.ProductionAssembly) {
+	if s == nil || assembly == nil {
+		return
+	}
+	key := activationBindingKey(request)
+	s.mu.Lock()
+	drainer, rotation := s.drainers[key], s.rotations[key]
+	s.mu.Unlock()
+	if drainer != nil {
+		drainer.unbind(assembly)
+	}
+	if rotation != nil {
+		rotation.unbind(assembly)
+	}
 }
 
 func (s *HTTPSProductionAssemblySource) newHello(ctx context.Context, request ActivationRequest, identity ControlIdentity, signer CredentialSigner) (connectorprotocol.Hello, error) {
@@ -780,46 +794,6 @@ func carrierNodeEndpoints(descriptor carrierBootstrapDescriptor, node carrierBoo
 		return connector.DataCarrierEndpointConfig{Address: parsed.Host, TLS: tlsConfig, ExpectedIdentity: identity, PeerBinding: func(tls.ConnectionState) (connector.DataCarrierIdentity, error) { return identity, nil }}
 	}
 	return connector.NetworkDialerConfig{TCPMux: newEndpoint(parsed["h2"]), QUIC: newEndpoint(parsed["h3"])}, nil
-}
-
-type referenceCryptoSigner struct {
-	ctx    context.Context
-	public ed25519.PublicKey
-	sign   CredentialSigner
-}
-
-func (s referenceCryptoSigner) Public() crypto.PublicKey { return s.public }
-func (s referenceCryptoSigner) Sign(_ io.Reader, payload []byte, opts crypto.SignerOpts) ([]byte, error) {
-	if opts == nil || opts.HashFunc() != crypto.Hash(0) {
-		return nil, ErrActivation
-	}
-	return s.sign(s.ctx, payload)
-}
-
-func connectorCredentialTLSCertificate(ctx context.Context, request ActivationRequest, signer CredentialSigner, uri *url.URL, now, expiresAt time.Time) (tls.Certificate, error) {
-	if len(request.CredentialPublicKey) != ed25519.PublicKeySize || uri == nil || !expiresAt.After(now) {
-		return tls.Certificate{}, ErrActivation
-	}
-	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
-	if err != nil {
-		return tls.Certificate{}, err
-	}
-	private := referenceCryptoSigner{ctx: ctx, public: ed25519.PublicKey(append([]byte(nil), request.CredentialPublicKey...)), sign: signer}
-	template := &x509.Certificate{
-		SerialNumber: serial, Subject: pkix.Name{CommonName: request.CredentialKeyID},
-		NotBefore: now.Add(-30 * time.Second), NotAfter: expiresAt,
-		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-		BasicConstraintsValid: true, URIs: []*url.URL{uri},
-	}
-	der, err := x509.CreateCertificate(rand.Reader, template, template, private.public, private)
-	if err != nil {
-		return tls.Certificate{}, errors.Join(ErrActivation, err)
-	}
-	leaf, err := x509.ParseCertificate(der)
-	if err != nil {
-		return tls.Certificate{}, ErrActivation
-	}
-	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: private, Leaf: leaf}, nil
 }
 
 var _ ProductionAssemblySource = (*HTTPSProductionAssemblySource)(nil)

@@ -1,15 +1,17 @@
 ## pb send
 
-Send files to a machine's Paperboat Inbox
+Send files to a device's Paperboat Inbox
 
 ### Synopsis
 
-Send files to a machine's Paperboat Inbox
+Send files to a device's Paperboat Inbox
+
+Send one or more paths to the selected device's Inbox. The command succeeds only after receiver verification and a durable receipt; --session associates the transfer with a terminal session.
 
 JSON output is supported with --json.
 
 ```
-pb send <path>... --to <machine> [flags]
+pb send <path>... --to <device> [flags]
 ```
 
 ### Options
@@ -32,4 +34,8 @@ pb send <path>... --to <machine> [flags]
 ### SEE ALSO
 
 * [pb](pb.md)	 - Open Paperboat or connect to an environment terminal
+* [pb send cancel](pb_send_cancel.md)	 - Cancel a file transfer batch
+* [pb send destination](pb_send_destination.md)	 - Show the default transfer destination
+* [pb send list](pb_send_list.md)	 - List file transfers
+* [pb send status](pb_send_status.md)	 - Inspect a file transfer
 

@@ -6,6 +6,8 @@ Set up this machine for Paperboat
 
 Set up this machine for Paperboat
 
+Enroll and configure this machine, create its Inbox, and install the running executable as the Paperboat service. Capability flags choose incoming services; recovery output must be stored carefully.
+
 JSON output is supported with --json.
 
 ```

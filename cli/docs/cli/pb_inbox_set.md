@@ -4,7 +4,9 @@
 
 ### Synopsis
 
+Set an explicit local directory for future received files. The command configures the receiving side; it does not move already delivered files.
 
+The Paperboat Inbox receives verified files and exact team requests. Files remain until removed by the user. The receiving path is a local device setting; team request acceptance is an account policy. A sender manages outgoing batches with pb send.
 
 JSON output is supported with --json.
 

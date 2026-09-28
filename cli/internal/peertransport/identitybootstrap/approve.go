@@ -97,23 +97,18 @@ func approveEndpoint(ctx context.Context, request ApprovalRequest, wantRole endp
 	if selectedRole != wantRole {
 		return Result{}, ErrInvalid
 	}
-	noise, noiseErr := base64.RawURLEncoding.Strict().DecodeString(selected.NoisePublicKey)
 	quic, quicErr := base64.RawURLEncoding.Strict().DecodeString(selected.QUICPublicKey)
-	if noiseErr != nil || quicErr != nil || len(noise) != 32 || len(quic) != ed25519.PublicKeySize || base64.RawURLEncoding.EncodeToString(noise) != selected.NoisePublicKey || base64.RawURLEncoding.EncodeToString(quic) != selected.QUICPublicKey || allZero(noise) || allZero(quic) {
-		clear(noise)
+	if quicErr != nil || len(quic) != ed25519.PublicKeySize || base64.RawURLEncoding.EncodeToString(quic) != selected.QUICPublicKey || allZero(quic) {
 		clear(quic)
 		return Result{}, ErrInvalid
 	}
-	var noisePublic [32]byte
-	copy(noisePublic[:], noise)
 	// Approval is performed by a paired endpoint, while the newly approved
 	// endpoint and the control plane may have slightly different wall clocks.
 	// Keep the certificate valid at the control plane when the signer is ahead,
 	// using the same bounded skew as fresh bootstrap issuance.
 	issuedAt := now.Add(-CertificateClockSkew)
 	expiresAt := now.Add(CertificateLifetime)
-	certificate, err := endpointidentity.Sign(signer, endpointidentity.Claims{AccountID: request.AccountID, Role: wantRole, EndpointID: selected.EndpointID, NoisePublicKey: noisePublic, QUICPublicKey: ed25519.PublicKey(quic), Generation: selected.Generation, Serial: 1, IssuedAt: issuedAt, ExpiresAt: expiresAt})
-	clear(noise)
+	certificate, err := endpointidentity.Sign(signer, endpointidentity.Claims{AccountID: request.AccountID, Role: wantRole, EndpointID: selected.EndpointID, QUICPublicKey: ed25519.PublicKey(quic), Generation: selected.Generation, Serial: 1, IssuedAt: issuedAt, ExpiresAt: expiresAt})
 	clear(quic)
 	if err != nil {
 		return Result{}, err

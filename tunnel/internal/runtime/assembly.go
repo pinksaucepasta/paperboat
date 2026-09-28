@@ -22,6 +22,7 @@ type AssemblySpec struct {
 	Certificates Component
 	// Preview reconciles server-issued preview carrier admissions and must stop
 	// before Carrier so route detach observations can use live peer handles.
+	Runtime               Component
 	Preview               Component
 	Node                  Component
 	Routes                Component
@@ -77,6 +78,7 @@ func NewAssembly(spec AssemblySpec) (*Assembly, error) {
 		Carrier:         spec.Carrier,
 		Certificates:    spec.Certificates,
 		Preview:         spec.Preview,
+		Runtime:         spec.Runtime,
 		Node:            spec.Node,
 		Routes:          spec.Routes,
 		PublicTCP:       spec.PublicTCP,

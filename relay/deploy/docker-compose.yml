@@ -10,7 +10,8 @@ services:
       PAPERBOAT_SENTRY_RELEASE: ${PAPERBOAT_SENTRY_RELEASE:-}
     ports:
       - "${PAPERBOAT_RELAY_TCP_PORT:-443}:${PAPERBOAT_RELAY_TCP_PORT:-443}/tcp"
-      - "${PAPERBOAT_RELAY_QUIC_PORT:-443}:${PAPERBOAT_RELAY_QUIC_PORT:-443}/udp"
+      - "${PAPERBOAT_RELAY_TCP_PORT:-443}:${PAPERBOAT_RELAY_TCP_PORT:-443}/udp"
+      - "${PAPERBOAT_RELAY_QUIC_PORT:-444}:${PAPERBOAT_RELAY_QUIC_PORT:-444}/udp"
     volumes:
       - ./operator/runtime.args:/var/lib/paperboat-relay/operator/runtime.args:ro
       - ./operator/runtime.credential:/var/lib/paperboat-relay/operator/runtime.credential:ro

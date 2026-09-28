@@ -19,6 +19,10 @@ const (
 	ActivationDiagnosticControlHTTPUnavailable ActivationDiagnosticCode = "control_http_unavailable"
 	ActivationDiagnosticControlNetworkTLS      ActivationDiagnosticCode = "control_network_tls"
 	ActivationDiagnosticInvalidSessionConfig   ActivationDiagnosticCode = "invalid_session_config"
+	ActivationDiagnosticAssemblyResolution     ActivationDiagnosticCode = "assembly_resolution"
+	ActivationDiagnosticAssemblyOpen           ActivationDiagnosticCode = "assembly_open"
+	ActivationDiagnosticAssemblyBinding        ActivationDiagnosticCode = "assembly_binding"
+	ActivationDiagnosticAssemblyStart          ActivationDiagnosticCode = "assembly_start"
 )
 
 // ActivationDiagnostic retains the typed cause for local callers while its
@@ -53,7 +57,11 @@ func validActivationDiagnosticCode(code ActivationDiagnosticCode) bool {
 		ActivationDiagnosticControlHTTPDenied,
 		ActivationDiagnosticControlHTTPUnavailable,
 		ActivationDiagnosticControlNetworkTLS,
-		ActivationDiagnosticInvalidSessionConfig:
+		ActivationDiagnosticInvalidSessionConfig,
+		ActivationDiagnosticAssemblyResolution,
+		ActivationDiagnosticAssemblyOpen,
+		ActivationDiagnosticAssemblyBinding,
+		ActivationDiagnosticAssemblyStart:
 		return true
 	default:
 		return false

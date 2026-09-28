@@ -6,6 +6,10 @@ View owner/admin activity from the last 90 days
 
 View owner/admin activity from the last 90 days
 
+Read recent owner/admin activity for one team, with cursor and limit for pagination. Entries support review of membership and grant changes within the retention window.
+
+Teams use explicit membership and resource grants. Membership alone does not grant device use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+
 JSON output is supported with --json.
 
 ```

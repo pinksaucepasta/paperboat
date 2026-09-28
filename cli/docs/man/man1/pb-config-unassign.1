@@ -6,27 +6,33 @@ pb-config-unassign - Remove a config repository assignment
 
 
 .SH SYNOPSIS
-\fBpb config unassign  [flags]\fP
+\fBpb config unassign <environment> [flags]\fP
 
 
 .SH DESCRIPTION
 Remove a config repository assignment
 
 .PP
+Remove a repository assignment from the selected environment. The repository and its content remain; the confirmation code confirms the local synchronization change.
+
+.PP
+Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
+
+.PP
 JSON output is supported with --json.
 
 
 .SH OPTIONS
+\fB--confirm\fP=""
+	six-character confirmation code from the preview
+
+.PP
 \fB-h\fP, \fB--help\fP[=false]
 	help for unassign
 
 .PP
 \fB--json\fP[=false]
 	print JSON
-
-.PP
-\fB--yes\fP[=false]
-	confirm removal
 
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS

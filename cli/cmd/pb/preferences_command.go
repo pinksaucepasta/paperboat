@@ -48,7 +48,7 @@ and controls remain visible even when optional panels are hidden.
 The editor validates changes and detects concurrent saves. Invalid preferences can
 be repaired with import or reset; these commands remain available without loading
 the invalid file. --json displays preferences without starting the editor.`
-	root.Example = "  pb config customize\n  pb config customize path\n  pb config customize show --json\n  pb config customize explain -- mac -- uptime\n  pb config customize import ./preferences.json\n  pb config customize reset --yes"
+	root.Example = "  pb config customize\n  pb config customize path\n  pb config customize show --json\n  pb config customize explain -- mac -- uptime\n  pb config customize import ./preferences.json\n  pb config customize reset"
 	show := &cobra.Command{Use: "show", Short: "Show the local preference document", Args: commandArgs(cobra.NoArgs), RunE: func(c *cobra.Command, _ []string) error { return showPreferences(c) }}
 	path := &cobra.Command{Use: "path", Short: "Print the local preference file path", Args: commandArgs(cobra.NoArgs), RunE: func(c *cobra.Command, _ []string) error {
 		path, err := customizationPath(c)
@@ -100,10 +100,6 @@ the invalid file. --json displays preferences without starting the editor.`
 		return preferenceResult(c, map[string]any{"saved": true, "path": path}, "Local preferences saved.")
 	}}
 	reset := &cobra.Command{Use: "reset", Short: "Reset only local CLI preferences; keep account and connection settings", Args: commandArgs(cobra.NoArgs), RunE: func(c *cobra.Command, _ []string) error {
-		yes, _ := c.Flags().GetBool("yes")
-		if !yes {
-			return invocationError(errors.New("reset requires --yes; account and connection settings are preserved"))
-		}
 		path, err := customizationPath(c)
 		if err != nil {
 			return err
@@ -112,12 +108,15 @@ the invalid file. --json displays preferences without starting the editor.`
 		if err != nil {
 			return err
 		}
+		if err := confirmMutation(c, "preferences-reset:"+revision, "Reset local CLI shortcuts, defaults, and appearance settings? Account and connection settings will remain."); err != nil {
+			return err
+		}
 		if err = preferences.SaveIfUnchanged(path, preferences.Default(), revision); err != nil {
 			return err
 		}
 		return preferenceResult(c, map[string]any{"reset": true, "path": path}, "Local preferences reset.")
 	}}
-	reset.Flags().Bool("yes", false, "confirm resetting local preferences")
+	reset.Flags().String("confirm", "", "six-character confirmation code from the preview")
 	explain := &cobra.Command{Use: "explain -- <arguments...>", Short: "Show command expansion without executing it", Args: commandArgs(cobra.MinimumNArgs(1)), RunE: func(c *cobra.Command, args []string) error {
 		// Only use explicit input arguments; resolution performs no command execution.
 		root := newRootCommand()

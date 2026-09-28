@@ -8,6 +8,8 @@ Generate the autocompletion script for pb for the specified shell.
 See each sub-command's help for details on how to use the generated script.
 
 
+Choose bash, fish, powershell, or zsh to print that shell's completion script to standard output. Follow the selected subcommand's installation instructions; generating a script does not modify your shell configuration.
+
 With --json, this command group lists its available commands.
 
 ### Options

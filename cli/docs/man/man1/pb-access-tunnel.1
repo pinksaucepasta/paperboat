@@ -6,11 +6,17 @@ pb-access-tunnel - Open private TCP access through stable hostd
 
 
 .SH SYNOPSIS
-\fBpb access tunnel  [flags]\fP
+\fBpb access tunnel <tunnel-or-route> [flags]\fP
 
 
 .SH DESCRIPTION
 Open private TCP access through stable hostd
+
+.PP
+Resolve a tunnel or route by its exact identity and forward a loopback listener to that authorized private TCP target. --listen selects the local address; the listener is closed when the command ends.
+
+.PP
+Private access requires authorization for the exact target. The listener stays on the local loopback interface, and closing this command closes the forwarding session. Public tunnel publication is managed separately with pb tunnel.
 
 .PP
 JSON output is supported with --json.

@@ -6,11 +6,14 @@ pb-ssh - Connect to a machine with OpenSSH
 
 
 .SH SYNOPSIS
-\fBpb ssh [user@] [-- ] [flags]\fP
+\fBpb ssh [user@]<machine> [-- <OpenSSH arguments...>] [flags]\fP
 
 
 .SH DESCRIPTION
 Connect to a machine with OpenSSH
+
+.PP
+Connect to an enrolled device through OpenSSH using Paperboat resolution. Optional arguments after -- go to OpenSSH; the command preserves SSH host-key verification and reports identity changes for deliberate approval.
 
 .PP
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
@@ -19,10 +22,6 @@ This command does not support --json output; it rejects that mode before executi
 .SH OPTIONS
 \fB-h\fP, \fB--help\fP[=false]
 	help for ssh
-
-.PP
-\fB--transport\fP=""
-	peer transport: a, d, q, w, or r
 
 .PP
 \fB--user\fP=""

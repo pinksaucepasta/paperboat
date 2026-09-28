@@ -16,7 +16,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
-	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
@@ -77,11 +76,7 @@ func executeManagedSSH(cobraCommand *cobra.Command, ctx *command.Context, machin
 	}
 	operationID := newSSHOperationID()
 	descriptor := pendingSSHDescriptor(machine, operationID)
-	requestedTransport, _ := cobraCommand.Flags().GetString("transport")
-	connectInfo, err := windowsManagedSSHConnectInfo(machine, descriptor, requestedTransport, d.transportMode)
-	if err != nil {
-		return invocationError(err)
-	}
+	connectInfo := sshConnectInfo(machine, descriptor)
 	connection, err := d.peerApplications.DialSSH(cobraCommand.Context(), connectInfo, operationID)
 	if err != nil {
 		return err
@@ -201,23 +196,6 @@ func windowsManagedSSHDependencies(ctx *command.Context) (*deps, error) {
 		return nil, fmt.Errorf("prepare local peer transport: %w", err)
 	}
 	return d, nil
-}
-
-func windowsManagedSSHConnectInfo(machine api.UserMachine, descriptor api.SSHDescriptor, requested string, fallback tunnel.TerminalTransport) (resolver.ConnectInfo, error) {
-	mode := fallback
-	if strings.TrimSpace(requested) != "" {
-		var err error
-		mode, err = tunnel.ParseTerminalTransport(requested)
-		if err != nil {
-			return resolver.ConnectInfo{}, err
-		}
-	}
-	if mode == "" {
-		mode = tunnel.TerminalTransportAuto
-	}
-	info := sshConnectInfo(machine, descriptor)
-	info.Transport = string(mode)
-	return info, nil
 }
 
 func windowsLoopbackOpenSSHArguments(destination managedssh.Destination, port uint16, executable string, passthrough []string, includePassthrough bool) []string {

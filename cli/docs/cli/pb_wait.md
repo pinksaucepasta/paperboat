@@ -6,6 +6,8 @@ Wait for a machine readiness condition
 
 Wait for a machine readiness condition
 
+Wait for the selected device to satisfy a named readiness condition from --for. --timeout bounds the wait, and an expired wait reports a failure instead of treating mere connectivity as readiness.
+
 JSON output is supported with --json.
 
 ```

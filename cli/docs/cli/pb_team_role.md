@@ -1,10 +1,14 @@
 ## pb team role
 
-Role team membership
+Change a team member's role
 
 ### Synopsis
 
-Role team membership
+Change a team member's role
+
+Set one member's role to admin or member at the expected generation. This changes team management authority, not the member's explicit resource grants.
+
+Teams use explicit membership and resource grants. Membership alone does not grant device use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
 
 JSON output is supported with --json.
 

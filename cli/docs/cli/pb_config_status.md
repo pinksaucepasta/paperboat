@@ -6,6 +6,10 @@ Show configuration synchronization status
 
 Show configuration synchronization status
 
+Report synchronization state and any pending review or conflict for one environment or all assignments. Use this before approving or forcing a direction.
+
+Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
+
 JSON output is supported with --json.
 
 ```

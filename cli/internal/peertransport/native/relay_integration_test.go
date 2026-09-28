@@ -126,6 +126,9 @@ func TestNativeSessionOverAuthenticatedDERPQUIC(t *testing.T) {
 	if relay.Snapshot().Forwarded == 0 {
 		t.Fatal("native session did not forward through authenticated DERP")
 	}
+	if path, err := clientAuthority.PeerPath("machine_relay"); err != nil || path != "regional_relay" {
+		t.Fatalf("forced DERP peer path=%q err=%v", path, err)
+	}
 	target, _ := json.Marshal(nativeprivate.Binding{Schema: nativeprivate.SchemaV1, ResourceKind: "tunnel", ResourceID: "tun_relay", ResourceGeneration: 1, RouteID: "route_relay", RouteGeneration: 1, TargetGeneration: 1, OwnerEndpointID: "machine_relay", Protocol: "tcp", TargetScheme: "tcp", TargetAddress: "127.0.0.1:22", ExpiresAt: now.Add(time.Minute)})
 	privateHeader, _ := streamauth.NewNativePrivate("operation_private_relay", "private_tcp", "stream_private_relay", "credential_private_tcp", now.Add(time.Minute), 1<<20, target)
 	privateStream, err := session.OpenAuthorized(ctx, privateHeader, "grant_test", "private_access")
@@ -153,6 +156,9 @@ func TestNativeSessionOverAuthenticatedDERPQUIC(t *testing.T) {
 	clientConfig.Generation++
 	clientConfig.Peers = nil
 	applyTestConfiguration(t, clientAuthority, signerPrivate, clientConfig)
+	if path, err := clientAuthority.PeerPath("machine_relay"); !errors.Is(err, tailnet.ErrAdmission) {
+		t.Fatalf("revoked peer path=%q err=%v", path, err)
+	}
 	if err := clientAuthority.ApplyRelayGrants(ctx, nil); err != nil {
 		t.Fatal(err)
 	}

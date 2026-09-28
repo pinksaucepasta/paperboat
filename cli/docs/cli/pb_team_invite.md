@@ -6,6 +6,10 @@ Invite an account as a member
 
 Invite an account as a member
 
+Invite one exact account to the selected team at its current generation. The recipient must accept; an invitation is not immediate membership or a resource grant.
+
+Teams use explicit membership and resource grants. Membership alone does not grant device use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+
 JSON output is supported with --json.
 
 ```

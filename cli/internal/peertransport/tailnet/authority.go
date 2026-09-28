@@ -111,6 +111,7 @@ type Authority struct {
 	current         *NetworkConfiguration
 	private         key.NodePrivate
 	timer           *time.Timer
+	stunTimer       *time.Timer
 	closed          bool
 	done            chan struct{}
 	server          *UDPServer
@@ -448,6 +449,10 @@ func (a *Authority) Apply(ctx context.Context, token string) error {
 }
 
 func (a *Authority) dropLocked() {
+	if a.stunTimer != nil {
+		a.stunTimer.Stop()
+		a.stunTimer = nil
+	}
 	a.expiresAt.Store(0)
 	a.relay.mu.Lock()
 	recovery := a.relay.recovery

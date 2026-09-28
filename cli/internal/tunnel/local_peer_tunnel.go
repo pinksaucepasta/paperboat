@@ -13,8 +13,7 @@ import (
 )
 
 type LocalPeerTunnel struct {
-	Client    *localapi.Client
-	Transport TerminalTransport
+	Client *localapi.Client
 }
 
 func (t LocalPeerTunnel) request(info resolver.ConnectInfo, consumer, operationID string, payload any) (localapi.PeerStreamRequest, error) {
@@ -51,10 +50,6 @@ func (t LocalPeerTunnel) request(info resolver.ConnectInfo, consumer, operationI
 		return localapi.PeerStreamRequest{}, err
 	}
 	request.AccessSessionID = info.Terminal.Auth.ResourceID
-	request.Transport = string(t.Transport)
-	if request.Transport == "" {
-		request.Transport = string(TerminalTransportAuto)
-	}
 	if request.Credential == "" {
 		if validationErr := request.ValidatePending(time.Now().UTC()); validationErr != nil {
 			return request, fmt.Errorf("%w: pending peer request: %v", ErrPeerTerminalInvalid, validationErr)
@@ -125,24 +120,6 @@ func (t LocalPeerTunnel) DialSSH(ctx context.Context, info resolver.ConnectInfo,
 		return nil, err
 	}
 	return &sshStreamConn{ReadWriteCloser: stream}, nil
-}
-
-func (t LocalPeerTunnel) DialPrivatePreview(ctx context.Context, info resolver.ConnectInfo, port uint16) (Conn, error) {
-	operationID := info.Terminal.SessionID
-	if operationID == "" {
-		operationID = fmt.Sprintf("operation_preview_%d", port)
-	}
-	request, err := t.request(info, "private_preview", operationID, localapi.PeerPreviewPayload{Port: port})
-	if err != nil {
-		return nil, err
-	}
-	stream, err := t.Client.OpenPeerStream(ctx, request)
-	if err != nil {
-		return nil, err
-	}
-	// Private preview is already one opaque HTTP/3 CONNECT byte stream at the
-	// daemon boundary. Terminal framing here corrupts the browser HTTP bytes.
-	return &previewStreamConn{ReadWriteCloser: stream}, nil
 }
 
 type localPeerNetConn struct {

@@ -278,16 +278,6 @@ func (m *Manager) Approve(ctx context.Context, version string, resolve workerupd
 	return Result{Version: release.Version, StagedVersion: release.Version, Applied: true, ProtectedWorkloads: latestSnapshot.Protected, WorkloadGeneration: latestSnapshot.Generation, Stage: stageIdle}, nil
 }
 
-func (m *Manager) Status() Result {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	j, err := loadJournal(m.config.Paths.StatePath)
-	if err != nil {
-		return Result{Version: m.active.Version, Stage: stageIdle}
-	}
-	return m.resultFromJournal(j)
-}
-
 func (m *Manager) Recover(ctx context.Context) error {
 	_ = ctx
 	m.mu.Lock()

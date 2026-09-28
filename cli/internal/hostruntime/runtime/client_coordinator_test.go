@@ -47,7 +47,6 @@ func TestClientCoordinatorExposesOnlyClientRoutes(t *testing.T) {
 		path   string
 		want   int
 	}{
-		{http.MethodPost, "/v1/file-transfers", http.StatusUnauthorized},
 		{http.MethodPost, "/v1/preview-launches", http.StatusNotFound},
 		{http.MethodGet, "/v1/runtime", http.StatusNotFound},
 		{http.MethodPost, "/v1/codex-sessions/session_1", http.StatusNotFound},

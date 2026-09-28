@@ -6,6 +6,8 @@ Manage Paperboat sign-in
 
 Manage Paperboat sign-in
 
+Use login to redeem a 26-character enrollment token, status to inspect the active profile, and logout to revoke it. The command group opens account settings interactively when run in a terminal.
+
 With --json, this command group lists its available commands.
 
 ```

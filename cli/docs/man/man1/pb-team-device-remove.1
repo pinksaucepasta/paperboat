@@ -1,0 +1,56 @@
+.nh
+.TH "PB-TEAM-DEVICE-REMOVE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-device-remove - Revoke a team-owned device without personal takeover
+
+
+.SH SYNOPSIS
+\fBpb team device remove <team> <device-id> [flags]\fP
+
+
+.SH DESCRIPTION
+Revoke a team-owned device without personal takeover
+
+.PP
+Revoke a team-owned device enrollment after exact confirmation. Ownership does not return to a former personal enroller; access is withdrawn from team members.
+
+.PP
+A personal device can be shared with a team while ownership stays personal, or explicitly transferred to team ownership. Sharing and capability grants are separate decisions. Removing a team-owned device revokes its enrollment; unsharing a personal device withdraws that team's access.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--confirm\fP=""
+	exact device identifier acknowledging the ownership or revocation effect
+
+.PP
+\fB--generation\fP=0
+	expected current team generation
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for remove
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-team-device(1)\fP

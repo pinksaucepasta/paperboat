@@ -6,6 +6,10 @@ Forward a local port to an authorized device service
 
 Forward a loopback TCP port in this process's network namespace to one authorized device service. The forward runs in the foreground; processes sharing the namespace can connect to it.
 
+--port identifies the exact service on the authorized device, and --listen chooses the local loopback address. Closing the command closes the forwarding session without publishing a public URL.
+
+Private access requires authorization for the exact target. The listener stays on the local loopback interface, and closing this command closes the forwarding session. Public tunnel publication is managed separately with pb tunnel.
+
 JSON output is supported with --json.
 
 ```

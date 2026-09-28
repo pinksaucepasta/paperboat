@@ -6,6 +6,10 @@ Show installed Paperboat update state
 
 Show installed Paperboat update state
 
+Show the installed release and updater state, including any pending or failed transition. This reads local update state rather than downloading and installing a new release.
+
+Updates use signed release metadata and preserve artifact authenticity and rollback protection. Check inspects an available release; status reports the installed updater state. A failed update should leave the known installation usable and report a recovery action.
+
 JSON output is supported with --json.
 
 ```

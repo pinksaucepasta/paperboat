@@ -94,7 +94,7 @@ func startInspectorNativeFixture(t *testing.T, d task32OwnerDescriptor, service 
 		issued = cert.Claims.IssuedAt
 	}
 	makeCertificate := func(endpoint string, role endpointidentity.Role, keys config.PeerIdentityKeys, serial uint64) (endpointidentity.Certificate, api.EndpointCertificateDocument) {
-		certificate, e := endpointidentity.Sign(cliKeys.RootPrivate, endpointidentity.Claims{AccountID: extra.OwnerAccountID, Role: role, EndpointID: endpoint, NoisePublicKey: keys.NoisePublic, QUICPublicKey: keys.QUICPrivate.Public().(ed25519.PublicKey), Generation: 1, Serial: serial, IssuedAt: issued, ExpiresAt: issued.Add(time.Hour)})
+		certificate, e := endpointidentity.Sign(cliKeys.RootPrivate, endpointidentity.Claims{AccountID: extra.OwnerAccountID, Role: role, EndpointID: endpoint, QUICPublicKey: keys.QUICPrivate.Public().(ed25519.PublicKey), Generation: 1, Serial: serial, IssuedAt: issued, ExpiresAt: issued.Add(time.Hour)})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -127,7 +127,7 @@ func startInspectorNativeFixture(t *testing.T, d task32OwnerDescriptor, service 
 	}
 	source := &task32MachineSource{token: d.MachineToken, machine: d.MachineID, environment: d.EnvironmentID, generation: d.MachineGeneration, private: ed25519.PrivateKey(rawPrivate)}
 	operation := "native-fixture-machine-" + extra.CLIClientSessionID
-	payload, _ := json.Marshal(map[string]any{"operation_id": operation, "generation": 1, "noise_public_key": base64.RawURLEncoding.EncodeToString(machineKeys.NoisePublic[:]), "quic_public_key": base64.RawURLEncoding.EncodeToString(machineKeys.QUICPrivate.Public().(ed25519.PublicKey))})
+	payload, _ := json.Marshal(map[string]any{"operation_id": operation, "generation": 1, "quic_public_key": base64.RawURLEncoding.EncodeToString(machineKeys.QUICPrivate.Public().(ed25519.PublicKey))})
 	path := "/v1/machine-peer-identity"
 	proof, err := source.Proof(ctx, operation, http.MethodPost, path, payload)
 	if err != nil {

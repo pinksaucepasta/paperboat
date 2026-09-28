@@ -59,7 +59,6 @@ type Manifest struct {
 	Size                 int64     `json:"size"`
 	SHA256               string    `json:"sha256"`
 	CommittedOffset      int64     `json:"committed_offset"`
-	CommittedChunk       uint64    `json:"committed_chunk,omitempty"`
 	State                string    `json:"state"`
 	ResultCode           string    `json:"result_code,omitempty"`
 	ReceiptPath          string    `json:"receipt_path,omitempty"`
@@ -335,29 +334,17 @@ func (c *Client) Pending(ctx context.Context, sessionID string, waitSeconds int)
 	}
 	target := c.Endpoint + "/pending?session_id=" + url.QueryEscape(sessionID) + "&wait_seconds=" + strconv.Itoa(waitSeconds)
 	var response struct {
-		Transfers []json.RawMessage `json:"transfers"`
+		Transfers []Manifest `json:"transfers"`
 	}
 	if err := c.jsonRequest(ctx, http.MethodGet, target, operationID("pending", sessionID), "", 0, nil, &response); err != nil {
 		return nil, err
 	}
-	result := make([]Manifest, 0, len(response.Transfers))
-	for _, raw := range response.Transfers {
-		var kind struct {
-			TransferGeneration uint64 `json:"transfer_generation"`
-		}
-		if err := json.Unmarshal(raw, &kind); err != nil {
-			return nil, errors.New("invalid pending transfer response")
-		}
-		if kind.TransferGeneration != 0 {
-			continue
-		}
-		var manifest Manifest
-		if err := json.Unmarshal(raw, &manifest); err != nil || manifest.TransferID == "" {
+	for _, manifest := range response.Transfers {
+		if manifest.TransferID == "" {
 			return nil, errors.New("invalid pending transfer manifest")
 		}
-		result = append(result, manifest)
 	}
-	return result, nil
+	return response.Transfers, nil
 }
 
 func (c *Client) Content(ctx context.Context, manifest Manifest, offset int64) (*http.Response, error) {
@@ -529,11 +516,6 @@ func (c *Client) retryJSONRequest(ctx context.Context, method, url, operation, m
 	// establishment while the peer acquires newly granted authority.
 	retryCtx := ctx
 	var cancel context.CancelFunc
-	defer func() {
-		if cancel != nil {
-			cancel()
-		}
-	}()
 	for attempt := 0; ; attempt++ {
 		var reader io.Reader
 		if body != nil {
@@ -549,6 +531,7 @@ func (c *Client) retryJSONRequest(ctx context.Context, method, url, operation, m
 		}
 		if cancel == nil {
 			retryCtx, cancel = context.WithTimeout(ctx, operationRecoveryWindow)
+			defer cancel()
 		}
 		wait := c.retryWait
 		if wait == nil {

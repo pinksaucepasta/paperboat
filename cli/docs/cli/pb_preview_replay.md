@@ -6,6 +6,10 @@ Deliberately replay one retained HTTP request to the same origin
 
 Deliberately replay one retained HTTP request to the same origin
 
+Replay one retained HTTP request to the same preview origin by capture ID. This deliberately repeats an HTTP action; use an idempotency key when the origin supports one.
+
+A preview exposes a local target through a temporary Paperboat URL or private/team access policy. Inspect its status before sharing the URL, and stop or delete it when no longer needed. Browser HTTP terminates TLS at the edge.
+
 JSON output is supported with --json.
 
 ```

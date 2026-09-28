@@ -656,6 +656,43 @@ func (c *AttachmentClient) WaitForEdgeReady(ctx context.Context, request Attachm
 	}
 }
 
+// WaitForEdgeReadyCurrent follows the same attachment while lease renewals
+// advance its strong ETag. A stale If-Match during a poll is retried with the
+// next current lease; it never marks edge readiness locally.
+func (c *AttachmentClient) WaitForEdgeReadyCurrent(ctx context.Context, initial Attachment, request func() (AttachmentRequest, error)) (Attachment, error) {
+	if c == nil || ctx == nil || request == nil {
+		return Attachment{}, ErrAttachmentClientInvalid
+	}
+	current := initial
+	for {
+		if (current.State == "edge_ready" || current.State == "ready") && current.EdgeReady {
+			return current, nil
+		}
+		if current.State != "pending" && current.State != "admitted" {
+			return Attachment{}, fmt.Errorf("%w: attachment cannot become edge-ready from %s", ErrAttachmentBinding, current.State)
+		}
+		timer := time.NewTimer(c.admissionPoll)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return Attachment{}, ctx.Err()
+		case <-timer.C:
+		}
+		latestRequest, err := request()
+		if err != nil {
+			return Attachment{}, err
+		}
+		next, err := c.Allocate(ctx, latestRequest)
+		if errors.Is(err, ErrAttachmentLeaseETagStale) {
+			continue
+		}
+		if err != nil {
+			return Attachment{}, err
+		}
+		current = next
+	}
+}
+
 // ObserveOrigin records the result of the local origin probe through the
 // machine-proof readiness endpoint. The response remains attachment state;
 // the caller must separately invoke the preview lease readiness callback.

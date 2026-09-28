@@ -6,6 +6,10 @@ Approve an exact team file request
 
 Approve an exact team file request
 
+Approve one exact pending team file request at its expected generation. The approved sender can deliver only the requested batch; review request details before accepting.
+
+The Paperboat Inbox receives verified files and exact team requests. Files remain until removed by the user. The receiving path is a local device setting; team request acceptance is an account policy. A sender manages outgoing batches with pb send.
+
 JSON output is supported with --json.
 
 ```

@@ -6,17 +6,27 @@ pb-tunnel-connector-revoke - Revoke a tunnel connector
 
 
 .SH SYNOPSIS
-\fBpb tunnel connector revoke   [flags]\fP
+\fBpb tunnel connector revoke <tunnel> <connector> [flags]\fP
 
 
 .SH DESCRIPTION
 Revoke a tunnel connector
 
 .PP
+Withdraw one connector's authority for the selected tunnel. --wait and --timeout control observation of shutdown; the confirmation code confirms revocation.
+
+.PP
+Connectors attach an enrolled host to a durable tunnel. Drain stops new work while allowing existing work to wind down; revoke removes connector authority. Inspect connector state before replacing or removing one.
+
+.PP
 JSON output is supported with --json.
 
 
 .SH OPTIONS
+\fB--confirm\fP=""
+	six-character confirmation code from the preview
+
+.PP
 \fB-h\fP, \fB--help\fP[=false]
 	help for revoke
 
@@ -31,10 +41,6 @@ JSON output is supported with --json.
 .PP
 \fB--wait\fP[=false]
 	wait for the operation to reach a terminal state
-
-.PP
-\fB--yes\fP[=false]
-	confirm permanent connector revocation
 
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS

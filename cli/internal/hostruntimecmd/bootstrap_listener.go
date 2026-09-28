@@ -5,21 +5,28 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"syscall"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
 )
 
-func allocateBootstrapLoopbackAddress() (string, error) {
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		return "", fmt.Errorf("reserve Paperboat runtime listener: %w", err)
+func chooseBootstrapLoopbackAddress(primary, secondary string) (string, error) {
+	for _, address := range []string{primary, secondary} {
+		listener, err := net.Listen("tcp4", address)
+		if err != nil {
+			if !errors.Is(err, syscall.EADDRINUSE) {
+				return "", fmt.Errorf("check Paperboat runtime listener %s: %w", address, err)
+			}
+			continue
+		}
+		if err := listener.Close(); err != nil {
+			return "", fmt.Errorf("release Paperboat runtime listener %s: %w", address, err)
+		}
+		return address, nil
 	}
-	address := listener.Addr().String()
-	if err := listener.Close(); err != nil {
-		return "", fmt.Errorf("release Paperboat runtime listener reservation: %w", err)
-	}
-	return address, nil
+	return "", fmt.Errorf("Paperboat cannot install: local ports %s and %s are unavailable", primary, secondary)
 }
 
 // Checkpoint the locally selected listener before consuming runtime enrollment
@@ -29,7 +36,11 @@ func prepareBootstrapListener(stateRoot string, material *bootstrap.Material, re
 		return bootstrap.ErrResumeBinding
 	}
 	if resume.RuntimeListenAddress == "" {
-		address, err := allocateBootstrapLoopbackAddress()
+		primary := material.HelperListenAddress
+		if primary == "" {
+			primary = runtimeport.Primary
+		}
+		address, err := chooseBootstrapLoopbackAddress(primary, runtimeport.Secondary)
 		if err != nil {
 			return err
 		}

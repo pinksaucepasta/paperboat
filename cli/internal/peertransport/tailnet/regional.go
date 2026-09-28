@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 )
 
 const MaxRegionalCandidates = 32
@@ -42,6 +44,7 @@ type RegionalNode struct {
 	DrainDeadline      *int64   `json:"drain_deadline,omitempty"`
 }
 type RegionalCandidates struct {
+	STUNServers             []string       `json:"stun_servers,omitempty"`
 	Schema                  string         `json:"schema"`
 	Issuer                  string         `json:"iss"`
 	Audience                string         `json:"aud"`
@@ -94,8 +97,67 @@ func (a *Authority) ApplyRegionalCandidates(ctx context.Context, token string) e
 	if a.regional != nil && c.Generation < a.regional.Generation {
 		return ErrStaleAuthority
 	}
+	if mesh.ValidateSTUNServers(c.STUNServers) != nil {
+		return ErrRegionalAuthority
+	}
+	if a.server != nil {
+		if err := a.server.server.SetSTUNServers(c.STUNServers); err != nil {
+			return err
+		}
+	}
+	if a.clientEngine != nil {
+		if err := a.clientEngine.SetSTUNServers(c.STUNServers); err != nil {
+			return err
+		}
+	}
 	a.regional = &c
+	if a.stunTimer != nil {
+		a.stunTimer.Stop()
+	}
+	a.stunTimer = time.AfterFunc(time.Until(time.Unix(c.ExpiresAt, 0)), func() {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		if a.regional != &c || a.closed {
+			return
+		}
+		if a.server != nil {
+			_ = a.server.server.SetSTUNServers(nil)
+		}
+		if a.clientEngine != nil {
+			_ = a.clientEngine.SetSTUNServers(nil)
+		}
+	})
 	return nil
+}
+
+// RegionalNodes returns the currently verified control-plane candidates.
+// A node's reported state is not evidence of a live data connection.
+func (a *Authority) RegionalNodes(now time.Time) ([]RegionalNode, error) {
+	if a == nil {
+		return nil, ErrRegionalAuthority
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.closed || a.regional == nil || a.regional.ExpiresAt <= now.UTC().Unix() {
+		return nil, ErrRegionalAuthority
+	}
+	nodes := make([]RegionalNode, len(a.regional.Nodes))
+	for index, node := range a.regional.Nodes {
+		nodes[index] = node
+		nodes[index].Roles = append([]string(nil), node.Roles...)
+		nodes[index].Transports = append([]string(nil), node.Transports...)
+		if node.DrainDeadline != nil {
+			deadline := *node.DrainDeadline
+			nodes[index].DrainDeadline = &deadline
+		}
+	}
+	sort.Slice(nodes, func(i, j int) bool {
+		if nodes[i].Region != nodes[j].Region {
+			return nodes[i].Region < nodes[j].Region
+		}
+		return nodes[i].NodeID < nodes[j].NodeID
+	})
+	return nodes, nil
 }
 
 func (c *RegionalCandidates) Eligible(role, transport string, regions map[string]bool, now time.Time) ([]RegionalNode, Redundancy, error) {
@@ -155,4 +217,12 @@ func validEndpointHost(value string) bool {
 		}
 	}
 	return true
+}
+
+// stunServersLocked returns only verified endpoint-bound discovery configuration.
+func (a *Authority) stunServersLocked() []string {
+	if a.regional == nil || a.regional.ExpiresAt <= time.Now().Unix() {
+		return nil
+	}
+	return append([]string(nil), a.regional.STUNServers...)
 }

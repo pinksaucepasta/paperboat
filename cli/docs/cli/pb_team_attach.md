@@ -6,6 +6,10 @@ Attach or detach an explicitly selected personal resource
 
 Attach or detach an explicitly selected personal resource
 
+Attach or detach an exact personal preview or tunnel to a team. --generation guards against stale changes, and --active chooses the desired attachment state.
+
+Teams use explicit membership and resource grants. Membership alone does not grant device use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+
 JSON output is supported with --json.
 
 ```

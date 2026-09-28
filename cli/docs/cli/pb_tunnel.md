@@ -6,6 +6,8 @@ Manage durable tunnels or start an ephemeral tunnel
 
 Manage durable tunnels or start an ephemeral tunnel
 
+Create or manage a durable tunnel, or start an ephemeral tunnel with --ephemeral and a local target. Durable routes, domains, connectors, and traffic state have separate subcommands.
+
 JSON output is supported with --json.
 
 ```

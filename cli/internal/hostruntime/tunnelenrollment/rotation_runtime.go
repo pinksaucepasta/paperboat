@@ -129,6 +129,17 @@ func (r *productionRotationRuntime) bind(assembly *tunnelmanager.ProductionAssem
 	return nil
 }
 
+func (r *productionRotationRuntime) unbind(assembly *tunnelmanager.ProductionAssembly) {
+	if r == nil || assembly == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.current == assembly {
+		r.current = nil
+	}
+}
+
 func (r *productionRotationRuntime) Install(ctx context.Context, install connectorprotocol.CredentialRotationInstall) error {
 	if r == nil || ctx == nil || install.Validate(r.source.clock.Now().UTC()) != nil {
 		return ErrInvalid

@@ -6,11 +6,17 @@ pb-team-cancel-invite - Cancel an outstanding invitation
 
 
 .SH SYNOPSIS
-\fBpb team cancel-invite   [flags]\fP
+\fBpb team cancel-invite <team> <invitation> [flags]\fP
 
 
 .SH DESCRIPTION
 Cancel an outstanding invitation
+
+.PP
+Cancel one outstanding invitation for the selected team at its expected generation. The invited account cannot accept that invitation afterward.
+
+.PP
+Teams use explicit membership and resource grants. Membership alone does not grant device use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
 
 .PP
 JSON output is supported with --json.

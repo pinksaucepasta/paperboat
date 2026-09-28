@@ -6,6 +6,8 @@ Create a redacted Paperboat diagnostic bundle
 
 Create a redacted Paperboat diagnostic bundle
 
+Collect a bounded, redacted diagnostic bundle for support. --record controls capture and --upload sends the prepared report; review the output path and support reference before sharing it.
+
 JSON output is supported with --json.
 
 ```

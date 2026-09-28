@@ -49,22 +49,6 @@ func (c *Client) Close() error {
 	return nil
 }
 
-// RawClient returns the generated gRPC client for direct access.
-func (c *Client) RawClient() pb.DaemonServiceClient {
-	return c.client
-}
-
-// GetStatus fetches the current daemon status and peer table snapshot by receiving the initial frame.
-func (c *Client) GetStatus(ctx context.Context) (*pb.StatusResponse, error) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	stream, err := c.client.StreamStatus(rpcContext(ctx), &pb.Empty{})
-	if err != nil {
-		return nil, err
-	}
-	return stream.Recv()
-}
-
 // StreamStatus subscribes to the live daemon status stream.
 func (c *Client) StreamStatus(ctx context.Context) (pb.DaemonService_StreamStatusClient, error) {
 	return c.client.StreamStatus(rpcContext(ctx), &pb.Empty{})

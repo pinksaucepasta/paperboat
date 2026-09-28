@@ -33,11 +33,7 @@
           "status": { "enum": ["pass", "warning", "fail", "unavailable"] },
           "summary": { "type": "string", "minLength": 1, "maxLength": 512 },
           "recovery": { "type": "string", "minLength": 1, "maxLength": 512 },
-          "selected_path": { "enum": ["direct", "relay", "wss"] },
-          "relay_region": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.:-]{0,127}$" },
-          "rtt_ms": { "type": "number", "exclusiveMinimum": 0, "maximum": 60000 },
-          "ptos": { "type": "integer", "minimum": 0, "maximum": 1000 },
-          "fallback": { "enum": ["none", "direct_not_selected", "quic_not_selected"] }
+          "selected_path": { "enum": ["direct", "peer_relay", "regional_relay", "unknown"] }
         },
         "allOf": [
           {
@@ -46,15 +42,7 @@
           },
           {
             "if": { "required": ["selected_path"] },
-            "then": { "properties": { "code": { "const": "peer_reachability" } }, "required": ["rtt_ms", "fallback"] }
-          },
-          {
-            "if": { "properties": { "selected_path": { "const": "direct" } }, "required": ["selected_path"] },
-            "then": { "properties": { "fallback": { "const": "none" } }, "not": { "required": ["relay_region"] } }
-          },
-          {
-            "if": { "properties": { "selected_path": { "enum": ["relay", "wss"] } }, "required": ["selected_path"] },
-            "then": { "required": ["relay_region"] }
+            "then": { "properties": { "code": { "const": "peer_reachability" } } }
           }
         ]
       }

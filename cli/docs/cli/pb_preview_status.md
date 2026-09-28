@@ -6,6 +6,10 @@ Show temporary preview status
 
 Show temporary preview status
 
+Show the selected preview's current publication and connector state. A URL existing in the account is distinct from a ready, reachable origin.
+
+A preview exposes a local target through a temporary Paperboat URL or private/team access policy. Inspect its status before sharing the URL, and stop or delete it when no longer needed. Browser HTTP terminates TLS at the edge.
+
 JSON output is supported with --json.
 
 ```

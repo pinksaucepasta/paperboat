@@ -6,6 +6,10 @@ List durable tunnels
 
 List durable tunnels
 
+List durable tunnels visible to this account with cursor and limit pagination. Select an exact tunnel for show, status, routes, domains, or lifecycle commands.
+
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+
 JSON output is supported with --json.
 
 ```

@@ -42,3 +42,25 @@ func TestPublicIngressRoutesBareNameAndIPUpstreams(t *testing.T) {
 		}
 	}
 }
+
+func TestPublicIngressForwardsOnlyBrowserTerminalOnInfrastructureHost(t *testing.T) {
+	handler := publicIngressHandler(nil, "infra.example.test", "127.0.0.1:1", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	for _, tc := range []struct {
+		path string
+		want int
+	}{
+		{path: "/v1/browser-terminal/machine.runtime.example.test", want: http.StatusAccepted},
+		{path: "/v1/browser-terminal/", want: http.StatusAccepted},
+		{path: "/v1/runtime/machine.runtime.example.test", want: http.StatusAccepted},
+		{path: "/v1/other", want: http.StatusNotFound},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "https://infra.example.test"+tc.path, nil)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, req)
+		if response.Code != tc.want {
+			t.Errorf("%s: got %d, want %d", tc.path, response.Code, tc.want)
+		}
+	}
+}

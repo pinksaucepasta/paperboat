@@ -6,6 +6,10 @@ Decline an exact team file request
 
 Decline an exact team file request
 
+Reject one exact pending team file request at its expected generation. The sender receives a decline rather than an implicit timeout.
+
+The Paperboat Inbox receives verified files and exact team requests. Files remain until removed by the user. The receiving path is a local device setting; team request acceptance is an account policy. A sender manages outgoing batches with pb send.
+
 JSON output is supported with --json.
 
 ```

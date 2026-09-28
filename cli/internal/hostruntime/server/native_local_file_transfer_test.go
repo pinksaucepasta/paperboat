@@ -70,7 +70,7 @@ func TestNativeLocalFileTransferIsIdempotentAndHasNoKeyDependency(t *testing.T) 
 		t.Fatalf("recover=%d %s", second.Code, second.Body.String())
 	}
 	transfer, err := base.config.Service.Get(context.Background(), created.Transfers[0].ID)
-	if err != nil || transfer.SourceMachineID != "machine_host" || transfer.DeliveryClientID != "cli_live" || transfer.SessionID != "ses_live" || transfer.E2EETransferID != "" || transfer.TransferGeneration != 0 {
+	if err != nil || transfer.SourceMachineID != "machine_host" || transfer.DeliveryClientID != "cli_live" || transfer.SessionID != "ses_live" {
 		t.Fatalf("transfer=%+v err=%v", transfer, err)
 	}
 	recipient = "cli_replaced"

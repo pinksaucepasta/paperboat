@@ -65,6 +65,7 @@ func (b *locoBackend) setRelayRegions(regions []*tailcfg.DERPRegion) {
 	defer b.policyMu.Unlock()
 	dm := derpMapOf(regions)
 	b.mu.Lock()
+	dm = withSTUNServers(dm, b.stunServers)
 	b.dm = dm
 	b.homeDERP = 0
 	if len(regions) != 0 {
@@ -140,7 +141,7 @@ func (b *locoBackend) setPeerRelayRegion(peer key.NodePublic, id tailcfg.DERPReg
 	defer b.policyMu.Unlock()
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.dm.Regions[id] == nil {
+	if !b.dm.Regions[id].HasDERP() {
 		return errors.New("mesh: unknown relay region")
 	}
 	n := b.clients[peer]

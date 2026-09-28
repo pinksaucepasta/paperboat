@@ -16,6 +16,9 @@ func (r *DataCarrierRouteRegistry) ingressDecision(ctx context.Context, rule rou
 		}
 		return &d, nil
 	}
+	if rule.AccessMode != "public" {
+		return nil, connectorprotocol.ErrIngressDenied
+	}
 	if r.ingressAuthority == nil {
 		return nil, nil
 	}
@@ -23,7 +26,7 @@ func (r *DataCarrierRouteRegistry) ingressDecision(ctx context.Context, rule rou
 	if err != nil {
 		return nil, err
 	}
-	if d.Authorize(d, open, rule.Node, rule.EdgeProcessEpoch, time.Now().UTC()) != nil || d.Binding.Audience != "public" {
+	if d.Authorize(d, open, rule.Node, rule.EdgeProcessEpoch, time.Now().UTC()) != nil || d.Binding.Audience != rule.AccessMode || d.PolicyGeneration != rule.ViewerPolicyGeneration {
 		return nil, connectorprotocol.ErrIngressDenied
 	}
 	return &d, nil

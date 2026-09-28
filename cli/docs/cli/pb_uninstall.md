@@ -6,6 +6,8 @@ Completely remove Paperboat from this machine
 
 Completely remove Paperboat from this machine
 
+Remove Paperboat services, binaries, credentials, configuration, and runtime state after exact host and confirmation checks. The local Inbox and its received files are preserved; inspect retained account resources separately.
+
 JSON output is supported with --json.
 
 ```

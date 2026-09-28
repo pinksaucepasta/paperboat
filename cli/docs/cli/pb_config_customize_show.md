@@ -6,6 +6,10 @@ Show the local preference document
 
 Show the local preference document
 
+Show the effective local preference document, including current shortcuts and appearance settings. The command does not execute any customized command.
+
+Customization is local to this CLI installation. It can change shortcuts, command defaults, and terminal appearance without changing account credentials or remote resources. Validate or explain preferences before applying an unfamiliar document.
+
 JSON output is supported with --json.
 
 ```

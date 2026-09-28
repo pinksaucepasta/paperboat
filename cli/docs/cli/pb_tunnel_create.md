@@ -6,6 +6,10 @@ Create a durable tunnel
 
 Create a durable tunnel
 
+Create a durable tunnel with a local port or origin and optional domain, privacy, and team settings. The returned operation may still be connecting; --wait observes readiness within --timeout.
+
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+
 JSON output is supported with --json.
 
 ```

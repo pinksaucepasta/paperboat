@@ -1,7 +1,6 @@
 package config
 
 import (
-	"crypto/ecdh"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -41,12 +40,10 @@ func (s ProfileStore) PeerApprovalSigningKey(issuer, accountID, endpointID strin
 	}
 	defer func() { clear(seed) }()
 	if exists {
-		for _, item := range []struct{ suffix, kind string }{{"endpoint-noise", "endpoint_noise_x25519"}, {"endpoint-quic", "endpoint_quic_seed"}} {
-			transport, present, err := loadPeerKey(s.Secrets, peerIdentitySecretRef(issuer, endpointID, item.suffix), item.kind)
-			clear(transport)
-			if err != nil || !present {
-				return nil, errors.Join(errors.New("fresh peer endpoint identity is incomplete"), err)
-			}
+		transport, present, err := loadPeerKey(s.Secrets, peerIdentitySecretRef(issuer, endpointID, "endpoint-quic"), "endpoint_quic_seed")
+		clear(transport)
+		if err != nil || !present {
+			return nil, errors.Join(errors.New("fresh peer endpoint identity is incomplete"), err)
 		}
 	} else {
 		seed, exists, err = loadPeerKey(s.Secrets, peerIdentitySecretRef(issuer, accountID, "account-root"), "account_root_seed")
@@ -180,9 +177,8 @@ func (s ProfileStore) SavePeerAccountRootPublic(issuer, accountID string, public
 	return storePeerKey(s.Secrets, ref, "account_root_public", public)
 }
 
-// SavePeerDeviceSigningPublic records the verifier for the current device's
-// certificate. Reauthentication may replace an obsolete account-root verifier
-// in the same local profile, but never changes any private signing material.
+// SavePeerDeviceSigningPublic records the verifier for this CLI's transport
+// certificate. ENV account authority has a separate local record.
 func (s ProfileStore) SavePeerDeviceSigningPublic(issuer, accountID string, public ed25519.PublicKey) (resultErr error) {
 	if s.Path == "" || s.Secrets == nil || !validCredentialID(accountID) || len(public) != ed25519.PublicKeySize {
 		return ErrCredentialStoreUnavailable
@@ -196,14 +192,35 @@ func (s ProfileStore) SavePeerDeviceSigningPublic(issuer, accountID string, publ
 		return err
 	}
 	defer func() { resultErr = errors.Join(resultErr, lock.Unlock()) }()
-	return storePeerKey(s.Secrets, peerIdentitySecretRef(issuer, accountID, "account-root-public"), "account_root_public", public)
+	return storePeerKey(s.Secrets, peerIdentitySecretRef(issuer, accountID, "device-signing-public"), "device_signing_public", public)
+}
+
+func (s ProfileStore) LoadPeerDeviceSigningPublic(issuer, accountID string) (public ed25519.PublicKey, resultErr error) {
+	if s.Path == "" || s.Secrets == nil || !validCredentialID(accountID) {
+		return nil, ErrCredentialStoreUnavailable
+	}
+	issuer, err := NormalizeIssuer(issuer)
+	if err != nil {
+		return nil, err
+	}
+	lock := newSharedLock(s.profilePath(issuer) + ".peer-identity.lock")
+	if err := lock.Lock(); err != nil {
+		return nil, err
+	}
+	defer func() { resultErr = errors.Join(resultErr, lock.Unlock()) }()
+	value, found, err := loadPeerKey(s.Secrets, peerIdentitySecretRef(issuer, accountID, "device-signing-public"), "device_signing_public")
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, ErrSecretNotFound
+	}
+	return ed25519.PublicKey(value), nil
 }
 
 type PeerIdentityKeys struct {
-	RootPrivate  ed25519.PrivateKey
-	NoisePrivate [32]byte
-	NoisePublic  [32]byte
-	QUICPrivate  ed25519.PrivateKey
+	RootPrivate ed25519.PrivateKey
+	QUICPrivate ed25519.PrivateKey
 }
 
 type peerKeyRecord struct {
@@ -225,6 +242,37 @@ func (s ProfileStore) SavePeerCertificate(issuer, endpointID string, raw []byte)
 		return PeerCertificateState{}, errors.New("peer endpoint certificate is invalid")
 	}
 	return s.peerCertificate(issuer, endpointID, raw)
+}
+
+// ReplacePeerCertificate advances a locally verified certificate without a
+// delete window. A concurrent renewal must present the exact previous bytes.
+func (s ProfileStore) ReplacePeerCertificate(issuer, endpointID string, previous, next []byte) (resultErr error) {
+	if s.Path == "" || s.Secrets == nil || !validCredentialID(endpointID) || len(previous) == 0 || len(next) == 0 || len(next) > 1024 {
+		return ErrCredentialStoreUnavailable
+	}
+	issuer, err := NormalizeIssuer(issuer)
+	if err != nil {
+		return err
+	}
+	lock := newSharedLock(s.profilePath(issuer) + ".peer-certificate.lock")
+	if err := lock.Lock(); err != nil {
+		return err
+	}
+	defer func() { resultErr = errors.Join(resultErr, lock.Unlock()) }()
+	ref := peerIdentitySecretRef(issuer, endpointID, "endpoint-certificate")
+	current, found, err := loadPeerCertificate(s.Secrets, ref)
+	if err != nil {
+		return err
+	}
+	defer clear(current)
+	if !found || !equalSecret(current, previous) {
+		return errors.New("peer endpoint certificate changed during renewal")
+	}
+	record, err := json.Marshal(peerKeyRecord{Version: 1, Kind: "endpoint_certificate", Key: base64.RawURLEncoding.EncodeToString(next)})
+	if err != nil {
+		return err
+	}
+	return s.Secrets.Set(ref, string(record))
 }
 
 // DeletePeerCertificate removes only the endpoint certificate while retaining
@@ -360,31 +408,23 @@ func (s ProfileStore) FreshPeerIdentityKeys(issuer, accountID, endpointID string
 	}()
 
 	signingRef := peerIdentitySecretRef(issuer, endpointID, "endpoint-signing")
-	noiseRef := peerIdentitySecretRef(issuer, endpointID, "endpoint-noise")
 	quicRef := peerIdentitySecretRef(issuer, endpointID, "endpoint-quic")
 	signingSeed, signingExists, err := loadPeerKey(s.Secrets, signingRef, "endpoint_signing_seed")
 	if err != nil {
 		return PeerIdentityKeys{}, err
 	}
-	noisePrivate, noiseExists, err := loadPeerKey(s.Secrets, noiseRef, "endpoint_noise_x25519")
-	if err != nil {
-		clear(signingSeed)
-		return PeerIdentityKeys{}, err
-	}
 	quicSeed, quicExists, err := loadPeerKey(s.Secrets, quicRef, "endpoint_quic_seed")
 	if err != nil {
 		clear(signingSeed)
-		clear(noisePrivate)
 		return PeerIdentityKeys{}, err
 	}
 	defer clear(signingSeed)
-	defer clear(noisePrivate)
 	defer clear(quicSeed)
-	if noiseExists != quicExists || signingExists && !noiseExists {
+	if signingExists && !quicExists {
 		return PeerIdentityKeys{}, errors.New("fresh peer endpoint identity is incomplete")
 	}
 
-	created := make([]string, 0, 3)
+	created := make([]string, 0, 2)
 	rollback := func() {
 		for index := len(created) - 1; index >= 0; index-- {
 			_ = s.Secrets.Delete(created[index])
@@ -400,23 +440,12 @@ func (s ProfileStore) FreshPeerIdentityKeys(issuer, accountID, endpointID string
 		}
 		created = append(created, signingRef)
 	}
-	if !noiseExists {
-		noiseKey, err := ecdh.X25519().GenerateKey(rand.Reader)
-		if err != nil {
-			rollback()
-			return PeerIdentityKeys{}, fmt.Errorf("generate endpoint Noise identity: %w", err)
-		}
-		noisePrivate = append([]byte(nil), noiseKey.Bytes()...)
+	if !quicExists {
 		quicSeed = make([]byte, ed25519.SeedSize)
 		if _, err := rand.Read(quicSeed); err != nil {
 			rollback()
 			return PeerIdentityKeys{}, fmt.Errorf("generate endpoint QUIC identity: %w", err)
 		}
-		if err := storePeerKey(s.Secrets, noiseRef, "endpoint_noise_x25519", noisePrivate); err != nil {
-			rollback()
-			return PeerIdentityKeys{}, err
-		}
-		created = append(created, noiseRef)
 		if err := storePeerKey(s.Secrets, quicRef, "endpoint_quic_seed", quicSeed); err != nil {
 			rollback()
 			return PeerIdentityKeys{}, err
@@ -424,19 +453,12 @@ func (s ProfileStore) FreshPeerIdentityKeys(issuer, accountID, endpointID string
 		created = append(created, quicRef)
 	}
 
-	if len(signingSeed) != ed25519.SeedSize || len(noisePrivate) != 32 || len(quicSeed) != ed25519.SeedSize {
+	if len(signingSeed) != ed25519.SeedSize || len(quicSeed) != ed25519.SeedSize {
 		rollback()
 		return PeerIdentityKeys{}, errors.New("fresh peer endpoint identity key size is invalid")
 	}
-	noiseKey, err := ecdh.X25519().NewPrivateKey(noisePrivate)
-	if err != nil {
-		rollback()
-		return PeerIdentityKeys{}, errors.New("fresh peer Noise identity is invalid")
-	}
 	identity.RootPrivate = ed25519.NewKeyFromSeed(signingSeed)
 	identity.QUICPrivate = ed25519.NewKeyFromSeed(quicSeed)
-	copy(identity.NoisePrivate[:], noisePrivate)
-	copy(identity.NoisePublic[:], noiseKey.PublicKey().Bytes())
 	return identity, nil
 }
 
@@ -462,61 +484,35 @@ func (s ProfileStore) PeerEndpointKeys(issuer, accountID, endpointID string) (id
 		}
 	}()
 
-	noiseRef := peerIdentitySecretRef(issuer, endpointID, "endpoint-noise")
 	quicRef := peerIdentitySecretRef(issuer, endpointID, "endpoint-quic")
-	noisePrivate, noiseExists, err := loadPeerKey(s.Secrets, noiseRef, "endpoint_noise_x25519")
-	if err != nil {
-		return PeerIdentityKeys{}, err
-	}
 	quicSeed, quicExists, err := loadPeerKey(s.Secrets, quicRef, "endpoint_quic_seed")
 	if err != nil {
-		clear(noisePrivate)
 		return PeerIdentityKeys{}, err
 	}
-	defer clear(noisePrivate)
 	defer clear(quicSeed)
-	if noiseExists != quicExists {
-		return PeerIdentityKeys{}, errors.New("peer endpoint identity is incomplete")
-	}
 
-	created := make([]string, 0, 2)
+	created := make([]string, 0, 1)
 	rollback := func() {
 		for index := len(created) - 1; index >= 0; index-- {
 			_ = s.Secrets.Delete(created[index])
 		}
 	}
-	if !noiseExists {
-		noiseKey, err := ecdh.X25519().GenerateKey(rand.Reader)
-		if err != nil {
-			return PeerIdentityKeys{}, fmt.Errorf("generate endpoint Noise identity: %w", err)
-		}
-		noisePrivate = append([]byte(nil), noiseKey.Bytes()...)
+	if !quicExists {
 		quicSeed = make([]byte, ed25519.SeedSize)
 		if _, err := rand.Read(quicSeed); err != nil {
 			return PeerIdentityKeys{}, fmt.Errorf("generate endpoint QUIC identity: %w", err)
 		}
-		if err := storePeerKey(s.Secrets, noiseRef, "endpoint_noise_x25519", noisePrivate); err != nil {
-			return PeerIdentityKeys{}, err
-		}
-		created = append(created, noiseRef)
 		if err := storePeerKey(s.Secrets, quicRef, "endpoint_quic_seed", quicSeed); err != nil {
 			rollback()
 			return PeerIdentityKeys{}, err
 		}
 		created = append(created, quicRef)
 	}
-	if len(noisePrivate) != 32 || len(quicSeed) != ed25519.SeedSize {
+	if len(quicSeed) != ed25519.SeedSize {
 		rollback()
 		return PeerIdentityKeys{}, errors.New("peer endpoint key size is invalid")
 	}
-	noiseKey, err := ecdh.X25519().NewPrivateKey(noisePrivate)
-	if err != nil {
-		rollback()
-		return PeerIdentityKeys{}, errors.New("peer Noise identity is invalid")
-	}
 	identity.QUICPrivate = ed25519.NewKeyFromSeed(quicSeed)
-	copy(identity.NoisePrivate[:], noisePrivate)
-	copy(identity.NoisePublic[:], noiseKey.PublicKey().Bytes())
 	return identity, nil
 }
 
@@ -533,7 +529,6 @@ func (s ProfileStore) DeletePeerEndpointIdentity(issuer, endpointID string) (res
 		return err
 	}
 	resultErr = errors.Join(
-		s.Secrets.Delete(peerIdentitySecretRef(issuer, endpointID, "endpoint-noise")),
 		s.Secrets.Delete(peerIdentitySecretRef(issuer, endpointID, "endpoint-quic")),
 		s.Secrets.Delete(peerIdentitySecretRef(issuer, endpointID, "endpoint-signing")),
 		lock.Unlock(),
@@ -587,31 +582,20 @@ func (s ProfileStore) peerIdentityKeys(issuer, accountID, endpointID string, cre
 	}()
 
 	rootRef := peerIdentitySecretRef(issuer, accountID, "account-root")
-	noiseRef := peerIdentitySecretRef(issuer, endpointID, "endpoint-noise")
 	quicRef := peerIdentitySecretRef(issuer, endpointID, "endpoint-quic")
 	rootSeed, rootExists, err := loadPeerKey(s.Secrets, rootRef, "account_root_seed")
 	if err != nil {
 		return PeerIdentityKeys{}, err
 	}
-	noisePrivate, noiseExists, err := loadPeerKey(s.Secrets, noiseRef, "endpoint_noise_x25519")
-	if err != nil {
-		clear(rootSeed)
-		return PeerIdentityKeys{}, err
-	}
 	quicSeed, quicExists, err := loadPeerKey(s.Secrets, quicRef, "endpoint_quic_seed")
 	if err != nil {
 		clear(rootSeed)
-		clear(noisePrivate)
 		return PeerIdentityKeys{}, err
 	}
 	defer clear(rootSeed)
-	defer clear(noisePrivate)
 	defer clear(quicSeed)
-	if noiseExists != quicExists {
-		return PeerIdentityKeys{}, errors.New("peer endpoint identity is incomplete")
-	}
 
-	created := make([]string, 0, 3)
+	created := make([]string, 0, 2)
 	rollback := func() {
 		for index := len(created) - 1; index >= 0; index-- {
 			_ = s.Secrets.Delete(created[index])
@@ -630,23 +614,12 @@ func (s ProfileStore) peerIdentityKeys(issuer, accountID, endpointID string, cre
 		}
 		created = append(created, rootRef)
 	}
-	if !noiseExists {
-		noiseKey, err := ecdh.X25519().GenerateKey(rand.Reader)
-		if err != nil {
-			rollback()
-			return PeerIdentityKeys{}, fmt.Errorf("generate endpoint Noise identity: %w", err)
-		}
-		noisePrivate = append([]byte(nil), noiseKey.Bytes()...)
+	if !quicExists {
 		quicSeed = make([]byte, ed25519.SeedSize)
 		if _, err := rand.Read(quicSeed); err != nil {
 			rollback()
 			return PeerIdentityKeys{}, fmt.Errorf("generate endpoint QUIC identity: %w", err)
 		}
-		if err := storePeerKey(s.Secrets, noiseRef, "endpoint_noise_x25519", noisePrivate); err != nil {
-			rollback()
-			return PeerIdentityKeys{}, err
-		}
-		created = append(created, noiseRef)
 		if err := storePeerKey(s.Secrets, quicRef, "endpoint_quic_seed", quicSeed); err != nil {
 			rollback()
 			return PeerIdentityKeys{}, err
@@ -654,19 +627,12 @@ func (s ProfileStore) peerIdentityKeys(issuer, accountID, endpointID string, cre
 		created = append(created, quicRef)
 	}
 
-	if len(rootSeed) != ed25519.SeedSize || len(noisePrivate) != 32 || len(quicSeed) != ed25519.SeedSize {
+	if len(rootSeed) != ed25519.SeedSize || len(quicSeed) != ed25519.SeedSize {
 		rollback()
 		return PeerIdentityKeys{}, errors.New("peer identity key size is invalid")
 	}
-	noiseKey, err := ecdh.X25519().NewPrivateKey(noisePrivate)
-	if err != nil {
-		rollback()
-		return PeerIdentityKeys{}, errors.New("peer Noise identity is invalid")
-	}
 	identity.RootPrivate = ed25519.NewKeyFromSeed(rootSeed)
 	identity.QUICPrivate = ed25519.NewKeyFromSeed(quicSeed)
-	copy(identity.NoisePrivate[:], noisePrivate)
-	copy(identity.NoisePublic[:], noiseKey.PublicKey().Bytes())
 	return identity, nil
 }
 
@@ -719,8 +685,6 @@ func clearPeerIdentity(identity *PeerIdentityKeys) {
 		return
 	}
 	clear(identity.RootPrivate)
-	clear(identity.NoisePrivate[:])
-	clear(identity.NoisePublic[:])
 	clear(identity.QUICPrivate)
 	*identity = PeerIdentityKeys{}
 }

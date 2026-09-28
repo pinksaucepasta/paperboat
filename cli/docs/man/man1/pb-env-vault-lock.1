@@ -13,6 +13,12 @@ pb-env-vault-lock - Clear unlocked vault keys while retaining encrypted custody
 Clear unlocked vault keys while retaining encrypted custody
 
 .PP
+Clear unlocked ENV keys from this device while retaining encrypted custody. Unlock with the password before another key-dependent operation.
+
+.PP
+The local vault protects ENV key custody with a password and optional recovery code. Locking clears unlocked keys from this device; removing local custody differs from resetting and deleting account values. Never place a password or recovery code in shell arguments.
+
+.PP
 JSON output is supported with --json.
 
 

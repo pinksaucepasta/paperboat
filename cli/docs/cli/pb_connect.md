@@ -6,6 +6,8 @@ Create and attach to an environment terminal session
 
 Create and attach to an environment terminal session
 
+Select an environment by name, create or reattach a durable terminal session, and bridge the local terminal. Use --session for a specific session or new to start another one; connection status is reported separately from readiness.
+
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
 
 ```
@@ -22,7 +24,6 @@ pb connect <environment> [new] [flags]
       --status-bar string              status bar for this attach: auto, on, or off
       --status-bar-fullscreen string   status bar in full-screen applications: hide or show
       --status-bar-theme string        status bar theme: terminal, dark, light, or mono
-      --transport string               peer transport: a (auto), d (direct QUIC), q (relay QUIC), w (relay WSS), or r (relay race)
 ```
 
 ### Options inherited from parent commands

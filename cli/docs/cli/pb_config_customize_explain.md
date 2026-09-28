@@ -6,6 +6,10 @@ Show command expansion without executing it
 
 Show command expansion without executing it
 
+Expand the supplied command arguments using the current local shortcuts and defaults without running the result. Place arguments after -- so they are interpreted as the proposed command.
+
+Customization is local to this CLI installation. It can change shortcuts, command defaults, and terminal appearance without changing account credentials or remote resources. Validate or explain preferences before applying an unfamiliar document.
+
 JSON output is supported with --json.
 
 ```

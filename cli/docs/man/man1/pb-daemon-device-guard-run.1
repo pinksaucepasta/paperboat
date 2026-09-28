@@ -2,7 +2,7 @@
 .TH "PB-DAEMON-DEVICE-GUARD-RUN" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-daemon-device-guard-run -
+pb-daemon-device-guard-run - Run the device guard under service supervision
 
 
 .SH SYNOPSIS
@@ -10,6 +10,15 @@ pb-daemon-device-guard-run -
 
 
 .SH DESCRIPTION
+Run the device guard under service supervision
+
+.PP
+Start the foreground device-guard process for its supervisor. This entrypoint is used by the installed root-owned service and normally should not be run from an interactive shell.
+
+.PP
+The device guard is a privileged local helper for protected device-name resolution. Installation and removal change local operating-system integration; use the dedicated service commands for the ordinary Paperboat daemon.
+
+.PP
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
 
 

@@ -17,7 +17,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostd"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/observability"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/peerattempt"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
@@ -101,37 +100,6 @@ func TestRuntimeLifecycleFailureRecoveryAndRegistryExport(t *testing.T) {
 	}
 	if !failed || !recovered || !metric {
 		t.Fatalf("failed=%v recovered=%v metric=%v", failed, recovered, metric)
-	}
-}
-
-type machineCredential struct{}
-
-func (machineCredential) Token(context.Context) (string, error) { return "PRIVATE-CREDENTIAL", nil }
-func (machineCredential) Proof(context.Context, string, string, string, []byte) ([]byte, error) {
-	return []byte("PRIVATE-PROOF"), nil
-}
-func TestIndependentMachineControlClientPropagatesTrace(t *testing.T) {
-	transport := &sentry.MockTransport{}
-	r := errorreport.NewTestReporter("https://public@example.invalid/1", "test", transport, true, true, 1)
-	defer r.Flush(context.Background())
-	restore := errorreport.Install(r)
-	defer restore()
-	ctx, end := r.Start(supportref.WithContext(context.Background(), "pb-0123456789abcdef0123456789abcdef"), "paperboat-daemon", "peer_identity")
-	defer end("success")
-	parent := sentry.SpanFromContext(ctx)
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if !strings.HasPrefix(req.Header.Get("sentry-trace"), parent.TraceID.String()+"-") || req.Header.Get(supportref.Header) == "" {
-			t.Error("machine control correlation missing")
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-	client, err := peerattempt.New(peerattempt.Config{ControlURL: server.URL, StateRoot: t.TempDir(), Transport: server.Client().Transport}, machineCredential{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = client.Reject(ctx, api.PeerAttemptDescriptor{IntentID: "intent_01", AttemptGeneration: 1}); err != nil {
-		t.Fatal(err)
 	}
 }
 

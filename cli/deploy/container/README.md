@@ -1,6 +1,6 @@
 # Paperboat containers
 
-The hosted and self-hosted images run a stable `paperboat-hostd` process and a
+The self-hosted image runs a stable `paperboat-hostd` process and a
 separate root `paperboat-updated` process. Hostd owns terminal PTYs, managed
 SSH channels, file transfers, previews, Codex processes, and live relay or
 direct streams. The updater owns only TUF verification, release staging,
@@ -19,31 +19,17 @@ ownership domains:
 user. Never mount either volume from a less-trusted container. Never copy the
 release volume between machines because it contains installation-local state.
 
-The root filesystem is read-only in both supplied Compose definitions. Only
+The root filesystem is read-only in the supplied Compose definition. Only
 the fixed state and workspace volumes plus tmpfs `/run` and `/tmp` are
-writable. The entrypoint rejects a non-HTTPS release repository, mutable path
-overrides, unexpected ownership, symlinks, and malformed capability tokens.
-
-## Hosted container
-
-Use [../hosted/compose.yaml](../hosted/compose.yaml). The hosted container
-requires `PAPERBOAT_SSH_USER=paperboat`; this is intentional. The SSH daemon
-binds only `127.0.0.1` and accepts the same unprivileged account that owns
-Paperboat workloads. It is reached only through Paperboat managed SSH, never
-through a published container port.
-
-The image first places its release-matched runtime and CLI into empty release
-slots. On every later boot it keeps the existing verified active slots. The
-updater independently resolves the fixed signed TUF index before it stages
-anything. A new runtime therefore replaces only the fenced runtime child
-under the running hostd process.
+writable. The entrypoint requires an HTTPS release repository, pins runtime
+paths, and rejects unexpected ownership, symlinks, and malformed capability tokens.
 
 ## Self-hosted container
 
 Use [../self-hosted/compose.yaml](../self-hosted/compose.yaml). The first
 start consumes the normal one-time BYOD enrollment credential. Remove that
 credential from the deployment configuration after enrollment. No SSH daemon
-or host port is exposed by this mode; all connectivity uses normal Paperboat
+or host port is exposed by the container; all connectivity uses normal Paperboat
 direct or relay paths.
 
 ## Operational boundary

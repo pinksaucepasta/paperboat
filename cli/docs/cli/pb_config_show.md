@@ -6,6 +6,10 @@ Print the effective config
 
 Print the effective config
 
+Show effective local configuration after defaults and file settings are applied. Credentials and ENV secret values are not included in this output.
+
+Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
+
 JSON output is supported with --json.
 
 ```

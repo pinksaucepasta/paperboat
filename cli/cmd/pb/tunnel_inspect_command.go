@@ -179,7 +179,7 @@ func productionInspectorClients(command *cobra.Command) (*inspectorClients, erro
 	if err != nil {
 		return nil, err
 	}
-	peer := d.hostedTransferKeys
+	peer := d.peerTunnel
 	if peer == nil {
 		return nil, errInspectorDaemonUnavailable
 	}

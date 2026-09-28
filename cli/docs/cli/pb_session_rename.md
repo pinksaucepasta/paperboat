@@ -6,6 +6,10 @@ Rename a terminal session
 
 Rename a terminal session
 
+Change the display name of one durable session. This is an identity label, not a bulk rename; the default session cannot be renamed.
+
+Terminal sessions persist independently of a single connection and can be reattached after a disconnect. Sharing grants explicit access to a named session. Closing, deleting, and removing a participant have different effects; inspect the selected session before acting.
+
 JSON output is supported with --json.
 
 ```

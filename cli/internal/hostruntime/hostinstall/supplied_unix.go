@@ -5,12 +5,14 @@ package hostinstall
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"syscall"
+	"time"
 )
 
 // SuppliedBinary uses the same fixed paths, binary journal and enrolled service
@@ -71,7 +73,12 @@ func SuppliedBinary(ctx context.Context, input Request, operation string) error 
 	switch operation {
 	case "install-supplied":
 		if bound {
-			return Install(ctx, request)
+			previous.Executable = paths.worker
+			return replaceEnrolledBinary(ctx,
+				func(ctx context.Context) error { return Stop(ctx, previous) },
+				func(ctx context.Context) error { return Install(ctx, request) },
+				func(ctx context.Context) error { return Repair(ctx, previous) },
+			)
 		}
 		if err = ensureSharedUserParents(paths); err != nil {
 			return err
@@ -111,12 +118,23 @@ func SuppliedBinary(ctx context.Context, input Request, operation string) error 
 		if err != nil {
 			return err
 		}
+		if bound {
+			// The current image may already be serving. Restoring its pathname
+			// alone does not replace the running supervisor or its worker.
+			if err = Stop(ctx, request); err != nil {
+				return err
+			}
+		}
 		if err = rollbackFiles(paths, journal); err != nil {
-			return err
+			return fmt.Errorf("Paperboat installation rollback is incomplete and runtime services may be stopped; retry pb install using the same installer executable to recover the retained installation journal: %w", err)
 		}
 		if bound {
-			previous.Executable = paths.worker
-			return Repair(ctx, previous)
+			restored, err := loadInstallMetadata(paths.metadata, input.UID)
+			if err != nil {
+				return err
+			}
+			restored.Executable = paths.worker
+			return Repair(ctx, restored)
 		}
 		return nil
 	default:
@@ -142,4 +160,24 @@ func LockSuppliedOperation(path string, uid int) (*os.File, error) {
 		return nil, errors.New("another Paperboat installation is running; retry when it finishes")
 	}
 	return f, nil
+}
+
+// replaceEnrolledBinary stops the supervisor as well as its worker before
+// publishing a new executable. Service-manager Start is otherwise a no-op for
+// an already running job, even when its executable's pathname has been replaced.
+func replaceEnrolledBinary(ctx context.Context, stop, install, restore func(context.Context) error) error {
+	recoverPrevious := func(cause error) error {
+		recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), 45*time.Second)
+		defer cancel()
+		return errors.Join(cause, restore(recovery))
+	}
+	if err := stop(ctx); err != nil {
+		// A failure to persist the stop journal can leave some roles stopped.
+		// Repair recovers that journal before restoring the prior enrollment.
+		return recoverPrevious(err)
+	}
+	if err := install(ctx); err != nil {
+		return recoverPrevious(err)
+	}
+	return nil
 }

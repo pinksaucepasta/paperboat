@@ -6,11 +6,17 @@ pb-config-conflict-resolve - Choose the machine or repository version
 
 
 .SH SYNOPSIS
-\fBpb config conflict resolve   [flags]\fP
+\fBpb config conflict resolve <environment> <path> [flags]\fP
 
 
 .SH DESCRIPTION
 Choose the machine or repository version
+
+.PP
+Resolve one exact path with --keep to select the machine or repository version. Use show first to inspect both sides; the chosen direction is recorded for synchronization.
+
+.PP
+Conflicts identify exact paths whose local and repository versions cannot be merged automatically. Review the affected path before choosing a side; resolution records a deliberate decision for the next synchronization step.
 
 .PP
 JSON output is supported with --json.

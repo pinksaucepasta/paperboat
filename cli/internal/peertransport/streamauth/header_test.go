@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestHeaderCanonicalRoundTripAndGrant(t *testing.T) {
+func TestHeaderCanonicalRoundTrip(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0).UTC()
 	header, err := New("operation_1", "exec", "native-control", "signed.credential.value", now.Add(time.Minute), 1<<20)
 	if err != nil {
@@ -19,10 +19,6 @@ func TestHeaderCanonicalRoundTripAndGrant(t *testing.T) {
 	parsed, err := Parse(encoded, now)
 	if err != nil || parsed != header {
 		t.Fatalf("parsed=%+v err=%v", parsed, err)
-	}
-	grant := parsed.Grant()
-	if grant.OperationID != header.OperationID || grant.Consumer != header.Consumer || grant.StreamID != header.StreamID || !bytes.Equal(grant.Credential, []byte(header.Credential)) || grant.MaximumBytes != header.MaximumBytes || !grant.Deadline.Equal(now.Add(time.Minute)) {
-		t.Fatalf("grant=%+v", grant)
 	}
 }
 

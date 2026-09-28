@@ -19,7 +19,7 @@ func (t *PeerTerminalTunnel) DialSSH(ctx context.Context, info resolver.ConnectI
 		raw: func(_ context.Context, stream io.ReadWriteCloser) (Conn, error) {
 			return &sshStreamConn{ReadWriteCloser: stream}, nil
 		},
-	}, nil)
+	})
 }
 
 type sshStreamConn struct{ io.ReadWriteCloser }

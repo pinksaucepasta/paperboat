@@ -192,7 +192,6 @@ func TestPreviewAliasExposesSameInspectorControls(t *testing.T) {
 	if len(fixture.issued) != 1 || fixture.issued[0]["resource_kind"] != "preview" || fixture.issued[0]["action"] != "inspect" {
 		t.Fatalf("alias issuance scope = %v", fixture.issued)
 	}
-	_ = hits
 }
 
 func TestPreviewAndTunnelCommandTrees(t *testing.T) {

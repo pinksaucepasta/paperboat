@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -395,6 +396,13 @@ func dispatchOutcome(request DispatchRequest, operation dispatchOperation) Dispa
 
 func (m *DispatchManager) observeSession(operationID, hash string, session *Session, releaseOwner bool) {
 	<-session.done
+	session.mu.RLock()
+	ready := session.readySet
+	failure := session.result
+	session.mu.RUnlock()
+	if !ready {
+		slog.Warn("preview dispatch ended before readiness", "code", previewDispatchFailureCode(failure))
+	}
 	lease := session.currentLease()
 	if releaseOwner {
 		m.releaseOwnerSession(lease.AccountID, lease.OwnerDeviceID, lease.OwnerSessionID)
@@ -406,6 +414,25 @@ func (m *DispatchManager) observeSession(operationID, hash string, session *Sess
 		m.operations[operationID] = current
 	}
 	m.mu.Unlock()
+}
+
+func previewDispatchFailureCode(err error) string {
+	switch {
+	case err == nil:
+		return "owner_or_runtime_closed"
+	case errors.Is(err, ErrAttachmentBinding), errors.Is(err, ErrMachineAttachmentSessionInvalid):
+		return "attachment_binding_invalid"
+	case errors.Is(err, ErrPreviewCarrierProviderUnavailable), errors.Is(err, ErrMachineAttachmentSessionUnavailable):
+		return "attachment_carrier_unavailable"
+	case errors.Is(err, ErrAttachmentClientUnavailable):
+		return "attachment_control_unavailable"
+	case errors.Is(err, ErrDataCarrierPreviewOrigin):
+		return "origin_unavailable"
+	case errors.Is(err, ErrLeaseExpired):
+		return "lease_expired"
+	default:
+		return "preview_dispatch_failed"
+	}
 }
 
 func (m *DispatchManager) releaseOwnerSession(accountID, machineID, ownerSessionID string) {
@@ -622,7 +649,11 @@ func (s *dispatchSessionLease) current() Lease {
 }
 
 func (c *readinessCarrier) Run(ctx context.Context, lease Lease, ready func(Lease) error) error {
-	return c.inner.Run(ctx, lease, func(observed Lease) error {
+	return c.RunWithLease(ctx, func() Lease { return lease }, ready)
+}
+
+func (c *readinessCarrier) RunWithLease(ctx context.Context, currentLease func() Lease, ready func(Lease) error) error {
+	markReady := func(observed Lease) error {
 		if err := validateReadyLeaseIdentity(c.admitted, observed); err != nil {
 			return err
 		}
@@ -655,10 +686,17 @@ func (c *readinessCarrier) Run(ctx context.Context, lease Lease, ready func(Leas
 			if err := validateReadyLeaseMutation(candidate, updated, expected); err != nil {
 				return fmt.Errorf("%w: readiness response is stale or changed lease identity", ErrDispatchInvalid)
 			}
+			updated.CreateOperationID = c.admitted.CreateOperationID
 			return ready(updated)
 		}
 		return fmt.Errorf("%w: readiness raced repeated lease renewals", ErrDispatchUnavailable)
-	})
+	}
+	if current, ok := c.inner.(interface {
+		RunWithLease(context.Context, func() Lease, func(Lease) error) error
+	}); ok {
+		return current.RunWithLease(ctx, currentLease, markReady)
+	}
+	return c.inner.Run(ctx, currentLease(), markReady)
 }
 
 func (c *readinessCarrier) Close(ctx context.Context) error { return c.inner.Close(ctx) }

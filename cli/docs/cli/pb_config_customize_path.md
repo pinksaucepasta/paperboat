@@ -6,6 +6,10 @@ Print the local preference file path
 
 Print the local preference file path
 
+Print the location of the local customization document. Use this path when editing or backing up preferences outside the CLI.
+
+Customization is local to this CLI installation. It can change shortcuts, command defaults, and terminal appearance without changing account credentials or remote resources. Validate or explain preferences before applying an unfamiliar document.
+
 JSON output is supported with --json.
 
 ```

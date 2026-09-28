@@ -32,6 +32,33 @@ func (a *Authority) peersLocked() (map[key.NodePublic]netip.Addr, map[netip.Addr
 	}
 	return peers, admitted
 }
+
+// PeerPath reports the selected WireGuard underlay only for a currently
+// authorized peer. It returns unknown while the peer is idle or changing paths.
+func (a *Authority) PeerPath(endpointID string) (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.usableLocked() {
+		return "", ErrAuthority
+	}
+	for _, peer := range a.current.Peers {
+		if peer.Identity.EndpointID != endpointID {
+			continue
+		}
+		public, err := publicKey(peer.Identity.WireGuardPublicKey)
+		if err != nil {
+			return "", ErrAuthority
+		}
+		if a.clientEngine != nil {
+			return a.clientEngine.PeerPath(public), nil
+		}
+		if a.server != nil && a.server.server != nil {
+			return a.server.server.PeerPath(public), nil
+		}
+		return "unknown", nil
+	}
+	return "", ErrAdmission
+}
 func (a *Authority) replaceLocked() error {
 	type admittedPeer struct {
 		binding NetworkBinding
@@ -109,7 +136,7 @@ func (a *Authority) Listen(region *tailcfg.DERPRegion) (*UDPServer, error) {
 		a.server = nil
 	}
 	peers, admitted := a.peersLocked()
-	server := &mesh.Server{OnRelayControl: a.relayControl, DERPCarrierFactory: a.relay.factory, PeerRelayNodes: a.relay.peerNodes, RelayControlPeers: a.relay.controlPeers, TestOnlyPacketListener: a.options.TestOnlyPacketListener, Key: a.private, LocalAddr: netip.MustParseAddr(a.current.Self.VirtualAddress), AllowedPeers: peers, Region: region, ServedUDPPorts: []filter.PortRange{{First: NetworkPort, Last: NetworkPort}}, Logf: func(string, ...any) {}}
+	server := &mesh.Server{STUNServers: a.stunServersLocked(), OnRelayControl: a.relayControl, DERPCarrierFactory: a.relay.factory, PeerRelayNodes: a.relay.peerNodes, RelayControlPeers: a.relay.controlPeers, TestOnlyPacketListener: a.options.TestOnlyPacketListener, Key: a.private, LocalAddr: netip.MustParseAddr(a.current.Self.VirtualAddress), AllowedPeers: peers, Region: region, ServedUDPPorts: []filter.PortRange{{First: NetworkPort, Last: NetworkPort}}, Logf: func(string, ...any) {}}
 	var err error
 	a.server, err = listenUDP(server, NetworkPort, admitted, &a.expiresAt)
 	return a.server, err
@@ -222,7 +249,7 @@ func (a *Authority) Client(descriptor mesh.Addr, peerID string) (*UDPClient, err
 			if len(regions) != 0 {
 				firstRegion = regions[0]
 			}
-			a.clientEngine = &mesh.Server{OnRelayControl: a.relayControl, DERPCarrierFactory: factory, PeerRelayNodes: peerNodes, RelayControlPeers: controlPeers, TestOnlyPacketListener: a.options.TestOnlyPacketListener, Key: a.private, LocalAddr: netip.MustParseAddr(a.current.Self.VirtualAddress), AllowedPeers: peers, Region: firstRegion, Logf: func(string, ...any) {}}
+			a.clientEngine = &mesh.Server{STUNServers: a.stunServersLocked(), OnRelayControl: a.relayControl, DERPCarrierFactory: factory, PeerRelayNodes: peerNodes, RelayControlPeers: controlPeers, TestOnlyPacketListener: a.options.TestOnlyPacketListener, Key: a.private, LocalAddr: netip.MustParseAddr(a.current.Self.VirtualAddress), AllowedPeers: peers, Region: firstRegion, Logf: func(string, ...any) {}}
 			if err := a.clientEngine.Start(); err != nil {
 				a.clientEngine = nil
 				return nil, err

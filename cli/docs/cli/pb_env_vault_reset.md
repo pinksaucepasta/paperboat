@@ -6,6 +6,10 @@ Replace personal ENV keys and delete every personal value
 
 Replace personal ENV keys and delete every personal value
 
+Replace personal ENV keys and delete every personal value after exact account confirmation. This is destructive and differs from local lock, remove, or password change.
+
+The local vault protects ENV key custody with a password and optional recovery code. Locking clears unlocked keys from this device; removing local custody differs from resetting and deleting account values. Never place a password or recovery code in shell arguments.
+
 JSON output is supported with --json.
 
 ```

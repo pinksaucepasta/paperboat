@@ -6,11 +6,17 @@ pb-team-accept - Accept an invitation bound to this account
 
 
 .SH SYNOPSIS
-\fBpb team accept  [flags]\fP
+\fBpb team accept <invitation> [flags]\fP
 
 
 .SH DESCRIPTION
 Accept an invitation bound to this account
+
+.PP
+Accept an invitation explicitly addressed to this account. The resulting membership does not automatically grant access to every resource owned or shared by the team.
+
+.PP
+Teams use explicit membership and resource grants. Membership alone does not grant device use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
 
 .PP
 JSON output is supported with --json.

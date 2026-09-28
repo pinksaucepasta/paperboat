@@ -6,6 +6,10 @@ Stop Paperboat daemon current-user service
 
 Stop Paperboat daemon current-user service
 
+Stop the supervised current-user daemon. Local forwarding and incoming connectivity owned by that process stop until it is started again.
+
+Service commands manage the current user's background Paperboat daemon through the host operating system. The service runs pb daemon; it is not a separate Paperboat binary. Use status to inspect the supervised process and restart after a local configuration change.
+
 JSON output is supported with --json.
 
 ```

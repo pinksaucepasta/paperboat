@@ -19,6 +19,8 @@ import (
 )
 
 const (
+	RuntimeCarrierSchema        = "paperboat.runtime-carrier/v1"
+	RuntimeCarrierRoute         = "runtime_https_wss"
 	PreviewCarrierSchema        = "paperboat.preview-tunnel/v1"
 	PreviewCarrierKind          = "preview_carrier_attachment"
 	PreviewCarrierRoute         = "preview_public_https_wss"
@@ -50,6 +52,7 @@ type ExpectedAdmission struct {
 	OwnerDeviceID                        string
 	OwnerSessionID                       string
 	Identity                             Identity
+	InstallationGeneration               uint64
 	LeaseGeneration                      uint64
 	ConfigGeneration                     uint64
 	ConfigContentHash                    string
@@ -73,17 +76,25 @@ type ExpectedAdmission struct {
 }
 
 func (a ExpectedAdmission) Validate(now time.Time, nodeID string) error {
-	if a.Schema != PreviewCarrierSchema || a.Kind != PreviewCarrierKind {
+	runtime := a.Schema == RuntimeCarrierSchema && a.Kind == "" && a.RouteKind == RuntimeCarrierRoute
+	if !runtime && (a.Schema != PreviewCarrierSchema || a.Kind != PreviewCarrierKind) {
 		return fmt.Errorf("%w: schema or kind is invalid", ErrAdmissionNotExpected)
 	}
 	if nodeID == "" || a.EdgeNodeID != nodeID || connectorprotocol.ValidateIdentifier(a.EdgeNodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(a.EdgeProcessEpoch) != nil {
 		return fmt.Errorf("%w: edge node binding is invalid", ErrAdmissionNotExpected)
 	}
-	for name, value := range map[string]string{
+	identifiers := map[string]string{
 		"preview_id": a.PreviewID, "operation_id": a.OperationID,
 		"route_id": a.RouteID, "owner_device_id": a.OwnerDeviceID,
 		"owner_session_id": a.OwnerSessionID,
-	} {
+	}
+	if runtime {
+		identifiers = map[string]string{"route_id": a.RouteID}
+		if a.InstallationGeneration == 0 || a.AccessMode != "" || a.PreviewID != "" || a.OperationID != "" || a.OwnerDeviceID != "" || a.OwnerSessionID != "" || a.LeaseGeneration != 0 {
+			return ErrAdmissionNotExpected
+		}
+	}
+	for name, value := range identifiers {
 		if value == "" || connectorprotocol.ValidateIdentifier(value) != nil {
 			return fmt.Errorf("%w: %s is invalid", ErrAdmissionNotExpected, name)
 		}
@@ -91,18 +102,21 @@ func (a ExpectedAdmission) Validate(now time.Time, nodeID string) error {
 	if err := a.Identity.Validate(); err != nil {
 		return fmt.Errorf("%w: carrier identity is invalid", ErrAdmissionNotExpected)
 	}
-	if a.Identity.HostID != a.OwnerDeviceID {
+	if !runtime && a.Identity.HostID != a.OwnerDeviceID {
 		return fmt.Errorf("%w: host and owner device differ", ErrAdmissionConflict)
 	}
-	if a.LeaseGeneration == 0 || a.ConfigGeneration == 0 || a.RouteRevision == 0 || a.AttachmentGeneration == 0 {
+	if (!runtime && a.LeaseGeneration == 0) || a.ConfigGeneration == 0 || a.RouteRevision == 0 || a.AttachmentGeneration == 0 {
 		return fmt.Errorf("%w: generations must be positive", ErrAdmissionNotExpected)
 	}
-	if a.AccessMode != PreviewCarrierAccessPublic && a.AccessMode != PreviewCarrierAccessPrivate {
+	if !runtime && a.AccessMode != PreviewCarrierAccessPublic && a.AccessMode != PreviewCarrierAccessPrivate {
 		return fmt.Errorf("%w: access mode is invalid", ErrAdmissionNotExpected)
 	}
 	wantRoute := PreviewCarrierRoute
 	if a.AccessMode == PreviewCarrierAccessPrivate {
 		wantRoute = PreviewCarrierPrivateRoute
+	}
+	if runtime {
+		wantRoute = RuntimeCarrierRoute
 	}
 	if a.RouteKind != wantRoute || !validAdmissionHost(a.Hostname) {
 		return fmt.Errorf("%w: route binding is invalid", ErrAdmissionNotExpected)
@@ -155,6 +169,7 @@ func (a ExpectedAdmission) exactEqual(other ExpectedAdmission) bool {
 		a.OwnerDeviceID == other.OwnerDeviceID &&
 		a.OwnerSessionID == other.OwnerSessionID &&
 		a.Identity == other.Identity &&
+		a.InstallationGeneration == other.InstallationGeneration &&
 		a.LeaseGeneration == other.LeaseGeneration &&
 		a.ConfigGeneration == other.ConfigGeneration &&
 		a.ConfigContentHash == other.ConfigContentHash &&

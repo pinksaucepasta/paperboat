@@ -6,6 +6,10 @@ Show a durable tunnel
 
 Show a durable tunnel
 
+Show one durable tunnel's configured identity, routes, domains, and control state. Use status for current health and logs for event history.
+
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+
 JSON output is supported with --json.
 
 ```

@@ -14,7 +14,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/transportmanager"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
@@ -27,9 +26,9 @@ type DaemonConfig struct {
 	RequestTimeout          time.Duration
 	Clock                   func() time.Time
 	ManagedSSH              *ManagedSSHConfig
-	TransportManager        *transportmanager.Manager
-	OpenPeerStream          func(context.Context, localapi.Peer, localapi.PeerStreamRequest, *transportmanager.Manager) (net.Conn, error)
+	OpenPeerStream          func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (net.Conn, error)
 	ProbePeer               func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (localapi.PeerProbeResult, error)
+	RelayInventory          func(context.Context) (localapi.RelayInventory, error)
 	InvalidatePeerAuthority func(string)
 	WarmPeerMetadata        func(context.Context, []api.UserMachine) error
 	IssuePeerStream         func(context.Context, localapi.PeerStreamRequest) (localapi.PeerStreamRequest, error)
@@ -49,21 +48,6 @@ func Run(ctx context.Context, config DaemonConfig) error {
 		return err
 	}
 	defer lock.Close()
-	peerTransports := config.TransportManager
-	if peerTransports == nil {
-		peerTransports, err = transportmanager.New()
-		if err != nil {
-			return err
-		}
-	}
-	transportStopped := make(chan struct{})
-	go func() {
-		defer close(transportStopped)
-		<-ctx.Done()
-		_ = peerTransports.Close()
-	}()
-	defer func() { stop(); <-transportStopped }()
-	defer peerTransports.Close()
 	if closer, ok := config.FileTransfers.(interface{ Close() error }); ok {
 		defer closer.Close()
 	}
@@ -71,10 +55,7 @@ func Run(ctx context.Context, config DaemonConfig) error {
 	if err != nil {
 		return err
 	}
-	transportInvalidator := NewMachineTransportInvalidator(peerTransports)
-	if transportInvalidator != nil {
-		transportInvalidator.authority = config.InvalidatePeerAuthority
-	}
+	authorityInvalidator := NewMachineAuthorityInvalidator(config.InvalidatePeerAuthority)
 	reference := supportref.FromContext(ctx)
 	if err := recorder.RecordWithSupportReference("daemon", "lifecycle", "info", reference, map[string]string{"state": "starting"}); err != nil {
 		_ = recorder.Close()
@@ -113,7 +94,7 @@ func Run(ctx context.Context, config DaemonConfig) error {
 		severity, fields := inventoryRefreshDiagnostic(err)
 		_ = recorder.Record("reconciliation", "inventory_refresh", severity, fields)
 	}, OnMachines: func(refreshCtx context.Context, machines []api.UserMachine) {
-		transportInvalidator.Observe(machines)
+		authorityInvalidator.Observe(machines)
 		if managedSSHRuntime != nil {
 			sshCtx, cancelSSH := context.WithTimeout(refreshCtx, 15*time.Second)
 			if refreshErr := managedSSHRuntime.Refresh(sshCtx); refreshErr != nil {
@@ -152,8 +133,9 @@ func Run(ctx context.Context, config DaemonConfig) error {
 		Diagnostics:          diagnosticAPI,
 		AuthorizeDiagnostics: func(peer localapi.Peer) bool { return peer.UID == config.OwnerUID },
 		Observations:         observations,
-		PeerStreams:          peerStreamBroker{open: config.OpenPeerStream, manager: peerTransports, issue: config.IssuePeerStream},
+		PeerStreams:          peerStreamBroker{open: config.OpenPeerStream, issue: config.IssuePeerStream},
 		PeerProbes:           peerProbeBroker{probe: config.ProbePeer},
+		RelayInventory:       config.RelayInventory,
 		FileTransfers:        config.FileTransfers,
 		Stale:                lock,
 	})
@@ -192,9 +174,8 @@ func Run(ctx context.Context, config DaemonConfig) error {
 }
 
 type peerStreamBroker struct {
-	open    func(context.Context, localapi.Peer, localapi.PeerStreamRequest, *transportmanager.Manager) (net.Conn, error)
-	manager *transportmanager.Manager
-	issue   func(context.Context, localapi.PeerStreamRequest) (localapi.PeerStreamRequest, error)
+	open  func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (net.Conn, error)
+	issue func(context.Context, localapi.PeerStreamRequest) (localapi.PeerStreamRequest, error)
 }
 
 type peerProbeBroker struct {
@@ -219,10 +200,10 @@ func (b peerStreamBroker) OpenPeerStream(ctx context.Context, peer localapi.Peer
 			return nil, err
 		}
 	}
-	if b.open == nil || b.manager == nil {
+	if b.open == nil {
 		return nil, errors.New("peer stream broker is unavailable")
 	}
-	return b.open(ctx, peer, request, b.manager)
+	return b.open(ctx, peer, request)
 }
 
 func CurrentUserPaths() (localapi.Paths, error) {

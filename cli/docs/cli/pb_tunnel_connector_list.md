@@ -6,6 +6,10 @@ List tunnel connectors
 
 List tunnel connectors
 
+List connectors attached to one durable tunnel with cursor and limit pagination. Use the returned connector identity for drain or revoke.
+
+Connectors attach an enrolled host to a durable tunnel. Drain stops new work while allowing existing work to wind down; revoke removes connector authority. Inspect connector state before replacing or removing one.
+
 JSON output is supported with --json.
 
 ```

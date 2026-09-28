@@ -800,6 +800,7 @@ func TestTunnelNameSelectorResolvesToDurableID(t *testing.T) {
 }
 
 func TestTunnelDeleteRequiresConfirmationAndUsesCurrentETag(t *testing.T) {
+	t.Setenv(config.EnvConfigPath, filepath.Join(t.TempDir(), "config.json"))
 	requests := 0
 	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
 		requests++
@@ -820,21 +821,24 @@ func TestTunnelDeleteRequiresConfirmationAndUsesCurrentETag(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelMutation{Tunnel: tunnel, Operation: validCommandOperation("tunnel", tunnel.ID)}})
 	})
 	command := tunnelCobraCommandV1()
+	var preview bytes.Buffer
+	command.SetOut(&preview)
 	command.SetArgs([]string{"delete", "tun_1"})
-	if err := command.Execute(); err == nil || !strings.Contains(err.Error(), "--yes") {
+	if err := command.Execute(); err == nil || err.(exitCodeError).code != 2 {
 		t.Fatalf("error = %v", err)
 	}
-	if requests != 0 {
+	if requests != 1 {
 		t.Fatalf("requests before confirmation = %d", requests)
 	}
+	token := previewConfirmationCode(t, preview.String())
 	var output bytes.Buffer
 	command = tunnelCobraCommandV1()
 	command.SetOut(&output)
-	command.SetArgs([]string{"delete", "tun_1", "--yes", "--json"})
+	command.SetArgs([]string{"delete", "tun_1", "--confirm", token, "--json"})
 	if err := command.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if requests != 2 {
+	if requests != 3 {
 		t.Fatalf("requests = %d", requests)
 	}
 	if strings.Contains(strings.ToLower(output.String()), "secret") {
@@ -1276,6 +1280,7 @@ func TestTunnelRouteSelectorsResolveNamesToCanonicalIDs(t *testing.T) {
 	})
 
 	t.Run("route remove", func(t *testing.T) {
+		t.Setenv(config.EnvConfigPath, filepath.Join(t.TempDir(), "config.json"))
 		withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case r.Method == http.MethodGet && r.URL.Path == "/v1/tunnels/tun_1/routes":
@@ -1294,7 +1299,14 @@ func TestTunnelRouteSelectorsResolveNamesToCanonicalIDs(t *testing.T) {
 			}
 		})
 		command := tunnelCobraCommandV1()
-		command.SetArgs([]string{"route", "remove", "tun_1", "default", "--yes"})
+		var preview bytes.Buffer
+		command.SetOut(&preview)
+		command.SetArgs([]string{"route", "remove", "tun_1", "default"})
+		if err := command.Execute(); err == nil || err.(exitCodeError).code != 2 {
+			t.Fatalf("preview error=%v", err)
+		}
+		command = tunnelCobraCommandV1()
+		command.SetArgs([]string{"route", "remove", "tun_1", "default", "--confirm", previewConfirmationCode(t, preview.String())})
 		if err := command.Execute(); err != nil {
 			t.Fatal(err)
 		}

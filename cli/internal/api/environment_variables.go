@@ -12,6 +12,27 @@ import (
 	"time"
 )
 
+func environmentNoStoreRequestHeaders(headers http.Header) http.Header {
+	if headers == nil {
+		headers = make(http.Header)
+	} else {
+		headers = headers.Clone()
+	}
+	headers.Set("Accept-Encoding", "identity")
+	headers.Set("Cache-Control", "no-store")
+	headers.Set("Pragma", "no-cache")
+	return headers
+}
+
+func validateEnvironmentNoStore(headers http.Header) error {
+	for _, directive := range strings.Split(strings.ToLower(headers.Get("Cache-Control")), ",") {
+		if strings.TrimSpace(directive) == "no-store" {
+			return nil
+		}
+	}
+	return errors.New("paperboat-server returned cacheable ENV data")
+}
+
 // EnvironmentVariableScope is the scope owned by an environment-variable
 // collection. The global scope applies to every connected host; the machine
 // scope applies only to the selected enrolled machine.

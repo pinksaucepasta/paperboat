@@ -2,15 +2,21 @@
 .TH "PB-TEAM-REMOVE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-team-remove - Remove team membership
+pb-team-remove - Remove a team member
 
 
 .SH SYNOPSIS
-\fBpb team remove   [flags]\fP
+\fBpb team remove <team> <account> [flags]\fP
 
 
 .SH DESCRIPTION
-Remove team membership
+Remove a team member
+
+.PP
+Remove one member from a team at the expected generation. Team resource access supplied through membership is withdrawn for that account.
+
+.PP
+Teams use explicit membership and resource grants. Membership alone does not grant device use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
 
 .PP
 JSON output is supported with --json.

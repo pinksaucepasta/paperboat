@@ -6,11 +6,17 @@ pb-tunnel-policy-get - Show an on-demand port policy
 
 
 .SH SYNOPSIS
-\fBpb tunnel policy get  [flags]\fP
+\fBpb tunnel policy get <policy> [flags]\fP
 
 
 .SH DESCRIPTION
 Show an on-demand port policy
+
+.PP
+Show one on-demand port policy, including its target and authorization state. Use its identity and generation for a deliberate revoke.
+
+.PP
+An on-demand policy authorizes an exact machine port for private or team access. A policy does not publish a public URL or grant every port on the device. Revocation fences subsequent activation.
 
 .PP
 JSON output is supported with --json.

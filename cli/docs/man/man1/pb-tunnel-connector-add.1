@@ -6,11 +6,17 @@ pb-tunnel-connector-add - Add a connector on this host
 
 
 .SH SYNOPSIS
-\fBpb tunnel connector add  [flags]\fP
+\fBpb tunnel connector add <tunnel> [flags]\fP
 
 
 .SH DESCRIPTION
 Add a connector on this host
+
+.PP
+Add a connector for the selected durable tunnel on this host. Inspect tunnel and connector status before advertising a route through the new attachment.
+
+.PP
+Connectors attach an enrolled host to a durable tunnel. Drain stops new work while allowing existing work to wind down; revoke removes connector authority. Inspect connector state before replacing or removing one.
 
 .PP
 JSON output is supported with --json.

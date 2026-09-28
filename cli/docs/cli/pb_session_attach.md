@@ -6,6 +6,10 @@ Choose and attach to a durable terminal session
 
 Choose and attach to a durable terminal session
 
+Choose a durable session for an environment and attach the local terminal. If several sessions exist, select the exact one; status-bar options affect only this terminal presentation.
+
+Terminal sessions persist independently of a single connection and can be reattached after a disconnect. Sharing grants explicit access to a named session. Closing, deleting, and removing a participant have different effects; inspect the selected session before acting.
+
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
 
 ```

@@ -1,10 +1,14 @@
 ## pb daemon device-guard run
 
-
+Run the device guard under service supervision
 
 ### Synopsis
 
+Run the device guard under service supervision
 
+Start the foreground device-guard process for its supervisor. This entrypoint is used by the installed root-owned service and normally should not be run from an interactive shell.
+
+The device guard is a privileged local helper for protected device-name resolution. Installation and removal change local operating-system integration; use the dedicated service commands for the ordinary Paperboat daemon.
 
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
 

@@ -6,11 +6,14 @@ pb-wait - Wait for a machine readiness condition
 
 
 .SH SYNOPSIS
-\fBpb wait  [flags]\fP
+\fBpb wait <machine> [flags]\fP
 
 
 .SH DESCRIPTION
 Wait for a machine readiness condition
+
+.PP
+Wait for the selected device to satisfy a named readiness condition from --for. --timeout bounds the wait, and an expired wait reports a failure instead of treating mere connectivity as readiness.
 
 .PP
 JSON output is supported with --json.

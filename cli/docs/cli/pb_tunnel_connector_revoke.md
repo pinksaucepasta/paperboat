@@ -6,6 +6,10 @@ Revoke a tunnel connector
 
 Revoke a tunnel connector
 
+Withdraw one connector's authority for the selected tunnel. --wait and --timeout control observation of shutdown; the confirmation code confirms revocation.
+
+Connectors attach an enrolled host to a durable tunnel. Drain stops new work while allowing existing work to wind down; revoke removes connector authority. Inspect connector state before replacing or removing one.
+
 JSON output is supported with --json.
 
 ```
@@ -15,11 +19,11 @@ pb tunnel connector revoke <tunnel> <connector> [flags]
 ### Options
 
 ```
+      --confirm string     six-character confirmation code from the preview
   -h, --help               help for revoke
       --json               print canonical JSON
       --timeout duration   maximum time to wait for operation completion (default 2m0s)
       --wait               wait for the operation to reach a terminal state
-      --yes                confirm permanent connector revocation
 ```
 
 ### Options inherited from parent commands

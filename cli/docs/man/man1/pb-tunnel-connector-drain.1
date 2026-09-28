@@ -6,11 +6,17 @@ pb-tunnel-connector-drain - Drain a tunnel connector
 
 
 .SH SYNOPSIS
-\fBpb tunnel connector drain   [flags]\fP
+\fBpb tunnel connector drain <tunnel> <connector> [flags]\fP
 
 
 .SH DESCRIPTION
 Drain a tunnel connector
+
+.PP
+Stop assigning new work to one connector and optionally wait for existing work to finish. --timeout bounds the wait; the connector remains distinct from a revoked one.
+
+.PP
+Connectors attach an enrolled host to a durable tunnel. Drain stops new work while allowing existing work to wind down; revoke removes connector authority. Inspect connector state before replacing or removing one.
 
 .PP
 JSON output is supported with --json.

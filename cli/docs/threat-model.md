@@ -16,7 +16,7 @@
   carries file bytes. `paperboat-server` and `paperboat-tunnel` have no content-decryption
   key or support decryption path. Public-preview content is intentionally public and outside
   this claim.
-- Endpoint certificates bind account, endpoint ID, role, generation, Noise key, QUIC key,
+- Endpoint certificates bind account, endpoint ID, role, generation, and QUIC key,
   serial, and expiry under an authenticated registered signing key. CLI enrollment registers
   an independent device signing identity under its account session; it does not require an
   older device or download its private identity. Private signing and endpoint keys stay in
@@ -71,7 +71,7 @@ terminal output, preview bodies, SSH payloads, or file manifests/chunks in plain
 | Device-code phishing or brute force | Server-authoritative expiry/interval; user sees the complete URL and short code; no token in output | Server/dashboard rate limits and approval UX |
 | Token theft or refresh replay | OS credential store, issuer-namespaced profiles, refresh rotation, durable revoke queue | Server session-family revocation |
 | Malicious route or descriptor | Scheme, issuer, environment, endpoint, scope, generation, and expiry validation; no raw VM/public-TCP fallback | Server route authorization and `paperboat-tunnel` enforcement |
-| Compromised relay or control plane | Authenticated registered signing keys and endpoint certificates, endpoint-authenticated QUIC/Noise handshakes, encrypted stream headers and records, replay/generation fencing | Traffic timing, endpoint addressing, ciphertext length, and authorized routing metadata remain observable |
+| Compromised relay or control plane | Authenticated registered signing keys and endpoint certificates, endpoint-authenticated QUIC handshakes, encrypted stream headers and records, replay/generation fencing | Traffic timing, endpoint addressing, ciphertext length, and authorized routing metadata remain observable |
 | Carrier downgrade | Authentication, authorization, certificate, protocol, revocation, and generation failures are terminal; only availability failures may select the next equally encrypted carrier | A network observer can block preferred carriers and force an allowed encrypted fallback |
 | Terminal injection | Non-file bytes pass through unchanged; rewriting is limited to a bracketed paste frame | `pb` host-runtime terminal authorization |
 | Compression side channel or decompression exhaustion | Each output event is an independent Zstandard frame with no dictionary or cross-session state; declared decoded size, frame content size, decoder memory, and concurrent codecs are bounded before delivery or ACK | A user controlling and observing the same authenticated terminal can still correlate its own input and output sizes |

@@ -276,7 +276,7 @@ func TestBridgeSSHBackpressurePreservesOrder(t *testing.T) {
 			return
 		}
 		defer connection.Close()
-		_ = connection.SetReadBuffer(1024)
+		_ = connection.SetReadBuffer(64 << 10)
 		time.Sleep(100 * time.Millisecond)
 		value, readErr := io.ReadAll(connection)
 		if readErr != nil {

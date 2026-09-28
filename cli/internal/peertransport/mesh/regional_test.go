@@ -39,7 +39,7 @@ func TestPeerDERPRegionUsesPromotedServerHome(t *testing.T) {
 	b := &locoBackend{
 		homeDERP: 1,
 		dm: &tailcfg.DERPMap{Regions: map[tailcfg.DERPRegionID]*tailcfg.DERPRegion{
-			1: {RegionID: 1}, 2: {RegionID: 2},
+			1: {RegionID: 1, Nodes: []*tailcfg.DERPNode{{Name: "one"}}}, 2: {RegionID: 2, Nodes: []*tailcfg.DERPNode{{Name: "two"}}},
 		}},
 		nm: &netmap.NetworkMap{Peers: []tailcfg.NodeView{(&tailcfg.Node{Key: server, HomeDERP: 2}).View()}},
 	}

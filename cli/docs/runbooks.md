@@ -78,7 +78,7 @@ terminal scope, or `file:transfer` scope is rejected.
 1. Stop new private operations and record only endpoint IDs, certificate fingerprints, generations,
    and timestamps. Never export private key material for diagnosis.
 2. For one endpoint, revoke its certificate, advance authorization state, remove its local endpoint
-   state through the supported logout/unpair flow, and re-enroll it under the existing account root.
+   state through `pb logout` for a CLI or `pb device revoke <device>` for a machine, then re-enroll under the existing account root.
 3. For account-root loss or suspected compromise, revoke every endpoint certificate, advance the
    account authorization generation, complete the explicit root reset/recovery flow, and re-pair
    every CLI and machine. The server must not fabricate or escrow a replacement root.

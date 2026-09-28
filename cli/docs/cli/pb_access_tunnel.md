@@ -6,6 +6,10 @@ Open private TCP access through stable hostd
 
 Open private TCP access through stable hostd
 
+Resolve a tunnel or route by its exact identity and forward a loopback listener to that authorized private TCP target. --listen selects the local address; the listener is closed when the command ends.
+
+Private access requires authorization for the exact target. The listener stays on the local loopback interface, and closing this command closes the forwarding session. Public tunnel publication is managed separately with pb tunnel.
+
 JSON output is supported with --json.
 
 ```

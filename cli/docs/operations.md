@@ -125,7 +125,7 @@ and the generation-bound `KnownHostsCommand`.
 The setup flow is:
 
 1. Complete `pb setup`/`pb pair` and wait for the machine's runtime and SSH readiness.
-   `pb machine list --json` exposes the server-owned alias; do not substitute the
+   `pb device list --json` exposes the server-owned alias; do not substitute the
    display name. `pb ssh doctor <machine>` checks OpenSSH parsing, the managed agent,
    current host-key authority, and the native SSH path.
 2. In the editor's native SSH or remote-development connection flow, select
@@ -210,16 +210,16 @@ browser traffic carries no Paperboat credential or browser login state.
 
 `pb tunnel doctor --bundle /absolute/output.zip` previews a bounded, redacted host-runtime
 support bundle without returning source paths or secrets. Add `--write-bundle` to publish
-the previewed file. Session-mode transitions, unpair, and uninstall revoke runtime authority
+the previewed file. Device capability changes, device revocation, and uninstall revoke runtime authority
 and retire affected preview routes.
 
 Machine-control credentials renew in memory and are bound to the enrolled Ed25519 key and
-installation generation. Reinstall, unpair, or machine revocation invalidates them. Never
+installation generation. Reinstall or machine revocation invalidates them. Never
 copy a runtime state directory to another machine.
 
 ## Container hostd and updates
 
-Hosted and self-hosted container deployments use the same split update boundary as native
+Self-hosted container deployments use the same split update boundary as native
 hosts. `paperboat-hostd` stays alive and owns live workloads; the root-only
 `paperboat-updated` process verifies TUF metadata, rotates root-owned artifacts in the
 persistent release volume, and replaces only the runtime worker. Routine runtime and CLI

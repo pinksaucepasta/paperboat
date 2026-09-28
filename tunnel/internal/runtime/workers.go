@@ -524,6 +524,16 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) error {
 		if w.DurableAdmissions == nil {
 			return route.ErrGenerationNotReady
 		}
+		if err := w.flushCanonicalDetached(ctx); err != nil {
+			return err
+		}
+		// An audience or policy-generation replacement cannot retain the old
+		// matcher generation while it probes the replacement. Fence the old
+		// route first, canceling its stream leases and acknowledging detach only
+		// after those leases have released.
+		if err := w.fenceChangedViewerPolicy(ctx, desired, selectedAssignments); err != nil {
+			return err
+		}
 		// A complete snapshot can contain assignments for several tunnels. A
 		// carrier failure is scoped to the tunnel that owns the failed
 		// assignment. Resolve each tunnel independently so a ready tunnel can
@@ -828,7 +838,8 @@ func canonicalRouteRules(assignments []control.RouteAssignment) []route.RouteRul
 			MachineIdentityPublicKey: assignment.MachineIdentityPublicKey, MachineIdentityThumbprint: assignment.MachineIdentityThumbprint,
 			ConnectorSessionID: assignment.ConnectorSessionID, ConnectorProcessGeneration: assignment.ConnectorProcessGeneration,
 			ConfigGeneration: assignment.ConfigGeneration, ConfigContentHash: assignment.ConfigContentHash,
-			AssignmentID: assignment.AssignmentID, AssignmentGeneration: assignment.AssignmentGeneration,
+			ViewerPolicyGeneration: assignment.ViewerPolicyGeneration,
+			AssignmentID:           assignment.AssignmentID, AssignmentGeneration: assignment.AssignmentGeneration,
 			ResourceKind: "tunnel", SessionGeneration: assignment.Generation,
 			Node: assignment.NodeID, EdgeProcessEpoch: assignment.EdgeProcessEpoch, EdgeFailureDomain: assignment.EdgeFailureDomain,
 			Kind: route.Kind(assignment.Kind), MatchType: assignment.MatchType, Hostname: hostname,
@@ -871,7 +882,8 @@ func canonicalPrivateRouteRules(assignments []control.RouteAssignment) []route.R
 			ConnectorProcessGeneration: assignment.ConnectorProcessGeneration, ConfigGeneration: assignment.ConfigGeneration,
 			MachineIdentityPublicKey: assignment.MachineIdentityPublicKey, MachineIdentityThumbprint: assignment.MachineIdentityThumbprint,
 			ConfigContentHash: assignment.ConfigContentHash, Node: assignment.NodeID, EdgeProcessEpoch: assignment.EdgeProcessEpoch,
-			EdgeFailureDomain: assignment.EdgeFailureDomain, Kind: route.TunnelPrivateTCP, Protocol: assignment.Protocol,
+			ViewerPolicyGeneration: assignment.ViewerPolicyGeneration,
+			EdgeFailureDomain:      assignment.EdgeFailureDomain, Kind: route.TunnelPrivateTCP, Protocol: assignment.Protocol,
 			AccessMode: assignment.AccessMode, Target: assignment.RouteID, DesiredState: assignment.DesiredState,
 			ObservedState: assignment.ObservedState,
 		})
@@ -891,7 +903,7 @@ func canonicalTCPRouteRules(assignments []control.RouteAssignment) []route.Route
 			ConnectorID: assignment.ConnectorID, ConnectorSessionID: assignment.ConnectorSessionID, ConnectorProcessGeneration: assignment.ConnectorProcessGeneration,
 			ConfigGeneration: assignment.ConfigGeneration, ConfigContentHash: assignment.ConfigContentHash, MachineIdentityPublicKey: assignment.MachineIdentityPublicKey,
 			MachineIdentityThumbprint: assignment.MachineIdentityThumbprint, Node: assignment.NodeID, EdgeProcessEpoch: assignment.EdgeProcessEpoch,
-			EdgeFailureDomain: assignment.EdgeFailureDomain, Kind: route.Kind(assignment.Kind), Protocol: assignment.Protocol, AccessMode: "public", Target: assignment.RouteID,
+			EdgeFailureDomain: assignment.EdgeFailureDomain, Kind: route.Kind(assignment.Kind), Protocol: assignment.Protocol, AccessMode: assignment.AccessMode, ViewerPolicyGeneration: assignment.ViewerPolicyGeneration, Target: assignment.RouteID,
 			PublicTCPListenerID: assignment.PublicTCPListenerID, PublicTCPPort: assignment.PublicTCPPort,
 			DesiredState: assignment.DesiredState, ObservedState: assignment.ObservedState})
 	}
@@ -1116,6 +1128,7 @@ func canonicalRouteObservations(assignments []control.RouteAssignment, observedS
 			ConnectorID:      assignment.ConnectorID, HostID: assignment.HostID, ConnectorGeneration: assignment.Generation,
 			ConnectorSessionID: assignment.ConnectorSessionID, ConnectorProcessGeneration: assignment.ConnectorProcessGeneration,
 			ConfigGeneration: assignment.ConfigGeneration, ConfigContentHash: assignment.ConfigContentHash,
+			AccessMode: assignment.AccessMode, ViewerPolicyGeneration: assignment.ViewerPolicyGeneration,
 			State: observedState, ObservedState: observedState,
 		})
 	}
@@ -1213,6 +1226,7 @@ func validateCanonicalAssignment(assignment control.RouteAssignment, nodeID, pro
 		assignment.NodeID != nodeID || assignment.EdgeProcessEpoch != processEpoch ||
 		connectorprotocol.ValidateOpaqueEpoch(assignment.EdgeProcessEpoch) != nil ||
 		assignment.AssignmentGeneration == 0 || assignment.Revision == 0 || assignment.Generation == 0 ||
+		assignment.ViewerPolicyGeneration == 0 ||
 		assignment.ConnectorProcessGeneration == 0 || assignment.ConfigGeneration == 0 ||
 		assignment.OriginAddress != "" || assignment.TargetHost != "" || assignment.TargetPort != 0 {
 		return route.ErrInvalid
@@ -1377,6 +1391,7 @@ func canonicalRouteHash(assignments []control.RouteAssignment) [sha256.Size]byte
 		Protocol                   string                  `json:"protocol"`
 		OriginScheme               string                  `json:"origin_scheme"`
 		AccessMode                 string                  `json:"access_mode"`
+		ViewerPolicyGeneration     uint64                  `json:"viewer_policy_generation"`
 		PreserveHost               bool                    `json:"preserve_host"`
 		HostOverride               string                  `json:"host_override"`
 		TargetRouteID              string                  `json:"target_route_id"`
@@ -1400,7 +1415,7 @@ func canonicalRouteHash(assignments []control.RouteAssignment) [sha256.Size]byte
 			MatchHostname: assignment.MatchHostname, WildcardSuffix: assignment.WildcardSuffix,
 			PathPrefix: assignment.PathPrefix, Priority: assignment.Priority, Protocol: assignment.Protocol,
 			OriginScheme: assignment.OriginScheme, PreserveHost: assignment.PreserveHost, HostOverride: assignment.HostOverride,
-			AccessMode:     assignment.AccessMode,
+			AccessMode: assignment.AccessMode, ViewerPolicyGeneration: assignment.ViewerPolicyGeneration,
 			DomainBindings: canonicalDomainBindings(assignment.DomainBindings),
 			TargetRouteID:  assignment.TargetRouteID, TargetConnectorSessionID: assignment.TargetConnectorSessionID,
 			TargetConnectorProcessGen: assignment.TargetConnectorProcessGen, TargetConfigGeneration: assignment.TargetConfigGeneration,
@@ -1414,6 +1429,116 @@ func canonicalRouteHash(assignments []control.RouteAssignment) [sha256.Size]byte
 	})
 	payload, _ := json.Marshal(ordered)
 	return sha256.Sum256(payload)
+}
+
+// fenceChangedViewerPolicy removes old HTTP rules before a changed audience
+// or viewer-policy generation is probed. Existing StreamLeases are canceled
+// and fully released before the old assignment is acknowledged as detached.
+// Unaffected routes in the complete local snapshot remain active.
+func (w *RouteWorker) fenceChangedViewerPolicy(ctx context.Context, desired, selected []control.RouteAssignment) error {
+	if w == nil || len(w.canonicalAssignments) == 0 || len(selected) == 0 {
+		return nil
+	}
+	selectedPolicies := make(map[string]control.RouteAssignment, len(selected))
+	for _, assignment := range selected {
+		if assignment.Kind != string(route.TunnelHTTPSWSS) {
+			continue
+		}
+		key := canonicalPolicyRouteKey(assignment)
+		if current, exists := selectedPolicies[key]; exists &&
+			(current.AccessMode != assignment.AccessMode || current.ViewerPolicyGeneration != assignment.ViewerPolicyGeneration) {
+			return route.ErrInvalid
+		}
+		selectedPolicies[key] = assignment
+	}
+	fencedRoutes := make(map[string]struct{})
+	for _, previous := range w.canonicalAssignments {
+		if previous.Kind != string(route.TunnelHTTPSWSS) {
+			continue
+		}
+		replacement, exists := selectedPolicies[canonicalPolicyRouteKey(previous)]
+		if !exists || previous.AccessMode == replacement.AccessMode && previous.ViewerPolicyGeneration == replacement.ViewerPolicyGeneration {
+			continue
+		}
+		fencedRoutes[canonicalPolicyRouteKey(previous)] = struct{}{}
+	}
+	if len(fencedRoutes) == 0 {
+		return nil
+	}
+
+	remaining := make([]control.RouteAssignment, 0, len(w.canonicalAssignments))
+	detached := make([]control.RouteAssignment, 0)
+	for _, assignment := range w.canonicalAssignments {
+		if _, fence := fencedRoutes[canonicalPolicyRouteKey(assignment)]; fence {
+			detached = append(detached, assignment)
+			continue
+		}
+		remaining = append(remaining, assignment)
+	}
+
+	generation := w.canonicalGeneration
+	if w.canonicalPendingGeneration > generation {
+		generation = w.canonicalPendingGeneration
+	}
+	if activeGeneration := w.Registry.Generation(); activeGeneration > generation {
+		generation = activeGeneration
+	}
+	generation++
+	if generation == 0 {
+		return route.ErrInvalid
+	}
+	rules := canonicalRouteRules(remaining)
+	sortRouteRules(rules)
+	for index := range rules {
+		rules[index].Generation = generation
+	}
+	if err := w.Registry.StageGeneration(generation, rules); err != nil {
+		return err
+	}
+	if err := w.Registry.MarkGenerationReady(generation); err != nil {
+		return err
+	}
+	admissionAssignments := canonicalPendingAdmissionAssignments(selected, remaining, desired)
+	admissions, err := canonicalDurableAdmissions(admissionAssignments)
+	if err != nil {
+		return err
+	}
+	if err := w.DurableAdmissions.Replace(admissions, time.Now().UTC()); err != nil {
+		return err
+	}
+	w.canonicalPendingAdmissions = true
+	identities := make([]route.RouteIdentity, 0, len(fencedRoutes))
+	seenIdentities := make(map[route.RouteIdentity]struct{}, len(fencedRoutes))
+	for _, assignment := range detached {
+		identity := route.RouteIdentity{AccountID: assignment.AccountID, TunnelID: assignment.TunnelID, RouteID: assignment.RouteID}
+		if _, exists := seenIdentities[identity]; exists {
+			continue
+		}
+		seenIdentities[identity] = struct{}{}
+		identities = append(identities, identity)
+	}
+	activateErr := w.Registry.ActivateGenerationFencedRoutes(ctx, generation, identities)
+	if w.Registry.Generation() == generation {
+		// Activation atomically removed the old matcher rules even if the caller
+		// context expires while canceled streams are releasing. Persist this
+		// local state so a retry never restores the old public generation.
+		w.canonicalGeneration = generation
+		w.canonicalHash = canonicalRouteHash(remaining)
+		w.canonicalSet = true
+		w.canonicalAssignments = append([]control.RouteAssignment(nil), remaining...)
+		w.canonicalPendingSet = false
+		w.canonicalPendingHash = [sha256.Size]byte{}
+		w.canonicalPendingGeneration = 0
+		w.canonicalPendingDetached = mergeCanonicalAssignments(w.canonicalPendingDetached, detached)
+	}
+	if activateErr != nil {
+		return activateErr
+	}
+	return w.flushCanonicalDetached(ctx)
+}
+
+func canonicalPolicyRouteKey(assignment control.RouteAssignment) string {
+	return assignment.AccountID + "\x00" + assignment.TunnelID + "\x00" + assignment.RouteID
 }
 
 func canonicalDomainBindings(bindings []control.DomainBinding) []control.DomainBinding {

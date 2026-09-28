@@ -20,8 +20,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	identitystore "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/endpointidentity"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/identitybootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/trustedkeys"
-	"golang.org/x/crypto/blake2s"
 )
 
 var (
@@ -88,44 +88,59 @@ func (c *Client) Ensure(ctx context.Context) error {
 	if err != nil || registration.InstallationGeneration < 1 || uint64(registration.InstallationGeneration) != endpoint.Generation {
 		return fmt.Errorf("local machine endpoint generation: %w", ErrInvalid)
 	}
-	// Newer endpoint state persists the complete root set alongside the
-	// certificate. Older state only has the certificate issuer, so refresh the
-	// authenticated status response once before constructing ENV verification;
-	// this is what lets an ENV authority signed by a different enrolled root
-	// bootstrap after an upgrade.
-	refreshing := len(endpoint.Certificate) > 0 && len(endpoint.TrustedKeys) == 0
-	noisePublic := endpoint.NoisePublicKey()
+	now := c.config.Clock().UTC().Truncate(time.Second)
 	quicPublic := endpoint.QUICPublicKey()
-	if !refreshing && len(endpoint.Certificate) > 0 {
-		return nil
+	serial := uint64(1)
+	registering := len(endpoint.Certificate) == 0
+	if !registering {
+		previous, parseErr := endpointidentity.Parse(endpoint.Certificate)
+		if parseErr != nil || previous.Claims.Serial == ^uint64(0) {
+			return fmt.Errorf("machine endpoint certificate: %w", ErrInvalid)
+		}
+		// Previously approved certificates may still be signed by an old
+		// account key. Renew them with this device's existing endpoint key;
+		// expiry alone would leave an installed device unable to restart.
+		_, ownCertificateErr := endpointidentity.Verify(endpoint.Certificate, quicPublic, endpointidentity.Expected{AccountID: registration.AccountID, Role: endpointidentity.RoleMachine, EndpointID: registration.MachineID, Generation: endpoint.Generation}, now)
+		if !previous.Claims.ExpiresAt.After(now.Add(7*24*time.Hour)) || ownCertificateErr != nil {
+			serial = previous.Claims.Serial + 1
+			registering = true
+		}
 	}
-	requestConflict := false
 	var status int
-	var pending struct {
-		RequestID  string    `json:"request_id"`
-		EndpointID string    `json:"endpoint_id"`
-		Generation uint64    `json:"generation"`
-		NoiseKey   string    `json:"noise_public_key"`
-		QUICKey    string    `json:"quic_public_key"`
-		ExpiresAt  time.Time `json:"expires_at"`
-		SafetyCode string    `json:"safety_code"`
-	}
-	if !refreshing {
-		requestOperation := operationID("op_peer_machine_request_", registration.MachineID, endpoint.Generation, noisePublic[:], quicPublic)
+	if registering {
+		if registration.AccountID == "" || len(endpoint.QUICPrivateKey) == 0 {
+			return fmt.Errorf("machine endpoint identity: %w", ErrInvalid)
+		}
+		issuedAt := now.Add(-identitybootstrap.CertificateClockSkew)
+		expiresAt := now.Add(identitybootstrap.CertificateLifetime)
+		certificate, signErr := endpointidentity.Sign(endpoint.QUICPrivateKey, endpointidentity.Claims{
+			AccountID: registration.AccountID, Role: endpointidentity.RoleMachine,
+			EndpointID:    registration.MachineID,
+			QUICPublicKey: quicPublic, Generation: endpoint.Generation, Serial: serial,
+			IssuedAt: issuedAt, ExpiresAt: expiresAt,
+		})
+		if signErr != nil {
+			return fmt.Errorf("sign machine endpoint identity: %w", signErr)
+		}
+		raw, marshalErr := certificate.MarshalBinary()
+		if marshalErr != nil {
+			return fmt.Errorf("encode machine endpoint identity: %w", marshalErr)
+		}
+		requestOperation := operationID("op_peer_machine_request_", registration.MachineID, endpoint.Generation, raw, nil)
 		requestBody, _ := json.Marshal(struct {
-			OperationID    string `json:"operation_id"`
-			Generation     uint64 `json:"generation"`
-			NoisePublicKey string `json:"noise_public_key"`
-			QUICPublicKey  string `json:"quic_public_key"`
-		}{requestOperation, endpoint.Generation, base64.RawURLEncoding.EncodeToString(noisePublic[:]), base64.RawURLEncoding.EncodeToString(quicPublic)})
-		status, err = c.post(ctx, "/v1/machine-peer-identity", requestOperation, requestBody, &pending)
-		requestConflict = status == http.StatusConflict
-		if err != nil && !requestConflict {
-			return fmt.Errorf("request machine endpoint: %w", err)
+			OperationID string `json:"operation_id"`
+			Generation  uint64 `json:"generation"`
+			Certificate string `json:"certificate"`
+		}{requestOperation, endpoint.Generation, base64.RawURLEncoding.EncodeToString(raw)})
+		var registered api.EndpointCertificateDocument
+		status, err = c.post(ctx, "/v1/machine-peer-identity", requestOperation, requestBody, &registered)
+		if err != nil && status != http.StatusConflict {
+			return fmt.Errorf("register machine endpoint: %w", err)
 		}
-		if !requestConflict && (status != http.StatusCreated || pending.EndpointID != registration.MachineID || pending.Generation != endpoint.Generation || pending.NoiseKey != base64.RawURLEncoding.EncodeToString(noisePublic[:]) || pending.QUICKey != base64.RawURLEncoding.EncodeToString(quicPublic) || pending.SafetyCode != safetyCode(registration.MachineID, endpoint.Generation, noisePublic, quicPublic)) {
-			return fmt.Errorf("machine endpoint request response: %w", ErrInvalid)
+		if err == nil && (status != http.StatusCreated || registered.Certificate != base64.RawURLEncoding.EncodeToString(raw) || registered.AccountID != registration.AccountID || registered.EndpointID != registration.MachineID || registered.Generation != endpoint.Generation || registered.Role != "machine") {
+			return fmt.Errorf("machine endpoint registration response: %w", ErrInvalid)
 		}
+		clear(raw)
 	}
 	statusOperation := operationID("op_peer_machine_status_", registration.MachineID, endpoint.Generation, nil, nil)
 	statusBody, _ := json.Marshal(struct {
@@ -142,13 +157,10 @@ func (c *Client) Ensure(ctx context.Context) error {
 		return fmt.Errorf("check machine endpoint approval: %w", err)
 	}
 	if status == http.StatusAccepted && approved.State == "pending" {
-		if refreshing {
+		if !registering {
 			return ErrInvalid
 		}
-		if requestConflict {
-			return ErrPending
-		}
-		return &PendingError{RequestID: pending.RequestID, SafetyCode: pending.SafetyCode, ExpiresAt: pending.ExpiresAt}
+		return ErrPending
 	}
 	trusted, trustedErr := trustedkeys.FromAPI(approved.TrustedKeys)
 	if trustedErr != nil {
@@ -161,11 +173,11 @@ func (c *Client) Ensure(ctx context.Context) error {
 	expiresAt, expiresErr := parseCanonicalTime(approved.Certificate.ExpiresAt)
 	certificateFingerprint, fingerprintErr := decodeFingerprint(approved.Certificate.CertificateFingerprint)
 	verified, verifyErr := endpointidentity.VerifyWithTrustedKey(certificate, approved.Certificate.KeyID, trusted, endpointidentity.Expected{Role: endpointidentity.RoleMachine, EndpointID: registration.MachineID, Generation: endpoint.Generation}, c.config.Clock().UTC())
-	if status != http.StatusOK || approved.State != "approved" || !keyOK || certificateErr != nil || len(certificate) == 0 || base64.RawURLEncoding.EncodeToString(certificate) != approved.Certificate.Certificate || issuedErr != nil || expiresErr != nil || fingerprintErr != nil || certificateFingerprint != sha256.Sum256(certificate) || verifyErr != nil || approved.Certificate.Version != 1 || approved.Certificate.AccountID != verified.Claims.AccountID || approved.Certificate.KeyID != key.KeyID || approved.Certificate.EndpointID != verified.Claims.EndpointID || approved.Certificate.Role != "machine" || approved.Certificate.Generation != verified.Claims.Generation || approved.Certificate.Serial != verified.Claims.Serial || issuedAt != verified.Claims.IssuedAt || expiresAt != verified.Claims.ExpiresAt {
+	if status != http.StatusOK || approved.State != "approved" || !keyOK || certificateErr != nil || len(certificate) == 0 || base64.RawURLEncoding.EncodeToString(certificate) != approved.Certificate.Certificate || issuedErr != nil || expiresErr != nil || fingerprintErr != nil || certificateFingerprint != sha256.Sum256(certificate) || verifyErr != nil || approved.Certificate.Version != 1 || approved.Certificate.AccountID != registration.AccountID || approved.Certificate.AccountID != verified.Claims.AccountID || approved.Certificate.KeyID != key.KeyID || !bytes.Equal(key.PublicKey, quicPublic) || approved.Certificate.EndpointID != verified.Claims.EndpointID || approved.Certificate.Role != "machine" || approved.Certificate.Generation != verified.Claims.Generation || approved.Certificate.Serial != verified.Claims.Serial || issuedAt != verified.Claims.IssuedAt || expiresAt != verified.Claims.ExpiresAt {
 		clear(certificate)
 		return fmt.Errorf("approved machine endpoint certificate: %w", ErrInvalid)
 	}
-	if refreshing && !bytes.Equal(endpoint.Certificate, certificate) {
+	if !registering && !bytes.Equal(endpoint.Certificate, certificate) {
 		clear(certificate)
 		return ErrInvalid
 	}
@@ -240,15 +252,4 @@ func operationID(prefix, endpointID string, generation uint64, first, second []b
 	h.Write(first)
 	h.Write(second)
 	return prefix + hex.EncodeToString(h.Sum(nil)[:16])
-}
-
-func safetyCode(endpointID string, generation uint64, noise [32]byte, quic []byte) string {
-	buffer := append([]byte("paperboat-machine-endpoint-v1\x00"), endpointID...)
-	buffer = append(buffer, 0)
-	buffer = binary.BigEndian.AppendUint64(buffer, generation)
-	buffer = append(buffer, noise[:]...)
-	buffer = append(buffer, quic...)
-	digest := blake2s.Sum256(buffer)
-	encoded := hex.EncodeToString(digest[:5])
-	return encoded[:5] + "-" + encoded[5:]
 }

@@ -338,7 +338,7 @@ func cryptoProcessorFixture(t *testing.T) processorFixture {
 
 func endpointCertificate(t *testing.T, root ed25519.PrivateKey, account string, role endpointidentity.Role, id string, now time.Time, seed byte) []byte {
 	t.Helper()
-	certificate, err := endpointidentity.Sign(root, endpointidentity.Claims{AccountID: account, Role: role, EndpointID: id, NoisePublicKey: [32]byte{seed}, QUICPublicKey: ed25519.NewKeyFromSeed(bytes.Repeat([]byte{seed}, 32)).Public().(ed25519.PublicKey), Generation: 1, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour)})
+	certificate, err := endpointidentity.Sign(root, endpointidentity.Claims{AccountID: account, Role: role, EndpointID: id, QUICPublicKey: ed25519.NewKeyFromSeed(bytes.Repeat([]byte{seed}, 32)).Public().(ed25519.PublicKey), Generation: 1, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour)})
 	if err != nil {
 		t.Fatal(err)
 	}

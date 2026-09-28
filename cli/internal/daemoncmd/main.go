@@ -24,9 +24,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimeentry"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
+	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/connectionmanager"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/transportmanager"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 	"github.com/spf13/cobra"
 )
@@ -67,7 +66,6 @@ func NewCommand() *cobra.Command {
 	root.AddCommand(windowsSSHDServiceCommand())
 	root.AddCommand(privilegedHostServiceCommand())
 	root.AddCommand(configRuntimeCommand())
-	root.AddCommand(ServiceCommand())
 	root.AddCommand(runDaemonCommand())
 	AddDeviceGuardCommand(root)
 	if platformUpdateProbeCommand != nil {
@@ -267,22 +265,8 @@ func localDaemonCommand() *cobra.Command {
 				return err
 			}
 			source.HTTPClient = &http.Client{Transport: peerHTTPTransport}
-			peerManager, err := transportmanager.New()
+			peerTunnel, err := tunnel.NewPeerTerminalTunnel(tunnel.PeerTerminalConfig{Issuer: cfg.ServerURL, Store: store, Auth: authSource, TLS: transportConfig.TLSConfig, HTTPClient: &http.Client{Transport: peerHTTPTransport}, OutputQueueChunks: cfg.Connect.TerminalOutputQueueChunks})
 			if err != nil {
-				return err
-			}
-			transportMode, err := tunnel.ParseTerminalTransport(cfg.Connect.TerminalTransport)
-			if err != nil {
-				_ = peerManager.Close()
-				return err
-			}
-			peerTunnel, err := tunnel.NewPeerTerminalTunnel(tunnel.PeerTerminalConfig{Issuer: cfg.ServerURL, Store: store, Auth: authSource, TLS: transportConfig.TLSConfig, HTTPClient: &http.Client{Transport: peerHTTPTransport}, OutputQueueChunks: cfg.Connect.TerminalOutputQueueChunks, Mode: peerConnectionMode(transportMode), PublishLocalStatus: true, TransportManager: peerManager, Race: peerRacePolicy()})
-			if err != nil {
-				_ = peerManager.Close()
-				return err
-			}
-			if err := peerTunnel.Start(command.Context()); err != nil {
-				_ = peerManager.Close()
 				return err
 			}
 			defer peerTunnel.Close()
@@ -342,7 +326,22 @@ func localDaemonCommand() *cobra.Command {
 					Paths: paths, Source: source, ManagedSSH: managedConfig, IssuePeerStream: source.IssuePeerStream,
 					OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(),
 					DeviceSuffix: cfg.DeviceSuffix, DeviceLoopbackCIDR: cfg.DeviceLoopbackCIDR,
-					TransportManager: peerManager, OpenPeerStream: localdaemon.TunnelPeerStreamOpener(peerTunnel), ProbePeer: localdaemon.TunnelPeerProbe(peerTunnel), FileTransfers: fileTransfers, InvalidatePeerAuthority: peerTunnel.InvalidateMachine, WarmPeerMetadata: peerTunnel.WarmMachines,
+					OpenPeerStream: localdaemon.TunnelPeerStreamOpener(peerTunnel), ProbePeer: localdaemon.TunnelPeerProbe(peerTunnel), FileTransfers: fileTransfers, InvalidatePeerAuthority: peerTunnel.InvalidateMachine, WarmPeerMetadata: peerTunnel.WarmMachines,
+					RelayInventory: func(ctx context.Context) (localapi.RelayInventory, error) {
+						nodes, err := peerTunnel.NativeRelayCandidates(ctx)
+						if err != nil {
+							return localapi.RelayInventory{}, err
+						}
+						inventory := localapi.RelayInventory{Schema: localapi.RelayInventorySchemaV1, Candidates: make([]localapi.RelayCandidate, 0, len(nodes))}
+						for _, node := range nodes {
+							state := "unavailable"
+							if node.State == "ready" {
+								state = "ready"
+							}
+							inventory.Candidates = append(inventory.Candidates, localapi.RelayCandidate{NodeID: node.NodeID, Region: node.Region, State: state, ObservedAt: node.ObservedAt, ExpiresAt: node.ExpiresAt, Roles: node.Roles, Transports: node.Transports})
+						}
+						return inventory, nil
+					},
 				})
 			})
 		},
@@ -423,29 +422,6 @@ func configRuntimeCommand() *cobra.Command {
 	}
 	command.Flags().String("state-root", "", "runtime state directory")
 	return command
-}
-
-func peerConnectionMode(mode tunnel.TerminalTransport) connectionmanager.Mode {
-	switch mode {
-	case tunnel.TerminalTransportDirect:
-		return connectionmanager.ModeDirectQUIC
-	case tunnel.TerminalTransportRelayQUIC:
-		return connectionmanager.ModeRelayQUIC
-	case tunnel.TerminalTransportRelayWSS:
-		return connectionmanager.ModeWSS
-	case tunnel.TerminalTransportRelay:
-		return connectionmanager.ModeRelayRace
-	default:
-		return connectionmanager.ModeAuto
-	}
-}
-
-func peerRacePolicy() connectionmanager.Config {
-	return connectionmanager.Config{
-		RelayDelay:     time.Duration(config.PeerRelayPreferenceMilliseconds) * time.Millisecond,
-		WSSDelay:       time.Duration(config.PeerWSSStartMilliseconds) * time.Millisecond,
-		ConnectTimeout: time.Duration(config.PeerConnectTimeoutMilliseconds) * time.Millisecond,
-	}
 }
 
 func runtimeIdentityStore() (*identity.Store, error) {

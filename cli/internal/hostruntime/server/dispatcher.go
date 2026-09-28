@@ -7,11 +7,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"log/slog"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcastserver"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configapply"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
@@ -40,6 +44,7 @@ type TerminalJoinRecorder func(context.Context, TerminalJoin) error
 
 type DispatcherConfig struct {
 	RecordTerminalJoin TerminalJoinRecorder
+	BrowserOutput      *browserbroadcastserver.Registry
 	Sessions           *session.Manager
 	ConfigApply        configapply.Handler
 	Health             HealthSource
@@ -59,10 +64,17 @@ type Dispatcher struct {
 }
 
 type terminalOutputStream struct {
-	manager      *session.Manager
-	sessionID    string
-	attachmentID string
-	writers      *filetransfer.WriterRegistry
+	manager            *session.Manager
+	sessionID          string
+	attachmentID       string
+	expectedGeneration uint64
+	writers            *filetransfer.WriterRegistry
+	checkpoint         []byte
+	checkpointSequence uint64
+	checkpointOffset   int
+	checkpointSent     bool
+	broadcast          *browserbroadcastserver.Registry
+	keyUpdates         <-chan browserbroadcastserver.Epoch
 }
 
 const terminalExitObservationInterval = 100 * time.Millisecond
@@ -165,7 +177,7 @@ type attachmentControl struct {
 }
 
 func (d *Dispatcher) HandleTerminalInput(_ context.Context, authorization Authorization, sessionID, attachmentID string, generation, inputSequence uint64, data []byte) (session.InputDecision, error) {
-	if authorization.ClientID == "" || sessionID == "" || attachmentID == "" || generation == 0 || (authorization.SessionID != "" && authorization.SessionID != sessionID) || authorization.TerminalRole == TerminalRoleViewer || isSharedTerminal(authorization) && !d.config.Sessions.AttachmentOwnedBy(sessionID, attachmentID, authorization.AccountID, authorization.ClientID) {
+	if authorization.ClientID == "" || sessionID == "" || attachmentID == "" || generation == 0 || isGenerationBoundTerminal(authorization) && generation != authorization.TerminalGeneration || (authorization.SessionID != "" && authorization.SessionID != sessionID) || authorization.TerminalRole == TerminalRoleViewer || isGenerationBoundTerminal(authorization) && (!browserAttachmentMatches(authorization, attachmentID) || !d.config.Sessions.AttachmentOwnedBy(sessionID, attachmentID, authorization.AccountID, authorization.ClientID)) {
 		return session.InputDecision{InputSequence: inputSequence}, session.ErrInvalidInput
 	}
 	decision, err := d.config.Sessions.Write(sessionID, session.InputKey{ClientID: authorization.ClientID, AttachmentID: attachmentID, Generation: generation, InputSequence: inputSequence}, data)
@@ -179,15 +191,21 @@ func (d *Dispatcher) HandleTerminalInput(_ context.Context, authorization Author
 }
 
 func (d *Dispatcher) HandleTerminalACK(_ context.Context, authorization Authorization, sessionID, attachmentID string, nextSequence uint64) error {
-	if authorization.ClientID == "" || sessionID == "" || attachmentID == "" || (authorization.SessionID != "" && authorization.SessionID != sessionID) || isSharedTerminal(authorization) && !d.config.Sessions.AttachmentOwnedBy(sessionID, attachmentID, authorization.AccountID, authorization.ClientID) {
+	if authorization.ClientID == "" || sessionID == "" || attachmentID == "" || (authorization.SessionID != "" && authorization.SessionID != sessionID) || isGenerationBoundTerminal(authorization) && (!browserAttachmentMatches(authorization, attachmentID) || !d.config.Sessions.AttachmentOwnedBy(sessionID, attachmentID, authorization.AccountID, authorization.ClientID)) {
 		return session.ErrInvalidInput
+	}
+	if isGenerationBoundTerminal(authorization) {
+		return d.config.Sessions.AcknowledgeAtGeneration(sessionID, attachmentID, nextSequence, authorization.TerminalGeneration)
 	}
 	return d.config.Sessions.Acknowledge(sessionID, attachmentID, nextSequence)
 }
 
 func (d *Dispatcher) HandleTerminalResize(_ context.Context, authorization Authorization, sessionID, attachmentID string, columns, rows uint16) error {
-	if authorization.ClientID == "" || sessionID == "" || attachmentID == "" || columns == 0 || rows == 0 || (authorization.SessionID != "" && authorization.SessionID != sessionID) || authorization.TerminalRole == TerminalRoleViewer || isSharedTerminal(authorization) && !d.config.Sessions.AttachmentOwnedBy(sessionID, attachmentID, authorization.AccountID, authorization.ClientID) {
+	if authorization.ClientID == "" || sessionID == "" || attachmentID == "" || columns == 0 || rows == 0 || (authorization.SessionID != "" && authorization.SessionID != sessionID) || authorization.TerminalRole == TerminalRoleViewer || isGenerationBoundTerminal(authorization) && (!browserAttachmentMatches(authorization, attachmentID) || !d.config.Sessions.AttachmentOwnedBy(sessionID, attachmentID, authorization.AccountID, authorization.ClientID)) {
 		return session.ErrInvalidInput
+	}
+	if isGenerationBoundTerminal(authorization) {
+		return d.config.Sessions.ResizeParticipantAtGeneration(sessionID, attachmentID, authorization.AccountID, authorization.ClientID, authorization.TerminalGeneration, pty.Dimensions{Columns: columns, Rows: rows}, d.config.Now())
 	}
 	return d.config.Sessions.Resize(sessionID, attachmentID, pty.Dimensions{Columns: columns, Rows: rows}, d.config.Now())
 }
@@ -220,15 +238,23 @@ func (d *Dispatcher) HandleControl(_ context.Context, authorization Authorizatio
 	if decodeStrict(frame.Payload, &control) != nil || control.SessionID == "" || control.AttachmentID == "" || authorization.ClientID == "" {
 		return failure("invalid_request")
 	}
-	if authorization.SessionID != "" && authorization.SessionID != control.SessionID || isSharedTerminal(authorization) && !d.config.Sessions.AttachmentOwnedBy(control.SessionID, control.AttachmentID, authorization.AccountID, authorization.ClientID) {
+	if authorization.SessionID != "" && authorization.SessionID != control.SessionID || isGenerationBoundTerminal(authorization) && (!browserAttachmentMatches(authorization, control.AttachmentID) || !d.config.Sessions.AttachmentOwnedBy(control.SessionID, control.AttachmentID, authorization.AccountID, authorization.ClientID)) {
 		return failure("not_found_or_forbidden")
 	}
 	var err error
 	switch frame.Type {
 	case "ack":
-		err = d.config.Sessions.Acknowledge(control.SessionID, control.AttachmentID, control.NextSequence)
+		if isGenerationBoundTerminal(authorization) {
+			err = d.config.Sessions.AcknowledgeAtGeneration(control.SessionID, control.AttachmentID, control.NextSequence, authorization.TerminalGeneration)
+		} else {
+			err = d.config.Sessions.Acknowledge(control.SessionID, control.AttachmentID, control.NextSequence)
+		}
 	case "detach":
-		err = d.config.Sessions.Detach(control.SessionID, control.AttachmentID)
+		if isGenerationBoundTerminal(authorization) {
+			err = d.config.Sessions.DetachParticipantAtGeneration(control.SessionID, control.AttachmentID, authorization.AccountID, authorization.ClientID, authorization.TerminalGeneration)
+		} else {
+			err = d.config.Sessions.Detach(control.SessionID, control.AttachmentID)
+		}
 		if err == nil && d.config.Writers != nil {
 			d.config.Writers.Detach(control.SessionID, control.AttachmentID)
 		}
@@ -265,7 +291,7 @@ func (d *Dispatcher) OpenStream(ctx context.Context, authorization Authorization
 		return nil, false, nil
 	}
 	var request terminalRequest
-	if decodeStrict(payload, &request) != nil || request.Action != "attach" {
+	if decodeStrict(payload, &request) != nil || request.Action != "attach" && request.Action != "replay" {
 		return nil, false, nil
 	}
 	var response struct {
@@ -275,9 +301,19 @@ func (d *Dispatcher) OpenStream(ctx context.Context, authorization Authorization
 	if json.Unmarshal(outcome.Result, &response) != nil || response.AttachmentID == "" {
 		return nil, false, ErrInvalidConfiguration
 	}
+	if authorization.BrowserTerminal && response.AttachmentID != authorization.BrowserAttachmentID {
+		return nil, false, ErrInvalidConfiguration
+	}
 	if replay {
 		var err error
-		if request.AtLiveBoundary {
+		if isGenerationBoundTerminal(authorization) {
+			participant := session.Participant{AttachmentID: response.AttachmentID, AccountID: authorization.AccountID, ClientID: authorization.ClientID, Role: string(authorization.TerminalRole), ConnectedAt: d.config.Now(), Browser: authorization.BrowserTerminal}
+			if request.AtLiveBoundary && authorization.BrowserTerminal {
+				_, err = d.config.Sessions.AttachLiveParticipantAtGeneration(request.SessionID, participant, authorization.TerminalGeneration)
+			} else {
+				_, err = d.config.Sessions.AttachParticipantAtGeneration(request.SessionID, participant, request.FromSequence, authorization.TerminalGeneration)
+			}
+		} else if request.AtLiveBoundary {
 			_, err = d.config.Sessions.AttachLive(request.SessionID, response.AttachmentID)
 		} else {
 			_, err = d.config.Sessions.Attach(request.SessionID, response.AttachmentID, request.FromSequence)
@@ -286,10 +322,42 @@ func (d *Dispatcher) OpenStream(ctx context.Context, authorization Authorization
 			return nil, false, err
 		}
 	}
+	expectedGeneration := uint64(0)
+	if isGenerationBoundTerminal(authorization) {
+		expectedGeneration = authorization.TerminalGeneration
+	}
+	stream := &terminalOutputStream{manager: d.config.Sessions, sessionID: request.SessionID, attachmentID: response.AttachmentID, expectedGeneration: expectedGeneration, writers: d.config.Writers, checkpointSent: true}
+	if authorization.BrowserTerminal {
+		// The request has already attached this participant. If checkpoint or
+		// publisher setup fails, there will be no OutputStream to detach it.
+		browserReady := false
+		defer func() {
+			if !browserReady {
+				_ = d.config.Sessions.DetachParticipantAtGeneration(request.SessionID, response.AttachmentID, authorization.AccountID, authorization.ClientID, expectedGeneration)
+			}
+		}()
+		checkpoint, boundary, err := d.config.Sessions.BrowserScreenAttachment(request.SessionID, response.AttachmentID, authorization.AccountID, authorization.ClientID, expectedGeneration)
+		if err != nil {
+			return nil, false, err
+		}
+		stream.checkpoint = checkpoint
+		stream.checkpointSequence = boundary
+		stream.checkpointSent = false
+		if d.config.BrowserOutput == nil {
+			return nil, false, ErrCapabilityUnavailable
+		}
+		updates, err := d.config.BrowserOutput.Join(ctx, request.SessionID, expectedGeneration, response.AttachmentID)
+		if err != nil {
+			return nil, false, err
+		}
+		stream.broadcast = d.config.BrowserOutput
+		stream.keyUpdates = updates
+		browserReady = true
+	}
 	if d.config.Writers != nil {
 		d.config.Writers.Attach(request.SessionID, response.AttachmentID, authorization.ClientID, authorization.SourceMachineID)
 	}
-	return &terminalOutputStream{manager: d.config.Sessions, sessionID: request.SessionID, attachmentID: response.AttachmentID, writers: d.config.Writers}, true, nil
+	return stream, true, nil
 }
 
 type execRequest struct {
@@ -454,17 +522,77 @@ func (s *execOutputStream) Close() error {
 }
 
 func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, error) {
+	if !s.checkpointSent {
+		const chunkSize = 64 << 10
+		remaining := len(s.checkpoint) - s.checkpointOffset
+		n := min(remaining, chunkSize)
+		last := n == remaining
+		data := make([]byte, 1+n)
+		if last {
+			data[0] = 1
+		}
+		copy(data[1:], s.checkpoint[s.checkpointOffset:s.checkpointOffset+n])
+		s.checkpointOffset += n
+		if last {
+			s.checkpointSent = true
+			s.checkpoint = nil
+		}
+		return protocol.BinaryFrame{Channel: protocol.TerminalScreenCheckpoint, StartSequence: s.checkpointSequence, Data: data}, nil
+	}
+	if s.keyUpdates != nil {
+		for {
+			select {
+			case <-ctx.Done():
+				return protocol.BinaryFrame{}, ctx.Err()
+			case epoch, ok := <-s.keyUpdates:
+				if !ok {
+					return protocol.BinaryFrame{}, ErrStreamClosed
+				}
+				data := make([]byte, 1+len(epoch.ID)+len(epoch.Key))
+				data[0] = 1
+				copy(data[1:17], epoch.ID[:])
+				copy(data[17:], epoch.Key[:])
+				return protocol.BinaryFrame{Channel: protocol.TerminalBroadcastKey, StartSequence: s.checkpointSequence, Data: data}, nil
+			case <-time.After(time.Second):
+				snapshot, err := s.snapshot()
+				if err != nil {
+					return protocol.BinaryFrame{}, ErrStreamClosed
+				}
+				if snapshot.State == session.Exited || snapshot.State == session.Closed {
+					payload, marshalErr := json.Marshal(struct {
+						Event         string          `json:"event"`
+						SessionID     string          `json:"session_id"`
+						State         session.State   `json:"state"`
+						FinalSequence uint64          `json:"final_sequence"`
+						Exit          *pty.ExitResult `json:"exit,omitempty"`
+					}{"terminal_stream_end", snapshot.ID, snapshot.State, snapshot.LatestSequence, snapshot.Exit})
+					if marshalErr != nil {
+						return protocol.BinaryFrame{}, marshalErr
+					}
+					return protocol.BinaryFrame{}, &StreamEnd{Payload: payload}
+				}
+				continue
+			}
+		}
+	}
 	for {
+		if _, err := s.snapshot(); err != nil {
+			return protocol.BinaryFrame{}, ErrStreamClosed
+		}
 		waitCtx, cancel := context.WithTimeout(ctx, terminalExitObservationInterval)
 		event, err := s.manager.WaitNext(waitCtx, s.sessionID, s.attachmentID)
 		cancel()
 		if err == nil {
+			if _, err := s.snapshot(); err != nil {
+				event.Release()
+				return protocol.BinaryFrame{}, ErrStreamClosed
+			}
 			return protocol.BinaryFrame{Channel: event.Channel, StartSequence: event.StartSequence, Data: event.Data, Release: event.Release}, nil
 		}
 		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
-			snapshot, snapshotErr := s.manager.Snapshot(s.sessionID)
+			snapshot, snapshotErr := s.snapshot()
 			if snapshotErr != nil {
-				return protocol.BinaryFrame{}, snapshotErr
+				return protocol.BinaryFrame{}, ErrStreamClosed
 			}
 			if snapshot.State != session.Exited && snapshot.State != session.Closed {
 				continue
@@ -495,7 +623,17 @@ func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, 
 	}
 }
 
+func (s *terminalOutputStream) snapshot() (session.Snapshot, error) {
+	if s.expectedGeneration != 0 {
+		return s.manager.SnapshotAtGeneration(s.sessionID, s.expectedGeneration)
+	}
+	return s.manager.Snapshot(s.sessionID)
+}
+
 func (s *terminalOutputStream) Close() error {
+	if s.broadcast != nil {
+		s.broadcast.Leave(s.sessionID, s.attachmentID)
+	}
 	err := s.manager.Detach(s.sessionID, s.attachmentID)
 	if s.writers != nil {
 		s.writers.Detach(s.sessionID, s.attachmentID)
@@ -524,10 +662,11 @@ type terminalRequest struct {
 }
 
 type terminalAttachResponse struct {
-	StreamID      uint32 `json:"stream_id,omitempty"`
-	AttachmentID  string `json:"attachment_id"`
-	InputSequence uint64 `json:"input_sequence,omitempty"`
-	Session       struct {
+	StreamID        uint32 `json:"stream_id,omitempty"`
+	AttachmentID    string `json:"attachment_id"`
+	InputSequence   uint64 `json:"input_sequence,omitempty"`
+	FirstAttachment bool   `json:"first_attachment,omitempty"`
+	Session         struct {
 		Snapshot session.Snapshot `json:"snapshot"`
 		Replay   struct {
 			FromSequence     uint64 `json:"from_sequence"`
@@ -539,7 +678,7 @@ type terminalAttachResponse struct {
 }
 
 func newTerminalAttachResponse(attachmentID string, attached session.AttachResult) terminalAttachResponse {
-	response := terminalAttachResponse{AttachmentID: attachmentID}
+	response := terminalAttachResponse{AttachmentID: attachmentID, FirstAttachment: attached.FirstAttachment}
 	response.Session.Snapshot = attached.Snapshot
 	response.Session.Replay.FromSequence = attached.Replay.FromSequence
 	response.Session.Replay.ToSequence = attached.Replay.ToSequence
@@ -550,20 +689,27 @@ func newTerminalAttachResponse(attachmentID string, attached session.AttachResul
 
 func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, payload json.RawMessage) operation.Outcome {
 	var request terminalRequest
-	if decodeStrict(payload, &request) != nil || authorization.ClientID == "" {
-		return failure("invalid_request")
+	if decodeStrict(payload, &request) != nil {
+		return failure("invalid_terminal_payload")
+	}
+	if authorization.ClientID == "" {
+		return failure("not_found_or_forbidden")
 	}
 	if authorization.SessionID != "" && request.SessionID != "" && authorization.SessionID != request.SessionID {
 		return failure("not_found_or_forbidden")
 	}
 	shared := isSharedTerminal(authorization)
-	if shared && (authorization.SessionID == "" || request.SessionID != "" && request.SessionID != authorization.SessionID) {
+	participantBound := isGenerationBoundTerminal(authorization)
+	if (shared || authorization.BrowserTerminal) && (authorization.SessionID == "" || request.SessionID != "" && request.SessionID != authorization.SessionID) {
 		return failure("not_found_or_forbidden")
 	}
 	if shared && !sharedTerminalActionAllowed(authorization.TerminalRole, request) {
 		return failure("not_found_or_forbidden")
 	}
-	if shared && request.SessionID == "" {
+	if authorization.BrowserTerminal && !browserTerminalActionAllowed(authorization.TerminalRole, request) {
+		return failure("not_found_or_forbidden")
+	}
+	if participantBound && request.SessionID == "" {
 		request.SessionID = authorization.SessionID
 	}
 	switch request.Action {
@@ -583,8 +729,16 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 	case "get", "snapshot":
 		value, err := d.config.Sessions.SnapshotAtGeneration(request.SessionID, authorization.TerminalGeneration)
 		return domainResult(value, err)
+	case "cursor":
+		value, err := d.config.Sessions.SnapshotAtGeneration(request.SessionID, authorization.TerminalGeneration)
+		if err != nil {
+			return domainResult(nil, err)
+		}
+		return result(struct {
+			LatestSequence uint64 `json:"latest_sequence"`
+		}{value.LatestSequence})
 	case "transfer-destinations":
-		value, err := d.config.Sessions.Snapshot(request.SessionID)
+		value, err := d.config.Sessions.SnapshotAtGeneration(request.SessionID, authorization.TerminalGeneration)
 		if err != nil {
 			return domainResult(nil, err)
 		}
@@ -597,14 +751,38 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 			EligibleTransferDestinationMachineIDs []string `json:"eligible_transfer_destination_machine_ids"`
 		}{Snapshot: value, EligibleTransferDestinationMachineIDs: eligible})
 	case "create":
-		cwd, ok := d.cwd(request.CWD)
+		if authorization.BrowserTerminal {
+			return failure("not_found_or_forbidden")
+		}
 		if request.SessionID == "" {
 			request.SessionID = authorization.SessionID
 		}
-		if !ok || request.Columns == 0 || request.Rows == 0 {
-			return failure("invalid_request")
+		cwd, ok := d.cwd(request.CWD)
+		if !ok {
+			return failure("invalid_terminal_workspace")
+		}
+		if request.Columns == 0 || request.Rows == 0 {
+			return failure("invalid_terminal_dimensions")
 		}
 		value, err := d.config.SessionLauncher.Launch(ctx, process.LaunchRequest{ID: request.SessionID, Name: request.Name, CWD: cwd, Dimensions: pty.Dimensions{Columns: request.Columns, Rows: request.Rows}, Environment: request.Environment})
+		if err != nil && !errors.Is(err, session.ErrSessionExists) {
+			// Keep terminal names, paths, output, and environment out of logs.
+			root := err
+			for errors.Unwrap(root) != nil {
+				root = errors.Unwrap(root)
+			}
+			var errno syscall.Errno
+			_ = errors.As(err, &errno)
+			slog.Warn("terminal creation failed", "error_type", fmt.Sprintf("%T", root), "errno", int(errno), "invalid_cwd", errors.Is(err, pty.ErrInvalidCWD), "invalid_session", errors.Is(err, session.ErrInvalidSession), "launch_rejected", errors.Is(err, process.ErrLaunchRejected))
+			outcome := domainResult(nil, err)
+			if outcome.ErrorCode == "invalid_request" {
+				return failureDetails("terminal_create_failed", struct {
+					ErrorType string `json:"error_type"`
+					Errno     int    `json:"errno"`
+				}{fmt.Sprintf("%T", root), int(errno)})
+			}
+			return outcome
+		}
 		if request.ExistingSnapshot {
 			// create-or-get lets one round trip both create a fresh session
 			// and resolve an already-running one. A name collision without a
@@ -628,6 +806,12 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 		return domainResult(value, err)
 	case "attach", "replay":
 		attachmentID := request.AttachmentID
+		if authorization.BrowserTerminal {
+			if attachmentID != "" && attachmentID != authorization.BrowserAttachmentID {
+				return failure("not_found_or_forbidden")
+			}
+			attachmentID = authorization.BrowserAttachmentID
+		}
 		if attachmentID == "" {
 			attachmentID = d.randomID("att_")
 		}
@@ -636,8 +820,11 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 		}
 		var value session.AttachResult
 		var err error
-		if shared {
-			value, err = d.config.Sessions.AttachParticipantAtGeneration(request.SessionID, session.Participant{AttachmentID: attachmentID, AccountID: authorization.AccountID, ClientID: authorization.ClientID, Role: string(authorization.TerminalRole), ConnectedAt: d.config.Now()}, request.FromSequence, authorization.TerminalGeneration)
+		participant := session.Participant{AttachmentID: attachmentID, AccountID: authorization.AccountID, ClientID: authorization.ClientID, Role: string(authorization.TerminalRole), ConnectedAt: d.config.Now(), Browser: authorization.BrowserTerminal}
+		if participantBound && request.AtLiveBoundary && authorization.BrowserTerminal {
+			value, err = d.config.Sessions.AttachLiveParticipantAtGeneration(request.SessionID, participant, authorization.TerminalGeneration)
+		} else if participantBound {
+			value, err = d.config.Sessions.AttachParticipantAtGeneration(request.SessionID, participant, request.FromSequence, authorization.TerminalGeneration)
 		} else if request.Action == "attach" && request.AtLiveBoundary {
 			value, err = d.config.Sessions.AttachLiveParticipant(request.SessionID, session.Participant{AttachmentID: attachmentID, AccountID: authorization.AccountID, ClientID: authorization.ClientID, Role: string(TerminalRoleOwner), ConnectedAt: d.config.Now()})
 		} else {
@@ -648,7 +835,7 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 		}
 		attachResponse := newTerminalAttachResponse(attachmentID, value)
 		if attachResponse.InputSequence, err = d.config.Sessions.InputSequence(request.SessionID, authorization.ClientID, attachmentID, value.Snapshot.Generation); err != nil {
-			if shared {
+			if participantBound {
 				_ = d.config.Sessions.DetachParticipantAtGeneration(request.SessionID, attachmentID, authorization.AccountID, authorization.ClientID, authorization.TerminalGeneration)
 			}
 			return domainResult(nil, err)
@@ -676,7 +863,13 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 		return result(attachResponse)
 	case "detach":
 		var err error
-		if shared {
+		if authorization.BrowserTerminal {
+			if request.AttachmentID != "" && request.AttachmentID != authorization.BrowserAttachmentID {
+				return failure("not_found_or_forbidden")
+			}
+			request.AttachmentID = authorization.BrowserAttachmentID
+		}
+		if participantBound {
 			err = d.config.Sessions.DetachParticipantAtGeneration(request.SessionID, request.AttachmentID, authorization.AccountID, authorization.ClientID, authorization.TerminalGeneration)
 		} else {
 			err = d.config.Sessions.Detach(request.SessionID, request.AttachmentID)
@@ -686,8 +879,11 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 		}
 		return domainResult(struct{}{}, err)
 	case "resize":
+		if authorization.BrowserTerminal && !browserAttachmentMatches(authorization, request.AttachmentID) {
+			return failure("not_found_or_forbidden")
+		}
 		var err error
-		if shared {
+		if participantBound {
 			err = d.config.Sessions.ResizeParticipantAtGeneration(request.SessionID, request.AttachmentID, authorization.AccountID, authorization.ClientID, authorization.TerminalGeneration, pty.Dimensions{Columns: request.Columns, Rows: request.Rows}, d.config.Now())
 		} else {
 			err = d.config.Sessions.Resize(request.SessionID, request.AttachmentID, pty.Dimensions{Columns: request.Columns, Rows: request.Rows}, d.config.Now())
@@ -695,38 +891,69 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 		return domainResult(struct{}{}, err)
 	case "signal":
 		generation := request.Generation
-		if shared {
+		if participantBound {
 			generation = authorization.TerminalGeneration
 		}
 		err := d.config.Sessions.Signal(request.SessionID, generation, pty.Signal(request.Signal))
 		return domainResult(struct{}{}, err)
 	case "clear":
+		if authorization.BrowserTerminal {
+			return failure("not_found_or_forbidden")
+		}
 		sequence, err := d.config.Sessions.Clear(request.SessionID)
 		return domainResult(struct {
 			Sequence uint64 `json:"sequence"`
 		}{sequence}, err)
 	case "restart":
-		value, err := d.config.Sessions.Restart(request.SessionID)
+		if authorization.BrowserTerminal {
+			return failure("not_found_or_forbidden")
+		}
+		value, err := d.config.Sessions.RestartContext(ctx, request.SessionID)
 		return domainResult(value, err)
 	case "close":
+		if authorization.BrowserTerminal {
+			return failure("not_found_or_forbidden")
+		}
 		value, err := d.config.Sessions.Close(ctx, request.SessionID)
 		if errors.Is(err, session.ErrSessionUnknown) {
 			return result(session.Snapshot{ID: request.SessionID, State: session.Closed})
 		}
 		return domainResult(value, err)
 	case "delete":
+		if authorization.BrowserTerminal {
+			return failure("not_found_or_forbidden")
+		}
 		err := d.config.Sessions.Delete(request.SessionID)
 		if errors.Is(err, session.ErrSessionUnknown) {
 			return result(struct{}{})
 		}
 		return domainResult(struct{}{}, err)
 	default:
-		return failure("invalid_request")
+		return failure("invalid_terminal_action")
 	}
 }
 
 func isSharedTerminal(authorization Authorization) bool {
-	return authorization.TerminalRole == TerminalRoleViewer || authorization.TerminalRole == TerminalRoleInteractive
+	return !authorization.BrowserTerminal && (authorization.TerminalRole == TerminalRoleViewer || authorization.TerminalRole == TerminalRoleInteractive)
+}
+
+func isGenerationBoundTerminal(authorization Authorization) bool {
+	return authorization.BrowserTerminal || isSharedTerminal(authorization)
+}
+
+func browserAttachmentMatches(authorization Authorization, attachmentID string) bool {
+	return !authorization.BrowserTerminal || authorization.BrowserAttachmentID != "" && authorization.BrowserAttachmentID == attachmentID
+}
+
+func browserTerminalActionAllowed(role TerminalRole, request terminalRequest) bool {
+	switch request.Action {
+	case "attach", "replay", "detach", "cursor":
+		return role == TerminalRoleOwner || role == TerminalRoleViewer || role == TerminalRoleInteractive
+	case "resize", "signal":
+		return role == TerminalRoleOwner || role == TerminalRoleInteractive
+	default:
+		return false
+	}
 }
 
 func sharedTerminalActionAllowed(role TerminalRole, request terminalRequest) bool {

@@ -6,6 +6,10 @@ Show a current path conflict
 
 Show a current path conflict
 
+Display the competing versions and status for one environment path. This is read-only and is the review step before conflict resolve.
+
+Conflicts identify exact paths whose local and repository versions cannot be merged automatically. Review the affected path before choosing a side; resolution records a deliberate decision for the next synchronization step.
+
 JSON output is supported with --json.
 
 ```

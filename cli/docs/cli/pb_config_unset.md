@@ -6,6 +6,10 @@ Remove a local configuration value
 
 Remove a local configuration value
 
+Remove the supported local server setting so the built-in or surrounding configuration applies. This does not revoke the current account session.
+
+Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
+
 JSON output is supported with --json.
 
 ```

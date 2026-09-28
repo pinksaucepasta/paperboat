@@ -595,17 +595,7 @@ func (m chooserModel) itemAtRow(row int) (int, bool) {
 	return index, index >= m.choices.offset && index < end
 }
 
-var (
-	brandColor     = lipgloss.AdaptiveColor{Light: "#1447E6", Dark: "#6F8CFF"}
-	titleStyle     = lipgloss.NewStyle().Bold(true).Foreground(brandColor)
-	subtitleStyle  = lipgloss.NewStyle().Faint(true)
-	selectedStyle  = lipgloss.NewStyle().Reverse(true)
-	actionStyle    = lipgloss.NewStyle().Bold(true).Foreground(brandColor)
-	favoriteStyle  = lipgloss.NewStyle().Bold(true).Foreground(brandColor)
-	favoriteMarker = lipgloss.NewStyle().Bold(true).Foreground(brandColor)
-	helpStyle      = lipgloss.NewStyle().Faint(true)
-	filterStyle    = lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("15")).Padding(0, 1)
-)
+var brandColor = lipgloss.AdaptiveColor{Light: "#1447E6", Dark: "#6F8CFF"}
 
 func (m chooserModel) View() string {
 	lineWidth := viewWidth(m.width)

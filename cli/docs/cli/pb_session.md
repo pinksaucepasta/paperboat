@@ -6,6 +6,8 @@ Manage environment terminal sessions
 
 Manage environment terminal sessions
 
+List, attach, rename, close, or delete durable terminal sessions, and manage exact session sharing. Use --all only on commands that expose it and inspect the affected environment first.
+
 With --json, this command group lists its available commands.
 
 ```
@@ -32,7 +34,7 @@ pb session [flags]
 * [pb](pb.md)	 - Open Paperboat or connect to an environment terminal
 * [pb session attach](pb_session_attach.md)	 - Choose and attach to a durable terminal session
 * [pb session close](pb_session_close.md)	 - Close one or all terminal sessions
-* [pb session delete](pb_session_delete.md)	 - Delete a terminal session and its history
+* [pb session delete](pb_session_delete.md)	 - Delete a closed terminal session record
 * [pb session join](pb_session_join.md)	 - Join an explicitly shared terminal with recent output
 * [pb session list](pb_session_list.md)	 - List durable terminal sessions
 * [pb session participants](pb_session_participants.md)	 - Show terminal sharing and connected participants

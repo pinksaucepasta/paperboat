@@ -58,10 +58,10 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnauthorized, "authentication_required")
 		case errors.Is(err, ErrForbidden):
 			writeError(w, http.StatusForbidden, "forbidden")
-		case errors.Is(err, ErrConflict):
-			writeError(w, http.StatusConflict, "enrollment_conflict")
 		case errors.Is(err, ErrActivation):
 			writeError(w, http.StatusServiceUnavailable, "activation_unavailable", activationDiagnosticCodeOf(err))
+		case errors.Is(err, ErrConflict):
+			writeError(w, http.StatusConflict, "enrollment_conflict")
 		case errors.Is(err, ErrSecretStore):
 			writeError(w, http.StatusServiceUnavailable, "credential_store_unavailable")
 		default:

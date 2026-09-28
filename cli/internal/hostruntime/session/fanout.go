@@ -26,14 +26,15 @@ type Eviction struct {
 }
 
 type attachmentCursor struct {
-	state        AttachmentState
-	maxBytes     uint64
-	queuedBytes  uint64
-	evictedBytes uint64
-	cursor       uint64
-	enqueuedEnd  uint64
-	hasCursor    bool
-	notify       chan struct{}
+	state         AttachmentState
+	receiveOutput bool
+	maxBytes      uint64
+	queuedBytes   uint64
+	evictedBytes  uint64
+	cursor        uint64
+	enqueuedEnd   uint64
+	hasCursor     bool
+	notify        chan struct{}
 }
 
 // Fanout retains one ordered ring of immutable chunks. Attachments track only
@@ -48,6 +49,16 @@ type Fanout struct {
 func NewFanout() *Fanout { return &Fanout{attachments: make(map[string]*attachmentCursor)} }
 
 func (f *Fanout) Attach(attachmentID string, maxPendingBytes uint64) error {
+	return f.attach(attachmentID, maxPendingBytes, true)
+}
+
+// AttachControl keeps an authorized participant present for input and
+// revocation while a shared encrypted output feed serves the browser.
+func (f *Fanout) AttachControl(attachmentID string, maxPendingBytes uint64) error {
+	return f.attach(attachmentID, maxPendingBytes, false)
+}
+
+func (f *Fanout) attach(attachmentID string, maxPendingBytes uint64, receiveOutput bool) error {
 	if attachmentID == "" || maxPendingBytes == 0 {
 		return ErrInvalidQueueLimit
 	}
@@ -56,7 +67,7 @@ func (f *Fanout) Attach(attachmentID string, maxPendingBytes uint64) error {
 	if existing := f.attachments[attachmentID]; existing != nil && existing.state == Attached {
 		return ErrAttachmentExists
 	}
-	f.attachments[attachmentID] = &attachmentCursor{state: Attached, maxBytes: maxPendingBytes, notify: make(chan struct{}, 1)}
+	f.attachments[attachmentID] = &attachmentCursor{state: Attached, receiveOutput: receiveOutput, maxBytes: maxPendingBytes, notify: make(chan struct{}, 1)}
 	f.active.Store(attachmentID, struct{}{})
 	return nil
 }
@@ -97,6 +108,29 @@ func (f *Fanout) IsAttached(attachmentID string) bool {
 	return ok
 }
 
+// SkipTo discards output covered by a screen checkpoint before the stream
+// starts. The session lock makes the checkpoint and this cursor update atomic
+// with PTY output publication.
+func (f *Fanout) SkipTo(attachmentID string, nextSequence uint64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cursor, ok := f.attachments[attachmentID]
+	if !ok || cursor.state != Attached {
+		return ErrAttachmentUnknown
+	}
+	if cursor.hasCursor && (nextSequence < cursor.cursor || nextSequence > cursor.enqueuedEnd) {
+		return ErrOutputOrder
+	}
+	if !cursor.hasCursor {
+		cursor.enqueuedEnd = nextSequence
+		cursor.hasCursor = true
+	}
+	cursor.cursor = nextSequence
+	cursor.queuedBytes = cursor.enqueuedEnd - nextSequence
+	f.compactLocked()
+	return nil
+}
+
 func (f *Fanout) Publish(event history.Event) ([]Eviction, error) {
 	event.Data = append([]byte(nil), event.Data...)
 	return f.PublishOwned(event)
@@ -109,14 +143,14 @@ func (f *Fanout) PublishOwned(event history.Event) ([]Eviction, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for id, cursor := range f.attachments {
-		if cursor.state == Attached && cursor.hasCursor && cursor.enqueuedEnd != event.StartSequence {
+		if cursor.state == Attached && cursor.receiveOutput && cursor.hasCursor && cursor.enqueuedEnd != event.StartSequence {
 			return nil, fmt.Errorf("attachment %s expected %d, got %d: %w", id, cursor.enqueuedEnd, event.StartSequence, ErrOutputOrder)
 		}
 	}
 	f.insertEventLocked(event)
 	var evictions []Eviction
 	for id, cursor := range f.attachments {
-		if cursor.state != Attached {
+		if cursor.state != Attached || !cursor.receiveOutput {
 			continue
 		}
 		if uint64(len(event.Data)) > cursor.maxBytes-cursor.queuedBytes {

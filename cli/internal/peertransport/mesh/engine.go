@@ -19,6 +19,8 @@ import (
 	"go4.org/netipx"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/disco"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-port-mapping
+	_ "tailscale.com/feature/portmapper"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/health"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
@@ -88,6 +90,7 @@ type locoBackend struct {
 	ns                     *netstack.Impl
 	dm                     *tailcfg.DERPMap
 	homeDERP               tailcfg.DERPRegionID
+	stunServers            []string
 	logf                   logger.Logf
 	allowedPeers           map[key.NodePublic]netip.Addr
 	policyMu               sync.Mutex // serializes policy replacement through device synchronization
@@ -120,11 +123,13 @@ func (b *locoBackend) derpRegionIDLocked() tailcfg.DERPRegionID {
 	if b.dm == nil {
 		panic("no derp map")
 	}
-	if b.homeDERP != 0 && b.dm.Regions[b.homeDERP] != nil {
+	if b.homeDERP != 0 && b.dm.Regions[b.homeDERP].HasDERP() {
 		return b.homeDERP
 	}
 	for _, r := range b.dm.Regions {
-		return r.RegionID
+		if r.HasDERP() {
+			return r.RegionID
+		}
 	}
 	return 0
 }
@@ -167,6 +172,7 @@ func (b *locoBackend) Close() error {
 // Set configuration before Start. Live policy changes use the replacement methods.
 // An empty peer map denies all peers; a zero identity or missing allocation is invalid.
 type Server struct {
+	STUNServers            []string
 	TestOnlyPacketListener nettype.PacketListener
 	PeerRelayNodes         []*tailcfg.Node
 	RelayControlPeers      []key.NodePublic
@@ -202,6 +208,9 @@ func (s *Server) Start() error {
 	if s.UDPIdleTimeout < 0 {
 		return errors.New("mesh: Server.UDPIdleTimeout must not be negative")
 	}
+	if err := ValidateSTUNServers(s.STUNServers); err != nil {
+		return err
+	}
 	logf := s.Logf
 	if logf == nil {
 		logf = logger.Discard
@@ -232,6 +241,8 @@ func (s *Server) Start() error {
 	for _, region := range regions {
 		mak.Set(&lb.dm.Regions, region.RegionID, region)
 	}
+	lb.stunServers = append([]string(nil), s.STUNServers...)
+	lb.dm = withSTUNServers(lb.dm, lb.stunServers)
 	if reg != nil {
 		lb.homeDERP = reg.RegionID
 	}
@@ -283,7 +294,12 @@ func (s *Server) Start() error {
 				// "meowed" is the ack that tells the client it can
 				// start dialing. Disallowed clients get no reply.
 				if lb.onMeow(src, discoPub) {
-					mc.SendDERPPacketTo(src, regionID, EncodeMeowed())
+					if _, err := mc.SendDERPPacketTo(src, regionID, EncodeMeowed()); err == nil {
+						// The client's peer map is installed before it sends the meow.
+						// Advertise after the acknowledgment on the same DERP route so
+						// it can process our endpoints before probing directly.
+						lb.advertiseEndpoints()
+					}
 				}
 			}()
 			return true
@@ -424,6 +440,10 @@ func (s *Server) prepareAuthorizedPeer(ctx context.Context, peer key.NodePublic,
 		lastSendErr = mc.SendDERPPacketToRegion(peer, region, packet)
 		select {
 		case <-ready:
+			// The first advertisement in onMeow can arrive before the remote
+			// has admitted us. Its acknowledgment proves that admission is now
+			// installed, so send our candidates again for direct discovery.
+			s.lb.advertiseEndpoints()
 			return nil
 		case <-ctx.Done():
 			s.peerReadyMu.Lock()
@@ -679,16 +699,16 @@ func (b *locoBackend) advertiseEndpoints() {
 	payload := (&disco.CallMeMaybe{MyNumber: eps}).AppendMarshal(nil)
 	discoPriv := discoPrivateForNode(b.priv)
 	mc := b.sys.MagicSock.Get()
-	regionID := b.derpRegionID()
 	for _, p := range peers {
 		// Frame and seal the message the same way magicsock's
 		// sendDiscoMessage does, so the peer's stock magicsock
-		// processes it natively.
+		// processes it natively. Use that peer's current rendezvous after
+		// regional promotion, as the meow handshake does.
 		pkt := make([]byte, 0, 512)
 		pkt = append(pkt, disco.Magic...)
 		pkt = b.discoPublic().AppendTo(pkt)
 		pkt = append(pkt, discoPriv.Shared(p.DiscoKey()).Seal(payload)...)
-		if _, err := mc.SendDERPPacketTo(p.Key(), regionID, pkt); err != nil {
+		if _, err := mc.SendDERPPacketTo(p.Key(), b.peerDERPRegion(p.Key()), pkt); err != nil {
 			b.logf("advertiseEndpoints to %v: %v", p.Key().ShortString(), err)
 		}
 	}
@@ -816,9 +836,6 @@ func (b *locoBackend) onMeow(src key.NodePublic, discoPub key.DiscoPublic) bool 
 	// new peer lazily via the config source installed with
 	// SetPeerConfigFunc when the client's handshake arrives.
 
-	// Tell the new client our UDP endpoints so both sides can attempt
-	// a direct path. Async because advertiseEndpoints takes b.mu.
-	go b.advertiseEndpoints()
 	return true
 }
 
@@ -950,7 +967,7 @@ func newNetstack(logf logger.Logf, sys *tsd.System) (*netstack.Impl, error) {
 func createEngine(logf logger.Logf, lb *locoBackend) (err error) {
 	sys := &lb.sys
 	conf := wgengine.Config{
-		ListenPort:             0,
+		ListenPort:             41642,
 		NetMon:                 sys.NetMon.Get(),
 		Dialer:                 sys.Dialer.Get(),
 		SetSubsystem:           sys.Set,

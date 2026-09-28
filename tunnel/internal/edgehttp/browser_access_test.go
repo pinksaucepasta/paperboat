@@ -138,6 +138,19 @@ func browserTestMatch() (route.RouteMatch, connectorprotocol.IngressDecision) {
 	m := route.RouteMatch{Host: b.Hostname, Rule: route.RouteRule{ID: b.RouteID, RouteID: b.RouteID, Revision: b.RouteGeneration, RouteGeneration: b.RouteGeneration, AccountID: b.AccountID, TunnelID: b.TunnelID, AccessMode: b.Audience, Node: d.EdgeNodeID, EdgeProcessEpoch: d.EdgeProcessEpoch, ConnectorID: d.ConnectorID, ConnectorSessionID: d.SessionID, ConnectorProcessGeneration: d.ProcessGeneration, ConfigGeneration: d.ConfigGeneration, Kind: route.TunnelHTTPSWSS}}
 	return m, d
 }
+
+func TestBrowserDecisionRequiresExactViewerPolicyGeneration(t *testing.T) {
+	match, decision := browserTestMatch()
+	match.Rule.ViewerPolicyGeneration = decision.PolicyGeneration
+	if !browserDecisionMatches(decision, match) {
+		t.Fatal("matching viewer policy generation was rejected")
+	}
+	decision.PolicyGeneration++
+	if browserDecisionMatches(decision, match) {
+		t.Fatal("stale viewer policy generation was accepted")
+	}
+}
+
 func TestBrowserAuthorizationExpiresAndDeniesBeforeForward(t *testing.T) {
 	m, d := browserTestMatch()
 	a := &browserAuthorityTest{decision: d}

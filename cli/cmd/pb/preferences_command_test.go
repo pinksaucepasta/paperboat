@@ -64,7 +64,11 @@ func TestCustomizationImportShowAndInvalidRecovery(t *testing.T) {
 	if code != 0 || errOut != "" {
 		t.Fatalf("bypass: %d %s %s", code, out, errOut)
 	}
-	code, out, errOut = invoke("config", "customize", "reset", "--yes", "--json")
+	code, out, errOut = invoke("config", "customize", "reset", "--json")
+	if code != 2 || errOut != "" {
+		t.Fatalf("reset preview: %d %s %s", code, out, errOut)
+	}
+	code, out, errOut = invoke("config", "customize", "reset", "--json", "--confirm", previewConfirmationCode(t, out))
 	if code != 0 || errOut != "" {
 		t.Fatalf("reset recovery: %d %s %s", code, out, errOut)
 	}

@@ -6,6 +6,10 @@ Choose the machine or repository version
 
 Choose the machine or repository version
 
+Resolve one exact path with --keep to select the machine or repository version. Use show first to inspect both sides; the chosen direction is recorded for synchronization.
+
+Conflicts identify exact paths whose local and repository versions cannot be merged automatically. Review the affected path before choosing a side; resolution records a deliberate decision for the next synchronization step.
+
 JSON output is supported with --json.
 
 ```

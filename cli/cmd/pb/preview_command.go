@@ -264,10 +264,6 @@ func runPreviewCobra(command *cobra.Command, args []string) error {
 	return runPreviewWithDomains(command, target, private, ttl, background, jsonOutput, domains)
 }
 
-func runPreviewForegroundWithDomains(command *cobra.Command, target preview.LeaseTarget, private bool, duration time.Duration, jsonOutput bool, domains []string) (resultErr error) {
-	return runPreviewWithDomains(command, target, private, duration, false, jsonOutput, domains)
-}
-
 func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, private bool, duration time.Duration, background bool, jsonOutput bool, domains []string) (resultErr error) {
 	machineID, err := previewMachineID()
 	if err != nil {

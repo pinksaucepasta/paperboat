@@ -34,7 +34,7 @@ func TestPeerEndpointKeysRemainLocalAndAcceptOnlyMatchingCertificate(t *testing.
 		t.Fatalf("info=%v err=%v", info, err)
 	}
 	rootPublic, rootPrivate, _ := ed25519.GenerateKey(nil)
-	certificate, err := endpointidentity.Sign(rootPrivate, endpointidentity.Claims{AccountID: "account_01", Role: endpointidentity.RoleMachine, EndpointID: "machine_01", NoisePublicKey: endpoint.NoisePublicKey(), QUICPublicKey: endpoint.QUICPublicKey(), Generation: 4, Serial: 1, IssuedAt: now, ExpiresAt: now.Add(time.Hour)})
+	certificate, err := endpointidentity.Sign(rootPrivate, endpointidentity.Claims{AccountID: "account_01", Role: endpointidentity.RoleMachine, EndpointID: "machine_01", QUICPublicKey: endpoint.QUICPublicKey(), Generation: 4, Serial: 1, IssuedAt: now, ExpiresAt: now.Add(time.Hour)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,10 +47,11 @@ func TestPeerEndpointKeysRemainLocalAndAcceptOnlyMatchingCertificate(t *testing.
 		t.Fatal(err)
 	}
 	loaded, err := reopened.PeerEndpoint()
-	if err != nil || !bytes.Equal(loaded.Certificate, raw) || loaded.NoisePublicKey() != endpoint.NoisePublicKey() || !bytes.Equal(loaded.QUICPublicKey(), endpoint.QUICPublicKey()) {
+	if err != nil || !bytes.Equal(loaded.Certificate, raw) || !bytes.Equal(loaded.QUICPublicKey(), endpoint.QUICPublicKey()) {
 		t.Fatalf("loaded=%+v err=%v", loaded, err)
 	}
-	bad, _ := endpointidentity.Sign(rootPrivate, endpointidentity.Claims{AccountID: "account_01", Role: endpointidentity.RoleMachine, EndpointID: "machine_01", NoisePublicKey: [32]byte{1}, QUICPublicKey: endpoint.QUICPublicKey(), Generation: 4, Serial: 2, IssuedAt: now, ExpiresAt: now.Add(time.Hour)})
+	wrongQUIC := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{9}, ed25519.SeedSize)).Public().(ed25519.PublicKey)
+	bad, _ := endpointidentity.Sign(rootPrivate, endpointidentity.Claims{AccountID: "account_01", Role: endpointidentity.RoleMachine, EndpointID: "machine_01", QUICPublicKey: wrongQUIC, Generation: 4, Serial: 2, IssuedAt: now, ExpiresAt: now.Add(time.Hour)})
 	badRaw, _ := bad.MarshalBinary()
 	if err := store.SavePeerEndpointCertificate(rootPublic, badRaw, now); err == nil {
 		t.Fatal("mismatched certificate was accepted")
@@ -79,7 +80,7 @@ func TestPeerEndpointRotatesKeysForNewInstallationGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	second, err := store.PeerEndpoint()
-	if err != nil || second.Generation != 2 || second.NoisePublicKey() == first.NoisePublicKey() || bytes.Equal(second.QUICPublicKey(), first.QUICPublicKey()) {
+	if err != nil || second.Generation != 2 || bytes.Equal(second.QUICPublicKey(), first.QUICPublicKey()) {
 		t.Fatalf("first=%+v second=%+v err=%v", first, second, err)
 	}
 }
@@ -100,15 +101,15 @@ func TestPeerEndpointRecoversMalformedUnsignedState(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(root, "peer-endpoint.json")
-	malformed := `{"version":1,"generation":1,"noise_private_key_base64url":"!","quic_seed_base64url":"!"}`
+	malformed := `{"version":1,"generation":1,"quic_seed_base64url":"!"}`
 	if err := os.WriteFile(path, []byte(malformed), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	recovered, err := store.PeerEndpoint()
-	if err != nil || recovered.Generation != 1 || recovered.NoisePublicKey() == first.NoisePublicKey() || bytes.Equal(recovered.QUICPublicKey(), first.QUICPublicKey()) {
+	if err != nil || recovered.Generation != 1 || bytes.Equal(recovered.QUICPublicKey(), first.QUICPublicKey()) {
 		t.Fatalf("recovered=%+v err=%v", recovered, err)
 	}
-	certified := `{"version":1,"generation":1,"noise_private_key_base64url":"!","quic_seed_base64url":"!","certificate_base64url":"!","root_public_key_base64url":"!"}`
+	certified := `{"version":1,"generation":1,"quic_seed_base64url":"!","certificate_base64url":"!","root_public_key_base64url":"!"}`
 	if err := os.WriteFile(path, []byte(certified), 0o600); err != nil {
 		t.Fatal(err)
 	}

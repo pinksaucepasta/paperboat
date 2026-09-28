@@ -4,22 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"net"
 	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/connectionmanager"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/transportmanager"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 )
 
-func TunnelPeerStreamOpener(peerTunnel *tunnel.PeerTerminalTunnel) func(context.Context, localapi.Peer, localapi.PeerStreamRequest, *transportmanager.Manager) (net.Conn, error) {
-	return func(ctx context.Context, _ localapi.Peer, request localapi.PeerStreamRequest, _ *transportmanager.Manager) (net.Conn, error) {
+func TunnelPeerStreamOpener(peerTunnel *tunnel.PeerTerminalTunnel) func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (net.Conn, error) {
+	return func(ctx context.Context, _ localapi.Peer, request localapi.PeerStreamRequest) (net.Conn, error) {
 		started := time.Now()
 		if ctx == nil || peerTunnel == nil || request.Validate(peerTunnelNow()) != nil {
 			return nil, ErrInvalidInventoryConfig
@@ -33,7 +30,7 @@ func TunnelPeerStreamOpener(peerTunnel *tunnel.PeerTerminalTunnel) func(context.
 		cursor := &tunnel.LocalPeerCursorBridge{}
 		target := &resolver.TerminalTarget{Protocol: terminalPayload.Protocol, Debug: terminalPayload.Debug, EnvironmentID: request.EnvironmentID, Auth: resolver.AuthTarget{Scopes: terminalPayload.Scopes, Token: request.Credential, ExpiresAt: request.Deadline.UTC().Format("2006-01-02T15:04:05Z07:00"), ResourceID: request.AccessSessionID}, ThreadID: terminalPayload.ThreadID, TerminalID: terminalPayload.TerminalID, SessionID: terminalPayload.SessionID, CWD: terminalPayload.CWD, Env: terminalPayload.Environment, Cols: terminalPayload.Columns, Rows: terminalPayload.Rows, RestartIfNotRunning: terminalPayload.RestartIfNotRunning, ReplayHistory: terminalPayload.ReplayHistory, AfterSequence: terminalPayload.AfterSequence, InputAttachmentID: terminalPayload.InputAttachmentID, SequenceSink: cursor.RecordSequence, ReplayGapSink: cursor.RecordReplayGap}
 		target.QUICEndpoint, target.WSSEndpoint = request.QUICEndpoint, request.WSSEndpoint
-		info := resolver.ConnectInfo{TargetKind: "machine", ProjectID: request.MachineID, MachineGeneration: request.MachineGeneration, Transport: request.Transport, Terminal: target}
+		info := resolver.ConnectInfo{TargetKind: "machine", ProjectID: request.MachineID, MachineGeneration: request.MachineGeneration, Terminal: target}
 		// Setup is part of the local API request and must stop when the caller
 		// cancels or its deadline expires. Once the HTTP handler upgrades, the
 		// returned stream becomes daemon-owned and is governed by its lease.
@@ -74,7 +71,7 @@ func TunnelPeerStreamOpener(peerTunnel *tunnel.PeerTerminalTunnel) func(context.
 				return nil, ErrInvalidInventoryConfig
 			}
 		}
-		remote, err = dialWithInvalidationRetry(lifetime, dial)
+		remote, err = dial()
 		if errors.Is(err, ErrInvalidInventoryConfig) {
 			stopCallerCancel()
 			deadlineTimer.Stop()
@@ -113,56 +110,19 @@ func TunnelPeerStreamOpener(peerTunnel *tunnel.PeerTerminalTunnel) func(context.
 
 func TunnelPeerProbe(peerTunnel *tunnel.PeerTerminalTunnel) func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (localapi.PeerProbeResult, error) {
 	return func(ctx context.Context, _ localapi.Peer, request localapi.PeerStreamRequest) (localapi.PeerProbeResult, error) {
-		if peerTunnel == nil || request.Consumer != "health_probe" {
+		if ctx == nil || peerTunnel == nil || request.Consumer != "health_probe" || request.Validate(time.Now().UTC()) != nil {
 			return localapi.PeerProbeResult{}, ErrInvalidInventoryConfig
 		}
-		var targetPayload localapi.PeerTerminalPayload
-		if len(request.Payload) > 0 {
-			if err := json.Unmarshal(request.Payload, &targetPayload); err != nil {
-				return localapi.PeerProbeResult{}, err
-			}
-		}
-		target := resolver.ConnectInfo{TargetKind: "machine", ProjectID: request.MachineID, MachineGeneration: request.MachineGeneration, Transport: request.Transport, Terminal: &resolver.TerminalTarget{Protocol: targetPayload.Protocol, EnvironmentID: request.EnvironmentID, Auth: resolver.AuthTarget{ExpiresAt: request.Deadline.UTC().Format(time.RFC3339)}}}
-		result, err := peerTunnel.PingTransport(ctx, target, request.Transport)
-		if err != nil && retryablePeerProbe(ctx, err) {
-			diagnosticlog.TryInfo("local peer probe retrying with a fresh path", "machine_id", request.MachineID, "error", err)
-			result, err = peerTunnel.PingTransport(ctx, target, request.Transport)
-		}
+		result, err := peerTunnel.ProbeNative(ctx, request.MachineID, request.MachineGeneration)
 		if err != nil {
 			diagnosticlog.TryInfo("local peer probe failed", "machine_id", request.MachineID, "error", err)
-			return localapi.PeerProbeResult{}, localProbeError(err)
+			if errors.Is(err, tailnet.ErrAdmission) || errors.Is(err, tailnet.ErrAuthority) {
+				return localapi.PeerProbeResult{}, errors.Join(localapi.ErrPermission, err)
+			}
+			return localapi.PeerProbeResult{}, err
 		}
-		path := "unknown"
-		switch result.Path {
-		case connectionmanager.PathDirectQUIC:
-			path = "direct_quic"
-		case connectionmanager.PathRelayQUIC:
-			path = "relay_quic"
-		case connectionmanager.PathWSS:
-			path = "wss"
-		}
-		return localapi.PeerProbeResult{Transport: path, RelayRegion: result.RelayRegion, ConnectionNanoseconds: result.Connection.Nanoseconds(), RTTNanoseconds: result.RTT.Nanoseconds(), PTOs: result.PTOs}, nil
+		return localapi.PeerProbeResult{Path: result.Path, ConnectionNanoseconds: result.Connection.Nanoseconds()}, nil
 	}
-}
-
-// localProbeError preserves terminal authority failures across the local IPC boundary.
-func localProbeError(err error) error {
-	var failure *connectionmanager.Failure
-	if errors.As(err, &failure) && failure.Class >= connectionmanager.FailureAuthentication && failure.Class <= connectionmanager.FailureGeneration {
-		return errors.Join(localapi.ErrPermission, err)
-	}
-	return err
-}
-
-func retryablePeerProbe(ctx context.Context, err error) bool {
-	if ctx == nil || ctx.Err() != nil {
-		return false
-	}
-	var failure *connectionmanager.Failure
-	if errors.As(err, &failure) {
-		return failure.AllowsFallback()
-	}
-	return !errors.Is(err, context.Canceled)
 }
 
 type rawPeerConn struct {
@@ -192,20 +152,3 @@ func (a rawPeerAddr) Network() string { return "paperboat-peer" }
 func (a rawPeerAddr) String() string  { return string(a) }
 
 func peerTunnelNow() time.Time { return time.Now().UTC() }
-
-func dialWithInvalidationRetry(ctx context.Context, dial func() (tunnel.Conn, error)) (tunnel.Conn, error) {
-	connection, err := dial()
-	if err == nil || ctx.Err() != nil || !retryablePeerDial(err) {
-		return connection, err
-	}
-	diagnosticlog.TryInfo("local peer dial retrying with a fresh machine session", "error", err)
-	retryConnection, retryErr := dial()
-	if retryErr != nil {
-		return nil, errors.Join(fmt.Errorf("initial peer dial: %w", err), fmt.Errorf("fresh peer dial retry: %w", retryErr))
-	}
-	return retryConnection, nil
-}
-
-func retryablePeerDial(err error) bool {
-	return errors.Is(err, transportmanager.ErrInvalid) || errors.Is(err, tunnel.ErrPeerStreamOpen) || tunnel.FallbackEligible(err) || errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed)
-}

@@ -6,6 +6,10 @@ Show Paperboat daemon current-user service status
 
 Show Paperboat daemon current-user service status
 
+Report whether the current-user daemon service is installed and running. Runtime readiness and account connectivity may require pb status or pb doctor as well.
+
+Service commands manage the current user's background Paperboat daemon through the host operating system. The service runs pb daemon; it is not a separate Paperboat binary. Use status to inspect the supervised process and restart after a local configuration change.
+
 JSON output is supported with --json.
 
 ```

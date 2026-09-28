@@ -1101,7 +1101,7 @@ func workerEnvironment(request Request) map[string]string {
 		directHosts += "," + releaseHost
 	}
 	return map[string]string{
-		"HOME": request.Home, "PATH": request.Path, "PAPERBOAT_RUNTIME_PROFILE": "byod",
+		"HOME": request.Home, "PATH": request.Path,
 		"PAPERBOAT_RUNTIME_STATE_ROOT": request.StateRoot, "PAPERBOAT_WORKSPACE_ROOT": request.WorkspaceRoot,
 		"PAPERBOAT_CONTROL_URL": request.ControlURL, "PAPERBOAT_MACHINE_ID": request.UserMachineID,
 		"PAPERBOAT_SHELL": request.Shell, "PAPERBOAT_RUNTIME_LISTEN_ADDRESS": request.HelperListenAddress,

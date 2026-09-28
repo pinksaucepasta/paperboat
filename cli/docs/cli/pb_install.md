@@ -6,6 +6,8 @@ Install this executable and its local service
 
 Install this executable and its local service
 
+Install this executable and its local background service on the current machine. --install-dir selects the binary location; use pb service status after installation to inspect the supervised daemon.
+
 JSON output is supported with --json.
 
 ```

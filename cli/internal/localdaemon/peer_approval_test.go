@@ -68,7 +68,7 @@ func TestApproveOwnedPeerEnrollmentsAutomaticCLIApproval(t *testing.T) {
 				t.Fatal(err)
 			}
 			quic := pendingKeys.QUICPrivate.Public().(ed25519.PublicKey)
-			pending := api.PendingEndpointIdentity{RequestID: "per_0123456789abcdef", EndpointID: endpointID, Role: "cli", State: "pending", Generation: 1, NoisePublicKey: base64.RawURLEncoding.EncodeToString(pendingKeys.NoisePublic[:]), QUICPublicKey: base64.RawURLEncoding.EncodeToString(quic), CreatedAt: serverNow.Add(-time.Minute), ExpiresAt: serverNow.Add(4 * time.Minute), SafetyCode: "abcde-fghij"}
+			pending := api.PendingEndpointIdentity{RequestID: "per_0123456789abcdef", EndpointID: endpointID, Role: "cli", State: "pending", Generation: 1, QUICPublicKey: base64.RawURLEncoding.EncodeToString(quic), CreatedAt: serverNow.Add(-time.Minute), ExpiresAt: serverNow.Add(4 * time.Minute), SafetyCode: "abcde-fghij"}
 			rootPublic := keys.RootPrivate.Public().(ed25519.PublicKey)
 			rootSum := sha256.Sum256(rootPublic)
 			rootKeyID := "aek_" + hex.EncodeToString(rootSum[:])
@@ -144,7 +144,7 @@ func TestApproveOwnedPeerEnrollmentsVerifierOnlyReturnsTypedNonSignerForMixedPen
 		t.Fatal(err)
 	}
 	quicPublic := endpointKeys.QUICPrivate.Public().(ed25519.PublicKey)
-	verifierCertificate, err := endpointidentity.Sign(rootPrivate, endpointidentity.Claims{AccountID: accountID, Role: endpointidentity.RoleCLI, EndpointID: daemonID, NoisePublicKey: endpointKeys.NoisePublic, QUICPublicKey: quicPublic, Generation: 1, Serial: 1, IssuedAt: serverNow.Add(-time.Minute), ExpiresAt: serverNow.Add(time.Hour)})
+	verifierCertificate, err := endpointidentity.Sign(rootPrivate, endpointidentity.Claims{AccountID: accountID, Role: endpointidentity.RoleCLI, EndpointID: daemonID, QUICPublicKey: quicPublic, Generation: 1, Serial: 1, IssuedAt: serverNow.Add(-time.Minute), ExpiresAt: serverNow.Add(time.Hour)})
 	clear(rootPrivate)
 	clearPeerKeysForTest(&endpointKeys)
 	if err != nil {
@@ -295,8 +295,5 @@ func clearPeerKeysForTest(keys *config.PeerIdentityKeys) {
 	}
 	for i := range keys.QUICPrivate {
 		keys.QUICPrivate[i] = 0
-	}
-	for i := range keys.NoisePrivate {
-		keys.NoisePrivate[i] = 0
 	}
 }

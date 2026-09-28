@@ -14,7 +14,7 @@ an actionable upgrade error instead of malformed session data. See
 
 ## Usage
 
-Install and enroll with a command from the dashboard or from `pb machine add` on
+Install and enroll with a command from the dashboard or from `pb device add` on
 an authenticated machine. If Paperboat is already installed, `pb auth login`
 accepts the same 26-character token directly for CLI authentication.
 
@@ -24,10 +24,10 @@ macOS PKG install bundled manuals automatically. For source installs, use
 `make install` or `make install-man`; see the guide for custom manual paths.
 
 ```sh
-pb <environment>             # attach a hosted project or machine terminal
-pb environments               # list hosted projects and machines
+pb <environment>             # attach an enrolled machine terminal
+pb environments               # list enrolled machines
 pb auth login                # enter the enrollment token directly
-pb machine add               # print Linux/macOS and Windows install commands
+pb device add               # print Linux/macOS and Windows install commands
 pb auth status               # show the active account for the configured server
 pb auth logout               # revoke and remove this installation's session
 pb doctor                    # check auth + environment connectivity
@@ -41,7 +41,7 @@ pb preview 3000 --private    # require the local Paperboat runtime
 
 Flags may appear before or after the environment name.
 Hosted projects and machines use the same durable terminal-session workflow:
-`--new`, `--session`, and `pb sessions` apply to either environment type.
+`--new`, `--session`, and `pb session` apply to either environment type.
 
 ## Interactive CLI
 
@@ -123,7 +123,7 @@ pb config customize explain --json -- mac -- uptime
 pb config customize validate --json
 pb config customize import ./my-preferences.json --json
 pb --no-customization config path --json
-pb config customize reset --yes
+pb config customize reset
 ```
 
 Typing `pb 3000` starts a preview. Setting `port_action` to `tunnel` selects durable
@@ -233,13 +233,10 @@ Attach flags override saved behavior for one session:
 ```sh
 pb demo --status-bar=off
 pb demo --status-bar-fullscreen=show --status-bar-theme=mono
-pb demo --path=d
 ```
 
-Terminal attachments use `connect.terminal_transport`, with `a` (the default), `d`, `q`,
-`w`, or `r`. Auto races direct and relay paths, prefers direct, and keeps a relay standby
-while the application is active. `--path` overrides the mode for one command without
-rewriting configuration. Explicit path modes never select a path outside their contract.
+Terminal attachments use the native peer path chosen by the connection engine.
+`pb ping` reports the observed direct or relay path.
 
 The bar automatically drops storage, credits, config-sync, session, and project widgets
 in that order as width becomes constrained. Connection and active failure state retain
@@ -260,13 +257,23 @@ restrictions. A paste is rewritten only after the whole batch publishes atomical
 reuse transfer IDs and confirmed offsets, and failures preserve the exact original paste.
 Published remote files remain for seven days.
 
-Use `pb send <path>... --to <machine>` to deliver files to another machine's configured
+Use `pb send <path>... --to <device>` to deliver files to another device's configured
 Paperboat Inbox. Session and user defaults are explicit, multi-attachment ambiguity never
 selects the latest writer, and the sender exits successfully only after the destination
 verifies size and SHA-256, fsyncs the file, avoids name collisions, and records a durable
 receipt. Inbox files remain until the user removes them.
 
-## Machines
+Use `pb send destination set <device>` for a default recipient, and `pb send list`,
+`pb send status <transfer-id>`, or `pb send cancel <transfer-id>` with `--on <device>`
+to manage an outgoing delivery. `pb inbox` controls the receiving directory and
+incoming team requests. `pb edge list` shows Paperboat-hosted and selected
+self-hosted tunnel edges; `pb relay list` does the same for relays. A
+self-hosted-only pool shows only its selected nodes. If none are selected,
+the lists show hosted nodes for reference while the pool policy still prevents
+using them until mixed mode is selected. `pb tunnel status <tunnel>` checks a
+particular tunnel.
+
+## Devices
 
 Run `pb setup` to register this device, create its Paperboat Inbox, and install
 the running executable as the Paperboat service. Enrollment contacts the account
@@ -346,12 +353,12 @@ Read the current team generation with `pb team get` before each mutation:
 
 ```sh
 pb team get research
-pb team machine share research MACHINE_ID --generation CURRENT_GENERATION
-pb team machine grant research MACHINE_ID --member ACCOUNT_ID \
+pb team device share research MACHINE_ID --generation CURRENT_GENERATION
+pb team device grant research MACHINE_ID --member ACCOUNT_ID \
   --capability terminal,exec,files --generation CURRENT_GENERATION
-pb team machine grant research MACHINE_ID --all-members \
+pb team device grant research MACHINE_ID --all-members \
   --capability managed_ssh --generation CURRENT_GENERATION
-pb team machine unshare research MACHINE_ID --generation CURRENT_GENERATION
+pb team device unshare research MACHINE_ID --generation CURRENT_GENERATION
 ```
 
 The six exact capabilities are `terminal`, `exec`, `managed_ssh` (including SCP, SFTP and
@@ -366,7 +373,7 @@ No machine grant implies ENV administration, public publication or resharing.
 A personal owner who is also a team owner/admin can explicitly transfer the enrollment:
 
 ```sh
-pb team machine transfer-to-team research MACHINE_ID \
+pb team device transfer-to-team research MACHINE_ID \
   --generation CURRENT_GENERATION --confirm MACHINE_ID
 ```
 
@@ -374,7 +381,7 @@ The team then controls the enrollment, other personal team shares are withdrawn,
 enroller loses implicit personal control. Remaining authorized members can keep using it
 when the enroller leaves. Team owner/admin roles govern management; machine use still
 requires a grant. Transferring the team to a new owner preserves its machine ownership.
-`pb team machine remove` requires the same exact confirmation and revokes the team-owned
+`pb team device remove` requires the same exact confirmation and revokes the team-owned
 enrollment. Deleting the team also revokes its team-owned enrollments, without converting
 them to personal property. Personal machines remain personal; withdrawing a share or
 leaving the team removes that team's access. Use the dashboard's Teams page for the same

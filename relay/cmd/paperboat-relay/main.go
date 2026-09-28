@@ -16,6 +16,7 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -26,6 +27,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-relay/operator"
 	"github.com/pinksaucepasta/paperboat-relay/peerrelay"
 	"go4.org/mem"
+	"tailscale.com/net/stunserver"
 	"tailscale.com/types/key"
 )
 
@@ -67,6 +69,13 @@ func run(reporters ...*reporting.Reporter) error {
 	flag.Parse()
 	if *listen == "" || *wssListen == "" || *keys == "" {
 		return errors.New("DERP/QUIC and WSS listen addresses and trusted JWKS are required")
+	}
+	_, quicPort, quicAddressErr := net.SplitHostPort(*listen)
+	_, wssPort, wssAddressErr := net.SplitHostPort(*wssListen)
+	quicPortNumber, quicPortErr := strconv.Atoi(quicPort)
+	wssPortNumber, wssPortErr := strconv.Atoi(wssPort)
+	if quicAddressErr != nil || wssAddressErr != nil || quicPortErr != nil || wssPortErr != nil || quicPortNumber < 1 || quicPortNumber > 65535 || wssPortNumber < 1 || wssPortNumber > 65535 || quicPortNumber == wssPortNumber {
+		return errors.New("DERP/QUIC and WSS/STUN listen ports must be valid and distinct")
 	}
 	pair, err := tls.LoadX509KeyPair(*cert, *private)
 	if err != nil {
@@ -191,6 +200,13 @@ func run(reporters ...*reporting.Reporter) error {
 	httpServer := &http.Server{Handler: server.WSSHandler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 45 * time.Second, MaxHeaderBytes: 16 << 10}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	// The operator-approved WSS TCP port also serves STUN over UDP. This
+	// separate socket lets magicsock discover public endpoints without making
+	// QUIC packet handling depend on unauthenticated STUN traffic.
+	stun := stunserver.New(ctx)
+	if err := stun.Listen(*wssListen); err != nil {
+		return errors.New("cannot bind relay STUN listener")
+	}
 	var metricsDone chan struct{}
 	if reporter != nil {
 		metricsDone = make(chan struct{})
@@ -251,6 +267,7 @@ func run(reporters ...*reporting.Reporter) error {
 	errs := make(chan error, 4)
 	go func() { errs <- server.Serve(ctx, socket, &tls.Config{Certificates: []tls.Certificate{pair}}) }()
 	go func() { errs <- httpServer.Serve(tls.NewListener(tcp, wssTLS)) }()
+	go func() { errs <- stun.Serve() }()
 	controlDone := make(chan struct{})
 	go func() { defer close(controlDone); errs <- control.Run(ctx, server) }()
 	err = <-errs

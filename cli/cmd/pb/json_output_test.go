@@ -53,9 +53,9 @@ func TestPersistentJSONBeforeCommandFeedsExistingJSONHandler(t *testing.T) {
 	}
 }
 
-func TestJSONMachineMutationRequiresExplicitConfirmationBeforeBackend(t *testing.T) {
+func TestJSONRejectsRemovedYesFlagBeforeBackend(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), []string{"session", "close", "demo", "work", "--json"}, &stdout, &stderr)
+	code := run(context.Background(), []string{"session", "close", "demo", "work", "--yes", "--json"}, &stdout, &stderr)
 	if code != 2 {
 		t.Fatalf("exit = %d, want 2; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}

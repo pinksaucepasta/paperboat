@@ -19,7 +19,7 @@ func TestSharedMachineSSHAliasRequiresUnambiguousTarget(t *testing.T) {
 	}))
 	defer server.Close()
 	client := api.New(server.URL, config.Credential{AccessToken: "token"}, server.Client())
-	if _, err := resolveSSHMachine(context.Background(), client, "dev"); !errors.Is(err, resolver.ErrProjectAmbiguous) {
+	if _, err := resolveSSHMachine(context.Background(), client, "dev"); !errors.Is(err, resolver.ErrMachineAmbiguous) {
 		t.Fatalf("shared alias silently selected a machine: %v", err)
 	}
 	machine, err := resolveSSHMachine(context.Background(), client, "machine_second")

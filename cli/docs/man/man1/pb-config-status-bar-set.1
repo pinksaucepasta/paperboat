@@ -6,11 +6,17 @@ pb-config-status-bar-set - Set a status-bar preference
 
 
 .SH SYNOPSIS
-\fBpb config status-bar set   [flags]\fP
+\fBpb config status-bar set <key> <value> [flags]\fP
 
 
 .SH DESCRIPTION
 Set a status-bar preference
+
+.PP
+Set one status-bar preference by key and value. Preview the result before using it in a full-screen terminal application.
+
+.PP
+The status bar is rendered by the interactive terminal client. Preferences affect local presentation and do not change remote sessions. Use preview to inspect the result before relying on a theme or width setting.
 
 .PP
 JSON output is supported with --json.

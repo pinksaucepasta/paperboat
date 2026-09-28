@@ -123,7 +123,7 @@ func TestAuthTokenLoginAuthenticatesMachineAddWithoutInstallation(t *testing.T) 
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	if code := run(context.Background(), []string{"--config", cfg, "machine", "add"}, &output, &output); code != 0 {
+	if code := run(context.Background(), []string{"--config", cfg, "device", "add"}, &output, &output); code != 0 {
 		t.Fatalf("machine add exit=%d", code)
 	}
 	if !strings.Contains(output.String(), "Linux/macOS:") || !strings.Contains(output.String(), "Windows (PowerShell or Command Prompt):") {
@@ -132,7 +132,7 @@ func TestAuthTokenLoginAuthenticatesMachineAddWithoutInstallation(t *testing.T) 
 	if len(requests) != 2 {
 		t.Fatalf("requests=%v", requests)
 	}
-	command, _, err := newRootCommand().Find([]string{"machine", "add"})
+	command, _, err := newRootCommand().Find([]string{"device", "add"})
 	if err != nil || command.Flags().Lookup("shell") != nil {
 		t.Fatal("machine add still exposes --shell")
 	}

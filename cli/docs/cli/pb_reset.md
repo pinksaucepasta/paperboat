@@ -6,6 +6,8 @@ Remove the current Paperboat setup before fresh enrollment
 
 Remove the current Paperboat setup before fresh enrollment
 
+Remove the current local Paperboat setup before fresh enrollment. Exact confirmation and host identity guard against resetting the wrong device; use uninstall for a complete local removal.
+
 JSON output is supported with --json.
 
 ```

@@ -224,10 +224,7 @@ func setEnvironmentVariableForScope(command *cobra.Command, team, requestedMachi
 	return err
 }
 
-func unsetEnvironmentVariableForScope(command *cobra.Command, team, requestedMachine, name string, confirmed bool) error {
-	if !confirmed {
-		return invocationError(errors.New("environment variable removal requires --yes"))
-	}
+func unsetEnvironmentVariableForScope(command *cobra.Command, team, requestedMachine, name string) error {
 	if err := validateEnvironmentVariableNameForCLI(name); err != nil {
 		return invocationError(err)
 	}
@@ -244,6 +241,9 @@ func unsetEnvironmentVariableForScope(command *cobra.Command, team, requestedMac
 	}
 	target, err := vaultScopeTargetForCommand(command, client, manager.AccountID, team, requestedMachine)
 	if err != nil {
+		return err
+	}
+	if err := confirmMutation(command, "env-unset:"+target.kind+":"+target.owner+":"+target.machine+":"+name, fmt.Sprintf("Remove ENV name %s from %s? New processes will no longer receive it; other names remain.", name, target.label)); err != nil {
 		return err
 	}
 	if err := manager.MutateScope(command.Context(), target.kind, target.owner, target.machine, func(values map[string][]byte) error {

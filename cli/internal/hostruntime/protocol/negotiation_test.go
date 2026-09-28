@@ -8,9 +8,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 )
 
-func TestBYODNegotiationFiltersHostedAndUnprovedConfig(t *testing.T) {
-	available := map[string]bool{"terminal.v1": true, "health.v1": true, "exec.v1": true, "ssh.v1": true, "config.apply.v1": true, "hosted.lifecycle.v1": true}
-	w, err := (Negotiator{Profile: config.BYOD, Available: available}).Negotiate("1.0", "1.0", []string{"terminal.v1", "health.v1", "exec.v1", "ssh.v1", "config.apply.v1", "hosted.lifecycle.v1", "future.v1"})
+func TestBYODNegotiationFiltersUnavailableCapabilities(t *testing.T) {
+	available := map[string]bool{"terminal.v1": true, "health.v1": true, "exec.v1": true, "ssh.v1": true}
+	w, err := (Negotiator{Profile: config.BYOD, Available: available}).Negotiate("1.0", "1.0", []string{"terminal.v1", "health.v1", "exec.v1", "ssh.v1", "config.apply.v1", "future.v1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -20,7 +20,7 @@ func TestBYODNegotiationFiltersHostedAndUnprovedConfig(t *testing.T) {
 }
 
 func TestNegotiationRequiresVersionAndRequiredCapabilities(t *testing.T) {
-	n := Negotiator{Profile: config.Hosted, Available: map[string]bool{"terminal.v1": true, "health.v1": true}}
+	n := Negotiator{Profile: config.BYOD, Available: map[string]bool{"terminal.v1": true, "health.v1": true}}
 	for _, tc := range []struct {
 		min, max string
 		offered  []string

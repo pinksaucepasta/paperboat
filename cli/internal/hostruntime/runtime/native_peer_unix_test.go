@@ -220,7 +220,7 @@ func TestProductionNativePeerReloadsRenewedEndpointIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	issue := func(serial uint64) string {
-		certificate, signErr := endpointidentity.Sign(rootPrivate, endpointidentity.Claims{AccountID: "account_1", Role: endpointidentity.RoleMachine, EndpointID: "machine_1", NoisePublicKey: endpoint.NoisePublicKey(), QUICPublicKey: endpoint.QUICPublicKey(), Generation: 1, Serial: serial, IssuedAt: now, ExpiresAt: now.Add(time.Hour)})
+		certificate, signErr := endpointidentity.Sign(rootPrivate, endpointidentity.Claims{AccountID: "account_1", Role: endpointidentity.RoleMachine, EndpointID: "machine_1", QUICPublicKey: endpoint.QUICPublicKey(), Generation: 1, Serial: serial, IssuedAt: now, ExpiresAt: now.Add(time.Hour)})
 		if signErr != nil {
 			t.Fatal(signErr)
 		}

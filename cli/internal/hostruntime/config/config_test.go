@@ -19,7 +19,7 @@ func TestValidateResourceLimitsAreCompleteAndBounded(t *testing.T) {
 	}
 	cases := []func(*ResourceLimits){
 		func(value *ResourceLimits) { value.MaxSessions = 0 },
-		func(value *ResourceLimits) { value.MaxAttachments = 65 },
+		func(value *ResourceLimits) { value.MaxAttachments = 129 },
 		func(value *ResourceLimits) { value.MaxInputDecisions = 100_001 },
 		func(value *ResourceLimits) { value.HistoryBytes = (64 << 20) + 1 },
 		func(value *ResourceLimits) { value.MaxConcurrentTransfers = 17 },
@@ -36,8 +36,8 @@ func TestValidateResourceLimitsAreCompleteAndBounded(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsHostedLifecycleUnsafeLimits(t *testing.T) {
-	c := Config{Profile: Hosted, StateRoot: t.TempDir(), Version: "1", Limits: DefaultLimits}
+func TestValidateRejectsUnsafeLimits(t *testing.T) {
+	c := Config{Profile: BYOD, StateRoot: t.TempDir(), Version: "1", Limits: DefaultLimits}
 	c.Limits.MutationDeadline = DefaultLimits.MutationDeadline + 1
 	if err := c.Validate(); err == nil {
 		t.Fatal("expected invalid limits")

@@ -480,7 +480,7 @@ func (c *Client) ProbePeer(ctx context.Context, value PeerStreamRequest) (PeerPr
 	if response.StatusCode != http.StatusOK {
 		return result, decodeRemoteError(response)
 	}
-	if response.Header.Get("Content-Type") != "application/json" || decodeStrictJSON(io.LimitReader(response.Body, maxJSONBytes+1), &result) != nil || result.Transport == "" || result.ConnectionNanoseconds < 0 || result.RTTNanoseconds <= 0 {
+	if response.Header.Get("Content-Type") != "application/json" || decodeStrictJSON(io.LimitReader(response.Body, maxJSONBytes+1), &result) != nil || !validNativeProbePath(result.Path) || result.ConnectionNanoseconds < 0 {
 		return PeerProbeResult{}, ErrInvalidResponse
 	}
 	return result, nil
@@ -510,6 +510,17 @@ func (c *Client) getJSON(ctx context.Context, path string, destination any) erro
 		return ErrInvalidResponse
 	}
 	return nil
+}
+
+func (c *Client) RelayInventory(ctx context.Context) (RelayInventory, error) {
+	var inventory RelayInventory
+	if err := c.getJSON(ctx, "/v1/relay-inventory", &inventory); err != nil {
+		return RelayInventory{}, err
+	}
+	if inventory.Validate() != nil {
+		return RelayInventory{}, ErrInvalidResponse
+	}
+	return inventory, nil
 }
 
 func (c *Client) PublishTransportObservation(ctx context.Context, observation TransportObservation) error {

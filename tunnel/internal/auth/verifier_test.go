@@ -293,3 +293,54 @@ type failingKeys struct{}
 func (failingKeys) Key(context.Context, string) (ed25519.PublicKey, error) {
 	return nil, errors.New("unavailable")
 }
+
+func TestVerifierBrowserTerminalCredentialBindings(t *testing.T) {
+	public, private, _ := ed25519.GenerateKey(rand.Reader)
+	verifier := &Verifier{Issuer: "https://api.paperboat.test", Keys: StaticKeys{"key-1": public}, Now: func() time.Time { return time.Unix(1000, 0) }}
+	for _, scenario := range []string{"valid", "view", "interactive", "missing_attachment", "missing_session", "missing_generation", "bad_browser_key", "cli_session", "wrong_scope"} {
+		t.Run(scenario, func(t *testing.T) {
+			token := tokenFor(t, private, "key-1", func(c map[string]any) {
+				c["aud"] = "paperboat-machine"
+				c["credential_class"] = "browser_terminal_operation"
+				c["scope"] = []string{"terminal:operate"}
+				c["machine_id"] = "machine_1"
+				c["user_id"] = "usr_1"
+				c["sub"] = "usr_1"
+				c["account_id"] = "usr_1"
+				c["session_id"] = "terminal_1"
+				c["browser_attachment_id"] = "attachment_1"
+				c["browser_public_key_sha256"] = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+				c["expected_generation"] = 1
+				c["policy_generation"] = 1
+				delete(c, "cli_client_session_id")
+				delete(c, "source_machine_id")
+				switch scenario {
+				case "view":
+					c["scope"] = []string{"terminal:view"}
+				case "interactive":
+					c["scope"] = []string{"terminal:control"}
+				case "missing_attachment":
+					delete(c, "browser_attachment_id")
+				case "missing_session":
+					delete(c, "session_id")
+				case "missing_generation":
+					delete(c, "policy_generation")
+				case "bad_browser_key":
+					c["browser_public_key_sha256"] = "invalid"
+				case "cli_session":
+					c["cli_client_session_id"] = "cli_1"
+				case "wrong_scope":
+					c["scope"] = []string{"file:transfer"}
+				}
+			})
+			_, err := verifier.VerifyHelperAccess(context.Background(), token)
+			if scenario == "valid" || scenario == "view" || scenario == "interactive" {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if err == nil {
+				t.Fatal("invalid browser credential accepted")
+			}
+		})
+	}
+}

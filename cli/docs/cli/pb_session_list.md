@@ -6,6 +6,10 @@ List durable terminal sessions
 
 List durable terminal sessions
 
+List durable sessions for one environment or the current selection. --wide adds more detail; choose an exact session ID for attach, rename, close, or sharing.
+
+Terminal sessions persist independently of a single connection and can be reattached after a disconnect. Sharing grants explicit access to a named session. Closing, deleting, and removing a participant have different effects; inspect the selected session before acting.
+
 JSON output is supported with --json.
 
 ```

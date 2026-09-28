@@ -2,7 +2,6 @@ package identity
 
 import (
 	"bytes"
-	"crypto/ecdh"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
@@ -20,11 +19,10 @@ import (
 var errPeerEndpointGeneration = errors.New("peer endpoint generation changed")
 
 type PeerEndpoint struct {
-	Generation      uint64
-	NoisePrivateKey [32]byte
-	QUICPrivateKey  ed25519.PrivateKey
-	RootPublicKey   ed25519.PublicKey
-	RootKeyID       string
+	Generation     uint64
+	QUICPrivateKey ed25519.PrivateKey
+	RootPublicKey  ed25519.PublicKey
+	RootKeyID      string
 	// TrustedKeys is the complete account E2EE root set authenticated by the
 	// machine endpoint approval response. RootPublicKey remains the key which
 	// issued this endpoint certificate; ENV documents may be signed by another
@@ -32,8 +30,6 @@ type PeerEndpoint struct {
 	TrustedKeys []endpointidentity.TrustedKey
 	Certificate []byte
 }
-
-func (p PeerEndpoint) NoisePublicKey() [32]byte { return peerNoisePublic(p.NoisePrivateKey) }
 
 func (p PeerEndpoint) QUICPublicKey() ed25519.PublicKey {
 	if len(p.QUICPrivateKey) != ed25519.PrivateKeySize {
@@ -43,14 +39,13 @@ func (p PeerEndpoint) QUICPublicKey() ed25519.PublicKey {
 }
 
 type peerEndpointDocument struct {
-	Version         int                              `json:"version"`
-	Generation      uint64                           `json:"generation"`
-	NoisePrivateKey string                           `json:"noise_private_key_base64url"`
-	QUICSeed        string                           `json:"quic_seed_base64url"`
-	Certificate     string                           `json:"certificate_base64url,omitempty"`
-	RootPublicKey   string                           `json:"root_public_key_base64url,omitempty"`
-	RootKeyID       string                           `json:"root_key_id,omitempty"`
-	TrustedKeys     []peerEndpointTrustedKeyDocument `json:"trusted_keys,omitempty"`
+	Version       int                              `json:"version"`
+	Generation    uint64                           `json:"generation"`
+	QUICSeed      string                           `json:"quic_seed_base64url"`
+	Certificate   string                           `json:"certificate_base64url,omitempty"`
+	RootPublicKey string                           `json:"root_public_key_base64url,omitempty"`
+	RootKeyID     string                           `json:"root_key_id,omitempty"`
+	TrustedKeys   []peerEndpointTrustedKeyDocument `json:"trusted_keys,omitempty"`
 }
 
 type peerEndpointTrustedKeyDocument struct {
@@ -118,8 +113,7 @@ func (s *Store) SavePeerEndpointCertificateWithTrustedKeys(rootPublic ed25519.Pu
 		return err
 	}
 	certificate, err := endpointidentity.Verify(raw, rootPublic, endpointidentity.Expected{Role: endpointidentity.RoleMachine, EndpointID: registration.MachineID, Generation: value.Generation}, now.UTC())
-	noisePublic := peerNoisePublic(value.NoisePrivateKey)
-	if err != nil || !bytes.Equal(certificate.Claims.NoisePublicKey[:], noisePublic[:]) || !bytes.Equal(certificate.Claims.QUICPublicKey, value.QUICPrivateKey.Public().(ed25519.PublicKey)) {
+	if err != nil || !bytes.Equal(certificate.Claims.QUICPublicKey, value.QUICPrivateKey.Public().(ed25519.PublicKey)) {
 		return ErrInvalidStore
 	}
 	trusted, err = normalizeTrustedKeys(rootPublic, trusted)
@@ -135,17 +129,11 @@ func (s *Store) SavePeerEndpointCertificateWithTrustedKeys(rootPublic ed25519.Pu
 }
 
 func (s *Store) generatePeerEndpoint(generation uint64) (PeerEndpoint, error) {
-	noise, err := ecdh.X25519().GenerateKey(s.config.Random)
-	if err != nil {
-		return PeerEndpoint{}, err
-	}
 	_, quic, err := ed25519.GenerateKey(s.config.Random)
 	if err != nil {
 		return PeerEndpoint{}, err
 	}
-	var noisePrivate [32]byte
-	copy(noisePrivate[:], noise.Bytes())
-	return PeerEndpoint{Generation: generation, NoisePrivateKey: noisePrivate, QUICPrivateKey: quic}, nil
+	return PeerEndpoint{Generation: generation, QUICPrivateKey: quic}, nil
 }
 
 func (s *Store) loadPeerEndpoint(generation uint64, machineID string) (PeerEndpoint, error) {
@@ -171,13 +159,12 @@ func (s *Store) loadPeerEndpoint(generation uint64, machineID string) (PeerEndpo
 	if document.Generation != generation {
 		return PeerEndpoint{}, errPeerEndpointGeneration
 	}
-	noise, noiseErr := base64.RawURLEncoding.Strict().DecodeString(document.NoisePrivateKey)
 	seed, seedErr := base64.RawURLEncoding.Strict().DecodeString(document.QUICSeed)
 	certificate, certificateErr := base64.RawURLEncoding.Strict().DecodeString(document.Certificate)
 	rootPublic, rootErr := base64.RawURLEncoding.Strict().DecodeString(document.RootPublicKey)
 	rootFingerprint := sha256.Sum256(rootPublic)
 	expectedRootKeyID := "aek_" + hex.EncodeToString(rootFingerprint[:])
-	if noiseErr != nil || seedErr != nil || len(noise) != 32 || len(seed) != ed25519.SeedSize || document.NoisePrivateKey != base64.RawURLEncoding.EncodeToString(noise) || document.QUICSeed != base64.RawURLEncoding.EncodeToString(seed) || document.Certificate != "" && (certificateErr != nil || rootErr != nil || len(rootPublic) != ed25519.PublicKeySize || document.RootKeyID != expectedRootKeyID) || document.Certificate == "" && (document.RootPublicKey != "" || document.RootKeyID != "" || len(document.TrustedKeys) != 0) {
+	if seedErr != nil || len(seed) != ed25519.SeedSize || document.QUICSeed != base64.RawURLEncoding.EncodeToString(seed) || document.Certificate != "" && (certificateErr != nil || rootErr != nil || len(rootPublic) != ed25519.PublicKeySize || document.RootKeyID != expectedRootKeyID) || document.Certificate == "" && (document.RootPublicKey != "" || document.RootKeyID != "" || len(document.TrustedKeys) != 0) {
 		return PeerEndpoint{}, ErrInvalidStore
 	}
 	trusted, err := decodeTrustedKeys(document.TrustedKeys)
@@ -189,16 +176,18 @@ func (s *Store) loadPeerEndpoint(generation uint64, machineID string) (PeerEndpo
 			return PeerEndpoint{}, ErrInvalidStore
 		}
 	}
-	var noisePrivate [32]byte
-	copy(noisePrivate[:], noise)
-	clear(noise)
 	private := ed25519.NewKeyFromSeed(seed)
 	clear(seed)
-	value := PeerEndpoint{Generation: generation, NoisePrivateKey: noisePrivate, QUICPrivateKey: private, RootPublicKey: ed25519.PublicKey(rootPublic), RootKeyID: document.RootKeyID, TrustedKeys: trusted, Certificate: certificate}
+	value := PeerEndpoint{Generation: generation, QUICPrivateKey: private, RootPublicKey: ed25519.PublicKey(rootPublic), RootKeyID: document.RootKeyID, TrustedKeys: trusted, Certificate: certificate}
 	if len(certificate) > 0 {
-		verified, err := endpointidentity.Verify(certificate, value.RootPublicKey, endpointidentity.Expected{Role: endpointidentity.RoleMachine, EndpointID: machineID, Generation: generation}, s.config.Clock.Now().UTC())
-		noisePublic := value.NoisePublicKey()
-		if err != nil || !bytes.Equal(verified.Claims.NoisePublicKey[:], noisePublic[:]) || !bytes.Equal(verified.Claims.QUICPublicKey, value.QUICPublicKey()) {
+		// A signed but expired certificate must remain loadable so enrollment can
+		// renew it with the same device keys. Live peers still check expiry.
+		parsed, parseErr := endpointidentity.Parse(certificate)
+		if parseErr != nil {
+			return PeerEndpoint{}, ErrInvalidStore
+		}
+		verified, err := endpointidentity.Verify(certificate, value.RootPublicKey, endpointidentity.Expected{Role: endpointidentity.RoleMachine, EndpointID: machineID, Generation: generation}, parsed.Claims.IssuedAt)
+		if err != nil || !bytes.Equal(verified.Claims.QUICPublicKey, value.QUICPublicKey()) {
 			return PeerEndpoint{}, ErrInvalidStore
 		}
 	}
@@ -209,7 +198,7 @@ func (s *Store) writePeerEndpoint(value PeerEndpoint) error {
 	if value.Generation == 0 || len(value.QUICPrivateKey) != ed25519.PrivateKeySize {
 		return ErrInvalidStore
 	}
-	document := peerEndpointDocument{Version: 1, Generation: value.Generation, NoisePrivateKey: base64.RawURLEncoding.EncodeToString(value.NoisePrivateKey[:]), QUICSeed: base64.RawURLEncoding.EncodeToString(value.QUICPrivateKey.Seed())}
+	document := peerEndpointDocument{Version: 1, Generation: value.Generation, QUICSeed: base64.RawURLEncoding.EncodeToString(value.QUICPrivateKey.Seed())}
 	if len(value.Certificate) > 0 {
 		if len(value.RootPublicKey) != ed25519.PublicKeySize {
 			return ErrInvalidStore
@@ -302,14 +291,4 @@ func clearTrustedKeys(keys []endpointidentity.TrustedKey) {
 	for index := range keys {
 		clear(keys[index].PublicKey)
 	}
-}
-
-func peerNoisePublic(private [32]byte) [32]byte {
-	key, err := ecdh.X25519().NewPrivateKey(private[:])
-	if err != nil {
-		return [32]byte{}
-	}
-	var public [32]byte
-	copy(public[:], key.PublicKey().Bytes())
-	return public
 }

@@ -13,6 +13,12 @@ pb-tunnel-connector - Manage tunnel connectors
 Manage tunnel connectors
 
 .PP
+List, add, drain, or revoke host connectors for one durable tunnel. Draining is a graceful transition; revocation withdraws connector authority.
+
+.PP
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+
+.PP
 With --json, this command group lists its available commands.
 
 

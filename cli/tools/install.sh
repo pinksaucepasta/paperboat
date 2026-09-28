@@ -1,4 +1,6 @@
 #!/bin/sh
+# Keep a truncated curl | sh download from running a partial installation.
+main() {
 set -eu
 
 # The release-published copy pins a small verifier by immutable GitHub URL,
@@ -229,3 +231,6 @@ elif [ "$setup" = true ]; then
 else
   "$target" --version
 fi
+}
+
+main "$@"

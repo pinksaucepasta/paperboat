@@ -6,11 +6,17 @@ pb-tunnel-route-add - Add a tunnel route
 
 
 .SH SYNOPSIS
-\fBpb tunnel route add  [flags]\fP
+\fBpb tunnel route add <tunnel> [flags]\fP
 
 
 .SH DESCRIPTION
 Add a tunnel route
+
+.PP
+Add a route to one durable tunnel, selecting protocol, match, origin, and optional TLS behavior. The operation can remain connecting after the command returns; use --wait or status to confirm readiness.
+
+.PP
+Routes map a public or private match to a specific origin and protocol. TLS and host-header options affect the trust boundary and should match the origin. Adding or updating a route may return an operation whose readiness must be checked separately.
 
 .PP
 JSON output is supported with --json.

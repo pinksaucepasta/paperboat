@@ -83,7 +83,17 @@ func Serve(ctx context.Context, stream io.ReadWriteCloser, dial DialContext) err
 	if !bytes.Equal(request[:5], magic[:]) || port == 0 {
 		return ErrInvalid
 	}
-	target, err := dial(ctx, "tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(int(port))))
+	portText := strconv.Itoa(int(port))
+	target, err := dial(ctx, "tcp4", net.JoinHostPort("127.0.0.1", portText))
+	if err != nil && ctx.Err() == nil {
+		var ipv6Err error
+		target, ipv6Err = dial(ctx, "tcp6", net.JoinHostPort("::1", portText))
+		if ipv6Err != nil {
+			err = errors.Join(err, ipv6Err)
+		} else {
+			err = nil
+		}
+	}
 	if err != nil {
 		_ = writeAll(stream, []byte{statusFailed})
 		return errors.Join(ErrUnavailable, err)

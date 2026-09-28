@@ -100,13 +100,6 @@ func (s DataCarrierSessionSource) Prepare(ctx context.Context) (*PreparedDataCar
 	return PrepareDataCarrierRequest(ctx, request)
 }
 
-// NewNetworkDataCarrierSessionSource binds the source to the production TCP
-// mTLS and native-QUIC endpoint dialers. The endpoint callbacks remain the
-// certificate-to-session authorization boundary.
-func NewNetworkDataCarrierSessionSource(identity DataCarrierIdentity, config DataCarrierPoolConfig, endpoints NetworkDialerConfig) (DataCarrierSessionSource, error) {
-	return NewDataCarrierSessionSource(identity, config, NewNetworkDialer(endpoints))
-}
-
 func sameDataCarrierBaseIdentity(left, right DataCarrierIdentity) bool {
 	return left.AccountID == right.AccountID && left.HostID == right.HostID && left.TunnelID == right.TunnelID && left.ConnectorID == right.ConnectorID
 }

@@ -6,17 +6,27 @@ pb-tunnel-domain-remove - Remove a tunnel domain
 
 
 .SH SYNOPSIS
-\fBpb tunnel domain remove   [flags]\fP
+\fBpb tunnel domain remove <tunnel> <domain> [flags]\fP
 
 
 .SH DESCRIPTION
 Remove a tunnel domain
 
 .PP
+Remove one domain binding after confirmation. DNS records managed by the user are not silently removed by this command.
+
+.PP
+Custom domains require DNS ownership verification before they can serve a route. Domain changes are scoped to one tunnel, and verification status is separate from route readiness. The instructions command returns the required authoritative DNS records.
+
+.PP
 JSON output is supported with --json.
 
 
 .SH OPTIONS
+\fB--confirm\fP=""
+	six-character confirmation code from the preview
+
+.PP
 \fB-h\fP, \fB--help\fP[=false]
 	help for remove
 
@@ -31,10 +41,6 @@ JSON output is supported with --json.
 .PP
 \fB--wait\fP[=false]
 	wait for the operation to reach a terminal state
-
-.PP
-\fB--yes\fP[=false]
-	confirm domain-binding removal while preserving user-owned DNS
 
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS

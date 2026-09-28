@@ -101,7 +101,7 @@ func (t *PeerTerminalTunnel) DialExec(ctx context.Context, info resolver.Connect
 			return nil, err
 		}
 		return exec, nil
-	}}, nil)
+	}})
 	if err != nil {
 		return nil, err
 	}

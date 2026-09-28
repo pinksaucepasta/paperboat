@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,11 +20,15 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 )
 
-func TestTransferStatusJSONPreservesSourceVisibleEncryptedManifest(t *testing.T) {
+type transferLeaseCloser func() error
+
+func (close transferLeaseCloser) Close() error { return close() }
+
+func TestTransferStatusJSONUsesNativeStreamAndClosesLease(t *testing.T) {
 	createdAt := time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC)
 	want := clienttransfer.Manifest{
 		TransferID: "fb_cli_status.0", BatchID: "fb_cli_status", SourceMachineID: "machine_source", DestinationMachineID: "machine_host", InitiatingUserID: "user_1", SessionID: "session_1",
-		Basename: "payload.txt", Size: 17, SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", CommittedOffset: 17, CommittedChunk: 1, State: "published", ResultCode: "published", ReceiptPath: "Paperboat Inbox/payload (2).txt", CreatedAt: createdAt, ExpiresAt: createdAt.Add(7 * 24 * time.Hour),
+		Basename: "payload.txt", Size: 17, SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", CommittedOffset: 17, State: "published", ResultCode: "published", ReceiptPath: "Paperboat Inbox/payload (2).txt", CreatedAt: createdAt, ExpiresAt: createdAt.Add(7 * 24 * time.Hour),
 	}
 	transferServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodGet || request.URL.Path != "/v1/file-transfers/"+want.TransferID || request.Header.Get("Authorization") != "Bearer transfer-token" {
@@ -36,15 +41,19 @@ func TestTransferStatusJSONPreservesSourceVisibleEncryptedManifest(t *testing.T)
 	}))
 	defer transferServer.Close()
 
-	previousTransferClient := newTransferClient
-	newTransferClient = func(target *resolver.FileTransferTarget) *clienttransfer.Client {
-		if target == nil || target.SourceMachineID != "machine_source" || target.DestinationMachineID != "machine_host" || target.InitiatingUserID != "user_1" || target.Auth.Token != "transfer-token" {
+	closed := false
+	previousTransferClient := newTransferCommandClient
+	newTransferCommandClient = func(ctx context.Context, target *resolver.FileTransferTarget, destination api.UserMachine, operationID string) (*clienttransfer.NativeClient, io.Closer, error) {
+		if target == nil || target.SourceMachineID != "machine_source" || target.DestinationMachineID != "machine_host" || target.InitiatingUserID != "user_1" || target.Auth.Token != "transfer-token" || target.Auth.ResourceID != "access_1" || destination.ID != "machine_host" || operationID == "" {
 			t.Errorf("transfer target=%+v", target)
-			return nil
+			return nil, nil, context.Canceled
 		}
-		return clienttransfer.NewClient(transferServer.URL+"/v1/file-transfers", clienttransfer.Auth{Token: target.Auth.Token}, clienttransfer.Binding{SourceMachineID: target.SourceMachineID, DestinationMachineID: target.DestinationMachineID, InitiatingUserID: target.InitiatingUserID}, transferServer.Client())
+		client, err := clienttransfer.NewNativeClient(transferServer.URL+"/v1/file-transfers", clienttransfer.Auth{Token: target.Auth.Token}, clienttransfer.Binding{SourceMachineID: target.SourceMachineID, DestinationMachineID: target.DestinationMachineID, InitiatingUserID: target.InitiatingUserID}, func(ctx context.Context) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "tcp", transferServer.Listener.Addr().String())
+		})
+		return client, transferLeaseCloser(func() error { closed = true; return nil }), err
 	}
-	t.Cleanup(func() { newTransferClient = previousTransferClient })
+	t.Cleanup(func() { newTransferCommandClient = previousTransferClient })
 
 	backend := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.Method + " " + request.URL.Path {
@@ -55,7 +64,7 @@ func TestTransferStatusJSONPreservesSourceVisibleEncryptedManifest(t *testing.T)
 			if !bytes.Contains(body, []byte(`"source_machine_id":"machine_source"`)) {
 				t.Errorf("descriptor body=%s", body)
 			}
-			writeAPIData(t, writer, api.FileTransfer{Endpoint: "https://machine.example.test/v1/file-transfers", SourceMachineID: "machine_source", DestinationMachineID: "machine_host", InitiatingUserID: "user_1", Auth: api.AuthMaterial{Method: "bearer", Token: "transfer-token", ExpiresAt: time.Now().Add(time.Hour)}})
+			writeAPIData(t, writer, api.FileTransfer{Endpoint: "https://machine.example.test/v1/file-transfers", SourceMachineID: "machine_source", DestinationMachineID: "machine_host", InitiatingUserID: "user_1", Auth: api.AuthMaterial{Method: "bearer", Token: "transfer-token", AccessSessionID: "access_1", ExpiresAt: time.Now().Add(time.Hour)}})
 		default:
 			http.NotFound(writer, request)
 		}
@@ -80,7 +89,7 @@ func TestTransferStatusJSONPreservesSourceVisibleEncryptedManifest(t *testing.T)
 	}
 
 	var stdout, stderr bytes.Buffer
-	if code := run(context.Background(), []string{"--config", configPath, "transfer", "status", want.TransferID, "--on", "hn", "--json"}, &stdout, &stderr); code != 0 {
+	if code := run(context.Background(), []string{"--config", configPath, "send", "status", want.TransferID, "--on", "hn", "--json"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	var output struct {
@@ -93,5 +102,8 @@ func TestTransferStatusJSONPreservesSourceVisibleEncryptedManifest(t *testing.T)
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr=%q", stderr.String())
+	}
+	if !closed {
+		t.Fatal("native transfer lease was not closed")
 	}
 }

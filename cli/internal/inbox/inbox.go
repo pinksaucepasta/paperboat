@@ -18,8 +18,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/filetransfer"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/transfercrypto"
-	"github.com/pinksaucepasta/paperboat/internal/resolver"
 )
 
 const (
@@ -33,18 +31,8 @@ type Client interface {
 	Receipt(context.Context, string, string, string) error
 }
 
-type EncryptedClient interface {
-	PendingEncrypted(context.Context, string, int) ([]filetransfer.EncryptedPendingBatch, error)
-	EncryptedManifest(context.Context, filetransfer.EncryptedPendingBatch, transfercrypto.KeyMaterial, transfercrypto.RecordContext) (filetransfer.EncryptedManifest, error)
-	EncryptedChunk(context.Context, string, uint64) ([]byte, error)
-	EncryptedReceipt(context.Context, string, []byte) error
-}
-
 type Config struct {
 	Client      Client
-	Encrypted   EncryptedClient
-	Keys        *filetransfer.KeyCoordinator
-	Target      resolver.ConnectInfo
 	MachineID   string
 	SessionID   string
 	Path        string
@@ -103,39 +91,12 @@ func New(config Config) (*Inbox, error) {
 	if config.PollSeconds < 1 || config.PollSeconds > 30 {
 		return nil, errors.New("invalid inbox poll duration")
 	}
-	if config.Encrypted != nil && (config.Keys == nil || config.Target.Terminal == nil) || config.Encrypted == nil && config.Keys != nil {
-		return nil, errors.New("invalid encrypted inbox configuration")
-	}
 	return &Inbox{config: config}, nil
 }
 
 func (i *Inbox) Run(ctx context.Context) error {
 	for {
-		if i.config.Encrypted != nil {
-			batches, err := i.config.Encrypted.PendingEncrypted(ctx, i.config.SessionID, i.config.PollSeconds)
-			if err != nil {
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				continue
-			}
-			for _, batch := range batches {
-				paths, deliveryErr := i.DeliverEncrypted(ctx, batch)
-				if deliveryErr != nil {
-					continue
-				}
-				if i.config.Notify != nil {
-					for _, path := range paths {
-						i.config.Notify("Saved to " + path)
-					}
-				}
-			}
-		}
-		waitSeconds := i.config.PollSeconds
-		if i.config.Encrypted != nil {
-			waitSeconds = 0
-		}
-		transfers, err := i.config.Client.Pending(ctx, i.config.SessionID, waitSeconds)
+		transfers, err := i.config.Client.Pending(ctx, i.config.SessionID, i.config.PollSeconds)
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()

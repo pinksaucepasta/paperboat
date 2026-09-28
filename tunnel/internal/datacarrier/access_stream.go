@@ -3,7 +3,6 @@ package datacarrier
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
 )
@@ -16,7 +15,8 @@ var (
 	// ErrAccessStreamIdentity is distinct from a route denial so callers can
 	// treat a stale/replaced carrier as unavailable without exposing route
 	// existence.
-	ErrAccessStreamIdentity = errors.New("private access stream identity mismatch")
+	ErrAccessStreamIdentity      = errors.New("private access stream identity mismatch")
+	ErrBrowserTerminalOutputKind = errors.New("invalid browser terminal output stream kind")
 )
 
 const (
@@ -26,7 +26,26 @@ const (
 	// AccessStreamTCP carries a bounded private raw-TCP envelope followed by
 	// opaque full-duplex bytes. It never uses the preview HTTP preface.
 	AccessStreamTCP = connectorprotocol.PrivateAccessTCP
+	// BrowserTerminalOutputStream carries length-prefixed opaque ciphertext
+	// records from the authenticated runtime host to the edge fanout hub.
+	BrowserTerminalOutputStream = connectorprotocol.BrowserTerminalOutput
 )
+
+// AcceptBrowserTerminalOutputStream accepts one host-initiated terminal output
+// stream on an authenticated carrier. The normal carrier authorizer validates
+// the exact admitted route and carrier identity before the returned bytes are
+// exposed. RequestID is the terminal session ID; the caller owns the stream.
+func (s *Server) AcceptBrowserTerminalOutputStream(ctx context.Context) (*Stream, StreamOpen, error) {
+	stream, open, err := s.acceptDataStream(ctx, true)
+	if err != nil {
+		return nil, StreamOpen{}, err
+	}
+	if open.Kind != BrowserTerminalOutputStream {
+		_ = stream.Close()
+		return nil, StreamOpen{}, ErrBrowserTerminalOutputKind
+	}
+	return stream, open, nil
+}
 
 // AcceptAccessStream accepts a host-initiated access request on an already
 // authenticated carrier. It authenticates only the immutable connector-v1
@@ -39,38 +58,13 @@ const (
 // The acceptance context controls only the accept and preface read; it does not
 // cancel the returned stream after a successful handoff.
 func (s *Server) AcceptAccessStream(ctx context.Context) (*Stream, StreamOpen, error) {
-	if s == nil || ctx == nil {
-		return nil, StreamOpen{}, ErrInvalidConfig
-	}
-	raw, err := s.acceptRaw(ctx)
+	stream, open, err := s.acceptDataStream(ctx, false)
 	if err != nil {
 		return nil, StreamOpen{}, err
-	}
-	deadline := time.Now().Add(s.config.StreamOpenLimit)
-	if contextDeadline, ok := ctx.Deadline(); ok && contextDeadline.Before(deadline) {
-		deadline = contextDeadline
-	}
-	if err := raw.SetReadDeadline(deadline); err != nil {
-		_ = raw.Close()
-		s.releasePermit()
-		return nil, StreamOpen{}, ErrInvalidPreface
-	}
-	open, err := connectorprotocol.ReadStreamOpen(raw)
-	_ = raw.SetReadDeadline(time.Time{})
-	if err != nil {
-		_ = raw.Close()
-		s.releasePermit()
-		return nil, StreamOpen{}, err
-	}
-	if !s.config.Identity.matches(open) {
-		_ = raw.Close()
-		s.releasePermit()
-		return nil, StreamOpen{}, ErrAccessStreamIdentity
 	}
 	if open.Kind != AccessStreamHTTPS && open.Kind != AccessStreamTCP {
-		_ = raw.Close()
-		s.releasePermit()
+		_ = stream.Close()
 		return nil, StreamOpen{}, ErrAccessStreamKind
 	}
-	return wrapStream(raw, context.Background(), s.releasePermit, open), open, nil
+	return stream, open, nil
 }

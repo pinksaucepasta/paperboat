@@ -6,6 +6,10 @@ Check the signed Paperboat release without installing it
 
 Check the signed Paperboat release without installing it
 
+Check trusted signed release metadata for a newer compatible artifact without installing it. The result can report availability and trust errors separately from installed state.
+
+Updates use signed release metadata and preserve artifact authenticity and rollback protection. Check inspects an available release; status reports the installed updater state. A failed update should leave the known installation usable and report a recovery action.
+
 JSON output is supported with --json.
 
 ```

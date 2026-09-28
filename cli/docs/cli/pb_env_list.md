@@ -6,6 +6,10 @@ List configured environment-variable metadata
 
 List configured environment-variable metadata
 
+List ENV names and scope metadata, optionally limited to a team or host. This does not print plaintext values or key material.
+
+ENV values are encrypted before they leave the client. Commands select personal, team, or host scope explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
+
 JSON output is supported with --json.
 
 ```

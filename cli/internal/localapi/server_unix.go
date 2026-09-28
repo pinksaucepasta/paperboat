@@ -70,6 +70,7 @@ type ServerConfig struct {
 	Observations         ObservationSink
 	PeerStreams          PeerStreamBroker
 	PeerProbes           PeerProbeBroker
+	RelayInventory       func(context.Context) (RelayInventory, error)
 	FileTransfers        FileTransferBroker
 	Authorize            ReadAuthorizer
 	AuthorizeDiagnostics ReadAuthorizer
@@ -206,6 +207,10 @@ func (s *Server) handler() http.Handler {
 		}
 		if request.URL.Path == "/v1/peer-probes" {
 			s.peerProbe(writer, request, requestID, peer)
+			return
+		}
+		if request.URL.Path == "/v1/relay-inventory" {
+			s.relayInventory(writer, request, requestID)
 			return
 		}
 		if request.URL.Path == "/v1/file-transfers" {
@@ -381,7 +386,7 @@ func (s *Server) peerProbe(writer http.ResponseWriter, request *http.Request, re
 		writeError(writer, http.StatusServiceUnavailable, requestID, "peer_probe_unavailable", "peer probe is unavailable: "+safeErrorMessage(err))
 		return
 	}
-	if result.Transport == "" || result.ConnectionNanoseconds < 0 || result.RTTNanoseconds <= 0 {
+	if !validNativeProbePath(result.Path) || result.ConnectionNanoseconds < 0 {
 		writeError(writer, http.StatusServiceUnavailable, requestID, "peer_probe_unavailable", "peer probe is unavailable")
 		return
 	}
@@ -514,6 +519,33 @@ func bridgePeerStream(ctx context.Context, local, remote net.Conn) {
 	}
 	_ = local.Close()
 	_ = remote.Close()
+}
+
+func (s *Server) relayInventory(writer http.ResponseWriter, request *http.Request, requestID string) {
+	if request.Method != http.MethodGet {
+		writer.Header().Set("Allow", http.MethodGet)
+		writeError(writer, http.StatusMethodNotAllowed, requestID, "method_not_allowed", "relay inventory method not allowed")
+		return
+	}
+	if request.URL.RawQuery != "" || request.ContentLength != 0 || request.Header.Get("Content-Type") != "" || s.config.RelayInventory == nil {
+		writeError(writer, http.StatusBadRequest, requestID, "invalid_request", "relay inventory request is invalid")
+		return
+	}
+	requestCtx, cancel := context.WithTimeout(request.Context(), 45*time.Second)
+	defer cancel()
+	inventory, err := s.config.RelayInventory(requestCtx)
+	if err != nil || inventory.Validate() != nil {
+		writeError(writer, http.StatusServiceUnavailable, requestID, "relay_inventory_unavailable", "verified relay inventory is unavailable")
+		return
+	}
+	encoded, err := json.Marshal(inventory)
+	if err != nil || len(encoded) > maxJSONBytes {
+		writeError(writer, http.StatusServiceUnavailable, requestID, "relay_inventory_unavailable", "verified relay inventory is unavailable")
+		return
+	}
+	writer.Header().Set("Content-Type", "application/json")
+	writer.Header().Set("X-Paperboat-Protocol", ProtocolV1)
+	_, _ = writer.Write(append(encoded, '\n'))
 }
 
 func (s *Server) completions(writer http.ResponseWriter, request *http.Request, requestID string) {

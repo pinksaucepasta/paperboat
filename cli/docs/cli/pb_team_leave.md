@@ -1,10 +1,14 @@
 ## pb team leave
 
-Leave team membership
+Leave a team
 
 ### Synopsis
 
-Leave team membership
+Leave a team
+
+Leave your current membership in one team at the expected generation. Access supplied by that membership is withdrawn; owned resources require separate handling.
+
+Teams use explicit membership and resource grants. Membership alone does not grant device use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
 
 JSON output is supported with --json.
 

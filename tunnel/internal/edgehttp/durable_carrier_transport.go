@@ -753,12 +753,14 @@ func (t *DataCarrierRouteTransport) RoundTrip(request *http.Request) (*http.Resp
 // ReverseProxy requires the response body to be an io.ReadWriteCloser before
 // it will bridge an upgraded connection.
 type dataCarrierRouteUpgradeBody struct {
-	reader     io.Reader
-	stream     io.ReadWriteCloser
-	stopCancel func() bool
-	writeDone  <-chan error
-	once       sync.Once
-	err        error
+	reader         io.Reader
+	stream         io.ReadWriteCloser
+	stopCancel     func() bool
+	writeDone      <-chan error
+	lifetimeCancel context.CancelFunc
+	lifetimeTimer  *time.Timer
+	once           sync.Once
+	err            error
 }
 
 func (b *dataCarrierRouteUpgradeBody) Read(payload []byte) (int, error) {
@@ -780,6 +782,7 @@ func (b *dataCarrierRouteUpgradeBody) Close() error {
 		return nil
 	}
 	b.once.Do(func() {
+		stopPreviewStreamLifetime(b.lifetimeCancel, b.lifetimeTimer)
 		if b.stopCancel != nil {
 			b.stopCancel()
 		}

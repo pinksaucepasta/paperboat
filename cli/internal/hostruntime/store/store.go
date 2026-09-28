@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	CurrentVersion          = 2
+	CurrentVersion          = 1
 	MaxOperationResultBytes = 64 << 10
 )
 
@@ -106,15 +106,11 @@ type FileTransfer struct {
 	Size                 int64     `json:"size"`
 	SHA256               string    `json:"sha256"`
 	CommittedOffset      int64     `json:"committed_offset"`
-	CommittedChunks      uint64    `json:"-"`
 	State                string    `json:"state"`
 	ResultCode           string    `json:"result_code,omitempty"`
 	ReceiptPath          string    `json:"receipt_path,omitempty"`
 	CreatedAt            time.Time `json:"created_at"`
 	ExpiresAt            time.Time `json:"expires_at"`
-	E2EETransferID       string    `json:"-"`
-	TransferGeneration   uint64    `json:"-"`
-	FileOrdinal          uint64    `json:"-"`
 }
 
 type FileTransferReceipt struct {
@@ -164,11 +160,10 @@ func (s *Store) CreateFileTransfersWithinLimits(ctx context.Context, transfers [
 		}
 	}
 	for _, transfer := range transfers {
-		e2ee := transfer.E2EETransferID != "" || transfer.TransferGeneration != 0
-		if transfer.ID == "" || transfer.BatchID == "" || transfer.SourceMachineID == "" || transfer.DestinationMachineID == "" || transfer.InitiatingUserID == "" || transfer.Basename == "" || transfer.Size < 0 || transfer.CommittedOffset != 0 || transfer.CreatedAt.IsZero() || transfer.ExpiresAt.IsZero() || e2ee != (transfer.E2EETransferID != "" && transfer.TransferGeneration > 0) {
+		if transfer.ID == "" || transfer.BatchID == "" || transfer.SourceMachineID == "" || transfer.DestinationMachineID == "" || transfer.InitiatingUserID == "" || transfer.Basename == "" || transfer.Size < 0 || transfer.CommittedOffset != 0 || transfer.CreatedAt.IsZero() || transfer.ExpiresAt.IsZero() {
 			return ErrConflict
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO file_transfers(id,batch_id,source_machine_id,destination_machine_id,initiating_user_id,session_id,delivery_client_id,basename,size,sha256,committed_offset,state,result_code,receipt_path,created_at,expires_at,e2ee_transfer_id,transfer_generation,file_ordinal) VALUES(?,?,?,?,?,?,?,?,?,?,0,'created',NULL,NULL,?,?,?,?,?)`, transfer.ID, transfer.BatchID, transfer.SourceMachineID, transfer.DestinationMachineID, transfer.InitiatingUserID, nullableString(transfer.SessionID), nullableString(transfer.DeliveryClientID), transfer.Basename, transfer.Size, transfer.SHA256, transfer.CreatedAt.UnixNano(), transfer.ExpiresAt.UnixNano(), nullableString(transfer.E2EETransferID), nullableUint64(transfer.TransferGeneration), nullableUint64IfEncrypted(transfer.FileOrdinal, e2ee)); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO file_transfers(id,batch_id,source_machine_id,destination_machine_id,initiating_user_id,session_id,delivery_client_id,basename,size,sha256,committed_offset,state,result_code,receipt_path,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,0,'created',NULL,NULL,?,?)`, transfer.ID, transfer.BatchID, transfer.SourceMachineID, transfer.DestinationMachineID, transfer.InitiatingUserID, nullableString(transfer.SessionID), nullableString(transfer.DeliveryClientID), transfer.Basename, transfer.Size, transfer.SHA256, transfer.CreatedAt.UnixNano(), transfer.ExpiresAt.UnixNano()); err != nil {
 			return classify(err)
 		}
 	}
@@ -245,41 +240,6 @@ func (s *Store) CommitFileTransferOffset(ctx context.Context, id string, expecte
 		return ErrConflict
 	}
 	return nil
-}
-
-func (s *Store) CommitFileTransferChunk(ctx context.Context, id string, ordinal uint64, expectedOffset, nextOffset int64, ciphertextDigest [32]byte, ciphertextLength, plaintextLength int) (bool, error) {
-	if id == "" || ordinal > uint64(^uint64(0)>>1) || expectedOffset < 0 || nextOffset < expectedOffset || ciphertextLength < 16 || ciphertextLength > (1<<20)+16 || plaintextLength < 0 || plaintextLength > 1<<20 || nextOffset-expectedOffset != int64(plaintextLength) {
-		return false, ErrConflict
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback()
-	var existingDigest []byte
-	var existingCiphertextLength, existingPlaintextLength int
-	err = tx.QueryRowContext(ctx, `SELECT ciphertext_sha256,ciphertext_length,plaintext_length FROM file_transfer_chunks WHERE transfer_id=? AND ordinal=?`, id, int64(ordinal)).Scan(&existingDigest, &existingCiphertextLength, &existingPlaintextLength)
-	if err == nil {
-		if !bytes.Equal(existingDigest, ciphertextDigest[:]) || existingCiphertextLength != ciphertextLength || existingPlaintextLength != plaintextLength {
-			return false, ErrConflict
-		}
-		return true, tx.Commit()
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return false, err
-	}
-	result, err := tx.ExecContext(ctx, `UPDATE file_transfers SET committed_offset=?,committed_chunks=?,state='uploading' WHERE id=? AND committed_offset=? AND committed_chunks=? AND state IN ('created','uploading') AND ?<=size`, nextOffset, int64(ordinal+1), id, expectedOffset, int64(ordinal), nextOffset)
-	if err != nil {
-		return false, err
-	}
-	changed, _ := result.RowsAffected()
-	if changed != 1 {
-		return false, ErrConflict
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO file_transfer_chunks(transfer_id,ordinal,ciphertext_sha256,ciphertext_length,plaintext_length) VALUES(?,?,?,?,?)`, id, int64(ordinal), ciphertextDigest[:], ciphertextLength, plaintextLength); err != nil {
-		return false, classify(err)
-	}
-	return false, tx.Commit()
 }
 
 func (s *Store) CompleteFileTransfer(ctx context.Context, id, localMachineID string) error {
@@ -476,23 +436,7 @@ func fileTransferFromSQLC(row storesqlc.FileTransfer) FileTransfer {
 		Basename: row.Basename, Size: row.Size, SHA256: row.Sha256, CommittedOffset: row.CommittedOffset,
 		State: row.State, ResultCode: row.ResultCode.String, ReceiptPath: row.ReceiptPath.String,
 		CreatedAt: time.Unix(0, row.CreatedAt).UTC(), ExpiresAt: time.Unix(0, row.ExpiresAt).UTC(),
-		E2EETransferID: row.E2eeTransferID.String, TransferGeneration: uint64(row.TransferGeneration.Int64), FileOrdinal: uint64(row.FileOrdinal.Int64),
-		CommittedChunks: uint64(row.CommittedChunks),
 	}
-}
-
-func nullableUint64(value uint64) any {
-	if value == 0 {
-		return nil
-	}
-	return int64(value)
-}
-
-func nullableUint64IfEncrypted(value uint64, encrypted bool) any {
-	if !encrypted {
-		return nil
-	}
-	return int64(value)
 }
 
 func Open(ctx context.Context, config Config) (*Store, error) {
@@ -632,6 +576,31 @@ func (s *Store) ClearOutput(ctx context.Context, sessionID string, nextSequence 
 	}
 	if latest != nextSequence {
 		return ErrConflict
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM output_events WHERE session_id=?`, sessionID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET earliest_sequence=?,latest_sequence=?,updated_at=? WHERE id=?`, nextSequence, nextSequence, time.Now().UTC().UnixNano(), sessionID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ClearStoppedOutput removes output after the session's writer has stopped.
+// Its cursor may be ahead of the durable cursor when an asynchronous append
+// failed, so preserving the larger value avoids replaying sequence numbers.
+func (s *Store) ClearStoppedOutput(ctx context.Context, sessionID string, nextSequence uint64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var latest uint64
+	if err := tx.QueryRowContext(ctx, `SELECT latest_sequence FROM sessions WHERE id=?`, sessionID).Scan(&latest); err != nil {
+		return err
+	}
+	if latest > nextSequence {
+		nextSequence = latest
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM output_events WHERE session_id=?`, sessionID); err != nil {
 		return err

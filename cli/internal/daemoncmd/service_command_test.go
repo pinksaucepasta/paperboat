@@ -13,11 +13,9 @@ import (
 
 func TestServiceCommandRegistration(t *testing.T) {
 	root := NewCommand()
-
-	for _, sub := range []string{"install", "uninstall", "start", "stop", "restart", "status"} {
-		cmd, _, err := root.Find([]string{"service", sub})
-		if err != nil || cmd == nil || cmd.Name() != sub {
-			t.Fatalf("expected 'service %s' command to be registered: %v", sub, err)
+	for _, command := range root.Commands() {
+		if command.Name() == "service" {
+			t.Fatal("duplicate daemon service command remains registered")
 		}
 	}
 
@@ -27,9 +25,16 @@ func TestServiceCommandRegistration(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	root.SetArgs([]string{"service", "--help"})
-	root.SetOut(&buf)
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	service := ServiceCommand()
+	for _, sub := range []string{"install", "uninstall", "start", "stop", "restart", "status"} {
+		cmd, _, err := service.Find([]string{sub})
+		if err != nil || cmd == nil || cmd.Name() != sub {
+			t.Fatalf("expected 'service %s' command to be registered: %v", sub, err)
+		}
+	}
+	service.SetArgs([]string{"--help"})
+	service.SetOut(&buf)
+	if err := service.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("unexpected error running 'service --help': %v", err)
 	}
 	if !strings.Contains(buf.String(), "Manage the Paperboat background daemon service") {

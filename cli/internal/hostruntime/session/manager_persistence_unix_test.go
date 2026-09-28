@@ -57,8 +57,7 @@ func TestManagerRecoversHistoryInputAndRestartGeneration(t *testing.T) {
 		t.Fatalf("decision=%#v err=%v", decision, err)
 	}
 	waitState(t, manager, created.ID, Exited)
-	// History persistence is asynchronous. Wait for the durable replay to
-	// contain the completed output before closing and reopening its store.
+	// The completed terminal keeps its cursor but clears its replay output.
 	waitLatest(t, manager, created.ID, 7)
 	if err := state.Close(); err != nil {
 		t.Fatal(err)
@@ -71,8 +70,11 @@ func TestManagerRecoversHistoryInputAndRestartGeneration(t *testing.T) {
 	if err != nil || recovered.State != Exited || recovered.Generation != 1 || recovered.Exit == nil || recovered.Exit.Code != 7 {
 		t.Fatalf("recovered=%#v err=%v", recovered, err)
 	}
-	attached, err := recoveredManager.Attach(created.ID, "att_2", 0)
-	if err != nil || attached.Replay.ToSequence < 7 {
+	if recovered.EarliestSequence != recovered.LatestSequence {
+		t.Fatalf("closed terminal retained replay: %#v", recovered)
+	}
+	attached, err := recoveredManager.Attach(created.ID, "att_2", recovered.LatestSequence)
+	if err != nil || len(attached.Replay.Events) != 0 {
 		t.Fatalf("attach=%#v err=%v", attached, err)
 	}
 	if decision, err := recoveredManager.QueryInput(created.ID, key); err != nil || decision.Status != InputAccepted {
@@ -148,8 +150,16 @@ func TestManagerLiveOutputDoesNotWaitForSQLitePersistence(t *testing.T) {
 		output = append(output, event.Data...)
 	}
 	releasePersistence()
-	if _, err := manager.Close(context.Background(), created.ID); err != nil {
+	closed, err := manager.Close(context.Background(), created.ID)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if closed.EarliestSequence != closed.LatestSequence {
+		t.Fatalf("closed terminal retained replay bounds: %#v", closed)
+	}
+	stored, earliest, latest, err := state.Replay(context.Background(), created.ID, closed.LatestSequence, 0)
+	if err != nil || len(stored) != 0 || earliest != latest {
+		t.Fatalf("closed terminal retained stored output: events=%d earliest=%d latest=%d err=%v", len(stored), earliest, latest, err)
 	}
 }
 
@@ -306,7 +316,7 @@ func TestManagerShutdownPreservesRunningGenerationForBootRecovery(t *testing.T) 
 	}
 }
 
-func TestManagerRecoveryCompactsHistoryToConfiguredLimit(t *testing.T) {
+func TestManagerRecoveryClearsLegacyExitedHistory(t *testing.T) {
 	stateRoot := filepath.Join(t.TempDir(), "state")
 	state, err := store.Open(context.Background(), store.Config{Root: stateRoot})
 	if err != nil {
@@ -328,11 +338,11 @@ func TestManagerRecoveryCompactsHistoryToConfiguredLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot, err := manager.Snapshot(record.ID)
-	if err != nil || snapshot.EarliestSequence != 6 || snapshot.LatestSequence != 9 {
+	if err != nil || snapshot.EarliestSequence != 9 || snapshot.LatestSequence != 9 {
 		t.Fatalf("snapshot=%#v err=%v", snapshot, err)
 	}
 	attached, err := manager.Attach(record.ID, "att_compact", snapshot.EarliestSequence)
-	if err != nil || len(attached.Replay.Events) != 1 || string(attached.Replay.Events[0].Data) != "ghi" {
+	if err != nil || len(attached.Replay.Events) != 0 {
 		t.Fatalf("attached=%#v err=%v", attached, err)
 	}
 }

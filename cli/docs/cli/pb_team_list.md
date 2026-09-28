@@ -6,6 +6,10 @@ List teams
 
 List teams
 
+List teams visible to the signed-in account and their basic state. Select one with pb team get to inspect its current generation and grants.
+
+Teams use explicit membership and resource grants. Membership alone does not grant device use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+
 JSON output is supported with --json.
 
 ```

@@ -215,7 +215,7 @@ func regionalID(node string) tailcfg.DERPRegionID {
 }
 func regionForNode(node RegionalNode) *tailcfg.DERPRegion {
 	id := regionalID(node.NodeID)
-	return &tailcfg.DERPRegion{RegionID: id, RegionCode: node.Region, RegionName: fmt.Sprintf("%s/%d/%s", node.NodeID, node.NodeGeneration, node.ProcessEpoch), Nodes: []*tailcfg.DERPNode{{Name: node.NodeID, RegionID: id, HostName: node.EndpointHost, DERPPort: int(node.EndpointQUICPort), STUNPort: -1}}}
+	return &tailcfg.DERPRegion{RegionID: id, RegionCode: node.Region, RegionName: fmt.Sprintf("%s/%d/%s", node.NodeID, node.NodeGeneration, node.ProcessEpoch), Nodes: []*tailcfg.DERPNode{{Name: node.NodeID, RegionID: id, HostName: node.EndpointHost, DERPPort: int(node.EndpointQUICPort), STUNPort: int(node.EndpointTCPPort)}}}
 }
 func (a *Authority) configureRegionalRelays(config *tls.Config, only string) ([]*tailcfg.DERPRegion, error) {
 	if config == nil || len(config.Certificates) != 1 || len(config.Certificates[0].Certificate) != 1 {

@@ -30,7 +30,7 @@ func TestEnvironmentVariableCommandSurfaceKeepsValuesOutOfArguments(t *testing.T
 	if setCommand.Flags().Lookup("value") != nil || setCommand.Flags().Lookup("value-stdin") == nil || setCommand.Flags().Lookup("value-file") == nil || setCommand.Flags().Lookup("team") == nil || setCommand.Flags().Lookup("machine") == nil {
 		t.Fatalf("set flags expose an unsafe value input: %v", setCommand.Flags().FlagUsages())
 	}
-	if unsetCommand, _, _ := root.Find([]string{"env", "unset"}); unsetCommand.Flags().Lookup("yes") == nil || unsetCommand.Flags().Lookup("value") != nil {
+	if unsetCommand, _, _ := root.Find([]string{"env", "unset"}); unsetCommand.Flags().Lookup("confirm") == nil || unsetCommand.Flags().Lookup("yes") != nil || unsetCommand.Flags().Lookup("value") != nil {
 		t.Fatalf("unset flags are incorrect: %v", unsetCommand.Flags().FlagUsages())
 	}
 	if listCommand, _, _ := root.Find([]string{"env", "list"}); listCommand.Flags().Lookup("json") == nil || listCommand.Flags().Lookup("team") == nil || listCommand.Flags().Lookup("machine") == nil {
@@ -247,15 +247,26 @@ func TestEnvironmentVariableUnsetCommandUsesEncryptedManagerAndYes(t *testing.T)
 		passwordVaultForCommand = previousVault
 	})
 
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	var preview bytes.Buffer
+	previewCommand := newEnvironmentTestCommand(strings.NewReader(""), &preview)
+	previewCommand.Flags().String("config", configPath, "")
+	previewCommand.Flags().String("confirm", "", "")
+	if err := unsetEnvironmentVariable(previewCommand, "", "API_MODE"); err == nil || err.(exitCodeError).code != 2 {
+		t.Fatalf("preview error=%v", err)
+	}
 	var output bytes.Buffer
-	if err := unsetEnvironmentVariable(newEnvironmentTestCommand(strings.NewReader(""), &output), "", "API_MODE", true); err != nil {
+	command := newEnvironmentTestCommand(strings.NewReader(""), &output)
+	command.Flags().String("config", configPath, "")
+	command.Flags().String("confirm", "", "")
+	if err := command.Flags().Set("confirm", previewConfirmationCode(t, preview.String())); err != nil {
+		t.Fatal(err)
+	}
+	if err := unsetEnvironmentVariable(command, "", "API_MODE"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "Unset API_MODE") || !strings.Contains(output.String(), "encrypted vault scope") {
 		t.Fatalf("output=%q", output.String())
-	}
-	if err := unsetEnvironmentVariable(newEnvironmentTestCommand(strings.NewReader(""), &bytes.Buffer{}), "", "API_MODE", false); !errors.Is(err, errUsage) {
-		t.Fatalf("missing --yes error=%v", err)
 	}
 }
 

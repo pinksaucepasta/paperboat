@@ -6,6 +6,10 @@ Uninstall Paperboat daemon current-user service
 
 Uninstall Paperboat daemon current-user service
 
+Remove the current-user daemon service registration. This does not by itself revoke the account's device enrollment or uninstall the privileged device guard.
+
+Service commands manage the current user's background Paperboat daemon through the host operating system. The service runs pb daemon; it is not a separate Paperboat binary. Use status to inspect the supervised process and restart after a local configuration change.
+
 JSON output is supported with --json.
 
 ```

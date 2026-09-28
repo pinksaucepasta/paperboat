@@ -6,6 +6,10 @@ Verify a tunnel domain
 
 Verify a tunnel domain
 
+Check DNS ownership for one registered domain and update its verification state. --wait observes the operation; serving still depends on route and connector readiness.
+
+Custom domains require DNS ownership verification before they can serve a route. Domain changes are scoped to one tunnel, and verification status is separate from route readiness. The instructions command returns the required authoritative DNS records.
+
 JSON output is supported with --json.
 
 ```

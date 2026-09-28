@@ -3,18 +3,15 @@
 package runtime
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -27,28 +24,14 @@ import (
 	"time"
 
 	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
-	clientconfig "github.com/pinksaucepasta/paperboat/internal/config"
-	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/peerrelay"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/networkcheck"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/signaling"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/transfercrypto"
 	"golang.org/x/crypto/ssh"
 )
 
 type testTokenSource struct{}
-
-type clientPeerAttemptSource struct{}
-
-func (*clientPeerAttemptSource) Next(context.Context) (clientapi.PeerAttemptDescriptor, error) {
-	return clientapi.PeerAttemptDescriptor{}, context.Canceled
-}
 
 type runtimeObservationConnector struct{}
 
@@ -72,92 +55,6 @@ func (runtimeObservationConnector) Status() connector.Status {
 }
 
 func (testTokenSource) Token(context.Context) (string, error) { return "helper-identity", nil }
-
-func TestProductionClientPeerServiceBindsCompleteClientTransport(t *testing.T) {
-	root := t.TempDir()
-	attempts := &clientPeerAttemptSource{}
-	networkChanges := &networkChangeService{}
-	signalingSubstrate := &signaling.SubstrateManager{}
-	transferKeys, err := transfercrypto.NewKeyVault(clientconfig.FileSecretStore{Dir: filepath.Join(root, "transfer-keys")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	directNetwork := &directNetworkProxy{}
-	transport := http.DefaultTransport
-	var captured peerrelay.Config
-	var observedRegion string
-	service, err := newProductionClientPeerService(productionClientPeerDependencies{
-		attempts:            attempts,
-		networkChanges:      networkChanges,
-		signalingSubstrate:  signalingSubstrate,
-		stateRoot:           root,
-		transport:           transport,
-		authorizer:          func(string) (server.Authorizer, error) { return hostAuthorizer{}, nil },
-		transferKeys:        transferKeys,
-		observeRelaySuccess: func(region string) { observedRegion = region },
-		directNetwork:       directNetwork,
-		build: func(config peerrelay.Config) (*peerrelay.Service, error) {
-			captured = config
-			return peerrelay.New(config)
-		},
-	}, func(net.Conn) error { return nil }, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		writer.WriteHeader(http.StatusNoContent)
-	}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if captured.Source != attempts || captured.Fingerprints != networkChanges || captured.SocketMapping != networkChanges {
-		t.Fatal("production Client peer service did not bind attempts and network-change authorities")
-	}
-	if captured.SignalingSubstrate != signalingSubstrate || captured.TransferKeys != transferKeys {
-		t.Fatal("production Client peer service did not bind signaling and transfer-key authorities")
-	}
-	if captured.HTTPClient == nil || captured.HTTPClient.Transport != transport || captured.TLS == nil || captured.TLS.MinVersion != tls.VersionTLS13 {
-		t.Fatal("production Client peer service did not bind its authenticated transport contract")
-	}
-	if captured.Serve == nil || captured.ServePreview != nil || captured.ServeTransfer == nil || captured.AuthorizeStream == nil || captured.ServeStream == nil {
-		t.Fatal("production Client peer service omitted a required serving contract")
-	}
-	captured.ObserveRelaySuccess("bom")
-	if observedRegion != "bom" {
-		t.Fatalf("observed relay region = %q, want bom", observedRegion)
-	}
-	if err := captured.ServeStream(t.Context(), streamauth.Header{Consumer: "terminal"}, nil); !errors.Is(err, peerrelay.ErrInvalid) {
-		t.Fatalf("non-preview stream error = %v, want peerrelay.ErrInvalid", err)
-	}
-	serverConn, clientConn := net.Pipe()
-	done := make(chan error, 1)
-	go func() { done <- captured.ServeTransfer(t.Context(), serverConn) }()
-	request, err := http.NewRequest(http.MethodGet, "http://machine/v1/file-transfers/id", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := request.Write(clientConn); err != nil {
-		t.Fatal(err)
-	}
-	response, err := http.ReadResponse(bufio.NewReader(clientConn), request)
-	if err != nil || response.StatusCode != http.StatusNoContent {
-		t.Fatalf("transfer response=%v error=%v", response, err)
-	}
-	_ = response.Body.Close()
-	_ = clientConn.Close()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("Client transfer server did not stop after stream close")
-	}
-
-	directNetwork.mu.RLock()
-	target := directNetwork.target
-	directNetwork.mu.RUnlock()
-	peerService, ok := service.(*peerrelay.Service)
-	if !ok || target != peerService {
-		t.Fatal("production Client peer service was not installed as direct-network recovery target")
-	}
-}
 
 type testProofSource struct{ body []byte }
 
@@ -486,16 +383,13 @@ func TestRuntimeObservationUsesRenewableIdentityAndExactBodyProof(t *testing.T) 
 	}
 }
 
-func TestEnvironmentInjectionSupportsHostProfilesWithLocalKeyCustody(t *testing.T) {
+func TestEnvironmentInjectionRequiresHostSetup(t *testing.T) {
 	registration := runtimeidentity.Registration{SetupMode: "host", MachineID: "mach_1", InstallationGeneration: 1}
-	if !environmentInjectionEligible(runtimeconfig.Hosted, registration) {
-		t.Fatal("hosted host runtime did not enable ENV local key custody")
-	}
-	if !environmentInjectionEligible(runtimeconfig.BYOD, registration) {
+	if !environmentInjectionEligible(registration) {
 		t.Fatal("BYOD host runtime did not enable ENV local key custody")
 	}
 	registration.SetupMode = "client"
-	if environmentInjectionEligible(runtimeconfig.BYOD, registration) {
+	if environmentInjectionEligible(registration) {
 		t.Fatal("client-only machine enabled host ENV custody")
 	}
 }
@@ -583,71 +477,13 @@ func TestRuntimeObservationAppliesEncryptedBundleAndAcknowledgesIt(t *testing.T)
 	}
 }
 
-func TestRuntimeObservationIncludesMonotonicMedianRelayLatency(t *testing.T) {
-	now := time.Now().UTC()
-	cache := networkcheck.NewRegionalCache()
-	for index, rtt := range []time.Duration{30, 10, 20} {
-		if err := cache.Record("fsn1", rtt*time.Millisecond, now.Add(time.Duration(index)*time.Nanosecond)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	var generations []uint64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			RelayLatency *runtimeRelayLatencyObservation `json:"relay_latency"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.RelayLatency == nil || len(body.RelayLatency.Samples) != 1 || body.RelayLatency.Samples[0].RTTMS != 20 {
-			t.Fatalf("relay latency=%#v err=%v", body.RelayLatency, err)
-		}
-		generations = append(generations, body.RelayLatency.Generation)
-		w.WriteHeader(http.StatusAccepted)
-	}))
-	defer server.Close()
-	sender := &runtimeObservationSender{endpoint: server.URL, tokens: testTokenSource{}, proofs: &testProofSource{}, operationID: func() (string, error) { return "op-1", nil }, environmentID: "prj_1", machineID: "mach_1", reporterVersion: "test", client: server.Client(), workerGeneration: 3, osBootID: "boot", serviceScope: "system", connector: runtimeObservationConnector{}, relayLatency: cache}
-	if err := sender.Send(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if err := sender.Send(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(generations, []uint64{1, 2}) {
-		t.Fatalf("generations=%v", generations)
-	}
-}
-
-func TestCurrentRelayRegionTracksOnlySuccessfulNonEmptyRegions(t *testing.T) {
-	state := &currentRelayRegion{}
-	state.Observe("")
-	if got := state.Current(); got != "" {
-		t.Fatalf("empty observation changed current region to %q", got)
-	}
-	state.Observe("fsn1")
-	state.Observe("")
-	if got := state.Current(); got != "fsn1" {
-		t.Fatalf("current region=%q want fsn1", got)
-	}
-	state.Observe("hel1")
-	if got := state.Current(); got != "hel1" {
-		t.Fatalf("current region=%q want hel1", got)
-	}
-}
-
 func TestProductionHelperRequiresHTTPSControl(t *testing.T) {
 	base := map[string]string{"PAPERBOAT_RUNTIME_STATE_ROOT": filepath.Join(t.TempDir(), "state")}
-	base["PAPERBOAT_RUNTIME_PROFILE"] = "byod"
 	base["PAPERBOAT_WORKSPACE_ROOT"] = t.TempDir()
 	base["PAPERBOAT_CONTROL_URL"] = "http://control.example.test"
 	base["PAPERBOAT_MACHINE_ID"] = "um_1"
 	if _, err := NewProductionHost(context.Background(), "test", func(name string) string { return base[name] }); !errors.Is(err, ErrProductionInvalid) {
 		t.Fatalf("byod control error=%v", err)
-	}
-	base["PAPERBOAT_RUNTIME_PROFILE"] = "hosted"
-	base["PAPERBOAT_WORKSPACE"] = filepath.Join(t.TempDir(), "volume")
-	base["PAPERBOAT_PROJECT_ID"] = "prj_1"
-	base["PAPERBOAT_REPOSITORY_URL"] = "https://github.com/paperboat/example.git"
-	base["PAPERBOAT_CONTROL_URL"] = "http://control.example.test"
-	if _, err := NewProductionHost(context.Background(), "test", func(name string) string { return base[name] }); !errors.Is(err, ErrProductionInvalid) {
-		t.Fatalf("control error=%v", err)
 	}
 }
 
@@ -709,34 +545,6 @@ func TestValidateBYODWorkspaceRejectsNonCanonicalAndSymlinkRoots(t *testing.T) {
 	}
 	if err := validateBYODWorkspace("relative"); !errors.Is(err, ErrProductionInvalid) {
 		t.Fatalf("relative error=%v", err)
-	}
-}
-
-func TestRetryHostedControlWaitsForTransientFailure(t *testing.T) {
-	attempts := 0
-	started := time.Now()
-	result, err := retryHostedControl(context.Background(), func(context.Context) (string, error) {
-		attempts++
-		if attempts == 1 {
-			return "", errors.New("control plane is not ready")
-		}
-		return "ready", nil
-	})
-	if err != nil || result != "ready" || attempts != 2 || time.Since(started) < time.Second {
-		t.Fatalf("result=%q err=%v attempts=%d elapsed=%s", result, err, attempts, time.Since(started))
-	}
-}
-
-func TestRetryHostedControlStopsOnCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	attempts := 0
-	_, err := retryHostedControl(ctx, func(context.Context) (string, error) {
-		attempts++
-		cancel()
-		return "", errors.New("unavailable")
-	})
-	if !errors.Is(err, context.Canceled) || attempts != 1 {
-		t.Fatalf("err=%v attempts=%d", err, attempts)
 	}
 }
 

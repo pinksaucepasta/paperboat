@@ -21,6 +21,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/deviceloopback"
 	"github.com/pinksaucepasta/paperboat/internal/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/internal/splitdns"
+	"google.golang.org/protobuf/proto"
 )
 
 type guardedNameClient interface {
@@ -270,7 +271,7 @@ func mapPeerSnapshot(peers []*pbSync.PeerUpdate, cidr string) ([]*pbSync.PeerUpd
 		if peer == nil {
 			continue
 		}
-		copyPeer := *peer
+		copyPeer := proto.Clone(peer).(*pbSync.PeerUpdate)
 		if strings.TrimSpace(peer.GetAssignedIp()) != "" {
 			canonical, err := netip.ParseAddr(peer.GetAssignedIp())
 			if err != nil {
@@ -282,7 +283,7 @@ func mapPeerSnapshot(peers []*pbSync.PeerUpdate, cidr string) ([]*pbSync.PeerUpd
 			}
 			copyPeer.AssignedIp = local.String()
 		}
-		mapped[index] = &copyPeer
+		mapped[index] = copyPeer
 	}
 	return mapped, nil
 }

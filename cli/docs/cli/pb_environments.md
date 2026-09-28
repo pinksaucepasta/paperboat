@@ -1,10 +1,12 @@
 ## pb environments
 
-List machines available to this account
+List enrolled machines available to this account
 
 ### Synopsis
 
-List machines available to this account
+List enrolled machines available to this account
+
+List enrolled machines available to this account as terminal environments. Use the displayed name or ID with pb connect; visibility does not imply a machine is ready.
 
 JSON output is supported with --json.
 

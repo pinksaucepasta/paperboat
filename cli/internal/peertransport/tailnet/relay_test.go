@@ -30,3 +30,10 @@ func TestDiscoveryRegistrationFencesKeyRotation(t *testing.T) {
 		t.Fatal("rotation did not replace discovery identity", err)
 	}
 }
+
+func TestRegionalRelayAdvertisesSTUNOnWSSPort(t *testing.T) {
+	region := regionForNode(RegionalNode{NodeID: "relay-1", NodeGeneration: 1, Region: "in", EndpointHost: "relay.example.test", EndpointTCPPort: 28443, EndpointQUICPort: 28444})
+	if len(region.Nodes) != 1 || region.Nodes[0].STUNPort != 28443 || region.Nodes[0].DERPPort != 28444 {
+		t.Fatalf("incorrect regional relay ports: %+v", region.Nodes)
+	}
+}

@@ -271,7 +271,7 @@ func browserDecisionMatches(d connectorprotocol.IngressDecision, m route.RouteMa
 	if generation == 0 {
 		generation = r.Revision
 	}
-	return d.Validate(time.Now().UTC()) == nil && d.Binding.Hostname == m.Host && d.Binding.RouteID == id && d.Binding.RouteGeneration == generation && d.Binding.AccountID == r.AccountID && ((r.ResourceKind == "preview" && d.Binding.PublicationID == r.TunnelID) || (r.ResourceKind != "preview" && d.Binding.TunnelID == r.TunnelID)) && d.Binding.Audience == r.AccessMode && d.EdgeNodeID == r.Node && d.EdgeProcessEpoch == r.EdgeProcessEpoch && d.ConnectorID == r.ConnectorID && d.SessionID == r.ConnectorSessionID && d.ProcessGeneration == r.ConnectorProcessGeneration && d.ConfigGeneration == r.ConfigGeneration
+	return d.Validate(time.Now().UTC()) == nil && d.Binding.Hostname == m.Host && d.Binding.RouteID == id && d.Binding.RouteGeneration == generation && d.Binding.AccountID == r.AccountID && ((r.ResourceKind == "preview" && d.Binding.PublicationID == r.TunnelID) || (r.ResourceKind != "preview" && d.Binding.TunnelID == r.TunnelID)) && d.Binding.Audience == r.AccessMode && (r.ViewerPolicyGeneration == 0 || d.PolicyGeneration == r.ViewerPolicyGeneration) && d.EdgeNodeID == r.Node && d.EdgeProcessEpoch == r.EdgeProcessEpoch && d.ConnectorID == r.ConnectorID && d.SessionID == r.ConnectorSessionID && d.ProcessGeneration == r.ConnectorProcessGeneration && d.ConfigGeneration == r.ConfigGeneration
 }
 
 // authorize owns one request's refresh loop. Context cancellation closes the

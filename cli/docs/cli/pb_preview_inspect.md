@@ -6,6 +6,10 @@ Show daemon-local HTTP captures
 
 Show daemon-local HTTP captures
 
+Read or manage bounded HTTP captures retained by the local daemon for one preview. --body and --raw expose capture content, while enable, disable, and purge change capture state; treat output as potentially sensitive.
+
+A preview exposes a local target through a temporary Paperboat URL or private/team access policy. Inspect its status before sharing the URL, and stop or delete it when no longer needed. Browser HTTP terminates TLS at the edge.
+
 JSON output is supported with --json.
 
 ```

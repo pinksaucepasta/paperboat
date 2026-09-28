@@ -6,7 +6,6 @@ import (
 	"context"
 	"flag"
 	"io"
-	"time"
 )
 
 type Action func(*Context) error
@@ -41,14 +40,6 @@ func (c *Context) Uint(name string) uint {
 		return 0
 	}
 	result, _ := value.Get().(uint)
-	return result
-}
-func (c *Context) Duration(name string) time.Duration {
-	value, ok := c.set.Lookup(name).Value.(flag.Getter)
-	if !ok {
-		return 0
-	}
-	result, _ := value.Get().(time.Duration)
 	return result
 }
 func (c *Context) Args() Args { return Args{values: c.set.Args()} }
@@ -89,12 +80,3 @@ func (*UintFlag) isFlag() {}
 type Float64Flag struct{ Name, Usage string }
 
 func (*Float64Flag) isFlag() {}
-
-// App is retained only as an injected test runner for command transcripts.
-// Production parsing starts directly at the Cobra root.
-type App struct {
-	Writer, ErrWriter io.Writer
-	RunFunc           func([]string) error
-}
-
-func (a *App) Run(args []string) error { return a.RunFunc(args) }

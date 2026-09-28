@@ -2,7 +2,7 @@
 
 The [complete command reference](cli/README.md) documents every public `pb` command,
 including terminal sessions, SSH/SCP/SFTP/rsync, previews, tunnels, authentication,
-configuration, environment variables and vaults, teams, transfers, diagnostics,
+configuration, environment variables and vaults, teams, sends, hosted edges, diagnostics,
 updates, and runtime management. Each page includes usage, local and inherited
 flags with defaults, and links to its parent and children. Commands with examples
 in their help include those examples in both formats.
@@ -107,7 +107,7 @@ not perform shell expansion or execute local shell statements.
 ## Authentication and recovery
 
 Install and enroll using the dashboard command, or generate both Linux/macOS and
-Windows install commands with `pb machine add` on an authenticated machine.
+Windows install commands with `pb device add` on an authenticated device.
 There is no shell selector.
 
 For CLI authentication on an existing installation, run `pb auth login` and
@@ -127,7 +127,10 @@ diagnostics. `--server` selects the control plane;
 use only the intended server and account.
 
 If local preferences are invalid, `pb --no-customization ...` bypasses them.
-`pb config customize validate`, `import`, and `reset --yes` provide repair paths.
+`pb config customize validate`, `import`, and `reset` provide repair paths.
+Reset and other destructive commands print a confirmation command with a short-lived
+code; run it to apply the change. A preview exits with status 2 so scripts can distinguish
+it from a completed operation.
 Reset affects local CLI preferences, not account or connection settings.
 
 Follow the command's recovery instructions after interrupted preview/tunnel or

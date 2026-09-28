@@ -6,6 +6,10 @@ Manage tunnel domains
 
 Manage tunnel domains
 
+Manage custom domains bound to a durable tunnel. Add the hostname, follow authoritative DNS instructions, verify ownership, then inspect route readiness.
+
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+
 With --json, this command group lists its available commands.
 
 ### Options

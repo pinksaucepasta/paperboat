@@ -26,7 +26,7 @@ type desktopRequest struct {
 }
 
 func desktopCommand() *cobra.Command {
-	root := &cobra.Command{Use: "desktop", Short: "Authenticated desktop management bridge"}
+	root := &cobra.Command{Use: "__desktop", Hidden: true, Short: "Authenticated desktop management bridge"}
 	request := &cobra.Command{Use: "request", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
 		data, err := io.ReadAll(io.LimitReader(c.InOrStdin(), 32769))
 		if err != nil {
@@ -108,11 +108,11 @@ func handleDesktop(c *cobra.Command, in desktopRequest) (any, error) {
 	case "local.update":
 		return desktopCLI(c, []string{"update", "--json"})
 	case "local.restart":
-		return desktopCLI(c, []string{"daemon", "service", "restart", "--json"})
+		return desktopCLI(c, []string{"service", "restart", "--json"})
 	case "network.pause":
-		return desktopCLI(c, []string{"daemon", "service", "stop", "--json"})
+		return desktopCLI(c, []string{"service", "stop", "--json"})
 	case "network.resume":
-		return desktopCLI(c, []string{"daemon", "service", "start", "--json"})
+		return desktopCLI(c, []string{"service", "start", "--json"})
 	case "auth.logout":
 		return desktopCLI(c, []string{"auth", "logout", "--json"})
 	case "network.get", "network.set", "network.effective", "network.apply":

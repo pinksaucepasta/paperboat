@@ -6,11 +6,17 @@ pb-session-remove - Remove a teammate, including access through an all-team gran
 
 
 .SH SYNOPSIS
-\fBpb session remove   [flags]\fP
+\fBpb session remove <session-id> <account-id> [flags]\fP
 
 
 .SH DESCRIPTION
 Remove a teammate, including access through an all-team grant
+
+.PP
+Remove one teammate from a session, including access that came through an all-team grant. The owner's session remains active for other authorized participants.
+
+.PP
+Terminal sessions persist independently of a single connection and can be reattached after a disconnect. Sharing grants explicit access to a named session. Closing, deleting, and removing a participant have different effects; inspect the selected session before acting.
 
 .PP
 JSON output is supported with --json.

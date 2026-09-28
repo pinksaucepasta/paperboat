@@ -141,7 +141,7 @@ func TestTask39PrepareWindowsUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer clear(private)
-	certificate, err := endpointidentity.Sign(private, endpointidentity.Claims{AccountID: "task39_account_" + username, Role: endpointidentity.RoleMachine, EndpointID: machine, NoisePublicKey: endpoint.NoisePublicKey(), QUICPublicKey: endpoint.QUICPublicKey(), Generation: 1, Serial: 1, IssuedAt: time.Now().UTC().Add(-time.Minute), ExpiresAt: time.Now().UTC().Add(24 * time.Hour)})
+	certificate, err := endpointidentity.Sign(private, endpointidentity.Claims{AccountID: "task39_account_" + username, Role: endpointidentity.RoleMachine, EndpointID: machine, QUICPublicKey: endpoint.QUICPublicKey(), Generation: 1, Serial: 1, IssuedAt: time.Now().UTC().Add(-time.Minute), ExpiresAt: time.Now().UTC().Add(24 * time.Hour)})
 	if err != nil {
 		t.Fatal(err)
 	}

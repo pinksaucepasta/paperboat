@@ -13,20 +13,26 @@ pb-config-customize-reset - Reset only local CLI preferences; keep account and c
 Reset only local CLI preferences; keep account and connection settings
 
 .PP
+Remove local shortcuts, command defaults, and appearance choices. This preserves sign-in credentials, configured server, and remote resource state; the confirmation code confirms the reset.
+
+.PP
+Customization is local to this CLI installation. It can change shortcuts, command defaults, and terminal appearance without changing account credentials or remote resources. Validate or explain preferences before applying an unfamiliar document.
+
+.PP
 JSON output is supported with --json.
 
 
 .SH OPTIONS
+\fB--confirm\fP=""
+	six-character confirmation code from the preview
+
+.PP
 \fB-h\fP, \fB--help\fP[=false]
 	help for reset
 
 .PP
 \fB--json\fP[=false]
 	print machine-readable JSON
-
-.PP
-\fB--yes\fP[=false]
-	confirm resetting local preferences
 
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS

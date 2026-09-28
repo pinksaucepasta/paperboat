@@ -523,11 +523,18 @@ func TestSessionRenewalUsesLeaseAdvancedDuringRenewalWait(t *testing.T) {
 	defer session.Stop(context.Background())
 
 	<-captured
+	session.mu.Lock()
+	session.lease.CreateOperationID = "operation_renew_ready"
+	session.mu.Unlock()
 	ready := session.currentLease()
 	ready = sessionReadyLease(ready)
 	ready.ETag = formatLeaseETag(ready.ID, 2)
+	ready.CreateOperationID = "" // readiness projections omit the create operation
 	if err := session.markReady(ready); err != nil {
 		t.Fatal(err)
+	}
+	if got := session.currentLease().CreateOperationID; got != "operation_renew_ready" {
+		t.Fatalf("readiness lost create operation: %q", got)
 	}
 	close(release)
 

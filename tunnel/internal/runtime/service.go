@@ -70,7 +70,7 @@ func (s *Service) Start(ctx context.Context) error {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), s.cfg.ShutdownTimeout)
 			defer cancel()
 			cleanupErr := s.shutdownLocked(cleanupCtx)
-			return errors.Join(fmt.Errorf("start component: %w", err), cleanupErr)
+			return errors.Join(componentStartError(component, err), cleanupErr)
 		}
 		s.started = append(s.started, component)
 		if source, ok := component.(interface{ Done() <-chan error }); ok {

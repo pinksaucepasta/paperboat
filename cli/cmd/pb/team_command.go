@@ -29,7 +29,11 @@ func teamReadCommand(action string) *cobra.Command {
 	if action == "get" {
 		use, args = "get <team>", cobra.ExactArgs(1)
 	}
-	c := &cobra.Command{Use: use, Short: strings.Title(action) + " teams", Args: commandArgs(args), RunE: func(c *cobra.Command, values []string) error {
+	short := "List teams"
+	if action == "get" {
+		short = "Show one team and its current generation"
+	}
+	c := &cobra.Command{Use: use, Short: short, Args: commandArgs(args), RunE: func(c *cobra.Command, values []string) error {
 		client, err := backendForCommand(c)
 		if err != nil {
 			return err
@@ -169,7 +173,14 @@ func teamMutationCommand(action string) *cobra.Command {
 		use = action + " <team> <account>"
 		exact = 2
 	}
-	c := &cobra.Command{Use: use, Short: strings.Title(action) + " team membership", Args: commandArgs(cobra.ExactArgs(exact)), RunE: func(c *cobra.Command, args []string) error {
+	short := map[string]string{
+		"role":     "Change a team member's role",
+		"remove":   "Remove a team member",
+		"leave":    "Leave a team",
+		"transfer": "Transfer team ownership",
+		"delete":   "Delete a team",
+	}[action]
+	c := &cobra.Command{Use: use, Short: short, Args: commandArgs(cobra.ExactArgs(exact)), RunE: func(c *cobra.Command, args []string) error {
 		generation, err := requiredTeamGeneration(c)
 		if err != nil {
 			return err

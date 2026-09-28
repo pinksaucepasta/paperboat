@@ -6,11 +6,17 @@ pb-tunnel-policy-revoke - Revoke an on-demand port policy
 
 
 .SH SYNOPSIS
-\fBpb tunnel policy revoke  [flags]\fP
+\fBpb tunnel policy revoke <policy> [flags]\fP
 
 
 .SH DESCRIPTION
 Revoke an on-demand port policy
+
+.PP
+Revoke one exact on-demand port policy at its expected generation. Subsequent activations are denied; this does not delete unrelated tunnel routes.
+
+.PP
+An on-demand policy authorizes an exact machine port for private or team access. A policy does not publish a public URL or grant every port on the device. Revocation fences subsequent activation.
 
 .PP
 JSON output is supported with --json.

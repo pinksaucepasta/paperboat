@@ -3,6 +3,8 @@ package tunnelenrollment
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -45,6 +47,12 @@ func (a *assemblyIngressAuthority) lookup(ctx context.Context, open connectorpro
 	if a.fetched.IsZero() || now.Sub(a.fetched) >= connectorprotocol.IngressRefreshInterval {
 		d, err := a.source.fetchCarrierDescriptor(ctx, a.request, a.body)
 		if err != nil {
+			var bootstrap *CarrierBootstrapError
+			if errors.As(err, &bootstrap) {
+				slog.WarnContext(ctx, "durable ingress authority refresh failed", "code", bootstrap.Code, "status", bootstrap.StatusCode)
+			} else {
+				slog.WarnContext(ctx, "durable ingress authority refresh failed", "code", "unavailable")
+			}
 			a.decisions = nil
 			a.fetched = time.Time{}
 			return connectorprotocol.IngressDecision{}, err

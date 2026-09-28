@@ -222,14 +222,11 @@ func testRotationFixture(t *testing.T) (*Manager, *testKeyStore, *testInstaller,
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := connectorprotocol.NewRotationPlan("account_1", "tunnel_1", "operation_1", []connectorprotocol.RotationTarget{{ConnectorID: "connector_1", HostID: "host_1", OldCredentialGeneration: 1, NewCredentialGeneration: 2}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	target := connectorprotocol.RotationTarget{ConnectorID: "connector_1", HostID: "host_1", OldCredentialGeneration: 1, NewCredentialGeneration: 2}
 	challenge := connectorprotocol.CredentialRotationChallenge{
-		AccountID: "account_1", TunnelID: "tunnel_1", OperationID: plan.OperationID,
+		AccountID: "account_1", TunnelID: "tunnel_1", OperationID: "operation_1",
 		ConnectorID: "connector_1", HostID: "host_1", SessionID: "session_old",
-		ProcessGeneration: 1, TargetSetHash: plan.TargetSetHash, Target: plan.Targets[0],
+		ProcessGeneration: 1, TargetSetHash: "sha256:" + strings.Repeat("a", 64), Target: target,
 		OldCredentialGeneration: 1, NewCredentialGeneration: 2, OldIdentityKeyID: oldID,
 		OldIdentityKeyThumbprint: oldThumbprint, ChallengeNonce: "rotation-challenge-1",
 		IssuedAt: now.Add(-time.Second), ExpiresAt: now.Add(time.Minute),

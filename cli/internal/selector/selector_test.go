@@ -151,7 +151,7 @@ func TestLoadingViewFitsNarrowTerminal(t *testing.T) {
 
 func TestModelFiltersMetadataAndWraps(t *testing.T) {
 	m := NewModel([]Item{
-		{ID: "env_1", Title: "api", Description: "hosted project · ready"},
+		{ID: "env_1", Title: "api", Description: "machine · online · darwin/amd64"},
 		{ID: "env_2", Title: "dadape", Description: "machine · online · linux/arm64"},
 	}, 1)
 	m.Type('a')
@@ -349,7 +349,7 @@ func TestChooserRendersActionItemsDistinctly(t *testing.T) {
 		height:  24,
 	}
 	view := model.View()
-	if !strings.Contains(view, actionStyle.Render("     + Add machine")) {
+	if !strings.Contains(view, stylesForContext(model.options.Context).action.Render("     + Add machine")) {
 		t.Fatalf("action item was not accented: %q", view)
 	}
 }
@@ -397,7 +397,8 @@ func TestChooserRendersFavoriteItemsWithAccent(t *testing.T) {
 		height:  24,
 	}
 	view := model.View()
-	if !strings.Contains(view, favoriteStyle.Render("     Favorite")+" "+favoriteMarker.Render("◆")) {
+	styles := stylesForContext(model.options.Context)
+	if !strings.Contains(view, styles.favorite.Render("     Favorite")+" "+styles.favoriteMarker.Render("◆")) {
 		t.Fatalf("favorite item was not accented: %q", view)
 	}
 }

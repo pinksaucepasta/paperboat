@@ -6,6 +6,10 @@ Remove a tunnel domain
 
 Remove a tunnel domain
 
+Remove one domain binding after confirmation. DNS records managed by the user are not silently removed by this command.
+
+Custom domains require DNS ownership verification before they can serve a route. Domain changes are scoped to one tunnel, and verification status is separate from route readiness. The instructions command returns the required authoritative DNS records.
+
 JSON output is supported with --json.
 
 ```
@@ -15,11 +19,11 @@ pb tunnel domain remove <tunnel> <domain> [flags]
 ### Options
 
 ```
+      --confirm string     six-character confirmation code from the preview
   -h, --help               help for remove
       --json               print canonical JSON
       --timeout duration   maximum time to wait for operation completion (default 2m0s)
       --wait               wait for the operation to reach a terminal state
-      --yes                confirm domain-binding removal while preserving user-owned DNS
 ```
 
 ### Options inherited from parent commands

@@ -1,8 +1,9 @@
 # Paperboat upstream foundations
 
 This directory records the upstream networking inputs that the Paperboat transport work
-is allowed to consume. It contains pins, notices, and the consumed Tailscale source snapshot
-with integration patches recorded in `PATCHES.md`. Tailcat is retained as source
+is allowed to consume. It contains original foundation pins and notices; the
+current consumed Tailscale fork and integration patches are recorded in `PATCHES.md`.
+Tailcat is retained as source
 provenance for the owned assembly in `internal/peertransport/mesh`, not a separate
 module or maintained upstream application snapshot.
 
@@ -13,11 +14,10 @@ license notice and declared Go version. The Tailcat pin is
 checkouts in `references/` remain inspection evidence; a newer checkout is not silently
 substituted for the version Tailcat declares.
 
-The repository fields point at the public upstream origins. A Paperboat fork is not
-required until a downstream patch must be distributed. If that happens, update the
-origin and commit together, preserve the upstream base in `PATCHES.md`, and rerun the
-bounded check. Never replace a commit pin with `main`, `latest`, or an unreviewed module
-version.
+The repository fields point at the public upstream origins. The distributed
+Paperboat networking fork is pinned in both consumer modules. When it changes,
+preserve the upstream base in `PATCHES.md` and rerun the bounded transport checks.
+Never replace a commit pin with `main`, `latest`, or an unreviewed module version.
 
 Run from this repository's root:
 
@@ -34,8 +34,8 @@ Task 6 owns actual module consumption and integration checks.
 No Paperboat transport or authorization policy belongs in these upstream records; such
 policy must stay behind the adapters owned by later tasks.
 
-Task 11 consumes the pinned Tailscale module snapshot in `tailscale/` through the
-module replacement. Its BSD-3-Clause license and other upstream notices are retained.
+Task 11 introduced the Tailscale integration. The current fork is consumed through
+the module replacement. Its BSD-3-Clause license and other upstream notices are retained.
 Only the explicit patches listed in `PATCHES.md` are maintained downstream; no upstream
 application is built as part of this intake. The private relay is in the sibling
 `paperboat-relay` module, consumed through a local module replacement until publication.

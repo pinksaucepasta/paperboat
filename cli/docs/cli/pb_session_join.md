@@ -6,6 +6,10 @@ Join an explicitly shared terminal with recent output
 
 Join an explicitly shared terminal with recent output
 
+Join an explicitly shared terminal by session ID. Your viewer or interactive role comes from the owner's grant; joining does not create a new ownership session.
+
+Terminal sessions persist independently of a single connection and can be reattached after a disconnect. Sharing grants explicit access to a named session. Closing, deleting, and removing a participant have different effects; inspect the selected session before acting.
+
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
 
 ```

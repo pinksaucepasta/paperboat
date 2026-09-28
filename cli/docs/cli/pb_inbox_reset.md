@@ -4,7 +4,9 @@
 
 ### Synopsis
 
+Restore the default local receiving directory for future files. The account's team request acceptance policy and already delivered files are unchanged.
 
+The Paperboat Inbox receives verified files and exact team requests. Files remain until removed by the user. The receiving path is a local device setting; team request acceptance is an account policy. A sender manages outgoing batches with pb send.
 
 JSON output is supported with --json.
 

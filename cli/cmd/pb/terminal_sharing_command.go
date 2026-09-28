@@ -144,8 +144,8 @@ func joinSharedTerminal(c *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if d.hostedTransferKeys != nil {
-		defer d.hostedTransferKeys.Close()
+	if d.peerTunnel != nil {
+		defer d.peerTunnel.Close()
 	}
 	source, err := configuredMachineID()
 	if err != nil {

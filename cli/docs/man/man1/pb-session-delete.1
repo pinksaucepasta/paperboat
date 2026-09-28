@@ -2,7 +2,7 @@
 .TH "PB-SESSION-DELETE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-session-delete - Delete a terminal session and its history
+pb-session-delete - Delete a closed terminal session record
 
 
 .SH SYNOPSIS
@@ -10,7 +10,13 @@ pb-session-delete - Delete a terminal session and its history
 
 
 .SH DESCRIPTION
-Delete a terminal session and its history
+Delete a closed terminal session record
+
+.PP
+Delete a closed non-default terminal session record, or use --all for all such records in the environment. Close a running terminal first. With --all, run the command once to receive a short-lived confirmation token, then run the displayed command to proceed. the confirmation code confirms only single-session deletion.
+
+.PP
+Terminal sessions persist independently of a single connection and can be reattached after a disconnect. Sharing grants explicit access to a named session. Closing, deleting, and removing a participant have different effects; inspect the selected session before acting.
 
 .PP
 JSON output is supported with --json.
@@ -21,16 +27,16 @@ JSON output is supported with --json.
 	delete all sessions in the environment
 
 .PP
+\fB--confirm\fP=""
+	six-character confirmation code from the preview
+
+.PP
 \fB-h\fP, \fB--help\fP[=false]
 	help for delete
 
 .PP
 \fB--json\fP[=false]
 	print JSON
-
-.PP
-\fB--yes\fP[=false]
-	confirm delete
 
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS

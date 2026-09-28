@@ -53,7 +53,6 @@ type PeerStreamRequest struct {
 	AccessSessionID   string          `json:"access_session_id,omitempty"`
 	Deadline          time.Time       `json:"deadline"`
 	MaximumBytes      uint64          `json:"maximum_bytes"`
-	Transport         string          `json:"transport"`
 	QUICEndpoint      string          `json:"quic_endpoint,omitempty"`
 	WSSEndpoint       string          `json:"wss_endpoint,omitempty"`
 	Payload           json.RawMessage `json:"payload,omitempty"`
@@ -77,11 +76,41 @@ type PeerTerminalPayload struct {
 }
 
 type PeerProbeResult struct {
-	Transport             string `json:"transport"`
-	RelayRegion           string `json:"relay_region,omitempty"`
+	Path                  string `json:"path"`
 	ConnectionNanoseconds int64  `json:"connection_nanoseconds"`
-	RTTNanoseconds        int64  `json:"rtt_nanoseconds"`
-	PTOs                  uint32 `json:"ptos"`
+}
+
+const RelayInventorySchemaV1 = "paperboat.relay-inventory/v1"
+
+type RelayCandidate struct {
+	NodeID     string   `json:"node_id"`
+	Region     string   `json:"region"`
+	State      string   `json:"state"`
+	ObservedAt int64    `json:"observed_at"`
+	ExpiresAt  int64    `json:"expires_at"`
+	Roles      []string `json:"roles"`
+	Transports []string `json:"transports"`
+}
+
+type RelayInventory struct {
+	Schema     string           `json:"schema"`
+	Candidates []RelayCandidate `json:"candidates"`
+}
+
+func (v RelayInventory) Validate() error {
+	if v.Schema != RelayInventorySchemaV1 || len(v.Candidates) > 32 {
+		return ErrInvalidConfig
+	}
+	for _, candidate := range v.Candidates {
+		if !safeValue(candidate.NodeID) || !safeValue(candidate.Region) || !oneOf(candidate.State, "ready", "draining", "unavailable") || candidate.ObservedAt <= 0 || candidate.ExpiresAt <= candidate.ObservedAt || len(candidate.Roles) > 8 || len(candidate.Transports) > 8 {
+			return ErrInvalidConfig
+		}
+	}
+	return nil
+}
+
+func validNativeProbePath(path string) bool {
+	return oneOf(path, "direct", "peer_relay", "regional_relay", "unknown")
 }
 
 type PeerPreviewPayload struct {
@@ -105,7 +134,7 @@ func NewPendingPeerStreamRequest(machineID, environmentID string, machineGenerat
 }
 
 func (r PeerStreamRequest) Validate(now time.Time) error {
-	if r.Schema != PeerStreamSchemaV1 || !safeValue(r.MachineID) || !safeValue(r.EnvironmentID) || r.MachineGeneration == 0 || !oneOf(r.Consumer, "terminal", "exec", "ssh", "private_preview", "codex", "health_probe", "file_transfer_key") || !safeValue(r.OperationID) || !oneOf(r.Transport, "", "a", "d", "q", "w", "r") || r.Credential == "" || len(r.Credential) > 16<<10 || r.Deadline.IsZero() || !r.Deadline.After(now) || r.Deadline.Sub(now) > 24*time.Hour || r.MaximumBytes == 0 || len(r.Payload) > 64<<10 || len(r.Payload) > 0 && !json.Valid(r.Payload) {
+	if r.Schema != PeerStreamSchemaV1 || !safeValue(r.MachineID) || !safeValue(r.EnvironmentID) || r.MachineGeneration == 0 || !oneOf(r.Consumer, "terminal", "exec", "ssh", "private_preview", "codex", "health_probe", "file_transfer_key") || !safeValue(r.OperationID) || r.Credential == "" || len(r.Credential) > 16<<10 || r.Deadline.IsZero() || !r.Deadline.After(now) || r.Deadline.Sub(now) > 24*time.Hour || r.MaximumBytes == 0 || len(r.Payload) > 64<<10 || len(r.Payload) > 0 && !json.Valid(r.Payload) {
 		return ErrInvalidConfig
 	}
 	return nil
@@ -118,7 +147,7 @@ func (r PeerStreamRequest) ValidatePending(now time.Time) error {
 	if r.Credential != "" {
 		return r.Validate(now)
 	}
-	if r.Schema != PeerStreamSchemaV1 || !safeValue(r.MachineID) || !safeValue(r.EnvironmentID) || r.MachineGeneration == 0 || !oneOf(r.Consumer, "terminal", "exec", "ssh", "private_preview", "codex", "file_transfer_key") || !safeValue(r.OperationID) || !oneOf(r.Transport, "", "a", "d", "q", "w", "r") || r.Deadline.IsZero() || r.Deadline.Sub(now) > 24*time.Hour || r.MaximumBytes == 0 || len(r.Payload) > 64<<10 || len(r.Payload) > 0 && !json.Valid(r.Payload) {
+	if r.Schema != PeerStreamSchemaV1 || !safeValue(r.MachineID) || !safeValue(r.EnvironmentID) || r.MachineGeneration == 0 || !oneOf(r.Consumer, "terminal", "exec", "ssh", "private_preview", "codex", "file_transfer_key") || !safeValue(r.OperationID) || r.Deadline.IsZero() || r.Deadline.Sub(now) > 24*time.Hour || r.MaximumBytes == 0 || len(r.Payload) > 64<<10 || len(r.Payload) > 0 && !json.Valid(r.Payload) {
 		return ErrInvalidConfig
 	}
 	return nil

@@ -6,6 +6,10 @@ Validate and replace local preferences from a JSON file
 
 Validate and replace local preferences from a JSON file
 
+Validate the JSON preferences document, then replace local customization with its contents. A failed validation leaves the current preferences in place.
+
+Customization is local to this CLI installation. It can change shortcuts, command defaults, and terminal appearance without changing account credentials or remote resources. Validate or explain preferences before applying an unfamiliar document.
+
 JSON output is supported with --json.
 
 ```

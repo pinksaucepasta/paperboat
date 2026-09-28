@@ -6,6 +6,10 @@ Manage encrypted host ENV projections
 
 Manage encrypted host ENV projections
 
+Provision an exact selection of encrypted ENV values to an enrolled host. The selection must be explicit and can be emptied deliberately.
+
+ENV values are encrypted before they leave the client. Commands select personal, team, or host scope explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
+
 With --json, this command group lists its available commands.
 
 ### Options

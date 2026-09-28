@@ -6,6 +6,10 @@ Rotate personal ENV scope keys while preserving values
 
 Rotate personal ENV scope keys while preserving values
 
+Rotate personal ENV scope keys while retaining the values. Complete or cancel an interrupted rotation before starting another custody change.
+
+ENV values are encrypted before they leave the client. Commands select personal, team, or host scope explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
+
 JSON output is supported with --json.
 
 ```

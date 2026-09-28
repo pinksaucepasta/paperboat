@@ -6,17 +6,27 @@ pb-env-unset - Remove one environment variable
 
 
 .SH SYNOPSIS
-\fBpb env unset  [flags]\fP
+\fBpb env unset <name> [flags]\fP
 
 
 .SH DESCRIPTION
 Remove one environment variable
 
 .PP
+Delete one ENV name from the selected personal, team, or host scope. the confirmation code confirms removal; other names and scopes remain intact.
+
+.PP
+ENV values are encrypted before they leave the client. Commands select personal, team, or host scope explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
+
+.PP
 JSON output is supported with --json.
 
 
 .SH OPTIONS
+\fB--confirm\fP=""
+	six-character confirmation code from the preview
+
+.PP
 \fB-h\fP, \fB--help\fP[=false]
 	help for unset
 
@@ -31,10 +41,6 @@ JSON output is supported with --json.
 .PP
 \fB--team\fP=""
 	team scope; cannot be combined with --machine
-
-.PP
-\fB--yes\fP[=false]
-	confirm removal
 
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS

@@ -418,7 +418,8 @@ func TestTerminalStreamEndFollowsOutputWithExactExit(t *testing.T) {
 		{name: "signal", command: "printf final-output; kill -TERM $$", code: 143, signal: "terminated"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			server := verticalServerCommand(t, []string{"-c", test.command})
+			ready := filepath.Join(t.TempDir(), "release-output")
+			server := verticalServerCommand(t, []string{"-c", "while [ ! -f '" + ready + "' ]; do sleep 0.01; done; " + test.command})
 			client, peer := net.Pipe()
 			go server.Serve(peer)
 			hello := json.RawMessage(`{"min_version":"1.0","max_version":"1.0","capabilities":["terminal.v1","health.v1"]}`)
@@ -435,6 +436,9 @@ func TestTerminalStreamEndFollowsOutputWithExactExit(t *testing.T) {
 			attachPayload, _ := json.Marshal(map[string]any{"action": "attach", "session_id": createResponse.Result.ID, "from_sequence": 0})
 			if attached := sendRequest(t, client, request("req_attach", "op_attach_exit", attachPayload)); attached.Type != "response" {
 				t.Fatalf("attach=%s", attached.Payload)
+			}
+			if err := os.WriteFile(ready, nil, 0o600); err != nil {
+				t.Fatal(err)
 			}
 			output, err := protocol.ReadBinaryFrame(client)
 			if err != nil || string(output.Data) != "final-output" {
@@ -543,6 +547,25 @@ func TestAttachLargeReplayUsesBinaryStreamNotStructuredResponse(t *testing.T) {
 		t.Fatalf("binary=%#v err=%v", frame, err)
 	}
 	_ = client.Close()
+}
+
+func TestBrowserScreenCheckpointChunksPrecedeLiveOutput(t *testing.T) {
+	content := bytes.Repeat([]byte("\x1b[48;2;126;58;242mpurple\x1b[0m"), 5000)
+	stream := &terminalOutputStream{checkpoint: content, checkpointSequence: 73}
+	var restored []byte
+	for !stream.checkpointSent {
+		frame, err := stream.Next(context.Background())
+		if err != nil || frame.Channel != protocol.TerminalScreenCheckpoint || frame.StartSequence != 73 || len(frame.Data) == 0 {
+			t.Fatalf("checkpoint frame=%#v err=%v", frame, err)
+		}
+		if frame.Data[0] == 1 && !stream.checkpointSent || frame.Data[0] == 0 && stream.checkpointSent {
+			t.Fatal("checkpoint final marker did not match stream state")
+		}
+		restored = append(restored, frame.Data[1:]...)
+	}
+	if !bytes.Equal(restored, content) || stream.checkpoint != nil {
+		t.Fatal("checkpoint chunks did not reconstruct the current screen")
+	}
 }
 
 func TestVerticalFramedTerminalAndReadiness(t *testing.T) {

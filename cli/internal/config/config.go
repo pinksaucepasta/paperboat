@@ -134,9 +134,6 @@ type AuthConfig struct {
 
 // ConnectConfig tunes how the CLI waits for an idle machine and its helper route.
 type ConnectConfig struct {
-	// TerminalTransport selects auto, quic, or wss. Auto uses direct QUIC,
-	// relay QUIC, then WSS; quic excludes WSS.
-	TerminalTransport string `json:"terminal_transport,omitempty"`
 	// ReadyTimeoutSeconds caps how long to poll for the tunnel to become
 	// connectable before giving up. Defaults to DefaultReadyTimeoutSeconds.
 	ReadyTimeoutSeconds int `json:"ready_timeout_seconds,omitempty"`
@@ -171,9 +168,6 @@ const (
 	DefaultTerminalOutputBatchMilliseconds = 0
 	DefaultTerminalOutputBufferBytes       = 128 * 1024
 	DefaultInputPartialFlushMilliseconds   = 1
-	DefaultTerminalTransport               = "a"
-	PeerRelayPreferenceMilliseconds        = 1000
-	PeerWSSStartMilliseconds               = 1000
 	PeerConnectTimeoutMilliseconds         = 20000
 	DefaultStatusBarMode                   = "auto"
 	DefaultStatusBarFullscreen             = "hide"
@@ -288,10 +282,6 @@ func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.DeviceLoopbackCIDR) == "" {
 		c.DeviceLoopbackCIDR = DefaultDeviceLoopbackCIDR
 	}
-	if strings.TrimSpace(c.Connect.TerminalTransport) == "" {
-		c.Connect.TerminalTransport = DefaultTerminalTransport
-	}
-	c.Connect.TerminalTransport = strings.ToLower(strings.TrimSpace(c.Connect.TerminalTransport))
 	if c.Observability.MaxEventLogBytes == 0 {
 		c.Observability.MaxEventLogBytes = DefaultTelemetryMaxBytes
 	}
@@ -403,11 +393,6 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("favorites contains duplicate %q", key)
 		}
 		seenFavorites[key] = struct{}{}
-	}
-	switch c.Connect.TerminalTransport {
-	case "a", "d", "q", "w", "r":
-	default:
-		return fmt.Errorf("connect.terminal_transport must be a, d, q, w, or r")
 	}
 	if c.Connect.TerminalOutputBatchMilliseconds < 0 {
 		return fmt.Errorf("connect.terminal_output_batch_milliseconds cannot be negative")

@@ -6,6 +6,10 @@ Reset only local CLI preferences; keep account and connection settings
 
 Reset only local CLI preferences; keep account and connection settings
 
+Remove local shortcuts, command defaults, and appearance choices. This preserves sign-in credentials, configured server, and remote resource state; the confirmation code confirms the reset.
+
+Customization is local to this CLI installation. It can change shortcuts, command defaults, and terminal appearance without changing account credentials or remote resources. Validate or explain preferences before applying an unfamiliar document.
+
 JSON output is supported with --json.
 
 ```
@@ -15,9 +19,9 @@ pb config customize reset [flags]
 ### Options
 
 ```
-  -h, --help   help for reset
-      --json   print machine-readable JSON
-      --yes    confirm resetting local preferences
+      --confirm string   six-character confirmation code from the preview
+  -h, --help             help for reset
+      --json             print machine-readable JSON
 ```
 
 ### Options inherited from parent commands

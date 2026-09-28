@@ -6,6 +6,10 @@ Enable, replace, or disable the optional recovery code
 
 Enable, replace, or disable the optional recovery code
 
+Enable, replace, or disable optional recovery-code custody. Disabling recovery removes that recovery path without deleting ENV values.
+
+The local vault protects ENV key custody with a password and optional recovery code. Locking clears unlocked keys from this device; removing local custody differs from resetting and deleting account values. Never place a password or recovery code in shell arguments.
+
 JSON output is supported with --json.
 
 ```

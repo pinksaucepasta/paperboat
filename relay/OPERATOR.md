@@ -38,8 +38,9 @@ from hostnames or node IDs.
 
 Use a host with a stable public IPv4 or IPv6 address. Create an `A` and/or `AAAA`
 record such as `relay.example.com` and wait until public DNS resolves to that address.
-Allow inbound TCP and UDP on the two ports passed to `operator setup` (443 for each in
-the example). Allow outbound HTTPS to the Paperboat control origin. Do not publish an
+Allow inbound TCP and UDP on the TCP port (443 in the example): WSS uses TCP and
+STUN uses UDP. Allow inbound UDP on the distinct QUIC port (444 in the example).
+Allow outbound HTTPS to the Paperboat control origin. Do not publish an
 HTTP administration port.
 
 Obtain a publicly trusted TLS certificate whose SAN covers the exact relay hostname.
@@ -58,7 +59,7 @@ docker compose --env-file deploy/.env -f deploy/docker-compose.yml run --rm rela
   --state-dir /var/lib/paperboat-relay/operator \
   --control-url https://api.paperboat.example \
   --name "Friends relay" --endpoint-host relay.example.com \
-  --tcp-port 443 --quic-port 443 --region in-blr \
+  --tcp-port 443 --quic-port 444 --region in-blr \
   --failure-domain home-ups-1 --capacity-limit 128 \
   --tls-cert /run/paperboat-relay/tls.crt \
   --tls-key /run/paperboat-relay/tls.key
@@ -107,7 +108,8 @@ Run protected administration through `relay-admin`. List or revoke account acces
 `operator list` and `operator revoke
 --account-id ACCOUNT_ID`. Revocation fences new authority and existing connections under
 the bounded control-plane lease; it does not grant the operator visibility into payloads.
-Account-side `pb selfhost remove INSTALLATION_ID --yes` removes only that account's
+Account-side `pb selfhost remove INSTALLATION_ID` previews removal and returns a
+confirmation command; it removes only that account's
 pairing. Codes are not inherited by other accounts.
 
 ## Maintenance and removal

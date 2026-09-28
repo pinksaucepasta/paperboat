@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -125,6 +126,39 @@ func TestVerifierAcceptsOnlyExactConfiguredScopeAlternative(t *testing.T) {
 		if (err == nil) != wantOK {
 			t.Fatalf("scopes=%q err=%v wantOK=%v", scopes, err, wantOK)
 		}
+	}
+}
+
+func TestBrowserTerminalCredentialRequiresCanonicalSPKIDigest(t *testing.T) {
+	fixture, private, public := loadFixture(t)
+	keys := &keySource{keys: map[string]ed25519.PublicKey{"test-key-1": public}}
+	verifier := Verifier{Keys: keys, Clock: fixedClock{time.Unix(fixture.Claims.IssuedAt+1, 0)}, ClockSkew: time.Minute}
+	policy := terminalPolicy(fixture.Claims)
+	policy.CredentialClass = "browser_terminal_operation"
+
+	valid := fixture.Claims
+	valid.CredentialClass = "browser_terminal_operation"
+	valid.BrowserPublicKeySHA256 = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	if _, err := verifier.Verify(context.Background(), signToken(t, fixture.Header, valid, private), policy); err != nil {
+		t.Fatalf("valid browser terminal key digest rejected: %v", err)
+	}
+
+	for _, digest := range []string{"", "A", strings.Repeat("A", 42), strings.Repeat("A", 42) + "=", strings.Repeat("A", 42) + "B"} {
+		claims := valid
+		claims.BrowserPublicKeySHA256 = digest
+		_, err := verifier.Verify(context.Background(), signToken(t, fixture.Header, claims, private), policy)
+		var authErr *Error
+		if !errors.As(err, &authErr) || authErr.Code != BindingInvalid {
+			t.Fatalf("digest %q accepted or wrong error: %v", digest, err)
+		}
+	}
+
+	native := fixture.Claims
+	native.BrowserPublicKeySHA256 = valid.BrowserPublicKeySHA256
+	_, err := verifier.Verify(context.Background(), signToken(t, fixture.Header, native, private), terminalPolicy(fixture.Claims))
+	var authErr *Error
+	if !errors.As(err, &authErr) || authErr.Code != BindingInvalid {
+		t.Fatalf("native terminal credential accepted a browser key binding: %v", err)
 	}
 }
 

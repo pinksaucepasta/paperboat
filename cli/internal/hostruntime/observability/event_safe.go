@@ -111,16 +111,3 @@ func safeBoundedString(value string, maximum int, required bool) (string, error)
 	}
 	return value, nil
 }
-
-// Redact is safe for fallback paths that cannot return a typed error.
-func Redact(value string) string {
-	redacted, err := safeBoundedString(value, maximumMessageBytes, false)
-	if err != nil {
-		return RedactedValue
-	}
-	return redacted
-}
-
-func SafeString(value string, maximum int) (string, error) {
-	return safeBoundedString(value, maximum, false)
-}

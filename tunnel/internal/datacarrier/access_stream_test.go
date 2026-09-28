@@ -109,3 +109,59 @@ func TestServerAcceptAccessStreamRejectsStaleCarrierIdentity(t *testing.T) {
 	}
 	_ = raw.Close()
 }
+
+func TestServerDemultiplexesPrivateAccessAndBrowserTerminalOutput(t *testing.T) {
+	edge, connector := dataCarrierPair(t, testCarrierConfig(8))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	type accepted struct {
+		open   StreamOpen
+		stream *Stream
+		err    error
+	}
+	accessResult := make(chan accepted, 1)
+	outputResult := make(chan accepted, 1)
+	go func() {
+		stream, open, err := edge.AcceptAccessStream(ctx)
+		accessResult <- accepted{open: open, stream: stream, err: err}
+	}()
+	go func() {
+		stream, open, err := edge.AcceptBrowserTerminalOutputStream(ctx)
+		outputResult <- accepted{open: open, stream: stream, err: err}
+	}()
+
+	outputOpen := testStreamOpen("route-a", "term_1")
+	outputOpen.Kind = BrowserTerminalOutputStream
+	output, err := connector.OpenStream(ctx, outputOpen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accessOpen := testStreamOpen("route-a", "access_1")
+	accessOpen.Kind = AccessStreamHTTPS
+	access, err := connector.OpenStream(ctx, accessOpen)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var gotAccess, gotOutput accepted
+	select {
+	case gotAccess = <-accessResult:
+	case <-ctx.Done():
+		t.Fatal("private access stream was not demultiplexed")
+	}
+	select {
+	case gotOutput = <-outputResult:
+	case <-ctx.Done():
+		t.Fatal("terminal output stream was not demultiplexed")
+	}
+	if gotAccess.err != nil || gotAccess.stream == nil || gotAccess.open != accessOpen {
+		t.Fatalf("private access result=%+v err=%v", gotAccess.open, gotAccess.err)
+	}
+	if gotOutput.err != nil || gotOutput.stream == nil || gotOutput.open != outputOpen {
+		t.Fatalf("terminal output result=%+v err=%v", gotOutput.open, gotOutput.err)
+	}
+	_ = gotAccess.stream.Close()
+	_ = gotOutput.stream.Close()
+	_ = access.Close()
+	_ = output.Close()
+}

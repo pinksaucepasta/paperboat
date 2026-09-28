@@ -30,6 +30,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesignature"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseindex"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
@@ -418,8 +419,8 @@ func decodeWindowsRuntimeConfig(body []byte) (WindowsRuntimeConfig, error) {
 		config.SetupMode = "host"
 	}
 	if config.ListenAddress == "" {
-		// Older Windows installs used the runtime's fixed loopback default.
-		config.ListenAddress = "127.0.0.1:8080"
+		// An incomplete installation still needs the runtime's fixed loopback default.
+		config.ListenAddress = runtimeport.Primary
 	}
 	if !validWindowsConfig(config) {
 		return WindowsRuntimeConfig{}, ErrInvalidRequest
@@ -543,18 +544,19 @@ func Install(ctx context.Context, request Request) error {
 		prior := previous.Source
 		rollbackSource = &prior
 	}
+	instanceRoot, _ := WindowsInstanceRoot(instance)
+	// Lifecycle recovery creates its journal directory. Establish the protected
+	// machine root first so a fresh install cannot inherit an unsafe owner/DACL.
+	if err := runWindowsInstallPhase(ctx, "prepare Paperboat machine state", func() error { return ensureWindowsMachineDirectory(instanceRoot, request.OwnerSID) }); err != nil {
+		return err
+	}
 	lifecycle, err := newWindowsLifecycleManager(request, layout, true)
 	if err != nil {
 		return err
 	}
 	// Recover the durable hostd/updater transaction before touching SCM,
-	// binaries, credentials, or machine state. A corrupt/stale journal is a
-	// fail-closed startup condition.
+	// binaries, or credentials. A corrupt/stale journal is a fail-closed condition.
 	if err := lifecycle.Recover(ctx); err != nil {
-		return err
-	}
-	instanceRoot, _ := WindowsInstanceRoot(instance)
-	if err := runWindowsInstallPhase(ctx, "prepare Paperboat machine state", func() error { return ensureWindowsMachineDirectory(instanceRoot, request.OwnerSID) }); err != nil {
 		return err
 	}
 	if err := runWindowsInstallPhase(ctx, "register Paperboat command path", func() error { return winenv.EnsureMachinePath(filepath.Dir(layout.Binary)) }); err != nil {
@@ -690,7 +692,7 @@ func installUnboundWindowsBinary(ctx context.Context, request Request) error {
 	if err := ensureWindowsTokenAt(tokenPath, request.OwnerSID); err != nil {
 		return err
 	}
-	config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: instance, OwnerSID: request.OwnerSID, User: request.User, StateRoot: request.StateRoot, Workspace: request.WorkspaceRoot, ControlURL: request.ControlURL, ListenAddress: "127.0.0.1:8080", SetupMode: "awaiting_enrollment", TokenFile: tokenPath, InstalledAt: time.Now().UTC(), Source: request.Source, RollbackSource: rollbackSource}
+	config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: instance, OwnerSID: request.OwnerSID, User: request.User, StateRoot: request.StateRoot, Workspace: request.WorkspaceRoot, ControlURL: request.ControlURL, ListenAddress: runtimeport.Primary, SetupMode: "awaiting_enrollment", TokenFile: tokenPath, InstalledAt: time.Now().UTC(), Source: request.Source, RollbackSource: rollbackSource}
 	if err := writeWindowsConfigAt(config, instanceRoot); err != nil {
 		return err
 	}

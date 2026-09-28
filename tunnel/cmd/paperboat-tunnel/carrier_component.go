@@ -24,6 +24,7 @@ func newCarrierComponentWithTelemetry(
 	durableRoutes *edgehttp.DataCarrierRouteRegistry,
 	privateAccess *edgehttp.PrivateAccessStreamBridge,
 	carrierTelemetry *datacarrier.CarrierTelemetry,
+	runtimeWorkers ...*edgeruntime.RuntimeCarrierWorker,
 ) (edgeruntime.Component, func() error, error) {
 	if previewExpected == nil || previewHandle == nil {
 		return nil, nil, errors.New("preview carrier admission and handler are required")
@@ -37,7 +38,20 @@ func newCarrierComponentWithTelemetry(
 	if len(serverCertificate.Certificate) == 0 || serverCertificate.PrivateKey == nil {
 		return nil, nil, errors.New("canonical carrier requires a process-bound server certificate")
 	}
+	var runtimeWorker *edgeruntime.RuntimeCarrierWorker
+	if len(runtimeWorkers) > 1 {
+		return nil, nil, errors.New("multiple runtime carrier workers")
+	}
+	if len(runtimeWorkers) == 1 {
+		runtimeWorker = runtimeWorkers[0]
+		if runtimeWorker == nil || runtimeWorker.Expected == nil {
+			return nil, nil, errors.New("runtime carrier admissions required")
+		}
+	}
 	bindings := []datacarrier.PeerBinding{previewExpected.PeerBinding}
+	if runtimeWorker != nil {
+		bindings = append(bindings, runtimeWorker.Expected.PeerBinding)
+	}
 	if durableExpected != nil {
 		bindings = append(bindings, durableExpected.PeerBinding)
 	}
@@ -60,7 +74,14 @@ func newCarrierComponentWithTelemetry(
 		},
 	}
 	carrierConfig := datacarrier.DefaultConfig()
+	// One runtime carrier may hold 100 browser-terminal participants plus
+	// their independent input streams and the shared output publisher stream.
+	// The listener shares this bound with the other authenticated carrier uses.
+	carrierConfig.MaximumStreams = 256
 	authorizers := []datacarrier.Authorizer{previewExpected}
+	if runtimeWorker != nil {
+		authorizers = append(authorizers, runtimeWorker.Expected)
+	}
 	if durableExpected != nil {
 		authorizers = append(authorizers, durableExpected)
 	}
@@ -125,6 +146,7 @@ func newCarrierComponentWithTelemetry(
 			durableRegistered = true
 			return nil
 		}
+		runtimeAttached := runtimeWorker != nil && len(runtimeWorker.Expected.ForIdentity(identity, time.Now().UTC())) != 0
 		previewAttached := len(previewExpected.ForIdentity(identity, time.Now().UTC())) != 0
 		durableAuthorized := durableExpected != nil && durableExpected.HasIdentity(identity, time.Now().UTC())
 		accessorAttached := accessorExpected != nil && accessorExpected.HasIdentity(identity, time.Now().UTC())
@@ -138,7 +160,7 @@ func newCarrierComponentWithTelemetry(
 				return err
 			}
 		}
-		if !previewAttached && !durableAuthorized && !accessorAttached {
+		if !runtimeAttached && !previewAttached && !durableAuthorized && !accessorAttached {
 			return datacarrier.ErrDurableAdmissionMissing
 		}
 		if durableRoutes != nil {
@@ -146,8 +168,12 @@ func newCarrierComponentWithTelemetry(
 		}
 		handlerCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
-		results := make(chan error, 3)
+		results := make(chan error, 4)
 		workers := 0
+		if runtimeAttached {
+			workers++
+			go func() { results <- runtimeWorker.Handle(handlerCtx, server) }()
+		}
 		if durableLifecycle {
 			workers++
 			go func() {

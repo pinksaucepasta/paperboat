@@ -327,9 +327,6 @@ func replaceTeamKey(keys *environmente2ee.VaultKeys, team environmente2ee.VaultT
 	sort.Slice(keys.Teams, func(i, j int) bool { return keys.Teams[i].TeamID < keys.Teams[j].TeamID })
 	return nil
 }
-func (v PasswordVault) CreateTeam(ctx context.Context, teamID string) error {
-	return v.CreateTeamAt(ctx, teamID, 0, 1)
-}
 func (v PasswordVault) CreateTeamAt(ctx context.Context, teamID string, expectedTeamGeneration, membershipGeneration uint64) error {
 	return v.withVaultKeys(ctx, func(local *config.PasswordVaultRecord, keys *environmente2ee.VaultKeys, c VaultDataClient) error {
 		if membershipGeneration == 0 {

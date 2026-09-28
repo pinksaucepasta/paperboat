@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/privateproxyconfig"
 )
 
 type failingPreviewPrivateAccess struct {
@@ -32,5 +34,15 @@ func TestStartPreviewPrivateAccessPreservesRequiredFailure(t *testing.T) {
 	service := &failingPreviewPrivateAccess{err: want}
 	if err := startPreviewPrivateAccess(context.Background(), service, false); !errors.Is(err, want) {
 		t.Fatalf("start error=%v, want %v", err, want)
+	}
+}
+
+func TestStartPreviewPrivateAccessAllowsHeadlessHost(t *testing.T) {
+	service := &failingPreviewPrivateAccess{err: errors.Join(privateproxyconfig.ErrUnsupported, errors.New("desktop session unavailable"))}
+	if err := startPreviewPrivateAccess(context.Background(), service, false); err != nil {
+		t.Fatalf("headless public preview start: %v", err)
+	}
+	if service.starts != 1 {
+		t.Fatalf("starts=%d, want 1", service.starts)
 	}
 }

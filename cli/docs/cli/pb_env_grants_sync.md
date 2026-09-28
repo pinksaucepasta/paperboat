@@ -6,6 +6,10 @@ Accept pending team grants into this account's encrypted vault
 
 Accept pending team grants into this account's encrypted vault
 
+Accept pending team grants into the unlocked local vault. Only grants addressed to this account are reconciled; secret values are not printed.
+
+Team ENV grants are reconciled into this account's encrypted vault. Synchronization accepts pending grants; it does not print secret values or grant access merely because an account belongs to a team.
+
 JSON output is supported with --json.
 
 ```

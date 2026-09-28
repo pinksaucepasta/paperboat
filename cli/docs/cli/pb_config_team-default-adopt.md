@@ -6,6 +6,10 @@ Adopt a team default using your provider access
 
 Adopt a team default using your provider access
 
+Adopt the selected team's default pull repository for this account using its provider access. Adoption is explicit; personal machine assignments still take precedence.
+
+Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
+
 JSON output is supported with --json.
 
 ```

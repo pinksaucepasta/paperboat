@@ -6,6 +6,10 @@ Check SSH integration for a machine
 
 Check SSH integration for a machine
 
+Check the selected device's managed SSH configuration and local integration. It reports actionable findings without approving a changed host identity.
+
+Managed SSH resolves the Paperboat device and then runs OpenSSH with the selected target. Host identity checks remain in force. Standard SSH, SCP, SFTP, and rsync behavior is preserved while Paperboat supplies device resolution and authorized connectivity.
+
 JSON output is supported with --json.
 
 ```

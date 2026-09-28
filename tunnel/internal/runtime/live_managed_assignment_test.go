@@ -16,7 +16,7 @@ func TestCanonicalManagedAssignmentStagesFromControlProjection(t *testing.T) {
 		MachineIdentityPublicKey: "V_3IRrjtfIdR7AKoJETXXYreyuCy0BbJfHOVqmJZXwA", MachineIdentityThumbprint: "R24c_xC8ZK_RmfUYQWNX0ChS7-BMa30Sjo_JfPERE4s",
 		TunnelID: "tun_chMH6AnTd3wz_HPD0rRdFg", ConnectorID: "con_Nl0Ee8yKzvYpMHfzAQkVWQ", Generation: 1,
 		ConnectorSessionID: "sess_af79d13ac2ccaf3f31051e29b4e79bfe4b16", ConnectorProcessGeneration: 15,
-		ConfigGeneration: 1, ConfigContentHash: "sha256:53d45d01a7b2fd79b5cbdbd0693347856f38ec4ac7d86d2448599ff3fa7b47d7",
+		ConfigGeneration: 1, ConfigContentHash: "sha256:53d45d01a7b2fd79b5cbdbd0693347856f38ec4ac7d86d2448599ff3fa7b47d7", ViewerPolicyGeneration: 1,
 		AssignmentID: "asn_faa83010e700246bc5ce93448ae2532f68f809e74019c36f", AssignmentGeneration: 7,
 		EdgeFailureDomain: "default", EdgeProcessEpoch: "XgDXW6wyhRsNUnYoo8xKhMyg5g_5DvKb", NodeID: "pprbt-helsinki",
 		Kind: string(route.TunnelHTTPSWSS), PublicHost: "1d22bc42-1290-440b-9dbc-bcaa2e1f2357.tunnels.pprbt.dev",

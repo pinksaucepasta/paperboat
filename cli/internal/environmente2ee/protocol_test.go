@@ -33,7 +33,7 @@ func fixture(t *testing.T) testIdentity {
 	rootID := "aek_" + hex.EncodeToString(rootSum[:])
 	roots := RootKeys{rootID: rootPublic}
 	now := time.Unix(1788134400, 0).UTC()
-	cert, err := endpointidentity.Sign(rootPrivate, endpointidentity.Claims{AccountID: "acct_01", Role: endpointidentity.RoleCLI, EndpointID: "cli_01", NoisePublicKey: [32]byte{1}, QUICPublicKey: ed25519.NewKeyFromSeed(bytes.Repeat([]byte{2}, 32)).Public().(ed25519.PublicKey), Generation: 1, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour)})
+	cert, err := endpointidentity.Sign(rootPrivate, endpointidentity.Claims{AccountID: "acct_01", Role: endpointidentity.RoleCLI, EndpointID: "cli_01", QUICPublicKey: ed25519.NewKeyFromSeed(bytes.Repeat([]byte{2}, 32)).Public().(ed25519.PublicKey), Generation: 1, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func fixture(t *testing.T) testIdentity {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hostCert, err := endpointidentity.Sign(rootPrivate, endpointidentity.Claims{AccountID: "acct_01", Role: endpointidentity.RoleMachine, EndpointID: "machine_01", NoisePublicKey: [32]byte{2}, QUICPublicKey: ed25519.NewKeyFromSeed(bytes.Repeat([]byte{5}, 32)).Public().(ed25519.PublicKey), Generation: 1, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour)})
+	hostCert, err := endpointidentity.Sign(rootPrivate, endpointidentity.Claims{AccountID: "acct_01", Role: endpointidentity.RoleMachine, EndpointID: "machine_01", QUICPublicKey: ed25519.NewKeyFromSeed(bytes.Repeat([]byte{5}, 32)).Public().(ed25519.PublicKey), Generation: 1, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestKeyBindingAllowsDifferentAuthorizedEndpointAndBindingRoots(t *testing.T
 
 	certificate, err := endpointidentity.Sign(endpointRoot, endpointidentity.Claims{
 		AccountID: "acct_01", Role: endpointidentity.RoleCLI, EndpointID: "cli_01",
-		NoisePublicKey: [32]byte{1}, QUICPublicKey: ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x23}, 32)).Public().(ed25519.PublicKey),
+		QUICPublicKey: ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x23}, 32)).Public().(ed25519.PublicKey),
 		Generation: 1, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour),
 	})
 	if err != nil {
@@ -144,7 +144,7 @@ func TestAuthorityAllowsEndpointRootDistinctFromBindingRoot(t *testing.T) {
 
 	certificate, err := endpointidentity.Sign(endpointRoot, endpointidentity.Claims{
 		AccountID: "acct_01", Role: endpointidentity.RoleCLI, EndpointID: "cli_01",
-		NoisePublicKey: [32]byte{0x41}, QUICPublicKey: ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x42}, ed25519.SeedSize)).Public().(ed25519.PublicKey),
+		QUICPublicKey: ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x42}, ed25519.SeedSize)).Public().(ed25519.PublicKey),
 		Generation: 1, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour),
 	})
 	if err != nil {

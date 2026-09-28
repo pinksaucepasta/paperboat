@@ -91,8 +91,7 @@ func environmentVariablesCobraCommand() *cobra.Command {
 		RunE: func(command *cobra.Command, args []string) error {
 			team, _ := command.Flags().GetString("team")
 			machine, _ := command.Flags().GetString("machine")
-			yes, _ := command.Flags().GetBool("yes")
-			if err := unsetEnvironmentVariableForScope(command, team, machine, args[0], yes); err != nil {
+			if err := unsetEnvironmentVariableForScope(command, team, machine, args[0]); err != nil {
 				return err
 			}
 			if jsonOutput, _ := command.Flags().GetBool("json"); jsonOutput {
@@ -103,7 +102,7 @@ func environmentVariablesCobraCommand() *cobra.Command {
 	}
 	unset.Flags().String("team", "", "team scope; cannot be combined with --machine")
 	unset.Flags().String("machine", "", "machine name or ID; defaults to the personal scope")
-	unset.Flags().Bool("yes", false, "confirm removal")
+	unset.Flags().String("confirm", "", "six-character confirmation code from the preview")
 	unset.Flags().Bool("json", false, "print redacted JSON metadata")
 
 	root.AddCommand(list, set, unset)
@@ -152,12 +151,8 @@ func setEnvironmentVariable(command *cobra.Command, requestedMachine, name strin
 	return setEnvironmentVariableForScope(command, "", requestedMachine, name, valueStdin, "")
 }
 
-func unsetEnvironmentVariable(command *cobra.Command, requestedMachine, name string, yes bool) error {
-	return unsetEnvironmentVariableForScope(command, "", requestedMachine, name, yes)
-}
-
-func readEnvironmentVariableValue(command *cobra.Command, valueStdin bool) ([]byte, error) {
-	return readEnvironmentVariableValueFile(command, valueStdin, "")
+func unsetEnvironmentVariable(command *cobra.Command, requestedMachine, name string) error {
+	return unsetEnvironmentVariableForScope(command, "", requestedMachine, name)
 }
 
 func readEnvironmentVariableValueFile(command *cobra.Command, valueStdin bool, valueFile string) ([]byte, error) {
@@ -494,11 +489,4 @@ func validateEnvironmentVariableNameForCLI(name string) error {
 		return errors.New("environment variable name is reserved")
 	}
 	return nil
-}
-
-func yesNo(value bool) string {
-	if value {
-		return "yes"
-	}
-	return "no"
 }

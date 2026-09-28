@@ -6,6 +6,10 @@ Remove a tunnel route
 
 Remove a tunnel route
 
+Remove one route from a durable tunnel after confirmation. The tunnel and its other routes and connectors remain available.
+
+Routes map a public or private match to a specific origin and protocol. TLS and host-header options affect the trust boundary and should match the origin. Adding or updating a route may return an operation whose readiness must be checked separately.
+
 JSON output is supported with --json.
 
 ```
@@ -15,11 +19,11 @@ pb tunnel route remove <tunnel> <route> [flags]
 ### Options
 
 ```
+      --confirm string     six-character confirmation code from the preview
   -h, --help               help for remove
       --json               print canonical JSON
       --timeout duration   maximum time to wait for operation completion (default 2m0s)
       --wait               wait for the operation to reach a terminal state
-      --yes                confirm route removal while preserving the tunnel
 ```
 
 ### Options inherited from parent commands

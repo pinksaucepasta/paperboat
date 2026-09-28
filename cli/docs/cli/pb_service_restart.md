@@ -6,6 +6,10 @@ Restart Paperboat daemon current-user service
 
 Restart Paperboat daemon current-user service
 
+Restart the supervised current-user daemon after a local configuration or binary change. Active connections may be interrupted; inspect pb service status afterward.
+
+Service commands manage the current user's background Paperboat daemon through the host operating system. The service runs pb daemon; it is not a separate Paperboat binary. Use status to inspect the supervised process and restart after a local configuration change.
+
 JSON output is supported with --json.
 
 ```

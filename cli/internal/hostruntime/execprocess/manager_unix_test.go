@@ -82,7 +82,7 @@ func TestManagedEnvironmentIsResolvedForEachNewProcess(t *testing.T) {
 	root := t.TempDir()
 	value := "first"
 	manager := testManager(t, root, func(config *Config) {
-		config.ManagedEnvironment = func() ([]string, error) {
+		config.ManagedEnvironment = func(context.Context) ([]string, error) {
 			return []string{"INJECTED=" + value, "OVERRIDE=managed"}, nil
 		}
 	})
@@ -124,7 +124,7 @@ func TestRequestRejectsCaseFoldedEnvironmentDuplicates(t *testing.T) {
 func TestManagedEnvironmentFailureFailsClosed(t *testing.T) {
 	root := t.TempDir()
 	manager := testManager(t, root, func(config *Config) {
-		config.ManagedEnvironment = func() ([]string, error) { return nil, errors.New("secret detail") }
+		config.ManagedEnvironment = func(context.Context) ([]string, error) { return nil, errors.New("secret detail") }
 	})
 	execution, _, err := manager.Start(context.Background(), Request{OperationID: "operation_managed_unavailable", Argv: []string{"/bin/true"}, CWD: root})
 	if err != nil {

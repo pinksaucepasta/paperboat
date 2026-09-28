@@ -8,10 +8,13 @@ at the Git provider, so keep configuration secrets in ENV rather than tracked fi
 Connect repositories through the dashboard or provider setup, then configure a machine:
 
 ```text
-pb config assign <repository> <machine> --mode pull-only --yes
+pb config assign <repository> <machine> --mode pull-only
 pb config assign <pull-repository> <machine> --mode bidirectional \
-  --push-repository <push-repository> --yes
+  --push-repository <push-repository>
 ```
+
+For a machine assignment, the first command shows the plaintext Git storage warning and
+a confirmation command. Run that displayed command within five minutes to apply it.
 
 Pull and push targets are independent. Paperboat uses your connected provider credential
 for each operation; it does not grant repository access or bypass read-only permissions,

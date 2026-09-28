@@ -215,7 +215,7 @@ func TestTunnelMutationsRejectWrongAccountResourceProjection(t *testing.T) {
 			},
 		},
 		{
-			name: "connector", args: []string{"connector", "revoke", "tun_1", "connector_other", "--yes", "--json"},
+			name: "connector", args: []string{"connector", "revoke", "tun_1", "connector_other", "--json"},
 			serve: func(w http.ResponseWriter, _ *http.Request) {
 				connector := validAdversarialConnector("tun_other")
 				connector.ID = "connector_other"

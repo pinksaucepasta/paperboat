@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/admission"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
 	"github.com/realclientip/realclientip-go"
 )
@@ -34,10 +36,16 @@ type RouteMatcher interface {
 }
 
 type Config struct {
-	BrowserAccess            *BrowserAccess
+	BrowserAccess   *BrowserAccess
+	BrowserTerminal interface {
+		Admit(context.Context, string, string, string) (control.BrowserTerminalAdmission, error)
+	}
+	BrowserTerminalHub       *BrowserTerminalHub
+	BrowserTerminalEdgeHost  string
 	InspectorAccess          *InspectorEdgeAccess
 	PreviewBaseDomain        string
 	TunnelBaseDomain         string
+	RuntimeCarrierTransport  http.RoundTripper
 	RuntimeBaseDomain        string
 	TrustedProxies           []*net.IPNet
 	MaxHeaderBytes           int64
@@ -139,7 +147,24 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 		legacyHandler = http.NotFoundHandler()
 	}
 	var next http.Handler = legacyHandler
-	if previewTransport != nil || canonicalTransport != nil {
+	if previewTransport != nil || canonicalTransport != nil || config.RuntimeCarrierTransport != nil {
+		var runtimeHandler http.Handler
+		if config.RuntimeCarrierTransport != nil {
+			runtimeHandler = &httputil.ReverseProxy{Transport: config.RuntimeCarrierTransport, FlushInterval: -1, Rewrite: func(request *httputil.ProxyRequest) {
+				request.Out.URL.Scheme = "http"
+				request.Out.URL.Host = request.In.Host
+			}, ModifyResponse: func(response *http.Response) error {
+				if response.Request != nil && response.Request.URL.Path == "/v1/browser-terminal" {
+					slog.InfoContext(response.Request.Context(), "browser terminal host response", "status", response.StatusCode)
+				}
+				return legacy.ModifyResponse(response)
+			}, ErrorHandler: func(writer http.ResponseWriter, request *http.Request, err error) {
+				if request.URL.Path == "/v1/browser-terminal" {
+					slog.WarnContext(request.Context(), "browser terminal host proxy failed", "error", err)
+				}
+				http.Error(writer, http.StatusText(http.StatusBadGateway), http.StatusBadGateway)
+			}}
+		}
 		var preview http.Handler
 		if previewTransport != nil {
 			preview = &httputil.ReverseProxy{
@@ -155,6 +180,13 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 		next = http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			if match, ok := RouteMatchFromContext(request.Context()); ok {
 				switch match.Rule.Kind {
+				case route.Kind("runtime_https_wss"):
+					if runtimeHandler != nil {
+						runtimeHandler.ServeHTTP(writer, request)
+						return
+					}
+					http.NotFound(writer, request)
+					return
 				case route.TunnelHTTPSWSS:
 					if canonical == nil {
 						http.NotFound(writer, request)
@@ -228,6 +260,31 @@ func ParseTrustedProxies(values []string) ([]*net.IPNet, error) {
 }
 
 func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Tickets use the selected edge's own TLS hostname so browser DNS caches
+	// cannot send a fresh admission to the former active edge. The path names
+	// only a candidate route; the one-use ticket and current node/epoch are
+	// still checked before any terminal stream is opened.
+	if p.config.BrowserTerminalEdgeHost != "" && r.Host == p.config.BrowserTerminalEdgeHost && (strings.HasPrefix(r.URL.Path, "/v1/browser-terminal/") || strings.HasPrefix(r.URL.Path, "/v1/runtime/")) {
+		browserTerminal := strings.HasPrefix(r.URL.Path, "/v1/browser-terminal/")
+		prefix := "/v1/runtime/"
+		if browserTerminal {
+			prefix = "/v1/browser-terminal/"
+		}
+		runtimeHost := strings.TrimPrefix(r.URL.Path, prefix)
+		_, kind, allowed := p.allowedHost(runtimeHost)
+		if !allowed || kind != "runtime_https_wss" || r.Method != http.MethodGet || !isWebSocketUpgrade(r.Header) || r.URL.RawQuery != "" {
+			http.NotFound(w, r)
+			return
+		}
+		r = r.Clone(r.Context())
+		r.Host = runtimeHost
+		if browserTerminal {
+			r.URL.Path = "/v1/browser-terminal"
+		} else {
+			r.URL.Path = "/v1/runtime"
+		}
+		r.URL.RawPath = ""
+	}
 	if strings.HasPrefix(r.URL.Path, inspectorEdgePrefix) {
 		if p.config.InspectorAccess == nil {
 			http.NotFound(w, r)
@@ -396,9 +453,31 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if expectedKind == "runtime_https_wss" && r.URL.Path == "/v1/browser-terminal" && websocket {
+		if r.Method != http.MethodGet || r.URL.RawQuery != "" || p.config.BrowserTerminal == nil || p.config.BrowserTerminalHub == nil || p.config.RuntimeCarrierTransport == nil {
+			http.Error(w, "Browser terminal unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		ticket, valid := browserTerminalTicket(r.Header)
+		if !valid || len(r.Header.Values("Origin")) != 1 || r.Header.Get("Origin") == "" {
+			http.Error(w, "Invalid browser terminal ticket", http.StatusForbidden)
+			return
+		}
+		admission, err := p.config.BrowserTerminal.Admit(r.Context(), ticket, r.Header.Get("Origin"), host)
+		if err != nil {
+			http.Error(w, "Browser terminal admission unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		p.serveBrowserTerminal(w, r, host, matched, admission)
+		return
+	}
 	if expectedKind == "runtime_https_wss" && helperAccessPath(r.URL.Path) {
 		claims, ok := p.authorizeHelperAccess(w, r)
 		if !ok {
+			return
+		}
+		if matched.Rule.ResourceKind == "runtime" && claims.MachineID != matched.Rule.HostID {
+			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 			return
 		}
 		if !credentialAllowsHelperPath(claims.CredentialClass, r.URL.Path) {
@@ -507,13 +586,15 @@ func (p *Policy) cancelWhenAccessRevoked(ctx context.Context, cancel context.Can
 }
 
 func helperAccessPath(path string) bool {
-	return path == "/v1/runtime" || path == "/v1/preview-launches" || path == "/v1/file-transfers" || strings.HasPrefix(path, "/v1/file-transfers/")
+	return path == "/v1/runtime" || path == "/v1/browser-terminal" || path == "/v1/preview-launches" || path == "/v1/file-transfers" || strings.HasPrefix(path, "/v1/file-transfers/")
 }
 
 func credentialAllowsHelperPath(class, path string) bool {
 	switch {
 	case path == "/v1/runtime":
 		return class == "terminal_operation"
+	case path == "/v1/browser-terminal":
+		return class == "browser_terminal_operation"
 	case path == "/v1/preview-launches":
 		return class == "preview_launch"
 	case path == "/v1/file-transfers" || strings.HasPrefix(path, "/v1/file-transfers/"):

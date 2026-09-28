@@ -23,7 +23,6 @@ func TestCertificateIsDeterministicAndIdentityBound(t *testing.T) {
 	}
 	now := time.Unix(1_800_000_000, 0).UTC()
 	claims := Claims{AccountID: "account_01", Role: RoleMachine, EndpointID: "machine_01", QUICPublicKey: quicPublic, Generation: 3, Serial: 9, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour)}
-	copy(claims.NoisePublicKey[:], bytes.Repeat([]byte{7}, 32))
 	first, err := Sign(rootPrivate, claims)
 	if err != nil {
 		t.Fatal(err)
@@ -41,7 +40,7 @@ func TestCertificateIsDeterministicAndIdentityBound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if verified.Claims.Serial != claims.Serial || !bytes.Equal(verified.Claims.NoisePublicKey[:], claims.NoisePublicKey[:]) {
+	if verified.Claims.Serial != claims.Serial || !bytes.Equal(verified.Claims.QUICPublicKey, claims.QUICPublicKey) {
 		t.Fatalf("verified claims=%+v", verified.Claims)
 	}
 	rootFingerprint, err := RootFingerprint(rootPublic)
@@ -55,7 +54,7 @@ func TestCertificateRejectsTamperingSubstitutionAndExpiry(t *testing.T) {
 	otherRoot, _, _ := ed25519.GenerateKey(rand.Reader)
 	quicPublic, _, _ := ed25519.GenerateKey(rand.Reader)
 	now := time.Unix(1_800_000_000, 0).UTC()
-	certificate, err := Sign(rootPrivate, Claims{AccountID: "account_01", Role: RoleCLI, EndpointID: "cli_01", NoisePublicKey: noiseKey(2), QUICPublicKey: quicPublic, Generation: 2, Serial: 4, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Minute)})
+	certificate, err := Sign(rootPrivate, Claims{AccountID: "account_01", Role: RoleCLI, EndpointID: "cli_01", QUICPublicKey: quicPublic, Generation: 2, Serial: 4, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Minute)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +96,7 @@ func TestTLSLeafRequiresCertifiedQUICKey(t *testing.T) {
 	quicPublic, quicPrivate, _ := ed25519.GenerateKey(rand.Reader)
 	_, wrongPrivate, _ := ed25519.GenerateKey(rand.Reader)
 	now := time.Unix(1_800_000_000, 0).UTC()
-	certificate, err := Sign(rootPrivate, Claims{AccountID: "account_01", Role: RoleMachine, EndpointID: "machine_01", NoisePublicKey: noiseKey(3), QUICPublicKey: quicPublic, Generation: 1, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour)})
+	certificate, err := Sign(rootPrivate, Claims{AccountID: "account_01", Role: RoleMachine, EndpointID: "machine_01", QUICPublicKey: quicPublic, Generation: 1, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +122,6 @@ func TestTLSVerifierRejectsEndpointSubstitutionAndLeafMutation(t *testing.T) {
 	quicPublic, quicPrivate, _ := ed25519.GenerateKey(rand.Reader)
 	now := time.Unix(1_800_000_000, 0).UTC()
 	claims := Claims{AccountID: "account_01", Role: RoleMachine, EndpointID: "machine_01", QUICPublicKey: quicPublic, Generation: 1, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour)}
-	copy(claims.NoisePublicKey[:], bytes.Repeat([]byte{1}, 32))
 	expected, _ := Sign(rootPrivate, claims)
 	expectedRaw, _ := expected.MarshalBinary()
 	expectedLeaf, err := NewTLSCertificate(expected, rootPublic, quicPrivate, now, time.Hour)
@@ -162,7 +160,7 @@ func TestTLSVerifierSelectsPeerCertificateFromTrustedKeyID(t *testing.T) {
 	peerRoot, peerRootPrivate, _ := ed25519.GenerateKey(rand.Reader)
 	peerQUIC, peerQUICPrivate, _ := ed25519.GenerateKey(rand.Reader)
 	now := time.Unix(1_800_000_000, 0).UTC()
-	local, err := Sign(localRootPrivate, Claims{AccountID: "account_01", Role: RoleCLI, EndpointID: "cli_01", NoisePublicKey: noiseKey(9), QUICPublicKey: localRoot, Generation: 1, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour)})
+	local, err := Sign(localRootPrivate, Claims{AccountID: "account_01", Role: RoleCLI, EndpointID: "cli_01", QUICPublicKey: localRoot, Generation: 1, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +175,7 @@ func TestTLSVerifierSelectsPeerCertificateFromTrustedKeyID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	peer, err := Sign(peerRootPrivate, Claims{AccountID: "account_01", Role: RoleMachine, EndpointID: "machine_01", NoisePublicKey: noiseKey(10), QUICPublicKey: peerQUIC, Generation: 2, Serial: 2, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour)})
+	peer, err := Sign(peerRootPrivate, Claims{AccountID: "account_01", Role: RoleMachine, EndpointID: "machine_01", QUICPublicKey: peerQUIC, Generation: 2, Serial: 2, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,12 +206,4 @@ func TestTLSVerifierSelectsPeerCertificateFromTrustedKeyID(t *testing.T) {
 	if _, err := ClientTLS(localLeaf, PeerExpectation{RootPublic: localRoot, TrustedKeys: trusted, CertificateKeyID: keyID(localRoot), Certificate: peerRaw, Expected: Expected{AccountID: "account_01", Role: RoleMachine, EndpointID: "machine_01", Generation: 2}}, "paperboat-test-v1", func() time.Time { return now }); err == nil {
 		t.Fatal("peer certificate accepted with the wrong trusted key ID")
 	}
-}
-
-func noiseKey(value byte) [32]byte {
-	var key [32]byte
-	for index := range key {
-		key[index] = value
-	}
-	return key
 }

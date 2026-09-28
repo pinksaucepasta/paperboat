@@ -127,7 +127,7 @@ func TestMachineControlIsBoundToRegistrationAndSignsExactRequest(t *testing.T) {
 	if !ed25519.Verify(key.Public(), payload, signature) {
 		t.Fatal("machine proof signature is invalid")
 	}
-	if _, err := store.MachineProof("operation-delete", http.MethodDelete, "/v1/peer-attempts/intent_1/1", nil, now); err != nil {
+	if _, err := store.MachineProof("operation-delete", http.MethodDelete, "/v1/machines/machine_1", nil, now); err != nil {
 		t.Fatalf("delete machine proof: %v", err)
 	}
 	var claims struct {

@@ -6,11 +6,14 @@ pb-ping - Measure authenticated connectivity to a machine
 
 
 .SH SYNOPSIS
-\fBpb ping  [flags]\fP
+\fBpb ping <machine> [flags]\fP
 
 
 .SH DESCRIPTION
 Measure authenticated connectivity to a machine
+
+.PP
+Send authenticated health exchanges to one enrolled device. --count and --timeout bound the measurements; a reachable transport alone is not a claim that the target service is ready.
 
 .PP
 JSON output is supported with --json.
@@ -18,7 +21,7 @@ JSON output is supported with --json.
 
 .SH OPTIONS
 \fB--count\fP=4
-	number of authenticated health exchanges
+	number of authenticated native connections
 
 .PP
 \fB-h\fP, \fB--help\fP[=false]
@@ -30,11 +33,7 @@ JSON output is supported with --json.
 
 .PP
 \fB--timeout\fP=10s
-	timeout for each exchange
-
-.PP
-\fB--transport\fP="a"
-	peer transport: a, d, q, w, or r
+	timeout for each connection
 
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS

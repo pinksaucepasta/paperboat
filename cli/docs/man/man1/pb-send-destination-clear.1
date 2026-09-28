@@ -1,0 +1,52 @@
+.nh
+.TH "PB-SEND-DESTINATION-CLEAR" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-send-destination-clear - Clear the default transfer destination
+
+
+.SH SYNOPSIS
+\fBpb send destination clear [flags]\fP
+
+
+.SH DESCRIPTION
+Clear the default transfer destination
+
+.PP
+Remove the saved default recipient for future sends. Existing transfers and received files are unaffected; a later send must specify --to or set another default.
+
+.PP
+Send publishes a batch to a device's Paperboat Inbox. Completion means the receiver verified and recorded the files; status and cancel act on a transfer ID. A default destination can be set separately, while --to chooses one for the current send.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for clear
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--session\fP=""
+	terminal session ID for a session-specific destination
+
+
+.SH SEE ALSO
+\fBpb-send-destination(1)\fP

@@ -1,0 +1,48 @@
+.nh
+.TH "PB-DEVICE-LIST" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-device-list - List enrolled devices
+
+
+.SH SYNOPSIS
+\fBpb device list [flags]\fP
+
+
+.SH DESCRIPTION
+List enrolled devices
+
+.PP
+Show enrolled devices and their current account-visible state. Use the returned device identity for rename, capabilities, availability, or revoke.
+
+.PP
+Devices are account enrollments with independent names, capabilities, and revocation state. Changes target the selected device, while pb setup configures the current machine. Revocation disconnects an enrollment rather than just hiding it from the list.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for list
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-device(1)\fP

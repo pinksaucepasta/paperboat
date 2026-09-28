@@ -6,6 +6,10 @@ Reconcile encrypted ENV team grants
 
 Reconcile encrypted ENV team grants
 
+Reconcile encrypted grants offered by a team into this account's vault. Use sync after a team has explicitly granted access.
+
+ENV values are encrypted before they leave the client. Commands select personal, team, or host scope explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
+
 With --json, this command group lists its available commands.
 
 ### Options

@@ -1,6 +1,5 @@
-// Package resolver turns a project name into the information needed to connect:
-// which environment and how to reach it through `paperboat-tunnel`. Production resolution calls
-// paperboat-server's pre-connect broker.
+// Package resolver turns an enrolled machine into the information needed to
+// connect through Paperboat's terminal transport.
 package resolver
 
 import (
@@ -157,7 +156,6 @@ type ConnectInfo struct {
 	Project           string
 	ProjectState      string
 	MachineGeneration uint64
-	Transport         string
 	// TunnelTarget identifies how the tunnel layer should reach the helper.
 	TunnelTarget string
 	// Local is true when this resolves to a local dev target (no real VM).
@@ -252,7 +250,7 @@ type FileTransferTarget struct {
 	Policy               api.FileTransferPolicy
 }
 
-// ProjectResolver resolves a project name to connect info.
-type ProjectResolver interface {
+// MachineResolver resolves an enrolled machine to connect info.
+type MachineResolver interface {
 	Resolve(ctx context.Context, req ConnectRequest) (ConnectInfo, error)
 }

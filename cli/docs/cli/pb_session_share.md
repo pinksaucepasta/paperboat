@@ -6,6 +6,10 @@ Grant a team or teammate viewer or interactive access
 
 Sharing includes up to 64 KiB of recent output, further bounded by attachment capacity, then live output. Recent output may reveal secrets regardless of ENV permissions. Interactive typing may interleave in host receive order and uses the shell's OS permissions.
 
+Grant a named teammate or team viewer or interactive access to one exact session. --all selects the all-team audience; --role controls whether the recipient can type.
+
+Terminal sessions persist independently of a single connection and can be reattached after a disconnect. Sharing grants explicit access to a named session. Closing, deleting, and removing a participant have different effects; inspect the selected session before acting.
+
 JSON output is supported with --json.
 
 ```

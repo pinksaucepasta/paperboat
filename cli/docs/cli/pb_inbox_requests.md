@@ -6,6 +6,10 @@ List team file requests
 
 List team file requests
 
+List pending team file requests and their identities for review. Use approve or decline with the exact request ID and current generation.
+
+The Paperboat Inbox receives verified files and exact team requests. Files remain until removed by the user. The receiving path is a local device setting; team request acceptance is an account policy. A sender manages outgoing batches with pb send.
+
 JSON output is supported with --json.
 
 ```

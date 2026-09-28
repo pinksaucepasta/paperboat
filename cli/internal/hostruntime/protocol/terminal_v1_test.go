@@ -59,6 +59,18 @@ func TestTerminalV1FramesRoundTrip(t *testing.T) {
 	}
 }
 
+func TestTerminalScreenCheckpointFrameRoundTrip(t *testing.T) {
+	data := append([]byte{1}, bytes.Repeat([]byte("\x1b[48;2;126;58;242mpurple"), 500)...)
+	wire, err := EncodeTerminalOutputAdaptive(TerminalOutputFrame{Channel: TerminalScreenCheckpoint, StreamID: 7, StartSequence: 123, Data: data}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err := DecodeTerminalOutput(wire)
+	if err != nil || frame.Channel != TerminalScreenCheckpoint || frame.StartSequence != 123 || !bytes.Equal(frame.Data, data) {
+		t.Fatalf("checkpoint frame channel=%d sequence=%d size=%d err=%v", frame.Channel, frame.StartSequence, len(frame.Data), err)
+	}
+}
+
 func TestTerminalOutputAdaptiveCompression(t *testing.T) {
 	data := bytes.Repeat([]byte("agent output with ansi \x1b[32mready\x1b[0m\r\n"), 200)
 	wire, err := EncodeTerminalOutputAdaptive(TerminalOutputFrame{Channel: TerminalStdout, StreamID: 3, StartSequence: 41, Data: data}, nil)

@@ -6,11 +6,17 @@ pb-preview-inspect - Show daemon-local HTTP captures
 
 
 .SH SYNOPSIS
-\fBpb preview inspect  [flags]\fP
+\fBpb preview inspect <preview> [flags]\fP
 
 
 .SH DESCRIPTION
 Show daemon-local HTTP captures
+
+.PP
+Read or manage bounded HTTP captures retained by the local daemon for one preview. --body and --raw expose capture content, while enable, disable, and purge change capture state; treat output as potentially sensitive.
+
+.PP
+A preview exposes a local target through a temporary Paperboat URL or private/team access policy. Inspect its status before sharing the URL, and stop or delete it when no longer needed. Browser HTTP terminates TLS at the edge.
 
 .PP
 JSON output is supported with --json.

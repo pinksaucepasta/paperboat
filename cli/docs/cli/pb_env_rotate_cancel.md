@@ -6,6 +6,10 @@ Cancel an uncommitted personal ENV key rotation
 
 Cancel an uncommitted personal ENV key rotation
 
+Cancel an uncommitted personal key rotation using the exact confirmation. A completed rotation cannot be undone by this command.
+
+ENV values are encrypted before they leave the client. Commands select personal, team, or host scope explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
+
 JSON output is supported with --json.
 
 ```

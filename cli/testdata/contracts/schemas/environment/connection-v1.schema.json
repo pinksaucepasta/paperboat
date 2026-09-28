@@ -16,7 +16,7 @@
       "required": ["id", "kind", "resource_id", "alias", "state"],
       "properties": {
         "id": {"type": "string", "minLength": 1},
-        "kind": {"enum": ["hosted", "byod"]},
+        "kind": {"const": "byod"},
         "resource_id": {"type": "string", "minLength": 1},
         "alias": {"type": "string", "minLength": 1},
         "state": {"enum": ["starting", "ready", "offline", "revoked", "deleted"]},

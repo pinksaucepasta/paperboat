@@ -185,10 +185,6 @@ func (t *OriginHTTPTransport) CloseIdleConnections() {
 	}
 }
 
-func sanitizeOriginHeaders(header http.Header) {
-	sanitizeOriginRequestHeaders(header, false)
-}
-
 func sanitizeOriginRequestHeaders(header http.Header, preserveWebSocketUpgrade bool) {
 	if header == nil {
 		return

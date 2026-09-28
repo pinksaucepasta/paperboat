@@ -13,6 +13,12 @@ pb-daemon-device-guard - Manage protected device-name access
 Manage protected device-name access
 
 .PP
+Install or uninstall the privileged guard that protects device-name access. The run entrypoint is invoked by operating-system supervision rather than normal interactive use.
+
+.PP
+The daemon owns this device's background connectivity and local API. Normal lifecycle management uses pb service; daemon run is the foreground entrypoint used by service supervision. Its device guard subcommands manage protected local device-name access.
+
+.PP
 With --json, this command group lists its available commands.
 
 

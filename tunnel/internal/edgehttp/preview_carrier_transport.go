@@ -141,6 +141,15 @@ func (r *DataCarrierPreviewRegistry) Attach(route DataCarrierPreviewRoute) error
 	}
 	old := r.byRoute[validated.RouteID]
 	if old != nil {
+		// A renewed runtime lease updates only its deadline. Preserve the entry
+		// and active streams; renewal is not an attachment replacement.
+		previous := old.route
+		previous.ExpiresAt = validated.ExpiresAt
+		if validated.Kind == datacarrier.RuntimeCarrierRoute && sameDataCarrierPreviewRoute(previous, validated) {
+			old.route.ExpiresAt = validated.ExpiresAt
+			r.mu.Unlock()
+			return nil
+		}
 		if sameDataCarrierPreviewRoute(old.route, validated) {
 			r.mu.Unlock()
 			return nil
@@ -202,22 +211,25 @@ func (r *DataCarrierPreviewRegistry) AttachAdmission(admission datacarrier.Expec
 }
 
 func (r *DataCarrierPreviewRegistry) validateRoute(route DataCarrierPreviewRoute) (DataCarrierPreviewRoute, error) {
-	if route.Server == nil || connectorprotocol.ValidateIdentifier(route.RouteID) != nil || route.Revision == 0 || route.Kind != dataCarrierPreviewRouteKind && route.Kind != dataCarrierPreviewPrivateRouteKind {
+	if route.Server == nil || connectorprotocol.ValidateIdentifier(route.RouteID) != nil || route.Revision == 0 || route.Kind != dataCarrierPreviewRouteKind && route.Kind != dataCarrierPreviewPrivateRouteKind && route.Kind != datacarrier.RuntimeCarrierRoute {
 		return DataCarrierPreviewRoute{}, ErrDataCarrierPreviewRegistryInvalid
 	}
 	if route.Kind == dataCarrierPreviewPrivateRouteKind && route.AccessMode != "private" && route.AccessMode != "team" || route.Kind == dataCarrierPreviewRouteKind && route.AccessMode != "" && route.AccessMode != "public" {
 		return DataCarrierPreviewRoute{}, ErrDataCarrierPreviewRegistryInvalid
 	}
-	if route.AccessMode == "" {
+	if route.Kind == datacarrier.RuntimeCarrierRoute && (route.AccessMode != "" || route.AttachmentGeneration == 0) {
+		return DataCarrierPreviewRoute{}, ErrDataCarrierPreviewRegistryInvalid
+	}
+	if route.AccessMode == "" && route.Kind != datacarrier.RuntimeCarrierRoute {
 		if route.Kind == dataCarrierPreviewPrivateRouteKind {
 			return DataCarrierPreviewRoute{}, ErrDataCarrierPreviewRegistryInvalid
 		}
 		route.AccessMode = "public"
 	}
-	if route.AccessMode != "public" && route.AccessMode != "private" && route.AccessMode != "team" {
+	if route.Kind != datacarrier.RuntimeCarrierRoute && route.AccessMode != "public" && route.AccessMode != "private" && route.AccessMode != "team" {
 		return DataCarrierPreviewRoute{}, ErrDataCarrierPreviewRegistryInvalid
 	}
-	if route.Kind != dataCarrierPreviewRouteKind && route.Kind != dataCarrierPreviewPrivateRouteKind {
+	if route.Kind != dataCarrierPreviewRouteKind && route.Kind != dataCarrierPreviewPrivateRouteKind && route.Kind != datacarrier.RuntimeCarrierRoute {
 		return DataCarrierPreviewRoute{}, ErrDataCarrierPreviewRegistryInvalid
 	}
 	if connectorprotocol.ValidateOpaqueEpoch(route.EdgeProcessEpoch) != nil || route.EdgeProcessEpoch != r.processEpoch {
@@ -236,7 +248,7 @@ func (r *DataCarrierPreviewRegistry) validateRoute(route DataCarrierPreviewRoute
 	}
 	route.Hostname = host
 	route.Identity = identity
-	if route.AttachmentGeneration != 0 {
+	if route.AttachmentGeneration != 0 && route.Kind != datacarrier.RuntimeCarrierRoute {
 		if connectorprotocol.ValidateIdentifier(route.OperationID) != nil || connectorprotocol.ValidateIdentifier(route.PreviewID) != nil || connectorprotocol.ValidateIdentifier(route.OwnerDeviceID) != nil || connectorprotocol.ValidateIdentifier(route.OwnerSessionID) != nil || route.OwnerDeviceID != identity.HostID || route.LeaseGeneration == 0 || route.ConfigContentHash == "" || route.Endpoint == "" || route.ExpiresAt.IsZero() || !route.ExpiresAt.After(time.Now().UTC()) {
 			return DataCarrierPreviewRoute{}, ErrDataCarrierPreviewRegistryInvalid
 		}
@@ -298,7 +310,7 @@ func (r *DataCarrierPreviewRegistry) Detach(routeID string, identity datacarrier
 // callback from a released or replaced attachment cannot remove the current
 // route, even if it reuses the same route ID.
 func (r *DataCarrierPreviewRegistry) DetachAdmission(admission datacarrier.ExpectedAdmission) error {
-	if r == nil || connectorprotocol.ValidateIdentifier(admission.RouteID) != nil || connectorprotocol.ValidateIdentifier(admission.OperationID) != nil || admission.AttachmentGeneration == 0 {
+	if r == nil || connectorprotocol.ValidateIdentifier(admission.RouteID) != nil || (admission.RouteKind != datacarrier.RuntimeCarrierRoute && connectorprotocol.ValidateIdentifier(admission.OperationID) != nil) || admission.AttachmentGeneration == 0 {
 		return ErrDataCarrierPreviewRegistryInvalid
 	}
 	r.mu.Lock()
@@ -631,7 +643,8 @@ func (t *DataCarrierPreviewTransport) RoundTrip(request *http.Request) (*http.Re
 	headerContext, cancelHeader := context.WithTimeout(request.Context(), t.openWait)
 	stopHeader := context.AfterFunc(headerContext, func() { _ = stream.Close() })
 	headerReader := &boundedPreviewResponseHeaderReader{reader: stream, maximum: dataCarrierPreviewMaxResponseHeader}
-	response, err := http.ReadResponse(bufio.NewReader(headerReader), out)
+	responseReader := bufio.NewReader(headerReader)
+	response, err := http.ReadResponse(responseReader, out)
 	headerTimedOut := errors.Is(headerContext.Err(), context.DeadlineExceeded)
 	stopHeader()
 	cancelHeader()
@@ -656,7 +669,13 @@ func (t *DataCarrierPreviewTransport) RoundTrip(request *http.Request) (*http.Re
 		}
 	}
 	response.Request = request
-	response.Body = &dataCarrierPreviewResponseBody{body: response.Body, stream: stream, stopCancel: stopCancel, writeDone: writeDone, lifetimeCancel: lifetimeCancel, lifetimeTimer: lifetimeTimer}
+	if response.StatusCode == http.StatusSwitchingProtocols {
+		// ReverseProxy bridges upgraded connections only when the response body
+		// is writable. Keep the buffered reader for bytes arriving with the 101.
+		response.Body = &dataCarrierRouteUpgradeBody{reader: responseReader, stream: stream, stopCancel: stopCancel, writeDone: writeDone, lifetimeCancel: lifetimeCancel, lifetimeTimer: lifetimeTimer}
+	} else {
+		response.Body = &dataCarrierPreviewResponseBody{body: response.Body, stream: stream, stopCancel: stopCancel, writeDone: writeDone, lifetimeCancel: lifetimeCancel, lifetimeTimer: lifetimeTimer}
+	}
 	return response, nil
 }
 

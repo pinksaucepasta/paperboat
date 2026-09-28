@@ -1,19 +1,18 @@
 package peeridentity
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,7 +28,7 @@ func (staticCredentials) Proof(context.Context, string, string, string, []byte) 
 	return []byte("proof"), nil
 }
 
-func TestEnsureResumesPendingEnrollmentAndPersistsApprovedCertificate(t *testing.T) {
+func TestEnsureRegistersDeviceOwnedMachineKeyWithoutPairedCLI(t *testing.T) {
 	stateRoot := filepath.Join(t.TempDir(), "identity")
 	store, err := identitystore.Open(identitystore.Config{StateRoot: stateRoot})
 	if err != nil {
@@ -37,61 +36,53 @@ func TestEnsureResumesPendingEnrollmentAndPersistsApprovedCertificate(t *testing
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	key := store.Current()
-	if err := store.SaveRegistration(identitystore.Registration{ServerURL: "https://api.example.test", MachineID: "machine_01", EnvironmentID: "env_01", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(stateRoot, "inbox"), InstallationGeneration: 3, SetupRoles: []string{"host"}, UpdatedAt: now}); err != nil {
+	if err := store.SaveRegistration(identitystore.Registration{ServerURL: "https://api.example.test", AccountID: "account_01", MachineID: "machine_01", EnvironmentID: "env_01", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(stateRoot, "inbox"), InstallationGeneration: 3, SetupRoles: []string{"host"}, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	rootPublic, rootPrivate, _ := ed25519.GenerateKey(nil)
-	extraPublic, _, _ := ed25519.GenerateKey(nil)
-	extraFingerprint := sha256.Sum256(extraPublic)
-	var approved atomic.Bool
-	var requested atomic.Bool
-	var request struct {
-		OperationID    string `json:"operation_id"`
-		Generation     uint64 `json:"generation"`
-		NoisePublicKey string `json:"noise_public_key"`
-		QUICPublicKey  string `json:"quic_public_key"`
+	endpoint, err := store.PeerEndpoint()
+	if err != nil {
+		t.Fatal(err)
 	}
+	quicPublic := endpoint.QUICPublicKey()
+	keyFingerprint := sha256.Sum256(quicPublic)
+	keyID := "aek_" + hex.EncodeToString(keyFingerprint[:])
+	otherPublic, _, _ := ed25519.GenerateKey(nil)
+	otherFingerprint := sha256.Sum256(otherPublic)
+	var registered api.EndpointCertificateDocument
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/v1/machine-peer-identity":
-			if requested.Swap(true) {
-				w.WriteHeader(http.StatusConflict)
-				_, _ = w.Write([]byte(`{"error":{"code":"operation_conflict"}}`))
-				return
+			var request struct {
+				OperationID string `json:"operation_id"`
+				Generation  uint64 `json:"generation"`
+				Certificate string `json:"certificate"`
 			}
-			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Generation != 3 || request.OperationID == "" {
+				t.Fatalf("invalid machine registration: %+v %v", request, err)
+			}
+			raw, err := base64.RawURLEncoding.DecodeString(request.Certificate)
+			if err != nil {
 				t.Fatal(err)
 			}
-			noise, _ := base64.RawURLEncoding.DecodeString(request.NoisePublicKey)
-			quic, _ := base64.RawURLEncoding.DecodeString(request.QUICPublicKey)
-			var noiseKey [32]byte
-			copy(noiseKey[:], noise)
-			response := map[string]any{"request_id": "per_abcdefghijklmnop", "endpoint_id": "machine_01", "generation": 3, "noise_public_key": request.NoisePublicKey, "quic_public_key": request.QUICPublicKey, "expires_at": now.Add(5 * time.Minute), "safety_code": safetyCode("machine_01", 3, noiseKey, quic)}
+			certificate, err := endpointidentity.Verify(raw, quicPublic, endpointidentity.Expected{AccountID: "account_01", Role: endpointidentity.RoleMachine, EndpointID: "machine_01", Generation: 3}, now)
+			if err != nil || !bytes.Equal(certificate.Claims.QUICPublicKey, endpoint.QUICPublicKey()) {
+				t.Fatalf("machine did not prove its own endpoint key: %v", err)
+			}
+			fingerprint := sha256.Sum256(raw)
+			registered = api.EndpointCertificateDocument{Version: 1, AccountID: "account_01", KeyID: keyID, EndpointID: "machine_01", Role: "machine", Generation: 3, Serial: certificate.Claims.Serial, IssuedAt: certificate.Claims.IssuedAt.Format(time.RFC3339), ExpiresAt: certificate.Claims.ExpiresAt.Format(time.RFC3339), Certificate: request.Certificate, CertificateFingerprint: hex.EncodeToString(fingerprint[:])}
 			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(map[string]any{"data": response})
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": registered})
 		case "/v1/machine-peer-identity/status":
-			if !approved.Load() {
+			if registered.Certificate == "" {
 				w.WriteHeader(http.StatusAccepted)
 				_, _ = w.Write([]byte(`{"data":{"state":"pending"}}`))
 				return
 			}
-			noise, _ := base64.RawURLEncoding.DecodeString(request.NoisePublicKey)
-			quic, _ := base64.RawURLEncoding.DecodeString(request.QUICPublicKey)
-			var noiseKey [32]byte
-			copy(noiseKey[:], noise)
-			certificate, err := endpointidentity.Sign(rootPrivate, endpointidentity.Claims{AccountID: "account_01", Role: endpointidentity.RoleMachine, EndpointID: "machine_01", NoisePublicKey: noiseKey, QUICPublicKey: quic, Generation: 3, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour)})
-			if err != nil {
-				t.Fatal(err)
-			}
-			raw, _ := certificate.MarshalBinary()
-			rootFingerprint := sha256.Sum256(rootPublic)
-			certificateFingerprint := sha256.Sum256(raw)
-			certificateDocument := api.EndpointCertificateDocument{Version: 1, AccountID: "account_01", KeyID: "aek_" + hex.EncodeToString(rootFingerprint[:]), EndpointID: "machine_01", Role: "machine", Generation: 3, Serial: 1, IssuedAt: now.Add(-time.Minute).Format(time.RFC3339), ExpiresAt: now.Add(time.Hour).Format(time.RFC3339), Certificate: base64.RawURLEncoding.EncodeToString(raw), CertificateFingerprint: hex.EncodeToString(certificateFingerprint[:])}
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"state": "approved", "trusted_keys": []api.E2EEKey{
-				{KeyID: certificateDocument.KeyID, PublicKey: base64.RawURLEncoding.EncodeToString(rootPublic), Fingerprint: hex.EncodeToString(rootFingerprint[:]), Generation: 1},
-				{KeyID: "aek_" + hex.EncodeToString(extraFingerprint[:]), PublicKey: base64.RawURLEncoding.EncodeToString(extraPublic), Fingerprint: hex.EncodeToString(extraFingerprint[:]), Generation: 2},
-			}, "certificate": certificateDocument}})
+				{KeyID: keyID, PublicKey: base64.RawURLEncoding.EncodeToString(quicPublic), Fingerprint: hex.EncodeToString(keyFingerprint[:]), Generation: 1},
+				{KeyID: "aek_" + hex.EncodeToString(otherFingerprint[:]), PublicKey: base64.RawURLEncoding.EncodeToString(otherPublic), Fingerprint: hex.EncodeToString(otherFingerprint[:]), Generation: 1},
+			}, "certificate": registered}})
 		default:
 			http.NotFound(w, r)
 		}
@@ -101,50 +92,78 @@ func TestEnsureResumesPendingEnrollmentAndPersistsApprovedCertificate(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	var pending *PendingError
-	if err := client.Ensure(context.Background()); !errors.As(err, &pending) || pending.SafetyCode == "" || pending.RequestID == "" {
-		t.Fatalf("pending=%+v err=%v", pending, err)
-	}
-	if err := client.Ensure(context.Background()); !errors.Is(err, ErrPending) {
-		t.Fatalf("repeated pending err=%v", err)
-	}
-	approved.Store(true)
 	if err := client.Ensure(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	endpoint, err := store.PeerEndpoint()
-	if err != nil || len(endpoint.Certificate) == 0 {
-		t.Fatalf("endpoint=%+v err=%v", endpoint, err)
+	stored, err := store.PeerEndpoint()
+	if err != nil || len(stored.Certificate) == 0 || len(stored.TrustedKeys) != 2 || stored.RootKeyID != keyID {
+		t.Fatalf("stored machine identity: cert=%d keys=%d key_id=%s err=%v", len(stored.Certificate), len(stored.TrustedKeys), stored.RootKeyID, err)
 	}
-	if len(endpoint.TrustedKeys) != 2 {
-		t.Fatalf("trusted endpoint roots=%d, want complete enrolled set", len(endpoint.TrustedKeys))
-	}
-	legacyPath := filepath.Join(stateRoot, "peer-endpoint.json")
-	legacyRaw, err := os.ReadFile(legacyPath)
+	// A state file without its trust directory refreshes through the authenticated
+	// machine status route; it does not need a CLI signer to come online.
+	path := filepath.Join(stateRoot, "peer-endpoint.json")
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var legacy map[string]any
-	if err := json.Unmarshal(legacyRaw, &legacy); err != nil {
+	var state map[string]any
+	if err := json.Unmarshal(raw, &state); err != nil {
 		t.Fatal(err)
 	}
-	delete(legacy, "trusted_keys")
-	legacyRaw, err = json.Marshal(legacy)
-	if err != nil {
+	delete(state, "trusted_keys")
+	raw, _ = json.Marshal(state)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
-	}
-	if err := os.WriteFile(legacyPath, legacyRaw, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	legacyEndpoint, err := store.PeerEndpoint()
-	if err != nil || len(legacyEndpoint.TrustedKeys) != 0 {
-		t.Fatalf("legacy endpoint roots=%d err=%v, want refresh marker", len(legacyEndpoint.TrustedKeys), err)
 	}
 	if err := client.Ensure(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	refreshed, err := store.PeerEndpoint()
 	if err != nil || len(refreshed.TrustedKeys) != 2 {
-		t.Fatalf("refreshed endpoint roots=%d err=%v", len(refreshed.TrustedKeys), err)
+		t.Fatalf("trust refresh keys=%d err=%v", len(refreshed.TrustedKeys), err)
+	}
+	soon, err := endpointidentity.Sign(endpoint.QUICPrivateKey, endpointidentity.Claims{AccountID: "account_01", Role: endpointidentity.RoleMachine, EndpointID: "machine_01", QUICPublicKey: quicPublic, Generation: 3, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(6 * 24 * time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	soonRaw, err := soon.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePeerEndpointCertificateWithTrustedKeys(quicPublic, refreshed.TrustedKeys, soonRaw, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Ensure(context.Background()); err != nil {
+		t.Fatalf("renew machine certificate: %v", err)
+	}
+	if registered.Serial != 2 {
+		t.Fatalf("renewed serial=%d", registered.Serial)
+	}
+	legacyPublic, legacyPrivate, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyFingerprint := sha256.Sum256(legacyPublic)
+	legacy, err := endpointidentity.Sign(legacyPrivate, endpointidentity.Claims{AccountID: "account_01", Role: endpointidentity.RoleMachine, EndpointID: "machine_01", QUICPublicKey: quicPublic, Generation: 3, Serial: 2, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(90 * 24 * time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyRaw, err := legacy.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyKey := endpointidentity.TrustedKey{KeyID: "aek_" + hex.EncodeToString(legacyFingerprint[:]), PublicKey: legacyPublic, Fingerprint: legacyFingerprint, Generation: 1}
+	if err := store.SavePeerEndpointCertificateWithTrustedKeys(legacyPublic, append(refreshed.TrustedKeys, legacyKey), legacyRaw, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Ensure(context.Background()); err != nil {
+		t.Fatalf("renew old account-signed certificate: %v", err)
+	}
+	if registered.Serial != 3 {
+		t.Fatalf("renewed old certificate serial=%d", registered.Serial)
+	}
+	updated, err := store.PeerEndpoint()
+	if err != nil || updated.Generation != endpoint.Generation || !bytes.Equal(updated.QUICPublicKey(), quicPublic) {
+		t.Fatalf("endpoint identity changed during renewal: %v", err)
 	}
 }

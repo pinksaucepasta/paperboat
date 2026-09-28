@@ -6,6 +6,10 @@ Approve the currently reviewed pull revision
 
 Approve the currently reviewed pull revision
 
+Approve the pull revision currently under review for the selected environment. This applies the reviewed revision; it does not approve an unrelated later repository change.
+
+Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
+
 JSON output is supported with --json.
 
 ```

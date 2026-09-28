@@ -6,6 +6,10 @@ Provision an explicit encrypted ENV selection to a host
 
 Provision an explicit encrypted ENV selection to a host
 
+Select values for the named host with --select, or pass --empty to clear its projection. The host receives only the chosen encrypted scope, not every ENV value in the account.
+
+Host ENV projections contain an explicit selection of encrypted values for an enrolled device. Provisioning changes the host selection; it does not expose values in command output or implicitly grant access to every scope.
+
 JSON output is supported with --json.
 
 ```

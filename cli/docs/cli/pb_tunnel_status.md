@@ -6,6 +6,10 @@ Show tunnel health
 
 Show tunnel health
 
+Show current health for one durable tunnel. --watch refreshes observations at --interval; a configured route is not necessarily ready to serve traffic.
+
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+
 JSON output is supported with --json.
 
 ```

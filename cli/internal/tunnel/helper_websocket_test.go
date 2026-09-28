@@ -234,28 +234,6 @@ func TestHelperTerminalInputPrecedesQueuedControlTraffic(t *testing.T) {
 	}
 }
 
-func TestWebSocketEstablishDoesNotSendAuthenticationOrHTTPUpgrade(t *testing.T) {
-	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		requests.Add(1)
-	}))
-	defer server.Close()
-	u, _ := url.Parse(server.URL)
-	u.Scheme = "ws"
-	u.Path = "/v1/runtime"
-	target := &resolver.TerminalTarget{Protocol: "paperboat.terminal.v1", WSSEndpoint: u.String(), Auth: resolver.AuthTarget{Method: "bearer", Token: "helper-token"}}
-	prepared, err := NewWebSocketTunnel().Establish(context.Background(), resolver.ConnectInfo{Terminal: target})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if requests.Load() != 0 {
-		t.Fatal("transport establishment sent an authenticated HTTP request")
-	}
-	if err := prepared.Close(); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestCanonicalHelperTerminalFramingIOResizeAndExit(t *testing.T) {
 	requests := make(chan helperFrame, 12)
 	inputs := make(chan []byte, 1)
@@ -332,7 +310,7 @@ func TestCanonicalHelperTerminalFramingIOResizeAndExit(t *testing.T) {
 	u.Scheme = strings.Replace(u.Scheme, "http", "ws", 1)
 	u.Path = "/v1/runtime"
 	target := &resolver.TerminalTarget{Protocol: "paperboat.terminal.v1", WSSEndpoint: u.String(), Auth: resolver.AuthTarget{Method: "bearer", Token: "helper-token"}, SessionID: "ses_bound", TerminalID: "default", CWD: "/workspace", Cols: 100, Rows: 30, Env: map[string]string{"TERM": "xterm-ghostty", "COLORTERM": "truecolor"}}
-	conn, err := NewWebSocketTunnel().Dial(context.Background(), resolver.ConnectInfo{Terminal: target})
+	conn, err := dialTestHelperTerminal(context.Background(), target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -479,7 +457,7 @@ func TestCanonicalHelperExistingSessionDoesNotInjectTerminalInput(t *testing.T) 
 	u.Scheme = strings.Replace(u.Scheme, "http", "ws", 1)
 	u.Path = "/v1/runtime"
 	target := &resolver.TerminalTarget{Protocol: "paperboat.terminal.v1", WSSEndpoint: u.String(), Auth: resolver.AuthTarget{Method: "bearer", Token: "helper-token"}, SessionID: "ses_gap", TerminalID: "default", CWD: "/workspace"}
-	conn, err := NewWebSocketTunnel().Dial(context.Background(), resolver.ConnectInfo{Terminal: target})
+	conn, err := dialTestHelperTerminal(context.Background(), target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -574,7 +552,7 @@ func TestCanonicalHelperRestartIsLimitedToInitialAttach(t *testing.T) {
 			u.Scheme = strings.Replace(u.Scheme, "http", "ws", 1)
 			u.Path = "/v1/runtime"
 			target := &resolver.TerminalTarget{Protocol: "paperboat.terminal.v1", WSSEndpoint: u.String(), Auth: resolver.AuthTarget{Method: "bearer", Token: "helper-token"}, SessionID: "ses_retained", TerminalID: "default", RestartIfNotRunning: test.restart, AfterSequence: 9}
-			conn, err := NewWebSocketTunnel().Dial(context.Background(), resolver.ConnectInfo{Terminal: target})
+			conn, err := dialTestHelperTerminal(context.Background(), target)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -659,7 +637,7 @@ func TestCanonicalHelperStaleReconnectCursorReportsReplayGap(t *testing.T) {
 	u.Path = "/v1/runtime"
 	var cursor atomic.Int64
 	target := &resolver.TerminalTarget{Protocol: "paperboat.terminal.v1", WSSEndpoint: u.String(), Auth: resolver.AuthTarget{Method: "bearer", Token: "helper-token"}, SessionID: "ses_gap", TerminalID: "default", AfterSequence: 2, SequenceSink: func(value int) { cursor.Store(int64(value)) }}
-	conn, err := NewWebSocketTunnel().Dial(context.Background(), resolver.ConnectInfo{Terminal: target})
+	conn, err := dialTestHelperTerminal(context.Background(), target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -685,80 +663,28 @@ func TestCanonicalHelperStaleReconnectCursorReportsReplayGap(t *testing.T) {
 	}
 }
 
-func TestCanonicalHelperFallsBackToLegacyWhenCreateOrGetUnavailable(t *testing.T) {
-	actions := make(chan string, 4)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{helperWebSocketSubprotocol}, CompressionMode: websocket.CompressionDisabled})
-		if err != nil {
-			t.Error(err)
-			return
-		}
-		defer ws.Close(websocket.StatusNormalClosure, "")
-		for {
-			messageType, data, err := ws.Read(context.Background())
-			if err != nil {
-				return
-			}
-			if messageType != websocket.MessageText {
-				return
-			}
-			frame, err := decodeHelperFrame(data)
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			if frame.Type == "hello" {
-				writeHelperTestFrame(t, ws, helperFrame{Type: "welcome", RequestID: frame.RequestID, Version: helperProtocolVersion, Payload: json.RawMessage(`{"version":"1.0","capabilities":["health.v1","terminal.v1"]}`)})
-				continue
-			}
-			if frame.Type != "request" {
-				continue
-			}
-			var payload struct {
-				Action           string `json:"action"`
-				ExistingSnapshot bool   `json:"existing_snapshot"`
-			}
-			_ = json.Unmarshal(frame.Payload, &payload)
-			actions <- payload.Action
-			switch payload.Action {
-			case "create":
-				if payload.ExistingSnapshot {
-					// Old host runtimes reject the unknown create-or-get field.
-					writeHelperTestFrame(t, ws, helperFrame{Type: "error", RequestID: frame.RequestID, Version: helperProtocolVersion, Payload: json.RawMessage(`{"code":"invalid_request","message":"operation failed","retryable":false}`)})
-					continue
-				}
-				writeHelperTestFrame(t, ws, helperFrame{Type: "response", RequestID: frame.RequestID, Version: helperProtocolVersion, Payload: json.RawMessage(`{"result":{"state":"running","generation":1},"replay":false}`)})
-			case "snapshot":
-				writeHelperTestFrame(t, ws, helperFrame{Type: "error", RequestID: frame.RequestID, Version: helperProtocolVersion, Payload: json.RawMessage(`{"code":"not_found_or_forbidden","message":"operation failed","retryable":false}`)})
-			case "attach":
-				writeHelperTestFrame(t, ws, helperFrame{Type: "response", RequestID: frame.RequestID, Version: helperProtocolVersion, Payload: json.RawMessage(`{"result":{"stream_id":11,"attachment_id":"att_legacy","session":{"snapshot":{"generation":1}}},"replay":false}`)})
-				writeHelperTestFrame(t, ws, helperFrame{Type: "event", RequestID: "stream", Version: helperProtocolVersion, Capability: "terminal.v1", Payload: json.RawMessage(`{"event":"terminal_stream_end","session_id":"ses_legacy","state":"exited","final_sequence":3,"exit":{"code":0}}`)})
-			}
-		}
-	}))
-	defer server.Close()
+const helperWebSocketSubprotocol = "paperboat.terminal.v1"
 
-	u, _ := url.Parse(server.URL)
-	u.Scheme = strings.Replace(u.Scheme, "http", "ws", 1)
-	u.Path = "/v1/runtime"
-	target := &resolver.TerminalTarget{Protocol: "paperboat.terminal.v1", WSSEndpoint: u.String(), Auth: resolver.AuthTarget{Method: "bearer", Token: "helper-token"}, SessionID: "ses_legacy", TerminalID: "default", CWD: "/workspace"}
-	conn, err := NewWebSocketTunnel().Dial(context.Background(), resolver.ConnectInfo{Terminal: target})
+func dialTestHelperTerminal(ctx context.Context, target *resolver.TerminalTarget) (Conn, error) {
+	connection, _, err := websocket.Dial(ctx, target.WSSEndpoint, &websocket.DialOptions{
+		HTTPHeader:      http.Header{"Authorization": []string{"Bearer " + target.Auth.Token}},
+		Subprotocols:    []string{helperWebSocketSubprotocol},
+		CompressionMode: websocket.CompressionDisabled,
+	})
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
-	defer conn.Close()
-	if code, err := conn.Wait(); err != nil || code != 0 {
-		t.Fatalf("Wait()=%d,%v", code, err)
+	message := &helperWebSocketConnection{ws: connection}
+	if _, err := helperHandshake(ctx, message); err != nil {
+		_ = message.Close()
+		return nil, err
 	}
-	close(actions)
-	var got []string
-	for action := range actions {
-		got = append(got, action)
+	terminal, err := newInitializedHelperTerminalConn(ctx, message, target, terminalOutputQueueChunks)
+	if err != nil {
+		_ = message.Close()
+		return nil, err
 	}
-	want := []string{"create", "snapshot", "create", "attach"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("actions=%v want=%v", got, want)
-	}
+	return terminal, nil
 }
 
 func writeHelperTestFrame(t *testing.T, ws *websocket.Conn, frame helperFrame) {

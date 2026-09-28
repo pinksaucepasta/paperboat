@@ -488,7 +488,10 @@ func renderSystemd(config Config) ([]byte, error) {
 		)
 	}
 	noNewPrivileges := "false"
-	if config.Kind == HostKind || config.Kind == HostdKind || config.Kind == UpdaterKind {
+	// Hostd owns interactive PTYs. Its child shells must retain the enrolled
+	// user's normal ability to run setuid programs such as sudo. Linux cannot
+	// clear NoNewPrivileges after systemd sets it on the parent service.
+	if config.Kind == HostKind || config.Kind == UpdaterKind {
 		noNewPrivileges = "true"
 	}
 	options = append(options, unit.NewUnitOption("Service", "NoNewPrivileges", noNewPrivileges))

@@ -243,9 +243,6 @@ func NewHealthTracker(now func() time.Time) (*HealthTracker, error) {
 	return &HealthTracker{now: now, updatedAt: at, states: states}, nil
 }
 
-// NewTracker is a concise alias used by runtime integrations.
-func NewTracker(now func() time.Time) (*HealthTracker, error) { return NewHealthTracker(now) }
-
 func (t *HealthTracker) Update(update HealthUpdate) error {
 	if t == nil {
 		return newError(ErrorInvalidObservation, "update host health")

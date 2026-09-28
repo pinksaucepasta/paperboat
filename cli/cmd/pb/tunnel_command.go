@@ -1969,12 +1969,6 @@ func tunnelStateCommand(action string) *cobra.Command {
 				return runPreviewStopCobra(command, args)
 			}
 		}
-		if action == "delete" {
-			yes, _ := command.Flags().GetBool("yes")
-			if !yes {
-				return errors.New("tunnel deletion revokes connector credentials and removes Paperboat endpoints, routes, and domain bindings; user-owned DNS records and audit history are preserved; pass --yes to confirm")
-			}
-		}
 		client, ctx, err := tunnelClient(command)
 		if err != nil {
 			return err
@@ -1988,6 +1982,11 @@ func tunnelStateCommand(action string) *cobra.Command {
 		})
 		if err != nil {
 			return err
+		}
+		if action == "delete" {
+			if err := confirmMutation(command, "tunnel-delete:"+current.ID+":"+current.ETag, fmt.Sprintf("Delete tunnel %s (%s)? Endpoints, routes, domain bindings, and connector credentials will be removed. User-owned DNS records and audit history remain.", current.Name, current.ID)); err != nil {
+				return err
+			}
 		}
 		key, err := tunnelKey()
 		if err != nil {
@@ -2006,7 +2005,7 @@ func tunnelStateCommand(action string) *cobra.Command {
 		return tunnelOutput(command, out, fmt.Sprintf("%s tunnel %s; status: %s", tunnelActionPastTense(action), out.Tunnel.ID, tunnelOperationHuman(out.Operation)))
 	})
 	if action == "delete" {
-		command.Flags().Bool("yes", false, "confirm endpoint, route, domain-binding, and connector-credential removal")
+		command.Flags().String("confirm", "", "six-character confirmation code from the preview")
 	}
 	tunnelMutationWaitFlags(command)
 	tunnelJSONFlag(command)
@@ -2406,10 +2405,6 @@ func routeUpdateCommand() *cobra.Command {
 }
 func routeRemoveCommand() *cobra.Command {
 	command := tunnelCommand("remove <tunnel> <route>", "Remove a tunnel route", cobra.ExactArgs(2), func(command *cobra.Command, args []string) error {
-		yes, _ := command.Flags().GetBool("yes")
-		if !yes {
-			return errors.New("route removal stops matching traffic but preserves the tunnel, domains, and connectors; pass --yes to confirm")
-		}
 		c, ctx, e := tunnelClient(command)
 		if e != nil {
 			return e
@@ -2420,6 +2415,9 @@ func routeRemoveCommand() *cobra.Command {
 		}
 		current, e := resolveTunnelRoute(ctx, c, tunnelID, args[1])
 		if e != nil {
+			return e
+		}
+		if e := confirmMutation(command, "tunnel-route-remove:"+tunnelID+":"+current.ID+":"+current.ETag, fmt.Sprintf("Remove route %s from tunnel %s? Matching traffic will stop; the tunnel, domains, and connectors remain.", current.ID, tunnelID)); e != nil {
 			return e
 		}
 		key, e := tunnelKey()
@@ -2438,7 +2436,7 @@ func routeRemoveCommand() *cobra.Command {
 		}
 		return tunnelOutput(command, out, fmt.Sprintf("Removed route %s; tunnel and connector are preserved; status: %s", out.Route.ID, tunnelOperationHuman(out.Operation)))
 	})
-	command.Flags().Bool("yes", false, "confirm route removal while preserving the tunnel")
+	command.Flags().String("confirm", "", "six-character confirmation code from the preview")
 	tunnelMutationWaitFlags(command)
 	tunnelJSONFlag(command)
 	return command
@@ -2621,12 +2619,6 @@ func resolveTunnelRoute(ctx context.Context, client *api.Client, tunnel, value s
 
 func domainMutationCommand(action string) *cobra.Command {
 	command := tunnelCommand(action+" <tunnel> <domain>", strings.ToUpper(action[:1])+action[1:]+" a tunnel domain", cobra.ExactArgs(2), func(command *cobra.Command, args []string) error {
-		if action == "remove" {
-			yes, _ := command.Flags().GetBool("yes")
-			if !yes {
-				return errors.New("domain removal deletes the Paperboat binding but preserves user-owned DNS records; pass --yes to confirm")
-			}
-		}
 		c, ctx, e := tunnelClient(command)
 		if e != nil {
 			return e
@@ -2638,6 +2630,11 @@ func domainMutationCommand(action string) *cobra.Command {
 		current, e := resolveTunnelDomain(ctx, c, tunnelID, args[1])
 		if e != nil {
 			return e
+		}
+		if action == "remove" {
+			if e := confirmMutation(command, "tunnel-domain-remove:"+tunnelID+":"+current.ID+":"+current.ETag, fmt.Sprintf("Remove domain binding %s from tunnel %s? User-owned DNS records remain.", current.ID, tunnelID)); e != nil {
+				return e
+			}
 		}
 		key, e := tunnelKey()
 		if e != nil {
@@ -2664,7 +2661,7 @@ func domainMutationCommand(action string) *cobra.Command {
 		return tunnelOutput(command, out, human)
 	})
 	if action == "remove" {
-		command.Flags().Bool("yes", false, "confirm domain-binding removal while preserving user-owned DNS")
+		command.Flags().String("confirm", "", "six-character confirmation code from the preview")
 	}
 	tunnelMutationWaitFlags(command)
 	tunnelJSONFlag(command)
@@ -2783,12 +2780,6 @@ func connectorListCommand() *cobra.Command {
 }
 func connectorMutationCommand(action string) *cobra.Command {
 	command := tunnelCommand(action+" <tunnel> <connector>", strings.ToUpper(action[:1])+action[1:]+" a tunnel connector", cobra.ExactArgs(2), func(command *cobra.Command, args []string) error {
-		if action == "revoke" {
-			yes, _ := command.Flags().GetBool("yes")
-			if !yes {
-				return errors.New("connector revocation permanently disables this host attachment but preserves the tunnel, routes, domains, and other connectors; pass --yes to confirm")
-			}
-		}
 		c, ctx, e := tunnelClient(command)
 		if e != nil {
 			return e
@@ -2802,6 +2793,11 @@ func connectorMutationCommand(action string) *cobra.Command {
 		})
 		if e != nil {
 			return e
+		}
+		if action == "revoke" {
+			if e := confirmMutation(command, "tunnel-connector-revoke:"+tunnelID+":"+current.ID+":"+current.ETag, fmt.Sprintf("Revoke connector %s on tunnel %s? This host attachment will be disabled; other connectors remain.", current.ID, tunnelID)); e != nil {
+				return e
+			}
 		}
 		key, e := tunnelKey()
 		if e != nil {
@@ -2821,7 +2817,7 @@ func connectorMutationCommand(action string) *cobra.Command {
 		return tunnelOutput(command, out, human)
 	})
 	if action == "revoke" {
-		command.Flags().Bool("yes", false, "confirm permanent connector revocation")
+		command.Flags().String("confirm", "", "six-character confirmation code from the preview")
 	}
 	tunnelMutationWaitFlags(command)
 	tunnelJSONFlag(command)
@@ -2834,10 +2830,6 @@ func tunnelCredentialsCommand() *cobra.Command {
 }
 func credentialsRotateCommand() *cobra.Command {
 	command := tunnelCommand("rotate <tunnel>", "Rotate tunnel connector credentials", cobra.ExactArgs(1), func(command *cobra.Command, args []string) error {
-		yes, _ := command.Flags().GetBool("yes")
-		if !yes {
-			return errors.New("credential rotation replaces connector credentials while preserving tunnel identity, routes, and domains; pass --yes to confirm")
-		}
 		c, ctx, e := tunnelClient(command)
 		if e != nil {
 			return e
@@ -2850,6 +2842,9 @@ func credentialsRotateCommand() *cobra.Command {
 			return c.GetTunnelV1(ctx, tunnelID)
 		})
 		if e != nil {
+			return e
+		}
+		if e := confirmMutation(command, "tunnel-credentials-rotate:"+current.ID+":"+current.ETag, fmt.Sprintf("Rotate credentials for tunnel %s (%s)? Existing connector credentials will be revoked and attachments may need to reconnect.", current.Name, current.ID)); e != nil {
 			return e
 		}
 		key, e := tunnelKey()
@@ -2868,7 +2863,7 @@ func credentialsRotateCommand() *cobra.Command {
 		}
 		return tunnelOutput(command, out, fmt.Sprintf("Rotated tunnel credentials; tunnel identity and routes are preserved; status: %s", tunnelOperationHuman(out)))
 	})
-	command.Flags().Bool("yes", false, "confirm credential rotation")
+	command.Flags().String("confirm", "", "six-character confirmation code from the preview")
 	tunnelMutationWaitFlags(command)
 	tunnelJSONFlag(command)
 	return command

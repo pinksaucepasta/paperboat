@@ -50,10 +50,9 @@ func TestApproveMachineRequiresExactSafetyCodeAndSignsPublishedKeys(t *testing.T
 	rootPublic := keys.RootPrivate.Public().(ed25519.PublicKey)
 	rootFingerprint := sha256.Sum256(rootPublic)
 	clearKeys(&keys)
-	noise := sha256.Sum256([]byte("machine-noise"))
 	quicPublic, _, _ := ed25519.GenerateKey(nil)
-	code := machineSafetyCode("machine_1", 2, noise, quicPublic)
-	client := &approvalClient{root: api.E2EERoot{Version: 1, PublicKey: base64.RawURLEncoding.EncodeToString(rootPublic), Fingerprint: hex.EncodeToString(rootFingerprint[:]), Generation: 1}, pending: []api.PendingEndpointIdentity{{RequestID: "per_0123456789abcdef", EndpointID: "machine_1", State: "pending", Generation: 2, NoisePublicKey: base64.RawURLEncoding.EncodeToString(noise[:]), QUICPublicKey: base64.RawURLEncoding.EncodeToString(quicPublic), CreatedAt: now.Add(-time.Minute), ExpiresAt: now.Add(4 * time.Minute), SafetyCode: code}}}
+	code := endpointSafetyCode("paperboat-machine-endpoint-v1", "machine_1", 2, quicPublic)
+	client := &approvalClient{root: api.E2EERoot{Version: 1, PublicKey: base64.RawURLEncoding.EncodeToString(rootPublic), Fingerprint: hex.EncodeToString(rootFingerprint[:]), Generation: 1}, pending: []api.PendingEndpointIdentity{{RequestID: "per_0123456789abcdef", EndpointID: "machine_1", State: "pending", Generation: 2, QUICPublicKey: base64.RawURLEncoding.EncodeToString(quicPublic), CreatedAt: now.Add(-time.Minute), ExpiresAt: now.Add(4 * time.Minute), SafetyCode: code}}}
 	request := ApprovalRequest{Store: store, Client: client, Issuer: "https://api.example.test", AccountID: "account_1", CLIClientSessionID: "cli_1", RequestID: "per_0123456789abcdef", SafetyCode: code, Now: func() time.Time { return now }}
 	result, err := ApproveMachine(context.Background(), request)
 	if err != nil {
@@ -61,7 +60,7 @@ func TestApproveMachineRequiresExactSafetyCodeAndSignsPublishedKeys(t *testing.T
 	}
 	raw, _ := base64.RawURLEncoding.DecodeString(client.registered.Certificate)
 	certificate, err := endpointidentity.Verify(raw, rootPublic, endpointidentity.Expected{AccountID: "account_1", Role: endpointidentity.RoleMachine, EndpointID: "machine_1", Generation: 2}, now)
-	if err != nil || certificate.Claims.NoisePublicKey != noise || string(certificate.Claims.QUICPublicKey) != string(quicPublic) || result.CertificateFingerprint != client.registered.CertificateFingerprint {
+	if err != nil || string(certificate.Claims.QUICPublicKey) != string(quicPublic) || result.CertificateFingerprint != client.registered.CertificateFingerprint {
 		t.Fatalf("certificate=%+v result=%+v err=%v", certificate, result, err)
 	}
 	request.SafetyCode = "00000-00000"
@@ -81,17 +80,16 @@ func TestApproveCLIRequiresCLIRoleAndSignsNewSessionKeys(t *testing.T) {
 	rootPublic := keys.RootPrivate.Public().(ed25519.PublicKey)
 	rootFingerprint := sha256.Sum256(rootPublic)
 	clearKeys(&keys)
-	noise := sha256.Sum256([]byte("cli-noise"))
 	quicPublic, _, _ := ed25519.GenerateKey(nil)
-	code := machineSafetyCode("cli_new", 1, noise, quicPublic)
-	client := &approvalClient{root: api.E2EERoot{Version: 1, PublicKey: base64.RawURLEncoding.EncodeToString(rootPublic), Fingerprint: hex.EncodeToString(rootFingerprint[:]), Generation: 1}, pending: []api.PendingEndpointIdentity{{RequestID: "per_0123456789abcdef", EndpointID: "cli_new", Role: "cli", State: "pending", Generation: 1, NoisePublicKey: base64.RawURLEncoding.EncodeToString(noise[:]), QUICPublicKey: base64.RawURLEncoding.EncodeToString(quicPublic), CreatedAt: now.Add(-time.Minute), ExpiresAt: now.Add(4 * time.Minute), SafetyCode: code}}}
+	code := endpointSafetyCode("paperboat-cli-endpoint-v1", "cli_new", 1, quicPublic)
+	client := &approvalClient{root: api.E2EERoot{Version: 1, PublicKey: base64.RawURLEncoding.EncodeToString(rootPublic), Fingerprint: hex.EncodeToString(rootFingerprint[:]), Generation: 1}, pending: []api.PendingEndpointIdentity{{RequestID: "per_0123456789abcdef", EndpointID: "cli_new", Role: "cli", State: "pending", Generation: 1, QUICPublicKey: base64.RawURLEncoding.EncodeToString(quicPublic), CreatedAt: now.Add(-time.Minute), ExpiresAt: now.Add(4 * time.Minute), SafetyCode: code}}}
 	result, err := ApproveCLI(context.Background(), ApprovalRequest{Store: store, Client: client, Issuer: "https://api.example.test", AccountID: "account_1", CLIClientSessionID: "cli_existing", RequestID: "per_0123456789abcdef", SafetyCode: code, Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := base64.RawURLEncoding.DecodeString(client.registered.Certificate)
 	certificate, err := endpointidentity.Verify(raw, rootPublic, endpointidentity.Expected{AccountID: "account_1", Role: endpointidentity.RoleCLI, EndpointID: "cli_new", Generation: 1}, now)
-	if err != nil || client.registered.Role != "cli" || certificate.Claims.NoisePublicKey != noise || string(certificate.Claims.QUICPublicKey) != string(quicPublic) || result.CertificateFingerprint != client.registered.CertificateFingerprint {
+	if err != nil || client.registered.Role != "cli" || string(certificate.Claims.QUICPublicKey) != string(quicPublic) || result.CertificateFingerprint != client.registered.CertificateFingerprint {
 		t.Fatalf("certificate=%+v document=%+v result=%+v err=%v", certificate, client.registered, result, err)
 	}
 	if _, err := ApproveMachine(context.Background(), ApprovalRequest{Store: store, Client: client, Issuer: "https://api.example.test", AccountID: "account_1", CLIClientSessionID: "cli_existing", RequestID: "per_0123456789abcdef", SafetyCode: code, Now: func() time.Time { return now }}); err == nil {
@@ -111,12 +109,11 @@ func TestApproveMachineBackdatesCertificateForServerClockSkew(t *testing.T) {
 	rootPublic := append(ed25519.PublicKey(nil), keys.RootPrivate.Public().(ed25519.PublicKey)...)
 	rootFingerprint := sha256.Sum256(rootPublic)
 	clearKeys(&keys)
-	noise := sha256.Sum256([]byte("machine-noise-skew"))
 	quicPublic, _, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	code := machineSafetyCode("machine_skew", 2, noise, quicPublic)
+	code := endpointSafetyCode("paperboat-machine-endpoint-v1", "machine_skew", 2, quicPublic)
 	client := &approvalClient{
 		root: api.E2EERoot{
 			Version: 1, PublicKey: base64.RawURLEncoding.EncodeToString(rootPublic),
@@ -124,9 +121,8 @@ func TestApproveMachineBackdatesCertificateForServerClockSkew(t *testing.T) {
 		},
 		pending: []api.PendingEndpointIdentity{{
 			RequestID: "per_0123456789abcdef", EndpointID: "machine_skew", State: "pending", Generation: 2,
-			NoisePublicKey: base64.RawURLEncoding.EncodeToString(noise[:]),
-			QUICPublicKey:  base64.RawURLEncoding.EncodeToString(quicPublic),
-			CreatedAt:      serverNow.Add(-time.Minute), ExpiresAt: serverNow.Add(4 * time.Minute), SafetyCode: code,
+			QUICPublicKey: base64.RawURLEncoding.EncodeToString(quicPublic),
+			CreatedAt:     serverNow.Add(-time.Minute), ExpiresAt: serverNow.Add(4 * time.Minute), SafetyCode: code,
 		}},
 		register: func(document api.EndpointCertificateDocument) error {
 			raw, err := base64.RawURLEncoding.Strict().DecodeString(document.Certificate)
@@ -158,10 +154,9 @@ func TestApproveMachineBackdatesCertificateForServerClockSkew(t *testing.T) {
 	}
 }
 
-func machineSafetyCode(endpointID string, generation uint64, noise [32]byte, quic []byte) string {
-	buffer := append([]byte("paperboat-machine-endpoint-v1\x00"+endpointID+"\x00"), make([]byte, 8)...)
+func endpointSafetyCode(domain, endpointID string, generation uint64, quic []byte) string {
+	buffer := append([]byte(domain+"\x00"+endpointID+"\x00"), make([]byte, 8)...)
 	binary.BigEndian.PutUint64(buffer[len(buffer)-8:], generation)
-	buffer = append(buffer, noise[:]...)
 	buffer = append(buffer, quic...)
 	digest := blake2s.Sum256(buffer)
 	encoded := hex.EncodeToString(digest[:5])
@@ -179,10 +174,9 @@ func TestFreshSignerApprovesMachineWithoutAccountRoot(t *testing.T) {
 	rootPublic := keys.RootPrivate.Public().(ed25519.PublicKey)
 	rootFingerprint := sha256.Sum256(rootPublic)
 	clearKeys(&keys)
-	noise := sha256.Sum256([]byte("machine-noise"))
 	quicPublic, _, _ := ed25519.GenerateKey(nil)
-	code := machineSafetyCode("machine_1", 2, noise, quicPublic)
-	client := &approvalClient{root: api.E2EERoot{Version: 1, PublicKey: base64.RawURLEncoding.EncodeToString(rootPublic), Fingerprint: hex.EncodeToString(rootFingerprint[:]), Generation: 1}, pending: []api.PendingEndpointIdentity{{RequestID: "per_0123456789abcdef", EndpointID: "machine_1", State: "pending", Generation: 2, NoisePublicKey: base64.RawURLEncoding.EncodeToString(noise[:]), QUICPublicKey: base64.RawURLEncoding.EncodeToString(quicPublic), CreatedAt: now.Add(-time.Minute), ExpiresAt: now.Add(4 * time.Minute), SafetyCode: code}}}
+	code := endpointSafetyCode("paperboat-machine-endpoint-v1", "machine_1", 2, quicPublic)
+	client := &approvalClient{root: api.E2EERoot{Version: 1, PublicKey: base64.RawURLEncoding.EncodeToString(rootPublic), Fingerprint: hex.EncodeToString(rootFingerprint[:]), Generation: 1}, pending: []api.PendingEndpointIdentity{{RequestID: "per_0123456789abcdef", EndpointID: "machine_1", State: "pending", Generation: 2, QUICPublicKey: base64.RawURLEncoding.EncodeToString(quicPublic), CreatedAt: now.Add(-time.Minute), ExpiresAt: now.Add(4 * time.Minute), SafetyCode: code}}}
 	request := ApprovalRequest{Store: store, Client: client, Issuer: "https://api.example.test", AccountID: "account_1", CLIClientSessionID: "cli_1", RequestID: "per_0123456789abcdef", SafetyCode: code, Now: func() time.Time { return now }}
 	result, err := ApproveMachine(context.Background(), request)
 	if err != nil {
@@ -190,7 +184,7 @@ func TestFreshSignerApprovesMachineWithoutAccountRoot(t *testing.T) {
 	}
 	raw, _ := base64.RawURLEncoding.DecodeString(client.registered.Certificate)
 	certificate, err := endpointidentity.Verify(raw, rootPublic, endpointidentity.Expected{AccountID: "account_1", Role: endpointidentity.RoleMachine, EndpointID: "machine_1", Generation: 2}, now)
-	if err != nil || certificate.Claims.NoisePublicKey != noise || string(certificate.Claims.QUICPublicKey) != string(quicPublic) || result.CertificateFingerprint != client.registered.CertificateFingerprint {
+	if err != nil || string(certificate.Claims.QUICPublicKey) != string(quicPublic) || result.CertificateFingerprint != client.registered.CertificateFingerprint {
 		t.Fatalf("certificate=%+v result=%+v err=%v", certificate, result, err)
 	}
 	request.SafetyCode = "00000-00000"

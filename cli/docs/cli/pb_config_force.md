@@ -6,6 +6,10 @@ Force a scoped configuration direction
 
 Force a scoped configuration direction
 
+Force one pull or push direction for the named environment, optionally limited to a path. This bypasses the normal conflict choice for that scope; the confirmation code confirms the direction.
+
+Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
+
 JSON output is supported with --json.
 
 ```
@@ -15,9 +19,9 @@ pb config force <pull|push> <environment> [path] [flags]
 ### Options
 
 ```
-  -h, --help   help for force
-      --json   print JSON
-      --yes    confirm the force operation
+      --confirm string   six-character confirmation code from the preview
+  -h, --help             help for force
+      --json             print JSON
 ```
 
 ### Options inherited from parent commands

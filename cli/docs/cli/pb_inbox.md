@@ -6,6 +6,8 @@ Manage the Paperboat Inbox
 
 Manage the Paperboat Inbox
 
+Inspect or set the local receiving directory, the account's team request acceptance policy, and pending team file requests. Approve or decline an exact request by ID; outgoing transfers are sent and managed under pb send.
+
 With --json, this command group lists its available commands.
 
 ```

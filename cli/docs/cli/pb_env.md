@@ -6,6 +6,8 @@ Manage ENV Injection for connected hosts
 
 Manage ENV Injection for connected hosts
 
+Manage encrypted ENV values by personal, team, or host scope. Vault commands control key custody, while set and unset change exact values. Listing shows metadata without revealing a value.
+
 With --json, this command group lists its available commands.
 
 ```

@@ -162,6 +162,50 @@ func TestGenerationRegistryReadyThenAtomicDrainHandoff(t *testing.T) {
 	}
 }
 
+func TestGenerationRegistryPolicyFenceCancelsOnlyAffectedRoute(t *testing.T) {
+	registry := NewGenerationRegistry(8)
+	affected := matcherRule("affected", "private.example.test", MatchExact, "/", 1)
+	affected.RouteID, affected.AccountID, affected.TunnelID = "route_affected", "account_1", "tunnel_1"
+	unaffected := matcherRule("unaffected", "other.example.test", MatchExact, "/", 1)
+	unaffected.RouteID, unaffected.AccountID, unaffected.TunnelID = "route_other", "account_1", "tunnel_1"
+	activateMatcher(t, registry, 1, []RouteRule{affected, unaffected})
+	affectedLease, _, err := registry.Acquire(context.Background(), affected.Hostname, "/stream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unaffectedLease, _, err := registry.Acquire(context.Background(), unaffected.Hostname, "/stream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.StageGeneration(2, []RouteRule{unaffected}); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.MarkGenerationReady(2); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.ActivateGenerationFencedRoutes(context.Background(), 2, []RouteIdentity{{AccountID: "account_1", TunnelID: "tunnel_1", RouteID: "route_affected"}}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-affectedLease.Context().Done():
+	default:
+		t.Fatal("affected route lease remained active after policy fence")
+	}
+	select {
+	case <-unaffectedLease.Context().Done():
+		t.Fatal("unaffected route lease was canceled by policy fence")
+	default:
+	}
+	if _, err := registry.Match(affected.Hostname, "/new-request"); !errors.Is(err, ErrNoMatch) {
+		t.Fatalf("affected route still admits new requests: %v", err)
+	}
+	if match, err := registry.Match(unaffected.Hostname, "/new-request"); err != nil || match.Rule.RouteID != unaffected.RouteID {
+		t.Fatalf("unaffected route unavailable after fence: %+v, %v", match, err)
+	}
+	_ = affectedLease.Close()
+	_ = unaffectedLease.Close()
+}
+
 func TestGenerationRegistryDrainTimeoutAndFailedReadinessPreserveActive(t *testing.T) {
 	registry := NewGenerationRegistry(8)
 	activateMatcher(t, registry, 1, []RouteRule{matcherRule("old", "app.example.test", MatchExact, "/", 1)})

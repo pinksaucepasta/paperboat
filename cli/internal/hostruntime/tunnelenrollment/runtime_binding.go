@@ -42,6 +42,21 @@ func (d *assemblyDrainer) bind(assembly *tunnelmanager.ProductionAssembly) error
 	return nil
 }
 
+func (d *assemblyDrainer) unbind(assembly *tunnelmanager.ProductionAssembly) {
+	if d == nil || assembly == nil {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.assembly == assembly {
+		d.assembly = nil
+		d.active = nil
+		d.carrier = nil
+		d.generation = 0
+		d.hash = ""
+	}
+}
+
 func (d *assemblyDrainer) exactCarrierLocked() (tunnelmanager.Active, *connector.ActiveDataCarrier, error) {
 	if d.assembly == nil || d.assembly.Manager == nil || d.assembly.Manager.Manager == nil {
 		return nil, nil, ErrUnavailable

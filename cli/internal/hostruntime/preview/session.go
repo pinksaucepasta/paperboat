@@ -542,6 +542,12 @@ func (s *Session) runCarrierAttempt(ctx context.Context) error {
 	result := make(chan error, 1)
 	lease := s.currentLease()
 	go func() {
+		if current, ok := s.config.Carrier.(interface {
+			RunWithLease(context.Context, func() Lease, func(Lease) error) error
+		}); ok {
+			result <- current.RunWithLease(ctx, s.currentLease, s.markReady)
+			return
+		}
 		result <- s.config.Carrier.Run(ctx, lease, s.markReady)
 	}()
 	select {
@@ -749,6 +755,9 @@ func (s *Session) markReady(lease Lease) error {
 	}
 	if lease.ETag == "" {
 		lease.ETag = current.ETag
+	}
+	if lease.CreateOperationID == "" {
+		lease.CreateOperationID = current.CreateOperationID
 	}
 	lease.LazyLifecycle = current.LazyLifecycle
 	lease.Generation = leaseGenerationForID(lease.ID, lease.ETag)

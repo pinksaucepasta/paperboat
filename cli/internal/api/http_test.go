@@ -95,7 +95,7 @@ func TestTLSHandshakeRetryTransportRetriesGETHeaderTimeout(t *testing.T) {
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("ok")), Header: make(http.Header), Request: req}, nil
 		}),
 	}
-	req, err := http.NewRequest(http.MethodGet, "https://paperboat.example/v1/projects", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://paperboat.example/v1/machines", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

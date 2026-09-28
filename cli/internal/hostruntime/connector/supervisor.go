@@ -153,17 +153,6 @@ func (s *Supervisor) NetworkChangedEvent(change NetworkChange) {
 	}
 }
 
-// NetworkGeneration returns the newest network generation accepted by the
-// supervisor. It is useful for health and support projections.
-func (s *Supervisor) NetworkGeneration() uint64 {
-	if s == nil {
-		return 0
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.networkGeneration
-}
-
 // RoutesChanged requests a fresh connector admission because proxy ownership is
 // part of the handoff.
 func (s *Supervisor) RoutesChanged() {

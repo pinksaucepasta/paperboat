@@ -4,11 +4,10 @@ services:
     restart: unless-stopped
     read_only: true
     environment:
-      PAPERBOAT_CONTAINER_MODE: self-hosted
       PAPERBOAT_RELEASE_REPOSITORY: ${PAPERBOAT_RELEASE_REPOSITORY:?set the fixed HTTPS TUF repository}
       PAPERBOAT_MACHINE_ID: ${PAPERBOAT_MACHINE_ID:?set the enrolled machine ID}
       PAPERBOAT_CONTROL_URL: ${PAPERBOAT_CONTROL_URL:?set the HTTPS control-plane URL}
-      PAPERBOAT_ENROLLMENT_CREDENTIAL: ${PAPERBOAT_ENROLLMENT_CREDENTIAL:?set the one-time enrollment credential}
+      PAPERBOAT_ENROLLMENT_CREDENTIAL: ${PAPERBOAT_ENROLLMENT_CREDENTIAL:-}
       PAPERBOAT_WORKSPACE_ROOT: /workspace
     volumes:
       - paperboat-state:/var/lib/paperboat

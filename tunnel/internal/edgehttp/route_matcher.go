@@ -3,6 +3,7 @@ package edgehttp
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
 	"strings"
 	"time"
 
@@ -136,7 +137,7 @@ func (m *PreviewCarrierRouteMatcher) lookup(host, requestPath string) (DataCarri
 		return DataCarrierPreviewRoute{}, nil, false
 	}
 	preview, entryDone, ok := m.registry.acquire(host)
-	if !ok || preview.Server == nil || preview.Kind != dataCarrierPreviewRouteKind && preview.Kind != dataCarrierPreviewPrivateRouteKind || !preview.ExpiresAt.IsZero() && !preview.ExpiresAt.After(time.Now().UTC()) {
+	if !ok || preview.Server == nil || preview.Kind != dataCarrierPreviewRouteKind && preview.Kind != dataCarrierPreviewPrivateRouteKind && preview.Kind != datacarrier.RuntimeCarrierRoute || !preview.ExpiresAt.IsZero() && !preview.ExpiresAt.After(time.Now().UTC()) {
 		return DataCarrierPreviewRoute{}, nil, false
 	}
 	select {
@@ -156,7 +157,13 @@ func previewRouteMatch(preview DataCarrierPreviewRoute) route.RouteMatch {
 	if preview.Kind == dataCarrierPreviewPrivateRouteKind {
 		kind = route.Kind(dataCarrierPreviewPrivateRouteKind)
 	}
-	rule := route.RouteRule{ID: preview.RouteID, Revision: preview.Revision, Generation: generation, AssignmentGeneration: preview.LeaseGeneration, ResourceKind: "preview", SessionGeneration: preview.LeaseGeneration, Environment: preview.PreviewID, AccountID: preview.Identity.AccountID, HostID: preview.Identity.HostID, TunnelID: preview.PreviewID, ConnectorID: preview.Identity.ConnectorID, ConnectorSessionID: preview.Identity.SessionID, ConnectorProcessGeneration: preview.Identity.ProcessGeneration, ConfigGeneration: preview.Identity.Generation, Node: preview.EdgeNodeID, EdgeProcessEpoch: preview.EdgeProcessEpoch, Kind: kind, MatchType: route.MatchExact, Hostname: preview.Hostname, PathPrefix: "/", Target: preview.Endpoint, Protocol: "https", OriginScheme: "http", AccessMode: preview.AccessMode, PreserveHost: true, DesiredState: "active", ObservedState: "ready"}
+	rule := route.RouteRule{ID: preview.RouteID, RouteID: preview.RouteID, RouteGeneration: preview.Revision, Revision: preview.Revision, Generation: generation, AssignmentGeneration: preview.LeaseGeneration, ResourceKind: "preview", SessionGeneration: preview.LeaseGeneration, Environment: preview.PreviewID, AccountID: preview.Identity.AccountID, HostID: preview.Identity.HostID, TunnelID: preview.PreviewID, ConnectorID: preview.Identity.ConnectorID, ConnectorSessionID: preview.Identity.SessionID, ConnectorProcessGeneration: preview.Identity.ProcessGeneration, ConfigGeneration: preview.Identity.Generation, Node: preview.EdgeNodeID, EdgeProcessEpoch: preview.EdgeProcessEpoch, Kind: kind, MatchType: route.MatchExact, Hostname: preview.Hostname, PathPrefix: "/", Target: preview.Endpoint, Protocol: "https", OriginScheme: "http", AccessMode: preview.AccessMode, PreserveHost: true, DesiredState: "active", ObservedState: "ready"}
+	if preview.Kind == datacarrier.RuntimeCarrierRoute {
+		rule.Kind = route.Kind(datacarrier.RuntimeCarrierRoute)
+		rule.ResourceKind = "runtime"
+		rule.TunnelID = preview.Identity.TunnelID
+		rule.Target = ""
+	}
 	return route.RouteMatch{Rule: rule, Host: preview.Hostname, Path: "/", Generation: generation}
 }
 

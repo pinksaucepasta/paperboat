@@ -52,7 +52,7 @@ func StartCurrentUserService(ctx context.Context, executable string) error {
 		return err
 	}
 	if !state.Registered {
-		return errors.New("Paperboat local daemon service is not installed; run pb daemon service install")
+		return errors.New("Paperboat local daemon service is not installed; run pb service install")
 	}
 	return controller.Start(ctx, path)
 }

@@ -2,15 +2,18 @@
 .TH "PB-SEND" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-send - Send files to a machine's Paperboat Inbox
+pb-send - Send files to a device's Paperboat Inbox
 
 
 .SH SYNOPSIS
-\fBpb send \&... --to  [flags]\fP
+\fBpb send <path>\&... --to <device> [flags]\fP
 
 
 .SH DESCRIPTION
-Send files to a machine's Paperboat Inbox
+Send files to a device's Paperboat Inbox
+
+.PP
+Send one or more paths to the selected device's Inbox. The command succeeds only after receiver verification and a durable receipt; --session associates the transfer with a terminal session.
 
 .PP
 JSON output is supported with --json.
@@ -47,4 +50,4 @@ JSON output is supported with --json.
 
 
 .SH SEE ALSO
-\fBpb(1)\fP
+\fBpb(1)\fP, \fBpb-send-cancel(1)\fP, \fBpb-send-destination(1)\fP, \fBpb-send-list(1)\fP, \fBpb-send-status(1)\fP

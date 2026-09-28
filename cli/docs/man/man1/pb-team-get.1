@@ -2,15 +2,21 @@
 .TH "PB-TEAM-GET" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-team-get - Get teams
+pb-team-get - Show one team and its current generation
 
 
 .SH SYNOPSIS
-\fBpb team get  [flags]\fP
+\fBpb team get <team> [flags]\fP
 
 
 .SH DESCRIPTION
-Get teams
+Show one team and its current generation
+
+.PP
+Read one team's current membership, permissions, and generation. Use the returned generation for the next mutation to avoid overwriting a newer change.
+
+.PP
+Teams use explicit membership and resource grants. Membership alone does not grant device use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
 
 .PP
 JSON output is supported with --json.

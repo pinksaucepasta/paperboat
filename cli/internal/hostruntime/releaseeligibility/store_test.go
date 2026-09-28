@@ -26,7 +26,7 @@ func testDeferral(t *testing.T) releasepolicy.Deferral {
 }
 
 func TestFileStoreRoundTripIsBoundedAndPrivate(t *testing.T) {
-	directory := t.TempDir()
+	directory := privateStoreTestDirectory(t)
 	store, err := NewFileStore(filepath.Join(directory, "deferral.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +56,7 @@ func TestFileStoreRoundTripIsBoundedAndPrivate(t *testing.T) {
 }
 
 func TestFileStoreRejectsMalformedDuplicateTrailingAndOversized(t *testing.T) {
-	directory := t.TempDir()
+	directory := privateStoreTestDirectory(t)
 	store, err := NewFileStore(filepath.Join(directory, "deferral.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +92,7 @@ func TestFileStoreRejectsMalformedDuplicateTrailingAndOversized(t *testing.T) {
 }
 
 func TestFileStoreRejectsSymlinkAndCanceledOperations(t *testing.T) {
-	directory := t.TempDir()
+	directory := privateStoreTestDirectory(t)
 	store, err := NewFileStore(filepath.Join(directory, "deferral.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -125,4 +125,13 @@ func TestFileStoreRejectsUnsafePaths(t *testing.T) {
 
 func bytesOfSize(size int64) []byte {
 	return make([]byte, int(size))
+}
+
+func privateStoreTestDirectory(t *testing.T) string {
+	t.Helper()
+	directory := t.TempDir()
+	if err := os.Chmod(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return directory
 }

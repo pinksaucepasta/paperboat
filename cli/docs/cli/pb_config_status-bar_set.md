@@ -6,6 +6,10 @@ Set a status-bar preference
 
 Set a status-bar preference
 
+Set one status-bar preference by key and value. Preview the result before using it in a full-screen terminal application.
+
+The status bar is rendered by the interactive terminal client. Preferences affect local presentation and do not change remote sessions. Use preview to inspect the result before relying on a theme or width setting.
+
 JSON output is supported with --json.
 
 ```

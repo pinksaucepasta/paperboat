@@ -215,7 +215,7 @@ type sliceLauncher struct {
 }
 
 func (l sliceLauncher) Launch(ctx context.Context, request process.LaunchRequest) (session.Snapshot, error) {
-	return l.sessions.Create(ctx, session.CreateRequest{ID: request.ID, Name: request.Name, Command: pty.Command{Path: l.shell, Args: []string{"-c", "printf ready; read first; printf 'paperboat:%s\\n' \"$first\"; read second; printf 'resumed:%s\\n' \"$second\"; exit 7"}, Env: []string{"HOME=" + l.root, "PATH=/usr/bin:/bin", "TERM=xterm"}, CWD: request.CWD, Dimensions: request.Dimensions}})
+	return l.sessions.Create(ctx, session.CreateRequest{ID: request.ID, Name: request.Name, Command: pty.Command{Path: l.shell, Args: []string{"-c", "printf ready; read first; printf 'paperboat:%s\\n' \"$first\"; read second; printf 'resumed:%s\\n' \"$second\"; read third; exit 7"}, Env: []string{"HOME=" + l.root, "PATH=/usr/bin:/bin", "TERM=xterm"}, CWD: request.CWD, Dimensions: request.Dimensions}})
 }
 
 func TestRealTerminalAndFileProtocolsOverNativeTailnet(t *testing.T) {
@@ -387,6 +387,9 @@ func runRealTerminalAndFileProtocols(t *testing.T, clientOwner, serverOwner *nat
 	defer resumedConn.Close()
 	if got := readTerminalUntil(t, resumedConn, "resumed:again"); !strings.Contains(got, "resumed:again") {
 		t.Fatalf("resumed attachment replay=%q", got)
+	}
+	if _, err := resumedConn.Write([]byte("exit\n")); err != nil {
+		t.Fatal(err)
 	}
 	for label, connection := range map[string]tunnel.Conn{"resumed": resumedConn, "second": secondConn} {
 		if code, waitErr := connection.Wait(); waitErr != nil || code != 7 {

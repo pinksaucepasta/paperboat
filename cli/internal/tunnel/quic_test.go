@@ -7,8 +7,6 @@ import (
 	"io"
 	"slices"
 	"testing"
-
-	"github.com/pinksaucepasta/paperboat/internal/resolver"
 )
 
 func TestNativeAndHelperHandshakesOfferManagedSSH(t *testing.T) {
@@ -85,19 +83,5 @@ func TestNativeRecordIsPresentedToWriterAsOneCompleteBuffer(t *testing.T) {
 	}
 	if len(writer.sizes) != 1 || writer.sizes[0] != 5+len("payload") {
 		t.Fatalf("write sizes = %v", writer.sizes)
-	}
-}
-
-func TestNativeEndpointRequiresExplicitQUICAndBearer(t *testing.T) {
-	target := &resolver.TerminalTarget{QUICEndpoint: "quic://edge.example.test:443", Auth: resolver.AuthTarget{Method: "bearer", Token: "token"}}
-	address, name, err := nativeEndpoint(target)
-	if err != nil || address != "edge.example.test:443" || name != "edge.example.test" {
-		t.Fatalf("address=%q name=%q err=%v", address, name, err)
-	}
-	for _, endpoint := range []string{"https://edge.example.test", "quic://edge.example.test/path", "quic://user@edge.example.test"} {
-		target.QUICEndpoint = endpoint
-		if _, _, err := nativeEndpoint(target); err == nil {
-			t.Fatalf("accepted %q", endpoint)
-		}
 	}
 }

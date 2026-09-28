@@ -2,15 +2,21 @@
 .TH "PB-TEAM-ROLE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-team-role - Role team membership
+pb-team-role - Change a team member's role
 
 
 .SH SYNOPSIS
-\fBpb team role    [flags]\fP
+\fBpb team role <team> <account> <admin|member> [flags]\fP
 
 
 .SH DESCRIPTION
-Role team membership
+Change a team member's role
+
+.PP
+Set one member's role to admin or member at the expected generation. This changes team management authority, not the member's explicit resource grants.
+
+.PP
+Teams use explicit membership and resource grants. Membership alone does not grant device use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
 
 .PP
 JSON output is supported with --json.

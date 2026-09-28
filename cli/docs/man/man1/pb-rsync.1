@@ -6,11 +6,14 @@ pb-rsync - Run rsync with Paperboat machine resolution
 
 
 .SH SYNOPSIS
-\fBpb rsync  [flags]\fP
+\fBpb rsync <standard rsync arguments...> [flags]\fP
 
 
 .SH DESCRIPTION
 Run rsync with Paperboat machine resolution
+
+.PP
+Run standard rsync arguments with Paperboat device-name resolution and authorized connectivity. File selection, deletion flags, and exit behavior remain rsync's responsibility; inspect its command line before synchronizing.
 
 .PP
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.

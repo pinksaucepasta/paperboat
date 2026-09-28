@@ -6,6 +6,10 @@ Show authoritative DNS instructions for a tunnel domain
 
 Show authoritative DNS instructions for a tunnel domain
 
+Show the authoritative DNS records required for one tunnel domain. Apply them at the domain's DNS provider before running verify.
+
+Custom domains require DNS ownership verification before they can serve a route. Domain changes are scoped to one tunnel, and verification status is separate from route readiness. The instructions command returns the required authoritative DNS records.
+
 JSON output is supported with --json.
 
 ```

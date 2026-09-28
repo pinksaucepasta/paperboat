@@ -34,6 +34,24 @@ func (s ProfileStore) RequireEnvironmentSecureStore() error {
 	return nil
 }
 
+// LockEnvironmentMutations serializes password-vault publications across CLI
+// processes for one account. The caller releases the returned lock once.
+func (s ProfileStore) LockEnvironmentMutations(issuer, accountID, subjectID string) (func() error, error) {
+	if s.Path == "" || !validCredentialID(accountID) || !validCredentialID(subjectID) {
+		return nil, ErrCredentialStoreUnavailable
+	}
+	issuer, err := NormalizeIssuer(issuer)
+	if err != nil {
+		return nil, err
+	}
+	digest := sha256.Sum256([]byte(issuer + "\x00" + accountID + "\x00" + subjectID + "\x00environment-mutations"))
+	lock := newSharedLock(s.profilePath(issuer) + ".environment-mutations-" + hex.EncodeToString(digest[:8]) + ".lock")
+	if err := lock.Lock(); err != nil {
+		return nil, fmt.Errorf("lock ENV mutations: %w", err)
+	}
+	return lock.Unlock, nil
+}
+
 // LockEnvironmentHostKey serializes creation and genesis-marker transitions
 // for one host installation across CLI and host-runtime processes. The key
 // itself remains in the platform credential store; this lock is only a

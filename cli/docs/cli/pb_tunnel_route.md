@@ -6,6 +6,10 @@ Manage tunnel routes
 
 Manage tunnel routes
 
+List, add, update, or remove exact routes for a durable tunnel. Each route binds protocol, match, and origin settings under the tunnel's authorization boundary.
+
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+
 With --json, this command group lists its available commands.
 
 ### Options

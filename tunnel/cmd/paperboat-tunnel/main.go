@@ -64,6 +64,7 @@ func execute(reporter *reporting.Reporter, args []string) (code int) {
 	if err := run(args, reporter); err != nil {
 		var failure serviceFailure
 		if errors.As(err, &failure) {
+			fmt.Fprintln(os.Stderr, serviceDiagnostic(failure.error))
 			reference := reportUnexpected(reporter, "service_run")
 			reporter.Observe(context.Background(), "service_lifecycle", "failed", "internal", reference, time.Since(started))
 		} else {
@@ -296,6 +297,20 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if err != nil {
 		return nil, err
 	}
+	runtimeExpected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: cfg.NodeID, ProcessEpoch: processEpoch, MaximumAdmissions: 4096})
+	if err != nil {
+		return nil, err
+	}
+	runtimeRoutes, err := edgehttp.NewDataCarrierPreviewRegistry(edgehttp.DataCarrierPreviewRegistryConfig{BaseDomain: deployment.RuntimeBaseDomain, ProcessEpoch: processEpoch, MaximumRoutes: 4096})
+	if err != nil {
+		return nil, err
+	}
+	browserTerminalHub := edgehttp.NewBrowserTerminalHub()
+	runtimeWorker := &edgeruntime.RuntimeCarrierWorker{Source: client, Expected: runtimeExpected, Routes: runtimeRoutes, BrowserTerminalHub: browserTerminalHub, Interval: deployment.ControlInterval, Timeout: deployment.ControlTimeout}
+	runtimeTransport, err := edgehttp.NewDataCarrierPreviewTransport(edgehttp.DataCarrierPreviewTransportConfig{Registry: runtimeRoutes, StreamOpenTimeout: deployment.ControlTimeout})
+	if err != nil {
+		return nil, err
+	}
 	accessorAdmissions, err := datacarrier.NewDurableAdmissionRegistry(datacarrier.DurableAdmissionRegistryConfig{NodeID: cfg.NodeID, ProcessEpoch: processEpoch, MaximumAdmissions: 4096})
 	if err != nil {
 		return nil, err
@@ -368,7 +383,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if err != nil {
 		return nil, fmt.Errorf("create preview carrier transport: %w", err)
 	}
-	routeMatcher := edgehttp.NewCompositeRouteMatcher(canonicalRoutes, routes, edgehttp.NewPreviewCarrierRouteMatcher(previewRoutes))
+	routeMatcher := edgehttp.NewCompositeRouteMatcher(canonicalRoutes, routes, edgehttp.NewPreviewCarrierRouteMatcher(previewRoutes), edgehttp.NewPreviewCarrierRouteMatcher(runtimeRoutes))
 	durableTransport, err := edgehttp.NewDataCarrierRouteTransport(edgehttp.DataCarrierRouteTransportConfig{Registry: durableRoutes, StreamOpenTimeout: deployment.ControlTimeout})
 	if err != nil {
 		return nil, fmt.Errorf("create durable carrier transport: %w", err)
@@ -440,7 +455,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		browserAccess = &edgehttp.BrowserAccess{Authority: &control.BrowserAccessClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, LoginOrigin: deployment.BrowserLoginOrigin}
 	}
 	inspectorAccess := &edgehttp.InspectorEdgeAccess{Authority: &control.InspectorAccessClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, Carriers: durableRoutes, PreviewCarriers: previewRoutes}
-	gateway, err := edgehttp.NewGatewayWithTransports(edgehttp.Config{BrowserAccess: browserAccess, InspectorAccess: inspectorAccess, PreviewBaseDomain: deployment.PreviewBaseDomain, TunnelBaseDomain: deployment.TunnelBaseDomain, RuntimeBaseDomain: deployment.RuntimeBaseDomain, TrustedProxies: trusted, MaxHeaderBytes: deployment.MaxHeaderBytes, MaxBodyBytes: deployment.MaxBodyBytes, Routes: routeMatcher, PrivateAccessToken: internalToken, PrivateAccessConnections: privateConnections, Readiness: previewReadiness{Canonical: previewRoutes, Fallback: routes}, HelperAccess: verifier, Revocations: trust.Snapshot, RevocationCheckInterval: deployment.ControlInterval}, "", previewForwarder, durableForwarder)
+	gateway, err := edgehttp.NewGatewayWithTransports(edgehttp.Config{RuntimeCarrierTransport: runtimeTransport, BrowserTerminalHub: browserTerminalHub, BrowserTerminalEdgeHost: deployment.ConnectorAdvertiseHost, BrowserAccess: browserAccess, BrowserTerminal: &control.BrowserTerminalClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, InspectorAccess: inspectorAccess, PreviewBaseDomain: deployment.PreviewBaseDomain, TunnelBaseDomain: deployment.TunnelBaseDomain, RuntimeBaseDomain: deployment.RuntimeBaseDomain, TrustedProxies: trusted, MaxHeaderBytes: deployment.MaxHeaderBytes, MaxBodyBytes: deployment.MaxBodyBytes, Routes: routeMatcher, PrivateAccessToken: internalToken, PrivateAccessConnections: privateConnections, Readiness: previewReadiness{Canonical: previewRoutes, Fallback: routes}, HelperAccess: verifier, Revocations: trust.Snapshot, RevocationCheckInterval: deployment.ControlInterval}, "", previewForwarder, durableForwarder)
 	if err != nil {
 		return nil, fmt.Errorf("create edge gateway: %w", err)
 	}
@@ -475,7 +490,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	carrierComponent := carrier
 	var carrierCleanup func() error
 	if carrierComponent == nil {
-		carrierComponent, carrierCleanup, err = newCarrierComponentWithTelemetry(deployment, carrierTrust.Certificate, expectedAdmissions, durableAdmissions, accessorAdmissions, previewHandler.Handle, durableRoutes, privateAccessBridge, carrierTelemetry)
+		carrierComponent, carrierCleanup, err = newCarrierComponentWithTelemetry(deployment, carrierTrust.Certificate, expectedAdmissions, durableAdmissions, accessorAdmissions, previewHandler.Handle, durableRoutes, privateAccessBridge, carrierTelemetry, runtimeWorker)
 		if err != nil {
 			return nil, err
 		}
@@ -494,7 +509,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		return nil, err
 	}
 	gatewayHandler = installationChallenge(cfg.NodeID, deployment.ConnectorAdvertiseHost, credential, gatewayHandler)
-	assembly, err := edgeruntime.NewAssembly(edgeruntime.AssemblySpec{Persistence: persistence, Control: controlDependency, Carrier: carrierComponent, Certificates: certificateWorker, Preview: previewWorker, Node: nodeWorker, Routes: routeWorker, PublicTCP: publicTCP, Usage: usageWorker, GatewayAddress: deployment.PublicHTTPSListenAddress, GatewayHandler: gatewayHandler, GatewayTLS: publicTLS, GatewayWrapListener: func(listener net.Listener) (net.Listener, error) {
+	assembly, err := edgeruntime.NewAssembly(edgeruntime.AssemblySpec{Persistence: persistence, Control: controlDependency, Carrier: carrierComponent, Certificates: certificateWorker, Runtime: runtimeWorker, Preview: previewWorker, Node: nodeWorker, Routes: routeWorker, PublicTCP: publicTCP, Usage: usageWorker, GatewayAddress: deployment.PublicHTTPSListenAddress, GatewayHandler: gatewayHandler, GatewayTLS: publicTLS, GatewayWrapListener: func(listener net.Listener) (net.Listener, error) {
 		return publicTCP.WrapTLSListener(listener, func(host string) bool {
 			if host == deployment.ConnectorAdvertiseHost {
 				return true

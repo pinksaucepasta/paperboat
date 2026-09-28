@@ -68,6 +68,26 @@ func resumeOneShotEnrollment(ctx context.Context, input oneShotResumeInput, oper
 	}
 	now := operations.Now().UTC()
 	resume, resumeErr := input.Resume, input.ResumeErr
+	if errors.Is(resumeErr, bootstrap.ErrResumeTokenChanged) {
+		if resume.AuthenticatedSetup || resume.Material != nil || resume.ClientInstalled || resume.RuntimeEnrolled || resume.RuntimeReady {
+			return bootstrap.Material{}, resume, bootstrap.ErrResumeBinding
+		}
+		if resume.PairingStarted {
+			oldConfig := input.Config
+			oldConfig.ServerURL, oldConfig.Alias, oldConfig.Verifier = resume.ServerURL, resume.Alias, resume.Verifier
+			oldConfig.EnrollmentToken = ""
+			_, err := operations.RecoverMaterial(ctx, oldConfig, false)
+			if !errors.Is(err, bootstrap.ErrPairingExpired) && !errors.Is(err, bootstrap.ErrPairingDenied) {
+				// Pending, recoverable, and ambiguous server responses all retain
+				// the old verifier so an installed device cannot be replaced.
+				return bootstrap.Material{}, resume, bootstrap.ErrResumeBinding
+			}
+		}
+		if err := operations.ClearResume(input.StateRoot); err != nil {
+			return bootstrap.Material{}, resume, fmt.Errorf("clear finished machine enrollment state: %w", err)
+		}
+		resume, resumeErr = bootstrap.ResumeRecord{}, bootstrap.ErrResumeNotFound
+	}
 	resumeExpired := errors.Is(resumeErr, bootstrap.ErrResumeExpired)
 	if resumeExpired {
 		if !resume.PairingStarted {

@@ -2,15 +2,21 @@
 .TH "PB-TEAM-DELETE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-team-delete - Delete team membership
+pb-team-delete - Delete a team
 
 
 .SH SYNOPSIS
-\fBpb team delete  [flags]\fP
+\fBpb team delete <team> [flags]\fP
 
 
 .SH DESCRIPTION
-Delete team membership
+Delete a team
+
+.PP
+Delete a team after exact confirmation and a matching generation. This affects team ownership and grants; inspect attached resources and enrolled team devices first.
+
+.PP
+Teams use explicit membership and resource grants. Membership alone does not grant device use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
 
 .PP
 JSON output is supported with --json.

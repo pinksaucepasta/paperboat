@@ -6,6 +6,10 @@ Show terminal sharing and connected participants
 
 Show terminal sharing and connected participants
 
+Show current participants and sharing grants for one session. Use this to review access before removing a teammate or ending sharing.
+
+Terminal sessions persist independently of a single connection and can be reattached after a disconnect. Sharing grants explicit access to a named session. Closing, deleting, and removing a participant have different effects; inspect the selected session before acting.
+
 JSON output is supported with --json.
 
 ```

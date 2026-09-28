@@ -2,15 +2,21 @@
 .TH "PB-TEAM-TRANSFER" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-team-transfer - Transfer team membership
+pb-team-transfer - Transfer team ownership
 
 
 .SH SYNOPSIS
-\fBpb team transfer   [flags]\fP
+\fBpb team transfer <team> <account> [flags]\fP
 
 
 .SH DESCRIPTION
-Transfer team membership
+Transfer team ownership
+
+.PP
+Transfer team ownership to the named account at the expected generation. Review the target account and current team state before changing owner authority.
+
+.PP
+Teams use explicit membership and resource grants. Membership alone does not grant device use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
 
 .PP
 JSON output is supported with --json.

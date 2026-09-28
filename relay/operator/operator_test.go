@@ -199,7 +199,7 @@ func TestUsageRotationSurvivesRepeatedSetupWithMatchingKeyID(t *testing.T) {
 }
 
 func TestValidateCapacityMatchesRuntimeCeilings(t *testing.T) {
-	relay := Setup{ControlURL: "https://control.example.test", Name: "relay", Capability: "relay", EndpointHost: "relay.example.test", TCPPort: 443, QUICPort: 443, Region: "eu", FailureDomain: "eu-1", CapacityLimit: 257}
+	relay := Setup{ControlURL: "https://control.example.test", Name: "relay", Capability: "relay", EndpointHost: "relay.example.test", TCPPort: 443, QUICPort: 444, Region: "eu", FailureDomain: "eu-1", CapacityLimit: 257}
 	if _, err := validate(relay); err == nil || !strings.Contains(err.Error(), "must not exceed 256") {
 		t.Fatalf("relay capacity mismatch accepted: %v", err)
 	}
@@ -215,6 +215,13 @@ func TestValidateCapacityMatchesRuntimeCeilings(t *testing.T) {
 	tunnel.CapacityLimit = 10001
 	if _, err := validate(tunnel); err == nil || !strings.Contains(err.Error(), "must not exceed 10000") {
 		t.Fatalf("unbounded tunnel capacity accepted: %v", err)
+	}
+}
+
+func TestRelaySetupRequiresSeparateSTUNAndQUICPorts(t *testing.T) {
+	relay := Setup{ControlURL: "https://control.example.test", Name: "relay", Capability: "relay", EndpointHost: "relay.example.test", TCPPort: 443, QUICPort: 443, Region: "eu", FailureDomain: "eu-1", CapacityLimit: 10}
+	if _, err := validate(relay); err == nil || !strings.Contains(err.Error(), "ports must be distinct") {
+		t.Fatalf("relay accepted conflicting UDP listeners: %v", err)
 	}
 }
 
@@ -271,7 +278,7 @@ func TestRegisterPreservesInsecureIdentity(t *testing.T) {
 	if err := os.Chmod(path, 0644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Register(context.Background(), dir, Setup{ControlURL: server.URL, Name: "relay", Capability: "relay", EndpointHost: "127.0.0.1", TCPPort: 443, QUICPort: 443, Region: "eu", FailureDomain: "eu-1", CapacityLimit: 10, TLSCert: cert, TLSKey: key}, server.Client())
+	_, err := Register(context.Background(), dir, Setup{ControlURL: server.URL, Name: "relay", Capability: "relay", EndpointHost: "127.0.0.1", TCPPort: 443, QUICPort: 444, Region: "eu", FailureDomain: "eu-1", CapacityLimit: 10, TLSCert: cert, TLSKey: key}, server.Client())
 	if err == nil {
 		t.Fatal("insecure identity accepted")
 	}

@@ -6,17 +6,27 @@ pb-tunnel-delete - Delete endpoints and routes and revoke connectors while prese
 
 
 .SH SYNOPSIS
-\fBpb tunnel delete  [flags]\fP
+\fBpb tunnel delete <tunnel> [flags]\fP
 
 
 .SH DESCRIPTION
 Delete endpoints and routes and revoke connectors while preserving user DNS records
 
 .PP
+Delete one durable tunnel's endpoints and routes and revoke its connectors, while preserving user-managed DNS records. the confirmation code confirms removal; inspect the tunnel and domains first.
+
+.PP
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+
+.PP
 JSON output is supported with --json.
 
 
 .SH OPTIONS
+\fB--confirm\fP=""
+	six-character confirmation code from the preview
+
+.PP
 \fB-h\fP, \fB--help\fP[=false]
 	help for delete
 
@@ -31,10 +41,6 @@ JSON output is supported with --json.
 .PP
 \fB--wait\fP[=false]
 	wait for the operation to reach a terminal state
-
-.PP
-\fB--yes\fP[=false]
-	confirm endpoint, route, domain-binding, and connector-credential removal
 
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS

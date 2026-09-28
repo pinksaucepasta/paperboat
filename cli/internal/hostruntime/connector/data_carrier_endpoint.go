@@ -210,42 +210,6 @@ func dialQUIC(ctx context.Context, endpoint DataCarrierEndpointConfig) (DataCarr
 	return newQUICDataCarrierSession(connection), identity, nil
 }
 
-// NewTCPMuxDialer adapts DialTCPMux to the pool's slot/attempt-bound dialer.
-func NewTCPMuxDialer(endpoint DataCarrierEndpointConfig) DataCarrierDialer {
-	return func(ctx context.Context, request DataCarrierDialRequest) (DataCarrierDialResult, error) {
-		if request.Transport != TCPMux {
-			return DataCarrierDialResult{}, &TransportDialError{Transport: request.Transport, Err: ErrInvalidDataCarrierEndpoint, Fallback: false}
-		}
-		link, peerIdentity, err := dialTCPMux(ctx, endpoint)
-		if err != nil {
-			return DataCarrierDialResult{}, newTransportDialError(TCPMux, err)
-		}
-		if request.Identity != (DataCarrierIdentity{}) && peerIdentity != request.Identity {
-			_ = link.Close()
-			return DataCarrierDialResult{}, &TransportDialError{Transport: TCPMux, Err: ErrDataCarrierAdmission, Fallback: false}
-		}
-		return DataCarrierDialResult{Link: link, PeerIdentity: peerIdentity, Transport: request.Transport, EdgeID: request.EdgeID, FailureDomain: request.FailureDomain}, nil
-	}
-}
-
-// NewQUICDialer adapts DialQUIC to the pool's slot/attempt-bound dialer.
-func NewQUICDialer(endpoint DataCarrierEndpointConfig) DataCarrierDialer {
-	return func(ctx context.Context, request DataCarrierDialRequest) (DataCarrierDialResult, error) {
-		if request.Transport != QUIC {
-			return DataCarrierDialResult{}, &TransportDialError{Transport: request.Transport, Err: ErrInvalidDataCarrierEndpoint, Fallback: false}
-		}
-		session, peerIdentity, err := dialQUIC(ctx, endpoint)
-		if err != nil {
-			return DataCarrierDialResult{}, newTransportDialError(QUIC, err)
-		}
-		if request.Identity != (DataCarrierIdentity{}) && peerIdentity != request.Identity {
-			_ = session.Close()
-			return DataCarrierDialResult{}, &TransportDialError{Transport: QUIC, Err: ErrDataCarrierAdmission, Fallback: true}
-		}
-		return DataCarrierDialResult{Session: session, PeerIdentity: peerIdentity, Transport: request.Transport, EdgeID: request.EdgeID, FailureDomain: request.FailureDomain}, nil
-	}
-}
-
 // NetworkDialerConfig configures the two supported pool transports.
 //
 // NewNetworkDialer routes the two supported pool transports to their real

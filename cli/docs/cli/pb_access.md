@@ -6,6 +6,8 @@ Open authenticated private access
 
 Open authenticated private access
 
+Choose device access for an enrolled device service or tunnel access for an existing private tunnel route. Each child command opens a local listener and keeps the forwarding process alive until it exits.
+
 With --json, this command group lists its available commands.
 
 ### Options

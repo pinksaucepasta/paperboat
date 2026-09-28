@@ -6,6 +6,8 @@ Assign tags to a device over gRPC IPC
 
 Assign tags to a device over gRPC IPC
 
+Assign the supplied tags to an exact device ID through the local daemon. Tags aid device discovery and resolution; they do not grant access by themselves.
+
 JSON output is supported with --json.
 
 ```

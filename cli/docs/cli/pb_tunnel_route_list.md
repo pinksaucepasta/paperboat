@@ -6,6 +6,10 @@ List tunnel routes
 
 List tunnel routes
 
+List routes and their identifiers for one durable tunnel with pagination. Inspect the exact route before updating or removing it.
+
+Routes map a public or private match to a specific origin and protocol. TLS and host-header options affect the trust boundary and should match the origin. Adding or updating a route may return an operation whose readiness must be checked separately.
+
 JSON output is supported with --json.
 
 ```

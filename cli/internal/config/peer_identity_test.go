@@ -46,10 +46,10 @@ func TestPeerIdentityKeysCreateAndReplaySeparateRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(first.RootPrivate) != ed25519.PrivateKeySize || len(first.QUICPrivate) != ed25519.PrivateKeySize || first.NoisePrivate == [32]byte{} || first.NoisePublic == [32]byte{} || !bytes.Equal(first.RootPrivate, second.RootPrivate) || first.NoisePrivate != second.NoisePrivate || !bytes.Equal(first.QUICPrivate, second.QUICPrivate) {
+	if len(first.RootPrivate) != ed25519.PrivateKeySize || len(first.QUICPrivate) != ed25519.PrivateKeySize || !bytes.Equal(first.RootPrivate, second.RootPrivate) || !bytes.Equal(first.QUICPrivate, second.QUICPrivate) {
 		t.Fatalf("identity replay mismatch")
 	}
-	if len(secrets.values) != 3 {
+	if len(secrets.values) != 2 {
 		t.Fatalf("stored records=%d", len(secrets.values))
 	}
 	for _, value := range secrets.values {
@@ -59,25 +59,25 @@ func TestPeerIdentityKeysCreateAndReplaySeparateRecords(t *testing.T) {
 	}
 }
 
-func TestPeerIdentityKeysRejectsPartialEndpointCustody(t *testing.T) {
+func TestPeerIdentityKeysRejectsInvalidEndpointCustody(t *testing.T) {
 	root := t.TempDir()
 	secrets := &peerTestSecretStore{values: map[string]string{}}
 	store := ProfileStore{Path: root, Secrets: secrets}
 	issuer, _ := NormalizeIssuer("https://api.example.test")
-	if err := storePeerKey(secrets, peerIdentitySecretRef(issuer, "cli_1", "endpoint-noise"), "endpoint_noise_x25519", bytes.Repeat([]byte{1}, 32)); err != nil {
+	if err := secrets.Set(peerIdentitySecretRef(issuer, "cli_1", "endpoint-quic"), "invalid"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.PeerIdentityKeys(issuer, "account_1", "cli_1"); err == nil {
-		t.Fatal("partial endpoint identity accepted")
+		t.Fatal("invalid endpoint identity accepted")
 	}
 }
 
 func TestPeerIdentityKeysRollsBackFailedCreation(t *testing.T) {
 	root := t.TempDir()
-	secrets := &peerTestSecretStore{values: map[string]string{}, failSetAt: 3}
+	secrets := &peerTestSecretStore{values: map[string]string{}, failSetAt: 2}
 	store := ProfileStore{Path: root, Secrets: secrets}
 	identity, err := store.PeerIdentityKeys("https://api.example.test", "account_1", "cli_1")
-	if err == nil || identity.RootPrivate != nil || identity.QUICPrivate != nil || identity.NoisePrivate != [32]byte{} || len(secrets.values) != 0 {
+	if err == nil || identity.RootPrivate != nil || identity.QUICPrivate != nil || len(secrets.values) != 0 {
 		t.Fatalf("identity=%+v values=%d err=%v", identity, len(secrets.values), err)
 	}
 }
@@ -144,7 +144,7 @@ func TestFreshPeerIdentityKeysUsesEndpointScopedSignerAndReplays(t *testing.T) {
 	if bytes.Equal(first.RootPrivate, oldRoot) {
 		t.Fatal("fresh endpoint reused account-scoped signing key")
 	}
-	if !bytes.Equal(first.RootPrivate, second.RootPrivate) || first.NoisePrivate != second.NoisePrivate || !bytes.Equal(first.QUICPrivate, second.QUICPrivate) {
+	if !bytes.Equal(first.RootPrivate, second.RootPrivate) || !bytes.Equal(first.QUICPrivate, second.QUICPrivate) {
 		t.Fatal("same fresh endpoint did not replay its durable identity")
 	}
 
@@ -173,6 +173,33 @@ func TestFreshPeerIdentityKeysRejectsPartialIdentity(t *testing.T) {
 	}
 	if _, err := store.FreshPeerIdentityKeys(issuer, "account_1", "cli_fresh"); err == nil {
 		t.Fatal("partial fresh endpoint identity accepted")
+	}
+}
+
+func TestDeviceSignerDoesNotReplaceENVRootVerifier(t *testing.T) {
+	store := ProfileStore{Path: t.TempDir(), Secrets: &peerTestSecretStore{values: map[string]string{}}}
+	issuer, accountID := "https://api.example.test", "account_1"
+	envPublic, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	devicePublic, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePeerAccountRootPublic(issuer, accountID, envPublic); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePeerDeviceSigningPublic(issuer, accountID, devicePublic); err != nil {
+		t.Fatal(err)
+	}
+	gotENV, err := store.LoadPeerAccountRootPublic(issuer, accountID)
+	if err != nil || !bytes.Equal(gotENV, envPublic) {
+		t.Fatalf("ENV verifier changed: %v", err)
+	}
+	gotDevice, err := store.LoadPeerDeviceSigningPublic(issuer, accountID)
+	if err != nil || !bytes.Equal(gotDevice, devicePublic) {
+		t.Fatalf("device verifier changed: %v", err)
 	}
 }
 
@@ -227,7 +254,7 @@ func TestProfileRemovalErasesPeerIdentityCustody(t *testing.T) {
 	if _, err := store.Remove(issuer); err != nil {
 		t.Fatal(err)
 	}
-	for _, ref := range []string{peerIdentitySecretRef(issuer, "account_1", "account-root"), peerIdentitySecretRef(issuer, "cli_1", "endpoint-noise"), peerIdentitySecretRef(issuer, "cli_1", "endpoint-quic"), peerIdentitySecretRef(issuer, "cli_1", "endpoint-signing"), peerIdentitySecretRef(issuer, "cli_1", "endpoint-certificate")} {
+	for _, ref := range []string{peerIdentitySecretRef(issuer, "account_1", "account-root"), peerIdentitySecretRef(issuer, "cli_1", "endpoint-quic"), peerIdentitySecretRef(issuer, "cli_1", "endpoint-signing"), peerIdentitySecretRef(issuer, "cli_1", "endpoint-certificate")} {
 		if _, err := secrets.Get(ref); !errors.Is(err, ErrSecretNotFound) {
 			t.Fatalf("secret %s remains: %v", ref, err)
 		}

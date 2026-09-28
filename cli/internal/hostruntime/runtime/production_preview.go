@@ -206,17 +206,16 @@ type previewPrivateAccessLifecycle interface {
 	Start(context.Context) error
 }
 
-// Windows installs the stable host runtime in a service-owned process. Its
-// private-preview PAC belongs to the interactive user's registry and can be
-// unavailable while that service is starting. Keep the machine preview,
-// owner-session, and durable tunnel runtimes alive when only this optional
-// user-scoped integration cannot start.
+// The private-preview PAC belongs to an interactive desktop session. A
+// headless Linux host cannot install one, but it can still serve public
+// previews. Windows also starts hostd separately from the interactive user.
+// Keep the machine preview and owner-session runtimes alive in those cases.
 func startPreviewPrivateAccess(ctx context.Context, service previewPrivateAccessLifecycle, isolateFailure bool) error {
 	if service == nil || ctx == nil {
 		return ErrProductionInvalid
 	}
 	err := service.Start(ctx)
-	if isolateFailure {
+	if isolateFailure || errors.Is(err, privateproxyconfig.ErrUnsupported) {
 		return nil
 	}
 	return err

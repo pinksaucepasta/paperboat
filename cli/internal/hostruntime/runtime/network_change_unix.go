@@ -4,53 +4,15 @@ package runtime
 
 import (
 	"context"
-	"net"
-	"net/netip"
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/networkadaptation"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/networkmonitor"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/portmapping"
 )
 
 type networkObserver interface {
 	Start() error
 	Close() error
-}
-
-func (s *networkChangeService) ConfigurePortMapping(verifier portmapping.SocketVerifier) error {
-	monitor, ok := s.observer.(*networkmonitor.Monitor)
-	if !ok || verifier == nil {
-		return ErrProductionInvalid
-	}
-	_, err := monitor.NewPortMappingManager(networkmonitor.PortMappingConfig{SocketVerifier: verifier, ProbeTimeout: 500 * time.Millisecond, CreateTimeout: 3 * time.Second, EnableUPnP: true})
-	return err
-}
-
-func (s *networkChangeService) AcquireSocketMapping(ctx context.Context, generation uint64, localPort uint16, connection net.PacketConn, stunURLs []string) (portmapping.VerifiedMapping, netip.Addr, error) {
-	monitor, ok := s.observer.(*networkmonitor.Monitor)
-	if !ok {
-		return portmapping.VerifiedMapping{}, netip.Addr{}, ErrProductionInvalid
-	}
-	return monitor.AcquireSocketMapping(ctx, generation, localPort, connection, stunURLs)
-}
-
-func (s *networkChangeService) WarmSocketMapping(ctx context.Context, generation uint64, stunURL string) error {
-	monitor, ok := s.observer.(*networkmonitor.Monitor)
-	if !ok {
-		return ErrProductionInvalid
-	}
-	return monitor.WarmSocketMapping(ctx, generation, stunURL)
-}
-
-func (s *networkChangeService) Generation() uint64 {
-	monitor, ok := s.observer.(*networkmonitor.Monitor)
-	if !ok {
-		return 0
-	}
-	return monitor.Generation()
 }
 
 type networkChangeService struct {
@@ -60,28 +22,7 @@ type networkChangeService struct {
 	closed   bool
 }
 
-type connectorNetworkRecovery interface{ NetworkChanged() }
-type connectorNetworkEventRecovery interface{ NetworkChangedEvent(connector.NetworkChange) }
-type directNetworkRecovery interface{ NetworkChanged(uint64) bool }
 type canonicalNetworkRecovery interface{ HandleNetworkEvent(networkmonitor.Event) }
-
-type directNetworkProxy struct {
-	mu     sync.RWMutex
-	target directNetworkRecovery
-}
-
-func (p *directNetworkProxy) Set(target directNetworkRecovery) {
-	p.mu.Lock()
-	p.target = target
-	p.mu.Unlock()
-}
-
-func (p *directNetworkProxy) NetworkChanged(generation uint64) bool {
-	p.mu.RLock()
-	target := p.target
-	p.mu.RUnlock()
-	return target != nil && target.NetworkChanged(generation)
-}
 
 type networkMetricRecorder interface {
 	Record(string, float64, map[string]string) error
@@ -89,13 +30,8 @@ type networkMetricRecorder interface {
 
 type networkChangeHandler struct {
 	connector canonicalNetworkRecovery
-	direct    directNetworkRecovery
 	metrics   networkMetricRecorder
-	changed   func()
-	legacy    connectorNetworkRecovery
 }
-
-func (h *networkChangeHandler) SetObserver(observer func()) { h.changed = observer }
 
 // SetCanonical attaches the durable connector-v1 recovery path after the
 // tunnel assembly is constructed. Production uses only this canonical path.
@@ -105,11 +41,11 @@ func (h *networkChangeHandler) SetCanonical(recovery canonicalNetworkRecovery) {
 	}
 }
 
-func newNetworkChangeHandler(connector connectorNetworkRecovery, direct directNetworkRecovery, metrics networkMetricRecorder) (*networkChangeHandler, error) {
+func newNetworkChangeHandler(metrics networkMetricRecorder) (*networkChangeHandler, error) {
 	if metrics == nil {
 		return nil, ErrProductionInvalid
 	}
-	return &networkChangeHandler{legacy: connector, direct: direct, metrics: metrics}, nil
+	return &networkChangeHandler{metrics: metrics}, nil
 }
 
 func (h *networkChangeHandler) Handle(event networkmonitor.Event) {
@@ -117,30 +53,8 @@ func (h *networkChangeHandler) Handle(event networkmonitor.Event) {
 		return
 	}
 	h.record(event)
-	if h.changed != nil {
-		h.changed()
-	}
 	if h.connector != nil {
 		h.connector.HandleNetworkEvent(event)
-	}
-	if !event.Rebind {
-		return
-	}
-	// Fence and retire the socket-bound direct attempt before requesting a
-	// replacement connector admission for the new network.
-	if h.direct != nil {
-		h.direct.NetworkChanged(event.Generation)
-	}
-	// Canonical connector-v1 recovery owns carrier replacement. Do not also
-	// wake the legacy Supervisor, which would stage a second independent
-	// carrier for the same network event.
-	if h.connector != nil || h.legacy == nil {
-		return
-	}
-	if detailed, ok := h.legacy.(connectorNetworkEventRecovery); ok {
-		detailed.NetworkChangedEvent(connector.NetworkChange{Generation: event.Generation, Reasons: connector.NetworkReason(event.Reasons), Rebind: event.Rebind, Viable: event.Viable})
-	} else {
-		h.legacy.NetworkChanged()
 	}
 }
 
@@ -197,19 +111,6 @@ func newFingerprintingNetworkChangeService(secret []byte, changed func(networkmo
 		return nil, err
 	}
 	return &networkChangeService{observer: observer}, nil
-}
-
-func (s *networkChangeService) CurrentFingerprint() (networkadaptation.Fingerprint, error) {
-	if s == nil || s.observer == nil {
-		return networkadaptation.Fingerprint{}, ErrProductionInvalid
-	}
-	source, ok := s.observer.(interface {
-		CurrentFingerprint() (networkadaptation.Fingerprint, error)
-	})
-	if !ok {
-		return networkadaptation.Fingerprint{}, ErrProductionInvalid
-	}
-	return source.CurrentFingerprint()
 }
 
 func (s *networkChangeService) Start(context.Context) error {

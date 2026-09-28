@@ -6,6 +6,10 @@ Pause new traffic while preserving tunnel identity and configuration
 
 Pause new traffic while preserving tunnel identity and configuration
 
+Pause new traffic for one durable tunnel while retaining its identity, routes, domains, and connector configuration. --wait observes the resulting state.
+
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+
 JSON output is supported with --json.
 
 ```

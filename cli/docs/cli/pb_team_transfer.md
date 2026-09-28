@@ -1,10 +1,14 @@
 ## pb team transfer
 
-Transfer team membership
+Transfer team ownership
 
 ### Synopsis
 
-Transfer team membership
+Transfer team ownership
+
+Transfer team ownership to the named account at the expected generation. Review the target account and current team state before changing owner authority.
+
+Teams use explicit membership and resource grants. Membership alone does not grant device use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
 
 JSON output is supported with --json.
 

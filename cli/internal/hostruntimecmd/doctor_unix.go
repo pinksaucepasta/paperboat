@@ -22,6 +22,7 @@ import (
 	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostservice"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
 )
 
 type doctorCheck struct {
@@ -139,14 +140,14 @@ func collectDoctor(ctx context.Context, stateRoot string) doctorReport {
 
 	host, err := hostDiagnostics(ctx)
 	if err != nil {
-		add("availability", "error", "The privileged host service is unavailable.", "Inspect the Paperboat host service logs; pb unpair restores original power settings.")
+		add("availability", "error", "The privileged host service is unavailable.", "Inspect and recover the Paperboat host service; then set device availability to allow-sleep if needed.")
 	} else {
 		report.Availability = &host
 		state := "ready"
 		if host.Status == "error" || host.ErrorCode != "" {
 			state = "error"
 		}
-		add("availability", state, fmt.Sprintf("Desired %s version %d; observed %s version %d (%s).", host.DesiredMode, host.DesiredVersion, host.ObservedMode, host.ObservedVersion, host.Status), "Run pb unpair to restore the original local power configuration.")
+		add("availability", state, fmt.Sprintf("Desired %s version %d; observed %s version %d (%s).", host.DesiredMode, host.DesiredVersion, host.ObservedMode, host.ObservedVersion, host.Status), "Run `pb device availability <device> --mode allow-sleep` and wait for it to apply.")
 	}
 	return report
 }
@@ -238,7 +239,7 @@ func workerListenAddress(stateRoot string) string {
 	if decodeStrictFile(filepath.Join(stateRoot, "runtime", "worker-local.json"), 4096, &local) == nil && local.Schema == "paperboat.worker-local/v1" && strings.HasPrefix(local.ListenAddress, "127.0.0.1:") {
 		return local.ListenAddress
 	}
-	return "127.0.0.1:8080"
+	return runtimeport.Primary
 }
 
 func decodeStrictFile(path string, limit int64, target any) error {

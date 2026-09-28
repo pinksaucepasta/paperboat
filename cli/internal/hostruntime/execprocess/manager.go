@@ -81,7 +81,7 @@ type Event struct {
 type Config struct {
 	WorkspaceRoot      string
 	BaseEnvironment    []string
-	ManagedEnvironment func() ([]string, error)
+	ManagedEnvironment func(context.Context) ([]string, error)
 	MaximumActive      int
 	MaximumOperations  int
 	ReplayBytes        int
@@ -531,7 +531,7 @@ func (e *Execution) run(parent context.Context) {
 	}
 	baseEnvironment := e.manager.config.BaseEnvironment
 	if provider := e.manager.config.ManagedEnvironment; provider != nil {
-		managed, environmentErr := provider()
+		managed, environmentErr := provider(ctx)
 		if environmentErr != nil || !validBaseEnvironment(managed) {
 			e.finish(StateFailed, Result{ExitedAt: e.manager.config.Clock()}, "environment_unavailable")
 			return

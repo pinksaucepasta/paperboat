@@ -47,6 +47,9 @@ type fileTransferPolicy struct {
 	MaxPendingSpoolBytes   int64  `json:"max_pending_spool_bytes"`
 }
 type claims struct {
+	BrowserAttachmentID    string              `json:"browser_attachment_id,omitempty"`
+	BrowserPublicKeySHA256 string              `json:"browser_public_key_sha256,omitempty"`
+	PolicyGeneration       int64               `json:"policy_generation,omitempty"`
 	Issuer                 string              `json:"iss"`
 	Audience               string              `json:"aud"`
 	Subject                string              `json:"sub"`
@@ -120,6 +123,14 @@ func (v *Verifier) VerifyHelperAccess(ctx context.Context, token string) (admiss
 	}
 	var wantScopes []string
 	switch parsed.CredentialClass {
+	case "browser_terminal_operation":
+		if exactScopes(parsed.Scope, []string{"terminal:view"}) {
+			wantScopes = []string{"terminal:view"}
+		} else if exactScopes(parsed.Scope, []string{"terminal:control"}) {
+			wantScopes = []string{"terminal:control"}
+		} else {
+			wantScopes = []string{"terminal:operate"}
+		}
 	case "terminal_operation":
 		wantScopes = []string{"terminal:operate"}
 	case "file_transfer":
@@ -138,7 +149,13 @@ func (v *Verifier) VerifyHelperAccess(ctx context.Context, token string) (admiss
 	// from a browser or a CLI request, so it binds the authenticated user and
 	// operation but deliberately has no CLI client-session claim. Interactive
 	// terminal, transfer, and Codex credentials remain client-session bound.
-	requiresClientSession := parsed.CredentialClass != "preview_launch"
+	requiresClientSession := parsed.CredentialClass != "preview_launch" && parsed.CredentialClass != "browser_terminal_operation"
+	if parsed.CredentialClass == "browser_terminal_operation" {
+		digest, e := base64.RawURLEncoding.Strict().DecodeString(parsed.BrowserPublicKeySHA256)
+		if e != nil || len(digest) != 32 || parsed.BrowserAttachmentID == "" || parsed.SessionID == "" || parsed.ExpectedGeneration < 1 || parsed.PolicyGeneration < 1 || parsed.CLIClientSessionID != "" || parsed.SourceMachineID != "" || parsed.AccountID != parsed.UserID || parsed.Subject != parsed.UserID {
+			return admission.Claims{}, invalid()
+		}
+	}
 	if parsed.Issuer != v.Issuer || parsed.Audience != "paperboat-machine" || parsed.Subject == "" || parsed.JTI == "" || !exactScopes(parsed.Scope, wantScopes) || parsed.EnvironmentID == "" || parsed.MachineID == "" || parsed.CredentialClass == "file_transfer" && parsed.SourceMachineID == "" || parsed.CredentialClass == "terminal_operation" && parsed.SessionID == "" || codexCredential && (parsed.SessionID == "" || parsed.InstallationGeneration < 1 || parsed.ConnectorID == "" || parsed.ConnectorGeneration < 1 || parsed.EdgePool == "" || parsed.EdgeNodeID == "") || parsed.UserID == "" || requiresClientSession && parsed.CLIClientSessionID == "" || parsed.Expires <= parsed.IssuedAt || parsed.Expires-parsed.IssuedAt > 300 || time.Unix(parsed.IssuedAt, 0).After(now.Add(v.ClockSkew)) || !time.Unix(parsed.Expires, 0).After(now) {
 		return admission.Claims{}, invalid()
 	}

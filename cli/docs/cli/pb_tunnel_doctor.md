@@ -6,6 +6,10 @@ Diagnose tunnel health
 
 Diagnose tunnel health
 
+Diagnose placement, connector, edge, and origin health for one tunnel. --bundle can prepare bounded supporting diagnostics, and --write-bundle selects a local output file.
+
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+
 JSON output is supported with --json.
 
 ```

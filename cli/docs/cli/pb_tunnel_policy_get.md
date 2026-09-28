@@ -6,6 +6,10 @@ Show an on-demand port policy
 
 Show an on-demand port policy
 
+Show one on-demand port policy, including its target and authorization state. Use its identity and generation for a deliberate revoke.
+
+An on-demand policy authorizes an exact machine port for private or team access. A policy does not publish a public URL or grant every port on the device. Revocation fences subsequent activation.
+
 JSON output is supported with --json.
 
 ```

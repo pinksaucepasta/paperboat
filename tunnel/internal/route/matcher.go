@@ -75,6 +75,7 @@ type RouteRule struct {
 	ConnectorProcessGeneration uint64
 	ConfigGeneration           uint64
 	ConfigContentHash          string
+	ViewerPolicyGeneration     uint64
 	Node                       string
 	EdgeProcessEpoch           string
 	EdgeFailureDomain          string
@@ -102,6 +103,14 @@ type RouteMatch struct {
 	Host       string
 	Path       string
 	Generation uint64
+}
+
+// RouteIdentity scopes a policy fence to one server-owned route, even when
+// another account or tunnel uses the same human-readable route identifier.
+type RouteIdentity struct {
+	AccountID string
+	TunnelID  string
+	RouteID   string
 }
 
 // StreamLease fences a request to the generation that admitted it. Closing a
@@ -132,7 +141,7 @@ func (l *StreamLease) Close() error {
 			l.cancel()
 		}
 		if l.registry != nil && l.state != nil {
-			l.registry.release(l.state)
+			l.registry.release(l.state, l)
 		}
 		close(l.done)
 	})
@@ -147,13 +156,14 @@ type generationState struct {
 	ready      bool
 	accepting  bool
 	streams    int
+	leases     map[*StreamLease]struct{}
 	drained    chan struct{}
 	drainOnce  sync.Once
 }
 
 func newGenerationState(generation uint64, rules []RouteRule) *generationState {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &generationState{generation: generation, rules: rules, ctx: ctx, cancel: cancel, drained: make(chan struct{})}
+	return &generationState{generation: generation, rules: rules, ctx: ctx, cancel: cancel, drained: make(chan struct{}), leases: make(map[*StreamLease]struct{})}
 }
 
 func (s *generationState) markDrained() {
@@ -443,6 +453,84 @@ func (g *GenerationRegistry) ActivateGeneration(ctx context.Context, generation 
 	}
 }
 
+// ActivateGenerationFencedRoutes swaps the matcher generation, rejects all
+// new leases from the old generation, and cancels only leases belonging to
+// the specified routes. Existing streams on unaffected routes remain live.
+func (g *GenerationRegistry) ActivateGenerationFencedRoutes(ctx context.Context, generation uint64, identities []RouteIdentity) error {
+	if g == nil {
+		return ErrGenerationClosed
+	}
+	if len(identities) == 0 {
+		return ErrInvalid
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	g.mu.Lock()
+	if g.closed {
+		g.mu.Unlock()
+		return ErrGenerationClosed
+	}
+	if g.active != nil && g.active.generation == generation && g.pending == nil {
+		g.mu.Unlock()
+		return nil
+	}
+	if g.pending == nil || g.pending.generation != generation || !g.pending.ready {
+		g.mu.Unlock()
+		return ErrGenerationNotReady
+	}
+	if g.active != nil && generation <= g.active.generation {
+		g.mu.Unlock()
+		return ErrGenerationStale
+	}
+	old := g.active
+	next := g.pending
+	next.accepting = true
+	g.active = next
+	g.pending = nil
+	var previousGeneration uint64
+	var oldStreams int
+	var fenced []*StreamLease
+	if old != nil {
+		old.accepting = false
+		previousGeneration = old.generation
+		oldStreams = old.streams
+		for lease := range old.leases {
+			for _, identity := range identities {
+				if matchesRouteIdentity(lease.match.Rule, identity) {
+					fenced = append(fenced, lease)
+					break
+				}
+			}
+		}
+	}
+	g.mu.Unlock()
+	g.emitLifecycle(LifecycleActivated, generation, previousGeneration, next.rules, next.streams)
+	if old == nil {
+		return nil
+	}
+	g.emitLifecycle(LifecycleDrainStarted, old.generation, generation, old.rules, oldStreams)
+	for _, lease := range fenced {
+		_ = lease.Close()
+	}
+	if g.streamCount(old) == 0 {
+		old.markDrained()
+		g.emitLifecycle(LifecycleDrainCompleted, old.generation, generation, nil, 0)
+	}
+	return nil
+}
+
+func matchesRouteIdentity(rule RouteRule, identity RouteIdentity) bool {
+	routeID := rule.RouteID
+	if routeID == "" {
+		routeID = rule.ID
+	}
+	return identity.RouteID != "" && routeID == identity.RouteID && rule.AccountID == identity.AccountID && rule.TunnelID == identity.TunnelID
+}
+
 // ApplyGeneration is the safe high-level handoff. The callback must confirm
 // actual edge/origin readiness; nil is rejected to prevent fake activation.
 func (g *GenerationRegistry) ApplyGeneration(ctx context.Context, generation uint64, rules []RouteRule, ready func(context.Context, []RouteRule) error, drainTimeout time.Duration) error {
@@ -538,12 +626,13 @@ func (g *GenerationRegistry) Acquire(ctx context.Context, host, requestPath stri
 		g.emitLifecycle(LifecycleStreamOverloaded, generation, 0, rulesForTelemetryRule(rules, rule), activeStreams)
 		return nil, RouteMatch{}, ErrStreamOverloaded
 	}
+	streamCtx, cancel := context.WithCancel(ctx)
+	lease := &StreamLease{ctx: streamCtx, cancel: cancel, registry: g, state: active, match: RouteMatch{Rule: rule, Host: host, Path: requestPath, Generation: active.generation}, done: make(chan struct{})}
 	active.streams++
+	active.leases[lease] = struct{}{}
 	activeStreams := active.streams
 	generation := active.generation
 	g.mu.Unlock()
-	streamCtx, cancel := context.WithCancel(ctx)
-	lease := &StreamLease{ctx: streamCtx, cancel: cancel, registry: g, state: active, match: RouteMatch{Rule: rule, Host: host, Path: requestPath, Generation: active.generation}, done: make(chan struct{})}
 	g.emitLifecycle(LifecycleStreamAcquired, generation, 0, []RouteRule{rule}, activeStreams)
 	go func() {
 		select {
@@ -556,8 +645,9 @@ func (g *GenerationRegistry) Acquire(ctx context.Context, host, requestPath stri
 	return lease, lease.match, nil
 }
 
-func (g *GenerationRegistry) release(state *generationState) {
+func (g *GenerationRegistry) release(state *generationState, lease *StreamLease) {
 	g.mu.Lock()
+	delete(state.leases, lease)
 	if state.streams > 0 {
 		state.streams--
 	}

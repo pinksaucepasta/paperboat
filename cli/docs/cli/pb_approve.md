@@ -6,6 +6,8 @@ Approve or revoke a peer device over gRPC IPC
 
 Approve or revoke a peer device over gRPC IPC
 
+Approve an exact peer device ID for local access, or use --revoke to withdraw that approval. This changes the local daemon's device trust decision; inspect the ID before approving an unfamiliar peer.
+
 JSON output is supported with --json.
 
 ```

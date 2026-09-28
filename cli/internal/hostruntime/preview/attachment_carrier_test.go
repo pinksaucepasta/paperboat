@@ -5,9 +5,49 @@ import (
 	"errors"
 	"io"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestAttachmentCarrierMovesStillConnectedPreviewOnPlacementChange(t *testing.T) {
+	now := time.Now().UTC()
+	identity := testPreviewCarrierIdentity(1)
+	lease, attachment := providerTestLeaseAttachment(t, now, "preview_move", "operation_move_01", "route_move_01", identity, 1)
+	var calls atomic.Int32
+	allocator := attachmentAllocatorFunc(func(context.Context, AttachmentRequest) (Attachment, error) {
+		if calls.Add(1) >= 2 {
+			moved := attachment
+			moved.Binding.EdgeNodeID = "edge_other"
+			moved.AttachmentGeneration++
+			return moved, nil
+		}
+		return attachment, nil
+	})
+	var stopped atomic.Bool
+	provider := &carrierProviderFunc{newCarrier: func() Carrier {
+		return &sessionCarrier{run: func(ctx context.Context, observed Lease, ready func(Lease) error) error {
+			if err := ready(observed); err != nil {
+				return err
+			}
+			<-ctx.Done()
+			stopped.Store(true)
+			return ctx.Err()
+		}}
+	}}
+	carrier, err := NewAttachmentCarrier(AttachmentCarrierConfig{
+		Attachments: allocator, Provider: provider, PlacementPollInterval: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	err = carrier.RunWithLease(ctx, func() Lease { return lease }, func(Lease) error { return nil })
+	if !errors.Is(err, ErrAttachmentPlacementChanged) || !stopped.Load() || ctx.Err() != nil {
+		t.Fatalf("placement move err=%v stopped=%v context=%v", err, stopped.Load(), ctx.Err())
+	}
+}
 
 func TestAttachmentCarrierRetainsOperationRequestAcrossRetry(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

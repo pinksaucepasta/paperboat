@@ -305,7 +305,17 @@ func summarizeRuns(transport string, values []result) aggregate {
 func deletePBSession(pb, target, session string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_ = exec.CommandContext(ctx, pb, "session", "delete", target, session, "--yes").Run()
+	preview, err := exec.CommandContext(ctx, pb, "session", "delete", target, session, "--json").Output()
+	var confirmation struct {
+		Data struct {
+			Token string `json:"confirmation_token"`
+		} `json:"data"`
+	}
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 2 || json.Unmarshal(preview, &confirmation) != nil || confirmation.Data.Token == "" {
+		return
+	}
+	_ = exec.CommandContext(ctx, pb, "session", "delete", target, session, "--confirm", confirmation.Data.Token, "--json").Run()
 }
 
 func sleep(ctx context.Context, duration time.Duration) error {

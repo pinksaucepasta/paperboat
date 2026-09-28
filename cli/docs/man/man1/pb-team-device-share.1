@@ -1,0 +1,52 @@
+.nh
+.TH "PB-TEAM-DEVICE-SHARE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-device-share - Share your personal device with a team; grants are separate
+
+
+.SH SYNOPSIS
+\fBpb team device share <team> <device-id> [flags]\fP
+
+
+.SH DESCRIPTION
+Share your personal device with a team; grants are separate
+
+.PP
+Share a personal device with one team while keeping personal ownership. Members need explicit capability grants before they can use it.
+
+.PP
+A personal device can be shared with a team while ownership stays personal, or explicitly transferred to team ownership. Sharing and capability grants are separate decisions. Removing a team-owned device revokes its enrollment; unsharing a personal device withdraws that team's access.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--generation\fP=0
+	expected current team generation
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for share
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-team-device(1)\fP

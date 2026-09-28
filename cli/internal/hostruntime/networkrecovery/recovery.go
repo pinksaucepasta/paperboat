@@ -196,13 +196,6 @@ func (f Failure) Unwrap() error { return f.Cause }
 func (f Failure) FailureClass() FailureClass { return f.Class }
 func (f Failure) PermanentFailure() bool     { return f.Permanent }
 
-func NewFailure(class FailureClass, permanent bool, cause error) error {
-	if class == "" {
-		class = FailureUnknown
-	}
-	return Failure{Class: class, Permanent: permanent, Cause: cause}
-}
-
 type failureMarker interface {
 	FailureClass() FailureClass
 	PermanentFailure() bool

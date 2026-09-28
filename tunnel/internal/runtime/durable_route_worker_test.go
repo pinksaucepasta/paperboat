@@ -424,7 +424,7 @@ func durableWorkerAssignment(publicKey, thumbprint, routeID, assignmentID string
 		RouteID: routeID, Revision: 1, Environment: "env_1", AccountID: "account_1", HostID: "host_1",
 		MachineIdentityPublicKey: publicKey, MachineIdentityThumbprint: thumbprint, TunnelID: "tunnel_1", ConnectorID: "connector_1",
 		Generation: 1, ConnectorSessionID: "session_1", ConnectorProcessGeneration: 1, ConfigGeneration: 1,
-		ConfigContentHash: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", AssignmentID: assignmentID,
+		ConfigContentHash: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", ViewerPolicyGeneration: 1, AssignmentID: assignmentID,
 		AssignmentGeneration: 1, EdgeFailureDomain: "zone_1", EdgeProcessEpoch: "edge_epoch_1", NodeID: "edge_1", Kind: string(kind),
 		PublicHost: "app.example.test", MatchType: route.MatchExact, MatchHostname: "app.example.test", PathPrefix: "/", Protocol: "https", AccessMode: "public", State: "active",
 	}
@@ -512,6 +512,15 @@ func TestCanonicalAssignmentRejectsUnsafeDomainBindings(t *testing.T) {
 	}
 }
 
+func TestCanonicalAssignmentRequiresViewerPolicyGeneration(t *testing.T) {
+	publicKey, thumbprint := durableWorkerIdentity(t)
+	assignment := durableWorkerAssignment(publicKey, thumbprint, "route_http", "assignment_http", route.TunnelHTTPSWSS)
+	assignment.ViewerPolicyGeneration = 0
+	if err := validateCanonicalAssignment(assignment, assignment.NodeID, assignment.EdgeProcessEpoch); !errors.Is(err, route.ErrInvalid) {
+		t.Fatalf("missing viewer policy generation error = %v, want ErrInvalid", err)
+	}
+}
+
 func TestCanonicalRouteHashIncludesDomainBindingsButNotTheirOrder(t *testing.T) {
 	assignment := durableWorkerAssignment("key", "thumbprint", "route_http", "assignment_http", route.TunnelHTTPSWSS)
 	assignment.DomainBindings = []control.DomainBinding{
@@ -526,6 +535,11 @@ func TestCanonicalRouteHashIncludesDomainBindingsButNotTheirOrder(t *testing.T) 
 	assignment.DomainBindings[0].Generation++
 	if got := canonicalRouteHash([]control.RouteAssignment{assignment}); got == first {
 		t.Fatal("domain generation change did not change canonical hash")
+	}
+	assignment.DomainBindings[0].Generation--
+	assignment.ViewerPolicyGeneration++
+	if got := canonicalRouteHash([]control.RouteAssignment{assignment}); got == first {
+		t.Fatal("viewer policy generation change did not change canonical hash")
 	}
 }
 

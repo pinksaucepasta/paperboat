@@ -6,11 +6,14 @@ pb-tag - Assign tags to a device over gRPC IPC
 
 
 .SH SYNOPSIS
-\fBpb tag   [tag2...] [flags]\fP
+\fBpb tag <device-id> <tag1> [tag2...] [flags]\fP
 
 
 .SH DESCRIPTION
 Assign tags to a device over gRPC IPC
+
+.PP
+Assign the supplied tags to an exact device ID through the local daemon. Tags aid device discovery and resolution; they do not grant access by themselves.
 
 .PP
 JSON output is supported with --json.

@@ -98,6 +98,19 @@ func (d *connectedDeviceAccess) control(r *http.Request, identity clientauthorit
 	case "/v1/e2ee/root":
 		k := identity.TrustedKeys[0]
 		data = api.E2EERoot{Version: 1, TrustedKeys: []api.E2EEKey{{KeyID: k.KeyID, PublicKey: base64.RawURLEncoding.EncodeToString(k.PublicKey), Fingerprint: hex.EncodeToString(k.Fingerprint[:]), Generation: 1}}}
+	case "/v1/e2ee/bootstrap":
+		var input api.E2EEBootstrapInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			return nil, err
+		}
+		if r.Header.Get("X-Paperboat-Fresh-Enrollment") != "1" || input.RootPublicKey != base64.RawURLEncoding.EncodeToString(identity.RootPublic) || input.Certificate.Certificate != base64.RawURLEncoding.EncodeToString(identity.LocalCertificateRaw) {
+			return nil, fmt.Errorf("invalid connected device enrollment request: fresh=%t root=%t certificate=%t", r.Header.Get("X-Paperboat-Fresh-Enrollment") == "1", input.RootPublicKey == base64.RawURLEncoding.EncodeToString(identity.RootPublic), input.Certificate.Certificate == base64.RawURLEncoding.EncodeToString(identity.LocalCertificateRaw))
+		}
+		k := identity.TrustedKeys[0]
+		data = api.E2EEBootstrapResult{KeyID: k.KeyID, TrustedKeys: []api.E2EEKey{{KeyID: k.KeyID, PublicKey: base64.RawURLEncoding.EncodeToString(k.PublicKey), Fingerprint: hex.EncodeToString(k.Fingerprint[:]), Generation: 1}}, Certificate: input.Certificate}
+	case "/v1/peer-keys":
+		k := identity.TrustedKeys[0]
+		data = api.PeerTransportKeySet{Version: 1, TrustedKeys: []api.E2EEKey{{KeyID: k.KeyID, PublicKey: base64.RawURLEncoding.EncodeToString(k.PublicKey), Fingerprint: hex.EncodeToString(k.Fingerprint[:]), Generation: 1}}}
 	case "/v1/endpoints/machine_connected/certificates/1":
 		c := identity.MachineCertificate
 		fp := c.Fingerprint()

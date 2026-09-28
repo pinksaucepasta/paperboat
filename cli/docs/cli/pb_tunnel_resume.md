@@ -6,6 +6,10 @@ Resume new traffic for a preserved tunnel
 
 Resume new traffic for a preserved tunnel
 
+Resume new traffic for a paused durable tunnel without creating a new identity. --wait observes readiness; connector and origin failures may still need repair.
+
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+
 JSON output is supported with --json.
 
 ```

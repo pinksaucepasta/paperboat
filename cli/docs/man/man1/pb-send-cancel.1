@@ -1,0 +1,56 @@
+.nh
+.TH "PB-SEND-CANCEL" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-send-cancel - Cancel a file transfer batch
+
+
+.SH SYNOPSIS
+\fBpb send cancel <transfer-id> [flags]\fP
+
+
+.SH DESCRIPTION
+Cancel a file transfer batch
+
+.PP
+Cancel an outgoing transfer by its exact transfer ID, optionally selecting a device with --on. Cancellation reports the resulting batch state; already delivered files are not silently deleted.
+
+.PP
+Send publishes a batch to a device's Paperboat Inbox. Completion means the receiver verified and recorded the files; status and cancel act on a transfer ID. A default destination can be set separately, while --to chooses one for the current send.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for cancel
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--on\fP=""
+	destination machine name or ID
+
+.PP
+\fB--session\fP=""
+	terminal session ID for destination context
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+
+.SH SEE ALSO
+\fBpb-send(1)\fP

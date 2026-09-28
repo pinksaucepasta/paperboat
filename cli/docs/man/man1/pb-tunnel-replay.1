@@ -6,11 +6,17 @@ pb-tunnel-replay - Deliberately replay one retained HTTP request to the same ori
 
 
 .SH SYNOPSIS
-\fBpb tunnel replay   [flags]\fP
+\fBpb tunnel replay <tunnel> <capture-id> [flags]\fP
 
 
 .SH DESCRIPTION
 Deliberately replay one retained HTTP request to the same origin
+
+.PP
+Replay one retained HTTP request to the same tunnel origin and route. This can repeat a side effect; use the capture identity and optional idempotency key deliberately.
+
+.PP
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
 
 .PP
 JSON output is supported with --json.

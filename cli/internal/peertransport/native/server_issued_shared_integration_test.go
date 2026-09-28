@@ -29,7 +29,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesession"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/peerrelay"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 	hostruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/runtime"
@@ -255,7 +254,7 @@ func TestServerIssuedCrossAccountNativeRuntime(t *testing.T) {
 	if !terminalOnly {
 		terminalAuth = fixture.TerminalDescriptor.Terminal["auth"].(map[string]any)
 	}
-	streamAuthorize := peerrelay.CredentialStreamAuthorizer(authorizer)
+	streamAuthorize := hostserver.CredentialStreamAuthorizer(authorizer)
 	var sshHost *managedssh.Host
 	var sshIdentity, sshKnownHosts, sshRemoteFile string
 	sshAvailable := true

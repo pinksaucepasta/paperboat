@@ -175,100 +175,6 @@ func TestLocalPeerDebugConnCarriesCursor(t *testing.T) {
 	}
 }
 
-type recordingOwnedLease struct{ calls int }
-
-func (l *recordingOwnedLease) Release() { l.calls++ }
-
-type blockingOwnedConn struct {
-	*localPeerRemote
-	started chan struct{}
-	release chan struct{}
-}
-
-func (c *blockingOwnedConn) Close() error {
-	close(c.started)
-	<-c.release
-	return nil
-}
-
-type cancelBlockedOwnedConn struct {
-	*localPeerRemote
-	canceled <-chan struct{}
-}
-
-func (c *cancelBlockedOwnedConn) Close() error {
-	<-c.canceled
-	return nil
-}
-
-func TestOwnedPeerCloseCancelsBlockedCarrierBeforeClosingApplication(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	lease := &recordingOwnedLease{}
-	connection := &ownedPeerTerminalConn{
-		Conn:   &cancelBlockedOwnedConn{localPeerRemote: &localPeerRemote{}, canceled: ctx.Done()},
-		cancel: cancel,
-		lease:  lease,
-	}
-	done := make(chan error, 1)
-	go func() { done <- connection.Close() }()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("owned close did not cancel blocked application carrier")
-	}
-	if lease.calls != 1 {
-		t.Fatalf("lease releases=%d, want exactly one", lease.calls)
-	}
-}
-
-func TestOwnedPeerCloseKeepsLeaseUntilApplicationCloseCompletes(t *testing.T) {
-	lease := &recordingOwnedLease{}
-	connection := &ownedPeerTerminalConn{
-		Conn:  &blockingOwnedConn{localPeerRemote: &localPeerRemote{}, started: make(chan struct{}), release: make(chan struct{})},
-		lease: lease,
-	}
-	done := make(chan struct{})
-	go func() {
-		_ = connection.Close()
-		close(done)
-	}()
-	select {
-	case <-connection.Conn.(*blockingOwnedConn).started:
-	case <-time.After(time.Second):
-		t.Fatal("application close did not start")
-	}
-	if lease.calls != 0 {
-		t.Fatalf("lease releases=%d, want 0 while application close is blocked", lease.calls)
-	}
-	close(connection.Conn.(*blockingOwnedConn).release)
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("owned close did not finish")
-	}
-	if lease.calls != 1 {
-		t.Fatalf("lease releases=%d after close, want exactly once", lease.calls)
-	}
-}
-
-func TestOwnedExecDetachReleasesLeaseWithoutCancelingOperation(t *testing.T) {
-	lease := &recordingOwnedLease{}
-	remote := &localPeerExecRemote{localPeerRemote: &localPeerRemote{}}
-	connection := &ownedPeerExecConn{ownedPeerTerminalConn: &ownedPeerTerminalConn{Conn: remote, lease: lease}}
-	if err := connection.Detach(); err != nil {
-		t.Fatal(err)
-	}
-	if err := connection.Detach(); err != nil {
-		t.Fatal(err)
-	}
-	if lease.calls != 1 || !remote.detached {
-		t.Fatalf("lease releases=%d detached=%t", lease.calls, remote.detached)
-	}
-}
-
 func (c *localPeerExecRemote) Events() <-chan ExecEvent { return c.events }
 func (c *localPeerExecRemote) Cancel() error {
 	c.mu.Lock()
@@ -289,27 +195,12 @@ func (c *localPeerExecRemote) Detach() error {
 	return nil
 }
 
-func TestOwnedPeerConnectionExposesExecOnlyForExecConnections(t *testing.T) {
-	ordinary := ownPeerConnection(&ownedPeerTerminalConn{Conn: &localPeerRemote{}})
-	if _, ok := ordinary.(ExecConn); ok {
-		t.Fatal("ordinary owned peer connection exposed exec controls")
-	}
-	exec := ownPeerConnection(&ownedPeerTerminalConn{Conn: &localPeerExecRemote{localPeerRemote: &localPeerRemote{}}})
-	if _, ok := exec.(ExecConn); !ok {
-		t.Fatal("owned exec connection did not expose exec controls")
-	}
-}
-
-func TestOwnedAndLocalPeerConnectionsPreserveRuntimeVersion(t *testing.T) {
+func TestLocalPeerConnectionsPreserveRuntimeVersion(t *testing.T) {
 	localClient, localServer := net.Pipe()
 	remoteServer, remotePeer := net.Pipe()
 	remote := &localPeerRemote{Conn: remoteServer, runtimeVersion: "2026.08.27.65"}
-	owned := &ownedPeerTerminalConn{Conn: remote}
-	if got := TerminalRuntimeVersion(owned); got != "2026.08.27.65" {
-		t.Fatalf("owned runtime version=%q", got)
-	}
 	served := make(chan error, 1)
-	go func() { served <- ServeLocalPeerDebugConn(context.Background(), localServer, owned) }()
+	go func() { served <- ServeLocalPeerDebugConn(context.Background(), localServer, remote) }()
 	connection, err := newLocalPeerDebugConn(localClient, nil, nil)
 	if err != nil {
 		t.Fatal(err)

@@ -72,14 +72,7 @@ func connectedSignedJWT(t *testing.T, private ed25519.PrivateKey, typ string, va
 
 func connectedEndpointAuthority(t *testing.T, store config.ProfileStore, issuer, accountID, cliID, machineID string) (clientauthority.Authority, tls.Certificate, tls.Certificate) {
 	t.Helper()
-	rootPublic, rootPrivate, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SavePeerAccountRootPublic(issuer, accountID, rootPublic); err != nil {
-		t.Fatal(err)
-	}
-	cliKeys, err := store.PeerEndpointKeys(issuer, accountID, cliID)
+	cliKeys, err := store.FreshPeerIdentityKeys(issuer, accountID, cliID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,12 +80,20 @@ func connectedEndpointAuthority(t *testing.T, store config.ProfileStore, issuer,
 	if err != nil {
 		t.Fatal(err)
 	}
+	rootPrivate := cliKeys.RootPrivate
+	rootPublic := rootPrivate.Public().(ed25519.PublicKey)
+	if err := store.SavePeerAccountRootPublic(issuer, accountID, rootPublic); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePeerDeviceSigningPublic(issuer, accountID, rootPublic); err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().UTC().Truncate(time.Second)
-	cliCertificate, err := endpointidentity.Sign(rootPrivate, endpointidentity.Claims{AccountID: accountID, Role: endpointidentity.RoleCLI, EndpointID: cliID, NoisePublicKey: cliKeys.NoisePublic, QUICPublicKey: cliKeys.QUICPrivate.Public().(ed25519.PublicKey), Generation: 1, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour)})
+	cliCertificate, err := endpointidentity.Sign(rootPrivate, endpointidentity.Claims{AccountID: accountID, Role: endpointidentity.RoleCLI, EndpointID: cliID, QUICPublicKey: cliKeys.QUICPrivate.Public().(ed25519.PublicKey), Generation: 1, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(90 * 24 * time.Hour)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	machineCertificate, err := endpointidentity.Sign(rootPrivate, endpointidentity.Claims{AccountID: accountID, Role: endpointidentity.RoleMachine, EndpointID: machineID, NoisePublicKey: machineKeys.NoisePublic, QUICPublicKey: machineKeys.QUICPrivate.Public().(ed25519.PublicKey), Generation: 1, Serial: 2, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour)})
+	machineCertificate, err := endpointidentity.Sign(rootPrivate, endpointidentity.Claims{AccountID: accountID, Role: endpointidentity.RoleMachine, EndpointID: machineID, QUICPublicKey: machineKeys.QUICPrivate.Public().(ed25519.PublicKey), Generation: 1, Serial: 2, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(90 * 24 * time.Hour)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +148,7 @@ func connectedServerTLS(t *testing.T) (tls.Certificate, *x509.CertPool) {
 }
 
 func connectedConfiguration(now int64, issuer string, self, peer tailnet.NetworkBinding, direction string) tailnet.NetworkConfiguration {
-	return tailnet.NetworkConfiguration{Version: 1, Issuer: issuer, Audience: "paperboat-network", IssuedAt: now, ExpiresAt: now + 300, Generation: 1, Self: self, Peers: []tailnet.NetworkPeer{{Identity: peer, Scopes: []tailnet.NetworkScope{{ResourceKind: "machine_access", ResourceID: "access_connected", ResourceGeneration: 1, Capability: "terminal", Direction: direction, Port: tailnet.NetworkPort, ExpiresAt: now + 300}}}}}
+	return tailnet.NetworkConfiguration{Version: 1, Issuer: issuer, Audience: "paperboat-network", IssuedAt: now, ExpiresAt: now + 300, Generation: 1, Self: self, Peers: []tailnet.NetworkPeer{{Identity: peer, Scopes: []tailnet.NetworkScope{{ResourceKind: "machine_access", ResourceID: "access_connected", ResourceGeneration: 1, Capability: "managed_ssh", Direction: direction, Port: tailnet.NetworkPort, ExpiresAt: now + 300}}}}}
 }
 
 func connectedRegionalTokens(t *testing.T, signer ed25519.PrivateKey, configuration tailnet.NetworkConfiguration, node tailnet.RegionalNode) (string, string) {

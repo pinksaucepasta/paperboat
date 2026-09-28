@@ -64,6 +64,46 @@ func TestStreamProxiesBytesOnlyToIPv4Loopback(t *testing.T) {
 	}
 }
 
+func TestStreamProxiesIPv6OnlyLoopback(t *testing.T) {
+	listener, err := net.Listen("tcp6", "[::1]:0")
+	if err != nil {
+		t.Skipf("IPv6 loopback unavailable: %v", err)
+	}
+	defer listener.Close()
+	port := uint16(listener.Addr().(*net.TCPAddr).Port)
+	client, host := net.Pipe()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	served := make(chan error, 1)
+	go func() { served <- Serve(ctx, host, (&net.Dialer{}).DialContext) }()
+	if err := Open(ctx, client, port); err != nil {
+		t.Fatal(err)
+	}
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		connection, _ := listener.Accept()
+		accepted <- connection
+	}()
+	select {
+	case connection := <-accepted:
+		if connection == nil {
+			t.Fatal("IPv6 listener did not accept preview")
+		}
+		_ = connection.Close()
+	case <-ctx.Done():
+		t.Fatal("IPv6 preview did not connect")
+	}
+	_ = client.Close()
+	select {
+	case err := <-served:
+		if err != nil && !errors.Is(err, net.ErrClosed) {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("IPv6 preview did not close")
+	}
+}
+
 func TestStreamDeliversCompleteResponseAfterTargetEOF(t *testing.T) {
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {

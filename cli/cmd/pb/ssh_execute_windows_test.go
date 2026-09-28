@@ -12,11 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
-	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 )
 
 func TestWindowsSSHRemoteCommandMatchesOpenSSHJoinSemantics(t *testing.T) {
@@ -108,23 +106,6 @@ func TestWindowsLoopbackOpenSSHArgumentsPreserveManagedIdentityAndHost(t *testin
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("windowsLoopbackOpenSSHArguments()=%q want %q", got, want)
-	}
-}
-
-func TestWindowsManagedSSHConnectInfoCarriesEveryExplicitTransport(t *testing.T) {
-	machine := api.UserMachine{ID: "machine-hn", EnvironmentID: "environment-hn", InstallationGeneration: 7}
-	descriptor := api.SSHDescriptor{Environment: &api.Environment{ID: "environment-hn"}}
-	for _, value := range []string{"a", "d", "q", "w", "r"} {
-		info, err := windowsManagedSSHConnectInfo(machine, descriptor, value, tunnel.TerminalTransportAuto)
-		if err != nil {
-			t.Fatalf("transport %q: %v", value, err)
-		}
-		if info.Transport != value {
-			t.Fatalf("transport %q reached DialSSH as %q", value, info.Transport)
-		}
-	}
-	if _, err := windowsManagedSSHConnectInfo(machine, descriptor, "invalid", tunnel.TerminalTransportAuto); err == nil {
-		t.Fatal("invalid transport was accepted")
 	}
 }
 

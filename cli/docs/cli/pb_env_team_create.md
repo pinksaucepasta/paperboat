@@ -6,6 +6,10 @@ Create an encrypted ENV team scope
 
 Create an encrypted ENV team scope
 
+Create an encrypted scope for the selected team. Values added later remain separate from personal ENV values and require explicit member grants.
+
+Team ENV scopes have their own encrypted keys and explicit account grants. Rotation preserves values while replacing access keys; reset discards values. Review the confirmation and affected members before changing custody.
+
 JSON output is supported with --json.
 
 ```

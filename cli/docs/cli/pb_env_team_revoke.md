@@ -6,6 +6,10 @@ Rotate an ENV team scope and revoke selected members
 
 Rotate an ENV team scope and revoke selected members
 
+Remove selected members and rotate the team scope key so subsequent access is fenced. --total-loss chooses the destructive recovery path when preserving existing values is impossible.
+
+Team ENV scopes have their own encrypted keys and explicit account grants. Rotation preserves values while replacing access keys; reset discards values. Review the confirmation and affected members before changing custody.
+
 JSON output is supported with --json.
 
 ```

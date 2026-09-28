@@ -1,10 +1,14 @@
 ## pb team remove
 
-Remove team membership
+Remove a team member
 
 ### Synopsis
 
-Remove team membership
+Remove a team member
+
+Remove one member from a team at the expected generation. Team resource access supplied through membership is withdrawn for that account.
+
+Teams use explicit membership and resource grants. Membership alone does not grant device use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
 
 JSON output is supported with --json.
 

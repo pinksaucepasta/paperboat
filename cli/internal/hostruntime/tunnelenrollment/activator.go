@@ -44,6 +44,10 @@ type ProductionAssemblySourceLifecycle interface {
 	Shutdown(context.Context) error
 }
 
+type ProductionAssemblyUnbinder interface {
+	UnbindProductionAssembly(ActivationRequest, *tunnelmanager.ProductionAssembly)
+}
+
 type ProductionAssemblyActivatorConfig struct {
 	Credentials CredentialStore
 	Source      ProductionAssemblySource
@@ -134,6 +138,7 @@ func (a *ProductionAssemblyActivator) Activate(ctx context.Context, request Acti
 	a.mu.Unlock()
 	if closed && assembly != nil {
 		_ = assembly.Shutdown(context.Background())
+		a.unbindFailedAssembly(request, assembly)
 	}
 	return projection, err
 }
@@ -144,7 +149,7 @@ func (a *ProductionAssemblyActivator) activate(ctx context.Context, request Acti
 	}
 	config, err := a.source.ResolveProductionAssembly(ctx, request, signer)
 	if err != nil {
-		return Projection{}, nil, activationFailure(err)
+		return Projection{}, nil, activationFailureAt(err, ActivationDiagnosticAssemblyResolution)
 	}
 	if err := validateResolvedAssembly(request, config); err != nil {
 		return Projection{}, nil, activationFailure(err)
@@ -165,12 +170,13 @@ func (a *ProductionAssemblyActivator) activate(ctx context.Context, request Acti
 	}
 	assembly, _, err := tunnelmanager.OpenProductionAssembly(config)
 	if err != nil {
-		return Projection{}, nil, activationFailure(err)
+		return Projection{}, nil, activationFailureAt(err, ActivationDiagnosticAssemblyOpen)
 	}
 	if binder, ok := a.source.(ProductionAssemblyBinder); ok {
 		if err := binder.BindProductionAssembly(request, assembly); err != nil {
 			_ = assembly.Shutdown(context.Background())
-			return Projection{}, nil, activationFailure(err)
+			a.unbindFailedAssembly(request, assembly)
+			return Projection{}, nil, activationFailureAt(err, ActivationDiagnosticAssemblyBinding)
 		}
 	}
 	a.mu.Lock()
@@ -178,11 +184,13 @@ func (a *ProductionAssemblyActivator) activate(ctx context.Context, request Acti
 	a.mu.Unlock()
 	if lifetime == nil {
 		_ = assembly.Shutdown(context.Background())
+		a.unbindFailedAssembly(request, assembly)
 		return Projection{}, nil, &ActivationDiagnostic{Code: ActivationDiagnosticLifecycleUnavailable, Cause: ErrUnavailable}
 	}
 	if err := assembly.Start(lifetime); err != nil {
 		_ = assembly.Shutdown(context.Background())
-		return Projection{}, nil, activationFailure(err)
+		a.unbindFailedAssembly(request, assembly)
+		return Projection{}, nil, activationFailureAt(err, ActivationDiagnosticAssemblyStart)
 	}
 	if active, ok := assembly.Manager.ActiveForTunnel(request.TunnelID); ok && active != nil && active.ConnectorID() == request.ConnectorID {
 		return a.readyProjection(request, config), assembly, nil
@@ -191,12 +199,20 @@ func (a *ProductionAssemblyActivator) activate(ctx context.Context, request Acti
 	case change := <-ready:
 		if change.Current.Generation() == 0 || change.Current.ContentHash() == "" {
 			_ = assembly.Shutdown(context.Background())
+			a.unbindFailedAssembly(request, assembly)
 			return Projection{}, nil, ErrActivation
 		}
 		return a.readyProjection(request, config), assembly, nil
 	case <-ctx.Done():
 		_ = assembly.Shutdown(context.Background())
+		a.unbindFailedAssembly(request, assembly)
 		return Projection{}, nil, ctx.Err()
+	}
+}
+
+func (a *ProductionAssemblyActivator) unbindFailedAssembly(request ActivationRequest, assembly *tunnelmanager.ProductionAssembly) {
+	if unbinder, ok := a.source.(ProductionAssemblyUnbinder); ok {
+		unbinder.UnbindProductionAssembly(request, assembly)
 	}
 }
 
@@ -223,6 +239,15 @@ func activationFailure(err error) error {
 		return errors.Join(ErrActivation, err)
 	}
 	return &ActivationDiagnostic{Code: code, Cause: errors.Join(ErrActivation, err)}
+}
+
+func activationFailureAt(err error, stage ActivationDiagnosticCode) error {
+	failure := activationFailure(err)
+	var diagnostic *ActivationDiagnostic
+	if errors.As(failure, &diagnostic) {
+		return failure
+	}
+	return &ActivationDiagnostic{Code: stage, Cause: failure}
 }
 
 func (a *ProductionAssemblyActivator) readyProjection(request ActivationRequest, config tunnelmanager.ProductionAssemblyConfig) Projection {

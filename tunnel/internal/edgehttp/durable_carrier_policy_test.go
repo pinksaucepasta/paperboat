@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
 )
 
@@ -86,6 +88,40 @@ func TestGatewayDispatchesDurableRouteToCanonicalCarrier(t *testing.T) {
 	}
 	if canonicalCalls != 1 || previewCalls != 0 || legacyCalls != 0 {
 		t.Fatalf("canonical=%d preview=%d legacy=%d", canonicalCalls, previewCalls, legacyCalls)
+	}
+}
+
+func TestDurableIngressRequiresExactRoutePolicyModeAndGeneration(t *testing.T) {
+	decision := publicTCPDecision(time.Now().UTC(), 43001)
+	rule := route.RouteRule{
+		ID: decision.Binding.RouteID, RouteID: decision.Binding.RouteID, Revision: decision.Binding.RouteGeneration,
+		RouteGeneration: decision.Binding.RouteGeneration, AccountID: decision.Binding.AccountID, TunnelID: decision.Binding.TunnelID,
+		ConnectorID: decision.ConnectorID, ConnectorSessionID: decision.SessionID, ConnectorProcessGeneration: decision.ProcessGeneration,
+		ConfigGeneration: decision.ConfigGeneration, AssignmentGeneration: decision.AssignmentGeneration,
+		Node: decision.EdgeNodeID, EdgeProcessEpoch: decision.EdgeProcessEpoch, AccessMode: "public",
+		ViewerPolicyGeneration: decision.PolicyGeneration, Kind: route.TunnelTCP, Protocol: "tcp",
+	}
+	open := connectorprotocol.StreamOpen{
+		Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion,
+		AccountID: decision.Binding.AccountID, TunnelID: decision.Binding.TunnelID,
+		ConnectorID: decision.ConnectorID, SessionID: decision.SessionID,
+		ProcessGeneration: decision.ProcessGeneration, Generation: decision.ConfigGeneration,
+		RouteID: decision.Binding.RouteID, RequestID: "request_policy_check", Kind: "tcp_public",
+	}
+	registry := &DataCarrierRouteRegistry{ingressAuthority: func(context.Context, route.RouteRule) (connectorprotocol.IngressDecision, error) {
+		return decision, nil
+	}}
+	if _, err := registry.ingressDecision(context.Background(), rule, open); err != nil {
+		t.Fatalf("matching policy decision rejected: %v", err)
+	}
+	rule.ViewerPolicyGeneration++
+	if _, err := registry.ingressDecision(context.Background(), rule, open); !errors.Is(err, connectorprotocol.ErrIngressDenied) {
+		t.Fatalf("stale policy generation error = %v, want ErrIngressDenied", err)
+	}
+	rule.ViewerPolicyGeneration = decision.PolicyGeneration
+	rule.AccessMode = "private"
+	if _, err := registry.ingressDecision(context.Background(), rule, open); !errors.Is(err, connectorprotocol.ErrIngressDenied) {
+		t.Fatalf("public decision for private route error = %v, want ErrIngressDenied", err)
 	}
 }
 

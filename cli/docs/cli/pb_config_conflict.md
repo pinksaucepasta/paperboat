@@ -6,6 +6,10 @@ Inspect and resolve configuration conflicts
 
 Inspect and resolve configuration conflicts
 
+List current path conflicts, inspect one with show, then resolve it by choosing the machine or repository version. Resolution is explicit per path rather than a blanket overwrite.
+
+Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
+
 With --json, this command group lists its available commands.
 
 ### Options

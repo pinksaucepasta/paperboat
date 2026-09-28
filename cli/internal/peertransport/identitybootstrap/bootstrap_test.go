@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -114,7 +115,7 @@ func (*existingEnrollmentClient) BootstrapE2EE(context.Context, string, api.E2EE
 }
 func (c *existingEnrollmentClient) RequestCLIEndpoint(_ context.Context, input api.CLIEndpointRequestInput) (api.PendingEndpointIdentity, error) {
 	c.requests++
-	if input.EndpointID != c.pending.EndpointID || input.Generation != c.pending.Generation || input.NoisePublicKey != c.pending.NoisePublicKey || input.QUICPublicKey != c.pending.QUICPublicKey {
+	if input.EndpointID != c.pending.EndpointID || input.Generation != c.pending.Generation || input.QUICPublicKey != c.pending.QUICPublicKey {
 		return api.PendingEndpointIdentity{}, errors.New("request key mismatch")
 	}
 	return c.pending, nil
@@ -146,7 +147,7 @@ func TestEnrollCLIExistingAccountCreatesIndependentDeviceIdentity(t *testing.T) 
 	if err != nil || second.RootFingerprint != first.RootFingerprint || second.CertificateFingerprint != first.CertificateFingerprint {
 		t.Fatalf("second enrollment failed: result=%+v err=%v", second, err)
 	}
-	storedRoot, err := store.LoadPeerAccountRootPublic(request.Issuer, request.AccountID)
+	storedRoot, err := store.LoadPeerDeviceSigningPublic(request.Issuer, request.AccountID)
 	if err != nil || !bytes.Equal(storedRoot, enrolledPublic) || bytes.Equal(enrolledPublic, rootPublic) {
 		t.Fatalf("stored root=%x err=%v", storedRoot, err)
 	}
@@ -169,7 +170,7 @@ func TestEnrollExistingRootRecoversAlreadyFulfilledEnrollmentAfterLocalPersisten
 		t.Fatal(err)
 	}
 	quicPublic := keys.QUICPrivate.Public().(ed25519.PublicKey)
-	certificate, err := endpointidentity.Sign(rootPrivate, endpointidentity.Claims{AccountID: "account_1", Role: endpointidentity.RoleCLI, EndpointID: "cli_1", NoisePublicKey: keys.NoisePublic, QUICPublicKey: quicPublic, Generation: 1, Serial: 1, IssuedAt: now.Add(-10 * time.Minute), ExpiresAt: now.Add(time.Hour)})
+	certificate, err := endpointidentity.Sign(rootPrivate, endpointidentity.Claims{AccountID: "account_1", Role: endpointidentity.RoleCLI, EndpointID: "cli_1", QUICPublicKey: quicPublic, Generation: 1, Serial: 1, IssuedAt: now.Add(-10 * time.Minute), ExpiresAt: now.Add(time.Hour)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +181,7 @@ func TestEnrollExistingRootRecoversAlreadyFulfilledEnrollmentAfterLocalPersisten
 	certificateFingerprint := sha256.Sum256(raw)
 	client := &existingEnrollmentClient{
 		root:        rootDocument(rootPublic),
-		pending:     api.PendingEndpointIdentity{RequestID: "per_0123456789abcdef", EndpointID: "cli_1", Role: "cli", State: "fulfilled", Generation: 1, NoisePublicKey: base64.RawURLEncoding.EncodeToString(keys.NoisePublic[:]), QUICPublicKey: base64.RawURLEncoding.EncodeToString(quicPublic), CreatedAt: now.Add(-10 * time.Minute), ExpiresAt: now.Add(-5 * time.Minute), SafetyCode: "abcde-fghij"},
+		pending:     api.PendingEndpointIdentity{RequestID: "per_0123456789abcdef", EndpointID: "cli_1", Role: "cli", State: "fulfilled", Generation: 1, QUICPublicKey: base64.RawURLEncoding.EncodeToString(quicPublic), CreatedAt: now.Add(-10 * time.Minute), ExpiresAt: now.Add(-5 * time.Minute), SafetyCode: "abcde-fghij"},
 		certificate: api.EndpointCertificateDocument{Version: 1, AccountID: "account_1", KeyID: rootKeyID(rootPublic), EndpointID: "cli_1", Role: "cli", Generation: 1, Serial: 1, IssuedAt: certificate.Claims.IssuedAt.Format(time.RFC3339), ExpiresAt: certificate.Claims.ExpiresAt.Format(time.RFC3339), Certificate: base64.RawURLEncoding.EncodeToString(raw), CertificateFingerprint: hex.EncodeToString(certificateFingerprint[:])},
 	}
 	result, err := EnrollExistingRoot(context.Background(), ExistingRootRequest{Store: store, Client: client, Issuer: "https://api.example.test", AccountID: "account_1", CLIClientSessionID: "cli_1", Now: func() time.Time { return now }, PollInterval: time.Millisecond, Timeout: time.Second})
@@ -202,7 +203,7 @@ func TestEnrollExistingRootExpiresWhileApprovalIsPending(t *testing.T) {
 		t.Fatal(err)
 	}
 	quicPublic := keys.QUICPrivate.Public().(ed25519.PublicKey)
-	client := &existingEnrollmentClient{root: rootDocument(rootPublic), pending: api.PendingEndpointIdentity{RequestID: "per_0123456789abcdef", EndpointID: "cli_1", Role: "cli", State: "pending", Generation: 1, NoisePublicKey: base64.RawURLEncoding.EncodeToString(keys.NoisePublic[:]), QUICPublicKey: base64.RawURLEncoding.EncodeToString(quicPublic), CreatedAt: now, ExpiresAt: now.Add(time.Minute), SafetyCode: "abcde-fghij"}}
+	client := &existingEnrollmentClient{root: rootDocument(rootPublic), pending: api.PendingEndpointIdentity{RequestID: "per_0123456789abcdef", EndpointID: "cli_1", Role: "cli", State: "pending", Generation: 1, QUICPublicKey: base64.RawURLEncoding.EncodeToString(quicPublic), CreatedAt: now, ExpiresAt: now.Add(time.Minute), SafetyCode: "abcde-fghij"}}
 	err = nil
 	_, err = EnrollExistingRoot(context.Background(), ExistingRootRequest{Store: store, Client: client, Issuer: "https://api.example.test", AccountID: "account_1", CLIClientSessionID: "cli_1", Now: func() time.Time { return now }, PollInterval: time.Millisecond, Timeout: 10 * time.Millisecond})
 	if !errors.Is(err, ErrEnrollmentExpired) {
@@ -260,7 +261,7 @@ func TestFreshBootstrapPersistsIdentityBeforeReturning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootPublic, err := store.LoadPeerAccountRootPublic(request.Issuer, request.AccountID)
+	rootPublic, err := store.LoadPeerDeviceSigningPublic(request.Issuer, request.AccountID)
 	if err != nil || len(rootPublic) != ed25519.PublicKeySize {
 		t.Fatalf("stored root err=%v", err)
 	}
@@ -310,6 +311,44 @@ func TestFreshBootstrapUsesEndpointScopedSigningKeyAndExactlyReplays(t *testing.
 	defer clear(oldPublic)
 	if bytes.Equal(freshPublic, oldPublic) {
 		t.Fatal("fresh enrollment reused the account-scoped signing identity")
+	}
+}
+
+func TestFreshCLICertificateRenewsWithoutAnotherDevice(t *testing.T) {
+	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	root := t.TempDir()
+	store := config.ProfileStore{Path: root, Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}}
+	var signer string
+	var serials []uint64
+	client := freshBootstrapClientFunc(func(_ context.Context, _ string, input api.E2EEBootstrapInput) (api.E2EEBootstrapResult, error) {
+		if signer == "" {
+			signer = input.RootPublicKey
+		} else if signer != input.RootPublicKey {
+			t.Fatal("renewal changed the device signing key")
+		}
+		raw, err := base64.RawURLEncoding.DecodeString(input.Certificate.Certificate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		certificate, err := endpointidentity.Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		serials = append(serials, certificate.Claims.Serial)
+		return bootstrapResult(input), nil
+	})
+	request := CLIRequest{Store: store, Client: client, Issuer: "https://api.example.test", AccountID: "account_1", CLIClientSessionID: "cli_fresh", Now: func() time.Time { return now }}
+	first, err := EnrollCLI(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(84 * 24 * time.Hour)
+	renewed, err := EnrollCLI(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renewed.Certificate.Claims.Serial != 2 || renewed.CertificateFingerprint == first.CertificateFingerprint || !slices.Equal(serials, []uint64{1, 2}) {
+		t.Fatalf("renewal serials=%v first=%d renewed=%d", serials, first.Certificate.Claims.Serial, renewed.Certificate.Claims.Serial)
 	}
 }
 

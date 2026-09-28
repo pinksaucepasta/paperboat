@@ -14,21 +14,12 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/telemetry"
 )
 
-// ErrProjectNotFound means no project matched the requested name or id for this
-// user. Surfaced distinctly so the CLI can guide the user to `pb` project list
-// / the dashboard rather than a generic failure.
-var ErrProjectNotFound = errors.New("project not found")
-var ErrProjectAmbiguous = errors.New("project name is ambiguous")
+var ErrMachineNotFound = errors.New("machine not found")
+var ErrMachineAmbiguous = errors.New("machine name is ambiguous")
 
 // connectClient is the subset of the paperboat-server client the resolver
 // needs. Defined here so the resolver can be unit-tested with a fake.
 type connectClient interface {
-	ListProjects(ctx context.Context) ([]api.Project, error)
-	ProjectConnectionDescriptor(ctx context.Context, projectID string) (api.ConnectionDescriptor, error)
-	ConnectionReadiness(ctx context.Context, projectID string) (api.ConnectionDescriptor, error)
-}
-
-type userMachineClient interface {
 	ListUserMachines(context.Context) ([]api.UserMachine, error)
 	UserMachineConnectionDescriptor(context.Context, string) (api.ConnectionDescriptor, error)
 	UserMachineConnectionReadiness(context.Context, string) (api.ConnectionDescriptor, error)
@@ -51,44 +42,10 @@ type target struct {
 	generation uint64
 }
 
-type EnvironmentIdentity struct {
-	Kind          string
-	ResourceID    string
-	EnvironmentID string
-	Name          string
-}
+const targetUserMachine = "machine"
 
-func (r *APIResolver) ResolveEnvironment(ctx context.Context, requested string) (EnvironmentIdentity, error) {
-	target, err := r.findTarget(ctx, requested)
-	if err != nil {
-		return EnvironmentIdentity{}, err
-	}
-	environmentID := target.id
-	if target.kind == targetUserMachine {
-		machines, listErr := r.client.(userMachineClient).ListUserMachines(ctx)
-		if listErr != nil {
-			return EnvironmentIdentity{}, listErr
-		}
-		for _, machine := range machines {
-			if machine.ID == target.id {
-				environmentID = machine.EnvironmentID
-				break
-			}
-		}
-	}
-	return EnvironmentIdentity{Kind: target.kind, ResourceID: target.id, EnvironmentID: environmentID, Name: target.name}, nil
-}
-
-const (
-	targetProject     = "project"
-	targetUserMachine = "machine"
-)
-
-// APIResolver resolves projects against paperboat-server: it matches the
-// requested name/id to one of the user's projects, runs the pre-connect broker
-// (which authorizes, reconciles Paperboat routes, and resumes an idle
-// machine), and polls until the tunnel is connectable — then hands the tunnel
-// layer a client-safe Paperboat WebSocket descriptor.
+// APIResolver resolves an enrolled machine, obtains its connection descriptor,
+// and polls until its terminal is connectable.
 type APIResolver struct {
 	client       connectClient
 	cfg          *config.Config
@@ -111,13 +68,13 @@ func NewAPIResolver(client connectClient, cfg *config.Config) *APIResolver {
 	}
 }
 
-// Resolve implements ProjectResolver against the real backend.
+// Resolve implements MachineResolver against the real backend.
 func (r *APIResolver) Resolve(ctx context.Context, req ConnectRequest) (ConnectInfo, error) {
 	started := r.now()
-	projectID := ""
+	machineID := ""
 	environmentID := ""
 	outcome := "failure"
-	defer func() { r.record("connect.result", outcome, projectID, environmentID, "", started) }()
+	defer func() { r.record("connect.result", outcome, machineID, environmentID, "", started) }()
 	if err := r.validatePolicy(); err != nil {
 		return ConnectInfo{}, err
 	}
@@ -135,14 +92,11 @@ func (r *APIResolver) Resolve(ctx context.Context, req ConnectRequest) (ConnectI
 		resolved = found
 	}
 	target := resolved
-	projectID = target.id
+	machineID = target.id
 
 	var createdSession *TerminalSessionInfo
 	var resp api.ConnectionDescriptor
 	if req.CreateTerminalSession != nil {
-		if target.kind != targetUserMachine {
-			return ConnectInfo{}, errors.New("session creation is only available for machine targets")
-		}
 		var createErr error
 		resp, createdSession, createErr = r.connectWithSessionCreate(ctx, target, req.CreateTerminalSession)
 		if createErr != nil {
@@ -202,41 +156,15 @@ func (r *APIResolver) Resolve(ctx context.Context, req ConnectRequest) (ConnectI
 	return info, nil
 }
 
-type sessionConnectClient interface {
-	ProjectConnectionDescriptorForSession(context.Context, string, string) (api.ConnectionDescriptor, error)
-}
-
-type sessionStatusClient interface {
-	ProjectConnectionReadinessForSession(context.Context, string, string) (api.ConnectionDescriptor, error)
-}
-
 func (r *APIResolver) connect(ctx context.Context, target target, terminalSessionID string) (api.ConnectionDescriptor, error) {
-	switch target.kind {
-	case targetProject:
-		if terminalSessionID == "" {
-			return r.client.ProjectConnectionDescriptor(ctx, target.id)
-		}
-		client, ok := r.client.(sessionConnectClient)
+	if terminalSessionID != "" {
+		sessionClient, ok := r.client.(userMachineSessionClient)
 		if !ok {
-			return api.ConnectionDescriptor{}, errors.New("this server client does not support selected terminal sessions")
+			return api.ConnectionDescriptor{}, errors.New("this server client does not support selected machine terminal sessions")
 		}
-		return client.ProjectConnectionDescriptorForSession(ctx, target.id, terminalSessionID)
-	case targetUserMachine:
-		client, ok := r.client.(userMachineClient)
-		if !ok {
-			return api.ConnectionDescriptor{}, errors.New("this server client does not support machines")
-		}
-		if terminalSessionID != "" {
-			sessionClient, ok := r.client.(userMachineSessionClient)
-			if !ok {
-				return api.ConnectionDescriptor{}, errors.New("this server client does not support selected machine terminal sessions")
-			}
-			return sessionClient.UserMachineConnectionDescriptorForSession(ctx, target.id, terminalSessionID)
-		}
-		return client.UserMachineConnectionDescriptor(ctx, target.id)
-	default:
-		return api.ConnectionDescriptor{}, errors.New("unknown environment target")
+		return sessionClient.UserMachineConnectionDescriptorForSession(ctx, target.id, terminalSessionID)
 	}
+	return r.client.UserMachineConnectionDescriptor(ctx, target.id)
 }
 
 func (r *APIResolver) connectWithSessionCreate(ctx context.Context, target target, create *TerminalSessionCreate) (api.ConnectionDescriptor, *TerminalSessionInfo, error) {
@@ -255,32 +183,14 @@ func (r *APIResolver) connectWithSessionCreate(ctx context.Context, target targe
 }
 
 func (r *APIResolver) connectionStatus(ctx context.Context, target target, terminalSessionID string) (api.ConnectionDescriptor, error) {
-	switch target.kind {
-	case targetProject:
-		if terminalSessionID == "" {
-			return r.client.ConnectionReadiness(ctx, target.id)
-		}
-		client, ok := r.client.(sessionStatusClient)
+	if terminalSessionID != "" {
+		sessionClient, ok := r.client.(userMachineSessionClient)
 		if !ok {
-			return api.ConnectionDescriptor{}, errors.New("this server client does not support selected terminal sessions")
+			return api.ConnectionDescriptor{}, errors.New("this server client does not support selected machine terminal sessions")
 		}
-		return client.ProjectConnectionReadinessForSession(ctx, target.id, terminalSessionID)
-	case targetUserMachine:
-		client, ok := r.client.(userMachineClient)
-		if !ok {
-			return api.ConnectionDescriptor{}, errors.New("this server client does not support machines")
-		}
-		if terminalSessionID != "" {
-			sessionClient, ok := r.client.(userMachineSessionClient)
-			if !ok {
-				return api.ConnectionDescriptor{}, errors.New("this server client does not support selected machine terminal sessions")
-			}
-			return sessionClient.UserMachineConnectionReadinessForSession(ctx, target.id, terminalSessionID)
-		}
-		return client.UserMachineConnectionReadiness(ctx, target.id)
-	default:
-		return api.ConnectionDescriptor{}, errors.New("unknown environment target")
+		return sessionClient.UserMachineConnectionReadinessForSession(ctx, target.id, terminalSessionID)
 	}
+	return r.client.UserMachineConnectionReadiness(ctx, target.id)
 }
 
 func (r *APIResolver) now() time.Time {
@@ -317,65 +227,15 @@ func (r *APIResolver) validatePolicy() error {
 	return nil
 }
 
-// findProject matches the requested token against the user's projects by id
-// first (exact) then by name (case-insensitive). Matching by id keeps scripts
-// stable; matching by name keeps the interactive `pb <name>` UX.
-func (r *APIResolver) findProject(ctx context.Context, requested string) (api.Project, error) {
+func (r *APIResolver) findTarget(ctx context.Context, requested string) (target, error) {
 	want := strings.TrimSpace(requested)
 	if want == "" {
-		return api.Project{}, errors.New("missing project name")
+		return target{}, errors.New("missing machine name or ID")
 	}
-	projects, err := r.client.ListProjects(ctx)
+	machines, err := r.client.ListUserMachines(ctx)
 	if err != nil {
-		return api.Project{}, fmt.Errorf("list projects: %w", err)
+		return target{}, fmt.Errorf("list machines: %w", err)
 	}
-	for _, p := range projects {
-		if p.ID == want {
-			return p, nil
-		}
-	}
-	var matches []api.Project
-	for _, p := range projects {
-		if strings.EqualFold(p.Name, want) {
-			matches = append(matches, p)
-		}
-	}
-	if len(matches) == 1 {
-		return matches[0], nil
-	}
-	if len(matches) > 1 {
-		ids := make([]string, 0, len(matches))
-		for _, match := range matches {
-			ids = append(ids, match.ID)
-		}
-		return api.Project{}, fmt.Errorf("%w: %q matches project IDs %s; connect using an exact ID", ErrProjectAmbiguous, requested, strings.Join(ids, ", "))
-	}
-	return api.Project{}, fmt.Errorf("%w: %q", ErrProjectNotFound, requested)
-}
-
-func (r *APIResolver) findTarget(ctx context.Context, requested string) (target, error) {
-	project, err := r.findProject(ctx, requested)
-	if err == nil {
-		return target{kind: targetProject, id: project.ID, name: project.Name, state: project.State}, nil
-	}
-	if !errors.Is(err, ErrProjectNotFound) && !api.IsHostedEntitlementRequired(err) {
-		return target{}, err
-	}
-	projectErr := err
-	client, ok := r.client.(userMachineClient)
-	if !ok {
-		return target{}, projectErr
-	}
-	machines, listErr := client.ListUserMachines(ctx)
-	if listErr != nil {
-		// Machines are additive. Older control planes do not expose
-		// this catalog yet, so preserve the historical project-not-found result.
-		if api.IsNotFound(listErr) {
-			return target{}, projectErr
-		}
-		return target{}, fmt.Errorf("list machines: %w", listErr)
-	}
-	want := strings.TrimSpace(requested)
 	for _, machine := range machines {
 		if machine.ID == want {
 			if err := terminalCapabilityError(machine); err != nil {
@@ -402,9 +262,9 @@ func (r *APIResolver) findTarget(ctx context.Context, requested string) (target,
 		for _, machine := range matches {
 			ids = append(ids, machine.ID)
 		}
-		return target{}, fmt.Errorf("%w: %q matches machine IDs %s; connect using an exact ID", ErrProjectAmbiguous, requested, strings.Join(ids, ", "))
+		return target{}, fmt.Errorf("%w: %q matches machine IDs %s; connect using an exact ID", ErrMachineAmbiguous, requested, strings.Join(ids, ", "))
 	}
-	return target{}, projectErr
+	return target{}, fmt.Errorf("%w: %q", ErrMachineNotFound, requested)
 }
 
 func terminalCapabilityError(machine api.UserMachine) error {
@@ -506,10 +366,7 @@ func (r *APIResolver) validateDescriptor(resp api.ConnectionDescriptor, target t
 	if !resp.Connectable {
 		return api.ConnectionDescriptor{}, errors.New("server returned a non-connectable descriptor")
 	}
-	if target.kind == targetProject && resp.ProjectID != "" && resp.ProjectID != target.id {
-		return api.ConnectionDescriptor{}, errors.New("server returned a descriptor for the wrong project")
-	}
-	if target.kind == targetUserMachine && resp.UserMachineID != target.id {
+	if resp.UserMachineID != target.id {
 		return api.ConnectionDescriptor{}, errors.New("server returned a descriptor for the wrong machine")
 	}
 	if resp.ExpiresAt.IsZero() || !time.Now().Before(resp.ExpiresAt) {
@@ -580,22 +437,12 @@ func (r *APIResolver) validateFileTransfer(transfer *api.FileTransfer, terminalU
 }
 
 func environmentMatchesTarget(environment *api.Environment, target target) bool {
-	switch target.kind {
-	case targetProject:
-		return environment.ProjectID == target.id && environment.UserMachineID == ""
-	case targetUserMachine:
-		return environment.UserMachineID == target.id && environment.ProjectID == ""
-	default:
-		return false
-	}
+	return environment.UserMachineID == target.id
 }
 
 func targetState(target target, resp api.ConnectionDescriptor) string {
-	if target.kind == targetUserMachine && strings.TrimSpace(resp.UserMachineState) != "" {
+	if strings.TrimSpace(resp.UserMachineState) != "" {
 		return resp.UserMachineState
-	}
-	if target.kind == targetProject && strings.TrimSpace(resp.ProjectState) != "" {
-		return resp.ProjectState
 	}
 	return target.state
 }

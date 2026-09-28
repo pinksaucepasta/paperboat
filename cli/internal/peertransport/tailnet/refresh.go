@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/config"
 )
 
 type NetworkAPI interface {
@@ -29,13 +28,8 @@ func (a *Authority) Register(ctx context.Context, client NetworkAPI, rotate bool
 	if err != nil {
 		return err
 	}
-	var pending bool
-	if err := a.state(func(s *config.PeerNetworkState) error { pending = len(s.PendingKey) != 0; return nil }); err != nil {
-		return err
-	}
-	if !pending {
-		return a.Refresh(ctx, client)
-	}
+	// Rebind an unchanged WireGuard key when the endpoint certificate was
+	// renewed. The server keeps the network key generation in that case.
 	discovery, err := a.discoveryPublicKey(public)
 	if err != nil {
 		return err

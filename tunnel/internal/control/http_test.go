@@ -120,6 +120,22 @@ func TestHTTPClientClassifiesStaleHeartbeat(t *testing.T) {
 	}
 }
 
+func TestHTTPClientAcceptsCanonicalRoutePublicTCPFields(t *testing.T) {
+	client := controlClient(t, func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/v1/edge/routes/desired-state" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		return response(http.StatusOK, `{"complete":true,"routes":[{"assignment_id":"assignment_1","route_id":"route_1","kind":"tunnel_http_wss","public_tcp_listener_id":null,"public_tcp_port":null},{"assignment_id":"assignment_2","route_id":"route_2","kind":"tunnel_tls","public_tcp_listener_id":"listener_tls_443","public_tcp_port":443}]}`), nil
+	})
+	snapshot, err := client.DesiredRouteSnapshot(context.Background(), "edge_1", "epoch_1")
+	if err != nil || !snapshot.Canonical || !snapshot.Complete || len(snapshot.Routes) != 2 {
+		t.Fatalf("snapshot = %+v, %v", snapshot, err)
+	}
+	if snapshot.Routes[0].PublicTCPPort != 0 || snapshot.Routes[1].PublicTCPListenerID != "listener_tls_443" || snapshot.Routes[1].PublicTCPPort != 443 {
+		t.Fatalf("public TCP projection = %+v", snapshot.Routes)
+	}
+}
+
 func TestHTTPClientPropagatesOnlySentryTraceAndReportsRecovery(t *testing.T) {
 	var calls int
 	var outcomes []string
@@ -176,14 +192,42 @@ func TestHTTPClientNormalizesCanonicalManagedMatchType(t *testing.T) {
 		if r.URL.Path != "/v1/edge/routes/desired-state" {
 			t.Fatalf("path = %s", r.URL.Path)
 		}
-		return response(http.StatusOK, `{"complete":true,"routes":[{"route_id":"rte_1","route_revision":1,"assignment_id":"asn_1","config_content_hash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","kind":"tunnel_http_wss","match_type":"managed"}]}`), nil
+		return response(http.StatusOK, `{"complete":true,"routes":[{"route_id":"rte_1","route_revision":1,"assignment_id":"asn_1","config_content_hash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","kind":"tunnel_http_wss","match_type":"managed","access_mode":"team","viewer_policy_generation":9}]}`), nil
 	})
 	snapshot, err := client.DesiredRouteSnapshot(context.Background(), "edge", "process_epoch")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Routes) != 1 || snapshot.Routes[0].MatchType != "managed_exact" {
+	if len(snapshot.Routes) != 1 || snapshot.Routes[0].MatchType != "managed_exact" || snapshot.Routes[0].AccessMode != "team" || snapshot.Routes[0].ViewerPolicyGeneration != 9 {
 		t.Fatalf("routes = %+v", snapshot.Routes)
+	}
+}
+
+func TestHTTPClientObservesViewerPolicyFieldsForReadyAndDetached(t *testing.T) {
+	testCases := []struct {
+		state string
+	}{{state: "ready"}, {state: "detached"}}
+	for _, testCase := range testCases {
+		t.Run(testCase.state, func(t *testing.T) {
+			client := controlClient(t, func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path != "/v1/edge/routes/observations" {
+					t.Fatalf("path = %s", r.URL.Path)
+				}
+				var payload struct {
+					Routes []RouteObservation `json:"routes"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					t.Fatal(err)
+				}
+				if len(payload.Routes) != 1 || payload.Routes[0].ObservedState != testCase.state || payload.Routes[0].AccessMode != "private" || payload.Routes[0].ViewerPolicyGeneration != 12 {
+					t.Fatalf("payload = %+v", payload)
+				}
+				return response(http.StatusNoContent, ""), nil
+			})
+			if err := client.ObserveRoutes(context.Background(), "edge_1", []RouteObservation{{RouteID: "route_1", RouteRevision: 3, AssignmentID: "assignment_1", AssignmentGeneration: 8, EdgeNodeID: "edge_1", EdgeProcessEpoch: "edge_epoch_1", ConnectorID: "connector_1", HostID: "host_1", ConnectorGeneration: 4, ConnectorSessionID: "session_1", ConnectorProcessGeneration: 4, ConfigGeneration: 5, ConfigContentHash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", AccessMode: "private", ViewerPolicyGeneration: 12, State: testCase.state, ObservedState: testCase.state}}); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

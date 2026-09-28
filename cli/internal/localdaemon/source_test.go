@@ -177,7 +177,7 @@ func TestIssuePeerStreamRefreshesRejectedCredentialOnce(t *testing.T) {
 	}))
 	defer server.Close()
 	source := AuthenticatedMachineSource{ServerURL: server.URL, Auth: &rotatingAuthSource{}, SourceMachineID: "source_1"}
-	request := localapi.PeerStreamRequest{Schema: localapi.PeerStreamSchemaV1, Consumer: "exec", MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, OperationID: "operation_1", Deadline: time.Now().UTC().Add(time.Minute), MaximumBytes: 1024, Transport: "a", Payload: json.RawMessage(`{"operation_id":"operation_1"}`)}
+	request := localapi.PeerStreamRequest{Schema: localapi.PeerStreamSchemaV1, Consumer: "exec", MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, OperationID: "operation_1", Deadline: time.Now().UTC().Add(time.Minute), MaximumBytes: 1024, Payload: json.RawMessage(`{"operation_id":"operation_1"}`)}
 	result, err := source.IssuePeerStream(context.Background(), request)
 	if err != nil || result.Credential != "operation-token" || !reflect.DeepEqual(operations, []string{"operation_1", "operation_1"}) {
 		t.Fatalf("result=%+v operations=%v err=%v", result, operations, err)

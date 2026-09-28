@@ -60,12 +60,12 @@ func newProductionAccessDeviceRuntime(command *cobra.Command, selector string) (
 	if err != nil {
 		return nil, "", err
 	}
-	if dependencies.hostedTransferKeys == nil {
+	if dependencies.peerTunnel == nil {
 		return nil, "", errors.New("Paperboat server is not configured; set server_url or use --server")
 	}
 	credential, err := dependencies.auth.Credential()
 	if err != nil {
-		_ = dependencies.hostedTransferKeys.Close()
+		_ = dependencies.peerTunnel.Close()
 		if errors.Is(err, config.ErrNoCredentials) || errors.Is(err, config.ErrSecretNotFound) {
 			return nil, "", errors.New("Paperboat sign-in credentials are unavailable; run the enrollment command from the Paperboat dashboard, then retry")
 		}
@@ -74,17 +74,17 @@ func newProductionAccessDeviceRuntime(command *cobra.Command, selector string) (
 	client := api.New(dependencies.cfg.ServerURL, credential, nil)
 	machine, err := resolveUserMachine(command.Context(), client, selector)
 	if err != nil {
-		_ = dependencies.hostedTransferKeys.Close()
+		_ = dependencies.peerTunnel.Close()
 		return nil, "", err
 	}
 	access, err := previewruntime.NewNativePrivateTCPAccess(previewruntime.NativePrivateTCPAccessConfig{
-		Grants: client, DialSession: dependencies.hostedTransferKeys.DialPrivateSession,
+		Grants: client, DialSession: dependencies.peerTunnel.DialPrivateSession,
 	})
 	if err != nil {
-		_ = dependencies.hostedTransferKeys.Close()
+		_ = dependencies.peerTunnel.Close()
 		return nil, "", err
 	}
-	return &productionAccessDeviceRuntime{access: access, close: dependencies.hostedTransferKeys.Close}, machine.ID, nil
+	return &productionAccessDeviceRuntime{access: access, close: dependencies.peerTunnel.Close}, machine.ID, nil
 }
 
 func accessDeviceCobraCommandV1() *cobra.Command {

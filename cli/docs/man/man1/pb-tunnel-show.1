@@ -6,11 +6,17 @@ pb-tunnel-show - Show a durable tunnel
 
 
 .SH SYNOPSIS
-\fBpb tunnel show  [flags]\fP
+\fBpb tunnel show <tunnel> [flags]\fP
 
 
 .SH DESCRIPTION
 Show a durable tunnel
+
+.PP
+Show one durable tunnel's configured identity, routes, domains, and control state. Use status for current health and logs for event history.
+
+.PP
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
 
 .PP
 JSON output is supported with --json.

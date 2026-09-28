@@ -180,8 +180,11 @@ type routeAssignmentWire struct {
 	PathPrefix                 string          `json:"path_prefix"`
 	Priority                   int             `json:"priority"`
 	Protocol                   string          `json:"protocol"`
+	PublicTCPListenerID        string          `json:"public_tcp_listener_id"`
+	PublicTCPPort              uint16          `json:"public_tcp_port"`
 	OriginScheme               string          `json:"origin_scheme"`
 	AccessMode                 string          `json:"access_mode"`
+	ViewerPolicyGeneration     uint64          `json:"viewer_policy_generation"`
 	OriginAddress              string          `json:"origin_address"`
 	PreserveHost               bool            `json:"preserve_host"`
 	HostOverride               string          `json:"host_override"`
@@ -264,7 +267,9 @@ func (c *HTTPClient) DesiredRouteSnapshot(ctx context.Context, nodeID, processEp
 			EdgeFailureDomain: wire.EdgeFailureDomain, EdgeProcessEpoch: wire.EdgeProcessEpoch,
 			NodeID: wire.NodeID, Kind: wire.Kind, PublicHost: wire.PublicHost, MatchType: matchType,
 			MatchHostname: wire.MatchHostname, WildcardSuffix: wire.WildcardSuffix, PathPrefix: wire.PathPrefix,
-			Priority: wire.Priority, Protocol: wire.Protocol, OriginScheme: wire.OriginScheme, AccessMode: wire.AccessMode, OriginAddress: originAddress,
+			Priority: wire.Priority, Protocol: wire.Protocol, OriginScheme: wire.OriginScheme, AccessMode: wire.AccessMode,
+			PublicTCPListenerID: wire.PublicTCPListenerID, PublicTCPPort: wire.PublicTCPPort,
+			ViewerPolicyGeneration: wire.ViewerPolicyGeneration, OriginAddress: originAddress,
 			PreserveHost: wire.PreserveHost, HostOverride: wire.HostOverride, DomainBindings: append([]DomainBinding(nil), wire.DomainBindings...), State: wire.State,
 			DesiredState: wire.DesiredState, ObservedState: wire.ObservedState, TargetHost: wire.Target.Host,
 			TargetPort: wire.Target.Port, TargetRouteID: wire.Target.RouteID,
@@ -424,7 +429,7 @@ func (c *HTTPClient) postNodeWithMaximumAndIdentity(ctx context.Context, path, n
 	request.Header.Set("Accept", "application/json")
 	response, err := c.client.Do(request)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrControlUnavailable, err)
+		return &RequestFailure{Path: path, Category: "transport", Err: ErrControlUnavailable}
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
@@ -432,7 +437,7 @@ func (c *HTTPClient) postNodeWithMaximumAndIdentity(ctx context.Context, path, n
 		if path == "/v1/nodes/heartbeat" && response.StatusCode == http.StatusConflict {
 			return ErrNodeObservationStale
 		}
-		return ErrControlUnavailable
+		return &RequestFailure{Path: path, Status: response.StatusCode, Category: "http_status", Err: ErrControlUnavailable}
 	}
 	if output == nil {
 		_, err = io.Copy(io.Discard, io.LimitReader(response.Body, int64(maximum)+1))
@@ -445,7 +450,7 @@ func (c *HTTPClient) postNodeWithMaximumAndIdentity(ctx context.Context, path, n
 		return ErrControlUnavailable
 	}
 	if err := strictjson.Decode(data, output, 64); err != nil {
-		return ErrControlUnavailable
+		return &RequestFailure{Path: path, Status: response.StatusCode, Category: "response_invalid", Err: ErrControlUnavailable}
 	}
 	return nil
 }

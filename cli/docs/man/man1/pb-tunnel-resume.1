@@ -6,11 +6,17 @@ pb-tunnel-resume - Resume new traffic for a preserved tunnel
 
 
 .SH SYNOPSIS
-\fBpb tunnel resume  [flags]\fP
+\fBpb tunnel resume <tunnel> [flags]\fP
 
 
 .SH DESCRIPTION
 Resume new traffic for a preserved tunnel
+
+.PP
+Resume new traffic for a paused durable tunnel without creating a new identity. --wait observes readiness; connector and origin failures may still need repair.
+
+.PP
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
 
 .PP
 JSON output is supported with --json.

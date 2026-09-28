@@ -15,6 +15,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/diagnosticlog"
 	hostauth "github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/clientauthority"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/endpointidentity"
@@ -71,6 +72,53 @@ type cliNativeRuntime struct {
 	cancel                context.CancelFunc
 	done                  chan struct{}
 	once                  sync.Once
+}
+
+// NativeProbe reports an authenticated connection to one admitted machine.
+// Connection is setup duration, not a round-trip measurement.
+type NativeProbe struct {
+	Path       string
+	Connection time.Duration
+}
+
+func (t *PeerTerminalTunnel) ProbeNative(ctx context.Context, machineID string, generation uint64) (NativeProbe, error) {
+	if t == nil || ctx == nil || machineID == "" || generation == 0 {
+		return NativeProbe{}, ErrPeerTerminalInvalid
+	}
+	credential, err := t.config.Auth.Credential()
+	if err != nil {
+		return NativeProbe{}, err
+	}
+	profile, err := t.config.Store.Load(t.config.Issuer)
+	if err != nil {
+		return NativeProbe{}, err
+	}
+	client := api.New(t.config.Issuer, credential, t.config.HTTPClient)
+	authority, err := t.authorities.Resolve(ctx, clientauthority.Request{Store: t.config.Store, Client: client, Issuer: t.config.Issuer, AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID, MachineID: machineID, MachineGeneration: generation, Now: t.config.Now().UTC()})
+	if err != nil {
+		return NativeProbe{}, err
+	}
+	runtime, consumed, err := t.acquireNativeRuntime(ctx, profile.Account.ID, profile.CLIClientSessionID, authority)
+	if !consumed {
+		authority.Clear()
+	}
+	if err != nil {
+		return NativeProbe{}, err
+	}
+	started := time.Now()
+	session, err := runtime.Dial(ctx, machineID, peerquic.ClassInteractive)
+	if err != nil {
+		return NativeProbe{}, err
+	}
+	defer session.Close()
+	if err := ctx.Err(); err != nil {
+		return NativeProbe{}, err
+	}
+	path, err := runtime.authority.PeerPath(machineID)
+	if err != nil {
+		return NativeProbe{}, err
+	}
+	return NativeProbe{Path: path, Connection: time.Since(started)}, nil
 }
 
 type cliNativeStreamGroup struct {
@@ -323,6 +371,35 @@ func (t *PeerTerminalTunnel) acquireNativeRuntime(ctx context.Context, accountID
 	return runtime, true, nil
 }
 
+// NativeRelayCandidates reads the same signed relay inventory used by native
+// sessions. It initializes the daemon's shared native authority if needed.
+func (t *PeerTerminalTunnel) NativeRelayCandidates(ctx context.Context) ([]tailnet.RegionalNode, error) {
+	if t == nil || ctx == nil {
+		return nil, ErrPeerTerminalInvalid
+	}
+	credential, err := t.config.Auth.Credential()
+	if err != nil {
+		return nil, err
+	}
+	profile, err := t.config.Store.Load(t.config.Issuer)
+	if err != nil {
+		return nil, err
+	}
+	client := api.New(t.config.Issuer, credential, t.config.HTTPClient)
+	identity, err := clientauthority.ResolveLocal(ctx, clientauthority.Request{Store: t.config.Store, Client: client, Issuer: t.config.Issuer, AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID, Now: t.config.Now().UTC()})
+	if err != nil {
+		return nil, err
+	}
+	runtime, consumed, err := t.acquireNativeRuntime(ctx, profile.Account.ID, profile.CLIClientSessionID, identity)
+	if !consumed {
+		identity.Clear()
+	}
+	if err != nil {
+		return nil, err
+	}
+	return runtime.authority.RegionalNodes(t.config.Now().UTC())
+}
+
 func (r *cliNativeRuntime) alive() bool {
 	if r == nil || r.done == nil {
 		return false
@@ -402,7 +479,11 @@ func newCLINativeRuntime(ctx context.Context, issuer string, store config.Profil
 		_ = authority.Close()
 		return nil, err
 	}
-	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: peerTLS})
+	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: peerTLS, Observe: func(event native.Event) {
+		if event.Kind == "connected" {
+			diagnosticlog.TryInfo("native peer connected", "machine_id", event.PeerID, "underlay", event.Path)
+		}
+	}})
 	if err != nil {
 		_ = authority.Close()
 		return nil, err

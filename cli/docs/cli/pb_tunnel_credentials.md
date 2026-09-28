@@ -6,6 +6,10 @@ Manage tunnel credentials
 
 Manage tunnel credentials
 
+Manage credentials that authorize tunnel connectors. Rotate deliberately and inspect connector recovery after the transition.
+
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+
 With --json, this command group lists its available commands.
 
 ### Options

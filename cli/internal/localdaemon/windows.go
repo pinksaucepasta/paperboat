@@ -10,7 +10,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/transportmanager"
 )
 
 type ManagedSSHConfig struct {
@@ -36,9 +35,9 @@ type DaemonConfig struct {
 	RequestTimeout          time.Duration
 	Clock                   func() time.Time
 	ManagedSSH              *ManagedSSHConfig
-	TransportManager        *transportmanager.Manager
-	OpenPeerStream          func(context.Context, localapi.Peer, localapi.PeerStreamRequest, *transportmanager.Manager) (net.Conn, error)
+	OpenPeerStream          func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (net.Conn, error)
 	ProbePeer               func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (localapi.PeerProbeResult, error)
+	RelayInventory          func(context.Context) (localapi.RelayInventory, error)
 	InvalidatePeerAuthority func(string)
 	WarmPeerMetadata        func(context.Context, []api.UserMachine) error
 	IssuePeerStream         func(context.Context, localapi.PeerStreamRequest) (localapi.PeerStreamRequest, error)

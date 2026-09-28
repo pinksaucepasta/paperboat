@@ -6,6 +6,10 @@ Approve a changed SSH host identity
 
 Approve a changed SSH host identity
 
+Approve one pending SSH host-key change by its exact SHA256 fingerprint. Verify the fingerprint out of band before accepting it; this changes trust for the selected device.
+
+Managed SSH resolves the Paperboat device and then runs OpenSSH with the selected target. Host identity checks remain in force. Standard SSH, SCP, SFTP, and rsync behavior is preserved while Paperboat supplies device resolution and authorized connectivity.
+
 JSON output is supported with --json.
 
 ```

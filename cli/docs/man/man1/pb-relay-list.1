@@ -2,7 +2,7 @@
 .TH "PB-RELAY-LIST" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-relay-list - List relays and measure current latency
+pb-relay-list - List hosted and self-hosted relays
 
 
 .SH SYNOPSIS
@@ -10,7 +10,15 @@ pb-relay-list - List relays and measure current latency
 
 
 .SH DESCRIPTION
-List relays and measure current latency
+List relay candidates from the signed native network authority and the
+signed-in account's selected self-hosted relay pool. Mixed mode shows both
+sources. Self-hosted-only mode shows only selected self-hosted relays,
+including unavailable ones. Sign-in and the local daemon are required.
+
+.PP
+Reported_ready means a recent signed control-plane observation, not a live
+data connection. Use --json for paperboat.relay-list/v1 output with the pool
+mode, relays, and observation timestamps.
 
 .PP
 JSON output is supported with --json.
@@ -36,6 +44,13 @@ JSON output is supported with --json.
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+
+.SH EXAMPLE
+.EX
+  pb relay list
+  pb relay list --json
+.EE
 
 
 .SH SEE ALSO

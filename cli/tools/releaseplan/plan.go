@@ -515,30 +515,6 @@ func WriteFile(path string, body []byte, max int64) error {
 	return directoryFile.Sync()
 }
 
-func WriteManifest(path string, manifest Manifest) error {
-	body, err := manifest.Bytes()
-	if err != nil {
-		return err
-	}
-	return WriteFile(path, body, MaxManifestBytes)
-}
-
-func WritePlan(path string, plan Plan) error {
-	body, err := plan.Bytes()
-	if err != nil {
-		return err
-	}
-	return WriteFile(path, body, MaxPlanBytes)
-}
-
-func WriteState(path string, state State) error {
-	body, err := state.Bytes()
-	if err != nil {
-		return err
-	}
-	return WriteFile(path, body, MaxStateBytes)
-}
-
 func readBoundedJSON(path string, max int64) ([]byte, error) {
 	if !absoluteCleanPath(path) {
 		return nil, ErrUnsafePath

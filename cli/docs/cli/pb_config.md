@@ -6,6 +6,8 @@ Inspect the local CLI config
 
 Inspect the local CLI config
 
+Show local configuration and synchronization commands. Use show for effective values, path for the active file, and status for repository synchronization. Interactive terminals open local config controls.
+
 With --json, this command group lists its available commands.
 
 ```

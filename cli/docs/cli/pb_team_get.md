@@ -1,10 +1,14 @@
 ## pb team get
 
-Get teams
+Show one team and its current generation
 
 ### Synopsis
 
-Get teams
+Show one team and its current generation
+
+Read one team's current membership, permissions, and generation. Use the returned generation for the next mutation to avoid overwriting a newer change.
+
+Teams use explicit membership and resource grants. Membership alone does not grant device use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
 
 JSON output is supported with --json.
 

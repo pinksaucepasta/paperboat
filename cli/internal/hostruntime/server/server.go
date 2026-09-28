@@ -71,25 +71,28 @@ type Authorizer interface {
 type Authorization struct {
 	// JournalBinding is a stable, non-secret identity and resource binding. It is
 	// included in idempotency hashing so operation IDs cannot cross principals.
-	JournalBinding     string
-	EnvironmentID      string
-	MachineID          string
-	SourceMachineID    string
-	UserID             string
-	AccountID          string
-	ClientID           string
-	SessionID          string
-	TerminalRole       TerminalRole
-	TerminalGeneration uint64
-	ResourceID         string
-	OperationID        string
-	RequestID          string
-	RequestHash        string
-	IdempotencyKey     string
-	ExpiresAt          time.Time
-	Revoked            *atomic.Bool
-	RevokedSignal      <-chan struct{}
-	Value              any
+	JournalBinding      string
+	EnvironmentID       string
+	MachineID           string
+	SourceMachineID     string
+	UserID              string
+	AccountID           string
+	ClientID            string
+	SessionID           string
+	TerminalRole        TerminalRole
+	TerminalGeneration  uint64
+	BrowserTerminal     bool
+	BrowserAttachmentID string
+	PolicyGeneration    uint64
+	ResourceID          string
+	OperationID         string
+	RequestID           string
+	RequestHash         string
+	IdempotencyKey      string
+	ExpiresAt           time.Time
+	Revoked             *atomic.Bool
+	RevokedSignal       <-chan struct{}
+	Value               any
 }
 
 type TerminalRole string
@@ -879,7 +882,7 @@ func (s *terminalConnectionState) bind(authorization Authorization, frame protoc
 				}
 			}(authorization.RevokedSignal)
 		}
-		if authorization.TerminalRole == TerminalRoleViewer || authorization.TerminalRole == TerminalRoleInteractive {
+		if authorization.BrowserTerminal || authorization.TerminalRole == TerminalRoleViewer || authorization.TerminalRole == TerminalRoleInteractive {
 			deadline := authorization.ExpiresAt
 			s.expiryWatchOnce.Do(func() {
 				go func() {
@@ -1192,6 +1195,16 @@ func errorFrameWithDetails(requestID, code, message string, retryable bool, deta
 func safeErrorDetails(code string, details json.RawMessage) map[string]any {
 	if len(details) == 0 {
 		return nil
+	}
+	if code == "terminal_create_failed" {
+		var value struct {
+			ErrorType string `json:"error_type"`
+			Errno     int    `json:"errno"`
+		}
+		if json.Unmarshal(details, &value) != nil || len(value.ErrorType) > 100 || value.Errno < 0 || value.Errno > 4096 {
+			return nil
+		}
+		return map[string]any{"error_type": value.ErrorType, "errno": value.Errno}
 	}
 	if code == "slow_consumer" {
 		var value struct {

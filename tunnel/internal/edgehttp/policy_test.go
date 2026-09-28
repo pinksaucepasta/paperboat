@@ -474,9 +474,9 @@ func TestHTTP3AbsoluteHTTPSRequestTargetIsNormalized(t *testing.T) {
 func TestHelperCredentialClassesCannotCrossCapabilityPaths(t *testing.T) {
 	allowed := map[string]string{
 		"file_transfer": "/v1/file-transfers", "preview_launch": "/v1/preview-launches",
-		"terminal_operation": "/v1/runtime",
+		"terminal_operation": "/v1/runtime", "browser_terminal_operation": "/v1/browser-terminal",
 	}
-	paths := []string{"/v1/file-transfers", "/v1/preview-launches", "/v1/runtime", "/v1/codex-sessions/cdx_1/ws", "/v1/local-file-transfers", "/v1/local-file-transfers/transfer_1/content"}
+	paths := []string{"/v1/file-transfers", "/v1/preview-launches", "/v1/runtime", "/v1/browser-terminal", "/v1/codex-sessions/cdx_1/ws", "/v1/local-file-transfers", "/v1/local-file-transfers/transfer_1/content"}
 	for class, ownPath := range allowed {
 		for _, path := range paths {
 			got := credentialAllowsHelperPath(class, path)
@@ -485,7 +485,7 @@ func TestHelperCredentialClassesCannotCrossCapabilityPaths(t *testing.T) {
 			}
 		}
 	}
-	for _, path := range paths[3:] {
+	for _, path := range paths[4:] {
 		if helperAccessPath(path) {
 			t.Fatalf("peer-only path became edge reachable: %s", path)
 		}
@@ -701,6 +701,91 @@ func TestPolicyGenerationHandoffDrainsActiveRequest(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("handoff did not finish after old request stopped")
+	}
+}
+
+func TestPolicyFenceClosesOnlyAffectedHTTPStreams(t *testing.T) {
+	routes := route.NewRegistry("preview.example.test", "runtime.example.test")
+	affected := policyRouteRule("affected", "affected.example.test", route.MatchExact, "/", 1)
+	affected.RouteID, affected.AccountID, affected.TunnelID = "route_affected", "account_1", "tunnel_1"
+	unaffected := policyRouteRule("unaffected", "unaffected.example.test", route.MatchExact, "/", 1)
+	unaffected.RouteID, unaffected.AccountID, unaffected.TunnelID = "route_unaffected", "account_1", "tunnel_1"
+	if err := routes.ApplyGeneration(context.Background(), 1, []route.RouteRule{affected, unaffected}, func(context.Context, []route.RouteRule) error { return nil }, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	affectedStarted, unaffectedStarted := make(chan struct{}), make(chan struct{})
+	affectedDone, unaffectedDone := make(chan struct{}), make(chan struct{})
+	policy, err := New(Config{PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test", MaxHeaderBytes: 4096, MaxBodyBytes: 1024, Routes: routes}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		match, ok := RouteMatchFromContext(r.Context())
+		if !ok {
+			t.Error("request lost route match")
+			return
+		}
+		if r.URL.Path == "/stream" {
+			switch match.Rule.RouteID {
+			case affected.RouteID:
+				close(affectedStarted)
+				<-r.Context().Done()
+				close(affectedDone)
+			case unaffected.RouteID:
+				close(unaffectedStarted)
+				<-r.Context().Done()
+				close(unaffectedDone)
+			}
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	serve := func(host string, requestContext context.Context) {
+		request := httptest.NewRequest(http.MethodGet, "https://"+host+"/stream", nil).WithContext(requestContext)
+		request.Host = host
+		policy.ServeHTTP(httptest.NewRecorder(), request)
+	}
+	otherContext, cancelOther := context.WithCancel(context.Background())
+	defer cancelOther()
+	go serve(affected.Hostname, context.Background())
+	go serve(unaffected.Hostname, otherContext)
+	for _, started := range []<-chan struct{}{affectedStarted, unaffectedStarted} {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("existing HTTP stream did not start")
+		}
+	}
+	if err := routes.StageGeneration(2, []route.RouteRule{unaffected}); err != nil {
+		t.Fatal(err)
+	}
+	if err := routes.MarkGenerationReady(2); err != nil {
+		t.Fatal(err)
+	}
+	if err := routes.ActivateGenerationFencedRoutes(context.Background(), 2, []route.RouteIdentity{{AccountID: "account_1", TunnelID: "tunnel_1", RouteID: affected.RouteID}}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-affectedDone:
+	case <-time.After(time.Second):
+		t.Fatal("affected HTTP handler did not stop after policy fence")
+	}
+	select {
+	case <-unaffectedDone:
+		t.Fatal("unaffected HTTP handler was stopped by policy fence")
+	default:
+	}
+	newRequest := httptest.NewRequest(http.MethodGet, "https://"+unaffected.Hostname+"/new", nil)
+	newRequest.Host = unaffected.Hostname
+	newRecorder := httptest.NewRecorder()
+	policy.ServeHTTP(newRecorder, newRequest)
+	if newRecorder.Code != http.StatusNoContent {
+		t.Fatalf("unaffected route status after fence = %d", newRecorder.Code)
+	}
+	cancelOther()
+	select {
+	case <-unaffectedDone:
+	case <-time.After(time.Second):
+		t.Fatal("unaffected HTTP handler did not stop after its own client disconnected")
 	}
 }
 

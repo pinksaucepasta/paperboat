@@ -6,6 +6,10 @@ Show the active Paperboat account
 
 Show the active Paperboat account
 
+Report the active account and session for the configured server. Use this before an account-scoped operation to check which identity the CLI will use.
+
+Sign-in credentials are stored in the selected local profile for its configured Paperboat server. Account commands use that profile; a missing or rejected session must be repaired with pb auth login before protected resources can be used.
+
 JSON output is supported with --json.
 
 ```

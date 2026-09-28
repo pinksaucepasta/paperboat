@@ -6,11 +6,17 @@ pb-tunnel-domain-list - List tunnel domains
 
 
 .SH SYNOPSIS
-\fBpb tunnel domain list  [flags]\fP
+\fBpb tunnel domain list <tunnel> [flags]\fP
 
 
 .SH DESCRIPTION
 List tunnel domains
+
+.PP
+List domains for one durable tunnel with pagination. The returned state distinguishes registration from verified ownership and serving readiness.
+
+.PP
+Custom domains require DNS ownership verification before they can serve a route. Domain changes are scoped to one tunnel, and verification status is separate from route readiness. The instructions command returns the required authoritative DNS records.
 
 .PP
 JSON output is supported with --json.

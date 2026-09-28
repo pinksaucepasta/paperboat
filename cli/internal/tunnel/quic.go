@@ -3,25 +3,19 @@ package tunnel
 import (
 	"context"
 	"crypto/rand"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net"
-	"net/url"
 	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
-	"github.com/quic-go/quic-go"
 )
 
 const (
-	nativeALPN             = "paperboat-terminal/1"
 	nativeVersion     byte = 1
 	nativeRoleControl byte = 1
 	nativeRoleInput   byte = 2
@@ -35,24 +29,6 @@ const (
 
 var nativeMagic = [4]byte{'P', 'B', 'T', '1'}
 
-type QUICTunnel struct {
-	OutputQueueChunks int
-	TLSConfig         *tls.Config
-	QUICConfig        *quic.Config
-	DialQUIC          func(context.Context, string, *tls.Config, *quic.Config) (*quic.Conn, error)
-}
-
-func NewQUICTunnel() *QUICTunnel {
-	return &QUICTunnel{OutputQueueChunks: terminalOutputQueueChunks, TLSConfig: &tls.Config{ClientSessionCache: tls.NewLRUClientSessionCache(64)}}
-}
-
-type preparedNativeTerminal struct {
-	connection *quic.Conn
-	target     *resolver.TerminalTarget
-	queue      int
-	once       sync.Once
-}
-
 type nativeStream interface {
 	io.ReadWriteCloser
 	SetWriteDeadline(time.Time) error
@@ -61,41 +37,6 @@ type nativeStream interface {
 type nativeStreamGroup interface {
 	OpenStream(context.Context) (nativeStream, error)
 	Close() error
-}
-
-type quicNativeStreamGroup struct{ connection *quic.Conn }
-
-func (g quicNativeStreamGroup) OpenStream(ctx context.Context) (nativeStream, error) {
-	return g.connection.OpenStreamSync(ctx)
-}
-func (g quicNativeStreamGroup) Close() error { return g.connection.CloseWithError(0, "closed") }
-
-func (p *preparedNativeTerminal) Attach(ctx context.Context) (Conn, error) {
-	var result Conn
-	var resultErr error
-	p.once.Do(func() {
-		message, err := authenticateNativeConnection(ctx, p.connection, p.target)
-		if err != nil {
-			_ = p.connection.CloseWithError(1, "authentication_failed")
-			resultErr = err
-			return
-		}
-		connection, err := newInitializedHelperTerminalConn(ctx, message, p.target, p.queue)
-		resultErr = err
-		if resultErr != nil {
-			_ = message.Close()
-			return
-		}
-		result = connection
-	})
-	if result == nil && resultErr == nil {
-		return nil, errors.New("prepared terminal already consumed")
-	}
-	return result, resultErr
-}
-
-func (p *preparedNativeTerminal) Close() error {
-	return p.connection.CloseWithError(0, "closed")
 }
 
 type terminalTransportError struct {
@@ -113,90 +54,6 @@ func (e *terminalTransportError) Unwrap() error { return e.cause }
 func FallbackEligible(err error) bool {
 	var target *terminalTransportError
 	return errors.As(err, &target)
-}
-
-func (t *QUICTunnel) Dial(ctx context.Context, info resolver.ConnectInfo) (Conn, error) {
-	prepared, err := t.Establish(ctx, info)
-	if err != nil {
-		return nil, err
-	}
-	return prepared.Attach(ctx)
-}
-
-func (t *QUICTunnel) Establish(ctx context.Context, info resolver.ConnectInfo) (preparedTerminal, error) {
-	if info.Terminal == nil || info.Terminal.Protocol != "paperboat.terminal.v1" {
-		return nil, errors.New("native QUIC requires terminal protocol v1")
-	}
-	connection, err := t.dialTransport(ctx, info.Terminal)
-	if err != nil {
-		return nil, err
-	}
-	return &preparedNativeTerminal{connection: connection, target: info.Terminal, queue: t.outputQueueChunks()}, nil
-}
-
-func (t *QUICTunnel) Check(ctx context.Context, target *resolver.TerminalTarget) error {
-	message, err := t.dialMessage(ctx, target)
-	if err != nil {
-		return err
-	}
-	defer message.Close()
-	return helperCheck(ctx, message)
-}
-
-func (t *QUICTunnel) outputQueueChunks() int {
-	if t.OutputQueueChunks > 0 {
-		return t.OutputQueueChunks
-	}
-	return terminalOutputQueueChunks
-}
-
-func (t *QUICTunnel) dialMessage(ctx context.Context, target *resolver.TerminalTarget) (*nativeMessageConnection, error) {
-	connection, err := t.dialTransport(ctx, target)
-	if err != nil {
-		return nil, err
-	}
-	message, err := authenticateNativeConnection(ctx, connection, target)
-	if err != nil {
-		_ = connection.CloseWithError(1, "authentication_failed")
-		return nil, err
-	}
-	return message, nil
-}
-
-func (t *QUICTunnel) dialTransport(ctx context.Context, target *resolver.TerminalTarget) (*quic.Conn, error) {
-	address, serverName, err := nativeEndpoint(target)
-	if err != nil {
-		return nil, err
-	}
-	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS13, ServerName: serverName, NextProtos: []string{nativeALPN}}
-	if t.TLSConfig != nil {
-		tlsConfig = t.TLSConfig.Clone()
-		tlsConfig.ServerName = serverName
-		tlsConfig.NextProtos = []string{nativeALPN}
-	}
-	quicConfig := &quic.Config{HandshakeIdleTimeout: 5 * time.Second, MaxIdleTimeout: 2 * time.Minute, KeepAlivePeriod: 15 * time.Second, MaxIncomingStreams: 0, MaxIncomingUniStreams: 0, EnableDatagrams: false}
-	if t.QUICConfig != nil {
-		quicConfig = t.QUICConfig.Clone()
-	}
-	dial := t.DialQUIC
-	if dial == nil {
-		dial = quic.DialAddr
-	}
-	connection, err := dial(ctx, address, tlsConfig, quicConfig)
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		if certificateError(err) {
-			return nil, fmt.Errorf("verify native QUIC terminal certificate: %w", err)
-		}
-		return nil, &terminalTransportError{transport: "QUIC", cause: fmt.Errorf("dial %s: %w", address, err)}
-	}
-	return connection, nil
-}
-
-func authenticateNativeConnection(ctx context.Context, connection *quic.Conn, target *resolver.TerminalTarget) (*nativeMessageConnection, error) {
-	return authenticateNativeStreamGroup(ctx, quicNativeStreamGroup{connection: connection}, target, "QUIC")
 }
 
 func authenticateNativeStreamGroup(ctx context.Context, connection nativeStreamGroup, target *resolver.TerminalTarget, transport string) (*nativeMessageConnection, error) {
@@ -223,7 +80,7 @@ func authenticateNativeStreamGroup(ctx context.Context, connection nativeStreamG
 	var input, output nativeStream
 	// The host admits auxiliary streams in this order. Opening concurrently
 	// allows relay multiplexing to deliver output before input, causing a
-	// stream-scoped Noise authority mismatch even though the transport is valid.
+	// stream-scoped authority mismatch even though the transport is valid.
 	for _, role := range []byte{nativeRoleInput, nativeRoleOutput} {
 		stream, openErr := connection.OpenStream(ctx)
 		if openErr == nil {
@@ -288,28 +145,6 @@ func classifyNativeHandshakeError(ctx context.Context, transport string, err err
 		return err
 	}
 	return &terminalTransportError{transport: transport, cause: err}
-}
-
-func nativeEndpoint(target *resolver.TerminalTarget) (string, string, error) {
-	if target == nil || target.Auth.Method != "bearer" || target.Auth.Token == "" {
-		return "", "", errors.New("missing terminal bearer credential")
-	}
-	u, err := url.Parse(target.QUICEndpoint)
-	if err != nil || u.Scheme != "quic" || u.Hostname() == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
-		return "", "", errors.New("invalid native QUIC endpoint")
-	}
-	port := u.Port()
-	if port == "" {
-		port = "443"
-	}
-	return net.JoinHostPort(u.Hostname(), port), u.Hostname(), nil
-}
-
-func certificateError(err error) bool {
-	var unknown x509.UnknownAuthorityError
-	var hostname x509.HostnameError
-	var invalid x509.CertificateInvalidError
-	return errors.As(err, &unknown) || errors.As(err, &hostname) || errors.As(err, &invalid)
 }
 
 func nativeHandshake(ctx context.Context, message helperMessageConnection) ([]byte, error) {

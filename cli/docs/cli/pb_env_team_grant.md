@@ -6,6 +6,10 @@ Grant an account access to an encrypted ENV team scope
 
 Grant an account access to an encrypted ENV team scope
 
+Give one account access to the selected encrypted team ENV scope. The account must still accept and reconcile its grant before using values.
+
+Team ENV scopes have their own encrypted keys and explicit account grants. Rotation preserves values while replacing access keys; reset discards values. Review the confirmation and affected members before changing custody.
+
 JSON output is supported with --json.
 
 ```

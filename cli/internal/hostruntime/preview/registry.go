@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"sort"
 	"sync"
 	"time"
@@ -284,16 +283,6 @@ func (r *Registry) transition(identity string, next State, reason string) (Recor
 	current.Revision++
 	r.records[identity] = current
 	return cloneRecord(current), nil
-}
-
-type TCPProber struct{ Dialer net.Dialer }
-
-func (p TCPProber) Probe(ctx context.Context, target Target) error {
-	connection, err := p.Dialer.DialContext(ctx, "tcp", net.JoinHostPort(target.Host, fmt.Sprint(target.Port)))
-	if err != nil {
-		return err
-	}
-	return connection.Close()
 }
 
 func validTarget(target Target) bool {

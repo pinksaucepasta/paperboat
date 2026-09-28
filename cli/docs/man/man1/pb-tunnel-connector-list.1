@@ -6,11 +6,17 @@ pb-tunnel-connector-list - List tunnel connectors
 
 
 .SH SYNOPSIS
-\fBpb tunnel connector list  [flags]\fP
+\fBpb tunnel connector list <tunnel> [flags]\fP
 
 
 .SH DESCRIPTION
 List tunnel connectors
+
+.PP
+List connectors attached to one durable tunnel with cursor and limit pagination. Use the returned connector identity for drain or revoke.
+
+.PP
+Connectors attach an enrolled host to a durable tunnel. Drain stops new work while allowing existing work to wind down; revoke removes connector authority. Inspect connector state before replacing or removing one.
 
 .PP
 JSON output is supported with --json.

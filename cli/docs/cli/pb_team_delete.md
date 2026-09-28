@@ -1,10 +1,14 @@
 ## pb team delete
 
-Delete team membership
+Delete a team
 
 ### Synopsis
 
-Delete team membership
+Delete a team
+
+Delete a team after exact confirmation and a matching generation. This affects team ownership and grants; inspect attached resources and enrolled team devices first.
+
+Teams use explicit membership and resource grants. Membership alone does not grant device use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
 
 JSON output is supported with --json.
 

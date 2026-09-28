@@ -60,11 +60,11 @@ func desktopEffectiveNetwork(c *cobra.Command, cfg *config.Config, client *api.C
 		if err = fresh.Save(); err != nil {
 			return nil, err
 		}
-		serviceArgs := []string{"daemon", "service", "restart", "--json"}
+		serviceArgs := []string{"service", "restart", "--json"}
 		if runtime.GOOS != "windows" {
 			// The current-user service must use the bundled runtime whose applied
 			// configuration contract this app understands, not an older CLI on PATH.
-			serviceArgs = []string{"daemon", "service", "install", "--config", fresh.Path(), "--json"}
+			serviceArgs = []string{"service", "install", "--config", fresh.Path(), "--json"}
 		}
 		if _, err = desktopCLI(c, serviceArgs); err != nil {
 			return nil, fmt.Errorf("network settings were saved, but the daemon did not become ready; retry Apply on this device: %w", err)

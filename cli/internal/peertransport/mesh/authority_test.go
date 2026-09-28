@@ -111,8 +111,21 @@ func TestAuthoritySharedEngineDialsTwoPeersAndRevokesOne(t *testing.T) {
 	defer firstFlow.Close()
 	secondFlow := dial(second, secondKey, secondAddr, "second")
 	defer secondFlow.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for shared.PeerPath(firstKey.Public()) != "direct" && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if path := shared.PeerPath(firstKey.Public()); path != "direct" {
+		t.Fatalf("local peers did not establish a direct path: %q", path)
+	}
+	if path := shared.PeerPath(firstKey.Public()); path == "unknown" {
+		t.Fatal("active authorized peer has no observed path")
+	}
 	if err := shared.ReplaceAllowedPeers(map[key.NodePublic]netip.Addr{secondKey.Public(): secondAddr}); err != nil {
 		t.Fatal(err)
+	}
+	if path := shared.PeerPath(firstKey.Public()); path != "unknown" {
+		t.Fatalf("revoked peer path=%q", path)
 	}
 	_ = firstFlow.SetDeadline(time.Now().Add(200 * time.Millisecond))
 	_, _ = firstFlow.Write([]byte("revoked"))

@@ -6,6 +6,8 @@ Expose a local target through a temporary preview
 
 Expose a local target through a temporary preview
 
+Start a temporary preview for a local port, URL, or path. --private or --team controls who may open it; public browser HTTP ends TLS at the edge. Use status and stop to manage its lifecycle.
+
 JSON output is supported with --json.
 
 ```

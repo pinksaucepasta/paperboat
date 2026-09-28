@@ -165,8 +165,10 @@ func dispatchElevatedOperation(ctx context.Context, request elevation.Request) e
 			}
 		}
 	case elevation.OperationOpenSSH:
-		config := windowsopenssh.DefaultConfig(nil)
-		config.OwnerSID = request.OwnerSID
+		config, err := elevatedOpenSSHConfig(request.OwnerSID)
+		if err != nil {
+			return err
+		}
 		switch request.Action {
 		case elevation.ActionOpenSSHSetup:
 			_, err := windowsopenssh.Setup(ctx, config)
@@ -179,6 +181,16 @@ func dispatchElevatedOperation(ctx context.Context, request elevation.Request) e
 		}
 	}
 	return errors.New("unsupported elevated Windows operation")
+}
+
+func elevatedOpenSSHConfig(ownerSID string) (windowsopenssh.Config, error) {
+	instance, err := hostinstall.WindowsInstanceForSID(ownerSID)
+	if err != nil {
+		return windowsopenssh.Config{}, err
+	}
+	config := windowsopenssh.DefaultConfig(nil)
+	config.OwnerSID = ownerSID
+	return windowsOpenSSHBootstrapConfig(config, instance), nil
 }
 
 func installWindowsRuntimeFromSuppliedBytes(ctx context.Context, request hostinstall.Request) error {

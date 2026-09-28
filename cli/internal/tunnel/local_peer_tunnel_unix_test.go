@@ -85,7 +85,7 @@ func TestLocalPeerTunnelTerminalPreservesFramingAndWaitLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tunnel := LocalPeerTunnel{Client: client, Transport: TerminalTransportAuto}
+	tunnel := LocalPeerTunnel{Client: client}
 	connection, err := tunnel.Dial(context.Background(), resolver.ConnectInfo{
 		ProjectID:         "machine_1",
 		MachineGeneration: 1,

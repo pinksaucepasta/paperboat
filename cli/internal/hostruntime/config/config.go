@@ -13,8 +13,7 @@ import (
 type Profile string
 
 const (
-	Hosted Profile = "hosted"
-	BYOD   Profile = "byod"
+	BYOD Profile = "byod"
 )
 
 type Limits struct {
@@ -46,10 +45,10 @@ type ResourceLimits struct {
 	MaxConcurrentOps       int
 }
 
-var DefaultResources = ResourceLimits{MaxSessions: 20, MaxAttachments: 16, MaxInputDecisions: 10_000, HistoryBytes: 64 << 10, MaxConcurrentTransfers: 2, MaxPreviewTargets: 20, MaxConcurrentProbes: 8, MaxConcurrentOps: 32}
+var DefaultResources = ResourceLimits{MaxSessions: 20, MaxAttachments: 128, MaxInputDecisions: 10_000, HistoryBytes: 64 << 10, MaxConcurrentTransfers: 2, MaxPreviewTargets: 20, MaxConcurrentProbes: 8, MaxConcurrentOps: 32}
 
 func (c Config) Validate() error {
-	if c.Profile != Hosted && c.Profile != BYOD {
+	if c.Profile != BYOD {
 		return fmt.Errorf("profile: %w", ErrInvalid)
 	}
 	if c.StateRoot == "" || !filepath.IsAbs(c.StateRoot) {
@@ -69,17 +68,14 @@ func (c Config) Validate() error {
 	if resources == (ResourceLimits{}) {
 		resources = DefaultResources
 	}
-	if resources.MaxSessions < 1 || resources.MaxSessions > 256 || resources.MaxAttachments < 1 || resources.MaxAttachments > 64 || resources.MaxInputDecisions < 1 || resources.MaxInputDecisions > 100_000 || resources.HistoryBytes < 1 || resources.HistoryBytes > 64<<20 || resources.MaxConcurrentTransfers < 1 || resources.MaxConcurrentTransfers > 16 || resources.MaxPreviewTargets < 1 || resources.MaxPreviewTargets > 20 || resources.MaxConcurrentProbes < 1 || resources.MaxConcurrentProbes > 64 || resources.MaxConcurrentOps < 1 || resources.MaxConcurrentOps > 256 {
+	if resources.MaxSessions < 1 || resources.MaxSessions > 256 || resources.MaxAttachments < 1 || resources.MaxAttachments > 128 || resources.MaxInputDecisions < 1 || resources.MaxInputDecisions > 100_000 || resources.HistoryBytes < 1 || resources.HistoryBytes > 64<<20 || resources.MaxConcurrentTransfers < 1 || resources.MaxConcurrentTransfers > 16 || resources.MaxPreviewTargets < 1 || resources.MaxPreviewTargets > 20 || resources.MaxConcurrentProbes < 1 || resources.MaxConcurrentProbes > 64 || resources.MaxConcurrentOps < 1 || resources.MaxConcurrentOps > 256 {
 		return fmt.Errorf("resource limits exceed runtime bounds: %w", ErrInvalid)
 	}
 	return nil
 }
 
 func FromEnv(version string, environ func(string) string) (Config, error) {
-	profile := Profile(environ("PAPERBOAT_RUNTIME_PROFILE"))
-	if profile == "" {
-		profile = BYOD
-	}
+	profile := BYOD
 	root := environ("PAPERBOAT_RUNTIME_STATE_ROOT")
 	if root == "" {
 		var err error

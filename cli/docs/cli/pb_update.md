@@ -6,6 +6,8 @@ Update pb from the signed Paperboat release
 
 Update pb from the signed Paperboat release
 
+Install a verified signed Paperboat release for this machine. Inspect available metadata with check and current state with status; failures report recovery while preserving a usable known installation.
+
 JSON output is supported with --json.
 
 ```

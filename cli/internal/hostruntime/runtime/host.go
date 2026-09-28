@@ -4,6 +4,7 @@ package runtime
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcastserver"
 	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configapply"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
@@ -33,11 +35,11 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/process"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeattachment"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/transfercrypto"
 )
 
 var ErrHostInvalid = errors.New("invalid host runtime composition")
@@ -61,6 +63,8 @@ type HostConfig struct {
 type HostDependencies struct {
 	RecordTerminalJoin        server.TerminalJoinRecorder
 	Authorizer                server.AuthorizerFactory
+	BrowserTerminalAuthorizer server.AuthorizerFactory
+	BrowserTerminalIdentity   server.BrowserTerminalIdentityProvider
 	AuthorizationService      Service
 	Listener                  ListenerFactory
 	Connector                 Service
@@ -70,12 +74,12 @@ type HostDependencies struct {
 	PreviewRecovery           Service
 	PreviewOwnerSessions      *preview.OwnerSessionLeaseManager
 	RuntimeObservationService Service
+	RuntimeAttachmentService  Service
 	ManagedEnvironment        envinject.EnvironmentSource
 	ConfigApply               configapply.Handler
 	ConfigApplyProof          bool
 	ConfigSync                Service
 	Random                    io.Reader
-	HostedLifecycle           HostedLifecycle
 	SessionLauncherFactory    func(*session.Manager) (server.SessionLauncher, error)
 	HealthTracker             *health.HealthTracker
 	Metrics                   *observability.Registry
@@ -92,7 +96,6 @@ type HostDependencies struct {
 	TunnelManager             stablehostd.TunnelWorkloads
 	UpdateGate                hostdproto.UpdateGateHandler
 	NativePeerFactory         func(func(net.Conn) error, http.Handler) (Service, error)
-	TransferKeys              *transfercrypto.KeyVault
 	Capabilities              server.CapabilityGate
 }
 
@@ -102,18 +105,6 @@ func previewPrivateTCPAccessHandler(value any) http.Handler {
 		return nil
 	}
 	return provider.PrivateTCPAccess()
-}
-
-func transferKeyEraser(vault *transfercrypto.KeyVault) func(string) error {
-	if vault == nil {
-		return nil
-	}
-	return vault.Delete
-}
-
-type HostedLifecycle interface {
-	Service
-	protocol.CapabilityProvider
 }
 
 type Host struct {
@@ -173,19 +164,15 @@ func NewClientCoordinator(ctx context.Context, config HostConfig, dependencies H
 	if err != nil {
 		return nil, err
 	}
-	transferService, err := filetransfer.New(filetransfer.Config{Root: filepath.Join(config.Runtime.StateRoot, "file-transfers"), LocalMachineID: config.MachineID, Store: durable, PublishRoot: config.InboxPath, Random: rand.Reader, Policy: config.FileTransferPolicy, EraseTransferKey: transferKeyEraser(dependencies.TransferKeys)})
+	transferService, err := filetransfer.New(filetransfer.Config{Root: filepath.Join(config.Runtime.StateRoot, "file-transfers"), LocalMachineID: config.MachineID, Store: durable, PublishRoot: config.InboxPath, Random: rand.Reader, Policy: config.FileTransferPolicy})
 	if err != nil {
 		return nil, err
 	}
 	transferHandlerConfig := server.FileTransferHandlerConfig{
-		Service: transferService, Journal: journal, Authorizer: dependencies.Authorizer, TransferKeys: dependencies.TransferKeys,
+		Service: transferService, Journal: journal, Authorizer: dependencies.Authorizer,
 		AuthorizeCreate: func(authorization server.Authorization, request server.CreateFileTransferRequest) bool {
 			return (dependencies.Capabilities == nil || dependencies.Capabilities.Enabled("file-transfer.v1")) && authorization.MachineID == config.MachineID && authorization.UserID != "" && request.SourceMachineID == authorization.SourceMachineID && request.InitiatingUserID == authorization.UserID && request.DestinationMachineID == config.MachineID && request.SessionID == "" && (authorization.RequestHash == "" || authorization.RequestID != "" && authorization.IdempotencyKey == request.BatchID && authorization.RequestHash == server.FileTransferManifestDigest(request.Files))
 		},
-	}
-	transferHandler, err := server.NewFileTransferHandler(transferHandlerConfig)
-	if err != nil {
-		return nil, err
 	}
 	nativeTransferHandler, err := server.NewNativeFileTransferHandler(transferHandlerConfig)
 	if err != nil {
@@ -213,8 +200,6 @@ func NewClientCoordinator(ctx context.Context, config HostConfig, dependencies H
 		mux.Handle("/v1/private-tcp-access", handler)
 		mux.Handle("/v1/private-tcp-access/", handler)
 	}
-	mux.Handle("/v1/file-transfers", transferHandler)
-	mux.Handle("/v1/file-transfers/", transferHandler)
 	if dependencies.PreviewDispatcher != nil {
 		handler, dispatchErr := server.NewPreviewDispatchHandler(server.PreviewDispatchHandlerConfig{Authorizer: dependencies.Authorizer, Dispatcher: dependencies.PreviewDispatcher, MachineID: config.MachineID, Capabilities: dependencies.Capabilities})
 		if dispatchErr != nil {
@@ -313,6 +298,9 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	if err := config.Runtime.Validate(); err != nil || !LoopbackAddress(config.ListenAddress) || !filepath.IsAbs(config.WorkspaceRoot) || config.MachineID == "" || dependencies.Authorizer == nil {
 		return nil, errors.Join(ErrHostInvalid, err)
 	}
+	if (dependencies.BrowserTerminalAuthorizer == nil) != (dependencies.BrowserTerminalIdentity == nil) {
+		return nil, ErrHostInvalid
+	}
 	if dependencies.SessionLauncherFactory == nil && config.ShellPath == "" {
 		return nil, ErrHostInvalid
 	}
@@ -338,13 +326,8 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		"PAPERBOAT_WORKSPACE_ROOT="+config.WorkspaceRoot,
 	)
 	invalidConfigApply := dependencies.ConfigApplyProof && dependencies.ConfigApply == nil
-	invalidHosted := config.Runtime.Profile == runtimeconfig.Hosted && dependencies.HostedLifecycle == nil ||
-		config.Runtime.Profile == runtimeconfig.BYOD && dependencies.HostedLifecycle != nil
 	if invalidConfigApply {
 		return nil, errors.Join(ErrHostInvalid, errors.New("invalid config-apply dependencies"))
-	}
-	if invalidHosted {
-		return nil, errors.Join(ErrHostInvalid, errors.New("invalid hosted lifecycle dependencies"))
 	}
 	adapter, err := pty.NewAdapter(config.WorkspaceRoot)
 	if err != nil {
@@ -374,8 +357,8 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		}
 	}()
 	sessions, err := session.NewManager(session.ManagerConfig{
-		Launch: func(command pty.Command) (session.PTYProcess, error) {
-			command, environmentErr := commandWithManagedEnvironment(command, dependencies.ManagedEnvironment)
+		LaunchContext: func(launchCtx context.Context, command pty.Command) (session.PTYProcess, error) {
+			command, environmentErr := commandWithManagedEnvironmentContext(launchCtx, command, dependencies.ManagedEnvironment)
 			if environmentErr != nil {
 				return nil, environmentErr
 			}
@@ -391,6 +374,28 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	})
 	if err != nil {
 		return nil, err
+	}
+	var browserOutput *browserbroadcastserver.Registry
+	if dependencies.BrowserTerminalAuthorizer != nil && dependencies.BrowserTerminalIdentity != nil {
+		browserOutput, err = browserbroadcastserver.NewRegistry(sessions, func(ctx context.Context) (ed25519.PrivateKey, error) {
+			identity, identityErr := dependencies.BrowserTerminalIdentity(ctx)
+			if identityErr != nil {
+				return nil, identityErr
+			}
+			private, ok := identity.TLSCertificate.PrivateKey.(ed25519.PrivateKey)
+			if !ok {
+				return nil, server.ErrBrowserTerminalIdentityUnavailable
+			}
+			return private, nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		if attachment, ok := dependencies.RuntimeAttachmentService.(*runtimeattachment.Service); ok {
+			if err := attachment.BindBroadcaster(browserOutput); err != nil {
+				return nil, err
+			}
+		}
 	}
 	var sessionLauncher server.SessionLauncher
 	if dependencies.SessionLauncherFactory != nil {
@@ -416,7 +421,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	if dependencies.ManagedEnvironment != nil {
 		// Resolve at process creation so updates affect only new executions and
 		// secret values never enter the durable operation journal.
-		executionConfig.ManagedEnvironment = dependencies.ManagedEnvironment.Environment
+		executionConfig.ManagedEnvironment = managedEnvironmentForLaunch(dependencies.ManagedEnvironment)
 	}
 	executions, err := execprocess.NewPersistent(ctx, executionConfig)
 	if err != nil {
@@ -424,6 +429,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	}
 	dispatcher, err := server.NewDispatcher(server.DispatcherConfig{
 		RecordTerminalJoin: dependencies.RecordTerminalJoin,
+		BrowserOutput:      browserOutput,
 		Sessions:           sessions, Health: healthSource, SessionLauncher: sessionLauncher,
 		WorkspaceRoot: config.WorkspaceRoot, Random: random,
 		ConfigApply: dependencies.ConfigApply,
@@ -435,13 +441,13 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	}
 	transferService, err := filetransfer.New(filetransfer.Config{
 		Root: filepath.Join(config.Runtime.StateRoot, "file-transfers"), LocalMachineID: config.MachineID, Store: durable,
-		PublishRoot: config.InboxPath, Random: random, Policy: config.FileTransferPolicy, EraseTransferKey: transferKeyEraser(dependencies.TransferKeys),
+		PublishRoot: config.InboxPath, Random: random, Policy: config.FileTransferPolicy,
 	})
 	if err != nil {
 		return nil, err
 	}
 	transferHandlerConfig := server.FileTransferHandlerConfig{
-		Service: transferService, Journal: journal, Authorizer: dependencies.Authorizer, TransferKeys: dependencies.TransferKeys,
+		Service: transferService, Journal: journal, Authorizer: dependencies.Authorizer,
 		AuthorizeCreate: func(authorization server.Authorization, request server.CreateFileTransferRequest) bool {
 			return (dependencies.Capabilities == nil || dependencies.Capabilities.Enabled("file-transfer.v1")) && authorization.MachineID == config.MachineID && authorization.UserID != "" &&
 				request.SourceMachineID == authorization.SourceMachineID && request.InitiatingUserID == authorization.UserID &&
@@ -455,18 +461,11 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 			return writers.Recipient(request.SessionID, request.DestinationMachineID)
 		},
 	}
-	transferHandler, err := server.NewFileTransferHandler(transferHandlerConfig)
-	if err != nil {
-		return nil, err
-	}
 	nativeTransferHandler, err := server.NewNativeFileTransferHandler(transferHandlerConfig)
 	if err != nil {
 		return nil, err
 	}
 	providers := []protocol.CapabilityProvider{dispatcher}
-	if dependencies.HostedLifecycle != nil {
-		providers = append(providers, dependencies.HostedLifecycle)
-	}
 	available, err := protocol.AvailableCapabilities(providers...)
 	if err != nil {
 		return nil, err
@@ -512,6 +511,19 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	if err != nil {
 		return nil, err
 	}
+	var browserTerminalHandler http.Handler
+	if dependencies.BrowserTerminalAuthorizer != nil {
+		browserTerminalHandler, err = server.NewBrowserTerminalWebSocketHandler(server.BrowserTerminalWebSocketHandlerConfig{
+			Server: protocolServer, Authorizer: dependencies.BrowserTerminalAuthorizer,
+			Identity:       dependencies.BrowserTerminalIdentity,
+			OriginPatterns: append([]string(nil), config.OriginPatterns...),
+			MaxConnections: resources.MaxAttachments * resources.MaxSessions,
+			Limiter:        connectionLimiter,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
 	mux := http.NewServeMux()
 	if dependencies.PreviewOwnerSessions != nil && dependencies.LocalControlToken != "" {
 		mux.Handle("/v1/preview-owner-sessions", dependencies.PreviewOwnerSessions)
@@ -528,8 +540,9 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		mux.Handle("/v1/private-tcp-access/", handler)
 	}
 	mux.Handle("/v1/runtime", websocketHandler)
-	mux.Handle("/v1/file-transfers", transferHandler)
-	mux.Handle("/v1/file-transfers/", transferHandler)
+	if browserTerminalHandler != nil {
+		mux.Handle("/v1/browser-terminal", browserTerminalHandler)
+	}
 	localTransferHandler, localTransferErr := server.NewNativeLocalFileTransferHandler(server.LocalFileTransferConfig{Token: agentToken, MachineID: config.MachineID, Service: transferService, ResolveRecipient: writers.Recipient})
 	if localTransferErr != nil {
 		return nil, localTransferErr
@@ -606,16 +619,10 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	if dependencies.Connector != nil {
 		stableComponents = append(stableComponents, stablehostd.Component{Name: "edge", Required: true, Service: dependencies.Connector})
 	}
-	// Start hosted preparation after transport dependencies. Reverse shutdown then
-	// flushes hosted state before connector drain and the final runtime observation.
-	if dependencies.HostedLifecycle != nil {
-		if stableHostOwnsCoordination() {
-			stableComponents = append(stableComponents, stablehostd.Component{Name: "hosted_lifecycle", Required: true, Service: dependencies.HostedLifecycle})
-		} else {
-			workerComponents = append(workerComponents, Component{Capability: "hosted_lifecycle", Required: true, Service: dependencies.HostedLifecycle})
-		}
-	}
 	stableComponents = append(stableComponents, stablehostd.Component{Name: "control_plane", Required: true, Service: httpService})
+	if dependencies.RuntimeAttachmentService != nil {
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "runtime_attachment", Required: false, Service: dependencies.RuntimeAttachmentService})
+	}
 	daemon, err := stablehostd.New(stablehostd.Config{
 		Workloads:  stablehostd.Workloads{Sessions: sessions, Executions: executions, Transfers: transferService, Previews: dependencies.Previews, ManagedSSH: dependencies.ManagedSSH, Tunnels: dependencies.TunnelManager},
 		Components: stableComponents, ShutdownTimeout: config.ShutdownTimeout,
@@ -649,10 +656,14 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 }
 
 func commandWithManagedEnvironment(command pty.Command, managed envinject.EnvironmentSource) (pty.Command, error) {
+	return commandWithManagedEnvironmentContext(context.Background(), command, managed)
+}
+
+func commandWithManagedEnvironmentContext(ctx context.Context, command pty.Command, managed envinject.EnvironmentSource) (pty.Command, error) {
 	if managed == nil {
 		return command, nil
 	}
-	values, err := managed.Environment()
+	values, err := managedEnvironmentForLaunch(managed)(ctx)
 	if err != nil {
 		return pty.Command{}, err
 	}
@@ -661,6 +672,26 @@ func commandWithManagedEnvironment(command pty.Command, managed envinject.Enviro
 		return pty.Command{}, err
 	}
 	return command, nil
+}
+
+func managedEnvironmentForLaunch(source envinject.EnvironmentSource) func(context.Context) ([]string, error) {
+	if source == nil {
+		return nil
+	}
+	return func(ctx context.Context) ([]string, error) {
+		if ctx == nil {
+			return nil, ErrProductionInvalid
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if contextual, ok := source.(interface {
+			EnvironmentForLaunch(context.Context) ([]string, error)
+		}); ok {
+			return contextual.EnvironmentForLaunch(ctx)
+		}
+		return source.Environment()
+	}
 }
 
 // WorkloadStatus is the stable host's monotonic snapshot used to fence a

@@ -17,7 +17,6 @@ import (
 	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
 	clientconfig "github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesession"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/peerrelay"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
@@ -500,7 +499,7 @@ func (s *productionNativePeerService) Shutdown(ctx context.Context) error {
 }
 
 func nativeNetworkAuthorizer(factory server.AuthorizerFactory) func(context.Context, streamauth.Header) (string, error) {
-	authorize := peerrelay.CredentialStreamAuthorizer(factory)
+	authorize := server.CredentialStreamAuthorizer(factory)
 	return func(ctx context.Context, header streamauth.Header) (string, error) {
 		value, err := authorize(ctx, header)
 		if err != nil {

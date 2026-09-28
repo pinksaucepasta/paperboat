@@ -125,3 +125,22 @@ func activationRequestFixture() ActivationRequest {
 		CredentialPublicKey: make([]byte, 32), CredentialGeneration: 3, ProcessGeneration: 2,
 	}
 }
+
+func TestFailedAssemblyUnbindKeepsExactGenerationAndDoesNotClearReplacement(t *testing.T) {
+	request := activationRequestFixture()
+	key := activationBindingKey(request)
+	failed := &tunnelmanager.ProductionAssembly{}
+	replacement := &tunnelmanager.ProductionAssembly{}
+	drainer := &assemblyDrainer{assembly: failed, generation: 7, hash: "old"}
+	rotation := &productionRotationRuntime{current: failed}
+	source := &HTTPSProductionAssemblySource{drainers: map[string]*assemblyDrainer{key: drainer}, rotations: map[string]*productionRotationRuntime{key: rotation}}
+	source.UnbindProductionAssembly(request, failed)
+	if drainer.assembly != nil || drainer.generation != 0 || drainer.hash != "" || rotation.current != nil {
+		t.Fatal("failed assembly binding was retained")
+	}
+	drainer.assembly, rotation.current = replacement, replacement
+	source.UnbindProductionAssembly(request, failed)
+	if drainer.assembly != replacement || rotation.current != replacement {
+		t.Fatal("stale cleanup cleared replacement assembly")
+	}
+}

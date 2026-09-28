@@ -28,7 +28,7 @@ func homeItems() []selector.Item {
 		{ID: "environment-variables", Title: "ENV Injection", Description: "Manage global and per-machine environment variables"},
 		{ID: "inbox", Title: "Team Inbox", Description: "Review and approve teammate file requests"},
 		{ID: "team", Title: "Teams", Description: "Members, invitations, shared resources, and permissions"},
-		{ID: "transfer", Title: "File transfers", Description: "Inspect, wait for, or cancel file deliveries"},
+		{ID: "send", Title: "Sent files", Description: "Inspect or cancel file deliveries and choose a destination"},
 		{ID: "config", Title: "Configuration", Description: "Sync status, CLI settings, and status bar preferences"},
 		{ID: "doctor", Title: "Diagnostics", Description: "Check setup, authentication, and connectivity"},
 		{ID: "account", Title: "Account", Description: "Sign in, switch accounts, or sign out"},
@@ -274,14 +274,7 @@ func actionHomeTunnelList(command *cobra.Command) error {
 			case "route", "domain", "connector":
 				args = []string{"tunnel", action.ID, "list", choice.ID}
 			case "delete":
-				yes, err := prompt.Confirm(prompt.ConfirmOptions{Title: "Delete " + choice.Title + "?", Description: "This removes the durable tunnel. External DNS records remain.", Stdin: os.Stdin, Context: command.Context(), Output: command.ErrOrStderr()})
-				if err != nil {
-					return err
-				}
-				if !yes {
-					continue
-				}
-				args = append(args, "--yes", "--wait")
+				args = append(args, "--wait")
 			case "pause", "resume":
 				args = append(args, "--wait")
 			}
@@ -462,7 +455,9 @@ func runHomeResult(parent *cobra.Command, args []string) error {
 	}
 	text := strings.TrimSpace(output.String())
 	if err != nil {
-		text += "\n\n" + userFacingError(err)
+		if message := userFacingError(err); message != "" {
+			text += "\n\n" + message
+		}
 	} else if text == "" {
 		text = "Completed successfully."
 	}

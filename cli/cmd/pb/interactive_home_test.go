@@ -64,7 +64,7 @@ func TestInteractiveCatalogCoversProductCommands(t *testing.T) {
 			t.Errorf("internal command exposed: %s", item.ID)
 		}
 	}
-	for _, name := range []string{"preview", "preview stop", "tunnel create", "tunnel route add", "team invite", "transfer status", "config status", "session share"} {
+	for _, name := range []string{"preview", "preview stop", "tunnel create", "tunnel route add", "team invite", "send status", "config status", "session share"} {
 		if !found[name] {
 			t.Errorf("missing %s", name)
 		}

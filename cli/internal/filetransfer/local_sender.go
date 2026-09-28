@@ -2,15 +2,11 @@ package filetransfer
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 	"time"
-
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/transfercrypto"
 )
 
 type LocalSender struct {
@@ -19,47 +15,22 @@ type LocalSender struct {
 	HTTPClient *http.Client
 }
 
-func (s *LocalSender) SendBatch(ctx context.Context, batchID, sourceMachineID, destinationMachineID, initiatingUserID, sessionID string, sources []Source, generation uint64, expiresAt time.Time) (Batch, error) {
-	if s == nil || ctx == nil || s.Endpoint == "" || len(s.Token) < 32 || batchID == "" || sourceMachineID == "" || destinationMachineID == "" || sourceMachineID == destinationMachineID || initiatingUserID == "" || sessionID == "" || len(sources) == 0 || len(sources) > 10 || generation == 0 || !expiresAt.After(time.Now().UTC()) || expiresAt.Nanosecond() != 0 {
-		return Batch{}, errors.New("invalid local encrypted file transfer")
-	}
-	material, err := transfercrypto.GenerateKeyMaterial()
-	if err != nil {
-		return Batch{}, err
-	}
-	defer material.Destroy()
-	encodedKey, err := material.MarshalBinary()
-	if err != nil {
-		return Batch{}, err
-	}
-	defer clear(encodedKey)
-	return s.sendBatch(ctx, batchID, sourceMachineID, destinationMachineID, initiatingUserID, sessionID, sources, expiresAt, generation, base64.RawURLEncoding.EncodeToString(encodedKey))
-}
-
 func (s *LocalSender) SendNativeBatch(ctx context.Context, batchID, sourceMachineID, destinationMachineID, initiatingUserID, sessionID string, sources []Source, expiresAt time.Time) (Batch, error) {
 	if s == nil || ctx == nil || s.Endpoint == "" || len(s.Token) < 32 || batchID == "" || sourceMachineID == "" || destinationMachineID == "" || sourceMachineID == destinationMachineID || initiatingUserID == "" || sessionID == "" || len(sources) == 0 || len(sources) > 10 || !expiresAt.After(time.Now().UTC()) || expiresAt.Nanosecond() != 0 {
 		return Batch{}, errors.New("invalid local native file transfer")
 	}
-	return s.sendBatch(ctx, batchID, sourceMachineID, destinationMachineID, initiatingUserID, sessionID, sources, expiresAt, 0, "")
+	return s.sendBatch(ctx, batchID, sourceMachineID, destinationMachineID, initiatingUserID, sessionID, sources, expiresAt)
 }
 
-func (s *LocalSender) sendBatch(ctx context.Context, batchID, sourceMachineID, destinationMachineID, initiatingUserID, sessionID string, sources []Source, expiresAt time.Time, generation uint64, encodedKey string) (result Batch, resultErr error) {
+func (s *LocalSender) sendBatch(ctx context.Context, batchID, sourceMachineID, destinationMachineID, initiatingUserID, sessionID string, sources []Source, expiresAt time.Time) (result Batch, resultErr error) {
 	files := make([]map[string]any, len(sources))
 	for index, source := range sources {
 		if source.Reader == nil || source.Basename == "" || source.Size < 0 {
 			return Batch{}, errors.New("invalid local file source")
 		}
 		files[index] = map[string]any{"basename": source.Basename, "size": source.Size, "sha256": hex.EncodeToString(source.SHA256[:])}
-		if generation != 0 {
-			files[index]["transfer_id"] = batchID + "." + strconv.Itoa(index)
-			files[index]["file_ordinal"] = index
-		}
 	}
 	request := map[string]any{"batch_id": batchID, "destination_machine_id": destinationMachineID, "initiating_user_id": initiatingUserID, "session_id": sessionID, "expires_at": expiresAt, "files": files}
-	if generation != 0 {
-		request["transfer_generation"] = generation
-		request["key_material"] = encodedKey
-	}
 	payload, err := json.Marshal(request)
 	if err != nil {
 		return Batch{}, err
@@ -77,7 +48,7 @@ func (s *LocalSender) sendBatch(ctx context.Context, batchID, sourceMachineID, d
 	}
 	completedSuccessfully := false
 	defer func() {
-		if generation != 0 || completedSuccessfully || !errors.Is(resultErr, context.Canceled) {
+		if completedSuccessfully || !errors.Is(resultErr, context.Canceled) {
 			return
 		}
 		cancelCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -90,8 +61,7 @@ func (s *LocalSender) sendBatch(ctx context.Context, batchID, sourceMachineID, d
 	for index, transfer := range created.Transfers {
 		expectedDigest := hex.EncodeToString(sources[index].SHA256[:])
 		_, duplicate := seenIDs[transfer.TransferID]
-		invalidNative := generation == 0 && (transfer.BatchID != batchID || transfer.SourceMachineID != sourceMachineID || transfer.DestinationMachineID != destinationMachineID || transfer.InitiatingUserID != initiatingUserID || transfer.SessionID != sessionID || transfer.Basename != sources[index].Basename || transfer.Size != sources[index].Size || transfer.SHA256 != expectedDigest)
-		if transfer.TransferID == "" || duplicate || generation != 0 && transfer.TransferID != batchID+"."+strconv.Itoa(index) || invalidNative {
+		if transfer.TransferID == "" || duplicate || transfer.BatchID != batchID || transfer.SourceMachineID != sourceMachineID || transfer.DestinationMachineID != destinationMachineID || transfer.InitiatingUserID != initiatingUserID || transfer.SessionID != sessionID || transfer.Basename != sources[index].Basename || transfer.Size != sources[index].Size || transfer.SHA256 != expectedDigest {
 			return Batch{}, errors.New("local runtime returned invalid resource identity")
 		}
 		seenIDs[transfer.TransferID] = struct{}{}

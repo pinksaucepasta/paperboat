@@ -6,6 +6,10 @@ List owned and explicitly shared terminal sessions
 
 List owned and explicitly shared terminal sessions
 
+List sessions you own and sessions explicitly shared with you. This inventory shows access, not a blanket right to all sessions in a team environment.
+
+Terminal sessions persist independently of a single connection and can be reattached after a disconnect. Sharing grants explicit access to a named session. Closing, deleting, and removing a participant have different effects; inspect the selected session before acting.
+
 JSON output is supported with --json.
 
 ```

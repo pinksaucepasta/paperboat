@@ -6,6 +6,10 @@ Update a tunnel route
 
 Update a tunnel route
 
+Change explicit fields of one route, including origin, match, protocol, or TLS options. Clear flags remove individual overrides; check the resulting operation and status before assuming traffic moved.
+
+Routes map a public or private match to a specific origin and protocol. TLS and host-header options affect the trust boundary and should match the origin. Adding or updating a route may return an operation whose readiness must be checked separately.
+
 JSON output is supported with --json.
 
 ```

@@ -2,7 +2,7 @@ package config
 
 import "testing"
 
-func TestAuthenticationCleanupPreservesENVKeyCustody(t *testing.T) {
+func TestAuthenticationCleanupPreservesPasswordVaultCustody(t *testing.T) {
 	for _, action := range []string{"remove", "queue_active", "complete", "discard_all", "replace"} {
 		t.Run(action, func(t *testing.T) {
 			store := ProfileStore{Path: t.TempDir(), Secrets: &faultSecretStore{values: map[string]string{}}}
@@ -10,7 +10,7 @@ func TestAuthenticationCleanupPreservesENVKeyCustody(t *testing.T) {
 			if err := store.Save(Profile{Issuer: issuer, Account: Account{ID: account}, CLIClientSessionID: session}, Credential{AccessToken: "test-access", RefreshToken: "test-refresh"}); err != nil {
 				t.Fatal(err)
 			}
-			ref := environmentManagerIdentitySecretRef(issuer, account, session)
+			ref := passwordVaultSecretRef(issuer, account)
 			if err := store.Secrets.Set(ref, "test-encrypted-key-record"); err != nil {
 				t.Fatal(err)
 			}
@@ -26,7 +26,7 @@ func TestAuthenticationCleanupPreservesENVKeyCustody(t *testing.T) {
 				if err = store.QueueRevocation(issuer, "cls_old", "test-refresh-old", account); err != nil {
 					t.Fatal(err)
 				}
-				ref = environmentManagerIdentitySecretRef(issuer, account, "cls_old")
+				ref = passwordVaultSecretRef(issuer, account)
 				if err = store.Secrets.Set(ref, "test-encrypted-key-record"); err != nil {
 					t.Fatal(err)
 				}
@@ -58,8 +58,8 @@ func TestTakeLogoutCredentialsAtomicallyRemovesActiveAndHistoricalSessions(t *te
 	if err := store.Save(Profile{Issuer: issuer, Account: Account{ID: accountID}, CLIClientSessionID: "cls_active"}, Credential{AccessToken: "access-active", RefreshToken: "refresh-active"}); err != nil {
 		t.Fatal(err)
 	}
-	environmentRef := environmentManagerIdentitySecretRef(issuer, accountID, "cls_active")
-	store.Secrets.(*faultSecretStore).values[environmentRef] = "encrypted-manager-record"
+	environmentRef := passwordVaultSecretRef(issuer, accountID)
+	store.Secrets.(*faultSecretStore).values[environmentRef] = "encrypted-vault-record"
 	if err := store.QueueRevocation(issuer, "cls_old", "refresh-old"); err != nil {
 		t.Fatal(err)
 	}

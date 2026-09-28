@@ -6,6 +6,10 @@ List current path conflicts
 
 List current path conflicts
 
+List unresolved paths for one environment or across assigned environments. Each entry identifies the path that needs review before synchronization can continue.
+
+Conflicts identify exact paths whose local and repository versions cannot be merged automatically. Review the affected path before choosing a side; resolution records a deliberate decision for the next synchronization step.
+
 JSON output is supported with --json.
 
 ```

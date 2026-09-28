@@ -6,11 +6,17 @@ pb-tunnel-status - Show tunnel health
 
 
 .SH SYNOPSIS
-\fBpb tunnel status  [flags]\fP
+\fBpb tunnel status <tunnel> [flags]\fP
 
 
 .SH DESCRIPTION
 Show tunnel health
+
+.PP
+Show current health for one durable tunnel. --watch refreshes observations at --interval; a configured route is not necessarily ready to serve traffic.
+
+.PP
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
 
 .PP
 JSON output is supported with --json.

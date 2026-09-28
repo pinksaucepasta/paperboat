@@ -12,7 +12,7 @@ import (
 
 func AddDeviceGuardCommand(root *cobra.Command) {
 	command := &cobra.Command{Use: "device-guard", Short: "Manage protected device-name access"}
-	run := &cobra.Command{Use: "run", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	run := &cobra.Command{Use: "run", Short: "Run the device guard under service supervision", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return deviceguard.Serve(cmd.Context(), deviceguard.Config{ConfigureResolver: true})
 	}}
 	install := &cobra.Command{Use: "install", Short: "Install the root-owned device guard service", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {

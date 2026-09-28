@@ -13,6 +13,25 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/environmente2ee"
 )
 
+type secureMemoryStore struct{ values map[string]string }
+
+func (*secureMemoryStore) EnvironmentSecureStore() {}
+func (store *secureMemoryStore) Set(ref, value string) error {
+	if store.values == nil {
+		store.values = make(map[string]string)
+	}
+	store.values[ref] = value
+	return nil
+}
+func (store *secureMemoryStore) Get(ref string) (string, error) {
+	value, ok := store.values[ref]
+	if !ok {
+		return "", config.ErrSecretNotFound
+	}
+	return value, nil
+}
+func (store *secureMemoryStore) Delete(ref string) error { delete(store.values, ref); return nil }
+
 type vaultControl struct {
 	store           config.ProfileStore
 	state           api.PasswordVaultState

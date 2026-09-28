@@ -6,6 +6,10 @@ Set a local configuration value
 
 Set a local configuration value
 
+Write one supported local configuration key. The change affects this CLI installation; inspect pb config show afterward to confirm the effective value.
+
+Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
+
 JSON output is supported with --json.
 
 ```

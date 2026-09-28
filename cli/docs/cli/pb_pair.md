@@ -6,6 +6,8 @@ Enroll this device with a one-shot token
 
 Enroll this device with a one-shot token
 
+Enroll this device with a one-shot token, optionally reading it from a private file. Name, shell, and state-root options target the local installation; enrollment binds a new device identity to the account.
+
 JSON output is supported with --json.
 
 ```

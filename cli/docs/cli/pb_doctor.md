@@ -6,6 +6,8 @@ Check Paperboat connectivity and readiness
 
 Check Paperboat connectivity and readiness
 
+Check authentication, local runtime, and connectivity for the current setup or one selected device. --repair performs supported local fixes; without it, the command reports findings and recovery guidance.
+
 JSON output is supported with --json.
 
 ```

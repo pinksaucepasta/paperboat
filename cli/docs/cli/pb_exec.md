@@ -6,6 +6,8 @@ Execute an exact command on a machine
 
 Execute an exact command on a machine
 
+Run the exact argv after -- on the selected device, with optional working directory, environment entries, PTY, and timeout. Output and exit status come from the remote command; use --json for structured events.
+
 JSON output is supported with --json.
 
 ```
@@ -21,7 +23,6 @@ pb exec <machine> [flags] -- <argv...>
       --json               emit paperboat.exec-event/v1 JSON Lines
       --pty                allocate a remote PTY
       --timeout duration   remote execution timeout
-      --transport string   peer transport: a, d, q, w, or r
 ```
 
 ### Options inherited from parent commands
