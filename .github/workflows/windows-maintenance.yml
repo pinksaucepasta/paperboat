@@ -1,0 +1,528 @@
+name: Windows maintenance
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Maintenance operation'
+        required: true
+        type: choice
+        options:
+          - restore-ssh-and-update-pb
+          - reenroll-victus
+          - inspect-recovery
+          - restore-victus-qualification-state
+          - inspect-victus-health
+          - prepare-victus-clean-qualification
+          - clean-victus-qualification-residue
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-recovery:
+    if: inputs.action == 'inspect-recovery'
+    runs-on: [self-hosted, Windows, X64, paperboat-windows-11-iot-ltsc]
+    timeout-minutes: 5
+    steps:
+      - name: Inspect recovery task
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          Get-ScheduledTask -TaskName 'PaperboatQualificationReenroll' -ErrorAction SilentlyContinue | Format-List *
+          Get-ScheduledTaskInfo -TaskName 'PaperboatQualificationReenroll' -ErrorAction SilentlyContinue | Format-List *
+          Get-Process paperboat*,pwsh -ErrorAction SilentlyContinue | Select-Object Id,Name,Path,SessionId,StartTime
+          Get-ChildItem 'C:\PaperboatRecovery' -Force -ErrorAction SilentlyContinue | Select-Object Name,Length,LastWriteTime
+          Get-Content 'C:\PaperboatRecovery\enroll.log' -Tail 100 -ErrorAction SilentlyContinue
+          $probe = 'PaperboatQualificationTaskProbe'
+          $probeOutput = 'C:\PaperboatRecovery\task-probe.txt'
+          Remove-Item $probeOutput -Force -ErrorAction SilentlyContinue
+          $probeAction = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\cmd.exe" -Argument "/c whoami > `"$probeOutput`""
+          $probeTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(5)
+          $probePrincipal = New-ScheduledTaskPrincipal -UserId 'VICTUS\Pujan' -LogonType Interactive -RunLevel Highest
+          Register-ScheduledTask -TaskName $probe -Action $probeAction -Trigger $probeTrigger -Principal $probePrincipal -Force | Out-Null
+          Start-ScheduledTask -TaskName $probe
+          Start-Sleep -Seconds 5
+          Get-ScheduledTaskInfo -TaskName $probe | Format-List LastTaskResult,LastRunTime,NextRunTime
+          Get-Content $probeOutput -ErrorAction SilentlyContinue
+          Unregister-ScheduledTask -TaskName $probe -Confirm:$false -ErrorAction SilentlyContinue
+  reenroll-victus:
+    if: inputs.action == 'reenroll-victus'
+    runs-on: [self-hosted, Windows, X64, paperboat-windows-11-iot-ltsc]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.6'
+          cache: true
+      - name: Build current Windows runtime
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path 'C:\PaperboatRecovery' -Force | Out-Null
+          go build -trimpath -buildvcs=false -o 'C:\PaperboatRecovery\pb.exe' ./cmd/pb
+      - name: Enroll as the interactive machine owner
+        shell: powershell
+        env:
+          PAPERBOAT_INSTALLER_URL: ${{ secrets.VICTUS_RECOVERY_INSTALLER_URL }}
+          VICTUS_RECOVERY_PASSWORD: ${{ secrets.VICTUS_RECOVERY_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:PAPERBOAT_INSTALLER_URL.StartsWith('https://get.pprbt.dev/install?p=victus-')) {
+            throw 'The scoped Victus enrollment URL is missing or invalid.'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:VICTUS_RECOVERY_PASSWORD)) {
+            throw 'The scoped Victus recovery credential is missing.'
+          }
+          $parameter = $env:PAPERBOAT_INSTALLER_URL.Substring($env:PAPERBOAT_INSTALLER_URL.IndexOf('?p=') + 3)
+          $token = $parameter.Substring('victus-'.Length)
+          if ([string]::IsNullOrWhiteSpace($token)) { throw 'The enrollment token is empty.' }
+
+          $root = 'C:\PaperboatRecovery'
+          $tokenPath = Join-Path $root 'enrollment-token'
+          $scriptPath = Join-Path $root 'enroll.ps1'
+          $resultPath = Join-Path $root 'result.txt'
+          $logPath = Join-Path $root 'enroll.log'
+          $taskName = 'PaperboatQualificationReenroll'
+          Remove-Item -LiteralPath $resultPath,$logPath -Force -ErrorAction SilentlyContinue
+          foreach ($service in @('PaperboatHostd', 'PaperboatUpdated', 'PaperboatSshd')) {
+            Stop-Service -Name $service -Force -ErrorAction SilentlyContinue
+            sc.exe delete $service | Out-Null
+          }
+          Get-Service 'PaperboatPreview-*' -ErrorAction SilentlyContinue | ForEach-Object {
+            Stop-Service -Name $_.Name -Force -ErrorAction SilentlyContinue
+            sc.exe delete $_.Name | Out-Null
+          }
+          Get-Process paperboat*,sshd -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath 'C:\Program Files\Paperboat','C:\ProgramData\Paperboat','C:\Users\Pujan\AppData\Local\Paperboat' -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath 'HKLM:\Software\Paperboat' -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $root -Force | Out-Null
+          [IO.File]::WriteAllText($tokenPath, $token, (New-Object Text.UTF8Encoding($false)))
+          icacls.exe $tokenPath /inheritance:r /grant:r 'SYSTEM:F' 'VICTUS\Pujan:F' | Out-Null
+          @'
+          $ErrorActionPreference = 'Stop'
+          $env:PSModulePath = "$env:WINDIR\System32\WindowsPowerShell\v1.0\Modules;$env:ProgramFiles\WindowsPowerShell\Modules"
+          Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
+          $token = [IO.File]::ReadAllText('C:\PaperboatRecovery\enrollment-token').Trim()
+          try {
+            & 'C:\PaperboatRecovery\pb.exe' pair --server 'https://api.pprbt.dev' --enrollment-token $token --name victus --setup-mode=host *>&1 |
+              Tee-Object -FilePath 'C:\PaperboatRecovery\enroll.log'
+            if ($LASTEXITCODE -ne 0) { throw "pb pair exited $LASTEXITCODE" }
+            [IO.File]::WriteAllText('C:\PaperboatRecovery\result.txt', 'success')
+          } catch {
+            $_ | Out-String | Add-Content -LiteralPath 'C:\PaperboatRecovery\enroll.log'
+            [IO.File]::WriteAllText('C:\PaperboatRecovery\result.txt', 'failure')
+            exit 1
+          }
+          '@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+          icacls.exe $scriptPath /inheritance:r /grant:r 'SYSTEM:F' 'VICTUS\Pujan:RX' | Out-Null
+
+          $pwsh = @(
+            'C:\Program Files\PowerShell\7\pwsh.exe',
+            'C:\Program Files\PowerShell\7-preview\pwsh.exe',
+            'C:\Users\Pujan\.cache\codex-runtimes\codex-primary-runtime\dependencies\native\powershell\pwsh.exe'
+          ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+          if (-not $pwsh) { throw 'PowerShell 7 is missing from every qualified location.' }
+          $action = New-ScheduledTaskAction -Execute $pwsh -Argument "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$scriptPath`""
+          $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(5)
+          $principal = New-ScheduledTaskPrincipal -UserId 'VICTUS\Pujan' -LogonType Interactive -RunLevel Highest
+          Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null
+          try {
+            Start-ScheduledTask -TaskName $taskName
+            $deadline = (Get-Date).AddMinutes(12)
+            while ((Get-Date) -lt $deadline -and -not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
+              Start-Sleep -Seconds 2
+            }
+            if (-not (Test-Path -LiteralPath $resultPath -PathType Leaf)) { throw 'Owner-scoped enrollment timed out.' }
+            $result = [IO.File]::ReadAllText($resultPath).Trim()
+            if ($result -ne 'success') {
+              Get-Content -LiteralPath $logPath -ErrorAction SilentlyContinue
+              throw 'Owner-scoped enrollment failed.'
+            }
+          } finally {
+            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $tokenPath,$scriptPath -Force -ErrorAction SilentlyContinue
+          }
+
+          foreach ($service in @('PaperboatHostd', 'PaperboatUpdated', 'PaperboatSshd')) {
+            $item = Get-Service -Name $service -ErrorAction Stop
+            if ($item.Status -ne 'Running') { throw "$service is not running after enrollment" }
+          }
+          $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          if (-not (($machinePath -split ';').Trim().TrimEnd('\') -contains 'C:\Program Files\Paperboat\bin')) {
+            throw 'Paperboat bin is absent from the machine PATH after enrollment.'
+          }
+          if (-not (Test-Path -LiteralPath 'C:\Program Files\Paperboat\bin\pb.exe' -PathType Leaf)) {
+            throw 'pb.exe is absent after enrollment.'
+          }
+          $runtime = Get-Content -LiteralPath 'C:\ProgramData\Paperboat\runtime-install.json' -Raw | ConvertFrom-Json
+          if ($runtime.user -ine 'VICTUS\Pujan' -or $runtime.owner_sid -eq 'S-1-5-18') {
+            throw "Enrollment owner is invalid: user=$($runtime.user) sid=$($runtime.owner_sid)"
+          }
+          Write-Output 'Victus owner-scoped enrollment and local service/PATH checks passed.'
+
+  clean-victus:
+    if: inputs.action == 'clean-victus-qualification-residue'
+    runs-on: [self-hosted, Windows, X64, paperboat-windows-11-iot-ltsc]
+    timeout-minutes: 5
+    steps:
+      - name: Remove only failed qualification residue
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-Service 'PaperboatPreview-*' -ErrorAction SilentlyContinue | ForEach-Object {
+            Stop-Service $_.Name -Force -ErrorAction SilentlyContinue
+            sc.exe delete $_.Name | Out-Host
+          }
+          foreach ($service in @('PaperboatHostd','PaperboatUpdated','PaperboatSshd')) {
+            if (Get-Service $service -ErrorAction SilentlyContinue) {
+              Stop-Service $service -Force -ErrorAction SilentlyContinue
+              sc.exe delete $service | Out-Host
+            }
+          }
+          Remove-Item 'HKLM:\Software\Paperboat' -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item 'C:\Program Files\Paperboat' -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item 'C:\ProgramData\Paperboat' -Recurse -Force -ErrorAction SilentlyContinue
+          $bin = 'C:\Program Files\Paperboat\bin'
+          $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          $cleanPath = (($machinePath -split ';' | Where-Object { $_.Trim().TrimEnd('\') -ine $bin }) -join ';').Trim(';')
+          [Environment]::SetEnvironmentVariable('Path', $cleanPath, 'Machine')
+          Write-Output 'Failed qualification residue removed; preserved Backup3 snapshots were not modified.'
+
+  prepare-victus:
+    if: inputs.action == 'prepare-victus-clean-qualification'
+    runs-on: [self-hosted, Windows, X64, paperboat-windows-11-iot-ltsc]
+    timeout-minutes: 10
+    steps:
+      - name: Snapshot live state and prepare clean qualification host
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $programBackup = 'C:\PaperboatQualificationProgramBackup3'
+          $stateBackup = 'C:\PaperboatQualificationStateBackup3'
+          $registryBackup = 'C:\PaperboatQualificationRegistryBackup3.reg'
+          foreach ($path in @($programBackup, $stateBackup, $registryBackup)) {
+            if (Test-Path -LiteralPath $path) { throw "Refusing to overwrite existing qualification snapshot: $path" }
+          }
+          Stop-Service PaperboatHostd,PaperboatUpdated,PaperboatSshd -Force -ErrorAction SilentlyContinue
+          Get-Service 'PaperboatPreview-*' -ErrorAction SilentlyContinue | ForEach-Object {
+            Stop-Service $_.Name -Force -ErrorAction SilentlyContinue
+            sc.exe delete $_.Name | Out-Host
+          }
+          Get-Process paperboat*,sshd -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 2
+          reg.exe export 'HKLM\Software\Paperboat' $registryBackup /y | Out-Host
+          if (Test-Path -LiteralPath 'C:\Program Files\Paperboat') { Move-Item 'C:\Program Files\Paperboat' $programBackup }
+          if (Test-Path -LiteralPath 'C:\ProgramData\Paperboat') { Move-Item 'C:\ProgramData\Paperboat' $stateBackup }
+          foreach ($service in @('PaperboatHostd','PaperboatUpdated','PaperboatSshd')) {
+            sc.exe delete $service | Out-Host
+          }
+          Remove-Item 'HKLM:\Software\Paperboat' -Recurse -Force -ErrorAction SilentlyContinue
+          Write-Output 'Victus is prepared for clean MSI qualification; snapshots are preserved at the explicit qualification backup paths.'
+
+  inspect-victus:
+    if: inputs.action == 'inspect-victus-health'
+    runs-on: [self-hosted, Windows, X64, paperboat-windows-11-iot-ltsc]
+    timeout-minutes: 5
+    steps:
+      - name: Inspect live Paperboat services and logs
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          Get-Service PaperboatHostd,PaperboatUpdated,PaperboatSshd | Format-Table Name,Status,StartType
+          Get-CimInstance Win32_Service -Filter "Name='PaperboatHostd' OR Name='PaperboatUpdated' OR Name='PaperboatSshd'" | Format-List Name,State,StartName,PathName
+          $hostKey = 'C:\ProgramData\Paperboat\ssh\hostkeys\ssh_host_ed25519_key'
+          if (Test-Path -LiteralPath $hostKey) {
+            $hostKeyAcl = Get-Acl -LiteralPath $hostKey
+            Write-Output "HOSTKEY_OWNER=$($hostKeyAcl.Owner)"
+            Write-Output "HOSTKEY_SDDL=$($hostKeyAcl.Sddl)"
+            icacls.exe $hostKey | Out-Host
+          }
+          $sshLog = 'C:\ProgramData\Paperboat\ssh\logs\service.log'
+          if (Test-Path -LiteralPath $sshLog) { Set-Content -LiteralPath $sshLog -Value '' -Encoding ascii }
+          Restart-Service PaperboatSshd -Force -ErrorAction Stop
+          Start-Sleep -Seconds 3
+          if ((Get-Service PaperboatSshd).Status -ne 'Running') { throw 'PaperboatSshd did not remain running after clean restart' }
+          Test-NetConnection -ComputerName 127.0.0.1 -Port 38222 -InformationLevel Detailed | Format-List
+          Test-NetConnection -ComputerName ::1 -Port 38222 -InformationLevel Detailed | Format-List
+          $sshKeyscan = Get-Command ssh-keyscan.exe -ErrorAction SilentlyContinue
+          if ($sshKeyscan) { & $sshKeyscan.Source -T 5 -p 38222 127.0.0.1 2>&1 | Select-Object -First 12 }
+          Get-Content -LiteralPath 'C:\ProgramData\Paperboat\runtime-install.json' -ErrorAction SilentlyContinue
+          Get-Content -LiteralPath 'C:\ProgramData\Paperboat\runtime.json' -ErrorAction SilentlyContinue
+          Get-ChildItem -LiteralPath 'C:\Users\Pujan\AppData\Local\Paperboat\runtime' -Recurse -File -ErrorAction SilentlyContinue |
+            Select-Object FullName,Length,LastWriteTime
+          Get-Content -LiteralPath 'C:\Users\Pujan\AppData\Local\Paperboat\runtime\machine-registration.json' -ErrorAction SilentlyContinue
+          if ((Get-Service PaperboatHostd).Status -ne 'Running') {
+            Write-Output 'STARTING_PAPERBOAT_HOSTD=TRUE'
+            Start-Service PaperboatHostd -ErrorAction Stop
+          }
+          Start-Sleep -Seconds 35
+          Get-Service PaperboatHostd,PaperboatUpdated,PaperboatSshd | Format-Table Name,Status,StartType
+          sc.exe qc PaperboatSshd | Out-Host
+          icacls.exe 'C:\Program Files\Paperboat\releases\runtime-current\paperboat-runtime.exe' | Out-Host
+          icacls.exe 'C:\ProgramData\Paperboat\ssh\sshd_config' | Out-Host
+          $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          Write-Output "MACHINE_PATH_HAS_PAPERBOAT=$($machinePath -split ';' -contains 'C:\Program Files\Paperboat\bin')"
+          Get-Command pwsh.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
+          Get-ChildItem -Path 'C:\Program Files\PowerShell','C:\Users' -Filter pwsh.exe -File -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -First 20 FullName,Length,LastWriteTime
+          Get-ChildItem -LiteralPath 'C:\ProgramData\Paperboat' -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match 'log|error|startup|observation|health' } |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 30 FullName,Length,LastWriteTime
+          Get-Content -LiteralPath 'C:\ProgramData\Paperboat\PaperboatHostd-worker-startup-error.log' -Tail 80 -ErrorAction SilentlyContinue
+          Get-Content -LiteralPath 'C:\ProgramData\Paperboat\ssh\logs\service.log' -Tail 120 -ErrorAction SilentlyContinue
+          Get-Content -LiteralPath 'C:\ProgramData\Paperboat\manual-out.log' -Tail 80 -ErrorAction SilentlyContinue
+          Get-WinEvent -LogName Application -MaxEvents 100 -ErrorAction SilentlyContinue |
+            Where-Object { $_.Message -match 'Paperboat' } |
+            Select-Object -First 20 TimeCreated,ProviderName,LevelDisplayName,Message | Format-List
+          Get-WinEvent -LogName System -MaxEvents 160 -ErrorAction SilentlyContinue |
+            Where-Object { $_.ProviderName -eq 'Service Control Manager' -and $_.Message -match 'PaperboatSshd|PaperboatHostd' } |
+            Select-Object -First 30 TimeCreated,Id,LevelDisplayName,Message | Format-List
+
+  restore-victus:
+    if: inputs.action == 'restore-victus-qualification-state'
+    runs-on: [self-hosted, Windows, X64, paperboat-windows-11-iot-ltsc]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Restore live Paperboat state
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Stop-Service PaperboatHostd,PaperboatUpdated,PaperboatSshd -Force -ErrorAction SilentlyContinue
+          Get-Service 'PaperboatPreview-*' -ErrorAction SilentlyContinue | ForEach-Object {
+            Stop-Service $_.Name -Force -ErrorAction SilentlyContinue
+            sc.exe delete $_.Name | Out-Host
+          }
+          Get-Process paperboat*,sshd -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 2
+
+          $programBackup = 'C:\PaperboatQualificationProgramBackup3'
+          $stateBackup = 'C:\PaperboatQualificationStateBackup3'
+          if (-not (Test-Path $programBackup)) { $programBackup = 'C:\PaperboatQualificationProgramBackup2' }
+          if (-not (Test-Path $stateBackup)) { $stateBackup = 'C:\PaperboatQualificationStateBackup2' }
+          foreach ($nested in @('C:\Program Files\Paperboat\PaperboatQualificationProgramBackup3', 'C:\Program Files\Paperboat\PaperboatQualificationProgramBackup2')) {
+            if (Test-Path -LiteralPath $nested) {
+              $restoredProgram = 'C:\PaperboatQualificationProgramRestored'
+              if (Test-Path -LiteralPath $restoredProgram) { throw "Refusing to overwrite existing program staging path: $restoredProgram" }
+              Move-Item -LiteralPath $nested -Destination $restoredProgram
+              Remove-Item -LiteralPath 'C:\Program Files\Paperboat' -Recurse -Force
+              Move-Item -LiteralPath $restoredProgram -Destination 'C:\Program Files\Paperboat'
+              break
+            }
+          }
+          foreach ($nested in @('C:\ProgramData\Paperboat\PaperboatQualificationStateBackup3', 'C:\ProgramData\Paperboat\PaperboatQualificationStateBackup2')) {
+            if (Test-Path -LiteralPath $nested) {
+              $restoredState = 'C:\PaperboatQualificationStateRestored'
+              if (Test-Path -LiteralPath $restoredState) { throw "Refusing to overwrite existing state staging path: $restoredState" }
+              Move-Item -LiteralPath $nested -Destination $restoredState
+              Remove-Item -LiteralPath 'C:\ProgramData\Paperboat' -Recurse -Force
+              Move-Item -LiteralPath $restoredState -Destination 'C:\ProgramData\Paperboat'
+              break
+            }
+          }
+          $programBackupLeaf = Split-Path -Leaf $programBackup
+          $stateBackupLeaf = Split-Path -Leaf $stateBackup
+          if (Test-Path -LiteralPath $programBackup) {
+            Move-Item -LiteralPath $programBackup -Destination 'C:\Program Files\Paperboat'
+          }
+          if (Test-Path -LiteralPath $stateBackup) {
+            Move-Item -LiteralPath $stateBackup -Destination 'C:\ProgramData\Paperboat'
+          }
+          # Move-Item nests a source directory when its destination already
+          # exists. Recover that exact interrupted shape for either snapshot
+          # generation, replacing only the known Paperboat destinations.
+          $nestedProgramBackup = Join-Path 'C:\Program Files\Paperboat' $programBackupLeaf
+          if (Test-Path -LiteralPath $nestedProgramBackup) {
+            $restoredProgram = 'C:\PaperboatQualificationProgramRestored'
+            if (Test-Path -LiteralPath $restoredProgram) { throw "Refusing to overwrite existing program staging path: $restoredProgram" }
+            Move-Item -LiteralPath $nestedProgramBackup -Destination $restoredProgram
+            Remove-Item -LiteralPath 'C:\Program Files\Paperboat' -Recurse -Force
+            Move-Item -LiteralPath $restoredProgram -Destination 'C:\Program Files\Paperboat'
+          }
+          $nestedStateBackup = Join-Path 'C:\ProgramData\Paperboat' $stateBackupLeaf
+          if (Test-Path -LiteralPath $nestedStateBackup) {
+            $restoredState = 'C:\PaperboatQualificationStateRestored'
+            if (Test-Path -LiteralPath $restoredState) { throw "Refusing to overwrite existing state staging path: $restoredState" }
+            Move-Item -LiteralPath $nestedStateBackup -Destination $restoredState
+            Remove-Item -LiteralPath 'C:\ProgramData\Paperboat' -Recurse -Force
+            Move-Item -LiteralPath $restoredState -Destination 'C:\ProgramData\Paperboat'
+          }
+          $registryBackup = 'C:\PaperboatQualificationRegistryBackup3.reg'
+          if (-not (Test-Path $registryBackup)) { $registryBackup = 'C:\PaperboatQualificationRegistryBackup.reg' }
+          if (Test-Path -LiteralPath $registryBackup) {
+            reg.exe import $registryBackup | Out-Host
+          }
+
+          # Qualification temporarily tightened these files for a test
+          # identity. Restore the production service ACL before LocalSystem
+          # Hostd starts. Limit this repair to Paperboat-owned SSH state.
+          $sshState = 'C:\ProgramData\Paperboat\ssh'
+          if (Test-Path -LiteralPath $sshState) {
+            $paperboatRoot = 'C:\ProgramData\Paperboat'
+            $runtimeConfigPath = Join-Path $paperboatRoot 'runtime-install.json'
+            $runtimeConfig = if (Test-Path -LiteralPath $runtimeConfigPath) { Get-Content -LiteralPath $runtimeConfigPath -Raw | ConvertFrom-Json } else { $null }
+            $ownerAccount = if ($null -ne $runtimeConfig -and $runtimeConfig.user) { $runtimeConfig.user } else { ([System.Security.Principal.WindowsIdentity]::GetCurrent()).Name }
+            $ownerSid = (New-Object System.Security.Principal.NTAccount($ownerAccount)).Translate([System.Security.Principal.SecurityIdentifier]).Value
+            icacls.exe $paperboatRoot /setowner "*$ownerSid" /T /C | Out-Host
+            icacls.exe $paperboatRoot /inheritance:r /remove:g '*S-1-5-32-545' '*S-1-5-11' /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' /C | Out-Host
+            if ($null -ne $runtimeConfig) {
+              $runtimeConfig.owner_sid = $ownerSid
+              $json = $runtimeConfig | ConvertTo-Json -Depth 16
+              [IO.File]::WriteAllText($runtimeConfigPath, $json, (New-Object Text.UTF8Encoding($false)))
+            }
+            icacls.exe $sshState /reset /T /C | Out-Host
+            icacls.exe $sshState /grant:r 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' /T /C | Out-Host
+            icacls.exe $sshState /inheritance:r /remove:g '*S-1-5-32-545' '*S-1-5-11' /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' /C | Out-Host
+            $hostKeys = Join-Path $sshState 'hostkeys'
+            if (Test-Path -LiteralPath $hostKeys) {
+              # OpenSSH rejects private keys if any broad/localized Users ACE
+              # survives an icacls name/SID rewrite. Build the DACL by SID so
+              # this remains correct on non-English Windows images too.
+              $systemSid = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')
+              $adminsSid = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')
+              icacls.exe $hostKeys /inheritance:r /remove:g '*S-1-5-32-545' '*S-1-5-11' /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' /C | Out-Host
+              Get-ChildItem -LiteralPath $hostKeys -File -Recurse | ForEach-Object {
+                $acl = New-Object System.Security.AccessControl.FileSecurity
+                $acl.SetAccessRuleProtection($true, $false)
+                $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($systemSid, 'FullControl', 'Allow')))
+                $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($adminsSid, 'FullControl', 'Allow')))
+                Set-Acl -LiteralPath $_.FullName -AclObject $acl
+                # Enforce the same result at the native ACL layer and print it
+                # so a localized account name cannot hide a broad ACE.
+                icacls.exe $_.FullName /inheritance:r /remove:g '*S-1-5-32-545' '*S-1-5-11' /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' /C | Out-Host
+                icacls.exe $_.FullName | Out-Host
+              }
+            }
+          }
+
+          $runtime = 'C:\Program Files\Paperboat\releases\runtime-current\paperboat-runtime.exe'
+          if (-not (Test-Path -LiteralPath $runtime -PathType Leaf)) {
+            $runtimeDirectory = Split-Path -Parent $runtime
+            $binDirectory = 'C:\Program Files\Paperboat\bin'
+            New-Item -ItemType Directory -Force -Path $runtimeDirectory,$binDirectory | Out-Null
+            go build -buildvcs=false -trimpath -o $runtime ./cmd/pb
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $runtime -PathType Leaf)) {
+              throw "Restored runtime was missing and the source rebuild failed: $runtime"
+            }
+            Copy-Item -LiteralPath $runtime -Destination (Join-Path $binDirectory 'pb.exe') -Force
+            Write-Output 'Rebuilt the missing Victus runtime from the pinned workflow source.'
+          }
+          if (-not (Get-Service PaperboatHostd -ErrorAction SilentlyContinue)) {
+            New-Service -Name PaperboatHostd -BinaryPathName ('"' + $runtime + '" __runtime-hostd') -DisplayName 'PaperboatHostd' -Description 'Paperboat stable host supervisor' -StartupType Automatic | Out-Null
+          }
+          if (-not (Get-Service PaperboatUpdated -ErrorAction SilentlyContinue)) {
+            New-Service -Name PaperboatUpdated -BinaryPathName ('"' + $runtime + '" __runtime-updated') -DisplayName 'PaperboatUpdated' -Description 'Paperboat signed update service' -StartupType Manual | Out-Null
+          }
+          $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          $bin = 'C:\Program Files\Paperboat\bin'
+          if (($machinePath -split ';') -notcontains $bin) {
+            [Environment]::SetEnvironmentVariable('Path', ($machinePath.TrimEnd(';') + ';' + $bin), 'Machine')
+          }
+          $winget = (Get-Command winget.exe -ErrorAction SilentlyContinue).Source
+          if (-not $winget) {
+            $appInstaller = Get-AppxPackage -AllUsers Microsoft.DesktopAppInstaller | Sort-Object Version -Descending | Select-Object -First 1
+            if ($appInstaller) { $winget = Join-Path $appInstaller.InstallLocation 'winget.exe' }
+          }
+          if (-not $winget -or -not (Test-Path -LiteralPath $winget)) { throw 'Microsoft-signed WinGet App Installer is unavailable.' }
+          $wingetLog = Join-Path $env:RUNNER_TEMP 'paperboat-openssh-winget.log'
+          $wingetArgs = @('install','--exact','--id','Microsoft.OpenSSH.Preview','--version','10.0.0.0','--source','winget','--scope','machine','--silent','--accept-source-agreements','--accept-package-agreements','--disable-interactivity')
+          $wingetProcess = Start-Process -FilePath $winget -ArgumentList $wingetArgs -Wait -PassThru -RedirectStandardOutput $wingetLog -RedirectStandardError ($wingetLog + '.err')
+          Get-Content -LiteralPath $wingetLog,($wingetLog + '.err') -ErrorAction SilentlyContinue | Out-Host
+          if ($wingetProcess.ExitCode -ne 0 -and -not (Test-Path -LiteralPath 'C:\Program Files\OpenSSH\sshd.exe')) { throw "Pinned OpenSSH WinGet install failed with exit code $($wingetProcess.ExitCode)." }
+          # The MSI qualification intentionally removed the product. Restore
+          # the owned OpenSSH service through the same elevated repair path a
+          # user gets from `pb doctor --repair`; Hostd depends on this loopback
+          # target and must not be started before it exists.
+          $repairLog = Join-Path $env:RUNNER_TEMP 'paperboat-runtime-repair.log'
+          $repairProcess = Start-Process -FilePath $runtime -ArgumentList @('__runtime-service', 'repair') -Wait -PassThru -RedirectStandardOutput $repairLog -RedirectStandardError ($repairLog + '.err')
+          $repairExit = $repairProcess.ExitCode
+          Get-Content -LiteralPath $repairLog,($repairLog + '.err') -ErrorAction SilentlyContinue | Out-Host
+          if ($repairExit -ne 0) { Write-Output "Paperboat aggregate repair returned exit code $repairExit; verifying owned SSH repair independently." }
+          icacls.exe $sshState /inheritance:r /remove:g "*$ownerSid" '*S-1-5-32-545' '*S-1-5-11' /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' /C | Out-Host
+          icacls.exe $hostKeys /inheritance:r /remove:g "*$ownerSid" '*S-1-5-32-545' '*S-1-5-11' /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' /T /C | Out-Host
+          foreach ($directory in @($paperboatRoot, $sshState, $hostKeys)) {
+            $acl = New-Object System.Security.AccessControl.DirectorySecurity
+            $acl.SetAccessRuleProtection($true, $false)
+            $inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+            $propagate = [System.Security.AccessControl.PropagationFlags]::None
+            $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($systemSid, 'FullControl', $inherit, $propagate, 'Allow')))
+            $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($adminsSid, 'FullControl', $inherit, $propagate, 'Allow')))
+            Set-Acl -LiteralPath $directory -AclObject $acl
+            icacls.exe $directory | Out-Host
+          }
+          icacls.exe $hostKeys /setowner '*S-1-5-18' /T /C | Out-Host
+          Get-ChildItem -LiteralPath $hostKeys -File -Recurse | ForEach-Object {
+            $acl = New-Object System.Security.AccessControl.FileSecurity
+            $acl.SetAccessRuleProtection($true, $false)
+            $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($systemSid, 'FullControl', 'Allow')))
+            $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($adminsSid, 'FullControl', 'Allow')))
+            Set-Acl -LiteralPath $_.FullName -AclObject $acl
+            icacls.exe $_.FullName | Out-Host
+          }
+          if (-not (Get-Service PaperboatSshd -ErrorAction SilentlyContinue)) {
+            $sshd = 'C:\Program Files\OpenSSH\sshd.exe'
+            $sshdConfig = 'C:\ProgramData\Paperboat\ssh\sshd_config'
+            if (-not (Test-Path -LiteralPath $sshd) -or -not (Test-Path -LiteralPath $sshdConfig)) { throw 'Pinned OpenSSH binaries or Paperboat sshd configuration are missing after repair.' }
+            $serviceCommand = '"' + $runtime + '" __windows-sshd-service --sshd "' + $sshd + '" --config "' + $sshdConfig + '"'
+            New-Service -Name PaperboatSshd -BinaryPathName $serviceCommand -DisplayName 'PaperboatSshd' -Description 'Paperboat managed loopback-only OpenSSH service' -StartupType Automatic | Out-Null
+            sc.exe sidtype PaperboatSshd unrestricted | Out-Host
+            sc.exe failure PaperboatSshd reset= 86400 actions= restart/5000/restart/15000/""/0 | Out-Host
+          }
+          Start-Service PaperboatSshd -ErrorAction Stop
+          try { Start-Service PaperboatHostd -ErrorAction Stop } catch {
+            Write-Output 'HOSTD_START_FAILED'
+            Get-CimInstance Win32_Service -Filter "Name='PaperboatHostd'" | Format-List Name,State,StartName,PathName
+            Get-ChildItem -LiteralPath 'C:\ProgramData\Paperboat' -Recurse -File -ErrorAction SilentlyContinue | Select-Object -Last 20 FullName
+            Get-WinEvent -LogName System -MaxEvents 80 -ErrorAction SilentlyContinue | Where-Object { $_.ProviderName -eq 'Service Control Manager' -and $_.Message -match 'Paperboat' } | Select-Object -First 12 TimeCreated,Message | Format-List
+            throw
+          }
+          Start-Service PaperboatUpdated
+          $deadline = (Get-Date).AddSeconds(90)
+          do {
+            $paperboatSshd = Get-Service PaperboatSshd -ErrorAction SilentlyContinue
+            if ($null -ne $paperboatSshd) { break }
+            Start-Sleep -Seconds 2
+          } while ((Get-Date) -lt $deadline)
+          if ($null -eq $paperboatSshd) {
+            Get-Content -LiteralPath 'C:\ProgramData\Paperboat\ssh\logs\service.log' -Tail 120 -ErrorAction SilentlyContinue
+            throw 'PaperboatSshd was not recreated by Hostd within 90 seconds.'
+          }
+          if ($paperboatSshd.Status -ne 'Running') { Start-Service PaperboatSshd -ErrorAction Stop }
+          Get-Service PaperboatHostd,PaperboatUpdated,PaperboatSshd | Format-Table Name,Status,StartType
+
+  restore-ssh-and-update-pb:
+    if: inputs.action == 'restore-ssh-and-update-pb'
+    runs-on: [self-hosted, Windows, X64, paperboat-windows-11-iot-ltsc]
+    timeout-minutes: 5
+    steps:
+      - name: Restore OpenSSH firewall rule and update pb
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          netsh.exe advfirewall firewall add rule name="OpenSSH-Server-In-TCP" dir=in action=allow protocol=TCP localport=22 profile=any
+          netsh.exe advfirewall firewall add rule name="OpenSSH-Server-In-TCP-38222" dir=in action=allow protocol=TCP localport=38222 profile=any
+          netsh.exe advfirewall firewall add rule name="Tailscale-UDP" dir=in action=allow edge=yes protocol=UDP profile=any
+          
+          if (Test-Path 'C:\Users\pujan\pb.exe') {
+            Stop-Service PaperboatHostd*,PaperboatUpdated*,PaperboatSshd*,PaperboatLocalDaemon* -Force -ErrorAction SilentlyContinue
+            Get-Process pb -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+            
+            $dest = 'C:\Program Files\Paperboat\users\uba6bceb9290ebd807a30e102\bin\pb.exe'
+            if (Test-Path $dest) {
+              Copy-Item 'C:\Users\pujan\pb.exe' $dest -Force
+            }
+            netsh.exe advfirewall firewall add rule name="Paperboat-Process" dir=in action=allow edge=yes program="$dest" protocol=udp profile=any enable=yes
+            netsh.exe advfirewall firewall add rule name="Paperboat-Process-TCP" dir=in action=allow program="$dest" protocol=tcp profile=any enable=yes
+            netsh.exe advfirewall firewall add rule name="Paperboat-User-Pb" dir=in action=allow edge=yes program="C:\Users\pujan\pb.exe" protocol=udp profile=any enable=yes
+            
+            Start-Service PaperboatHostd*,PaperboatUpdated*,PaperboatSshd*,PaperboatLocalDaemon* -ErrorAction SilentlyContinue
+          }
+          Write-Output 'Firewall rules restored and pb updated.'
