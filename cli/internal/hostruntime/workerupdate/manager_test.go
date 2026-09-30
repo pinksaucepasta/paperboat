@@ -23,7 +23,7 @@ import (
 
 func TestWorkerUpdateCutsOverWithoutRestartingHostd(t *testing.T) {
 	fixture := newFixture(t)
-	result, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	result, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestActiveVersionRemainsReadableDuringHealthHold(t *testing.T) {
 		}
 	}()
 	go func() {
-		_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+		_, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 		updateDone <- err
 	}()
 	select {
@@ -212,7 +212,7 @@ func TestOneHundredWorkerUpdatesKeepOneHostdAndBoundedRetention(t *testing.T) {
 	hostd := fixture.hostd
 	for generation := 2; generation <= 101; generation++ {
 		candidate := release(fmt.Sprintf("2026.08.18.%d", generation), fixture.fetcher.body)
-		result, err := fixture.manager.Activate(context.Background(), candidate)
+		result, err := activatePrepared(context.Background(), fixture.manager, candidate)
 		if err != nil || !result.Updated || result.Version != candidate.Version {
 			t.Fatalf("generation %d: result=%+v err=%v", generation, result, err)
 		}
@@ -255,7 +255,7 @@ func TestWorkerUpdateRollsBackWithoutRestartingHostd(t *testing.T) {
 	}
 
 	fixture.health.err = errors.New("relay unavailable")
-	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	_, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	if err == nil || err.Error() != "relay unavailable" {
 		t.Fatalf("error=%v", err)
 	}
@@ -272,7 +272,7 @@ func TestWorkerUpdateRollsBackWithoutRestartingHostd(t *testing.T) {
 	if loadErr != nil || journal.Stage != updateflow.StageIdle || journal.LastFailure != updateflow.FailureHealth || journal.CandidateVersion != fixture.candidate.Version {
 		t.Fatalf("journal=%+v err=%v", journal, loadErr)
 	}
-	if _, err := fixture.manager.Activate(context.Background(), fixture.candidate); !errors.Is(err, ErrQuarantined) {
+	if _, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate); !errors.Is(err, ErrQuarantined) {
 		t.Fatalf("same candidate err=%v, want quarantine", err)
 	}
 }
@@ -280,7 +280,7 @@ func TestWorkerUpdateRollsBackWithoutRestartingHostd(t *testing.T) {
 func TestWorkerUpdateRefusesCutoverWithoutAuthorizedRecovery(t *testing.T) {
 	fixture := newFixture(t)
 	fixture.fetcher.recoveryError = ErrReleaseRevoked
-	result, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	result, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	if !errors.Is(err, ErrReleaseRevoked) || result.Updated {
 		t.Fatalf("result=%+v error=%v", result, err)
 	}
@@ -300,7 +300,7 @@ func TestWorkerUpdateReverifiesRollbackBytesBeforeStart(t *testing.T) {
 		}
 	}
 	fixture.health.err = errors.New("candidate unhealthy")
-	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	_, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	if !errors.Is(err, ErrInvalidRelease) || !errors.Is(err, ErrBlocked) {
 		t.Fatalf("error=%v, want invalid release and blocked", err)
 	}
@@ -312,7 +312,7 @@ func TestWorkerUpdateReverifiesRollbackBytesBeforeStart(t *testing.T) {
 func TestWorkerUpdateAuthorizesSuccessfulRollback(t *testing.T) {
 	fixture := newFixture(t)
 	fixture.health.err = errors.New("candidate unhealthy")
-	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	_, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	if err == nil || fixture.fetcher.recoveryCalls != 4 {
 		t.Fatalf("error=%v recovery calls=%d", err, fixture.fetcher.recoveryCalls)
 	}
@@ -332,7 +332,7 @@ func TestWorkerUpdateRecoveryAuthorizationHonorsCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	started := time.Now()
-	_, err := fixture.manager.Activate(ctx, fixture.candidate)
+	_, err := activatePrepared(ctx, fixture.manager, fixture.candidate)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error=%v, want canceled", err)
 	}
@@ -347,7 +347,7 @@ func TestWorkerUpdateRecoveryAuthorizationHonorsCancellation(t *testing.T) {
 func TestWorkerUpdateLeavesUncertainCutoverForRecovery(t *testing.T) {
 	fixture := newFixture(t)
 	fixture.starter.activateError = errors.New("activation response lost")
-	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	_, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	if err == nil || err.Error() != "activation response lost" {
 		t.Fatalf("error=%v", err)
 	}
@@ -368,7 +368,7 @@ func TestWorkerUpdateLeavesUncertainCutoverForRecovery(t *testing.T) {
 func TestCrashRecoveryRechecksRollbackAuthorization(t *testing.T) {
 	fixture := newFixture(t)
 	fixture.starter.activateError = errors.New("activation response lost")
-	if _, err := fixture.manager.Activate(context.Background(), fixture.candidate); err == nil {
+	if _, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate); err == nil {
 		t.Fatal("activation unexpectedly succeeded")
 	}
 	fixture.starter.activateError = nil
@@ -388,7 +388,7 @@ func TestCrashRecoveryRechecksRollbackAuthorization(t *testing.T) {
 func TestWorkerUpdateRejectsTamperedArtifactBeforeCandidateStart(t *testing.T) {
 	fixture := newFixture(t)
 	fixture.fetcher.body = []byte("tampered")
-	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	_, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	if !errors.Is(err, ErrInvalidRelease) {
 		t.Fatalf("error=%v", err)
 	}
@@ -414,7 +414,7 @@ func TestWorkerUpdateRejectsNativeSignatureBeforeCandidateStart(t *testing.T) {
 		}
 		return errors.New("native signature rejected")
 	})
-	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	_, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	if !errors.Is(err, ErrInvalidRelease) {
 		t.Fatalf("error=%v", err)
 	}
@@ -427,7 +427,7 @@ func TestWorkerUpdateRejectsUnsignedCompatibilityRange(t *testing.T) {
 	fixture := newFixture(t)
 	invalid := fixture.candidate
 	invalid.HostdAPIMin, invalid.HostdAPIMax = 0, 0
-	_, err := fixture.manager.Activate(context.Background(), invalid)
+	_, err := activatePrepared(context.Background(), fixture.manager, invalid)
 	if !errors.Is(err, ErrInvalidRelease) {
 		t.Fatalf("error=%v", err)
 	}
@@ -436,7 +436,7 @@ func TestWorkerUpdateRejectsUnsignedCompatibilityRange(t *testing.T) {
 	}
 }
 
-func TestSchedulerAdapterOnlyRunsSafeManagerTransaction(t *testing.T) {
+func TestSchedulerAdapterOnlyReportsAvailableUpdate(t *testing.T) {
 	fixture := newFixture(t)
 	scheduler, err := fixture.manager.MandatoryScheduler(func(context.Context) (Release, bool, error) {
 		return fixture.candidate, true, nil
@@ -445,7 +445,7 @@ func TestSchedulerAdapterOnlyRunsSafeManagerTransaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := scheduler.CheckNow(context.Background())
-	if err != nil || !result.Updated || fixture.hostd.activations != 1 {
+	if err != nil || result.Updated || result.Version != fixture.candidate.Version || fixture.hostd.activations != 0 || fixture.starter.starts != 0 {
 		t.Fatalf("result=%+v err=%v activations=%d", result, err, fixture.hostd.activations)
 	}
 }
@@ -457,7 +457,7 @@ func TestActiveTerminalBusyRestoresOldWorkerWithoutQuarantine(t *testing.T) {
 	gate := &busyActivationGate{drainErr: busy}
 	fixture.manager.config.Gate = gate
 
-	result, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	result, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	var gotBusy *autoupdate.ActiveTerminalSessionsError
 	if !errors.As(err, &gotBusy) || gotBusy.RequiredVersion != fixture.candidate.Version {
 		t.Fatalf("error=%v", err)
@@ -492,7 +492,7 @@ func TestActiveTerminalBusyRestoresOldWorkerWithoutQuarantine(t *testing.T) {
 		t.Fatalf("expected busy recorded as failed rollback: %+v", journal)
 	}
 	gate.drainErr = nil
-	result, err = fixture.manager.Activate(context.Background(), fixture.candidate)
+	result, err = activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	if err != nil || !result.Updated {
 		t.Fatalf("deferred activation: %+v %v", result, err)
 	}
@@ -512,7 +512,7 @@ func TestActiveTerminalBusyDoesNotHideRollbackFailure(t *testing.T) {
 	}
 	fixture.manager.config.Gate = gate
 
-	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	_, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	var busy *autoupdate.ActiveTerminalSessionsError
 	if !errors.Is(err, rollbackErr) || !errors.Is(err, ErrBlocked) || errors.As(err, &busy) {
 		t.Fatalf("error=%v", err)
@@ -536,7 +536,7 @@ func TestNativeRuntimeActivationAdoptsRestartedHostdFence(t *testing.T) {
 		return updateflow.Write(path, journal, uid, gid)
 	}
 
-	result, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	result, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	if err != nil || !result.Updated {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
@@ -546,8 +546,8 @@ func TestNativeRuntimeActivationAdoptsRestartedHostdFence(t *testing.T) {
 	if fixture.hostd.activations != 0 {
 		t.Fatal("used stale candidate IPC after native host restart")
 	}
-	if fixture.starter.stops != 1 {
-		t.Fatalf("candidate stops=%d", fixture.starter.stops)
+	if fixture.starter.starts != 0 || fixture.starter.stops != 0 {
+		t.Fatalf("candidate starts=%d stops=%d", fixture.starter.starts, fixture.starter.stops)
 	}
 }
 
@@ -557,11 +557,14 @@ func TestNativeRuntimeHealthyRollbackRestartsRestoredCanonicalHostd(t *testing.T
 	var activated []string
 	fixture.manager.config.ActivateRuntime = func(_ context.Context, version string) (hostdproto.Status, error) {
 		activated = append(activated, version)
+		if version == fixture.active.Version {
+			fixture.health.err = nil
+		}
 		status := hostdproto.Status{State: hostdproto.StateActive, WorkerID: workerID(version), APIVersion: 1, Epoch: uint64(len(activated) + 10)}
 		fixture.hostd.active = status
 		return status, nil
 	}
-	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	_, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	if err == nil || errors.Is(err, ErrBlocked) {
 		t.Fatalf("error=%v", err)
 	}
@@ -570,26 +573,26 @@ func TestNativeRuntimeHealthyRollbackRestartsRestoredCanonicalHostd(t *testing.T
 	}
 }
 
-func TestNativeRuntimeBusyDoesNotRestartHostd(t *testing.T) {
+func TestApprovedNativeRuntimeUpdateAllowsTerminalInterruption(t *testing.T) {
 	fixture := newFixture(t)
 	fixture.manager.config.Gate = &busyActivationGate{drainErr: &autoupdate.ActiveTerminalSessionsError{RequiredVersion: fixture.candidate.Version}}
 	calls := 0
-	fixture.manager.config.ActivateRuntime = func(context.Context, string) (hostdproto.Status, error) {
+	fixture.manager.config.ActivateRuntime = func(_ context.Context, version string) (hostdproto.Status, error) {
 		calls++
-		return hostdproto.Status{}, nil
+		status := hostdproto.Status{State: hostdproto.StateActive, WorkerID: workerID(version), APIVersion: 1, Epoch: 42}
+		fixture.hostd.active = status
+		return status, nil
 	}
-	if _, err := fixture.manager.Activate(context.Background(), fixture.candidate); err == nil {
-		t.Fatal("busy activation succeeded")
-	}
-	if calls != 0 {
-		t.Fatalf("hostd restarts=%d", calls)
+	result, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
+	if err != nil || !result.Updated || calls != 1 || fixture.starter.starts != 0 {
+		t.Fatalf("result=%+v err=%v restarts=%d candidate starts=%d", result, err, calls, fixture.starter.starts)
 	}
 }
 
 func TestNativeRuntimeCrashAtCutoverRestoresSignedPreviousHostd(t *testing.T) {
 	fixture := newFixture(t)
 	fixture.starter.activateError = errors.New("activation response lost")
-	if _, err := fixture.manager.Activate(context.Background(), fixture.candidate); err == nil {
+	if _, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate); err == nil {
 		t.Fatal("cutover did not remain interrupted")
 	}
 	fixture.hostd.activeErr = errors.New("new hostd unavailable")
@@ -625,7 +628,7 @@ func TestNativeRuntimeCutoverHookIsBoundedAndFailureRestoresPrevious(t *testing.
 		fixture.hostd.active = status
 		return status, nil
 	}
-	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	_, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrBlocked) {
 		t.Fatalf("error=%v", err)
 	}
@@ -637,7 +640,7 @@ func TestNativeRuntimeCutoverHookIsBoundedAndFailureRestoresPrevious(t *testing.
 	}
 }
 
-func TestNativeRuntimeCandidateStopFailureRestoresPrevious(t *testing.T) {
+func TestNativeRuntimeDoesNotStartOrStopWorkerCandidate(t *testing.T) {
 	fixture := newFixture(t)
 	stopErr := errors.New("candidate did not exit")
 	fixture.starter.stopError = stopErr
@@ -648,11 +651,11 @@ func TestNativeRuntimeCandidateStopFailureRestoresPrevious(t *testing.T) {
 		fixture.hostd.active = status
 		return status, nil
 	}
-	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
-	if !errors.Is(err, stopErr) || !errors.Is(err, ErrBlocked) {
+	_, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
+	if err != nil {
 		t.Fatalf("error=%v", err)
 	}
-	if len(activated) != 1 || activated[0] != fixture.active.Version || fixture.hostd.activations != 0 || !regularMatches(fixture.paths.current, fixture.active.Length, fixture.active.SHA256) {
+	if len(activated) != 1 || activated[0] != fixture.candidate.Version || fixture.hostd.activations != 0 || !regularMatches(fixture.paths.current, fixture.candidate.Length, fixture.candidate.SHA256) || fixture.starter.starts != 0 || fixture.starter.stops != 0 {
 		t.Fatalf("activated=%v stale activations=%d previous restored=%v", activated, fixture.hostd.activations, regularMatches(fixture.paths.current, fixture.active.Length, fixture.active.SHA256))
 	}
 }
@@ -674,7 +677,7 @@ func TestNativeRuntimeParentCancellationStillRestoresPrevious(t *testing.T) {
 		fixture.hostd.active = status
 		return status, nil
 	}
-	_, err := fixture.manager.Activate(ctx, fixture.candidate)
+	_, err := activatePrepared(ctx, fixture.manager, fixture.candidate)
 	if !errors.Is(err, context.Canceled) || errors.Is(err, ErrBlocked) {
 		t.Fatalf("error=%v", err)
 	}
@@ -683,7 +686,7 @@ func TestNativeRuntimeParentCancellationStillRestoresPrevious(t *testing.T) {
 	}
 }
 
-func TestNativeRuntimePromotedJournalFailureStopsCandidateBeforeRestore(t *testing.T) {
+func TestNativeRuntimePromotedJournalFailureRestoresWithoutCandidate(t *testing.T) {
 	fixture := newFixture(t)
 	writeErr := errors.New("promoted journal unavailable")
 	failed := false
@@ -701,11 +704,11 @@ func TestNativeRuntimePromotedJournalFailureStopsCandidateBeforeRestore(t *testi
 		fixture.hostd.active = status
 		return status, nil
 	}
-	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	_, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	if !errors.Is(err, writeErr) || errors.Is(err, ErrBlocked) {
 		t.Fatalf("error=%v", err)
 	}
-	if fixture.starter.stops != 1 || len(activated) != 1 || activated[0] != fixture.active.Version || fixture.hostd.activations != 0 {
+	if fixture.starter.starts != 0 || fixture.starter.stops != 0 || len(activated) != 1 || activated[0] != fixture.active.Version || fixture.hostd.activations != 0 {
 		t.Fatalf("stops=%d activated=%v stale activations=%d", fixture.starter.stops, activated, fixture.hostd.activations)
 	}
 }
@@ -785,6 +788,7 @@ func TestValidWorkerIdentitySupportsExactRootEnrollment(t *testing.T) {
 }
 
 type fakeFetcher struct {
+	fetchCalls       int
 	body             []byte
 	recoveryError    error
 	recoveryCalls    int
@@ -793,6 +797,7 @@ type fakeFetcher struct {
 }
 
 func (f *fakeFetcher) Fetch(context.Context, Release) (io.ReadCloser, error) {
+	f.fetchCalls++
 	return io.NopCloser(bytes.NewReader(f.body)), nil
 }
 
@@ -913,7 +918,7 @@ func TestCanceledHealthCheckRestoresPolicyValidInstallation(t *testing.T) {
 	fixture.health.check = cancel
 	fixture.health.err = context.Canceled
 	fixture.fetcher.recovery = func(ctx context.Context) error { return ctx.Err() }
-	_, err := fixture.manager.Activate(ctx, fixture.candidate)
+	_, err := activatePrepared(ctx, fixture.manager, fixture.candidate)
 	if !errors.Is(err, context.Canceled) || errors.Is(err, ErrBlocked) {
 		t.Fatalf("error=%v", err)
 	}
@@ -924,4 +929,20 @@ func TestCanceledHealthCheckRestoresPolicyValidInstallation(t *testing.T) {
 	if loadErr != nil || journal.Stage != updateflow.StageIdle {
 		t.Fatalf("journal=%+v error=%v", journal, loadErr)
 	}
+}
+
+// activatePrepared exercises explicit user authorization in the existing
+// activation/recovery scenarios, preserving preparation failure assertions.
+func activatePrepared(ctx context.Context, manager *Manager, release Release) (Result, error) {
+	candidate, err := manager.Prepare(ctx, release)
+	if err != nil {
+		return Result{Version: manager.ActiveVersion()}, err
+	}
+	if candidate.ID == "" {
+		return manager.Activate(ctx, release)
+	}
+	if err = manager.Approve(ctx, candidate.ID); err != nil {
+		return Result{Version: manager.ActiveVersion()}, err
+	}
+	return manager.Activate(ctx, release)
 }

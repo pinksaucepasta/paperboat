@@ -3,6 +3,7 @@ package splitdns
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"net"
 	"net/http"
@@ -14,20 +15,60 @@ import (
 	"golang.org/x/net/publicsuffix"
 )
 
-func TestBrowserHostsAreSeparateRegistrableSites(t *testing.T) {
+func TestPublicBrowserNamespaceAndCertificateConstraint(t *testing.T) {
+	host, err := BrowserHostname("hp", 6767, BrowserSuffix)
+	if err != nil || host != "6767.hp.local.pprbt.dev" || !IsPublicBrowserHostname(host) {
+		t.Fatalf("public hostname %q: %v", host, err)
+	}
+	for _, bad := range []string{"06767.hp.local.pprbt.dev", "0.hp.local.pprbt.dev", "6767.hp.local.pprbt.dev.evil", "6767.hp.pprbt.dev", BrowserGatewayHostname} {
+		if IsPublicBrowserHostname(bad) {
+			t.Fatalf("accepted %q", bad)
+		}
+	}
+	for _, bad := range []string{"dev", "pprbt.dev", "other.pprbt.dev"} {
+		if _, err := ValidateTrustSuffix(bad); err == nil {
+			t.Fatalf("accepted trust scope %q", bad)
+		}
+	}
+	ca, err := LoadOrCreateConstrainedCA(t.TempDir(), BrowserSuffix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(ca.CertPEM())
+	for _, name := range []string{host, "api.pprbt.dev", "unrelated.dev"} {
+		cert, key, err := ca.IssueCertificate([]string{name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pair, err := tls.X509KeyPair(cert, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		leaf, err := x509.ParseCertificate(pair.Certificate[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = leaf.Verify(x509.VerifyOptions{DNSName: name, Roots: roots})
+		if (err == nil) != (name == host) {
+			t.Fatalf("constraint for %q: %v", name, err)
+		}
+	}
+}
+
+func TestBrowserHostsUseSelectedPortDeviceNames(t *testing.T) {
 	a, err := BrowserHostname("machine", 3000, "pprbt")
 	if err != nil {
 		t.Fatal(err)
 	}
 	b, _ := BrowserHostname("machine", 3001, "pprbt")
 	again, _ := BrowserHostname("machine", 3000, "pprbt")
-	if a != again || a == b || strings.Count(a, ".") != 1 || len(strings.Split(a, ".")[0]) != 32 {
-		t.Fatalf("bad stable flat names: %s %s", a, b)
+	if a != again || a == b || a != "3000.machine.pprbt" || b != "3001.machine.pprbt" {
+		t.Fatalf("bad stable browser names: %s %s", a, b)
 	}
 	for _, host := range []string{a, b} {
-		site, err := publicsuffix.EffectiveTLDPlusOne(host)
-		if err != nil || site != host {
-			t.Fatalf("site=%q host=%q err=%v", site, host, err)
+		if site, err := publicsuffix.EffectiveTLDPlusOne(host); err != nil || site != "machine.pprbt" {
+			t.Fatalf("selected nested naming site %q: %v", site, err)
 		}
 	}
 	if _, err := BrowserHostname("machine", 3000, "home.pprbt"); err == nil {
@@ -47,7 +88,7 @@ func TestProxyRejectsUnregisteredHostSNIAndCrossSiteAuthorityBeforeDial(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, host := range []string{"unknown.pprbt", "3000.device.pprbt", "child.first.pprbt", "first.pprbt.evil"} {
+	for _, host := range []string{"unknown.pprbt", "4000.other.pprbt", "3000.first.pprbt", "child.first.pprbt", "first.pprbt.evil"} {
 		req := httptest.NewRequest(http.MethodGet, "http://"+host+"/", nil)
 		rec := httptest.NewRecorder()
 		p.ServeHTTP(rec, req)

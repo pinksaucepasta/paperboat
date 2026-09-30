@@ -34,6 +34,19 @@ func TestBindingRequiresExactCurrentLoopbackTarget(t *testing.T) {
 	}
 }
 
+func TestBindingLifetimeAllowsBoundedClockSkew(t *testing.T) {
+	now := time.Now().UTC()
+	binding := validBinding(now)
+	binding.ExpiresAt = now.Add(5*time.Minute + 3*time.Second)
+	if err := binding.Validate(now); err != nil {
+		t.Fatal("small client clock skew rejected:", err)
+	}
+	binding.ExpiresAt = now.Add(5*time.Minute + 31*time.Second)
+	if !errors.Is(binding.Validate(now), ErrInvalid) {
+		t.Fatal("overlong grant accepted")
+	}
+}
+
 func TestDecodeIsStrictAndBounded(t *testing.T) {
 	now := time.Now().UTC()
 	raw, _ := json.Marshal(validBinding(now))

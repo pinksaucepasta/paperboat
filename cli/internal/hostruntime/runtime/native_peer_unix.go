@@ -155,10 +155,12 @@ func (s *productionNativePeerService) Start(ctx context.Context) error {
 	s.mu.Unlock()
 	generation, err := s.startGeneration(runCtx)
 	if err != nil {
-		if errors.Is(err, errNativePeerPending) {
+		if runCtx.Err() == nil && transientNativePeerStart(err) {
 			s.mu.Lock()
 			s.lastErr = err
 			s.mu.Unlock()
+			// Keep initial control or approval failure under the same bounded
+			// supervisor as later failures. No listener exists until admission passes.
 			go s.supervise(runCtx, nil)
 			return nil
 		}
@@ -176,6 +178,20 @@ func (s *productionNativePeerService) Start(ctx context.Context) error {
 	s.mu.Unlock()
 	go s.supervise(runCtx, generation)
 	return nil
+}
+
+// Approval and transient control failures keep the existing supervisor alive.
+// Invalid identity, protocol, or authorization still fails startup closed.
+func transientNativePeerStart(err error) bool {
+	if errors.Is(err, errNativePeerPending) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var response *clientapi.APIError
+	if errors.As(err, &response) {
+		return response.Status == 408 || response.Status == 429 || response.Status >= 500
+	}
+	var network net.Error
+	return errors.As(err, &network) && (network.Timeout() || network.Temporary())
 }
 
 func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*productionNativePeerGeneration, error) {

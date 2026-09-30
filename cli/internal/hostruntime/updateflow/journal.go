@@ -33,6 +33,7 @@ const (
 	StageIdle                Stage = "idle"
 	StageChecking            Stage = "checking"
 	StageStaged              Stage = "staged"
+	StageAwaitingApproval    Stage = "awaiting_approval"
 	StageCandidateStarted    Stage = "candidate_started"
 	StageCandidateValidating Stage = "candidate_validating"
 	StageCandidateReady      Stage = "candidate_ready"
@@ -81,6 +82,7 @@ func (p ActivationPolicy) Validate() error {
 }
 
 type Journal struct {
+	NativeActivation        bool                  `json:"native_activation,omitempty"`
 	ActiveSource            *installsource.Source `json:"active_source,omitempty"`
 	Schema                  string                `json:"schema"`
 	TransactionID           string                `json:"transaction_id"`
@@ -93,6 +95,12 @@ type Journal struct {
 	ActiveRuntimeAPIMin     uint16                `json:"active_runtime_api_min,omitempty"`
 	ActiveRuntimeAPIMax     uint16                `json:"active_runtime_api_max,omitempty"`
 	RollbackVersion         string                `json:"rollback_version,omitempty"`
+	CandidateID             string                `json:"candidate_id,omitempty"`
+	ApprovedCandidateID     string                `json:"approved_candidate_id,omitempty"`
+	ArtifactDigest          string                `json:"artifact_digest,omitempty"`
+	ArtifactLength          int64                 `json:"artifact_length,omitempty"`
+	ArtifactPlatform        string                `json:"artifact_platform,omitempty"`
+	ArtifactArchitecture    string                `json:"artifact_architecture,omitempty"`
 	CandidateVersion        string                `json:"candidate_version,omitempty"`
 	CandidateDigest         string                `json:"candidate_digest,omitempty"`
 	CandidateManifestDigest string                `json:"candidate_manifest_digest,omitempty"`
@@ -137,6 +145,15 @@ func (j Journal) Validate() error {
 	if j.CandidateDigest != "" && !digestPattern.MatchString(j.CandidateDigest) || j.CandidateManifestDigest != "" && !digestPattern.MatchString(j.CandidateManifestDigest) || j.CandidateLength < 0 {
 		return ErrInvalidJournal
 	}
+	if j.CandidateID != "" && (!digestPattern.MatchString(j.CandidateID) || !digestPattern.MatchString(j.ArtifactDigest) || j.ArtifactLength < 1 || j.ArtifactPlatform == "" || j.ArtifactArchitecture == "") {
+		return ErrInvalidJournal
+	}
+	if j.ApprovedCandidateID != "" && (j.CandidateID == "" || j.ApprovedCandidateID != j.CandidateID) {
+		return ErrInvalidJournal
+	}
+	if j.Stage == StageAwaitingApproval && j.CandidateID == "" {
+		return ErrInvalidJournal
+	}
 	// A signed deployment manifest must carry its complete activation policy.
 	if j.CandidateManifestDigest != "" && j.CandidatePolicy == nil || j.CandidatePolicy != nil && (j.CandidateManifestDigest == "" || j.CandidatePolicy.Validate() != nil) {
 		return ErrInvalidJournal
@@ -147,7 +164,7 @@ func (j Journal) Validate() error {
 	if requiresCandidate(j.Stage) && (j.CandidateVersion == "" || j.CandidateDigest == "" || j.CandidateLength <= 0 || j.StagedPath == "") {
 		return ErrInvalidJournal
 	}
-	if (j.Stage == StageCutover || j.Stage == StageMonitoring || j.Stage == StageCommitted) && (j.WorkerEpoch == 0 || !validID(j.WorkerID)) {
+	if ((j.Stage == StageCutover && !j.NativeActivation) || j.Stage == StageMonitoring || j.Stage == StageCommitted) && (j.WorkerEpoch == 0 || !validID(j.WorkerID)) {
 		return ErrInvalidJournal
 	}
 	if j.DeferredManual && j.BlockedReason != "active_terminal_sessions" {
@@ -193,7 +210,7 @@ func (j Journal) Recovery() RecoveryAction {
 		return RecoveryRequired
 	}
 	switch j.Stage {
-	case StageIdle, StageChecking:
+	case StageIdle, StageChecking, StageAwaitingApproval:
 		return RecoveryKeepActive
 	case StageStaged, StageCandidateStarted, StageCandidateValidating, StageCandidateReady:
 		return RecoveryDiscardCandidate
@@ -251,8 +268,9 @@ func Load(path string) (Journal, error) {
 
 func allowed(from, to Stage) bool {
 	allowedNext := map[Stage][]Stage{
-		StageIdle: {StageChecking}, StageChecking: {StageStaged, StageIdle, StageBlocked},
+		StageIdle: {StageChecking}, StageChecking: {StageStaged, StageAwaitingApproval, StageIdle, StageBlocked},
 		StageStaged:              {StageCandidateStarted, StageIdle, StageBlocked},
+		StageAwaitingApproval:    {StageStaged, StageCutover, StageChecking, StageIdle},
 		StageCandidateStarted:    {StageCandidateValidating, StageRollback, StageBlocked},
 		StageCandidateValidating: {StageCandidateReady, StageRollback, StageBlocked},
 		StageCandidateReady:      {StageDraining, StageRollback, StageBlocked},
@@ -275,13 +293,13 @@ func validID(value string) bool {
 func validVersion(value string) bool { return versionPattern.MatchString(value) }
 func requiresCandidate(stage Stage) bool {
 	switch stage {
-	case StageStaged, StageCandidateStarted, StageCandidateValidating, StageCandidateReady, StageDraining, StageCutover, StageMonitoring, StageCommitted, StageRollback:
+	case StageAwaitingApproval, StageStaged, StageCandidateStarted, StageCandidateValidating, StageCandidateReady, StageDraining, StageCutover, StageMonitoring, StageCommitted, StageRollback:
 		return true
 	}
 	return false
 }
 func knownStage(stage Stage) bool {
-	for _, value := range []Stage{StageIdle, StageChecking, StageStaged, StageCandidateStarted, StageCandidateValidating, StageCandidateReady, StageDraining, StageCutover, StageMonitoring, StageCommitted, StageRollback, StageBlocked} {
+	for _, value := range []Stage{StageIdle, StageChecking, StageAwaitingApproval, StageStaged, StageCandidateStarted, StageCandidateValidating, StageCandidateReady, StageDraining, StageCutover, StageMonitoring, StageCommitted, StageRollback, StageBlocked} {
 		if value == stage {
 			return true
 		}

@@ -44,6 +44,7 @@ type DaemonConfig struct {
 	FileTransfers           localapi.FileTransferBroker
 	DeviceSuffix            string
 	DeviceLoopbackCIDR      string
+	OnMachines              func(context.Context, []api.UserMachine)
 }
 
 func Run(ctx context.Context, config DaemonConfig) error { return runWindowsDaemon(ctx, config) }

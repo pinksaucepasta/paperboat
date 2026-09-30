@@ -77,6 +77,9 @@ func (a *Authority) Refresh(ctx context.Context, client NetworkAPI) error {
 		}
 	}
 	if err := a.Apply(ctx, result.Configuration); err != nil {
+		if errors.Is(err, ErrStaleAuthority) {
+			return nil
+		}
 		return err
 	}
 	if result.CandidateSet == "" {

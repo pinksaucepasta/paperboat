@@ -42,8 +42,8 @@ func desktopCommand() *cobra.Command {
 			return writeCLIJSONError(c.OutOrStdout(), invocationError(err))
 		}
 		timeout := 45 * time.Second
-		if in.Action == "local.update" {
-			timeout = 180 * time.Second
+		if in.Action == "local.update-download" || in.Action == "local.update-install" {
+			timeout = 15 * time.Minute
 		}
 		ctx, cancel := context.WithTimeout(c.Context(), timeout)
 		defer cancel()
@@ -105,8 +105,21 @@ func handleDesktop(c *cobra.Command, in desktopRequest) (any, error) {
 		return desktopAuthPoll(c)
 	case "local.update-status":
 		return desktopCLI(c, []string{"update", "status", "--json"})
-	case "local.update":
-		return desktopCLI(c, []string{"update", "--json"})
+	case "local.update-check":
+		return desktopCLI(c, []string{"update", "check", "--json"})
+	case "local.update-download":
+		return desktopCLI(c, []string{"update", "download", "--json"})
+	case "local.update-install":
+		var payload struct {
+			ApprovalID string `json:"approval_id"`
+		}
+		if err := decodeDesktop(in.Payload, &payload); err != nil {
+			return nil, err
+		}
+		if len(payload.ApprovalID) != 64 || strings.Trim(payload.ApprovalID, "0123456789abcdef") != "" {
+			return nil, errors.New("review a downloaded update and approve its exact candidate")
+		}
+		return desktopCLI(c, []string{"update", "--approve", payload.ApprovalID, "--json"})
 	case "local.restart":
 		return desktopCLI(c, []string{"service", "restart", "--json"})
 	case "network.pause":

@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,7 +75,7 @@ func TestControlClientUsesOnlyFixedOperations(t *testing.T) {
 	}
 	defer listener.Close()
 	server := controlServer{socketPath: path, uid: os.Geteuid(), gid: os.Getegid(), invoke: func(_ context.Context, operation string) (ControlResponse, error) {
-		if operation != "update" {
+		if operation != "install" {
 			t.Fatalf("operation = %q", operation)
 		}
 		return ControlResponse{Schema: ControlProtocolV1, Status: "ok", Version: "2.0.0", Updated: true}, nil
@@ -92,7 +93,7 @@ func TestControlClientUsesOnlyFixedOperations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := client.Update(context.Background())
+	response, err := client.Install(context.Background(), strings.Repeat("a", 64))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +186,7 @@ func TestControlStatusRemainsResponsiveDuringUpdate(t *testing.T) {
 	releaseUpdate := make(chan struct{})
 	server := controlServer{socketPath: path, uid: os.Geteuid(), gid: os.Getegid(), invokeRequest: func(_ context.Context, request ControlRequest) (ControlResponse, error) {
 		switch request.Operation {
-		case "update":
+		case "install":
 			close(updateStarted)
 			<-releaseUpdate
 			return ControlResponse{Schema: ControlProtocolV1, Status: "ok", Version: "2.0.0", Updated: true}, nil
@@ -204,7 +205,7 @@ func TestControlStatusRemainsResponsiveDuringUpdate(t *testing.T) {
 	}
 	updateDone := make(chan error, 1)
 	go func() {
-		_, updateErr := client.Update(context.Background())
+		_, updateErr := client.Install(context.Background(), strings.Repeat("a", 64))
 		updateDone <- updateErr
 	}()
 	select {
@@ -256,7 +257,7 @@ func TestControlResponseIsReadableBeforePostCommitHandoffCompletes(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := client.Update(context.Background())
+	response, err := client.Install(context.Background(), strings.Repeat("a", 64))
 	if err != nil || response.Version != "2.0.0" || !response.Updated {
 		t.Fatalf("response=%#v error=%v", response, err)
 	}

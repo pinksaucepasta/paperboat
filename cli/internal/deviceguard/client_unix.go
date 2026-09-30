@@ -136,11 +136,11 @@ func (c *Client) exchange(ctx context.Context, in request) (response, *os.File, 
 	if err = json.Unmarshal(data, &out); err != nil {
 		return fail(err)
 	}
-	if out.Error != "" {
+	if responseErr := responseError(out); responseErr != nil {
 		if file != nil {
 			file.Close()
 		}
-		return response{}, nil, errors.New(out.Error)
+		return response{}, nil, responseErr
 	}
 	return out, file, nil
 }

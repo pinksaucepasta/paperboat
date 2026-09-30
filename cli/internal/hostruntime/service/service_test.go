@@ -80,6 +80,16 @@ func TestSystemdDefinitionEscapesSpecifiersAndEnvironmentExpansion(t *testing.T)
 	}
 }
 
+func TestSystemdDaemonPreservesRootPeerCredentials(t *testing.T) {
+	body, err := renderSystemd(Config{Kind: DaemonKind, Executable: "/opt/pb", Arguments: []string{"daemon"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "PrivateTmp=false") {
+		t.Fatalf("daemon cannot authenticate root guard in a user namespace:\n%s", body)
+	}
+}
+
 func TestSystemdWorkerUsesPrivateTmp(t *testing.T) {
 	body, err := renderSystemd(Config{Kind: WorkerKind, User: "paperboat", Group: "paperboat", Executable: "/opt/pb", Arguments: []string{"run"}})
 	if err != nil {

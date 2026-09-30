@@ -28,6 +28,7 @@ type directFilter struct {
 	relayPort      uint16
 	enabled        atomic.Bool
 	writes         atomic.Uint64
+	directData     atomic.Uint64
 	relayData      atomic.Uint64
 	relayHandshake atomic.Uint64
 	derpData       atomic.Uint64
@@ -92,7 +93,9 @@ func (c *filteredPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) {
 		return len(p), nil
 	}
 	c.filter.writes.Add(1)
-	return c.UDPConn.WriteTo(p, addr)
+	n, err := c.UDPConn.WriteTo(p, addr)
+	c.countDirectData(p, n, err)
+	return n, err
 }
 
 func (c *filteredPacketConn) WriteToUDPAddrPort(p []byte, addr netip.AddrPort) (int, error) {
@@ -106,7 +109,15 @@ func (c *filteredPacketConn) WriteToUDPAddrPort(p []byte, addr netip.AddrPort) (
 		return len(p), nil
 	}
 	c.filter.writes.Add(1)
-	return c.UDPConn.WriteToUDPAddrPort(p, addr)
+	n, err := c.UDPConn.WriteToUDPAddrPort(p, addr)
+	c.countDirectData(p, n, err)
+	return n, err
+}
+
+func (c *filteredPacketConn) countDirectData(p []byte, n int, err error) {
+	if err == nil && n == len(p) && len(p) >= 4 && binary.LittleEndian.Uint32(p) == 4 {
+		c.filter.directData.Add(1)
+	}
 }
 
 // Discovery probes also traverse the relay; only WireGuard transport data
@@ -326,6 +337,22 @@ func TestAutomaticPeerRelayThenDirectRecovery(t *testing.T) {
 		t.Fatalf("recovered peer relay transfer with DERP data disabled: %v", err)
 	}
 
+	// This fault sequence includes a bounded 35s relay-reallocation wait and a
+	// second 35s recovery window. Renew the real signed 60s relay authority
+	// between phases, as the production refresh loop does; expiration must not
+	// masquerade as a transport recovery failure.
+	refreshed := time.Now().UTC().Truncate(time.Second)
+	// The control plane advances the network generation on every refresh.
+	// Renewing timestamps at the old generation is a conflicting signed grant
+	// and correctly causes the relay to reject its next authentication frame.
+	clientConfig.Generation++
+	serverConfig.Generation++
+	applyTestConfiguration(t, clientAuthority, signerPrivate, clientConfig)
+	applyTestConfiguration(t, serverAuthority, signerPrivate, serverConfig)
+	node.ObservedAt, node.CapacityObservedAt, node.ExpiresAt = refreshed.Unix(), refreshed.Unix(), refreshed.Add(time.Minute).Unix()
+	applyRelayAuthority(t, clientAuthority, signerPrivate, clientConfig, clientTLS, node, grant(clientDisco, serverDisco))
+	applyRelayAuthority(t, serverAuthority, signerPrivate, serverConfig, serverTLS, node, grant(serverDisco, clientDisco))
+
 	clientFilter.enabled.Store(true)
 	serverFilter.enabled.Store(true)
 	deadline := time.Now().Add(8 * time.Second)
@@ -335,14 +362,24 @@ func TestAutomaticPeerRelayThenDirectRecovery(t *testing.T) {
 	if clientFilter.writes.Load()+serverFilter.writes.Load() == 0 {
 		t.Fatal("direct WireGuard UDP did not recover")
 	}
-	// A direct probe write precedes endpoint selection. Keep application traffic
-	// flowing while magicsock completes the direct path handshake.
-	directDeadline := time.Now().Add(5 * time.Second)
+	// Discovery writes are not proof of a direct application path. Require a
+	// successful same-session transfer and direct WireGuard data in both directions.
+	directDeadline := time.Now().Add(8 * time.Second)
+	beforeClientDirect, beforeServerDirect := clientFilter.directData.Load(), serverFilter.directData.Load()
+	var directErr error
+	var directRecovered bool
 	for time.Now().Before(directDeadline) {
 		attemptCtx, attemptCancel := context.WithTimeout(ctx, time.Second)
-		_ = repeatTransfer(attemptCtx)
+		directErr = repeatTransfer(attemptCtx)
 		attemptCancel()
+		if directErr == nil && clientFilter.directData.Load() > beforeClientDirect && serverFilter.directData.Load() > beforeServerDirect {
+			directRecovered = true
+			break
+		}
 		time.Sleep(50 * time.Millisecond)
+	}
+	if !directRecovered {
+		t.Fatalf("direct application path did not recover: data=%d/%d control=%d/%d relay=%+v err=%v", clientFilter.directData.Load(), serverFilter.directData.Load(), controlCalls.Load(), controlErrors.Load(), restartedUDP.Snapshot(), directErr)
 	}
 	clientFilter.enabled.Store(false)
 	serverFilter.enabled.Store(false)
@@ -359,6 +396,6 @@ func TestAutomaticPeerRelayThenDirectRecovery(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	if clientFilter.relayData.Load() <= beforeClient || serverFilter.relayData.Load() <= beforeServer {
-		t.Fatalf("direct loss did not recover same-session traffic through peer relay: before=%d/%d after=%d/%d err=%v", beforeClient, beforeServer, clientFilter.relayData.Load(), serverFilter.relayData.Load(), peerErr)
+		t.Fatalf("direct loss did not recover same-session traffic through peer relay: before=%d/%d after=%d/%d control=%d/%d handshakes=%d/%d dropped=%d/%d relay=%+v derp=%+v err=%v", beforeClient, beforeServer, clientFilter.relayData.Load(), serverFilter.relayData.Load(), controlCalls.Load(), controlErrors.Load(), clientFilter.relayHandshake.Load(), serverFilter.relayHandshake.Load(), clientFilter.dropped.Load(), serverFilter.dropped.Load(), restartedUDP.Snapshot(), relay.Snapshot(), peerErr)
 	}
 }

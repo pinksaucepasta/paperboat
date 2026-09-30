@@ -145,6 +145,20 @@ func TestLinuxGuardSystemResolver(t *testing.T) {
 		}
 		t.Fatal(err)
 	}
+	cfg := Config{StateDir: filepath.Join(root, "state"), Socket: filepath.Join(root, "control", "guard.sock"), DNSAddress: "127.100.0.1:53535", ConfigureResolver: true, hostsPath: testHostsFile(t)}
+	if err := setupResolver(t.Context(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	alias, err := os.ReadFile("/sys/class/net/paperboat-dns/ifalias")
+	if err != nil || strings.TrimSpace(string(alias)) != "paperboat-deviceguard-v1" {
+		t.Fatalf("fresh resolver link has no ownership: %v %q", err, alias)
+	}
+	if err := removeOwnedResolver(t.Context(), cfg); err != nil {
+		t.Fatalf("fresh resolver cleanup: %v", err)
+	}
+	if err := exec.Command("ip", "link", "show", "paperboat-dns").Run(); err == nil {
+		t.Fatal("owned resolver link survived cleanup")
+	}
 	// Model the state left by a SIGKILL: the root-owned link and its resolved
 	// routing domain survive, while the helper process and DNS listener do not.
 	command("ip", "link", "add", "name", "paperboat-dns", "type", "dummy")
@@ -158,7 +172,6 @@ func TestLinuxGuardSystemResolver(t *testing.T) {
 	if err != nil || !strings.Contains(string(stale), "~stale-before-restart") {
 		t.Fatalf("seed stale resolver projection: %v %s", err, stale)
 	}
-	cfg := Config{StateDir: filepath.Join(root, "state"), Socket: filepath.Join(root, "control", "guard.sock"), DNSAddress: "127.100.0.1:53535", ConfigureResolver: true}
 	notifyPath := filepath.Join(root, "notify.sock")
 	notify, err := net.ListenUnixgram("unixgram", &net.UnixAddr{Name: notifyPath, Net: "unixgram"})
 	if err != nil {

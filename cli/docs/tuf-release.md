@@ -1,6 +1,6 @@
 # TUF release operations
 
-Paperboat publishes five native product assets. Each is the complete unified `pb` executable or package for its platform and architecture:
+Paperboat supports five canonical native product assets. A release may publish any nonempty subset that has completed its platform qualification. Each is the complete unified `pb` executable or package for its platform and architecture:
 
 - `pb-windows-amd64.exe`
 - `pb-windows-arm64.exe`
@@ -12,7 +12,7 @@ Linux assets are raw ELF executables. Windows assets are PE executables. The mac
 
 ## Distribution contract
 
-GitHub Releases hosts those five product assets and five small bootstrap-verifier executables. The release origin serves only:
+GitHub Releases hosts the selected product assets and their corresponding small bootstrap-verifier executables. The release origin serves only:
 
 - the shell installer at `/install`
 - the PowerShell installer selected by the PowerShell user agent
@@ -32,7 +32,7 @@ Installed clients refresh and verify TUF metadata, select their canonical asset 
 On Unix, `pb update status` reports a recorded activation failure after recovery.
 If the transaction or activation record cannot be read, it returns
 `recovery_required` instead of reporting activation complete; completion remains
-unknown until the updater can read its recovery state. The transaction preserves the signed canary policy and activation/recovery deadlines across helper restarts. Canary policies require 2–32 samples. macOS bootstrap verifies and extracts the package without modifying installed paths or receipts; the native installer transaction owns executable cutover. Completed Unix bootstrap binds the enrolled user daemon to the canonical installed executable; activation and rollback verify the running daemon and updater versions.
+unknown until the updater can read its recovery state. The transaction preserves signed artifact identity and activation/recovery deadlines across helper restarts. macOS bootstrap verifies and extracts the package without modifying installed paths or receipts; the native installer transaction owns executable cutover. Completed Unix bootstrap binds the enrolled user daemon to the canonical installed executable; activation and rollback verify the running daemon and updater versions.
 
 If an older activation helper cannot recover, a verified newer native reinstall can supersede its transaction. The updater verifies the installed executable against the signed payload and requires a strictly newer version before recording the new installation as idle and retiring the obsolete handoff. Recovery does not require editing the journal or replacing the helper by hand, and reinstall does not waive TUF verification or rollback protection.
 
@@ -42,9 +42,9 @@ The installer script is the bootstrap trust anchor. A compromised script origin 
 
 1. Create and push a release tag.
 2. The workflow runs the release checks and native platform tests.
-3. It builds and verifies the five product assets and five bootstrap-verifier assets.
-4. It creates or updates the GitHub release through the GitHub API, uploads the five product and five bootstrap-verifier assets, and verifies the API-reported size and digest.
-5. The TUF signer publishes five signed asset targets with the GitHub URLs and inline release policy.
+3. It builds and verifies the selected product assets and corresponding bootstrap-verifier assets.
+4. It creates or updates the GitHub release through the GitHub API, uploads the selected product and bootstrap-verifier assets, and verifies the API-reported size and digest.
+5. The TUF signer updates the selected signed targets with their GitHub URLs and inline release policy. Omitted platforms retain their previously signed artifact identities, versions and policies.
 6. The workflow renders both installers with verifier pins and stages them with TUF metadata for atomic activation on the server origin.
 
 All pull requests run the reusable checks. The tag workflow repeats the small release contract checks and the required native checks before spending time on publication. No separate binary transfer or checksum-file handoff is part of the release.
@@ -57,20 +57,20 @@ Users start with:
 
 The shell installer verifies its pinned bootstrap executable, which selects the Linux or macOS asset through TUF and downloads that product once from GitHub before executing it. Linux invokes the verified executable as `pb install --install-dir ABSOLUTE_DIRECTORY --json`. On macOS, the bootstrap expands the verified package in its task-owned temporary directory and invokes the canonical payload at `Library/PrivilegedHelperTools/Paperboat/bin/pb install --json`; it does not run the package installer. The PowerShell bootstrap follows the same boundary with the verified Windows executable and lets `pb install --json` own UAC while preserving the invoking user. Each bootstrap validates the owner-scoped absolute executable path returned in `data.executable`. Ordinary installation preserves enrollment and settings. A dashboard/token pairing securely stages the required token, then asks the verified binary to classify the protected resume journal. The same token resumes the existing partial pairing without reset or a replacement install. A new token runs confirmed `pb reset`, which synchronously removes Paperboat-owned services, configuration, credentials, keys, runtime state, and the prior installation while preserving Inbox payloads; any incomplete cleanup aborts before the token is consumed. It then installs and pairs through the returned installed binary without downloading a second artifact.
 
-`pb install` installs the running executable without contacting a release server. Source/shared builds default to automatic updates disabled. Official release builds enable automatic updates, whose downloaded replacements still require TUF verification. Enrollment contacts the account server independently and does not download another runtime.
+`pb install` installs the running executable without contacting a release server. Source/shared builds default to background update checks disabled. Official release builds enable periodic checks and notification; downloads and installation require user action, and every downloaded replacement still requires TUF verification. Enrollment contacts the account server independently and does not download another runtime.
 
 ## Windows qualification
 
-`paperboat-tuf publish` requires one passed native qualification header for each Windows architecture. The evidence binds the release version, Windows architecture, Windows build, runner, and `native_tested` status. It does not publish a separate executable or package target.
+`paperboat-tuf publish` requires one passed native qualification header for each Windows architecture selected for publication. The evidence binds the release version, Windows architecture, Windows build, runner, and `native_tested` status. It does not publish a separate executable or package target.
 
 ## Signing and maintenance
 
 Keep TUF private keys out of the repository and runtime machines. Online role keys are protected GitHub environment secrets; root keys remain offline. The signer runs on the approved release workstation or in the explicitly authorized CI mode.
 
-Use the signer for the current five-asset repository:
+Use the signer for a qualified subset of the canonical assets:
 
 First create and validate the canonical artifact manifest and signed deployment
-policy from the exact five files. The policy revision passed to the signer must
+policy from the exact selected files. The policy revision passed to the signer must
 match the plan's `policy_revision`.
 
 ```sh
@@ -78,7 +78,7 @@ go run ./tools/release-plan manifest \
   -version YYYY.MM.DD.X \
   -source-commit <40-or-64-char-commit> \
   -toolchain go1.27.1 \
-  -artifacts /absolute/path/to/five-assets \
+  -artifacts /absolute/path/to/qualified-assets \
   -output /absolute/path/to/manifest.json
 
 go run ./tools/release-plan plan \
@@ -91,16 +91,15 @@ go run ./tools/release-plan plan \
 go run ./tools/release-plan validate \
   -manifest /absolute/path/to/manifest.json \
   -plan /absolute/path/to/deployment-plan.json \
-  -artifacts /absolute/path/to/five-assets
+  -artifacts /absolute/path/to/qualified-assets
 
 paperboat-tuf publish \
   -repository /Users/pujan.pm/.local/share/paperboat-release/tuf-production \
   -version YYYY.MM.DD.X \
-  -artifacts /absolute/path/to/five-assets \
+  -artifacts /absolute/path/to/qualified-assets \
   -manifest /absolute/path/to/manifest.json \
   -deployment-plan /absolute/path/to/deployment-plan.json \
   -windows-amd64-native-evidence /absolute/path/to/windows-amd64-native-qualification.json \
-  -windows-arm64-native-evidence /absolute/path/to/windows-arm64-native-qualification.json \
   -rollout-revision 1 \
   -severity routine
 
@@ -117,4 +116,4 @@ sets `quarantined`. Automatic consumers are eligible only while the signed
 state is active. The quarantine command does not use the release index's
 cryptographic revocation flag.
 
-Before publication, verify that the GitHub release contains the five product and five verifier assets, that each signed product URL points to that release, and that the origin's TUF target directory is empty.
+For the example above, select darwin-arm64, linux-amd64 and windows-amd64 assets; a selection including windows-arm64 also requires its native evidence file. Before publication, verify that the GitHub release contains every selected product and corresponding verifier asset, that each signed product URL points to that release, and that the origin's TUF target directory is empty.

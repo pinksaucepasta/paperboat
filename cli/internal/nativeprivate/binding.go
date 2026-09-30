@@ -46,7 +46,7 @@ type Binding struct {
 }
 
 func (b Binding) Validate(now time.Time) error {
-	if b.Schema != SchemaV1 || !id(b.ResourceID) || !id(b.RouteID) || !id(b.OwnerEndpointID) || b.ResourceGeneration == 0 || b.RouteGeneration == 0 || b.TargetGeneration == 0 || !b.ExpiresAt.After(now) || b.ExpiresAt.Sub(now) > 5*time.Minute {
+	if b.Schema != SchemaV1 || !id(b.ResourceID) || !id(b.RouteID) || !id(b.OwnerEndpointID) || b.ResourceGeneration == 0 || b.RouteGeneration == 0 || b.TargetGeneration == 0 || !b.ExpiresAt.After(now) || b.ExpiresAt.Sub(now) > 5*time.Minute+30*time.Second {
 		return ErrInvalid
 	}
 	if b.ResourceKind != "preview" && b.ResourceKind != "tunnel" && b.ResourceKind != "device_service" || b.Protocol != "http" && b.Protocol != "tcp" {

@@ -6,7 +6,7 @@ import "testing"
 
 func TestOwnedFilterNamesCoverBoundedLoopbackRanges(t *testing.T) {
 	names := ownedFilterNames()
-	if len(names) != 5+2*254 {
+	if len(names) != 7+2*254 {
 		t.Fatalf("owned filter names=%d", len(names))
 	}
 	seen := make(map[string]bool, len(names))

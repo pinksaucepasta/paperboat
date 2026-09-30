@@ -21,8 +21,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
-	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
+	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 )
 
 func InstallRunningBinary(ctx context.Context, executable string, source installsource.Source, directory string) (string, error) {
@@ -114,20 +114,24 @@ func InstallRunningBinary(ctx context.Context, executable string, source install
 	if restoreService, err = localdaemon.ReplaceCurrentUserService(ctx, layout.Binary, cfg.Path(), cfg.ServerURL); err != nil {
 		return rollback(err)
 	}
-	client, err := localapi.NewClient(paths.SocketPath, time.Second)
-	if err != nil {
-		return rollback(err)
-	}
 	readyCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	var lastProbe localdaemon.UpdateProbe
+	var lastProbeErr error
 	for {
-		snapshot, probeErr := client.Snapshot(readyCtx)
-		if probeErr == nil && snapshot.DaemonVersion == source.Version && snapshot.DaemonState != "starting" && snapshot.DaemonState != "stopping" {
+		probe, probeErr := localdaemon.ProbeCurrentUserForUpdate(readyCtx)
+		if probeErr == nil && probe.Running && probe.Version == source.Version && probe.State != "starting" && probe.State != "stopping" {
 			break
+		}
+		if readyCtx.Err() == nil {
+			lastProbe, lastProbeErr = probe, probeErr
 		}
 		select {
 		case <-readyCtx.Done():
-			return rollback(errors.New("installed Paperboat service did not start; attempting to restore the previous installation"))
+			if lastProbeErr != nil {
+				return rollback(fmt.Errorf("installed Paperboat service readiness failed; attempting to restore the previous installation: %w", lastProbeErr))
+			}
+			return rollback(fmt.Errorf("installed Paperboat service did not start at version %s (running=%t state=%q version=%q); attempting to restore the previous installation", source.Version, lastProbe.Running, lastProbe.State, lastProbe.Version))
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
@@ -147,5 +151,16 @@ func InstallRunningBinary(ctx context.Context, executable string, source install
 	if err != nil {
 		return "", fmt.Errorf("Paperboat is installed, but its manuals could not be installed; retry pb install to repair them: %w", err)
 	}
-	return filepath.Join(directory, "pb"), nil
+	installed := filepath.Join(directory, "pb")
+	if runtime.GOOS == "darwin" {
+		// This foreground approval occurs after the verified local service and
+		// its installation have committed. A denied browser CA must not prevent
+		// native access or undo that working installation.
+		trust := exec.CommandContext(ctx, "/usr/bin/sudo", "--", layout.Binary, "--no-customization", "daemon", "device-guard", "trust", "--suffix", splitdns.BrowserSuffix)
+		trust.Stdin, trust.Stdout, trust.Stderr = os.Stdin, os.Stderr, os.Stderr
+		if err := trust.Run(); err != nil {
+			return installed, &BrowserTrustPendingError{Cause: err, Recovery: "retry Paperboat installation and approve its macOS certificate trust request"}
+		}
+	}
+	return installed, nil
 }

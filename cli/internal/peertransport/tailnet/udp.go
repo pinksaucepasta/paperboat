@@ -54,7 +54,13 @@ func listenUDP(server *mesh.Server, port uint16, admitted map[netip.Addr]string,
 			var packet *Packet
 			packet = newPacket(c, func() { s.mu.Lock(); delete(s.flows, packet); s.mu.Unlock(); <-s.slots })
 			s.mu.Lock()
-			address, _ := netip.ParseAddrPort(packet.RemoteAddr().String())
+			remote := packet.RemoteAddr()
+			if remote == nil {
+				s.mu.Unlock()
+				_ = packet.Close()
+				return
+			}
+			address, _ := netip.ParseAddrPort(remote.String())
 			binding := s.admitted[address.Addr()]
 			if s.closed || !validExpiry(s.expiresAt) || s.admitted != nil && binding == "" {
 				s.mu.Unlock()

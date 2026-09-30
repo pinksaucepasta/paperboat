@@ -1,8 +1,7 @@
 //go:build darwin || linux
 
-// Package updated runs the mandatory Paperboat update scheduler. It owns
-// verified artifact staging and restarts the fixed native hostd only after the
-// workload admission fence permits cutover.
+// Package updated discovers updates, prepares verified artifacts for review, and
+// installs only an exactly approved candidate, with native restart and recovery.
 package updated
 
 import (
@@ -68,7 +67,7 @@ type Service struct {
 }
 
 func New(config Config) (*Service, error) {
-	if !filepath.IsAbs(config.StateRoot) || !filepath.IsAbs(config.ControlSocket) || !validUnixWorkerIdentity(config.WorkerUID, config.WorkerGID) || len(config.Token) != 32 || config.SocketPath == "" || config.RepositoryURL == "" || config.MachineID == "" || config.Health == nil || config.ActivationGate == nil || config.ActivationController == nil || config.Participants == nil {
+	if !filepath.IsAbs(config.StateRoot) || !filepath.IsAbs(config.ControlSocket) || !validUnixWorkerIdentity(config.WorkerUID, config.WorkerGID) || len(config.Token) != 32 || config.SocketPath == "" || config.RepositoryURL == "" || config.MachineID == "" || config.Health == nil || config.ActivationController == nil || config.Participants == nil {
 		return nil, ErrInvalidConfig
 	}
 	if err := secureRoot(config.StateRoot); err != nil {
@@ -92,15 +91,24 @@ func New(config Config) (*Service, error) {
 		return nil, err
 	}
 	source := workerupdate.TUFSource{RepositoryURL: config.RepositoryURL, StateRoot: filepath.Join(config.StateRoot, "tuf"), MachineID: config.MachineID, FailureDomain: workerupdate.HostdFailureDomainSource{Client: client, MachineID: config.MachineID}, Deferral: deferral}
-	service := &Service{source: source, config: config, managerConfig: workerupdate.Config{StatePath: filepath.Join(config.StateRoot, "transaction.json"), Binary: config.Binary, BinaryRollback: config.BinaryRollback, BinaryStaged: config.BinaryStaged, Active: config.Active, OwnerUID: 0, OwnerGID: 0, WorkerUID: config.WorkerUID, WorkerGID: config.WorkerGID, HostdEndpoint: config.SocketPath, Capability: config.Token, Fetcher: source, Starter: workerupdate.ExecStarter{}, Hostd: client, Health: config.Health, Gate: config.ActivationGate, Events: config.Events, MonitorWindow: 10 * time.Minute, HealthInterval: time.Second}}
+	service := &Service{source: source, config: config, managerConfig: workerupdate.Config{StatePath: filepath.Join(config.StateRoot, "transaction.json"), Binary: config.Binary, BinaryRollback: config.BinaryRollback, BinaryStaged: config.BinaryStaged, Active: config.Active, OwnerUID: 0, OwnerGID: 0, WorkerUID: config.WorkerUID, WorkerGID: config.WorkerGID, HostdEndpoint: config.SocketPath, Capability: config.Token, Fetcher: source, Hostd: client, Health: config.Health, Gate: config.ActivationGate, Events: config.Events, MonitorWindow: 10 * time.Minute, HealthInterval: time.Second}}
 	service.managerConfig.ActivateRuntime = service.activateRuntime
+	service.managerConfig.CommitRuntime = func(ctx context.Context, release workerupdate.Release) error {
+		if service.config.RefreshManuals == nil {
+			return nil
+		}
+		if err := verifyUnixExecutable(service.config.Binary, release); err != nil {
+			return err
+		}
+		return service.config.RefreshManuals(ctx)
+	}
 	manager, err := service.newManager(config.Active)
 	if err != nil {
 		return nil, err
 	}
 	service.manager = manager
 	scheduler, err := autoupdate.New(autoupdate.Config{Check: func(ctx context.Context) (autoupdate.Result, error) {
-		workerResult, workerErr := service.queueActivation(ctx, false)
+		workerResult, workerErr := resolveRelease(ctx, service.currentManager().ActiveVersion(), service.source.Resolve)
 		return autoupdate.Result{Version: workerResult.Version, Updated: workerResult.Updated}, workerErr
 	}})
 	if err != nil {
@@ -129,6 +137,16 @@ func (s *Service) activateRuntime(ctx context.Context, version string) (hostdpro
 	for {
 		status, err := s.managerConfig.Hostd.Active(ctx)
 		if err == nil && status.State == hostdproto.StateActive && status.WorkerID == wantWorker && status.Epoch > 0 && status.LastHeartbeatUnixMilli >= time.Now().Add(-15*time.Second).UnixMilli() {
+			handoff, handoffErr := readUnixHandoff(s.config.StateRoot)
+			if handoffErr != nil {
+				return hostdproto.Status{}, handoffErr
+			}
+			if handoff != nil {
+				participants := &unixParticipantGate{participants: s.config.Participants, controller: s.config.ActivationController, handoff: handoff, persist: func() error { return writeUnixHandoff(s.config.StateRoot, handoff) }}
+				if err := participants.restart(ctx, version); err != nil {
+					return hostdproto.Status{}, err
+				}
+			}
 			return status, nil
 		}
 		if err != nil {
@@ -269,14 +287,35 @@ serveControl:
 	return s.scheduler.Run(ctx)
 }
 
-// UpdateNow is the control-plane/manual path. It bypasses the signed cohort
-// delay only; TUF verification, revocation, compatibility, and continuity
-// checks remain exactly the same as background activation.
-func (s *Service) UpdateNow(ctx context.Context) (workerupdate.Result, error) {
+// Download prepares the signed candidate without launching it or stopping services.
+func (s *Service) Download(ctx context.Context) (workerupdate.PreparedCandidate, error) {
 	if s == nil || s.currentManager() == nil {
-		return workerupdate.Result{}, ErrInvalidConfig
+		return workerupdate.PreparedCandidate{}, ErrInvalidConfig
 	}
-	return s.queueActivation(ctx, true)
+	lock, err := unixActivationLock(s.config.StateRoot)
+	if err != nil {
+		return workerupdate.PreparedCandidate{}, err
+	}
+	defer lock.Close()
+	if handoff, err := readUnixHandoff(s.config.StateRoot); err != nil || handoff != nil {
+		return workerupdate.PreparedCandidate{}, errors.Join(ErrActivationPending, err)
+	}
+	if err = s.refreshManager(); err != nil {
+		return workerupdate.PreparedCandidate{}, err
+	}
+	release, found, err := s.source.ResolveManual(ctx)
+	if err != nil || !found {
+		return workerupdate.PreparedCandidate{}, err
+	}
+	return s.currentManager().Prepare(ctx, release)
+}
+
+// Install persists exact local approval before handing installation to recovery.
+func (s *Service) Install(ctx context.Context, approvalID string) (workerupdate.Result, error) {
+	if !approvalIDPattern.MatchString(approvalID) {
+		return workerupdate.Result{}, ErrInvalidControl
+	}
+	return s.queueActivation(ctx, approvalID)
 }
 
 func (s *Service) Snapshot() autoupdate.Observation {
@@ -387,7 +426,6 @@ func (s *Service) newManager(active workerupdate.Release) (*workerupdate.Manager
 	return s.newManagerWithGate(active, s.config.ActivationGate, false)
 }
 func (s *Service) newManagerWithGate(active workerupdate.Release, gate workerupdate.ActivationGate, manual bool) (*workerupdate.Manager, error) {
-	gate = s.manualCommitGate(gate)
 	config := s.managerConfig
 	config.Active = active
 	config.Gate = gate

@@ -19,6 +19,9 @@ import (
 	"tailscale.com/types/key"
 )
 
+// MaxClockSkew tolerates issuer clock drift without extending signed expiry.
+const MaxClockSkew = time.Minute
+
 var ErrAdmission = &Error{Code: 1, Message: "relay authorization rejected"}
 var ErrProtocol = &Error{Code: 2, Message: "relay protocol rejected"}
 var ErrOverload = &Error{Code: 3, Message: "relay capacity exhausted"}
@@ -133,7 +136,7 @@ func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time)
 	fingerprint, fingerprintErr := hex.DecodeString(g.CertificateFingerprint)
 	quicPublic, publicErr := base64.RawURLEncoding.Strict().DecodeString(g.QUICPublicKey)
 	presented, isEd25519 := leaf.PublicKey.(ed25519.PublicKey)
-	if g.Version != 1 || g.Issuer != v.Issuer || g.Audience != "paperboat-relay" || g.NodeID != v.NodeID || g.NodeGeneration != v.NodeGeneration || g.ProcessEpoch != v.ProcessEpoch || fingerprintErr != nil || len(fingerprint) != 32 || hex.EncodeToString(fingerprint) != g.CertificateFingerprint || publicErr != nil || len(quicPublic) != ed25519.PublicKeySize || base64.RawURLEncoding.EncodeToString(quicPublic) != g.QUICPublicKey || !isEd25519 || !bytes.Equal(presented, quicPublic) || now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) || leaf.NotAfter.Sub(leaf.NotBefore) > 24*time.Hour+time.Minute || leaf.CheckSignature(leaf.SignatureAlgorithm, leaf.RawTBSCertificate, leaf.Signature) != nil || g.IssuedAt > now.Unix() || g.ExpiresAt <= g.IssuedAt || g.ExpiresAt-g.IssuedAt > 60 || g.Generation == 0 || g.AccountID == "" || g.EndpointID == "" || len(g.AccountID) > 256 || len(g.EndpointID) > 256 || len(g.Peers) > 64 || len(g.RelayControlPeers) > 16 {
+	if g.Version != 1 || g.Issuer != v.Issuer || g.Audience != "paperboat-relay" || g.NodeID != v.NodeID || g.NodeGeneration != v.NodeGeneration || g.ProcessEpoch != v.ProcessEpoch || fingerprintErr != nil || len(fingerprint) != 32 || hex.EncodeToString(fingerprint) != g.CertificateFingerprint || publicErr != nil || len(quicPublic) != ed25519.PublicKeySize || base64.RawURLEncoding.EncodeToString(quicPublic) != g.QUICPublicKey || !isEd25519 || !bytes.Equal(presented, quicPublic) || now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) || leaf.NotAfter.Sub(leaf.NotBefore) > 24*time.Hour+time.Minute || leaf.CheckSignature(leaf.SignatureAlgorithm, leaf.RawTBSCertificate, leaf.Signature) != nil || g.IssuedAt > now.Add(MaxClockSkew).Unix() || g.ExpiresAt <= g.IssuedAt || g.ExpiresAt-g.IssuedAt > 60 || g.Generation == 0 || g.AccountID == "" || g.EndpointID == "" || len(g.AccountID) > 256 || len(g.EndpointID) > 256 || len(g.Peers) > 64 || len(g.RelayControlPeers) > 16 {
 		return Grant{}, ErrAdmission
 	}
 	if _, err := ParseKey(g.WireGuardPublicKey); err != nil {
@@ -179,7 +182,7 @@ func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time)
 		}
 		for _, s := range p.Scopes {
 			scopes++
-			validResource := s.ResourceKind == "inspector" && s.Capability == "inspector" || s.ResourceKind == "machine_access" && (s.Capability == "terminal" || s.Capability == "exec" || s.Capability == "managed_ssh" || s.Capability == "file_transfer" || s.Capability == "private_access") || s.ResourceKind == "codex_session" && s.Capability == "codex"
+			validResource := s.ResourceKind == "device_network" && s.Capability == "connect" || s.ResourceKind == "inspector" && s.Capability == "inspector" || s.ResourceKind == "machine_access" && (s.Capability == "terminal" || s.Capability == "exec" || s.Capability == "managed_ssh" || s.Capability == "file_transfer" || s.Capability == "private_access") || s.ResourceKind == "codex_session" && s.Capability == "codex"
 			if scopes > 128 || !validResource || s.ResourceID == "" || len(s.ResourceID) > 256 || s.ResourceGeneration == 0 || s.Port != 443 || (s.Direction != "dial" && s.Direction != "accept") || s.ExpiresAt < g.ExpiresAt {
 				return Grant{}, ErrAdmission
 			}
@@ -208,7 +211,7 @@ func allowed(a, b Grant, now time.Time) bool {
 			}
 			for _, s := range p.Scopes {
 				for _, t := range q.Scopes {
-					if s.ResourceKind == t.ResourceKind && s.ResourceID == t.ResourceID && s.ResourceGeneration == t.ResourceGeneration && s.Capability == t.Capability && s.Port == t.Port && s.Direction != t.Direction && s.ExpiresAt > now.Unix() && t.ExpiresAt > now.Unix() {
+					if (s.ResourceKind != "device_network" || a.AccountID == b.AccountID) && s.ResourceKind == t.ResourceKind && s.ResourceID == t.ResourceID && s.ResourceGeneration == t.ResourceGeneration && s.Capability == t.Capability && s.Port == t.Port && s.Direction != t.Direction && s.ExpiresAt > now.Unix() && t.ExpiresAt > now.Unix() {
 						return true
 					}
 				}

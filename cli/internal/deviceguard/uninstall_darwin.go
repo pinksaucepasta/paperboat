@@ -138,6 +138,9 @@ func uninstallDarwin(ctx context.Context, cfg darwinInstallConfig, guardCfg Conf
 	if err != nil {
 		return result, err
 	}
+	if err = projectDeviceHosts(ctx, guardCfg, nil); err != nil {
+		return result, err
+	}
 	if err = configureDomains(ctx, guardCfg, nil); err != nil {
 		return result, err
 	}

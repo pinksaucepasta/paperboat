@@ -43,7 +43,7 @@ func darwinLoadAliases(cfg Config) error {
 	}
 	for address := range darwinPlatform.aliases {
 		dnsAddress, _ := deviceloopback.DNSAddress(cfg.LoopbackCIDR)
-		if !validAddressInCIDR(address, cfg.LoopbackCIDR) && address != dnsAddress.String() {
+		if !validAddressInCIDR(address, cfg.LoopbackCIDR) && address != dnsAddress.String() && address != splitdns.BrowserGatewayIP {
 			return errors.New("invalid protected alias journal address")
 		}
 	}

@@ -28,8 +28,7 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 	flags := flag.NewFlagSet("updated", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	helper := flags.Bool("activation-helper", false, "run the protected native activation job")
-	now := flags.Bool("now", false, "perform one manual update")
-	if flags.Parse(args) != nil || flags.NArg() != 0 || *helper && *now || os.Geteuid() != 0 {
+	if flags.Parse(args) != nil || flags.NArg() != 0 || os.Geteuid() != 0 {
 		return errors.New("invalid paperboat-updated invocation")
 	}
 	notifier, err := service.NewProcessNotifier()
@@ -100,10 +99,6 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 	if err != nil {
 		return failInitialization(err)
 	}
-	gate, err := workerupdate.NewDeploymentActivationGate(workerupdate.DeploymentActivationGateConfig{Provider: workerupdate.HostdDeploymentProvider{Client: hostdClient}})
-	if err != nil {
-		return failInitialization(err)
-	}
 	environment := map[string]string{}
 	refreshManuals, err := newUnixManualRefresher(binary, uid, gid)
 	if err != nil {
@@ -114,19 +109,12 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 			environment[key] = value
 		}
 	}
-	updaterService, err := updated.New(updated.Config{AutomaticUpdates: installedSource.AutomaticUpdates, StateRoot: stateRoot, Binary: binary, BinaryRollback: binaryRollback, BinaryStaged: binaryStaged, Active: active, WorkerUID: uid, WorkerGID: gid, SocketPath: socket, Token: token, RepositoryURL: repository, MachineID: machineID, Health: updated.HTTPHealth{Endpoint: healthURL}, ActivationGate: gate, ControlSocket: controlSocket, Participants: participants, ActivationController: service.UnixUpdateActivator{Platform: runtime.GOOS, UID: uid, Runner: service.ExecRunner{}}, Environment: environment, RefreshManuals: refreshManuals})
+	updaterService, err := updated.New(updated.Config{AutomaticUpdates: installedSource.AutomaticUpdates, StateRoot: stateRoot, Binary: binary, BinaryRollback: binaryRollback, BinaryStaged: binaryStaged, Active: active, WorkerUID: uid, WorkerGID: gid, SocketPath: socket, Token: token, RepositoryURL: repository, MachineID: machineID, Health: updated.HTTPHealth{Endpoint: healthURL}, ControlSocket: controlSocket, Participants: participants, ActivationController: service.UnixUpdateActivator{Platform: runtime.GOOS, UID: uid, Runner: service.ExecRunner{}}, Environment: environment, RefreshManuals: refreshManuals})
 	if err != nil {
 		return failInitialization(err)
 	}
 	if *helper {
 		return updaterService.RunActivationHelper(ctx)
-	}
-	if *now {
-		if err := notifier.Ready(); err != nil {
-			return errors.Join(err, notifier.Degraded("updater readiness notification failed"))
-		}
-		_, updateErr := updaterService.UpdateNow(ctx)
-		return errors.Join(updateErr, notifier.Stopping())
 	}
 	return runNotifiedUpdater(ctx, updaterRunnerFunc(func(ctx context.Context, ready func() error) error {
 		return updaterService.RunWithReady(ctx, ready)

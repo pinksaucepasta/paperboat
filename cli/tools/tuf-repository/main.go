@@ -24,6 +24,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseindex"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releasepolicy"
+	"github.com/pinksaucepasta/paperboat/internal/selfupdate"
 	"github.com/pinksaucepasta/paperboat/tools/releaseplan"
 	"github.com/sigstore/sigstore/pkg/signature"
 	"github.com/theupdateframework/go-tuf/v2/metadata"
@@ -133,7 +134,7 @@ func run(args []string) error {
 		artifacts := fs.String("artifacts", "", "release artifact directory")
 		rolloutRevision := fs.Uint64("rollout-revision", 0, "monotonic signed rollout policy revision")
 		severity := fs.String("severity", "routine", "routine, security, or critical")
-		manifestPath := fs.String("manifest", "", "precomputed exact five-artifact manifest")
+		manifestPath := fs.String("manifest", "", "precomputed exact selected-artifact manifest")
 		planPath := fs.String("deployment-plan", "", "precomputed signed deployment policy input")
 		supervisorMaintenance := fs.Bool("supervisor-maintenance", false, "release updates stable supervisor components")
 		amd64QualificationEvidence := fs.String("windows-amd64-native-evidence", "", "absolute JSON evidence for Windows amd64 native qualification")
@@ -350,14 +351,22 @@ func verifyPublishedDeploymentPolicies(targets *metadata.Metadata[metadata.Targe
 }
 
 func verifyPublishedDeploymentPoliciesAt(targets *metadata.Metadata[metadata.TargetsType], now time.Time) error {
-	if targets == nil || len(targets.Signed.Targets) != len(supportedReleaseTargets()) {
-		return errors.New("published TUF targets do not contain the exact release set")
+	if targets == nil || len(targets.Signed.Targets) == 0 || len(targets.Signed.Targets) > len(supportedReleaseTargets()) {
+		return errors.New("published TUF targets contain an invalid release set")
 	}
-	var manifestDigest, planDigest string
-	var planBytes []byte
-	for _, releaseTarget := range supportedReleaseTargets() {
-		name := releaseAssetName(releaseTarget.platform, releaseTarget.architecture)
-		info := targets.Signed.Targets[name]
+	type binding struct{ manifest, plan string }
+	versions := make(map[string]binding)
+	for name, info := range targets.Signed.Targets {
+		known := false
+		for _, target := range supportedReleaseTargets() {
+			if name == releaseAssetName(target.platform, target.architecture) {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return fmt.Errorf("unsupported published TUF target %s", name)
+		}
 		if info == nil || info.Custom == nil {
 			return fmt.Errorf("published TUF target %s has no signed custom metadata", name)
 		}
@@ -367,7 +376,7 @@ func verifyPublishedDeploymentPoliciesAt(targets *metadata.Metadata[metadata.Tar
 		}
 		target, ok := custom.ReleaseIndex.Component("pb")
 		digest, hasDigest := info.Hashes["sha256"]
-		if !ok || !hasDigest || len(digest) != sha256.Size || info.Length != target.Length || hex.EncodeToString(digest) != target.SHA256 {
+		if !ok || custom.AssetName != name || target.AssetName != name || !hasDigest || len(digest) != sha256.Size || info.Length != target.Length || hex.EncodeToString(digest) != target.SHA256 {
 			return fmt.Errorf("published TUF target %s does not match its signed release index", name)
 		}
 		plan := custom.ReleaseIndex.DeploymentPlan
@@ -378,25 +387,22 @@ func verifyPublishedDeploymentPoliciesAt(targets *metadata.Metadata[metadata.Tar
 		if err != nil || actualPlanDigest != custom.ReleaseIndex.DeploymentPlanSHA256 {
 			return fmt.Errorf("published TUF target %s has a deployment policy digest mismatch", name)
 		}
+		identity := binding{custom.ReleaseIndex.ManifestSHA256, custom.ReleaseIndex.DeploymentPlanSHA256}
+		if prior, ok := versions[custom.Version]; ok && prior != identity {
+			return errors.New("published targets for one version have inconsistent manifest or policy")
+		}
+		versions[custom.Version] = identity
 		if len(custom.ReleaseIndex.ManifestSHA256) != sha256.Size*2 || !lowerHex(custom.ReleaseIndex.ManifestSHA256) {
 			return fmt.Errorf("published TUF target %s has an invalid manifest digest", name)
 		}
-		encoded, err := plan.Bytes()
-		if err != nil {
-			return fmt.Errorf("encode deployment policy %s: %w", name, err)
-		}
-		if manifestDigest == "" {
-			manifestDigest, planDigest, planBytes = custom.ReleaseIndex.ManifestSHA256, custom.ReleaseIndex.DeploymentPlanSHA256, encoded
-		} else if manifestDigest != custom.ReleaseIndex.ManifestSHA256 || planDigest != custom.ReleaseIndex.DeploymentPlanSHA256 || !bytes.Equal(planBytes, encoded) {
-			return errors.New("published TUF targets do not share one immutable deployment policy")
-		}
+
 	}
 	return nil
 }
 
 // validateTargetsForPublication is the write/signing boundary for release
 // targets. An empty target set is valid only for a newly initialized
-// repository; once targets exist, the complete five-asset contract must pass
+// repository; once targets exist, every selected platform contract must pass
 // the same validation used by verify-published.
 func validateTargetsForPublication(targets *metadata.Metadata[metadata.TargetsType], now time.Time) error {
 	if targets == nil {
@@ -545,7 +551,11 @@ func publishWithPolicy(repo, version, artifacts string, qualificationEvidencePat
 		return fmt.Errorf("hash deployment plan: %w", err)
 	}
 	qualifications := make(map[string]windowsNativeQualification, 2)
-	for _, architecture := range []string{"amd64", "arm64"} {
+	for _, asset := range manifest.Artifacts {
+		if asset.Platform != "windows" {
+			continue
+		}
+		architecture := asset.Architecture
 		path := strings.TrimSpace(qualificationEvidencePaths[architecture])
 		if path == "" {
 			return fmt.Errorf("absolute Windows %s native qualification evidence is required", architecture)
@@ -563,15 +573,29 @@ func publishWithPolicy(repo, version, artifacts string, qualificationEvidencePat
 	if err != nil {
 		return err
 	}
+	if err := verifyRoot(root); err != nil {
+		return err
+	}
+	if err := root.VerifyDelegate("targets", targets); err != nil {
+		return fmt.Errorf("verify existing targets: %w", err)
+	}
+	if err := root.VerifyDelegate("snapshot", snapshot); err != nil {
+		return err
+	}
+	if err := root.VerifyDelegate("timestamp", timestamp); err != nil {
+		return err
+	}
+	if err := validateTargetsForPublication(targets, time.Now().UTC()); err != nil {
+		return err
+	}
 	state, err := loadSigningState(repo, root, "targets", "snapshot", "timestamp")
 	if err != nil {
 		return err
 	}
-	targets.Signed.Targets = map[string]*metadata.TargetFiles{}
 	createdAt := time.Now().UTC()
 	githubRepository := releaseRepository()
-	for _, releaseTarget := range supportedReleaseTargets() {
-		platform, architecture := releaseTarget.platform, releaseTarget.architecture
+	for _, asset := range manifest.Artifacts {
+		platform, architecture := asset.Platform, asset.Architecture
 		format := releaseAssetFormat(platform)
 		name := releaseAssetName(platform, architecture)
 		local := filepath.Join(artifacts, name)
@@ -588,6 +612,18 @@ func publishWithPolicy(repo, version, artifacts string, qualificationEvidencePat
 		if !releaseindex.ValidDownloadURL(downloadURL, githubRepository, version, name) {
 			return fmt.Errorf("GitHub repository %q or release URL is invalid", githubRepository)
 		}
+		var previousIndex releaseIndex
+		if old := targets.Signed.Targets[name]; old != nil {
+			previous, err := decodeAndValidateAssetTargetCustom(*old.Custom, createdAt)
+			if err != nil {
+				return err
+			}
+			comparison, err := selfupdate.CompareVersions(version, previous.Version)
+			if err != nil || comparison <= 0 {
+				return fmt.Errorf("release asset %s must advance its published version", name)
+			}
+			previousIndex = previous.ReleaseIndex
+		}
 		component := componentTarget{Component: "pb", TargetPath: name, AssetName: name, Repository: githubRepository, DownloadURL: downloadURL, SHA256: digest, Length: info.Length, Platform: platform, Architecture: architecture, BinaryFormat: format}
 		channel, stability, nativeTested := "stable", "", false
 		var testedBuilds []string
@@ -600,6 +636,8 @@ func publishWithPolicy(repo, version, artifacts string, qualificationEvidencePat
 		}
 		planCopy := deploymentPlan
 		index := releaseIndex{Schema: "paperboat.release-index/v1", ReleaseID: "rel_" + version, Version: version, Channel: channel, Severity: severity, CreatedAt: createdAt, Platform: platform, Architecture: architecture, BinaryFormat: format, Targets: []componentTarget{component}, HostdAPIMin: 1, HostdAPIMax: 2, RuntimeAPIMin: 1, RuntimeAPIMax: 2, RolloutPolicyRevision: deploymentPlan.PolicyRevision, SupervisorMaintenance: supervisorMaintenance, Stability: stability, NativeTested: nativeTested, TestedWindowsBuilds: testedBuilds, OpenSSHPackageID: openSSHID, OpenSSHApprovedVersion: openSSHVersion, ManifestSHA256: manifestSHA256, DeploymentPlanSHA256: deploymentPlanSHA256, DeploymentPlan: &planCopy}
+		index.MinimumVersion = previousIndex.MinimumVersion
+		index.RevokedVersions = append([]string(nil), previousIndex.RevokedVersions...)
 		custom := assetTargetCustom{Schema: "paperboat.tuf-asset/v1", Kind: "github-release-asset", Version: version, Platform: platform, Architecture: architecture, Format: format, AssetName: name, Repository: githubRepository, URL: downloadURL, SHA256: digest, Length: info.Length, ReleaseIndex: index}
 		customBody, err := json.Marshal(custom)
 		if err != nil {
@@ -667,11 +705,33 @@ func loadPublicationPolicy(artifacts, version string, rolloutRevision uint64, se
 	if err != nil {
 		return releaseplan.Manifest{}, releaseplan.Plan{}, err
 	}
+	entries, err := os.ReadDir(artifacts)
+	if err != nil {
+		return releaseplan.Manifest{}, releaseplan.Plan{}, err
+	}
+	for _, entry := range entries {
+		known := false
+		for _, spec := range releaseplan.ArtifactSpecs() {
+			if entry.Name() == spec.Name {
+				known = true
+				break
+			}
+		}
+		if entry.Name() == windowsNativeQualificationTarget("amd64") || entry.Name() == windowsNativeQualificationTarget("arm64") {
+			known = true
+		}
+		if !known || !entry.Type().IsRegular() {
+			return releaseplan.Manifest{}, releaseplan.Plan{}, errors.New("artifact directory contains unsupported entries")
+		}
+	}
 	specs := releaseplan.ArtifactSpecs()
 	artifactsForManifest := make([]releaseplan.Artifact, 0, len(specs))
 	for _, spec := range specs {
 		path := filepath.Join(artifacts, spec.Name)
 		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
 		if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() < 1 || info.Size() > releaseplan.MaxArtifactBytes {
 			return releaseplan.Manifest{}, releaseplan.Plan{}, fmt.Errorf("release asset %s is invalid", spec.Name)
 		}
@@ -827,8 +887,8 @@ func validateRefreshMetadataFreshness(root *metadata.Metadata[metadata.RootType]
 
 // mutateRollout changes only the signed static deployment policy carried by
 // every release target. It never accepts artifact paths or target names from
-// the caller. All targets must start with byte-identical policy and receive the
-// same revision and resulting digest before the metadata set is re-signed.
+// the caller. Each published platform retains its release/manifest binding and
+// receives the requested monotonic revision before metadata is re-signed.
 func mutateRollout(repo, operation string, revision uint64, percentage uint8) error {
 	if revision == 0 || operation == "promote" && (percentage == 0 || percentage > 100) || operation != "promote" && percentage != 0 {
 		return errors.New("invalid deployment policy mutation")
@@ -844,6 +904,12 @@ func mutateRollout(repo, operation string, revision uint64, percentage uint8) er
 	if err != nil {
 		return err
 	}
+	if err := root.VerifyDelegate("targets", targets); err != nil {
+		return err
+	}
+	if err := verifyPublishedDeploymentPolicies(targets); err != nil {
+		return err
+	}
 	state, err := loadSigningState(repo, root, "targets", "snapshot", "timestamp")
 	if err != nil {
 		return err
@@ -854,12 +920,7 @@ func mutateRollout(repo, operation string, revision uint64, percentage uint8) er
 		raw  json.RawMessage
 	}
 	updates := make([]update, 0, len(supportedReleaseTargets()))
-	var baselinePlanBytes []byte
-	var baselineManifestDigest, baselinePlanDigest string
-	for _, releaseTarget := range supportedReleaseTargets() {
-		platform, architecture := releaseTarget.platform, releaseTarget.architecture
-		name := releaseAssetName(platform, architecture)
-		info := targets.Signed.Targets[name]
+	for name, info := range targets.Signed.Targets {
 		if info == nil || len(info.Hashes["sha256"]) != sha256.Size || info.Custom == nil {
 			return fmt.Errorf("signed release asset %s is unavailable", name)
 		}
@@ -867,7 +928,7 @@ func mutateRollout(repo, operation string, revision uint64, percentage uint8) er
 		decoder := json.NewDecoder(strings.NewReader(string(*info.Custom)))
 		decoder.DisallowUnknownFields()
 		var extra any
-		if decoder.Decode(&custom) != nil || decoder.Decode(&extra) != io.EOF || custom.Schema != "paperboat.tuf-asset/v1" || custom.Kind != "github-release-asset" || custom.ReleaseIndex.Schema != "paperboat.release-index/v1" || custom.ReleaseIndex.Platform != platform || custom.ReleaseIndex.Architecture != architecture || custom.ReleaseIndex.DeploymentPlan == nil {
+		if decoder.Decode(&custom) != nil || decoder.Decode(&extra) != io.EOF || custom.Schema != "paperboat.tuf-asset/v1" || custom.Kind != "github-release-asset" || custom.ReleaseIndex.Schema != "paperboat.release-index/v1" || custom.ReleaseIndex.DeploymentPlan == nil {
 			return fmt.Errorf("signed release asset %s cannot accept revision %d", name, revision)
 		}
 		plan := *custom.ReleaseIndex.DeploymentPlan
@@ -877,16 +938,6 @@ func mutateRollout(repo, operation string, revision uint64, percentage uint8) er
 		currentPlanDigest, err := plan.PlanSHA256()
 		if err != nil || currentPlanDigest != custom.ReleaseIndex.DeploymentPlanSHA256 || custom.ReleaseIndex.RolloutPolicyRevision != plan.PolicyRevision {
 			return fmt.Errorf("signed release asset %s has inconsistent deployment policy metadata", name)
-		}
-		currentPlanBytes, err := plan.Bytes()
-		if err != nil {
-			return fmt.Errorf("encode deployment policy %s: %w", name, err)
-		}
-		if baselinePlanBytes == nil {
-			baselinePlanBytes = append([]byte(nil), currentPlanBytes...)
-			baselineManifestDigest, baselinePlanDigest = custom.ReleaseIndex.ManifestSHA256, custom.ReleaseIndex.DeploymentPlanSHA256
-		} else if !bytes.Equal(baselinePlanBytes, currentPlanBytes) || baselineManifestDigest != custom.ReleaseIndex.ManifestSHA256 || baselinePlanDigest != custom.ReleaseIndex.DeploymentPlanSHA256 {
-			return errors.New("signed release targets do not share one deployment policy")
 		}
 		if err := applyDeploymentMutation(&plan, operation, revision, percentage); err != nil {
 			return fmt.Errorf("mutate deployment policy %s: %w", name, err)

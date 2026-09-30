@@ -79,6 +79,14 @@ func TestLinuxProtectionRetainsPriorLoopbackRanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if strings.Contains(string(data), "ip daddr !=") {
+		t.Fatal("DNS address exempts non-DNS services from ownership filtering")
+	}
+	for _, protocol := range []string{"tcp", "udp"} {
+		if strings.Count(string(data), "ip daddr 127.212.0.1 "+protocol+" dport 53535 accept") != 2 {
+			t.Fatalf("DNS %s port is not permitted in both chains", protocol)
+		}
+	}
 	for _, cidr := range cfg.ProtectedLoopbackCIDRs {
 		if !strings.Contains(string(data), cidr) {
 			t.Errorf("nft rules omit protected range %s", cidr)
@@ -260,6 +268,24 @@ func TestLinuxDeviceGuardNamespace(t *testing.T) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 65534, Gid: 65534}}
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("foreign UID denial: %v %s", err, output)
+	}
+	// The browser gateway shares the DNS address. Its replies therefore also
+	// target the protected range; ownership must permit the owner in both directions.
+	gateway, err := client.Acquire(t.Context(), "gateway.local.pprbt.dev", netip.MustParseAddr("127.100.0.1"), 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gateway.Close()
+	gatewayConn, err := net.DialTimeout("tcp4", "127.100.0.1:80", time.Second)
+	if err != nil {
+		t.Fatalf("gateway owner connection: %v", err)
+	}
+	gatewayConn.Close()
+	gatewayProbe := exec.Command(probe, "-test.run=^TestDeviceGuardOtherUserProbe$")
+	gatewayProbe.Env = append(os.Environ(), "PAPERBOAT_GUARD_PROBE=127.100.0.1:80", "PAPERBOAT_GUARD_SOCKET="+cfg.Socket)
+	gatewayProbe.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 65534, Gid: 65534}}
+	if output, err := gatewayProbe.CombinedOutput(); err != nil {
+		t.Fatalf("foreign gateway UID denial: %v %s", err, output)
 	}
 	if accepted.Load() != 1 {
 		t.Fatal("unauthorized traffic reached accept")

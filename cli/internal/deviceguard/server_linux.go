@@ -43,7 +43,8 @@ func listenProtected(ctx context.Context, address, _ string) (net.Listener, erro
 		err := raw.Control(func(fd uintptr) { optionErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_MARK, guardMark) })
 		return errors.Join(err, optionErr)
 	}}
-	return config.Listen(ctx, "tcp4", address)
+	listener, err := config.Listen(ctx, "tcp4", address)
+	return listener, classifyProtectedBindError(err)
 }
 func notifyReady() error {
 	notify := os.Getenv("NOTIFY_SOCKET")
@@ -83,12 +84,21 @@ func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) er
 		}
 		fmt.Fprintf(&script, "ip daddr %s tcp dport %d meta skuid %d accept\n", l.ip, l.port, uid)
 	}
-	dnsHost, _, err := net.SplitHostPort(cfg.DNSAddress)
+	dnsHost, dnsPort, err := net.SplitHostPort(cfg.DNSAddress)
 	if err != nil {
 		return errors.New("invalid device guard DNS address")
 	}
+	port, err := strconv.ParseUint(dnsPort, 10, 16)
+	if err != nil || port == 0 {
+		return errors.New("invalid device guard DNS port")
+	}
+	// Replies can target the protected gateway address itself. Only a marked
+	// broker socket in an already admitted connection may bypass the UID check.
+	fmt.Fprintf(&script, "meta mark %d ct mark %d ct state established,related accept\n", guardMark, guardMark)
+	fmt.Fprintf(&script, "ip daddr %s tcp dport %d accept\nip daddr %s udp dport %d accept\n", dnsHost, port, dnsHost, port)
+	fmt.Fprintf(&script, "ip saddr %s tcp sport %d ct state established,related accept\nip saddr %s udp sport %d ct state established,related accept\n", dnsHost, port, dnsHost, port)
 	for _, cidr := range protectedLoopbackCIDRs(cfg) {
-		fmt.Fprintf(&script, "ip daddr %s ip daddr != %s reject\n", cidr, dnsHost)
+		fmt.Fprintf(&script, "ip daddr %s reject\n", cidr)
 	}
 	script.WriteString("}\nchain input { type filter hook input priority -10; policy accept;\n")
 	for _, cidr := range protectedLoopbackCIDRs(cfg) {
@@ -98,8 +108,12 @@ func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) er
 		fmt.Fprintf(&script, "ip daddr %s tcp dport %d tcp flags & (syn | ack) == syn socket mark %d ct mark set %d accept\n", l.ip, l.port, guardMark, guardMark)
 		fmt.Fprintf(&script, "ip daddr %s tcp dport %d tcp flags & syn == 0 ct mark %d ct state established,related accept\n", l.ip, l.port, guardMark)
 	}
+	// Return traffic inherits the connection mark installed on an owned SYN.
+	fmt.Fprintf(&script, "ct mark %d ct state established,related accept\n", guardMark)
+	fmt.Fprintf(&script, "ip daddr %s tcp dport %d accept\nip daddr %s udp dport %d accept\n", dnsHost, port, dnsHost, port)
+	fmt.Fprintf(&script, "ip saddr %s tcp sport %d ct state established,related accept\nip saddr %s udp sport %d ct state established,related accept\n", dnsHost, port, dnsHost, port)
 	for _, cidr := range protectedLoopbackCIDRs(cfg) {
-		fmt.Fprintf(&script, "ip daddr %s ip daddr != %s reject\n", cidr, dnsHost)
+		fmt.Fprintf(&script, "ip daddr %s reject\n", cidr)
 	}
 	script.WriteString("}\n}\n")
 	command := exec.CommandContext(ctx, "nft", "-f", "-")
@@ -119,8 +133,17 @@ func setupResolver(ctx context.Context, cfg Config) error {
 		if readErr != nil || strings.TrimSpace(string(alias)) != "paperboat-deviceguard-v1" {
 			return errors.New("paperboat-dns link already exists without Paperboat ownership")
 		}
-	} else if err := exec.CommandContext(ctx, "ip", "link", "add", "name", "paperboat-dns", "alias", "paperboat-deviceguard-v1", "type", "dummy").Run(); err != nil {
-		return err
+	} else {
+		if err := exec.CommandContext(ctx, "ip", "link", "add", "name", "paperboat-dns", "type", "dummy").Run(); err != nil {
+			return err
+		}
+		// Some iproute2 versions ignore alias during dummy-link creation.
+		// Mark the link we just created before publishing resolver state.
+		if err := exec.CommandContext(ctx, "ip", "link", "set", "dev", "paperboat-dns", "alias", "paperboat-deviceguard-v1").Run(); err != nil {
+			cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			return errors.Join(err, exec.CommandContext(cleanup, "ip", "link", "delete", "paperboat-dns").Run())
+		}
 	}
 	if err := exec.CommandContext(ctx, "ip", "link", "set", "paperboat-dns", "up").Run(); err != nil {
 		retireResolver(cfg)
@@ -156,7 +179,10 @@ func retireResolver(cfg Config) {
 	_ = removeOwnedResolver(ctx, cfg)
 }
 
-func removeOwnedResolver(ctx context.Context, _ Config) error {
+func removeOwnedResolver(ctx context.Context, cfg Config) error {
+	if err := projectDeviceHosts(ctx, cfg, nil); err != nil {
+		return err
+	}
 	if err := exec.CommandContext(ctx, "ip", "link", "show", "paperboat-dns").Run(); err != nil {
 		return nil
 	}

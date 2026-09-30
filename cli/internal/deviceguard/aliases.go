@@ -8,6 +8,8 @@ import (
 	"maps"
 	"strings"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 )
 
 // leaseServesName requires the registry lock. Aliases never cross a control
@@ -27,8 +29,9 @@ func (g *guardServer) replaceAliases(ctx context.Context, conn controlConn, uid 
 		}
 	}
 	for name, base := range aliases {
-		if !validName(name) || !validName(base) || name == base || strings.Split(name, ".")[1] != strings.Split(base, ".")[1] {
-			return errors.New("invalid flat browser alias")
+		public := base == splitdns.BrowserGatewayHostname && splitdns.IsPublicBrowserHostname(name)
+		if !public && ((!validName(name) && !validSubdomainName(name)) || !validName(base) || base == splitdns.BrowserGatewayHostname || name == base || !strings.HasSuffix(name, "."+strings.Split(base, ".")[1]) || validSubdomainName(name) && strings.Join(strings.Split(name, ".")[1:], ".") != base) {
+			return errors.New("invalid browser alias")
 		}
 		if owner, ok := g.reserved.Names[name]; ok {
 			if owner != uid {

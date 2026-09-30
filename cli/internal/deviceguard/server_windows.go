@@ -233,7 +233,11 @@ func (l *stateLock) Close() error {
 }
 func listenProtected(ctx context.Context, address, _ string) (net.Listener, error) {
 	var lc net.ListenConfig
-	return lc.Listen(ctx, "tcp4", address)
+	listener, err := lc.Listen(ctx, "tcp4", address)
+	if errors.Is(err, windows.WSAEADDRINUSE) {
+		return nil, ErrPortInUse
+	}
+	return listener, err
 }
 func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) error {
 	if err := ctx.Err(); err != nil {

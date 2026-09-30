@@ -6,9 +6,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
 )
 
-// MandatoryScheduler creates the only supported background scheduler for an
-// ordinary runtime update. Its callback enters Manager.Check, which stages and
-// cuts over a fenced worker; it has no path to the legacy restart updater.
+// MandatoryScheduler checks release availability only. Installation requires a
+// separately prepared candidate, exact approval, and an explicit activation.
 func (m *Manager) MandatoryScheduler(resolve Resolver, observe func(autoupdate.Observation)) (*autoupdate.Scheduler, error) {
 	if resolve == nil {
 		return nil, ErrInvalidConfig

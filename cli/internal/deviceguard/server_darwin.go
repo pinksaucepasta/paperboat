@@ -19,7 +19,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const DefaultSocket = "/var/run/paperboat-deviceguard/control.sock"
+const DefaultSocket = "/Library/Application Support/Paperboat/deviceguard-control/control.sock"
 const DefaultStateDir = "/Library/Application Support/Paperboat/deviceguard"
 const defaultDNSPort = "53535"
 const defaultDNSAddress = "127.100.0.1:" + defaultDNSPort
@@ -73,7 +73,7 @@ func listenProtected(ctx context.Context, address, loopbackCIDR string) (net.Lis
 		return nil, err
 	}
 	host, _, err := net.SplitHostPort(address)
-	if err != nil || !validAddressInCIDR(host, loopbackCIDR) {
+	if err != nil || !validProtectedBindAddress(address, loopbackCIDR) {
 		return nil, errors.New("invalid protected listener address")
 	}
 	if err = darwinEnsureAlias(ctx, host); err != nil {
@@ -107,48 +107,116 @@ func listenProtected(ctx context.Context, address, loopbackCIDR string) (net.Lis
 	wait := make(chan error, 1)
 	go func() { wait <- command.Wait() }()
 	defer func() { _ = command.Process.Kill(); <-wait }()
-	connection.SetReadDeadline(time.Now().Add(5 * time.Second))
-	marker := make([]byte, 1)
-	oob := make([]byte, unix.CmsgSpace(4))
-	_, oobn, flags, _, err := connection.(*net.UnixConn).ReadMsgUnix(marker, oob)
-	if err != nil || marker[0] != 1 || flags&unix.MSG_CTRUNC != 0 {
-		return nil, errors.New("protected receiver did not return a listener")
+	deadline := time.Now().Add(5 * time.Second)
+	if end, ok := ctx.Deadline(); ok && end.Before(deadline) {
+		deadline = end
 	}
-	messages, err := unix.ParseSocketControlMessage(oob[:oobn])
+	if err := connection.SetReadDeadline(deadline); err != nil {
+		return nil, err
+	}
+	stopRead := context.AfterFunc(ctx, func() { _ = connection.Close() })
+	defer stopRead()
+	fd, err := receiveDarwinSocket(connection.(*net.UnixConn))
 	if err != nil {
 		return nil, err
 	}
+	return bindDarwinSocket(ctx, fd, address, loopbackCIDR)
+}
+
+// receiveDarwinSocket owns every descriptor delivered by this private channel,
+// including descriptors accompanying a malformed response.
+func receiveDarwinSocket(connection *net.UnixConn) (int, error) {
+	marker := make([]byte, 2)
+	oob := make([]byte, unix.CmsgSpace(4*16))
+	n, oobn, flags, _, readErr := connection.ReadMsgUnix(marker, oob)
+	messages, parseErr := unix.ParseSocketControlMessage(oob[:oobn])
 	var descriptors []int
+	valid := true
 	for _, message := range messages {
-		fds, e := unix.ParseUnixRights(&message)
-		if e != nil {
-			return nil, e
+		fds, err := unix.ParseUnixRights(&message)
+		if err != nil {
+			valid = false
+			continue
 		}
 		descriptors = append(descriptors, fds...)
 	}
-	defer func() {
+	if readErr != nil || parseErr != nil || !valid || n != 1 || marker[0] != 1 || flags&(unix.MSG_CTRUNC|unix.MSG_TRUNC) != 0 || len(descriptors) != 1 {
 		for _, fd := range descriptors {
-			unix.Close(fd)
+			_ = unix.Close(fd)
 		}
-	}()
-	if len(descriptors) != 1 {
-		return nil, errors.New("invalid protected listener descriptor")
+		return -1, errors.New("protected receiver did not return one socket")
 	}
-	file := os.NewFile(uintptr(descriptors[0]), "protected-listener")
-	listener, err := net.FileListener(file)
-	// FileListener duplicates its descriptor; exactly one close owns this copy.
-	file.Close()
-	descriptors = nil
-	return listener, err
+	unix.CloseOnExec(descriptors[0])
+	return descriptors[0], nil
 }
 
-// ServeSocketChild only creates a socket under the dedicated receiver UID. The
-// root controller supplies an inherited private channel; it never accepts user
-// control connections or receives account credentials here.
+// The socket's creation credentials remain the broker's. XNU checks the
+// calling process credentials at bind, so only this root controller performs
+// privileged-port binding. PF continues to identify the broker-owned socket.
+func bindDarwinSocket(ctx context.Context, fd int, address, loopbackCIDR string) (net.Listener, error) {
+	file := os.NewFile(uintptr(fd), "protected-socket")
+	if file == nil {
+		return nil, errors.New("invalid protected socket")
+	}
+	defer file.Close()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !validProtectedBindAddress(address, loopbackCIDR) {
+		return nil, errors.New("invalid protected listener address")
+	}
+	kind, err := unix.GetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_TYPE)
+	if err != nil || kind != unix.SOCK_STREAM {
+		return nil, errors.New("protected receiver returned a non-TCP socket")
+	}
+	if _, err = unix.GetsockoptInt(fd, unix.IPPROTO_TCP, unix.TCP_NODELAY); err != nil {
+		return nil, errors.New("protected receiver returned a non-TCP socket")
+	}
+	bound, err := unix.Getsockname(fd)
+	ipv4, ok := bound.(*unix.SockaddrInet4)
+	if err != nil || !ok || ipv4.Port != 0 || ipv4.Addr != [4]byte{} {
+		return nil, errors.New("protected receiver returned a bound or non-IPv4 socket")
+	}
+	// Darwin does not expose SO_ACCEPTCONN through getsockopt. A TCP
+	// listener necessarily has a bound local port, already excluded above.
+	host, portText, _ := net.SplitHostPort(address)
+	port, portErr := strconv.Atoi(portText)
+	if portErr != nil || port < 1 || port > 65535 {
+		return nil, errors.New("invalid protected port")
+	}
+	ip := net.ParseIP(host).To4()
+	if ip == nil {
+		return nil, errors.New("invalid protected IPv4 address")
+	}
+	target := &unix.SockaddrInet4{Port: port}
+	copy(target.Addr[:], ip)
+	if err = unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_REUSEADDR, 1); err != nil {
+		return nil, err
+	}
+	if err = unix.Bind(fd, target); err != nil {
+		return nil, classifyProtectedBindError(err)
+	}
+	if err = unix.Listen(fd, unix.SOMAXCONN); err != nil {
+		return nil, err
+	}
+	if err = ctx.Err(); err != nil {
+		return nil, err
+	}
+	return net.FileListener(file)
+}
+
+// ServeSocketChild never regains root: it creates one unbound IPv4 TCP socket
+// under the dedicated receiver UID and hands it to the inherited private channel.
 func ServeSocketChild(ctx context.Context, address, loopbackCIDR string) error {
-	host, port, err := net.SplitHostPort(address)
-	value, e := strconv.ParseUint(port, 10, 16)
-	if err != nil || e != nil || value == 0 || !validAddressInCIDR(host, loopbackCIDR) {
+	_, rawPort, splitErr := net.SplitHostPort(address)
+	port, portErr := strconv.Atoi(rawPort)
+	if splitErr != nil || portErr != nil || port < 1 || port > 65535 {
+		return errors.New("invalid protected port")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !validProtectedBindAddress(address, loopbackCIDR) {
 		return errors.New("invalid protected listener")
 	}
 	channel := os.NewFile(3, "guard-parent")
@@ -161,18 +229,19 @@ func ServeSocketChild(ctx context.Context, address, loopbackCIDR string) error {
 		return err
 	}
 	defer connection.Close()
-	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp4", address)
+	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_STREAM, unix.IPPROTO_TCP)
 	if err != nil {
 		return err
 	}
-	defer listener.Close()
-	file, err := listener.(*net.TCPListener).File()
-	if err != nil {
+	defer unix.Close(fd)
+	unix.CloseOnExec(fd)
+	if err = connection.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		return err
 	}
-	defer file.Close()
-	connection.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	_, _, err = connection.(*net.UnixConn).WriteMsgUnix([]byte{1}, unix.UnixRights(int(file.Fd())), nil)
+	n, _, err := connection.(*net.UnixConn).WriteMsgUnix([]byte{1}, unix.UnixRights(fd), nil)
+	if err == nil && n != 1 {
+		return errors.New("incomplete protected socket handoff")
+	}
 	return err
 }
 

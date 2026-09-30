@@ -4,7 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
+
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 	"reflect"
 	"slices"
 	"strings"
@@ -87,7 +88,7 @@ func testWindowsActivationJournal() windowsActivationJournal {
 	c := windowsActivationComponent{Path: `C:\Paperboat\candidate.exe`, SHA256: strings.Repeat("a", 64), Length: 1}
 	previous := c
 	previous.Path = `C:\Program Files\Paperboat\bin\pb.exe`
-	return windowsActivationJournal{Schema: windowsActivationJournalSchema, TransactionID: strings.Repeat("1", 32), PreviousVersion: "2026.08.22.1", Version: "2026.08.23.1", Architecture: "amd64", Stage: windowsActivationStaged, Runtime: c, CLI: c, Hostd: c, Updater: c, PreviousBinary: previous, OldHostd: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-hostd", "--instance", "u0123456789abcdef01234567"}, WasRunning: true}, NewHostd: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-hostd", "--instance", "u0123456789abcdef01234567"}}, OldUpdater: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-updated", "--instance", "u0123456789abcdef01234567"}, WasRunning: true}, NewUpdater: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-updated", "--instance", "u0123456789abcdef01234567"}}, ManifestSHA256: strings.Repeat("b", 64), CanaryPath: "/_paperboat/update-canary", CanaryStatus: 204, CanarySamples: 3, CanaryTimeout: time.Second, DrainTimeout: time.Second, StabilityWindow: time.Second, StabilityInterval: time.Second, RollbackTimeout: time.Second, HostdAPIMin: 1, HostdAPIMax: 2, RuntimeAPIMin: 1, RuntimeAPIMax: 2}
+	return windowsActivationJournal{Candidate: workerupdate.PreparedCandidate{ID: strings.Repeat("d", 64), Version: "2026.08.23.1", Platform: "windows", Architecture: "amd64", SHA256: c.SHA256, Length: c.Length}, ApprovedCandidateID: strings.Repeat("d", 64), Schema: windowsActivationJournalSchema, TransactionID: strings.Repeat("1", 32), PreviousVersion: "2026.08.22.1", Version: "2026.08.23.1", Architecture: "amd64", Stage: windowsActivationStaged, Runtime: c, CLI: c, Hostd: c, Updater: c, PreviousBinary: previous, OldHostd: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-hostd", "--instance", "u0123456789abcdef01234567"}, WasRunning: true}, NewHostd: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-hostd", "--instance", "u0123456789abcdef01234567"}}, OldUpdater: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-updated", "--instance", "u0123456789abcdef01234567"}, WasRunning: true}, NewUpdater: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-updated", "--instance", "u0123456789abcdef01234567"}}, ManifestSHA256: strings.Repeat("b", 64), CanaryPath: "/_paperboat/update-canary", CanaryStatus: 204, CanarySamples: 3, CanaryTimeout: time.Second, DrainTimeout: time.Second, StabilityWindow: time.Second, StabilityInterval: time.Second, RollbackTimeout: time.Second, HostdAPIMin: 1, HostdAPIMax: 2, RuntimeAPIMin: 1, RuntimeAPIMax: 2}
 }
 
 func TestWindowsActivationCommitsCLIOnlyAfterHealth(t *testing.T) {
@@ -96,7 +97,7 @@ func TestWindowsActivationCommitsCLIOnlyAfterHealth(t *testing.T) {
 	if err != nil || result.Stage != windowsActivationCommitted {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
-	want := []string{"journal:candidate_validating", "candidate", "journal:candidate_ready", "journal:draining", "drain", "candidate_stop", "journal:switching", "stop", "activate", "targets:C:\\Program Files\\Paperboat\\bin\\pb.exe", "start", "journal:services_live", "health", "cli:", "journal:commit_ready", "gate_commit", "journal:committed", "finalize"}
+	want := []string{"journal:switching", "stop", "activate", "targets:C:\\Program Files\\Paperboat\\bin\\pb.exe", "start", "journal:services_live", "health", "cli:", "journal:commit_ready", "verifyCommitted", "journal:committed", "finalize"}
 	if !reflect.DeepEqual(b.events, want) {
 		t.Fatalf("events=%q want=%q", b.events, want)
 	}
@@ -138,24 +139,6 @@ func TestWindowsActivationRollbackReadyResumeOnlyStartsOldServices(t *testing.T)
 	want := []string{"start", "verifyRollback", "journal:rolled_back"}
 	if !reflect.DeepEqual(b.events, want) {
 		t.Fatalf("events=%q want=%q", b.events, want)
-	}
-}
-
-func TestWindowsActivationResumesInterruptedPreDrainRollbackWithoutRollbackGate(t *testing.T) {
-	for _, stage := range []windowsActivationStage{windowsActivationRollingBack, windowsActivationRollbackReady} {
-		t.Run(string(stage), func(t *testing.T) {
-			journal := testWindowsActivationJournal()
-			journal.Stage = stage
-			journal.PreDrainRollback = true
-			b := &recordingWindowsActivationBackend{}
-			result, err := executeWindowsActivation(context.Background(), b, journal)
-			if err == nil || result.Stage != windowsActivationRolledBack || result.PreDrainRollback {
-				t.Fatalf("result=%+v err=%v", result, err)
-			}
-			if slices.Contains(b.events, "verifyRollback") || !slices.Contains(b.events, "candidate_stop") || !slices.Contains(b.events, "start") {
-				t.Fatalf("events=%q", b.events)
-			}
-		})
 	}
 }
 
@@ -204,74 +187,6 @@ func TestWindowsActivationRecoveryNeverContinuesAmbiguousCutover(t *testing.T) {
 	result, err := executeWindowsActivation(context.Background(), b, j)
 	if err == nil || result.Stage != windowsActivationRolledBack || b.events[0] != "journal:rolling_back" {
 		t.Fatalf("result=%+v events=%q err=%v", result, b.events, err)
-	}
-}
-
-func TestWindowsActivationCandidateFailureLeavesOldRouteUndrained(t *testing.T) {
-	b := &recordingWindowsActivationBackend{fail: "candidate"}
-	result, err := executeWindowsActivation(context.Background(), b, testWindowsActivationJournal())
-	if err == nil || result.Stage != windowsActivationRolledBack {
-		t.Fatalf("result=%+v events=%q err=%v", result, b.events, err)
-	}
-	if slices.Contains(b.events, "drain") || slices.Contains(b.events, "stop") || slices.Contains(b.events, "restore") {
-		t.Fatalf("candidate failure touched old route/services: %q", b.events)
-	}
-	wantTail := []string{"journal:candidate_validating", "candidate", "journal:rolling_back", "candidate_stop", "quarantine", "start", "journal:rolled_back"}
-	if len(b.events) < len(wantTail) || !reflect.DeepEqual(b.events[len(b.events)-len(wantTail):], wantTail) {
-		t.Fatalf("events=%q want tail=%q", b.events, wantTail)
-	}
-}
-
-func TestWindowsActivationCandidateRollbackRestartsOnlyUpdater(t *testing.T) {
-	b := &recordingWindowsActivationBackend{fail: "candidate"}
-	journal := testWindowsActivationJournal()
-	journal.LocalDaemonWasRunning = true
-	result, err := executeWindowsActivation(context.Background(), b, journal)
-	if err == nil || result.Stage != windowsActivationRolledBack {
-		t.Fatalf("result=%+v events=%q err=%v", result, b.events, err)
-	}
-	start := slices.Index(b.events, "start")
-	terminal := slices.Index(b.events, "journal:rolled_back")
-	if start < 0 || terminal < 0 || start >= terminal || b.startedLocalDaemon {
-		t.Fatalf("previous services were not restored before terminal rollback: %q", b.events)
-	}
-}
-
-func TestWindowsActivationCandidateRollbackRemainsRecoverableIfRestartFails(t *testing.T) {
-	b := &recordingWindowsActivationBackend{fail: "candidate", failStartOnRollback: true}
-	result, err := executeWindowsActivation(context.Background(), b, testWindowsActivationJournal())
-	if err == nil || result.Stage != windowsActivationRollingBack {
-		t.Fatalf("result=%+v events=%q err=%v", result, b.events, err)
-	}
-	if slices.Contains(b.events, "journal:rolled_back") {
-		t.Fatalf("published terminal rollback after previous services failed to restart: %q", b.events)
-	}
-}
-
-func TestWindowsActivationCandidateStagesRecoverWithoutDrainingOldRoute(t *testing.T) {
-	for _, stage := range []windowsActivationStage{windowsActivationCandidateValidating, windowsActivationCandidateReady} {
-		b := &recordingWindowsActivationBackend{}
-		journal := testWindowsActivationJournal()
-		journal.Stage = stage
-		result, err := executeWindowsActivation(context.Background(), b, journal)
-		if err == nil || result.Stage != windowsActivationRolledBack {
-			t.Fatalf("stage=%q result=%+v events=%q err=%v", stage, result, b.events, err)
-		}
-		if slices.Contains(b.events, "drain") || slices.Contains(b.events, "stop") || slices.Contains(b.events, "restore") {
-			t.Fatalf("stage=%q touched old route/services: %q", stage, b.events)
-		}
-	}
-}
-
-func TestWindowsActivationJournalOrdersDrainBeforeSwitch(t *testing.T) {
-	b := &recordingWindowsActivationBackend{}
-	_, err := executeWindowsActivation(context.Background(), b, testWindowsActivationJournal())
-	if err != nil {
-		t.Fatal(err)
-	}
-	drainIndex, switchIndex := slices.Index(b.events, "journal:draining"), slices.Index(b.events, "journal:switching")
-	if drainIndex < 0 || switchIndex < 0 || drainIndex >= switchIndex {
-		t.Fatalf("events=%q: drain must be durable before switching", b.events)
 	}
 }
 
@@ -357,97 +272,6 @@ func TestWindowsUpdaterDoesNotResumeTransactionOwnedByRunningActivator(t *testin
 	}
 }
 
-type busyWindowsActivationBackend struct {
-	recordingWindowsActivationBackend
-	startedHostd, startedSSH bool
-}
-
-func (b *busyWindowsActivationBackend) Drain(context.Context, windowsActivationJournal) error {
-	b.events = append(b.events, "drain")
-	return &autoupdate.ActiveTerminalSessionsError{RequiredVersion: testWindowsActivationJournal().Version}
-}
-func (b *busyWindowsActivationBackend) StartServices(ctx context.Context, h, u, ssh, local bool) error {
-	b.startedHostd, b.startedSSH = h, ssh
-	return b.recordingWindowsActivationBackend.StartServices(ctx, h, u, ssh, local)
-}
-func TestWindowsBusyActivationPreservesOriginalProcesses(t *testing.T) {
-	b := &busyWindowsActivationBackend{}
-	journal := testWindowsActivationJournal()
-	journal.LocalDaemonWasRunning = true
-	result, err := executeWindowsActivation(context.Background(), b, journal)
-	var busy *autoupdate.ActiveTerminalSessionsError
-	if !errors.As(err, &busy) || result.Stage != windowsActivationRolledBack {
-		t.Fatalf("result=%+v error=%v", result, err)
-	}
-	for _, event := range []string{"stop", "activate", "restore", "quarantine", "verifyRollback"} {
-		if slices.Contains(b.events, event) {
-			t.Fatalf("busy activation performed %s: %v", event, b.events)
-		}
-	}
-	if b.startedHostd || b.startedSSH || b.startedLocalDaemon {
-		t.Fatal("busy compensation restarted an original process")
-	}
-}
-
-func TestWindowsBusyCompensationRecoveryAndFailure(t *testing.T) {
-	for _, stage := range []windowsActivationStage{windowsActivationRollingBack, windowsActivationBusyReady} {
-		t.Run(string(stage), func(t *testing.T) {
-			j := testWindowsActivationJournal()
-			j.Stage = stage
-			j.PreDrainRollback = true
-			j.BlockedReason = autoupdate.BlockedActiveTerminalSessions
-			j.BlockedRetryAt = time.Now().Add(autoupdate.DefaultRetryFloor)
-			b := &busyWindowsActivationBackend{}
-			result, err := executeWindowsActivation(context.Background(), b, j)
-			var busy *autoupdate.ActiveTerminalSessionsError
-			if !errors.As(err, &busy) || result.Stage != windowsActivationRolledBack || b.startedHostd || b.startedSSH || b.startedLocalDaemon || slices.Contains(b.events, "quarantine") {
-				t.Fatalf("recovery=%+v error=%v events=%v", result, err, b.events)
-			}
-		})
-	}
-	for _, failure := range []string{"candidate_stop", "journal:busy_ready", "start", "journal:rolled_back"} {
-		t.Run(failure, func(t *testing.T) {
-			b := &busyWindowsActivationBackend{recordingWindowsActivationBackend: recordingWindowsActivationBackend{fail: failure}}
-			_, err := executeWindowsActivation(context.Background(), b, testWindowsActivationJournal())
-			var busy *autoupdate.ActiveTerminalSessionsError
-			if err == nil || errors.As(err, &busy) {
-				t.Fatalf("cleanup failure reported expected busy: %v", err)
-			}
-			if b.startedHostd || b.startedSSH || b.startedLocalDaemon || slices.Contains(b.events, "quarantine") {
-				t.Fatalf("cleanup touched original services: %v", b.events)
-			}
-		})
-	}
-}
-
-func TestWindowsInterruptedDrainPreservesOriginalProcesses(t *testing.T) {
-	for _, fail := range []string{"", "rollbackDrain"} {
-		t.Run(fail, func(t *testing.T) {
-			b := &recordingWindowsActivationBackend{fail: fail}
-			j := testWindowsActivationJournal()
-			j.Stage = windowsActivationDraining
-			j.LocalDaemonWasRunning = true
-			result, err := executeWindowsActivation(context.Background(), b, j)
-			if err == nil {
-				t.Fatal("interrupted activation must be reported")
-			}
-			if slices.Contains(b.events, "stop") || slices.Contains(b.events, "restore") || b.startedLocalDaemon {
-				t.Fatalf("touched original processes: %v", b.events)
-			}
-			if !slices.Contains(b.events, "rollbackDrain") {
-				t.Fatalf("missing admission rollback: %v", b.events)
-			}
-			if fail != "" {
-				if result.Stage != windowsActivationDraining || slices.Contains(b.events, "candidate_stop") {
-					t.Fatalf("failed admission rollback advanced: %v", b.events)
-				}
-			} else if result.Stage != windowsActivationRolledBack {
-				t.Fatalf("stage=%s", result.Stage)
-			}
-		})
-	}
-}
-
 func (b *recordingWindowsActivationBackend) RollbackDrain(context.Context, windowsActivationJournal) error {
 	return b.event("rollbackDrain")
 }
@@ -469,64 +293,26 @@ func TestWindowsJournalOmitsAbsentAdmissionFields(t *testing.T) {
 	}
 }
 
-func TestWindowsDrainResponseLossDoesNotStopOriginalProcesses(t *testing.T) {
-	b := &recordingWindowsActivationBackend{fail: "drain"}
-	j := testWindowsActivationJournal()
-	j.LocalDaemonWasRunning = true
-	result, err := executeWindowsActivation(context.Background(), b, j)
-	if err == nil || result.Stage != windowsActivationRolledBack {
-		t.Fatalf("stage=%s err=%v", result.Stage, err)
-	}
-	if slices.Contains(b.events, "stop") || slices.Contains(b.events, "restore") || b.startedLocalDaemon {
-		t.Fatalf("ambiguous drain touched live processes: %v", b.events)
-	}
-	if !slices.Contains(b.events, "rollbackDrain") {
-		t.Fatalf("did not reconcile exact admission: %v", b.events)
-	}
-}
-
-type consecutiveWindowsBackend struct {
-	recordingWindowsActivationBackend
-	held string
-}
-
-func (b *consecutiveWindowsBackend) Drain(_ context.Context, j windowsActivationJournal) error {
-	if b.held != "" && b.held != j.TransactionID {
-		return errors.New("admission remains held")
-	}
-	b.held = j.TransactionID
-	return b.event("drain")
-}
-func (b *consecutiveWindowsBackend) CommitGate(_ context.Context, j windowsActivationJournal) error {
-	if b.held != "" && b.held != j.TransactionID {
-		return errors.New("wrong admission owner")
-	}
-	if err := b.event("gate_commit"); err != nil {
-		return err
-	}
-	b.held = ""
-	return nil
-}
 func TestWindowsSuccessiveUpdatesReleaseAdmission(t *testing.T) {
-	b := &consecutiveWindowsBackend{}
+	b := &recordingWindowsActivationBackend{}
 	j := testWindowsActivationJournal()
 	for _, id := range []string{strings.Repeat("1", 32), strings.Repeat("2", 32)} {
 		j.TransactionID = id
 		result, err := executeWindowsActivation(context.Background(), b, j)
-		if err != nil || result.Stage != windowsActivationCommitted || b.held != "" {
-			t.Fatalf("stage=%s held=%s err=%v events=%v", result.Stage, b.held, err, b.events)
+		if err != nil || result.Stage != windowsActivationCommitted {
+			t.Fatalf("stage=%s err=%v events=%v", result.Stage, err, b.events)
 		}
 	}
 }
 
-func (b *recordingWindowsActivationBackend) CommitGate(context.Context, windowsActivationJournal) error {
-	return b.event("gate_commit")
+func (b *recordingWindowsActivationBackend) VerifyCommitted(context.Context, windowsActivationJournal) error {
+	return b.event("verifyCommitted")
 }
 
 func TestWindowsCommitFailureResumesWithoutRollback(t *testing.T) {
-	for _, fail := range []string{"gate_commit", "journal:committed"} {
+	for _, fail := range []string{"verifyCommitted", "journal:committed"} {
 		t.Run(fail, func(t *testing.T) {
-			b := &consecutiveWindowsBackend{}
+			b := &recordingWindowsActivationBackend{}
 			b.fail = fail
 			j := testWindowsActivationJournal()
 			result, err := executeWindowsActivation(context.Background(), b, j)
@@ -539,7 +325,7 @@ func TestWindowsCommitFailureResumesWithoutRollback(t *testing.T) {
 			b.fail = ""
 			b.events = nil
 			result, err = executeWindowsActivation(context.Background(), b, result)
-			if err != nil || result.Stage != windowsActivationCommitted || b.held != "" || slices.Contains(b.events, "stop") {
+			if err != nil || result.Stage != windowsActivationCommitted || slices.Contains(b.events, "stop") {
 				t.Fatalf("resume=%s err=%v events=%v", result.Stage, err, b.events)
 			}
 		})
@@ -590,6 +376,43 @@ func TestWindowsSSHInstanceServiceRecoverySelection(t *testing.T) {
 	} {
 		if got := isWindowsSSHInstanceService(test.name); got != test.want {
 			t.Errorf("service %q: got %v, want %v", test.name, got, test.want)
+		}
+	}
+}
+
+func TestWindowsPreparedCandidateCannotExecuteOrResume(t *testing.T) {
+	for _, approved := range []bool{false, true} {
+		j := testWindowsActivationJournal()
+		j.Stage = windowsActivationAwaitingApproval
+		if !approved {
+			j.ApprovedCandidateID = ""
+		}
+		if !validWindowsActivationJournal(j) {
+			t.Fatal("prepared candidate rejected")
+		}
+		if windowsActivationNeedsResume(j, j.PreviousVersion, false) || windowsActivationBlocksVersion(j, j.PreviousVersion) {
+			t.Fatal("prepared candidate requests activation")
+		}
+		backend := &recordingWindowsActivationBackend{}
+		result, err := executeWindowsActivation(context.Background(), backend, j)
+		if !errors.Is(err, workerupdate.ErrApprovalRequired) || result.Stage != windowsActivationAwaitingApproval || len(backend.events) != 0 {
+			t.Fatalf("result=%+v err=%v events=%v", result, err, backend.events)
+		}
+	}
+}
+
+func TestWindowsActivationRejectsApprovalAndArtifactIdentityMismatch(t *testing.T) {
+	for _, mutate := range []func(*windowsActivationJournal){
+		func(j *windowsActivationJournal) { j.ApprovedCandidateID = "" },
+		func(j *windowsActivationJournal) { j.ApprovedCandidateID = strings.Repeat("e", 64) },
+		func(j *windowsActivationJournal) { j.Candidate.SHA256 = strings.Repeat("e", 64) },
+		func(j *windowsActivationJournal) { j.Candidate.Version = "2026.08.24.1" },
+	} {
+		j := testWindowsActivationJournal()
+		mutate(&j)
+		backend := &recordingWindowsActivationBackend{}
+		if _, err := executeWindowsActivation(context.Background(), backend, j); err == nil || len(backend.events) != 0 {
+			t.Fatalf("invalid candidate executed: %v %v", err, backend.events)
 		}
 	}
 }

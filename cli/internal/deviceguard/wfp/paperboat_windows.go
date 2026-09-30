@@ -62,7 +62,7 @@ func Apply(leases, known []Lease, configuration ...string) error {
 	}
 	defer fwpmEngineClose0(engine)
 	return runTransaction(engine, func(engine uintptr) error {
-		baseNames := []string{"paperboat-dns-permit-tcp", "paperboat-dns-permit-udp", "paperboat-in-permit", "paperboat-in-block", "paperboat-out-block"}
+		baseNames := []string{"paperboat-dns-permit-tcp", "paperboat-dns-permit-udp", "paperboat-in-permit", "paperboat-browser-in-permit-80", "paperboat-browser-in-permit-443", "paperboat-in-block", "paperboat-out-block"}
 		for _, protectedPrefix := range protectedPrefixes {
 			second := int(protectedPrefix.Addr().As4()[1])
 			baseNames = append(baseNames, fmt.Sprintf("paperboat-in-block-%d", second), fmt.Sprintf("paperboat-out-block-%d", second))
@@ -102,6 +102,14 @@ func Apply(leases, known []Lease, configuration ...string) error {
 		}
 		if err = addRule(engine, "paperboat-in-permit", cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, cFWP_ACTION_PERMIT, 14, []wtFwpmFilterCondition0{protocol(), addrCondition(cFWPM_CONDITION_IP_LOCAL_ADDRESS, &prefix), blobCondition(cFWPM_CONDITION_ALE_APP_ID, cFWP_BYTE_BLOB_TYPE, unsafe.Pointer(app)), blobCondition(cFWPM_CONDITION_ALE_USER_ID, cFWP_SECURITY_DESCRIPTOR_TYPE, unsafe.Pointer(&systemBlob))}); err != nil {
 			return fmt.Errorf("inbound app permit: %w", err)
+		}
+		// The public browser gateway has a stable address even when the native range changes.
+		gatewayBytes := netip.MustParseAddr("127.100.0.1").As4()
+		gatewayAddress := binary.BigEndian.Uint32(gatewayBytes[:])
+		for _, port := range []uint16{80, 443} {
+			if err = addRule(engine, fmt.Sprintf("paperboat-browser-in-permit-%d", port), cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, cFWP_ACTION_PERMIT, 14, []wtFwpmFilterCondition0{protocol(), uint32Condition(cFWPM_CONDITION_IP_LOCAL_ADDRESS, gatewayAddress), uint16Condition(cFWPM_CONDITION_IP_LOCAL_PORT, port), blobCondition(cFWPM_CONDITION_ALE_APP_ID, cFWP_BYTE_BLOB_TYPE, unsafe.Pointer(app)), blobCondition(cFWPM_CONDITION_ALE_USER_ID, cFWP_SECURITY_DESCRIPTOR_TYPE, unsafe.Pointer(&systemBlob))}); err != nil {
+				return fmt.Errorf("browser inbound app permit: %w", err)
+			}
 		}
 		runtime.KeepAlive(systemSD)
 		runtime.KeepAlive(systemBlob)
@@ -279,7 +287,7 @@ func Remove(leases []Lease) error {
 // derived from these exact Paperboat-owned names; no foreign provider or filter
 // is enumerated or deleted.
 func ownedFilterNames() []string {
-	names := []string{"paperboat-dns-permit-tcp", "paperboat-dns-permit-udp", "paperboat-in-permit", "paperboat-in-block", "paperboat-out-block"}
+	names := []string{"paperboat-dns-permit-tcp", "paperboat-dns-permit-udp", "paperboat-in-permit", "paperboat-browser-in-permit-80", "paperboat-browser-in-permit-443", "paperboat-in-block", "paperboat-out-block"}
 	for second := 1; second <= 254; second++ {
 		names = append(names, fmt.Sprintf("paperboat-in-block-%d", second), fmt.Sprintf("paperboat-out-block-%d", second))
 	}

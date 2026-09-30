@@ -10,6 +10,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -21,11 +22,94 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	pbSync "github.com/pinksaucepasta/paperboat/internal/controlsync/proto"
 	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
+	"github.com/pinksaucepasta/paperboat/internal/deviceguard"
 	previewruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 	"google.golang.org/grpc"
 )
+
+func TestCoordinatorSharedBrowserGatewayRoutesExactDevicesAndWithdraws(t *testing.T) {
+	testCoordinatorSharedBrowserGateway(t, false)
+}
+
+func TestCoordinatorBrowserGatewayPreservesRoutesWhenNativePortsConflict(t *testing.T) {
+	testCoordinatorSharedBrowserGateway(t, true)
+}
+
+func testCoordinatorSharedBrowserGateway(t *testing.T, nativeConflict bool) {
+	t.Helper()
+	ca, err := splitdns.LoadOrCreateConstrainedCA(t.TempDir(), splitdns.BrowserSuffix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	origins := map[string]*httptest.Server{}
+	for _, id := range []string{"first", "second"} {
+		origins[id] = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, id) }))
+		defer origins[id].Close()
+	}
+	names := &coordinatorNameClient{conflictPorts: map[int]bool{6767: nativeConflict}}
+	c, err := NewCoordinator(CoordinatorConfig{DNSSuffix: "pprbt", NameClient: names, DialDevice: func(ctx context.Context, machineID string, port int) (net.Conn, error) {
+		origin := origins[machineID]
+		if origin == nil || port != 6767 {
+			return nil, errors.New("wrong exact device/port")
+		}
+		return (&net.Dialer{}).DialContext(ctx, "tcp", origin.Listener.Addr().String())
+	}, IssueCertificate: func(_ context.Context, _ guardedNameClient, name string) (tls.Certificate, error) {
+		cert, key, err := ca.IssueCertificate([]string{name})
+		if err != nil {
+			return tls.Certificate{}, err
+		}
+		return tls.X509KeyPair(cert, key)
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.ctx = t.Context()
+	defer c.Stop()
+	peers := []*pbSync.PeerUpdate{{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6767}}, {PeerId: "second", Alias: "victus", AssignedIp: "127.100.0.5", Approved: true, Online: true, ExportedPorts: []int32{6767}}}
+	if err := c.replaceGuardedRoutes(t.Context(), peers); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.webRoutes) != 1 || len(c.BrowserURLs()) != 2 {
+		t.Fatal("gateway duplicated or device URLs collapsed")
+	}
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(ca.CertPEM())
+	for i, peer := range peers {
+		host := testBrowserHostname(t, peer.Alias, 6767)
+		tr := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: host, MinVersion: tls.VersionTLS12}}
+		client := &http.Client{Transport: tr}
+		req, _ := http.NewRequest(http.MethodGet, "https://"+names.addresses[443]+"/", nil)
+		req.Host = host
+		response, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(response.Body)
+		response.Body.Close()
+		tr.CloseIdleConnections()
+		if err != nil || response.StatusCode != 200 || string(body) != peers[i].PeerId {
+			t.Fatalf("wrong device: %q %v", body, err)
+		}
+	}
+	if err := c.replaceGuardedRoutes(t.Context(), peers[1:]); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := c.BrowserURLs()["first"]; exists {
+		t.Fatal("withdrawn device remains published")
+	}
+	web := c.webRoutes[splitdns.BrowserGatewayHostname]
+	if _, err := web.proxy.GetCertificate(&tls.ClientHelloInfo{ServerName: testBrowserHostname(t, "hp", 6767)}); err == nil {
+		t.Fatal("withdrawn TLS route remains admitted")
+	}
+	if err := c.replaceGuardedRoutes(t.Context(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.webRoutes) != 0 || len(c.BrowserURLs()) != 0 {
+		t.Fatal("empty snapshot retained gateway")
+	}
+}
 
 type testControlSyncServer struct {
 	pbSync.UnimplementedSyncServiceServer
@@ -227,23 +311,252 @@ func TestCoordinatorGuardedNamesFollowFullSnapshots(t *testing.T) {
 	}
 }
 
+func TestCoordinatorPortConflictPreservesOtherRoutesRecoversAndRevokes(t *testing.T) {
+	names := &coordinatorNameClient{conflictPorts: map[int]bool{5000: true}}
+	c, err := NewCoordinator(CoordinatorConfig{DNSSuffix: "pprbt", NameClient: names, DialDevice: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("not dialed") }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.ctx = t.Context()
+	t.Cleanup(func() { _ = c.Stop() })
+	peers := []*pbSync.PeerUpdate{
+		{PeerId: "local", Alias: "apple", AssignedIp: "127.100.0.5", Approved: true, Online: true, ExportedPorts: []int32{5000, 7000}},
+		{PeerId: "remote", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6768}},
+	}
+	assertRoutes := func(want int, localPorts []int32) {
+		t.Helper()
+		c.mu.Lock()
+		count := len(c.routes)
+		c.mu.Unlock()
+		if count != want {
+			t.Fatalf("acquired routes=%d want=%d", count, want)
+		}
+		status, err := c.rpcBackend.GetStatus(t.Context())
+		if err != nil || len(status.Peers) != 2 {
+			t.Fatalf("independent peer status withdrawn: %v %v", status, err)
+		}
+		for _, peer := range status.Peers {
+			if peer.PeerId == "local" && !slices.Equal(peer.ForwardedPorts, localPorts) {
+				t.Fatalf("reported unacquired ports: %v want=%v", peer.ForwardedPorts, localPorts)
+			}
+		}
+	}
+	c.applySnapshot(peers, 1)
+	assertRoutes(2, []int32{7000})
+	names.mu.Lock()
+	if len(names.names) != 2 || names.addresses[5000] != "" {
+		names.mu.Unlock()
+		t.Fatal("conflict withdrew unrelated names or acquired a blocked listener")
+	}
+	delete(names.conflictPorts, 5000)
+	names.mu.Unlock()
+	c.applySnapshot(peers, 2)
+	assertRoutes(3, []int32{5000, 7000})
+	if !slices.Equal(peers[0].ExportedPorts, []int32{5000, 7000}) {
+		t.Fatal("status projection mutated authoritative discovery")
+	}
+	names.mu.Lock()
+	withdrawnAddress := names.addresses[6768]
+	names.mu.Unlock()
+	peers[1].Approved = false
+	c.applySnapshot(peers, 3)
+	c.mu.Lock()
+	remaining := len(c.routes)
+	c.mu.Unlock()
+	names.mu.Lock()
+	_, staleName := names.names["hp.pprbt"]
+	names.mu.Unlock()
+	if remaining != 2 || staleName {
+		t.Fatal("revocation retained a route or removed an unrelated device")
+	}
+	if connection, err := net.DialTimeout("tcp", withdrawnAddress, time.Second); err == nil {
+		connection.Close()
+		t.Fatal("revoked listener remained reachable")
+	}
+}
+
+func TestCoordinatorInventoryUsesAuthorizedDiscoveredPortsAndWithdrawsExpiry(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	names := &coordinatorNameClient{}
+	c, err := NewCoordinator(CoordinatorConfig{SocketAddress: filepath.Join(dir, "daemon.sock"), DNSSuffix: "pprbt", NameClient: names, DialDevice: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unused") }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Stop() })
+	machines := []api.UserMachine{{ID: "device", Alias: "studio", AssignedIP: "127.100.0.22", State: "online", Online: true, NetworkApproved: true, InstallationGeneration: 2}}
+	services := []api.DeviceServicesDevice{{MachineID: "device", InstallationGeneration: 2, ExpiresAt: time.Now().Add(100 * time.Millisecond), Services: []api.DeviceServicePort{{Port: 45678, AddressFamily: "ipv4"}}}}
+	c.ApplyMachines(machines, services)
+	names.mu.Lock()
+	_, discovered := names.addresses[45678]
+	_, hardcoded := names.addresses[3000]
+	names.mu.Unlock()
+	if !discovered || hardcoded {
+		t.Fatal("inventory did not use actual authorized service discovery")
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		names.mu.Lock()
+		remaining := len(names.names)
+		names.mu.Unlock()
+		if remaining == 0 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	names.mu.Lock()
+	remaining := len(names.names)
+	names.mu.Unlock()
+	if remaining != 0 {
+		t.Fatal("expired discovery retained usable names")
+	}
+	services[0].ExpiresAt = time.Now().Add(time.Hour)
+	machines[0].NetworkApproved = false
+	c.ApplyMachines(machines, services)
+	names.mu.Lock()
+	remaining = len(names.names)
+	names.mu.Unlock()
+	if remaining != 0 {
+		t.Fatal("unapproved device regained local routes")
+	}
+}
+
+func TestCoordinatorRawForwardPreservesServerFirstBytes(t *testing.T) {
+	client, local := net.Pipe()
+	defer client.Close()
+	upstream, server := net.Pipe()
+	defer server.Close()
+	c := &Coordinator{cfg: CoordinatorConfig{DialDevice: func(context.Context, string, int) (net.Conn, error) { return upstream, nil }}}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { defer close(done); c.forward(ctx, local, "device", 5432) }()
+	go func() { _, _ = server.Write([]byte("server greeting")) }()
+	_ = client.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	got := make([]byte, len("server greeting"))
+	if _, err := io.ReadFull(client, got); err != nil || string(got) != "server greeting" {
+		t.Fatalf("native forwarding delayed or altered server-first protocol: %v", err)
+	}
+	_ = client.Close()
+	_ = server.Close()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("native forward did not retire")
+	}
+}
+
+func TestCoordinatorNativePortPreservesApplicationTLSAndALPN(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	appCA, err := splitdns.LoadOrCreateConstrainedCA(t.TempDir(), "pprbt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	certPEM, keyPEM, err := appCA.IssueCertificate([]string{"studio.pprbt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	application, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}, NextProtos: []string{"application-protocol"}, MinVersion: tls.VersionTLS12})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer application.Close()
+	serverDone := make(chan error, 1)
+	go func() {
+		conn, err := application.Accept()
+		if err != nil {
+			serverDone <- err
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+		_, err = conn.Write([]byte("application TLS"))
+		serverDone <- err
+	}()
+	names := &coordinatorNameClient{}
+	c, err := NewCoordinator(CoordinatorConfig{SocketAddress: filepath.Join(dir, "daemon.sock"), DNSSuffix: "pprbt", NameClient: names,
+		DialDevice: func(ctx context.Context, _ string, _ int) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "tcp", application.Addr().String())
+		},
+		IssueCertificate: func(_ context.Context, _ guardedNameClient, hostname string) (tls.Certificate, error) {
+			if hostname != "24443.studio."+splitdns.BrowserSuffix {
+				return tls.Certificate{}, errors.New("native port must not issue a local certificate")
+			}
+			leaf, key, err := appCA.IssueCertificate([]string{hostname})
+			if err != nil {
+				return tls.Certificate{}, err
+			}
+			return tls.X509KeyPair(leaf, key)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Stop() })
+	c.applySnapshot([]*pbSync.PeerUpdate{{PeerId: "device", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{24443}}}, 1)
+	names.mu.Lock()
+	address := names.addresses[24443]
+	names.mu.Unlock()
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(appCA.CertPEM()) {
+		t.Fatal("invalid application CA")
+	}
+	client, err := tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", address, &tls.Config{RootCAs: roots, ServerName: "studio.pprbt", NextProtos: []string{"application-protocol"}, MinVersion: tls.VersionTLS12})
+	if err != nil {
+		t.Fatal("application TLS was intercepted:", err)
+	}
+	defer client.Close()
+	if client.ConnectionState().NegotiatedProtocol != "application-protocol" {
+		t.Fatal("application ALPN was changed")
+	}
+	_ = client.SetReadDeadline(time.Now().Add(time.Second))
+	got := make([]byte, len("application TLS"))
+	if _, err := io.ReadFull(client, got); err != nil || string(got) != "application TLS" {
+		t.Fatalf("application TLS payload failed: %v", err)
+	}
+	if err := <-serverDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
 type coordinatorNameClient struct {
-	mu           sync.Mutex
-	names        map[string]netip.Addr
-	failAcquire  bool
-	blockAcquire bool
-	addresses    map[int]string
-	failReplace  bool
-	closed       bool
+	mu            sync.Mutex
+	names         map[string]netip.Addr
+	failAcquire   bool
+	conflictPorts map[int]bool
+	blockAcquire  bool
+	addresses     map[int]string
+	failReplace   bool
+	closed        bool
 }
 
 func (c *coordinatorNameClient) Acquire(ctx context.Context, _ string, _ netip.Addr, requestedPort int) (net.Listener, error) {
 	c.mu.Lock()
 	fail := c.failAcquire
+	conflict := c.conflictPorts[requestedPort]
 	block := c.blockAcquire
 	c.mu.Unlock()
 	if fail {
 		return nil, errors.New("guard unavailable")
+	}
+	if conflict {
+		return nil, deviceguard.ErrPortInUse
 	}
 	if block {
 		<-ctx.Done()
@@ -390,7 +703,7 @@ func TestCoordinatorReconnectsNameClientOnNextSnapshot(t *testing.T) {
 	second := &generationNameClient{generation: 2}
 	clients := []*generationNameClient{first, second}
 	connects := 0
-	ca, err := splitdns.LoadOrCreateConstrainedCA(filepath.Join(t.TempDir(), "ca"), "pprbt")
+	ca, err := splitdns.LoadOrCreateConstrainedCA(filepath.Join(t.TempDir(), "ca"), splitdns.BrowserSuffix)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,7 +802,7 @@ func TestCoordinatorGenerationCleanupHonorsReconcileDeadline(t *testing.T) {
 }
 
 func TestCoordinatorProtectedHTTPFrontDoorUsesAuthenticatedDeviceDial(t *testing.T) {
-	ca, err := splitdns.LoadOrCreateConstrainedCA(filepath.Join(t.TempDir(), "ca"), "pprbt")
+	ca, err := splitdns.LoadOrCreateConstrainedCA(filepath.Join(t.TempDir(), "ca"), splitdns.BrowserSuffix)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -529,7 +842,7 @@ func TestCoordinatorProtectedHTTPFrontDoorUsesAuthenticatedDeviceDial(t *testing
 	address := names.addresses[80]
 	names.mu.Unlock()
 	req, _ := http.NewRequest(http.MethodGet, "http://"+address+"/", nil)
-	req.Host = testBrowserHostname(t, "peer", 3000)
+	req.Host = testBrowserHostname(t, "studio", 3000)
 	response, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -718,7 +1031,7 @@ func TestCoordinatorHTTPAndTLSUseRealNativePrivateAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ca, err := splitdns.LoadOrCreateConstrainedCA(filepath.Join(t.TempDir(), "ca"), "pprbt")
+	ca, err := splitdns.LoadOrCreateConstrainedCA(filepath.Join(t.TempDir(), "ca"), splitdns.BrowserSuffix)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -742,7 +1055,7 @@ func TestCoordinatorHTTPAndTLSUseRealNativePrivateAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	urls := coordinator.BrowserURLs()
-	if urls["peer"][3000] != "https://"+testBrowserHostname(t, "peer", 3000) {
+	if urls["peer"][3000] != "https://"+testBrowserHostname(t, "studio", 3000) {
 		t.Fatalf("browser URL projection=%v", urls)
 	}
 	urls["peer"][3000] = "mutated"
@@ -756,7 +1069,7 @@ func TestCoordinatorHTTPAndTLSUseRealNativePrivateAuthority(t *testing.T) {
 	requestAndRead := func(client *http.Client, scheme, address string) {
 		t.Helper()
 		request, _ := http.NewRequest(http.MethodGet, scheme+"://"+address+"/", nil)
-		request.Host = testBrowserHostname(t, "peer", 3000)
+		request.Host = testBrowserHostname(t, "studio", 3000)
 		response, requestErr := client.Do(request)
 		if requestErr != nil {
 			t.Fatal(requestErr)
@@ -772,7 +1085,7 @@ func TestCoordinatorHTTPAndTLSUseRealNativePrivateAuthority(t *testing.T) {
 	if !roots.AppendCertsFromPEM(ca.CertPEM()) {
 		t.Fatal("append test CA")
 	}
-	tlsClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: testBrowserHostname(t, "peer", 3000), MinVersion: tls.VersionTLS12}}}
+	tlsClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: testBrowserHostname(t, "studio", 3000), MinVersion: tls.VersionTLS12}}}
 	requestAndRead(tlsClient, "https", httpsAddress)
 
 	for range 2 {
@@ -800,11 +1113,11 @@ func TestCoordinatorHTTPAndTLSUseRealNativePrivateAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	urls = coordinator.BrowserURLs()
-	if len(urls["peer"]) != 1 || urls["peer"][3001] != "https://"+testBrowserHostname(t, "peer", 3001) {
+	if len(urls["peer"]) != 1 || urls["peer"][3001] != "https://"+testBrowserHostname(t, "studio", 3001) {
 		t.Fatalf("changed service URL projection=%v", urls)
 	}
 	names.mu.Lock()
-	_, oldPublished := names.names[testBrowserHostname(t, "peer", 3000)]
+	_, oldPublished := names.names[testBrowserHostname(t, "studio", 3000)]
 	names.mu.Unlock()
 	if oldPublished {
 		t.Fatal("removed service alias remained published")
@@ -835,7 +1148,7 @@ func TestCoordinatorGuardUnavailableFailsBeforeIPC(t *testing.T) {
 }
 
 func TestCoordinatorWebOnlyPeerPublishesName(t *testing.T) {
-	ca, err := splitdns.LoadOrCreateConstrainedCA(filepath.Join(t.TempDir(), "ca"), "pprbt")
+	ca, err := splitdns.LoadOrCreateConstrainedCA(filepath.Join(t.TempDir(), "ca"), splitdns.BrowserSuffix)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -907,7 +1220,7 @@ func (c *generationNameClient) ReplaceAliases(context.Context, map[string]string
 
 func testBrowserHostname(t *testing.T, machine string, port int) string {
 	t.Helper()
-	host, err := splitdns.BrowserHostname(machine, port, "pprbt")
+	host, err := splitdns.BrowserHostname(machine, port, splitdns.BrowserSuffix)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -80,6 +80,9 @@ func SuppliedBinary(ctx context.Context, input Request, operation string) error 
 				func(ctx context.Context) error { return Repair(ctx, previous) },
 			)
 		}
+		if err = installDeviceGuard(ctx, request); err != nil {
+			return err
+		}
 		if err = ensureSharedUserParents(paths); err != nil {
 			return err
 		}

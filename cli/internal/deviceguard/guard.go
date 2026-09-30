@@ -11,7 +11,24 @@ import (
 
 var ErrUnsupported = errors.New("protected device-name access requires the Linux Paperboat device guard service; this platform is not qualified")
 
+var ErrPortInUse = errors.New("protected port is already in use")
+
+func responseError(out response) error {
+	if out.ErrorCode == "port_in_use" {
+		return ErrPortInUse
+	}
+	if out.Error != "" {
+		return errors.New(out.Error)
+	}
+	if out.ErrorCode != "" {
+		return errors.New("unknown device guard error code")
+	}
+	return nil
+}
+
 type Config struct {
+	// Private path injection keeps OS-projection tests away from the system hosts file.
+	hostsPath                    string
 	Socket, StateDir, DNSAddress string
 	LoopbackCIDR                 string
 	ProtectedLoopbackCIDRs       []string
@@ -29,6 +46,7 @@ type response struct {
 	Certificate *CertificateBundle `json:"certificate,omitempty"`
 	Status      *RuntimeStatus     `json:"status,omitempty"`
 	Socket      []byte             `json:"socket,omitempty"`
+	ErrorCode   string             `json:"error_code,omitempty"`
 	Error       string             `json:"error,omitempty"`
 }
 

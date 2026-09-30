@@ -41,7 +41,7 @@ func uninstallRoots(state string) ([]ownedRoot, error) {
 	}
 	var roots []ownedRoot
 	for _, entry := range entries {
-		suffix, err := splitdns.ValidateSuffix(entry.Name())
+		suffix, err := splitdns.ValidateTrustSuffix(entry.Name())
 		if err != nil {
 			return nil, fmt.Errorf("unexpected certificate state entry %q", entry.Name())
 		}

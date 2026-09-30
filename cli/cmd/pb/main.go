@@ -59,6 +59,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	service "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 	"github.com/pinksaucepasta/paperboat/internal/inbox"
@@ -2632,7 +2633,6 @@ type updateResult struct {
 	Version           string `json:"version"`
 	CLIUpdated        bool   `json:"cli_updated"`
 	RuntimeUpdated    bool   `json:"runtime_updated"`
-	SupervisorUpdated bool   `json:"supervisor_updated"`
 	ActivationPending bool   `json:"activation_pending,omitempty"`
 }
 
@@ -2643,11 +2643,10 @@ func updateCommand() *cobra.Command {
 	check.Flags().Bool("json", false, "print JSON")
 	status := &cobra.Command{Use: "status", Short: "Show installed Paperboat update state", Args: commandArgs(cobra.NoArgs), RunE: actionUpdateStatus}
 	status.Flags().Bool("json", false, "print JSON")
-	approve := &cobra.Command{Use: "approve-maintenance", Short: "Approve one exact supervisor release for a protected-workload interruption", Args: commandArgs(cobra.NoArgs), RunE: actionApproveMaintenance}
-	approve.Flags().String("release", "", "exact signed release version to approve")
-	approve.Flags().Bool("json", false, "print JSON")
-	_ = approve.MarkFlagRequired("release")
-	command.AddCommand(check, status, approve)
+	command.Flags().String("approve", "", "install the exact downloaded candidate ID after reviewing it")
+	download := &cobra.Command{Use: "download", Short: "Download and verify an update without installing it", Args: commandArgs(cobra.NoArgs), RunE: actionUpdateDownload}
+	download.Flags().Bool("json", false, "print JSON")
+	command.AddCommand(check, status, download)
 	return command
 }
 
@@ -2686,7 +2685,7 @@ var readLocalDaemonSnapshot = func(ctx context.Context) (localapi.Snapshot, erro
 func actionUpdateCheck(command *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithTimeout(command.Context(), 30*time.Second)
 	defer cancel()
-	client, err := updated.NewClient(updateControlSocketForCommand(), 30*time.Second)
+	client, err := newUpdateControlClient(30 * time.Second)
 	if err != nil {
 		return err
 	}
@@ -2727,24 +2726,26 @@ func signedUpdateAvailable(installed, latest string) (bool, error) {
 }
 
 type updateStatusResult struct {
-	BlockedReason     string    `json:"blocked_reason,omitempty"`
-	RequiredVersion   string    `json:"required_version,omitempty"`
-	CLIVersion        string    `json:"cli_version"`
-	RuntimeVersion    string    `json:"runtime_version"`
-	RuntimeAvailable  bool      `json:"runtime_available"`
-	RuntimeState      string    `json:"runtime_state,omitempty"`
-	ActivationPending bool      `json:"activation_pending"`
-	ActivationFailure string    `json:"activation_failure,omitempty"`
-	LastCheck         time.Time `json:"last_check,omitempty"`
-	NextCheck         time.Time `json:"next_check,omitempty"`
-	LastFailure       string    `json:"last_failure,omitempty"`
-	Supervisor        any       `json:"supervisor,omitempty"`
+	LatestVersion     string                          `json:"latest_version,omitempty"`
+	UpdateAvailable   bool                            `json:"update_available"`
+	BlockedReason     string                          `json:"blocked_reason,omitempty"`
+	RequiredVersion   string                          `json:"required_version,omitempty"`
+	CLIVersion        string                          `json:"cli_version"`
+	RuntimeVersion    string                          `json:"runtime_version"`
+	RuntimeAvailable  bool                            `json:"runtime_available"`
+	RuntimeState      string                          `json:"runtime_state,omitempty"`
+	ActivationPending bool                            `json:"activation_pending"`
+	ActivationFailure string                          `json:"activation_failure,omitempty"`
+	LastCheck         time.Time                       `json:"last_check,omitempty"`
+	NextCheck         time.Time                       `json:"next_check,omitempty"`
+	LastFailure       string                          `json:"last_failure,omitempty"`
+	Candidate         *workerupdate.PreparedCandidate `json:"candidate,omitempty"`
 }
 
 func actionUpdateStatus(command *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithTimeout(command.Context(), 10*time.Second)
 	defer cancel()
-	client, err := updated.NewClient(updateControlSocketForCommand(), 10*time.Second)
+	client, err := newUpdateControlClient(10 * time.Second)
 	if err != nil {
 		return err
 	}
@@ -2755,13 +2756,21 @@ func actionUpdateStatus(command *cobra.Command, _ []string) error {
 			snapshot = &daemonSnapshot
 		}
 		result := updateStatusCommandResult(buildinfo.Version, response, snapshot)
-		return writeUpdateStatusResult(command, result, response.Supervisor.MaintenanceRequired, response.Supervisor.StagedVersion)
+		return writeUpdateStatusResult(command, result)
 	}
 	return fmt.Errorf("read paperboat-updated status: %w", err)
 }
 
 func updateStatusCommandResult(cliVersion string, response updated.ControlResponse, snapshot *localapi.Snapshot) updateStatusResult {
-	result := updateStatusResult{BlockedReason: response.Observation.BlockedReason, RequiredVersion: response.Observation.RequiredVersion, CLIVersion: cliVersion, ActivationPending: response.Pending, ActivationFailure: response.ActivationFailure, LastCheck: response.Observation.CheckedAt, NextCheck: response.Observation.NextCheckAt, LastFailure: response.Observation.Failure, Supervisor: response.Supervisor}
+	result := updateStatusResult{BlockedReason: response.Observation.BlockedReason, RequiredVersion: response.Observation.RequiredVersion, CLIVersion: cliVersion, ActivationPending: response.Pending, ActivationFailure: response.ActivationFailure, LastCheck: response.Observation.CheckedAt, NextCheck: response.Observation.NextCheckAt, LastFailure: response.Observation.Failure, Candidate: response.Candidate}
+	result.LatestVersion = response.Observation.Version
+	installed := response.Transaction.ActiveVersion
+	if installed == "" {
+		installed = cliVersion
+	}
+	if available, err := signedUpdateAvailable(installed, result.LatestVersion); err == nil {
+		result.UpdateAvailable = available
+	}
 	if snapshot != nil {
 		result.RuntimeState = snapshot.DaemonState
 		if daemonSnapshotAvailable(*snapshot) {
@@ -2776,7 +2785,7 @@ func daemonSnapshotAvailable(snapshot localapi.Snapshot) bool {
 	return snapshot.DaemonVersion != "" && (snapshot.DaemonState == "ready" || snapshot.DaemonState == "degraded")
 }
 
-func writeUpdateStatusResult(command *cobra.Command, result updateStatusResult, maintenanceRequired bool, stagedVersion string) error {
+func writeUpdateStatusResult(command *cobra.Command, result updateStatusResult) error {
 	jsonOutput, _ := command.Flags().GetBool("json")
 	if jsonOutput {
 		return json.NewEncoder(command.OutOrStdout()).Encode(map[string]any{"schema_version": "1.0", "ok": true, "data": result})
@@ -2790,8 +2799,11 @@ func writeUpdateStatusResult(command *cobra.Command, result updateStatusResult, 
 	if result.RuntimeState != "" {
 		fmt.Fprintf(command.OutOrStdout(), "Runtime state: %s\n", result.RuntimeState)
 	}
-	if result.BlockedReason == "active_terminal_sessions" {
-		fmt.Fprintf(command.OutOrStdout(), "Activation: waiting for running or detached terminal sessions to finish; required version %s. Existing sessions remain usable.\n", result.RequiredVersion)
+	if result.UpdateAvailable && result.Candidate == nil {
+		fmt.Fprintf(command.OutOrStdout(), "Paperboat %s is available. Run `pb update` to download and review it.\n", result.LatestVersion)
+	}
+	if result.Candidate != nil {
+		writePreparedUpdate(command, result.Candidate)
 	} else if result.ActivationPending {
 		fmt.Fprintln(command.OutOrStdout(), "Activation: pending")
 	} else if result.ActivationFailure != "" {
@@ -2805,36 +2817,92 @@ func writeUpdateStatusResult(command *cobra.Command, result updateStatusResult, 
 	if result.LastFailure != "" {
 		fmt.Fprintf(command.OutOrStdout(), "Last update failure: %s\n", result.LastFailure)
 	}
-	if maintenanceRequired {
-		fmt.Fprintf(command.OutOrStdout(), "Supervisor %s requires maintenance approval.\n", stagedVersion)
+
+	return nil
+}
+
+func actionUpdateDownload(command *cobra.Command, _ []string) error {
+	ctx, cancel := context.WithTimeout(command.Context(), 15*time.Minute)
+	defer cancel()
+	client, err := newUpdateControlClient(15 * time.Minute)
+	if err != nil {
+		return err
+	}
+	response, err := updateWithProgress(command, ctx, client.Download)
+	if err != nil {
+		return fmt.Errorf("download signed update: %w", err)
+	}
+	return writeDownloadedUpdate(command, response)
+}
+
+func writePreparedUpdate(command *cobra.Command, candidate *workerupdate.PreparedCandidate) {
+	fmt.Fprintf(command.OutOrStdout(), "Downloaded Paperboat %s (%s/%s, %d bytes).\nSHA256: %s\n", candidate.Version, candidate.Platform, candidate.Architecture, candidate.Length, candidate.SHA256)
+	fmt.Fprintf(command.OutOrStdout(), "Review this update, then install with:\n  pb update --approve %s\nInstallation restarts Paperboat services and interrupts active connections. Clients reconnect afterward.\n", candidate.ID)
+}
+
+func writeDownloadedUpdate(command *cobra.Command, response updated.ControlResponse) error {
+	if updateJSON(command) {
+		return json.NewEncoder(command.OutOrStdout()).Encode(map[string]any{"schema_version": "1.0", "ok": true, "data": response})
+	}
+	if response.Candidate != nil {
+		writePreparedUpdate(command, response.Candidate)
+	} else {
+		fmt.Fprintln(command.OutOrStdout(), "Paperboat is up to date.")
 	}
 	return nil
+}
+
+var updateInputIsTerminal = func(command *cobra.Command) bool {
+	input, ok := command.InOrStdin().(*os.File)
+	return ok && term.IsTerminal(int(input.Fd()))
 }
 
 func actionUpdate(command *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithTimeout(command.Context(), 15*time.Minute)
 	defer cancel()
-	client, err := updated.NewClient(updateControlSocketForCommand(), 15*time.Minute)
+	client, err := newUpdateControlClient(15 * time.Minute)
 	if err != nil {
 		return err
 	}
-	response, err := updateWithProgress(command, ctx, client.Update)
-	if err == nil {
-		var snapshot *localapi.Snapshot
-		if response.Updated && !response.Pending {
-			if daemonSnapshot, snapshotErr := readLocalDaemonSnapshot(ctx); snapshotErr == nil {
-				snapshot = &daemonSnapshot
-			}
+	approvalID, _ := command.Flags().GetString("approve")
+	if approvalID == "" {
+		response, err := updateWithProgress(command, ctx, client.Download)
+		if err != nil {
+			return fmt.Errorf("download signed update: %w", err)
 		}
-		return writeUpdateResult(command, updateCommandResult(buildinfo.Version, response, snapshot), response.Version)
+		if response.Candidate == nil || updateJSON(command) || !updateInputIsTerminal(command) {
+			return writeDownloadedUpdate(command, response)
+		}
+		writePreparedUpdate(command, response.Candidate)
+		fmt.Fprintf(command.OutOrStdout(), "Install Paperboat %s now? [y/N] ", response.Candidate.Version)
+		answer, err := bufio.NewReader(io.LimitReader(command.InOrStdin(), 128)).ReadString('\n')
+		if err != nil {
+			return fmt.Errorf("read update approval: %w", err)
+		}
+		answer = strings.TrimSpace(strings.ToLower(answer))
+		if answer != "y" && answer != "yes" {
+			fmt.Fprintln(command.OutOrStdout(), "Update remains downloaded; installation was not requested.")
+			return nil
+		}
+		approvalID = response.Candidate.ID
 	}
-	return fmt.Errorf("update with paperboat-updated: %w", err)
+	response, err := updateWithProgress(command, ctx, func(ctx context.Context) (updated.ControlResponse, error) { return client.Install(ctx, approvalID) })
+	if err != nil {
+		return fmt.Errorf("install approved update: %w", err)
+	}
+	var snapshot *localapi.Snapshot
+	if response.Updated && !response.Pending {
+		if value, err := readLocalDaemonSnapshot(ctx); err == nil {
+			snapshot = &value
+		}
+	}
+	return writeUpdateResult(command, updateCommandResult(buildinfo.Version, response, snapshot), response.Version)
 }
 
 func updateCommandResult(previousVersion string, response updated.ControlResponse, snapshot *localapi.Snapshot) updateResult {
 	completed := response.Updated && !response.Pending
 	runtimeUpdated := completed && snapshot != nil && daemonSnapshotAvailable(*snapshot) && snapshot.DaemonVersion == response.Version
-	return updateResult{PreviousVersion: previousVersion, Version: response.Version, CLIUpdated: completed, RuntimeUpdated: runtimeUpdated, SupervisorUpdated: response.Supervisor.Applied, ActivationPending: response.Pending}
+	return updateResult{PreviousVersion: previousVersion, Version: response.Version, CLIUpdated: completed, RuntimeUpdated: runtimeUpdated, ActivationPending: response.Pending}
 }
 
 var updateProgressInterval = 5 * time.Second
@@ -2849,7 +2917,7 @@ func updateWithProgress(command *cobra.Command, ctx context.Context, update func
 	if updateJSON(command) {
 		return update(ctx)
 	}
-	fmt.Fprintln(command.ErrOrStderr(), "Checking for a signed Paperboat update...")
+	fmt.Fprintln(command.ErrOrStderr(), "Processing the signed Paperboat update...")
 	type result struct {
 		response updated.ControlResponse
 		err      error
@@ -2873,7 +2941,7 @@ func updateWithProgress(command *cobra.Command, ctx context.Context, update func
 		case <-ctx.Done():
 			return updated.ControlResponse{}, ctx.Err()
 		case <-ticker.C:
-			fmt.Fprintf(command.ErrOrStderr(), "Update is still in progress (%s); verifying runtime health...\n", time.Since(started).Round(time.Second))
+			fmt.Fprintf(command.ErrOrStderr(), "Update is still in progress (%s)...\n", time.Since(started).Round(time.Second))
 		}
 	}
 }
@@ -2892,7 +2960,7 @@ func writeUpdateResult(command *cobra.Command, result updateResult, version stri
 		fmt.Fprintf(command.OutOrStdout(), "Paperboat %s is staged. Activation is in progress; run `pb update status` to confirm completion.\n", version)
 		return nil
 	}
-	if !result.CLIUpdated && !result.RuntimeUpdated && !result.SupervisorUpdated {
+	if !result.CLIUpdated && !result.RuntimeUpdated {
 		fmt.Fprintf(command.OutOrStdout(), "pb %s is already up to date.\n", version)
 		return nil
 	}
@@ -2904,41 +2972,30 @@ func writeUpdateResult(command *cobra.Command, result updateResult, version stri
 	return nil
 }
 
-func actionApproveMaintenance(command *cobra.Command, _ []string) error {
-	release, err := command.Flags().GetString("release")
-	if err != nil || release == "" {
-		return errors.New("--release is required")
-	}
-	ctx, cancel := context.WithTimeout(command.Context(), 15*time.Minute)
-	defer cancel()
-	client, err := updated.NewClient(updateControlSocketForCommand(), 15*time.Minute)
+func newUpdateControlClient(timeout time.Duration) (*updated.Client, error) {
+	socket, err := updateControlSocketForCommand()
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("resolve the current user's updater: %w", err)
 	}
-	response, err := client.ApproveMaintenance(ctx, release)
-	if err != nil {
-		return fmt.Errorf("approve supervisor maintenance: %w", err)
-	}
-	jsonOutput, _ := command.Flags().GetBool("json")
-	if jsonOutput {
-		return json.NewEncoder(command.OutOrStdout()).Encode(map[string]any{"schema_version": "1.0", "ok": true, "data": response.Supervisor})
-	}
-	if response.Supervisor.Applied {
-		fmt.Fprintf(command.OutOrStdout(), "Approved and applied supervisor release %s.\n", response.Supervisor.Version)
-	} else {
-		fmt.Fprintf(command.OutOrStdout(), "Supervisor release %s was staged; activation is pending.\n", response.Supervisor.StagedVersion)
-	}
-	return nil
+	return updated.NewClient(socket, timeout)
 }
 
-func updatedControlSocket() string {
+func updatedControlSocket() (string, error) {
+	account, err := user.Current()
+	if err != nil {
+		return "", err
+	}
+	var layout service.Layout
 	if runtime.GOOS == "windows" {
-		return `\\.\pipe\PaperboatUpdatedControl`
+		layout, err = service.WindowsUserLayout(account.Uid)
+	} else {
+		uid, parseErr := strconv.Atoi(account.Uid)
+		if parseErr != nil {
+			return "", parseErr
+		}
+		layout, err = service.UserLayout(runtime.GOOS, uid)
 	}
-	if runtime.GOOS == "darwin" {
-		return "/var/run/paperboat-updated/control.sock"
-	}
-	return "/run/paperboat-updated/control.sock"
+	return layout.UpdaterSocket, err
 }
 
 const shellCompletionDeadline = 200 * time.Millisecond

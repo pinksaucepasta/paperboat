@@ -94,6 +94,9 @@ func Uninstall(ctx context.Context) (result UninstallResult, err error) {
 	if err != nil {
 		return result, err
 	}
+	if err = projectDeviceHosts(ctx, cfg, nil); err != nil {
+		return result, err
+	}
 	if err = configureDomains(ctx, cfg, nil); err != nil {
 		return result, err
 	}

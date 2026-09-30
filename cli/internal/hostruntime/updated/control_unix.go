@@ -10,51 +10,17 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"regexp"
 	"syscall"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/supervisorupdate"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 	"github.com/pinksaucepasta/paperboat/internal/ospeer"
 )
 
-const ControlProtocolV1 = "paperboat.updated/v1"
-
-const maxUpdateControlTimeout = 15 * time.Minute
-
-var (
-	ErrInvalidControl = errors.New("invalid paperboat-updated control request")
-	ErrControlDenied  = errors.New("paperboat-updated control peer is not the enrolled user")
-	ErrRecoveryState  = errors.New("update recovery state cannot be read; update completion is unknown; retry status after recovery")
-)
-
-// ControlRequest intentionally has no artifact, path, command, environment,
-// or arbitrary target selector. The only accepted release value is an exact
-// version for the one-use maintenance approval operation; the updater still
-// resolves and verifies the signed index itself.
-type ControlRequest struct {
-	Schema    string `json:"schema"`
-	Operation string `json:"operation"`
-	Release   string `json:"release,omitempty"`
-}
-
-type ControlResponse struct {
-	UpdaterVersion    string                        `json:"updater_version,omitempty"`
-	Schema            string                        `json:"schema"`
-	Status            string                        `json:"status"`
-	Version           string                        `json:"version,omitempty"`
-	Updated           bool                          `json:"updated"`
-	Pending           bool                          `json:"pending,omitempty"`
-	ActivationFailure string                        `json:"activation_failure,omitempty"`
-	Observation       autoupdate.Observation        `json:"observation"`
-	ErrorCode         string                        `json:"error_code,omitempty"`
-	ErrorMessage      string                        `json:"error_message,omitempty"`
-	Supervisor        supervisorupdate.Result       `json:"supervisor,omitempty"`
-	Transaction       workerupdate.TransactionState `json:"transaction"`
-}
+var ErrRecoveryState = errors.New("update recovery state cannot be read; update completion is unknown; retry status after recovery")
 
 type controlServer struct {
 	socketPath    string
@@ -166,32 +132,17 @@ func (s *controlServer) handle(connection *net.UnixConn) error {
 	return nil
 }
 
-var exactReleasePattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$`)
-
-func validControlRequest(request ControlRequest) bool {
-	switch request.Operation {
-	case "status", "check", "update":
-		return request.Release == ""
-	case "approve-maintenance":
-		return exactReleasePattern.MatchString(request.Release)
-	default:
-		return false
-	}
-}
-
 func controlErrorCode(err error) string {
 	switch {
+	case errors.Is(err, ErrApprovalRequired), errors.Is(err, workerupdate.ErrApprovalRequired):
+		return "approval_required"
+	case errors.Is(err, ErrCandidateChanged), errors.Is(err, workerupdate.ErrPreparedCandidate):
+		return "candidate_changed"
 	case errors.As(err, new(*autoupdate.ActiveTerminalSessionsError)):
 		return autoupdate.BlockedActiveTerminalSessions
-	case errors.Is(err, supervisorupdate.ErrMaintenanceRequired):
-		return "maintenance_required"
-	case errors.Is(err, supervisorupdate.ErrApprovalExpired):
-		return "approval_expired"
-	case errors.Is(err, supervisorupdate.ErrStaleWorkloads):
-		return "stale_workloads"
-	case errors.Is(err, supervisorupdate.ErrBlocked), errors.Is(err, ErrRecoveryState):
+	case errors.Is(err, ErrRecoveryState), errors.Is(err, workerupdate.ErrBlocked):
 		return "recovery_required"
-	case errors.Is(err, supervisorupdate.ErrInvalidRelease):
+	case errors.Is(err, workerupdate.ErrInvalidRelease):
 		return "release_not_found"
 	default:
 		return "update_failed"
@@ -224,17 +175,25 @@ func (s *Service) controlRequestWithRequest(ctx context.Context, request Control
 		response.Version, response.Updated = result.Version, result.Updated
 		stateErr := s.populateControlState(&response)
 		return response, errors.Join(err, stateErr)
-	case "update":
+	case "download", "install":
 		s.controlMu.Lock()
 		defer s.controlMu.Unlock()
 		response := ControlResponse{Schema: ControlProtocolV1, Status: "ok", Observation: s.Snapshot(), UpdaterVersion: buildinfo.Version}
-		result, err := s.UpdateNow(ctx)
-		response.Version, response.Updated = result.Version, result.Updated
-		response.Observation = s.Snapshot()
+		var err error
+		if request.Operation == "download" {
+			var candidate workerupdate.PreparedCandidate
+			candidate, err = s.Download(ctx)
+			if candidate.ID != "" {
+				response.Candidate = &candidate
+				response.Version = candidate.Version
+			}
+		} else {
+			var result workerupdate.Result
+			result, err = s.Install(ctx, request.ApprovalID)
+			response.Version, response.Updated = result.Version, result.Updated
+		}
 		stateErr := s.populateControlState(&response)
 		return response, errors.Join(err, stateErr)
-	case "approve-maintenance":
-		return ControlResponse{Schema: ControlProtocolV1, Status: "error"}, ErrInvalidControl
 	default:
 		return ControlResponse{}, ErrInvalidControl
 	}
@@ -248,6 +207,13 @@ func (s *Service) populateControlState(response *ControlResponse) error {
 		return ErrRecoveryState
 	}
 	response.Transaction = state
+	if state.Stage == updateflow.StageAwaitingApproval {
+		candidate, candidateErr := s.currentManager().PreparedCandidate()
+		if candidateErr != nil {
+			return candidateErr
+		}
+		response.Candidate = &candidate
+	}
 	response.ActivationFailure = string(state.Failure)
 	if s.config.StateRoot != "" {
 		handoff, err := readUnixHandoff(s.config.StateRoot)

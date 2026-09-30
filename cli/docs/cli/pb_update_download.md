@@ -1,27 +1,26 @@
-## pb update approve-maintenance
+## pb update download
 
-Approve one exact supervisor release for a protected-workload interruption
+Download and verify an update without installing it
 
 ### Synopsis
 
-Approve one exact supervisor release for a protected-workload interruption
+Download and verify an update without installing it
 
-Approve one exact supervisor release for a protected workload interruption. --release binds the approval to that release instead of granting open-ended maintenance permission.
+Download and verify the signed release without changing running services. Review the candidate and use pb update --approve with its exact ID to install. Installation interrupts connections while services restart.
 
 Updates use signed release metadata and preserve artifact authenticity and rollback protection. Check inspects an available release; status reports the installed updater state. A failed update should leave the known installation usable and report a recovery action.
 
 JSON output is supported with --json.
 
 ```
-pb update approve-maintenance [flags]
+pb update download [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help             help for approve-maintenance
-      --json             print JSON
-      --release string   exact signed release version to approve
+  -h, --help   help for download
+      --json   print JSON
 ```
 
 ### Options inherited from parent commands

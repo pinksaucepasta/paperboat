@@ -36,5 +36,9 @@ func DefaultSocketAddress() string {
 	}
 
 	uid := os.Getuid()
+	runUserPath := fmt.Sprintf("/run/user/%d/paperboat/daemon.sock", uid)
+	if _, err := os.Stat(runUserPath); err == nil {
+		return runUserPath
+	}
 	return filepath.Join(os.TempDir(), fmt.Sprintf("paperboat-%d", uid), "daemon.sock")
 }

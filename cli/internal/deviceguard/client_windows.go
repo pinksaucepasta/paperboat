@@ -88,8 +88,8 @@ func (c *Client) exchange(ctx context.Context, in request) (response, error) {
 		c.conn = nil
 		return out, err
 	}
-	if out.Error != "" {
-		return out, errors.New(out.Error)
+	if responseErr := responseError(out); responseErr != nil {
+		return out, responseErr
 	}
 	return out, nil
 }

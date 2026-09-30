@@ -25,6 +25,14 @@ and application capabilities. The endpoint verifies the signature and monotonic
 generation before installing it. WireGuard reachability does not itself authorize an
 application operation.
 
+Personal same-account devices and their enrolled CLI endpoints receive a
+`device_network` / `connect` scope for connectivity without an active application
+session. Team-owned devices are excluded. This scope uses an account-bound canonical
+endpoint-pair identifier and complementary directions for relay admission. It cannot
+satisfy an application capability check. Network configuration remains limited to
+five minutes, 64 peers and 128 scopes; source grants and endpoint certificates bound
+its expiry. Every application stream still requires its exact access-session scope.
+
 The native relay uses the separately scoped `paperboat-relay-grant+jwt` admission
 contract. Relay registration, generations, revocation floors, bounds, and drain state
 remain controlled by the authenticated node lifecycle. The relay never stores private
@@ -54,3 +62,5 @@ fingerprints, never private keys or session content.
 Authentication, authorization, identity, protocol, revocation, generation, malformed
 response, and integrity errors are terminal. Availability and transport interruption are
 retryable only through a fresh current-authority check.
+
+Signed network and regional authority allows at most 60 seconds of issuer clock skew in `issued_at`, matching operation-token verification. Signed expiry and maximum token lifetime remain strict; clock tolerance does not extend an acknowledged lease.

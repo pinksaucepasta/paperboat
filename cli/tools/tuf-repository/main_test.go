@@ -603,3 +603,107 @@ func TestDeploymentPolicyMutationsAreMonotonicAndConsistent(t *testing.T) {
 		}
 	}
 }
+
+func TestQualifiedSubsetPublicationRetainsOtherPlatformTargets(t *testing.T) {
+	t.Setenv("PAPERBOAT_TUF_CI", "1")
+	t.Setenv("PAPERBOAT_RELEASE_SOURCE_COMMIT", strings.Repeat("c", 40))
+	t.Setenv("PAPERBOAT_RELEASE_TOOLCHAIN", "go1.27.1")
+	for index, name := range roles {
+		t.Setenv(tufKeyEnvironmentName(name), base64.RawStdEncoding.EncodeToString(bytes.Repeat([]byte{byte(index + 31)}, ed25519.SeedSize)))
+	}
+	repository := filepath.Join(t.TempDir(), "repository")
+	if err := initialize(repository); err != nil {
+		t.Fatal(err)
+	}
+	makeAssets := func(version string, selected []releaseTargetPlatform) (string, map[string]string) {
+		dir := t.TempDir()
+		evidence := map[string]string{}
+		for _, target := range selected {
+			name := releaseAssetName(target.platform, target.architecture)
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(version+"-"+name), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if target.platform == "windows" {
+				body, err := json.Marshal(windowsNativeQualification{Schema: windowsNativeQualificationSchema, ReleaseVersion: version, Platform: "windows", Architecture: target.architecture, Status: "passed", NativeTested: true, WindowsBuild: "26100", Runner: "unit-test"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(t.TempDir(), windowsNativeQualificationTarget(target.architecture))
+				if err = os.WriteFile(path, body, 0600); err != nil {
+					t.Fatal(err)
+				}
+				evidence[target.architecture] = path
+			}
+		}
+		return dir, evidence
+	}
+	first := "2026.09.29.1"
+	dir, evidence := makeAssets(first, supportedReleaseTargets())
+	if err := publish(repository, first, dir, evidence, 1, "routine", false); err != nil {
+		t.Fatal(err)
+	}
+	_, before, _, _, err := loadSet(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retained := map[string][]byte{}
+	for _, name := range []string{"pb-linux-arm64", "pb-windows-arm64.exe"} {
+		retained[name], err = json.Marshal(before.Signed.Targets[name])
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	selected := []releaseTargetPlatform{{"darwin", "arm64"}, {"linux", "amd64"}, {"windows", "amd64"}}
+	next := "2026.09.30.1"
+	dir, evidence = makeAssets(next, selected)
+	if err = publish(repository, next, dir, nil, 2, "routine", false); err == nil {
+		t.Fatal("selected Windows target published without native evidence")
+	}
+	_, unchanged, _, _, err := loadSet(repository)
+	if err != nil || unchanged.Signed.Version != before.Signed.Version {
+		t.Fatal("failed qualification changed signed repository")
+	}
+	if err = publish(repository, next, dir, evidence, 2, "routine", false); err != nil {
+		t.Fatal(err)
+	}
+	if err = verifyPublished(repository); err != nil {
+		t.Fatal(err)
+	}
+	_, after, _, _, err := loadSet(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range retained {
+		got, err := json.Marshal(after.Signed.Targets[name])
+		if err != nil || !bytes.Equal(got, want) {
+			t.Fatalf("retained target %s changed", name)
+		}
+	}
+	for _, target := range selected {
+		name := releaseAssetName(target.platform, target.architecture)
+		custom, err := decodeAndValidateAssetTargetCustom(*after.Signed.Targets[name].Custom, time.Now().UTC())
+		if err != nil || custom.Version != next {
+			t.Fatalf("selected target %s version=%s err=%v", name, custom.Version, err)
+		}
+	}
+	// Operator policy actions continue to work over individually bound versions.
+	if err = mutateRollout(repository, "pause", 3, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err = verifyPublished(repository); err != nil {
+		t.Fatal(err)
+	}
+	// Do not re-sign tampered retained data, even when a new selected artifact is valid.
+	_, tampered, _, _, err := loadSet(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tampered.Signed.Targets["pb-windows-arm64.exe"].Length++
+	if err = tampered.ToFile(filepath.Join(repository, "metadata", "targets.json"), true); err != nil {
+		t.Fatal(err)
+	}
+	latestDir, latestEvidence := makeAssets("2026.10.01.1", selected)
+	if err = publish(repository, "2026.10.01.1", latestDir, latestEvidence, 4, "routine", false); err == nil {
+		t.Fatal("tampered retained target was re-signed")
+	}
+}

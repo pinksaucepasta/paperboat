@@ -20,7 +20,7 @@ func TestFreshManagerRecoversPromotedDistinctExecutable(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.starter.activateError = errors.New("activation response lost")
-	if _, err := f.manager.Activate(context.Background(), f.candidate); err == nil {
+	if _, err := activatePrepared(context.Background(), f.manager, f.candidate); err == nil {
 		t.Fatal("expected uncertain cutover")
 	}
 	restarted, err := New(f.manager.config)
@@ -88,7 +88,7 @@ func TestRecoveryAfterInterruptedQuarantineLink(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.starter.activateError = errors.New("activation response lost")
-	if _, err := f.manager.Activate(context.Background(), f.candidate); err == nil {
+	if _, err := activatePrepared(context.Background(), f.manager, f.candidate); err == nil {
 		t.Fatal("expected uncertain cutover")
 	}
 	// Simulate power loss after quarantine was linked, before old bytes replaced

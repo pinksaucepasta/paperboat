@@ -132,6 +132,14 @@ func Serve(ctx context.Context, cfg Config) (resultErr error) {
 	defer dnsUDP.Shutdown()
 	defer dnsTCP.Shutdown()
 	if cfg.ConfigureResolver {
+		if err = projectDeviceHosts(ctx, cfg, nil); err != nil {
+			return err
+		}
+		defer func() {
+			cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = projectDeviceHosts(cleanup, cfg, nil)
+		}()
 		if err = setupResolver(ctx, cfg); err != nil {
 			return err
 		}
@@ -419,6 +427,9 @@ func (g *guardServer) serveConnection(ctx context.Context, conn controlConn) {
 		out := response{Certificate: certificate, Status: status}
 		if err != nil {
 			out.Error = err.Error()
+			if errors.Is(err, ErrPortInUse) {
+				out.ErrorCode = "port_in_use"
+			}
 		}
 		if err := conn.Send(out, file); err != nil {
 			return
@@ -437,6 +448,9 @@ func (g *guardServer) runtimeStatus() *RuntimeStatus {
 	return &RuntimeStatus{LoopbackCIDR: g.cfg.LoopbackCIDR, DNSAddress: g.cfg.DNSAddress, Ready: true, ActiveLeases: len(g.leases), ActiveOwners: len(owners), ProtectedLoopbackCIDRs: append([]string(nil), g.cfg.ProtectedLoopbackCIDRs...)}
 }
 func validName(host string) bool {
+	if host == splitdns.BrowserGatewayHostname {
+		return true
+	}
 	if len(host) > 253 || host != strings.ToLower(host) {
 		return false
 	}
@@ -452,10 +466,29 @@ func validName(host string) bool {
 	_, err := splitdns.ValidateSuffix(labels[1])
 	return err == nil
 }
+
+func validSubdomainName(host string) bool {
+	parts := strings.Split(host, ".")
+	if len(parts) != 3 || host != strings.ToLower(host) || !validName(parts[1]+"."+parts[2]) {
+		return false
+	}
+	port, err := strconv.Atoi(parts[0])
+	return err == nil && port > 0 && port <= 65535 && parts[0] == strconv.Itoa(port)
+}
+
 func validAddress(ip string) bool { return validAddressInCIDR(ip, deviceloopback.DefaultCIDR) }
 
+func validProtectedBindAddress(address, cidr string) bool {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return false
+	}
+	return validAddressInCIDR(host, cidr) || host == splitdns.BrowserGatewayIP && (port == "80" || port == "443")
+}
+
 func protectedLoopbackCIDRs(cfg Config) []string {
-	values := append([]string{cfg.LoopbackCIDR}, cfg.ProtectedLoopbackCIDRs...)
+	// Public DNS cannot follow the configurable native address projection.
+	values := append([]string{cfg.LoopbackCIDR, deviceloopback.DefaultCIDR}, cfg.ProtectedLoopbackCIDRs...)
 	seen := make(map[string]bool)
 	out := make([]string, 0, len(values))
 	for _, value := range values {
@@ -506,7 +539,8 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 		if g.rangeChangeOwner != nil && g.rangeChangeOwner != conn {
 			return nil, errors.New("device loopback range change is pending")
 		}
-		if !validName(in.Hostname) || !validAddressInCIDR(in.IP, g.cfg.LoopbackCIDR) || in.Port < 1 || in.Port > 65535 {
+		gateway := in.Hostname == splitdns.BrowserGatewayHostname && in.IP == splitdns.BrowserGatewayIP && (in.Port == 80 || in.Port == 443)
+		if !gateway && (!validName(in.Hostname) || in.Hostname == splitdns.BrowserGatewayHostname || !validAddressInCIDR(in.IP, g.cfg.LoopbackCIDR) || in.Port < 1 || in.Port > 65535) {
 			return nil, errors.New("invalid protected device listener")
 		}
 
@@ -548,7 +582,7 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 		}
 		listener, err := listenProtected(ctx, key, g.cfg.LoopbackCIDR)
 		if err != nil {
-			return nil, errors.New("protected port conflicts with an existing listener")
+			return nil, fmt.Errorf("create protected listener: %w", err)
 		}
 		g.leases[key] = &guardedLease{hostname: in.Hostname, ip: in.IP, port: in.Port, uid: uid, owner: conn, listener: listener}
 		if err = g.applyRules(ctx); err != nil {
@@ -589,7 +623,7 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 			return nil, errors.New("too many device names")
 		}
 		for name, ip := range in.Names {
-			if !validName(name) || !validAddressInCIDR(ip, g.cfg.LoopbackCIDR) {
+			if (!validName(name) && !validSubdomainName(name)) || !validAddressInCIDR(ip, g.cfg.LoopbackCIDR) {
 				return nil, errors.New("invalid device name")
 			}
 			found := false
@@ -618,7 +652,13 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 		if g.cfg.ConfigureResolver {
 			if err := g.configureDomains(ctx); err != nil {
 				g.names[conn] = previous
-				return nil, err
+				cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				rollback := g.configureDomains(cleanup)
+				cancel()
+				if rollback != nil {
+					g.fail(rollback)
+				}
+				return nil, errors.Join(err, rollback)
 			}
 		}
 		g.rebuildDNS()
@@ -727,6 +767,7 @@ func (g *guardServer) answerDNS(writer dns.ResponseWriter, in *dns.Msg) {
 	name := strings.TrimSuffix(strings.ToLower(q.Name), ".")
 	g.mu.Lock()
 	ip := g.dnsView[name]
+
 	g.mu.Unlock()
 	if ip == "" {
 		out.Rcode = dns.RcodeNameError
@@ -768,5 +809,16 @@ func (g *guardServer) configureDomains(ctx context.Context) error {
 		domains = append(domains, domain)
 	}
 	sort.Strings(domains)
-	return configureDomains(ctx, g.cfg, domains)
+	if err := configureDomains(ctx, g.cfg, domains); err != nil {
+		return err
+	}
+	names := map[string]string{}
+	for _, view := range g.names {
+		for name, ip := range view {
+			if validName(name) && len(strings.Split(name, ".")) == 2 {
+				names[name] = ip
+			}
+		}
+	}
+	return projectDeviceHosts(ctx, g.cfg, names)
 }

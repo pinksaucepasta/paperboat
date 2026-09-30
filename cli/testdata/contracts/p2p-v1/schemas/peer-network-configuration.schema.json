@@ -171,7 +171,11 @@
       ],
       "properties": {
         "resource_kind": {
-          "enum": ["machine_access", "codex_session"]
+          "enum": [
+            "machine_access",
+            "codex_session",
+            "device_network"
+          ]
         },
         "resource_id": {
           "$ref": "#/$defs/id"
@@ -184,7 +188,8 @@
             "terminal",
             "file_transfer",
             "private_access",
-            "codex"
+            "codex",
+            "connect"
           ]
         },
         "direction": {
@@ -200,10 +205,46 @@
           "$ref": "#/$defs/generation"
         }
       },
-      "allOf": [{"oneOf": [
-        {"properties": {"resource_kind": {"const": "machine_access"}, "capability": {"enum": ["terminal", "file_transfer", "private_access"]}}},
-        {"properties": {"resource_kind": {"const": "codex_session"}, "capability": {"const": "codex"}}}
-      ]}]
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "resource_kind": {
+                  "const": "machine_access"
+                },
+                "capability": {
+                  "enum": [
+                    "terminal",
+                    "file_transfer",
+                    "private_access"
+                  ]
+                }
+              }
+            },
+            {
+              "properties": {
+                "resource_kind": {
+                  "const": "codex_session"
+                },
+                "capability": {
+                  "const": "codex"
+                }
+              }
+            },
+            {
+              "properties": {
+                "resource_kind": {
+                  "const": "device_network"
+                },
+                "capability": {
+                  "const": "connect"
+                }
+              }
+            }
+          ]
+        }
+      ]
     },
     "peer": {
       "type": "object",

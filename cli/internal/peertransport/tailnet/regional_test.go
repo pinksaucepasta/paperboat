@@ -150,3 +150,21 @@ func TestSTUNConfigurationExpiresOnLiveEngine(t *testing.T) {
 	}
 	t.Fatal("expired discovery remains installed")
 }
+
+func TestRegionalIssuedAtToleratesBoundedClockSkew(t *testing.T) {
+	a, network, signer, _ := networkTestAuthority(t)
+	if err := a.Apply(t.Context(), networkToken(t, signer, network)); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	c := RegionalCandidates{Schema: "paperboat.regional-candidates.v1", Issuer: network.Issuer, Audience: "paperboat-regional-candidates", AccountID: network.Self.AccountID, EndpointID: network.Self.EndpointID, AuthorizationGeneration: network.Generation, Generation: 1, IssuedAt: now + 3, ExpiresAt: now + 60, Nodes: []RegionalNode{}}
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, c)); err != nil {
+		t.Fatal("small clock skew rejected", err)
+	}
+	c.Generation++
+	c.IssuedAt = now + 65
+	c.ExpiresAt = now + 125
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, c)); err == nil {
+		t.Fatal("excessive clock skew accepted")
+	}
+}

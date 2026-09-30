@@ -6,7 +6,7 @@ Update pb from the signed Paperboat release
 
 Update pb from the signed Paperboat release
 
-Install a verified signed Paperboat release for this machine. Inspect available metadata with check and current state with status; failures report recovery while preserving a usable known installation.
+Download and verify a signed Paperboat release, then review and approve its exact candidate before installation. Check and status are read-only; download never restarts services. Installation interrupts connections while services restart, with trusted recovery on failure.
 
 JSON output is supported with --json.
 
@@ -17,8 +17,9 @@ pb update [flags]
 ### Options
 
 ```
-  -h, --help   help for update
-      --json   print JSON
+      --approve string   install the exact downloaded candidate ID after reviewing it
+  -h, --help             help for update
+      --json             print JSON
 ```
 
 ### Options inherited from parent commands
@@ -32,7 +33,7 @@ pb update [flags]
 ### SEE ALSO
 
 * [pb](pb.md)	 - Open Paperboat or connect to an environment terminal
-* [pb update approve-maintenance](pb_update_approve-maintenance.md)	 - Approve one exact supervisor release for a protected-workload interruption
 * [pb update check](pb_update_check.md)	 - Check the signed Paperboat release without installing it
+* [pb update download](pb_update_download.md)	 - Download and verify an update without installing it
 * [pb update status](pb_update_status.md)	 - Show installed Paperboat update state
 

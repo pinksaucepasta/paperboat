@@ -12,7 +12,7 @@ import (
 
 func TestWindowsAutomaticUpdatesDisabledDoesNotResolve(t *testing.T) {
 	calls := 0
-	c := &windowsController{activeVersion: "local-dev", config: WindowsConfig{AutomaticActivation: false}, resolve: func(context.Context) (workerupdate.Release, bool, error) {
+	c := &windowsController{activeVersion: "local-dev", config: WindowsConfig{AutomaticChecks: false}, resolve: func(context.Context) (workerupdate.Release, bool, error) {
 		calls++
 		return workerupdate.Release{}, false, nil
 	}}
@@ -47,5 +47,15 @@ func TestWindowsInstalledVersionComparisonPreservesOfficialRollbackProtection(t 
 	s.Version = "local-dev"
 	if got, err := compareWindowsInstalledVersion("2026.09.18.0", s.Version, s); err != nil || got <= 0 {
 		t.Fatalf("custom adoption comparison=%d err=%v", got, err)
+	}
+}
+
+func TestWindowsBackgroundCheckOnlyReportsAvailableVersion(t *testing.T) {
+	c := &windowsController{activeVersion: "2026.08.22.1", config: WindowsConfig{AutomaticChecks: true}, handoff: make(chan struct{}), resolve: func(context.Context) (workerupdate.Release, bool, error) {
+		return workerupdate.Release{Version: "2026.08.23.1"}, true, nil
+	}}
+	got, err := c.checkRelease(context.Background())
+	if err != nil || got.Updated || got.Version != "2026.08.23.1" || activationRequested(c.handoff) {
+		t.Fatalf("result=%+v err=%v", got, err)
 	}
 }

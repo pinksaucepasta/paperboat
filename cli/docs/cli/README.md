@@ -211,7 +211,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb tunnel stop](pb_tunnel_stop.md) | Stop an ephemeral tunnel |
 | [pb uninstall](pb_uninstall.md) | Completely remove Paperboat from this machine |
 | [pb update](pb_update.md) | Update pb from the signed Paperboat release |
-| [pb update approve-maintenance](pb_update_approve-maintenance.md) | Approve one exact supervisor release for a protected-workload interruption |
 | [pb update check](pb_update_check.md) | Check the signed Paperboat release without installing it |
+| [pb update download](pb_update_download.md) | Download and verify an update without installing it |
 | [pb update status](pb_update_status.md) | Show installed Paperboat update state |
 | [pb wait](pb_wait.md) | Wait for a machine readiness condition |

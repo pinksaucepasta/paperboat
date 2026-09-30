@@ -59,7 +59,7 @@ func TestCandidateCanaryFailureQuarantinesWithoutCutover(t *testing.T) {
 	fixture := newFixture(t)
 	gate := &scriptedGate{candidateErr: errors.New("edge route canary failed")}
 	fixture.manager.config.Gate = gate
-	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	_, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	if !errors.Is(err, ErrActivationGate) || fixture.hostd.activations != 0 || gate.candidate != 1 || gate.drain != 0 {
 		t.Fatalf("error=%v activations=%d gate=%+v", err, fixture.hostd.activations, gate)
 	}
@@ -67,7 +67,7 @@ func TestCandidateCanaryFailureQuarantinesWithoutCutover(t *testing.T) {
 	if loadErr != nil || journal.Stage != updateflow.StageIdle || journal.LastFailure != updateflow.FailureCanary || journal.CandidateVersion != fixture.candidate.Version {
 		t.Fatalf("journal=%+v err=%v", journal, loadErr)
 	}
-	if _, err := fixture.manager.Activate(context.Background(), fixture.candidate); !errors.Is(err, ErrQuarantined) {
+	if _, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate); !errors.Is(err, ErrQuarantined) {
 		t.Fatalf("quarantined retry error=%v", err)
 	}
 }
@@ -77,7 +77,7 @@ func TestDrainDeadlineQuarantinesBeforeActivation(t *testing.T) {
 	gate := &scriptedGate{drainErr: context.DeadlineExceeded}
 	fixture.manager.config.Gate = gate
 	fixture.manager.config.DrainTimeout = time.Millisecond
-	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	_, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	if !errors.Is(err, context.DeadlineExceeded) || fixture.hostd.activations != 0 || gate.drain != 1 || gate.rollback != 1 {
 		t.Fatalf("error=%v activations=%d gate=%+v", err, fixture.hostd.activations, gate)
 	}
@@ -91,7 +91,7 @@ func TestPartialDrainErrorBlocksWhenOldPathCannotBeRestored(t *testing.T) {
 	fixture := newFixture(t)
 	gate := &scriptedGate{drainErr: errors.New("drain response lost"), rollbackErr: errors.New("old route remains drained")}
 	fixture.manager.config.Gate = gate
-	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	_, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	if !errors.Is(err, ErrBlocked) || gate.drain != 1 || gate.rollback != 1 || fixture.hostd.activations != 0 {
 		t.Fatalf("error=%v activations=%d gate=%+v", err, fixture.hostd.activations, gate)
 	}
@@ -188,7 +188,7 @@ func TestPostPromoteJournalFailureRestoresStorageAndUndrains(t *testing.T) {
 		}
 		return updateflow.Write(path, journal, uid, gid)
 	}
-	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	_, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	if err == nil || gate.drain != 1 || gate.rollback != 1 || fixture.hostd.activations != 0 {
 		t.Fatalf("error=%v activations=%d gate=%+v", err, fixture.hostd.activations, gate)
 	}
@@ -202,7 +202,7 @@ func TestStabilityCanaryFailureRollsBackAndRevalidates(t *testing.T) {
 	fixture := newFixture(t)
 	gate := &scriptedGate{activeErr: errors.New("edge path unavailable")}
 	fixture.manager.config.Gate = gate
-	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	_, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	if !errors.Is(err, ErrActivationGate) || fixture.hostd.activations != 2 || gate.candidate != 1 || gate.drain != 1 || gate.active != 1 || gate.rollback != 1 {
 		t.Fatalf("error=%v activations=%d gate=%+v", err, fixture.hostd.activations, gate)
 	}
@@ -216,7 +216,7 @@ func TestCommitFailureRemainsDurableAndRecoveryRetriesBeforeCleanup(t *testing.T
 	fixture := newFixture(t)
 	gate := &scriptedGate{commitErr: errors.New("hostd commit unavailable")}
 	fixture.manager.config.Gate = gate
-	result, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	result, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	if !errors.Is(err, ErrActivationGate) || result.Updated || gate.commit != 1 || fixture.manager.ActiveVersion() != fixture.active.Version {
 		t.Fatalf("result=%+v error=%v commit=%d active=%s", result, err, gate.commit, fixture.manager.ActiveVersion())
 	}
@@ -241,7 +241,7 @@ func TestRollbackRevalidationFailureLeavesDurableBlockedState(t *testing.T) {
 	fixture := newFixture(t)
 	gate := &scriptedGate{activeErr: errors.New("candidate unavailable"), rollbackErr: errors.New("restored path unavailable")}
 	fixture.manager.config.Gate = gate
-	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	_, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	if !errors.Is(err, ErrBlocked) || gate.rollback != 1 {
 		t.Fatalf("error=%v gate=%+v", err, gate)
 	}

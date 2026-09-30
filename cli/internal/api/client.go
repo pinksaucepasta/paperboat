@@ -373,6 +373,8 @@ type UserMachine struct {
 	Capabilities           MachineCapabilities    `json:"capabilities"`
 	DeviceCapabilities     DeviceCapabilityPolicy `json:"device_capabilities"`
 	PublicIdentityKey      string                 `json:"public_identity_key"`
+	AssignedIP             string                 `json:"assigned_ip,omitempty"`
+	NetworkApproved        bool                   `json:"network_approved"`
 	InstallationGeneration int64                  `json:"installation_generation"`
 	Availability           AvailabilityPolicy     `json:"availability"`
 	RuntimeDiagnostics     RuntimeDiagnostics     `json:"runtime_diagnostics"`

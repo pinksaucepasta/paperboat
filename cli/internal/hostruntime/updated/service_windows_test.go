@@ -12,26 +12,11 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc/mgr"
 )
-
-type noopWindowsActivationGate struct{}
-
-func (noopWindowsActivationGate) Candidate(context.Context, workerupdate.GateRequest) error {
-	return nil
-}
-func (noopWindowsActivationGate) Drain(context.Context, workerupdate.GateRequest) error  { return nil }
-func (noopWindowsActivationGate) Active(context.Context, workerupdate.GateRequest) error { return nil }
-func (noopWindowsActivationGate) Commit(context.Context, workerupdate.GateRequest) error {
-	return nil
-}
-func (noopWindowsActivationGate) Rollback(context.Context, workerupdate.GateRequest) error {
-	return nil
-}
 
 func TestWaitForWindowsUpdaterVersionWaitsForApplicationReadiness(t *testing.T) {
 	calls := 0
@@ -91,9 +76,7 @@ func testWindowsUpdaterConfig(t *testing.T) WindowsConfig {
 		t.Fatal(err)
 	}
 	instanceRoot, _ := hostinstall.WindowsInstanceRoot(layout.Instance)
-	return WindowsConfig{StateRoot: layout.UpdateStateRoot, RuntimeStateRoot: `C:\Users\Pujan\AppData\Local\Paperboat\runtime`, Binary: layout.Binary, BinaryRollback: layout.BinaryRollback, BinaryStaged: layout.BinaryStaged, OwnerSID: "S-1-5-21-1-2-3-1001", MachineID: "machine", RepositoryURL: "https://get.pprbt.dev", TokenFile: filepath.Join(instanceRoot, "hostd.token"), InstallState: filepath.Join(instanceRoot, "runtime-install.json"), ControlSocket: `\\.\pipe\PaperboatUpdatedControl-` + layout.Instance, HostdSocket: layout.HostdSocket, HealthURL: "http://127.0.0.1:8080/healthz", ActiveVersion: "2026.08.23.1", Architecture: "amd64", SetupMode: "client", ActivationGate: noopWindowsActivationGate{}, CandidateStarter: func(context.Context, workerupdate.StartRequest) (workerupdate.Worker, error) {
-		return nil, errors.New("candidate test stub")
-	}}
+	return WindowsConfig{StateRoot: layout.UpdateStateRoot, RuntimeStateRoot: `C:\Users\Pujan\AppData\Local\Paperboat\runtime`, Binary: layout.Binary, BinaryRollback: layout.BinaryRollback, BinaryStaged: layout.BinaryStaged, OwnerSID: "S-1-5-21-1-2-3-1001", MachineID: "machine", RepositoryURL: "https://get.pprbt.dev", TokenFile: filepath.Join(instanceRoot, "hostd.token"), InstallState: filepath.Join(instanceRoot, "runtime-install.json"), ControlSocket: `\\.\pipe\PaperboatUpdatedControl-` + layout.Instance, HostdSocket: layout.HostdSocket, HealthURL: "http://127.0.0.1:8080/healthz", ActiveVersion: "2026.08.23.1", Architecture: "amd64", SetupMode: "client"}
 }
 
 func TestWindowsUpdaterRejectsMutableTrustAndPathInputs(t *testing.T) {
@@ -146,14 +129,18 @@ func TestPrivilegedWindowsServiceIdentityContract(t *testing.T) {
 }
 
 func TestWindowsRecoveryPolicyIsServiceSpecific(t *testing.T) {
-	standard := windowsRecoveryActionsForService(windowsHostdService)
+	_, hostdName, updaterName, sshName, _, err := windowsInstanceNames("S-1-5-21-1-2-3-1001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	standard := windowsRecoveryActionsForService(hostdName)
 	if !windowsRecoveryActionsMatch(standard, []mgr.RecoveryAction{{Type: mgr.ServiceRestart, Delay: 5 * time.Second}, {Type: mgr.ServiceRestart, Delay: 15 * time.Second}, {Type: mgr.ServiceRestart, Delay: time.Minute}}) {
 		t.Fatal("hostd/updater recovery policy changed")
 	}
-	if !windowsRecoveryActionsMatch(windowsRecoveryActionsForService(windowsUpdaterService), standard) {
+	if !windowsRecoveryActionsMatch(windowsRecoveryActionsForService(updaterName), standard) {
 		t.Fatal("PaperboatUpdated does not use the standard recovery policy")
 	}
-	ssh := windowsRecoveryActionsForService(windowsSSHService)
+	ssh := windowsRecoveryActionsForService(sshName)
 	if !windowsRecoveryActionsMatch(ssh, []mgr.RecoveryAction{{Type: mgr.ServiceRestart, Delay: 5 * time.Second}, {Type: mgr.ServiceRestart, Delay: 30 * time.Second}, {Type: mgr.NoAction}}) {
 		t.Fatal("PaperboatSshd recovery policy changed")
 	}
@@ -201,20 +188,25 @@ func TestWindowsActiveServiceTargetsUseCanonicalBinary(t *testing.T) {
 }
 
 func TestNormalizeWindowsRollbackTargetsRestartsUpdaterFromCanonicalPath(t *testing.T) {
-	layout, err := service.DefaultLayout("windows")
+	layout, err := service.WindowsUserLayout("S-1-5-21-1-2-3-1001")
 	if err != nil {
 		t.Fatal(err)
 	}
-	hostd := windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-hostd"}}
-	updater := windowsServiceTarget{Executable: layout.BinaryRollback, Arguments: []string{"daemon", "__runtime-updated"}, WasRunning: true}
+	hostd := windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-hostd", "--instance", layout.Instance}}
+	updater := windowsServiceTarget{Executable: layout.BinaryRollback, Arguments: []string{"daemon", "__runtime-updated", "--instance", layout.Instance}, WasRunning: true}
 	ssh := windowsServiceTarget{}
-	_, normalized, _, err := normalizeWindowsRollbackTargets(hostd, updater, ssh)
+	_, normalized, _, err := normalizeWindowsRollbackTargets(layout, hostd, updater, ssh)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if normalized.Executable != layout.Binary || !normalized.WasRunning {
+	if normalized.Executable != layout.Binary || !normalized.WasRunning || strings.Join(normalized.Arguments, "\x00") != strings.Join(updater.Arguments, "\x00") {
 		t.Fatalf("normalized updater=%+v want canonical executable %q", normalized, layout.Binary)
 	}
+	updater.Executable = filepath.Join(filepath.Dir(layout.Binary), "pb.rollback.exe")
+	if _, _, _, err := normalizeWindowsRollbackTargets(layout, hostd, updater, ssh); !errors.Is(err, errInvalidWindowsActivation) {
+		t.Fatalf("invented rollback path accepted: %v", err)
+	}
+
 }
 
 func TestWindowsActivationPathsAcceptRollbackUpdaterDuringRecovery(t *testing.T) {

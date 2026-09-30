@@ -28,9 +28,11 @@ func NewClient(socketPath string, timeout time.Duration) (*Client, error) {
 
 func (c *Client) Status(ctx context.Context) (ControlResponse, error) { return c.call(ctx, "status") }
 func (c *Client) Check(ctx context.Context) (ControlResponse, error)  { return c.call(ctx, "check") }
-func (c *Client) Update(ctx context.Context) (ControlResponse, error) { return c.call(ctx, "update") }
-func (c *Client) ApproveMaintenance(ctx context.Context, release string) (ControlResponse, error) {
-	return c.callRequest(ctx, ControlRequest{Schema: ControlProtocolV1, Operation: "approve-maintenance", Release: release})
+func (c *Client) Download(ctx context.Context) (ControlResponse, error) {
+	return c.call(ctx, "download")
+}
+func (c *Client) Install(ctx context.Context, approvalID string) (ControlResponse, error) {
+	return c.callRequest(ctx, ControlRequest{Schema: ControlProtocolV1, Operation: "install", ApprovalID: approvalID})
 }
 
 func (c *Client) call(ctx context.Context, operation string) (ControlResponse, error) {

@@ -116,6 +116,9 @@ func Install(ctx context.Context, request Request) error {
 	if err := lifecycle.Recover(ctx); err != nil {
 		return err
 	}
+	if err := installDeviceGuard(ctx, request); err != nil {
+		return err
+	}
 	if err := ensureHostdToken(paths, request); err != nil {
 		return err
 	}

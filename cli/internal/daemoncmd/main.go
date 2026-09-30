@@ -287,27 +287,25 @@ func localDaemonCommand() *cobra.Command {
 					return localdaemon.ApproveOwnedMachineEnrollment(ctx, store, profile, client, machineID)
 				}
 			}
-			if cfg.ControlSyncAddress != "" {
-				issuer := dynamicNativePrivateGrantIssuer{serverURL: cfg.ServerURL, auth: authSource, client: &http.Client{Transport: peerHTTPTransport}}
-				access, accessErr := previewruntime.NewNativePrivateTCPAccess(previewruntime.NativePrivateTCPAccessConfig{Grants: issuer, DialSession: peerTunnel.DialPrivateSession})
-				if accessErr != nil {
-					return accessErr
+			issuer := dynamicNativePrivateGrantIssuer{serverURL: cfg.ServerURL, auth: authSource, client: &http.Client{Transport: peerHTTPTransport}}
+			access, accessErr := previewruntime.NewNativePrivateTCPAccess(previewruntime.NativePrivateTCPAccessConfig{Grants: issuer, DialSession: peerTunnel.DialPrivateSession})
+			if accessErr != nil {
+				return accessErr
+			}
+			coordinatorConfig.DNSSuffix, coordinatorConfig.DialDevice = cfg.DeviceSuffix, access.DialDevice
+			coordinatorConfig.ConnectNameClient = func(ctx context.Context) (guardedNameClient, error) {
+				return deviceguard.Connect(ctx, deviceguard.DefaultSocket)
+			}
+			coordinatorConfig.IssueCertificate = func(ctx context.Context, nameClient guardedNameClient, hostname string) (tls.Certificate, error) {
+				guard, ok := nameClient.(*deviceguard.Client)
+				if !ok {
+					return tls.Certificate{}, errors.New("protected device-name certificate client is invalid")
 				}
-				coordinatorConfig.DNSSuffix, coordinatorConfig.DialDevice = cfg.DeviceSuffix, access.DialDevice
-				coordinatorConfig.ConnectNameClient = func(ctx context.Context) (guardedNameClient, error) {
-					return deviceguard.Connect(ctx, deviceguard.DefaultSocket)
+				bundle, certificateErr := guard.Certificate(ctx, hostname)
+				if certificateErr != nil {
+					return tls.Certificate{}, certificateErr
 				}
-				coordinatorConfig.IssueCertificate = func(ctx context.Context, nameClient guardedNameClient, hostname string) (tls.Certificate, error) {
-					guard, ok := nameClient.(*deviceguard.Client)
-					if !ok {
-						return tls.Certificate{}, errors.New("protected device-name certificate client is invalid")
-					}
-					bundle, certificateErr := guard.Certificate(ctx, hostname)
-					if certificateErr != nil {
-						return tls.Certificate{}, certificateErr
-					}
-					return tls.X509KeyPair(bundle.CertificatePEM, bundle.PrivateKeyPEM)
-				}
+				return tls.X509KeyPair(bundle.CertificatePEM, bundle.PrivateKeyPEM)
 			}
 			coordinator, err := NewCoordinator(coordinatorConfig)
 			if err != nil {
@@ -326,6 +324,20 @@ func localDaemonCommand() *cobra.Command {
 					Paths: paths, Source: source, ManagedSSH: managedConfig, IssuePeerStream: source.IssuePeerStream,
 					OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(),
 					DeviceSuffix: cfg.DeviceSuffix, DeviceLoopbackCIDR: cfg.DeviceLoopbackCIDR,
+					OnMachines: func(ctx context.Context, machines []api.UserMachine) {
+						if cfg.ControlSyncAddress != "" {
+							return
+						}
+						credential, err := authSource.WithContext(ctx).Credential()
+						if err != nil {
+							return
+						}
+						services, err := api.New(cfg.ServerURL, credential, &http.Client{Transport: peerHTTPTransport}).DeviceServices(ctx)
+						if err != nil {
+							return
+						}
+						coordinator.ApplyMachines(machines, services)
+					},
 					OpenPeerStream: localdaemon.TunnelPeerStreamOpener(peerTunnel), ProbePeer: localdaemon.TunnelPeerProbe(peerTunnel), FileTransfers: fileTransfers, InvalidatePeerAuthority: peerTunnel.InvalidateMachine, WarmPeerMetadata: peerTunnel.WarmMachines,
 					RelayInventory: func(ctx context.Context) (localapi.RelayInventory, error) {
 						nodes, err := peerTunnel.NativeRelayCandidates(ctx)

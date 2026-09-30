@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -24,15 +25,23 @@ func platformInstallCommand() *cobra.Command {
 			ctx, cancel := context.WithTimeout(c.Context(), 3*time.Minute)
 			defer cancel()
 			installed, err := installSuppliedExecutable(ctx, executable, source, directory)
-			if err != nil {
+			var trustPending *hostruntimecmd.BrowserTrustPendingError
+			if err != nil && !errors.As(err, &trustPending) {
 				return err
 			}
-			result := map[string]any{"executable": installed, "version": source.Version, "distribution": source.Distribution, "automatic_updates": source.AutomaticUpdates, "sha256": source.SHA256, "enrollment": "unchanged"}
+			result := map[string]any{"executable": installed, "version": source.Version, "distribution": source.Distribution, "automatic_update_checks": source.AutomaticUpdates, "sha256": source.SHA256, "enrollment": "unchanged"}
+			if trustPending != nil {
+				result["browser_https"] = "trust_pending"
+				result["warnings"] = []string{trustPending.Error()}
+				if _, warningErr := fmt.Fprintln(c.ErrOrStderr(), trustPending.Error()); warningErr != nil {
+					return warningErr
+				}
+			}
 			asJSON, _ := c.Flags().GetBool("json")
 			if asJSON {
 				return writeCLIJSON(c.OutOrStdout(), result)
 			}
-			_, err = fmt.Fprintf(c.OutOrStdout(), "Installed Paperboat %s at %s. Automatic updates: %t. Enrollment is unchanged.\n", source.Version, installed, source.AutomaticUpdates)
+			_, err = fmt.Fprintf(c.OutOrStdout(), "Installed Paperboat %s at %s. Background update checks: %t. Enrollment is unchanged.\n", source.Version, installed, source.AutomaticUpdates)
 			return err
 		}}
 	command.Flags().String("install-dir", "", "absolute directory for the Unix pb command")

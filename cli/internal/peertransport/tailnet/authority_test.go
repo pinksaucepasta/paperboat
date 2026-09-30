@@ -286,6 +286,71 @@ func TestNetworkAuthorityAcceptsSignedCrossAccountPeer(t *testing.T) {
 	}
 }
 
+func TestNetworkAdmissionDoesNotAuthorizeApplicationStreams(t *testing.T) {
+	a, cfg, signer, _ := networkTestAuthority(t)
+	cfg.Peers[0].Scopes = []NetworkScope{{ResourceKind: "device_network", ResourceID: "network_pair", ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443, ExpiresAt: cfg.ExpiresAt}}
+	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
+		t.Fatal(err)
+	}
+	for _, resource := range []string{"grant_test", "machine_test", "", "*"} {
+		for _, capability := range []string{"terminal", "exec", "private_access", "file_transfer", "managed_ssh"} {
+			if a.Allows("machine_test", resource, capability, "dial") {
+				t.Fatalf("network admission authorized %s / %s", resource, capability)
+			}
+		}
+	}
+	cfg.Generation++
+	cfg.Peers[0].Identity.AccountID = "another_account"
+	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err == nil {
+		t.Fatal("cross-account personal network admission accepted")
+	}
+}
+
+func TestExactApplicationScopeRejectsWildcardRequests(t *testing.T) {
+	a, cfg, signer, _ := networkTestAuthority(t)
+	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
+		t.Fatal(err)
+	}
+	for _, resource := range []string{"machine_test", "", "*", "other_grant"} {
+		if a.Allows("machine_test", resource, "terminal", "dial") {
+			t.Fatalf("ungranted resource %q accepted", resource)
+		}
+	}
+}
+
+func TestPersonalMachinePeersHaveOnlyNetworkAdmission(t *testing.T) {
+	a, cfg, signer, _ := networkTestAuthority(t)
+	cfg.Self.Role, cfg.Self.MachineID, cfg.Self.MachineGeneration = "machine", cfg.Self.EndpointID, 1
+	a.options.Self = cfg.Self
+	cfg.Peers[0].Scopes = []NetworkScope{{ResourceKind: "device_network", ResourceID: "network_pair", ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443, ExpiresAt: cfg.ExpiresAt}}
+	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
+		t.Fatal("personal machine network admission rejected:", err)
+	}
+	cfg.Generation++
+	cfg.Peers[0].Scopes[0].ResourceKind = "machine_access"
+	cfg.Peers[0].Scopes[0].Capability = "terminal"
+	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err == nil {
+		t.Fatal("machine-to-machine network admission gained a terminal scope")
+	}
+}
+
+func TestReorderedNetworkAuthorityKeepsCurrentButConflictingGenerationFailsClosed(t *testing.T) {
+	a, cfg, signer, _ := networkTestAuthority(t)
+	cfg.Generation = 2
+	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
+		t.Fatal(err)
+	}
+	older := cfg
+	older.Generation = 1
+	if err := a.Apply(t.Context(), networkToken(t, signer, older)); !errors.Is(err, ErrStaleAuthority) || !a.Allows("machine_test", "grant_test", "terminal", "dial") {
+		t.Fatalf("reordered authority retired valid grants: %v", err)
+	}
+	cfg.Peers[0].Scopes[0].ResourceID = "conflicting_grant"
+	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); !errors.Is(err, ErrAuthority) || a.Allows("machine_test", "grant_test", "terminal", "dial") {
+		t.Fatalf("conflicting generation did not fail closed: %v", err)
+	}
+}
+
 func TestNetworkAuthorityAcceptsExactCodexSessionScope(t *testing.T) {
 	a, configuration, private, _ := networkTestAuthority(t)
 	configuration.Peers[0].Scopes[0] = NetworkScope{ResourceKind: "codex_session", ResourceID: "cdx_test", ResourceGeneration: 1, Capability: "codex", Direction: "dial", Port: NetworkPort, ExpiresAt: configuration.ExpiresAt}
@@ -309,7 +374,7 @@ func TestNetworkAuthorityRotationReplayRestartAndFailedWrite(t *testing.T) {
 	}
 	changed := c
 	changed.Peers = nil
-	if !errors.Is(a.Apply(ctx, networkToken(t, priv, changed)), ErrStaleAuthority) {
+	if !errors.Is(a.Apply(ctx, networkToken(t, priv, changed)), ErrAuthority) {
 		t.Fatal("same generation change accepted")
 	}
 	if err := a.Apply(ctx, token); err != nil {
@@ -668,5 +733,21 @@ func TestNetworkProducedConfiguration(t *testing.T) {
 	}
 	if len(cli.current.Peers) != 0 {
 		t.Fatal("actual revoked grant retained")
+	}
+}
+
+func TestNetworkIssuedAtToleratesClockSkewWithoutExtendingExpiry(t *testing.T) {
+	a, c, signer, _ := networkTestAuthority(t)
+	token := networkToken(t, signer, c)
+	for _, seconds := range []int64{1, 3, 60} {
+		if _, _, err := a.verify(t.Context(), token, time.Unix(c.IssuedAt-seconds, 0)); err != nil {
+			t.Fatalf("%ds clock skew: %v", seconds, err)
+		}
+	}
+	if _, _, err := a.verify(t.Context(), token, time.Unix(c.IssuedAt-61, 0)); err == nil {
+		t.Fatal("excessive clock skew accepted")
+	}
+	if _, _, err := a.verify(t.Context(), token, time.Unix(c.ExpiresAt, 0)); err == nil {
+		t.Fatal("expired authority accepted")
 	}
 }

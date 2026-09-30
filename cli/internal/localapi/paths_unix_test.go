@@ -38,6 +38,9 @@ func TestResolvePathsUsesCanonicalStateAndSafeRuntimeFallback(t *testing.T) {
 }
 
 func TestResolvePathsUsesSafeRuntimeAndRejectsRelativeOverrides(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux XDG runtime overrides")
+	}
 	home := localAPITestDir(t)
 	runtimeRoot := filepath.Join(home, "runtime")
 	if err := os.Mkdir(runtimeRoot, 0o700); err != nil {
@@ -64,19 +67,26 @@ func TestResolvePathsUsesSafeRuntimeAndRejectsRelativeOverrides(t *testing.T) {
 	}
 }
 
-func TestResolvePathsAcceptsTrailingSlashRuntimeOverride(t *testing.T) {
-	if runtime.GOOS == "linux" {
-		t.Skip("TMPDIR override is darwin-only")
+func TestDarwinSocketNamespaceIndependentOfTemporaryEnvironment(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("Darwin stable per-user socket namespace")
 	}
 	home := localAPITestDir(t)
 	runtimeRoot := filepath.Join(home, "runtime")
 	if err := os.Mkdir(runtimeRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	environment := map[string]string{"TMPDIR": runtimeRoot + string(os.PathSeparator)}
-	paths, err := ResolvePaths(func(key string) string { return environment[key] }, home, os.Geteuid())
-	if err != nil || paths.RuntimeRoot != filepath.Join(runtimeRoot, "paperboat") {
-		t.Fatalf("paths=%#v err=%v", paths, err)
+	want := filepath.Join(home, "Library", "Application Support", "Paperboat", "state", "run")
+	for _, temporary := range []string{"", runtimeRoot, runtimeRoot + string(os.PathSeparator), filepath.Join(home, "missing"), "relative"} {
+		paths, err := ResolvePaths(func(key string) string {
+			if key == "TMPDIR" {
+				return temporary
+			}
+			return ""
+		}, home, os.Geteuid())
+		if err != nil || paths.RuntimeRoot != want || paths.SocketPath != filepath.Join(want, "local-api.sock") {
+			t.Fatalf("TMPDIR=%q paths=%#v err=%v", temporary, paths, err)
+		}
 	}
 }
 

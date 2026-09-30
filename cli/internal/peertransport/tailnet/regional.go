@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-relay/derpquic"
 	"sort"
 	"strings"
 	"time"
@@ -91,7 +92,7 @@ func (a *Authority) ApplyRegionalCandidates(ctx context.Context, token string) e
 	if a.current == nil || c.AuthorizationGeneration != a.current.Generation {
 		return ErrRegionalAuthority
 	}
-	if c.Schema != "paperboat.regional-candidates.v1" || c.Issuer != a.options.Issuer || c.Audience != "paperboat-regional-candidates" || c.AccountID != a.options.Self.AccountID || c.EndpointID != a.options.Self.EndpointID || c.Generation == 0 || c.IssuedAt > now.Unix() || c.ExpiresAt <= now.Unix() || c.ExpiresAt-c.IssuedAt > 60 || len(c.Nodes) > MaxRegionalCandidates {
+	if c.Schema != "paperboat.regional-candidates.v1" || c.Issuer != a.options.Issuer || c.Audience != "paperboat-regional-candidates" || c.AccountID != a.options.Self.AccountID || c.EndpointID != a.options.Self.EndpointID || c.Generation == 0 || c.IssuedAt > now.Add(derpquic.MaxClockSkew).Unix() || c.ExpiresAt <= now.Unix() || c.ExpiresAt-c.IssuedAt > 60 || len(c.Nodes) > MaxRegionalCandidates {
 		return ErrRegionalAuthority
 	}
 	if a.regional != nil && c.Generation < a.regional.Generation {

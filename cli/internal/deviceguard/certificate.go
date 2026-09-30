@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -20,7 +21,7 @@ type cachedCertificate struct {
 }
 
 func (g *guardServer) certificate(ctx context.Context, conn controlConn, owner, hostname string) (*CertificateBundle, error) {
-	if !validName(hostname) {
+	if !validName(hostname) && !validSubdomainName(hostname) && !splitdns.IsPublicBrowserHostname(hostname) {
 		return nil, errors.New("invalid private certificate name")
 	}
 	for _, label := range strings.Split(hostname, ".") {
@@ -73,6 +74,9 @@ func (g *guardServer) certificate(ctx context.Context, conn controlConn, owner, 
 	g.mu.Unlock()
 	labels := strings.Split(base, ".")
 	suffix, err := splitdns.ValidateSuffix(labels[len(labels)-1])
+	if base == splitdns.BrowserGatewayHostname {
+		suffix, err = splitdns.BrowserSuffix, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -89,8 +93,13 @@ func (g *guardServer) certificate(ctx context.Context, conn controlConn, owner, 
 	if err != nil {
 		return nil, err
 	}
-	if err = installCATrust(ctx, owner, suffix, ca.CertPEM()); err != nil {
-		return nil, err
+	// macOS trust authorization belongs to the foreground installer. A daemon
+	// cannot present that approval reliably, and denial must not withdraw peer
+	// names or prevent issuing a leaf from the protected, constrained CA.
+	if runtime.GOOS != "darwin" {
+		if err = installCATrust(ctx, owner, suffix, ca.CertPEM()); err != nil {
+			return nil, err
+		}
 	}
 	certificate, key, err := ca.IssueCertificate([]string{hostname})
 	if err != nil {

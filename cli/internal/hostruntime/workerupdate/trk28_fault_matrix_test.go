@@ -74,7 +74,7 @@ func TestTRK28ArtifactTruncationAndExtensionNeverStartCandidate(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			fixture := newFixture(t)
 			fixture.fetcher.body = test.body(fixture.fetcher.body)
-			_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+			_, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 			if !errors.Is(err, ErrInvalidRelease) {
 				t.Fatalf("artifact fault error=%v", err)
 			}
@@ -99,7 +99,7 @@ func TestTRK28JournalWriteFailureLeavesTransactionBeforeCandidateStart(t *testin
 		writes++
 		return writeErr
 	}
-	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	_, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	if !errors.Is(err, writeErr) || writes != 1 {
 		t.Fatalf("error=%v writes=%d", err, writes)
 	}
@@ -188,7 +188,7 @@ func TestTRK28EdgeCanaryFailurePreservesOldGeneration(t *testing.T) {
 	fixture := newFixture(t)
 	gate := &scriptedGate{candidateErr: errors.New("edge canary unavailable")}
 	fixture.manager.config.Gate = gate
-	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	_, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	if !errors.Is(err, ErrActivationGate) || fixture.hostd.activations != 0 || gate.drain != 0 {
 		t.Fatalf("error=%v activations=%d gate=%+v", err, fixture.hostd.activations, gate)
 	}
@@ -242,15 +242,15 @@ func TestTRK28ExactGenerationFenceRejectsZeroValues(t *testing.T) {
 func TestTRK28RollbackQuarantineDoesNotFreezeNewerRelease(t *testing.T) {
 	fixture := newFixture(t)
 	fixture.health.err = errors.New("edge health failed")
-	if _, err := fixture.manager.Activate(context.Background(), fixture.candidate); err == nil {
+	if _, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate); err == nil {
 		t.Fatal("failed activation unexpectedly succeeded")
 	}
-	if _, err := fixture.manager.Activate(context.Background(), fixture.candidate); !errors.Is(err, ErrQuarantined) {
+	if _, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate); !errors.Is(err, ErrQuarantined) {
 		t.Fatalf("quarantined exact retry error=%v", err)
 	}
 	fixture.health.err = nil
 	newer := release("2026.08.18.3", fixture.fetcher.body)
-	result, err := fixture.manager.Activate(context.Background(), newer)
+	result, err := activatePrepared(context.Background(), fixture.manager, newer)
 	if err != nil || !result.Updated || fixture.manager.ActiveVersion() != newer.Version {
 		t.Fatalf("newer release was frozen by quarantine: result=%+v err=%v active=%q", result, err, fixture.manager.ActiveVersion())
 	}
@@ -262,7 +262,7 @@ func TestTRK28DrainDeadlineIsBoundedAndDowngradeIsRejected(t *testing.T) {
 	fixture.manager.config.Gate = gate
 	fixture.manager.config.DrainTimeout = 2 * time.Millisecond
 	started := time.Now()
-	_, err := fixture.manager.Activate(context.Background(), fixture.candidate)
+	_, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
 	if !errors.Is(err, context.DeadlineExceeded) || gate.drain != 1 || gate.rollback != 1 || fixture.hostd.activations != 0 {
 		t.Fatalf("drain result error=%v gate=%+v activations=%d", err, gate, fixture.hostd.activations)
 	}
@@ -271,7 +271,7 @@ func TestTRK28DrainDeadlineIsBoundedAndDowngradeIsRejected(t *testing.T) {
 	}
 
 	downgrade := release("2026.08.17.99", fixture.fetcher.body)
-	result, err := fixture.manager.Activate(context.Background(), downgrade)
+	result, err := activatePrepared(context.Background(), fixture.manager, downgrade)
 	if !errors.Is(err, ErrInvalidRelease) || result.Updated || fixture.starter.starts != 1 {
 		t.Fatalf("downgrade result=%+v err=%v starts=%d", result, err, fixture.starter.starts)
 	}

@@ -76,6 +76,9 @@ func (a *Authority) replaceLocked() error {
 				a.clientEngine.InvalidateAuthorizedPeer(lease.node)
 			}
 			delete(a.clients, id)
+		} else {
+			lease.scopes = append([]NetworkScope(nil), peer.scopes...)
+			a.clients[id] = lease
 		}
 	}
 	if a.clientEngine != nil {
@@ -103,7 +106,12 @@ func (a *Authority) replaceLocked() error {
 	a.server.admitted = admitted
 	var removed []*Packet
 	for p := range a.server.flows {
-		addr, _ := netip.ParseAddrPort(p.RemoteAddr().String())
+		remote := p.RemoteAddr()
+		if remote == nil {
+			removed = append(removed, p)
+			continue
+		}
+		addr, _ := netip.ParseAddrPort(remote.String())
 		if admitted[addr.Addr()] == "" || previous[addr.Addr()] != admitted[addr.Addr()] {
 			removed = append(removed, p)
 		}
@@ -279,7 +287,13 @@ func scopesRetained(old, current []NetworkScope) bool {
 	for _, prior := range old {
 		found := false
 		for _, next := range current {
-			if prior == next {
+			if prior.ResourceKind == next.ResourceKind &&
+				prior.ResourceID == next.ResourceID &&
+				prior.ResourceGeneration == next.ResourceGeneration &&
+				prior.Capability == next.Capability &&
+				prior.Direction == next.Direction &&
+				prior.Port == next.Port &&
+				next.ExpiresAt >= prior.ExpiresAt {
 				found = true
 				break
 			}

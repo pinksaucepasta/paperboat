@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -39,7 +40,9 @@ import (
 	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 	"github.com/pinksaucepasta/paperboat/internal/inbox"
@@ -194,7 +197,7 @@ func TestUpdateWithProgressReportsHumanProgressOnStderr(t *testing.T) {
 	if response.Version != "2026.08.27.47" {
 		t.Fatalf("response = %+v", response)
 	}
-	if !strings.Contains(stderr.String(), "Checking for a signed Paperboat update") || !strings.Contains(stderr.String(), "still in progress") {
+	if !strings.Contains(stderr.String(), "Processing the signed Paperboat update") || !strings.Contains(stderr.String(), "still in progress") {
 		t.Fatalf("progress output = %q", stderr.String())
 	}
 }
@@ -274,7 +277,7 @@ func TestUpdateStatusPreservesWindowsActivationState(t *testing.T) {
 	}
 	var output bytes.Buffer
 	command.SetOut(&output)
-	if err := writeUpdateStatusResult(command, result, false, ""); err != nil {
+	if err := writeUpdateStatusResult(command, result); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "Activation: pending") {
@@ -282,7 +285,7 @@ func TestUpdateStatusPreservesWindowsActivationState(t *testing.T) {
 	}
 	result.ActivationPending = false
 	output.Reset()
-	if err := writeUpdateStatusResult(command, result, false, ""); err != nil {
+	if err := writeUpdateStatusResult(command, result); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "Activation: failed (activation_failed)") {
@@ -425,7 +428,7 @@ func TestUpdateCheckRequiresManagedUpdater(t *testing.T) {
 		updateControlSocketForCommand = oldSocket
 	}()
 	buildinfo.Version = "2026.08.18.1"
-	updateControlSocketForCommand = func() string { return filepath.Join(t.TempDir(), "missing-updater.sock") }
+	updateControlSocketForCommand = func() (string, error) { return filepath.Join(t.TempDir(), "missing-updater.sock"), nil }
 	command, _, err := newRootCommand().Find([]string{"update", "check"})
 	if err != nil {
 		t.Fatal(err)
@@ -447,7 +450,7 @@ func TestUpdateRequiresManagedUpdater(t *testing.T) {
 		updateControlSocketForCommand = oldSocket
 	}()
 	buildinfo.Version = "2026.08.18.1"
-	updateControlSocketForCommand = func() string { return filepath.Join(t.TempDir(), "missing-updater.sock") }
+	updateControlSocketForCommand = func() (string, error) { return filepath.Join(t.TempDir(), "missing-updater.sock"), nil }
 	command, _, err := newRootCommand().Find([]string{"update"})
 	if err != nil {
 		t.Fatal(err)
@@ -3871,22 +3874,48 @@ func TestResolveSSHCommandTargetFastFallsBackWithoutWarmSnapshot(t *testing.T) {
 	}
 }
 
-func TestUpdateStatusReportsActiveTerminalBlock(t *testing.T) {
-	response := updated.ControlResponse{}
-	response.Observation.BlockedReason = "active_terminal_sessions"
-	response.Observation.RequiredVersion = "2026.09.07.1"
-	result := updateStatusCommandResult("2026.09.06.1", response, nil)
-	if result.BlockedReason != "active_terminal_sessions" || result.RequiredVersion != "2026.09.07.1" {
+func TestUpdateStatusReportsDownloadedCandidate(t *testing.T) {
+	candidate := &workerupdate.PreparedCandidate{ID: strings.Repeat("a", 64), Version: "2026.09.30.9", Platform: "linux", Architecture: "amd64", SHA256: strings.Repeat("b", 64), Length: 128}
+	response := updated.ControlResponse{Candidate: candidate}
+	result := updateStatusCommandResult("2026.09.30.8", response, nil)
+	if result.Candidate != candidate || result.ActivationPending {
 		t.Fatalf("status=%+v", result)
 	}
 	var output bytes.Buffer
 	command := &cobra.Command{}
 	command.SetOut(&output)
 	command.Flags().Bool("json", false, "")
-	if err := writeUpdateStatusResult(command, result, false, ""); err != nil {
+	if err := writeUpdateStatusResult(command, result); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "waiting for running or detached terminal sessions") || !strings.Contains(output.String(), result.RequiredVersion) || strings.Contains(output.String(), "Activation: complete") {
+	if !strings.Contains(output.String(), candidate.SHA256) || !strings.Contains(output.String(), "pb update --approve "+candidate.ID) || !strings.Contains(output.String(), "interrupts active connections") || strings.Contains(output.String(), "Activation: complete") {
 		t.Fatalf("output=%s", output.String())
+	}
+}
+
+func TestUpdateControlUsesInstalledOwnerNamespace(t *testing.T) {
+	account, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var layout service.Layout
+	if runtime.GOOS == "windows" {
+		layout, err = service.WindowsUserLayout(account.Uid)
+	} else {
+		uid, parseErr := strconv.Atoi(account.Uid)
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		layout, err = service.UserLayout(runtime.GOOS, uid)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket, err := updatedControlSocket()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if socket != layout.UpdaterSocket || layout.Instance == "" {
+		t.Fatalf("CLI updater endpoint %q differs from installed owner %q endpoint %q", socket, layout.Instance, layout.UpdaterSocket)
 	}
 }

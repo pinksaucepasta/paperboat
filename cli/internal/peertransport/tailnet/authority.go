@@ -242,7 +242,7 @@ func (a *Authority) verify(ctx context.Context, token string, now time.Time) (Ne
 	if err != nil || !found || len(pub) != ed25519.PublicKeySize || !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), sig) || strictDecode(body, &cfg) != nil {
 		return cfg, "", ErrAuthority
 	}
-	if cfg.Version != 1 || cfg.Issuer != a.options.Issuer || cfg.Audience != "paperboat-network" || cfg.Generation == 0 || cfg.Generation > 1<<53-1 || cfg.IssuedAt <= 0 || cfg.IssuedAt > now.Unix() || cfg.ExpiresAt <= cfg.IssuedAt || cfg.ExpiresAt-cfg.IssuedAt > int64(ConfigurationTTL/time.Second) || !validBinding(cfg.Self) || len(cfg.Peers) > MaxFlows || len(cfg.RelayPairs) > 16 {
+	if cfg.Version != 1 || cfg.Issuer != a.options.Issuer || cfg.Audience != "paperboat-network" || cfg.Generation == 0 || cfg.Generation > 1<<53-1 || cfg.IssuedAt <= 0 || cfg.IssuedAt > now.Add(derpquic.MaxClockSkew).Unix() || cfg.ExpiresAt <= cfg.IssuedAt || cfg.ExpiresAt-cfg.IssuedAt > int64(ConfigurationTTL/time.Second) || !validBinding(cfg.Self) || len(cfg.Peers) > MaxFlows || len(cfg.RelayPairs) > 16 {
 		return cfg, "", ErrAuthority
 	}
 	if cfg.ExpiresAt <= now.Unix() {
@@ -258,7 +258,7 @@ func (a *Authority) verify(ctx context.Context, token string, now time.Time) (Ne
 	scopes := 0
 	for _, p := range cfg.Peers {
 		b := p.Identity
-		if !validBinding(b) || b.Role == s.Role || ids[b.EndpointID] || addresses[b.VirtualAddress] || keys[b.WireGuardPublicKey] || len(p.Scopes) == 0 {
+		if !validBinding(b) || (s.Role == "cli" && b.Role == "cli") || ids[b.EndpointID] || addresses[b.VirtualAddress] || keys[b.WireGuardPublicKey] || len(p.Scopes) == 0 {
 			return cfg, "", ErrAuthority
 		}
 		ids[b.EndpointID] = true
@@ -267,11 +267,12 @@ func (a *Authority) verify(ctx context.Context, token string, now time.Time) (Ne
 		seen := map[string]bool{}
 		for _, scope := range p.Scopes {
 			scopes++
-			validResource := scope.ResourceKind == "inspector" && scope.Capability == "inspector" || scope.ResourceKind == "machine_access" && (scope.Capability == "terminal" || scope.Capability == "exec" || scope.Capability == "managed_ssh" || scope.Capability == "file_transfer" || scope.Capability == "private_access") || scope.ResourceKind == "codex_session" && scope.Capability == "codex"
-			if scopes > 128 || !validResource || !validID(scope.ResourceID) || scope.ResourceGeneration != 1 || scope.Port != NetworkPort || scope.ExpiresAt < cfg.ExpiresAt || scope.Direction != "dial" && scope.Direction != "accept" || s.Role == "cli" && scope.Direction != "dial" || s.Role == "machine" && scope.Direction != "accept" {
+			networkOnly := scope.ResourceKind == "device_network" && scope.Capability == "connect" && b.AccountID == s.AccountID
+			validResource := networkOnly || scope.ResourceKind == "inspector" && scope.Capability == "inspector" || scope.ResourceKind == "machine_access" && (scope.Capability == "terminal" || scope.Capability == "exec" || scope.Capability == "managed_ssh" || scope.Capability == "file_transfer" || scope.Capability == "private_access") || scope.ResourceKind == "codex_session" && scope.Capability == "codex"
+			if scopes > 128 || !validResource || !validID(scope.ResourceID) || scope.ResourceGeneration != 1 || scope.Port != NetworkPort || scope.ExpiresAt < cfg.ExpiresAt || scope.Direction != "dial" && scope.Direction != "accept" || s.Role == "cli" && scope.Direction != "dial" || !networkOnly && (s.Role == b.Role || s.Role == "machine" && scope.Direction != "accept") {
 				return cfg, "", ErrAuthority
 			}
-			k := scope.ResourceID + "\x00" + scope.Capability
+			k := scope.ResourceID + "\x00" + scope.Capability + "\x00" + scope.Direction
 			if seen[k] {
 				return cfg, "", ErrAuthority
 			}
@@ -357,8 +358,11 @@ func (a *Authority) Apply(ctx context.Context, token string) error {
 	}
 	var selected key.NodePrivate
 	err = a.state(func(s *config.PeerNetworkState) error {
-		if cfg.Generation < s.Generation || cfg.Generation == s.Generation && hash != s.ConfigHash {
+		if cfg.Generation < s.Generation {
 			return ErrStaleAuthority
+		}
+		if cfg.Generation == s.Generation && hash != s.ConfigHash {
+			return ErrAuthority
 		}
 		if s.VirtualAddress != "" && s.VirtualAddress != cfg.Self.VirtualAddress {
 			return ErrAuthority
@@ -397,6 +401,9 @@ func (a *Authority) Apply(ctx context.Context, token string) error {
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
+	}
+	if errors.Is(err, ErrStaleAuthority) {
+		return err
 	}
 	if err != nil {
 		a.dropLocked()
@@ -520,7 +527,7 @@ func (a *Authority) Allows(peerID, resourceID, capability, direction string) boo
 	for _, p := range a.current.Peers {
 		if p.Identity.EndpointID == peerID {
 			for _, s := range p.Scopes {
-				if s.ResourceID == resourceID && s.Capability == capability && s.Direction == direction {
+				if s.ResourceKind != "device_network" && s.ResourceID == resourceID && s.Capability == capability && s.Direction == direction {
 					return true
 				}
 			}

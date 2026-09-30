@@ -195,3 +195,10 @@ func syncDirectory(path string) error {
 	defer directory.Close()
 	return directory.Sync()
 }
+
+func classifyProtectedBindError(err error) error {
+	if errors.Is(err, syscall.EADDRINUSE) {
+		return ErrPortInUse
+	}
+	return err
+}

@@ -59,7 +59,7 @@ func TestCustomInstalledBaselineStartsAndRecoversWithoutPublishedVersion(t *test
 func TestCustomBaselineRejectsTamperingAndCannotBecomeUpdateCandidate(t *testing.T) {
 	f := newFixture(t)
 	active := installCustomFixture(t, &f)
-	if _, err := f.manager.Activate(context.Background(), active); !errors.Is(err, ErrInvalidRelease) {
+	if _, err := activatePrepared(context.Background(), f.manager, active); !errors.Is(err, ErrInvalidRelease) {
 		t.Fatal("local source accepted as update candidate", err)
 	}
 	if err := ValidateActivationRelease(active); err == nil {
@@ -85,7 +85,7 @@ func TestCustomBaselineOfficialUpdateAndRollbackPreserveProvenance(t *testing.T)
 			if fail {
 				f.manager.config.Health = &fakeHealth{err: errors.New("candidate unhealthy")}
 			}
-			result, err := f.manager.Activate(context.Background(), f.candidate)
+			result, err := activatePrepared(context.Background(), f.manager, f.candidate)
 			if fail && err == nil || !fail && err != nil {
 				t.Fatalf("update outcome: %+v %v", result, err)
 			}
@@ -122,7 +122,7 @@ func TestOfficialInstalledBaselineRejectsDowngrade(t *testing.T) {
 	}
 	candidate := f.candidate
 	candidate.Version = "2026.09.18.0"
-	if _, err := f.manager.Activate(context.Background(), candidate); !errors.Is(err, ErrInvalidRelease) {
+	if _, err := activatePrepared(context.Background(), f.manager, candidate); !errors.Is(err, ErrInvalidRelease) {
 		t.Fatalf("official baseline downgrade accepted: %v", err)
 	}
 }

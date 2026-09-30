@@ -39,7 +39,7 @@ func TestStabilityObservationAllowsBoundedCompletion(t *testing.T) {
 	f.candidate.StabilityInterval = 10 * time.Millisecond
 	gate := &timedObservationGate{extra: 20 * time.Millisecond}
 	f.manager.config.Gate = gate
-	if _, err := f.manager.Activate(context.Background(), f.candidate); err != nil {
+	if _, err := activatePrepared(context.Background(), f.manager, f.candidate); err != nil {
 		t.Fatalf("healthy full-window observation failed: %v", err)
 	}
 	if gate.calls != 1 || gate.window != f.candidate.StabilityWindow {

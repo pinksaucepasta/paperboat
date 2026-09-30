@@ -53,6 +53,7 @@ type unixActivationHandoff struct {
 	Schema              string               `json:"schema"`
 	Previous            workerupdate.Release `json:"previous"`
 	Candidate           string               `json:"candidate"`
+	ApprovalID          string               `json:"approval_id"`
 	Manual              bool                 `json:"manual"`
 	Started             bool                 `json:"started"`
 	Baseline            UnixParticipantProbe `json:"baseline"`
@@ -96,7 +97,7 @@ func readUnixHandoff(root string) (*unixActivationHandoff, error) {
 	decoder := json.NewDecoder(io.LimitReader(file, 64<<10))
 	decoder.DisallowUnknownFields()
 	var extra any
-	if decoder.Decode(&value) != nil || decoder.Decode(&extra) != io.EOF || value.Schema != unixHandoffSchema || value.Previous.Version == "" || value.Previous.Length <= 0 || len(value.Previous.SHA256) != 64 || value.Candidate == "" || value.ActiveTerminalBusy != (value.BusyRequiredVersion != "" && !value.BusyNextCheckAt.IsZero()) {
+	if decoder.Decode(&value) != nil || decoder.Decode(&extra) != io.EOF || value.Schema != unixHandoffSchema || !approvalIDPattern.MatchString(value.ApprovalID) || value.Previous.Version == "" || value.Previous.Length <= 0 || len(value.Previous.SHA256) != 64 || value.Candidate == "" || value.ActiveTerminalBusy != (value.BusyRequiredVersion != "" && !value.BusyNextCheckAt.IsZero()) {
 		return nil, ErrInvalidConfig
 	}
 	return &value, nil
@@ -223,9 +224,9 @@ func syncUnixDirectory(path string) error {
 	return directory.Sync()
 }
 
-func (s *Service) queueActivation(ctx context.Context, manual bool) (workerupdate.Result, error) {
-	if !manual && !s.config.AutomaticUpdates {
-		return workerupdate.Result{Version: s.config.Active.Version}, nil
+func (s *Service) queueActivation(ctx context.Context, approvalID string) (workerupdate.Result, error) {
+	if !approvalIDPattern.MatchString(approvalID) {
+		return workerupdate.Result{}, ErrApprovalRequired
 	}
 	result := workerupdate.Result{Version: s.currentManager().ActiveVersion()}
 	lock, err := unixActivationLock(s.config.StateRoot)
@@ -244,6 +245,9 @@ func (s *Service) queueActivation(ctx context.Context, manual bool) (workerupdat
 		return result, err
 	}
 	if handoff != nil {
+		if handoff.ApprovalID != approvalID {
+			return result, ErrCandidateChanged
+		}
 		result.Version = handoff.Candidate
 		if handoff.ActiveTerminalBusy {
 			return result, &autoupdate.ActiveTerminalSessionsError{RequiredVersion: handoff.BusyRequiredVersion}
@@ -255,14 +259,23 @@ func (s *Service) queueActivation(ctx context.Context, manual bool) (workerupdat
 	}
 	manager := s.currentManager()
 	result.Version = manager.ActiveVersion()
-	journal, journalErr := updateflow.Load(filepath.Join(s.config.StateRoot, "transaction.json"))
-	if journalErr != nil && !errors.Is(journalErr, os.ErrNotExist) {
-		return result, journalErr
-	}
-	release, found, resolvedManual, err := resolveQueuedRelease(ctx, manual, journal, s.source.Resolve, s.source.ResolveManual)
-	manual = resolvedManual
-	if err != nil || !found || release.Version == result.Version {
+	release, found, err := s.source.ResolveManual(ctx)
+	if err != nil || !found {
 		return result, err
+	}
+	prepared, err := manager.PreparedCandidate()
+	if err != nil {
+		return result, err
+	}
+	current, err := workerupdate.PreparedCandidateForRelease(release)
+	if err != nil {
+		return result, err
+	}
+	if prepared.ID == "" {
+		return result, ErrApprovalRequired
+	}
+	if prepared.ID != approvalID || current.ID != prepared.ID {
+		return result, ErrCandidateChanged
 	}
 	state, err := manager.TransactionState()
 	if err != nil {
@@ -285,7 +298,10 @@ func (s *Service) queueActivation(ctx context.Context, manual bool) (workerupdat
 	if err = unixParticipantReady(baseline, s.config.Active.Version, baseline, baseline.Machines > 0 || baseline.State == "ready"); err != nil {
 		return result, err
 	}
-	handoff = &unixActivationHandoff{Schema: unixHandoffSchema, Previous: s.config.Active, Candidate: release.Version, Manual: manual, RecoveryTimeout: release.RollbackTimeout, Baseline: baseline, RequireInventory: baseline.Machines > 0 || baseline.State == "ready"}
+	if err = manager.Approve(ctx, approvalID); err != nil {
+		return result, err
+	}
+	handoff = &unixActivationHandoff{Schema: unixHandoffSchema, ApprovalID: approvalID, Previous: s.config.Active, Candidate: release.Version, Manual: true, RecoveryTimeout: release.RollbackTimeout, Baseline: baseline, RequireInventory: baseline.Machines > 0 || baseline.State == "ready"}
 	if _, err = secureChild(s.config.StateRoot, "activation"); err != nil {
 		return result, err
 	}
@@ -366,24 +382,32 @@ func (s *Service) RunActivationHelper(ctx context.Context) error {
 	s.managerMu.Lock()
 	s.manager = manager
 	s.managerMu.Unlock()
-	if handoff.Started {
+	stateBefore, stateBeforeErr := manager.TransactionState()
+	if stateBeforeErr != nil {
+		return stateBeforeErr
+	}
+	if handoff.Started && stateBefore.Stage != updateflow.StageAwaitingApproval {
 		err = manager.Recover(ctx)
 	} else {
 		handoff.Started = true
 		if err = writeUnixHandoff(s.config.StateRoot, handoff); err != nil {
 			return err
 		}
-		resolver := s.source.Resolve
-		if handoff.Manual {
-			resolver = s.source.ResolveManual
+		release, found, resolveErr := s.source.ResolveManual(ctx)
+		if resolveErr != nil {
+			return resolveErr
 		}
-		_, err = manager.Check(ctx, func(ctx context.Context) (workerupdate.Release, bool, error) {
-			release, found, resolveErr := resolver(ctx)
-			if resolveErr == nil && found && release.Version != handoff.Candidate {
-				return workerupdate.Release{}, false, errors.New("signed eligible release changed before activation; retry update")
-			}
-			return release, found, resolveErr
-		})
+		if !found {
+			return ErrCandidateChanged
+		}
+		candidate, candidateErr := workerupdate.PreparedCandidateForRelease(release)
+		if candidateErr != nil {
+			return candidateErr
+		}
+		if candidate.ID != handoff.ApprovalID || release.Version != handoff.Candidate {
+			return ErrCandidateChanged
+		}
+		_, err = manager.Activate(ctx, release)
 	}
 	state, stateErr := manager.TransactionState()
 	if stateErr != nil {

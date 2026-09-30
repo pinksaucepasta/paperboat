@@ -87,57 +87,20 @@ type TUFSource struct {
 }
 
 func (s TUFSource) Resolve(ctx context.Context) (Release, bool, error) {
-	return s.resolve(ctx, false, false)
+	return s.resolve(ctx, false)
 }
 
 // ResolveManual bypasses only the signed cohort delay. It still verifies TUF,
 // revocations, compatibility metadata, and every artifact hash.
 func (s TUFSource) ResolveManual(ctx context.Context) (Release, bool, error) {
-	return s.resolve(ctx, true, false)
+	return s.resolve(ctx, true)
 }
 
-// ResolveSupervisor resolves the newest signed supervisor release. A release
-// can require maintenance even when its worker is otherwise eligible; the
-// supervisor updater stages that release and waits for a protected-workload
-// approval instead of silently restarting a host supervisor.
-func (s TUFSource) ResolveSupervisor(ctx context.Context) (Release, bool, error) {
-	return s.resolveSupervisor(ctx, false)
-}
-
-// ResolveSupervisorManual bypasses only the signed cohort delay. It still
-// requires a fresh, valid TUF index and exact supervisor targets.
-func (s TUFSource) ResolveSupervisorManual(ctx context.Context) (Release, bool, error) {
-	return s.resolveSupervisor(ctx, true)
-}
-
-func (s TUFSource) resolveSupervisor(ctx context.Context, bypassCohort bool) (Release, bool, error) {
+func (s TUFSource) resolve(ctx context.Context, bypassCohort bool) (Release, bool, error) {
 	now := s.now()
 	index, err := bootstrap.FetchVerifiedReleaseIndex(ctx, s.RepositoryURL, filepath.Join(s.StateRoot, "index"), s.HTTP, now)
 	if err != nil {
 		return Release{}, false, err
-	}
-	eligible, err := s.eligible(ctx, index, now, bypassCohort)
-	if err != nil {
-		return Release{}, false, err
-	}
-	if !eligible {
-		return Release{}, false, nil
-	}
-	release, ok := releaseFromIndex(index)
-	if !ok {
-		return Release{}, false, ErrInvalidRelease
-	}
-	return release, true, nil
-}
-
-func (s TUFSource) resolve(ctx context.Context, bypassCohort, supervisor bool) (Release, bool, error) {
-	now := s.now()
-	index, err := bootstrap.FetchVerifiedReleaseIndex(ctx, s.RepositoryURL, filepath.Join(s.StateRoot, "index"), s.HTTP, now)
-	if err != nil {
-		return Release{}, false, err
-	}
-	if index.SupervisorMaintenance && !supervisor {
-		return Release{}, false, nil
 	}
 	eligible, err := s.eligible(ctx, index, now, bypassCohort)
 	if err != nil {

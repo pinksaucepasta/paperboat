@@ -559,6 +559,9 @@ func Install(ctx context.Context, request Request) error {
 	if err := lifecycle.Recover(ctx); err != nil {
 		return err
 	}
+	if err := runWindowsInstallPhase(ctx, "install Paperboat device guard", func() error { return installDeviceGuard(ctx, request) }); err != nil {
+		return err
+	}
 	if err := runWindowsInstallPhase(ctx, "register Paperboat command path", func() error { return winenv.EnsureMachinePath(filepath.Dir(layout.Binary)) }); err != nil {
 		return err
 	}
@@ -628,6 +631,9 @@ func installUnboundWindowsBinary(ctx context.Context, request Request) error {
 	}
 	if err := request.Source.Verify(request.Executable); err != nil {
 		return fmt.Errorf("%w: source bytes", ErrInvalidRequest)
+	}
+	if err := runWindowsInstallPhase(ctx, "install Paperboat device guard", func() error { return installDeviceGuard(ctx, request) }); err != nil {
+		return err
 	}
 	instance, err := WindowsInstanceForSID(request.OwnerSID)
 	if err != nil {

@@ -81,7 +81,7 @@ func windowsActivationJournalPath(stateRoot string) string {
 	return filepath.Join(stateRoot, "activation", "journal.json")
 }
 
-func stageWindowsActivation(ctx context.Context, config WindowsConfig, release workerupdate.Release, manualMode string) (windowsActivationJournal, error) {
+func stageWindowsActivation(ctx context.Context, config WindowsConfig, release workerupdate.Release) (windowsActivationJournal, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -93,6 +93,18 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 	// policy cannot strand a partially staged transaction.
 	if err := workerupdate.ValidateActivationRelease(release); err != nil {
 		return windowsActivationJournal{}, err
+	}
+	candidate, err := workerupdate.PreparedCandidateForRelease(release)
+	if err != nil {
+		return windowsActivationJournal{}, err
+	}
+	if prior, loadErr := loadWindowsActivationJournal(config); loadErr == nil && prior.Stage == windowsActivationAwaitingApproval && prior.Candidate.ID == candidate.ID {
+		if err := verifyWindowsPreparedCandidate(ctx, prior); err != nil {
+			return windowsActivationJournal{}, err
+		}
+		return prior, nil
+	} else if loadErr != nil && !errors.Is(loadErr, os.ErrNotExist) {
+		return windowsActivationJournal{}, loadErr
 	}
 	layout, err := service.WindowsUserLayout(config.OwnerSID)
 	if err != nil {
@@ -205,8 +217,7 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 		return windowsActivationJournal{}, err
 	}
 	journal := windowsActivationJournal{
-		ManualMode: manualMode,
-		Schema:     windowsActivationJournalSchema, TransactionID: hex.EncodeToString(transaction[:]), PreviousVersion: config.ActiveVersion, Version: release.Version, Architecture: config.Architecture, Stage: windowsActivationStaged,
+		Schema: windowsActivationJournalSchema, TransactionID: hex.EncodeToString(transaction[:]), PreviousVersion: config.ActiveVersion, Version: release.Version, Architecture: config.Architecture, Stage: windowsActivationAwaitingApproval,
 		Runtime: staged, CLI: staged, Hostd: staged, Updater: staged, PreviousBinary: previousBinary,
 		OldHostd: oldHostd, OldUpdater: oldUpdater, OldSSH: oldSSH, NewSSH: newSSH,
 		LocalDaemonWasRunning: localDaemonWasRunning,
@@ -220,14 +231,12 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 		local := config.Source
 		journal.PreviousSource = &local
 	}
+	journal.Candidate = candidate
 	backend := newWindowsSCMActivationBackend(config)
 	if err := backend.AuthorizeRecovery(ctx, journal); err != nil {
 		return windowsActivationJournal{}, err
 	}
 	if err := backend.WriteJournal(journal); err != nil {
-		return windowsActivationJournal{}, err
-	}
-	if err := installWindowsActivatorService(paths.Updater, config.OwnerSID); err != nil {
 		return windowsActivationJournal{}, err
 	}
 	return journal, nil
@@ -629,9 +638,7 @@ func startWindowsActivatorService(ownerSID string) error {
 }
 
 type windowsSCMActivationBackend struct {
-	config         WindowsConfig
-	candidate      workerupdate.Worker
-	candidateReady hostdproto.Status
+	config WindowsConfig
 }
 
 func newWindowsSCMActivationBackend(config WindowsConfig) *windowsSCMActivationBackend {
@@ -650,73 +657,6 @@ func (b *windowsSCMActivationBackend) WriteJournal(j windowsActivationJournal) e
 	return applyWindowsReleaseACL(path, "D:P(A;;FA;;;SY)(A;;FA;;;BA)")
 }
 
-// ProbeCandidate starts the signed staged executable as a hostd candidate and
-// runs the complete edge/connector/route/origin canary while the old active
-// route is still serving. The candidate remains mutation-disabled and waits
-// for the activator's later cutover signal.
-func (b *windowsSCMActivationBackend) ProbeCandidate(ctx context.Context, journal windowsActivationJournal) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if b == nil || b.config.CandidateStarter == nil || b.config.ActivationGate == nil || b.candidate != nil || journal.Stage != windowsActivationCandidateValidating {
-		return errInvalidWindowsActivation
-	}
-	release := windowsCandidateRelease(journal)
-	request := workerupdate.StartRequest{
-		Executable:        journal.Runtime.Path,
-		Release:           release,
-		WorkerID:          windowsCandidateWorkerID(journal.Version),
-		HostdEndpoint:     b.config.HostdSocket,
-		MutationsDisabled: true,
-	}
-	candidate, err := b.config.CandidateStarter(ctx, request)
-	if err != nil {
-		return err
-	}
-	if candidate == nil {
-		return errInvalidWindowsActivation
-	}
-	// Publish the process handle before any readiness call. If readiness or
-	// canary verification fails, the caller can retry cleanup even when the
-	// first Stop is interrupted.
-	b.candidate = candidate
-	stopCandidate := func() error {
-		return b.StopCandidate(context.Background(), journal)
-	}
-	ready, err := candidate.Ready(ctx)
-	if err != nil {
-		return errors.Join(err, stopCandidate())
-	}
-	gateRequest, err := windowsCandidateGateRequest(journal, ready)
-	if err != nil {
-		return errors.Join(err, stopCandidate())
-	}
-	canaryCtx, cancel := context.WithTimeout(ctx, journal.CanaryTimeout)
-	canaryErr := b.config.ActivationGate.Candidate(canaryCtx, gateRequest)
-	cancel()
-	if canaryErr != nil {
-		return errors.Join(canaryErr, stopCandidate())
-	}
-	b.candidateReady = ready
-	return nil
-}
-
-func (b *windowsSCMActivationBackend) StopCandidate(ctx context.Context, _ windowsActivationJournal) error {
-	if b == nil || b.candidate == nil {
-		return nil
-	}
-	if ctx == nil || ctx.Err() != nil {
-		ctx = context.Background()
-	}
-	stopCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	err := b.candidate.Stop(stopCtx)
-	if err == nil {
-		b.candidate, b.candidateReady = nil, hostdproto.Status{}
-	}
-	return err
-}
-
 func windowsLocalDaemonLockPath(runtimeStateRoot string) (string, error) {
 	if !filepath.IsAbs(runtimeStateRoot) || filepath.Clean(runtimeStateRoot) != runtimeStateRoot {
 		return "", errInvalidWindowsActivation
@@ -725,18 +665,14 @@ func windowsLocalDaemonLockPath(runtimeStateRoot string) (string, error) {
 }
 
 func (b *windowsSCMActivationBackend) StopServices(ctx context.Context, localDaemonWasRunning bool) error {
-	// A staged candidate is attached to the current hostd lease. Stop it before
-	// stopping SCM services so it cannot race the old route or survive an
-	// owner-service teardown with an ambiguous lease.
-	candidateErr := b.StopCandidate(ctx, windowsActivationJournal{})
 	instance, err := service.WindowsUserInstance(b.config.OwnerSID)
 	if err != nil {
-		return errors.Join(candidateErr, err)
+		return err
 	}
 	serviceErr := stopNamedWindowsServices(ctx, windowsActivationServiceNames(b.config.SetupMode, instance)...)
 	lockPath, err := windowsLocalDaemonLockPath(b.config.RuntimeStateRoot)
 	if err != nil {
-		return errors.Join(candidateErr, serviceErr, err)
+		return errors.Join(serviceErr, err)
 	}
 	stopErr := localdaemon.StopWindowsOwnerService(ctx, lockPath, b.config.OwnerSID)
 	stateErr := hostinstall.PrepareWindowsLocalDaemonState(b.config.RuntimeStateRoot, b.config.OwnerSID)
@@ -749,7 +685,7 @@ func (b *windowsSCMActivationBackend) StopServices(ctx context.Context, localDae
 	if !localDaemonWasRunning && errors.Is(stopErr, os.ErrNotExist) {
 		stopErr = nil
 	}
-	return errors.Join(candidateErr, serviceErr, stopErr, stateErr)
+	return errors.Join(serviceErr, stopErr, stateErr)
 }
 
 func windowsStableBinaryDACL(ownerSID string) string {
@@ -964,6 +900,15 @@ func retryWindowsFileOperation(ctx context.Context, operation func() error) erro
 }
 
 func (b *windowsSCMActivationBackend) SetServiceTargets(_ context.Context, hostd, updater, ssh windowsServiceTarget) error {
+	layout, err := service.WindowsUserLayout(b.config.OwnerSID)
+	if err != nil {
+		return err
+	}
+	hostd, updater, ssh, err = normalizeWindowsRollbackTargets(layout, hostd, updater, ssh)
+	if err != nil {
+		return err
+	}
+
 	hostdName, updaterName, err := windowsInstanceServiceNames(b.config.OwnerSID)
 	if err != nil {
 		return err
@@ -989,16 +934,16 @@ func (b *windowsSCMActivationBackend) SetServiceTargets(_ context.Context, hostd
 // A previous interrupted activation may have recorded PaperboatUpdated on the
 // rollback path. Once RestoreBinary succeeds that path no longer exists, so
 // restarting it verbatim leaves every service stopped and strands recovery.
-func normalizeWindowsRollbackTargets(hostd, updater, ssh windowsServiceTarget) (windowsServiceTarget, windowsServiceTarget, windowsServiceTarget, error) {
-	if !filepath.IsAbs(hostd.Executable) {
+func normalizeWindowsRollbackTargets(layout service.Layout, hostd, updater, ssh windowsServiceTarget) (windowsServiceTarget, windowsServiceTarget, windowsServiceTarget, error) {
+	if !strings.EqualFold(hostd.Executable, layout.Binary) || !windowsUpdaterExecutableMatches(layout, updater.Executable) || (ssh.Executable != "" && !strings.EqualFold(ssh.Executable, layout.Binary)) {
 		return windowsServiceTarget{}, windowsServiceTarget{}, windowsServiceTarget{}, errInvalidWindowsActivation
 	}
-	rollback := filepath.Join(filepath.Dir(hostd.Executable), "pb.rollback.exe")
-	if strings.EqualFold(updater.Executable, rollback) {
-		updater.Executable = hostd.Executable
+	if strings.EqualFold(updater.Executable, layout.BinaryRollback) {
+		updater.Executable = layout.Binary
 	}
 	return hostd, updater, ssh, nil
 }
+
 func (b *windowsSCMActivationBackend) StartServices(ctx context.Context, hostd, updater, ssh, localDaemon bool) error {
 	if localDaemon {
 		if err := hostinstall.PrepareWindowsLocalDaemonState(b.config.RuntimeStateRoot, b.config.OwnerSID); err != nil {
@@ -1023,7 +968,7 @@ func (b *windowsSCMActivationBackend) StartServices(ctx context.Context, hostd, 
 	return nil
 }
 
-func (b *windowsSCMActivationBackend) CommitGate(ctx context.Context, journal windowsActivationJournal) error {
+func (b *windowsSCMActivationBackend) VerifyCommitted(ctx context.Context, journal windowsActivationJournal) error {
 	source, err := newWindowsTUFSource(b.config)
 	if err != nil {
 		return err
@@ -1039,14 +984,10 @@ func (b *windowsSCMActivationBackend) CommitGate(ctx context.Context, journal wi
 		return err
 	}
 	status, err := b.activeHostdStatus(ctx)
-	if err != nil {
-		return err
+	if err == nil && !validWindowsRuntimeStatus(status, journal.Version) {
+		return errInvalidWindowsActivation
 	}
-	request, err := windowsActiveGateRequest(journal, status)
-	if err != nil {
-		return err
-	}
-	return b.config.ActivationGate.Commit(ctx, request)
+	return err
 }
 
 func (b *windowsSCMActivationBackend) FinalizeServices(ctx context.Context, journal windowsActivationJournal) error {
@@ -1056,19 +997,6 @@ func (b *windowsSCMActivationBackend) FinalizeServices(ctx context.Context, jour
 	return hostinstall.EnsureWindowsLocalDaemonService(ctx, b.config.OwnerSID)
 }
 
-func (b *windowsSCMActivationBackend) Drain(ctx context.Context, journal windowsActivationJournal) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	request, err := windowsDrainGateRequest(journal, b.candidateReady)
-	if err != nil {
-		return err
-	}
-	bounded, cancel := context.WithTimeout(ctx, journal.DrainTimeout)
-	defer cancel()
-	return b.config.ActivationGate.Drain(bounded, request)
-}
-
 func (b *windowsSCMActivationBackend) VerifyRollback(ctx context.Context, journal windowsActivationJournal) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -1076,21 +1004,11 @@ func (b *windowsSCMActivationBackend) VerifyRollback(ctx context.Context, journa
 	if err := b.verifyWindowsRuntimeVersions(ctx, journal.PreviousVersion); err != nil {
 		return err
 	}
-	return b.RollbackDrain(ctx, journal)
-}
-
-func (b *windowsSCMActivationBackend) RollbackDrain(ctx context.Context, journal windowsActivationJournal) error {
 	status, err := b.activeHostdStatus(ctx)
-	if err != nil {
-		return err
+	if err == nil && !validWindowsRuntimeStatus(status, journal.PreviousVersion) {
+		return errInvalidWindowsActivation
 	}
-	request, err := windowsRollbackGateRequest(journal, status)
-	if err != nil {
-		return err
-	}
-	bounded, cancel := context.WithTimeout(ctx, journal.RollbackTimeout)
-	defer cancel()
-	return b.config.ActivationGate.Rollback(bounded, request)
+	return err
 }
 
 func (b *windowsSCMActivationBackend) activeHostdStatus(ctx context.Context) (hostdproto.Status, error) {
@@ -1113,7 +1031,7 @@ func (b *windowsSCMActivationBackend) VerifyHealth(ctx context.Context, journal 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if b == nil || b.config.ActivationGate == nil {
+	if b == nil {
 		return errInvalidWindowsActivation
 	}
 	hostdName, updaterName, err := windowsInstanceServiceNames(b.config.OwnerSID)
@@ -1137,7 +1055,7 @@ func (b *windowsSCMActivationBackend) VerifyHealth(ctx context.Context, journal 
 	var activeErr error
 	for {
 		status, activeErr = hostd.Active(ctx)
-		if activeErr == nil && status.State == hostdproto.StateActive && status.WorkerID != "" && status.Epoch != 0 && status.LastHeartbeatUnixMilli > 0 && time.Since(time.UnixMilli(status.LastHeartbeatUnixMilli)) <= 15*time.Second {
+		if activeErr == nil && validWindowsRuntimeStatus(status, journal.Version) && status.APIVersion >= journal.HostdAPIMin && status.APIVersion <= journal.HostdAPIMax {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -1179,26 +1097,36 @@ func (b *windowsSCMActivationBackend) VerifyHealth(ctx context.Context, journal 
 			return err
 		}
 	}
-	// Candidate was already canaried while the old route was authoritative.
-	// The post-cutover gate is exclusively a signed stability observation over
-	// the exact new active worker. Calling Candidate here would be invalid: the
-	// worker is StateActive, not StateCandidate, and would also blur the journal
-	// boundary between canary and stability.
-	activeRequest, err := windowsActiveGateRequest(journal, status)
-	if err != nil {
-		return err
+	// Observe the approved replacement without a worker admission transaction.
+	bounded, cancel := context.WithTimeout(ctx, windowsStabilityCallTimeout(journal.StabilityWindow, journal.StabilityInterval))
+	defer cancel()
+	timer := time.NewTimer(journal.StabilityWindow)
+	defer timer.Stop()
+	ticker := time.NewTicker(journal.StabilityInterval)
+	defer ticker.Stop()
+	probe := func() error {
+		current, err := hostd.Active(bounded)
+		if err != nil {
+			return err
+		}
+		if current.State != hostdproto.StateActive || current.WorkerID != status.WorkerID || current.Epoch != status.Epoch || current.LastHeartbeatUnixMilli <= 0 || time.Since(time.UnixMilli(current.LastHeartbeatUnixMilli)) > 15*time.Second {
+			return errInvalidWindowsActivation
+		}
+		return b.verifyWindowsRuntimeVersions(bounded, journal.Version)
 	}
-	// Hostd owns and observes the complete signed stability window. Give the
-	// local RPC enough time to return its terminal result after that window;
-	// using the window itself as the transport deadline races a successful
-	// final observation with deadline expiry.
-	stabilityCtx, stabilityCancel := context.WithTimeout(ctx, windowsStabilityCallTimeout(journal.StabilityWindow, journal.StabilityInterval))
-	stabilityErr := b.config.ActivationGate.Active(stabilityCtx, activeRequest)
-	stabilityCancel()
-	if stabilityErr != nil {
-		return stabilityErr
+	for {
+		select {
+		case <-bounded.Done():
+			return bounded.Err()
+		case <-ticker.C:
+			if err := probe(); err != nil {
+				return err
+			}
+		case <-timer.C:
+			return probe()
+		}
 	}
-	return nil
+
 }
 
 func (b *windowsSCMActivationBackend) verifyWindowsRuntimeVersions(ctx context.Context, version string) error {
@@ -1617,10 +1545,6 @@ func resumeWindowsActivation(ctx context.Context, config WindowsConfig) (bool, e
 	if err != nil {
 		return false, err
 	}
-	if !config.AutomaticActivation && journal.ManualMode == "" && journal.Stage == windowsActivationStaged {
-		journal.Stage = windowsActivationRolledBack
-		return false, newWindowsSCMActivationBackend(config).WriteJournal(journal)
-	}
 	if !windowsActivationNeedsResume(journal, config.ActiveVersion, false) {
 		return false, nil
 	}
@@ -1732,15 +1656,7 @@ func RunWindowsActivator(ctx context.Context, config WindowsConfig) error {
 		return err
 	}
 	backend := newWindowsSCMActivationBackend(config)
-	var result windowsActivationJournal
-	var activationErr error
-	if !config.AutomaticActivation && journal.ManualMode == "" && journal.Stage == windowsActivationStaged {
-		journal.Stage = windowsActivationRolledBack
-		result = journal
-		activationErr = backend.WriteJournal(journal)
-	} else {
-		result, activationErr = executeWindowsActivation(ctx, backend, journal)
-	}
+	result, activationErr := executeWindowsActivation(ctx, backend, journal)
 	var connectErr error
 	if activationErr == nil && result.Stage == windowsActivationCommitted || result.Stage == windowsActivationRolledBack {
 		var manager *mgr.Mgr
@@ -1764,4 +1680,19 @@ func RunWindowsActivator(ctx context.Context, config WindowsConfig) error {
 // require the exact signed release version contract.
 func validObservedRuntimeVersion(value string) bool {
 	return value != "" && len(value) <= 128 && strings.TrimSpace(value) == value && !strings.ContainsAny(value, "\x00\r\n\t ")
+}
+
+func verifyWindowsPreparedCandidate(ctx context.Context, j windowsActivationJournal) error {
+	if j.Candidate.ID == "" || j.Candidate.Version != j.Version || j.Candidate.SHA256 != j.Runtime.SHA256 || j.Candidate.Length != j.Runtime.Length {
+		return workerupdate.ErrPreparedCandidate
+	}
+	target := windowsActivationComponentTarget(j.Runtime, j.Architecture)
+	if err := verifyWindowsActivationComponent(ctx, j.Runtime.Path, target); err != nil {
+		return errors.Join(workerupdate.ErrPreparedCandidate, err)
+	}
+	return nil
+}
+
+func validWindowsRuntimeStatus(status hostdproto.Status, version string) bool {
+	return status.State == hostdproto.StateActive && status.WorkerID == "runtime-"+strings.ReplaceAll(version, " ", "-") && status.Epoch > 0 && status.APIVersion > 0 && status.LastHeartbeatUnixMilli > 0 && time.Since(time.UnixMilli(status.LastHeartbeatUnixMilli)) <= 15*time.Second
 }

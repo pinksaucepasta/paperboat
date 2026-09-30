@@ -251,3 +251,47 @@ func containsAny(value string, needles ...string) bool {
 	}
 	return false
 }
+
+func TestSelectedArtifactManifestHasExactPlanCoverage(t *testing.T) {
+	full := testManifest(t)
+	selected := full
+	selected.Artifacts = []Artifact{full.Artifacts[0], full.Artifacts[1], full.Artifacts[3]}
+	if err := selected.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := DefaultPlan(selected, 1, "routine", "selected")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = ValidatePlanAgainstManifest(plan, selected); err != nil {
+		t.Fatal(err)
+	}
+	allPlan, err := DefaultPlan(full, 1, "routine", "all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.Cohorts = allPlan.Cohorts
+	if ValidatePlanAgainstManifest(plan, selected) == nil {
+		t.Fatal("unselected platform policy accepted")
+	}
+	for _, assets := range [][]Artifact{nil, {full.Artifacts[1], full.Artifacts[1]}, {full.Artifacts[1], full.Artifacts[0]}, {{Name: "unknown"}}} {
+		invalid := full
+		invalid.Artifacts = assets
+		if invalid.Validate() == nil {
+			t.Fatalf("invalid selected assets accepted: %+v", assets)
+		}
+	}
+	dir := t.TempDir()
+	for _, asset := range selected.Artifacts {
+		if err = os.WriteFile(filepath.Join(dir, asset.Name), []byte("release-"+asset.Name), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := BuildManifest(selected.Version, selected.SourceCommit, selected.Toolchain, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Artifacts) != 3 || VerifyManifest(got, dir) != nil {
+		t.Fatal("selected manifest did not verify")
+	}
+}

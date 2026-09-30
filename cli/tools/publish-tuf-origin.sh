@@ -109,11 +109,17 @@ tar -xzf "$bundle" -C "$next" --no-same-owner --no-same-permissions
 [[ -z "$(find "$next" -type l -print -quit)" ]] || { echo "staged release contains a symlink" >&2; exit 1; }
 [[ "$(find "$next" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)" == $'install\ntuf\nwindows' ]] || { echo "staged release has an unexpected top-level file" >&2; exit 1; }
 
-python3 - "$next/tuf/metadata/targets.json" "$version" <<'PY'
+python3 - "$next/tuf/metadata/targets.json" "$live/tuf/metadata/targets.json" "$version" <<'PY'
+import datetime
 import hashlib
-import json, pathlib, re, sys
+import json
+import pathlib
+import re
+import sys
+
 targets_path = pathlib.Path(sys.argv[1])
-version = sys.argv[2]
+live_targets_path = pathlib.Path(sys.argv[2])
+version = sys.argv[3]
 expected = {
     "pb-darwin-arm64.pkg": ("darwin", "arm64", "pkg"),
     "pb-linux-amd64": ("linux", "amd64", "elf"),
@@ -121,24 +127,50 @@ expected = {
     "pb-windows-amd64.exe": ("windows", "amd64", "pe"),
     "pb-windows-arm64.exe": ("windows", "arm64", "pe"),
 }
-try:
-    targets_document = json.loads(targets_path.read_text())
-except (OSError, json.JSONDecodeError) as error:
-    raise SystemExit(f"TUF targets metadata is invalid: {error}")
-signed = targets_document.get("signed")
-if not isinstance(signed, dict):
-    raise SystemExit("TUF targets metadata has no signed object")
-targets = signed.get("targets")
-if not isinstance(targets, dict) or set(targets) != set(expected):
-    raise SystemExit("TUF targets metadata does not contain the exact release asset set")
 
-def require_equal(actual, wanted, message):
-    if type(actual) is not type(wanted) or actual != wanted:
-        raise SystemExit(message)
+def reject_duplicate_keys(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
 
-release_repository = None
-for name, (platform, architecture, format_) in expected.items():
-    target = targets.get(name)
+def read_targets(path, label):
+    if not path.is_file() or path.is_symlink():
+        raise SystemExit(f"{label} TUF targets metadata is unavailable")
+    try:
+        document = json.loads(path.read_text(), object_pairs_hook=reject_duplicate_keys)
+    except (OSError, json.JSONDecodeError, ValueError) as error:
+        raise SystemExit(f"{label} TUF targets metadata is invalid: {error}")
+    signed = document.get("signed") if isinstance(document, dict) else None
+    if not isinstance(signed, dict):
+        raise SystemExit(f"{label} TUF targets metadata has no signed object")
+    targets = signed.get("targets")
+    if not isinstance(targets, dict) or set(targets) != set(expected):
+        raise SystemExit(f"{label} TUF targets metadata does not contain the exact release asset set")
+    return targets
+
+def version_parts(value, name):
+    if not isinstance(value, str) or not re.fullmatch(r"20[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.(0|[1-9][0-9]*)", value):
+        raise SystemExit(f"TUF target version is invalid for {name}")
+    year, month, day, release = value.split(".")
+    try:
+        datetime.date(int(year), int(month), int(day))
+    except ValueError:
+        raise SystemExit(f"TUF target version is invalid for {name}")
+    return (year, month, day, release)
+
+def compare_versions(left, right):
+    for left_part, right_part in zip(left, right):
+        if len(left_part) != len(right_part):
+            return -1 if len(left_part) < len(right_part) else 1
+        if left_part != right_part:
+            return -1 if left_part < right_part else 1
+    return 0
+
+def validate_target(name, target):
+    platform, architecture, format_ = expected[name]
     if not isinstance(target, dict):
         raise SystemExit(f"TUF target metadata is invalid for {name}")
     hashes = target.get("hashes")
@@ -154,17 +186,16 @@ for name, (platform, architecture, format_) in expected.items():
     custom = target.get("custom")
     if not isinstance(custom, dict):
         raise SystemExit(f"TUF target custom metadata is invalid for {name}")
+    target_version = custom.get("version")
+    target_version_parts = version_parts(target_version, name)
     repository = custom.get("repository")
     if not isinstance(repository, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
         raise SystemExit(f"TUF target repository is invalid for {name}")
-    if release_repository is None:
-        release_repository = repository
-    require_equal(repository, release_repository, f"TUF targets disagree on repository for {name}")
-    url = f"https://github.com/{repository}/releases/download/{version}/{name}"
+    url = f"https://github.com/{repository}/releases/download/{target_version}/{name}"
     for key, wanted in {
         "schema": "paperboat.tuf-asset/v1",
         "kind": "github-release-asset",
-        "version": version,
+        "version": target_version,
         "platform": platform,
         "architecture": architecture,
         "format": format_,
@@ -179,9 +210,23 @@ for name, (platform, architecture, format_) in expected.items():
     release_index = custom.get("release_index")
     if not isinstance(release_index, dict):
         raise SystemExit(f"TUF release index is invalid for {name}")
-    require_equal(release_index.get("schema"), "paperboat.release-index/v1", f"TUF release index schema is invalid for {name}")
-    require_equal(release_index.get("release_id"), "rel_" + version, f"TUF release index ID is invalid for {name}")
-    require_equal(release_index.get("version"), version, f"TUF release index version is invalid for {name}")
+    for key, wanted in {
+        "schema": "paperboat.release-index/v1",
+        "release_id": "rel_" + target_version,
+        "version": target_version,
+        "channel": "stable",
+        "platform": platform,
+        "architecture": architecture,
+        "binary_format": format_,
+    }.items():
+        require_equal(release_index.get(key), wanted, f"TUF release index is invalid for {name}: {key}")
+    severity = release_index.get("severity")
+    if severity not in ("routine", "security", "critical"):
+        raise SystemExit(f"TUF release index severity is invalid for {name}")
+    policy_revision = release_index.get("rollout_policy_revision")
+    if isinstance(policy_revision, bool) or not isinstance(policy_revision, int) or policy_revision < 1:
+        raise SystemExit(f"TUF release index policy revision is invalid for {name}")
+
     index_targets = release_index.get("targets")
     if not isinstance(index_targets, list) or len(index_targets) != 1 or not isinstance(index_targets[0], dict):
         raise SystemExit(f"TUF release index target is invalid for {name}")
@@ -200,9 +245,6 @@ for name, (platform, architecture, format_) in expected.items():
     }.items():
         require_equal(index_target.get(key), wanted, f"TUF release index target is invalid for {name}: {key}")
 
-    # These fields are mandatory in the current release-index contract. A
-    # missing or null value is not a usable policy and must never cross the
-    # final pre-exchange boundary.
     manifest_sha256 = release_index.get("manifest_sha256")
     if not isinstance(manifest_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", manifest_sha256):
         raise SystemExit(f"TUF release index manifest digest is invalid for {name}")
@@ -212,7 +254,7 @@ for name, (platform, architecture, format_) in expected.items():
     deployment_plan = release_index.get("deployment_plan")
     if not isinstance(deployment_plan, dict):
         raise SystemExit(f"TUF release index deployment plan is missing for {name}")
-    if deployment_plan.get("schema") != "paperboat.release-deployment/v1" or deployment_plan.get("version") != version or deployment_plan.get("manifest_sha256") != manifest_sha256:
+    if deployment_plan.get("schema") != "paperboat.release-deployment/v1" or deployment_plan.get("version") != target_version or deployment_plan.get("manifest_sha256") != manifest_sha256:
         raise SystemExit(f"TUF release index deployment plan binding is invalid for {name}")
     expected_plan_fields = {
         "schema", "version", "manifest_sha256", "channel", "rollout_state", "severity",
@@ -221,9 +263,45 @@ for name, (platform, architecture, format_) in expected.items():
     }
     if set(deployment_plan) != expected_plan_fields:
         raise SystemExit(f"TUF release index deployment plan is incomplete for {name}")
+    require_equal(deployment_plan.get("channel"), release_index.get("channel"), f"TUF release policy channel is invalid for {name}")
+    require_equal(deployment_plan.get("severity"), severity, f"TUF release policy severity is invalid for {name}")
+    require_equal(deployment_plan.get("policy_revision"), policy_revision, f"TUF release policy revision is invalid for {name}")
     plan_bytes = (json.dumps(deployment_plan, separators=(",", ":"), ensure_ascii=True) + "\n").encode()
     if hashlib.sha256(plan_bytes).hexdigest() != deployment_plan_sha256:
         raise SystemExit(f"TUF release index deployment-plan digest does not match for {name}")
+    return target_version_parts, repository
+
+def require_equal(actual, wanted, message):
+    if type(actual) is not type(wanted) or actual != wanted:
+        raise SystemExit(message)
+
+try:
+    candidate_targets = read_targets(targets_path, "candidate")
+    live_targets = read_targets(live_targets_path, "live")
+except (OSError, ValueError) as error:
+    raise SystemExit(f"TUF targets metadata is invalid: {error}")
+
+requested_version_parts = version_parts(version, "candidate")
+candidate_repositories = set()
+live_repositories = set()
+selected = []
+for name in expected:
+    live_version, live_repository = validate_target(name, live_targets[name])
+    candidate_version, candidate_repository = validate_target(name, candidate_targets[name])
+    live_repositories.add(live_repository)
+    candidate_repositories.add(candidate_repository)
+    if candidate_version == requested_version_parts:
+        if compare_versions(candidate_version, live_version) <= 0:
+            raise SystemExit(f"selected TUF target version does not advance the live target for {name}")
+        selected.append(name)
+    elif candidate_targets[name] != live_targets[name]:
+        raise SystemExit(f"omitted TUF target metadata changed for {name}")
+
+if len(selected) == 0:
+    raise SystemExit("TUF targets metadata does not select any target at the requested release version")
+if len(live_repositories) != 1 or len(candidate_repositories) != 1 or live_repositories != candidate_repositories:
+    raise SystemExit("TUF targets disagree on the immutable GitHub repository")
+release_repository = next(iter(candidate_repositories))
 
 root = targets_path.parent.parent.parent
 for script, version_pin, repository_pin in (

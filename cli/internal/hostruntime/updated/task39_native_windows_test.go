@@ -44,7 +44,7 @@ func TestTask39WindowsUpdateControl(t *testing.T) {
 	if err != nil || before.Version == "" || before.Pending {
 		t.Fatalf("updater must be usable before request: response=%+v error=%v", before, err)
 	}
-	response, err := client.Update(ctx)
+	response, err := client.Download(ctx)
 	if *task39WindowsUpdateWantError {
 		var rejected *ControlError
 		if !errors.As(err, &rejected) || rejected.Code != "check_failed" {
@@ -60,6 +60,14 @@ func TestTask39WindowsUpdateControl(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if response.Candidate == nil || response.Candidate.ID == "" {
+		t.Fatalf("download lacks reviewable candidate: %+v", response)
+	}
+	response, err = client.Install(ctx, response.Candidate.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	if *task39WindowsUpdateVersion == "" || response.Version != *task39WindowsUpdateVersion || !response.Pending && !response.Updated {
 		t.Fatalf("candidate was not accepted for activation: %+v", response)
 	}

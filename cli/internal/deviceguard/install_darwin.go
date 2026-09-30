@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 )
 
@@ -28,6 +29,25 @@ const darwinLaunchMarker = "<!-- Managed by Paperboat device guard -->"
 
 func Install(ctx context.Context, executable string, configuredCIDR ...string) (resultErr error) {
 	if err := requirePrivilege(); err != nil {
+		return err
+	}
+	// The control socket is reachable by user processes, while guard state
+	// remains private. Create the shared application parent before the private
+	// state directory can create it with mode 0700.
+	parent := filepath.Dir(DefaultStateDir)
+	if err := protectedDirectory(parent, 0755); err != nil {
+		return err
+	}
+	if err := os.Chmod(parent, 0755); err != nil {
+		return err
+	}
+	controlDirectory := filepath.Dir(DefaultSocket)
+	if err := protectedDirectory(controlDirectory, 0755); err != nil {
+		return err
+	}
+	// Launchd uses umask 077. Explicitly set the protected control directory's
+	// traversal mode so authenticated non-root clients can reach its socket.
+	if err := os.Chmod(controlDirectory, 0755); err != nil {
 		return err
 	}
 	lifecycle, err := lockGuardLifecycle(DefaultStateDir)
@@ -149,13 +169,8 @@ func installDarwin(ctx context.Context, executable string, cfg darwinInstallConf
 	}
 	// A prior installed copy can be running; only this exact service is replaced.
 	domain := "system/" + cfg.Label
-	if exec.CommandContext(ctx, "/bin/launchctl", "print", domain).Run() == nil {
-		if _, err = darwinRun(ctx, "", "/bin/launchctl", "bootout", domain); err != nil {
-			return err
-		}
-	}
-	_, err = darwinRun(ctx, "", "/bin/launchctl", "bootstrap", "system", cfg.LaunchPath)
-	if err != nil {
+	controller := service.LaunchdController{Runner: service.ExecRunner{}, UID: 0, Label: cfg.Label}
+	if err := controller.Apply(ctx, cfg.LaunchPath, true); err != nil {
 		return err
 	}
 	ready, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -298,6 +313,10 @@ func InstallTrust(ctx context.Context, suffix string) error {
 	if err := requirePrivilege(); err != nil {
 		return err
 	}
+	// The elevated process can outlive its sudo caller. Bound the OS approval
+	// request itself so an unattended dialog cannot retain the install lock.
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
 	lifecycle, lockErr := lockGuardLifecycle(DefaultStateDir)
 	if lockErr != nil {
 		return lockErr
@@ -306,7 +325,7 @@ func InstallTrust(ctx context.Context, suffix string) error {
 	if err := requirePrivilege(); err != nil {
 		return err
 	}
-	suffix, err := splitdns.ValidateSuffix(suffix)
+	suffix, err := splitdns.ValidateTrustSuffix(suffix)
 	if err != nil {
 		return err
 	}
@@ -356,7 +375,7 @@ func installCATrust(ctx context.Context, owner, suffix string, certificatePEM []
 	}
 	_, err := darwinRun(ctx, "", "/usr/bin/security", "add-trusted-cert", "-d", "-r", "trustRoot", "-k", "/Library/Keychains/System.keychain", path)
 	if err != nil {
-		return fmt.Errorf("macOS has not approved Paperboat private HTTPS trust; in an interactive Mac terminal run sudo pb daemon device-guard trust --suffix %s, approve the system prompt, then retry device access: %w", suffix, err)
+		return fmt.Errorf("macOS has not approved Paperboat browser HTTPS trust; retry Paperboat installation and approve the macOS request: %w", err)
 	}
 	return darwinWrite(path+".installed", []byte("installed\n"), 0600)
 }

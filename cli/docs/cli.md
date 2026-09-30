@@ -152,3 +152,17 @@ command, loading user preferences or contacting services. Public completion comm
 are included; hidden/internal commands are excluded. Update command descriptions,
 examples and flag help in `cmd/pb`, then regenerate. The generation date is fixed
 for reproducible output. No separate hand-maintained command inventory is used.
+
+## Updates
+
+`pb update check` checks signed release metadata without changing the installation.
+`pb update download` downloads and verifies an available release without running it.
+Review the reported version, platform, size and SHA-256 digest, then install with
+`pb update --approve <candidate-id>`. Interactive `pb update` presents the same
+download for confirmation; JSON and noninteractive use only download unless an
+exact candidate ID is supplied.
+
+Installation restarts Paperboat services and interrupts active connections. Clients
+reconnect afterward using the existing recovery paths. Check `pb update status`
+for completion or an actionable recovery error. A downloaded candidate survives
+service restart without being installed.

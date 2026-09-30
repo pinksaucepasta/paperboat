@@ -71,7 +71,7 @@ func TestTRK35CutoverCrashRecoveryIsIdempotentAtFixedClock(t *testing.T) {
 	gate := &scriptedGate{}
 	fixture.manager.config.Gate = gate
 	fixture.starter.activateError = errors.New("activation response lost")
-	if _, err := fixture.manager.Activate(context.Background(), fixture.candidate); !errors.Is(err, fixture.starter.activateError) {
+	if _, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate); !errors.Is(err, fixture.starter.activateError) {
 		t.Fatalf("cutover crash error=%v", err)
 	}
 	crashed, err := updateflow.Load(fixture.paths.journal)
@@ -105,7 +105,7 @@ func TestTRK35QuarantineSurvivesRestartAndAllowsOnlyNewerRelease(t *testing.T) {
 	fixture.manager.config.Now = func() time.Time { return now }
 	gate := &scriptedGate{candidateErr: errors.New("candidate rejected")}
 	fixture.manager.config.Gate = gate
-	if _, err := fixture.manager.Activate(context.Background(), fixture.candidate); !errors.Is(err, ErrActivationGate) {
+	if _, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate); !errors.Is(err, ErrActivationGate) {
 		t.Fatalf("candidate failure error=%v", err)
 	}
 	quarantined, err := fixture.manager.TransactionState()
@@ -120,12 +120,12 @@ func TestTRK35QuarantineSurvivesRestartAndAllowsOnlyNewerRelease(t *testing.T) {
 	if err := restarted.Recover(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := restarted.Activate(context.Background(), fixture.candidate); !errors.Is(err, ErrQuarantined) {
+	if _, err := activatePrepared(context.Background(), restarted, fixture.candidate); !errors.Is(err, ErrQuarantined) {
 		t.Fatalf("exact quarantined retry error=%v", err)
 	}
 	restarted.config.Gate = &scriptedGate{}
 	newer := release("2026.08.18.3", fixture.fetcher.body)
-	result, err := restarted.Activate(context.Background(), newer)
+	result, err := activatePrepared(context.Background(), restarted, newer)
 	if err != nil || !result.Updated || restarted.ActiveVersion() != newer.Version {
 		t.Fatalf("newer release result=%+v err=%v active=%q", result, err, restarted.ActiveVersion())
 	}

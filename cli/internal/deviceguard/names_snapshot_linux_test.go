@@ -22,7 +22,7 @@ func TestRepeatedNamesSnapshotDoesNotReconfigureResolver(t *testing.T) {
 	t.Setenv("PATH", directory)
 	t.Setenv("PAPERBOAT_RESOLVER_CALLS", counter)
 	owner := &certificateConnection{identity: "owner"}
-	g := &guardServer{cfg: Config{ConfigureResolver: true}, leases: map[string]*guardedLease{"a": {hostname: "office.pprbt", ip: "127.100.23.45", owner: owner}, "b": {hostname: "studio.pprbt", ip: "127.100.23.46", owner: owner}}, names: map[controlConn]map[string]string{}, dnsView: map[string]string{}}
+	g := &guardServer{cfg: Config{ConfigureResolver: true, hostsPath: testHostsFile(t)}, leases: map[string]*guardedLease{"a": {hostname: "office.pprbt", ip: "127.100.23.45", owner: owner}, "b": {hostname: "studio.pprbt", ip: "127.100.23.46", owner: owner}}, names: map[controlConn]map[string]string{}, dnsView: map[string]string{}}
 	publish := func(names map[string]string) {
 		t.Helper()
 		if _, err := g.handle(context.Background(), owner, "owner", request{Operation: "names", Names: names}); err != nil {
@@ -65,7 +65,7 @@ func TestNamesRetirementProjectsResolver(t *testing.T) {
 	t.Setenv("PAPERBOAT_RESOLVER_CALLS", counter)
 	t.Setenv("PAPERBOAT_RESOLVER_FAIL", "")
 	owner := &certificateConnection{identity: "owner"}
-	g := &guardServer{cfg: Config{ConfigureResolver: true}, leases: map[string]*guardedLease{}, names: map[controlConn]map[string]string{}, dnsView: map[string]string{}, failures: make(chan error, 1)}
+	g := &guardServer{cfg: Config{ConfigureResolver: true, hostsPath: testHostsFile(t)}, leases: map[string]*guardedLease{}, names: map[controlConn]map[string]string{}, dnsView: map[string]string{}, failures: make(chan error, 1)}
 	install := func() int {
 		t.Helper()
 		listener, err := net.Listen("tcp4", "127.0.0.1:0")

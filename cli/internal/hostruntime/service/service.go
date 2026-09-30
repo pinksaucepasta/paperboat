@@ -495,7 +495,13 @@ func renderSystemd(config Config) ([]byte, error) {
 		noNewPrivileges = "true"
 	}
 	options = append(options, unit.NewUnitOption("Service", "NoNewPrivileges", noNewPrivileges))
-	options = append(options, unit.NewUnitOption("Service", "PrivateTmp", "true"))
+	privateTmp := "true"
+	if config.Kind == DaemonKind {
+		// User-service mount isolation also creates a user namespace on Linux.
+		// Unmapped root appears as nobody and cannot authenticate deviceguard.
+		privateTmp = "false"
+	}
+	options = append(options, unit.NewUnitOption("Service", "PrivateTmp", privateTmp))
 	wantedBy := "multi-user.target"
 	if config.Kind == ConfigKind || config.Kind == DaemonKind {
 		wantedBy = "default.target"

@@ -35,7 +35,7 @@ const (
 // validated private suffix. Existing unconstrained or differently constrained
 // roots are rejected and preserved for explicit operator recovery.
 func LoadOrCreateConstrainedCA(caDir, suffix string) (*CA, error) {
-	clean, err := ValidateSuffix(suffix)
+	clean, err := validateBrowserSuffix(suffix)
 	if err != nil {
 		return nil, err
 	}

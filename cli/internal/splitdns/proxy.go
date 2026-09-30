@@ -28,7 +28,7 @@ type ProxyConfig struct {
 	IssueCertificate func(context.Context, string) (tls.Certificate, error)
 }
 
-// Proxy serves only explicitly registered flat browser hostnames.
+// Proxy serves only explicitly registered browser hostnames.
 type Proxy struct {
 	mu               sync.RWMutex
 	routes           map[string]BrowserRoute
@@ -47,12 +47,12 @@ type Proxy struct {
 	started          bool
 }
 
-// NewProxy creates a router for registered flat browser sites.
+// NewProxy creates a router for registered browser services.
 func NewProxy(cfg ProxyConfig) (*Proxy, error) {
 	if cfg.DialContext == nil {
 		return nil, errors.New("splitdns proxy: authorized DialContext is required")
 	}
-	suffix, err := validateSuffix(cfg.Suffix)
+	suffix, err := validateBrowserSuffix(cfg.Suffix)
 	if err != nil {
 		return nil, err
 	}

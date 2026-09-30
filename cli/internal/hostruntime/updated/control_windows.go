@@ -77,13 +77,6 @@ func newWindowsController(config WindowsConfig) (*windowsController, error) {
 		return nil, err
 	}
 	controller.scheduler = scheduler
-	if journal, loadErr := loadWindowsActivationJournalForController(config); loadErr == nil && journal.PreviousVersion == config.ActiveVersion && journal.BlockedReason == autoupdate.BlockedActiveTerminalSessions && (journal.Stage == windowsActivationBusyReady || journal.Stage == windowsActivationRolledBack) {
-		if err := scheduler.SeedBlockedActiveTerminalSessions(journal.Version, journal.BlockedRetryAt); err != nil {
-			return nil, err
-		}
-	} else if loadErr != nil && !errors.Is(loadErr, os.ErrNotExist) {
-		return nil, loadErr
-	}
 	return controller, nil
 }
 
@@ -134,7 +127,7 @@ func (c *windowsController) run(ctx context.Context, ready func() error) error {
 		}
 		_ = listener.Close()
 	}()
-	if c.config.AutomaticActivation {
+	if c.config.AutomaticChecks {
 		go func() { _ = c.scheduler.Run(ctx) }()
 	}
 	if ready != nil {
@@ -205,25 +198,29 @@ func (c *windowsController) handle(connection net.Conn) (bool, error) {
 	if err := json.NewEncoder(connection).Encode(response); err != nil {
 		return false, err
 	}
-	return response.Pending, nil
+	return request.Operation == "install" && response.Pending && invokeErr == nil, nil
 }
 
 func (c *windowsController) invoke(ctx context.Context, request ControlRequest) (ControlResponse, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	response := ControlResponse{Schema: ControlProtocolV1, Status: "ok", Version: c.activeVersion, Observation: c.scheduler.Snapshot()}
-	var blocked bool
-	var blockErr error
-	if request.Operation == "status" || request.Operation == "check" {
-		// Read-only operations may report a fenced transaction, but must not
-		// hand its journal to the activator. Recovery is reserved for paths
-		// that can mutate the transaction.
-		blocked, blockErr = c.activationBlockedReadOnlyContext(ctx)
-	} else {
-		blocked, blockErr = c.activationBlockedContext(ctx)
-	}
+	blocked, blockErr := c.activationBlockedReadOnlyContext(ctx)
 	if blockErr != nil {
 		return response, blockErr
+	}
+	if blocked && request.Operation == "install" {
+		journal, err := loadWindowsActivationJournalForController(c.config)
+		if err != nil {
+			return response, err
+		}
+		if request.ApprovalID != journal.Candidate.ID || journal.ApprovedCandidateID != request.ApprovalID {
+			return response, workerupdate.ErrApprovalRequired
+		}
+		blocked, blockErr = c.activationBlockedContext(ctx)
+		if blockErr != nil {
+			return response, blockErr
+		}
 	}
 	if blocked && request.Operation != "status" {
 		return response, ErrWindowsActivationUnavailable
@@ -232,6 +229,14 @@ func (c *windowsController) invoke(ctx context.Context, request ControlRequest) 
 	case "status":
 		if journal, err := loadWindowsActivationJournalForController(c.config); err == nil {
 			response.Transaction = windowsTransactionState(journal)
+			if journal.Stage == windowsActivationAwaitingApproval {
+				if err := verifyWindowsPreparedCandidate(ctx, journal); err != nil {
+					return response, err
+				}
+				candidate := journal.Candidate
+				response.Candidate = &candidate
+			}
+
 			if journal.Version == c.activeVersion {
 				response.Pending = journal.Stage != windowsActivationCommitted
 				response.Updated = journal.Stage == windowsActivationCommitted
@@ -252,58 +257,75 @@ func (c *windowsController) invoke(ctx context.Context, request ControlRequest) 
 		c.checkMu.Unlock()
 		response.Version, response.Updated, response.Observation = result.Version, false, c.scheduler.Snapshot()
 		return response, err
-	case "update":
+	case "download", "install":
 		if c.config.RepositoryURL == "" {
 			return response, ErrWindowsActivationUnavailable
 		}
 		c.checkMu.Lock()
 		defer c.checkMu.Unlock()
-		source, sourceErr := c.tufSource()
-		if sourceErr != nil {
-			return response, sourceErr
-		}
-		release, found, err := source.ResolveManual(ctx)
-		if err != nil || !found {
+		source, err := c.tufSource()
+		if err != nil {
 			return response, err
 		}
-		comparison, compareErr := compareWindowsInstalledVersion(release.Version, c.activeVersion, c.config.Source)
-		if compareErr != nil || comparison < 0 {
+		release, found, err := source.ResolveManual(ctx)
+		if err != nil {
+			return response, err
+		}
+		if !found {
+			return response, workerupdate.ErrPreparedCandidate
+		}
+		comparison, err := compareWindowsInstalledVersion(release.Version, c.activeVersion, c.config.Source)
+		if err != nil || comparison < 0 {
 			return response, workerupdate.ErrInvalidRelease
 		}
 		if comparison == 0 {
 			return response, nil
 		}
-		if _, err := stageWindowsActivation(ctx, c.config, release, "update"); err != nil {
+		candidate, err := workerupdate.PreparedCandidateForRelease(release)
+		if err != nil {
 			return response, err
 		}
-		response.Version, response.Pending = release.Version, true
-		return response, nil
-	case "approve-maintenance":
-		if c.config.RepositoryURL == "" {
-			return response, ErrWindowsActivationUnavailable
+		if request.Operation == "download" {
+			journal, stageErr := stageWindowsActivation(ctx, c.config, release)
+			if stageErr != nil {
+				return response, stageErr
+			}
+			response.Candidate = &candidate
+			response.Transaction = windowsTransactionState(journal)
+			return response, nil
 		}
-		c.checkMu.Lock()
-		defer c.checkMu.Unlock()
-		source, sourceErr := c.tufSource()
-		if sourceErr != nil {
-			return response, sourceErr
+		journal, err := loadWindowsActivationJournal(c.config)
+		if err != nil {
+			return response, errors.Join(workerupdate.ErrPreparedCandidate, err)
 		}
-		release, found, err := source.ResolveSupervisorManual(ctx)
-		if err != nil || !found {
+		if journal.Stage != windowsActivationAwaitingApproval {
+			return response, ErrApprovalRequired
+		}
+		if request.ApprovalID != candidate.ID || journal.Candidate.ID != candidate.ID {
+			return response, ErrCandidateChanged
+		}
+		if err = verifyWindowsPreparedCandidate(ctx, journal); err != nil {
 			return response, err
 		}
-		if release.Version != request.Release {
-			return response, workerupdate.ErrInvalidRelease
-		}
-		comparison, compareErr := compareWindowsInstalledVersion(release.Version, c.activeVersion, c.config.Source)
-		if compareErr != nil || comparison <= 0 {
-			return response, workerupdate.ErrInvalidRelease
-		}
-		if _, err := stageWindowsActivation(ctx, c.config, release, "maintenance"); err != nil {
+		backend := newWindowsSCMActivationBackend(c.config)
+		if err = backend.AuthorizeRecovery(ctx, journal); err != nil {
 			return response, err
 		}
-		response.Version, response.Pending = release.Version, true
-		response.Supervisor.StagedVersion, response.Supervisor.MaintenanceRequired, response.Supervisor.Stage = release.Version, true, "activation_pending"
+		journal.ApprovedCandidateID = candidate.ID
+		if err = backend.WriteJournal(journal); err != nil {
+			return response, err
+		}
+		if err = installWindowsActivatorService(journal.Updater.Path, c.config.OwnerSID); err != nil {
+			return response, err
+		}
+		journal.Stage = windowsActivationStaged
+		if err = backend.WriteJournal(journal); err != nil {
+			return response, err
+		}
+		response.Candidate = &candidate
+		response.Version = release.Version
+		response.Pending = true
+		response.Transaction = windowsTransactionState(journal)
 		return response, nil
 	default:
 		return ControlResponse{}, ErrInvalidControl
@@ -317,24 +339,20 @@ func windowsTransactionState(journal windowsActivationJournal) workerupdate.Tran
 		UpdatedAt: time.Now().UTC(),
 	}
 	switch journal.Stage {
+	case windowsActivationAwaitingApproval:
+		state.Stage = updateflow.StageAwaitingApproval
 	case windowsActivationStaged:
 		state.Stage = updateflow.StageStaged
-	case windowsActivationCandidateValidating:
-		state.Stage = updateflow.StageCandidateValidating
-	case windowsActivationCandidateReady:
-		state.Stage = updateflow.StageCandidateReady
-	case windowsActivationDraining:
-		state.Stage = updateflow.StageDraining
 	case windowsActivationSwitching:
 		state.Stage = updateflow.StageCutover
 	case windowsActivationServicesLive, windowsActivationCommitReady:
 		state.Stage = updateflow.StageMonitoring
 	case windowsActivationCommitted:
 		state.Stage, state.ActiveVersion = updateflow.StageCommitted, journal.Version
-	case windowsActivationRollingBack, windowsActivationRollbackReady, windowsActivationBusyReady:
+	case windowsActivationRollingBack, windowsActivationRollbackReady:
 		state.Stage = updateflow.StageRollback
 	case windowsActivationRolledBack:
-		state.Stage, state.Quarantined = updateflow.StageIdle, journal.BlockedReason == ""
+		state.Stage, state.Quarantined = updateflow.StageIdle, true
 	}
 	if journal.Failure != "" {
 		state.Failure = updateflow.FailureHealth
@@ -352,55 +370,13 @@ func activationRequested(channel <-chan struct{}) bool {
 }
 
 func (c *windowsController) checkRelease(ctx context.Context) (autoupdate.Result, error) {
-	if !c.config.AutomaticActivation {
+	if !c.config.AutomaticChecks {
 		return autoupdate.Result{Version: c.activeVersion}, nil
 	}
 	c.checkMu.Lock()
 	defer c.checkMu.Unlock()
-	blocked, err := c.activationBlockedContext(ctx)
-	if err != nil {
-		return autoupdate.Result{Version: c.activeVersion}, err
-	}
-	if blocked {
-		return autoupdate.Result{Version: c.activeVersion}, nil
-	}
-	journal, loadErr := loadWindowsActivationJournalForController(c.config)
-	if loadErr != nil && !errors.Is(loadErr, os.ErrNotExist) {
-		return autoupdate.Result{Version: c.activeVersion}, loadErr
-	}
-	manualResolver, maintenanceResolver := c.resolve, c.resolve
-	if journal.BlockedReason == autoupdate.BlockedActiveTerminalSessions && journal.ManualMode != "" {
-		source, sourceErr := c.tufSource()
-		if sourceErr != nil {
-			return autoupdate.Result{Version: c.activeVersion}, sourceErr
-		}
-		manualResolver, maintenanceResolver = source.ResolveManual, source.ResolveSupervisorManual
-	}
-	release, found, manualMode, err := resolveWindowsQueuedRelease(ctx, journal, c.resolve, manualResolver, maintenanceResolver)
-	if err != nil {
-		return autoupdate.Result{Version: c.activeVersion}, err
-	}
-	if !found {
-		return autoupdate.Result{Version: c.activeVersion}, nil
-	}
-	if c.config.AutomaticActivation {
-		comparison, compareErr := compareWindowsInstalledVersion(release.Version, c.activeVersion, c.config.Source)
-		if compareErr != nil || comparison < 0 {
-			return autoupdate.Result{Version: c.activeVersion}, workerupdate.ErrInvalidRelease
-		}
-		if comparison == 0 {
-			return autoupdate.Result{Version: c.activeVersion}, nil
-		}
-		if _, err := stageWindowsActivation(ctx, c.config, release, manualMode); err != nil {
-			return autoupdate.Result{Version: c.activeVersion}, err
-		}
-		if err := startWindowsActivatorService(c.config.OwnerSID); err != nil {
-			return autoupdate.Result{Version: c.activeVersion}, err
-		}
-		c.handoffOnce.Do(func() { close(c.handoff) })
-		return autoupdate.Result{Version: release.Version, Updated: true}, nil
-	}
-	return autoupdate.Result{Version: release.Version}, nil
+	result, err := resolveRelease(ctx, c.activeVersion, c.resolve)
+	return autoupdate.Result{Version: result.Version}, err
 }
 
 func (c *windowsController) activationBlocked() (bool, error) {
@@ -478,6 +454,12 @@ func (c *windowsController) activationBlockedContext(ctx context.Context) (bool,
 }
 
 func controlErrorCodeWindows(err error) string {
+	if errors.Is(err, workerupdate.ErrApprovalRequired) || errors.Is(err, ErrApprovalRequired) {
+		return "approval_required"
+	}
+	if errors.Is(err, workerupdate.ErrPreparedCandidate) || errors.Is(err, ErrCandidateChanged) {
+		return "candidate_changed"
+	}
 	var busy *autoupdate.ActiveTerminalSessionsError
 	if errors.As(err, &busy) {
 		return autoupdate.BlockedActiveTerminalSessions
@@ -486,26 +468,6 @@ func controlErrorCodeWindows(err error) string {
 		return "activation_unavailable"
 	}
 	return "check_failed"
-}
-
-func resolveWindowsQueuedRelease(ctx context.Context, journal windowsActivationJournal, automatic, manual, maintenance workerupdate.Resolver) (workerupdate.Release, bool, string, error) {
-	resolver := automatic
-	mode := ""
-	if journal.BlockedReason == autoupdate.BlockedActiveTerminalSessions {
-		switch journal.ManualMode {
-		case "update":
-			resolver = manual
-			mode = "update"
-		case "maintenance":
-			resolver = maintenance
-			mode = "maintenance"
-		}
-	}
-	release, found, err := resolver(ctx)
-	if err == nil && mode != "" && (!found || release.Version != journal.Version) {
-		return workerupdate.Release{}, false, mode, errors.New("deferred manual update is no longer the current eligible signed release; run pb update to choose a new release")
-	}
-	return release, found, mode, err
 }
 
 func compareWindowsInstalledVersion(candidate, active string, source installsource.Source) (int, error) {

@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
@@ -284,5 +285,41 @@ func TestNativeNetworkAuthorizerUsesVerifiedAccessSessionInsteadOfJournalHash(t 
 				t.Fatalf("cross-machine credential accepted resource=%q err=%v", resource, err)
 			}
 		})
+	}
+}
+
+func TestProductionNativePeerRecoversInitialControlFailure(t *testing.T) {
+	recovered := make(chan struct{})
+	failure := &api.APIError{Status: 503, Code: "peer_network_unavailable", Message: "control authority temporarily unavailable"}
+	service := &productionNativePeerService{startGeneration: func(ctx context.Context) (*productionNativePeerGeneration, error) {
+		select {
+		case <-recovered:
+			return &productionNativePeerGeneration{cancel: func() {}, errors: make(chan error, 1)}, nil
+		default:
+			return nil, failure
+		}
+	}}
+	if err := service.Start(t.Context()); err != nil {
+		t.Fatal("initial control failure abandoned supervisor", err)
+	}
+	if !errors.Is(service.LastError(), failure) {
+		t.Fatal("initial failure not retained")
+	}
+	close(recovered)
+	deadline := time.Now().Add(3 * time.Second)
+	for service.LastError() != nil && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if service.LastError() != nil {
+		t.Fatal("control recovery did not restart peer service")
+	}
+	service.mu.Lock()
+	active := service.current != nil
+	service.mu.Unlock()
+	if !active {
+		t.Fatal("recovery did not activate peer generation")
+	}
+	if err := service.Shutdown(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 )
 
 func TestDeviceGuardTrustCommandValidatesAndInvokesExactSuffix(t *testing.T) {
@@ -39,7 +41,7 @@ func TestDeviceGuardTrustCommandRejectsUnsafeSuffixAndReportsRecovery(t *testing
 	command = newDeviceGuardTrustCommand(func(context.Context, string) error { return errors.New("interaction denied") })
 	command.SetArgs(nil)
 	err := command.ExecuteContext(t.Context())
-	if err == nil || !strings.Contains(err.Error(), "sudo pb daemon device-guard trust --suffix pprbt") || !strings.Contains(err.Error(), "interactive macOS terminal") {
+	if err == nil || !strings.Contains(err.Error(), "sudo pb daemon device-guard trust --suffix "+splitdns.BrowserSuffix) || !strings.Contains(err.Error(), "interactive macOS terminal") {
 		t.Fatalf("recovery error=%v", err)
 	}
 }

@@ -53,18 +53,10 @@ func ResolvePaths(environ func(string) string, home string, uid int) (Paths, err
 				runtimeBase = candidate
 			}
 		}
-	} else {
-		candidate := environ("TMPDIR")
-		if candidate != "" && !filepath.IsAbs(candidate) {
-			return Paths{}, ErrInvalidConfig
-		}
-		if candidate != "" {
-			candidate = filepath.Clean(candidate)
-			if safeOwnerDirectory(candidate, uid) {
-				runtimeBase = candidate
-			}
-		}
 	}
+	// Darwin launchd supplies TMPDIR even when the installing shell does not.
+	// Keep its per-user socket in the protected state directory so GUI, SSH and
+	// launchd clients always use the same namespace.
 	var runtimeRoot string
 	if runtimeBase == "" {
 		runtimeRoot = filepath.Join(stateRoot, "run")

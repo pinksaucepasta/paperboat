@@ -32,14 +32,14 @@ publication, the copy in signed TUF target metadata is authoritative.
 
 ## Publication inputs
 
-Build exactly the five native assets in a clean absolute directory:
+Build the selected qualified canonical native assets in a clean absolute directory. Omitted platform targets retain their existing signed versions and policies:
 
 ```sh
 go run ./tools/release-plan manifest \
   -version 2026.08.31.1 \
   -source-commit 0123456789abcdef0123456789abcdef01234567 \
   -toolchain go1.27.1 \
-  -artifacts /absolute/path/to/five-assets \
+  -artifacts /absolute/path/to/qualified-assets \
   -output /absolute/path/to/manifest.json
 
 go run ./tools/release-plan plan \
@@ -52,7 +52,7 @@ go run ./tools/release-plan plan \
 go run ./tools/release-plan validate \
   -manifest /absolute/path/to/manifest.json \
   -plan /absolute/path/to/deployment-plan.json \
-  -artifacts /absolute/path/to/five-assets
+  -artifacts /absolute/path/to/qualified-assets
 ```
 
 The signer consumes and validates those files before writing targets metadata:
@@ -61,11 +61,10 @@ The signer consumes and validates those files before writing targets metadata:
 go run ./tools/tuf-repository publish \
   -repository /absolute/path/to/tuf-production \
   -version 2026.08.31.1 \
-  -artifacts /absolute/path/to/five-assets \
+  -artifacts /absolute/path/to/qualified-assets \
   -manifest /absolute/path/to/manifest.json \
   -deployment-plan /absolute/path/to/deployment-plan.json \
   -windows-amd64-native-evidence /absolute/path/to/windows-amd64-native-qualification.json \
-  -windows-arm64-native-evidence /absolute/path/to/windows-arm64-native-qualification.json \
   -rollout-revision 7 \
   -severity routine
 
@@ -75,8 +74,10 @@ go run ./tools/tuf-repository verify-published \
 
 Publication embeds `manifest_sha256`, `deployment_plan_sha256`, and the static
 deployment policy in every signed release-index target. The publisher checks
-that all five targets carry identical policy bytes and that the artifact
-manifest matches each TUF length and SHA-256. Changing a policy or artifact
+that targets from the same release carry consistent policy bytes and that the
+selected artifact manifest matches each TUF length and SHA-256. Every selected
+Windows architecture requires its own native qualification evidence; the example
+selects windows-amd64 and omits windows-arm64. Changing a policy or artifact
 after signing invalidates the TUF role signatures and is rejected by
 `verify-published`.
 
@@ -119,21 +120,24 @@ The updater must reject an input whose target tuple changes between phases. A
 reconnect, route replacement, or configuration replacement therefore obtains a
 fresh provider input rather than reusing a stale one.
 
-Standalone executable activation restarts the host daemon. While it owns a running
-or detached terminal process, activation waits and `pb update status` reports
-`active_terminal_sessions` and the required version. Existing terminals remain usable;
-finish those shells to permit activation at the next automatic check. This does not
-quarantine the candidate or change signed eligibility or user-deferral deadlines.
-Once no terminal remains, the host atomically fences new terminal creation and restart
-until verified commit or rollback. The persisted exact transaction restores this fence
-on host restart. Resumable transfers use their application recovery protocol; workload
-counters are not proof of continuity across a daemon restart.
+Standalone updates notify users and require approval of the exact verified download.
+`pb update check` reads signed metadata. `pb update download` stages the candidate
+without executing it; `pb update --approve <candidate-id>` starts installation after
+review. Interactive `pb update` shows the downloaded version, platform, size and digest
+before its default-no confirmation. Changed signed metadata or staged bytes invalidate
+approval. Ordinary updater restart preserves the download without activating it.
+
+Approved installation restarts services and interrupts active connections. Terminals
+and transfers use their existing reconnect/recovery behavior afterward; seamless work
+preservation is not promised. The native transaction retains authenticated process
+readiness, bounded monitoring and policy-authorized rollback, without requiring a
+parallel worker, terminal-drain grant or a separate maintenance approval owner.
 
 On Linux and macOS, the existing update transaction replaces the verified executable,
 restarts the fixed native host service, and adopts its authenticated worker identity and
 persistent epoch before checking stability. Restart and recovery have signed timeout
 bounds. A failed cutover restores an artifact still permitted by the update trust policy
-and restarts that previous host runtime before releasing the admission fence.
+and restarts that previous host runtime before completing recovery.
 
 ## Journal and operator actions
 

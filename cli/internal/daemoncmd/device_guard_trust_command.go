@@ -17,7 +17,7 @@ func newDeviceGuardTrustCommand(install deviceGuardTrustInstaller) *cobra.Comman
 		Short: "Trust Paperboat private HTTPS names on this Mac",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
-			clean, err := splitdns.ValidateSuffix(suffix)
+			clean, err := splitdns.ValidateTrustSuffix(suffix)
 			if err != nil {
 				return fmt.Errorf("invalid --suffix: %w", err)
 			}
@@ -29,6 +29,6 @@ func newDeviceGuardTrustCommand(install deviceGuardTrustInstaller) *cobra.Comman
 		},
 		SilenceUsage: true,
 	}
-	command.Flags().StringVar(&suffix, "suffix", "pprbt", "private Paperboat device suffix")
+	command.Flags().StringVar(&suffix, "suffix", splitdns.BrowserSuffix, "private Paperboat browser suffix")
 	return command
 }

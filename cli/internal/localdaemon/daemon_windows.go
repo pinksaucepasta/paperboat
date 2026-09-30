@@ -112,6 +112,9 @@ func runWindowsDaemon(ctx context.Context, config DaemonConfig) error {
 			severity, fields := inventoryRefreshDiagnostic(err)
 			_ = recorder.Record("reconciliation", "inventory_refresh", severity, fields)
 		}, OnMachines: func(refreshCtx context.Context, machines []api.UserMachine) {
+			if config.OnMachines != nil {
+				config.OnMachines(refreshCtx, machines)
+			}
 			authorityInvalidator.Observe(machines)
 			if managedSSHRuntime != nil {
 				sshCtx, cancelSSH := context.WithTimeout(refreshCtx, 15*time.Second)

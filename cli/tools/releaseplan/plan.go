@@ -87,15 +87,28 @@ type Manifest struct {
 }
 
 func (m Manifest) Validate() error {
-	if m.Schema != ManifestSchema || !releasepolicy.IsVersion(m.Version) || !commitPattern.MatchString(m.SourceCommit) || !toolchainPattern.MatchString(m.Toolchain) || len(m.Artifacts) != len(artifactSpecs) {
+	if m.Schema != ManifestSchema || !releasepolicy.IsVersion(m.Version) || !commitPattern.MatchString(m.SourceCommit) || !toolchainPattern.MatchString(m.Toolchain) || len(m.Artifacts) == 0 || len(m.Artifacts) > len(artifactSpecs) {
 		return ErrInvalidManifest
 	}
-	for index, artifact := range m.Artifacts {
-		spec := artifactSpecs[index]
-		if artifact.Name != spec.Name || artifact.Platform != spec.Platform || artifact.Architecture != spec.Architecture || artifact.Format != spec.Format || artifact.Length < 1 || artifact.Length > MaxArtifactBytes || !releasepolicy.IsDigest(artifact.SHA256) {
+	previous := -1
+	for _, artifact := range m.Artifacts {
+		index := -1
+		for candidate, spec := range artifactSpecs {
+			if artifact.Name == spec.Name {
+				index = candidate
+				break
+			}
+		}
+		if index <= previous {
 			return ErrInvalidManifest
 		}
+		spec := artifactSpecs[index]
+		if artifact.Platform != spec.Platform || artifact.Architecture != spec.Architecture || artifact.Format != spec.Format || artifact.Length < 1 || artifact.Length > MaxArtifactBytes || !releasepolicy.IsDigest(artifact.SHA256) {
+			return ErrInvalidManifest
+		}
+		previous = index
 	}
+
 	return nil
 }
 
@@ -119,7 +132,7 @@ func (m Manifest) SHA256() (string, error) {
 	return hex.EncodeToString(digest[:]), nil
 }
 
-// BuildManifest reads exactly the five canonical release files. It rejects
+// BuildManifest reads a nonempty canonical subset of supported release files. It rejects
 // symlinks, directories, extra files, and a file that changes while hashing.
 func BuildManifest(version, sourceCommit, toolchain, artifactDirectory string) (Manifest, error) {
 	if !absoluteCleanDirectory(artifactDirectory) || !releasepolicy.IsVersion(version) || !commitPattern.MatchString(sourceCommit) || !toolchainPattern.MatchString(toolchain) {
@@ -129,12 +142,15 @@ func BuildManifest(version, sourceCommit, toolchain, artifactDirectory string) (
 	if err != nil {
 		return Manifest{}, err
 	}
-	if len(entries) != len(artifactSpecs) {
+	if len(entries) == 0 || len(entries) > len(artifactSpecs) {
 		return Manifest{}, ErrInvalidManifest
 	}
 	artifacts := make([]Artifact, 0, len(artifactSpecs))
 	for _, spec := range artifactSpecs {
 		info, err := os.Lstat(filepath.Join(artifactDirectory, spec.Name))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
 		if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() < 1 || info.Size() > MaxArtifactBytes {
 			return Manifest{}, ErrInvalidManifest
 		}
@@ -218,7 +234,7 @@ type DeferralRequest = releasepolicy.DeferralRequest
 type Deferral = releasepolicy.Deferral
 
 // ValidatePlanAgainstManifest verifies both the signed policy identity and
-// complete coverage of the canonical native artifact set.
+// exact platform coverage of the selected native artifact set.
 func ValidatePlanAgainstManifest(plan Plan, manifest Manifest) error {
 	if manifest.Validate() != nil {
 		return ErrInvalidPlan
@@ -227,18 +243,23 @@ func ValidatePlanAgainstManifest(plan Plan, manifest Manifest) error {
 	if err != nil || plan.ValidateAgainst(manifest.Version, digest) != nil {
 		return ErrInvalidPlan
 	}
-	for _, spec := range artifactSpecs {
-		covered := false
-		for _, cohort := range plan.Cohorts {
-			if cohort.Platform == spec.Platform && cohort.Architecture == spec.Architecture {
-				covered = true
-				break
-			}
+	selected := make(map[string]bool, len(manifest.Artifacts))
+	for _, artifact := range manifest.Artifacts {
+		selected[artifact.Platform+"/"+artifact.Architecture] = false
+	}
+	for _, cohort := range plan.Cohorts {
+		key := cohort.Platform + "/" + cohort.Architecture
+		if _, ok := selected[key]; !ok {
+			return ErrInvalidPlan
 		}
+		selected[key] = true
+	}
+	for _, covered := range selected {
 		if !covered {
 			return ErrInvalidPlan
 		}
 	}
+
 	return nil
 }
 
@@ -259,9 +280,9 @@ func DefaultPlan(manifest Manifest, policyRevision uint64, severity, seed string
 	if err != nil || !releasepolicy.IsIdentifier(seed) || policyRevision == 0 {
 		return Plan{}, ErrInvalidPlan
 	}
-	targets := make([]releasepolicy.PlatformTarget, 0, len(artifactSpecs))
-	for _, spec := range artifactSpecs {
-		targets = append(targets, releasepolicy.PlatformTarget{Platform: spec.Platform, Architecture: spec.Architecture})
+	targets := make([]releasepolicy.PlatformTarget, 0, len(manifest.Artifacts))
+	for _, artifact := range manifest.Artifacts {
+		targets = append(targets, releasepolicy.PlatformTarget{Platform: artifact.Platform, Architecture: artifact.Architecture})
 	}
 	plan, err := releasepolicy.Default(manifest.Version, digest, policyRevision, severity, seed, targets)
 	if err != nil {
@@ -617,7 +638,7 @@ func knownState(state DeploymentState) bool {
 }
 
 // ArtifactSpecs returns a copy for release workflow tests and callers that
-// need to enumerate the exact publication set without inventing a new target.
+// need to enumerate supported assets without inventing a new target.
 func ArtifactSpecs() []Artifact {
 	result := make([]Artifact, len(artifactSpecs))
 	for index, spec := range artifactSpecs {
