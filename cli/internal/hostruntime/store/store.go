@@ -286,8 +286,10 @@ func (s *Store) CompleteFileTransferBatch(ctx context.Context, batchID, localMac
 	return tx.Commit()
 }
 
+// CancelFileTransferBatch commits cancellation only when every member is cancelable.
+// The single guarded statement also arbitrates concurrent delivery receipts.
 func (s *Store) CancelFileTransferBatch(ctx context.Context, batchID string) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE file_transfers SET state='canceled',result_code='canceled' WHERE batch_id=? AND state IN ('created','uploading','pending')`, batchID)
+	result, err := s.db.ExecContext(ctx, `UPDATE file_transfers SET state='canceled',result_code='canceled' WHERE batch_id=? AND state IN ('created','uploading','pending') AND NOT EXISTS (SELECT 1 FROM file_transfers AS member WHERE member.batch_id=? AND member.state NOT IN ('created','uploading','pending','canceled'))`, batchID, batchID)
 	if err != nil {
 		return err
 	}

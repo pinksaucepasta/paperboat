@@ -77,6 +77,7 @@ const (
 	InvalidSize        Code = "invalid_size"
 	BatchLimit         Code = "batch_limit"
 	OffsetConflict     Code = "offset_conflict"
+	StateConflict      Code = "state_conflict"
 	DigestMismatch     Code = "digest_mismatch"
 	StorageUnavailable Code = "storage_unavailable"
 	ResourceLimit      Code = "resource_limit"
@@ -696,11 +697,16 @@ func (s *Service) cancelBatch(ctx context.Context, transfers []store.FileTransfe
 
 func (s *Service) cancelBatchLocked(ctx context.Context, transfers []store.FileTransfer) error {
 	var result error
+	if len(transfers) > 0 {
+		if err := s.config.Store.CancelFileTransferBatch(ctx, transfers[0].BatchID); err != nil {
+			if errors.Is(err, store.ErrConflict) {
+				return &Error{Code: StateConflict, Cause: err}
+			}
+			return &Error{Code: StorageUnavailable, Cause: err}
+		}
+	}
 	for _, transfer := range transfers {
 		s.signalCancel(transfer.ID)
-	}
-	if len(transfers) > 0 {
-		result = s.config.Store.CancelFileTransferBatch(ctx, transfers[0].BatchID)
 	}
 	if err := s.waitForWrites(ctx, transfers); err != nil {
 		return errors.Join(result, &Error{Code: StorageUnavailable, Cause: err})

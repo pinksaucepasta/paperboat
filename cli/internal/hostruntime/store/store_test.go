@@ -580,3 +580,84 @@ func crashStoreAt(t *testing.T, crashPoint string) {
 	}
 	t.Fatalf("crash point %q was not reached", crashPoint)
 }
+
+func TestCancelBatchRejectsCompletedMemberAtomically(t *testing.T) {
+	for _, completed := range []string{"published", "delivered"} {
+		t.Run(completed, func(t *testing.T) {
+			state, _ := openStore(t, nil)
+			now := time.Now().UTC()
+			first := FileTransfer{ID: "ft_cancel1", BatchID: "fb_cancel", SourceMachineID: "source", DestinationMachineID: "destination", InitiatingUserID: "user", SessionID: "session", DeliveryClientID: "cli", Basename: "a", SHA256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}
+			second := first
+			second.ID = "ft_cancel2"
+			second.Basename = "b"
+			if err := state.CreateFileTransfers(t.Context(), []FileTransfer{first, second}); err != nil {
+				t.Fatal(err)
+			}
+			local := "destination"
+			if completed == "delivered" {
+				local = "source"
+			}
+			if err := state.CompleteFileTransfer(t.Context(), first.ID, local); err != nil {
+				t.Fatal(err)
+			}
+			if completed == "delivered" {
+				if err := state.ReceiptFileTransfer(t.Context(), first.ID, "cli", "stored", "inbox/a"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := state.CancelFileTransferBatch(t.Context(), first.BatchID); !errors.Is(err, ErrConflict) {
+				t.Fatalf("cancel err=%v", err)
+			}
+			a, err := state.FileTransfer(t.Context(), first.ID)
+			if err != nil || a.State != completed {
+				t.Fatalf("completed state=%s err=%v", a.State, err)
+			}
+			b, err := state.FileTransfer(t.Context(), second.ID)
+			if err != nil || b.State != "created" {
+				t.Fatalf("other state=%s err=%v", b.State, err)
+			}
+		})
+	}
+}
+
+func TestCancelBatchAndReceiptNeverPartiallyCancel(t *testing.T) {
+	for attempt := 0; attempt < 10; attempt++ {
+		state, _ := openStore(t, nil)
+		now := time.Now().UTC()
+		a := FileTransfer{ID: "ft_race1", BatchID: "fb_race", SourceMachineID: "source", DestinationMachineID: "destination", InitiatingUserID: "user", SessionID: "session", DeliveryClientID: "cli", Basename: "a", SHA256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}
+		b := a
+		b.ID = "ft_race2"
+		b.Basename = "b"
+		if err := state.CreateFileTransfers(t.Context(), []FileTransfer{a, b}); err != nil {
+			t.Fatal(err)
+		}
+		if err := state.CompleteFileTransferBatch(t.Context(), a.BatchID, "source"); err != nil {
+			t.Fatal(err)
+		}
+		start := make(chan struct{})
+		cancelDone := make(chan error, 1)
+		receiptDone := make(chan error, 1)
+		go func() { <-start; cancelDone <- state.CancelFileTransferBatch(t.Context(), a.BatchID) }()
+		go func() {
+			<-start
+			receiptDone <- state.ReceiptFileTransfer(t.Context(), a.ID, "cli", "stored", "inbox/a")
+		}()
+		close(start)
+		cancelErr, receiptErr := <-cancelDone, <-receiptDone
+		first, err := state.FileTransfer(t.Context(), a.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		second, err := state.FileTransfer(t.Context(), b.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cancelErr == nil {
+			if first.State != "canceled" || second.State != "canceled" || !errors.Is(receiptErr, ErrConflict) {
+				t.Fatalf("cancel winner states=%s/%s receipt=%v", first.State, second.State, receiptErr)
+			}
+		} else if !errors.Is(cancelErr, ErrConflict) || receiptErr != nil || first.State != "delivered" || second.State != "pending" {
+			t.Fatalf("receipt winner states=%s/%s cancel=%v receipt=%v", first.State, second.State, cancelErr, receiptErr)
+		}
+	}
+}

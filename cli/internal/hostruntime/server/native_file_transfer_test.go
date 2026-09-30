@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	clienttransfer "github.com/pinksaucepasta/paperboat/internal/filetransfer"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -102,5 +103,42 @@ func TestNativeTransferPolicyUsesAuthorizedReceiver(t *testing.T) {
 	}
 	if json.Unmarshal(response.Body.Bytes(), &body) != nil || body.Policy != policy {
 		t.Fatal("receiver limits differ")
+	}
+}
+
+func TestNativeTransferCompletedCancellationReturnsConflictAndPreservesContent(t *testing.T) {
+	handler, _ := fileTransferTestHandler(t)
+	data := []byte("published record")
+	created, err := handler.config.Service.Create(t.Context(), filetransfer.CreateRequest{BatchID: "completed_cancel", SourceMachineID: "machine_client", DestinationMachineID: "machine_host", InitiatingUserID: "user_1", SessionID: "ses_1", Files: []filetransfer.File{{Basename: "completed.txt", Size: int64(len(data)), SHA256: transferDigest(data)}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := created[0].ID
+	if _, err := handler.config.Service.Append(t.Context(), id, 0, bytes.NewReader(data)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := handler.config.Service.Complete(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, transferRequest(http.MethodDelete, "http://helper.test/v1/file-transfers/"+id, nil))
+	if response.Code != http.StatusConflict {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Code      string `json:"code"`
+		Retryable bool   `json:"retryable"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || body.Code != "state_conflict" || body.Retryable {
+		t.Fatalf("error=%s", response.Body.String())
+	}
+	content, _, err := handler.config.Service.OpenContent(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer content.Close()
+	got, err := io.ReadAll(content)
+	if err != nil || !bytes.Equal(got, data) {
+		t.Fatalf("content lost: %v", err)
 	}
 }

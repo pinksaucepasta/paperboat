@@ -770,3 +770,65 @@ func hasCode(err error, code Code) bool {
 	var transferErr *Error
 	return errors.As(err, &transferErr) && transferErr.Code == code
 }
+
+func TestCancelCompletedTransferPreservesContentAndSignals(t *testing.T) {
+	service, durable, root := newService(t)
+	data := []byte("completed content")
+	created, err := service.Create(t.Context(), requestFor(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := created[0].ID
+	if _, err = service.Append(t.Context(), id, 0, bytes.NewReader(data)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.Complete(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	published, err := service.PublishedPath(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		if err = service.Cancel(t.Context(), id); !hasCode(err, StateConflict) {
+			t.Fatalf("cancel err=%v", err)
+		}
+		current, err := durable.FileTransfer(t.Context(), id)
+		if err != nil || current.State != "published" {
+			t.Fatalf("state=%v err=%v", current.State, err)
+		}
+		for _, path := range []string{filepath.Join(root, id+".content"), published} {
+			got, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(got, data) {
+				t.Fatalf("completed content changed: %v", err)
+			}
+		}
+		select {
+		case <-service.CancellationSignal(id):
+			t.Fatal("rejected cancel signaled completed transfer")
+		default:
+		}
+	}
+}
+
+func TestCancelStoreFailurePreservesPartialAndSignals(t *testing.T) {
+	service, durable, root := newService(t)
+	created, err := service.Create(t.Context(), requestFor([]byte("data")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := durable.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.cancelBatchLocked(t.Context(), created); !hasCode(err, StorageUnavailable) {
+		t.Fatalf("err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, created[0].ID+".part")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-service.CancellationSignal(created[0].ID):
+		t.Fatal("failed storage transition signaled cancellation")
+	default:
+	}
+}

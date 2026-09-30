@@ -589,7 +589,7 @@ func fileTransferHTTPStatus(code string) int {
 		return http.StatusNotFound
 	case "invalid_size", "batch_limit":
 		return http.StatusBadRequest
-	case "offset_conflict":
+	case "offset_conflict", "state_conflict":
 		return http.StatusConflict
 	case "no_active_writer", "recipient_unavailable":
 		return http.StatusConflict
