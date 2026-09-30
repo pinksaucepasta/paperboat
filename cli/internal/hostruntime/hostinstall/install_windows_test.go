@@ -302,3 +302,147 @@ func TestPrepareWindowsLocalDaemonStateRepairsSiblingStateTree(t *testing.T) {
 		t.Fatalf("write state after repair: %v", err)
 	}
 }
+
+func TestWindowsRollbackRequiresExactNativeBytes(t *testing.T) {
+	path, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := installsource.Inspect(path, "2026.09.30.18", installsource.Official)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := WindowsRuntimeConfig{RollbackSource: &source}
+	if err := verifyWindowsRollbackBinary(context.Background(), config, service.Layout{}, path); err != nil {
+		t.Fatal(err)
+	}
+	changed := source
+	changed.SHA256 = strings.Repeat("0", 64)
+	config.RollbackSource = &changed
+	if err := verifyWindowsRollbackBinary(context.Background(), config, service.Layout{}, path); err == nil {
+		t.Fatal("same-format wrong rollback payload accepted")
+	}
+	config.RollbackSource = &source
+	config.RollbackSigned = true
+	config.Artifact.RepositoryURL = "invalid"
+	if err := verifyWindowsRollbackBinary(context.Background(), config, service.Layout{UpdateStateRoot: t.TempDir()}, path); err == nil {
+		t.Fatal("signed rollback accepted without authenticated policy")
+	}
+}
+
+func TestWindowsRollbackProvenanceCannotComeFromClientJSON(t *testing.T) {
+	if _, err := Decode(strings.NewReader(`{"rollback_identity":{"Signed":true}}`)); err == nil {
+		t.Fatal("client supplied privileged rollback identity")
+	}
+	ownerSID := "S-1-5-21-1-2-3-1001"
+	instance, _ := WindowsInstanceForSID(ownerSID)
+	token, _ := WindowsInstanceTokenPath(instance)
+	source := installsource.Source{Version: "dev", Platform: "windows", Architecture: runtime.GOARCH, SHA256: strings.Repeat("0", 64), Length: 1, Distribution: installsource.Custom}
+	config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: instance, OwnerSID: ownerSID, User: "tester", StateRoot: `C:\State`, Workspace: `C:\Users\tester`, ListenAddress: "127.0.0.1:8080", SetupMode: "awaiting_enrollment", TokenFile: token, Source: source, RollbackSigned: true}
+	if validWindowsConfig(config) {
+		t.Fatal("signed provenance without identity accepted")
+	}
+	config.RollbackSource = &source
+	if validWindowsConfig(config) {
+		t.Fatal("custom source promoted to signed rollback")
+	}
+	config.RollbackSigned = false
+	if !validWindowsConfig(config) {
+		t.Fatal("explicit native rollback rejected")
+	}
+}
+
+// This opt-in check uses the real installed declaration, signed origin, and
+// retained recovery slot. It never changes product files or release metadata.
+func TestWindowsNativeRecordedSignedRollback(t *testing.T) {
+	instance := os.Getenv("PAPERBOAT_TEST_ROLLBACK_INSTANCE")
+	if instance == "" {
+		t.Skip("requires enrolled native-install recovery slot")
+	}
+	config, err := LoadWindowsRuntimeConfigForInstance(instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout, err := WindowsLayoutForInstance(instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !config.RollbackSigned || config.RollbackSource == nil || config.RollbackSource.Version != "2026.09.30.18" {
+		t.Fatalf("signed18 recovery identity missing: %+v", config.RollbackSource)
+	}
+	if err := verifyWindowsRollbackBinary(context.Background(), config, layout, layout.BinaryRollback); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyWindowsRollbackBinary(context.Background(), config, layout, layout.Binary); err == nil {
+		t.Fatal("new native payload accepted as prior signed rollback")
+	}
+	prior := *config.RollbackSource
+	prior.Version = "invalid-release"
+	config.RollbackSource = &prior
+	if err := verifyWindowsRollbackBinary(context.Background(), config, layout, layout.BinaryRollback); err == nil {
+		t.Fatal("rollback version outside signed policy accepted")
+	}
+}
+
+func TestWindowsNativeSignedRollbackRecovery(t *testing.T) {
+	instance := os.Getenv("PAPERBOAT_TEST_ROLLBACK_INSTANCE")
+	if instance == "" {
+		t.Skip("requires actual packaged native and signed recovery binaries")
+	}
+	config, err := LoadWindowsRuntimeConfigForInstance(instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed, err := WindowsLayoutForInstance(instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !config.RollbackSigned || config.RollbackSource == nil {
+		t.Fatal("missing signed recovery provenance")
+	}
+	body, err := os.ReadFile(installed.BinaryRollback)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.RollbackSource.Verify(installed.BinaryRollback); err != nil {
+		t.Fatal(err)
+	}
+	for _, cancelled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "recover", true: "cancelled-policy"}[cancelled], func(t *testing.T) {
+			root := t.TempDir()
+			layout := service.Layout{Binary: filepath.Join(root, "pb.exe"), BinaryRollback: filepath.Join(root, "pb.previous.exe"), BinaryStaged: filepath.Join(root, "pb.staged.exe"), UpdateStateRoot: filepath.Join(root, "updated")}
+			if err := os.WriteFile(layout.BinaryRollback, body, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			corrupt := []byte("interrupted native executable")
+			if err := os.WriteFile(layout.Binary, corrupt, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if cancelled {
+				cancel()
+			}
+			err := repairWindowsRuntimeBinary(ctx, config, layout)
+			if cancelled {
+				if err == nil {
+					t.Fatal("cancelled signed recovery accepted")
+				}
+				restored, readErr := os.ReadFile(layout.Binary)
+				if readErr != nil || string(restored) != string(corrupt) {
+					t.Fatal("failed recovery lost pre-operation bytes")
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := config.RollbackSource.Verify(layout.Binary); err != nil {
+					t.Fatalf("recovered payload identity: %v", err)
+				}
+				if _, err := os.Stat(layout.Binary + ".repair-quarantine"); !os.IsNotExist(err) {
+					t.Fatal("recovery quarantine leaked")
+				}
+			}
+		})
+	}
+}

@@ -216,10 +216,11 @@ func installWindowsRuntimeFromSuppliedBytes(ctx context.Context, request hostins
 			return err
 		}
 	}
-	restoreJournal, err := updated.PrepareWindowsNativeInstall(ctx, request.OwnerSID)
+	rollbackIdentity, restoreJournal, err := updated.PrepareWindowsNativeInstall(ctx, request.OwnerSID)
 	if err != nil {
 		return errors.Join(fmt.Errorf("prepare Windows updater for supplied install: %w", err), restoreServices())
 	}
+	request.RollbackIdentity = rollbackIdentity
 	if err := hostinstall.Install(ctx, request); err != nil {
 		return errors.Join(fmt.Errorf("install supplied Windows runtime: %w", err), restoreJournal(), restoreServices())
 	}

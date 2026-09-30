@@ -411,3 +411,23 @@ func validWindowsLocalPrevious(j windowsActivationJournal) bool {
 func nativeWindowsJournalRetirable(j windowsActivationJournal) bool {
 	return validWindowsActivationJournal(j) && (j.Stage == windowsActivationCommitted || j.Stage == windowsActivationRolledBack)
 }
+
+// nativeWindowsRollbackSource preserves the distinction between explicitly
+// installed baselines and signed update bytes when the native installer takes over.
+func nativeWindowsRollbackSource(j windowsActivationJournal) (installsource.Source, bool, error) {
+	if !nativeWindowsJournalRetirable(j) {
+		return installsource.Source{}, false, errInvalidWindowsActivation
+	}
+	if j.Stage == windowsActivationRolledBack && j.PreviousSource != nil {
+		return *j.PreviousSource, false, nil
+	}
+	version, component := j.Version, j.Runtime
+	if j.Stage == windowsActivationRolledBack {
+		version, component = j.PreviousVersion, j.PreviousBinary
+	}
+	source := installsource.Source{Version: version, Platform: "windows", Architecture: j.Architecture, SHA256: component.SHA256, Length: component.Length, Distribution: installsource.Official, AutomaticUpdates: true}
+	if err := source.Validate(); err != nil {
+		return installsource.Source{}, false, err
+	}
+	return source, true, nil
+}

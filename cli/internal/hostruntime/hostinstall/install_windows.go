@@ -32,6 +32,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseindex"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
 	winenv "github.com/pinksaucepasta/paperboat/internal/windowsenvironment"
@@ -60,7 +61,14 @@ var (
 	purgeStandaloneInstall              = func(context.Context) error { return nil }
 )
 
+// WindowsRollbackIdentity is supplied only by the privileged native-install coordinator.
+type WindowsRollbackIdentity struct {
+	Source installsource.Source
+	Signed bool
+}
+
 type Request struct {
+	RollbackIdentity    *WindowsRollbackIdentity `json:"-"`
 	Schema              string                   `json:"schema"`
 	Platform            string                   `json:"platform"`
 	User                string                   `json:"user"`
@@ -101,6 +109,7 @@ type WindowsRuntimeConfig struct {
 	Artifact       bootstrap.ArtifactTarget `json:"artifact"`
 	Source         installsource.Source     `json:"source"`
 	RollbackSource *installsource.Source    `json:"rollback_source,omitempty"`
+	RollbackSigned bool                     `json:"rollback_signed,omitempty"`
 }
 
 const windowsConfigSchema = "paperboat.windows-runtime-install/v1"
@@ -542,6 +551,12 @@ func Install(ctx context.Context, request Request) error {
 	var rollbackSource *installsource.Source
 	if previous, loadErr := LoadWindowsRuntimeConfigForInstance(instance); loadErr == nil {
 		prior := previous.Source
+		if request.RollbackIdentity != nil {
+			prior = request.RollbackIdentity.Source
+		}
+		if err := prior.Verify(layout.Binary); err != nil {
+			return fmt.Errorf("verify installed Windows rollback identity before reinstall: %w", err)
+		}
 		rollbackSource = &prior
 	}
 	instanceRoot, _ := WindowsInstanceRoot(instance)
@@ -604,7 +619,7 @@ func Install(ctx context.Context, request Request) error {
 		return err
 	}
 	request.Artifact.Version = request.Source.Version
-	config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: instance, OwnerSID: request.OwnerSID, User: request.User, StateRoot: request.StateRoot, Workspace: request.WorkspaceRoot, ControlURL: request.ControlURL, ListenAddress: request.HelperListenAddress, MachineID: request.UserMachineID, SetupMode: request.SetupMode, TokenFile: tokenPath, InstalledAt: time.Now().UTC(), Artifact: request.Artifact, Source: request.Source, RollbackSource: rollbackSource}
+	config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: instance, OwnerSID: request.OwnerSID, User: request.User, StateRoot: request.StateRoot, Workspace: request.WorkspaceRoot, ControlURL: request.ControlURL, ListenAddress: request.HelperListenAddress, MachineID: request.UserMachineID, SetupMode: request.SetupMode, TokenFile: tokenPath, InstalledAt: time.Now().UTC(), Artifact: request.Artifact, Source: request.Source, RollbackSource: rollbackSource, RollbackSigned: request.RollbackIdentity != nil && request.RollbackIdentity.Signed}
 	if err := runWindowsInstallPhase(ctx, "write Paperboat runtime configuration", func() error { return writeWindowsConfigAt(config, instanceRoot) }); err != nil {
 		return err
 	}
@@ -2024,7 +2039,7 @@ func validWindowsConfig(config WindowsRuntimeConfig) bool {
 	}
 	bound := config.MachineID != "" && (config.SetupMode == "host" || config.SetupMode == "client") && bootstrap.VerifyArtifactTarget(config.Artifact) == nil && config.Artifact.Platform == "windows" && config.Artifact.Architecture == runtime.GOARCH
 	unbound := config.MachineID == "" && config.SetupMode == "awaiting_enrollment"
-	rollbackValid := config.RollbackSource == nil || config.RollbackSource.Validate() == nil && config.RollbackSource.Platform == "windows" && config.RollbackSource.Architecture == runtime.GOARCH
+	rollbackValid := (config.RollbackSource == nil && !config.RollbackSigned) || config.RollbackSource != nil && config.RollbackSource.Validate() == nil && config.RollbackSource.Platform == "windows" && config.RollbackSource.Architecture == runtime.GOARCH && (!config.RollbackSigned || config.RollbackSource.Distribution == installsource.Official)
 	return config.Schema == windowsConfigSchema && validSID(config.OwnerSID) && tokenValid && config.User != "" && safeAbsolute(config.StateRoot) && safeAbsolute(config.Workspace) && (bound || unbound) && config.Source.Validate() == nil && config.Source.Platform == "windows" && config.Source.Architecture == runtime.GOARCH && rollbackValid && listenErr == nil && port != "" && net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback()
 }
 func safeAbsolute(path string) bool {
@@ -2559,6 +2574,9 @@ func ensureWindowsExecutableDirectory(path, readerSID string) error {
 }
 
 func repairWindowsRuntimeBinary(ctx context.Context, config WindowsRuntimeConfig, layout service.Layout) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	current, rollback, _ := windowsRuntimePaths(layout)
 	quarantine := current + ".repair-quarantine"
 	verifyCandidate := func(path string) error {
@@ -2570,18 +2588,7 @@ func repairWindowsRuntimeBinary(ctx context.Context, config WindowsRuntimeConfig
 		}
 		return verifyWindowsInstalledBinary(ctx, path, config.Source.Architecture)
 	}
-	verifyRollback := func(path string) error {
-		if config.RollbackSource == nil {
-			return ErrInvalidRequest
-		}
-		if config.RollbackSource.Distribution == installsource.Custom {
-			if err := secureWindowsFile(path, ""); err != nil {
-				return err
-			}
-			return config.RollbackSource.Verify(path)
-		}
-		return verifyWindowsInstalledBinary(ctx, path, config.RollbackSource.Architecture)
-	}
+	verifyRollback := func(path string) error { return verifyWindowsRollbackBinary(ctx, config, layout, path) }
 	if verifyCandidate(current) == nil {
 		_ = os.Remove(quarantine)
 		return applyWindowsACL(current, config.OwnerSID, false)
@@ -2611,6 +2618,10 @@ func repairWindowsRuntimeBinary(ctx context.Context, config WindowsRuntimeConfig
 		}
 	}
 	if verifyRollback(rollback) == nil {
+		if err := ctx.Err(); err != nil {
+			restoreCurrent()
+			return err
+		}
 		//paperboat:allow-source-policy atomic-replacement owner=windows-host-repair reason=verified-rollback-runtime-activation
 		if err := os.Rename(rollback, current); err != nil {
 			restoreCurrent()
@@ -2951,4 +2962,35 @@ func isAdministrator() bool {
 	}
 	defer token.Close()
 	return token.IsElevated()
+}
+
+// verifyWindowsRollbackBinary binds recovery to its recorded bytes and keeps
+// signed update recovery subject to current publisher revocation/floor policy.
+func verifyWindowsRollbackBinary(ctx context.Context, config WindowsRuntimeConfig, layout service.Layout, path string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if config.RollbackSource == nil {
+		return ErrInvalidRequest
+	}
+	if err := secureWindowsFile(path, ""); err != nil {
+		return err
+	}
+	if err := config.RollbackSource.Verify(path); err != nil {
+		return err
+	}
+	if config.RollbackSource.Distribution == installsource.Custom {
+		return nil
+	}
+	if err := verifyWindowsInstalledBinary(ctx, path, config.RollbackSource.Architecture); err != nil {
+		return err
+	}
+	if config.RollbackSigned {
+		source := workerupdate.TUFSource{RepositoryURL: config.Artifact.RepositoryURL, StateRoot: filepath.Join(layout.UpdateStateRoot, "tuf")}
+		if err := source.AuthorizeRecovery(ctx, config.RollbackSource.Version, "windows", config.RollbackSource.Architecture); err != nil {
+			return err
+		}
+		return ctx.Err()
+	}
+	return nil
 }
