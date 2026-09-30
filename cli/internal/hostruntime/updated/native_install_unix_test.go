@@ -5,6 +5,7 @@ package updated
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -113,4 +114,70 @@ func beginNativeInstallFixture(root string) (io.Closer, error) {
 		return nil, err
 	}
 	return lock, nil
+}
+
+func TestUnixNativeInstallSupersedesOnlyUnapprovedDownload(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("protected native installer state requires root")
+	}
+	for _, approved := range []bool{false, true} {
+		t.Run(fmt.Sprint(approved), func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.Chmod(root, 0700); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(root, "transaction.json")
+			j := updateflow.Journal{Schema: updateflow.SchemaV1, TransactionID: "native-install-candidate", Stage: updateflow.StageAwaitingApproval, ActiveVersion: "2026.09.30.10", BootID: "hostd", StageUpdatedAt: time.Now().UTC(), ActiveDigest: strings.Repeat("a", 64), ActiveLength: 1, ActiveHostdAPIMin: 1, ActiveHostdAPIMax: 1, ActiveRuntimeAPIMin: 1, ActiveRuntimeAPIMax: 1,
+				CandidateID: strings.Repeat("b", 64), ArtifactDigest: strings.Repeat("c", 64), ArtifactLength: 1, ArtifactPlatform: "linux", ArtifactArchitecture: "amd64", CandidateVersion: "2026.09.30.12", CandidateDigest: strings.Repeat("c", 64), CandidateLength: 1, StagedPath: filepath.Join(root, "staged")}
+			if approved {
+				j.ApprovedCandidateID = j.CandidateID
+			}
+			if err := updateflow.Write(path, j, 0, 0); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lock, err := beginNativeInstallFixture(root)
+			if lock != nil {
+				defer lock.Close()
+			}
+			if approved {
+				if !errors.Is(err, ErrActivationPending) {
+					t.Fatalf("approved candidate accepted: %v", err)
+				}
+				after, readErr := os.ReadFile(path)
+				if readErr != nil || !bytes.Equal(before, after) {
+					t.Fatal("approved journal changed", readErr)
+				}
+				if pending, err := nativeInstallPending(root); pending || err != nil {
+					t.Fatal("rejected install left marker", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("candidate not fenced", err)
+			}
+			if err = RollbackUnixNativeInstall(root); err != nil {
+				t.Fatal(err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatal("unapproved candidate not restored exactly", err)
+			}
+			if err = PrepareUnixNativeInstall(root); err != nil {
+				t.Fatal(err)
+			}
+			if err = CommitUnixNativeInstall(root); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("superseded journal retained", err)
+			}
+		})
+	}
 }

@@ -330,10 +330,10 @@ func downloadVerifiedGitHubAsset(ctx context.Context, base *http.Client, rawURL,
 	client := &http.Client{Timeout: 5 * time.Minute}
 	if base != nil {
 		*client = *base
-		if client.Timeout <= 0 {
-			client.Timeout = 5 * time.Minute
-		}
 	}
+	// Metadata requests have a shorter deadline than artifact bodies. Keep the
+	// existing artifact bound after copying transport settings; ctx can shorten it.
+	client.Timeout = 5 * time.Minute
 	client.CheckRedirect = func(request *http.Request, via []*http.Request) error {
 		host := strings.ToLower(request.URL.Hostname())
 		if len(via) >= 5 || request.URL.Scheme != "https" || request.URL.User != nil || host != "github.com" && !strings.HasSuffix(host, ".githubusercontent.com") && !strings.HasSuffix(host, ".blob.core.windows.net") {
@@ -368,7 +368,10 @@ func downloadVerifiedGitHubAsset(ctx context.Context, base *http.Client, rawURL,
 	}()
 	hash := sha256.New()
 	written, copyErr := io.Copy(io.MultiWriter(pending, hash), io.LimitReader(response.Body, expectedLength+1))
-	if copyErr != nil || written != expectedLength || !equalBytes(hash.Sum(nil), expectedDigest) {
+	if copyErr != nil {
+		return "", fmt.Errorf("download GitHub asset body: %w", copyErr)
+	}
+	if written != expectedLength || !equalBytes(hash.Sum(nil), expectedDigest) {
 		return "", ErrArtifactMismatch
 	}
 	if err := pending.Sync(); err != nil {

@@ -50,7 +50,9 @@ func PrepareUnixNativeInstall(root string) error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err == nil && journal.Stage != updateflow.StageIdle {
+	// An unapproved download has not changed the installation. Snapshot it so
+	// an explicit native install can supersede it, or restore it on failure.
+	if err == nil && !nativeInstallMaySupersede(journal) {
 		return fmt.Errorf("finish or recover the pending update before installing: %w", ErrActivationPending)
 	}
 	var snapshot nativeInstallSnapshot
@@ -97,7 +99,7 @@ func CommitUnixNativeInstall(root string) error {
 	return nil
 }
 
-// RollbackUnixNativeInstall restores the previous idle transaction before lifting
+// RollbackUnixNativeInstall restores the previous non-activating transaction before lifting
 // the pending marker. Updater startup and activation honor that marker.
 func RollbackUnixNativeInstall(root string) error {
 	info, err := os.Lstat(nativeInstallPath(root))
@@ -125,7 +127,7 @@ func RollbackUnixNativeInstall(root string) error {
 	path := filepath.Join(root, "transaction.json")
 	if len(snapshot.Journal) > 0 {
 		var previous updateflow.Journal
-		if json.Unmarshal(snapshot.Journal, &previous) != nil || previous.Validate() != nil || previous.Stage != updateflow.StageIdle {
+		if json.Unmarshal(snapshot.Journal, &previous) != nil || previous.Validate() != nil || !nativeInstallMaySupersede(previous) {
 			return ErrInvalidConfig
 		}
 		if err = atomicfile.Write(path, snapshot.Journal, atomicfile.Options{Mode: 0600, OwnerUID: 0, OwnerGID: 0}); err != nil {
@@ -135,4 +137,8 @@ func RollbackUnixNativeInstall(root string) error {
 		return err
 	}
 	return CommitUnixNativeInstall(root)
+}
+
+func nativeInstallMaySupersede(journal updateflow.Journal) bool {
+	return journal.Stage == updateflow.StageIdle || journal.Stage == updateflow.StageAwaitingApproval && journal.ApprovedCandidateID == ""
 }

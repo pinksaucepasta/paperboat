@@ -484,3 +484,78 @@ func testLinuxReleaseIndex() releaseindex.Index {
 		ManifestSHA256: manifest, DeploymentPlanSHA256: planDigest, DeploymentPlan: &plan,
 	}
 }
+
+// Exercise real TLS response bodies: transport remapping only directs the
+// immutable GitHub URL to this isolated test origin.
+func TestGitHubArtifactBodyDeadlineIntegrityAndCleanup(t *testing.T) {
+	for _, mode := range []string{"valid", "wrong_bytes", "cancel"} {
+		t.Run(mode, func(t *testing.T) {
+			body := []byte("signed artifact bytes")
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+				if mode == "cancel" {
+					_, _ = w.Write(body[:1])
+					w.(http.Flusher).Flush()
+					cancel()
+					<-r.Context().Done()
+					return
+				}
+				if mode == "wrong_bytes" {
+					body = []byte("wrong! artifact bytes")
+				}
+				_, _ = w.Write(body)
+			}))
+			defer server.Close()
+			endpoint, _ := url.Parse(server.URL)
+			client := server.Client()
+			client.Timeout = 2 * time.Minute
+			transport := client.Transport
+			client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				deadline, ok := r.Context().Deadline()
+				if !ok || time.Until(deadline) < 4*time.Minute || time.Until(deadline) > 5*time.Minute {
+					t.Errorf("artifact deadline inherited metadata limit: %v", deadline)
+				}
+				clone := r.Clone(r.Context())
+				u := *r.URL
+				u.Host = endpoint.Host
+				clone.URL = &u
+				return transport.RoundTrip(clone)
+			})
+			digest := sha256.Sum256(body)
+			directory := filepath.Join(t.TempDir(), "artifacts")
+			path, err := downloadVerifiedGitHubAsset(ctx, client, "https://github.com/owner/repo/releases/download/2026.09.30.13/pb-linux-amd64", directory, "pb-linux-amd64", int64(len(body)), digest[:])
+			switch mode {
+			case "valid":
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, err := os.ReadFile(path)
+				if err != nil || string(got) != string(body) {
+					t.Fatalf("body=%q err=%v", got, err)
+				}
+			case "wrong_bytes":
+				if !errors.Is(err, ErrArtifactMismatch) {
+					t.Fatalf("error=%v", err)
+				}
+			case "cancel":
+				if !errors.Is(err, context.Canceled) || errors.Is(err, ErrArtifactMismatch) {
+					t.Fatalf("error=%v", err)
+				}
+			}
+			entries, err := os.ReadDir(directory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range entries {
+				if strings.HasPrefix(entry.Name(), ".pb-download-") {
+					t.Fatalf("partial artifact retained: %s", entry.Name())
+				}
+			}
+			if mode != "valid" && len(entries) != 0 {
+				t.Fatalf("failed artifact committed: %v", entries)
+			}
+		})
+	}
+}
