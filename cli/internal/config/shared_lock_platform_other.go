@@ -27,5 +27,5 @@ func quarantineSharedLock(path, stalePath string) error {
 }
 
 func cleanupNewSharedLock(path string) error {
-	return os.RemoveAll(path)
+	return os.Remove(path)
 }

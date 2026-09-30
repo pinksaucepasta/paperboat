@@ -28,6 +28,10 @@ var ErrCredentialRequiresInteractiveLogin = errors.New("credential requires an i
 
 const sharedLockRemoteStaleAfter = 30 * time.Minute
 
+// A creator normally writes owner.json immediately. Allow its full acquisition
+// budget before reclaiming an empty directory left by an interrupted process.
+const sharedLockOwnerlessStaleAfter = 30 * time.Second
+
 type sharedLockOwner struct {
 	PID       int       `json:"pid"`
 	Hostname  string    `json:"hostname"`
@@ -84,12 +88,21 @@ func (l *sharedLock) Lock() error {
 		if err := validateSharedLockDirectory(l.path); err != nil {
 			return err
 		}
+		_, ownerErr := os.Lstat(filepath.Join(l.path, "owner.json"))
 		stale, err := sharedLockIsStale(l.path, hostname)
 		if err == nil && stale {
-			stalePath := l.path + ".stale-" + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
-			//paperboat:allow-source-policy atomic-replacement owner=runtime-auth reason=stale-lock-quarantine
-			if quarantineSharedLock(l.path, stalePath) == nil {
-				continue
+			if os.IsNotExist(ownerErr) {
+				// Empty-only removal is atomic: if a creator publishes ownership
+				// after this check, removal fails without touching its record.
+				if cleanupNewSharedLock(l.path) == nil {
+					continue
+				}
+			} else if ownerErr == nil {
+				stalePath := l.path + ".stale-" + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+				//paperboat:allow-source-policy atomic-replacement owner=runtime-auth reason=stale-lock-quarantine
+				if quarantineSharedLock(l.path, stalePath) == nil {
+					continue
+				}
 			}
 		}
 		if time.Now().After(deadline) {
@@ -102,14 +115,19 @@ func (l *sharedLock) Lock() error {
 
 func sharedLockIsStale(path, hostname string) (bool, error) {
 	b, err := os.ReadFile(filepath.Join(path, "owner.json"))
-	if err != nil {
+	if os.IsNotExist(err) {
 		info, statErr := os.Stat(path)
-		return statErr == nil && time.Since(info.ModTime()) > sharedLockRemoteStaleAfter, err
+		if statErr != nil {
+			return false, statErr
+		}
+		return time.Since(info.ModTime()) > sharedLockOwnerlessStaleAfter, nil
+	}
+	if err != nil {
+		return false, err
 	}
 	var owner sharedLockOwner
 	if err := json.Unmarshal(b, &owner); err != nil {
-		info, statErr := os.Stat(path)
-		return statErr == nil && time.Since(info.ModTime()) > sharedLockRemoteStaleAfter, err
+		return false, err
 	}
 	if owner.Hostname != hostname {
 		return time.Since(owner.CreatedAt) > sharedLockRemoteStaleAfter, nil
