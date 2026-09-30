@@ -13,6 +13,7 @@ import (
 	"errors"
 	"io"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -544,7 +545,12 @@ func (s *HTTPSProductionAssemblySource) carrierSessionSource(ctx context.Context
 		if !ok {
 			return connector.DataCarrierDialResult{}, connector.ErrInvalidDataCarrierEndpoint
 		}
-		return connector.NewHTTPNetworkDialer(configured)(dialCtx, dialRequest)
+		result, err := connector.NewHTTPNetworkDialer(configured)(dialCtx, dialRequest)
+		if err != nil && !errors.Is(dialCtx.Err(), context.Canceled) {
+			s.report(tunnelmanager.Observation{TunnelID: request.TunnelID, ConnectorID: request.ConnectorID,
+				Code: carrierDialDiagnostic(err), Retryable: true, ObservedAt: s.clock.Now().UTC(), Err: connector.ErrDataCarrierUnavailable})
+		}
+		return result, err
 	})
 	return connector.NewDataCarrierSessionSource(identity, pool, dialer)
 }
@@ -797,3 +803,35 @@ func carrierNodeEndpoints(descriptor carrierBootstrapDescriptor, node carrierBoo
 }
 
 var _ ProductionAssemblySource = (*HTTPSProductionAssemblySource)(nil)
+
+// carrierDialDiagnostic exposes only finite error categories, never a peer's
+// response, certificate content, address or credential material.
+func carrierDialDiagnostic(err error) string {
+	var hostname x509.HostnameError
+	var root x509.UnknownAuthorityError
+	var invalid x509.CertificateInvalidError
+	var network net.Error
+	switch {
+	case errors.As(err, &hostname):
+		return "carrier_tls_hostname"
+	case errors.As(err, &root):
+		return "carrier_tls_root"
+	case errors.As(err, &invalid):
+		if invalid.Reason == x509.Expired {
+			return "carrier_tls_expired"
+		}
+		return "carrier_tls_certificate"
+	case errors.Is(err, connector.ErrHTTP3Unavailable), errors.Is(err, context.DeadlineExceeded):
+		return "carrier_timeout"
+	case errors.As(err, &network) && network.Timeout():
+		return "carrier_timeout"
+	case errors.Is(err, connector.ErrDataCarrierAdmission):
+		return "carrier_admission"
+	case errors.Is(err, connector.ErrInvalidDataCarrierEndpoint):
+		return "carrier_endpoint"
+	case errors.Is(err, connector.ErrDataCarrierTLS):
+		return "carrier_tls"
+	default:
+		return "carrier_transport"
+	}
+}
