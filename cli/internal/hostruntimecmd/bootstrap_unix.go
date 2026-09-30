@@ -126,6 +126,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		return err
 	}
 	publicIdentityKey := base64.RawURLEncoding.EncodeToString(identityStore.Current().Public())
+	pairingSSHUser, pairingSSHPort := unixBootstrapSSHFields(*setupMode, account.Username)
 	resume, resumeErr := bootstrap.LoadResume(*stateRoot, *serverURL, publicIdentityKey, token, *name, *setupMode, time.Now().UTC())
 	if err := rejectFreshBootstrapOverEnrollment(identityStore, resumeErr); err != nil {
 		return err
@@ -142,7 +143,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		material = *resume.Material
 		fmt.Fprintln(stderr, "Finishing the existing machine enrollment...")
 	} else if authenticatedResume {
-		config := bootstrap.Config{ServerURL: *serverURL, Alias: *name, WorkspaceRoot: workspace, Verifier: resume.Verifier, PublicIdentityKey: publicIdentityKey, RuntimeVersions: map[string]string{"pb": buildinfo.Version}}
+		config := bootstrap.Config{ServerURL: *serverURL, Alias: *name, WorkspaceRoot: workspace, Verifier: resume.Verifier, PublicIdentityKey: publicIdentityKey, RuntimeVersions: map[string]string{"pb": buildinfo.Version}, SSHUser: pairingSSHUser, SSHPort: pairingSSHPort}
 		fmt.Fprintln(stderr, "Completing authenticated device setup...")
 		material, err = bootstrap.RecoverMaterial(ctx, config, resume.RuntimeEnrolled)
 		if err == nil {
@@ -159,7 +160,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	} else {
 		material, resume, err = resumeOneShotEnrollment(ctx, oneShotResumeInput{
 			StateRoot: *stateRoot, SetupMode: *setupMode, TokenFile: *tokenFile, TokenFileErr: tokenFileErr,
-			Config: bootstrap.Config{ServerURL: *serverURL, EnrollmentToken: token, Alias: *name, WorkspaceRoot: workspace, PublicIdentityKey: publicIdentityKey, RuntimeVersions: map[string]string{"pb": buildinfo.Version}},
+			Config: bootstrap.Config{ServerURL: *serverURL, EnrollmentToken: token, Alias: *name, WorkspaceRoot: workspace, PublicIdentityKey: publicIdentityKey, RuntimeVersions: map[string]string{"pb": buildinfo.Version}, SSHUser: pairingSSHUser, SSHPort: pairingSSHPort},
 			Resume: resume, ResumeErr: resumeErr, Status: stderr,
 		}, defaultOneShotResumeOperations())
 		if err != nil {

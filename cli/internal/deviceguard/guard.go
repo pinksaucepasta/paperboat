@@ -70,7 +70,8 @@ type ListenerOwner interface {
 }
 
 type CertificateBundle struct {
-	CertificatePEM []byte `json:"certificate_pem"`
-	PrivateKeyPEM  []byte `json:"private_key_pem"`
-	RootCAPEM      []byte `json:"root_ca_pem"`
+	RevocationListDER []byte `json:"revocation_list_der"`
+	CertificatePEM    []byte `json:"certificate_pem"`
+	PrivateKeyPEM     []byte `json:"private_key_pem"`
+	RootCAPEM         []byte `json:"root_ca_pem"`
 }

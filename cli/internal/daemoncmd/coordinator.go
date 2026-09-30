@@ -3,6 +3,7 @@ package daemoncmd
 import (
 	"context"
 	"crypto/tls"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -579,7 +580,27 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 			return guardedWebRoute{}, err
 		}
 	}
-	proxy, err := splitdns.NewProxy(splitdns.ProxyConfig{Routes: routes, IssueCertificate: issue, Suffix: splitdns.BrowserSuffix, DialContext: func(ctx context.Context, _, address string) (net.Conn, error) {
+	revocations := func(ctx context.Context, path string) ([]byte, []byte, error) {
+		certificates, ok := client.(interface {
+			Certificate(context.Context, string) (deviceguard.CertificateBundle, error)
+		})
+		if !ok {
+			return nil, nil, errors.New("protected certificate status is unavailable")
+		}
+		for hostname := range routes {
+			bundle, err := certificates.Certificate(ctx, hostname)
+			if err != nil {
+				return nil, nil, err
+			}
+			block, _ := pem.Decode(bundle.RootCAPEM)
+			if block == nil || splitdns.CRLPath(block.Bytes) != path {
+				return nil, nil, errors.New("unknown local certificate issuer")
+			}
+			return block.Bytes, bundle.RevocationListDER, nil
+		}
+		return nil, nil, errors.New("browser certificate routes are withdrawn")
+	}
+	proxy, err := splitdns.NewProxy(splitdns.ProxyConfig{Routes: routes, IssueCertificate: issue, RevocationList: revocations, Suffix: splitdns.BrowserSuffix, DialContext: func(ctx context.Context, _, address string) (net.Conn, error) {
 		machineID, ok := byAddress[address]
 		if !ok {
 			return nil, errors.New("unregistered browser service address")

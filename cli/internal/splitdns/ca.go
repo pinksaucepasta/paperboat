@@ -23,6 +23,7 @@ type CA struct {
 	caCert    *x509.Certificate
 	caKey     *rsa.PrivateKey
 	caCertPEM []byte
+	directory string
 }
 
 const (
@@ -50,7 +51,7 @@ func loadOrCreateCA(caDir, suffix string) (*CA, error) {
 	certPath := filepath.Join(caDir, "rootCA.pem")
 	keyPath := filepath.Join(caDir, "rootCA-key.pem")
 
-	ca := &CA{}
+	ca := &CA{directory: caDir}
 
 	certBytes, errCert := os.ReadFile(certPath)
 	keyBytes, errKey := os.ReadFile(keyPath)
@@ -206,6 +207,7 @@ func (c *CA) IssueCertificate(domains []string) ([]byte, []byte, error) {
 		DNSNames:              dnsNames,
 		IPAddresses:           ipAddresses,
 		BasicConstraintsValid: true,
+		CRLDistributionPoints: []string{"http://" + BrowserGatewayIP + CRLPath(c.caCert.Raw)},
 	}
 
 	leafDer, err := x509.CreateCertificate(rand.Reader, template, c.caCert, &leafKey.PublicKey, c.caKey)

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,7 @@ type ProxyConfig struct {
 	Suffix           string
 	DialContext      func(context.Context, string, string) (net.Conn, error)
 	IssueCertificate func(context.Context, string) (tls.Certificate, error)
+	RevocationList   func(context.Context, string) ([]byte, []byte, error)
 }
 
 // Proxy serves only explicitly registered browser hostnames.
@@ -42,6 +44,7 @@ type Proxy struct {
 	suffix           string
 	transport        *http.Transport
 	issueCertificate func(context.Context, string) (tls.Certificate, error)
+	revocationList   func(context.Context, string) ([]byte, []byte, error)
 	httpListener     net.Listener
 	httpsListener    net.Listener
 	started          bool
@@ -82,12 +85,52 @@ func NewProxy(cfg ProxyConfig) (*Proxy, error) {
 		suffix:           suffix,
 		transport:        &http.Transport{DialContext: cfg.DialContext, ForceAttemptHTTP2: false, MaxIdleConns: 64, MaxIdleConnsPerHost: 8, IdleConnTimeout: 30 * time.Second, ResponseHeaderTimeout: 15 * time.Second},
 		issueCertificate: cfg.IssueCertificate,
+		revocationList:   cfg.RevocationList,
 	}
 	return p, nil
 }
 
 // ServeHTTP implements http.Handler to dynamically reverse-proxy to target port.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, CRLPathPrefix) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if r.TLS != nil || r.URL.RawQuery != "" || len(r.URL.Path) != len(CRLPathPrefix)+64+4 {
+			http.NotFound(w, r)
+			return
+		}
+		var rootDER, der []byte
+		var err error
+		if p.revocationList != nil {
+			rootDER, der, err = p.revocationList(r.Context(), r.URL.Path)
+		} else if p.ca != nil {
+			rootDER = p.ca.caCert.Raw
+			der, err = p.ca.RevocationList(time.Now())
+		} else {
+			http.NotFound(w, r)
+			return
+		}
+		if err != nil || CRLPath(rootDER) != r.URL.Path {
+			http.NotFound(w, r)
+			return
+		}
+		list, err := ValidateCRL(rootDER, der, time.Now())
+		if err != nil {
+			http.Error(w, "Local certificate status unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/pkix-crl")
+		w.Header().Set("Content-Length", strconv.Itoa(len(der)))
+		w.Header().Set("Cache-Control", "max-age="+strconv.FormatInt(int64(time.Until(list.NextUpdate).Seconds()), 10))
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		if r.Method == http.MethodGet {
+			_, _ = w.Write(der)
+		}
+		return
+	}
 	host := r.Host
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h

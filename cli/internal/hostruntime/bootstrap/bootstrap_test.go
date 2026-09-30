@@ -37,7 +37,7 @@ func TestDashboardTokenPairingAndMaterialExchange(t *testing.T) {
 		case "/v1/machines/pairings":
 			pairingCalls++
 			var body map[string]any
-			if json.NewDecoder(request.Body).Decode(&body) != nil || body["enrollment_token"] != "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP" || body["platform"] != runtime.GOOS || body["architecture"] != runtime.GOARCH || body["workspace_root"] != workspace || body["alias"] != "studio" || body["display_name"] != nil {
+			if json.NewDecoder(request.Body).Decode(&body) != nil || body["enrollment_token"] != "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP" || body["platform"] != runtime.GOOS || body["architecture"] != runtime.GOARCH || body["workspace_root"] != workspace || body["alias"] != "studio" || body["display_name"] != nil || body["ssh_user"] != "developer" || body["ssh_port"] != float64(22) {
 				t.Fatalf("pairing body=%v", body)
 			}
 			_ = json.NewEncoder(writer).Encode(map[string]any{"data": Pairing{ID: "cmp_1", UserCode: "ABCD1234", ExpiresAt: expires}})
@@ -55,7 +55,7 @@ func TestDashboardTokenPairingAndMaterialExchange(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	config := Config{ServerURL: server.URL, EnrollmentToken: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", Alias: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", PublicIdentityKey: testPublicIdentityKey, HTTP: server.Client()}
+	config := Config{ServerURL: server.URL, EnrollmentToken: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", Alias: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", PublicIdentityKey: testPublicIdentityKey, SSHUser: "developer", SSHPort: 22, HTTP: server.Client()}
 	pairing, err := CreatePairing(context.Background(), config)
 	if err != nil {
 		t.Fatal(err)

@@ -105,7 +105,11 @@ func (g *guardServer) certificate(ctx context.Context, conn controlConn, owner, 
 	if err != nil {
 		return nil, err
 	}
-	bundle := &CertificateBundle{CertificatePEM: certificate, PrivateKeyPEM: key, RootCAPEM: ca.CertPEM()}
+	crl, err := ca.RevocationList(time.Now())
+	if err != nil {
+		return nil, err
+	}
+	bundle := &CertificateBundle{CertificatePEM: certificate, PrivateKeyPEM: key, RootCAPEM: ca.CertPEM(), RevocationListDER: crl}
 	renewAt, err := certificateRenewAt(bundle, time.Now())
 	if err != nil {
 		return nil, err
@@ -140,6 +144,13 @@ func certificateRenewAt(bundle *CertificateBundle, now time.Time) (time.Time, er
 		return time.Time{}, errors.New("issued private certificate chain is invalid")
 	}
 	renewAt := now.Add(24 * time.Hour)
+	if len(bundle.RevocationListDER) > 0 {
+		list, err := splitdns.ValidateCRL(root.Raw, bundle.RevocationListDER, now)
+		if err != nil {
+			return time.Time{}, err
+		}
+		renewAt = list.NextUpdate.Add(-time.Hour)
+	}
 	for _, expires := range []time.Time{leaf.NotAfter, root.NotAfter} {
 		candidate := expires.Add(-time.Hour)
 		if candidate.Before(renewAt) {
