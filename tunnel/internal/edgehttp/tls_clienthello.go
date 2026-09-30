@@ -55,6 +55,9 @@ func (c *replayTLSConn) CloseWrite() error {
 }
 
 func inspectTLSClientHello(ctx context.Context, connection net.Conn) (net.Conn, string, error) {
+	return inspectTLSInfrastructureClientHello(ctx, connection, "")
+}
+func inspectTLSInfrastructureClientHello(ctx context.Context, connection net.Conn, infrastructureHost string) (net.Conn, string, error) {
 	if ctx == nil || connection == nil {
 		return nil, "", errClientHello
 	}
@@ -74,7 +77,11 @@ func inspectTLSClientHello(ctx context.Context, connection net.Conn) (net.Conn, 
 		return nil, errHelloInspected
 	}})
 	err := parser.HandshakeContext(inspectCtx)
-	if !errors.Is(err, errHelloInspected) || !validSNIHostname(hostname) || inspectCtx.Err() != nil {
+	if hostname == "" && net.ParseIP(infrastructureHost) != nil {
+		hostname = infrastructureHost
+	}
+	infrastructureIP := hostname == infrastructureHost && net.ParseIP(infrastructureHost) != nil
+	if !errors.Is(err, errHelloInspected) || (!validSNIHostname(hostname) && !infrastructureIP) || inspectCtx.Err() != nil {
 		return nil, "", errClientHello
 	}
 	if err := connection.SetReadDeadline(time.Time{}); err != nil {

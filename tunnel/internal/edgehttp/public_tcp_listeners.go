@@ -294,7 +294,7 @@ func (p *PublicTCPListeners) WrapTLSListener(listener net.Listener, httpsHostnam
 	if p.sharedTLS != nil {
 		return nil, errors.New("shared TLS listener already configured")
 	}
-	if listener == nil || httpsHostname == nil || p.cfg.InfrastructureHostname != "" && !validSNIHostname(p.cfg.InfrastructureHostname) {
+	if listener == nil || httpsHostname == nil || p.cfg.InfrastructureHostname != "" && !validSNIHostname(p.cfg.InfrastructureHostname) && net.ParseIP(p.cfg.InfrastructureHostname) == nil {
 		return nil, errors.New("shared TLS listener configuration is invalid")
 	}
 	// Opaque TLS streams, raw TCP streams and pending TLS inspections share

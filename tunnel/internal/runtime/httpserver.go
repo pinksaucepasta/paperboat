@@ -96,6 +96,7 @@ func (s *HTTPServer) Start(context.Context) error {
 			err = nil
 		}
 		s.done <- err
+		close(s.done)
 	}()
 	return nil
 }

@@ -1,6 +1,7 @@
 package edgehttp
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -123,6 +124,60 @@ func TestSharedTLSAuthorityOutageAndRecovery(t *testing.T) {
 			authority.unavailable.Store(false)
 			if err = dial(); err != nil {
 				t.Fatal("fresh authority did not restore HTTPS", err)
+			}
+		})
+	}
+}
+
+func TestSharedTLSReservedIPNoSNIRequiresHTTPSBinding(t *testing.T) {
+	for _, bound := range []bool{true, false} {
+		t.Run(map[bool]string{true: "bound", false: "unbound"}[bound], func(t *testing.T) {
+			clientTLS, serverTLS, _, _, _ := task24Certificates(t)
+			// An IP ServerName emits no SNI. Keep exact certificate authentication.
+			clientTLS.ServerName = "127.0.0.1"
+			clientTLS.InsecureSkipVerify = true
+			expected := serverTLS.Certificates[0].Certificate[0]
+			clientTLS.VerifyConnection = func(state tls.ConnectionState) error {
+				if len(state.PeerCertificates) == 0 || !bytes.Equal(state.PeerCertificates[0].Raw, expected) {
+					return errors.New("wrong fixture certificate")
+				}
+				return nil
+			}
+			raw, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+			defer registry.Close()
+			manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{ListenHost: "127.0.0.1", InfrastructureHostname: "140.245.11.41", Authority: &tlsAuthorityFixture{}, Routes: registry, MaximumConnections: 4})
+			if err != nil {
+				raw.Close()
+				t.Fatal(err)
+			}
+			shared, err := manager.WrapTLSListener(raw, func(host string) bool { return bound && host == "140.245.11.41" })
+			if err != nil {
+				raw.Close()
+				t.Fatal(err)
+			}
+			server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })}
+			defer server.Close()
+			go server.ServeTLS(shared, "", "")
+			transport := &http.Transport{TLSClientConfig: clientTLS}
+			defer transport.CloseIdleConnections()
+			response, err := (&http.Client{Transport: transport, Timeout: time.Second}).Get("https://" + raw.Addr().String() + "/")
+			if !bound {
+				if err == nil {
+					response.Body.Close()
+					t.Fatal("no-SNI accepted without reserved HTTPS binding")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			if response.StatusCode != 200 {
+				t.Fatal("reserved infrastructure HTTPS not forwarded")
 			}
 		})
 	}

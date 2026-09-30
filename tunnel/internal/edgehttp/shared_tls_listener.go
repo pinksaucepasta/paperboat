@@ -31,7 +31,7 @@ type SharedTLSListener struct {
 }
 
 func NewSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, routes *DataCarrierRouteRegistry, httpsHostname func(string) bool, maximumConnections int, infrastructureHostname string) (*SharedTLSListener, error) {
-	if listener == nil || authority == nil || routes == nil || httpsHostname == nil || maximumConnections < 1 || infrastructureHostname != "" && !validSNIHostname(infrastructureHostname) {
+	if listener == nil || authority == nil || routes == nil || httpsHostname == nil || maximumConnections < 1 || infrastructureHostname != "" && !validSNIHostname(infrastructureHostname) && net.ParseIP(infrastructureHostname) == nil {
 		return nil, errors.New("shared TLS listener configuration is invalid")
 	}
 	return newSharedTLSListener(listener, authority, routes, httpsHostname, make(chan struct{}, maximumConnections), infrastructureHostname), nil
@@ -74,7 +74,7 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 			_ = conn.Close()
 		}
 	}()
-	replay, host, err := inspectTLSClientHello(l.ctx, conn)
+	replay, host, err := inspectTLSInfrastructureClientHello(l.ctx, conn, l.infrastructureHostname)
 	if err != nil {
 		return
 	}

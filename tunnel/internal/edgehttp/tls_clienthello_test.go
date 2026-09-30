@@ -148,3 +148,24 @@ func FuzzTLSClientHello(f *testing.F) {
 		}
 	})
 }
+
+func TestNoSNIIsReservedForInfrastructureIP(t *testing.T) {
+	wire := testClientHello(t, "")
+	for _, infra := range []string{"", "infrastructure.example.test", "140.245.11.41"} {
+		conn := &helloTestConn{input: bytes.NewReader(wire)}
+		replay, host, err := inspectTLSInfrastructureClientHello(t.Context(), conn, infra)
+		if infra != "140.245.11.41" {
+			if err == nil {
+				t.Fatal("no SNI accepted outside reserved infrastructure IP")
+			}
+			continue
+		}
+		if err != nil || host != infra {
+			t.Fatal("reserved IP no-SNI rejected")
+		}
+		b := make([]byte, len(wire))
+		if _, err := io.ReadFull(replay, b); err != nil || !bytes.Equal(b, wire) {
+			t.Fatal("ClientHello replay changed")
+		}
+	}
+}
