@@ -5,6 +5,8 @@ package localdaemon
 import (
 	"context"
 	"errors"
+	"os"
+	"runtime"
 
 	hostservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 )
@@ -39,13 +41,34 @@ func InspectCurrentUserService(ctx context.Context, executable string) (ServiceS
 		return ServiceState{}, err
 	}
 	state, err := controller.Inspect(ctx, path)
-	return ServiceState{Installed: state.Registered, Running: state.Running}, err
+	if err != nil {
+		return ServiceState{}, err
+	}
+	installed := state.Registered
+	if runtime.GOOS == "darwin" {
+		installed, err = darwinServiceInstalled(path, executable, os.Geteuid())
+	}
+	return ServiceState{Installed: installed, Running: state.Running}, err
 }
 
 func StartCurrentUserService(ctx context.Context, executable string) error {
 	controller, path, err := currentUserLifecycle(executable)
 	if err != nil {
 		return err
+	}
+	return startUserService(ctx, controller, path, runtime.GOOS, executable, os.Geteuid())
+}
+
+func startUserService(ctx context.Context, controller hostservice.NativeLifecycleController, path, platform, executable string, uid int) error {
+	if platform == "darwin" {
+		installed, err := darwinServiceInstalled(path, executable, uid)
+		if err != nil {
+			return err
+		}
+		if !installed {
+			return errors.New("Paperboat local daemon service is not installed; run pb service install")
+		}
+		return controller.Start(ctx, path)
 	}
 	state, err := controller.Inspect(ctx, path)
 	if err != nil {
