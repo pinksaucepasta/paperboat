@@ -460,17 +460,18 @@ type carrierBootstrapDescriptor struct {
 // defined by the connector bootstrap endpoint. Keeping the wire type private
 // prevents server diagnostics from becoming part of the success descriptor.
 type carrierBootstrapErrorPayload struct {
-	Schema        string     `json:"schema"`
-	Kind          string     `json:"kind"`
-	Code          string     `json:"code"`
-	Component     string     `json:"component"`
-	Message       string     `json:"message"`
-	Outcome       string     `json:"outcome"`
-	Retryable     *bool      `json:"retryable"`
-	RetryAt       *time.Time `json:"retry_at"`
-	RepairAction  string     `json:"repair_action"`
-	RequestID     string     `json:"request_id"`
-	CorrelationID string     `json:"correlation_id"`
+	SupportReference string     `json:"support_reference,omitempty"`
+	Schema           string     `json:"schema"`
+	Kind             string     `json:"kind"`
+	Code             string     `json:"code"`
+	Component        string     `json:"component"`
+	Message          string     `json:"message"`
+	Outcome          string     `json:"outcome"`
+	Retryable        *bool      `json:"retryable"`
+	RetryAt          *time.Time `json:"retry_at"`
+	RepairAction     string     `json:"repair_action"`
+	RequestID        string     `json:"request_id"`
+	CorrelationID    string     `json:"correlation_id"`
 }
 
 type carrierBootstrapErrorResponse struct {

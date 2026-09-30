@@ -300,6 +300,15 @@ func TestFetchCarrierDescriptorClassifiesTypedTransientErrors(t *testing.T) {
 	}
 }
 
+func TestCarrierBootstrapErrorAcceptsControlPlaneSupportReference(t *testing.T) {
+	raw := []byte(`{"error":{"support_reference":"support_reference_01","schema":"paperboat.preview-tunnel/v1","kind":"error","code":"connector_session_stale","component":"control","message":"The connector session changed before carrier bootstrap.","outcome":"unchanged","retryable":true,"repair_action":"reconnect","request_id":"request_01","correlation_id":"correlation_01"}}`)
+	err := classifyCarrierBootstrapError(http.StatusConflict, raw)
+	var typed *CarrierBootstrapError
+	if !errors.As(err, &typed) || typed.Code != "connector_session_stale" || !errors.Is(err, tunnelmanager.ErrConnectorUnavailable) || errors.Is(err, ErrConflict) {
+		t.Fatalf("control-plane stale error lost retry semantics: %T", err)
+	}
+}
+
 func TestFetchCarrierDescriptorRejectsNonRetryableOrMalformedTypedErrors(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	request, _ := productionActivationRequest(t)
