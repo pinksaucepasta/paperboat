@@ -26,6 +26,7 @@ const (
 var routeBaseDomainPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$`)
 
 type Deployment struct {
+	SelfHosted                bool   `json:"self_hosted,omitempty"`
 	InfrastructureTLSCertFile string `json:"infrastructure_tls_cert_file,omitempty"`
 	InfrastructureTLSKeyFile  string `json:"infrastructure_tls_key_file,omitempty"`
 	BrowserAccessEnabled      bool   `json:"browser_access_enabled"`
@@ -157,6 +158,9 @@ func (d Deployment) validate() error {
 		}
 	}
 	for _, domain := range []string{d.PreviewBaseDomain, d.TunnelBaseDomain, d.RuntimeBaseDomain} {
+		if domain == "" && d.SelfHosted && !d.BrowserAccessEnabled {
+			continue
+		}
 		if !routeBaseDomainPattern.MatchString(domain) || net.ParseIP(domain) != nil {
 			return errors.New("route base domain is invalid")
 		}
@@ -196,7 +200,7 @@ func (d Deployment) validate() error {
 }
 
 func overlappingDomains(first, second string) bool {
-	return first == second || strings.HasSuffix(first, "."+second) || strings.HasSuffix(second, "."+first)
+	return first != "" && second != "" && (first == second || strings.HasSuffix(first, "."+second) || strings.HasSuffix(second, "."+first))
 }
 
 func overlapsManagedDomain(host string, domains []string) bool {

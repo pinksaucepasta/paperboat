@@ -24,8 +24,8 @@ import (
 	"github.com/pinksaucepasta/paperboat-relay/derpquic"
 	"github.com/pinksaucepasta/paperboat-relay/internal/reporting"
 	"github.com/pinksaucepasta/paperboat-relay/nodelifecycle"
-	"github.com/pinksaucepasta/paperboat-relay/operator"
 	"github.com/pinksaucepasta/paperboat-relay/peerrelay"
+	"github.com/pinksaucepasta/paperboat-relay/selfhost"
 	"go4.org/mem"
 	"tailscale.com/net/stunserver"
 	"tailscale.com/types/key"
@@ -42,10 +42,7 @@ func run(reporters ...*reporting.Reporter) error {
 		fmt.Fprintf(os.Stdout, "paperboat-relay %s\n", version)
 		return nil
 	}
-	if handled, err := operator.Dispatch(context.Background(), os.Args[1:], "relay", os.Stdout, nil); handled {
-		return err
-	}
-	if generated, handled, err := operator.RuntimeArgs(os.Args[1:]); handled {
+	if generated, handled, err := selfhost.RuntimeArgs(os.Args[1:]); handled {
 		if err != nil {
 			return err
 		}

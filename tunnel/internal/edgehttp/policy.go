@@ -36,6 +36,7 @@ type RouteMatcher interface {
 }
 
 type Config struct {
+	SelfHosted      bool
 	BrowserAccess   *BrowserAccess
 	BrowserTerminal interface {
 		Admit(context.Context, string, string, string) (control.BrowserTerminalAdmission, error)
@@ -85,7 +86,7 @@ type Policy struct {
 }
 
 func New(config Config, next http.Handler) (*Policy, error) {
-	if next == nil || config.PreviewBaseDomain == "" || config.TunnelBaseDomain == "" || config.RuntimeBaseDomain == "" || config.MaxHeaderBytes < 1024 || config.MaxBodyBytes < 1 || config.PrivateAccessToken != "" && (len(config.PrivateAccessToken) < 32 || len(config.PrivateAccessToken) > 256 || strings.TrimSpace(config.PrivateAccessToken) != config.PrivateAccessToken || strings.ContainsAny(config.PrivateAccessToken, "\r\n\x00")) {
+	if next == nil || (!config.SelfHosted || config.BrowserAccess != nil) && (config.PreviewBaseDomain == "" || config.TunnelBaseDomain == "" || config.RuntimeBaseDomain == "") || config.MaxHeaderBytes < 1024 || config.MaxBodyBytes < 1 || config.PrivateAccessToken != "" && (len(config.PrivateAccessToken) < 32 || len(config.PrivateAccessToken) > 256 || strings.TrimSpace(config.PrivateAccessToken) != config.PrivateAccessToken || strings.ContainsAny(config.PrivateAccessToken, "\r\n\x00")) {
 		return nil, http.ErrNotSupported
 	}
 	trusted := make([]net.IPNet, 0, len(config.TrustedProxies))
@@ -675,6 +676,9 @@ func (p *Policy) allowedHost(value string) (string, string, bool) {
 		{p.config.PreviewBaseDomain, "preview_public_https_wss"},
 		{p.config.RuntimeBaseDomain, "runtime_https_wss"},
 	} {
+		if candidate.domain == "" {
+			continue
+		}
 		suffix := "." + strings.ToLower(candidate.domain)
 		prefix, ok := strings.CutSuffix(host, suffix)
 		if ok && prefix != "" && !strings.Contains(prefix, ".") && net.ParseIP(host) == nil {

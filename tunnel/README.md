@@ -17,19 +17,19 @@ Plain HTTP redirects permanently to HTTPS.
 make check
 ```
 
-Dependencies are checked in through standard `go mod vendor` output. CI and Docker
-build from that snapshot, including the shared `paperboat-relay/operator` package;
-a sibling checkout is not required. When changing that shared package, regenerate
-with `go mod vendor` from the reviewed sibling checkout and review the vendor diff.
-The local `replace` directive is used only when refreshing dependencies.
+The workspace module includes the shared `paperboat-relay/selfhost` runtime-file
+reader. Build from the Paperboat OSS workspace so both modules are available.
 
 Production configuration is illustrated by `deploy/deployment.example.json`.
 The container contains one executable, `paperboat-tunnel`; there are no external
 proxy or signaling binaries to provision.
 
-For relay-only, tunnel-only, and combined operator-managed Docker layouts, see
-[OPERATOR.md](OPERATOR.md). Operator setup generates the actual strict deployment
-document; the checked-in JSON is a field and path example.
+For native relay-only, tunnel-only, or combined installation, see
+[self-host installation](../relay/deploy/README.md). The `pbh` helper generates the
+strict deployment document after an authenticated dashboard claim. Installation
+and claim need no DNS domains; configured browser/public routes need domain and
+certificate readiness before publication. The checked-in JSON is a field and path
+example for an already configured node.
 
 ## License
 

@@ -19,7 +19,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-relay/operator"
+	"github.com/pinksaucepasta/paperboat-relay/selfhost"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/auth"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/config"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
@@ -93,10 +93,7 @@ func run(args []string, reporters ...*reporting.Reporter) error {
 		fmt.Fprintf(os.Stdout, "paperboat-tunnel %s\n", version)
 		return nil
 	}
-	if handled, err := operator.Dispatch(context.Background(), args, "tunnel", os.Stdout, nil); handled {
-		return err
-	}
-	if generated, handled, err := operator.RuntimeArgs(args); handled {
+	if generated, handled, err := selfhost.RuntimeArgs(args); handled {
 		if err != nil {
 			return err
 		}
@@ -455,7 +452,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		browserAccess = &edgehttp.BrowserAccess{Authority: &control.BrowserAccessClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, LoginOrigin: deployment.BrowserLoginOrigin}
 	}
 	inspectorAccess := &edgehttp.InspectorEdgeAccess{Authority: &control.InspectorAccessClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, Carriers: durableRoutes, PreviewCarriers: previewRoutes}
-	gateway, err := edgehttp.NewGatewayWithTransports(edgehttp.Config{RuntimeCarrierTransport: runtimeTransport, BrowserTerminalHub: browserTerminalHub, BrowserTerminalEdgeHost: deployment.ConnectorAdvertiseHost, BrowserAccess: browserAccess, BrowserTerminal: &control.BrowserTerminalClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, InspectorAccess: inspectorAccess, PreviewBaseDomain: deployment.PreviewBaseDomain, TunnelBaseDomain: deployment.TunnelBaseDomain, RuntimeBaseDomain: deployment.RuntimeBaseDomain, TrustedProxies: trusted, MaxHeaderBytes: deployment.MaxHeaderBytes, MaxBodyBytes: deployment.MaxBodyBytes, Routes: routeMatcher, PrivateAccessToken: internalToken, PrivateAccessConnections: privateConnections, Readiness: previewReadiness{Canonical: previewRoutes, Fallback: routes}, HelperAccess: verifier, Revocations: trust.Snapshot, RevocationCheckInterval: deployment.ControlInterval}, "", previewForwarder, durableForwarder)
+	gateway, err := edgehttp.NewGatewayWithTransports(edgehttp.Config{SelfHosted: deployment.SelfHosted, RuntimeCarrierTransport: runtimeTransport, BrowserTerminalHub: browserTerminalHub, BrowserTerminalEdgeHost: deployment.ConnectorAdvertiseHost, BrowserAccess: browserAccess, BrowserTerminal: &control.BrowserTerminalClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, InspectorAccess: inspectorAccess, PreviewBaseDomain: deployment.PreviewBaseDomain, TunnelBaseDomain: deployment.TunnelBaseDomain, RuntimeBaseDomain: deployment.RuntimeBaseDomain, TrustedProxies: trusted, MaxHeaderBytes: deployment.MaxHeaderBytes, MaxBodyBytes: deployment.MaxBodyBytes, Routes: routeMatcher, PrivateAccessToken: internalToken, PrivateAccessConnections: privateConnections, Readiness: previewReadiness{Canonical: previewRoutes, Fallback: routes}, HelperAccess: verifier, Revocations: trust.Snapshot, RevocationCheckInterval: deployment.ControlInterval}, "", previewForwarder, durableForwarder)
 	if err != nil {
 		return nil, fmt.Errorf("create edge gateway: %w", err)
 	}

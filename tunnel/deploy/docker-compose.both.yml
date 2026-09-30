@@ -1,3 +1,0 @@
-include:
-  - path: ../../relay/deploy/docker-compose.yml
-  - path: docker-compose.yml

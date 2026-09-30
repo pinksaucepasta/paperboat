@@ -105,3 +105,26 @@ func writeDeployment(t *testing.T, value string) string {
 	}
 	return path
 }
+
+func TestSelfHostedStartsWithoutManagedDomains(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "deployment.json")
+	value := validDeploymentJSON()
+	for _, domain := range []string{"preview.example.test", "tunnels.example.test", "runtime.example.test"} {
+		value = strings.ReplaceAll(value, domain, "")
+	}
+	value = strings.Replace(value, `{`, `{"self_hosted":true,`, 1)
+	if err := os.WriteFile(path, []byte(value), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadDeployment(path); err != nil {
+		t.Fatal(err)
+	}
+	value = strings.Replace(value, `"self_hosted":true`, `"self_hosted":false`, 1)
+	if err := os.WriteFile(path, []byte(value), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadDeployment(path); err == nil {
+		t.Fatal("managed edge accepted unconfigured domains")
+	}
+}

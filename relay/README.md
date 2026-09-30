@@ -7,8 +7,9 @@ HTTP ingress; the UDP peer-relay role reuses upstream Geneve. Its authenticated
 lifecycle integrates startup, registry health/capacity, drain and endpoint revocation.
 The current library and runtime fixtures are not a production deployment.
 
-For an operator-managed Docker installation, including public DNS, TLS, pairing,
-pool selection, updates and removal, see [OPERATOR.md](OPERATOR.md).
+For native relay-only, tunnel-only, or combined installation and dashboard ownership,
+see [self-host installation](deploy/README.md). `pbh` installs the service before
+any account, team, or global pool is assigned.
 
 Build from this directory into the ignored build directory:
 
@@ -32,7 +33,7 @@ The command requires these flags, supplied from registered relay configuration:
 | `-control-credential-file` | Owner-only control credential file |
 | `-node-state` | Durable, owner-only startup generation/epoch state |
 
-An operator provisions the existing registry row, endpoints, region, account policy,
+An authenticated dashboard claim provisions the registry row, endpoints, region, scope policy,
 capacity and optional peer-relay service identity. Startup cannot create or widen that
 authority. The command uses the authenticated native lifecycle APIs to claim the next
 node generation and a fresh process epoch, persisting pending startup before requesting
@@ -65,7 +66,7 @@ the carrier. Revocation, invalid credentials and protocol violations remain fata
 Relay capacity is bounded at 256 concurrent connections globally and 16 per account.
 The peer-relay packet shaper's 4,096 packets/second rate and 128-packet burst are fixed
 workload budgets. These limits define admission fairness and bounded resource use, so
-operator setup does not expose separate tuning knobs for them.
+installation does not expose separate tuning knobs for them.
 
 Focused verification:
 
