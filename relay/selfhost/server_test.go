@@ -135,7 +135,7 @@ func TestActualTLSClaimSingleUseRestartAndRuntimeFiles(t *testing.T) {
 	if err := json.Unmarshal(b, &deployment); err != nil {
 		t.Fatal(err)
 	}
-	if deployment["self_hosted"] != true || deployment["preview_base_domain"] != "" {
+	if deployment["self_hosted"] != true || deployment["preview_base_domain"] != "" || deployment["public_https_listen_address"] != "127.0.0.1:443" || deployment["carrier_tcp_listen_address"] != "127.0.0.1:27443" {
 		t.Fatal("unconfigured tunnel domains were synthesized")
 	}
 	server.Config.Handler = Handler(dir, nil) // Rebuild handler with no memory from the first claim.

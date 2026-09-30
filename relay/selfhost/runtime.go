@@ -6,7 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,10 +14,10 @@ import (
 )
 
 type Setup struct {
-	ControlURL, Name, Capability, EndpointHost, Region, FailureDomain      string
-	TLSCert, TLSKey, ControlCA, PreviewDomain, TunnelDomain, RuntimeDomain string
-	TCPPort, QUICPort                                                      int
-	CapacityLimit                                                          int64
+	ControlURL, Name, Capability, EndpointHost, Region, FailureDomain, ListenHost string
+	TLSCert, TLSKey, ControlCA, PreviewDomain, TunnelDomain, RuntimeDomain        string
+	TCPPort, QUICPort                                                             int
+	CapacityLimit                                                                 int64
 }
 type Registration struct {
 	InstallationID    string `json:"installation_id"`
@@ -47,7 +47,7 @@ func ExportRuntime(ctx context.Context, dir string, s Setup, r Registration, usa
 func exportRuntime(ctx context.Context, dir string, s Setup, r Registration, usage ed25519.PrivateKey, revocations json.RawMessage) error {
 	var args []string
 	if s.Capability == "relay" {
-		args = []string{"-listen", fmt.Sprintf("0.0.0.0:%d", s.QUICPort), "-wss-listen", fmt.Sprintf("0.0.0.0:%d", s.TCPPort), "-tls-cert", s.TLSCert, "-tls-key", s.TLSKey, "-jwks", filepath.Join(dir, "jwks.json"), "-issuer", s.ControlURL, "-node-id", r.NodeID, "-node-generation", strconv.FormatUint(r.NodeGeneration, 10), "-control-url", s.ControlURL, "-control-credential-file", filepath.Join(dir, "runtime.credential"), "-node-state", filepath.Join(filepath.Dir(dir), "state", "node-state.json")}
+		args = []string{"-listen", listenAddress(s.ListenHost, s.QUICPort), "-wss-listen", listenAddress(s.ListenHost, s.TCPPort), "-tls-cert", s.TLSCert, "-tls-key", s.TLSKey, "-jwks", filepath.Join(dir, "jwks.json"), "-issuer", s.ControlURL, "-node-id", r.NodeID, "-node-generation", strconv.FormatUint(r.NodeGeneration, 10), "-control-url", s.ControlURL, "-control-credential-file", filepath.Join(dir, "runtime.credential"), "-node-state", filepath.Join(filepath.Dir(dir), "state", "node-state.json")}
 		if s.ControlCA != "" {
 			args = append(args, "-control-ca", s.ControlCA)
 		}
@@ -65,7 +65,7 @@ func exportRuntime(ctx context.Context, dir string, s Setup, r Registration, usa
 		if err := writeFile(filepath.Join(dir, "revocations.json"), revocations); err != nil {
 			return err
 		}
-		deployment := map[string]any{"self_hosted": true, "browser_access_enabled": false, "browser_login_origin": "", "control_url": s.ControlURL, "credential_issuer": s.ControlURL, "control_credential_file": filepath.Join(dir, "runtime.credential"), "control_ca_file": s.ControlCA, "jwks_file": filepath.Join(dir, "jwks.json"), "revocations_file": filepath.Join(dir, "revocations.json"), "usage_signing_key_file": filepath.Join(dir, "usage.key"), "infrastructure_tls_cert_file": s.TLSCert, "infrastructure_tls_key_file": s.TLSKey, "connector_advertise_host": s.EndpointHost, "carrier_tcp_listen_address": fmt.Sprintf("0.0.0.0:%d", s.TCPPort), "carrier_quic_listen_address": fmt.Sprintf("0.0.0.0:%d", s.QUICPort), "public_https_listen_address": "0.0.0.0:443", "private_https_listen_address": "127.0.0.1:9443", "public_http_listen_address": "0.0.0.0:80", "preview_base_domain": s.PreviewDomain, "tunnel_base_domain": s.TunnelDomain, "runtime_base_domain": s.RuntimeDomain, "trusted_proxy_cidrs": []string{}, "public_routes": []any{}, "node_capacity": s.CapacityLimit, "control_interval": int64(5 * time.Second), "control_timeout": int64(5 * time.Second), "max_body_bytes": int64(50 << 20), "max_header_bytes": int64(32 << 10)}
+		deployment := map[string]any{"self_hosted": true, "browser_access_enabled": false, "browser_login_origin": "", "control_url": s.ControlURL, "credential_issuer": s.ControlURL, "control_credential_file": filepath.Join(dir, "runtime.credential"), "control_ca_file": s.ControlCA, "jwks_file": filepath.Join(dir, "jwks.json"), "revocations_file": filepath.Join(dir, "revocations.json"), "usage_signing_key_file": filepath.Join(dir, "usage.key"), "infrastructure_tls_cert_file": s.TLSCert, "infrastructure_tls_key_file": s.TLSKey, "connector_advertise_host": s.EndpointHost, "carrier_tcp_listen_address": listenAddress(s.ListenHost, s.TCPPort), "carrier_quic_listen_address": listenAddress(s.ListenHost, s.QUICPort), "public_https_listen_address": listenAddress(s.ListenHost, 443), "private_https_listen_address": "127.0.0.1:9443", "public_http_listen_address": listenAddress(s.ListenHost, 80), "preview_base_domain": s.PreviewDomain, "tunnel_base_domain": s.TunnelDomain, "runtime_base_domain": s.RuntimeDomain, "trusted_proxy_cidrs": []string{}, "public_routes": []any{}, "node_capacity": s.CapacityLimit, "control_interval": int64(5 * time.Second), "control_timeout": int64(5 * time.Second), "max_body_bytes": int64(50 << 20), "max_header_bytes": int64(32 << 10)}
 		if err := writeJSON(filepath.Join(dir, "deployment.json"), deployment); err != nil {
 			return err
 		}
@@ -127,4 +127,11 @@ func writeFile(path string, b []byte) error {
 		err = parent.Sync()
 	}
 	return err
+}
+
+func listenAddress(host string, port int) string {
+	if host == "" {
+		host = "0.0.0.0"
+	}
+	return net.JoinHostPort(host, strconv.Itoa(port))
 }
