@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/config"
+	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
 )
 
 func installationChallenge(node, host, credential string, next http.Handler) http.Handler {
@@ -72,4 +73,37 @@ func infrastructureTLS(d config.Deployment, base *tls.Config) (*tls.Config, erro
 		return fallback(hello)
 	}
 	return result, nil
+}
+
+// carrierServerTrust binds self-hosted H2/H3 carriers to the identity claimed
+// during enrollment. Process epochs and signed admissions fence restarts.
+func carrierServerTrust(d config.Deployment, nodeID, epoch, host string, now time.Time) (control.ProcessCarrierServerTrust, error) {
+	if !d.SelfHosted {
+		return control.NewProcessCarrierServerTrust(nodeID, epoch, host, now, control.DefaultProcessCarrierServerCertificateLifetime)
+	}
+	certificate, err := tls.LoadX509KeyPair(d.InfrastructureTLSCertFile, d.InfrastructureTLSKeyFile)
+	if err != nil {
+		return control.ProcessCarrierServerTrust{}, errors.New("cannot load claimed carrier TLS certificate and key")
+	}
+	pin, err := control.CarrierServerSPKISHA256(certificate)
+	if err != nil {
+		return control.ProcessCarrierServerTrust{}, err
+	}
+	chain, err := control.CarrierServerCertificateChainPEM(certificate)
+	if err != nil {
+		return control.ProcessCarrierServerTrust{}, err
+	}
+	if err = control.ValidateCarrierServerCertificateChain(chain, pin, host, now); err != nil {
+		return control.ProcessCarrierServerTrust{}, err
+	}
+	leaf, err := x509.ParseCertificate(certificate.Certificate[0])
+	if err != nil {
+		return control.ProcessCarrierServerTrust{}, err
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(leaf)
+	if _, err = leaf.Verify(x509.VerifyOptions{Roots: roots, CurrentTime: now, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}); err != nil {
+		return control.ProcessCarrierServerTrust{}, errors.New("claimed carrier TLS certificate requires server-auth usage")
+	}
+	return control.ProcessCarrierServerTrust{Certificate: certificate, SPKISHA256: pin, CertificateChainPEM: chain}, nil
 }

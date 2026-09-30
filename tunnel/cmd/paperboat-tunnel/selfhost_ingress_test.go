@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/config"
+	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
 	"math/big"
 	"net"
 	"net/http"
@@ -143,5 +144,42 @@ func TestInfrastructureTLSNoSNIAndNamedRouteSelection(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestSelfhostCarrierUsesClaimedInfrastructureIdentity(t *testing.T) {
+	now := time.Now().UTC()
+	infrastructure, err := control.NewProcessCarrierServerTrust("node", "installation", "127.0.0.1", now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	certPath, keyPath := filepath.Join(dir, "tls.pem"), filepath.Join(dir, "tls.key")
+	keyDER, err := x509.MarshalPKCS8PrivateKey(infrastructure.Certificate.PrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(certPath, []byte(infrastructure.CertificateChainPEM), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	deployment := config.Deployment{SelfHosted: true, InfrastructureTLSCertFile: certPath, InfrastructureTLSKeyFile: keyPath}
+	for _, epoch := range []string{"first", "replacement"} {
+		trust, err := carrierServerTrust(deployment, "node", epoch, "127.0.0.1", now)
+		if err != nil || trust.SPKISHA256 != infrastructure.SPKISHA256 || trust.CertificateChainPEM != infrastructure.CertificateChainPEM {
+			t.Fatalf("claimed identity changed: %v", err)
+		}
+	}
+	if _, err = carrierServerTrust(deployment, "node", "epoch", "wrong.example.test", now); err == nil {
+		t.Fatal("accepted wrong advertised host")
+	}
+	if _, err = carrierServerTrust(deployment, "node", "epoch", "127.0.0.1", now.Add(2*time.Hour)); err == nil {
+		t.Fatal("accepted expired identity")
+	}
+	hosted, err := carrierServerTrust(config.Deployment{}, "node", "hosted", "127.0.0.1", now)
+	if err != nil || hosted.SPKISHA256 == infrastructure.SPKISHA256 {
+		t.Fatalf("hosted process identity changed: %v", err)
 	}
 }

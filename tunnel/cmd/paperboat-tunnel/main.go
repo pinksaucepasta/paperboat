@@ -346,7 +346,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if carrierEndpoint == nil {
 		return nil, errors.New("parse carrier endpoints: canonical carrier endpoint is required")
 	}
-	carrierTrust, err := control.NewProcessCarrierServerTrust(cfg.NodeID, processEpoch, carrierEndpoint.Host, time.Now().UTC(), control.DefaultProcessCarrierServerCertificateLifetime)
+	carrierTrust, err := carrierServerTrust(deployment, cfg.NodeID, processEpoch, carrierEndpoint.Host, time.Now().UTC())
 	if err != nil {
 		return nil, fmt.Errorf("mint process carrier server trust: %w", err)
 	}
