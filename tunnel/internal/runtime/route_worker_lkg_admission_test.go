@@ -74,6 +74,24 @@ func TestRouteWorkerRetainsLKGAdmissionUntilReplacementPromotion(t *testing.T) {
 		t.Fatalf("LKG route disappeared during failed replacement: %v", err)
 	}
 
+	// A second authenticated process replaces the failed pending candidate.
+	previousCandidateID := newAssignment.AssignmentID
+	newAssignment.AssignmentID = "assignment_lkg_newer"
+	newAssignment.AssignmentGeneration = 3
+	newAssignment.ConnectorSessionID = "session_lkg_newer"
+	newAssignment.ConnectorProcessGeneration = 3
+	source.snapshot.Routes = []control.RouteAssignment{old, newAssignment}
+	if err := worker.reconcile(context.Background()); !errors.Is(err, readyErr) {
+		t.Fatalf("new pending replacement error=%v", err)
+	}
+	admissions = durable.Snapshot()
+	seen = make(map[string]bool, len(admissions))
+	for _, admission := range admissions {
+		seen[admission.AssignmentID] = true
+	}
+	if len(admissions) != 2 || !seen[old.AssignmentID] || !seen[newAssignment.AssignmentID] || seen[previousCandidateID] {
+		t.Fatalf("changed pending process did not replace exact admissions: %v", seen)
+	}
 	readyErr = nil
 	if err := worker.reconcile(context.Background()); err != nil {
 		t.Fatal(err)

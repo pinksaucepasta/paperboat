@@ -275,20 +275,21 @@ type RouteWorker struct {
 	Ready        func(context.Context, []route.RouteRule) error
 	DrainTimeout time.Duration
 
-	mu                         sync.Mutex
-	cancel                     context.CancelFunc
-	done                       chan struct{}
-	starting                   bool
-	lastErr                    error
-	canonicalSet               bool
-	canonicalHash              [sha256.Size]byte
-	canonicalGeneration        uint64
-	canonicalPendingSet        bool
-	canonicalPendingHash       [sha256.Size]byte
-	canonicalPendingGeneration uint64
-	canonicalPendingAdmissions bool
-	canonicalAssignments       []control.RouteAssignment
-	canonicalPendingDetached   []control.RouteAssignment
+	mu                             sync.Mutex
+	cancel                         context.CancelFunc
+	done                           chan struct{}
+	starting                       bool
+	lastErr                        error
+	canonicalSet                   bool
+	canonicalHash                  [sha256.Size]byte
+	canonicalGeneration            uint64
+	canonicalPendingSet            bool
+	canonicalPendingHash           [sha256.Size]byte
+	canonicalPendingGeneration     uint64
+	canonicalPendingAdmissions     bool
+	canonicalPendingAdmissionsHash [sha256.Size]byte
+	canonicalAssignments           []control.RouteAssignment
+	canonicalPendingDetached       []control.RouteAssignment
 }
 
 // RouteCarrier is implemented by the edge's authenticated carrier registry.
@@ -545,7 +546,7 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) error {
 		// Install the exact candidate/LKG pending set before opening any probe
 		// stream, otherwise a healthy carrier is incorrectly reported as missing
 		// during the first reconcile after a control update.
-		if probeCandidate && len(selectedAssignments) != 0 && !w.canonicalPendingAdmissions {
+		if probeCandidate && len(selectedAssignments) != 0 && (!w.canonicalPendingAdmissions || w.canonicalPendingAdmissionsHash != candidateHash) {
 			admissionAssignments := canonicalPendingAdmissionAssignments(selectedAssignments, w.canonicalAssignments, desired)
 			admissions, admissionErr := canonicalDurableAdmissions(admissionAssignments)
 			if admissionErr != nil {
@@ -555,6 +556,7 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) error {
 				return err
 			}
 			w.canonicalPendingAdmissions = true
+			w.canonicalPendingAdmissionsHash = candidateHash
 		}
 		activeAssignments := append([]control.RouteAssignment(nil), selectedAssignments...)
 		readyAssignments := append([]control.RouteAssignment(nil), selectedAssignments...)
@@ -621,6 +623,7 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) error {
 					return err
 				}
 				w.canonicalPendingAdmissions = true
+				w.canonicalPendingAdmissionsHash = candidateHash
 			}
 			// The server must durably accept the exact ready tuple before local
 			// promotion. A failed or uncertain ACK leaves the pending candidate
@@ -677,6 +680,7 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) error {
 						return err
 					}
 					w.canonicalPendingAdmissions = true
+					w.canonicalPendingAdmissionsHash = candidateHash
 				}
 			}
 			if len(probeFailures) == 0 {
@@ -1507,6 +1511,7 @@ func (w *RouteWorker) fenceChangedViewerPolicy(ctx context.Context, desired, sel
 		return err
 	}
 	w.canonicalPendingAdmissions = true
+	w.canonicalPendingAdmissionsHash = canonicalRouteHash(selected)
 	identities := make([]route.RouteIdentity, 0, len(fencedRoutes))
 	seenIdentities := make(map[route.RouteIdentity]struct{}, len(fencedRoutes))
 	for _, assignment := range detached {

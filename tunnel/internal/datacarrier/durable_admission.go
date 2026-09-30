@@ -161,8 +161,10 @@ func (r *DurableAdmissionRegistry) Replace(admissions []DurableAdmission, now ti
 	next := make(map[string]durableAdmissionEntry)
 	r.mu.RLock()
 	currentGenerations := make(map[string]uint64)
+	currentAdmissions := make(map[DurableAdmission]bool)
 	for _, entry := range r.byID {
 		for _, admission := range entry.byRoute {
+			currentAdmissions[admission] = true
 			key := admission.Identity.AccountID + "\x00" + admission.Identity.HostID + "\x00" + admission.RouteID
 			if admission.AssignmentGeneration > currentGenerations[key] {
 				currentGenerations[key] = admission.AssignmentGeneration
@@ -174,7 +176,7 @@ func (r *DurableAdmissionRegistry) Replace(admissions []DurableAdmission, now ti
 		if err := admission.Validate(r.nodeID, r.processEpoch, now); err != nil {
 			return err
 		}
-		if admission.AssignmentGeneration < currentGenerations[admission.Identity.AccountID+"\x00"+admission.Identity.HostID+"\x00"+admission.RouteID] {
+		if admission.AssignmentGeneration < currentGenerations[admission.Identity.AccountID+"\x00"+admission.Identity.HostID+"\x00"+admission.RouteID] && !currentAdmissions[admission] {
 			return ErrDurableAdmissionConflict
 		}
 		key := durableIdentityKey(admission.Identity)
