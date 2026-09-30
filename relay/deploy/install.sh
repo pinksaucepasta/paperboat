@@ -1,12 +1,12 @@
 #!/bin/sh
 # Served at https://get.pprbt.dev/selfhost/install with release values filled in.
 set -eu
-package_url='{{PACKAGE_URL}}'
-package_sha256='{{PACKAGE_SHA256}}'
-package_arch='{{PACKAGE_ARCH}}'
 case "$(uname -s)" in Linux) ;; *) echo 'Paperboat self-host currently requires Linux with systemd.' >&2; exit 1;; esac
-case "$(uname -m)" in x86_64) native_arch=amd64;; aarch64|arm64) native_arch=arm64;; *) echo 'Unsupported self-host architecture.' >&2; exit 1;; esac
-if [ "$native_arch" != "$package_arch" ]; then echo 'This release does not contain your architecture.' >&2; exit 1; fi
+case "$(uname -m)" in
+ x86_64) package_arch=amd64; package_url='{{PACKAGE_URL_AMD64}}'; package_sha256='{{PACKAGE_SHA256_AMD64}}';;
+ aarch64|arm64) package_arch=arm64; package_url='{{PACKAGE_URL_ARM64}}'; package_sha256='{{PACKAGE_SHA256_ARM64}}';;
+ *) echo 'Unsupported self-host architecture.' >&2; exit 1;;
+esac
 case "$package_url" in https://*) ;; *) echo 'Self-host release is not configured.' >&2; exit 1;; esac
 if [ ${#package_sha256} -ne 64 ]; then echo 'Self-host release digest is not configured.' >&2; exit 1; fi
 case "$package_sha256" in *[!0-9a-f]*) echo 'Invalid release digest.' >&2; exit 1;; esac
