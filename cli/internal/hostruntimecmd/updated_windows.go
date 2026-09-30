@@ -51,7 +51,11 @@ func runActivator(_ context.Context, args []string, _ io.Writer, _ io.Writer) er
 		return err
 	}
 	err = service.RunWindowsSystemService(serviceName, func(serviceCtx context.Context) error {
-		return updated.RunWindowsActivator(serviceCtx, config)
+		runErr := updated.RunWindowsActivator(serviceCtx, config)
+		if runErr != nil {
+			recordWindowsServiceLaunchFailure(serviceName, runErr)
+		}
+		return runErr
 	})
 	if err != nil {
 		recordWindowsServiceLaunchFailure(serviceName, err)

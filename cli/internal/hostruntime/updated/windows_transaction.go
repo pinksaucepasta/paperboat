@@ -3,6 +3,7 @@ package updated
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -122,28 +123,28 @@ func executeWindowsActivation(ctx context.Context, backend windowsActivationBack
 		return rollbackWindowsActivation(ctx, backend, journal, err)
 	}
 	if err = backend.StopServices(ctx, journal.LocalDaemonWasRunning); err != nil {
-		return rollbackWindowsActivation(ctx, backend, journal, err)
+		return rollbackWindowsActivation(ctx, backend, journal, fmt.Errorf("stop Windows services: %w", err))
 	}
 	if err = backend.ActivateBinary(ctx, journal); err != nil {
-		return rollbackWindowsActivation(ctx, backend, journal, err)
+		return rollbackWindowsActivation(ctx, backend, journal, fmt.Errorf("activate Windows binary: %w", err))
 	}
 	if err = backend.SetServiceTargets(ctx, journal.NewHostd, journal.NewUpdater, journal.NewSSH); err != nil {
-		return rollbackWindowsActivation(ctx, backend, journal, err)
+		return rollbackWindowsActivation(ctx, backend, journal, fmt.Errorf("set Windows service targets: %w", err))
 	}
 	// Every canonical participant must run the new binary before health can
 	// verify its version. Rollback restores the recorded prior running state.
 	if err = backend.StartServices(ctx, true, true, journal.NewSSH.WasRunning, true); err != nil {
-		return rollbackWindowsActivation(ctx, backend, journal, err)
+		return rollbackWindowsActivation(ctx, backend, journal, fmt.Errorf("start Windows candidate services: %w", err))
 	}
 	journal.Stage = windowsActivationServicesLive
 	if err = backend.WriteJournal(journal); err != nil {
 		return rollbackWindowsActivation(ctx, backend, journal, err)
 	}
 	if err = backend.VerifyHealth(ctx, journal); err != nil {
-		return rollbackWindowsActivation(ctx, backend, journal, err)
+		return rollbackWindowsActivation(ctx, backend, journal, fmt.Errorf("verify Windows candidate health: %w", err))
 	}
 	if err = backend.CommitCLI(ctx, journal); err != nil {
-		return rollbackWindowsActivation(ctx, backend, journal, err)
+		return rollbackWindowsActivation(ctx, backend, journal, fmt.Errorf("commit Windows installation: %w", err))
 	}
 	journal.Stage, journal.Failure = windowsActivationCommitReady, ""
 	if err = backend.WriteJournal(journal); err != nil {

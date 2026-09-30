@@ -722,7 +722,7 @@ func (b *windowsSCMActivationBackend) AuthorizeRecovery(ctx context.Context, jou
 func (b *windowsSCMActivationBackend) ActivateBinary(ctx context.Context, journal windowsActivationJournal) error {
 	layout, err := service.WindowsUserLayout(b.config.OwnerSID)
 	if err != nil || b.config.Binary != layout.Binary || b.config.BinaryRollback != layout.BinaryRollback || b.config.BinaryStaged != layout.BinaryStaged {
-		return errInvalidWindowsActivation
+		return fmt.Errorf("canonical Windows slot identity: %w", errInvalidWindowsActivation)
 	}
 	candidateTarget := windowsActivationComponentTarget(journal.Runtime, journal.Architecture)
 	if err := verifyWindowsActivationComponent(ctx, journal.Runtime.Path, candidateTarget); err != nil {
@@ -730,7 +730,7 @@ func (b *windowsSCMActivationBackend) ActivateBinary(ctx context.Context, journa
 	}
 	previousTarget := windowsActivationComponentTarget(journal.PreviousBinary, journal.Architecture)
 	if !matchesWindowsComponent(b.config.Binary, previousTarget) {
-		return errInvalidWindowsActivation
+		return fmt.Errorf("previous Windows binary identity: %w", errInvalidWindowsActivation)
 	}
 	body, err := readWindowsActivationBinary(journal.Runtime.Path)
 	if err != nil {
@@ -741,7 +741,7 @@ func (b *windowsSCMActivationBackend) ActivateBinary(ctx context.Context, journa
 	}
 	if err := verifyWindowsStableBinary(ctx, b.config.BinaryStaged, candidateTarget, b.config.OwnerSID); err != nil {
 		_ = removeWindowsActivationFile(b.config.BinaryStaged)
-		return err
+		return fmt.Errorf("verify staged Windows binary: %w", err)
 	}
 	if err := removeWindowsActivationFile(b.config.BinaryRollback); err != nil {
 		_ = removeWindowsActivationFile(b.config.BinaryStaged)
@@ -839,7 +839,7 @@ func verifyWindowsStableBinary(ctx context.Context, path string, target workerup
 		return err
 	}
 	if !windowsMachineFileSecurityMatches(path, windowsStableBinaryDACL(ownerSID)) {
-		return errInvalidWindowsActivation
+		return fmt.Errorf("protected Windows binary ACL: %w", errInvalidWindowsActivation)
 	}
 	return nil
 }

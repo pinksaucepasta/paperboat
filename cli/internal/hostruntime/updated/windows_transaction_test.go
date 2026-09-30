@@ -416,3 +416,11 @@ func TestWindowsActivationRejectsApprovalAndArtifactIdentityMismatch(t *testing.
 		}
 	}
 }
+
+func TestWindowsActivationPersistsFailedPhase(t *testing.T) {
+	b := &recordingWindowsActivationBackend{fail: "activate"}
+	result, err := executeWindowsActivation(context.Background(), b, testWindowsActivationJournal())
+	if err == nil || !strings.Contains(err.Error(), "activate Windows binary:") || !strings.Contains(result.Failure, "activate Windows binary:") || result.Stage != windowsActivationRolledBack {
+		t.Fatalf("stage=%s failure=%s err=%v", result.Stage, result.Failure, err)
+	}
+}
