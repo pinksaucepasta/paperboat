@@ -18,8 +18,8 @@ install or claim. Browser/public routes need their own domain configuration in
 the dashboard before publication.
 
 Paste the printed claim address and expiring code into **Dashboard → Network →
-Add self-hosted node**, then choose the owning personal workspace, team, or
-operator global pool there. The bootstrap TLS key is pinned by the code; ownership
+Add self-hosted node**, then choose the owning personal workspace or team.
+Paperboat global nodes use the separate authenticated operator enrollment API. The bootstrap TLS key is pinned by the code; ownership
 is assigned only by the authenticated control-plane claim. The code lasts fifteen
 minutes, is single-use, and contains no account or team identity. Treat it as a
 secret. Generate a fresh unclaimed code with `pbh selfhost code`.
@@ -43,7 +43,8 @@ entry. The helper executable stays available for a future install.
 Release owners build one required artifact with
 `relay/deploy/package-selfhost.sh VERSION amd64 ABSOLUTE_IGNORED_BUILD_DIRECTORY`.
 The install endpoint renders `install.sh` with the configured immutable
-`PACKAGE_URL`, `PACKAGE_SHA256`, and `PACKAGE_ARCH`. An unconfigured endpoint must
+architecture-specific `PACKAGE_URL_AMD64`, `PACKAGE_SHA256_AMD64`,
+`PACKAGE_URL_ARM64`, and `PACKAGE_SHA256_ARM64` values. An unconfigured endpoint must
 not claim an installation is available. Packages include Paperboat and upstream
 Tailscale license notices.
 
