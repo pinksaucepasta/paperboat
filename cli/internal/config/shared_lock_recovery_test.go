@@ -36,7 +36,11 @@ func TestSharedLockRecognizesAbandonedOwnerMetadata(t *testing.T) {
 }
 
 func TestSharedLockRecoversAbandonedDirectoryAndPreservesLiveOwner(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "profiles", "profile.lock")
+	root := filepath.Join(t.TempDir(), "secure-root")
+	if err := createSharedLockDirectory(root); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "profiles", "profile.lock")
 	lock := newSharedLock(path)
 	if err := prepareSharedLockParent(filepath.Dir(lock.path)); err != nil {
 		t.Fatal(err)
@@ -94,7 +98,11 @@ func TestSharedLockDoesNotTreatOwnerReadFailureAsAbandonment(t *testing.T) {
 }
 
 func TestEmptyLockCleanupPreservesPublishedOwner(t *testing.T) {
-	lock := newSharedLock(filepath.Join(t.TempDir(), "profiles", "profile.lock"))
+	root := filepath.Join(t.TempDir(), "secure-root")
+	if err := createSharedLockDirectory(root); err != nil {
+		t.Fatal(err)
+	}
+	lock := newSharedLock(filepath.Join(root, "profiles", "profile.lock"))
 	if err := lock.Lock(); err != nil {
 		t.Fatal(err)
 	}
