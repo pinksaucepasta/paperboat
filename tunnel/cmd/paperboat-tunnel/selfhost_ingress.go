@@ -46,7 +46,8 @@ func installationChallenge(node, host, credential string, next http.Handler) htt
 }
 
 // The optional operator certificate is valid only for the installation's
-// infrastructure hostname; it never replaces managed route certificates.
+// infrastructure hostname and no-SNI IP connections. Named managed routes
+// continue to use their own certificates.
 func infrastructureTLS(d config.Deployment, base *tls.Config) (*tls.Config, error) {
 	if d.InfrastructureTLSCertFile == "" && d.InfrastructureTLSKeyFile == "" {
 		return base, nil
@@ -65,7 +66,7 @@ func infrastructureTLS(d config.Deployment, base *tls.Config) (*tls.Config, erro
 	result := base.Clone()
 	fallback := result.GetCertificate
 	result.GetCertificate = func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-		if strings.EqualFold(hello.ServerName, d.ConnectorAdvertiseHost) {
+		if hello.ServerName == "" || strings.EqualFold(hello.ServerName, d.ConnectorAdvertiseHost) {
 			return &certificate, nil
 		}
 		return fallback(hello)
