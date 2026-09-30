@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-relay/derpquic"
+	"github.com/pinksaucepasta/paperboat-relay/nodetls"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"net/netip"
@@ -320,16 +321,26 @@ func (a *Authority) configureRegionalRelays(config *tls.Config, only string) ([]
 			a.relay.mu.Lock()
 			defer a.relay.mu.Unlock()
 			grant := a.relay.grants[node.NodeID]
+			current := a.relay.nodes[regionalID(node.NodeID)]
+			if current.NodeID != node.NodeID || current.NodeGeneration != node.NodeGeneration || current.ProcessEpoch != node.ProcessEpoch || current.TLSSPKISHA256 != node.TLSSPKISHA256 {
+				return "", ErrAuthority
+			}
 			if node.NodeID == "" || grant.ExpiresAt <= time.Now().Unix() || grant.NodeGeneration != node.NodeGeneration || grant.ProcessEpoch != node.ProcessEpoch {
 				return "", ErrAuthority
 			}
 			return a.relay.tokens[node.NodeID], nil
 		}
-		client := derpquic.NewClient(derpquic.ClientConfig{Address: net.JoinHostPort(node.EndpointHost, strconv.Itoa(int(node.EndpointQUICPort))), TLS: config.Clone(), Credential: credential})
+		nodeTLS, pinErr := nodetls.ClientConfig(config, node.TLSSPKISHA256)
+		if pinErr != nil {
+			// Signed candidates are validated on ingestion; fail closed if unavailable.
+			nodeTLS = config.Clone()
+			nodeTLS.VerifyConnection = func(tls.ConnectionState) error { return nodetls.ErrIdentity }
+		}
+		client := derpquic.NewClient(derpquic.ClientConfig{Address: net.JoinHostPort(node.EndpointHost, strconv.Itoa(int(node.EndpointQUICPort))), TLS: nodeTLS.Clone(), Credential: credential})
 		var carrier magicsock.DERPCarrier = client
 		if node.EndpointTCPPort != 0 && contains(node.Transports, "derp_wss") {
 			u := (&url.URL{Scheme: "wss", Host: net.JoinHostPort(node.EndpointHost, strconv.Itoa(int(node.EndpointTCPPort))), Path: "/derp"}).String()
-			carrier = derpquic.NewFallbackCarrier(client, derpquic.NewWSSClient(derpquic.WSSClientConfig{URL: u, TLS: config.Clone(), Credential: credential}), 5*time.Second)
+			carrier = derpquic.NewFallbackCarrier(client, derpquic.NewWSSClient(derpquic.WSSClientConfig{URL: u, TLS: nodeTLS.Clone(), Credential: credential}), 5*time.Second)
 		}
 		if a.options.TestOnlyDERPCarrier != nil {
 			return a.options.TestOnlyDERPCarrier(carrier)

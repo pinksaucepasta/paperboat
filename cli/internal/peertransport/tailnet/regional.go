@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"github.com/pinksaucepasta/paperboat-relay/derpquic"
+	"github.com/pinksaucepasta/paperboat-relay/nodetls"
 	"sort"
 	"strings"
 	"time"
@@ -26,6 +27,7 @@ const (
 )
 
 type RegionalNode struct {
+	TLSSPKISHA256      string   `json:"tls_spki_sha256,omitempty"`
 	NodeID             string   `json:"node_id"`
 	NodeGeneration     uint64   `json:"node_generation"`
 	ProcessEpoch       string   `json:"process_epoch"`
@@ -97,6 +99,13 @@ func (a *Authority) ApplyRegionalCandidates(ctx context.Context, token string) e
 	}
 	if a.regional != nil && c.Generation < a.regional.Generation {
 		return ErrStaleAuthority
+	}
+	for _, node := range c.Nodes {
+		if node.TLSSPKISHA256 != "" {
+			if _, err := nodetls.ParsePin(node.TLSSPKISHA256); err != nil {
+				return ErrRegionalAuthority
+			}
+		}
 	}
 	if mesh.ValidateSTUNServers(c.STUNServers) != nil {
 		return ErrRegionalAuthority

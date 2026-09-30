@@ -268,7 +268,7 @@ func publicKeyForEndpoint(peers map[key.NodePublic]NetworkPeer, endpointID strin
 
 func sameRegionalNode(nodes []RegionalNode, wanted RegionalNode) bool {
 	for _, node := range nodes {
-		if node.NodeID == wanted.NodeID && node.NodeGeneration == wanted.NodeGeneration && node.ProcessEpoch == wanted.ProcessEpoch {
+		if node.NodeID == wanted.NodeID && node.NodeGeneration == wanted.NodeGeneration && node.ProcessEpoch == wanted.ProcessEpoch && node.TLSSPKISHA256 == wanted.TLSSPKISHA256 {
 			return true
 		}
 	}

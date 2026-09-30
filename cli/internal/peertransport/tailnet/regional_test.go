@@ -168,3 +168,34 @@ func TestRegionalIssuedAtToleratesBoundedClockSkew(t *testing.T) {
 		t.Fatal("excessive clock skew accepted")
 	}
 }
+
+func TestRegionalCandidateTLSPinValidation(t *testing.T) {
+	a, network, signer, _ := networkTestAuthority(t)
+	if err := a.Apply(t.Context(), networkToken(t, signer, network)); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	c := RegionalCandidates{Schema: "paperboat.regional-candidates.v1", Issuer: network.Issuer, Audience: "paperboat-regional-candidates", AccountID: network.Self.AccountID, EndpointID: network.Self.EndpointID, AuthorizationGeneration: network.Generation, Generation: 1, IssuedAt: now, ExpiresAt: now + 60, Nodes: []RegionalNode{{TLSSPKISHA256: "bad"}}}
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, c)); !errors.Is(err, ErrRegionalAuthority) {
+		t.Fatalf("malformed pin: %v", err)
+	}
+	c.Nodes[0].TLSSPKISHA256 = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, c)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRegionalIdentityIncludesTLSPin(t *testing.T) {
+	node := RegionalNode{NodeID: "node", NodeGeneration: 1, ProcessEpoch: "epoch", TLSSPKISHA256: base64.RawURLEncoding.EncodeToString(make([]byte, 32))}
+	if !sameRegionalNode([]RegionalNode{node}, node) {
+		t.Fatal("same pinned node rejected")
+	}
+	other := node
+	other.TLSSPKISHA256 = base64.RawURLEncoding.EncodeToString([]byte("12345678901234567890123456789012"))
+	if sameRegionalNode([]RegionalNode{other}, node) {
+		t.Fatal("rotated pin retained old node identity")
+	}
+	if sameRegionalNode(nil, node) {
+		t.Fatal("withdrawn node retained identity")
+	}
+}

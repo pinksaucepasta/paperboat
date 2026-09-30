@@ -653,3 +653,57 @@ func machineAttachmentAdmission(t *testing.T, store *identity.Store, now time.Ti
 	}
 	return admission
 }
+
+func TestMachineAttachmentCarrierTrustsPinnedSelfSignedIP(t *testing.T) {
+	stateRoot, store := newMachineAttachmentIdentity(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	identityValue := testPreviewCarrierIdentity(1)
+	public, private, err := ed25519.GenerateKey(cryptorand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{SerialNumber: big.NewInt(4), IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}, NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	der, err := x509.CreateCertificate(cryptorand.Reader, template, template, public, private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverCertificate := tls.Certificate{Certificate: [][]byte{der}, PrivateKey: private, Leaf: parsed}
+	source, err := NewMachineAttachmentSessionSource(MachineAttachmentSessionSourceConfig{StateRoot: stateRoot, Clock: func() time.Time { return now }, SessionFactory: func(connector.DataCarrierIdentity, connector.DataCarrierPoolConfig, connector.NetworkDialerConfig) (connector.DataCarrierSessionSource, error) {
+		return connector.DataCarrierSessionSource{}, errors.New("not used")
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admission := machineAttachmentAdmission(t, store, now, identityValue, []string{"h2://127.0.0.1:443", "h3://127.0.0.1:444"})
+	admission.Binding.EdgeCarrierServerSPKISHA256, admission.Binding.EdgeCarrierServerCertificateChainPEM = testEdgeServerTrust(t, serverCertificate)
+	leaf, err := store.CurrentTLSCertificate(now, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoints, h2, h3, err := source.endpointConfigs(admission, identityValue, leaf)
+	if err != nil || !h2 || !h3 {
+		t.Fatalf("endpoint trust: %v", err)
+	}
+	for _, endpoint := range []connector.DataCarrierEndpointConfig{endpoints.TCPMux, endpoints.QUIC} {
+		if err := handshakeWithServer(endpoint.TLS, serverCertificate); err != nil {
+			t.Fatalf("self-signed IP handshake: %v", err)
+		}
+		state := tls.ConnectionState{VerifiedChains: [][]*x509.Certificate{{parsed}}, PeerCertificates: []*x509.Certificate{parsed}}
+		if _, err := endpoint.PeerBinding(state); err != nil {
+			t.Fatal(err)
+		}
+		_, other := testEdgeServerCertificate(t, now, identityValue, "edge_epoch_01")
+		otherLeaf, err := x509.ParseCertificate(other.Certificate[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		state.PeerCertificates = []*x509.Certificate{otherLeaf}
+		if _, err := endpoint.PeerBinding(state); err == nil {
+			t.Fatal("accepted wrong SPKI")
+		}
+	}
+}
