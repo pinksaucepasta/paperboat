@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/pinksaucepasta/paperboat/internal/api"
 )
 
 type edgeListItem struct {
@@ -42,7 +44,15 @@ pool mode, edges, and hosted_fallback_display_only marker.`, Example: "  pb edge
 		if err != nil {
 			return friendlyCommandError(err)
 		}
-		showHosted := pool.Mode == "mixed" || len(selfhost) == 0
+		selected := make([]api.SelfhostInstallation, 0, len(selfhost))
+		metadata := make(map[string]api.SelfhostInstallation, len(selfhost))
+		for _, installation := range selfhost {
+			metadata[installation.NodeID] = installation
+			if installation.Selected && installation.ScopeKind != "global" {
+				selected = append(selected, installation)
+			}
+		}
+		showHosted := pool.Mode == "mixed" || len(selected) == 0
 		items := make([]edgeListItem, 0, len(selfhost))
 		observedAt := time.Now().UTC()
 		if showHosted {
@@ -52,17 +62,17 @@ pool mode, edges, and hosted_fallback_display_only marker.`, Example: "  pb edge
 			}
 			observedAt = page.ObservedAt
 			for _, edge := range page.Items {
-				items = append(items, edgeListItem{ID: edge.ID, Source: "paperboat", Region: edge.Region, Status: edge.Status, LastHeartbeat: edge.LastHeartbeat})
+				items = append(items, edgeListItem{ID: edge.ID, Name: metadata[edge.ID].Name, Source: "paperboat", Region: edge.Region, Status: edge.Status, LastHeartbeat: edge.LastHeartbeat})
 			}
 		}
-		for _, installation := range selfhost {
+		for _, installation := range selected {
 			status := "unavailable"
 			if installation.Ready {
 				status = "ready"
 			}
 			items = append(items, edgeListItem{ID: installation.NodeID, Name: installation.Name, Source: "self-hosted", Status: status})
 		}
-		fallback := pool.Mode == "self-hosted-only" && len(selfhost) == 0
+		fallback := pool.Mode == "self-hosted-only" && len(selected) == 0
 		if jsonOutput, _ := command.Flags().GetBool("json"); jsonOutput {
 			return json.NewEncoder(command.OutOrStdout()).Encode(map[string]any{"schema": "paperboat.edge-list/v1", "observed_at": observedAt, "pool_mode": pool.Mode, "hosted_fallback_display_only": fallback, "edges": items})
 		}

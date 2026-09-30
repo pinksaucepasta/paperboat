@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 )
 
@@ -75,8 +77,10 @@ func TestEdgeListRespectsPoolAndShowsHostedWhenNoSelfhostSelected(t *testing.T) 
 		name, mode, installations, selected    string
 		wantHosted, wantSelfhost, wantFallback bool
 	}{
-		{"mixed", "mixed", `[{"installation_id":"install_1","node_id":"node_1","name":"My edge","capability":"tunnel","ready":true}]`, `["install_1"]`, true, true, false},
-		{"selfhost_only", "self-hosted-only", `[{"installation_id":"install_1","node_id":"node_1","name":"My edge","capability":"tunnel","ready":false}]`, `["install_1"]`, false, true, false},
+		{"mixed", "mixed", `[{"installation_id":"install_1","node_id":"node_1","name":"My edge","capability":"tunnel","scope_kind":"account","scope_id":"account_1","enrollment_state":"enrolled","ready":true}]`, `["install_1"]`, true, true, false},
+		{"selfhost_only", "self-hosted-only", `[{"installation_id":"install_1","node_id":"node_1","name":"My edge","capability":"tunnel","scope_kind":"account","scope_id":"account_1","enrollment_state":"enrolled","ready":false}]`, `["install_1"]`, false, true, false},
+		{"unselected_private", "mixed", `[{"installation_id":"install_1","node_id":"node_1","name":"Shared edge","capability":"tunnel","scope_kind":"team","scope_id":"team_1","enrollment_state":"enrolled","ready":true}]`, `[]`, true, false, false},
+		{"pending_selected", "self-hosted-only", `[{"installation_id":"install_1","node_id":"node_1","name":"Pending edge","capability":"tunnel","scope_kind":"account","scope_id":"account_1","enrollment_state":"pending","ready":false}]`, `["install_1"]`, true, false, true},
 		{"empty_fallback", "self-hosted-only", `[]`, `[]`, true, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -131,7 +135,7 @@ func TestRelayListResultsUseNativeAuthorityAndSelectedPool(t *testing.T) {
 		{NodeID: "node_1", Region: "hel1", State: "ready", ObservedAt: now.Unix() - 3, ExpiresAt: now.Unix() + 30, Roles: []string{"relay"}, Transports: []string{"derp_quic"}},
 		{NodeID: "edge_1", Region: "fsn1", State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Unix() + 30, Roles: []string{"edge"}, Transports: []string{"http3"}},
 	}}
-	selected := []api.SelfhostInstallation{{NodeID: "node_1", Name: "My relay"}, {NodeID: "node_2", Name: "Offline relay"}}
+	selected := []api.SelfhostInstallation{{InstallationID: "install_1", NodeID: "node_1", Name: "My relay", ScopeKind: "account", ScopeID: "account_1", EnrollmentState: "enrolled", Selected: true}, {InstallationID: "install_2", NodeID: "node_2", Name: "Offline relay", ScopeKind: "team", ScopeID: "team_1", EnrollmentState: "enrolled", Selected: true}}
 	mixed := relayListResults(inventory, selected, "mixed", now)
 	if len(mixed) != 3 || mixed[0].RelayID != "hosted_1" || mixed[0].Status != "reported_ready" || mixed[1].Name != "My relay" || mixed[1].Source != "self-hosted" || mixed[2].RelayID != "node_2" || mixed[2].Status != "unavailable" {
 		t.Fatalf("mixed relays = %+v", mixed)
@@ -158,5 +162,59 @@ func TestSendManagementHasNoTransferAlias(t *testing.T) {
 		if err != nil || command == nil || command.Name() != path[len(path)-1] {
 			t.Fatalf("missing %v: %v", path, err)
 		}
+	}
+}
+
+func TestRelayListKeepsUnselectedSignedIdentityWithoutInventingOfflineEntries(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	candidates := localapi.RelayInventory{Candidates: []localapi.RelayCandidate{
+		{NodeID: "shared", Region: "hel1", State: "ready", ObservedAt: now.Unix() - 1, ExpiresAt: now.Unix() + 30, Roles: []string{"relay"}, Transports: []string{"derp_quic"}},
+		{NodeID: "global", Region: "fsn1", State: "ready", ObservedAt: now.Unix() - 1, ExpiresAt: now.Unix() + 30, Roles: []string{"relay"}, Transports: []string{"derp_quic"}},
+	}}
+	metadata := []api.SelfhostInstallation{
+		{NodeID: "shared", Name: "Shared relay", ScopeKind: "team", ScopeID: "team_1", EnrollmentState: "enrolled"},
+		{NodeID: "global", Name: "Paperboat relay", ScopeKind: "global", ScopeID: "global", EnrollmentState: "enrolled"},
+		{NodeID: "offline_selected", Name: "Selected offline", ScopeKind: "account", ScopeID: "account_1", EnrollmentState: "enrolled", Selected: true},
+		{NodeID: "offline_unselected", Name: "Unselected offline", ScopeKind: "account", ScopeID: "account_1", EnrollmentState: "enrolled"},
+	}
+	mixed := relayListResults(candidates, metadata, "mixed", now)
+	if len(mixed) != 3 || mixed[0].Name != "Shared relay" || mixed[0].Source != "self-hosted" || mixed[0].Status != "reported_ready" || mixed[1].Name != "Paperboat relay" || mixed[1].Source != "paperboat" || mixed[2].RelayID != "offline_selected" || mixed[2].Status != "unavailable" {
+		t.Fatalf("mixed relays=%+v", mixed)
+	}
+	strict := relayListResults(candidates, metadata, "self-hosted-only", now)
+	if len(strict) != 1 || strict[0].RelayID != "offline_selected" {
+		t.Fatalf("strict relays=%+v", strict)
+	}
+}
+
+func TestSelfhostInventoryRetainsAuthorizedEnrolledMetadataAndComputesSelection(t *testing.T) {
+	for _, invalid := range []bool{false, true} {
+		t.Run(fmt.Sprint("invalid_scope_", invalid), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path == "/v1/selfhost/installations" {
+					scope := "team"
+					if invalid {
+						scope = ""
+					}
+					fmt.Fprintf(w, `{"data":{"installations":[{"installation_id":"shared","node_id":"shared_node","name":"Shared relay","capability":"relay","scope_kind":%q,"scope_id":"team_1","enrollment_state":"enrolled","ready":true},{"installation_id":"selected","node_id":"selected_node","name":"Offline selected","capability":"relay","scope_kind":"account","scope_id":"account_1","enrollment_state":"enrolled","ready":false},{"installation_id":"pending","node_id":"pending_node","name":"Pending relay","capability":"relay","scope_kind":"account","scope_id":"account_1","enrollment_state":"pending","ready":false}]}}`, scope)
+				} else if r.URL.Path == "/v1/selfhost/pools/relay" {
+					fmt.Fprint(w, `{"data":{"mode":"mixed","installation_ids":["selected"]}}`)
+				} else {
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			items, pool, err := api.New(server.URL, config.Credential{AccessToken: "test-credential"}, server.Client()).SelfhostInventory(context.Background(), "relay")
+			if invalid {
+				if err == nil {
+					t.Fatal("missing authoritative scope accepted")
+				}
+				return
+			}
+			if err != nil || pool.Mode != "mixed" || len(items) != 2 || items[0].Name != "Shared relay" || items[0].Selected || !items[1].Selected {
+				t.Fatalf("inventory=%+v pool=%+v err=%v", items, pool, err)
+			}
+		})
 	}
 }

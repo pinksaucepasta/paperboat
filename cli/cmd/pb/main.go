@@ -2382,9 +2382,9 @@ func actionRelayList(command *cobra.Command, _ []string) error {
 }
 
 func relayListResults(inventory localapi.RelayInventory, selfhost []api.SelfhostInstallation, poolMode string, now time.Time) []relayListResult {
-	selected := make(map[string]api.SelfhostInstallation, len(selfhost))
+	metadata := make(map[string]api.SelfhostInstallation, len(selfhost))
 	for _, installation := range selfhost {
-		selected[installation.NodeID] = installation
+		metadata[installation.NodeID] = installation
 	}
 	results := make([]relayListResult, 0, len(inventory.Candidates)+len(selfhost))
 	seen := make(map[string]bool, len(inventory.Candidates))
@@ -2393,8 +2393,8 @@ func relayListResults(inventory localapi.RelayInventory, selfhost []api.Selfhost
 		if !slices.Contains(candidate.Roles, "relay") || !slices.Contains(candidate.Transports, "derp_quic") {
 			continue
 		}
-		installation, isSelfhost := selected[candidate.NodeID]
-		if poolMode == "self-hosted-only" && !isSelfhost {
+		installation, isSelfhost := metadata[candidate.NodeID]
+		if poolMode == "self-hosted-only" && (!isSelfhost || installation.ScopeKind == "global" || !installation.Selected) {
 			continue
 		}
 		result := relayListResult{RelayID: candidate.NodeID, Name: candidate.NodeID, Region: candidate.Region, Source: "paperboat", Status: "unavailable", ObservedAt: candidate.ObservedAt}
@@ -2403,13 +2403,15 @@ func relayListResults(inventory localapi.RelayInventory, selfhost []api.Selfhost
 		}
 		if isSelfhost {
 			result.Name = installation.Name
-			result.Source = "self-hosted"
+			if installation.ScopeKind != "global" {
+				result.Source = "self-hosted"
+			}
 		}
 		results = append(results, result)
 		seen[candidate.NodeID] = true
 	}
 	for _, installation := range selfhost {
-		if !seen[installation.NodeID] {
+		if installation.Selected && installation.ScopeKind != "global" && !seen[installation.NodeID] {
 			results = append(results, relayListResult{RelayID: installation.NodeID, Name: installation.Name, Source: "self-hosted", Status: "unavailable"})
 		}
 	}

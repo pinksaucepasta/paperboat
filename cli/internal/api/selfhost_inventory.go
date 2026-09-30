@@ -7,11 +7,15 @@ import (
 )
 
 type SelfhostInstallation struct {
-	InstallationID string `json:"installation_id"`
-	NodeID         string `json:"node_id"`
-	Name           string `json:"name"`
-	Capability     string `json:"capability"`
-	Ready          bool   `json:"ready"`
+	ScopeKind       string `json:"scope_kind"`
+	ScopeID         string `json:"scope_id"`
+	EnrollmentState string `json:"enrollment_state"`
+	Selected        bool   `json:"-"`
+	InstallationID  string `json:"installation_id"`
+	NodeID          string `json:"node_id"`
+	Name            string `json:"name"`
+	Capability      string `json:"capability"`
+	Ready           bool   `json:"ready"`
 }
 
 type SelfhostPool struct {
@@ -44,11 +48,14 @@ func (c *Client) SelfhostInventory(ctx context.Context, capability string) ([]Se
 		selected[id] = true
 	}
 	items := make([]SelfhostInstallation, 0, len(installations.Items))
+	seenInstallations, seenNodes := make(map[string]bool), make(map[string]bool)
 	for _, item := range installations.Items {
-		if item.InstallationID == "" || item.NodeID == "" || item.Name == "" || (item.Capability != "relay" && item.Capability != "tunnel") {
+		if item.InstallationID == "" || item.NodeID == "" || item.Name == "" || item.ScopeID == "" || (item.ScopeKind != "account" && item.ScopeKind != "team" && item.ScopeKind != "global") || (item.EnrollmentState != "pending" && item.EnrollmentState != "enrolled") || (item.EnrollmentState == "pending" && item.Ready) || seenInstallations[item.InstallationID] || seenNodes[item.NodeID] || (item.Capability != "relay" && item.Capability != "tunnel") {
 			return nil, SelfhostPool{}, errors.New("paperboat-server returned invalid self-hosted installation")
 		}
-		if item.Capability == capability && selected[item.InstallationID] {
+		seenInstallations[item.InstallationID], seenNodes[item.NodeID] = true, true
+		if item.Capability == capability && item.EnrollmentState == "enrolled" {
+			item.Selected = selected[item.InstallationID] && item.ScopeKind != "global"
 			items = append(items, item)
 		}
 	}
