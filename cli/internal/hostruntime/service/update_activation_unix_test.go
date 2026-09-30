@@ -75,3 +75,23 @@ func TestUnixUpdateActivatorRestartsOnlyFixedHostdJob(t *testing.T) {
 		t.Fatalf("restart failure=%v", err)
 	}
 }
+
+// The ordinary updater and its persistent helper need the same installer-owned
+// source identity to authorize recovery of a locally installed runtime.
+func TestUnixUpdateActivatorPreservesInstallerSource(t *testing.T) {
+	const source = "eyJkaXN0cmlidXRpb24iOiJvZmZpY2lhbCJ9"
+	environment := map[string]string{"PAPERBOAT_INSTALL_SOURCE": source}
+	for _, platform := range []string{"linux", "darwin"} {
+		body, err := unixUpdateActivatorDefinition(platform, 501, "/safe/activation/pb", environment)
+		if err != nil {
+			t.Fatalf("%s: %v", platform, err)
+		}
+		if !strings.Contains(string(body), source) {
+			t.Fatalf("%s: installer source omitted", platform)
+		}
+	}
+	environment["PAPERBOAT_INSTALL_SOURCE"] = source + "\nExecStart=/bad"
+	if _, err := unixUpdateActivatorDefinition("linux", 501, "/safe/activation/pb", environment); err == nil {
+		t.Fatal("accepted injected source")
+	}
+}
