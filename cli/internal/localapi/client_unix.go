@@ -145,8 +145,14 @@ func (c *Client) Watch(ctx context.Context, after uint64) (<-chan Snapshot, <-ch
 }
 
 func newClient(socketPath string, timeout time.Duration) *Client {
-	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+	return newClientWithDial(socketPath, timeout, func(ctx context.Context) (net.Conn, error) {
 		return dialLocal(ctx, socketPath, timeout)
+	})
+}
+
+func newClientWithDial(socketPath string, timeout time.Duration, dial func(context.Context) (net.Conn, error)) *Client {
+	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return dial(ctx)
 	}, DisableCompression: true, MaxConnsPerHost: 4, MaxIdleConnsPerHost: 4, IdleConnTimeout: timeout}
 	return &Client{http: &http.Client{Transport: supportReferenceTransport{base: transport}}, timeout: timeout, socket: socketPath}
 }
@@ -621,4 +627,10 @@ func decodeStrictJSON(reader io.Reader, target any) error {
 		return ErrInvalidResponse
 	}
 	return nil
+}
+
+func (t supportReferenceTransport) CloseIdleConnections() {
+	if closer, ok := t.base.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
 }

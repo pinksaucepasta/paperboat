@@ -1152,10 +1152,6 @@ func (b *windowsSCMActivationBackend) verifyWindowsRuntimeVersions(ctx context.C
 	if err != nil {
 		return fmt.Errorf("resolve Paperboat local daemon endpoint: %w", err)
 	}
-	daemon, err := localapi.NewClient(paths.SocketPath, 2*time.Second)
-	if err != nil {
-		return fmt.Errorf("verify Paperboat local daemon control: %w", err)
-	}
 	return waitForWindowsDaemonVersion(ctx, version, 30*time.Second, 250*time.Millisecond, func(probeCtx context.Context) (localapi.Snapshot, error) {
 		running, probeErr := localdaemon.WindowsOwnerServiceRunning(lockPath, b.config.OwnerSID)
 		if probeErr != nil || !running {
@@ -1164,7 +1160,7 @@ func (b *windowsSCMActivationBackend) verifyWindowsRuntimeVersions(ctx context.C
 			}
 			return localapi.Snapshot{}, probeErr
 		}
-		return daemon.Snapshot(probeCtx)
+		return localapi.ReadSystemOwnerSnapshot(probeCtx, paths.SocketPath, b.config.OwnerSID, 2*time.Second)
 	})
 }
 
@@ -1372,8 +1368,11 @@ func reconcileWindowsInstallVersion(ctx context.Context, config WindowsConfig) e
 		return nil
 	}
 	if journal, journalErr := loadWindowsActivationJournal(config); journalErr == nil && journal.Stage != windowsActivationCommitted && journal.Stage != windowsActivationRolledBack {
-		if document.Artifact.Version != journal.PreviousVersion && document.Artifact.Version != journal.Version || config.ActiveVersion != journal.PreviousVersion && config.ActiveVersion != journal.Version {
-			return errInvalidWindowsActivation
+		if document.Artifact.Version != journal.PreviousVersion && document.Artifact.Version != journal.Version {
+			return fmt.Errorf("%w: installed release metadata differs from both approved transaction releases", errInvalidWindowsActivation)
+		}
+		if config.ActiveVersion != journal.PreviousVersion && config.ActiveVersion != journal.Version {
+			return fmt.Errorf("%w: running updater differs from both approved transaction releases", errInvalidWindowsActivation)
 		}
 		return nil
 	} else if journalErr != nil && !errors.Is(journalErr, os.ErrNotExist) {
@@ -1531,8 +1530,14 @@ func loadWindowsActivationJournal(config WindowsConfig) (windowsActivationJourna
 	decoder.DisallowUnknownFields()
 	var journal windowsActivationJournal
 	var extra any
-	if decoder.Decode(&journal) != nil || decoder.Decode(&extra) != io.EOF || !validWindowsActivationJournal(journal) || !validWindowsActivationPaths(config, journal) {
-		return windowsActivationJournal{}, errInvalidWindowsActivation
+	if decoder.Decode(&journal) != nil || decoder.Decode(&extra) != io.EOF {
+		return windowsActivationJournal{}, fmt.Errorf("%w: activation journal cannot be decoded", errInvalidWindowsActivation)
+	}
+	if !validWindowsActivationJournal(journal) {
+		return windowsActivationJournal{}, fmt.Errorf("%w: activation journal identity or policy is invalid", errInvalidWindowsActivation)
+	}
+	if !validWindowsActivationPaths(config, journal) {
+		return windowsActivationJournal{}, fmt.Errorf("%w: activation journal paths do not match the installed owner", errInvalidWindowsActivation)
 	}
 	return journal, nil
 }

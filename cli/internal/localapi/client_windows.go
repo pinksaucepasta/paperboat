@@ -39,3 +39,18 @@ func validPipePath(path string) bool {
 	}
 	return !strings.ContainsAny(path[len(prefix):], "/\\:*?\"<>|\x00\r\n")
 }
+
+// ReadSystemOwnerSnapshot is the privileged updater's read-only readiness
+// probe. The owner comes from its protected installation configuration.
+func ReadSystemOwnerSnapshot(ctx context.Context, socketPath, ownerSID string, timeout time.Duration) (Snapshot, error) {
+	if ctx == nil || !validPipePath(socketPath) || timeout <= 0 || timeout > time.Minute {
+		return Snapshot{}, ErrInvalidConfig
+	}
+	client := newClientWithDial(socketPath, timeout, func(callCtx context.Context) (net.Conn, error) {
+		dialCtx, cancel := context.WithTimeout(callCtx, timeout)
+		defer cancel()
+		return pipeauth.DialSystemOwner(dialCtx, socketPath, ownerSID)
+	})
+	defer client.http.CloseIdleConnections()
+	return client.Snapshot(ctx)
+}

@@ -45,21 +45,39 @@ var currentOwner = func() (string, error) {
 // DialCurrentUser connects at identification impersonation level and rejects
 // a pipe object not owned by the current process user.
 func DialCurrentUser(ctx context.Context, path string) (net.Conn, error) {
+	expected, err := currentOwner()
+	if err != nil {
+		return nil, err
+	}
+	return dialExpectedOwner(ctx, path, expected)
+}
+
+// DialSystemOwner permits only LocalSystem to probe a specifically bound user
+// pipe. It still authenticates the connected object before exchanging bytes.
+func DialSystemOwner(ctx context.Context, path, ownerSID string) (net.Conn, error) {
+	caller, err := currentOwner()
+	if err != nil {
+		return nil, err
+	}
+	owner, err := windows.StringToSid(ownerSID)
+	if caller != "S-1-5-18" || err != nil || owner == nil || !owner.IsValid() {
+		return nil, errors.New("owner-specific named pipe probe requires LocalSystem and a valid owner")
+	}
+	return dialExpectedOwner(ctx, path, ownerSID)
+}
+
+func dialExpectedOwner(ctx context.Context, path, expected string) (net.Conn, error) {
 	conn, err := dialPipe(ctx, path)
 	if err != nil {
 		return nil, err
 	}
 	owner, ownerErr := connectedOwner(conn)
-	expected, expectedErr := currentOwner()
-	if ownerErr != nil || expectedErr != nil || owner == "" || expected == "" || owner != expected {
+	if ownerErr != nil || owner == "" || expected == "" || owner != expected {
 		_ = conn.Close()
 		if ownerErr != nil {
 			return nil, ownerErr
 		}
-		if expectedErr != nil {
-			return nil, expectedErr
-		}
-		return nil, errors.New("refusing named pipe not owned by the current user")
+		return nil, errors.New("refusing named pipe not owned by the expected account")
 	}
 	return conn, nil
 }

@@ -237,11 +237,15 @@ func (c *windowsController) invoke(ctx context.Context, request ControlRequest) 
 				response.Candidate = &candidate
 			}
 
-			if journal.Version == c.activeVersion {
-				response.Pending = journal.Stage != windowsActivationCommitted
-				response.Updated = journal.Stage == windowsActivationCommitted
-			} else if journal.PreviousVersion == c.activeVersion && journal.Stage == windowsActivationRolledBack {
-				response.ActivationFailure = "activation_failed"
+			response.Pending = journal.Stage != windowsActivationAwaitingApproval && journal.Stage != windowsActivationCommitted && journal.Stage != windowsActivationRolledBack
+			response.Updated = journal.Version == c.activeVersion && journal.Stage == windowsActivationCommitted
+			if journal.PreviousVersion == c.activeVersion {
+				switch journal.Stage {
+				case windowsActivationRolledBack:
+					response.ActivationFailure = "activation_failed"
+				case windowsActivationRollingBack, windowsActivationRollbackReady:
+					response.ActivationFailure = "recovery_pending"
+				}
 			}
 		}
 		return response, nil

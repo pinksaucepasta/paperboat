@@ -185,11 +185,16 @@ func TestWindowsControllerReadOnlyOperationsDoNotRecover(t *testing.T) {
 	controller := &windowsController{activeVersion: journal.PreviousVersion, scheduler: scheduler}
 
 	status, err := controller.invoke(context.Background(), ControlRequest{Operation: "status"})
-	if err != nil || status.Transaction.TransactionID != journal.TransactionID {
+	if err != nil || !status.Pending || status.ActivationFailure != "recovery_pending" || status.Transaction.TransactionID != journal.TransactionID {
 		t.Fatalf("status=%+v err=%v, want fenced journal without recovery", status, err)
 	}
 	if resumed != 0 {
 		t.Fatalf("status invoked recovery %d times", resumed)
+	}
+	journal.Stage = windowsActivationRollbackReady
+	status, err = controller.invoke(context.Background(), ControlRequest{Operation: "status"})
+	if err != nil || !status.Pending || status.ActivationFailure != "recovery_pending" || resumed != 0 {
+		t.Fatalf("rollback readiness status=%+v err=%v recovery calls=%d", status, err, resumed)
 	}
 
 	_, err = controller.invoke(context.Background(), ControlRequest{Operation: "check"})

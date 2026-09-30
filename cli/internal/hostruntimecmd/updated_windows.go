@@ -44,13 +44,19 @@ func runActivator(_ context.Context, args []string, _ io.Writer, _ io.Writer) er
 	if err != nil {
 		return err
 	}
+	serviceName := windowsInstanceServiceName("PaperboatUpdateActivator", instance.name)
 	config, err := windowsUpdatedConfig(instance)
 	if err != nil {
+		recordWindowsServiceLaunchFailure(serviceName, err)
 		return err
 	}
-	return service.RunWindowsSystemService(windowsInstanceServiceName("PaperboatUpdateActivator", instance.name), func(serviceCtx context.Context) error {
+	err = service.RunWindowsSystemService(serviceName, func(serviceCtx context.Context) error {
 		return updated.RunWindowsActivator(serviceCtx, config)
 	})
+	if err != nil {
+		recordWindowsServiceLaunchFailure(serviceName, err)
+	}
+	return err
 }
 
 func windowsUpdatedConfig(instance windowsRuntimeInstance) (updated.WindowsConfig, error) {
