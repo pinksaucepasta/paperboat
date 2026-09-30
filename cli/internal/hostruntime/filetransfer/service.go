@@ -161,6 +161,9 @@ func New(config Config) (*Service, error) {
 	return &Service{config: config}, nil
 }
 
+// Policy returns the current limits enforced by this receiver.
+func (s *Service) Policy() Policy { return s.config.Policy.Current() }
+
 func (s *Service) Create(ctx context.Context, request CreateRequest) ([]store.FileTransfer, error) {
 	policy := s.config.Policy.Current()
 	if request.BatchID == "" || request.SourceMachineID == "" || request.DestinationMachineID == "" || request.InitiatingUserID == "" || request.SourceMachineID == request.DestinationMachineID || request.DestinationMachineID != s.config.LocalMachineID && (request.SessionID == "" || request.DeliveryClientID == "") {

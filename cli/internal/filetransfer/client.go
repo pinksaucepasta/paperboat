@@ -157,7 +157,7 @@ func (c *Client) VerifyPolicy(ctx context.Context, expected Policy) error {
 	if err != nil {
 		return err
 	}
-	u.Path, u.RawPath, u.RawQuery, u.Fragment = "/healthz", "", "", ""
+	u.Path, u.RawPath, u.RawQuery, u.Fragment = strings.TrimRight(u.Path, "/")+"/policy", "", "", ""
 	response, err := c.requestWithHeaders(ctx, http.MethodGet, u.String(), operationID("policy", u.Host), nil)
 	if err != nil {
 		return err

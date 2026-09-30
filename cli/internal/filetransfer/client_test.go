@@ -209,7 +209,7 @@ func TestProactiveRefreshAppliesToBodyAndHeaderOnlyOperations(t *testing.T) {
 		}
 		writer.Header().Set("Content-Type", "application/json")
 		switch {
-		case request.URL.Path == "/healthz":
+		case request.URL.Path == "/v1/file-transfers/policy":
 			_ = json.NewEncoder(writer).Encode(map[string]any{"file_transfer_policy": policy})
 		case strings.HasSuffix(request.URL.Path, "/receipt"):
 			writer.WriteHeader(http.StatusNoContent)

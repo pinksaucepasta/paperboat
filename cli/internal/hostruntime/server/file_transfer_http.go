@@ -123,6 +123,15 @@ func (h *FileTransferHandler) ServeHTTP(writer http.ResponseWriter, request *htt
 		h.serveCollection(writer, request, requestID, authorization)
 		return
 	}
+	if relative == "/policy" {
+		if request.Method != http.MethodGet || request.URL.RawQuery != "" {
+			methodNotAllowed(writer, http.MethodGet)
+			return
+		}
+		writer.Header().Set("Cache-Control", "no-store")
+		writeJSON(writer, http.StatusOK, map[string]any{"file_transfer_policy": h.config.Service.Policy()})
+		return
+	}
 	if relative == "/pending" {
 		h.servePending(writer, request, requestID, authorization)
 		return

@@ -5,6 +5,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	clienttransfer "github.com/pinksaucepasta/paperboat/internal/filetransfer"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -57,5 +60,47 @@ func TestNativeTransferCommitsOnlyBoundedVerifiedChunks(t *testing.T) {
 				t.Fatalf("rejected chunk status=%d offset=%d", response.Code, current.CommittedOffset)
 			}
 		})
+	}
+}
+
+func TestNativeTransferPolicyUsesAuthorizedReceiver(t *testing.T) {
+	handler, _ := fileTransferTestHandler(t)
+	endpoint := httptest.NewServer(handler)
+	defer endpoint.Close()
+	policy := filetransfer.DefaultPolicy
+	expected := clienttransfer.Policy{Revision: policy.Revision, MaxFileBytes: policy.MaxFileBytes, MaxBatchFiles: policy.MaxBatchFiles, MaxBatchBytes: policy.MaxBatchBytes, MaxConcurrentTransfers: policy.MaxConcurrentTransfers, RetentionSeconds: policy.RetentionSeconds, DeliveryTimeoutSeconds: policy.DeliveryTimeoutSeconds, MaxPendingSpoolBytes: policy.MaxPendingSpoolBytes}
+	native, err := clienttransfer.NewNativeClient(endpoint.URL+"/v1/file-transfers", clienttransfer.Auth{Token: "token"}, clienttransfer.Binding{SourceMachineID: "machine_client", DestinationMachineID: "machine_host", InitiatingUserID: "user_1"}, func(ctx context.Context) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", endpoint.Listener.Addr().String())
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer native.Close()
+	if err := native.VerifyPolicy(t.Context(), expected); err != nil {
+		t.Fatal(err)
+	}
+	expected.Revision = "different"
+	if err := native.VerifyPolicy(t.Context(), expected); err == nil {
+		t.Fatal("mismatched policy admitted")
+	}
+	for _, scenario := range []struct {
+		method, token string
+		status        int
+	}{{http.MethodGet, "wrong", http.StatusUnauthorized}, {http.MethodPost, "token", http.StatusMethodNotAllowed}} {
+		req := transferRequest(scenario.method, endpoint.URL+"/v1/file-transfers/policy", nil)
+		req.Header.Set("Authorization", "Bearer "+scenario.token)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, req)
+		if response.Code != scenario.status {
+			t.Fatalf("status=%d want=%d", response.Code, scenario.status)
+		}
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, transferRequest(http.MethodGet, endpoint.URL+"/v1/file-transfers/policy", nil))
+	var body struct {
+		Policy filetransfer.Policy `json:"file_transfer_policy"`
+	}
+	if json.Unmarshal(response.Body.Bytes(), &body) != nil || body.Policy != policy {
+		t.Fatal("receiver limits differ")
 	}
 }
