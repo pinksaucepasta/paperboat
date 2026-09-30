@@ -17,6 +17,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseeligibility"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
@@ -109,7 +110,9 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 			environment[key] = value
 		}
 	}
-	updaterService, err := updated.New(updated.Config{AutomaticUpdates: installedSource.AutomaticUpdates, StateRoot: stateRoot, Binary: binary, BinaryRollback: binaryRollback, BinaryStaged: binaryStaged, Active: active, WorkerUID: uid, WorkerGID: gid, SocketPath: socket, Token: token, RepositoryURL: repository, MachineID: machineID, Health: updated.HTTPHealth{Endpoint: healthURL}, ControlSocket: controlSocket, Participants: participants, ActivationController: service.UnixUpdateActivator{Platform: runtime.GOOS, UID: uid, Runner: service.ExecRunner{}}, Environment: environment, RefreshManuals: refreshManuals})
+	updaterService, err := updated.New(updated.Config{AutomaticUpdates: installedSource.AutomaticUpdates, StateRoot: stateRoot, Binary: binary, BinaryRollback: binaryRollback, BinaryStaged: binaryStaged, Active: active, WorkerUID: uid, WorkerGID: gid, SocketPath: socket, Token: token, RepositoryURL: repository, MachineID: machineID, Health: updated.HTTPHealth{Endpoint: healthURL}, ControlSocket: controlSocket, Participants: participants, ActivationController: service.UnixUpdateActivator{Platform: runtime.GOOS, UID: uid, Runner: service.ExecRunner{}}, Environment: environment, RefreshManuals: refreshManuals, CommitInstallation: func(commitCtx context.Context, release workerupdate.Release) error {
+		return hostinstall.CommitUpdatedSource(commitCtx, uid, installsource.Source{Version: release.Version, Platform: release.Platform, Architecture: release.Architecture, SHA256: release.SHA256, Length: release.Length, Distribution: installsource.Official})
+	}})
 	if err != nil {
 		return failInitialization(err)
 	}

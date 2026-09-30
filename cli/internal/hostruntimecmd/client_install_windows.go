@@ -70,6 +70,7 @@ func InstallRunningBinary(ctx context.Context, sourcePath string, source install
 	if existing, loadErr := hostinstall.LoadWindowsRuntimeConfigForInstance(instance); loadErr == nil {
 		if existing.SetupMode != "awaiting_enrollment" {
 			request.Artifact = existing.Artifact
+			request.Artifact.Version = source.Version
 			request.Home = home
 			request.Path = os.Getenv("PATH")
 			request.StateRoot = existing.StateRoot
@@ -140,6 +141,7 @@ func InstallClient(ctx context.Context, config ClientInstallConfig, _ io.Reader,
 		return err
 	}
 	request := hostinstall.Request{Schema: hostinstall.SchemaV1, Platform: runtime.GOOS, User: windowsAccountName(account.Username), Group: "Paperboat", OwnerSID: sid, Executable: artifactPath, Artifact: config.Artifact, Source: sourceIdentity, Home: home, Path: os.Getenv("PATH"), StateRoot: config.StateRoot, WorkspaceRoot: config.WorkspaceRoot, ControlURL: config.ControlURL, UserMachineID: config.MachineID, Shell: filepath.Join(os.Getenv("WINDIR"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), HelperListenAddress: config.ListenAddress, SetupMode: "client"}
+	request.Artifact.Version = sourceIdentity.Version
 	executable, err := os.Executable()
 	if err != nil {
 		return err

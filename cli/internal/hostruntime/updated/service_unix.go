@@ -49,7 +49,8 @@ type Config struct {
 	Environment          map[string]string
 	// RefreshManuals runs the committed executable's bundled-manual extractor.
 	// Failure keeps the existing committed transaction pending for recovery.
-	RefreshManuals func(context.Context) error
+	RefreshManuals     func(context.Context) error
+	CommitInstallation func(context.Context, workerupdate.Release) error
 	// ControlSocket is the fixed local socket exposed to the enrolled user for
 	// pb update, check, and status. It is not an updater command channel.
 	ControlSocket string
@@ -94,13 +95,18 @@ func New(config Config) (*Service, error) {
 	service := &Service{source: source, config: config, managerConfig: workerupdate.Config{StatePath: filepath.Join(config.StateRoot, "transaction.json"), Binary: config.Binary, BinaryRollback: config.BinaryRollback, BinaryStaged: config.BinaryStaged, Active: config.Active, OwnerUID: 0, OwnerGID: 0, WorkerUID: config.WorkerUID, WorkerGID: config.WorkerGID, HostdEndpoint: config.SocketPath, Capability: config.Token, Fetcher: source, Hostd: client, Health: config.Health, Gate: config.ActivationGate, Events: config.Events, MonitorWindow: 10 * time.Minute, HealthInterval: time.Second}}
 	service.managerConfig.ActivateRuntime = service.activateRuntime
 	service.managerConfig.CommitRuntime = func(ctx context.Context, release workerupdate.Release) error {
-		if service.config.RefreshManuals == nil {
-			return nil
-		}
 		if err := verifyUnixExecutable(service.config.Binary, release); err != nil {
 			return err
 		}
-		return service.config.RefreshManuals(ctx)
+		if service.config.CommitInstallation != nil {
+			if err := service.config.CommitInstallation(ctx, release); err != nil {
+				return err
+			}
+		}
+		if service.config.RefreshManuals != nil {
+			return service.config.RefreshManuals(ctx)
+		}
+		return nil
 	}
 	manager, err := service.newManager(config.Active)
 	if err != nil {

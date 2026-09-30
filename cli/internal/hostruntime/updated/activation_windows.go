@@ -1490,31 +1490,31 @@ func stopNamedWindowsServices(ctx context.Context, names ...string) error {
 func startNamedWindowsService(ctx context.Context, name string) error {
 	manager, err := mgr.Connect()
 	if err != nil {
-		return err
+		return fmt.Errorf("start Windows service %s: %w", name, err)
 	}
 	defer manager.Disconnect()
 	item, err := manager.OpenService(name)
 	if err != nil {
-		return err
+		return fmt.Errorf("start Windows service %s: %w", name, err)
 	}
 	defer item.Close()
 	if err := item.Start(); err != nil && !errors.Is(err, windows.ERROR_SERVICE_ALREADY_RUNNING) {
-		return err
+		return fmt.Errorf("start Windows service %s: %w", name, err)
 	}
 	for {
 		status, err := item.Query()
 		if err != nil {
-			return err
+			return fmt.Errorf("start Windows service %s: %w", name, err)
 		}
 		if status.State == svc.Running {
 			return nil
 		}
 		if status.State == svc.Stopped {
-			return errInvalidWindowsActivation
+			return fmt.Errorf("start Windows service %s: stopped (Win32 exit %d, service exit %d): %w", name, status.Win32ExitCode, status.ServiceSpecificExitCode, errInvalidWindowsActivation)
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return fmt.Errorf("start Windows service %s: %w", name, ctx.Err())
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
