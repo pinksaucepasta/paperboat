@@ -686,6 +686,7 @@ func (i *Interceptor) uploadAsync(seq uint64, policy policySnapshot, paths []str
 		ctx, cancel = context.WithTimeout(ctx, i.timeout)
 		defer cancel()
 	}
+	uploaded := false
 	sources, err := transfer.PrepareDescriptors(paths, files, policy.transferLimits)
 	if err == nil {
 		batchID, batchErr := transfer.NewBatchID()
@@ -694,6 +695,7 @@ func (i *Interceptor) uploadAsync(seq uint64, policy policySnapshot, paths []str
 		} else {
 			var batch transfer.Batch
 			batch, err = policy.transfer.SendBatch(ctx, batchID, policy.sessionID, sources)
+			uploaded = err == nil
 			if err == nil && len(batch.Paths) != nonEmpty {
 				err = errors.New("helper returned incomplete file batch")
 			}
@@ -706,15 +708,26 @@ func (i *Interceptor) uploadAsync(seq uint64, policy policySnapshot, paths []str
 						continue
 					}
 					candidate := candidates[idx]
-					out[idx] = line[:candidate.start] + batch.Paths[result] + line[candidate.end:]
+					var replacement string
+					replacement, err = quoteRemotePath(batch.Paths[result])
+					if err != nil {
+						break
+					}
+					out[idx] = line[:candidate.start] + replacement + line[candidate.end:]
 					result++
 				}
-				body = []byte(strings.Join(out, "\n"))
+				if err == nil {
+					body = []byte(strings.Join(out, "\n"))
+				}
 			}
 		}
 	}
 	if err != nil {
-		i.warn("file upload failed: %v; pasting original path", err)
+		if uploaded {
+			i.warn("file uploaded, but its path could not be inserted safely; pasting original path")
+		} else {
+			i.warn("file upload failed: %v; pasting original path", err)
+		}
 	}
 	framed := make([]byte, 0, len(startMarker)+len(body)+len(endMarker))
 	framed = append(framed, startMarker...)
@@ -825,7 +838,7 @@ type pathCandidate struct {
 // whitespace. It deliberately decodes only syntax that has one unambiguous
 // literal value, rejecting operators, expansions, and malformed quoting.
 // start/end identify the complete source word so staged paths replace any
-// source quoting; staged names are safe absolute paths generated remotely.
+// source quoting; uploaded paths are quoted separately for literal insertion.
 func parseCandidate(line string) (pathCandidate, bool) {
 	trimmedLeft := strings.TrimLeft(line, " \t\r")
 	start := len(line) - len(trimmedLeft)
