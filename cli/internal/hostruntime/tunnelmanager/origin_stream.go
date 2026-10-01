@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -114,6 +116,7 @@ func (f OriginStreamForwarder) serve(ctx context.Context, active *connector.Acti
 	for {
 		stream, open, err := active.AcceptStream(ctx)
 		if err != nil {
+			logOriginStreamFailure(ctx, "stream_accept", err)
 			return
 		}
 		if open.Validate() != nil {
@@ -160,6 +163,7 @@ func (f OriginStreamForwarder) serve(ctx context.Context, active *connector.Acti
 			continue
 		}
 		if !ok || !(route.Protocol == "http" && validOriginStreamKind(open.Kind) || route.Protocol == "tcp" && open.Kind == "tcp_public" && f.IngressAuthority != nil) {
+			logOriginStreamFailure(ctx, "route_binding", ErrInvalidConfig)
 			_ = stream.Close()
 			continue
 		}
@@ -213,11 +217,13 @@ func (f OriginStreamForwarder) serveHTTP(ctx context.Context, stream io.ReadWrit
 	reader := bufio.NewReader(&originHeaderReader{reader: stream, remaining: maximumOriginRequestHeaderBytes})
 	request, err := http.ReadRequest(reader)
 	if err != nil {
+		logOriginStreamFailure(ctx, "http_read", err)
 		return errors.Join(ErrOriginRequestInvalid, err)
 	}
 	defer request.Body.Close()
 	request = request.WithContext(ctx)
 	if err := validateIngressHTTPRequest(ctx, request); err != nil {
+		logOriginStreamFailure(ctx, "host_path_binding", err)
 		return err
 	}
 	return f.roundTripAndRespond(ctx, stream, reader, route, transport, request)
@@ -233,10 +239,15 @@ func (f OriginStreamForwarder) roundTripAndRespond(ctx context.Context, stream i
 	if pending == nil {
 		response, err := transport.RoundTrip(ctx, route, request)
 		if err != nil {
+			logOriginStreamFailure(ctx, "origin_roundtrip", err)
 			return err
 		}
 		defer response.Body.Close()
-		return writeOriginResponse(ctx, stream, reader, request, response)
+		err = writeOriginResponse(ctx, stream, reader, request, response)
+		if err != nil {
+			logOriginStreamFailure(ctx, "http_write", err)
+		}
+		return err
 	}
 	return f.exchange(ctx, stream, reader, route, transport, request, pending, capture)
 }
@@ -665,4 +676,34 @@ func (r *originHeaderReader) Read(payload []byte) (int, error) {
 		}
 	}
 	return n, err
+}
+
+// Diagnostics contain only fixed stages and typed categories. Request headers,
+// origins, credentials and the original error text never enter the log.
+func logOriginStreamFailure(ctx context.Context, stage string, err error) {
+	code := "transport"
+	var networkError net.Error
+	switch {
+	case errors.Is(err, context.Canceled):
+		return
+	case errors.Is(err, context.DeadlineExceeded):
+		code = "deadline"
+	case errors.Is(err, io.ErrUnexpectedEOF):
+		code = "unexpected_eof"
+	case errors.Is(err, io.EOF):
+		code = "eof"
+	case errors.Is(err, connector.ErrDataCarrierAdmission):
+		code = "admission"
+	case errors.Is(err, connector.ErrDataCarrierClosed):
+		code = "carrier_closed"
+	case errors.Is(err, connectorprotocol.ErrIngressDenied):
+		code = "ingress_denied"
+	case errors.Is(err, ErrInvalidConfig):
+		code = "configuration"
+	case errors.Is(err, ErrOriginUnavailable):
+		code = "origin_unavailable"
+	case errors.As(err, &networkError) && networkError.Timeout():
+		code = "timeout"
+	}
+	slog.WarnContext(ctx, "durable origin forwarding failed", "stage", stage, "code", code)
 }
