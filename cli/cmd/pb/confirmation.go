@@ -125,7 +125,7 @@ func confirmMutation(command *cobra.Command, scope, impact string) error {
 }
 
 func confirmMutationWithArgs(command *cobra.Command, scope, impact string, explicitArgs []string) error {
-	if interactive, _ := command.Context().Value(configSyncInteractiveConfirmation{}).(bool); interactive {
+	if ctx := command.Context(); ctx != nil && ctx.Value(configSyncInteractiveConfirmation{}) == true {
 		confirmed, err := prompt.Confirm(prompt.ConfirmOptions{Context: command.Context(), Title: "Confirm configuration change", Description: impact, Output: command.ErrOrStderr()})
 		if err != nil {
 			return err
