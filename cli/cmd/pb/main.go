@@ -9593,10 +9593,16 @@ func localConfigServiceState() string {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if runtime.GOOS == "linux" {
-		if err := exec.CommandContext(ctx, "systemctl", "--user", "is-active", "--quiet", "paperboat-runtime-config.service").Run(); err == nil {
+		query := exec.CommandContext(ctx, "systemctl", "--user", "is-active", "paperboat-runtime-config.service")
+		output, err := query.Output()
+		state := strings.TrimSpace(string(output))
+		if err == nil && state == "active" {
 			return "active"
 		}
-		return "installed_inactive"
+		if state == "inactive" || state == "failed" || state == "activating" || state == "deactivating" {
+			return "installed_inactive"
+		}
+		return "unavailable"
 	}
 	if runtime.GOOS == "windows" {
 		return windowsConfigServiceStatus()
