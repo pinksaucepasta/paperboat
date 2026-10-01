@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -680,6 +681,9 @@ func (r *originHeaderReader) Read(payload []byte) (int, error) {
 
 // Diagnostics contain only fixed stages and typed categories. Request headers,
 // origins, credentials and the original error text never enter the log.
+// originDiagnosticLogger emits only fixed categories; the CLI deliberately discards global transport logs.
+var originDiagnosticLogger = slog.New(slog.NewTextHandler(os.Stderr, nil))
+
 func logOriginStreamFailure(ctx context.Context, stage string, err error) {
 	code := "transport"
 	var networkError net.Error
@@ -705,5 +709,5 @@ func logOriginStreamFailure(ctx context.Context, stage string, err error) {
 	case errors.As(err, &networkError) && networkError.Timeout():
 		code = "timeout"
 	}
-	slog.WarnContext(ctx, "durable origin forwarding failed", "stage", stage, "code", code)
+	originDiagnosticLogger.WarnContext(ctx, "durable origin forwarding failed", "stage", stage, "code", code)
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -30,17 +29,17 @@ func (f OriginStreamForwarder) admitIngress(parent context.Context, stream io.Re
 	decision, err := connectorprotocol.ReadIngressDecision(stream, time.Now().UTC())
 	stopRead.Stop()
 	if err != nil {
-		slog.WarnContext(ctx, "durable ingress rejected", "stage", "decision_read")
+		originDiagnosticLogger.WarnContext(ctx, "durable ingress rejected", "stage", "decision_read")
 		return fail(err)
 	}
 	if open.Kind == "http_browser" && decision.Binding.Audience == "public" {
-		slog.WarnContext(ctx, "durable ingress rejected", "stage", "audience")
+		originDiagnosticLogger.WarnContext(ctx, "durable ingress rejected", "stage", "audience")
 		return fail(connectorprotocol.ErrIngressDenied)
 	}
 	if carrierStream, ok := stream.(*connector.DataCarrierStream); ok {
 		target := carrierStream.EdgeTarget()
 		if target.EdgeID != decision.EdgeNodeID || target.ProcessEpoch != decision.EdgeProcessEpoch {
-			slog.WarnContext(ctx, "durable ingress rejected", "stage", "edge_identity")
+			originDiagnosticLogger.WarnContext(ctx, "durable ingress rejected", "stage", "edge_identity")
 			return fail(connectorprotocol.ErrIngressDenied)
 		}
 	}
@@ -48,15 +47,15 @@ func (f OriginStreamForwarder) admitIngress(parent context.Context, stream io.Re
 	current, err := f.IngressAuthority(lookup, open, decision)
 	stopLookup()
 	if err != nil {
-		slog.WarnContext(ctx, "durable ingress rejected", "stage", "authority_lookup")
+		originDiagnosticLogger.WarnContext(ctx, "durable ingress rejected", "stage", "authority_lookup")
 		return fail(connectorprotocol.ErrIngressDenied)
 	}
 	if decision.Authorize(current, open, current.EdgeNodeID, current.EdgeProcessEpoch, time.Now().UTC()) != nil {
-		slog.WarnContext(ctx, "durable ingress rejected", "stage", "authority_binding")
+		originDiagnosticLogger.WarnContext(ctx, "durable ingress rejected", "stage", "authority_binding")
 		return fail(connectorprotocol.ErrIngressDenied)
 	}
 	if !ingressRouteMatches(current.Binding, route) {
-		slog.WarnContext(ctx, "durable ingress rejected", "stage", "origin_binding")
+		originDiagnosticLogger.WarnContext(ctx, "durable ingress rejected", "stage", "origin_binding")
 		return fail(connectorprotocol.ErrIngressDenied)
 	}
 	ctx = context.WithValue(ctx, ingressBindingKey{}, current.Binding)
