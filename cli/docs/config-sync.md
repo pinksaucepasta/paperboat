@@ -5,7 +5,19 @@ can narrow that scope. Credentials, `.env` files, SSH material and Paperboat run
 state are always excluded. Repository contents and Git history are ordinary plaintext
 at the Git provider, so keep configuration secrets in ENV rather than tracked files.
 
-Connect repositories through the dashboard or provider setup, then configure a machine:
+In the interactive CLI, open **Diagnostics → Config sync** or **Configuration → Config sync**.
+Choose **Enable sync** to connect GitHub in your browser, select authorized repositories,
+choose pull/push direction, and confirm the plaintext Git storage warning. A remote or
+headless terminal can display a one-use browser link instead. The menu configures the
+machine running that CLI, including when opened inside a remote Paperboat terminal.
+
+The same menu provides status, repository changes, reviewed update approval, worker
+repair, and disabling sync. Disabling removes the assignment and stops the worker;
+existing repository content and applied files remain. Windows may ask for its normal
+administrator approval when installing or removing the worker. Cancellation of browser
+setup cancels the pending connection; a completed provider connection remains available.
+
+For scripted setup, connect an authorized provider repository and configure a machine:
 
 ```text
 pb config assign <repository> <machine> --mode pull-only
