@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -761,5 +762,40 @@ func TestUserMachineConnectionDescriptorDecodesCanonicalDescriptor(t *testing.T)
 	}
 	if response.UserMachineID != "um_1" || response.Terminal.Endpoints.WSS != "wss://edge.paperboat.test/v1/runtime" || response.FileTransfer.Endpoint != "https://edge.paperboat.test/v1/file-transfers" {
 		t.Fatalf("canonical response not decoded: %#v", response)
+	}
+}
+
+func TestConfigRepositoryDiscoveryAndConnectionUseNativeCredential(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Header.Get("Authorization") != "Bearer token" {
+			t.Errorf("missing native authentication")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method + " " + r.URL.Path {
+		case "GET /v1/config-repositories/candidates":
+			fmt.Fprint(w, `{"data":{"items":[{"provider":"github","external_id":"123","display_name":"owner/private config","default_branch":"main"}]}}`)
+		case "POST /v1/config-repositories":
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["provider"] != "github" || body["external_ref"] != "123" || body["display_name"] != "owner/private config" {
+				t.Errorf("incorrect repository request: %v %v", body, err)
+			}
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"data":{"id":"repo","provider":"github","external_ref":"123","display_name":"owner/private config","state":"active"}}`)
+		default:
+			t.Errorf("unexpected endpoint: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client := New(server.URL, config.Credential{AccessToken: "token"}, nil)
+	candidates, err := client.ConfigRepositoryCandidates(context.Background())
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("discovery %v %v", candidates, err)
+	}
+	repository, err := client.ConnectConfigRepository(context.Background(), candidates[0])
+	if err != nil || repository.ID != "repo" || repository.State != "active" || requests != 2 {
+		t.Fatalf("connection %+v %v requests=%d", repository, err, requests)
 	}
 }

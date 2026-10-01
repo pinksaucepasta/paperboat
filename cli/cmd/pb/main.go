@@ -4065,7 +4065,7 @@ func actionHomeConfig(command *cobra.Command) error {
 			{ID: "server", Title: "Paperboat server", Description: orNone(cfg.ServerURL), Search: "edit url endpoint"},
 			{ID: "auth", Title: "File credential fallback", Description: onOff(cfg.Auth.AllowFileFallback), Search: "toggle auth credentials"},
 			{ID: "status-bar", Title: "Status bar", Description: cfg.StatusBar.Mode + "  ·  " + cfg.StatusBar.Theme + "  ·  fullscreen " + cfg.StatusBar.Fullscreen},
-			{ID: "status", Title: "Sync status", Description: "Inspect environment configuration synchronization"},
+			{ID: "sync", Title: "Config sync", Description: "Enable, configure, inspect or disable sync on this machine"},
 			{ID: "path", Title: "Configuration file", Description: cfg.Path()},
 		})
 		if err != nil {
@@ -4110,26 +4110,11 @@ func actionHomeConfig(command *cobra.Command) error {
 			if statusErr := actionHomeStatusBar(command); !errors.Is(statusErr, selector.ErrCanceled) {
 				return statusErr
 			}
-		case "status":
-			client, clientErr := backendForCommand(command)
-			if clientErr != nil {
-				return clientErr
-			}
-			var status api.ConfigSyncStatus
-			statusErr := homeLoading(command, "Configuration sync", "Loading sync status", func(ctx context.Context) error {
-				var loadErr error
-				status, loadErr = client.ConfigSyncStatus(ctx)
-				return loadErr
-			})
-			if statusErr != nil {
-				return friendlyCommandError(statusErr)
-			}
-			items := make([]selector.Item, 0, len(status.Environments))
-			for _, environment := range status.Environments {
-				items = append(items, selector.Item{ID: environment.EnvironmentID, Title: environment.Alias, Description: fmt.Sprintf("%s  ·  %s  ·  %d managed paths  ·  %d conflicts", environment.State, environment.Mode, environment.ManagedPathCount, len(environment.Conflicts))})
-			}
-			if infoErr := showInformation(command, "Configuration sync", "Account state  ·  "+status.State, items); infoErr != nil && !errors.Is(infoErr, selector.ErrCanceled) {
-				return infoErr
+		case "sync":
+			if syncErr := actionHomeConfigSync(command); syncErr != nil && !interactiveCanceled(syncErr) {
+				if err := showHomeFailure(command, syncErr); err != nil && !interactiveCanceled(err) {
+					return err
+				}
 			}
 		case "path":
 			if infoErr := showInformation(command, "Configuration file", cfg.Path(), nil); infoErr != nil && !errors.Is(infoErr, selector.ErrCanceled) {
@@ -4203,13 +4188,34 @@ func onOff(value bool) string {
 }
 
 func actionHomeDoctor(command *cobra.Command) error {
+	for {
+		items, err := homeDoctorItems(command)
+		if err != nil {
+			return err
+		}
+		choice, err := selector.Choose(selector.Options{Title: "Diagnostics", Subtitle: "Local setup and Paperboat connectivity", Items: items, Footer: "enter manage config sync · esc back", Context: command.Context(), Output: command.ErrOrStderr()})
+		if err != nil {
+			return err
+		}
+		if choice.ID != "config" {
+			continue
+		}
+		if err = actionHomeConfigSync(command); err != nil && !interactiveCanceled(err) {
+			if err = showHomeFailure(command, err); err != nil && !interactiveCanceled(err) {
+				return err
+			}
+		}
+	}
+}
+
+func homeDoctorItems(command *cobra.Command) ([]selector.Item, error) {
 	report := collectLocalDoctor()
 	items := []selector.Item{
 		{ID: "setup", Title: "Local setup", Description: report.SetupState},
 		{ID: "identity", Title: "Machine identity", Description: report.IdentityState},
 		{ID: "credential", Title: "Machine credential", Description: report.CredentialState},
 		{ID: "inbox", Title: "Paperboat Inbox", Description: report.InboxState + "  ·  " + report.InboxPath},
-		{ID: "config", Title: "Config sync", Description: diagnosticConfigSync(report.ConfigService, nil, errors.New("assignment not checked"))},
+		{ID: "config", Title: "Config sync", Description: diagnosticConfigSync(report.ConfigService, nil, errors.New("assignment not checked")), Action: true},
 		{ID: "runtime", Title: "Host runtime", Description: report.HostRuntime},
 		{ID: "workloads", Title: "Local workloads", Description: diagnosticWorkloads(report)},
 	}
@@ -4254,7 +4260,7 @@ func actionHomeDoctor(command *cobra.Command) error {
 	for index, recovery := range report.RecoveryActions {
 		items = append(items, selector.Item{ID: fmt.Sprintf("recovery-%d", index), Title: "Needs attention", Description: recovery})
 	}
-	return showInformation(command, "Diagnostics", "Local setup and Paperboat connectivity", items)
+	return items, nil
 }
 
 func showInformation(command *cobra.Command, title, subtitle string, items []selector.Item) error {
@@ -8952,7 +8958,7 @@ func configAssign(c *command.Context) error {
 	} else if !api.IsNotFound(getErr) {
 		return friendlyCommandError(getErr)
 	}
-	if err := confirmContextMutation(c, fmt.Sprintf("config-assign:%s:%s:%s:%s:%d", target.id, pullID, pushID, mode, expectedVersion), fmt.Sprintf("Assign repository %s to machine %s (%s)? Selected content is ordinary plaintext in private Git, and Git history may retain removed versions.", repository.DisplayName, target.name, target.id)); err != nil {
+	if err := confirmContextMutation(c, fmt.Sprintf("config-assign:%s:%s:%s:%s:%d", target.id, pullID, pushID, mode, expectedVersion), fmt.Sprintf("Assign pull repository %s and push repository %s to %s in %s mode? Selected content is ordinary plaintext in private Git, and Git history may retain removed versions.", pullRepository.DisplayName, pushRepository.DisplayName, target.name, strings.ReplaceAll(mode, "_", "-"))); err != nil {
 		return err
 	}
 	assignment, err := client.AssignConfigTargets(c.Context, machineID, pullID, pushID, mode, c.Bool("automatic-updates"), expectedVersion)
@@ -9143,18 +9149,8 @@ func manageConfigService(ctx context.Context, machineID string, install bool) er
 	if registration.MachineID != machineID {
 		return nil
 	}
-	if windowsConfig, windowsService, windowsErr := windowsConfigServiceDefinition(stateRoot); windowsService {
-		if windowsErr != nil {
-			return windowsErr
-		}
-		installer, installErr := service.New(windowsConfig)
-		if installErr != nil {
-			return installErr
-		}
-		if install {
-			return installer.Install(ctx)
-		}
-		return installer.Uninstall(ctx)
+	if handled, windowsErr := manageWindowsConfigService(ctx, stateRoot, install); handled {
+		return windowsErr
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -9180,7 +9176,9 @@ func manageConfigService(ctx context.Context, machineID string, install bool) er
 	if err != nil {
 		return err
 	}
-	runner := service.ExecRunner{}
+	query := &exec.Cmd{}
+	prepareConfigServiceQuery(query)
+	runner := service.ExecRunner{Environment: query.Env}
 	var controller service.Controller
 	switch runtime.GOOS {
 	case "darwin":

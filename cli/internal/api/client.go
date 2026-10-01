@@ -580,6 +580,7 @@ type AvailabilityPolicy struct {
 }
 
 type ConfigRepository struct {
+	State       string `json:"state"`
 	ID          string `json:"id"`
 	Provider    string `json:"provider"`
 	ExternalRef string `json:"external_ref"`
@@ -678,6 +679,27 @@ func (c *Client) ListConfigRepositories(ctx context.Context) ([]ConfigRepository
 	}
 	err := c.do(ctx, http.MethodGet, "/v1/config-repositories", nil, &page)
 	return page.Items, err
+}
+
+type ConfigRepositoryCandidate struct {
+	Provider      string `json:"provider"`
+	ExternalID    string `json:"external_id"`
+	DisplayName   string `json:"display_name"`
+	DefaultBranch string `json:"default_branch"`
+}
+
+func (c *Client) ConfigRepositoryCandidates(ctx context.Context) ([]ConfigRepositoryCandidate, error) {
+	var page struct {
+		Items []ConfigRepositoryCandidate `json:"items"`
+	}
+	err := c.do(ctx, http.MethodGet, "/v1/config-repositories/candidates", nil, &page)
+	return page.Items, err
+}
+
+func (c *Client) ConnectConfigRepository(ctx context.Context, candidate ConfigRepositoryCandidate) (ConfigRepository, error) {
+	var out ConfigRepository
+	err := c.do(ctx, http.MethodPost, "/v1/config-repositories", map[string]string{"provider": candidate.Provider, "external_ref": candidate.ExternalID, "display_name": candidate.DisplayName}, &out)
+	return out, err
 }
 
 func (c *Client) ConfigAssignment(ctx context.Context, machineID string) (ConfigAssignment, error) {

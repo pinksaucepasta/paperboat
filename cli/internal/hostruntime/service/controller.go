@@ -21,16 +21,19 @@ type OutputRunner interface {
 	Output(context.Context, string, ...string) (string, error)
 }
 
-type ExecRunner struct{}
+type ExecRunner struct {
+	Environment []string
+}
 
-func (ExecRunner) Run(ctx context.Context, name string, arguments ...string) error {
-	_, err := (ExecRunner{}).Output(ctx, name, arguments...)
+func (runner ExecRunner) Run(ctx context.Context, name string, arguments ...string) error {
+	_, err := runner.Output(ctx, name, arguments...)
 	return err
 }
 
-func (ExecRunner) Output(ctx context.Context, name string, arguments ...string) (string, error) {
+func (runner ExecRunner) Output(ctx context.Context, name string, arguments ...string) (string, error) {
 	output := &boundedCommandOutput{limit: 8 << 10}
 	command := exec.CommandContext(ctx, name, arguments...)
+	command.Env = runner.Environment
 	processlaunch.ConfigureBackground(command)
 	command.Stdout, command.Stderr = output, output
 	if err := command.Run(); err != nil {

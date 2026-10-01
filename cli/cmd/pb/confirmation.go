@@ -13,6 +13,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/prompt"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -124,6 +125,16 @@ func confirmMutation(command *cobra.Command, scope, impact string) error {
 }
 
 func confirmMutationWithArgs(command *cobra.Command, scope, impact string, explicitArgs []string) error {
+	if interactive, _ := command.Context().Value(configSyncInteractiveConfirmation{}).(bool); interactive {
+		confirmed, err := prompt.Confirm(prompt.ConfirmOptions{Context: command.Context(), Title: "Confirm configuration change", Description: impact, Output: command.ErrOrStderr()})
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			return prompt.ErrCanceled
+		}
+		return nil
+	}
 	basePath, server, err := confirmationPath(command)
 	if err != nil {
 		return err
