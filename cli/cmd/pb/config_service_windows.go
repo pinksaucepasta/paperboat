@@ -3,36 +3,43 @@
 package main
 
 import (
+	"context"
 	"errors"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
-// windowsConfigServiceDefinition deliberately uses the fixed machine runtime
-// instead of the caller's pb path. The SCM service is a token bridge and never
-// executes the config worker as LocalSystem.
-func windowsConfigServiceDefinition(stateRoot string) (service.Config, bool, error) {
-	install, err := hostinstall.LoadWindowsRuntimeConfig()
+// manageWindowsConfigService uses the same protected elevation bridge as install.
+func manageWindowsConfigService(ctx context.Context, stateRoot string, install bool) (bool, error) {
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
-		return service.Config{}, true, err
+		return true, err
 	}
-	if stateRoot != install.StateRoot || !ownerSIDMatches(install.OwnerSID) {
-		return service.Config{}, true, errors.New("Paperboat Windows config sync must be managed by the enrolled owner")
-	}
-	layout, err := service.DefaultLayout("windows")
+	owner := user.User.Sid.String()
+	instance, err := hostinstall.WindowsInstanceForSID(owner)
 	if err != nil {
-		return service.Config{}, true, err
+		return true, err
 	}
-	return service.Config{
-		Platform: "windows", Kind: service.ConfigKind, ConfigRoot: hostinstall.WindowsProgramDataRoot(),
-		Executable: layout.Binary, User: "Paperboat", Group: "Paperboat",
-		Arguments:  []string{"daemon", "__runtime-config", "--state-root", install.StateRoot},
-		Controller: service.WindowsController{},
-	}, true, nil
+	config, err := hostinstall.LoadWindowsRuntimeConfigForInstance(instance)
+	if err != nil {
+		return true, err
+	}
+	if stateRoot != config.StateRoot || !ownerSIDMatches(config.OwnerSID) {
+		return true, errors.New("Paperboat Windows config sync must be managed by the enrolled owner")
+	}
+	definition, err := hostinstall.WindowsConfigServiceDefinition(owner)
+	if err != nil {
+		return true, err
+	}
+	action := elevation.ActionConfigRemove
+	if install {
+		action = elevation.ActionConfigInstall
+	}
+	return true, elevation.RunRuntimeService(ctx, definition.Executable, action, nil)
 }
 
 func ownerSIDMatches(ownerSID string) bool {
@@ -53,7 +60,16 @@ func windowsConfigServiceStatus() string {
 	}
 	manager := &mgr.Mgr{Handle: handle}
 	defer manager.Disconnect()
-	name, err := windows.UTF16PtrFromString("PaperboatRuntimeConfig")
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		return "unavailable"
+	}
+	instance, err := hostinstall.WindowsInstanceForSID(user.User.Sid.String())
+	if err != nil {
+		return "invalid"
+	}
+	serviceName := "PaperboatRuntimeConfig-" + instance
+	name, err := windows.UTF16PtrFromString(serviceName)
 	if err != nil {
 		return "invalid"
 	}
@@ -64,7 +80,7 @@ func windowsConfigServiceStatus() string {
 	if err != nil {
 		return "unavailable"
 	}
-	configService := &mgr.Service{Name: "PaperboatRuntimeConfig", Handle: serviceHandle}
+	configService := &mgr.Service{Name: serviceName, Handle: serviceHandle}
 	defer configService.Close()
 	status, err := configService.Query()
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
@@ -122,6 +123,24 @@ func dispatchElevatedOperation(ctx context.Context, request elevation.Request) e
 			return hostinstall.Purge(ctx, request.OwnerSID)
 		case elevation.ActionRepair:
 			return repairWindowsInstallation(ctx, request.OwnerSID)
+		case elevation.ActionConfigInstall, elevation.ActionConfigRemove:
+			unlock, err := lockWindowsNativeInstall(ctx)
+			if err != nil {
+				return err
+			}
+			defer unlock()
+			definition, err := hostinstall.WindowsConfigServiceDefinition(request.OwnerSID)
+			if err != nil {
+				return err
+			}
+			installer, err := service.New(definition)
+			if err != nil {
+				return err
+			}
+			if request.Action == elevation.ActionConfigInstall {
+				return installer.Install(ctx)
+			}
+			return installer.Uninstall(ctx)
 		case elevation.ActionStop:
 			return hostinstall.Stop(ctx, request.OwnerSID)
 		case elevation.ActionInstall, elevation.ActionInstallCommit, elevation.ActionCommit, elevation.ActionUninstall:

@@ -21,7 +21,7 @@ func validOperationAction(operation, action string) bool {
 	switch operation {
 	case OperationRuntimeService:
 		switch action {
-		case ActionInstall, ActionInstallCommit, ActionCommit, ActionUninstall, ActionUninstallPersist, ActionPurge, ActionRepair, ActionStop:
+		case ActionInstall, ActionInstallCommit, ActionCommit, ActionUninstall, ActionUninstallPersist, ActionPurge, ActionRepair, ActionStop, ActionConfigInstall, ActionConfigRemove:
 			return true
 		}
 	case OperationOpenSSH:

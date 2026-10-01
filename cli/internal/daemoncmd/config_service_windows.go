@@ -4,21 +4,33 @@ package daemoncmd
 
 import (
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
-	"golang.org/x/sys/windows"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"golang.org/x/sys/windows"
 )
 
 const windowsConfigWorkloadEnvironment = "PAPERBOAT_WINDOWS_CONFIG_WORKLOAD"
 
+func resolveWindowsConfigStateRoot(stateRoot, instance string) (string, error) {
+	install, err := hostinstall.LoadWindowsRuntimeConfigForInstance(instance)
+	if err != nil {
+		return "", err
+	}
+	if stateRoot != "" && stateRoot != install.StateRoot {
+		return "", errors.New("Paperboat Windows config sync state root does not match the installed owner")
+	}
+	return install.StateRoot, nil
+}
+
 // enterWindowsConfigService turns the LocalSystem SCM invocation into the
 // enrolled user's worker. The child marker is generated only by this function;
 // direct callers cannot select another SID or state root.
-func enterWindowsConfigService(stateRoot string) (bool, error) {
-	install, err := hostinstall.LoadWindowsRuntimeConfig()
+func enterWindowsConfigService(stateRoot, instance string) (bool, error) {
+	install, err := hostinstall.LoadWindowsRuntimeConfigForInstance(instance)
 	if err != nil {
 		return false, err
 	}
@@ -31,14 +43,14 @@ func enterWindowsConfigService(stateRoot string) (bool, error) {
 		}
 		return false, nil
 	}
-	layout, err := service.DefaultLayout("windows")
+	layout, err := hostinstall.WindowsLayoutForInstance(instance)
 	if err != nil {
 		return false, err
 	}
 	err = service.RunWindowsService(service.ServiceEntryConfig{
-		Name:        "PaperboatRuntimeConfig",
+		Name:        "PaperboatRuntimeConfig-" + instance,
 		Executable:  layout.Binary,
-		Arguments:   []string{"daemon", "__runtime-config", "--state-root", install.StateRoot},
+		Arguments:   []string{"daemon", "__runtime-config", "--instance", instance},
 		EnrolledSID: install.OwnerSID,
 		Environment: map[string]string{
 			windowsConfigWorkloadEnvironment:  "1",

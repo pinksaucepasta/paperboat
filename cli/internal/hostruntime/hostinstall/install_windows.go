@@ -1592,6 +1592,19 @@ const staleWindowsRuntimeProcessPattern = `__(runtime-(hostd|worker|updated|loca
 const staleWindowsRuntimeProcessScript = `$ErrorActionPreference = 'Stop'; Get-CimInstance Win32_Process -Filter "Name = 'pb.exe'" | Where-Object { $_.CommandLine -match '` + staleWindowsRuntimeProcessPattern + `' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop }`
 
 func uninstallWindows(ctx context.Context, layout service.Layout, purge bool) error {
+	// Optional configuration sync is owned by the same enrolled instance.
+	// Stop/remove it before removing its protected executable and metadata.
+	configDefinition, err := windowsConfigServiceDefinitionForLayout(layout)
+	if err != nil {
+		return err
+	}
+	configInstaller, err := service.NewPending(configDefinition)
+	if err != nil {
+		return err
+	}
+	if err := configInstaller.Uninstall(ctx); err != nil {
+		return err
+	}
 	hostd, updater, daemon, err := windowsRoleInstallers(layout, true)
 	if err != nil {
 		return err

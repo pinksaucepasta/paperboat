@@ -2,8 +2,6 @@
 
 package main
 
-import "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+import "context"
 
-func windowsConfigServiceDefinition(string) (service.Config, bool, error) {
-	return service.Config{}, false, nil
-}
+func manageWindowsConfigService(context.Context, string, bool) (bool, error) { return false, nil }

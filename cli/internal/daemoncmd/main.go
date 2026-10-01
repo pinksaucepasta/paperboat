@@ -389,6 +389,14 @@ func configRuntimeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			instance, err := command.Flags().GetString("instance")
+			if err != nil {
+				return err
+			}
+			stateRoot, err = resolveWindowsConfigStateRoot(stateRoot, instance)
+			if err != nil {
+				return err
+			}
 			if stateRoot == "" {
 				stateRoot = os.Getenv("PAPERBOAT_RUNTIME_STATE_ROOT")
 			}
@@ -398,7 +406,7 @@ func configRuntimeCommand() *cobra.Command {
 					return err
 				}
 			}
-			handled, err := enterWindowsConfigService(stateRoot)
+			handled, err := enterWindowsConfigService(stateRoot, instance)
 			if err != nil {
 				return err
 			}
@@ -433,6 +441,7 @@ func configRuntimeCommand() *cobra.Command {
 		SilenceUsage: true, SilenceErrors: true,
 	}
 	command.Flags().String("state-root", "", "runtime state directory")
+	command.Flags().String("instance", "", "protected Windows owner installation")
 	return command
 }
 
