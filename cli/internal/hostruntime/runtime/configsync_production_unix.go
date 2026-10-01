@@ -60,7 +60,15 @@ func RunProductionConfigWorker(ctx context.Context, config ProductionConfigWorke
 	if err != nil {
 		return err
 	}
-	return service.Start(ctx)
+	if err := service.Start(ctx); err != nil {
+		return err
+	}
+	// Start owns an asynchronous component. The standalone worker owns the
+	// process lifetime and must join it before the service process exits.
+	<-ctx.Done()
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	return service.Shutdown(shutdownCtx)
 }
 
 func randomProductionOperationID() (string, error) {
