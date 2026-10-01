@@ -48,6 +48,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/observability"
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/process"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeattachment"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
@@ -303,9 +304,9 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, err
 	}
-	agentEnvironment := []string{"PATH=" + os.Getenv("PATH"), "SHELL=" + agentShell, "TERM=xterm-256color"}
-	if home, homeErr := os.UserHomeDir(); homeErr == nil && filepath.IsAbs(home) {
-		agentEnvironment = append(agentEnvironment, "HOME="+home)
+	agentEnvironment, err := process.BaseEnvironment(agentShell)
+	if err != nil {
+		return nil, errors.Join(ErrProductionInvalid, err)
 	}
 	shutdownTimeout := 30 * time.Second
 	if err := validateBYODWorkspace(workspaceRoot); err != nil {

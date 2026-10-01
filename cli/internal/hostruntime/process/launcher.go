@@ -85,7 +85,7 @@ func validEnvironment(environment []string) bool {
 	seen := make(map[string]bool, len(environment))
 	for _, entry := range environment {
 		key, _, ok := strings.Cut(entry, "=")
-		if !ok || !allowedEnvironment[key] || seen[key] {
+		if !ok || (!allowedEnvironment[key] && !platformEnvironmentKey(key)) || seen[key] {
 			return false
 		}
 		seen[key] = true
