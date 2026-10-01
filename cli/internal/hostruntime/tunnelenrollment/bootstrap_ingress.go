@@ -64,7 +64,7 @@ func (a *assemblyIngressAuthority) lookup(ctx context.Context, open connectorpro
 		a.fetched = now
 	}
 	for _, d := range a.decisions {
-		if d.Binding.RouteID == open.RouteID && d.EdgeNodeID == claimed.EdgeNodeID && d.EdgeProcessEpoch == claimed.EdgeProcessEpoch && d.Validate(time.Now().UTC()) == nil {
+		if claimed.Authorize(d, open, claimed.EdgeNodeID, claimed.EdgeProcessEpoch, time.Now().UTC()) == nil {
 			return d, nil
 		}
 	}
