@@ -162,6 +162,14 @@ func New(config Config) (*Service, error) {
 	return &Service{config: config}, nil
 }
 
+// ActiveCount reports current admitted content-write operations. Retained
+// transfer files and completed uploads are not active operations.
+func (s *Service) ActiveCount() uint64 {
+	s.slotMu.Lock()
+	defer s.slotMu.Unlock()
+	return uint64(s.active)
+}
+
 // Policy returns the current limits enforced by this receiver.
 func (s *Service) Policy() Policy { return s.config.Policy.Current() }
 

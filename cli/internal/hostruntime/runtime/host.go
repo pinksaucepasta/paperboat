@@ -208,7 +208,9 @@ func NewClientCoordinator(ctx context.Context, config HostConfig, dependencies H
 		mux.Handle("/v1/preview-launches", handler)
 	}
 	healthSource := &runtimeHealthSource{}
-	registerHostLivenessAndDiagnostics(mux, healthSource, dependencies.HealthTracker, dependencies.Metrics, dependencies.EventLog)
+	registerHostLivenessAndDiagnostics(mux, healthSource, dependencies.HealthTracker, dependencies.Metrics, dependencies.EventLog, func() HostWorkloadCounts {
+		return hostWorkloadCounts(nil, transferService)
+	})
 	if dependencies.Metrics != nil {
 		mux.Handle("/metrics", dependencies.Metrics.Handler())
 	}
@@ -556,7 +558,9 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		}
 		mux.Handle("/v1/preview-launches", previewDispatchHandler)
 	}
-	registerHostLivenessAndDiagnostics(mux, healthSource, dependencies.HealthTracker, dependencies.Metrics, dependencies.EventLog)
+	registerHostLivenessAndDiagnostics(mux, healthSource, dependencies.HealthTracker, dependencies.Metrics, dependencies.EventLog, func() HostWorkloadCounts {
+		return hostWorkloadCounts(sessions, transferService)
+	})
 	if dependencies.Metrics != nil {
 		mux.Handle("/metrics", dependencies.Metrics.Handler())
 	}

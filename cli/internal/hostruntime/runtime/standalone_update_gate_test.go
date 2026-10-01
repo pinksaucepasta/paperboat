@@ -37,7 +37,7 @@ func TestStandaloneUpdateGateCompletesExactLifecycleAndReload(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "gate.json")
 	workloads := hostdproto.WorkloadStatus{Generation: 1}
 	health := http.NewServeMux()
-	registerHostLivenessAndDiagnostics(health, nil, nil, nil, nil)
+	registerHostLivenessAndDiagnostics(health, nil, nil, nil, nil, nil)
 	gate, err := newStandaloneUpdateGate(standaloneUpdateGateConfig{MachineID: "machine_01", StatePath: statePath, Health: health, Workloads: func() hostdproto.WorkloadStatus { return workloads }})
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +63,7 @@ func TestStandaloneUpdateGateCompletesExactLifecycleAndReload(t *testing.T) {
 
 func TestStandaloneUpdateGateCompletesWithNoProtectedWorkloads(t *testing.T) {
 	health := http.NewServeMux()
-	registerHostLivenessAndDiagnostics(health, nil, nil, nil, nil)
+	registerHostLivenessAndDiagnostics(health, nil, nil, nil, nil, nil)
 	gate, err := newStandaloneUpdateGate(standaloneUpdateGateConfig{
 		MachineID: "machine_01", StatePath: filepath.Join(t.TempDir(), "gate.json"), Health: health,
 		Workloads: func() hostdproto.WorkloadStatus { return hostdproto.WorkloadStatus{} },
@@ -85,7 +85,7 @@ func TestStandaloneUpdateGateCompletesWithNoProtectedWorkloads(t *testing.T) {
 
 func TestStandaloneUpdateGateDefersTerminalsAndRestoresAdmissionFence(t *testing.T) {
 	health := http.NewServeMux()
-	registerHostLivenessAndDiagnostics(health, nil, nil, nil, nil)
+	registerHostLivenessAndDiagnostics(health, nil, nil, nil, nil, nil)
 	busy, held := true, ""
 	workloads := hostdproto.WorkloadStatus{Generation: 2, Protected: 3}
 	config := standaloneUpdateGateConfig{MachineID: "machine_01", StatePath: filepath.Join(t.TempDir(), "gate.json"), Health: health,
@@ -155,7 +155,7 @@ func TestStandaloneUpdateGateCompletesWithStableProtectedWorkloads(t *testing.T)
 	statePath := filepath.Join(t.TempDir(), "gate.json")
 	workloads := hostdproto.WorkloadStatus{Generation: 7, Protected: 4}
 	health := http.NewServeMux()
-	registerHostLivenessAndDiagnostics(health, nil, nil, nil, nil)
+	registerHostLivenessAndDiagnostics(health, nil, nil, nil, nil, nil)
 	config := standaloneUpdateGateConfig{MachineID: "machine_01", StatePath: statePath, Health: health, Workloads: func() hostdproto.WorkloadStatus { return workloads }}
 	gate, err := newStandaloneUpdateGate(config)
 	if err != nil {
@@ -184,7 +184,7 @@ func TestStandaloneUpdateGateCompletesWithStableProtectedWorkloads(t *testing.T)
 
 func TestStandaloneUpdateGateRollsBackAfterInvalidWorkloadSnapshot(t *testing.T) {
 	health := http.NewServeMux()
-	registerHostLivenessAndDiagnostics(health, nil, nil, nil, nil)
+	registerHostLivenessAndDiagnostics(health, nil, nil, nil, nil, nil)
 	valid := false
 	gate, err := newStandaloneUpdateGate(standaloneUpdateGateConfig{
 		MachineID: "machine_01",
@@ -267,7 +267,7 @@ func TestHostsAlwaysExposeUpdateGate(t *testing.T) {
 func TestStandaloneUpdateGatePurgeUsesBoundedLedger(t *testing.T) {
 	now := time.Now().UTC()
 	health := http.NewServeMux()
-	registerHostLivenessAndDiagnostics(health, nil, nil, nil, nil)
+	registerHostLivenessAndDiagnostics(health, nil, nil, nil, nil, nil)
 	gate, err := newStandaloneUpdateGate(standaloneUpdateGateConfig{MachineID: "machine_01", StatePath: filepath.Join(t.TempDir(), "gate.json"), Health: health, Workloads: func() hostdproto.WorkloadStatus { return hostdproto.WorkloadStatus{Generation: 1} }, Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)

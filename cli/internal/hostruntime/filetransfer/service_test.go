@@ -519,6 +519,9 @@ func TestCancelActiveWaitsForAppendBeforeRemovingPartial(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if service.ActiveCount() != 0 {
+		t.Fatal("queued transfer counted as active upload")
+	}
 	id := created[0].ID
 	reader := &blockedUploadReader{started: make(chan struct{}), release: make(chan struct{})}
 	appendDone := make(chan error, 1)
@@ -530,6 +533,9 @@ func TestCancelActiveWaitsForAppendBeforeRemovingPartial(t *testing.T) {
 	case <-reader.started:
 	case <-time.After(time.Second):
 		t.Fatal("append did not begin reading")
+	}
+	if service.ActiveCount() != 1 {
+		t.Fatal("running upload was not counted")
 	}
 	cancelDone := make(chan error, 1)
 	go func() { cancelDone <- service.CancelActive(context.Background()) }()
@@ -554,6 +560,9 @@ func TestCancelActiveWaitsForAppendBeforeRemovingPartial(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("cancel did not finish after append closed")
+	}
+	if service.ActiveCount() != 0 {
+		t.Fatal("canceled upload still counted as active")
 	}
 	if _, err := os.Stat(filepath.Join(root, id+".part")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("partial remains after cancellation: %v", err)

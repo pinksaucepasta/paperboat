@@ -10,8 +10,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/observability"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
 )
 
 // HostDiagnosticsPath is intentionally outside the versioned /v1 API. It is
@@ -32,10 +34,31 @@ const (
 	hostDiagnosticsMaximumBytes   = HostDiagnosticsMaxBytes
 )
 
+// HostWorkloadCounts contains current counts read from stable daemon owners.
+// Sessions includes retained sessions; Processes counts live PTYs. Uploads counts
+// admitted content writes. A missing Workloads field means no workload source.
+type HostWorkloadCounts struct {
+	Sessions    uint64 `json:"sessions"`
+	Processes   uint64 `json:"processes"`
+	Attachments uint64 `json:"attachments"`
+	Uploads     uint64 `json:"uploads"`
+}
+
+func hostWorkloadCounts(sessions *session.Manager, transfers *filetransfer.Service) HostWorkloadCounts {
+	counts := HostWorkloadCounts{Uploads: transfers.ActiveCount()}
+	// Client-only hosts have no terminal manager or incoming terminal capability.
+	if sessions != nil {
+		resources := sessions.ResourceCounts()
+		counts.Sessions, counts.Processes, counts.Attachments = resources["sessions"], resources["processes"], resources["attachments"]
+	}
+	return counts
+}
+
 // HostDiagnostics is the safe, typed projection used by the local operator
-// endpoint. Its fields are intentionally limited to typed health, fixed-label
+// endpoint. Its fields are limited to workload counts, typed health, fixed-label
 // metrics, and construction-time-redacted events.
 type HostDiagnostics struct {
+	Workloads     *HostWorkloadCounts    `json:"workloads,omitempty"`
 	Schema        string                 `json:"schema"`
 	Health        health.HealthSnapshot  `json:"health"`
 	Metrics       []observability.Series `json:"metrics"`
@@ -66,18 +89,20 @@ func (diagnostics HostDiagnostics) MarshalJSON() ([]byte, error) {
 		events = []observability.Event{}
 	}
 	return json.Marshal(struct {
+		Workloads     *HostWorkloadCounts     `json:"workloads,omitempty"`
 		Schema        string                  `json:"schema"`
 		Health        health.HealthSnapshot   `json:"health"`
 		Metrics       []hostDiagnosticsMetric `json:"metrics"`
 		Events        []observability.Event   `json:"events"`
 		DroppedEvents uint64                  `json:"dropped_events"`
 	}{
-		Schema: diagnostics.Schema, Health: diagnostics.Health, Metrics: metrics,
+		Workloads: diagnostics.Workloads, Schema: diagnostics.Schema, Health: diagnostics.Health, Metrics: metrics,
 		Events: events, DroppedEvents: diagnostics.DroppedEvents,
 	})
 }
 
 type hostDiagnosticsSource struct {
+	workloads     func() HostWorkloadCounts
 	health        *runtimeHealthSource
 	healthTracker *health.HealthTracker
 	metrics       *observability.Registry
@@ -85,17 +110,18 @@ type hostDiagnosticsSource struct {
 }
 
 // registerHostLivenessAndDiagnostics installs the minimal liveness contract
-// and, only when an optional typed telemetry source exists, the richer local
+// and, only when a telemetry or workload source exists, the richer local
 // diagnostics contract. The caller binds HTTPService to literal loopback.
-func registerHostLivenessAndDiagnostics(mux *http.ServeMux, healthSource *runtimeHealthSource, tracker *health.HealthTracker, metrics *observability.Registry, events *observability.EventLog) {
+func registerHostLivenessAndDiagnostics(mux *http.ServeMux, healthSource *runtimeHealthSource, tracker *health.HealthTracker, metrics *observability.Registry, events *observability.EventLog, workloads func() HostWorkloadCounts) {
 	if mux == nil {
 		return
 	}
 	mux.HandleFunc("/healthz", hostLivenessHandler)
-	if tracker == nil && metrics == nil && events == nil {
+	if tracker == nil && metrics == nil && events == nil && workloads == nil {
 		return
 	}
 	mux.Handle(HostDiagnosticsPath, hostDiagnosticsHandler{source: hostDiagnosticsSource{
+		workloads:     workloads,
 		health:        healthSource,
 		healthTracker: tracker,
 		metrics:       metrics,
@@ -162,7 +188,13 @@ func (handler hostDiagnosticsHandler) ServeHTTP(writer http.ResponseWriter, requ
 		healthSnapshot = handler.source.healthTracker.Snapshot()
 	}
 
+	var workloadCounts *HostWorkloadCounts
+	if handler.source.workloads != nil {
+		current := handler.source.workloads()
+		workloadCounts = &current
+	}
 	body, err := json.Marshal(HostDiagnostics{
+		Workloads:     workloadCounts,
 		Schema:        hostDiagnosticsSchemaV1,
 		Health:        healthSnapshot,
 		Metrics:       metrics,

@@ -51,7 +51,7 @@ func TestHostDiagnosticsIsLoopbackBoundedAndDeterministic(t *testing.T) {
 
 	mux := http.NewServeMux()
 	healthSource := &runtimeHealthSource{}
-	registerHostLivenessAndDiagnostics(mux, healthSource, tracker, metrics, events)
+	registerHostLivenessAndDiagnostics(mux, healthSource, tracker, metrics, events, nil)
 
 	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/diagnostics", nil)
 	request.RemoteAddr = "127.0.0.1:43210"
@@ -115,7 +115,7 @@ func TestHostDiagnosticsIsLoopbackBoundedAndDeterministic(t *testing.T) {
 
 func TestHostDiagnosticsAbsentWhenOptionalSourcesAreNil(t *testing.T) {
 	mux := http.NewServeMux()
-	registerHostLivenessAndDiagnostics(mux, &runtimeHealthSource{}, nil, nil, nil)
+	registerHostLivenessAndDiagnostics(mux, &runtimeHealthSource{}, nil, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/diagnostics", nil)
 	request.RemoteAddr = "127.0.0.1:43210"
 	response := httptest.NewRecorder()
@@ -143,7 +143,7 @@ func TestHostDiagnosticsEventLimitIsBounded(t *testing.T) {
 		}
 	}
 	mux := http.NewServeMux()
-	registerHostLivenessAndDiagnostics(mux, &runtimeHealthSource{}, nil, nil, events)
+	registerHostLivenessAndDiagnostics(mux, &runtimeHealthSource{}, nil, nil, events, nil)
 	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/diagnostics", nil)
 	request.RemoteAddr = "127.0.0.1:43210"
 	response := httptest.NewRecorder()
@@ -181,4 +181,21 @@ func mustJSON(t *testing.T, value any) []byte {
 		t.Fatal(err)
 	}
 	return body
+}
+
+func TestHostDiagnosticsWorkloadsWithoutTelemetry(t *testing.T) {
+	mux := http.NewServeMux()
+	counts := HostWorkloadCounts{Sessions: 2, Processes: 1, Attachments: 3, Uploads: 4}
+	registerHostLivenessAndDiagnostics(mux, nil, nil, nil, nil, func() HostWorkloadCounts { return counts })
+	for _, want := range []HostWorkloadCounts{counts, {}} {
+		counts = want
+		request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/diagnostics", nil)
+		request.RemoteAddr = "127.0.0.1:43210"
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		var got HostDiagnostics
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &got) != nil || got.Workloads == nil || *got.Workloads != want {
+			t.Fatalf("workload snapshot status=%d body=%s", response.Code, response.Body.String())
+		}
+	}
 }
