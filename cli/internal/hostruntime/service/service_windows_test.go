@@ -178,3 +178,18 @@ func TestWindowsServiceEntryRejectsMissingContext(t *testing.T) {
 		t.Fatal("missing service definition unexpectedly accepted")
 	}
 }
+
+func TestConfigWorkerUsesOwnerBridgeRecovery(t *testing.T) {
+	instance, err := WindowsUserInstance("S-1-5-21-1-2-3-1001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := windowsServiceName(ConfigKind, instance)
+	if !windowsServiceUsesSID(name) {
+		t.Fatal("config worker omitted from enrolled-owner bridge recovery")
+	}
+	definition := windowsServiceDefinition{Name: name}
+	if got := windowsServiceManagerConfig(definition).SidType; got != windows.SERVICE_SID_TYPE_UNRESTRICTED {
+		t.Fatalf("config token bridge SID type=%d", got)
+	}
+}

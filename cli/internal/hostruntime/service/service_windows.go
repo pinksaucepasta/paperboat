@@ -604,7 +604,7 @@ func windowsServiceManagerConfig(definition windowsServiceDefinition) mgr.Config
 
 func windowsServiceUsesSID(name string) bool {
 	base := windowsServiceBaseNameFromName(name)
-	return base == "PaperboatHostd" || base == "PaperboatUpdated" || base == "PaperboatLocalDaemon"
+	return base == "PaperboatHostd" || base == "PaperboatUpdated" || base == "PaperboatLocalDaemon" || base == "PaperboatRuntimeConfig"
 }
 
 func configureWindowsServiceRecovery(service *mgr.Service, name string) error {
