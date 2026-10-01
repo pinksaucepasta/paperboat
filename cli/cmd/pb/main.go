@@ -7,6 +7,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/tls"
@@ -4208,16 +4209,16 @@ func actionHomeDoctor(command *cobra.Command) error {
 		{ID: "identity", Title: "Machine identity", Description: report.IdentityState},
 		{ID: "credential", Title: "Machine credential", Description: report.CredentialState},
 		{ID: "inbox", Title: "Paperboat Inbox", Description: report.InboxState + "  ·  " + report.InboxPath},
-		{ID: "config", Title: "Configuration service", Description: report.ConfigService},
+		{ID: "config", Title: "Config sync", Description: diagnosticConfigSync(report.ConfigService, nil, errors.New("assignment not checked"))},
 		{ID: "runtime", Title: "Host runtime", Description: report.HostRuntime},
-		{ID: "workloads", Title: "Local workloads", Description: fmt.Sprintf("%s  ·  %d sessions  ·  %d transfers", report.WorkloadCounts, report.ActiveSessions, report.ActiveTransfers)},
+		{ID: "workloads", Title: "Local workloads", Description: diagnosticWorkloads(report)},
 	}
 	ctx := actionContext(command, nil)
 	d, err := buildDeps(ctx)
 	if err == nil {
 		credential, credentialErr := d.auth.Credential()
 		if credentialErr != nil {
-			items = append(items, selector.Item{ID: "auth", Title: "Account", Description: "not signed in"})
+			items = append(items, selector.Item{ID: "auth", Title: "Account", Description: diagnosticCredentialFailure(credentialErr)})
 		} else if strings.TrimSpace(d.cfg.ServerURL) == "" {
 			items = append(items, selector.Item{ID: "backend", Title: "Control plane", Description: "server not configured"})
 		} else {
@@ -4231,8 +4232,24 @@ func actionHomeDoctor(command *cobra.Command) error {
 				items = append(items, selector.Item{ID: "backend", Title: "Control plane", Description: "unavailable  ·  " + meErr.Error()})
 			} else {
 				items = append(items, selector.Item{ID: "auth", Title: "Account", Description: firstNonEmpty(me.Email, me.DisplayName, me.ID)}, selector.Item{ID: "backend", Title: "Control plane", Description: "authenticated"})
+				if report.MachineID != "" {
+					checkCtx, cancel := context.WithTimeout(command.Context(), 5*time.Second)
+					assignment, assignmentErr := api.New(d.cfg.ServerURL, credential, nil).ConfigAssignment(checkCtx, report.MachineID)
+					cancel()
+					for index := range items {
+						if items[index].ID == "config" {
+							items[index].Description = diagnosticConfigSync(report.ConfigService, &assignment, assignmentErr)
+						}
+					}
+					if assignmentErr == nil && configAssignmentEnabled(assignment) && report.ConfigService == "not_installed" {
+						report.RecoveryActions = append(report.RecoveryActions, "configuration sync is assigned but its local worker is missing; reapply the configuration assignment to reinstall it")
+					}
+				}
 			}
 		}
+	}
+	if err != nil {
+		items = append(items, selector.Item{ID: "auth", Title: "Account", Description: "saved sign-in could not be inspected"})
 	}
 	for index, recovery := range report.RecoveryActions {
 		items = append(items, selector.Item{ID: fmt.Sprintf("recovery-%d", index), Title: "Needs attention", Description: recovery})
@@ -9482,10 +9499,10 @@ type localDoctorReport struct {
 	InboxState             string   `json:"inbox_state"`
 	ConfigService          string   `json:"config_service"`
 	HostRuntime            string   `json:"host_runtime"`
-	ActiveSessions         uint64   `json:"active_sessions"`
+	TrackedSessions        uint64   `json:"tracked_sessions"`
 	ActiveProcesses        uint64   `json:"active_processes"`
 	ActiveAttachments      uint64   `json:"active_attachments"`
-	ActiveTransfers        uint64   `json:"active_transfers"`
+	ActiveUploads          uint64   `json:"active_uploads"`
 	WorkloadCounts         string   `json:"workload_counts_state"`
 	RecoveryActions        []string `json:"recovery_actions,omitempty"`
 }
@@ -9558,10 +9575,15 @@ func collectLocalDoctor() localDoctorReport {
 		}
 		if info, err := os.Lstat(definition); err == nil && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 {
 			report.ConfigService = localConfigServiceState()
-		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		} else if err == nil {
 			report.ConfigService = "invalid"
 			report.RecoveryActions = append(report.RecoveryActions, "repair the config-sync service definition")
+		} else if !errors.Is(err, os.ErrNotExist) {
+			report.ConfigService = "unavailable"
+			report.RecoveryActions = append(report.RecoveryActions, "check access to the config-sync service definition")
 		}
+	} else {
+		report.ConfigService = "unavailable"
 	}
 	inspectLocalRuntimeHealth(&report, stateRoot)
 	return report
@@ -9590,51 +9612,45 @@ func localConfigServiceState() string {
 }
 
 func inspectLocalRuntimeHealth(report *localDoctorReport, stateRoot string) {
-	var local struct {
-		Schema        string `json:"schema"`
-		ListenAddress string `json:"listen_address"`
-	}
-	file, err := os.Open(filepath.Join(stateRoot, "runtime", "worker-local.json"))
-	if err != nil {
-		return
-	}
-	decoder := json.NewDecoder(io.LimitReader(file, 4096))
-	decoder.DisallowUnknownFields()
-	decodeErr := decoder.Decode(&local)
-	var extra any
-	extraErr := decoder.Decode(&extra)
-	file.Close()
-	host, port, splitErr := net.SplitHostPort(local.ListenAddress)
-	ip := net.ParseIP(host)
-	if decodeErr != nil || extraErr != io.EOF || local.Schema != "paperboat.worker-local/v1" || splitErr != nil || ip == nil || !ip.IsLoopback() || port == "" {
-		report.HostRuntime = "invalid_local_endpoint"
-		report.RecoveryActions = append(report.RecoveryActions, "run pb pair to repair the local host-runtime endpoint")
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
-	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+local.ListenAddress+"/healthz", nil)
-	client := &http.Client{Timeout: 2 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("local health endpoint redirected") }}
-	response, err := client.Do(request)
+	body, err := requestTunnelHostRuntime(ctx, stateRoot, "/healthz", 64<<10)
 	if err != nil {
-		report.HostRuntime = "unavailable"
+		report.HostRuntime = "unavailable · local runtime could not be reached"
 		return
 	}
-	defer response.Body.Close()
-	var health struct {
-		Live      bool              `json:"live"`
-		Workloads map[string]uint64 `json:"workloads"`
-	}
-	decoder = json.NewDecoder(io.LimitReader(response.Body, 64<<10))
-	if response.StatusCode != http.StatusOK || decoder.Decode(&health) != nil || !health.Live {
-		report.HostRuntime = "unhealthy"
+	live, err := decodeTunnelDoctorHealth(bytes.NewReader(body), 64<<10)
+	if err != nil || !live {
+		report.HostRuntime = "unhealthy · invalid liveness response"
 		return
 	}
-	report.HostRuntime, report.WorkloadCounts = "ready", "available"
-	report.ActiveSessions = health.Workloads["sessions"]
-	report.ActiveProcesses = health.Workloads["processes"]
-	report.ActiveAttachments = health.Workloads["attachments"]
-	report.ActiveTransfers = health.Workloads["transfers"]
+	report.HostRuntime = "ready"
+	body, err = requestTunnelHostRuntime(ctx, stateRoot, tunnelHostDiagnosticsPath, tunnelHostDiagnosticsMaxBytes)
+	if err != nil {
+		report.WorkloadCounts = "unavailable · runtime diagnostics could not be read"
+		return
+	}
+	diagnostics, err := decodeTunnelHostDiagnostics(body)
+	if err != nil {
+		report.WorkloadCounts = "unavailable · invalid runtime diagnostics"
+		return
+	}
+	state := diagnostics.Health.Dimensions.Service
+	if state.Status != "" && state.Status != "ready" {
+		report.HostRuntime = string(state.Status) + " · " + state.Summary
+		if state.RepairAction != "" {
+			report.RecoveryActions = append(report.RecoveryActions, state.RepairAction)
+		}
+	}
+	if diagnostics.Workloads == nil {
+		report.WorkloadCounts = "unavailable · runtime did not provide workload counts"
+		return
+	}
+	report.WorkloadCounts = "available"
+	report.TrackedSessions = diagnostics.Workloads.Sessions
+	report.ActiveProcesses = diagnostics.Workloads.Processes
+	report.ActiveAttachments = diagnostics.Workloads.Attachments
+	report.ActiveUploads = diagnostics.Workloads.Uploads
 }
 
 func doctorUserMachine(ctx context.Context, client *api.Client, machineID string) (api.UserMachine, error) {

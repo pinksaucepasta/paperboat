@@ -45,22 +45,30 @@ func ownerSIDMatches(ownerSID string) bool {
 }
 
 func windowsConfigServiceStatus() string {
-	manager, err := mgr.Connect()
+	// Status queries must work in the enrolled user's non-elevated terminal.
+	// mgr.Connect/OpenService request ALL_ACCESS even for a read-only query.
+	handle, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)
+	if err != nil {
+		return "unavailable"
+	}
+	manager := &mgr.Mgr{Handle: handle}
+	defer manager.Disconnect()
+	name, err := windows.UTF16PtrFromString("PaperboatRuntimeConfig")
 	if err != nil {
 		return "invalid"
 	}
-	defer manager.Disconnect()
-	configService, err := manager.OpenService("PaperboatRuntimeConfig")
+	serviceHandle, err := windows.OpenService(manager.Handle, name, windows.SERVICE_QUERY_STATUS)
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return "not_installed"
 	}
 	if err != nil {
-		return "invalid"
+		return "unavailable"
 	}
+	configService := &mgr.Service{Name: "PaperboatRuntimeConfig", Handle: serviceHandle}
 	defer configService.Close()
 	status, err := configService.Query()
 	if err != nil {
-		return "invalid"
+		return "unavailable"
 	}
 	if status.State == svc.Running {
 		return "active"
