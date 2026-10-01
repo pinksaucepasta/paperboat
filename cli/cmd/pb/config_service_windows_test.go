@@ -5,6 +5,8 @@ package main
 import (
 	"context"
 	"os"
+	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -55,6 +57,18 @@ func TestInstalledWindowsConfigWorkerActivation(t *testing.T) {
 		}
 	}
 	t.Log("current enrolled-owner instance config worker active")
+	// SCM can report Running before a short-lived worker exits. Verify the
+	// actual enrolled-owner child across the asynchronous startup boundary.
+	time.Sleep(3 * time.Second)
+	probe := `$ErrorActionPreference='Stop'; $owner='` + install.OwnerSID + `'; $found=@(Get-CimInstance Win32_Process -Filter "Name = 'pb.exe'" | Where-Object { $_.CommandLine -match '__runtime-config' } | Where-Object { (Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid).Sid -eq $owner }); if($found.Count -ne 1){exit 2}; 'owner_worker_alive'`
+	output, err := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-Command", probe).CombinedOutput()
+	if err != nil || strings.TrimSpace(string(output)) != "owner_worker_alive" {
+		t.Fatal("configuration worker did not remain alive as the enrolled owner")
+	}
+	if windowsConfigServiceStatus() != "active" {
+		t.Fatal("configuration bridge stopped after asynchronous startup")
+	}
+
 	if _, err := manageWindowsConfigService(ctx, install.StateRoot, false); err != nil {
 		t.Fatal(err)
 	}
