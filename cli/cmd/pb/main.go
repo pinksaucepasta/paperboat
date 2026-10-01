@@ -9594,6 +9594,7 @@ func localConfigServiceState() string {
 	defer cancel()
 	if runtime.GOOS == "linux" {
 		query := exec.CommandContext(ctx, "systemctl", "--user", "is-active", "paperboat-runtime-config.service")
+		prepareConfigServiceQuery(query)
 		output, err := query.Output()
 		state := strings.TrimSpace(string(output))
 		if err == nil && state == "active" {
