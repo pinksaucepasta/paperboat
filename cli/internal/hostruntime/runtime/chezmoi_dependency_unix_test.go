@@ -13,6 +13,15 @@ import (
 	"testing"
 )
 
+func TestPinnedChezmoiDigestsAreSHA256(t *testing.T) {
+	for platform, digest := range chezmoiDigests {
+		decoded, err := hex.DecodeString(digest)
+		if err != nil || len(decoded) != sha256.Size {
+			t.Errorf("%s dependency pin is not a complete SHA256 digest", platform)
+		}
+	}
+}
+
 func TestChezmoiDependencyWriteIsAtomicAndRejectsSymlinkDestination(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "chezmoi")
