@@ -55,9 +55,9 @@ PY
 }
 
 write_installers() {
-  local root=$1 version=$2
-  printf "#!/bin/sh\nbootstrap_version='%s'\nrepository=\${PAPERBOAT_GITHUB_REPOSITORY:-pinksaucepasta/paperboat-cli}\n" "$version" > "$root/install"
-  printf "\$bootstrapVersion = '%s'\n\$repo = if (\$env:PAPERBOAT_GITHUB_REPOSITORY) { \$env:PAPERBOAT_GITHUB_REPOSITORY } else { 'pinksaucepasta/paperboat-cli' }\n" "$version" > "$root/windows"
+  local root=$1
+  python3 "$repository_root/tools/render-installers.py" \
+    "$root/tuf/metadata/targets.json" "$root/install" "$root/windows"
 }
 
 write_matching_targets_metadata() {
@@ -333,6 +333,24 @@ snapshot() {
 snapshot_directory() {
   snapshot_directory_with_native_backend "$checksum_backend" "$1"
 }
+expect_candidate_rejection() {
+  local name=$1 expected_error=$2
+  local candidate_bundle="$temporary/$name.tgz"
+  local output="$temporary/$name.log"
+  tar -C "$candidate" -czf "$candidate_bundle" install windows tuf
+  local candidate_digest
+  candidate_digest=$(run_checksum "$checksum_backend" "$candidate_bundle" | awk '{print $1}')
+  if run_test_publisher "$candidate_bundle" "$release_root" "$candidate_version" "$candidate_digest" >"$output" 2>&1; then
+    echo "publisher accepted $name" >&2
+    exit 1
+  fi
+  if ! grep -Fq "$expected_error" "$output"; then
+    cat "$output" >&2
+    echo "publisher rejection did not identify $expected_error" >&2
+    exit 1
+  fi
+  test "$before" = "$(snapshot)"
+}
 live_version=2026.08.22.9
 write_current_manifest "$temporary/live-current.json" "$live_version"
 write_matching_targets_metadata "$temporary/live-current.json" "$release_root/current/tuf/metadata/targets.json"
@@ -350,8 +368,9 @@ test "$before" = "$(snapshot)"
 
 candidate="$temporary/candidate"
 mkdir -p "$candidate/tuf/metadata" "$candidate/tuf/targets"
-write_current_manifest "$candidate/current.json" wrong
-write_installers "$candidate" 2026.08.22.23
+write_current_manifest "$candidate/current.json" 2026.08.22.23
+write_matching_targets_metadata "$candidate/current.json" "$candidate/tuf/metadata/targets.json"
+write_installers "$candidate"
 for name in root targets snapshot timestamp; do printf x > "$candidate/tuf/metadata/$name.json"; done
 bundle="$temporary/candidate.tgz"
 tar -C "$candidate" -czf "$bundle" install windows tuf
@@ -364,8 +383,8 @@ test "$before" = "$(snapshot)"
 
 candidate_version=2026.08.22.10
 write_current_manifest "$candidate/current.json" "$candidate_version"
-write_installers "$candidate" "$candidate_version"
 write_matching_targets_metadata "$candidate/current.json" "$candidate/tuf/metadata/targets.json"
+write_installers "$candidate"
 python3 - "$candidate/tuf/metadata/targets.json" <<'PY'
 import json
 import pathlib
@@ -458,6 +477,7 @@ test "$before" = "$(snapshot)"
 # The requested version must select at least one target; installer pins alone
 # cannot advance the publication.
 cp "$temporary/live-targets.json" "$candidate/tuf/metadata/targets.json"
+write_installers "$candidate"
 no_selected_bundle="$temporary/no-selected.tgz"
 tar -C "$candidate" -czf "$no_selected_bundle" install windows tuf
 no_selected_digest=$(run_checksum "$checksum_backend" "$no_selected_bundle" | awk '{print $1}')
@@ -469,8 +489,8 @@ test "$before" = "$(snapshot)"
 
 # A selected target must advance beyond the version already served for it.
 same_version=$live_version
-write_installers "$candidate" "$same_version"
 cp "$temporary/live-targets.json" "$candidate/tuf/metadata/targets.json"
+write_installers "$candidate"
 stale_bundle="$temporary/stale-version.tgz"
 tar -C "$candidate" -czf "$stale_bundle" install windows tuf
 stale_digest=$(run_checksum "$checksum_backend" "$stale_bundle" | awk '{print $1}')
@@ -482,7 +502,6 @@ test "$before" = "$(snapshot)"
 
 # Alter one omitted artifact identity consistently across its TUF target and
 # release index. It is still rejected because omitted entries must be exact.
-write_installers "$candidate" "$candidate_version"
 write_matching_targets_metadata "$candidate/current.json" "$candidate/tuf/metadata/targets.json"
 python3 - "$candidate/tuf/metadata/targets.json" "$temporary/live-targets.json" <<'PY'
 import json
@@ -500,6 +519,7 @@ omitted["custom"]["sha256"] = "f" * 64
 omitted["custom"]["release_index"]["targets"][0]["sha256"] = "f" * 64
 candidate_path.write_text(json.dumps(candidate) + "\n")
 PY
+write_installers "$candidate"
 tampered_omitted_bundle="$temporary/tampered-omitted.tgz"
 tar -C "$candidate" -czf "$tampered_omitted_bundle" install windows tuf
 tampered_omitted_digest=$(run_checksum "$checksum_backend" "$tampered_omitted_bundle" | awk '{print $1}')
@@ -511,6 +531,7 @@ test "$before" = "$(snapshot)"
 
 # A new target may not forge a repository distinct from the retained entries.
 write_matching_targets_metadata "$candidate/current.json" "$candidate/tuf/metadata/targets.json"
+write_installers "$candidate"
 python3 - "$candidate/tuf/metadata/targets.json" "$temporary/live-targets.json" <<'PY'
 import json
 import pathlib
@@ -540,7 +561,6 @@ if run_test_publisher "$forged_repo_bundle" "$release_root" "$candidate_version"
 fi
 test "$before" = "$(snapshot)"
 
-write_installers "$candidate" "$candidate_version"
 write_matching_targets_metadata "$candidate/current.json" "$candidate/tuf/metadata/targets.json"
 # Retain the two omitted targets from the active metadata in the valid bundle.
 python3 - "$candidate/tuf/metadata/targets.json" "$temporary/live-targets.json" <<'PY'
@@ -555,6 +575,81 @@ for name in ("pb-linux-arm64", "pb-windows-arm64.exe"):
     candidate["signed"]["targets"][name] = live["signed"]["targets"][name]
 candidate_path.write_text(json.dumps(candidate) + "\n")
 PY
+write_installers "$candidate"
+
+# Product pins must use retained ARM64 target identities, not the newest
+# release's version or another platform's branch values.
+cp "$candidate/install" "$temporary/install-correct"
+cp "$candidate/windows" "$temporary/windows-correct"
+python3 - "$candidate/install" "$live_version" "$candidate_version" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+old_version, new_version = sys.argv[2:]
+body = path.read_text()
+start = body.index("  linux-arm64)\n")
+end = body.index("  darwin-arm64)\n", start)
+branch = body[start:end]
+old = f"product_version='{old_version}'"
+if branch.count(old) != 1:
+    raise SystemExit("fixture has no unique retained Linux ARM64 version pin")
+body = body[:start] + branch.replace(old, f"product_version='{new_version}'", 1) + body[end:]
+path.write_text(body)
+PY
+expect_candidate_rejection wrong-linux-arm-pin "installer product pin mismatch for pb-linux-arm64: version"
+cp "$temporary/install-correct" "$candidate/install"
+
+python3 - "$candidate/windows" "$live_version" "$candidate_version" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+old_version, new_version = sys.argv[2:]
+body = path.read_text()
+start = body.index("if ($arch -eq 'amd64') {\n")
+else_start = body.index("} else {\n", start) + len("} else {\n")
+end = body.index("\n}\nif ($productVersion", else_start)
+branch = body[else_start:end]
+old = f"$productUrl = 'https://github.com/pinksaucepasta/paperboat-cli/releases/download/{old_version}/pb-windows-arm64.exe'"
+new = f"$productUrl = 'https://github.com/pinksaucepasta/paperboat-cli/releases/download/{new_version}/pb-windows-arm64.exe'"
+if branch.count(old) != 1:
+    raise SystemExit("fixture has no unique retained Windows ARM64 URL pin")
+path.write_text(body[:else_start] + branch.replace(old, new, 1) + body[end:])
+PY
+expect_candidate_rejection wrong-windows-arm-pin "installer product pin mismatch for pb-windows-arm64.exe: URL"
+cp "$temporary/windows-correct" "$candidate/windows"
+
+# A correct value present in the wrong shell branch cannot stand in for the
+# value required by the selected platform branch.
+python3 - "$candidate/install" <<'PY'
+import pathlib
+import re
+import sys
+
+path = pathlib.Path(sys.argv[1])
+body = path.read_text()
+amd_marker = "  linux-amd64)\n"
+arm_marker = "  linux-arm64)\n"
+darwin_marker = "  darwin-arm64)\n"
+amd_start = body.index(amd_marker)
+arm_start = body.index(arm_marker, amd_start)
+arm_end = body.index(darwin_marker, arm_start)
+prefix, amd, arm, suffix = body[:amd_start], body[amd_start:arm_start], body[arm_start:arm_end], body[arm_end:]
+for field in ("product_version", "product_url", "product_sha", "product_length"):
+    pattern = re.compile(rf"(?m)^([ \t]*{re.escape(field)}=')([^']*)('.*)$")
+    amd_matches = list(pattern.finditer(amd))
+    arm_matches = list(pattern.finditer(arm))
+    if len(amd_matches) != 1 or len(arm_matches) != 1:
+        raise SystemExit(f"fixture has no unique {field} pin in each Linux branch")
+    amd_value, arm_value = amd_matches[0].group(2), arm_matches[0].group(2)
+    amd = pattern.sub(lambda match: match.group(1) + arm_value + match.group(3), amd, count=1)
+    arm = pattern.sub(lambda match: match.group(1) + amd_value + match.group(3), arm, count=1)
+path.write_text(prefix + amd + arm + suffix)
+PY
+expect_candidate_rejection swapped-linux-platform-pins "installer product pin mismatch for pb-linux-amd64: version"
+cp "$temporary/install-correct" "$candidate/install"
+
 bundle="$temporary/candidate.tgz"
 tar -C "$candidate" -czf "$bundle" install windows tuf
 digest=$(run_checksum "$checksum_backend" "$bundle" | awk '{print $1}')
@@ -658,9 +753,9 @@ PY
   next="$temporary/next"
   mkdir -p "$next/tuf/metadata" "$next/tuf/targets"
   write_current_manifest "$next/current.json" 2026.08.22.24
-  write_installers "$next" 2026.08.22.24
-  for name in root targets snapshot timestamp; do printf x > "$next/tuf/metadata/$name.json"; done
   write_matching_targets_metadata "$next/current.json" "$next/tuf/metadata/targets.json"
+  write_installers "$next"
+  for name in root snapshot timestamp; do printf x > "$next/tuf/metadata/$name.json"; done
   next_bundle="$temporary/next.tgz"
   tar -C "$next" -czf "$next_bundle" install windows tuf
   next_digest=$(run_checksum "$checksum_backend" "$next_bundle" | awk '{print $1}')

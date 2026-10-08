@@ -329,11 +329,12 @@ GitHub API digest verification. Use `tools/release-version.sh next` to generate 
 tags have no `v` prefix.
 
 Releases contain one complete `pb` asset per supported platform and architecture:
-Windows amd64/arm64 PE executables, Linux amd64/arm64 raw ELF executables, and one signed
-and notarized macOS arm64 installer package. Users install through
-[`https://get.pprbt.dev/install`](https://get.pprbt.dev/install). The installer checks a
-pinned bootstrap verifier downloaded from GitHub. That verifier authenticates the
-signed TUF release metadata and downloads the selected product once from GitHub.
+Windows amd64/arm64 PE executables, Linux amd64/arm64 raw ELF executables, and one
+macOS arm64 installer package. Users install through
+[`https://get.pprbt.dev/install`](https://get.pprbt.dev/install). The trusted HTTPS
+installer pins the selected product's exact URL, version, SHA-256, and length before
+execution. First installation does not locally verify a TUF signature; the installed
+updater continues to use full TUF verification for future updates and rollback.
 
 ## Stack
 

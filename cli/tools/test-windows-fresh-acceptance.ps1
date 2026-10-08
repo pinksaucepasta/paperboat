@@ -938,7 +938,7 @@ function Invoke-FreshInstaller([pscustomobject]$Paths) {
     if (-not (Test-Path -LiteralPath $InstallerPath -PathType Leaf) -or (Test-ReparsePoint $InstallerPath)) {
         Fail 'The Windows bootstrap installer script is missing or unsafe.'
     }
-    if ((Get-Content -LiteralPath $InstallerPath -Raw).Contains('@PAPERBOAT_BOOTSTRAP_')) {
+    if ((Get-Content -LiteralPath $InstallerPath -Raw) -match '@PAPERBOAT_[A-Z0-9_]+@') {
         Fail 'The Windows bootstrap installer must be the release-rendered script from the published origin.'
     }
     $token = Read-EnrollmentToken $EnrollmentTokenFile

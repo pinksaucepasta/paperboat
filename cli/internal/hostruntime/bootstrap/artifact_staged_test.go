@@ -5,12 +5,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -18,10 +20,10 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseindex"
 )
 
-// TestStagedTUFRepository runs the same signed bootstrap, release-index, and
-// component consumers used by a native runtime, but serves the freshly signed
-// repository from the workflow's isolated staging directory. This must run
-// before that directory is activated on the public origin.
+// TestStagedTUFRepository runs the same signed release-index and component
+// consumers used by a native runtime, but serves the freshly signed repository
+// from the workflow's isolated staging directory. This must run before that
+// directory is activated on the public origin.
 func TestStagedTUFRepository(t *testing.T) {
 	releaseRoot, githubRoot, err := stagedReleaseVerificationDirectories()
 	if err != nil {
@@ -30,17 +32,65 @@ func TestStagedTUFRepository(t *testing.T) {
 	if releaseRoot == "" {
 		t.Skip("staged release verification is not configured")
 	}
-	version := strings.TrimSpace(os.Getenv("PAPERBOAT_TEST_TUF_VERSION"))
-	if version == "" {
+	candidateVersion := strings.TrimSpace(os.Getenv("PAPERBOAT_TEST_TUF_VERSION"))
+	if candidateVersion == "" {
 		t.Fatal("PAPERBOAT_TEST_TUF_VERSION is not set")
 	}
 	if !cleanAbsoluteDirectory(releaseRoot) || !cleanAbsoluteDirectory(githubRoot) {
 		t.Fatal("staged release paths must be absolute, clean directories")
 	}
+	assertStagedGitHubAssets(t, githubRoot)
+	pins := readStagedProductPins(t, filepath.Join(releaseRoot, "tuf", "metadata", "targets.json"))
+	candidatePresent := false
+	for _, pin := range pins {
+		if pin.Version == candidateVersion {
+			candidatePresent = true
+			break
+		}
+	}
+	if !candidatePresent {
+		t.Fatalf("staged product targets do not include candidate version %q", candidateVersion)
+	}
+	installers := make(map[string][]byte, 2)
 	for _, name := range []string{"install", "windows"} {
 		body := readStagedRegularFile(t, filepath.Join(releaseRoot, name))
-		if !bytes.Contains(body, []byte("pb-bootstrap")) || !bytes.Contains(body, []byte(version)) || bytes.Contains(body, []byte("@PAPERBOAT_BOOTSTRAP_")) {
-			t.Fatalf("staged %s has invalid bootstrap verifier pins", name)
+		if bytes.Contains(body, []byte("pb-bootstrap")) || bytes.Contains(body, []byte("@PAPERBOAT_BOOTSTRAP_")) || regexp.MustCompile(`@PAPERBOAT_[A-Z0-9_]+@`).Match(body) {
+			t.Fatalf("staged %s contains a helper asset reference or unresolved product pin", name)
+		}
+		installers[name] = body
+	}
+	for _, target := range []struct {
+		platform, architecture, installer string
+		powershell                        bool
+	}{
+		{"linux", "amd64", "install", false},
+		{"linux", "arm64", "install", false},
+		{"darwin", "arm64", "install", false},
+		{"windows", "amd64", "windows", true},
+		{"windows", "arm64", "windows", true},
+	} {
+		assetName := releaseindex.AssetName(target.platform, target.architecture)
+		pin := pins[assetName]
+		var expected []string
+		if target.powershell {
+			expected = []string{
+				"$productVersion = '" + pin.Version + "'",
+				"$productUrl = '" + pin.URL + "'",
+				"$productSha = '" + pin.SHA256 + "'",
+				fmt.Sprintf("$productLength = '%d'", pin.Length),
+			}
+		} else {
+			expected = []string{
+				"product_version='" + pin.Version + "'",
+				"product_url='" + pin.URL + "'",
+				"product_sha='" + pin.SHA256 + "'",
+				fmt.Sprintf("product_length='%d'", pin.Length),
+			}
+		}
+		for _, value := range expected {
+			if !bytes.Contains(installers[target.installer], []byte(value)) {
+				t.Fatalf("staged %s is missing %s pin for %s", target.installer, value, assetName)
+			}
 		}
 	}
 
@@ -56,31 +106,15 @@ func TestStagedTUFRepository(t *testing.T) {
 	} {
 		t.Run(target.platform+"-"+target.architecture, func(t *testing.T) {
 			stateRoot := t.TempDir()
-			bootstrap := ArtifactTarget{
-				Schema: ArtifactTargetSchemaV1, Kind: ArtifactKindPB, Version: version,
-				Platform: target.platform, Architecture: target.architecture, RepositoryURL: server.URL,
-				TargetPath: releaseindex.AssetName(target.platform, target.architecture),
-			}
-			bootstrapPath, err := fetchVerifiedArtifact(ctx, bootstrap, filepath.Join(stateRoot, "bootstrap"), client, trustedRoot, target.platform, target.architecture)
-			if err != nil {
-				t.Fatal(err)
-			}
-			bootstrapBody, err := os.ReadFile(bootstrapPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			githubBootstrap := readStagedRegularFile(t, filepath.Join(githubRoot, stagedBootstrapAssetName(target.platform, bootstrap.TargetPath)))
-			if !bytes.Equal(bootstrapBody, githubBootstrap) {
-				t.Fatal("staged bootstrap target differs from the immutable GitHub asset")
-			}
+			productVersion := pins[releaseindex.AssetName(target.platform, target.architecture)].Version
 
 			now := time.Now().UTC()
 			index, err := fetchVerifiedReleaseIndex(ctx, server.URL, filepath.Join(stateRoot, "index"), client, now, target.platform, target.architecture)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if index.Version != version {
-				t.Fatalf("staged release index version=%q, want %q", index.Version, version)
+			if index.Version != productVersion {
+				t.Fatalf("staged release index version=%q, want %q", index.Version, productVersion)
 			}
 			targetInfo, ok := index.Component("pb")
 			if !ok {
@@ -102,23 +136,76 @@ func TestStagedTUFRepository(t *testing.T) {
 			if !bytes.Equal(body, githubComponent) {
 				t.Fatal("pb component differs from the immutable GitHub asset")
 			}
-			if !bytes.Equal(bootstrapBody, body) {
-				t.Fatal("staged bootstrap target and signed pb component are not identical")
-			}
 		})
 	}
 }
 
-func stagedBootstrapAssetName(_ string, targetPath string) string {
-	return targetPath
+type stagedProductPin struct {
+	Version string `json:"version"`
+	URL     string `json:"url"`
+	SHA256  string `json:"sha256"`
+	Length  int64  `json:"length"`
 }
 
-func TestStagedBootstrapAssetNameUsesWindowsExecutableSuffix(t *testing.T) {
-	if got := stagedBootstrapAssetName("windows", "pb-windows-amd64.exe"); got != "pb-windows-amd64.exe" {
-		t.Fatalf("Windows bootstrap asset = %q", got)
+func readStagedProductPins(t *testing.T, path string) map[string]stagedProductPin {
+	t.Helper()
+	var document struct {
+		Signed struct {
+			Targets map[string]struct {
+				Custom *stagedProductPin `json:"custom"`
+			} `json:"targets"`
+		} `json:"signed"`
 	}
-	if got := stagedBootstrapAssetName("linux", "pb-linux-amd64"); got != "pb-linux-amd64" {
-		t.Fatalf("Linux bootstrap asset = %q", got)
+	if err := json.Unmarshal(readStagedRegularFile(t, path), &document); err != nil {
+		t.Fatalf("decode staged product target metadata: %v", err)
+	}
+	assets := canonicalProductAssetNames()
+	if len(document.Signed.Targets) != len(assets) {
+		t.Fatalf("staged product target count=%d, want %d canonical products", len(document.Signed.Targets), len(assets))
+	}
+	pins := make(map[string]stagedProductPin, len(assets))
+	for _, name := range assets {
+		target, ok := document.Signed.Targets[name]
+		if !ok || target.Custom == nil {
+			t.Fatalf("staged product target %s is missing signed custom metadata", name)
+		}
+		pin := *target.Custom
+		decodedDigest, err := hex.DecodeString(pin.SHA256)
+		if err != nil || len(decodedDigest) != sha256.Size || pin.Version == "" || pin.URL == "" || pin.Length <= 0 {
+			t.Fatalf("staged product target %s has incomplete pins", name)
+		}
+		pins[name] = pin
+	}
+	return pins
+}
+
+func assertStagedGitHubAssets(t *testing.T, root string) {
+	t.Helper()
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("read staged GitHub release assets: %v", err)
+	}
+	expected := make(map[string]struct{}, 5)
+	for _, name := range canonicalProductAssetNames() {
+		expected[name] = struct{}{}
+	}
+	if len(entries) != len(expected) {
+		t.Fatalf("staged GitHub release asset count=%d, want exactly %d canonical products", len(entries), len(expected))
+	}
+	for _, entry := range entries {
+		if _, ok := expected[entry.Name()]; !ok {
+			t.Fatalf("unexpected staged GitHub release asset %s", entry.Name())
+		}
+	}
+}
+
+func canonicalProductAssetNames() []string {
+	return []string{
+		releaseindex.AssetName("windows", "amd64"),
+		releaseindex.AssetName("windows", "arm64"),
+		releaseindex.AssetName("linux", "amd64"),
+		releaseindex.AssetName("linux", "arm64"),
+		releaseindex.AssetName("darwin", "arm64"),
 	}
 }
 

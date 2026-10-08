@@ -9,24 +9,15 @@ mkdir -p "$temporary/package/Library/PrivilegedHelperTools/Paperboat/bin"
 printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "$PAPERBOAT_TEST_PB_LOG"\nexit 97\n' > "$temporary/package/Library/PrivilegedHelperTools/Paperboat/bin/pb"
 chmod 0755 "$temporary/package/Library/PrivilegedHelperTools/Paperboat/bin/pb"
 (cd "$temporary/package" && find . -type f | cpio -o -H odc 2>/dev/null | gzip -c) > "$temporary/Payload"
-cat > "$temporary/verifier" <<'EOF'
-#!/bin/sh
-set -eu
-while [ "$#" -gt 0 ]; do
-  case "$1" in --state-dir) state=$2; shift 2 ;; *) shift ;; esac
-done
-mkdir -p "$state/product"
-printf 'pkg\n' > "$state/product/pb-darwin-arm64.pkg"
-printf '{"path":"%s","version":"2026.09.02.0"}\n' "$state/product/pb-darwin-arm64.pkg"
-EOF
-chmod 0700 "$temporary/verifier"
-verifier_sha=$(sha256sum "$temporary/verifier" | awk '{print $1}')
-verifier_length=$(wc -c < "$temporary/verifier" | tr -d ' ')
+printf 'valid-package-fixture\n' > "$temporary/product.pkg"
+printf 'xxxxx-package-fixture\n' > "$temporary/wrong-product.pkg"
+product_sha=$(sha256sum "$temporary/product.pkg" | awk '{print $1}')
+product_length=$(wc -c < "$temporary/product.pkg" | tr -d ' ')
 installer="$temporary/install"
-sed -e 's/@PAPERBOAT_BOOTSTRAP_VERSION@/2026.09.02.0/g' \
-  -e 's|@PAPERBOAT_BOOTSTRAP_REPOSITORY@|example/paperboat-cli|g' \
-  -e "s/@PAPERBOAT_BOOTSTRAP_DARWIN_ARM64_SHA256@/$verifier_sha/g" \
-  -e "s/@PAPERBOAT_BOOTSTRAP_DARWIN_ARM64_LENGTH@/$verifier_length/g" \
+sed -e 's/@PAPERBOAT_PRODUCT_DARWIN_ARM64_VERSION@/2026.09.02.0/g' \
+  -e 's|@PAPERBOAT_PRODUCT_DARWIN_ARM64_URL@|https://github.com/pinksaucepasta/paperboat-cli/releases/download/2026.09.02.0/pb-darwin-arm64.pkg|g' \
+  -e "s/@PAPERBOAT_PRODUCT_DARWIN_ARM64_SHA256@/$product_sha/g" \
+  -e "s/@PAPERBOAT_PRODUCT_DARWIN_ARM64_LENGTH@/$product_length/g" \
   "$repository_root/tools/install.sh" > "$installer"
 chmod 0700 "$installer"
 
@@ -46,16 +37,21 @@ url=
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -o|--output) output=$2; shift 2 ;;
-    --proto|--retry|--retry-delay|--connect-timeout|--max-time) shift 2 ;;
+    --proto|--proto-redir|--retry|--retry-delay|--connect-timeout|--max-time|--max-filesize) shift 2 ;;
     --*) shift ;;
     *) url=$1; shift ;;
   esac
 done
 printf '%s\n' "$url" >> "$PAPERBOAT_TEST_CURL_LOG"
 case "$url" in
-  https://github.com/example/paperboat-cli/releases/download/2026.09.02.0/pb-bootstrap-darwin-arm64)
+  https://github.com/pinksaucepasta/paperboat-cli/releases/download/2026.09.02.0/pb-darwin-arm64.pkg)
     [ -n "$output" ] || exit 1
-    cp "$PAPERBOAT_TEST_VERIFIER" "$output"
+    case "${PAPERBOAT_TEST_CURL_MODE:-valid}" in
+      valid) cp "$PAPERBOAT_TEST_PRODUCT" "$output" ;;
+      bad-digest) cp "$PAPERBOAT_TEST_WRONG_PRODUCT" "$output" ;;
+      truncated) printf 'bad\n' > "$output" ;;
+      *) echo 'unknown test curl mode' >&2; exit 1 ;;
+    esac
     exit 0
     ;;
   *) echo "unexpected curl URL: $url" >&2; exit 1 ;;
@@ -66,6 +62,7 @@ cat > "$temporary/bin/pkgutil" <<'EOF'
 #!/bin/sh
 set -eu
 test "$1" = --expand
+printf '%s\n' "$*" >> "$PAPERBOAT_TEST_PKGUTIL_LOG"
 mkdir -p "$3"
 cp "$PAPERBOAT_TEST_PAYLOAD" "$3/Payload"
 EOF
@@ -136,7 +133,8 @@ chmod 0700 "$temporary/bin/uname" "$temporary/bin/curl" "$temporary/bin/pkgutil"
 
 export PAPERBOAT_TEST_STATE="$temporary/state"
 export PAPERBOAT_TEST_FAKE_BIN="$temporary/bin"
-export PAPERBOAT_TEST_VERIFIER="$temporary/verifier"
+export PAPERBOAT_TEST_PRODUCT="$temporary/product.pkg"
+export PAPERBOAT_TEST_WRONG_PRODUCT="$temporary/wrong-product.pkg"
 export PAPERBOAT_TEST_PAYLOAD="$temporary/Payload"
 export PAPERBOAT_TEST_PB_LOG="$temporary/pb.log"
 
@@ -156,10 +154,28 @@ run_installer() {
   PAPERBOAT_TEST_LAUNCHCTL_LOG="$temporary/$scenario-launchctl.log" \
   PAPERBOAT_TEST_RM_LOG="$temporary/$scenario-rm.log" \
   PAPERBOAT_TEST_SUDO_LOG="$temporary/$scenario-sudo.log" \
-  PAPERBOAT_GITHUB_REPOSITORY=example/paperboat-cli \
+  PAPERBOAT_TEST_PKGUTIL_LOG="$temporary/$scenario-pkgutil.log" \
+  PAPERBOAT_TEST_CURL_MODE=${PAPERBOAT_TEST_CURL_MODE:-valid} \
+  PAPERBOAT_GITHUB_REPOSITORY=ignored/example \
   HOME="$temporary/home" \
   PATH="$temporary/bin:/usr/bin:/bin" \
   "$installer" "$@" >"$temporary/$scenario-output" 2>"$temporary/$scenario-error"
+}
+
+expected_product_url=https://github.com/pinksaucepasta/paperboat-cli/releases/download/2026.09.02.0/pb-darwin-arm64.pkg
+assert_rejected_product() {
+  mode=$1
+  expected_error=$2
+  seed_managed_state
+  if PAPERBOAT_TEST_CURL_MODE="$mode" run_installer "$mode"; then
+    echo "$mode product test unexpectedly succeeded" >&2
+    exit 1
+  fi
+  grep -q "$expected_error" "$temporary/$mode-error"
+  test ! -s "$temporary/$mode-pkgutil.log" || { echo "$mode product reached package extraction" >&2; exit 1; }
+  for marker in hostd.plist updated.plist cli legacy-helper hostd.sock updated.sock; do
+    test -e "$PAPERBOAT_TEST_STATE/$marker" || { echo "$mode product removed $marker" >&2; exit 1; }
+  done
 }
 
 seed_managed_state
@@ -174,6 +190,9 @@ test -d "$PAPERBOAT_TEST_STATE/helper"
 test -f "$PAPERBOAT_TEST_STATE/helper/bin/pb"
 test -d "$PAPERBOAT_TEST_STATE/application-support"
 test -f "$PAPERBOAT_TEST_STATE/application-support/config"
+grep -Fx "$expected_product_url" "$temporary/install-only-curl.log"
+test "$(wc -l < "$temporary/install-only-curl.log" | tr -d ' ')" -eq 1 || { echo 'installer did not fetch exactly one product asset' >&2; exit 1; }
+test "$(wc -l < "$temporary/install-only-pkgutil.log" | tr -d ' ')" -eq 1 || { echo 'installer did not extract exactly one verified product package' >&2; exit 1; }
 if grep -Eq 'launchctl bootout|com\.pinksaucepasta\.paperboat\.(hostd|updated)|/Library/PrivilegedHelperTools/Paperboat|/Library/Application Support/Paperboat|/var/run/paperboat-(hostd|updated)|/usr/local/bin/pb' "$temporary/install-only-sudo.log" "$temporary/install-only-rm.log" "$temporary/install-only-launchctl.log" 2>/dev/null; then
   echo 'install-only called macOS service cleanup' >&2
   exit 1
@@ -188,5 +207,8 @@ grep -q '^install --json$' "$PAPERBOAT_TEST_PB_LOG"
 for marker in hostd.plist updated.plist cli legacy-helper hostd.sock updated.sock; do
   test -e "$PAPERBOAT_TEST_STATE/$marker" || { echo "failed install removed $marker" >&2; exit 1; }
 done
+
+assert_rejected_product bad-digest 'product digest mismatch'
+assert_rejected_product truncated 'product length mismatch'
 
 echo 'macOS install preservation: ok'

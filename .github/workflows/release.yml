@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Unused YYYY.MM.DD.N candidate version
+        description: Candidate version in YYYY.MM.DD.N format
         required: true
         default: '2026.10.08.20'
         type: string
@@ -508,6 +508,19 @@ jobs:
             -severity routine \
             -cohort-seed "candidate-$RELEASE_VERSION" \
             -output "$input_dir/deployment-plan.json"
+          # Dev acceptance release: exercise HP's actual scheduled update without
+          # waiting for staged rollout. Runtime defaults and stability stay intact.
+          python3 - "$input_dir/deployment-plan.json" <<'PYPLAN'
+          import json
+          import pathlib
+          import sys
+          path = pathlib.Path(sys.argv[1])
+          plan = json.loads(path.read_text())
+          for cohort in plan["cohorts"]:
+              if cohort["platform"] == "linux" and cohort["architecture"] == "amd64":
+                  cohort["percentage"] = 100
+          path.write_text(json.dumps(plan, separators=(",", ":")) + "\n")
+          PYPLAN
           go run ./tools/release-plan validate \
             -manifest "$input_dir/manifest.json" \
             -plan "$input_dir/deployment-plan.json" \
@@ -557,23 +570,17 @@ jobs:
             -severity routine \
             -supervisor-maintenance="$SUPERVISOR_MAINTENANCE"
           go run ./tools/tuf-repository verify-published -repository "$repository"
-      - name: Build pinned bootstrap verifiers and render the publishable origin
+      - name: Render product-pinned installers and prepare the publishable origin
         shell: bash
         run: |
           set -euo pipefail
-          bootstrap_dir="$RUNNER_TEMP/candidate-bootstrap"
           origin_dir="$RUNNER_TEMP/candidate-origin"
-          mkdir -p "$bootstrap_dir" "$origin_dir/tuf/targets"
-          for target in linux-amd64 linux-arm64 darwin-arm64 windows-amd64 windows-arm64; do
-            platform=${target%-*}
-            architecture=${target#*-}
-            suffix=
-            if [ "$platform" = windows ]; then suffix=.exe; fi
-            CGO_ENABLED=0 GOOS="$platform" GOARCH="$architecture" go build -buildvcs=false -trimpath -ldflags='-s -w' \
-              -o "$bootstrap_dir/pb-bootstrap-$target$suffix" ./cmd/pb-bootstrap
-          done
+          mkdir -p "$origin_dir/tuf/targets"
           cp -R "$RUNNER_TEMP/tuf-candidate/metadata" "$origin_dir/tuf/"
-          python3 tools/render-installers.py "$RELEASE_VERSION" "$PAPERBOAT_GITHUB_REPOSITORY" "$bootstrap_dir" "$origin_dir/install" "$origin_dir/windows"
+          python3 tools/render-installers.py \
+            "$RUNNER_TEMP/tuf-candidate/metadata/targets.json" \
+            "$origin_dir/install" \
+            "$origin_dir/windows"
           chmod 0755 "$origin_dir/install"
           tar -C "$origin_dir" -czf "$RUNNER_TEMP/candidate-origin.tgz" install windows tuf
       - name: Assemble private Actions candidate artifact
@@ -581,7 +588,7 @@ jobs:
         run: |
           set -euo pipefail
           bundle_root="$RUNNER_TEMP/paperboat-update-candidate"
-          mkdir -p "$bundle_root/artifacts" "$bundle_root/tuf/metadata" "$bundle_root/qualification" "$bundle_root/bootstrap"
+          mkdir -p "$bundle_root/artifacts" "$bundle_root/tuf/metadata" "$bundle_root/qualification"
           cp "$RUNNER_TEMP/candidate-artifacts/pb-darwin-arm64.pkg" "$bundle_root/artifacts/"
           cp "$RUNNER_TEMP/candidate-artifacts/pb-linux-amd64" "$bundle_root/artifacts/"
           cp "$RUNNER_TEMP/candidate-artifacts/pb-windows-amd64.exe" "$bundle_root/artifacts/"
@@ -589,19 +596,19 @@ jobs:
           cp "$RUNNER_TEMP/paperboat-update-candidate-inputs/manifest.json" "$bundle_root/"
           cp "$RUNNER_TEMP/paperboat-update-candidate-inputs/deployment-plan.json" "$bundle_root/"
           cp "$RUNNER_TEMP/candidate-qualification/windows-amd64-native-qualification.json" "$bundle_root/qualification/"
-          cp "$RUNNER_TEMP/candidate-bootstrap/"* "$bundle_root/bootstrap/"
           cp "$RUNNER_TEMP/candidate-origin.tgz" "$bundle_root/origin.tgz"
           cat > "$bundle_root/README.txt" <<EOF
           Paperboat update candidate $RELEASE_VERSION
           Source commit: $GITHUB_SHA
           Release asset repository: $PAPERBOAT_GITHUB_REPOSITORY
 
-          This artifact contains three real packages and TUF metadata signed from
-          the production metadata chain. It was not published to GitHub Releases,
-          the TUF origin, or the installer endpoint. The signed target URLs refer
-          to future release assets in the repository above. A later authorized
-          publication must upload the product and bootstrap bytes and activate the
-          included origin bundle through the existing publication validator.
+          This private artifact contains three product assets, their selected
+          TUF metadata, and product-pinned installer scripts rendered from the
+          verified target records. It was not published to GitHub Releases or the
+          TUF origin. The signed target URLs refer to immutable product assets in
+          the repository above. A later authorized publication must upload those
+          three products and activate the included origin bundle through the
+          existing publication validator.
           EOF
           tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/paperboat-update-candidate-$RELEASE_VERSION.tgz" paperboat-update-candidate
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -618,5 +625,5 @@ jobs:
           {
             printf 'Candidate **%s** was signed and stored as a private Actions artifact.\n\n' "$RELEASE_VERSION"
             printf 'This workflow did not create a GitHub Release, publish a TUF origin, update Latest, or publish an installer.\n'
-            printf 'The signed asset URLs require an authorized product/bootstrap upload and origin activation before device updates can consume this artifact.\n'
+            printf 'The signed product URLs require an authorized three-product upload and origin activation before device updates can consume this artifact.\n'
           } >> "$GITHUB_STEP_SUMMARY"
