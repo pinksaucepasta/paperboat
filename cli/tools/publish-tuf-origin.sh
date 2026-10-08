@@ -141,12 +141,29 @@ def version(directory, role):
     return value
 
 candidate, live = map(pathlib.Path, sys.argv[1:])
-for role in ("targets", "snapshot", "timestamp"):
+try:
+    candidate_targets = version(candidate, "targets")
+    live_targets = version(live, "targets")
+    if candidate_targets < live_targets:
+        raise ValueError("metadata version rolls back live")
+    if candidate_targets == live_targets:
+        # Snapshot/timestamp refresh owns no target, policy, root or installer
+        # change. Compare exact bytes under the same publication lock.
+        for relative in ("tuf/metadata/root.json", "tuf/metadata/targets.json", "install", "windows"):
+            incoming = candidate.parent.parent / relative
+            current = live.parent.parent / relative
+            if not incoming.is_file() or incoming.is_symlink() or not current.is_file() or current.is_symlink() or incoming.read_bytes() != current.read_bytes():
+                raise ValueError("unchanged targets refresh modifies root, targets or installers")
+except (OSError, ValueError, TypeError, AttributeError) as error:
+    raise SystemExit(f"TUF targets: {error}")
+
+for role in ("snapshot", "timestamp"):
     try:
         if version(candidate, role) <= version(live, role):
             raise ValueError("metadata version does not advance live")
     except (OSError, ValueError, TypeError, AttributeError) as error:
         raise SystemExit(f"TUF {role}: {error}")
+
 PY_METADATA
 
 python3 - "$next/tuf/metadata/targets.json" "$live/tuf/metadata/targets.json" "$version" <<'PY'
@@ -321,6 +338,7 @@ try:
 except (OSError, ValueError) as error:
     raise SystemExit(f"TUF targets metadata is invalid: {error}")
 
+refresh = targets_path.read_bytes() == live_targets_path.read_bytes()
 requested_version_parts = version_parts(version, "candidate")
 candidate_repositories = set()
 live_repositories = set()
@@ -333,12 +351,14 @@ for name in expected:
     live_repositories.add(live_repository)
     candidate_repositories.add(candidate_repository)
     if candidate_version_parts == requested_version_parts:
-        if compare_versions(candidate_version_parts, live_version_parts) <= 0:
+        if not refresh and compare_versions(candidate_version_parts, live_version_parts) <= 0:
             raise SystemExit(f"selected TUF target version does not advance the live target for {name}")
         selected.append(name)
     elif candidate_targets[name] != live_targets[name]:
         raise SystemExit(f"omitted TUF target metadata changed for {name}")
 
+if refresh and len(selected) != len(expected):
+    raise SystemExit("refreshed TUF targets must all retain the requested release version")
 if len(selected) == 0:
     raise SystemExit("TUF targets metadata does not select any target at the requested release version")
 if len(live_repositories) != 1 or len(candidate_repositories) != 1 or live_repositories != candidate_repositories:
