@@ -1996,10 +1996,61 @@ func TestMachineRevokeRequiresConfirmationBeforeBackend(t *testing.T) {
 }
 
 func TestSessionCloseRequiresConfirmationBeforeBackend(t *testing.T) {
-	root := newRootCommand()
-	command, _, err := root.Find([]string{"session", "close"})
-	if err != nil || command.Flags().Lookup("confirm") == nil || command.Flags().Lookup("yes") != nil {
-		t.Fatalf("confirmation flags: command=%v err=%v", command, err)
+	for _, tc := range []struct {
+		name, operation, state string
+		status                 int
+	}{
+		{"pending", "pending", "closing", http.StatusAccepted},
+		{"applied", "applied", "closed", http.StatusOK},
+		{"missing receipt", "", "", http.StatusOK},
+		{"backend rejection", "", "", http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			configPath := filepath.Join(dir, "config.json")
+			closes := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/v1/machines":
+					writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "demo", "state": "ready", "online": true, "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"next_offset": nil}})
+				case r.Method == http.MethodGet && r.URL.Path == "/v1/machines/um_1/terminal-sessions":
+					writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "ses_1", "name": "task", "state": "running"}}, "pagination": map[string]any{"next_offset": nil}})
+				case r.Method == http.MethodPost && r.URL.Path == "/v1/machines/um_1/terminal-sessions/ses_1/close":
+					closes++
+					w.WriteHeader(tc.status)
+					json.NewEncoder(w).Encode(map[string]any{"data": map[string]string{"operation_state": tc.operation}})
+				default:
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer srv.Close()
+			writeTestProfile(t, dir, configPath, srv.URL)
+			args := []string{"--config", configPath, "session", "close", "demo", "ses_1", "--json"}
+			var preview, output, errorsOutput bytes.Buffer
+			if code := run(context.Background(), args, &preview, &errorsOutput); code != 2 || closes != 0 {
+				t.Fatalf("preview code=%d mutations=%d", code, closes)
+			}
+			token := previewConfirmationCode(t, preview.String())
+			errorsOutput.Reset()
+			code := run(context.Background(), append(args, "--confirm", token), &output, &errorsOutput)
+			if closes != 1 {
+				t.Fatalf("close requests=%d", closes)
+			}
+			if tc.state == "" {
+				if code == 0 || strings.Contains(output.String(), `"state":"closed"`) {
+					t.Fatalf("failed close reported success: code=%d output=%s", code, output.String())
+				}
+				return
+			}
+			var result struct {
+				State          string `json:"state"`
+				OperationState string `json:"operation_state"`
+			}
+			if err := json.Unmarshal(output.Bytes(), &result); err != nil || code != 0 || result.State != tc.state || result.OperationState != tc.operation {
+				t.Fatalf("code=%d result=%+v err=%v", code, result, err)
+			}
+		})
 	}
 }
 
@@ -2080,7 +2131,11 @@ func TestSessionCloseAllClosesEveryOpenSession(t *testing.T) {
 			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "ses_1", "name": "default", "state": "open"}, {"id": "ses_2", "name": "api", "state": "open"}, {"id": "ses_3", "name": "old", "state": "closed"}}, "pagination": map[string]any{"next_offset": nil}})
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/close"):
 			closed = append(closed, r.URL.Path)
-			writeAPIData(t, w, map[string]any{})
+			operation := "applied"
+			if strings.Contains(r.URL.Path, "/ses_2/") {
+				operation = "pending"
+			}
+			writeAPIData(t, w, map[string]any{"operation_state": operation})
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
 		}
@@ -2100,7 +2155,7 @@ func TestSessionCloseAllClosesEveryOpenSession(t *testing.T) {
 	if len(closed) != 2 || !strings.Contains(closed[0], "ses_1") || !strings.Contains(closed[1], "ses_2") {
 		t.Fatalf("closed=%v", closed)
 	}
-	if !strings.Contains(output.String(), "Closed 2 sessions in demo.") {
+	if !strings.Contains(output.String(), "Closed 1 sessions in demo.") || !strings.Contains(output.String(), "1 close requests are pending host confirmation.") {
 		t.Fatalf("output=%q", output.String())
 	}
 }
@@ -2117,7 +2172,7 @@ func TestSessionsCloseAllClosesEveryOpenSessionAndRetainsHistory(t *testing.T) {
 			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "ses_1", "name": "default", "state": "open"}, {"id": "ses_2", "name": "api", "state": "open"}, {"id": "ses_3", "name": "old", "state": "closed"}}, "pagination": map[string]any{"next_offset": nil}})
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/close"):
 			closed = append(closed, r.URL.Path)
-			writeAPIData(t, w, map[string]any{})
+			writeAPIData(t, w, map[string]any{"operation_state": "applied"})
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
 		}

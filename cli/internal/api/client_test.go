@@ -579,7 +579,9 @@ func TestUserMachineTerminalSessionRequests(t *testing.T) {
 			_, _ = w.Write([]byte(`{"data":{"items":[{"id":"pts_1","name":"api","state":"running","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}],"pagination":{"next_offset":null}}}`))
 		case "PATCH /v1/machines/um_1/terminal-sessions/pts_1":
 			_, _ = w.Write([]byte(`{"data":{"id":"pts_1","name":"renamed","state":"running","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}}`))
-		case "POST /v1/machines/um_1/terminal-sessions/pts_1/close", "DELETE /v1/machines/um_1/terminal-sessions/pts_1":
+		case "POST /v1/machines/um_1/terminal-sessions/pts_1/close":
+			writeData(w, http.StatusOK, map[string]string{"operation_state": "applied"})
+		case "DELETE /v1/machines/um_1/terminal-sessions/pts_1":
 			writeData(w, http.StatusOK, map[string]bool{"ok": true})
 		default:
 			http.NotFound(w, r)
@@ -596,7 +598,7 @@ func TestUserMachineTerminalSessionRequests(t *testing.T) {
 	if _, err := c.RenameUserMachineTerminalSession(context.Background(), "um_1", "pts_1", "renamed"); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.CloseUserMachineTerminalSession(context.Background(), "um_1", "pts_1"); err != nil {
+	if result, err := c.CloseUserMachineTerminalSession(context.Background(), "um_1", "pts_1"); err != nil || result.OperationState != "applied" {
 		t.Fatal(err)
 	}
 	if err := c.DeleteUserMachineTerminalSession(context.Background(), "um_1", "pts_1"); err != nil {

@@ -238,3 +238,35 @@ func zero(value []byte) {
 		value[index] = 0
 	}
 }
+
+func writeStructuredFrame(writer io.Writer, frame protocol.Frame) error {
+	if err := frame.Validate(); err != nil {
+		return err
+	}
+	encoded, err := json.Marshal(frame)
+	if err != nil {
+		return err
+	}
+	return writeApplicationFrame(writer, appKindStructured, encoded)
+}
+
+func readStructuredFrame(reader io.Reader) (protocol.Frame, error) {
+	kind, payload, err := readApplicationFrame(reader)
+	if err != nil {
+		return protocol.Frame{}, err
+	}
+	if kind != appKindStructured {
+		return protocol.Frame{}, errors.New("expected a structured terminal frame")
+	}
+	return decodeStructuredFrame(payload)
+}
+
+func decodeStructuredFrame(payload []byte) (protocol.Frame, error) {
+	if len(payload) > protocol.MaxStructuredFrame {
+		return protocol.Frame{}, errors.New("structured terminal frame is too large")
+	}
+	wire := make([]byte, 4, 4+len(payload))
+	binary.BigEndian.PutUint32(wire, uint32(len(payload)))
+	wire = append(wire, payload...)
+	return protocol.ReadFrame(bytes.NewReader(wire))
+}

@@ -1,24 +1,11 @@
-name: Update candidate
+name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: Shared release version in YYYY.MM.DD.N format for all platforms
-        required: true
-        default: '2026.10.08.32'
-        type: string
-      expected_source_sha:
-        description: Reviewed source commit SHA; must match the checked out GITHUB_SHA exactly
-        required: true
-        type: string
-      supervisor_maintenance:
-        description: Whether this release updates stable supervisor components
-        required: true
-        default: false
-        type: boolean
+  push:
+    tags:
+      - '20[0-9][0-9].[0-9][0-9].[0-9][0-9].*'
 
-run-name: Update candidate ${{ inputs.version }}
+run-name: Release ${{ github.ref_name }}
 
 concurrency:
   group: paperboat-release-${{ github.repository }}
@@ -28,8 +15,8 @@ permissions:
   contents: read
 
 env:
-  RELEASE_VERSION: ${{ inputs.version }}
-  SUPERVISOR_MAINTENANCE: ${{ inputs.supervisor_maintenance }}
+  RELEASE_VERSION: ${{ github.ref_name }}
+  SUPERVISOR_MAINTENANCE: 'false'
   SENTRY_DSN: ${{ vars.SENTRY_DSN }}
   # Preserve the repository identity already signed into production TUF.
   # GitHub redirects this alias to the canonical repository.
@@ -56,48 +43,17 @@ jobs:
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
-      - name: Require the reviewed source commit
-        env:
-          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+      - name: Validate immutable tag and source before network work
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
-            echo 'expected_source_sha must be exactly 40 hexadecimal characters.' >&2
-            exit 1
-          fi
-          if [[ "${EXPECTED_SOURCE_SHA,,}" != "${GITHUB_SHA,,}" ]]; then
-            echo 'The selected workflow source does not match expected_source_sha.' >&2
-            exit 1
-          fi
-      - name: Validate version and ensure the target release slot is unused
-        env:
-          ASSET_REPOSITORY: ${{ env.PAPERBOAT_GITHUB_REPOSITORY }}
-        shell: bash
-        run: |
-          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_REF" = "refs/tags/$RELEASE_VERSION"
           ./tools/release-version.sh validate-format "$RELEASE_VERSION"
-          python3 - "$ASSET_REPOSITORY" "$RELEASE_VERSION" <<'PY'
-          import sys
-          import urllib.error
-          import urllib.request
-
-          repository, version = sys.argv[1:]
-          for kind, path in (
-              ("release", f"releases/tags/{version}"),
-              ("tag", f"git/ref/tags/{version}"),
-          ):
-              request = urllib.request.Request(
-                  f"https://api.github.com/repos/{repository}/{path}",
-                  headers={"User-Agent": "Paperboat-update-candidate"},
-              )
-              try:
-                  with urllib.request.urlopen(request, timeout=10):
-                      raise SystemExit(f"candidate {kind} already exists in the asset repository")
-              except urllib.error.HTTPError as error:
-                  if error.code != 404:
-                      raise SystemExit(f"cannot verify candidate {kind} slot (HTTP {error.code})")
-          PY
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          # Annotated tags report a peeled commit; lightweight tags report HEAD.
+          remote_commit=$(git ls-remote origin "$GITHUB_REF" "$GITHUB_REF^{}" | awk '$2 ~ /\^\{\}$/ { peeled=$1 } $2 !~ /\^\{\}$/ { commit=$1 } END { print peeled ? peeled : commit }')
+          test "$remote_commit" = "$GITHUB_SHA" || { echo 'Release tag no longer identifies this source commit.' >&2; exit 1; }
       - name: Validate protected release endpoints
         id: endpoints
         env:
@@ -157,6 +113,8 @@ jobs:
           root=/opt/paperboat/releases
           test -d "$root" && test ! -L "$root"
           test -d "$root/current" && test ! -L "$root/current"
+          test -d "$root/staging" && test ! -L "$root/staging" && test -w "$root/staging"
+          test -d "$root/current/tuf/targets" && test ! -L "$root/current/tuf/targets"
           test -d "$root/current/tuf/metadata" && test ! -L "$root/current/tuf/metadata"
           REMOTE
           curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
@@ -584,14 +542,14 @@ jobs:
           compression-level: 0
           retention-days: 7
 
-  candidate-metadata:
-    name: Sign candidate metadata with current TUF authority
+  release-publication:
+    name: Publish five qualified products and signed TUF metadata
     needs: [release-authority, linux-amd64, linux-arm64, windows-amd64, windows-arm64, darwin-arm64]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 35
     environment: paperboat-tuf-published
     permissions:
-      contents: read
+      contents: write
     env:
       RELEASE_HOST: ${{ needs.release-authority.outputs.release_host }}
       PAPERBOAT_TUF_CI: '1'
@@ -696,6 +654,136 @@ jobs:
           printf '%s\n' "$PAPERBOAT_RELEASE_SSH_KEY" > "$HOME/.ssh/paperboat-release"
           printf '%s\n' "$PAPERBOAT_RELEASE_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 0600 "$HOME/.ssh/paperboat-release" "$HOME/.ssh/known_hosts"
+      - name: Create or resume the immutable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Recheck after qualification: a tag changed during the builds must
+          # never publish these bytes under a different source identity.
+          remote_commit=$(git ls-remote origin "$GITHUB_REF" "$GITHUB_REF^{}" | awk '$2 ~ /\^\{\}$/ { peeled=$1 } $2 !~ /\^\{\}$/ { commit=$1 } END { print peeled ? peeled : commit }')
+          test "$remote_commit" = "$GITHUB_SHA" || { echo 'Release tag changed during qualification.' >&2; exit 1; }
+          if ! gh release view "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --verify-tag --title "Paperboat $RELEASE_VERSION" --notes "Paperboat $RELEASE_VERSION; source $GITHUB_SHA" --draft --latest=false
+          fi
+      - name: Upload only missing draft assets; never replace published bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in "$RUNNER_TEMP/candidate-artifacts/"*; do
+            gh release view "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,assets > "$RUNNER_TEMP/release-upload.json"
+            decision=$(python3 - "$RUNNER_TEMP/release-upload.json" "$file" <<'PYUPLOAD'
+          import hashlib, json, pathlib, sys
+          release = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          path = pathlib.Path(sys.argv[2])
+          assets = [item for item in release['assets'] if item['name'] == path.name]
+          if len(assets) > 1:
+              raise SystemExit('duplicate release asset')
+          if assets:
+              asset = assets[0]
+              if asset.get('size') != path.stat().st_size or asset.get('digest') != 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest():
+                  raise SystemExit('existing immutable release asset differs from qualified bytes')
+              print('present')
+          elif not release['isDraft']:
+              raise SystemExit('published release is missing a qualified product; immutable release cannot be changed')
+          else:
+              print('upload')
+          PYUPLOAD
+            )
+            if [ "$decision" = upload ]; then
+              # An ambiguous successful upload is recognized on the next attempt.
+              uploaded=false
+              for attempt in 1 2 3; do
+                if timeout --signal=TERM 300 gh release upload "$RELEASE_VERSION" "$file" --repo "$GITHUB_REPOSITORY"; then uploaded=true; break; fi
+                gh release view "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --json assets > "$RUNNER_TEMP/release-upload.json"
+                if python3 - "$RUNNER_TEMP/release-upload.json" "$file" <<'PYRETRY'
+          import hashlib, json, pathlib, sys
+          path = pathlib.Path(sys.argv[2])
+          assets = [item for item in json.loads(pathlib.Path(sys.argv[1]).read_text())['assets'] if item['name'] == path.name]
+          raise SystemExit(0 if len(assets) == 1 and assets[0].get('size') == path.stat().st_size and assets[0].get('digest') == 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest() else 1)
+          PYRETRY
+                then uploaded=true; break; fi
+                if [ "$attempt" -lt 3 ]; then sleep $((attempt * 10)); fi
+              done
+              test "$uploaded" = true || { echo 'Qualified product upload failed; rerun failed jobs to reuse artifact bytes.' >&2; exit 1; }
+            fi
+          done
+      - name: Verify GitHub asset bytes and exact asset set without re-downloading
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --json tagName,assets > "$RUNNER_TEMP/release.json"
+          python3 - "$RUNNER_TEMP/release.json" "$RUNNER_TEMP/candidate-artifacts" <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import sys
+
+          release = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          roots = [pathlib.Path(path) for path in sys.argv[2:]]
+          release_version = os.environ['RELEASE_VERSION']
+          repository = os.environ['GITHUB_REPOSITORY']
+          if release.get('tagName') != release_version:
+              raise SystemExit(f'GitHub release tag is {release.get("tagName")!r}, expected {release_version!r}')
+          expected = {path.name: path for root in roots for path in root.iterdir() if path.is_file()}
+          assets = {asset['name']: asset for asset in release.get('assets', [])}
+          if set(assets) != set(expected):
+              raise SystemExit(f'GitHub asset set is {sorted(assets)}, expected {sorted(expected)}')
+          for name, path in expected.items():
+              asset = assets[name]
+              digest = asset.get('digest')
+              if asset.get('size') != path.stat().st_size:
+                  raise SystemExit(f'GitHub asset size mismatch: {name}')
+              if not digest:
+                  raise SystemExit(f'GitHub API did not return a digest for {name}')
+              expected_digest = 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest()
+              if digest != expected_digest:
+                  raise SystemExit(f'GitHub asset digest mismatch: {name}')
+          PY
+      - name: Publish release assets without changing Latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # TUF must never point at a draft-only asset. Make the
+          # verified assets public first, while leaving the Latest selector
+          # unchanged until the origin exchange succeeds below.
+          # `gh release edit` leaves the Latest selector untouched when the
+          # --latest flag is omitted. Explicitly passing make_latest=false
+          # would unset an already-latest release during a retry.
+          gh release edit "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --draft=false --target "$GITHUB_SHA"
+      - name: Verify published GitHub download URLs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --json tagName,assets > "$RUNNER_TEMP/published-release.json"
+          python3 - "$RUNNER_TEMP/published-release.json" <<'PY'
+          import json
+          import os
+          import pathlib
+
+          release = json.loads(pathlib.Path(__import__('sys').argv[1]).read_text())
+          version = os.environ['RELEASE_VERSION']
+          repository = os.environ['GITHUB_REPOSITORY']
+          if release.get('tagName') != version:
+              raise SystemExit('published release tag mismatch')
+          expected_prefix = f'https://github.com/{repository}/releases/download/{version}/'
+          for asset in release.get('assets', []):
+              expected = expected_prefix + asset['name']
+              # `gh release view --json assets` exposes the public download
+              # URL as `url` once the draft has been published.
+              if asset.get('url') != expected:
+                  raise SystemExit(f'published GitHub asset URL mismatch: {asset["name"]}')
+          PY
       - name: Read and validate current production TUF signing state
         shell: bash
         run: |
@@ -709,7 +797,32 @@ jobs:
             -repository "$repository" \
             -trusted-root "$GITHUB_WORKSPACE/cli/internal/hostruntime/bootstrap/trusted-root.json"
           go run ./tools/tuf-repository verify-published -repository "$repository"
-      - name: Sign only the selected packages; do not publish them
+      - name: Recognize an already committed release without re-signing
+        id: committed
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/tuf-candidate/metadata/targets.json" "$RUNNER_TEMP/candidate-artifacts" "$RUNNER_TEMP/paperboat-update-candidate-inputs/manifest.json" <<'PYCOMMITTED' >> "$GITHUB_OUTPUT"
+          import hashlib, json, os, pathlib, sys
+          targets = json.loads(pathlib.Path(sys.argv[1]).read_text())['signed']['targets']
+          artifacts = pathlib.Path(sys.argv[2])
+          version = os.environ['RELEASE_VERSION']
+          selected = [target['custom']['version'] == version for target in targets.values()]
+          if any(selected):
+              if not all(selected) or len(targets) != 5:
+                  raise SystemExit('live release only partially matches the requested version')
+              manifest_digest = hashlib.sha256(pathlib.Path(sys.argv[3]).read_bytes()).hexdigest()
+              for name, target in targets.items():
+                  path = artifacts / name
+                  custom = target['custom']
+                  if target['hashes']['sha256'] != hashlib.sha256(path.read_bytes()).hexdigest() or target['length'] != path.stat().st_size or custom['repository'] != os.environ['PAPERBOAT_GITHUB_REPOSITORY'] or custom['release_index']['manifest_sha256'] != manifest_digest or custom['release_index']['supervisor_maintenance_required'] is not False:
+                      raise SystemExit('live release identity differs from qualified source/artifacts')
+              print('already_published=true')
+          else:
+              print('already_published=false')
+          PYCOMMITTED
+      - name: Sign the five qualified release targets
+        if: steps.committed.outputs.already_published != 'true'
         env:
           PAPERBOAT_GITHUB_REPOSITORY: ${{ env.PAPERBOAT_GITHUB_REPOSITORY }}
         shell: bash
@@ -742,51 +855,61 @@ jobs:
             "$origin_dir/windows"
           chmod 0755 "$origin_dir/install"
           tar -C "$origin_dir" -czf "$RUNNER_TEMP/candidate-origin.tgz" install windows tuf
-      - name: Assemble private Actions candidate artifact
+      - name: Atomically activate installers and TUF on the protected origin
         shell: bash
         run: |
           set -euo pipefail
-          bundle_root="$RUNNER_TEMP/paperboat-update-candidate"
-          mkdir -p "$bundle_root/artifacts" "$bundle_root/tuf/metadata" "$bundle_root/qualification"
-          cp "$RUNNER_TEMP/candidate-artifacts/pb-darwin-arm64.pkg" "$bundle_root/artifacts/"
-          cp "$RUNNER_TEMP/candidate-artifacts/pb-linux-amd64" "$bundle_root/artifacts/"
-          cp "$RUNNER_TEMP/candidate-artifacts/pb-linux-arm64" "$bundle_root/artifacts/"
-          cp "$RUNNER_TEMP/candidate-artifacts/pb-windows-amd64.exe" "$bundle_root/artifacts/"
-          cp "$RUNNER_TEMP/candidate-artifacts/pb-windows-arm64.exe" "$bundle_root/artifacts/"
-          cp "$RUNNER_TEMP/tuf-candidate/metadata/"*.json "$bundle_root/tuf/metadata/"
-          cp "$RUNNER_TEMP/paperboat-update-candidate-inputs/manifest.json" "$bundle_root/"
-          cp "$RUNNER_TEMP/paperboat-update-candidate-inputs/deployment-plan.json" "$bundle_root/"
-          cp "$RUNNER_TEMP/candidate-qualification/windows-amd64-native-qualification.json" "$bundle_root/qualification/"
-          cp "$RUNNER_TEMP/candidate-qualification/windows-arm64-native-qualification.json" "$bundle_root/qualification/"
-          cp "$RUNNER_TEMP/candidate-origin.tgz" "$bundle_root/origin.tgz"
-          cat > "$bundle_root/README.txt" <<EOF
-          Paperboat update candidate $RELEASE_VERSION
-          Source commit: $GITHUB_SHA
-          Release asset repository: $PAPERBOAT_GITHUB_REPOSITORY
-
-          This private artifact contains five product assets, native qualification
-          evidence for both Windows architectures, their selected
-          TUF metadata, and product-pinned installer scripts rendered from the
-          verified target records. It was not published to GitHub Releases or the
-          TUF origin. The signed target URLs refer to immutable product assets in
-          the repository above. A later authorized publication must upload those
-          five products and activate the included origin bundle through the
-          existing publication validator.
-          EOF
-          tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/paperboat-update-candidate-$RELEASE_VERSION.tgz" paperboat-update-candidate
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: paperboat-update-candidate-${{ inputs.version }}
-          path: ${{ runner.temp }}/paperboat-update-candidate-${{ inputs.version }}.tgz
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
-      - name: Summarize candidate boundary
+          bundle="$RUNNER_TEMP/candidate-origin.tgz"
+          digest=$(sha256sum "$bundle" | awk '{print $1}')
+          remote_bundle="/opt/paperboat/releases/staging/paperboat-release-$RELEASE_VERSION-$GITHUB_RUN_ID.tgz"
+          remote_script="/opt/paperboat/releases/staging/publish-tuf-origin-$GITHUB_RUN_ID.sh"
+          scp -i "$HOME/.ssh/paperboat-release" -o BatchMode=yes -o StrictHostKeyChecking=yes "$bundle" "root@$RELEASE_HOST:$remote_bundle"
+          scp -i "$HOME/.ssh/paperboat-release" -o BatchMode=yes -o StrictHostKeyChecking=yes tools/publish-tuf-origin.sh "root@$RELEASE_HOST:$remote_script"
+          # A lost SSH acknowledgement after exchange must not cause a second
+          # exchange. Compare only this publication's owned files; selfhost has
+          # its own owner and is preserved by the publisher.
+          ssh -i "$HOME/.ssh/paperboat-release" -o BatchMode=yes -o StrictHostKeyChecking=yes "root@$RELEASE_HOST"             "bash -s -- '$remote_bundle' '$remote_script' '$RELEASE_VERSION' '$digest'" <<'REMOTE'
+          set -euo pipefail
+          bundle=$1 script=$2 version=$3 digest=$4
+          trap 'rm -f -- "$bundle" "$script"' EXIT
+          chmod 0700 "$script"
+          if python3 - "$bundle" "$digest" <<'PYLIVE'
+          import hashlib, pathlib, sys, tarfile
+          bundle = pathlib.Path(sys.argv[1])
+          if bundle.is_symlink() or hashlib.sha256(bundle.read_bytes()).hexdigest() != sys.argv[2]:
+              raise SystemExit(1)
+          live = pathlib.Path('/opt/paperboat/releases/current')
+          with tarfile.open(bundle, 'r:gz') as archive:
+              files = [item for item in archive.getmembers() if item.isfile()]
+              expected = {item.name for item in files}
+              actual = {'install', 'windows'} | {str(path.relative_to(live)) for path in (live/'tuf').rglob('*') if path.is_file()}
+              if expected != actual:
+                  raise SystemExit(1)
+              for item in files:
+                  path = live/item.name
+                  if path.is_symlink() or not path.is_file() or path.read_bytes() != archive.extractfile(item).read():
+                      raise SystemExit(1)
+          PYLIVE
+          then
+            echo 'The exact signed release and installers are already active.'
+          else
+            "$script" "$bundle" /opt/paperboat/releases "$version" "$digest"
+          fi
+          REMOTE
+      - name: Verify active public metadata before marking Latest
         shell: bash
         run: |
           set -euo pipefail
-          {
-            printf 'Candidate **%s** was signed and stored as a private Actions artifact.\n\n' "$RELEASE_VERSION"
-            printf 'This workflow did not create a GitHub Release, publish a TUF origin, update Latest, or publish an installer.\n'
-            printf 'The signed product URLs require an authorized five-product upload and origin activation before device updates can consume this artifact.\n'
-          } >> "$GITHUB_STEP_SUMMARY"
+          for role in root targets snapshot timestamp; do
+            curl --fail --silent --show-error --proto '=https' --connect-timeout 5 --max-time 15 --max-filesize 1048576               "${{ needs.release-authority.outputs.release_url }}/metadata/$role.json" -o "$RUNNER_TEMP/active-$role.json"
+            cmp "$RUNNER_TEMP/active-$role.json" "$RUNNER_TEMP/tuf-candidate/metadata/$role.json"
+          done
+      - name: Mark the verified release Latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh release edit "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --draft=false --latest --target "$GITHUB_SHA"
+      - name: Summarize the completed release
+        shell: bash
+        run: |
+          printf 'Release **%s** published five qualified products, signed TUF metadata and product-pinned installers; Latest advanced after origin verification.\n' "$RELEASE_VERSION" >> "$GITHUB_STEP_SUMMARY"

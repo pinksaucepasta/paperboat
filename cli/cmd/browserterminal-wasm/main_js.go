@@ -3,12 +3,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/tls"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"github.com/google/uuid"
@@ -787,38 +785,6 @@ func (connection *browserTerminal) readBroadcast(ws *browserWSConn, machinePubli
 			return
 		}
 	}
-}
-
-func writeStructuredFrame(writer io.Writer, frame protocol.Frame) error {
-	if err := frame.Validate(); err != nil {
-		return err
-	}
-	encoded, err := json.Marshal(frame)
-	if err != nil {
-		return err
-	}
-	return writeApplicationFrame(writer, appKindStructured, encoded)
-}
-
-func readStructuredFrame(reader io.Reader) (protocol.Frame, error) {
-	kind, payload, err := readApplicationFrame(reader)
-	if err != nil {
-		return protocol.Frame{}, err
-	}
-	if kind != appKindStructured {
-		return protocol.Frame{}, errors.New("expected a structured terminal frame")
-	}
-	return decodeStructuredFrame(payload)
-}
-
-func decodeStructuredFrame(payload []byte) (protocol.Frame, error) {
-	if len(payload) > protocol.MaxStructuredFrame {
-		return protocol.Frame{}, errors.New("structured terminal frame is too large")
-	}
-	wire := make([]byte, 4, 4+len(payload))
-	binary.BigEndian.PutUint32(wire, uint32(len(payload)))
-	wire = append(wire, payload...)
-	return protocol.ReadFrame(bytes.NewReader(wire))
 }
 
 func (connection *browserTerminal) sendInput(data []byte) error {

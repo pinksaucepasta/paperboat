@@ -1443,9 +1443,20 @@ func (c *Client) RenameUserMachineTerminalSession(ctx context.Context, machineID
 	return out, err
 }
 
-func (c *Client) CloseUserMachineTerminalSession(ctx context.Context, machineID, sessionID string) error {
+type TerminalSessionCloseResult struct {
+	OperationState string `json:"operation_state"`
+}
+
+func (c *Client) CloseUserMachineTerminalSession(ctx context.Context, machineID, sessionID string) (TerminalSessionCloseResult, error) {
+	var out TerminalSessionCloseResult
 	path := "/v1/machines/" + url.PathEscape(machineID) + "/terminal-sessions/" + url.PathEscape(sessionID) + "/close"
-	return c.do(ctx, http.MethodPost, path, nil, &struct{}{})
+	if err := c.do(ctx, http.MethodPost, path, nil, &out); err != nil {
+		return out, err
+	}
+	if out.OperationState != "pending" && out.OperationState != "applied" {
+		return out, &ResponseDecodeError{Err: errors.New("invalid terminal close operation state")}
+	}
+	return out, nil
 }
 
 func (c *Client) DeleteUserMachineTerminalSession(ctx context.Context, machineID, sessionID string) error {

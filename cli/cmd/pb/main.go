@@ -6334,7 +6334,7 @@ func renameTerminalSessionForTarget(ctx context.Context, client *api.Client, tar
 	return client.RenameUserMachineTerminalSession(ctx, target.id, sessionID, name)
 }
 
-func closeTerminalSessionForTarget(ctx context.Context, client *api.Client, target environmentTarget, sessionID string) error {
+func closeTerminalSessionForTarget(ctx context.Context, client *api.Client, target environmentTarget, sessionID string) (api.TerminalSessionCloseResult, error) {
 	return client.CloseUserMachineTerminalSession(ctx, target.id, sessionID)
 }
 
@@ -6974,7 +6974,7 @@ func sessionsCommand() *command.Spec {
 				}
 				if len(open) == 0 {
 					if c.Bool("json") {
-						return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "environment": map[string]string{"id": target.id, "kind": target.kind, "alias": target.name}, "closed": 0})
+						return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "environment": map[string]string{"id": target.id, "kind": target.kind, "alias": target.name}, "closed": 0, "pending": 0})
 					}
 					fmt.Fprintln(c.Writer, "No open sessions to close.")
 					return nil
@@ -6983,21 +6983,29 @@ func sessionsCommand() *command.Spec {
 					return err
 				}
 				var closeErrors []error
-				closed := 0
+				closed, pending := 0, 0
 				for _, session := range open {
-					if err := closeTerminalSessionForTarget(c.Context, client, target, session.ID); err != nil {
+					result, err := closeTerminalSessionForTarget(c.Context, client, target, session.ID)
+					if err != nil {
 						closeErrors = append(closeErrors, fmt.Errorf("close session %s: %w", session.Name, err))
 						continue
 					}
-					closed++
+					if result.OperationState == "applied" {
+						closed++
+					} else {
+						pending++
+					}
 				}
 				if len(closeErrors) > 0 {
-					return fmt.Errorf("closed %d sessions in %s; remote state changed; rerun without --confirm to preview the remaining sessions: %w", closed, target.name, errors.Join(closeErrors...))
+					return fmt.Errorf("closed %d sessions, with %d close requests pending in %s; rerun without --confirm to inspect remaining sessions: %w", closed, pending, target.name, errors.Join(closeErrors...))
 				}
 				if c.Bool("json") {
-					return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "environment": map[string]string{"id": target.id, "kind": target.kind, "alias": target.name}, "closed": closed})
+					return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "environment": map[string]string{"id": target.id, "kind": target.kind, "alias": target.name}, "closed": closed, "pending": pending})
 				}
 				fmt.Fprintf(c.Writer, "Closed %d sessions in %s. Recent output was deleted.\n", closed, target.name)
+				if pending > 0 {
+					fmt.Fprintf(c.Writer, "%d close requests are pending host confirmation. Check session list before deleting their records.\n", pending)
+				}
 				return nil
 			}
 			var session api.TerminalSession
@@ -7016,11 +7024,21 @@ func sessionsCommand() *command.Spec {
 			if err := confirmContextMutationWithArgs(c, "session-close:"+target.id+":"+session.ID, fmt.Sprintf("Close terminal session %q in %s (%s)? Its process will end and recent output will be deleted.", session.Name, target.name, target.id), []string{c.Args().First(), session.ID}); err != nil {
 				return err
 			}
-			if err := closeTerminalSessionForTarget(c.Context, client, target, session.ID); err != nil {
+			result, err := closeTerminalSessionForTarget(c.Context, client, target, session.ID)
+			if err != nil {
 				return friendlyCommandError(err)
 			}
+			state := "closing"
+			if result.OperationState == "applied" {
+				state = "closed"
+			}
 			if c.Bool("json") {
-				return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "environment": map[string]string{"id": target.id, "kind": target.kind, "alias": target.name}, "session_id": session.ID, "state": "closed"})
+				return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "environment": map[string]string{"id": target.id, "kind": target.kind, "alias": target.name}, "session_id": session.ID, "state": state, "operation_state": result.OperationState})
+			}
+			if result.OperationState == "pending" {
+				fmt.Fprintln(c.Writer, "Close requested; waiting for host confirmation. Check session list before deleting its record.")
+			} else {
+				fmt.Fprintln(c.Writer, "Session closed. Recent output was deleted.")
 			}
 			return nil
 		}, Flags: []command.Flag{&command.StringFlag{Name: "confirm", Usage: "six-character confirmation code from the preview"}, &command.BoolFlag{Name: "all", Usage: "close all sessions in the environment"}, &command.BoolFlag{Name: "json", Usage: "emit JSON"}}},

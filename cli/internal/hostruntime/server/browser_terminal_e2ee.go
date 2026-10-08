@@ -155,15 +155,19 @@ func (h *BrowserTerminalWebSocketHandler) ServeHTTP(writer http.ResponseWriter, 
 	}
 	defer h.limiter.release()
 
+	subprotocol := BrowserTerminalWebSocketSubprotocol
+	if h.config.CompareOnly {
+		subprotocol = "paperboat.browser-config-compare.e2ee.v1"
+	}
 	connection, err := websocket.Accept(writer, request, &websocket.AcceptOptions{
-		Subprotocols:    []string{BrowserTerminalWebSocketSubprotocol},
+		Subprotocols:    []string{subprotocol},
 		OriginPatterns:  append([]string(nil), h.config.OriginPatterns...),
 		CompressionMode: websocket.CompressionDisabled,
 	})
 	if err != nil {
 		return
 	}
-	if connection.Subprotocol() != BrowserTerminalWebSocketSubprotocol {
+	if connection.Subprotocol() != subprotocol {
 		_ = connection.Close(websocket.StatusPolicyViolation, "subprotocol_required")
 		return
 	}
