@@ -75,7 +75,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ./tools/release-version.sh validate "$RELEASE_VERSION"
+          ./tools/release-version.sh validate-format "$RELEASE_VERSION"
           python3 - "$ASSET_REPOSITORY" "$RELEASE_VERSION" <<'PY'
           import sys
           import urllib.error

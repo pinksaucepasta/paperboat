@@ -4,7 +4,7 @@ set -eu
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
 usage() {
-  echo "usage: $0 current | next | validate <YYYY.MM.DD.X>" >&2
+  echo "usage: $0 current | next | validate-format <YYYY.MM.DD.X> | validate <YYYY.MM.DD.X>" >&2
   exit 64
 }
 
@@ -44,6 +44,13 @@ case "${1:-}" in
       [ "$candidate" -le "$sequence" ] || sequence=$candidate
     done
     printf '%s.%s\n' "$release_date" "$((sequence + 1))"
+    ;;
+  validate-format)
+    [ "$#" -eq 2 ] || usage
+    valid_version "$2" || {
+      echo "invalid release version: $2 (expected YYYY.MM.DD.X)" >&2
+      exit 1
+    }
     ;;
   validate)
     [ "$#" -eq 2 ] || usage
