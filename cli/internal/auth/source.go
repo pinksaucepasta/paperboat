@@ -64,19 +64,31 @@ func (s *Source) Refresh() (config.Credential, error) {
 }
 
 func (s *Source) credential(refreshWindow time.Duration) (config.Credential, error) {
-	credential, err := s.Store.CredentialWithRefresh(s.Issuer, refreshWindow, func(current config.Credential) (config.Credential, string, error) {
-		parent := s.lifetime
-		if parent == nil {
-			parent = context.Background()
+	var credential config.Credential
+	var err error
+	for range 2 {
+		credential, err = s.Store.CredentialWithRefresh(s.Issuer, refreshWindow, func(current config.Credential, attemptID string) (config.Credential, string, error) {
+			parent := s.lifetime
+			if parent == nil {
+				parent = context.Background()
+			}
+			ctx, cancel := context.WithTimeout(parent, 30*time.Second)
+			defer cancel()
+			tokens, err := api.RefreshToken(ctx, s.Issuer, current.RefreshToken, attemptID, nil)
+			if err != nil {
+				return config.Credential{}, "", fmt.Errorf("refresh Paperboat session: %w", err)
+			}
+			expires := time.Now().UTC().Add(time.Duration(tokens.ExpiresIn) * time.Second)
+			return config.Credential{AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken, TokenType: tokens.TokenType, ExpiresAt: expires}, tokens.CLIClientSessionID, nil
+		})
+		if err != nil || time.Now().Before(credential.ExpiresAt) {
+			break
 		}
-		ctx, cancel := context.WithTimeout(parent, 30*time.Second)
-		defer cancel()
-		tokens, err := api.RefreshToken(ctx, s.Issuer, current.RefreshToken, nil)
-		if err != nil {
-			return config.Credential{}, "", fmt.Errorf("refresh Paperboat session: %w", err)
-		}
-		expires := time.Now().UTC().Add(time.Duration(tokens.ExpiresIn) * time.Second)
-		return config.Credential{AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken, TokenType: tokens.TokenType, ExpiresAt: expires}, tokens.CLIClientSessionID, nil
-	})
+		// An offline interrupted rotation can recover an expired access token with
+		// its still-valid successor refresh. Commit it first, then rotate normally.
+	}
+	if err == nil && !time.Now().Before(credential.ExpiresAt) {
+		return config.Credential{}, accountCredentialFailure(config.ErrNoCredentials)
+	}
 	return credential, accountCredentialFailure(err)
 }

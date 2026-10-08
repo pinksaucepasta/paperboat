@@ -439,7 +439,7 @@ func TestCredentialOperationsWithholdTokensWhenUnlockFails(t *testing.T) {
 
 	t.Run("refreshed", func(t *testing.T) {
 		store, issuer := newStore(t, time.Now().Add(-time.Minute))
-		credential, err := store.credentialWithRefresh(issuer, time.Minute, func(Credential) (Credential, string, error) {
+		credential, err := store.credentialWithRefresh(issuer, time.Minute, func(Credential, string) (Credential, string, error) {
 			return Credential{AccessToken: "access-new", RefreshToken: "refresh-new", TokenType: "Bearer", ExpiresAt: time.Now().Add(time.Hour)}, "cls_1", nil
 		}, failingCredentialLock{unlock: want})
 		if !errors.Is(err, want) || credential != (Credential{}) {
@@ -466,7 +466,7 @@ func TestRefreshWriteFailurePreservesRotatedRefreshToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	secrets.failAccess = true
-	_, err := store.CredentialWithRefresh(profile.Issuer, time.Minute, func(Credential) (Credential, string, error) {
+	_, err := store.CredentialWithRefresh(profile.Issuer, time.Minute, func(Credential, string) (Credential, string, error) {
 		return Credential{AccessToken: "access-new", RefreshToken: "refresh-new", ExpiresAt: time.Now().Add(time.Hour)}, "cls_1", nil
 	})
 	if err == nil {
@@ -494,8 +494,11 @@ func TestRefreshProfileCommitFailureKeepsNewTokensAndExpiredMetadata(t *testing.
 		t.Fatal(err)
 	}
 	store.write = func(string, []byte, os.FileMode) error { return errors.New("injected profile commit failure") }
-	_, err := store.CredentialWithRefresh(issuer, time.Minute, func(Credential) (Credential, string, error) {
-		return Credential{AccessToken: "access-new", RefreshToken: "refresh-new", ExpiresAt: time.Now().Add(time.Hour)}, "cls_1", nil
+	var attemptID string
+	nextExpiry := time.Now().Add(time.Hour)
+	_, err := store.CredentialWithRefresh(issuer, time.Minute, func(_ Credential, attempt string) (Credential, string, error) {
+		attemptID = attempt
+		return Credential{AccessToken: "access-new", RefreshToken: "refresh-new", ExpiresAt: nextExpiry}, "cls_1", nil
 	})
 	if err == nil {
 		t.Fatal("expected profile commit failure")
@@ -514,6 +517,18 @@ func TestRefreshProfileCommitFailureKeepsNewTokensAndExpiredMetadata(t *testing.
 	if !profile.AccessExpiresAt.Equal(expired) {
 		t.Fatalf("profile expiry = %s, want retry-forcing %s", profile.AccessExpiresAt, expired)
 	}
+	store.write = nil
+	if _, err := store.CredentialWithRefresh(issuer, time.Minute, func(original Credential, attempt string) (Credential, string, error) {
+		if original.RefreshToken != "refresh-old" || attempt != attemptID {
+			t.Fatal("profile commit retry lost original rotation")
+		}
+		return Credential{AccessToken: "access-new", RefreshToken: "refresh-new", ExpiresAt: nextExpiry}, "cls_1", nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.loadRefreshAttempt(issuer); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("committed refresh attempt not cleaned")
+	}
 }
 
 func TestRefreshSessionMismatchQuarantinesRotatedCredential(t *testing.T) {
@@ -526,7 +541,7 @@ func TestRefreshSessionMismatchQuarantinesRotatedCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	nextExpiry := time.Now().Add(time.Hour)
-	_, err := store.CredentialWithRefresh(profile.Issuer, time.Minute, func(Credential) (Credential, string, error) {
+	_, err := store.CredentialWithRefresh(profile.Issuer, time.Minute, func(Credential, string) (Credential, string, error) {
 		return Credential{AccessToken: "access-new", RefreshToken: "refresh-new", ExpiresAt: nextExpiry}, "cls_unexpected", nil
 	})
 	if err == nil || !strings.Contains(err.Error(), "changed client session") {

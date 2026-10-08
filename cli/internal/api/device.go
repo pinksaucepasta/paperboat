@@ -46,9 +46,9 @@ func RevokeToken(ctx context.Context, baseURL, token string, hc *http.Client) er
 	return publicCall(ctx, baseURL, "/v1/auth/token/revoke", nil, token, nil, hc)
 }
 
-func RefreshToken(ctx context.Context, baseURL, refreshToken string, hc *http.Client) (TokenSet, error) {
+func RefreshToken(ctx context.Context, baseURL, refreshToken, attemptID string, hc *http.Client) (TokenSet, error) {
 	var out TokenSet
-	err := publicCall(ctx, baseURL, "/v1/auth/token/refresh", nil, refreshToken, &out, hc)
+	err := publicCall(ctx, baseURL, "/v1/auth/token/refresh", map[string]string{"attempt_id": attemptID}, refreshToken, &out, hc)
 	return out, err
 }
 

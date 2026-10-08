@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -15,6 +16,12 @@ import (
 func TestRuntimeLifetimeCancelsCredentialRefresh(t *testing.T) {
 	entered := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Consume the refresh attempt body, as the real handler does, so the
+		// HTTP server can observe the client's disconnect while awaiting work.
+		if _, err := io.Copy(io.Discard, r.Body); err != nil {
+			t.Error(err)
+			return
+		}
 		close(entered)
 		<-r.Context().Done()
 	}))

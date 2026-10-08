@@ -14,6 +14,18 @@ retry.
   machine port. `pb ssh` is allowed only when its stream succeeds through the normal selected
   direct/relay/WSS carrier and terminates at the machine's system `sshd`.
 
+Account refresh uses the same v1 endpoint for browser-login and installation-bootstrap
+sessions. Before rotating, the CLI stores a random 32-byte attempt ID as 64 lowercase
+hexadecimal characters and retains the original refresh bearer in the credential store
+under its shared profile lock. Transport interruption or a partial credential save resumes
+that exact attempt on the next run. The server returns the original encrypted recovery
+receipt without extending expiry; using a different attempt with a rotated bearer still
+revokes the session family. Once both credentials and profile metadata are committed, the
+CLI removes the pending receipt. If the recovered access lifetime is zero, it commits the
+successor refresh token and rotates normally before making an authenticated request.
+Keep credentials in the configured credential store; do not remove pending refresh state
+to work around a failed request. Revoked or expired sessions require normal `pb login`.
+
 Production connection metrics are written as validated JSONL to
 `observability.event_log_path`, or `telemetry.jsonl` beside the CLI config by
 default. The file is restricted to mode `0600` and never contains network endpoints,

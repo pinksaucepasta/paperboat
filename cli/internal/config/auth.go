@@ -677,10 +677,9 @@ func (s ProfileStore) saveLocked(p Profile, cred Credential) error {
 	if err := validateCredential(cred); err != nil {
 		return err
 	}
-	// Refresh tokens rotate at the server before this method runs. Atomically
-	// replace the active refresh value first so every crash point retains the
-	// server-valid token. The old access token and expired profile metadata are
-	// safe retry state until their subsequent atomic writes complete.
+	// The durable original-bearer attempt was prepared before HTTP rotation.
+	// Replace refresh first, then access and profile metadata; an interruption
+	// resumes that exact server receipt until the complete pair is committed.
 	if err := s.Secrets.Set(p.RefreshSecretRef, cred.RefreshToken); err != nil {
 		return fmt.Errorf("store refresh token: %w", err)
 	}
@@ -739,6 +738,11 @@ func (s ProfileStore) removeCredential(issuer string, lock credentialLock) (cred
 	}
 	cred, credentialErr := s.credentialForProfile(p)
 	var errs []error
+	if attempt, err := s.loadRefreshAttempt(issuer); err == nil {
+		errs = append(errs, s.clearRefreshAttempt(issuer, attempt))
+	} else if !errors.Is(err, os.ErrNotExist) {
+		errs = append(errs, err)
+	}
 	errs = append(errs, s.Secrets.Delete(p.AccessSecretRef), s.Secrets.Delete(p.RefreshSecretRef), s.DeleteManagedSSHIdentity(p.Issuer, p.CLIClientSessionID), s.DeletePeerEndpointIdentity(p.Issuer, p.CLIClientSessionID), s.DeletePeerAccountRoot(p.Issuer, p.Account.ID))
 	for _, ref := range p.ObsoleteSecretRefs {
 		errs = append(errs, s.Secrets.Delete(ref))
@@ -1128,7 +1132,7 @@ func (s ProfileStore) credentialForProfile(p Profile) (Credential, error) {
 	return credential, nil
 }
 
-type RefreshFunc func(Credential) (Credential, string, error)
+type RefreshFunc func(Credential, string) (Credential, string, error)
 
 // CredentialWithRefresh serializes the complete read-refresh-write operation.
 // It rechecks expiry after taking the lock because another process may have
@@ -1168,10 +1172,24 @@ func (s ProfileStore) credentialWithRefresh(issuer string, refreshBefore time.Du
 	if err != nil {
 		return Credential{}, err
 	}
-	if refresh == nil || time.Now().Add(refreshBefore).Before(p.AccessExpiresAt) {
+	attempt, attemptErr := s.loadRefreshAttempt(issuer)
+	if attemptErr != nil && !errors.Is(attemptErr, os.ErrNotExist) {
+		return Credential{}, attemptErr
+	}
+	if attemptErr == nil && (attempt.SessionID != p.CLIClientSessionID || attempt.State == "committed") {
+		if err := s.clearRefreshAttempt(issuer, attempt); err != nil {
+			return Credential{}, err
+		}
+		attempt = refreshAttempt{}
+	}
+	if refresh == nil || attempt.ID == "" && time.Now().Add(refreshBefore).Before(p.AccessExpiresAt) {
 		return cred, nil
 	}
-	next, sessionID, err := refresh(cred)
+	attempt, original, err := s.prepareRefreshAttempt(p, cred, attempt)
+	if err != nil {
+		return Credential{}, err
+	}
+	next, sessionID, err := refresh(original, attempt.ID)
 	if err != nil {
 		return Credential{}, err
 	}
@@ -1184,6 +1202,7 @@ func (s ProfileStore) credentialWithRefresh(issuer string, refreshBefore time.Du
 			return Credential{}, errors.Join(errors.New("refreshed credential changed client session"), fmt.Errorf("retain rotated credential: %w", queueErr))
 		}
 		var cleanupErrs []error
+		cleanupErrs = append(cleanupErrs, s.clearRefreshAttempt(issuer, attempt))
 		cleanupErrs = append(cleanupErrs, s.Secrets.Delete(p.AccessSecretRef), s.Secrets.Delete(p.RefreshSecretRef))
 		if removeErr := os.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
 			cleanupErrs = append(cleanupErrs, removeErr)
@@ -1192,6 +1211,9 @@ func (s ProfileStore) credentialWithRefresh(issuer string, refreshBefore time.Du
 	}
 	p.AccessExpiresAt = next.ExpiresAt
 	if err := s.saveLocked(p, next); err != nil {
+		return Credential{}, err
+	}
+	if err := s.clearRefreshAttempt(issuer, attempt); err != nil {
 		return Credential{}, err
 	}
 	return next, nil
