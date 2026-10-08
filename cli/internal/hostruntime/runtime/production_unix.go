@@ -48,12 +48,12 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/inspectorapi"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/inspectorauth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/observability"
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/process"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeattachment"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/observability"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
@@ -187,11 +187,15 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err := allowPendingPeerEnrollment(ctx, peerEnrollment); err != nil {
 		return nil, err
 	}
+	machineControlIdentity, err := machinecontrol.NewSource(machinecontrol.Config{ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport})
+	if err != nil {
+		return nil, err
+	}
 	var managedEnvironment envinject.EnvironmentSource
 	var runtimeLayers *layerEnvironmentService
 	var environmentBootstrap Service
 	if environmentInjectionEligible(machineRegistration) {
-		runtimeLayers = newLayerEnvironmentService(runtimeConfig.StateRoot, controlURL, transport, machineRegistration, managedSSHIdentity)
+		runtimeLayers = newLayerEnvironmentService(runtimeConfig.StateRoot, controlURL, transport, machineRegistration, managedSSHIdentity, machineControlIdentity)
 		managedEnvironment, environmentBootstrap = runtimeLayers, runtimeLayers
 	}
 	fetcher, err := auth.NewHTTPJWKSFetcher(controlURL.ResolveReference(&url.URL{Path: "/.well-known/jwks.json"}).String(), []string{controlURL.Hostname()}, transport)
@@ -335,10 +339,6 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, err
 	}
-	compareIdentity, err := machinecontrol.NewSource(machinecontrol.Config{ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport})
-	if err != nil {
-		return nil, err
-	}
 	comparisonHome, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
@@ -347,7 +347,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if raw := strings.TrimSpace(environ("PAPERBOAT_CONFIG_REPOSITORY_HOSTS")); raw != "" {
 		comparisonHosts = strings.Split(raw, ",")
 	}
-	comparison, err := productionConfigComparison(productionConfigSyncConfig{ControlURL: controlURL.String(), ControlHost: controlURL.Hostname(), RepositoryHosts: comparisonHosts, HomeRoot: filepath.Clean(comparisonHome), StateRoot: runtimeConfig.StateRoot, Identities: compareIdentity, Proofs: compareIdentity, OperationID: operationID, Transport: transport})
+	comparison, err := productionConfigComparison(productionConfigSyncConfig{ControlURL: controlURL.String(), ControlHost: controlURL.Hostname(), RepositoryHosts: comparisonHosts, HomeRoot: filepath.Clean(comparisonHome), StateRoot: runtimeConfig.StateRoot, Identities: machineControlIdentity, Proofs: machineControlIdentity, OperationID: operationID, Transport: transport})
 	if err != nil {
 		return nil, err
 	}

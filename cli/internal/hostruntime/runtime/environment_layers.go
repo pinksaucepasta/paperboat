@@ -158,6 +158,9 @@ func (s *layerEnvironmentService) flushLayerObservationsLocked(ctx context.Conte
 }
 
 func (s *layerEnvironmentService) sendLayerObservationBatch(ctx context.Context, reports []api.VaultLayerObservation) error {
+	if s.observationCredentials == nil {
+		return ErrProductionInvalid
+	}
 	if len(reports) == 0 || len(reports) > 128 {
 		return envinject.ErrInvalidSnapshot
 	}
@@ -175,11 +178,11 @@ func (s *layerEnvironmentService) sendLayerObservationBatch(ctx context.Context,
 		return err
 	}
 	path := "/v1/environment/hosts/" + url.PathEscape(s.registration.MachineID) + "/layer-observations"
-	token, err := s.credentials.Token(ctx)
+	token, err := s.observationCredentials.Token(ctx)
 	if err != nil {
 		return err
 	}
-	proof, err := s.credentials.Proof(ctx, operationID, http.MethodPost, path, body)
+	proof, err := s.observationCredentials.Proof(ctx, operationID, http.MethodPost, path, body)
 	if err != nil {
 		return err
 	}
@@ -200,7 +203,7 @@ func (s *layerEnvironmentService) sendLayerObservationBatch(ctx context.Context,
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return envinject.ErrNotReady
+		return &api.APIError{Status: response.StatusCode, Code: "environment_observation_failed", Message: "The ENV observation report was not accepted. The durable report remains pending for retry."}
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, 4097))
 	if err != nil || len(raw) > 4096 {

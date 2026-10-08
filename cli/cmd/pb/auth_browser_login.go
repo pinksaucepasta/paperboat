@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/auth"
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/selector"
@@ -207,7 +208,7 @@ func authBrowserLogin(c *command.Context) error {
 		if !time.Now().Before(state.Credential.ExpiresAt) {
 			return abortBrowserLogin(issuer, state, save, errors.New("approved login session expired; run `pb login` again"))
 		}
-		if err = persistBrowserLoginProfile(store, *state); err != nil {
+		if _, err = auth.CompleteLogin(c.Context, auth.LoginCompletion{Store: store, Client: api.New(issuer, *state.Credential, loginHTTPClient()), Issuer: issuer, Credential: *state.Credential, SessionID: state.Profile.CLIClientSessionID, ExpectedAccountID: state.Profile.Account.ID, PreviousSessionID: &state.PreviousSessionID, AllowAccountChange: true}); err != nil {
 			return fmt.Errorf("sign-in not activated; retry `pb login`: %w", err)
 		}
 		if err = cfg.Save(); err != nil {
@@ -236,29 +237,7 @@ func validateApprovalURL(a api.DeviceAuthorization) error {
 	}
 	return nil
 }
-func persistBrowserLoginProfile(store config.ProfileStore, s config.BrowserLoginState) error {
-	p, e := store.Load(s.Issuer)
-	if e == nil && p.CLIClientSessionID == s.Profile.CLIClientSessionID {
-		cred, err := store.CredentialFor(s.Issuer)
-		if err == nil && cred.AccessToken == s.Credential.AccessToken && cred.RefreshToken == s.Credential.RefreshToken {
-			return nil
-		}
-		return errors.New("active session does not match the pending login")
-	}
-	if s.PreviousSessionID == "" {
-		if e == nil {
-			return config.ErrProfileChanged
-		}
-		if !errors.Is(e, config.ErrNoCredentials) {
-			return e
-		}
-		return store.Save(*s.Profile, *s.Credential)
-	}
-	if e != nil {
-		return e
-	}
-	return store.Switch(s.PreviousSessionID, *s.Profile, *s.Credential)
-}
+
 func cancelBrowserLogin(issuer string, s *config.BrowserLoginState, save func() error) error {
 	if s.DeviceCode == "" {
 		return nil

@@ -26,18 +26,21 @@ type layerEnvironmentService struct {
 	base            *url.URL
 	transport       http.RoundTripper
 	registration    runtimeidentity.Registration
-	credentials     managedSSHIdentitySource
-	cancel          context.CancelFunc
-	done            chan struct{}
-	refresh         sync.Mutex
-	closed          bool
+	// Helper identity authorizes key registration and launch-context reads.
+	credentials managedSSHIdentitySource
+	// Runtime observations require the installation machine-control identity.
+	observationCredentials managedSSHIdentitySource
+	cancel                 context.CancelFunc
+	done                   chan struct{}
+	refresh                sync.Mutex
+	closed                 bool
 }
 
-func newLayerEnvironmentService(stateRoot string, base *url.URL, transport http.RoundTripper, registration runtimeidentity.Registration, credentials managedSSHIdentitySource) *layerEnvironmentService {
-	return &layerEnvironmentService{stateRoot: stateRoot, base: base, transport: transport, registration: registration, credentials: credentials, done: make(chan struct{})}
+func newLayerEnvironmentService(stateRoot string, base *url.URL, transport http.RoundTripper, registration runtimeidentity.Registration, credentials, observationCredentials managedSSHIdentitySource) *layerEnvironmentService {
+	return &layerEnvironmentService{stateRoot: stateRoot, base: base, transport: transport, registration: registration, credentials: credentials, observationCredentials: observationCredentials, done: make(chan struct{})}
 }
 func (s *layerEnvironmentService) Start(ctx context.Context) error {
-	if ctx == nil || s == nil || s.credentials == nil {
+	if ctx == nil || s == nil || s.credentials == nil || s.observationCredentials == nil {
 		return ErrProductionInvalid
 	}
 	if err := ctx.Err(); err != nil {

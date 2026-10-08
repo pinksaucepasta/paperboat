@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -79,7 +80,7 @@ func TestLayerEnvironmentLaunchRequiresFreshProofBoundWorkspaceActor(t *testing.
 		json.NewEncoder(w).Encode(map[string]any{"data": bundle})
 	}))
 	defer server.Close()
-	service := newLayerEnvironmentService(root, layerServiceURL(t, server.URL), server.Client().Transport, registration, credentials)
+	service := newLayerEnvironmentService(root, layerServiceURL(t, server.URL), server.Client().Transport, registration, credentials, credentials)
 	if _, err := service.EnvironmentForLaunch(context.Background()); err == nil || calls != 0 {
 		t.Fatal("unverified actor launched")
 	}
@@ -128,7 +129,8 @@ func TestLayerEnvironmentObservationLostAckRetainsDurableExactReport(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	credentials := &layerTestCredentials{token: "test-token", proof: []byte("proof")}
+	credentials := &layerTestCredentials{token: "helper-token", proof: []byte("helper-proof")}
+	observationCredentials := &layerTestCredentials{token: "machine-control-token", proof: []byte("machine-control-proof")}
 	var delivery api.VaultLayerDelivery
 	sends := 0
 	accept := false
@@ -150,8 +152,12 @@ func TestLayerEnvironmentObservationLostAckRetainsDurableExactReport(t *testing.
 			w.WriteHeader(404)
 			return
 		}
+		if r.Header.Get("Authorization") != "Bearer machine-control-token" || r.Header.Get("X-Paperboat-Machine-Proof") != base64.RawURLEncoding.EncodeToString(observationCredentials.proof) {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
 		body, _ := io.ReadAll(r.Body)
-		operation, method, path, signed, _ := credentials.snapshot()
+		operation, method, path, signed, _ := observationCredentials.snapshot()
 		if method != http.MethodPost || path != r.URL.Path || !bytes.Equal(body, signed) || operation != r.Header.Get("Idempotency-Key") {
 			t.Error("observation not exact proof-bound")
 		}
@@ -189,7 +195,7 @@ func TestLayerEnvironmentObservationLostAckRetainsDurableExactReport(t *testing.
 		t.Fatal(err)
 	}
 	delivery = api.VaultLayerDelivery{Recipient: api.VaultLayerRecipient{RecipientAccount: "account_1", MachineID: "machine_1", InstallationGeneration: uint64(registration.InstallationGeneration), HostKeyGeneration: material.Generation, HostPublic: base64.RawURLEncoding.EncodeToString(public[:]), DeliveryGeneration: 1, DocumentID: layer.ID.String(), FenceGeneration: 1}, Source: api.VaultLayerSource{VaultLayerCoordinate: api.VaultLayerCoordinate{WorkspaceID: "personal", OwnerKind: "personal", OwnerID: "account_1"}, KeyEpoch: 1, Revision: 1, DocumentID: sourceID.String()}, WriterAccount: "account_1", WriterPublic: base64.RawURLEncoding.EncodeToString(layer.Claims.WriterPublic), Envelope: base64.RawURLEncoding.EncodeToString(layer.Raw), State: "ready"}
-	service := newLayerEnvironmentService(root, layerServiceURL(t, server.URL), server.Client().Transport, registration, credentials)
+	service := newLayerEnvironmentService(root, layerServiceURL(t, server.URL), server.Client().Transport, registration, credentials, observationCredentials)
 	ctx := envinject.WithLaunchContext(context.Background(), "personal", "account_1")
 	values, err := service.EnvironmentForLaunch(ctx)
 	if err != nil || len(values) != 1 {
@@ -355,12 +361,17 @@ func TestLayerObservationFlushTraverses129ContextsAndKeepsRejectedWorkspace(t *t
 		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"operation_id": batch.OperationID, "accepted": true}})
 	}))
 	defer server.Close()
-	service := newLayerEnvironmentService(root, layerServiceURL(t, server.URL), server.Client().Transport, registration, credentials)
+	service := newLayerEnvironmentService(root, layerServiceURL(t, server.URL), server.Client().Transport, registration, credentials, credentials)
 	service.layers = store
 	for {
 		before := len(pending)
 		if err := service.FlushLayerObservations(ctx); err == nil {
 			t.Fatal("revoked workspace report failure hidden")
+		} else {
+			var apiError *api.APIError
+			if !errors.As(err, &apiError) || apiError.DiagnosticStatus() != http.StatusForbidden {
+				t.Fatal("observation HTTP status lost")
+			}
 		}
 		pending, err = store.PendingObservations(ctx)
 		if err != nil {

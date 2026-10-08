@@ -35,6 +35,17 @@ func testTransportKeys(public ed25519.PublicKey) api.PeerTransportKeySet {
 	return api.PeerTransportKeySet{Version: 1, TrustedKeys: []api.E2EEKey{{KeyID: "aek_" + hex.EncodeToString(fingerprint[:]), PublicKey: base64.RawURLEncoding.EncodeToString(public), Fingerprint: hex.EncodeToString(fingerprint[:]), Generation: 1}}}
 }
 
+func testCertificateDocument(t *testing.T, certificate endpointidentity.Certificate, public ed25519.PublicKey) api.EndpointCertificateDocument {
+	t.Helper()
+	raw, err := certificate.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint := sha256.Sum256(raw)
+	key := sha256.Sum256(public)
+	c := certificate.Claims
+	return api.EndpointCertificateDocument{Version: 1, AccountID: c.AccountID, KeyID: "aek_" + hex.EncodeToString(key[:]), EndpointID: c.EndpointID, Role: "cli", Generation: c.Generation, Serial: c.Serial, IssuedAt: c.IssuedAt.Format(time.RFC3339), ExpiresAt: c.ExpiresAt.Format(time.RFC3339), Certificate: base64.RawURLEncoding.EncodeToString(raw), CertificateFingerprint: hex.EncodeToString(fingerprint[:])}
+}
 func TestResolveBindsLocalCustodyAndRemoteCertificateToOneRoot(t *testing.T) {
 	root := t.TempDir()
 	store := config.ProfileStore{Path: root, Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}}
@@ -66,6 +77,9 @@ func TestResolveBindsLocalCustodyAndRemoteCertificateToOneRoot(t *testing.T) {
 	rootFingerprint := sha256.Sum256(rootPublic)
 	document := api.EndpointCertificateDocument{Version: 1, AccountID: accountID, KeyID: "aek_" + hex.EncodeToString(rootFingerprint[:]), EndpointID: machineID, Role: "machine", Generation: 3, Serial: 2, IssuedAt: machine.Claims.IssuedAt.Format(time.RFC3339), ExpiresAt: machine.Claims.ExpiresAt.Format(time.RFC3339), Certificate: base64.RawURLEncoding.EncodeToString(machineRaw), CertificateFingerprint: hex.EncodeToString(machineFingerprint[:])}
 	authority, err := Resolve(context.Background(), Request{Store: store, Client: certificateClientFunc{fetch: func(_ context.Context, endpoint string, generation uint64) (api.EndpointCertificateDocument, error) {
+		if endpoint == cliID && generation == 1 {
+			return testCertificateDocument(t, local, rootPublic), nil
+		}
 		if endpoint != machineID || generation != 3 {
 			t.Fatalf("endpoint=%s generation=%d", endpoint, generation)
 		}
@@ -78,18 +92,93 @@ func TestResolveBindsLocalCustodyAndRemoteCertificateToOneRoot(t *testing.T) {
 	if len(authority.RootPublic) != 0 || len(authority.LocalKeys.RootPrivate) != 0 || len(authority.MachineCertificateRaw) != 0 {
 		t.Fatal("authority was not cleared")
 	}
-	localOnly, localErr := ResolveLocal(context.Background(), Request{Store: store, Client: certificateClientFunc{fetch: func(context.Context, string, uint64) (api.EndpointCertificateDocument, error) {
-		t.Fatal("local native authority fetched a machine certificate")
-		return api.EndpointCertificateDocument{}, nil
+	// A pending enrollment writes another session's account-wide selector. The
+	// active CLI must keep using its own authenticated certificate signer.
+	otherSelector, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.SavePeerMachineSigningPublic(issuer, accountID, otherSelector); err != nil {
+		t.Fatal(err)
+	}
+	localOnly, localErr := ResolveLocal(context.Background(), Request{Store: store, Client: certificateClientFunc{fetch: func(_ context.Context, endpoint string, generation uint64) (api.EndpointCertificateDocument, error) {
+		if endpoint != cliID || generation != 1 {
+			t.Fatal("local authority fetched another endpoint")
+		}
+		return testCertificateDocument(t, local, rootPublic), nil
 	}, keys: testTransportKeys(rootPublic)}, Issuer: issuer, AccountID: accountID, CLIClientSessionID: cliID, Now: now})
 	if localErr != nil || localOnly.LocalCertificate.Claims.EndpointID != cliID || len(localOnly.MachineCertificateRaw) != 0 {
 		t.Fatalf("local native authority: %v", localErr)
 	}
 	localOnly.Clear()
-	document.CertificateFingerprint = hex.EncodeToString(make([]byte, 32))
-	if _, err := Resolve(context.Background(), Request{Store: store, Client: certificateClientFunc{fetch: func(context.Context, string, uint64) (api.EndpointCertificateDocument, error) { return document, nil }, keys: testTransportKeys(rootPublic)}, Issuer: issuer, AccountID: accountID, CLIClientSessionID: cliID, MachineID: machineID, MachineGeneration: 3, Now: now}); err == nil {
-		t.Fatal("metadata substitution was accepted")
+	for _, tc := range []struct {
+		name   string
+		mutate func(*api.EndpointCertificateDocument)
+	}{
+		{"version", func(d *api.EndpointCertificateDocument) { d.Version = 2 }},
+		{"account", func(d *api.EndpointCertificateDocument) { d.AccountID = "account_other" }},
+		{"session", func(d *api.EndpointCertificateDocument) { d.EndpointID = "cli_other" }},
+		{"role", func(d *api.EndpointCertificateDocument) { d.Role = "machine" }},
+		{"generation", func(d *api.EndpointCertificateDocument) { d.Generation = 2 }},
+		{"serial", func(d *api.EndpointCertificateDocument) { d.Serial++ }},
+		{"issued_at", func(d *api.EndpointCertificateDocument) { d.IssuedAt = now.Format(time.RFC3339) }},
+		{"expires_at", func(d *api.EndpointCertificateDocument) { d.ExpiresAt = now.Format(time.RFC3339) }},
+		{"fingerprint", func(d *api.EndpointCertificateDocument) {
+			d.CertificateFingerprint = hex.EncodeToString(make([]byte, 32))
+		}},
+		{"missing_key", func(d *api.EndpointCertificateDocument) { d.KeyID = "" }},
+		{"untrusted_key", func(d *api.EndpointCertificateDocument) { d.KeyID = "aek_other" }},
+		{"different_raw", func(d *api.EndpointCertificateDocument) {
+			d.Certificate = base64.RawURLEncoding.EncodeToString(machineRaw)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			localDocument := testCertificateDocument(t, local, rootPublic)
+			tc.mutate(&localDocument)
+			_, err := ResolveLocal(context.Background(), Request{Store: store, Client: certificateClientFunc{fetch: func(context.Context, string, uint64) (api.EndpointCertificateDocument, error) {
+				return localDocument, nil
+			}, keys: testTransportKeys(rootPublic)}, Issuer: issuer, AccountID: accountID, CLIClientSessionID: cliID, Now: now})
+			if !errors.Is(err, ErrInvalid) {
+				t.Fatalf("invalid local metadata accepted: %v", err)
+			}
+		})
 	}
+	localDocument := testCertificateDocument(t, local, rootPublic)
+	if _, err := ResolveLocal(context.Background(), Request{Store: store, Client: certificateClientFunc{fetch: func(context.Context, string, uint64) (api.EndpointCertificateDocument, error) {
+		return localDocument, nil
+	}, keys: testTransportKeys(otherSelector)}, Issuer: issuer, AccountID: accountID, CLIClientSessionID: cliID, Now: now}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("revoked local signer accepted: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(*api.EndpointCertificateDocument)
+	}{
+		{"remote_fingerprint", func(d *api.EndpointCertificateDocument) {
+			d.CertificateFingerprint = hex.EncodeToString(make([]byte, 32))
+		}},
+		{"missing_remote_key", func(d *api.EndpointCertificateDocument) { d.KeyID = "" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			remoteDocument := document
+			tc.mutate(&remoteDocument)
+			remoteFetched := false
+			_, err := Resolve(context.Background(), Request{Store: store, Client: certificateClientFunc{fetch: func(_ context.Context, endpoint string, generation uint64) (api.EndpointCertificateDocument, error) {
+				if endpoint == cliID && generation == 1 {
+					return localDocument, nil
+				}
+				if endpoint != machineID || generation != 3 {
+					t.Fatalf("unexpected endpoint %s generation%d", endpoint, generation)
+				}
+				remoteFetched = true
+				return remoteDocument, nil
+			}, keys: testTransportKeys(rootPublic)}, Issuer: issuer, AccountID: accountID, CLIClientSessionID: cliID, MachineID: machineID, MachineGeneration: 3, Now: now})
+			if !remoteFetched || !errors.Is(err, ErrInvalid) {
+				t.Fatalf("remote metadata not rejected at intended boundary: fetched=%v err=%v", remoteFetched, err)
+			}
+		})
+	}
+
 }
 
 func TestResolveFailurePreservesSentinelAndHasStaticAuthorityClassification(t *testing.T) {
@@ -199,6 +288,9 @@ func TestResolveUsesVerifierOnlyRootWithoutCreatingPrivateCustody(t *testing.T) 
 	}
 	request := Request{
 		Store: store, Client: certificateClientFunc{fetch: func(_ context.Context, endpoint string, generation uint64) (api.EndpointCertificateDocument, error) {
+			if endpoint == cliID && generation == 1 {
+				return testCertificateDocument(t, local, rootPublic), nil
+			}
 			if endpoint != machineID || generation != 3 {
 				t.Fatalf("endpoint=%q generation=%d", endpoint, generation)
 			}

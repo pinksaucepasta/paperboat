@@ -95,6 +95,11 @@ staging="$release_root/staging"
 [[ -d "$live" && ! -L "$live" ]] || { echo "live release is unavailable" >&2; exit 1; }
 [[ -d "$staging" && ! -L "$staging" ]] || { echo "release staging directory is unavailable" >&2; exit 1; }
 
+# Serialize validation, staging cleanup and exchange against the same live tree.
+# Keep this descriptor open through the final exchange; never unlink the lock.
+exec 9>"$release_root/.publish-tuf-origin.lock"
+flock -x 9
+
 # A successful prior activation deliberately retains its exchanged-out tree.
 # It is safe to remove only now, before this release creates its transaction.
 find "$staging" -mindepth 1 -maxdepth 1 -type d -name 'activation-*' -print0 | while IFS= read -r -d '' previous; do
@@ -108,6 +113,41 @@ tar -xzf "$bundle" -C "$next" --no-same-owner --no-same-permissions
 
 [[ -z "$(find "$next" -type l -print -quit)" ]] || { echo "staged release contains a symlink" >&2; exit 1; }
 [[ "$(find "$next" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)" == $'install\ntuf\nwindows' ]] || { echo "staged release has an unexpected top-level file" >&2; exit 1; }
+
+python3 - "$next/tuf/metadata" "$live/tuf/metadata" <<'PY_METADATA'
+import json
+import pathlib
+import sys
+
+def no_duplicates(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate metadata key")
+        result[key] = value
+    return result
+
+def version(directory, role):
+    path = directory / (role + ".json")
+    if not path.is_file() or path.is_symlink():
+        raise ValueError("metadata is unavailable")
+    document = json.loads(path.read_text(), object_pairs_hook=no_duplicates)
+    signed = document.get("signed")
+    if not isinstance(signed, dict) or signed.get("_type") != role:
+        raise ValueError("metadata role is invalid")
+    value = signed.get("version")
+    if type(value) is not int or value <= 0:
+        raise ValueError("metadata version must be a positive integer")
+    return value
+
+candidate, live = map(pathlib.Path, sys.argv[1:])
+for role in ("targets", "snapshot", "timestamp"):
+    try:
+        if version(candidate, role) <= version(live, role):
+            raise ValueError("metadata version does not advance live")
+    except (OSError, ValueError, TypeError, AttributeError) as error:
+        raise SystemExit(f"TUF {role}: {error}")
+PY_METADATA
 
 python3 - "$next/tuf/metadata/targets.json" "$live/tuf/metadata/targets.json" "$version" <<'PY'
 import datetime

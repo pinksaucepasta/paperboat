@@ -111,6 +111,9 @@ func (d *connectedMachineAccess) control(r *http.Request, identity clientauthori
 	case "/v1/peer-keys":
 		k := identity.TrustedKeys[0]
 		data = api.PeerTransportKeySet{Version: 1, TrustedKeys: []api.E2EEKey{{KeyID: k.KeyID, PublicKey: base64.RawURLEncoding.EncodeToString(k.PublicKey), Fingerprint: hex.EncodeToString(k.Fingerprint[:]), Generation: 1}}}
+	case "/v1/endpoints/cli_connected/certificates/1":
+		c := identity.LocalCertificate
+		data = api.EndpointCertificateDocument{Version: 1, AccountID: c.Claims.AccountID, KeyID: identity.TrustedKeys[0].KeyID, EndpointID: c.Claims.EndpointID, Role: "cli", Generation: 1, Serial: c.Claims.Serial, IssuedAt: c.Claims.IssuedAt.Format(time.RFC3339), ExpiresAt: c.Claims.ExpiresAt.Format(time.RFC3339), Certificate: base64.RawURLEncoding.EncodeToString(identity.LocalCertificateRaw), CertificateFingerprint: c.Fingerprint()}
 	case "/v1/endpoints/machine_connected/certificates/1":
 		c := identity.MachineCertificate
 		fp := c.Fingerprint()

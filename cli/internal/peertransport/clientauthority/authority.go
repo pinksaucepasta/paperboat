@@ -109,11 +109,9 @@ func resolve(ctx context.Context, request Request, localOnly bool) (Authority, e
 	}
 	var keys config.PeerIdentityKeys
 	var trusted []endpointidentity.TrustedKey
-	var rootPublic ed25519.PublicKey
 	var err error
 	fail := func(err error) (Authority, error) {
 		trustedkeys.Clear(trusted)
-		clear(rootPublic)
 		clear(keys.RootPrivate)
 		clear(keys.QUICPrivate)
 		return Authority{}, err
@@ -133,37 +131,38 @@ func resolve(ctx context.Context, request Request, localOnly bool) (Authority, e
 	if err != nil {
 		return fail(ErrInvalid)
 	}
-	rootPublic, rootErr = request.Store.LoadPeerMachineSigningPublic(request.Issuer, request.AccountID)
-	if rootErr != nil {
-		return fail(rootErr)
-	}
 	keys, err = request.Store.PeerEndpointKeys(request.Issuer, request.AccountID, request.CLIClientSessionID)
 	if err != nil {
-		clear(rootPublic)
 		return fail(err)
-	}
-	if len(rootPublic) != ed25519.PublicKeySize {
-		return fail(ErrInvalid)
-	}
-	if len(trusted) == 0 {
-		return fail(ErrInvalid)
-	}
-	localKey, ok := trustedkeys.ByPublic(trusted, rootPublic)
-	if !ok {
-		return fail(ErrInvalid)
 	}
 	localState, err := request.Store.LoadPeerCertificate(request.Issuer, request.CLIClientSessionID)
 	if err != nil {
 		return fail(err)
 	}
-	local, err := endpointidentity.Verify(localState.Raw, localKey.PublicKey, endpointidentity.Expected{AccountID: request.AccountID, Role: endpointidentity.RoleCLI, EndpointID: request.CLIClientSessionID, Generation: 1}, request.Now.UTC())
-	if err != nil || !bytes.Equal(local.Claims.QUICPublicKey, keys.QUICPrivate.Public().(ed25519.PublicKey)) {
+	localDocument, err := request.Client.EndpointCertificate(ctx, request.CLIClientSessionID, 1)
+	if err != nil {
+		clear(localState.Raw)
+		return fail(err)
+	}
+	localKey, ok := endpointidentity.TrustedKeyFor(trusted, localDocument.KeyID)
+	if !ok {
+		clear(localState.Raw)
+		return fail(ErrInvalid)
+	}
+	documentRaw, decodeErr := base64.RawURLEncoding.Strict().DecodeString(localDocument.Certificate)
+	localFingerprint := sha256.Sum256(localState.Raw)
+	local, verifyErr := endpointidentity.VerifyWithTrustedKey(localState.Raw, localDocument.KeyID, trusted, endpointidentity.Expected{AccountID: request.AccountID, Role: endpointidentity.RoleCLI, EndpointID: request.CLIClientSessionID, Generation: 1}, request.Now.UTC())
+	valid := decodeErr == nil && base64.RawURLEncoding.EncodeToString(documentRaw) == localDocument.Certificate && bytes.Equal(documentRaw, localState.Raw) && verifyErr == nil &&
+		localDocument.Version == 1 && localDocument.AccountID == request.AccountID && localDocument.EndpointID == request.CLIClientSessionID && localDocument.Role == "cli" && localDocument.Generation == 1 &&
+		localDocument.Serial == local.Claims.Serial && localDocument.IssuedAt == local.Claims.IssuedAt.Format(time.RFC3339) && localDocument.ExpiresAt == local.Claims.ExpiresAt.Format(time.RFC3339) && localDocument.CertificateFingerprint == hex.EncodeToString(localFingerprint[:]) &&
+		bytes.Equal(local.Claims.QUICPublicKey, keys.QUICPrivate.Public().(ed25519.PublicKey))
+	clear(documentRaw)
+	if !valid {
 		clear(localState.Raw)
 		return fail(ErrInvalid)
 	}
 	if localOnly {
 		localRootPublic := append(ed25519.PublicKey(nil), localKey.PublicKey...)
-		clear(rootPublic)
 		return Authority{RootPublic: localRootPublic, TrustedKeys: trusted, LocalKeys: keys, LocalCertificate: local, LocalCertificateRaw: localState.Raw}, nil
 	}
 	document, err := request.Client.EndpointCertificate(ctx, request.MachineID, request.MachineGeneration)
@@ -172,10 +171,6 @@ func resolve(ctx context.Context, request Request, localOnly bool) (Authority, e
 		return fail(err)
 	}
 	machineKey, ok := endpointidentity.TrustedKeyFor(trusted, document.KeyID)
-	if !ok && document.KeyID == "" && len(trusted) == 1 {
-		// Internal fixture adapter. Server-issued documents always carry key_id.
-		machineKey, ok = trusted[0], true
-	}
 	if !ok {
 		clear(localState.Raw)
 		return fail(ErrInvalid)
@@ -183,13 +178,12 @@ func resolve(ctx context.Context, request Request, localOnly bool) (Authority, e
 	machineRaw, decodeErr := base64.RawURLEncoding.Strict().DecodeString(document.Certificate)
 	machineFingerprint := sha256.Sum256(machineRaw)
 	machine, verifyErr := endpointidentity.Verify(machineRaw, machineKey.PublicKey, endpointidentity.Expected{AccountID: request.AccountID, Role: endpointidentity.RoleMachine, EndpointID: request.MachineID, Generation: request.MachineGeneration}, request.Now.UTC())
-	if decodeErr != nil || base64.RawURLEncoding.EncodeToString(machineRaw) != document.Certificate || verifyErr != nil || document.Version != 1 || document.AccountID != request.AccountID || document.KeyID != "" && document.KeyID != machineKey.KeyID || document.EndpointID != request.MachineID || document.Role != "machine" || document.Generation != request.MachineGeneration || document.Serial != machine.Claims.Serial || document.IssuedAt != machine.Claims.IssuedAt.Format(time.RFC3339) || document.ExpiresAt != machine.Claims.ExpiresAt.Format(time.RFC3339) || document.CertificateFingerprint != hex.EncodeToString(machineFingerprint[:]) {
+	if decodeErr != nil || base64.RawURLEncoding.EncodeToString(machineRaw) != document.Certificate || verifyErr != nil || document.Version != 1 || document.AccountID != request.AccountID || document.KeyID != machineKey.KeyID || document.EndpointID != request.MachineID || document.Role != "machine" || document.Generation != request.MachineGeneration || document.Serial != machine.Claims.Serial || document.IssuedAt != machine.Claims.IssuedAt.Format(time.RFC3339) || document.ExpiresAt != machine.Claims.ExpiresAt.Format(time.RFC3339) || document.CertificateFingerprint != hex.EncodeToString(machineFingerprint[:]) {
 		clear(localState.Raw)
 		clear(machineRaw)
 		return fail(ErrInvalid)
 	}
 	localRootPublic := append(ed25519.PublicKey(nil), localKey.PublicKey...)
-	clear(rootPublic)
 	return Authority{RootPublic: localRootPublic, TrustedKeys: trusted, LocalKeys: keys, LocalCertificate: local, LocalCertificateRaw: localState.Raw, MachineCertificate: machine, MachineCertificateKeyID: machineKey.KeyID, MachineCertificateRaw: machineRaw}, nil
 }
 
