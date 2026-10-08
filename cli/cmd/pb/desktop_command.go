@@ -179,6 +179,10 @@ func handleDesktop(c *cobra.Command, in desktopRequest) (any, error) {
 			Reason          string                         `json:"reason"`
 			ApprovalID      string                         `json:"approval_id"`
 			Decision        string                         `json:"decision"`
+			Limit           int                            `json:"limit"`
+			Offset          int                            `json:"offset"`
+			Q               string                         `json:"q"`
+			State           string                         `json:"state"`
 		}
 		if err := decodeDesktop(in.Payload, &p); err != nil {
 			return nil, err
@@ -200,7 +204,7 @@ func handleDesktop(c *cobra.Command, in desktopRequest) (any, error) {
 		case "machine.maintenance":
 			return client.RequestMachineMaintenance(ctx, p.MachineID, newIdempotencyKey(), p.Action, p.TargetVersion, p.Reason)
 		case "machine.maintenance-list":
-			return client.MachineMaintenanceApprovals(ctx, p.MachineID)
+			return client.MachineMaintenanceApprovals(ctx, p.MachineID, p.Limit, p.Offset, p.Q, p.State)
 		case "machine.maintenance-decide":
 			if p.ApprovalID == "" {
 				return nil, invocationError(errors.New("select a maintenance request"))

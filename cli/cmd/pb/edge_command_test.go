@@ -28,7 +28,7 @@ func TestEdgeListUsesAccountInventoryAndPaginates(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/v1/selfhost/installations":
-			_, _ = w.Write([]byte(`{"data":{"installations":[]}}`))
+			_, _ = w.Write([]byte(selfhostTestInventoryJSON(`[]`)))
 			return
 		case "/v1/selfhost/pools/tunnel":
 			_, _ = w.Write([]byte(`{"data":{"mode":"mixed","installation_ids":[]}}`))
@@ -89,7 +89,7 @@ func TestEdgeListRespectsPoolAndShowsHostedWhenNoSelfhostSelected(t *testing.T) 
 				w.Header().Set("Content-Type", "application/json")
 				switch r.URL.Path {
 				case "/v1/selfhost/installations":
-					_, _ = w.Write([]byte(`{"data":{"installations":` + tc.installations + `}}`))
+					_, _ = w.Write([]byte(selfhostTestInventoryJSON(tc.installations)))
 				case "/v1/selfhost/pools/tunnel":
 					_, _ = w.Write([]byte(`{"data":{"mode":"` + tc.mode + `","installation_ids":` + tc.selected + `}}`))
 				case "/v1/edges":
@@ -197,7 +197,7 @@ func TestSelfhostInventoryRetainsAuthorizedEnrolledMetadataAndComputesSelection(
 					if invalid {
 						scope = ""
 					}
-					fmt.Fprintf(w, `{"data":{"installations":[{"installation_id":"shared","node_id":"shared_node","name":"Shared relay","capability":"relay","scope_kind":%q,"scope_id":"team_1","enrollment_state":"enrolled","ready":true},{"installation_id":"selected","node_id":"selected_node","name":"Offline selected","capability":"relay","scope_kind":"account","scope_id":"account_1","enrollment_state":"enrolled","ready":false},{"installation_id":"pending","node_id":"pending_node","name":"Pending relay","capability":"relay","scope_kind":"account","scope_id":"account_1","enrollment_state":"pending","ready":false}]}}`, scope)
+					fmt.Fprint(w, selfhostTestInventoryJSON(fmt.Sprintf(`[{"installation_id":"shared","node_id":"shared_node","name":"Shared relay","capability":"relay","scope_kind":%q,"scope_id":"team_1","enrollment_state":"enrolled","ready":true},{"installation_id":"selected","node_id":"selected_node","name":"Offline selected","capability":"relay","scope_kind":"account","scope_id":"account_1","enrollment_state":"enrolled","ready":false},{"installation_id":"pending","node_id":"pending_node","name":"Pending relay","capability":"relay","scope_kind":"account","scope_id":"account_1","enrollment_state":"pending","ready":false}]`, scope)))
 				} else if r.URL.Path == "/v1/selfhost/pools/relay" {
 					fmt.Fprint(w, `{"data":{"mode":"mixed","installation_ids":["selected"]}}`)
 				} else {
@@ -217,4 +217,27 @@ func TestSelfhostInventoryRetainsAuthorizedEnrolledMetadataAndComputesSelection(
 			}
 		})
 	}
+}
+
+func selfhostTestInventoryJSON(itemsJSON string) string {
+	var items []api.SelfhostInstallation
+	if err := json.Unmarshal([]byte(itemsJSON), &items); err != nil {
+		panic(err)
+	}
+	counts := api.SelfhostCounts{}
+	for _, item := range items {
+		if item.EnrollmentState == "enrolled" {
+			counts.Enrolled++
+		} else {
+			counts.Pending++
+		}
+		if item.Ready {
+			counts.Ready++
+		}
+	}
+	data, err := json.Marshal(map[string]any{"data": api.SelfhostInstallationPage{Installations: items, Pagination: api.Pagination{Limit: 200, Offset: 0, Total: len(items)}, Counts: counts}})
+	if err != nil {
+		panic(err)
+	}
+	return string(data)
 }
