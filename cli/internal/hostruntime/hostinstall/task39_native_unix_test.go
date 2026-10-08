@@ -310,7 +310,7 @@ func TestTask39TwoUserNativeInstallUpdateRemove(t *testing.T) {
 		if err = Install(ctx, request); err != nil {
 			t.Fatal("native install:", err)
 		}
-		if err = Commit(request); err != nil {
+		if err = Commit(context.Background(), request); err != nil {
 			t.Fatal(err)
 		}
 		t.Logf("installed production runtime for uid=%d", request.UID)

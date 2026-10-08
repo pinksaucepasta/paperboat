@@ -3171,7 +3171,7 @@ func actionUpdateCheck(command *cobra.Command, _ []string) error {
 		}
 		return writeUpdateCheckResult(command, response.Version, available)
 	}
-	return fmt.Errorf("check with paperboat-updated: %w", err)
+	return updateControlFailure("check with paperboat-updated", err)
 }
 
 func writeUpdateCheckResult(command *cobra.Command, latest string, available bool) error {
@@ -3336,7 +3336,7 @@ func actionUpdateDownload(command *cobra.Command, _ []string) error {
 	}
 	response, err := updateWithProgress(command, ctx, client.Download)
 	if err != nil {
-		return fmt.Errorf("download signed update: %w", err)
+		return updateControlFailure("download signed update", err)
 	}
 	return writeDownloadedUpdate(command, response)
 }
@@ -3379,7 +3379,7 @@ func actionUpdate(command *cobra.Command, _ []string) error {
 	if approvalID == "" {
 		response, err := updateWithProgress(command, ctx, client.Download)
 		if err != nil {
-			return fmt.Errorf("download signed update: %w", err)
+			return updateControlFailure("download signed update", err)
 		}
 		if response.Candidate == nil || updateJSON(command) || !updateInputIsTerminal(command) {
 			return writeDownloadedUpdate(command, response)
@@ -3399,7 +3399,7 @@ func actionUpdate(command *cobra.Command, _ []string) error {
 	}
 	response, err := updateWithProgress(command, ctx, func(ctx context.Context) (updated.ControlResponse, error) { return client.Install(ctx, approvalID) })
 	if err != nil {
-		return fmt.Errorf("install approved update: %w", err)
+		return updateControlFailure("install approved update", err)
 	}
 	var snapshot *localapi.Snapshot
 	if response.Updated && !response.Pending {

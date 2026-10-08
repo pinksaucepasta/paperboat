@@ -9,9 +9,13 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 )
 
 func (s *Service) automaticCheck(ctx context.Context) (autoupdate.Result, error) {
+	if s.config.Active.LocalSource != nil && s.config.Active.LocalSource.Distribution == installsource.Custom {
+		return autoupdate.Result{Version: s.currentManager().ActiveVersion()}, nil
+	}
 	s.controlMu.Lock()
 	defer s.controlMu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, maxUpdateControlTimeout)

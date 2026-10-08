@@ -128,7 +128,7 @@ func Install(ctx context.Context, request Request) error {
 	if _, err := ensureEnvironmentHostCredential(ctx, paths, request); err != nil {
 		return err
 	}
-	activationLock, err := updated.LockUnixNativeInstall(paths.updateState)
+	activationLock, err := updated.LockUnixNativeInstall(ctx, paths.updateState)
 	if err != nil {
 		return err
 	}
@@ -206,23 +206,23 @@ func Install(ctx context.Context, request Request) error {
 	return writeJournal(paths.journal, journal)
 }
 
-func Commit(request Request) error {
+func Commit(ctx context.Context, request Request) error {
 	if os.Geteuid() != 0 {
 		return ErrNotPrivileged
 	}
 	if err := Validate(request, invokingUID()); err != nil {
 		return err
 	}
-	return commitPreparedInstallation(request, platformPaths(request.UID))
+	return commitPreparedInstallation(ctx, request, platformPaths(request.UID))
 }
 
-func commitPreparedInstallation(request Request, paths installPaths) error {
+func commitPreparedInstallation(ctx context.Context, request Request, paths installPaths) error {
 	journal, err := loadJournal(paths.journal)
 	if err != nil || journal.Stage != "services_started" || journal.Source != request.Source {
 		return ErrInvalidRequest
 	}
 	if _, statErr := os.Lstat(paths.updateState); statErr == nil {
-		lock, lockErr := updated.LockUnixNativeInstall(paths.updateState)
+		lock, lockErr := updated.LockUnixNativeInstall(ctx, paths.updateState)
 		if lockErr != nil {
 			return lockErr
 		}

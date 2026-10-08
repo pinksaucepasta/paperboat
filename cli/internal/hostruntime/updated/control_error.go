@@ -1,6 +1,11 @@
 package updated
 
-import "strings"
+import (
+	"errors"
+	"strings"
+)
+
+var ErrCustomInstallation = errors.New("Custom builds cannot use official updates. Install a fresh official build to switch to official updates.")
 
 const maxControlErrorMessage = 2048
 

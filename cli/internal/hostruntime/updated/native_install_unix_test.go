@@ -4,6 +4,7 @@ package updated
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -105,7 +106,7 @@ func TestUnixNativeInstallRejectsPendingActivationWithoutMutation(t *testing.T) 
 }
 
 func beginNativeInstallFixture(root string) (io.Closer, error) {
-	lock, err := LockUnixNativeInstall(root)
+	lock, err := LockUnixNativeInstall(context.Background(), root)
 	if err != nil {
 		return nil, err
 	}
@@ -177,6 +178,84 @@ func TestUnixNativeInstallSupersedesOnlyUnapprovedDownload(t *testing.T) {
 			}
 			if _, err = os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 				t.Fatal("superseded journal retained", err)
+			}
+		})
+	}
+}
+
+func TestUnixNativeInstallLockWaitsForTransientOwner(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("protected native installer state requires root")
+	}
+	root := t.TempDir()
+	if err := os.Chmod(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	owner, err := unixActivationLock(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	acquired := make(chan error, 1)
+	go func() {
+		lock, err := LockUnixNativeInstall(ctx, root)
+		if lock != nil {
+			lock.Close()
+		}
+		acquired <- err
+	}()
+	select {
+	case err := <-acquired:
+		t.Fatalf("returned while lock held: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := owner.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-acquired; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUnixNativeInstallLockCancellationAndDeadlineLeaveOwnerIntact(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("protected native installer state requires root")
+	}
+	for _, deadline := range []bool{false, true} {
+		t.Run(fmt.Sprint(deadline), func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.Chmod(root, 0700); err != nil {
+				t.Fatal(err)
+			}
+			owner, err := unixActivationLock(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer owner.Close()
+			ctx, cancel := context.WithCancel(context.Background())
+			want := context.Canceled
+			if deadline {
+				ctx, cancel = context.WithTimeout(context.Background(), 50*time.Millisecond)
+				want = context.DeadlineExceeded
+			} else {
+				cancel()
+			}
+			defer cancel()
+			lock, err := LockUnixNativeInstall(ctx, root)
+			if lock != nil {
+				lock.Close()
+				t.Fatal("acquired occupied lock")
+			}
+			if !errors.Is(err, want) || !errors.Is(err, ErrActivationPending) {
+				t.Fatalf("wrong cancellation: %v", err)
+			}
+			if other, err := unixActivationLock(root); !errors.Is(err, ErrActivationPending) {
+				if other != nil {
+					other.Close()
+				}
+				t.Fatalf("existing owner lost exclusion: %v", err)
 			}
 		})
 	}

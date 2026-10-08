@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 	"golang.org/x/sys/windows"
@@ -94,12 +95,25 @@ func PrepareWindowsNativeInstall(ctx context.Context, ownerSID string) (*hostins
 	if !windowsMachineFileSecurityMatches(windowsActivationJournalPath(layout.UpdateStateRoot), "D:P(A;;FA;;;SY)(A;;FA;;;BA)") {
 		return nil, nil, errInvalidWindowsActivation
 	}
-	if !nativeWindowsJournalRetirable(journal) {
-		return nil, nil, fmt.Errorf("finish or recover the pending update before reinstalling: %w", ErrWindowsActivationUnavailable)
-	}
-	sourceIdentity, signed, err := nativeWindowsRollbackSource(journal)
-	if err != nil {
-		return nil, nil, err
+	var sourceIdentity = config.Source
+	var signed bool
+	if windowsNativeInstallMaySupersede(journal) {
+		// This download never changed the installation. Preserve its exact journal
+		// for rollback instead of approving or launching it during explicit install.
+		if err := validateWindowsNativeInstallPreviousSource(config.Source, journal); err != nil {
+			return nil, nil, err
+		}
+		if err := verifyWindowsPreparedCandidate(ctx, journal); err != nil {
+			return nil, nil, err
+		}
+	} else {
+		if !nativeWindowsJournalRetirable(journal) {
+			return nil, nil, fmt.Errorf("finish or recover the pending update before reinstalling: %w", ErrWindowsActivationUnavailable)
+		}
+		sourceIdentity, signed, err = nativeWindowsRollbackSource(journal)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	sourceIdentity.AutomaticUpdates = config.Source.AutomaticUpdates
 	if err := sourceIdentity.Verify(layout.Binary); err != nil {
@@ -161,6 +175,22 @@ func RecoverWindowsNativeInstall(ctx context.Context, config WindowsConfig) erro
 			}
 			if err := validateWindowsNativeInstallJournalBinding(config, j); err != nil {
 				return err
+			}
+			if windowsNativeInstallMaySupersede(j) {
+				if err := validateWindowsNativeInstallPreviousSource(config.Source, j); err != nil {
+					return err
+				}
+				layout, err := service.WindowsUserLayout(config.OwnerSID)
+				if err != nil {
+					return err
+				}
+				if err := config.Source.Verify(layout.Binary); err != nil {
+					return err
+				}
+				target := workerupdate.ComponentTarget{SHA256: config.Source.SHA256, Length: config.Source.Length, Platform: "windows", Architecture: config.Source.Architecture}
+				if err := verifyWindowsStableBinary(ctx, layout.Binary, target, config.OwnerSID); err != nil {
+					return err
+				}
 			}
 			if err := verifyWindowsPreparedCandidate(ctx, j); err != nil {
 				return err
@@ -232,6 +262,21 @@ func recoverWindowsNativeInstall(ctx context.Context, ops windowsNativeInstallRe
 	}
 	if !validWindowsActivationJournal(initial) {
 		return errInvalidWindowsActivation
+	}
+	if windowsNativeInstallMaySupersede(initial) {
+		if err := ops.validate(bounded, initial); err != nil {
+			return err
+		}
+		registered, running, err := ops.owner(initial)
+		if err != nil {
+			return err
+		}
+		if registered || running {
+			return ErrWindowsActivationUnavailable
+		}
+		// PrepareWindowsNativeInstall snapshots/removes this journal only after
+		// the updater has stopped, and restores it if installation fails.
+		return nil
 	}
 	if initial.Stage == windowsActivationAwaitingApproval || initial.ApprovedCandidateID != initial.Candidate.ID {
 		return fmt.Errorf("approve the pending update before reinstalling: %w", ErrApprovalRequired)
@@ -439,4 +484,15 @@ func validateWindowsNativeInstallJournalBinding(config WindowsConfig, j windowsA
 		return errInvalidWindowsActivation
 	}
 	return nil
+}
+
+func windowsNativeInstallMaySupersede(j windowsActivationJournal) bool {
+	return j.Stage == windowsActivationAwaitingApproval && j.ApprovedCandidateID == ""
+}
+
+func validateWindowsNativeInstallPreviousSource(source installsource.Source, j windowsActivationJournal) error {
+	if source.Version != j.PreviousVersion || source.Platform != "windows" || source.Architecture != j.Architecture || source.SHA256 != j.PreviousBinary.SHA256 || source.Length != j.PreviousBinary.Length || j.PreviousSource != nil && source != *j.PreviousSource {
+		return errInvalidWindowsActivation
+	}
+	return source.Validate()
 }

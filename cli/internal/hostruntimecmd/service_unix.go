@@ -78,7 +78,7 @@ func runServiceCommand(ctx context.Context, args []string, stdin io.Reader, _, _
 		return hostinstall.Uninstall(ctx, request)
 	}
 	if args[0] == "commit" {
-		return hostinstall.Commit(request)
+		return hostinstall.Commit(ctx, request)
 	}
 	if args[0] == "repair" {
 		return hostinstall.Repair(ctx, request)

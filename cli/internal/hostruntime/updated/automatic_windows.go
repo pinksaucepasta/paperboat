@@ -11,9 +11,13 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 )
 
 func (c *windowsController) automaticCheck(ctx context.Context) (autoupdate.Result, error) {
+	if c.config.Source.Distribution == installsource.Custom {
+		return autoupdate.Result{Version: c.activeVersion}, nil
+	}
 	ctx, cancel := context.WithTimeout(ctx, maxUpdateControlTimeout)
 	defer cancel()
 	settings, err := machineUpdateSettings(c.config.StateRoot, c.config.AutomaticChecks, nil)
@@ -80,6 +84,9 @@ func (c *windowsController) automaticCheck(ctx context.Context) (autoupdate.Resu
 
 // Serialize the final automatic SCM handoff with changes to machine settings.
 func (c *windowsController) handoffAutomaticActivation(ctx context.Context, launch func(context.Context) error) error {
+	if c.config.Source.Distribution == installsource.Custom {
+		return nil
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	settings, err := machineUpdateSettings(c.config.StateRoot, c.config.AutomaticChecks, nil)

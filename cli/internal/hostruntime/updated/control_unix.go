@@ -15,6 +15,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 	"github.com/pinksaucepasta/paperboat/internal/ospeer"
@@ -134,6 +135,8 @@ func (s *controlServer) handle(connection *net.UnixConn) error {
 
 func controlErrorCode(err error) string {
 	switch {
+	case errors.Is(err, ErrCustomInstallation):
+		return "custom_installation"
 	case errors.Is(err, ErrApprovalRequired), errors.Is(err, workerupdate.ErrApprovalRequired):
 		return "approval_required"
 	case errors.Is(err, ErrCandidateChanged), errors.Is(err, workerupdate.ErrPreparedCandidate):
@@ -160,6 +163,9 @@ func (s *controlServer) respond(writer io.Writer, response ControlResponse) erro
 }
 
 func (s *Service) controlRequestWithRequest(ctx context.Context, request ControlRequest) (ControlResponse, error) {
+	if s.config.Active.LocalSource != nil && s.config.Active.LocalSource.Distribution == installsource.Custom && (request.Operation == "check" || request.Operation == "download" || request.Operation == "install" || request.Operation == "settings" && request.Settings != nil && request.Settings.Enabled) {
+		return ControlResponse{}, ErrCustomInstallation
+	}
 	switch request.Operation {
 	case "settings":
 		s.controlMu.Lock()
@@ -167,6 +173,9 @@ func (s *Service) controlRequestWithRequest(ctx context.Context, request Control
 		settings, err := machineUpdateSettings(s.config.StateRoot, s.config.AutomaticUpdates, request.Settings)
 		if err != nil {
 			return ControlResponse{}, err
+		}
+		if s.config.Active.LocalSource != nil && s.config.Active.LocalSource.Distribution == installsource.Custom {
+			settings.Enabled = false
 		}
 		if request.Settings != nil {
 			s.scheduler.Wake()
@@ -219,6 +228,10 @@ func (s *Service) controlRequestWithRequest(ctx context.Context, request Control
 func (s *Service) populateControlState(response *ControlResponse) error {
 	if err := populateMachineSettings(response, s.config.StateRoot, s.config.AutomaticUpdates); err != nil {
 		return err
+	}
+	if s.config.Active.LocalSource != nil && s.config.Active.LocalSource.Distribution == installsource.Custom {
+		response.Settings.Enabled = false
+		response.NextMaintenanceAt = time.Time{}
 	}
 	state, err := s.currentManager().TransactionState()
 	if err != nil {

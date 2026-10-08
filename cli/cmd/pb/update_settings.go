@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/spf13/cobra"
 )
 
@@ -24,9 +26,9 @@ func updateSettingsCommand() *cobra.Command {
 		Short: "View or change automatic update settings",
 		Long: `Show or change this machine's automatic update schedule.
 
-Official installations enable scheduled updates by default. Source and custom
-installations default to availability checks only. Scheduled updates download
-and verify releases ahead of the maintenance time, then install at that time
+Official installations enable scheduled updates by default. Custom builds require
+a fresh official installation before they can use updates. Scheduled updates
+download and verify releases ahead of the maintenance time, then install at that time
 using the machine's local clock. The default maintenance time is 04:00.
 
 Disabling automatic updates keeps availability checks enabled but leaves
@@ -37,8 +39,8 @@ machine, independently of the selected account.`,
   pb update settings --auto=false
   pb update settings --auto=true --time 22:15
   pb update settings --time 04:30 --json`,
-		Args:  commandArgs(cobra.NoArgs),
-		RunE:  actionUpdateSettings,
+		Args: commandArgs(cobra.NoArgs),
+		RunE: actionUpdateSettings,
 	}
 	command.Flags().Bool("auto", false, "enable or disable scheduled downloads and installs")
 	command.Flags().String("time", "", "set the machine-local daily update time (HH:MM)")
@@ -96,7 +98,7 @@ func actionUpdateSettings(command *cobra.Command, _ []string) error {
 		}
 		response, err = client.Settings(ctx, &settings)
 		if err != nil {
-			return fmt.Errorf("save automatic update settings: %w", err)
+			return updateControlFailure("save automatic update settings", err)
 		}
 		if response.Settings == nil || *response.Settings != settings {
 			return fmt.Errorf("paperboat-updated did not confirm the requested automatic update settings")
@@ -156,4 +158,12 @@ func writeUpdateSettingsResult(output io.Writer, result updateSettingsResult) er
 	}
 	_, err := fmt.Fprintln(output, "Availability checks continue; downloads and installs wait for manual action.")
 	return err
+}
+
+func updateControlFailure(operation string, err error) error {
+	var remote *updated.ControlError
+	if errors.As(err, &remote) && remote.Code == "custom_installation" {
+		return commandRejection{reason: commandRejectCustomUpdate}
+	}
+	return fmt.Errorf("%s: %w", operation, err)
 }

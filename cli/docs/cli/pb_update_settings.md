@@ -6,9 +6,9 @@ View or change automatic update settings
 
 Show or change this machine's automatic update schedule.
 
-Official installations enable scheduled updates by default. Source and custom
-installations default to availability checks only. Scheduled updates download
-and verify releases ahead of the maintenance time, then install at that time
+Official installations enable scheduled updates by default. Custom builds require
+a fresh official installation before they can use updates. Scheduled updates
+download and verify releases ahead of the maintenance time, then install at that time
 using the machine's local clock. The default maintenance time is 04:00.
 
 Disabling automatic updates keeps availability checks enabled but leaves

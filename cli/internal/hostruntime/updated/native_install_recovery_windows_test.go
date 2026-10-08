@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
@@ -317,5 +318,52 @@ func TestWindowsNativeInstallJournalBindsProtectedSourceBytesAndPlatform(t *test
 	config.Source.Length = journal.Runtime.Length
 	if err := validateWindowsNativeInstallJournalBinding(config, journal); err != nil {
 		t.Fatalf("Source-before-journal commit rejected: %v", err)
+	}
+}
+
+func TestWindowsNativeInstallSupersedesOnlyValidatedUnapprovedDownload(t *testing.T) {
+	for _, kind := range []string{"unapproved", "registered", "running", "changed_source", "invalid_candidate", "approved"} {
+		t.Run(kind, func(t *testing.T) {
+			j := testWindowsFeatureJournal()
+			j.Stage = windowsActivationAwaitingApproval
+			j.ApprovedCandidateID = ""
+			source := installsource.Source{Version: j.PreviousVersion, Platform: "windows", Architecture: j.Architecture, SHA256: j.PreviousBinary.SHA256, Length: j.PreviousBinary.Length, Distribution: installsource.Custom}
+			j.PreviousSource = &source
+			if kind == "changed_source" {
+				source.SHA256 = strings.Repeat("f", 64)
+			}
+			if kind == "invalid_candidate" {
+				j.Candidate.ID = "bad"
+			}
+			if kind == "approved" {
+				j.ApprovedCandidateID = j.Candidate.ID
+			}
+			validated := false
+			mutation := func(context.Context) error { t.Fatal("unapproved download changed services"); return nil }
+			ops := windowsNativeInstallRecoveryOps{
+				load: func() (windowsActivationJournal, error) { return j, nil },
+				validate: func(context.Context, windowsActivationJournal) error {
+					validated = true
+					return validateWindowsNativeInstallPreviousSource(source, j)
+				},
+				owner: func(windowsActivationJournal) (bool, bool, error) {
+					return kind == "registered", kind == "running", nil
+				},
+				stopUpdater: mutation,
+				resume:      func(context.Context, windowsActivationJournal) error { t.Fatal("download was activated"); return nil },
+				finishTerminal: func(context.Context, windowsActivationJournal) error {
+					t.Fatal("download was retired as committed")
+					return nil
+				},
+			}
+			err := recoverWindowsNativeInstall(context.Background(), ops)
+			if kind == "unapproved" {
+				if err != nil || !validated {
+					t.Fatalf("validated download cannot be superseded: %v", err)
+				}
+			} else if err == nil {
+				t.Fatalf("%s accepted", kind)
+			}
+		})
 	}
 }

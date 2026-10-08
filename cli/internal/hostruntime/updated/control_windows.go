@@ -241,6 +241,9 @@ func (c *windowsController) invoke(ctx context.Context, request ControlRequest) 
 }
 
 func (c *windowsController) invokeWithAutomatic(ctx context.Context, request ControlRequest, automatic bool) (ControlResponse, error) {
+	if c.config.Source.Distribution == installsource.Custom && (request.Operation == "check" || request.Operation == "download" || request.Operation == "install" || request.Operation == "settings" && request.Settings != nil && request.Settings.Enabled) {
+		return ControlResponse{}, ErrCustomInstallation
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	response := ControlResponse{Schema: ControlProtocolV1, Status: "ok", Version: c.activeVersion, Observation: c.scheduler.Snapshot()}
@@ -248,6 +251,9 @@ func (c *windowsController) invokeWithAutomatic(ctx context.Context, request Con
 		settings, err := machineUpdateSettings(c.config.StateRoot, c.config.AutomaticChecks, request.Settings)
 		if err != nil {
 			return response, err
+		}
+		if c.config.Source.Distribution == installsource.Custom {
+			settings.Enabled = false
 		}
 		response.Settings = &settings
 		if settings.Enabled {
@@ -260,6 +266,10 @@ func (c *windowsController) invokeWithAutomatic(ctx context.Context, request Con
 	}
 	if err := populateMachineSettings(&response, c.config.StateRoot, c.config.AutomaticChecks); err != nil {
 		return response, err
+	}
+	if c.config.Source.Distribution == installsource.Custom {
+		response.Settings.Enabled = false
+		response.NextMaintenanceAt = time.Time{}
 	}
 	// Settings can change after the scheduler's initial read or its download.
 	// Recheck under the same lock as activation before accepting an automatic
@@ -543,6 +553,9 @@ func (c *windowsController) activationBlockedContext(ctx context.Context) (bool,
 }
 
 func controlErrorCodeWindows(err error) string {
+	if errors.Is(err, ErrCustomInstallation) {
+		return "custom_installation"
+	}
 	if errors.Is(err, workerupdate.ErrApprovalRequired) || errors.Is(err, ErrApprovalRequired) {
 		return "approval_required"
 	}

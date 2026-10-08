@@ -217,9 +217,9 @@ Review the reported version, platform, size and SHA-256 digest, then install wit
 download for confirmation; JSON and noninteractive use only download unless an
 exact candidate ID is supplied.
 
-Official installations have scheduled updates enabled by default. Source and custom
-installations default to availability checks only. Scheduled updates check for a
-release and download and verify it ahead of the maintenance window, then install it
+Official installations have scheduled updates enabled by default. Custom builds
+require a fresh official installation before they can use updates. Scheduled
+updates check for a release and download and verify it ahead of the maintenance window, then install it
 at 04:00 in the machine's local time zone. Configure or inspect this machine-level
 schedule with `pb update settings`:
 

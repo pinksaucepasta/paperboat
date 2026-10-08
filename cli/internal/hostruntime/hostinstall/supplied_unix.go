@@ -113,9 +113,9 @@ func SuppliedBinary(ctx context.Context, input Request, operation string) error 
 			return err
 		}
 		if bound {
-			return Commit(request)
+			return Commit(ctx, request)
 		}
-		return commitPreparedInstallation(request, paths)
+		return commitPreparedInstallation(ctx, request, paths)
 	case "rollback-supplied":
 		journal, err := loadJournal(paths.journal)
 		if err != nil {

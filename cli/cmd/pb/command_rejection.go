@@ -10,6 +10,7 @@ const (
 	commandRejectOpenSessionDelete
 	commandRejectMissingServer
 	commandRejectNoninteractiveHome
+	commandRejectCustomUpdate
 )
 
 // commandRejection describes a command-owned refusal before mutation. Its
@@ -21,7 +22,7 @@ type commandRejection struct {
 }
 
 func (e commandRejection) valid() bool {
-	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectNoninteractiveHome
+	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectCustomUpdate
 }
 func (e commandRejection) Error() string {
 	switch e.reason {
@@ -33,6 +34,8 @@ func (e commandRejection) Error() string {
 		return "close the terminal session before deleting its record."
 	case commandRejectMissingServer:
 		return "Paperboat server is not configured; set server_url or use --server."
+	case commandRejectCustomUpdate:
+		return "Custom builds cannot use official updates. Install a fresh official build to switch to official updates."
 	case commandRejectNoninteractiveHome:
 		return "pb requires a command or environment when used without an interactive terminal"
 	}

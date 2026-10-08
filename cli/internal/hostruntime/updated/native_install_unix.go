@@ -3,6 +3,7 @@
 package updated
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
@@ -29,12 +31,29 @@ func nativeInstallPending(root string) (bool, error) {
 }
 
 // LockUnixNativeInstall excludes update activation before native crash recovery.
-func LockUnixNativeInstall(root string) (io.Closer, error) {
-	lock, err := unixActivationLock(root)
-	if err != nil {
-		return nil, fmt.Errorf("finish the pending update before installing: %w", err)
+func LockUnixNativeInstall(ctx context.Context, root string) (io.Closer, error) {
+	// Metadata checks share this lock with activation. Retry contention without
+	// weakening secure ownership checks or treating a transient check as recovery.
+	bounded, cancel := context.WithTimeout(ctx, maxUpdateControlTimeout)
+	defer cancel()
+	for {
+		if err := bounded.Err(); err != nil {
+			return nil, fmt.Errorf("waiting for the update operation before installing: %w", errors.Join(ErrActivationPending, err))
+		}
+		lock, err := unixActivationLock(root)
+		if err == nil {
+			return lock, nil
+		}
+		if !errors.Is(err, ErrActivationPending) {
+			return nil, fmt.Errorf("acquiring the update operation before installing: %w", err)
+		}
+		timer := time.NewTimer(50 * time.Millisecond)
+		select {
+		case <-bounded.Done():
+			timer.Stop()
+		case <-timer.C:
+		}
 	}
-	return lock, nil
 }
 
 // PrepareUnixNativeInstall requires the caller to hold the activation lock.
