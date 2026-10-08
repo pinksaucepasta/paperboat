@@ -1,0 +1,56 @@
+.nh
+.TH "PB-CONFIG-FORCE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-force - Force a scoped configuration direction
+
+
+.SH SYNOPSIS
+\fBpb config force <pull|push> <environment> [path] [flags]\fP
+
+
+.SH DESCRIPTION
+Force a scoped configuration direction
+
+.PP
+Force one pull or push direction for the named environment, optionally limited to a path. This bypasses the normal conflict choice for that scope; the confirmation code confirms the direction.
+
+.PP
+Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--confirm\fP=""
+	six-character confirmation code from the preview
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for force
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config(1)\fP

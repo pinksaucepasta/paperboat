@@ -1,0 +1,52 @@
+.nh
+.TH "PB-CONFIG-CONFLICT" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-conflict - Inspect and resolve configuration conflicts
+
+
+.SH SYNOPSIS
+\fBpb config conflict [flags]\fP
+
+
+.SH DESCRIPTION
+Inspect and resolve configuration conflicts
+
+.PP
+List current path conflicts, inspect their metadata with show, and read both versions with compare through an encrypted peer connection. Resolve the exact current path by choosing the machine or repository version.
+
+.PP
+Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for conflict
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config(1)\fP, \fBpb-config-conflict-compare(1)\fP, \fBpb-config-conflict-list(1)\fP, \fBpb-config-conflict-resolve(1)\fP, \fBpb-config-conflict-show(1)\fP

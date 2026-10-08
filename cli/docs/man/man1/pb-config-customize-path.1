@@ -1,0 +1,52 @@
+.nh
+.TH "PB-CONFIG-CUSTOMIZE-PATH" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-customize-path - Print the local preference file path
+
+
+.SH SYNOPSIS
+\fBpb config customize path [flags]\fP
+
+
+.SH DESCRIPTION
+Print the local preference file path
+
+.PP
+Print the location of the local customization document. Use this path when editing or backing up preferences outside the CLI.
+
+.PP
+Customization is local to this CLI installation. It can change shortcuts, command defaults, and terminal appearance without changing account credentials or remote resources. Validate or explain preferences before applying an unfamiliar document.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for path
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config-customize(1)\fP

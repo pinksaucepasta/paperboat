@@ -1,0 +1,56 @@
+.nh
+.TH "PB-TEAM-ROLE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-role - Change a team member's role
+
+
+.SH SYNOPSIS
+\fBpb team role <team> <account> <admin|member> [flags]\fP
+
+
+.SH DESCRIPTION
+Change a team member's role
+
+.PP
+Set one member's role to admin or member at the expected generation. This changes team management authority, not the member's explicit resource grants.
+
+.PP
+Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--generation\fP=0
+	expected current team generation
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for role
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-team(1)\fP

@@ -1,0 +1,122 @@
+//go:build windows
+
+package windowsopenssh
+
+import (
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+	"unsafe"
+
+	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
+	winenv "github.com/pinksaucepasta/paperboat/internal/windowsenvironment"
+	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/svc"
+)
+
+// RunServiceHost runs the PaperboatSshd SCM entry point. sshd itself cannot be
+// registered under an arbitrary service name, so the signed Paperboat binary
+// owns the service and supervises the pinned sshd child.
+func RunServiceHost(serviceName, sshdPath, configPath, ownerSID string) error {
+	if !strings.HasPrefix(serviceName, ServiceName+"-u") || !filepath.IsAbs(sshdPath) || !filepath.IsAbs(configPath) {
+		return ErrInvalidConfig
+	}
+	if _, err := validatedServiceQueryOwner(serviceName, ownerSID); err != nil {
+		return err
+	}
+	isService, err := svc.IsWindowsService()
+	if err != nil || !isService {
+		return errors.Join(ErrServiceOwnership, err)
+	}
+	return svc.Run(serviceName, &sshdServiceHandler{sshdPath: sshdPath, configPath: configPath, serviceName: serviceName, ownerSID: ownerSID})
+}
+
+type sshdServiceHandler struct{ sshdPath, configPath, serviceName, ownerSID string }
+
+func (h *sshdServiceHandler) Execute(_ []string, requests <-chan svc.ChangeRequest, status chan<- svc.Status) (bool, uint32) {
+	status <- svc.Status{State: svc.StartPending}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	command := exec.CommandContext(ctx, h.sshdPath, "-D", "-e", "-f", h.configPath)
+	// services.exe may retain the pre-install environment until reboot. The
+	// Paperboat command directory is part of the managed installation contract,
+	// so carry it into sshd explicitly; OpenSSH copies this environment to every
+	// authenticated command shell.
+	if executable, executableErr := os.Executable(); executableErr == nil {
+		command.Env = winenv.WithCommandDirectory(os.Environ(), filepath.Dir(executable))
+	}
+	processlaunch.ConfigureBackground(command)
+	job, err := windows.CreateJobObject(nil, nil)
+	if err != nil {
+		status <- svc.Status{State: svc.Stopped}
+		return true, 1
+	}
+	defer windows.Close(job)
+	limits := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
+	limits.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+	if _, err := windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation, uintptr(unsafe.Pointer(&limits)), uint32(unsafe.Sizeof(limits))); err != nil {
+		status <- svc.Status{State: svc.Stopped}
+		return true, 1
+	}
+	logPath := filepath.Join(filepath.Dir(h.configPath), "logs", "service.log")
+	if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+		defer logFile.Close()
+		command.Stdout = logFile
+		command.Stderr = logFile
+	}
+	if err := command.Start(); err != nil {
+		status <- svc.Status{State: svc.Stopped}
+		return true, 1
+	}
+	processHandle, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE|windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.READ_CONTROL|windows.WRITE_DAC, false, uint32(command.Process.Pid))
+	if err != nil {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		status <- svc.Status{State: svc.Stopped}
+		return true, 1
+	}
+	assignErr := windows.AssignProcessToJobObject(job, processHandle)
+	if assignErr == nil {
+		assignErr = grantSSHDProcessOwnerQuery(processHandle, h.serviceName, h.ownerSID)
+	}
+	windows.Close(processHandle)
+	if assignErr != nil {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		status <- svc.Status{State: svc.Stopped}
+		return true, 1
+	}
+	done := make(chan error, 1)
+	go func() { done <- command.Wait() }()
+	status <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
+	for {
+		select {
+		case request := <-requests:
+			switch request.Cmd {
+			case svc.Interrogate:
+				status <- request.CurrentStatus
+			case svc.Stop, svc.Shutdown:
+				status <- svc.Status{State: svc.StopPending}
+				cancel()
+				select {
+				case <-done:
+				case <-time.After(10 * time.Second):
+					_ = command.Process.Kill()
+					<-done
+				}
+				status <- svc.Status{State: svc.Stopped}
+				return false, 0
+			}
+		case err := <-done:
+			status <- svc.Status{State: svc.Stopped}
+			if err != nil {
+				return true, 1
+			}
+			return false, 0
+		}
+	}
+}

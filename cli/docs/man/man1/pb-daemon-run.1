@@ -1,0 +1,52 @@
+.nh
+.TH "PB-DAEMON-RUN" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-daemon-run - Run Paperboat daemon under service supervision
+
+
+.SH SYNOPSIS
+\fBpb daemon run [flags]\fP
+
+
+.SH DESCRIPTION
+Run Paperboat daemon under service supervision
+
+.PP
+Run the endpoint daemon in the foreground for service supervision. It remains active until stopped and uses the selected local configuration and server; use pb service for ordinary lifecycle control.
+
+.PP
+The daemon owns this machine's background connectivity and local API. Normal lifecycle management uses pb service; daemon run is the foreground entrypoint used by service supervision. Its machine guard subcommands manage protected local machine-name access.
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for run
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	configuration file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	Paperboat server URL
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-daemon(1)\fP

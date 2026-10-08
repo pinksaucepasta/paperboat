@@ -1,0 +1,40 @@
+## pb reset
+
+Remove the current Paperboat setup before fresh enrollment
+
+### Synopsis
+
+Remove the current Paperboat setup before fresh enrollment
+
+Remove the current local Paperboat setup before fresh enrollment. Exact confirmation and host identity guard against resetting the wrong machine; use uninstall for a complete local removal.
+
+JSON output is supported with --json.
+
+```
+pb reset [flags]
+```
+
+### Options
+
+```
+      --confirmation string            exact confirmation phrase: RESET PAPERBOAT
+      --enrollment-token-file string   absolute owner-only dashboard enrollment token file
+  -h, --help                           help for reset
+      --hostname string                exact current hostname confirmation
+      --json                           print JSON
+      --state-root string              additional Paperboat runtime state directory to remove
+```
+
+### Options inherited from parent commands
+
+```
+      --config string      path to the CLI config file
+      --no-customization   ignore local shortcuts, command defaults, and TUI preferences
+      --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
+```
+
+### SEE ALSO
+
+* [pb](pb.md)	 - Open Paperboat or connect to an environment terminal
+

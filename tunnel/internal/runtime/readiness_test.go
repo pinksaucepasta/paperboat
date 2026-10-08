@@ -1,0 +1,55 @@
+package runtime
+
+import (
+	"context"
+	"errors"
+	"net"
+	"syscall"
+	"testing"
+	"time"
+)
+
+func TestReadinessRetriesUntilDependencyIsReady(t *testing.T) {
+	calls := 0
+	ready := Readiness{Timeout: time.Second, Interval: time.Millisecond, Probe: func() error {
+		calls++
+		if calls < 3 {
+			return errors.New("not ready")
+		}
+		return nil
+	}}
+	if err := ready.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 3 {
+		t.Fatalf("calls = %d, want 3", calls)
+	}
+}
+
+func TestReadinessIsBoundedAndCancellable(t *testing.T) {
+	probe := func() error { return errors.New("not ready") }
+	if err := (Readiness{Timeout: 5 * time.Millisecond, Interval: time.Millisecond, Probe: probe}).Start(context.Background()); !errors.Is(err, ErrReadinessTimeout) {
+		t.Fatalf("timeout error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := (Readiness{Timeout: time.Second, Interval: time.Millisecond, Probe: probe}).Start(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation error = %v", err)
+	}
+}
+
+func TestReadinessTimeoutPreservesOriginalProbeCause(t *testing.T) {
+	cause := &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+	err := (Readiness{Timeout: 5 * time.Millisecond, Interval: time.Millisecond, Probe: func() error { return cause }}).Start(context.Background())
+	var actual *net.OpError
+	if !errors.Is(err, ErrReadinessTimeout) || !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, syscall.ECONNREFUSED) || !errors.As(err, &actual) || actual != cause {
+		t.Fatalf("lost readiness cause: %T", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	calls := 0
+	err = (Readiness{Timeout: time.Second, Interval: time.Millisecond, Probe: func() error { calls++; return nil }}).Start(ctx)
+	if !errors.Is(err, context.Canceled) || calls != 0 {
+		t.Fatalf("canceled readiness probed: calls=%d error=%T", calls, err)
+	}
+}

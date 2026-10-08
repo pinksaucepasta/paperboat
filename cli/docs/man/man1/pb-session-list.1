@@ -1,0 +1,72 @@
+.nh
+.TH "PB-SESSION-LIST" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-session-list - List durable terminal sessions
+
+
+.SH SYNOPSIS
+\fBpb session list [environment] [flags]\fP
+
+
+.SH DESCRIPTION
+List durable terminal sessions
+
+.PP
+List durable sessions with automatic application title or foreground process and current directory where observed. “Started in” labels the launch directory when current metadata is unavailable. --wide adds the session ID; choose an exact session ID for attach, rename, close, or sharing.
+
+.PP
+Terminal sessions persist independently of a single connection and can be reattached after a disconnect. Sharing grants explicit access to a named session. Closing, deleting, and removing a participant have different effects; inspect the selected session before acting.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--closed\fP[=false]
+	filter explicitly by closed state
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for list
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--owner\fP=""
+	filter owner: mine, shared, or an authorized account ID
+
+.PP
+\fB--q\fP=""
+	filter by resource name or ID
+
+.PP
+\fB--state\fP=""
+	filter by resource state
+
+.PP
+\fB--wide\fP[=false]
+	include immutable IDs
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-session(1)\fP

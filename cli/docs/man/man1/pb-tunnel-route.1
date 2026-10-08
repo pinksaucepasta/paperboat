@@ -1,0 +1,56 @@
+.nh
+.TH "PB-TUNNEL-ROUTE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel-route - Manage tunnel routes
+
+
+.SH SYNOPSIS
+\fBpb tunnel route [flags]\fP
+
+
+.SH DESCRIPTION
+Manage tunnel routes
+
+.PP
+List, add, update, or remove exact routes for a durable tunnel. Each route binds protocol, match, and origin settings under the tunnel's authorization boundary.
+
+.PP
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for route
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-tunnel(1)\fP, \fBpb-tunnel-route-add(1)\fP, \fBpb-tunnel-route-list(1)\fP, \fBpb-tunnel-route-remove(1)\fP, \fBpb-tunnel-route-update(1)\fP

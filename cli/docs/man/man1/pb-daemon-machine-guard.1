@@ -1,0 +1,52 @@
+.nh
+.TH "PB-DAEMON-MACHINE-GUARD" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-daemon-machine-guard - Manage protected local machine access
+
+
+.SH SYNOPSIS
+\fBpb daemon machine-guard [flags]\fP
+
+
+.SH DESCRIPTION
+Manage protected local machine access
+
+.PP
+Install or uninstall the privileged guard that protects machine-name access. The run entrypoint is invoked by operating-system supervision rather than normal interactive use.
+
+.PP
+The daemon owns this machine's background connectivity and local API. Normal lifecycle management uses pb service; daemon run is the foreground entrypoint used by service supervision. Its machine guard subcommands manage protected local machine-name access.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for machine-guard
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	configuration file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	Paperboat server URL
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-daemon(1)\fP, \fBpb-daemon-machine-guard-install(1)\fP, \fBpb-daemon-machine-guard-run(1)\fP, \fBpb-daemon-machine-guard-uninstall(1)\fP

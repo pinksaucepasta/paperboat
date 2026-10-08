@@ -1,0 +1,418 @@
+package auth
+
+import (
+	"bytes"
+	"context"
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"io"
+	"strings"
+	"time"
+)
+
+type Code string
+
+const (
+	Malformed        Code = "credential_malformed"
+	AlgorithmInvalid Code = "credential_algorithm_invalid"
+	KeyUnknown       Code = "credential_key_unknown"
+	SignatureInvalid Code = "credential_signature_invalid"
+	AudienceInvalid  Code = "credential_audience_invalid"
+	ScopeInvalid     Code = "credential_scope_invalid"
+	BindingInvalid   Code = "credential_binding_invalid"
+	Expired          Code = "credential_expired"
+	NotYetValid      Code = "credential_not_yet_valid"
+	Revoked          Code = "credential_revoked"
+	Replayed         Code = "credential_replayed"
+)
+
+type Error struct {
+	Code  Code
+	Cause error
+}
+
+func (e *Error) Error() string {
+	if e.Cause == nil {
+		return string(e.Code)
+	}
+	return string(e.Code) + ": " + e.Cause.Error()
+}
+func (e *Error) Unwrap() error { return e.Cause }
+
+type Claims struct {
+	BootID                 string `json:"boot_id,omitempty"`
+	PolicyGeneration       int64  `json:"policy_generation,omitempty"`
+	AnnouncementGeneration int64  `json:"announcement_generation,omitempty"`
+
+	Issuer                 string              `json:"iss"`
+	Audience               string              `json:"aud"`
+	Subject                string              `json:"sub"`
+	JTI                    string              `json:"jti"`
+	IssuedAt               int64               `json:"iat"`
+	ExpiresAt              int64               `json:"exp"`
+	Scope                  []string            `json:"scope"`
+	CredentialClass        string              `json:"credential_class"`
+	EnvironmentID          string              `json:"environment_id,omitempty"`
+	AccountID              string              `json:"account_id,omitempty"`
+	UserID                 string              `json:"user_id,omitempty"`
+	BrowserAttachmentID    string              `json:"browser_attachment_id,omitempty"`
+	BrowserPublicKeySHA256 string              `json:"browser_public_key_sha256,omitempty"`
+	ActorID                string              `json:"actor_id,omitempty"`
+	CLIClientSessionID     string              `json:"cli_client_session_id,omitempty"`
+	HelperID               string              `json:"helper_id,omitempty"`
+	MachineID              string              `json:"machine_id,omitempty"`
+	InstallationGeneration int64               `json:"installation_generation,omitempty"`
+	SourceMachineID        string              `json:"source_machine_id,omitempty"`
+	SessionID              string              `json:"session_id,omitempty"`
+	OperationID            string              `json:"operation_id,omitempty"`
+	PreviewID              string              `json:"preview_id,omitempty"`
+	OwnerSessionID         string              `json:"owner_session_id,omitempty"`
+	OwnerSessionKind       string              `json:"owner_session_kind,omitempty"`
+	TargetScheme           string              `json:"target_scheme,omitempty"`
+	TargetAddress          string              `json:"target_address,omitempty"`
+	ResourceKind           string              `json:"resource_kind,omitempty"`
+	ResourceID             string              `json:"resource_id,omitempty"`
+	RouteID                string              `json:"route_id,omitempty"`
+	Protocol               string              `json:"protocol,omitempty"`
+	RouteGeneration        int64               `json:"route_generation,omitempty"`
+	TargetGeneration       int64               `json:"target_generation,omitempty"`
+	AccessMode             string              `json:"access_mode,omitempty"`
+	Endpoint               string              `json:"endpoint,omitempty"`
+	LeaseDeadline          int64               `json:"lease_deadline,omitempty"`
+	UserDeadline           *int64              `json:"user_deadline,omitempty"`
+	LeaseETag              string              `json:"lease_etag,omitempty"`
+	State                  string              `json:"state,omitempty"`
+	AllocationState        string              `json:"allocation_state,omitempty"`
+	EdgeState              string              `json:"edge_state,omitempty"`
+	OriginState            string              `json:"origin_state,omitempty"`
+	CreatedAt              int64               `json:"created_at,omitempty"`
+	LastRenewedAt          int64               `json:"last_renewed_at,omitempty"`
+	ExpectedGeneration     int64               `json:"expected_generation,omitempty"`
+	IdempotencyKey         string              `json:"idempotency_key,omitempty"`
+	RequestID              string              `json:"request_id,omitempty"`
+	CorrelationID          string              `json:"correlation_id,omitempty"`
+	RequestHash            string              `json:"request_hash,omitempty"`
+	AssignmentID           string              `json:"assignment_id,omitempty"`
+	AssignmentVersion      int64               `json:"assignment_version,omitempty"`
+	ConfigPath             string              `json:"config_path,omitempty"`
+	ConflictRevision       string              `json:"conflict_revision,omitempty"`
+	ExpectedRemoteRevision string              `json:"expected_remote_revision,omitempty"`
+	WarningRevision        string              `json:"warning_revision,omitempty"`
+	ConnectorID            string              `json:"connector_id,omitempty"`
+	ConnectorGeneration    uint64              `json:"connector_generation,omitempty"`
+	EdgePool               string              `json:"edge_pool,omitempty"`
+	EdgeNodeID             string              `json:"edge_node_id,omitempty"`
+	RouteBinding           string              `json:"route_binding,omitempty"`
+	FileTransferPolicy     *FileTransferPolicy `json:"file_transfer_policy,omitempty"`
+	CounterEpoch           string              `json:"counter_epoch,omitempty"`
+	Confirmation           *struct {
+		JKT string `json:"jkt"`
+	} `json:"cnf,omitempty"`
+}
+
+type FileTransferPolicy struct {
+	Revision               string `json:"revision"`
+	MaxFileBytes           int64  `json:"max_file_bytes"`
+	MaxBatchFiles          int    `json:"max_batch_files"`
+	MaxBatchBytes          int64  `json:"max_batch_bytes"`
+	MaxConcurrentTransfers int    `json:"max_concurrent_transfers"`
+	RetentionSeconds       int64  `json:"retention_seconds"`
+	DeliveryTimeoutSeconds int64  `json:"delivery_timeout_seconds"`
+	MaxPendingSpoolBytes   int64  `json:"max_pending_spool_bytes"`
+}
+
+type Policy struct {
+	Issuer          string
+	Audience        string
+	CredentialClass string
+	// AllowedCredentialClasses permits exact additional classes for a narrowly
+	// shared protocol boundary. CredentialClass remains the primary class and
+	// every accepted value is matched exactly.
+	AllowedCredentialClasses []string
+	Scopes                   []string
+	// AnyScopes permits one of several exact scope sets. It is mutually
+	// exclusive with Scopes and never performs subset matching.
+	AnyScopes              [][]string
+	EnvironmentID          string
+	UserID                 string
+	CLIClientSessionID     string
+	HelperID               string
+	MachineID              string
+	SourceMachineID        string
+	SessionID              string
+	OperationID            string
+	AssignmentID           string
+	InstallationGeneration int64
+	WarningRevision        string
+	ConnectorID            string
+	ConnectorGeneration    uint64
+	EdgePool               string
+	EdgeNodeID             string
+	CounterEpoch           string
+	MaxLifetime            time.Duration
+	SingleUse              bool
+}
+
+type Clock interface{ Now() time.Time }
+type KeySource interface {
+	Lookup(context.Context, string) (ed25519.PublicKey, bool, error)
+	Refresh(context.Context) error
+}
+type Revocations interface{ Revoked(Claims) bool }
+type ReplayStore interface{ Consume(string, time.Time) bool }
+
+type Verifier struct {
+	Keys           KeySource
+	Clock          Clock
+	Revocations    Revocations
+	Replays        ReplayStore
+	ClockSkew      time.Duration
+	RefreshTimeout time.Duration
+}
+
+type header struct {
+	Algorithm string `json:"alg"`
+	KeyID     string `json:"kid"`
+	Type      string `json:"typ"`
+}
+
+func (v Verifier) Verify(ctx context.Context, token string, policy Policy) (Claims, error) {
+	if len(token) == 0 || len(token) > 16<<10 || v.Keys == nil || v.Clock == nil {
+		return Claims{}, &Error{Code: Malformed}
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 || len(parts[0]) > 2<<10 || len(parts[1]) > 12<<10 || len(parts[2]) > 512 {
+		return Claims{}, &Error{Code: Malformed}
+	}
+	var h header
+	if err := decodeSegment(parts[0], &h); err != nil {
+		return Claims{}, &Error{Code: Malformed, Cause: err}
+	}
+	if h.Algorithm != "EdDSA" || h.Type != "paperboat-credential+jwt" || h.KeyID == "" {
+		return Claims{}, &Error{Code: AlgorithmInvalid}
+	}
+	key, ok, err := v.Keys.Lookup(ctx, h.KeyID)
+	if err != nil {
+		return Claims{}, &Error{Code: KeyUnknown, Cause: err}
+	}
+	if !ok {
+		timeout := v.RefreshTimeout
+		if timeout <= 0 {
+			timeout = 2 * time.Second
+		}
+		refreshCtx, cancel := context.WithTimeout(ctx, timeout)
+		err = v.Keys.Refresh(refreshCtx)
+		cancel()
+		if err == nil {
+			key, ok, err = v.Keys.Lookup(ctx, h.KeyID)
+		}
+	}
+	if err != nil || !ok || len(key) != ed25519.PublicKeySize {
+		return Claims{}, &Error{Code: KeyUnknown, Cause: err}
+	}
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil || len(signature) != ed25519.SignatureSize {
+		return Claims{}, &Error{Code: Malformed, Cause: err}
+	}
+	if !ed25519.Verify(key, []byte(parts[0]+"."+parts[1]), signature) {
+		return Claims{}, &Error{Code: SignatureInvalid}
+	}
+	var claims Claims
+	if err := decodeSegment(parts[1], &claims); err != nil {
+		return Claims{}, &Error{Code: Malformed, Cause: err}
+	}
+	if claims.CredentialClass == "browser_terminal_operation" || claims.CredentialClass == "browser_config_compare" {
+		if !validBrowserPublicKeyDigest(claims.BrowserPublicKeySHA256) {
+			return Claims{}, &Error{Code: BindingInvalid}
+		}
+	} else if claims.BrowserPublicKeySHA256 != "" {
+		return Claims{}, &Error{Code: BindingInvalid}
+	}
+	if claims.Issuer != policy.Issuer {
+		return Claims{}, &Error{Code: BindingInvalid}
+	}
+	if claims.Audience != policy.Audience {
+		return Claims{}, &Error{Code: AudienceInvalid}
+	}
+	if !credentialClassMatches(claims.CredentialClass, policy) || !bindingsMatch(claims, policy) || claims.UserID != "" && claims.Subject != claims.UserID {
+		return Claims{}, &Error{Code: BindingInvalid}
+	}
+	if !policyScopesMatch(claims.Scope, policy) {
+		return Claims{}, &Error{Code: ScopeInvalid}
+	}
+	now := v.Clock.Now()
+	skew := v.ClockSkew
+	if skew < 0 {
+		skew = 0
+	}
+	issued := time.Unix(claims.IssuedAt, 0)
+	expires := time.Unix(claims.ExpiresAt, 0)
+	if claims.JTI == "" || claims.Subject == "" || claims.IssuedAt < 0 || claims.ExpiresAt <= claims.IssuedAt {
+		return Claims{}, &Error{Code: Malformed}
+	}
+	if policy.MaxLifetime > 0 && expires.Sub(issued) > policy.MaxLifetime {
+		return Claims{}, &Error{Code: BindingInvalid}
+	}
+	if now.After(expires.Add(skew)) {
+		return Claims{}, &Error{Code: Expired}
+	}
+	if now.Add(skew).Before(issued) {
+		return Claims{}, &Error{Code: NotYetValid}
+	}
+	if v.Revocations != nil && v.Revocations.Revoked(claims) {
+		return Claims{}, &Error{Code: Revoked}
+	}
+	if policy.SingleUse {
+		if v.Replays == nil || !v.Replays.Consume(claims.JTI, expires) {
+			return Claims{}, &Error{Code: Replayed}
+		}
+	}
+	return claims, nil
+}
+
+// validBrowserPublicKeyDigest accepts only the canonical unpadded base64url
+// encoding of a 32-byte SHA-256 digest. The digest is over the browser TLS
+// certificate's SubjectPublicKeyInfo DER bytes.
+func validBrowserPublicKeyDigest(value string) bool {
+	if len(value) != 43 {
+		return false
+	}
+	digest, err := base64.RawURLEncoding.Strict().DecodeString(value)
+	return err == nil && len(digest) == 32 && base64.RawURLEncoding.EncodeToString(digest) == value
+}
+
+func credentialClassMatches(actual string, policy Policy) bool {
+	if policy.CredentialClass == "" {
+		return false
+	}
+	classes := make(map[string]struct{}, len(policy.AllowedCredentialClasses))
+	for _, class := range policy.AllowedCredentialClasses {
+		if class == "" || class == policy.CredentialClass {
+			return false
+		}
+		if _, exists := classes[class]; exists {
+			return false
+		}
+		classes[class] = struct{}{}
+	}
+	if actual == policy.CredentialClass {
+		return true
+	}
+	_, ok := classes[actual]
+	return ok
+}
+
+func policyScopesMatch(actual []string, policy Policy) bool {
+	if len(policy.AnyScopes) == 0 {
+		return exactScopes(actual, policy.Scopes)
+	}
+	if len(policy.Scopes) != 0 {
+		return false
+	}
+	for _, alternative := range policy.AnyScopes {
+		if exactScopes(actual, alternative) {
+			return true
+		}
+	}
+	return false
+}
+
+func decodeSegment(segment string, target any) error {
+	b, err := base64.RawURLEncoding.DecodeString(segment)
+	if err != nil {
+		return err
+	}
+	if err := rejectDuplicateKeys(b); err != nil {
+		return err
+	}
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(target); err != nil {
+		return err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		return errors.New("trailing JSON")
+	}
+	return nil
+}
+
+func rejectDuplicateKeys(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var walk func() error
+	walk = func() error {
+		token, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		delim, ok := token.(json.Delim)
+		if !ok {
+			return nil
+		}
+		switch delim {
+		case '{':
+			seen := make(map[string]bool)
+			for dec.More() {
+				keyToken, err := dec.Token()
+				if err != nil {
+					return err
+				}
+				key, ok := keyToken.(string)
+				if !ok || seen[key] {
+					return errors.New("duplicate or invalid object key")
+				}
+				seen[key] = true
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+			_, err := dec.Token()
+			return err
+		case '[':
+			for dec.More() {
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+			_, err := dec.Token()
+			return err
+		default:
+			return errors.New("unexpected JSON delimiter")
+		}
+	}
+	if err := walk(); err != nil {
+		return err
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return errors.New("trailing JSON")
+	}
+	return nil
+}
+
+func bindingsMatch(c Claims, p Policy) bool {
+	return (p.InstallationGeneration == 0 || p.InstallationGeneration == c.InstallationGeneration) && match(p.EnvironmentID, c.EnvironmentID) && match(p.MachineID, c.MachineID) && match(p.SourceMachineID, c.SourceMachineID) && match(p.UserID, c.UserID) && match(p.CLIClientSessionID, c.CLIClientSessionID) && match(p.HelperID, c.HelperID) && match(p.SessionID, c.SessionID) && match(p.OperationID, c.OperationID) && match(p.AssignmentID, c.AssignmentID) && match(p.WarningRevision, c.WarningRevision) && match(p.ConnectorID, c.ConnectorID) && matchUint(p.ConnectorGeneration, c.ConnectorGeneration) && match(p.EdgePool, c.EdgePool) && match(p.EdgeNodeID, c.EdgeNodeID) && match(p.CounterEpoch, c.CounterEpoch)
+}
+func match(expected, actual string) bool     { return expected == "" || expected == actual }
+func matchUint(expected, actual uint64) bool { return expected == 0 || expected == actual }
+func exactScopes(actual, expected []string) bool {
+	if len(actual) != len(expected) {
+		return false
+	}
+	set := make(map[string]bool, len(expected))
+	for _, scope := range expected {
+		if scope == "" || set[scope] {
+			return false
+		}
+		set[scope] = true
+	}
+	for _, scope := range actual {
+		if !set[scope] {
+			return false
+		}
+		delete(set, scope)
+	}
+	return len(set) == 0
+}

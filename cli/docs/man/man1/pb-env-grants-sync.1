@@ -1,0 +1,52 @@
+.nh
+.TH "PB-ENV-GRANTS-SYNC" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-env-grants-sync - Accept pending team grants into this account's encrypted vault
+
+
+.SH SYNOPSIS
+\fBpb env grants sync [flags]\fP
+
+
+.SH DESCRIPTION
+Accept pending team grants into this account's encrypted vault
+
+.PP
+Accept pending team grants into the unlocked local vault. Only grants addressed to this account are reconciled; secret values are not printed.
+
+.PP
+Team ENV grants are reconciled into this account's encrypted vault. Synchronization accepts pending grants; it does not print secret values or grant access merely because an account belongs to a team.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for sync
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-env-grants(1)\fP

@@ -1,0 +1,349 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"runtime"
+	"strings"
+	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/api"
+	sessionauth "github.com/pinksaucepasta/paperboat/internal/auth"
+	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
+	"github.com/spf13/cobra"
+)
+
+type desktopRequest struct {
+	Action  string          `json:"action"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+func desktopCommand() *cobra.Command {
+	root := &cobra.Command{Use: "__desktop", Hidden: true, Short: "Authenticated desktop management bridge"}
+	request := &cobra.Command{Use: "request", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
+		data, err := io.ReadAll(io.LimitReader(c.InOrStdin(), 32769))
+		if err != nil {
+			return writeCLIJSONError(c.OutOrStdout(), err)
+		}
+		var in desktopRequest
+		if len(data) > 32768 {
+			err = errors.New("desktop request exceeds 32 KiB")
+		} else {
+			err = decodeDesktop(data, &in)
+		}
+		if err != nil {
+			return writeCLIJSONError(c.OutOrStdout(), invocationError(err))
+		}
+		timeout := 45 * time.Second
+		if in.Action == "local.update-download" || in.Action == "local.update-install" {
+			timeout = 15 * time.Minute
+		}
+		ctx, cancel := context.WithTimeout(c.Context(), timeout)
+		defer cancel()
+		c.SetContext(ctx)
+		out, err := handleDesktop(c, in)
+		if err != nil {
+			return writeCLIJSONError(c.OutOrStdout(), err)
+		}
+		return writeCLIJSON(c.OutOrStdout(), out)
+	}}
+	root.AddCommand(request)
+	return root
+}
+
+func decodeDesktop(data []byte, out any) error {
+	if len(data) == 0 {
+		data = []byte("{}")
+	}
+	d := json.NewDecoder(bytes.NewReader(data))
+	d.DisallowUnknownFields()
+	if err := d.Decode(out); err != nil {
+		return fmt.Errorf("invalid desktop request: %w", err)
+	}
+	if d.Decode(new(any)) != io.EOF {
+		return errors.New("desktop request must contain one JSON object")
+	}
+	return nil
+}
+
+func desktopLocalStatus(ctx context.Context) map[string]any {
+	out := map[string]any{"version": buildinfo.Version, "platform": runtime.GOOS, "daemon_running": false}
+	paths, err := localdaemon.CurrentUserPaths()
+	if err == nil {
+		var client *localapi.Client
+		client, err = localapi.NewClient(paths.SocketPath, time.Second)
+		if err == nil {
+			probe, cancel := context.WithTimeout(ctx, time.Second)
+			defer cancel()
+			var snap localapi.Snapshot
+			snap, err = client.Snapshot(probe)
+			if err == nil {
+				out["daemon_running"] = true
+				out["daemon_state"] = snap.DaemonState
+			}
+		}
+	}
+	if err != nil {
+		out["daemon_error"] = "The local Paperboat service is unavailable. Start or repair the service."
+	}
+	return out
+}
+
+func handleDesktop(c *cobra.Command, in desktopRequest) (any, error) {
+	// The renderer never chooses a command line, executable, API URL or method.
+	switch in.Action {
+	case "auth.login":
+		return desktopAuthPending(c)
+	case "auth.poll":
+		return desktopAuthPoll(c)
+	case "local.update-status":
+		return desktopCLI(c, []string{"update", "status", "--json"})
+	case "local.update-check":
+		return desktopCLI(c, []string{"update", "check", "--json"})
+	case "local.update-download":
+		return desktopCLI(c, []string{"update", "download", "--json"})
+	case "local.update-install":
+		var payload struct {
+			ApprovalID string `json:"approval_id"`
+		}
+		if err := decodeDesktop(in.Payload, &payload); err != nil {
+			return nil, err
+		}
+		if len(payload.ApprovalID) != 64 || strings.Trim(payload.ApprovalID, "0123456789abcdef") != "" {
+			return nil, errors.New("review a downloaded update and approve its exact candidate")
+		}
+		return desktopCLI(c, []string{"update", "--approve", payload.ApprovalID, "--json"})
+	case "local.restart":
+		return desktopCLI(c, []string{"service", "restart", "--json"})
+	case "network.pause":
+		return desktopCLI(c, []string{"service", "stop", "--json"})
+	case "network.resume":
+		return desktopCLI(c, []string{"service", "start", "--json"})
+	case "auth.logout":
+		return desktopCLI(c, []string{"auth", "logout", "--json"})
+	}
+	client, err := desktopBackend(c)
+	if err != nil {
+		return nil, err
+	}
+	ctx := c.Context()
+	switch in.Action {
+	case "overview":
+		me, err := client.Me(ctx)
+		if err != nil {
+			return nil, err
+		}
+		machines, err := client.ListUserMachines(ctx)
+		if err != nil {
+			return nil, err
+		}
+		teams, err := client.ListTeams(ctx)
+		if err != nil {
+			return nil, err
+		}
+		warnings := []string{}
+		services, serviceErr := client.MachineServices(ctx)
+		if serviceErr != nil {
+			warnings = append(warnings, "Machine service details are temporarily unavailable.")
+		}
+		updates, updateErr := client.MachineUpdateSummary(ctx)
+		if updateErr != nil {
+			warnings = append(warnings, "Fleet update observations are temporarily unavailable.")
+		}
+		if machines == nil {
+			machines = []api.UserMachine{}
+		}
+		if teams == nil {
+			teams = []api.Team{}
+		}
+		if services == nil {
+			services = []api.MachineServicesMachine{}
+		}
+		return map[string]any{"account": me, "machines": machines, "teams": teams, "services": services, "updates": updates, "local": desktopLocalStatus(ctx), "warnings": warnings}, nil
+	case "machine.rename", "machine.disconnect", "machine.remove", "machine.capabilities", "machine.update-status", "machine.maintenance", "machine.maintenance-list", "machine.maintenance-decide":
+		var p struct {
+			MachineID       string                         `json:"machine_id"`
+			Alias           string                         `json:"alias"`
+			Description     string                         `json:"description"`
+			ExpectedVersion int64                          `json:"expected_version"`
+			Desired         api.MachineCapabilitySelection `json:"desired"`
+			Action          string                         `json:"action"`
+			TargetVersion   string                         `json:"target_version"`
+			Reason          string                         `json:"reason"`
+			ApprovalID      string                         `json:"approval_id"`
+			Decision        string                         `json:"decision"`
+		}
+		if err := decodeDesktop(in.Payload, &p); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(p.MachineID) == "" {
+			return nil, errors.New("select a machine")
+		}
+		switch in.Action {
+		case "machine.rename":
+			return client.SetMachineMetadata(ctx, p.MachineID, p.Alias, p.Description)
+		case "machine.disconnect":
+			err = client.DisconnectUserMachine(ctx, p.MachineID)
+		case "machine.remove":
+			err = client.DeleteUserMachine(ctx, p.MachineID)
+		case "machine.capabilities":
+			return client.SetUserMachineCapabilities(ctx, p.MachineID, newIdempotencyKey(), p.Desired, p.ExpectedVersion)
+		case "machine.update-status":
+			return client.MachineUpdateStatus(ctx, p.MachineID)
+		case "machine.maintenance":
+			return client.RequestMachineMaintenance(ctx, p.MachineID, newIdempotencyKey(), p.Action, p.TargetVersion, p.Reason)
+		case "machine.maintenance-list":
+			return client.MachineMaintenanceApprovals(ctx, p.MachineID)
+		case "machine.maintenance-decide":
+			if p.ApprovalID == "" {
+				return nil, invocationError(errors.New("select a maintenance request"))
+			}
+			return client.DecideMachineMaintenance(ctx, p.MachineID, p.ApprovalID, p.Decision)
+		}
+		return map[string]bool{"saved": err == nil}, err
+	case "team.get", "team.create", "team.invite", "team.mutate", "team.accept", "team.activity":
+		var p struct {
+			TeamID             string `json:"team_id"`
+			AccountID          string `json:"account_id"`
+			ExpectedGeneration uint64 `json:"expected_generation"`
+			Action             string `json:"action"`
+			Role               string `json:"role"`
+			InvitationID       string `json:"invitation_id"`
+			Cursor             string `json:"cursor"`
+			Confirmation       string `json:"confirmation"`
+		}
+		if err := decodeDesktop(in.Payload, &p); err != nil {
+			return nil, err
+		}
+		if in.Action != "team.accept" && !validTeamCLIIdentifier(p.TeamID) {
+			return nil, errors.New("select a valid team")
+		}
+		switch in.Action {
+		case "team.get":
+			return client.GetTeam(ctx, p.TeamID)
+		case "team.create":
+			return client.CreateTeam(ctx, api.TeamCreateRequest{OperationID: newIdempotencyKey(), TeamID: p.TeamID})
+		case "team.invite":
+			return client.InviteTeamMember(ctx, p.TeamID, api.TeamInviteRequest{OperationID: newIdempotencyKey(), ExpectedGeneration: p.ExpectedGeneration, AccountID: p.AccountID})
+		case "team.mutate":
+			return client.MutateTeam(ctx, p.TeamID, api.TeamMutationRequest{OperationID: newIdempotencyKey(), ExpectedGeneration: p.ExpectedGeneration, AccountID: p.AccountID, Action: p.Action, Role: p.Role, Confirmation: p.Confirmation})
+		case "team.accept":
+			return client.AcceptTeamInvitation(ctx, p.InvitationID, api.TeamAcceptRequest{OperationID: newIdempotencyKey()})
+		case "team.activity":
+			return client.TeamActivity(ctx, p.TeamID, p.Cursor, 50)
+		}
+	case "sessions.list":
+		var p struct {
+			Offset int `json:"offset"`
+		}
+		if err := decodeDesktop(in.Payload, &p); err != nil {
+			return nil, invocationError(err)
+		}
+		return client.ManagementSessions(ctx, p.Offset)
+	case "sessions.revoke":
+		var p struct {
+			SessionID string `json:"session_id"`
+		}
+		if err := decodeDesktop(in.Payload, &p); err != nil {
+			return nil, err
+		}
+		if p.SessionID == "" {
+			return nil, errors.New("select a session")
+		}
+		err = client.RevokeManagementSession(ctx, p.SessionID)
+		return map[string]bool{"revoked": err == nil}, err
+	}
+	return nil, invocationError(errors.New("unknown desktop management action"))
+}
+
+func desktopAuthPending(c *cobra.Command) (any, error) {
+	cfg, err := config.Load(configPathFlag(c))
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(c.Context(), 10*time.Second)
+	defer cancel()
+	metadata, err := api.New(cfg.ServerURL, config.Credential{}, nil).ClientConfiguration(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("retrieve the Paperboat dashboard enrollment page: %w", err)
+	}
+	return map[string]any{
+		"status":           "pending",
+		"verification_uri": metadata.MachinesURL,
+		"message":          dashboardEnrollmentGuidance,
+	}, nil
+}
+
+func desktopAuthPoll(c *cobra.Command) (any, error) {
+	ctx, cancel := context.WithTimeout(c.Context(), 10*time.Second)
+	defer cancel()
+	c.SetContext(ctx)
+	client, err := desktopBackend(c)
+	if errors.Is(err, api.ErrUnauthenticated) {
+		return desktopAuthPending(c)
+	}
+	if err != nil {
+		return nil, err
+	}
+	// A stored token is not proof of sign-in: validate it against the account
+	// endpoint so expired, revoked, and otherwise rejected credentials remain
+	// in the enrollment state.
+	if _, err = client.Me(ctx); errors.Is(err, api.ErrUnauthenticated) {
+		return desktopAuthPending(c)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{"status": "signed_in"}, nil
+}
+
+func desktopCLI(parent *cobra.Command, args []string) (any, error) {
+	child := newRootCommand()
+	var out bytes.Buffer
+	child.SetOut(&out)
+	child.SetErr(io.Discard)
+	child.SetIn(strings.NewReader(""))
+	child.SetContext(parent.Context())
+	if path := configPathFlag(parent); path != "" {
+		args = append([]string{"--config", path}, args...)
+	}
+	child.SetArgs(args)
+	if err := child.Execute(); err != nil {
+		return nil, err
+	}
+	var result cliJSONEnvelope
+	if json.Unmarshal(out.Bytes(), &result) == nil && result.SchemaVersion != "" {
+		if result.Error != nil {
+			return nil, errors.New(result.Error.Message)
+		}
+		return result.Data, nil
+	}
+	return map[string]bool{"completed": true}, nil
+}
+
+// Management needs authentication, not construction of terminal transports.
+func desktopBackend(c *cobra.Command) (*api.Client, error) {
+	cfg, err := config.Load(configPathFlag(c))
+	if err != nil {
+		return nil, err
+	}
+	source, err := sessionauth.NewSource(cfg)
+	if err != nil {
+		return nil, err
+	}
+	credential, err := source.WithContext(c.Context()).Credential()
+	if errors.Is(err, config.ErrNoCredentials) || errors.Is(err, config.ErrSecretNotFound) {
+		return nil, api.ErrUnauthenticated
+	}
+	if err != nil {
+		return nil, err
+	}
+	return newWorkspaceAPIClient(actionContext(c, nil), cfg.ServerURL, credential)
+}

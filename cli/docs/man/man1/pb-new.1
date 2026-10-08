@@ -1,0 +1,70 @@
+.nh
+.TH "PB-NEW" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-new - Open a fresh terminal on this device in the current directory
+
+
+.SH SYNOPSIS
+\fBpb new [flags]\fP
+
+
+.SH DESCRIPTION
+Create and attach a fresh durable terminal on this enrolled device in the current directory. The device runtime must be running and the selected workspace must authorize this device. Use --name to name the new session; use pb session attach to reconnect later.
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB--debug\fP[=false]
+	show the pb versions used by this terminal session
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for new
+
+.PP
+\fB--name\fP=""
+	name for the fresh terminal session
+
+.PP
+\fB--session\fP=""
+	attach an existing terminal session by name or ID
+
+.PP
+\fB--status-bar\fP=""
+	status bar for this attach: auto, on, or off
+
+.PP
+\fB--status-bar-fullscreen\fP=""
+	status bar in full-screen applications: hide or show
+
+.PP
+\fB--status-bar-theme\fP=""
+	status bar theme: terminal, dark, light, or mono
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb(1)\fP

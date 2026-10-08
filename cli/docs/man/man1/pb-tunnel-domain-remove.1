@@ -1,0 +1,68 @@
+.nh
+.TH "PB-TUNNEL-DOMAIN-REMOVE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel-domain-remove - Remove a tunnel domain
+
+
+.SH SYNOPSIS
+\fBpb tunnel domain remove <tunnel> <domain> [flags]\fP
+
+
+.SH DESCRIPTION
+Remove a tunnel domain
+
+.PP
+Remove one domain binding after confirmation. DNS records managed by the user are not silently removed by this command.
+
+.PP
+Custom domains require DNS ownership verification before they can serve a route. Domain changes are scoped to one tunnel, and verification status is separate from route readiness. The instructions command returns the required authoritative DNS records.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--confirm\fP=""
+	six-character confirmation code from the preview
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for remove
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+.PP
+\fB--timeout\fP=2m0s
+	maximum time to wait for operation completion
+
+.PP
+\fB--wait\fP[=false]
+	wait for the operation to reach a terminal state
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-tunnel-domain(1)\fP

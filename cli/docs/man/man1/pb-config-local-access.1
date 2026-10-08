@@ -1,0 +1,46 @@
+.nh
+.TH "PB-CONFIG-LOCAL-ACCESS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-local-access - Configure local browser domains, aliases and reverse proxies
+
+
+.SH SYNOPSIS
+\fBpb config local-access [flags]\fP
+
+
+.SH DESCRIPTION
+Configure the browser domain and named service URLs used by this local Paperboat client. These settings only select names for machine ports already authorized elsewhere; they do not grant access or publish additional ports.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for local-access
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config(1)\fP, \fBpb-config-local-access-alias(1)\fP, \fBpb-config-local-access-apply(1)\fP, \fBpb-config-local-access-domain(1)\fP, \fBpb-config-local-access-proxy(1)\fP, \fBpb-config-local-access-show(1)\fP

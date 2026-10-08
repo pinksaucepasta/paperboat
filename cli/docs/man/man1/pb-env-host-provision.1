@@ -1,0 +1,64 @@
+.nh
+.TH "PB-ENV-HOST-PROVISION" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-env-host-provision - Provision an explicit encrypted ENV selection to a host
+
+
+.SH SYNOPSIS
+\fBpb env host provision [flags]\fP
+
+
+.SH DESCRIPTION
+Provision an explicit encrypted ENV selection to a host
+
+.PP
+Select values for the named host with --select, or pass --empty to clear its projection. The host receives only the chosen encrypted scope, not every ENV value in the account.
+
+.PP
+Host ENV projections contain an explicit selection of encrypted values for an enrolled machine. Provisioning changes the host selection; it does not expose values in command output or implicitly grant access to every scope.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--empty\fP[=false]
+	explicitly provision an empty selection
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for provision
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--machine\fP=""
+	machine name or ID
+
+.PP
+\fB--select\fP=[]
+	selection reference personal:NAME or team:TEAM:NAME; repeat to select more values
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-env-host(1)\fP

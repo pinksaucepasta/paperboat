@@ -1,0 +1,56 @@
+.nh
+.TH "PB-CONFIG-CUSTOMIZE-RESET" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-customize-reset - Reset only local CLI preferences; keep account and connection settings
+
+
+.SH SYNOPSIS
+\fBpb config customize reset [flags]\fP
+
+
+.SH DESCRIPTION
+Reset only local CLI preferences; keep account and connection settings
+
+.PP
+Remove local shortcuts, command defaults, and appearance choices. This preserves sign-in credentials, configured server, and remote resource state; the confirmation code confirms the reset.
+
+.PP
+Customization is local to this CLI installation. It can change shortcuts, command defaults, and terminal appearance without changing account credentials or remote resources. Validate or explain preferences before applying an unfamiliar document.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--confirm\fP=""
+	six-character confirmation code from the preview
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for reset
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config-customize(1)\fP

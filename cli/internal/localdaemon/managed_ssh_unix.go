@@ -1,0 +1,109 @@
+//go:build darwin || linux
+
+package localdaemon
+
+import (
+	"context"
+	"encoding/hex"
+	"errors"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+)
+
+type ManagedSSHConfig struct {
+	ServerURL            string
+	Auth                 config.AuthSource
+	Store                config.ProfileStore
+	CLIClientSessionID   string
+	Home                 string
+	RuntimeDirectory     string
+	Executable           string
+	OwnerUID             uint32
+	InheritedAgentSocket string
+}
+
+type ManagedSSHRuntime struct {
+	agent   *managedssh.AgentService
+	mu      sync.Mutex
+	refresh func(context.Context) error
+}
+
+func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig) (*ManagedSSHRuntime, error) {
+	if ctx == nil || strings.TrimSpace(cfg.ServerURL) == "" || cfg.Auth == nil || cfg.Store.Path == "" || strings.TrimSpace(cfg.CLIClientSessionID) == "" || !filepath.IsAbs(cfg.Home) || !filepath.IsAbs(cfg.RuntimeDirectory) || !filepath.IsAbs(cfg.Executable) {
+		return nil, ErrInvalidInventoryConfig
+	}
+	identity, err := cfg.Store.ManagedSSHIdentity(cfg.ServerURL, cfg.CLIClientSessionID)
+	if err != nil {
+		return nil, err
+	}
+	credential, err := cfg.Auth.Credential()
+	if err != nil {
+		return nil, err
+	}
+	registerCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	client := api.New(cfg.ServerURL, credential, nil)
+	_, err = client.RegisterManagedSSHClientKey(registerCtx, identity.PublicKey, identity.Fingerprint, "managed-ssh-register-"+hex.EncodeToString(identity.Fingerprint[:16]))
+	cancel()
+	if err != nil {
+		return nil, managedSSHAuthorityError(err)
+	}
+	capabilities, err := managedssh.ProbeOpenSSH(ctx, "ssh", 5*time.Second)
+	if err != nil || !capabilities.Ready() {
+		return nil, errors.Join(managedssh.ErrOpenSSHUnavailable, err)
+	}
+	agent, err := managedssh.StartAgentService(ctx, managedssh.AgentServiceConfig{RuntimeDirectory: cfg.RuntimeDirectory, InheritedAgentSocket: cfg.InheritedAgentSocket, Signer: identity.Signer, MaxConnections: 32, IdleTimeout: 2 * time.Minute, DelegateTimeout: 3 * time.Second})
+	if err != nil {
+		return nil, err
+	}
+	if err := managedssh.InstallManagedIdentityPublicKey(cfg.Home, cfg.OwnerUID, identity.PublicKey); err != nil {
+		return nil, errors.Join(err, agent.Close())
+	}
+	command := strconv.Quote(cfg.Executable)
+	install := func(refreshCtx context.Context) error {
+		targets, err := managedSSHAliasTargets(refreshCtx, client)
+		if err != nil {
+			return err
+		}
+		_, err = managedssh.InstallOpenSSHConfig(managedssh.OpenSSHConfig{
+			Home: cfg.Home, OwnerUID: cfg.OwnerUID,
+			ProxyCommand:      command + " __ssh-proxy --host %h --port %p --user %r",
+			KnownHostsCommand: command + " __ssh-known-hosts --host %h --port %p",
+			AgentSocket:       agent.Socket(),
+			IdentityFile:      managedssh.ManagedIdentityPublicKeyPath(cfg.Home),
+			Targets:           targets,
+		})
+		return err
+	}
+	err = install(ctx)
+	if err != nil {
+		return nil, errors.Join(err, agent.Close())
+	}
+	return &ManagedSSHRuntime{agent: agent, refresh: install}, nil
+}
+
+func (r *ManagedSSHRuntime) Refresh(ctx context.Context) error {
+	if r == nil || r.refresh == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.refresh(ctx)
+}
+
+func (r *ManagedSSHRuntime) Close() error {
+	if r == nil || r.agent == nil {
+		return nil
+	}
+	return r.agent.Close()
+}
+
+func ManagedSSHHealthCode(err error) string {
+	return managedSSHHealthCode(err)
+}

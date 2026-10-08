@@ -1,0 +1,202 @@
+package runtime
+
+import (
+	"context"
+	"crypto/ed25519"
+	"errors"
+	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
+)
+
+var ErrStaticAuthInvalid = errors.New("invalid static authorization configuration")
+
+type StaticAuthConfig struct {
+	Issuer        string
+	EnvironmentID string
+	MachineID     string
+	HelperID      string
+	Keys          map[string]ed25519.PublicKey
+	RevokedJTIs   []string
+	Clock         auth.Clock
+}
+
+type CredentialAuthConfig struct {
+	InstallationGeneration int64
+	Issuer                 string
+	EnvironmentID          string
+	MachineID              string
+	HelperID               string
+	Verifier               server.CredentialVerifier
+	Revocations            server.CredentialRevocationWatcher
+}
+
+func NewCredentialAuthorizer(config CredentialAuthConfig) (server.AuthorizerFactory, error) {
+	return newCredentialAuthorizer(config, false)
+}
+
+// NewBrowserTerminalCredentialAuthorizer creates the credential factory used
+// only by the E2EE browser-terminal transport. Plain /v1/runtime deliberately
+// keeps using NewCredentialAuthorizer and therefore cannot accept browser
+// terminal credentials.
+func NewBrowserTerminalCredentialAuthorizer(config CredentialAuthConfig) (server.AuthorizerFactory, error) {
+	return newCredentialAuthorizer(config, true)
+}
+
+func NewBrowserConfigCompareCredentialAuthorizer(config CredentialAuthConfig) (server.AuthorizerFactory, error) {
+	if config.Issuer == "" || config.EnvironmentID == "" || config.MachineID == "" || config.HelperID == "" || config.Verifier == nil {
+		return nil, ErrStaticAuthInvalid
+	}
+	resolver := staticPolicyResolver{issuer: config.Issuer, environmentID: config.EnvironmentID, machineID: config.MachineID, helperID: config.HelperID, installationGeneration: config.InstallationGeneration, browserCompareOnly: true}
+	return func(token string) (server.Authorizer, error) {
+		if token == "" || len(token) > 16<<10 {
+			return nil, ErrStaticAuthInvalid
+		}
+		return &server.CredentialAuthorizer{Verifier: config.Verifier, Resolver: resolver, Token: token, Revocations: config.Revocations}, nil
+	}, nil
+}
+
+func newCredentialAuthorizer(config CredentialAuthConfig, browserTerminalOnly bool) (server.AuthorizerFactory, error) {
+	if config.Issuer == "" || config.EnvironmentID == "" || config.MachineID == "" || config.HelperID == "" || config.Verifier == nil {
+		return nil, ErrStaticAuthInvalid
+	}
+	resolver := staticPolicyResolver{issuer: config.Issuer, environmentID: config.EnvironmentID, machineID: config.MachineID, helperID: config.HelperID, installationGeneration: config.InstallationGeneration, browserTerminalOnly: browserTerminalOnly}
+	return func(token string) (server.Authorizer, error) {
+		if token == "" || len(token) > 16<<10 {
+			return nil, ErrStaticAuthInvalid
+		}
+		return &server.CredentialAuthorizer{Verifier: config.Verifier, Resolver: resolver, Token: token, Revocations: config.Revocations}, nil
+	}, nil
+}
+
+func NewStaticAuthorizer(config StaticAuthConfig) (server.AuthorizerFactory, error) {
+	if config.Issuer == "" || config.EnvironmentID == "" || config.MachineID == "" || config.Clock == nil || len(config.Keys) == 0 {
+		return nil, ErrStaticAuthInvalid
+	}
+	keys := make(map[string]ed25519.PublicKey, len(config.Keys))
+	for keyID, key := range config.Keys {
+		if keyID == "" || len(key) != ed25519.PublicKeySize {
+			return nil, ErrStaticAuthInvalid
+		}
+		keys[keyID] = append(ed25519.PublicKey(nil), key...)
+	}
+	revoked := make(map[string]bool, len(config.RevokedJTIs))
+	for _, jti := range config.RevokedJTIs {
+		if jti == "" || revoked[jti] {
+			return nil, ErrStaticAuthInvalid
+		}
+		revoked[jti] = true
+	}
+	verifier := auth.Verifier{Keys: staticKeys{keys: keys}, Clock: config.Clock, Revocations: staticRevocations(revoked), ClockSkew: time.Minute}
+	resolver := staticPolicyResolver{issuer: config.Issuer, environmentID: config.EnvironmentID, machineID: config.MachineID, helperID: config.HelperID}
+	return func(token string) (server.Authorizer, error) {
+		if token == "" || len(token) > 16<<10 {
+			return nil, ErrStaticAuthInvalid
+		}
+		return &server.CredentialAuthorizer{Verifier: verifier, Resolver: resolver, Token: token}, nil
+	}, nil
+}
+
+type staticKeys struct{ keys map[string]ed25519.PublicKey }
+
+func (s staticKeys) Lookup(_ context.Context, keyID string) (ed25519.PublicKey, bool, error) {
+	key, ok := s.keys[keyID]
+	return append(ed25519.PublicKey(nil), key...), ok, nil
+}
+func (staticKeys) Refresh(context.Context) error { return nil }
+
+type staticRevocations map[string]bool
+
+func (r staticRevocations) Revoked(claims auth.Claims) bool { return r[claims.JTI] }
+
+type staticPolicyResolver struct {
+	issuer                 string
+	environmentID          string
+	machineID              string
+	installationGeneration int64
+	helperID               string
+	browserTerminalOnly    bool
+	browserCompareOnly     bool
+}
+
+func (r staticPolicyResolver) Policy(frame protocol.Frame) (auth.Policy, error) {
+	if r.browserCompareOnly && frame.Capability != "config.compare.v1" {
+		return auth.Policy{}, ErrStaticAuthInvalid
+	}
+	base := auth.Policy{Issuer: r.issuer, Audience: "paperboat-machine", EnvironmentID: r.environmentID, MachineID: r.machineID}
+	if r.browserTerminalOnly && frame.Type != "ack" && frame.Type != "detach" && frame.Capability != "terminal.v1" && frame.Capability != "file-transfer.v1" {
+		return auth.Policy{}, ErrStaticAuthInvalid
+	}
+	if frame.Type == "ack" || frame.Type == "detach" {
+		base.CredentialClass = r.terminalCredentialClass()
+		base.AnyScopes = [][]string{{"terminal:operate"}, {"terminal:view"}, {"terminal:control"}}
+		base.MaxLifetime = 5 * time.Minute
+		return base, nil
+	}
+	switch frame.Capability {
+	case "terminal.v1":
+		base.CredentialClass = r.terminalCredentialClass()
+		base.AnyScopes = [][]string{{"terminal:operate"}, {"terminal:view"}, {"terminal:control"}}
+		base.MaxLifetime = 5 * time.Minute
+	case "health.v1":
+		base.CredentialClass = "terminal_operation"
+		base.AnyScopes = [][]string{{"terminal:operate"}, {"terminal:view"}, {"terminal:control"}}
+		base.MaxLifetime = 5 * time.Minute
+	case "exec.v1":
+		base.CredentialClass = "exec_operation"
+		base.Scopes = []string{"exec:operate"}
+		base.OperationID = frame.OperationID
+		base.MaxLifetime = 5 * time.Minute
+	case "ssh.v1":
+		base.CredentialClass = "ssh_operation"
+		base.Scopes = []string{"ssh:operate"}
+		base.OperationID = frame.OperationID
+		base.MaxLifetime = 5 * time.Minute
+	case "preview.launch.v1":
+		base.CredentialClass = "preview_launch"
+		base.Scopes = []string{"preview:launch"}
+		base.OperationID = frame.OperationID
+		base.MaxLifetime = 5 * time.Minute
+		base.SingleUse = true
+	case "private.access.v1":
+		base.CredentialClass = "native_private"
+		base.Scopes = []string{"private:native"}
+		base.OperationID = frame.OperationID
+		base.MaxLifetime = 5 * time.Minute
+	case "file-transfer.v1":
+		if r.browserTerminalOnly {
+			base.CredentialClass = "browser_terminal_operation"
+			base.Scopes = []string{"terminal:operate"}
+			base.MaxLifetime = 5 * time.Minute
+			return base, nil
+		}
+		base.CredentialClass = "file_transfer"
+		base.Scopes = []string{"file:transfer"}
+		base.MaxLifetime = 5 * time.Minute
+	case "config.compare.v1":
+		base.CredentialClass = "config_compare"
+		if r.browserCompareOnly {
+			base.CredentialClass = "browser_config_compare"
+		}
+		base.OperationID = frame.OperationID
+		base.InstallationGeneration = r.installationGeneration
+		base.Scopes = []string{"config:compare"}
+		base.MaxLifetime = 5 * time.Minute
+	case "config.apply.v1":
+		base.CredentialClass = "config_sync"
+		base.Scopes = []string{"config:pull", "config:apply", "config:report"}
+		base.MaxLifetime = 5 * time.Minute
+	default:
+		return auth.Policy{}, ErrStaticAuthInvalid
+	}
+	return base, nil
+}
+
+func (r staticPolicyResolver) terminalCredentialClass() string {
+	if r.browserTerminalOnly {
+		return "browser_terminal_operation"
+	}
+	return "terminal_operation"
+}

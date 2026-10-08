@@ -1,0 +1,60 @@
+.nh
+.TH "PB-TUNNEL-POLICY-REVOKE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel-policy-revoke - Revoke an on-demand port policy
+
+
+.SH SYNOPSIS
+\fBpb tunnel policy revoke <policy> [flags]\fP
+
+
+.SH DESCRIPTION
+Revoke an on-demand port policy
+
+.PP
+Revoke one exact on-demand port policy at its expected generation. Subsequent activations are denied; this does not delete unrelated tunnel routes.
+
+.PP
+An on-demand policy authorizes an exact machine port for private or team access. A policy does not publish a public URL or grant every port on the machine. Revocation fences subsequent activation.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--generation\fP=0
+	expected policy generation; omitted reads current state first
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for revoke
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-tunnel-policy(1)\fP

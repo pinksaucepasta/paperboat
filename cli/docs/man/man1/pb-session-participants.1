@@ -1,0 +1,52 @@
+.nh
+.TH "PB-SESSION-PARTICIPANTS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-session-participants - Show terminal sharing and connected participants
+
+
+.SH SYNOPSIS
+\fBpb session participants <session-id> [flags]\fP
+
+
+.SH DESCRIPTION
+Show terminal sharing and connected participants
+
+.PP
+Show current participants and sharing grants for one session. Use this to review access before removing a teammate or ending sharing.
+
+.PP
+Terminal sessions persist independently of a single connection and can be reattached after a disconnect. Sharing grants explicit access to a named session. Closing, deleting, and removing a participant have different effects; inspect the selected session before acting.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for participants
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-session(1)\fP

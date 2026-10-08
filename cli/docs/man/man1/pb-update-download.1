@@ -1,0 +1,52 @@
+.nh
+.TH "PB-UPDATE-DOWNLOAD" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-update-download - Download and verify an update without installing it
+
+
+.SH SYNOPSIS
+\fBpb update download [flags]\fP
+
+
+.SH DESCRIPTION
+Download and verify an update without installing it
+
+.PP
+Download and verify the signed release without changing running services. Review the candidate and use pb update --approve with its exact ID to install. Ordinary installation reconnects connections while preserving running shells; process-owner updates warn before ending running work.
+
+.PP
+Updates use signed release metadata and preserve artifact authenticity and rollback protection. Check inspects an available release; status reports the installed updater state. A failed update should leave the known installation usable and report a recovery action.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for download
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-update(1)\fP

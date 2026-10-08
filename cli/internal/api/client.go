@@ -1,0 +1,1632 @@
+// Package api is the Paperboat bearer-authenticated control-plane client.
+package api
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"github.com/google/uuid"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
+	"github.com/pinksaucepasta/paperboat/internal/machinename"
+	"github.com/pinksaucepasta/paperboat/internal/remotepath"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
+)
+
+// ErrUnauthenticated means the server rejected the reused credential. Callers
+// should route the user through Paperboat machine login.
+var ErrUnauthenticated = errors.New("paperboat-server rejected the credential")
+
+// ErrMachineAuthReadRequiresClientSession reports that a machine-proof create
+// returned an operation but this client has no ordinary read credential to
+// fetch the resulting public lease. The server deliberately keeps preview
+// reads behind the client-session authorization boundary.
+var ErrMachineAuthReadRequiresClientSession = errors.New("machine-authenticated preview create requires a client-session read credential")
+
+// ErrIncompatibleVersion tells callers to upgrade instead of retrying.
+type ErrIncompatibleVersion struct{ Required, Message string }
+
+func (e *ErrIncompatibleVersion) Error() string {
+	if required := safeRequiredProtocol(e.Required); required != "" {
+		return fmt.Sprintf("this CLI is incompatible with the server (required protocol %s); upgrade pb", required)
+	}
+	return "this CLI is incompatible with the server; upgrade pb"
+}
+
+func responseRequestID(header http.Header) string {
+	if requestID := safeRequestID(header.Get("Request-Id")); requestID != "" {
+		return requestID
+	}
+	return safeRequestID(header.Get("X-Request-ID"))
+}
+
+// APIError is a structured server error surfaced to the caller. It carries the
+// server's stable error code so command logic can branch without string
+// matching on messages.
+type APIError struct {
+	Status           int
+	Code             string
+	Message          string
+	RequestID        string
+	SupportReference string
+	Details          map[string]any
+	cause            error
+}
+
+func (e *APIError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+// DiagnosticStatus exposes only the protocol status to safe fault projection.
+// The response message, details and request data remain outside logging sinks.
+func (e *APIError) DiagnosticStatus() int {
+	if e == nil {
+		return 0
+	}
+	return e.Status
+}
+
+// IsNotFound reports whether the control plane explicitly rejected a request
+// because its resource or route is absent. Callers use it only for additive
+// capability discovery; authorization failures are never treated as absent.
+func IsNotFound(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound
+}
+
+func (e *APIError) Error() string {
+	if e == nil {
+		return "paperboat-server request failed"
+	}
+	return apiErrorMessage(e.Code, e.Status)
+}
+
+func (e *APIError) Is(target error) bool {
+	return e != nil && e.Status == http.StatusUnauthorized && target == ErrUnauthenticated
+}
+
+// Retryable classifies transport-level HTTP failures for lease/session
+// renewals without making callers branch on human-readable error messages.
+func (e *APIError) Retryable() bool {
+	return e != nil && (e.Status == http.StatusRequestTimeout || e.Status == http.StatusTooManyRequests || e.Status >= 500)
+}
+
+// Client talks to paperboat-server with a Paperboat client-session access token.
+type Client struct {
+	baseURL         string
+	cred            config.Credential
+	http            *http.Client
+	accessToken     string
+	sourceMachineID string
+	machineAuth     MachineAuthSource
+	workspace       string
+}
+
+// MachineAuthSource supplies the renewable machine-control bearer and signs
+// the exact request body for a mutating operation. It is intentionally a
+// narrow interface so the API client never persists or owns machine secrets.
+type MachineAuthSource interface {
+	Token(context.Context) (string, error)
+	Proof(context.Context, string, string, string, []byte) ([]byte, error)
+}
+
+// SetMachineAuth makes subsequent mutating requests use the authenticated
+// machine identity. Mutations must include Idempotency-Key; that key is bound
+// into the signed proof. GETs retain ordinary client-session authentication so
+// a create operation can fetch its public lease through the read middleware.
+// The source remains responsible for renewal and key material. Passing nil
+// restores ordinary client-session authentication for mutations.
+func (c *Client) SetMachineAuth(source MachineAuthSource) {
+	if c == nil {
+		return
+	}
+	c.machineAuth = source
+}
+
+func (c *Client) SetSourceMachineID(machineID string) {
+	c.sourceMachineID = strings.TrimSpace(machineID)
+}
+
+// New builds a client. baseURL is the paperboat-server base (e.g.
+// https://api.paperboat.dev). httpClient is optional; a sane default with a
+// timeout is used when nil.
+func New(baseURL string, cred config.Credential, httpClient *http.Client) *Client {
+	if httpClient == nil {
+		httpClient = defaultHTTPClient()
+	}
+	clientCopy := *httpClient
+	clientCopy.Transport = errorreport.Transport(httpClient.Transport, baseURL)
+	httpClient = &clientCopy
+	return &Client{
+		baseURL:     strings.TrimRight(baseURL, "/"),
+		cred:        cred,
+		http:        httpClient,
+		accessToken: strings.TrimSpace(cred.AccessToken),
+	}
+}
+
+// Me is the authenticated-user payload from GET /v1/me.
+type Me struct {
+	ID          string `json:"id"`
+	Email       string `json:"email"`
+	DisplayName string `json:"display_name"`
+	Status      string `json:"status"`
+	Role        string `json:"role"`
+}
+
+// ClientConfiguration contains server-owned URLs used by Paperboat clients.
+type ClientConfiguration struct {
+	Version            string `json:"version"`
+	CLIVerificationURL string `json:"cli_verification_url"`
+	MachinesURL        string `json:"machines_url"`
+}
+
+func (c *Client) ClientConfiguration(ctx context.Context) (ClientConfiguration, error) {
+	var out ClientConfiguration
+	if err := c.do(ctx, http.MethodGet, "/v1/client-configuration", nil, &out); err != nil {
+		return ClientConfiguration{}, err
+	}
+	if out.Version != "1" {
+		return ClientConfiguration{}, errors.New("paperboat-server returned an unsupported client configuration version")
+	}
+	machinesURL, err := url.Parse(out.MachinesURL)
+	if err != nil || (machinesURL.Scheme != "http" && machinesURL.Scheme != "https") || machinesURL.Host == "" {
+		return ClientConfiguration{}, errors.New("paperboat-server returned an invalid machines URL")
+	}
+	return out, nil
+}
+
+type EndpointCertificateDocument struct {
+	Version                int    `json:"version"`
+	AccountID              string `json:"account_id"`
+	KeyID                  string `json:"key_id"`
+	RootFingerprint        string `json:"-"`
+	EndpointID             string `json:"endpoint_id"`
+	Role                   string `json:"role"`
+	Generation             uint64 `json:"generation"`
+	Serial                 uint64 `json:"serial"`
+	IssuedAt               string `json:"issued_at"`
+	ExpiresAt              string `json:"expires_at"`
+	Certificate            string `json:"certificate"`
+	CertificateFingerprint string `json:"certificate_fingerprint"`
+}
+
+type E2EEBootstrapInput struct {
+	RootPublicKey string                      `json:"root_public_key"`
+	Certificate   EndpointCertificateDocument `json:"certificate"`
+}
+
+// E2EEBootstrapResult is the result of adding one trusted endpoint signing
+// key. The server returns the complete active trust set so every endpoint can
+// verify certificates issued by any enrolled machine.
+type E2EEBootstrapResult struct {
+	KeyID       string                      `json:"key_id"`
+	TrustedKeys []E2EEKey                   `json:"trusted_keys"`
+	Certificate EndpointCertificateDocument `json:"certificate"`
+}
+
+// E2EEKey is public trust metadata for one independently enrolled endpoint.
+// PublicKey and Fingerprint are canonical base64url and lowercase hex strings
+// respectively; private key material never crosses the API boundary.
+type E2EEKey struct {
+	KeyID       string `json:"key_id"`
+	PublicKey   string `json:"public_key"`
+	Fingerprint string `json:"fingerprint"`
+	Generation  uint64 `json:"generation"`
+}
+
+type E2EERoot struct {
+	Version     int       `json:"version"`
+	TrustedKeys []E2EEKey `json:"trusted_keys"`
+	PublicKey   string    `json:"-"`
+	Fingerprint string    `json:"-"`
+	Generation  uint64    `json:"-"`
+}
+
+// PeerTransportKeySet contains currently authorized machine certificate
+// signers. It is separate from the account ENV root authority.
+type PeerTransportKeySet struct {
+	Version     int       `json:"version"`
+	TrustedKeys []E2EEKey `json:"trusted_keys"`
+}
+
+type PendingEndpointIdentity struct {
+	RequestID     string    `json:"request_id"`
+	EndpointID    string    `json:"endpoint_id"`
+	Role          string    `json:"role,omitempty"`
+	State         string    `json:"state,omitempty"`
+	Generation    uint64    `json:"generation"`
+	QUICPublicKey string    `json:"quic_public_key"`
+	CreatedAt     time.Time `json:"created_at"`
+	ExpiresAt     time.Time `json:"expires_at"`
+	SafetyCode    string    `json:"safety_code"`
+}
+
+// CLIEndpointRequestInput contains only public endpoint keys. The request is
+// signed later by an already paired CLI and never carries a root private key.
+type CLIEndpointRequestInput struct {
+	OperationID   string `json:"operation_id"`
+	EndpointID    string `json:"endpoint_id"`
+	Generation    uint64 `json:"generation"`
+	QUICPublicKey string `json:"quic_public_key"`
+}
+
+func (c *Client) E2EERoot(ctx context.Context) (E2EERoot, error) {
+	var out E2EERoot
+	if err := c.doStrict(ctx, http.MethodGet, "/v1/e2ee/root", nil, &out); err != nil {
+		return E2EERoot{}, err
+	}
+	return out, nil
+}
+
+// PeerTransportKeys is the current authorized endpoint signer directory.
+// These public keys grant no authority over ENV vault data.
+func (c *Client) PeerTransportKeys(ctx context.Context) (PeerTransportKeySet, error) {
+	var out PeerTransportKeySet
+	if err := c.doStrict(ctx, http.MethodGet, "/v1/peer-keys", nil, &out); err != nil {
+		return PeerTransportKeySet{}, err
+	}
+	return out, nil
+}
+
+func (c *Client) PendingE2EEEndpoints(ctx context.Context) ([]PendingEndpointIdentity, error) {
+	var out []PendingEndpointIdentity
+	if err := c.doStrict(ctx, http.MethodGet, "/v1/e2ee/pending-endpoints", nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// RequestCLIEndpoint creates or exactly replays a pending existing-account
+// CLI endpoint enrollment request. Unlike machine endpoint enrollment this
+// route uses the authenticated CLI session and carries no machine proof.
+func (c *Client) RequestCLIEndpoint(ctx context.Context, input CLIEndpointRequestInput) (PendingEndpointIdentity, error) {
+	if strings.TrimSpace(input.OperationID) == "" || strings.TrimSpace(input.EndpointID) == "" || input.Generation == 0 || strings.TrimSpace(input.QUICPublicKey) == "" {
+		return PendingEndpointIdentity{}, errors.New("CLI endpoint enrollment request is invalid")
+	}
+	var out PendingEndpointIdentity
+	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/e2ee/endpoint-requests", input, &out, http.Header{"Idempotency-Key": []string{input.OperationID}}); err != nil {
+		return PendingEndpointIdentity{}, err
+	}
+	return out, nil
+}
+
+func (c *Client) RegisterEndpointCertificate(ctx context.Context, operationID string, document EndpointCertificateDocument) (EndpointCertificateDocument, error) {
+	var out EndpointCertificateDocument
+	path := "/v1/endpoints/" + url.PathEscape(document.EndpointID) + "/certificates/" + fmt.Sprintf("%d", document.Generation)
+	if err := c.doWithHeaders(ctx, http.MethodPut, path, document, &out, http.Header{"Idempotency-Key": []string{operationID}}); err != nil {
+		return EndpointCertificateDocument{}, err
+	}
+	return out, nil
+}
+
+func (c *Client) EndpointCertificate(ctx context.Context, endpointID string, generation uint64) (EndpointCertificateDocument, error) {
+	if strings.TrimSpace(endpointID) == "" || generation == 0 {
+		return EndpointCertificateDocument{}, errors.New("endpoint certificate identity is invalid")
+	}
+	var out EndpointCertificateDocument
+	path := "/v1/endpoints/" + url.PathEscape(endpointID) + "/certificates/" + fmt.Sprintf("%d", generation)
+	if err := c.doStrict(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return EndpointCertificateDocument{}, err
+	}
+	return out, nil
+}
+
+func (c *Client) BootstrapE2EE(ctx context.Context, operationID string, input E2EEBootstrapInput) (E2EEBootstrapResult, error) {
+	return c.bootstrapE2EE(ctx, operationID, input, false)
+}
+
+// BootstrapE2EEFresh registers public identity material owned by the current
+// authenticated CLI session. The historical method name is retained on the
+// v1 client surface while all CLI enrollments use this machine-scoped ceremony.
+func (c *Client) BootstrapE2EEFresh(ctx context.Context, operationID string, input E2EEBootstrapInput) (E2EEBootstrapResult, error) {
+	return c.bootstrapE2EE(ctx, operationID, input, true)
+}
+
+func (c *Client) bootstrapE2EE(ctx context.Context, operationID string, input E2EEBootstrapInput, fresh bool) (E2EEBootstrapResult, error) {
+	var out E2EEBootstrapResult
+	headers := http.Header{"Idempotency-Key": []string{operationID}}
+	if fresh {
+		headers.Set("X-Paperboat-Fresh-Enrollment", "1")
+	}
+	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/e2ee/bootstrap", input, &out, headers); err != nil {
+		return E2EEBootstrapResult{}, err
+	}
+	return out, nil
+}
+
+type Pagination struct {
+	Limit      int  `json:"limit"`
+	Offset     int  `json:"offset"`
+	Total      int  `json:"total"`
+	NextOffset *int `json:"next_offset"`
+}
+
+// UserMachine describes an enrolled machine. The control plane owns its lifecycle
+// and authorization; the CLI uses this metadata to select and manage it.
+type UserMachine struct {
+	Ownership     string   `json:"ownership"`
+	OwnerAccount  string   `json:"owner_account,omitempty"`
+	OwnerTeamID   string   `json:"owner_team_id,omitempty"`
+	Permissions   []string `json:"permissions"`
+	CanManage     bool     `json:"can_manage"`
+	Shared        bool     `json:"shared"`
+	ID            string   `json:"id"`
+	EnvironmentID string   `json:"environment_id"`
+	Description   string   `json:"description"`
+	Alias         string   `json:"alias"`
+	State         string   `json:"state"`
+	Online        bool     `json:"online"`
+	Platform      string   `json:"platform"`
+	Architecture  string   `json:"architecture"`
+	WorkspaceRoot string   `json:"workspace_root"`
+
+	Capabilities           MachineCapabilities     `json:"capabilities"`
+	MachineCapabilities    MachineCapabilityPolicy `json:"machine_capabilities"`
+	PublicIdentityKey      string                  `json:"public_identity_key"`
+	AssignedIP             string                  `json:"assigned_ip,omitempty"`
+	NetworkApproved        bool                    `json:"network_approved"`
+	InstallationGeneration int64                   `json:"installation_generation"`
+	Availability           AvailabilityPolicy      `json:"availability"`
+	RuntimeDiagnostics     RuntimeDiagnostics      `json:"runtime_diagnostics"`
+	Installation           *ClientInstallation     `json:"installation,omitempty"`
+	SSHAuthority           SSHAuthority            `json:"-"`
+	SSHLocalReady          bool                    `json:"-"`
+	SSHLocalCode           string                  `json:"-"`
+	SSHUser                string                  `json:"-"`
+	SSHPort                uint16                  `json:"-"`
+}
+
+type MachineCapabilitySelection struct {
+	Terminal      bool `json:"terminal"`
+	ManagedSSH    bool `json:"managed_ssh"`
+	FileReceive   bool `json:"file_receive"`
+	PreviewTunnel bool `json:"preview_tunnel"`
+}
+
+type MachineCapabilityPolicy struct {
+	Schema         string                     `json:"schema"`
+	Desired        MachineCapabilitySelection `json:"desired"`
+	DesiredVersion int64                      `json:"desired_version"`
+	Applied        MachineCapabilitySelection `json:"applied"`
+	AppliedVersion int64                      `json:"applied_version"`
+	Status         string                     `json:"status"`
+	ErrorCode      string                     `json:"error_code,omitempty"`
+}
+
+type SSHAuthority struct {
+	TargetGeneration  uint64
+	HostKeyGeneration uint64
+}
+
+type ManagedSSHTarget struct {
+	Type                  string `json:"type"`
+	Version               int    `json:"version"`
+	MachineID             string `json:"machine_id"`
+	MachineGeneration     uint64 `json:"machine_generation"`
+	OSUser                string `json:"os_user"`
+	Port                  uint16 `json:"port"`
+	ReconciliationVersion uint64 `json:"reconciliation_version"`
+}
+
+type ManagedSSHHostKeySet struct {
+	Type                  string   `json:"type"`
+	Version               int      `json:"version"`
+	SetID                 string   `json:"set_id"`
+	MachineID             string   `json:"machine_id"`
+	MachineGeneration     uint64   `json:"machine_generation"`
+	ObservationGeneration uint64   `json:"observation_generation"`
+	Keys                  []string `json:"keys"`
+	Fingerprint           string   `json:"fingerprint"`
+	State                 string   `json:"state"`
+	ReconciliationVersion uint64   `json:"reconciliation_version"`
+}
+
+type ManagedSSHAuthorizedKeys struct {
+	Type              string   `json:"type"`
+	Version           int      `json:"version"`
+	MachineID         string   `json:"machine_id"`
+	MachineGeneration uint64   `json:"machine_generation"`
+	Keys              []string `json:"keys"`
+}
+
+type ManagedSSHClientKey struct {
+	Type                  string `json:"type"`
+	Version               int    `json:"version"`
+	Fingerprint           string `json:"fingerprint"`
+	PublicKey             string `json:"public_key"`
+	State                 string `json:"state"`
+	ReconciliationVersion uint64 `json:"reconciliation_version"`
+}
+
+type MachineArtifact struct {
+	Schema        string `json:"schema"`
+	Kind          string `json:"kind"`
+	Version       string `json:"version"`
+	Platform      string `json:"platform"`
+	Architecture  string `json:"architecture"`
+	RepositoryURL string `json:"repository_url"`
+	TargetPath    string `json:"target_path"`
+}
+
+type ClientInstallation struct {
+	ControlURL          string          `json:"control_url"`
+	HelperListenAddress string          `json:"helper_listen_address"`
+	Artifact            MachineArtifact `json:"artifact"`
+}
+
+type MachineCapability struct {
+	Configured bool `json:"configured"`
+	Observed   bool `json:"observed"`
+}
+
+type MachineCapabilities struct {
+	FileReceive          MachineCapability `json:"file_receive"`
+	PreviewLaunch        MachineCapability `json:"preview_launch"`
+	TerminalHost         MachineCapability `json:"terminal_host"`
+	SessionHost          MachineCapability `json:"session_host"`
+	KeepAwake            MachineCapability `json:"keep_awake"`
+	EnvironmentInjection MachineCapability `json:"environment_injection"`
+}
+
+type MachineSetupInput struct {
+	Alias             string            `json:"alias"`
+	Platform          string            `json:"platform"`
+	Architecture      string            `json:"architecture"`
+	WorkspaceRoot     string            `json:"workspace_root"`
+	PublicIdentityKey string            `json:"public_identity_key"`
+	RuntimeVersions   map[string]string `json:"runtime_versions"`
+}
+
+type MachineEnrollmentStart struct {
+	ID             string    `json:"id"`
+	BootstrapToken string    `json:"bootstrap_token"`
+	ServerURL      string    `json:"server_url"`
+	ExpiresAt      time.Time `json:"expires_at"`
+}
+
+// StartMachineEnrollment creates the single-use credential used by the
+// dashboard, CLI, and TUI one-shot installers.
+func (c *Client) StartMachineEnrollment(ctx context.Context, idempotencyKey string) (MachineEnrollmentStart, error) {
+	var out MachineEnrollmentStart
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return out, errors.New("machine enrollment idempotency key is required")
+	}
+	err := c.doWithHeaders(ctx, http.MethodPost, "/v1/machine-enrollments", map[string]string{}, &out, http.Header{"Idempotency-Key": []string{idempotencyKey}})
+	return out, err
+}
+
+func (c *Client) SetupMachine(ctx context.Context, input MachineSetupInput) (UserMachine, error) {
+	var out UserMachine
+	input.Alias = strings.ToLower(strings.TrimSpace(input.Alias))
+	err := c.do(ctx, http.MethodPost, "/v1/machines/setup", input, &out)
+	return out, err
+}
+
+type AuthenticatedMachineInstallationInput struct {
+	Verifier               string `json:"verifier"`
+	PublicIdentityKey      string `json:"public_identity_key"`
+	InstallationGeneration int64  `json:"installation_generation"`
+
+	Artifact                MachineArtifact `json:"artifact"`
+	SSHUser                 string          `json:"ssh_user,omitempty"`
+	SSHPort                 uint16          `json:"ssh_port,omitempty"`
+	CanReuseRuntimeIdentity bool            `json:"can_reuse_runtime_identity,omitempty"`
+}
+
+type AuthenticatedMachineInstallation struct {
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+func (c *Client) PrepareAuthenticatedMachineInstallation(ctx context.Context, machineID, operationID string, input AuthenticatedMachineInstallationInput) (AuthenticatedMachineInstallation, error) {
+	if strings.TrimSpace(machineID) == "" || len(strings.TrimSpace(operationID)) < 8 {
+		return AuthenticatedMachineInstallation{}, errors.New("authenticated machine installation request is invalid")
+	}
+	var out AuthenticatedMachineInstallation
+	err := c.doWithHeaders(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/machine-installations", input, &out, http.Header{"Idempotency-Key": []string{operationID}})
+	return out, err
+}
+
+type MachineControlCredential struct {
+	Credential string    `json:"credential"`
+	ExpiresAt  time.Time `json:"expires_at"`
+}
+
+func (c *Client) IssueMachineControlCredential(ctx context.Context, machineID, operationID string, proof []byte) (MachineControlCredential, error) {
+	if strings.TrimSpace(machineID) == "" || len(operationID) < 8 || len(proof) == 0 {
+		return MachineControlCredential{}, errors.New("machine control credential request is invalid")
+	}
+	var out MachineControlCredential
+	path := "/v1/machines/" + url.PathEscape(machineID) + "/control-credentials"
+	err := c.doWithHeaders(ctx, http.MethodPost, path, struct {
+		OperationID string `json:"operation_id"`
+	}{operationID}, &out, http.Header{"X-Paperboat-Machine-Proof": []string{base64.RawURLEncoding.EncodeToString(proof)}})
+	return out, err
+}
+
+type RuntimeDiagnostics struct {
+	WorkerGeneration    uint64     `json:"worker_generation"`
+	OSBootID            string     `json:"os_boot_id,omitempty"`
+	WorkerServiceScope  string     `json:"worker_service_scope"`
+	ConnectorState      string     `json:"connector_state"`
+	ConnectorGeneration uint64     `json:"connector_generation"`
+	ObservedAt          *time.Time `json:"observed_at,omitempty"`
+}
+
+type AvailabilityPolicy struct {
+	Schema             string     `json:"schema"`
+	DesiredMode        string     `json:"desired_mode"`
+	DesiredVersion     int64      `json:"desired_version"`
+	ObservedMode       string     `json:"observed_mode,omitempty"`
+	ObservedVersion    int64      `json:"observed_version"`
+	ObservedAt         *time.Time `json:"observed_at,omitempty"`
+	Status             string     `json:"status"`
+	ErrorCode          string     `json:"error_code,omitempty"`
+	HostServiceVersion string     `json:"host_service_version,omitempty"`
+	HostServiceScope   string     `json:"host_service_scope,omitempty"`
+	UpdateRollbacks    int64      `json:"update_rollbacks"`
+	UpdateHealth       string     `json:"update_health"`
+}
+
+type ConfigRepository struct {
+	State       string `json:"state"`
+	ID          string `json:"id"`
+	Provider    string `json:"provider"`
+	ExternalRef string `json:"external_ref"`
+	DisplayName string `json:"display_name"`
+}
+
+type ConfigPathRule struct {
+	Source         string   `json:"source"`
+	ID             string   `json:"id"`
+	RepositoryPath string   `json:"repository_path"`
+	LocalPath      string   `json:"local_path"`
+	Kind           string   `json:"kind"`
+	Include        []string `json:"include,omitempty"`
+	Exclude        []string `json:"exclude,omitempty"`
+}
+type ConfigRepositoryBinding struct {
+	RepositoryID string `json:"repository_id"`
+	URL          string `json:"url"`
+}
+
+type ConfigAssignment struct {
+	ConfigurationRevision string                    `json:"configuration_revision"`
+	PathRules             []ConfigPathRule          `json:"path_rules"`
+	RepositoryBindings    []ConfigRepositoryBinding `json:"repository_bindings"`
+	ID                    string                    `json:"id"`
+	MachineID             string                    `json:"machine_id"`
+	EnvironmentID         string                    `json:"environment_id"`
+	RepositoryID          *string                   `json:"repository_id"`
+	PullRepositoryID      *string                   `json:"pull_repository_id"`
+	PushRepositoryID      *string                   `json:"push_repository_id"`
+	AutomaticUpdates      bool                      `json:"automatic_updates"`
+	ConsentState          string                    `json:"consent_state"`
+	Mode                  string                    `json:"mode"`
+	WarningRevision       *string                   `json:"warning_revision"`
+	Version               int64                     `json:"version"`
+}
+
+type ConfigWarningFacts struct {
+	Revision             string `json:"revision"`
+	MachineName          string `json:"machine_name"`
+	RepositoryName       string `json:"repository_name"`
+	CanonicalScope       string `json:"canonical_scope"`
+	Mode                 string `json:"mode"`
+	ManifestScope        string `json:"manifest_scope"`
+	RepositoryVisibility string `json:"repository_visibility"`
+	HistoryRetention     string `json:"history_retention"`
+	ConflictBehavior     string `json:"conflict_behavior"`
+	ForceBehavior        string `json:"force_behavior"`
+	DisableAction        string `json:"disable_action"`
+	OfflineBehavior      string `json:"offline_behavior"`
+	AccessConsequence    string `json:"access_consequence"`
+}
+
+type Preview struct {
+	ID              string     `json:"id"`
+	EnvironmentID   string     `json:"environment_id"`
+	ResourceID      string     `json:"resource_id"`
+	UserID          string     `json:"user_id"`
+	LogicalName     string     `json:"logical_name"`
+	PreviewKey      string     `json:"preview_key"`
+	URL             string     `json:"url"`
+	TargetPort      int32      `json:"target_port"`
+	State           string     `json:"state"`
+	ExpiresAt       *time.Time `json:"expires_at"`
+	RemovedAt       *time.Time `json:"removed_at"`
+	Version         int64      `json:"version"`
+	EnvironmentName string     `json:"environment_name"`
+	EnvironmentKind string     `json:"environment_kind"`
+	OwnerEmail      string     `json:"owner_email"`
+	SourceKind      string     `json:"source_kind"`
+	OwnerMode       string     `json:"owner_mode"`
+	SourcePath      string     `json:"source_path,omitempty"`
+}
+
+type Favorite struct {
+	Kind       string    `json:"kind"`
+	ResourceID string    `json:"resource_id"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+func (c *Client) ListFavorites(ctx context.Context) ([]Favorite, error) {
+	var out []Favorite
+	err := c.do(ctx, http.MethodGet, "/v1/favorites", nil, &out)
+	return out, err
+}
+
+func (c *Client) SetFavorite(ctx context.Context, kind, resourceID string, favorite bool) ([]Favorite, error) {
+	var out []Favorite
+	err := c.do(ctx, http.MethodPut, "/v1/favorites", map[string]any{"kind": kind, "resource_id": resourceID, "favorite": favorite}, &out)
+	return out, err
+}
+
+func (c *Client) ListPreviews(ctx context.Context) ([]Preview, error) {
+	var out []Preview
+	err := c.do(ctx, http.MethodGet, "/v1/previews", nil, &out)
+	return out, err
+}
+
+func (c *Client) RemovePreview(ctx context.Context, previewID, idempotencyKey string) (Preview, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return Preview{}, errors.New("preview idempotency key is required")
+	}
+	var out Preview
+	path := "/v1/previews/" + url.PathEscape(previewID)
+	err := c.doWithHeaders(ctx, http.MethodDelete, path, nil, &out, http.Header{"Idempotency-Key": []string{idempotencyKey}})
+	return out, err
+}
+
+func (c *Client) ListConfigRepositories(ctx context.Context) ([]ConfigRepository, error) {
+	return collectOffsetInventory[ConfigRepository](ctx, c, "/v1/config-repositories", "items", nil)
+}
+
+type ConfigRepositoryCandidate struct {
+	Provider      string `json:"provider"`
+	ExternalID    string `json:"external_id"`
+	DisplayName   string `json:"display_name"`
+	DefaultBranch string `json:"default_branch"`
+}
+
+func (c *Client) ConfigRepositoryCandidates(ctx context.Context) ([]ConfigRepositoryCandidate, error) {
+	return collectCursorInventory[ConfigRepositoryCandidate](ctx, c, "/v1/config-repositories/candidates")
+}
+
+func (c *Client) ConnectConfigRepository(ctx context.Context, candidate ConfigRepositoryCandidate) (ConfigRepository, error) {
+	var out ConfigRepository
+	err := c.do(ctx, http.MethodPost, "/v1/config-repositories", map[string]string{"provider": candidate.Provider, "external_ref": candidate.ExternalID, "display_name": candidate.DisplayName}, &out)
+	return out, err
+}
+
+func (c *Client) ConnectCustomConfigRepository(ctx context.Context, endpoint, displayName, branch string) (ConfigRepository, error) {
+	var out ConfigRepository
+	err := c.do(ctx, http.MethodPost, "/v1/config-repositories", map[string]string{"provider": "git", "external_ref": endpoint, "display_name": displayName, "branch": branch}, &out)
+	return out, err
+}
+
+func (c *Client) ConfigRepositoryReadAccess(ctx context.Context, repositoryID, endpoint string) (configsync.RepositoryReadAccess, error) {
+	var out configsync.RepositoryReadAccess
+	err := c.do(ctx, http.MethodPost, "/v1/config-repositories/"+url.PathEscape(repositoryID)+"/read-access", map[string]string{"url": endpoint}, &out)
+	return out, err
+}
+
+func (c *Client) ConfigAssignment(ctx context.Context, machineID string) (ConfigAssignment, error) {
+	var out ConfigAssignment
+	err := c.do(ctx, http.MethodGet, "/v1/machines/"+url.PathEscape(machineID)+"/config-assignment", nil, &out)
+	return out, err
+}
+
+func (c *Client) ConfigureConfigProjection(ctx context.Context, machineID, pullRepositoryID, pushRepositoryID, mode string, automaticUpdates bool, expectedVersion int64, rules []ConfigPathRule, bindings []ConfigRepositoryBinding, revision string) (ConfigAssignment, error) {
+	if rules == nil {
+		rules = []ConfigPathRule{}
+	}
+	if bindings == nil {
+		bindings = []ConfigRepositoryBinding{}
+	}
+	var out ConfigAssignment
+	err := c.do(ctx, http.MethodPut, "/v1/machines/"+url.PathEscape(machineID)+"/config-assignment", map[string]any{"pull_repository_id": pullRepositoryID, "push_repository_id": pushRepositoryID, "mode": mode, "automatic_updates": automaticUpdates, "warning_revision": "", "expected_version": expectedVersion, "path_rules": rules, "repository_bindings": bindings, "configuration_revision": revision}, &out)
+	return out, err
+}
+
+func (c *Client) ApproveConfigPullRevision(ctx context.Context, machineID, revision string, expectedVersion int64) (ConfigAssignment, error) {
+	var out ConfigAssignment
+	err := c.do(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/config-assignment/approve", map[string]any{"remote_revision": revision, "expected_version": expectedVersion}, &out)
+	return out, err
+}
+
+type ConfigTeamDefault struct {
+	TeamID               string `json:"team_id"`
+	Provider             string `json:"provider"`
+	ExternalRepositoryID string `json:"external_repository_id"`
+	DisplayName          string `json:"display_name"`
+	Branch               string `json:"branch"`
+	Version              int64  `json:"version"`
+	RepositoryID         string `json:"repository_id,omitempty"`
+	AdoptedVersion       int64  `json:"adopted_version,omitempty"`
+	UpdatePending        bool   `json:"update_pending,omitempty"`
+}
+
+func (c *Client) ConfigTeamDefault(ctx context.Context, teamID string) (ConfigTeamDefault, error) {
+	var out ConfigTeamDefault
+	err := c.do(ctx, http.MethodGet, "/v1/teams/"+url.PathEscape(teamID)+"/config-default", nil, &out)
+	return out, err
+}
+func (c *Client) SetConfigTeamDefault(ctx context.Context, teamID, repositoryID string, expectedVersion int64) (ConfigTeamDefault, error) {
+	var out ConfigTeamDefault
+	err := c.do(ctx, http.MethodPut, "/v1/teams/"+url.PathEscape(teamID)+"/config-default", map[string]any{"repository_id": repositoryID, "expected_version": expectedVersion}, &out)
+	return out, err
+}
+func (c *Client) AdoptConfigTeamDefault(ctx context.Context, teamID string, version int64) (ConfigTeamDefault, error) {
+	var out ConfigTeamDefault
+	err := c.do(ctx, http.MethodPut, "/v1/config-sync/team-default-adoption", map[string]any{"team_id": teamID, "default_version": version}, &out)
+	return out, err
+}
+func (c *Client) UnadoptConfigTeamDefault(ctx context.Context) error {
+	return c.do(ctx, http.MethodDelete, "/v1/config-sync/team-default-adoption", nil, nil)
+}
+
+func (c *Client) UnassignConfig(ctx context.Context, machineID string, expectedVersion int64) error {
+	path := fmt.Sprintf("/v1/machines/%s/config-assignment?expected_version=%d", url.PathEscape(machineID), expectedVersion)
+	return c.do(ctx, http.MethodDelete, path, nil, nil)
+}
+
+func (c *Client) ConfigWarning(ctx context.Context, machineID string) (ConfigWarningFacts, error) {
+	var out ConfigWarningFacts
+	err := c.do(ctx, http.MethodGet, "/v1/machines/"+url.PathEscape(machineID)+"/config-assignment/warning", nil, &out)
+	return out, err
+}
+
+func (c *Client) AcceptConfigConsent(ctx context.Context, machineID, warningRevision string, expectedVersion int64) (ConfigAssignment, error) {
+	var out ConfigAssignment
+	err := c.do(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/config-assignment/consent", map[string]any{"warning_revision": warningRevision, "expected_version": expectedVersion}, &out)
+	return out, err
+}
+
+type UserMachinePage struct {
+	Items      []UserMachine `json:"items"`
+	Pagination Pagination    `json:"pagination"`
+}
+
+type TransferDestinationDefault struct {
+	Configured bool         `json:"configured"`
+	Machine    *UserMachine `json:"machine"`
+}
+
+func (c *Client) TransferDestinationDefault(ctx context.Context) (TransferDestinationDefault, error) {
+	var out TransferDestinationDefault
+	err := c.do(ctx, http.MethodGet, "/v1/transfer-destination-default", nil, &out)
+	return out, err
+}
+
+func (c *Client) SetTransferDestinationDefault(ctx context.Context, machineID string) (TransferDestinationDefault, error) {
+	var out TransferDestinationDefault
+	err := c.do(ctx, http.MethodPut, "/v1/transfer-destination-default", map[string]string{"machine_id": machineID}, &out)
+	return out, err
+}
+
+func (c *Client) ClearTransferDestinationDefault(ctx context.Context) error {
+	return c.do(ctx, http.MethodDelete, "/v1/transfer-destination-default", nil, nil)
+}
+
+func (c *Client) TerminalSessionTransferDestination(ctx context.Context, sessionID string) (TransferDestinationDefault, error) {
+	var out TransferDestinationDefault
+	err := c.do(ctx, http.MethodGet, "/v1/terminal-sessions/"+url.PathEscape(sessionID)+"/transfer-destination", nil, &out)
+	return out, err
+}
+
+func (c *Client) SetTerminalSessionTransferDestination(ctx context.Context, sessionID, machineID string) (TransferDestinationDefault, error) {
+	var out TransferDestinationDefault
+	err := c.do(ctx, http.MethodPut, "/v1/terminal-sessions/"+url.PathEscape(sessionID)+"/transfer-destination", map[string]string{"machine_id": machineID}, &out)
+	return out, err
+}
+
+func (c *Client) ClearTerminalSessionTransferDestination(ctx context.Context, sessionID string) error {
+	return c.do(ctx, http.MethodDelete, "/v1/terminal-sessions/"+url.PathEscape(sessionID)+"/transfer-destination", nil, nil)
+}
+
+func (c *Client) EligibleTerminalSessionTransferDestinations(ctx context.Context, sessionID string) ([]UserMachine, error) {
+	var page struct {
+		Items []UserMachine `json:"items"`
+	}
+	err := c.do(ctx, http.MethodGet, "/v1/terminal-sessions/"+url.PathEscape(sessionID)+"/transfer-destinations", nil, &page)
+	return page.Items, err
+}
+
+// TerminalSession is the durable session catalog record returned by the
+// control plane. Runtime-only fields may be unavailable while a VM is stopped.
+type TerminalSession struct {
+	Title             string           `json:"title"`
+	CurrentDirectory  string           `json:"current_directory,omitempty"`
+	ForegroundProcess string           `json:"foreground_process,omitempty"`
+	StartedIn         string           `json:"started_in"`
+	Machine           string           `json:"machine"`
+	ID                string           `json:"id"`
+	Name              string           `json:"name"`
+	IsDefault         bool             `json:"is_default"`
+	State             string           `json:"state"`
+	AttachedCount     *int             `json:"attached_count"`
+	LastActiveAt      *time.Time       `json:"last_active_at"`
+	CreatedAt         time.Time        `json:"created_at"`
+	UpdatedAt         time.Time        `json:"updated_at"`
+	EvictedSession    *TerminalSession `json:"evicted_session,omitempty"`
+}
+
+type TerminalSessionPage struct {
+	Items      []TerminalSession `json:"items"`
+	Pagination Pagination        `json:"pagination"`
+}
+
+// AuthMaterial is short-lived auth material scoped by paperboat-server for a
+// specific connect descriptor. The protocol contract defines the exact token format.
+type AuthMaterial struct {
+	Method          string    `json:"method"`
+	Ticket          string    `json:"ticket,omitempty"`
+	Token           string    `json:"token,omitempty"`
+	ExpiresAt       time.Time `json:"expires_at"`
+	Scopes          []string  `json:"scopes,omitempty"`
+	AccessSessionID string    `json:"access_session_id,omitempty"`
+}
+
+const ConnectionSchemaV1 = "paperboat.environment-connection/v1"
+
+// Environment identifies the enrolled machine behind a terminal descriptor.
+type Environment struct {
+	ID            string `json:"id"`
+	Kind          string `json:"kind"`
+	ResourceID    string `json:"resource_id"`
+	State         string `json:"state"`
+	Root          string `json:"root"`
+	EnvironmentID string `json:"environment_id"`
+	UserMachineID string `json:"machine_id"`
+	Alias         string `json:"alias"`
+	ProjectRoot   string `json:"project_root"`
+}
+
+// Terminal is the CLI-safe Paperboat WebSocket attach descriptor from
+// cli-connect. It carries client-safe Paperboat route URLs, not raw VM
+// addresses or SSH credentials.
+type Terminal struct {
+	Protocol  string            `json:"protocol"`
+	Endpoints TerminalEndpoints `json:"endpoints"`
+	SessionID string            `json:"session_id"`
+	Auth      AuthMaterial      `json:"auth"`
+	CWD       string            `json:"cwd"`
+}
+
+type TerminalEndpoints struct {
+	QUIC string `json:"quic"`
+	WSS  string `json:"wss"`
+}
+
+type FileTransferPolicy struct {
+	Revision               string `json:"revision"`
+	MaxFileBytes           int64  `json:"max_file_bytes"`
+	MaxBatchFiles          int    `json:"max_batch_files"`
+	MaxBatchBytes          int64  `json:"max_batch_bytes"`
+	MaxConcurrentTransfers int    `json:"max_concurrent_transfers"`
+	RetentionSeconds       int64  `json:"retention_seconds"`
+	DeliveryTimeoutSeconds int64  `json:"delivery_timeout_seconds"`
+	MaxPendingSpoolBytes   int64  `json:"max_pending_spool_bytes"`
+}
+
+type FileTransfer struct {
+	Endpoint             string             `json:"endpoint"`
+	SourceMachineID      string             `json:"source_machine_id"`
+	DestinationMachineID string             `json:"destination_machine_id"`
+	InitiatingUserID     string             `json:"initiating_user_id"`
+	Auth                 AuthMaterial       `json:"auth"`
+	Policy               FileTransferPolicy `json:"policy"`
+}
+
+// ConnectionDescriptor is the cli-connect / connection-status descriptor. When
+// Connectable is false the machine is not ready yet; Status/Reason explain why
+// and the caller should poll ConnectionReadiness.
+type ConnectionDescriptor struct {
+	MachineGeneration uint64        `json:"machine_generation,omitempty"`
+	Schema            string        `json:"schema"`
+	Issuer            string        `json:"issuer,omitempty"`
+	UserMachineID     string        `json:"machine_id"`
+	UserMachineState  string        `json:"machine_state"`
+	Connectable       bool          `json:"connectable"`
+	ExpiresAt         time.Time     `json:"expires_at"`
+	Environment       *Environment  `json:"environment,omitempty"`
+	Terminal          *Terminal     `json:"terminal,omitempty"`
+	FileTransfer      *FileTransfer `json:"file_transfer,omitempty"`
+	Status            string        `json:"status,omitempty"`
+	Reason            string        `json:"reason,omitempty"`
+	RetryAfterSeconds int           `json:"retry_after_seconds,omitempty"`
+	Capabilities      []string      `json:"capabilities,omitempty"`
+}
+
+type ExecDescriptor struct {
+	OperationID string            `json:"operation_id"`
+	Environment *Environment      `json:"environment"`
+	Endpoints   TerminalEndpoints `json:"endpoints"`
+	Auth        AuthMaterial      `json:"auth"`
+	ExpiresAt   time.Time         `json:"expires_at"`
+}
+
+type SSHDescriptor = ExecDescriptor
+
+// NormalizeConnectionDescriptor maps the canonical wire contract onto the
+// internal transport fields.
+func (r *ConnectionDescriptor) NormalizeConnectionDescriptor() error {
+	if r.Schema != ConnectionSchemaV1 {
+		return errors.New("paperboat-server returned an unsupported connection descriptor schema")
+	}
+	if r.Environment == nil {
+		return nil
+	}
+	e := r.Environment
+	e.EnvironmentID, e.ProjectRoot = e.ID, e.Root
+	switch e.Kind {
+	case "machine":
+		e.UserMachineID, r.UserMachineID, r.UserMachineState = e.ResourceID, e.ResourceID, e.State
+	default:
+		return errors.New("paperboat-server returned an invalid environment kind")
+	}
+	if r.Terminal != nil {
+		if r.Terminal.Protocol != "paperboat.terminal.v1" {
+			return errors.New("invalid canonical terminal protocol")
+		}
+	}
+	if r.FileTransfer != nil {
+		u, err := url.Parse(r.FileTransfer.Endpoint)
+		if err != nil || u.Scheme == "" || u.Host == "" || strings.TrimRight(u.Path, "/") == "" {
+			return errors.New("invalid canonical file transfer endpoint")
+		}
+		r.FileTransfer.Endpoint = strings.TrimRight(r.FileTransfer.Endpoint, "/")
+	}
+	return nil
+}
+
+// ConfigSyncStatus is the account-wide status response. The CLI selects the
+// entry matching the attached machine and intentionally ignores path/error
+// details when rendering its local status line.
+type ConfigSyncStatus struct {
+	State        string                       `json:"state"`
+	Environments []ConfigSyncEnvironmentState `json:"environments"`
+}
+
+type ConfigSyncEnvironmentState struct {
+	MachineID             string                  `json:"machine_id"`
+	EnvironmentID         string                  `json:"environment_id"`
+	Alias                 string                  `json:"alias"`
+	State                 string                  `json:"state"`
+	Mode                  string                  `json:"mode"`
+	AssignmentVersion     int64                   `json:"assignment_version"`
+	RemoteRevision        string                  `json:"remote_revision"`
+	ManifestHealth        string                  `json:"manifest_health"`
+	ManifestRevision      string                  `json:"manifest_revision"`
+	ManagedPathCount      int                     `json:"managed_path_count"`
+	PendingCleanPathCount int                     `json:"pending_clean_path_count"`
+	LastAppliedRevision   string                  `json:"last_applied_revision"`
+	LastPublishedRevision string                  `json:"last_published_revision"`
+	Conflicts             []ConfigSyncPathSummary `json:"conflicts"`
+	Review                []ConfigSyncPathSummary `json:"review"`
+	ErrorCode             string                  `json:"error_code,omitempty"`
+	RecoveryActions       []string                `json:"recovery_actions,omitempty"`
+}
+
+type ConfigSyncPathSummary struct {
+	Path     string `json:"path"`
+	Bytes    int64  `json:"bytes,omitempty"`
+	Reason   string `json:"reason"`
+	Revision string `json:"revision,omitempty"`
+}
+
+// ConfigSyncStatus gets the authenticated account's configuration sync state.
+func (c *Client) ConfigSyncStatus(ctx context.Context) (ConfigSyncStatus, error) {
+	var out ConfigSyncStatus
+	err := c.do(ctx, http.MethodGet, "/v1/config-sync/status", nil, &out)
+	return out, err
+}
+
+type ConfigConflictRequest struct {
+	Path                      string `json:"path"`
+	ConflictRevision          string `json:"conflict_revision"`
+	ExpectedRemoteRevision    string `json:"expected_remote_revision"`
+	ExpectedAssignmentVersion int64  `json:"expected_assignment_version"`
+	Action                    string `json:"action"`
+}
+
+type ConfigOperation struct {
+	ID     string `json:"id"`
+	Path   string `json:"path"`
+	Scope  string `json:"scope"`
+	Action string `json:"action"`
+}
+
+func (c *Client) ResolveConfigConflict(ctx context.Context, machineID string, request ConfigConflictRequest) (ConfigOperation, error) {
+	var out ConfigOperation
+	err := c.do(ctx, http.MethodPost, "/v1/config-sync/environments/"+url.PathEscape(machineID)+"/conflict-resolutions", request, &out)
+	return out, err
+}
+
+type ConfigForceRequest struct {
+	Scope                     string `json:"scope"`
+	Path                      string `json:"path,omitempty"`
+	ConflictRevision          string `json:"conflict_revision,omitempty"`
+	ExpectedRemoteRevision    string `json:"expected_remote_revision"`
+	ExpectedAssignmentVersion int64  `json:"expected_assignment_version"`
+	Action                    string `json:"action"`
+	Confirmation              string `json:"confirmation"`
+}
+
+func (c *Client) ForceConfig(ctx context.Context, machineID string, request ConfigForceRequest) (ConfigOperation, error) {
+	var out ConfigOperation
+	err := c.do(ctx, http.MethodPost, "/v1/config-sync/environments/"+url.PathEscape(machineID)+"/force", request, &out)
+	return out, err
+}
+
+// Me fetches the authenticated user, validating the reused credential.
+func (c *Client) Me(ctx context.Context) (Me, error) {
+	var out Me
+	err := c.do(ctx, http.MethodGet, "/v1/me", nil, &out)
+	return out, err
+}
+
+// ListUserMachines returns every enrolled machine page using the
+// server-authored cursor. Calling it never reveals connector credentials or
+// local paths beyond the machine's declared scope.
+func (c *Client) ListUserMachines(ctx context.Context) ([]UserMachine, error) {
+	return c.ListUserMachinesFiltered(ctx, nil)
+}
+func (c *Client) ListUserMachinesFiltered(ctx context.Context, filters url.Values) ([]UserMachine, error) {
+	query := url.Values{"sort": {"alias"}}
+	for _, key := range []string{"q", "state", "owner"} {
+		if value := filters.Get(key); value != "" {
+			query.Set(key, value)
+		}
+	}
+	return collectOffsetInventory[UserMachine](ctx, c, "/v1/machines", "items", query)
+}
+
+func (c *Client) ManagedSSHTarget(ctx context.Context, machineID string, generation uint64) (ManagedSSHTarget, error) {
+	if strings.TrimSpace(machineID) == "" || generation == 0 {
+		return ManagedSSHTarget{}, errors.New("valid managed SSH target identity is required")
+	}
+	var target ManagedSSHTarget
+	path := fmt.Sprintf("/v1/machines/%s/ssh-target?machine_generation=%d", url.PathEscape(machineID), generation)
+	if err := c.do(ctx, http.MethodGet, path, nil, &target); err != nil {
+		return ManagedSSHTarget{}, err
+	}
+	if target.Type != "machine_target" || target.Version != 1 || target.MachineID != machineID || target.MachineGeneration != generation || target.Port == 0 || target.ReconciliationVersion == 0 || strings.TrimSpace(target.OSUser) == "" {
+		return ManagedSSHTarget{}, errors.New("paperboat-server returned an invalid managed SSH target")
+	}
+	return target, nil
+}
+
+func (c *Client) RegisterManagedSSHTarget(ctx context.Context, machineID string, generation uint64, osUser string, port uint16, operationID string) (ManagedSSHTarget, error) {
+	if strings.TrimSpace(machineID) == "" || generation == 0 || strings.TrimSpace(osUser) == "" || port == 0 || strings.TrimSpace(operationID) == "" {
+		return ManagedSSHTarget{}, errors.New("valid managed SSH target registration is required")
+	}
+	var target ManagedSSHTarget
+	err := c.doWithHeaders(ctx, http.MethodPut, "/v1/machines/"+url.PathEscape(machineID)+"/ssh-target", map[string]any{"machine_generation": generation, "os_user": osUser, "port": port}, &target, http.Header{"Idempotency-Key": []string{operationID}})
+	if err != nil {
+		return ManagedSSHTarget{}, err
+	}
+	if target.Type != "machine_target" || target.Version != 1 || target.MachineID != machineID || target.MachineGeneration != generation || target.OSUser != osUser || target.Port != port || target.ReconciliationVersion == 0 {
+		return ManagedSSHTarget{}, errors.New("paperboat-server returned an invalid managed SSH target")
+	}
+	return target, nil
+}
+
+func (c *Client) UpdateManagedSSHTargetPort(ctx context.Context, machineID string, generation, expectedVersion uint64, port uint16, operationID string) (ManagedSSHTarget, error) {
+	if strings.TrimSpace(machineID) == "" || generation == 0 || expectedVersion == 0 || port == 0 || strings.TrimSpace(operationID) == "" {
+		return ManagedSSHTarget{}, errors.New("valid managed SSH target update is required")
+	}
+	var target ManagedSSHTarget
+	err := c.doWithHeaders(ctx, http.MethodPut, "/v1/machines/"+url.PathEscape(machineID)+"/ssh-target", map[string]any{"machine_generation": generation, "port": port, "expected_reconciliation_version": expectedVersion}, &target, http.Header{"Idempotency-Key": []string{operationID}})
+	if err != nil {
+		return ManagedSSHTarget{}, err
+	}
+	if target.Type != "machine_target" || target.Version != 1 || target.MachineID != machineID || target.MachineGeneration != generation || target.Port != port || target.ReconciliationVersion != expectedVersion+1 {
+		return ManagedSSHTarget{}, errors.New("paperboat-server returned an invalid managed SSH target update")
+	}
+	return target, nil
+}
+
+func (c *Client) ObserveManagedSSHHostKeys(ctx context.Context, machineID, keyID, operationID string, generation, observationGeneration uint64, publicKeys []string, proof []byte) (ManagedSSHHostKeySet, error) {
+	if strings.TrimSpace(machineID) == "" || strings.TrimSpace(keyID) == "" || strings.TrimSpace(operationID) == "" || generation == 0 || observationGeneration == 0 || len(publicKeys) == 0 || len(proof) == 0 {
+		return ManagedSSHHostKeySet{}, errors.New("valid managed SSH host-key observation is required")
+	}
+	var set ManagedSSHHostKeySet
+	err := c.doWithHeaders(ctx, http.MethodPut, "/v1/machines/"+url.PathEscape(machineID)+"/ssh-host-keys", map[string]any{"observation_generation": observationGeneration, "public_keys": publicKeys}, &set, http.Header{"X-Paperboat-Machine-Identity": []string{keyID}, "X-Paperboat-Machine-Proof": []string{base64.RawURLEncoding.EncodeToString(proof)}})
+	if err != nil {
+		return ManagedSSHHostKeySet{}, err
+	}
+	if set.Type != "host_key_set" || set.Version != 1 || !validManagedSSHHostKeySetID(set.SetID) || set.MachineID != machineID || set.MachineGeneration != generation || set.ObservationGeneration == 0 || len(set.Keys) == 0 || set.ReconciliationVersion == 0 {
+		return ManagedSSHHostKeySet{}, errors.New("paperboat-server returned an invalid managed SSH host-key observation")
+	}
+	return set, nil
+}
+
+func (c *Client) ManagedSSHAuthorizedKeys(ctx context.Context, machineID, keyID string, generation uint64, proof []byte) (ManagedSSHAuthorizedKeys, error) {
+	if strings.TrimSpace(machineID) == "" || strings.TrimSpace(keyID) == "" || generation == 0 || len(proof) == 0 {
+		return ManagedSSHAuthorizedKeys{}, errors.New("valid managed SSH authorized-key request is required")
+	}
+	var set ManagedSSHAuthorizedKeys
+	err := c.doWithHeaders(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/ssh-authorized-keys", map[string]any{}, &set, http.Header{"X-Paperboat-Machine-Identity": []string{keyID}, "X-Paperboat-Machine-Proof": []string{base64.RawURLEncoding.EncodeToString(proof)}})
+	if err != nil {
+		return ManagedSSHAuthorizedKeys{}, err
+	}
+	if set.Type != "authorized_key_set" || set.Version != 1 || set.MachineID != machineID || set.MachineGeneration != generation || len(set.Keys) > 64 {
+		return ManagedSSHAuthorizedKeys{}, errors.New("paperboat-server returned an invalid managed SSH authorized-key set")
+	}
+	return set, nil
+}
+
+func (c *Client) ManagedSSHHostKeys(ctx context.Context, machineID string, generation uint64) (ManagedSSHHostKeySet, error) {
+	return c.managedSSHHostKeys(ctx, machineID, generation, "active")
+}
+
+func (c *Client) ManagedSSHPendingHostKeys(ctx context.Context, machineID string, generation uint64) (ManagedSSHHostKeySet, error) {
+	return c.managedSSHHostKeys(ctx, machineID, generation, "pending")
+}
+
+func (c *Client) managedSSHHostKeys(ctx context.Context, machineID string, generation uint64, state string) (ManagedSSHHostKeySet, error) {
+	if strings.TrimSpace(machineID) == "" || generation == 0 {
+		return ManagedSSHHostKeySet{}, errors.New("valid managed SSH host-key identity is required")
+	}
+	var set ManagedSSHHostKeySet
+	path := fmt.Sprintf("/v1/machines/%s/ssh-host-keys?machine_generation=%d&state=%s", url.PathEscape(machineID), generation, state)
+	if err := c.do(ctx, http.MethodGet, path, nil, &set); err != nil {
+		return ManagedSSHHostKeySet{}, err
+	}
+	if set.Type != "host_key_set" || set.Version != 1 || set.SetID == "" || set.MachineID != machineID || set.MachineGeneration != generation || set.ObservationGeneration == 0 || len(set.Keys) == 0 || set.State != state || set.Fingerprint == "" || set.ReconciliationVersion == 0 {
+		return ManagedSSHHostKeySet{}, errors.New("paperboat-server returned an invalid managed SSH host-key set")
+	}
+	return set, nil
+}
+
+func (c *Client) PromoteManagedSSHHostKeys(ctx context.Context, machineID, setID, fingerprint, operationID string, generation uint64) (ManagedSSHHostKeySet, error) {
+	if strings.TrimSpace(machineID) == "" || strings.TrimSpace(fingerprint) == "" || strings.TrimSpace(operationID) == "" || generation == 0 {
+		return ManagedSSHHostKeySet{}, errors.New("valid managed SSH host-key promotion is required")
+	}
+	var set ManagedSSHHostKeySet
+	err := c.doWithHeaders(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/ssh-host-keys/"+url.PathEscape(setID)+"/promote", map[string]any{"machine_generation": generation, "expected_fingerprint": fingerprint}, &set, http.Header{"Idempotency-Key": []string{operationID}})
+	if err != nil {
+		return ManagedSSHHostKeySet{}, err
+	}
+	if set.Type != "host_key_set" || set.Version != 1 || !validManagedSSHHostKeySetID(set.SetID) || set.MachineID != machineID || set.MachineGeneration != generation || set.State != "active" || set.Fingerprint != fingerprint || set.ReconciliationVersion == 0 {
+		return ManagedSSHHostKeySet{}, errors.New("paperboat-server returned an invalid managed SSH host-key promotion")
+	}
+	return set, nil
+}
+
+func (c *Client) RegisterManagedSSHClientKey(ctx context.Context, publicKey string, fingerprint [32]byte, operationID string) (ManagedSSHClientKey, error) {
+	publicKey = strings.TrimSpace(publicKey)
+	operationID = strings.TrimSpace(operationID)
+	if publicKey == "" || fingerprint == [32]byte{} || operationID == "" {
+		return ManagedSSHClientKey{}, errors.New("valid managed SSH client-key registration is required")
+	}
+	encodedFingerprint := "SHA256:" + base64.RawStdEncoding.EncodeToString(fingerprint[:])
+	var key ManagedSSHClientKey
+	path := "/v1/ssh/client-keys/" + url.PathEscape(encodedFingerprint)
+	err := c.doWithHeaders(ctx, http.MethodPut, path, map[string]string{"public_key": publicKey}, &key, http.Header{"Idempotency-Key": []string{operationID}})
+	if err != nil {
+		return ManagedSSHClientKey{}, err
+	}
+	if key.Type != "client_key" || key.Version != 1 || key.Fingerprint != encodedFingerprint || key.PublicKey != publicKey || key.State != "active" || key.ReconciliationVersion == 0 {
+		return ManagedSSHClientKey{}, errors.New("paperboat-server returned an invalid managed SSH client key")
+	}
+	return key, nil
+}
+
+func (c *Client) DisconnectUserMachine(ctx context.Context, machineID string) error {
+	if strings.TrimSpace(machineID) == "" {
+		return errors.New("machine ID is required")
+	}
+	return c.do(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/disconnect", nil, nil)
+}
+
+func (c *Client) RenameUserMachine(ctx context.Context, machineID, alias string) (UserMachine, error) {
+	machineID = strings.TrimSpace(machineID)
+	alias = strings.ToLower(strings.TrimSpace(alias))
+	if machineID == "" || alias == "" {
+		return UserMachine{}, errors.New("machine ID and alias are required")
+	}
+	if err := machinename.Validate(alias); err != nil {
+		return UserMachine{}, err
+	}
+	var out UserMachine
+	err := c.do(ctx, http.MethodPatch, "/v1/machines/"+url.PathEscape(machineID), map[string]string{"alias": alias}, &out)
+	return out, err
+}
+
+func (c *Client) SetUserMachineAvailability(ctx context.Context, machineID, mode, idempotencyKey string, expectedVersion int64) (AvailabilityPolicy, error) {
+	if strings.TrimSpace(machineID) == "" || (mode != "allow_sleep" && mode != "keep_awake") || strings.TrimSpace(idempotencyKey) == "" || expectedVersion < 0 {
+		return AvailabilityPolicy{}, errors.New("valid machine availability input is required")
+	}
+	var out AvailabilityPolicy
+	path := "/v1/machines/" + url.PathEscape(machineID) + "/availability-policy"
+	err := c.doWithHeaders(ctx, http.MethodPut, path, map[string]any{"expected_version": expectedVersion, "mode": mode}, &out, http.Header{"Idempotency-Key": []string{idempotencyKey}})
+	return out, err
+}
+
+func (c *Client) SetUserMachineCapabilities(ctx context.Context, machineID, idempotencyKey string, desired MachineCapabilitySelection, expectedVersion int64) (MachineCapabilityPolicy, error) {
+	if strings.TrimSpace(machineID) == "" || strings.TrimSpace(idempotencyKey) == "" || expectedVersion < 1 {
+		return MachineCapabilityPolicy{}, errors.New("valid machine capability input is required")
+	}
+	var out MachineCapabilityPolicy
+	path := "/v1/machines/" + url.PathEscape(machineID) + "/capabilities"
+	err := c.doWithHeaders(ctx, http.MethodPut, path, map[string]any{"expected_version": expectedVersion, "desired": desired}, &out, http.Header{"Idempotency-Key": []string{idempotencyKey}})
+	return out, err
+}
+
+func (c *Client) DeleteUserMachine(ctx context.Context, machineID string) error {
+	if strings.TrimSpace(machineID) == "" {
+		return errors.New("machine ID is required")
+	}
+	return c.do(ctx, http.MethodDelete, "/v1/machines/"+url.PathEscape(machineID), nil, nil)
+}
+
+// UserMachineConnectionDescriptor obtains the default terminal session's short-lived
+// Paperboat descriptor. It deliberately does not accept a client-supplied
+// route or connector credential.
+func (c *Client) UserMachineConnectionDescriptor(ctx context.Context, machineID string) (ConnectionDescriptor, error) {
+	return c.UserMachineConnectionDescriptorForSession(ctx, machineID, "")
+}
+
+// UserMachineConnectionDescriptorWithSessionCreate creates a durable terminal
+// session and issues the connection descriptor in one round trip. The
+// idempotency key makes retried requests resolve the same durable session.
+func (c *Client) UserMachineConnectionDescriptorWithSessionCreate(ctx context.Context, machineID, name, idempotencyKey, cwd string) (ConnectionDescriptor, TerminalSession, error) {
+	if strings.TrimSpace(machineID) == "" || strings.TrimSpace(idempotencyKey) == "" || c.sourceMachineID == "" {
+		return ConnectionDescriptor{}, TerminalSession{}, errors.New("machine identity and idempotency key are required")
+	}
+	var out struct {
+		Descriptor      ConnectionDescriptor `json:"descriptor"`
+		TerminalSession TerminalSession      `json:"terminal_session"`
+	}
+	create := map[string]string{"name": name, "idempotency_key": idempotencyKey}
+	if cwd != "" {
+		create["cwd"] = cwd
+	}
+	err := c.do(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/connection-descriptor", map[string]any{
+		"source_machine_id": c.sourceMachineID,
+		"create_session":    create,
+	}, &out)
+	if err == nil {
+		err = out.Descriptor.NormalizeConnectionDescriptor()
+	}
+	if err == nil && out.TerminalSession.ID == "" {
+		err = errors.New("server did not return the created terminal session")
+	}
+	return out.Descriptor, out.TerminalSession, err
+}
+
+// UserMachineConnectionDescriptorForSession connects a durable terminal session belonging
+// to an enrolled machine.
+func (c *Client) UserMachineConnectionDescriptorForSession(ctx context.Context, machineID, terminalSessionID string) (ConnectionDescriptor, error) {
+	var out ConnectionDescriptor
+	var values map[string]string
+	if c.sourceMachineID != "" {
+		values = map[string]string{"source_machine_id": c.sourceMachineID}
+	}
+	if terminalSessionID != "" {
+		if values == nil {
+			values = make(map[string]string)
+		}
+		values["terminal_session_id"] = terminalSessionID
+	}
+	var body any
+	if values != nil {
+		body = values
+	}
+	err := c.do(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/connection-descriptor", body, &out)
+	if err == nil {
+		err = out.NormalizeConnectionDescriptor()
+	}
+	return out, err
+}
+
+func (c *Client) MachineExecDescriptor(ctx context.Context, machineID, operationID string) (ExecDescriptor, error) {
+	if strings.TrimSpace(machineID) == "" || len(operationID) < 8 || len(operationID) > 128 || c.sourceMachineID == "" {
+		return ExecDescriptor{}, errors.New("machine, source machine, and operation IDs are required")
+	}
+	var out ExecDescriptor
+	err := c.do(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/exec-descriptor", map[string]string{"source_machine_id": c.sourceMachineID, "operation_id": operationID}, &out)
+	if err == nil {
+		err = validateOperationDescriptor(out, machineID, operationID, "exec:operate", "exec")
+	}
+	return out, err
+}
+
+func (c *Client) MachineSSHDescriptor(ctx context.Context, machineID, operationID string) (SSHDescriptor, error) {
+	if strings.TrimSpace(machineID) == "" || len(operationID) < 8 || len(operationID) > 128 || c.sourceMachineID == "" {
+		return SSHDescriptor{}, errors.New("machine, source machine, and operation IDs are required")
+	}
+	var out SSHDescriptor
+	err := c.do(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(machineID)+"/ssh-descriptor", map[string]string{"source_machine_id": c.sourceMachineID, "operation_id": operationID}, &out)
+	if err == nil {
+		err = validateOperationDescriptor(out, machineID, operationID, "ssh:operate", "ssh")
+	}
+	return out, err
+}
+
+func validateOperationDescriptor(out ExecDescriptor, machineID, operationID, expectedScope, operationKind string) error {
+	quic, quicErr := url.Parse(out.Endpoints.QUIC)
+	wss, wssErr := url.Parse(out.Endpoints.WSS)
+	if out.OperationID != operationID || out.Environment == nil || out.Environment.ID == "" || out.Environment.Kind != "machine" || out.Environment.ResourceID != machineID || out.Environment.State != "ready" || !remotepath.Absolute(out.Environment.Root) ||
+		quicErr != nil || quic.Scheme != "quic" || quic.Hostname() == "" || quic.User != nil || quic.Path != "" || quic.RawQuery != "" || quic.Fragment != "" ||
+		wssErr != nil || wss.Scheme != "wss" || wss.Hostname() == "" || wss.User != nil || wss.Path != "/v1/runtime" || wss.RawQuery != "" || wss.Fragment != "" ||
+		out.Auth.Method != "bearer" || out.Auth.Token == "" || len(out.Auth.Scopes) != 1 || out.Auth.Scopes[0] != expectedScope || out.ExpiresAt.IsZero() || out.Auth.ExpiresAt.IsZero() || !out.ExpiresAt.Equal(out.Auth.ExpiresAt) {
+		return fmt.Errorf("invalid %s descriptor", operationKind)
+	}
+	return nil
+}
+
+func (c *Client) MachineFileTransferDescriptor(ctx context.Context, destinationMachineID, sourceMachineID, sessionID string) (FileTransfer, error) {
+	return c.MachineFileTransferDescriptorForRequest(ctx, destinationMachineID, sourceMachineID, sessionID, "", "")
+}
+
+func (c *Client) MachineFileTransferDescriptorForRequest(ctx context.Context, destinationMachineID, sourceMachineID, sessionID, requestID, manifestDigest string) (FileTransfer, error) {
+	if strings.TrimSpace(destinationMachineID) == "" || strings.TrimSpace(sourceMachineID) == "" {
+		return FileTransfer{}, errors.New("source and destination machine IDs are required")
+	}
+	var out FileTransfer
+	body := map[string]string{
+		"source_machine_id": sourceMachineID,
+		"session_id":        sessionID,
+	}
+	if requestID != "" || manifestDigest != "" {
+		body["request_id"], body["manifest_digest"] = requestID, manifestDigest
+	}
+	err := c.do(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(destinationMachineID)+"/file-transfer-descriptor", body, &out)
+	return out, err
+}
+
+// UserMachineConnectionReadiness polls readiness without minting a fresh
+// descriptor. Reconnects re-run UserMachineConnectionDescriptor after this reports
+// ready, matching the machine connection flow.
+func (c *Client) UserMachineConnectionReadiness(ctx context.Context, machineID string) (ConnectionDescriptor, error) {
+	return c.UserMachineConnectionReadinessForSession(ctx, machineID, "")
+}
+
+// UserMachineConnectionReadinessForSession preserves the selected terminal
+// session through readiness polling.
+func (c *Client) UserMachineConnectionReadinessForSession(ctx context.Context, machineID, terminalSessionID string) (ConnectionDescriptor, error) {
+	var out ConnectionDescriptor
+	path := "/v1/machines/" + url.PathEscape(machineID) + "/connection-readiness"
+	if terminalSessionID != "" {
+		path += "?terminal_session_id=" + url.QueryEscape(terminalSessionID)
+	}
+	err := c.do(ctx, http.MethodGet, path, nil, &out)
+	if err == nil {
+		err = out.NormalizeConnectionDescriptor()
+	}
+	return out, err
+}
+
+// ListUserMachineTerminalSessions lists the durable Paperboat sessions
+// for a machine. Session records remain server-owned, so the CLI
+// never discovers local paths or connector state through this endpoint.
+func (c *Client) ListUserMachineTerminalSessions(ctx context.Context, machineID string) ([]TerminalSession, error) {
+	return c.ListUserMachineTerminalSessionsFiltered(ctx, machineID, nil)
+}
+
+func (c *Client) ListUserMachineTerminalSessionsFiltered(ctx context.Context, machineID string, filters url.Values) ([]TerminalSession, error) {
+	return collectOffsetInventory[TerminalSession](ctx, c, "/v1/machines/"+url.PathEscape(machineID)+"/terminal-sessions", "items", filters)
+}
+
+func (c *Client) CreateUserMachineTerminalSession(ctx context.Context, machineID, name, idempotencyKey string) (TerminalSession, error) {
+	var out TerminalSession
+	body := map[string]string{}
+	if name != "" {
+		body["name"] = name
+	}
+	path := "/v1/machines/" + url.PathEscape(machineID) + "/terminal-sessions"
+	return out, c.doWithHeaders(ctx, http.MethodPost, path, body, &out, http.Header{"Idempotency-Key": []string{idempotencyKey}})
+}
+
+func (c *Client) RenameUserMachineTerminalSession(ctx context.Context, machineID, sessionID, name string) (TerminalSession, error) {
+	var out TerminalSession
+	path := "/v1/machines/" + url.PathEscape(machineID) + "/terminal-sessions/" + url.PathEscape(sessionID)
+	err := c.do(ctx, http.MethodPatch, path, map[string]string{"name": name}, &out)
+	return out, err
+}
+
+func (c *Client) CloseUserMachineTerminalSession(ctx context.Context, machineID, sessionID string) error {
+	path := "/v1/machines/" + url.PathEscape(machineID) + "/terminal-sessions/" + url.PathEscape(sessionID) + "/close"
+	return c.do(ctx, http.MethodPost, path, nil, &struct{}{})
+}
+
+func (c *Client) DeleteUserMachineTerminalSession(ctx context.Context, machineID, sessionID string) error {
+	path := "/v1/machines/" + url.PathEscape(machineID) + "/terminal-sessions/" + url.PathEscape(sessionID)
+	return c.do(ctx, http.MethodDelete, path, nil, &struct{}{})
+}
+
+func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
+	return c.doRequest(ctx, method, path, body, out, nil, false)
+}
+
+func (c *Client) doWithHeaders(ctx context.Context, method, path string, body, out any, headers http.Header) error {
+	return c.doRequest(ctx, method, path, body, out, headers, false)
+}
+
+func (c *Client) doStrict(ctx context.Context, method, path string, body, out any) error {
+	return c.doRequest(ctx, method, path, body, out, nil, true)
+}
+
+func (c *Client) doRequest(ctx context.Context, method, path string, body, out any, headers http.Header, strict bool) error {
+	return c.doRequestMeta(ctx, method, path, body, out, headers, strict, nil)
+}
+
+// doRequestMeta is the same authenticated request path used by the rest of
+// the client, with response headers exposed to callers that need optimistic
+// concurrency metadata. Keeping this as a narrow extension avoids making
+// ETags or other transport headers part of every existing API method.
+func (c *Client) doRequestMeta(ctx context.Context, method, path string, body, out any, headers http.Header, strict bool, responseHeaders *http.Header) error {
+	if strings.TrimSpace(c.baseURL) == "" {
+		return errors.New("paperboat-server base URL is not configured")
+	}
+	var err error
+	path, err = c.workspaceRequestPath(path)
+	if err != nil {
+		return err
+	}
+
+	var reader io.Reader
+	var encodedBody []byte
+	if body != nil {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("encode request body: %w", err)
+		}
+		encodedBody = encoded
+		reader = bytes.NewReader(encoded)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "paperboat/"+buildinfo.Version)
+	req.Header.Set("X-Paperboat-Client", "paperboat")
+	req.Header.Set("X-Paperboat-Distribution", buildinfo.Distribution)
+	req.Header.Set("X-Paperboat-Protocol", buildinfo.ProtocolVersion)
+	requestSupportReference := supportref.FromContext(ctx)
+	if requestSupportReference == "" {
+		requestSupportReference = supportref.New()
+	}
+	if requestSupportReference != "" {
+		req.Header.Set(supportref.Header, requestSupportReference)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.accessToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.accessToken)
+	}
+	for key, values := range headers {
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
+	}
+	if c.machineAuth != nil && method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions {
+		token, err := c.machineAuth.Token(ctx)
+		if err != nil {
+			return fmt.Errorf("machine authentication token: %w", err)
+		}
+		if strings.TrimSpace(token) == "" {
+			return errors.New("machine authentication token is empty")
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-Paperboat-Machine-Identity", token)
+		operationID := strings.TrimSpace(req.Header.Get("Idempotency-Key"))
+		if operationID == "" {
+			return errors.New("machine-authenticated mutation requires Idempotency-Key")
+		}
+		// Machine proofs use the canonical route path verified by the server.
+		// Workspace selection remains authenticated in the exact signed JSON body.
+		proof, err := c.machineAuth.Proof(ctx, operationID, method, req.URL.Path, encodedBody)
+		if err != nil || len(proof) == 0 {
+			if err == nil {
+				err = errors.New("empty machine proof")
+			}
+			return fmt.Errorf("machine authentication proof: %w", err)
+		}
+		req.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString(proof))
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("call %s %s: %w", method, path, err)
+	}
+	defer resp.Body.Close()
+	if responseHeaders != nil {
+		*responseHeaders = resp.Header.Clone()
+	}
+	if resp.StatusCode == http.StatusNoContent {
+		return nil
+	}
+
+	var envelope struct {
+		Data  json.RawMessage `json:"data"`
+		Error struct {
+			Code             string         `json:"code"`
+			Message          string         `json:"message"`
+			SupportReference string         `json:"support_reference"`
+			Details          map[string]any `json:"details"`
+		} `json:"error"`
+	}
+	// A body is expected for every documented response; a decode failure on a
+	// 2xx is a real protocol error, so surface it rather than silently succeed.
+	decodeErr := json.NewDecoder(resp.Body).Decode(&envelope)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if (resp.StatusCode == http.StatusUpgradeRequired && envelope.Error.Code != "update_required") || envelope.Error.Code == "incompatible_client_version" {
+			required, _ := envelope.Error.Details["required_protocol"].(string)
+			return &ErrIncompatibleVersion{Required: safeRequiredProtocol(required), Message: apiErrorMessage("incompatible_client_version", resp.StatusCode)}
+		}
+		responseSupportReference := resp.Header.Get(supportref.Header)
+		if !supportref.Valid(responseSupportReference) {
+			responseSupportReference = envelope.Error.SupportReference
+		}
+		if !supportref.Valid(responseSupportReference) {
+			responseSupportReference = requestSupportReference
+		}
+		return c.workspaceRequestError(path, &APIError{Status: resp.StatusCode, Code: envelope.Error.Code, Message: apiErrorMessage(envelope.Error.Code, resp.StatusCode), RequestID: responseRequestID(resp.Header), SupportReference: responseSupportReference, Details: envelope.Error.Details, cause: errorreport.HTTPStatusFailure(resp)})
+	}
+	if decodeErr != nil {
+		return &ResponseDecodeError{Err: decodeErr}
+	}
+	if out == nil {
+		return nil
+	}
+	if len(envelope.Data) == 0 {
+		return fmt.Errorf("%s %s returned an empty response", method, path)
+	}
+	if !strict {
+		if err := json.Unmarshal(envelope.Data, out); err != nil {
+			return &ResponseDecodeError{Err: err}
+		}
+		return nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(envelope.Data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(out); err != nil {
+		return &ResponseDecodeError{Err: err}
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return fmt.Errorf("decode %s %s data: trailing JSON", method, path)
+	}
+	return nil
+}
+
+func safeRequestID(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 200 {
+		return ""
+	}
+	for _, r := range value {
+		if !(r >= 'a' && r <= 'z') && !(r >= 'A' && r <= 'Z') && !(r >= '0' && r <= '9') && !strings.ContainsRune("_.:-", r) {
+			return ""
+		}
+	}
+	return value
+}
+
+func validManagedSSHHostKeySetID(value string) bool {
+	suffix, ok := strings.CutPrefix(value, "keyset_")
+	id, err := uuid.Parse(suffix)
+	return ok && err == nil && id.Version() == 4 && id.Variant() == uuid.RFC4122 && id.String() == suffix
+}

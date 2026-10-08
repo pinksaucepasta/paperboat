@@ -1,0 +1,46 @@
+.nh
+.TH "PB-CONFIG-LOCAL-ACCESS-ALIAS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-local-access-alias - Manage named browser aliases for authorized machine ports
+
+
+.SH SYNOPSIS
+\fBpb config local-access alias [flags]\fP
+
+
+.SH DESCRIPTION
+Manage optional DNS names for ports that are already authorized on a machine. Alias configuration never creates a port grant; the browser gateway checks the existing authorization when it resolves and serves each request.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for alias
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config-local-access(1)\fP, \fBpb-config-local-access-alias-set(1)\fP, \fBpb-config-local-access-alias-unset(1)\fP

@@ -1,0 +1,52 @@
+.nh
+.TH "PB-SERVICE-INSTALL" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-service-install - Install Paperboat daemon as the current-user service
+
+
+.SH SYNOPSIS
+\fBpb service install [flags]\fP
+
+
+.SH DESCRIPTION
+Install Paperboat daemon as the current-user service
+
+.PP
+Register the current executable as the current user's Paperboat daemon service, using the selected server and configuration. Installation does not enroll a new account by itself.
+
+.PP
+Service commands manage the current user's background Paperboat daemon through the host operating system. The service runs pb daemon; it is not a separate Paperboat binary. Use status to inspect the supervised process and restart after a local configuration change.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--config\fP=""
+	configuration file path
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for install
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--server\fP=""
+	Paperboat server URL
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-service(1)\fP

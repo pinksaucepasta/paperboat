@@ -1,0 +1,288 @@
+//go:build windows
+
+package updated
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/binarytarget"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesignature"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
+	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
+	"golang.org/x/sys/windows"
+)
+
+// WindowsConfig contains only fixed paths supplied by the SCM installation.
+// Release metadata is never accepted over the local service command channel.
+type WindowsConfig struct {
+	Source                                                                     installsource.Source
+	StateRoot, RuntimeStateRoot, Binary, BinaryRollback, BinaryStaged          string
+	OwnerSID, MachineID, RepositoryURL, TokenFile, InstallState, ControlSocket string
+	ActiveVersion                                                              string
+	Architecture                                                               string
+	HostdSocket, HealthURL                                                     string
+	AutomaticChecks                                                            bool
+	VerifyExecutable                                                           func(context.Context, string, string) error
+	ResolveRelease                                                             workerupdate.Resolver
+	AuthorizeOwnerMaintenance                                                  func(context.Context, workerupdate.Release, bool) error
+	localDaemonReady                                                           func() bool
+}
+
+func validLoopbackHealthURL(value string) bool {
+	parsed, err := url.Parse(value)
+	return err == nil && parsed.Scheme == "http" && parsed.User == nil && parsed.RawQuery == "" && parsed.Fragment == "" && parsed.Path == "/healthz" && net.ParseIP(parsed.Hostname()) != nil && net.ParseIP(parsed.Hostname()).IsLoopback() && parsed.Port() != ""
+}
+
+var ErrInvalidWindowsConfig = errors.New("invalid Windows updater configuration")
+
+// RunWindows performs crash recovery before publishing updater readiness. The
+// normal update controller connects through the protected named-pipe client;
+// this service intentionally keeps its public SCM invocation argument-free.
+func RunWindows(ctx context.Context, config WindowsConfig) error {
+	return RunWindowsWithReady(ctx, config, nil)
+}
+
+// RunWindowsWithReady is the SCM service entry used by the durable updater
+// declaration. The callback runs only after the protected control listener has
+// been created, allowing the SCM wrapper to delay Running until the updater
+// can accept control requests.
+func RunWindowsWithReady(ctx context.Context, config WindowsConfig, ready func() error) error {
+	if !validWindowsConfig(config) {
+		return ErrInvalidWindowsConfig
+	}
+	if err := validateWindowsReadOnlyOwnerFile(config.TokenFile, config.OwnerSID); err != nil {
+		return fmt.Errorf("validate updater token permissions: %w", err)
+	}
+	if err := validateWindowsReadOnlyOwnerFile(config.InstallState, config.OwnerSID); err != nil {
+		return fmt.Errorf("validate updater installation permissions: %w", err)
+	}
+	if err := validateWindowsPrivilegedInstallConfig(config); err != nil {
+		return fmt.Errorf("validate updater installation binding: %w", err)
+	}
+	if err := secureWindowsPrivilegedTree(config.StateRoot); err != nil {
+		return fmt.Errorf("secure updater state: %w", err)
+	}
+	if err := reconcileWindowsInstallVersion(ctx, config); err != nil {
+		return fmt.Errorf("reconcile installed updater version: %w", err)
+	}
+	if err := recoverWindowsSlots(ctx, config); err != nil {
+		return fmt.Errorf("recover updater binary slots: %w", err)
+	}
+	if resumed, err := resumeWindowsActivation(ctx, config); err != nil {
+		return fmt.Errorf("resume updater activation: %w", err)
+	} else if resumed {
+		if ready != nil {
+			return service.ErrWindowsServiceHandoff
+		}
+		return nil
+	}
+	// Repair the durable, silent LocalDaemon service before reporting updater
+	// readiness. Do not cross an active transaction's rollback boundary: the
+	// candidate activator finalizes this migration only after its journal is
+	// durably committed.
+	finalizeLocalDaemon := true
+	if journal, journalErr := loadWindowsActivationJournal(config); journalErr == nil {
+		finalizeLocalDaemon = journal.Stage == windowsActivationCommitted || journal.Stage == windowsActivationRolledBack
+	} else if !errors.Is(journalErr, os.ErrNotExist) {
+		return journalErr
+	}
+	instance, err := service.WindowsUserInstance(config.OwnerSID)
+	if err != nil {
+		return err
+	}
+	persisted, err := hostinstall.LoadWindowsRuntimeConfigForInstance(instance)
+	if err != nil {
+		return err
+	}
+	// The installer and repair path already migrate, start, and probe the
+	// canonical LocalDaemon before starting Updated. Calling the same migration
+	// here would wait on the installer's Global mutex while SCM waits for this
+	// updater to publish readiness. Only an updater started outside that
+	// protected path must run the legacy migration itself.
+	if finalizeLocalDaemon && persisted.Committed && !config.LocalDaemonReady() {
+		if err := hostinstall.EnsureWindowsLocalDaemonService(ctx, config.OwnerSID); err != nil {
+			return err
+		}
+	}
+	state := struct {
+		Schema      string    `json:"schema"`
+		MachineID   string    `json:"machine_id"`
+		RecoveredAt time.Time `json:"recovered_at"`
+	}{Schema: "paperboat.windows-updated/v1", MachineID: config.MachineID, RecoveredAt: time.Now().UTC()}
+	body, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	if err := atomicfile.Write(filepath.Join(config.StateRoot, "service-state.json"), body, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1}); err != nil {
+		return err
+	}
+	if err := applyWindowsPrivilegedACL(filepath.Join(config.StateRoot, "service-state.json"), false); err != nil {
+		return err
+	}
+	controller, err := newWindowsController(config)
+	if err != nil {
+		return err
+	}
+	return controller.run(ctx, ready)
+}
+
+func (config WindowsConfig) LocalDaemonReady() bool {
+	if config.localDaemonReady != nil {
+		return config.localDaemonReady()
+	}
+	return hostinstall.WindowsLocalDaemonServiceReady(config.OwnerSID, config.RuntimeStateRoot)
+}
+
+func validWindowsConfig(config WindowsConfig) bool {
+	paths := []string{config.StateRoot, config.RuntimeStateRoot, config.Binary, config.BinaryRollback, config.BinaryStaged, config.TokenFile, config.InstallState}
+	for _, value := range paths {
+		if !filepath.IsAbs(value) || filepath.Clean(value) != value || strings.ContainsAny(value, "\x00\r\n") {
+			return false
+		}
+	}
+	layout, layoutErr := service.WindowsUserLayout(config.OwnerSID)
+	instance, instanceErr := service.WindowsUserInstance(config.OwnerSID)
+	instanceRoot := filepath.Join(hostinstall.WindowsProgramDataRoot(), "users", instance)
+	sid, err := windows.StringToSid(config.OwnerSID)
+	return layoutErr == nil && instanceErr == nil && err == nil && sid != nil && sid.IsValid() && config.MachineID != "" && config.RepositoryURL != "" && config.StateRoot == layout.UpdateStateRoot && filepath.Base(config.RuntimeStateRoot) == "runtime" && config.Binary == layout.Binary && config.BinaryRollback == layout.BinaryRollback && config.BinaryStaged == layout.BinaryStaged && config.TokenFile == filepath.Join(instanceRoot, "hostd.token") && config.InstallState == filepath.Join(instanceRoot, "runtime-install.json") && config.ControlSocket == layout.UpdaterSocket && config.HostdSocket == layout.HostdSocket && validLoopbackHealthURL(config.HealthURL) && (exactReleasePattern.MatchString(config.ActiveVersion) || config.Source.Validate() == nil && config.Source.Version == config.ActiveVersion) && (config.Architecture == "amd64" || config.Architecture == "arm64")
+}
+
+func validateWindowsPrivilegedInstallConfig(config WindowsConfig) error {
+	instance, err := service.WindowsUserInstance(config.OwnerSID)
+	if err != nil {
+		return ErrInvalidWindowsConfig
+	}
+	persisted, err := hostinstall.LoadWindowsRuntimeConfigForInstance(instance)
+	if err != nil {
+		return ErrInvalidWindowsConfig
+	}
+	// ActiveVersion may legitimately differ while a protected activation
+	// journal is rolling forward/back, or while MSI has installed a newer
+	// signed updater. reconcileWindowsInstallVersion binds that one mutable
+	// field to signed TUF metadata before committing it.
+	if persisted.Source != config.Source || config.AutomaticChecks != config.Source.AutomaticUpdates || persisted.OwnerSID != config.OwnerSID || persisted.MachineID != config.MachineID || persisted.StateRoot != config.RuntimeStateRoot || persisted.TokenFile != config.TokenFile || persisted.Artifact.Platform != "windows" || persisted.Artifact.Architecture != config.Architecture || persisted.Artifact.RepositoryURL != config.RepositoryURL || "http://"+persisted.ListenAddress+"/healthz" != config.HealthURL {
+		return ErrInvalidWindowsConfig
+	}
+	return nil
+}
+
+func validateWindowsReadOnlyOwnerFile(path, ownerSID string) error {
+	if err := secureWindowsFileShape(path); err != nil {
+		return err
+	}
+	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
+	if err != nil || !windowssecurity.OwnerMatchesSID(path, system) {
+		return ErrInvalidWindowsConfig
+	}
+	want := "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;" + ownerSID + ")"
+	if !windowssecurity.ProtectedDACLMatches(path, want) {
+		return ErrInvalidWindowsConfig
+	}
+	return nil
+}
+
+func secureWindowsFileShape(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return ErrInvalidWindowsConfig
+	}
+	attributes, err := windows.GetFileAttributes(windows.StringToUTF16Ptr(path))
+	if err != nil || attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+		return ErrInvalidWindowsConfig
+	}
+	return nil
+}
+
+func secureWindowsPrivilegedTree(root string) error {
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return err
+	}
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		attributes, err := windows.GetFileAttributes(windows.StringToUTF16Ptr(path))
+		if err != nil || attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+			return ErrInvalidWindowsConfig
+		}
+		return applyWindowsPrivilegedACL(path, entry.IsDir())
+	})
+}
+
+func applyWindowsPrivilegedACL(path string, directory bool) error {
+	inherit := ""
+	if directory {
+		inherit = "OICI"
+	}
+	descriptor, err := windows.SecurityDescriptorFromString("D:P(A;" + inherit + ";FA;;;SY)(A;" + inherit + ";FA;;;BA)")
+	if err != nil {
+		return err
+	}
+	dacl, _, err := descriptor.DACL()
+	if err != nil {
+		return err
+	}
+	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil)
+}
+func recoverWindowsSlots(ctx context.Context, config WindowsConfig) error {
+	verify := config.VerifyExecutable
+	if verify == nil {
+		verify = verifyWindowsRecoveryExecutable
+	}
+	runtimeRestore, runtimeErr := validateWindowsSlot(ctx, config.Binary, config.BinaryRollback, config.Architecture, verify)
+	// A staged file without a committed transaction is deliberately discarded.
+	// This is the safe reboot recovery point: never activate unknown bytes.
+	stagedErr := os.Remove(config.BinaryStaged)
+	if errors.Is(stagedErr, os.ErrNotExist) {
+		stagedErr = nil
+	}
+	if err := errors.Join(runtimeErr, stagedErr); err != nil {
+		return err
+	}
+	if runtimeRestore {
+		//paperboat:allow-source-policy atomic-replacement owner=windows-updater reason=verified-runtime-rollback-slot-activation
+		if err := os.Rename(config.BinaryRollback, config.Binary); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateWindowsSlot(ctx context.Context, current, rollback, architecture string, verify func(context.Context, string, string) error) (bool, error) {
+	if _, err := os.Stat(current); errors.Is(err, os.ErrNotExist) {
+		if _, rollbackErr := os.Stat(rollback); rollbackErr == nil {
+			if err := verify(ctx, rollback, architecture); err != nil {
+				return false, err
+			}
+			return true, nil
+		} else if !errors.Is(rollbackErr, os.ErrNotExist) {
+			return false, rollbackErr
+		}
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	return false, verify(ctx, current, architecture)
+}
+
+func verifyWindowsRecoveryExecutable(ctx context.Context, path, architecture string) error {
+	if err := binarytarget.Validate(path, "windows", architecture); err != nil {
+		return err
+	}
+	verifyCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return nativesignature.New(nil).Verify(verifyCtx, path, "windows", architecture)
+}

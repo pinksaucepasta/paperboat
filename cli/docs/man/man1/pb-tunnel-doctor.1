@@ -1,0 +1,68 @@
+.nh
+.TH "PB-TUNNEL-DOCTOR" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel-doctor - Diagnose tunnel health
+
+
+.SH SYNOPSIS
+\fBpb tunnel doctor <tunnel> [flags]\fP
+
+
+.SH DESCRIPTION
+Diagnose tunnel health
+
+.PP
+Diagnose placement, connector, edge, and origin health for one tunnel. --bundle can prepare bounded supporting diagnostics, and --write-bundle selects a local output file.
+
+.PP
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--bundle\fP=""
+	absolute path for a local support-bundle preview
+
+.PP
+\fB--bundle-max-bytes\fP=2097152
+	maximum bundle bytes (64KiB-8MiB)
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for doctor
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+.PP
+\fB--write-bundle\fP[=false]
+	write the exact previewed bundle (requires --bundle)
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-tunnel(1)\fP

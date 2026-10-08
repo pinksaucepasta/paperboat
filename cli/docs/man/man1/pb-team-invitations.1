@@ -1,0 +1,52 @@
+.nh
+.TH "PB-TEAM-INVITATIONS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-invitations - Discover pending invitations received by you or administered for a team
+
+
+.SH SYNOPSIS
+\fBpb team invitations [team] [flags]\fP
+
+
+.SH DESCRIPTION
+Discover pending invitations received by you or administered for a team
+
+.PP
+Discover every authorized invitation for your account, or list invitations for a team you administer. Inventory pagination is followed to completion. Use the exact invitation identity to inspect, accept a received invitation, or cancel an invitation you administer.
+
+.PP
+Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for invitations
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-team(1)\fP

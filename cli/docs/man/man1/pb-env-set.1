@@ -1,0 +1,68 @@
+.nh
+.TH "PB-ENV-SET" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-env-set - Set one environment variable through a hidden prompt or bounded stdin
+
+
+.SH SYNOPSIS
+\fBpb env set <name> [flags]\fP
+
+
+.SH DESCRIPTION
+Set one environment variable through a hidden prompt or bounded stdin
+
+.PP
+Set one exact ENV name using a hidden interactive prompt, a bounded stdin stream, or --value-file. Use --team or --machine to choose a nonpersonal scope; the value is never part of the command output.
+
+.PP
+ENV values are encrypted before they leave the client. Commands select personal, team, or host scope explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for set
+
+.PP
+\fB--json\fP[=false]
+	print redacted JSON metadata
+
+.PP
+\fB--machine\fP=""
+	machine name or ID; defaults to the personal scope
+
+.PP
+\fB--team\fP=""
+	team scope; cannot be combined with --machine
+
+.PP
+\fB--value-file\fP=""
+	read the raw value from an absolute file path
+
+.PP
+\fB--value-stdin\fP[=false]
+	read the raw value from non-interactive stdin
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-env(1)\fP

@@ -1,0 +1,305 @@
+//go:build darwin || linux
+
+package hostruntimecmd
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	gort "runtime"
+	"strings"
+	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	hostruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/runtime"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
+)
+
+type hostdHost interface {
+	StartHostd(context.Context) error
+	ShutdownHostd(context.Context) error
+	WorkloadStatus() hostdproto.WorkloadStatus
+	UpdateGate() hostdproto.UpdateGateHandler
+}
+
+type hostdHostFactory func(context.Context, string, func(string) string) (hostdHost, error)
+type hostdWorkerFactory func(context.Context, workerupdate.StartRequest) (workerupdate.Worker, error)
+
+// runHostd starts hostd-owned workloads first, then launches the active
+// runtime artifact as a separately fenced child. No coordination runtime is
+// started in-process here.
+func runHostd(ctx context.Context, args []string, output io.Writer) error {
+	if len(args) != 0 {
+		return errors.New("hostd does not accept arguments")
+	}
+	return runHostdWith(ctx, output,
+		func(ctx context.Context, version string, environ func(string) string) (hostdHost, error) {
+			return hostruntime.NewProductionOwner(ctx, version, environ)
+		},
+		func(ctx context.Context, request workerupdate.StartRequest) (workerupdate.Worker, error) {
+			return (workerupdate.ExecStarter{}).Start(ctx, request)
+		},
+	)
+}
+
+func runHostdWith(ctx context.Context, output io.Writer, newHost hostdHostFactory, startWorker hostdWorkerFactory) error {
+	if newHost == nil || startWorker == nil {
+		return errors.New("hostd requires lifecycle factories")
+	}
+	socket, tokenPath, executable := os.Getenv("PAPERBOAT_HOSTD_SOCKET"), os.Getenv("PAPERBOAT_HOSTD_TOKEN_FILE"), os.Getenv("PAPERBOAT_RUNTIME_CURRENT")
+	if !filepath.IsAbs(socket) || !filepath.IsAbs(tokenPath) || !filepath.IsAbs(executable) {
+		return errors.New("hostd requires fixed socket, token, and active runtime paths")
+	}
+	token, err := readWorkerToken(tokenPath)
+	if err != nil {
+		return err
+	}
+	notifier, err := service.NewProcessNotifier()
+	if err != nil {
+		return err
+	}
+	if err := notifier.Starting(); err != nil {
+		return err
+	}
+	host, err := newHost(ctx, buildinfo.Version, os.Getenv)
+	if err != nil {
+		_ = notifier.Degraded("hostd initialization failed")
+		return err
+	}
+	if err := host.StartHostd(ctx); err != nil {
+		_ = notifier.Degraded("hostd startup failed")
+		return err
+	}
+	template := workerupdate.StartRequest{Executable: executable, Release: workerupdate.Release{Version: buildinfo.Version, Platform: gort.GOOS, Architecture: gort.GOARCH, HostdAPIMin: 1, HostdAPIMax: 1}, WorkerID: "runtime-" + strings.ReplaceAll(buildinfo.Version, " ", "-"), UID: os.Geteuid(), GID: os.Getegid(), HostdEndpoint: socket, Capability: token, MutationsDisabled: true}
+	owned := newOwnedWorkers(ctx, template, startWorker)
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = owned.shutdown(shutdownCtx)
+	}()
+	server, err := hostdproto.NewServer(hostdproto.SocketConfig{SocketPath: socket, StatePath: filepath.Join(filepath.Dir(tokenPath), "hostd", "fence.json"), UID: os.Geteuid(), GID: os.Getegid(), Token: token, APIMin: 1, APIMax: 1, Workloads: host.WorkloadStatus, UpdateGate: host.UpdateGate(), WorkerControl: owned, RequestTimeout: 31 * time.Minute})
+	if err != nil {
+		shutdownHostd(host)
+		return err
+	}
+	if owner, ok := host.(*hostruntime.ProcessOwner); ok {
+		owner.BindLifecycle(socket+".workloads", token, server.Status, server.AcquireActive)
+		if err := owner.StartBridge(ctx); err != nil {
+			shutdownHostd(host)
+			return err
+		}
+	}
+	serverCtx, stopServer := context.WithCancel(ctx)
+	serverDone := make(chan error, 1)
+	go func() { serverDone <- server.Run(serverCtx) }()
+	if err := waitForHostdSocket(ctx, socket, serverDone); err != nil {
+		stopServer()
+		shutdownHostd(host)
+		return err
+	}
+	_, err = owned.HandleWorkerControl(ctx, hostdproto.WorkerControlRequest{Operation: "start", WorkerID: template.WorkerID, Executable: executable, Version: template.Release.Version, APIMin: 1, APIMax: 1})
+	if err == nil {
+		_, err = owned.HandleWorkerControl(ctx, hostdproto.WorkerControlRequest{Operation: "ready", WorkerID: template.WorkerID})
+	}
+	if err == nil {
+		_, err = owned.HandleWorkerControl(ctx, hostdproto.WorkerControlRequest{Operation: "activate", WorkerID: template.WorkerID})
+	}
+	if err != nil {
+		stopServer()
+		shutdownHostd(host)
+		return err
+	}
+	if err := notifier.Ready(); err != nil {
+		_ = owned.shutdown(context.Background())
+		stopServer()
+		shutdownHostd(host)
+		return err
+	}
+	fmt.Fprintln(output, "pb daemon hostd ready")
+	watchdogInterval := notifier.WatchdogInterval()
+	var watchdog <-chan time.Time
+	var watchdogTicker *time.Ticker
+	if watchdogInterval > 0 {
+		watchdogTicker = time.NewTicker(watchdogInterval)
+		defer watchdogTicker.Stop()
+		watchdog = watchdogTicker.C
+	}
+	var runErr error
+run:
+	for {
+		select {
+		case <-ctx.Done():
+			runErr = notifier.Draining()
+			break run
+		case <-watchdog:
+			if err := notifier.Watchdog(); err != nil {
+				runErr = errors.Join(err, notifier.Degraded("watchdog notification failed"))
+				break run
+			}
+		}
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	stopErr := owned.shutdown(shutdownCtx)
+	stopServer()
+	serverErr := <-serverDone
+	return errors.Join(runErr, stopErr, serverErr, notifier.Stopping(), host.ShutdownHostd(shutdownCtx))
+}
+
+func waitForHostdSocket(ctx context.Context, socket string, done <-chan error) error {
+	deadline := time.NewTimer(15 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if info, err := os.Lstat(socket); err == nil && info.Mode()&os.ModeSocket != 0 {
+			return nil
+		}
+		select {
+		case err := <-done:
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return errors.New("hostd lifecycle socket did not become ready")
+		case <-tick.C:
+		}
+	}
+}
+func shutdownHostd(host hostdHost) {
+	if host != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = host.ShutdownHostd(ctx)
+	}
+}
+
+func runWorker(ctx context.Context, args []string, input io.Reader, output, stderr io.Writer) error {
+	return runWorkerWith(ctx, args, input, output, stderr, newWorkerFeature)
+}
+func runWorkerWith(ctx context.Context, args []string, input io.Reader, output, stderr io.Writer, newFeature workerFeatureFactory) error {
+	flags := flag.NewFlagSet("worker", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	socket := flags.String("socket", "", "hostd lifecycle socket")
+	tokenPath := flags.String("token-file", "", "hostd capability token")
+	tokenFD := flags.Int("token-fd", -1, "hostd capability token descriptor")
+	workerID := flags.String("worker-id", "", "runtime worker identity")
+	version := flags.String("version", buildinfo.Version, "runtime version")
+	apiMin := flags.Uint("api-min", 1, "minimum hostd API")
+	apiMax := flags.Uint("api-max", 1, "maximum hostd API")
+	heartbeat := flags.Duration("heartbeat", 5*time.Second, "hostd heartbeat interval")
+	waitActivation := flags.Bool("wait-activation", false, "wait for private supervisor activation")
+	if flags.Parse(args) != nil || flags.NArg() != 0 || !filepath.IsAbs(*socket) || (*tokenPath == "" && *tokenFD < 0) || (*tokenPath != "" && *tokenFD >= 0) || (*tokenPath != "" && !filepath.IsAbs(*tokenPath)) || *workerID == "" || *version == "" || *apiMin == 0 || *apiMin > 1024 || *apiMax < *apiMin || *apiMax > 1024 || *heartbeat < time.Second || *heartbeat > time.Minute {
+		return errors.New("invalid worker invocation")
+	}
+	var token []byte
+	var err error
+	if *tokenPath != "" {
+		token, err = readWorkerToken(*tokenPath)
+	} else {
+		token, err = readWorkerTokenFD(*tokenFD)
+	}
+	if err != nil {
+		return err
+	}
+	client, err := hostdproto.NewClient(*socket, token, 5*time.Second)
+	if err != nil {
+		return err
+	}
+	candidate, err := hostdproto.NewCandidate(client, *workerID, *version, uint16(*apiMin), uint16(*apiMax))
+	if err != nil {
+		return err
+	}
+	ready, err := candidate.Ready(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(output, "ready %d %d\n", ready.Epoch, ready.APIVersion)
+	if *waitActivation {
+		activation := make(chan error, 1)
+		go func() {
+			line, readErr := bufio.NewReader(io.LimitReader(input, 64)).ReadString('\n')
+			if readErr != nil && !errors.Is(readErr, io.EOF) {
+				activation <- readErr
+				return
+			}
+			if line != "activate\n" {
+				activation <- errors.New("invalid worker activation")
+				return
+			}
+			activation <- nil
+		}()
+		select {
+		case <-ctx.Done():
+			return nil
+		case err := <-activation:
+			if err != nil {
+				return err
+			}
+		}
+	}
+	active, err := candidate.Activate(ctx)
+	if err != nil {
+		return err
+	}
+	feature, err := newFeature(ctx, *socket, token, *workerID, active.Epoch, *version)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = feature.Shutdown(shutdownCtx)
+	}()
+	fmt.Fprintf(output, "active %d %d\n", active.Epoch, active.APIVersion)
+	ticker := time.NewTicker(*heartbeat)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if err := feature.Health(ctx); err != nil {
+				return err
+			}
+			if err := candidate.Heartbeat(ctx); err != nil {
+				return fmt.Errorf("hostd worker heartbeat: %w", err)
+			}
+		}
+	}
+}
+
+func readWorkerTokenFD(descriptor int) ([]byte, error) {
+	if descriptor < 3 || descriptor > 16 {
+		return nil, errors.New("invalid worker token descriptor")
+	}
+	file := os.NewFile(uintptr(descriptor), "worker-token")
+	if file == nil {
+		return nil, errors.New("invalid worker token descriptor")
+	}
+	defer file.Close()
+	token, err := io.ReadAll(io.LimitReader(file, 33))
+	if err != nil || len(token) != 32 {
+		return nil, errors.New("invalid worker token descriptor")
+	}
+	return token, nil
+}
+
+func readWorkerToken(path string) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o600 {
+		return nil, errors.New("invalid worker token file")
+	}
+	token, err := os.ReadFile(path)
+	if err != nil || len(token) != 32 {
+		return nil, errors.New("invalid worker token file")
+	}
+	return token, nil
+}

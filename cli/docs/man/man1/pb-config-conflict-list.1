@@ -1,0 +1,52 @@
+.nh
+.TH "PB-CONFIG-CONFLICT-LIST" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-conflict-list - List current path conflicts
+
+
+.SH SYNOPSIS
+\fBpb config conflict list [environment] [flags]\fP
+
+
+.SH DESCRIPTION
+List current path conflicts
+
+.PP
+List unresolved paths for one environment or across assigned environments. Each entry identifies the path that needs review before synchronization can continue.
+
+.PP
+Conflicts identify exact paths whose local and repository versions cannot be merged automatically. Review the affected path before choosing a side; resolution records a deliberate decision for the next synchronization step.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for list
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config-conflict(1)\fP

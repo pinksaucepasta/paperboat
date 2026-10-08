@@ -1,0 +1,68 @@
+.nh
+.TH "PB-TUNNEL-DELETE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel-delete - Delete endpoints and routes and revoke connectors while preserving user DNS records
+
+
+.SH SYNOPSIS
+\fBpb tunnel delete <tunnel> [flags]\fP
+
+
+.SH DESCRIPTION
+Delete endpoints and routes and revoke connectors while preserving user DNS records
+
+.PP
+Delete one durable tunnel's endpoints and routes and revoke its connectors, while preserving user-managed DNS records. the confirmation code confirms removal; inspect the tunnel and domains first.
+
+.PP
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--confirm\fP=""
+	six-character confirmation code from the preview
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for delete
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+.PP
+\fB--timeout\fP=2m0s
+	maximum time to wait for operation completion
+
+.PP
+\fB--wait\fP[=false]
+	wait for the operation to reach a terminal state
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-tunnel(1)\fP

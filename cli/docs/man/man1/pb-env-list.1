@@ -1,0 +1,60 @@
+.nh
+.TH "PB-ENV-LIST" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-env-list - List configured environment-variable metadata
+
+
+.SH SYNOPSIS
+\fBpb env list [flags]\fP
+
+
+.SH DESCRIPTION
+List configured environment-variable metadata
+
+.PP
+List ENV names and scope metadata, optionally limited to a team or host. This does not print plaintext values or key material.
+
+.PP
+ENV values are encrypted before they leave the client. Commands select personal, team, or host scope explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for list
+
+.PP
+\fB--json\fP[=false]
+	print redacted JSON metadata
+
+.PP
+\fB--machine\fP=""
+	machine name or ID; defaults to the personal scope
+
+.PP
+\fB--team\fP=""
+	team scope; defaults to this account's personal scope
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-env(1)\fP

@@ -1,0 +1,60 @@
+.nh
+.TH "PB-CONFIG-REPOSITORY-CONNECT" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-repository-connect - Connect an HTTPS, SSH, or local Git repository
+
+
+.SH SYNOPSIS
+\fBpb config repository connect <url-or-absolute-path> [flags]\fP
+
+
+.SH DESCRIPTION
+Connect an HTTPS, SSH, or local Git repository
+
+.PP
+Register an HTTPS, HTTP, SSH URL or absolute local Git path without embedded credentials. Use --name and --branch to select its display name and branch. Machine authentication and explicit file mappings are configured separately.
+
+.PP
+Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--branch\fP="main"
+	Git branch
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for connect
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--name\fP=""
+	display name
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config-repository(1)\fP

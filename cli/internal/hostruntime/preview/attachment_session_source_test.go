@@ -1,0 +1,828 @@
+package preview
+
+import (
+	"bytes"
+	"context"
+	"crypto/ed25519"
+	cryptorand "crypto/rand"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/pem"
+	"errors"
+	"io"
+	"math/big"
+	"net"
+	"net/http"
+	"path/filepath"
+	"strconv"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
+	"golang.org/x/net/http2"
+)
+
+func TestMachineAttachmentSessionSourceSharesAndReleasesMachineCarrier(t *testing.T) {
+	ctx := context.Background()
+	stateRoot, store := newMachineAttachmentIdentity(t)
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	identityValue := testPreviewCarrierIdentity(1)
+	identityValue.TunnelID, identityValue.ConnectorID = identityValue.HostID, identityValue.HostID
+	admission := machineAttachmentAdmission(t, store, now, identityValue, []string{"h2://edge.example.test:8443", "h3://edge.example.test:9443"})
+
+	var mu sync.Mutex
+	var calls int
+	var endpointConfig connector.NetworkDialerConfig
+	var poolConfig connector.DataCarrierPoolConfig
+	var edges []*connector.DataCarrier
+	factory := func(got connector.DataCarrierIdentity, config connector.DataCarrierPoolConfig, endpoints connector.NetworkDialerConfig) (connector.DataCarrierSessionSource, error) {
+		mu.Lock()
+		calls++
+		endpointConfig, poolConfig = endpoints, config
+		mu.Unlock()
+		local, remote := net.Pipe()
+		edge, err := connector.NewDataCarrierServer(ctx, remote, config.Carrier, connector.DataCarrierAdmission{Identity: got, Authorize: func(context.Context, connector.StreamOpen) error { return nil }})
+		if err != nil {
+			_ = local.Close()
+			_ = remote.Close()
+			return connector.DataCarrierSessionSource{}, err
+		}
+		mu.Lock()
+		edges = append(edges, edge)
+		mu.Unlock()
+		dialer := connector.DataCarrierDialer(func(_ context.Context, request connector.DataCarrierDialRequest) (connector.DataCarrierDialResult, error) {
+			return connector.DataCarrierDialResult{Link: local, PeerIdentity: got, Transport: request.Transport, EdgeID: request.EdgeID, FailureDomain: request.FailureDomain}, nil
+		})
+		return connector.NewDataCarrierSessionSource(got, config, dialer)
+	}
+	source, err := NewMachineAttachmentSessionSource(MachineAttachmentSessionSourceConfig{StateRoot: stateRoot, Clock: func() time.Time { return now }, SessionFactory: factory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = source.Close(context.Background())
+		mu.Lock()
+		defer mu.Unlock()
+		for _, edge := range edges {
+			_ = edge.Close()
+		}
+	})
+
+	first, err := source.AcquirePreviewDataCarrier(ctx, admission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := source.AcquirePreviewDataCarrier(ctx, admission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Active != second.Active || first.Identity != second.Identity {
+		t.Fatal("two routes did not share the authenticated machine carrier")
+	}
+	mu.Lock()
+	if calls != 1 {
+		t.Fatalf("session factory calls = %d, want 1", calls)
+	}
+	capturedEndpoint, capturedPool := endpointConfig, poolConfig
+	mu.Unlock()
+	if capturedPool.MaximumCarriers != 1 || capturedPool.Preferred != connector.HTTP3 || capturedPool.Fallback != connector.HTTP2 || capturedPool.SingleTransport {
+		t.Fatalf("pool config = %+v", capturedPool)
+	}
+	if capturedPool.EdgeID != admission.Binding.EdgeNodeID || len(capturedPool.FailureDomains) != 1 || capturedPool.FailureDomains[0] != admission.Binding.EdgeNodeID {
+		t.Fatalf("pool binding = %+v", capturedPool)
+	}
+	if capturedEndpoint.QUIC.Address != "edge.example.test:9443" || capturedEndpoint.TCPMux.Address != "edge.example.test:8443" {
+		t.Fatalf("endpoint addresses = TCP %q QUIC %q", capturedEndpoint.TCPMux.Address, capturedEndpoint.QUIC.Address)
+	}
+	for name, endpoint := range map[string]connector.DataCarrierEndpointConfig{"tcp": capturedEndpoint.TCPMux, "quic": capturedEndpoint.QUIC} {
+		if endpoint.TLS == nil || endpoint.TLS.MinVersion != tls.VersionTLS13 || endpoint.TLS.MaxVersion != tls.VersionTLS13 || endpoint.TLS.InsecureSkipVerify || endpoint.TLS.ServerName != "edge.example.test" || len(endpoint.TLS.Certificates) != 1 {
+			t.Fatalf("%s TLS config = %#v", name, endpoint.TLS)
+		}
+		if endpoint.TLS.Certificates[0].Leaf == nil || endpoint.TLS.Certificates[0].Leaf.ExtKeyUsage[0] != x509.ExtKeyUsageClientAuth {
+			t.Fatalf("%s TLS leaf = %#v", name, endpoint.TLS.Certificates[0].Leaf)
+		}
+		wantURN, err := connectorprotocol.CarrierIdentityURN(connectorprotocol.CarrierIdentityBinding{
+			AccountID: identityValue.AccountID, HostID: identityValue.HostID, TunnelID: identityValue.TunnelID,
+			ConnectorID: identityValue.ConnectorID, SessionID: identityValue.SessionID,
+			ProcessGeneration: identityValue.ProcessGeneration, ConfigGeneration: identityValue.Generation,
+			EdgeProcessEpoch: admission.Binding.EdgeProcessEpoch,
+		})
+		if err != nil || len(endpoint.TLS.Certificates[0].Leaf.URIs) != 1 || endpoint.TLS.Certificates[0].Leaf.URIs[0].String() != wantURN.String() {
+			t.Fatalf("%s TLS carrier URI SAN = %v, want %v (err=%v)", name, endpoint.TLS.Certificates[0].Leaf.URIs, wantURN, err)
+		}
+		peer := firstCertificateFromPEM(t, admission.Binding.EdgeCarrierServerCertificateChainPEM)
+		bound, err := endpoint.PeerBinding(tls.ConnectionState{VerifiedChains: [][]*x509.Certificate{{peer}}, PeerCertificates: []*x509.Certificate{peer}})
+		if err != nil || bound != identityValue {
+			t.Fatalf("%s peer binding = %+v, err=%v", name, bound, err)
+		}
+		if _, err := endpoint.PeerBinding(tls.ConnectionState{}); !errors.Is(err, ErrMachineAttachmentTrustRequired) {
+			t.Fatalf("%s empty verified chain err=%v", name, err)
+		}
+	}
+
+	if err := first.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if first.Active.Pool().State() != connector.DataCarrierPoolReady {
+		t.Fatal("first release closed a carrier still owned by a sibling route")
+	}
+	if err := first.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if second.Active.Pool().State() != connector.DataCarrierPoolClosed {
+		t.Fatalf("carrier state after final release = %s", second.Active.Pool().State())
+	}
+	if err := second.Release(ctx); err != nil {
+		t.Fatalf("idempotent release = %v", err)
+	}
+
+	third, err := source.AcquirePreviewDataCarrier(ctx, admission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.Active == first.Active {
+		t.Fatal("released carrier was retained in source cache")
+	}
+	mu.Lock()
+	if calls != 2 {
+		t.Fatalf("session factory calls after reuse = %d, want 2", calls)
+	}
+	mu.Unlock()
+	if err := third.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMachineAttachmentNetworkSourceFallsBackAfterStalledHTTP3(t *testing.T) {
+	identityValue := testPreviewCarrierIdentity(1)
+	config := connector.DefaultDataCarrierPoolConfig()
+	config.MaximumCarriers = 1
+	config.QueueDepth = 1
+	config.Preferred = connector.HTTP3
+	config.Fallback = connector.HTTP2
+	config.SingleTransport = false
+	config.EdgeID = "edge_fallback"
+	config.FailureDomains = []string{"edge_fallback"}
+
+	var (
+		mu       sync.Mutex
+		attempts []connector.DataCarrierDialRequest
+	)
+	base := connector.DataCarrierDialer(func(ctx context.Context, request connector.DataCarrierDialRequest) (connector.DataCarrierDialResult, error) {
+		mu.Lock()
+		attempts = append(attempts, request)
+		mu.Unlock()
+		if request.Transport == connector.HTTP3 {
+			<-ctx.Done()
+			return connector.DataCarrierDialResult{}, &connector.TransportDialError{Transport: request.Transport, Err: context.DeadlineExceeded, Fallback: true}
+		}
+		return connector.DataCarrierDialResult{
+			Session:       newPreviewTestDataCarrierSession(),
+			PeerIdentity:  request.Identity,
+			Transport:     request.Transport,
+			EdgeID:        request.EdgeID,
+			FailureDomain: request.FailureDomain,
+		}, nil
+	})
+	dialer := boundedMachineAttachmentDialer(base, 20*time.Millisecond)
+	config.Session = identityValue
+	source, err := connector.NewDataCarrierSessionSource(identityValue, config, dialer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	prepared, err := source.Prepare(ctx)
+	if err != nil {
+		t.Fatalf("prepare after QUIC stall: %v", err)
+	}
+	defer prepared.Abort(context.Background())
+	if got := prepared.State(); got != connector.DataCarrierLifecyclePrepared {
+		t.Fatalf("prepared state = %s", got)
+	}
+	if transport, ok := prepared.SelectedTransport(); !ok || transport != connector.HTTP2 {
+		t.Fatalf("selected transport = %s, ok=%v, want TCPMux", transport, ok)
+	}
+	mu.Lock()
+	gotAttempts := append([]connector.DataCarrierDialRequest(nil), attempts...)
+	mu.Unlock()
+	if len(gotAttempts) != 2 || gotAttempts[0].Transport != connector.HTTP3 || gotAttempts[0].Attempt != 1 || gotAttempts[1].Transport != connector.HTTP2 || gotAttempts[1].Attempt != 2 {
+		t.Fatalf("dial attempts = %#v, want bounded QUIC then TCP fallback", gotAttempts)
+	}
+	if gotAttempts[0].Identity != identityValue || gotAttempts[1].Identity != identityValue {
+		t.Fatalf("dial identity was not preserved across fallback: %#v", gotAttempts)
+	}
+}
+
+func TestMachineAttachmentProductionSourceUsesAuthenticatedHTTP2CONNECT(t *testing.T) {
+	stateRoot, store := newMachineAttachmentIdentity(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	identityValue := testPreviewCarrierIdentity(1)
+	identityValue.TunnelID, identityValue.ConnectorID = identityValue.HostID, identityValue.HostID
+	admission := machineAttachmentAdmission(t, store, now, identityValue, []string{"h2://edge.example.test:443"})
+	_, serverCertificate := testEdgeServerCertificate(t, now, identityValue, "edge_epoch_01")
+	admission.Binding.EdgeCarrierServerSPKISHA256, admission.Binding.EdgeCarrierServerCertificateChainPEM = testEdgeServerTrust(t, serverCertificate)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	serverTLS := &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{serverCertificate}, ClientAuth: tls.RequireAnyClientCert, NextProtos: []string{"h2"}}
+	handlerErrors := make(chan error, 1)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodConnect {
+			http.Error(w, "invalid method", http.StatusMethodNotAllowed)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		carrier, err := connector.NewDataCarrierServer(r.Context(), &previewHTTPLink{Reader: r.Body, writer: w}, connector.DefaultDataCarrierConfig(), connector.DataCarrierAdmission{Identity: identityValue, Authorize: func(context.Context, connector.StreamOpen) error { return nil }})
+		if err != nil {
+			handlerErrors <- err
+			return
+		}
+		defer carrier.Close()
+		stream, _, err := carrier.AcceptStream(r.Context())
+		if err != nil {
+			handlerErrors <- err
+			return
+		}
+		defer stream.Close()
+		_, err = io.Copy(stream, stream)
+		handlerErrors <- err
+	})
+	httpServer := &http.Server{Handler: handler, TLSConfig: serverTLS}
+	if err := http2.ConfigureServer(httpServer, &http2.Server{}); err != nil {
+		t.Fatal(err)
+	}
+	go httpServer.Serve(tls.NewListener(listener, serverTLS))
+	defer httpServer.Close()
+
+	admission.EdgeEndpoints = []string{"h2://edge.example.test:" + strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)}
+	sourceConfig := MachineAttachmentSessionSourceConfig{StateRoot: stateRoot, Clock: func() time.Time { return now }}
+	source, err := NewMachineAttachmentSessionSource(sourceConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, endpoints, poolConfig, err := source.prepareAdmission(admission, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoints.TCPMux.Address = listener.Addr().String()
+	sessionSource, err := newMachineAttachmentNetworkSessionSource(identityValue, poolConfig, endpoints)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	prepared, err := sessionSource.Prepare(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := prepared.Activate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer active.Close(context.Background())
+	stream, err := active.Pool().OpenStream(ctx, connector.StreamOpen{Protocol: "paperboat.connector", Version: "1.0", AccountID: identityValue.AccountID, TunnelID: identityValue.TunnelID, ConnectorID: identityValue.ConnectorID, SessionID: identityValue.SessionID, ProcessGeneration: identityValue.ProcessGeneration, Generation: identityValue.Generation, RouteID: "route_h2_preview", RequestID: "request_h2_preview", Kind: "http"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	if _, err := stream.Write([]byte("h2-preview")); err != nil {
+		t.Fatal(err)
+	}
+	got := make([]byte, len("h2-preview"))
+	if _, err := io.ReadFull(stream, got); err != nil || string(got) != "h2-preview" {
+		t.Fatalf("echo = %q, %v", got, err)
+	}
+}
+
+type previewHTTPLink struct {
+	io.Reader
+	writer http.ResponseWriter
+}
+
+func (l *previewHTTPLink) Write(p []byte) (int, error) {
+	n, err := l.writer.Write(p)
+	if err == nil {
+		l.writer.(http.Flusher).Flush()
+	}
+	return n, err
+}
+func (*previewHTTPLink) Close() error { return nil }
+
+type previewTestDataCarrierSession struct {
+	done      chan struct{}
+	closeOnce sync.Once
+}
+
+func newPreviewTestDataCarrierSession() *previewTestDataCarrierSession {
+	return &previewTestDataCarrierSession{done: make(chan struct{})}
+}
+
+func (s *previewTestDataCarrierSession) OpenStream(ctx context.Context) (connector.DataCarrierStreamLink, error) {
+	if ctx == nil {
+		return nil, context.Canceled
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.done:
+		return nil, connector.ErrDataCarrierClosed
+	}
+}
+
+func (s *previewTestDataCarrierSession) AcceptStream(ctx context.Context) (connector.DataCarrierStreamLink, error) {
+	if ctx == nil {
+		return nil, context.Canceled
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.done:
+		return nil, connector.ErrDataCarrierClosed
+	}
+}
+
+func (s *previewTestDataCarrierSession) Ping(ctx context.Context) error {
+	if ctx == nil {
+		return context.Canceled
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.done:
+		return connector.ErrDataCarrierClosed
+	default:
+		return nil
+	}
+}
+
+func (s *previewTestDataCarrierSession) Close() error {
+	s.closeOnce.Do(func() { close(s.done) })
+	return nil
+}
+
+func (s *previewTestDataCarrierSession) CloseChan() <-chan struct{} { return s.done }
+
+var _ connector.DataCarrierSession = (*previewTestDataCarrierSession)(nil)
+
+func TestMachineAttachmentSessionSourceRejectsMachineAndEndpointMismatch(t *testing.T) {
+	stateRoot, store := newMachineAttachmentIdentity(t)
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	identityValue := testPreviewCarrierIdentity(1)
+	valid := machineAttachmentAdmission(t, store, now, identityValue, []string{"h2://edge.example.test"})
+	source, err := NewMachineAttachmentSessionSource(MachineAttachmentSessionSourceConfig{
+		StateRoot: stateRoot,
+		Clock:     func() time.Time { return now },
+		SessionFactory: func(connector.DataCarrierIdentity, connector.DataCarrierPoolConfig, connector.NetworkDialerConfig) (connector.DataCarrierSessionSource, error) {
+			t.Fatal("session factory called for invalid admission")
+			return connector.DataCarrierSessionSource{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	badMachine := valid
+	badMachine.Binding.MachineIdentityPublicKey = base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x99}, ed25519.PublicKeySize))
+	if _, err := source.AcquirePreviewDataCarrier(context.Background(), badMachine); !errors.Is(err, ErrMachineAttachmentSessionInvalid) {
+		t.Fatalf("machine mismatch err=%v", err)
+	}
+	badEndpoint := valid
+	badEndpoint.EdgeEndpoints = []string{"https://edge.example.test"}
+	if _, err := source.AcquirePreviewDataCarrier(context.Background(), badEndpoint); !errors.Is(err, ErrMachineAttachmentSessionInvalid) {
+		t.Fatalf("endpoint mismatch err=%v", err)
+	}
+}
+
+func TestMachineAttachmentSessionSourceRequiresPinnedTrustAndExactEdgeTuple(t *testing.T) {
+	stateRoot, store := newMachineAttachmentIdentity(t)
+	now := time.Now().UTC()
+	identityValue := testPreviewCarrierIdentity(1)
+	admission := machineAttachmentAdmission(t, store, now, identityValue, []string{"h2://edge.example.test"})
+	base := MachineAttachmentSessionSourceConfig{StateRoot: stateRoot, Clock: func() time.Time { return now }}
+	source, err := NewMachineAttachmentSessionSource(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := store.CurrentTLSCertificate(now, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoints, _, _, err := source.endpointConfigs(admission, identityValue, leaf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer := firstCertificateFromPEM(t, admission.Binding.EdgeCarrierServerCertificateChainPEM)
+	state := tls.ConnectionState{VerifiedChains: [][]*x509.Certificate{{peer}}, PeerCertificates: []*x509.Certificate{peer}}
+	if _, err := endpoints.TCPMux.PeerBinding(state); err != nil {
+		t.Fatalf("exact edge tuple rejected: %v", err)
+	}
+	stale := admission
+	stale.Binding.EdgeProcessEpoch = "edge_epoch_02"
+	_, staleCertificate := testEdgeServerCertificate(t, now, identityValue, stale.Binding.EdgeProcessEpoch)
+	stale.Binding.EdgeCarrierServerSPKISHA256, stale.Binding.EdgeCarrierServerCertificateChainPEM = testEdgeServerTrust(t, staleCertificate)
+	staleEndpoints, _, _, err := source.endpointConfigs(stale, identityValue, leaf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := staleEndpoints.TCPMux.PeerBinding(state); err == nil {
+		t.Fatal("stale edge process epoch was accepted")
+	}
+}
+
+func TestNormalizeCarrierEndpointIsStrictAndUsesHTTPSDefaultPort(t *testing.T) {
+	tests := []struct {
+		name, value, scheme, address, serverName string
+	}{
+		{name: "h2", value: "h2://edge.example.test", scheme: "h2", address: "edge.example.test:443", serverName: "edge.example.test"},
+		{name: "h2-explicit", value: "h2://edge.example.test:9443/", scheme: "h2", address: "edge.example.test:9443", serverName: "edge.example.test"},
+		{name: "h3", value: "h3://[::1]:7443", scheme: "h3", address: "[::1]:7443", serverName: "::1"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			scheme, address, serverName, err := normalizeCarrierEndpoint(test.value)
+			if err != nil || scheme != test.scheme || address != test.address || serverName != test.serverName {
+				t.Fatalf("normalized = %q %q %q, err=%v", scheme, address, serverName, err)
+			}
+		})
+	}
+	for _, value := range []string{
+		"http://edge.example.test",
+		"https://edge.example.test",
+		"wss://edge.example.test",
+		"tls://edge.example.test:443",
+		"quic://edge.example.test:443",
+		"h2://user:secret@edge.example.test",
+		"h2://edge.example.test/carrier",
+		"h2://edge.example.test?token=secret",
+		"h2://edge.example.test:bad",
+	} {
+		if _, _, _, err := normalizeCarrierEndpoint(value); !errors.Is(err, ErrMachineAttachmentSessionInvalid) {
+			t.Fatalf("%q error = %v", value, err)
+		}
+	}
+}
+
+func TestMachineAttachmentSessionSourceUsesStandardTLSHostnameAndRoots(t *testing.T) {
+	stateRoot, store := newMachineAttachmentIdentity(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	identityValue := testPreviewCarrierIdentity(1)
+	_, serverCertificate := testEdgeServerCertificate(t, now, identityValue, "edge_epoch_01")
+	source, err := NewMachineAttachmentSessionSource(MachineAttachmentSessionSourceConfig{StateRoot: stateRoot, Clock: func() time.Time { return now }, SessionFactory: func(connector.DataCarrierIdentity, connector.DataCarrierPoolConfig, connector.NetworkDialerConfig) (connector.DataCarrierSessionSource, error) {
+		return connector.DataCarrierSessionSource{}, errors.New("not used")
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admission := machineAttachmentAdmission(t, store, now, identityValue, []string{"h2://edge.example.test"})
+	admission.Binding.EdgeCarrierServerSPKISHA256, admission.Binding.EdgeCarrierServerCertificateChainPEM = testEdgeServerTrust(t, serverCertificate)
+	key := store.Current()
+	leaf, err := store.CurrentTLSCertificate(now, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoints, _, _, err := source.endpointConfigs(admission, identityValue, leaf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handshakeWithServer(endpoints.TCPMux.TLS, serverCertificate); err != nil {
+		t.Fatalf("trusted endpoint handshake: %v", err)
+	}
+	wrongHost := endpoints.TCPMux.TLS.Clone()
+	wrongHost.ServerName = "wrong.example.test"
+	if err := handshakeWithServer(wrongHost, serverCertificate); err == nil {
+		t.Fatal("wrong TLS hostname unexpectedly succeeded")
+	}
+	untrusted := endpoints.TCPMux.TLS.Clone()
+	untrusted.RootCAs = x509.NewCertPool()
+	if err := handshakeWithServer(untrusted, serverCertificate); err == nil {
+		t.Fatal("untrusted TLS endpoint unexpectedly succeeded")
+	}
+	if len(key.Public()) != ed25519.PublicKeySize {
+		t.Fatal("identity fixture did not create an Ed25519 key")
+	}
+}
+
+func testEdgeServerCertificate(t *testing.T, now time.Time, identityValue connector.DataCarrierIdentity, edgeProcessEpoch string) (*x509.Certificate, tls.Certificate) {
+	t.Helper()
+	caPublic, caPrivate, err := ed25519.GenerateKey(cryptorand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "preview-test-ca"},
+		NotBefore:    now.Add(-time.Minute), NotAfter: now.Add(time.Hour),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+	}
+	caDER, err := x509.CreateCertificate(cryptorand.Reader, caTemplate, caTemplate, caPublic, caPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverPublic, serverPrivate, err := ed25519.GenerateKey(cryptorand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "edge.example.test"},
+		DNSNames: []string{"edge.example.test"}, NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour),
+		BasicConstraintsValid: true, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, KeyUsage: x509.KeyUsageDigitalSignature,
+	}
+	serverDER, err := x509.CreateCertificate(cryptorand.Reader, serverTemplate, ca, serverPublic, caPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = identityValue
+	_ = edgeProcessEpoch
+	return ca, tls.Certificate{Certificate: [][]byte{serverDER, caDER}, PrivateKey: serverPrivate}
+}
+
+func testEdgeServerTrust(t *testing.T, certificate tls.Certificate) (string, string) {
+	t.Helper()
+	if len(certificate.Certificate) == 0 {
+		t.Fatal("edge certificate chain is empty")
+	}
+	leaf, err := x509.ParseCertificate(certificate.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(leaf.RawSubjectPublicKeyInfo)
+	var chain bytes.Buffer
+	for _, der := range certificate.Certificate {
+		if err := pem.Encode(&chain, &pem.Block{Type: "CERTIFICATE", Bytes: der}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return "sha256:" + hex.EncodeToString(digest[:]), chain.String()
+}
+
+func firstCertificateFromPEM(t *testing.T, chain string) *x509.Certificate {
+	t.Helper()
+	block, _ := pem.Decode([]byte(chain))
+	if block == nil {
+		t.Fatal("certificate PEM is empty")
+	}
+	certificate, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return certificate
+}
+
+func handshakeWithServer(clientConfig *tls.Config, serverCertificate tls.Certificate) error {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+	serverErrors := make(chan error, 1)
+	go func() {
+		connection, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			serverErrors <- acceptErr
+			return
+		}
+		server := tls.Server(connection, &tls.Config{MinVersion: tls.VersionTLS13, MaxVersion: tls.VersionTLS13, Certificates: []tls.Certificate{serverCertificate}, ClientAuth: tls.RequestClientCert})
+		serverErrors <- server.Handshake()
+		_ = server.Close()
+	}()
+	connection, err := net.DialTimeout("tcp", listener.Addr().String(), time.Second)
+	if err != nil {
+		return err
+	}
+	client := tls.Client(connection, clientConfig)
+	clientErr := client.Handshake()
+	_ = client.Close()
+	serverErr := <-serverErrors
+	if clientErr != nil {
+		return clientErr
+	}
+	return serverErr
+}
+
+func newMachineAttachmentIdentity(t *testing.T) (string, *identity.Store) {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "identity")
+	store, err := identity.Open(identity.Config{StateRoot: root, Random: bytes.NewReader(bytes.Repeat([]byte{0x23}, ed25519.SeedSize))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := store.Current()
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	if err := store.SaveRegistration(identity.Registration{
+		ServerURL: "https://api.example.test", MachineID: "host_01", EnvironmentID: "account_01",
+		PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()),
+		InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return root, store
+}
+
+func machineAttachmentAdmission(t *testing.T, store *identity.Store, now time.Time, identityValue connector.DataCarrierIdentity, endpoints []string) CarrierAdmission {
+	t.Helper()
+	_, attachment := providerTestLeaseAttachment(t, now, "preview_source", "operation_source_01", "route_source_01", identityValue, 1)
+	key := store.Current()
+	publicKey := base64.RawURLEncoding.EncodeToString(key.Public())
+	attachment.EdgeEndpoints = append([]string(nil), endpoints...)
+	attachment.Binding.MachineIdentityPublicKey = publicKey
+	attachment.Binding.MachineIdentityThumbprint = machineIdentityThumbprint(publicKey)
+	_, edgeCertificate := testEdgeServerCertificate(t, now, identityValue, attachment.Binding.EdgeProcessEpoch)
+	attachment.Binding.EdgeCarrierServerSPKISHA256, attachment.Binding.EdgeCarrierServerCertificateChainPEM = testEdgeServerTrust(t, edgeCertificate)
+	if err := attachment.Validate(now); err != nil {
+		t.Fatal(err)
+	}
+	admission, err := attachment.Admission()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return admission
+}
+
+func TestMachineAttachmentCarrierTrustsPinnedSelfSignedIP(t *testing.T) {
+	stateRoot, store := newMachineAttachmentIdentity(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	identityValue := testPreviewCarrierIdentity(1)
+	identityValue.TunnelID, identityValue.ConnectorID = identityValue.HostID, identityValue.HostID
+	public, private, err := ed25519.GenerateKey(cryptorand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{SerialNumber: big.NewInt(4), IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}, NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	der, err := x509.CreateCertificate(cryptorand.Reader, template, template, public, private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverCertificate := tls.Certificate{Certificate: [][]byte{der}, PrivateKey: private, Leaf: parsed}
+	source, err := NewMachineAttachmentSessionSource(MachineAttachmentSessionSourceConfig{StateRoot: stateRoot, Clock: func() time.Time { return now }, SessionFactory: func(connector.DataCarrierIdentity, connector.DataCarrierPoolConfig, connector.NetworkDialerConfig) (connector.DataCarrierSessionSource, error) {
+		return connector.DataCarrierSessionSource{}, errors.New("not used")
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admission := machineAttachmentAdmission(t, store, now, identityValue, []string{"h2://127.0.0.1:443", "h3://127.0.0.1:444"})
+	admission.Binding.EdgeCarrierServerSPKISHA256, admission.Binding.EdgeCarrierServerCertificateChainPEM = testEdgeServerTrust(t, serverCertificate)
+	leaf, err := store.CurrentTLSCertificate(now, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoints, h2, h3, err := source.endpointConfigs(admission, identityValue, leaf)
+	if err != nil || !h2 || !h3 {
+		t.Fatalf("endpoint trust: %v", err)
+	}
+	for _, endpoint := range []connector.DataCarrierEndpointConfig{endpoints.TCPMux, endpoints.QUIC} {
+		if err := handshakeWithServer(endpoint.TLS, serverCertificate); err != nil {
+			t.Fatalf("self-signed IP handshake: %v", err)
+		}
+		state := tls.ConnectionState{VerifiedChains: [][]*x509.Certificate{{parsed}}, PeerCertificates: []*x509.Certificate{parsed}}
+		if _, err := endpoint.PeerBinding(state); err != nil {
+			t.Fatal(err)
+		}
+		_, other := testEdgeServerCertificate(t, now, identityValue, "edge_epoch_01")
+		otherLeaf, err := x509.ParseCertificate(other.Certificate[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		state.PeerCertificates = []*x509.Certificate{otherLeaf}
+		if _, err := endpoint.PeerBinding(state); err == nil {
+			t.Fatal("accepted wrong SPKI")
+		}
+	}
+}
+
+func TestPrivateAccessorCarrierUsesCanonicalKeyThumbprint(t *testing.T) {
+	stateRoot, store := newMachineAttachmentIdentity(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	identityValue := testPreviewCarrierIdentity(1)
+	identityValue.TunnelID, identityValue.ConnectorID = "machine_origin", "machine_origin"
+	owner := machineAttachmentAdmission(t, store, now, identityValue, []string{"h2://edge.example.test:8443", "h3://edge.example.test:9443"})
+	public := store.Current().Public()
+	thumb, err := connectorprotocol.IdentityThumbprint(public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := AccessorCarrierAdmission{AccountID: identityValue.AccountID, MachineID: identityValue.HostID, AccessorPublicKey: base64.RawURLEncoding.EncodeToString(public), AccessorThumbprint: thumb, TunnelID: identityValue.TunnelID, CarrierConnectorID: identityValue.ConnectorID, CarrierSessionID: identityValue.SessionID, ProcessGeneration: identityValue.ProcessGeneration, ConfigGeneration: identityValue.Generation, EdgeNodeID: owner.Binding.EdgeNodeID, EdgeProcessEpoch: owner.Binding.EdgeProcessEpoch, EdgeCarrierServerSPKISHA256: owner.Binding.EdgeCarrierServerSPKISHA256, EdgeCarrierServerCertificateChainPEM: owner.Binding.EdgeCarrierServerCertificateChainPEM, EdgeEndpoints: owner.EdgeEndpoints, ExpiresAt: owner.ExpiresAt}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var edge *connector.DataCarrier
+	calls := 0
+	source, err := NewMachineAttachmentSessionSource(MachineAttachmentSessionSourceConfig{StateRoot: stateRoot, Clock: func() time.Time { return now }, SessionFactory: func(got connector.DataCarrierIdentity, c connector.DataCarrierPoolConfig, e connector.NetworkDialerConfig) (connector.DataCarrierSessionSource, error) {
+		calls++
+		if got != identityValue || len(e.QUIC.TLS.Certificates) != 1 {
+			t.Fatal("accessor identity or signing certificate changed")
+		}
+		leaf := e.QUIC.TLS.Certificates[0].Leaf
+		if !bytes.Equal(leaf.PublicKey.(ed25519.PublicKey), public) {
+			t.Fatal("carrier certificate uses another principal key")
+		}
+		local, remote := net.Pipe()
+		edge, err = connector.NewDataCarrierServer(ctx, remote, c.Carrier, connector.DataCarrierAdmission{Identity: got, Authorize: func(context.Context, connector.StreamOpen) error { return nil }})
+		if err != nil {
+			local.Close()
+			remote.Close()
+			return connector.DataCarrierSessionSource{}, err
+		}
+		return connector.NewDataCarrierSessionSource(got, c, func(_ context.Context, r connector.DataCarrierDialRequest) (connector.DataCarrierDialResult, error) {
+			return connector.DataCarrierDialResult{Link: local, PeerIdentity: got, Transport: r.Transport, EdgeID: r.EdgeID, FailureDomain: r.FailureDomain}, nil
+		})
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close(context.Background())
+	defer func() {
+		if edge != nil {
+			edge.Close()
+		}
+	}()
+	session, err := source.AcquirePrivateAccessCarrier(ctx, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.Identity != identityValue || calls != 1 {
+		t.Fatal("accessor carrier did not retain exact origin incarnation and accessor principal")
+	}
+	session.Release(context.Background())
+	a.AccessorThumbprint = thumb[:len(thumb)-1] + "!"
+	if _, err = source.AcquirePrivateAccessCarrier(ctx, a); !errors.Is(err, ErrMachineAttachmentSessionInvalid) || calls != 1 {
+		t.Fatal("invalid accessor key thumbprint reached carrier factory")
+	}
+}
+
+func TestRuntimeCarrierUsesRawKeyFingerprint(t *testing.T) {
+	stateRoot, store := newMachineAttachmentIdentity(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	identityValue := testPreviewCarrierIdentity(1)
+	identityValue.TunnelID, identityValue.ConnectorID, identityValue.SessionID = "route_runtime", identityValue.HostID, "session_runtime"
+	owner := machineAttachmentAdmission(t, store, now, identityValue, []string{"h2://edge.example.test:8443", "h3://edge.example.test:9443"})
+	public := store.Current().Public()
+	thumb := machineIdentityThumbprint(base64.RawURLEncoding.EncodeToString(public))
+	a := RuntimeCarrierAdmission{AccountID: identityValue.AccountID, MachineID: identityValue.HostID, MachineIdentityPublicKey: base64.RawURLEncoding.EncodeToString(public), MachineIdentityThumbprint: thumb, TunnelID: identityValue.TunnelID, ConnectorID: identityValue.ConnectorID, SessionID: identityValue.SessionID, ProcessGeneration: identityValue.ProcessGeneration, ConfigGeneration: identityValue.Generation, EdgeNodeID: owner.Binding.EdgeNodeID, EdgeProcessEpoch: owner.Binding.EdgeProcessEpoch, EdgeCarrierServerSPKISHA256: owner.Binding.EdgeCarrierServerSPKISHA256, EdgeCarrierServerCertificateChainPEM: owner.Binding.EdgeCarrierServerCertificateChainPEM, EdgeEndpoints: owner.EdgeEndpoints, ExpiresAt: owner.ExpiresAt}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var edge *connector.DataCarrier
+	var err error
+	calls := 0
+	source, err := NewMachineAttachmentSessionSource(MachineAttachmentSessionSourceConfig{StateRoot: stateRoot, Clock: func() time.Time { return now }, SessionFactory: func(got connector.DataCarrierIdentity, c connector.DataCarrierPoolConfig, e connector.NetworkDialerConfig) (connector.DataCarrierSessionSource, error) {
+		calls++
+		if got != identityValue || len(e.QUIC.TLS.Certificates) != 1 {
+			t.Fatal("accessor identity or signing certificate changed")
+		}
+		leaf := e.QUIC.TLS.Certificates[0].Leaf
+		if !bytes.Equal(leaf.PublicKey.(ed25519.PublicKey), public) {
+			t.Fatal("carrier certificate uses another principal key")
+		}
+		local, remote := net.Pipe()
+		edge, err = connector.NewDataCarrierServer(ctx, remote, c.Carrier, connector.DataCarrierAdmission{Identity: got, Authorize: func(context.Context, connector.StreamOpen) error { return nil }})
+		if err != nil {
+			local.Close()
+			remote.Close()
+			return connector.DataCarrierSessionSource{}, err
+		}
+		return connector.NewDataCarrierSessionSource(got, c, func(_ context.Context, r connector.DataCarrierDialRequest) (connector.DataCarrierDialResult, error) {
+			return connector.DataCarrierDialResult{Link: local, PeerIdentity: got, Transport: r.Transport, EdgeID: r.EdgeID, FailureDomain: r.FailureDomain}, nil
+		})
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close(context.Background())
+	defer func() {
+		if edge != nil {
+			edge.Close()
+		}
+	}()
+	session, err := source.AcquireRuntimeCarrier(ctx, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.Identity != identityValue || calls != 1 {
+		t.Fatal("accessor carrier did not retain exact origin incarnation and accessor principal")
+	}
+	session.Release(context.Background())
+	a.MachineIdentityThumbprint = thumb[:len(thumb)-1] + "!"
+	if _, err = source.AcquireRuntimeCarrier(ctx, a); !errors.Is(err, ErrMachineAttachmentSessionInvalid) || calls != 1 {
+		t.Fatal("invalid accessor key thumbprint reached carrier factory")
+	}
+}

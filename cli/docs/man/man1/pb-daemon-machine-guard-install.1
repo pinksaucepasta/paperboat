@@ -1,0 +1,52 @@
+.nh
+.TH "PB-DAEMON-MACHINE-GUARD-INSTALL" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-daemon-machine-guard-install - Install the root-owned machine guard service
+
+
+.SH SYNOPSIS
+\fBpb daemon machine-guard install [flags]\fP
+
+
+.SH DESCRIPTION
+Install the root-owned machine guard service
+
+.PP
+Install the root-owned guard service for the fixed protected 127.100.0.0/16 loopback range and configure local HTTPS certificate trust automatically.
+
+.PP
+The machine guard is a privileged local helper for protected loopback listeners and trusted local HTTPS. Installation handles certificate trust; public DNS supplies the browser names. Use the dedicated service commands for the ordinary Paperboat daemon.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for install
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	configuration file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	Paperboat server URL
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-daemon-machine-guard(1)\fP

@@ -1,0 +1,75 @@
+.nh
+.TH "PB-UPDATE-SETTINGS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-update-settings - View or change automatic update settings
+
+
+.SH SYNOPSIS
+\fBpb update settings [flags]\fP
+
+
+.SH DESCRIPTION
+Show or change this machine's automatic update schedule.
+
+.PP
+Official installations enable scheduled updates by default. Source and custom
+installations default to availability checks only. Scheduled updates download
+and verify releases ahead of the maintenance time, then install at that time
+using the machine's local clock. The default maintenance time is 04:00.
+
+.PP
+Disabling automatic updates keeps availability checks enabled but leaves
+downloads and installation to manual commands. Manual update check, download,
+and install commands remain available either way. These settings apply to the
+machine, independently of the selected account.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--auto\fP[=false]
+	enable or disable scheduled downloads and installs
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for settings
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--time\fP=""
+	set the machine-local daily update time (HH:MM)
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb update settings
+  pb update settings --auto=false
+  pb update settings --auto=true --time 22:15
+  pb update settings --time 04:30 --json
+.EE
+
+
+.SH SEE ALSO
+\fBpb-update(1)\fP

@@ -1,0 +1,528 @@
+package resolver
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/telemetry"
+)
+
+var ErrMachineNotFound = errors.New("machine not found")
+var ErrMachineAmbiguous = errors.New("machine name is ambiguous")
+
+// connectClient is the subset of the paperboat-server client the resolver
+// needs. Defined here so the resolver can be unit-tested with a fake.
+type connectClient interface {
+	ListUserMachines(context.Context) ([]api.UserMachine, error)
+	UserMachineConnectionDescriptor(context.Context, string) (api.ConnectionDescriptor, error)
+	UserMachineConnectionReadiness(context.Context, string) (api.ConnectionDescriptor, error)
+}
+
+type userMachineSessionClient interface {
+	UserMachineConnectionDescriptorForSession(context.Context, string, string) (api.ConnectionDescriptor, error)
+	UserMachineConnectionReadinessForSession(context.Context, string, string) (api.ConnectionDescriptor, error)
+}
+
+type userMachineCreateSessionClient interface {
+	UserMachineConnectionDescriptorWithSessionCreate(context.Context, string, string, string, string) (api.ConnectionDescriptor, api.TerminalSession, error)
+}
+
+type target struct {
+	kind       string
+	id         string
+	name       string
+	state      string
+	generation uint64
+}
+
+const targetUserMachine = "machine"
+
+// APIResolver resolves an enrolled machine, obtains its connection descriptor,
+// and polls until its terminal is connectable.
+type APIResolver struct {
+	client       connectClient
+	cfg          *config.Config
+	readyTimeout time.Duration
+	pollInterval time.Duration
+	// sleep is injectable for tests; nil uses a real timer honoring ctx.
+	sleep     func(ctx context.Context, d time.Duration) error
+	Progress  func(status, reason string, retryAfter time.Duration)
+	Telemetry telemetry.Sink
+	Now       func() time.Time
+}
+
+// NewAPIResolver builds a resolver bound to a paperboat-server client.
+func NewAPIResolver(client connectClient, cfg *config.Config) *APIResolver {
+	return &APIResolver{
+		client:       client,
+		cfg:          cfg,
+		readyTimeout: time.Duration(cfg.Connect.ReadyTimeoutSeconds) * time.Second,
+		pollInterval: time.Duration(cfg.Connect.PollIntervalSeconds) * time.Second,
+	}
+}
+
+// Resolve implements MachineResolver against the real backend.
+func (r *APIResolver) Resolve(ctx context.Context, req ConnectRequest) (ConnectInfo, error) {
+	started := r.now()
+	machineID := ""
+	environmentID := ""
+	outcome := "failure"
+	defer func() { r.record("connect.result", outcome, machineID, environmentID, "", started) }()
+	if err := r.validatePolicy(); err != nil {
+		return ConnectInfo{}, err
+	}
+	var resolved target
+	if req.ResolvedMachine != nil {
+		if strings.TrimSpace(req.ResolvedMachine.ID) == "" || req.ResolvedMachine.Generation == 0 {
+			return ConnectInfo{}, errors.New("resolved machine is incomplete")
+		}
+		resolved = target{kind: targetUserMachine, id: req.ResolvedMachine.ID, name: req.ResolvedMachine.Name, state: req.ResolvedMachine.State, generation: req.ResolvedMachine.Generation}
+	} else {
+		found, resolveErr := r.findTarget(ctx, req.Machine)
+		if resolveErr != nil {
+			return ConnectInfo{}, resolveErr
+		}
+		resolved = found
+	}
+	target := resolved
+	machineID = target.id
+
+	var createdSession *TerminalSessionInfo
+	var resp api.ConnectionDescriptor
+	if req.CreateTerminalSession != nil {
+		var createErr error
+		resp, createdSession, createErr = r.connectWithSessionCreate(ctx, target, req.CreateTerminalSession)
+		if createErr != nil {
+			return ConnectInfo{}, fmt.Errorf("connect to environment %q: %w", req.Machine, createErr)
+		}
+	} else {
+		var connectErr error
+		resp, connectErr = r.connect(ctx, target, req.TerminalSessionID)
+		if connectErr != nil {
+			return ConnectInfo{}, fmt.Errorf("connect to environment %q: %w", req.Machine, connectErr)
+		}
+	}
+
+	sessionID := req.TerminalSessionID
+	if createdSession != nil {
+		sessionID = createdSession.ID
+	}
+	waitErr := error(nil)
+	resp, waitErr = r.waitConnectable(ctx, target, sessionID, resp)
+	if waitErr != nil {
+		return ConnectInfo{}, waitErr
+	}
+	if resp.Environment != nil {
+		environmentID = resp.Environment.EnvironmentID
+	}
+
+	if !completeTerminalDescriptor(resp.Terminal) {
+		return ConnectInfo{}, fmt.Errorf("connect to environment %q: server did not return a terminal endpoint", req.Machine)
+	}
+
+	info := ConnectInfo{
+		TargetKind:        target.kind,
+		MachineID:         target.id,
+		Machine:           target.name,
+		MachineState:      targetState(target, resp),
+		MachineGeneration: target.generation,
+		TunnelTarget:      resp.Terminal.Endpoints.WSS,
+		Local:             false,
+		Terminal: &TerminalTarget{
+			Protocol:      resp.Terminal.Protocol,
+			EnvironmentID: resp.Environment.EnvironmentID,
+			QUICEndpoint:  resp.Terminal.Endpoints.QUIC,
+			WSSEndpoint:   resp.Terminal.Endpoints.WSS,
+			Auth:          mapAuth(resp.Terminal.Auth),
+			SessionID:     resp.Terminal.SessionID,
+			CWD:           resp.Terminal.CWD,
+			ReplayHistory: true,
+		},
+	}
+	if resp.FileTransfer != nil {
+		info.FileTransfer = &FileTransferTarget{Endpoint: resp.FileTransfer.Endpoint, SourceMachineID: resp.FileTransfer.SourceMachineID, DestinationMachineID: resp.FileTransfer.DestinationMachineID, InitiatingUserID: resp.FileTransfer.InitiatingUserID, Auth: mapAuth(resp.FileTransfer.Auth), Policy: resp.FileTransfer.Policy}
+	}
+	info.TerminalSession = createdSession
+	outcome = "success"
+	return info, nil
+}
+
+func (r *APIResolver) connect(ctx context.Context, target target, terminalSessionID string) (api.ConnectionDescriptor, error) {
+	if terminalSessionID != "" {
+		sessionClient, ok := r.client.(userMachineSessionClient)
+		if !ok {
+			return api.ConnectionDescriptor{}, errors.New("this server client does not support selected machine terminal sessions")
+		}
+		return sessionClient.UserMachineConnectionDescriptorForSession(ctx, target.id, terminalSessionID)
+	}
+	return r.client.UserMachineConnectionDescriptor(ctx, target.id)
+}
+
+func (r *APIResolver) connectWithSessionCreate(ctx context.Context, target target, create *TerminalSessionCreate) (api.ConnectionDescriptor, *TerminalSessionInfo, error) {
+	if create == nil || strings.TrimSpace(create.IdempotencyKey) == "" {
+		return api.ConnectionDescriptor{}, nil, errors.New("terminal session creation requires an idempotency key")
+	}
+	client, ok := r.client.(userMachineCreateSessionClient)
+	if !ok {
+		return api.ConnectionDescriptor{}, nil, errors.New("this server client does not support create-and-connect for machines")
+	}
+	descriptor, session, err := client.UserMachineConnectionDescriptorWithSessionCreate(ctx, target.id, create.Name, create.IdempotencyKey, create.CWD)
+	if err != nil {
+		return api.ConnectionDescriptor{}, nil, err
+	}
+	return descriptor, &TerminalSessionInfo{ID: session.ID, Name: session.Name, EvictedSession: session.EvictedSession}, nil
+}
+
+func (r *APIResolver) connectionStatus(ctx context.Context, target target, terminalSessionID string) (api.ConnectionDescriptor, error) {
+	if terminalSessionID != "" {
+		sessionClient, ok := r.client.(userMachineSessionClient)
+		if !ok {
+			return api.ConnectionDescriptor{}, errors.New("this server client does not support selected machine terminal sessions")
+		}
+		return sessionClient.UserMachineConnectionReadinessForSession(ctx, target.id, terminalSessionID)
+	}
+	return r.client.UserMachineConnectionReadiness(ctx, target.id)
+}
+
+func (r *APIResolver) now() time.Time {
+	if r.Now != nil {
+		return r.Now()
+	}
+	return time.Now()
+}
+
+func (r *APIResolver) record(name, outcome, machineID, environmentID, stage string, started time.Time) {
+	if r.Telemetry == nil {
+		return
+	}
+	ended := r.now()
+	e := telemetry.Event{Name: name, At: ended, Outcome: outcome, MachineID: machineID, EnvironmentID: environmentID, Stage: stage, LatencyMS: ended.Sub(started).Milliseconds()}
+	if e.Validate() == nil {
+		r.Telemetry.Record(e)
+	}
+}
+
+func (r *APIResolver) validatePolicy() error {
+	if r.cfg.Connect.ReadyTimeoutSeconds <= 0 {
+		return errors.New("connect.ready_timeout_seconds must be configured and positive")
+	}
+	if r.cfg.Connect.PollIntervalSeconds <= 0 {
+		return errors.New("connect.poll_interval_seconds must be configured and positive")
+	}
+	if r.cfg.Connect.DialRetries < 0 {
+		return errors.New("connect.dial_retries cannot be negative")
+	}
+	if r.cfg.Connect.DialRetries > 0 && r.cfg.Connect.DialRetrySeconds <= 0 {
+		return errors.New("connect.dial_retry_seconds must be positive when retries are enabled")
+	}
+	return nil
+}
+
+func (r *APIResolver) findTarget(ctx context.Context, requested string) (target, error) {
+	want := strings.TrimSpace(requested)
+	if want == "" {
+		return target{}, errors.New("missing machine name or ID")
+	}
+	machines, err := r.client.ListUserMachines(ctx)
+	if err != nil {
+		return target{}, fmt.Errorf("list machines: %w", err)
+	}
+	for _, machine := range machines {
+		if machine.ID == want {
+			if err := terminalCapabilityError(machine); err != nil {
+				return target{}, err
+			}
+			return target{kind: targetUserMachine, id: machine.ID, name: machine.Alias, state: machine.State, generation: uint64(machine.InstallationGeneration)}, nil
+		}
+	}
+	var matches []api.UserMachine
+	for _, machine := range machines {
+		if strings.EqualFold(machine.Alias, want) {
+			matches = append(matches, machine)
+		}
+	}
+	if len(matches) == 1 {
+		machine := matches[0]
+		if err := terminalCapabilityError(machine); err != nil {
+			return target{}, err
+		}
+		return target{kind: targetUserMachine, id: machine.ID, name: machine.Alias, state: machine.State, generation: uint64(machine.InstallationGeneration)}, nil
+	}
+	if len(matches) > 1 {
+		ids := make([]string, 0, len(matches))
+		for _, machine := range matches {
+			ids = append(ids, machine.ID)
+		}
+		return target{}, fmt.Errorf("%w: %q matches machine IDs %s; connect using an exact ID", ErrMachineAmbiguous, requested, strings.Join(ids, ", "))
+	}
+	return target{}, fmt.Errorf("%w: %q", ErrMachineNotFound, requested)
+}
+
+func terminalCapabilityError(machine api.UserMachine) error {
+	if !machine.Capabilities.TerminalHost.Configured {
+		return &api.APIError{Status: http.StatusConflict, Code: "machine_capability_unavailable", Message: "This machine is not configured to host terminals."}
+	}
+	if slices.Contains([]string{"revoked", "disconnected", "deleted"}, machine.State) {
+		return nil
+	}
+	if !machine.Online || !machine.Capabilities.TerminalHost.Observed {
+		return &api.APIError{Status: http.StatusConflict, Code: "machine_offline", Message: "This terminal host is offline."}
+	}
+	return nil
+}
+
+// waitConnectable polls connection-status until the tunnel is connectable or the
+// configured timeout elapses. cli-connect already queued any needed machine
+// resume, so this only waits for readiness; it never re-brokers.
+func (r *APIResolver) waitConnectable(ctx context.Context, target target, terminalSessionID string, resp api.ConnectionDescriptor) (api.ConnectionDescriptor, error) {
+	if err := terminalConnectionError(resp); err != nil {
+		return api.ConnectionDescriptor{}, err
+	}
+	if resp.Connectable {
+		return r.validateDescriptor(resp, target)
+	}
+	deadline := time.Now().Add(r.readyTimeout)
+	pollCtx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	for {
+		if time.Now().After(deadline) {
+			return api.ConnectionDescriptor{}, fmt.Errorf("timed out waiting for the machine to become ready: %w", context.DeadlineExceeded)
+		}
+		interval := r.pollInterval
+		if resp.RetryAfterSeconds > 0 {
+			interval = time.Duration(resp.RetryAfterSeconds) * time.Second
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return api.ConnectionDescriptor{}, fmt.Errorf("timed out waiting for the machine to become ready: %w", context.DeadlineExceeded)
+		}
+		if interval > remaining {
+			interval = remaining
+		}
+		if r.Progress != nil {
+			r.Progress(resp.Status, resp.Reason, interval)
+		}
+		r.record("connect.stage", "waiting", target.id, "", resp.Status, r.now())
+		if err := r.wait(pollCtx, interval); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return api.ConnectionDescriptor{}, fmt.Errorf("timed out waiting for the machine to become ready: %w", context.DeadlineExceeded)
+			}
+			return api.ConnectionDescriptor{}, err
+		}
+		next, err := r.connectionStatus(pollCtx, target, terminalSessionID)
+		if err != nil {
+			return api.ConnectionDescriptor{}, fmt.Errorf("poll connection status: %w", err)
+		}
+		if next.Connectable {
+			// connection-status omits the terminal descriptor's routing detail;
+			// re-broker once now that the machine is ready to get a fresh,
+			// fully-populated WebSocket descriptor and access session.
+			if !completeTerminalDescriptor(next.Terminal) {
+				fresh, err := r.connect(pollCtx, target, terminalSessionID)
+				if err != nil {
+					return api.ConnectionDescriptor{}, err
+				}
+				if !fresh.Connectable {
+					resp = fresh
+					continue
+				}
+				return r.validateDescriptor(fresh, target)
+			}
+			return r.validateDescriptor(next, target)
+		}
+		if err := terminalConnectionError(next); err != nil {
+			return api.ConnectionDescriptor{}, err
+		}
+		resp = next
+	}
+}
+
+func terminalConnectionError(resp api.ConnectionDescriptor) error {
+	switch resp.Status {
+	case "machine_revoked":
+		return &api.APIError{Status: http.StatusForbidden, Code: resp.Status, Message: "machine access was revoked"}
+	}
+	return nil
+}
+
+func (r *APIResolver) validateDescriptor(resp api.ConnectionDescriptor, target target) (api.ConnectionDescriptor, error) {
+	wantIssuer, err := config.NormalizeIssuer(r.cfg.ServerURL)
+	if err != nil {
+		return api.ConnectionDescriptor{}, fmt.Errorf("normalize configured issuer: %w", err)
+	}
+	gotIssuer, err := config.NormalizeIssuer(resp.Issuer)
+	if err != nil || gotIssuer != wantIssuer {
+		return api.ConnectionDescriptor{}, errors.New("server returned a descriptor for an unexpected issuer")
+	}
+	if !resp.Connectable {
+		return api.ConnectionDescriptor{}, errors.New("server returned a non-connectable descriptor")
+	}
+	if resp.UserMachineID != target.id {
+		return api.ConnectionDescriptor{}, errors.New("server returned a descriptor for the wrong machine")
+	}
+	if resp.ExpiresAt.IsZero() || !time.Now().Before(resp.ExpiresAt) {
+		return api.ConnectionDescriptor{}, errors.New("server returned an expired connection descriptor")
+	}
+	if !completeTerminalDescriptor(resp.Terminal) {
+		return api.ConnectionDescriptor{}, errors.New("server returned an incomplete terminal descriptor")
+	}
+	if resp.Terminal.Protocol != "paperboat.terminal.v1" || resp.Environment == nil || strings.TrimSpace(resp.Environment.EnvironmentID) == "" || !environmentMatchesTarget(resp.Environment, target) {
+		return api.ConnectionDescriptor{}, errors.New("server returned an invalid environment descriptor")
+	}
+	if strings.TrimSpace(resp.Environment.ProjectRoot) == "" || strings.TrimSpace(resp.Terminal.SessionID) == "" || strings.TrimSpace(resp.Terminal.CWD) == "" {
+		return api.ConnectionDescriptor{}, errors.New("server returned incomplete environment or terminal identity")
+	}
+	wsURL, err := secureEndpoint(resp.Terminal.Endpoints.WSS, "wss")
+	if err != nil {
+		return api.ConnectionDescriptor{}, fmt.Errorf("invalid terminal WebSocket endpoint: %w", err)
+	}
+	quicURL, quicErr := secureEndpoint(resp.Terminal.Endpoints.QUIC, "quic")
+	if quicErr != nil || endpointAuthority(quicURL) != endpointAuthority(wsURL) {
+		return api.ConnectionDescriptor{}, errors.New("terminal QUIC and WSS hosts do not match")
+	}
+	if len(r.cfg.Connect.AllowedRouteHosts) > 0 {
+		if !allowedHost(resp.Terminal.Endpoints.WSS, r.cfg.Connect.AllowedRouteHosts) || !allowedHost(resp.Terminal.Endpoints.QUIC, r.cfg.Connect.AllowedRouteHosts) {
+			return api.ConnectionDescriptor{}, errors.New("terminal descriptor host is not allowed by local policy")
+		}
+	}
+	validTerminalAuth := resp.Terminal.Auth.Method == "websocket_ticket" && resp.Terminal.Auth.Ticket != "" || resp.Terminal.Auth.Method == "bearer" && resp.Terminal.Auth.Token != ""
+	if !validTerminalAuth || !(exactScopes(resp.Terminal.Auth.Scopes, "terminal:operate") || exactScopes(resp.Terminal.Auth.Scopes, "terminal:view") || exactScopes(resp.Terminal.Auth.Scopes, "terminal:control")) {
+		return api.ConnectionDescriptor{}, errors.New("terminal descriptor has invalid scope or auth")
+	}
+	if resp.Terminal.Auth.ExpiresAt.IsZero() || !time.Now().Before(resp.Terminal.Auth.ExpiresAt) || resp.Terminal.Auth.ExpiresAt.After(resp.ExpiresAt) {
+		return api.ConnectionDescriptor{}, errors.New("terminal credential is expired")
+	}
+	sharedTerminal := exactScopes(resp.Terminal.Auth.Scopes, "terminal:view") || exactScopes(resp.Terminal.Auth.Scopes, "terminal:control")
+	if sharedTerminal {
+		if resp.FileTransfer != nil {
+			return api.ConnectionDescriptor{}, errors.New("shared terminal descriptor must not include file transfer authority")
+		}
+	} else if resp.FileTransfer != nil {
+		if err := r.validateFileTransfer(resp.FileTransfer, wsURL, resp.ExpiresAt); err != nil {
+			return api.ConnectionDescriptor{}, err
+		}
+	}
+	return resp, nil
+}
+
+func (r *APIResolver) validateFileTransfer(transfer *api.FileTransfer, terminalURL *url.URL, descriptorExpiry time.Time) error {
+	if transfer == nil {
+		return errors.New("server returned an incomplete file transfer descriptor")
+	}
+	u, err := secureEndpoint(transfer.Endpoint, "https")
+	if err != nil || endpointAuthority(u) != endpointAuthority(terminalURL) || strings.TrimRight(u.Path, "/") != "/v1/file-transfers" {
+		return errors.New("file transfer endpoint is not on the validated terminal route")
+	}
+	if len(r.cfg.Connect.AllowedRouteHosts) > 0 && !allowedHost(transfer.Endpoint, r.cfg.Connect.AllowedRouteHosts) {
+		return errors.New("file transfer descriptor host is not allowed by local policy")
+	}
+	if transfer.Auth.Method != "bearer" || strings.TrimSpace(transfer.Auth.Token) == "" || !exactScopes(transfer.Auth.Scopes, "file:transfer") {
+		return errors.New("file transfer descriptor has invalid scope or auth")
+	}
+	if transfer.Auth.ExpiresAt.IsZero() || !time.Now().Before(transfer.Auth.ExpiresAt) || transfer.Auth.ExpiresAt.After(descriptorExpiry) {
+		return errors.New("file transfer credential is expired")
+	}
+	p := transfer.Policy
+	if p.Revision == "" || p.MaxFileBytes <= 0 || p.MaxFileBytes > 50<<20 || p.MaxBatchFiles < 1 || p.MaxBatchFiles > 10 || p.MaxBatchBytes < p.MaxFileBytes || p.MaxBatchBytes > 500<<20 || p.MaxConcurrentTransfers < 1 || p.MaxConcurrentTransfers > 2 || p.RetentionSeconds != 7*24*60*60 || p.DeliveryTimeoutSeconds != 600 || p.MaxPendingSpoolBytes != 1<<30 {
+		return errors.New("file transfer descriptor has invalid policy")
+	}
+	return nil
+}
+
+func environmentMatchesTarget(environment *api.Environment, target target) bool {
+	return environment.UserMachineID == target.id
+}
+
+func targetState(target target, resp api.ConnectionDescriptor) string {
+	if strings.TrimSpace(resp.UserMachineState) != "" {
+		return resp.UserMachineState
+	}
+	return target.state
+}
+
+func endpointAuthority(u *url.URL) string {
+	port := u.Port()
+	if port == "" {
+		switch strings.ToLower(u.Scheme) {
+		case "https", "wss":
+			port = "443"
+		case "http", "ws":
+			port = "80"
+		}
+	}
+	return strings.ToLower(strings.TrimSuffix(u.Hostname(), ".")) + ":" + port
+}
+
+func secureEndpoint(raw, scheme string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil, err
+	}
+	if u.Scheme != scheme || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return nil, fmt.Errorf("endpoint must use %s without credentials, query, or fragment", scheme)
+	}
+	return u, nil
+}
+
+func exactScopes(scopes []string, want string) bool { return len(scopes) == 1 && scopes[0] == want }
+
+func allowedHost(raw string, allowed []string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return false
+	}
+	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	for _, candidate := range allowed {
+		candidate = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(candidate), "."))
+		if candidate != "" && host == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *APIResolver) wait(ctx context.Context, d time.Duration) error {
+	if r.sleep != nil {
+		return r.sleep(ctx, d)
+	}
+	if d <= 0 {
+		return ctx.Err()
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func mapAuth(auth api.AuthMaterial) AuthTarget {
+	return AuthTarget{
+		Method:     auth.Method,
+		Ticket:     auth.Ticket,
+		Token:      auth.Token,
+		ExpiresAt:  auth.ExpiresAt.Format(time.RFC3339),
+		Scopes:     auth.Scopes,
+		ResourceID: auth.AccessSessionID,
+	}
+}
+
+func completeTerminalDescriptor(term *api.Terminal) bool {
+	if term == nil || strings.TrimSpace(term.Protocol) == "" || strings.TrimSpace(term.Endpoints.QUIC) == "" || strings.TrimSpace(term.Endpoints.WSS) == "" {
+		return false
+	}
+	if strings.TrimSpace(term.Auth.Method) == "" {
+		return false
+	}
+	return strings.TrimSpace(term.Auth.Ticket) != "" || strings.TrimSpace(term.Auth.Token) != ""
+}

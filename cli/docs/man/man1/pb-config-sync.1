@@ -1,0 +1,52 @@
+.nh
+.TH "PB-CONFIG-SYNC" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-sync - Validate and apply this machine's configuration file
+
+
+.SH SYNOPSIS
+\fBpb config sync [flags]\fP
+
+
+.SH DESCRIPTION
+Validate and apply this machine's configuration file
+
+.PP
+Inspect, initialize, validate, or apply this machine's authoritative configuration file. The file defines repository choices and explicit path rules. Validate the effective configuration before applying a confirmed change to the enrolled machine's synchronization assignment.
+
+.PP
+Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for sync
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config(1)\fP, \fBpb-config-sync-apply(1)\fP, \fBpb-config-sync-init(1)\fP, \fBpb-config-sync-path(1)\fP, \fBpb-config-sync-validate(1)\fP

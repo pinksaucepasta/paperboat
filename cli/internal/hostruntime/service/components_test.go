@@ -1,0 +1,264 @@
+package service
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+)
+
+func canonicalLayout(t *testing.T, platform string) Layout {
+	t.Helper()
+	if runtime.GOOS == "windows" && platform != "windows" {
+		t.Skip("POSIX split-service filesystem semantics are not applicable on Windows")
+	}
+	root := filepath.Join(t.TempDir(), "paperboat")
+	releases := filepath.Join(root, "releases")
+	layout := Layout{
+		Platform: platform, InstallRoot: root, ReleasesRoot: releases,
+		Binary:          filepath.Join(root, "bin", "pb"),
+		BinaryRollback:  filepath.Join(releases, "pb.rollback"),
+		BinaryStaged:    filepath.Join(releases, "pb.staged"),
+		UpdateStateRoot: filepath.Join(t.TempDir(), "updated"),
+		HostdSocket:     filepath.Join(t.TempDir(), "hostd", "hostd.sock"),
+		UpdaterSocket:   filepath.Join(t.TempDir(), "updated-runtime", "control.sock"),
+	}
+	if runtime.GOOS == "windows" {
+		layout.Binary += ".exe"
+	}
+	if err := os.MkdirAll(filepath.Dir(layout.Binary), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(layout.Binary, []byte("binary"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	return layout
+}
+
+func TestDefaultLayoutsAreFixedAndBounded(t *testing.T) {
+	for _, platform := range []string{"linux", "darwin", "windows"} {
+		t.Run(platform, func(t *testing.T) {
+			layout, err := DefaultLayout(platform)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := layout.Validate(); err != nil || !withinForPlatform(platform, layout.InstallRoot, layout.Binary) || !withinForPlatform(platform, layout.ReleasesRoot, layout.BinaryRollback) {
+				t.Fatalf("layout=%+v err=%v", layout, err)
+			}
+			if layout.Binary == layout.BinaryRollback || layout.Binary == layout.BinaryStaged || layout.BinaryRollback == layout.BinaryStaged {
+				t.Fatalf("release retention paths overlap: %+v", layout)
+			}
+		})
+	}
+}
+
+func TestWindowsUserLayoutIsStableAndIsolated(t *testing.T) {
+	first, err := WindowsUserLayout("S-1-5-21-1-2-3-1001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repeat, err := WindowsUserLayout("S-1-5-21-1-2-3-1001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := WindowsUserLayout("S-1-5-21-1-2-3-1002")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Instance != repeat.Instance || first.Binary != repeat.Binary {
+		t.Fatal("same SID produced unstable Windows layout")
+	}
+	if first.Instance == second.Instance || first.Binary == second.Binary || first.HostdSocket == second.HostdSocket || first.UpdateStateRoot == second.UpdateStateRoot {
+		t.Fatalf("different SIDs share Windows runtime layout: first=%+v second=%+v", first, second)
+	}
+	if len(first.Instance) != 25 || first.Instance[0] != 'u' {
+		t.Fatalf("instance=%q", first.Instance)
+	}
+}
+
+func TestDefaultWindowsLayoutUsesCanonicalSeparators(t *testing.T) {
+	layout, err := DefaultLayout("windows")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if layout.ReleasesRoot != `C:\Program Files\Paperboat\releases` || layout.Binary != `C:\Program Files\Paperboat\bin\pb.exe` || layout.BinaryRollback != `C:\Program Files\Paperboat\releases\pb.rollback.exe` {
+		t.Fatalf("non-canonical Windows layout: %+v", layout)
+	}
+	for _, value := range []string{layout.ReleasesRoot, layout.Binary, layout.BinaryRollback, layout.BinaryStaged} {
+		if strings.Contains(value, `\\`) {
+			t.Fatalf("layout path contains a duplicate separator: %q", value)
+		}
+	}
+}
+
+func TestLayoutRejectsEscapingBinary(t *testing.T) {
+	layout := canonicalLayout(t, "linux")
+	layout.Binary = "/tmp/paperboat-updated"
+	if err := layout.Validate(); !errors.Is(err, ErrInvalidDefinition) {
+		t.Fatalf("escaping component err=%v", err)
+	}
+}
+
+func TestHostdAndUpdaterInstallersUseStableDaemon(t *testing.T) {
+	for _, platform := range []string{"linux", "darwin"} {
+		t.Run(platform, func(t *testing.T) {
+			layout := canonicalLayout(t, platform)
+			control := &controller{}
+			config := ComponentConfig{Source: installsource.Source{Version: "custom-build", Platform: platform, Architecture: "arm64", SHA256: strings.Repeat("a", 64), Length: 1, Distribution: installsource.Custom}, Layout: layout, User: "alice", Group: "staff", UID: 501, GID: 20, HostdTokenFile: filepath.Join(t.TempDir(), "hostd.token"), ReleaseRepository: "https://releases.paperboat.test", MachineID: "machine_1", HealthURL: "http://127.0.0.1:38080/healthz", Controller: control}
+			hostd, err := NewHostdInstaller(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			updater, err := NewUpdaterInstaller(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sourceBody, decodeErr := base64.RawStdEncoding.DecodeString(updater.config.Environment["PAPERBOAT_INSTALL_SOURCE"])
+			var persisted installsource.Source
+			if decodeErr != nil || json.Unmarshal(sourceBody, &persisted) != nil || persisted != config.Source {
+				t.Fatal("installed updater lost source identity or disabled automatic policy")
+			}
+			if hostd.config.UpgradeMode != UpgradeReload || updater.config.UpgradeMode != UpgradeReload {
+				t.Fatal("stable components must not restart on definition upgrades")
+			}
+			if platform == "linux" {
+				if !strings.HasSuffix(hostd.DefinitionPath(), "/etc/systemd/system/paperboat-hostd.service") || !strings.HasSuffix(updater.DefinitionPath(), "/etc/systemd/system/paperboat-updated.service") {
+					t.Fatalf("paths hostd=%q updater=%q", hostd.DefinitionPath(), updater.DefinitionPath())
+				}
+				hostdDefinition, err := hostd.render()
+				if err != nil {
+					t.Fatal(err)
+				}
+				updaterDefinition, err := updater.render()
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, expected := range []string{"User=alice", "Group=staff", "RuntimeDirectory=paperboat-hostd", "RuntimeDirectoryMode=0700", "NoNewPrivileges=false", "PAPERBOAT_BINARY=" + layout.Binary, "PAPERBOAT_RUNTIME_CURRENT=" + layout.Binary, "PAPERBOAT_HOSTD_SOCKET=" + layout.HostdSocket, `"daemon" "__runtime-hostd"`} {
+					if !strings.Contains(string(hostdDefinition), expected) {
+						t.Fatalf("hostd missing %q:\n%s", expected, hostdDefinition)
+					}
+				}
+				for _, expected := range []string{"User=root", "Group=root", "RuntimeDirectory=paperboat-updated", "NoNewPrivileges=true", "After=local-fs.target network-online.target", "Wants=network-online.target", "PAPERBOAT_RELEASE_ROOT=" + layout.ReleasesRoot, "PAPERBOAT_BINARY=" + layout.Binary, "PAPERBOAT_BINARY_ROLLBACK=" + layout.BinaryRollback, "PAPERBOAT_BINARY_STAGED=" + layout.BinaryStaged, "PAPERBOAT_UPDATED_SOCKET=" + updaterControlSocket(platform, layout.Instance), `"daemon" "__runtime-updated"`} {
+					if !strings.Contains(string(updaterDefinition), expected) {
+						t.Fatalf("updater missing %q:\n%s", expected, updaterDefinition)
+					}
+				}
+			} else {
+				if !strings.HasSuffix(hostd.DefinitionPath(), "/Library/LaunchDaemons/"+HostdLabel+".plist") || !strings.HasSuffix(updater.DefinitionPath(), "/Library/LaunchDaemons/"+UpdaterLabel+".plist") {
+					t.Fatalf("paths hostd=%q updater=%q", hostd.DefinitionPath(), updater.DefinitionPath())
+				}
+				body, err := hostd.render()
+				if err != nil || !strings.Contains(string(body), "<string>alice</string>") || !strings.Contains(string(body), "<string>"+HostdLabel+"</string>") {
+					t.Fatalf("hostd plist err=%v body=%s", err, body)
+				}
+				body, err = updater.render()
+				if err != nil || !strings.Contains(string(body), "<string>root</string>") || !strings.Contains(string(body), "<string>"+UpdaterLabel+"</string>") {
+					t.Fatalf("updater plist err=%v body=%s", err, body)
+				}
+			}
+		})
+	}
+}
+
+func TestServiceDefinitionUpgradeDoesNotRestartStableBinary(t *testing.T) {
+	layout := canonicalLayout(t, "linux")
+	control := &controller{}
+	installer, err := New(Config{
+		Platform: "linux", Kind: HostdKind, ConfigRoot: t.TempDir(), Executable: layout.Binary,
+		User: "alice", Group: "staff", Arguments: []string{"serve"}, UpgradeMode: UpgradeReload, Controller: control,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := installer.Install(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := installer.Install(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := control.applied; len(got) != 1 || got[0] {
+		t.Fatalf("stable hostd restart flags=%v", got)
+	}
+}
+
+func TestConfigApplyRestartsUnchangedDeclaration(t *testing.T) {
+	layout := canonicalLayout(t, "linux")
+	control := &controller{}
+	installer, err := New(Config{
+		Platform: "linux", Kind: ConfigKind, ConfigRoot: t.TempDir(), Executable: layout.Binary,
+		User: "alice", Group: "staff", Arguments: []string{"daemon", "__runtime-config"}, Controller: control,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := installer.Install(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(control.applied) != 2 || control.applied[0] || !control.applied[1] {
+		t.Fatalf("config activation flags=%v", control.applied)
+	}
+}
+
+func TestHostdInstallerAcceptsOnlyExactRootEnrollment(t *testing.T) {
+	if _, err := NewHostdInstaller(ComponentConfig{Layout: canonicalLayout(t, "linux"), User: "root", Group: "root", UID: 0, GID: 0, HostdTokenFile: "/tmp/token", Controller: &controller{}}); err != nil {
+		t.Fatalf("root hostd err=%v", err)
+	}
+	for _, config := range []ComponentConfig{
+		{Layout: canonicalLayout(t, "linux"), User: "alice", Group: "users", UID: 0, GID: 0, HostdTokenFile: "/tmp/token", Controller: &controller{}},
+		{Layout: canonicalLayout(t, "linux"), User: "root", Group: "root", UID: 0, GID: 1000, HostdTokenFile: "/tmp/token", Controller: &controller{}},
+		{Layout: canonicalLayout(t, "linux"), User: "root", Group: "users", UID: 0, GID: 0, HostdTokenFile: "/tmp/token", Controller: &controller{}},
+		{Layout: canonicalLayout(t, "linux"), User: "root", Group: "users", UID: 1000, GID: 1000, HostdTokenFile: "/tmp/token", Controller: &controller{}},
+	} {
+		if _, err := NewHostdInstaller(config); !errors.Is(err, ErrInvalidDefinition) {
+			t.Fatalf("invalid identity %+v err=%v", config, err)
+		}
+	}
+}
+
+func TestComponentControllerUsesStableRoleServiceNames(t *testing.T) {
+	for _, test := range []struct {
+		platform string
+		kind     string
+		want     string
+	}{
+		{platform: "linux", kind: HostdKind, want: "paperboat-hostd-u501.service"},
+		{platform: "linux", kind: UpdaterKind, want: "paperboat-updated-u501.service"},
+		{platform: "darwin", kind: HostdKind, want: HostdLabel + ".u501"},
+		{platform: "darwin", kind: UpdaterKind, want: UpdaterLabel + ".u501"},
+	} {
+		t.Run(test.platform+"_"+test.kind, func(t *testing.T) {
+			controller, err := ComponentController(test.platform, test.kind, 501, ExecRunner{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch value := controller.(type) {
+			case SystemdController:
+				if value.Unit != test.want {
+					t.Fatalf("unit=%q want=%q", value.Unit, test.want)
+				}
+			case LaunchdController:
+				if value.Label != test.want || value.UserDomain {
+					t.Fatalf("label=%q user_domain=%v", value.Label, value.UserDomain)
+				}
+			default:
+				t.Fatalf("controller=%T", controller)
+			}
+		})
+	}
+	if controller, err := ComponentController("windows", HostdKind, 501, ExecRunner{}); err != nil {
+		t.Fatalf("windows controller err=%v", err)
+	} else if _, ok := controller.(WindowsController); !ok {
+		t.Fatalf("windows controller=%T", controller)
+	}
+}

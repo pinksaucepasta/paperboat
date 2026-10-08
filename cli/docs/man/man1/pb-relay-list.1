@@ -1,0 +1,61 @@
+.nh
+.TH "PB-RELAY-LIST" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-relay-list - List hosted and self-hosted relays
+
+
+.SH SYNOPSIS
+\fBpb relay list [flags]\fP
+
+
+.SH DESCRIPTION
+List relay candidates from the signed native network authority and the
+signed-in account's selected self-hosted relay pool. Mixed mode shows both
+sources. Self-hosted-only mode shows only selected self-hosted relays,
+including unavailable ones. Sign-in and the local daemon are required.
+
+.PP
+Reported_ready means a recent signed control-plane observation, not a live
+data connection. Use --json for paperboat.relay-list/v1 output with the pool
+mode, relays, and observation timestamps.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for list
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb relay list
+  pb relay list --json
+.EE
+
+
+.SH SEE ALSO
+\fBpb-relay(1)\fP

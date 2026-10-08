@@ -1,0 +1,30 @@
+# Binaries & build output
+*.exe
+*.dll
+*.so
+*.dylib
+/bin/
+/dist/
+/.codex-build/
+/.build/
+/pb
+/diag
+/cmd/pb-peerprobe/
+/tools/deploy-mac.sh
+
+# Test & coverage
+*.out
+coverage.*
+
+# Go workspace
+go.work
+go.work.sum
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# OS & editor
+.DS_Store
+*.swp

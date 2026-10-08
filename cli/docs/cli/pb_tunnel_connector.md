@@ -1,0 +1,39 @@
+## pb tunnel connector
+
+Manage tunnel connectors
+
+### Synopsis
+
+Manage tunnel connectors
+
+List, add, drain, or revoke host connectors for one durable tunnel. Draining is a graceful transition; revocation withdraws connector authority.
+
+Durable tunnels retain identity, routes, connectors, and domains across client sessions. Ephemeral tunnels have a separate lifecycle. Route publication and browser HTTP access require exact authorization; TLS for browser HTTP terminates at the edge.
+
+With --json, this command group lists its available commands.
+
+### Options
+
+```
+  -h, --help   help for connector
+```
+
+### Options inherited from parent commands
+
+```
+      --config string      path to the CLI config file
+      --ephemeral          use the temporary preview lifecycle
+      --json               print machine-readable JSON
+      --no-customization   ignore local shortcuts, command defaults, and TUI preferences
+      --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
+```
+
+### SEE ALSO
+
+* [pb tunnel](pb_tunnel.md)	 - Manage durable tunnels or start an ephemeral tunnel
+* [pb tunnel connector add](pb_tunnel_connector_add.md)	 - Add a connector on this host
+* [pb tunnel connector drain](pb_tunnel_connector_drain.md)	 - Drain a tunnel connector
+* [pb tunnel connector list](pb_tunnel_connector_list.md)	 - List tunnel connectors
+* [pb tunnel connector revoke](pb_tunnel_connector_revoke.md)	 - Revoke a tunnel connector
+

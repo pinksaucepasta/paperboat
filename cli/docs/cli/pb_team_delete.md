@@ -1,0 +1,40 @@
+## pb team delete
+
+Delete a team
+
+### Synopsis
+
+Delete a team
+
+Delete a team after exact confirmation and a matching generation. This affects team ownership and grants; inspect attached resources and enrolled team machines first.
+
+Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+
+JSON output is supported with --json.
+
+```
+pb team delete <team> [flags]
+```
+
+### Options
+
+```
+      --confirm string    exact team identifier
+      --generation uint   expected current team generation
+  -h, --help              help for delete
+      --json              print canonical JSON
+```
+
+### Options inherited from parent commands
+
+```
+      --config string      path to the CLI config file
+      --no-customization   ignore local shortcuts, command defaults, and TUI preferences
+      --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
+```
+
+### SEE ALSO
+
+* [pb team](pb_team.md)	 - Manage teams and explicit resource permissions
+

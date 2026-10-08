@@ -1,0 +1,1882 @@
+package session
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"reflect"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	xterm "github.com/gitpod-io/xterm-go"
+	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
+)
+
+var (
+	ErrSessionExists    = errors.New("session name already exists")
+	ErrSessionUnknown   = errors.New("session not found")
+	ErrSessionRunning   = errors.New("session is running")
+	ErrInvalidSession   = errors.New("invalid session")
+	ErrManagerStopped   = errors.New("session manager stopped")
+	ErrResourceLimit    = errors.New("session resource limit")
+	ErrUpdateBusy       = errors.New("session update blocked by live PTY")
+	ErrUpdateInProgress = errors.New("session update already in progress")
+)
+
+// initialReplayBytes bounds attach replay to a terminal-sized recent tail while
+// reserving attachment queue capacity for output that arrives during setup.
+const initialReplayBytes uint64 = 64 << 10
+
+const browserScreenScrollbackLines = 200
+
+const outputPersistDebounce = 20 * time.Millisecond
+
+type PTYProcess interface {
+	io.Reader
+	InputWriter
+	Resize(pty.Dimensions) error
+	Signal(pty.Signal) error
+	Wait(context.Context) (pty.ExitResult, error)
+	Terminate(context.Context, time.Duration) (pty.ExitResult, error)
+	CloseIO() error
+}
+
+type Launcher func(pty.Command) (PTYProcess, error)
+type ContextLauncher func(context.Context, pty.Command) (PTYProcess, error)
+
+type ManagerConfig struct {
+	Launch             Launcher
+	LaunchContext      ContextLauncher
+	Random             io.Reader
+	HistoryBytes       uint64
+	AttachmentBytes    uint64
+	TerminationTimeout time.Duration
+	TerminationGrace   time.Duration
+	MaxSessions        int
+	Store              *store.Store
+	MaxAttachments     int
+	MaxInputDecisions  int
+	RecoveryExitSignal string
+	Metrics            interface {
+		Record(string, float64, map[string]string) error
+	}
+}
+
+type Manager struct {
+	admission         sync.RWMutex
+	mu                sync.RWMutex
+	config            ManagerConfig
+	sessions          map[string]*managedSession
+	names             map[string]string
+	stopping          bool
+	updateTransaction string
+}
+
+type managedSession struct {
+	opMu             sync.Mutex
+	inputMu          sync.Mutex
+	persistMu        sync.Mutex
+	liveProcess      atomic.Pointer[liveProcess]
+	id               string
+	name             string
+	supportReference atomic.Pointer[string]
+	command          pty.Command
+	lifecycle        *Lifecycle
+	history          *history.History
+	fanout           *Fanout
+	inputs           *InputJournal
+	process          PTYProcess
+	exit             *pty.ExitResult
+	resizeID         string
+	resizeTime       time.Time
+	persistNotify    chan struct{}
+	persistStop      chan struct{}
+	persistDone      chan error
+	persistErr       error
+	modes            terminalModeTracker
+	identification   identificationTracker
+	screen           *xterm.Terminal
+	continuation     screenContinuation
+	participants     map[string]Participant
+}
+
+type sessionFailure struct {
+	stage string
+	cause error
+}
+
+func (e *sessionFailure) Error() string {
+	switch e.stage {
+	case "command":
+		return "terminal process operation failed"
+	case "delivery":
+		return "terminal output delivery failed"
+	default:
+		return "terminal session lifecycle failed"
+	}
+}
+func (e *sessionFailure) Unwrap() error           { return e.cause }
+func (e *sessionFailure) DiagnosticStage() string { return e.stage }
+func (*sessionFailure) DiagnosticCode() string    { return "terminal_session_failed" }
+
+func classifySessionFailure(stage string, err error) error {
+	if err == nil || onlyContextEnd(err) {
+		return err
+	}
+	return &sessionFailure{stage: stage, cause: err}
+}
+
+func onlyContextEnd(err error) bool {
+	return allSessionErrorLeaves(err, func(leaf error) bool {
+		return leaf == context.Canceled || leaf == context.DeadlineExceeded
+	})
+}
+
+func normalSessionTermination(err error) bool {
+	return allSessionErrorLeaves(err, func(leaf error) bool {
+		return leaf == io.EOF || leaf == os.ErrClosed || leaf == net.ErrClosed || leaf == context.Canceled
+	})
+}
+
+func allSessionErrorLeaves(err error, isNormal func(error) bool) bool {
+	if err == nil {
+		return false
+	}
+	remaining := []error{err}
+	seen := make(map[error]struct{})
+	leaves := 0
+	for visited := 0; len(remaining) > 0; visited++ {
+		if visited >= 16 {
+			return false
+		}
+		current := remaining[0]
+		remaining = remaining[1:]
+		if current == nil {
+			return false
+		}
+		typeOf := reflect.TypeOf(current)
+		if typeOf.Comparable() {
+			if _, ok := seen[current]; ok {
+				return false
+			}
+			seen[current] = struct{}{}
+		}
+		value := reflect.ValueOf(current)
+		switch value.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+			if value.IsNil() {
+				return false
+			}
+		}
+		switch wrapped := current.(type) {
+		case interface{ Unwrap() []error }:
+			children := wrapped.Unwrap()
+			if len(children) == 0 || len(children) > 16-visited-1 || len(remaining)+len(children) > 16-visited-1 {
+				return false
+			}
+			remaining = append(remaining, children...)
+		case interface{ Unwrap() error }:
+			child := wrapped.Unwrap()
+			if child == nil || len(remaining)+1 > 16-visited-1 {
+				return false
+			}
+			remaining = append(remaining, child)
+		default:
+			leaves++
+			if !isNormal(current) {
+				return false
+			}
+		}
+	}
+	return leaves > 0
+}
+
+func observeSessionFailure(session *managedSession, stage string, err error) {
+	if err == nil || normalSessionTermination(err) {
+		return
+	}
+	ctx := supportref.WithContext(context.Background(), sessionSupportReference(session))
+	errorreport.Current().CaptureFailure(ctx, "paperboat-daemon", "sessions", stage, "terminal_session_failed", err)
+}
+
+func setSessionSupportReference(session *managedSession, reference string) {
+	if reference == "" {
+		return
+	}
+	value := reference
+	session.supportReference.Store(&value)
+}
+
+func sessionSupportReference(session *managedSession) string {
+	reference := session.supportReference.Load()
+	if reference == nil {
+		return ""
+	}
+	return *reference
+}
+
+// liveProcess is immutable after publication. Terminal v1 input can therefore
+// resolve its generation and PTY without waiting for lifecycle or persistence.
+type liveProcess struct {
+	process    PTYProcess
+	generation uint64
+}
+
+type CreateRequest struct {
+	ID      string
+	Name    string
+	Command pty.Command
+}
+
+type Snapshot struct {
+	ID                string          `json:"id"`
+	Name              string          `json:"name"`
+	CWD               string          `json:"cwd"`
+	Title             string          `json:"title"`
+	CurrentDirectory  string          `json:"current_directory,omitempty"`
+	ForegroundProcess string          `json:"foreground_process,omitempty"`
+	Dimensions        pty.Dimensions  `json:"dimensions"`
+	State             State           `json:"state"`
+	Generation        uint64          `json:"generation"`
+	EarliestSequence  uint64          `json:"earliest_sequence"`
+	LatestSequence    uint64          `json:"latest_sequence"`
+	Exit              *pty.ExitResult `json:"exit,omitempty"`
+	TerminalModes     TerminalModes   `json:"terminal_modes"`
+	Participants      []Participant   `json:"participants,omitempty"`
+}
+
+type Participant struct {
+	AttachmentID string    `json:"attachment_id"`
+	AccountID    string    `json:"account_id"`
+	ClientID     string    `json:"client_id"`
+	Role         string    `json:"role"`
+	ConnectedAt  time.Time `json:"connected_at"`
+	Browser      bool      `json:"-"`
+}
+
+type AttachResult struct {
+	Snapshot        Snapshot       `json:"snapshot"`
+	Replay          history.Replay `json:"replay"`
+	FirstAttachment bool           `json:"first_attachment"`
+}
+
+func (m *Manager) ResourceCounts() map[string]uint64 {
+	m.mu.RLock()
+	sessions := make([]*managedSession, 0, len(m.sessions))
+	for _, session := range m.sessions {
+		sessions = append(sessions, session)
+	}
+	m.mu.RUnlock()
+	counts := map[string]uint64{"sessions": uint64(len(sessions))}
+	for _, session := range sessions {
+		session.opMu.Lock()
+		counts["attachments"] += uint64(session.fanout.Count())
+		if session.process != nil {
+			counts["processes"]++
+		}
+		session.opMu.Unlock()
+	}
+	return counts
+}
+
+func NewManager(config ManagerConfig) (*Manager, error) {
+	if config.Launch == nil && config.LaunchContext == nil {
+		return nil, ErrInvalidSession
+	}
+	if config.Random == nil {
+		config.Random = rand.Reader
+	}
+	if config.HistoryBytes == 0 {
+		config.HistoryBytes = helperconfig.DefaultResources.HistoryBytes
+	}
+	if config.AttachmentBytes == 0 {
+		config.AttachmentBytes = 1 << 20
+	}
+	if config.TerminationTimeout == 0 {
+		config.TerminationTimeout = 10 * time.Second
+	}
+	if config.TerminationGrace == 0 {
+		config.TerminationGrace = 2 * time.Second
+	}
+	if config.MaxSessions == 0 {
+		config.MaxSessions = helperconfig.DefaultResources.MaxSessions
+	}
+	if config.MaxAttachments == 0 {
+		config.MaxAttachments = helperconfig.DefaultResources.MaxAttachments
+	}
+	if config.MaxInputDecisions == 0 {
+		config.MaxInputDecisions = helperconfig.DefaultResources.MaxInputDecisions
+	}
+	if config.RecoveryExitSignal == "" {
+		config.RecoveryExitSignal = "runtime_restart"
+	}
+	if config.HistoryBytes < 1 || config.AttachmentBytes < 1 || config.TerminationTimeout <= 0 || config.TerminationGrace < 0 || config.TerminationGrace > config.TerminationTimeout || config.MaxSessions < 1 || config.MaxAttachments < 1 || config.MaxInputDecisions < 1 || config.RecoveryExitSignal != "runtime_restart" && config.RecoveryExitSignal != "machine_reboot" {
+		return nil, ErrInvalidSession
+	}
+	manager := &Manager{config: config, sessions: make(map[string]*managedSession), names: make(map[string]string)}
+	if config.Store != nil {
+		if err := manager.recover(context.Background()); err != nil {
+			return nil, err
+		}
+	}
+	return manager, nil
+}
+
+func (m *Manager) launch(ctx context.Context, command pty.Command) (PTYProcess, error) {
+	if ctx == nil {
+		return nil, ErrInvalidSession
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var process PTYProcess
+	var err error
+	if m.config.LaunchContext != nil {
+		process, err = m.config.LaunchContext(ctx, command)
+	} else {
+		process, err = m.config.Launch(command)
+	}
+	if errors.Is(err, pty.ErrInvalidCommand) || errors.Is(err, pty.ErrInvalidCWD) || errors.Is(err, pty.ErrInvalidDimensions) {
+		return process, err
+	}
+	return process, classifySessionFailure("command", err)
+}
+
+func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, error) {
+	if !validSessionName(request.Name) {
+		return Snapshot{}, ErrInvalidSession
+	}
+	if err := ctx.Err(); err != nil {
+		return Snapshot{}, err
+	}
+	m.admission.RLock()
+	defer m.admission.RUnlock()
+	if m.updateTransaction != "" {
+		return Snapshot{}, ErrUpdateInProgress
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.stopping {
+		return Snapshot{}, ErrManagerStopped
+	}
+	if len(m.sessions) >= m.config.MaxSessions {
+		return Snapshot{}, ErrResourceLimit
+	}
+	if _, exists := m.names[request.Name]; exists {
+		return Snapshot{}, ErrSessionExists
+	}
+	id := request.ID
+	if id != "" {
+		if _, exists := m.sessions[id]; exists {
+			return Snapshot{}, ErrSessionExists
+		}
+	}
+	for attempt := 0; attempt < 8; attempt++ {
+		if id != "" {
+			break
+		}
+		candidate, err := randomID(m.config.Random)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		if _, exists := m.sessions[candidate]; !exists {
+			id = candidate
+			break
+		}
+	}
+	if id == "" {
+		return Snapshot{}, ErrSessionExists
+	}
+	retained, _ := history.New(m.config.HistoryBytes)
+	session := &managedSession{id: id, name: request.Name, command: request.Command, lifecycle: NewLifecycle(), history: retained, fanout: NewFanout(), participants: make(map[string]Participant), screen: xterm.New(xterm.WithCols(int(request.Command.Dimensions.Columns)), xterm.WithRows(int(request.Command.Dimensions.Rows)), xterm.WithScrollback(browserScreenScrollbackLines))}
+	setSessionSupportReference(session, supportref.FromContext(ctx))
+	if m.config.Store != nil {
+		if err := m.config.Store.CreateSession(ctx, store.Session{ID: id, Name: request.Name, CWD: request.Command.CWD, CommandPath: request.Command.Path, CommandArgs: request.Command.Args, CommandEnv: request.Command.Env, Columns: request.Command.Dimensions.Columns, Rows: request.Command.Dimensions.Rows, State: string(Creating), Generation: 0}); err != nil {
+			return Snapshot{}, err
+		}
+	}
+	process, err := m.launch(ctx, request.Command)
+	if err != nil {
+		_ = session.lifecycle.Transition(Closed)
+		if cleanupErr := m.discardFailedCreate(ctx, session, Creating); cleanupErr != nil {
+			observeSessionFailure(session, "lifecycle", cleanupErr)
+		}
+		return Snapshot{}, err
+	}
+	if err := session.lifecycle.Transition(Running); err != nil {
+		closeErr := process.CloseIO()
+		observeSessionFailure(session, "lifecycle", closeErr)
+		return Snapshot{}, classifySessionFailure("lifecycle", errors.Join(err, closeErr))
+	}
+	_, generation := session.lifecycle.Snapshot()
+	if err := m.persist(ctx, session, Creating); err != nil {
+		terminateCtx, cancel := context.WithTimeout(context.Background(), m.config.TerminationTimeout)
+		_, terminateErr := process.Terminate(terminateCtx, 0)
+		cancel()
+		cleanupErr := m.discardFailedCreate(context.Background(), session, Creating)
+		observeSessionFailure(session, "lifecycle", errors.Join(terminateErr, cleanupErr))
+		return Snapshot{}, errors.Join(err, classifySessionFailure("lifecycle", errors.Join(terminateErr, cleanupErr)))
+	}
+	session.inputs = NewBoundedInputJournal(generation, m.config.MaxInputDecisions)
+	session.process = process
+	session.identification = identificationTracker{}
+	session.liveProcess.Store(&liveProcess{process: process, generation: generation})
+	m.startOutputPersistence(session)
+	m.sessions[id] = session
+	m.names[request.Name] = id
+	snapshot := session.snapshotLocked()
+	go m.capture(session, process)
+	return snapshot, nil
+}
+
+// BeginUpdate atomically excludes new PTY creation and restart while checking
+// that the stable host owns no live PTY process. The caller persists ownership.
+func (m *Manager) BeginUpdate(transactionID string) error {
+	if m == nil || transactionID == "" {
+		return ErrInvalidSession
+	}
+	m.admission.Lock()
+	defer m.admission.Unlock()
+	if m.updateTransaction != "" {
+		if m.updateTransaction == transactionID {
+			return nil
+		}
+		return ErrUpdateInProgress
+	}
+	m.mu.RLock()
+	sessions := make([]*managedSession, 0, len(m.sessions))
+	for _, session := range m.sessions {
+		sessions = append(sessions, session)
+	}
+	stopping := m.stopping
+	m.mu.RUnlock()
+	if stopping {
+		return ErrManagerStopped
+	}
+	for _, session := range sessions {
+		session.opMu.Lock()
+		live := session.process != nil
+		session.opMu.Unlock()
+		if live {
+			return ErrUpdateBusy
+		}
+	}
+	m.updateTransaction = transactionID
+	return nil
+}
+
+func (m *Manager) EndUpdate(transactionID string) error {
+	if m == nil || transactionID == "" {
+		return ErrInvalidSession
+	}
+	m.admission.Lock()
+	defer m.admission.Unlock()
+	if m.updateTransaction == "" || m.updateTransaction != transactionID {
+		return ErrUpdateInProgress
+	}
+	m.updateTransaction = ""
+	return nil
+}
+
+func (m *Manager) Attach(sessionID, attachmentID string, fromSequence uint64) (AttachResult, error) {
+	session, err := m.get(sessionID)
+	if err != nil {
+		return AttachResult{}, err
+	}
+	session.opMu.Lock()
+	defer session.opMu.Unlock()
+	return m.attachLocked(session, attachmentID, fromSequence, false)
+}
+
+func (m *Manager) AttachParticipant(sessionID string, participant Participant, fromSequence uint64) (AttachResult, error) {
+	return m.AttachParticipantAtGeneration(sessionID, participant, fromSequence, 0)
+}
+
+func (m *Manager) AttachParticipantAtGeneration(sessionID string, participant Participant, fromSequence, expectedGeneration uint64) (AttachResult, error) {
+	session, err := m.get(sessionID)
+	if err != nil {
+		return AttachResult{}, err
+	}
+	session.opMu.Lock()
+	defer session.opMu.Unlock()
+	if !validParticipant(participant, expectedGeneration) {
+		return AttachResult{}, ErrInvalidInput
+	}
+	if participant.ConnectedAt.IsZero() {
+		return AttachResult{}, ErrInvalidInput
+	}
+	_, generation := session.lifecycle.Snapshot()
+	if expectedGeneration != 0 && expectedGeneration != generation || participant.Role != "owner" && expectedGeneration == 0 {
+		return AttachResult{}, &StaleGenerationError{CurrentGeneration: generation}
+	}
+	m.pruneParticipantsLocked(session)
+	if fromSequence == 0 {
+		fromSequence, _, _ = session.history.Bounds()
+	}
+	result, err := m.attachLocked(session, participant.AttachmentID, fromSequence, participant.Browser)
+	if err == nil {
+		if session.participants == nil {
+			session.participants = make(map[string]Participant)
+		}
+		session.participants[participant.AttachmentID] = participant
+		result.Snapshot = session.snapshotLocked()
+	}
+	return result, err
+}
+
+func (m *Manager) pruneParticipantsLocked(session *managedSession) {
+	for attachmentID := range session.participants {
+		state, _, err := session.fanout.Status(attachmentID)
+		if err != nil || state != Attached {
+			if err == nil {
+				_ = session.fanout.Detach(attachmentID)
+			}
+			delete(session.participants, attachmentID)
+		}
+	}
+}
+
+// AttachLive resolves the current output boundary and registers the attachment
+// while holding the same session lock. High-output terminals therefore cannot
+// compact past a boundary observed by a separate snapshot request.
+func (m *Manager) AttachLive(sessionID, attachmentID string) (AttachResult, error) {
+	session, err := m.get(sessionID)
+	if err != nil {
+		return AttachResult{}, err
+	}
+	session.opMu.Lock()
+	defer session.opMu.Unlock()
+	_, latest, _ := session.history.Bounds()
+	return m.attachLocked(session, attachmentID, latest, false)
+}
+
+func (m *Manager) AttachLiveParticipant(sessionID string, participant Participant) (AttachResult, error) {
+	return m.AttachLiveParticipantAtGeneration(sessionID, participant, 0)
+}
+
+func (m *Manager) AttachLiveParticipantAtGeneration(sessionID string, participant Participant, expectedGeneration uint64) (AttachResult, error) {
+	session, err := m.get(sessionID)
+	if err != nil {
+		return AttachResult{}, err
+	}
+	session.opMu.Lock()
+	defer session.opMu.Unlock()
+	_, latest, _ := session.history.Bounds()
+	if !validParticipant(participant, expectedGeneration) || participant.ConnectedAt.IsZero() {
+		return AttachResult{}, ErrInvalidInput
+	}
+	_, generation := session.lifecycle.Snapshot()
+	if expectedGeneration != 0 && expectedGeneration != generation || participant.Role != "owner" && expectedGeneration == 0 {
+		return AttachResult{}, &StaleGenerationError{CurrentGeneration: generation}
+	}
+	m.pruneParticipantsLocked(session)
+	result, err := m.attachLocked(session, participant.AttachmentID, latest, participant.Browser)
+	if err == nil {
+		if session.participants == nil {
+			session.participants = make(map[string]Participant)
+		}
+		session.participants[participant.AttachmentID] = participant
+		result.Snapshot = session.snapshotLocked()
+	}
+	return result, err
+}
+
+// BrowserScreenAttachment captures the host's current VT screen and moves one
+// browser attachment to that exact output boundary. The checkpoint is kept in
+// memory only and is sent on the authenticated, encrypted terminal stream.
+func (m *Manager) BrowserScreenAttachment(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64) ([]byte, uint64, error) {
+	session, err := m.get(sessionID)
+	if err != nil {
+		return nil, 0, err
+	}
+	session.opMu.Lock()
+	defer session.opMu.Unlock()
+	_, generation := session.lifecycle.Snapshot()
+	participant, ok := session.participants[attachmentID]
+	if expectedGeneration == 0 || generation != expectedGeneration || !ok || participant.AccountID != accountID || participant.ClientID != clientID || session.screen == nil {
+		return nil, 0, ErrInvalidInput
+	}
+	state, _, err := session.fanout.Status(attachmentID)
+	if err != nil || state != Attached {
+		return nil, 0, ErrInvalidInput
+	}
+	checkpoint := xterm.NewSerializeAddon(session.screen).Serialize(nil)
+	if session.continuation.overflow {
+		return nil, 0, ErrResourceLimit
+	}
+	checkpoint = append(checkpoint, session.continuation.pending...)
+	if len(checkpoint) > protocol.MaxTerminalScreenCheckpointBytes {
+		return nil, 0, ErrResourceLimit
+	}
+	_, latest, _ := session.history.Bounds()
+	if err := session.fanout.SkipTo(attachmentID, latest); err != nil {
+		return nil, 0, err
+	}
+	if err := session.history.Acknowledge(attachmentID, latest); err != nil {
+		return nil, 0, err
+	}
+	return checkpoint, latest, nil
+}
+
+func validParticipant(participant Participant, expectedGeneration uint64) bool {
+	validRole := participant.Role == "owner" || participant.Role == "viewer" || participant.Role == "interactive"
+	if participant.AttachmentID == "" || !validRole {
+		return false
+	}
+	if participant.Role != "owner" || expectedGeneration != 0 {
+		return participant.AccountID != "" && participant.ClientID != ""
+	}
+	return true
+}
+
+func (m *Manager) attachLocked(session *managedSession, attachmentID string, fromSequence uint64, controlOnly bool) (AttachResult, error) {
+	firstAttachment := session.fanout.Count() == 0
+	if session.fanout.Count() >= m.config.MaxAttachments {
+		return AttachResult{}, ErrResourceLimit
+	}
+	if controlOnly {
+		earliest, latest, _ := session.history.Bounds()
+		if err := session.fanout.AttachControl(attachmentID, m.config.AttachmentBytes); err != nil {
+			return AttachResult{}, err
+		}
+		if err := session.history.Acknowledge(attachmentID, latest); err != nil {
+			_ = session.fanout.Detach(attachmentID)
+			return AttachResult{}, err
+		}
+		return AttachResult{Snapshot: session.snapshotLocked(), Replay: history.Replay{FromSequence: latest, ToSequence: latest, EarliestSequence: earliest, LatestSequence: latest}, FirstAttachment: firstAttachment}, nil
+	}
+	replayLimit := attachmentReplayLimit(m.config.AttachmentBytes)
+	replay, err := session.history.ReplayOwned(fromSequence, replayLimit)
+	if err != nil {
+		return AttachResult{}, err
+	}
+	// A durable session may retain more history than a live attachment can
+	// queue. Start at the newest bounded tail so reconnect always succeeds and
+	// presents the most recent output instead of repeatedly racing replay gaps.
+	if replay.ToSequence < replay.LatestSequence {
+		boundary := replay.LatestSequence - replayLimit
+		if boundary < replay.EarliestSequence {
+			boundary = replay.EarliestSequence
+		}
+		fromSequence = boundary
+		replay.Release()
+		replay, err = session.history.ReplayOwned(fromSequence, replayLimit)
+		if err != nil {
+			return AttachResult{}, err
+		}
+	}
+	if err := session.fanout.Attach(attachmentID, m.config.AttachmentBytes); err != nil {
+		replay.Release()
+		return AttachResult{}, err
+	}
+	for _, event := range replay.Events {
+		if eviction, err := session.fanout.EnqueueOwned(attachmentID, event); err != nil {
+			replay.Release()
+			_ = session.fanout.Detach(attachmentID)
+			return AttachResult{}, err
+		} else if eviction != nil {
+			replay.Release()
+			_ = session.fanout.Detach(attachmentID)
+			return AttachResult{}, ErrAttachmentEvicted
+		}
+	}
+	publicReplay := cloneReplay(replay)
+	replay.Release()
+	return AttachResult{Snapshot: session.snapshotLocked(), Replay: publicReplay, FirstAttachment: firstAttachment}, nil
+}
+
+func cloneReplay(replay history.Replay) history.Replay {
+	result := replay
+	result.Events = make([]history.Event, len(replay.Events))
+	for index, event := range replay.Events {
+		result.Events[index] = history.Event{Channel: event.Channel, StartSequence: event.StartSequence, EndSequence: event.EndSequence, Data: append([]byte(nil), event.Data...)}
+	}
+	return result
+}
+
+func attachmentReplayLimit(attachmentBytes uint64) uint64 {
+	limit := attachmentBytes / 2
+	if limit == 0 {
+		limit = 1
+	}
+	if limit > initialReplayBytes {
+		return initialReplayBytes
+	}
+	return limit
+}
+
+func (m *Manager) Detach(sessionID, attachmentID string) error {
+	session, err := m.get(sessionID)
+	if err != nil {
+		return err
+	}
+	session.opMu.Lock()
+	defer session.opMu.Unlock()
+	err = session.fanout.Detach(attachmentID)
+	if err == nil {
+		delete(session.participants, attachmentID)
+	}
+	return err
+}
+
+func (m *Manager) DetachParticipantAtGeneration(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64) error {
+	session, err := m.get(sessionID)
+	if err != nil {
+		return err
+	}
+	session.opMu.Lock()
+	defer session.opMu.Unlock()
+	_, generation := session.lifecycle.Snapshot()
+	p, ok := session.participants[attachmentID]
+	if expectedGeneration == 0 || generation != expectedGeneration || !ok || p.AccountID != accountID || p.ClientID != clientID {
+		return ErrStaleGeneration
+	}
+	if err = session.fanout.Detach(attachmentID); err == nil {
+		delete(session.participants, attachmentID)
+	}
+	return err
+}
+
+func (m *Manager) AttachmentOwnedBy(sessionID, attachmentID, accountID, clientID string) bool {
+	session, err := m.get(sessionID)
+	if err != nil {
+		return false
+	}
+	session.opMu.Lock()
+	defer session.opMu.Unlock()
+	p, ok := session.participants[attachmentID]
+	return ok && p.AccountID == accountID && p.ClientID == clientID
+}
+
+func (m *Manager) Next(sessionID, attachmentID string) (history.Event, bool, error) {
+	session, err := m.get(sessionID)
+	if err != nil {
+		return history.Event{}, false, err
+	}
+	return session.fanout.Next(attachmentID)
+}
+
+func (m *Manager) WaitNext(ctx context.Context, sessionID, attachmentID string) (history.Event, error) {
+	session, err := m.get(sessionID)
+	if err != nil {
+		return history.Event{}, err
+	}
+	return session.fanout.WaitNextOwned(ctx, attachmentID)
+}
+
+func (m *Manager) Acknowledge(sessionID, attachmentID string, nextSequence uint64) error {
+	return m.acknowledgeAtGeneration(sessionID, attachmentID, nextSequence, 0)
+}
+
+func (m *Manager) AcknowledgeAtGeneration(sessionID, attachmentID string, nextSequence, expectedGeneration uint64) error {
+	if expectedGeneration == 0 {
+		return ErrInvalidInput
+	}
+	return m.acknowledgeAtGeneration(sessionID, attachmentID, nextSequence, expectedGeneration)
+}
+
+func (m *Manager) acknowledgeAtGeneration(sessionID, attachmentID string, nextSequence, expectedGeneration uint64) error {
+	session, err := m.get(sessionID)
+	if err != nil {
+		return err
+	}
+	session.opMu.Lock()
+	defer session.opMu.Unlock()
+	_, generation := session.lifecycle.Snapshot()
+	if expectedGeneration != 0 && generation != expectedGeneration {
+		return &StaleGenerationError{CurrentGeneration: generation}
+	}
+	state, _, err := session.fanout.Status(attachmentID)
+	if err != nil || state != Attached {
+		return ErrInvalidInput
+	}
+	return session.history.Acknowledge(attachmentID, nextSequence)
+}
+
+func (m *Manager) AttachmentStatus(sessionID, attachmentID string) (AttachmentState, uint64, error) {
+	session, err := m.get(sessionID)
+	if err != nil {
+		return "", 0, err
+	}
+	return session.fanout.Status(attachmentID)
+}
+
+func (m *Manager) Write(sessionID string, key InputKey, data []byte) (InputDecision, error) {
+	return m.WriteContext(context.Background(), sessionID, key, data)
+}
+func (m *Manager) WriteContext(ctx context.Context, sessionID string, key InputKey, data []byte) (InputDecision, error) {
+	session, err := m.get(sessionID)
+	if err != nil {
+		return InputDecision{}, err
+	}
+	if err := pty.LockInput(ctx, &session.opMu); err != nil {
+		return InputDecision{}, err
+	}
+	defer session.opMu.Unlock()
+	state, generation := session.lifecycle.Snapshot()
+	if state != Running || session.process == nil || key.Generation != generation {
+		return InputDecision{}, &StaleGenerationError{CurrentGeneration: generation}
+	}
+	if attachmentState, _, err := session.fanout.Status(key.AttachmentID); err != nil || attachmentState != Attached {
+		return InputDecision{}, ErrInvalidInput
+	}
+	key, _ = normalizeInputKey(key)
+	if _, queryErr := session.inputs.Query(key); queryErr == nil {
+		return session.inputs.Write(key, data, contextInputWriter{ctx: ctx, writer: session.process})
+	} else if !errors.Is(queryErr, ErrInputUnknown) {
+		return InputDecision{}, queryErr
+	}
+	if err := session.inputs.Admit(key); err != nil {
+		return InputDecision{}, err
+	}
+	hash := sha256.Sum256(data)
+	storageID := inputStorageID(key)
+	if m.config.Store != nil {
+		inserted, err := m.config.Store.PutInputDecision(context.Background(), store.InputDecision{SessionID: sessionID, ClientID: key.ClientID, AttachmentID: key.AttachmentID, Generation: key.Generation, InputID: storageID, Hash: hash[:], Status: string(InputUncertain), CreatedAt: time.Now().UTC()})
+		if err != nil {
+			return InputDecision{}, err
+		}
+		if !inserted {
+			return InputDecision{}, ErrInputConflict
+		}
+	}
+	decision, err := session.inputs.Write(key, data, contextInputWriter{ctx: ctx, writer: session.process})
+	if err != nil {
+		return decision, err
+	}
+	if m.config.Store != nil {
+		persisted := store.InputDecision{SessionID: sessionID, ClientID: key.ClientID, AttachmentID: key.AttachmentID, Generation: key.Generation, InputID: storageID, Hash: hash[:], Status: string(decision.Status), BytesWritten: decision.BytesWritten, ErrorCode: decision.WriteError}
+		if persistErr := m.config.Store.UpdateInputDecision(context.Background(), persisted); persistErr != nil {
+			decision.Status = InputUncertain
+			decision.WriteError = "decision_persist_failed"
+			return decision, persistErr
+		}
+	}
+	return decision, nil
+}
+
+// InputSequence returns the highest sequence recorded for an attachment. The
+// stream server uses it when rebinding a persistent attachment after a
+// transport reconnect so a duplicate delivery is answered from the journal.
+func (m *Manager) InputSequence(sessionID, clientID, attachmentID string, generation uint64) (uint64, error) {
+	session, err := m.get(sessionID)
+	if err != nil {
+		return 0, err
+	}
+	return session.inputs.LastSequence(clientID, attachmentID, generation), nil
+}
+
+func inputStorageID(key InputKey) string {
+	if key.InputSequence != 0 {
+		return strconv.FormatUint(key.InputSequence, 10)
+	}
+	return key.InputID
+}
+
+// WriteStream writes ordered live terminal input without creating an
+// idempotency decision. Stream input is never replayed after disconnection.
+func (m *Manager) WriteStream(sessionID, attachmentID string, generation uint64, data []byte) error {
+	return m.WriteStreamContext(context.Background(), sessionID, attachmentID, generation, data)
+}
+func (m *Manager) WriteStreamContext(ctx context.Context, sessionID, attachmentID string, generation uint64, data []byte) error {
+	if len(data) == 0 || len(data) > 256<<10 {
+		return ErrInvalidInput
+	}
+	session, err := m.get(sessionID)
+	if err != nil {
+		return err
+	}
+	if err := pty.LockInput(ctx, &session.inputMu); err != nil {
+		return err
+	}
+	defer session.inputMu.Unlock()
+	live := session.liveProcess.Load()
+	if live == nil || generation != live.generation {
+		_, currentGeneration := session.lifecycle.Snapshot()
+		return &StaleGenerationError{CurrentGeneration: currentGeneration}
+	}
+	if !session.fanout.IsAttached(attachmentID) {
+		return ErrInvalidInput
+	}
+	n, writeErr := (contextInputWriter{ctx: ctx, writer: live.process}).Write(data)
+	if writeErr != nil {
+		return writeErr
+	}
+	if n != len(data) {
+		return io.ErrShortWrite
+	}
+	return nil
+}
+
+func (m *Manager) QueryInput(sessionID string, key InputKey) (InputDecision, error) {
+	session, err := m.get(sessionID)
+	if err != nil {
+		return InputDecision{}, err
+	}
+	return session.inputs.Query(key)
+}
+
+func (m *Manager) Resize(sessionID, attachmentID string, dimensions pty.Dimensions, activeAt time.Time) error {
+	return m.resize(sessionID, attachmentID, "", "", 0, dimensions, activeAt)
+}
+
+func (m *Manager) ResizeParticipantAtGeneration(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64, dimensions pty.Dimensions, activeAt time.Time) error {
+	return m.resize(sessionID, attachmentID, accountID, clientID, expectedGeneration, dimensions, activeAt)
+}
+
+func (m *Manager) resize(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64, dimensions pty.Dimensions, activeAt time.Time) error {
+	session, err := m.get(sessionID)
+	if err != nil {
+		return err
+	}
+	session.opMu.Lock()
+	defer session.opMu.Unlock()
+	if expectedGeneration != 0 {
+		_, generation := session.lifecycle.Snapshot()
+		p, ok := session.participants[attachmentID]
+		if generation != expectedGeneration || !ok || p.AccountID != accountID || p.ClientID != clientID {
+			return ErrStaleGeneration
+		}
+	}
+	attachmentState, _, statusErr := session.fanout.Status(attachmentID)
+	if statusErr != nil || attachmentState != Attached || session.process == nil {
+		return ErrInvalidInput
+	}
+	if activeAt.Before(session.resizeTime) || activeAt.Equal(session.resizeTime) && attachmentID < session.resizeID {
+		return nil
+	}
+	if session.command.Dimensions == dimensions {
+		return nil
+	}
+	if err := session.process.Resize(dimensions); err != nil {
+		return err
+	}
+	session.resizeID, session.resizeTime = attachmentID, activeAt
+	session.command.Dimensions = dimensions
+	if session.screen != nil {
+		session.screen.Resize(int(dimensions.Columns), int(dimensions.Rows))
+	}
+	// Include geometry in the same ordered output history as PTY bytes. Every
+	// attachment must interpret cursor-addressed output at the host's grid size.
+	resizeOutput := []byte(fmt.Sprintf("\x1b[8;%d;%dt", dimensions.Rows, dimensions.Columns))
+	event, err := session.history.Append(2, resizeOutput)
+	if err != nil {
+		return err
+	}
+	_, _ = session.fanout.PublishOwned(event)
+	m.queueOutputPersistence(session, event)
+	lifecycleState, _ := session.lifecycle.Snapshot()
+	if err := m.persist(context.Background(), session, lifecycleState); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *Manager) Signal(sessionID string, generation uint64, signal pty.Signal) error {
+	session, err := m.get(sessionID)
+	if err != nil {
+		return err
+	}
+	session.opMu.Lock()
+	defer session.opMu.Unlock()
+	state, current := session.lifecycle.Snapshot()
+	if state != Running || generation != current || session.process == nil {
+		return ErrStaleGeneration
+	}
+	return session.process.Signal(signal)
+}
+
+func (m *Manager) Clear(sessionID string) (uint64, error) {
+	return m.clearAtGeneration(sessionID, 0)
+}
+
+func (m *Manager) ClearAtGeneration(sessionID string, expectedGeneration uint64) (uint64, error) {
+	if expectedGeneration == 0 {
+		return 0, ErrInvalidInput
+	}
+	return m.clearAtGeneration(sessionID, expectedGeneration)
+}
+
+func (m *Manager) clearAtGeneration(sessionID string, expectedGeneration uint64) (uint64, error) {
+	session, err := m.get(sessionID)
+	if err != nil {
+		return 0, err
+	}
+	session.opMu.Lock()
+	defer session.opMu.Unlock()
+	_, generation := session.lifecycle.Snapshot()
+	if expectedGeneration != 0 && generation != expectedGeneration {
+		return 0, &StaleGenerationError{CurrentGeneration: generation}
+	}
+	if err := m.clearOutputLocked(context.Background(), session, false); err != nil {
+		return 0, err
+	}
+	_, latest, _ := session.history.Bounds()
+	return latest, nil
+}
+
+// clearOutputLocked removes the replay tail without deleting the stable
+// session identity. Callers hold opMu and have stopped output persistence for
+// terminal states; an explicit live Clear may race only with a later append.
+func (m *Manager) clearOutputLocked(ctx context.Context, session *managedSession, stopped bool) error {
+	_, latest, _ := session.history.Bounds()
+	var clearErr error
+	if m.config.Store != nil {
+		if stopped {
+			clearErr = m.config.Store.ClearStoppedOutput(ctx, session.id, latest)
+		} else {
+			clearErr = m.config.Store.ClearOutput(ctx, session.id, latest)
+		}
+	}
+	if clearErr == nil || stopped {
+		// A stopped terminal must not offer its old output to a new attach,
+		// even if durable cleanup failed. Recovery retries durable deletion.
+		session.history.Clear()
+	}
+	if stopped && session.screen != nil {
+		session.screen.Dispose()
+		session.screen = nil
+		session.continuation.reset()
+	}
+	return classifySessionFailure("lifecycle", clearErr)
+}
+
+func (m *Manager) Close(ctx context.Context, sessionID string) (Snapshot, error) {
+	return m.closeAtGeneration(ctx, sessionID, 0)
+}
+
+func (m *Manager) CloseAtGeneration(ctx context.Context, sessionID string, expectedGeneration uint64) (Snapshot, error) {
+	if expectedGeneration == 0 {
+		return Snapshot{}, ErrInvalidInput
+	}
+	return m.closeAtGeneration(ctx, sessionID, expectedGeneration)
+}
+
+func (m *Manager) closeAtGeneration(ctx context.Context, sessionID string, expectedGeneration uint64) (Snapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return Snapshot{}, err
+	}
+	session, err := m.get(sessionID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	session.opMu.Lock()
+	defer session.opMu.Unlock()
+	state, generation := session.lifecycle.Snapshot()
+	if expectedGeneration != 0 && generation != expectedGeneration {
+		return Snapshot{}, &StaleGenerationError{CurrentGeneration: generation}
+	}
+	if state == Closed {
+		if err := m.clearOutputLocked(ctx, session, true); err != nil {
+			return Snapshot{}, err
+		}
+		return session.snapshotLocked(), nil
+	}
+	if state == Exited {
+		if err := session.lifecycle.Transition(Closing); err != nil {
+			return Snapshot{}, err
+		}
+		if err := session.lifecycle.Transition(Closed); err != nil {
+			return Snapshot{}, err
+		}
+		persistErr := m.persist(ctx, session, Exited)
+		clearErr := m.clearOutputLocked(ctx, session, true)
+		if err := errors.Join(persistErr, clearErr); err != nil {
+			return Snapshot{}, err
+		}
+		return session.snapshotLocked(), nil
+	}
+	if state != Running && state != Closing || session.process == nil {
+		return Snapshot{}, ErrSessionRunning
+	}
+	if state == Running {
+		session.liveProcess.Store(nil)
+		if err := session.lifecycle.Transition(Closing); err != nil {
+			return Snapshot{}, err
+		}
+		// Drain the asynchronous history writer before the lifecycle update. Both
+		// operations write SQLite; ordering them avoids SQLITE_BUSY while keeping
+		// PTY output fan-out independent of persistence latency.
+		if err := m.stopOutputPersistence(session); err != nil {
+			return Snapshot{}, err
+		}
+		if err := m.persist(ctx, session, Running); err != nil {
+			terminateCtx, cancel := context.WithTimeout(context.Background(), m.config.TerminationTimeout)
+			result, terminateErr := session.process.Terminate(terminateCtx, 0)
+			cancel()
+			session.exit, session.process = &result, nil
+			_ = session.lifecycle.Transition(Closed)
+			cleanupErr := errors.Join(terminateErr, m.clearOutputLocked(context.Background(), session, true))
+			observeSessionFailure(session, "lifecycle", cleanupErr)
+			return Snapshot{}, errors.Join(err, cleanupErr)
+		}
+	}
+	terminateCtx, cancel := context.WithTimeout(ctx, m.config.TerminationTimeout)
+	result, terminateErr := session.process.Terminate(terminateCtx, m.config.TerminationGrace)
+	cancel()
+	if onlyContextEnd(terminateErr) {
+		process := session.process
+		setSessionSupportReference(session, supportref.FromContext(ctx))
+		go m.finishClosing(session, process)
+		return session.snapshotLocked(), terminateErr
+	}
+	terminateErr = classifySessionFailure("lifecycle", terminateErr)
+	session.liveProcess.Store(nil)
+	session.exit = &result
+	session.process = nil
+	if err := session.lifecycle.Transition(Closed); err != nil {
+		return Snapshot{}, errors.Join(terminateErr, err)
+	}
+	persistErr := m.persist(ctx, session, Closing)
+	clearErr := m.clearOutputLocked(ctx, session, true)
+	return session.snapshotLocked(), errors.Join(terminateErr, persistErr, clearErr)
+}
+
+func (m *Manager) finishClosing(session *managedSession, process PTYProcess) {
+	session.opMu.Lock()
+	defer session.opMu.Unlock()
+	state, _ := session.lifecycle.Snapshot()
+	if state != Closing || session.process != process {
+		return
+	}
+	terminateCtx, cancel := context.WithTimeout(context.Background(), m.config.TerminationTimeout)
+	result, err := process.Terminate(terminateCtx, m.config.TerminationGrace)
+	cancel()
+	if err != nil {
+		observeSessionFailure(session, "lifecycle", err)
+		return
+	}
+	session.exit = &result
+	session.process = nil
+	if err := session.lifecycle.Transition(Closed); err != nil {
+		observeSessionFailure(session, "lifecycle", err)
+		return
+	}
+	persistErr := m.persist(context.Background(), session, Closing)
+	clearErr := m.clearOutputLocked(context.Background(), session, true)
+	if persistErr != nil || clearErr != nil {
+		session.persistErr = errors.Join(session.persistErr, persistErr, clearErr)
+		observeSessionFailure(session, "lifecycle", errors.Join(persistErr, clearErr))
+		if m.config.Metrics != nil {
+			_ = m.config.Metrics.Record("paperboat_runtime_terminal_persistence_failures_total", 1, nil)
+		}
+	}
+}
+
+func (m *Manager) Restart(sessionID string) (Snapshot, error) {
+	return m.RestartContext(context.Background(), sessionID)
+}
+
+func (m *Manager) RestartAtGeneration(sessionID string, expectedGeneration uint64) (Snapshot, error) {
+	return m.RestartAtGenerationContext(context.Background(), sessionID, expectedGeneration)
+}
+
+func (m *Manager) RestartContext(ctx context.Context, sessionID string) (Snapshot, error) {
+	return m.restartAtGeneration(ctx, sessionID, 0)
+}
+
+func (m *Manager) RestartAtGenerationContext(ctx context.Context, sessionID string, expectedGeneration uint64) (Snapshot, error) {
+	if expectedGeneration == 0 {
+		return Snapshot{}, ErrInvalidInput
+	}
+	return m.restartAtGeneration(ctx, sessionID, expectedGeneration)
+}
+
+func (m *Manager) restartAtGeneration(ctx context.Context, sessionID string, expectedGeneration uint64) (Snapshot, error) {
+	if ctx == nil {
+		return Snapshot{}, ErrInvalidInput
+	}
+	if err := ctx.Err(); err != nil {
+		return Snapshot{}, err
+	}
+	m.admission.RLock()
+	defer m.admission.RUnlock()
+	if m.updateTransaction != "" {
+		return Snapshot{}, ErrUpdateInProgress
+	}
+	m.mu.RLock()
+	stopping := m.stopping
+	m.mu.RUnlock()
+	if stopping {
+		return Snapshot{}, ErrManagerStopped
+	}
+	session, err := m.get(sessionID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	session.opMu.Lock()
+	defer session.opMu.Unlock()
+	state, generation := session.lifecycle.Snapshot()
+	if expectedGeneration != 0 && generation != expectedGeneration {
+		return Snapshot{}, &StaleGenerationError{CurrentGeneration: generation}
+	}
+	if state != Exited && state != Closed {
+		return Snapshot{}, ErrSessionRunning
+	}
+	setSessionSupportReference(session, supportref.FromContext(ctx))
+	for attachmentID, participant := range session.participants {
+		if participant.Role != "owner" {
+			_ = session.fanout.Detach(attachmentID)
+			delete(session.participants, attachmentID)
+		}
+	}
+	if err := session.lifecycle.Transition(Restarting); err != nil {
+		return Snapshot{}, err
+	}
+	if err := m.persist(context.Background(), session, state); err != nil {
+		_ = session.lifecycle.Transition(Closed)
+		return Snapshot{}, err
+	}
+	process, err := m.launch(ctx, session.command)
+	if err != nil {
+		_ = session.lifecycle.Transition(Closed)
+		if cleanupErr := m.persist(context.Background(), session, Restarting); cleanupErr != nil {
+			observeSessionFailure(session, "lifecycle", cleanupErr)
+		}
+		return Snapshot{}, err
+	}
+	if err := session.lifecycle.Transition(Running); err != nil {
+		closeErr := process.CloseIO()
+		observeSessionFailure(session, "lifecycle", closeErr)
+		return Snapshot{}, classifySessionFailure("lifecycle", errors.Join(err, closeErr))
+	}
+	_, generation = session.lifecycle.Snapshot()
+	session.inputs.SetGeneration(generation)
+	session.screen = xterm.New(xterm.WithCols(int(session.command.Dimensions.Columns)), xterm.WithRows(int(session.command.Dimensions.Rows)), xterm.WithScrollback(browserScreenScrollbackLines))
+	session.continuation.reset()
+	session.process, session.exit = process, nil
+	session.identification = identificationTracker{}
+	session.liveProcess.Store(&liveProcess{process: process, generation: generation})
+	m.startOutputPersistence(session)
+	if err := m.persist(context.Background(), session, Restarting); err != nil {
+		terminateCtx, cancel := context.WithTimeout(context.Background(), m.config.TerminationTimeout)
+		_, terminateErr := process.Terminate(terminateCtx, 0)
+		cancel()
+		session.liveProcess.Store(nil)
+		session.process = nil
+		_ = session.lifecycle.Transition(Exited)
+		observeSessionFailure(session, "lifecycle", terminateErr)
+		return Snapshot{}, errors.Join(err, classifySessionFailure("lifecycle", terminateErr))
+	}
+	go m.capture(session, process)
+	return session.snapshotLocked(), nil
+}
+
+func (m *Manager) Delete(sessionID string) error {
+	return m.deleteAtGeneration(sessionID, 0, true)
+}
+
+func (m *Manager) DeleteAtGeneration(sessionID string, expectedGeneration uint64) error {
+	if expectedGeneration == 0 {
+		return ErrInvalidInput
+	}
+	return m.deleteAtGeneration(sessionID, expectedGeneration, false)
+}
+
+func (m *Manager) deleteAtGeneration(sessionID string, expectedGeneration uint64, closeLive bool) (resultErr error) {
+	defer func() {
+		if m.config.Metrics == nil {
+			return
+		}
+		result := "removed"
+		if resultErr != nil {
+			result = "failed"
+		}
+		_ = m.config.Metrics.Record("paperboat_runtime_cleanup_total", 1, map[string]string{"kind": "session", "result": result})
+	}()
+	if closeLive {
+		session, err := m.get(sessionID)
+		if err != nil {
+			return err
+		}
+		session.opMu.Lock()
+		state, _ := session.lifecycle.Snapshot()
+		session.opMu.Unlock()
+		if state != Exited && state != Closed {
+			if _, err := m.Close(context.Background(), sessionID); err != nil {
+				return err
+			}
+		}
+	}
+	session, err := m.get(sessionID)
+	if err != nil {
+		return err
+	}
+	session.opMu.Lock()
+	defer session.opMu.Unlock()
+	state, generation := session.lifecycle.Snapshot()
+	if expectedGeneration != 0 && generation != expectedGeneration {
+		return &StaleGenerationError{CurrentGeneration: generation}
+	}
+	if state != Exited && state != Closed {
+		return ErrSessionRunning
+	}
+	if m.config.Store != nil {
+		if err := m.config.Store.DeleteSession(context.Background(), sessionID); err != nil {
+			return err
+		}
+	}
+	if err := session.lifecycle.Transition(Deleted); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	delete(m.sessions, sessionID)
+	delete(m.names, session.name)
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *Manager) Snapshot(sessionID string) (Snapshot, error) {
+	return m.SnapshotAtGeneration(sessionID, 0)
+}
+
+func (m *Manager) SnapshotAtGeneration(sessionID string, expectedGeneration uint64) (Snapshot, error) {
+	session, err := m.get(sessionID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	session.opMu.Lock()
+	snapshot := session.snapshotLocked()
+	process := session.process
+	session.opMu.Unlock()
+	if expectedGeneration != 0 && snapshot.Generation != expectedGeneration {
+		return Snapshot{}, &StaleGenerationError{CurrentGeneration: snapshot.Generation}
+	}
+	// Native observation is request-time only, outside the output/input lock.
+	if observer, ok := process.(interface{ Identification() pty.Identification }); ok && (snapshot.State == Running || snapshot.State == Closing) {
+		observed := observer.Identification()
+		session.opMu.Lock()
+		state, generation := session.lifecycle.Snapshot()
+		current := session.process == process && generation == snapshot.Generation && (state == Running || state == Closing)
+		session.opMu.Unlock()
+		if current {
+			snapshot.ForegroundProcess = cleanIdentification(observed.ForegroundProcess, 128)
+			if observed.CurrentDirectory != "" {
+				snapshot.CurrentDirectory = cleanIdentification(observed.CurrentDirectory, 1024)
+			}
+		} else {
+			return m.SnapshotAtGeneration(sessionID, expectedGeneration)
+		}
+	}
+	return snapshot, nil
+}
+
+func (m *Manager) List() []Snapshot {
+	m.mu.RLock()
+	sessions := make([]*managedSession, 0, len(m.sessions))
+	for _, session := range m.sessions {
+		sessions = append(sessions, session)
+	}
+	m.mu.RUnlock()
+	snapshots := make([]Snapshot, 0, len(sessions))
+	for _, session := range sessions {
+		if snapshot, err := m.Snapshot(session.id); err == nil {
+			snapshots = append(snapshots, snapshot)
+		}
+	}
+	sort.Slice(snapshots, func(i, j int) bool { return snapshots[i].Name < snapshots[j].Name })
+	return snapshots
+}
+
+func (m *Manager) Shutdown(ctx context.Context) error {
+	m.admission.Lock()
+	m.mu.Lock()
+	if m.stopping {
+		m.mu.Unlock()
+		m.admission.Unlock()
+		return nil
+	}
+	m.stopping = true
+	ids := make([]string, 0, len(m.sessions))
+	for id := range m.sessions {
+		ids = append(ids, id)
+	}
+	m.mu.Unlock()
+	m.admission.Unlock()
+	results := make(chan error, len(ids))
+	for _, id := range ids {
+		go func(sessionID string) {
+			_, err := m.Close(ctx, sessionID)
+			results <- err
+		}(id)
+	}
+	var result error
+	for range ids {
+		select {
+		case err := <-results:
+			if err != nil && !errors.Is(err, ErrSessionRunning) {
+				result = errors.Join(result, err)
+			}
+		case <-ctx.Done():
+			return errors.Join(result, ctx.Err())
+		}
+	}
+	return result
+}
+
+// ShutdownForRecovery stops live PTYs and flushes their history while leaving
+// their durable generations recoverable by the next worker process.
+func (m *Manager) ShutdownForRecovery(ctx context.Context) error {
+	m.mu.RLock()
+	sessions := make(map[string]*managedSession, len(m.sessions))
+	for id, session := range m.sessions {
+		sessions[id] = session
+	}
+	m.mu.RUnlock()
+	recoverable := make(map[string]State)
+	for id, session := range sessions {
+		session.opMu.Lock()
+		state, _ := session.lifecycle.Snapshot()
+		if state == Running || state == Restarting {
+			recoverable[id] = state
+		}
+		session.opMu.Unlock()
+	}
+
+	result := m.Shutdown(ctx)
+	if m.config.Store == nil {
+		return result
+	}
+	restoreCtx, cancel := context.WithTimeout(context.Background(), m.config.TerminationTimeout)
+	defer cancel()
+	for id, original := range recoverable {
+		session, err := m.get(id)
+		if err != nil {
+			result = errors.Join(result, err)
+			continue
+		}
+		session.opMu.Lock()
+		state, _ := session.lifecycle.Snapshot()
+		if state != Closed {
+			session.opMu.Unlock()
+			result = errors.Join(result, ErrInvalidTransition)
+			continue
+		}
+		record := session.storeRecordLocked()
+		record.State = string(original)
+		record.ExitCode, record.ExitSignal, record.ExitedAt = nil, "", nil
+		err = m.config.Store.UpdateSession(restoreCtx, id, string(Closed), record)
+		session.opMu.Unlock()
+		result = errors.Join(result, err)
+	}
+	return result
+}
+
+func (m *Manager) capture(session *managedSession, process PTYProcess) {
+	var readErr error
+	for {
+		buffer := history.AcquireBuffer()
+		n, err := process.Read(buffer)
+		if n > 0 {
+			session.opMu.Lock()
+			state, _ := session.lifecycle.Snapshot()
+			if state == Running || state == Closing {
+				session.modes.Consume(buffer[:n])
+				session.identification.Consume(buffer[:n])
+				event, appendErr := session.history.AppendBuffer(1, buffer[:n])
+				if appendErr == nil {
+					if session.screen != nil {
+						_, _ = session.screen.Write(buffer[:n])
+						session.continuation.feed(buffer[:n])
+					}
+					_, _ = session.fanout.PublishOwned(event)
+					m.queueOutputPersistence(session, event)
+					event.Release()
+				}
+			} else {
+				history.ReleaseBuffer(buffer)
+			}
+			session.opMu.Unlock()
+		} else {
+			history.ReleaseBuffer(buffer)
+		}
+		if err != nil {
+			readErr = err
+			break
+		}
+	}
+	persistErr := m.stopOutputPersistence(session)
+	result, waitErr := process.Wait(context.Background())
+	closeErr := process.CloseIO()
+	observeSessionFailure(session, "delivery", classifySessionFailure("delivery", readErr))
+	observeSessionFailure(session, "command", classifySessionFailure("command", waitErr))
+	lifecycleErr := errors.Join(persistErr, closeErr)
+	session.opMu.Lock()
+	defer session.opMu.Unlock()
+	if session.process != process {
+		observeSessionFailure(session, "lifecycle", lifecycleErr)
+		return
+	}
+	session.persistErr = persistErr
+	if persistErr != nil && m.config.Metrics != nil {
+		_ = m.config.Metrics.Record("paperboat_runtime_terminal_persistence_failures_total", 1, nil)
+	}
+	state, _ := session.lifecycle.Snapshot()
+	if state == Running {
+		if err := session.lifecycle.Transition(Exited); err != nil {
+			lifecycleErr = errors.Join(lifecycleErr, err)
+		}
+		session.exit = &result
+		session.liveProcess.CompareAndSwap(session.liveProcess.Load(), nil)
+		session.process = nil
+		if err := m.persist(context.Background(), session, Running); err != nil {
+			session.persistErr = errors.Join(session.persistErr, err)
+			lifecycleErr = errors.Join(lifecycleErr, err)
+			if m.config.Metrics != nil {
+				_ = m.config.Metrics.Record("paperboat_runtime_terminal_persistence_failures_total", 1, nil)
+			}
+		}
+		if clearErr := m.clearOutputLocked(context.Background(), session, true); clearErr != nil {
+			session.persistErr = errors.Join(session.persistErr, clearErr)
+			lifecycleErr = errors.Join(lifecycleErr, clearErr)
+			if m.config.Metrics != nil {
+				_ = m.config.Metrics.Record("paperboat_runtime_terminal_persistence_failures_total", 1, nil)
+			}
+		}
+	}
+	observeSessionFailure(session, "lifecycle", lifecycleErr)
+}
+
+func (m *Manager) startOutputPersistence(session *managedSession) {
+	if m.config.Store == nil {
+		return
+	}
+	session.persistMu.Lock()
+	defer session.persistMu.Unlock()
+	session.persistNotify = make(chan struct{}, 1)
+	session.persistStop = make(chan struct{})
+	session.persistDone = make(chan error, 1)
+	session.persistErr = nil
+	go m.runOutputPersistence(session, session.persistNotify, session.persistStop, session.persistDone)
+}
+
+func (m *Manager) queueOutputPersistence(session *managedSession, event history.Event) {
+	session.persistMu.Lock()
+	defer session.persistMu.Unlock()
+	if session.persistNotify == nil {
+		return
+	}
+	select {
+	case session.persistNotify <- struct{}{}:
+	default:
+	}
+}
+
+func (m *Manager) stopOutputPersistence(session *managedSession) error {
+	session.persistMu.Lock()
+	defer session.persistMu.Unlock()
+	if session.persistStop == nil {
+		return nil
+	}
+	close(session.persistStop)
+	err := <-session.persistDone
+	session.persistNotify, session.persistStop, session.persistDone = nil, nil, nil
+	return classifySessionFailure("lifecycle", err)
+}
+
+func (m *Manager) runOutputPersistence(session *managedSession, notify, stop <-chan struct{}, done chan<- error) {
+	timer := time.NewTimer(time.Hour)
+	if !timer.Stop() {
+		<-timer.C
+	}
+	dirty := false
+	flush := func() error {
+		for {
+			earliest, latest, _ := session.history.Bounds()
+			_, persistedLatest, err := m.config.Store.OutputBounds(context.Background(), session.id)
+			if err != nil {
+				return err
+			}
+			if m.config.Metrics != nil {
+				lag := uint64(0)
+				if persistedLatest < latest {
+					lag = latest - persistedLatest
+				}
+				_ = m.config.Metrics.Record("paperboat_runtime_terminal_persistence_lag_bytes", float64(lag), nil)
+			}
+			if persistedLatest < earliest {
+				if err := m.config.Store.AdvanceOutput(context.Background(), session.id, persistedLatest, earliest); err != nil {
+					return err
+				}
+				persistedLatest = earliest
+			}
+			if persistedLatest >= latest {
+				return nil
+			}
+			replay, err := session.history.ReplayOwned(persistedLatest, m.config.HistoryBytes)
+			if err != nil {
+				var gap *history.GapError
+				if errors.As(err, &gap) {
+					continue
+				}
+				return err
+			}
+			for _, event := range replay.Events {
+				if _, _, err := m.config.Store.AppendOutput(context.Background(), session.id, event.Channel, event.StartSequence, event.Data, m.config.HistoryBytes); err != nil {
+					replay.Release()
+					return err
+				}
+			}
+			replay.Release()
+			if replay.ToSequence >= latest {
+				return nil
+			}
+		}
+	}
+	for {
+		select {
+		case <-notify:
+			if !dirty {
+				dirty = true
+				timer.Reset(outputPersistDebounce)
+			}
+		case <-timer.C:
+			if dirty {
+				if err := flush(); err != nil {
+					done <- err
+					return
+				}
+				dirty = false
+			}
+		case <-stop:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			done <- flush()
+			return
+		}
+	}
+}
+
+func (m *Manager) get(sessionID string) (*managedSession, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	session, ok := m.sessions[sessionID]
+	if !ok {
+		return nil, ErrSessionUnknown
+	}
+	return session, nil
+}
+
+func (s *managedSession) snapshotLocked() Snapshot {
+	state, generation := s.lifecycle.Snapshot()
+	earliest, latest, _ := s.history.Bounds()
+	snapshot := Snapshot{ID: s.id, Name: s.name, CWD: s.command.CWD, Dimensions: s.command.Dimensions, State: state, Generation: generation, EarliestSequence: earliest, LatestSequence: latest, TerminalModes: s.modes.Modes()}
+	snapshot.Title = s.identification.title
+	if state == Running || state == Closing {
+		snapshot.CurrentDirectory = s.identification.directory
+
+	}
+	for _, participant := range s.participants {
+		state, _, err := s.fanout.Status(participant.AttachmentID)
+		if err == nil && state == Attached {
+			snapshot.Participants = append(snapshot.Participants, participant)
+		}
+	}
+	sort.Slice(snapshot.Participants, func(i, j int) bool {
+		return snapshot.Participants[i].AttachmentID < snapshot.Participants[j].AttachmentID
+	})
+	if s.exit != nil {
+		exit := *s.exit
+		snapshot.Exit = &exit
+	}
+	return snapshot
+}
+
+func (s *managedSession) storeRecordLocked() store.Session {
+	snapshot := s.snapshotLocked()
+	record := store.Session{ID: snapshot.ID, Name: snapshot.Name, CWD: snapshot.CWD, CommandPath: s.command.Path, CommandArgs: append([]string(nil), s.command.Args...), CommandEnv: append([]string(nil), s.command.Env...), Columns: snapshot.Dimensions.Columns, Rows: snapshot.Dimensions.Rows, State: string(snapshot.State), Generation: snapshot.Generation, EarliestSequence: snapshot.EarliestSequence, LatestSequence: snapshot.LatestSequence}
+	if snapshot.Exit != nil {
+		code := snapshot.Exit.Code
+		record.ExitCode, record.ExitSignal = &code, snapshot.Exit.Signal
+		exitedAt := snapshot.Exit.ExitedAt
+		record.ExitedAt = &exitedAt
+	}
+	return record
+}
+
+func (m *Manager) persist(ctx context.Context, session *managedSession, expected State) error {
+	if m.config.Store == nil {
+		return nil
+	}
+	return classifySessionFailure("lifecycle", m.config.Store.UpdateSession(ctx, session.id, string(expected), session.storeRecordLocked()))
+}
+
+func (m *Manager) discardFailedCreate(ctx context.Context, session *managedSession, expected State) error {
+	if m.config.Store == nil {
+		return nil
+	}
+	updateErr := m.config.Store.UpdateSession(ctx, session.id, string(expected), session.storeRecordLocked())
+	deleteErr := m.config.Store.DeleteSession(ctx, session.id)
+	return classifySessionFailure("lifecycle", errors.Join(updateErr, deleteErr))
+}
+
+func (m *Manager) recover(ctx context.Context) error {
+	records, err := m.config.Store.Sessions(ctx)
+	if err != nil {
+		return err
+	}
+	for _, record := range records {
+		original := State(record.State)
+		recovered := original
+		now := time.Now().UTC()
+		switch original {
+		case Creating:
+			recovered = Closed
+		case Running, Restarting:
+			recovered = Exited
+			code := 255
+			record.ExitCode, record.ExitSignal, record.ExitedAt = &code, m.config.RecoveryExitSignal, &now
+		case Closing:
+			recovered = Closed
+		case Exited, Closed:
+		default:
+			return ErrInvalidSession
+		}
+		if recovered != original {
+			record.State = string(recovered)
+			if err := m.config.Store.UpdateSession(ctx, record.ID, string(original), record); err != nil {
+				return err
+			}
+		}
+		// A terminal that cannot run after recovery has no useful replay tail.
+		// Clearing output here also retries an interrupted close without
+		// deleting the stable default-session identity.
+		if recovered == Exited || recovered == Closed {
+			if err := m.config.Store.ClearStoppedOutput(ctx, record.ID, record.LatestSequence); err != nil {
+				return err
+			}
+			record.EarliestSequence = record.LatestSequence
+		}
+		earliestSequence, err := m.config.Store.TrimOutput(ctx, record.ID, m.config.HistoryBytes)
+		if err != nil {
+			return err
+		}
+		storedEvents, earliest, latest, err := m.config.Store.Replay(ctx, record.ID, earliestSequence, 0)
+		if err != nil {
+			return err
+		}
+		events := make([]history.Event, len(storedEvents))
+		for i, event := range storedEvents {
+			events[i] = history.Event{Channel: event.Channel, StartSequence: event.StartSequence, EndSequence: event.EndSequence, Data: event.Data}
+		}
+		retained, err := history.Restore(m.config.HistoryBytes, earliest, latest, events)
+		if err != nil {
+			return err
+		}
+		lifecycle, err := RecoverLifecycle(recovered, record.Generation)
+		if err != nil {
+			return err
+		}
+		inputJournal := NewBoundedInputJournal(record.Generation, m.config.MaxInputDecisions)
+		decisions, err := m.config.Store.InputDecisions(ctx, record.ID)
+		if err != nil {
+			return err
+		}
+		for _, decision := range decisions {
+			key := InputKey{ClientID: decision.ClientID, AttachmentID: decision.AttachmentID, Generation: decision.Generation, InputID: decision.InputID}
+			if sequence, parseErr := strconv.ParseUint(decision.InputID, 10, 64); parseErr == nil && sequence > 0 {
+				key.InputSequence = sequence
+				key.InputID = ""
+			}
+			if err := inputJournal.Restore(key, decision.Hash, InputStatus(decision.Status), decision.BytesWritten, decision.ErrorCode); err != nil {
+				return err
+			}
+		}
+		session := &managedSession{id: record.ID, name: record.Name, command: pty.Command{Path: record.CommandPath, Args: record.CommandArgs, Env: record.CommandEnv, CWD: record.CWD, Dimensions: pty.Dimensions{Columns: record.Columns, Rows: record.Rows}}, lifecycle: lifecycle, history: retained, fanout: NewFanout(), inputs: inputJournal, participants: make(map[string]Participant)}
+		if record.ExitCode != nil {
+			session.exit = &pty.ExitResult{Code: *record.ExitCode, Signal: record.ExitSignal}
+			if record.ExitedAt != nil {
+				session.exit.ExitedAt = *record.ExitedAt
+			}
+		}
+		if _, duplicate := m.sessions[record.ID]; duplicate || m.names[record.Name] != "" {
+			return ErrInvalidSession
+		}
+		m.sessions[record.ID], m.names[record.Name] = session, record.ID
+	}
+	return nil
+}
+
+func randomID(random io.Reader) (string, error) {
+	id, err := uuid.NewRandomFromReader(random)
+	if err != nil {
+		return "", err
+	}
+	return "terminal_" + id.String(), nil
+}
+
+func validSessionName(name string) bool {
+	if len(name) < 1 || len(name) > 64 {
+		return false
+	}
+	for _, char := range name {
+		if !(char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || char == '-' || char == '_') {
+			return false
+		}
+	}
+	return !strings.HasPrefix(name, "-")
+}
+
+// DetachAllAttachments releases transport participants when the active feature
+// worker changes. PTYs, screen state, input decisions and replay remain owned.
+func (m *Manager) DetachAllAttachments() error {
+	m.mu.RLock()
+	sessions := make([]*managedSession, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		sessions = append(sessions, s)
+	}
+	m.mu.RUnlock()
+	var result error
+	for _, s := range sessions {
+		s.opMu.Lock()
+		ids := make([]string, 0, len(s.participants))
+		for id := range s.participants {
+			ids = append(ids, id)
+		}
+		s.opMu.Unlock()
+		for _, id := range ids {
+			err := m.Detach(s.id, id)
+			if !errors.Is(err, ErrAttachmentUnknown) && !errors.Is(err, ErrSessionUnknown) {
+				result = errors.Join(result, err)
+			}
+		}
+	}
+	return result
+}
+
+type contextInputWriter struct {
+	ctx    context.Context
+	writer io.Writer
+}
+
+func (w contextInputWriter) Write(data []byte) (int, error) {
+	if err := w.ctx.Err(); err != nil {
+		return 0, err
+	}
+	if writer, ok := w.writer.(interface {
+		WriteContext(context.Context, []byte) (int, error)
+	}); ok {
+		return writer.WriteContext(w.ctx, data)
+	}
+	return w.writer.Write(data)
+}

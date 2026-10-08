@@ -1,0 +1,60 @@
+.nh
+.TH "PB-TEAM-ACTIVITY" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-activity - View owner/admin activity from the last 90 days
+
+
+.SH SYNOPSIS
+\fBpb team activity <team> [flags]\fP
+
+
+.SH DESCRIPTION
+View owner/admin activity from the last 90 days
+
+.PP
+Read recent owner/admin activity for one team, with cursor and limit for pagination. Entries support review of membership and grant changes within the retention window.
+
+.PP
+Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--cursor\fP=""
+	next_cursor from the previous page
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for activity
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON including metadata and next_cursor
+
+.PP
+\fB--limit\fP=50
+	maximum events, 1–200
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-team(1)\fP

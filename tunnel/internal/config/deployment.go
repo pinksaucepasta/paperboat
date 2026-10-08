@@ -1,0 +1,266 @@
+package config
+
+import (
+	"errors"
+	"io"
+	"net"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/pinksaucepasta/paperboat-tunnel/internal/strictjson"
+	"golang.org/x/net/publicsuffix"
+)
+
+const (
+	maxDeploymentBytes        = 1 << 20
+	defaultGatewayBodyBytes   = 50 << 20
+	defaultGatewayHeaderBytes = 32 << 10
+	maximumGatewayHeaderBytes = 128 << 10
+)
+
+var routeBaseDomainPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$`)
+
+type Deployment struct {
+	SelfHosted                bool   `json:"self_hosted,omitempty"`
+	InfrastructureTLSCertFile string `json:"infrastructure_tls_cert_file,omitempty"`
+	InfrastructureTLSKeyFile  string `json:"infrastructure_tls_key_file,omitempty"`
+	BrowserAccessEnabled      bool   `json:"browser_access_enabled"`
+	BrowserLoginOrigin        string `json:"browser_login_origin"`
+	ControlURL                string `json:"control_url"`
+	CredentialIssuer          string `json:"credential_issuer"`
+	ControlCredentialFile     string `json:"control_credential_file"`
+	ControlCAFile             string `json:"control_ca_file"`
+	JWKSFile                  string `json:"jwks_file"`
+	RevocationsFile           string `json:"revocations_file"`
+	UsageSigningKeyFile       string `json:"usage_signing_key_file"`
+	ConnectorAdvertiseHost    string `json:"connector_advertise_host"`
+	// Carrier listeners are dedicated connector-v1 data-plane endpoints. They
+	// require mutual TLS plus the
+	// server's admission-backed peer binding.
+	CarrierTCPListenAddress   string `json:"carrier_tcp_listen_address,omitempty"`
+	CarrierQUICListenAddress  string `json:"carrier_quic_listen_address,omitempty"`
+	PublicHTTPSListenAddress  string `json:"public_https_listen_address"`
+	PrivateHTTPSListenAddress string `json:"private_https_listen_address"`
+	PublicHTTPListenAddress   string `json:"public_http_listen_address"`
+	PreviewBaseDomain         string `json:"preview_base_domain"`
+	TunnelBaseDomain          string `json:"tunnel_base_domain"`
+	// RuntimeBaseDomain is retained only for the host-runtime control route.
+	// Managed durable tunnel endpoints use TunnelBaseDomain and never this
+	// legacy runtime namespace.
+	RuntimeBaseDomain string        `json:"runtime_base_domain"`
+	TrustedProxyCIDRs []string      `json:"trusted_proxy_cidrs"`
+	PublicRoutes      []PublicRoute `json:"public_routes,omitempty"`
+	NodeCapacity      uint32        `json:"node_capacity"`
+	ControlInterval   time.Duration `json:"control_interval"`
+	ControlTimeout    time.Duration `json:"control_timeout"`
+	MaxBodyBytes      int64         `json:"max_body_bytes"`
+	MaxHeaderBytes    int64         `json:"max_header_bytes"`
+}
+
+type PublicRoute struct {
+	Host        string `json:"host"`
+	PathPrefix  string `json:"path_prefix,omitempty"`
+	StripPrefix bool   `json:"strip_prefix,omitempty"`
+	Upstream    string `json:"upstream"`
+}
+
+func LoadDeployment(path string) (Deployment, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return Deployment{}, err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxDeploymentBytes+1))
+	if err != nil {
+		return Deployment{}, err
+	}
+	if len(data) > maxDeploymentBytes {
+		return Deployment{}, invalid("deployment config", errors.New("document is oversized"))
+	}
+	deployment := Deployment{MaxBodyBytes: defaultGatewayBodyBytes, MaxHeaderBytes: defaultGatewayHeaderBytes}
+	if err := strictjson.Decode(data, &deployment, 64); err != nil {
+		return Deployment{}, invalid("deployment config", err)
+	}
+	if deployment.CredentialIssuer == "" {
+		deployment.CredentialIssuer = deployment.ControlURL
+	}
+
+	if err := deployment.validate(); err != nil {
+		return Deployment{}, invalid("deployment config", err)
+	}
+	return deployment, nil
+}
+
+func (d Deployment) validate() error {
+	control, err := url.Parse(d.ControlURL)
+	if err != nil || control.Scheme != "https" || control.Host == "" || control.User != nil || control.RawQuery != "" || control.Fragment != "" {
+		return errors.New("control_url must be a private HTTPS URL")
+	}
+	issuer, err := url.Parse(d.CredentialIssuer)
+	if err != nil || issuer.Scheme != "https" || issuer.Host == "" || issuer.User != nil || issuer.RawQuery != "" || issuer.Fragment != "" {
+		return errors.New("credential_issuer must be an HTTPS origin")
+	}
+	for _, path := range []string{d.ControlCredentialFile, d.JWKSFile, d.RevocationsFile, d.UsageSigningKeyFile} {
+		if path == "" || !filepath.IsAbs(path) || len(path) > 4096 {
+			return errors.New("deployment paths must be bounded and absolute")
+		}
+	}
+	if d.ControlCAFile != "" && (!filepath.IsAbs(d.ControlCAFile) || len(d.ControlCAFile) > 4096) {
+		return errors.New("control_ca_file must be a bounded absolute path")
+	}
+	// Canonical preview traffic always has both dedicated carrier transports.
+	// There is no safe legacy-only deployment: buildService cannot construct a
+	// server-admitted carrier or advertise a complete endpoint without them.
+	if d.CarrierTCPListenAddress == "" || d.CarrierQUICListenAddress == "" {
+		return errors.New("canonical preview carrier requires both TCP and QUIC addresses")
+	}
+	if err := carrierEndpoint(d.CarrierTCPListenAddress); err != nil {
+		return err
+	}
+	if err := carrierEndpoint(d.CarrierQUICListenAddress); err != nil {
+		return err
+	}
+	if endpointPort(d.CarrierTCPListenAddress) == endpointPort(d.CarrierQUICListenAddress) {
+		return errors.New("carrier TCP and QUIC listeners must use distinct ports")
+	}
+	if d.ConnectorAdvertiseHost == "" || len(d.ConnectorAdvertiseHost) > 253 || strings.ContainsAny(d.ConnectorAdvertiseHost, "/:@") {
+		return errors.New("connector advertised host is invalid")
+	}
+	if _, _, err := net.SplitHostPort(d.PublicHTTPSListenAddress); err != nil {
+		return errors.New("public HTTPS listener is invalid")
+	}
+	if err := privateLoopbackEndpoint(d.PrivateHTTPSListenAddress); err != nil || d.PrivateHTTPSListenAddress == d.PublicHTTPSListenAddress || d.PrivateHTTPSListenAddress == d.PublicHTTPListenAddress {
+		return errors.New("private HTTPS listener is invalid")
+	}
+	if _, _, err := net.SplitHostPort(d.PublicHTTPListenAddress); err != nil || d.PublicHTTPListenAddress == d.PublicHTTPSListenAddress {
+		return errors.New("public HTTP listener is invalid")
+	}
+	if d.BrowserAccessEnabled {
+		login, e := url.Parse(d.BrowserLoginOrigin)
+		if e != nil || login.Scheme != "https" || login.Host == "" || login.User != nil || login.Path != "" || login.RawQuery != "" || login.Fragment != "" {
+			return errors.New("browser access requires exact trusted HTTPS origin and distributed PSL hostname isolation")
+		}
+		for _, domain := range []string{d.PreviewBaseDomain, d.TunnelBaseDomain} {
+			suffix, _ := publicsuffix.PublicSuffix(domain)
+			if suffix != domain || login.Hostname() == domain || strings.HasSuffix(login.Hostname(), "."+domain) {
+				return errors.New("browser access requires exact trusted HTTPS origin and distributed PSL hostname isolation")
+			}
+			parent := strings.SplitN(domain, ".", 2)
+			if len(parent) != 2 {
+				return errors.New("browser access requires exact trusted HTTPS origin and distributed PSL hostname isolation")
+			}
+			suffix, _ = publicsuffix.PublicSuffix(parent[1])
+			if suffix != parent[1] {
+				return errors.New("browser access requires exact trusted HTTPS origin and distributed PSL hostname isolation")
+			}
+		}
+	}
+	for _, domain := range []string{d.PreviewBaseDomain, d.TunnelBaseDomain, d.RuntimeBaseDomain} {
+		if domain == "" && d.SelfHosted && !d.BrowserAccessEnabled {
+			continue
+		}
+		if !routeBaseDomainPattern.MatchString(domain) || net.ParseIP(domain) != nil {
+			return errors.New("route base domain is invalid")
+		}
+	}
+	if overlappingDomains(d.PreviewBaseDomain, d.TunnelBaseDomain) || overlappingDomains(d.PreviewBaseDomain, d.RuntimeBaseDomain) || overlappingDomains(d.TunnelBaseDomain, d.RuntimeBaseDomain) {
+		return errors.New("route base domains must not overlap")
+	}
+	for _, cidr := range d.TrustedProxyCIDRs {
+		if _, _, err := net.ParseCIDR(cidr); err != nil {
+			return errors.New("trusted proxy CIDR is invalid")
+		}
+	}
+	seenPublicHosts := make(map[string]struct{}, len(d.PublicRoutes))
+	for _, route := range d.PublicRoutes {
+		if route.Host != strings.ToLower(route.Host) || !routeBaseDomainPattern.MatchString(route.Host) || net.ParseIP(route.Host) != nil || overlapsManagedDomain(route.Host, []string{d.PreviewBaseDomain, d.TunnelBaseDomain, d.RuntimeBaseDomain}) {
+			return errors.New("public route host is invalid or overlaps managed routes")
+		}
+		key := route.Host + "\x00" + route.PathPrefix
+		if _, exists := seenPublicHosts[key]; exists {
+			return errors.New("public route is duplicated")
+		}
+		seenPublicHosts[key] = struct{}{}
+		if err := privateRouteEndpoint(route.Upstream); err != nil {
+			return errors.New("public route upstream must use a private address or service name")
+		}
+		if route.PathPrefix != "" && (!strings.HasPrefix(route.PathPrefix, "/") || strings.Contains(route.PathPrefix, "..") || strings.ContainsAny(route.PathPrefix, "?#")) {
+			return errors.New("public route path prefix is invalid")
+		}
+		if route.StripPrefix && route.PathPrefix == "" {
+			return errors.New("public route cannot strip an empty prefix")
+		}
+	}
+	if d.NodeCapacity == 0 || d.NodeCapacity > 10000 || d.ControlInterval <= 0 || d.ControlInterval > time.Minute || d.ControlTimeout <= 0 || d.ControlTimeout > 30*time.Second || d.MaxBodyBytes < 1 || d.MaxHeaderBytes < 1024 || d.MaxHeaderBytes > maximumGatewayHeaderBytes {
+		return errors.New("deployment bounds are invalid")
+	}
+	return nil
+}
+
+func overlappingDomains(first, second string) bool {
+	return first != "" && second != "" && (first == second || strings.HasSuffix(first, "."+second) || strings.HasSuffix(second, "."+first))
+}
+
+func overlapsManagedDomain(host string, domains []string) bool {
+	for _, domain := range domains {
+		if host == domain || strings.HasSuffix(host, "."+domain) || strings.HasSuffix(domain, "."+host) {
+			return true
+		}
+	}
+	return false
+}
+
+func privateLoopbackEndpoint(endpoint string) error {
+	host, port, err := net.SplitHostPort(endpoint)
+	ip := net.ParseIP(host)
+	if err != nil || ip == nil || !ip.IsLoopback() || port == "" || port == "0" {
+		return errors.New("private endpoint must use a literal loopback address and explicit port")
+	}
+	return nil
+}
+
+func endpointPort(address string) int {
+	_, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return 0
+	}
+	value, _ := strconv.Atoi(port)
+	return value
+}
+
+func privateEndpoint(address string) error {
+	host, port, err := net.SplitHostPort(address)
+	ip := net.ParseIP(host)
+	if err != nil || ip == nil || (!ip.IsLoopback() && !ip.IsPrivate()) || port == "" || port == "0" {
+		return errors.New("private endpoint must use a fixed loopback or private address")
+	}
+	return nil
+}
+
+func carrierEndpoint(address string) error {
+	host, port, err := net.SplitHostPort(address)
+	value, portErr := strconv.Atoi(port)
+	if err != nil || net.ParseIP(host) == nil || portErr != nil || value < 1 || value > 65535 {
+		return errors.New("carrier listener must use an explicit IP and fixed nonzero port")
+	}
+	return nil
+}
+
+func privateRouteEndpoint(address string) error {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || port == "" || port == "0" {
+		return errors.New("private route endpoint is invalid")
+	}
+	if net.ParseIP(host) != nil {
+		return privateEndpoint(address)
+	}
+	if !regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`).MatchString(host) {
+		return errors.New("private route service name is invalid")
+	}
+	return nil
+}

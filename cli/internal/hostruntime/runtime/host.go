@@ -1,0 +1,895 @@
+//go:build darwin || linux || windows
+
+package runtime
+
+import (
+	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"sync"
+	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/internal/bandwidth"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcastserver"
+	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configapply"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
+	stablehostd "github.com/pinksaucepasta/paperboat/internal/hostruntime/hostd"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/inspectorapi"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/observability"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/process"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeattachment"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
+	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+)
+
+var ErrHostInvalid = errors.New("invalid host runtime composition")
+
+type HostConfig struct {
+	Runtime            runtimeconfig.Config
+	ListenAddress      string
+	WorkspaceRoot      string
+	ShellPath          string
+	AgentEnvironment   []string
+	OriginPatterns     []string
+	EnvironmentID      string
+	MachineID          string
+	InboxPath          string
+	AgentTokenFile     string
+	ShutdownTimeout    time.Duration
+	RecoveryExitSignal string
+	FileTransferPolicy *filetransfer.PolicyStore
+}
+
+type HostDependencies struct {
+	Sessions                       session.Service
+	Executions                     execprocess.Service
+	ReuseAgentToken                bool
+	Bandwidth                      *bandwidth.Recorder
+	RecordTerminalJoin             server.TerminalJoinRecorder
+	Authorizer                     server.AuthorizerFactory
+	BrowserTerminalAuthorizer      server.AuthorizerFactory
+	BrowserConfigCompareAuthorizer server.AuthorizerFactory
+	BrowserTerminalIdentity        server.BrowserTerminalIdentityProvider
+	AuthorizationService           Service
+	Listener                       ListenerFactory
+	Connector                      Service
+	Previews                       *preview.Registry
+	PreviewRoutesChanged           func()
+	PreviewDispatcher              server.PreviewDispatcher
+	PreviewRecovery                Service
+	PreviewOwnerSessions           *preview.OwnerSessionLeaseManager
+	RuntimeObservationService      Service
+	RuntimeAttachmentService       Service
+	ManagedEnvironment             envinject.EnvironmentSource
+	ConfigApply                    configapply.Handler
+	ConfigCompare                  server.ConfigComparisonReader
+	ConfigApplyProof               bool
+	ConfigSync                     Service
+	Random                         io.Reader
+	SessionLauncherFactory         func(session.Service) (server.SessionLauncher, error)
+	HealthTracker                  *health.HealthTracker
+	Metrics                        *observability.Registry
+	EventLog                       *observability.EventLog
+	LocalControlToken              string
+	// Inspector is the daemon-local inspector HTTP service (bounded
+	// sanitized retrieval and deliberate audited replay). It is mounted at
+	// /v1/inspector/ only with a control token, on the loopback service.
+	Inspector                 *inspectorapi.Service
+	TunnelEnrollment          http.Handler
+	TunnelEnrollmentLifecycle Service
+	ManagedSSH                *managedssh.Host
+	ManagedSSHService         Service
+	TunnelManager             stablehostd.TunnelWorkloads
+	UpdateGate                hostdproto.UpdateGateHandler
+	NativePeerFactory         func(func(net.Conn) error, http.Handler) (Service, error)
+	Capabilities              server.CapabilityGate
+}
+
+func previewPrivateTCPAccessHandler(value any) http.Handler {
+	provider, ok := value.(interface{ PrivateTCPAccess() http.Handler })
+	if !ok {
+		return nil
+	}
+	return provider.PrivateTCPAccess()
+}
+
+type Host struct {
+	workerMu            sync.RWMutex
+	runtime             *Runtime
+	hostd               *stablehostd.Daemon
+	workers             *stablehostd.WorkerController
+	http                *HTTPService
+	handler             http.Handler
+	sessions            session.Service
+	executions          execprocess.Service
+	dispatcher          *server.Dispatcher
+	transfers           *filetransfer.Service
+	managedSSHSelection interface{ Disable(context.Context) error }
+	health              *runtimeHealthSource
+	transferRoot        string
+	cleanupUnstarted    func() error
+	workloadMu          sync.Mutex
+	workloadGeneration  uint64
+	workloadFingerprint string
+	updateGate          hostdproto.UpdateGateHandler
+}
+
+func (h *Host) UpdateGate() hostdproto.UpdateGateHandler {
+	if h == nil {
+		return nil
+	}
+	return h.updateGate
+}
+
+func transferWorkloadCount(root string) uint64 {
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, os.ErrNotExist) || err != nil {
+		return 0
+	}
+	var count uint64
+	for _, entry := range entries {
+		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".content" {
+			count++
+		}
+	}
+	return count
+}
+
+func NewHost(ctx context.Context, config HostConfig, dependencies HostDependencies) (_ *Host, resultErr error) {
+	usageService := &hostBandwidthService{recorder: dependencies.Bandwidth}
+	defer func() {
+		if resultErr != nil {
+			resultErr = errors.Join(resultErr, usageService.Shutdown(context.Background()))
+		}
+	}()
+	if err := config.Runtime.Validate(); err != nil || !LoopbackAddress(config.ListenAddress) || !filepath.IsAbs(config.WorkspaceRoot) || config.MachineID == "" || dependencies.Authorizer == nil {
+		return nil, errors.Join(ErrHostInvalid, err)
+	}
+	if (dependencies.BrowserTerminalAuthorizer != nil || dependencies.BrowserConfigCompareAuthorizer != nil) != (dependencies.BrowserTerminalIdentity != nil) || dependencies.BrowserConfigCompareAuthorizer != nil && dependencies.ConfigCompare == nil {
+		return nil, ErrHostInvalid
+	}
+	if dependencies.SessionLauncherFactory == nil && config.ShellPath == "" {
+		return nil, ErrHostInvalid
+	}
+	if config.ShutdownTimeout == 0 {
+		config.ShutdownTimeout = 30 * time.Second
+	}
+	if config.ShutdownTimeout <= 0 {
+		return nil, ErrHostInvalid
+	}
+	if config.AgentTokenFile == "" {
+		config.AgentTokenFile = filepath.Join(config.Runtime.StateRoot, "agent", "token")
+	}
+	if config.FileTransferPolicy == nil {
+		config.FileTransferPolicy = filetransfer.NewPolicyStore(filetransfer.DefaultPolicy)
+	}
+	if !filepath.IsAbs(config.AgentTokenFile) {
+		return nil, ErrHostInvalid
+	}
+	config.AgentEnvironment = append(config.AgentEnvironment,
+		"PAPERBOAT_FILE_TRANSFER_ENDPOINT=http://"+config.ListenAddress+"/v1/file-transfers",
+		"PAPERBOAT_FILE_TRANSFER_STAGING_ENDPOINT=http://"+config.ListenAddress+"/v1/local-file-transfers",
+		"PAPERBOAT_RUNTIME_AGENT_TOKEN_FILE="+config.AgentTokenFile,
+		"PAPERBOAT_WORKSPACE_ROOT="+config.WorkspaceRoot,
+	)
+	invalidConfigApply := dependencies.ConfigApplyProof && dependencies.ConfigApply == nil
+	if invalidConfigApply {
+		return nil, errors.Join(ErrHostInvalid, errors.New("invalid config-apply dependencies"))
+	}
+	adapter, err := pty.NewShellAdapter(config.WorkspaceRoot)
+	if err != nil {
+		return nil, err
+	}
+	resources := config.Runtime.Resources
+	if resources == (runtimeconfig.ResourceLimits{}) {
+		resources = runtimeconfig.DefaultResources
+	}
+	random := dependencies.Random
+	if random == nil {
+		random = rand.Reader
+	}
+	random = &lockedReader{reader: random}
+	var agentToken string
+	if dependencies.ReuseAgentToken {
+		agentToken, err = readPersistentAgentToken(config.AgentTokenFile)
+	} else {
+		agentToken, err = writeAgentToken(config.AgentTokenFile, random)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	durable, err := store.Open(ctx, store.Config{Root: config.Runtime.StateRoot})
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if resultErr != nil {
+			resultErr = errors.Join(resultErr, durable.Close())
+		}
+	}()
+	sessions := dependencies.Sessions
+	if sessions == nil {
+		sessions, err = session.NewManager(session.ManagerConfig{
+			LaunchContext: func(launchCtx context.Context, command pty.Command) (session.PTYProcess, error) {
+				command, environmentErr := commandWithManagedEnvironmentContext(launchCtx, command, dependencies.ManagedEnvironment)
+				if environmentErr != nil {
+					return nil, environmentErr
+				}
+				return adapter.Start(command)
+			},
+			Random: random, HistoryBytes: resources.HistoryBytes,
+			AttachmentBytes: config.Runtime.Limits.PendingOutputBytes,
+			MaxSessions:     resources.MaxSessions, MaxAttachments: resources.MaxAttachments,
+			MaxInputDecisions:  resources.MaxInputDecisions,
+			TerminationTimeout: 10 * time.Second, TerminationGrace: 2 * time.Second,
+			Store:              durable,
+			RecoveryExitSignal: config.RecoveryExitSignal,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	if dependencies.Sessions != nil && dependencies.ManagedEnvironment != nil {
+		sessions = launchSessions{Service: sessions, source: dependencies.ManagedEnvironment}
+	}
+	var browserOutput *browserbroadcastserver.Registry
+	if (dependencies.BrowserTerminalAuthorizer != nil || dependencies.BrowserConfigCompareAuthorizer != nil) && dependencies.BrowserTerminalIdentity != nil {
+		browserOutput, err = browserbroadcastserver.NewRegistry(sessions, func(ctx context.Context) (ed25519.PrivateKey, error) {
+			identity, identityErr := dependencies.BrowserTerminalIdentity(ctx)
+			if identityErr != nil {
+				return nil, identityErr
+			}
+			private, ok := identity.TLSCertificate.PrivateKey.(ed25519.PrivateKey)
+			if !ok {
+				return nil, server.ErrBrowserTerminalIdentityUnavailable
+			}
+			return private, nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		if attachment, ok := dependencies.RuntimeAttachmentService.(*runtimeattachment.Service); ok {
+			if err := attachment.BindBroadcaster(browserOutput); err != nil {
+				return nil, err
+			}
+		}
+	}
+	var sessionLauncher server.SessionLauncher
+	if dependencies.SessionLauncherFactory != nil {
+		sessionLauncher, err = dependencies.SessionLauncherFactory(sessions)
+	} else {
+		sessionLauncher, err = process.NewShellLauncher(config.ShellPath, config.AgentEnvironment, sessions)
+	}
+	if err != nil || sessionLauncher == nil {
+		return nil, errors.Join(ErrHostInvalid, err)
+	}
+	journal, err := operation.NewPersistentJournal(ctx, resources.MaxConcurrentOps*32, durable, time.Hour, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	healthSource := &runtimeHealthSource{}
+	writers := filetransfer.NewWriterRegistry()
+	executionConfig := execprocess.Config{
+		WorkspaceRoot: config.WorkspaceRoot, BaseEnvironment: config.AgentEnvironment,
+		MaximumActive: resources.MaxConcurrentOps, MaximumOperations: resources.MaxConcurrentOps * 32,
+		ReplayBytes: int(config.Runtime.Limits.PendingOutputBytes), CancelGrace: 2 * time.Second, Store: durable,
+	}
+	if dependencies.ManagedEnvironment != nil {
+		// Resolve at process creation so updates affect only new executions and
+		// secret values never enter the durable operation journal.
+		executionConfig.ManagedEnvironment = managedEnvironmentForLaunch(dependencies.ManagedEnvironment)
+	}
+	executions := dependencies.Executions
+	if executions == nil {
+		executions, err = execprocess.NewPersistent(ctx, executionConfig)
+	}
+	if dependencies.Executions != nil && dependencies.ManagedEnvironment != nil {
+		executions = launchExecutions{Service: executions, source: dependencies.ManagedEnvironment}
+	}
+	if err != nil {
+		return nil, err
+	}
+	transferService, err := filetransfer.New(filetransfer.Config{
+		Root: filepath.Join(config.Runtime.StateRoot, "file-transfers"), LocalMachineID: config.MachineID, Store: durable,
+		PublishRoot: config.InboxPath, Random: random, Policy: config.FileTransferPolicy,
+	})
+	if err != nil {
+		return nil, err
+	}
+	dispatcher, err := server.NewDispatcher(server.DispatcherConfig{
+		RecordTerminalJoin: dependencies.RecordTerminalJoin,
+		BrowserOutput:      browserOutput,
+		Sessions:           sessions, Health: healthSource, SessionLauncher: sessionLauncher,
+		WorkspaceRoot: config.WorkspaceRoot, Random: random,
+		ConfigApply:   dependencies.ConfigApply,
+		ConfigCompare: dependencies.ConfigCompare,
+		FileTransfers: transferService, Writers: writers, Exec: executions,
+		SSH: dependencies.ManagedSSH, Capabilities: dependencies.Capabilities,
+	})
+	if err != nil {
+		return nil, err
+	}
+	transferHandlerConfig := server.FileTransferHandlerConfig{
+		Service: transferService, Journal: journal, Authorizer: dependencies.Authorizer,
+		AuthorizeCreate: func(authorization server.Authorization, request server.CreateFileTransferRequest) bool {
+			return (dependencies.Capabilities == nil || dependencies.Capabilities.Enabled("file-transfer.v1")) && authorization.MachineID == config.MachineID && authorization.UserID != "" &&
+				request.SourceMachineID == authorization.SourceMachineID && request.InitiatingUserID == authorization.UserID &&
+				(request.DestinationMachineID == config.MachineID || request.SessionID != "" && authorization.SessionID == request.SessionID) &&
+				(authorization.RequestHash == "" || authorization.RequestID != "" && authorization.IdempotencyKey == request.BatchID && authorization.RequestHash == server.FileTransferManifestDigest(request.Files))
+		},
+		ResolveDeliveryClient: func(_ server.Authorization, request server.CreateFileTransferRequest) (string, error) {
+			if request.DestinationMachineID == config.MachineID {
+				return "", nil
+			}
+			return writers.Recipient(request.SessionID, request.DestinationMachineID)
+		},
+	}
+	nativeTransferHandler, err := server.NewNativeFileTransferHandler(transferHandlerConfig)
+	if err != nil {
+		return nil, err
+	}
+	providers := []protocol.CapabilityProvider{dispatcher}
+	available, err := protocol.AvailableCapabilities(providers...)
+	if err != nil {
+		return nil, err
+	}
+	var protocolMetrics server.MetricRecorder
+	if dependencies.Metrics != nil {
+		protocolMetrics = dependencies.Metrics
+	}
+	protocolServer, err := server.New(server.Config{
+		Negotiator: protocol.Negotiator{Available: available, ConfigApplyProof: dependencies.ConfigApplyProof},
+		Journal:    journal, Authorizer: nil, Handler: dispatcher,
+		MaxConcurrent:     resources.MaxConcurrentOps,
+		HeartbeatInterval: config.Runtime.Limits.HeartbeatInterval,
+		MutationDeadline:  config.Runtime.Limits.MutationDeadline,
+		Metrics:           protocolMetrics,
+	})
+	if err != nil {
+		return nil, err
+	}
+	connectionLimiter, err := server.NewConnectionLimiter(resources.MaxAttachments * resources.MaxSessions)
+	if err != nil {
+		return nil, err
+	}
+	nativeManager, err := server.NewNativeAssociationManager(server.NativeAssociationConfig{
+		Server: protocolServer, Authorizer: dependencies.Authorizer, Limiter: connectionLimiter, Random: random,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var nativePeerService Service
+	if dependencies.NativePeerFactory != nil {
+		nativePeerService, err = dependencies.NativePeerFactory(nativeManager.Serve, nativeTransferHandler)
+		if err != nil || nativePeerService == nil {
+			return nil, errors.Join(ErrHostInvalid, err)
+		}
+	}
+	websocketHandler, err := server.NewWebSocketHandler(server.WebSocketHandlerConfig{
+		Server: protocolServer, Authorizer: dependencies.Authorizer,
+		OriginPatterns: append([]string(nil), config.OriginPatterns...),
+		MaxConnections: resources.MaxAttachments * resources.MaxSessions,
+		Limiter:        connectionLimiter,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var browserTerminalHandler http.Handler
+	if dependencies.BrowserTerminalAuthorizer != nil {
+		browserTerminalHandler, err = server.NewBrowserTerminalWebSocketHandler(server.BrowserTerminalWebSocketHandlerConfig{
+			Server: protocolServer, Authorizer: dependencies.BrowserTerminalAuthorizer, Bandwidth: dependencies.Bandwidth,
+			Identity:       dependencies.BrowserTerminalIdentity,
+			OriginPatterns: append([]string(nil), config.OriginPatterns...),
+			MaxConnections: resources.MaxAttachments * resources.MaxSessions,
+			Limiter:        connectionLimiter,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	mux := http.NewServeMux()
+	if dependencies.BrowserConfigCompareAuthorizer != nil {
+		handler, err := server.NewBrowserTerminalWebSocketHandler(server.BrowserTerminalWebSocketHandlerConfig{CompareOnly: true, Server: protocolServer, Authorizer: dependencies.BrowserConfigCompareAuthorizer, Bandwidth: dependencies.Bandwidth, Identity: dependencies.BrowserTerminalIdentity, OriginPatterns: append([]string(nil), config.OriginPatterns...), MaxConnections: resources.MaxAttachments * resources.MaxSessions, Limiter: connectionLimiter})
+		if err != nil {
+			return nil, err
+		}
+		mux.Handle("/v1/browser-config-compare", handler)
+	}
+	if dependencies.PreviewOwnerSessions != nil && dependencies.LocalControlToken != "" {
+		mux.Handle("/v1/preview-owner-sessions", dependencies.PreviewOwnerSessions)
+		mux.Handle("/v1/preview-owner-sessions/", dependencies.PreviewOwnerSessions)
+	}
+	if dependencies.TunnelEnrollment != nil && dependencies.LocalControlToken != "" {
+		mux.Handle("/v1/tunnel-connectors/enroll", dependencies.TunnelEnrollment)
+	}
+	if dependencies.Inspector != nil && dependencies.LocalControlToken != "" {
+		mux.Handle("/v1/inspector/", dependencies.Inspector)
+	}
+	if handler := previewPrivateTCPAccessHandler(dependencies.PreviewDispatcher); handler != nil {
+		mux.Handle("/v1/private-tcp-access", handler)
+		mux.Handle("/v1/private-tcp-access/", handler)
+	}
+	mux.Handle("/v1/runtime", websocketHandler)
+	if browserTerminalHandler != nil {
+		mux.Handle("/v1/browser-terminal", browserTerminalHandler)
+	}
+	localTransferHandler, localTransferErr := server.NewNativeLocalFileTransferHandler(server.LocalFileTransferConfig{Token: agentToken, MachineID: config.MachineID, Service: transferService, ResolveRecipient: writers.Recipient})
+	if localTransferErr != nil {
+		return nil, localTransferErr
+	}
+	mux.Handle("/v1/local-file-transfers", localTransferHandler)
+	mux.Handle("/v1/local-file-transfers/", localTransferHandler)
+	if dependencies.PreviewDispatcher != nil {
+		previewDispatchHandler, dispatchErr := server.NewPreviewDispatchHandler(server.PreviewDispatchHandlerConfig{Authorizer: dependencies.Authorizer, Dispatcher: dependencies.PreviewDispatcher, MachineID: config.MachineID, Capabilities: dependencies.Capabilities})
+		if dispatchErr != nil {
+			return nil, dispatchErr
+		}
+		mux.Handle("/v1/preview-launches", previewDispatchHandler)
+	}
+	registerHostLivenessAndDiagnostics(mux, healthSource, dependencies.HealthTracker, dependencies.Metrics, dependencies.EventLog, func() HostWorkloadCounts {
+		return hostWorkloadCounts(sessions, transferService)
+	})
+	if dependencies.Metrics != nil {
+		mux.Handle("/metrics", dependencies.Metrics.Handler())
+	}
+	httpService, err := NewHTTPService(HTTPConfig{Address: config.ListenAddress, Handler: mux, Listener: dependencies.Listener, NativeHandler: func(conn net.Conn) { _ = nativeManager.Serve(conn) }})
+	if err != nil {
+		return nil, err
+	}
+	// The stable daemon owns every component which terminates or routes a live
+	// workload. A replaceable worker only coordinates policy and the control
+	// plane. This is the update boundary: stopping a worker must never call
+	// ShutdownForRecovery or close a connection accepted by hostd.
+	stableComponents := make([]stablehostd.Component, 0, 13)
+	if dependencies.Bandwidth != nil {
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "bandwidth", Required: true, Service: usageService})
+	}
+	transferCleanup := &filetransfer.CleanupWorker{Service: transferService}
+	stableComponents = append(stableComponents,
+		stablehostd.Component{Name: "storage", Required: true, Service: shutdownService{shutdown: func(context.Context) error { return durable.Close() }}},
+		stablehostd.Component{Name: "sessions", Required: true, Service: shutdownService{shutdown: sessions.Shutdown}},
+		stablehostd.Component{Name: "file_transfer_cleanup", Required: true, Service: transferCleanup},
+	)
+	if dependencies.Inspector != nil {
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "inspector_retention", Required: true, Service: dependencies.Inspector})
+	}
+	workerComponents := []Component{{Capability: "worker_lifecycle", Required: true, Service: workerLifecycleService{}}}
+	if dependencies.AuthorizationService != nil {
+		// Authorization refresh and ENV recipient registration belong to the
+		// stable host, including packaged startup without an in-process worker.
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "authorization", Required: false, Service: dependencies.AuthorizationService})
+	}
+	if dependencies.ConfigSync != nil {
+		if stableHostOwnsCoordination() {
+			stableComponents = append(stableComponents, stablehostd.Component{Name: "config_sync", Required: true, Service: dependencies.ConfigSync})
+		} else {
+			workerComponents = append(workerComponents, Component{Capability: "config_sync", Required: true, Service: dependencies.ConfigSync})
+		}
+	}
+	stableComponents = append(stableComponents, stablehostd.Component{Name: "protocol", Required: true, Service: protocolServer})
+	if nativePeerService != nil {
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "peer_transport", Required: false, Service: nativePeerService})
+	}
+	if dependencies.PreviewRecovery != nil {
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "preview_recovery", Required: false, Service: dependencies.PreviewRecovery})
+	}
+	if dependencies.RuntimeObservationService != nil {
+		// Presence is a stable host responsibility. The replaceable worker
+		// negotiates lifecycle only and is not guaranteed to run on every
+		// platform, so placing this service in workerComponents silently stops
+		// heartbeats after an update (and on hostd-only startup). Keep the
+		// observation loop alive with the same daemon that owns the machine
+		// identity and local control plane.
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "runtime_observation", Required: false, Service: dependencies.RuntimeObservationService})
+	}
+	if dependencies.ManagedSSHService != nil {
+		// Managed SSH is an independently selectable incoming capability. An
+		// unavailable target authority must fail SSH closed without taking the
+		// terminal, file-transfer, or preview services down with it.
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "managed_ssh_authority", Required: false, Service: dependencies.ManagedSSHService})
+	}
+	if dependencies.TunnelManager != nil {
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "tunnel_manager", Required: true, Service: dependencies.TunnelManager})
+	}
+	if dependencies.Connector != nil {
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "edge", Required: true, Service: dependencies.Connector})
+	}
+	stableComponents = append(stableComponents, stablehostd.Component{Name: "control_plane", Required: true, Service: httpService})
+	if dependencies.RuntimeAttachmentService != nil {
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "runtime_attachment", Required: false, Service: dependencies.RuntimeAttachmentService})
+	}
+	daemon, err := stablehostd.New(stablehostd.Config{
+		Workloads:  stablehostd.Workloads{Sessions: sessions, Executions: executions, Transfers: transferService, Previews: dependencies.Previews, ManagedSSH: dependencies.ManagedSSH, Tunnels: dependencies.TunnelManager},
+		Components: stableComponents, ShutdownTimeout: config.ShutdownTimeout,
+	})
+	if err != nil {
+		return nil, errors.Join(ErrHostInvalid, err)
+	}
+	runtime, err := NewRuntime(Config{
+		Version: config.Runtime.Version, Components: workerComponents, ShutdownTimeout: config.ShutdownTimeout,
+		HealthTracker: dependencies.HealthTracker, Metrics: dependencies.Metrics, EventLog: dependencies.EventLog,
+	})
+	if err != nil {
+		return nil, err
+	}
+	workers, err := stablehostd.NewWorkerController(daemon)
+	if err != nil {
+		return nil, errors.Join(ErrHostInvalid, err)
+	}
+	healthSource.set(runtime, workerComponents)
+	if provider, ok := dependencies.ManagedSSHService.(capabilityHealthProvider); ok {
+		healthSource.dynamic["ssh.v1"] = provider
+	}
+	host := &Host{runtime: runtime, hostd: daemon, workers: workers, http: httpService, handler: mux, sessions: sessions, executions: executions, dispatcher: dispatcher, transfers: transferService, health: healthSource, transferRoot: filepath.Join(config.Runtime.StateRoot, "file-transfers"), cleanupUnstarted: func() error { return errors.Join(durable.Close(), usageService.Shutdown(context.Background())) }, updateGate: dependencies.UpdateGate}
+	host.managedSSHSelection, _ = dependencies.ManagedSSHService.(interface{ Disable(context.Context) error })
+	if host.updateGate == nil {
+		host.updateGate, err = newStandaloneUpdateGate(standaloneUpdateGateConfig{MachineID: config.MachineID, StatePath: filepath.Join(config.Runtime.StateRoot, "updates", "standalone-deployment-gate.json"), Health: mux, Workloads: host.WorkloadStatus, BeginUpdate: sessions.BeginUpdate, EndUpdate: sessions.EndUpdate})
+		if err != nil {
+			return nil, errors.Join(ErrHostInvalid, err)
+		}
+	}
+	return host, nil
+}
+
+func commandWithManagedEnvironment(command pty.Command, managed envinject.EnvironmentSource) (pty.Command, error) {
+	return commandWithManagedEnvironmentContext(context.Background(), command, managed)
+}
+
+func commandWithManagedEnvironmentContext(ctx context.Context, command pty.Command, managed envinject.EnvironmentSource) (pty.Command, error) {
+	if managed == nil {
+		return command, nil
+	}
+	values, err := managedEnvironmentForLaunch(managed)(ctx)
+	if err != nil {
+		return pty.Command{}, err
+	}
+	command.Env, err = envinject.Merge(command.Env, values)
+	if err != nil {
+		return pty.Command{}, err
+	}
+	return command, nil
+}
+
+func managedEnvironmentForLaunch(source envinject.EnvironmentSource) func(context.Context) ([]string, error) {
+	if source == nil {
+		return nil
+	}
+	return func(ctx context.Context) ([]string, error) {
+		if ctx == nil {
+			return nil, ErrProductionInvalid
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if contextual, ok := source.(interface {
+			EnvironmentForLaunch(context.Context) ([]string, error)
+		}); ok {
+			return contextual.EnvironmentForLaunch(ctx)
+		}
+		return source.Environment()
+	}
+}
+
+// WorkloadStatus is the stable host's monotonic snapshot used to fence a
+// supervisor maintenance activation. It counts ownership-bearing workloads,
+// not merely network clients, and advances whenever that set changes.
+func (h *Host) WorkloadStatus() hostdproto.WorkloadStatus {
+	if h == nil {
+		return hostdproto.WorkloadStatus{Generation: 1}
+	}
+	counts := map[string]uint64{}
+	identities := make([]string, 0)
+	if h.sessions != nil {
+		for key, value := range h.sessions.ResourceCounts() {
+			counts[key] = value
+		}
+		for _, value := range h.sessions.List() {
+			identities = append(identities, fmt.Sprintf("session\x00%s\x00%d\x00%s", value.ID, value.Generation, value.State))
+		}
+	}
+	if h.executions != nil {
+		values := h.executions.ActiveSnapshots()
+		counts["executions"] = uint64(len(values))
+		for _, value := range values {
+			identities = append(identities, fmt.Sprintf("execution\x00%s\x00%s\x00%d", value.OperationID, value.State, value.NextSequence))
+		}
+	}
+	if h.transferRoot != "" {
+		counts["transfers"] = transferWorkloadCount(h.transferRoot)
+	}
+	if h.hostd != nil {
+		workloads := h.hostd.Workloads()
+		if workloads.Previews != nil {
+			for key, value := range workloads.Previews.ResourceCounts() {
+				counts[key] += value
+			}
+			for _, value := range workloads.Previews.List() {
+				if value.State != preview.Removed {
+					identities = append(identities, fmt.Sprintf("preview\x00%s\x00%d\x00%s", value.Identity, value.Revision, value.State))
+				}
+			}
+		}
+		if workloads.Tunnels != nil {
+			for key, value := range workloads.Tunnels.ResourceCounts() {
+				counts[key] += value
+			}
+			if source, ok := workloads.Tunnels.(interface{ WorkloadIdentities() []string }); ok {
+				for _, value := range source.WorkloadIdentities() {
+					identities = append(identities, "tunnel\x00"+value)
+				}
+			}
+		}
+	}
+	keys := make([]string, 0, len(counts))
+	var protected uint64
+	for key, value := range counts {
+		keys = append(keys, key)
+		protected += value
+	}
+	sort.Strings(keys)
+	sort.Strings(identities)
+	var fingerprint string
+	for _, key := range keys {
+		fingerprint += fmt.Sprintf("%s=%d;", key, counts[key])
+	}
+	for _, identity := range identities {
+		fingerprint += fmt.Sprintf("%d:%s;", len(identity), identity)
+	}
+	h.workloadMu.Lock()
+	defer h.workloadMu.Unlock()
+	if h.workloadGeneration == 0 {
+		h.workloadGeneration = 1
+		h.workloadFingerprint = fingerprint
+	} else if fingerprint != h.workloadFingerprint {
+		h.workloadGeneration++
+		h.workloadFingerprint = fingerprint
+	}
+	return hostdproto.WorkloadStatus{Generation: h.workloadGeneration, Protected: protected}
+}
+
+func writeAgentToken(path string, random io.Reader) (string, error) {
+	directory := filepath.Dir(path)
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return "", err
+	}
+	info, err := os.Lstat(directory)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return "", ErrHostInvalid
+	}
+	if err := os.Chmod(directory, 0o700); err != nil {
+		return "", err
+	}
+	if info, err = os.Lstat(path); err == nil && (!info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0) {
+		return "", ErrHostInvalid
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	raw := make([]byte, 32)
+	if _, err := io.ReadFull(random, raw); err != nil {
+		return "", err
+	}
+	token := base64.RawURLEncoding.EncodeToString(raw)
+	if err := atomicfile.Write(path, []byte(token+"\n"), atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1}); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+func (h *Host) Start(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	h.workerMu.RLock()
+	worker := h.runtime
+	h.workerMu.RUnlock()
+	if h.hostd == nil || h.workers == nil {
+		return worker.Start(ctx)
+	}
+	if err := h.hostd.Start(ctx); err != nil {
+		return err
+	}
+	if err := h.workers.Start(ctx, worker); err != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return errors.Join(err, h.hostd.Shutdown(shutdownCtx))
+	}
+	return nil
+}
+
+// StartHostd starts only the stable daemon. The hostd process uses this entry
+// point before it launches the separately fenced runtime worker. Starting the
+// in-process Runtime here would create a second lifecycle owner and can stop
+// stable services when the external worker is activated or replaced.
+func (h *Host) StartHostd(ctx context.Context) error {
+	if h == nil || h.hostd == nil {
+		return ErrHostInvalid
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return h.hostd.Start(ctx)
+}
+
+// StartStable starts hostd-owned workloads and the coordination services whose
+// health is exposed by the stable control plane. The separately fenced worker
+// proves the selected runtime artifact and owns its lifecycle lease; it must
+// not leave the actual authorization and observation services in New state.
+func (h *Host) StartStable(ctx context.Context) error {
+	return h.Start(ctx)
+}
+
+// ReplaceWorker swaps coordination only. Hostd-owned workload managers,
+// accepted ingress, PTYs and streams continue running throughout the change.
+func (h *Host) ReplaceWorker(ctx context.Context, candidate *Runtime) error {
+	if h.workers == nil {
+		return ErrHostInvalid
+	}
+	if candidate == nil {
+		return ErrHostInvalid
+	}
+	replaceErr := h.workers.Replace(ctx, candidate)
+	if replaceErr != nil {
+		var committed *stablehostd.ReplacementCommittedError
+		if !errors.As(replaceErr, &committed) {
+			return replaceErr
+		}
+	}
+	h.workerMu.Lock()
+	h.runtime = candidate
+	h.workerMu.Unlock()
+	if h.health != nil {
+		h.health.set(candidate, candidate.config.Components)
+	}
+	return replaceErr
+}
+
+func (h *Host) Shutdown(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	h.workerMu.RLock()
+	worker := h.runtime
+	h.workerMu.RUnlock()
+	if worker != nil && worker.State() == New && h.cleanupUnstarted != nil && (h.hostd == nil || !h.hostd.Running()) {
+		cleanup := h.cleanupUnstarted
+		h.cleanupUnstarted = nil
+		return cleanup()
+	}
+	if h.hostd == nil || h.workers == nil {
+		return worker.Shutdown(ctx)
+	}
+	return errors.Join(h.workers.Shutdown(ctx), h.hostd.Shutdown(ctx))
+}
+
+// ShutdownHostd drains the stable daemon after the external runtime worker has
+// stopped. It deliberately does not touch the in-process Runtime, which was
+// never started by StartHostd.
+func (h *Host) ShutdownHostd(ctx context.Context) error {
+	if h == nil || h.hostd == nil {
+		return ErrHostInvalid
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return h.hostd.Shutdown(ctx)
+}
+
+// ShutdownStable is used by the stable hostd process after its external worker
+// has been stopped. It drains coordination before durable hostd workloads.
+func (h *Host) ShutdownStable(ctx context.Context) error {
+	return h.Shutdown(ctx)
+}
+func (h *Host) State() State {
+	h.workerMu.RLock()
+	defer h.workerMu.RUnlock()
+	return h.runtime.State()
+}
+
+type shutdownService struct{ shutdown func(context.Context) error }
+
+func (shutdownService) Start(context.Context) error          { return nil }
+func (s shutdownService) Shutdown(ctx context.Context) error { return s.shutdown(ctx) }
+
+// workerLifecycleService represents the replaceable runtime process itself.
+// It has no workload ownership; hostd owns all state which survives a worker
+// update.
+type workerLifecycleService struct{}
+
+func (workerLifecycleService) Start(context.Context) error    { return nil }
+func (workerLifecycleService) Shutdown(context.Context) error { return nil }
+
+type serviceGroup []Service
+
+func (g serviceGroup) Start(ctx context.Context) error {
+	started := 0
+	for i, service := range g {
+		if err := service.Start(ctx); err != nil {
+			for j := started - 1; j >= 0; j-- {
+				_ = g[j].Shutdown(ctx)
+			}
+			return err
+		}
+		started = i + 1
+	}
+	return nil
+}
+
+func (g serviceGroup) Shutdown(ctx context.Context) error {
+	var result error
+	for i := len(g) - 1; i >= 0; i-- {
+		result = errors.Join(result, g[i].Shutdown(ctx))
+	}
+	return result
+}
+
+type lockedReader struct {
+	mu     sync.Mutex
+	reader io.Reader
+}
+
+func (r *lockedReader) Read(buffer []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.reader.Read(buffer)
+}
+
+type runtimeHealthSource struct {
+	mu      sync.RWMutex
+	runtime *Runtime
+	dynamic map[string]capabilityHealthProvider
+}
+
+type capabilityHealthProvider interface {
+	CapabilityHealth() health.Capability
+}
+
+func (s *runtimeHealthSource) set(runtime *Runtime, components []Component) {
+	dynamic := make(map[string]capabilityHealthProvider)
+	for _, component := range components {
+		if provider, ok := component.Service.(capabilityHealthProvider); ok {
+			dynamic[component.Capability] = provider
+		}
+	}
+	s.mu.Lock()
+	s.runtime, s.dynamic = runtime, dynamic
+	s.mu.Unlock()
+}
+func (s *runtimeHealthSource) Snapshot() (snapshot health.Snapshot) {
+	s.mu.RLock()
+	runtime := s.runtime
+	dynamic := make(map[string]capabilityHealthProvider, len(s.dynamic))
+	for capability, provider := range s.dynamic {
+		dynamic[capability] = provider
+	}
+	s.mu.RUnlock()
+	if runtime != nil {
+		snapshot = runtime.Health()
+		for capability, provider := range dynamic {
+			snapshot.Capabilities[capability] = provider.CapabilityHealth()
+		}
+	}
+	return snapshot
+}

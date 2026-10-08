@@ -1,0 +1,56 @@
+.nh
+.TH "PB-ENV-ROTATE-CANCEL" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-env-rotate-cancel - Cancel an uncommitted personal ENV key rotation
+
+
+.SH SYNOPSIS
+\fBpb env rotate cancel [flags]\fP
+
+
+.SH DESCRIPTION
+Cancel an uncommitted personal ENV key rotation
+
+.PP
+Cancel an uncommitted personal key rotation using the exact confirmation. A completed rotation cannot be undone by this command.
+
+.PP
+ENV values are encrypted before they leave the client. Commands select personal, team, or host scope explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--confirm\fP=""
+	exact confirmation phrase: CANCEL ENV ROTATE <account_id>
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for cancel
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-env-rotate(1)\fP

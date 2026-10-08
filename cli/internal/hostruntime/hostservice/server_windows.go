@@ -1,0 +1,359 @@
+//go:build windows
+
+package hostservice
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/Microsoft/go-winio"
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
+	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
+	"golang.org/x/sys/windows"
+)
+
+const (
+	ProtocolV1                       = "paperboat.host-service/v1"
+	AllowSleep                       = "allow_sleep"
+	KeepAwake                        = "keep_awake"
+	maxAuthorizedKeys                = 256
+	windowsHostServiceMaxRequestSize = 64 << 10
+)
+
+var (
+	ErrInvalidConfig  = errors.New("invalid host-service configuration")
+	ErrInvalidRequest = errors.New("invalid host-service request")
+	ErrPeerDenied     = errors.New("host-service named-pipe peer is not enrolled")
+	ErrStalePolicy    = errors.New("availability policy version is stale")
+)
+
+type Request struct {
+	Schema         string                    `json:"schema"`
+	Operation      string                    `json:"operation"`
+	Mode           string                    `json:"mode,omitempty"`
+	Version        int64                     `json:"version,omitempty"`
+	Artifact       *bootstrap.ArtifactTarget `json:"artifact,omitempty"`
+	AuthorizedKeys *[]string                 `json:"authorized_keys,omitempty"`
+}
+type Response struct {
+	Schema                   string    `json:"schema"`
+	Status                   string    `json:"status"`
+	DesiredMode              string    `json:"desired_mode"`
+	DesiredVersion           int64     `json:"desired_version"`
+	ObservedMode             string    `json:"observed_mode,omitempty"`
+	ObservedVersion          int64     `json:"observed_version,omitempty"`
+	ObservedAt               time.Time `json:"observed_at,omitempty"`
+	ErrorCode                string    `json:"error_code,omitempty"`
+	HostServiceVersion       string    `json:"host_service_version"`
+	Scope                    string    `json:"scope"`
+	UpdateVersion            string    `json:"update_version,omitempty"`
+	UpdateRollbacks          uint64    `json:"update_rollbacks"`
+	UpdateHealth             string    `json:"update_health"`
+	AuthorizedKeysReconciled bool      `json:"authorized_keys_reconciled,omitempty"`
+	AuthorizedKeysChanged    bool      `json:"authorized_keys_changed,omitempty"`
+}
+type State struct {
+	Schema          string    `json:"schema"`
+	DesiredMode     string    `json:"desired_mode"`
+	DesiredVersion  int64     `json:"desired_version"`
+	ObservedMode    string    `json:"observed_mode,omitempty"`
+	ObservedVersion int64     `json:"observed_version,omitempty"`
+	ObservedAt      time.Time `json:"observed_at,omitempty"`
+	Status          string    `json:"status"`
+	ErrorCode       string    `json:"error_code,omitempty"`
+}
+type Applier interface {
+	Apply(context.Context, string) error
+	Close(context.Context) error
+}
+type UpdateActivator interface {
+	Activate(context.Context, bootstrap.ArtifactTarget) (string, error)
+}
+type UpdateDiagnostics interface {
+	RollbackCount() uint64
+	UpdateHealth() string
+}
+type AuthorizedKeysReconciler interface {
+	ReconcileAuthorizedKeys(context.Context, []string) (bool, error)
+}
+type Config struct {
+	SocketPath        string
+	StatePath         string
+	UID               int
+	GID               int
+	SID               string
+	Applier           Applier
+	Now               func() time.Time
+	Version           string
+	Updates           UpdateActivator
+	UpdateDiagnostics UpdateDiagnostics
+	AuthorizedKeys    AuthorizedKeysReconciler
+	Ready             func() error
+	Heartbeat         func() error
+	HeartbeatInterval time.Duration
+}
+type Server struct {
+	config Config
+	mu     sync.Mutex
+	state  State
+}
+
+func New(config Config) (*Server, error) {
+	if !validPipePath(config.SocketPath) || !filepath.IsAbs(config.StatePath) || config.Applier == nil || config.Version == "" || config.HeartbeatInterval < 0 || config.HeartbeatInterval > 0 && config.Heartbeat == nil || config.SID != "" && !validSID(config.SID) {
+		return nil, ErrInvalidConfig
+	}
+	if config.Now == nil {
+		config.Now = time.Now
+	}
+	server := &Server{config: config, state: State{Schema: ProtocolV1, DesiredMode: KeepAwake, Status: "pending"}}
+	if err := server.load(); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	return server, nil
+}
+
+func (s *Server) Run(ctx context.Context) error {
+	s.mu.Lock()
+	mode, version := s.state.DesiredMode, s.state.DesiredVersion
+	s.mu.Unlock()
+	if mode == KeepAwake {
+		if err := s.apply(ctx, mode, version); err != nil {
+			return err
+		}
+	}
+	listener, err := winio.ListenPipe(s.config.SocketPath, &winio.PipeConfig{SecurityDescriptor: hostServiceSecurityDescriptor(s.config.SID), InputBufferSize: windowsHostServiceMaxRequestSize, OutputBufferSize: 16 << 10})
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+	if s.config.Ready != nil {
+		if err := s.config.Ready(); err != nil {
+			return err
+		}
+	}
+	go func() { <-ctx.Done(); _ = listener.Close() }()
+	for {
+		connection, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			if ctx.Err() != nil || errors.Is(acceptErr, net.ErrClosed) || errors.Is(acceptErr, winio.ErrPipeListenerClosed) {
+				return errors.Join(ctx.Err(), s.config.Applier.Close(context.WithoutCancel(ctx)))
+			}
+			return acceptErr
+		}
+		s.serveConnection(ctx, connection)
+	}
+}
+
+func (s *Server) serveConnection(ctx context.Context, connection net.Conn) {
+	serveErr := s.serveContext(ctx, connection)
+	closeErr := connection.Close()
+	observeUnexpected(ctx, "service", "lifecycle", "service_failed", errors.Join(serveErr, closeErr))
+}
+
+func (s *Server) serve(connection net.Conn) error {
+	return s.serveContext(context.Background(), connection)
+}
+
+func (s *Server) serveContext(ctx context.Context, connection net.Conn) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	requestCtx, cancelRequest := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelRequest()
+	deadline, _ := requestCtx.Deadline()
+	_ = connection.SetDeadline(deadline)
+	reader := bufio.NewReaderSize(io.LimitReader(connection, windowsHostServiceMaxRequestSize+1), windowsHostServiceMaxRequestSize+1)
+	body, err := reader.ReadBytes('\n')
+	if err != nil || len(body) == 0 || len(body) > windowsHostServiceMaxRequestSize {
+		return s.respond(connection, s.errorResponse("invalid_request"))
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	var request Request
+	if err := decoder.Decode(&request); err != nil {
+		return s.respond(connection, s.errorResponse("invalid_request"))
+	}
+	var extra any
+	if decoder.Decode(&extra) != io.EOF || request.Schema != ProtocolV1 {
+		return s.respond(connection, s.errorResponse("invalid_request"))
+	}
+	if request.Operation == "diagnostics" {
+		if request.Mode != "" || request.Version != 0 || request.Artifact != nil || request.AuthorizedKeys != nil {
+			return s.respond(connection, s.errorResponse("invalid_request"))
+		}
+		s.mu.Lock()
+		current := s.state
+		s.mu.Unlock()
+		return s.respond(connection, s.response(current))
+	}
+	if request.Operation == "activate_update" {
+		if request.Mode != "" || request.Version != 0 || request.Artifact == nil || request.AuthorizedKeys != nil || s.config.Updates == nil {
+			return s.respond(connection, s.errorResponse("invalid_request"))
+		}
+		version, activateErr := s.config.Updates.Activate(requestCtx, *request.Artifact)
+		if activateErr != nil {
+			return s.respond(connection, s.errorResponse("update_activation_failed"))
+		}
+		response := s.errorResponse("")
+		response.UpdateVersion = version
+		return s.respond(connection, response)
+	}
+	if request.Operation == "reconcile_ssh_authorized_keys" {
+		if request.Mode != "" || request.Version != 0 || request.Artifact != nil || request.AuthorizedKeys == nil || len(*request.AuthorizedKeys) > maxAuthorizedKeys || s.config.AuthorizedKeys == nil {
+			return s.respond(connection, s.errorResponse("invalid_request"))
+		}
+		changed, reconcileErr := s.config.AuthorizedKeys.ReconcileAuthorizedKeys(requestCtx, append([]string(nil), (*request.AuthorizedKeys)...))
+		if reconcileErr != nil {
+			if !allErrorLeavesMatch(reconcileErr, func(leaf error) bool {
+				return leaf == windowsopenssh.ErrQualificationEnrollment || normalRequestLeaf(leaf)
+			}) {
+				errorreport.Current().CaptureFailure(requestCtx, "paperboatd", "ssh", "peer_authority", "managed_ssh_failed", failAt("peer_authority", "managed_ssh_failed", reconcileErr))
+			}
+			return s.respond(connection, s.errorResponse("ssh_authorized_keys_reconcile_failed"))
+		}
+		response := s.errorResponse("")
+		response.AuthorizedKeysReconciled = true
+		response.AuthorizedKeysChanged = changed
+		return s.respond(connection, response)
+	}
+	if request.Operation != "apply_availability" || request.Artifact != nil || request.AuthorizedKeys != nil || !validMode(request.Mode) || request.Version < 0 {
+		return s.respond(connection, s.errorResponse("invalid_request"))
+	}
+	s.mu.Lock()
+	current := s.state
+	s.mu.Unlock()
+	if request.Version < current.DesiredVersion || request.Version == current.DesiredVersion && request.Mode != current.DesiredMode {
+		return s.respond(connection, s.errorResponse("stale_policy"))
+	}
+	if request.Version == current.DesiredVersion && current.Status == "applied" {
+		return s.respond(connection, s.response(current))
+	}
+	if err := s.apply(requestCtx, request.Mode, request.Version); err != nil {
+		captureUnexpected(requestCtx, "service", "reconciliation", "availability_apply_failed", err)
+		s.mu.Lock()
+		result := s.state
+		s.mu.Unlock()
+		return s.respond(connection, s.response(result))
+	}
+	s.mu.Lock()
+	result := s.state
+	s.mu.Unlock()
+	return s.respond(connection, s.response(result))
+}
+
+func (s *Server) apply(ctx context.Context, mode string, version int64) error {
+	s.mu.Lock()
+	s.state.DesiredMode, s.state.DesiredVersion, s.state.Status, s.state.ErrorCode = mode, version, "pending", ""
+	if err := s.persistLocked(); err != nil {
+		s.state.Status, s.state.ErrorCode = "error", "availability_apply_failed"
+		s.mu.Unlock()
+		return failAt("diagnostic_storage", "diagnostic_storage_unavailable", err)
+	}
+	s.mu.Unlock()
+	err := s.config.Applier.Apply(ctx, mode)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err != nil {
+		s.state.ObservedMode, s.state.ObservedVersion = mode, version
+		s.state.ObservedAt, s.state.Status, s.state.ErrorCode = s.config.Now().UTC(), "error", "availability_apply_failed"
+		return failAt("reconciliation", "availability_apply_failed", errors.Join(err, s.persistLocked()))
+	}
+	s.state.ObservedMode, s.state.ObservedVersion = mode, version
+	s.state.ObservedAt, s.state.Status, s.state.ErrorCode = s.config.Now().UTC(), "applied", ""
+	if err := s.persistLocked(); err != nil {
+		s.state.Status, s.state.ErrorCode = "error", "availability_apply_failed"
+		return failAt("diagnostic_storage", "diagnostic_storage_unavailable", err)
+	}
+	return nil
+}
+func (s *Server) State() State { s.mu.Lock(); defer s.mu.Unlock(); return s.state }
+func (s *Server) load() error {
+	body, err := os.ReadFile(s.config.StatePath)
+	if err != nil {
+		return failAt("diagnostic_storage", "diagnostic_storage_unavailable", err)
+	}
+	if len(body) > 16<<10 {
+		return ErrInvalidConfig
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	var state State
+	var extra any
+	if decoder.Decode(&state) != nil || decoder.Decode(&extra) != io.EOF || state.Schema != ProtocolV1 || !validMode(state.DesiredMode) || state.DesiredVersion < 0 || !validStatus(state.Status) {
+		return ErrInvalidConfig
+	}
+	s.state = state
+	return nil
+}
+
+func isPeerClosedError(err error) bool {
+	return err == windows.ERROR_BROKEN_PIPE || err == windows.ERROR_NO_DATA || err == windows.ERROR_PIPE_NOT_CONNECTED
+}
+func (s *Server) persistLocked() error {
+	body, err := json.Marshal(s.state)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(s.config.StatePath), 0o700); err != nil {
+		return err
+	}
+	return atomicfile.Write(s.config.StatePath, body, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1})
+}
+func (s *Server) respond(writer io.Writer, value Response) error {
+	return json.NewEncoder(writer).Encode(value)
+}
+func (s *Server) errorResponse(code string) Response {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value := s.response(s.state)
+	value.ErrorCode = code
+	return value
+}
+func (s *Server) response(state State) Response {
+	var rollbacks uint64
+	if diagnostics := s.updateDiagnostics(); diagnostics != nil {
+		rollbacks = diagnostics.RollbackCount()
+	}
+	health := "unknown"
+	if diagnostics := s.updateDiagnostics(); diagnostics != nil {
+		health = diagnostics.UpdateHealth()
+	}
+	return Response{Schema: ProtocolV1, Status: state.Status, DesiredMode: state.DesiredMode, DesiredVersion: state.DesiredVersion, ObservedMode: state.ObservedMode, ObservedVersion: state.ObservedVersion, ObservedAt: state.ObservedAt, ErrorCode: state.ErrorCode, HostServiceVersion: s.config.Version, Scope: "system", UpdateRollbacks: rollbacks, UpdateHealth: health}
+}
+func (s *Server) updateDiagnostics() UpdateDiagnostics {
+	if s.config.UpdateDiagnostics != nil {
+		return s.config.UpdateDiagnostics
+	}
+	diagnostics, _ := s.config.Updates.(UpdateDiagnostics)
+	return diagnostics
+}
+func validMode(mode string) bool { return mode == AllowSleep || mode == KeepAwake }
+func validStatus(status string) bool {
+	return status == "applied" || status == "pending" || status == "error"
+}
+func validPipePath(path string) bool {
+	const prefix = `\\.\pipe\`
+	return strings.HasPrefix(strings.ToLower(path), prefix) && len(path) > len(prefix) && len(path) <= 256 && !strings.ContainsAny(path[len(prefix):], `/\:*?"<>|`)
+}
+func validSID(value string) bool {
+	sid, err := windows.StringToSid(value)
+	return err == nil && sid != nil && sid.String() == value
+}
+func hostServiceSecurityDescriptor(sid string) string {
+	if validSID(sid) {
+		return "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;" + sid + ")"
+	}
+	return "D:P(A;;GA;;;SY)(A;;GA;;;BA)"
+}

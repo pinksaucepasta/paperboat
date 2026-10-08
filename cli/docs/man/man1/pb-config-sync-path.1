@@ -1,0 +1,52 @@
+.nh
+.TH "PB-CONFIG-SYNC-PATH" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-sync-path - Show the authoritative machine configuration path
+
+
+.SH SYNOPSIS
+\fBpb config sync path [flags]\fP
+
+
+.SH DESCRIPTION
+Show the authoritative machine configuration path
+
+.PP
+Print the authoritative local machine configuration path so you can edit or inspect the source file. This command only resolves the location; it does not create a file or change the machine's synchronization assignment.
+
+.PP
+Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for path
+
+.PP
+\fB--json\fP[=false]
+	print the authoritative path as JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config-sync(1)\fP
