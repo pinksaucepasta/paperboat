@@ -1,0 +1,278 @@
+# Temporary signing-only recovery; remove after publication. No product/helper builds.
+name: Recover qualified .21 Mac and Windows candidate
+'on':
+  workflow_dispatch:
+    inputs:
+      expected_harness_sha:
+        description: Exact reviewed recovery workflow commit SHA
+        required: true
+        type: string
+run-name: Recover qualified Paperboat update candidate 2026.10.08.21
+concurrency:
+  group: paperboat-release-${{ github.repository }}
+  cancel-in-progress: false
+permissions: {}
+jobs:
+  recover-qualified-candidate:
+    name: Sign qualified Mac and Windows only; preserve published Linux .30
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    environment: paperboat-tuf-published
+    permissions:
+      actions: read
+      contents: read
+    env:
+      RELEASE_VERSION: 2026.10.08.21
+      PRODUCT_RUN_ID: '37743858060'
+      PRODUCT_SOURCE_COMMIT: cfc9b841d894ba7634c7f67909066a00a8fa707d
+      PAPERBOAT_RELEASE_SOURCE_COMMIT: cfc9b841d894ba7634c7f67909066a00a8fa707d
+      PAPERBOAT_GITHUB_REPOSITORY: pinksaucepasta/paperboat-cli
+      SUPERVISOR_MAINTENANCE: 'false'
+      RELEASE_HOST: ${{ vars.PAPERBOAT_RELEASE_HOST }}
+      PAPERBOAT_TUF_CI: '1'
+      PAPERBOAT_TUF_KEY_TARGETS_1: ${{ secrets.PAPERBOAT_TUF_KEY_TARGETS_1 }}
+      PAPERBOAT_TUF_KEY_TARGETS_2: ${{ secrets.PAPERBOAT_TUF_KEY_TARGETS_2 }}
+      PAPERBOAT_TUF_KEY_SNAPSHOT_1: ${{ secrets.PAPERBOAT_TUF_KEY_SNAPSHOT_1 }}
+      PAPERBOAT_TUF_KEY_TIMESTAMP_2: ${{ secrets.PAPERBOAT_TUF_KEY_TIMESTAMP_2 }}
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+    - name: Pin the reviewed recovery harness
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ ! "$EXPECTED_HARNESS_SHA" =~ ^[0-9a-f]{40}$ || "$EXPECTED_HARNESS_SHA" != "$GITHUB_SHA" ]]; then
+          echo 'The dispatched commit does not match expected_harness_sha.' >&2
+          exit 1
+        fi
+      env:
+        EXPECTED_HARNESS_SHA: ${{ inputs.expected_harness_sha }}
+      working-directory: ${{ github.workspace }}
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: cfc9b841d894ba7634c7f67909066a00a8fa707d
+        fetch-depth: 1
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+      with:
+        go-version-file: cli/go.mod
+        cache: true
+        cache-dependency-path: cli/go.sum
+    - name: Verify exact product-run provenance and sole signing failure
+      shell: bash
+      run: |
+        set -euo pipefail
+         test "$(git rev-parse HEAD)" = "$PRODUCT_SOURCE_COMMIT"
+         python3 - <<'PYVERIFY'
+        import json, os, urllib.request
+        api=f"https://api.github.com/repos/{os.environ['REPOSITORY']}/actions/runs/{os.environ['PRODUCT_RUN_ID']}"
+        def get(url):
+            req=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'Paperboat-recovery'})
+            with urllib.request.urlopen(req,timeout=20) as response: return json.load(response)
+        run=get(api)
+        expected={'id':int(os.environ['PRODUCT_RUN_ID']),'head_sha':os.environ['PRODUCT_SOURCE_COMMIT'],'path':'.github/workflows/release.yml','name':'Update candidate '+os.environ['RELEASE_VERSION'],'display_title':'Update candidate '+os.environ['RELEASE_VERSION'],'event':'workflow_dispatch','status':'completed','conclusion':'failure','run_attempt':1}
+        for key,value in expected.items():
+            if run.get(key)!=value: raise SystemExit('product run provenance mismatch: '+key)
+        names={'Validate trusted source and read-only origin access','Build Linux amd64 executable','Build and natively qualify Windows amd64 executable','Build macOS arm64 package','Sign candidate metadata with current TUF authority'}
+        result=get(api+'/jobs?filter=all&per_page=100')
+        jobs=result['jobs']
+        if result['total_count']!=5 or len(jobs)!=5 or {j['name'] for j in jobs}!=names: raise SystemExit('unexpected product run jobs')
+        required={
+        'Validate trusted source and read-only origin access':{'Require the reviewed source commit','Validate version and ensure the target release slot is unused','Verify production metadata origin is readable'},
+        'Build Linux amd64 executable':{'Build official Linux amd64 package','Smoke test Linux package'},
+        'Build and natively qualify Windows amd64 executable':{'Build official Windows amd64 executable','Smoke test Windows package','Record native Windows qualification handoff'},
+        'Build macOS arm64 package':{'Build and package official macOS arm64 executable','Smoke test macOS package'},
+        'Sign candidate metadata with current TUF authority':{'Validate the exact three-asset candidate set','Build and validate the selected artifact manifest and deployment plan','Read and validate current production TUF signing state'}}
+        for job in jobs:
+            signing=job['name']=='Sign candidate metadata with current TUF authority'
+            if job['status']!='completed' or job['conclusion']!=('failure' if signing else 'success'): raise SystemExit('required job did not complete as expected')
+            s={s['name']:s for s in job['steps']}
+            if any(s.get(n,{}).get('conclusion')!='success' for n in required[job['name']]): raise SystemExit('required qualification step failed')
+            failures=[s['name'] for s in job['steps'] if s['conclusion']=='failure']
+            if failures!=(['Sign only the selected packages; do not publish them'] if signing else []): raise SystemExit('unexpected failure boundary')
+            for s in job['steps']:
+                if s['name'].startswith('Run actions/upload-artifact@') and not signing and s['conclusion']!='success': raise SystemExit('product artifact upload failed')
+        expected_artifacts={
+        'paperboat-candidate-product-darwin-arm64':'sha256:701af62b64048d9137ed506192e8dab0feb182856fb7b97c60eab1852428e736',
+        'paperboat-candidate-product-windows-amd64':'sha256:93cf0b17062e0e716f06743298a90a9e28c4a8191ca370653f6188c876938aa4',
+        'paperboat-candidate-windows-amd64-qualification':'sha256:efbc5684f7d00cfb6b780869844dcea1218d9d6d9971effa2752d6dfe833f6fa'}
+        artifacts=get(api+'/artifacts?per_page=100')['artifacts']
+        for name,digest in expected_artifacts.items():
+            found=[a for a in artifacts if a['name']==name]
+            if len(found)!=1 or found[0]['expired'] or not 0<found[0]['size_in_bytes']<=512<<20 or found[0].get('digest')!=digest: raise SystemExit('pinned artifact identity mismatch: '+name)
+        print('Pinned run, successful products/native qualification, sole signing failure, and artifact identities verified.')
+        PYVERIFY
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPOSITORY: ${{ github.repository }}
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: paperboat-candidate-product-darwin-arm64
+        path: ${{ runner.temp }}/candidate-artifacts
+        run-id: 37743858060
+        github-token: ${{ github.token }}
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: paperboat-candidate-product-windows-amd64
+        path: ${{ runner.temp }}/candidate-artifacts
+        run-id: 37743858060
+        github-token: ${{ github.token }}
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: paperboat-candidate-windows-amd64-qualification
+        path: ${{ runner.temp }}/candidate-qualification
+        run-id: 37743858060
+        github-token: ${{ github.token }}
+    - name: Validate exact two-product and native evidence inputs
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 - <<'PYINPUTS'
+        import json,os,pathlib
+        root=pathlib.Path(os.environ['RUNNER_TEMP'])
+        for directory,names,bound in [('candidate-artifacts',{'pb-darwin-arm64.pkg','pb-windows-amd64.exe'},512<<20),('candidate-qualification',{'windows-amd64-native-qualification.json'},65536)]:
+            items=list((root/directory).iterdir())
+            if {p.name for p in items}!=names or any(p.is_symlink() or not p.is_file() or not 0<p.stat().st_size<=bound for p in items): raise SystemExit('unexpected or unsafe recovery input set')
+        q=json.loads((root/'candidate-qualification/windows-amd64-native-qualification.json').read_text())
+        for key,value in {'schema':'paperboat.windows-native-qualification/v1','release_version':os.environ['RELEASE_VERSION'],'platform':'windows','architecture':'amd64','status':'passed','native_tested':True}.items():
+            if q.get(key)!=value: raise SystemExit('native qualification mismatch: '+key)
+        PYINPUTS
+    - name: Bind two-product manifest to original qualified source and signed Apple eligibility
+      shell: bash
+      run: |
+        set -euo pipefail
+        input_dir="$RUNNER_TEMP/paperboat-update-candidate-inputs"
+        mkdir -p "$input_dir"
+        go run ./tools/release-plan manifest \
+          -version "$RELEASE_VERSION" -source-commit "$PRODUCT_SOURCE_COMMIT" \
+          -toolchain "$(go env GOVERSION)" -artifacts "$RUNNER_TEMP/candidate-artifacts" \
+          -output "$input_dir/manifest.json"
+        go run ./tools/release-plan plan \
+          -manifest "$input_dir/manifest.json" -policy-revision "$PRODUCT_RUN_ID" \
+          -severity routine -cohort-seed "candidate-$RELEASE_VERSION" \
+          -output "$input_dir/deployment-plan.json"
+        python3 - "$input_dir/deployment-plan.json" <<'PYPLAN'
+        import json,pathlib,sys
+        path=pathlib.Path(sys.argv[1]); plan=json.loads(path.read_text())
+        assert plan['activation']['stability_window_seconds']==600
+        for cohort in plan['cohorts']:
+            if cohort['platform']=='darwin' and cohort['architecture']=='arm64': cohort['percentage']=100
+        path.write_text(json.dumps(plan,separators=(',',':'))+'\n')
+        PYPLAN
+        go run ./tools/release-plan validate \
+          -manifest "$input_dir/manifest.json" -plan "$input_dir/deployment-plan.json" \
+          -artifacts "$RUNNER_TEMP/candidate-artifacts"
+    - name: Configure protected origin read identity
+      env:
+        PAPERBOAT_RELEASE_SSH_KEY: ${{ secrets.PAPERBOAT_RELEASE_SSH_KEY }}
+        PAPERBOAT_RELEASE_KNOWN_HOSTS: ${{ secrets.PAPERBOAT_RELEASE_KNOWN_HOSTS }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 - "$RELEASE_HOST" <<'PYHOST'
+        import re,sys
+        if not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?',sys.argv[1]) or '..' in sys.argv[1]: raise SystemExit('Invalid release host')
+        PYHOST
+        test -n "$PAPERBOAT_RELEASE_SSH_KEY" || { echo 'PAPERBOAT_RELEASE_SSH_KEY is required' >&2; exit 1; }
+        test -n "$PAPERBOAT_RELEASE_KNOWN_HOSTS" || { echo 'PAPERBOAT_RELEASE_KNOWN_HOSTS is required' >&2; exit 1; }
+        install -d -m 0700 "$HOME/.ssh"
+        printf '%s\n' "$PAPERBOAT_RELEASE_SSH_KEY" > "$HOME/.ssh/paperboat-release"
+        printf '%s\n' "$PAPERBOAT_RELEASE_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+        chmod 0600 "$HOME/.ssh/paperboat-release" "$HOME/.ssh/known_hosts"
+    - name: Read and validate current production TUF signing state
+      shell: bash
+      run: |
+        set -euo pipefail
+        repository="$RUNNER_TEMP/tuf-candidate"
+        mkdir -p "$repository/targets"
+        ssh -i "$HOME/.ssh/paperboat-release" -o BatchMode=yes -o StrictHostKeyChecking=yes "root@$RELEASE_HOST" \
+          'tar -C /opt/paperboat/releases/current/tuf -cf - metadata' | tar -C "$repository" -xf -
+        install -m 0600 tools/tuf-repository/active-signing-state.json "$repository/.signing-state.json"
+        go run ./tools/tuf-repository validate-signers \
+          -repository "$repository" \
+          -trusted-root "$GITHUB_WORKSPACE/cli/internal/hostruntime/bootstrap/trusted-root.json"
+        go run ./tools/tuf-repository verify-published -repository "$repository"
+        python3 - "$repository/metadata/targets.json" "$RUNNER_TEMP/retained-targets.json" <<'PYRETAIN'
+        import json,pathlib,sys
+        targets=json.loads(pathlib.Path(sys.argv[1]).read_text())['signed']['targets']
+        linux=targets['pb-linux-amd64']['custom']
+        if linux['version']!='2026.10.08.30' or linux['sha256']!='f55541d8a14256984fa69e4dc82dac9e5913b8e4334912ddebd024c62d148bb8': raise SystemExit('Published Linux changed; re-evaluate instead of overwriting concurrent work')
+        retained={k:v for k,v in targets.items() if k not in {'pb-darwin-arm64.pkg','pb-windows-amd64.exe'}}
+        pathlib.Path(sys.argv[2]).write_text(json.dumps(retained,sort_keys=True))
+        PYRETAIN
+    - name: Sign only the selected packages; do not publish them
+      env:
+        PAPERBOAT_GITHUB_REPOSITORY: ${{ env.PAPERBOAT_GITHUB_REPOSITORY }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        repository="$RUNNER_TEMP/tuf-candidate"
+        input_dir="$RUNNER_TEMP/paperboat-update-candidate-inputs"
+        go run ./tools/tuf-repository publish \
+          -repository "$repository" \
+          -version "$RELEASE_VERSION" \
+          -artifacts "$RUNNER_TEMP/candidate-artifacts" \
+          -manifest "$input_dir/manifest.json" \
+          -deployment-plan "$input_dir/deployment-plan.json" \
+          -windows-amd64-native-evidence "$RUNNER_TEMP/candidate-qualification/windows-amd64-native-qualification.json" \
+          -rollout-revision "$PRODUCT_RUN_ID" \
+          -severity routine \
+          -supervisor-maintenance="$SUPERVISOR_MAINTENANCE"
+        go run ./tools/tuf-repository verify-published -repository "$repository"
+        python3 - "$repository/metadata/targets.json" "$RUNNER_TEMP/retained-targets.json" <<'PYRETAIN'
+        import json,pathlib,sys
+        targets=json.loads(pathlib.Path(sys.argv[1]).read_text())['signed']['targets']
+        retained={k:v for k,v in targets.items() if k not in {'pb-darwin-arm64.pkg','pb-windows-amd64.exe'}}
+        if retained!=json.loads(pathlib.Path(sys.argv[2]).read_text()): raise SystemExit('An unselected published target changed')
+        for name in ['pb-darwin-arm64.pkg','pb-windows-amd64.exe']:
+            if targets[name]['custom']['version']!='2026.10.08.21': raise SystemExit('Selected target version mismatch')
+        PYRETAIN
+    - name: Render product-pinned installers and prepare the publishable origin
+      shell: bash
+      run: |
+        set -euo pipefail
+        origin_dir="$RUNNER_TEMP/candidate-origin"
+        mkdir -p "$origin_dir/tuf/targets"
+        cp -R "$RUNNER_TEMP/tuf-candidate/metadata" "$origin_dir/tuf/"
+        python3 tools/render-installers.py \
+          "$RUNNER_TEMP/tuf-candidate/metadata/targets.json" \
+          "$origin_dir/install" \
+          "$origin_dir/windows"
+        chmod 0755 "$origin_dir/install"
+        tar -C "$origin_dir" -czf "$RUNNER_TEMP/candidate-origin.tgz" install windows tuf
+    - name: Assemble private Actions candidate artifact
+      shell: bash
+      run: |
+        set -euo pipefail
+        bundle_root="$RUNNER_TEMP/paperboat-update-candidate"
+        mkdir -p "$bundle_root/artifacts" "$bundle_root/tuf/metadata" "$bundle_root/qualification"
+        cp "$RUNNER_TEMP/candidate-artifacts/pb-darwin-arm64.pkg" "$bundle_root/artifacts/"
+        cp "$RUNNER_TEMP/candidate-artifacts/pb-windows-amd64.exe" "$bundle_root/artifacts/"
+        cp "$RUNNER_TEMP/tuf-candidate/metadata/"*.json "$bundle_root/tuf/metadata/"
+        cp "$RUNNER_TEMP/paperboat-update-candidate-inputs/manifest.json" "$bundle_root/"
+        cp "$RUNNER_TEMP/paperboat-update-candidate-inputs/deployment-plan.json" "$bundle_root/"
+        cp "$RUNNER_TEMP/candidate-qualification/windows-amd64-native-qualification.json" "$bundle_root/qualification/"
+        cp "$RUNNER_TEMP/candidate-origin.tgz" "$bundle_root/origin.tgz"
+        cat > "$bundle_root/README.txt" <<EOF
+        Paperboat update candidate $RELEASE_VERSION
+        Source commit: $PRODUCT_SOURCE_COMMIT
+        Release asset repository: $PAPERBOAT_GITHUB_REPOSITORY
+
+        Qualified product run: $PRODUCT_RUN_ID
+
+        This private artifact contains two product assets, their selected
+        TUF metadata, and product-pinned installer scripts rendered from the
+        verified target records. It was not published to GitHub Releases or the
+        TUF origin. The signed target URLs refer to immutable product assets in
+        the repository above. A later authorized publication must upload those
+        two products and activate the included origin bundle through the
+        existing publication validator.
+        EOF
+        tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/paperboat-update-candidate-recovery-$RELEASE_VERSION.tgz" paperboat-update-candidate
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: paperboat-update-candidate-recovery-2026.10.08.21
+        path: ${{ runner.temp }}/paperboat-update-candidate-recovery-2026.10.08.21.tgz
+        if-no-files-found: error
+        compression-level: 0
+        retention-days: 7
