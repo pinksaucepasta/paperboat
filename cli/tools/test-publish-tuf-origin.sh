@@ -624,6 +624,11 @@ EOF
 
   expected="$temporary/expected"
   cp -R "$candidate" "$expected"
+  mkdir -p "$selfhost/versions/2026.09.30.32"
+  cp "$selfhost/install" "$selfhost/versions/2026.09.30.32/install"
+  cp "$selfhost/manifest.json" "$selfhost/versions/2026.09.30.32/manifest.json"
+  printf 'existing package bytes\n' > "$selfhost/versions/2026.09.30.32/paperboat-selfhost-linux-amd64.tar.gz"
+  before=$(snapshot)
   cp -R "$selfhost" "$expected/selfhost"
   rm -f "$expected/current.json"
   expected_candidate=$(snapshot_directory "$expected")

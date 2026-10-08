@@ -378,6 +378,10 @@ for release in releases:
         if entry.name in {"paperboat-selfhost-linux-amd64.tar.gz", "paperboat-selfhost-linux-arm64.tar.gz"}:
             regular(entry, 512 << 20)
             packages += 1
+        elif entry.name == "install":
+            regular(entry, 1 << 20)
+        elif entry.name == "manifest.json":
+            regular(entry, 64 << 10)
         else:
             reject("unexpected version entry")
     if packages == 0:
