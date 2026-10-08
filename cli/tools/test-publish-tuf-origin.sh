@@ -337,6 +337,9 @@ live_version=2026.08.22.9
 write_current_manifest "$temporary/live-current.json" "$live_version"
 write_matching_targets_metadata "$temporary/live-current.json" "$release_root/current/tuf/metadata/targets.json"
 cp "$release_root/current/tuf/metadata/targets.json" "$temporary/live-targets.json"
+mkdir -p "$release_root/current/selfhost"
+printf '#!/bin/sh\nexisting selfhost installer\n' > "$release_root/current/selfhost/install"
+printf '{"existing":"opaque selfhost publication metadata"}\n' > "$release_root/current/selfhost/manifest.json"
 before=$(snapshot)
 
 if run_test_publisher "$temporary/missing.tgz" "$release_root" 2026.08.22.23 "$(printf x | run_checksum "$checksum_backend" | awk '{print $1}')" >/dev/null 2>&1; then
@@ -595,8 +598,33 @@ exit 0
 EOF
   chmod 0700 "$temporary/bin/docker" "$temporary/bin/chown"
 
+  # The CLI publisher preserves the separately owned selfhost distribution;
+  # malformed live trees fail before exchange and leave every live byte intact.
+  selfhost="$release_root/current/selfhost"
+  for invalid in symlink special unexpected oversized; do
+    case "$invalid" in
+      symlink) ln -s "$selfhost/manifest.json" "$selfhost/versions" ;;
+      special) mv "$selfhost/install" "$temporary/selfhost-install"; mkfifo "$selfhost/install" ;;
+      unexpected) printf invalid > "$selfhost/unknown" ;;
+      oversized) mv "$selfhost/manifest.json" "$temporary/selfhost-manifest"; truncate -s 65537 "$selfhost/manifest.json" ;;
+    esac
+    if PATH="$temporary/bin:$PATH" PAPERBOAT_TEST_DOCKER_MODE=good PAPERBOAT_TEST_RELEASE_ROOT="$release_root" run_test_publisher "$bundle" "$release_root" "$candidate_version" "$digest" >"$temporary/selfhost-rejection" 2>&1; then
+      echo "publisher accepted unsafe selfhost distribution: $invalid" >&2
+      exit 1
+    fi
+    grep -q 'live selfhost distribution is unsafe' "$temporary/selfhost-rejection"
+    case "$invalid" in
+      symlink) rm "$selfhost/versions" ;;
+      special) rm "$selfhost/install"; mv "$temporary/selfhost-install" "$selfhost/install" ;;
+      unexpected) rm "$selfhost/unknown" ;;
+      oversized) rm "$selfhost/manifest.json"; mv "$temporary/selfhost-manifest" "$selfhost/manifest.json" ;;
+    esac
+    test "$before" = "$(snapshot)"
+  done
+
   expected="$temporary/expected"
   cp -R "$candidate" "$expected"
+  cp -R "$selfhost" "$expected/selfhost"
   rm -f "$expected/current.json"
   expected_candidate=$(snapshot_directory "$expected")
   PATH="$temporary/bin:$PATH" PAPERBOAT_TEST_DOCKER_MODE=good PAPERBOAT_TEST_RELEASE_ROOT="$release_root" run_test_publisher "$bundle" "$release_root" "$candidate_version" "$digest"

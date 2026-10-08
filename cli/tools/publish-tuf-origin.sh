@@ -323,12 +323,98 @@ for directory in "$next/tuf/metadata" "$next/tuf/targets"; do
 done
 [[ -z "$(find "$next/tuf/targets" -mindepth 1 -print -quit)" ]] || { echo "release bundle must not contain TUF target blobs" >&2; exit 1; }
 
+# Selfhost has a separate release owner. Carry its existing public distribution
+# through this CLI metadata/installer transaction instead of deleting its routes.
+python3 - "$live/selfhost" "$next/selfhost" <<'PY'
+import os
+import pathlib
+import re
+import stat
+import sys
+
+source, destination = map(pathlib.Path, sys.argv[1:])
+if not source.exists() and not source.is_symlink():
+    raise SystemExit(0)
+files = []
+total = 0
+
+def reject(message):
+    raise SystemExit("live selfhost distribution is unsafe: " + message)
+
+def directory(path):
+    if not stat.S_ISDIR(path.lstat().st_mode):
+        reject("non-directory or symlink")
+
+def regular(path, limit):
+    global total
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= limit:
+        reject("non-regular, empty, or oversized file")
+    total += info.st_size
+    if total > 2 << 30:
+        reject("distribution exceeds 2 GiB preservation bound")
+    files.append((path, info))
+
+directory(source)
+entries = {p.name for p in source.iterdir()}
+if not {"install", "manifest.json"} <= entries or entries - {"install", "manifest.json", "versions"}:
+    reject("unexpected top-level entry")
+regular(source / "install", 1 << 20)
+regular(source / "manifest.json", 64 << 10)
+versions = source / "versions"
+releases = []
+if "versions" in entries:
+    directory(versions)
+    releases = list(versions.iterdir())
+if len(releases) > 32:
+    reject("version count exceeds preservation bound")
+for release in releases:
+    if re.fullmatch(r"[0-9.]{1,128}", release.name) is None:
+        reject("unexpected version path")
+    directory(release)
+    entries = list(release.iterdir())
+    packages = 0
+    for entry in entries:
+        if entry.name in {"paperboat-selfhost-linux-amd64.tar.gz", "paperboat-selfhost-linux-arm64.tar.gz"}:
+            regular(entry, 512 << 20)
+            packages += 1
+        else:
+            reject("unexpected version entry")
+    if packages == 0:
+        reject("version has no package")
+
+# Validate before copying; O_NOFOLLOW and a stable open-file identity also
+# prevent a file replacement from being followed during the copy.
+for path, expected in files:
+    target = destination / path.relative_to(source)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as input_file:
+        actual = os.fstat(input_file.fileno())
+        if not stat.S_ISREG(actual.st_mode) or (actual.st_dev, actual.st_ino, actual.st_size, actual.st_mtime_ns) != (expected.st_dev, expected.st_ino, expected.st_size, expected.st_mtime_ns):
+            reject("file changed before preservation")
+        with target.open("xb") as output_file:
+            remaining = actual.st_size
+            while remaining:
+                block = input_file.read(min(remaining, 1 << 20))
+                if not block:
+                    reject("file truncated during preservation")
+                output_file.write(block)
+                remaining -= len(block)
+            if input_file.read(1):
+                reject("file grew during preservation")
+        after = os.fstat(input_file.fileno())
+        if (after.st_size, after.st_mtime_ns) != (actual.st_size, actual.st_mtime_ns) or target.stat().st_size != actual.st_size:
+            reject("file changed during preservation")
+    target.chmod(stat.S_IMODE(expected.st_mode) & 0o755)
+PY
+
 chown -R 501:root "$next"
 chmod 0700 "$next"
 verify_live_mount_contract "$release_root"
 
 # This must remain the final command. The server resolves current through the
 # releases-parent mount on every request, so the exchange exposes TUF,
-# installers together. The old tree stays in transaction/next
+# installers and the preserved selfhost distribution together. The old tree stays in transaction/next
 # until a later release performs its pre-activation cleanup.
 atomic_exchange "$live" "$next"
