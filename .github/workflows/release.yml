@@ -1,792 +1,148 @@
-name: Update candidate
+name: Qualify exact Windows release assets
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: Shared release version in YYYY.MM.DD.N format for all platforms
-        required: true
-        default: '2026.10.08.32'
-        type: string
-      expected_source_sha:
-        description: Reviewed source commit SHA; must match the checked out GITHUB_SHA exactly
+        description: Canonical candidate version
         required: true
         type: string
-      supervisor_maintenance:
-        description: Whether this release updates stable supervisor components
+      release_id:
+        description: Exact draft release ID
         required: true
-        default: false
-        type: boolean
-
-run-name: Update candidate ${{ inputs.version }}
-
-concurrency:
-  group: paperboat-release-${{ github.repository }}
-  cancel-in-progress: false
+        type: string
+      source_commit:
+        description: Frozen source SHA recorded in the candidate manifest
+        required: true
+        type: string
+      windows_amd64_asset_id:
+        required: true
+        type: string
+      windows_amd64_sha256:
+        required: true
+        type: string
+      windows_amd64_length:
+        required: true
+        type: string
+      windows_arm64_asset_id:
+        required: true
+        type: string
+      windows_arm64_sha256:
+        required: true
+        type: string
+      windows_arm64_length:
+        required: true
+        type: string
 
 permissions:
-  contents: read
-
-env:
-  RELEASE_VERSION: ${{ inputs.version }}
-  SUPERVISOR_MAINTENANCE: ${{ inputs.supervisor_maintenance }}
-  SENTRY_DSN: ${{ vars.SENTRY_DSN }}
-  # Preserve the repository identity already signed into production TUF.
-  # GitHub redirects this alias to the canonical repository.
-  PAPERBOAT_GITHUB_REPOSITORY: pinksaucepasta/paperboat-cli
-
-defaults:
-  run:
-    working-directory: cli
+  contents: write
 
 jobs:
-  release-authority:
-    name: Validate trusted source and read-only origin access
-    runs-on: ubuntu-24.04-arm
+  qualify-windows:
+    name: Qualify exact Windows ${{ matrix.architecture }} asset
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 8
-    environment: paperboat-tuf-published
-    permissions:
-      contents: read
-    outputs:
-      server_url: ${{ steps.endpoints.outputs.server_url }}
-      release_url: ${{ steps.endpoints.outputs.release_url }}
-      release_host: ${{ steps.endpoints.outputs.release_host }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: amd64
+            native_architecture: X64
+            runner: windows-2025
+            asset_id: ${{ inputs.windows_amd64_asset_id }}
+            sha256: ${{ inputs.windows_amd64_sha256 }}
+            length: ${{ inputs.windows_amd64_length }}
+          - architecture: arm64
+            native_architecture: Arm64
+            runner: windows-11-arm
+            asset_id: ${{ inputs.windows_arm64_asset_id }}
+            sha256: ${{ inputs.windows_arm64_sha256 }}
+            length: ${{ inputs.windows_arm64_length }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-      - name: Require the reviewed source commit
+      - name: Verify exact draft asset and execute native version smoke
+        shell: pwsh
         env:
-          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ ! "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
-            echo 'expected_source_sha must be exactly 40 hexadecimal characters.' >&2
-            exit 1
-          fi
-          if [[ "${EXPECTED_SOURCE_SHA,,}" != "${GITHUB_SHA,,}" ]]; then
-            echo 'The selected workflow source does not match expected_source_sha.' >&2
-            exit 1
-          fi
-      - name: Validate version and ensure the target release slot is unused
-        env:
-          ASSET_REPOSITORY: ${{ env.PAPERBOAT_GITHUB_REPOSITORY }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./tools/release-version.sh validate-format "$RELEASE_VERSION"
-          python3 - "$ASSET_REPOSITORY" "$RELEASE_VERSION" <<'PY'
-          import sys
-          import urllib.error
-          import urllib.request
-
-          repository, version = sys.argv[1:]
-          for kind, path in (
-              ("release", f"releases/tags/{version}"),
-              ("tag", f"git/ref/tags/{version}"),
-          ):
-              request = urllib.request.Request(
-                  f"https://api.github.com/repos/{repository}/{path}",
-                  headers={"User-Agent": "Paperboat-update-candidate"},
-              )
-              try:
-                  with urllib.request.urlopen(request, timeout=10):
-                      raise SystemExit(f"candidate {kind} already exists in the asset repository")
-              except urllib.error.HTTPError as error:
-                  if error.code != 404:
-                      raise SystemExit(f"cannot verify candidate {kind} slot (HTTP {error.code})")
-          PY
-      - name: Validate protected release endpoints
-        id: endpoints
-        env:
-          SERVER_URL: ${{ vars.PAPERBOAT_DEFAULT_SERVER_URL }}
-          RELEASE_URL: ${{ vars.PAPERBOAT_DEFAULT_RELEASE_URL }}
-          RELEASE_HOST: ${{ vars.PAPERBOAT_RELEASE_HOST }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import os
-          from urllib.parse import urlsplit
-
-          def endpoint(name, value, path=None):
-              if not value or value != value.strip() or any(c.isspace() for c in value):
-                  raise SystemExit(f'{name} is required and must not contain whitespace')
-              parsed = urlsplit(value)
-              if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.port not in (None, 443):
-                  raise SystemExit(f'{name} must be an HTTPS URL without credentials, query, fragment, or non-default port')
-              if path is not None and parsed.path != path:
-                  raise SystemExit(f'{name} must use the exact {path} path')
-              if path is None and parsed.path not in ('', '/'):
-                  raise SystemExit(f'{name} must be an HTTPS origin without a path')
-              return f'https://{parsed.hostname.lower()}{path or ""}'
-
-          server = endpoint('PAPERBOAT_DEFAULT_SERVER_URL', os.environ.get('SERVER_URL', ''))
-          release = endpoint('PAPERBOAT_DEFAULT_RELEASE_URL', os.environ.get('RELEASE_URL', ''), '/tuf')
-          host = os.environ.get('RELEASE_HOST', '')
-          if not host or host != host.strip() or any(c.isspace() for c in host) or '/' in host or ':' in host:
-              raise SystemExit('PAPERBOAT_RELEASE_HOST must be a canonical SSH host name or IPv4 address')
-          print(f'server_url={server}')
-          print(f'release_url={release}')
-          print(f'release_host={host}')
-          PY
-      - name: Configure protected origin read identity
-        env:
-          PAPERBOAT_RELEASE_SSH_KEY: ${{ secrets.PAPERBOAT_RELEASE_SSH_KEY }}
-          PAPERBOAT_RELEASE_KNOWN_HOSTS: ${{ secrets.PAPERBOAT_RELEASE_KNOWN_HOSTS }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$PAPERBOAT_RELEASE_SSH_KEY" || { echo 'PAPERBOAT_RELEASE_SSH_KEY is required' >&2; exit 1; }
-          test -n "$PAPERBOAT_RELEASE_KNOWN_HOSTS" || { echo 'PAPERBOAT_RELEASE_KNOWN_HOSTS is required' >&2; exit 1; }
-          install -d -m 0700 "$HOME/.ssh"
-          printf '%s\n' "$PAPERBOAT_RELEASE_SSH_KEY" > "$HOME/.ssh/paperboat-release"
-          printf '%s\n' "$PAPERBOAT_RELEASE_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
-          chmod 0600 "$HOME/.ssh/paperboat-release" "$HOME/.ssh/known_hosts"
-      - name: Verify production metadata origin is readable
-        env:
-          RELEASE_HOST: ${{ steps.endpoints.outputs.release_host }}
-          RELEASE_URL: ${{ steps.endpoints.outputs.release_url }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          ssh -i "$HOME/.ssh/paperboat-release" -o BatchMode=yes -o StrictHostKeyChecking=yes "root@$RELEASE_HOST" 'bash -s' <<'REMOTE'
-          set -euo pipefail
-          root=/opt/paperboat/releases
-          test -d "$root" && test ! -L "$root"
-          test -d "$root/current" && test ! -L "$root/current"
-          test -d "$root/current/tuf/metadata" && test ! -L "$root/current/tuf/metadata"
-          REMOTE
-          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
-            --connect-timeout 5 --max-time 15 --max-filesize 1048576 \
-            "$RELEASE_URL/metadata/root.json" -o "$RUNNER_TEMP/paperboat-root.json"
-
-  linux-amd64:
-    name: Build Linux amd64 executable
-    needs: release-authority
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    environment: paperboat-tuf-published
-    permissions:
-      contents: read
-    env:
-      DEFAULT_SERVER_URL: ${{ needs.release-authority.outputs.server_url }}
-      DEFAULT_RELEASE_URL: ${{ needs.release-authority.outputs.release_url }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: cli/go.mod
-          cache: true
-          cache-dependency-path: cli/go.sum
-      - name: Build official Linux amd64 package
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./tools/build-release-asset.sh \
-            --platform linux \
-            --architecture amd64 \
-            --output dist/pb-linux-amd64 \
-            --version "$RELEASE_VERSION" \
-            --server-url "$DEFAULT_SERVER_URL" \
-            --release-url "$DEFAULT_RELEASE_URL"
-      - name: Smoke test Linux package
-        shell: bash
-        run: |
-          set -euo pipefail
-          asset=dist/pb-linux-amd64
-          file "$asset" | grep -E 'ELF|executable'
-          if ! version_output=$("$asset" --version); then
-            echo "Linux candidate failed its version smoke test: $asset" >&2
-            exit 1
-          fi
-          version_line=$(printf '%s\n' "$version_output" | grep -Eo 'Version[[:space:]]+[0-9A-Za-z._-]+' | tail -n 1 || true)
-          if [ "$version_line" != "Version $RELEASE_VERSION" ]; then
-            echo "Linux candidate reported an unexpected version: ${version_line:-<missing>} (want $RELEASE_VERSION)" >&2
-            exit 1
-          fi
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: paperboat-candidate-product-linux-amd64
-          path: cli/dist/pb-linux-amd64
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
-
-  windows-amd64:
-    name: Build and natively qualify Windows amd64 executable
-    needs: release-authority
-    runs-on: windows-2025
-    timeout-minutes: 20
-    environment: paperboat-tuf-published
-    permissions:
-      contents: read
-    env:
-      DEFAULT_SERVER_URL: ${{ needs.release-authority.outputs.server_url }}
-      DEFAULT_RELEASE_URL: ${{ needs.release-authority.outputs.release_url }}
-      PAPERBOAT_WINDOWS_SIGNING_PFX_B64: ${{ secrets.PAPERBOAT_WINDOWS_SIGNING_PFX_B64 }}
-      PAPERBOAT_WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.PAPERBOAT_WINDOWS_SIGNING_PFX_PASSWORD }}
-      PAPERBOAT_WINDOWS_PUBLISHER_SUBJECT: ${{ vars.PAPERBOAT_WINDOWS_PUBLISHER_SUBJECT }}
-      PAPERBOAT_WINDOWS_TIMESTAMP_URL: ${{ vars.PAPERBOAT_WINDOWS_TIMESTAMP_URL }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: cli/go.mod
-          cache: true
-          cache-dependency-path: cli/go.sum
-      - name: Build official Windows amd64 executable
-        shell: powershell
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ inputs.release_id }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+          WORKFLOW_COMMIT: ${{ github.sha }}
+          ASSET_ID: ${{ matrix.asset_id }}
+          EXPECTED_SHA256: ${{ matrix.sha256 }}
+          EXPECTED_LENGTH: ${{ matrix.length }}
+          TARGET_ARCHITECTURE: ${{ matrix.architecture }}
+          NATIVE_ARCHITECTURE: ${{ matrix.native_architecture }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $output = Join-Path $env:GITHUB_WORKSPACE 'cli\dist\pb-windows-amd64.exe'
-          New-Item -ItemType Directory -Force -Path (Split-Path -Parent $output) | Out-Null
-          $env:CGO_ENABLED = '0'
-          $env:GOOS = 'windows'
-          $env:GOARCH = 'amd64'
-          if ($env:SENTRY_DSN -cnotmatch '\Ahttps://[A-Za-z0-9]+@[A-Za-z0-9.-]+(:[0-9]+)?/[0-9]+\z') { throw 'Official candidate requires a valid HTTPS SENTRY_DSN.' }
-          $ldflags = "-s -w -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryDSN=$env:SENTRY_DSN -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryRelease=paperboat:$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Distribution=official -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=$env:GITHUB_SHA -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=$env:DEFAULT_SERVER_URL -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=$env:DEFAULT_RELEASE_URL"
-          & go build -buildvcs=false -trimpath -ldflags $ldflags -o $output ./cmd/pb
-          if ($LASTEXITCODE -ne 0) { throw 'Unified Windows candidate build failed.' }
-      - name: Authenticode sign when release certificate is configured
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          & ./packaging/windows/scripts/sign-and-verify.ps1 `
-            -Path (Join-Path $env:GITHUB_WORKSPACE 'cli\dist\pb-windows-amd64.exe') `
-            -Architecture 'amd64' `
-            -Description 'Paperboat unified executable'
-          if ($LASTEXITCODE -ne 0) { throw 'Windows executable signing failed.' }
-      - name: Smoke test Windows package
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $output = Join-Path $env:GITHUB_WORKSPACE 'cli\dist\pb-windows-amd64.exe'
-          if (-not (Test-Path -LiteralPath $output -PathType Leaf)) { throw 'Windows candidate is missing.' }
-          $versionOutput = (& $output --version 2>&1 | Out-String)
-          $exitCode = $LASTEXITCODE
-          if ($exitCode -ne 0) { throw 'Windows candidate failed its version smoke test.' }
-          $versionMatches = [regex]::Matches($versionOutput, 'Version[\t ]+[0-9A-Za-z._-]+')
-          $expectedVersionLine = "Version $env:RELEASE_VERSION"
-          if ($versionMatches.Count -ne 1 -or $versionMatches[0].Value -ne $expectedVersionLine) {
-            throw "Windows candidate reported an unexpected version (want $env:RELEASE_VERSION): $versionOutput"
+          $ProgressPreference = 'SilentlyContinue'
+          if ($env:RELEASE_VERSION -cnotmatch '\A[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]+\z') { throw 'Invalid canonical release version.' }
+          if ($env:SOURCE_COMMIT -cnotmatch '\A[0-9a-f]{40}\z') { throw 'Invalid frozen source SHA.' }
+          if ($env:ASSET_ID -cnotmatch '\A[1-9][0-9]*\z') { throw 'Invalid draft asset ID.' }
+          if ($env:EXPECTED_SHA256 -cnotmatch '\A[0-9a-f]{64}\z') { throw 'Invalid expected asset SHA256.' }
+          if ($env:EXPECTED_LENGTH -cnotmatch '\A[1-9][0-9]*\z') { throw 'Invalid expected asset length.' }
+          $osArch = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+          if ($osArch -cne $env:NATIVE_ARCHITECTURE) { throw 'Runner is not native for the selected architecture.' }
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
           }
-      - name: Record native Windows qualification handoff
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $qualification = [ordered]@{
-            schema = 'paperboat.windows-native-qualification/v1'
-            release_version = $env:RELEASE_VERSION
-            platform = 'windows'
-            architecture = 'amd64'
-            status = 'passed'
-            native_tested = $true
-            windows_build = [Environment]::OSVersion.Version.Build.ToString()
-            runner = if ($env:RUNNER_NAME) { $env:RUNNER_NAME } else { 'windows-2025' }
+          $apiRoot = 'https://api.github.com/repos/pinksaucepasta/paperboat'
+          if ($env:SOURCE_COMMIT -cne $env:WORKFLOW_COMMIT) {
+            $comparison = Invoke-RestMethod -Uri "$apiRoot/compare/$env:SOURCE_COMMIT...$env:WORKFLOW_COMMIT" -Headers $headers
+            if ($comparison.status -cne 'ahead' -or @($comparison.files).Count -ne 1 -or $comparison.files[0].filename -cne '.github/workflows/release.yml') { throw 'Qualification branch changes product source.' }
           }
-          $qualificationPath = Join-Path $env:RUNNER_TEMP 'windows-amd64-native-qualification.json'
-          $json = $qualification | ConvertTo-Json -Compress
-          [IO.File]::WriteAllText($qualificationPath, $json, (New-Object Text.UTF8Encoding($false)))
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: paperboat-candidate-product-windows-amd64
-          path: cli/dist/pb-windows-amd64.exe
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: paperboat-candidate-windows-amd64-qualification
-          path: ${{ runner.temp }}/windows-amd64-native-qualification.json
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
-
-  linux-arm64:
-    name: Build Linux arm64 executable
-    needs: release-authority
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 20
-    environment: paperboat-tuf-published
-    permissions:
-      contents: read
-    env:
-      DEFAULT_SERVER_URL: ${{ needs.release-authority.outputs.server_url }}
-      DEFAULT_RELEASE_URL: ${{ needs.release-authority.outputs.release_url }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: cli/go.mod
-          cache: true
-          cache-dependency-path: cli/go.sum
-      - name: Build official Linux arm64 package
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./tools/build-release-asset.sh \
-            --platform linux \
-            --architecture arm64 \
-            --output dist/pb-linux-arm64 \
-            --version "$RELEASE_VERSION" \
-            --server-url "$DEFAULT_SERVER_URL" \
-            --release-url "$DEFAULT_RELEASE_URL"
-      - name: Smoke test Linux package
-        shell: bash
-        run: |
-          set -euo pipefail
-          asset=dist/pb-linux-arm64
-          file "$asset" | grep -E 'ELF|executable'
-          if ! version_output=$("$asset" --version); then
-            echo "Linux candidate failed its version smoke test: $asset" >&2
-            exit 1
-          fi
-          version_line=$(printf '%s\n' "$version_output" | grep -Eo 'Version[[:space:]]+[0-9A-Za-z._-]+' | tail -n 1 || true)
-          if [ "$version_line" != "Version $RELEASE_VERSION" ]; then
-            echo "Linux candidate reported an unexpected version: ${version_line:-<missing>} (want $RELEASE_VERSION)" >&2
-            exit 1
-          fi
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: paperboat-candidate-product-linux-arm64
-          path: cli/dist/pb-linux-arm64
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
-
-  windows-arm64:
-    name: Build and natively qualify Windows arm64 executable
-    needs: release-authority
-    runs-on: windows-11-arm
-    timeout-minutes: 20
-    environment: paperboat-tuf-published
-    permissions:
-      contents: read
-    env:
-      DEFAULT_SERVER_URL: ${{ needs.release-authority.outputs.server_url }}
-      DEFAULT_RELEASE_URL: ${{ needs.release-authority.outputs.release_url }}
-      PAPERBOAT_WINDOWS_SIGNING_PFX_B64: ${{ secrets.PAPERBOAT_WINDOWS_SIGNING_PFX_B64 }}
-      PAPERBOAT_WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.PAPERBOAT_WINDOWS_SIGNING_PFX_PASSWORD }}
-      PAPERBOAT_WINDOWS_PUBLISHER_SUBJECT: ${{ vars.PAPERBOAT_WINDOWS_PUBLISHER_SUBJECT }}
-      PAPERBOAT_WINDOWS_TIMESTAMP_URL: ${{ vars.PAPERBOAT_WINDOWS_TIMESTAMP_URL }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: cli/go.mod
-          cache: true
-          cache-dependency-path: cli/go.sum
-      - name: Build official Windows arm64 executable
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $output = Join-Path $env:GITHUB_WORKSPACE 'cli\dist\pb-windows-arm64.exe'
-          New-Item -ItemType Directory -Force -Path (Split-Path -Parent $output) | Out-Null
-          $env:CGO_ENABLED = '0'
-          $env:GOOS = 'windows'
-          $env:GOARCH = 'arm64'
-          if ($env:SENTRY_DSN -cnotmatch '\Ahttps://[A-Za-z0-9]+@[A-Za-z0-9.-]+(:[0-9]+)?/[0-9]+\z') { throw 'Official candidate requires a valid HTTPS SENTRY_DSN.' }
-          $ldflags = "-s -w -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryDSN=$env:SENTRY_DSN -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryRelease=paperboat:$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Distribution=official -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=$env:GITHUB_SHA -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=$env:DEFAULT_SERVER_URL -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=$env:DEFAULT_RELEASE_URL"
-          & go build -buildvcs=false -trimpath -ldflags $ldflags -o $output ./cmd/pb
-          if ($LASTEXITCODE -ne 0) { throw 'Unified Windows candidate build failed.' }
-      - name: Authenticode sign when release certificate is configured
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          & ./packaging/windows/scripts/sign-and-verify.ps1 `
-            -Path (Join-Path $env:GITHUB_WORKSPACE 'cli\dist\pb-windows-arm64.exe') `
-            -Architecture 'arm64' `
-            -Description 'Paperboat unified executable'
-          if ($LASTEXITCODE -ne 0) { throw 'Windows executable signing failed.' }
-      - name: Smoke test Windows package
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $output = Join-Path $env:GITHUB_WORKSPACE 'cli\dist\pb-windows-arm64.exe'
-          if (-not (Test-Path -LiteralPath $output -PathType Leaf)) { throw 'Windows candidate is missing.' }
-          $versionOutput = (& $output --version 2>&1 | Out-String)
-          $exitCode = $LASTEXITCODE
-          if ($exitCode -ne 0) { throw 'Windows candidate failed its version smoke test.' }
-          $versionMatches = [regex]::Matches($versionOutput, 'Version[\t ]+[0-9A-Za-z._-]+')
-          $expectedVersionLine = "Version $env:RELEASE_VERSION"
-          if ($versionMatches.Count -ne 1 -or $versionMatches[0].Value -ne $expectedVersionLine) {
-            throw "Windows candidate reported an unexpected version (want $env:RELEASE_VERSION): $versionOutput"
+          if ($env:RELEASE_ID -cnotmatch '\A[1-9][0-9]*\z') { throw 'Invalid exact draft release ID.' }
+          $source = Invoke-RestMethod -Uri "$apiRoot/commits/$env:SOURCE_COMMIT" -Headers $headers
+          if ($source.sha -cne $env:SOURCE_COMMIT) { throw 'Frozen source commit is unavailable in the release repository.' }
+          $release = Invoke-RestMethod -Uri "$apiRoot/releases/$env:RELEASE_ID" -Headers $headers
+          if ($release.tag_name -cne $env:RELEASE_VERSION -or -not $release.draft) { throw 'Candidate must be the exact unpublished draft release.' }
+          $name = "pb-windows-$env:TARGET_ARCHITECTURE.exe"
+          $assets = @($release.assets | Where-Object { [string]$_.id -ceq $env:ASSET_ID -and $_.name -ceq $name })
+          if ($assets.Count -ne 1 -or [long]$assets[0].size -ne [long]$env:EXPECTED_LENGTH) { throw 'Draft asset identity or length does not match the frozen candidate.' }
+          $asset = Join-Path $env:RUNNER_TEMP $name
+          try {
+            $binaryHeaders = $headers.Clone()
+            $binaryHeaders.Accept = 'application/octet-stream'
+            Invoke-WebRequest -Uri "$apiRoot/releases/assets/$env:ASSET_ID" -Headers $binaryHeaders -OutFile $asset
+            if ((Get-Item -LiteralPath $asset).Length -ne [long]$env:EXPECTED_LENGTH) { throw 'Downloaded candidate length mismatch.' }
+            $actualSha = (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualSha -cne $env:EXPECTED_SHA256) { throw 'Downloaded candidate SHA256 mismatch.' }
+            # PE machine identity prevents an emulated x64 binary from qualifying ARM64.
+            $bytes = [IO.File]::ReadAllBytes($asset)
+            if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x4d -or $bytes[1] -ne 0x5a) { throw 'Candidate is not a PE executable.' }
+            $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+            if ($peOffset -lt 64 -or $peOffset -gt ($bytes.Length - 6)) { throw 'Candidate PE header is invalid.' }
+            if ([BitConverter]::ToUInt32($bytes, $peOffset) -ne 0x00004550) { throw 'Candidate PE signature is invalid.' }
+            $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+            $expectedMachine = if ($env:TARGET_ARCHITECTURE -ceq 'arm64') { 0xaa64 } else { 0x8664 }
+            if ($machine -ne $expectedMachine) { throw 'Candidate PE architecture mismatch.' }
+            $bytes = $null
+            Remove-Item Env:GH_TOKEN -ErrorAction SilentlyContinue
+            $versionOutput = (& $asset --version 2>&1 | Out-String)
+            if ($LASTEXITCODE -ne 0) { throw 'Native candidate version smoke failed.' }
+            $versionMatches = [regex]::Matches($versionOutput, 'Version[\t ]+[0-9A-Za-z._-]+')
+            if ($versionMatches.Count -ne 1 -or $versionMatches[0].Value -cne "Version $env:RELEASE_VERSION") { throw 'Native candidate reported the wrong version.' }
+            $qualification = [ordered]@{
+              schema = 'paperboat.windows-native-qualification/v1'
+              release_version = $env:RELEASE_VERSION
+              platform = 'windows'
+              architecture = $env:TARGET_ARCHITECTURE
+              status = 'passed'
+              native_tested = $true
+              windows_build = [Environment]::OSVersion.Version.Build.ToString()
+              runner = $env:RUNNER_NAME
+            }
+            $evidence = Join-Path $env:RUNNER_TEMP "windows-$env:TARGET_ARCHITECTURE-native-qualification.json"
+            [IO.File]::WriteAllText($evidence, ($qualification | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
+            Write-Output "Native package smoke passed: $name version=$env:RELEASE_VERSION sha256=$actualSha length=$env:EXPECTED_LENGTH source=$env:SOURCE_COMMIT"
+          } finally {
+            Remove-Item -LiteralPath $asset -Force -ErrorAction SilentlyContinue
           }
-      - name: Record native Windows qualification handoff
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $qualification = [ordered]@{
-            schema = 'paperboat.windows-native-qualification/v1'
-            release_version = $env:RELEASE_VERSION
-            platform = 'windows'
-            architecture = 'arm64'
-            status = 'passed'
-            native_tested = $true
-            windows_build = [Environment]::OSVersion.Version.Build.ToString()
-            runner = if ($env:RUNNER_NAME) { $env:RUNNER_NAME } else { 'windows-11-arm' }
-          }
-          $qualificationPath = Join-Path $env:RUNNER_TEMP 'windows-arm64-native-qualification.json'
-          $json = $qualification | ConvertTo-Json -Compress
-          [IO.File]::WriteAllText($qualificationPath, $json, (New-Object Text.UTF8Encoding($false)))
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - name: Upload native qualification evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: paperboat-candidate-product-windows-arm64
-          path: cli/dist/pb-windows-arm64.exe
+          name: qualification-windows-${{ matrix.architecture }}
+          path: ${{ runner.temp }}/windows-${{ matrix.architecture }}-native-qualification.json
           if-no-files-found: error
-          compression-level: 0
           retention-days: 7
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: paperboat-candidate-windows-arm64-qualification
-          path: ${{ runner.temp }}/windows-arm64-native-qualification.json
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
-
-  darwin-arm64:
-    name: Build macOS arm64 package
-    needs: release-authority
-    runs-on: macos-14
-    timeout-minutes: 30
-    environment: paperboat-tuf-published
-    permissions:
-      contents: read
-    env:
-      DEFAULT_SERVER_URL: ${{ needs.release-authority.outputs.server_url }}
-      DEFAULT_RELEASE_URL: ${{ needs.release-authority.outputs.release_url }}
-      APPLE_INSTALLER_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_P12_BASE64 }}
-      APPLE_INSTALLER_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_PASSWORD }}
-      APPLE_INSTALLER_SIGNING_IDENTITY: ${{ secrets.APPLE_INSTALLER_SIGNING_IDENTITY }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: cli/go.mod
-          cache: true
-          cache-dependency-path: cli/go.sum
-      - name: Import Developer ID Installer certificate
-        if: ${{ env.APPLE_INSTALLER_CERTIFICATE_P12_BASE64 != '' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          for name in APPLE_INSTALLER_CERTIFICATE_PASSWORD APPLE_INSTALLER_SIGNING_IDENTITY; do
-            test -n "${!name}" || { echo "$name is required when an Apple installer certificate is configured" >&2; exit 1; }
-          done
-          keychain="$RUNNER_TEMP/paperboat-release.keychain-db"
-          password="$(uuidgen)"
-          certificate="$RUNNER_TEMP/paperboat-installer.p12"
-          printf '%s' "$APPLE_INSTALLER_CERTIFICATE_P12_BASE64" | base64 --decode > "$certificate" 2>/dev/null || printf '%s' "$APPLE_INSTALLER_CERTIFICATE_P12_BASE64" | base64 -D > "$certificate"
-          security create-keychain -p "$password" "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p "$password" "$keychain"
-          security import "$certificate" -P "$APPLE_INSTALLER_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain"
-          security list-keychains -d user -s "$keychain" login.keychain-db
-          security default-keychain -s "$keychain"
-      - name: Build and package official macOS arm64 executable
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./tools/build-release-asset.sh \
-            --platform darwin \
-            --architecture arm64 \
-            --output "$RUNNER_TEMP/pb-darwin-arm64" \
-            --version "$RELEASE_VERSION" \
-            --server-url "$DEFAULT_SERVER_URL" \
-            --release-url "$DEFAULT_RELEASE_URL"
-          mkdir -p dist
-          if [ -n "$APPLE_INSTALLER_SIGNING_IDENTITY" ]; then
-            ./tools/build-macos-pkg.sh \
-              --binary "$RUNNER_TEMP/pb-darwin-arm64" \
-              --output dist/pb-darwin-arm64.pkg \
-              --version "$RELEASE_VERSION" \
-              --signing-identity "$APPLE_INSTALLER_SIGNING_IDENTITY"
-          else
-            ./tools/build-macos-pkg.sh \
-              --binary "$RUNNER_TEMP/pb-darwin-arm64" \
-              --output dist/pb-darwin-arm64.pkg \
-              --version "$RELEASE_VERSION"
-          fi
-      - name: Smoke test macOS package
-        shell: bash
-        run: |
-          set -euo pipefail
-          binary="$RUNNER_TEMP/pb-darwin-arm64"
-          if ! version_output=$("$binary" --version); then
-            echo 'macOS candidate binary failed its version smoke test.' >&2
-            exit 1
-          fi
-          version_line=$(printf '%s\n' "$version_output" | grep -Eo 'Version[[:space:]]+[0-9A-Za-z._-]+' | tail -n 1 || true)
-          if [ "$version_line" != "Version $RELEASE_VERSION" ]; then
-            echo "macOS candidate binary reported an unexpected version: ${version_line:-<missing>} (want $RELEASE_VERSION)" >&2
-            exit 1
-          fi
-          expanded="$RUNNER_TEMP/pb-darwin-arm64-expanded"
-          pkgutil --expand dist/pb-darwin-arm64.pkg "$expanded"
-          package_version=$(sed -nE 's/.*<pkg-info[^>]* version="([^"]*)".*/\1/p' "$expanded/PackageInfo")
-          if [ "$package_version" != "$RELEASE_VERSION" ]; then
-            echo "macOS PKG reported an unexpected version: ${package_version:-<missing>} (want $RELEASE_VERSION)" >&2
-            exit 1
-          fi
-          payload_files=$(pkgutil --payload-files dist/pb-darwin-arm64.pkg)
-          for expected in \
-            './usr/local/bin/pb' \
-            './Library/PrivilegedHelperTools/Paperboat/bin/pb'; do
-            if ! printf '%s\n' "$payload_files" | grep -Fqx "$expected"; then
-              echo "macOS PKG is missing the unified runtime payload $expected" >&2
-              exit 1
-            fi
-          done
-          if printf '%s\n' "$payload_files" | grep -Eq '(^|/)(Application Support|LaunchDaemons)(/|$)|\.plist$'; then
-            echo 'macOS PKG must not publish updater state or service declarations' >&2
-            exit 1
-          fi
-      - name: Notarize and staple macOS PKG
-        if: ${{ env.APPLE_ID != '' && env.APPLE_TEAM_ID != '' && env.APPLE_APP_PASSWORD != '' && env.APPLE_INSTALLER_SIGNING_IDENTITY != '' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          xcrun notarytool submit dist/pb-darwin-arm64.pkg \
-            --apple-id "$APPLE_ID" \
-            --team-id "$APPLE_TEAM_ID" \
-            --password "$APPLE_APP_PASSWORD" \
-            --wait
-          xcrun stapler staple dist/pb-darwin-arm64.pkg
-          xcrun stapler validate dist/pb-darwin-arm64.pkg
-          pkgutil --check-signature dist/pb-darwin-arm64.pkg
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: paperboat-candidate-product-darwin-arm64
-          path: cli/dist/pb-darwin-arm64.pkg
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
-
-  candidate-metadata:
-    name: Sign candidate metadata with current TUF authority
-    needs: [release-authority, linux-amd64, linux-arm64, windows-amd64, windows-arm64, darwin-arm64]
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 35
-    environment: paperboat-tuf-published
-    permissions:
-      contents: read
-    env:
-      RELEASE_HOST: ${{ needs.release-authority.outputs.release_host }}
-      PAPERBOAT_TUF_CI: '1'
-      PAPERBOAT_TUF_KEY_TARGETS_1: ${{ secrets.PAPERBOAT_TUF_KEY_TARGETS_1 }}
-      PAPERBOAT_TUF_KEY_TARGETS_2: ${{ secrets.PAPERBOAT_TUF_KEY_TARGETS_2 }}
-      PAPERBOAT_TUF_KEY_SNAPSHOT_1: ${{ secrets.PAPERBOAT_TUF_KEY_SNAPSHOT_1 }}
-      PAPERBOAT_TUF_KEY_TIMESTAMP_2: ${{ secrets.PAPERBOAT_TUF_KEY_TIMESTAMP_2 }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: cli/go.mod
-          cache: true
-          cache-dependency-path: cli/go.sum
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: paperboat-candidate-product-*
-          path: ${{ runner.temp }}/candidate-artifacts
-          merge-multiple: true
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: paperboat-candidate-windows-amd64-qualification
-          path: ${{ runner.temp }}/candidate-qualification
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: paperboat-candidate-windows-arm64-qualification
-          path: ${{ runner.temp }}/candidate-qualification
-      - name: Validate the exact five-asset candidate set
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - "$RUNNER_TEMP/candidate-artifacts" <<'PY'
-          import pathlib
-          import sys
-
-          root = pathlib.Path(sys.argv[1])
-          entries = list(root.iterdir())
-          if any(not item.is_file() or item.is_symlink() for item in entries):
-              raise SystemExit("candidate artifact directory contains a non-regular entry")
-          expected = {
-              "pb-darwin-arm64.pkg",
-              "pb-linux-amd64",
-              "pb-linux-arm64",
-              "pb-windows-amd64.exe",
-              "pb-windows-arm64.exe",
-          }
-          actual = {item.name for item in entries}
-          if actual != expected:
-              raise SystemExit(f"candidate artifact set is {sorted(actual)}, expected {sorted(expected)}")
-          if any(not (root / name).is_file() or (root / name).is_symlink() or (root / name).stat().st_size == 0 for name in expected):
-              raise SystemExit("candidate contains a missing, empty, or unsafe package")
-          PY
-          test -s "$RUNNER_TEMP/candidate-qualification/windows-amd64-native-qualification.json"
-          test -s "$RUNNER_TEMP/candidate-qualification/windows-arm64-native-qualification.json"
-      - name: Build and validate the selected artifact manifest and deployment plan
-        shell: bash
-        run: |
-          set -euo pipefail
-          input_dir="$RUNNER_TEMP/paperboat-update-candidate-inputs"
-          mkdir -p "$input_dir"
-          go run ./tools/release-plan manifest \
-            -version "$RELEASE_VERSION" \
-            -source-commit "$GITHUB_SHA" \
-            -toolchain "$(go env GOVERSION)" \
-            -artifacts "$RUNNER_TEMP/candidate-artifacts" \
-            -output "$input_dir/manifest.json"
-          go run ./tools/release-plan plan \
-            -manifest "$input_dir/manifest.json" \
-            -policy-revision "$GITHUB_RUN_ID" \
-            -severity routine \
-            -cohort-seed "candidate-$RELEASE_VERSION" \
-            -output "$input_dir/deployment-plan.json"
-          # Dev acceptance release: make every supported platform wave eligible
-          # immediately while keeping the signed stability policy unchanged.
-          python3 - "$input_dir/deployment-plan.json" <<'PYPLAN'
-          import json
-          import pathlib
-          import sys
-          path = pathlib.Path(sys.argv[1])
-          plan = json.loads(path.read_text())
-          for cohort in plan["cohorts"]:
-              cohort["percentage"] = 100
-          path.write_text(json.dumps(plan, separators=(",", ":")) + "\n")
-          PYPLAN
-          go run ./tools/release-plan validate \
-            -manifest "$input_dir/manifest.json" \
-            -plan "$input_dir/deployment-plan.json" \
-            -artifacts "$RUNNER_TEMP/candidate-artifacts"
-      - name: Configure protected origin read identity
-        env:
-          PAPERBOAT_RELEASE_SSH_KEY: ${{ secrets.PAPERBOAT_RELEASE_SSH_KEY }}
-          PAPERBOAT_RELEASE_KNOWN_HOSTS: ${{ secrets.PAPERBOAT_RELEASE_KNOWN_HOSTS }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$PAPERBOAT_RELEASE_SSH_KEY" || { echo 'PAPERBOAT_RELEASE_SSH_KEY is required' >&2; exit 1; }
-          test -n "$PAPERBOAT_RELEASE_KNOWN_HOSTS" || { echo 'PAPERBOAT_RELEASE_KNOWN_HOSTS is required' >&2; exit 1; }
-          install -d -m 0700 "$HOME/.ssh"
-          printf '%s\n' "$PAPERBOAT_RELEASE_SSH_KEY" > "$HOME/.ssh/paperboat-release"
-          printf '%s\n' "$PAPERBOAT_RELEASE_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
-          chmod 0600 "$HOME/.ssh/paperboat-release" "$HOME/.ssh/known_hosts"
-      - name: Read and validate current production TUF signing state
-        shell: bash
-        run: |
-          set -euo pipefail
-          repository="$RUNNER_TEMP/tuf-candidate"
-          mkdir -p "$repository/targets"
-          ssh -i "$HOME/.ssh/paperboat-release" -o BatchMode=yes -o StrictHostKeyChecking=yes "root@$RELEASE_HOST" \
-            'tar -C /opt/paperboat/releases/current/tuf -cf - metadata' | tar -C "$repository" -xf -
-          install -m 0600 tools/tuf-repository/active-signing-state.json "$repository/.signing-state.json"
-          go run ./tools/tuf-repository validate-signers \
-            -repository "$repository" \
-            -trusted-root "$GITHUB_WORKSPACE/cli/internal/hostruntime/bootstrap/trusted-root.json"
-          go run ./tools/tuf-repository verify-published -repository "$repository"
-      - name: Sign only the selected packages; do not publish them
-        env:
-          PAPERBOAT_GITHUB_REPOSITORY: ${{ env.PAPERBOAT_GITHUB_REPOSITORY }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          repository="$RUNNER_TEMP/tuf-candidate"
-          input_dir="$RUNNER_TEMP/paperboat-update-candidate-inputs"
-          go run ./tools/tuf-repository publish \
-            -repository "$repository" \
-            -version "$RELEASE_VERSION" \
-            -artifacts "$RUNNER_TEMP/candidate-artifacts" \
-            -manifest "$input_dir/manifest.json" \
-            -deployment-plan "$input_dir/deployment-plan.json" \
-            -windows-amd64-native-evidence "$RUNNER_TEMP/candidate-qualification/windows-amd64-native-qualification.json" \
-            -windows-arm64-native-evidence "$RUNNER_TEMP/candidate-qualification/windows-arm64-native-qualification.json" \
-            -rollout-revision "$GITHUB_RUN_ID" \
-            -severity routine \
-            -supervisor-maintenance="$SUPERVISOR_MAINTENANCE"
-          go run ./tools/tuf-repository verify-published -repository "$repository"
-      - name: Render product-pinned installers and prepare the publishable origin
-        shell: bash
-        run: |
-          set -euo pipefail
-          origin_dir="$RUNNER_TEMP/candidate-origin"
-          mkdir -p "$origin_dir/tuf/targets"
-          cp -R "$RUNNER_TEMP/tuf-candidate/metadata" "$origin_dir/tuf/"
-          python3 tools/render-installers.py \
-            "$RUNNER_TEMP/tuf-candidate/metadata/targets.json" \
-            "$origin_dir/install" \
-            "$origin_dir/windows"
-          chmod 0755 "$origin_dir/install"
-          tar -C "$origin_dir" -czf "$RUNNER_TEMP/candidate-origin.tgz" install windows tuf
-      - name: Assemble private Actions candidate artifact
-        shell: bash
-        run: |
-          set -euo pipefail
-          bundle_root="$RUNNER_TEMP/paperboat-update-candidate"
-          mkdir -p "$bundle_root/artifacts" "$bundle_root/tuf/metadata" "$bundle_root/qualification"
-          cp "$RUNNER_TEMP/candidate-artifacts/pb-darwin-arm64.pkg" "$bundle_root/artifacts/"
-          cp "$RUNNER_TEMP/candidate-artifacts/pb-linux-amd64" "$bundle_root/artifacts/"
-          cp "$RUNNER_TEMP/candidate-artifacts/pb-linux-arm64" "$bundle_root/artifacts/"
-          cp "$RUNNER_TEMP/candidate-artifacts/pb-windows-amd64.exe" "$bundle_root/artifacts/"
-          cp "$RUNNER_TEMP/candidate-artifacts/pb-windows-arm64.exe" "$bundle_root/artifacts/"
-          cp "$RUNNER_TEMP/tuf-candidate/metadata/"*.json "$bundle_root/tuf/metadata/"
-          cp "$RUNNER_TEMP/paperboat-update-candidate-inputs/manifest.json" "$bundle_root/"
-          cp "$RUNNER_TEMP/paperboat-update-candidate-inputs/deployment-plan.json" "$bundle_root/"
-          cp "$RUNNER_TEMP/candidate-qualification/windows-amd64-native-qualification.json" "$bundle_root/qualification/"
-          cp "$RUNNER_TEMP/candidate-qualification/windows-arm64-native-qualification.json" "$bundle_root/qualification/"
-          cp "$RUNNER_TEMP/candidate-origin.tgz" "$bundle_root/origin.tgz"
-          cat > "$bundle_root/README.txt" <<EOF
-          Paperboat update candidate $RELEASE_VERSION
-          Source commit: $GITHUB_SHA
-          Release asset repository: $PAPERBOAT_GITHUB_REPOSITORY
-
-          This private artifact contains five product assets, native qualification
-          evidence for both Windows architectures, their selected
-          TUF metadata, and product-pinned installer scripts rendered from the
-          verified target records. It was not published to GitHub Releases or the
-          TUF origin. The signed target URLs refer to immutable product assets in
-          the repository above. A later authorized publication must upload those
-          five products and activate the included origin bundle through the
-          existing publication validator.
-          EOF
-          tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/paperboat-update-candidate-$RELEASE_VERSION.tgz" paperboat-update-candidate
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: paperboat-update-candidate-${{ inputs.version }}
-          path: ${{ runner.temp }}/paperboat-update-candidate-${{ inputs.version }}.tgz
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
-      - name: Summarize candidate boundary
-        shell: bash
-        run: |
-          set -euo pipefail
-          {
-            printf 'Candidate **%s** was signed and stored as a private Actions artifact.\n\n' "$RELEASE_VERSION"
-            printf 'This workflow did not create a GitHub Release, publish a TUF origin, update Latest, or publish an installer.\n'
-            printf 'The signed product URLs require an authorized five-product upload and origin activation before device updates can consume this artifact.\n'
-          } >> "$GITHUB_STEP_SUMMARY"
