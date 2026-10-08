@@ -865,6 +865,21 @@ func verifyWindowsStableBinary(ctx context.Context, path string, target workerup
 	return nil
 }
 
+// Immutable native pins are produced by release staging (Users read/execute)
+// or installation staging (enrolled user read/execute). Both require SYSTEM
+// ownership and the exact protected read-only policy; canonical binaries keep
+// their separate enrolled-user policy.
+func verifyWindowsPinnedBinary(ctx context.Context, path string, target workerupdate.ComponentTarget, ownerSID string) error {
+	if err := verifyWindowsActivationComponent(ctx, path, target); err != nil {
+		return err
+	}
+	if !windowsMachineFileSecurityMatches(path, windowsStableBinaryDACL("BU")) &&
+		!windowsMachineFileSecurityMatches(path, windowsStableBinaryDACL(ownerSID)) {
+		return fmt.Errorf("protected Windows pinned binary ACL: %w", errInvalidWindowsActivation)
+	}
+	return nil
+}
+
 func moveWindowsActivationFile(ctx context.Context, from, to string) error {
 	fromPointer, err := windows.UTF16PtrFromString(from)
 	if err != nil {
@@ -1906,7 +1921,7 @@ func (b *windowsSCMActivationBackend) verifyFeatureNativePins(ctx context.Contex
 		if err := validateWindowsFeatureNativePin(layout, role.expected, actual, identity); err != nil {
 			return err
 		}
-		if err := verifyWindowsStableBinary(ctx, actual.Executable, workerupdate.ComponentTarget{SHA256: identity.SHA256, Length: identity.Length, Platform: "windows", Architecture: journal.Architecture}, b.config.OwnerSID); err != nil {
+		if err := verifyWindowsPinnedBinary(ctx, actual.Executable, workerupdate.ComponentTarget{SHA256: identity.SHA256, Length: identity.Length, Platform: "windows", Architecture: journal.Architecture}, b.config.OwnerSID); err != nil {
 			return err
 		}
 	}
