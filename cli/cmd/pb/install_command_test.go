@@ -5,9 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"runtime"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 )
 
 func TestInstallSuppliesCurrentExecutableAndPropagatesFailure(t *testing.T) {
@@ -20,8 +23,10 @@ func TestInstallSuppliesCurrentExecutableAndPropagatesFailure(t *testing.T) {
 		if path != "/supplied/pb" || got != source || directory != "/commands" {
 			t.Fatal("supplied executable identity changed")
 		}
-		if _, ok := ctx.Deadline(); !ok {
+		if deadline, ok := ctx.Deadline(); !ok {
 			t.Fatal("installation has no deadline")
+		} else if remaining := time.Until(deadline); remaining < suppliedInstallTimeout(runtime.GOOS)-time.Second {
+			t.Fatal("caller truncated installation recovery deadline", remaining)
 		}
 		return "/commands/pb", failure
 	}
@@ -56,6 +61,17 @@ func TestInstallSuppliesCurrentExecutableAndPropagatesFailure(t *testing.T) {
 	for _, flag := range []string{"skip-verification", "skip-download", "fresh", "source", "source-version"} {
 		if command.Flags().Lookup(flag) != nil {
 			t.Fatal("unexpected install bypass flag", flag)
+		}
+	}
+}
+
+func TestSuppliedInstallTimeoutPreservesNativeRecoveryBudget(t *testing.T) {
+	if got := suppliedInstallTimeout("windows"); got != elevation.RuntimeInstallDuration || got <= elevation.RuntimeInstallRecoveryDuration {
+		t.Fatal("Windows install caller must allow recovery and local installation", got)
+	}
+	for _, platform := range []string{"linux", "darwin"} {
+		if got := suppliedInstallTimeout(platform); got != 3*time.Minute {
+			t.Fatal("Unix install deadline changed", platform, got)
 		}
 	}
 }

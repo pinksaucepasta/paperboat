@@ -3,15 +3,24 @@ package main
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
+	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	"github.com/spf13/cobra"
 )
 
 var installSuppliedExecutable = hostruntimecmd.InstallRunningBinary
 var runningInstallSource = installsource.Current
+
+func suppliedInstallTimeout(platform string) time.Duration {
+	if platform == "windows" {
+		return elevation.RuntimeInstallDuration
+	}
+	return 3 * time.Minute
+}
 
 func platformInstallCommand() *cobra.Command {
 	command := &cobra.Command{Use: "install", Short: "Install this executable and its local service", Args: commandArgs(cobra.NoArgs), SilenceUsage: true, SilenceErrors: true,
@@ -21,7 +30,7 @@ func platformInstallCommand() *cobra.Command {
 				return err
 			}
 			directory, _ := c.Flags().GetString("install-dir")
-			ctx, cancel := context.WithTimeout(c.Context(), 3*time.Minute)
+			ctx, cancel := context.WithTimeout(c.Context(), suppliedInstallTimeout(runtime.GOOS))
 			defer cancel()
 			installed, err := installSuppliedExecutable(ctx, executable, source, directory)
 			if err != nil {

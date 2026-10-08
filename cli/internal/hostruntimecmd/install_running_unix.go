@@ -47,6 +47,14 @@ func InstallRunningBinary(ctx context.Context, executable string, source install
 	if err != nil {
 		return "", err
 	}
+	rootHome := ""
+	if os.Geteuid() == 0 {
+		rootAccount, lookupErr := user.LookupId("0")
+		if lookupErr != nil {
+			return "", lookupErr
+		}
+		rootHome = rootAccount.HomeDir
+	}
 	if directory == "" {
 		directory = filepath.Join(account.HomeDir, ".local", "bin")
 	}
@@ -72,11 +80,7 @@ func InstallRunningBinary(ctx context.Context, executable string, source install
 		if err != nil {
 			return err
 		}
-		args := []string{"--", "/usr/bin/env", "PAPERBOAT_INVOKING_UID=" + account.Uid, executable, "__runtime-service", operation}
-		command := exec.CommandContext(callCtx, "/usr/bin/sudo", args...)
-		if os.Geteuid() == 0 {
-			command = exec.CommandContext(callCtx, "/usr/bin/env", args[2:]...)
-		}
+		command := privilegedInstallCommand(callCtx, os.Geteuid(), rootHome, account.Uid, executable, "__runtime-service", operation)
 		command.Stdin = bytes.NewReader(body)
 		command.Stdout, command.Stderr = os.Stderr, os.Stderr
 		if err = command.Run(); err != nil {
@@ -141,7 +145,7 @@ func InstallRunningBinary(ctx context.Context, executable string, source install
 		return "", err
 	}
 	if runtime.GOOS == "darwin" {
-		manuals := exec.CommandContext(ctx, "/usr/bin/sudo", "--", layout.Binary, "--no-customization", "__man-pages", "--directory", "/usr/local/share/man")
+		manuals := privilegedInstallCommand(ctx, os.Geteuid(), rootHome, account.Uid, layout.Binary, "--no-customization", "__man-pages", "--directory", "/usr/local/share/man")
 		manuals.Stdin, manuals.Stdout, manuals.Stderr = os.Stdin, os.Stderr, os.Stderr
 		err = manuals.Run()
 	} else {
@@ -152,4 +156,17 @@ func InstallRunningBinary(ctx context.Context, executable string, source install
 	}
 	installed := filepath.Join(directory, "pb")
 	return installed, nil
+}
+
+// Diagnostic storage belongs to the child's effective identity. Keep the
+// enrolled identity in the supplied request and invoking UID, never in HOME.
+func privilegedInstallCommand(ctx context.Context, effectiveUID int, rootHome, invokingUID, executable string, arguments ...string) *exec.Cmd {
+	args := []string{"PAPERBOAT_INVOKING_UID=" + invokingUID, executable}
+	args = append(args, arguments...)
+	if effectiveUID == 0 {
+		args = append([]string{"HOME=" + rootHome, "USER=root", "LOGNAME=root"}, args...)
+		return exec.CommandContext(ctx, "/usr/bin/env", args...)
+	}
+	args = append([]string{"-H", "--", "/usr/bin/env"}, args...)
+	return exec.CommandContext(ctx, "/usr/bin/sudo", args...)
 }
