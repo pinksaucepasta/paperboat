@@ -104,7 +104,7 @@ jobs:
               "id": int(run_id),
               "head_sha": source_sha,
               "path": ".github/workflows/release.yml",
-              "name": "Update candidate",
+              "name": f"Update candidate {version}",
               "display_title": f"Update candidate {version}",
               "event": "workflow_dispatch",
               "status": "completed",
