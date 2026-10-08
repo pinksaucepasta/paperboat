@@ -30,7 +30,6 @@ import (
 	stablehostd "github.com/pinksaucepasta/paperboat/internal/hostruntime/hostd"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/inspectorapi"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/observability"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/process"
@@ -40,6 +39,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/observability"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 )
 
@@ -62,36 +62,35 @@ type HostConfig struct {
 }
 
 type HostDependencies struct {
-	Sessions                       session.Service
-	Executions                     execprocess.Service
-	ReuseAgentToken                bool
-	Bandwidth                      *bandwidth.Recorder
-	RecordTerminalJoin             server.TerminalJoinRecorder
-	Authorizer                     server.AuthorizerFactory
-	BrowserTerminalAuthorizer      server.AuthorizerFactory
-	BrowserConfigCompareAuthorizer server.AuthorizerFactory
-	BrowserTerminalIdentity        server.BrowserTerminalIdentityProvider
-	AuthorizationService           Service
-	Listener                       ListenerFactory
-	Connector                      Service
-	Previews                       *preview.Registry
-	PreviewRoutesChanged           func()
-	PreviewDispatcher              server.PreviewDispatcher
-	PreviewRecovery                Service
-	PreviewOwnerSessions           *preview.OwnerSessionLeaseManager
-	RuntimeObservationService      Service
-	RuntimeAttachmentService       Service
-	ManagedEnvironment             envinject.EnvironmentSource
-	ConfigApply                    configapply.Handler
-	ConfigCompare                  server.ConfigComparisonReader
-	ConfigApplyProof               bool
-	ConfigSync                     Service
-	Random                         io.Reader
-	SessionLauncherFactory         func(session.Service) (server.SessionLauncher, error)
-	HealthTracker                  *health.HealthTracker
-	Metrics                        *observability.Registry
-	EventLog                       *observability.EventLog
-	LocalControlToken              string
+	Sessions                  session.Service
+	Executions                execprocess.Service
+	ReuseAgentToken           bool
+	Bandwidth                 *bandwidth.Recorder
+	RecordTerminalJoin        server.TerminalJoinRecorder
+	Authorizer                server.AuthorizerFactory
+	BrowserTerminalAuthorizer server.AuthorizerFactory
+	BrowserTerminalIdentity   server.BrowserTerminalIdentityProvider
+	AuthorizationService      Service
+	Listener                  ListenerFactory
+	Connector                 Service
+	Previews                  *preview.Registry
+	PreviewRoutesChanged      func()
+	PreviewDispatcher         server.PreviewDispatcher
+	PreviewRecovery           Service
+	PreviewOwnerSessions      *preview.OwnerSessionLeaseManager
+	RuntimeObservationService Service
+	RuntimeAttachmentService  Service
+	ManagedEnvironment        envinject.EnvironmentSource
+	ConfigApply               configapply.Handler
+	ConfigCompare             server.ConfigComparisonReader
+	ConfigApplyProof          bool
+	ConfigSync                Service
+	Random                    io.Reader
+	SessionLauncherFactory    func(session.Service) (server.SessionLauncher, error)
+	HealthTracker             *health.HealthTracker
+	Metrics                   *observability.Registry
+	EventLog                  *observability.EventLog
+	LocalControlToken         string
 	// Inspector is the daemon-local inspector HTTP service (bounded
 	// sanitized retrieval and deliberate audited replay). It is mounted at
 	// /v1/inspector/ only with a control token, on the loopback service.
@@ -166,7 +165,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	if err := config.Runtime.Validate(); err != nil || !LoopbackAddress(config.ListenAddress) || !filepath.IsAbs(config.WorkspaceRoot) || config.MachineID == "" || dependencies.Authorizer == nil {
 		return nil, errors.Join(ErrHostInvalid, err)
 	}
-	if (dependencies.BrowserTerminalAuthorizer != nil || dependencies.BrowserConfigCompareAuthorizer != nil) != (dependencies.BrowserTerminalIdentity != nil) || dependencies.BrowserConfigCompareAuthorizer != nil && dependencies.ConfigCompare == nil {
+	if (dependencies.BrowserTerminalAuthorizer != nil) != (dependencies.BrowserTerminalIdentity != nil) {
 		return nil, ErrHostInvalid
 	}
 	if dependencies.SessionLauncherFactory == nil && config.ShellPath == "" {
@@ -255,7 +254,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		sessions = launchSessions{Service: sessions, source: dependencies.ManagedEnvironment}
 	}
 	var browserOutput *browserbroadcastserver.Registry
-	if (dependencies.BrowserTerminalAuthorizer != nil || dependencies.BrowserConfigCompareAuthorizer != nil) && dependencies.BrowserTerminalIdentity != nil {
+	if (dependencies.BrowserTerminalAuthorizer != nil) && dependencies.BrowserTerminalIdentity != nil {
 		browserOutput, err = browserbroadcastserver.NewRegistry(sessions, func(ctx context.Context) (ed25519.PrivateKey, error) {
 			identity, identityErr := dependencies.BrowserTerminalIdentity(ctx)
 			if identityErr != nil {
@@ -411,13 +410,6 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		}
 	}
 	mux := http.NewServeMux()
-	if dependencies.BrowserConfigCompareAuthorizer != nil {
-		handler, err := server.NewBrowserTerminalWebSocketHandler(server.BrowserTerminalWebSocketHandlerConfig{CompareOnly: true, Server: protocolServer, Authorizer: dependencies.BrowserConfigCompareAuthorizer, Bandwidth: dependencies.Bandwidth, Identity: dependencies.BrowserTerminalIdentity, OriginPatterns: append([]string(nil), config.OriginPatterns...), MaxConnections: resources.MaxAttachments * resources.MaxSessions, Limiter: connectionLimiter})
-		if err != nil {
-			return nil, err
-		}
-		mux.Handle("/v1/browser-config-compare", handler)
-	}
 	if dependencies.PreviewOwnerSessions != nil && dependencies.LocalControlToken != "" {
 		mux.Handle("/v1/preview-owner-sessions", dependencies.PreviewOwnerSessions)
 		mux.Handle("/v1/preview-owner-sessions/", dependencies.PreviewOwnerSessions)

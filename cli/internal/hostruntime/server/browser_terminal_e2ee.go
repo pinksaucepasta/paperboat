@@ -59,7 +59,6 @@ type BrowserTerminalCredentialKey interface {
 }
 
 type BrowserTerminalWebSocketHandlerConfig struct {
-	CompareOnly     bool
 	Bandwidth       *bandwidth.Recorder
 	Server          *Server
 	Authorizer      AuthorizerFactory
@@ -106,24 +105,12 @@ func (h *BrowserTerminalWebSocketHandler) ServeHTTP(writer http.ResponseWriter, 
 		http.Error(writer, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
-	var pinnedDigest string
-	if h.config.CompareOnly {
-		keyAuthorizer, ok := authorizer.(interface {
-			BrowserConfigComparePublicKeySHA256(context.Context) (string, error)
-		})
-		if !ok {
-			http.Error(writer, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
-			return
-		}
-		pinnedDigest, err = keyAuthorizer.BrowserConfigComparePublicKeySHA256(request.Context())
-	} else {
-		keyAuthorizer, ok := authorizer.(BrowserTerminalCredentialKey)
-		if !ok {
-			http.Error(writer, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
-			return
-		}
-		pinnedDigest, err = keyAuthorizer.BrowserTerminalPublicKeySHA256(request.Context())
+	keyAuthorizer, ok := authorizer.(BrowserTerminalCredentialKey)
+	if !ok {
+		http.Error(writer, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
 	}
+	pinnedDigest, err := keyAuthorizer.BrowserTerminalPublicKeySHA256(request.Context())
 	if err != nil {
 		if reportAuthorizationFailure(request.Context(), err) {
 			http.Error(writer, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
@@ -156,9 +143,6 @@ func (h *BrowserTerminalWebSocketHandler) ServeHTTP(writer http.ResponseWriter, 
 	defer h.limiter.release()
 
 	subprotocol := BrowserTerminalWebSocketSubprotocol
-	if h.config.CompareOnly {
-		subprotocol = "paperboat.browser-config-compare.e2ee.v1"
-	}
 	connection, err := websocket.Accept(writer, request, &websocket.AcceptOptions{
 		Subprotocols:    []string{subprotocol},
 		OriginPatterns:  append([]string(nil), h.config.OriginPatterns...),
@@ -206,15 +190,9 @@ func (h *BrowserTerminalWebSocketHandler) ServeHTTP(writer http.ResponseWriter, 
 	var plaintext net.Conn = tlsConnection
 	if h.config.Bandwidth != nil {
 		capability, consumer := "terminal.v1", "terminal"
-		if h.config.CompareOnly {
-			capability, consumer = "config.compare.v1", "config_compare"
-		}
 		authorization, authorizeErr := authorizer.Authorize(request.Context(), protocol.Frame{Capability: capability})
 		bindingID := authorization.BrowserAttachmentID
-		if h.config.CompareOnly {
-			bindingID = authorization.BrowserAttachmentID
-		}
-		if authorizeErr != nil || bindingID == "" || !h.config.CompareOnly && !authorization.BrowserTerminal {
+		if authorizeErr != nil || bindingID == "" || !authorization.BrowserTerminal {
 			authorityUnavailable := reportAuthorizationFailure(request.Context(), authorizeErr)
 			if closer, ok := authorizer.(AuthorizationCloser); ok {
 				closer.CloseAuthorization()

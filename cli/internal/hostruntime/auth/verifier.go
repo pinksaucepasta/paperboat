@@ -225,7 +225,7 @@ func (v Verifier) Verify(ctx context.Context, token string, policy Policy) (Clai
 	if err := decodeSegment(parts[1], &claims); err != nil {
 		return Claims{}, &Error{Code: Malformed, Cause: err}
 	}
-	if claims.CredentialClass == "browser_terminal_operation" || claims.CredentialClass == "browser_config_compare" {
+	if claims.CredentialClass == "browser_terminal_operation" {
 		if !validBrowserPublicKeyDigest(claims.BrowserPublicKeySHA256) {
 			return Claims{}, &Error{Code: BindingInvalid}
 		}

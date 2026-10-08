@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"encoding/base64"
 	"testing"
 	"time"
 
@@ -21,10 +20,6 @@ func TestConfigCompareCredentialHasExactClassScopeAndGeneration(t *testing.T) {
 	verifier := auth.Verifier{Keys: staticKeys{keys: map[string]ed25519.PublicKey{"key": public}}, Clock: staticClock{now}}
 	config := CredentialAuthConfig{Issuer: "https://control.test", EnvironmentID: "env", MachineID: "machine", HelperID: "helper", InstallationGeneration: 3, Verifier: verifier}
 	native, err := NewCredentialAuthorizer(config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	browser, err := NewBrowserConfigCompareCredentialAuthorizer(config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,23 +41,5 @@ func TestConfigCompareCredentialHasExactClassScopeAndGeneration(t *testing.T) {
 	stale, _ := native(signStaticCredential(t, private, "key", claims))
 	if _, err := stale.Authorize(context.Background(), protocol.Frame{Capability: "config.compare.v1"}); err == nil {
 		t.Fatal("stale installation accepted")
-	}
-	claims.InstallationGeneration = 3
-	claims.CredentialClass = "browser_config_compare"
-	claims.SourceMachineID = ""
-	claims.CLIClientSessionID = ""
-	claims.BrowserAttachmentID = "read_1"
-	claims.BrowserPublicKeySHA256 = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-	token = signStaticCredential(t, private, "key", claims)
-	browserAuth, _ := browser(token)
-	if _, err := browserAuth.Authorize(context.Background(), protocol.Frame{Capability: "config.compare.v1"}); err != nil {
-		t.Fatal(err)
-	}
-	plain, _ := native(token)
-	if _, err := plain.Authorize(context.Background(), protocol.Frame{Capability: "config.compare.v1"}); err == nil {
-		t.Fatal("browser credential accepted by plain transport")
-	}
-	if _, err := browserAuth.Authorize(context.Background(), protocol.Frame{Capability: "terminal.v1"}); err == nil {
-		t.Fatal("browser compare opened a terminal")
 	}
 }

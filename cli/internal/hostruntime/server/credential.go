@@ -65,7 +65,7 @@ func (a *CredentialAuthorizer) Authorize(ctx context.Context, frame protocol.Fra
 	if browserTerminal && ((!terminalFrame && !browserUpload) || !validBrowserTerminalClaims(claims)) {
 		return Authorization{}, ErrCredentialPolicy
 	}
-	if claims.CredentialClass == "config_compare" || claims.CredentialClass == "browser_config_compare" {
+	if claims.CredentialClass == "config_compare" {
 		if frame.Capability != "config.compare.v1" || !validConfigCompareClaims(claims) {
 			return Authorization{}, ErrCredentialPolicy
 		}
@@ -97,7 +97,7 @@ func (a *CredentialAuthorizer) Authorize(ctx context.Context, frame protocol.Fra
 		accountID = claims.UserID
 	}
 	clientID := claims.CLIClientSessionID
-	if browserTerminal || claims.CredentialClass == "browser_config_compare" {
+	if browserTerminal {
 		clientID = claims.BrowserAttachmentID
 	}
 	if (claims.CredentialClass == "codex_manage" || claims.CredentialClass == "codex_connect") && resourceID == "" {
@@ -218,7 +218,7 @@ func stableClaimsBinding(claims auth.Claims) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if claims.CredentialClass == "config_compare" || claims.CredentialClass == "browser_config_compare" {
+	if claims.CredentialClass == "config_compare" {
 		tuple, err := json.Marshal(struct {
 			Binding           json.RawMessage `json:"binding"`
 			AssignmentVersion int64           `json:"assignment_version"`
@@ -240,25 +240,5 @@ func validConfigCompareClaims(c auth.Claims) bool {
 	if c.AssignmentID == "" || c.AssignmentVersion < 1 || c.ConfigPath == "" || c.ConflictRevision == "" || c.ExpectedRemoteRevision == "" || c.EnvironmentID == "" || c.MachineID == "" || c.InstallationGeneration < 1 || c.UserID == "" || c.AccountID == "" {
 		return false
 	}
-	if c.CredentialClass == "browser_config_compare" {
-		return c.BrowserAttachmentID != "" && c.BrowserPublicKeySHA256 != "" && c.SourceMachineID == "" && c.CLIClientSessionID == ""
-	}
 	return c.CredentialClass == "config_compare" && c.SourceMachineID != "" && c.CLIClientSessionID != ""
-}
-func (a *CredentialAuthorizer) BrowserConfigComparePublicKeySHA256(ctx context.Context) (string, error) {
-	if a.Verifier == nil || a.Resolver == nil || a.Token == "" {
-		return "", ErrCredentialPolicy
-	}
-	policy, err := a.Resolver.Policy(protocol.Frame{Capability: "config.compare.v1"})
-	if err != nil {
-		return "", err
-	}
-	c, err := a.Verifier.Verify(ctx, a.Token, policy)
-	if err != nil {
-		return "", err
-	}
-	if c.CredentialClass != "browser_config_compare" || !validConfigCompareClaims(c) {
-		return "", ErrCredentialPolicy
-	}
-	return c.BrowserPublicKeySHA256, nil
 }

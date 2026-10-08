@@ -45,19 +45,6 @@ func NewBrowserTerminalCredentialAuthorizer(config CredentialAuthConfig) (server
 	return newCredentialAuthorizer(config, true)
 }
 
-func NewBrowserConfigCompareCredentialAuthorizer(config CredentialAuthConfig) (server.AuthorizerFactory, error) {
-	if config.Issuer == "" || config.EnvironmentID == "" || config.MachineID == "" || config.HelperID == "" || config.Verifier == nil {
-		return nil, ErrStaticAuthInvalid
-	}
-	resolver := staticPolicyResolver{issuer: config.Issuer, environmentID: config.EnvironmentID, machineID: config.MachineID, helperID: config.HelperID, installationGeneration: config.InstallationGeneration, browserCompareOnly: true}
-	return func(token string) (server.Authorizer, error) {
-		if token == "" || len(token) > 16<<10 {
-			return nil, ErrStaticAuthInvalid
-		}
-		return &server.CredentialAuthorizer{Verifier: config.Verifier, Resolver: resolver, Token: token, Revocations: config.Revocations}, nil
-	}, nil
-}
-
 func newCredentialAuthorizer(config CredentialAuthConfig, browserTerminalOnly bool) (server.AuthorizerFactory, error) {
 	if config.Issuer == "" || config.EnvironmentID == "" || config.MachineID == "" || config.HelperID == "" || config.Verifier == nil {
 		return nil, ErrStaticAuthInvalid
@@ -118,13 +105,9 @@ type staticPolicyResolver struct {
 	installationGeneration int64
 	helperID               string
 	browserTerminalOnly    bool
-	browserCompareOnly     bool
 }
 
 func (r staticPolicyResolver) Policy(frame protocol.Frame) (auth.Policy, error) {
-	if r.browserCompareOnly && frame.Capability != "config.compare.v1" {
-		return auth.Policy{}, ErrStaticAuthInvalid
-	}
 	base := auth.Policy{Issuer: r.issuer, Audience: "paperboat-machine", EnvironmentID: r.environmentID, MachineID: r.machineID}
 	if r.browserTerminalOnly && frame.Type != "ack" && frame.Type != "detach" && frame.Capability != "terminal.v1" && frame.Capability != "file-transfer.v1" {
 		return auth.Policy{}, ErrStaticAuthInvalid
@@ -177,9 +160,6 @@ func (r staticPolicyResolver) Policy(frame protocol.Frame) (auth.Policy, error) 
 		base.MaxLifetime = 5 * time.Minute
 	case "config.compare.v1":
 		base.CredentialClass = "config_compare"
-		if r.browserCompareOnly {
-			base.CredentialClass = "browser_config_compare"
-		}
 		base.OperationID = frame.OperationID
 		base.InstallationGeneration = r.installationGeneration
 		base.Scopes = []string{"config:compare"}

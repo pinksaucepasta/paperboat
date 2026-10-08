@@ -335,10 +335,6 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, err
 	}
-	browserCompareAuthorizer, err := NewBrowserConfigCompareCredentialAuthorizer(credentialConfig)
-	if err != nil {
-		return nil, err
-	}
 	comparisonHome, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
@@ -351,7 +347,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, err
 	}
-	dependencies := HostDependencies{ConfigCompare: comparison, BrowserConfigCompareAuthorizer: browserCompareAuthorizer, Authorizer: authorizer, BrowserTerminalAuthorizer: browserTerminalAuthorizer, BrowserTerminalIdentity: func(identityCtx context.Context) (server.BrowserTerminalIdentity, error) {
+	dependencies := HostDependencies{ConfigCompare: comparison, Authorizer: authorizer, BrowserTerminalAuthorizer: browserTerminalAuthorizer, BrowserTerminalIdentity: func(identityCtx context.Context) (server.BrowserTerminalIdentity, error) {
 		if err := identityCtx.Err(); err != nil {
 			return server.BrowserTerminalIdentity{}, err
 		}
