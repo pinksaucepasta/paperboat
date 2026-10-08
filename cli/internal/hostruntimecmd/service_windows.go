@@ -182,20 +182,7 @@ func dispatchElevatedOperation(ctx context.Context, request elevation.Request) e
 			case elevation.ActionUninstall:
 				return uninstallWindowsRuntime(ctx, installRequest)
 			case elevation.ActionInstallCommit:
-				if err := installWindowsRuntimeFromSuppliedBytes(ctx, installRequest); err != nil {
-					return err
-				}
-				if err := hostinstall.Commit(installRequest); err != nil {
-					return errors.Join(err, hostinstall.Uninstall(ctx, installRequest))
-				}
-				// Service registration can succeed before the enrolled-owner
-				// workload finishes startup. Check hostd after the durable commit;
-				// a stopped first launch may recover when started with final state.
-				// Leave the installation intact on failure so pairing can resume.
-				if err := hostinstall.EnsureCommittedWindowsHostdReady(ctx, installRequest); err != nil {
-					return fmt.Errorf("Paperboat host service did not become ready after installation: %w", err)
-				}
-				return nil
+				return installWindowsRuntimeFromSuppliedBytesWithCommit(ctx, installRequest, true)
 			}
 		}
 	case elevation.OperationOpenSSH:
@@ -228,6 +215,10 @@ func elevatedOpenSSHConfig(ownerSID string) (windowsopenssh.Config, error) {
 }
 
 func installWindowsRuntimeFromSuppliedBytes(ctx context.Context, request hostinstall.Request) error {
+	return installWindowsRuntimeFromSuppliedBytesWithCommit(ctx, request, false)
+}
+
+func installWindowsRuntimeFromSuppliedBytesWithCommit(ctx context.Context, request hostinstall.Request, commit bool) error {
 	instance, err := hostinstall.WindowsInstanceForSID(request.OwnerSID)
 	if err != nil {
 		return err
@@ -236,14 +227,35 @@ func installWindowsRuntimeFromSuppliedBytes(ctx context.Context, request hostins
 	if loadErr != nil && !errors.Is(loadErr, os.ErrNotExist) {
 		return loadErr
 	}
+	if loadErr == nil {
+		layout, err := service.WindowsUserLayout(request.OwnerSID)
+		if err != nil {
+			return err
+		}
+		config := windowsUpdatedConfigFor(previous, layout, previous.Source.Version)
+		if err := updated.RecoverWindowsNativeInstall(ctx, config); err != nil {
+			return fmt.Errorf("recover pending Windows update before supplied install: %w", err)
+		}
+		// Recovery may commit or restore feature Source and its artifact.
+		previous, loadErr = hostinstall.LoadWindowsRuntimeConfigForInstance(instance)
+		if loadErr != nil {
+			return loadErr
+		}
+	}
+	// Recovery has its own signed-policy budget; local slot/SCM changes and
+	// the final enrollment commit/readiness keep their previous short budget.
+	ctx, cancel := context.WithTimeout(ctx, elevation.RuntimeActivationDuration)
+	defer cancel()
 	restoreServices := func() error {
+		recoveryCtx, recoveryCancel := context.WithTimeout(context.WithoutCancel(ctx), elevation.RuntimeActivationDuration)
+		defer recoveryCancel()
 		if loadErr != nil {
 			return nil
 		}
 		if previous.EnrollmentPending {
-			return hostinstall.EnsureWindowsLocalDaemonService(context.Background(), previous.OwnerSID)
+			return hostinstall.EnsureWindowsLocalDaemonService(recoveryCtx, previous.OwnerSID)
 		}
-		return hostinstall.Repair(context.Background(), previous.OwnerSID)
+		return hostinstall.Repair(recoveryCtx, previous.OwnerSID)
 	}
 	if loadErr == nil {
 		if err := hostinstall.Stop(ctx, request.OwnerSID); err != nil {
@@ -257,6 +269,15 @@ func installWindowsRuntimeFromSuppliedBytes(ctx context.Context, request hostins
 	request.RollbackIdentity = rollbackIdentity
 	if err := hostinstall.Install(ctx, request); err != nil {
 		return errors.Join(fmt.Errorf("install supplied Windows runtime: %w", err), restoreJournal(), restoreServices())
+	}
+	if commit {
+		if err := hostinstall.Commit(request); err != nil {
+			return errors.Join(err, hostinstall.Uninstall(ctx, request))
+		}
+		// Durable commit precedes the exact enrolled owner's readiness probe.
+		if err := hostinstall.EnsureCommittedWindowsHostdReady(ctx, request); err != nil {
+			return fmt.Errorf("Paperboat host service did not become ready after installation: %w", err)
+		}
 	}
 	return nil
 }

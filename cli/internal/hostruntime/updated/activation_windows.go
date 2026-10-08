@@ -1677,6 +1677,13 @@ func resumeWindowsActivation(ctx context.Context, config WindowsConfig) (bool, e
 	if !windowsActivationNeedsResume(journal, config.ActiveVersion, activatorOwnsTransaction) {
 		return false, nil
 	}
+	return startVerifiedWindowsActivation(ctx, config, journal)
+}
+
+// Startup predicates protect a candidate updater from resuming its own
+// transaction. The installer may call this same verified launch boundary only
+// after stopping that native updater and validating the approved journal/pins.
+func startVerifiedWindowsActivation(ctx context.Context, config WindowsConfig, journal windowsActivationJournal) (bool, error) {
 	target := workerupdate.ComponentTarget{SHA256: journal.Updater.SHA256, Length: journal.Updater.Length, Platform: "windows", Architecture: journal.Architecture}
 	if !matchesWindowsComponent(journal.Updater.Path, target) {
 		return false, errInvalidWindowsActivation
@@ -1690,7 +1697,7 @@ func resumeWindowsActivation(ctx context.Context, config WindowsConfig) (bool, e
 	// already starting to become visible in SCM. Re-check ownership immediately
 	// before mutating the activator service so this updater never steals a live
 	// transaction during that handoff window.
-	activatorOwnsTransaction, err = windowsActivatorOwnsTransaction(config.OwnerSID)
+	activatorOwnsTransaction, err := windowsActivatorOwnsTransaction(config.OwnerSID)
 	if err != nil {
 		return false, err
 	}

@@ -84,8 +84,10 @@ func TestWindowsActivatorControlStatusSettingsAndRetirement(t *testing.T) {
 	if journal.ApprovedCandidateID != journal.Candidate.ID {
 		t.Fatal("opt-out changed approved recovery ownership")
 	}
-	if response, err := client.Check(context.Background()); err == nil || response.ErrorCode != "activation_unavailable" {
-		t.Fatalf("activator accepted another transaction: %+v %v", response, err)
+	_, checkErr := client.Check(context.Background())
+	var controlErr *ControlError
+	if !errors.As(checkErr, &controlErr) || controlErr.Code != "activation_unavailable" {
+		t.Fatalf("activator accepted another transaction: %v", checkErr)
 	}
 	// Closing must interrupt an incomplete request as well as the accept loop.
 	connection, err := winio.DialPipeContext(context.Background(), config.ControlSocket)

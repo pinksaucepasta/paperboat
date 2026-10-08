@@ -40,6 +40,11 @@ const (
 	// must not leave a one-shot installer waiting behind an opaque privileged
 	// child for the general five-minute maintenance window.
 	RuntimeActivationDuration = 90 * time.Second
+	// Install may first wait for an already-approved signed update's bounded
+	// recovery, then has the usual local activation budget. Other operations
+	// retain their shorter deadlines.
+	RuntimeInstallRecoveryDuration = 31 * time.Minute
+	RuntimeInstallDuration         = RuntimeInstallRecoveryDuration + RuntimeActivationDuration
 )
 
 var (
@@ -118,7 +123,11 @@ func (*RemoteError) Unwrap() error { return ErrElevatedOperation }
 // child use the same expiry. That gives callers a bounded result even if an
 // individual SCM or firewall API blocks during runtime activation.
 func operationDuration(operation, action string) time.Duration {
-	if operation == OperationRuntimeService && (action == ActionInstall || action == ActionInstallCommit || action == ActionCommit || action == ActionUninstall || action == ActionStop || action == ActionConfigInstall || action == ActionConfigRemove || action == ActionBrowserDomain) {
+	if operation == OperationRuntimeService && (action == ActionInstall || action == ActionInstallCommit) {
+		return RuntimeInstallDuration
+	}
+
+	if operation == OperationRuntimeService && (action == ActionCommit || action == ActionUninstall || action == ActionStop || action == ActionConfigInstall || action == ActionConfigRemove || action == ActionBrowserDomain) {
 		return RuntimeActivationDuration
 	}
 	return MaxOperationDuration

@@ -285,6 +285,29 @@ func TestUpdateStatusIncludesNewerVerifiedCandidate(t *testing.T) {
 	}
 }
 
+func TestUpdateStatusPendingTransactionReportsTargetWithoutOfferingAnotherUpdate(t *testing.T) {
+	response := updated.ControlResponse{Pending: true}
+	response.Observation.Version = "2026.10.08.35"
+	response.Transaction.ActiveVersion = "2026.10.08.35"
+	response.Transaction.CandidateVersion = "2026.10.08.36"
+	result := updateStatusCommandResult("2026.10.08.36", response, nil)
+	if result.LatestVersion != "2026.10.08.36" || !result.UpdateAvailable {
+		t.Fatalf("latest=%q available=%v", result.LatestVersion, result.UpdateAvailable)
+	}
+	command, _, err := newRootCommand().Find([]string{"update", "status"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	command.SetOut(&output)
+	if err := writeUpdateStatusResult(command, result); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Activation: pending") || strings.Contains(output.String(), "Run `pb update`") {
+		t.Fatalf("pending status = %q", output.String())
+	}
+}
+
 func TestUpdateStatusPreservesWindowsActivationState(t *testing.T) {
 	response := updated.ControlResponse{Version: "2026.08.27.50", Pending: true, ActivationFailure: "activation_failed"}
 	result := updateStatusCommandResult("2026.08.27.46", response, nil)

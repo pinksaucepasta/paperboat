@@ -3243,8 +3243,13 @@ func updateStatusCommandResult(cliVersion string, response updated.ControlRespon
 	result.LatestVersion = response.Observation.Version
 	// A prepared candidate is verified release evidence even when the last
 	// periodic observation predates its download. Preserve a newer observation.
+	candidateVersion := ""
 	if response.Candidate != nil {
-		candidateVersion := response.Candidate.Version
+		candidateVersion = response.Candidate.Version
+	} else if response.Pending {
+		candidateVersion = response.Transaction.CandidateVersion
+	}
+	if candidateVersion != "" {
 		observedVersion := result.LatestVersion
 		if observedVersion == "" {
 			observedVersion = candidateVersion
@@ -3300,7 +3305,7 @@ func writeUpdateStatusResult(command *cobra.Command, result updateStatusResult) 
 	if result.RuntimeState != "" {
 		fmt.Fprintf(command.OutOrStdout(), "Runtime state: %s\n", result.RuntimeState)
 	}
-	if result.UpdateAvailable && result.Candidate == nil {
+	if result.UpdateAvailable && result.Candidate == nil && !result.ActivationPending {
 		fmt.Fprintf(command.OutOrStdout(), "Paperboat %s is available. Run `pb update` to download and review it.\n", result.LatestVersion)
 	}
 	if result.Candidate != nil {
