@@ -20,7 +20,7 @@ on:
 run-name: Update candidate ${{ inputs.version }}
 
 concurrency:
-  group: update-candidate-${{ inputs.version }}
+  group: paperboat-release-${{ github.repository }}
   cancel-in-progress: false
 
 permissions:
@@ -30,9 +30,9 @@ env:
   RELEASE_VERSION: ${{ inputs.version }}
   SUPERVISOR_MAINTENANCE: ${{ inputs.supervisor_maintenance }}
   SENTRY_DSN: ${{ vars.SENTRY_DSN }}
-  # Use the canonical public repository returned for the former paperboat-cli
-  # alias. This release asset repository is independent of workflow hosting.
-  PAPERBOAT_GITHUB_REPOSITORY: pinksaucepasta/paperboat
+  # Preserve the repository identity already signed into production TUF.
+  # GitHub redirects this alias to the canonical repository.
+  PAPERBOAT_GITHUB_REPOSITORY: pinksaucepasta/paperboat-cli
 
 defaults:
   run:
@@ -557,12 +557,31 @@ jobs:
             -severity routine \
             -supervisor-maintenance="$SUPERVISOR_MAINTENANCE"
           go run ./tools/tuf-repository verify-published -repository "$repository"
+      - name: Build pinned bootstrap verifiers and render the publishable origin
+        shell: bash
+        run: |
+          set -euo pipefail
+          bootstrap_dir="$RUNNER_TEMP/candidate-bootstrap"
+          origin_dir="$RUNNER_TEMP/candidate-origin"
+          mkdir -p "$bootstrap_dir" "$origin_dir/tuf/targets"
+          for target in linux-amd64 linux-arm64 darwin-arm64 windows-amd64 windows-arm64; do
+            platform=${target%-*}
+            architecture=${target#*-}
+            suffix=
+            if [ "$platform" = windows ]; then suffix=.exe; fi
+            CGO_ENABLED=0 GOOS="$platform" GOARCH="$architecture" go build -buildvcs=false -trimpath -ldflags='-s -w' \
+              -o "$bootstrap_dir/pb-bootstrap-$target$suffix" ./cmd/pb-bootstrap
+          done
+          cp -R "$RUNNER_TEMP/tuf-candidate/metadata" "$origin_dir/tuf/"
+          python3 tools/render-installers.py "$RELEASE_VERSION" "$PAPERBOAT_GITHUB_REPOSITORY" "$bootstrap_dir" "$origin_dir/install" "$origin_dir/windows"
+          chmod 0755 "$origin_dir/install"
+          tar -C "$origin_dir" -czf "$RUNNER_TEMP/candidate-origin.tgz" install windows tuf
       - name: Assemble private Actions candidate artifact
         shell: bash
         run: |
           set -euo pipefail
           bundle_root="$RUNNER_TEMP/paperboat-update-candidate"
-          mkdir -p "$bundle_root/artifacts" "$bundle_root/tuf/metadata" "$bundle_root/qualification"
+          mkdir -p "$bundle_root/artifacts" "$bundle_root/tuf/metadata" "$bundle_root/qualification" "$bundle_root/bootstrap"
           cp "$RUNNER_TEMP/candidate-artifacts/pb-darwin-arm64.pkg" "$bundle_root/artifacts/"
           cp "$RUNNER_TEMP/candidate-artifacts/pb-linux-amd64" "$bundle_root/artifacts/"
           cp "$RUNNER_TEMP/candidate-artifacts/pb-windows-amd64.exe" "$bundle_root/artifacts/"
@@ -570,6 +589,8 @@ jobs:
           cp "$RUNNER_TEMP/paperboat-update-candidate-inputs/manifest.json" "$bundle_root/"
           cp "$RUNNER_TEMP/paperboat-update-candidate-inputs/deployment-plan.json" "$bundle_root/"
           cp "$RUNNER_TEMP/candidate-qualification/windows-amd64-native-qualification.json" "$bundle_root/qualification/"
+          cp "$RUNNER_TEMP/candidate-bootstrap/"* "$bundle_root/bootstrap/"
+          cp "$RUNNER_TEMP/candidate-origin.tgz" "$bundle_root/origin.tgz"
           cat > "$bundle_root/README.txt" <<EOF
           Paperboat update candidate $RELEASE_VERSION
           Source commit: $GITHUB_SHA
@@ -579,8 +600,8 @@ jobs:
           the production metadata chain. It was not published to GitHub Releases,
           the TUF origin, or the installer endpoint. The signed target URLs refer
           to future release assets in the repository above. A later authorized
-          publication must upload these exact bytes and arrange a candidate feed
-          before installed clients can consume this metadata.
+          publication must upload the product and bootstrap bytes and activate the
+          included origin bundle through the existing publication validator.
           EOF
           tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/paperboat-update-candidate-$RELEASE_VERSION.tgz" paperboat-update-candidate
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -597,5 +618,5 @@ jobs:
           {
             printf 'Candidate **%s** was signed and stored as a private Actions artifact.\n\n' "$RELEASE_VERSION"
             printf 'This workflow did not create a GitHub Release, publish a TUF origin, update Latest, or publish an installer.\n'
-            printf 'The signed asset URLs require a separately authorized prerelease upload and a candidate feed before device updates can consume this artifact.\n'
+            printf 'The signed asset URLs require an authorized product/bootstrap upload and origin activation before device updates can consume this artifact.\n'
           } >> "$GITHUB_STEP_SUMMARY"
