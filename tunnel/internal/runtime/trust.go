@@ -4,7 +4,6 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"os"
 
@@ -46,11 +45,8 @@ func LoadTrust(jwksPath, revocationsPath, usageKeyPath string) (Trust, error) {
 		EdgeNodeID string `json:"edge_node_id"`
 		PrivateKey string `json:"private_key"`
 	}
-	if err := strictjson.Decode(keyDocument, &key, 64); err != nil {
-		return Trust{}, errors.Join(ErrProcessInvalid, err)
-	}
-	if key.KeyID == "" || len(key.KeyID) > 128 || key.EdgeNodeID == "" || len(key.EdgeNodeID) > 128 {
-		return Trust{}, ErrProcessInvalid
+	if err := strictjson.Decode(keyDocument, &key, 64); err != nil || key.KeyID == "" || len(key.KeyID) > 128 || key.EdgeNodeID == "" || len(key.EdgeNodeID) > 128 {
+		return Trust{}, fmt.Errorf("decode usage key document: %w", ErrProcessInvalid)
 	}
 	private, err := base64.RawURLEncoding.DecodeString(key.PrivateKey)
 	if err != nil || base64.RawURLEncoding.EncodeToString(private) != key.PrivateKey || len(private) != ed25519.PrivateKeySize && len(private) != ed25519.SeedSize {
@@ -70,17 +66,11 @@ func LoadTrust(jwksPath, revocationsPath, usageKeyPath string) (Trust, error) {
 
 func readTrustFile(path string, ownerOnly bool) ([]byte, error) {
 	info, err := os.Lstat(path)
-	if err != nil {
-		return nil, errors.Join(ErrProcessInvalid, err)
-	}
-	if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > maxTrustDocument || ownerOnly && info.Mode().Perm()&0077 != 0 {
+	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > maxTrustDocument || ownerOnly && info.Mode().Perm()&0077 != 0 {
 		return nil, ErrProcessInvalid
 	}
 	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, errors.Join(ErrProcessInvalid, err)
-	}
-	if len(data) == 0 || len(data) > maxTrustDocument {
+	if err != nil || len(data) == 0 || len(data) > maxTrustDocument {
 		return nil, ErrProcessInvalid
 	}
 	return data, nil

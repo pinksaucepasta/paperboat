@@ -234,7 +234,7 @@ func TestRelayControlAuthorityCannotForwardApplicationPackets(t *testing.T) {
 	server, address, _ := f.start("127.0.0.1:0")
 	ka, kb := key.NewNode().Public(), key.NewNode().Public()
 	ca, cb := certificate(t), certificate(t)
-	ga, gb := f.grant(ka, ca, "initiator"), f.grant(kb, cb, "machine-relay")
+	ga, gb := f.grant(ka, ca, "initiator"), f.grant(kb, cb, "device-relay")
 	ga.RelayControlPeers = []string{gb.WireGuardPublicKey}
 	gb.RelayControlPeers = []string{ga.WireGuardPublicKey}
 	a, b := f.client(address, ca, ga), f.client(address, cb, gb)

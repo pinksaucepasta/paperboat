@@ -79,7 +79,7 @@ func rollbackWindowsFeature(ctx context.Context, b windowsActivationBackend, f w
 	if err := f.RestoreFeature(ctx, j); err != nil {
 		return j, errors.Join(cause, err)
 	}
-	if err := b.CommitCLI(ctx, windowsActivationJournal{Version: j.PreviousVersion}); err != nil {
+	if err := b.CommitCLI(ctx, j); err != nil {
 		return j, errors.Join(cause, err)
 	}
 	if err := b.VerifyRollback(ctx, j); err != nil {

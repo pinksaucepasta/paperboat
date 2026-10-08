@@ -76,11 +76,8 @@ func LoadDeployment(path string) (Deployment, error) {
 	}
 	defer file.Close()
 	data, err := io.ReadAll(io.LimitReader(file, maxDeploymentBytes+1))
-	if err != nil {
-		return Deployment{}, err
-	}
-	if len(data) > maxDeploymentBytes {
-		return Deployment{}, invalid("deployment config", errors.New("document is oversized"))
+	if err != nil || len(data) > maxDeploymentBytes {
+		return Deployment{}, invalid("deployment config", errors.New("document is unavailable or oversized"))
 	}
 	deployment := Deployment{MaxBodyBytes: defaultGatewayBodyBytes, MaxHeaderBytes: defaultGatewayHeaderBytes}
 	if err := strictjson.Decode(data, &deployment, 64); err != nil {

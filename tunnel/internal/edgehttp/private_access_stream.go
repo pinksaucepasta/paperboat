@@ -3,7 +3,6 @@ package edgehttp
 import (
 	"context"
 	"errors"
-	yamux "github.com/libp2p/go-yamux/v5"
 	"io"
 	"net"
 	"net/http"
@@ -36,7 +35,6 @@ func (f PrivateAccessTargetFunc) OpenPrivateAccessTarget(ctx context.Context, re
 }
 
 type PrivateAccessStreamBridgeConfig struct {
-	OnFailure        func(context.Context, string, error)
 	Authorizer       control.PrivateAccessGrantAuthorizer
 	Target           PrivateAccessTarget
 	MaximumStreams   int
@@ -46,7 +44,6 @@ type PrivateAccessStreamBridgeConfig struct {
 }
 
 type PrivateAccessStreamBridge struct {
-	onFailure        func(context.Context, string, error)
 	authorizer       control.PrivateAccessGrantAuthorizer
 	target           PrivateAccessTarget
 	maximum          int
@@ -74,17 +71,16 @@ func NewPrivateAccessStreamBridge(config PrivateAccessStreamBridgeConfig) (*Priv
 	if config.Clock == nil {
 		config.Clock = func() time.Time { return time.Now().UTC() }
 	}
-	return &PrivateAccessStreamBridge{onFailure: config.OnFailure, authorizer: config.Authorizer, target: config.Target, maximum: config.MaximumStreams, authorizeTimeout: config.AuthorizeTimeout, openTimeout: config.OpenTimeout, clock: config.Clock}, nil
+	return &PrivateAccessStreamBridge{authorizer: config.Authorizer, target: config.Target, maximum: config.MaximumStreams, authorizeTimeout: config.AuthorizeTimeout, openTimeout: config.OpenTimeout, clock: config.Clock}, nil
 }
 
 func (b *PrivateAccessStreamBridge) Serve(ctx context.Context, server *datacarrier.Server) error {
 	if b == nil || ctx == nil || server == nil {
 		return ErrPrivateAccessStreamInvalid
 	}
-	ctx, cancel := context.WithCancel(ctx)
 	permits := make(chan struct{}, b.maximum)
 	var streams sync.WaitGroup
-	defer func() { cancel(); streams.Wait() }()
+	defer streams.Wait()
 	for {
 		select {
 		case permits <- struct{}{}:
@@ -96,15 +92,12 @@ func (b *PrivateAccessStreamBridge) Serve(ctx context.Context, server *datacarri
 		stream, metadata, err := server.AcceptAccessStream(ctx)
 		if err != nil {
 			<-permits
-			if requestCanceled(ctx, err) {
-				return errors.Join(ctx.Err(), err)
+			if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, net.ErrClosed) {
+				return ctx.Err()
 			}
 			select {
 			case <-server.Done():
-				if requestErrorLeaves(err, func(leaf error) bool { return leaf == datacarrier.ErrCarrierClosed || leaf == net.ErrClosed }, true) {
-					return nil
-				}
-				return err
+				return nil
 			default:
 				return err
 			}
@@ -119,51 +112,29 @@ func (b *PrivateAccessStreamBridge) Serve(ctx context.Context, server *datacarri
 	}
 }
 
-func (b *PrivateAccessStreamBridge) serveStream(parent context.Context, stream *datacarrier.Stream, metadata connectorprotocol.StreamOpen, identity datacarrier.Identity) (result error) {
+func (b *PrivateAccessStreamBridge) serveStream(parent context.Context, stream *datacarrier.Stream, metadata connectorprotocol.StreamOpen, identity datacarrier.Identity) {
 	if stream == nil {
-		return ErrPrivateAccessStreamInvalid
+		return
 	}
-	closeDone := make(chan struct{})
-	stopClose := context.AfterFunc(parent, func() { defer close(closeDone); _ = stream.Close() })
-	defer func() {
-		if !stopClose() {
-			<-closeDone
-		}
-	}()
-	phase := "private_stream_open"
-	observeCtx := parent
-	streamClosed := false
-	defer func() {
-		if !streamClosed {
-			if closeErr := stream.Close(); closeErr != nil {
-				result = errors.Join(result, closeErr)
-			}
-		}
-		b.observe(observeCtx, phase, result)
-	}()
+	defer stream.Close()
 	now := b.clock().UTC()
 	open, err := connectorprotocol.ReadPrivateAccessOpen(stream, now)
 	if err != nil || !privateAccessMetadataMatches(metadata, open.Request, identity) {
-		writeErr := connectorprotocol.WritePrivateAccessResult(stream, connectorprotocol.PrivateAccessResult{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Status: http.StatusUnauthorized})
-		return errors.Join(err, writeErr)
+		_ = connectorprotocol.WritePrivateAccessResult(stream, connectorprotocol.PrivateAccessResult{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Status: http.StatusUnauthorized})
+		return
 	}
 	authorizeCtx, cancelAuthorize := context.WithTimeout(parent, b.authorizeTimeout)
 	decision, err := b.authorizer.AuthorizePrivateAccessGrant(authorizeCtx, open.Grant, open.Request)
 	cancelAuthorize()
 	if err != nil {
-		phase = "private_stream_authorize"
-		writeErr := connectorprotocol.WritePrivateAccessResult(stream, connectorprotocol.PrivateAccessResult{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Status: privateAccessErrorStatus(err)})
-		if writeErr == nil {
-			return err
-		}
-		return errors.Join(err, writeErr)
+		_ = connectorprotocol.WritePrivateAccessResult(stream, connectorprotocol.PrivateAccessResult{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Status: privateAccessErrorStatus(err)})
+		return
 	}
 	if !decision.Allowed || !decision.ExpiresAt.After(b.clock().UTC()) {
-		return connectorprotocol.WritePrivateAccessResult(stream, connectorprotocol.PrivateAccessResult{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Status: http.StatusForbidden})
+		_ = connectorprotocol.WritePrivateAccessResult(stream, connectorprotocol.PrivateAccessResult{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Status: http.StatusForbidden})
+		return
 	}
 	lifetime, cancelLifetime := context.WithDeadline(parent, decision.ExpiresAt)
-	lifetime = context.WithValue(lifetime, privateIngressDecisionKey{}, decision.Ingress)
-	observeCtx = lifetime
 	defer cancelLifetime()
 	openCtx, cancelOpen := context.WithTimeout(lifetime, b.openTimeout)
 	var target io.ReadWriteCloser
@@ -173,50 +144,24 @@ func (b *PrivateAccessStreamBridge) serveStream(parent context.Context, stream *
 		target, err = b.target.OpenPrivateAccessTarget(openCtx, open.Request)
 	}
 	cancelOpen()
-	phase = "private_stream_target"
 	if err != nil || target == nil {
-		if err == nil {
-			err = ErrPrivateAccessStreamInvalid
-		}
 		if target != nil {
-			err = errors.Join(err, target.Close())
+			_ = target.Close()
 		}
-		return errors.Join(err, connectorprotocol.WritePrivateAccessResult(stream, connectorprotocol.PrivateAccessResult{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Status: http.StatusServiceUnavailable}))
+		_ = connectorprotocol.WritePrivateAccessResult(stream, connectorprotocol.PrivateAccessResult{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Status: http.StatusServiceUnavailable})
+		return
 	}
-	targetClosed := false
-	defer func() {
-		if !targetClosed {
-			if closeErr := target.Close(); closeErr != nil {
-				result = errors.Join(result, closeErr)
-			}
-		}
-	}()
-	phase = "private_stream_result"
+	defer target.Close()
 	if err := connectorprotocol.WritePrivateAccessResult(stream, connectorprotocol.PrivateAccessResult{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Status: http.StatusOK, ExpiresAt: decision.ExpiresAt}); err != nil {
-		return err
+		return
 	}
-	phase = "private_stream_copy"
-	copyDone := make(chan error, 2)
-	go func() { _, err := io.Copy(target, stream); copyDone <- err }()
-	go func() { _, err := io.Copy(stream, target); copyDone <- err }()
-	var first error
-	completed := 0
+	copyDone := make(chan struct{}, 2)
+	go func() { _, _ = io.Copy(target, stream); copyDone <- struct{}{} }()
+	go func() { _, _ = io.Copy(stream, target); copyDone <- struct{}{} }()
 	select {
-	case first = <-copyDone:
-		completed++
+	case <-copyDone:
 	case <-lifetime.Done():
-		first = lifetime.Err()
 	}
-	cancelLifetime()
-	closeErr := errors.Join(target.Close(), stream.Close())
-	targetClosed = true
-	streamClosed = true
-	result = errors.Join(first, closeErr)
-	for completed < 2 {
-		result = errors.Join(result, <-copyDone)
-		completed++
-	}
-	return result
 }
 
 func privateAccessMetadataMatches(metadata connectorprotocol.StreamOpen, request connectorprotocol.PrivateAccessRequest, identity datacarrier.Identity) bool {
@@ -224,7 +169,7 @@ func privateAccessMetadataMatches(metadata connectorprotocol.StreamOpen, request
 	if request.Protocol == "tcp" {
 		wantKind = connectorprotocol.PrivateAccessTCP
 	}
-	return identity.AccountID == request.AccountID && identity.HostID == request.MachineID && identity.TunnelID == metadata.TunnelID && identity.ConnectorID == metadata.ConnectorID && identity.SessionID == metadata.SessionID && identity.ProcessGeneration == metadata.ProcessGeneration && identity.Generation == metadata.Generation && metadata.Kind == wantKind && metadata.AccountID == request.AccountID && metadata.RouteID == request.RouteID && metadata.SessionID == request.CarrierSessionID && metadata.ProcessGeneration == request.ProcessGeneration && metadata.Generation == request.ConfigGeneration && metadata.RequestID == request.RequestID
+	return identity.AccountID == request.AccountID && identity.HostID == request.DeviceID && identity.TunnelID == metadata.TunnelID && identity.ConnectorID == metadata.ConnectorID && identity.SessionID == metadata.SessionID && identity.ProcessGeneration == metadata.ProcessGeneration && identity.Generation == metadata.Generation && metadata.Kind == wantKind && metadata.AccountID == request.AccountID && metadata.RouteID == request.RouteID && metadata.SessionID == request.CarrierSessionID && metadata.ProcessGeneration == request.ProcessGeneration && metadata.Generation == request.ConfigGeneration && metadata.RequestID == request.RequestID
 }
 
 func privateAccessErrorStatus(err error) int {
@@ -265,17 +210,7 @@ func (t PrivateAccessHTTPTarget) OpenPrivateAccessTarget(ctx context.Context, re
 		_ = connection.Close()
 		return nil, ErrPrivateAccessStreamInvalid
 	}
-	var token uint64
-	if request.ResourceKind == "tunnel" || request.ResourceKind == "preview" {
-		d, ok := ctx.Value(privateIngressDecisionKey{}).(*connectorprotocol.IngressDecision)
-		if !ok || d == nil {
-			_ = connection.Close()
-			return nil, ErrPrivateAccessStreamInvalid
-		}
-		token, err = t.Connections.RegisterIngress(connection.LocalAddr().String(), request, request.ExpiresAt, *d)
-	} else {
-		token, err = t.Connections.Register(connection.LocalAddr().String(), request, request.ExpiresAt)
-	}
+	token, err := t.Connections.Register(connection.LocalAddr().String(), request, request.ExpiresAt)
 	if err != nil {
 		_ = connection.Close()
 		return nil, err
@@ -342,29 +277,3 @@ func privateTCPRuleMatches(rule route.RouteRule, request connectorprotocol.Priva
 }
 
 var _ PrivateAccessTarget = PrivateAccessRouteTarget{}
-
-func (b *PrivateAccessStreamBridge) observe(ctx context.Context, phase string, err error) {
-	if err == nil || b.onFailure == nil {
-		return
-	}
-	if requestCanceled(ctx, err) || requestErrorLeaves(err, func(leaf error) bool {
-		if reset, ok := leaf.(*yamux.StreamError); ok && reset != nil && ctxErr(ctx) == context.Canceled && reset.ErrorCode == 0 {
-			return true
-		}
-		return leaf == io.EOF || leaf == context.Canceled || ctxErr(ctx) == context.Canceled && (leaf == net.ErrClosed || leaf == io.ErrClosedPipe || leaf == datacarrier.ErrCarrierClosed || leaf == yamux.ErrStreamReset || leaf == yamux.ErrStreamClosed || leaf == yamux.ErrSessionShutdown)
-	}, true) {
-		return
-	}
-	current := err
-	for depth := 0; current != nil && depth < 8; depth++ {
-		if attempt, ok := current.(*control.RequestFailure); ok && attempt != nil {
-			return
-		}
-		wrapper, ok := current.(interface{ Unwrap() error })
-		if !ok {
-			break
-		}
-		current = wrapper.Unwrap()
-	}
-	b.onFailure(ctx, phase, err)
-}

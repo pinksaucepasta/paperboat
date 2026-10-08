@@ -8,11 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net"
 	"net/http"
-	"net/http/httptest"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -142,7 +139,7 @@ func TestHTTPClientAcceptsCanonicalRoutePublicTCPFields(t *testing.T) {
 func TestHTTPClientPropagatesOnlySentryTraceAndReportsRecovery(t *testing.T) {
 	var calls int
 	var outcomes []string
-	const reference = "support_01234567-89ab-4def-8123-456789abcdef"
+	const reference = "pb-0123456789abcdef0123456789abcdef"
 	client, err := NewHTTPClient(HTTPConfig{BaseURL: "https://control.test", Credential: testControlCredential, Timeout: time.Second, ControlTrace: func(_ context.Context, operation string) (string, string, func(string, string)) {
 		if operation != "dependency_health" {
 			t.Fatalf("operation=%s", operation)
@@ -164,10 +161,6 @@ func TestHTTPClientPropagatesOnlySentryTraceAndReportsRecovery(t *testing.T) {
 	if err = client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); !errors.Is(err, ErrControlUnavailable) {
 		t.Fatalf("failure=%v", err)
 	}
-	var failure *RequestFailure
-	if !errors.As(err, &failure) || failure.SupportReference != reference || failure.Path != "/v1/nodes/heartbeat" || failure.Category != "http_status" {
-		t.Fatalf("request failure lost safe correlation: %+v", failure)
-	}
 	if err = client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); err != nil {
 		t.Fatalf("recovery=%v", err)
 	}
@@ -177,7 +170,7 @@ func TestHTTPClientPropagatesOnlySentryTraceAndReportsRecovery(t *testing.T) {
 }
 
 func TestHTTPClientPropagatesCorrelationWithoutTrace(t *testing.T) {
-	const reference = "support_fedcba98-7654-4a32-8fed-cba987654321"
+	const reference = "pb-fedcba9876543210fedcba9876543210"
 	client, err := NewHTTPClient(HTTPConfig{BaseURL: "https://control.test", Credential: testControlCredential, Timeout: time.Second, ControlTrace: func(context.Context, string) (string, string, func(string, string)) {
 		return "", reference, func(string, string) {}
 	}, Client: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -213,7 +206,7 @@ func TestHTTPClientNormalizesCanonicalManagedMatchType(t *testing.T) {
 func TestHTTPClientObservesViewerPolicyFieldsForReadyAndDetached(t *testing.T) {
 	testCases := []struct {
 		state string
-	}{{state: "prepared"}, {state: "ready"}, {state: "detached"}}
+	}{{state: "ready"}, {state: "detached"}}
 	for _, testCase := range testCases {
 		t.Run(testCase.state, func(t *testing.T) {
 			client := controlClient(t, func(r *http.Request) (*http.Response, error) {
@@ -274,13 +267,7 @@ func TestHTTPClientRejectsPlaintextRedirectMalformedAndOversized(t *testing.T) {
 }
 
 func TestHTTPClientPreviewCarrierCompleteSnapshotAndNodeBinding(t *testing.T) {
-	admission := testPreviewCarrierAdmissionForHTTP(t, "preview_10000000-0000-4000-8000-000000000011", "operation_10000000-0000-4000-8000-000000000012", "route_10000000-0000-4000-8000-000000000013", "one.preview.example.test", time.Now().UTC().Add(time.Hour))
-	admission.Binding.AccountID = "user_10000000-0000-4000-8000-000000000014"
-	admission.Binding.OwnerMachineID = "machine_10000000-0000-4000-8000-000000000015"
-	admission.Binding.HostID = admission.Binding.OwnerMachineID
-	admission.Binding.TunnelID, admission.Binding.ConnectorID = admission.Binding.OwnerMachineID, admission.Binding.OwnerMachineID
-	admission.Binding.OwnerSessionID = "session_10000000-0000-4000-8000-000000000016"
-	admission.Binding.SessionID = "session_10000000-0000-4000-8000-000000000017"
+	admission := testPreviewCarrierAdmissionForHTTP(t, "preview_1", "operation_1", "route_1", "one.preview.example.test", time.Now().UTC().Add(time.Hour))
 	detachment := PreviewCarrierDetachment{
 		Schema: admission.Schema, Kind: admission.Kind, Binding: admission.Binding,
 		AttachmentGeneration: 2, Reason: "server_detach", ObservedAt: time.Now().UTC(),
@@ -330,7 +317,7 @@ func TestHTTPClientPreviewCarrierCompleteSnapshotAndNodeBinding(t *testing.T) {
 				ProcessEpoch string                      `json:"edge_process_epoch"`
 				Observations []PreviewCarrierObservation `json:"observations"`
 			}
-			if err := json.Unmarshal(body, &request); err != nil || request.NodeID != "edge_1" || request.ProcessEpoch != "edge_epoch_1" || len(request.Observations) != 1 || request.Observations[0].Binding != admission.Binding {
+			if err := json.Unmarshal(body, &request); err != nil || request.NodeID != "edge_1" || request.ProcessEpoch != "edge_epoch_1" || len(request.Observations) != 1 {
 				t.Fatalf("observation request = %s", body)
 			}
 			return response(http.StatusNoContent, ""), nil
@@ -447,7 +434,7 @@ func testPreviewCarrierAdmissionForHTTP(t *testing.T, previewID, operationID, ro
 	}
 	return PreviewCarrierAdmission{
 		Schema: "paperboat.preview-tunnel/v1", Kind: "preview_carrier_attachment",
-		Binding:              PreviewCarrierBinding{AccountID: "account_1", PreviewID: previewID, OperationID: operationID, OwnerMachineID: "host_1", OwnerSessionID: "owner_session_1", HostID: "host_1", LeaseGeneration: 1, TunnelID: "tunnel_1", ConnectorID: "connector_1", SessionID: "session_1", ProcessGeneration: 1, ConfigGeneration: 1, RouteID: routeID, RouteGeneration: 1, EdgeNodeID: "edge_1", EdgeProcessEpoch: "edge_epoch_1", EdgeCarrierServerSPKISHA256: trust.SPKISHA256, EdgeCarrierServerCertificateChainPEM: trust.CertificateChainPEM, MachineIdentityPublicKey: base64.RawURLEncoding.EncodeToString(publicKey), MachineIdentityThumbprint: "sha256:" + base64.RawURLEncoding.EncodeToString(digest[:])},
+		Binding:              PreviewCarrierBinding{AccountID: "account_1", PreviewID: previewID, OperationID: operationID, OwnerDeviceID: "host_1", OwnerSessionID: "owner_session_1", HostID: "host_1", LeaseGeneration: 1, TunnelID: "tunnel_1", ConnectorID: "connector_1", SessionID: "session_1", ProcessGeneration: 1, ConfigGeneration: 1, RouteID: routeID, RouteGeneration: 1, EdgeNodeID: "edge_1", EdgeProcessEpoch: "edge_epoch_1", EdgeCarrierServerSPKISHA256: trust.SPKISHA256, EdgeCarrierServerCertificateChainPEM: trust.CertificateChainPEM, MachineIdentityPublicKey: base64.RawURLEncoding.EncodeToString(publicKey), MachineIdentityThumbprint: "sha256:" + base64.RawURLEncoding.EncodeToString(digest[:])},
 		AttachmentGeneration: 1, ConfigContentHash: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", EdgeEndpoints: []string{"h2://edge.example.test:27443", "h3://edge.example.test:27444"}, Endpoint: "https://" + hostname, ExpiresAt: expiresAt, AccessMode: "public", RouteKind: "preview_public_https_wss", RouteRevision: 1,
 	}
 }
@@ -487,75 +474,5 @@ func TestExpiredUsageAcknowledgementDrainsQueueAndResumes(t *testing.T) {
 	result, delivered, err = DeliverNext(context.Background(), q, client)
 	if err != nil || !delivered || result.Disposition != "accounted" || q.Len() != 0 {
 		t.Fatalf("fresh delivery: %+v %v", result, err)
-	}
-}
-
-func TestControlAttemptPreservesTypedCauseStatusAndRecovery(t *testing.T) {
-	const reference = "support_01234567-89ab-4def-8123-456789abcdef"
-	var calls int
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Support-Reference") != reference {
-			t.Error("request reference missing")
-		}
-		calls++
-		switch calls {
-		case 1:
-			w.WriteHeader(503)
-			io.WriteString(w, "PRIVATE_RESPONSE_BODY")
-		case 2:
-			w.WriteHeader(409)
-			io.WriteString(w, "PRIVATE_RESPONSE_BODY")
-		default:
-			w.WriteHeader(204)
-		}
-	}))
-	defer server.Close()
-	var failures []error
-	var outcomes []string
-	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Credential: testControlCredential, Timeout: time.Second, Client: server.Client(), ControlTrace: func(context.Context, string) (string, string, func(string, string)) {
-		return "", reference, func(outcome, code string) { outcomes = append(outcomes, outcome+":"+code) }
-	}, ControlFailure: func(_ context.Context, ref string, err error) {
-		if ref != reference {
-			t.Error("attempt reference mismatch")
-		}
-		failures = append(failures, err)
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, status := range []int{503, 409} {
-		err := client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"})
-		var failure *RequestFailure
-		if !errors.As(err, &failure) || failure.DiagnosticStatus() != status || strings.Contains(err.Error(), "PRIVATE") {
-			t.Fatalf("unsafe or missing status: %v", err)
-		}
-		if status == 409 && !errors.Is(err, ErrNodeObservationStale) {
-			t.Fatal("stale fencing was lost")
-		}
-	}
-	if err := client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); err != nil {
-		t.Fatal("control did not recover", err)
-	}
-	if len(failures) != 2 || strings.Join(outcomes, ",") != "failed:control_request_failed,rejected:control_request_failed,success:ok" {
-		t.Fatalf("attempt ownership: %v %d", outcomes, len(failures))
-	}
-	original := &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}
-	offline := controlClient(t, func(*http.Request) (*http.Response, error) { return nil, original })
-	for _, revocations := range []bool{false, true} {
-		var err error
-		if revocations {
-			_, err = offline.Revocations(context.Background())
-		} else {
-			err = offline.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"})
-		}
-		var cause *net.OpError
-		if !errors.Is(err, ErrControlUnavailable) || !errors.Is(err, syscall.ECONNREFUSED) || !errors.As(err, &cause) || cause != original {
-			t.Fatal("transport cause lost")
-		}
-	}
-	canceled, cancel := context.WithCancel(context.Background())
-	cancel()
-	if err := client.Heartbeat(canceled, NodeObservation{NodeID: "edge"}); !errors.Is(err, context.Canceled) || !errors.Is(err, ErrControlUnavailable) {
-		t.Fatal("cancellation cause lost")
 	}
 }

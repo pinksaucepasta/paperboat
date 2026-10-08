@@ -395,7 +395,17 @@ func (e *Engine) syncNow(ctx context.Context) error {
 	if result.Review != nil {
 		e.status.Review = boundPathSummaries(result.Review, e.descriptor.Policy.SummaryLimit)
 	}
+	if result.Landed {
+		// Publication progress survives cleanup/acknowledgement failures.
+		e.lastPush = now
+		e.dirtySince = time.Time{}
+		e.status.LastSuccessfulAt = &now
+	}
 	switch {
+	case result.Landed && err != nil:
+		e.status.State = "warning"
+		e.status.ErrorCode = "repository_unavailable"
+		e.status.RecoveryActions = []string{"check_status"}
 	case err == nil && result.Landed && len(diagnostics.Conflicts) > 0:
 		e.remoteRevision = result.RemoteRevision
 		e.lastPush = now
@@ -417,14 +427,18 @@ func (e *Engine) syncNow(ctx context.Context) error {
 		e.status.LastSuccessfulAt = &now
 		e.status.ErrorCode = ""
 		e.status.RecoveryActions = nil
-	case errors.Is(err, ErrConfigConflict):
-		e.status.State = "conflict"
-		e.status.ErrorCode = "config_conflict"
-		e.status.RecoveryActions = []string{"keep_local", "keep_remote"}
 	case errors.Is(err, ErrSyncUncertain):
 		e.status.State = "sync_uncertain"
 		e.status.ErrorCode = "sync_uncertain"
 		e.status.RecoveryActions = []string{"observe_remote"}
+	case errors.Is(err, ErrRepositoryUnavailable):
+		e.status.State = "offline"
+		e.status.ErrorCode = "repository_unavailable"
+		e.status.RecoveryActions = []string{"check_repository_access", "retry"}
+	case errors.Is(err, ErrConfigConflict):
+		e.status.State = "conflict"
+		e.status.ErrorCode = "config_conflict"
+		e.status.RecoveryActions = []string{"keep_local", "keep_remote"}
 	case errors.Is(err, ErrWritesDisabled):
 		e.status.State = "warning"
 		e.status.ErrorCode = "writes_disabled"
@@ -457,10 +471,6 @@ func (e *Engine) syncNow(ctx context.Context) error {
 		e.status.State = "error"
 		e.status.ErrorCode = "repository_credentials_required"
 		e.status.RecoveryActions = []string{"configure_repository_credentials"}
-	case errors.Is(err, ErrRepositoryUnavailable):
-		e.status.State = "offline"
-		e.status.ErrorCode = "repository_unavailable"
-		e.status.RecoveryActions = []string{"check_repository_access", "retry"}
 	case errors.Is(err, ErrPathRuleInvalid):
 		e.status.State = "error"
 		e.status.ErrorCode = "config_path_invalid"
@@ -489,7 +499,7 @@ func (e *Engine) syncWithRetry(ctx context.Context, remoteRevision string) (Publ
 	var lastErr error
 	for attempt := 0; attempt < e.descriptor.Policy.RetryLimit; attempt++ {
 		result, err := e.syncer.Sync(ctx, remoteRevision)
-		if err == nil || !retryableSyncError(err) || attempt+1 == e.descriptor.Policy.RetryLimit {
+		if result.Landed || result.Uncertain || err == nil || !retryableSyncError(err) || attempt+1 == e.descriptor.Policy.RetryLimit {
 			return result, err
 		}
 		lastErr = err
@@ -521,7 +531,7 @@ func retryableSyncError(err error) bool {
 		!errors.Is(err, ErrManifestUnsafePath) &&
 		!errors.Is(err, ErrBaselineInvalid) &&
 		!errors.Is(err, ErrPathRuleInvalid) &&
-		!errors.Is(err, ErrRepositoryCredentials) &&
+		(!errors.Is(err, ErrRepositoryCredentials) || errors.Is(err, ErrRepositoryUnavailable)) &&
 		!errors.Is(err, ErrConfigurationChanged) &&
 		!errors.Is(err, ErrSourceConfigInvalid)
 }

@@ -46,6 +46,21 @@ func TestRegistryRejectsRouteKindDomainMismatch(t *testing.T) {
 	}
 }
 
+func TestManagedTunnelRoutesRequireOpaqueUUIDHostname(t *testing.T) {
+	registry := NewRegistry("preview.example.test", "runtime.example.test")
+	base := RouteRule{ID: "managed_route", Revision: 1, Kind: TunnelHTTPSWSS, MatchType: MatchManagedExact, PathPrefix: "/", Target: "carrier_01", Protocol: "http", OriginScheme: "http", AccessMode: "public", Generation: 1}
+	for _, host := range []string{
+		"demo.tunnels.example.test",
+		"123e4567-e89b-12d3-a456-426614174000.tunnels.example.test",
+	} {
+		rule := base
+		rule.Hostname = host
+		if err := registry.StageGeneration(1, []RouteRule{rule}); host != "123e4567-e89b-12d3-a456-426614174000.tunnels.example.test" && err == nil || host == "123e4567-e89b-12d3-a456-426614174000.tunnels.example.test" && err != nil {
+			t.Fatalf("managed host %q stage error=%v", host, err)
+		}
+	}
+}
+
 func TestRegistryReplaceRejectsStaleSnapshotWithoutMutation(t *testing.T) {
 	registry := NewRegistry("preview.example.test", "example.test")
 	current := Attachment{ID: "route", Revision: 3, Environment: "env", Node: "edge", Generation: 2, Host: "app.example.test", Target: "127.0.0.1:8080", Kind: HelperHTTPSWSS}

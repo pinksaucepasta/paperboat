@@ -46,12 +46,18 @@ type repositoryContextCloser struct {
 
 func newRepositoryContextCloser(ctx context.Context, c io.Closer) *repositoryContextCloser {
 	r := &repositoryContextCloser{closer: c}
-	r.stop = context.AfterFunc(ctx, func() { _ = c.Close() })
+	r.stop = context.AfterFunc(ctx, r.closeUnderlying)
 	return r
 }
 func (r *repositoryContextCloser) Close() error {
-	r.once.Do(func() { r.stop(); r.err = r.closer.Close() })
+	r.stop()
+	r.closeUnderlying()
 	return r.err
+}
+
+// Both owners join the same close and retain its original outcome.
+func (r *repositoryContextCloser) closeUnderlying() {
+	r.once.Do(func() { r.err = r.closer.Close() })
 }
 
 type repositorySSHSession struct {

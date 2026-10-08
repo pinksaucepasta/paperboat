@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"errors"
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -35,9 +34,6 @@ func (v PasswordVault) provisionHost(ctx context.Context, machine string, select
 		}
 		if storedSelection {
 			selection = append([]api.VaultHostSelection{}, host.Selection...)
-			if host.Bundle.ProjectionRevision == 0 {
-				return ErrIntegrity
-			}
 		}
 		b := host.Bundle
 		if b.AccountID != v.AccountID || b.MachineID != machine || b.State == "revoked" || len(selection) > environmente2ee.MaximumVariables {
@@ -138,7 +134,8 @@ type VaultHostInventoryClient interface {
 	PendingVaultHosts(context.Context) ([]api.VaultHostSummary, error)
 }
 
-// ReconcileHosts refreshes only previously provisioned, caller-owned recipients.
+// ReconcileHosts refreshes already registered caller-owned recipients, keeping
+// their exact selections. Initial empty delivery never authorizes base names.
 // Collect all pages before writes: publishing shrinks the pending inventory.
 func (v PasswordVault) ReconcileHosts(ctx context.Context) (int, error) {
 	c, ok := v.Client.(VaultHostInventoryClient)
@@ -155,8 +152,7 @@ func (v PasswordVault) ReconcileHosts(ctx context.Context) (int, error) {
 			return completed, err
 		}
 		err := v.provisionHost(ctx, host.MachineID, nil, true)
-		var conflict *HostRefreshConflict
-		if errors.As(err, &conflict) {
+		if hostRefreshCanRetry(err) {
 			err = v.provisionHost(ctx, host.MachineID, nil, true)
 		}
 		if err != nil {
@@ -165,4 +161,49 @@ func (v PasswordVault) ReconcileHosts(ctx context.Context) (int, error) {
 		completed++
 	}
 	return completed, nil
+}
+
+// HostPublicationPending retains the durable operation for exact-byte resume.
+type HostPublicationPending struct{ Cause error }
+
+func (e *HostPublicationPending) Error() string {
+	return "ENV recipient publication remains pending; resume the exact staged operation"
+}
+func (e *HostPublicationPending) Unwrap() error { return e.Cause }
+
+// HostRotationRequired releases a rejected/superseded host journal only after
+// checking its signed binding against the authorized current host cursor.
+type HostRotationRequired struct {
+	Cause     error
+	Published bool
+}
+
+func (e *HostRotationRequired) Error() string {
+	return "ENV key rotation is required before recipient refresh"
+}
+func (e *HostRotationRequired) Unwrap() error { return e.Cause }
+
+// The owning publication handler proves the rejection. An independent cleanup
+// failure must remain visible instead of being erased by a successful retry.
+func hostRefreshCanRetry(err error) bool {
+	for range 16 {
+		if err == nil {
+			return false
+		}
+		switch cause := err.(type) {
+		case *HostRefreshConflict:
+			return cause != nil
+		case interface{ Unwrap() []error }:
+			children := cause.Unwrap()
+			if len(children) != 1 {
+				return false
+			}
+			err = children[0]
+		case interface{ Unwrap() error }:
+			err = cause.Unwrap()
+		default:
+			return false
+		}
+	}
+	return false
 }

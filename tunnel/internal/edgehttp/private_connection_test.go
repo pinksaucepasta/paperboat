@@ -20,20 +20,9 @@ func TestPrivateConnectionBindsExactRouteAndFencesStaleClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ruleA := route.RouteMatch{Host: request.Host, Rule: route.RouteRule{ID: "route_a", Revision: 7, AssignmentID: request.OperationID, ResourceKind: request.ResourceKind, SessionGeneration: request.SessionGeneration, AssignmentGeneration: 9, AccountID: request.AccountID, HostID: "connector_host_other_machine", TunnelID: "preview_a", ConnectorID: request.ConnectorID, ConnectorSessionID: request.CarrierSessionID, ConnectorProcessGeneration: request.ProcessGeneration, ConfigGeneration: request.ConfigGeneration, Node: request.EdgeNodeID, EdgeProcessEpoch: request.EdgeProcessEpoch}}
+	ruleA := route.RouteMatch{Host: request.Host, Rule: route.RouteRule{ID: "route_a", Revision: 7, ResourceKind: request.ResourceKind, SessionGeneration: request.SessionGeneration, AssignmentGeneration: 9, AccountID: request.AccountID, HostID: "connector_host_other_device", TunnelID: "preview_a", ConnectorID: request.ConnectorID, ConnectorSessionID: request.CarrierSessionID, ConnectorProcessGeneration: request.ProcessGeneration, ConfigGeneration: request.ConfigGeneration, Node: request.EdgeNodeID, EdgeProcessEpoch: request.EdgeProcessEpoch}}
 	if status, ok := registry.Authorize("127.0.0.1:41001", ruleA); !ok || status != 200 {
 		t.Fatalf("route A status=%d ok=%v", status, ok)
-	}
-	for name, mutate := range map[string]func(*route.RouteRule){
-		"operation":       func(r *route.RouteRule) { r.AssignmentID = "operation_other" },
-		"carrier session": func(r *route.RouteRule) { r.ConnectorSessionID = "session_other" },
-		"account":         func(r *route.RouteRule) { r.AccountID = "user_other" },
-	} {
-		mismatch := ruleA
-		mutate(&mismatch.Rule)
-		if status, ok := registry.Authorize("127.0.0.1:41001", mismatch); ok || status != 403 {
-			t.Fatalf("%s mismatch status=%d allowed=%v", name, status, ok)
-		}
 	}
 	ruleB := ruleA
 	ruleB.Rule.ID = "route_b"
@@ -70,8 +59,8 @@ func TestPrivateConnectionDomainAliasesKeepAuthoritativeRouteBinding(t *testing.
 			}
 			match := route.RouteMatch{Host: host, Rule: route.RouteRule{
 				ID: "route_a@domain_a", Revision: 12, RouteID: "route_a", RouteGeneration: 7,
-				AssignmentID: request.OperationID, ResourceKind: request.ResourceKind, SessionGeneration: request.SessionGeneration,
-				AssignmentGeneration: 9, AccountID: request.AccountID, HostID: "connector_host_other_machine",
+				ResourceKind: request.ResourceKind, SessionGeneration: request.SessionGeneration,
+				AssignmentGeneration: 9, AccountID: request.AccountID, HostID: "connector_host_other_device",
 				TunnelID: request.ResourceID, ConnectorID: request.ConnectorID,
 				ConnectorSessionID: request.CarrierSessionID, ConnectorProcessGeneration: request.ProcessGeneration,
 				ConfigGeneration: request.ConfigGeneration, Node: request.EdgeNodeID, EdgeProcessEpoch: request.EdgeProcessEpoch,

@@ -13,7 +13,7 @@ pb-env-unset - Remove one environment variable
 Remove one environment variable
 
 .PP
-Delete one ENV name from the selected personal, team, or host scope. the confirmation code confirms removal; other names and scopes remain intact.
+Delete one ENV name from the selected personal, team, or host scope. The confirmation code confirms removal. Previously selected recipients receive a refreshed encrypted delivery with the deleted value omitted; running processes retain their environment.
 
 .PP
 ENV values are encrypted before they leave the client. Commands select personal, team, or host scope explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
@@ -36,7 +36,7 @@ JSON output is supported with --json.
 
 .PP
 \fB--machine\fP=""
-	machine name or ID; defaults to the personal scope
+	Personal override for an owned machine, even in a Team workspace; omitted uses the active workspace
 
 .PP
 \fB--team\fP=""

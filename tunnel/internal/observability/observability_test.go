@@ -1,7 +1,6 @@
 package observability
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -49,7 +48,7 @@ func TestPrivateHandlerReportsBoundedDiagnosticsAndMetrics(t *testing.T) {
 	}
 	controlErr := errors.New("Authorization: Bearer secret")
 	sessionRoutes := 2
-	handler, err := NewHandler(Sources{Node: state.Snapshot, Manager: manager.Snapshot, Sessions: func() int { return 1 }, SessionRoutes: func() int { return sessionRoutes }, ActiveStreams: func() uint32 { return 3 }, RouteCount: func() int { return 2 }, Usage: queue.Stats, ControlErr: func() error { return controlErr }, RouteErr: func() error { return nil }, UsageErr: func() error { return nil }, CarrierRunning: func() bool { return true }, Traffic: usage.NewCounters().Snapshot, Now: func() time.Time { return now }})
+	handler, err := NewHandler(Sources{Node: state.Snapshot, Manager: manager.Snapshot, Sessions: func() int { return 1 }, SessionRoutes: func() int { return sessionRoutes }, ActiveStreams: func() uint32 { return 3 }, RouteCount: func() int { return 2 }, Usage: queue.Stats, ControlErr: func() error { return controlErr }, RouteErr: func() error { return nil }, UsageErr: func() error { return nil }, CarrierRunning: func() bool { return true }, Events: NewMetrics().Snapshot, Traffic: usage.NewCounters().Snapshot, Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,6 +83,19 @@ func TestPrivateHandlerReportsBoundedDiagnosticsAndMetrics(t *testing.T) {
 	handler.ServeHTTP(drift, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if drift.Code != http.StatusServiceUnavailable || !strings.Contains(drift.Body.String(), `"route_drift":true`) || !strings.Contains(drift.Body.String(), `"route_drift"`) {
 		t.Fatalf("route drift diagnostics = %d %s", drift.Code, drift.Body.String())
+	}
+}
+
+func TestMetricsRejectUnboundedDimensions(t *testing.T) {
+	metrics := NewMetrics()
+	valid := MetricKey{Kind: Stream, Result: Success, RouteKind: "preview_public_https_wss", Direction: "egress"}
+	if !metrics.Add(valid, 10) || metrics.Get(valid) != 10 {
+		t.Fatal("valid metric rejected")
+	}
+	for _, invalid := range []MetricKey{{Kind: "credential-secret", Result: Success}, {Kind: Stream, Result: "user-input"}, {Kind: Stream, Result: Success, RouteKind: "route-id-123"}, {Kind: Usage, Result: Success, Direction: "host.example"}} {
+		if metrics.Add(invalid, 1) {
+			t.Fatalf("unbounded metric accepted: %+v", invalid)
+		}
 	}
 }
 
@@ -132,7 +144,7 @@ func TestPrivateHandlerProjectsTypedHealthEventsMetricsAndDrops(t *testing.T) {
 	if err := typedMetrics.AddCounter(edgetelemetry.MetricRouteRequests, edgetelemetry.MetricLabels{"route_kind": "tunnel_https_wss", "outcome": "success"}, 2); err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(Sources{Node: state.Snapshot, Manager: manager.Snapshot, Sessions: func() int { return 0 }, SessionRoutes: func() int { return 0 }, ActiveStreams: func() uint32 { return 0 }, RouteCount: func() int { return 0 }, Usage: queue.Stats, ControlErr: func() error { return nil }, RouteErr: func() error { return nil }, UsageErr: func() error { return nil }, CarrierRunning: func() bool { return true }, Traffic: usage.NewCounters().Snapshot, Health: health.Snapshot, Lifecycle: events.Snapshot, TypedMetrics: typedMetrics.Snapshot, TelemetryDrops: func() uint64 { return 3 }, Now: func() time.Time { return now }})
+	handler, err := NewHandler(Sources{Node: state.Snapshot, Manager: manager.Snapshot, Sessions: func() int { return 0 }, SessionRoutes: func() int { return 0 }, ActiveStreams: func() uint32 { return 0 }, RouteCount: func() int { return 0 }, Usage: queue.Stats, ControlErr: func() error { return nil }, RouteErr: func() error { return nil }, UsageErr: func() error { return nil }, CarrierRunning: func() bool { return true }, Events: NewMetrics().Snapshot, Traffic: usage.NewCounters().Snapshot, Health: health.Snapshot, Lifecycle: events.Snapshot, TypedMetrics: typedMetrics.Snapshot, TelemetryDrops: func() uint64 { return 3 }, Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,41 +161,5 @@ func TestPrivateHandlerProjectsTypedHealthEventsMetricsAndDrops(t *testing.T) {
 		if !strings.Contains(metrics.Body.String(), expected) {
 			t.Fatalf("metrics missing %q: %s", expected, metrics.Body.String())
 		}
-	}
-}
-
-func TestMetricDescriptorsFollowTypedTelemetryCatalog(t *testing.T) {
-	descriptors := MetricDescriptors()
-	byName := make(map[string]MetricDescriptor, len(descriptors))
-	for _, descriptor := range descriptors {
-		byName[descriptor.Name] = descriptor
-	}
-	for _, typed := range edgetelemetry.MetricDescriptors() {
-		descriptor, ok := byName[typed.Name]
-		if !ok || descriptor.Kind != string(typed.Kind) {
-			t.Fatalf("typed metric %q missing from endpoint descriptors", typed.Name)
-		}
-		if typed.Histogram != nil && len(descriptor.Buckets) != len(typed.Histogram.Buckets) {
-			t.Fatalf("histogram %q buckets=%v want=%v", typed.Name, descriptor.Buckets, typed.Histogram.Buckets)
-		}
-	}
-	if _, ok := byName["paperboat_tunnel_events_total"]; ok {
-		t.Fatal("unused event counter remains documented")
-	}
-}
-
-func TestErrorProjectionUsesOwnedCodesAndRecovery(t *testing.T) {
-	for _, err := range []error{edgeerrors.New(edgeerrors.Code("PRIVATE_CODE"), "PRIVATE_MESSAGE", "PRIVATE_RECOVERY"), edgeerrors.New(edgeerrors.CodeCredentialInvalid, "PRIVATE_MESSAGE", "PRIVATE_RECOVERY"), errors.Join(errors.New("PRIVATE_CAUSE"), edgeerrors.New(edgeerrors.CodeRevoked, "PRIVATE_MESSAGE", "PRIVATE_RECOVERY"))} {
-		encoded, _ := json.Marshal(Error(err))
-		if strings.Contains(string(encoded), "PRIVATE_") {
-			t.Fatal("private typed error fields exported")
-		}
-	}
-	if actual := Error(edgeerrors.New(edgeerrors.CodeCredentialInvalid, "private", "private")); actual.Code != "credential_invalid" || actual.Recovery != "request a fresh admission" {
-		t.Fatalf("owned recovery lost: %+v", actual)
-	}
-	var nilError *edgeerrors.Error
-	if actual := Error(nilError); actual.Code != "internal_error" {
-		t.Fatal("typed nil accepted")
 	}
 }

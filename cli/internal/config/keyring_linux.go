@@ -18,7 +18,7 @@ var errKeyringSecretNotFound = errors.New("credential not found")
 var errKeyringSecretAmbiguous = errors.New("duplicate credentials found")
 
 func unavailableCredentialStore(err error) error {
-	return fmt.Errorf("%w: %v", ErrCredentialStoreUnavailable, err)
+	return credentialStoreFailure("OS credential store unavailable", err)
 }
 
 func linuxSecretAttributes(ref string) map[string]string {
@@ -91,7 +91,7 @@ func linuxSecretItem(service *secretservice.SecretService, ref string) (dbus.Obj
 	}
 	return items[0], nil
 }
-func (KeyringStore) Set(ref, value string) error {
+func (KeyringStore) Set(ref, value string) (resultErr error) {
 	service, err := secretservice.NewSecretService()
 	if err != nil {
 		return unavailableCredentialStore(err)
@@ -100,7 +100,11 @@ func (KeyringStore) Set(ref, value string) error {
 	if err != nil {
 		return unavailableCredentialStore(err)
 	}
-	defer service.Close(session)
+	defer func() {
+		if closeErr := service.Close(session); closeErr != nil {
+			resultErr = errors.Join(resultErr, safeConfigCause("OS credential store session could not be closed", closeErr))
+		}
+	}()
 	collection := service.GetLoginCollection()
 	if err := service.Unlock(collection.Path()); err != nil {
 		return unavailableCredentialStore(err)
@@ -152,7 +156,7 @@ func (KeyringStore) Set(ref, value string) error {
 	}
 	return nil
 }
-func (KeyringStore) Get(ref string) (string, error) {
+func (KeyringStore) Get(ref string) (value string, resultErr error) {
 	service, err := secretservice.NewSecretService()
 	if err != nil {
 		return "", unavailableCredentialStore(err)
@@ -168,7 +172,14 @@ func (KeyringStore) Get(ref string) (string, error) {
 	if err != nil {
 		return "", unavailableCredentialStore(err)
 	}
-	defer service.Close(session)
+	defer func() {
+		if closeErr := service.Close(session); closeErr != nil {
+			resultErr = errors.Join(resultErr, safeConfigCause("OS credential store session could not be closed", closeErr))
+		}
+		if resultErr != nil {
+			value = ""
+		}
+	}()
 	if err := service.Unlock(item); err != nil {
 		return "", unavailableCredentialStore(err)
 	}

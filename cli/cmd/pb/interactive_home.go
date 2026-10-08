@@ -638,10 +638,7 @@ func renderHomeText(command *cobra.Command, title, content string) error {
 	options := append(selector.ProgramOptions(os.Stdin, command.ErrOrStderr()), tea.WithContext(command.Context()))
 	result, err := tea.NewProgram(homeTextModel{ctx: command.Context(), title: title, content: content, view: view, width: 80, height: 24}, options...).Run()
 	if err != nil {
-		if errors.Is(err, tea.ErrProgramKilled) && command.Context().Err() != nil {
-			return context.Canceled
-		}
-		return err
+		return homeProgramFailure(command.Context(), err)
 	}
 	if result.(homeTextModel).interrupted {
 		return selector.ErrInterrupted

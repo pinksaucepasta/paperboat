@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/environmente2ee"
 )
@@ -15,9 +16,25 @@ type VaultHostSelection struct {
 	OwnerID   string `json:"owner_id"`
 	Name      string `json:"name"`
 }
+type VaultProjectionCursor struct {
+	Revision   uint64 `json:"revision"`
+	DocumentID string `json:"document_id"`
+}
+type VaultProjectionObservation struct {
+	Schema             string                 `json:"schema"`
+	ObservationSeq     uint64                 `json:"observation_seq"`
+	HostRecipientKeyID string                 `json:"host_recipient_key_id"`
+	Projection         *VaultProjectionCursor `json:"projection"`
+	FenceGeneration    uint64                 `json:"fence_generation"`
+	State              string                 `json:"state"`
+	ErrorCode          *string                `json:"error_code"`
+	ObservedAt         time.Time              `json:"observed_at"`
+}
 type VaultHostState struct {
-	Bundle    environmente2ee.ProjectionBundle `json:"bundle"`
-	Selection []VaultHostSelection             `json:"selection"`
+	Bundle      environmente2ee.ProjectionBundle `json:"bundle"`
+	Selection   []VaultHostSelection             `json:"selection"`
+	Observation *VaultProjectionObservation      `json:"observation"`
+	Applied     bool                             `json:"applied"`
 }
 type VaultHostProvision struct {
 	OperationID                 string               `json:"operation_id"`
@@ -28,12 +45,19 @@ type VaultHostProvision struct {
 
 func (c *Client) GetVaultHost(ctx context.Context, machine string) (VaultHostState, error) {
 	var out VaultHostState
-	err := c.vaultDataRequest(ctx, http.MethodGet, "/v1/environment/hosts/"+url.PathEscape(machine), nil, &out)
+	personal := *c
+	personal.workspace = "personal"
+	err := personal.vaultDataRequest(ctx, http.MethodGet, "/v1/environment/hosts/"+url.PathEscape(machine), nil, &out)
+	if err == nil && out.Bundle.MachineID != machine {
+		return VaultHostState{}, errors.New("server returned an ENV host with the wrong machine binding")
+	}
 	return out, err
 }
 func (c *Client) ProvisionVaultHost(ctx context.Context, machine string, in VaultHostProvision) (environmente2ee.ProjectionBundle, error) {
 	var out environmente2ee.ProjectionBundle
-	err := c.vaultDataRequest(ctx, http.MethodPut, "/v1/environment/hosts/"+url.PathEscape(machine), in, &out)
+	personal := *c
+	personal.workspace = "personal"
+	err := personal.vaultDataRequest(ctx, http.MethodPut, "/v1/environment/hosts/"+url.PathEscape(machine), in, &out)
 	return out, err
 }
 
@@ -49,6 +73,8 @@ type VaultHostSummary struct {
 
 func (c *Client) PendingVaultHosts(ctx context.Context) ([]VaultHostSummary, error) {
 	const limit = 200
+	personal := *c
+	personal.workspace = "personal"
 	items := []VaultHostSummary{}
 	seen := map[string]bool{}
 	for offset := 0; ; {
@@ -57,20 +83,23 @@ func (c *Client) PendingVaultHosts(ctx context.Context) ([]VaultHostSummary, err
 			Pagination Pagination         `json:"pagination"`
 		}
 		query := url.Values{"state": {"pending"}, "limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(offset)}}
-		if err := c.vaultDataRequest(ctx, http.MethodGet, "/v1/environment/hosts?"+query.Encode(), nil, &page); err != nil {
+		if err := personal.vaultDataRequest(ctx, http.MethodGet, "/v1/environment/hosts?"+query.Encode(), nil, &page); err != nil {
 			return nil, err
 		}
 		if len(page.Items) > limit || page.Pagination.Limit != limit || page.Pagination.Offset != offset || page.Pagination.Total < offset+len(page.Items) {
 			return nil, errors.New("invalid ENV host inventory page")
 		}
 		for _, item := range page.Items {
-			if item.MachineID == "" || item.State != "pending" || item.ProjectionRevision == 0 || seen[item.MachineID] {
+			if item.MachineID == "" || item.State != "pending" || seen[item.MachineID] {
 				return nil, errors.New("invalid ENV host inventory item")
 			}
 			seen[item.MachineID] = true
 		}
 		items = append(items, page.Items...)
 		if page.Pagination.NextOffset == nil {
+			if page.Pagination.Total != offset+len(page.Items) {
+				return nil, errors.New("ENV host inventory ended before its reported total")
+			}
 			return items, nil
 		}
 		next := *page.Pagination.NextOffset

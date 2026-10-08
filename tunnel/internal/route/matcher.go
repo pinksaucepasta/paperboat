@@ -849,7 +849,7 @@ func normalizeRule(generation uint64, rule RouteRule) (RouteRule, error) {
 		if err != nil || host == "" || net.ParseIP(host) != nil {
 			return RouteRule{}, ErrInvalid
 		}
-		if matchType == MatchManagedExact && rule.Kind == TunnelHTTPSWSS && !ValidTunnelHostname(host) {
+		if matchType == MatchManagedExact && rule.Kind == TunnelHTTPSWSS && !ValidOpaqueTunnelHostname(host) {
 			return RouteRule{}, ErrInvalid
 		}
 		rule.Hostname, rule.WildcardSuffix = host, ""

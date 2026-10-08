@@ -4,16 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"strings"
-	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
@@ -475,38 +470,4 @@ func waitForCarrier(predicate func() bool) bool {
 		time.Sleep(time.Millisecond)
 	}
 	return predicate()
-}
-
-func TestDataCarrierAuthorizationCausePreservedAndRecovery(t *testing.T) {
-	var reject atomic.Bool
-	reject.Store(true)
-	config := testCarrierConfig(2)
-	config.Authorize = AuthorizerFunc(func(context.Context, Identity, StreamOpen) error {
-		if reject.Swap(false) {
-			return fmt.Errorf("PRIVATE_AUTHORITY: %w", syscall.EACCES)
-		}
-		return nil
-	})
-	edge, connector := dataCarrierPair(t, config)
-	_, err := edge.OpenStream(t.Context(), testStreamOpen("route-a", "failed"))
-	if !errors.Is(err, ErrRouteDenied) || !errors.Is(err, syscall.EACCES) || strings.Contains(err.Error(), "PRIVATE") {
-		t.Fatalf("authorization cause lost or exposed: %v", err)
-	}
-	stream, err := edge.OpenStream(t.Context(), testStreamOpen("route-a", "recovered"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer stream.Close()
-	accepted, _, err := connector.AcceptStream(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer accepted.Close()
-	binding := EndpointConfig{PeerBinding: func(tls.ConnectionState) (Identity, error) {
-		return Identity{}, fmt.Errorf("PRIVATE_CERTIFICATE: %w", context.DeadlineExceeded)
-	}}
-	_, err = bindEndpointPeer(binding, tls.ConnectionState{})
-	if !errors.Is(err, ErrCarrierTLS) || !errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "PRIVATE") {
-		t.Fatal("peer binding cause lost or exposed")
-	}
 }

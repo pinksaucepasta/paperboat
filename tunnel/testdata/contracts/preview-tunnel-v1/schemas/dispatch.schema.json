@@ -54,9 +54,8 @@
         "operation_id",
         "account_id",
         "actor_id",
-        "owner_machine_id",
+        "owner_device_id",
         "owner_session_id",
-        "owner_session_kind",
         "target",
         "access_mode",
         "endpoint",
@@ -81,9 +80,8 @@
         "operation_id": { "$ref": "#/definitions/id" },
         "account_id": { "$ref": "#/definitions/id" },
         "actor_id": { "$ref": "#/definitions/id" },
-        "owner_machine_id": { "$ref": "#/definitions/id" },
+        "owner_device_id": { "$ref": "#/definitions/id" },
         "owner_session_id": { "$ref": "#/definitions/id" },
-        "owner_session_kind": { "enum": ["local_lease", "foreground", "lazy_runtime"] },
         "target": { "$ref": "#/definitions/target" },
         "access_mode": { "enum": ["public", "private", "team"] },
         "endpoint": {
@@ -120,11 +118,7 @@
       },
       "allOf": [{
         "if": { "required": ["lazy"] },
-        "then": { "properties": {
-          "access_mode": { "enum": ["private", "team"] },
-          "owner_session_kind": { "const": "lazy_runtime" }
-        } },
-        "else": { "properties": { "owner_session_kind": { "enum": ["local_lease", "foreground"] } } }
+        "then": { "properties": { "access_mode": { "enum": ["private", "team"] } } }
       }],
       "additionalProperties": false
     },

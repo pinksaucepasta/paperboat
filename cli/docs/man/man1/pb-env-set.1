@@ -13,7 +13,7 @@ pb-env-set - Set one environment variable through a hidden prompt or bounded std
 Set one environment variable through a hidden prompt or bounded stdin
 
 .PP
-Set one exact ENV name using a hidden interactive prompt, a bounded stdin stream, or --value-file. Use --team or --machine to choose a nonpersonal scope; the value is never part of the command output.
+Set one exact ENV name using a hidden interactive prompt, a bounded stdin stream, or --value-file. Use --team in its matching workspace for Team values, or --machine for an owned Personal machine override, including in a Team workspace; the value is never part of the command output. Previously provisioned recipient selections refresh automatically without authorizing new names.
 
 .PP
 ENV values are encrypted before they leave the client. Commands select personal, team, or host scope explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
@@ -32,7 +32,7 @@ JSON output is supported with --json.
 
 .PP
 \fB--machine\fP=""
-	machine name or ID; defaults to the personal scope
+	Personal override for an owned machine, even in a Team workspace; omitted uses the active workspace
 
 .PP
 \fB--team\fP=""

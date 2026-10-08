@@ -42,17 +42,26 @@ func (s ProfileStore) UpdatePeerNetworkState(issuer, accountID, endpointID strin
 	digest := sha256.Sum256([]byte(issuer + "\x00" + accountID + "\x00" + endpointID))
 	ref := "peer-network-v1-" + hex.EncodeToString(digest[:])
 	previous, err := s.Secrets.Get(ref)
-	if err != nil && !errors.Is(err, ErrSecretNotFound) {
-		return ErrCredentialStoreUnavailable
+	if err != nil && !credentialAbsenceOnly(err) {
+		return credentialStoreFailure("peer network custody could not be loaded", err)
 	}
 	state := PeerNetworkState{Version: 1}
 	defer func() { clear(state.PrivateKey); clear(state.PendingKey) }()
 	if err == nil {
-		if len(previous) > 2048 || json.Unmarshal([]byte(previous), &state) != nil || !validPeerNetworkState(state) {
+		if len(previous) > 2048 {
+			return errors.New("peer network custody is invalid; recover endpoint identity")
+		}
+		if err := json.Unmarshal([]byte(previous), &state); err != nil {
+			return safeConfigCause("peer network custody is invalid; recover endpoint identity", err)
+		}
+		if !validPeerNetworkState(state) {
 			return errors.New("peer network custody is invalid; recover endpoint identity")
 		}
 		canonical, err := json.Marshal(state)
-		if err != nil || !bytes.Equal(canonical, []byte(previous)) {
+		if err != nil {
+			return safeConfigCause("peer network custody could not be validated", err)
+		}
+		if !bytes.Equal(canonical, []byte(previous)) {
 			return errors.New("peer network custody is not canonical")
 		}
 	}
@@ -72,7 +81,7 @@ func (s ProfileStore) UpdatePeerNetworkState(issuer, accountID, endpointID strin
 		return nil
 	}
 	if err := s.Secrets.Set(ref, string(encoded)); err != nil {
-		return ErrCredentialStoreUnavailable
+		return credentialStoreFailure("peer network custody could not be stored", err)
 	}
 	return nil
 }

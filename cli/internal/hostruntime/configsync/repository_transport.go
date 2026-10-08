@@ -213,24 +213,42 @@ func resolveRepositoryTransportAccess(ctx context.Context, credentialRoot string
 }
 func readRepositoryReference(path string, private bool) ([]byte, error) {
 	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil || !repositoryReferencePathMatches(path, resolved) {
+	if err != nil {
+		return nil, repositoryCredentialReferenceFailure(err)
+	}
+	if !repositoryReferencePathMatches(path, resolved) {
 		return nil, ErrRepositoryCredentials
 	}
 	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() > 1048576 || !secureRepositoryReference(path, info, private) {
+	if err != nil {
+		return nil, repositoryCredentialReferenceFailure(err)
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() > 1048576 || !secureRepositoryReference(path, info, private) {
 		return nil, ErrRepositoryCredentials
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, ErrRepositoryCredentials
+		return nil, repositoryCredentialReferenceFailure(err)
 	}
-	defer file.Close()
 	actual, err := file.Stat()
-	if err != nil || !os.SameFile(info, actual) {
+	if err != nil {
+		closeErr := file.Close()
+		return nil, repositoryUnavailableFailure(errors.Join(err, closeErr))
+	}
+	if !os.SameFile(info, actual) {
+		if closeErr := file.Close(); closeErr != nil {
+			return nil, repositoryUnavailableFailure(errors.Join(ErrRepositoryCredentials, closeErr))
+		}
 		return nil, ErrRepositoryCredentials
 	}
 	data, err := io.ReadAll(io.LimitReader(file, 1048577))
-	if err != nil || len(data) > 1048576 {
+	closeErr := file.Close()
+	if err != nil || closeErr != nil {
+		clear(data)
+		return nil, repositoryUnavailableFailure(errors.Join(err, closeErr))
+	}
+	if len(data) > 1048576 {
+		clear(data)
 		return nil, ErrRepositoryCredentials
 	}
 	return data, nil
@@ -238,8 +256,9 @@ func readRepositoryReference(path string, private bool) ([]byte, error) {
 
 var ErrRepositoryUnavailable = errors.New("config repository unavailable")
 
-func (a repositoryTransportAccess) close() {
+func (a repositoryTransportAccess) close() error {
 	if a.closer != nil {
-		a.closer.Close()
+		return a.closer.Close()
 	}
+	return nil
 }

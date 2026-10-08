@@ -53,55 +53,33 @@ func TestInspectorEdgeAccessTraversesExactOwnerCarrier(t *testing.T) {
 		ResourceGeneration: 1, RouteGeneration: rule.RouteGeneration, TargetGeneration: rule.RouteGeneration, ExpiresAt: time.Now().Add(time.Minute),
 		Carrier: control.InspectorCarrier{AccountID: identity.AccountID, MachineID: identity.HostID, TunnelID: identity.TunnelID, ConnectorID: identity.ConnectorID, SessionID: identity.SessionID, ProcessGeneration: identity.ProcessGeneration, Generation: identity.Generation, RouteID: rule.RouteID, AssignmentID: rule.AssignmentID, AssignmentGeneration: rule.AssignmentGeneration, RouteGeneration: rule.RouteGeneration, ConfigContentHash: rule.ConfigContentHash},
 	}}
-	observed := 0
-	handler := &InspectorEdgeAccess{OnFailure: func(_ context.Context, cause error) {
-		observed++
-		if !errors.Is(cause, io.ErrUnexpectedEOF) && !errors.Is(cause, io.EOF) {
-			t.Errorf("original response cause lost: %v", cause)
-		}
-	}, Authority: authority, Carriers: registry, PreviewCarriers: preview}
+	handler := &InspectorEdgeAccess{Authority: authority, Carriers: registry, PreviewCarriers: preview, RequestID: func() string { return "request_inspector" }}
 	done := make(chan error, 1)
 	go func() {
-		for attempt := range 2 {
-			stream, open, acceptErr := ownerCarrier.AcceptStream(context.Background())
-			if acceptErr != nil {
-				done <- acceptErr
-				return
-			}
-			defer stream.Close()
-			request, readErr := http.ReadRequest(bufio.NewReader(stream))
-			if readErr != nil {
-				done <- readErr
-				return
-			}
-			if open.Kind != "inspector_http" || open.RouteID != rule.RouteID || request.URL.Path != "/v1/inspector/records" || request.Header.Get(inspectorGrantHeader) != "iat_test" {
-				done <- errors.New("inspector carrier metadata mismatch")
-				return
-			}
-			if attempt == 0 {
-				_, readErr = io.WriteString(stream, "HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nx")
-				_ = stream.CloseWrite()
-			} else {
-				_, readErr = io.WriteString(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 14\r\n\r\n{\"records\":[]}")
-			}
-			done <- readErr
+		stream, open, acceptErr := ownerCarrier.AcceptStream(context.Background())
+		if acceptErr != nil {
+			done <- acceptErr
+			return
 		}
+		defer stream.Close()
+		request, readErr := http.ReadRequest(bufio.NewReader(stream))
+		if readErr != nil {
+			done <- readErr
+			return
+		}
+		if open.Kind != "inspector_http" || open.RouteID != rule.RouteID || request.URL.Path != "/v1/inspector/records" || request.Header.Get(inspectorGrantHeader) != "iat_test" {
+			done <- errors.New("inspector carrier metadata mismatch")
+			return
+		}
+		_, readErr = io.WriteString(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 14\r\n\r\n{\"records\":[]}")
+		done <- readErr
 	}()
 
 	request := httptest.NewRequest(http.MethodGet, "https://app.tunnels.example.test/.paperboat/inspector/v1/records?kind=tunnel&resource=tunnel_replica&route=route_replica", nil)
 	request.Header.Set(inspectorGrantHeader, "iat_test")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusBadGateway || observed != 1 {
-		t.Fatalf("failed response=%d observed=%d", response.Code, observed)
-	}
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	request = request.Clone(request.Context())
-	response = httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != `{"records":[]}` || authority.calls != 2 || observed != 1 {
+	if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != `{"records":[]}` || authority.calls != 1 {
 		t.Fatalf("response=%d %q calls=%d", response.Code, response.Body.String(), authority.calls)
 	}
 	if err := <-done; err != nil {

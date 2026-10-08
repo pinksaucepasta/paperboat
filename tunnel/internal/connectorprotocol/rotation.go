@@ -3,7 +3,6 @@ package connectorprotocol
 import (
 	"context"
 	"crypto/ed25519"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -976,7 +975,7 @@ func (c *RotationCoordinator) Revoke(ctx context.Context, connectorID string) (C
 	if state.state != RotationTargetReady {
 		return CredentialRotationRevoke{}, codeError(ErrStaleGeneration, ReasonStaleGeneration, false, nil)
 	}
-	revokeNonce, err := newRotationRevokeNonce()
+	revokeNonce, err := newOpaqueID("rotation-revoke")
 	if err != nil {
 		return CredentialRotationRevoke{}, err
 	}
@@ -1335,12 +1334,4 @@ func (m *MemoryRotationPersistence) LoadCredentialRotation(_ context.Context, pl
 		}
 	}
 	return result, nil
-}
-
-func newRotationRevokeNonce() (string, error) {
-	var random [18]byte
-	if _, err := rand.Read(random[:]); err != nil {
-		return "", err
-	}
-	return "rotation-revoke_" + hex.EncodeToString(random[:]), nil
 }

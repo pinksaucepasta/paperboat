@@ -2,12 +2,9 @@ package edgehttp
 
 import (
 	"context"
-	"errors"
-	"io"
 	"net"
 	"strconv"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -123,99 +120,5 @@ func TestPublicTCPListenersBindPersistAndWithdrawExactReservation(t *testing.T) 
 	manager.mu.Unlock()
 	if old || replacement == nil {
 		t.Fatalf("listener identity was not fenced: old=%v replacement=%v", old, replacement != nil)
-	}
-}
-
-func TestPublicTCPFatalAcceptWithdrawsOnlyItsIdentityAndRebinds(t *testing.T) {
-	probe, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := probe.Addr().(*net.TCPAddr).Port
-	_ = probe.Close()
-	authority := &publicTCPAuthorityFixture{}
-	authority.set(publicTCPListenerDecision(port, "listener_1"))
-	routes, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer routes.Close()
-	type ctxKey struct{}
-	reported := make(chan error, 4)
-	manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{ListenHost: "127.0.0.1", Authority: authority, Routes: routes, Interval: time.Hour, OnFailure: func(ctx context.Context, phase string, cause error) {
-		if phase == "public_tcp_listener" {
-			if ctx.Value(ctxKey{}) != "borrowed" {
-				t.Error("invocation context lost")
-			}
-			reported <- cause
-		}
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = manager.Start(context.WithValue(t.Context(), ctxKey{}, "borrowed")); err != nil {
-		t.Fatal(err)
-	}
-	defer manager.Shutdown(context.Background())
-	manager.mu.Lock()
-	first := manager.listeners["listener_1"]
-	manager.mu.Unlock()
-	if first == nil {
-		t.Fatal("authorized listener missing")
-	}
-	_ = first.listener.Close()
-	select {
-	case cause := <-reported:
-		if !errors.Is(cause, net.ErrClosed) {
-			t.Fatalf("original accept cause lost: %v", cause)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("fatal accept unobserved")
-	}
-	<-first.done
-	manager.mu.Lock()
-	remaining := manager.listeners["listener_1"]
-	manager.mu.Unlock()
-	if remaining != nil {
-		t.Fatal("dead listener retained")
-	}
-	if err = manager.reconcile(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	manager.mu.Lock()
-	replacement := manager.listeners["listener_1"]
-	manager.mu.Unlock()
-	if replacement == nil || replacement == first {
-		t.Fatal("authorized replacement missing")
-	}
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), time.Second)
-	if err != nil {
-		t.Fatal("replacement unusable", err)
-	}
-	_ = conn.Close()
-	// A delayed fatal exit must never erase a replacement already adopted under the same ID.
-	staleDone := make(chan struct{})
-	stale := &publicTCPListener{listener: first.listener, cancel: func() {}, done: staleDone}
-	manager.streams.Add(1)
-	go manager.accept(context.WithoutCancel(manager.ctx), stale)
-	<-staleDone
-	manager.mu.Lock()
-	current := manager.listeners["listener_1"]
-	manager.mu.Unlock()
-	if current != replacement {
-		t.Fatal("stale accept erased replacement")
-	}
-}
-
-func TestPublicTCPObservationKeepsMixedOperationalCause(t *testing.T) {
-	observed := 0
-	manager := &PublicTCPListeners{cfg: PublicTCPListenerConfig{OnFailure: func(context.Context, string, error) { observed++ }}}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	manager.observe(ctx, "public_tcp_stream", errors.Join(context.Canceled, syscall.EIO))
-	manager.observe(ctx, "public_tcp_stream", errors.Join(io.EOF, syscall.EIO))
-	manager.observe(ctx, "public_tcp_stream", errors.Join(context.Canceled, io.EOF))
-	if observed != 2 {
-		t.Fatalf("observed=%d", observed)
 	}
 }

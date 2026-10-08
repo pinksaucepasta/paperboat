@@ -77,7 +77,7 @@ func TestTRK35PrivateAccessProofRevocationAndExpiryFailClosed(t *testing.T) {
 
 	request := edgePrivateAccessRequest(wireNow)
 	request.AccountID = identity.AccountID
-	request.MachineID = identity.HostID
+	request.DeviceID = identity.HostID
 	request.CarrierSessionID = identity.SessionID
 	request.ProcessGeneration = identity.ProcessGeneration
 	request.ConfigGeneration = identity.Generation

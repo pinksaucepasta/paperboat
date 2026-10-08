@@ -48,10 +48,14 @@ func (s ProfileStore) networkFingerprintSecret(root string, lock credentialLock)
 	ref := "network-fingerprint-v1-" + hex.EncodeToString(refDigest[:16])
 	encoded, err := s.Secrets.Get(ref)
 	if err == nil {
-		return decodeNetworkFingerprintSecret(encoded)
+		secret, err = decodeNetworkFingerprintSecret(encoded)
+		if err != nil {
+			return nil, err
+		}
+		return secret, nil
 	}
-	if !errors.Is(err, ErrSecretNotFound) {
-		return nil, fmt.Errorf("load network fingerprint secret: %w", err)
+	if !credentialAbsenceOnly(err) {
+		return nil, safeConfigCause("network fingerprint secret could not be loaded", err)
 	}
 	secret = make([]byte, networkFingerprintSecretBytes)
 	if _, err := rand.Read(secret); err != nil {
@@ -60,7 +64,7 @@ func (s ProfileStore) networkFingerprintSecret(root string, lock credentialLock)
 	encoded = base64.RawURLEncoding.EncodeToString(secret)
 	if err := s.Secrets.Set(ref, encoded); err != nil {
 		clear(secret)
-		return nil, fmt.Errorf("store network fingerprint secret: %w", err)
+		return nil, safeConfigCause("network fingerprint secret could not be stored", err)
 	}
 	return secret, nil
 }

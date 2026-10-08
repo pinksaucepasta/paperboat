@@ -29,7 +29,7 @@ func TestDataCarrierPreviewAliasesShareAuthenticatedCarrierEndToEnd(t *testing.T
 	primary := DataCarrierPreviewRoute{
 		RouteID: "preview_alias_01", Hostname: "managed.preview.example.test", Kind: dataCarrierPreviewRouteKind,
 		EdgeProcessEpoch: "edge_epoch_1", Revision: 1, Server: server, PreviewID: "preview_alias_01",
-		OperationID: "operation_alias_01", OwnerMachineID: identity.HostID, OwnerSessionID: "owner_session_01",
+		OperationID: "operation_alias_01", OwnerDeviceID: identity.HostID, OwnerSessionID: "owner_session_01",
 		AccessMode: "public", LeaseGeneration: identity.Generation,
 	}
 	if err := registry.Attach(primary); err != nil {
@@ -38,7 +38,7 @@ func TestDataCarrierPreviewAliasesShareAuthenticatedCarrierEndToEnd(t *testing.T
 	private := DataCarrierPreviewRoute{
 		RouteID: "preview_private_01", Hostname: "private.preview.example.test", Kind: dataCarrierPreviewPrivateRouteKind,
 		EdgeProcessEpoch: "edge_epoch_1", Revision: 1, Server: server, PreviewID: "preview_private_01",
-		OperationID: "operation_private_01", OwnerMachineID: identity.HostID, OwnerSessionID: "owner_session_02",
+		OperationID: "operation_private_01", OwnerDeviceID: identity.HostID, OwnerSessionID: "owner_session_02",
 		AccessMode: "private", LeaseGeneration: identity.Generation,
 	}
 	if err := registry.Attach(private); err != nil {
@@ -301,48 +301,5 @@ func TestDataCarrierPreviewRegistryReconcilesCompleteAliasSnapshot(t *testing.T)
 	}
 	if _, ok := registry.Lookup(alias.Hostname); ok {
 		t.Fatal("complete empty snapshot retained alias")
-	}
-}
-
-func TestPreviewAliasConflictPreservesSnapshotAndRecovers(t *testing.T) {
-	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1", MaximumRoutes: 4})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer registry.Close()
-	server, client := testEdgePreviewCarrierPair(t, testEdgePreviewIdentity(4, 2))
-	defer server.Close()
-	defer client.Close()
-	primary := DataCarrierPreviewRoute{RouteID: "preview_01", Hostname: "managed.preview.example.test", Kind: dataCarrierPreviewRouteKind, EdgeProcessEpoch: "edge_epoch_1", Revision: 4, LeaseGeneration: 7, Server: server}
-	if err := registry.Attach(primary); err != nil {
-		t.Fatal(err)
-	}
-	previous := DataCarrierPreviewAlias{DomainID: "domain_01", RouteID: primary.RouteID, Hostname: "demo.customer.test", MatchType: PreviewAliasExact, PreviewGeneration: 7, DomainGeneration: 1, CertificateGeneration: 1}
-	if err := registry.ReconcilePreviewAliases([]DataCarrierPreviewAlias{previous}); err != nil {
-		t.Fatal(err)
-	}
-	collision := previous
-	collision.DomainID = "domain_02"
-	collision.Hostname = primary.Hostname
-	// Missing carrier is legitimate desired state, but cannot steal a live base hostname.
-	collision.RouteID = "preview_pending"
-	if err := registry.ReconcilePreviewAliases([]DataCarrierPreviewAlias{collision}); !errors.Is(err, ErrDataCarrierPreviewRegistryConflict) {
-		t.Fatalf("conflict = %v", err)
-	}
-	if aliases := registry.PreviewAliases(); len(aliases) != 1 || aliases[0] != previous {
-		t.Fatalf("previous snapshot changed: %+v", aliases)
-	}
-	if _, ok := registry.Lookup(previous.Hostname); !ok {
-		t.Fatal("rejected snapshot removed working alias")
-	}
-	collision.Hostname = "pending.customer.test"
-	if err := registry.ReconcilePreviewAliases([]DataCarrierPreviewAlias{previous, collision}); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := registry.Lookup(collision.Hostname); ok {
-		t.Fatal("unattached desired alias became ready")
-	}
-	if _, ok := registry.Lookup(previous.Hostname); !ok {
-		t.Fatal("corrected snapshot lost ready alias")
 	}
 }

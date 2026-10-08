@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -16,14 +15,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat-relay/selfhost"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/auth"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/config"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgehttp"
@@ -47,78 +45,50 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	ctx := reporting.WithSupportReference(context.Background(), reporting.Reference())
-	code := executeContext(ctx, reporter, os.Args[1:])
+	code := execute(reporter, os.Args[1:])
 	reporter.Close()
-	if len(os.Args) < 2 || os.Args[1] != "version" && os.Args[1] != "--version" {
-		logReportingShutdown(ctx, reporter)
-	}
 	os.Exit(code)
 }
 
-type serviceFailure struct {
-	error
-	definition string
-}
+type serviceFailure struct{ error }
 
-func (e serviceFailure) Error() string { return "edge service failed" }
-func (e serviceFailure) Unwrap() error { return e.error }
-
-func execute(reporter *reporting.Reporter, args []string) int {
-	return executeContext(reporting.WithSupportReference(context.Background(), reporting.Reference()), reporter, args)
-}
-
-func executeContext(ctx context.Context, reporter *reporting.Reporter, args []string) (code int) {
+func execute(reporter *reporting.Reporter, args []string) (code int) {
+	started := time.Now()
 	defer func() {
-		if recovered := recover(); recovered != nil {
-			fault := reporter.CaptureFailure(ctx, "process_panic", reporting.PanicFailure{})
-			if fault.CorrelationID == "" {
-				fmt.Fprintln(os.Stderr, "paperboat-tunnel stopped after an internal process panic")
-			} else {
-				fmt.Fprintf(os.Stderr, "paperboat-tunnel stopped after an internal process panic; support reference %s\n", fault.CorrelationID)
-			}
+		if recover() != nil {
+			reference := reportUnexpected(reporter, "panic")
+			reporter.Observe(context.Background(), "service_lifecycle", "failed", "internal", reference, time.Since(started))
 			code = 2
 		}
 	}()
-	if err := runContext(ctx, args, reporter); err != nil {
-		failure := serviceFailure{error: err, definition: "service_config"}
-		var knownFailure serviceFailure
-		if errors.As(err, &knownFailure) {
-			failure = knownFailure
-			if failure.definition == "" {
-				failure.definition = "service_run"
-			}
-		}
-		fault := reporter.CaptureFailure(ctx, failure.definition, failure.error)
-		fmt.Fprintf(os.Stderr, "service failure stage=%s %s\n", failureStage(failure.definition), serviceDiagnostic(failure.error))
-		if fault.CorrelationID != "" {
-			fmt.Fprintf(os.Stderr, "paperboat-tunnel stopped; support reference %s\n", fault.CorrelationID)
+	if err := run(args, reporter); err != nil {
+		var failure serviceFailure
+		if errors.As(err, &failure) {
+			fmt.Fprintln(os.Stderr, serviceDiagnostic(failure.error))
+			reference := reportUnexpected(reporter, "service_run")
+			reporter.Observe(context.Background(), "service_lifecycle", "failed", "internal", reference, time.Since(started))
 		} else {
-			fmt.Fprintln(os.Stderr, "paperboat-tunnel stopped; support reference unavailable")
+			reporter.Observe(context.Background(), "service_lifecycle", "rejected", "invalid", "", time.Since(started))
+			fmt.Fprintln(os.Stderr, err)
 		}
 		return 1
 	}
+	reporter.Observe(context.Background(), "service_lifecycle", "success", "shutdown", "", time.Since(started))
 	return 0
 }
 
-func failureStage(definition string) string {
-	switch definition {
-	case "service_config", "service_build":
-		return "configure"
-	case "service_start":
-		return "startup"
-	case "service_shutdown":
-		return "shutdown"
-	default:
-		return "serve"
+func reportUnexpected(reporter *reporting.Reporter, kind string) string {
+	reference := reporting.Reference()
+	if reference == "" {
+		fmt.Fprintln(os.Stderr, "paperboat-tunnel stopped unexpectedly")
+		return ""
 	}
+	reporter.Capture(reference, kind, 2)
+	fmt.Fprintf(os.Stderr, "paperboat-tunnel stopped unexpectedly; support reference %s\n", reference)
+	return reference
 }
 
 func run(args []string, reporters ...*reporting.Reporter) error {
-	return runContext(context.Background(), args, reporters...)
-}
-
-func runContext(processCtx context.Context, args []string, reporters ...*reporting.Reporter) error {
 	if len(args) == 1 && (args[0] == "version" || args[0] == "--version") {
 		fmt.Fprintf(os.Stdout, "paperboat-tunnel %s\n", version)
 		return nil
@@ -138,7 +108,7 @@ func runContext(processCtx context.Context, args []string, reporters ...*reporti
 	}
 	deployment, err := config.LoadDeployment(cfg.DeploymentPath)
 	if err != nil {
-		return serviceFailure{error: err, definition: "service_build"}
+		return err
 	}
 	var reporter *reporting.Reporter
 	if len(reporters) > 0 {
@@ -146,12 +116,12 @@ func runContext(processCtx context.Context, args []string, reporters ...*reporti
 	}
 	service, err := buildServiceWithReporter(cfg, deployment, reporter)
 	if err != nil {
-		return serviceFailure{error: err, definition: "service_build"}
+		return err
 	}
-	root, stop := signal.NotifyContext(processCtx, os.Interrupt, syscall.SIGTERM)
+	root, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := service.Start(root); err != nil {
-		return serviceFailure{error: err, definition: "service_start"}
+		return serviceFailure{err}
 	}
 	var runtimeErr error
 	select {
@@ -161,11 +131,11 @@ func runContext(processCtx context.Context, args []string, reporters ...*reporti
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
-	if err := service.Shutdown(ctx); err != nil {
-		return serviceFailure{error: err, definition: "service_shutdown"}
+	if err := service.Shutdown(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		return serviceFailure{err}
 	}
 	if runtimeErr != nil {
-		return serviceFailure{error: runtimeErr, definition: "service_run"}
+		return serviceFailure{runtimeErr}
 	}
 	return nil
 }
@@ -206,9 +176,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if reporter != nil {
 		controlTrace = reporter.ControlTrace
 	}
-	client, err := control.NewHTTPClient(control.HTTPConfig{BaseURL: deployment.ControlURL, Credential: credential, Timeout: deployment.ControlTimeout, TLS: tlsConfig, ControlTrace: controlTrace, ControlFailure: func(ctx context.Context, reference string, err error) {
-		reporter.ObserveFailure(reporting.WithSupportReference(ctx, reference), "control_request", err)
-	}})
+	client, err := control.NewHTTPClient(control.HTTPConfig{BaseURL: deployment.ControlURL, Credential: credential, Timeout: deployment.ControlTimeout, TLS: tlsConfig, ControlTrace: controlTrace})
 	if err != nil {
 		return nil, fmt.Errorf("create control client: %w", err)
 	}
@@ -251,7 +219,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		return nil, fmt.Errorf("create TLS on-demand certificate requester: %w", err)
 	}
 	certificateWorker, err := edgeruntime.NewCertificateDistributionWorker(edgeruntime.CertificateDistributionWorkerConfig{
-		Reporter: reporter, Client: certificateClient, Receiver: certificateReceiver, NodeID: cfg.NodeID, ProcessEpoch: processEpoch,
+		Client: certificateClient, Receiver: certificateReceiver, NodeID: cfg.NodeID, ProcessEpoch: processEpoch,
 		Interval: deployment.ControlInterval,
 	})
 	if err != nil {
@@ -310,7 +278,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if err != nil {
 		return nil, fmt.Errorf("create route telemetry: %w", err)
 	}
-	canonicalRoutes, err := route.NewRegistryWithOptions("", "", route.GenerationRegistryOptions{TelemetrySink: telemetryLifecycle.routeSink(routeTelemetry)})
+	canonicalRoutes, err := route.NewRegistryWithOptions("", "", route.GenerationRegistryOptions{TelemetrySink: routeTelemetry})
 	if err != nil {
 		return nil, fmt.Errorf("create canonical route registry: %w", err)
 	}
@@ -322,7 +290,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		return store.State{Version: store.CurrentVersion, CounterEpoch: epoch, Operations: journal.Snapshot(), Counters: counters.Snapshot(), PendingUsage: queue.Snapshot()}
 	}
 	verifier := &auth.Verifier{Issuer: deployment.CredentialIssuer, NodeID: cfg.NodeID, Keys: trust.Snapshot, Revocations: trust.Snapshot, ClockSkew: 30 * time.Second}
-	previewWorker, previewHandler, expectedAdmissions, previewRoutes, err := previewCarrierState(cfg.NodeID, processEpoch, deployment, client, reporter)
+	previewWorker, previewHandler, expectedAdmissions, previewRoutes, err := previewCarrierState(cfg.NodeID, processEpoch, deployment, client)
 	if err != nil {
 		return nil, err
 	}
@@ -335,18 +303,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		return nil, err
 	}
 	browserTerminalHub := edgehttp.NewBrowserTerminalHub()
-	browserTerminalHub.OnFailure = func(ctx context.Context, cause error) {
-		if reporting.SupportReference(ctx) == "" {
-			telemetryLifecycle.mu.Lock()
-			processCtx := telemetryLifecycle.processCtx
-			telemetryLifecycle.mu.Unlock()
-			if processCtx != nil {
-				ctx = reporting.WithSupportReference(ctx, reporting.SupportReference(processCtx))
-			}
-		}
-		reporter.ObserveFailure(ctx, "browser_terminal_stream", cause)
-	}
-	runtimeWorker := &edgeruntime.RuntimeCarrierWorker{Reporter: reporter, Source: client, Expected: runtimeExpected, Routes: runtimeRoutes, BrowserTerminalHub: browserTerminalHub, Interval: deployment.ControlInterval, Timeout: deployment.ControlTimeout}
+	runtimeWorker := &edgeruntime.RuntimeCarrierWorker{Source: client, Expected: runtimeExpected, Routes: runtimeRoutes, BrowserTerminalHub: browserTerminalHub, Interval: deployment.ControlInterval, Timeout: deployment.ControlTimeout}
 	runtimeTransport, err := edgehttp.NewDataCarrierPreviewTransport(edgehttp.DataCarrierPreviewTransportConfig{Registry: runtimeRoutes, StreamOpenTimeout: deployment.ControlTimeout})
 	if err != nil {
 		return nil, err
@@ -373,14 +330,13 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if publicListenHost == "" {
 		publicListenHost = "0.0.0.0"
 	}
-	publicTCP, err := edgehttp.NewPublicTCPListeners(edgehttp.PublicTCPListenerConfig{OnFailure: func(ctx context.Context, phase string, cause error) {
-		switch phase {
-		case "public_tcp_reconcile", "public_tcp_listener", "public_tcp_stream", "tls_dispatch":
-			reporter.ObserveFailure(ctx, phase, cause)
-		}
-	}, ListenHost: publicListenHost, InfrastructureHostname: deployment.ConnectorAdvertiseHost, Authority: ingressAuthority, Routes: durableRoutes, Interval: deployment.ControlInterval, MaximumListeners: 4096, MaximumConnections: int(deployment.NodeCapacity) * 128})
+	publicTCP, err := edgehttp.NewPublicTCPListeners(edgehttp.PublicTCPListenerConfig{ListenHost: publicListenHost, InfrastructureHostname: deployment.ConnectorAdvertiseHost, Authority: ingressAuthority, Routes: durableRoutes, Interval: deployment.ControlInterval, MaximumListeners: 4096, MaximumConnections: int(deployment.NodeCapacity) * 128})
 	if err != nil {
 		return nil, fmt.Errorf("configure public TCP listeners: %w", err)
+	}
+	internalToken, err := newPrivateAccessToken()
+	if err != nil {
+		return nil, fmt.Errorf("create private access token: %w", err)
 	}
 	persistence := edgeruntime.Persistence{Path: cfg.StatePath, Restore: func(store.State) error { return nil }, Snapshot: snapshotState}
 	carrierEndpoint, err := carrierEndpointFromDeployment(deployment)
@@ -411,30 +367,16 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if err != nil {
 		return nil, fmt.Errorf("schedule process carrier trust refresh: %w", err)
 	}
-	nodeWorker := &edgeruntime.NodeWorker{Reporter: reporter, Manager: manager, Sink: client, Registration: control.NodeRegistration{NodeID: cfg.NodeID, EdgePool: cfg.EdgePool, Artifact: "paperboat-connector-v1", Protocol: "1.0", ProcessEpoch: processEpoch, Capacity: deployment.NodeCapacity, Endpoint: control.ConnectorEndpoint{Host: deployment.ConnectorAdvertiseHost, TCPPort: carrierEndpoint.TCPPort, QUICPort: carrierEndpoint.QUICPort}, CarrierEndpoint: *carrierEndpoint, CarrierServerSPKISHA256: carrierTrust.SPKISHA256, CarrierServerCertificateChainPEM: carrierTrust.CertificateChainPEM}, Interval: deployment.ControlInterval}
-	routeWorker := &edgeruntime.RouteWorker{Reporter: reporter, Certificates: certificateRegistry, Registry: canonicalRoutes, LegacyRegistry: routes, Source: client, Observer: client, InvalidateIngressAuthority: ingressAuthority.Invalidate, State: state, NodeID: cfg.NodeID, ProcessEpoch: processEpoch, Carrier: durableRoutes, PublicTCP: publicTCP, DurableAdmissions: durableAdmissions, AccessorSource: client, AccessorAdmissions: accessorAdmissions, Interval: deployment.ControlInterval, DrainTimeout: deployment.ControlTimeout}
-	usageWorker := &edgeruntime.UsageWorker{Reporter: reporter, Queue: queue, Sink: client, Prepare: meter, Persist: meter.Persist, Interval: 250 * time.Millisecond}
-	controlDependency := &edgeruntime.ControlDependency{Reporter: reporter, Source: client, TrustSource: client, ApplyTrust: trust.Snapshot.ReplaceRevocations, NodeID: cfg.NodeID, Interval: deployment.ControlInterval}
+	nodeWorker := &edgeruntime.NodeWorker{Manager: manager, Sink: client, Registration: control.NodeRegistration{NodeID: cfg.NodeID, EdgePool: cfg.EdgePool, Artifact: "paperboat-connector-v1", Protocol: "1.0", ProcessEpoch: processEpoch, Capacity: deployment.NodeCapacity, Endpoint: control.ConnectorEndpoint{Host: deployment.ConnectorAdvertiseHost, TCPPort: carrierEndpoint.TCPPort, QUICPort: carrierEndpoint.QUICPort}, CarrierEndpoint: *carrierEndpoint, CarrierServerSPKISHA256: carrierTrust.SPKISHA256, CarrierServerCertificateChainPEM: carrierTrust.CertificateChainPEM}, Interval: deployment.ControlInterval}
+	routeWorker := &edgeruntime.RouteWorker{Registry: canonicalRoutes, LegacyRegistry: routes, Source: client, Observer: client, State: state, NodeID: cfg.NodeID, ProcessEpoch: processEpoch, Carrier: durableRoutes, PublicTCP: publicTCP, DurableAdmissions: durableAdmissions, AccessorSource: client, AccessorAdmissions: accessorAdmissions, Interval: deployment.ControlInterval, DrainTimeout: deployment.ControlTimeout}
+	usageWorker := &edgeruntime.UsageWorker{Queue: queue, Sink: client, Prepare: meter, Persist: meter.Persist, Interval: 250 * time.Millisecond}
+	metrics := observability.NewMetrics()
+	controlDependency := &edgeruntime.ControlDependency{Source: client, TrustSource: client, ApplyTrust: trust.Snapshot.ReplaceRevocations, NodeID: cfg.NodeID, Interval: deployment.ControlInterval}
 	trusted, err := edgehttp.ParseTrustedProxies(append(deployment.TrustedProxyCIDRs, "127.0.0.1/32"))
 	if err != nil {
 		return nil, fmt.Errorf("parse edge trusted proxies: %w", err)
 	}
-	privateAccessAuthorizer, err := control.NewPrivateAccessGrantClient(client, cfg.NodeID, processEpoch)
-	if err != nil {
-		return nil, fmt.Errorf("create private access authorizer: %w", err)
-	}
-	previewTransport, err := edgehttp.NewDataCarrierPreviewTransport(edgehttp.DataCarrierPreviewTransportConfig{Registry: previewRoutes, StreamOpenTimeout: deployment.ControlTimeout, IngressRegistry: durableRoutes, PrivateAuthority: func(ctx context.Context, evidence connectorprotocol.PrivateAccessOpen) (connectorprotocol.IngressDecision, error) {
-		result, err := privateAccessAuthorizer.AuthorizePrivateAccessGrant(ctx, evidence.Grant, evidence.Request)
-		if err != nil {
-			return connectorprotocol.IngressDecision{}, err
-		}
-		if !result.Allowed || result.Ingress == nil {
-			return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
-		}
-		return *result.Ingress, nil
-	}, PublicAuthority: func(ctx context.Context, r edgehttp.DataCarrierPreviewRoute) (connectorprotocol.IngressDecision, error) {
-		return ingressAuthority.ResolvePreview(ctx, r.PreviewID, r.Hostname, r.Revision, connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: r.Identity.AccountID, TunnelID: r.Identity.TunnelID, ConnectorID: r.Identity.ConnectorID, SessionID: r.Identity.SessionID, ProcessGeneration: r.Identity.ProcessGeneration, Generation: r.Identity.Generation, RouteID: r.RouteID, RequestID: "preview-authority", Kind: "http"})
-	}})
+	previewTransport, err := edgehttp.NewDataCarrierPreviewTransport(edgehttp.DataCarrierPreviewTransportConfig{Registry: previewRoutes, StreamOpenTimeout: deployment.ControlTimeout})
 	if err != nil {
 		return nil, fmt.Errorf("create preview carrier transport: %w", err)
 	}
@@ -449,13 +391,14 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		Clock:   time.Now,
 		Info: datacarrier.StreamInfo{
 			IDs:                edgetelemetry.SafeIDs{EdgeNodeID: cfg.NodeID},
+			CorrelationID:      "corr_edge_carrier",
 			ReadDirection:      "ingress",
 			WriteDirection:     "egress",
 			CancellationReason: "shutdown",
 		},
 		Observe: func(ctx context.Context, operation, outcome, code string, duration time.Duration) {
 			if reporter != nil {
-				reporter.Observe(ctx, operation, outcome, code, reporting.SupportReference(ctx), duration)
+				reporter.Observe(ctx, operation, outcome, code, "", duration)
 			}
 		},
 	})
@@ -467,8 +410,9 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		Events:  typedEvents,
 		Clock:   time.Now,
 		Info: edgehttp.RequestInfo{
-			IDs:       edgetelemetry.SafeIDs{EdgeNodeID: cfg.NodeID},
-			RouteKind: "preview_public_https_wss",
+			IDs:           edgetelemetry.SafeIDs{EdgeNodeID: cfg.NodeID},
+			CorrelationID: "corr_edge_request",
+			RouteKind:     "preview_public_https_wss",
 		},
 	})
 	if err != nil {
@@ -479,8 +423,9 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		Events:  typedEvents,
 		Clock:   time.Now,
 		Info: edgehttp.RequestInfo{
-			IDs:       edgetelemetry.SafeIDs{EdgeNodeID: cfg.NodeID},
-			RouteKind: "tunnel_https_wss",
+			IDs:           edgetelemetry.SafeIDs{EdgeNodeID: cfg.NodeID},
+			CorrelationID: "corr_edge_request",
+			RouteKind:     "tunnel_https_wss",
 		},
 	})
 	if err != nil {
@@ -506,46 +451,16 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if deployment.BrowserAccessEnabled {
 		browserAccess = &edgehttp.BrowserAccess{Authority: &control.BrowserAccessClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, LoginOrigin: deployment.BrowserLoginOrigin}
 	}
-	inspectorAccess := &edgehttp.InspectorEdgeAccess{OnFailure: func(ctx context.Context, cause error) {
-		if reporting.SupportReference(ctx) == "" {
-			telemetryLifecycle.mu.Lock()
-			processCtx := telemetryLifecycle.processCtx
-			telemetryLifecycle.mu.Unlock()
-			if processCtx != nil {
-				ctx = reporting.WithSupportReference(ctx, reporting.SupportReference(processCtx))
-			}
-		}
-		reporter.ObserveFailure(ctx, "inspector_stream", cause)
-	}, Authority: &control.InspectorAccessClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, Carriers: durableRoutes, PreviewCarriers: previewRoutes}
-	gateway, err := edgehttp.NewGatewayWithTransports(edgehttp.Config{OnFailure: func(ctx context.Context, cause error) {
-		if reporting.SupportReference(ctx) == "" {
-			telemetryLifecycle.mu.Lock()
-			processCtx := telemetryLifecycle.processCtx
-			telemetryLifecycle.mu.Unlock()
-			if processCtx != nil {
-				ctx = reporting.WithSupportReference(ctx, reporting.SupportReference(processCtx))
-			}
-		}
-		reporter.ObserveFailure(ctx, "upstream_request", cause)
-	}, SelfHosted: deployment.SelfHosted, RuntimeCarrierTransport: runtimeTransport, BrowserTerminalHub: browserTerminalHub, BrowserTerminalEdgeHost: deployment.ConnectorAdvertiseHost, BrowserAccess: browserAccess, BrowserTerminal: &control.BrowserTerminalClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, BrowserConfigCompare: &control.BrowserConfigCompareClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, InspectorAccess: inspectorAccess, PreviewBaseDomain: deployment.PreviewBaseDomain, TunnelBaseDomain: deployment.TunnelBaseDomain, RuntimeBaseDomain: deployment.RuntimeBaseDomain, TrustedProxies: trusted, MaxHeaderBytes: deployment.MaxHeaderBytes, MaxBodyBytes: deployment.MaxBodyBytes, Routes: routeMatcher, PrivateAccessConnections: privateConnections, Readiness: previewReadiness{Canonical: previewRoutes, Fallback: routes}, HelperAccess: verifier, Revocations: trust.Snapshot, RevocationCheckInterval: deployment.ControlInterval}, "", previewForwarder, durableForwarder)
+	inspectorAccess := &edgehttp.InspectorEdgeAccess{Authority: &control.InspectorAccessClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, Carriers: durableRoutes, PreviewCarriers: previewRoutes}
+	gateway, err := edgehttp.NewGatewayWithTransports(edgehttp.Config{SelfHosted: deployment.SelfHosted, RuntimeCarrierTransport: runtimeTransport, BrowserTerminalHub: browserTerminalHub, BrowserTerminalEdgeHost: deployment.ConnectorAdvertiseHost, BrowserAccess: browserAccess, BrowserTerminal: &control.BrowserTerminalClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, InspectorAccess: inspectorAccess, PreviewBaseDomain: deployment.PreviewBaseDomain, TunnelBaseDomain: deployment.TunnelBaseDomain, RuntimeBaseDomain: deployment.RuntimeBaseDomain, TrustedProxies: trusted, MaxHeaderBytes: deployment.MaxHeaderBytes, MaxBodyBytes: deployment.MaxBodyBytes, Routes: routeMatcher, PrivateAccessToken: internalToken, PrivateAccessConnections: privateConnections, Readiness: previewReadiness{Canonical: previewRoutes, Fallback: routes}, HelperAccess: verifier, Revocations: trust.Snapshot, RevocationCheckInterval: deployment.ControlInterval}, "", previewForwarder, durableForwarder)
 	if err != nil {
 		return nil, fmt.Errorf("create edge gateway: %w", err)
 	}
+	privateAccessAuthorizer, err := control.NewPrivateAccessGrantClient(client, cfg.NodeID, processEpoch)
+	if err != nil {
+		return nil, fmt.Errorf("create private access authorizer: %w", err)
+	}
 	privateAccessBridge, err := edgehttp.NewPrivateAccessStreamBridge(edgehttp.PrivateAccessStreamBridgeConfig{
-		OnFailure: func(ctx context.Context, phase string, cause error) {
-			if reporting.SupportReference(ctx) == "" {
-				telemetryLifecycle.mu.Lock()
-				processCtx := telemetryLifecycle.processCtx
-				telemetryLifecycle.mu.Unlock()
-				if processCtx != nil {
-					ctx = reporting.WithSupportReference(ctx, reporting.SupportReference(processCtx))
-				}
-			}
-			switch phase {
-			case "private_stream_open", "private_stream_authorize", "private_stream_target", "private_stream_result", "private_stream_copy":
-				reporter.ObserveFailure(ctx, phase, cause)
-			}
-		},
 		Authorizer: privateAccessAuthorizer,
 		Target: edgehttp.PrivateAccessRouteTarget{
 			HTTP:   edgehttp.PrivateAccessHTTPTarget{Address: deployment.PrivateHTTPSListenAddress, Connections: privateConnections},
@@ -561,17 +476,18 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		Events:  typedEvents,
 		Clock:   time.Now,
 		Info: edgehttp.RequestInfo{
-			IDs: edgetelemetry.SafeIDs{EdgeNodeID: cfg.NodeID},
+			IDs:           edgetelemetry.SafeIDs{EdgeNodeID: cfg.NodeID},
+			CorrelationID: "corr_edge_request",
 		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create gateway request telemetry: %w", err)
 	}
-	gatewayHandler := gatewayRequestTelemetry.Handler(publicIngressHandler(deployment.PublicRoutes, deployment.ConnectorAdvertiseHost, cfg.HealthAddress, gateway, reporter))
+	gatewayHandler := gatewayRequestTelemetry.Handler(publicIngressHandler(deployment.PublicRoutes, deployment.ConnectorAdvertiseHost, cfg.HealthAddress, gateway))
 	carrierComponent := carrier
 	var carrierCleanup func() error
 	if carrierComponent == nil {
-		carrierComponent, carrierCleanup, err = newCarrierComponentWithTelemetry(deployment, carrierTrust.Certificate, expectedAdmissions, durableAdmissions, accessorAdmissions, previewHandler.Handle, durableRoutes, privateAccessBridge, carrierTelemetry, reporter, runtimeWorker)
+		carrierComponent, carrierCleanup, err = newCarrierComponentWithTelemetry(deployment, carrierTrust.Certificate, expectedAdmissions, durableAdmissions, accessorAdmissions, previewHandler.Handle, durableRoutes, privateAccessBridge, carrierTelemetry, runtimeWorker)
 		if err != nil {
 			return nil, err
 		}
@@ -590,7 +506,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		return nil, err
 	}
 	gatewayHandler = installationChallenge(cfg.NodeID, deployment.ConnectorAdvertiseHost, credential, gatewayHandler)
-	assembly, err := edgeruntime.NewAssembly(edgeruntime.AssemblySpec{Reporter: reporter, Persistence: persistence, Control: controlDependency, Carrier: carrierComponent, Certificates: certificateWorker, Runtime: runtimeWorker, Preview: previewWorker, Node: nodeWorker, Routes: routeWorker, PublicTCP: publicTCP, Usage: usageWorker, GatewayAddress: deployment.PublicHTTPSListenAddress, GatewayHandler: gatewayHandler, GatewayTLS: publicTLS, GatewayWrapListener: func(listener net.Listener) (net.Listener, error) {
+	assembly, err := edgeruntime.NewAssembly(edgeruntime.AssemblySpec{Persistence: persistence, Control: controlDependency, Carrier: carrierComponent, Certificates: certificateWorker, Runtime: runtimeWorker, Preview: previewWorker, Node: nodeWorker, Routes: routeWorker, PublicTCP: publicTCP, Usage: usageWorker, GatewayAddress: deployment.PublicHTTPSListenAddress, GatewayHandler: gatewayHandler, GatewayTLS: publicTLS, GatewayWrapListener: func(listener net.Listener) (net.Listener, error) {
 		return publicTCP.WrapTLSListener(listener, func(host string) bool {
 			if host == deployment.ConnectorAdvertiseHost {
 				return true
@@ -624,6 +540,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		RouteErr:       routeWorker.LastError,
 		UsageErr:       usageWorker.LastError,
 		CarrierRunning: trackedCarrier.running.Load,
+		Events:         metrics.Snapshot,
 		Traffic:        counters.Snapshot,
 		Health:         typedHealth.Snapshot,
 		Lifecycle:      typedEvents.Snapshot,
@@ -637,7 +554,6 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		return nil, fmt.Errorf("create private observability handler: %w", err)
 	}
 	service := edgeruntime.New(cfg, state, telemetryLifecycle, assembly, carrierTrustLifetime, telemetryReady{lifecycle: telemetryLifecycle})
-	service.Reporter = reporter
 	if err := service.SetHealthHandler(health); err != nil {
 		if carrierCleanup != nil {
 			_ = carrierCleanup()
@@ -683,6 +599,7 @@ type carrierTelemetryRoundTripper struct {
 	Telemetry *datacarrier.CarrierTelemetry
 	RouteKind string
 	NodeID    string
+	sequence  atomic.Uint64
 }
 
 func (t *carrierTelemetryRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -730,7 +647,7 @@ func (t *carrierTelemetryRoundTripper) streamInfo(request *http.Request) datacar
 	if request != nil && strings.EqualFold(strings.TrimSpace(request.Header.Get("Upgrade")), "websocket") {
 		protocol, kind = "websocket", "websocket"
 	}
-	correlationID := "correlation_" + uuid.NewString()
+	correlationID := "corr_edge_carrier_" + strconv.FormatUint(t.sequence.Add(1), 10)
 	info := datacarrier.StreamInfo{
 		IDs:           edgetelemetry.SafeIDs{EdgeNodeID: t.NodeID},
 		CorrelationID: correlationID, RouteKind: t.RouteKind,
@@ -793,7 +710,6 @@ type telemetryLifecycle struct {
 	startedAt    time.Time
 	metricCancel context.CancelFunc
 	metricDone   chan struct{}
-	processCtx   context.Context
 }
 
 func newTelemetryLifecycle(health *edgetelemetry.HealthTracker, metrics *edgetelemetry.Metrics, events *edgetelemetry.EventLog) *telemetryLifecycle {
@@ -821,11 +737,10 @@ func (l *telemetryLifecycle) Start(ctx context.Context) error {
 		return errors.New("telemetry lifecycle already started")
 	}
 	l.started = true
-	l.processCtx = ctx
 	l.startedAt = l.now()
 	if l.reporter != nil {
 		var metricCtx context.Context
-		metricCtx, l.metricCancel = context.WithCancel(ctx)
+		metricCtx, l.metricCancel = context.WithCancel(context.Background())
 		l.metricDone = make(chan struct{})
 		go l.runMetricExport(metricCtx)
 	}
@@ -880,18 +795,13 @@ func (l *telemetryLifecycle) Shutdown(ctx context.Context) error {
 	started := l.started
 	cancel, done := l.metricCancel, l.metricDone
 	l.mu.Unlock()
-	var failures []error
 	if cancel != nil {
 		cancel()
-		select {
-		case <-done:
-		case <-ctx.Done():
-			failures = append(failures, ctx.Err())
-		}
+		<-done
 	}
-	if len(failures) == 0 {
-		l.exportMetrics(l.processCtx)
-	}
+	l.exportMetrics(context.Background())
+
+	var failures []error
 	if started {
 		if err := l.updateHealth(edgetelemetry.StatusDown, "service_shutdown", "Edge service is shutting down.", "Start the edge service again when it is needed.", edgetelemetry.RetryNotRetryable); err != nil {
 			failures = append(failures, err)
@@ -904,41 +814,6 @@ func (l *telemetryLifecycle) Shutdown(ctx context.Context) error {
 		failures = append(failures, err)
 	}
 	return errors.Join(failures...)
-}
-
-// routeSink borrows the service invocation context without changing route identity.
-func (l *telemetryLifecycle) routeSink(core route.RouteTelemetrySink) route.RouteTelemetrySink {
-	return route.RouteTelemetrySinkFunc(func(record route.RouteTelemetryRecord) error {
-		input, err := record.EventInput()
-		if err != nil {
-			return err
-		}
-		l.mu.Lock()
-		ctx := l.processCtx
-		l.mu.Unlock()
-		if ctx == nil {
-			ctx = context.Background()
-		}
-		reference := reporting.SupportReference(ctx)
-		if reference == "" {
-			reference = reporting.Reference()
-		}
-		// The private in-memory record keeps its resource correlation and IDs.
-		// Export only producer-owned lifecycle labels and the invocation reference.
-		level := slog.LevelInfo
-		if input.Severity == edgetelemetry.SeverityWarn {
-			level = slog.LevelWarn
-		} else if input.Severity == edgetelemetry.SeverityDebug {
-			level = slog.LevelDebug
-		}
-		slog.New(slog.NewJSONHandler(os.Stderr, nil)).Log(ctx, level, "route_lifecycle",
-			"schema", edgetelemetry.EventSchemaV1, "at", record.At, "severity", string(input.Severity),
-			"component", "paperboat-tunnel", "operation", "route_lifecycle", "name", input.Name,
-			"code", input.Code, "outcome", string(input.Outcome), "retry", string(input.Retry),
-			"support_reference", reference, "correlation_id", reference)
-		l.reporter.Observe(ctx, "route_lifecycle", string(input.Outcome), input.Code, reference, -1)
-		return core.RecordRouteTelemetry(record)
-	})
 }
 
 func (l *telemetryLifecycle) runMetricExport(ctx context.Context) {
@@ -987,22 +862,17 @@ func (l *telemetryLifecycle) updateHealth(status edgetelemetry.HealthStatus, cod
 	}
 	return l.health.Update(edgetelemetry.HealthUpdate{
 		Dimension: edgetelemetry.DimensionService, Status: status, Code: code,
-		Summary: summary, RepairAction: repair, CorrelationID: l.correlation(), Retry: retry,
+		Summary: summary, RepairAction: repair, CorrelationID: "corr_edge_lifecycle", Retry: retry,
 	})
 }
 
 func (l *telemetryLifecycle) record(name string, severity edgetelemetry.EventSeverity, outcome edgetelemetry.EventOutcome, message string) error {
-	code := ""
-	switch name {
-	case "edge_service_starting":
-		code = "ok"
-	case "edge_service_ready":
-		code = "ready"
-	case "edge_service_shutdown":
-		code = "shutdown"
-	}
-	if l != nil && code != "" {
-		serviceEvent(l.processCtx, l.reporter, code, 0)
+	if l != nil && l.reporter != nil {
+		observed, code := string(outcome), "ok"
+		if outcome == edgetelemetry.OutcomeFailed {
+			code = "internal"
+		}
+		l.reporter.Observe(context.Background(), "service_lifecycle", observed, code, "", 0)
 	}
 	if l == nil || l.events == nil {
 		return nil
@@ -1010,7 +880,7 @@ func (l *telemetryLifecycle) record(name string, severity edgetelemetry.EventSev
 	_, _, err := l.events.TryRecord(edgetelemetry.EventInput{
 		At: l.now(), Severity: severity, Component: edgetelemetry.DimensionService,
 		Name: name, Code: name, Outcome: outcome, Message: message,
-		CorrelationID: l.correlation(), Retry: edgetelemetry.RetryNone,
+		CorrelationID: "corr_edge_lifecycle", Retry: edgetelemetry.RetryNone,
 	})
 	return err
 }
@@ -1081,64 +951,13 @@ func restoreState(path string) (*operation.Journal, *usage.Counters, *usage.Queu
 
 func readCredential(path string) (string, error) {
 	info, err := os.Lstat(path)
-	if err != nil {
-		return "", fmt.Errorf("read control credential metadata: %w", err)
-	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > 8192 {
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > 8192 {
 		return "", errors.New("invalid control credential file")
 	}
 	data, err := os.ReadFile(path)
 	value := strings.TrimSpace(string(data))
-	if err != nil {
-		return "", fmt.Errorf("read control credential: %w", err)
-	}
-	if len(value) < 32 || len(value) > 8192 {
+	if err != nil || len(value) < 32 || len(value) > 8192 {
 		return "", errors.New("invalid control credential file")
 	}
 	return value, nil
-}
-
-// SDK drain is local completion of export attempts; receipt remains unconfirmed.
-func logReportingShutdown(ctx context.Context, reporter *reporting.Reporter) {
-	level := slog.LevelInfo
-	if reporter.FlushStatus() == "timed_out" || reporter.SDKSubmissionsDropped() != 0 || reporter.SDKHTTPFailures() != 0 {
-		level = slog.LevelWarn
-	}
-	severity := "info"
-	if level == slog.LevelWarn {
-		severity = "warning"
-	}
-	reference := reporting.SupportReference(ctx)
-	slog.New(slog.NewJSONHandler(os.Stderr, nil)).Log(ctx, level, "reporting_shutdown",
-		"schema", "paperboat.edge_event.v1", "at", time.Now().UTC(), "severity", severity, "name", "reporting_shutdown", "outcome", "state_change", "component", "paperboat-tunnel",
-		"operation", "service_lifecycle", "stage", "shutdown", "code", "telemetry_shutdown",
-		"support_reference", reference, "correlation_id", reference,
-		"flush_status", reporter.FlushStatus(), "sdk_http_failures", reporter.SDKHTTPFailures(),
-		"sdk_submissions_dropped", reporter.SDKSubmissionsDropped(), "delivery", "unconfirmed")
-}
-
-func (l *telemetryLifecycle) correlation() string {
-	if reference := reporting.SupportReference(l.processCtx); reference != "" {
-		return reference
-	}
-	return "correlation_" + uuid.NewString()
-}
-
-func serviceEvent(ctx context.Context, reporter *reporting.Reporter, code string, duration time.Duration) {
-	if code != "ok" && code != "ready" && code != "shutdown" {
-		return
-	}
-	reference := reporting.SupportReference(ctx)
-	if reference == "" {
-		reference = reporting.Reference()
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	slog.New(slog.NewJSONHandler(os.Stderr, nil)).InfoContext(ctx, "tunnel_service_lifecycle",
-		"schema", "paperboat.edge_event.v1", "at", time.Now().UTC(), "severity", "info",
-		"component", "paperboat-tunnel", "operation", "service_lifecycle", "stage", "serve",
-		"name", "tunnel_service_lifecycle", "code", code, "outcome", "success",
-		"support_reference", reference, "correlation_id", reference)
-	reporter.Observe(ctx, "service_lifecycle", "success", code, reference, duration)
 }

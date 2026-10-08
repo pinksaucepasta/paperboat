@@ -1584,7 +1584,11 @@ func (c *Client) doRequestMeta(ctx context.Context, method, path string, body, o
 		if !supportref.Valid(responseSupportReference) {
 			responseSupportReference = requestSupportReference
 		}
-		return c.workspaceRequestError(path, &APIError{Status: resp.StatusCode, Code: envelope.Error.Code, Message: apiErrorMessage(envelope.Error.Code, resp.StatusCode), RequestID: responseRequestID(resp.Header), SupportReference: responseSupportReference, Details: envelope.Error.Details, cause: errorreport.HTTPStatusFailure(resp)})
+		cause := errorreport.HTTPStatusFailure(resp)
+		if decodeErr != nil {
+			cause = errors.Join(cause, &ResponseDecodeError{Err: decodeErr})
+		}
+		return c.workspaceRequestError(path, &APIError{Status: resp.StatusCode, Code: envelope.Error.Code, Message: apiErrorMessage(envelope.Error.Code, resp.StatusCode), RequestID: responseRequestID(resp.Header), SupportReference: responseSupportReference, Details: envelope.Error.Details, cause: cause})
 	}
 	if decodeErr != nil {
 		return &ResponseDecodeError{Err: decodeErr}

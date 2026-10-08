@@ -3,8 +3,12 @@ package configsync
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -281,6 +285,57 @@ func TestEngineRepositoryRecoveryErrorsKeepConsentIntact(t *testing.T) {
 			}
 			if engine.status.State != tc.state || engine.status.ErrorCode != tc.code || len(engine.status.RecoveryActions) == 0 || engine.status.RecoveryActions[0] != tc.action || syncer.calls != tc.calls {
 				t.Fatalf("status %#v calls %d", engine.status, syncer.calls)
+			}
+		})
+	}
+}
+
+func TestEngineMixedRepositoryFailureStaysOperationalAndRecovers(t *testing.T) {
+	operational := repositoryUnavailableFailure(fmt.Errorf("private cache /home/user/.config/paperboat: %w", syscall.EIO))
+	mixed := errors.Join(repositoryCredentialsFailure(os.ErrNotExist), operational)
+	syncer := &retryingSyncer{failures: 1, err: mixed}
+	engine, err := NewEngine(EngineConfig{HomeRoot: resolvedTempDir(t), Descriptor: testEngineDescriptor(1), Syncer: syncer})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = engine.Apply(context.Background())
+	if !errors.Is(err, ErrRepositoryCredentials) || !errors.Is(err, ErrRepositoryUnavailable) || !errors.Is(err, os.ErrNotExist) || !errors.Is(err, syscall.EIO) || strings.Contains(err.Error(), "/home/user") {
+		t.Fatalf("mixed failure lost a cause/classification or exposed a path: %v", err)
+	}
+	if engine.status.State != "offline" || engine.status.ErrorCode != "repository_unavailable" || !retryableSyncError(err) {
+		t.Fatalf("mixed operational failure was treated as a credential rejection: status=%#v retryable=%t", engine.status, retryableSyncError(err))
+	}
+	if err := engine.Apply(context.Background()); err != nil {
+		t.Fatalf("repository did not recover on the next cycle: %v", err)
+	}
+	if engine.status.State != "healthy" || syncer.calls != 2 {
+		t.Fatalf("repository recovery state=%q calls=%d", engine.status.State, syncer.calls)
+	}
+}
+
+func TestEngineCleanupFailureDoesNotBecomeConfigurationValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name, state, code, action string
+		primary                   error
+	}{
+		{name: "validation", state: "offline", code: "repository_unavailable", action: "check_repository_access", primary: fmt.Errorf("invalid config: %w", ErrSourceConfigInvalid)},
+		{name: "publication_uncertain", state: "sync_uncertain", code: "sync_uncertain", action: "observe_remote", primary: ErrSyncUncertain},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cleanup := repositoryUnavailableFailure(fmt.Errorf("private staging cleanup: %w", syscall.EIO))
+			mixed := repositoryCleanupFailure(tc.primary, cleanup)
+			engine, err := NewEngine(EngineConfig{HomeRoot: resolvedTempDir(t), Descriptor: testEngineDescriptor(1), Syncer: failingSyncer{err: mixed}})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			err = engine.Apply(context.Background())
+			if !errors.Is(err, ErrRepositoryUnavailable) || !errors.Is(err, syscall.EIO) || !errors.Is(err, tc.primary) {
+				t.Fatalf("combined failure lost its original state or cleanup causes: %v", err)
+			}
+			if engine.status.State != tc.state || engine.status.ErrorCode != tc.code || len(engine.status.RecoveryActions) == 0 || engine.status.RecoveryActions[0] != tc.action {
+				t.Fatalf("cleanup failure changed the wrong owner state: %#v", engine.status)
 			}
 		})
 	}

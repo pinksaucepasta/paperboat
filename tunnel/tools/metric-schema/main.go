@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,7 +15,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/node"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/observability"
-	edgetelemetry "github.com/pinksaucepasta/paperboat-tunnel/internal/telemetry"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/usage"
 )
 
@@ -28,10 +26,9 @@ type document struct {
 }
 
 type metric struct {
-	Name    string              `json:"name"`
-	Kind    string              `json:"kind"`
-	Labels  map[string][]string `json:"labels,omitempty"`
-	Buckets []float64           `json:"buckets,omitempty"`
+	Name   string              `json:"name"`
+	Kind   string              `json:"kind"`
+	Labels map[string][]string `json:"labels,omitempty"`
 }
 
 func main() {
@@ -64,20 +61,8 @@ func canonicalDocument() ([]byte, error) {
 	descriptors := observability.MetricDescriptors()
 	metrics := make([]metric, 0, len(descriptors))
 	for index, descriptor := range descriptors {
-		if descriptor.Name == "" || descriptor.Kind != "counter" && descriptor.Kind != "gauge" && descriptor.Kind != "histogram" {
+		if descriptor.Name == "" || descriptor.Kind != "counter" && descriptor.Kind != "gauge" {
 			return nil, fmt.Errorf("invalid descriptor %+v", descriptor)
-		}
-		if descriptor.Kind == "histogram" {
-			if len(descriptor.Buckets) == 0 {
-				return nil, fmt.Errorf("histogram %q has no buckets", descriptor.Name)
-			}
-			for bucketIndex, bucket := range descriptor.Buckets {
-				if bucket <= 0 || math.IsNaN(bucket) || math.IsInf(bucket, 0) || bucketIndex > 0 && descriptor.Buckets[bucketIndex-1] >= bucket {
-					return nil, fmt.Errorf("histogram %q has invalid bucket %v", descriptor.Name, bucket)
-				}
-			}
-		} else if len(descriptor.Buckets) != 0 {
-			return nil, fmt.Errorf("non-histogram %q has buckets", descriptor.Name)
 		}
 		if index > 0 && descriptors[index-1].Name >= descriptor.Name {
 			return nil, fmt.Errorf("descriptors are not uniquely sorted at %q", descriptor.Name)
@@ -92,7 +77,7 @@ func canonicalDocument() ([]byte, error) {
 				}
 			}
 		}
-		metrics = append(metrics, metric{Name: descriptor.Name, Kind: descriptor.Kind, Labels: descriptor.Labels, Buckets: descriptor.Buckets})
+		metrics = append(metrics, metric{Name: descriptor.Name, Kind: descriptor.Kind, Labels: descriptor.Labels})
 	}
 	data, err := json.MarshalIndent(document{SchemaVersion: schemaVersion, Metrics: metrics}, "", "  ")
 	if err != nil {
@@ -103,37 +88,6 @@ func canonicalDocument() ([]byte, error) {
 
 func verifyHandler() error {
 	now := time.Unix(1_800_000_000, 0).UTC()
-	schemaData, err := canonicalDocument()
-	if err != nil {
-		return err
-	}
-	typedMetrics := edgetelemetry.NewMetrics()
-	for _, descriptor := range edgetelemetry.MetricDescriptors() {
-		labels := make(edgetelemetry.MetricLabels, len(descriptor.Labels))
-		for _, label := range descriptor.Labels {
-			if len(label.AllowedValues) == 0 {
-				return fmt.Errorf("metric %q label %q has no allowed values", descriptor.Name, label.Name)
-			}
-			labels[label.Name] = label.AllowedValues[0]
-		}
-		var err error
-		switch descriptor.Kind {
-		case edgetelemetry.MetricCounter:
-			err = typedMetrics.AddCounter(descriptor.Name, labels, 1)
-		case edgetelemetry.MetricGauge:
-			err = typedMetrics.SetGauge(descriptor.Name, labels, 1)
-		case edgetelemetry.MetricHistogram:
-			if descriptor.Histogram == nil || len(descriptor.Histogram.Buckets) == 0 {
-				return fmt.Errorf("histogram %q has no buckets", descriptor.Name)
-			}
-			err = typedMetrics.ObserveHistogram(descriptor.Name, labels, descriptor.Histogram.Buckets[0])
-		default:
-			return fmt.Errorf("metric %q has unsupported kind %q", descriptor.Name, descriptor.Kind)
-		}
-		if err != nil {
-			return fmt.Errorf("populate metric %q: %w", descriptor.Name, err)
-		}
-	}
 	handler, err := observability.NewHandler(observability.Sources{
 		Node:     func() node.Snapshot { return node.Snapshot{Live: true, Ready: true} },
 		Manager:  func() node.ManagerSnapshot { return node.ManagerSnapshot{Capacity: 8} },
@@ -142,7 +96,10 @@ func verifyHandler() error {
 		Usage:      func() usage.QueueStats { return usage.QueueStats{MaxReports: 8, MaxBytes: 1024} },
 		ControlErr: func() error { return nil }, RouteErr: func() error { return nil }, UsageErr: func() error { return nil },
 		CarrierRunning: func() bool { return true },
-		Traffic:        func() []usage.CounterRecord { return nil }, TypedMetrics: typedMetrics.Snapshot, Now: func() time.Time { return now },
+		Events: func() map[observability.MetricKey]uint64 {
+			return map[observability.MetricKey]uint64{{Kind: observability.Admission, Result: observability.Success}: 1}
+		},
+		Traffic: func() []usage.CounterRecord { return nil }, Now: func() time.Time { return now },
 	})
 	if err != nil {
 		return err
@@ -152,15 +109,11 @@ func verifyHandler() error {
 	if recorder.Code != http.StatusOK {
 		return fmt.Errorf("status %d", recorder.Code)
 	}
-	var schema document
-	if err := json.Unmarshal(schemaData, &schema); err != nil {
-		return fmt.Errorf("decode canonical schema: %w", err)
-	}
-	documented := make(map[string]metric, len(schema.Metrics))
-	for _, descriptor := range schema.Metrics {
+	documented := make(map[string]observability.MetricDescriptor)
+	for _, descriptor := range observability.MetricDescriptors() {
 		documented[descriptor.Name] = descriptor
 	}
-	emitted := make(map[string]map[string]struct{})
+	emitted := make(map[string]struct{})
 	for _, line := range strings.Split(strings.TrimSpace(recorder.Body.String()), "\n") {
 		token := strings.Fields(line)[0]
 		name := token
@@ -173,49 +126,21 @@ func verifyHandler() error {
 			}
 			labels = parsed
 		}
-		descriptorName, series, ok := resolveMetricLine(name, documented)
+		descriptor, ok := documented[name]
 		if !ok {
 			return fmt.Errorf("handler emitted undocumented metric %q", name)
 		}
-		descriptor := documented[descriptorName]
-		if err := validateLabels(descriptor, series, labels); err != nil {
+		if err := validateLabels(descriptor, labels); err != nil {
 			return err
 		}
-		if emitted[descriptorName] == nil {
-			emitted[descriptorName] = make(map[string]struct{})
-		}
-		emitted[descriptorName][series] = struct{}{}
+		emitted[name] = struct{}{}
 	}
-	for name, descriptor := range documented {
-		if descriptor.Kind != "histogram" {
-			if _, ok := emitted[name]["value"]; !ok {
-				return fmt.Errorf("documented metric %q was not emitted", name)
-			}
-			continue
-		}
-		for _, series := range []string{"bucket", "sum", "count"} {
-			if _, ok := emitted[name][series]; !ok {
-				return fmt.Errorf("documented histogram %q %s series was not emitted", name, series)
-			}
+	for name := range documented {
+		if _, ok := emitted[name]; !ok {
+			return fmt.Errorf("documented metric %q was not emitted", name)
 		}
 	}
 	return nil
-}
-
-func resolveMetricLine(name string, documented map[string]metric) (descriptorName, series string, ok bool) {
-	if _, exists := documented[name]; exists {
-		return name, "value", true
-	}
-	for _, suffix := range []string{"_bucket", "_sum", "_count"} {
-		if !strings.HasSuffix(name, suffix) {
-			continue
-		}
-		base := strings.TrimSuffix(name, suffix)
-		if descriptor, exists := documented[base]; exists && descriptor.Kind == "histogram" {
-			return base, strings.TrimPrefix(suffix, "_"), true
-		}
-	}
-	return "", "", false
 }
 
 func parseLabels(value string) (map[string]string, error) {
@@ -240,39 +165,17 @@ func parseLabels(value string) (map[string]string, error) {
 	return result, nil
 }
 
-func validateLabels(descriptor metric, series string, labels map[string]string) error {
-	baseLabels := labels
-	if descriptor.Kind == "histogram" && series == "bucket" {
-		le, ok := labels["le"]
-		if !ok || !contains(histogramBucketValues(descriptor.Buckets), le) {
-			return fmt.Errorf("histogram %q has undocumented bucket label %q", descriptor.Name, le)
-		}
-		baseLabels = make(map[string]string, len(labels)-1)
-		for key, value := range labels {
-			if key != "le" {
-				baseLabels[key] = value
-			}
-		}
+func validateLabels(descriptor observability.MetricDescriptor, labels map[string]string) error {
+	if len(labels) != len(descriptor.Labels) {
+		return fmt.Errorf("metric %q labels=%v want=%v", descriptor.Name, labels, descriptor.Labels)
 	}
-	if len(baseLabels) != len(descriptor.Labels) {
-		return fmt.Errorf("metric %q labels=%v want=%v", descriptor.Name, baseLabels, descriptor.Labels)
-	}
-	for label, value := range baseLabels {
+	for label, value := range labels {
 		allowed, ok := descriptor.Labels[label]
 		if !ok || !contains(allowed, value) {
 			return fmt.Errorf("metric %q has undocumented label %s=%q", descriptor.Name, label, value)
 		}
 	}
 	return nil
-}
-
-func histogramBucketValues(buckets []float64) []string {
-	values := make([]string, len(buckets)+1)
-	for index, bucket := range buckets {
-		values[index] = strconv.FormatFloat(bucket, 'g', -1, 64)
-	}
-	values[len(buckets)] = "+Inf"
-	return values
 }
 
 func contains(values []string, want string) bool {

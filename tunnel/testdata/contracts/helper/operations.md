@@ -60,8 +60,8 @@ Stable file-transfer errors are `invalid_path`, `invalid_size`, `batch_limit`,
 
 ## Config application
 
-`config.apply.v1` is advertised only when the server has issued an active assignment
-plus proof of acceptance of the current warning revision for that machine.
+`config.apply.v1` is advertised for hosted profiles and for BYOD only when the server has
+issued an active assignment plus proof of acceptance of the current warning revision.
 Assignments use immutable revision IDs. Pull, apply, and report carry operation IDs and the
 expected assignment revision. Revision mismatch returns `config_revision_conflict` without
 writing. Apply stages all validated files, rejects absolute/traversal/symlink paths and

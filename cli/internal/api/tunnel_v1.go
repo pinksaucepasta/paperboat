@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
@@ -1221,7 +1222,7 @@ func (c *Client) doTunnelRequest(ctx context.Context, method, requestPath string
 	var envelope tunnelWireEnvelope
 	if err := decodeTunnelJSONStrict(raw, &envelope); err != nil {
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return &APIError{Status: resp.StatusCode, Code: "invalid_server_response", Message: "paperboat-server returned an invalid error response", RequestID: responseRequestID(resp.Header), SupportReference: responseOrRequestSupportReference(resp.Header, "", requestSupportReference)}
+			return &APIError{Status: resp.StatusCode, Code: "invalid_server_response", Message: "paperboat-server returned an invalid error response", RequestID: responseRequestID(resp.Header), SupportReference: responseOrRequestSupportReference(resp.Header, "", requestSupportReference), cause: errors.Join(errorreport.HTTPStatusFailure(resp), &ResponseDecodeError{Err: err})}
 		}
 		return &ResponseDecodeError{Err: err}
 	}
@@ -1238,7 +1239,7 @@ func (c *Client) doTunnelRequest(ctx context.Context, method, requestPath string
 		if code == "" {
 			code = "server_error"
 		}
-		return c.workspaceRequestError(requestPath, &APIError{Status: resp.StatusCode, Code: code, Message: apiErrorMessage(code, resp.StatusCode), RequestID: responseRequestID(resp.Header), SupportReference: responseOrRequestSupportReference(resp.Header, envelope.Error.SupportReference, requestSupportReference), Details: details})
+		return c.workspaceRequestError(requestPath, &APIError{Status: resp.StatusCode, Code: code, Message: apiErrorMessage(code, resp.StatusCode), RequestID: responseRequestID(resp.Header), SupportReference: responseOrRequestSupportReference(resp.Header, envelope.Error.SupportReference, requestSupportReference), Details: details, cause: errorreport.HTTPStatusFailure(resp)})
 	}
 	if out == nil {
 		return nil

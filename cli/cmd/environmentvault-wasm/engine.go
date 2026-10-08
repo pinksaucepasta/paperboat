@@ -31,6 +31,8 @@ type scopeState struct {
 	Envelope     string `json:"envelope"`
 }
 type request struct {
+	Envelope  string          `json:"envelope"`
+	Candidate *scopeState     `json:"candidate"`
 	Host      *hostState      `json:"host"`
 	Selection []hostSelection `json:"selection"`
 	Teams     []teamState     `json:"teams"`
@@ -129,10 +131,16 @@ func (e *engine) run(ctx context.Context, r request) (any, error) {
 		return nil, ctx.Err()
 	}
 	switch r.Action {
+	case "scope-candidate", "scope-reconcile":
+		return e.reconcileScope(r)
 	case "personal-rotate", "personal-rotate-scope":
 		return e.rotatePersonal(ctx, r)
 	case "status":
-		if e.head.AccountID != r.Vault.Account {
+		account := e.head.AccountID
+		if e.pendingRaw != nil {
+			account = e.pendingHead.AccountID
+		}
+		if account != r.Vault.Account {
 			e.clear()
 		}
 		recovery := false
@@ -140,7 +148,7 @@ func (e *engine) run(ctx context.Context, r request) (any, error) {
 			p, err := env.PasswordVaultProtection(e.raw)
 			recovery = err == nil && p.Recovery != nil
 		}
-		return map[string]any{"unlocked": len(e.raw) > 0, "recovery_enabled": recovery}, nil
+		return map[string]any{"unlocked": len(e.raw) > 0 && e.head.AccountID == r.Vault.Account, "recovery_enabled": recovery}, nil
 	case "lock":
 		e.clear()
 		return map[string]bool{"locked": true}, nil

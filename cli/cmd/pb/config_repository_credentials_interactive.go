@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/x509"
 	"errors"
-	"fmt"
 	gitssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 	"io"
@@ -26,7 +25,7 @@ func configureRepositoryCredentialsInteractive(command *cobra.Command, repositor
 	}
 	_, kind, err := configsync.NormalizeRepositoryEndpoint(repository.ExternalRef)
 	if err != nil {
-		return errors.New("the connected repository endpoint is invalid; reconnect it with a credential-free URL")
+		return safeCommandFailureFor("the connected repository endpoint is invalid; reconnect it with a credential-free URL", err)
 	}
 	if kind == "local" {
 		return showHomeText(command, "Local repository access", "This machine uses the repository's existing filesystem permissions. No credential profile is needed. A repository on another machine requires an explicit mounted location or an SSH/HTTPS repository binding.")
@@ -110,7 +109,7 @@ func configureRepositoryCredentialsInteractive(command *cobra.Command, repositor
 		return err
 	}
 	if err := configsync.SaveRepositoryCredentialProfile(root, repository.ID, profile); err != nil {
-		return fmt.Errorf("save machine repository credentials: %w", err)
+		return safeCommandFailureFor("could not save this machine's repository credential profile", err)
 	}
 	return showHomeText(command, "Repository credentials saved", "This repository's credentials are stored privately on this machine. Other machines need their own credentials. Define explicit path rules before syncing files.")
 }
@@ -148,11 +147,17 @@ func validateCredentialInteractiveFile(path string) error {
 		return errors.New("enter an absolute file path on this machine")
 	}
 	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil || resolved != path {
+	if err != nil {
+		return safeCommandFailureFor("choose an existing file through its real absolute path", err)
+	}
+	if resolved != path {
 		return errors.New("choose an existing file through its real absolute path")
 	}
 	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() > 1<<20 || (runtime.GOOS != "windows" && info.Mode().Perm()&0022 != 0) {
+	if err != nil {
+		return safeCommandFailureFor("could not inspect the credential reference file", err)
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() > 1<<20 || (runtime.GOOS != "windows" && info.Mode().Perm()&0022 != 0) {
 		return errors.New("choose a regular file no larger than 1 MiB that other users cannot modify")
 	}
 	return nil
@@ -179,7 +184,10 @@ func validateCredentialInteractiveProfileReferences(profile configsync.Repositor
 	}
 	if profile.SSHKeyFile != "" {
 		info, err := os.Lstat(profile.SSHKeyFile)
-		if err != nil || (runtime.GOOS != "windows" && info.Mode().Perm()&0077 != 0) {
+		if err != nil {
+			return safeCommandFailureFor("could not inspect the SSH private key file", err)
+		}
+		if runtime.GOOS != "windows" && info.Mode().Perm()&0077 != 0 {
 			return errors.New("SSH private key must be accessible only to its owner")
 		}
 		data, err := readCredentialInteractiveReference(profile.SSHKeyFile)
@@ -199,12 +207,17 @@ func readCredentialInteractiveReference(path string) ([]byte, error) {
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, errors.New("credential reference file is unavailable")
+		return nil, safeCommandFailureFor("credential reference file is unavailable", err)
 	}
-	defer file.Close()
 	data, err := io.ReadAll(io.LimitReader(file, (1<<20)+1))
-	if err != nil || len(data) > 1<<20 {
-		return nil, errors.New("credential reference file is unavailable or exceeds 1 MiB")
+	closeErr := file.Close()
+	if err != nil || closeErr != nil {
+		clear(data)
+		return nil, safeCommandFailureFor("credential reference file is unavailable", errors.Join(err, closeErr))
+	}
+	if len(data) > 1<<20 {
+		clear(data)
+		return nil, errors.New("credential reference file exceeds 1 MiB")
 	}
 	return data, nil
 }

@@ -3,9 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -176,35 +174,5 @@ func TestRouteWorkerPrivateOutageDoesNotBlockPublicProgressOrEraseLKG(t *testing
 	defer cancel()
 	if err := worker.Shutdown(ctx); err != nil {
 		t.Fatal(err)
-	}
-}
-
-type cyclicControlError struct{ cause error }
-
-func (e *cyclicControlError) Error() string { return "control wrapper" }
-func (e *cyclicControlError) Unwrap() error { return e.cause }
-func TestTransientControlUnavailableRetainsMixedLocalFailures(t *testing.T) {
-	request := &control.RequestFailure{Err: control.ErrControlUnavailable, Cause: syscall.ECONNREFUSED}
-	cycle := &cyclicControlError{}
-	cycle.cause = cycle
-	var typedNil *control.RequestFailure
-	tests := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{"transport cause", request, true},
-		{"wrapped parallel outage", fmt.Errorf("parallel pull: %w", errors.Join(request, control.ErrControlUnavailable)), true},
-		{"wrapped local failure", fmt.Errorf("parallel pull: %w", errors.Join(request, route.ErrInvalid)), false},
-		{"rejected", &control.RequestFailure{Err: control.ErrControlInvalid}, false},
-		{"cycle", errors.Join(request, cycle), false},
-		{"typed nil", errors.Join(request, typedNil), false},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := transientControlUnavailable(test.err); got != test.want {
-				t.Fatalf("transient=%v want=%v", got, test.want)
-			}
-		})
 	}
 }

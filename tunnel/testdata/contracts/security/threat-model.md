@@ -29,7 +29,7 @@
   encoding, illegal header bytes, ambiguous authority/host, and hop-by-hop forwarded headers.
 - Oversized input: declared and actual body/frame limits are enforced during streaming,
   with bounded reads and cleanup of partial state.
-- Filesystem escape: absolute, traversal, NUL, symlink, hard-link, and machine paths fail
+- Filesystem escape: absolute, traversal, NUL, symlink, hard-link, and device paths fail
   before staging or config application.
 - Log injection: externally supplied fields are structured, length-bounded, and escaped;
   terminal bytes, config contents, tokens, claims, signed URLs, and local paths are absent.

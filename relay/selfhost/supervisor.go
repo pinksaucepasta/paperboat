@@ -16,12 +16,12 @@ import (
 
 // Run keeps ownership of runtime subprocesses until cancellation. A runtime
 // crash is retried with bounded backoff; terminating pbh drains all children.
-func Run(ctx context.Context, dir, binaryDir string, output io.Writer, observe func(context.Context, string, error)) error {
+func Run(ctx context.Context, dir, binaryDir string, output io.Writer) error {
 	ticker := time.NewTicker(certificateCheckInterval)
 	defer ticker.Stop()
-	return run(ctx, dir, binaryDir, output, ticker.C, observe)
+	return run(ctx, dir, binaryDir, output, ticker.C)
 }
-func run(ctx context.Context, dir, binaryDir string, output io.Writer, renewals <-chan time.Time, observe func(context.Context, string, error)) error {
+func run(ctx context.Context, dir, binaryDir string, output io.Writer, renewals <-chan time.Time) error {
 	output = &synchronizedWriter{writer: output}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -58,10 +58,7 @@ func run(ctx context.Context, dir, binaryDir string, output io.Writer, renewals 
 			capability := filepath.Base(componentDir)
 			binary := filepath.Join(binaryDir, "paperboat-"+capability)
 			info, err := os.Stat(binary)
-			if err != nil {
-				return fmt.Errorf("runtime binary unavailable: %w", err)
-			}
-			if !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+			if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
 				return fmt.Errorf("%s runtime binary unavailable", capability)
 			}
 		}
@@ -69,7 +66,7 @@ func run(ctx context.Context, dir, binaryDir string, output io.Writer, renewals 
 			wg.Add(1)
 			go func(componentDir string) {
 				defer wg.Done()
-				supervise(childContext, filepath.Join(binaryDir, "paperboat-"+filepath.Base(componentDir)), componentDir, output, observe)
+				supervise(childContext, filepath.Join(binaryDir, "paperboat-"+filepath.Base(componentDir)), componentDir, output)
 			}(componentDir)
 		}
 		started = true
@@ -79,7 +76,7 @@ func run(ctx context.Context, dir, binaryDir string, output io.Writer, renewals 
 		return err
 	}
 	serverDone := make(chan error, 1)
-	go func() { serverDone <- Serve(ctx, dir, notify, observe) }()
+	go func() { serverDone <- Serve(ctx, dir, notify) }()
 	for {
 		select {
 		case err := <-serverDone:
@@ -98,9 +95,6 @@ func run(ctx context.Context, dir, binaryDir string, output io.Writer, renewals 
 		case now := <-renewals:
 			renewed, err := RenewCertificate(dir, now)
 			if err != nil {
-				if observe != nil {
-					observe(ctx, "selfhost_certificate", err)
-				}
 				fmt.Fprintln(output, "Infrastructure certificate renewal unavailable; existing certificate retained; retry scheduled.")
 				continue
 			}
@@ -127,7 +121,7 @@ func run(ctx context.Context, dir, binaryDir string, output io.Writer, renewals 
 		}
 	}
 }
-func supervise(ctx context.Context, binary, dir string, output io.Writer, observe func(context.Context, string, error)) {
+func supervise(ctx context.Context, binary, dir string, output io.Writer) {
 	delay := time.Second
 	for ctx.Err() == nil {
 		cmd := exec.CommandContext(ctx, binary, "run", "--state-dir", dir)
@@ -156,9 +150,7 @@ func supervise(ctx context.Context, binary, dir string, output io.Writer, observ
 			return
 		}
 		fmt.Fprintf(output, "%s stopped; restarting in %s\n", strings.TrimPrefix(filepath.Base(binary), "paperboat-"), delay)
-		if observe != nil && err != nil {
-			observe(ctx, "selfhost_child", err)
-		}
+		_ = err // Runtime logs contain its actionable startup failure; never echo arguments or credentials.
 		if time.Since(started) > time.Minute {
 			delay = time.Second
 		}

@@ -69,14 +69,21 @@ func (s *commandVaultSecureStore) snapshot() []string {
 	return values
 }
 
+func (c *commandVaultControl) PendingVaultHosts(context.Context) ([]api.VaultHostSummary, error) {
+	c.hostRefreshes++
+	return []api.VaultHostSummary{}, c.hostRefreshError
+}
+
 type commandVaultControl struct {
-	store           config.ProfileStore
-	state           api.PasswordVaultState
-	scopes          map[string]api.VaultScopeState
-	failAfterCommit bool
-	puts            int
-	envelopes       [][]byte
-	beforePut       func([]byte) error
+	hostRefreshes    int
+	hostRefreshError error
+	store            config.ProfileStore
+	state            api.PasswordVaultState
+	scopes           map[string]api.VaultScopeState
+	failAfterCommit  bool
+	puts             int
+	envelopes        [][]byte
+	beforePut        func([]byte) error
 }
 
 func commandVaultScopeKey(kind, owner, machine string) string {
@@ -306,6 +313,9 @@ func TestPasswordVaultCommandSavesRecoveryBeforePublicationAndHidesCode(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	if fixture.control.hostRefreshes != 1 {
+		t.Fatal("initialization did not refresh already registered recipients after publication")
+	}
 	defer clear(code)
 	if len(code) == 0 || !publicationSawFile || !strings.Contains(stdout, "ENV vault operation completed.") {
 		t.Fatalf("publicationSawFile=%t code=%q stdout=%q", publicationSawFile, code, stdout)
@@ -334,6 +344,9 @@ func TestPasswordVaultCommandCommitErrorRetainsCodeAndResumeRetriesExactBytes(t 
 	stdout, stderr, err := executePasswordVaultCommand(t, "vault", "init", "--recovery-file", path)
 	if err == nil || !strings.Contains(err.Error(), "retain the new recovery file") || !strings.Contains(err.Error(), "pb env vault resume") {
 		t.Fatalf("commit error=%v; want actionable custody/resume guidance", err)
+	}
+	if fixture.control.hostRefreshes != 0 {
+		t.Fatal("unconfirmed initialization refreshed recipients before publication recovery")
 	}
 	code, mode := readCommandRecoveryFile(t, path)
 	defer clear(code)
@@ -512,10 +525,46 @@ func TestPersonalRotationCancelRequiresAccountBoundConfirmation(t *testing.T) {
 	}
 	t.Cleanup(func() { passwordVaultForCommand = previousManager })
 	_, _, err := executePasswordVaultCommand(t, "rotate", "cancel", "--confirm", "CANCEL ENV ROTATE other-account")
-	if err == nil || !strings.Contains(err.Error(), "CANCEL ENV ROTATE <account_id>") {
+	if err == nil || !errors.Is(err, errUsage) || err.Error() != "The command arguments are invalid. Run `pb COMMAND --help` and retry." || strings.Contains(err.Error(), "other-account") {
 		t.Fatalf("rotation cancel confirmation error=%v", err)
+	}
+	if _, err := fixture.store.LoadPasswordVault(commandVaultIssuer, commandVaultAccount); !errors.Is(err, config.ErrSecretNotFound) {
+		t.Fatalf("wrong confirmation changed local vault custody: %v", err)
 	}
 }
 
 var _ environmentmanager.PasswordVaultClient = (*commandVaultControl)(nil)
 var _ config.EnvironmentSecureSecretStore = (*commandVaultSecureStore)(nil)
+
+func TestPasswordVaultUnlockRefreshesRecipientsAndKeepsPendingRecovery(t *testing.T) {
+	fixture := newCommandVaultFixture(t)
+	password := []byte("refresh master password")
+	defer clear(password)
+	if err := fixture.manager.Initialize(context.Background(), password); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.manager.Store.LockPasswordVault(fixture.manager.Issuer, fixture.manager.AccountID); err != nil {
+		t.Fatal(err)
+	}
+	installPasswordVaultCommandDependencies(t, fixture.manager, map[string][][]byte{"Master password": {password}})
+	stdout, stderr, err := executePasswordVaultCommand(t, "vault", "unlock")
+	if err != nil || fixture.control.hostRefreshes != 1 || !strings.Contains(stdout, "completed") {
+		t.Fatalf("refreshes=%d err=%v stdout=%q stderr=%q", fixture.control.hostRefreshes, err, stdout, stderr)
+	}
+	private := errors.New("PRIVATE_REFRESH_TRANSPORT")
+	fixture.control.hostRefreshError = private
+	_, _, err = executePasswordVaultCommand(t, "vault", "resume")
+	var pending *envHostRefreshFailure
+	if !errors.As(err, &pending) || !errors.Is(err, private) || fixture.control.hostRefreshes != 2 {
+		t.Fatal("resume did not retain recipient refresh failure")
+	}
+	message := userFacingError(err)
+	result := classifyCLIJSONError(err)
+	if strings.Contains(message, "PRIVATE") || !strings.Contains(message, "pb env vault resume") || result.Code != "env_recipient_refresh_pending" || result.StateChanged != true || !result.Retryable {
+		t.Fatalf("unsafe pending refresh=%#v", result)
+	}
+	fixture.control.hostRefreshError = nil
+	if _, _, err = executePasswordVaultCommand(t, "vault", "resume"); err != nil || fixture.control.hostRefreshes != 3 {
+		t.Fatal("recipient refresh did not recover")
+	}
+}

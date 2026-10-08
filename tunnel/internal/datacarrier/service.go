@@ -15,9 +15,6 @@ type ServiceConfig struct {
 	Carrier Config
 	TCP     *EndpointConfig
 	QUIC    *EndpointConfig
-	// OnFailure receives content-free HTTP diagnostics and a typed panic marker.
-	// Fatal listener errors are returned to Accept for its final lifecycle owner.
-	OnFailure func(context.Context, error)
 }
 
 // Service owns the real edge carrier listeners. It only publishes a Server

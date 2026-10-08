@@ -258,6 +258,14 @@ func runWorkerWith(ctx context.Context, args []string, input io.Reader, output, 
 		defer cancel()
 		_ = feature.Shutdown(shutdownCtx)
 	}()
+	// Activation fences the lease before feature startup. Readiness means the
+	// feature is usable and its heartbeat is fresh after that startup completes.
+	if err := feature.Health(ctx); err != nil {
+		return err
+	}
+	if err := candidate.Heartbeat(ctx); err != nil {
+		return fmt.Errorf("hostd worker heartbeat: %w", err)
+	}
 	fmt.Fprintf(output, "active %d %d\n", active.Epoch, active.APIVersion)
 	ticker := time.NewTicker(*heartbeat)
 	defer ticker.Stop()

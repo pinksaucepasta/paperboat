@@ -55,7 +55,7 @@ func ClientConfig(base *tls.Config, pin string) (*tls.Config, error) {
 			options.CurrentTime = now()
 		}
 		if _, err := leaf.Verify(options); err != nil {
-			return identityFailure{cause: err}
+			return ErrIdentity
 		}
 		if previous != nil {
 			return previous(state)
@@ -64,9 +64,3 @@ func ClientConfig(base *tls.Config, pin string) (*tls.Config, error) {
 	}
 	return result, nil
 }
-
-// identityFailure preserves the typed verification cause without exposing certificate details.
-type identityFailure struct{ cause error }
-
-func (identityFailure) Error() string     { return ErrIdentity.Error() }
-func (e identityFailure) Unwrap() []error { return []error{ErrIdentity, e.cause} }

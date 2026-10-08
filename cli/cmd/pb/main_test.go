@@ -2956,9 +2956,13 @@ func TestAuthStatusRejectsProfileWithMissingSecret(t *testing.T) {
 			if err := store.Secrets.Delete(ref); err != nil {
 				t.Fatal(err)
 			}
-			err = newApp().Run([]string{"pb", "--config", configPath, "auth", "status", "--json"})
-			if !errors.Is(err, config.ErrSecretNotFound) || !strings.Contains(err.Error(), "enrollment command from the Paperboat dashboard") {
-				t.Fatalf("auth status error = %v", err)
+			app := newApp()
+			var output bytes.Buffer
+			app.Writer = &output
+			err = app.Run([]string{"pb", "--config", configPath, "auth", "status", "--json"})
+			message := userFacingError(err)
+			if !errors.Is(err, config.ErrSecretNotFound) || !strings.Contains(message, "`pb login`") || strings.Contains(message, "enrollment") || strings.Contains(message, "paired") || output.Len() != 0 {
+				t.Fatal("missing account token did not retain its cause and safe sign-in recovery")
 			}
 		})
 	}

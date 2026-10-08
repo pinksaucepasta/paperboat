@@ -85,14 +85,11 @@ func (c *BrowserAccessClient) Activate(ctx context.Context, in BrowserAuthorizeR
 	return out, err
 }
 
-func (c *BrowserAccessClient) call(ctx context.Context, action string, input, output any) (resultErr error) {
-	if c == nil || c.HTTP == nil || ctx == nil || connectorprotocol.ValidateIdentifier(c.NodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(c.ProcessEpoch) != nil {
+func (c *BrowserAccessClient) call(ctx context.Context, action string, input, output any) error {
+	if c == nil || c.HTTP == nil || connectorprotocol.ValidateIdentifier(c.NodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(c.ProcessEpoch) != nil {
 		return ErrControlInvalid
 	}
-	ctx, finish := c.HTTP.startRequest(ctx, "connector_admission")
-	defer func() { finish(resultErr) }()
 	body, err := json.Marshal(input)
-	defer clearControlBytes(body)
 	if err != nil || len(body) > 16<<10 {
 		return ErrControlInvalid
 	}
@@ -105,7 +102,6 @@ func (c *BrowserAccessClient) call(ctx context.Context, action string, input, ou
 	request.Header.Set("X-Paperboat-Edge-Node-ID", c.NodeID)
 	request.Header.Set("X-Paperboat-Edge-Process-Epoch", c.ProcessEpoch)
 	request.Header.Set("Content-Type", "application/json")
-	c.HTTP.applyTraceHeaders(ctx, request.Header)
 	client := c.HTTP.client
 	if action == "activate" {
 		bounded := *client
@@ -115,40 +111,33 @@ func (c *BrowserAccessClient) call(ctx context.Context, action string, input, ou
 	response, err := client.Do(request)
 	if err != nil {
 		if action == "activate" && (errors.Is(err, context.DeadlineExceeded) || ctx.Err() == context.DeadlineExceeded) {
-			return &RequestFailure{Path: "/v1/edge/browser-access/activate", Category: "transport", SupportReference: controlReference(ctx), Err: ErrLazyActivationTimeout, Cause: err}
+			return ErrLazyActivationTimeout
 		}
-		return &RequestFailure{Path: "/v1/edge/browser-access/" + action, Category: "transport", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: err}
+		return ErrControlUnavailable
 	}
 	defer response.Body.Close()
 	switch response.StatusCode {
 	case http.StatusUnauthorized:
-		return &RequestFailure{Path: "/v1/edge/browser-access/" + action, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrBrowserUnauthenticated}
+		return ErrBrowserUnauthenticated
 	case http.StatusNotFound, http.StatusForbidden:
-		return &RequestFailure{Path: "/v1/edge/browser-access/" + action, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrBrowserDenied}
+		return ErrBrowserDenied
 	case http.StatusOK:
 	default:
 		if action == "activate" {
 			if classified := classifyLazyActivationError(response.Body); classified != nil {
-				return &RequestFailure{Path: "/v1/edge/browser-access/" + action, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: classified}
+				return classified
 			}
 		}
-		return &RequestFailure{Path: "/v1/edge/browser-access/" + action, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrControlUnavailable}
+		return ErrControlUnavailable
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, (32<<10)+1))
-	defer clearControlBytes(data)
-	if err != nil {
-		return &RequestFailure{Path: "/v1/edge/browser-access/" + action, Category: "transport", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: err}
-	}
-	if len(data) > 32<<10 {
+	if err != nil || len(data) > 32<<10 {
 		return ErrControlUnavailable
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(output); err != nil {
-		return &RequestFailure{Path: "/v1/edge/browser-access/" + action, Category: "response_invalid", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: err}
-	}
-	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
-		return &RequestFailure{Path: "/v1/edge/browser-access/" + action, Category: "response_invalid", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: err}
+	if decoder.Decode(output) != nil || decoder.Decode(new(any)) != io.EOF {
+		return ErrControlUnavailable
 	}
 	return nil
 }

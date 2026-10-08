@@ -72,7 +72,7 @@ type task27Dispatch struct {
 	OperationID        string             `json:"operation_id"`
 	AccountID          string             `json:"account_id"`
 	ActorID            string             `json:"actor_id"`
-	OwnerMachineID     string             `json:"owner_machine_id"`
+	OwnerDeviceID      string             `json:"owner_device_id"`
 	OwnerSessionID     string             `json:"owner_session_id"`
 	Target             task27Target       `json:"target"`
 	AccessMode         string             `json:"access_mode"`
@@ -102,7 +102,7 @@ func (d *task27Dispatch) setHash() error {
 		OperationID        string             `json:"operation_id"`
 		AccountID          string             `json:"account_id"`
 		ActorID            string             `json:"actor_id"`
-		OwnerMachineID     string             `json:"owner_machine_id"`
+		OwnerDeviceID      string             `json:"owner_device_id"`
 		OwnerSessionID     string             `json:"owner_session_id"`
 		Target             task27Target       `json:"target"`
 		AccessMode         string             `json:"access_mode"`
@@ -120,7 +120,7 @@ func (d *task27Dispatch) setHash() error {
 		IdempotencyKey     string             `json:"idempotency_key"`
 		RequestID          string             `json:"request_id"`
 		CorrelationID      string             `json:"correlation_id"`
-	}{d.Lazy, d.Schema, d.Kind, d.PreviewID, d.OperationID, d.AccountID, d.ActorID, d.OwnerMachineID, d.OwnerSessionID, d.Target, d.AccessMode, d.Endpoint, d.LeaseDeadline.UTC(), d.UserDeadline, d.LeaseETag, d.State, d.AllocationState, d.EdgeState, d.OriginState, d.CreatedAt.UTC(), d.LastRenewedAt.UTC(), d.ExpectedGeneration, d.IdempotencyKey, d.RequestID, d.CorrelationID}
+	}{d.Lazy, d.Schema, d.Kind, d.PreviewID, d.OperationID, d.AccountID, d.ActorID, d.OwnerDeviceID, d.OwnerSessionID, d.Target, d.AccessMode, d.Endpoint, d.LeaseDeadline.UTC(), d.UserDeadline, d.LeaseETag, d.State, d.AllocationState, d.EdgeState, d.OriginState, d.CreatedAt.UTC(), d.LastRenewedAt.UTC(), d.ExpectedGeneration, d.IdempotencyKey, d.RequestID, d.CorrelationID}
 	raw, err := json.Marshal(canonical)
 	if err != nil {
 		return err
@@ -296,7 +296,7 @@ func TestTask27CrossRepositoryLazyActivation(t *testing.T) {
 	authority.activate = func(activationCtx context.Context) error {
 		dispatches.Add(1)
 		created := time.Now().UTC()
-		request := task27Dispatch{Lazy: &task27LazyBinding{PolicyID: "policy_task27", PolicyGeneration: 2, InstallationGeneration: ready.InstallationGeneration, BootID: ready.BootID}, Schema: "paperboat.preview-tunnel/v1", Kind: "preview_dispatch", PreviewID: "preview_task27", OperationID: "operation_task27", AccountID: identity.AccountID, ActorID: "actor_task27", OwnerMachineID: identity.HostID, OwnerSessionID: "lazy_" + ready.BootID, Target: task27Target{Scheme: "http", Address: ready.OriginAddress}, AccessMode: "private", Endpoint: "https://" + host, LeaseDeadline: created.Add(time.Hour), LeaseETag: fmt.Sprintf(`"ptv1:preview_lease:%s:1"`, base64.RawURLEncoding.EncodeToString([]byte("preview_task27"))), State: "allocating", AllocationState: "pending", EdgeState: "pending", OriginState: "unknown", CreatedAt: created, LastRenewedAt: created, ExpectedGeneration: 1, IdempotencyKey: "task27_dispatch_key", RequestID: "request_task27", CorrelationID: "correlation_task27"}
+		request := task27Dispatch{Lazy: &task27LazyBinding{PolicyID: "policy_task27", PolicyGeneration: 2, InstallationGeneration: ready.InstallationGeneration, BootID: ready.BootID}, Schema: "paperboat.preview-tunnel/v1", Kind: "preview_dispatch", PreviewID: "preview_task27", OperationID: "operation_task27", AccountID: identity.AccountID, ActorID: "actor_task27", OwnerDeviceID: identity.HostID, OwnerSessionID: "lazy_" + ready.BootID, Target: task27Target{Scheme: "http", Address: ready.OriginAddress}, AccessMode: "private", Endpoint: "https://" + host, LeaseDeadline: created.Add(time.Hour), LeaseETag: fmt.Sprintf(`"ptv1:preview_lease:%s:1"`, base64.RawURLEncoding.EncodeToString([]byte("preview_task27"))), State: "allocating", AllocationState: "pending", EdgeState: "pending", OriginState: "unknown", CreatedAt: created, LastRenewedAt: created, ExpectedGeneration: 1, IdempotencyKey: "task27_dispatch_key", RequestID: "request_task27", CorrelationID: "correlation_task27"}
 		if err := request.setHash(); err != nil {
 			return err
 		}

@@ -119,9 +119,22 @@ func (e *engine) provision(ctx context.Context, r request) (any, error) {
 		coordinate := selected.Kind + "\x00" + selected.Owner + "\x00"
 		value, ok := scopes[coordinate][selected.Name]
 		if !ok {
-			return nil, env.ErrInvalid
+			previouslySelected := false
+			for _, previous := range r.Host.Selection {
+				if previous == selected {
+					previouslySelected = true
+					break
+				}
+			}
+			if !previouslySelected {
+				return nil, env.ErrInvalid
+			}
+			if _, exists := documents[coordinate]; !exists {
+				return nil, env.ErrInvalid
+			}
+		} else {
+			values[selected.Name] = bytes.Clone(value)
 		}
-		values[selected.Name] = bytes.Clone(value)
 		addSource(coordinate)
 	}
 	machineCoordinate := "personal\x00" + e.head.AccountID + "\x00" + r.Machine

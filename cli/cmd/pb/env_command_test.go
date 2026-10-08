@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -81,7 +82,7 @@ func TestVaultHostSelectionParsingIsExplicitAndRedacted(t *testing.T) {
 
 func TestVaultScopeTargetRejectsMixedTeamMachineSelection(t *testing.T) {
 	target, err := vaultScopeTargetForCommand(newEnvironmentTestCommand(strings.NewReader(""), io.Discard), nil, "account_1", "team_1", "machine_1")
-	if err == nil || target.owner != "" || !strings.Contains(err.Error(), "cannot be combined") {
+	if err == nil || target.owner != "" || !errors.Is(err, errUsage) || err.Error() != "The command arguments are invalid. Run `pb COMMAND --help` and retry." || strings.Contains(err.Error(), "team_1") || strings.Contains(err.Error(), "machine_1") {
 		t.Fatalf("target=%+v err=%v", target, err)
 	}
 }
@@ -103,10 +104,15 @@ func TestEnvironmentVariableStdinIsRawBoundedAndAllowsEmpty(t *testing.T) {
 	if got, err := readBoundedEnvironmentVariableStdin(bytes.NewReader([]byte{0xff})); err == nil || got != nil || !strings.Contains(err.Error(), "UTF-8") {
 		t.Fatalf("invalid UTF-8 stdin got=%q err=%v", got, err)
 	}
-	if got, err := readBoundedEnvironmentVariableStdin(errorReader{}); err == nil || got != nil || !strings.Contains(err.Error(), "could not read") {
+	readCause := syscall.EIO
+	if got, err := readBoundedEnvironmentVariableStdin(environmentVariableErrorReader{cause: readCause}); err == nil || got != nil || !errors.Is(err, readCause) || strings.Contains(err.Error(), "input fault") || !strings.Contains(err.Error(), "could not read") {
 		t.Fatalf("reader error got=%q err=%v", got, err)
 	}
 }
+
+type environmentVariableErrorReader struct{ cause error }
+
+func (r environmentVariableErrorReader) Read([]byte) (int, error) { return 0, r.cause }
 
 func TestEnvironmentVariableValueFileIsBoundedAndRequiresAbsolutePath(t *testing.T) {
 	root := t.TempDir()
@@ -125,6 +131,11 @@ func TestEnvironmentVariableValueFileIsBoundedAndRequiresAbsolutePath(t *testing
 	}
 	if _, err := readEnvironmentVariableValueFile(newEnvironmentTestCommand(strings.NewReader("stdin"), io.Discard), true, path); err == nil || !strings.Contains(err.Error(), "choose") {
 		t.Fatalf("combined value input error=%v", err)
+	}
+
+	missing := filepath.Join(root, "missing-value.txt")
+	if _, err := readEnvironmentVariableValueFile(newEnvironmentTestCommand(strings.NewReader(""), io.Discard), false, missing); err == nil || !errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), missing) {
+		t.Fatalf("missing value file lost its private cause or exposed its path: %v", err)
 	}
 }
 
@@ -154,6 +165,9 @@ func TestEnvironmentVariableSetCommandEncryptsLocallyAndHidesInput(t *testing.T)
 	if err := setEnvironmentVariable(command, "", "API_MODE", true); err != nil {
 		t.Fatal(err)
 	}
+	if fixture.control.hostRefreshes != 1 {
+		t.Fatal("source mutation did not automatically refresh selected recipients")
+	}
 	scope := fixture.control.scopes[commandVaultScopeKey("personal", commandVaultAccount, "")]
 	raw, err := base64.RawURLEncoding.Strict().DecodeString(scope.Envelope)
 	if err != nil {
@@ -175,7 +189,7 @@ func TestEnvironmentVariableSetCommandRoutesTeamScopeWithoutPlaintext(t *testing
 	teamKey := bytes.Repeat([]byte{0x42}, 32)
 	defer clear(teamKey)
 	if err := fixture.manager.UpdateKeys(context.Background(), func(keys *environmente2ee.VaultKeys) error {
-		keys.Teams = append(keys.Teams, environmente2ee.VaultTeamKey{TeamID: "team_1", Epoch: 1, MembershipGeneration: 1, Key: bytes.Clone(teamKey)})
+		keys.Teams = append(keys.Teams, environmente2ee.VaultTeamKey{TeamID: "team-one", Epoch: 1, MembershipGeneration: 1, Key: bytes.Clone(teamKey)})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -193,31 +207,122 @@ func TestEnvironmentVariableSetCommandRoutesTeamScopeWithoutPlaintext(t *testing
 		passwordVaultForCommand = previousVault
 	})
 	var output bytes.Buffer
-	if err := setEnvironmentVariableForScope(newEnvironmentTestCommand(strings.NewReader(canary), &output), "team_1", "", "API_MODE", true, ""); err != nil {
+	teamCommand := newEnvironmentTestCommand(strings.NewReader(canary), &output)
+	teamCommand.PersistentFlags().String("workspace", "", "")
+	if err := teamCommand.PersistentFlags().Set("workspace", "team-one"); err != nil {
 		t.Fatal(err)
 	}
-	scope := fixture.control.scopes[commandVaultScopeKey("team", "team_1", "")]
+	if err := setEnvironmentVariableForScope(teamCommand, "team-one", "", "API_MODE", true, ""); err != nil {
+		t.Fatal(err)
+	}
+	scope := fixture.control.scopes[commandVaultScopeKey("team", "team-one", "")]
 	raw, err := base64.RawURLEncoding.Strict().DecodeString(scope.Envelope)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(raw, []byte(canary)) || strings.Contains(output.String(), canary) || !strings.Contains(output.String(), "team team_1") {
+	if bytes.Contains(raw, []byte(canary)) || strings.Contains(output.String(), canary) || !strings.Contains(output.String(), "team team-one") {
 		t.Fatalf("team scope or output exposed plaintext: output=%q", output.String())
 	}
 }
 
 func TestEnvironmentVariableSetCommandHidesServerEcho(t *testing.T) {
 	const canary = "command-error-canary"
-	if got := safeEnvironmentVariableCommandError(errors.New("server echoed " + canary + "\\nwith escaped details")); got == nil || strings.Contains(got.Error(), canary) || got.Error() != "environment variable update failed" {
+	cause := errors.New("server echoed " + canary + "\\nwith escaped details")
+	if got := safeEnvironmentVariableCommandError(cause); got == nil || !errors.Is(got, cause) || strings.Contains(got.Error(), canary) || got.Error() != "environment variable update failed" {
 		t.Fatalf("unsafe command error=%v", got)
 	}
 }
 
 func TestEnvironmentVariableSetConflictErrorUsesOnlyStableCode(t *testing.T) {
 	const canary = "conflict-secret-canary"
-	err := safeEnvironmentVariableCommandError(&api.APIError{Code: "version_conflict", Message: canary, Details: map[string]any{"message": canary}})
-	if err == nil || strings.Contains(err.Error(), canary) || err.Error() != "environment variable scope changed; fetch it and retry" {
+	apiCause := &api.APIError{Code: "version_conflict", Message: canary, Details: map[string]any{"message": canary}}
+	err := safeEnvironmentVariableCommandError(apiCause)
+	var projected *api.APIError
+	if err == nil || !errors.As(err, &projected) || projected != apiCause || !errors.Is(err, apiCause) || strings.Contains(err.Error(), canary) || err.Error() != "environment variable scope changed; fetch it and retry" {
 		t.Fatalf("unsafe conflict error=%v", err)
+	}
+	operational := syscall.EIO
+	mixed := safeEnvironmentVariableCommandError(errors.Join(apiCause, operational))
+	if !errors.Is(mixed, apiCause) || !errors.Is(mixed, operational) || mixed.Error() != "environment variable update failed" {
+		t.Fatalf("mixed API and I/O failure lost cause or received conflict-only advice: %v", mixed)
+	}
+}
+
+func TestEnvironmentVariableCommandErrorKeepsExpectedStateCauseOnlyWhenUnmixed(t *testing.T) {
+	pure := safeEnvironmentVariableCommandError(environmentmanager.ErrVaultLocked)
+	if !errors.Is(pure, environmentmanager.ErrVaultLocked) || !strings.Contains(pure.Error(), "pb env vault unlock") {
+		t.Fatalf("pure locked state lost recovery guidance or cause: %v", pure)
+	}
+	operational := syscall.EIO
+	mixed := safeEnvironmentVariableCommandError(errors.Join(environmentmanager.ErrVaultLocked, operational))
+	if !errors.Is(mixed, environmentmanager.ErrVaultLocked) || !errors.Is(mixed, operational) || mixed.Error() != "environment variable update failed" {
+		t.Fatalf("mixed failure was hidden or received misleading state guidance: %v", mixed)
+	}
+}
+
+func TestResumeSuppressesOnlyAnUnmixedHostRefreshConflict(t *testing.T) {
+	conflict := &environmentmanager.HostRefreshConflict{Cause: &api.APIError{Status: 409, Code: "version_conflict"}}
+	if !onlyEnvironmentHostRefreshConflict(errors.Join(conflict, nil)) {
+		t.Fatal("definitive host refresh conflict was not recognized")
+	}
+	operational := syscall.EIO
+	if onlyEnvironmentHostRefreshConflict(errors.Join(conflict, operational)) {
+		t.Fatal("host refresh conflict hid a joined operational failure")
+	}
+	if onlyEnvironmentHostRefreshConflict(errors.Join(conflict, errors.Join(operational))) {
+		t.Fatal("host refresh conflict hid an operational failure in a nested join")
+	}
+}
+
+func TestENVRecipientRecoveryAdviceRequiresUnmixedCause(t *testing.T) {
+	pureLock := (&envHostRefreshFailure{cause: errors.Join(environmentmanager.ErrVaultLocked, nil)}).Error()
+	if !strings.Contains(pureLock, "pb env vault unlock") {
+		t.Fatalf("pure lock did not retain unlock recovery: %q", pureLock)
+	}
+	operational := syscall.EIO
+	mixedLock := (&envHostRefreshFailure{cause: errors.Join(environmentmanager.ErrVaultLocked, operational)}).Error()
+	if strings.Contains(mixedLock, "pb env vault unlock") || !strings.Contains(mixedLock, "pb env vault resume") {
+		t.Fatalf("mixed lock and I/O failure received misleading recovery: %q", mixedLock)
+	}
+	pureAuth := (&envHostRefreshFailure{cause: &api.APIError{Status: 401}}).Error()
+	if !strings.Contains(pureAuth, "pb auth login") {
+		t.Fatalf("pure authorization rejection lost recovery: %q", pureAuth)
+	}
+	mixedAuth := (&envHostRefreshFailure{cause: errors.Join(&api.APIError{Status: 401}, operational)}).Error()
+	if strings.Contains(mixedAuth, "pb auth login") || !strings.Contains(mixedAuth, "pb env vault resume") {
+		t.Fatalf("mixed authorization and I/O failure received misleading recovery: %q", mixedAuth)
+	}
+	pureRotation := (&envHostRefreshFailure{cause: &environmentmanager.HostRotationRequired{Cause: &api.APIError{Status: 409, Code: "rotation_required"}}}).Error()
+	if !strings.Contains(pureRotation, "pb env rotate") {
+		t.Fatalf("pure rotation requirement lost recovery: %q", pureRotation)
+	}
+	mixedRotation := (&envHostRefreshFailure{cause: errors.Join(&environmentmanager.HostRotationRequired{Cause: &api.APIError{Status: 409, Code: "rotation_required"}}, operational)}).Error()
+	if strings.Contains(mixedRotation, "pb env rotate") || !strings.Contains(mixedRotation, "pb env vault resume") {
+		t.Fatalf("mixed rotation and I/O failure received misleading recovery: %q", mixedRotation)
+	}
+}
+
+type cyclicEnvironmentCause struct{}
+
+func (cyclicEnvironmentCause) Error() string       { return "cyclic environment cause" }
+func (cause cyclicEnvironmentCause) Unwrap() error { return cause }
+
+func TestENVRecoveryCauseInspectionRejectsCyclicAndOversizedTrees(t *testing.T) {
+	matchLocked := func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrVaultLocked) }
+	cycle := cyclicEnvironmentCause{}
+	if onlyEnvironmentFailureLeaves(cycle, matchLocked) || onlyEnvironmentHostRefreshConflict(cycle) || environmentFailureHasMarker(cycle, func(error) bool { return true }) || !environmentFailureContainsJoin(cycle) {
+		t.Fatal("cyclic cause was accepted as an ordinary ENV state")
+	}
+	cycleMessage := (&envHostRefreshFailure{cause: cycle}).Error()
+	if !strings.Contains(cycleMessage, "pb env vault resume") || strings.Contains(cycleMessage, "pb auth login") {
+		t.Fatalf("cyclic cause did not receive bounded generic recovery: %q", cycleMessage)
+	}
+	causes := make([]error, 17)
+	for index := range causes {
+		causes[index] = environmentmanager.ErrVaultLocked
+	}
+	if onlyEnvironmentFailureLeaves(errors.Join(causes...), matchLocked) {
+		t.Fatal("oversized joined cause tree was accepted as an ordinary ENV state")
 	}
 }
 
@@ -264,6 +369,9 @@ func TestEnvironmentVariableUnsetCommandUsesEncryptedManagerAndYes(t *testing.T)
 	}
 	if err := unsetEnvironmentVariable(command, "", "API_MODE"); err != nil {
 		t.Fatal(err)
+	}
+	if fixture.control.hostRefreshes != 1 {
+		t.Fatal("source mutation did not automatically refresh selected recipients")
 	}
 	if !strings.Contains(output.String(), "Unset API_MODE") || !strings.Contains(output.String(), "encrypted vault scope") {
 		t.Fatalf("output=%q", output.String())
@@ -327,7 +435,7 @@ func TestEnvironmentVariableCapabilityFilteringAndCaseInsensitiveNames(t *testin
 
 func TestEnvironmentVariableScopePickerUsesPersonalScopeAndExplicitHostSelections(t *testing.T) {
 	items := environmentVariableScopePickerItems([]api.UserMachine{{ID: "host_1", Alias: "host-one", Capabilities: api.MachineCapabilities{EnvironmentInjection: api.MachineCapability{Configured: true}}}})
-	if len(items) != 2 || items[0].ID != "personal" || items[0].Title != "Personal" || strings.Contains(items[0].Description, "every connected") || !strings.Contains(items[0].Description, "explicit host selections") {
+	if len(items) != 2 || items[0].ID != "workspace" || items[0].Title != "Personal" || strings.Contains(items[0].Description, "every connected") || !strings.Contains(items[0].Description, "explicit host selections") {
 		t.Fatalf("personal picker item=%+v", items[0])
 	}
 	if items[1].ID != "host_1" || items[1].Title != "host-one" {
@@ -388,4 +496,74 @@ func allZero(value []byte) bool {
 		}
 	}
 	return true
+}
+
+func TestENVSafeFailureKeepsRecoveryAndCauseInRealFormatter(t *testing.T) {
+	for _, scenario := range []struct {
+		cause    error
+		recovery string
+	}{
+		{environmentmanager.ErrVaultLocked, "pb env vault unlock"},
+		{environmentmanager.ErrVaultPending, "pb env vault resume"},
+		{&api.APIError{Status: 403, Code: "team_entitlement_required", Message: "PRIVATE_PROVIDER_VALUE"}, "Team Billing"},
+		{&api.APIError{Status: 409, Code: "version_conflict", Message: "PRIVATE_PROVIDER_VALUE"}, "retry"},
+	} {
+		err := safeEnvironmentVariableCommandError(scenario.cause)
+		if !errors.Is(err, scenario.cause) {
+			t.Fatal("ENV recovery erased the typed cause")
+		}
+		message := userFacingError(err)
+		result := classifyCLIJSONError(err)
+		if !strings.Contains(message, scenario.recovery) || strings.Contains(message, "PRIVATE") || !strings.Contains(result.Message, scenario.recovery) || strings.Contains(result.Message, "PRIVATE") {
+			t.Fatalf("safe ENV recovery lost: %#v", result)
+		}
+	}
+}
+
+func TestVaultScopeMachineOverrideUsesPersonalWhileTeamRemainsSelected(t *testing.T) {
+	command := newEnvironmentTestCommand(strings.NewReader(""), io.Discard)
+	command.PersistentFlags().String("workspace", "", "")
+	if err := command.PersistentFlags().Set("workspace", "team-one"); err != nil {
+		t.Fatal(err)
+	}
+	client := api.New("https://control.invalid", config.Credential{}, nil)
+	if err := client.SetWorkspace("team-one"); err != nil {
+		t.Fatal(err)
+	}
+	previous := environmentVariableResolveMachine
+	defer func() { environmentVariableResolveMachine = previous }()
+	for _, owned := range []bool{true, false} {
+		environmentVariableResolveMachine = func(_ context.Context, scoped *api.Client, requested string) (api.UserMachine, error) {
+			if scoped.Workspace() != "personal" || requested != "machine_1" {
+				t.Fatal("machine lookup did not use owner-only Personal authorization")
+			}
+			if !owned {
+				return api.UserMachine{}, &api.APIError{Status: 403, Code: "forbidden"}
+			}
+			return api.UserMachine{ID: "machine_1", Alias: "owned", Capabilities: api.MachineCapabilities{EnvironmentInjection: api.MachineCapability{Configured: true}}}, nil
+		}
+		target, err := vaultScopeTargetForCommand(command, client, "account_1", "", "machine_1")
+		if owned && (err != nil || target.kind != "personal" || target.owner != "account_1" || target.machine != "machine_1" || !strings.Contains(target.label, "personal")) {
+			t.Fatalf("Personal override target=%+v error=%v", target, err)
+		}
+		if !owned && err == nil {
+			t.Fatal("foreign Team-owned machine gained a Personal override")
+		}
+		if client.Workspace() != "team-one" {
+			t.Fatal("override changed the active Team workspace")
+		}
+	}
+	_, err := vaultScopeTargetForCommand(command, client, "account_1", "team-one", "machine_1")
+	if !errors.Is(err, errUsage) {
+		t.Fatal("explicit Team and machine were accepted")
+	}
+}
+
+func TestENVSourceConflictRecoveryKeepsExactMachineOutcome(t *testing.T) {
+	cause := &environmentmanager.ScopeRefreshConflict{Cause: &api.APIError{Status: 409, Code: "version_conflict", Message: "PRIVATE_PROVIDER_VALUE"}}
+	err := safeEnvironmentVariableCommandError(errors.Join(cause, nil))
+	result := classifyCLIJSONError(err)
+	if result.Code != "env_source_conflict" || result.StateChanged != false || result.OutcomeUncertain || !strings.Contains(result.Message, "submit the intended edit again") || strings.Contains(result.Message, "PRIVATE") {
+		t.Fatalf("conflict result lost: %#v", result)
+	}
 }

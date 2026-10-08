@@ -105,7 +105,7 @@ func bindEndpointPeer(endpoint EndpointConfig, state tls.ConnectionState) (Ident
 	}
 	identity, err := endpoint.PeerBinding(state)
 	if err != nil {
-		return Identity{}, carrierFailure{sentinel: ErrCarrierTLS, cause: err}
+		return Identity{}, fmt.Errorf("%w: peer binding rejected: %v", ErrCarrierTLS, err)
 	}
 	if err := identity.Validate(); err != nil {
 		return Identity{}, fmt.Errorf("%w: peer binding returned invalid identity", ErrCarrierTLS)
@@ -149,7 +149,7 @@ func ListenTCPMux(ctx context.Context, endpoint EndpointConfig, config Config) (
 	}
 	listener, err := net.Listen("tcp", endpoint.Address)
 	if err != nil {
-		return nil, carrierFailure{sentinel: ErrInvalidEndpoint, cause: err}
+		return nil, fmt.Errorf("%w: TCP listener: %v", ErrInvalidEndpoint, err)
 	}
 	listenerContext, cancel := context.WithCancel(ctx)
 	workerCount := config.QueueDepth
@@ -313,7 +313,7 @@ func ListenQUIC(ctx context.Context, endpoint EndpointConfig, config Config) (*Q
 	}
 	listener, err := quic.ListenAddr(endpoint.Address, tlsConfig, endpointQUICConfig(config))
 	if err != nil {
-		return nil, carrierFailure{sentinel: ErrInvalidEndpoint, cause: err}
+		return nil, fmt.Errorf("%w: QUIC listener: %v", ErrInvalidEndpoint, err)
 	}
 	listenerContext, cancel := context.WithCancel(ctx)
 	result := &QUICListener{ctx: listenerContext, cancel: cancel, listener: listener, endpoint: endpoint, config: config, done: make(chan struct{})}
@@ -354,9 +354,6 @@ func (l *QUICListener) Accept(ctx context.Context) (*Server, error) {
 	identity, err := bindEndpointPeer(l.endpoint, state)
 	if err != nil || l.config.Identity != (Identity{}) && identity != l.config.Identity {
 		_ = session.Close()
-		if err != nil {
-			return nil, err
-		}
 		return nil, ErrCarrierTLS
 	}
 	serverConfig := l.config

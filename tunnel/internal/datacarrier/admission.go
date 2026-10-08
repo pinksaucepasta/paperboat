@@ -49,7 +49,7 @@ type ExpectedAdmission struct {
 	EdgeNodeID                           string
 	PreviewID                            string
 	OperationID                          string
-	OwnerMachineID                       string
+	OwnerDeviceID                        string
 	OwnerSessionID                       string
 	Identity                             Identity
 	InstallationGeneration               uint64
@@ -85,12 +85,12 @@ func (a ExpectedAdmission) Validate(now time.Time, nodeID string) error {
 	}
 	identifiers := map[string]string{
 		"preview_id": a.PreviewID, "operation_id": a.OperationID,
-		"route_id": a.RouteID, "owner_machine_id": a.OwnerMachineID,
+		"route_id": a.RouteID, "owner_device_id": a.OwnerDeviceID,
 		"owner_session_id": a.OwnerSessionID,
 	}
 	if runtime {
 		identifiers = map[string]string{"route_id": a.RouteID}
-		if a.InstallationGeneration == 0 || a.AccessMode != "" || a.PreviewID != "" || a.OperationID != "" || a.OwnerMachineID != "" || a.OwnerSessionID != "" || a.LeaseGeneration != 0 {
+		if a.InstallationGeneration == 0 || a.AccessMode != "" || a.PreviewID != "" || a.OperationID != "" || a.OwnerDeviceID != "" || a.OwnerSessionID != "" || a.LeaseGeneration != 0 {
 			return ErrAdmissionNotExpected
 		}
 	}
@@ -102,8 +102,8 @@ func (a ExpectedAdmission) Validate(now time.Time, nodeID string) error {
 	if err := a.Identity.Validate(); err != nil {
 		return fmt.Errorf("%w: carrier identity is invalid", ErrAdmissionNotExpected)
 	}
-	if !runtime && a.Identity.HostID != a.OwnerMachineID {
-		return fmt.Errorf("%w: host and owner machine differ", ErrAdmissionConflict)
+	if !runtime && a.Identity.HostID != a.OwnerDeviceID {
+		return fmt.Errorf("%w: host and owner device differ", ErrAdmissionConflict)
 	}
 	if (!runtime && a.LeaseGeneration == 0) || a.ConfigGeneration == 0 || a.RouteRevision == 0 || a.AttachmentGeneration == 0 {
 		return fmt.Errorf("%w: generations must be positive", ErrAdmissionNotExpected)
@@ -166,7 +166,7 @@ func (a ExpectedAdmission) exactEqual(other ExpectedAdmission) bool {
 		a.EdgeCarrierServerCertificateChainPEM == other.EdgeCarrierServerCertificateChainPEM &&
 		a.PreviewID == other.PreviewID &&
 		a.OperationID == other.OperationID &&
-		a.OwnerMachineID == other.OwnerMachineID &&
+		a.OwnerDeviceID == other.OwnerDeviceID &&
 		a.OwnerSessionID == other.OwnerSessionID &&
 		a.Identity == other.Identity &&
 		a.InstallationGeneration == other.InstallationGeneration &&

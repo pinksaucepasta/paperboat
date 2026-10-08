@@ -46,7 +46,7 @@ func testInstallation(t *testing.T, both bool) (string, string, *http.Client, *h
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewUnstartedServer(Handler(dir, nil, nil))
+	server := httptest.NewUnstartedServer(Handler(dir, nil))
 	server.TLS = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13}
 	server.StartTLS()
 	t.Cleanup(server.Close)
@@ -138,7 +138,7 @@ func TestActualTLSClaimSingleUseRestartAndRuntimeFiles(t *testing.T) {
 	if deployment["self_hosted"] != true || deployment["preview_base_domain"] != "" || deployment["public_https_listen_address"] != "127.0.0.1:443" || deployment["carrier_tcp_listen_address"] != "127.0.0.1:27443" {
 		t.Fatal("unconfigured tunnel domains were synthesized")
 	}
-	server.Config.Handler = Handler(dir, nil, nil) // Rebuild handler with no memory from the first claim.
+	server.Config.Handler = Handler(dir, nil) // Rebuild handler with no memory from the first claim.
 	status, again := post(t, client, server.URL+"/v1/selfhost/claim", secret, testClaim(true))
 	if status != 200 || !bytes.Equal(body, again) {
 		t.Fatal("same claim was not idempotent after restart")
@@ -277,7 +277,7 @@ func TestServeCancellationReleasesListener(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, dir, nil, nil) }()
+	go func() { done <- Serve(ctx, dir, nil) }()
 	deadline := time.Now().Add(time.Second)
 	for {
 		conn, err := net.DialTimeout("tcp", address, 50*time.Millisecond)

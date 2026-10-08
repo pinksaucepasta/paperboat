@@ -36,7 +36,7 @@ func vaultPasswordSource(command *cobra.Command) (path string, stdin bool, err e
 		}
 	}
 	if path != "" && stdin {
-		return "", false, invocationError(errors.New("choose --password-file or --password-stdin, not both"))
+		return "", false, localArgumentError("choose --password-file or --password-stdin, not both")
 	}
 	return path, stdin, nil
 }
@@ -56,7 +56,7 @@ func readVaultPasswordSource(command *cobra.Command) ([]byte, bool, error) {
 		value, err := readOwnerOnlyFile(path, vaultSecretMaximumBytes)
 		if err != nil {
 			clear(value)
-			return nil, true, errors.New("--password-file must be an owner-only regular file no larger than 1024 bytes")
+			return nil, true, userInputFileError("--password-file must be an owner-only regular file no larger than 1024 bytes; check its path and permissions", err)
 		}
 		return value, true, nil
 	}
@@ -64,7 +64,7 @@ func readVaultPasswordSource(command *cobra.Command) ([]byte, bool, error) {
 		return nil, false, nil
 	}
 	if environmentVariableTerminal(command) {
-		return nil, true, errors.New("--password-stdin requires non-interactive stdin")
+		return nil, true, localArgumentError("--password-stdin requires non-interactive stdin")
 	}
 	value, err := readBoundedVaultSecret(command.InOrStdin())
 	if err != nil {
@@ -81,11 +81,11 @@ func readBoundedVaultSecret(input io.Reader) ([]byte, error) {
 	value, err := io.ReadAll(io.LimitReader(input, vaultSecretMaximumBytes+1))
 	if err != nil {
 		clear(value)
-		return nil, errors.New("could not read vault password")
+		return nil, safeCommandFailureFor("could not read vault password", err)
 	}
 	if len(value) > vaultSecretMaximumBytes {
 		clear(value)
-		return nil, errors.New("vault password exceeds 1024 bytes")
+		return nil, localArgumentError("vault password exceeds 1024 bytes")
 	}
 	return value, nil
 }
@@ -100,7 +100,7 @@ func vaultPasswordForOperation(command *cobra.Command, title string, confirm boo
 	}
 	if !explicit {
 		if jsonOutputRequested(command) {
-			return nil, errors.New("--json requires --password-file or --password-stdin")
+			return nil, localArgumentError("--json requires --password-file or --password-stdin")
 		}
 		password, err = passwordVaultPrompt(command, title)
 		if err != nil {
@@ -109,7 +109,7 @@ func vaultPasswordForOperation(command *cobra.Command, title string, confirm boo
 	}
 	if len(password) == 0 {
 		clear(password)
-		return nil, errors.New("master password cannot be empty")
+		return nil, localArgumentError("master password cannot be empty")
 	}
 	if !confirm || explicit {
 		return password, nil
@@ -123,7 +123,7 @@ func vaultPasswordForOperation(command *cobra.Command, title string, confirm boo
 	clear(confirmation)
 	if !match {
 		clear(password)
-		return nil, errors.New("master passwords do not match; vault unchanged")
+		return nil, localArgumentError("master passwords do not match; vault unchanged")
 	}
 	return password, nil
 }
@@ -140,7 +140,7 @@ func readVaultRecoveryInput(command *cobra.Command) ([]byte, error) {
 	}
 	if path == "" {
 		if jsonOutputRequested(command) {
-			return nil, errors.New("--json recover requires --recovery-input-file")
+			return nil, localArgumentError("--json recover requires --recovery-input-file")
 		}
 		return passwordVaultPrompt(command, "Recovery code")
 	}
@@ -150,7 +150,7 @@ func readVaultRecoveryInput(command *cobra.Command) ([]byte, error) {
 	value, err := readOwnerOnlyFile(path, vaultSecretMaximumBytes)
 	if err != nil {
 		clear(value)
-		return nil, errors.New("--recovery-input-file must be an owner-only regular file no larger than 1024 bytes")
+		return nil, userInputFileError("--recovery-input-file must be an owner-only regular file no larger than 1024 bytes; check its path and permissions", err)
 	}
 	// Recovery output files are newline terminated. Normalize that file
 	// framing while keeping password input byte-for-byte unchanged.
@@ -159,7 +159,7 @@ func readVaultRecoveryInput(command *cobra.Command) ([]byte, error) {
 	clear(value)
 	if len(normalized) == 0 {
 		clear(normalized)
-		return nil, errors.New("--recovery-input-file cannot be empty")
+		return nil, localArgumentError("--recovery-input-file cannot be empty")
 	}
 	return normalized, nil
 }

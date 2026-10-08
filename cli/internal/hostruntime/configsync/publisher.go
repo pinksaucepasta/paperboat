@@ -154,7 +154,7 @@ func (p *Publisher) Sync(ctx context.Context, _ string) (result PublishResult, r
 	if !prepared.HasChanges {
 		if observer, ok := p.repository.(PublicationObserver); ok {
 			if observeErr := observer.PublicationCommitted(ctx, prepared, remote.Revision); observeErr != nil {
-				return PublishResult{}, observeErr
+				return PublishResult{RemoteRevision: remote.Revision, Landed: true}, observeErr
 			}
 		}
 		return PublishResult{RemoteRevision: remote.Revision, Landed: true}, nil
@@ -168,7 +168,7 @@ func (p *Publisher) Sync(ctx context.Context, _ string) (result PublishResult, r
 		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), p.releaseTimeout)
 		defer cancel()
 		releaseErr := p.authority.ReleaseLease(releaseCtx, lease)
-		resultErr = errors.Join(resultErr, releaseErr)
+		resultErr = repositoryCleanupFailure(resultErr, releaseErr)
 	}()
 	verified, err := p.repository.Fetch(ctx)
 	if err != nil {
@@ -186,7 +186,7 @@ func (p *Publisher) Sync(ctx context.Context, _ string) (result PublishResult, r
 	if !prepared.HasChanges {
 		if observer, ok := p.repository.(PublicationObserver); ok {
 			if observeErr := observer.PublicationCommitted(ctx, prepared, verified.Revision); observeErr != nil {
-				return PublishResult{}, observeErr
+				return PublishResult{RemoteRevision: verified.Revision, Landed: true}, observeErr
 			}
 		}
 		return PublishResult{RemoteRevision: verified.Revision, Landed: true}, nil
@@ -222,13 +222,14 @@ func (p *Publisher) Sync(ctx context.Context, _ string) (result PublishResult, r
 		}
 	}
 	published, err := p.repository.Publish(publicationCtx, prepared, lease.FencingToken)
-	if err == nil && published.Landed && !published.Uncertain && published.RemoteRevision != "" {
+	// Cleanup cannot revoke a proved commit or authorize replay of its push.
+	if published.Landed && !published.Uncertain && published.RemoteRevision != "" {
 		if observer, ok := p.repository.(PublicationObserver); ok {
 			if observeErr := observer.PublicationCommitted(ctx, prepared, published.RemoteRevision); observeErr != nil {
-				return PublishResult{}, observeErr
+				return published, errors.Join(err, observeErr)
 			}
 		}
-		return published, nil
+		return published, err
 	}
 	if err != nil && !published.Uncertain {
 		if journal, ok := p.repository.(PublicationJournal); ok {
@@ -239,16 +240,22 @@ func (p *Publisher) Sync(ctx context.Context, _ string) (result PublishResult, r
 		return PublishResult{}, err
 	}
 	landed, revision, observeErr := p.repository.ObserveCommit(ctx, prepared.CommitID)
-	if observeErr != nil {
-		return PublishResult{Uncertain: true}, errors.Join(ErrSyncUncertain, observeErr)
-	}
-	if landed {
+	if landed && revision != "" {
+		proven := PublishResult{RemoteRevision: revision, Landed: true}
 		if observer, ok := p.repository.(PublicationObserver); ok {
 			if commitErr := observer.PublicationCommitted(ctx, prepared, revision); commitErr != nil {
-				return PublishResult{}, commitErr
+				return proven, errors.Join(err, observeErr, commitErr)
 			}
 		}
-		return PublishResult{RemoteRevision: revision, Landed: true}, nil
+		// A successful observation resolves the original transport uncertainty.
+		// Retain it alongside a later failure, never erase independent failures.
+		if observeErr != nil {
+			return proven, errors.Join(err, observeErr)
+		}
+		return proven, nil
 	}
-	return PublishResult{RemoteRevision: revision, Uncertain: true}, ErrSyncUncertain
+	if observeErr != nil {
+		return PublishResult{RemoteRevision: revision, Uncertain: true}, errors.Join(ErrSyncUncertain, err, observeErr)
+	}
+	return PublishResult{RemoteRevision: revision, Uncertain: true}, errors.Join(ErrSyncUncertain, err)
 }

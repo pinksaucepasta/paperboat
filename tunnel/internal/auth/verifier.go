@@ -77,7 +77,6 @@ type claims struct {
 	OperationID            string              `json:"operation_id,omitempty"`
 	PreviewID              string              `json:"preview_id,omitempty"`
 	OwnerSessionID         string              `json:"owner_session_id,omitempty"`
-	OwnerSessionKind       string              `json:"owner_session_kind,omitempty"`
 	IdempotencyKey         string              `json:"idempotency_key,omitempty"`
 	RequestID              string              `json:"request_id,omitempty"`
 	CorrelationID          string              `json:"correlation_id,omitempty"`
@@ -141,9 +140,6 @@ func (v *Verifier) VerifyHelperAccess(ctx context.Context, token string) (admiss
 	case "codex_manage":
 		wantScopes = []string{"codex:prepare", "codex:browse", "codex:renew", "codex:stop"}
 	case "preview_launch":
-		if parsed.OwnerSessionKind != "local_lease" && parsed.OwnerSessionKind != "foreground" && parsed.OwnerSessionKind != "lazy_runtime" {
-			return admission.Claims{}, invalid()
-		}
 		wantScopes = []string{"preview:launch"}
 	default:
 		return admission.Claims{}, invalid()
@@ -163,11 +159,11 @@ func (v *Verifier) VerifyHelperAccess(ctx context.Context, token string) (admiss
 	if parsed.Issuer != v.Issuer || parsed.Audience != "paperboat-machine" || parsed.Subject == "" || parsed.JTI == "" || !exactScopes(parsed.Scope, wantScopes) || parsed.EnvironmentID == "" || parsed.MachineID == "" || parsed.CredentialClass == "file_transfer" && parsed.SourceMachineID == "" || parsed.CredentialClass == "terminal_operation" && parsed.SessionID == "" || codexCredential && (parsed.SessionID == "" || parsed.InstallationGeneration < 1 || parsed.ConnectorID == "" || parsed.ConnectorGeneration < 1 || parsed.EdgePool == "" || parsed.EdgeNodeID == "") || parsed.UserID == "" || requiresClientSession && parsed.CLIClientSessionID == "" || parsed.Expires <= parsed.IssuedAt || parsed.Expires-parsed.IssuedAt > 300 || time.Unix(parsed.IssuedAt, 0).After(now.Add(v.ClockSkew)) || !time.Unix(parsed.Expires, 0).After(now) {
 		return admission.Claims{}, invalid()
 	}
-	result := admission.Claims{KeyID: parsedHeader.KeyID, Issuer: parsed.Issuer, Audience: parsed.Audience, JTI: parsed.JTI, CredentialClass: parsed.CredentialClass, Scopes: append([]string(nil), parsed.Scope...), EnvironmentID: parsed.EnvironmentID, MachineID: parsed.MachineID, InstallationGeneration: parsed.InstallationGeneration, HelperID: parsed.HelperID, ConnectorID: parsed.ConnectorID, EdgePool: parsed.EdgePool, EdgeNodeID: parsed.EdgeNodeID, ConnectorGeneration: parsed.ConnectorGeneration, ExpiresAt: time.Unix(parsed.Expires, 0).UTC()}
+	result := admission.Claims{KeyID: parsedHeader.KeyID, Issuer: parsed.Issuer, Audience: parsed.Audience, JTI: parsed.JTI, CredentialClass: parsed.CredentialClass, Scopes: append([]string(nil), parsed.Scope...), EnvironmentID: parsed.EnvironmentID, MachineID: parsed.MachineID, HelperID: parsed.HelperID, ConnectorGeneration: parsed.ConnectorGeneration, ExpiresAt: time.Unix(parsed.Expires, 0).UTC()}
 	if v.Revocations != nil {
 		revoked, err := v.Revocations.Revoked(ctx, result)
 		if err != nil {
-			return admission.Claims{}, edgeerrors.Wrap(edgeerrors.CodeCredentialRevocationUnavailable, "credential revocation state is unavailable", "retry after revocation synchronization", err)
+			return admission.Claims{}, edgeerrors.New(edgeerrors.CodeCredentialInvalid, "credential revocation state is unavailable", "retry after revocation synchronization")
 		}
 		result.Revoked = revoked
 	}
@@ -209,7 +205,7 @@ func (v *Verifier) verifySigned(ctx context.Context, token string) (header, clai
 	}
 	key, err := v.Keys.Key(ctx, parsedHeader.KeyID)
 	if err != nil || len(key) != ed25519.PublicKeySize {
-		return header{}, claims{}, edgeerrors.Wrap(edgeerrors.CodeCredentialKeyUnavailable, "credential signing key is unavailable", "retry after key synchronization", err)
+		return header{}, claims{}, edgeerrors.New(edgeerrors.CodeCredentialInvalid, "credential signing key is unavailable", "retry after key synchronization")
 	}
 	signature, err := decodeCredentialSegment(parts[2])
 	if err != nil || !ed25519.Verify(key, []byte(parts[0]+"."+parts[1]), signature) {
@@ -247,7 +243,7 @@ func (v *Verifier) Verify(ctx context.Context, token string) (admission.Claims, 
 	}
 	key, err := v.Keys.Key(ctx, parsedHeader.KeyID)
 	if err != nil || len(key) != ed25519.PublicKeySize {
-		return admission.Claims{}, edgeerrors.Wrap(edgeerrors.CodeCredentialKeyUnavailable, "credential signing key is unavailable", "retry after key synchronization", err)
+		return admission.Claims{}, edgeerrors.New(edgeerrors.CodeCredentialKeyUnavailable, "credential signing key is unavailable", "retry after key synchronization")
 	}
 	signature, err := decodeCredentialSegment(parts[2])
 	if err != nil || !ed25519.Verify(key, []byte(parts[0]+"."+parts[1]), signature) {
@@ -279,7 +275,7 @@ func (v *Verifier) Verify(ctx context.Context, token string) (admission.Claims, 
 	if v.Revocations != nil {
 		revoked, err := v.Revocations.Revoked(ctx, result)
 		if err != nil {
-			return admission.Claims{}, edgeerrors.Wrap(edgeerrors.CodeCredentialRevocationUnavailable, "credential revocation state is unavailable", "retry after revocation synchronization", err)
+			return admission.Claims{}, edgeerrors.New(edgeerrors.CodeCredentialRevocationUnavailable, "credential revocation state is unavailable", "retry after revocation synchronization")
 		}
 		if revoked {
 			result.Revoked = true

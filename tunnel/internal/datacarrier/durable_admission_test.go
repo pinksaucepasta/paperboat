@@ -7,10 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"net/url"
-	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -108,23 +105,5 @@ func TestDurableAdmissionRegistryKeepsLKGOnInvalidReplacement(t *testing.T) {
 	}
 	if got := registry.Snapshot(); len(got) != 1 || got[0].AssignmentID != admission.AssignmentID {
 		t.Fatalf("LKG snapshot=%+v", got)
-	}
-}
-
-func TestComposedCarrierAuthoritiesPreserveAllFailureCausesAndSuccess(t *testing.T) {
-	failure := fmt.Errorf("PRIVATE_AUTHORITY: %w", syscall.EIO)
-	binding := AnyPeerBinding(func(tls.ConnectionState) (Identity, error) { return Identity{}, failure }, func(tls.ConnectionState) (Identity, error) { return Identity{}, ErrDurableAdmissionMissing })
-	_, err := binding(tls.ConnectionState{})
-	if !errors.Is(err, syscall.EIO) || !errors.Is(err, ErrDurableAdmissionMissing) || strings.Contains(err.Error(), "PRIVATE") {
-		t.Fatal("composed peer authority lost or exposed original cause")
-	}
-	authorizer := AnyAuthorizer(AuthorizerFunc(func(context.Context, Identity, StreamOpen) error { return failure }), AuthorizerFunc(func(context.Context, Identity, StreamOpen) error { return ErrDurableAdmissionMissing }))
-	err = authorizer.AuthorizeStream(t.Context(), testCarrierIdentity(), testStreamOpen("route-a", "request"))
-	if !errors.Is(err, syscall.EIO) || !errors.Is(err, ErrDurableAdmissionMissing) || strings.Contains(err.Error(), "PRIVATE") {
-		t.Fatal("composed stream authority lost or exposed original cause")
-	}
-	authorizer = AnyAuthorizer(authorizer, AuthorizerFunc(func(context.Context, Identity, StreamOpen) error { return nil }))
-	if err := authorizer.AuthorizeStream(t.Context(), testCarrierIdentity(), testStreamOpen("route-a", "request")); err != nil {
-		t.Fatal("valid alternate authority did not recover")
 	}
 }

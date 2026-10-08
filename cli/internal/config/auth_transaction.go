@@ -43,15 +43,15 @@ func (s ProfileStore) authTransactionPath(issuer string) string {
 func (s ProfileStore) loadAuthTransaction(issuer string) (AuthTransaction, error) {
 	path := s.authTransactionPath(issuer)
 	b, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
+	if credentialAbsenceOnly(err) {
 		return AuthTransaction{}, os.ErrNotExist
 	}
 	if err != nil {
-		return AuthTransaction{}, err
+		return AuthTransaction{}, safeConfigCause("auth transaction state could not be read", err)
 	}
 	var tx AuthTransaction
 	if err := json.Unmarshal(b, &tx); err != nil {
-		return AuthTransaction{}, fmt.Errorf("parse auth transaction: %w", err)
+		return AuthTransaction{}, safeConfigCause("auth transaction state is invalid", err)
 	}
 	if tx.Version != authTransactionVersion || tx.Issuer != issuer || tx.State == "" {
 		return AuthTransaction{}, errors.New("unsupported or mismatched auth transaction")
@@ -82,17 +82,23 @@ func (s ProfileStore) writeAuthTransaction(tx AuthTransaction) error {
 	}
 	path := s.authTransactionPath(tx.Issuer)
 	if err := ensureProfileDirectory(filepath.Dir(path)); err != nil {
-		return err
+		return safeConfigCause("auth transaction storage could not be prepared", err)
 	}
-	return atomicWrite(path, append(b, '\n'), 0o600)
+	if err := atomicWrite(path, append(b, '\n'), 0o600); err != nil {
+		return safeConfigCause("auth transaction state could not be stored", err)
+	}
+	return nil
 }
 
 func (s ProfileStore) removeAuthTransaction(issuer string) error {
 	err := os.Remove(s.authTransactionPath(issuer))
-	if os.IsNotExist(err) {
+	if credentialAbsenceOnly(err) {
 		return nil
 	}
-	return err
+	if err != nil {
+		return safeConfigCause("auth transaction state could not be removed", err)
+	}
+	return nil
 }
 
 func profileRefsMatch(a, b Profile) bool {
@@ -112,7 +118,9 @@ func (s ProfileStore) deleteStagedAuthSecrets(tx AuthTransaction, active *Profil
 		if active != nil && (ref == active.AccessSecretRef || ref == active.RefreshSecretRef) {
 			continue
 		}
-		errs = append(errs, s.Secrets.Delete(ref))
+		if err := s.Secrets.Delete(ref); err != nil && !credentialAbsenceOnly(err) {
+			errs = append(errs, safeConfigCause("staged credential could not be discarded", err))
+		}
 	}
 	return errors.Join(errs...)
 }
@@ -131,7 +139,7 @@ func (s ProfileStore) AuthTransactionCredential(tx AuthTransaction) (Credential,
 	}
 	refresh, err := s.Secrets.Get(tx.Next.RefreshSecretRef)
 	if err != nil {
-		return Credential{}, fmt.Errorf("read staged refresh token: %w", err)
+		return Credential{}, safeConfigCause("staged refresh credential could not be read", err)
 	}
 	if strings.TrimSpace(refresh) == "" {
 		return Credential{}, errors.New("staged refresh token is empty")
@@ -155,7 +163,7 @@ func (s ProfileStore) pendingAuthTransaction(issuer string) (AuthTransaction, er
 // staged state before invoking Recover.
 func (s ProfileStore) PendingAuthTransactions(issuer string) ([]AuthTransaction, error) {
 	tx, err := s.pendingAuthTransaction(issuer)
-	if errors.Is(err, os.ErrNotExist) {
+	if credentialAbsenceOnly(err) {
 		return nil, nil
 	}
 	if err != nil {
@@ -176,7 +184,7 @@ func (s ProfileStore) retainStagedAuthSessionLocked(tx AuthTransaction, active *
 	}
 	credential, err := s.AuthTransactionCredential(tx)
 	if err != nil {
-		if errors.Is(err, ErrSecretNotFound) || errors.Is(err, os.ErrNotExist) {
+		if credentialAbsenceOnly(err) {
 			return nil
 		}
 		return err
@@ -261,7 +269,7 @@ func (s ProfileStore) retainAndAbortAuthTransactionLocked(tx AuthTransaction) er
 // Callers must hold the issuer profile lock.
 func (s ProfileStore) recoverTransactionsLocked(issuer string) error {
 	tx, err := s.loadAuthTransaction(issuer)
-	if errors.Is(err, os.ErrNotExist) {
+	if credentialAbsenceOnly(err) {
 		return nil
 	}
 	if err != nil {
@@ -299,7 +307,7 @@ func (s ProfileStore) beginAuthTransactionLocked(tx AuthTransaction) error {
 	}
 	if _, err := s.loadAuthTransaction(tx.Issuer); err == nil {
 		return errors.New("auth transaction already exists")
-	} else if !errors.Is(err, os.ErrNotExist) {
+	} else if !credentialAbsenceOnly(err) {
 		return err
 	}
 	tx.Version = authTransactionVersion
@@ -342,7 +350,7 @@ func (s ProfileStore) finishAuthTransactionLocked(tx AuthTransaction, active Pro
 func (s ProfileStore) RecoverAll() error {
 	dir := filepath.Join(s.Path, "transactions")
 	entries, err := os.ReadDir(dir)
-	if os.IsNotExist(err) {
+	if credentialAbsenceOnly(err) {
 		return nil
 	}
 	if err != nil {

@@ -8,7 +8,6 @@ import (
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgehttp"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
 	edgeruntime "github.com/pinksaucepasta/paperboat-tunnel/internal/runtime"
 )
 
@@ -16,7 +15,7 @@ import (
 // control worker. It does not bind a listener: the worker must install and
 // durably acknowledge a complete server snapshot before the carrier accepts
 // a host connection.
-func previewCarrierState(nodeID, processEpoch string, deployment config.Deployment, source *control.HTTPClient, reporter *reporting.Reporter) (*edgeruntime.PreviewCarrierWorker, *edgeruntime.PreviewCarrierHandler, *datacarrier.ExpectedAdmissionRegistry, *edgehttp.DataCarrierPreviewRegistry, error) {
+func previewCarrierState(nodeID, processEpoch string, deployment config.Deployment, source *control.HTTPClient) (*edgeruntime.PreviewCarrierWorker, *edgeruntime.PreviewCarrierHandler, *datacarrier.ExpectedAdmissionRegistry, *edgehttp.DataCarrierPreviewRegistry, error) {
 	if source == nil {
 		return nil, nil, nil, nil, errors.New("preview carrier control source is required")
 	}
@@ -29,7 +28,7 @@ func previewCarrierState(nodeID, processEpoch string, deployment config.Deployme
 		return nil, nil, nil, nil, fmt.Errorf("create preview carrier route registry: %w", err)
 	}
 	worker, err := edgeruntime.NewPreviewCarrierWorker(edgeruntime.PreviewCarrierWorkerConfig{
-		Reporter: reporter, Source: source, Expected: expected, Registry: routes, NodeID: nodeID,
+		Source: source, Expected: expected, Registry: routes, NodeID: nodeID,
 		ProcessEpoch: processEpoch,
 		Interval:     deployment.ControlInterval, Timeout: deployment.ControlTimeout,
 	})

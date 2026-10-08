@@ -1,7 +1,6 @@
 package config
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -127,13 +126,5 @@ func TestSelfHostedStartsWithoutManagedDomains(t *testing.T) {
 	}
 	if _, err := LoadDeployment(path); err == nil {
 		t.Fatal("managed edge accepted unconfigured domains")
-	}
-}
-
-func TestLoadDeploymentRetainsFileReadCause(t *testing.T) {
-	_, err := LoadDeployment(t.TempDir())
-	var original *os.PathError
-	if !errors.As(err, &original) || original.Op != "read" || original.Err == nil {
-		t.Fatalf("file read cause lost: %T", err)
 	}
 }

@@ -34,6 +34,7 @@ func TestCommandMixedFailuresNeverHideIndependentOperationalCause(t *testing.T) 
 	private := &commandPrivateError{calls: &calls}
 	cases := []error{
 		errors.Join(context.Canceled, syscall.EIO),
+		errors.Join(&net.DNSError{Err: "no such host", Name: "PRIVATE_DNS_NAME"}, syscall.EIO),
 		errors.Join(api.ErrUnauthenticated, syscall.EIO),
 		errors.Join(&api.APIError{Status: 403, Code: "team_subscription_required"}, private),
 		errors.Join(managedssh.NativeExitError{Code: 7, Err: private}, syscall.EIO),

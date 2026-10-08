@@ -4,13 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
-	yamux "github.com/libp2p/go-yamux/v5"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
-	"io"
 	"strconv"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -249,97 +243,5 @@ func TestBrowserTerminalHubBuffersBurstButBoundsSlowViewerBytes(t *testing.T) {
 	case <-viewer.Done():
 	case <-ctx.Done():
 		t.Fatal("slow viewer exceeded byte budget without disconnect")
-	}
-}
-
-func TestBrowserTerminalPublisherFailureAndRecovery(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	identity := testEdgePreviewIdentity(1, 1)
-	server, client := testEdgePreviewCarrierPair(t, identity)
-	hub := NewBrowserTerminalHub()
-	defer hub.Close()
-	failures := make(chan error, 2)
-	hub.OnFailure = func(_ context.Context, err error) { failures <- err }
-	fence := BrowserTerminalRouteFence{Identity: identity, Revision: 1, AttachmentGeneration: 1}
-	if err := hub.ActivateRoute("route_publisher", fence); err != nil {
-		t.Fatal(err)
-	}
-	key := BrowserTerminalSessionKey{RouteID: "route_publisher", TerminalSessionID: "term_publisher", ProcessGeneration: identity.ProcessGeneration}
-	runDone := make(chan error, 1)
-	go func() { runDone <- hub.ServeCarrier(ctx, server) }()
-	open := func() *datacarrier.Stream {
-		stream, err := client.OpenStream(ctx, connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: identity.AccountID, TunnelID: identity.TunnelID, ConnectorID: identity.ConnectorID, SessionID: identity.SessionID, ProcessGeneration: identity.ProcessGeneration, Generation: identity.Generation, RouteID: key.RouteID, RequestID: key.TerminalSessionID, Kind: datacarrier.BrowserTerminalOutputStream})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return stream
-	}
-	old, err := hub.Subscribe(key, fence, "browser_old")
-	if err != nil {
-		t.Fatal(err)
-	}
-	failed := open()
-	if _, err := failed.Write([]byte{0, 0, 0, 4, 'x'}); err != nil {
-		t.Fatal(err)
-	}
-	failed.Close()
-	select {
-	case err := <-failures:
-		if !errors.Is(err, io.ErrUnexpectedEOF) {
-			t.Fatalf("lost truncated record cause: %T", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("missing publisher failure")
-	}
-	select {
-	case <-old.Done():
-	case <-time.After(time.Second):
-		t.Fatal("old publisher did not release session")
-	}
-	current, err := hub.Subscribe(key, fence, "browser_current")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer current.Close()
-	recovered := open()
-	if _, err := recovered.Write(append([]byte{0, 0, 0, 6}, []byte("opaque")...)); err != nil {
-		t.Fatal(err)
-	}
-	readCtx, stopRead := context.WithTimeout(ctx, time.Second)
-	defer stopRead()
-	got, err := current.Next(readCtx)
-	if err != nil || string(got) != "opaque" {
-		t.Fatal("publisher did not recover")
-	}
-	cancel()
-	select {
-	case <-runDone:
-	case <-time.After(time.Second):
-		t.Fatal("publisher workers did not join")
-	}
-	select {
-	case err := <-failures:
-		var types []string
-		requestCauseMatches(err, func(node error) bool { types = append(types, fmt.Sprintf("%T", node)); return false })
-		t.Fatalf("normal shutdown emitted failure: %v EOF=%v truncated=%v", types, errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF))
-	default:
-	}
-}
-
-func TestBrowserTerminalCanceledPublisherRetainsAbnormalReset(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	var failures []error
-	hub := NewBrowserTerminalHub()
-	defer hub.Close()
-	hub.OnFailure = func(_ context.Context, err error) { failures = append(failures, err) }
-	normal := &yamux.StreamError{Remote: true, ErrorCode: 0}
-	abnormal := &yamux.StreamError{Remote: true, ErrorCode: 7}
-	hub.observe(ctx, normal)
-	hub.observe(ctx, abnormal)
-	hub.observe(ctx, errors.Join(normal, syscall.EIO))
-	if len(failures) != 2 || !errors.Is(failures[0], abnormal) || !errors.Is(failures[1], syscall.EIO) {
-		t.Fatal("canceled publisher masked operational reset")
 	}
 }

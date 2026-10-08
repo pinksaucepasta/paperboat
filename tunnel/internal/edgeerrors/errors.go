@@ -1,9 +1,6 @@
 package edgeerrors
 
-import (
-	"fmt"
-	"reflect"
-)
+import "fmt"
 
 type Code string
 
@@ -56,47 +53,16 @@ func Wrap(code Code, message, recovery string, cause error) *Error {
 	return &Error{Code: code, Message: message, Recovery: recovery, Cause: cause}
 }
 
-func (c Code) Valid() bool {
-	switch c {
-	case CodeConfigInvalid, CodeCredentialReplayed, CodeCredentialInvalid, CodeCredentialMalformed, CodeCredentialKeyUnavailable, CodeCredentialSignatureInvalid, CodeCredentialRevocationUnavailable, CodeCredentialExpired, CodeCredentialNotYetValid, CodeBindingInvalid, CodeGenerationStale, CodeRevoked, CodeRunIDInvalid, CodeRunIDMismatch, CodeRunIDExpired, CodeRunIDRevoked, CodeOperationConflict, CodeRouteConflict, CodeRouteInvalid, CodeRouteRevisionStale, CodeServiceUnavailable, CodeStoreCapacity:
-		return true
-	default:
-		return false
-	}
-}
-
 func CodeOf(err error) (Code, bool) {
-	pending := []error{err}
-	seen := make(map[error]bool)
-	for count := 0; len(pending) > 0 && count < 16; count++ {
-		current := pending[0]
-		pending = pending[1:]
-		if current == nil {
-			continue
-		}
-		value := reflect.ValueOf(current)
-		if value.Kind() == reflect.Pointer && value.IsNil() {
-			continue
-		}
-		if value.Type().Comparable() {
-			if seen[current] {
-				continue
-			}
-			seen[current] = true
-		}
-		if typed, ok := current.(*Error); ok && typed.Code.Valid() {
+	for err != nil {
+		if typed, ok := err.(*Error); ok {
 			return typed.Code, true
 		}
-		switch wrapped := current.(type) {
-		case interface{ Unwrap() []error }:
-			children := wrapped.Unwrap()
-			if len(children) > 16-len(pending) {
-				children = children[:16-len(pending)]
-			}
-			pending = append(pending, children...)
-		case interface{ Unwrap() error }:
-			pending = append(pending, wrapped.Unwrap())
+		unwrapper, ok := err.(interface{ Unwrap() error })
+		if !ok {
+			break
 		}
+		err = unwrapper.Unwrap()
 	}
 	return "", false
 }

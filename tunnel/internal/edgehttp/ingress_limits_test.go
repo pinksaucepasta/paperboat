@@ -10,7 +10,6 @@ import (
 	"io"
 	"net"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -280,52 +279,4 @@ func TestIngressQuotaFeedbackIsolatesSharedRouteAndAllowsFreshAdmission(t *testi
 	_ = fresh.Close()
 	_ = b.Close()
 	_ = a.Close()
-}
-
-type failingIngressUsage struct{ ingressUsageRecorder }
-
-func (*failingIngressUsage) Record(string, string, uint64, uint64, uint64, string) error {
-	return syscall.EIO
-}
-
-type failingIngressClose struct{ net.Conn }
-
-func (s failingIngressClose) Close() error { return errors.Join(s.Conn.Close(), syscall.EIO) }
-
-func TestIngressRetainsTransferAndCleanupCauses(t *testing.T) {
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2, IngressLimits: testIngressLimits(1, 1<<20), Usage: &failingIngressUsage{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer registry.Close()
-	decision := publicTCPDecision(time.Now().UTC(), 4001)
-	lease, err := registry.AcquireIngress(context.Background(), decision)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stream := lease.Wrap(context.Background(), &ingressMemoryStream{writeLimit: 1, writeErr: io.ErrUnexpectedEOF})
-	if n, err := stream.Write([]byte("ab")); n != 1 || !errors.Is(err, syscall.EIO) || !errors.Is(err, io.ErrUnexpectedEOF) {
-		t.Fatalf("lost partial transfer causes: n=%d err=%v", n, err)
-	}
-	_ = stream.Close()
-	lease, err = registry.AcquireIngress(context.Background(), decision)
-	if err != nil {
-		t.Fatal(err)
-	}
-	local, peer := net.Pipe()
-	defer peer.Close()
-	ctx, cancel := context.WithCancel(context.Background())
-	wrapped := lease.Wrap(ctx, failingIngressClose{local})
-	cancel()
-	if err := wrapped.Close(); !errors.Is(err, syscall.EIO) {
-		t.Fatalf("lost cleanup cause: %v", err)
-	}
-	if err := wrapped.Close(); !errors.Is(err, syscall.EIO) {
-		t.Fatal("repeated cleanup lost first cause")
-	}
-	next, err := registry.AcquireIngress(context.Background(), decision)
-	if err != nil {
-		t.Fatalf("cleanup retained capacity: %v", err)
-	}
-	next.Release()
 }

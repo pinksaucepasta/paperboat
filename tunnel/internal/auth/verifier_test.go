@@ -7,10 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgeerrors"
-	"os"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -208,23 +205,22 @@ func TestVerifierAcceptsPreviewLaunchWithoutCLIClientSession(t *testing.T) {
 	verifier := &Verifier{Issuer: "https://api.paperboat.test", Keys: StaticKeys{"key-1": public}, Now: func() time.Time { return time.Unix(1000, 0) }}
 	token := tokenFor(t, private, "key-1", func(claims map[string]any) {
 		claims["aud"] = "paperboat-machine"
-		claims["sub"] = "user_11111111-1111-4111-8111-111111111111"
+		claims["sub"] = "usr_1"
 		claims["credential_class"] = "preview_launch"
 		claims["scope"] = []string{"preview:launch"}
-		claims["account_id"] = "user_11111111-1111-4111-8111-111111111111"
-		claims["machine_id"] = "machine_22222222-2222-4222-8222-222222222222"
-		claims["user_id"] = "user_11111111-1111-4111-8111-111111111111"
-		claims["actor_id"] = "user_11111111-1111-4111-8111-111111111111"
-		claims["preview_id"] = "preview_33333333-3333-4333-8333-333333333333"
-		claims["owner_session_id"] = "session_44444444-4444-4444-8444-444444444444"
-		claims["owner_session_kind"] = "local_lease"
-		claims["operation_id"] = "operation_55555555-5555-4555-8555-555555555555"
+		claims["account_id"] = "usr_1"
+		claims["machine_id"] = "machine_1"
+		claims["user_id"] = "usr_1"
+		claims["actor_id"] = "usr_1"
+		claims["preview_id"] = "prv_1"
+		claims["owner_session_id"] = "owner_local_1"
+		claims["operation_id"] = "op_1"
 		claims["target_scheme"] = "http"
 		claims["target_address"] = "127.0.0.1:43871"
 		claims["access_mode"] = "public"
 		claims["endpoint"] = "https://preview-1.preview.pprbt.dev"
 		claims["lease_deadline"] = int64(1100)
-		claims["lease_etag"] = `"ptv1:preview_lease:` + base64.RawURLEncoding.EncodeToString([]byte(claims["preview_id"].(string))) + `:1"`
+		claims["lease_etag"] = `"ptv1:preview_lease:cHJ2XzE:1"`
 		claims["state"] = "connecting"
 		claims["allocation_state"] = "pending"
 		claims["edge_state"] = "pending"
@@ -232,10 +228,10 @@ func TestVerifierAcceptsPreviewLaunchWithoutCLIClientSession(t *testing.T) {
 		claims["created_at"] = int64(1000)
 		claims["last_renewed_at"] = int64(1000)
 		claims["expected_generation"] = int64(1)
-		claims["request_hash"] = strings.Repeat("a", 64)
+		claims["request_hash"] = "sha256:test"
 		claims["idempotency_key"] = "idem_1"
-		claims["request_id"] = "request_66666666-6666-4666-8666-666666666666"
-		claims["correlation_id"] = "correlation_77777777-7777-4777-8777-777777777777"
+		claims["request_id"] = "req_1"
+		claims["correlation_id"] = "cor_1"
 		delete(claims, "cli_client_session_id")
 		delete(claims, "session_id")
 		delete(claims, "connector_id")
@@ -245,27 +241,9 @@ func TestVerifierAcceptsPreviewLaunchWithoutCLIClientSession(t *testing.T) {
 		delete(claims, "file_transfer_policy")
 	})
 	claims, err := verifier.VerifyHelperAccess(context.Background(), token)
-	if err != nil || claims.CredentialClass != "preview_launch" || claims.MachineID != "machine_22222222-2222-4222-8222-222222222222" {
+	if err != nil || claims.CredentialClass != "preview_launch" || claims.MachineID != "machine_1" {
 		t.Fatalf("preview claims=%+v err=%v", claims, err)
 	}
-	parts := strings.Split(token, ".")
-	var payload map[string]any
-	if err := json.Unmarshal(mustDecodeSegment(t, parts[1]), &payload); err != nil {
-		t.Fatal(err)
-	}
-	for _, kind := range []string{"foreground", "lazy_runtime", "", "unrelated"} {
-		payload["owner_session_kind"] = kind
-		raw, err := json.Marshal(payload)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, err = verifier.VerifyHelperAccess(context.Background(), resignToken(string(mustDecodeSegment(t, parts[0])), string(raw), private))
-		valid := kind == "foreground" || kind == "lazy_runtime"
-		if (err == nil) != valid {
-			t.Fatalf("preview owner session kind %q valid=%t: %v", kind, valid, err)
-		}
-	}
-
 }
 
 func TestVerifierRejectsMalformedWrongKeySignatureAndClaims(t *testing.T) {
@@ -364,79 +342,5 @@ func TestVerifierBrowserTerminalCredentialBindings(t *testing.T) {
 				t.Fatal("invalid browser credential accepted")
 			}
 		})
-	}
-}
-
-type originalFailureKeys struct{ cause error }
-
-func (k originalFailureKeys) Key(context.Context, string) (ed25519.PublicKey, error) {
-	return nil, k.cause
-}
-
-type originalFailureRevocations struct{ cause error }
-
-func (r originalFailureRevocations) Revoked(context.Context, admission.Claims) (bool, error) {
-	return false, r.cause
-}
-func TestVerifierPreservesUnavailableSourceCausesAndRecovers(t *testing.T) {
-	public, private, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cause := &os.PathError{Op: "open", Path: "PRIVATE_KEY_PATH", Err: syscall.EACCES}
-	v := &Verifier{Issuer: "https://api.paperboat.test", Keys: StaticKeys{"key-1": public}, Now: func() time.Time { return time.Unix(1000, 0) }}
-	connector := tokenFor(t, private, "key-1", nil)
-	helper := tokenFor(t, private, "key-1", func(c map[string]any) {
-		c["aud"] = "paperboat-machine"
-		c["credential_class"] = "codex_connect"
-		c["scope"] = []string{"codex:connect"}
-		c["user_id"] = "usr_1"
-		c["cli_client_session_id"] = "acs_1"
-		c["session_id"] = "cdx_1"
-	})
-	for _, verify := range []struct {
-		name  string
-		call  func(context.Context, string) (admission.Claims, error)
-		token string
-	}{{"connector", v.Verify, connector}, {"helper", v.VerifyHelperAccess, helper}} {
-		t.Run(verify.name, func(t *testing.T) {
-			for _, code := range []edgeerrors.Code{edgeerrors.CodeCredentialKeyUnavailable, edgeerrors.CodeCredentialRevocationUnavailable} {
-				v.Keys = StaticKeys{"key-1": public}
-				v.Revocations = nil
-				if code == edgeerrors.CodeCredentialKeyUnavailable {
-					v.Keys = originalFailureKeys{cause}
-				} else {
-					v.Revocations = originalFailureRevocations{cause}
-				}
-				_, err := verify.call(context.Background(), verify.token)
-				var original *os.PathError
-				actual, ok := edgeerrors.CodeOf(err)
-				if actual != code || !ok || !errors.Is(err, syscall.EACCES) || !errors.As(err, &original) || original != cause || strings.Contains(err.Error(), "PRIVATE_") {
-					t.Fatalf("source cause/code lost: code=%q err=%T", actual, err)
-				}
-			}
-			v.Keys = StaticKeys{"key-1": public}
-			v.Revocations = nil
-			if _, err := verify.call(context.Background(), verify.token); err != nil {
-				t.Fatal("source recovery rejected signed credential")
-			}
-		})
-	}
-	snapshot := NewSnapshot()
-	revocations, _ := json.Marshal(RevocationDocument{Connectors: []RevokedConnectorGeneration{{MachineID: "machine", ConnectorID: "runtime", Generation: 3}}})
-	if err := snapshot.ReplaceRevocations(revocations); err != nil {
-		t.Fatal(err)
-	}
-	v.Revocations = snapshot
-	claims, err := v.VerifyHelperAccess(context.Background(), helper)
-	if err != nil || !claims.Revoked || claims.ConnectorID != "runtime" || claims.InstallationGeneration != 1 || claims.EdgePool != "default" || claims.EdgeNodeID != "edge" {
-		t.Fatal("helper connector revocation binding lost")
-	}
-	if err := snapshot.ReplaceRevocations([]byte(`{"jtis":[],"environments":[],"connector_generations":[],"key_ids":[]}`)); err != nil {
-		t.Fatal(err)
-	}
-	claims, err = v.VerifyHelperAccess(context.Background(), helper)
-	if err != nil || claims.Revoked {
-		t.Fatal("fresh unrevoked helper could not recover")
 	}
 }

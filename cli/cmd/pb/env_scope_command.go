@@ -45,6 +45,9 @@ func addVaultScopeCommands(root *cobra.Command) {
 			if err := manager.RotatePersonal(command.Context()); err != nil {
 				return safeEnvironmentVariableCommandError(err)
 			}
+			if err := refreshSelectedENVHosts(command, manager, true); err != nil {
+				return err
+			}
 			return writeVaultMutationResult(command, map[string]any{"scope": "personal", "rotated": true}, "Rotated personal encrypted ENV scope keys.")
 		},
 	}
@@ -131,6 +134,9 @@ func addVaultScopeCommands(root *cobra.Command) {
 			if err := manager.RotateTeam(command.Context(), teamID, nil, true); err != nil {
 				return safeEnvironmentVariableCommandError(err)
 			}
+			if err := refreshSelectedENVHosts(command, manager, true); err != nil {
+				return err
+			}
 			return writeVaultMutationResult(command, map[string]any{"team": teamID, "reset": true}, fmt.Sprintf("Reset encrypted ENV team %s; previous values were discarded.", teamID))
 		},
 	}
@@ -153,6 +159,9 @@ func addVaultScopeCommands(root *cobra.Command) {
 			}
 			if err := manager.SyncTeamGrants(command.Context()); err != nil {
 				return safeEnvironmentVariableCommandError(err)
+			}
+			if err := refreshSelectedENVHosts(command, manager, true); err != nil {
+				return err
 			}
 			return writeVaultMutationResult(command, map[string]any{"grants_synchronized": true}, "ENV team grants synchronized into encrypted vault custody.")
 		},
@@ -177,7 +186,13 @@ func addVaultScopeCommands(root *cobra.Command) {
 	provision.Flags().StringArray("select", nil, "selection reference personal:NAME or team:TEAM:NAME; repeat to select more values")
 	provision.Flags().Bool("empty", false, "explicitly provision an empty selection")
 	provision.Flags().Bool("json", false, "print JSON")
-	host.AddCommand(provision)
+	show := &cobra.Command{Use: "show", Short: "Show published ENV delivery and observed application on a host", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, _ []string) error {
+		requested, _ := command.Flags().GetString("machine")
+		return runVaultHostShow(command, requested)
+	}}
+	show.Flags().String("machine", "", "machine name or ID; defaults to this enrolled machine")
+	show.Flags().Bool("json", false, "print host delivery metadata without ciphertext or keys")
+	host.AddCommand(provision, show)
 	root.AddCommand(host)
 }
 
@@ -216,6 +231,9 @@ func setEnvironmentVariableForScope(command *cobra.Command, team, requestedMachi
 		return nil
 	}); err != nil {
 		return safeEnvironmentVariableCommandError(err)
+	}
+	if err := refreshSelectedENVHosts(command, manager, true); err != nil {
+		return err
 	}
 	if jsonOutputRequested(command) {
 		return nil
@@ -257,6 +275,9 @@ func unsetEnvironmentVariableForScope(command *cobra.Command, team, requestedMac
 	}); err != nil {
 		return safeEnvironmentVariableCommandError(err)
 	}
+	if err := refreshSelectedENVHosts(command, manager, true); err != nil {
+		return err
+	}
 	if jsonOutputRequested(command) {
 		return nil
 	}
@@ -291,6 +312,17 @@ func vaultScopeTargetForCommand(command *cobra.Command, client *api.Client, acco
 			return vaultScopeTarget{}, fmt.Errorf("ENV team %q is outside the active workspace; run `pb switch %s` or use `--workspace %s`", team, team, team)
 		}
 		return vaultScopeTarget{kind: "team", owner: team, label: "team " + team}, nil
+	}
+	if requestedMachine != "" {
+		personal := *client
+		if err := personal.SetWorkspace("personal"); err != nil {
+			return vaultScopeTarget{}, err
+		}
+		target, err := environmentVariableTargetForCommand(command, &personal, requestedMachine)
+		if err != nil {
+			return vaultScopeTarget{}, err
+		}
+		return vaultScopeTarget{kind: "personal", owner: accountID, machine: target.machineID, label: "personal machine " + environmentVariableScopeLabel(target)}, nil
 	}
 	target, err := environmentVariableTargetForCommand(command, client, requestedMachine)
 	if err != nil {
@@ -492,6 +524,9 @@ func runVaultTeamRotate(command *cobra.Command, teamID string) error {
 	if err := manager.RotateTeam(command.Context(), teamID, nil, false); err != nil {
 		return safeEnvironmentVariableCommandError(err)
 	}
+	if err := refreshSelectedENVHosts(command, manager, true); err != nil {
+		return err
+	}
 	return writeVaultMutationResult(command, map[string]any{"team": teamID, "rotated": true, "values_preserved": true}, fmt.Sprintf("Rotated encrypted ENV team %s while preserving values.", teamID))
 }
 
@@ -525,6 +560,9 @@ func runVaultTeamRevoke(command *cobra.Command, teamID string, remove []string, 
 	if err := manager.RotateTeam(command.Context(), teamID, append([]string(nil), remove...), totalLoss); err != nil {
 		return safeEnvironmentVariableCommandError(err)
 	}
+	if err := refreshSelectedENVHosts(command, manager, true); err != nil {
+		return err
+	}
 	return writeVaultMutationResult(command, map[string]any{"team": teamID, "rotated": true, "removed_accounts": remove, "values_discarded": totalLoss}, fmt.Sprintf("Rotated encrypted ENV team %s.", teamID))
 }
 
@@ -551,7 +589,7 @@ func runVaultHostProvision(command *cobra.Command, requestedMachine string, refe
 	if err != nil {
 		return err
 	}
-	target, err := environmentVariableTargetForCommand(command, client, requestedMachine)
+	target, err := vaultHostTargetForCommand(command, client, requestedMachine)
 	if err != nil {
 		return err
 	}
@@ -570,23 +608,23 @@ func parseVaultHostSelections(references []string, accountID string) ([]api.Vaul
 		switch {
 		case len(parts) == 2 && parts[0] == "personal":
 			if err := validateEnvironmentVariableNameForCLI(parts[1]); err != nil {
-				return nil, errors.New("personal selection name must be a valid environment variable name")
+				return nil, localArgumentError("personal selection name must be a valid environment variable name")
 			}
 			item = api.VaultHostSelection{OwnerKind: "personal", OwnerID: accountID, Name: parts[1]}
 		case len(parts) == 3 && parts[0] == "team":
 			if !vaultCommandIdentifier(parts[1]) {
-				return nil, errors.New("team selection must use a valid team identifier")
+				return nil, localArgumentError("team selection must use a valid team identifier")
 			}
 			if err := validateEnvironmentVariableNameForCLI(parts[2]); err != nil {
-				return nil, errors.New("team selection name must be a valid environment variable name")
+				return nil, localArgumentError("team selection name must be a valid environment variable name")
 			}
 			item = api.VaultHostSelection{OwnerKind: "team", OwnerID: parts[1], Name: parts[2]}
 		default:
-			return nil, errors.New("selection must be personal:NAME or team:TEAM:NAME")
+			return nil, localArgumentError("selection must be personal:NAME or team:TEAM:NAME")
 		}
 		key := item.OwnerKind + "\x00" + item.OwnerID + "\x00" + item.Name
 		if _, ok := seen[key]; ok {
-			return nil, errors.New("a host selection may appear only once")
+			return nil, localArgumentError("a host selection may appear only once")
 		}
 		seen[key] = struct{}{}
 		selection = append(selection, item)

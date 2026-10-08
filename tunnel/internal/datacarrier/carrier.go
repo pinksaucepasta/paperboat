@@ -46,13 +46,6 @@ var (
 	ErrRequestInUse      = errors.New("data carrier request already in use")
 )
 
-// carrierFailure preserves policy classification and the original typed cause
-// without evaluating transport, authorizer, or peer-owned error text.
-type carrierFailure struct{ sentinel, cause error }
-
-func (carrierFailure) Error() string           { return "data carrier operation failed" }
-func (failure carrierFailure) Unwrap() []error { return []error{failure.sentinel, failure.cause} }
-
 // StreamOpen is the canonical connector-v1 stream-open preface. It contains
 // no bearer or reusable credential bytes.
 type StreamOpen = connectorprotocol.StreamOpen
@@ -294,13 +287,13 @@ func (s *Server) OpenStreamWithLifetime(openCtx, lifetimeCtx context.Context, op
 		return nil, ErrInvalidConfig
 	}
 	if err := open.Validate(); err != nil {
-		return nil, carrierFailure{sentinel: ErrInvalidPreface, cause: err}
+		return nil, ErrInvalidPreface
 	}
 	if !s.config.Identity.matches(open) {
 		return nil, ErrIdentityMismatch
 	}
 	if err := s.config.Authorize.AuthorizeStream(openCtx, s.config.Identity, open); err != nil {
-		return nil, carrierFailure{sentinel: ErrRouteDenied, cause: err}
+		return nil, fmt.Errorf("%w: %v", ErrRouteDenied, err)
 	}
 	raw, err := s.openRaw(openCtx)
 	if err != nil {
@@ -696,7 +689,7 @@ func (c *Client) acceptLoop() {
 			cancel()
 			_ = raw.Close()
 			c.releasePermit()
-			c.publish(acceptResult{err: carrierFailure{sentinel: ErrInvalidPreface, cause: err}})
+			c.publish(acceptResult{err: ErrInvalidPreface})
 			continue
 		}
 		open, err := connectorprotocol.ReadStreamOpen(raw)
@@ -707,7 +700,7 @@ func (c *Client) acceptLoop() {
 		if err == nil {
 			err = c.config.Authorize.AuthorizeStream(admissionContext, c.config.Identity, open)
 			if err != nil {
-				err = carrierFailure{sentinel: ErrRouteDenied, cause: err}
+				err = fmt.Errorf("%w: %v", ErrRouteDenied, err)
 			}
 		}
 		cancel()
@@ -783,13 +776,13 @@ func (c *Client) OpenStream(ctx context.Context, open StreamOpen) (*Stream, erro
 		return nil, ErrInvalidConfig
 	}
 	if err := open.Validate(); err != nil {
-		return nil, carrierFailure{sentinel: ErrInvalidPreface, cause: err}
+		return nil, ErrInvalidPreface
 	}
 	if !c.config.Identity.matches(open) {
 		return nil, ErrIdentityMismatch
 	}
 	if err := c.config.Authorize.AuthorizeStream(ctx, c.config.Identity, open); err != nil {
-		return nil, carrierFailure{sentinel: ErrRouteDenied, cause: err}
+		return nil, fmt.Errorf("%w: %v", ErrRouteDenied, err)
 	}
 	raw, err := c.openRaw(ctx)
 	if err != nil {

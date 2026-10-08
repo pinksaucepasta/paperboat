@@ -23,7 +23,7 @@ type PrivateAccessCarrierAdmission struct {
 	Schema                               string    `json:"schema"`
 	Kind                                 string    `json:"kind"`
 	AccountID                            string    `json:"account_id"`
-	MachineID                            string    `json:"machine_id"`
+	DeviceID                             string    `json:"device_id"`
 	InstallationGeneration               uint64    `json:"installation_generation"`
 	AccessorPublicKey                    string    `json:"accessor_public_key"`
 	AccessorThumbprint                   string    `json:"accessor_thumbprint"`
@@ -57,7 +57,7 @@ type PrivateAccessCarrierAdmission struct {
 }
 
 func (a PrivateAccessCarrierAdmission) Durable() datacarrier.DurableAdmission {
-	return datacarrier.DurableAdmission{Identity: datacarrier.Identity{AccountID: a.AccountID, HostID: a.MachineID, TunnelID: a.TunnelID, ConnectorID: a.CarrierConnectorID, SessionID: a.CarrierSessionID, ProcessGeneration: a.ProcessGeneration, Generation: a.ConfigGeneration}, EdgeNodeID: a.EdgeNodeID, EdgeProcessEpoch: a.EdgeProcessEpoch, AssignmentID: a.AssignmentID, RouteID: a.RouteID, AssignmentGeneration: a.AssignmentGeneration, RouteGeneration: a.RouteGeneration, ConfigContentHash: a.ConfigContentHash, MachineIdentityPublicKey: a.AccessorPublicKey, MachineIdentityThumbprint: a.AccessorThumbprint, State: "active", ExpiresAt: a.ExpiresAt}
+	return datacarrier.DurableAdmission{Identity: datacarrier.Identity{AccountID: a.AccountID, HostID: a.DeviceID, TunnelID: a.TunnelID, ConnectorID: a.CarrierConnectorID, SessionID: a.CarrierSessionID, ProcessGeneration: a.ProcessGeneration, Generation: a.ConfigGeneration}, EdgeNodeID: a.EdgeNodeID, EdgeProcessEpoch: a.EdgeProcessEpoch, AssignmentID: a.AssignmentID, RouteID: a.RouteID, AssignmentGeneration: a.AssignmentGeneration, RouteGeneration: a.RouteGeneration, ConfigContentHash: a.ConfigContentHash, MachineIdentityPublicKey: a.AccessorPublicKey, MachineIdentityThumbprint: a.AccessorThumbprint, State: "active", ExpiresAt: a.ExpiresAt}
 }
 
 func (a PrivateAccessCarrierAdmission) Validate(nodeID, processEpoch string, now time.Time) error {
@@ -65,7 +65,7 @@ func (a PrivateAccessCarrierAdmission) Validate(nodeID, processEpoch string, now
 		return ErrControlUnavailable
 	}
 	if err := a.Durable().Validate(nodeID, processEpoch, now); err != nil {
-		return documentFailure{sentinel: ErrControlUnavailable, cause: err}
+		return ErrControlUnavailable
 	}
 	for index, scheme := range []string{"h2", "h3"} {
 		endpoint, err := url.Parse(a.EdgeEndpoints[index])
@@ -131,10 +131,10 @@ func (c *HTTPClient) PrivateAccessCarrierAdmissions(ctx context.Context, nodeID,
 	}
 	seen := make(map[string]struct{}, len(out.Admissions))
 	for _, admission := range out.Admissions {
-		if err := admission.Validate(nodeID, processEpoch, time.Now().UTC()); err != nil {
-			return nil, documentFailure{sentinel: ErrControlUnavailable, cause: err}
+		if admission.Validate(nodeID, processEpoch, time.Now().UTC()) != nil {
+			return nil, ErrControlUnavailable
 		}
-		key := admission.MachineID + "\x00" + admission.ResourceID + "\x00" + admission.RouteID + "\x00" + admission.AssignmentID
+		key := admission.DeviceID + "\x00" + admission.ResourceID + "\x00" + admission.RouteID + "\x00" + admission.AssignmentID
 		if _, ok := seen[key]; ok {
 			return nil, ErrControlUnavailable
 		}

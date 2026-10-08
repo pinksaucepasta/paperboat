@@ -2,7 +2,6 @@ package selfhost
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -26,7 +25,7 @@ func lockState(dir string) (*os.File, error) {
 	f := os.NewFile(uintptr(fd), "installation lock")
 	if err = syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		f.Close()
-		return nil, fmt.Errorf("another self-host command is running; wait for it to finish: %w", err)
+		return nil, errors.New("another self-host command is running; wait for it to finish")
 	}
 	return f, nil
 }

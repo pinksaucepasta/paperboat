@@ -51,12 +51,12 @@
     "protocol": { "enum": ["http", "tcp"] },
     "carrier_admission": {
       "type": "object",
-      "required": ["schema", "kind", "account_id", "machine_id", "installation_generation", "accessor_public_key", "accessor_thumbprint", "resource_kind", "resource_id", "carrier_session_id", "route_id", "route_generation", "session_generation", "process_generation", "config_generation", "assignment_generation", "assignment_id", "config_content_hash", "edge_node_id", "edge_process_epoch", "edge_carrier_server_spki_sha256", "edge_carrier_server_certificate_chain_pem", "protocol", "match_type", "edge_endpoints", "expires_at", "tunnel_id", "carrier_connector_id"],
+      "required": ["schema", "kind", "account_id", "device_id", "installation_generation", "accessor_public_key", "accessor_thumbprint", "resource_kind", "resource_id", "carrier_session_id", "route_id", "route_generation", "session_generation", "process_generation", "config_generation", "assignment_generation", "assignment_id", "config_content_hash", "edge_node_id", "edge_process_epoch", "edge_carrier_server_spki_sha256", "edge_carrier_server_certificate_chain_pem", "protocol", "match_type", "edge_endpoints", "expires_at", "tunnel_id", "carrier_connector_id"],
       "properties": {
         "schema": { "$ref": "#/definitions/schema" },
         "kind": { "const": "private_access_carrier_admission" },
         "account_id": { "$ref": "#/definitions/id" },
-        "machine_id": { "$ref": "#/definitions/id" },
+        "device_id": { "$ref": "#/definitions/id" },
         "installation_generation": { "type": "integer", "minimum": 1 },
         "accessor_public_key": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" },
         "accessor_thumbprint": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" },
@@ -115,7 +115,7 @@
         "resource_id": { "$ref": "#/definitions/id" },
         "route_id": { "$ref": "#/definitions/id" },
         "audience": { "$ref": "#/definitions/audience" },
-        "machine_id": { "$ref": "#/definitions/id" },
+        "device_id": { "$ref": "#/definitions/id" },
         "session_id": { "$ref": "#/definitions/id" },
         "installation_generation": { "type": "integer", "minimum": 1 },
         "expires_at": { "$ref": "#/definitions/timestamp" },
@@ -218,7 +218,7 @@
           "not": {
             "anyOf": [
               { "required": ["account_id"] },
-              { "required": ["machine_id"] },
+              { "required": ["device_id"] },
               { "required": ["session_id"] }
             ]
           }
@@ -227,14 +227,14 @@
     },
     "authorize_request": {
       "type": "object",
-      "required": ["account_id", "resource_kind", "resource_id", "route_id", "audience", "machine_id", "session_id", "installation_generation", "expires_at", "nonce", "carrier_session_id", "route_generation", "session_generation", "process_generation", "config_generation", "assignment_generation", "edge_node_id", "edge_process_epoch", "protocol", "idempotency_key", "request_id", "correlation_id"],
+      "required": ["account_id", "resource_kind", "resource_id", "route_id", "audience", "device_id", "session_id", "installation_generation", "expires_at", "nonce", "carrier_session_id", "route_generation", "session_generation", "process_generation", "config_generation", "assignment_generation", "edge_node_id", "edge_process_epoch", "protocol", "idempotency_key", "request_id", "correlation_id"],
       "properties": {
         "account_id": { "$ref": "#/definitions/id" },
         "resource_kind": { "$ref": "#/definitions/resource_kind" },
         "resource_id": { "$ref": "#/definitions/id" },
         "route_id": { "$ref": "#/definitions/id" },
         "audience": { "$ref": "#/definitions/audience" },
-        "machine_id": { "$ref": "#/definitions/id" },
+        "device_id": { "$ref": "#/definitions/id" },
         "session_id": { "$ref": "#/definitions/id" },
         "installation_generation": { "type": "integer", "minimum": 1 },
         "expires_at": { "$ref": "#/definitions/timestamp" },
@@ -260,7 +260,7 @@
       "additionalProperties": false,
       "allOf": [
         { "$ref": "#/definitions/route_request_constraints" },
-        { "required": ["account_id", "machine_id", "session_id"] }
+        { "required": ["account_id", "device_id", "session_id"] }
       ]
     },
     "grant_issue_response": {
@@ -337,7 +337,7 @@
           "properties": {
             "allowed": { "const": false },
             "reason": {
-              "enum": ["unauthenticated", "account_mismatch", "machine_revoked", "session_expired", "resource_not_found", "route_paused", "expired", "wrong_route", "protocol_denied", "identity_invalid", "rate_limited", "authorization_unavailable"]
+              "enum": ["unauthenticated", "account_mismatch", "device_revoked", "session_expired", "resource_not_found", "route_paused", "expired", "wrong_route", "protocol_denied", "identity_invalid", "rate_limited", "authorization_unavailable"]
             }
           },
           "not": {

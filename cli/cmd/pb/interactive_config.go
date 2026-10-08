@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
 	"github.com/pinksaucepasta/paperboat/internal/prompt"
 	"github.com/pinksaucepasta/paperboat/internal/selector"
@@ -454,10 +455,25 @@ func connectGitHubInteractive(command *cobra.Command, client *api.Client) (resul
 	if err != nil {
 		return err
 	}
-	if choice.ID == "link" || openGitHubAuthorizationBrowser(command.Context(), link.BrowserURL) != nil {
+	showLink := choice.ID == "link"
+	handoffMessage := "Open this one-use link in your browser, check the Paperboat account, and approve GitHub access. Then press Esc to return and wait for completion."
+	if !showLink {
+		if browserErr := openGitHubAuthorizationBrowser(command.Context(), link.BrowserURL); browserErr != nil {
+			if contextErr := command.Context().Err(); contextErr != nil {
+				return errors.Join(contextErr, browserErr)
+			}
+			// Opening a browser is optional: the link is a complete recovery
+			// path. Keep the launcher's original cause in safe local evidence,
+			// without recording its arguments or the one-use authorization URL.
+			errorreport.Current().ObserveFailure(command.Context(), "pb", "browser_authorization", "command", "command_failed", browserErr)
+			showLink = true
+			handoffMessage = "Paperboat could not open a browser on this machine. " + handoffMessage
+		}
+	}
+	if showLink {
 		// Deliberately show the one-use browser handoff only in this interactive
 		// screen. Never include it in errors, diagnostics or logs.
-		if err = showHomeText(command, "Connect GitHub in your browser", "Open this one-use link in your browser, check the Paperboat account, and approve GitHub access. Then press Esc to return and wait for completion.\n\n"+link.BrowserURL); err != nil {
+		if err = showHomeText(command, "Connect GitHub in your browser", handoffMessage+"\n\n"+link.BrowserURL); err != nil {
 			return err
 		}
 	}

@@ -34,7 +34,8 @@ func nextMachineUpdateCheck(root string, enabled bool, now, next time.Time) time
 	if err != nil || !settings.Enabled {
 		return next
 	}
-	maintenance := settings.NextMaintenance(now)
+	// Scheduler observations are UTC; scheduling uses the machine local calendar.
+	maintenance := settings.NextMaintenance(now.In(time.Local))
 	if maintenance.After(now) && maintenance.Before(next) {
 		return maintenance
 	}

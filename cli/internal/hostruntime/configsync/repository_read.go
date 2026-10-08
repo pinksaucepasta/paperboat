@@ -57,7 +57,7 @@ func ReadSharedAuthorizedRepositoryConfig(ctx context.Context, root, credentialR
 	}
 	return readSharedRepositoryConfig(ctx, root, credentialRoot, RepositoryReadAccess{RepositoryID: access.RepositoryID, CloneURL: access.CloneURL, Branch: access.Branch, Transport: access.Transport, Username: access.Username, Password: access.Password, Capability: access.Capability, ExpiresAt: access.ExpiresAt}, limits, true)
 }
-func readSharedRepositoryConfig(ctx context.Context, root, credentialRoot string, access RepositoryReadAccess, limits SourceConfigLimits, machineGrant bool) (SourceConfig, string, error) {
+func readSharedRepositoryConfig(ctx context.Context, root, credentialRoot string, access RepositoryReadAccess, limits SourceConfigLimits, machineGrant bool) (source SourceConfig, revision string, resultErr error) {
 	fail := func(err error) (SourceConfig, string, error) { return SourceConfig{}, "", err }
 	normalized, kind, err := NormalizeRepositoryEndpoint(access.CloneURL)
 	if err != nil || normalized != access.CloneURL || kind != access.Transport || access.RepositoryID == "" || access.Branch == "" || plumbing.NewBranchReferenceName(access.Branch).Validate() != nil || (access.Capability != "repository_contents_read" && (!machineGrant || access.Capability != "repository_contents_write")) {
@@ -76,7 +76,7 @@ func readSharedRepositoryConfig(ctx context.Context, root, credentialRoot string
 		return fail(err)
 	}
 	if err := EnsureRepositoryCredentialRoot(root); err != nil {
-		return fail(ErrRepositoryUnavailable)
+		return fail(repositoryUnavailableFailure(err))
 	}
 	if kind == "local" {
 		if _, err := openLocalRepositoryContext(ctx, access.CloneURL); err != nil {
@@ -87,29 +87,47 @@ func readSharedRepositoryConfig(ctx context.Context, root, credentialRoot string
 	if err != nil {
 		return fail(err)
 	}
-	defer opts.close()
+	defer func() {
+		if opts.closer != nil {
+			if closeErr := opts.closer.Close(); closeErr != nil {
+				resultErr = repositoryCleanupFailure(resultErr, closeErr)
+				source = SourceConfig{}
+				revision = ""
+			}
+		}
+	}()
 	initRepositoryTransports()
 	staging, err := newPrivateRepositoryTemporaryDirectory(root, ".repository-read-")
 	if err != nil {
-		return fail(ErrRepositoryUnavailable)
+		return fail(err)
 	}
-	defer os.RemoveAll(staging)
+	defer func() {
+		if cleanupErr := os.RemoveAll(staging); cleanupErr != nil {
+			resultErr = repositoryCleanupFailure(resultErr, cleanupErr)
+			source = SourceConfig{}
+			revision = ""
+		}
+	}()
 	if err := EnsureRepositoryCredentialRoot(staging); err != nil {
-		return fail(ErrRepositoryUnavailable)
+		return fail(repositoryUnavailableFailure(err))
 	}
 	store := &repositoryReadStorage{Storer: filesystem.NewStorage(osfs.New(filepath.Clean(staging)), cache.NewObjectLRUDefault()), ctx: ctx, root: staging}
 	repository, err := git.CloneContext(ctx, store, nil, &git.CloneOptions{URL: access.CloneURL, Auth: opts.auth, CABundle: opts.ca, RemoteName: "origin", ReferenceName: plumbing.NewBranchReferenceName(access.Branch), SingleBranch: true, NoCheckout: true, Tags: git.NoTags})
 	if err != nil {
-		if errors.Is(gitUnderlyingError(err), ErrRepositoryReadLimit) {
+		underlying := gitUnderlyingError(err)
+		if errors.Is(underlying, ErrRepositoryReadLimit) && !errors.Is(underlying, ErrRepositoryUnavailable) {
 			return fail(ErrRepositoryReadLimit)
 		}
 		return fail(sanitizeGitError(err))
 	}
 	ref, err := repository.Reference(plumbing.NewBranchReferenceName(access.Branch), true)
-	if err != nil || ref.Hash().IsZero() {
+	if err != nil {
+		return fail(sanitizeGitError(err))
+	}
+	if ref.Hash().IsZero() {
 		return fail(ErrGitRepositoryInvalid)
 	}
-	revision := ref.Hash().String()
+	revision = ref.Hash().String()
 	commit, err := repository.CommitObject(ref.Hash())
 	if err != nil {
 		return fail(sanitizeGitError(err))
@@ -132,19 +150,34 @@ func readSharedRepositoryConfig(ctx context.Context, root, credentialRoot string
 	if err != nil {
 		return fail(sanitizeGitError(err))
 	}
-	defer reader.Close()
 	data, err := io.ReadAll(io.LimitReader(&repositoryContextReader{ctx: ctx, reader: reader}, int64(limits.MaxBytes)+1))
-	if err != nil {
-		return fail(err)
+	closeErr := reader.Close()
+	if err != nil || closeErr != nil {
+		clear(data)
+		if err != nil && closeErr != nil {
+			return fail(repositoryCleanupFailure(sanitizeGitError(err), closeErr))
+		}
+		if err != nil {
+			return fail(sanitizeGitError(err))
+		}
+		return fail(repositoryUnavailableFailure(closeErr))
 	}
+	defer clear(data)
 	if len(data) > limits.MaxBytes {
 		return fail(ErrSourceConfigInvalid)
 	}
-	source, err := ParseSourceConfig(data, limits)
+	source, err = ParseSourceConfig(data, limits)
 	if err != nil {
 		return fail(err)
 	}
 	return source, revision, nil
+}
+
+func repositoryCleanupFailure(previous, cleanup error) error {
+	if cleanup == nil {
+		return previous
+	}
+	return repositoryUnavailableFailure(errors.Join(previous, cleanup))
 }
 
 type repositoryContextReader struct {
@@ -200,9 +233,20 @@ func (w *repositoryReadPackWriter) Write(p []byte) (int, error) {
 	w.writeErr = err
 	return n, err
 }
-func (w *repositoryReadPackWriter) Close() error {
-	defer os.Remove(w.file.Name())
-	defer w.file.Close()
+func (w *repositoryReadPackWriter) Close() (resultErr error) {
+	defer func() {
+		closeErr := w.file.Close()
+		removeErr := os.Remove(w.file.Name())
+		if errors.Is(removeErr, os.ErrNotExist) {
+			removeErr = nil
+		}
+		if closeErr != nil {
+			resultErr = repositoryCleanupFailure(resultErr, closeErr)
+		}
+		if removeErr != nil {
+			resultErr = repositoryCleanupFailure(resultErr, removeErr)
+		}
+	}()
 	if w.writeErr != nil {
 		return w.writeErr
 	}

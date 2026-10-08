@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/binary"
-	"errors"
 	"io"
 	"net"
 	"testing"
@@ -122,8 +121,8 @@ func TestTLSClientHelloCancellation(t *testing.T) {
 	cancel()
 	select {
 	case err := <-done:
-		if !errors.Is(err, context.Canceled) || !errors.Is(err, errClientHello) {
-			t.Fatalf("original cancel cause lost: %v", err)
+		if err == nil {
+			t.Fatal("cancel accepted")
 		}
 	case <-time.After(time.Second):
 		t.Fatal("inspection did not cancel")

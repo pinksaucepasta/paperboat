@@ -22,6 +22,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/binarytarget"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
@@ -1307,25 +1308,29 @@ func requireNamedWindowsServicesRunning(names ...string) error {
 	return nil
 }
 func (b *windowsSCMActivationBackend) CommitCLI(ctx context.Context, journal windowsActivationJournal) error {
-	if exactReleasePattern.MatchString(journal.Version) {
-		if err := commitWindowsInstallVersion(b.config, journal.Version); err != nil {
-			return err
-		}
+	if err := commitWindowsInstallIdentity(ctx, b.config, journal); err != nil {
+		return err
 	}
 	recordPath := filepath.Join(filepath.Dir(b.config.Binary), "pb.active")
-	if journal.NewCLIRecord == "" {
+	newRecord := journal.NewCLIRecord
+	cli := journal.CLI
+	if windowsJournalRestoresPrevious(journal) {
+		newRecord = journal.PreviousCLIRecord
+		cli = windowsActivationComponent{}
+	}
+	if newRecord == "" {
 		if err := os.Remove(recordPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		return nil
 	}
-	name := strings.TrimSuffix(journal.NewCLIRecord, "\n")
+	name := strings.TrimSuffix(newRecord, "\n")
 	if strings.ContainsAny(name, `/\:*?"<>|`) || !strings.HasPrefix(name, "pb.slot-") || !strings.HasSuffix(name, ".exe") {
 		return errInvalidWindowsActivation
 	}
 	destination := filepath.Join(filepath.Dir(b.config.Binary), name)
-	if journal.CLI.Path != "" && !matchesWindowsComponent(destination, workerupdate.ComponentTarget{SHA256: journal.CLI.SHA256, Length: journal.CLI.Length, Platform: "windows", Architecture: journal.Architecture}) {
-		body, err := os.ReadFile(journal.CLI.Path)
+	if cli.Path != "" && !matchesWindowsComponent(destination, workerupdate.ComponentTarget{SHA256: cli.SHA256, Length: cli.Length, Platform: "windows", Architecture: journal.Architecture}) {
+		body, err := os.ReadFile(cli.Path)
 		if err != nil {
 			return err
 		}
@@ -1338,8 +1343,8 @@ func (b *windowsSCMActivationBackend) CommitCLI(ctx context.Context, journal win
 	if !windowsMachineFileSecurityMatches(destination, "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)") {
 		return errInvalidWindowsActivation
 	}
-	if journal.CLI.Path != "" {
-		target := workerupdate.ComponentTarget{SHA256: journal.CLI.SHA256, Length: journal.CLI.Length, Platform: "windows", Architecture: journal.Architecture}
+	if cli.Path != "" {
+		target := workerupdate.ComponentTarget{SHA256: cli.SHA256, Length: cli.Length, Platform: "windows", Architecture: journal.Architecture}
 		if !matchesWindowsComponent(destination, target) {
 			return errInvalidWindowsActivation
 		}
@@ -1348,7 +1353,7 @@ func (b *windowsSCMActivationBackend) CommitCLI(ctx context.Context, journal win
 		if err := nativesignature.New(nil).Verify(verifyCtx, destination, "windows", journal.Architecture); err != nil {
 			return err
 		}
-	} else if journal.NewCLIRecord != "" {
+	} else if newRecord != "" {
 		if err := binarytarget.Validate(destination, "windows", b.config.Architecture); err != nil {
 			return err
 		}
@@ -1359,26 +1364,69 @@ func (b *windowsSCMActivationBackend) CommitCLI(ctx context.Context, journal win
 		}
 	}
 	return windowssecurity.WithRestorePrivilege(func() error {
-		return atomicfile.Write(recordPath, []byte(journal.NewCLIRecord), atomicfile.Options{Mode: 0o644, OwnerUID: -1, OwnerGID: -1, SecurityDescriptor: "O:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;BU)"})
+		return atomicfile.Write(recordPath, []byte(newRecord), atomicfile.Options{Mode: 0o644, OwnerUID: -1, OwnerGID: -1, SecurityDescriptor: "O:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;BU)"})
 	})
 }
 
-func commitWindowsInstallVersion(config WindowsConfig, version string) error {
+func windowsJournalRestoresPrevious(j windowsActivationJournal) bool {
+	return j.Stage == windowsActivationRollingBack || j.Stage == windowsActivationRollbackReady || j.Stage == windowsActivationRolledBack
+}
+
+func windowsJournalInstallSource(j windowsActivationJournal, automatic bool) (installsource.Source, error) {
+	if !validWindowsActivationJournal(j) {
+		return installsource.Source{}, errInvalidWindowsActivation
+	}
+	version, component := j.Version, j.Runtime
+	if windowsJournalRestoresPrevious(j) {
+		if j.PreviousSource != nil {
+			return *j.PreviousSource, nil
+		}
+		version, component = j.PreviousVersion, j.PreviousBinary
+	} else if j.Stage != windowsActivationServicesLive && j.Stage != windowsActivationCommitReady && j.Stage != windowsActivationCommitted {
+		return installsource.Source{}, errInvalidWindowsActivation
+	}
+	source := installsource.Source{Version: version, Platform: "windows", Architecture: j.Architecture, SHA256: component.SHA256, Length: component.Length, Distribution: installsource.Official, AutomaticUpdates: automatic}
+	return source, source.Validate()
+}
+
+func commitWindowsInstallIdentity(ctx context.Context, config WindowsConfig, journal windowsActivationJournal) error {
+	if !validWindowsActivationPaths(config, journal) {
+		return errInvalidWindowsActivation
+	}
+	if err := validateWindowsReadOnlyOwnerFile(config.InstallState, config.OwnerSID); err != nil {
+		return err
+	}
 	body, err := os.ReadFile(config.InstallState)
 	if err != nil || len(body) == 0 || len(body) > 128<<10 {
 		return errInvalidWindowsActivation
 	}
-	var document map[string]any
+	var document hostinstall.WindowsRuntimeConfig
 	decoder := json.NewDecoder(strings.NewReader(string(body)))
-	decoder.UseNumber()
+	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&document); err != nil {
 		return err
 	}
-	artifact, ok := document["artifact"].(map[string]any)
-	if !ok {
+	var extra any
+	if decoder.Decode(&extra) != io.EOF || document.OwnerSID != config.OwnerSID || document.Source.Validate() != nil || document.Source.Platform != "windows" || document.Source.Architecture != journal.Architecture || bootstrap.VerifyArtifactTarget(document.Artifact) != nil || document.Artifact.RepositoryURL != config.RepositoryURL || document.Artifact.Architecture != journal.Architecture {
 		return errInvalidWindowsActivation
 	}
-	artifact["version"] = version
+	current := document.Source
+	if !((current.Version == journal.PreviousVersion && current.SHA256 == journal.PreviousBinary.SHA256 && current.Length == journal.PreviousBinary.Length) || (current.Version == journal.Version && current.SHA256 == journal.Runtime.SHA256 && current.Length == journal.Runtime.Length)) {
+		return errInvalidWindowsActivation
+	}
+	if current.Version == journal.PreviousVersion && journal.PreviousSource != nil && current != *journal.PreviousSource || current.Version == journal.Version && current.Distribution != installsource.Official {
+		return errInvalidWindowsActivation
+	}
+	source, err := windowsJournalInstallSource(journal, current.AutomaticUpdates)
+	if err != nil {
+		return err
+	}
+	target := workerupdate.ComponentTarget{SHA256: source.SHA256, Length: source.Length, Platform: source.Platform, Architecture: source.Architecture}
+	if err := verifyWindowsStableBinary(ctx, config.Binary, target, config.OwnerSID); err != nil {
+		return err
+	}
+	document.Source = source
+	document.Artifact.Version, document.Artifact.Platform, document.Artifact.Architecture = source.Version, source.Platform, source.Architecture
 	updated, err := json.Marshal(document)
 	if err != nil {
 		return err
@@ -1421,11 +1469,11 @@ func reconcileWindowsInstallVersion(ctx context.Context, config WindowsConfig) e
 // uncommitted cutover/rollback bytes instead of the installed Source.
 func WindowsFeatureVersion(ctx context.Context, config WindowsConfig) (string, error) {
 	journal, err := loadWindowsActivationJournal(config)
-	if err == nil && journal.Release.SupervisorMaintenance && journal.Stage != windowsActivationAwaitingApproval && journal.Stage != windowsActivationStaged {
+	if err == nil && journal.Stage != windowsActivationAwaitingApproval && journal.Stage != windowsActivationStaged {
 		if err := secureWindowsFileShape(windowsActivationJournalPath(config.StateRoot)); err != nil {
 			return "", err
 		}
-		if !windowssecurity.ProtectedDACLMatches(windowsActivationJournalPath(config.StateRoot), "D:P(A;;FA;;;SY)(A;;FA;;;BA)") {
+		if !windowsMachineFileSecurityMatches(windowsActivationJournalPath(config.StateRoot), "D:P(A;;FA;;;SY)(A;;FA;;;BA)") {
 			return "", errInvalidWindowsActivation
 		}
 		candidate := windowsActivationComponentTarget(journal.Runtime, config.Architecture)
@@ -1733,23 +1781,138 @@ func RunWindowsActivator(ctx context.Context, config WindowsConfig) error {
 	}
 	backend := newWindowsSCMActivationBackend(config)
 	result, activationErr := executeWindowsActivation(ctx, backend, journal)
-	var connectErr error
-	if activationErr == nil && result.Stage == windowsActivationCommitted || result.Stage == windowsActivationRolledBack {
-		var manager *mgr.Mgr
-		manager, connectErr = mgr.Connect()
-		if connectErr == nil {
-			_, _, _, _, name, _ := windowsInstanceNames(config.OwnerSID)
-			if item, openErr := manager.OpenService(name); openErr == nil {
-				_ = item.Delete()
-				_ = item.Close()
-			}
-			_ = manager.Disconnect()
+	return finishWindowsActivatorResult(ctx, result, activationErr, backend.restoreFeatureUpdater, func() error {
+		manager, err := mgr.Connect()
+		if err != nil {
+			return err
+		}
+		defer manager.Disconnect()
+		_, _, _, _, name, err := windowsInstanceNames(config.OwnerSID)
+		if err != nil {
+			return err
+		}
+		item, err := manager.OpenService(name)
+		if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		defer item.Close()
+		if err := item.Delete(); err != nil && !errors.Is(err, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
+			return err
+		}
+		return nil
+	})
+}
+
+// Keep the durable activator until its terminal feature installation has a
+// usable updater again. Retrying this terminal step never repeats cutover.
+func finishWindowsActivatorResult(ctx context.Context, journal windowsActivationJournal, activationErr error, restoreUpdater func(context.Context, windowsActivationJournal) error, retire func() error) error {
+	terminal := journal.Stage == windowsActivationCommitted && activationErr == nil || journal.Stage == windowsActivationRolledBack
+	if !terminal {
+		return activationErr
+	}
+	if !journal.Release.SupervisorMaintenance {
+		if err := restoreUpdater(ctx, journal); err != nil {
+			return errors.Join(activationErr, err)
 		}
 	}
-	if result.Stage == windowsActivationRolledBack {
-		activationErr = nil
+	// Rolled-back transactions intentionally retain the original failure in
+	// their journal. It is no longer a service failure after usable recovery.
+	return retire()
+}
+
+func (b *windowsSCMActivationBackend) restoreFeatureUpdater(ctx context.Context, journal windowsActivationJournal) error {
+	_, updaterName, err := windowsInstanceServiceNames(b.config.OwnerSID)
+	if err != nil {
+		return err
 	}
-	return errors.Join(activationErr, connectErr)
+	client, err := NewClient(b.config.ControlSocket, 2*time.Second)
+	if err != nil {
+		return err
+	}
+	return restoreWindowsFeatureUpdater(ctx, journal, func(ctx context.Context, j windowsActivationJournal) error {
+		if err := b.verifyFeatureNativePins(ctx, j); err != nil {
+			return err
+		}
+		// Terminal recovery also repairs a commit interrupted before installer
+		// metadata was persisted, before starting the trusted native updater.
+		return b.CommitCLI(ctx, j)
+	}, func(ctx context.Context) error {
+		return startNamedWindowsService(ctx, updaterName)
+	}, client.Status)
+}
+
+// Native executable identity is independent of the feature version reported by
+// the updater. Starting the installed old pin is safe only after its SCM target,
+// protected declaration and executable bytes still match the approved journal.
+func (b *windowsSCMActivationBackend) verifyFeatureNativePins(ctx context.Context, journal windowsActivationJournal) error {
+	layout, err := service.WindowsUserLayout(b.config.OwnerSID)
+	if err != nil {
+		return err
+	}
+	hostdName, updaterName, err := windowsInstanceServiceNames(b.config.OwnerSID)
+	if err != nil {
+		return err
+	}
+	for _, role := range []struct {
+		name, kind, argument string
+		expected             windowsServiceTarget
+	}{
+		{hostdName, service.HostdKind, "__runtime-hostd", journal.OldHostd},
+		{updaterName, service.UpdaterKind, "__runtime-updated", journal.OldUpdater},
+	} {
+		actual, err := queryWindowsServiceTarget(role.name, role.argument)
+		if err != nil {
+			return err
+		}
+		identity, err := service.VerifyOwnedWindowsRoleExecutable(role.kind, layout.Instance, actual.Executable)
+		if err != nil {
+			return err
+		}
+		if err := validateWindowsFeatureNativePin(layout, role.expected, actual, identity); err != nil {
+			return err
+		}
+		if err := verifyWindowsStableBinary(ctx, actual.Executable, workerupdate.ComponentTarget{SHA256: identity.SHA256, Length: identity.Length, Platform: "windows", Architecture: journal.Architecture}, b.config.OwnerSID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateWindowsFeatureNativePin(layout service.Layout, expected, actual windowsServiceTarget, identity service.WindowsExecutableIdentity) error {
+	if !windowsPinnedServiceExecutable(layout, actual.Executable) || !strings.EqualFold(expected.Executable, actual.Executable) || !strings.EqualFold(identity.Executable, actual.Executable) || !slices.Equal(expected.Arguments, actual.Arguments) || expected.Length <= 0 || expected.Length != identity.Length || len(expected.SHA256) != 64 || expected.SHA256 != identity.SHA256 {
+		return errInvalidWindowsActivation
+	}
+	return nil
+}
+
+func restoreWindowsFeatureUpdater(ctx context.Context, journal windowsActivationJournal, verify func(context.Context, windowsActivationJournal) error, start func(context.Context) error, status func(context.Context) (ControlResponse, error)) error {
+	if ctx == nil || journal.Release.SupervisorMaintenance || journal.Stage != windowsActivationCommitted && journal.Stage != windowsActivationRolledBack {
+		return errInvalidWindowsActivation
+	}
+	version := journal.Version
+	if journal.Stage == windowsActivationRolledBack {
+		version = journal.PreviousVersion
+	}
+	if !validObservedRuntimeVersion(version) {
+		return errInvalidWindowsActivation
+	}
+	bounded, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
+	defer cancel()
+	if err := verify(bounded, journal); err != nil {
+		return err
+	}
+	// A previous start may have succeeded before its acknowledgement was lost.
+	// Reuse its authenticated control readiness rather than restarting it.
+	if response, err := status(bounded); err == nil && response.Version == version {
+		return nil
+	}
+	if err := start(bounded); err != nil {
+		return err
+	}
+	return waitForWindowsUpdaterVersion(bounded, version, 30*time.Second, 250*time.Millisecond, status)
 }
 
 // Runtime observations include locally-built versions; update candidates still

@@ -416,7 +416,7 @@ func ProjectEventResource(event Event, binding EventResourceBinding) (EventResou
 	addSafeMetadata(metadata, "certificate_id", event.IDs.CertificateID)
 	addSafeMetadata(metadata, "assignment_id", event.IDs.AssignmentID)
 	addSafeMetadata(metadata, "host_id", event.IDs.HostID)
-	addSafeMetadata(metadata, "machine_id", event.IDs.MachineID)
+	addSafeMetadata(metadata, "device_id", event.IDs.DeviceID)
 	addGenerationMetadata(metadata, "config_generation", event.Generations.Config)
 	addGenerationMetadata(metadata, "route_generation", event.Generations.Route)
 	addGenerationMetadata(metadata, "assignment_generation", event.Generations.Assignment)
@@ -445,7 +445,7 @@ func restoreSafeIDMetadata(metadata map[string]any, ids SafeIDs) {
 		"account_id": ids.AccountID, "actor_id": ids.ActorID, "tunnel_id": ids.TunnelID,
 		"route_id": ids.RouteID, "connector_id": ids.ConnectorID, "domain_id": ids.DomainID,
 		"certificate_id": ids.CertificateID, "assignment_id": ids.AssignmentID, "host_id": ids.HostID,
-		"machine_id": ids.MachineID, "session_id": ids.SessionID, "operation_id": ids.OperationID,
+		"device_id": ids.DeviceID, "session_id": ids.SessionID, "operation_id": ids.OperationID,
 		"request_id": ids.RequestID, "edge_node_id": ids.EdgeNodeID,
 	} {
 		if value != "" {

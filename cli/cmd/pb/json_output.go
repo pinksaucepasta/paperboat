@@ -9,6 +9,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/environmentmanager"
 	"github.com/pinksaucepasta/paperboat/internal/preferences"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
 	"github.com/spf13/cobra"
@@ -77,17 +78,65 @@ func classifyCLIJSONError(err error) cliJSONError {
 }
 
 func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
-	result := cliJSONError{Code: "operation_failed", Category: "local_io", Message: boundedCLIJSONMessage(commandFailureMessage(err, failure)), StateChanged: "unknown"}
+	result := cliJSONError{Code: "operation_failed", Category: "local_io", Message: boundedCLIJSONMessage(commandFailureMessage(err, failure)), StateChanged: "unknown", SupportReference: failure.supportReference}
 	if result.Message == "" {
 		result.Message = "The operation failed."
 	}
 	owner := soleCommandOwner(err)
 	switch typed := owner.(type) {
+	case *envCommandFailure:
+		if failure.kind != commandOperational && failure.kind != commandRejected {
+			break
+		}
+		result.Code = "env_operation_failed"
+		result.Category, result.Retryable = "unavailable_retryable", true
+		result.Recovery = typed.message
+		if failure.kind == commandRejected {
+			result.Category, result.Retryable = "conflict", false
+		}
+		if environmentFailureHasMarker(typed.cause, func(cause error) bool { _, ok := cause.(*environmentmanager.ScopePublicationPending); return ok }) {
+			result.Code = "env_source_publication_pending"
+			result.OutcomeUncertain = true
+		}
+		sourceConflict := onlyEnvironmentFailureUnderMarker(typed.cause, func(cause error) bool { _, ok := cause.(*environmentmanager.ScopeRefreshConflict); return ok })
+		if sourceConflict {
+			result.Code = "env_source_conflict"
+			result.Category = "conflict"
+			result.StateChanged = false
+			result.OutcomeUncertain = false
+		}
+		if onlyEnvironmentFailureLeaves(typed.cause, func(leaf error) bool {
+			return leaf == environmentmanager.ErrVaultLocked || leaf == environmentmanager.ErrVaultPending || leaf == environmentmanager.ErrVaultChanged || leaf == environmentmanager.ErrVaultTeamGrantRequired || leaf == environmentmanager.ErrVariableNotConfigured
+		}) {
+			result.StateChanged = false
+		}
+		if rejected, ok := failure.owner.(*api.APIError); ok && !sourceConflict && !failure.apiCauseInvalid && !environmentFailureContainsJoin(typed.cause) {
+			switch rejected.Code {
+			case "team_entitlement_required":
+				result.Code, result.Category, result.Retryable = rejected.Code, "authorization_or_entitlement", false
+			case "version_conflict", "precondition_failed", "vault_conflict", "operation_conflict":
+				result.Code, result.Category = rejected.Code, "conflict"
+			case "rotation_required", "key_authorization_required":
+				result.Code = rejected.Code
+			}
+		}
+	case *envHostRefreshFailure:
+		result.Code, result.Category, result.StateChanged = "env_recipient_refresh_pending", "unavailable_retryable", "unknown"
+		result.Retryable = true
+		result.Recovery = typed.recovery()
+		changed := typed.sourceChanged || typed.operationCompleted || typed.completed > 0
+		result.OutcomeUncertain = typed.publicationPending || failure.kind == commandUnexpected || !changed
+		if changed {
+			result.StateChanged = true
+		}
 	case *configComparisonFailure:
 		result.Code, result.Category, result.StateChanged = "config_comparison_unavailable", "unavailable_retryable", false
 		result.Retryable = true
 		result.Recovery = "Refresh pb config status and retry the exact conflict comparison."
 	case *api.APIError:
+		if failure.owner != typed || failure.apiCauseInvalid {
+			break
+		}
 		result.Code = typed.PublicCode()
 		if supportref.Valid(typed.SupportReference) {
 			result.SupportReference = typed.SupportReference
@@ -110,6 +159,13 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 			result.Category, result.StateChanged = "conflict", false
 			result.Message = typed.Error()
 			result.Recovery = "Run `pb update` to install a supported official release."
+		}
+	case commandRejection:
+		if failure.kind == commandRejected && typed.valid() {
+			result.Code, result.Category, result.Message = "operation_refused", "conflict", typed.Error()
+			if typed.cause == nil {
+				result.StateChanged = false
+			}
 		}
 	case unsupportedJSONOutputError:
 		result.Code, result.Category, result.StateChanged = "unsupported_output", "usage", false

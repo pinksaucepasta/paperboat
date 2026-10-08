@@ -62,7 +62,7 @@ func TestRuntimeWorkerEntryActivatesFencedHostdLease(t *testing.T) {
 	go func() {
 		done <- runWorkerWith(workerCtx, []string{
 			"--socket", filepath.Join(root, "socket", "hostd.sock"), "--token-file", tokenPath,
-			"--worker-id", "runtime-test", "--version", "test", "--heartbeat", "1s",
+			"--worker-id", "runtime-test", "--version", "test", "--heartbeat", "1m",
 		}, bytes.NewReader(nil), output, &bytes.Buffer{}, func(context.Context, string, []byte, string, uint64, string) (workerFeature, error) {
 			return testWorkerFeature{}, nil
 		})
@@ -79,7 +79,7 @@ func TestRuntimeWorkerEntryActivatesFencedHostdLease(t *testing.T) {
 			t.Fatalf("worker did not activate before deadline: status=%+v output=%q", server.Status(), output.String())
 		}
 	}
-	if status := server.Status(); status.State != hostdproto.StateActive {
+	if status := server.Status(); status.State != hostdproto.StateActive || status.LastHeartbeatUnixMilli == 0 {
 		t.Fatalf("worker reported activation without active fence: status=%+v output=%q", status, output.String())
 	}
 	stopWorker()
@@ -284,3 +284,32 @@ type testWorkerFeature struct{}
 
 func (testWorkerFeature) Health(context.Context) error   { return nil }
 func (testWorkerFeature) Shutdown(context.Context) error { return nil }
+
+func workerStartupFixture(t *testing.T) (*hostdproto.Server, string, []byte, []string) {
+	t.Helper()
+	root, err := os.MkdirTemp("/tmp", "pb-startup-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	endpoint := filepath.Join(root, "hostd.sock")
+	token := bytes.Repeat([]byte{0x56}, 32)
+	tokenPath := filepath.Join(root, "token")
+	if err := os.WriteFile(tokenPath, token, 0600); err != nil {
+		t.Fatal(err)
+	}
+	server, err := hostdproto.NewServer(hostdproto.SocketConfig{SocketPath: endpoint, StatePath: filepath.Join(root, "state", "fence.json"), UID: os.Geteuid(), GID: os.Getegid(), Token: token, APIMin: 1, APIMax: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Run(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("listener cleanup: %v", err)
+		}
+	})
+	return server, endpoint, token, []string{"--socket", endpoint, "--token-file", tokenPath}
+}

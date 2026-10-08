@@ -9,14 +9,20 @@ import (
 )
 
 type peerTestSecretStore struct {
-	values    map[string]string
-	setCount  int
-	failSetAt int
+	values          map[string]string
+	setCount        int
+	failSetAt       int
+	failSetErr      error
+	failDeleteRef   string
+	failDeleteError error
 }
 
 func (s *peerTestSecretStore) Set(ref, value string) error {
 	s.setCount++
 	if s.failSetAt > 0 && s.setCount == s.failSetAt {
+		if s.failSetErr != nil {
+			return s.failSetErr
+		}
 		return errors.New("injected peer identity write failure")
 	}
 	s.values[ref] = value
@@ -30,6 +36,9 @@ func (s *peerTestSecretStore) Get(ref string) (string, error) {
 	return value, nil
 }
 func (s *peerTestSecretStore) Delete(ref string) error {
+	if ref == s.failDeleteRef {
+		return s.failDeleteError
+	}
 	delete(s.values, ref)
 	return nil
 }
@@ -80,6 +89,35 @@ func TestPeerIdentityKeysRollsBackFailedCreation(t *testing.T) {
 	if err == nil || identity.RootPrivate != nil || identity.QUICPrivate != nil || len(secrets.values) != 0 {
 		t.Fatalf("identity=%+v values=%d err=%v", identity, len(secrets.values), err)
 	}
+}
+
+func TestPeerIdentityCreationPreservesRollbackFailureAndRetries(t *testing.T) {
+	const issuer, accountID, endpointID = "https://api.example.test", "account_1", "cli_1"
+	writeFailure := errors.New("write failed")
+	cleanupFailure := errors.New("cleanup failed")
+	rootRef := peerIdentitySecretRef(issuer, accountID, "account-root")
+	secrets := &peerTestSecretStore{
+		values:          map[string]string{},
+		failSetAt:       2,
+		failSetErr:      writeFailure,
+		failDeleteRef:   rootRef,
+		failDeleteError: cleanupFailure,
+	}
+	store := ProfileStore{Path: t.TempDir(), Secrets: secrets}
+	identity, err := store.PeerIdentityKeys(issuer, accountID, endpointID)
+	if err == nil || !errors.Is(err, writeFailure) || !errors.Is(err, cleanupFailure) || identity.RootPrivate != nil || identity.QUICPrivate != nil {
+		t.Fatalf("partial identity=%+v error=%v", identity, err)
+	}
+	if _, ok := secrets.values[rootRef]; !ok {
+		t.Fatal("fixture did not retain the key whose rollback failed")
+	}
+
+	secrets.failDeleteRef = ""
+	identity, err = store.PeerIdentityKeys(issuer, accountID, endpointID)
+	if err != nil || len(identity.RootPrivate) != ed25519.PrivateKeySize || len(identity.QUICPrivate) != ed25519.PrivateKeySize {
+		t.Fatalf("retry identity=%+v error=%v", identity, err)
+	}
+	clearPeerIdentity(&identity)
 }
 
 func TestPeerIdentityKeysUsesProfileScopedLock(t *testing.T) {

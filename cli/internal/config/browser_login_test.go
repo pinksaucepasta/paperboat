@@ -3,8 +3,11 @@ package config
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -49,5 +52,24 @@ func TestBrowserLoginRecoveryIsPrivateAndIssuerBound(t *testing.T) {
 		return save()
 	}); e != nil {
 		t.Fatal(e)
+	}
+}
+
+func TestBrowserLoginParseFailureRetainsCauseWithoutExposingStoredState(t *testing.T) {
+	const issuer = "https://api.example.test"
+	root := t.TempDir()
+	ref := "browser-login-v1-" + profileKey(issuer+"\x00"+filepath.Clean(root))
+	secrets := &injectedCredentialStore{values: map[string]string{
+		ref: `{"device_code":"PRIVATE_DEVICE_CODE",`,
+	}}
+	store := ProfileStore{Path: root, Secrets: secrets}
+	callbackCalled := false
+	err := store.WithBrowserLogin(issuer, func(*BrowserLoginState, func() error) error {
+		callbackCalled = true
+		return nil
+	})
+	var syntaxErr *json.SyntaxError
+	if err == nil || err.Error() != "pending login is invalid" || (!errors.As(err, &syntaxErr) && !errors.Is(err, io.ErrUnexpectedEOF)) || strings.Contains(err.Error(), "PRIVATE_DEVICE_CODE") || callbackCalled {
+		t.Fatalf("parse failure=%v callbackCalled=%t", err, callbackCalled)
 	}
 }

@@ -65,7 +65,7 @@ var ErrIngressDenied = errors.New("connector ingress authority denied")
 
 // IngressBinding is the single v1 tunnel route/target identity shared by both
 // lifecycle modes. It is issued by the server, never inferred from reachability
-// or public request headers. Native private HTTP uses the same independently revalidated edge bindings.
+// or public request headers. Native access does not consume edge bindings.
 type IngressBinding struct {
 	EnvironmentID           string `json:"environment_id"`
 	AccountID               string `json:"account_id"`
@@ -158,30 +158,26 @@ func (b IngressBinding) Validate() error {
 // publication is owner authority; restricted viewer grants are separate fields.
 // A daemon compares Binding to its independently obtained current server binding.
 type IngressDecision struct {
-	NativeAuthorization  *PrivateAccessOpen `json:"native_authorization,omitempty"`
-	Binding              IngressBinding     `json:"binding"`
-	DecisionID           string             `json:"decision_id"`
-	PolicyGeneration     uint64             `json:"policy_generation"`
-	EdgeNodeID           string             `json:"edge_node_id"`
-	EdgeProcessEpoch     string             `json:"edge_process_epoch"`
-	ConnectorID          string             `json:"connector_id"`
-	SessionID            string             `json:"session_id"`
-	ProcessGeneration    uint64             `json:"process_generation"`
-	ConfigGeneration     uint64             `json:"config_generation"`
-	AssignmentGeneration uint64             `json:"assignment_generation"`
-	PrincipalID          string             `json:"principal_id"`
-	GrantID              string             `json:"grant_id"`
-	GrantGeneration      uint64             `json:"grant_generation"`
-	MembershipGeneration uint64             `json:"membership_generation"`
-	Action               string             `json:"action"`
-	IssuedAt             time.Time          `json:"issued_at"`
-	ExpiresAt            time.Time          `json:"expires_at"`
+	Binding              IngressBinding `json:"binding"`
+	DecisionID           string         `json:"decision_id"`
+	PolicyGeneration     uint64         `json:"policy_generation"`
+	EdgeNodeID           string         `json:"edge_node_id"`
+	EdgeProcessEpoch     string         `json:"edge_process_epoch"`
+	ConnectorID          string         `json:"connector_id"`
+	SessionID            string         `json:"session_id"`
+	ProcessGeneration    uint64         `json:"process_generation"`
+	ConfigGeneration     uint64         `json:"config_generation"`
+	AssignmentGeneration uint64         `json:"assignment_generation"`
+	PrincipalID          string         `json:"principal_id"`
+	GrantID              string         `json:"grant_id"`
+	GrantGeneration      uint64         `json:"grant_generation"`
+	MembershipGeneration uint64         `json:"membership_generation"`
+	Action               string         `json:"action"`
+	IssuedAt             time.Time      `json:"issued_at"`
+	ExpiresAt            time.Time      `json:"expires_at"`
 }
 
 func (d IngressDecision) Validate(now time.Time) error {
-	if d.NativeAuthorization != nil && d.ValidateNativeAuthorization(now) != nil {
-		return ErrIngressDenied
-	}
 	if d.Binding.Validate() != nil || now.IsZero() || d.IssuedAt.IsZero() || d.IssuedAt.After(now) || !d.ExpiresAt.After(now) || d.ExpiresAt.Sub(d.IssuedAt) > IngressAuthorityLifetime || d.Action != "view" {
 		return ErrIngressDenied
 	}
@@ -214,48 +210,11 @@ func (d IngressDecision) Authorize(authority IngressDecision, open StreamOpen, e
 		d.PolicyGeneration != authority.PolicyGeneration || d.AssignmentGeneration != authority.AssignmentGeneration ||
 		d.ConnectorID != authority.ConnectorID || d.SessionID != authority.SessionID || d.ProcessGeneration != authority.ProcessGeneration || d.ConfigGeneration != authority.ConfigGeneration ||
 		d.EdgeNodeID != authority.EdgeNodeID || d.EdgeProcessEpoch != authority.EdgeProcessEpoch ||
-		!sameNativeAuthorization(d.NativeAuthorization, authority.NativeAuthorization) || d.PrincipalID != authority.PrincipalID || d.GrantID != authority.GrantID || d.GrantGeneration != authority.GrantGeneration || d.MembershipGeneration != authority.MembershipGeneration ||
+		d.PrincipalID != authority.PrincipalID || d.GrantID != authority.GrantID || d.GrantGeneration != authority.GrantGeneration || d.MembershipGeneration != authority.MembershipGeneration ||
 		open.AccountID != current.AccountID || open.TunnelID != current.TunnelID || open.RouteID != current.RouteID ||
 		d.ConnectorID != open.ConnectorID || d.SessionID != open.SessionID || d.ProcessGeneration != open.ProcessGeneration || d.ConfigGeneration != open.Generation ||
 		d.EdgeNodeID != edgeNodeID || d.EdgeProcessEpoch != edgeEpoch {
 		return ErrIngressDenied
 	}
 	return nil
-}
-
-// ValidateNativeAuthorization binds the signed accessor authority to the exact
-// durable publisher assignment. Publisher identity is independently projected.
-func (d IngressDecision) ValidateNativeAuthorization(now time.Time) error {
-	a := d.NativeAuthorization
-	if a == nil || a.Validate(now) != nil {
-		return ErrIngressDenied
-	}
-	q := a.Request
-	b := d.Binding
-	resourceMatches := b.Lifecycle == TunnelDurable && q.ResourceKind == "tunnel" && q.ResourceID == b.TunnelID && q.Audience == "paperboat-tunnel-http"
-	if b.Lifecycle == TunnelEphemeral {
-		resourceMatches = q.ResourceKind == "preview" && q.ResourceID == b.PublicationID && ValidateIdentifier(q.OperationID) == nil && q.Audience == "paperboat-preview-http"
-	}
-	connectorMatches := q.ConnectorID == d.ConnectorID
-	if b.Lifecycle == TunnelEphemeral {
-		connectorMatches = q.ConnectorID == ""
-	}
-	if !resourceMatches || !connectorMatches || b.Audience != "private" || b.Protocol != "http" || q.Protocol != "http" ||
-		q.AccountID != b.AccountID || q.RouteID != b.RouteID || q.Host != b.Hostname || q.RouteGeneration != b.RouteGeneration ||
-		q.CarrierSessionID != d.SessionID || q.ProcessGeneration != d.ProcessGeneration || q.ConfigGeneration != d.ConfigGeneration || q.AssignmentGeneration != d.AssignmentGeneration ||
-		q.EdgeNodeID != d.EdgeNodeID || q.EdgeProcessEpoch != d.EdgeProcessEpoch || d.PrincipalID != q.MachineID || d.GrantID != q.Nonce || d.GrantGeneration != q.InstallationGeneration || d.MembershipGeneration != 0 || d.ExpiresAt.After(q.ExpiresAt) {
-		return ErrIngressDenied
-	}
-	// Keep the combined envelope within the existing stream admission bound.
-	encoded, err := json.Marshal(d)
-	if err != nil || len(encoded) > MaxStreamOpenBytes {
-		return ErrIngressDenied
-	}
-	return nil
-}
-func sameNativeAuthorization(a, b *PrivateAccessOpen) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return *a == *b
 }

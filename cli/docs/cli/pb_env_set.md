@@ -6,7 +6,7 @@ Set one environment variable through a hidden prompt or bounded stdin
 
 Set one environment variable through a hidden prompt or bounded stdin
 
-Set one exact ENV name using a hidden interactive prompt, a bounded stdin stream, or --value-file. Use --team or --machine to choose a nonpersonal scope; the value is never part of the command output.
+Set one exact ENV name using a hidden interactive prompt, a bounded stdin stream, or --value-file. Use --team in its matching workspace for Team values, or --machine for an owned Personal machine override, including in a Team workspace; the value is never part of the command output. Previously provisioned recipient selections refresh automatically without authorizing new names.
 
 ENV values are encrypted before they leave the client. Commands select personal, team, or host scope explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
 
@@ -21,7 +21,7 @@ pb env set <name> [flags]
 ```
   -h, --help                help for set
       --json                print redacted JSON metadata
-      --machine string      machine name or ID; defaults to the personal scope
+      --machine string      Personal override for an owned machine, even in a Team workspace; omitted uses the active workspace
       --team string         team scope; cannot be combined with --machine
       --value-file string   read the raw value from an absolute file path
       --value-stdin         read the raw value from non-interactive stdin

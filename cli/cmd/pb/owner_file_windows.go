@@ -9,17 +9,37 @@ import (
 )
 
 func ownerOnlyRegularFile(path string, info os.FileInfo) bool {
+	return validateOwnerOnlyRegularFile(path, info) == nil
+}
+
+func validateOwnerOnlyRegularFile(path string, info os.FileInfo) error {
 	if info == nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-		return false
+		return errOwnerOnlyFileInvalid
 	}
-	attributes, err := windows.GetFileAttributes(windows.StringToUTF16Ptr(path))
-	if err != nil || attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-		return false
+	encoded, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return err
+	}
+	attributes, err := windows.GetFileAttributes(encoded)
+	if err != nil {
+		return err
+	}
+	if attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+		return errOwnerOnlyFileInvalid
 	}
 	descriptor, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
-	if err != nil || descriptor == nil || !descriptor.IsValid() {
-		return false
+	if err != nil {
+		return err
+	}
+	if descriptor == nil || !descriptor.IsValid() {
+		return errOwnerOnlyFileInvalid
 	}
 	control, _, err := descriptor.Control()
-	return err == nil && control&windows.SE_DACL_PROTECTED != 0
+	if err != nil {
+		return err
+	}
+	if control&windows.SE_DACL_PROTECTED == 0 {
+		return errOwnerOnlyFileInvalid
+	}
+	return nil
 }

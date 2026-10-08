@@ -19,7 +19,7 @@ import (
 )
 
 // Handler performs each state transition under the installation's process lock.
-func Handler(dir string, onClaim func(), observe func(context.Context, string, error)) http.Handler {
+func Handler(dir string, onClaim func()) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/selfhost/inspect", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -37,18 +37,12 @@ func Handler(dir string, onClaim func(), observe func(context.Context, string, e
 		}
 		lock, err := lockState(dir)
 		if err != nil {
-			if observe != nil {
-				observe(r.Context(), "selfhost_claim", err)
-			}
 			http.Error(w, "installation busy; retry", 503)
 			return
 		}
 		defer lock.Close()
 		s, err := load(dir)
 		if err != nil {
-			if observe != nil {
-				observe(r.Context(), "selfhost_claim", err)
-			}
 			http.Error(w, "installation state unavailable", 503)
 			return
 		}
@@ -63,18 +57,12 @@ func Handler(dir string, onClaim func(), observe func(context.Context, string, e
 
 		key, err := privateKey(s)
 		if err != nil {
-			if observe != nil {
-				observe(r.Context(), "selfhost_claim", err)
-			}
 			http.Error(w, "installation identity unavailable", 503)
 			return
 		}
 		out := Inspection{Version: 1, Nonce: req.Nonce, InstallationKey: encoding.EncodeToString(key.Public().(ed25519.PublicKey)), Name: s.Config.Name, EndpointHost: s.Config.EndpointHost, ExpiresAt: s.ExpiresAt, Components: append([]Component(nil), s.Config.Components...)}
 		certPEM, err := os.ReadFile(filepath.Join(dir, "tls.crt"))
 		if err != nil {
-			if observe != nil {
-				observe(r.Context(), "selfhost_claim", err)
-			}
 			http.Error(w, "installation certificate unavailable", 503)
 			return
 		}
@@ -106,18 +94,12 @@ func Handler(dir string, onClaim func(), observe func(context.Context, string, e
 		}
 		lock, err := lockState(dir)
 		if err != nil {
-			if observe != nil {
-				observe(r.Context(), "selfhost_claim", err)
-			}
 			http.Error(w, "installation busy; retry", 503)
 			return
 		}
 		defer lock.Close()
 		s, err := load(dir)
 		if err != nil {
-			if observe != nil {
-				observe(r.Context(), "selfhost_claim", err)
-			}
 			http.Error(w, "installation state unavailable", 503)
 			return
 		}
@@ -149,18 +131,12 @@ func Handler(dir string, onClaim func(), observe func(context.Context, string, e
 			s.Claim = &req
 			s.ClaimHash = hash
 			if err := save(dir, s); err != nil {
-				if observe != nil {
-					observe(r.Context(), "selfhost_claim", err)
-				}
 				http.Error(w, "could not persist claim; retry same claim", 503)
 				return
 			}
 		}
 		if !s.RuntimeReady {
 			if err := applyClaim(r.Context(), dir, &s); err != nil {
-				if observe != nil {
-					observe(r.Context(), "selfhost_claim", err)
-				}
 				http.Error(w, "claim saved; runtime configuration incomplete; retry same claim", 503)
 				return
 			}
@@ -276,7 +252,7 @@ func applyClaim(ctx context.Context, dir string, s *state) error {
 }
 
 // Serve exposes the bounded local claim API and drains it on cancellation.
-func Serve(ctx context.Context, dir string, onClaim func(), observe func(context.Context, string, error)) error {
+func Serve(ctx context.Context, dir string, onClaim func()) error {
 	lock, err := lockState(dir)
 	if err != nil {
 		return err
@@ -300,7 +276,7 @@ func Serve(ctx context.Context, dir string, onClaim func(), observe func(context
 	if err != nil {
 		return err
 	}
-	srv := &http.Server{Handler: Handler(dir, onClaim, observe), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 15 * time.Second, MaxHeaderBytes: 8 << 10, TLSConfig: liveTLSConfig(dir, cert), BaseContext: func(net.Listener) context.Context { return ctx }}
+	srv := &http.Server{Handler: Handler(dir, onClaim), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 15 * time.Second, MaxHeaderBytes: 8 << 10, TLSConfig: liveTLSConfig(dir, cert)}
 	done := make(chan error, 1)
 	go func() { done <- srv.ServeTLS(listener, "", "") }()
 	select {

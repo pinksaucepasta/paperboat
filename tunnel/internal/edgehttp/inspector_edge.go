@@ -6,12 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
@@ -31,7 +31,6 @@ type InspectorAuthority interface {
 }
 
 type InspectorEdgeAccess struct {
-	OnFailure       func(context.Context, error)
 	Authority       InspectorAuthority
 	Carriers        *DataCarrierRouteRegistry
 	PreviewCarriers *DataCarrierPreviewRegistry
@@ -97,13 +96,12 @@ func (a *InspectorEdgeAccess) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Inspector authorization unavailable", http.StatusForbidden)
 		return
 	}
-	requestID := "request_" + uuid.NewString()
+	requestID := fmt.Sprintf("inspector-%d", time.Now().UnixNano())
 	if a.RequestID != nil {
 		requestID = a.RequestID()
 	}
 	stream, err := a.openInspectorStream(ctx, access, requestID)
 	if err != nil {
-		a.observe(ctx, err)
 		http.Error(w, "Inspector owner is unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -123,31 +121,23 @@ func (a *InspectorEdgeAccess) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		out.Body = http.NoBody
 	}
 	if err := out.Write(stream); err != nil {
-		a.observe(ctx, err)
 		http.Error(w, "Inspector owner is unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	response, err := http.ReadResponse(bufio.NewReader(io.LimitReader(stream, inspectorEdgeReplyLimit+64<<10)), out)
 	if err != nil {
-		a.observe(ctx, err)
 		http.Error(w, "Inspector owner is unavailable", http.StatusBadGateway)
 		return
 	}
 	defer response.Body.Close()
 	payload, err := io.ReadAll(io.LimitReader(response.Body, inspectorEdgeReplyLimit+1))
 	if err != nil || len(payload) > inspectorEdgeReplyLimit {
-		if err == nil {
-			err = errInspectorResponseLimit
-		}
-		a.observe(ctx, err)
 		http.Error(w, "Inspector response is too large", http.StatusBadGateway)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(response.StatusCode)
-	if _, err := w.Write(payload); err != nil {
-		a.observe(ctx, err)
-	}
+	_, _ = w.Write(payload)
 }
 
 func inspectorRequestSelectors(w http.ResponseWriter, r *http.Request) (inspectorSelectors, []byte, error) {
@@ -207,11 +197,11 @@ func (r *DataCarrierRouteRegistry) openInspectorStream(ctx context.Context, carr
 
 func (r *DataCarrierPreviewRegistry) openInspectorStream(ctx context.Context, access control.InspectorAccess, requestID string) (io.ReadWriteCloser, error) {
 	carrier := access.Carrier
-	if r == nil || ctx == nil || connectorprotocol.ValidateIdentifier(requestID) != nil || carrier.LeaseGeneration == 0 || carrier.AttachmentGeneration == 0 || carrier.AssignmentGeneration != carrier.AttachmentGeneration || carrier.OwnerMachineID == "" {
+	if r == nil || ctx == nil || connectorprotocol.ValidateIdentifier(requestID) != nil || carrier.LeaseGeneration == 0 || carrier.AttachmentGeneration == 0 || carrier.AssignmentGeneration != carrier.AttachmentGeneration || carrier.OwnerDeviceID == "" {
 		return nil, ErrDataCarrierPreviewRegistryInvalid
 	}
 	route, ok := r.Route(carrier.RouteID)
-	if !ok || route.Server == nil || route.PreviewID != access.ResourceID || route.OperationID != carrier.AssignmentID || route.OwnerMachineID != carrier.OwnerMachineID || route.OwnerMachineID != access.MachineID || route.LeaseGeneration != carrier.LeaseGeneration || route.AttachmentGeneration != carrier.AttachmentGeneration || route.Revision != carrier.RouteGeneration || route.ConfigContentHash != carrier.ConfigContentHash || route.EdgeNodeID != carrier.EdgeNodeID || route.EdgeProcessEpoch != carrier.EdgeProcessEpoch || !route.ExpiresAt.After(time.Now().UTC()) {
+	if !ok || route.Server == nil || route.PreviewID != access.ResourceID || route.OperationID != carrier.AssignmentID || route.OwnerDeviceID != carrier.OwnerDeviceID || route.OwnerDeviceID != access.MachineID || route.LeaseGeneration != carrier.LeaseGeneration || route.AttachmentGeneration != carrier.AttachmentGeneration || route.Revision != carrier.RouteGeneration || route.ConfigContentHash != carrier.ConfigContentHash || route.EdgeNodeID != carrier.EdgeNodeID || route.EdgeProcessEpoch != carrier.EdgeProcessEpoch || !route.ExpiresAt.After(time.Now().UTC()) {
 		return nil, ErrDataCarrierPreviewRegistryStale
 	}
 	identity := route.Server.Identity()
@@ -224,12 +214,4 @@ func (r *DataCarrierPreviewRegistry) openInspectorStream(ctx context.Context, ac
 		return nil, errors.Join(ErrDataCarrierRouteTransport, err)
 	}
 	return stream, nil
-}
-
-var errInspectorResponseLimit = errors.New("inspector response exceeded its bound")
-
-func (a *InspectorEdgeAccess) observe(ctx context.Context, err error) {
-	if err != nil && a.OnFailure != nil && !requestErrorLeaves(err, func(leaf error) bool { return leaf == context.Canceled }, true) {
-		a.OnFailure(ctx, err)
-	}
 }

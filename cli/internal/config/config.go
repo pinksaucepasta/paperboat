@@ -252,7 +252,7 @@ func DefaultPath() (string, error) {
 	}
 	path, err := userpaths.Config("paperboat/config.json")
 	if err != nil {
-		return "", fmt.Errorf("resolve user config dir: %w", err)
+		return "", safeConfigCause("user config location could not be resolved", err)
 	}
 	return path, nil
 }
@@ -271,13 +271,13 @@ func Load(path string) (*Config, error) {
 	cfg := &Config{path: path}
 	data, err := os.ReadFile(path)
 	switch {
-	case os.IsNotExist(err):
+	case credentialAbsenceOnly(err):
 		// No file yet: fall through with defaults applied below.
 	case err != nil:
-		return nil, fmt.Errorf("read config %s: %w", path, err)
+		return nil, safeConfigCause("config file could not be read", err)
 	default:
 		if err := json.Unmarshal(data, cfg); err != nil {
-			return nil, fmt.Errorf("parse config %s: %w", path, err)
+			return nil, safeConfigCause("config file is invalid", err)
 		}
 		cfg.path = path
 		var raw struct {
@@ -576,15 +576,15 @@ func (c *Config) Save() error {
 		c.path = p
 	}
 	if err := os.MkdirAll(filepath.Dir(c.path), 0o700); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
+		return safeConfigCause("config directory could not be created", err)
 	}
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
-		return fmt.Errorf("encode config: %w", err)
+		return safeConfigCause("config file could not be encoded", err)
 	}
 	data = append(data, '\n')
 	if err := atomicfile.Write(c.path, data, atomicfile.CurrentOwnerOptions(0o600)); err != nil {
-		return fmt.Errorf("replace config %s: %w", c.path, err)
+		return safeConfigCause("config file could not be stored", err)
 	}
 	return nil
 }
@@ -594,8 +594,11 @@ func (c *Config) Save() error {
 func NormalizeServerURL(value string) (string, error) {
 	raw := strings.TrimSpace(value)
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return "", fmt.Errorf("invalid Paperboat server URL %q", value)
+	if err != nil {
+		return "", safeConfigCause("invalid Paperboat server URL", err)
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return "", errorsNewServerURL()
 	}
 	if u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" && u.Path != "/" {
 		return "", errorsNewServerURL()

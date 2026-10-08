@@ -4,8 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -47,8 +45,8 @@ func (s ProfileStore) WithBrowserLogin(issuer string, fn func(*BrowserLoginState
 	ref := "browser-login-v1-" + profileKey(normalized+"\x00"+filepath.Clean(s.Path))
 	var state BrowserLoginState
 	encoded, err := s.Secrets.Get(ref)
-	if err != nil && !errors.Is(err, ErrSecretNotFound) && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("load pending login: %w", err)
+	if err != nil && !credentialAbsenceOnly(err) {
+		return safeConfigCause("pending login state could not be loaded", err)
 	}
 	if err == nil {
 		if len(encoded) > 4<<10 {
@@ -56,11 +54,14 @@ func (s ProfileStore) WithBrowserLogin(issuer string, fn func(*BrowserLoginState
 		}
 		decoder := json.NewDecoder(strings.NewReader(encoded))
 		decoder.DisallowUnknownFields()
-		if decoder.Decode(&state) != nil {
-			return errors.New("pending login is invalid")
+		if err := decoder.Decode(&state); err != nil {
+			return safeConfigCause("pending login is invalid", err)
 		}
 		b, e := json.Marshal(state)
-		if e != nil || string(b) != encoded {
+		if e != nil {
+			return safeConfigCause("pending login state could not be validated", e)
+		}
+		if string(b) != encoded {
 			return errors.New("pending login is invalid")
 		}
 		if err = validateBrowserLogin(state, normalized); err != nil {
@@ -70,28 +71,35 @@ func (s ProfileStore) WithBrowserLogin(issuer string, fn func(*BrowserLoginState
 	save := func() error {
 		if state == (BrowserLoginState{}) {
 			e := s.Secrets.Delete(ref)
-			if errors.Is(e, ErrSecretNotFound) || errors.Is(e, os.ErrNotExist) {
+			if e == nil || credentialAbsenceOnly(e) {
 				return nil
 			}
-			return e
+			return safeConfigCause("pending login state could not be removed", e)
 		}
 		if err := validateBrowserLogin(state, normalized); err != nil {
 			return err
 		}
 		b, err := json.Marshal(state)
 		if err != nil {
-			return err
+			return safeConfigCause("pending login state could not be encoded", err)
 		}
 		if len(b) > 4<<10 {
 			return errors.New("pending login exceeds storage limit")
 		}
-		return s.Secrets.Set(ref, string(b))
+		if err := s.Secrets.Set(ref, string(b)); err != nil {
+			return safeConfigCause("pending login state could not be stored", err)
+		}
+		return nil
 	}
 	return fn(&state, save)
 }
 func validateBrowserLogin(s BrowserLoginState, issuer string) error {
 	code, err := base64.RawURLEncoding.Strict().DecodeString(s.DeviceCode)
-	if err != nil || len(code) != 32 || base64.RawURLEncoding.EncodeToString(code) != s.DeviceCode || s.Version != 1 || s.Issuer != issuer || s.ExpiresAt.IsZero() || s.Interval < 1 || s.Interval > 60 || len(s.ApprovalURL) > 2048 {
+	if err != nil {
+		return safeConfigCause("pending login is invalid", err)
+	}
+	defer clear(code)
+	if len(code) != 32 || base64.RawURLEncoding.EncodeToString(code) != s.DeviceCode || s.Version != 1 || s.Issuer != issuer || s.ExpiresAt.IsZero() || s.Interval < 1 || s.Interval > 60 || len(s.ApprovalURL) > 2048 {
 		return errors.New("pending login is invalid")
 	}
 	if (s.Profile == nil) != (s.Credential == nil) {

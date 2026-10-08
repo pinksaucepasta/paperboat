@@ -89,6 +89,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb env grants sync](pb_env_grants_sync.md) | Accept pending team grants into this account's encrypted vault |
 | [pb env host](pb_env_host.md) | Manage encrypted host ENV projections |
 | [pb env host provision](pb_env_host_provision.md) | Provision an explicit encrypted ENV selection to a host |
+| [pb env host show](pb_env_host_show.md) | Show published ENV delivery and observed application on a host |
 | [pb env list](pb_env_list.md) | List configured environment-variable metadata |
 | [pb env rotate](pb_env_rotate.md) | Rotate personal ENV scope keys while preserving values |
 | [pb env rotate cancel](pb_env_rotate_cancel.md) | Cancel an uncommitted personal ENV key rotation |

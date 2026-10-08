@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
 	"net"
 	"net/http"
 	"strconv"
@@ -15,7 +14,6 @@ import (
 var ErrHTTPServerInvalid = errors.New("private HTTP server configuration is invalid")
 
 type HTTPServerSpec struct {
-	Reporter          *reporting.Reporter
 	Address           string
 	Handler           http.Handler
 	ReadHeaderTimeout time.Duration
@@ -66,13 +64,7 @@ func validateHTTPServerSpec(spec HTTPServerSpec) error {
 	return nil
 }
 
-func (s *HTTPServer) Start(ctx context.Context) error {
-	if ctx == nil {
-		return ErrHTTPServerInvalid
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
+func (s *HTTPServer) Start(context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.server != nil || s.closed {
@@ -91,7 +83,7 @@ func (s *HTTPServer) Start(ctx context.Context) error {
 		listener = wrapped
 	}
 	s.listener = listener
-	s.server = &http.Server{Handler: httpDiagnosticHandler(ctx, s.spec.Reporter, s.spec.Handler), ErrorLog: httpDiagnosticLogger(ctx, s.spec.Reporter), ReadHeaderTimeout: s.spec.ReadHeaderTimeout, IdleTimeout: s.spec.IdleTimeout, MaxHeaderBytes: s.spec.MaxHeaderBytes, TLSConfig: s.spec.TLSConfig}
+	s.server = &http.Server{Handler: s.spec.Handler, ReadHeaderTimeout: s.spec.ReadHeaderTimeout, IdleTimeout: s.spec.IdleTimeout, MaxHeaderBytes: s.spec.MaxHeaderBytes, TLSConfig: s.spec.TLSConfig}
 	s.done = make(chan error, 1)
 	go func() {
 		var err error

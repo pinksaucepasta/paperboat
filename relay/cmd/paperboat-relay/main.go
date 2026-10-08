@@ -11,8 +11,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
-	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
@@ -36,10 +34,6 @@ import (
 var version = "development"
 
 func run(reporters ...*reporting.Reporter) error {
-	return runContext(context.Background(), reporters...)
-}
-
-func runContext(processCtx context.Context, reporters ...*reporting.Reporter) error {
 	var reporter *reporting.Reporter
 	if len(reporters) > 0 {
 		reporter = reporters[0]
@@ -54,34 +48,22 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 		}
 		os.Args = append([]string{os.Args[0]}, generated...)
 	}
-	fs := flag.NewFlagSet("paperboat-relay", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	listen := fs.String("listen", "", "UDP listen address")
-	wssListen := fs.String("wss-listen", "", "WSS/TCP listen address")
-	cert := fs.String("tls-cert", "", "TLS certificate file")
-	private := fs.String("tls-key", "", "TLS private key file")
-	keys := fs.String("jwks", "", "trusted Paperboat issuer JWKS file")
-	issuer := fs.String("issuer", "", "Paperboat issuer")
-	node := fs.String("node-id", "", "registered relay node ID")
-	generation := fs.Uint64("node-generation", 0, "registered node generation")
-	controlURL := fs.String("control-url", "", "authenticated control-plane HTTPS base URL")
-	controlCA := fs.String("control-ca", "", "optional control-plane CA bundle")
-	controlCredential := fs.String("control-credential-file", "", "control-plane credential file")
-	nodeState := fs.String("node-state", "", "durable node startup state file")
-	servicePath := fs.String("peer-relay-service", "", "registered public service descriptor JSON file")
-	serviceKeyPath := fs.String("peer-relay-disco-key", "", "private service discovery key file (rawurl base64)")
-	serviceAddresses := fs.String("peer-relay-addresses", "", "comma-separated advertised UDP relay IP:port addresses")
-	if err := fs.Parse(os.Args[1:]); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			fs.SetOutput(os.Stdout)
-			fs.PrintDefaults()
-			return nil
-		}
-		return err
-	}
-	if fs.NArg() != 0 {
-		return errors.New("unexpected relay arguments")
-	}
+	listen := flag.String("listen", "", "UDP listen address")
+	wssListen := flag.String("wss-listen", "", "WSS/TCP listen address")
+	cert := flag.String("tls-cert", "", "TLS certificate file")
+	private := flag.String("tls-key", "", "TLS private key file")
+	keys := flag.String("jwks", "", "trusted Paperboat issuer JWKS file")
+	issuer := flag.String("issuer", "", "Paperboat issuer")
+	node := flag.String("node-id", "", "registered relay node ID")
+	generation := flag.Uint64("node-generation", 0, "registered node generation")
+	controlURL := flag.String("control-url", "", "authenticated control-plane HTTPS base URL")
+	controlCA := flag.String("control-ca", "", "optional control-plane CA bundle")
+	controlCredential := flag.String("control-credential-file", "", "control-plane credential file")
+	nodeState := flag.String("node-state", "", "durable node startup state file")
+	servicePath := flag.String("peer-relay-service", "", "registered public service descriptor JSON file")
+	serviceKeyPath := flag.String("peer-relay-disco-key", "", "private service discovery key file (rawurl base64)")
+	serviceAddresses := flag.String("peer-relay-addresses", "", "comma-separated advertised UDP relay IP:port addresses")
+	flag.Parse()
 	if *listen == "" || *wssListen == "" || *keys == "" {
 		return errors.New("DERP/QUIC and WSS listen addresses and trusted JWKS are required")
 	}
@@ -94,13 +76,10 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 	}
 	pair, err := tls.LoadX509KeyPair(*cert, *private)
 	if err != nil {
-		return serviceFailure{error: err, definition: "service_build"}
+		return errors.New("cannot load relay TLS certificate and key")
 	}
 	raw, err := os.ReadFile(*keys)
-	if err != nil {
-		return serviceFailure{error: err, definition: "service_build"}
-	}
-	if len(raw) > 128<<10 {
+	if err != nil || len(raw) > 128<<10 {
 		return errors.New("cannot read bounded issuer JWKS")
 	}
 	var jwks struct {
@@ -118,21 +97,18 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 		trusted[k.Kid] = ed25519.PublicKey(b)
 	}
 	credentialInfo, err := os.Stat(*controlCredential)
-	if err != nil {
-		return serviceFailure{error: err, definition: "service_build"}
-	}
-	if credentialInfo.Size() > 4096 || credentialInfo.Mode().Perm()&0077 != 0 {
+	if err != nil || credentialInfo.Size() > 4096 || credentialInfo.Mode().Perm()&0077 != 0 {
 		return errors.New("cannot read private control credential file")
 	}
 	credential, err := os.ReadFile(*controlCredential)
 	if err != nil {
-		return serviceFailure{error: err, definition: "service_build"}
+		return errors.New("cannot read private control credential file")
 	}
 	var controlHTTP *http.Client
 	if *controlCA != "" {
 		raw, e := os.ReadFile(*controlCA)
 		if e != nil {
-			return serviceFailure{error: e, definition: "service_build"}
+			return errors.New("cannot read control CA")
 		}
 		roots, e := x509.SystemCertPool()
 		if e != nil {
@@ -147,18 +123,16 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 	if reporter != nil {
 		controlTrace = reporter.ControlTrace
 	}
-	control, err := nodelifecycle.New(nodelifecycle.Config{URL: *controlURL, Credential: strings.TrimSpace(string(credential)), NodeID: *node, ExpectedGeneration: *generation, StatePath: *nodeState, HTTP: controlHTTP, ControlTrace: controlTrace, ControlFailure: func(ctx context.Context, reference string, err error) {
-		reporter.ObserveFailure(reporting.WithSupportReference(ctx, reference), "control_request", err)
-	}})
+	control, err := nodelifecycle.New(nodelifecycle.Config{URL: *controlURL, Credential: strings.TrimSpace(string(credential)), NodeID: *node, ExpectedGeneration: *generation, StatePath: *nodeState, HTTP: controlHTTP, ControlTrace: controlTrace})
 	if err != nil {
 		return err
 	}
 	defer control.Close()
-	startup, stopStartup := context.WithTimeout(processCtx, 5*time.Second)
+	startup, stopStartup := context.WithTimeout(context.Background(), 5*time.Second)
 	lease, err := control.Start(startup)
 	stopStartup()
 	if err != nil {
-		return serviceFailure{error: err, definition: "service_start"}
+		return err
 	}
 	server, err := derpquic.NewServer(derpquic.Verifier{Issuer: *issuer, NodeID: *node, NodeGeneration: lease.Generation, ProcessEpoch: lease.ProcessEpoch, Keys: trusted})
 	if err != nil {
@@ -173,10 +147,7 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 			return errors.New("peer relay requires its registered descriptor, discovery key and UDP addresses")
 		}
 		raw, e := os.ReadFile(*servicePath)
-		if e != nil {
-			return serviceFailure{error: e, definition: "service_build"}
-		}
-		if len(raw) > 4096 {
+		if e != nil || len(raw) > 4096 {
 			return errors.New("cannot read peer relay descriptor")
 		}
 		var descriptor derpquic.ServiceDescriptor
@@ -184,10 +155,7 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 			return errors.New("invalid peer relay descriptor")
 		}
 		encoded, e := os.ReadFile(*serviceKeyPath)
-		if e != nil {
-			return serviceFailure{error: e, definition: "service_build"}
-		}
-		if len(encoded) > 128 {
+		if e != nil || len(encoded) > 128 {
 			return errors.New("cannot read peer relay discovery key")
 		}
 		private, e := base64.RawURLEncoding.Strict().DecodeString(strings.TrimSpace(string(encoded)))
@@ -217,24 +185,24 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 	}
 	socket, err := net.ListenPacket("udp", *listen)
 	if err != nil {
-		return serviceFailure{error: fmt.Errorf("bind relay UDP listener: %w", err), definition: "service_start"}
+		return errors.New("cannot bind relay UDP listener")
 	}
 	defer socket.Close()
 	tcp, err := net.Listen("tcp", *wssListen)
 	if err != nil {
-		return serviceFailure{error: fmt.Errorf("bind relay WSS listener: %w", err), definition: "service_start"}
+		return errors.New("cannot bind relay WSS listener")
 	}
 	defer tcp.Close()
 	wssTLS := &tls.Config{Certificates: []tls.Certificate{pair}, ClientAuth: tls.RequestClientCert, MinVersion: tls.VersionTLS12}
 	httpServer := &http.Server{Handler: server.WSSHandler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 45 * time.Second, MaxHeaderBytes: 16 << 10}
-	ctx, cancel := context.WithCancel(processCtx)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	// The operator-approved WSS TCP port also serves STUN over UDP. This
 	// separate socket lets magicsock discover public endpoints without making
 	// QUIC packet handling depend on unauthenticated STUN traffic.
 	stun := stunserver.New(ctx)
 	if err := stun.Listen(*wssListen); err != nil {
-		return serviceFailure{error: fmt.Errorf("bind relay STUN listener: %w", err), definition: "service_start"}
+		return errors.New("cannot bind relay STUN listener")
 	}
 	var metricsDone chan struct{}
 	if reporter != nil {
@@ -299,39 +267,26 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 	go func() { errs <- stun.Serve() }()
 	controlDone := make(chan struct{})
 	go func() { defer close(controlDone); errs <- control.Run(ctx, server) }()
-	failureDefinition := "service_run"
-	err = waitReady(ctx, server.Ready, errs)
-	if err != nil {
-		failureDefinition = "service_start"
-	}
-	if err == nil {
-		serviceEvent(ctx, reporter, "ready", 0)
-		err = <-errs
-	}
+	err = <-errs
 	wasCanceled := ctx.Err() != nil
 	cancel()
 	<-controlDone
 	server.Drain(time.Now())
-	observe, stopObserve := context.WithTimeout(context.WithoutCancel(processCtx), time.Second)
+	observe, stopObserve := context.WithTimeout(context.Background(), time.Second)
 	_ = control.Observe(observe, server, true)
 	stopObserve()
 	server.Close()
-	shutdown, stopShutdown := context.WithTimeout(context.WithoutCancel(processCtx), 5*time.Second)
+	shutdown, stopShutdown := context.WithTimeout(context.Background(), 5*time.Second)
 	_ = httpServer.Shutdown(shutdown)
 	stopShutdown()
 	server.Wait()
 	if wasCanceled || errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
-	return serviceFailure{error: err, definition: failureDefinition}
+	return serviceFailure{err}
 }
 
-type serviceFailure struct {
-	error
-	definition string
-}
-
-func (e serviceFailure) Unwrap() error { return e.error }
+type serviceFailure struct{ error }
 
 func main() {
 	reporter, err := reporting.New("paperboat-relay")
@@ -339,129 +294,42 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	ctx := reporting.WithSupportReference(context.Background(), reporting.Reference())
-	code := executeContext(ctx, reporter)
+	code := execute(reporter)
 	reporter.Close()
-	if len(os.Args) < 2 || os.Args[1] != "version" && os.Args[1] != "--version" {
-		logReportingShutdown(ctx, reporter)
-	}
 	os.Exit(code)
 }
 
-func execute(reporter *reporting.Reporter) int {
-	return executeContext(reporting.WithSupportReference(context.Background(), reporting.Reference()), reporter)
-}
-
-func executeContext(ctx context.Context, reporter *reporting.Reporter) (code int) {
+func execute(reporter *reporting.Reporter) (code int) {
 	started := time.Now()
 	defer func() {
-		if recovered := recover(); recovered != nil {
-			fault := reporter.CaptureFailure(ctx, "process_panic", recoveredPanic{})
-			if fault.CorrelationID != "" {
-				fmt.Fprintf(os.Stderr, "paperboat-relay stopped during %s (%s); support reference %s\n", fault.Stage, fault.Cause, fault.CorrelationID)
-			}
+		if recover() != nil {
+			reference := reportUnexpected(reporter, "panic")
+			reporter.Observe(context.Background(), "service_lifecycle", "failed", "internal", reference, time.Since(started))
 			code = 2
 		}
 	}()
-	if err := runContext(ctx, reporter); err != nil {
-		failure := serviceFailure{error: err, definition: "service_config"}
-		var knownFailure serviceFailure
-		if errors.As(err, &knownFailure) {
-			failure = knownFailure
-			if failure.definition == "" {
-				failure.definition = "service_run"
-			}
-		}
-		fault := reporter.CaptureFailure(ctx, failure.definition, failure.error)
-		if fault.CorrelationID != "" {
-			fmt.Fprintf(os.Stderr, "paperboat-relay stopped during %s (%s); support reference %s\n", fault.Stage, fault.Cause, fault.CorrelationID)
+	if err := run(reporter); err != nil {
+		var failure serviceFailure
+		if errors.As(err, &failure) {
+			reference := reportUnexpected(reporter, "service_run")
+			reporter.Observe(context.Background(), "service_lifecycle", "failed", "internal", reference, time.Since(started))
 		} else {
-			fmt.Fprintf(os.Stderr, "paperboat-relay stopped during %s (%s); support reference unavailable\n", failureStage(failure.definition), reporting.SafeFailureCause(failure.error))
+			reporter.Observe(context.Background(), "service_lifecycle", "rejected", "invalid", "", time.Since(started))
+			fmt.Fprintln(os.Stderr, err)
 		}
 		return 1
 	}
-	if len(os.Args) != 2 || os.Args[1] != "version" && os.Args[1] != "--version" {
-		serviceEvent(ctx, reporter, "shutdown", time.Since(started))
-	}
+	reporter.Observe(context.Background(), "service_lifecycle", "success", "shutdown", "", time.Since(started))
 	return 0
 }
 
-func failureStage(definition string) string {
-	switch definition {
-	case "service_config", "service_build":
-		return "configure"
-	case "service_start":
-		return "startup"
-	case "service_run":
-		return "serve"
-	default:
-		return "unknown"
-	}
-}
-
-type recoveredPanic struct{}
-
-func (recoveredPanic) Error() string { return "panic" }
-func (recoveredPanic) processPanic() {}
-
-// SDK drain is local completion of export attempts; receipt remains unconfirmed.
-func logReportingShutdown(ctx context.Context, reporter *reporting.Reporter) {
-	level := slog.LevelInfo
-	if reporter.FlushStatus() == "timed_out" || reporter.SDKSubmissionsDropped() != 0 || reporter.SDKHTTPFailures() != 0 {
-		level = slog.LevelWarn
-	}
-	severity := "info"
-	if level == slog.LevelWarn {
-		severity = "warning"
-	}
-	reference := reporting.SupportReference(ctx)
-	slog.New(slog.NewJSONHandler(os.Stderr, nil)).Log(ctx, level, "reporting_shutdown",
-		"schema", "paperboat.edge_event.v1", "at", time.Now().UTC(), "severity", severity, "name", "reporting_shutdown", "outcome", "state_change", "component", "paperboat-relay",
-		"operation", "service_lifecycle", "stage", "shutdown", "code", "telemetry_shutdown",
-		"support_reference", reference, "correlation_id", reference,
-		"flush_status", reporter.FlushStatus(), "sdk_http_failures", reporter.SDKHTTPFailures(),
-		"sdk_submissions_dropped", reporter.SDKSubmissionsDropped(), "delivery", "unconfirmed")
-}
-
-// serviceEvent owns the finite process lifecycle fields and their common reference.
-func serviceEvent(ctx context.Context, reporter *reporting.Reporter, code string, duration time.Duration) {
-	if code != "ready" && code != "shutdown" {
-		return
-	}
-	reference := reporting.SupportReference(ctx)
+func reportUnexpected(reporter *reporting.Reporter, kind string) string {
+	reference := reporting.Reference()
 	if reference == "" {
-		reference = reporting.Reference()
+		fmt.Fprintln(os.Stderr, "paperboat-relay stopped unexpectedly")
+		return ""
 	}
-	slog.New(slog.NewJSONHandler(os.Stderr, nil)).InfoContext(ctx, "relay_service_lifecycle",
-		"schema", "paperboat.edge_event.v1", "at", time.Now().UTC(), "severity", "info",
-		"component", "paperboat-relay", "operation", "service_lifecycle", "stage", "serve",
-		"name", "relay_service_lifecycle", "code", code, "outcome", "success",
-		"support_reference", reference, "correlation_id", reference)
-	reporter.Observe(ctx, "service_lifecycle", "success", code, reference, duration)
-}
-
-func waitReady(ctx context.Context, ready func() bool, failures <-chan error) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case err := <-failures:
-			return err
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		if ready() {
-			return nil
-		}
-		select {
-		case err := <-failures:
-			return err
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-		}
-	}
+	reporter.Capture(reference, kind, 2)
+	fmt.Fprintf(os.Stderr, "paperboat-relay stopped unexpectedly; support reference %s\n", reference)
+	return reference
 }

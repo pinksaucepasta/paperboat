@@ -158,7 +158,7 @@ func (s *Server) tryControlService(p *peerConn, msg packet) bool {
 		s.dropped.Add(1)
 		return true
 	}
-	ctx, cancel := context.WithTimeout(p.context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(p.conn.Context(), 5*time.Second)
 	authorization := new(controlLease)
 	reply, err := service.handle(ctx, ControlRequest{server: s, source: p, Payload: msg.data, authorization: authorization})
 	cancel()

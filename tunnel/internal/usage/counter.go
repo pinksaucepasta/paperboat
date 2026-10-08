@@ -267,14 +267,6 @@ func (q *Queue) Ack(operationID string) bool {
 		return false
 	}
 	delete(q.pending, operationID)
-	for index, id := range q.order {
-		if id == operationID {
-			copy(q.order[index:], q.order[index+1:])
-			q.order[len(q.order)-1] = ""
-			q.order = q.order[:len(q.order)-1]
-			break
-		}
-	}
 	q.bytes -= len(report.Payload)
 	return true
 }

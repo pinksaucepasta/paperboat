@@ -28,20 +28,18 @@ type SharedTLSListener struct {
 	closeOnce              sync.Once
 	mu                     sync.Mutex
 	acceptErr              error
-	onFailure              func(context.Context, string, error)
-	closeErr               error
 }
 
 func NewSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, routes *DataCarrierRouteRegistry, httpsHostname func(string) bool, maximumConnections int, infrastructureHostname string) (*SharedTLSListener, error) {
 	if listener == nil || authority == nil || routes == nil || httpsHostname == nil || maximumConnections < 1 || infrastructureHostname != "" && !validSNIHostname(infrastructureHostname) && net.ParseIP(infrastructureHostname) == nil {
 		return nil, errors.New("shared TLS listener configuration is invalid")
 	}
-	return newSharedTLSListener(listener, authority, routes, httpsHostname, make(chan struct{}, maximumConnections), infrastructureHostname, nil), nil
+	return newSharedTLSListener(listener, authority, routes, httpsHostname, make(chan struct{}, maximumConnections), infrastructureHostname), nil
 }
 
-func newSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, routes *DataCarrierRouteRegistry, httpsHostname func(string) bool, slots chan struct{}, infrastructureHostname string, observe func(context.Context, string, error)) *SharedTLSListener {
+func newSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, routes *DataCarrierRouteRegistry, httpsHostname func(string) bool, slots chan struct{}, infrastructureHostname string) *SharedTLSListener {
 	ctx, cancel := context.WithCancel(context.Background())
-	l := &SharedTLSListener{Listener: listener, authority: authority, routes: routes, httpsHostname: httpsHostname, infrastructureHostname: infrastructureHostname, ctx: ctx, cancel: cancel, ready: make(chan net.Conn), slots: slots, done: make(chan struct{}), onFailure: observe}
+	l := &SharedTLSListener{Listener: listener, authority: authority, routes: routes, httpsHostname: httpsHostname, infrastructureHostname: infrastructureHostname, ctx: ctx, cancel: cancel, ready: make(chan net.Conn), slots: slots, done: make(chan struct{})}
 	go l.run()
 	return l
 }
@@ -78,7 +76,6 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 	}()
 	replay, host, err := inspectTLSInfrastructureClientHello(l.ctx, conn, l.infrastructureHostname)
 	if err != nil {
-		l.observe("tls_dispatch", err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(l.ctx, 2*time.Second)
@@ -86,7 +83,6 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 	cancel()
 	https := l.httpsHostname(host)
 	if err != nil {
-		l.observe("public_tcp_reconcile", err)
 		// This exact installation name is reserved for HTTPS by server authority.
 		// Keep health/installation verification usable during control outages;
 		// dynamic route names must never fall back when authority is unavailable.
@@ -112,7 +108,7 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 	}
 	if selected != nil {
 		replay.(*replayTLSConn).sharedListener = true
-		l.observe("public_tcp_stream", l.routes.ForwardPublicTCP(l.ctx, replay, *selected, l.authority.ResolveDecision))
+		_ = l.routes.ForwardPublicTCP(l.ctx, replay, *selected, l.authority.ResolveDecision)
 		return
 	}
 	if !https {
@@ -141,13 +137,8 @@ func (l *SharedTLSListener) Accept() (net.Conn, error) {
 }
 
 func (l *SharedTLSListener) Close() error {
-	l.closeOnce.Do(func() { l.cancel(); l.closeErr = l.Listener.Close() })
+	var err error
+	l.closeOnce.Do(func() { l.cancel(); err = l.Listener.Close() })
 	<-l.done
-	return l.closeErr
-}
-
-func (l *SharedTLSListener) observe(phase string, err error) {
-	if err != nil && l.onFailure != nil {
-		l.onFailure(l.ctx, phase, err)
-	}
+	return err
 }

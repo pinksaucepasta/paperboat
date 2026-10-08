@@ -44,16 +44,13 @@ func browserTerminalTLSMessage(record []byte) ([]byte, error) {
 }
 
 func browserTerminalTicket(header http.Header) (string, bool) {
-	return browserOperationTicket(header, browserTerminalSubprotocol)
-}
-func browserOperationTicket(header http.Header, expectedProtocol string) (string, bool) {
 	var ticket string
 	protocol := false
 	for _, field := range header.Values("Sec-WebSocket-Protocol") {
 		for _, raw := range strings.Split(field, ",") {
 			part := strings.TrimSpace(raw)
 			switch {
-			case part == expectedProtocol:
+			case part == browserTerminalSubprotocol:
 				if protocol {
 					return "", false
 				}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdh"
 	"crypto/rand"
@@ -228,6 +229,36 @@ func TestBrowserHostProjectionExplicitSelectionAndAuthority(t *testing.T) {
 	if len(values) != 1 || string(values["SELECTED"]) != "override" {
 		t.Fatal("selection or override contract violated")
 	}
+
+	// A deleted, previously authorized slot remains selected but carries no value.
+	absent := hostSelection{Kind: "personal", Owner: v.Account, Name: "DELETED"}
+	request.Selection = []hostSelection{absent}
+	request.Inventory = []scopeState{base}
+	if _, err = e.run(ctx, request); err == nil {
+		t.Fatal("new absent slot accepted")
+	}
+	host.Selection = []hostSelection{absent}
+	out, err = e.run(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = decode(out.(map[string]any)["envelope"].(string))
+	projection, err = env.ParseHostProjection(raw, protection.WriterPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	absentValues, err := env.OpenHostProjection(ctx, projection, projection.Claims, hostKey.Bytes())
+	if err != nil || len(absentValues) != 0 || len(projection.Claims.Sources) != 1 {
+		t.Fatal("deleted authorized slot was not fenced without a value", err)
+	}
+	if selected := out.(map[string]any)["selection"].([]hostSelection); len(selected) != 1 || selected[0] != absent {
+		t.Fatal("stored selection changed")
+	}
+	request.Inventory = nil
+	if _, err = e.run(ctx, request); err == nil {
+		t.Fatal("missing source document accepted")
+	}
+	request.Inventory = []scopeState{base}
 	host.Bundle.AccountID = "another-account"
 	if _, err = e.run(ctx, request); err == nil {
 		t.Fatal("foreign installation accepted")
@@ -370,5 +401,191 @@ func TestBrowserReservedNameShowsActionableError(t *testing.T) {
 	}
 	if _, err := e.run(context.Background(), request{Action: "set", Vault: v, Kind: "personal", Owner: v.Account, Name: "PB_API_AUDIT", Value: "private"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBrowserStatusPreservesSameAccountPendingPublication(t *testing.T) {
+	ctx := context.Background()
+	e, v := initialized(t)
+	e.clear() // A total-loss reset is initiated while browser keys are locked.
+	defer e.clear()
+	if _, err := e.run(ctx, request{Action: "reset-vault", Vault: v, Password: "replacement password", KeyEpoch: 1}); err != nil {
+		t.Fatal(err)
+	}
+	next := stateFrom(t, e.pendingRaw)
+	status, err := e.run(ctx, request{Action: "status", Vault: vaultState{Account: v.Account}})
+	if err != nil || status.(map[string]any)["unlocked"].(bool) {
+		t.Fatal("locked pending reset incorrectly reports unlocked", err)
+	}
+	if _, err := e.run(ctx, request{Action: "commit", Vault: next}); err != nil {
+		t.Fatal("same-account status erased committed reset keys", err)
+	}
+	if _, err := e.run(ctx, request{Action: "unlock", Vault: next, Password: "replacement password"}); err != nil {
+		t.Fatal(err)
+	}
+	e.clear()
+	if _, err := e.run(ctx, request{Action: "initialize", Vault: vaultState{Issuer: v.Issuer, Account: v.Account}, Password: "initial password"}); err != nil {
+		t.Fatal(err)
+	}
+	next = stateFrom(t, e.pendingRaw)
+	if _, err := e.run(ctx, request{Action: "status", Vault: vaultState{Account: v.Account}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.run(ctx, request{Action: "commit", Vault: next}); err != nil {
+		t.Fatal("same-account status erased initialization keys", err)
+	}
+	e.clear()
+	if _, err := e.run(ctx, request{Action: "initialize", Vault: vaultState{Issuer: v.Issuer, Account: v.Account}, Password: "initial password"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.run(ctx, request{Action: "status", Vault: vaultState{Account: "another-account"}}); err != nil {
+		t.Fatal(err)
+	}
+	if e.pendingKeys != nil || e.pendingRaw != nil || len(e.raw) != 0 {
+		t.Fatal("different-account status retained staged keys")
+	}
+}
+
+func TestBrowserScopeConflictReconciliationVerifiesSignedHeads(t *testing.T) {
+	ctx := context.Background()
+	e, v := initialized(t)
+	defer e.clear()
+	prepare := func(scope *scopeState, value string) scopeState {
+		t.Helper()
+		out, err := e.run(ctx, request{Action: "set", Vault: v, Scope: scope, Kind: "personal", Owner: v.Account, Name: "VALUE", Value: value})
+		if err != nil {
+			t.Fatal(err)
+		}
+		metadata, err := e.run(ctx, request{Action: "scope-candidate", Vault: v, Envelope: out.(map[string]string)["envelope"], Kind: "personal", Owner: v.Account})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return metadata.(scopeState)
+	}
+	first := prepare(nil, "first")
+	candidate := prepare(&first, "candidate")
+	competing := prepare(&first, "competing")
+	check := func(current scopeState, expected string) {
+		t.Helper()
+		out, err := e.run(ctx, request{Action: "scope-reconcile", Vault: v, Candidate: &candidate, Scope: &current, Kind: "personal", Owner: v.Account})
+		if expected == "invalid" {
+			if err == nil {
+				t.Fatal("invalid signed head accepted")
+			}
+			return
+		}
+		if err != nil || out.(map[string]string)["state"] != expected {
+			t.Fatal("incorrect scope reconciliation", expected, err)
+		}
+	}
+	check(candidate, "committed")
+	check(competing, "superseded")
+	check(first, "retained")
+	newer := prepare(&candidate, "newer")
+	check(newer, "superseded")
+	parsed, err := scopeDocument(candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims := parsed.Claims
+	claims.KeyEpoch++
+	claims.Revision = 1
+	claims.Previous = make([]byte, 32)
+	document, err := env.SealVaultScope(ctx, claims, e.keys.PersonalKey, e.keys.WriterSeed, map[string][]byte{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	epoch := candidate
+	epoch.Epoch = claims.KeyEpoch
+	epoch.Revision = 1
+	epoch.DocumentID = digest(document.ID)
+	epoch.Envelope = encoded(document.Raw)
+	check(epoch, "superseded")
+	invalid := competing
+	invalid.Owner = "other-account"
+	check(invalid, "invalid")
+	invalid = competing
+	raw, _ := decode(invalid.Envelope)
+	raw[len(raw)-1] ^= 1
+	invalid.Envelope = encoded(raw)
+	check(invalid, "invalid")
+	claims.Issuer = "https://other.invalid"
+	document, err = env.SealVaultScope(ctx, claims, e.keys.PersonalKey, e.keys.WriterSeed, map[string][]byte{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalid = epoch
+	invalid.DocumentID = digest(document.ID)
+	invalid.Envelope = encoded(document.Raw)
+	check(invalid, "invalid")
+	// Scope reconciliation must never erase a staged vault/key successor.
+	if _, err := e.run(ctx, request{Action: "personal-rotate", Vault: v, KeyEpoch: 1}); err != nil {
+		t.Fatal(err)
+	}
+	pendingRaw := append([]byte(nil), e.pendingRaw...)
+	defer clear(pendingRaw)
+	pendingKeys := e.pendingKeys
+	check(competing, "superseded")
+	if !bytes.Equal(e.pendingRaw, pendingRaw) || e.pendingKeys != pendingKeys {
+		t.Fatal("scope reconciliation changed staged vault/key successor")
+	}
+}
+
+func TestBrowserFirstEmptyProjectionUsesOnlyMachineOverride(t *testing.T) {
+	ctx := context.Background()
+	e, v := initialized(t)
+	defer e.clear()
+	hostKey, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	protection, err := env.PasswordVaultProtection(e.raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := hostState{Bundle: env.ProjectionBundle{AccountID: v.Account, MachineID: "machine-first", InstallationGeneration: 1, HostKeyGeneration: 1, HostPublic: encoded(hostKey.PublicKey().Bytes()), State: "pending"}, Selection: []hostSelection{}}
+	for _, override := range []bool{false, true} {
+		r := request{Action: "host-provision", Vault: v, Host: &host, Machine: "machine-first", Operation: "operation-first", Selection: host.Selection}
+		if override {
+			out, err := e.run(ctx, request{Action: "set", Vault: v, Kind: "personal", Owner: v.Account, Machine: "machine-first", Name: "OVERRIDE", Value: "machine-only"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			metadata, err := e.run(ctx, request{Action: "scope-candidate", Vault: v, Envelope: out.(map[string]string)["envelope"], Kind: "personal", Owner: v.Account, Machine: "machine-first"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.Inventory = []scopeState{metadata.(scopeState)}
+		}
+		out, err := e.run(ctx, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload := out.(map[string]any)
+		raw, err := decode(payload["envelope"].(string))
+		if err != nil {
+			t.Fatal(err)
+		}
+		projection, err := env.ParseHostProjection(raw, protection.WriterPublic)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if projection.Claims.Revision != 1 || projection.Claims.SelectionGeneration != 1 || !bytes.Equal(projection.Claims.Previous, make([]byte, 32)) || len(payload["selection"].([]hostSelection)) != 0 {
+			t.Fatal("first projection changed authorization or cursor")
+		}
+		values, err := env.OpenHostProjection(ctx, projection, projection.Claims, hostKey.Bytes())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if override {
+			if len(values) != 1 || string(values["OVERRIDE"]) != "machine-only" || len(projection.Claims.Sources) != 1 || projection.Claims.Sources[0].MachineID != "machine-first" {
+				t.Fatal("machine override not preserved")
+			}
+		} else if len(values) != 0 || len(projection.Claims.Sources) != 0 {
+			t.Fatal("empty projection auto-selected values")
+		}
+		for _, value := range values {
+			clear(value)
+		}
 	}
 }

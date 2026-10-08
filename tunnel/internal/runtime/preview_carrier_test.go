@@ -265,7 +265,7 @@ func TestPreviewCarrierDetachmentPreservesPreviewOwnerSession(t *testing.T) {
 	now := time.Date(2026, time.August, 30, 12, 0, 0, 0, time.UTC)
 	route := edgehttp.DataCarrierPreviewRoute{
 		PreviewID: "preview_owner", OperationID: "operation_owner",
-		OwnerMachineID: "host_1", OwnerSessionID: "owner_session_preview_1",
+		OwnerDeviceID: "host_1", OwnerSessionID: "owner_session_preview_1",
 		Identity: datacarrier.Identity{
 			AccountID: "account_1", HostID: "host_1", TunnelID: "tunnel_1", ConnectorID: "connector_1",
 			SessionID: "stable_carrier_session_1", ProcessGeneration: 1, Generation: 1,
@@ -273,8 +273,8 @@ func TestPreviewCarrierDetachmentPreservesPreviewOwnerSession(t *testing.T) {
 		LeaseGeneration: 1, RouteID: "route_owner", Revision: 1,
 	}
 	observation := observationFromRoute(route, now, "expired", "lease_expired")
-	if observation.Binding.OwnerMachineID != route.OwnerMachineID || observation.Binding.OwnerSessionID != route.OwnerSessionID {
-		t.Fatalf("observation owner = %s/%s, want %s/%s", observation.Binding.OwnerMachineID, observation.Binding.OwnerSessionID, route.OwnerMachineID, route.OwnerSessionID)
+	if observation.Binding.OwnerDeviceID != route.OwnerDeviceID || observation.Binding.OwnerSessionID != route.OwnerSessionID {
+		t.Fatalf("observation owner = %s/%s, want %s/%s", observation.Binding.OwnerDeviceID, observation.Binding.OwnerSessionID, route.OwnerDeviceID, route.OwnerSessionID)
 	}
 	if observation.Binding.OwnerSessionID == route.Identity.SessionID {
 		t.Fatal("preview owner session was replaced by the stable carrier session")
@@ -576,7 +576,7 @@ func testPreviewCarrierAdmission(previewID, operationID, routeID, hostname strin
 		Schema: "paperboat.preview-tunnel/v1", Kind: "preview_carrier_attachment",
 		Binding: control.PreviewCarrierBinding{
 			AccountID: "account_1", PreviewID: previewID, OperationID: operationID,
-			OwnerMachineID: "host_1", OwnerSessionID: "owner_session_1", HostID: "host_1",
+			OwnerDeviceID: "host_1", OwnerSessionID: "owner_session_1", HostID: "host_1",
 			LeaseGeneration: 1, TunnelID: "tunnel_1", ConnectorID: "connector_1", SessionID: "session_1",
 			ProcessGeneration: 1, ConfigGeneration: 1, RouteID: routeID, RouteGeneration: 1,
 			EdgeNodeID: "edge_1", EdgeProcessEpoch: "edge_epoch_1", EdgeCarrierServerSPKISHA256: trust.SPKISHA256, EdgeCarrierServerCertificateChainPEM: trust.CertificateChainPEM, MachineIdentityPublicKey: base64.RawURLEncoding.EncodeToString(publicKey),

@@ -31,7 +31,7 @@ type PrivateAccessRequest struct {
 	ResourceID             string    `json:"resource_id"`
 	RouteID                string    `json:"route_id"`
 	Audience               string    `json:"audience"`
-	MachineID              string    `json:"machine_id"`
+	DeviceID               string    `json:"device_id"`
 	SessionID              string    `json:"session_id"`
 	InstallationGeneration uint64    `json:"installation_generation"`
 	ExpiresAt              time.Time `json:"expires_at"`
@@ -56,7 +56,7 @@ type PrivateAccessRequest struct {
 }
 
 func (r PrivateAccessRequest) Validate(now time.Time) error {
-	for _, value := range []string{r.AccountID, r.ResourceID, r.RouteID, r.Audience, r.MachineID, r.SessionID, r.Nonce, r.CarrierSessionID, r.EdgeNodeID, r.EdgeProcessEpoch, r.IdempotencyKey, r.RequestID, r.CorrelationID} {
+	for _, value := range []string{r.AccountID, r.ResourceID, r.RouteID, r.Audience, r.DeviceID, r.SessionID, r.Nonce, r.CarrierSessionID, r.EdgeNodeID, r.EdgeProcessEpoch, r.IdempotencyKey, r.RequestID, r.CorrelationID} {
 		if ValidateIdentifier(value) != nil {
 			return ErrInvalidInput
 		}

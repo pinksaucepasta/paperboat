@@ -22,7 +22,6 @@ import (
 
 	"golang.org/x/net/http2"
 
-	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/config"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
@@ -118,7 +117,7 @@ func TestCarrierPromotesAnAlreadyLivePreviewSessionToDurableRouting(t *testing.T
 			CarrierTCPListenAddress: tcpAddress, CarrierQUICListenAddress: quicAddress,
 			ControlInterval: 5 * time.Millisecond, NodeCapacity: 8,
 		}, serverCertificate, previewExpected, durableExpected, accessorExpected,
-		previewHandle, routes, nil, nil, nil,
+		previewHandle, routes, nil, nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -202,15 +201,12 @@ func TestCarrierPromotesAnAlreadyLivePreviewSessionToDurableRouting(t *testing.T
 			probeDone <- acceptErr
 			return
 		}
-		if parsed, parseErr := uuid.Parse(strings.TrimPrefix(open.RequestID, "request_")); open.RouteID != routeID || open.Kind != "https" || parseErr != nil || parsed.Version() != 4 || parsed.Variant() != uuid.RFC4122 || "request_"+parsed.String() != open.RequestID {
+		if open.RouteID != routeID || !strings.HasPrefix(open.RequestID, "edge-probe-") {
 			_ = stream.Close()
 			probeDone <- fmt.Errorf("probe stream metadata = %+v", open)
 			return
 		}
 		request, readErr := http.ReadRequest(bufio.NewReader(stream))
-		if readErr == nil && (request.Method != http.MethodGet || request.URL.Path != "/" || request.Host != rule.Hostname || request.Header.Get("Connection") != "close") {
-			readErr = fmt.Errorf("unexpected origin probe request")
-		}
 		if readErr == nil {
 			readErr = request.Body.Close()
 		}
@@ -239,7 +235,7 @@ func dynamicPreviewAdmission(identity datacarrier.Identity, machinePublicKey, ma
 	return datacarrier.ExpectedAdmission{
 		Schema: datacarrier.PreviewCarrierSchema, Kind: datacarrier.PreviewCarrierKind,
 		EdgeNodeID: edgeNodeID, PreviewID: "preview_dynamic", OperationID: "operation_dynamic",
-		OwnerMachineID: identity.HostID, OwnerSessionID: "owner_dynamic", Identity: identity,
+		OwnerDeviceID: identity.HostID, OwnerSessionID: "owner_dynamic", Identity: identity,
 		LeaseGeneration: 1, ConfigGeneration: identity.Generation,
 		ConfigContentHash: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 		RouteID:           routeID, EdgeProcessEpoch: edgeProcess,

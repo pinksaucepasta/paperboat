@@ -52,7 +52,7 @@ func testAuth(t *testing.T, now time.Time, generation uint64) (AuthRequest, ed25
 }
 
 func testConfigPayload(generation uint64, hostname string) []byte {
-	return []byte(fmt.Sprintf(`{"schema":"paperboat.preview-tunnel/v1","kind":"tunnel_config_snapshot","tunnel_id":"tunnel_1","generation":%d,"name":"demo","desired_state":"active","access_mode":"public","stable_endpoint":"https://123e4567-e89b-42d3-a456-426614174000.tunnels.example.test","stable_endpoint_id":"endpoint_123e4567-e89b-42d3-a456-426614174000","expires_at":null,"routes":[{"id":"route_1","name":"default","protocol":"http","match_type":"exact","match_hostname":"%s","path_prefix":null,"origin_scheme":"http","origin_address":"127.0.0.1:3000","preserve_host":true,"host_override":null,"tls_verification":"not_applicable","tls_server_name":null,"ca_reference":null,"mtls_credential_reference":null,"connect_timeout_ms":10000,"idle_timeout_ms":90000,"max_concurrent_streams":128,"desired_state":"active"}]}`, generation, hostname))
+	return []byte(fmt.Sprintf(`{"schema":"paperboat.preview-tunnel/v1","kind":"tunnel_config_snapshot","tunnel_id":"tunnel_1","generation":%d,"name":"demo","desired_state":"active","access_mode":"public","stable_endpoint":"https://123e4567-e89b-42d3-a456-426614174000.tunnels.example.test","expires_at":null,"routes":[{"id":"route_1","name":"default","protocol":"http","match_type":"exact","match_hostname":"%s","path_prefix":null,"origin_scheme":"http","origin_address":"127.0.0.1:3000","preserve_host":true,"host_override":null,"tls_verification":"not_applicable","tls_server_name":null,"ca_reference":null,"mtls_credential_reference":null,"connect_timeout_ms":10000,"idle_timeout_ms":90000,"max_concurrent_streams":128,"desired_state":"active"}]}`, generation, hostname))
 }
 
 func TestAuthProofBindsEveryIdentityField(t *testing.T) {
@@ -204,37 +204,5 @@ func TestPublicStreamSnapshotAccessBoundary(t *testing.T) {
 				t.Fatalf("%s accepted %s snapshot", protocol, mode)
 			}
 		}
-	}
-}
-
-type privateProtocolCause struct{ calls int }
-
-func (e *privateProtocolCause) Error() string { e.calls++; return "PRIVATE credential" }
-
-type cyclicProtocolCause struct{}
-
-func (e *cyclicProtocolCause) Error() string { return "PRIVATE" }
-func (e *cyclicProtocolCause) Unwrap() error { return e }
-
-func TestProtocolFailureExportsFiniteLabelsWithoutFormattingCause(t *testing.T) {
-	private := &privateProtocolCause{}
-	failure := &Error{Code: CodeSnapshotRejected, Reason: ReasonSnapshotRejected, Cause: private}
-	if failure.Error() != string(CodeSnapshotRejected) || private.calls != 0 || !errors.Is(failure, private) {
-		t.Fatal("failure formatted or lost original cause")
-	}
-	unknown := &Error{Code: "PRIVATE_code", Reason: "PRIVATE_reason", Cause: private}
-	if unknown.Error() != "connector operation failed" || CodeOf(unknown) != "" || ReasonOf(unknown) != "" || private.calls != 0 {
-		t.Fatal("unowned labels escaped")
-	}
-	if CodeOf(&cyclicProtocolCause{}) != "" || ReasonOf(&cyclicProtocolCause{}) != "" {
-		t.Fatal("cyclic cause classified")
-	}
-	var absent *Error
-	if CodeOf(absent) != "" || absent.Unwrap() != nil {
-		t.Fatal("typed nil classified")
-	}
-	wrapped := fmt.Errorf("wrapper: %w", failure)
-	if CodeOf(wrapped) != CodeSnapshotRejected || ReasonOf(wrapped) != ReasonSnapshotRejected {
-		t.Fatal("owned labels lost")
 	}
 }

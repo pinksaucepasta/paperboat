@@ -3,8 +3,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"net"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -35,21 +33,5 @@ func TestReadinessIsBoundedAndCancellable(t *testing.T) {
 	cancel()
 	if err := (Readiness{Timeout: time.Second, Interval: time.Millisecond, Probe: probe}).Start(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation error = %v", err)
-	}
-}
-
-func TestReadinessTimeoutPreservesOriginalProbeCause(t *testing.T) {
-	cause := &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
-	err := (Readiness{Timeout: 5 * time.Millisecond, Interval: time.Millisecond, Probe: func() error { return cause }}).Start(context.Background())
-	var actual *net.OpError
-	if !errors.Is(err, ErrReadinessTimeout) || !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, syscall.ECONNREFUSED) || !errors.As(err, &actual) || actual != cause {
-		t.Fatalf("lost readiness cause: %T", err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	calls := 0
-	err = (Readiness{Timeout: time.Second, Interval: time.Millisecond, Probe: func() error { calls++; return nil }}).Start(ctx)
-	if !errors.Is(err, context.Canceled) || calls != 0 {
-		t.Fatalf("canceled readiness probed: calls=%d error=%T", calls, err)
 	}
 }

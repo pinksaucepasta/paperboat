@@ -12,7 +12,6 @@ import (
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgehttp"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
 )
 
 var (
@@ -36,7 +35,6 @@ const (
 // successful pull is required to be complete; the control client rejects
 // incomplete or over-limit responses before this worker can commit them.
 type PreviewCarrierWorker struct {
-	reporter     *reporting.Reporter
 	source       control.PreviewCarrierSource
 	expected     *datacarrier.ExpectedAdmissionRegistry
 	registry     *edgehttp.DataCarrierPreviewRegistry
@@ -60,7 +58,6 @@ type PreviewCarrierWorker struct {
 }
 
 type PreviewCarrierWorkerConfig struct {
-	Reporter     *reporting.Reporter
 	Source       control.PreviewCarrierSource
 	Expected     *datacarrier.ExpectedAdmissionRegistry
 	Registry     *edgehttp.DataCarrierPreviewRegistry
@@ -87,7 +84,7 @@ func NewPreviewCarrierWorker(config PreviewCarrierWorkerConfig) (*PreviewCarrier
 	if config.Clock == nil {
 		config.Clock = func() time.Time { return time.Now().UTC() }
 	}
-	return &PreviewCarrierWorker{reporter: config.Reporter, source: config.Source, expected: config.Expected, registry: config.Registry, nodeID: config.NodeID, processEpoch: config.ProcessEpoch, interval: config.Interval, timeout: config.Timeout, now: config.Clock, pending: make(map[string]control.PreviewCarrierDetachment), pendingObservations: make(map[string]control.PreviewCarrierObservation)}, nil
+	return &PreviewCarrierWorker{source: config.Source, expected: config.Expected, registry: config.Registry, nodeID: config.NodeID, processEpoch: config.ProcessEpoch, interval: config.Interval, timeout: config.Timeout, now: config.Clock, pending: make(map[string]control.PreviewCarrierDetachment), pendingObservations: make(map[string]control.PreviewCarrierObservation)}, nil
 }
 
 func (w *PreviewCarrierWorker) Start(ctx context.Context) error {
@@ -131,14 +128,9 @@ func (w *PreviewCarrierWorker) loop(ctx context.Context) {
 	}
 }
 
-func (w *PreviewCarrierWorker) reconcile(parent context.Context) (failure error) {
-	defer func() {
-		if w != nil {
-			observeWorkerFailure(parent, w.reporter, "preview_admission", failure)
-		}
-	}()
+func (w *PreviewCarrierWorker) reconcile(parent context.Context) {
 	if w == nil || parent == nil || parent.Err() != nil {
-		return nil
+		return
 	}
 	ctx, cancel := context.WithTimeout(parent, w.timeout)
 	defer cancel()
@@ -162,36 +154,36 @@ func (w *PreviewCarrierWorker) reconcile(parent context.Context) (failure error)
 	if err != nil {
 		// ErrControlUnavailable includes rollout/temporary network failures. Do
 		// not clear the last-known-good admission set on any failed pull.
-		return err
+		return
 	}
 	expected := make([]datacarrier.ExpectedAdmission, 0, len(admissions))
 	for _, admission := range admissions {
 		value, convertErr := admission.Expected(w.nodeID, now)
 		if convertErr != nil {
-			return convertErr
+			return
 		}
 		expected = append(expected, value)
 	}
 	if err := w.expected.InstallPending(expected, now); err != nil {
-		return err
+		return
 	}
 	if err := w.source.AcknowledgePreviewCarrierAdmissions(ctx, w.nodeID, w.processEpoch, admissions); err != nil {
-		return err
+		return
 	}
 	for index := range expected {
 		expected[index].Admitted = true
 	}
 	if err := w.expected.MarkAdmitted(expected); err != nil {
-		return err
+		return
 	}
 	if err := w.expected.Commit(expected); err != nil {
-		return err
+		return
 	}
 	aliases := make([]edgehttp.DataCarrierPreviewAlias, 0)
 	for _, admission := range admissions {
 		normalized, normalizeErr := admission.Normalize()
 		if normalizeErr != nil {
-			return normalizeErr
+			return
 		}
 		for _, alias := range normalized.Aliases {
 			aliases = append(aliases, edgehttp.DataCarrierPreviewAlias{
@@ -201,12 +193,13 @@ func (w *PreviewCarrierWorker) reconcile(parent context.Context) (failure error)
 		}
 	}
 	if err := w.registry.ReconcilePreviewAliases(aliases); err != nil {
-		return err
+		return
 	}
 	w.detachRemoved(expected, now)
 	w.applyServerDetachments(ctx, detachments)
 	w.expireLocal(now)
-	return errors.Join(w.flushPending(ctx), w.flushPendingObservations(ctx))
+	_ = w.flushPending(ctx)
+	_ = w.flushPendingObservations(ctx)
 }
 
 // expireLocal fails closed when a lease expires while the control plane is
@@ -263,7 +256,7 @@ func (w *PreviewCarrierWorker) applyServerDetachments(ctx context.Context, detac
 	}
 	for _, detachment := range detachments {
 		for _, route := range w.registry.Snapshot() {
-			if route.OperationID != detachment.Binding.OperationID || route.RouteID != detachment.Binding.RouteID || route.Identity.AccountID != detachment.Binding.AccountID || route.Identity.HostID != detachment.Binding.HostID || route.Identity.TunnelID != detachment.Binding.TunnelID || route.Identity.ConnectorID != detachment.Binding.ConnectorID || route.Identity.SessionID != detachment.Binding.SessionID || route.Identity.ProcessGeneration != detachment.Binding.ProcessGeneration || route.Identity.Generation != detachment.Binding.ConfigGeneration || route.Revision != detachment.Binding.RouteGeneration || route.OwnerMachineID != detachment.Binding.OwnerMachineID || route.OwnerSessionID != detachment.Binding.OwnerSessionID || route.AttachmentGeneration >= detachment.AttachmentGeneration {
+			if route.OperationID != detachment.Binding.OperationID || route.RouteID != detachment.Binding.RouteID || route.Identity.AccountID != detachment.Binding.AccountID || route.Identity.HostID != detachment.Binding.HostID || route.Identity.TunnelID != detachment.Binding.TunnelID || route.Identity.ConnectorID != detachment.Binding.ConnectorID || route.Identity.SessionID != detachment.Binding.SessionID || route.Identity.ProcessGeneration != detachment.Binding.ProcessGeneration || route.Identity.Generation != detachment.Binding.ConfigGeneration || route.Revision != detachment.Binding.RouteGeneration || route.OwnerDeviceID != detachment.Binding.OwnerDeviceID || route.OwnerSessionID != detachment.Binding.OwnerSessionID || route.AttachmentGeneration >= detachment.AttachmentGeneration {
 				continue
 			}
 			_ = w.registry.Detach(route.RouteID, route.Identity, route.Revision)
@@ -275,7 +268,6 @@ func (w *PreviewCarrierWorker) applyServerDetachments(ctx context.Context, detac
 		}
 	}
 	if err := w.source.DetachPreviewCarriers(ctx, w.nodeID, w.processEpoch, detachments); err != nil {
-		observeWorkerFailure(ctx, w.reporter, "preview_observation", err)
 		// Keep exact commands for retry. The server endpoint is idempotent and
 		// the next complete snapshot will replay them after a lost response.
 		w.mu.Lock()
@@ -601,11 +593,11 @@ func observationFromAdmission(admission datacarrier.ExpectedAdmission, state, re
 }
 
 func observationFromRoute(route edgehttp.DataCarrierPreviewRoute, observedAt time.Time, state, reason string) control.PreviewCarrierObservation {
-	return control.PreviewCarrierObservation{Schema: controlPreviewCarrierSchema, Kind: controlPreviewCarrierKind, Binding: control.PreviewCarrierBinding{AccountID: route.Identity.AccountID, PreviewID: route.PreviewID, OperationID: route.OperationID, OwnerMachineID: route.OwnerMachineID, OwnerSessionID: route.OwnerSessionID, HostID: route.Identity.HostID, LeaseGeneration: route.LeaseGeneration, TunnelID: route.Identity.TunnelID, ConnectorID: route.Identity.ConnectorID, SessionID: route.Identity.SessionID, ProcessGeneration: route.Identity.ProcessGeneration, ConfigGeneration: route.Identity.Generation, RouteID: route.RouteID, RouteGeneration: route.Revision, EdgeNodeID: route.EdgeNodeID, EdgeProcessEpoch: route.EdgeProcessEpoch, EdgeCarrierServerSPKISHA256: route.EdgeCarrierServerSPKISHA256, EdgeCarrierServerCertificateChainPEM: route.EdgeCarrierServerCertificateChainPEM, MachineIdentityPublicKey: route.MachineIdentityPublicKey, MachineIdentityThumbprint: route.MachineIdentityThumbprint}, AttachmentGeneration: route.AttachmentGeneration, State: state, Reason: reason, ObservedAt: observedAt}
+	return control.PreviewCarrierObservation{Schema: controlPreviewCarrierSchema, Kind: controlPreviewCarrierKind, Binding: control.PreviewCarrierBinding{AccountID: route.Identity.AccountID, PreviewID: route.PreviewID, OperationID: route.OperationID, OwnerDeviceID: route.OwnerDeviceID, OwnerSessionID: route.OwnerSessionID, HostID: route.Identity.HostID, LeaseGeneration: route.LeaseGeneration, TunnelID: route.Identity.TunnelID, ConnectorID: route.Identity.ConnectorID, SessionID: route.Identity.SessionID, ProcessGeneration: route.Identity.ProcessGeneration, ConfigGeneration: route.Identity.Generation, RouteID: route.RouteID, RouteGeneration: route.Revision, EdgeNodeID: route.EdgeNodeID, EdgeProcessEpoch: route.EdgeProcessEpoch, EdgeCarrierServerSPKISHA256: route.EdgeCarrierServerSPKISHA256, EdgeCarrierServerCertificateChainPEM: route.EdgeCarrierServerCertificateChainPEM, MachineIdentityPublicKey: route.MachineIdentityPublicKey, MachineIdentityThumbprint: route.MachineIdentityThumbprint}, AttachmentGeneration: route.AttachmentGeneration, State: state, Reason: reason, ObservedAt: observedAt}
 }
 
 func bindingFromAdmission(admission datacarrier.ExpectedAdmission) control.PreviewCarrierBinding {
-	return control.PreviewCarrierBinding{AccountID: admission.Identity.AccountID, PreviewID: admission.PreviewID, OperationID: admission.OperationID, OwnerMachineID: admission.OwnerMachineID, OwnerSessionID: admission.OwnerSessionID, HostID: admission.Identity.HostID, LeaseGeneration: admission.LeaseGeneration, TunnelID: admission.Identity.TunnelID, ConnectorID: admission.Identity.ConnectorID, SessionID: admission.Identity.SessionID, ProcessGeneration: admission.Identity.ProcessGeneration, ConfigGeneration: admission.Identity.Generation, RouteID: admission.RouteID, RouteGeneration: admission.RouteRevision, EdgeNodeID: admission.EdgeNodeID, EdgeProcessEpoch: admission.EdgeProcessEpoch, EdgeCarrierServerSPKISHA256: admission.EdgeCarrierServerSPKISHA256, EdgeCarrierServerCertificateChainPEM: admission.EdgeCarrierServerCertificateChainPEM, MachineIdentityPublicKey: admission.MachineIdentityPublicKey, MachineIdentityThumbprint: admission.MachineIdentityThumbprint}
+	return control.PreviewCarrierBinding{AccountID: admission.Identity.AccountID, PreviewID: admission.PreviewID, OperationID: admission.OperationID, OwnerDeviceID: admission.OwnerDeviceID, OwnerSessionID: admission.OwnerSessionID, HostID: admission.Identity.HostID, LeaseGeneration: admission.LeaseGeneration, TunnelID: admission.Identity.TunnelID, ConnectorID: admission.Identity.ConnectorID, SessionID: admission.Identity.SessionID, ProcessGeneration: admission.Identity.ProcessGeneration, ConfigGeneration: admission.Identity.Generation, RouteID: admission.RouteID, RouteGeneration: admission.RouteRevision, EdgeNodeID: admission.EdgeNodeID, EdgeProcessEpoch: admission.EdgeProcessEpoch, EdgeCarrierServerSPKISHA256: admission.EdgeCarrierServerSPKISHA256, EdgeCarrierServerCertificateChainPEM: admission.EdgeCarrierServerCertificateChainPEM, MachineIdentityPublicKey: admission.MachineIdentityPublicKey, MachineIdentityThumbprint: admission.MachineIdentityThumbprint}
 }
 
 const (

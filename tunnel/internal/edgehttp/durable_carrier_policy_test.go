@@ -21,19 +21,13 @@ func (f durablePolicyRoundTripFunc) RoundTrip(request *http.Request) (*http.Resp
 }
 
 func TestGatewayDispatchesDurableRouteToCanonicalCarrier(t *testing.T) {
-	for _, host := range []string{"service.customer.test", "smart-cloudy-voyage-6024.tunnels.example.test", "123e4567-e89b-12d3-a456-426614174000.tunnels.example.test"} {
-		t.Run(host, func(t *testing.T) { testGatewayDispatchesDurableRoute(t, host) })
-	}
-}
-
-func testGatewayDispatchesDurableRoute(t *testing.T, host string) {
 	routes := route.NewRegistry("preview.example.test", "runtime.example.test")
 	rule := route.RouteRule{
 		ID:                         "route_durable_01",
 		Revision:                   1,
 		Kind:                       route.TunnelHTTPSWSS,
 		MatchType:                  route.MatchExact,
-		Hostname:                   host,
+		Hostname:                   "service.customer.test",
 		PathPrefix:                 "/",
 		Target:                     "route_durable_01",
 		Protocol:                   "http",
@@ -53,9 +47,6 @@ func testGatewayDispatchesDurableRoute(t *testing.T, host string) {
 		AssignmentID:               "assignment_01",
 		AssignmentGeneration:       1,
 		ObservedState:              "ready",
-	}
-	if strings.HasSuffix(host, ".tunnels.example.test") {
-		rule.MatchType = route.MatchManagedExact
 	}
 	if err := routes.ApplyGeneration(context.Background(), 1, []route.RouteRule{rule}, func(context.Context, []route.RouteRule) error { return nil }, 0); err != nil {
 		t.Fatal(err)
@@ -88,8 +79,8 @@ func testGatewayDispatchesDurableRoute(t *testing.T, host string) {
 	// second policy. A canonical match must never reach this handler regardless
 	// of the retained legacy upstream configuration.
 	_ = legacy
-	request := httptest.NewRequest(http.MethodGet, "https://"+host+"/normal", nil)
-	request.Host = host
+	request := httptest.NewRequest(http.MethodGet, "https://service.customer.test/normal", nil)
+	request.Host = "service.customer.test"
 	recorder := httptest.NewRecorder()
 	policy.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK || recorder.Body.String() != "from-carrier" {

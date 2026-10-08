@@ -6,7 +6,7 @@ Remove one environment variable
 
 Remove one environment variable
 
-Delete one ENV name from the selected personal, team, or host scope. the confirmation code confirms removal; other names and scopes remain intact.
+Delete one ENV name from the selected personal, team, or host scope. The confirmation code confirms removal. Previously selected recipients receive a refreshed encrypted delivery with the deleted value omitted; running processes retain their environment.
 
 ENV values are encrypted before they leave the client. Commands select personal, team, or host scope explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
 
@@ -22,7 +22,7 @@ pb env unset <name> [flags]
       --confirm string   six-character confirmation code from the preview
   -h, --help             help for unset
       --json             print redacted JSON metadata
-      --machine string   machine name or ID; defaults to the personal scope
+      --machine string   Personal override for an owned machine, even in a Team workspace; omitted uses the active workspace
       --team string      team scope; cannot be combined with --machine
 ```
 

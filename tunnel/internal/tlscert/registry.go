@@ -39,13 +39,6 @@ var (
 	ErrClosed              = errors.New("TLS certificate registry is closed")
 )
 
-// certificateFailure keeps the original verifier cause available to diagnostic
-// projection without exposing certificate names or parser text to callers.
-type certificateFailure struct{ sentinel, cause error }
-
-func (e certificateFailure) Error() string   { return "TLS certificate validation failed" }
-func (e certificateFailure) Unwrap() []error { return []error{e.sentinel, e.cause} }
-
 const (
 	defaultMaximumLifetime = 90 * 24 * time.Hour
 	maxBundleBytes         = 16 << 20
@@ -304,7 +297,7 @@ func (r *Registry) stage(ctx context.Context, binding Binding, bundle Bundle, ex
 			continue
 		}
 		if activeEntry.binding.DomainID != binding.DomainID {
-			return ErrHostnameConflict
+			return fmt.Errorf("%w: %s", ErrHostnameConflict, host)
 		}
 	}
 	if existing, ok := r.entries[key]; ok {
@@ -773,21 +766,15 @@ func validateBundle(bundle Bundle, hostname string, wildcard bool, now time.Time
 		return tls.Certificate{}, fingerprint, time.Time{}, time.Time{}, fmt.Errorf("%w: bundle is empty or oversized", ErrCertificateInvalid)
 	}
 	parsed, err := tls.X509KeyPair(bundle.CertificatePEM, bundle.PrivateKeyPEM)
-	if err != nil {
-		return tls.Certificate{}, fingerprint, time.Time{}, time.Time{}, certificateFailure{ErrCertificateInvalid, err}
-	}
-	if len(parsed.Certificate) == 0 {
-		return tls.Certificate{}, fingerprint, time.Time{}, time.Time{}, ErrCertificateInvalid
+	if err != nil || len(parsed.Certificate) == 0 {
+		return tls.Certificate{}, fingerprint, time.Time{}, time.Time{}, fmt.Errorf("%w: certificate and private key do not match", ErrCertificateInvalid)
 	}
 	leaf, err := x509.ParseCertificate(parsed.Certificate[0])
 	if err != nil {
-		return tls.Certificate{}, fingerprint, time.Time{}, time.Time{}, certificateFailure{ErrCertificateInvalid, err}
+		return tls.Certificate{}, fingerprint, time.Time{}, time.Time{}, fmt.Errorf("%w: parse certificate", ErrCertificateInvalid)
 	}
 	parsed.Leaf = leaf
-	if !leaf.NotAfter.After(now) || leaf.NotBefore.After(now.Add(10*time.Minute)) {
-		return tls.Certificate{}, fingerprint, time.Time{}, time.Time{}, certificateFailure{ErrCertificateInvalid, x509.CertificateInvalidError{Cert: leaf, Reason: x509.Expired}}
-	}
-	if maxLifetime > 0 && leaf.NotAfter.Sub(now) > maxLifetime {
+	if !leaf.NotAfter.After(now) || leaf.NotBefore.After(now.Add(10*time.Minute)) || maxLifetime > 0 && leaf.NotAfter.Sub(now) > maxLifetime {
 		return tls.Certificate{}, fingerprint, time.Time{}, time.Time{}, fmt.Errorf("%w: certificate lifetime is outside bounds", ErrCertificateInvalid)
 	}
 	verifyHost := hostname
@@ -795,7 +782,7 @@ func validateBundle(bundle Bundle, hostname string, wildcard bool, now time.Time
 		verifyHost = "paperboat." + hostname[2:]
 	}
 	if err := leaf.VerifyHostname(verifyHost); err != nil {
-		return tls.Certificate{}, fingerprint, time.Time{}, time.Time{}, certificateFailure{ErrCertificateInvalid, err}
+		return tls.Certificate{}, fingerprint, time.Time{}, time.Time{}, fmt.Errorf("%w: certificate does not cover hostname", ErrCertificateInvalid)
 	}
 	if !bundle.NotBefore.IsZero() && !bundle.NotBefore.Equal(leaf.NotBefore) || !bundle.NotAfter.IsZero() && !bundle.NotAfter.Equal(leaf.NotAfter) {
 		return tls.Certificate{}, fingerprint, time.Time{}, time.Time{}, fmt.Errorf("%w: certificate timestamps do not match", ErrCertificateInvalid)
@@ -850,7 +837,7 @@ func normalizeHostname(raw string) (string, bool, error) {
 	}
 	ascii, err := idna.Lookup.ToASCII(base)
 	if err != nil {
-		return "", false, certificateFailure{ErrInvalid, err}
+		return "", false, fmt.Errorf("%w: hostname is invalid", ErrInvalid)
 	}
 	base = strings.ToLower(strings.TrimSuffix(ascii, "."))
 	// Persist and compare the ASCII IDNA form. Keeping the original Unicode

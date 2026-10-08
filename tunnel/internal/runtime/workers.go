@@ -4,14 +4,13 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
-	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,7 +21,6 @@ import (
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/node"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/usage"
 )
@@ -30,7 +28,6 @@ import (
 var ErrWorkerInvalid = errors.New("runtime worker configuration is invalid")
 
 type UsageWorker struct {
-	Reporter *reporting.Reporter
 	Queue    *usage.Queue
 	Sink     control.UsageSink
 	Prepare  interface{ Flush() error }
@@ -68,7 +65,7 @@ func (w *UsageWorker) run(ctx context.Context) {
 					return
 				}
 				_, _, err := w.deliver(ctx)
-				w.recordError(ctx, err)
+				w.recordError(err)
 			}
 		}
 	}
@@ -80,7 +77,7 @@ func (w *UsageWorker) run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			_, _, err := w.deliver(ctx)
-			w.recordError(ctx, err)
+			w.recordError(err)
 		}
 	}
 }
@@ -101,11 +98,10 @@ func (w *UsageWorker) deliver(ctx context.Context) (control.UsageResult, bool, e
 	return result, true, nil
 }
 
-func (w *UsageWorker) recordError(ctx context.Context, err error) {
+func (w *UsageWorker) recordError(err error) {
 	w.mu.Lock()
 	w.lastErr = err
 	w.mu.Unlock()
-	observeWorkerFailure(ctx, w.Reporter, "usage_delivery", err)
 }
 
 func (w *UsageWorker) LastError() error {
@@ -139,7 +135,6 @@ func (w *UsageWorker) Shutdown(ctx context.Context) error {
 }
 
 type NodeWorker struct {
-	Reporter     *reporting.Reporter
 	Manager      *node.Manager
 	Sink         control.NodeSink
 	Registration control.NodeRegistration
@@ -179,7 +174,7 @@ func (w *NodeWorker) run(ctx context.Context) {
 				if !ok {
 					return
 				}
-				w.recordError(ctx, w.heartbeat(ctx, at))
+				w.recordError(w.heartbeat(ctx, at))
 			}
 		}
 	}
@@ -190,7 +185,7 @@ func (w *NodeWorker) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case at := <-ticker.C:
-			w.recordError(ctx, w.heartbeat(ctx, at))
+			w.recordError(w.heartbeat(ctx, at))
 		}
 	}
 }
@@ -203,11 +198,10 @@ func (w *NodeWorker) heartbeat(ctx context.Context, at time.Time) error {
 	return w.Manager.RegisterAndHeartbeat(ctx, w.Sink, w.Registration, at)
 }
 
-func (w *NodeWorker) recordError(ctx context.Context, err error) {
+func (w *NodeWorker) recordError(err error) {
 	w.mu.Lock()
 	w.lastErr = err
 	w.mu.Unlock()
-	observeWorkerFailure(ctx, w.Reporter, "node_heartbeat", err)
 }
 
 func (w *NodeWorker) LastError() error {
@@ -240,17 +234,15 @@ func (w *NodeWorker) now() time.Time {
 }
 
 type RouteWorker struct {
-	Reporter *reporting.Reporter
 	// Registry owns the canonical durable HTTP generation. Legacy helper and
 	// retained preview assignments use LegacyRegistry so a successful empty
 	// canonical snapshot cannot erase their independent ownership.
-	Registry                   *route.Registry
-	LegacyRegistry             *route.Registry
-	Source                     control.RouteSource
-	Observer                   control.RouteObserver
-	InvalidateIngressAuthority func()
-	State                      *node.State
-	NodeID                     string
+	Registry       *route.Registry
+	LegacyRegistry *route.Registry
+	Source         control.RouteSource
+	Observer       control.RouteObserver
+	State          *node.State
+	NodeID         string
 	// ProcessEpoch fences desired assignments and observations to this exact
 	// edge process. Canonical tunnel assignments must never be applied by an
 	// old process instance.
@@ -280,8 +272,6 @@ type RouteWorker struct {
 	// and origin paths, before the generation is promoted. It is required for
 	// the canonical config-generation contract; legacy assignments continue to
 	// use the existing atomic snapshot path until that contract is available.
-	// Certificates gates managed HTTP publication on locally activated TLS material.
-	Certificates CertificateSource
 	Ready        func(context.Context, []route.RouteRule) error
 	DrainTimeout time.Duration
 
@@ -300,7 +290,6 @@ type RouteWorker struct {
 	canonicalPendingAdmissionsHash [sha256.Size]byte
 	canonicalAssignments           []control.RouteAssignment
 	canonicalPendingDetached       []control.RouteAssignment
-	canonicalPublicationPending    bool
 }
 
 // RouteCarrier is implemented by the edge's authenticated carrier registry.
@@ -389,7 +378,7 @@ func (w *RouteWorker) run(ctx context.Context) {
 				if !ok {
 					return
 				}
-				w.recordReconcile(ctx, w.reconcile(ctx))
+				w.recordReconcile(w.reconcile(ctx))
 			}
 		}
 	}
@@ -400,12 +389,12 @@ func (w *RouteWorker) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			w.recordReconcile(ctx, w.reconcile(ctx))
+			w.recordReconcile(w.reconcile(ctx))
 		}
 	}
 }
 
-func (w *RouteWorker) recordReconcile(ctx context.Context, err error) {
+func (w *RouteWorker) recordReconcile(err error) {
 	// A transient control outage must not withdraw this process's ready
 	// registration. The control endpoints intentionally reject unready nodes,
 	// so doing that would turn a short outage into a permanent startup loop.
@@ -421,8 +410,8 @@ func (w *RouteWorker) recordReconcile(ctx context.Context, err error) {
 	w.mu.Lock()
 	w.lastErr = err
 	w.mu.Unlock()
-	if err != nil && w.Reporter != nil {
-		w.Reporter.ObserveFailure(ctx, "route_reconcile", err)
+	if err != nil {
+		slog.Warn("route reconciliation failed", "edge_node_id", w.NodeID, "error", err)
 	}
 }
 
@@ -434,49 +423,19 @@ func transientControlUnavailable(err error) bool {
 	if err == nil {
 		return false
 	}
-	pending := []error{err}
-	seen := make(map[error]bool)
-	for count := 0; len(pending) > 0 && count < 32; count++ {
-		current := pending[len(pending)-1]
-		pending = pending[:len(pending)-1]
-		if current == nil {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		causes := joined.Unwrap()
+		if len(causes) == 0 {
 			return false
 		}
-		if current == control.ErrControlUnavailable {
-			continue
-		}
-		value := reflect.ValueOf(current)
-		if value.Kind() == reflect.Pointer && value.IsNil() {
-			return false
-		}
-		if value.Type().Comparable() {
-			if seen[current] {
+		for _, cause := range causes {
+			if !transientControlUnavailable(cause) {
 				return false
 			}
-			seen[current] = true
 		}
-		// The transport category owns whether an attempt is unavailable; its
-		// retained network cause is evidence, not an independent local failure.
-		if request, ok := current.(*control.RequestFailure); ok {
-			if request.Err != control.ErrControlUnavailable {
-				return false
-			}
-			continue
-		}
-		switch wrapped := current.(type) {
-		case interface{ Unwrap() []error }:
-			children := wrapped.Unwrap()
-			if len(children) == 0 || len(children) > 32-len(pending) {
-				return false
-			}
-			pending = append(pending, children...)
-		case interface{ Unwrap() error }:
-			pending = append(pending, wrapped.Unwrap())
-		default:
-			return false
-		}
+		return true
 	}
-	return len(pending) == 0
+	return errors.Is(err, control.ErrControlUnavailable)
 }
 
 func (w *RouteWorker) LastError() error {
@@ -569,21 +528,6 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) error {
 		if err := w.flushCanonicalDetached(ctx); err != nil {
 			return err
 		}
-		// An assignment that was never in the local matcher has no application
-		// stream leases to drain. A failed unrelated candidate must not prevent
-		// its exact withdrawal acknowledgement after restart or failed startup.
-		published := make(map[string]bool, len(w.canonicalAssignments))
-		for _, assignment := range w.canonicalAssignments {
-			published[assignment.AssignmentID] = true
-		}
-		for _, assignment := range desired {
-			if isCanonicalAssignment(assignment) && assignment.State == "draining" && !published[assignment.AssignmentID] {
-				w.canonicalPendingDetached = mergeCanonicalAssignments(w.canonicalPendingDetached, []control.RouteAssignment{assignment})
-			}
-		}
-		if err := w.flushCanonicalDetached(ctx); err != nil {
-			return err
-		}
 		// An audience or policy-generation replacement cannot retain the old
 		// matcher generation while it probes the replacement. Fence the old
 		// route first, canceling its stream leases and acknowledging detach only
@@ -623,9 +567,7 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			// A failed remaining group must not retain routes withdrawn from
-			// this complete snapshot. Publish their removal before retrying it.
-			if len(selectedAssignments) != 0 && len(activeAssignments) == 0 && len(probeFailures) != 0 && len(w.canonicalAssignments) == 0 {
+			if len(selectedAssignments) != 0 && len(activeAssignments) == 0 && len(probeFailures) != 0 {
 				return errors.Join(probeFailures...)
 			}
 		}
@@ -683,19 +625,15 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) error {
 				w.canonicalPendingAdmissions = true
 				w.canonicalPendingAdmissionsHash = candidateHash
 			}
-			// Prepared grants exact candidate authority without claiming that the
-			// local matcher is published. Ready is confirmed after publication.
+			// The server must durably accept the exact ready tuple before local
+			// promotion. A failed or uncertain ACK leaves the pending candidate
+			// staged while the old generation remains authoritative.
 			observedAssignments := activeAssignments
 			if len(probeFailures) != 0 {
 				observedAssignments = readyAssignments
 			}
-			if err := w.Observer.ObserveRoutes(ctx, w.NodeID, canonicalRouteObservations(observedAssignments, "prepared")); err != nil {
+			if err := w.Observer.ObserveRoutes(ctx, w.NodeID, canonicalRouteObservations(observedAssignments, "ready")); err != nil {
 				return err
-			}
-			// Server authority is committed before publication. Fence any cache
-			// populated before that ACK before making this generation selectable.
-			if w.InvalidateIngressAuthority != nil {
-				w.InvalidateIngressAuthority()
 			}
 			if err := w.Registry.MarkGenerationReady(localGeneration); err != nil {
 				return err
@@ -707,32 +645,20 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) error {
 			// Promotion is now complete. Retire the prior admission so future
 			// requests cannot select the drained connector, while streams that
 			// were already established continue under their stream lifetime.
-			admissionAssignments := activeAssignments
-			if len(probeFailures) != 0 {
-				admissionAssignments = canonicalPendingAdmissionAssignments(selectedAssignments, activeAssignments, desired)
-			}
-			activeAdmissions, activeAdmissionErr := canonicalDurableAdmissions(admissionAssignments)
+			activeAdmissions, activeAdmissionErr := canonicalDurableAdmissions(activeAssignments)
 			if activeAdmissionErr != nil {
 				return activeAdmissionErr
 			}
 			if err := w.DurableAdmissions.Replace(activeAdmissions, time.Now().UTC()); err != nil {
 				return err
 			}
-			w.canonicalPendingAdmissions = len(probeFailures) != 0
-			if w.canonicalPendingAdmissions {
-				w.canonicalPendingAdmissionsHash = candidateHash
-			}
+			w.canonicalPendingAdmissions = false
 			w.canonicalGeneration, w.canonicalHash, w.canonicalSet = localGeneration, contentHash, true
 			w.canonicalPendingSet = false
 			w.canonicalPendingDetached = mergeCanonicalAssignments(
 				detachedCanonicalAssignments(w.canonicalAssignments, activeAssignments), supersededAssignments,
 			)
 			w.canonicalAssignments = append([]control.RouteAssignment(nil), activeAssignments...)
-			w.canonicalPublicationPending = true
-			if err := w.Observer.ObserveRoutes(ctx, w.NodeID, canonicalRouteObservations(observedAssignments, "ready")); err != nil {
-				return err
-			}
-			w.canonicalPublicationPending = false
 			if err := w.flushCanonicalDetached(ctx); err != nil {
 				return err
 			}
@@ -778,10 +704,6 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) error {
 				observedAssignments = readyAssignments
 			}
 			if err := w.Observer.ObserveRoutes(ctx, w.NodeID, canonicalRouteObservations(observedAssignments, "ready")); err != nil {
-				return err
-			}
-			w.canonicalPublicationPending = false
-			if err := w.flushCanonicalDetached(ctx); err != nil {
 				return err
 			}
 		}
@@ -944,12 +866,6 @@ func canonicalRouteRules(assignments []control.RouteAssignment) []route.RouteRul
 				alias.Hostname = ""
 				alias.WildcardSuffix = strings.TrimPrefix(domain.Hostname, "*.")
 			}
-			// A ready binding may be the primary hostname too. Keep one
-			// matcher rule so TLS activation cannot introduce an overlap.
-			if alias.Hostname == base.Hostname && alias.WildcardSuffix == base.WildcardSuffix &&
-				(alias.MatchType == base.MatchType || alias.MatchType == route.MatchExact && base.MatchType == route.MatchManagedExact) {
-				continue
-			}
 			rules = append(rules, alias)
 		}
 	}
@@ -1054,20 +970,6 @@ func (w *RouteWorker) probeCanonicalGroup(ctx context.Context, assignments []con
 	sortRouteRules(httpRules)
 
 	if len(httpRules) != 0 {
-		if w.Certificates != nil {
-			for _, rule := range httpRules {
-				if rule.MatchType != route.MatchManagedExact {
-					continue
-				}
-				certificate, err := w.Certificates.GetCertificate(&tls.ClientHelloInfo{ServerName: rule.Hostname})
-				if err != nil {
-					return err
-				}
-				if !certificateCoversHost(certificate, rule.Hostname) {
-					return route.ErrGenerationNotReady
-				}
-			}
-		}
 		ready := w.Ready
 		if ready == nil {
 			if w.Carrier == nil {
@@ -1120,6 +1022,7 @@ func (w *RouteWorker) resolveCanonicalGroups(ctx context.Context, candidates, pr
 		if err := w.probeCanonicalGroup(ctx, group.assignments); err != nil {
 			failures = append(failures, err)
 			failedAssignments = append(failedAssignments, group.assignments...)
+			slog.Warn("canonical tunnel route group unavailable", "account_id", group.assignments[0].AccountID, "tunnel_id", group.assignments[0].TunnelID, "error", err)
 			if lkg, ok := previousByKey[group.key]; ok {
 				effective = append(effective, lkg...)
 			}
@@ -1127,11 +1030,6 @@ func (w *RouteWorker) resolveCanonicalGroups(ctx context.Context, candidates, pr
 		}
 		effective = append(effective, group.assignments...)
 		ready = append(ready, group.assignments...)
-	}
-	if len(failures) != 0 && len(ready) != 0 && w.Reporter != nil {
-		for _, failure := range failures {
-			w.Reporter.ObserveFailure(ctx, "route_group_probe", failure)
-		}
 	}
 	sort.Slice(effective, func(i, j int) bool {
 		if effective[i].RouteID != effective[j].RouteID {
@@ -1310,7 +1208,7 @@ func mergeCanonicalAssignments(left, right []control.RouteAssignment) []control.
 }
 
 func (w *RouteWorker) flushCanonicalDetached(ctx context.Context) error {
-	if w == nil || w.canonicalPublicationPending || len(w.canonicalPendingDetached) == 0 {
+	if w == nil || len(w.canonicalPendingDetached) == 0 {
 		return nil
 	}
 	if err := w.Observer.ObserveRoutes(ctx, w.NodeID, canonicalRouteObservations(w.canonicalPendingDetached, "detached")); err != nil {
@@ -1376,7 +1274,7 @@ func validateCanonicalAssignment(assignment control.RouteAssignment, nodeID, pro
 			if managedHost == "" {
 				managedHost = assignment.PublicHost
 			}
-			if !route.ValidTunnelHostname(managedHost) {
+			if !route.ValidOpaqueTunnelHostname(managedHost) {
 				return route.ErrInvalid
 			}
 		}
@@ -1391,7 +1289,7 @@ func validateCanonicalAssignment(assignment control.RouteAssignment, nodeID, pro
 		if assignment.AccessMode != "public" || assignment.Protocol != "tls" || assignment.PublicHost == "" || assignment.MatchType != route.MatchManagedExact || assignment.PathPrefix != "" || assignment.OriginScheme != "tcp" || assignment.HostOverride != "" || assignment.PreserveHost || assignment.PublicTCPListenerID != "listener_tls_443" || assignment.PublicTCPPort != 443 {
 			return route.ErrInvalid
 		}
-		if !route.ValidTunnelHostname(assignment.PublicHost) {
+		if !route.ValidOpaqueTunnelHostname(assignment.PublicHost) {
 			return route.ErrInvalid
 		}
 		if err := validateDomainBindings(assignment.DomainBindings); err != nil {

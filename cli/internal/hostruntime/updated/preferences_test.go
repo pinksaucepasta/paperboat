@@ -10,6 +10,9 @@ import (
 )
 
 func TestMachineSettingsPersistAndRespectOptOut(t *testing.T) {
+	previous := time.Local
+	time.Local = time.FixedZone("device", 19800)
+	t.Cleanup(func() { time.Local = previous })
 	root := t.TempDir()
 	initial, err := machineUpdateSettings(root, true, nil)
 	if err != nil || initial != autoupdate.DefaultPreferences(true) {
@@ -47,5 +50,24 @@ func TestMachineSettingsPersistAndRespectOptOut(t *testing.T) {
 	}
 	if got, err := machineUpdateSettings(root, false, nil); err != nil || got != initial {
 		t.Fatalf("invalid write changed stored settings: %+v %v", got, err)
+	}
+}
+
+// Scheduler observations use UTC; maintenance still belongs to the machine's
+// local calendar, independently of the observation timestamp's location.
+func TestMachineMaintenanceWakeUsesLocalClockForUTCObservation(t *testing.T) {
+	previous := time.Local
+	time.Local = time.FixedZone("IST", 19800)
+	t.Cleanup(func() { time.Local = previous })
+	root := t.TempDir()
+	settings := autoupdate.DefaultPreferences(true)
+	if _, err := machineUpdateSettings(root, true, &settings); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 8, 21, 0, 0, 0, time.UTC)
+	nominal := now.Add(6 * time.Hour)
+	want := time.Date(2026, 10, 8, 22, 30, 0, 0, time.UTC)
+	if got := nextMachineUpdateCheck(root, true, now, nominal); !got.Equal(want) {
+		t.Fatalf("local 04:00 maintenance wake=%v, want %v", got, want)
 	}
 }

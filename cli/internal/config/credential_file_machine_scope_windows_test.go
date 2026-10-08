@@ -53,6 +53,21 @@ func TestWindowsFileSecretUsesMachineScopeReferenceBoundEnvelope(t *testing.T) {
 	}
 }
 
+func TestWindowsFileSecretRejectsNonRegularCredentialObject(t *testing.T) {
+	directory, _ := preparePrivateWindowsCredentialDirectory(t)
+	store := FileSecretStore{Dir: directory}
+	ref := fmt.Sprintf("directory-secret-%d", time.Now().UnixNano())
+	path := store.path(ref)
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	value, err := store.Get(ref)
+	if value != "" || !errors.Is(err, ErrCredentialStoreUnavailable) {
+		t.Fatalf("directory credential returned value=%q error=%v", value, err)
+	}
+}
+
 func TestWindowsFileSecretMigratesReadableUserScopeV1(t *testing.T) {
 	store := FileSecretStore{Dir: t.TempDir()}
 	ref := fmt.Sprintf("legacy-file-secret-%d", time.Now().UnixNano())

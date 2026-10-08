@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"sync"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 type SessionState string
@@ -176,13 +174,7 @@ func NewServer(config ServerConfig) (*Server, error) {
 		config.HeartbeatInterval = DefaultHeartbeat
 	}
 	if config.SessionIDs == nil {
-		config.SessionIDs = func() (string, error) {
-			id, err := uuid.NewRandom()
-			if err != nil {
-				return "", err
-			}
-			return "session_" + id.String(), nil
-		}
+		config.SessionIDs = func() (string, error) { return newOpaqueID("sess") }
 	}
 	if config.Registry == nil {
 		config.Registry = NewSessionRegistry()
@@ -1067,7 +1059,7 @@ func (c *ClientSession) ApplySnapshot(ctx context.Context, snapshot Snapshot) (A
 			if cause == nil {
 				cause = prepareErr
 			}
-			return Ack{}, codeError(ErrCanceled, ReasonCanceled, true, joinCleanup(errors.Join(cause, err), abortErr))
+			return Ack{}, codeError(ErrCanceled, ReasonCanceled, true, joinCleanup(cause, abortErr))
 		}
 		return Ack{}, codeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, joinCleanup(err, abortErr))
 	}
@@ -1153,7 +1145,7 @@ func (c *ClientSession) ApplyDelta(ctx context.Context, delta Delta) (Ack, error
 			if cause == nil {
 				cause = prepareErr
 			}
-			return Ack{}, codeError(ErrCanceled, ReasonCanceled, true, joinCleanup(errors.Join(cause, err), abortErr))
+			return Ack{}, codeError(ErrCanceled, ReasonCanceled, true, joinCleanup(cause, abortErr))
 		}
 		return Ack{}, codeError(ErrDeltaRejected, ReasonSnapshotRejected, false, joinCleanup(err, abortErr))
 	}
@@ -1263,7 +1255,7 @@ func (c *ClientSession) MarkReadyContext(ctx context.Context, edgeReady, routeRe
 		}
 		c.mu.Unlock()
 		if ctx.Err() != nil {
-			return readiness, codeError(ErrCanceled, ReasonCanceled, true, joinCleanup(errors.Join(ctx.Err(), err), abortErr))
+			return readiness, codeError(ErrCanceled, ReasonCanceled, true, joinCleanup(err, abortErr))
 		}
 		return readiness, codeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, joinCleanup(err, abortErr))
 	}

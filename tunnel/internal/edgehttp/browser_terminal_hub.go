@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	yamux "github.com/libp2p/go-yamux/v5"
 	"io"
 	"sync"
 
@@ -55,8 +54,6 @@ type browserTerminalSession struct {
 // retaining, or interpreting their contents. Each participant has a bounded
 // burst buffer; a participant that stays behind is disconnected independently.
 type BrowserTerminalHub struct {
-	// OnFailure is installed by the process owner before ServeCarrier starts.
-	OnFailure    func(context.Context, error)
 	mu           sync.Mutex
 	closed       bool
 	activeRoutes map[string]BrowserTerminalRouteFence
@@ -181,21 +178,16 @@ func (h *BrowserTerminalHub) ServeCarrier(ctx context.Context, server *datacarri
 	if h == nil || ctx == nil || server == nil {
 		return ErrBrowserTerminalHubInvalid
 	}
-	ctx, cancel := context.WithCancel(ctx)
-	var publishers sync.WaitGroup
-	defer func() { cancel(); publishers.Wait() }()
 	for {
 		stream, open, err := server.AcceptBrowserTerminalOutputStream(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
-				return errors.Join(ctx.Err(), err)
+				return ctx.Err()
 			}
-			if requestErrorLeaves(err, func(leaf error) bool { return leaf == datacarrier.ErrCarrierClosed }, true) {
+			if errors.Is(err, datacarrier.ErrCarrierClosed) {
 				return nil
 			}
-			if requestErrorLeaves(err, func(leaf error) bool {
-				return leaf == datacarrier.ErrBrowserTerminalOutputKind || leaf == datacarrier.ErrAccessStreamIdentity || leaf == datacarrier.ErrRouteDenied || leaf == datacarrier.ErrInvalidPreface || leaf == connectorprotocol.ErrMalformedFrame || leaf == connectorprotocol.ErrFrameTooLarge
-			}, true) {
+			if errors.Is(err, datacarrier.ErrBrowserTerminalOutputKind) || errors.Is(err, datacarrier.ErrAccessStreamIdentity) || errors.Is(err, datacarrier.ErrRouteDenied) || errors.Is(err, datacarrier.ErrInvalidPreface) || errors.Is(err, connectorprotocol.ErrMalformedFrame) || errors.Is(err, connectorprotocol.ErrFrameTooLarge) {
 				continue
 			}
 			return err
@@ -206,8 +198,7 @@ func (h *BrowserTerminalHub) ServeCarrier(ctx context.Context, server *datacarri
 			_ = stream.Close()
 			continue
 		}
-		publishers.Add(1)
-		go func() { defer publishers.Done(); h.servePublisher(ctx, stream, publisher) }()
+		go h.servePublisher(ctx, stream, publisher)
 	}
 }
 
@@ -216,19 +207,11 @@ func (h *BrowserTerminalHub) servePublisher(parent context.Context, stream *data
 	defer publisher.Close()
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
-	closeDone := make(chan struct{})
-	stopClose := context.AfterFunc(ctx, func() { defer close(closeDone); _ = stream.Close() })
-	defer func() {
-		cancel()
-		if !stopClose() {
-			<-closeDone
-		}
-	}()
+	stopClose := context.AfterFunc(ctx, func() { _ = stream.Close() })
+	defer stopClose()
 	watchDone := make(chan struct{})
-	watcherDone := make(chan struct{})
-	defer func() { close(watchDone); <-watcherDone }()
+	defer close(watchDone)
 	go func() {
-		defer close(watcherDone)
 		select {
 		case <-publisher.Done():
 			cancel()
@@ -239,11 +222,9 @@ func (h *BrowserTerminalHub) servePublisher(parent context.Context, stream *data
 	for {
 		record, err := readBrowserTerminalRecord(stream)
 		if err != nil {
-			h.observe(ctx, err)
 			return
 		}
 		if err := publisher.Publish(record); err != nil {
-			h.observe(ctx, err)
 			return
 		}
 	}
@@ -469,15 +450,4 @@ func readBrowserTerminalRecord(reader io.Reader) ([]byte, error) {
 		return nil, err
 	}
 	return record, nil
-}
-
-func (h *BrowserTerminalHub) observe(ctx context.Context, err error) {
-	if h.OnFailure != nil && !requestCanceled(ctx, err) && !requestErrorLeaves(err, func(leaf error) bool {
-		if reset, ok := leaf.(*yamux.StreamError); ok && reset != nil && ctxErr(ctx) == context.Canceled && reset.ErrorCode == 0 {
-			return true
-		}
-		return leaf == io.EOF || leaf == ErrBrowserTerminalHubEnded || ctxErr(ctx) == context.Canceled && (leaf == yamux.ErrStreamReset || leaf == yamux.ErrStreamClosed || leaf == yamux.ErrSessionShutdown || leaf == datacarrier.ErrCarrierClosed)
-	}, true) {
-		h.OnFailure(ctx, err)
-	}
 }

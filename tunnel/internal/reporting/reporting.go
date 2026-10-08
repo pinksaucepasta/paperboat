@@ -6,8 +6,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"io"
 	"math"
-	"net/http"
 	"net/url"
 	"os"
 	"path"
@@ -15,23 +15,18 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/getsentry/sentry-go"
 	"github.com/getsentry/sentry-go/attribute"
-	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
 	edgetelemetry "github.com/pinksaucepasta/paperboat-tunnel/internal/telemetry"
 )
 
 const (
-	maxEvents = 8
-	maxTraces = 128
-	// The pinned SDK metric queue holds 100 items. Reserve 64 cumulative
-	// snapshots and eight drop/enable gauges; detailed signals get 28 items.
-	maxDetailMetrics = 100 - maxSnapshots - 8
+	maxEvents        = 8
+	maxTraces        = 128
+	maxDetailMetrics = 64
 	maxSnapshots     = 64
 	flushTimeout     = 2 * time.Second
 )
@@ -50,8 +45,6 @@ type Reporter struct {
 	logs, traces, metrics bool
 	component             string
 	region, instance      string
-	localFault            func(Fault)
-	quotaMu               sync.Mutex
 	sent                  atomic.Uint32
 	logsSent              atomic.Uint32
 	metricsSent           atomic.Uint32
@@ -63,12 +56,6 @@ type Reporter struct {
 	droppedErrors         atomic.Uint64
 	droppedTraces         atomic.Uint64
 	closed                atomic.Bool
-	submitMu              sync.RWMutex
-	closeOnce             sync.Once
-	closeDone             chan struct{}
-	flushStatus           atomic.Uint32
-	submissionsDropped    atomic.Uint64
-	httpFailures          atomic.Uint64
 }
 
 func New(component string) (*Reporter, error) {
@@ -82,13 +69,13 @@ func New(component string) (*Reporter, error) {
 			return nil, errors.New("PAPERBOAT_SENTRY_ENABLED must be a boolean")
 		}
 		if !enabled {
-			return &Reporter{component: component, localFault: writeLocalFault}, nil
+			return &Reporter{}, nil
 		}
 	}
 	dsn := firstNonempty(os.Getenv("PAPERBOAT_SENTRY_DSN"), DefaultDSN)
 	release := firstNonempty(os.Getenv("PAPERBOAT_SENTRY_RELEASE"), DefaultRelease)
 	if enabledText == "" && strings.TrimSpace(DefaultDSN) == "" {
-		return &Reporter{component: component, localFault: writeLocalFault}, nil
+		return &Reporter{}, nil
 	}
 	if dsn == "" || release == "" {
 		return nil, errors.New("enabled Sentry reporting requires PAPERBOAT_SENTRY_DSN and PAPERBOAT_SENTRY_RELEASE")
@@ -144,14 +131,11 @@ func New(component string) (*Reporter, error) {
 	config.Environment = environment
 	config.PropagateTraceparent = false
 	config.TracePropagationTargets = []string{}
-	r := &Reporter{enabled: true, logs: logs, traces: traceRate > 0, metrics: metrics, component: component, region: region, instance: instance, localFault: writeLocalFault}
-	config.HTTPTransport = sdkHTTPObserver{next: &http.Transport{Proxy: http.ProxyFromEnvironment}, failures: &r.httpFailures}
 	client, err := sentry.NewClient(config)
 	if err != nil {
 		return nil, errors.New("cannot configure Sentry reporting")
 	}
-	r.client, r.hub = client, sentry.NewHub(client, sentry.NewScope())
-	return r, nil
+	return &Reporter{client: client, hub: sentry.NewHub(client, sentry.NewScope()), enabled: true, logs: logs, traces: traceRate > 0, metrics: metrics, component: component, region: region, instance: instance}, nil
 }
 
 func firstNonempty(value, fallback string) string {
@@ -212,7 +196,7 @@ func optionalRate(name string, fallback float64) (float64, error) {
 
 func options(component, release, dsn string, transport sentry.Transport) sentry.ClientOptions {
 	return sentry.ClientOptions{
-		Dsn: dsn, Release: release, Transport: transport, DisableTelemetryBuffer: true,
+		Dsn: dsn, Release: release, Transport: transport,
 		AttachStacktrace: false, EnableTracing: false, TracesSampleRate: 0,
 		SendDefaultPII: false, MaxBreadcrumbs: 0, DataCollection: &sentry.DataCollection{UserInfo: sentry.Set(false), Cookies: &sentry.KeyValueCollectionBehavior{Mode: sentry.CollectionOff}, HTTPHeaders: &sentry.HeaderCollectionConfig{Request: &sentry.KeyValueCollectionBehavior{Mode: sentry.CollectionOff}, Response: &sentry.KeyValueCollectionBehavior{Mode: sentry.CollectionOff}}, HTTPBodies: []sentry.BodyType{}, QueryParams: &sentry.KeyValueCollectionBehavior{Mode: sentry.CollectionOff}},
 		Integrations: func([]sentry.Integration) []sentry.Integration { return nil },
@@ -234,69 +218,15 @@ func sanitizeLog(log *sentry.Log, component, release, environment string, fleet 
 	operation := attributeString(log.Attributes, "operation")
 	outcome := attributeString(log.Attributes, "outcome")
 	code := attributeString(log.Attributes, "code")
-	stage := attributeString(log.Attributes, "stage")
-	cause := attributeString(log.Attributes, "cause")
-	errorType := attributeString(log.Attributes, "error_type")
 	reference := attributeString(log.Attributes, "support_reference")
-	correlationID := attributeString(log.Attributes, "correlation_id")
-	errorChain := attributeString(log.Attributes, "error_chain")
-	errno := attributeString(log.Attributes, "errno")
-	httpStatus := attributeString(log.Attributes, "http_status")
-	sourceFile := attributeString(log.Attributes, "source_file")
-	sourceFunction := attributeString(log.Attributes, "source_function")
-	sourceLine := attributeString(log.Attributes, "source_line")
-	if !operations[operation] || !outcomes[outcome] || !codes[code] || (reference != "" && !validReference(reference)) || (correlationID != "" && (!validReference(correlationID) || correlationID != reference)) {
+	if !operations[operation] || !outcomes[outcome] || !codes[code] || (reference != "" && !validReference(reference)) {
 		return nil
-	}
-	if stage != "" || cause != "" || errorType != "" {
-		if !validStage(stage) || !validCause(cause) || !validErrorType(errorType) || outcome != "failed" && outcome != "canceled" && outcome != "rejected" {
-			return nil
-		}
-	}
-	if errorChain != "" && !validTypeChain(errorChain) || errno != "" && !validErrno(errno) || httpStatus != "" && !validHTTPStatus(httpStatus) {
-		return nil
-	}
-	if sourceFile != "" && safeSourceFile(sourceFile) != sourceFile || sourceFunction != "" && !validSourceFunction(sourceFunction) || sourceLine != "" && !validErrno(sourceLine) {
-		return nil
-	}
-	if sourceFile != "" || sourceFunction != "" || sourceLine != "" {
-		if sourceFile == "" || sourceFunction == "" || sourceLine == "" {
-			return nil
-		}
 	}
 	level, severity := sentry.LogLevelInfo, sentry.LogSeverityInfo
 	if outcome == "failed" {
 		level, severity = sentry.LogLevelError, sentry.LogSeverityError
-	} else if outcome == "rejected" {
-		level, severity = sentry.LogLevelWarn, sentry.LogSeverityWarning
 	}
 	attrs := map[string]attribute.Value{"component": attribute.StringValue(component), "sentry.release": attribute.StringValue(release), "sentry.environment": attribute.StringValue(environment), "operation": attribute.StringValue(operation), "outcome": attribute.StringValue(outcome), "code": attribute.StringValue(code), "support_reference": attribute.StringValue(reference)}
-	if operation == "route_lifecycle" {
-		input, err := (route.RouteTelemetryRecord{Type: route.LifecycleType(code)}).EventInput()
-		if err != nil || string(input.Outcome) != outcome {
-			return nil
-		}
-		attrs["retry"] = attribute.StringValue(string(input.Retry))
-		if input.Severity == edgetelemetry.SeverityWarn {
-			level, severity = sentry.LogLevelWarn, sentry.LogSeverityWarning
-		} else if input.Severity == edgetelemetry.SeverityDebug {
-			level, severity = sentry.LogLevelDebug, sentry.LogSeverityDebug
-		}
-	}
-	if reference != "" {
-		attrs["correlation_id"] = attribute.StringValue(reference)
-	}
-	if stage != "" {
-		attrs["stage"] = attribute.StringValue(stage)
-		attrs["name"] = attribute.StringValue(failureName(stage))
-		attrs["cause"] = attribute.StringValue(cause)
-		attrs["error_type"] = attribute.StringValue(errorType)
-	}
-	for key, value := range map[string]string{"error_chain": errorChain, "errno": errno, "http_status": httpStatus, "source_file": sourceFile, "source_function": sourceFunction, "source_line": sourceLine} {
-		if value != "" {
-			attrs[key] = attribute.StringValue(value)
-		}
-	}
 	addFleetAttributes(attrs, fleet)
 	return &sentry.Log{Timestamp: log.Timestamp, TraceID: log.TraceID, SpanID: log.SpanID, Level: level, Severity: severity, Body: "paperboat.operation", Attributes: attrs}
 }
@@ -361,25 +291,16 @@ func sanitizeTransaction(event *sentry.Event, component, release, environment st
 		}
 		tags[key] = value
 	}
-	if stage := event.Tags["stage"]; stage != "" {
-		cause, errorType := event.Tags["cause"], event.Tags["error_type"]
-		if !validStage(stage) || !validCause(cause) || !validErrorType(errorType) {
+	if reference := event.Tags["support_reference"]; reference != "" {
+		if !validReference(reference) {
 			return nil
 		}
-		tags["stage"], tags["cause"], tags["error_type"] = stage, cause, errorType
-	}
-	if reference, correlationID := event.Tags["support_reference"], event.Tags["correlation_id"]; reference != "" {
-		if !validReference(reference) || correlationID != "" && (!validReference(correlationID) || correlationID != reference) {
-			return nil
-		}
-		tags["support_reference"], tags["correlation_id"] = reference, reference
+		tags["support_reference"] = reference
 	}
 	contexts := map[string]sentry.Context{}
 	if trace, ok := event.Contexts["trace"]; ok {
 		clean := sentry.Context{"op": "paperboat." + event.Transaction}
-		if tags["outcome"] == "canceled" {
-			clean["status"] = "cancelled"
-		} else if tags["outcome"] == "failed" || tags["outcome"] == "rejected" {
+		if tags["outcome"] == "failed" || tags["outcome"] == "rejected" {
 			clean["status"] = "internal_error"
 		} else {
 			clean["status"] = "ok"
@@ -449,34 +370,27 @@ func buildMetricCatalog() map[string]metricSpec {
 	return catalog
 }
 
-var operations = map[string]bool{"route_lifecycle": true, "relay_admission": true, "relay_session": true, "relay_service": true, "service_lifecycle": true, "dependency_health": true, "control_reconcile": true, "connector_admission": true, "connector_attach": true, "connector_stream": true, "usage_delivery": true, "capacity": true, "backlog": true}
+var operations = map[string]bool{"relay_admission": true, "relay_session": true, "relay_service": true, "service_lifecycle": true, "dependency_health": true, "control_reconcile": true, "connector_admission": true, "connector_attach": true, "connector_stream": true, "usage_delivery": true, "capacity": true, "backlog": true}
 var outcomes = map[string]bool{"success": true, "failed": true, "rejected": true, "canceled": true, "state_change": true}
-var codes = map[string]bool{"stage_accepted": true, "stage_rejected": true, "generation_ready": true, "activated": true, "drain_started": true, "drain_completed": true, "drain_forced": true, "stale_generation_rejected": true, "stream_acquired": true, "stream_overloaded": true, "stream_released": true, "control_trust_failed": true, "carrier_handler_failed": true, "usage_delivery_failed": true, "node_heartbeat_failed": true, "http_server_failed": true, "runtime_admission_failed": true, "runtime_observation_failed": true, "preview_admission_failed": true, "preview_observation_failed": true, "certificate_distribution_failed": true, "ready": true, "upstream_request_failed": true, "control_request_failed": true, "ok": true, "internal": true, "invalid": true, "unauthorized": true, "capacity": true, "unavailable": true, "timeout": true, "shutdown": true, "recovered": true, "service_failed": true, "service_setup_failed": true, "service_start_failed": true, "service_shutdown_failed": true, "process_panic": true, "internal_failure": true, "control_reconcile_failed": true, "route_group_unavailable": true}
+var codes = map[string]bool{"ok": true, "internal": true, "invalid": true, "unauthorized": true, "capacity": true, "unavailable": true, "timeout": true, "shutdown": true, "recovered": true}
 
 // Observe emits a bounded fixed-cardinality operation log, trace, and counter.
 func (r *Reporter) Observe(ctx context.Context, operation, outcome, code, reference string, duration time.Duration) {
-	if operation == "route_lifecycle" {
-		input, err := (route.RouteTelemetryRecord{Type: route.LifecycleType(code)}).EventInput()
-		if err != nil || string(input.Outcome) != outcome {
-			return
-		}
-	}
-	if !operations[operation] || !outcomes[outcome] || !codes[code] {
+	if r == nil || !r.enabled || r.closed.Load() || !operations[operation] || !outcomes[outcome] || !codes[code] {
 		return
 	}
 	if reference != "" && !validReference(reference) {
 		return
 	}
-	if !r.beginSubmit() {
-		return
-	}
-	defer r.submitMu.RUnlock()
 	ctx = sentry.SetHubOnContext(ctx, r.hub)
 	if r.traces && r.permit(&r.tracesSent, &r.droppedTraces, maxTraces) {
 		span := sentry.StartSpan(ctx, "paperboat."+operation, sentry.WithTransactionName(operation))
 		ctx = span.Context()
 		r.emitSignals(ctx, operation, outcome, code, reference, duration)
-		span.Status = spanStatus(outcome)
+		span.Status = sentry.SpanStatusOK
+		if outcome == "failed" || outcome == "rejected" {
+			span.Status = sentry.SpanStatusInternalError
+		}
 		span.SetTag("component", r.component)
 		span.SetTag("operation", operation)
 		span.SetTag("outcome", outcome)
@@ -498,11 +412,7 @@ func (r *Reporter) emitSignals(ctx context.Context, operation, outcome, code, re
 		}
 		entry.String("component", r.component).String("operation", operation).String("outcome", outcome).String("code", code).String("support_reference", reference).Emit("paperboat.operation")
 	}
-	items := uint32(1)
-	if duration >= 0 {
-		items++
-	}
-	if r.metrics && r.permitN(&r.metricsSent, &r.droppedMetrics, maxDetailMetrics, items) {
+	if r.metrics && r.permitN(&r.metricsSent, &r.droppedMetrics, maxDetailMetrics, 2) {
 		meter := sentry.NewMeter(ctx)
 		meter.SetAttributes(attribute.String("component", r.component), attribute.String("operation", operation), attribute.String("outcome", outcome), attribute.String("code", code))
 		meter.Count("paperboat.operation.count", 1)
@@ -513,42 +423,39 @@ func (r *Reporter) emitSignals(ctx context.Context, operation, outcome, code, re
 }
 
 func (r *Reporter) permitN(counter *atomic.Uint32, dropped *atomic.Uint64, limit, count uint32) bool {
-	return r.permitCount(counter, dropped, limit, count)
+	r.refreshWindow()
+	if counter.Add(count) <= limit {
+		return true
+	}
+	dropped.Add(uint64(count))
+	return false
 }
 
 func (r *Reporter) permit(counter *atomic.Uint32, dropped *atomic.Uint64, limit uint32) bool {
-	return r.permitCount(counter, dropped, limit, 1)
+	r.refreshWindow()
+	if counter.Add(1) > limit {
+		dropped.Add(1)
+		return false
+	}
+	return true
 }
 
-func (r *Reporter) permitCount(counter *atomic.Uint32, dropped *atomic.Uint64, limit, count uint32) bool {
-	r.quotaMu.Lock()
-	defer r.quotaMu.Unlock()
+func (r *Reporter) refreshWindow() {
 	minute := time.Now().Unix() / 60
-	if r.window.Load() != minute {
-		r.window.Store(minute)
+	old := r.window.Load()
+	if old != minute && r.window.CompareAndSwap(old, minute) {
 		r.sent.Store(0)
 		r.logsSent.Store(0)
 		r.metricsSent.Store(0)
 		r.tracesSent.Store(0)
 	}
-	current := counter.Load()
-	if count > limit || current > limit-count {
-		dropped.Add(uint64(count))
-		return false
-	}
-	counter.Store(current + count)
-	return true
 }
 
 // ExportDrops publishes cumulative local rate-limit drops without recursive accounting.
 func (r *Reporter) ExportDrops(ctx context.Context) {
-	if r == nil || !r.enabled || !r.metrics {
+	if r == nil || !r.enabled || r.closed.Load() || !r.metrics {
 		return
 	}
-	if !r.beginSubmit() {
-		return
-	}
-	defer r.submitMu.RUnlock()
 	ctx = sentry.SetHubOnContext(ctx, r.hub)
 	meter := sentry.NewMeter(ctx)
 	meter.SetAttributes(attribute.String("component", r.component))
@@ -573,13 +480,9 @@ type Snapshot struct {
 }
 
 func (r *Reporter) MetricSnapshots(ctx context.Context, snapshots []Snapshot) {
-	if r == nil || !r.enabled || !r.metrics || len(snapshots) == 0 {
+	if r == nil || !r.enabled || r.closed.Load() || !r.metrics || len(snapshots) == 0 {
 		return
 	}
-	if !r.beginSubmit() {
-		return
-	}
-	defer r.submitMu.RUnlock()
 	valid := make([]Snapshot, 0, len(snapshots))
 	for _, snapshot := range snapshots {
 		if r.validSnapshot(snapshot) {
@@ -652,14 +555,10 @@ func validLabels(expected map[string]map[string]bool, labels map[string]string) 
 // ControlTrace starts telemetry for a Paperboat-owned control request. Its support
 // reference is always generated; sentry-trace is optional and baggage is never returned.
 func (r *Reporter) ControlTrace(ctx context.Context, operation string) (string, string, func(string, string)) {
-	reference := SupportReference(ctx)
-	if reference == "" {
-		reference = Reference()
-	}
-	if !operations[operation] || !r.beginSubmit() {
+	reference := Reference()
+	if r == nil || !r.enabled || r.closed.Load() || !operations[operation] {
 		return "", reference, func(string, string) {}
 	}
-	defer r.submitMu.RUnlock()
 	started := time.Now()
 	ctx = sentry.SetHubOnContext(ctx, r.hub)
 	var span *sentry.Span
@@ -676,57 +575,61 @@ func (r *Reporter) ControlTrace(ctx context.Context, operation string) (string, 
 			}
 			return ""
 		}(), reference, func(outcome, code string) {
-			if !outcomes[outcome] || !codes[code] || !r.beginSubmit() {
+			if !outcomes[outcome] || !codes[code] || r.closed.Load() {
 				return
 			}
-			defer r.submitMu.RUnlock()
 			if span != nil {
 				span.SetTag("outcome", outcome)
 				span.SetTag("code", code)
-				span.Status = spanStatus(outcome)
+				if outcome == "failed" || outcome == "rejected" {
+					span.Status = sentry.SpanStatusInternalError
+				} else {
+					span.Status = sentry.SpanStatusOK
+				}
 				span.Finish()
 			}
-			if code == "control_request_failed" {
-				// ObserveFailure owns the local event, SDK log and count. This closure
-				// retains the trace and one duration item without duplicating those signals.
-				if r.metrics && r.permit(&r.metricsSent, &r.droppedMetrics, maxDetailMetrics) {
-					meter := sentry.NewMeter(ctx)
-					meter.SetAttributes(attribute.String("component", r.component), attribute.String("operation", operation), attribute.String("outcome", outcome), attribute.String("code", code))
-					meter.Distribution("paperboat.operation.duration", time.Since(started).Seconds(), sentry.WithUnit(sentry.UnitSecond))
-				}
-			} else {
-				r.emitSignals(ctx, operation, outcome, code, reference, time.Since(started))
-			}
+			r.emitSignals(ctx, operation, outcome, code, reference, time.Since(started))
 		}
 }
 
-func spanStatus(outcome string) sentry.SpanStatus {
-	switch outcome {
-	case "failed", "rejected":
-		return sentry.SpanStatusInternalError
-	case "canceled":
-		return sentry.SpanStatusCanceled
-	default:
-		return sentry.SpanStatusOK
+func (r *Reporter) Capture(reference, kind string, skip int) {
+	if r == nil || !r.enabled || r.closed.Load() || r.client == nil || !validReference(reference) || !r.permit(&r.sent, &r.droppedErrors, maxEvents) {
+		return
 	}
+	event := &sentry.Event{
+		Level: sentry.LevelError, Message: "unexpected service failure",
+		Tags:      map[string]string{"failure_kind": failureKind(kind), "support_reference": reference},
+		Exception: []sentry.Exception{{Type: "service_failure", Value: "unexpected service failure", Stacktrace: stack(skip + 1)}},
+	}
+	r.client.CaptureEvent(event, nil, nil)
 }
 
-func (r *Reporter) Close() { r.CloseContext(context.Background()) }
+func (r *Reporter) Close() {
+	if r == nil || !r.closed.CompareAndSwap(false, true) || !r.enabled || r.client == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), flushTimeout)
+	defer cancel()
+	_ = r.client.FlushWithContext(ctx) // Queue drain is not an acknowledgement of server receipt.
+	r.client.Close()
+}
 
 var entropy = rand.Reader
 
 func Reference() string {
-	id, err := uuid.NewRandomFromReader(entropy)
-	if err != nil {
+	var raw [16]byte
+	if _, err := io.ReadFull(entropy, raw[:]); err != nil {
 		return ""
 	}
-	return "support_" + id.String()
+	return "pb-" + hex.EncodeToString(raw[:])
 }
 
-var supportReferencePattern = regexp.MustCompile(`^support_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
-
 func validReference(value string) bool {
-	return len(value) <= 44 && supportReferencePattern.MatchString(value)
+	if len(value) != 35 || !strings.HasPrefix(value, "pb-") {
+		return false
+	}
+	_, err := hex.DecodeString(value[3:])
+	return err == nil && strings.Trim(value, "0") != "" && value == strings.ToLower(value)
 }
 
 func stack(skip int) *sentry.Stacktrace {
@@ -742,6 +645,13 @@ func stack(skip int) *sentry.Stacktrace {
 		}
 	}
 	return result
+}
+
+func failureKind(value string) string {
+	if value == "panic" || value == "service_run" {
+		return value
+	}
+	return "internal"
 }
 
 func safeToken(value string) string {
@@ -782,71 +692,24 @@ func sanitizeEnvironment(event *sentry.Event, component, release, environment st
 	if event == nil {
 		return nil
 	}
-	stage, code := event.Tags["stage"], event.Tags["code"]
-	cause, errorType := event.Tags["cause"], event.Tags["error_type"]
-	operation, outcome := event.Tags["operation"], event.Tags["outcome"]
-	reference, correlationID := event.Tags["support_reference"], event.Tags["correlation_id"]
-	errorChain, errno, httpStatus := event.Tags["error_chain"], event.Tags["errno"], event.Tags["http_status"]
-	sourceFile, sourceFunction, sourceLine := event.Tags["source_file"], event.Tags["source_function"], event.Tags["source_line"]
-	if !operations[operation] || !outcomes[outcome] || !validStage(stage) || !codes[code] || !validCause(cause) || !validErrorType(errorType) || !validReference(reference) || !validReference(correlationID) || correlationID != reference || outcome != "failed" && outcome != "canceled" && outcome != "rejected" {
-		return nil
-	}
-	if errorChain != "" && !validTypeChain(errorChain) || errno != "" && !validErrno(errno) || httpStatus != "" && !validHTTPStatus(httpStatus) {
-		return nil
-	}
-	if sourceFile != "" && safeSourceFile(sourceFile) != sourceFile || sourceFunction != "" && !validSourceFunction(sourceFunction) || sourceLine != "" && !validErrno(sourceLine) {
-		return nil
-	}
-	if sourceFile != "" || sourceFunction != "" || sourceLine != "" {
-		if sourceFile == "" || sourceFunction == "" || sourceLine == "" {
-			return nil
-		}
-	}
-	level := sentry.LevelError
-	if outcome == "canceled" {
-		level = sentry.LevelInfo
-	} else if outcome == "rejected" {
-		level = sentry.LevelWarning
-	}
 	clean := &sentry.Event{
 		EventID: event.EventID, Timestamp: event.Timestamp, Platform: "go",
-		Level: level, Message: "paperboat service failure", Release: release, Environment: environment,
+		Level: sentry.LevelError, Message: "unexpected service failure", Release: release, Environment: environment,
 		Tags: map[string]string{
-			"component": safeToken(component), "operation": operation, "stage": stage,
-			"name": failureName(stage), "code": code, "cause": cause, "error_type": errorType,
-			"outcome": outcome, "support_reference": reference, "correlation_id": correlationID,
+			"component": safeToken(component), "failure_kind": failureKind(event.Tags["failure_kind"]),
+			"support_reference": event.Tags["support_reference"],
 		},
-	}
-	for key, value := range map[string]string{"error_chain": errorChain, "errno": errno, "http_status": httpStatus, "source_file": sourceFile, "source_function": sourceFunction, "source_line": sourceLine} {
-		if value != "" {
-			clean.Tags[key] = value
-		}
-	}
-	if errorChain != "" {
-		clean.Tags["error_chain"] = errorChain
-	}
-	if errno != "" {
-		clean.Tags["errno"] = errno
-	}
-	if httpStatus != "" {
-		clean.Tags["http_status"] = httpStatus
-	}
-	if sourceFile != "" {
-		clean.Tags["source_file"], clean.Tags["source_function"], clean.Tags["source_line"] = sourceFile, sourceFunction, sourceLine
-	}
-	if outcome == "failed" {
-		clean.Exception = []sentry.Exception{{Type: code, Value: cause, Stacktrace: &sentry.Stacktrace{Frames: []sentry.Frame{}}}}
 	}
 	addFleetTags(clean.Tags, fleet)
 	for _, exception := range event.Exception {
-		if outcome != "failed" || exception.Stacktrace == nil {
+		if exception.Stacktrace == nil {
 			continue
 		}
 		trace := &sentry.Stacktrace{Frames: make([]sentry.Frame, 0, len(exception.Stacktrace.Frames))}
 		for _, frame := range exception.Stacktrace.Frames {
 			trace.Frames = append(trace.Frames, safeFrame(frame))
 		}
-		clean.Exception = []sentry.Exception{{Type: code, Value: cause, Stacktrace: trace}}
+		clean.Exception = append(clean.Exception, sentry.Exception{Type: "service_failure", Value: "unexpected service failure", Stacktrace: trace})
 	}
 	return clean
 }

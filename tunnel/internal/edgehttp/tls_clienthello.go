@@ -19,12 +19,6 @@ const clientHelloTimeout = 5 * time.Second
 var errClientHello = errors.New("TLS ingress requires a bounded ClientHello with an exact SNI hostname")
 var errHelloInspected = errors.New("ClientHello inspection complete")
 
-type clientHelloFailure struct{ cause error }
-
-func (e *clientHelloFailure) Error() string        { return "TLS ingress ClientHello could not be validated" }
-func (e *clientHelloFailure) Unwrap() error        { return e.cause }
-func (e *clientHelloFailure) Is(target error) bool { return target == errClientHello }
-
 // helloCapture lets the maintained Go TLS parser inspect fragmented records,
 // but never sends its alerts or handshake bytes to the peer. No TLS session is
 // established here. Every byte read is replayed to the authorized origin.
@@ -88,15 +82,7 @@ func inspectTLSInfrastructureClientHello(ctx context.Context, connection net.Con
 	}
 	infrastructureIP := hostname == infrastructureHost && net.ParseIP(infrastructureHost) != nil
 	if !errors.Is(err, errHelloInspected) || (!validSNIHostname(hostname) && !infrastructureIP) || inspectCtx.Err() != nil {
-		cause := err
-		if errors.Is(cause, errHelloInspected) {
-			cause = nil
-		}
-		cause = errors.Join(cause, inspectCtx.Err())
-		if cause == nil {
-			return nil, "", errClientHello
-		}
-		return nil, "", &clientHelloFailure{cause: cause}
+		return nil, "", errClientHello
 	}
 	if err := connection.SetReadDeadline(time.Time{}); err != nil {
 		return nil, "", err

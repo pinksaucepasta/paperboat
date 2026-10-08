@@ -32,4 +32,5 @@ With --json, this command group lists its available commands.
 
 * [pb env](pb_env.md)	 - Manage ENV Injection for connected hosts
 * [pb env host provision](pb_env_host_provision.md)	 - Provision an explicit encrypted ENV selection to a host
+* [pb env host show](pb_env_host_show.md)	 - Show published ENV delivery and observed application on a host
 

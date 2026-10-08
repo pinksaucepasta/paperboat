@@ -226,7 +226,7 @@ func rollbackWindowsActivation(ctx context.Context, backend windowsActivationBac
 	// Restore the durable version and CLI pointer before restarting the old
 	// updater. Otherwise the old updater can observe candidate state and race
 	// this rollback.
-	cliErr := backend.CommitCLI(ctx, windowsActivationJournal{Version: journal.PreviousVersion, PreviousCLIRecord: journal.NewCLIRecord, NewCLIRecord: journal.PreviousCLIRecord})
+	cliErr := backend.CommitCLI(ctx, journal)
 	quarantineErr := backend.Quarantine(ctx, journal)
 	// The binary and SCM target restoration are the safety boundary. Cleanup
 	// of the durable CLI record or quarantining the candidate is best effort at

@@ -8,7 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,8 +16,6 @@ import (
 	"time"
 
 	edgetelemetry "github.com/pinksaucepasta/paperboat-tunnel/internal/telemetry"
-
-	"github.com/google/uuid"
 )
 
 // ErrInvalidRequestTelemetry identifies an invalid wrapper or callback. The
@@ -44,7 +42,8 @@ const (
 )
 
 var (
-	requestRouteKinds = map[string]struct{}{
+	requestTelemetryIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{2,127}$`)
+	requestRouteKinds         = map[string]struct{}{
 		"preview_public_https_wss": {},
 		"tunnel_https_wss":         {},
 		"tunnel_tcp":               {},
@@ -85,6 +84,7 @@ type RequestTelemetry struct {
 	events  *edgetelemetry.EventLog
 	clock   func() time.Time
 	base    RequestInfo
+	seq     atomic.Uint64
 }
 
 // NewRequestTelemetry constructs a request producer. It never starts a
@@ -149,18 +149,12 @@ func (p *RequestTelemetry) Handler(next http.Handler) http.Handler {
 		info := p.infoFor(request.Context())
 		lifecycle := p.startRequest(request.Context(), info, requestProtocol(request), isWebSocketUpgrade(request.Header))
 		wrappedWriter := &requestResponseWriter{ResponseWriter: writer, lifecycle: lifecycle}
-		wrappedRequest := request.Clone(WithRequestTelemetryInfo(request.Context(), lifecycle.info))
+		wrappedRequest := request.Clone(request.Context())
 		if request.Body != nil {
 			wrappedRequest.Body = &requestBody{ReadCloser: request.Body, add: lifecycle.addIngress}
 		}
 		hijacked := false
 		defer func() {
-			if value := recover(); value != nil {
-				if value != http.ErrAbortHandler {
-					lifecycle.finishWith(errRequestHandlerPanic)
-				}
-				panic(value)
-			}
 			if wrappedWriter.hijacked.Load() {
 				hijacked = true
 			}
@@ -212,8 +206,6 @@ func (t requestRoundTripper) RoundTrip(request *http.Request) (*http.Response, e
 	info := t.producer.infoFor(request.Context())
 	protocol := requestProtocol(request)
 	lifecycle := t.producer.startRequest(request.Context(), info, protocol, isWebSocketUpgrade(request.Header))
-	info = lifecycle.info
-	request = request.WithContext(WithRequestTelemetryInfo(request.Context(), info))
 	lifecycle.route = info.RouteKind
 	if request.Body != nil && request.Body != http.NoBody {
 		request = request.Clone(request.Context())
@@ -280,10 +272,12 @@ func (p *RequestTelemetry) startRequest(ctx context.Context, info RequestInfo, p
 		protocol = "http"
 	}
 	if info.CorrelationID == "" {
-		info.CorrelationID = "correlation_" + uuid.NewString()
+		sequence := p.seq.Add(1)
+		info.CorrelationID = "corr_edge_request_" + itoa(sequence)
 	}
 	if info.IDs.RequestID == "" {
-		info.IDs.RequestID = "request_" + uuid.NewString()
+		sequence := p.seq.Add(1)
+		info.IDs.RequestID = "request_edge_" + itoa(sequence)
 	}
 	started := p.now()
 	lifecycle := &requestLifecycle{producer: p, ctx: ctx, info: info, protocol: protocol, started: started, upgraded: upgraded}
@@ -346,11 +340,10 @@ func (p *RequestTelemetry) recordOriginFailure(ctx context.Context, info Request
 	reason := originFailureReason(err)
 	outcome := "failed"
 	eventOutcome := edgetelemetry.OutcomeFailed
-	severity := edgetelemetry.SeverityError
-	if requestCanceled(ctx, err) {
+	severity := edgetelemetry.SeverityWarn
+	if errors.Is(err, context.Canceled) || errors.Is(ctxErr(ctx), context.Canceled) {
 		outcome = "canceled"
 		eventOutcome = edgetelemetry.OutcomeCanceled
-		severity = edgetelemetry.SeverityInfo
 	} else if reason == "timeout" {
 		outcome = "timeout"
 	}
@@ -458,15 +451,15 @@ func (l *requestLifecycle) finishWith(cause error) {
 		name := requestEventCompleted
 		severity := edgetelemetry.SeverityDebug
 		message := requestMessageComplete
-		if requestCanceled(l.ctx, cause) {
+		if ctxErr(l.ctx) != nil || errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) {
 			outcome = edgetelemetry.OutcomeCanceled
 			name = requestEventCanceled
-			severity = edgetelemetry.SeverityInfo
+			severity = edgetelemetry.SeverityWarn
 			message = requestMessageCanceled
-		} else if errors.Is(ctxErr(l.ctx), context.DeadlineExceeded) || requestCauseMatches(cause, func(err error) bool { return err == context.DeadlineExceeded }) || cause != nil && !requestErrorLeaves(cause, func(err error) bool { return err == io.EOF }, true) {
+		} else if cause != nil && !errors.Is(cause, io.EOF) {
 			outcome = edgetelemetry.OutcomeFailed
 			name = requestEventFailed
-			severity = edgetelemetry.SeverityError
+			severity = edgetelemetry.SeverityWarn
 			message = requestMessageFailed
 		} else if status := int(l.status.Load()); status >= http.StatusBadRequest && status < http.StatusInternalServerError {
 			outcome = edgetelemetry.OutcomeRejected
@@ -476,7 +469,7 @@ func (l *requestLifecycle) finishWith(cause error) {
 		} else if status := int(l.status.Load()); status >= http.StatusInternalServerError {
 			outcome = edgetelemetry.OutcomeFailed
 			name = requestEventFailed
-			severity = edgetelemetry.SeverityError
+			severity = edgetelemetry.SeverityWarn
 			message = requestMessageFailed
 		}
 		if l.producer != nil {
@@ -533,7 +526,6 @@ func (b *requestBody) Read(payload []byte) (int, error) {
 type responseBody struct {
 	body      io.ReadCloser
 	lifecycle *requestLifecycle
-	stopMu    sync.Mutex
 	stop      func() bool
 	once      sync.Once
 	err       error
@@ -544,14 +536,12 @@ func newResponseBody(ctx context.Context, body io.ReadCloser, lifecycle *request
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	wrapped.stopMu.Lock()
 	wrapped.stop = context.AfterFunc(ctx, func() {
 		if wrapped.lifecycle != nil {
 			wrapped.lifecycle.finishWith(ctx.Err())
 		}
 		_ = wrapped.Close()
 	})
-	wrapped.stopMu.Unlock()
 	return wrapped
 }
 
@@ -594,11 +584,8 @@ func (b *responseBody) Close() error {
 		return nil
 	}
 	b.once.Do(func() {
-		b.stopMu.Lock()
-		stop := b.stop
-		b.stopMu.Unlock()
-		if stop != nil {
-			stop()
+		if b.stop != nil {
+			b.stop()
 		}
 		if b.body != nil {
 			b.err = b.body.Close()
@@ -612,7 +599,7 @@ func (b *responseBody) finish(err error) {
 	if b == nil || b.lifecycle == nil {
 		return
 	}
-	if requestErrorLeaves(err, func(leaf error) bool { return leaf == io.EOF }, true) {
+	if errors.Is(err, io.EOF) {
 		err = nil
 	}
 	b.lifecycle.finishWith(err)
@@ -869,115 +856,31 @@ func normalizeUpgradeTo(protocol string) string {
 }
 
 func originFailureReason(err error) string {
-	if requestCauseMatches(err, func(leaf error) bool {
-		timeout, ok := leaf.(net.Error)
-		return leaf == context.DeadlineExceeded || ok && timeout.Timeout()
-	}) {
+	if errors.Is(err, context.DeadlineExceeded) {
 		return "timeout"
 	}
-	if requestCauseMatches(err, func(leaf error) bool { return leaf == syscall.ECONNREFUSED }) {
+	var timeout net.Error
+	if errors.As(err, &timeout) && timeout.Timeout() {
+		return "timeout"
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) {
 		return "refused"
 	}
-	if requestCauseMatches(err, func(leaf error) bool {
-		if _, ok := leaf.(*tls.CertificateVerificationError); ok {
-			return true
-		}
-		operation, ok := leaf.(*net.OpError)
-		return ok && operation.Op == "crypto/tls"
-	}) {
+	var tlsError *tls.CertificateVerificationError
+	if errors.As(err, &tlsError) {
 		return "tls"
 	}
-	if requestCauseMatches(err, func(leaf error) bool {
-		return leaf == syscall.ECONNRESET || leaf == net.ErrClosed || leaf == io.ErrUnexpectedEOF
-	}) {
+	var operationError *net.OpError
+	if errors.As(err, &operationError) && operationError.Op == "crypto/tls" {
+		return "tls"
+	}
+	if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, net.ErrClosed) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return "reset"
 	}
 	if err == nil {
 		return "unknown"
 	}
 	return "unavailable"
-}
-
-var errRequestHandlerPanic = errors.New("edge request handler panicked")
-
-// Request callbacks may return joined or malformed error chains. Keep the
-// cancellation proof bounded; an unresolved leaf is an operational failure.
-func requestErrorLeaves(err error, accept func(error) bool, all bool) bool {
-	pending := []error{err}
-	found := false
-	for remaining := 16; remaining > 0 && len(pending) > 0; remaining-- {
-		current := pending[0]
-		pending = pending[1:]
-		if current == nil {
-			if all {
-				return false
-			}
-			continue
-		}
-		value := reflect.ValueOf(current)
-		if value.Kind() == reflect.Pointer && value.IsNil() {
-			if all {
-				return false
-			}
-			continue
-		}
-		if !all && accept(current) {
-			return true
-		}
-		switch wrapped := current.(type) {
-		case interface{ Unwrap() []error }:
-			children := wrapped.Unwrap()
-			if len(children) == 0 {
-				if all && !accept(current) {
-					return false
-				}
-				found = true
-				continue
-			}
-			capacity := remaining - 1 - len(pending)
-			if capacity < 0 {
-				capacity = 0
-			}
-			if len(children) > capacity {
-				return false
-			}
-			pending = append(children, pending...)
-		case interface{ Unwrap() error }:
-			child := wrapped.Unwrap()
-			if child != nil {
-				pending = append([]error{child}, pending...)
-				continue
-			}
-			if all && !accept(current) {
-				return false
-			}
-			found = true
-		default:
-			if all && !accept(current) {
-				return false
-			}
-			found = true
-		}
-	}
-	return all && found && len(pending) == 0
-}
-
-func requestCauseMatches(err error, accept func(error) bool) bool {
-	return requestErrorLeaves(err, accept, false)
-}
-func requestCanceled(ctx context.Context, cause error) bool {
-	if ctxErr(ctx) == context.DeadlineExceeded {
-		return false
-	}
-	if cause == nil {
-		return ctxErr(ctx) == context.Canceled
-	}
-	return requestErrorLeaves(cause, func(err error) bool {
-		if err == context.Canceled {
-			return true
-		}
-		return ctxErr(ctx) == context.Canceled && (err == net.ErrClosed || err == io.ErrClosedPipe || err == io.EOF)
-	}, true)
 }
 
 func cancellationReason(ctx context.Context, cause error) string {
@@ -1003,39 +906,49 @@ func ctxErr(ctx context.Context) error {
 }
 
 func safeRequestCorrelation(value string) bool {
-	return edgetelemetry.SafeOpaqueID(value)
+	return requestTelemetryIDPattern.MatchString(value) && (strings.HasPrefix(value, "corr_") || strings.HasPrefix(value, "cor_") || strings.HasPrefix(value, "correlation_") || strings.HasPrefix(value, "request_") || strings.HasPrefix(value, "pb-"))
 }
 
 func safeRequestIDs(ids edgetelemetry.SafeIDs) edgetelemetry.SafeIDs {
-	ids.AccountID = safeRequestID(ids.AccountID)
-	ids.ActorID = safeRequestID(ids.ActorID)
-	ids.TunnelID = safeRequestID(ids.TunnelID)
-	ids.RouteID = safeRequestID(ids.RouteID)
-	ids.ConnectorID = safeRequestID(ids.ConnectorID)
-	ids.DomainID = safeRequestID(ids.DomainID)
-	ids.CertificateID = safeRequestID(ids.CertificateID)
-	ids.AssignmentID = safeRequestID(ids.AssignmentID)
-	ids.HostID = safeRequestID(ids.HostID)
-	ids.MachineID = safeRequestID(ids.MachineID)
-	ids.SessionID = safeRequestID(ids.SessionID)
-	ids.OperationID = safeRequestID(ids.OperationID)
-	ids.RequestID = safeRequestID(ids.RequestID)
-	ids.EdgeNodeID = safeRequestID(ids.EdgeNodeID)
+	ids.AccountID = safeRequestID(ids.AccountID, "account_")
+	ids.ActorID = safeRequestID(ids.ActorID, "actor_")
+	ids.TunnelID = safeRequestID(ids.TunnelID, "tunnel_")
+	ids.RouteID = safeRequestID(ids.RouteID, "route_")
+	ids.ConnectorID = safeRequestID(ids.ConnectorID, "connector_")
+	ids.DomainID = safeRequestID(ids.DomainID, "domain_")
+	ids.CertificateID = safeRequestID(ids.CertificateID, "certificate_")
+	ids.AssignmentID = safeRequestID(ids.AssignmentID, "assignment_")
+	ids.HostID = safeRequestID(ids.HostID, "host_")
+	ids.DeviceID = safeRequestID(ids.DeviceID, "device_")
+	ids.SessionID = safeRequestID(ids.SessionID, "session_", "carrier_")
+	ids.OperationID = safeRequestID(ids.OperationID, "operation_", "op_")
+	ids.RequestID = safeRequestID(ids.RequestID, "request_", "req_")
+	ids.EdgeNodeID = safeRequestID(ids.EdgeNodeID, "edge_")
 	return ids
 }
 
-func safeRequestID(value string) string {
-	if edgetelemetry.SafeOpaqueID(value) {
-		return value
+func safeRequestID(value string, prefixes ...string) string {
+	if value == "" || !requestTelemetryIDPattern.MatchString(value) {
+		return ""
+	}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(value, prefix) && len(value) > len(prefix) {
+			return value
+		}
 	}
 	return ""
 }
 
-func requestIDFor(request *http.Request) string {
-	if request != nil {
-		if info, ok := RequestTelemetryInfo(request.Context()); ok && edgetelemetry.SafeOpaqueID(info.IDs.RequestID) {
-			return info.IDs.RequestID
-		}
+func itoa(value uint64) string {
+	if value == 0 {
+		return "0"
 	}
-	return "request_" + uuid.NewString()
+	var buffer [20]byte
+	index := len(buffer)
+	for value > 0 {
+		index--
+		buffer[index] = byte('0' + value%10)
+		value /= 10
+	}
+	return string(buffer[index:])
 }

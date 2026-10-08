@@ -95,10 +95,7 @@ func (s *Ed25519DistributionRequestSigner) SignDistributionRequest(ctx context.C
 		return DistributionRequestProof{}, ErrDistributionProofInvalid
 	}
 	nonceBytes, err := s.nonce()
-	if err != nil {
-		return DistributionRequestProof{}, documentFailure{sentinel: ErrDistributionProofInvalid, cause: err}
-	}
-	if len(nonceBytes) != distributionProofNonceBytes {
+	if err != nil || len(nonceBytes) != distributionProofNonceBytes {
 		return DistributionRequestProof{}, ErrDistributionProofInvalid
 	}
 	nonce := base64.RawURLEncoding.EncodeToString(nonceBytes)

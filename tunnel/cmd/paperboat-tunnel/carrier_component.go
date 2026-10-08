@@ -5,12 +5,12 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/config"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgehttp"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
 	edgeruntime "github.com/pinksaucepasta/paperboat-tunnel/internal/runtime"
 )
 
@@ -24,7 +24,6 @@ func newCarrierComponentWithTelemetry(
 	durableRoutes *edgehttp.DataCarrierRouteRegistry,
 	privateAccess *edgehttp.PrivateAccessStreamBridge,
 	carrierTelemetry *datacarrier.CarrierTelemetry,
-	reporter *reporting.Reporter,
 	runtimeWorkers ...*edgeruntime.RuntimeCarrierWorker,
 ) (edgeruntime.Component, func() error, error) {
 	if previewExpected == nil || previewHandle == nil {
@@ -92,15 +91,8 @@ func newCarrierComponentWithTelemetry(
 	carrierConfig.Authorize = datacarrier.AnyAuthorizer(authorizers...)
 	service, err := datacarrier.NewHTTPService(context.Background(), datacarrier.ServiceConfig{
 		Carrier: carrierConfig,
-		OnFailure: func(ctx context.Context, err error) {
-			if errors.Is(err, datacarrier.ErrCarrierHTTPPanic) {
-				reporter.CaptureFailure(ctx, "process_panic", reporting.PanicFailure{})
-			} else {
-				reporter.ObserveFailure(ctx, "http_server", err)
-			}
-		},
-		TCP:  &datacarrier.EndpointConfig{Address: deployment.CarrierTCPListenAddress, TLS: tlsConfig, PeerBinding: peerBinding},
-		QUIC: &datacarrier.EndpointConfig{Address: deployment.CarrierQUICListenAddress, TLS: tlsConfig, PeerBinding: peerBinding},
+		TCP:     &datacarrier.EndpointConfig{Address: deployment.CarrierTCPListenAddress, TLS: tlsConfig, PeerBinding: peerBinding},
+		QUIC:    &datacarrier.EndpointConfig{Address: deployment.CarrierQUICListenAddress, TLS: tlsConfig, PeerBinding: peerBinding},
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("create carrier service: %w", err)
@@ -114,6 +106,7 @@ func newCarrierComponentWithTelemetry(
 	}
 	handle := func(ctx context.Context, server *datacarrier.Server) error {
 		identity := server.Identity()
+		slog.Info("carrier session accepted", "account_id", identity.AccountID, "host_id", identity.HostID, "tunnel_id", identity.TunnelID, "connector_id", identity.ConnectorID, "session_id", identity.SessionID, "process_generation", identity.ProcessGeneration, "config_generation", identity.Generation)
 		durableRegistered := false
 		syncDurable := func(now time.Time) error {
 			if durableExpected == nil || !durableExpected.HasIdentity(identity, now) {
@@ -149,6 +142,7 @@ func newCarrierComponentWithTelemetry(
 			if err := durableRoutes.AttachReplica(server, publicKey, thumbprint, state); err != nil {
 				return fmt.Errorf("attach durable carrier: %w", err)
 			}
+			slog.Info("carrier promoted to durable routes", "tunnel_id", identity.TunnelID, "connector_id", identity.ConnectorID, "session_id", identity.SessionID, "routes", len(routeIDs))
 			durableRegistered = true
 			return nil
 		}
@@ -224,7 +218,7 @@ func newCarrierComponentWithTelemetry(
 			return ctx.Err()
 		}
 	}
-	assembly, err := edgeruntime.NewCarrierAssembly(edgeruntime.CarrierAssemblyConfig{Reporter: reporter, Service: service, Handle: handle, MaximumHandlers: maximumHandlers, Telemetry: carrierTelemetry})
+	assembly, err := edgeruntime.NewCarrierAssembly(edgeruntime.CarrierAssemblyConfig{Service: service, Handle: handle, MaximumHandlers: maximumHandlers, Telemetry: carrierTelemetry})
 	if err != nil {
 		_ = service.Close()
 		return nil, nil, fmt.Errorf("create carrier assembly: %w", err)

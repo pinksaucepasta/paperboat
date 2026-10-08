@@ -195,7 +195,11 @@ func (v PasswordVault) publishOperation(ctx context.Context, local *config.Passw
 		}
 		out, err := c.PutVaultScope(ctx, op.OwnerKind, op.OwnerID, op.MachineID, in)
 		if err != nil {
-			return err
+			var rejected *api.APIError
+			if errors.As(err, &rejected) && rejected.Status == 409 && rejected.Code == "version_conflict" {
+				return v.reconcileScopeConflict(ctx, local, c, in, err)
+			}
+			return &ScopePublicationPending{Cause: err}
 		}
 		if out.Envelope != in.Envelope {
 			return ErrIntegrity
@@ -261,7 +265,44 @@ func (v PasswordVault) publishOperation(ctx context.Context, local *config.Passw
 				}
 				return &HostRefreshConflict{Cause: err}
 			}
-			return err
+			if errors.As(err, &rejected) && rejected.Status == 409 && rejected.Code == "rotation_required" {
+				current, readErr := hostClient.GetVaultHost(ctx, op.MachineID)
+				if readErr != nil {
+					var retired *api.APIError
+					if errors.As(readErr, &retired) && (retired.Status == 404 || retired.Status == 422) {
+						local.Operation = nil
+						if saveErr := v.Store.SavePasswordVault(*local); saveErr != nil {
+							return &HostPublicationPending{Cause: errors.Join(err, readErr, saveErr)}
+						}
+						return &HostRotationRequired{Cause: err}
+					}
+					return &HostPublicationPending{Cause: errors.Join(err, readErr)}
+				}
+				raw, decodeErr := base64.RawURLEncoding.Strict().DecodeString(in.Envelope)
+				writer, writerErr := base64.RawURLEncoding.Strict().DecodeString(current.Bundle.WriterPublic)
+				projection, projectionErr := environmente2ee.ParseHostProjection(raw, writer)
+				binding := current.Bundle
+				if decodeErr != nil || writerErr != nil || projectionErr != nil || binding.AccountID != v.AccountID || binding.MachineID != op.MachineID || binding.State == "revoked" || projection.Claims.OwnerAccount != v.AccountID || projection.Claims.MachineID != op.MachineID || projection.Claims.Issuer != v.Issuer || projection.Claims.InstallationGeneration != binding.InstallationGeneration || projection.Claims.HostKeyGeneration != binding.HostKeyGeneration || projection.Claims.SelectionGeneration != in.ExpectedSelectionGeneration+1 {
+					return &HostPublicationPending{Cause: errors.Join(err, ErrIntegrity)}
+				}
+				// A lost committed response may subsequently encounter rotation.
+				// Equal digest is published; a later cursor is superseded; a
+				// lower cursor proves this staged revision wasn't published.
+				hostPublic, hostPublicErr := base64.RawURLEncoding.Strict().DecodeString(binding.HostPublic)
+				if hostPublicErr != nil || !bytes.Equal(hostPublic, projection.Claims.HostPublic) || (binding.ProjectionRevision >= projection.Claims.Revision && binding.SelectionGeneration < projection.Claims.SelectionGeneration) || (binding.ProjectionRevision < projection.Claims.Revision && binding.SelectionGeneration > in.ExpectedSelectionGeneration) {
+					return &HostPublicationPending{Cause: errors.Join(err, ErrIntegrity)}
+				}
+				published := binding.DocumentID == projection.ID.String()
+				if binding.ProjectionRevision == projection.Claims.Revision && published && binding.SelectionGeneration != projection.Claims.SelectionGeneration {
+					return &HostPublicationPending{Cause: errors.Join(err, ErrIntegrity)}
+				}
+				local.Operation = nil
+				if saveErr := v.Store.SavePasswordVault(*local); saveErr != nil {
+					return &HostPublicationPending{Cause: errors.Join(err, saveErr)}
+				}
+				return &HostRotationRequired{Cause: err, Published: published}
+			}
+			return &HostPublicationPending{Cause: err}
 		}
 		if out.Envelope != in.Envelope || out.MachineID != op.MachineID || out.AccountID != v.AccountID || out.State != "ready" {
 			return ErrIntegrity

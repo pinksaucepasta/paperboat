@@ -64,32 +64,37 @@ func (l *sharedLock) Lock() error {
 		}
 	}()
 	if err := prepareSharedLockParent(filepath.Dir(l.path)); err != nil {
-		return err
+		return safeConfigCause("shared credential lock parent could not be prepared", err)
 	}
 	hostname, _ := os.Hostname()
 	l.token = strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 	owner := sharedLockOwner{PID: os.Getpid(), Hostname: hostname, CreatedAt: time.Now().UTC(), Token: l.token}
 	encoded, err := json.Marshal(owner)
 	if err != nil {
-		return err
+		return safeConfigCause("shared credential lock owner could not be encoded", err)
 	}
 	deadline := time.Now().Add(30 * time.Second)
+	var lastOwnerErr error
 	for {
 		if err := createSharedLockDirectory(l.path); err == nil {
 			if err := writeSharedLockOwner(filepath.Join(l.path, "owner.json"), append(encoded, '\n')); err != nil {
-				_ = cleanupNewSharedLock(l.path)
-				return err
+				writeErr := safeConfigCause("shared credential lock owner could not be written", err)
+				if cleanupErr := cleanupNewSharedLock(l.path); cleanupErr != nil {
+					writeErr = errors.Join(writeErr, safeConfigCause("failed shared credential lock could not be cleaned up", cleanupErr))
+				}
+				return writeErr
 			}
 			locked = true
 			return nil
 		} else if !os.IsExist(err) {
-			return err
+			return safeConfigCause("shared credential lock could not be acquired", err)
 		}
 		if err := validateSharedLockDirectory(l.path); err != nil {
-			return err
+			return safeConfigCause("shared credential lock could not be validated", err)
 		}
 		_, ownerErr := os.Lstat(filepath.Join(l.path, "owner.json"))
 		stale, err := sharedLockIsStale(l.path, hostname)
+		lastOwnerErr = err
 		if err == nil && stale {
 			if os.IsNotExist(ownerErr) {
 				// Empty-only removal is atomic: if a creator publishes ownership
@@ -106,7 +111,7 @@ func (l *sharedLock) Lock() error {
 			}
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("timed out waiting for shared credential lock %s", l.path)
+			return errors.Join(errors.New("timed out waiting for shared credential lock"), lastOwnerErr)
 		}
 		//paperboat:allow-source-policy sleep owner=runtime-auth reason=bounded-cross-process-lock-poll
 		time.Sleep(25 * time.Millisecond)
@@ -115,19 +120,19 @@ func (l *sharedLock) Lock() error {
 
 func sharedLockIsStale(path, hostname string) (bool, error) {
 	b, err := os.ReadFile(filepath.Join(path, "owner.json"))
-	if os.IsNotExist(err) {
+	if credentialAbsenceOnly(err) {
 		info, statErr := os.Stat(path)
 		if statErr != nil {
-			return false, statErr
+			return false, safeConfigCause("shared credential lock directory could not be inspected", statErr)
 		}
 		return time.Since(info.ModTime()) > sharedLockOwnerlessStaleAfter, nil
 	}
 	if err != nil {
-		return false, err
+		return false, safeConfigCause("shared credential lock owner could not be read", err)
 	}
 	var owner sharedLockOwner
 	if err := json.Unmarshal(b, &owner); err != nil {
-		return false, err
+		return false, safeConfigCause("shared credential lock owner is invalid", err)
 	}
 	if owner.Hostname != hostname {
 		return time.Since(owner.CreatedAt) > sharedLockRemoteStaleAfter, nil
@@ -142,26 +147,29 @@ func (l *sharedLock) Unlock() error {
 		}
 	}()
 	if err := validateSharedLockDirectory(l.path); err != nil {
-		if os.IsNotExist(err) {
+		if credentialAbsenceOnly(err) {
 			return nil
 		}
-		return err
+		return safeConfigCause("shared credential lock could not be validated during release", err)
 	}
 	b, err := os.ReadFile(filepath.Join(l.path, "owner.json"))
-	if os.IsNotExist(err) {
+	if credentialAbsenceOnly(err) {
 		return nil
 	}
 	if err != nil {
-		return err
+		return safeConfigCause("shared credential lock owner could not be read", err)
 	}
 	var owner sharedLockOwner
 	if err := json.Unmarshal(b, &owner); err != nil {
-		return err
+		return safeConfigCause("shared credential lock owner is invalid", err)
 	}
 	if owner.Token != l.token {
 		return nil
 	}
-	return removeSharedLock(l.path)
+	if err := removeSharedLock(l.path); err != nil {
+		return safeConfigCause("shared credential lock could not be removed", err)
+	}
+	return nil
 }
 
 var (
@@ -223,38 +231,65 @@ type FileSecretStore struct{ Dir string }
 func (s FileSecretStore) path(ref string) string { return filepath.Join(s.Dir, ref+".secret") }
 func (s FileSecretStore) Set(ref, value string) error {
 	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
-		return err
+		return safeConfigCause("credential storage directory could not be created", err)
 	}
 	if err := validateCredentialDirectory(s.Dir); err != nil {
-		return err
+		if isSafeConfigError(err) {
+			return err
+		}
+		return safeConfigCause("credential storage directory could not be validated", err)
 	}
-	return writeCredentialFile(s.path(ref), []byte(value))
+	if err := writeCredentialFile(s.path(ref), []byte(value)); err != nil {
+		if isSafeConfigError(err) {
+			return err
+		}
+		return safeConfigCause("credential file could not be stored", err)
+	}
+	return nil
 }
 func (s FileSecretStore) Get(ref string) (string, error) {
 	if err := validateCredentialDirectory(s.Dir); err != nil {
-		if os.IsNotExist(err) {
+		if credentialAbsenceOnly(err) {
 			return "", ErrSecretNotFound
 		}
-		return "", err
+		if isSafeConfigError(err) {
+			return "", err
+		}
+		return "", safeConfigCause("credential storage directory could not be validated", err)
 	}
 	b, err := readCredentialFile(s.path(ref))
-	if os.IsNotExist(err) {
+	if credentialAbsenceOnly(err) {
 		return "", ErrSecretNotFound
 	}
-	return string(b), err
+	if err != nil {
+		if errors.Is(err, ErrCredentialRequiresInteractiveLogin) || isSafeConfigError(err) {
+			return "", err
+		}
+		return "", safeConfigCause("credential file could not be read", err)
+	}
+	return string(b), nil
 }
 func (s FileSecretStore) Delete(ref string) error {
 	if err := validateCredentialDirectory(s.Dir); err != nil {
-		if os.IsNotExist(err) {
+		if credentialAbsenceOnly(err) {
 			return nil
 		}
-		return err
+		if isSafeConfigError(err) {
+			return err
+		}
+		return safeConfigCause("credential storage directory could not be validated", err)
 	}
 	err := os.Remove(s.path(ref))
-	if os.IsNotExist(err) {
+	if credentialAbsenceOnly(err) {
 		return nil
 	}
-	return err
+	if err != nil {
+		if isSafeConfigError(err) {
+			return err
+		}
+		return safeConfigCause("credential file could not be deleted", err)
+	}
+	return nil
 }
 
 type AuthSource interface{ Credential() (Credential, error) }
@@ -273,8 +308,11 @@ type ProfileStore struct {
 
 func NormalizeIssuer(raw string) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return "", fmt.Errorf("invalid Paperboat server URL %q", raw)
+	if err != nil {
+		return "", safeConfigCause("invalid Paperboat server URL", err)
+	}
+	if u.Scheme == "" || u.Host == "" || u.User != nil {
+		return "", errors.New("invalid Paperboat server URL")
 	}
 	u.Scheme = strings.ToLower(u.Scheme)
 	hostname := strings.ToLower(u.Hostname())
@@ -403,15 +441,15 @@ func (s ProfileStore) Load(issuer string) (Profile, error) {
 
 func (s ProfileStore) loadNormalized(issuer string) (Profile, error) {
 	b, err := os.ReadFile(s.profilePath(issuer))
-	if os.IsNotExist(err) {
+	if credentialAbsenceOnly(err) {
 		return Profile{}, ErrNoCredentials
 	}
 	if err != nil {
-		return Profile{}, err
+		return Profile{}, safeConfigCause("credential profile could not be read", err)
 	}
 	var p Profile
 	if err := json.Unmarshal(b, &p); err != nil {
-		return Profile{}, fmt.Errorf("parse credential profile: %w", err)
+		return Profile{}, safeConfigCause("credential profile is invalid", err)
 	}
 	if p.Version != ProfileVersion || p.Issuer != issuer {
 		return Profile{}, fmt.Errorf("unsupported or mismatched credential profile")

@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -87,10 +86,7 @@ func RuntimeArgs(args []string) ([]string, bool, error) {
 	if e == nil {
 		e = json.Unmarshal(b, &out)
 	}
-	if e != nil {
-		return nil, true, fmt.Errorf("cannot read generated runtime arguments; finish claiming this installation in the dashboard: %w", e)
-	}
-	if len(out) == 0 {
+	if e != nil || len(out) == 0 {
 		return nil, true, errors.New("cannot read generated runtime arguments; finish claiming this installation in the dashboard")
 	}
 	return out, true, nil

@@ -64,6 +64,7 @@ type VaultTeamMember struct {
 	EnvPermission        string `json:"env_permission"`
 }
 type VaultTeamState struct {
+	Entitled         bool              `json:"entitled"`
 	RotationRequired bool              `json:"rotation_required"`
 	TeamID           string            `json:"team_id"`
 	OwnerAccount     string            `json:"owner_account"`
@@ -117,6 +118,13 @@ func vaultScopePath(kind, owner, machine string) string {
 }
 func (c *Client) GetVaultScope(ctx context.Context, kind, owner, machine string) (VaultScopeState, error) {
 	var out VaultScopeState
+	// Machine overrides are owned Personal sources, including when the selected
+	// base source belongs to a Team. Keep the caller's workspace unchanged.
+	if kind == "personal" && machine != "" {
+		personal := *c
+		personal.workspace = "personal"
+		c = &personal
+	}
 	err := c.vaultDataRequest(ctx, http.MethodGet, vaultScopePath(kind, owner, machine), nil, &out)
 	if err == nil {
 		_, err = out.Decode()
@@ -125,6 +133,13 @@ func (c *Client) GetVaultScope(ctx context.Context, kind, owner, machine string)
 }
 func (c *Client) PutVaultScope(ctx context.Context, kind, owner, machine string, in VaultScopePut) (VaultScopeState, error) {
 	var out VaultScopeState
+	// Machine overrides are owned Personal sources, including when the selected
+	// base source belongs to a Team. Keep the caller's workspace unchanged.
+	if kind == "personal" && machine != "" {
+		personal := *c
+		personal.workspace = "personal"
+		c = &personal
+	}
 	err := c.vaultDataRequest(ctx, http.MethodPut, vaultScopePath(kind, owner, machine), in, &out)
 	if err == nil {
 		_, err = out.Decode()

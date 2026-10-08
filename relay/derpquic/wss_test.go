@@ -137,7 +137,7 @@ func TestMixedQUICWSSViaProxyAndRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(t, func() bool { b.mu.Lock(); defer b.mu.Unlock(); return b.current != nil && b.current.ctx.Err() != nil })
-	if err := b.Connect(context.Background()); !errors.Is(err, ErrAdmission) {
+	if err := b.Connect(context.Background()); err != ErrAdmission {
 		t.Fatalf("revoked WSS admission: %v", err)
 	}
 }
@@ -156,7 +156,7 @@ func TestWSSAccountConnectionBound(t *testing.T) {
 	k, cert := key.NewNode().Public(), certificate(t)
 	g := f.grant(k, cert, "overflow")
 	overflow, _ := f.wss(s, cert, g, nil)
-	if err := overflow.Connect(context.Background()); !errors.Is(err, ErrOverload) {
+	if err := overflow.Connect(context.Background()); err != ErrOverload {
 		t.Fatalf("WSS account overload: %v", err)
 	}
 	eventually(t, func() bool { return s.Snapshot().Connections == MaxAccountConnections })
@@ -268,50 +268,4 @@ func testWSSExpiredLease(t *testing.T, callback bool) {
 		t.Fatal(err)
 	}
 	receive(t, b, ka, payload)
-}
-
-func TestWSSControlServiceUsesOwnedConnectionContext(t *testing.T) {
-	f := newFixture(t)
-	server, err := NewServer(f.verifier)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer server.Close()
-	identity := ServiceDescriptor{WireGuardPublicKey: KeyString(key.NewNode().Public()), DiscoPublicKey: DiscoKeyString(key.NewDisco().Public()), VirtualAddress: "fd7a:115c:a1e0::123"}
-	called := make(chan struct{}, 1)
-	if err := server.SetControlService(identity, func(ctx context.Context, request ControlRequest) ([]byte, error) {
-		if _, err := request.SourceDisco(); err != nil {
-			return nil, err
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
-		called <- struct{}{}
-		return nil, ErrProtocol
-	}); err != nil {
-		t.Fatal(err)
-	}
-	cert := certificate(t)
-	grant := f.grant(key.NewNode().Public(), cert, "wss-control")
-	grant.DiscoPublicKey = DiscoKeyString(key.NewDisco().Public())
-	grant.PeerRelay = &identity
-	client, _ := f.wss(server, cert, grant, nil)
-	connectWSS(t, client)
-	service, _ := ParseKey(identity.WireGuardPublicKey)
-	if err := client.SendControl(service, []byte("PRIVATE_CONTROL_PAYLOAD")); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-called:
-	case <-time.After(time.Second):
-		t.Fatal("WSS control did not reach its authorized handler")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if err := client.Ping(ctx); err != nil {
-		t.Fatal("handler rejection closed healthy WSS connection")
-	}
-	eventually(t, func() bool { return server.Snapshot().Dropped == 1 })
 }

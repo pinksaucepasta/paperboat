@@ -11,7 +11,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/config"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/node"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
 )
 
 type Component interface {
@@ -20,7 +19,6 @@ type Component interface {
 }
 
 type Service struct {
-	Reporter   *reporting.Reporter
 	cfg        config.Config
 	node       *node.State
 	components []Component
@@ -32,12 +30,11 @@ type Service struct {
 	closed   bool
 	listen   func(network, address string) (net.Listener, error)
 	done     chan error
-	stop     chan struct{}
 	handler  http.Handler
 }
 
 func New(cfg config.Config, state *node.State, components ...Component) *Service {
-	return &Service{cfg: cfg, node: state, components: components, listen: net.Listen, done: make(chan error, 1), stop: make(chan struct{}), handler: state.HealthHandler()}
+	return &Service{cfg: cfg, node: state, components: components, listen: net.Listen, done: make(chan error, 1), handler: state.HealthHandler()}
 }
 
 func (s *Service) SetHealthHandler(handler http.Handler) error {
@@ -51,12 +48,6 @@ func (s *Service) SetHealthHandler(handler http.Handler) error {
 }
 
 func (s *Service) Start(ctx context.Context) error {
-	if ctx == nil {
-		return ErrProcessInvalid
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.listener != nil || s.closed {
@@ -68,20 +59,12 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 	s.listener = listener
 	s.health = &http.Server{
-		Handler:           httpDiagnosticHandler(ctx, s.Reporter, s.handler),
-		ErrorLog:          httpDiagnosticLogger(ctx, s.Reporter),
+		Handler:           s.handler,
 		ReadHeaderTimeout: 2 * time.Second,
 		IdleTimeout:       30 * time.Second,
 		MaxHeaderBytes:    8 << 10,
 	}
-	go func() {
-		if err := s.health.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			select {
-			case s.done <- err:
-			default:
-			}
-		}
-	}()
+	go func() { _ = s.health.Serve(listener) }()
 	for _, component := range s.components {
 		if err := component.Start(ctx); err != nil {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), s.cfg.ShutdownTimeout)
@@ -92,12 +75,7 @@ func (s *Service) Start(ctx context.Context) error {
 		s.started = append(s.started, component)
 		if source, ok := component.(interface{ Done() <-chan error }); ok {
 			go func() {
-				var err error
-				select {
-				case err = <-source.Done():
-				case <-s.stop:
-					return
-				}
+				err := <-source.Done()
 				select {
 				case s.done <- err:
 				default:
@@ -126,7 +104,6 @@ func (s *Service) shutdownLocked(ctx context.Context) error {
 		return nil
 	}
 	s.closed = true
-	close(s.stop)
 	s.node.BeginDrain(deadline(ctx))
 	var errs []error
 	for i := len(s.started) - 1; i >= 0; i-- {

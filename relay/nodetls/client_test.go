@@ -8,7 +8,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
-	"errors"
 	"github.com/quic-go/quic-go"
 	"math/big"
 	"net"
@@ -179,21 +178,5 @@ func TestHostedTLSWire(t *testing.T) {
 				t.Fatalf("hosted handshake: %v", err)
 			}
 		})
-	}
-}
-
-func TestPinnedIdentityPreservesTypedCertificateCause(t *testing.T) {
-	cert, pin := certificate(t, true, x509.ExtKeyUsageServerAuth)
-	config, err := ClientConfig(&tls.Config{}, pin)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = config.VerifyConnection(tls.ConnectionState{PeerCertificates: []*x509.Certificate{cert.Leaf}})
-	var cause x509.CertificateInvalidError
-	if !errors.Is(err, ErrIdentity) || !errors.As(err, &cause) || cause.Reason != x509.Expired {
-		t.Fatalf("typed verification cause missing: %v", err)
-	}
-	if err.Error() != ErrIdentity.Error() {
-		t.Fatal("certificate details leaked")
 	}
 }

@@ -53,7 +53,18 @@ func windowsCredentialError(operation string, err error) error {
 	if errors.Is(err, windows.ERROR_NOT_FOUND) {
 		return ErrSecretNotFound
 	}
-	return fmt.Errorf("%w: Credential Manager %s: %v", ErrCredentialStoreUnavailable, operation, err)
+	message := "Credential Manager operation failed"
+	switch operation {
+	case "read":
+		message = "Credential Manager could not read the credential"
+	case "write":
+		message = "Credential Manager could not write the credential"
+	case "delete":
+		message = "Credential Manager could not delete the credential"
+	case "encode credential name":
+		message = "Credential Manager credential name is invalid"
+	}
+	return credentialStoreFailure(message, err)
 }
 
 // A network or S4U logon has no Credential Manager logon session. DPAPI is
@@ -97,10 +108,24 @@ func (KeyringStore) Set(ref, value string) error {
 	// DPAPI is the sole write authority. Credential Manager is read only as a
 	// one-time migration source in Get. A Set therefore has one atomic replace
 	// and cannot expose different old/new values to interactive and S4U logons.
-	return setDPAPISecret(ref, value, nil)
+	if err := setDPAPISecret(ref, value, nil); err != nil {
+		return credentialStoreFailure("OS credential store unavailable", err)
+	}
+	return nil
 }
 
-func (KeyringStore) Get(ref string) (string, error) {
+func (KeyringStore) Get(ref string) (value string, resultErr error) {
+	defer func() {
+		if resultErr == nil || credentialAbsenceOnly(resultErr) {
+			return
+		}
+		if errors.Is(resultErr, ErrCredentialRequiresInteractiveLogin) {
+			resultErr = safeConfigCause("credential requires an interactive login to migrate", resultErr)
+		} else {
+			resultErr = credentialStoreFailure("OS credential store unavailable", resultErr)
+		}
+		value = ""
+	}()
 	// Prefer the machine-scope DPAPI copy protected by the enrolled owner's
 	// exact filesystem ownership and owner/SY/BA ACL so interactive commands,
 	// scheduled tasks and the S4U owner workload resolve one durable value.
@@ -232,5 +257,8 @@ func deleteWindowsCredential(ref string, deleteLegacy windowsCredentialDeleteFun
 }
 
 func (KeyringStore) Delete(ref string) error {
-	return deleteWindowsCredential(ref, callWindowsCredentialDelete)
+	if err := deleteWindowsCredential(ref, callWindowsCredentialDelete); err != nil {
+		return credentialStoreFailure("OS credential store unavailable", err)
+	}
+	return nil
 }

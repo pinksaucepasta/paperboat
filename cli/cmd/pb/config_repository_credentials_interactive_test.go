@@ -36,6 +36,13 @@ func TestConfigCredentialInteractiveExplicitFileValidation(t *testing.T) {
 			t.Fatal("unsafe or unavailable file accepted")
 		}
 	}
+	missing := filepath.Join(root, "private-missing-key")
+	if err := validateCredentialInteractiveFile(missing); err == nil || !errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), missing) {
+		t.Fatalf("missing key reference lost private cause or exposed path: %v", err)
+	}
+	if _, err := readCredentialInteractiveReference(missing); err == nil || !errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), missing) {
+		t.Fatalf("missing credential reference lost private cause or exposed path: %v", err)
+	}
 	link := filepath.Join(root, "symlink")
 	if err := os.Symlink(file, link); err == nil {
 		if err := validateCredentialInteractiveFile(link); err == nil {

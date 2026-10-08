@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgeerrors"
@@ -54,40 +55,39 @@ type SafeError struct {
 }
 
 func Error(err error) SafeError {
+	if typed, ok := err.(*edgeerrors.Error); ok {
+		return SafeError{Code: string(typed.Code), Recovery: typed.Recovery}
+	}
 	if code, ok := edgeerrors.CodeOf(err); ok {
-		recovery := "retry or inspect private diagnostics"
-		switch code {
-		case edgeerrors.CodeCredentialReplayed, edgeerrors.CodeCredentialInvalid, edgeerrors.CodeCredentialMalformed, edgeerrors.CodeCredentialSignatureInvalid, edgeerrors.CodeCredentialExpired, edgeerrors.CodeCredentialNotYetValid, edgeerrors.CodeBindingInvalid, edgeerrors.CodeGenerationStale, edgeerrors.CodeRevoked, edgeerrors.CodeRunIDInvalid, edgeerrors.CodeRunIDMismatch, edgeerrors.CodeRunIDExpired, edgeerrors.CodeRunIDRevoked:
-			recovery = "request a fresh admission"
-		case edgeerrors.CodeCredentialKeyUnavailable, edgeerrors.CodeCredentialRevocationUnavailable, edgeerrors.CodeServiceUnavailable:
-			recovery = "retry after control state recovers"
-		case edgeerrors.CodeStoreCapacity:
-			recovery = "restore journal capacity before retrying"
-		case edgeerrors.CodeConfigInvalid, edgeerrors.CodeRouteInvalid:
-			recovery = "correct the configuration and retry"
-		case edgeerrors.CodeOperationConflict, edgeerrors.CodeRouteConflict, edgeerrors.CodeRouteRevisionStale:
-			recovery = "refresh current state and retry"
-		}
-		return SafeError{Code: string(code), Recovery: recovery}
+		return SafeError{Code: string(code)}
 	}
 	return SafeError{Code: "internal_error", Recovery: "retry or inspect private diagnostics"}
 }
 
+type MetricKey struct {
+	Kind                 Kind
+	Result               Result
+	RouteKind, Direction string
+}
+
 type MetricDescriptor struct {
-	Name    string
-	Kind    string
-	Labels  map[string][]string
-	Buckets []float64
+	Name   string
+	Kind   string
+	Labels map[string][]string
 }
 
 func MetricDescriptors() []MetricDescriptor {
-	result := []MetricDescriptor{
+	return []MetricDescriptor{
 		{Name: "paperboat_edge_telemetry_dropped_total", Kind: "counter"},
 		{Name: "paperboat_tunnel_active_streams", Kind: "gauge"},
 		{Name: "paperboat_tunnel_attached_routes", Kind: "gauge"},
 		{Name: "paperboat_tunnel_connector_capacity", Kind: "gauge"},
 		{Name: "paperboat_tunnel_connectors", Kind: "gauge"},
 		{Name: "paperboat_tunnel_dependency_healthy", Kind: "gauge", Labels: map[string][]string{"dependency": {"carrier", "control", "routes", "usage"}}},
+		{Name: "paperboat_tunnel_events_total", Kind: "counter", Labels: map[string][]string{
+			"direction": {"", "egress", "ingress"}, "kind": {"admission", "cleanup", "node", "route", "stream", "usage"},
+			"result": {"canceled", "failed", "rejected", "success"}, "route_kind": {"", "preview_public_https_wss", "runtime_https_wss"},
+		}},
 		{Name: "paperboat_tunnel_live", Kind: "gauge"},
 		{Name: "paperboat_tunnel_ready", Kind: "gauge"},
 		{Name: "paperboat_tunnel_traffic_egress_bytes_total", Kind: "counter"},
@@ -96,25 +96,50 @@ func MetricDescriptors() []MetricDescriptor {
 		{Name: "paperboat_tunnel_usage_pending_bytes", Kind: "gauge"},
 		{Name: "paperboat_tunnel_usage_pending_reports", Kind: "gauge"},
 	}
-	for _, descriptor := range edgetelemetry.MetricDescriptors() {
-		labels := make(map[string][]string, len(descriptor.Labels))
-		var buckets []float64
-		for _, label := range descriptor.Labels {
-			values := append([]string(nil), label.AllowedValues...)
-			sort.Strings(values)
-			labels[label.Name] = values
-		}
-		if descriptor.Histogram != nil {
-			buckets = append([]float64(nil), descriptor.Histogram.Buckets...)
-		}
-		result = append(result, MetricDescriptor{
-			Name: descriptor.Name, Kind: string(descriptor.Kind), Labels: labels,
-			Buckets: buckets,
-		})
+}
+
+type Metrics struct {
+	mu     sync.Mutex
+	values map[MetricKey]uint64
+}
+
+func NewMetrics() *Metrics { return &Metrics{values: make(map[MetricKey]uint64)} }
+
+func (m *Metrics) Add(key MetricKey, value uint64) bool {
+	if !validKind(key.Kind) || !validResult(key.Result) || !validRouteKind(key.RouteKind) || !validDirection(key.Direction) {
+		return false
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if ^uint64(0)-m.values[key] < value {
+		return false
+	}
+	m.values[key] += value
+	return true
+}
+
+func (m *Metrics) Get(key MetricKey) uint64 { m.mu.Lock(); defer m.mu.Unlock(); return m.values[key] }
+
+func (m *Metrics) Snapshot() map[MetricKey]uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make(map[MetricKey]uint64, len(m.values))
+	for key, value := range m.values {
+		result[key] = value
+	}
 	return result
 }
+
+func validKind(value Kind) bool {
+	return value == Admission || value == Route || value == Stream || value == Usage || value == Node || value == Cleanup
+}
+func validResult(value Result) bool {
+	return value == Success || value == Rejected || value == Failed || value == Canceled
+}
+func validRouteKind(value string) bool {
+	return value == "" || value == "runtime_https_wss" || value == "preview_public_https_wss"
+}
+func validDirection(value string) bool { return value == "" || value == "ingress" || value == "egress" }
 
 type Status string
 
@@ -147,6 +172,7 @@ type Sources struct {
 	RouteErr       func() error
 	UsageErr       func() error
 	CarrierRunning func() bool
+	Events         func() map[MetricKey]uint64
 	Traffic        func() []usage.CounterRecord
 	Health         func() edgetelemetry.HealthSnapshot
 	Lifecycle      func() []edgetelemetry.Event
@@ -171,6 +197,7 @@ type Snapshot struct {
 	UsageOldestAgeSeconds int64                         `json:"usage_oldest_age_seconds"`
 	Capacity              uint32                        `json:"connector_capacity"`
 	FailureCodes          []string                      `json:"failure_codes,omitempty"`
+	Events                map[MetricKey]uint64          `json:"-"`
 	TrafficIngressBytes   uint64                        `json:"traffic_ingress_bytes"`
 	TrafficEgressBytes    uint64                        `json:"traffic_egress_bytes"`
 	Health                *edgetelemetry.HealthSnapshot `json:"health,omitempty"`
@@ -180,7 +207,7 @@ type Snapshot struct {
 }
 
 func NewHandler(s Sources) (http.Handler, error) {
-	if s.Node == nil || s.Manager == nil || s.Sessions == nil || s.SessionRoutes == nil || s.ActiveStreams == nil || s.RouteCount == nil || s.Usage == nil || s.ControlErr == nil || s.RouteErr == nil || s.UsageErr == nil || s.CarrierRunning == nil || s.Traffic == nil {
+	if s.Node == nil || s.Manager == nil || s.Sessions == nil || s.SessionRoutes == nil || s.ActiveStreams == nil || s.RouteCount == nil || s.Usage == nil || s.ControlErr == nil || s.RouteErr == nil || s.UsageErr == nil || s.CarrierRunning == nil || s.Events == nil || s.Traffic == nil {
 		return nil, fmt.Errorf("observability sources are incomplete")
 	}
 	mux := http.NewServeMux()
@@ -198,7 +225,7 @@ func snapshot(s Sources) Snapshot {
 	}
 	manager, pending := s.Manager(), s.Usage()
 	routeErr := s.RouteErr()
-	result := Snapshot{At: now, Node: s.Node(), Control: statusFor(s.ControlErr()), Routes: statusFor(routeErr), Usage: statusFor(s.UsageErr()), Carrier: runningStatus(s.CarrierRunning()), Connectors: s.Sessions(), ActiveStreams: s.ActiveStreams(), AttachedRoutes: s.RouteCount(), UsagePendingReports: pending.Reports, UsagePendingBytes: pending.Bytes, Capacity: manager.Capacity}
+	result := Snapshot{At: now, Node: s.Node(), Control: statusFor(s.ControlErr()), Routes: statusFor(routeErr), Usage: statusFor(s.UsageErr()), Carrier: runningStatus(s.CarrierRunning()), Connectors: s.Sessions(), ActiveStreams: s.ActiveStreams(), AttachedRoutes: s.RouteCount(), UsagePendingReports: pending.Reports, UsagePendingBytes: pending.Bytes, Capacity: manager.Capacity, Events: s.Events()}
 	if s.Health != nil {
 		health := s.Health()
 		result.Health = &health
@@ -297,35 +324,27 @@ func writeMetrics(w http.ResponseWriter, s Snapshot) {
 	}{{"control", s.Control}, {"routes", s.Routes}, {"usage", s.Usage}, {"carrier", s.Carrier}} {
 		lines = append(lines, `paperboat_tunnel_dependency_healthy{dependency="`+dependency.name+`"} `+booleanMetric(dependency.status == Healthy))
 	}
+	keys := make([]MetricKey, 0, len(s.Events))
+	for key := range s.Events {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool { return fmt.Sprint(keys[i]) < fmt.Sprint(keys[j]) })
+	for _, key := range keys {
+		lines = append(lines, `paperboat_tunnel_events_total{kind="`+string(key.Kind)+`",result="`+string(key.Result)+`",route_kind="`+key.RouteKind+`",direction="`+key.Direction+`"} `+strconv.FormatUint(s.Events[key], 10))
+	}
 	for _, sample := range s.TypedMetrics {
-		labels := metricLabels(sample.Labels)
-		switch sample.Kind {
-		case edgetelemetry.MetricCounter, edgetelemetry.MetricGauge:
-			lines = append(lines, sample.Name+labels+" "+strconv.FormatUint(sample.Value, 10))
-		case edgetelemetry.MetricHistogram:
-			for _, bucket := range sample.Buckets {
-				bucketLabels := append(append([]edgetelemetry.MetricLabel(nil), sample.Labels...), edgetelemetry.MetricLabel{Name: "le", Value: strconv.FormatFloat(bucket.UpperBound, 'g', -1, 64)})
-				lines = append(lines, sample.Name+"_bucket"+metricLabels(bucketLabels)+" "+strconv.FormatUint(bucket.Count, 10))
-			}
-			bucketLabels := append(append([]edgetelemetry.MetricLabel(nil), sample.Labels...), edgetelemetry.MetricLabel{Name: "le", Value: "+Inf"})
-			lines = append(lines, sample.Name+"_bucket"+metricLabels(bucketLabels)+" "+strconv.FormatUint(sample.Count, 10))
-			lines = append(lines, sample.Name+"_sum"+labels+" "+strconv.FormatFloat(sample.Sum, 'g', -1, 64))
-			lines = append(lines, sample.Name+"_count"+labels+" "+strconv.FormatUint(sample.Count, 10))
+		labels := make([]string, len(sample.Labels))
+		for index, label := range sample.Labels {
+			labels[index] = label.Name + `="` + label.Value + `"`
 		}
+		suffix := ""
+		if len(labels) > 0 {
+			suffix = "{" + strings.Join(labels, ",") + "}"
+		}
+		lines = append(lines, sample.Name+suffix+" "+strconv.FormatUint(sample.Value, 10))
 	}
 	lines = append(lines, "paperboat_edge_telemetry_dropped_total "+strconv.FormatUint(s.TelemetryDrops, 10))
 	_, _ = w.Write([]byte(strings.Join(lines, "\n") + "\n"))
-}
-
-func metricLabels(labels []edgetelemetry.MetricLabel) string {
-	if len(labels) == 0 {
-		return ""
-	}
-	parts := make([]string, len(labels))
-	for index, label := range labels {
-		parts[index] = label.Name + `="` + label.Value + `"`
-	}
-	return "{" + strings.Join(parts, ",") + "}"
 }
 
 func booleanMetric(value bool) string {

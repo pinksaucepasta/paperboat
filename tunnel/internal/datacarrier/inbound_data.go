@@ -79,7 +79,7 @@ func (s *Server) readInboundDataStream(raw StreamLink) acceptResult {
 	if err := raw.SetReadDeadline(deadline); err != nil {
 		_ = raw.Close()
 		s.releasePermit()
-		return acceptResult{err: carrierFailure{sentinel: ErrInvalidPreface, cause: err}}
+		return acceptResult{err: ErrInvalidPreface}
 	}
 	open, err := connectorprotocol.ReadStreamOpen(raw)
 	_ = raw.SetReadDeadline(time.Time{})
@@ -91,7 +91,7 @@ func (s *Server) readInboundDataStream(raw StreamLink) acceptResult {
 		err = s.config.Authorize.AuthorizeStream(admissionContext, s.config.Identity, open)
 		cancel()
 		if err != nil {
-			err = carrierFailure{sentinel: ErrRouteDenied, cause: err}
+			err = errors.Join(ErrRouteDenied, err)
 		}
 	}
 	if err != nil {

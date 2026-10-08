@@ -26,7 +26,7 @@ var passwordVaultForCommand = func(command *cobra.Command) (environmentmanager.P
 var passwordVaultPrompt = func(command *cobra.Command, title string) ([]byte, error) {
 	input, ok := command.InOrStdin().(*os.File)
 	if !ok || !environmentVariableTerminal(command) {
-		return nil, errors.New("vault passwords require an interactive hidden prompt")
+		return nil, localArgumentError("vault passwords require an interactive hidden prompt")
 	}
 	return prompt.Secret(prompt.SecretOptions{Context: command.Context(), Title: title, Stdin: input, Output: command.ErrOrStderr(), MaxBytes: 1024})
 }
@@ -78,8 +78,11 @@ func addPasswordVaultCommands(root *cobra.Command) {
 			}
 			if action == "recover" {
 				path, pathErr := command.Flags().GetString("recovery-file")
-				if pathErr != nil || strings.TrimSpace(path) == "" {
-					return errors.New("recovery requires --recovery-file for the replacement code")
+				if pathErr != nil {
+					return safeCommandFailureFor("could not read the recovery output option", pathErr)
+				}
+				if strings.TrimSpace(path) == "" {
+					return localArgumentError("recovery requires --recovery-file for the replacement code")
 				}
 				oldCode, err = readVaultRecoveryInput(command)
 				if err != nil {
@@ -95,8 +98,11 @@ func addPasswordVaultCommands(root *cobra.Command) {
 			if action == "recovery" {
 				disabled, flagErr := command.Flags().GetBool("disable")
 				path, pathErr := command.Flags().GetString("recovery-file")
-				if flagErr != nil || pathErr != nil || disabled && strings.TrimSpace(path) != "" || !disabled && strings.TrimSpace(path) == "" {
-					return errors.New("choose --disable or --recovery-file")
+				if flagErr != nil || pathErr != nil {
+					return safeCommandFailureFor("could not read the recovery options", errors.Join(flagErr, pathErr))
+				}
+				if disabled && strings.TrimSpace(path) != "" || !disabled && strings.TrimSpace(path) == "" {
+					return localArgumentError("choose --disable or --recovery-file")
 				}
 			}
 			manager, err := passwordVaultForCommand(command)
@@ -108,6 +114,30 @@ func addPasswordVaultCommands(root *cobra.Command) {
 				err = manager.Store.LockPasswordVault(manager.Issuer, manager.AccountID)
 			case "resume":
 				err = manager.Resume(command.Context())
+				if environmentFailureHasMarker(err, func(cause error) bool {
+					switch cause.(type) {
+					case *environmentmanager.ScopeRefreshConflict, *environmentmanager.ScopePublicationPending:
+						return true
+					}
+					return false
+				}) {
+					err = safeEnvironmentVariableCommandError(err)
+				}
+				if onlyEnvironmentHostRefreshConflict(err) {
+					err = nil
+				}
+				if environmentFailureHasMarker(err, func(cause error) bool {
+					_, ok := cause.(*environmentmanager.HostPublicationPending)
+					return ok
+				}) {
+					err = &envHostRefreshFailure{cause: err, publicationPending: true}
+				}
+				if environmentFailureHasMarker(err, func(cause error) bool {
+					_, ok := cause.(*environmentmanager.HostRotationRequired)
+					return ok
+				}) {
+					err = &envHostRefreshFailure{cause: err}
+				}
 			case "recovery":
 				disabled, _ := command.Flags().GetBool("disable")
 				path, _ := command.Flags().GetString("recovery-file")
@@ -155,6 +185,11 @@ func addPasswordVaultCommands(root *cobra.Command) {
 					return fmt.Errorf("%w; retain the new recovery file: activation is unconfirmed; run `pb env vault resume` to reconcile any pending publication before retrying", err)
 				}
 				return err
+			}
+			if action == "init" || action == "unlock" || action == "resume" || action == "recover" {
+				if err := refreshSelectedENVHosts(command, manager, false); err != nil {
+					return err
+				}
 			}
 			fields := map[string]any{}
 			switch action {
@@ -224,7 +259,7 @@ func runPasswordVaultReset(command *cobra.Command) error {
 		return err
 	}
 	if jsonOutputRequested(command) && passwordPath == "" && !passwordStdin {
-		return errors.New("--json requires --password-file or --password-stdin")
+		return localArgumentError("--json requires --password-file or --password-stdin")
 	}
 	manager, err := passwordVaultForCommand(command)
 	if err != nil {
@@ -232,7 +267,7 @@ func runPasswordVaultReset(command *cobra.Command) error {
 	}
 	confirmation, _ := command.Flags().GetString("confirm")
 	if confirmation != "RESET ENV "+manager.AccountID {
-		return invocationError(errors.New("--confirm must exactly match `RESET ENV <account_id>`"))
+		return localArgumentError("--confirm must exactly match `RESET ENV <account_id>`")
 	}
 	password, explicit, err := readVaultPasswordSource(command)
 	if err != nil {
@@ -241,7 +276,7 @@ func runPasswordVaultReset(command *cobra.Command) error {
 	if explicit {
 		if len(password) == 0 {
 			clear(password)
-			return errors.New("master password cannot be empty")
+			return localArgumentError("master password cannot be empty")
 		}
 		defer clear(password)
 	} else {
@@ -283,7 +318,7 @@ func runPasswordVaultRemove(command *cobra.Command) error {
 	}
 	confirmation, _ := command.Flags().GetString("confirm")
 	if confirmation != "REMOVE LOCAL ENV "+manager.AccountID {
-		return invocationError(errors.New("vault remove requires --confirm `REMOVE LOCAL ENV <account_id>`"))
+		return localArgumentError("vault remove requires --confirm `REMOVE LOCAL ENV <account_id>`")
 	}
 	if err := manager.Store.RemovePasswordVault(manager.Issuer, manager.AccountID); err != nil {
 		return safeEnvironmentVariableCommandError(err)

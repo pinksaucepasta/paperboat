@@ -50,6 +50,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/daemoncmd"
 	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
 	"github.com/pinksaucepasta/paperboat/internal/endpointbinary"
+	"github.com/pinksaucepasta/paperboat/internal/environmentmanager"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/fileindex"
 	filetransfer "github.com/pinksaucepasta/paperboat/internal/filetransfer"
@@ -372,8 +373,8 @@ func runWithReporter(ctx context.Context, args []string, stdout, stderr io.Write
 	diagnosticReference := ""
 	if failure.kind != commandCanceled && failure.kind != commandInteractiveCanceled {
 		faultCtx := ctx
-		if remote, ok := failure.owner.(*api.APIError); ok && supportref.Valid(remote.SupportReference) {
-			faultCtx = supportref.WithContext(ctx, remote.SupportReference)
+		if supportref.Valid(failure.supportReference) {
+			faultCtx = supportref.WithContext(ctx, failure.supportReference)
 		}
 		if failure.kind == commandUnexpected {
 			diagnosticReference = reporter.CaptureFailure(faultCtx, processComponent(args), operation, "command", "unexpected_cli_failure", err).SupportReference
@@ -489,19 +490,31 @@ const (
 )
 
 type commandFailure struct {
-	kind      commandFailureKind
-	owner     error
-	presented bool
-	execCount int
-	execCode  int
-	execCause error
+	supportReference string
+	apiCauseInvalid  bool
+	kind             commandFailureKind
+	owner            error
+	presented        bool
+	execCount        int
+	execCode         int
+	execCause        error
 }
 
-func classifyCommandFailure(err error) commandFailure {
+func classifyCommandFailure(err error) (failure commandFailure) {
+	defer func() {
+		if recover() != nil {
+			failure = commandFailure{kind: commandUnexpected, owner: err}
+		}
+	}()
 	if err == nil {
 		return commandFailure{}
 	}
-	remaining := []error{err}
+	type causeFrame struct {
+		err    error
+		status int
+	}
+	remaining := []causeFrame{{err: err}}
+	referenceConflict := false
 	seen := make(map[error]bool)
 	result := commandFailure{}
 	set := func(kind commandFailureKind, owner error) {
@@ -510,15 +523,21 @@ func classifyCommandFailure(err error) commandFailure {
 		}
 	}
 	for count := 0; len(remaining) > 0 && count < 32; count++ {
-		current := remaining[0]
+		frame := remaining[0]
+		current := frame.err
 		remaining = remaining[1:]
 		if current == nil {
+			set(commandUnexpected, err)
 			continue
 		}
 		value := reflect.ValueOf(current)
-		if value.Kind() == reflect.Pointer && value.IsNil() {
-			set(commandUnexpected, current)
-			continue
+		switch value.Kind() {
+		case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan, reflect.Interface:
+			if value.IsNil() {
+				set(commandUnexpected, current)
+				referenceConflict = true
+				continue
+			}
 		}
 		if execFailure, ok := current.(execCommandFailure); ok {
 			result.execCount++
@@ -526,15 +545,37 @@ func classifyCommandFailure(err error) commandFailure {
 				result.execCode, result.execCause = execFailure.code, execFailure.cause
 			}
 			result.presented = result.presented || execFailure.presented
-			remaining = append(remaining, execFailure.cause)
+			remaining = append(remaining, causeFrame{err: execFailure.cause, status: frame.status})
 			continue
 		}
 		if presented, ok := current.(presentedCommandFailure); ok {
 			result.presented = true
-			remaining = append(remaining, presented.cause)
+			remaining = append(remaining, causeFrame{err: presented.cause, status: frame.status})
 			continue
 		}
+		// HTTP metadata can accompany an API owner without creating a second
+		// failure. It is authoritative only as a matching terminal leaf.
+		if metadata, ok := current.(interface{ DiagnosticStatus() int }); ok && frame.status != 0 {
+			_, unary := current.(interface{ Unwrap() error })
+			_, joined := current.(interface{ Unwrap() []error })
+			if !unary && !joined {
+				if metadata.DiagnosticStatus() != frame.status {
+					set(commandUnexpected, current)
+				}
+				continue
+			}
+		}
 		switch owner := current.(type) {
+		case commandRejection:
+			if owner.valid() {
+				set(commandRejected, current)
+			} else {
+				set(commandUnexpected, current)
+			}
+			if owner.cause != nil {
+				remaining = append(remaining, causeFrame{err: owner.cause, status: frame.status})
+			}
+			continue
 		case usageError, unsupportedJSONOutputError, *preferences.InvalidError:
 			set(commandUsage, current)
 			continue
@@ -560,14 +601,36 @@ func classifyCommandFailure(err error) commandFailure {
 			}
 			continue
 		case *api.APIError:
+			if supportref.Valid(owner.SupportReference) {
+				if result.supportReference != "" && result.supportReference != owner.SupportReference {
+					referenceConflict = true
+				}
+				result.supportReference = owner.SupportReference
+			}
 			if owner.Status == 0 || owner.Status >= 500 || owner.Status == 408 || owner.Status == 429 {
 				set(commandOperational, current)
 			} else {
 				set(commandRejected, current)
 			}
+			if child := owner.Unwrap(); child != nil {
+				result.apiCauseInvalid = result.apiCauseInvalid || !commandAPIStatusMetadataOnly(child, owner.Status)
+				remaining = append(remaining, causeFrame{err: child, status: owner.Status})
+			}
 			continue
-		case *configComparisonFailure:
+		case *envCommandFailure:
+			if owner.cause == nil {
+				set(commandUnexpected, current)
+			} else {
+				remaining = append(remaining, causeFrame{err: owner.cause, status: frame.status})
+			}
+			continue
+		case *configComparisonFailure, *envHostRefreshFailure:
 			set(commandOperational, current)
+			if wrapper, ok := current.(interface{ Unwrap() error }); ok {
+				if child := wrapper.Unwrap(); child != nil {
+					remaining = append(remaining, causeFrame{err: child, status: frame.status})
+				}
+			}
 			continue
 		case *localapi.RemoteError:
 			if owner.StatusCode >= 500 {
@@ -596,7 +659,7 @@ func classifyCommandFailure(err error) commandFailure {
 		case errUsage:
 			set(commandUsage, current)
 			continue
-		case api.ErrUnauthenticated, config.ErrSecretNotFound, identitybootstrap.ErrPairingRequired, identitybootstrap.ErrEnrollmentExpired, preferences.ErrChanged, preferences.ErrBusy, localwait.ErrMachineNotFound, localwait.ErrMachineAmbiguous, localwait.ErrInvalid, tailnet.ErrAuthority, tailnet.ErrAdmission:
+		case api.ErrUnauthenticated, config.ErrSecretNotFound, config.ErrNoCredentials, environmentmanager.ErrVaultPending, environmentmanager.ErrVaultLocked, environmentmanager.ErrVaultChanged, environmentmanager.ErrVaultTeamGrantRequired, environmentmanager.ErrVariableNotConfigured, identitybootstrap.ErrPairingRequired, identitybootstrap.ErrEnrollmentExpired, preferences.ErrChanged, preferences.ErrBusy, localwait.ErrMachineNotFound, localwait.ErrMachineAmbiguous, localwait.ErrInvalid, tailnet.ErrAuthority, tailnet.ErrAdmission:
 			set(commandRejected, current)
 			continue
 		case tunnel.ErrTransportLost:
@@ -613,6 +676,7 @@ func classifyCommandFailure(err error) commandFailure {
 		if value.Type().Comparable() {
 			if seen[current] {
 				set(commandUnexpected, current)
+				referenceConflict = true
 				continue
 			}
 			seen[current] = true
@@ -623,12 +687,20 @@ func classifyCommandFailure(err error) commandFailure {
 				set(commandUnexpected, current)
 				continue
 			}
-			remaining = append(remaining, children...)
+			for _, child := range children {
+				remaining = append(remaining, causeFrame{err: child, status: frame.status})
+			}
 			continue
 		}
 		// Filesystem errors also implement net.Error. Keep their recovery local.
 		if _, ok := current.(*os.PathError); ok {
 			set(commandUnexpected, current)
+			continue
+		}
+		// DNS failures may have no underlying error even though DNSError
+		// implements Unwrap. The typed network failure is still actionable.
+		if dns, ok := current.(*net.DNSError); ok && dns.Unwrap() == nil {
+			set(commandOperational, current)
 			continue
 		}
 		if _, ok := current.(net.Error); ok {
@@ -656,7 +728,7 @@ func classifyCommandFailure(err error) commandFailure {
 			if child == nil {
 				set(commandUnexpected, current)
 			} else {
-				remaining = append(remaining, child)
+				remaining = append(remaining, causeFrame{err: child, status: frame.status})
 			}
 			continue
 		}
@@ -664,6 +736,10 @@ func classifyCommandFailure(err error) commandFailure {
 	}
 	if len(remaining) > 0 || result.kind == 0 {
 		set(commandUnexpected, err)
+		referenceConflict = true
+	}
+	if referenceConflict {
+		result.supportReference = ""
 	}
 	return result
 }
@@ -676,7 +752,11 @@ func operationalCLIError(err error) bool {
 }
 
 func userFacingError(err error) string {
-	return commandFailureMessage(err, classifyCommandFailure(err))
+	failure := classifyCommandFailure(err)
+	if owner, ok := failure.owner.(commandRejection); ok && failure.kind == commandRejected && owner.valid() {
+		return owner.Error()
+	}
+	return commandFailureMessage(err, failure)
 }
 
 func commandFailureMessage(err error, failure commandFailure) string {
@@ -687,7 +767,23 @@ func commandFailureMessage(err error, failure commandFailure) string {
 		return preference.Error()
 	}
 	const generic = "Paperboat could not finish the command. Check the current state before retrying; run `pb doctor` if this continues."
+	if failure.kind == commandRejected {
+		if _, accountCredentials := soleCommandOwner(err).(*sessionauth.CredentialFailure); accountCredentials && onlyEnvironmentFailureLeaves(err, func(leaf error) bool {
+			return leaf == config.ErrSecretNotFound || leaf == config.ErrNoCredentials
+		}) {
+			return "Paperboat sign-in credentials are unavailable. " + dashboardEnrollmentGuidance + " Then retry."
+		}
+		if rejected, ok := soleCommandOwner(err).(commandRejection); ok && rejected.valid() {
+			return rejected.Error()
+		}
+	}
 	switch owned := soleCommandOwner(err).(type) {
+	case *envCommandFailure:
+		return owned.Error()
+	case *envHostRefreshFailure:
+		return owned.Error()
+	case *configComparisonFailure:
+		return owned.Error()
 	case setupFailureError:
 		return owned.Error()
 	case commandPreparationFailure:
@@ -719,11 +815,14 @@ func commandFailureMessage(err error, failure commandFailure) string {
 	case unsupportedJSONOutputError:
 		return "This command does not support JSON output. Run it without --json."
 	case *api.APIError:
+		if failure.apiCauseInvalid {
+			return generic
+		}
 		if owner.Status == http.StatusUpgradeRequired && owner.Code == "update_required" {
 			return owner.Error()
 		}
 		if owner.Status == http.StatusUnauthorized {
-			return "Your Paperboat session is no longer valid. Run the enrollment command from the Paperboat dashboard, then retry."
+			return "Your Paperboat session is no longer valid. " + dashboardEnrollmentGuidance + " Then retry."
 		}
 		message := friendlyAPIError(owner)
 		if owner.Code == "team_subscription_required" && owner.Status != http.StatusForbidden {
@@ -738,6 +837,10 @@ func commandFailureMessage(err error, failure commandFailure) string {
 		}
 		return message
 	case *configComparisonFailure:
+		return owner.Error()
+	case *envHostRefreshFailure:
+		return owner.Error()
+	case *envCommandFailure:
 		return owner.Error()
 	case *localapi.RemoteError:
 		return "The local Paperboat service could not complete the request. Check its status with `pb status`, then retry; run `pb doctor` if this continues."
@@ -772,7 +875,9 @@ func commandFailureMessage(err error, failure commandFailure) string {
 	case tunnel.ErrTransportLost:
 		return "The terminal connection was lost and could not be restored. Retry `pb`; if this continues, run `pb doctor`."
 	case api.ErrUnauthenticated:
-		return "Your Paperboat session is no longer valid. Run the enrollment command from the Paperboat dashboard, then retry."
+		return "Your Paperboat session is no longer valid. " + dashboardEnrollmentGuidance + " Then retry."
+	case config.ErrNoCredentials:
+		return "Not signed in to Paperboat. " + dashboardEnrollmentGuidance + " Then retry."
 	case config.ErrSecretNotFound:
 		return "This CLI is signed in but not paired for private transport. Run the enrollment command from the Paperboat dashboard."
 	case identitybootstrap.ErrPairingRequired:
@@ -797,7 +902,7 @@ func soleCommandOwner(err error) error {
 			return nil
 		}
 		switch err.(type) {
-		case *configComparisonFailure, setupFailureError, commandPreparationFailure, *api.APIError, *localapi.RemoteError, *TunnelCreateExistingError, *TunnelCreateChangedError, *TunnelOperationOutcomeError, *TunnelOperationWaitTimeoutError, uninstallCleanupError, preferenceLoadFailure, usageError, unsupportedJSONOutputError, managedssh.NativeExitError, managedssh.NativeLaunchError, exitCodeError, jsonFailureExitCodeError:
+		case *sessionauth.CredentialFailure, commandRejection, *envCommandFailure, *envHostRefreshFailure, *configComparisonFailure, setupFailureError, commandPreparationFailure, *api.APIError, *localapi.RemoteError, *TunnelCreateExistingError, *TunnelCreateChangedError, *TunnelOperationOutcomeError, *TunnelOperationWaitTimeoutError, uninstallCleanupError, preferenceLoadFailure, usageError, unsupportedJSONOutputError, managedssh.NativeExitError, managedssh.NativeLaunchError, exitCodeError, jsonFailureExitCodeError:
 			return err
 		}
 		wrapper, ok := err.(interface{ Unwrap() error })
@@ -928,7 +1033,7 @@ func doctorCommandV1() *cobra.Command {
 			repair, _ := command.Flags().GetBool("repair")
 			if repair {
 				if len(args) != 0 {
-					return errors.New("doctor --repair does not accept a machine")
+					return localArgumentError("doctor --repair does not accept a machine")
 				}
 				if runtime.GOOS == "windows" {
 					doctorArgs := []string{"doctor", "--repair"}
@@ -1999,13 +2104,13 @@ func pairCommand() *cobra.Command {
 				serverURL = strings.TrimSpace(buildinfo.DefaultServerURL)
 			}
 			if fresh && serverURL == "" {
-				return errors.New("fresh pairing requires --server")
+				return localArgumentError("fresh pairing requires --server")
 			}
 			if fresh {
 				token, _ := command.Flags().GetString("enrollment-token")
 				tokenFile, _ := command.Flags().GetString("enrollment-token-file")
 				if strings.TrimSpace(token) == "" && strings.TrimSpace(tokenFile) == "" {
-					return errors.New("fresh pairing requires --enrollment-token or --enrollment-token-file")
+					return localArgumentError("fresh pairing requires --enrollment-token or --enrollment-token-file")
 				}
 			}
 			publicIdentityKey := base64.RawURLEncoding.EncodeToString(identityStore.Current().Public())
@@ -3534,7 +3639,7 @@ func sessionCompletionValues(items []api.TerminalSession, prefix string) []strin
 
 func actionHome(command *cobra.Command) error {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return errors.New("pb requires a command or environment when used without an interactive terminal")
+		return commandRejection{reason: commandRejectNoninteractiveHome}
 	}
 	previousContext := command.Context()
 	homeContext, cancelHome := context.WithCancel(previousContext)
@@ -5427,7 +5532,7 @@ func userMachineCobraCommand() *cobra.Command {
 			}
 		}
 		if strings.TrimSpace(cfg.ServerURL) == "" {
-			return errors.New("Paperboat server is not configured; set server_url or use --server")
+			return commandRejection{reason: commandRejectMissingServer}
 		}
 		name, _ := command.Flags().GetString("name")
 		authSource, err := sessionauth.NewSource(cfg)
@@ -5552,7 +5657,7 @@ func userMachineCobraCommand() *cobra.Command {
 		modeFlag, _ := command.Flags().GetString("mode")
 		mode := strings.ReplaceAll(strings.TrimSpace(modeFlag), "-", "_")
 		if mode != "allow_sleep" && mode != "keep_awake" {
-			return errors.New("availability --mode must be allow-sleep or keep-awake")
+			return localArgumentError("availability --mode must be allow-sleep or keep-awake")
 		}
 		ctx := actionContext(command, args)
 		client, err := backendClient(ctx)
@@ -5595,6 +5700,19 @@ func userMachineCobraCommand() *cobra.Command {
 	availability.Flags().String("confirm", "", "six-character confirmation code for keep-awake mode")
 	availability.Flags().Bool("json", false, "print JSON")
 	capabilities := &cobra.Command{Use: "capabilities <machine>", Short: "Set incoming services for a machine", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(command *cobra.Command, args []string) error {
+		overrides := make(map[string]bool, 4)
+		for _, name := range []string{"terminal", "managed-ssh", "file-receive", "preview-tunnel"} {
+			if command.Flags().Changed(name) {
+				value, err := command.Flags().GetBool(name)
+				if err != nil {
+					return invocationError(err)
+				}
+				overrides[name] = value
+			}
+		}
+		if len(overrides) == 0 {
+			return localArgumentError("set at least one capability flag")
+		}
 		ctx := actionContext(command, args)
 		client, err := backendClient(ctx)
 		if err != nil {
@@ -5605,18 +5723,10 @@ func userMachineCobraCommand() *cobra.Command {
 			return friendlyCommandError(err)
 		}
 		desired := machineValue.MachineCapabilities.Desired
-		changed := false
 		for name, destination := range map[string]*bool{"terminal": &desired.Terminal, "managed-ssh": &desired.ManagedSSH, "file-receive": &desired.FileReceive, "preview-tunnel": &desired.PreviewTunnel} {
-			if command.Flags().Changed(name) {
-				value, flagErr := command.Flags().GetBool(name)
-				if flagErr != nil {
-					return flagErr
-				}
-				*destination, changed = value, true
+			if value, changed := overrides[name]; changed {
+				*destination = value
 			}
-		}
-		if !changed {
-			return errors.New("set at least one capability flag")
 		}
 		policy, err := client.SetUserMachineCapabilities(ctx.Context, machineValue.ID, newIdempotencyKey(), desired, machineValue.MachineCapabilities.DesiredVersion)
 		if err != nil {
@@ -5760,7 +5870,7 @@ func requireAuthConfig(c *command.Context) (*config.Config, config.ProfileStore,
 		return nil, config.ProfileStore{}, err
 	}
 	if strings.TrimSpace(d.cfg.ServerURL) == "" {
-		return nil, config.ProfileStore{}, errors.New("Paperboat server is not configured; set server_url or use --server")
+		return nil, config.ProfileStore{}, commandRejection{reason: commandRejectMissingServer}
 	}
 	s, err := config.ProfileStoreFor(d.cfg)
 	if err != nil {
@@ -5823,16 +5933,13 @@ func e2eeClient(c *command.Context) (*api.Client, config.ProfileStore, config.Pr
 		}
 	}
 	if strings.TrimSpace(cfg.ServerURL) == "" {
-		return nil, config.ProfileStore{}, config.Profile{}, errors.New("Paperboat server is not configured; set server_url or use --server")
+		return nil, config.ProfileStore{}, config.Profile{}, commandRejection{reason: commandRejectMissingServer}
 	}
 	store, err := config.ProfileStoreFor(cfg)
 	if err != nil {
 		return nil, config.ProfileStore{}, config.Profile{}, err
 	}
 	profile, err := store.Load(cfg.ServerURL)
-	if errors.Is(err, config.ErrNoCredentials) {
-		return nil, config.ProfileStore{}, config.Profile{}, errors.New("not signed in to Paperboat; run `pb login`, then retry")
-	}
 	if err != nil {
 		return nil, config.ProfileStore{}, config.Profile{}, err
 	}
@@ -5857,7 +5964,7 @@ func authStatus(c *command.Context) error {
 		return fmt.Errorf("recover interrupted Paperboat sign-in: %w", err)
 	}
 	p, err := store.Load(cfg.ServerURL)
-	if errors.Is(err, config.ErrNoCredentials) {
+	if onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return leaf == config.ErrNoCredentials }) {
 		if c.Bool("json") {
 			return json.NewEncoder(c.Writer).Encode(map[string]any{"signed_in": false})
 		}
@@ -5868,7 +5975,7 @@ func authStatus(c *command.Context) error {
 		return err
 	}
 	if _, err := store.CredentialFor(cfg.ServerURL); err != nil {
-		return fmt.Errorf("Paperboat sign-in credentials are unavailable; run `pb login`: %w", err)
+		return &sessionauth.CredentialFailure{Cause: err}
 	}
 	if c.Bool("json") {
 		document := map[string]any{"signed_in": true, "issuer": p.Issuer, "cli_client_session_id": p.CLIClientSessionID, "access_expires_at": p.AccessExpiresAt, "account": p.Account}
@@ -5879,7 +5986,7 @@ func authStatus(c *command.Context) error {
 			}
 			document["trusted_root_public_key"] = base64.RawURLEncoding.EncodeToString(root)
 			document["trusted_root_fingerprint"] = fingerprint
-		} else if !errors.Is(rootErr, config.ErrSecretNotFound) {
+		} else if !onlyEnvironmentFailureLeaves(rootErr, func(leaf error) bool { return leaf == config.ErrSecretNotFound }) {
 			return fmt.Errorf("load locally trusted identity: %w", rootErr)
 		}
 		return json.NewEncoder(c.Writer).Encode(document)
@@ -6012,12 +6119,9 @@ func backendClient(c *command.Context) (*api.Client, error) {
 		return nil, err
 	}
 	if d.cfg.ServerURL == "" {
-		return nil, errors.New("server_url is not configured; set --server or configure Paperboat server_url")
+		return nil, commandRejection{reason: commandRejectMissingServer}
 	}
 	cred, err := d.auth.Credential()
-	if errors.Is(err, config.ErrNoCredentials) {
-		return nil, errors.New("not signed in to Paperboat; run `pb login`, then retry")
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -6497,26 +6601,45 @@ func environmentsCommand() *command.Spec {
 	}
 }
 
-func readOwnerOnlyFile(path string, limit int64) ([]byte, error) {
+var errOwnerOnlyFileInvalid = errors.New("invalid owner-only file")
+
+func readOwnerOnlyFile(path string, limit int64) (data []byte, resultErr error) {
 	info, err := os.Lstat(path)
-	if err != nil || !ownerOnlyRegularFile(path, info) {
-		return nil, errors.Join(errors.New("invalid owner-only file"), err)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateOwnerOnlyRegularFile(path, info); err != nil {
+		return nil, err
 	}
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			clear(data)
+			data = nil
+			resultErr = errors.Join(resultErr, closeErr)
+		}
+	}()
 	opened, err := file.Stat()
-	if err != nil || !os.SameFile(info, opened) || !ownerOnlyRegularFile(path, opened) {
-		return nil, errors.Join(errors.New("invalid owner-only file"), err)
-	}
-	data, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
 		return nil, err
 	}
+	if !os.SameFile(info, opened) {
+		return nil, errOwnerOnlyFileInvalid
+	}
+	if err := validateOwnerOnlyRegularFile(path, opened); err != nil {
+		return nil, err
+	}
+	data, err = io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		clear(data)
+		return nil, err
+	}
 	if int64(len(data)) > limit {
-		return nil, errors.New("invalid owner-only file")
+		clear(data)
+		return nil, errOwnerOnlyFileInvalid
 	}
 	return data, nil
 }
@@ -6535,7 +6658,7 @@ func inboxCommand() *command.Spec {
 
 func inboxRequestsCommand(c *command.Context) error {
 	if c.Args().Len() != 0 {
-		return errors.New("pb inbox requests does not accept arguments")
+		return localArgumentError("pb inbox requests does not accept arguments")
 	}
 	client, err := backendClient(c)
 	if err != nil {
@@ -6562,7 +6685,7 @@ func inboxRequestsCommand(c *command.Context) error {
 
 func inboxDecisionCommand(c *command.Context, action string) error {
 	if c.Args().Len() != 1 {
-		return fmt.Errorf("usage: pb inbox %s <request-id> --generation <generation>", action)
+		return localArgumentError("usage: pb inbox approve|decline <request-id> --generation <generation>")
 	}
 	client, err := backendClient(c)
 	if err != nil {
@@ -6589,7 +6712,10 @@ func inboxDecisionCommand(c *command.Context, action string) error {
 
 func inboxPolicyCommand(c *command.Context) error {
 	if c.Args().Len() > 1 {
-		return errors.New("usage: pb inbox policy [manual|automatic] [--receipt-email]")
+		return localArgumentError("usage: pb inbox policy [manual|automatic] [--receipt-email]")
+	}
+	if c.Args().Len() == 1 && c.Args().First() != "manual" && c.Args().First() != "automatic" {
+		return localArgumentError("acceptance must be manual or automatic")
 	}
 	client, err := backendClient(c)
 	if err != nil {
@@ -6601,9 +6727,6 @@ func inboxPolicyCommand(c *command.Context) error {
 	}
 	if c.Args().Len() == 1 {
 		acceptance := c.Args().First()
-		if acceptance != "manual" && acceptance != "automatic" {
-			return errors.New("acceptance must be manual or automatic")
-		}
 		policy.Acceptance, policy.ReceiptEmail = acceptance, c.Bool("receipt-email")
 		policy, err = client.SetTeamInboxPolicy(c.Context, policy)
 		if err != nil {
@@ -6670,14 +6793,14 @@ func inboxPathCommand(c *command.Context) error {
 
 func inboxSetCommand(c *command.Context) error {
 	if c.Args().Len() != 1 {
-		return errors.New("usage: pb inbox set <directory>")
+		return localArgumentError("usage: pb inbox set <directory>")
 	}
 	return setInboxPath(c, c.Args().First())
 }
 
 func inboxResetCommand(c *command.Context) error {
 	if c.Args().Len() != 0 {
-		return errors.New("pb inbox reset does not accept arguments")
+		return localArgumentError("pb inbox reset does not accept arguments")
 	}
 	path, err := inbox.DefaultPath()
 	if err != nil {
@@ -6761,7 +6884,7 @@ func sessionsCommand() *command.Spec {
 	return &command.Spec{Name: "session", Usage: "Manage environment terminal sessions", ArgsUsage: "<environment>", Flags: []command.Flag{&command.BoolFlag{Name: "wide"}, &command.BoolFlag{Name: "json"}}, Action: list, Subcommands: []*command.Spec{
 		{Name: "rename", ArgsUsage: "<environment> <session> <new-name>", Usage: "Rename a terminal session", Flags: []command.Flag{&command.BoolFlag{Name: "json", Usage: "emit JSON"}}, Action: func(c *command.Context) error {
 			if c.Args().Len() != 3 {
-				return errors.New("usage: pb session rename <environment> <session> <new-name>")
+				return localArgumentError("usage: pb session rename <environment> <session> <new-name>")
 			}
 			if err := validateSessionName(c.Args().Get(2)); err != nil {
 				return err
@@ -6779,7 +6902,7 @@ func sessionsCommand() *command.Spec {
 				return err
 			}
 			if session.IsDefault {
-				return errors.New("the default session cannot be renamed")
+				return commandRejection{reason: commandRejectDefaultSessionRename}
 			}
 			updated, err := renameTerminalSessionForTarget(c.Context, client, target, session.ID, c.Args().Get(2))
 			if err != nil {
@@ -6794,7 +6917,7 @@ func sessionsCommand() *command.Spec {
 		{Name: "close", ArgsUsage: "<environment> [<session>]", Usage: "Close one or all terminal sessions", Action: func(c *command.Context) error {
 			all := c.Bool("all")
 			if c.Args().Len() < 1 || c.Args().Len() > 2 || all && c.Args().Len() != 1 {
-				return errors.New("usage: pb session close <environment> [<session>] [--all] [--confirm CODE]")
+				return localArgumentError("usage: pb session close <environment> [<session>] [--all] [--confirm CODE]")
 			}
 			client, err := backendClient(c)
 			if err != nil {
@@ -6878,7 +7001,7 @@ func sessionsCommand() *command.Spec {
 		{Name: "delete", ArgsUsage: "<environment> [<session>]", Usage: "Delete a closed terminal session record", Flags: []command.Flag{&command.StringFlag{Name: "confirm", Usage: "six-character confirmation code from the preview"}, &command.BoolFlag{Name: "all", Usage: "delete all closed non-default sessions in the environment"}, &command.BoolFlag{Name: "json", Usage: "emit JSON"}}, Action: func(c *command.Context) error {
 			all := c.Bool("all")
 			if c.Args().Len() < 1 || c.Args().Len() > 2 || all && c.Args().Len() != 1 {
-				return errors.New("usage: pb session delete <environment> [<session>] [--all] [--confirm CODE]")
+				return localArgumentError("usage: pb session delete <environment> [<session>] [--all] [--confirm CODE]")
 			}
 			client, err := backendClient(c)
 			if err != nil {
@@ -6944,10 +7067,10 @@ func sessionsCommand() *command.Spec {
 				return err
 			}
 			if session.IsDefault {
-				return errors.New("the default session cannot be deleted")
+				return commandRejection{reason: commandRejectDefaultSessionDelete}
 			}
 			if session.State != "closed" {
-				return errors.New("close the terminal session before deleting its record")
+				return commandRejection{reason: commandRejectOpenSessionDelete}
 			}
 			if err := confirmContextMutationWithArgs(c, "session-delete:"+target.id+":"+session.ID, fmt.Sprintf("Delete closed terminal session %q in %s (%s)? Its record and retained history will be removed.", session.Name, target.name, target.id), []string{c.Args().First(), session.ID}); err != nil {
 				return err
@@ -7102,7 +7225,7 @@ func validateSessionNameOptional(name string) error {
 }
 func validateSessionName(name string) error {
 	if name == "default" || automaticSessionNamePattern.MatchString(name) || !sessionNamePattern.MatchString(name) {
-		return errors.New("session names must be lowercase 1-64 character values matching [a-z0-9][a-z0-9._-]{0,63}; default and shell-N are reserved")
+		return localArgumentError("session names must be lowercase 1-64 character values matching [a-z0-9][a-z0-9._-]{0,63}; default and shell-N are reserved")
 	}
 	return nil
 }
@@ -7653,10 +7776,10 @@ func parseExecEnvironment(values []string) (map[string]string, error) {
 	for _, value := range values {
 		name, item, ok := strings.Cut(value, "=")
 		if !ok || !namePattern.MatchString(name) || strings.ContainsRune(item, '\x00') {
-			return nil, fmt.Errorf("invalid --env %q; expected name=value", value)
+			return nil, localArgumentError("Each --env must use a valid variable name followed by =value; values cannot contain NUL bytes.")
 		}
 		if _, exists := result[name]; exists {
-			return nil, fmt.Errorf("duplicate --env name %q", name)
+			return nil, localArgumentError("An --env variable was specified more than once; provide each variable once.")
 		}
 		result[name] = item
 	}
@@ -7686,7 +7809,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		return fail(255, "local_configuration", false, false, err)
 	}
 	credential, err := d.auth.Credential()
-	if errors.Is(err, config.ErrNoCredentials) {
+	if onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return leaf == config.ErrNoCredentials }) {
 		err = fmt.Errorf("authentication required: %w", err)
 		return fail(255, "authentication_required", false, false, err)
 	}
@@ -8513,16 +8636,16 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		return nil
 	}
 	if c.Args().Len() > 2 {
-		return errors.New("expected an environment and optional `new`")
+		return localArgumentError("expected an environment and optional `new`")
 	}
 	if c.Args().Len() == 2 && c.Args().Get(1) != "new" {
-		return errors.New("second argument must be `new`")
+		return localArgumentError("second argument must be `new`")
 	}
 	if c.Args().Len() == 2 && strings.TrimSpace(c.String("session")) != "" {
-		return errors.New("`new` and --session cannot be used together")
+		return localArgumentError("`new` and --session cannot be used together")
 	}
 	if strings.TrimSpace(c.String("name")) != "" && strings.TrimSpace(c.String("session")) != "" {
-		return errors.New("--name and --session cannot be used together")
+		return localArgumentError("--name and --session cannot be used together")
 	}
 
 	ctx, cancelConnection := context.WithCancel(c.Context)
@@ -8535,14 +8658,11 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		return err
 	}
 	if strings.TrimSpace(d.cfg.ServerURL) == "" {
-		return errors.New("Paperboat server is not configured; set server_url or use --server")
+		return commandRejection{reason: commandRejectMissingServer}
 	}
 	cred, err := d.auth.Credential()
-	if err != nil && !errors.Is(err, config.ErrNoCredentials) {
+	if err != nil {
 		return err
-	}
-	if errors.Is(err, config.ErrNoCredentials) {
-		return errors.New("not signed in to Paperboat; run `pb login`, then retry")
 	}
 	backend, err := newWorkspaceAPIClient(c, d.cfg.ServerURL, cred)
 	if err != nil {
@@ -9127,18 +9247,7 @@ func connectTelemetry(cfg *config.Config, warnings io.Writer) (telemetry.Sink, f
 }
 
 func retryableInitialConnectError(err error) bool {
-	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return false
-	}
-	var apiErr *api.APIError
-	if errors.As(err, &apiErr) {
-		return apiErr.Code == "machine_not_ready" || apiErr.Code == "tunnel_unavailable"
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "timed out waiting for the machine") ||
-		strings.Contains(msg, "dial terminal websocket") ||
-		strings.Contains(msg, "websocket route") ||
-		strings.Contains(msg, "transport lost")
+	return retryableInitialConnectFailure(err)
 }
 
 func friendlyAPIError(err error) string {
@@ -9335,7 +9444,7 @@ func configCommand() *command.Spec {
 				Flags: []command.Flag{&command.BoolFlag{Name: "json"}},
 				Action: func(c *command.Context) error {
 					if c.Args().Len() != 2 {
-						return errors.New("usage: pb config set server <url>")
+						return localArgumentError("usage: pb config set server <url>")
 					}
 					cfg, err := config.Load(c.String("config"))
 					if err != nil {
@@ -9345,17 +9454,17 @@ func configCommand() *command.Spec {
 					case "server":
 						server, err := config.NormalizeServerURL(c.Args().Get(1))
 						if err != nil {
-							return err
+							return usageError{err: err, publicMessage: "The server URL is invalid. Use an absolute HTTP or HTTPS URL without credentials, a query or a fragment."}
 						}
 						cfg.ServerURL = server
 					case "ssh-target-port":
 						port, parseErr := strconv.ParseUint(c.Args().Get(1), 10, 16)
 						if parseErr != nil || port == 0 {
-							return errors.New("ssh-target-port must be between 1 and 65535")
+							return localArgumentError("ssh-target-port must be between 1 and 65535")
 						}
 						return configSetSSHTargetPort(c, uint16(port))
 					default:
-						return errors.New("usage: pb config set server <url> or pb config set ssh-target-port <1-65535>")
+						return localArgumentError("usage: pb config set server <url> or pb config set ssh-target-port <1-65535>")
 					}
 					if err := cfg.Save(); err != nil {
 						return err
@@ -9372,7 +9481,7 @@ func configCommand() *command.Spec {
 				Flags: []command.Flag{&command.BoolFlag{Name: "json"}},
 				Action: func(c *command.Context) error {
 					if c.Args().Len() != 1 || c.Args().First() != "server" {
-						return errors.New("usage: pb config unset server")
+						return localArgumentError("usage: pb config unset server")
 					}
 					cfg, err := config.Load(c.String("config"))
 					if err != nil {
@@ -9629,7 +9738,7 @@ func setStatusBarValue(value *config.StatusBarConfig, key, raw string) error {
 	case "notice-seconds":
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 1 || parsed > 60 {
-			return errors.New("notice-seconds must be between 1 and 60")
+			return localArgumentError("notice-seconds must be between 1 and 60")
 		}
 		value.NoticeSeconds = parsed
 	case "left", "center", "right":
@@ -10032,7 +10141,7 @@ func configConflictResolve(c *command.Context) error {
 	case "repository", "remote":
 		action = "keep_remote"
 	default:
-		return errors.New("config conflict resolve --keep must be machine or repository")
+		return localArgumentError("config conflict resolve --keep must be machine or repository")
 	}
 	operation, err := client.ResolveConfigConflict(c.Context, items[0].EnvironmentID, api.ConfigConflictRequest{
 		Path: conflict.Path, ConflictRevision: conflict.Revision, ExpectedRemoteRevision: items[0].RemoteRevision,
@@ -10051,7 +10160,7 @@ func configConflictResolve(c *command.Context) error {
 func configForce(c *command.Context) error {
 	direction := strings.ToLower(strings.TrimSpace(c.Args().First()))
 	if direction != "pull" && direction != "push" {
-		return errors.New("config force direction must be pull or push")
+		return localArgumentError("config force direction must be pull or push")
 	}
 	client, err := backendClient(c)
 	if err != nil {

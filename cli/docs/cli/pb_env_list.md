@@ -21,7 +21,7 @@ pb env list [flags]
 ```
   -h, --help             help for list
       --json             print redacted JSON metadata
-      --machine string   machine name or ID; defaults to the personal scope
+      --machine string   Personal override for an owned machine, even in a Team workspace; omitted uses the active workspace
       --team string      team scope; defaults to this account's personal scope
 ```
 

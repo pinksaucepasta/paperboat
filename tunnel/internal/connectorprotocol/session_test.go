@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -708,60 +707,5 @@ func TestDrainHookFailureRejectsWithoutWithdrawingReadySession(t *testing.T) {
 	}
 	if client.State() != SessionReady {
 		t.Fatalf("client state=%s, want ready after rejected drain", client.State())
-	}
-}
-
-type cancelingProtocolApplier struct{ cancel context.CancelFunc }
-
-func (a cancelingProtocolApplier) PrepareSnapshot(context.Context, Snapshot) (PreparedConfig, error) {
-	a.cancel()
-	return nil, syscall.EIO
-}
-func (a cancelingProtocolApplier) PrepareDelta(context.Context, Delta) (PreparedConfig, error) {
-	a.cancel()
-	return nil, syscall.EIO
-}
-
-func TestApplyPreservesOperationalFailureAlongsideCancellation(t *testing.T) {
-	for _, delta := range []bool{false, true} {
-		t.Run(map[bool]string{false: "snapshot", true: "delta"}[delta], func(t *testing.T) {
-			_, client, _, applier, first := testSessionPair(t)
-			snapshot, err := NewSnapshot(first.TunnelID, 2, testConfigPayload(2, "next.preview.example.test"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			snapshot = bindSnapshot(snapshot, "acct_1", "connector_1", "sess_1", 1)
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			client.config.Applier = cancelingProtocolApplier{cancel: cancel}
-			if delta {
-				change, buildErr := NewDelta(first.TunnelID, first, 2, snapshot.Payload)
-				if buildErr != nil {
-					t.Fatal(buildErr)
-				}
-				change.AccountID, change.ConnectorID, change.SessionID, change.ProcessGeneration = "acct_1", "connector_1", "sess_1", 1
-				_, err = client.ApplyDelta(ctx, change)
-			} else {
-				_, err = client.ApplySnapshot(ctx, snapshot)
-			}
-			if !errors.Is(err, context.Canceled) || !errors.Is(err, syscall.EIO) || err.Error() != string(CodeCanceled) {
-				t.Fatalf("lost mixed cause: %v", err)
-			}
-			active, ok := client.Active()
-			if !ok || active.Generation != 1 {
-				t.Fatal("failed candidate changed active configuration")
-			}
-			client.config.Applier = applier
-			if _, err := client.ApplySnapshot(context.Background(), snapshot); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := client.MarkReady(true, true, true); err != nil {
-				t.Fatal(err)
-			}
-			active, ok = client.Active()
-			if !ok || active.Generation != 2 {
-				t.Fatal("recovery did not promote candidate")
-			}
-		})
 	}
 }

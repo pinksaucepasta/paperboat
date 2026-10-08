@@ -3,15 +3,17 @@ package edgehttp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
+	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgeerrors"
 )
+
+var publicTCPRequestSequence atomic.Uint64
 
 // ForwardPublicTCP forwards one connection already accepted by the listener
 // named in a current server decision. Listener allocation and lifecycle remain
@@ -37,7 +39,7 @@ func (r *DataCarrierRouteRegistry) ForwardPublicTCP(ctx context.Context, connect
 	if _, ok := connection.(interface{ CloseWrite() error }); !ok {
 		return ErrDataCarrierRouteInvalid
 	}
-	requestID := "request_" + uuid.NewString()
+	requestID := fmt.Sprintf("edge-tcp-%d", publicTCPRequestSequence.Add(1))
 	open := connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: decision.Binding.AccountID, TunnelID: decision.Binding.TunnelID, ConnectorID: decision.ConnectorID, SessionID: decision.SessionID, ProcessGeneration: decision.ProcessGeneration, Generation: decision.ConfigGeneration, RouteID: decision.Binding.RouteID, RequestID: requestID, Kind: "tcp_public"}
 	authority, err := resolvePublicTCPAuthority(ctx, currentAuthority, decision, open)
 	if err != nil {
@@ -75,10 +77,7 @@ func resolvePublicTCPAuthority(ctx context.Context, current func(context.Context
 	defer cancel()
 	authority, err := current(resolveCtx, decision)
 	now := time.Now().UTC()
-	if err != nil {
-		return connectorprotocol.IngressDecision{}, edgeerrors.Wrap(edgeerrors.CodeServiceUnavailable, "Public TCP authority is unavailable.", "Retry when current authority is available.", errors.Join(connectorprotocol.ErrIngressDenied, err))
-	}
-	if decision.Authorize(authority, open, decision.EdgeNodeID, decision.EdgeProcessEpoch, now) != nil || (authority.Binding.Protocol != "tcp" && authority.Binding.Protocol != "tls") || authority.Binding.Audience != "public" {
+	if err != nil || decision.Authorize(authority, open, decision.EdgeNodeID, decision.EdgeProcessEpoch, now) != nil || (authority.Binding.Protocol != "tcp" && authority.Binding.Protocol != "tls") || authority.Binding.Audience != "public" {
 		return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
 	}
 	return authority, nil
@@ -88,9 +87,7 @@ func bridgePublicTCP(ctx context.Context, connection net.Conn, stream io.ReadWri
 	bridgeCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	closed := make(chan struct{})
-	closeWatcherDone := make(chan struct{})
 	go func() {
-		defer close(closeWatcherDone)
 		select {
 		case <-bridgeCtx.Done():
 			_ = connection.Close()
@@ -99,9 +96,7 @@ func bridgePublicTCP(ctx context.Context, connection net.Conn, stream io.ReadWri
 		}
 	}()
 	authorityFailed := make(chan error, 1)
-	authorityWatcherDone := make(chan struct{})
 	go func() {
-		defer close(authorityWatcherDone)
 		ticker := time.NewTicker(connectorprotocol.IngressRefreshInterval)
 		defer ticker.Stop()
 		active := authority
@@ -151,12 +146,13 @@ func bridgePublicTCP(ctx context.Context, connection net.Conn, stream io.ReadWri
 	second := <-results
 	close(closed)
 	cancel()
-	<-authorityWatcherDone
-	<-closeWatcherDone
 	select {
 	case err := <-authorityFailed:
 		return errors.Join(connectorprotocol.ErrIngressDenied, err, first, second)
 	default:
 	}
-	return errors.Join(ctx.Err(), first, second)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return errors.Join(first, second)
 }
