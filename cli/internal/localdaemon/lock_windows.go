@@ -43,8 +43,7 @@ func acquireProcessLock(path, ownerSID string) (*processLock, error) {
 		return nil, err
 	}
 	closeWith := func(cause error) (*processLock, error) {
-		_ = file.Close()
-		return nil, cause
+		return nil, errors.Join(cause, file.Close())
 	}
 	if err := validateWindowsLockFile(path); err != nil {
 		return closeWith(err)
@@ -82,8 +81,8 @@ func acquireProcessLock(path, ownerSID string) (*processLock, error) {
 		}
 	}
 	if err != nil {
-		_ = windows.UnlockFileEx(windows.Handle(file.Fd()), 0, 1, 0, &lock.region)
-		return closeWith(fmt.Errorf("record local daemon PID: %w", err))
+		unlockErr := windows.UnlockFileEx(windows.Handle(file.Fd()), 0, 1, 0, &lock.region)
+		return closeWith(errors.Join(fmt.Errorf("record local daemon PID: %w", err), unlockErr))
 	}
 	lock.ownerPath = ownerPath
 	return lock, nil

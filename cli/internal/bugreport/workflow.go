@@ -1,13 +1,13 @@
 package bugreport
 
 import (
-	"bufio"
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 	"io"
 	"os"
 	"slices"
@@ -56,9 +56,10 @@ type Result struct {
 }
 
 type Failure struct {
-	Code    string `json:"code"`
-	Stage   string `json:"stage"`
-	Message string `json:"message"`
+	Code             string `json:"code"`
+	Stage            string `json:"stage"`
+	Message          string `json:"message"`
+	SupportReference string `json:"support_reference,omitempty"`
 }
 
 func (r Result) Validate() error {
@@ -66,7 +67,7 @@ func (r Result) Validate() error {
 		return errors.New("invalid bugreport result")
 	}
 	if r.BundleCreated {
-		if len(r.CorrelationID) != 35 || r.BundlePath == "" || r.Bytes < 1 || r.Bytes > diagnostics.MaximumBundleBytes || len(r.SHA256) != 64 || !slices.Equal(r.Categories, []string{"manifest", "recent_events", "redacted_events", "status"}) || r.CreatedAt.IsZero() || r.CreatedAt.Location() != time.UTC {
+		if !supportref.Valid(r.CorrelationID) || r.BundlePath == "" || r.Bytes < 1 || r.Bytes > diagnostics.MaximumBundleBytes || len(r.SHA256) != 64 || !slices.Equal(r.Categories, []string{"manifest", "recent_events", "redacted_events", "status"}) || r.CreatedAt.IsZero() || r.CreatedAt.Location() != time.UTC {
 			return errors.New("invalid bugreport bundle result")
 		}
 	} else if r.CorrelationID != "" || r.BundlePath != "" || r.Bytes != 0 || r.SHA256 != "" || len(r.Categories) != 0 || !r.CreatedAt.IsZero() || r.Uploaded {
@@ -74,6 +75,9 @@ func (r Result) Validate() error {
 	}
 	if r.Error != nil && (r.Error.Code == "" || r.Error.Stage == "" || r.Error.Message == "" || len(r.Error.Code) > 64 || len(r.Error.Stage) > 128 || len(r.Error.Message) > 512) {
 		return errors.New("invalid bugreport failure")
+	}
+	if r.Error != nil && r.Error.SupportReference != "" && !supportref.Valid(r.Error.SupportReference) {
+		return errors.New("invalid bugreport support reference")
 	}
 	return nil
 }
@@ -84,8 +88,32 @@ type StageError struct {
 	Err    error
 }
 
-func (e *StageError) Error() string { return fmt.Sprintf("%s: %v", e.Stage, e.Err) }
+func (e *StageError) Error() string {
+	switch e.Stage {
+	case "start reproduction recording", "create local bundle", "open local bundle", "hash local bundle", "finish reproduction recording", "display upload categories", "authorize upload", "upload bundle", "finalize upload":
+		return e.Stage + " failed; retry `pb bugreport`"
+	default:
+		return "diagnostic workflow failed; retry `pb bugreport`"
+	}
+}
 func (e *StageError) Unwrap() error { return e.Err }
+
+func (e *StageError) DiagnosticStage() string {
+	switch e.Stage {
+	case "start reproduction recording", "finish reproduction recording":
+		return "local_gateway"
+	case "create local bundle", "open local bundle", "hash local bundle":
+		return "diagnostic_storage"
+	case "authorize upload", "finalize upload":
+		return "control_request"
+	case "upload bundle":
+		return "delivery"
+	default:
+		return "command"
+	}
+}
+
+func (*StageError) DiagnosticCode() string { return "command_failed" }
 
 func Run(ctx context.Context, options Options) (Result, error) {
 	result := Result{Schema: ResultSchemaV1}
@@ -97,8 +125,11 @@ func Run(ctx context.Context, options Options) (Result, error) {
 		if err := options.Local.RecordBugreportMarker(ctx, "start"); err != nil {
 			return result, &StageError{Stage: "start reproduction recording", Result: result, Err: err}
 		}
-		_, _ = fmt.Fprintln(options.Prompt, "Reproduce the issue, then press Enter to finish recording.")
-		readErr := waitForLine(ctx, options.Input)
+		_, promptErr := fmt.Fprintln(options.Prompt, "Reproduce the issue, then press Enter to finish recording.")
+		readErr := promptErr
+		if readErr == nil {
+			readErr = waitForLine(ctx, options.Input)
+		}
 		endCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 		endErr := options.Local.RecordBugreportMarker(endCtx, "end")
 		cancel()
@@ -161,23 +192,6 @@ func Run(ctx context.Context, options Options) (Result, error) {
 	return result, nil
 }
 
-func waitForLine(ctx context.Context, input io.Reader) error {
-	done := make(chan error, 1)
-	go func() {
-		_, err := bufio.NewReader(input).ReadString('\n')
-		if errors.Is(err, io.EOF) {
-			err = nil
-		}
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
 func openExactBundle(bundle diagnostics.Bundle) (*os.File, error) {
 	if bundle.Validate() != nil {
 		return nil, errors.New("local daemon returned an invalid bundle")
@@ -199,9 +213,9 @@ func openExactBundle(bundle diagnostics.Bundle) (*os.File, error) {
 }
 
 func randomOperationKey() (string, error) {
-	var value [16]byte
-	if _, err := rand.Read(value[:]); err != nil {
+	id, err := uuid.NewRandom()
+	if err != nil {
 		return "", err
 	}
-	return "diagnostic_" + hex.EncodeToString(value[:]), nil
+	return "operation_" + id.String(), nil
 }

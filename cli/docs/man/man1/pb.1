@@ -15,6 +15,7 @@ tunnels, environment configuration, team management, and local runtime controls.
 
 .PP
 Run pb without arguments in a terminal to open the interactive home screen.
+Run pb new to open a fresh terminal on this enrolled device in the current directory.
 Use explicit subcommands in scripts; pb COMMAND --help describes each operation.
 Use pb COMMAND --help --json for machine-readable command discovery.
 
@@ -82,10 +83,15 @@ recovery instructions before retrying an operation that may have created resourc
 \fB-v\fP, \fB--version\fP[=false]
 	version for pb
 
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
 
 .SH EXAMPLE
 .EX
   pb
+  pb new
   pb auth login
   pb environments
   pb connect Studio
@@ -98,4 +104,4 @@ recovery instructions before retrying an operation that may have created resourc
 
 
 .SH SEE ALSO
-\fBpb-access(1)\fP, \fBpb-approve(1)\fP, \fBpb-auth(1)\fP, \fBpb-bugreport(1)\fP, \fBpb-completion(1)\fP, \fBpb-config(1)\fP, \fBpb-connect(1)\fP, \fBpb-daemon(1)\fP, \fBpb-device(1)\fP, \fBpb-doctor(1)\fP, \fBpb-edge(1)\fP, \fBpb-env(1)\fP, \fBpb-environments(1)\fP, \fBpb-exec(1)\fP, \fBpb-inbox(1)\fP, \fBpb-install(1)\fP, \fBpb-logout(1)\fP, \fBpb-pair(1)\fP, \fBpb-ping(1)\fP, \fBpb-preview(1)\fP, \fBpb-relay(1)\fP, \fBpb-reset(1)\fP, \fBpb-resolve(1)\fP, \fBpb-rsync(1)\fP, \fBpb-scp(1)\fP, \fBpb-send(1)\fP, \fBpb-service(1)\fP, \fBpb-session(1)\fP, \fBpb-setup(1)\fP, \fBpb-sftp(1)\fP, \fBpb-ssh(1)\fP, \fBpb-status(1)\fP, \fBpb-tag(1)\fP, \fBpb-team(1)\fP, \fBpb-tunnel(1)\fP, \fBpb-uninstall(1)\fP, \fBpb-update(1)\fP, \fBpb-wait(1)\fP
+\fBpb-access(1)\fP, \fBpb-approve(1)\fP, \fBpb-auth(1)\fP, \fBpb-bugreport(1)\fP, \fBpb-completion(1)\fP, \fBpb-config(1)\fP, \fBpb-connect(1)\fP, \fBpb-daemon(1)\fP, \fBpb-doctor(1)\fP, \fBpb-edge(1)\fP, \fBpb-env(1)\fP, \fBpb-environments(1)\fP, \fBpb-exec(1)\fP, \fBpb-inbox(1)\fP, \fBpb-install(1)\fP, \fBpb-login(1)\fP, \fBpb-logout(1)\fP, \fBpb-machine(1)\fP, \fBpb-new(1)\fP, \fBpb-pair(1)\fP, \fBpb-ping(1)\fP, \fBpb-preview(1)\fP, \fBpb-relay(1)\fP, \fBpb-reset(1)\fP, \fBpb-resolve(1)\fP, \fBpb-rsync(1)\fP, \fBpb-scp(1)\fP, \fBpb-send(1)\fP, \fBpb-service(1)\fP, \fBpb-session(1)\fP, \fBpb-setup(1)\fP, \fBpb-sftp(1)\fP, \fBpb-ssh(1)\fP, \fBpb-status(1)\fP, \fBpb-switch(1)\fP, \fBpb-tag(1)\fP, \fBpb-team(1)\fP, \fBpb-tunnel(1)\fP, \fBpb-uninstall(1)\fP, \fBpb-update(1)\fP, \fBpb-wait(1)\fP

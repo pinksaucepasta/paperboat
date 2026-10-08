@@ -48,13 +48,16 @@ func TestWindowsDiskRingAndBundleUseCurrentUserACL(t *testing.T) {
 	if err != nil || strings.Count(string(data), "\n") != 1 {
 		t.Fatalf("data=%q err=%v", data, err)
 	}
-	entries, err := os.ReadDir(config.Directory)
+	entries, _, err := ring.segments()
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("entries=%v err=%v", entries, err)
 	}
-	segment := filepath.Join(config.Directory, entries[0].Name())
+	segment := entries[0].path
 	if _, err := verifiedDiagnosticFile(segment, owner); err != nil {
 		t.Fatalf("segment ACL/reparse validation: %v", err)
+	}
+	if _, err := verifiedDiagnosticFile(filepath.Join(config.Directory, "writer.lock"), owner); err != nil {
+		t.Fatalf("writer lock ACL/reparse validation: %v", err)
 	}
 	recorder, err := NewRecorder(DiskConfig{Directory: filepath.Join(root, "bundle-events"), QueueCapacity: 8})
 	if err != nil {

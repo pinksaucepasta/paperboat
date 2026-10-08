@@ -13,7 +13,7 @@ import (
 func TestDispatchManagerValidatesCurrentNativePrivatePreview(t *testing.T) {
 	now := time.Now().UTC()
 	done := make(chan struct{})
-	session := &Session{lease: Lease{ID: "preview_1", OwnerDeviceID: "machine_1", AccessMode: "private", Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, LeaseDeadline: now.Add(time.Minute), Generation: 2}, done: done}
+	session := &Session{lease: Lease{ID: "preview_1", OwnerMachineID: "machine_1", AccessMode: "private", Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, LeaseDeadline: now.Add(time.Minute), Generation: 2}, done: done}
 	manager := &DispatchManager{config: DispatchManagerConfig{MachineID: "machine_1", Now: func() time.Time { return now }}, operations: map[string]dispatchOperation{"operation_1": {session: session}}}
 	binding := nativeprivate.Binding{Schema: nativeprivate.SchemaV1, ResourceKind: "preview", ResourceID: "preview_1", ResourceGeneration: 2, RouteID: "preview_1", RouteGeneration: 2, TargetGeneration: 2, OwnerEndpointID: "machine_1", Protocol: "http", TargetScheme: "http", TargetAddress: "127.0.0.1:3000", ExpiresAt: now.Add(time.Minute)}
 	if err := manager.ValidateNativePrivateTarget(binding); err != nil {
@@ -52,7 +52,7 @@ type dispatchObserver struct {
 
 type dispatchOwners struct{ done <-chan struct{} }
 
-func (o dispatchOwners) OwnerSessionDone(accountID, machineID, ownerSessionID string) (<-chan struct{}, error) {
+func (o dispatchOwners) OwnerSessionDone(accountID, machineID, ownerSessionID, ownerSessionKind string) (<-chan struct{}, error) {
 	if accountID == "" || machineID == "" || ownerSessionID == "" || o.done == nil {
 		return nil, ErrDispatchInvalid
 	}
@@ -78,7 +78,7 @@ func testDispatchRequest(t *testing.T, now time.Time) DispatchRequest {
 	request := DispatchRequest{
 		Schema: PreviewTunnelSchemaV1, Kind: PreviewDispatchKind,
 		PreviewID: "prv_dispatch_1", OperationID: "operation_dispatch_1", AccountID: "account_1", ActorID: "actor_1",
-		OwnerDeviceID: "machine_1", OwnerSessionID: "session_dispatch_1",
+		OwnerMachineID: "machine_1", OwnerSessionID: "session_dispatch_1", OwnerSessionKind: "foreground",
 		Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, AccessMode: "public",
 		Endpoint: "https://dispatch.preview.example.test", LeaseDeadline: now.Add(time.Hour),
 		LeaseETag: formatLeaseETag("prv_dispatch_1", 1), ExpectedGeneration: 1,
@@ -96,8 +96,8 @@ func testDispatchRequest(t *testing.T, now time.Time) DispatchRequest {
 
 func testDispatchAuthorization(request DispatchRequest, now time.Time) DispatchAuthorization {
 	return DispatchAuthorization{
-		AccountID: request.AccountID, ActorID: request.ActorID, MachineID: request.OwnerDeviceID,
-		OwnerSessionID: request.OwnerSessionID, PreviewID: request.PreviewID, OperationID: request.OperationID,
+		AccountID: request.AccountID, ActorID: request.ActorID, MachineID: request.OwnerMachineID,
+		OwnerSessionID: request.OwnerSessionID, OwnerSessionKind: request.OwnerSessionKind, PreviewID: request.PreviewID, OperationID: request.OperationID,
 		ExpectedGeneration: request.ExpectedGeneration, RequestHash: request.RequestHash, ExpiresAt: now.Add(time.Minute),
 		IdempotencyKey: request.IdempotencyKey, RequestID: request.RequestID, CorrelationID: request.CorrelationID,
 	}
@@ -243,7 +243,7 @@ func TestDispatchRejectsWrongMachineHashAndMismatchedReplay(t *testing.T) {
 	t.Cleanup(func() { _ = manager.Shutdown(context.Background()) })
 
 	wrongMachine := testDispatchRequest(t, now)
-	wrongMachine.OwnerDeviceID = "machine_2"
+	wrongMachine.OwnerMachineID = "machine_2"
 	wrongMachine.RequestHash, err = wrongMachine.ComputeRequestHash()
 	if err != nil {
 		t.Fatal(err)
@@ -313,7 +313,8 @@ func TestLazyDispatchFencesBootAndSkipsForegroundOwner(t *testing.T) {
 	t.Cleanup(func() { _ = manager.Shutdown(context.Background()) })
 	request := testDispatchRequest(t, now)
 	request.AccessMode = "team"
-	request.OwnerSessionID = "lazy_0123456789abcdef0123456789abcdef"
+	request.OwnerSessionKind = "lazy_runtime"
+	request.OwnerSessionID = "session_01234567-89ab-4cde-8fab-0123456789ab"
 	request.Lazy = &LazyBinding{PolicyID: "policy_1", PolicyGeneration: 2, InstallationGeneration: 7, BootID: "wrong-boot-identifier"}
 	request.RequestHash, err = request.ComputeRequestHash()
 	if err != nil {
@@ -431,7 +432,7 @@ func TestDispatchOwnerLossStopsAndUntracksSession(t *testing.T) {
 
 func TestReadyLeaseAdvancesRenewalAndManagerGeneration(t *testing.T) {
 	now := time.Now().UTC()
-	request := LeaseRequest{OwnerDeviceID: "machine_1", OwnerSessionID: "session_ready_generation", Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, AccessMode: "public"}
+	request := LeaseRequest{OwnerMachineID: "machine_1", OwnerSessionID: "session_ready_generation", OwnerSessionKind: "foreground", Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, AccessMode: "public"}
 	lease := sessionTestLease(request)
 	lease.ID = "prv_ready_generation"
 	lease.ETag = formatLeaseETag(lease.ID, 1)
@@ -445,8 +446,8 @@ func TestReadyLeaseAdvancesRenewalAndManagerGeneration(t *testing.T) {
 		return ctx.Err()
 	}}
 	session, err := StartExisting(context.Background(), SessionConfig{
-		LeaseClient: &sessionLeaseClient{}, Carrier: carrier, OwnerDeviceID: request.OwnerDeviceID,
-		OwnerSessionID: request.OwnerSessionID, Target: request.Target, AccessMode: request.AccessMode,
+		LeaseClient: &sessionLeaseClient{}, Carrier: carrier, OwnerMachineID: request.OwnerMachineID,
+		OwnerSessionID: request.OwnerSessionID, OwnerSessionKind: request.OwnerSessionKind, Target: request.Target, AccessMode: request.AccessMode,
 		DisableParentWatch: true, RenewInterval: time.Hour, Now: func() time.Time { return now },
 	}, lease)
 	if err != nil {

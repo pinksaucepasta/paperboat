@@ -101,7 +101,7 @@ func TestMachineControlIsBoundToRegistrationAndSignsExactRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := store.Current()
-	registration := Registration{ServerURL: "https://api.example.test", MachineID: "mch_1", EnvironmentID: "env_1", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 3, SetupRoles: []string{"interactive"}, UpdatedAt: now}
+	registration := Registration{ServerURL: "https://api.example.test", MachineID: "mch_1", EnvironmentID: "env_1", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 3, UpdatedAt: now}
 	if err := store.SaveRegistration(registration); err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestMachineControlIsBoundToRegistrationAndSignsExactRequest(t *testing.T) {
 	}
 }
 
-func TestNonHostRegistrationRejectsSSHConfiguration(t *testing.T) {
+func TestRegistrationRejectsIncompleteSSHConfiguration(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "identity")
 	store, err := Open(Config{StateRoot: root, Random: bytes.NewReader(bytes.Repeat([]byte{8}, 32))})
 	if err != nil {
@@ -155,42 +155,55 @@ func TestNonHostRegistrationRejectsSSHConfiguration(t *testing.T) {
 	registration := Registration{
 		ServerURL: "https://api.example.test", MachineID: "mch_1", EnvironmentID: "env_1",
 		PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()),
-		InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, SetupMode: "client",
-		SetupRoles: []string{"interactive"}, SSHUser: "developer", SSHPort: 22, UpdatedAt: time.Now().UTC(),
+		InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, SSHUser: "developer", SSHPort: 0, UpdatedAt: time.Now().UTC(),
 	}
 	if err := store.SaveRegistration(registration); !errors.Is(err, ErrInvalidStore) {
-		t.Fatalf("non-host SSH registration error = %v", err)
+		t.Fatalf("incomplete SSH registration error = %v", err)
 	}
 }
 
-func TestLegacySessionRegistrationLoadsAsClient(t *testing.T) {
+func TestRegistrationRejectsObsoleteFieldsWithoutChangingIdentity(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "identity")
 	store, err := Open(Config{StateRoot: root, Random: bytes.NewReader(bytes.Repeat([]byte{9}, 32))})
 	if err != nil {
 		t.Fatal(err)
 	}
 	key := store.Current()
-	registration := Registration{
-		ServerURL: "https://api.example.test", MachineID: "mch_legacy", EnvironmentID: "env_legacy",
-		PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()),
-		InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, SetupMode: "client",
-		SetupRoles: []string{"interactive"}, UpdatedAt: time.Now().UTC(),
-	}
+	registration := Registration{ServerURL: "https://api.example.test", MachineID: "machine_1", EnvironmentID: "environment_1", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 7, UpdatedAt: time.Now().UTC()}
 	if err := store.SaveRegistration(registration); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(root, "machine-registration.json")
-	body, err := os.ReadFile(path)
+	canonical, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body = bytes.Replace(body, []byte(`"setup_mode":"client"`), []byte(`"setup_mode":"session"`), 1)
-	if err := os.WriteFile(path, body, 0o600); err != nil {
+	for _, field := range []string{`"setup_mode":"host",`, `"setup_roles":["host"],`, `"unexpected_authority":true,`} {
+		input := bytes.Replace(canonical, []byte(`{`), []byte(`{`+field), 1)
+		if err := os.WriteFile(path, input, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.Registration(); !errors.Is(err, ErrInvalidStore) {
+			t.Fatalf("obsolete field accepted: %v", err)
+		}
+		retained, err := os.ReadFile(path)
+		if err != nil || !bytes.Equal(retained, input) {
+			t.Fatal("rejected registration was rewritten")
+		}
+		if store.Current().ID != key.ID || !bytes.Equal(store.Current().Public(), key.Public()) {
+			t.Fatal("rejected registration changed identity")
+		}
+	}
+	if err := os.WriteFile(path, canonical, 0600); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := store.Registration()
-	if err != nil || loaded.SetupMode != "client" {
-		t.Fatalf("legacy registration=%+v err=%v", loaded, err)
+	if err != nil || loaded.MachineID != registration.MachineID || loaded.InstallationGeneration != 7 || loaded.PublicIdentityKey != registration.PublicIdentityKey {
+		t.Fatal("canonical registration lost its identity or generation")
+	}
+	retained, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(retained, canonical) {
+		t.Fatal("canonical registration read wrote state")
 	}
 }
 

@@ -5,8 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -110,6 +113,20 @@ func TestCLIJSONUnknownMutationStateIsExplicit(t *testing.T) {
 	}
 }
 
+func TestCLIJSONDeadlineAndCancellationRemainDistinct(t *testing.T) {
+	deadline := classifyCLIJSONError(errors.Join(context.DeadlineExceeded, context.Canceled))
+	if deadline.Code != "operation_timeout" || deadline.Category != "unavailable_retryable" || !deadline.Retryable || deadline.StateChanged != "unknown" {
+		t.Fatalf("deadline=%#v", deadline)
+	}
+	canceled := classifyCLIJSONError(context.Canceled)
+	if canceled.Code != "operation_canceled" || canceled.Category != "canceled" || canceled.Retryable || canceled.StateChanged != "unknown" {
+		t.Fatalf("canceled=%#v", canceled)
+	}
+	if timedOut := classifyCLIJSONError(&api.APIError{Status: 408}); timedOut.Category != "unavailable_retryable" || !timedOut.Retryable {
+		t.Fatalf("request timeout=%#v", timedOut)
+	}
+}
+
 func TestJSONVersionHelpAndTerminalShorthand(t *testing.T) {
 	for _, args := range [][]string{{"--json", "--version"}, {"status", "--json", "--help"}} {
 		var stdout, stderr bytes.Buffer
@@ -178,7 +195,7 @@ func TestJSONEarlyOutputWriteFailureReturnsNonzero(t *testing.T) {
 }
 
 func TestCLIJSONSupportReferenceMatchesContract(t *testing.T) {
-	const reference = "pb-0123456789abcdef0123456789abcdef"
+	const reference = "support_01234567-89ab-4def-8123-456789abcdef"
 	value := classifyCLIJSONError(&api.APIError{SupportReference: reference})
 	if value.SupportReference != reference {
 		t.Fatalf("support reference = %q, want %q", value.SupportReference, reference)
@@ -206,8 +223,20 @@ func TestCLIJSONSupportReferenceMatchesContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	property, ok := schema.Properties.Error.Properties["support_reference"]
-	if !ok || property.Pattern != "^pb-[0-9a-f]{32}$" || property.MaxLength != len(reference) {
+	if !ok || property.Pattern != `^support_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` || property.MaxLength != 44 {
 		t.Fatalf("support_reference schema = %+v, present=%v", property, ok)
+	}
+	pattern := regexp.MustCompile(property.Pattern)
+	generated := supportref.New()
+	for _, value := range []string{reference, generated} {
+		if !pattern.MatchString(value) || len(value) > property.MaxLength || !supportref.Valid(value) {
+			t.Fatalf("support reference rejected by contract: %q", value)
+		}
+	}
+	for _, value := range []string{reference + "0", generated + "0", "support_invalid", "support_01234567-89ab-1cde-8fab-0123456789ab"} {
+		if pattern.MatchString(value) || supportref.Valid(value) {
+			t.Fatalf("invalid support reference accepted: %q", value)
+		}
 	}
 }
 
@@ -219,5 +248,53 @@ func assertCLIJSONFailure(t *testing.T, payload []byte, code, category string) {
 	}
 	if envelope.SchemaVersion != cliJSONSchemaVersion || envelope.OK || envelope.Error == nil || envelope.Error.Code != code || envelope.Error.Category != category {
 		t.Fatalf("unexpected envelope: %+v", envelope)
+	}
+}
+
+func TestTeamSubscriptionRequiredHasActionableUnchangedOutput(t *testing.T) {
+	err := fmt.Errorf("wrapped create failure: %w", &api.APIError{Status: 403, Code: "team_subscription_required", Message: "untrusted private provider detail"})
+	message := userFacingError(err)
+	for _, want := range []string{"active team subscription", "owner or admin", "--workspace personal", "No resource was created"} {
+		if !strings.Contains(message, want) {
+			t.Errorf("human message=%q, missing %q", message, want)
+		}
+	}
+	if strings.Contains(message, "private provider") {
+		t.Fatal("raw server message was exposed")
+	}
+	var output bytes.Buffer
+	if err := writeCLIJSONError(&output, err); err != nil {
+		t.Fatal(err)
+	}
+	var envelope cliJSONEnvelope
+	if err := json.Unmarshal(output.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	got := envelope.Error
+	if envelope.OK || got == nil {
+		t.Fatalf("envelope=%+v", envelope)
+	}
+	if got.Code != "team_subscription_required" || got.Category != "authorization_or_entitlement" || got.StateChanged != false || got.Retryable || got.OutcomeUncertain {
+		t.Fatalf("structured error=%+v", got)
+	}
+	if !strings.Contains(got.Recovery, "owner or admin") || !strings.Contains(got.Recovery, "--workspace personal") || !strings.Contains(got.Message, "No resource was created") {
+		t.Fatalf("recovery/message=%+v", got)
+	}
+	ordinary := classifyCLIJSONError(&api.APIError{Status: 403, Code: "forbidden"})
+	if ordinary.StateChanged != "unknown" {
+		t.Fatalf("ordinary authorization outcome was guessed: %+v", ordinary)
+	}
+}
+
+func TestCLIJSONRejectsUnknownServerCodeAndMessage(t *testing.T) {
+	for _, status := range []int{400, 409, 500} {
+		result := classifyCLIJSONError(&api.APIError{Status: status, Code: "private_api_token_value", Message: "private response body"})
+		if result.Code != "api_error" || strings.Contains(result.Message, "private") {
+			t.Fatalf("unsafe API output: %#v", result)
+		}
+	}
+	known := classifyCLIJSONError(&api.APIError{Status: 403, Code: "team_subscription_required"})
+	if known.Code != "team_subscription_required" {
+		t.Fatal("known protocol code was lost")
 	}
 }

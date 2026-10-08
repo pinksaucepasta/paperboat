@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -54,7 +55,7 @@ func Default() Document {
 	}}
 }
 
-var homeIDs = []string{"machines", "sessions", "previews", "environment-variables", "inbox", "team", "transfer", "config", "doctor", "account", "customize", "commands"}
+var homeIDs = []string{"machines", "sessions", "previews", "environment-variables", "inbox", "team", "send", "config", "doctor", "account", "switch-workspace", "customize", "commands"}
 var columnIDs = map[string][]string{"machines": {"status", "platform", "id"}, "sessions": {"machine", "state", "id"}, "previews": {"state", "access", "id"}, "tunnels": {"state", "access", "endpoint"}}
 var previewPanelIDs = []string{"target", "access", "expiry", "domains"}
 
@@ -112,37 +113,68 @@ func Path(configPath string) (string, error) {
 	return configPath + ".preferences.json", nil
 }
 
-func Load(path string) (Document, error) {
+var ErrInvalid = errors.New("preferences are invalid")
+
+// InvalidError marks validation of local preferences; its cause is retained
+// for diagnostics, but may contain user-authored values and is never prose.
+type InvalidError struct{ cause error }
+
+func (*InvalidError) Error() string {
+	return "Preferences are invalid. Run `pb config customize`, or retry with --no-customization."
+}
+func (e *InvalidError) Unwrap() error      { return e.cause }
+func (*InvalidError) Is(target error) bool { return target == ErrInvalid }
+
+func Load(path string) (document Document, resultErr error) {
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
+		// Windows also reports a missing path when an existing parent is a
+		// regular file. That is a storage failure, rather than first use.
+		parent, parentErr := os.Stat(filepath.Dir(path))
+		if parentErr == nil && !parent.IsDir() {
+			return Document{}, fmt.Errorf("read preferences: %w", err)
+		}
+		if parentErr != nil && !errors.Is(parentErr, os.ErrNotExist) {
+			return Document{}, fmt.Errorf("read preferences directory: %w", parentErr)
+		}
 		return Default(), nil
 	}
 	if err != nil {
 		return Document{}, fmt.Errorf("read preferences: %w", err)
 	}
 	if !info.Mode().IsRegular() || info.Size() > maxFileBytes {
-		return Document{}, errors.New("preferences file must be a regular file no larger than 128 KiB")
+		return Document{}, &InvalidError{cause: errors.New("preferences file must be a regular file no larger than 128 KiB")}
 	}
 	f, err := os.Open(path)
 	if err != nil {
 		return Document{}, fmt.Errorf("read preferences: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			resultErr = errors.Join(resultErr, closeErr)
+		}
+	}()
 	data, err := io.ReadAll(io.LimitReader(f, maxFileBytes+1))
-	if err != nil || len(data) > maxFileBytes {
-		return Document{}, errors.New("preferences file cannot be read within the 128 KiB limit")
+	if err != nil {
+		return Document{}, fmt.Errorf("read preferences: %w", err)
+	}
+	if len(data) > maxFileBytes {
+		return Document{}, &InvalidError{cause: errors.New("preferences exceed the 128 KiB limit")}
 	}
 	var doc Document
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&doc); err != nil {
-		return Document{}, fmt.Errorf("parse preferences: %w", err)
+		return Document{}, &InvalidError{cause: err}
 	}
-	if decoder.Decode(&struct{}{}) != io.EOF {
-		return Document{}, errors.New("parse preferences: trailing JSON value")
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			err = errors.New("trailing JSON value")
+		}
+		return Document{}, &InvalidError{cause: err}
 	}
 	if err := Validate(doc); err != nil {
-		return Document{}, err
+		return Document{}, &InvalidError{cause: err}
 	}
 	return Effective(doc), nil
 }

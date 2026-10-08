@@ -1,0 +1,52 @@
+.nh
+.TH "PB-DAEMON-MACHINE-GUARD-UNINSTALL" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-daemon-machine-guard-uninstall - Remove machine access while retaining cached-address protection
+
+
+.SH SYNOPSIS
+\fBpb daemon machine-guard uninstall [flags]\fP
+
+
+.SH DESCRIPTION
+Remove machine access while retaining cached-address protection
+
+.PP
+Remove the privileged machine-access integration while retaining cached-address protection. This does not uninstall the ordinary current-user Paperboat daemon service.
+
+.PP
+The machine guard is a privileged local helper for protected loopback listeners and trusted local HTTPS. Installation handles certificate trust; public DNS supplies the browser names. Use the dedicated service commands for the ordinary Paperboat daemon.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for uninstall
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	configuration file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	Paperboat server URL
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-daemon-machine-guard(1)\fP

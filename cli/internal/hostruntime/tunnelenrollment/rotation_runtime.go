@@ -188,7 +188,7 @@ func (r *productionRotationRuntime) startReplacement(request ActivationRequest, 
 		var config tunnelmanager.ProductionAssemblyConfig
 		config, result = r.source.resolveProductionAssembly(ctx, request, signer, r)
 		if result == nil {
-			assembly, _, result = tunnelmanager.OpenProductionAssembly(config)
+			assembly, result = openObservedProductionAssembly(ctx, config)
 		}
 		if result == nil {
 			result = r.source.bindReplacementProductionAssembly(request, assembly, r)
@@ -197,11 +197,12 @@ func (r *productionRotationRuntime) startReplacement(request ActivationRequest, 
 			result = assembly.Start(ctx)
 		}
 	}
-	r.mu.Lock()
 	if result != nil && assembly != nil {
-		_ = assembly.Shutdown(context.Background())
+		result = errors.Join(result, assembly.Shutdown(context.Background()))
+		r.source.UnbindProductionAssembly(request, assembly)
 		assembly = nil
 	}
+	r.mu.Lock()
 	r.replacement = assembly
 	r.replacementErr = result
 	close(done)

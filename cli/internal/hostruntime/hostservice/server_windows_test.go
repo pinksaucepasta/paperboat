@@ -28,7 +28,10 @@ type windowsTestAuthorizedKeys struct {
 	err     error
 }
 
-func (r *windowsTestAuthorizedKeys) ReconcileAuthorizedKeys(_ context.Context, keys []string) (bool, error) {
+func (r *windowsTestAuthorizedKeys) ReconcileAuthorizedKeys(ctx context.Context, keys []string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	r.keys = make([]string, len(keys))
 	copy(r.keys, keys)
 	return r.changed, r.err

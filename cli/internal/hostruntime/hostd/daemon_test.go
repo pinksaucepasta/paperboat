@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -236,7 +237,7 @@ func TestWorkerReplacementReportsCommittedCandidateWhenPreviousCleanupFails(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	stopErr := errors.New("previous cleanup failed")
+	stopErr := errors.New("private process payload must not appear")
 	previous := &failingStartService{shutdownErr: stopErr}
 	if err := controller.Start(context.Background(), previous); err != nil {
 		t.Fatal(err)
@@ -246,6 +247,9 @@ func TestWorkerReplacementReportsCommittedCandidateWhenPreviousCleanupFails(t *t
 	var committed *ReplacementCommittedError
 	if !errors.As(err, &committed) || !errors.Is(err, stopErr) {
 		t.Fatalf("replace error=%v", err)
+	}
+	if strings.Contains(err.Error(), stopErr.Error()) || !strings.Contains(err.Error(), "new worker is active") {
+		t.Fatal("replacement result exposes private cause or omits committed state")
 	}
 	if controller.active != candidate || !controller.running || candidate.starts != 1 {
 		t.Fatalf("candidate was not committed active=%#v running=%t starts=%d", controller.active, controller.running, candidate.starts)

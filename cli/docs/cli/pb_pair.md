@@ -1,12 +1,12 @@
 ## pb pair
 
-Enroll this device with a one-shot token
+Enroll this machine with a one-shot token
 
 ### Synopsis
 
-Enroll this device with a one-shot token
+Enroll this machine with a one-shot token
 
-Enroll this device with a one-shot token, optionally reading it from a private file. Name, shell, and state-root options target the local installation; enrollment binds a new device identity to the account.
+Enroll this machine with a one-shot token, optionally reading it from a private file. Name, shell, and state-root options target the local installation; enrollment binds a new machine identity to the account.
 
 JSON output is supported with --json.
 
@@ -32,6 +32,7 @@ pb pair [flags]
       --config string      path to the CLI config file
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO

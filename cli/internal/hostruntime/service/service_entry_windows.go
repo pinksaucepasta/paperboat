@@ -581,13 +581,17 @@ func launchEnrolledProcess(config ServiceEntryConfig) (result *enrolledProcess, 
 	if err != nil {
 		return nil, err
 	}
-	startup := enrolledProcessStartupInfo()
+	startup, closeStartup, err := enrolledProcessStartupWithStdio()
+	if err != nil {
+		return nil, err
+	}
+	defer closeStartup()
 	var processInfo windows.ProcessInformation
 	// The process must not execute before its kill-on-close job owns it. In
 	// particular, a fast process could otherwise create grandchildren between
 	// CreateProcessAsUser and AssignProcessToJobObject.
 	flags := enrolledProcessCreationFlags()
-	if err := windows.CreateProcessAsUser(primary, nil, &command[0], nil, nil, false, flags, &environment[0], workingDirectoryUTF16, &startup, &processInfo); err != nil {
+	if err := windows.CreateProcessAsUser(primary, nil, &command[0], nil, nil, true, flags, &environment[0], workingDirectoryUTF16, &startup.StartupInfo, &processInfo); err != nil {
 		return nil, err
 	}
 	job, err := killOnCloseJob()
@@ -617,7 +621,7 @@ func enrolledProcessStartupInfo() windows.StartupInfo {
 }
 
 func enrolledProcessCreationFlags() uint32 {
-	return windows.CREATE_UNICODE_ENVIRONMENT | windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_NO_WINDOW | windows.CREATE_SUSPENDED
+	return windows.CREATE_UNICODE_ENVIRONMENT | windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_NO_WINDOW | windows.CREATE_SUSPENDED | windows.EXTENDED_STARTUPINFO_PRESENT
 }
 
 func cleanFailedEnrolledLaunch(info windows.ProcessInformation, job windows.Handle) error {

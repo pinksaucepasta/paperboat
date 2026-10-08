@@ -3,6 +3,7 @@ package connectorprotocol
 import (
 	"context"
 	"errors"
+	"github.com/google/uuid"
 	"sync"
 	"time"
 )
@@ -162,7 +163,7 @@ func NewServer(config ServerConfig) (*Server, error) {
 		config.HeartbeatInterval = DefaultHeartbeat
 	}
 	if config.SessionIDs == nil {
-		config.SessionIDs = func() (string, error) { return newOpaqueID("sess") }
+		config.SessionIDs = func() (string, error) { id, err := uuid.NewRandom(); return "session_" + id.String(), err }
 	}
 	if config.Registry == nil {
 		config.Registry = NewSessionRegistry()

@@ -59,7 +59,7 @@ func TestLinuxExecutableLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := store.Current()
-	if err := store.SaveRegistration(identity.Registration{ServerURL: cfg.ServerURL, MachineID: "machine_test", EnvironmentID: "environment_test", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, SetupMode: "client", UpdatedAt: time.Now()}); err != nil {
+	if err := store.SaveRegistration(identity.Registration{ServerURL: cfg.ServerURL, MachineID: "machine_test", EnvironmentID: "environment_test", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, UpdatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	env := append(os.Environ(), "HOME="+filepath.Join(root, "home"), "XDG_CONFIG_HOME="+filepath.Join(root, "config"), "XDG_STATE_HOME="+filepath.Join(root, "state"), "XDG_RUNTIME_DIR="+filepath.Join(root, "run"), "PAPERBOAT_RUNTIME_STATE_ROOT="+filepath.Join(root, "identity"), "PAPERBOAT_CONFIG="+cfgPath)

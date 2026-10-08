@@ -2,17 +2,17 @@ package localapi
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/google/uuid"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
@@ -83,7 +83,7 @@ type ServerConfig struct {
 
 type Server struct {
 	config  ServerConfig
-	cleanup func()
+	cleanup func() error
 }
 
 type peerContextKey struct{}
@@ -116,22 +116,26 @@ func NewServer(config ServerConfig) (*Server, error) {
 	if config.AuthorizeDiagnostics == nil {
 		config.AuthorizeDiagnostics = defaultReadAuthorizer(config)
 	}
-	return &Server{config: config, cleanup: func() {}}, nil
+	return &Server{config: config, cleanup: func() error { return nil }}, nil
 }
 
-func (s *Server) Run(ctx context.Context) error {
+func (s *Server) Run(ctx context.Context) (runErr error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	listener, err := s.listen(ctx)
 	if err != nil {
-		return err
+		return localListenerFailure{cause: err}
 	}
 	defer func() {
-		_ = listener.Close()
-		s.cleanup()
+		closeErr := listener.Close()
+		if errors.Is(closeErr, net.ErrClosed) {
+			closeErr = nil
+		}
+		runErr = errors.Join(runErr, closeErr, s.cleanup())
 	}()
 	httpServer := &http.Server{
 		Handler:           s.handler(),
+		ErrorLog:          log.New(localServerLog{ctx: ctx}, "", 0),
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 		ReadHeaderTimeout: s.config.Timeout,
 		ReadTimeout:       s.config.Timeout,
@@ -165,11 +169,28 @@ func (s *Server) Run(ctx context.Context) error {
 	return err
 }
 
+type localListenerFailure struct{ cause error }
+
+func (localListenerFailure) Error() string           { return "local API listener could not start" }
+func (failure localListenerFailure) Unwrap() error   { return failure.cause }
+func (localListenerFailure) DiagnosticStage() string { return "listener_bind" }
+func (localListenerFailure) DiagnosticCode() string  { return "local_gateway_failed" }
+
 func (s *Server) handler() http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if reference := request.Header.Get(supportref.Header); supportref.Valid(reference) {
 			request = request.WithContext(supportref.WithContext(request.Context(), reference))
 		}
+		defer func() {
+			if failure := recover(); failure != nil {
+				if failure != http.ErrAbortHandler {
+					errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "diagnostic", "process", "process_panic", localHandlerPanic{})
+				}
+				// net/http aborts this response without logging the panic value,
+				// stack, request address, or any user-controlled handler state.
+				panic(http.ErrAbortHandler)
+			}
+		}()
 		requestID := request.Header.Get("X-Paperboat-Request-ID")
 		if !validRequestID(requestID) {
 			requestID = localRequestID()
@@ -237,12 +258,20 @@ func (s *Server) handler() http.Handler {
 		requestCtx, cancel := context.WithTimeout(request.Context(), s.config.Timeout)
 		defer cancel()
 		snapshot, err := s.config.Source.Snapshot(requestCtx)
-		if err != nil || snapshot.Validate() != nil {
+		if err == nil {
+			err = snapshot.Validate()
+		}
+		if err != nil {
+			errorreport.Current().CaptureFailure(requestCtx, "paperboatd", "status", "local_gateway", "local_gateway_failed", err)
 			writeError(writer, http.StatusServiceUnavailable, requestID, "snapshot_unavailable", "local snapshot is unavailable")
 			return
 		}
 		encoded, err := json.Marshal(snapshot)
 		if err != nil || len(encoded) > maxJSONBytes {
+			if err == nil {
+				err = ErrInvalidResponse
+			}
+			errorreport.Current().CaptureFailure(requestCtx, "paperboatd", "status", "local_gateway", "local_gateway_failed", err)
 			writeError(writer, http.StatusServiceUnavailable, requestID, "snapshot_unavailable", "local snapshot is unavailable")
 			return
 		}
@@ -264,14 +293,14 @@ func (s *Server) fileTransfer(writer http.ResponseWriter, request *http.Request,
 	}
 	result, err := s.config.FileTransfers.PrepareFileTransfer(request.Context(), peer, value)
 	if err != nil || result.Handle == "" {
+		if err == nil {
+			err = ErrInvalidResponse
+		}
 		if result.Handle != "" {
 			_ = s.config.FileTransfers.ReleaseFileTransfer(peer, result.Handle)
 		}
-		message := "file transfer is unavailable"
-		if err != nil {
-			message += ": " + safeErrorMessage(err)
-		}
-		writeError(writer, http.StatusServiceUnavailable, requestID, "file_transfer_unavailable", message)
+		errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "transfer", "stream_open", "file_transfer_failed", err)
+		writeError(writer, http.StatusServiceUnavailable, requestID, "file_transfer_unavailable", "file transfer setup failed; retry the transfer")
 		return
 	}
 	hijacker, ok := writer.(http.Hijacker)
@@ -307,7 +336,7 @@ func (s *Server) fileTransfer(writer http.ResponseWriter, request *http.Request,
 	go func() {
 		defer local.Close()
 		defer s.config.FileTransfers.ReleaseFileTransfer(peer, result.Handle)
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(context.WithoutCancel(request.Context()))
 		defer cancel()
 		watchControlHangup(ctx, local, peer, cancel)
 	}()
@@ -325,14 +354,14 @@ func (s *Server) fileTransferStream(writer http.ResponseWriter, request *http.Re
 	}
 	stream, err := s.config.FileTransfers.OpenFileTransferStream(request.Context(), peer, handle)
 	if err != nil || stream == nil {
+		if err == nil {
+			err = ErrInvalidResponse
+		}
 		if stream != nil {
 			_ = stream.Close()
 		}
-		message := "file transfer stream is unavailable"
-		if err != nil {
-			message += ": " + safeErrorMessage(err)
-		}
-		writeError(writer, http.StatusServiceUnavailable, requestID, "file_transfer_stream_unavailable", message)
+		errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "transfer", "stream_open", "file_transfer_failed", err)
+		writeError(writer, http.StatusServiceUnavailable, requestID, "file_transfer_stream_unavailable", "file transfer stream could not open; refresh the target and retry the transfer")
 		return
 	}
 	hijacker, ok := writer.(http.Hijacker)
@@ -356,9 +385,17 @@ func (s *Server) fileTransferStream(writer http.ResponseWriter, request *http.Re
 		_ = stream.Close()
 		return
 	}
-	streamCtx, cancel := context.WithCancel(context.Background())
-	go watchPeerHangup(streamCtx, local, peer, cancel)
-	go func() { defer cancel(); bridgePeerStream(streamCtx, local, stream) }()
+	streamCtx, cancel := context.WithCancel(context.WithoutCancel(request.Context()))
+	watchDone := make(chan struct{})
+	go func() {
+		defer close(watchDone)
+		watchPeerHangup(streamCtx, local, peer, cancel)
+	}()
+	go func() {
+		bridgePeerStream(streamCtx, local, stream)
+		cancel()
+		<-watchDone
+	}()
 }
 
 func (s *Server) peerProbe(writer http.ResponseWriter, request *http.Request, requestID string, peer Peer) {
@@ -375,7 +412,7 @@ func (s *Server) peerProbe(writer http.ResponseWriter, request *http.Request, re
 	defer cancel()
 	result, err := s.config.PeerProbes.ProbePeer(ctx, peer, value)
 	if err != nil {
-		if errors.Is(err, ErrPermission) {
+		if IsPermissionFailure(err) {
 			writeError(writer, http.StatusForbidden, requestID, "permission_denied", "peer probe authority was denied; refresh the target and its authorization")
 			return
 		}
@@ -383,7 +420,8 @@ func (s *Server) peerProbe(writer http.ResponseWriter, request *http.Request, re
 			writeError(writer, http.StatusGatewayTimeout, requestID, "deadline_exceeded", "peer probe deadline expired")
 			return
 		}
-		writeError(writer, http.StatusServiceUnavailable, requestID, "peer_probe_unavailable", "peer probe is unavailable: "+safeErrorMessage(err))
+		errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "peer_probe", "peer_connect", "native_private_failed", err)
+		writeError(writer, http.StatusServiceUnavailable, requestID, "peer_probe_unavailable", "peer probe failed; check target connectivity with pb doctor")
 		return
 	}
 	if !validNativeProbePath(result.Path) || result.ConnectionNanoseconds < 0 {
@@ -431,17 +469,19 @@ func (s *Server) peerStream(writer http.ResponseWriter, request *http.Request, r
 	<-setupDone
 	closeProcessExit()
 	if err != nil || stream == nil {
+		if err == nil {
+			err = ErrInvalidResponse
+		}
 		if stream != nil {
 			_ = stream.Close()
 		}
-		message := "peer stream is unavailable"
-		if err != nil {
-			message += ": " + safeErrorMessage(err)
-		}
+		errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "peer_stream", "stream_open", "native_private_failed", err)
+		message := "peer stream could not open; refresh the target and check connectivity with pb doctor"
 		code := "peer_stream_unavailable"
 		var coded interface{ LocalAPICode() string }
 		if errors.As(err, &coded) && coded.LocalAPICode() == "exec_start_uncertain" {
 			code = coded.LocalAPICode()
+			message = "remote execution start outcome is uncertain; check the execution status before starting it again"
 		}
 		writeError(writer, http.StatusServiceUnavailable, requestID, code, message)
 		return
@@ -469,29 +509,22 @@ func (s *Server) peerStream(writer http.ResponseWriter, request *http.Request, r
 	}
 	// Admission already validated the credential deadline. The hijacked stream
 	// is canceled by either endpoint closing, not by credential expiry.
-	streamCtx, cancel := context.WithCancel(context.Background())
+	streamCtx, cancel := context.WithCancel(context.WithoutCancel(request.Context()))
 	go watchPeerHangup(streamCtx, local, peer, cancel)
 	go func() { defer cancel(); bridgePeerStream(streamCtx, local, stream) }()
 }
 
-func safeErrorMessage(err error) string {
-	if err == nil {
-		return "unknown error"
-	}
-	message := strings.Join(strings.FieldsFunc(err.Error(), func(value rune) bool {
-		return value < 0x20 || value == 0x7f
-	}), "; ")
-	// Transport errors append a parenthesized diagnostic record containing
-	// internal identity fingerprints, connection handles, and certificate
-	// hashes. Those fields belong in protected diagnostics, not local API error
-	// envelopes that are rendered by the normal CLI.
-	if index := strings.Index(message, " ("); index >= 0 && strings.Contains(message[index:], "=") {
-		message = message[:index]
-	}
-	if len(message) > 512 {
-		message = message[:512]
-	}
-	return message
+type localHandlerPanic struct{}
+
+func (localHandlerPanic) Error() string { return "local API handler panic" }
+
+type localServerLog struct{ ctx context.Context }
+
+func (writer localServerLog) Write(content []byte) (int, error) {
+	// net/http diagnostics may contain arbitrary request and panic data.
+	// Record a finite fallback classification without inspecting that content.
+	errorreport.Current().ObserveFailure(writer.ctx, "paperboatd", "diagnostic", "local_gateway", "local_gateway_failed", errors.New("local HTTP server failure"))
+	return len(content), nil
 }
 
 func bridgePeerStream(ctx context.Context, local, remote net.Conn) {
@@ -505,20 +538,33 @@ func bridgePeerStream(ctx context.Context, local, remote net.Conn) {
 	}
 	go copyOne(remote, local)
 	go copyOne(local, remote)
-	for range 2 {
-		select {
-		case err := <-done:
-			if err != nil {
-				_ = local.Close()
-				_ = remote.Close()
-			}
-		case <-ctx.Done():
-			_ = local.Close()
-			_ = remote.Close()
+	var failure error
+	closed := false
+	closeEndpoints := func() {
+		if !closed {
+			closed = true
+			failure = errors.Join(failure, local.Close(), remote.Close())
 		}
 	}
-	_ = local.Close()
-	_ = remote.Close()
+	canceled := ctx.Done()
+	for completed := 0; completed < 2; {
+		select {
+		case err := <-done:
+			completed++
+			failure = errors.Join(failure, err)
+			if err != nil {
+				closeEndpoints()
+			}
+		case <-canceled:
+			failure = errors.Join(failure, ctx.Err())
+			canceled = nil
+			closeEndpoints()
+		}
+	}
+	closeEndpoints()
+	if failure != nil && !normalPeerStreamTermination(failure) {
+		errorreport.Current().CaptureFailure(ctx, "paperboatd", "peer_stream", "delivery", "native_private_failed", failure)
+	}
 }
 
 func (s *Server) relayInventory(writer http.ResponseWriter, request *http.Request, requestID string) {
@@ -534,12 +580,20 @@ func (s *Server) relayInventory(writer http.ResponseWriter, request *http.Reques
 	requestCtx, cancel := context.WithTimeout(request.Context(), 45*time.Second)
 	defer cancel()
 	inventory, err := s.config.RelayInventory(requestCtx)
-	if err != nil || inventory.Validate() != nil {
+	if err == nil {
+		err = inventory.Validate()
+	}
+	if err != nil {
+		errorreport.Current().CaptureFailure(requestCtx, "paperboatd", "relay", "local_gateway", "local_gateway_failed", err)
 		writeError(writer, http.StatusServiceUnavailable, requestID, "relay_inventory_unavailable", "verified relay inventory is unavailable")
 		return
 	}
 	encoded, err := json.Marshal(inventory)
 	if err != nil || len(encoded) > maxJSONBytes {
+		if err == nil {
+			err = ErrInvalidResponse
+		}
+		errorreport.Current().CaptureFailure(requestCtx, "paperboatd", "relay", "local_gateway", "local_gateway_failed", err)
 		writeError(writer, http.StatusServiceUnavailable, requestID, "relay_inventory_unavailable", "verified relay inventory is unavailable")
 		return
 	}
@@ -561,12 +615,20 @@ func (s *Server) completions(writer http.ResponseWriter, request *http.Request, 
 	requestCtx, cancel := context.WithTimeout(request.Context(), s.config.Timeout)
 	defer cancel()
 	snapshot, err := s.config.Completions.Completions(requestCtx)
-	if err != nil || snapshot.Validate() != nil {
+	if err == nil {
+		err = snapshot.Validate()
+	}
+	if err != nil {
+		errorreport.Current().CaptureFailure(requestCtx, "paperboatd", "status", "local_gateway", "local_gateway_failed", err)
 		writeError(writer, http.StatusServiceUnavailable, requestID, "completion_unavailable", "completion inventory is unavailable")
 		return
 	}
 	encoded, err := json.Marshal(snapshot)
 	if err != nil || len(encoded) > maxJSONBytes {
+		if err == nil {
+			err = ErrInvalidResponse
+		}
+		errorreport.Current().CaptureFailure(requestCtx, "paperboatd", "status", "local_gateway", "local_gateway_failed", err)
 		writeError(writer, http.StatusServiceUnavailable, requestID, "completion_unavailable", "completion inventory is unavailable")
 		return
 	}
@@ -602,6 +664,7 @@ func (s *Server) observeTransport(writer http.ResponseWriter, request *http.Requ
 			return
 		}
 		writeError(writer, http.StatusServiceUnavailable, requestID, "observation_unavailable", "transport observation could not be committed")
+		errorreport.Current().CaptureFailure(requestCtx, "paperboatd", "runtime_observation", "local_gateway", "local_gateway_failed", err)
 		return
 	}
 	writer.Header().Set("X-Paperboat-Protocol", ProtocolV1)
@@ -648,17 +711,30 @@ func (s *Server) watch(writer http.ResponseWriter, request *http.Request, reques
 	for count := 0; count < s.config.MaxWatchEvents; count++ {
 		snapshot, err := watcher.Watch(watchCtx, after)
 		if err != nil {
+			if err != context.Canceled && err != context.DeadlineExceeded {
+				errorreport.Current().CaptureFailure(watchCtx, "paperboatd", "status", "local_gateway", "local_gateway_failed", err)
+			}
 			return
 		}
-		if snapshot.Validate() != nil || snapshot.Generation <= after {
+		if err := snapshot.Validate(); err != nil {
+			errorreport.Current().CaptureFailure(watchCtx, "paperboatd", "status", "local_gateway", "local_gateway_failed", err)
+			return
+		}
+		if snapshot.Generation <= after {
+			errorreport.Current().CaptureFailure(watchCtx, "paperboatd", "status", "local_gateway", "local_gateway_failed", ErrInvalidResponse)
 			return
 		}
 		event := StatusEvent{Schema: StatusEventSchemaV1, Snapshot: snapshot}
 		encoded, err := json.Marshal(event)
 		if err != nil || len(encoded) > maxJSONBytes {
+			if err == nil {
+				err = ErrInvalidResponse
+			}
+			errorreport.Current().CaptureFailure(watchCtx, "paperboatd", "status", "local_gateway", "local_gateway_failed", err)
 			return
 		}
 		if _, err := writer.Write(append(encoded, '\n')); err != nil {
+			errorreport.Current().ObserveFailure(watchCtx, "paperboatd", "status", "delivery", "local_gateway_failed", err)
 			return
 		}
 		flusher.Flush()
@@ -682,13 +758,9 @@ func writeError(writer http.ResponseWriter, status int, requestID, code, message
 }
 
 func localRequestID() string {
-	var value [12]byte
-	if _, err := io.ReadFull(rand.Reader, value[:]); err == nil {
-		return "req_" + hex.EncodeToString(value[:])
-	}
-	return "req_" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	return "request_" + uuid.NewString()
 }
 
 func validRequestID(value string) bool {
-	return strings.HasPrefix(value, "req_") && safeValue(value)
+	return safeValue(value)
 }

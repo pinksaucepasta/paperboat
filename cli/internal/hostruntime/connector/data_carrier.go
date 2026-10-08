@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"math/rand/v2"
 	"net"
@@ -46,6 +47,39 @@ var (
 	ErrDataCarrierControlOpen   = errors.New("data carrier control stream already open")
 	ErrDataCarrierAdmission     = errors.New("data carrier stream admission rejected")
 )
+
+type dataCarrierAdmissionFailure struct{ cause error }
+
+func (*dataCarrierAdmissionFailure) Error() string { return "connector stream admission failed" }
+func (e *dataCarrierAdmissionFailure) Unwrap() []error {
+	return []error{ErrDataCarrierAdmission, e.cause}
+}
+func (*dataCarrierAdmissionFailure) DiagnosticStage() string { return "peer_authority" }
+func (*dataCarrierAdmissionFailure) DiagnosticCode() string  { return "peer_authority_failed" }
+
+type dataCarrierStreamOpenFailure struct {
+	cause    error
+	sentinel error
+}
+
+func (*dataCarrierStreamOpenFailure) Error() string { return "connector stream open failed" }
+func (e *dataCarrierStreamOpenFailure) Unwrap() []error {
+	if e.sentinel != nil {
+		return []error{e.sentinel, e.cause}
+	}
+	return []error{e.cause}
+}
+func (*dataCarrierStreamOpenFailure) DiagnosticStage() string { return "stream_open" }
+func (*dataCarrierStreamOpenFailure) DiagnosticCode() string  { return "native_private_failed" }
+
+func wrapDataCarrierStreamOpenFailure(err, sentinel error) error {
+	if err == nil || connectorErrorLeaves(err, func(leaf error) bool {
+		return leaf == context.Canceled || leaf == ErrDataCarrierClosed || leaf == net.ErrClosed
+	}) {
+		return err
+	}
+	return &dataCarrierStreamOpenFailure{cause: err, sentinel: sentinel}
+}
 
 // StreamOpen is the canonical connector-v1 per-stream admission metadata.
 // It deliberately contains no bearer or reusable credential bytes.
@@ -188,8 +222,6 @@ const (
 	DataCarrierUnknown DataCarrierState = "unknown"
 )
 
-var nextDataCarrierID atomic.Uint64
-
 // DataCarrierStreamLink is the bounded byte stream exposed by one carrier
 // stream. TCP links use yamux streams; QUIC links use native bidirectional
 // streams directly.
@@ -318,7 +350,7 @@ func newDataCarrierWithSession(ctx context.Context, session DataCarrierSession, 
 		return nil, err
 	}
 	c := &DataCarrier{
-		id:        fmt.Sprintf("carrier-%d", nextDataCarrierID.Add(1)),
+		id:        "carrier_" + uuid.NewString(),
 		ctx:       ctx,
 		session:   session,
 		config:    config,
@@ -491,24 +523,27 @@ func (c *DataCarrier) acceptLoop() {
 		}
 		var open StreamOpen
 		if c.admission != nil {
-			admissionContext, cancel := context.WithTimeout(context.Background(), c.config.StreamOpenLimit)
+			admissionContext, cancel := context.WithTimeout(c.ctx, c.config.StreamOpenLimit)
 			deadline := time.Now().Add(c.config.StreamOpenLimit)
 			if err := raw.SetReadDeadline(deadline); err != nil {
 				cancel()
 				_ = raw.Close()
 				c.releasePermit()
-				c.publishAccepted(dataCarrierAcceptResult{err: ErrDataCarrierAdmission})
+				c.publishAccepted(dataCarrierAcceptResult{err: wrapDataCarrierStreamOpenFailure(err, ErrDataCarrierAdmission)})
 				continue
 			}
 			open, err = connectorprotocol.ReadStreamOpen(raw)
 			_ = raw.SetReadDeadline(time.Time{})
+			if err != nil {
+				err = wrapDataCarrierStreamOpenFailure(err, nil)
+			}
 			if err == nil && !c.admission.Identity.matches(open) {
-				err = ErrDataCarrierAdmission
+				err = &dataCarrierAdmissionFailure{cause: ErrDataCarrierAdmission}
 			}
 			if err == nil {
 				err = c.admission.Authorize(admissionContext, open)
 				if err != nil {
-					err = fmt.Errorf("%w: %v", ErrDataCarrierAdmission, err)
+					err = &dataCarrierAdmissionFailure{cause: err}
 				}
 			}
 			cancel()
@@ -671,7 +706,7 @@ func (c *DataCarrier) openStreamWithMetadata(ctx context.Context, onClose func()
 			if c.closed() {
 				return nil, ErrDataCarrierClosed
 			}
-			return nil, opened.err
+			return nil, wrapDataCarrierStreamOpenFailure(opened.err, nil)
 		}
 		if err := ctx.Err(); err != nil {
 			_ = opened.stream.Close()
@@ -682,7 +717,7 @@ func (c *DataCarrier) openStreamWithMetadata(ctx context.Context, onClose func()
 			if err := writeDataCarrierStreamOpen(ctx, opened.stream, *open, c.config.StreamOpenLimit); err != nil {
 				_ = opened.stream.Close()
 				c.releasePermit()
-				return nil, err
+				return nil, wrapDataCarrierStreamOpenFailure(err, nil)
 			}
 		}
 		if open != nil {
@@ -933,10 +968,7 @@ type TransportDialError struct {
 }
 
 func (e *TransportDialError) Error() string {
-	if e == nil {
-		return ""
-	}
-	return fmt.Sprintf("%s carrier dial: %v", e.Transport, e.Err)
+	return "connector transport failed"
 }
 
 func (e *TransportDialError) Unwrap() error {
@@ -945,6 +977,9 @@ func (e *TransportDialError) Unwrap() error {
 	}
 	return e.Err
 }
+
+func (*TransportDialError) DiagnosticStage() string { return "peer_connect" }
+func (*TransportDialError) DiagnosticCode() string  { return "transport_failed" }
 
 func transportFallbackAllowed(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

@@ -13,7 +13,7 @@ pb-config-conflict-resolve - Choose the machine or repository version
 Choose the machine or repository version
 
 .PP
-Resolve one exact path with --keep to select the machine or repository version. Use show first to inspect both sides; the chosen direction is recorded for synchronization.
+Resolve one exact path with --keep to select the machine or repository version. Use compare first to inspect both sides; the chosen direction is recorded for the next synchronization step.
 
 .PP
 Conflicts identify exact paths whose local and repository versions cannot be merged automatically. Review the affected path before choosing a side; resolution records a deliberate decision for the next synchronization step.
@@ -46,6 +46,10 @@ JSON output is supported with --json.
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

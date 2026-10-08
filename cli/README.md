@@ -4,7 +4,7 @@ The Paperboat command-line client. `pb` authenticates the user, selects an envir
 attaches to helper-managed terminal sessions, and bridges local file pastes into remote
 agent workflows.
 
-The CLI uses Paperboat device sessions and stores secrets in the operating-system
+The CLI uses Paperboat machine sessions and stores secrets in the operating-system
 credential store. It does not own remote PTYs, tunnel infrastructure, or reusable
 connector credentials.
 
@@ -14,7 +14,7 @@ an actionable upgrade error instead of malformed session data. See
 
 ## Usage
 
-Install and enroll with a command from the dashboard or from `pb device add` on
+Install and enroll with a command from the dashboard or from `pb machine add` on
 an authenticated machine. If Paperboat is already installed, `pb auth login`
 accepts the same 26-character token directly for CLI authentication.
 
@@ -24,10 +24,11 @@ macOS PKG install bundled manuals automatically. For source installs, use
 `make install` or `make install-man`; see the guide for custom manual paths.
 
 ```sh
-pb <environment>             # attach an enrolled machine terminal
+pb new                       # fresh terminal on this device in the current directory
+pb <environment>             # fresh terminal on an enrolled machine
 pb environments               # list enrolled machines
 pb auth login                # enter the enrollment token directly
-pb device add               # print Linux/macOS and Windows install commands
+pb machine add               # print Linux/macOS and Windows install commands
 pb auth status               # show the active account for the configured server
 pb auth logout               # revoke and remove this installation's session
 pb doctor                    # check auth + environment connectivity
@@ -40,8 +41,8 @@ pb preview 3000 --private    # require the local Paperboat runtime
 ```
 
 Flags may appear before or after the environment name.
-Hosted projects and machines use the same durable terminal-session workflow:
-`--new`, `--session`, and `pb session` apply to either environment type.
+Machines use the durable terminal-session workflow:
+`new`, `--session`, and `pb session` select or create sessions on a machine.
 
 ## Interactive CLI
 
@@ -74,7 +75,7 @@ and live preview panels. Changes remain in a draft until **Save changes**; the h
 preview never runs an action. Escape returns to the previous screen. Leaving a changed
 draft offers to discard it. Saving checks for edits made by another process.
 
-Preferences are local to this device. Find the editable JSON file with
+Preferences are local to this machine. Find the editable JSON file with
 `pb config customize path`; it lives alongside the selected CLI config as
 `config.preferences.json` (a different `--config` basename gets its own preferences).
 Account synchronization is deferred. This file configures existing Paperboat commands
@@ -190,6 +191,21 @@ pb preview 3000 --domain preview.example.com
 pb preview 3000 --private
 ```
 
+Preview and tunnel list commands accept `--cursor` and `--limit`, with `--q`, `--state`, and `--owner`
+filters for preview and tunnel inventories. Human output prints an exact next-page
+invocation when more results exist; JSON preserves `next_cursor`. Interactive
+preview, tunnel, route, domain, and connector inventories offer page navigation.
+
+Use `pb send list --on MACHINE --offset OFFSET --limit 50` for native transfer
+history. Optional `--q` and `--state` filters apply before pagination. History
+contains authorized metadata only. Sent files in the home menu lets you select a
+destination, browse all history pages, inspect receipts, or cancel pending batches.
+
+Use `pb team invitations` to discover invitations received by your account and
+`pb team invitations TEAM` to discover invitations you administer. Inspect an exact
+invitation with `pb team invitation ID`; accept with `pb team accept ID`, or cancel
+with `pb team cancel-invite TEAM ID`. The Teams home menu provides these actions.
+
 Use `pb preview list` or `pb preview status <preview>` to inspect ephemeral tunnels;
 `stop` and `delete` both withdraw one. Background ownership defaults to 30 minutes, is
 capped at 24 hours, and is not restored after reboot. `--domain` attaches a verified
@@ -257,14 +273,14 @@ restrictions. A paste is rewritten only after the whole batch publishes atomical
 reuse transfer IDs and confirmed offsets, and failures preserve the exact original paste.
 Published remote files remain for seven days.
 
-Use `pb send <path>... --to <device>` to deliver files to another device's configured
+Use `pb send <path>... --to <machine>` to deliver files to another machine's configured
 Paperboat Inbox. Session and user defaults are explicit, multi-attachment ambiguity never
 selects the latest writer, and the sender exits successfully only after the destination
 verifies size and SHA-256, fsyncs the file, avoids name collisions, and records a durable
 receipt. Inbox files remain until the user removes them.
 
-Use `pb send destination set <device>` for a default recipient, and `pb send list`,
-`pb send status <transfer-id>`, or `pb send cancel <transfer-id>` with `--on <device>`
+Use `pb send destination set <machine>` for a default recipient, and `pb send list`,
+`pb send status <transfer-id>`, or `pb send cancel <transfer-id>` with `--on <machine>`
 to manage an outgoing delivery. `pb inbox` controls the receiving directory and
 incoming team requests. `pb edge list` shows Paperboat-hosted and selected
 self-hosted tunnel edges; `pb relay list` does the same for relays. A
@@ -273,17 +289,17 @@ the lists show hosted nodes for reference while the pool policy still prevents
 using them until mixed mode is selected. `pb tunnel status <tunnel>` checks a
 particular tunnel.
 
-## Devices
+## Machines
 
-Run `pb setup` to register this device, create its Paperboat Inbox, and install
+Run `pb setup` to register this machine, create its Paperboat Inbox, and install
 the running executable as the Paperboat service. Enrollment contacts the account
 server without downloading another runtime. Downloaded updates require TUF
-verification; source/shared builds disable automatic updates by default. A device can initiate
+verification; source/shared builds disable automatic updates by default. A machine can initiate
 authorized operations and can receive the incoming services enabled in its capability
 settings. Terminal, managed SSH, native file receiving, and preview/tunnel serving are
 enabled by default; account peer relay is opt-in.
 
-`pb pair` performs the same unified-device enrollment when invoked by a dashboard-issued
+`pb pair` performs the same unified-machine enrollment when invoked by a dashboard-issued
 one-shot install command. It does not select a permanent host or client role.
 
 When no observability path is configured, metadata-only events are appended to
@@ -313,11 +329,12 @@ GitHub API digest verification. Use `tools/release-version.sh next` to generate 
 tags have no `v` prefix.
 
 Releases contain one complete `pb` asset per supported platform and architecture:
-Windows amd64/arm64 PE executables, Linux amd64/arm64 raw ELF executables, and one signed
-and notarized macOS arm64 installer package. Users install through
-[`https://get.pprbt.dev/install`](https://get.pprbt.dev/install). The installer checks a
-pinned bootstrap verifier downloaded from GitHub. That verifier authenticates the
-signed TUF release metadata and downloads the selected product once from GitHub.
+Windows amd64/arm64 PE executables, Linux amd64/arm64 raw ELF executables, and one
+macOS arm64 installer package. Users install through
+[`https://get.pprbt.dev/install`](https://get.pprbt.dev/install). The trusted HTTPS
+installer pins the selected product's exact URL, version, SHA-256, and length before
+execution. First installation does not locally verify a TUF signature; the installed
+updater continues to use full TUF verification for future updates and rollback.
 
 ## Stack
 
@@ -342,7 +359,7 @@ MIT. See [LICENSE](LICENSE).
 ## Team machines
 
 Each OS user enrolls their own machine identity and keeps their own local PB credentials.
-Teammates use their own accounts and devices to connect; do not copy private keys or add
+Teammates use their own accounts and machines to connect; do not copy private keys or add
 another target-side enrollment for each teammate. Work on one enrollment runs as its OS
 user. Separate terminals are the default, but OS files and processes remain accessible
 under that same OS user's permissions. Machine grants are not OS isolation and do not
@@ -353,19 +370,19 @@ Read the current team generation with `pb team get` before each mutation:
 
 ```sh
 pb team get research
-pb team device share research MACHINE_ID --generation CURRENT_GENERATION
-pb team device grant research MACHINE_ID --member ACCOUNT_ID \
+pb team machine share research MACHINE_ID --generation CURRENT_GENERATION
+pb team machine grant research MACHINE_ID --member ACCOUNT_ID \
   --capability terminal,exec,files --generation CURRENT_GENERATION
-pb team device grant research MACHINE_ID --all-members \
+pb team machine grant research MACHINE_ID --all-members \
   --capability managed_ssh --generation CURRENT_GENERATION
-pb team device unshare research MACHINE_ID --generation CURRENT_GENERATION
+pb team machine unshare research MACHINE_ID --generation CURRENT_GENERATION
 ```
 
 The six exact capabilities are `terminal`, `exec`, `managed_ssh` (including SCP, SFTP and
 rsync), `files`, `preview_manage`, and `tunnel_manage`. All-member grants apply to current
 and future accepted members; selected-member grants apply to one accepted account.
 Their capabilities combine. Saving a grant replaces that audience's capability list;
-`--active=false` revokes it. Device incoming toggles must also allow the requested operation.
+`--active=false` revokes it. Machine incoming toggles must also allow the requested operation.
 Tunnel management covers existing private/team tunnels: routes, desired state, deletion, and connector status and controls. Create tunnels locally on the target machine; a teammate’s grant does not copy its enrollment proof or launch a remote connector. Public publication, domains, and connector enrollment require separate owner authority.
 
 No machine grant implies ENV administration, public publication or resharing.
@@ -373,7 +390,7 @@ No machine grant implies ENV administration, public publication or resharing.
 A personal owner who is also a team owner/admin can explicitly transfer the enrollment:
 
 ```sh
-pb team device transfer-to-team research MACHINE_ID \
+pb team machine transfer-to-team research MACHINE_ID \
   --generation CURRENT_GENERATION --confirm MACHINE_ID
 ```
 
@@ -381,13 +398,15 @@ The team then controls the enrollment, other personal team shares are withdrawn,
 enroller loses implicit personal control. Remaining authorized members can keep using it
 when the enroller leaves. Team owner/admin roles govern management; machine use still
 requires a grant. Transferring the team to a new owner preserves its machine ownership.
-`pb team device remove` requires the same exact confirmation and revokes the team-owned
+`pb team machine remove` requires the same exact confirmation and revokes the team-owned
 enrollment. Deleting the team also revokes its team-owned enrollments, without converting
 them to personal property. Personal machines remain personal; withdrawing a share or
 leaving the team removes that team's access. Use the dashboard's Teams page for the same
 ownership and grant controls; Machines shows current ownership and your permissions.
 
 ## Shared terminals
+
+The Terminal sessions home menu separates machine sessions from shared-session discovery. Both global and machine-specific session menus expose sharing and participants alongside lifecycle actions.
 
 Terminal sessions are private by default. Machine access or team membership does not
 allow joining someone else's session. The session owner can explicitly grant access:
@@ -428,3 +447,9 @@ New connection credentials always require a current grant. Active connections cl
 the runtime receives revocation or their credential expires. Revocation refresh uses
 a 15-second interval and a 10-second request timeout; shared credentials last
 at most five minutes, bounding access if the control plane cannot be reached.
+
+Configuration conflicts can be read with `pb config conflict compare <environment> <path>` or Config sync → Compare and resolve conflicts. Both versions stream over the encrypted peer connection, with exact conflict/revision binding and complete content hash verification. A changed conflict requires refreshing status before retrying. `--json` returns the verified sides as base64 content.
+
+Already registered owner hosts receive an initial empty encrypted delivery after vault initialization; this grants no base names. Their existing ENV selections refresh automatically after native scope edits, key rotation, vault unlock, grant synchronization, or publication resume. Deleting a selected name removes its value from the next encrypted delivery while retaining the selection slot; adding a name never grants it to new recipients. `pb env host provision` remains available to change an explicit selection. Locked keys and interrupted deliveries leave an actionable pending result; `pb env vault resume` retries a staged operation with its original ciphertext before refreshing recipients. Published delivery readiness does not claim that a disconnected host has applied it, and running processes retain their existing environment.
+
+`pb env set/unset/list --machine <owned-machine>` selects a Personal machine override even while a Team workspace is active, without changing that workspace. The override can replace a selected Personal or Team base name. Explicit `--team` and `--machine` cannot be combined. A rejected source edit is released only after the signed current source proves it was committed or superseded; competing edits require reading the current source and submitting the intended edit again. Ambiguous reads retain the exact staged operation for `pb env vault resume`.

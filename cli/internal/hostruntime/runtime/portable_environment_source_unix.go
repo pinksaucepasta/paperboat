@@ -4,7 +4,6 @@ package runtime
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"runtime"
 
@@ -55,17 +54,4 @@ func productionEnvironmentKeySourceForState(stateRoot string, registration runti
 		}, nil
 	}
 	return newPortableEnvironmentKeySource(stateRoot, registration)
-}
-
-func resetLegacyEnvironmentCacheForPortableSource(stateRoot string) error {
-	if runtime.GOOS != "darwin" || !filepath.IsAbs(stateRoot) {
-		return nil
-	}
-	for _, name := range []string{"environment/cache.json", "environment-high-water.json"} {
-		path := filepath.Join(filepath.Clean(stateRoot), name)
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-	}
-	return nil
 }

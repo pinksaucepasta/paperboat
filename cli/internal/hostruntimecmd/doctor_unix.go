@@ -140,35 +140,26 @@ func collectDoctor(ctx context.Context, stateRoot string) doctorReport {
 
 	host, err := hostDiagnostics(ctx)
 	if err != nil {
-		add("availability", "error", "The privileged host service is unavailable.", "Inspect and recover the Paperboat host service; then set device availability to allow-sleep if needed.")
+		add("availability", "error", "The privileged host service is unavailable.", "Inspect and recover the Paperboat host service; then set machine availability to allow-sleep if needed.")
 	} else {
 		report.Availability = &host
 		state := "ready"
 		if host.Status == "error" || host.ErrorCode != "" {
 			state = "error"
 		}
-		add("availability", state, fmt.Sprintf("Desired %s version %d; observed %s version %d (%s).", host.DesiredMode, host.DesiredVersion, host.ObservedMode, host.ObservedVersion, host.Status), "Run `pb device availability <device> --mode allow-sleep` and wait for it to apply.")
+		add("availability", state, fmt.Sprintf("Desired %s version %d; observed %s version %d (%s).", host.DesiredMode, host.DesiredVersion, host.ObservedMode, host.ObservedVersion, host.Status), "Run `pb machine availability <machine> --mode allow-sleep` and wait for it to apply.")
 	}
 	return report
 }
 
+// systemServiceScope checks the native services owned by the unified runtime.
 func systemServiceScope(ctx context.Context) (string, error) {
-	return systemServiceScopeFor(ctx, false)
-}
-
-// systemServiceScopeFor verifies the native service ownership for the
-// requested setup role. Every managed runtime includes the stable hostd and
-// updater services. Host mode also includes the privileged power-management
-// service. The old monolithic
-// runtime-host service is intentionally removed during installation and must
-// never be used as a readiness requirement.
-func systemServiceScopeFor(ctx context.Context, hostMode bool) (string, error) {
-	return systemServiceScopeWithRunner(ctx, runtime.GOOS, os.Getuid(), hostMode, runSystemServiceCommand)
+	return systemServiceScopeWithRunner(ctx, runtime.GOOS, os.Getuid(), runSystemServiceCommand)
 }
 
 type systemServiceCommandRunner func(context.Context, string, ...string) ([]byte, error)
 
-func systemServiceScopeWithRunner(ctx context.Context, platform string, uid int, hostMode bool, run systemServiceCommandRunner) (string, error) {
+func systemServiceScopeWithRunner(ctx context.Context, platform string, uid int, run systemServiceCommandRunner) (string, error) {
 	if ctx == nil || run == nil || uid < 0 {
 		return "system", errors.New("inactive")
 	}
@@ -180,17 +171,13 @@ func systemServiceScopeWithRunner(ctx context.Context, platform string, uid int,
 			[]string{"/usr/bin/systemctl", "is-active", "paperboat-hostd-" + instance + ".service"},
 			[]string{"/usr/bin/systemctl", "is-active", "paperboat-updated-" + instance + ".service"},
 		)
-		if hostMode {
-			commands = append(commands, []string{"/usr/bin/systemctl", "is-active", "paperboat-runtime-privileged-" + instance + ".service"})
-		}
+		commands = append(commands, []string{"/usr/bin/systemctl", "is-active", "paperboat-runtime-privileged-" + instance + ".service"})
 	case "darwin":
 		commands = append(commands,
 			[]string{"/bin/launchctl", "print", "system/com.pinksaucepasta.paperboat.hostd." + instance},
 			[]string{"/bin/launchctl", "print", "system/com.pinksaucepasta.paperboat.updated." + instance},
 		)
-		if hostMode && platform != "darwin" {
-			commands = append(commands, []string{"/bin/launchctl", "print", "system/com.pinksaucepasta.paperboat.runtime-privileged"})
-		}
+
 	default:
 		return "system", errors.New("inactive")
 	}

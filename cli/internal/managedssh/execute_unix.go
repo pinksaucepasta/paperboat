@@ -3,41 +3,104 @@
 package managedssh
 
 import (
+	"context"
 	"errors"
 	"os"
+	"os/exec"
+	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 )
 
 var ErrOpenSSHExecution = errors.New("OpenSSH execution request is invalid")
 
-type ProcessExec func(path string, argv []string, envv []string) error
+type OpenSSHExecutor struct{}
 
-type OpenSSHExecutor struct {
-	Exec ProcessExec
-}
+const nativeSSHCancelGrace = 5 * time.Second
 
-// Execute replaces the current process with OpenSSH. A successful call never
-// returns, which preserves OpenSSH's native stdio, TTY, signal, and exit status.
-func (e OpenSSHExecutor) Execute(executable string, arguments, environment []string) error {
-	path, err := resolveOpenSSHExecutable(executable)
-	if err != nil || !validProcessValues(arguments) || !validEnvironment(environment) {
+// Execute inherits the native terminal and foreground process group while pb
+// remains alive to finish its invocation diagnostics after the native tool exits.
+func (OpenSSHExecutor) Execute(ctx context.Context, executable string, arguments, environment []string) error {
+	if ctx == nil || !validProcessValues(arguments) || !validEnvironment(environment) {
 		return ErrOpenSSHExecution
 	}
-	execProcess := e.Exec
-	if execProcess == nil {
-		execProcess = syscall.Exec
-	}
-	argv := make([]string, 1, len(arguments)+1)
-	argv[0] = path
-	argv = append(argv, arguments...)
-	if environment == nil {
-		environment = os.Environ()
-	}
-	if err := execProcess(path, argv, append([]string(nil), environment...)); err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return ErrOpenSSHExecution
+	path, err := resolveOpenSSHExecutable(executable)
+	if err != nil {
+		return NativeLaunchError{Err: errors.Join(ErrOpenSSHExecution, err)}
+	}
+	command := exec.Command(path, arguments...)
+	command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if environment != nil {
+		command.Env = append([]string(nil), environment...)
+	}
+	// Do not create a process group or proxy stdio: the shell's foreground group
+	// delivers terminal stop/continue to both processes, and OpenSSH owns raw mode.
+	signals := make(chan os.Signal, 8)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(signals)
+	if err := command.Start(); err != nil {
+		return NativeLaunchError{Err: err}
+	}
+	done := make(chan error, 1)
+	go func() { done <- command.Wait() }()
+	cancellation := ctx.Done()
+	var timer *time.Timer
+	var deadline <-chan time.Time
+	forwarded := false
+	beginDrain := func() {
+		if timer == nil {
+			timer = time.NewTimer(nativeSSHCancelGrace)
+			deadline = timer.C
+		}
+	}
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
+	for {
+		select {
+		case err := <-done:
+			if err == nil {
+				return nil
+			}
+			var exited *exec.ExitError
+			if errors.As(err, &exited) {
+				status := exited.Sys().(syscall.WaitStatus)
+				code := status.ExitStatus()
+				if status.Signaled() {
+					code = 128 + int(status.Signal())
+				}
+				return NativeExitError{Code: code, Err: err}
+			}
+			return NativeLaunchError{Err: err}
+		case received := <-signals:
+			_ = command.Process.Signal(received)
+			forwarded = true
+			// Signal-only forwarding preserves the native tool's response. The
+			// owner's cancellation context controls bounded termination.
+		case <-cancellation:
+			cancellation = nil
+			// NotifyContext can wake before this observer consumes the same OS signal.
+			select {
+			case received := <-signals:
+				_ = command.Process.Signal(received)
+				forwarded = true
+			default:
+			}
+			if !forwarded {
+				_ = command.Process.Signal(syscall.SIGTERM)
+			}
+			beginDrain()
+		case <-deadline:
+			deadline = nil
+			_ = command.Process.Kill()
+		}
+	}
 }
 
 func validProcessValues(values []string) bool {

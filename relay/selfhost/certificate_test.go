@@ -34,7 +34,7 @@ func TestCertificateRenewalPreservesPinAndLiveTLS(t *testing.T) {
 		t.Fatal(err)
 	}
 	pinBefore, _ := CertificatePin(initial)
-	server := httptest.NewUnstartedServer(Handler(dir, nil))
+	server := httptest.NewUnstartedServer(Handler(dir, nil, nil))
 	server.TLS = liveTLSConfig(dir, initial)
 	server.StartTLS()
 	// httptest injects its own default certificate when GetCertificate is used.

@@ -475,3 +475,47 @@ func testBundle(t *testing.T, hostname string, now time.Time, serial uint64) Bun
 func tlsClientHello(serverName string) *tls.ClientHelloInfo {
 	return &tls.ClientHelloInfo{ServerName: serverName}
 }
+
+func TestCertificateFailureRetainsTypedCauseAndRecoversPrivately(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	registry, err := NewRegistry(Config{Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	binding := testBinding("private.example.test", 1)
+	bundle := testBundle(t, binding.Hostname, now, 1)
+	wrong := binding
+	wrong.Hostname = "other-private.example.test"
+	err = registry.Stage(context.Background(), wrong, bundle)
+	var hostnameError x509.HostnameError
+	if !errors.Is(err, ErrCertificateInvalid) || !errors.As(err, &hostnameError) || strings.Contains(err.Error(), "example.test") {
+		t.Fatal("certificate verifier cause/privacy lost")
+	}
+	auth := &testDistributionAuth{err: context.DeadlineExceeded}
+	receiver, err := NewDistributionReceiver(ReceiverConfig{Registry: registry, NodeID: binding.EdgeNodeID, ProcessEpoch: binding.EdgeProcessEpoch, Authenticator: auth, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope := DistributionEnvelope{CertificateID: "cert_1", Binding: binding, Bundle: bundle, Proof: []byte("private-proof"), IssuedAt: now, ExpiresAt: now.Add(time.Minute)}
+	err = receiver.StageAndReady(context.Background(), envelope)
+	if !errors.Is(err, ErrDistributionAuth) || !errors.Is(err, context.DeadlineExceeded) || len(registry.Snapshot()) != 0 {
+		t.Fatal("auth failure cause/fencing lost")
+	}
+	auth.err = nil
+	if err := receiver.StageAndReady(context.Background(), envelope); err != nil {
+		t.Fatal(err)
+	}
+	if err := receiver.Activate(context.Background(), envelope); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.GetCertificate(tlsClientHello(binding.Hostname)); err != nil {
+		t.Fatal("certificate recovery failed")
+	}
+	sibling := binding
+	sibling.DomainID = "domain_2"
+	err = registry.Stage(context.Background(), sibling, bundle)
+	if !errors.Is(err, ErrHostnameConflict) || strings.Contains(err.Error(), binding.Hostname) {
+		t.Fatal("hostname conflict leaked private name")
+	}
+}

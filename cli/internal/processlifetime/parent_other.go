@@ -2,4 +2,6 @@
 
 package processlifetime
 
-func ArmParentDeath() error { return nil }
+import "context"
+
+func ArmParentDeath(context.Context) error { return nil }

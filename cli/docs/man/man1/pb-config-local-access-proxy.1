@@ -1,0 +1,46 @@
+.nh
+.TH "PB-CONFIG-LOCAL-ACCESS-PROXY" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-local-access-proxy - Route machine app names through Coolify or another reverse proxy
+
+
+.SH SYNOPSIS
+\fBpb config local-access proxy [flags]\fP
+
+
+.SH DESCRIPTION
+Otherwise-unmapped app names automatically use authorized port 80. Configure a different reverse-proxy port for a machine. Numeric port URLs and explicit aliases keep their destinations. This local setting never grants access; the proxy port must already be authorized.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for proxy
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config-local-access(1)\fP, \fBpb-config-local-access-proxy-set(1)\fP, \fBpb-config-local-access-proxy-unset(1)\fP

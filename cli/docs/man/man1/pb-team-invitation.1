@@ -1,0 +1,52 @@
+.nh
+.TH "PB-TEAM-INVITATION" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-invitation - Show an invitation you may receive or administer
+
+
+.SH SYNOPSIS
+\fBpb team invitation <invitation> [flags]\fP
+
+
+.SH DESCRIPTION
+Show an invitation you may receive or administer
+
+.PP
+Read one exact invitation visible to your account or team administration authority. This command displays metadata and does not accept or cancel it. Use the corresponding explicit invitation action after reviewing its team and recipient.
+
+.PP
+Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for invitation
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-team(1)\fP

@@ -2,8 +2,10 @@ package edgehttp
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
+	"sync"
 
 	"github.com/coder/websocket"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
@@ -41,7 +43,10 @@ func (p *Policy) serveBrowserTerminal(w http.ResponseWriter, request *http.Reque
 
 	ctx, cancel := context.WithCancel(request.Context())
 	defer cancel()
+	admissionWatcherDone := make(chan struct{})
+	defer func() { cancel(); <-admissionWatcherDone }()
 	go func() {
+		defer close(admissionWatcherDone)
 		select {
 		case <-admission.Closed:
 			cancel()
@@ -60,6 +65,7 @@ func (p *Policy) serveBrowserTerminal(w http.ResponseWriter, request *http.Reque
 		CompressionMode: websocket.CompressionDisabled,
 	})
 	if err != nil {
+		p.observeBrowserTerminal(ctx, err)
 		if response != nil && response.Body != nil {
 			_ = response.Body.Close()
 		}
@@ -67,6 +73,7 @@ func (p *Policy) serveBrowserTerminal(w http.ResponseWriter, request *http.Reque
 		return
 	}
 	if upstream.Subprotocol() != browserTerminalSubprotocol {
+		p.observeBrowserTerminal(ctx, ErrBrowserTerminalMessage)
 		upstream.CloseNow()
 		http.Error(w, "Browser terminal host rejected the protocol", http.StatusBadGateway)
 		return
@@ -83,11 +90,12 @@ func (p *Policy) serveBrowserTerminal(w http.ResponseWriter, request *http.Reque
 		CompressionMode:    websocket.CompressionDisabled,
 	})
 	if err != nil {
+		p.observeBrowserTerminal(ctx, err)
 		return
 	}
 	browser.SetReadLimit(browserTerminalMaxRecordBytes + 1)
 	defer browser.CloseNow()
-	bridgeBrowserTerminal(ctx, browser, upstream, subscription)
+	p.observeBrowserTerminal(ctx, bridgeBrowserTerminal(ctx, browser, upstream, subscription))
 }
 
 func browserTerminalFenceForMatch(match route.RouteMatch) BrowserTerminalRouteFence {
@@ -107,12 +115,25 @@ func browserTerminalFenceForMatch(match route.RouteMatch) BrowserTerminalRouteFe
 	}
 }
 
-func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Conn, subscription *BrowserTerminalSubscription) {
+func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Conn, subscription *BrowserTerminalSubscription) (result error) {
 	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	var workers sync.WaitGroup
+	failures := make(chan error, 3)
+	defer func() {
+		cancel()
+		_ = browser.CloseNow()
+		_ = upstream.CloseNow()
+		workers.Wait()
+		close(failures)
+		for cause := range failures {
+			result = errors.Join(result, cause)
+		}
+	}()
 	outbound := make(chan []byte, browserTerminalBridgeQueue)
-	failures := make(chan error, 1)
 	report := func(err error) {
+		if requestCanceled(ctx, err) {
+			return
+		}
 		select {
 		case failures <- err:
 		default:
@@ -129,7 +150,9 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 		}
 	}
 
+	workers.Add(1)
 	go func() {
+		defer workers.Done()
 		for {
 			kind, message, err := browser.Read(ctx)
 			if err != nil {
@@ -152,7 +175,9 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 		}
 	}()
 
+	workers.Add(1)
 	go func() {
+		defer workers.Done()
 		for {
 			kind, payload, err := upstream.Read(ctx)
 			if err != nil {
@@ -175,7 +200,9 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 		}
 	}()
 
+	workers.Add(1)
 	go func() {
+		defer workers.Done()
 		for {
 			record, err := subscription.Next(ctx)
 			if err != nil {
@@ -201,17 +228,38 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		case <-subscription.Done():
-			return
-		case <-failures:
-			cancel()
-			return
+			return ErrBrowserTerminalHubEnded
+		case cause := <-failures:
+			return cause
 		case message := <-outbound:
 			if err := browser.Write(ctx, websocket.MessageBinary, message); err != nil {
-				cancel()
-				return
+				return err
 			}
 		}
+	}
+}
+
+// Expected shutdown must account for every leaf so a simultaneous operational
+// failure is never hidden by a normal participant departure.
+func browserTerminalExpected(err error) bool {
+	return requestErrorLeaves(err, func(leaf error) bool {
+		if leaf == context.Canceled || leaf == ErrBrowserTerminalHubEnded {
+			return true
+		}
+		switch closed := leaf.(type) {
+		case websocket.CloseError:
+			return closed.Code == websocket.StatusNormalClosure || closed.Code == websocket.StatusGoingAway
+		case *websocket.CloseError:
+			return closed != nil && (closed.Code == websocket.StatusNormalClosure || closed.Code == websocket.StatusGoingAway)
+		}
+		return false
+	}, true)
+}
+
+func (p *Policy) observeBrowserTerminal(ctx context.Context, err error) {
+	if err != nil && p.config.OnFailure != nil && !browserTerminalExpected(err) {
+		p.config.OnFailure(ctx, err)
 	}
 }

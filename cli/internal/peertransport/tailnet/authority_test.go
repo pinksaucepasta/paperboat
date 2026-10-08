@@ -187,6 +187,25 @@ func networkToken(t *testing.T, priv ed25519.PrivateKey, c NetworkConfiguration)
 	data := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)
 	return data + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, []byte(data)))
 }
+func networkTokenWithRetiredRelayPairs(t *testing.T, priv ed25519.PrivateKey, c NetworkConfiguration) string {
+	t.Helper()
+	header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-network-config+jwt", "kid": "network_test"})
+	body, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var claims map[string]any
+	if err := json.Unmarshal(body, &claims); err != nil {
+		t.Fatal(err)
+	}
+	claims["relay_pairs"] = []any{}
+	body, err = json.Marshal(claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)
+	return data + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, []byte(data)))
+}
 func networkTestBinding(role, id, addr string, k key.NodePrivate) NetworkBinding {
 	p := k.Public().Raw32()
 	fp := sha256.Sum256([]byte("quic:" + id))
@@ -275,6 +294,16 @@ func TestNetworkAuthorityRejectsInvalidBindingsAndScopes(t *testing.T) {
 	}
 }
 
+func TestNetworkAuthorityRejectsRetiredMachineRelayClaims(t *testing.T) {
+	a, c, priv, _ := networkTestAuthority(t)
+	if err := a.Apply(context.Background(), networkTokenWithRetiredRelayPairs(t, priv, c)); err == nil {
+		t.Fatal("retired enrolled-machine relay claim was accepted")
+	}
+	if a.Allows("machine_test", "grant_test", "terminal", "dial") {
+		t.Fatal("retired relay claim installed network authority")
+	}
+}
+
 func TestNetworkAuthorityAcceptsSignedCrossAccountPeer(t *testing.T) {
 	a, cfg, private, _ := networkTestAuthority(t)
 	cfg.Peers[0].Identity.AccountID = "shared_machine_owner"
@@ -288,12 +317,12 @@ func TestNetworkAuthorityAcceptsSignedCrossAccountPeer(t *testing.T) {
 
 func TestNetworkAdmissionDoesNotAuthorizeApplicationStreams(t *testing.T) {
 	a, cfg, signer, _ := networkTestAuthority(t)
-	cfg.Peers[0].Scopes = []NetworkScope{{ResourceKind: "device_network", ResourceID: "network_pair", ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443, ExpiresAt: cfg.ExpiresAt}}
+	cfg.Peers[0].Scopes = []NetworkScope{{ResourceKind: "machine_network", ResourceID: "network_pair", ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443, ExpiresAt: cfg.ExpiresAt}}
 	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
 		t.Fatal(err)
 	}
 	for _, resource := range []string{"grant_test", "machine_test", "", "*"} {
-		for _, capability := range []string{"terminal", "exec", "private_access", "file_transfer", "managed_ssh"} {
+		for _, capability := range []string{"terminal", "exec", "private_access", "file_transfer", "managed_ssh", "config_compare"} {
 			if a.Allows("machine_test", resource, capability, "dial") {
 				t.Fatalf("network admission authorized %s / %s", resource, capability)
 			}
@@ -322,7 +351,7 @@ func TestPersonalMachinePeersHaveOnlyNetworkAdmission(t *testing.T) {
 	a, cfg, signer, _ := networkTestAuthority(t)
 	cfg.Self.Role, cfg.Self.MachineID, cfg.Self.MachineGeneration = "machine", cfg.Self.EndpointID, 1
 	a.options.Self = cfg.Self
-	cfg.Peers[0].Scopes = []NetworkScope{{ResourceKind: "device_network", ResourceID: "network_pair", ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443, ExpiresAt: cfg.ExpiresAt}}
+	cfg.Peers[0].Scopes = []NetworkScope{{ResourceKind: "machine_network", ResourceID: "network_pair", ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443, ExpiresAt: cfg.ExpiresAt}}
 	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
 		t.Fatal("personal machine network admission rejected:", err)
 	}
@@ -749,5 +778,19 @@ func TestNetworkIssuedAtToleratesClockSkewWithoutExtendingExpiry(t *testing.T) {
 	}
 	if _, _, err := a.verify(t.Context(), token, time.Unix(c.ExpiresAt, 0)); err == nil {
 		t.Fatal("expired authority accepted")
+	}
+}
+
+func TestConfigCompareAdmissionIsExactAndCannotOpenTerminal(t *testing.T) {
+	a, cfg, signer, _ := networkTestAuthority(t)
+	cfg.Peers[0].Scopes = []NetworkScope{{ResourceKind: "config_compare", ResourceID: "assignment_1", ResourceGeneration: 1, Capability: "config_compare", Direction: "dial", Port: 443, ExpiresAt: cfg.ExpiresAt}}
+	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
+		t.Fatal(err)
+	}
+	if !a.Allows("machine_test", "assignment_1", "config_compare", "dial") {
+		t.Fatal("exact compare admission rejected")
+	}
+	if a.Allows("machine_test", "assignment_2", "config_compare", "dial") || a.Allows("machine_test", "assignment_1", "terminal", "dial") {
+		t.Fatal("compare admission expanded authority")
 	}
 }

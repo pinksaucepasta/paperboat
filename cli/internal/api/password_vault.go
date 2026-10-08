@@ -18,8 +18,35 @@ type PasswordVaultState struct {
 	Envelope   string `json:"envelope"`
 }
 
+// envStateDecodeFailure owns only in-memory decoding/verification. It keeps
+// original typed parser causes without exposing encrypted inputs in prose.
+type envStateDecodeFailure struct {
+	message string
+	cause   error
+}
+
+func (failure *envStateDecodeFailure) Error() string {
+	if failure == nil {
+		return "server returned invalid encrypted ENV state"
+	}
+	return failure.message
+}
+func (failure *envStateDecodeFailure) Unwrap() error {
+	if failure == nil {
+		return nil
+	}
+	return failure.cause
+}
+
+// OwnsENVIntegrityFailure recognizes a direct producer-owned decode failure.
+// Wrappers/joins must prove their own complete cause tree; this is not an Is scan.
+func OwnsENVIntegrityFailure(err error) bool {
+	failure, ok := err.(*envStateDecodeFailure)
+	return ok && failure != nil && failure.cause != nil
+}
+
 func (s PasswordVaultState) Decode() (environmente2ee.VaultHead, []byte, error) {
-	invalid := errors.New("server returned invalid ENV vault state")
+	invalid := &envStateDecodeFailure{message: "server returned invalid ENV vault state", cause: environmente2ee.ErrInvalid}
 	if len(s.Envelope) > base64.RawURLEncoding.EncodedLen(environmente2ee.MaximumVaultBytes) {
 		return environmente2ee.VaultHead{}, nil, invalid
 	}
@@ -28,12 +55,20 @@ func (s PasswordVaultState) Decode() (environmente2ee.VaultHead, []byte, error) 
 		return environmente2ee.VaultHead{}, nil, invalid
 	}
 	raw, err := base64.RawURLEncoding.Strict().DecodeString(s.Envelope)
-	if err != nil || len(raw) == 0 || len(raw) > environmente2ee.MaximumVaultBytes || environmente2ee.DocumentID(sha256.Sum256(raw)) != id {
+	if err != nil {
+		invalid.cause = err
+		return environmente2ee.VaultHead{}, nil, invalid
+	}
+	if len(raw) == 0 || len(raw) > environmente2ee.MaximumVaultBytes || environmente2ee.DocumentID(sha256.Sum256(raw)) != id {
 		return environmente2ee.VaultHead{}, nil, invalid
 	}
 	head := environmente2ee.VaultHead{Issuer: s.Issuer, AccountID: s.AccountID, Generation: s.Generation, ID: id}
 	parsed, _, err := environmente2ee.InspectPasswordVault(raw)
-	if err != nil || parsed != head {
+	if err != nil {
+		invalid.cause = err
+		return environmente2ee.VaultHead{}, nil, invalid
+	}
+	if parsed != head {
 		return environmente2ee.VaultHead{}, nil, invalid
 	}
 	return head, raw, nil

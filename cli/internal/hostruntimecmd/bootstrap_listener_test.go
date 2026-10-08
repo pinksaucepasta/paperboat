@@ -20,10 +20,10 @@ func TestFreshBootstrapCannotReplaceExistingEnrollment(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := store.Current()
-	if err := store.SaveRegistration(identity.Registration{ServerURL: "https://api.example.test", MachineID: "machine_1", EnvironmentID: "env_1", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, SetupRoles: []string{"interactive"}, UpdatedAt: time.Now().UTC()}); err != nil {
+	if err := store.SaveRegistration(identity.Registration{ServerURL: "https://api.example.test", MachineID: "machine_1", EnvironmentID: "env_1", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
-	if err := rejectFreshBootstrapOverEnrollment(store, bootstrap.ErrResumeNotFound); err == nil || !strings.Contains(err.Error(), "pb uninstall") || !strings.Contains(err.Error(), "pb setup --name <device-alias>") {
+	if err := rejectFreshBootstrapOverEnrollment(store, bootstrap.ErrResumeNotFound); err == nil || !strings.Contains(err.Error(), "pb uninstall") || !strings.Contains(err.Error(), "pb setup --name <machine-alias>") {
 		t.Fatalf("guard error=%v", err)
 	}
 	if err := rejectFreshBootstrapOverEnrollment(store, nil); err != nil {
@@ -76,7 +76,7 @@ func TestBootstrapListenerSurvivesCredentialConsumptionAndMaterialRecovery(t *te
 	root, now := t.TempDir(), time.Now().UTC()
 	material := testClientBootstrapMaterial("https://control.example.test", now.Add(time.Hour))
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-	record := bootstrap.NewResumeRecord(material.ControlURL, publicKey, "token", "Laptop", "client", strings.Repeat("v", 40), now.Add(time.Hour))
+	record := bootstrap.NewResumeRecord(material.ControlURL, publicKey, "token", "Laptop", strings.Repeat("v", 40), now.Add(time.Hour))
 	record.PairingStarted, record.Material = true, &material
 	if err := prepareBootstrapListener(root, &material, &record); err != nil {
 		t.Fatal(err)
@@ -87,7 +87,7 @@ func TestBootstrapListenerSurvivesCredentialConsumptionAndMaterialRecovery(t *te
 	if err := bootstrap.SaveResume(root, record); err != nil {
 		t.Fatalf("checkpoint after credential consumption: %v", err)
 	}
-	reloaded, err := bootstrap.LoadResume(root, record.ServerURL, publicKey, "", "Laptop", "client", now)
+	reloaded, err := bootstrap.LoadResume(root, record.ServerURL, publicKey, "", "Laptop", now)
 	if err != nil {
 		t.Fatal(err)
 	}

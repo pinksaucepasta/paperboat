@@ -52,7 +52,7 @@ func (a *CredentialAuthorizer) Authorize(ctx context.Context, frame protocol.Fra
 	if err != nil {
 		return Authorization{}, err
 	}
-	if frame.Capability == "file-transfer.v1" && claims.SourceMachineID == "" {
+	if frame.Capability == "file-transfer.v1" && claims.SourceMachineID == "" && claims.CredentialClass != "browser_terminal_operation" {
 		return Authorization{}, ErrCredentialPolicy
 	}
 	role := terminalRole(claims)
@@ -61,8 +61,14 @@ func (a *CredentialAuthorizer) Authorize(ctx context.Context, frame protocol.Fra
 	}
 	browserTerminal := claims.CredentialClass == "browser_terminal_operation"
 	terminalFrame := frame.Capability == "terminal.v1" || frame.Type == "ack" || frame.Type == "detach"
-	if browserTerminal && (!terminalFrame || !validBrowserTerminalClaims(claims)) {
+	browserUpload := frame.Capability == "file-transfer.v1" && role == TerminalRoleOwner
+	if browserTerminal && ((!terminalFrame && !browserUpload) || !validBrowserTerminalClaims(claims)) {
 		return Authorization{}, ErrCredentialPolicy
+	}
+	if claims.CredentialClass == "config_compare" || claims.CredentialClass == "browser_config_compare" {
+		if frame.Capability != "config.compare.v1" || !validConfigCompareClaims(claims) {
+			return Authorization{}, ErrCredentialPolicy
+		}
 	}
 	var revoked *atomic.Bool
 	if a.Revocations != nil {
@@ -91,13 +97,15 @@ func (a *CredentialAuthorizer) Authorize(ctx context.Context, frame protocol.Fra
 		accountID = claims.UserID
 	}
 	clientID := claims.CLIClientSessionID
-	if browserTerminal {
+	if browserTerminal || claims.CredentialClass == "browser_config_compare" {
 		clientID = claims.BrowserAttachmentID
 	}
 	if (claims.CredentialClass == "codex_manage" || claims.CredentialClass == "codex_connect") && resourceID == "" {
 		resourceID = claims.SessionID
 	}
 	return Authorization{
+		WorkspaceID:         claims.WorkspaceID,
+		ActorAccountID:      claims.ActorAccountID,
 		JournalBinding:      binding,
 		EnvironmentID:       claims.EnvironmentID,
 		MachineID:           claims.MachineID,
@@ -178,6 +186,8 @@ func stableClaimsBinding(claims auth.Claims) (string, error) {
 	// can retrieve the same durable operation result without crossing identity,
 	// resource, class, or exact-scope boundaries.
 	encoded, err := json.Marshal(struct {
+		WorkspaceID            string   `json:"workspace_id"`
+		ActorAccountID         string   `json:"actor_account_id"`
 		Issuer                 string   `json:"issuer"`
 		Subject                string   `json:"subject"`
 		Class                  string   `json:"class"`
@@ -198,15 +208,57 @@ func stableClaimsBinding(claims auth.Claims) (string, error) {
 		AssignmentID           string   `json:"assignment_id"`
 		PreviewID              string   `json:"preview_id"`
 		OwnerSessionID         string   `json:"owner_session_id"`
+		OwnerSessionKind       string   `json:"owner_session_kind,omitempty"`
 		ExpectedGeneration     int64    `json:"expected_generation"`
 		IdempotencyKey         string   `json:"idempotency_key"`
 		RequestID              string   `json:"request_id"`
 		CorrelationID          string   `json:"correlation_id"`
 		RequestHash            string   `json:"request_hash"`
-	}{claims.Issuer, claims.Subject, claims.CredentialClass, claims.Scope, claims.EnvironmentID, claims.AccountID, claims.MachineID, claims.SourceMachineID, claims.UserID, claims.ActorID, claims.CLIClientSessionID, claims.HelperID, claims.SessionID, claims.BrowserAttachmentID, claims.BrowserPublicKeySHA256, claims.PolicyGeneration, claims.OperationID, claims.AssignmentID, claims.PreviewID, claims.OwnerSessionID, claims.ExpectedGeneration, claims.IdempotencyKey, claims.RequestID, claims.CorrelationID, claims.RequestHash})
+	}{claims.WorkspaceID, claims.ActorAccountID, claims.Issuer, claims.Subject, claims.CredentialClass, claims.Scope, claims.EnvironmentID, claims.AccountID, claims.MachineID, claims.SourceMachineID, claims.UserID, claims.ActorID, claims.CLIClientSessionID, claims.HelperID, claims.SessionID, claims.BrowserAttachmentID, claims.BrowserPublicKeySHA256, claims.PolicyGeneration, claims.OperationID, claims.AssignmentID, claims.PreviewID, claims.OwnerSessionID, claims.OwnerSessionKind, claims.ExpectedGeneration, claims.IdempotencyKey, claims.RequestID, claims.CorrelationID, claims.RequestHash})
 	if err != nil {
 		return "", err
 	}
+	if claims.CredentialClass == "config_compare" || claims.CredentialClass == "browser_config_compare" {
+		tuple, err := json.Marshal(struct {
+			Binding           json.RawMessage `json:"binding"`
+			AssignmentVersion int64           `json:"assignment_version"`
+			Path              string          `json:"path"`
+			Conflict          string          `json:"conflict"`
+			Remote            string          `json:"remote"`
+			Generation        int64           `json:"generation"`
+		}{encoded, claims.AssignmentVersion, claims.ConfigPath, claims.ConflictRevision, claims.ExpectedRemoteRevision, claims.InstallationGeneration})
+		if err != nil {
+			return "", err
+		}
+		encoded = tuple
+	}
 	digest := sha256.Sum256(encoded)
 	return hex.EncodeToString(digest[:]), nil
+}
+
+func validConfigCompareClaims(c auth.Claims) bool {
+	if c.AssignmentID == "" || c.AssignmentVersion < 1 || c.ConfigPath == "" || c.ConflictRevision == "" || c.ExpectedRemoteRevision == "" || c.EnvironmentID == "" || c.MachineID == "" || c.InstallationGeneration < 1 || c.UserID == "" || c.AccountID == "" {
+		return false
+	}
+	if c.CredentialClass == "browser_config_compare" {
+		return c.BrowserAttachmentID != "" && c.BrowserPublicKeySHA256 != "" && c.SourceMachineID == "" && c.CLIClientSessionID == ""
+	}
+	return c.CredentialClass == "config_compare" && c.SourceMachineID != "" && c.CLIClientSessionID != ""
+}
+func (a *CredentialAuthorizer) BrowserConfigComparePublicKeySHA256(ctx context.Context) (string, error) {
+	if a.Verifier == nil || a.Resolver == nil || a.Token == "" {
+		return "", ErrCredentialPolicy
+	}
+	policy, err := a.Resolver.Policy(protocol.Frame{Capability: "config.compare.v1"})
+	if err != nil {
+		return "", err
+	}
+	c, err := a.Verifier.Verify(ctx, a.Token, policy)
+	if err != nil {
+		return "", err
+	}
+	if c.CredentialClass != "browser_config_compare" || !validConfigCompareClaims(c) {
+		return "", ErrCredentialPolicy
+	}
+	return c.BrowserPublicKeySHA256, nil
 }

@@ -13,7 +13,7 @@ pb-ping - Measure authenticated connectivity to a machine
 Measure authenticated connectivity to a machine
 
 .PP
-Send authenticated health exchanges to one enrolled device. --count and --timeout bound the measurements; a reachable transport alone is not a claim that the target service is ready.
+Send authenticated health exchanges to one enrolled machine. --count and --timeout bound the measurements; a reachable transport alone is not a claim that the target service is ready.
 
 .PP
 JSON output is supported with --json.
@@ -47,6 +47,10 @@ JSON output is supported with --json.
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

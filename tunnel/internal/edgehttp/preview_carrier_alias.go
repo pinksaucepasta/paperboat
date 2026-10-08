@@ -95,6 +95,14 @@ func (r *DataCarrierPreviewRegistry) ReconcilePreviewAliases(aliases []DataCarri
 	if r.closed {
 		return ErrDataCarrierPreviewRegistryClosed
 	}
+	// A snapshot may wait for a disconnected carrier, but must never claim
+	// ownership of an authenticated route's primary hostname. Validate before
+	// removing the previous snapshot so a rejected update leaves it usable.
+	for _, alias := range next {
+		if entry := r.byHost[alias.Hostname]; entry != nil && alias.Hostname == entry.host {
+			return ErrDataCarrierPreviewRegistryConflict
+		}
+	}
 	for domainID, current := range r.desiredAliases {
 		candidate, retained := next[domainID]
 		if retained && (candidate.RouteID != current.RouteID || candidate.Hostname != current.Hostname || candidate.MatchType != current.MatchType || candidate.PreviewGeneration < current.PreviewGeneration || candidate.DomainGeneration < current.DomainGeneration || candidate.CertificateGeneration < current.CertificateGeneration) {

@@ -35,7 +35,6 @@ var (
 
 type PrivateTCPAccessManagerConfig struct {
 	Runtime           *MachinePreviewRuntime
-	Native            *NativePrivateTCPAccess
 	ControlToken      string
 	RunContext        context.Context
 	MaximumActive     int
@@ -102,9 +101,7 @@ func NewPrivateTCPAccessManager(config PrivateTCPAccessManagerConfig) (*PrivateT
 	}
 	resolve, start := config.resolve, config.start
 	validate := config.validate
-	if config.Native != nil {
-		resolve, start, validate = config.Native.Resolve, config.Native.Start, config.Native.Validate
-	}
+
 	if config.Runtime != nil {
 		if resolve == nil {
 			resolve = config.Runtime.resolvePrivateTCPRoute

@@ -21,7 +21,9 @@ func watchProcessExit(pid int) (<-chan struct{}, func()) {
 		return done, func() {}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
 	go func() {
+		defer close(stopped)
 		defer unix.Close(fileDescriptor)
 		poll := []unix.PollFd{{Fd: int32(fileDescriptor), Events: unix.POLLIN | unix.POLLHUP | unix.POLLERR}}
 		for ctx.Err() == nil {
@@ -38,5 +40,5 @@ func watchProcessExit(pid int) (<-chan struct{}, func()) {
 			}
 		}
 	}()
-	return done, cancel
+	return done, func() { cancel(); <-stopped }
 }

@@ -30,8 +30,8 @@ const (
 var ErrOpenSSHConfigConflict = errors.New("Paperboat OpenSSH configuration conflicts with existing state")
 
 type OpenSSHConfig struct {
-	Home, AliasSuffix, ProxyCommand, KnownHostsCommand, AgentSocket, IdentityFile string
-	Targets                                                                       []OpenSSHAliasTarget
+	Home, ProxyCommand, KnownHostsCommand, AgentSocket, IdentityFile string
+	Targets                                                          []OpenSSHAliasTarget
 	// OwnerUID is retained for the cross-platform API. Windows validates the
 	// current token SID instead; numeric POSIX IDs have no security meaning.
 	OwnerUID uint32
@@ -44,9 +44,18 @@ type OpenSSHOptionConflict struct {
 }
 
 func (e *OpenSSHOptionConflict) Error() string {
-	return fmt.Sprintf("%v: line %d sets %s %q; Paperboat requires %q", ErrOpenSSHConfigConflict, e.Line, e.Option, e.Existing, e.Required)
+	option := "OpenSSH option"
+	switch strings.ToLower(e.Option) {
+	case "proxycommand":
+		option = "ProxyCommand"
+	case "knownhostscommand":
+		option = "KnownHostsCommand"
+	}
+	return fmt.Sprintf("%v: line %d contains a conflicting %s", ErrOpenSSHConfigConflict, e.Line, option)
 }
-func (e *OpenSSHOptionConflict) Unwrap() error { return ErrOpenSSHConfigConflict }
+func (e *OpenSSHOptionConflict) Unwrap() error         { return ErrOpenSSHConfigConflict }
+func (*OpenSSHOptionConflict) DiagnosticStage() string { return "command" }
+func (*OpenSSHOptionConflict) DiagnosticCode() string  { return "managed_ssh_failed" }
 
 type openSSHInstallRecord struct {
 	Version      int    `json:"version"`
@@ -56,7 +65,8 @@ type openSSHInstallRecord struct {
 	OwnedHash    string `json:"owned_hash"`
 }
 
-func InstallOpenSSHConfig(config OpenSSHConfig) (OpenSSHConfigResult, error) {
+func InstallOpenSSHConfig(config OpenSSHConfig) (result OpenSSHConfigResult, resultErr error) {
+	defer func() { resultErr = managedSSHBoundary("command", resultErr) }()
 	directory, sid, unlock, err := openWindowsSSHDirectory(config.Home, true)
 	if err != nil {
 		return OpenSSHConfigResult{}, err
@@ -108,7 +118,7 @@ func InstallOpenSSHConfig(config OpenSSHConfig) (OpenSSHConfigResult, error) {
 	if recordSet {
 		originalMainExisted = record.MainExisted
 	}
-	nextRecord := &openSSHInstallRecord{Version: 1, MainExisted: originalMainExisted, IncludeChunk: includeChunk, AliasSuffix: config.AliasSuffix, OwnedHash: hashOpenSSHBytes(owned)}
+	nextRecord := &openSSHInstallRecord{Version: 1, MainExisted: originalMainExisted, IncludeChunk: includeChunk, AliasSuffix: AliasSuffix, OwnedHash: hashOpenSSHBytes(owned)}
 	if bytes.Equal(main, nextMain) && bytes.Equal(existingOwned, owned) && recordSet && *record == *nextRecord {
 		return OpenSSHConfigResult{}, nil
 	}
@@ -118,7 +128,8 @@ func InstallOpenSSHConfig(config OpenSSHConfig) (OpenSSHConfigResult, error) {
 	return OpenSSHConfigResult{Changed: true}, nil
 }
 
-func ValidateOpenSSHConfig(config OpenSSHConfig) error {
+func ValidateOpenSSHConfig(config OpenSSHConfig) (resultErr error) {
+	defer func() { resultErr = managedSSHBoundary("command", resultErr) }()
 	directory, sid, unlock, err := openWindowsSSHDirectory(config.Home, false)
 	if err != nil {
 		return err
@@ -138,13 +149,14 @@ func ValidateOpenSSHConfig(config OpenSSHConfig) error {
 	}
 	record, recordSet, err := readWindowsSSHRecord(directory, sid)
 	line := "Include ~/.ssh/paperboat_config # " + openSSHIncludeMarker + "\n"
-	if err != nil || !mainSet || !ownedSet || !recordSet || record.Version != 1 || record.AliasSuffix != config.AliasSuffix || !validRecordedInclude(record.IncludeChunk, line) || bytes.Count(main, []byte(record.IncludeChunk)) != 1 || !bytes.Equal(owned, expected) || record.OwnedHash != hashOpenSSHBytes(owned) {
+	if err != nil || !mainSet || !ownedSet || !recordSet || record.Version != 1 || record.AliasSuffix != AliasSuffix || !validRecordedInclude(record.IncludeChunk, line) || bytes.Count(main, []byte(record.IncludeChunk)) != 1 || !bytes.Equal(owned, expected) || record.OwnedHash != hashOpenSSHBytes(owned) {
 		return errors.Join(ErrOpenSSHConfigConflict, err)
 	}
 	return findOpenSSHOptionConflict(main, config)
 }
 
-func ValidateInstalledOpenSSHConfig(home string, ownerUID uint32, aliasSuffix, agentSocket string) error {
+func ValidateInstalledOpenSSHConfig(home string, ownerUID uint32, agentSocket string) (resultErr error) {
+	defer func() { resultErr = managedSSHBoundary("command", resultErr) }()
 	directory, sid, unlock, err := openWindowsSSHDirectory(home, false)
 	if err != nil {
 		return err
@@ -161,23 +173,23 @@ func ValidateInstalledOpenSSHConfig(home string, ownerUID uint32, aliasSuffix, a
 	record, recordSet, err := readWindowsSSHRecord(directory, sid)
 	line := "Include ~/.ssh/paperboat_config # " + openSSHIncludeMarker + "\n"
 	lines := strings.Split(strings.TrimSuffix(string(owned), "\n"), "\n")
-	wildcard := ownedWildcardLine(lines, aliasSuffix)
-	if err != nil || !mainSet || !ownedSet || !recordSet || record.Version != 1 || record.AliasSuffix != aliasSuffix ||
+	wildcard := ownedWildcardLine(lines, AliasSuffix)
+	if err != nil || !mainSet || !ownedSet || !recordSet || record.Version != 1 || record.AliasSuffix != AliasSuffix ||
 		!validRecordedInclude(record.IncludeChunk, line) || bytes.Count(main, []byte(record.IncludeChunk)) != 1 ||
-		!validOwnedOpenSSHContent(owned, aliasSuffix) || record.OwnedHash != hashOpenSSHBytes(owned) || wildcard < 1 ||
+		!validOwnedOpenSSHContent(owned, AliasSuffix) || record.OwnedHash != hashOpenSSHBytes(owned) || wildcard < 1 ||
 		lines[wildcard+3] != "    IdentityAgent \""+strings.ReplaceAll(agentSocket, "\\", "\\\\")+"\"" ||
 		lines[wildcard+4] != "    IdentityFile \""+strings.ReplaceAll(ManagedIdentityPublicKeyPath(home), "\\", "\\\\")+"\"" {
 		return errors.Join(ErrOpenSSHConfigConflict, err)
 	}
 	installed := OpenSSHConfig{
-		AliasSuffix:       aliasSuffix,
 		ProxyCommand:      strings.TrimPrefix(lines[wildcard+1], "    ProxyCommand "),
 		KnownHostsCommand: strings.TrimPrefix(lines[wildcard+2], "    KnownHostsCommand "),
 	}
 	return findOpenSSHOptionConflict(main, installed)
 }
 
-func UninstallOpenSSHConfig(home string, _ uint32) (OpenSSHConfigResult, error) {
+func UninstallOpenSSHConfig(home string, _ uint32) (result OpenSSHConfigResult, resultErr error) {
+	defer func() { resultErr = managedSSHBoundary("command", resultErr) }()
 	absent, err := windowsOpenSSHStateAbsent(home)
 	if err != nil {
 		return OpenSSHConfigResult{}, err
@@ -262,13 +274,13 @@ func optionalWindowsSSHBytes(value []byte, set bool) []byte {
 }
 
 func renderOwnedOpenSSHConfig(config OpenSSHConfig) ([]byte, error) {
-	if !validAliasSuffix(config.AliasSuffix) || !validOpenSSHCommand(config.ProxyCommand) || !validOpenSSHCommand(config.KnownHostsCommand) || !validWindowsAgentPipe(config.AgentSocket) || strings.ContainsAny(config.AgentSocket, "\r\n\x00\"") || !filepath.IsAbs(config.IdentityFile) || strings.ContainsAny(config.IdentityFile, "\r\n\x00\"") {
+	if !validOpenSSHCommand(config.ProxyCommand) || !validOpenSSHCommand(config.KnownHostsCommand) || !validWindowsAgentPipe(config.AgentSocket) || strings.ContainsAny(config.AgentSocket, "\r\n\x00\"") || !filepath.IsAbs(config.IdentityFile) || strings.ContainsAny(config.IdentityFile, "\r\n\x00\"") {
 		return nil, ErrOpenSSHConfigConflict
 	}
 	var targets strings.Builder
 	seen := make(map[string]struct{}, len(config.Targets))
 	for _, target := range config.Targets {
-		host, err := AliasHost(target.Alias, config.AliasSuffix)
+		host, err := AliasHost(target.Alias)
 		if err != nil || target.Port == 0 {
 			return nil, ErrOpenSSHConfigConflict
 		}
@@ -278,7 +290,7 @@ func renderOwnedOpenSSHConfig(config OpenSSHConfig) ([]byte, error) {
 		seen[host] = struct{}{}
 		fmt.Fprintf(&targets, "Host %s\n    Port %d\n", host, target.Port)
 	}
-	return []byte(openSSHBeginMarker + "\n" + targets.String() + "Host *." + config.AliasSuffix + "\n" + "    ProxyCommand " + config.ProxyCommand + "\n" + "    KnownHostsCommand " + config.KnownHostsCommand + "\n" + "    IdentityAgent \"" + strings.ReplaceAll(config.AgentSocket, "\\", "\\\\") + "\"\n" + "    IdentityFile \"" + strings.ReplaceAll(config.IdentityFile, "\\", "\\\\") + "\"\n" + "    IdentitiesOnly yes\n    BatchMode yes\n    PasswordAuthentication no\n    KbdInteractiveAuthentication no\n    StrictHostKeyChecking yes\n    CheckHostIP no\n    UserKnownHostsFile none\n    GlobalKnownHostsFile none\n    CanonicalizeHostname yes\n" + openSSHEndMarker + "\n"), nil
+	return []byte(openSSHBeginMarker + "\n" + targets.String() + "Host *." + AliasSuffix + "\n" + "    ProxyCommand " + config.ProxyCommand + "\n" + "    KnownHostsCommand " + config.KnownHostsCommand + "\n" + "    IdentityAgent \"" + strings.ReplaceAll(config.AgentSocket, "\\", "\\\\") + "\"\n" + "    IdentityFile \"" + strings.ReplaceAll(config.IdentityFile, "\\", "\\\\") + "\"\n" + "    IdentitiesOnly yes\n    BatchMode yes\n    PasswordAuthentication no\n    KbdInteractiveAuthentication no\n    StrictHostKeyChecking yes\n    CheckHostIP no\n    UserKnownHostsFile none\n    GlobalKnownHostsFile none\n    CanonicalizeHostname yes\n" + openSSHEndMarker + "\n"), nil
 }
 
 func validRecordedInclude(chunk, line string) bool { return chunk == line || chunk == "\n"+line }
@@ -369,7 +381,7 @@ func firstOpenSSHBlockOffset(value []byte) int {
 }
 func findOpenSSHOptionConflict(value []byte, config OpenSSHConfig) error {
 	matching, uncertain := false, false
-	probe := "paperboat-probe." + config.AliasSuffix
+	probe := "paperboat-probe." + AliasSuffix
 	for index, line := range bytes.Split(value, []byte{'\n'}) {
 		trimmed := strings.TrimSpace(string(line))
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {

@@ -11,6 +11,28 @@ import (
 
 const refreshBefore = 60 * time.Second
 
+// CredentialFailure identifies account-token custody, distinct from private
+// pairing custody. Its cause remains available for complete classification.
+type CredentialFailure struct{ Cause error }
+
+func (*CredentialFailure) Error() string { return "Paperboat account credentials are unavailable" }
+func (e *CredentialFailure) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+func accountCredentialFailure(cause error) error {
+	if cause == nil {
+		return nil
+	}
+	if _, owned := cause.(*CredentialFailure); owned {
+		return cause
+	}
+	return &CredentialFailure{Cause: cause}
+}
+
 type Source struct {
 	lifetime context.Context
 	Store    config.ProfileStore
@@ -42,7 +64,7 @@ func (s *Source) Refresh() (config.Credential, error) {
 }
 
 func (s *Source) credential(refreshWindow time.Duration) (config.Credential, error) {
-	return s.Store.CredentialWithRefresh(s.Issuer, refreshWindow, func(current config.Credential) (config.Credential, string, error) {
+	credential, err := s.Store.CredentialWithRefresh(s.Issuer, refreshWindow, func(current config.Credential) (config.Credential, string, error) {
 		parent := s.lifetime
 		if parent == nil {
 			parent = context.Background()
@@ -56,4 +78,5 @@ func (s *Source) credential(refreshWindow time.Duration) (config.Credential, err
 		expires := time.Now().UTC().Add(time.Duration(tokens.ExpiresIn) * time.Second)
 		return config.Credential{AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken, TokenType: tokens.TokenType, ExpiresAt: expires}, tokens.CLIClientSessionID, nil
 	})
+	return credential, accountCredentialFailure(err)
 }

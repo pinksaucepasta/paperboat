@@ -128,8 +128,6 @@ func handleDesktop(c *cobra.Command, in desktopRequest) (any, error) {
 		return desktopCLI(c, []string{"service", "start", "--json"})
 	case "auth.logout":
 		return desktopCLI(c, []string{"auth", "logout", "--json"})
-	case "network.get", "network.set", "network.effective", "network.apply":
-		return desktopNetwork(c, in)
 	}
 	client, err := desktopBackend(c)
 	if err != nil {
@@ -142,7 +140,7 @@ func handleDesktop(c *cobra.Command, in desktopRequest) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		devices, err := client.ListUserMachines(ctx)
+		machines, err := client.ListUserMachines(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -151,59 +149,59 @@ func handleDesktop(c *cobra.Command, in desktopRequest) (any, error) {
 			return nil, err
 		}
 		warnings := []string{}
-		services, serviceErr := client.DeviceServices(ctx)
+		services, serviceErr := client.MachineServices(ctx)
 		if serviceErr != nil {
-			warnings = append(warnings, "Device service details are temporarily unavailable.")
+			warnings = append(warnings, "Machine service details are temporarily unavailable.")
 		}
 		updates, updateErr := client.MachineUpdateSummary(ctx)
 		if updateErr != nil {
 			warnings = append(warnings, "Fleet update observations are temporarily unavailable.")
 		}
-		if devices == nil {
-			devices = []api.UserMachine{}
+		if machines == nil {
+			machines = []api.UserMachine{}
 		}
 		if teams == nil {
 			teams = []api.Team{}
 		}
 		if services == nil {
-			services = []api.DeviceServicesDevice{}
+			services = []api.MachineServicesMachine{}
 		}
-		return map[string]any{"account": me, "devices": devices, "teams": teams, "services": services, "updates": updates, "local": desktopLocalStatus(ctx), "warnings": warnings}, nil
-	case "device.rename", "device.disconnect", "device.remove", "device.capabilities", "device.update-status", "device.maintenance", "device.maintenance-list", "device.maintenance-decide":
+		return map[string]any{"account": me, "machines": machines, "teams": teams, "services": services, "updates": updates, "local": desktopLocalStatus(ctx), "warnings": warnings}, nil
+	case "machine.rename", "machine.disconnect", "machine.remove", "machine.capabilities", "machine.update-status", "machine.maintenance", "machine.maintenance-list", "machine.maintenance-decide":
 		var p struct {
-			MachineID       string                        `json:"machine_id"`
-			Alias           string                        `json:"alias"`
-			Description     string                        `json:"description"`
-			ExpectedVersion int64                         `json:"expected_version"`
-			Desired         api.DeviceCapabilitySelection `json:"desired"`
-			Action          string                        `json:"action"`
-			TargetVersion   string                        `json:"target_version"`
-			Reason          string                        `json:"reason"`
-			ApprovalID      string                        `json:"approval_id"`
-			Decision        string                        `json:"decision"`
+			MachineID       string                         `json:"machine_id"`
+			Alias           string                         `json:"alias"`
+			Description     string                         `json:"description"`
+			ExpectedVersion int64                          `json:"expected_version"`
+			Desired         api.MachineCapabilitySelection `json:"desired"`
+			Action          string                         `json:"action"`
+			TargetVersion   string                         `json:"target_version"`
+			Reason          string                         `json:"reason"`
+			ApprovalID      string                         `json:"approval_id"`
+			Decision        string                         `json:"decision"`
 		}
 		if err := decodeDesktop(in.Payload, &p); err != nil {
 			return nil, err
 		}
 		if strings.TrimSpace(p.MachineID) == "" {
-			return nil, errors.New("select a device")
+			return nil, errors.New("select a machine")
 		}
 		switch in.Action {
-		case "device.rename":
+		case "machine.rename":
 			return client.SetMachineMetadata(ctx, p.MachineID, p.Alias, p.Description)
-		case "device.disconnect":
+		case "machine.disconnect":
 			err = client.DisconnectUserMachine(ctx, p.MachineID)
-		case "device.remove":
+		case "machine.remove":
 			err = client.DeleteUserMachine(ctx, p.MachineID)
-		case "device.capabilities":
+		case "machine.capabilities":
 			return client.SetUserMachineCapabilities(ctx, p.MachineID, newIdempotencyKey(), p.Desired, p.ExpectedVersion)
-		case "device.update-status":
+		case "machine.update-status":
 			return client.MachineUpdateStatus(ctx, p.MachineID)
-		case "device.maintenance":
+		case "machine.maintenance":
 			return client.RequestMachineMaintenance(ctx, p.MachineID, newIdempotencyKey(), p.Action, p.TargetVersion, p.Reason)
-		case "device.maintenance-list":
+		case "machine.maintenance-list":
 			return client.MachineMaintenanceApprovals(ctx, p.MachineID)
-		case "device.maintenance-decide":
+		case "machine.maintenance-decide":
 			if p.ApprovalID == "" {
 				return nil, invocationError(errors.New("select a maintenance request"))
 			}
@@ -330,61 +328,6 @@ func desktopCLI(parent *cobra.Command, args []string) (any, error) {
 	return map[string]bool{"completed": true}, nil
 }
 
-func desktopNetwork(c *cobra.Command, in desktopRequest) (any, error) {
-	var p struct {
-		Scope              string          `json:"scope"`
-		TeamID             string          `json:"team_id"`
-		ExpectedRevision   json.RawMessage `json:"expected_revision"`
-		DeviceSuffix       *string         `json:"device_suffix"`
-		DeviceLoopbackCIDR *string         `json:"device_loopback_cidr"`
-		SelectedTeamID     *string         `json:"selected_team_id"`
-	}
-	if err := decodeDesktop(in.Payload, &p); err != nil {
-		return nil, err
-	}
-	cfg, err := config.Load(configPathFlag(c))
-	if err != nil {
-		return nil, err
-	}
-	if p.Scope == "local" {
-		if in.Action == "network.get" {
-			return cfg.LoadNetworkPreferences()
-		}
-		if in.Action == "network.set" {
-			var revision string
-			if json.Unmarshal(p.ExpectedRevision, &revision) != nil {
-				return nil, errors.New("local expected_revision is required")
-			}
-			return cfg.SaveNetworkPreferences(config.NetworkPreferences{DeviceSuffix: p.DeviceSuffix, DeviceLoopbackCIDR: p.DeviceLoopbackCIDR}, revision)
-		}
-	}
-	client, err := desktopBackend(c)
-	if err != nil {
-		return nil, err
-	}
-	if in.Action == "network.effective" || in.Action == "network.apply" {
-		return desktopEffectiveNetwork(c, cfg, client, in.Action == "network.apply")
-	}
-	if p.Scope != "account" && p.Scope != "team" {
-		return nil, errors.New("scope must be local, account, or team")
-	}
-	team := ""
-	if p.Scope == "team" {
-		team = p.TeamID
-		if !validTeamCLIIdentifier(team) {
-			return nil, errors.New("select a team")
-		}
-	}
-	if in.Action == "network.get" {
-		return client.NetworkPreferences(c.Context(), team)
-	}
-	var revision int64
-	if json.Unmarshal(p.ExpectedRevision, &revision) != nil || revision < 0 {
-		return nil, errors.New("expected_revision is required")
-	}
-	return client.SetNetworkPreferences(c.Context(), team, api.SetNetworkPreferences{ExpectedRevision: revision, DeviceSuffix: p.DeviceSuffix, DeviceLoopbackCIDR: p.DeviceLoopbackCIDR, SelectedTeamID: p.SelectedTeamID})
-}
-
 // Management needs authentication, not construction of terminal transports.
 func desktopBackend(c *cobra.Command) (*api.Client, error) {
 	cfg, err := config.Load(configPathFlag(c))
@@ -402,5 +345,5 @@ func desktopBackend(c *cobra.Command) (*api.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return api.New(cfg.ServerURL, credential, nil), nil
+	return newWorkspaceAPIClient(actionContext(c, nil), cfg.ServerURL, credential)
 }

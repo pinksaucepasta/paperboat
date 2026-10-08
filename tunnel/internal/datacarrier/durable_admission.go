@@ -49,7 +49,7 @@ type DurableAdmission struct {
 
 func (a DurableAdmission) Validate(nodeID, processEpoch string, now time.Time) error {
 	if err := a.Identity.Validate(); err != nil {
-		return fmt.Errorf("%w: identity: %v", ErrDurableAdmissionInvalid, err)
+		return carrierFailure{sentinel: ErrDurableAdmissionInvalid, cause: err}
 	}
 	if a.EdgeNodeID != nodeID || connectorprotocol.ValidateIdentifier(a.EdgeNodeID) != nil || a.EdgeProcessEpoch != processEpoch || connectorprotocol.ValidateOpaqueEpoch(a.EdgeProcessEpoch) != nil {
 		return fmt.Errorf("%w: edge binding", ErrDurableAdmissionInvalid)
@@ -405,7 +405,7 @@ func durableIdentityKey(identity Identity) string {
 // without making either registry understand the other's resource model.
 func AnyPeerBinding(bindings ...PeerBinding) PeerBinding {
 	return func(state tls.ConnectionState) (Identity, error) {
-		var last error
+		var failures []error
 		for _, binding := range bindings {
 			if binding == nil {
 				continue
@@ -414,18 +414,18 @@ func AnyPeerBinding(bindings ...PeerBinding) PeerBinding {
 			if err == nil {
 				return identity, nil
 			}
-			last = err
+			failures = append(failures, err)
 		}
-		if last == nil {
-			last = ErrDurableAdmissionMissing
+		if len(failures) == 0 {
+			return Identity{}, ErrDurableAdmissionMissing
 		}
-		return Identity{}, last
+		return Identity{}, carrierFailure{sentinel: ErrDurableAdmissionMissing, cause: errors.Join(failures...)}
 	}
 }
 
 func AnyAuthorizer(authorizers ...Authorizer) Authorizer {
 	return AuthorizerFunc(func(ctx context.Context, identity Identity, open StreamOpen) error {
-		var last error
+		var failures []error
 		for _, authorizer := range authorizers {
 			if authorizer == nil {
 				continue
@@ -433,13 +433,13 @@ func AnyAuthorizer(authorizers ...Authorizer) Authorizer {
 			if err := authorizer.AuthorizeStream(ctx, identity, open); err == nil {
 				return nil
 			} else {
-				last = err
+				failures = append(failures, err)
 			}
 		}
-		if last == nil {
-			last = ErrDurableAdmissionMissing
+		if len(failures) == 0 {
+			return ErrDurableAdmissionMissing
 		}
-		return last
+		return carrierFailure{sentinel: ErrDurableAdmissionMissing, cause: errors.Join(failures...)}
 	})
 }
 

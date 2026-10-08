@@ -13,10 +13,10 @@ pb-send-list - List file transfers
 List file transfers
 
 .PP
-List outgoing transfer batches, optionally limited by device, terminal session, or result count. Use a returned transfer ID with status or cancel.
+List outgoing transfer batches, optionally limited by machine, terminal session, or result count. Use a returned transfer ID with status or cancel.
 
 .PP
-Send publishes a batch to a device's Paperboat Inbox. Completion means the receiver verified and recorded the files; status and cancel act on a transfer ID. A default destination can be set separately, while --to chooses one for the current send.
+Send publishes a batch to a machine's Paperboat Inbox. Completion means the receiver verified and recorded the files; status and cancel act on a transfer ID. A default destination can be set separately, while --to chooses one for the current send.
 
 .PP
 JSON output is supported with --json.
@@ -35,12 +35,24 @@ JSON output is supported with --json.
 	maximum transfers to return
 
 .PP
+\fB--offset\fP=0
+	continue at a transfer history offset
+
+.PP
 \fB--on\fP=""
 	destination machine name or ID
 
 .PP
+\fB--q\fP=""
+	filter by file basename or transfer ID
+
+.PP
 \fB--session\fP=""
 	terminal session ID for destination context
+
+.PP
+\fB--state\fP=""
+	filter by transfer state
 
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS
@@ -54,6 +66,10 @@ JSON output is supported with --json.
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

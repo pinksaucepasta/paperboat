@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -21,7 +23,7 @@ func TestLeaseObserverCarrierWaitsForStableHostReadiness(t *testing.T) {
 	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
 	base := Lease{
 		Schema: PreviewTunnelSchemaV1, Kind: PreviewLeaseKind, ID: "preview_observer_01", AccountID: "account_01", ActorID: "actor_01",
-		OwnerDeviceID: "host_01", OwnerSessionID: "owner_session_01", Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:8080"}, AccessMode: "public",
+		OwnerMachineID: "host_01", OwnerSessionID: "owner_session_01", OwnerSessionKind: "foreground", Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:8080"}, AccessMode: "public",
 		Endpoint: "https://preview.example.test", LeaseDeadline: now.Add(time.Hour), State: "connecting", AllocationState: "pending", EdgeState: "pending", OriginState: "unknown",
 		CreatedAt: now.Add(-time.Minute), LastRenewedAt: now, CreateOperationID: "operation_observer_01", ETag: formatLeaseETag("preview_observer_01", 1), Generation: 1,
 	}
@@ -57,6 +59,9 @@ func TestLeaseObserverCarrierWaitsForStableHostReadiness(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("observer did not report host readiness")
 	}
+	if detail := carrier.ReadinessDetail(); !strings.Contains(detail, "allocation ready, edge ready, origin ready") {
+		t.Fatalf("readiness detail: %s", detail)
+	}
 	cancel()
 	select {
 	case err := <-done:
@@ -70,7 +75,7 @@ func TestLeaseObserverCarrierWaitsForStableHostReadiness(t *testing.T) {
 
 func TestLeaseObserverCarrierRejectsChangedLease(t *testing.T) {
 	now := time.Now().UTC()
-	base := Lease{Schema: PreviewTunnelSchemaV1, Kind: PreviewLeaseKind, ID: "preview_observer_02", AccountID: "account_01", ActorID: "actor_01", OwnerDeviceID: "host_01", OwnerSessionID: "owner_session_01", Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:8080"}, AccessMode: "public", Endpoint: "https://preview.example.test", LeaseDeadline: now.Add(time.Hour), State: "connecting", AllocationState: "pending", EdgeState: "pending", OriginState: "unknown", CreatedAt: now.Add(-time.Minute), LastRenewedAt: now, CreateOperationID: "operation_observer_02", ETag: formatLeaseETag("preview_observer_02", 1), Generation: 1}
+	base := Lease{Schema: PreviewTunnelSchemaV1, Kind: PreviewLeaseKind, ID: "preview_observer_02", AccountID: "account_01", ActorID: "actor_01", OwnerMachineID: "host_01", OwnerSessionID: "owner_session_01", OwnerSessionKind: "foreground", Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:8080"}, AccessMode: "public", Endpoint: "https://preview.example.test", LeaseDeadline: now.Add(time.Hour), State: "connecting", AllocationState: "pending", EdgeState: "pending", OriginState: "unknown", CreatedAt: now.Add(-time.Minute), LastRenewedAt: now, CreateOperationID: "operation_observer_02", ETag: formatLeaseETag("preview_observer_02", 1), Generation: 1}
 	changed := base
 	changed.ID = "preview_other_02"
 	carrier, err := NewLeaseObserverCarrier(LeaseObserverCarrierConfig{Reader: leaseReaderFunc(func(context.Context, string) (Lease, error) { return changed, nil })})
@@ -107,4 +112,30 @@ type leaseReaderFunc func(context.Context, string) (Lease, error)
 
 func (f leaseReaderFunc) Get(ctx context.Context, id string) (Lease, error) {
 	return f(ctx, id)
+}
+
+func TestLeaseObserverOriginCheckAndCancellation(t *testing.T) {
+	carrier, err := NewLeaseObserverCarrier(LeaseObserverCarrierConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(nil)
+	target := LeaseTarget{Scheme: "http", Address: strings.TrimPrefix(server.URL, "http://")}
+	if err := carrier.CheckOrigin(context.Background(), target); err != nil {
+		t.Fatal(err)
+	}
+	server.Close()
+	if err := carrier.CheckOrigin(context.Background(), target); err == nil {
+		t.Fatal("closed origin passed preflight")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := carrier.CheckOrigin(ctx, target); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled probe: %v", err)
+	}
+	tlsServer := httptest.NewTLSServer(nil)
+	defer tlsServer.Close()
+	if err := carrier.CheckOrigin(context.Background(), LeaseTarget{Scheme: "https", Address: strings.TrimPrefix(tlsServer.URL, "https://")}); err == nil {
+		t.Fatal("untrusted TLS origin passed preflight")
+	}
 }

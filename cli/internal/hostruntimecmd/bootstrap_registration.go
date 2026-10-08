@@ -38,7 +38,7 @@ func saveBootstrapRegistration(store *identity.Store, serverURL string, material
 	if err != nil || strings.TrimSpace(profile.Account.ID) == "" {
 		return errors.New("Paperboat enrollment account is unavailable")
 	}
-	sshUser, sshPort = bootstrapSSHFields(material.SetupMode, sshUser, sshPort)
+	sshUser, sshPort = bootstrapSSHFields(sshUser, sshPort)
 	return store.SaveRegistration(identity.Registration{
 		ServerURL:              strings.TrimRight(strings.TrimSpace(serverURL), "/"),
 		AccountID:              profile.Account.ID,
@@ -48,18 +48,13 @@ func saveBootstrapRegistration(store *identity.Store, serverURL string, material
 		PublicIdentityKey:      base64.RawURLEncoding.EncodeToString(key.Public()),
 		InboxPath:              inboxPath,
 		InstallationGeneration: material.InstallationGeneration,
-		SetupMode:              material.SetupMode,
-		SetupRoles:             append([]string(nil), material.SetupRoles...),
 		SSHUser:                strings.TrimSpace(sshUser),
 		SSHPort:                sshPort,
 		UpdatedAt:              time.Now().UTC(),
 	})
 }
 
-func bootstrapSSHFields(setupMode, sshUser string, sshPort uint16) (string, uint16) {
-	if setupMode != "host" {
-		return "", 0
-	}
+func bootstrapSSHFields(sshUser string, sshPort uint16) (string, uint16) {
 	return strings.TrimSpace(sshUser), sshPort
 }
 
@@ -88,16 +83,12 @@ func validateBootstrapFinalizationBinding(registration identity.Registration, ac
 	if !resume.RuntimeReady || !resume.RuntimeEnrolled || !resume.ClientInstalled || material == nil ||
 		accountID == "" || registration.AccountID != accountID || registration.ServerURL != resume.ServerURL ||
 		registration.PublicIdentityKey != resume.PublicIdentityKey || registration.MachineID != material.UserMachineID ||
-		registration.EnvironmentID != material.EnvironmentID || registration.InstallationGeneration != material.InstallationGeneration ||
-		registration.SetupMode != material.SetupMode {
+		registration.EnvironmentID != material.EnvironmentID || registration.InstallationGeneration != material.InstallationGeneration {
 		return fmt.Errorf("existing enrollment finalization: %w", bootstrap.ErrResumeBinding)
 	}
 	return nil
 }
 
-func unixBootstrapSSHFields(setupMode, username string) (string, uint16) {
-	if setupMode != "host" {
-		return "", 0
-	}
-	return bootstrapSSHFields(setupMode, username, 22)
+func unixBootstrapSSHFields(username string) (string, uint16) {
+	return bootstrapSSHFields(username, 22)
 }

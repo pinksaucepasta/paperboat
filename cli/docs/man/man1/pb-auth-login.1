@@ -2,7 +2,7 @@
 .TH "PB-AUTH-LOGIN" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-auth-login - Sign in with a 26-character enrollment token
+pb-auth-login - Sign in through browser approval on any device
 
 
 .SH SYNOPSIS
@@ -10,10 +10,10 @@ pb-auth-login - Sign in with a 26-character enrollment token
 
 
 .SH DESCRIPTION
-Sign in with a 26-character enrollment token
+Sign in through browser approval on any device
 
 .PP
-Enter the enrollment token interactively or read it from --token-file so it is not exposed in shell history. A successful redemption stores the client session for later authenticated commands.
+Print an approval link and open it when a browser is available. Sign in through WorkOS on this or another device and explicitly approve the requesting CLI. No local callback listener or copied token is needed. Interrupted attempts resume securely; the existing account remains active until replacement succeeds.
 
 .PP
 Sign-in credentials are stored in the selected local profile for its configured Paperboat server. Account commands use that profile; a missing or rejected session must be repaired with pb auth login before protected resources can be used.
@@ -23,16 +23,24 @@ JSON output is supported with --json.
 
 
 .SH OPTIONS
+\fB--change-account\fP[=false]
+	sign in with another account after browser approval
+
+.PP
 \fB-h\fP, \fB--help\fP[=false]
 	help for login
 
 .PP
 \fB--json\fP[=false]
-	print sign-in result as JSON
+	print approval and sign-in states as JSON
 
 .PP
-\fB--token-file\fP=""
-	absolute protected file containing the enrollment token
+\fB--no-browser\fP[=false]
+	print the approval link without opening a browser
+
+.PP
+\fB--reauth\fP[=false]
+	authenticate the current account again
 
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS
@@ -46,6 +54,10 @@ JSON output is supported with --json.
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

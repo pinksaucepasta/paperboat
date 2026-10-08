@@ -3,11 +3,11 @@ package runtime
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
+	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/tlscert"
 )
 
@@ -22,6 +22,7 @@ var (
 // binding. The worker acknowledges an action only after the local transition
 // succeeds, so a lost ACK is safe to replay.
 type CertificateDistributionWorker struct {
+	reporter     *reporting.Reporter
 	client       *control.CertificateDistributionClient
 	receiver     *tlscert.DistributionReceiver
 	nodeID       string
@@ -35,6 +36,7 @@ type CertificateDistributionWorker struct {
 }
 
 type CertificateDistributionWorkerConfig struct {
+	Reporter     *reporting.Reporter
 	Client       *control.CertificateDistributionClient
 	Receiver     *tlscert.DistributionReceiver
 	NodeID       string
@@ -46,7 +48,7 @@ func NewCertificateDistributionWorker(config CertificateDistributionWorkerConfig
 	if config.Client == nil || config.Receiver == nil || config.NodeID == "" || config.ProcessEpoch == "" || config.Interval <= 0 {
 		return nil, ErrCertificateWorkerInvalid
 	}
-	return &CertificateDistributionWorker{client: config.Client, receiver: config.Receiver, nodeID: config.NodeID, processEpoch: config.ProcessEpoch, interval: config.Interval}, nil
+	return &CertificateDistributionWorker{reporter: config.Reporter, client: config.Client, receiver: config.Receiver, nodeID: config.NodeID, processEpoch: config.ProcessEpoch, interval: config.Interval}, nil
 }
 
 func (w *CertificateDistributionWorker) Start(ctx context.Context) error {
@@ -79,6 +81,7 @@ func (w *CertificateDistributionWorker) Start(ctx context.Context) error {
 					w.mu.Lock()
 					w.lastErr = err
 					w.mu.Unlock()
+					observeWorkerFailure(workerCtx, w.reporter, "certificate_distribution", err)
 				}
 			}
 		}
@@ -160,9 +163,9 @@ func (w *CertificateDistributionWorker) apply(ctx context.Context, envelope tlsc
 	if applyErr != nil {
 		code := boundedCertificateWorkerCode(applyErr)
 		if ackErr := w.client.Ack(ctx, envelope, "failed", code); ackErr != nil {
-			return errors.Join(fmt.Errorf("%w: %v", ErrCertificateWorkerAction, applyErr), ackErr)
+			return errors.Join(ErrCertificateWorkerAction, applyErr, ackErr)
 		}
-		return fmt.Errorf("%w: %v", ErrCertificateWorkerAction, applyErr)
+		return errors.Join(ErrCertificateWorkerAction, applyErr)
 	}
 	if err := w.client.Ack(ctx, envelope, status, ""); err != nil {
 		return err

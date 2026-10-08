@@ -1,4 +1,4 @@
-// Package edgeplacement chooses the device's preferred web edge locations from
+// Package edgeplacement chooses the machine's preferred web edge locations from
 // bounded connection measurements. The control plane authorizes the result.
 package edgeplacement
 
@@ -117,7 +117,7 @@ func (s *Selector) reset() {
 	s.consecutive = 0
 }
 
-// Probe measures the device's TCP setup time to the published carrier port.
+// Probe measures the machine's TCP setup time to the published carrier port.
 // A later authenticated carrier handshake still verifies the exact edge key.
 // Eight concurrent one-second probes bound work even with 32 candidates.
 func Probe(ctx context.Context, candidates []Candidate, dial func(context.Context, string) error) ([]Measurement, error) {

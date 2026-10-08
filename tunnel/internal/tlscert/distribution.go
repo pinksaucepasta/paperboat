@@ -180,10 +180,7 @@ func (r *DistributionReceiver) authenticate(ctx context.Context, action string, 
 		return ErrDistributionInvalid
 	}
 	if err := r.authenticator.Verify(ctx, action, envelope); err != nil {
-		if errors.Is(err, ErrDistributionAuth) {
-			return err
-		}
-		return ErrDistributionAuth
+		return certificateFailure{ErrDistributionAuth, err}
 	}
 	return nil
 }

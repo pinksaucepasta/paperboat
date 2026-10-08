@@ -26,9 +26,34 @@ type MachineControl struct {
 	KeyID                  string    `json:"key_id"`
 }
 
+type machineControlStoreFailure struct {
+	cause error
+}
+
+func (machineControlStoreFailure) Error() string { return ErrInvalidStore.Error() }
+
+func (e machineControlStoreFailure) Unwrap() error { return e.cause }
+
+func invalidMachineControlStore(causes ...error) error {
+	wrapped := make([]error, 0, len(causes)+1)
+	wrapped = append(wrapped, ErrInvalidStore)
+	for _, cause := range causes {
+		if cause != nil {
+			wrapped = append(wrapped, cause)
+		}
+	}
+	if len(wrapped) == 1 {
+		return ErrInvalidStore
+	}
+	return machineControlStoreFailure{cause: errors.Join(wrapped...)}
+}
+
 func (s *Store) SaveMachineControl(value MachineControl) error {
 	registration, err := s.Registration()
-	if err != nil || value.MachineID != registration.MachineID || value.EnvironmentID != registration.EnvironmentID || value.InstallationGeneration != registration.InstallationGeneration || value.KeyID != s.key.ID || len(value.Credential) < 32 || value.ExpiresAt.IsZero() {
+	if err != nil {
+		return invalidMachineControlStore(err)
+	}
+	if value.MachineID != registration.MachineID || value.EnvironmentID != registration.EnvironmentID || value.InstallationGeneration != registration.InstallationGeneration || value.KeyID != s.key.ID || len(value.Credential) < 32 || value.ExpiresAt.IsZero() {
 		return ErrInvalidStore
 	}
 	value.Version = 1
@@ -42,22 +67,36 @@ func (s *Store) SaveMachineControl(value MachineControl) error {
 func (s *Store) MachineControl(now time.Time, expiryGrace time.Duration) (MachineControl, error) {
 	path := filepath.Join(s.config.StateRoot, "machine-control.json")
 	info, err := os.Lstat(path)
-	if err != nil || !secureIdentityPath(path, info, true) || info.Size() > 32<<10 {
+	if err != nil {
+		return MachineControl{}, invalidMachineControlStore(err)
+	}
+	if !secureIdentityPath(path, info, true) || info.Size() > 32<<10 {
 		return MachineControl{}, ErrInvalidStore
 	}
 	encoded, err := os.ReadFile(path)
 	if err != nil {
-		return MachineControl{}, err
+		return MachineControl{}, invalidMachineControlStore(err)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
 	decoder.DisallowUnknownFields()
 	var value MachineControl
 	if err := decoder.Decode(&value); err != nil {
-		return MachineControl{}, ErrInvalidStore
+		return MachineControl{}, invalidMachineControlStore(err)
 	}
 	var extra any
+	trailingErr := decoder.Decode(&extra)
 	registration, registrationErr := s.Registration()
-	if decoder.Decode(&extra) != io.EOF || registrationErr != nil || value.Version != 1 || value.KeyID != s.key.ID || value.MachineID != registration.MachineID || value.EnvironmentID != registration.EnvironmentID || value.InstallationGeneration != registration.InstallationGeneration || len(value.Credential) < 32 || value.ExpiresAt.Add(expiryGrace).Before(now.UTC()) {
+	var causes []error
+	if trailingErr != nil && trailingErr != io.EOF {
+		causes = append(causes, trailingErr)
+	}
+	if registrationErr != nil {
+		causes = append(causes, registrationErr)
+	}
+	if len(causes) != 0 {
+		return MachineControl{}, invalidMachineControlStore(causes...)
+	}
+	if trailingErr != io.EOF || value.Version != 1 || value.KeyID != s.key.ID || value.MachineID != registration.MachineID || value.EnvironmentID != registration.EnvironmentID || value.InstallationGeneration != registration.InstallationGeneration || len(value.Credential) < 32 || value.ExpiresAt.Add(expiryGrace).Before(now.UTC()) {
 		return MachineControl{}, ErrInvalidStore
 	}
 	return value, nil
@@ -65,8 +104,11 @@ func (s *Store) MachineControl(now time.Time, expiryGrace time.Duration) (Machin
 
 func (s *Store) MachineProof(operationID, method, path string, body []byte, now time.Time) ([]byte, error) {
 	registration, err := s.Registration()
+	if err != nil {
+		return nil, invalidMachineControlStore(err)
+	}
 	method = strings.ToUpper(method)
-	if err != nil || len(operationID) < 8 || len(operationID) > 128 || method != http.MethodPost && method != http.MethodPut && method != http.MethodDelete || !strings.HasPrefix(path, "/v1/") || len(body) > 1<<20 {
+	if len(operationID) < 8 || len(operationID) > 128 || method != http.MethodPost && method != http.MethodPut && method != http.MethodDelete || !strings.HasPrefix(path, "/v1/") || len(body) > 1<<20 {
 		return nil, ErrInvalidStore
 	}
 	now = now.UTC()

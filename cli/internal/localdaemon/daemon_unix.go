@@ -33,12 +33,17 @@ type DaemonConfig struct {
 	WarmPeerMetadata        func(context.Context, []api.UserMachine) error
 	IssuePeerStream         func(context.Context, localapi.PeerStreamRequest) (localapi.PeerStreamRequest, error)
 	FileTransfers           localapi.FileTransferBroker
-	DeviceSuffix            string
-	DeviceLoopbackCIDR      string
+	ReconcileMachines       func(context.Context, []api.UserMachine) error
 	OnMachines              func(context.Context, []api.UserMachine)
 }
 
-func Run(ctx context.Context, config DaemonConfig) error {
+func Run(ctx context.Context, config DaemonConfig) (runErr error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if supportref.FromContext(ctx) == "" {
+		ctx = supportref.WithContext(ctx, supportref.New())
+	}
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 	if config.Source == nil || config.OwnerUID < 0 || config.OwnerGID < 0 || config.Paths.SocketPath == "" || config.Paths.LockPath == "" {
@@ -48,35 +53,46 @@ func Run(ctx context.Context, config DaemonConfig) error {
 	if err != nil {
 		return err
 	}
-	defer lock.Close()
+	defer func() { runErr = daemonCleanupFailure(runErr, lock.Close()) }()
 	if closer, ok := config.FileTransfers.(interface{ Close() error }); ok {
-		defer closer.Close()
+		defer func() { runErr = daemonCleanupFailure(runErr, closer.Close()) }()
 	}
-	recorder, err := diagnostics.NewRecorder(diagnostics.DiskConfig{Directory: filepath.Join(config.Paths.StateRoot, "diagnostics"), OwnerUID: config.OwnerUID, Clock: config.Clock})
-	if err != nil {
-		return err
+	recorder := diagnostics.FromContext(ctx)
+	ownedRecorder := recorder == nil
+	if ownedRecorder {
+		recorder, err = diagnostics.NewRecorder(diagnostics.DiskConfig{Directory: filepath.Join(config.Paths.StateRoot, "diagnostics"), OwnerUID: config.OwnerUID, Clock: config.Clock})
+		if err != nil {
+			return err
+		}
 	}
+	ctx = diagnostics.WithRecorder(ctx, recorder)
 	authorityInvalidator := NewMachineAuthorityInvalidator(config.InvalidatePeerAuthority)
 	reference := supportref.FromContext(ctx)
 	if err := recorder.RecordWithSupportReference("daemon", "lifecycle", "info", reference, map[string]string{"state": "starting"}); err != nil {
-		_ = recorder.Close()
+		if ownedRecorder {
+			err = errors.Join(err, recorder.Close())
+		}
 		return err
 	}
 	defer func() {
-		_ = recorder.RecordWithSupportReference("daemon", "lifecycle", "info", reference, map[string]string{"state": "stopping"})
-		_ = recorder.Close()
+		runErr = daemonCleanupFailure(runErr, recorder.RecordWithSupportReference("daemon", "lifecycle", "info", reference, map[string]string{"state": "stopping"}))
+		if ownedRecorder {
+			runErr = daemonCleanupFailure(runErr, recorder.Close())
+		}
 	}()
 	var managedSSHRuntime *ManagedSSHRuntime
 	if config.ManagedSSH != nil {
 		managedSSHRuntime, err = StartManagedSSH(ctx, *config.ManagedSSH)
-		reportManagedSSHStartup(config.Source, recorder, err)
+		reportManagedSSHStartup(ctx, config.Source, recorder, err)
 		defer func() {
 			if managedSSHRuntime != nil {
-				_ = managedSSHRuntime.Close()
+				runErr = daemonCleanupFailure(runErr, managedSSHRuntime.Close())
 			}
 		}()
 	}
 
+	observeSSHRefresh := maintenanceObserver(ctx, recorder, "managed_ssh")
+	observePeerMetadata := maintenanceObserver(ctx, recorder, "peer_metadata")
 	diagnosticClock := config.Clock
 	if diagnosticClock == nil {
 		diagnosticClock = time.Now
@@ -85,25 +101,19 @@ func Run(ctx context.Context, config DaemonConfig) error {
 	store, err := localapi.NewSnapshotStore(&localapi.Snapshot{
 		Schema: localapi.SnapshotSchemaV1, Generation: 1,
 		ObservedAt: diagnosticClock().UTC(), DaemonState: "starting", DaemonVersion: buildinfo.Version,
-		DeviceSuffix: config.DeviceSuffix, DeviceLoopbackCIDR: config.DeviceLoopbackCIDR,
 	})
 	if err != nil {
 		return err
 	}
 	diagnosticAPI := &diagnosticService{recorder: recorder, store: store, stateRoot: config.Paths.StateRoot, ownerUID: config.OwnerUID, clock: diagnosticClock}
-	inventory, err := NewInventory(InventoryConfig{Source: config.Source, Store: store, RefreshInterval: config.RefreshInterval, RequestTimeout: config.RequestTimeout, Clock: config.Clock, OnRefresh: func(err error) {
-		severity, fields := inventoryRefreshDiagnostic(err)
-		_ = recorder.Record("reconciliation", "inventory_refresh", severity, fields)
-	}, OnMachines: func(refreshCtx context.Context, machines []api.UserMachine) {
+	inventory, err := NewInventory(InventoryConfig{Source: config.Source, Store: store, RefreshInterval: config.RefreshInterval, RequestTimeout: config.RequestTimeout, Clock: config.Clock, ReconcileMachines: config.ReconcileMachines, OnRefresh: inventoryRefreshObserver(ctx, recorder), OnMachines: func(refreshCtx context.Context, machines []api.UserMachine) {
 		if config.OnMachines != nil {
 			config.OnMachines(refreshCtx, machines)
 		}
 		authorityInvalidator.Observe(machines)
 		if managedSSHRuntime != nil {
 			sshCtx, cancelSSH := context.WithTimeout(refreshCtx, 15*time.Second)
-			if refreshErr := managedSSHRuntime.Refresh(sshCtx); refreshErr != nil {
-				_ = recorder.Record("ssh", "managed_refresh", "warning", map[string]string{"outcome": "degraded", "reason": ManagedSSHHealthCode(refreshErr)})
-			}
+			observeSSHRefresh(managedSSHRuntime.Refresh(sshCtx))
 			cancelSSH()
 		}
 		if config.WarmPeerMetadata != nil {
@@ -114,11 +124,7 @@ func Run(ctx context.Context, config DaemonConfig) error {
 			warmCtx, cancelWarm := context.WithTimeout(refreshCtx, warmTimeout)
 			warmErr := config.WarmPeerMetadata(warmCtx, machines)
 			cancelWarm()
-			outcome, severity := "ready", "info"
-			if warmErr != nil {
-				outcome, severity = "degraded", "warning"
-			}
-			_ = recorder.Record("transport", "metadata_warm", severity, map[string]string{"outcome": outcome})
+			observePeerMetadata(warmErr)
 		}
 	}})
 	if err != nil {
@@ -163,18 +169,7 @@ func Run(ctx context.Context, config DaemonConfig) error {
 	first := <-results
 	cancel()
 	remaining := []error{<-results, <-results}
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	if first != nil && !errors.Is(first, context.Canceled) {
-		return first
-	}
-	for _, result := range remaining {
-		if result != nil && !errors.Is(result, context.Canceled) {
-			return result
-		}
-	}
-	return first
+	return errors.Join(first, remaining[0], remaining[1], ctx.Err())
 }
 
 type peerStreamBroker struct {

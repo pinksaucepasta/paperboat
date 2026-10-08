@@ -19,8 +19,8 @@ type mockBackend struct {
 	mu          sync.Mutex
 	status      *pb.StatusResponse
 	subscribers []chan *pb.StatusResponse
-	devices     map[string]*pb.DeviceAddress
-	deviceTags  map[string][]string
+	machines    map[string]*pb.MachineAddress
+	machineTags map[string][]string
 }
 
 func newMockBackend() *mockBackend {
@@ -50,16 +50,16 @@ func newMockBackend() *mockBackend {
 				},
 			},
 		},
-		devices: map[string]*pb.DeviceAddress{
+		machines: map[string]*pb.MachineAddress{
 			"workstation": {
-				DeviceId:       "dev-1",
+				MachineId:      "dev-1",
 				Alias:          "workstation",
 				AssignedIp:     "127.100.0.2",
 				ForwardedPorts: []int32{22, 8080},
 				Tags:           []string{"work", "fast"},
 			},
 		},
-		deviceTags: make(map[string][]string),
+		machineTags: make(map[string][]string),
 	}
 }
 
@@ -100,29 +100,29 @@ func (m *mockBackend) broadcastStatus(update *pb.StatusResponse) {
 	}
 }
 
-func (m *mockBackend) ResolveDevice(ctx context.Context, query string) (*pb.DeviceAddress, error) {
+func (m *mockBackend) ResolveMachine(ctx context.Context, query string) (*pb.MachineAddress, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if dev, ok := m.devices[query]; ok {
-		tags := m.deviceTags[dev.DeviceId]
+	if dev, ok := m.machines[query]; ok {
+		tags := m.machineTags[dev.MachineId]
 		if len(tags) > 0 {
 			dev.Tags = tags
 		}
 		return dev, nil
 	}
-	return nil, fmt.Errorf("device %q not found", query)
+	return nil, fmt.Errorf("machine %q not found", query)
 }
 
-func (m *mockBackend) ApprovePeer(ctx context.Context, deviceID string, approved bool) error {
+func (m *mockBackend) ApprovePeer(ctx context.Context, machineID string, approved bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return nil
 }
 
-func (m *mockBackend) SetDeviceTags(ctx context.Context, deviceID string, tags []string) error {
+func (m *mockBackend) SetMachineTags(ctx context.Context, machineID string, tags []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.deviceTags[deviceID] = tags
+	m.machineTags[machineID] = tags
 	return nil
 }
 
@@ -162,27 +162,27 @@ func TestDaemonRPCServerAndClient(t *testing.T) {
 	}
 	defer client.Close()
 
-	// 1. Test ResolveDevice
-	dev, err := client.ResolveDevice(ctx, "workstation")
+	// 1. Test ResolveMachine
+	dev, err := client.ResolveMachine(ctx, "workstation")
 	if err != nil {
-		t.Fatalf("ResolveDevice() error: %v", err)
+		t.Fatalf("ResolveMachine() error: %v", err)
 	}
-	if dev.DeviceId != "dev-1" || dev.AssignedIp != "127.100.0.2" {
-		t.Fatalf("unexpected resolved device: %+v", dev)
+	if dev.MachineId != "dev-1" || dev.AssignedIp != "127.100.0.2" {
+		t.Fatalf("unexpected resolved machine: %+v", dev)
 	}
 
-	// 2. Test SetDeviceTags and then resolve again
-	tagResp, err := client.SetDeviceTags(ctx, "dev-1", []string{"production", "gateway"})
+	// 2. Test SetMachineTags and then resolve again
+	tagResp, err := client.SetMachineTags(ctx, "dev-1", []string{"production", "gateway"})
 	if err != nil {
-		t.Fatalf("SetDeviceTags() error: %v", err)
+		t.Fatalf("SetMachineTags() error: %v", err)
 	}
 	if !tagResp.Success || !reflect.DeepEqual(tagResp.Tags, []string{"production", "gateway"}) {
-		t.Fatalf("unexpected SetDeviceTags response: %+v", tagResp)
+		t.Fatalf("unexpected SetMachineTags response: %+v", tagResp)
 	}
 
-	dev, err = client.ResolveDevice(ctx, "workstation")
+	dev, err = client.ResolveMachine(ctx, "workstation")
 	if err != nil {
-		t.Fatalf("ResolveDevice after tags error: %v", err)
+		t.Fatalf("ResolveMachine after tags error: %v", err)
 	}
 	if !reflect.DeepEqual(dev.Tags, []string{"production", "gateway"}) {
 		t.Fatalf("expected updated tags, got %v", dev.Tags)
@@ -261,13 +261,13 @@ func TestLiveDaemonBackendAuthorizedPortsAndUnknownTransport(t *testing.T) {
 	}
 	backend.ApplyPeerUpdates(updates, 10, nil)
 
-	// 1. Resolve device and verify exported ports are dynamic, not static
-	addr, err := backend.ResolveDevice(context.Background(), "dev-box")
+	// 1. Resolve machine and verify exported ports are dynamic, not static
+	addr, err := backend.ResolveMachine(context.Background(), "dev-box")
 	if err != nil {
-		t.Fatalf("ResolveDevice failed: %v", err)
+		t.Fatalf("ResolveMachine failed: %v", err)
 	}
-	if addr.DeviceId != "node-xyz" || addr.AssignedIp != "127.100.0.5" {
-		t.Fatalf("unexpected device address: %+v", addr)
+	if addr.MachineId != "node-xyz" || addr.AssignedIp != "127.100.0.5" {
+		t.Fatalf("unexpected machine address: %+v", addr)
 	}
 	if !reflect.DeepEqual(addr.ForwardedPorts, []int32{3000, 8080, 5432}) {
 		t.Fatalf("expected dynamic ports [3000, 8080, 5432], got %v", addr.ForwardedPorts)

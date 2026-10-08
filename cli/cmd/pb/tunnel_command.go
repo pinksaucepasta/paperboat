@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"net"
 	"net/http"
@@ -38,11 +39,11 @@ var resolveTunnelSelectorForCommand = resolveTunnelSelector
 var beginTunnelCreateWorkflowForCommand = beginProductionTunnelCreateWorkflow
 
 var newTunnelIdempotencyKey = func() (string, error) {
-	var value [16]byte
-	if _, err := rand.Read(value[:]); err != nil {
+	id, err := uuid.NewRandom()
+	if err != nil {
 		return "", err
 	}
-	return "pb_tunnel_" + hex.EncodeToString(value[:]), nil
+	return "operation_" + id.String(), nil
 }
 
 const (
@@ -301,7 +302,7 @@ func (e *TunnelOperationOutcomeError) Error() string {
 	if e == nil {
 		return "tunnel operation failed"
 	}
-	message := fmt.Sprintf("tunnel operation %s ended in state %s during %s", e.Operation.ID, e.Operation.State, e.Operation.Phase)
+	message := fmt.Sprintf("tunnel operation ended in state %s during %s", e.Operation.State, e.Operation.Phase)
 	if e.Operation.Error != nil && e.Operation.Error.RepairAction != "" {
 		message += "; repair: " + e.Operation.Error.RepairAction
 	}
@@ -1447,6 +1448,9 @@ func tunnelCreateCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		if !jsonOutputRequested(command) {
+			fmt.Fprintln(command.ErrOrStderr(), "Creating tunnel… Ctrl+C to cancel.")
+		}
 		requestDigest, err := tunnelCreateRequestDigest(name, mode, scheme, address, expiry, domains)
 		if err != nil {
 			return err
@@ -1483,8 +1487,25 @@ func tunnelCreateCommand() *cobra.Command {
 			}
 			return err
 		}
-		if hadTunnel && (!out.Replayed || out.Tunnel.ID != journal.TunnelID || out.Operation.ID != journal.OperationID) {
-			return api.ErrUnsafeTunnelResponse
+		if hadTunnel {
+			if out.Tunnel.ID != journal.TunnelID {
+				return api.ErrUnsafeTunnelResponse
+			}
+			// Completed mutations return the canonical tunnel, while running
+			// mutations return their operation. Recover the recorded operation
+			// without relying on a replay flag that is not part of the wire API.
+			if out.Operation.ID == "" {
+				out.Operation, err = retryTunnelRead(ctx, func() (api.TunnelOperation, error) {
+					return client.GetTunnelOperationV1(ctx, journal.OperationID)
+				})
+				if err != nil {
+					return tunnelCreateJournalError(out.Tunnel.ID, "recovering tunnel operation", "pb tunnel show "+out.Tunnel.ID, err)
+				}
+			}
+			if out.Operation.ID != journal.OperationID || out.Operation.ResourceKind != "tunnel" || out.Operation.ResourceID != journal.TunnelID {
+				return api.ErrUnsafeTunnelResponse
+			}
+			out.Replayed = true
 		}
 		if out.Tunnel.Name != name {
 			return api.ErrUnsafeTunnelResponse
@@ -1500,6 +1521,9 @@ func tunnelCreateCommand() *cobra.Command {
 				return tunnelCreateConnectorError(out.Tunnel.ID, err)
 			}
 		} else {
+			if !jsonOutputRequested(command) {
+				fmt.Fprintln(command.ErrOrStderr(), "Waiting for the tunnel connector to become ready…")
+			}
 			connector, err = activateCreatedTunnelConnector(command, out.Tunnel.ID)
 			if err != nil {
 				return tunnelCreateConnectorError(out.Tunnel.ID, err)
@@ -1911,7 +1935,7 @@ func tunnelListCommand() *cobra.Command {
 			return err
 		}
 		out, err := retryTunnelRead(ctx, func() (api.TunnelPage, error) {
-			return client.ListTunnelsV1(ctx, cursor, limit)
+			return client.ListTunnelsV1Filtered(ctx, cursor, limit, inventoryFilters(command))
 		})
 		if err != nil {
 			return err
@@ -1924,10 +1948,11 @@ func tunnelListCommand() *cobra.Command {
 				return err
 			}
 		}
-		return nil
+		return writeInventoryContinuation(command, nil, out.NextCursor, limit)
 	})
 	command.Flags().String("cursor", "", "continue a previous page")
 	command.Flags().Int("limit", 100, "maximum results (1-200)")
+	inventoryFilterFlags(command)
 	tunnelJSONFlag(command)
 	return command
 }
@@ -2077,7 +2102,7 @@ func routeListCommand() *cobra.Command {
 				return err
 			}
 		}
-		return nil
+		return writeInventoryContinuation(command, args, out.NextCursor, limit)
 	})
 	tunnelPageFlag(command)
 	tunnelJSONFlag(command)
@@ -2523,7 +2548,7 @@ func domainListCommand() *cobra.Command {
 				return err
 			}
 		}
-		return nil
+		return writeInventoryContinuation(command, args, out.NextCursor, limit)
 	})
 	tunnelPageFlag(command)
 	tunnelJSONFlag(command)
@@ -2772,7 +2797,7 @@ func connectorListCommand() *cobra.Command {
 				return err
 			}
 		}
-		return nil
+		return writeInventoryContinuation(command, args, out.NextCursor, limit)
 	})
 	tunnelPageFlag(command)
 	tunnelJSONFlag(command)

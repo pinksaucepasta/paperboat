@@ -25,6 +25,7 @@ import (
 
 var (
 	ErrInvalid                       = errors.New("invalid helper enrollment")
+	ErrUnavailable                   = errors.New("runtime enrollment is unavailable")
 	ErrEnrollmentExchangeRejected    = errors.New("helper enrollment exchange was rejected")
 	ErrEnrollmentExchangeUnavailable = errors.New("helper enrollment exchange is unavailable")
 )
@@ -83,11 +84,17 @@ func (s ProofSource) proof(operationID, method, path string, body []byte, allowE
 	} else {
 		value, err = LoadRuntimeIdentity(s.StateRoot, now)
 	}
-	if err != nil || len(operationID) < 8 || len(operationID) > 128 || method != http.MethodPost && method != http.MethodPut || path == "" || len(body) > 1<<20 {
+	if err != nil {
+		return nil, unavailableEnrollment(err)
+	}
+	if len(operationID) < 8 || len(operationID) > 128 || method != http.MethodPost && method != http.MethodPut || path == "" || len(body) > 1<<20 {
 		return nil, ErrInvalid
 	}
 	store, err := identity.Open(identity.Config{StateRoot: s.StateRoot})
-	if err != nil || store.Current().ID != value.KeyID {
+	if err != nil {
+		return nil, unavailableEnrollment(err)
+	}
+	if store.Current().ID != value.KeyID {
 		return nil, ErrInvalid
 	}
 	bodyHash := sha256.Sum256(body)
@@ -137,15 +144,25 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, ErrInvalid
 	}
 	info, err := os.Lstat(path)
-	if err != nil || !secureEnrollmentConfigFile(path, info, 32<<10) {
+	if err != nil {
+		return Config{}, unavailableEnrollment(err)
+	}
+	secure, err := checkEnrollmentConfigFile(path, info, 32<<10)
+	if err != nil {
+		return Config{}, unavailableEnrollment(err)
+	}
+	if !secure {
 		return Config{}, ErrInvalid
 	}
 	body, err := os.ReadFile(path)
 	if err != nil {
-		return Config{}, err
+		return Config{}, unavailableEnrollment(err)
 	}
 	var config Config
-	if strictJSON(body, &config) != nil || !filepath.IsAbs(config.StateRoot) || config.ControlCAFile != "" && !filepath.IsAbs(config.ControlCAFile) || len(config.EnrollmentCredential) < 32 || len(config.EnrollmentCredential) > 16<<10 {
+	if err := strictJSON(body, &config); err != nil {
+		return Config{}, unavailableEnrollment(err)
+	}
+	if !filepath.IsAbs(config.StateRoot) || config.ControlCAFile != "" && !filepath.IsAbs(config.ControlCAFile) || len(config.EnrollmentCredential) < 32 || len(config.EnrollmentCredential) > 16<<10 {
 		return Config{}, ErrInvalid
 	}
 	return config, nil
@@ -163,13 +180,16 @@ func (c *Client) Enroll(ctx context.Context, config Config) (RuntimeIdentity, er
 
 func (c *Client) enroll(ctx context.Context, config Config, endpointPath string, payload any) (RuntimeIdentity, error) {
 	base, err := url.Parse(config.ControlURL)
-	if err != nil || base.Scheme != "https" || base.User != nil || base.Hostname() == "" || base.RawQuery != "" || base.Fragment != "" {
+	if err != nil {
+		return RuntimeIdentity{}, unavailableEnrollment(err)
+	}
+	if base.Scheme != "https" || base.User != nil || base.Hostname() == "" || base.RawQuery != "" || base.Fragment != "" {
 		return RuntimeIdentity{}, ErrInvalid
 	}
 	base.Path = strings.TrimRight(base.Path, "/") + endpointPath
 	store, err := identity.Open(identity.Config{StateRoot: config.StateRoot})
 	if err != nil {
-		return RuntimeIdentity{}, err
+		return RuntimeIdentity{}, unavailableEnrollment(err)
 	}
 	key := store.Current()
 	switch value := payload.(type) {
@@ -193,10 +213,10 @@ func (c *Client) enroll(ctx context.Context, config Config, endpointPath string,
 	if transport == nil {
 		transport, err = controlTransport(config.ControlCAFile)
 		if err != nil {
-			return RuntimeIdentity{}, err
+			return RuntimeIdentity{}, unavailableEnrollment(err)
 		}
 	}
-	client := &http.Client{Transport: errorreport.TransportOperation(transport, base.String(), "helper_enrollment"), CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}
+	client := &http.Client{Transport: errorreport.TransportOperation(transport, base.String(), "helper_enrollment"), CheckRedirect: func(*http.Request, []*http.Request) error { return errEnrollmentRedirect }}
 	var responseBody []byte
 	for attempt := 0; attempt < enrollmentExchangeAttempts; attempt++ {
 		status, value, exchangeErr := c.enrollmentExchangeAttempt(ctx, client, base.String(), body)
@@ -205,28 +225,31 @@ func (c *Client) enroll(ctx context.Context, config Config, endpointPath string,
 			break
 		}
 		if ctx.Err() != nil {
-			return RuntimeIdentity{}, ctx.Err()
+			return RuntimeIdentity{}, unavailableEnrollment(errors.Join(ctx.Err(), exchangeErr))
 		}
-		if exchangeErr != nil && errors.Is(exchangeErr, ErrInvalid) || exchangeErr == nil && !retryableEnrollmentExchangeStatus(status) {
-			return RuntimeIdentity{}, errors.Join(ErrInvalid, ErrEnrollmentExchangeRejected)
+		if exchangeErr == nil && !retryableEnrollmentExchangeStatus(status) {
+			return RuntimeIdentity{}, enrollmentFailure{classification: ErrEnrollmentExchangeRejected, cause: ErrInvalid}
+		}
+		if errors.Is(exchangeErr, ErrInvalid) {
+			return RuntimeIdentity{}, unavailableEnrollment(exchangeErr)
 		}
 		if attempt+1 == enrollmentExchangeAttempts {
-			return RuntimeIdentity{}, ErrEnrollmentExchangeUnavailable
+			return RuntimeIdentity{}, enrollmentFailure{classification: ErrEnrollmentExchangeUnavailable, cause: exchangeErr}
 		}
 		delay := 500 * time.Millisecond << attempt
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return RuntimeIdentity{}, ctx.Err()
+			return RuntimeIdentity{}, unavailableEnrollment(errors.Join(ctx.Err(), exchangeErr))
 		case <-timer.C:
 		}
 	}
 	var envelope struct {
 		Data RuntimeIdentity `json:"data"`
 	}
-	if strictJSON(responseBody, &envelope) != nil {
-		return RuntimeIdentity{}, ErrInvalid
+	if err := strictJSON(responseBody, &envelope); err != nil {
+		return RuntimeIdentity{}, unavailableEnrollment(err)
 	}
 	result := envelope.Data
 	result.Version = 1
@@ -235,7 +258,7 @@ func (c *Client) enroll(ctx context.Context, config Config, endpointPath string,
 		return RuntimeIdentity{}, ErrInvalid
 	}
 	if err := writeIdentity(config.StateRoot, result); err != nil {
-		return RuntimeIdentity{}, err
+		return RuntimeIdentity{}, unavailableEnrollment(err)
 	}
 	return result, nil
 }
@@ -253,13 +276,15 @@ func (c *Client) enrollmentExchangeAttempt(ctx context.Context, client *http.Cli
 	if err != nil {
 		return 0, nil, err
 	}
-	defer response.Body.Close()
-	responseBody, err := io.ReadAll(io.LimitReader(response.Body, 64<<10+1))
+	responseBody, err := readEnrollmentResponse(response)
 	if err != nil {
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			err = errors.Join(errorreport.HTTPStatusFailure(response), err)
+		}
 		return response.StatusCode, nil, err
 	}
-	if len(responseBody) > 64<<10 {
-		return response.StatusCode, nil, ErrInvalid
+	if retryableEnrollmentExchangeStatus(response.StatusCode) {
+		return response.StatusCode, nil, errorreport.HTTPStatusFailure(response)
 	}
 	return response.StatusCode, responseBody, nil
 }
@@ -272,12 +297,15 @@ func controlTransport(caPath string) (http.RoundTripper, error) {
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS13}
 	if caPath != "" {
 		info, err := os.Lstat(caPath)
-		if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() < 1 || info.Size() > 1<<20 {
+		if err != nil {
+			return nil, unavailableEnrollment(err)
+		}
+		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() < 1 || info.Size() > 1<<20 {
 			return nil, ErrInvalid
 		}
 		encoded, err := os.ReadFile(caPath)
 		if err != nil {
-			return nil, err
+			return nil, unavailableEnrollment(err)
 		}
 		roots, err := x509.SystemCertPool()
 		if err != nil || roots == nil {
@@ -298,7 +326,10 @@ func writeIdentity(root string, value RuntimeIdentity) error {
 	if err != nil {
 		return err
 	}
-	return atomicfile.Write(filepath.Join(root, "runtime-identity.json"), encoded, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1})
+	if err := atomicfile.Write(filepath.Join(root, "runtime-identity.json"), encoded, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1}); err != nil {
+		return unavailableEnrollment(err)
+	}
+	return nil
 }
 
 func LoadRuntimeIdentity(root string, now time.Time) (RuntimeIdentity, error) {
@@ -316,25 +347,32 @@ func loadRuntimeIdentity(root string, now time.Time, expiryGrace time.Duration) 
 	path := filepath.Join(root, "runtime-identity.json")
 	info, err := os.Lstat(path)
 	if err != nil {
-		return RuntimeIdentity{}, err
+		return RuntimeIdentity{}, unavailableEnrollment(err)
 	}
-	if !secureIdentityFile(path, info, 32<<10) {
+	secure, err := checkIdentityFile(path, info, 32<<10)
+	if err != nil {
+		return RuntimeIdentity{}, unavailableEnrollment(err)
+	}
+	if !secure {
 		return RuntimeIdentity{}, ErrInvalid
 	}
 	body, err := os.ReadFile(path)
 	if err != nil {
-		return RuntimeIdentity{}, err
+		return RuntimeIdentity{}, unavailableEnrollment(err)
 	}
 	var value RuntimeIdentity
-	if strictJSON(body, &value) != nil {
-		return RuntimeIdentity{}, ErrInvalid
+	if err := strictJSON(body, &value); err != nil {
+		return RuntimeIdentity{}, unavailableEnrollment(err)
 	}
 	validExpiry := expiryGrace < 0 || value.ExpiresAt.After(now.Add(-expiryGrace))
 	if value.Version != 1 || value.HelperID == "" || value.MachineID == "" || value.EnvironmentID == "" || len(value.Credential) < 32 || !validExpiry || value.KeyID == "" {
 		return RuntimeIdentity{}, ErrInvalid
 	}
 	store, err := identity.Open(identity.Config{StateRoot: root})
-	if err != nil || store.Current().ID != value.KeyID {
+	if err != nil {
+		return RuntimeIdentity{}, unavailableEnrollment(err)
+	}
+	if store.Current().ID != value.KeyID {
 		return RuntimeIdentity{}, ErrInvalid
 	}
 	return value, nil
@@ -351,6 +389,9 @@ func strictJSON(data []byte, target any) error {
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
+		if err != nil {
+			return err
+		}
 		return ErrInvalid
 	}
 	return nil
@@ -405,6 +446,9 @@ func rejectDuplicateJSON(data []byte) error {
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
+		if err != nil {
+			return err
+		}
 		return ErrInvalid
 	}
 	return nil

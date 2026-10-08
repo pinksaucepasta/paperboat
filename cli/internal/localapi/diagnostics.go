@@ -13,11 +13,13 @@ const (
 )
 
 type DiagnosticSnapshot struct {
-	Schema         string              `json:"schema"`
-	ObservedAt     time.Time           `json:"observed_at"`
-	Recent         []diagnostics.Event `json:"recent"`
-	DroppedRecords uint64              `json:"dropped_records"`
-	DroppedBytes   uint64              `json:"dropped_bytes"`
+	PersistenceAvailable bool                `json:"persistence_available"`
+	Schema               string              `json:"schema"`
+	ObservedAt           time.Time           `json:"observed_at"`
+	Recent               []diagnostics.Event `json:"recent"`
+	DroppedRecords       uint64              `json:"dropped_records"`
+	DroppedBytes         uint64              `json:"dropped_bytes"`
+	FailedRecords        uint64              `json:"failed_records"`
 }
 
 func (s DiagnosticSnapshot) Validate() error {

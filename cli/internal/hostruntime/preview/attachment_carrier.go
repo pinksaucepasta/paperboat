@@ -4,11 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
+	"log/slog"
+	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
+	yamux "github.com/libp2p/go-yamux/v5"
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
+	"io"
 )
 
 var (
@@ -76,10 +83,10 @@ func NewAttachmentCarrier(config AttachmentCarrierConfig) (*AttachmentCarrier, e
 		return nil, ErrAttachmentCarrierInvalid
 	}
 	if config.RequestID == nil {
-		config.RequestID = func() (string, error) { return newAttachmentTraceID("request_") }
+		config.RequestID = func() (string, error) { return newAttachmentTraceID("request") }
 	}
 	if config.CorrelationID == nil {
-		config.CorrelationID = func() (string, error) { return newAttachmentTraceID("correlation_") }
+		config.CorrelationID = func() (string, error) { return newAttachmentTraceID("correlation") }
 	}
 	return &AttachmentCarrier{
 		attachments:  config.Attachments,
@@ -114,11 +121,13 @@ func (c *AttachmentCarrier) RunWithLease(ctx context.Context, currentLease func(
 	c.mu.Unlock()
 	attachment, err := c.attachments.Allocate(ctx, request)
 	if err != nil {
+		logAttachmentFailure(ctx, "allocate", err)
 		return classifyAttachmentCarrierError(err)
 	}
 	if waiter, ok := c.attachments.(AttachmentAdmissionWaiter); ok {
 		attachment, err = waiter.WaitForAdmission(ctx, request, attachment)
 		if err != nil {
+			logAttachmentFailure(ctx, "admission", err)
 			return classifyAttachmentCarrierError(err)
 		}
 	}
@@ -130,6 +139,7 @@ func (c *AttachmentCarrier) RunWithLease(ctx context.Context, currentLease func(
 	}
 	carrier, err := c.provider.CarrierForAttachment(ctx, lease, attachment)
 	if err != nil {
+		logAttachmentFailure(ctx, "acquire", err)
 		// Edge admission and local origin readiness are separate state
 		// transitions. If the edge has accepted this attachment but the
 		// host cannot acquire the authenticated carrier, publish the negative
@@ -177,6 +187,7 @@ func (c *AttachmentCarrier) RunWithLease(ctx context.Context, currentLease func(
 			return classifyAttachmentCarrierError(ErrAttachmentAdmissionPending)
 		}
 		if err != nil {
+			logAttachmentFailure(ctx, "edge_ready", err)
 			return classifyAttachmentCarrierError(err)
 		}
 	}
@@ -299,7 +310,7 @@ func (c *AttachmentCarrier) requestForLease(lease Lease) (AttachmentRequest, err
 		return AttachmentRequest{}, ErrAttachmentCarrierClosed
 	}
 	if c.set {
-		if c.request.PreviewID != lease.ID || c.request.OperationID != lease.CreateOperationID || c.request.OwnerDeviceID != lease.OwnerDeviceID || c.request.OwnerSessionID != lease.OwnerSessionID {
+		if c.request.PreviewID != lease.ID || c.request.OperationID != lease.CreateOperationID || c.request.OwnerMachineID != lease.OwnerMachineID || c.request.OwnerSessionID != lease.OwnerSessionID {
 			return AttachmentRequest{}, fmt.Errorf("%w: lease identity changed during retry", ErrAttachmentCarrierInvalid)
 		}
 		// Lease renewal advances only the strong ETag. The signed operation
@@ -377,13 +388,54 @@ func (c *AttachmentCarrier) Close(ctx context.Context) error {
 	return carrier.Close(ctx)
 }
 
-func newAttachmentTraceID(prefix string) (string, error) {
-	value, err := api.NewPreviewLeaseIdempotencyKey()
+func newAttachmentTraceID(noun string) (string, error) {
+	id, err := uuid.NewRandom()
 	if err != nil {
 		return "", err
 	}
-	return prefix + strings.TrimPrefix(value, "preview_"), nil
+	return noun + "_" + id.String(), nil
 }
 
 var _ Carrier = (*AttachmentCarrier)(nil)
 var _ AttachmentAllocator = (*AttachmentClient)(nil)
+
+// Global transport logs are discarded by the CLI; emit only fixed categories.
+var attachmentDiagnosticLogger = slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+func logAttachmentFailure(ctx context.Context, phase string, err error) {
+	code := previewDispatchFailureCode(err)
+	var networkError net.Error
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		code = "deadline"
+	case errors.Is(err, context.Canceled):
+		code = "canceled"
+	case errors.Is(err, connector.ErrDataCarrierAdmission):
+		code = "carrier_admission"
+	case errors.Is(err, connector.ErrDataCarrierClosed):
+		code = "carrier_closed"
+	case errors.Is(err, connector.ErrInvalidDataCarrierConfig):
+		code = "carrier_config_invalid"
+	case errors.Is(err, connector.ErrDataCarrierSessionSource):
+		code = "carrier_source_invalid"
+	case errors.Is(err, yamux.ErrSessionShutdown):
+		code = "multiplexer_closed"
+	case errors.Is(err, yamux.ErrInvalidVersion):
+		code = "multiplexer_protocol_invalid"
+	case errors.Is(err, io.EOF):
+		code = "peer_closed"
+	case errors.Is(err, connector.ErrDataCarrierUnavailable):
+		code = "carrier_unavailable"
+	case errors.As(err, &networkError) && networkError.Timeout():
+		code = "timeout"
+	}
+	attributes := []any{"phase", phase, "code", code, "error_type", fmt.Sprintf("%T", err)}
+	var dialError *connector.TransportDialError
+	if errors.As(err, &dialError) {
+		switch dialError.Transport {
+		case connector.HTTP2, connector.HTTP3, connector.TCPMux, connector.QUIC:
+			attributes = append(attributes, "transport", string(dialError.Transport))
+		}
+	}
+	attachmentDiagnosticLogger.WarnContext(ctx, "preview attachment failed", attributes...)
+}

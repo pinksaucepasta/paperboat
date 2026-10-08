@@ -4,9 +4,6 @@ package updated
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
 	"net"
 	"path/filepath"
 	"time"
@@ -43,32 +40,12 @@ func (c *Client) callRequest(ctx context.Context, request ControlRequest) (Contr
 	if c == nil || !validControlRequest(request) {
 		return ControlResponse{}, ErrInvalidControl
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	connection, err := (&net.Dialer{Timeout: c.timeout}).DialContext(ctx, "unix", c.socketPath)
 	if err != nil {
-		return ControlResponse{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
+		return ControlResponse{}, controlClientFailure{kind: ErrUnavailable, cause: err}
 	}
-	defer connection.Close()
-	deadline := time.Now().Add(c.timeout)
-	if limit, ok := ctx.Deadline(); ok && limit.Before(deadline) {
-		deadline = limit
-	}
-	_ = connection.SetDeadline(deadline)
-	if err := json.NewEncoder(connection).Encode(request); err != nil {
-		return ControlResponse{}, err
-	}
-	closer, ok := connection.(interface{ CloseWrite() error })
-	if !ok || closer.CloseWrite() != nil {
-		return ControlResponse{}, ErrInvalidControl
-	}
-	decoder := json.NewDecoder(io.LimitReader(connection, 16<<10))
-	decoder.DisallowUnknownFields()
-	var response ControlResponse
-	var extra any
-	if decoder.Decode(&response) != nil || decoder.Decode(&extra) != io.EOF || response.Schema != ControlProtocolV1 || (response.Status != "ok" && response.Status != "error") || !validControlResponseError(response.Status, response.ErrorCode, response.ErrorMessage) {
-		return ControlResponse{}, ErrInvalidControl
-	}
-	if response.ErrorCode != "" {
-		return ControlResponse{}, &ControlError{Code: response.ErrorCode, Message: response.ErrorMessage}
-	}
-	return response, nil
+	return exchangeControl(ctx, connection, request, c.timeout, true)
 }

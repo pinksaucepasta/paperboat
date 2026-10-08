@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"github.com/google/uuid"
 	"strconv"
 	"time"
 
@@ -57,11 +58,11 @@ func (a *Authority) Refresh(ctx context.Context, client NetworkAPI) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	var operation [16]byte
-	if _, err := rand.Read(operation[:]); err != nil {
+	operation, err := uuid.NewRandom()
+	if err != nil {
 		return err
 	}
-	result, err := client.PeerNetworkConfiguration(ctx, "network_"+hex.EncodeToString(operation[:]))
+	result, err := client.PeerNetworkConfiguration(ctx, "operation_"+operation.String())
 	if err != nil {
 		var apiErr *api.APIError
 		if errors.Is(err, api.ErrUnauthenticated) || errors.As(err, &apiErr) && (apiErr.Status == 401 || apiErr.Status == 403) {

@@ -19,6 +19,7 @@ type foregroundSession struct {
 	stopDone   chan struct{}
 	stopOnce   sync.Once
 	waitResult error
+	readyErr   error
 }
 
 type composedLeaseClient struct {
@@ -30,8 +31,9 @@ func (c *composedLeaseClient) Create(_ context.Context, request preview.LeaseReq
 	c.create = request
 	lease := c.lease
 	lease.Target = request.Target
-	lease.OwnerDeviceID = request.OwnerDeviceID
+	lease.OwnerMachineID = request.OwnerMachineID
 	lease.OwnerSessionID = request.OwnerSessionID
+	lease.OwnerSessionKind = request.OwnerSessionKind
 	return lease, nil
 }
 
@@ -74,7 +76,7 @@ func TestForegroundRejectsNilSessionStarterResult(t *testing.T) {
 
 func (s *foregroundSession) WaitReady(context.Context) (preview.Lease, error) {
 	<-s.readyDone
-	return s.ready, nil
+	return s.ready, s.readyErr
 }
 
 func (s *foregroundSession) Wait() error {
@@ -100,7 +102,7 @@ func TestForegroundUsesSessionReadyBoundaryAndStopsLease(t *testing.T) {
 	session := &foregroundSession{
 		ready: preview.Lease{
 			Schema: preview.PreviewTunnelSchemaV1, Kind: preview.PreviewLeaseKind, ID: "prv_1", AccountID: "acct_1",
-			OwnerDeviceID: "device_1", OwnerSessionID: "session_1", AccessMode: "public", Endpoint: "https://quiet.preview.test",
+			OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground", AccessMode: "public", Endpoint: "https://quiet.preview.test",
 			LeaseDeadline: now.Add(time.Hour), State: "ready", AllocationState: "ready", EdgeState: "ready", OriginState: "ready",
 			ETag: `"preview:1"`, Target: preview.LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, CreatedAt: now,
 		},
@@ -163,7 +165,7 @@ func TestForegroundComposesCanonicalSessionAfterActualListenerPort(t *testing.T)
 	defer cancel()
 	foreground, err := StartForeground(ctx, ForegroundConfig{
 		Source: source, Name: "docs", Indefinite: true, LeaseClient: client, Carrier: composedCarrier{},
-		OwnerDeviceID: "device_1", OwnerSessionID: "session_1", ReadyTimeout: time.Second, DrainTimeout: time.Second,
+		OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground", ReadyTimeout: time.Second, DrainTimeout: time.Second,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -180,5 +182,28 @@ func TestForegroundComposesCanonicalSessionAfterActualListenerPort(t *testing.T)
 	cancel()
 	if err := foreground.Wait(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestForegroundPropagatesReadinessFailureAndCleansUp(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "index.html")
+	if err := os.WriteFile(file, []byte("ready"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	source, err := ResolveSource(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure := errors.New("readiness rejected")
+	session := &foregroundSession{readyDone: make(chan struct{}), stopDone: make(chan struct{}), readyErr: failure}
+	close(session.readyDone)
+	_, err = StartForeground(context.Background(), ForegroundConfig{Source: source, Name: "app", ReadyTimeout: time.Second, DrainTimeout: time.Second, Session: func(context.Context, uint16) (PreviewSession, error) { return session, nil }})
+	if !errors.Is(err, failure) || errors.Is(err, ErrPreviewReadinessTimeout) {
+		t.Fatalf("readiness error = %v", err)
+	}
+	select {
+	case <-session.stopDone:
+	default:
+		t.Fatal("failed session was not stopped")
 	}
 }

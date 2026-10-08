@@ -24,6 +24,7 @@ const (
 	ActionStop             = "stop"
 	ActionConfigInstall    = "config_install"
 	ActionConfigRemove     = "config_remove"
+	ActionBrowserDomain    = "browser_domain"
 
 	ActionOpenSSHSetup   = "setup"
 	ActionOpenSSHRepair  = "repair"
@@ -117,7 +118,7 @@ func (*RemoteError) Unwrap() error { return ErrElevatedOperation }
 // child use the same expiry. That gives callers a bounded result even if an
 // individual SCM or firewall API blocks during runtime activation.
 func operationDuration(operation, action string) time.Duration {
-	if operation == OperationRuntimeService && (action == ActionInstall || action == ActionInstallCommit || action == ActionCommit || action == ActionUninstall || action == ActionStop || action == ActionConfigInstall || action == ActionConfigRemove) {
+	if operation == OperationRuntimeService && (action == ActionInstall || action == ActionInstallCommit || action == ActionCommit || action == ActionUninstall || action == ActionStop || action == ActionConfigInstall || action == ActionConfigRemove || action == ActionBrowserDomain) {
 		return RuntimeActivationDuration
 	}
 	return MaxOperationDuration

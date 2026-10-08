@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -112,9 +113,15 @@ func TestCLINativeStreamGroupAuthorizesEveryApplicationStream(t *testing.T) {
 	}
 }
 
-type failingNativeApplicationSession struct{ closed bool }
+type failingNativeApplicationSession struct {
+	closed bool
+	err    error
+}
 
-func (*failingNativeApplicationSession) OpenAuthorized(context.Context, streamauth.Header, string, string) (net.Conn, error) {
+func (s *failingNativeApplicationSession) OpenAuthorized(context.Context, streamauth.Header, string, string) (net.Conn, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
 	return nil, net.ErrClosed
 }
 func (s *failingNativeApplicationSession) Close() error { s.closed = true; return nil }
@@ -150,6 +157,101 @@ func TestCLINativeTransferLeaseRedialsFailedAssociation(t *testing.T) {
 	defer replacement.mu.Unlock()
 	if !replacement.closed || len(replacement.headers) != 1 || replacement.headers[0].Consumer != "file_transfer" || replacement.resources[0] != "access_1" || replacement.capabilities[0] != "file_transfer" {
 		t.Fatalf("replacement closed=%t headers=%#v resources=%#v capabilities=%#v", replacement.closed, replacement.headers, replacement.resources, replacement.capabilities)
+	}
+}
+
+func TestCLINativeTransferLeasePreservesFinalStreamOpenFailure(t *testing.T) {
+	now := time.Now().UTC()
+	cause := errors.New("private peer address and grant detail")
+	var dials int
+	lease := &cliNativeTransferLease{
+		dial: func(context.Context) (nativeApplicationSession, error) {
+			dials++
+			return &failingNativeApplicationSession{err: cause}, nil
+		},
+		target:      &resolver.TerminalTarget{Auth: resolver.AuthTarget{Token: "file-token", ExpiresAt: now.Add(time.Minute).Format(time.RFC3339), ResourceID: "access_1"}},
+		application: peerApplication{operationID: "operation_1"}, now: func() time.Time { return now },
+	}
+	_, err := lease.OpenTransferStream(t.Context())
+	if !errors.Is(err, cause) || dials != 2 {
+		t.Fatalf("stream open error=%v dials=%d", err, dials)
+	}
+	var staged interface{ DiagnosticStage() string }
+	var coded interface{ DiagnosticCode() string }
+	if !errors.As(err, &staged) || staged.DiagnosticStage() != "stream_open" ||
+		!errors.As(err, &coded) || coded.DiagnosticCode() != "file_transfer_failed" {
+		t.Fatalf("stream open phase was not classified: %T %v", err, err)
+	}
+	if err.Error() != "native file transfer stream could not be opened" {
+		t.Fatalf("stream open error exposed cause details: %q", err)
+	}
+}
+
+type deadlineNativeApplicationSession struct {
+	started chan struct{}
+	closed  bool
+}
+
+func (s *deadlineNativeApplicationSession) OpenAuthorized(ctx context.Context, _ streamauth.Header, _, _ string) (net.Conn, error) {
+	close(s.started)
+	<-ctx.Done()
+	return nil, context.Cause(ctx)
+}
+
+func (s *deadlineNativeApplicationSession) Close() error {
+	s.closed = true
+	return nil
+}
+
+func TestCLINativeTransferLeaseClassifiesStreamOpenDeadline(t *testing.T) {
+	now := time.Now().UTC()
+	session := &deadlineNativeApplicationSession{started: make(chan struct{})}
+	lease := &cliNativeTransferLease{
+		dial: func(context.Context) (nativeApplicationSession, error) { return session, nil },
+		target: &resolver.TerminalTarget{Auth: resolver.AuthTarget{
+			Token: "file-token", ExpiresAt: now.Add(time.Minute).Format(time.RFC3339), ResourceID: "access_1",
+		}},
+		application: peerApplication{operationID: "operation_1"},
+		now:         func() time.Time { return now },
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := lease.OpenTransferStream(ctx)
+		done <- err
+	}()
+	select {
+	case <-session.started:
+	case <-time.After(time.Second):
+		t.Fatal("native file stream open did not start")
+	}
+	err := <-done
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("stream open error=%v, want deadline cause", err)
+	}
+	var staged interface{ DiagnosticStage() string }
+	var coded interface{ DiagnosticCode() string }
+	if !errors.As(err, &staged) || staged.DiagnosticStage() != "stream_open" || !errors.As(err, &coded) || coded.DiagnosticCode() != "file_transfer_failed" {
+		t.Fatalf("stream open deadline classification=%T %v", err, err)
+	}
+	if err.Error() != "native file transfer stream could not be opened" || !session.closed {
+		t.Fatalf("stream open error=%q session closed=%t", err, session.closed)
+	}
+}
+
+func TestCLINativeTransferLeasePreservesCancellationBeforeDial(t *testing.T) {
+	cause := errors.New("caller stopped file transfer")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(cause)
+	dials := 0
+	lease := &cliNativeTransferLease{dial: func(context.Context) (nativeApplicationSession, error) {
+		dials++
+		return &capturedNativeApplicationSession{}, nil
+	}}
+	_, err := lease.OpenTransferStream(ctx)
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, cause) || dials != 0 {
+		t.Fatalf("canceled open error=%v dials=%d", err, dials)
 	}
 }
 

@@ -34,7 +34,7 @@ func TestPreviewTunnelV1HostOwnership(t *testing.T) {
 		switch vector.Resource["kind"] {
 		case "preview_lease":
 			seenPreview = true
-			if vector.Resource["persistent"] != false || vector.Resource["owner_device_id"] == "" || vector.Resource["owner_session_id"] == "" {
+			if vector.Resource["persistent"] != false || vector.Resource["owner_machine_id"] == "" || vector.Resource["owner_session_id"] == "" {
 				t.Fatalf("%s: preview must be foreground-owned and nonpersistent", vector.Case)
 			}
 		case "connector":

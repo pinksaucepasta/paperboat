@@ -3,12 +3,19 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"github.com/pinksaucepasta/paperboat/internal/config"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/selector"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 func TestConfigSyncMenuFollowsAuthoritativeAssignment(t *testing.T) {
@@ -71,5 +78,101 @@ func TestGitHubConnectionPollingCancellation(t *testing.T) {
 	err := waitForGitHubNativeLink(ctx, api.New(server.URL, config.Credential{AccessToken: "native"}, nil), api.GitHubNativeLink{ID: "link", PollIntervalSeconds: 2})
 	if err == nil {
 		t.Fatal("pending authorization ignored cancellation")
+	}
+}
+
+func TestConfigSyncEnrollmentOnlyTreatsPureMissingRegistrationAsNotEnrolled(t *testing.T) {
+	missing := &os.PathError{Op: "lstat", Path: "/private/identity/machine-registration.json", Err: os.ErrNotExist}
+	if err := configSyncEnrollmentError("", missing); err == nil || !strings.Contains(err.Error(), "not enrolled") {
+		t.Fatalf("missing registration error=%v, want setup guidance", err)
+	}
+
+	operationalCause := errors.New("operation failed")
+	joined := &os.PathError{Op: "lstat", Path: "/private/identity/machine-registration.json", Err: errors.Join(os.ErrNotExist, operationalCause)}
+	err := configSyncEnrollmentError("", joined)
+	if err == nil || strings.Contains(err.Error(), "not enrolled") || !errors.Is(err, operationalCause) {
+		t.Fatalf("mixed registration failure was misclassified or lost: %v", err)
+	}
+	var pathErr *os.PathError
+	if !errors.As(err, &pathErr) || strings.Contains(err.Error(), "/private/identity") {
+		t.Fatalf("registration cause was not retained privately: %T %q", err, err.Error())
+	}
+	if err := configSyncEnrollmentError("machine_1", nil); err != nil {
+		t.Fatalf("valid registration rejected: %v", err)
+	}
+}
+
+type cyclicNotExistCause struct{}
+
+func (cyclicNotExistCause) Error() string       { return "cyclic cause" }
+func (cause cyclicNotExistCause) Unwrap() error { return cause }
+
+type nilNotExistCause struct{}
+
+func (*nilNotExistCause) Error() string { return "nil cause" }
+
+func TestOnlyNotExistCauseRejectsMalformedChains(t *testing.T) {
+	if onlyNotExistCause(errors.Join(os.ErrNotExist, errors.New("operation failed"))) {
+		t.Fatal("mixed missing-file and operational causes were treated as absence")
+	}
+	if onlyNotExistCause(cyclicNotExistCause{}) {
+		t.Fatal("cyclic error chain was treated as absence")
+	}
+	var typedNil *nilNotExistCause
+	if onlyNotExistCause(typedNil) {
+		t.Fatal("typed-nil error was treated as absence")
+	}
+}
+
+func TestConfigSyncSourceInspectionRetainsCauseAndDiagnosticPhase(t *testing.T) {
+	missingPath := filepath.Join(t.TempDir(), "missing-config.json")
+	if exists, err := configSyncSourceExists(missingPath); exists || err != nil {
+		t.Fatalf("missing source exists=%t err=%v", exists, err)
+	}
+
+	if _, err := configSyncSourceExists("\x00"); err == nil {
+		t.Fatal("invalid source path was ignored")
+	} else {
+		var pathErr *os.PathError
+		if !errors.As(err, &pathErr) {
+			t.Fatalf("source path cause lost: %T", err)
+		}
+		if strings.ContainsRune(err.Error(), '\x00') || !strings.Contains(err.Error(), "could not inspect") {
+			t.Fatalf("unsafe source error: %q", err.Error())
+		}
+		stage, ok := err.(interface{ DiagnosticStage() string })
+		if !ok || stage.DiagnosticStage() != "reconciliation" {
+			t.Fatalf("source diagnostic stage=%v", err)
+		}
+		code, ok := err.(interface{ DiagnosticCode() string })
+		if !ok || code.DiagnosticCode() != "config_sync_failed" {
+			t.Fatalf("source diagnostic code=%v", err)
+		}
+	}
+}
+
+func TestGitHubLinkCleanupKeepsReferenceAndSurfacesMixedCancellationFailure(t *testing.T) {
+	reference := "support_550e8400-e29b-41d4-a716-446655440000"
+	parent, cancel := context.WithCancel(supportref.WithContext(context.Background(), reference))
+	cleanup, stop := githubLinkCleanupContext(parent)
+	defer stop()
+	if got := supportref.FromContext(cleanup); got != reference || !supportref.Valid(got) {
+		t.Fatalf("cleanup lost support reference: %q", got)
+	}
+	if _, ok := cleanup.Deadline(); !ok {
+		t.Fatal("cleanup context has no bounded deadline")
+	}
+	cancel()
+	if cleanup.Err() != nil {
+		t.Fatalf("parent cancellation canceled cleanup context: %v", cleanup.Err())
+	}
+
+	privateCause := errors.New("provider response secret-marker")
+	joined := joinGitHubLinkCancelFailure(selector.ErrCanceled, privateCause)
+	if !errors.Is(joined, privateCause) || interactiveCanceled(joined) {
+		t.Fatalf("mixed cleanup error lost its cause or was hidden as cancellation: %v", joined)
+	}
+	if strings.Contains(joined.Error(), privateCause.Error()) {
+		t.Fatalf("cleanup error disclosed provider response: %q", joined.Error())
 	}
 }

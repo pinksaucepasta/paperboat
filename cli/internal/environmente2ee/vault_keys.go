@@ -17,7 +17,7 @@ type VaultTeamKey struct {
 	Key                  []byte
 }
 
-// VaultKeys contains only ENV keys. Device signing and transport private keys
+// VaultKeys contains only ENV keys. Machine signing and transport private keys
 // never enter this structure or the server-stored password envelope.
 type VaultKeys struct {
 	_                 struct{} `cbor:",toarray"`

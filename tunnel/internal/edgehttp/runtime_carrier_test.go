@@ -39,7 +39,7 @@ func TestRuntimeBrowserTerminalReplacesTicketWithHostCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer registry.Close()
-	value := DataCarrierPreviewRoute{RouteID: "runtime_browser", Hostname: "device.runtime.example.test", Kind: datacarrier.RuntimeCarrierRoute, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, AttachmentGeneration: 1, Identity: identity, Server: server, ExpiresAt: time.Now().Add(time.Minute)}
+	value := DataCarrierPreviewRoute{RouteID: "runtime_browser", Hostname: "machine.runtime.example.test", Kind: datacarrier.RuntimeCarrierRoute, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, AttachmentGeneration: 1, Identity: identity, Server: server, ExpiresAt: time.Now().Add(time.Minute)}
 	if err := registry.Attach(value); err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestRuntimeCarrierGatewayRequiresHelperAuthAndPreservesRenewedStream(t *tes
 		t.Fatal(err)
 	}
 	defer registry.Close()
-	value := DataCarrierPreviewRoute{RouteID: "runtime_route", Hostname: "device.runtime.example.test", Kind: datacarrier.RuntimeCarrierRoute, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, AttachmentGeneration: 1, Server: server, ExpiresAt: time.Now().Add(time.Minute)}
+	value := DataCarrierPreviewRoute{RouteID: "runtime_route", Hostname: "machine.runtime.example.test", Kind: datacarrier.RuntimeCarrierRoute, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, AttachmentGeneration: 1, Server: server, ExpiresAt: time.Now().Add(time.Minute)}
 	if err = registry.Attach(value); err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestRuntimeCarrierGatewayRequiresHelperAuthAndPreservesRenewedStream(t *tes
 		if token != "runtime-test-token" {
 			return admission.Claims{}, errors.New("unauthorized")
 		}
-		return admission.Claims{JTI: "test", EnvironmentID: "device", MachineID: identity.HostID, CredentialClass: "browser_terminal_operation", ExpiresAt: time.Now().Add(time.Minute)}, nil
+		return admission.Claims{JTI: "test", EnvironmentID: "machine", MachineID: identity.HostID, CredentialClass: "browser_terminal_operation", ExpiresAt: time.Now().Add(time.Minute)}, nil
 	}), Revocations: revocationFunc(func(context.Context, admission.Claims) (bool, error) { return false, nil }), RevocationCheckInterval: time.Second}, "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -306,7 +306,7 @@ func TestRuntimeCarrierTransportPreservesWebSocketUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer registry.Close()
-	value := DataCarrierPreviewRoute{RouteID: "runtime_ws", Hostname: "device.runtime.example.test", Kind: datacarrier.RuntimeCarrierRoute, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, AttachmentGeneration: 1, Server: server, ExpiresAt: time.Now().Add(time.Minute)}
+	value := DataCarrierPreviewRoute{RouteID: "runtime_ws", Hostname: "machine.runtime.example.test", Kind: datacarrier.RuntimeCarrierRoute, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, AttachmentGeneration: 1, Server: server, ExpiresAt: time.Now().Add(time.Minute)}
 	if err := registry.Attach(value); err != nil {
 		t.Fatal(err)
 	}

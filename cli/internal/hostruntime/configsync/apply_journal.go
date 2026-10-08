@@ -13,22 +13,25 @@ import (
 var ErrApplyJournalInvalid = errors.New("invalid config apply journal")
 
 type applyJournalEntry struct {
-	Path    string      `json:"path"`
-	Existed bool        `json:"existed"`
-	Mode    os.FileMode `json:"mode,omitempty"`
-	Target  string      `json:"target,omitempty"`
-	Content []byte      `json:"content,omitempty"`
+	Path        string      `json:"path"`
+	Destination string      `json:"destination,omitempty"`
+	Existed     bool        `json:"existed"`
+	Mode        os.FileMode `json:"mode,omitempty"`
+	Target      string      `json:"target,omitempty"`
+	Content     []byte      `json:"content,omitempty"`
 }
 
 type applyJournal struct {
-	Format         string              `json:"format"`
-	RepositoryID   string              `json:"repository_id"`
-	AssignmentID   string              `json:"assignment_id"`
-	RemoteRevision string              `json:"remote_revision"`
-	Entries        []applyJournalEntry `json:"entries"`
+	Format          string              `json:"format"`
+	MappingRevision string              `json:"mapping_revision,omitempty"`
+	MappingRules    []PathRule          `json:"mapping_rules,omitempty"`
+	RepositoryID    string              `json:"repository_id"`
+	AssignmentID    string              `json:"assignment_id"`
+	RemoteRevision  string              `json:"remote_revision"`
+	Entries         []applyJournalEntry `json:"entries"`
 }
 
-func beginApplyJournal(path, homeRoot, repositoryID, assignmentID, remoteRevision string, paths []string, maxBytes int64) error {
+func beginApplyJournal(path, homeRoot, repositoryID, assignmentID, remoteRevision string, paths []string, maxBytes int64, mappings ...*PathMapping) error {
 	if !canonicalAbsolutePath(path) || !canonicalAbsolutePath(homeRoot) || repositoryID == "" ||
 		assignmentID == "" || remoteRevision == "" || maxBytes <= 0 {
 		return ErrApplyJournalInvalid
@@ -41,16 +44,33 @@ func beginApplyJournal(path, homeRoot, repositoryID, assignmentID, remoteRevisio
 		AssignmentID: assignmentID, RemoteRevision: remoteRevision,
 		Entries: make([]applyJournalEntry, 0, len(paths)),
 	}
+	if len(mappings) > 0 {
+		journal.MappingRevision = mappings[0].Revision()
+		journal.MappingRules = append([]PathRule(nil), mappings[0].rules...)
+	}
 	var total int64
 	for _, relative := range paths {
 		if !safeRelativeStatusPath(relative) {
 			return ErrApplyJournalInvalid
 		}
 		full := filepath.Join(homeRoot, filepath.FromSlash(relative))
-		if !sameOrInsidePath(full, homeRoot) {
+		if len(mappings) > 0 {
+			var ok bool
+			full, ok = mappings[0].LocalPath(relative)
+			if !ok {
+				return ErrApplyJournalInvalid
+			}
+			if err := checkSafeAbsolutePath(full); err != nil {
+				return err
+			}
+		}
+		if len(mappings) == 0 && !sameOrInsidePath(full, homeRoot) {
 			return ErrApplyJournalInvalid
 		}
 		entry := applyJournalEntry{Path: relative}
+		if len(mappings) > 0 {
+			entry.Destination = full
+		}
 		info, err := os.Lstat(full)
 		if errors.Is(err, os.ErrNotExist) {
 			journal.Entries = append(journal.Entries, entry)
@@ -69,7 +89,11 @@ func beginApplyJournal(path, homeRoot, repositoryID, assignmentID, remoteRevisio
 			if !info.Mode().IsRegular() || info.Size() > maxBytes-total {
 				return ErrApplyJournalInvalid
 			}
-			entry.Content, err = os.ReadFile(full)
+			var opened os.FileInfo
+			entry.Content, opened, err = secureReadFile(full, maxBytes-total)
+			if err == nil && !os.SameFile(info, opened) {
+				return ErrSourceChanged
+			}
 			if err != nil {
 				return err
 			}
@@ -87,7 +111,7 @@ func beginApplyJournal(path, homeRoot, repositoryID, assignmentID, remoteRevisio
 	return writePrivateAtomic(path, append(plaintext, '\n'))
 }
 
-func recoverApplyJournal(path, homeRoot, repositoryID, assignmentID string, maxBytes int64) error {
+func recoverApplyJournal(path, homeRoot, repositoryID, assignmentID string, maxBytes int64, mappings ...*PathMapping) error {
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -117,8 +141,38 @@ func recoverApplyJournal(path, homeRoot, repositoryID, assignmentID string, maxB
 	if !validApplyJournalEntries(journal.Entries, maxBytes) {
 		return ErrApplyJournalInvalid
 	}
+	if len(mappings) > 0 && mappings[0] == nil {
+		mappings = nil
+	}
+	if len(mappings) == 0 && journal.MappingRevision != "" {
+		original, err := ResolvePathRules(homeRoot, journal.MappingRules)
+		if err != nil || original.Revision() != journal.MappingRevision {
+			return ErrApplyJournalInvalid
+		}
+		mappings = []*PathMapping{original}
+	}
+	if len(mappings) > 0 && journal.MappingRevision != mappings[0].Revision() {
+		previous, err := ResolvePathRules(homeRoot, journal.MappingRules)
+		if err != nil || previous.Revision() != journal.MappingRevision {
+			return ErrApplyJournalInvalid
+		}
+		mappings = []*PathMapping{previous}
+	}
+	for _, entry := range journal.Entries {
+		if len(mappings) > 0 {
+			target, ok := mappings[0].LocalPath(entry.Path)
+			if !ok || target != entry.Destination {
+				return ErrApplyJournalInvalid
+			}
+			if err := checkSafeAbsolutePath(target); err != nil {
+				return err
+			}
+		} else if entry.Destination != "" {
+			return ErrApplyJournalInvalid
+		}
+	}
 	for index := len(journal.Entries) - 1; index >= 0; index-- {
-		if err := restoreApplyJournalEntry(homeRoot, journal.Entries[index]); err != nil {
+		if err := restoreApplyJournalEntry(homeRoot, journal.Entries[index], mappings...); err != nil {
 			return err
 		}
 	}
@@ -165,37 +219,26 @@ func validApplyJournalEntries(entries []applyJournalEntry, maxBytes int64) bool 
 	return true
 }
 
-func restoreApplyJournalEntry(homeRoot string, entry applyJournalEntry) error {
+func restoreApplyJournalEntry(homeRoot string, entry applyJournalEntry, mappings ...*PathMapping) error {
 	if !safeRelativeStatusPath(entry.Path) {
 		return ErrApplyJournalInvalid
 	}
 	target := filepath.Join(homeRoot, filepath.FromSlash(entry.Path))
-	if err := ensurePrivateParent(homeRoot, filepath.Dir(target)); err != nil {
-		return err
-	}
-	if info, err := os.Lstat(target); err == nil {
-		if info.IsDir() {
+	if len(mappings) > 0 {
+		var ok bool
+		target, ok = mappings[0].LocalPath(entry.Path)
+		if !ok || target != entry.Destination {
 			return ErrApplyJournalInvalid
 		}
-		if err := os.Remove(target); err != nil {
-			return err
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
+		homeRoot = filepath.VolumeName(target) + string(filepath.Separator)
 	}
 	if !entry.Existed {
-		return nil
-	}
-	if entry.Mode&os.ModeSymlink != 0 {
-		if entry.Target == "" || filepath.IsAbs(entry.Target) {
-			return ErrApplyJournalInvalid
-		}
-		return os.Symlink(entry.Target, target)
+		return secureRemoveFile(target)
 	}
 	if !entry.Mode.IsRegular() {
 		return ErrApplyJournalInvalid
 	}
-	return restoreRegularFile(target, entry.Content, entry.Mode.Perm())
+	return secureWriteFile(target, entry.Content, entry.Mode.Perm())
 }
 
 func ensurePrivateParent(root, parent string) error {

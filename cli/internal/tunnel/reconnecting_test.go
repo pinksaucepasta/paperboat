@@ -69,7 +69,7 @@ func TestReconnectingConnRecordsReconnectAndLifetime(t *testing.T) {
 	sink := &tunnelEventSink{}
 	n := int64(0)
 	now := func() time.Time { n++; return time.Unix(0, n*int64(time.Millisecond)) }
-	c := NewObservedReconnectingConn(context.Background(), first, 1, 0, func(context.Context) (Conn, error) { return second, nil }, sink, now, TelemetryContext{ProjectID: "prj_1", EnvironmentID: "env_1"})
+	c := NewObservedReconnectingConn(context.Background(), first, 1, 0, func(context.Context) (Conn, error) { return second, nil }, sink, now, TelemetryContext{MachineID: "prj_1", EnvironmentID: "env_1"})
 	_, _ = io.ReadAll(c)
 	_, _ = c.Wait()
 	if len(sink.events) != 3 {
@@ -78,7 +78,7 @@ func TestReconnectingConnRecordsReconnectAndLifetime(t *testing.T) {
 	if sink.events[0].Name != "terminal.reconnect" || sink.events[0].Outcome != "success" {
 		t.Fatalf("reconnect event = %+v", sink.events[0])
 	}
-	if sink.events[0].ProjectID != "prj_1" || sink.events[0].EnvironmentID != "env_1" || sink.events[2].ProjectID != "prj_1" || sink.events[2].EnvironmentID != "env_1" {
+	if sink.events[0].MachineID != "prj_1" || sink.events[0].EnvironmentID != "env_1" || sink.events[2].MachineID != "prj_1" || sink.events[2].EnvironmentID != "env_1" {
 		t.Fatalf("missing correlation: %+v", sink.events)
 	}
 	if sink.events[1].Name != "terminal.output" || sink.events[1].Outcome != "success" {
@@ -114,7 +114,7 @@ func TestReconnectingConnRecordsOutputPerformance(t *testing.T) {
 func TestReconnectingConnRecordsCompressionWithoutContentOrIdentity(t *testing.T) {
 	conn := &compressionTestConn{reconnectTestConn: &reconnectTestConn{Reader: bytes.NewReader(nil)}, compression: TerminalCompressionTelemetry{RawFrames: 2, ZstdFrames: 3, DecodedBytes: 4096, EncodedBytes: 1024, DecodeNanos: 9000, DecodeFailures: 1}}
 	sink := &tunnelEventSink{}
-	c := NewObservedReconnectingConn(context.Background(), conn, 0, 0, nil, sink, time.Now, TelemetryContext{ProjectID: "prj_private", EnvironmentID: "env_private"})
+	c := NewObservedReconnectingConn(context.Background(), conn, 0, 0, nil, sink, time.Now, TelemetryContext{MachineID: "prj_private", EnvironmentID: "env_private"})
 	_, _ = io.ReadAll(c)
 	_, _ = c.Wait()
 	compressionEvents := 0
@@ -123,7 +123,7 @@ func TestReconnectingConnRecordsCompressionWithoutContentOrIdentity(t *testing.T
 			continue
 		}
 		compressionEvents++
-		if event.ProjectID != "" || event.EnvironmentID != "" || event.SessionID != "" || event.RequestID != "" {
+		if event.MachineID != "" || event.EnvironmentID != "" || event.SessionID != "" || event.RequestID != "" {
 			t.Fatalf("compression event contains identity: %+v", event)
 		}
 	}

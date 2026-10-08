@@ -35,9 +35,9 @@ type WindowsConfig struct {
 	Architecture                                                               string
 	HostdSocket, HealthURL                                                     string
 	AutomaticChecks                                                            bool
-	SetupMode                                                                  string
 	VerifyExecutable                                                           func(context.Context, string, string) error
 	ResolveRelease                                                             workerupdate.Resolver
+	AuthorizeOwnerMaintenance                                                  func(context.Context, workerupdate.Release, bool) error
 	localDaemonReady                                                           func() bool
 }
 
@@ -157,7 +157,7 @@ func validWindowsConfig(config WindowsConfig) bool {
 	instance, instanceErr := service.WindowsUserInstance(config.OwnerSID)
 	instanceRoot := filepath.Join(hostinstall.WindowsProgramDataRoot(), "users", instance)
 	sid, err := windows.StringToSid(config.OwnerSID)
-	return layoutErr == nil && instanceErr == nil && err == nil && sid != nil && sid.IsValid() && config.MachineID != "" && config.RepositoryURL != "" && config.StateRoot == layout.UpdateStateRoot && filepath.Base(config.RuntimeStateRoot) == "runtime" && config.Binary == layout.Binary && config.BinaryRollback == layout.BinaryRollback && config.BinaryStaged == layout.BinaryStaged && config.TokenFile == filepath.Join(instanceRoot, "hostd.token") && config.InstallState == filepath.Join(instanceRoot, "runtime-install.json") && config.ControlSocket == layout.UpdaterSocket && config.HostdSocket == layout.HostdSocket && validLoopbackHealthURL(config.HealthURL) && (exactReleasePattern.MatchString(config.ActiveVersion) || config.Source.Validate() == nil && config.Source.Version == config.ActiveVersion) && (config.Architecture == "amd64" || config.Architecture == "arm64") && (config.SetupMode == "host" || config.SetupMode == "client")
+	return layoutErr == nil && instanceErr == nil && err == nil && sid != nil && sid.IsValid() && config.MachineID != "" && config.RepositoryURL != "" && config.StateRoot == layout.UpdateStateRoot && filepath.Base(config.RuntimeStateRoot) == "runtime" && config.Binary == layout.Binary && config.BinaryRollback == layout.BinaryRollback && config.BinaryStaged == layout.BinaryStaged && config.TokenFile == filepath.Join(instanceRoot, "hostd.token") && config.InstallState == filepath.Join(instanceRoot, "runtime-install.json") && config.ControlSocket == layout.UpdaterSocket && config.HostdSocket == layout.HostdSocket && validLoopbackHealthURL(config.HealthURL) && (exactReleasePattern.MatchString(config.ActiveVersion) || config.Source.Validate() == nil && config.Source.Version == config.ActiveVersion) && (config.Architecture == "amd64" || config.Architecture == "arm64")
 }
 
 func validateWindowsPrivilegedInstallConfig(config WindowsConfig) error {
@@ -173,7 +173,7 @@ func validateWindowsPrivilegedInstallConfig(config WindowsConfig) error {
 	// journal is rolling forward/back, or while MSI has installed a newer
 	// signed updater. reconcileWindowsInstallVersion binds that one mutable
 	// field to signed TUF metadata before committing it.
-	if persisted.Source != config.Source || config.AutomaticChecks != config.Source.AutomaticUpdates || persisted.OwnerSID != config.OwnerSID || persisted.MachineID != config.MachineID || persisted.SetupMode != config.SetupMode || persisted.StateRoot != config.RuntimeStateRoot || persisted.TokenFile != config.TokenFile || persisted.Artifact.Platform != "windows" || persisted.Artifact.Architecture != config.Architecture || persisted.Artifact.RepositoryURL != config.RepositoryURL || "http://"+persisted.ListenAddress+"/healthz" != config.HealthURL {
+	if persisted.Source != config.Source || config.AutomaticChecks != config.Source.AutomaticUpdates || persisted.OwnerSID != config.OwnerSID || persisted.MachineID != config.MachineID || persisted.StateRoot != config.RuntimeStateRoot || persisted.TokenFile != config.TokenFile || persisted.Artifact.Platform != "windows" || persisted.Artifact.Architecture != config.Architecture || persisted.Artifact.RepositoryURL != config.RepositoryURL || "http://"+persisted.ListenAddress+"/healthz" != config.HealthURL {
 		return ErrInvalidWindowsConfig
 	}
 	return nil

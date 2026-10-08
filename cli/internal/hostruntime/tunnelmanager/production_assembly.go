@@ -56,9 +56,10 @@ type ProductionAssemblyConfig struct {
 	// server-authenticated Welcome has supplied the live SessionID. It is the
 	// production path for new enrollments. SessionSource remains supported for
 	// already-running/recovered sessions; exactly one source is required.
-	CarrierDescriptorSource CarrierDescriptorSource
-	Origins                 OriginProber
-	OriginStreams           *OriginStreamForwarder
+	CarrierDescriptorSource    CarrierDescriptorSource
+	Origins                    OriginProber
+	OriginStreams              *OriginStreamForwarder
+	OriginStreamsForGeneration func(ApplyRequest, connector.DataCarrierIdentity) *OriginStreamForwarder
 
 	Control connectorrotation.ControlSessionConfig
 
@@ -136,7 +137,7 @@ func OpenProductionAssembly(config ProductionAssemblyConfig) (*ProductionAssembl
 	} else {
 		sessionSource = liveDataCarrierSessionSource{source: config.SessionSource, expectedAccountID: config.Control.Hello.AccountID}
 	}
-	factory, err := NewRuntimeFactory(RuntimeFactoryConfig{Builder: DataCarrierBuilder{Sessions: sessionSource}, Origins: config.Origins, OriginStreams: config.OriginStreams})
+	factory, err := NewRuntimeFactory(RuntimeFactoryConfig{Builder: DataCarrierBuilder{Sessions: sessionSource}, Origins: config.Origins, OriginStreams: config.OriginStreams, OriginStreamsForGeneration: config.OriginStreamsForGeneration})
 	if err != nil {
 		return nil, hoststate.StartupStatus{}, errors.Join(ErrProductionAssemblyInvalid, err)
 	}

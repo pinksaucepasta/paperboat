@@ -15,7 +15,6 @@ import (
 	sessionauth "github.com/pinksaucepasta/paperboat/internal/auth"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/deviceguard"
 	"github.com/pinksaucepasta/paperboat/internal/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/internal/endpointbinary"
 	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
@@ -26,6 +25,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
+	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 	"github.com/spf13/cobra"
 )
@@ -67,7 +67,7 @@ func NewCommand() *cobra.Command {
 	root.AddCommand(privilegedHostServiceCommand())
 	root.AddCommand(configRuntimeCommand())
 	root.AddCommand(runDaemonCommand())
-	AddDeviceGuardCommand(root)
+	AddMachineGuardCommand(root)
 	if platformUpdateProbeCommand != nil {
 		root.AddCommand(platformUpdateProbeCommand())
 	}
@@ -248,7 +248,7 @@ func localDaemonCommand() *cobra.Command {
 					if homeErr != nil {
 						return homeErr
 					}
-					managedConfig = &localdaemon.ManagedSSHConfig{ServerURL: cfg.ServerURL, Auth: authSource, Store: store, CLIClientSessionID: profile.CLIClientSessionID, Home: home, RuntimeDirectory: paths.RuntimeRoot, Executable: executable, OwnerUID: uint32(os.Geteuid()), InheritedAgentSocket: os.Getenv("SSH_AUTH_SOCK"), AliasSuffix: cfg.DeviceSuffix}
+					managedConfig = &localdaemon.ManagedSSHConfig{ServerURL: cfg.ServerURL, Auth: authSource, Store: store, CLIClientSessionID: profile.CLIClientSessionID, Home: home, RuntimeDirectory: paths.RuntimeRoot, Executable: executable, OwnerUID: uint32(os.Geteuid()), InheritedAgentSocket: os.Getenv("SSH_AUTH_SOCK")}
 				}
 			}
 			store, err := config.ProfileStoreFor(cfg)
@@ -270,7 +270,7 @@ func localDaemonCommand() *cobra.Command {
 				return err
 			}
 			defer peerTunnel.Close()
-			coordinatorConfig := CoordinatorConfig{SyncAddress: cfg.ControlSyncAddress, DeviceID: source.SourceMachineID, DeviceLoopbackCIDR: cfg.DeviceLoopbackCIDR, TLSConfig: transportConfig.TLSConfig, Token: func(ctx context.Context) (string, error) {
+			coordinatorConfig := CoordinatorConfig{LocalAccess: cfg.LocalAccess, SyncAddress: cfg.ControlSyncAddress, MachineID: source.SourceMachineID, TLSConfig: transportConfig.TLSConfig, Token: func(ctx context.Context) (string, error) {
 				credential, credentialErr := authSource.WithContext(ctx).Credential()
 				return credential.AccessToken, credentialErr
 			}}
@@ -292,20 +292,12 @@ func localDaemonCommand() *cobra.Command {
 			if accessErr != nil {
 				return accessErr
 			}
-			coordinatorConfig.DNSSuffix, coordinatorConfig.DialDevice = cfg.DeviceSuffix, access.DialDevice
-			coordinatorConfig.ConnectNameClient = func(ctx context.Context) (guardedNameClient, error) {
-				return deviceguard.Connect(ctx, deviceguard.DefaultSocket)
+			coordinatorConfig.ReportReconcileError = func(err error) {
+				fmt.Fprintln(command.ErrOrStderr(), err)
 			}
-			coordinatorConfig.IssueCertificate = func(ctx context.Context, nameClient guardedNameClient, hostname string) (tls.Certificate, error) {
-				guard, ok := nameClient.(*deviceguard.Client)
-				if !ok {
-					return tls.Certificate{}, errors.New("protected device-name certificate client is invalid")
-				}
-				bundle, certificateErr := guard.Certificate(ctx, hostname)
-				if certificateErr != nil {
-					return tls.Certificate{}, certificateErr
-				}
-				return tls.X509KeyPair(bundle.CertificatePEM, bundle.PrivateKeyPEM)
+			coordinatorConfig.DialMachine = access.DialMachine
+			coordinatorConfig.ConnectNameClient = func(ctx context.Context) (guardedNameClient, error) {
+				return machineguard.Connect(ctx, machineguard.DefaultSocket)
 			}
 			coordinator, err := NewCoordinator(coordinatorConfig)
 			if err != nil {
@@ -323,20 +315,19 @@ func localDaemonCommand() *cobra.Command {
 				return localdaemon.Run(ctx, localdaemon.DaemonConfig{
 					Paths: paths, Source: source, ManagedSSH: managedConfig, IssuePeerStream: source.IssuePeerStream,
 					OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(),
-					DeviceSuffix: cfg.DeviceSuffix, DeviceLoopbackCIDR: cfg.DeviceLoopbackCIDR,
-					OnMachines: func(ctx context.Context, machines []api.UserMachine) {
+					ReconcileMachines: func(ctx context.Context, machines []api.UserMachine) error {
 						if cfg.ControlSyncAddress != "" {
-							return
+							return coordinator.ReconcileStatus(ctx)
 						}
 						credential, err := authSource.WithContext(ctx).Credential()
 						if err != nil {
-							return
+							return fmt.Errorf("refresh local machine access credentials: %w", err)
 						}
-						services, err := api.New(cfg.ServerURL, credential, &http.Client{Transport: peerHTTPTransport}).DeviceServices(ctx)
+						services, err := api.New(cfg.ServerURL, credential, &http.Client{Transport: peerHTTPTransport}).MachineServices(ctx)
 						if err != nil {
-							return
+							return fmt.Errorf("refresh authorized local browser services: %w", err)
 						}
-						coordinator.ApplyMachines(machines, services)
+						return coordinator.ApplyMachines(ctx, machines, services)
 					},
 					OpenPeerStream: localdaemon.TunnelPeerStreamOpener(peerTunnel), ProbePeer: localdaemon.TunnelPeerProbe(peerTunnel), FileTransfers: fileTransfers, InvalidatePeerAuthority: peerTunnel.InvalidateMachine, WarmPeerMetadata: peerTunnel.WarmMachines,
 					RelayInventory: func(ctx context.Context) (localapi.RelayInventory, error) {
@@ -425,17 +416,13 @@ func configRuntimeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			chezmoi := strings.TrimSpace(os.Getenv("PAPERBOAT_CHEZMOI_PATH"))
-			if chezmoi == "" {
-				chezmoi = defaultChezmoiPath()
-			}
 			hosts := []string{"github.com"}
 			if raw := strings.TrimSpace(os.Getenv("PAPERBOAT_CONFIG_REPOSITORY_HOSTS")); raw != "" {
 				hosts = strings.Split(raw, ",")
 			}
 			return hostruntimeentry.RunConfigWorker(command.Context(), hostruntimeentry.ConfigWorkerConfig{
 				ControlURL: registration.ServerURL, StateRoot: stateRoot, HomeRoot: filepath.Clean(homeRoot),
-				ChezmoiBinary: chezmoi, RepositoryHosts: hosts,
+				RepositoryHosts: hosts,
 			})
 		},
 		SilenceUsage: true, SilenceErrors: true,

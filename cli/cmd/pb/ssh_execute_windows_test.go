@@ -88,7 +88,7 @@ func TestWindowsSSHCommandInputDuplicateCloseCancelsReadAndPreservesOriginal(t *
 }
 
 func TestWindowsLoopbackOpenSSHArgumentsPreserveManagedIdentityAndHost(t *testing.T) {
-	destination := managedssh.Destination{User: "root", Host: "hn.pprbt", Port: 2222}
+	destination := managedssh.Destination{User: "root", Host: "hn.local.pprbt.dev", Port: 2222}
 	got := windowsLoopbackOpenSSHArguments(destination, 49152, `C:\Program Files\Paperboat\pb.exe`, []string{"/usr/bin/printf", "VICTUS_PB_SSH_OK"}, true)
 	want := []string{
 		"-o", "BatchMode=yes",
@@ -98,10 +98,10 @@ func TestWindowsLoopbackOpenSSHArgumentsPreserveManagedIdentityAndHost(t *testin
 		"-o", "KbdInteractiveAuthentication=no",
 		"-o", "ProxyCommand=none",
 		"-o", "Hostname=127.0.0.1",
-		"-o", "HostKeyAlias=hn.pprbt",
-		"-o", `KnownHostsCommand="C:\Program Files\Paperboat\pb.exe" __ssh-known-hosts --host hn.pprbt --port 2222`,
+		"-o", "HostKeyAlias=hn.local.pprbt.dev",
+		"-o", `KnownHostsCommand="C:\Program Files\Paperboat\pb.exe" __ssh-known-hosts --host hn.local.pprbt.dev --port 2222`,
 		"-p", "49152",
-		"root@hn.pprbt",
+		"root@hn.local.pprbt.dev",
 		"/usr/bin/printf", "VICTUS_PB_SSH_OK",
 	}
 	if !slices.Equal(got, want) {
@@ -139,16 +139,16 @@ func TestWindowsManagedSSHDependenciesRequiresLocalDaemonBeforeDial(t *testing.T
 }
 
 func TestWindowsLoopbackOpenSSHArgumentsKeepDefaultRegisteredPortSeparateFromLoopback(t *testing.T) {
-	destination := managedssh.Destination{User: "root", Host: "hn.pprbt", Port: 22}
+	destination := managedssh.Destination{User: "root", Host: "hn.local.pprbt.dev", Port: 22}
 	got := windowsLoopbackOpenSSHArguments(destination, 50443, `C:\Program Files\Paperboat\pb.exe`, []string{"must-not-appear"}, false)
 	joined := strings.Join(got, "\n")
 	for _, required := range []string{
-		`KnownHostsCommand="C:\Program Files\Paperboat\pb.exe" __ssh-known-hosts --host hn.pprbt --port 22`,
-		"HostKeyAlias=hn.pprbt",
+		`KnownHostsCommand="C:\Program Files\Paperboat\pb.exe" __ssh-known-hosts --host hn.local.pprbt.dev --port 22`,
+		"HostKeyAlias=hn.local.pprbt.dev",
 		"ProxyCommand=none",
 		"Hostname=127.0.0.1",
 		"50443",
-		"root@hn.pprbt",
+		"root@hn.local.pprbt.dev",
 	} {
 		if !strings.Contains(joined, required) {
 			t.Fatalf("arguments %q do not contain %q", got, required)

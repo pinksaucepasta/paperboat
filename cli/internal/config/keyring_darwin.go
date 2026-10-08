@@ -4,7 +4,6 @@ package config
 
 import (
 	"errors"
-	"fmt"
 	"os/exec"
 	"path/filepath"
 
@@ -21,7 +20,7 @@ func (KeyringStore) Set(ref, value string) error {
 		}
 		return store.Set(ref, value)
 	}
-	return keyring.Set(keyringService, ref, value)
+	return vaultKeychainError(keyring.Set(keyringService, ref, value))
 }
 func (KeyringStore) Get(ref string) (string, error) {
 	if keychainVaultReference(ref) {
@@ -35,7 +34,7 @@ func (KeyringStore) Get(ref string) (string, error) {
 	if errors.Is(err, keyring.ErrNotFound) {
 		return "", ErrSecretNotFound
 	}
-	return value, err
+	return value, vaultKeychainError(err)
 }
 func (KeyringStore) Delete(ref string) error {
 	if keychainVaultReference(ref) {
@@ -49,7 +48,7 @@ func (KeyringStore) Delete(ref string) error {
 	if errors.Is(err, keyring.ErrNotFound) {
 		return nil
 	}
-	return err
+	return vaultKeychainError(err)
 }
 
 func macOSVaultStore() (keychainVaultStore, error) {
@@ -78,9 +77,12 @@ func (smallKeychainStore) Delete(ref string) error {
 }
 
 func vaultKeychainError(err error) error {
+	if err == nil {
+		return nil
+	}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) && exit.ExitCode() == 36 {
-		return fmt.Errorf("macOS Keychain does not allow access from this session; unlock the login keychain and run the vault command from the signed-in desktop session: %w", ErrCredentialStoreUnavailable)
+		return credentialStoreFailure("macOS Keychain does not allow access from this session; unlock the login keychain and run the vault command from the signed-in desktop session", err)
 	}
-	return err
+	return credentialStoreFailure("macOS Keychain request failed", err)
 }

@@ -16,7 +16,7 @@ Allow on-demand access to an exact machine port
 Authorize on-demand access to one machine port or URL with an exact access audience and optional expiry. --generation protects updates to an existing policy.
 
 .PP
-An on-demand policy authorizes an exact machine port for private or team access. A policy does not publish a public URL or grant every port on the device. Revocation fences subsequent activation.
+An on-demand policy authorizes an exact machine port for private or team access. A policy does not publish a public URL or grant every port on the machine. Revocation fences subsequent activation.
 
 .PP
 JSON output is supported with --json.
@@ -62,6 +62,10 @@ JSON output is supported with --json.
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

@@ -1,11 +1,12 @@
 // Package errorreport provides Paperboat's deliberately narrow Sentry boundary.
-// Callers supply only a stable classification and support reference; raw errors,
+// Callers supply only a stable classification and support reference; raw error text,
 // commands, request data, URLs, logs, breadcrumbs, and local values are never accepted.
 package errorreport
 
 import (
 	"context"
 	"math"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -44,6 +45,12 @@ type Reporter struct {
 	rate                     float64
 	limits                   [3]signalLimit
 	closed                   atomic.Bool
+	sealed                   atomic.Bool
+	submitMu                 sync.RWMutex
+	submissionsDropped       atomic.Uint64
+	httpFailures             atomic.Uint64
+	flushStatus              atomic.Uint32
+	flushDone                chan struct{}
 }
 
 func FromEnvironment() *Reporter {
@@ -99,8 +106,11 @@ func newSignalReporter(dsn, release string, transport sentry.Transport, logs, me
 	client, err := sentry.NewClient(sentry.ClientOptions{
 		Dsn: dsn, Release: release, Environment: environment(), Transport: transport,
 		AttachStacktrace: false, EnableTracing: rate > 0, TracesSampleRate: rate, MaxSpans: 64, BeforeSendLog: sanitizeLog, BeforeSendMetric: r.sanitizeMetric, BeforeSendTransaction: sanitizeTransaction, MaxBreadcrumbs: 0,
-		SendDefaultPII: false, BeforeSend: sanitize,
-		Integrations: func([]sentry.Integration) []sentry.Integration { return nil },
+		SendDefaultPII: false, BeforeSend: sanitize, DisableTelemetryBuffer: true,
+		// Match the SDK's default HTTP transport/proxy behavior while observing
+		// only response status and network failure at its export boundary.
+		HTTPTransport: sdkHTTPObserver{next: &http.Transport{Proxy: http.ProxyFromEnvironment}, failures: &r.httpFailures},
+		Integrations:  func([]sentry.Integration) []sentry.Integration { return nil },
 	})
 	if err != nil {
 		return &Reporter{}
@@ -117,7 +127,11 @@ func newSignalReporter(dsn, release string, transport sentry.Transport, logs, me
 func (r *Reporter) Enabled() bool { return r != nil && r.client != nil && !r.closed.Load() }
 
 func (r *Reporter) Capture(ctx context.Context, component, classification string) {
-	if !r.Enabled() || !safeComponent(component) || !safeClassification(classification) || !r.admit(time.Now()) {
+	if !safeComponent(component) || !safeClassification(classification) || !r.beginSubmit(false) {
+		return
+	}
+	defer r.submitMu.RUnlock()
+	if !r.admit(time.Now()) {
 		return
 	}
 	ctx = r.context(ctx)
@@ -141,17 +155,114 @@ func (r *Reporter) Flush(ctx context.Context) {
 	if r == nil || r.client == nil {
 		return
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	waitCtx, stop := context.WithTimeout(ctx, flushLimit)
+	defer stop()
 	r.flushOnce.Do(func() {
-		if r.samplerStop != nil {
-			close(r.samplerStop)
-			<-r.samplerDone
-		}
+		r.flushDone = make(chan struct{})
 		r.closed.Store(true)
+		r.flushStatus.Store(1)
 		flushCtx, cancel := context.WithTimeout(ctx, flushLimit)
-		defer cancel()
-		_ = r.client.FlushWithContext(flushCtx)
-		r.client.Close()
+		go func() {
+			defer cancel()
+			defer close(r.flushDone)
+			if r.samplerStop != nil {
+				close(r.samplerStop)
+				select {
+				case <-r.samplerDone:
+				case <-flushCtx.Done():
+					r.flushStatus.Store(3)
+				}
+			}
+			r.sealed.Store(true)
+			// Every admitted submission finishes before SDK drain/close. Sources
+			// run outside this short gate, so a stuck registry cannot hold it.
+			r.submitMu.Lock()
+			defer r.submitMu.Unlock()
+			flushed := r.client.FlushWithContext(flushCtx)
+			r.client.Close()
+			if flushed && flushCtx.Err() == nil {
+				r.flushStatus.CompareAndSwap(1, 2)
+			} else {
+				r.flushStatus.Store(3)
+			}
+		}()
 	})
+	select {
+	case <-r.flushDone:
+	case <-waitCtx.Done():
+		// Seal before returning: a late sampler must not win the race with
+		// the cleanup goroutine observing the same expired deadline.
+		r.sealed.Store(true)
+		r.flushStatus.Store(3)
+	}
+}
+
+// FlushStatus reports local SDK lifecycle state. Drained means queued attempts
+// finished; it does not establish successful HTTP responses or SaaS ingestion.
+func (r *Reporter) FlushStatus() string {
+	if r == nil || r.client == nil {
+		return "disabled"
+	}
+	switch r.flushStatus.Load() {
+	case 1:
+		return "flushing"
+	case 2:
+		return "drained"
+	case 3:
+		return "timed_out"
+	default:
+		return "not_started"
+	}
+}
+
+// SDKSubmissionsDropped counts submissions refused by the shutdown fence. SDK
+// internal queue/network losses remain separate from this local count.
+func (r *Reporter) SDKSubmissionsDropped() uint64 {
+	if r == nil {
+		return 0
+	}
+	return r.submissionsDropped.Load()
+}
+
+// SDKHTTPFailures counts failed export HTTP attempts, not lost signals. A
+// successful response is also not proof of final ingestion by Sentry.
+func (r *Reporter) SDKHTTPFailures() uint64 {
+	if r == nil {
+		return 0
+	}
+	return r.httpFailures.Load()
+}
+
+type sdkHTTPObserver struct {
+	next     http.RoundTripper
+	failures *atomic.Uint64
+}
+
+func (t sdkHTTPObserver) RoundTrip(req *http.Request) (*http.Response, error) {
+	response, err := t.next.RoundTrip(req)
+	if err != nil || response == nil || response.StatusCode < 200 || response.StatusCode >= 300 {
+		t.failures.Add(1)
+	}
+	return response, err
+}
+
+func (r *Reporter) beginSubmit(sampler bool) bool {
+	if r == nil || r.client == nil {
+		return false
+	}
+	if !r.submitMu.TryRLock() {
+		r.submissionsDropped.Add(1)
+		return false
+	}
+	if r.sealed.Load() || !sampler && r.closed.Load() {
+		r.submitMu.RUnlock()
+		r.submissionsDropped.Add(1)
+		return false
+	}
+	return true
 }
 
 func safeRelease(value string) bool {
@@ -220,13 +331,55 @@ func sanitize(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
 			tags[key] = value
 		}
 	}
+	for _, key := range []string{"operation", "stage", "code", "cause", "error_type"} {
+		value := event.Tags[key]
+		valid := key == "operation" && Operation(value) == value || key == "stage" && faultStage(value) == value || key == "code" && faultCode(value) == value || key == "cause" && validCause(value) || key == "error_type" && validErrorType(value)
+		if valid && value != "" {
+			tags[key] = value
+		}
+	}
+	if value := event.Tags["source_file"]; validSourceFile(value) {
+		tags["source_file"] = value
+	}
+	if value := event.Tags["source_function"]; value != "" && safeSourceFunction(value) == value {
+		tags["source_function"] = value
+	}
+	if value := event.Tags["source_line"]; validErrno(value) {
+		tags["source_line"] = value
+	}
+	if value := event.Tags["http_status"]; validHTTPStatus(value) {
+		tags["http_status"] = value
+	}
+	if value := event.Tags["errno"]; value != "" {
+		if number, err := strconv.ParseUint(value, 10, 32); err == nil && number != 0 {
+			tags["errno"] = strconv.FormatUint(number, 10)
+		}
+	}
+	if value := event.Tags["error_chain"]; value != "" {
+		types := strings.Split(value, ",")
+		valid := len(types) <= 8
+		for _, name := range types {
+			valid = valid && validErrorType(name)
+		}
+		if valid {
+			tags["error_chain"] = value
+		}
+	}
+	cause := ""
+	if validCause(event.Exception[0].Value) {
+		cause = event.Exception[0].Value
+	}
+	var fingerprint []string
+	if tags["stage"] != "" && tags["code"] != "" && tags["cause"] != "" {
+		fingerprint = []string{"{{ default }}", tags["component"], tags["stage"], tags["code"], tags["cause"]}
+	}
 	var frames []sentry.Frame
 	if stack := event.Exception[0].Stacktrace; stack != nil {
 		for _, frame := range stack.Frames {
 			frames = append(frames, sentry.Frame{Function: frame.Function, Filename: filepath.Base(frame.Filename), Lineno: frame.Lineno, InApp: true})
 		}
 	}
-	return &sentry.Event{EventID: event.EventID, Timestamp: event.Timestamp, Level: sentry.LevelError, Release: event.Release, Environment: event.Environment, Contexts: safeTraceContext(event.Contexts), Platform: "go", Tags: tags, Exception: []sentry.Exception{{Type: event.Exception[0].Type, Stacktrace: &sentry.Stacktrace{Frames: frames}}}}
+	return &sentry.Event{EventID: event.EventID, Timestamp: event.Timestamp, Level: sentry.LevelError, Release: event.Release, Environment: event.Environment, Contexts: safeTraceContext(event.Contexts), Platform: "go", Tags: tags, Fingerprint: fingerprint, Exception: []sentry.Exception{{Type: event.Exception[0].Type, Value: cause, Stacktrace: &sentry.Stacktrace{Frames: frames}}}}
 }
 
 func signalFlag(name string, defaultValue bool) (bool, bool) {

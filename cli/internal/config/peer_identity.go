@@ -177,9 +177,9 @@ func (s ProfileStore) SavePeerAccountRootPublic(issuer, accountID string, public
 	return storePeerKey(s.Secrets, ref, "account_root_public", public)
 }
 
-// SavePeerDeviceSigningPublic records the verifier for this CLI's transport
+// SavePeerMachineSigningPublic records the verifier for this CLI's transport
 // certificate. ENV account authority has a separate local record.
-func (s ProfileStore) SavePeerDeviceSigningPublic(issuer, accountID string, public ed25519.PublicKey) (resultErr error) {
+func (s ProfileStore) SavePeerMachineSigningPublic(issuer, accountID string, public ed25519.PublicKey) (resultErr error) {
 	if s.Path == "" || s.Secrets == nil || !validCredentialID(accountID) || len(public) != ed25519.PublicKeySize {
 		return ErrCredentialStoreUnavailable
 	}
@@ -192,10 +192,10 @@ func (s ProfileStore) SavePeerDeviceSigningPublic(issuer, accountID string, publ
 		return err
 	}
 	defer func() { resultErr = errors.Join(resultErr, lock.Unlock()) }()
-	return storePeerKey(s.Secrets, peerIdentitySecretRef(issuer, accountID, "device-signing-public"), "device_signing_public", public)
+	return storePeerKey(s.Secrets, peerIdentitySecretRef(issuer, accountID, "machine-signing-public"), "machine_signing_public", public)
 }
 
-func (s ProfileStore) LoadPeerDeviceSigningPublic(issuer, accountID string) (public ed25519.PublicKey, resultErr error) {
+func (s ProfileStore) LoadPeerMachineSigningPublic(issuer, accountID string) (public ed25519.PublicKey, resultErr error) {
 	if s.Path == "" || s.Secrets == nil || !validCredentialID(accountID) {
 		return nil, ErrCredentialStoreUnavailable
 	}
@@ -208,7 +208,7 @@ func (s ProfileStore) LoadPeerDeviceSigningPublic(issuer, accountID string) (pub
 		return nil, err
 	}
 	defer func() { resultErr = errors.Join(resultErr, lock.Unlock()) }()
-	value, found, err := loadPeerKey(s.Secrets, peerIdentitySecretRef(issuer, accountID, "device-signing-public"), "device_signing_public")
+	value, found, err := loadPeerKey(s.Secrets, peerIdentitySecretRef(issuer, accountID, "machine-signing-public"), "machine_signing_public")
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +272,10 @@ func (s ProfileStore) ReplacePeerCertificate(issuer, endpointID string, previous
 	if err != nil {
 		return err
 	}
-	return s.Secrets.Set(ref, string(record))
+	if err := s.Secrets.Set(ref, string(record)); err != nil {
+		return safeConfigCause("peer endpoint certificate could not be stored", err)
+	}
+	return nil
 }
 
 // DeletePeerCertificate removes only the endpoint certificate while retaining
@@ -290,7 +293,7 @@ func (s ProfileStore) DeletePeerCertificate(issuer, endpointID string) (resultEr
 	if err := lock.Lock(); err != nil {
 		return err
 	}
-	return errors.Join(s.Secrets.Delete(peerIdentitySecretRef(issuer, endpointID, "endpoint-certificate")), lock.Unlock())
+	return errors.Join(safePeerSecretDelete(s.Secrets, peerIdentitySecretRef(issuer, endpointID, "endpoint-certificate")), lock.Unlock())
 }
 
 func (s ProfileStore) peerCertificate(issuer, endpointID string, proposed []byte) (state PeerCertificateState, resultErr error) {
@@ -332,26 +335,40 @@ func (s ProfileStore) peerCertificate(issuer, endpointID string, proposed []byte
 		return PeerCertificateState{}, err
 	}
 	if err := s.Secrets.Set(ref, string(record)); err != nil {
-		return PeerCertificateState{}, fmt.Errorf("store peer endpoint certificate: %w", err)
+		return PeerCertificateState{}, safeConfigCause("peer endpoint certificate could not be stored", err)
 	}
 	return PeerCertificateState{Raw: append([]byte(nil), proposed...)}, nil
 }
 
+func safePeerSecretDelete(store SecretStore, ref string) error {
+	if err := store.Delete(ref); err != nil && !credentialAbsenceOnly(err) {
+		return safeConfigCause("peer identity secret could not be deleted", err)
+	}
+	return nil
+}
+
 func loadPeerCertificate(store SecretStore, ref string) ([]byte, bool, error) {
 	encoded, err := store.Get(ref)
-	if errors.Is(err, ErrSecretNotFound) {
+	if credentialAbsenceOnly(err) {
 		return nil, false, nil
 	}
 	if err != nil {
-		return nil, false, err
+		return nil, false, safeConfigCause("peer endpoint certificate could not be loaded", err)
 	}
 	var record peerKeyRecord
-	if json.Unmarshal([]byte(encoded), &record) != nil || record.Version != 1 || record.Kind != "endpoint_certificate" {
+	if err := json.Unmarshal([]byte(encoded), &record); err != nil {
+		return nil, false, safeConfigCause("peer endpoint certificate record is invalid", err)
+	}
+	if record.Version != 1 || record.Kind != "endpoint_certificate" {
 		return nil, false, errors.New("peer endpoint certificate record is invalid")
 	}
 	raw, err := base64.RawURLEncoding.Strict().DecodeString(record.Key)
 	canonical, marshalErr := json.Marshal(record)
-	if err != nil || len(raw) == 0 || len(raw) > 1024 || base64.RawURLEncoding.EncodeToString(raw) != record.Key || marshalErr != nil || string(canonical) != encoded {
+	if err != nil {
+		clear(raw)
+		return nil, false, safeConfigCause("peer endpoint certificate record is invalid", err)
+	}
+	if len(raw) == 0 || len(raw) > 1024 || base64.RawURLEncoding.EncodeToString(raw) != record.Key || marshalErr != nil || string(canonical) != encoded {
 		clear(raw)
 		return nil, false, errors.New("peer endpoint certificate record is invalid")
 	}
@@ -381,7 +398,7 @@ func (s ProfileStore) PeerIdentityKeysForExistingRoot(issuer, accountID, endpoin
 // for one freshly issued endpoint session. Unlike PeerIdentityKeys, the
 // signing seed is scoped to the endpoint session rather than the account
 // root. This is required for a fresh enrollment into an account that already
-// has an active device key: reusing the account root would make the server
+// has an active machine key: reusing the account root would make the server
 // reject the new session as a key/session conflict.
 //
 // The identity is durable and keyed by endpointID, so a retry of the same
@@ -425,37 +442,36 @@ func (s ProfileStore) FreshPeerIdentityKeys(issuer, accountID, endpointID string
 	}
 
 	created := make([]string, 0, 2)
-	rollback := func() {
+	rollback := func() error {
+		var result error
 		for index := len(created) - 1; index >= 0; index-- {
-			_ = s.Secrets.Delete(created[index])
+			result = errors.Join(result, safePeerSecretDelete(s.Secrets, created[index]))
 		}
+		return result
 	}
 	if !signingExists {
 		signingSeed = make([]byte, ed25519.SeedSize)
 		if _, err := rand.Read(signingSeed); err != nil {
-			return PeerIdentityKeys{}, fmt.Errorf("generate endpoint signing identity: %w", err)
+			return PeerIdentityKeys{}, safeConfigCause("endpoint signing identity could not be generated", err)
 		}
 		if err := storePeerKey(s.Secrets, signingRef, "endpoint_signing_seed", signingSeed); err != nil {
-			return PeerIdentityKeys{}, err
+			return PeerIdentityKeys{}, errors.Join(err, safePeerSecretDelete(s.Secrets, signingRef))
 		}
 		created = append(created, signingRef)
 	}
 	if !quicExists {
 		quicSeed = make([]byte, ed25519.SeedSize)
 		if _, err := rand.Read(quicSeed); err != nil {
-			rollback()
-			return PeerIdentityKeys{}, fmt.Errorf("generate endpoint QUIC identity: %w", err)
+			return PeerIdentityKeys{}, errors.Join(safeConfigCause("endpoint QUIC identity could not be generated", err), rollback())
 		}
 		if err := storePeerKey(s.Secrets, quicRef, "endpoint_quic_seed", quicSeed); err != nil {
-			rollback()
-			return PeerIdentityKeys{}, err
+			return PeerIdentityKeys{}, errors.Join(err, safePeerSecretDelete(s.Secrets, quicRef), rollback())
 		}
 		created = append(created, quicRef)
 	}
 
 	if len(signingSeed) != ed25519.SeedSize || len(quicSeed) != ed25519.SeedSize {
-		rollback()
-		return PeerIdentityKeys{}, errors.New("fresh peer endpoint identity key size is invalid")
+		return PeerIdentityKeys{}, errors.Join(errors.New("fresh peer endpoint identity key size is invalid"), rollback())
 	}
 	identity.RootPrivate = ed25519.NewKeyFromSeed(signingSeed)
 	identity.QUICPrivate = ed25519.NewKeyFromSeed(quicSeed)
@@ -492,25 +508,25 @@ func (s ProfileStore) PeerEndpointKeys(issuer, accountID, endpointID string) (id
 	defer clear(quicSeed)
 
 	created := make([]string, 0, 1)
-	rollback := func() {
+	rollback := func() error {
+		var result error
 		for index := len(created) - 1; index >= 0; index-- {
-			_ = s.Secrets.Delete(created[index])
+			result = errors.Join(result, safePeerSecretDelete(s.Secrets, created[index]))
 		}
+		return result
 	}
 	if !quicExists {
 		quicSeed = make([]byte, ed25519.SeedSize)
 		if _, err := rand.Read(quicSeed); err != nil {
-			return PeerIdentityKeys{}, fmt.Errorf("generate endpoint QUIC identity: %w", err)
+			return PeerIdentityKeys{}, safeConfigCause("endpoint QUIC identity could not be generated", err)
 		}
 		if err := storePeerKey(s.Secrets, quicRef, "endpoint_quic_seed", quicSeed); err != nil {
-			rollback()
-			return PeerIdentityKeys{}, err
+			return PeerIdentityKeys{}, errors.Join(err, safePeerSecretDelete(s.Secrets, quicRef), rollback())
 		}
 		created = append(created, quicRef)
 	}
 	if len(quicSeed) != ed25519.SeedSize {
-		rollback()
-		return PeerIdentityKeys{}, errors.New("peer endpoint key size is invalid")
+		return PeerIdentityKeys{}, errors.Join(errors.New("peer endpoint key size is invalid"), rollback())
 	}
 	identity.QUICPrivate = ed25519.NewKeyFromSeed(quicSeed)
 	return identity, nil
@@ -529,15 +545,15 @@ func (s ProfileStore) DeletePeerEndpointIdentity(issuer, endpointID string) (res
 		return err
 	}
 	resultErr = errors.Join(
-		s.Secrets.Delete(peerIdentitySecretRef(issuer, endpointID, "endpoint-quic")),
-		s.Secrets.Delete(peerIdentitySecretRef(issuer, endpointID, "endpoint-signing")),
+		safePeerSecretDelete(s.Secrets, peerIdentitySecretRef(issuer, endpointID, "endpoint-quic")),
+		safePeerSecretDelete(s.Secrets, peerIdentitySecretRef(issuer, endpointID, "endpoint-signing")),
 		lock.Unlock(),
 	)
 	certificateLock := newSharedLock(s.profilePath(issuer) + ".peer-certificate.lock")
 	if err := certificateLock.Lock(); err != nil {
 		return errors.Join(resultErr, err)
 	}
-	return errors.Join(resultErr, s.Secrets.Delete(peerIdentitySecretRef(issuer, endpointID, "endpoint-certificate")), certificateLock.Unlock())
+	return errors.Join(resultErr, safePeerSecretDelete(s.Secrets, peerIdentitySecretRef(issuer, endpointID, "endpoint-certificate")), certificateLock.Unlock())
 }
 
 func (s ProfileStore) DeletePeerAccountRoot(issuer, accountID string) (resultErr error) {
@@ -557,8 +573,8 @@ func (s ProfileStore) DeletePeerAccountRoot(issuer, accountID string) (resultErr
 	}
 	defer func() { resultErr = errors.Join(resultErr, lock.Unlock()) }()
 	return errors.Join(
-		s.Secrets.Delete(peerIdentitySecretRef(issuer, accountID, "account-root")),
-		s.Secrets.Delete(peerIdentitySecretRef(issuer, accountID, "account-root-public")),
+		safePeerSecretDelete(s.Secrets, peerIdentitySecretRef(issuer, accountID, "account-root")),
+		safePeerSecretDelete(s.Secrets, peerIdentitySecretRef(issuer, accountID, "account-root-public")),
 	)
 }
 
@@ -596,10 +612,12 @@ func (s ProfileStore) peerIdentityKeys(issuer, accountID, endpointID string, cre
 	defer clear(quicSeed)
 
 	created := make([]string, 0, 2)
-	rollback := func() {
+	rollback := func() error {
+		var result error
 		for index := len(created) - 1; index >= 0; index-- {
-			_ = s.Secrets.Delete(created[index])
+			result = errors.Join(result, safePeerSecretDelete(s.Secrets, created[index]))
 		}
+		return result
 	}
 	if !rootExists {
 		if !createRoot {
@@ -607,29 +625,26 @@ func (s ProfileStore) peerIdentityKeys(issuer, accountID, endpointID string, cre
 		}
 		rootSeed = make([]byte, ed25519.SeedSize)
 		if _, err := rand.Read(rootSeed); err != nil {
-			return PeerIdentityKeys{}, fmt.Errorf("generate account root: %w", err)
+			return PeerIdentityKeys{}, safeConfigCause("account root identity could not be generated", err)
 		}
 		if err := storePeerKey(s.Secrets, rootRef, "account_root_seed", rootSeed); err != nil {
-			return PeerIdentityKeys{}, err
+			return PeerIdentityKeys{}, errors.Join(err, safePeerSecretDelete(s.Secrets, rootRef))
 		}
 		created = append(created, rootRef)
 	}
 	if !quicExists {
 		quicSeed = make([]byte, ed25519.SeedSize)
 		if _, err := rand.Read(quicSeed); err != nil {
-			rollback()
-			return PeerIdentityKeys{}, fmt.Errorf("generate endpoint QUIC identity: %w", err)
+			return PeerIdentityKeys{}, errors.Join(safeConfigCause("endpoint QUIC identity could not be generated", err), rollback())
 		}
 		if err := storePeerKey(s.Secrets, quicRef, "endpoint_quic_seed", quicSeed); err != nil {
-			rollback()
-			return PeerIdentityKeys{}, err
+			return PeerIdentityKeys{}, errors.Join(err, safePeerSecretDelete(s.Secrets, quicRef), rollback())
 		}
 		created = append(created, quicRef)
 	}
 
 	if len(rootSeed) != ed25519.SeedSize || len(quicSeed) != ed25519.SeedSize {
-		rollback()
-		return PeerIdentityKeys{}, errors.New("peer identity key size is invalid")
+		return PeerIdentityKeys{}, errors.Join(errors.New("peer identity key size is invalid"), rollback())
 	}
 	identity.RootPrivate = ed25519.NewKeyFromSeed(rootSeed)
 	identity.QUICPrivate = ed25519.NewKeyFromSeed(quicSeed)
@@ -638,18 +653,25 @@ func (s ProfileStore) peerIdentityKeys(issuer, accountID, endpointID string, cre
 
 func loadPeerKey(store SecretStore, ref, kind string) ([]byte, bool, error) {
 	encoded, err := store.Get(ref)
-	if errors.Is(err, ErrSecretNotFound) {
+	if credentialAbsenceOnly(err) {
 		return nil, false, nil
 	}
 	if err != nil {
-		return nil, false, fmt.Errorf("load %s: %w", kind, err)
+		return nil, false, safeConfigCause("peer identity key could not be loaded", err)
 	}
 	var record peerKeyRecord
-	if json.Unmarshal([]byte(encoded), &record) != nil || record.Version != 1 || record.Kind != kind {
+	if err := json.Unmarshal([]byte(encoded), &record); err != nil {
+		return nil, false, safeConfigCause("peer identity key record is invalid", err)
+	}
+	if record.Version != 1 || record.Kind != kind {
 		return nil, false, fmt.Errorf("%s record is invalid", kind)
 	}
 	key, err := base64.RawURLEncoding.Strict().DecodeString(record.Key)
-	if err != nil || base64.RawURLEncoding.EncodeToString(key) != record.Key || len(key) != 32 {
+	if err != nil {
+		clear(key)
+		return nil, false, safeConfigCause("peer identity key record is invalid", err)
+	}
+	if base64.RawURLEncoding.EncodeToString(key) != record.Key || len(key) != 32 {
 		clear(key)
 		return nil, false, fmt.Errorf("%s record is invalid", kind)
 	}
@@ -670,7 +692,7 @@ func storePeerKey(store SecretStore, ref, kind string, key []byte) error {
 		return err
 	}
 	if err := store.Set(ref, string(encoded)); err != nil {
-		return fmt.Errorf("store %s: %w", kind, err)
+		return safeConfigCause("peer identity key could not be stored", err)
 	}
 	return nil
 }

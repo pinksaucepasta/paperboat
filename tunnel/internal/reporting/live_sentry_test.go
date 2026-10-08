@@ -2,6 +2,7 @@ package reporting
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,7 +16,7 @@ func TestLiveSentryFailureRecovery(t *testing.T) {
 		t.Skip("set PB_LIVE_SENTRY_DSN and PB_LIVE_SENTRY_REF")
 	}
 	if !validReference(ref) {
-		t.Fatal("PB_LIVE_SENTRY_REF must be pb-32lowerhex")
+		t.Fatal("PB_LIVE_SENTRY_REF must be a canonical support reference")
 	}
 	t.Setenv("PAPERBOAT_SENTRY_ENABLED", "true")
 	t.Setenv("PAPERBOAT_SENTRY_DSN", dsn)
@@ -62,7 +63,7 @@ func TestLiveSentryFailureRecovery(t *testing.T) {
 	}
 	r.Observe(context.Background(), "control_reconcile", "failed", "unavailable", ref, time.Millisecond)
 	r.Observe(context.Background(), "control_reconcile", "success", "recovered", ref, time.Millisecond)
-	r.Capture(ref, "live_validation", 0)
+	r.CaptureFailure(WithSupportReference(context.Background(), ref), "service_run", errors.New("live validation failure"))
 	r.ExportDrops(context.Background())
 	r.MetricSnapshots(context.Background(), []Snapshot{{Name: "paperboat_edge_service_uptime_seconds", Kind: "gauge", Value: 1}})
 	t.Logf("live_sentry correlated_reference=%s control_references=per_request signals=error,log,trace,metric,drop_health", ref)

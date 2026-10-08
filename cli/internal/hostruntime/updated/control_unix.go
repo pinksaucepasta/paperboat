@@ -161,6 +161,21 @@ func (s *controlServer) respond(writer io.Writer, response ControlResponse) erro
 
 func (s *Service) controlRequestWithRequest(ctx context.Context, request ControlRequest) (ControlResponse, error) {
 	switch request.Operation {
+	case "settings":
+		s.controlMu.Lock()
+		defer s.controlMu.Unlock()
+		settings, err := machineUpdateSettings(s.config.StateRoot, s.config.AutomaticUpdates, request.Settings)
+		if err != nil {
+			return ControlResponse{}, err
+		}
+		if request.Settings != nil {
+			s.scheduler.Wake()
+		}
+		response := ControlResponse{Schema: ControlProtocolV1, Status: "ok", Settings: &settings}
+		if settings.Enabled {
+			response.NextMaintenanceAt = settings.NextMaintenance(time.Now())
+		}
+		return response, nil
 	case "status":
 		response := ControlResponse{Schema: ControlProtocolV1, Status: "ok", Observation: s.Snapshot(), UpdaterVersion: buildinfo.Version}
 		response.Version = s.currentManager().ActiveVersion()
@@ -202,6 +217,9 @@ func (s *Service) controlRequestWithRequest(ctx context.Context, request Control
 // All control operations report the durable activation outcome. A missing
 // handoff means complete only when both state records were read successfully.
 func (s *Service) populateControlState(response *ControlResponse) error {
+	if err := populateMachineSettings(response, s.config.StateRoot, s.config.AutomaticUpdates); err != nil {
+		return err
+	}
 	state, err := s.currentManager().TransactionState()
 	if err != nil {
 		return ErrRecoveryState

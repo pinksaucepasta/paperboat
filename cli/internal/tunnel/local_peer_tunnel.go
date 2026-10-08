@@ -17,13 +17,8 @@ type LocalPeerTunnel struct {
 }
 
 func (t LocalPeerTunnel) request(info resolver.ConnectInfo, consumer, operationID string, payload any) (localapi.PeerStreamRequest, error) {
-	if t.Client == nil || info.ProjectID == "" || info.MachineGeneration == 0 || info.Terminal == nil || info.Terminal.EnvironmentID == "" {
-		return localapi.PeerStreamRequest{}, fmt.Errorf("%w: missing local peer target (client=%t project=%q generation=%d terminal=%t environment=%q)", ErrPeerTerminalInvalid, t.Client != nil, info.ProjectID, info.MachineGeneration, info.Terminal != nil, func() string {
-			if info.Terminal == nil {
-				return ""
-			}
-			return info.Terminal.EnvironmentID
-		}())
+	if t.Client == nil || info.MachineID == "" || info.MachineGeneration == 0 || info.Terminal == nil || info.Terminal.EnvironmentID == "" {
+		return localapi.PeerStreamRequest{}, ErrPeerTerminalInvalid
 	}
 	deadline := time.Now().Add(2 * time.Minute)
 	var err error
@@ -42,9 +37,9 @@ func (t LocalPeerTunnel) request(info resolver.ConnectInfo, consumer, operationI
 	}
 	var request localapi.PeerStreamRequest
 	if info.Terminal.Auth.Token == "" {
-		request, err = localapi.NewPendingPeerStreamRequest(info.ProjectID, info.Terminal.EnvironmentID, info.MachineGeneration, consumer, operationID, deadline, 1<<40, encoded)
+		request, err = localapi.NewPendingPeerStreamRequest(info.MachineID, info.Terminal.EnvironmentID, info.MachineGeneration, consumer, operationID, deadline, 1<<40, encoded)
 	} else {
-		request, err = localapi.NewPeerStreamRequest(info.ProjectID, info.Terminal.EnvironmentID, info.MachineGeneration, consumer, operationID, info.Terminal.Auth.Token, deadline, 1<<40, encoded)
+		request, err = localapi.NewPeerStreamRequest(info.MachineID, info.Terminal.EnvironmentID, info.MachineGeneration, consumer, operationID, info.Terminal.Auth.Token, deadline, 1<<40, encoded)
 	}
 	if err != nil {
 		return localapi.PeerStreamRequest{}, err
@@ -52,18 +47,18 @@ func (t LocalPeerTunnel) request(info resolver.ConnectInfo, consumer, operationI
 	request.AccessSessionID = info.Terminal.Auth.ResourceID
 	if request.Credential == "" {
 		if validationErr := request.ValidatePending(time.Now().UTC()); validationErr != nil {
-			return request, fmt.Errorf("%w: pending peer request: %v", ErrPeerTerminalInvalid, validationErr)
+			return request, fmt.Errorf("%w: pending peer request: %w", ErrPeerTerminalInvalid, validationErr)
 		}
 		return request, nil
 	}
 	if validationErr := request.Validate(time.Now().UTC()); validationErr != nil {
-		return request, fmt.Errorf("%w: peer request: %v", ErrPeerTerminalInvalid, validationErr)
+		return request, fmt.Errorf("%w: peer request: %w", ErrPeerTerminalInvalid, validationErr)
 	}
 	return request, nil
 }
 
 func terminalLocalPayload(target *resolver.TerminalTarget) localapi.PeerTerminalPayload {
-	return localapi.PeerTerminalPayload{Scopes: target.Auth.Scopes, Protocol: target.Protocol, Debug: target.Debug, ThreadID: target.ThreadID, TerminalID: target.TerminalID, SessionID: target.SessionID, CWD: target.CWD, Environment: target.Env, Columns: target.Cols, Rows: target.Rows, RestartIfNotRunning: target.RestartIfNotRunning, ReplayHistory: target.ReplayHistory, AfterSequence: target.AfterSequence, InputAttachmentID: target.InputAttachmentID}
+	return localapi.PeerTerminalPayload{Scopes: target.Auth.Scopes, Protocol: target.Protocol, Debug: target.Debug, SessionID: target.SessionID, CWD: target.CWD, Environment: target.Env, Columns: target.Cols, Rows: target.Rows, RestartIfNotRunning: target.RestartIfNotRunning, ReplayHistory: target.ReplayHistory, AfterSequence: target.AfterSequence, InputAttachmentID: target.InputAttachmentID}
 }
 
 func (t LocalPeerTunnel) Dial(ctx context.Context, info resolver.ConnectInfo) (Conn, error) {

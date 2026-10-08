@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
@@ -117,6 +119,72 @@ func TestFileTransferManifestDigestRejectsSubstitution(t *testing.T) {
 	files[0].Size, files[0].SHA256 = 7, strings.Repeat("b", 64)
 	if approved == FileTransferManifestDigest(files) {
 		t.Fatal("content digest substitution retained approval digest")
+	}
+}
+
+func TestFileTransferAuthorizationStorageFailureIsUnavailableAndPrivate(t *testing.T) {
+	handler, _ := fileTransferTestHandler(t)
+	const privateText = "private credential store details"
+	handler.config.Authorizer = func(string) (Authorizer, error) {
+		return authorizerFunc(func(context.Context, protocol.Frame) (Authorization, error) {
+			return Authorization{}, &auth.Error{Code: auth.KeyUnknown, Cause: errors.New(privateText)}
+		}), nil
+	}
+	var faults []errorreport.Fault
+	restore := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) {
+		faults = append(faults, fault)
+	})
+	defer restore()
+
+	request := transferRequest(http.MethodGet, "http://helper.test/v1/file-transfers", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "storage_unavailable") || strings.Contains(response.Body.String(), privateText) {
+		t.Fatalf("authorization failure response = %d %s", response.Code, response.Body.String())
+	}
+	if len(faults) != 1 || faults[0].Stage != "peer_authority" || faults[0].Code != "peer_authority_failed" || strings.Contains(strings.Join(faults[0].ErrorChain, ","), privateText) {
+		t.Fatalf("authorization fault = %#v", faults)
+	}
+}
+
+func TestFileTransferUnknownCredentialRemainsExpectedDenial(t *testing.T) {
+	handler, _ := fileTransferTestHandler(t)
+	handler.config.Authorizer = func(string) (Authorizer, error) {
+		return authorizerFunc(func(context.Context, protocol.Frame) (Authorization, error) {
+			return Authorization{}, &auth.Error{Code: auth.SignatureInvalid}
+		}), nil
+	}
+	var faults atomic.Int32
+	restore := errorreport.InstallFaultObserver(func(context.Context, errorreport.Fault) { faults.Add(1) })
+	defer restore()
+
+	request := transferRequest(http.MethodGet, "http://helper.test/v1/file-transfers", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized || faults.Load() != 0 {
+		t.Fatalf("credential rejection = %d %s, faults=%d", response.Code, response.Body.String(), faults.Load())
+	}
+}
+
+func TestFileTransferLookupFailureIsNotReportedAsMissingResource(t *testing.T) {
+	handler, durable := fileTransferTestHandler(t)
+	if err := durable.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var faults []errorreport.Fault
+	restore := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) {
+		faults = append(faults, fault)
+	})
+	defer restore()
+
+	request := transferRequest(http.MethodGet, "http://helper.test/v1/file-transfers/ft_unknown", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "storage_unavailable") {
+		t.Fatalf("store failure response = %d %s", response.Code, response.Body.String())
+	}
+	if len(faults) != 1 || faults[0].Stage != "peer_authority" || faults[0].Code != "file_transfer_failed" {
+		t.Fatalf("store failure fault = %#v", faults)
 	}
 }
 

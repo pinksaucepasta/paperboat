@@ -11,12 +11,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
-	hostconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
@@ -179,7 +179,7 @@ func TestExecApplicationProtocolCanary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	host, err := server.New(server.Config{Negotiator: protocol.Negotiator{Profile: hostconfig.BYOD, Available: map[string]bool{"terminal.v1": true, "health.v1": true, "exec.v1": true}}, Journal: journal, Authorizer: authorizer, Handler: dispatcher, MaxConcurrent: 4, HeartbeatInterval: time.Hour, MutationDeadline: time.Minute})
+	host, err := server.New(server.Config{Negotiator: protocol.Negotiator{Available: map[string]bool{"terminal.v1": true, "health.v1": true, "exec.v1": true}}, Journal: journal, Authorizer: authorizer, Handler: dispatcher, MaxConcurrent: 4, HeartbeatInterval: time.Hour, MutationDeadline: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,57 @@ func TestExecApplicationProtocolCanary(t *testing.T) {
 	if _, err := helperHandshake(ctx, wire); err != nil {
 		t.Fatal(err)
 	}
-	connection := &helperExecConn{message: wire, target: &resolver.TerminalTarget{}, request: ExecRequest{OperationID: operationID, Argv: []string{"/bin/sh", "-c", `printf stdout-canary; printf stderr-canary >&2; exit 23`}, CWD: root}, events: make(chan ExecEvent, 16), done: make(chan struct{}), pending: make(map[string]chan helperFrame)}
+	connection := &helperExecConn{message: wire, target: &resolver.TerminalTarget{}, request: ExecRequest{OperationID: operationID, Argv: []string{"/bin/sh", "-c", `printf x >> launches; printf stdout-canary; printf stderr-canary >&2; exit 23`}, CWD: root}, events: make(chan ExecEvent, 1), done: make(chan struct{}), pending: make(map[string]chan helperFrame)}
+	if err := connection.initialize(ctx); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for len(connection.events) != cap(connection.events) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(connection.events) != cap(connection.events) {
+		t.Fatal("actual exec queue did not saturate")
+	}
+	detached := make(chan error, 1)
+	go func() { detached <- connection.Detach() }()
+	select {
+	case err := <-detached:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("detach blocked on saturated exec queue")
+	}
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		for range connection.Events() {
+		}
+	}()
+	select {
+	case <-connection.readLoopDone:
+	default:
+		t.Fatal("detach returned before actual helper reader joined")
+	}
+	select {
+	case <-drained:
+	case <-time.After(time.Second):
+		t.Fatal("helper event reader did not join")
+	}
+	select {
+	case <-serveDone:
+	case <-time.After(time.Second):
+		t.Fatal("detached server attachment did not stop")
+	}
+	// The same operation remains replayable. Attachment must not launch again.
+	wire = newExecCanaryWire()
+	go func() { serveDone <- host.ServeAuthenticated(wire, authorizer) }()
+	if _, err := helperHandshake(ctx, wire); err != nil {
+		t.Fatal(err)
+	}
+	request := connection.request
+	request.FromSequence = 1
+	connection = &helperExecConn{message: wire, target: &resolver.TerminalTarget{}, request: request, events: make(chan ExecEvent, 16), done: make(chan struct{}), pending: make(map[string]chan helperFrame)}
 	if err := connection.initialize(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -213,6 +263,16 @@ func TestExecApplicationProtocolCanary(t *testing.T) {
 	exitCode, err := connection.Wait()
 	if err != nil || exitCode != 23 || stdout.String() != "stdout-canary" || stderr.String() != "stderr-canary" {
 		t.Fatalf("exit=%d err=%v stdout=%q stderr=%q", exitCode, err, stdout.String(), stderr.String())
+	}
+	if err := connection.Cancel(); err != nil {
+		t.Fatalf("already-completed exec cancel lost known result: %v", err)
+	}
+	if code, err := connection.Wait(); err != nil || code != 23 {
+		t.Fatalf("cancel overwrote completed native result: %d/%v", code, err)
+	}
+	launches, readErr := os.ReadFile(root + "/launches")
+	if readErr != nil || string(launches) != "x" {
+		t.Fatalf("operation launch count changed: %q err=%v", launches, readErr)
 	}
 	_ = wire.Close()
 	select {

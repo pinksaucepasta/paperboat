@@ -27,7 +27,9 @@ func watchProcessExit(pid int) (<-chan struct{}, func()) {
 		return done, func() {}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
 	go func() {
+		defer close(stopped)
 		defer windows.CloseHandle(process)
 		for {
 			state, waitErr := windows.WaitForSingleObject(process, 250)
@@ -45,5 +47,5 @@ func watchProcessExit(pid int) (<-chan struct{}, func()) {
 			}
 		}
 	}()
-	return done, cancel
+	return done, func() { cancel(); <-stopped }
 }

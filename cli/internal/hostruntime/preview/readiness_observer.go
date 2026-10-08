@@ -70,16 +70,16 @@ func NewHTTPDispatchReadinessObserver(config HTTPDispatchReadinessObserverConfig
 }
 
 func (o *HTTPDispatchReadinessObserver) ObservePreviewReadiness(ctx context.Context, metadata DispatchReadiness, lease Lease, expectedGeneration int64) (Lease, error) {
-	if o == nil || ctx == nil || expectedGeneration < 1 || metadata.OperationID == "" || metadata.IdempotencyKey == "" || metadata.RequestID == "" || metadata.CorrelationID == "" || lease.ID == "" || lease.OwnerDeviceID == "" || lease.OwnerSessionID == "" || lease.ETag == "" || leaseGenerationForID(lease.ID, lease.ETag) != expectedGeneration {
+	if o == nil || ctx == nil || expectedGeneration < 1 || metadata.OperationID == "" || metadata.IdempotencyKey == "" || metadata.RequestID == "" || metadata.CorrelationID == "" || lease.ID == "" || lease.OwnerMachineID == "" || lease.OwnerSessionID == "" || lease.ETag == "" || leaseGenerationForID(lease.ID, lease.ETag) != expectedGeneration {
 		return Lease{}, ErrDispatchInvalid
 	}
 	body, err := json.Marshal(struct {
-		OwnerDeviceID   string `json:"owner_device_id"`
+		OwnerMachineID  string `json:"owner_machine_id"`
 		OwnerSessionID  string `json:"owner_session_id"`
 		AllocationState string `json:"allocation_state"`
 		EdgeState       string `json:"edge_state"`
 		OriginState     string `json:"origin_state"`
-	}{lease.OwnerDeviceID, lease.OwnerSessionID, "ready", "ready", "ready"})
+	}{lease.OwnerMachineID, lease.OwnerSessionID, "ready", "ready", "ready"})
 	if err != nil {
 		return Lease{}, errors.Join(ErrDispatchInvalid, err)
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 )
 
@@ -42,15 +43,19 @@ func TestFileTransferBrokerBindsHandleToUnixPeer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = broker.Close() })
 	broker.now = func() time.Time { return now }
 	request := localapi.FileTransferRequest{Schema: localapi.FileTransferSchemaV1, MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, OperationID: "operation_1", Credential: "credential_1", AccessSessionID: "access_1", Deadline: now.Add(time.Hour), MaximumBytes: 1 << 20}
 	owner := localapi.Peer{UID: 1000, GID: 1000, PID: 41}
-	setupCtx, cancelSetup := context.WithCancel(context.Background())
+	setupCtx, cancelSetup := context.WithCancel(supportref.WithContext(context.Background(), supportref.New()))
 	result, err := broker.PrepareFileTransfer(setupCtx, owner, request)
 	if err != nil || result.Handle == "" {
 		t.Fatalf("prepare result=%+v err=%v", result, err)
 	}
 	lifetime := <-lifetimes
+	if supportref.FromContext(lifetime) != supportref.FromContext(setupCtx) {
+		t.Fatal("transfer lifetime lost invocation reference")
+	}
 	cancelSetup()
 	select {
 	case <-lifetime.Done():
@@ -87,6 +92,7 @@ func TestFileTransferBrokerExpiresAndBoundsNativeLeases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = broker.Close() })
 	broker.now = func() time.Time { return now }
 	peer := localapi.Peer{UID: 1000, GID: 1000, PID: 41}
 	request := localapi.FileTransferRequest{Schema: localapi.FileTransferSchemaV1, MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, OperationID: "operation_1", Credential: "credential_1", AccessSessionID: "access_1", Deadline: now.Add(time.Hour), MaximumBytes: 1 << 20}

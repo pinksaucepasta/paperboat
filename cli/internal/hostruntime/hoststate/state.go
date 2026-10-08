@@ -38,7 +38,7 @@ var (
 	idPattern               = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 	codePattern             = regexp.MustCompile(`^[a-z][a-z0-9_]{0,127}$`)
 	hostnamePattern         = regexp.MustCompile(`^[a-z0-9.-]+$`)
-	stableEndpointIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	stableEndpointIDPattern = regexp.MustCompile(`^endpoint_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 )
 
 type State struct {
@@ -95,16 +95,17 @@ type ConfigSnapshot struct {
 // paperboat-server. References may identify a platform credential, but never
 // contain reusable credential material.
 type TunnelConfigSnapshot struct {
-	Schema         string              `json:"schema"`
-	Kind           string              `json:"kind"`
-	TunnelID       string              `json:"tunnel_id"`
-	Generation     uint64              `json:"generation"`
-	Name           string              `json:"name"`
-	DesiredState   string              `json:"desired_state"`
-	AccessMode     string              `json:"access_mode"`
-	StableEndpoint string              `json:"stable_endpoint"`
-	ExpiresAt      *time.Time          `json:"expires_at"`
-	Routes         []TunnelConfigRoute `json:"routes"`
+	Schema           string              `json:"schema"`
+	Kind             string              `json:"kind"`
+	TunnelID         string              `json:"tunnel_id"`
+	Generation       uint64              `json:"generation"`
+	Name             string              `json:"name"`
+	DesiredState     string              `json:"desired_state"`
+	AccessMode       string              `json:"access_mode"`
+	StableEndpointID string              `json:"stable_endpoint_id"`
+	StableEndpoint   string              `json:"stable_endpoint"`
+	ExpiresAt        *time.Time          `json:"expires_at"`
+	Routes           []TunnelConfigRoute `json:"routes"`
 }
 
 type TunnelConfigRoute struct {
@@ -182,10 +183,13 @@ func parseTunnelConfigSnapshot(canonical []byte, tunnelID string, generation uin
 		return TunnelConfigSnapshot{}, ErrInvalidState
 	}
 	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(canonical, &fields); err != nil || fields == nil {
+	if err := json.Unmarshal(canonical, &fields); err != nil {
+		return TunnelConfigSnapshot{}, safeStoreFailure("tunnel configuration snapshot shape is invalid", ErrInvalidState, err)
+	}
+	if fields == nil {
 		return TunnelConfigSnapshot{}, ErrInvalidState
 	}
-	for _, field := range []string{"schema", "kind", "tunnel_id", "generation", "name", "desired_state", "access_mode", "stable_endpoint", "expires_at", "routes"} {
+	for _, field := range []string{"schema", "kind", "tunnel_id", "generation", "name", "desired_state", "access_mode", "stable_endpoint_id", "stable_endpoint", "expires_at", "routes"} {
 		if _, ok := fields[field]; !ok {
 			return TunnelConfigSnapshot{}, fmt.Errorf("%w: snapshot field %s is required", ErrInvalidState, field)
 		}
@@ -194,10 +198,13 @@ func parseTunnelConfigSnapshot(canonical []byte, tunnelID string, generation uin
 	decoder := json.NewDecoder(bytes.NewReader(canonical))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&snapshot); err != nil {
-		return TunnelConfigSnapshot{}, fmt.Errorf("%w: snapshot shape: %v", ErrInvalidState, err)
+		return TunnelConfigSnapshot{}, safeStoreFailure("tunnel configuration snapshot shape is invalid", ErrInvalidState, err)
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err != nil {
+			return TunnelConfigSnapshot{}, safeStoreFailure("tunnel configuration snapshot has trailing data", ErrInvalidState, err)
+		}
 		return TunnelConfigSnapshot{}, ErrInvalidState
 	}
 	if snapshot.Schema != "paperboat.preview-tunnel/v1" || snapshot.Kind != "tunnel_config_snapshot" || snapshot.TunnelID != tunnelID || snapshot.Generation != generation {
@@ -215,7 +222,7 @@ func parseTunnelConfigSnapshot(canonical []byte, tunnelID string, generation uin
 	if !validStableEndpoint(snapshot.StableEndpoint) || snapshot.Routes == nil {
 		return TunnelConfigSnapshot{}, ErrInvalidState
 	}
-	if _, err := StableEndpointIDForEndpoint(snapshot.StableEndpoint); err != nil {
+	if err := ValidateStableEndpointID(snapshot.StableEndpointID); err != nil {
 		return TunnelConfigSnapshot{}, err
 	}
 	for index, route := range snapshot.Routes {
@@ -224,11 +231,17 @@ func parseTunnelConfigSnapshot(canonical []byte, tunnelID string, generation uin
 			return TunnelConfigSnapshot{}, ErrInvalidState
 		}
 		var rawRoutes []json.RawMessage
-		if err := json.Unmarshal(routeFields, &rawRoutes); err != nil || len(rawRoutes) != len(snapshot.Routes) {
+		if err := json.Unmarshal(routeFields, &rawRoutes); err != nil {
+			return TunnelConfigSnapshot{}, safeStoreFailure("tunnel configuration snapshot routes are invalid", ErrInvalidState, err)
+		}
+		if len(rawRoutes) != len(snapshot.Routes) {
 			return TunnelConfigSnapshot{}, ErrInvalidState
 		}
 		var routeObject map[string]json.RawMessage
-		if err := json.Unmarshal(rawRoutes[index], &routeObject); err != nil || routeObject == nil {
+		if err := json.Unmarshal(rawRoutes[index], &routeObject); err != nil {
+			return TunnelConfigSnapshot{}, safeStoreFailure("tunnel configuration snapshot route is invalid", ErrInvalidState, err)
+		}
+		if routeObject == nil {
 			return TunnelConfigSnapshot{}, ErrInvalidState
 		}
 		for _, field := range []string{"id", "name", "protocol", "match_type", "path_prefix", "origin_scheme", "origin_address", "preserve_host", "host_override", "tls_verification", "tls_server_name", "ca_reference", "mtls_credential_reference", "connect_timeout_ms", "idle_timeout_ms", "max_concurrent_streams", "desired_state"} {
@@ -237,7 +250,7 @@ func parseTunnelConfigSnapshot(canonical []byte, tunnelID string, generation uin
 			}
 		}
 		if err := validateTunnelConfigRoute(route); err != nil {
-			return TunnelConfigSnapshot{}, fmt.Errorf("%w: route %d: %v", ErrInvalidState, index, err)
+			return TunnelConfigSnapshot{}, safeStoreFailure("tunnel configuration snapshot route is invalid", ErrInvalidState, err)
 		}
 	}
 	return snapshot, nil
@@ -254,7 +267,7 @@ func validStableEndpoint(value string) bool {
 	return true
 }
 
-// ValidateStableEndpointID accepts only the canonical lowercase UUID used as
+// ValidateStableEndpointID accepts only the canonical endpoint_UUIDv4 used as
 // the immutable managed tunnel endpoint identity. Host runtime state must not
 // invent this identity from a display name, host name, or endpoint hash.
 func ValidateStableEndpointID(value string) error {
@@ -262,28 +275,6 @@ func ValidateStableEndpointID(value string) error {
 		return ErrInvalidState
 	}
 	return nil
-}
-
-// StableEndpointIDForEndpoint extracts the immutable managed tunnel identity
-// from the endpoint's first DNS label. The endpoint must use a canonical
-// lowercase UUID there; callers that have an authoritative ID must compare it
-// with the returned value.
-func StableEndpointIDForEndpoint(value string) (string, error) {
-	if !validStableEndpoint(value) {
-		return "", ErrInvalidState
-	}
-	parsed, err := url.Parse(value)
-	if err != nil {
-		return "", ErrInvalidState
-	}
-	labels := strings.Split(parsed.Hostname(), ".")
-	if len(labels) < 2 {
-		return "", ErrInvalidState
-	}
-	if err := ValidateStableEndpointID(labels[0]); err != nil {
-		return "", err
-	}
-	return labels[0], nil
 }
 
 func validateTunnelConfigRoute(route TunnelConfigRoute) error {
@@ -345,9 +336,9 @@ func validateTunnelConfigRoute(route TunnelConfigRoute) error {
 	if route.TLSServerName != nil && (len(*route.TLSServerName) == 0 || len(*route.TLSServerName) > 253 || strings.TrimSpace(*route.TLSServerName) != *route.TLSServerName || strings.ContainsAny(*route.TLSServerName, "\r\n")) {
 		return ErrInvalidState
 	}
-	for name, reference := range map[string]*string{"ca_reference": route.CAReference, "mtls_credential_reference": route.MTLSCredentialReference} {
+	for _, reference := range map[string]*string{"ca_reference": route.CAReference, "mtls_credential_reference": route.MTLSCredentialReference} {
 		if reference != nil && !safeSnapshotCredentialReference(*reference) {
-			return fmt.Errorf("%w: unsafe %s", ErrCredentialMaterial, name)
+			return safeStoreFailure("tunnel configuration contains an unsafe credential reference", ErrCredentialMaterial)
 		}
 	}
 	if route.ConnectTimeoutMs < 100 || route.ConnectTimeoutMs > 120000 || route.IdleTimeoutMs < 1000 || route.IdleTimeoutMs > 3600000 || route.MaxConcurrentStreams < 1 || route.MaxConcurrentStreams > 100000 {
@@ -375,7 +366,10 @@ func (s State) Validate() error {
 		if _, exists := tunnels[tunnel.ID]; exists {
 			return ErrInvalidState
 		}
-		if err := validateSnapshot(tunnel.DesiredSnapshot); err != nil || tunnel.DesiredSnapshot.TunnelID != tunnel.ID || tunnel.DesiredSnapshot.Generation != tunnel.DesiredGeneration {
+		if err := validateSnapshot(tunnel.DesiredSnapshot); err != nil {
+			return safeStoreFailure("host state desired snapshot is invalid", ErrInvalidState, err)
+		}
+		if tunnel.DesiredSnapshot.TunnelID != tunnel.ID || tunnel.DesiredSnapshot.Generation != tunnel.DesiredGeneration {
 			return ErrInvalidState
 		}
 		if err := validateStableEndpointIdentity(tunnel.StableEndpointID, tunnel.DesiredSnapshot); err != nil {
@@ -385,7 +379,10 @@ func (s State) Validate() error {
 			return ErrInvalidState
 		}
 		if tunnel.LastKnownGood != nil {
-			if err := validateSnapshot(*tunnel.LastKnownGood); err != nil || tunnel.LastKnownGood.TunnelID != tunnel.ID || tunnel.LastKnownGood.Generation != tunnel.AppliedGeneration || tunnel.LastKnownGood.Generation > tunnel.DesiredGeneration {
+			if err := validateSnapshot(*tunnel.LastKnownGood); err != nil {
+				return safeStoreFailure("host state last-known-good snapshot is invalid", ErrInvalidState, err)
+			}
+			if tunnel.LastKnownGood.TunnelID != tunnel.ID || tunnel.LastKnownGood.Generation != tunnel.AppliedGeneration || tunnel.LastKnownGood.Generation > tunnel.DesiredGeneration {
 				return ErrInvalidState
 			}
 			if err := validateStableEndpointIdentity(tunnel.StableEndpointID, *tunnel.LastKnownGood); err != nil {
@@ -442,7 +439,10 @@ func validateSnapshot(snapshot ConfigSnapshot) error {
 		return ErrInvalidState
 	}
 	canonical, err := canonicalSafeJSON(snapshot.Payload)
-	if err != nil || !bytes.Equal(canonical, snapshot.Payload) {
+	if err != nil {
+		return safeStoreFailure("host state snapshot is invalid", ErrInvalidState, err)
+	}
+	if !bytes.Equal(canonical, snapshot.Payload) {
 		return ErrInvalidState
 	}
 	digest := sha256.Sum256(canonical)
@@ -450,7 +450,7 @@ func validateSnapshot(snapshot ConfigSnapshot) error {
 		return ErrInvalidState
 	}
 	if _, err := parseTunnelConfigSnapshot(canonical, snapshot.TunnelID, snapshot.Generation); err != nil {
-		return ErrInvalidState
+		return safeStoreFailure("host state snapshot is invalid", ErrInvalidState, err)
 	}
 	return nil
 }
@@ -461,10 +461,9 @@ func validateStableEndpointIdentity(stableEndpointID string, snapshot ConfigSnap
 	}
 	decoded, err := ParseTunnelConfigSnapshot(snapshot.Payload, snapshot.TunnelID, snapshot.Generation)
 	if err != nil {
-		return ErrInvalidState
+		return safeStoreFailure("host state snapshot identity could not be checked", ErrInvalidState, err)
 	}
-	endpointID, err := StableEndpointIDForEndpoint(decoded.StableEndpoint)
-	if err != nil || endpointID != stableEndpointID {
+	if decoded.StableEndpointID != stableEndpointID {
 		return ErrInvalidState
 	}
 	return nil
@@ -506,9 +505,12 @@ func canonicalSafeJSON(payload []byte) ([]byte, error) {
 	decoder.UseNumber()
 	value, err := decodeJSONValue(decoder, 0)
 	if err != nil {
-		return nil, fmt.Errorf("%w: snapshot JSON: %v", ErrInvalidState, err)
+		return nil, safeStoreFailure("tunnel configuration snapshot JSON is invalid", ErrInvalidState, err)
 	}
 	if _, err := decoder.Token(); err != io.EOF {
+		if err != nil {
+			return nil, safeStoreFailure("tunnel configuration snapshot has trailing data", ErrInvalidState, err)
+		}
 		return nil, ErrInvalidState
 	}
 	object, ok := value.(map[string]any)
@@ -519,7 +521,10 @@ func canonicalSafeJSON(payload []byte) ([]byte, error) {
 		return nil, err
 	}
 	canonical, err := json.Marshal(value)
-	if err != nil || len(canonical) > maxSnapshotBytes {
+	if err != nil {
+		return nil, safeStoreFailure("tunnel configuration snapshot could not be canonicalized", ErrInvalidState, err)
+	}
+	if len(canonical) > maxSnapshotBytes {
 		return nil, ErrInvalidState
 	}
 	return canonical, nil
@@ -550,7 +555,7 @@ func decodeJSONValue(decoder *json.Decoder, depth int) (any, error) {
 				return nil, ErrInvalidState
 			}
 			if _, duplicate := object[key]; duplicate {
-				return nil, fmt.Errorf("duplicate key %q", key)
+				return nil, ErrInvalidState
 			}
 			child, err := decodeJSONValue(decoder, depth+1)
 			if err != nil {
@@ -558,7 +563,9 @@ func decodeJSONValue(decoder *json.Decoder, depth int) (any, error) {
 			}
 			object[key] = child
 		}
-		if token, err := decoder.Token(); err != nil || token != json.Delim('}') {
+		if token, err := decoder.Token(); err != nil {
+			return nil, err
+		} else if token != json.Delim('}') {
 			return nil, ErrInvalidState
 		}
 		return object, nil
@@ -571,7 +578,9 @@ func decodeJSONValue(decoder *json.Decoder, depth int) (any, error) {
 			}
 			array = append(array, child)
 		}
-		if token, err := decoder.Token(); err != nil || token != json.Delim(']') {
+		if token, err := decoder.Token(); err != nil {
+			return nil, err
+		} else if token != json.Delim(']') {
 			return nil, ErrInvalidState
 		}
 		return array, nil
@@ -600,11 +609,11 @@ func rejectCredentialMaterial(value any) error {
 				}
 				reference, ok := child.(string)
 				if !ok || !safeSnapshotCredentialReference(reference) {
-					return fmt.Errorf("%w: unsafe %s", ErrCredentialMaterial, key)
+					return ErrCredentialMaterial
 				}
 			}
 			if forbiddenCredentialKey(normalized) {
-				return fmt.Errorf("%w: %s", ErrCredentialMaterial, key)
+				return ErrCredentialMaterial
 			}
 			if err := rejectCredentialMaterial(child); err != nil {
 				return err

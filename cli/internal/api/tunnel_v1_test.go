@@ -109,17 +109,15 @@ func writeTunnelTestData(t *testing.T, w http.ResponseWriter, value any) {
 }
 
 func validTunnelTestValue() Tunnel {
-	return Tunnel{Schema: TunnelV1Schema, Kind: "tunnel", ID: "tun_1", AccountID: "acc_1", Generation: 3, ETag: `"tunnel:tun_1:3"`, Name: "demo", AccessMode: "private", DesiredState: "active", StableEndpointID: "123e4567-e89b-42d3-a456-426614174000", StableEndpoint: "https://123e4567-e89b-42d3-a456-426614174000.tunnels.example.test", CreatedByHostID: "host_1", CreatedByActorID: "user_1", SummaryCode: "ready", CreatedAt: time.Unix(1, 0).UTC(), UpdatedAt: time.Unix(2, 0).UTC()}
+	return Tunnel{Schema: TunnelV1Schema, Kind: "tunnel", ID: "tun_1", AccountID: "acc_1", Generation: 3, ETag: `"tunnel:tun_1:3"`, Name: "demo", AccessMode: "private", DesiredState: "active", StableEndpointID: "endpoint_123e4567-e89b-42d3-a456-426614174000", StableEndpoint: "https://123e4567-e89b-42d3-a456-426614174000.tunnels.example.test", CreatedByHostID: "host_1", CreatedByActorID: "user_1", SummaryCode: "ready", CreatedAt: time.Unix(1, 0).UTC(), UpdatedAt: time.Unix(2, 0).UTC()}
 }
 
-func TestTunnelV1RejectsNonCanonicalOrMismatchedStableEndpointIdentity(t *testing.T) {
+func TestTunnelV1RejectsUnsafeEndpointIdentityAndURL(t *testing.T) {
 	for name, mutate := range map[string]func(*Tunnel){
-		"name-derived ID": func(value *Tunnel) { value.StableEndpointID = "demo" },
-		"uppercase UUID":  func(value *Tunnel) { value.StableEndpointID = "123E4567-E89B-42D3-A456-426614174000" },
-		"mismatched label": func(value *Tunnel) {
-			value.StableEndpoint = "https://223e4567-e89b-42d3-a456-426614174000.tunnels.example.test"
-		},
-		"bare base": func(value *Tunnel) { value.StableEndpoint = "https://tunnels.example.test" },
+		"name-derived ID":   func(value *Tunnel) { value.StableEndpointID = "demo" },
+		"uppercase UUID":    func(value *Tunnel) { value.StableEndpointID = "endpoint_123E4567-E89B-42D3-A456-426614174000" },
+		"invalid DNS label": func(value *Tunnel) { value.StableEndpoint = "https://unsafe_label.tunnels.example.test" },
+		"wildcard URL":      func(value *Tunnel) { value.StableEndpoint = "https://*.tunnels.example.test" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			value := validTunnelTestValue()
@@ -354,7 +352,7 @@ func TestTunnelOperationV1IsBoundAndRedactsFailureText(t *testing.T) {
 	operation := validTunnelOperationTestValue("tunnel", "tun_1")
 	operation.Phase = "failed"
 	operation.State = "failed"
-	operation.Error = &PreviewTunnelAPIError{Schema: TunnelV1Schema, Kind: "error", Code: "origin_failed", Component: "origin", Message: "Bearer must-not-escape", Outcome: "failed", RepairAction: "replace token secret", RequestID: "request_1", CorrelationID: "correlation_1"}
+	operation.Error = &PreviewTunnelAPIError{Schema: TunnelV1Schema, Kind: "error", Code: "origin_failed", Component: "origin", Message: "PRIVATE_PAYLOAD", Outcome: "failed", RepairAction: "PRIVATE_ACTION", RequestID: "request_1", CorrelationID: "correlation_1"}
 	client := tunnelTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/v1/operations/operation_1" {
 			t.Fatalf("request=%s %s", r.Method, r.URL.Path)
@@ -365,7 +363,7 @@ func TestTunnelOperationV1IsBoundAndRedactsFailureText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.Error == nil || out.Error.Message != "[REDACTED]" || out.Error.RepairAction != "[REDACTED]" {
+	if out.Error == nil || out.Error.Message != "The operation did not complete." || out.Error.RepairAction != "" || out.Error.Code != "origin_failed" {
 		t.Fatalf("operation=%#v", out)
 	}
 }
@@ -532,7 +530,7 @@ func TestTunnelPrivateAccessDiscoveryV1WireContract(t *testing.T) {
 			t.Fatalf("body = %q, read error = %v", body, readErr)
 		}
 		admission := TunnelPrivateAccessAdmission{
-			Schema: TunnelV1Schema, Kind: "private_access_carrier_admission", AccountID: "acc_1", DeviceID: "device_1", InstallationGeneration: 1,
+			Schema: TunnelV1Schema, Kind: "private_access_carrier_admission", AccountID: "acc_1", MachineID: "machine_1", InstallationGeneration: 1,
 			AccessorPublicKey: strings.Repeat("A", 43), AccessorThumbprint: strings.Repeat("B", 43), ResourceKind: "tunnel", ResourceID: "tun_1", TunnelName: "demo", RouteName: "private", ConnectorID: "connector_1", CarrierSessionID: "session_1", RouteID: "route_1", RouteGeneration: 1, SessionGeneration: 1, ProcessGeneration: 1, ConfigGeneration: 1, AssignmentGeneration: 1, AssignmentID: "assignment_1", ConfigContentHash: "sha256:" + strings.Repeat("a", 64), EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_001", EdgeCarrierServerSPKISHA256: "sha256:" + strings.Repeat("b", 64), EdgeCarrierServerCertificateChainPEM: "certificate-chain", Protocol: "http", Hostname: "app.example.test", MatchType: "exact", EdgeEndpoints: []string{"tls://edge.example.test:25001", "quic://edge.example.test:25002"}, ExpiresAt: time.Now().UTC().Add(time.Hour), TunnelID: "tun_1", CarrierConnectorID: "connector_1",
 		}
 		writeTunnelTestData(t, w, TunnelPrivateAccessSnapshot{Schema: TunnelV1Schema, Kind: "private_access_carrier_snapshot", Complete: true, Admissions: []TunnelPrivateAccessAdmission{admission}})
@@ -591,5 +589,70 @@ func TestTunnelDomainCertificateStrategyV1(t *testing.T) {
 	}
 	if out.CertificateStrategy != "managed" {
 		t.Fatalf("certificate strategy = %q", out.CertificateStrategy)
+	}
+}
+
+func TestTunnelV1StateMutationReadsCanonicalResourceAfterOperation(t *testing.T) {
+	client := tunnelTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			writeTunnelTestData(t, w, validTunnelOperationTestValue("tunnel", "tun_1"))
+		case http.MethodGet:
+			tunnel := validTunnelTestValue()
+			tunnel.DesiredState = "paused"
+			w.Header().Set("ETag", tunnel.ETag)
+			writeTunnelTestData(t, w, tunnel)
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	})
+	out, err := client.ChangeTunnelStateV1(context.Background(), "tun_1", "pause", `"tunnel:tun_1:3"`, "idem_1")
+	if err != nil || out.Tunnel.Schema != TunnelV1Schema || out.Tunnel.DesiredState != "paused" {
+		t.Fatalf("mutation = %#v, error %v", out, err)
+	}
+}
+
+func TestTunnelEndpointIdentityIsIndependentOfHostname(t *testing.T) {
+	value := validTunnelTestValue()
+	value.StableEndpoint = "https://brave-blue-beacon-0421.tunnels.example.test"
+	if err := validateTunnel(value); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTunnelDomainMutationReadsCanonicalResourceAfterOperation(t *testing.T) {
+	for _, action := range []string{"create", "verify"} {
+		t.Run(action, func(t *testing.T) {
+			domain := TunnelDomain{Schema: TunnelV1Schema, Kind: "domain_binding", ID: "domain_1", AccountID: "account_1", TunnelID: "tun_1", RouteID: "route_1", Hostname: "app.example.test", MatchType: "exact", CertificateStrategy: "managed", State: "waiting_dns", DNS: TunnelDomainDNS{Target: "edge.example.test"}, Certificate: TunnelDomainCertificate{State: "not_requested"}, Generation: 2, ETag: `"domain:domain_1:2"`}
+			gets := 0
+			client := tunnelTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodPost:
+					writeTunnelTestData(t, w, validTunnelOperationTestValue("domain_binding", "domain_1"))
+				case http.MethodGet:
+					if r.URL.Path != "/v1/tunnels/tun_1/domains/domain_1" {
+						t.Fatalf("path=%s", r.URL.Path)
+					}
+					gets++
+					if r.Header.Get("Accept-Encoding") != "identity" {
+						t.Fatal("canonical domain read must preserve its strong ETag")
+					}
+					w.Header().Set("ETag", domain.ETag)
+					writeTunnelTestData(t, w, domain)
+				default:
+					t.Fatalf("method=%s", r.Method)
+				}
+			})
+			var out TunnelDomainMutation
+			var err error
+			if action == "create" {
+				out, err = client.CreateTunnelDomainV1(context.Background(), "tun_1", "idem_1", TunnelDomainInput{Hostname: domain.Hostname, RouteID: domain.RouteID, Provider: "generic"})
+			} else {
+				out, err = client.MutateTunnelDomainV1(context.Background(), "tun_1", "domain_1", "verify", `"domain:domain_1:1"`, "idem_1")
+			}
+			if err != nil || gets != 1 || out.Domain.Hostname != domain.Hostname || out.Domain.State != domain.State || out.Operation.ResourceID != domain.ID {
+				t.Fatalf("result=%#v gets=%d error=%v", out, gets, err)
+			}
+		})
 	}
 }

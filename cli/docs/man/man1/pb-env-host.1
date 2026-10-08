@@ -2,7 +2,7 @@
 .TH "PB-ENV-HOST" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-env-host - Manage encrypted host ENV projections
+pb-env-host - Inspect automatic workspace ENV delivery
 
 
 .SH SYNOPSIS
@@ -10,13 +10,13 @@ pb-env-host - Manage encrypted host ENV projections
 
 
 .SH DESCRIPTION
-Manage encrypted host ENV projections
+Inspect automatic workspace ENV delivery
 
 .PP
-Provision an exact selection of encrypted ENV values to an enrolled host. The selection must be explicit and can be emptied deliberately.
+Inspect automatic encrypted ENV delivery for the active workspace. Personal globals apply to your devices with device overrides; Team globals have private member and device overrides. Delivery does not require selecting names or provisioning a host.
 
 .PP
-ENV values are encrypted before they leave the client. Commands select personal, team, or host scope explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
+ENV values are encrypted before they leave the client. The interactive picker separates shared Team globals, your private member globals, and device overrides in the active workspace; commands select exact scopes explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
 
 .PP
 With --json, this command group lists its available commands.
@@ -43,6 +43,10 @@ With --json, this command group lists its available commands.
 \fB--server\fP=""
 	paperboat-server base URL override
 
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
 
 .SH SEE ALSO
-\fBpb-env(1)\fP, \fBpb-env-host-provision(1)\fP
+\fBpb-env(1)\fP, \fBpb-env-host-show(1)\fP

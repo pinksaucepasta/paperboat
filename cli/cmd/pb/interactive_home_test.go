@@ -149,3 +149,38 @@ func TestHomeTextFitsTinyTerminal(t *testing.T) {
 		}
 	}
 }
+
+func TestHomeMutationFailureRemainsFailureAfterDisplay(t *testing.T) {
+	previousRoot, previousViewer := newInteractiveRootCommand, showHomeText
+	t.Cleanup(func() { newInteractiveRootCommand = previousRoot; showHomeText = previousViewer })
+	sentinel := invocationError(errors.New("mutation rejected; state unchanged"))
+	newInteractiveRootCommand = func() *cobra.Command {
+		root := &cobra.Command{Use: "pb", SilenceErrors: true, SilenceUsage: true}
+		root.PersistentFlags().Bool("no-customization", false, "")
+		root.AddCommand(&cobra.Command{Use: "mutate", RunE: func(command *cobra.Command, args []string) error { return sentinel }})
+		return root
+	}
+	displayed := 0
+	showHomeText = func(command *cobra.Command, title, content string) error {
+		displayed++
+		if !strings.Contains(content, userFacingError(sentinel)) {
+			t.Errorf("failure omitted: %q", content)
+		}
+		return nil
+	}
+	parent := &cobra.Command{Use: "pb"}
+	parent.SetContext(context.Background())
+	parent.Flags().Bool("no-customization", true, "")
+	var diagnostic bytes.Buffer
+	parent.SetErr(&diagnostic)
+	err := runHomeResult(parent, []string{"mutate"})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("mutation failure became success: %v", err)
+	}
+	if err := showHomeFailure(parent, err); err != nil {
+		t.Fatal(err)
+	}
+	if displayed != 1 {
+		t.Fatalf("failure displayed %d times", displayed)
+	}
+}

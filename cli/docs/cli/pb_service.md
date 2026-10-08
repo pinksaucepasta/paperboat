@@ -6,7 +6,7 @@ Manage the Paperboat background daemon service
 
 Manage the Paperboat background daemon service
 
-Install, start, stop, restart, inspect, or uninstall the current-user daemon service. The service supervises pb daemon and is separate from the privileged device guard.
+Install, start, stop, restart, inspect, or uninstall the current-user daemon service. The service supervises pb daemon and is separate from the privileged machine guard.
 
 With --json, this command group lists its available commands.
 
@@ -23,6 +23,7 @@ With --json, this command group lists its available commands.
       --json               print machine-readable JSON
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO

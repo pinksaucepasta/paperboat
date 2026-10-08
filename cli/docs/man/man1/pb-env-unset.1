@@ -13,10 +13,10 @@ pb-env-unset - Remove one environment variable
 Remove one environment variable
 
 .PP
-Delete one ENV name from the selected personal, team, or host scope. the confirmation code confirms removal; other names and scopes remain intact.
+Delete one ENV name from the selected personal, team, or host scope. The confirmation code confirms removal. Authorized devices receive refreshed encrypted layers with the deleted value omitted; running processes retain their environment.
 
 .PP
-ENV values are encrypted before they leave the client. Commands select personal, team, or host scope explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
+ENV values are encrypted before they leave the client. The interactive picker separates shared Team globals, your private member globals, and device overrides in the active workspace; commands select exact scopes explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
 
 .PP
 JSON output is supported with --json.
@@ -36,7 +36,7 @@ JSON output is supported with --json.
 
 .PP
 \fB--machine\fP=""
-	machine name or ID; defaults to the personal scope
+	Private device override in the active workspace; omitted uses your global values
 
 .PP
 \fB--team\fP=""
@@ -54,6 +54,10 @@ JSON output is supported with --json.
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

@@ -8,11 +8,11 @@ import (
 
 func TestValidateRuntimeDescriptorAcceptsEmptyManifestContract(t *testing.T) {
 	credential := Credential{
-		AssignmentID: "assignment", EnvironmentID: "environment", MachineID: "helper",
+		AssignmentID: "assignment", AssignmentVersion: 1, EnvironmentID: "environment", MachineID: "helper",
 		WarningRevision: "warning",
 	}
 	descriptor := RuntimeDescriptor{
-		WriteMode: "read_only", Mode: ModePullOnly, RepositoryID: "repository", AssignmentID: credential.AssignmentID,
+		WriteMode: "read_only", Mode: ModePullOnly, RepositoryID: "repository", AssignmentID: credential.AssignmentID, AssignmentVersion: credential.AssignmentVersion,
 		EnvironmentID: credential.EnvironmentID, MachineID: credential.MachineID, InstallationGeneration: 1,
 		WarningRevision: credential.WarningRevision,
 		Policy: RuntimePolicy{

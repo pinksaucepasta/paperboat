@@ -64,14 +64,6 @@ type NetworkPeer struct {
 	Identity NetworkBinding `json:"identity"`
 	Scopes   []NetworkScope `json:"scopes"`
 }
-type RelayPair struct {
-	ResourceKind       string         `json:"resource_kind"`
-	ResourceID         string         `json:"resource_id"`
-	ResourceGeneration uint64         `json:"resource_generation"`
-	First              NetworkBinding `json:"first"`
-	Second             NetworkBinding `json:"second"`
-	ExpiresAt          int64          `json:"expires_at"`
-}
 type NetworkConfiguration struct {
 	Version    int            `json:"version"`
 	Issuer     string         `json:"iss"`
@@ -81,7 +73,6 @@ type NetworkConfiguration struct {
 	Generation uint64         `json:"generation"`
 	Self       NetworkBinding `json:"self"`
 	Peers      []NetworkPeer  `json:"peers"`
-	RelayPairs []RelayPair    `json:"relay_pairs,omitempty"`
 }
 
 // NetworkKeys is satisfied by the existing authenticated, bounded JWKS cache.
@@ -242,7 +233,7 @@ func (a *Authority) verify(ctx context.Context, token string, now time.Time) (Ne
 	if err != nil || !found || len(pub) != ed25519.PublicKeySize || !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), sig) || strictDecode(body, &cfg) != nil {
 		return cfg, "", ErrAuthority
 	}
-	if cfg.Version != 1 || cfg.Issuer != a.options.Issuer || cfg.Audience != "paperboat-network" || cfg.Generation == 0 || cfg.Generation > 1<<53-1 || cfg.IssuedAt <= 0 || cfg.IssuedAt > now.Add(derpquic.MaxClockSkew).Unix() || cfg.ExpiresAt <= cfg.IssuedAt || cfg.ExpiresAt-cfg.IssuedAt > int64(ConfigurationTTL/time.Second) || !validBinding(cfg.Self) || len(cfg.Peers) > MaxFlows || len(cfg.RelayPairs) > 16 {
+	if cfg.Version != 1 || cfg.Issuer != a.options.Issuer || cfg.Audience != "paperboat-network" || cfg.Generation == 0 || cfg.Generation > 1<<53-1 || cfg.IssuedAt <= 0 || cfg.IssuedAt > now.Add(derpquic.MaxClockSkew).Unix() || cfg.ExpiresAt <= cfg.IssuedAt || cfg.ExpiresAt-cfg.IssuedAt > int64(ConfigurationTTL/time.Second) || !validBinding(cfg.Self) || len(cfg.Peers) > MaxFlows {
 		return cfg, "", ErrAuthority
 	}
 	if cfg.ExpiresAt <= now.Unix() {
@@ -267,8 +258,8 @@ func (a *Authority) verify(ctx context.Context, token string, now time.Time) (Ne
 		seen := map[string]bool{}
 		for _, scope := range p.Scopes {
 			scopes++
-			networkOnly := scope.ResourceKind == "device_network" && scope.Capability == "connect" && b.AccountID == s.AccountID
-			validResource := networkOnly || scope.ResourceKind == "inspector" && scope.Capability == "inspector" || scope.ResourceKind == "machine_access" && (scope.Capability == "terminal" || scope.Capability == "exec" || scope.Capability == "managed_ssh" || scope.Capability == "file_transfer" || scope.Capability == "private_access") || scope.ResourceKind == "codex_session" && scope.Capability == "codex"
+			networkOnly := scope.ResourceKind == "machine_network" && scope.Capability == "connect" && b.AccountID == s.AccountID
+			validResource := networkOnly || scope.ResourceKind == "config_compare" && scope.Capability == "config_compare" || scope.ResourceKind == "inspector" && scope.Capability == "inspector" || scope.ResourceKind == "machine_access" && (scope.Capability == "terminal" || scope.Capability == "exec" || scope.Capability == "managed_ssh" || scope.Capability == "file_transfer" || scope.Capability == "private_access") || scope.ResourceKind == "codex_session" && scope.Capability == "codex"
 			if scopes > 128 || !validResource || !validID(scope.ResourceID) || scope.ResourceGeneration != 1 || scope.Port != NetworkPort || scope.ExpiresAt < cfg.ExpiresAt || scope.Direction != "dial" && scope.Direction != "accept" || s.Role == "cli" && scope.Direction != "dial" || !networkOnly && (s.Role == b.Role || s.Role == "machine" && scope.Direction != "accept") {
 				return cfg, "", ErrAuthority
 			}
@@ -278,15 +269,6 @@ func (a *Authority) verify(ctx context.Context, token string, now time.Time) (Ne
 			}
 			seen[k] = true
 		}
-	}
-	pairs := map[string]bool{}
-	for _, pair := range cfg.RelayPairs {
-		first, second := pair.First, pair.Second
-		pairID := first.DiscoPublicKey + "\x00" + second.DiscoPublicKey
-		if s.Role != "machine" || pair.ResourceKind != "machine_access" || !validID(pair.ResourceID) || pair.ResourceGeneration != 1 || pair.ExpiresAt < cfg.ExpiresAt || !validBinding(first) || !validBinding(second) || first.AccountID != s.AccountID || second.AccountID != s.AccountID || first.EndpointID == second.EndpointID || first.EndpointID == s.EndpointID || second.EndpointID == s.EndpointID || first.Role != "cli" || second.Role != "machine" || pairs[pairID] {
-			return cfg, "", ErrAuthority
-		}
-		pairs[pairID] = true
 	}
 	hash := sha256.Sum256(body)
 	return cfg, hex.EncodeToString(hash[:]), nil
@@ -419,24 +401,6 @@ func (a *Authority) Apply(ctx context.Context, token string) error {
 	a.current = &cfg
 	a.expiresAt.Store(cfg.ExpiresAt)
 	a.private = selected
-	a.relay.mu.Lock()
-	device, addresses := a.relay.device, append([]netip.AddrPort(nil), a.relay.deviceAddresses...)
-	a.relay.mu.Unlock()
-	if len(cfg.RelayPairs) == 0 && device != nil {
-		_ = device.close()
-		a.relay.mu.Lock()
-		if a.relay.device == device {
-			a.relay.device = nil
-		}
-		a.relay.mu.Unlock()
-	} else if device != nil {
-		device.update(cfg.RelayPairs)
-	} else if len(cfg.RelayPairs) != 0 && len(addresses) != 0 {
-		if err := a.startDeviceRelayLocked(addresses); err != nil {
-			a.dropLocked()
-			return err
-		}
-	}
 	if err := a.replaceLocked(); err != nil {
 		a.dropLocked()
 		return err
@@ -466,6 +430,7 @@ func (a *Authority) dropLocked() {
 	a.relay.recovery = nil
 	a.relay.tokens = nil
 	a.relay.grants = nil
+	a.relay.usagePeers = nil
 	a.relay.mu.Unlock()
 	if recovery != nil {
 		recovery.stop()
@@ -486,12 +451,6 @@ func (a *Authority) dropLocked() {
 		a.clientEngine.Close()
 		a.clientEngine = nil
 	}
-	a.relay.mu.Lock()
-	if a.relay.device != nil {
-		_ = a.relay.device.close()
-		a.relay.device = nil
-	}
-	a.relay.mu.Unlock()
 	a.current = nil
 	a.private = key.NodePrivate{}
 }
@@ -527,7 +486,7 @@ func (a *Authority) Allows(peerID, resourceID, capability, direction string) boo
 	for _, p := range a.current.Peers {
 		if p.Identity.EndpointID == peerID {
 			for _, s := range p.Scopes {
-				if s.ResourceKind != "device_network" && s.ResourceID == resourceID && s.Capability == capability && s.Direction == direction {
+				if s.ResourceKind != "machine_network" && s.ResourceID == resourceID && s.Capability == capability && s.Direction == direction {
 					return true
 				}
 			}

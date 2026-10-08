@@ -99,7 +99,7 @@ func TestOwnerSessionLeaseManagerLocalAndDispatchReferencesAreIndependent(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	dispatchDone, err := registry.OwnerSessionDoneForTarget("account_01", "machine_01", lease.OwnerSessionID, target)
+	dispatchDone, err := registry.OwnerSessionDoneForTarget("account_01", "machine_01", lease.OwnerSessionID, "local_lease", target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestOwnerSessionLeaseManagerBackgroundOwnershipIsAbsoluteAndIsolated(t *tes
 	if _, err := manager.Heartbeat(lease.ID, lease.Token); !errors.Is(err, ErrOwnerSessionLeaseConflict) {
 		t.Fatalf("background heartbeat = %v", err)
 	}
-	if _, err := registry.OwnerSessionDoneForTarget("account_01", "machine_01", lease.OwnerSessionID, target); err != nil {
+	if _, err := registry.OwnerSessionDoneForTarget("account_01", "machine_01", lease.OwnerSessionID, "local_lease", target); err != nil {
 		t.Fatal(err)
 	}
 	manager.Sweep(now.Add(time.Second)) // observes the attached daemon session
@@ -164,7 +164,7 @@ func TestOwnerSessionLeaseManagerBackgroundOwnershipIsAbsoluteAndIsolated(t *tes
 	}
 	now = expiresAt.Add(time.Millisecond)
 	manager.Sweep(now)
-	if _, err := registry.OwnerSessionDoneForTarget("account_01", "machine_01", lease.OwnerSessionID, target); !errors.Is(err, ErrOwnerSessionBinding) {
+	if _, err := registry.OwnerSessionDoneForTarget("account_01", "machine_01", lease.OwnerSessionID, "local_lease", target); !errors.Is(err, ErrOwnerSessionBinding) {
 		t.Fatalf("expired background dispatch = %v", err)
 	}
 	if err := manager.Release(lease.ID, lease.Token); err != nil {
@@ -209,7 +209,7 @@ func TestOwnerSessionLeaseRetirementRejectsDelayedDispatch(t *testing.T) {
 	}
 	now = now.Add(21 * time.Second)
 	manager.Sweep(now)
-	if _, err := registry.OwnerSessionDoneForTarget("account_01", "machine_01", lease.OwnerSessionID, target); !errors.Is(err, ErrOwnerSessionBinding) {
+	if _, err := registry.OwnerSessionDoneForTarget("account_01", "machine_01", lease.OwnerSessionID, "local_lease", target); !errors.Is(err, ErrOwnerSessionBinding) {
 		t.Fatalf("retired local owner dispatch error = %v", err)
 	}
 }

@@ -45,7 +45,7 @@ func (k task32NativeKeys) Lookup(_ context.Context, id string) (ed25519.PublicKe
 	return v, ok, nil
 }
 
-// startInspectorNativeFixture uses the real device token, endpoint enrollment,
+// startInspectorNativeFixture uses the real machine token, endpoint enrollment,
 // signed network admission and machine proof handlers of the linked authority.
 func startInspectorNativeFixture(t *testing.T, d task32OwnerDescriptor, service *inspectorapi.Service) {
 	t.Helper()

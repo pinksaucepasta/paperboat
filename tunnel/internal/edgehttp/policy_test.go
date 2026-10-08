@@ -80,7 +80,7 @@ func TestPrivateDurableRouteRejectsPublicBrowserProof(t *testing.T) {
 	rule := route.RouteRule{
 		ID: "route_private_01", Revision: 1, Generation: 1,
 		RouteID: "route_private_01", RouteGeneration: 1,
-		AssignmentGeneration: 5, ResourceKind: "preview", SessionGeneration: 4, AccountID: "account_1", HostID: "machine_1", TunnelID: "preview_1", ConnectorSessionID: "session_1", ConnectorProcessGeneration: 2, ConfigGeneration: 3, Node: "edge_1", EdgeProcessEpoch: "epoch_1",
+		AssignmentID: "operation_1", AssignmentGeneration: 5, ResourceKind: "preview", SessionGeneration: 4, AccountID: "account_1", HostID: "machine_1", TunnelID: "preview_1", ConnectorSessionID: "session_1", ConnectorProcessGeneration: 2, ConfigGeneration: 3, Node: "edge_1", EdgeProcessEpoch: "epoch_1",
 		Kind: route.TunnelHTTPSWSS, Hostname: "tunnel.example.test", Target: "carrier://tunnel_01/route_private_01",
 		Protocol: "http", AccessMode: "private", DesiredState: "active", ObservedState: "ready",
 	}
@@ -106,7 +106,7 @@ func TestPrivateDurableRouteRejectsPublicBrowserProof(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "https://tunnel.example.test/", nil)
 	request.Host = "tunnel.example.test"
 	request.Header.Set("X-Paperboat-Access-Authorization", "Bearer proof")
-	request.Header.Set("X-Paperboat-Access-Device-ID", "device_accessor_01")
+	request.Header.Set("X-Paperboat-Access-Machine-ID", "machine_accessor_01")
 	response := httptest.NewRecorder()
 	policy.ServeHTTP(response, request)
 	if response.Code != http.StatusUnauthorized {
@@ -121,7 +121,7 @@ func TestPrivateDurableRouteAcceptsOnlyInternalCarrierToken(t *testing.T) {
 	routes := route.NewRegistry("preview.example.test", "runtime.example.test")
 	rule := route.RouteRule{
 		ID: "route_private_01", Revision: 1, RouteID: "route_private_01", RouteGeneration: 1, Generation: 1,
-		AssignmentGeneration: 5, ResourceKind: "preview", SessionGeneration: 4, AccountID: "account_1", HostID: "machine_1", TunnelID: "preview_1", ConnectorSessionID: "session_1", ConnectorProcessGeneration: 2, ConfigGeneration: 3, Node: "edge_1", EdgeProcessEpoch: "epoch_1",
+		AssignmentID: "operation_1", AssignmentGeneration: 5, ResourceKind: "preview", SessionGeneration: 4, AccountID: "account_1", HostID: "machine_1", TunnelID: "preview_1", ConnectorSessionID: "session_1", ConnectorProcessGeneration: 2, ConfigGeneration: 3, Node: "edge_1", EdgeProcessEpoch: "epoch_1",
 		Kind: route.TunnelHTTPSWSS, Hostname: "tunnel.example.test", Target: "carrier://tunnel_01/route_private_01",
 		Protocol: "http", AccessMode: "private", DesiredState: "active", ObservedState: "ready",
 	}
@@ -137,7 +137,7 @@ func TestPrivateDurableRouteAcceptsOnlyInternalCarrierToken(t *testing.T) {
 	const token = "private-access-token-0123456789abcdef"
 	connections, _ := NewPrivateAccessConnectionRegistry(8)
 	expires := time.Now().Add(time.Minute)
-	accessRequest := connectorprotocol.PrivateAccessRequest{AccountID: "account_1", ResourceKind: "preview", ResourceID: "preview_1", RouteID: "route_private_01", Audience: "paperboat-preview-http", DeviceID: "machine_1", SessionID: "installation_4", InstallationGeneration: 4, ExpiresAt: expires, Nonce: "nonce_1", OperationID: "operation_1", CarrierSessionID: "session_1", RouteGeneration: 1, ProcessGeneration: 2, ConfigGeneration: 3, SessionGeneration: 4, AssignmentGeneration: 5, EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_1", Protocol: "http", Method: http.MethodConnect, Host: "tunnel.example.test", Path: "/", IdempotencyKey: "access_1", RequestID: "request_1", CorrelationID: "correlation_1"}
+	accessRequest := connectorprotocol.PrivateAccessRequest{AccountID: "account_1", ResourceKind: "preview", ResourceID: "preview_1", RouteID: "route_private_01", Audience: "paperboat-preview-http", MachineID: "machine_1", SessionID: "installation_4", InstallationGeneration: 4, ExpiresAt: expires, Nonce: "nonce_1", OperationID: "operation_1", CarrierSessionID: "session_1", RouteGeneration: 1, ProcessGeneration: 2, ConfigGeneration: 3, SessionGeneration: 4, AssignmentGeneration: 5, EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_1", Protocol: "http", Method: http.MethodConnect, Host: "tunnel.example.test", Path: "/", IdempotencyKey: "access_1", RequestID: "request_1", CorrelationID: "correlation_1"}
 	_, err := connections.Register("127.0.0.1:41001", accessRequest, expires)
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +152,7 @@ func TestPrivateDurableRouteAcceptsOnlyInternalCarrierToken(t *testing.T) {
 	called := false
 	policy, err := New(Config{
 		PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test",
-		MaxHeaderBytes: 4096, MaxBodyBytes: 1024, Routes: routes, PrivateAccessToken: token, PrivateAccessConnections: connections,
+		MaxHeaderBytes: 4096, MaxBodyBytes: 1024, Routes: routes, PrivateAccessConnections: connections,
 	}, http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
 		called = true
 		if request.Header.Get("X-Paperboat-Private-Carrier") != "" {
@@ -165,7 +165,7 @@ func TestPrivateDurableRouteAcceptsOnlyInternalCarrierToken(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "https://tunnel.example.test/", nil)
 	request.Host = "tunnel.example.test"
 	request.Header.Set("X-Paperboat-Private-Carrier", token)
-	request.Header.Set("X-Paperboat-Private-Connection", "127.0.0.1:41001")
+	request.RemoteAddr = "127.0.0.1:41001"
 	response := httptest.NewRecorder()
 	policy.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !called {

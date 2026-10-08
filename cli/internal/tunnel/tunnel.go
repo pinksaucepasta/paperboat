@@ -1,6 +1,5 @@
-// Package tunnel abstracts reaching a project VM's terminal. In production the
-// connection is carried through `paperboat-tunnel` (never a raw exposed port); the
-// Tunnel/Conn interfaces keep the production transport testable through injected doubles.
+// Package tunnel attaches to an enrolled machine's terminal through its authorized
+// native peer stream. Tunnel and Conn expose the same contract to the CLI and tests.
 package tunnel
 
 import (
@@ -117,7 +116,7 @@ func readBufferedChunksWithWait(p []byte, pending *[]byte, out <-chan []byte, wa
 	return n, nil
 }
 
-// Tunnel dials a project VM and attaches its terminal.
+// Tunnel dials an enrolled machine and attaches its terminal.
 type Tunnel interface {
 	Dial(ctx context.Context, info resolver.ConnectInfo) (Conn, error)
 }

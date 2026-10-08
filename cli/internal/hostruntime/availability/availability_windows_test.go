@@ -2,6 +2,8 @@ package availability
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -46,5 +48,39 @@ func TestWindowsServicePublishesInitialObservationBeforeStartReturns(t *testing.
 	defer shutdownCancel()
 	if err := service.Shutdown(shutdownCtx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWindowsHostClientAcceptsOnlyOwnerPipe(t *testing.T) {
+	canonical, err := windowsOwnerHostServicePipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{canonical, strings.ToUpper(canonical)} {
+		client, err := NewHostClient(path, time.Second)
+		if err != nil || client.socketPath != canonical {
+			t.Fatalf("owner pipe rejected: %v", err)
+		}
+	}
+	for _, path := range []string{`\\.\pipe\PaperboatHostService`, `\\.\pipe\Other`, canonical + "-invalid", `\\.\pipe\PaperboatHostService-u000000000000000000000000`} {
+		if _, err := NewHostClient(path, time.Second); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("foreign pipe accepted: %q", path)
+		}
+		if _, err := dialAvailabilityHostService(context.Background(), path, time.Second); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("foreign pipe dial accepted: %q", path)
+		}
+	}
+	for _, timeout := range []time.Duration{0, -time.Second} {
+		if _, err := NewHostClient(canonical, timeout); !errors.Is(err, ErrInvalid) {
+			t.Fatal("invalid timeout accepted")
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if conn, err := dialAvailabilityHostService(ctx, canonical, time.Second); !errors.Is(err, context.Canceled) {
+		if conn != nil {
+			conn.Close()
+		}
+		t.Fatalf("owner pipe cancellation: %v", err)
 	}
 }

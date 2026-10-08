@@ -266,7 +266,7 @@ func TestCanonicalHelperTerminalFramingIOResizeAndExit(t *testing.T) {
 					acks <- binary.BigEndian.Uint64(data[5:13])
 				case 4:
 					resizes <- [2]uint16{binary.BigEndian.Uint16(data[5:7]), binary.BigEndian.Uint16(data[7:9])}
-					writeHelperTestFrame(t, ws, helperFrame{Type: "event", RequestID: "stream", Version: helperProtocolVersion, Capability: "terminal.v1", Payload: json.RawMessage(`{"event":"terminal_stream_end","session_id":"ses_bound","state":"exited","final_sequence":5,"exit":{"code":7}}`)})
+					writeHelperTestFrame(t, ws, helperFrame{Type: "event", RequestID: "stream", Version: helperProtocolVersion, Capability: "terminal.v1", Payload: json.RawMessage(`{"event":"terminal_stream_end","session_id":"terminal_00000000-0000-4000-8000-000000000001","state":"exited","final_sequence":5,"exit":{"code":7}}`)})
 				default:
 					t.Errorf("invalid binary frame: %x", data)
 				}
@@ -294,7 +294,7 @@ func TestCanonicalHelperTerminalFramingIOResizeAndExit(t *testing.T) {
 				case "snapshot":
 					writeHelperTestFrame(t, ws, helperFrame{Type: "error", RequestID: frame.RequestID, Version: helperProtocolVersion, Payload: json.RawMessage(`{"code":"not_found_or_forbidden","message":"operation failed","retryable":false}`)})
 				case "create":
-					writeHelperTestFrame(t, ws, helperFrame{Type: "response", RequestID: frame.RequestID, Version: helperProtocolVersion, Payload: json.RawMessage(`{"result":{"id":"ses_bound","generation":1},"replay":false}`)})
+					writeHelperTestFrame(t, ws, helperFrame{Type: "response", RequestID: frame.RequestID, Version: helperProtocolVersion, Payload: json.RawMessage(`{"result":{"id":"terminal_00000000-0000-4000-8000-000000000001","generation":1},"replay":false}`)})
 				case "attach":
 					writeHelperTestFrame(t, ws, helperFrame{Type: "response", RequestID: frame.RequestID, Version: helperProtocolVersion, Payload: json.RawMessage(`{"result":{"stream_id":7,"attachment_id":"att_1","session":{"snapshot":{"generation":1}}},"replay":false}`)})
 					writeHelperTestBinary(t, ws, 7, 0, []byte("h"))
@@ -309,7 +309,7 @@ func TestCanonicalHelperTerminalFramingIOResizeAndExit(t *testing.T) {
 	u, _ := url.Parse(server.URL)
 	u.Scheme = strings.Replace(u.Scheme, "http", "ws", 1)
 	u.Path = "/v1/runtime"
-	target := &resolver.TerminalTarget{Protocol: "paperboat.terminal.v1", WSSEndpoint: u.String(), Auth: resolver.AuthTarget{Method: "bearer", Token: "helper-token"}, SessionID: "ses_bound", TerminalID: "default", CWD: "/workspace", Cols: 100, Rows: 30, Env: map[string]string{"TERM": "xterm-ghostty", "COLORTERM": "truecolor"}}
+	target := &resolver.TerminalTarget{Protocol: "paperboat.terminal.v1", WSSEndpoint: u.String(), Auth: resolver.AuthTarget{Method: "bearer", Token: "helper-token"}, SessionID: "terminal_00000000-0000-4000-8000-000000000001", CWD: "/workspace", Cols: 100, Rows: 30, Env: map[string]string{"TERM": "xterm-ghostty", "COLORTERM": "truecolor"}}
 	conn, err := dialTestHelperTerminal(context.Background(), target)
 	if err != nil {
 		t.Fatal(err)
@@ -341,9 +341,9 @@ func TestCanonicalHelperTerminalFramingIOResizeAndExit(t *testing.T) {
 		switch {
 		case payload["action"] == "create":
 			environment, _ := payload["environment"].(map[string]any)
-			sawCreate = payload["session_id"] == "ses_bound" && payload["name"] == "ses_bound" && payload["columns"] == float64(100) && payload["rows"] == float64(30) && environment["TERM"] == "xterm-ghostty" && environment["COLORTERM"] == "truecolor"
+			sawCreate = payload["session_id"] == "terminal_00000000-0000-4000-8000-000000000001" && payload["name"] == "terminal_00000000-0000-4000-8000-000000000001" && payload["columns"] == float64(100) && payload["rows"] == float64(30) && environment["TERM"] == "xterm-ghostty" && environment["COLORTERM"] == "truecolor"
 		case payload["action"] == "attach":
-			sawAttach = payload["session_id"] == "ses_bound"
+			sawAttach = payload["session_id"] == "terminal_00000000-0000-4000-8000-000000000001"
 		}
 	}
 	if ack := <-acks; ack != 5 {
@@ -456,7 +456,7 @@ func TestCanonicalHelperExistingSessionDoesNotInjectTerminalInput(t *testing.T) 
 	u, _ := url.Parse(server.URL)
 	u.Scheme = strings.Replace(u.Scheme, "http", "ws", 1)
 	u.Path = "/v1/runtime"
-	target := &resolver.TerminalTarget{Protocol: "paperboat.terminal.v1", WSSEndpoint: u.String(), Auth: resolver.AuthTarget{Method: "bearer", Token: "helper-token"}, SessionID: "ses_gap", TerminalID: "default", CWD: "/workspace"}
+	target := &resolver.TerminalTarget{Protocol: "paperboat.terminal.v1", WSSEndpoint: u.String(), Auth: resolver.AuthTarget{Method: "bearer", Token: "helper-token"}, SessionID: "ses_gap", CWD: "/workspace"}
 	conn, err := dialTestHelperTerminal(context.Background(), target)
 	if err != nil {
 		t.Fatal(err)
@@ -551,7 +551,7 @@ func TestCanonicalHelperRestartIsLimitedToInitialAttach(t *testing.T) {
 			u, _ := url.Parse(server.URL)
 			u.Scheme = strings.Replace(u.Scheme, "http", "ws", 1)
 			u.Path = "/v1/runtime"
-			target := &resolver.TerminalTarget{Protocol: "paperboat.terminal.v1", WSSEndpoint: u.String(), Auth: resolver.AuthTarget{Method: "bearer", Token: "helper-token"}, SessionID: "ses_retained", TerminalID: "default", RestartIfNotRunning: test.restart, AfterSequence: 9}
+			target := &resolver.TerminalTarget{Protocol: "paperboat.terminal.v1", WSSEndpoint: u.String(), Auth: resolver.AuthTarget{Method: "bearer", Token: "helper-token"}, SessionID: "ses_retained", RestartIfNotRunning: test.restart, AfterSequence: 9}
 			conn, err := dialTestHelperTerminal(context.Background(), target)
 			if err != nil {
 				t.Fatal(err)
@@ -636,7 +636,7 @@ func TestCanonicalHelperStaleReconnectCursorReportsReplayGap(t *testing.T) {
 	u.Scheme = strings.Replace(u.Scheme, "http", "ws", 1)
 	u.Path = "/v1/runtime"
 	var cursor atomic.Int64
-	target := &resolver.TerminalTarget{Protocol: "paperboat.terminal.v1", WSSEndpoint: u.String(), Auth: resolver.AuthTarget{Method: "bearer", Token: "helper-token"}, SessionID: "ses_gap", TerminalID: "default", AfterSequence: 2, SequenceSink: func(value int) { cursor.Store(int64(value)) }}
+	target := &resolver.TerminalTarget{Protocol: "paperboat.terminal.v1", WSSEndpoint: u.String(), Auth: resolver.AuthTarget{Method: "bearer", Token: "helper-token"}, SessionID: "ses_gap", AfterSequence: 2, SequenceSink: func(value int) { cursor.Store(int64(value)) }}
 	conn, err := dialTestHelperTerminal(context.Background(), target)
 	if err != nil {
 		t.Fatal(err)

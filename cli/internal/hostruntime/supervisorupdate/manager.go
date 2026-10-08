@@ -7,12 +7,12 @@ package supervisorupdate
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"os"
 	"path/filepath"
@@ -253,7 +253,7 @@ func (m *Manager) Approve(ctx context.Context, version string, resolve workerupd
 	j := m.loadOrNewJournal(release)
 	j.WorkloadGeneration = snapshot.Generation
 	j.ProtectedWorkloads = snapshot.Protected
-	j.ApprovalID = randomID()
+	j.ApprovalID = "approval_" + uuid.NewString()
 	j.ApprovalVersion = release.Version
 	j.ApprovalExpiresAt = m.now().Add(m.config.GrantTTL)
 	if err := m.write(j); err != nil {
@@ -731,9 +731,5 @@ func isLowerHex(s string) bool {
 	return err == nil && strings.ToLower(s) == s
 }
 func randomID() string {
-	var buf [16]byte
-	if _, err := rand.Read(buf[:]); err != nil {
-		return fmt.Sprintf("local-%d", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(buf[:])
+	return "transaction_" + uuid.NewString()
 }

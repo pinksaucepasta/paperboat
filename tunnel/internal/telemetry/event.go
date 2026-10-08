@@ -3,7 +3,6 @@ package telemetry
 import (
 	"context"
 	"encoding/json"
-	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -45,7 +44,7 @@ type SafeIDs struct {
 	CertificateID string `json:"certificate_id,omitempty"`
 	AssignmentID  string `json:"assignment_id,omitempty"`
 	HostID        string `json:"host_id,omitempty"`
-	DeviceID      string `json:"device_id,omitempty"`
+	MachineID     string `json:"machine_id,omitempty"`
 	SessionID     string `json:"session_id,omitempty"`
 	OperationID   string `json:"operation_id,omitempty"`
 	RequestID     string `json:"request_id,omitempty"`
@@ -94,8 +93,6 @@ type Event struct {
 	Retry         RetryDecision `json:"retry"`
 	NextRetryAt   *time.Time    `json:"next_retry_at,omitempty"`
 }
-
-var safeIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{2,127}$`)
 
 func NewEvent(input EventInput) (Event, error) {
 	if normalizeTime(input.At).IsZero() {
@@ -151,40 +148,28 @@ func validEventOutcome(value EventOutcome) bool {
 }
 
 func validCorrelationID(value string) bool {
-	return hasSafePrefix(value, "corr_", "cor_", "correlation_", "request_", "pb-")
+	return SafeOpaqueID(value)
 }
 
 func validSafeIDs(ids SafeIDs) bool {
-	return optionalSafeID(ids.AccountID, "account_") &&
-		optionalSafeID(ids.ActorID, "actor_") &&
-		optionalSafeID(ids.TunnelID, "tunnel_") &&
-		optionalSafeID(ids.RouteID, "route_") &&
-		optionalSafeID(ids.ConnectorID, "connector_") &&
-		optionalSafeID(ids.DomainID, "domain_") &&
-		optionalSafeID(ids.CertificateID, "certificate_") &&
-		optionalSafeID(ids.AssignmentID, "assignment_") &&
-		optionalSafeID(ids.HostID, "host_") &&
-		optionalSafeID(ids.DeviceID, "device_") &&
-		optionalSafeID(ids.SessionID, "session_", "carrier_") &&
-		optionalSafeID(ids.OperationID, "operation_", "op_") &&
-		optionalSafeID(ids.RequestID, "request_", "req_") &&
-		optionalSafeID(ids.EdgeNodeID, "edge_")
+	return optionalSafeID(ids.AccountID) &&
+		optionalSafeID(ids.ActorID) &&
+		optionalSafeID(ids.TunnelID) &&
+		optionalSafeID(ids.RouteID) &&
+		optionalSafeID(ids.ConnectorID) &&
+		optionalSafeID(ids.DomainID) &&
+		optionalSafeID(ids.CertificateID) &&
+		optionalSafeID(ids.AssignmentID) &&
+		optionalSafeID(ids.HostID) &&
+		optionalSafeID(ids.MachineID) &&
+		optionalSafeID(ids.SessionID) &&
+		optionalSafeID(ids.OperationID) &&
+		optionalSafeID(ids.RequestID) &&
+		optionalSafeID(ids.EdgeNodeID)
 }
 
-func optionalSafeID(value string, prefixes ...string) bool {
-	return value == "" || hasSafePrefix(value, prefixes...)
-}
-
-func hasSafePrefix(value string, prefixes ...string) bool {
-	if !safeIDPattern.MatchString(value) {
-		return false
-	}
-	for _, prefix := range prefixes {
-		if len(value) > len(prefix) && value[:len(prefix)] == prefix {
-			return true
-		}
-	}
-	return false
+func optionalSafeID(value string) bool {
+	return value == "" || SafeOpaqueID(value)
 }
 
 // EventLog is a bounded, nonblocking producer path backed by an owned worker.

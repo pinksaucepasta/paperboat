@@ -24,23 +24,27 @@ var (
 )
 
 type ControlRequest struct {
-	Schema     string `json:"schema"`
-	Operation  string `json:"operation"`
-	ApprovalID string `json:"approval_id,omitempty"`
+	Schema     string                  `json:"schema"`
+	Operation  string                  `json:"operation"`
+	ApprovalID string                  `json:"approval_id,omitempty"`
+	Settings   *autoupdate.Preferences `json:"settings,omitempty"`
 }
 type ControlResponse struct {
-	UpdaterVersion    string                          `json:"updater_version,omitempty"`
-	Schema            string                          `json:"schema"`
-	Status            string                          `json:"status"`
-	Version           string                          `json:"version,omitempty"`
-	Updated           bool                            `json:"updated"`
-	Pending           bool                            `json:"pending,omitempty"`
-	Candidate         *workerupdate.PreparedCandidate `json:"candidate,omitempty"`
-	ActivationFailure string                          `json:"activation_failure,omitempty"`
-	Observation       autoupdate.Observation          `json:"observation"`
-	ErrorCode         string                          `json:"error_code,omitempty"`
-	ErrorMessage      string                          `json:"error_message,omitempty"`
-	Transaction       workerupdate.TransactionState   `json:"transaction"`
+	UpdaterVersion    string                             `json:"updater_version,omitempty"`
+	Schema            string                             `json:"schema"`
+	Status            string                             `json:"status"`
+	Version           string                             `json:"version,omitempty"`
+	Updated           bool                               `json:"updated"`
+	Pending           bool                               `json:"pending,omitempty"`
+	Candidate         *workerupdate.PreparedCandidate    `json:"candidate,omitempty"`
+	ActivationFailure string                             `json:"activation_failure,omitempty"`
+	Observation       autoupdate.Observation             `json:"observation"`
+	ErrorCode         string                             `json:"error_code,omitempty"`
+	ErrorMessage      string                             `json:"error_message,omitempty"`
+	Transaction       workerupdate.TransactionState      `json:"transaction"`
+	Settings          *autoupdate.Preferences            `json:"settings,omitempty"`
+	NextMaintenanceAt time.Time                          `json:"next_maintenance_at,omitempty"`
+	OwnerMaintenance  *autoupdate.OwnerMaintenanceNotice `json:"owner_maintenance,omitempty"`
 }
 
 func validControlRequest(request ControlRequest) bool {
@@ -49,9 +53,11 @@ func validControlRequest(request ControlRequest) bool {
 	}
 	switch request.Operation {
 	case "status", "check", "download":
-		return request.ApprovalID == ""
+		return request.ApprovalID == "" && request.Settings == nil
+	case "settings":
+		return request.ApprovalID == "" && (request.Settings == nil || request.Settings.Validate() == nil)
 	case "install":
-		return approvalIDPattern.MatchString(request.ApprovalID)
+		return request.Settings == nil && approvalIDPattern.MatchString(request.ApprovalID)
 	default:
 		return false
 	}

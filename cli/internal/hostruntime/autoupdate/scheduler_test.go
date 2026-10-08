@@ -27,6 +27,66 @@ func TestSchedulerChecksImmediatelyAndUsesBoundedJitter(t *testing.T) {
 	}
 }
 
+func TestSchedulerWakeAppliesPreferencesWithoutRestart(t *testing.T) {
+	calls := make(chan struct{}, 4)
+	scheduler, err := New(Config{Check: func(context.Context) (Result, error) {
+		calls <- struct{}{}
+		return Result{}, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- scheduler.Run(ctx) }()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Error("scheduler did not stop")
+		}
+	}()
+	select {
+	case <-calls:
+	case <-time.After(time.Second):
+		t.Fatal("initial check missing")
+	}
+	scheduler.Wake()
+	select {
+	case <-calls:
+	case <-time.After(time.Second):
+		t.Fatal("settings change did not wake scheduler")
+	}
+}
+
+func TestSchedulerCalendarWindowOnlyBringsCheckForward(t *testing.T) {
+	now := time.Date(2026, 10, 8, 3, 59, 0, 0, time.UTC)
+	wanted := now.Add(time.Minute)
+	scheduler, err := New(Config{
+		Check:     func(context.Context) (Result, error) { return Result{}, nil },
+		Now:       func() time.Time { return now },
+		Random:    func(time.Duration) (time.Duration, error) { return 0, nil },
+		NextCheck: func(time.Time, time.Time) time.Time { return wanted },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scheduler.CheckNow(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := scheduler.Snapshot().NextCheckAt; !got.Equal(wanted) {
+		t.Fatalf("calendar check=%v want=%v", got, wanted)
+	}
+	wanted = now.Add(24 * time.Hour)
+	if _, err := scheduler.CheckNow(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := scheduler.Snapshot().NextCheckAt; !got.Equal(now.Add(3 * time.Hour)) {
+		t.Fatalf("calendar postponed availability check: %v", got)
+	}
+}
+
 func TestSchedulerBackoffIsBoundedAndSuccessResetsFailures(t *testing.T) {
 	now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
 	var attempts atomic.Uint32

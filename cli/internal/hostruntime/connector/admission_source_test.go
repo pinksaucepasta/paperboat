@@ -12,7 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 type identityTokenFunc func(context.Context) (string, error)
@@ -96,6 +98,75 @@ func TestHTTPSAdmissionSourceVerifiesExactBindingsAndReturnsCredential(t *testin
 	}
 	if admission.Credential != "test-only-connector-admission-credential" || admission.Generation != 3 || admission.JTI != "jti_admit_0001" || admission.RelayHTTPEndpoint != "https://relay.test" {
 		t.Fatalf("admission=%#v", admission)
+	}
+}
+
+func TestSupervisorDoesNotDuplicateObservedAdmissionTransportFailure(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var requests atomic.Uint64
+	secret := "private admission token and endpoint"
+	source := admissionSourceFor(t, validAdmissionResponse, credentialVerifierFunc(func(_ context.Context, _ string, _ auth.Policy) (auth.Claims, error) {
+		policy := testFileTransferPolicy()
+		routes := []RouteHandoff{{RouteID: "route_1", Revision: 1, Kind: "runtime_https_wss", PublicHost: "helper.test", ProxyName: "helper_1", LocalTarget: RouteTarget{Host: "127.0.0.1", Port: 8080}}}
+		return auth.Claims{JTI: "jti_admit_0001", EdgePool: "default", EdgeNodeID: "edge_1", RouteBinding: connectorRouteBinding(routes), ExpiresAt: now.Add(time.Minute).Unix(), FileTransferPolicy: &policy}, nil
+	}))
+	source.client.Transport = errorreport.TransportOperation(httpRoundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if requests.Add(1) == 1 {
+			return nil, errors.New(secret)
+		}
+		var input admissionRequest
+		if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
+			return nil, err
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(validAdmissionResponse(input))), Request: request}, nil
+	}), source.endpoint.String(), "connector_admission")
+
+	faults := make(chan errorreport.Fault, 8)
+	restore := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) { faults <- fault })
+	defer restore()
+	network := &recoveringDialer{}
+	manager := manager(t, network, now)
+	supervisor, err := NewSupervisor(SupervisorConfig{Manager: manager, Admissions: source, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond, Waiter: &recordingWaiter{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reference := supportref.New()
+	if err := supervisor.Start(supportref.WithContext(context.Background(), reference)); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(2 * time.Second)
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for !manager.Status().Connected {
+		select {
+		case <-ticker.C:
+		case <-deadline:
+			t.Fatalf("connector did not recover after admission transport failure: status=%+v", manager.Status())
+		}
+	}
+	select {
+	case fault := <-faults:
+		if fault.Operation != "connector_admission" || fault.Stage != "control_request" || fault.Code != "control_request_failed" || fault.SupportReference != reference {
+			t.Fatalf("unexpected admission transport fault: %+v", fault)
+		}
+		if strings.Contains(strings.Join(fault.ErrorChain, ","), secret) || strings.Contains(fault.Cause, secret) || strings.Contains(fault.ErrorType, secret) {
+			t.Fatalf("raw admission transport detail escaped: %+v", fault)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("admission transport failure was not observed")
+	}
+	select {
+	case duplicate := <-faults:
+		t.Fatalf("supervisor duplicated admission transport failure: %+v", duplicate)
+	case <-time.After(25 * time.Millisecond):
+	}
+	if requests.Load() < 2 {
+		t.Fatalf("admission source did not recover; requests=%d", requests.Load())
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := supervisor.Shutdown(ctx); err != nil {
+		t.Fatal(err)
 	}
 }
 

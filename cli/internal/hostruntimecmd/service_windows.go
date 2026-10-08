@@ -16,6 +16,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
+	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
 	"golang.org/x/sys/windows"
@@ -117,6 +118,20 @@ func dispatchElevatedOperation(ctx context.Context, request elevation.Request) e
 	switch request.Operation {
 	case elevation.OperationRuntimeService:
 		switch request.Action {
+		case elevation.ActionBrowserDomain:
+			domainRequest, err := decodeBrowserDomain(bytes.NewReader(request.Payload))
+			if err != nil {
+				return err
+			}
+			if !strings.EqualFold(domainRequest.Owner, request.OwnerSID) {
+				return errors.New("browser domain owner does not match elevation requester")
+			}
+			executable, err := os.Executable()
+			if err != nil {
+				return err
+			}
+			_, err = machineguard.InstallBrowserDomain(ctx, executable, domainRequest.Owner, domainRequest.Domain)
+			return err
 		case elevation.ActionUninstallPersist:
 			return uninstallPersistedWindowsRuntime(ctx, request.OwnerSID)
 		case elevation.ActionPurge:
@@ -225,7 +240,7 @@ func installWindowsRuntimeFromSuppliedBytes(ctx context.Context, request hostins
 		if loadErr != nil {
 			return nil
 		}
-		if previous.SetupMode == "awaiting_enrollment" {
+		if previous.EnrollmentPending {
 			return hostinstall.EnsureWindowsLocalDaemonService(context.Background(), previous.OwnerSID)
 		}
 		return hostinstall.Repair(context.Background(), previous.OwnerSID)

@@ -49,7 +49,7 @@ func (b Binding) Validate(now time.Time) error {
 	if b.Schema != SchemaV1 || !id(b.ResourceID) || !id(b.RouteID) || !id(b.OwnerEndpointID) || b.ResourceGeneration == 0 || b.RouteGeneration == 0 || b.TargetGeneration == 0 || !b.ExpiresAt.After(now) || b.ExpiresAt.Sub(now) > 5*time.Minute+30*time.Second {
 		return ErrInvalid
 	}
-	if b.ResourceKind != "preview" && b.ResourceKind != "tunnel" && b.ResourceKind != "device_service" || b.Protocol != "http" && b.Protocol != "tcp" {
+	if b.ResourceKind != "preview" && b.ResourceKind != "tunnel" && b.ResourceKind != "machine_service" || b.Protocol != "http" && b.Protocol != "tcp" {
 		return ErrInvalid
 	}
 	if b.ResourceKind == "preview" && b.Protocol != "http" {
@@ -60,7 +60,7 @@ func (b Binding) Validate(now time.Time) error {
 		return ErrInvalid
 	}
 
-	if b.ResourceKind == "device_service" {
+	if b.ResourceKind == "machine_service" {
 		_, port, _ := net.SplitHostPort(b.TargetAddress)
 		if b.ResourceID != b.OwnerEndpointID || b.RouteID != "tcp:"+port || b.Protocol != "tcp" || !id(b.UserID) || !id(b.CLIClientSessionID) || !id(b.AccessSessionID) || b.InstallationGeneration < 1 || !id(b.BootID) || b.PolicyGeneration < 1 || b.AnnouncementGeneration < 1 {
 			return ErrInvalid

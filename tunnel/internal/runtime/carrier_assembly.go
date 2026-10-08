@@ -6,7 +6,9 @@ import (
 	"io"
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
+	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
 	edgetelemetry "github.com/pinksaucepasta/paperboat-tunnel/internal/telemetry"
 )
 
@@ -36,6 +38,7 @@ type CarrierService interface {
 type CarrierHandler func(context.Context, *datacarrier.Server) error
 
 type CarrierAssemblyConfig struct {
+	Reporter        *reporting.Reporter
 	Service         CarrierService
 	Handle          CarrierHandler
 	MaximumHandlers int
@@ -49,6 +52,7 @@ type CarrierAssemblyConfig struct {
 // datacarrier.NewService; Start only begins consumption of authenticated
 // peers.
 type CarrierAssembly struct {
+	reporter        *reporting.Reporter
 	service         CarrierService
 	handle          CarrierHandler
 	observeError    func(error)
@@ -76,7 +80,7 @@ func NewCarrierAssembly(config CarrierAssemblyConfig) (*CarrierAssembly, error) 
 		return nil, ErrCarrierAssemblyInvalid
 	}
 	return &CarrierAssembly{
-		service: config.Service, handle: config.Handle, observeError: config.ObserveError,
+		reporter: config.Reporter, service: config.Service, handle: config.Handle, observeError: config.ObserveError,
 		telemetry: config.Telemetry, maximumHandlers: config.MaximumHandlers, done: make(chan error, 1),
 	}, nil
 }
@@ -126,7 +130,7 @@ func (a *CarrierAssembly) acceptLoop(ctx context.Context) {
 			if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, datacarrier.ErrCarrierClosed) {
 				return
 			}
-			a.report(err)
+			a.report(ctx, err, true)
 			return
 		}
 		if server == nil {
@@ -144,7 +148,7 @@ func (a *CarrierAssembly) acceptLoop(ctx context.Context) {
 			if err != nil {
 				_ = server.Close()
 				if ctx.Err() == nil {
-					a.report(err)
+					a.report(ctx, err, true)
 				}
 				return
 			}
@@ -161,13 +165,18 @@ func (a *CarrierAssembly) acceptLoop(ctx context.Context) {
 		a.handlers.Add(1)
 		go func() {
 			defer a.handlers.Done()
+			defer func() {
+				if value := recover(); value != nil {
+					a.reporter.CaptureFailure(ctx, "process_panic", reporting.PanicFailure{})
+				}
+			}()
 			defer func() { <-limits }()
 			if accepted != nil {
 				defer accepted.Close()
 			}
 			defer server.Close()
 			if err := a.handle(ctx, server); err != nil && ctx.Err() == nil {
-				a.report(err)
+				a.report(ctx, err, false)
 			}
 		}()
 	}
@@ -186,7 +195,7 @@ func carrierPeerStreamInfo(identity datacarrier.Identity) datacarrier.StreamInfo
 			Connector: identity.ProcessGeneration,
 			Session:   identity.Generation,
 		},
-		CorrelationID:      "corr_edge_carrier",
+		CorrelationID:      "correlation_" + uuid.NewString(),
 		Kind:               "carrier",
 		ReadDirection:      "ingress",
 		WriteDirection:     "egress",
@@ -203,12 +212,16 @@ func (carrierPeerLifetime) Read([]byte) (int, error)  { return 0, io.EOF }
 func (carrierPeerLifetime) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
 func (carrierPeerLifetime) Close() error              { return nil }
 
-func (a *CarrierAssembly) report(err error) {
+func (a *CarrierAssembly) report(ctx context.Context, err error, fatal bool) {
 	if err == nil {
 		return
 	}
 	if a.observeError != nil {
 		a.observeError(err)
+	}
+	if !fatal {
+		observeWorkerFailure(ctx, a.reporter, "carrier_handler", err)
+		return
 	}
 	a.once.Do(func() {
 		select {
@@ -218,7 +231,7 @@ func (a *CarrierAssembly) report(err error) {
 	})
 }
 
-// Done reports a fatal accept or handler error. Per-peer handler failures do
+// Done reports a fatal accept error. Per-peer handler failures do
 // not stop accepting later authenticated carriers.
 func (a *CarrierAssembly) Done() <-chan error {
 	if a == nil || a.done == nil {

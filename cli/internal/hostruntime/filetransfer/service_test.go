@@ -10,12 +10,15 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 func newService(t *testing.T) (*Service, *store.Store, string) {
@@ -45,6 +48,30 @@ func relayRequest(data []byte) CreateRequest {
 	request.DestinationMachineID = "machine_destination"
 	request.DeliveryClientID = "cli_1"
 	return request
+}
+
+func TestContentLookupDistinguishesMissingRecordFromStorageFailure(t *testing.T) {
+	service, durable, _ := newService(t)
+	if _, _, err := service.OpenContent(context.Background(), "ft_missing"); err == nil ||
+		!errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing content lookup error = %v", err)
+	} else {
+		var transferErr *Error
+		if !errors.As(err, &transferErr) || transferErr.Code != InvalidPath {
+			t.Fatalf("missing content lookup classification = %v", err)
+		}
+	}
+	if err := durable.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.OpenContent(context.Background(), "ft_missing"); err == nil {
+		t.Fatal("closed storage unexpectedly opened transfer content")
+	} else {
+		var transferErr *Error
+		if !errors.As(err, &transferErr) || transferErr.Code != StorageUnavailable {
+			t.Fatalf("storage failure was misclassified as invalid path: %v", err)
+		}
+	}
 }
 
 func TestResumableTransferPersistsExactCommittedOffsetAndPublishes(t *testing.T) {
@@ -371,6 +398,142 @@ func TestOutboundDeliveryExpiryFailsRecordAndCleansContent(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "transfers", created[0].ID+".content")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("content remains: %v", err)
+	}
+}
+
+func TestCleanupExpiredRetainsRecordUntilPayloadRemovalSucceeds(t *testing.T) {
+	service, durable, root := newService(t)
+	created, err := service.Create(context.Background(), requestFor([]byte("private-transfer-content")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	transfer := created[0]
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Add(Retention)
+	service.config.Now = func() time.Time { return now }
+	blockedPath := service.contentPath(transfer.ID)
+	if err := os.Mkdir(blockedPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	privateName := "private-payload-marker"
+	if err := os.WriteFile(filepath.Join(blockedPath, privateName), []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.CleanupExpired(context.Background()); !errors.Is(err, syscall.ENOTEMPTY) {
+		t.Fatalf("cleanup did not retain unlink cause: %v", err)
+	} else if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), privateName) {
+		t.Fatalf("cleanup error exposed private path: %q", err.Error())
+	}
+	manifest, err := durable.FileTransfer(context.Background(), transfer.ID)
+	if err != nil || manifest.State != "created" {
+		t.Fatalf("record expired before content removal: manifest=%#v err=%v", manifest, err)
+	}
+	if err := os.Remove(filepath.Join(blockedPath, privateName)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(blockedPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.CleanupExpired(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err = durable.FileTransfer(context.Background(), transfer.ID)
+	if err != nil || manifest.State != "canceled" {
+		t.Fatalf("retry did not finish expiry: manifest=%#v err=%v", manifest, err)
+	}
+}
+
+func TestCleanupWorkerReportsFailureOnceUntilRecovery(t *testing.T) {
+	service, durable, _ := newService(t)
+	created, err := service.Create(context.Background(), requestFor([]byte("private-transfer-content")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	transfer := created[0]
+	service.config.Now = func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Add(Retention) }
+	blockedPath := service.contentPath(transfer.ID)
+	if err := os.Mkdir(blockedPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(blockedPath, "private-payload-marker"), []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reference := supportref.New()
+	observed := make(chan errorreport.Fault, 4)
+	restore := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) {
+		observed <- fault
+	})
+	defer restore()
+	parent, cancel := context.WithCancel(supportref.WithContext(context.Background(), reference))
+	worker := &CleanupWorker{Service: service, Interval: 20 * time.Millisecond}
+	if err := worker.Start(parent); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	select {
+	case fault := <-observed:
+		if fault.Component != "paperboat-daemon" || fault.Operation != "transfer" || fault.Stage != "lifecycle" || fault.Code != "file_transfer_failed" || fault.SupportReference != reference {
+			t.Fatalf("fault metadata=%+v", fault)
+		}
+		if strings.Contains(fault.Cause, "private-payload-marker") || strings.Contains(strings.Join(fault.ErrorChain, ","), "private-payload-marker") {
+			t.Fatalf("fault exposed private payload label: %+v", fault)
+		}
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("cleanup worker did not observe failed unlink")
+	}
+	time.Sleep(80 * time.Millisecond)
+	select {
+	case fault := <-observed:
+		cancel()
+		t.Fatalf("repeated cleanup attempt emitted a duplicate fault: %+v", fault)
+	default:
+	}
+	if err := os.Remove(filepath.Join(blockedPath, "private-payload-marker")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(blockedPath); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		manifest, err := durable.FileTransfer(context.Background(), transfer.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if manifest.State == "canceled" {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	manifest, err := durable.FileTransfer(context.Background(), transfer.ID)
+	if err != nil || manifest.State != "canceled" {
+		cancel()
+		t.Fatalf("worker did not recover after unlink succeeded: manifest=%#v err=%v", manifest, err)
+	}
+	time.Sleep(60 * time.Millisecond)
+	select {
+	case fault := <-observed:
+		cancel()
+		t.Fatalf("successful recovery emitted a fault: %+v", fault)
+	default:
+	}
+	cancel()
+	shutdown, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	if err := worker.Shutdown(shutdown); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTransferErrorTextPreservesCodeWithoutCauseText(t *testing.T) {
+	privateText := "private-file-path-marker"
+	cause := errors.New(privateText)
+	err := &Error{Code: StorageUnavailable, Cause: cause}
+	if err.Error() != string(StorageUnavailable) || strings.Contains(err.Error(), privateText) {
+		t.Fatalf("error text=%q", err.Error())
+	}
+	if !errors.Is(err, cause) {
+		t.Fatal("transfer error did not preserve its cause")
 	}
 }
 

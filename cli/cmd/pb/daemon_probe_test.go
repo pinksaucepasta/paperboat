@@ -19,7 +19,7 @@ func (f daemonProbeFunc) ProbePeer(ctx context.Context, request localapi.PeerStr
 func TestDaemonProbePreservesTargetAuthorityAndNativeResult(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	target := resolver.ConnectInfo{ProjectID: "machine_1", MachineGeneration: 7, Terminal: &resolver.TerminalTarget{EnvironmentID: "environment_1"}}
+	target := resolver.ConnectInfo{MachineID: "machine_1", MachineGeneration: 7, Terminal: &resolver.TerminalTarget{EnvironmentID: "environment_1"}}
 	client := daemonProbeFunc(func(_ context.Context, request localapi.PeerStreamRequest) (localapi.PeerProbeResult, error) {
 		if err := request.Validate(time.Now()); err != nil {
 			t.Fatal(err)

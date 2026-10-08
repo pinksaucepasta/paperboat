@@ -2,10 +2,8 @@ package tunnel
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
-	"io"
+	"github.com/google/uuid"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
@@ -98,15 +96,15 @@ type tailnetTerminalStreams struct {
 }
 
 func (g *tailnetTerminalStreams) OpenStream(ctx context.Context) (nativeStream, error) {
-	var random [16]byte
-	if _, err := io.ReadFull(rand.Reader, random[:]); err != nil {
+	streamID, err := uuid.NewRandom()
+	if err != nil {
 		return nil, err
 	}
 	deadline, err := time.Parse(time.RFC3339, g.deadline)
 	if err != nil {
 		return nil, err
 	}
-	header, err := streamauth.New(g.operationID, g.consumer, hex.EncodeToString(random[:]), g.credential, deadline, 1<<40)
+	header, err := streamauth.New(g.operationID, g.consumer, "stream_"+streamID.String(), g.credential, deadline, 1<<40)
 	if err != nil {
 		return nil, err
 	}

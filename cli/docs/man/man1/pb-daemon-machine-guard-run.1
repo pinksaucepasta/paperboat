@@ -1,0 +1,52 @@
+.nh
+.TH "PB-DAEMON-MACHINE-GUARD-RUN" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-daemon-machine-guard-run - Run the machine guard under service supervision
+
+
+.SH SYNOPSIS
+\fBpb daemon machine-guard run [flags]\fP
+
+
+.SH DESCRIPTION
+Run the machine guard under service supervision
+
+.PP
+Start the foreground machine-guard process for its supervisor. This entrypoint is used by the installed root-owned service and normally should not be run from an interactive shell.
+
+.PP
+The machine guard is a privileged local helper for protected loopback listeners and trusted local HTTPS. Installation handles certificate trust; public DNS supplies the browser names. Use the dedicated service commands for the ordinary Paperboat daemon.
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for run
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	configuration file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	Paperboat server URL
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-daemon-machine-guard(1)\fP

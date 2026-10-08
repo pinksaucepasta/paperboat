@@ -96,3 +96,22 @@ func (a *WindowsAdapter) Restore(ctx context.Context, raw json.RawMessage) error
 	}
 	return a.registry.BroadcastInternetSettingsChanged(ctx)
 }
+
+func (a *WindowsAdapter) OwnsTransition(ctx context.Context, oldURL, newURL string) (bool, error) {
+	owned, err := a.Owns(ctx, oldURL)
+	if err != nil || owned {
+		return owned, err
+	}
+	return a.Owns(ctx, newURL)
+}
+
+func (a *WindowsAdapter) OwnsRestoration(ctx context.Context, prior json.RawMessage, pacURL, previousPACURL string) (bool, error) {
+	matches, err := a.Matches(ctx, prior)
+	if err != nil || matches {
+		return matches, err
+	}
+	if previousPACURL == "" {
+		return a.Owns(ctx, pacURL)
+	}
+	return a.OwnsTransition(ctx, pacURL, previousPACURL)
+}

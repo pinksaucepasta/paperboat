@@ -3,12 +3,15 @@
 package hostinstall
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -129,7 +132,7 @@ func TestTask39PrepareWindowsUser(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err = store.SaveRegistration(identity.Registration{ServerURL: control, AccountID: "task39_account_" + username, MachineID: machine, EnvironmentID: "task39_env_" + username, PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: workspace, SSHUser: username, SSHPort: sshConfig.Port, InstallationGeneration: 1, SetupMode: "host", SetupRoles: []string{"host"}, UpdatedAt: time.Now().UTC()}); err != nil {
+	if err = store.SaveRegistration(identity.Registration{ServerURL: control, AccountID: "task39_account_" + username, MachineID: machine, EnvironmentID: "task39_env_" + username, PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: workspace, SSHUser: username, SSHPort: sshConfig.Port, InstallationGeneration: 1, UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	endpoint, err := store.PeerEndpoint()
@@ -176,7 +179,7 @@ func TestTask39PrepareWindowsUser(t *testing.T) {
 	}
 	listen := listener.Addr().String()
 	_ = listener.Close()
-	request := Request{Schema: SchemaV1, Platform: "windows", User: username, OwnerSID: ownerSID, Executable: executable, Artifact: artifact, Home: home, Path: os.Getenv("PATH"), StateRoot: state, WorkspaceRoot: workspace, ControlURL: control, UserMachineID: machine, Shell: "powershell.exe", HelperListenAddress: listen, SetupMode: "host"}
+	request := Request{Schema: SchemaV1, Platform: "windows", User: username, OwnerSID: ownerSID, Executable: executable, Artifact: artifact, Home: home, Path: os.Getenv("PATH"), StateRoot: state, WorkspaceRoot: workspace, ControlURL: control, UserMachineID: machine, Shell: "powershell.exe", HelperListenAddress: listen}
 	raw, _ = json.Marshal(request)
 	if err = os.WriteFile(filepath.Join(root, "request.json"), raw, 0600); err != nil {
 		t.Fatal(err)
@@ -273,4 +276,124 @@ func TestTask39WindowsLifecycle(t *testing.T) {
 			t.Fatal("invalid lifecycle action")
 		}
 	}
+}
+
+// Run as the real enrolled disposable user's elevated token. No enrollment
+// material is synthesized here; bootstrap has already committed the install.
+func TestTask39CustomNativeInstalledLifecycle(t *testing.T) {
+	if os.Getenv("PAPERBOAT_TASK39_NATIVE_CUSTOM") != "1" {
+		t.Skip("actual disposable custom installation required")
+	}
+	account, err := user.Current()
+	if err != nil || !strings.HasPrefix(filepath.Base(account.Username), "pb39") || !isAdministrator() {
+		t.Fatal("elevated disposable owner required")
+	}
+	sid, err := currentWindowsSID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, err := WindowsInstanceForSID(sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadWindowsRuntimeConfigForInstance(instance)
+	if err != nil || !cfg.Committed || cfg.Source.Distribution != "custom" || cfg.Source.AutomaticUpdates {
+		t.Fatal("committed custom source required")
+	}
+	layout, err := WindowsLayoutForInstance(instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath, err := WindowsInstanceConfigPath(instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary, err := os.ReadFile(layout.Binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(binary)
+	declaration, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requirePreserved := func() {
+		t.Helper()
+		current, err := os.ReadFile(layout.Binary)
+		if err != nil || sha256.Sum256(current) != digest {
+			t.Fatal("failed candidate changed installed bytes")
+		}
+		current, err = os.ReadFile(configPath)
+		if err != nil || !bytes.Equal(current, declaration) {
+			t.Fatal("failed candidate changed protected installation declaration")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		client := &http.Client{Timeout: time.Second}
+		for {
+			response, err := client.Get("http://" + cfg.ListenAddress + "/healthz")
+			if err == nil {
+				var health struct {
+					Live bool `json:"live"`
+				}
+				decodeErr := json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&health)
+				response.Body.Close()
+				if response.StatusCode == http.StatusOK && decodeErr == nil && health.Live {
+					break
+				}
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatal("original installation did not recover liveness")
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+	}
+	requirePreserved()
+	request := Request{Schema: SchemaV1, Platform: "windows", User: cfg.User, OwnerSID: sid, Executable: layout.Binary, Artifact: cfg.Artifact, Source: cfg.Source, Home: account.HomeDir, Path: os.Getenv("PATH"), StateRoot: cfg.StateRoot, WorkspaceRoot: cfg.Workspace, ControlURL: cfg.ControlURL, UserMachineID: cfg.MachineID, Shell: "powershell.exe", HelperListenAddress: cfg.ListenAddress}
+	// The candidate must be a separate file: in-place writes could affect the
+	// currently running image before the privileged installer validates it.
+	candidate := filepath.Join(t.TempDir(), "pb-corrupt.exe")
+	corrupted := append([]byte(nil), binary...)
+	corrupted[len(corrupted)-1] ^= 1
+	if err := os.WriteFile(candidate, corrupted, 0755); err != nil {
+		t.Fatal(err)
+	}
+	clear(corrupted)
+	clear(binary)
+	invalid := request
+	invalid.Executable = candidate
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	err = Install(ctx, invalid)
+	cancel()
+	if err == nil {
+		t.Fatal("artifact whose bytes differ from approved source was accepted")
+	}
+	requirePreserved()
+	// Stage unchanged approved bytes separately from the executable SCM uses.
+	sourcePath := filepath.Join(t.TempDir(), "pb-candidate.exe")
+	original, err := os.ReadFile(layout.Binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(sourcePath, original, 0755); err != nil {
+		t.Fatal(err)
+	}
+	clear(original)
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupied.Close()
+	failed := request
+	failed.Executable = sourcePath
+	failed.HelperListenAddress = occupied.Addr().String()
+	ctx, cancel = context.WithTimeout(context.Background(), 45*time.Second)
+	err = Install(ctx, failed)
+	cancel()
+	if err == nil {
+		t.Fatal("candidate with unavailable runtime listener was accepted")
+	}
+	requirePreserved()
+	t.Logf("actual custom artifact digest %x preserved after invalid bytes and failed native activation", digest)
 }

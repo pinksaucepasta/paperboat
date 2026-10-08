@@ -14,8 +14,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
 )
 
 type livenessObservationTokenSource struct{}
@@ -114,16 +112,8 @@ func (t *initialFailureObservationTransport) RoundTrip(request *http.Request) (*
 
 type failingLivenessEnvironment struct{}
 
-func (failingLivenessEnvironment) BindingState() envinject.BindingState {
-	return envinject.BindingUnknown
-}
-
-func (failingLivenessEnvironment) NextObservation(time.Time) (envinject.Observation, error) {
-	return envinject.Observation{}, errors.New("environment observation store unavailable")
-}
-
-func (failingLivenessEnvironment) Apply(context.Context, envinject.Bundle) error {
-	return nil
+func (failingLivenessEnvironment) FlushLayerObservations(context.Context) error {
+	return errors.New("encrypted layer report storage unavailable")
 }
 
 func TestRuntimeObservationServiceContinuesAfterInitialAcceptance(t *testing.T) {
@@ -243,7 +233,7 @@ func TestRuntimeObservationServiceKeepsLivenessWhenAuxiliaryObservationFails(t *
 		receiptPath:      filepath.Join(t.TempDir(), "runtime", "server-heartbeat.json"),
 		workerGeneration: 1,
 		osBootID:         "boot-runtime-observation-auxiliary",
-		environment:      failingLivenessEnvironment{},
+		layers:           failingLivenessEnvironment{},
 	}
 	service := &runtimeObservationService{sender: sender, interval: 15 * time.Millisecond, timeout: 250 * time.Millisecond}
 	if err := service.Start(context.Background()); err != nil {

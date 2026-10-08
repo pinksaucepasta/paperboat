@@ -124,22 +124,24 @@ func (a *ProductionAssemblyActivator) Activate(ctx context.Context, request Acti
 
 	projection, assembly, err := a.activate(ctx, request)
 	a.mu.Lock()
-	closed := a.closed
-	if closed && err == nil {
-		err = ErrUnavailable
+	if a.closed {
+		a.mu.Unlock()
+		err = errors.Join(err, ErrUnavailable)
+		if assembly != nil {
+			err = errors.Join(err, assembly.Shutdown(context.Background()))
+			a.unbindFailedAssembly(request, assembly)
+		}
+		projection, assembly = Projection{}, nil
+		a.mu.Lock()
 	}
 	current.assembly = assembly
 	current.projection = projection
 	current.err = err
 	close(current.ready)
-	if err != nil {
+	if err != nil && a.assemblies[key] == current {
 		delete(a.assemblies, key)
 	}
 	a.mu.Unlock()
-	if closed && assembly != nil {
-		_ = assembly.Shutdown(context.Background())
-		a.unbindFailedAssembly(request, assembly)
-	}
 	return projection, err
 }
 
@@ -168,13 +170,13 @@ func (a *ProductionAssemblyActivator) activate(ctx context.Context, request Acti
 			}
 		}
 	}
-	assembly, _, err := tunnelmanager.OpenProductionAssembly(config)
+	assembly, err := openObservedProductionAssembly(ctx, config)
 	if err != nil {
 		return Projection{}, nil, activationFailureAt(err, ActivationDiagnosticAssemblyOpen)
 	}
 	if binder, ok := a.source.(ProductionAssemblyBinder); ok {
 		if err := binder.BindProductionAssembly(request, assembly); err != nil {
-			_ = assembly.Shutdown(context.Background())
+			err = errors.Join(err, assembly.Shutdown(context.Background()))
 			a.unbindFailedAssembly(request, assembly)
 			return Projection{}, nil, activationFailureAt(err, ActivationDiagnosticAssemblyBinding)
 		}
@@ -183,12 +185,12 @@ func (a *ProductionAssemblyActivator) activate(ctx context.Context, request Acti
 	lifetime := a.lifetime
 	a.mu.Unlock()
 	if lifetime == nil {
-		_ = assembly.Shutdown(context.Background())
+		err := errors.Join(ErrUnavailable, assembly.Shutdown(context.Background()))
 		a.unbindFailedAssembly(request, assembly)
-		return Projection{}, nil, &ActivationDiagnostic{Code: ActivationDiagnosticLifecycleUnavailable, Cause: ErrUnavailable}
+		return Projection{}, nil, &ActivationDiagnostic{Code: ActivationDiagnosticLifecycleUnavailable, Cause: err}
 	}
 	if err := assembly.Start(lifetime); err != nil {
-		_ = assembly.Shutdown(context.Background())
+		err = errors.Join(err, assembly.Shutdown(context.Background()))
 		a.unbindFailedAssembly(request, assembly)
 		return Projection{}, nil, activationFailureAt(err, ActivationDiagnosticAssemblyStart)
 	}
@@ -198,15 +200,15 @@ func (a *ProductionAssemblyActivator) activate(ctx context.Context, request Acti
 	select {
 	case change := <-ready:
 		if change.Current.Generation() == 0 || change.Current.ContentHash() == "" {
-			_ = assembly.Shutdown(context.Background())
+			err := errors.Join(ErrActivation, assembly.Shutdown(context.Background()))
 			a.unbindFailedAssembly(request, assembly)
-			return Projection{}, nil, ErrActivation
+			return Projection{}, nil, err
 		}
 		return a.readyProjection(request, config), assembly, nil
 	case <-ctx.Done():
-		_ = assembly.Shutdown(context.Background())
+		err := errors.Join(ctx.Err(), assembly.Shutdown(context.Background()))
 		a.unbindFailedAssembly(request, assembly)
-		return Projection{}, nil, ctx.Err()
+		return Projection{}, nil, err
 	}
 }
 

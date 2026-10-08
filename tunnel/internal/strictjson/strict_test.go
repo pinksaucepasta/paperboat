@@ -1,6 +1,7 @@
 package strictjson
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -33,5 +34,20 @@ func TestValidateAllowsBoundedNestedArrays(t *testing.T) {
 	data := []byte(strings.Repeat("[", 64) + "0" + strings.Repeat("]", 64))
 	if err := Validate(data, 64); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDecodePreservesBoundedSyntaxCause(t *testing.T) {
+	var target struct {
+		Value string `json:"value"`
+	}
+	err := Decode([]byte(`{"value": @}`), &target, 64)
+	var syntax *json.SyntaxError
+	if !errors.Is(err, ErrInvalid) || !errors.As(err, &syntax) || syntax.Offset == 0 {
+		t.Fatalf("lost syntax cause: %T", err)
+	}
+	syntax = nil
+	if err := Decode([]byte(`{"value":"private"`), &target, 64); !errors.Is(err, ErrInvalid) || !errors.As(err, &syntax) || syntax.Offset == 0 {
+		t.Fatalf("lost truncated syntax cause: %T", err)
 	}
 }

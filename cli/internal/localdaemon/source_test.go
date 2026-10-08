@@ -14,11 +14,13 @@ import (
 	"path/filepath"
 	"reflect"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 )
 
@@ -173,7 +175,7 @@ func TestIssuePeerStreamRefreshesRejectedCredentialOnce(t *testing.T) {
 			_, _ = writer.Write([]byte(`{"error":{"code":"unauthenticated","message":"expired"}}`))
 			return
 		}
-		_, _ = fmt.Fprintf(writer, `{"data":{"operation_id":"operation_1","environment":{"id":"environment_1","kind":"byod","resource_id":"machine_1","state":"ready","root":"/root"},"endpoints":{"quic":"quic://example.test:443","wss":"wss://example.test/v1/runtime"},"auth":{"method":"bearer","token":"operation-token","expires_at":%q,"scopes":["exec:operate"]},"expires_at":%q}}`, expires, expires)
+		_, _ = fmt.Fprintf(writer, `{"data":{"operation_id":"operation_1","environment":{"id":"environment_1","kind":"machine","resource_id":"machine_1","state":"ready","root":"/root"},"endpoints":{"quic":"quic://example.test:443","wss":"wss://example.test/v1/runtime"},"auth":{"method":"bearer","token":"operation-token","expires_at":%q,"scopes":["exec:operate"]},"expires_at":%q}}`, expires, expires)
 	}))
 	defer server.Close()
 	source := AuthenticatedMachineSource{ServerURL: server.URL, Auth: &rotatingAuthSource{}, SourceMachineID: "source_1"}
@@ -202,5 +204,31 @@ func TestAuthenticatedMachineSourceReconcilesSSHAuthority(t *testing.T) {
 	machines, err := (AuthenticatedMachineSource{ServerURL: server.URL, Auth: &rotatingAuthSource{}}).ListUserMachines(context.Background())
 	if err != nil || len(machines) != 1 || machines[0].SSHAuthority.TargetGeneration != 4 || machines[0].SSHAuthority.HostKeyGeneration != 4 {
 		t.Fatalf("machines=%+v err=%v", machines, err)
+	}
+}
+
+type failedRefreshAuth struct{ cause error }
+
+func (failedRefreshAuth) Credential() (config.Credential, error) {
+	return config.Credential{AccessToken: "fixture"}, nil
+}
+func (s failedRefreshAuth) Refresh() (config.Credential, error) { return config.Credential{}, s.cause }
+
+func TestIssuePeerStreamPreservesRefreshFailureAfterRejection(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(401)
+		_, _ = w.Write([]byte(`{"error":{"code":"unauthenticated"}}`))
+	}))
+	defer server.Close()
+	cause := syscall.EIO
+	source := AuthenticatedMachineSource{ServerURL: server.URL, Auth: failedRefreshAuth{cause}, SourceMachineID: "source_1"}
+	request := localapi.PeerStreamRequest{Schema: localapi.PeerStreamSchemaV1, Consumer: "exec", MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, OperationID: "operation_1", Deadline: time.Now().UTC().Add(time.Minute), MaximumBytes: 1024, Payload: json.RawMessage(`{"operation_id":"operation_1"}`)}
+	_, err := source.IssuePeerStream(t.Context(), request)
+	if !errors.Is(err, cause) || !errors.Is(err, api.ErrUnauthenticated) {
+		t.Fatal("refresh error or original rejection lost")
+	}
+	fault := errorreport.ProjectFault(t.Context(), "paperboatd", "peer_stream", "control_request", "control_request_failed", err)
+	if fault.Errno != int(cause) || fault.Outcome == "rejected" || fault.Stage != "peer_authority" {
+		t.Fatalf("refresh cause masked: %+v", fault)
 	}
 }

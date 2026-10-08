@@ -26,6 +26,32 @@ var (
 	ErrDirectorySync  = errors.New("release eligibility directory sync failed")
 )
 
+// safeStoreError preserves typed causes for callers while presenting only
+// package-owned text. Messages supplied here must be static and must not
+// contain paths or record data.
+type safeStoreError struct {
+	message string
+	causes  []error
+}
+
+func (err safeStoreError) Error() string { return err.message }
+
+func (err safeStoreError) Unwrap() []error {
+	causes := make([]error, len(err.causes))
+	copy(causes, err.causes)
+	return causes
+}
+
+func safeStoreFailure(message string, causes ...error) error {
+	retained := make([]error, 0, len(causes))
+	for _, cause := range causes {
+		if cause != nil {
+			retained = append(retained, cause)
+		}
+	}
+	return safeStoreError{message: message, causes: retained}
+}
+
 // FileStore is a strict, single-record store. The path is supplied by the
 // host configuration, never by a release index or a network response.
 type FileStore struct {
@@ -50,7 +76,7 @@ func (s FileStore) validate() error {
 
 // CurrentDeferral implements workerupdate.DeferralSource structurally without
 // importing workerupdate (which keeps the package dependency acyclic).
-func (s FileStore) CurrentDeferral(ctx context.Context) (releasepolicy.Deferral, bool, error) {
+func (s FileStore) CurrentDeferral(ctx context.Context) (deferral releasepolicy.Deferral, present bool, resultErr error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -61,7 +87,7 @@ func (s FileStore) CurrentDeferral(ctx context.Context) (releasepolicy.Deferral,
 		return releasepolicy.Deferral{}, false, err
 	}
 	if err := validateParentDirectory(s.Path); err != nil {
-		return releasepolicy.Deferral{}, false, err
+		return releasepolicy.Deferral{}, false, safeStoreFailure("release eligibility directory could not be inspected", err)
 	}
 
 	before, err := os.Lstat(s.Path)
@@ -69,32 +95,51 @@ func (s FileStore) CurrentDeferral(ctx context.Context) (releasepolicy.Deferral,
 		return releasepolicy.Deferral{}, false, nil
 	}
 	if err != nil {
-		return releasepolicy.Deferral{}, false, err
+		return releasepolicy.Deferral{}, false, safeStoreFailure("release eligibility record could not be inspected", err)
 	}
 	if err := validateRecordInfo(s.Path, before); err != nil {
 		return releasepolicy.Deferral{}, false, err
 	}
 	file, err := os.Open(s.Path)
 	if err != nil {
-		return releasepolicy.Deferral{}, false, err
+		return releasepolicy.Deferral{}, false, safeStoreFailure("release eligibility record could not be opened", err)
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			if resultErr == nil {
+				resultErr = safeStoreFailure("release eligibility record could not be closed", closeErr)
+			} else {
+				resultErr = safeStoreFailure("release eligibility record read and close failed", resultErr, closeErr)
+			}
+			deferral = releasepolicy.Deferral{}
+			present = false
+		}
+	}()
 	opened, err := file.Stat()
-	if err != nil || !sameFile(before, opened) {
+	if err != nil {
+		return releasepolicy.Deferral{}, false, safeStoreFailure("release eligibility record could not be checked", err)
+	}
+	if !sameFile(before, opened) {
 		return releasepolicy.Deferral{}, false, ErrRecordChanged
 	}
 	body, err := readBounded(ctx, file, s.MaxBytes)
 	if err != nil {
-		return releasepolicy.Deferral{}, false, err
+		if err == context.Canceled || err == context.DeadlineExceeded || err == ErrRecordTooLarge {
+			return releasepolicy.Deferral{}, false, err
+		}
+		return releasepolicy.Deferral{}, false, safeStoreFailure("release eligibility record could not be read", err)
 	}
 	after, err := file.Stat()
-	if err != nil || !sameFile(opened, after) {
+	if err != nil {
+		return releasepolicy.Deferral{}, false, safeStoreFailure("release eligibility record could not be checked after reading", err)
+	}
+	if !sameFile(opened, after) {
 		return releasepolicy.Deferral{}, false, ErrRecordChanged
 	}
 	if err := ctx.Err(); err != nil {
 		return releasepolicy.Deferral{}, false, err
 	}
-	deferral, err := decode(body)
+	deferral, err = decode(body)
 	if err != nil {
 		return releasepolicy.Deferral{}, false, err
 	}
@@ -104,7 +149,7 @@ func (s FileStore) CurrentDeferral(ctx context.Context) (releasepolicy.Deferral,
 // Save atomically replaces the single record and fsyncs both the file and its
 // containing directory. The temporary file is created with 0600 permissions
 // in the same directory, so a process crash cannot expose a partial record.
-func (s FileStore) Save(ctx context.Context, deferral releasepolicy.Deferral) error {
+func (s FileStore) Save(ctx context.Context, deferral releasepolicy.Deferral) (resultErr error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -115,70 +160,84 @@ func (s FileStore) Save(ctx context.Context, deferral releasepolicy.Deferral) er
 		return err
 	}
 	body, err := deferral.Bytes()
-	if err != nil || int64(len(body)) > s.MaxBytes {
-		if err != nil {
-			return errors.Join(ErrInvalidRecord, err)
-		}
+	if err != nil {
+		return safeStoreFailure("release eligibility record is invalid", ErrInvalidRecord, err)
+	}
+	if int64(len(body)) > s.MaxBytes {
 		return ErrRecordTooLarge
 	}
 	if err := validateParentDirectory(s.Path); err != nil {
-		return err
+		return safeStoreFailure("release eligibility directory could not be inspected", err)
 	}
 	if info, statErr := os.Lstat(s.Path); statErr == nil {
 		if err := validateRecordInfo(s.Path, info); err != nil {
 			return err
 		}
 	} else if !errors.Is(statErr, os.ErrNotExist) {
-		return statErr
+		return safeStoreFailure("existing release eligibility record could not be inspected", statErr)
 	}
 	temporary, temporaryPath, err := createTemporaryFile(filepath.Dir(s.Path), filepath.Base(s.Path))
 	if err != nil {
-		return err
+		return safeStoreFailure("release eligibility staging record could not be created", err)
 	}
 	removeTemporary := true
+	temporaryOpen := true
 	defer func() {
+		var cleanupErrors []error
+		if temporaryOpen {
+			if closeErr := temporary.Close(); closeErr != nil {
+				cleanupErrors = append(cleanupErrors, closeErr)
+			}
+		}
 		if removeTemporary {
-			_ = os.Remove(temporaryPath)
+			if removeErr := os.Remove(temporaryPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				cleanupErrors = append(cleanupErrors, removeErr)
+			}
+		}
+		if len(cleanupErrors) > 0 {
+			causes := append([]error{resultErr}, cleanupErrors...)
+			resultErr = safeStoreFailure("release eligibility staging cleanup failed", causes...)
 		}
 	}()
 	if err := temporary.Chmod(0o600); err != nil {
-		_ = temporary.Close()
-		return err
+		return safeStoreFailure("release eligibility staging record permissions could not be set", err)
 	}
 	// On Windows, Chmod does not establish ownership or a protected DACL.
 	// Apply the platform security policy before any bytes are written so an
 	// attacker cannot observe or replace an unprotected staging record.
 	if err := secureRecordFile(temporaryPath); err != nil {
-		_ = temporary.Close()
-		return err
+		return safeStoreFailure("release eligibility staging record could not be secured", err)
 	}
 	if err := writeBounded(ctx, temporary, body); err != nil {
-		_ = temporary.Close()
-		return err
+		if err == context.Canceled || err == context.DeadlineExceeded {
+			return err
+		}
+		return safeStoreFailure("release eligibility staging record could not be written", err)
 	}
 	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return err
+		return safeStoreFailure("release eligibility staging record could not be synced", err)
 	}
 	if err := temporary.Close(); err != nil {
-		return err
+		temporaryOpen = false
+		return safeStoreFailure("release eligibility staging record could not be closed", err)
 	}
+	temporaryOpen = false
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	//paperboat:allow-source-policy atomic-replacement owner=release-eligibility reason=same-directory-synced-protected-state-staging
 	if err := os.Rename(temporaryPath, s.Path); err != nil {
-		return err
+		return safeStoreFailure("release eligibility record could not be published", err)
 	}
 	removeTemporary = false
 	// Rename preserves the protected temporary object's security on Windows,
 	// but verify the final name as well. This also catches a hostile rename
 	// target race before the directory durability barrier is reported.
 	if err := secureRecordFile(s.Path); err != nil {
-		return err
+		return safeStoreFailure("published release eligibility record could not be secured", err)
 	}
 	if err := syncDirectory(filepath.Dir(s.Path)); err != nil {
-		return errors.Join(ErrDirectorySync, err)
+		return safeStoreFailure("release eligibility directory could not be synced", ErrDirectorySync, err)
 	}
 	return nil
 }
@@ -196,34 +255,49 @@ func (s FileStore) Remove(ctx context.Context) error {
 		return err
 	}
 	if err := validateParentDirectory(s.Path); err != nil {
-		return err
+		return safeStoreFailure("release eligibility directory could not be inspected", err)
 	}
 	info, err := os.Lstat(s.Path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
-		return err
+		return safeStoreFailure("release eligibility record could not be inspected", err)
 	}
 	if err := validateRecordInfo(s.Path, info); err != nil {
 		return err
 	}
 	if err := os.Remove(s.Path); err != nil {
-		return err
+		return safeStoreFailure("release eligibility record could not be removed", err)
 	}
-	return syncDirectory(filepath.Dir(s.Path))
+	if err := syncDirectory(filepath.Dir(s.Path)); err != nil {
+		return safeStoreFailure("release eligibility directory could not be synced after removal", ErrDirectorySync, err)
+	}
+	return nil
 }
 
 func decode(body []byte) (releasepolicy.Deferral, error) {
 	if err := rejectDuplicateKeys(body); err != nil {
-		return releasepolicy.Deferral{}, ErrInvalidRecord
+		if errors.Is(err, ErrInvalidRecord) {
+			return releasepolicy.Deferral{}, ErrInvalidRecord
+		}
+		return releasepolicy.Deferral{}, safeStoreFailure("release eligibility record is invalid", ErrInvalidRecord, err)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	var deferral releasepolicy.Deferral
 	var extra any
-	if decoder.Decode(&deferral) != nil || decoder.Decode(&extra) != io.EOF || deferral.Validate() != nil {
-		return releasepolicy.Deferral{}, ErrInvalidRecord
+	if err := decoder.Decode(&deferral); err != nil {
+		return releasepolicy.Deferral{}, safeStoreFailure("release eligibility record is invalid", ErrInvalidRecord, err)
+	}
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return releasepolicy.Deferral{}, ErrInvalidRecord
+		}
+		return releasepolicy.Deferral{}, safeStoreFailure("release eligibility record is invalid", ErrInvalidRecord, err)
+	}
+	if err := deferral.Validate(); err != nil {
+		return releasepolicy.Deferral{}, safeStoreFailure("release eligibility record is invalid", ErrInvalidRecord, err)
 	}
 	return deferral, nil
 }
@@ -268,7 +342,10 @@ func consumeJSONValue(decoder *json.Decoder) error {
 				}
 			}
 			end, err := decoder.Token()
-			if err != nil || end != json.Delim('}') {
+			if err != nil {
+				return err
+			}
+			if end != json.Delim('}') {
 				return ErrInvalidRecord
 			}
 		case '[':
@@ -278,7 +355,10 @@ func consumeJSONValue(decoder *json.Decoder) error {
 				}
 			}
 			end, err := decoder.Token()
-			if err != nil || end != json.Delim(']') {
+			if err != nil {
+				return err
+			}
+			if end != json.Delim(']') {
 				return ErrInvalidRecord
 			}
 		default:

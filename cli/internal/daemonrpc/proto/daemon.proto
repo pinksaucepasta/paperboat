@@ -34,12 +34,12 @@ message DERPStatus {
   int64 latency_ms = 4;
 }
 
-message DeviceQuery {
+message MachineQuery {
   string query = 1;
 }
 
-message DeviceAddress {
-  string device_id = 1;
+message MachineAddress {
+  string machine_id = 1;
   string alias = 2;
   string assigned_ip = 3;
   repeated int32 forwarded_ports = 4;
@@ -47,31 +47,31 @@ message DeviceAddress {
   map<int32, string> browser_urls = 6;
 }
 
-message SetDeviceTagsRequest {
-  string device_id = 1;
+message SetMachineTagsRequest {
+  string machine_id = 1;
   repeated string tags = 2;
 }
 
-message SetDeviceTagsResponse {
-  string device_id = 1;
+message SetMachineTagsResponse {
+  string machine_id = 1;
   repeated string tags = 2;
   bool success = 3;
 }
 
 message ApprovePeerRequest {
-  string device_id = 1;
+  string machine_id = 1;
   bool approved = 2;
 }
 
 message ApprovePeerResponse {
-  string device_id = 1;
+  string machine_id = 1;
   bool approved = 2;
   bool success = 3;
 }
 
 service DaemonService {
   rpc StreamStatus(Empty) returns (stream StatusResponse);
-  rpc ResolveDevice(DeviceQuery) returns (DeviceAddress);
-  rpc SetDeviceTags(SetDeviceTagsRequest) returns (SetDeviceTagsResponse);
+  rpc ResolveMachine(MachineQuery) returns (MachineAddress);
+  rpc SetMachineTags(SetMachineTagsRequest) returns (SetMachineTagsResponse);
   rpc ApprovePeer(ApprovePeerRequest) returns (ApprovePeerResponse);
 }

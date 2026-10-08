@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"net"
 	"net/url"
@@ -46,25 +47,26 @@ type LeaseTarget struct {
 // endpoint is available to the carrier, but Session.URL only exposes it after
 // readiness has been reported by an authenticated carrier.
 type Lease struct {
-	Schema          string      `json:"schema"`
-	Kind            string      `json:"kind"`
-	ID              string      `json:"id"`
-	AccountID       string      `json:"account_id"`
-	ActorID         string      `json:"actor_id"`
-	OwnerDeviceID   string      `json:"owner_device_id"`
-	OwnerSessionID  string      `json:"owner_session_id"`
-	Target          LeaseTarget `json:"target"`
-	AccessMode      string      `json:"access_mode"`
-	Persistent      bool        `json:"persistent"`
-	Endpoint        string      `json:"endpoint"`
-	LeaseDeadline   time.Time   `json:"lease_deadline"`
-	UserDeadline    *time.Time  `json:"user_deadline,omitempty"`
-	State           string      `json:"state"`
-	AllocationState string      `json:"allocation_state"`
-	EdgeState       string      `json:"edge_state"`
-	OriginState     string      `json:"origin_state"`
-	CreatedAt       time.Time   `json:"created_at"`
-	LastRenewedAt   time.Time   `json:"last_renewed_at"`
+	Schema           string      `json:"schema"`
+	Kind             string      `json:"kind"`
+	ID               string      `json:"id"`
+	AccountID        string      `json:"account_id"`
+	ActorID          string      `json:"actor_id"`
+	OwnerMachineID   string      `json:"owner_machine_id"`
+	OwnerSessionID   string      `json:"owner_session_id"`
+	OwnerSessionKind string      `json:"owner_session_kind"`
+	Target           LeaseTarget `json:"target"`
+	AccessMode       string      `json:"access_mode"`
+	Persistent       bool        `json:"persistent"`
+	Endpoint         string      `json:"endpoint"`
+	LeaseDeadline    time.Time   `json:"lease_deadline"`
+	UserDeadline     *time.Time  `json:"user_deadline,omitempty"`
+	State            string      `json:"state"`
+	AllocationState  string      `json:"allocation_state"`
+	EdgeState        string      `json:"edge_state"`
+	OriginState      string      `json:"origin_state"`
+	CreatedAt        time.Time   `json:"created_at"`
+	LastRenewedAt    time.Time   `json:"last_renewed_at"`
 	// CreateOperationID is the durable server operation that allocated this
 	// lease. It is transport-only metadata used by the authenticated carrier
 	// attachment path and is never serialized in a preview resource.
@@ -79,13 +81,14 @@ type Lease struct {
 // LeaseRequest contains only create-time owner and target information. The
 // server allocates the random endpoint and never accepts a requested hostname.
 type LeaseRequest struct {
-	OwnerDeviceID  string
-	OwnerSessionID string
-	Target         LeaseTarget
-	AccessMode     string
-	UserDeadline   *time.Time
-	Duration       time.Duration
-	IdempotencyKey string
+	OwnerMachineID   string
+	OwnerSessionID   string
+	OwnerSessionKind string
+	Target           LeaseTarget
+	AccessMode       string
+	UserDeadline     *time.Time
+	Duration         time.Duration
+	IdempotencyKey   string
 }
 
 // LeaseClient owns the control-plane calls for one foreground session. Stop
@@ -149,8 +152,9 @@ type SessionConfig struct {
 	LeaseClient LeaseClient
 	Carrier     Carrier
 
-	OwnerDeviceID      string
+	OwnerMachineID     string
 	OwnerSessionID     string
+	OwnerSessionKind   string
 	Target             LeaseTarget
 	AccessMode         string
 	UserDeadline       *time.Time
@@ -211,7 +215,7 @@ func Start(ctx context.Context, config SessionConfig) (*Session, error) {
 	}
 
 	request := LeaseRequest{
-		OwnerDeviceID: config.OwnerDeviceID, OwnerSessionID: config.OwnerSessionID,
+		OwnerMachineID: config.OwnerMachineID, OwnerSessionID: config.OwnerSessionID, OwnerSessionKind: config.OwnerSessionKind,
 		Target: config.Target, AccessMode: config.AccessMode,
 		UserDeadline: config.UserDeadline, Duration: config.Duration,
 		IdempotencyKey: config.IdempotencyKey,
@@ -242,7 +246,7 @@ func Start(ctx context.Context, config SessionConfig) (*Session, error) {
 }
 
 // StartExisting admits a lease that was already created by the control plane.
-// It is the only entry point for dashboard-to-device dispatch. In particular,
+// It is the only entry point for dashboard-to-machine dispatch. In particular,
 // it never calls LeaseClient.Create, so a rejected or retried dispatch cannot
 // mint a second endpoint.
 func StartExisting(ctx context.Context, config SessionConfig, lease Lease) (*Session, error) {
@@ -264,7 +268,7 @@ func prepareSessionConfig(config SessionConfig) (SessionConfig, error) {
 	if config.Now == nil {
 		config.Now = func() time.Time { return time.Now().UTC() }
 	}
-	config.OwnerDeviceID = strings.TrimSpace(config.OwnerDeviceID)
+	config.OwnerMachineID = strings.TrimSpace(config.OwnerMachineID)
 	config.OwnerSessionID = strings.TrimSpace(config.OwnerSessionID)
 	config.Target.Scheme = strings.ToLower(strings.TrimSpace(config.Target.Scheme))
 	config.Target.Address = strings.TrimSpace(config.Target.Address)
@@ -339,8 +343,8 @@ func validateSessionConfig(config SessionConfig) error {
 	if config.LeaseClient == nil || config.Carrier == nil {
 		return fmt.Errorf("%w: lease client and carrier are required", ErrSessionInvalid)
 	}
-	if strings.TrimSpace(config.OwnerDeviceID) == "" || strings.TrimSpace(config.OwnerSessionID) == "" {
-		return fmt.Errorf("%w: owner device and session are required", ErrSessionInvalid)
+	if !validOwnerSessionKind(config.OwnerSessionKind) || strings.TrimSpace(config.OwnerMachineID) == "" || strings.TrimSpace(config.OwnerSessionID) == "" {
+		return fmt.Errorf("%w: owner machine and session are required", ErrSessionInvalid)
 	}
 	if err := validateLeaseTarget(config.Target); err != nil {
 		return err
@@ -375,7 +379,7 @@ func validateSessionLease(lease Lease, config SessionConfig, now time.Time) erro
 	if lease.Schema != PreviewTunnelSchemaV1 || lease.Kind != PreviewLeaseKind || !validLeaseID(lease.ID) || !validLeaseID(lease.AccountID) || !validLeaseID(lease.ActorID) {
 		return fmt.Errorf("%w: server returned an invalid lease identity", ErrSessionInvalid)
 	}
-	if !validLeaseID(lease.OwnerDeviceID) || !validLeaseID(lease.OwnerSessionID) || lease.OwnerDeviceID != config.OwnerDeviceID || lease.OwnerSessionID != config.OwnerSessionID {
+	if !validLeaseID(lease.OwnerMachineID) || !validLeaseID(lease.OwnerSessionID) || lease.OwnerMachineID != config.OwnerMachineID || lease.OwnerSessionID != config.OwnerSessionID || lease.OwnerSessionKind != config.OwnerSessionKind {
 		return fmt.Errorf("%w: server returned a lease for a different owner", ErrSessionInvalid)
 	}
 	if lease.Target != config.Target {
@@ -702,7 +706,7 @@ func (s *Session) renewLease(ctx context.Context, lease Lease, idempotencyKey st
 }
 
 func (s *Session) acceptRenewal(renewed, previous Lease) error {
-	if renewed.ID != previous.ID || renewed.Endpoint != previous.Endpoint || renewed.OwnerDeviceID != previous.OwnerDeviceID || renewed.OwnerSessionID != previous.OwnerSessionID {
+	if renewed.ID != previous.ID || renewed.Endpoint != previous.Endpoint || renewed.OwnerMachineID != previous.OwnerMachineID || renewed.OwnerSessionID != previous.OwnerSessionID || renewed.OwnerSessionKind != previous.OwnerSessionKind {
 		return fmt.Errorf("%w: renewal changed lease identity, endpoint, or owner", ErrSessionInvalid)
 	}
 	if !validActiveLeaseState(renewed.State) {
@@ -968,11 +972,11 @@ func newSessionIdempotencyKey(source io.Reader) (string, error) {
 	if source == nil {
 		source = cryptorand.Reader
 	}
-	var value [18]byte
-	if _, err := io.ReadFull(source, value[:]); err != nil {
+	id, err := uuid.NewRandomFromReader(source)
+	if err != nil {
 		return "", err
 	}
-	return "preview_" + base64.RawURLEncoding.EncodeToString(value[:]), nil
+	return "operation_" + id.String(), nil
 }
 
 func leaseGenerationForID(id, etag string) int64 {
@@ -997,4 +1001,14 @@ func leaseGenerationForID(id, etag string) int64 {
 
 func formatLeaseETag(id string, generation int64) string {
 	return fmt.Sprintf(`"ptv1:%s:%s:%d"`, PreviewLeaseKind, base64.RawURLEncoding.EncodeToString([]byte(id)), generation)
+}
+
+const (
+	OwnerSessionLocalLease  = "local_lease"
+	OwnerSessionForeground  = "foreground"
+	OwnerSessionLazyRuntime = "lazy_runtime"
+)
+
+func validOwnerSessionKind(kind string) bool {
+	return kind == OwnerSessionLocalLease || kind == OwnerSessionForeground || kind == OwnerSessionLazyRuntime
 }

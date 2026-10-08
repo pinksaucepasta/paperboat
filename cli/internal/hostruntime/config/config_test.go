@@ -2,18 +2,18 @@ package config
 
 import "testing"
 
-func TestFromEnvDefaultsToBYOD(t *testing.T) {
+func TestFromEnvDefaults(t *testing.T) {
 	c, err := FromEnv("1.0.0", func(string) string { return "" })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Profile != BYOD || c.Limits != DefaultLimits || c.Resources != DefaultResources {
+	if c.Limits != DefaultLimits || c.Resources != DefaultResources {
 		t.Fatalf("config = %#v", c)
 	}
 }
 
 func TestValidateResourceLimitsAreCompleteAndBounded(t *testing.T) {
-	base := Config{Profile: BYOD, StateRoot: t.TempDir(), Version: "1", Limits: DefaultLimits, Resources: DefaultResources}
+	base := Config{StateRoot: t.TempDir(), Version: "1", Limits: DefaultLimits, Resources: DefaultResources}
 	if err := base.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestValidateResourceLimitsAreCompleteAndBounded(t *testing.T) {
 }
 
 func TestValidateRejectsUnsafeLimits(t *testing.T) {
-	c := Config{Profile: BYOD, StateRoot: t.TempDir(), Version: "1", Limits: DefaultLimits}
+	c := Config{StateRoot: t.TempDir(), Version: "1", Limits: DefaultLimits}
 	c.Limits.MutationDeadline = DefaultLimits.MutationDeadline + 1
 	if err := c.Validate(); err == nil {
 		t.Fatal("expected invalid limits")

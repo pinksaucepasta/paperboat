@@ -3,8 +3,6 @@ package localwait
 import (
 	"context"
 	"errors"
-	"fmt"
-	"io"
 	"strings"
 	"time"
 
@@ -12,6 +10,12 @@ import (
 )
 
 const ResultSchemaV1 = "paperboat.wait-result/v1"
+
+var (
+	ErrInvalid          = errors.New("invalid local wait configuration")
+	ErrMachineNotFound  = errors.New("machine was not found in local status; run pb status to refresh available targets")
+	ErrMachineAmbiguous = errors.New("machine alias is ambiguous; use a machine ID from pb status")
+)
 
 type Client interface {
 	Snapshot(context.Context) (localapi.Snapshot, error)
@@ -71,20 +75,20 @@ func ResolveMachine(machines []localapi.MachineStatus, target string) (localapi.
 			continue
 		}
 		if match != nil {
-			return localapi.MachineStatus{}, fmt.Errorf("machine alias %q is ambiguous; use a machine ID", target)
+			return localapi.MachineStatus{}, ErrMachineAmbiguous
 		}
 		candidate := machines[index]
 		match = &candidate
 	}
 	if match == nil {
-		return localapi.MachineStatus{}, fmt.Errorf("machine %q was not found in local status", target)
+		return localapi.MachineStatus{}, ErrMachineNotFound
 	}
 	return *match, nil
 }
 
 func Wait(ctx context.Context, client Client, machineID, condition string) (Result, error) {
-	if client == nil || strings.TrimSpace(machineID) == "" || !validCondition(condition) {
-		return Result{}, errors.New("invalid local wait configuration")
+	if ctx == nil || client == nil || strings.TrimSpace(machineID) == "" || !validCondition(condition) {
+		return Result{}, ErrInvalid
 	}
 	snapshot, err := client.Snapshot(ctx)
 	if err != nil {
@@ -94,8 +98,8 @@ func Wait(ctx context.Context, client Client, machineID, condition string) (Resu
 }
 
 func WaitTargetFromSnapshot(ctx context.Context, client Client, snapshot localapi.Snapshot, target, condition string) (Result, error) {
-	if client == nil || snapshot.Validate() != nil || strings.TrimSpace(target) == "" || !validCondition(condition) {
-		return Result{}, errors.New("invalid local wait configuration")
+	if ctx == nil || client == nil || snapshot.Validate() != nil || strings.TrimSpace(target) == "" || !validCondition(condition) {
+		return Result{}, ErrInvalid
 	}
 	machine, err := ResolveMachine(snapshot.Machines, target)
 	if err != nil {
@@ -107,7 +111,10 @@ func WaitTargetFromSnapshot(ctx context.Context, client Client, snapshot localap
 func waitFromSnapshot(ctx context.Context, client Client, snapshot localapi.Snapshot, machineID, condition string) (Result, error) {
 	last, found := machineByID(snapshot.Machines, machineID)
 	if !found {
-		return Result{}, fmt.Errorf("machine %q disappeared from local status", machineID)
+		return Result{}, ErrMachineNotFound
+	}
+	if ctx.Err() != nil {
+		return contextResult(ctx, snapshot, last, condition), nil
 	}
 	if result, done := evaluate(snapshot, last, condition); done {
 		return result, nil
@@ -132,6 +139,9 @@ func waitFromSnapshot(ctx context.Context, client Client, snapshot localapi.Snap
 					return resultFor(next, last, condition, "failed", "machine_removed"), nil
 				}
 				last = machine
+				if ctx.Err() != nil {
+					return contextResult(ctx, snapshot, last, condition), nil
+				}
 				if result, done := evaluate(next, machine, condition); done {
 					return result, nil
 				}
@@ -141,9 +151,12 @@ func waitFromSnapshot(ctx context.Context, client Client, snapshot localapi.Snap
 					continue
 				}
 				if ctx.Err() != nil {
+					if watchErr != nil && !normalWatchTermination(watchErr, ctx.Err()) {
+						return Result{}, errors.Join(watchErr, ctx.Err())
+					}
 					return contextResult(ctx, snapshot, last, condition), nil
 				}
-				if watchErr != nil && !errors.Is(watchErr, io.EOF) {
+				if watchErr != nil && !normalWatchTermination(watchErr, nil) {
 					return Result{}, watchErr
 				}
 				watchErrors = nil

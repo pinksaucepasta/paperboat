@@ -29,6 +29,31 @@ type Session struct {
 	err      error
 }
 
+// MeterBinding contains only verified accounting metadata, never credentials.
+type MeterBinding struct {
+	AccessSessionID, StreamID, Consumer string
+	Reverse                             bool
+	Path                                func(string) (string, string)
+}
+
+// MeterIncoming measures authorized host application I/O. Reverse is used for
+// an origin connection, whose writes carry client uploads rather than downloads.
+func (s *Session) MeterIncoming(conn net.Conn, header streamauth.Header, accessSessionID string, reverse bool) net.Conn {
+	if header.Consumer == "config_compare" {
+		accessSessionID = header.UsageSessionID
+	}
+	if s.owner.meterIncoming == nil {
+		return conn
+	}
+	return s.owner.meterIncoming(conn, MeterBinding{AccessSessionID: accessSessionID, StreamID: header.StreamID, Consumer: header.Consumer, Reverse: reverse, Path: func(direction string) (string, string) {
+		path, err := s.owner.authority.PeerUsagePathDirection(s.peerID, direction)
+		if err != nil {
+			return "unknown", ""
+		}
+		return path.Mode, path.NodeID
+	}})
+}
+
 // OpenAuthorizedHTTP3 validates native network admission and exposes the
 // preview-class connection exclusively to HTTP/3. The canonical operation
 // credential is carried by the CONNECT request, not a competing raw stream.
@@ -136,16 +161,23 @@ func (s *Session) AcceptAuthorized(ctx context.Context, authorize func(context.C
 		_ = connection.Close()
 		return nil, streamauth.Header{}, tailnet.ErrAdmission
 	}
-	err = s.authorizeIncoming(ctx, header, capability, authorize)
+	var accessSessionID string
+	err = s.authorizeIncoming(ctx, header, capability, func(ctx context.Context, header streamauth.Header) (string, error) {
+		var authorizeErr error
+		accessSessionID, authorizeErr = authorize(ctx, header)
+		return accessSessionID, authorizeErr
+	})
 	if err != nil {
 		_ = connection.Close()
 		return nil, streamauth.Header{}, errors.Join(ErrStreamRejected, err)
 	}
-	return newLimitedConn(connection, header.MaximumBytes), header, nil
+	return s.MeterIncoming(newLimitedConn(connection, header.MaximumBytes), header, accessSessionID, false), header, nil
 }
 
 func capabilityForConsumer(consumer string) string {
 	switch consumer {
+	case "config_compare":
+		return "config_compare"
 	case "inspector":
 		return "inspector"
 	case "terminal":

@@ -2,9 +2,12 @@ package updated
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 	"reflect"
 	"slices"
@@ -88,7 +91,9 @@ func testWindowsActivationJournal() windowsActivationJournal {
 	c := windowsActivationComponent{Path: `C:\Paperboat\candidate.exe`, SHA256: strings.Repeat("a", 64), Length: 1}
 	previous := c
 	previous.Path = `C:\Program Files\Paperboat\bin\pb.exe`
-	return windowsActivationJournal{Candidate: workerupdate.PreparedCandidate{ID: strings.Repeat("d", 64), Version: "2026.08.23.1", Platform: "windows", Architecture: "amd64", SHA256: c.SHA256, Length: c.Length}, ApprovedCandidateID: strings.Repeat("d", 64), Schema: windowsActivationJournalSchema, TransactionID: strings.Repeat("1", 32), PreviousVersion: "2026.08.22.1", Version: "2026.08.23.1", Architecture: "amd64", Stage: windowsActivationStaged, Runtime: c, CLI: c, Hostd: c, Updater: c, PreviousBinary: previous, OldHostd: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-hostd", "--instance", "u0123456789abcdef01234567"}, WasRunning: true}, NewHostd: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-hostd", "--instance", "u0123456789abcdef01234567"}}, OldUpdater: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-updated", "--instance", "u0123456789abcdef01234567"}, WasRunning: true}, NewUpdater: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-updated", "--instance", "u0123456789abcdef01234567"}}, ManifestSHA256: strings.Repeat("b", 64), CanaryPath: "/_paperboat/update-canary", CanaryStatus: 204, CanarySamples: 3, CanaryTimeout: time.Second, DrainTimeout: time.Second, StabilityWindow: time.Second, StabilityInterval: time.Second, RollbackTimeout: time.Second, HostdAPIMin: 1, HostdAPIMax: 2, RuntimeAPIMin: 1, RuntimeAPIMax: 2}
+	j := windowsActivationJournal{Candidate: workerupdate.PreparedCandidate{ID: strings.Repeat("d", 64), Version: "2026.08.23.1", Platform: "windows", Architecture: "amd64", SHA256: c.SHA256, Length: c.Length}, ApprovedCandidateID: strings.Repeat("d", 64), Schema: windowsActivationJournalSchema, TransactionID: strings.Repeat("1", 32), PreviousVersion: "2026.08.22.1", Version: "2026.08.23.1", Architecture: "amd64", Stage: windowsActivationStaged, Runtime: c, CLI: c, Hostd: c, Updater: c, PreviousBinary: previous, OldHostd: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-hostd", "--instance", "u0123456789abcdef01234567"}, WasRunning: true}, NewHostd: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-hostd", "--instance", "u0123456789abcdef01234567"}}, OldUpdater: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-updated", "--instance", "u0123456789abcdef01234567"}, WasRunning: true}, NewUpdater: windowsServiceTarget{Executable: `C:\Program Files\Paperboat\bin\pb.exe`, Arguments: []string{"daemon", "__runtime-updated", "--instance", "u0123456789abcdef01234567"}}, Release: workerupdate.Release{SupervisorMaintenance: true, Version: "2026.08.23.1", Platform: "windows", Architecture: "amd64", SHA256: c.SHA256, Length: c.Length, ManifestSHA256: strings.Repeat("b", 64), CanaryPath: "/_paperboat/update-canary", CanaryStatus: 204, CanarySamples: 3, CanaryTimeout: time.Second, DrainTimeout: time.Second, StabilityWindow: time.Second, StabilityInterval: time.Second, RollbackTimeout: time.Second, HostdAPIMin: 1, HostdAPIMax: 2, RuntimeAPIMin: 1, RuntimeAPIMax: 2}}
+	bindWindowsTestCandidate(&j)
+	return j
 }
 
 func TestWindowsActivationCommitsCLIOnlyAfterHealth(t *testing.T) {
@@ -201,20 +206,16 @@ func TestWindowsActivationRollbackNeverRestartsAfterTargetFailure(t *testing.T) 
 	}
 }
 
-func TestWindowsActivationServiceSetIsRoleScoped(t *testing.T) {
-	if got, want := windowsActivationServiceNames("client", "u0123456789abcdef01234567"), []string{"PaperboatHostd-u0123456789abcdef01234567", "PaperboatUpdated-u0123456789abcdef01234567"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("client=%q want=%q", got, want)
-	}
-	if got, want := windowsActivationServiceNames("host", "u0123456789abcdef01234567"), []string{"PaperboatSshd-u0123456789abcdef01234567", "PaperboatHostd-u0123456789abcdef01234567", "PaperboatUpdated-u0123456789abcdef01234567"}; !reflect.DeepEqual(got, want) {
+func TestWindowsActivationServiceSetAndSSHPrerequisite(t *testing.T) {
+
+	if got, want := windowsActivationServiceNames("u0123456789abcdef01234567"), []string{"PaperboatSshd-u0123456789abcdef01234567", "PaperboatHostd-u0123456789abcdef01234567", "PaperboatUpdated-u0123456789abcdef01234567"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("host=%q want=%q", got, want)
 	}
-	if got, want := windowsActivationServiceStartNames("host", "u0123456789abcdef01234567", true, true, true), []string{"PaperboatSshd-u0123456789abcdef01234567", "PaperboatHostd-u0123456789abcdef01234567", "PaperboatUpdated-u0123456789abcdef01234567"}; !reflect.DeepEqual(got, want) {
+	if got, want := windowsActivationServiceStartNames("u0123456789abcdef01234567", true, true, true), []string{"PaperboatSshd-u0123456789abcdef01234567", "PaperboatHostd-u0123456789abcdef01234567", "PaperboatUpdated-u0123456789abcdef01234567"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("host start order=%q want=%q", got, want)
 	}
-	if got, want := windowsActivationServiceStartNames("client", "u0123456789abcdef01234567", true, true, true), []string{"PaperboatHostd-u0123456789abcdef01234567", "PaperboatUpdated-u0123456789abcdef01234567"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("client start order=%q want=%q", got, want)
-	}
-	if got, want := windowsActivationServiceStartNames("host", "u0123456789abcdef01234567", false, true, true), []string{"PaperboatSshd-u0123456789abcdef01234567", "PaperboatUpdated-u0123456789abcdef01234567"}; !reflect.DeepEqual(got, want) {
+
+	if got, want := windowsActivationServiceStartNames("u0123456789abcdef01234567", false, true, true), []string{"PaperboatSshd-u0123456789abcdef01234567", "PaperboatUpdated-u0123456789abcdef01234567"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("filtered host start order=%q want=%q", got, want)
 	}
 	sshArguments := []string{"daemon", "__windows-sshd-service", "--instance", "u0123456789abcdef01234567"}
@@ -222,8 +223,8 @@ func TestWindowsActivationServiceSetIsRoleScoped(t *testing.T) {
 		t.Fatal("SSH runtime accepted a missing daemon entry point or extra arguments")
 	}
 	target := windowsServiceTarget{Executable: "sshd", Arguments: sshArguments}
-	if !validWindowsSSHRoleTarget("host", target) || validWindowsSSHRoleTarget("host", windowsServiceTarget{}) || validWindowsSSHRoleTarget("client", target) || !validWindowsSSHRoleTarget("client", windowsServiceTarget{}) {
-		t.Fatal("PaperboatSshd role invariant is not exact")
+	if !validWindowsSSHTarget(target) || validWindowsSSHTarget(windowsServiceTarget{}) {
+		t.Fatal("PaperboatSshd target invariant is not exact")
 	}
 	journal := testWindowsActivationJournal()
 	journal.OldSSH, journal.NewSSH = target, target
@@ -422,5 +423,110 @@ func TestWindowsActivationPersistsFailedPhase(t *testing.T) {
 	result, err := executeWindowsActivation(context.Background(), b, testWindowsActivationJournal())
 	if err == nil || !strings.Contains(err.Error(), "activate Windows binary:") || !strings.Contains(result.Failure, "activate Windows binary:") || result.Stage != windowsActivationRolledBack {
 		t.Fatalf("stage=%s failure=%s err=%v", result.Stage, result.Failure, err)
+	}
+}
+
+func (b *recordingWindowsActivationBackend) AuthorizeOwnerMaintenance(context.Context, workerupdate.Release, bool) error {
+	return nil
+}
+
+type featureWindowsBackend struct {
+	recordingWindowsActivationBackend
+}
+
+func (b *featureWindowsBackend) PrepareFeature(context.Context, windowsActivationJournal) (hostdproto.UpdateGateTargetBinding, error) {
+	return hostdproto.UpdateGateTargetBinding{Scope: hostdproto.UpdateGateScopeStandalone, MachineID: "machine-one", FailureDomain: "standalone"}, b.event("feature:prepare")
+}
+func (b *featureWindowsBackend) ActivateFeature(context.Context, windowsActivationJournal) error {
+	return b.event("feature:activate")
+}
+func (b *featureWindowsBackend) RestoreFeature(context.Context, windowsActivationJournal) error {
+	return b.event("feature:restore")
+}
+func (b *featureWindowsBackend) VerifyFeature(context.Context, windowsActivationJournal) error {
+	return b.event("feature:health")
+}
+func (b *featureWindowsBackend) CompleteFeature(context.Context, windowsActivationJournal) error {
+	return b.event("feature:commit")
+}
+func testWindowsFeatureJournal() windowsActivationJournal {
+	j := testWindowsActivationJournal()
+	j.Release.SupervisorMaintenance = false
+	bindWindowsTestCandidate(&j)
+	j.PreviousRuntime = j.PreviousBinary
+	j.PreviousRuntime.Path = `C:\Paperboat\versions\2026.08.22.1\pb.exe`
+	return j
+}
+func TestWindowsFeatureActivationPreservesNativeOwnersOnCommitAndHealthRollback(t *testing.T) {
+	for _, failure := range []string{"", "feature:health"} {
+		t.Run(failure, func(t *testing.T) {
+			b := &featureWindowsBackend{}
+			b.fail = failure
+			j, err := executeWindowsActivation(context.Background(), b, testWindowsFeatureJournal())
+			if failure == "" {
+				if err != nil || j.Stage != windowsActivationCommitted {
+					t.Fatalf("commit=%s err=%v", j.Stage, err)
+				}
+			} else if err == nil || j.Stage != windowsActivationRolledBack {
+				t.Fatalf("rollback=%s err=%v", j.Stage, err)
+			}
+			for _, event := range b.events {
+				if event == "stop" || event == "start" || strings.HasPrefix(event, "targets:") {
+					t.Fatalf("feature update touched native owner: %q", b.events)
+				}
+			}
+			if failure != "" && !slices.Contains(b.events, "feature:restore") {
+				t.Fatalf("trusted feature not restored: %q", b.events)
+			}
+		})
+	}
+}
+func TestWindowsFeatureInterruptedSwitchRestoresFeatureWithoutOwnerStop(t *testing.T) {
+	b := &featureWindowsBackend{}
+	j := testWindowsFeatureJournal()
+	j.Stage = windowsActivationSwitching
+	result, err := executeWindowsActivation(context.Background(), b, j)
+	if err == nil || result.Stage != windowsActivationRolledBack || !slices.Contains(b.events, "feature:restore") || slices.Contains(b.events, "stop") {
+		t.Fatalf("stage=%s events=%q err=%v", result.Stage, b.events, err)
+	}
+}
+
+func bindWindowsTestCandidate(j *windowsActivationJournal) {
+	raw, _ := json.Marshal(j.Release)
+	digest := sha256.Sum256(raw)
+	j.Candidate.ID = hex.EncodeToString(digest[:])
+	j.Candidate.OwnerMaintenance = j.Release.SupervisorMaintenance
+	j.ApprovedCandidateID = j.Candidate.ID
+}
+func TestWindowsActivationRejectsPolicyMutationAfterApproval(t *testing.T) {
+	j := testWindowsActivationJournal()
+	j.Release.OwnerMaintenanceGraceSeconds++
+	if validWindowsActivationJournal(j) {
+		t.Fatal("changed signed policy retained old approval")
+	}
+}
+
+func (b *recordingWindowsActivationBackend) AbortOwnerMaintenance(context.Context) error {
+	return b.event("maintenance:abort")
+}
+func (b *featureWindowsBackend) AbortFeature(context.Context, windowsActivationJournal) error {
+	return b.event("feature:abort")
+}
+func TestWindowsActivationStorageFailureBeforeOwnerStopAbortsFence(t *testing.T) {
+	b := &recordingWindowsActivationBackend{fail: "journal:switching"}
+	_, err := executeWindowsActivation(context.Background(), b, testWindowsActivationJournal())
+	if err == nil || !slices.Contains(b.events, "maintenance:abort") || slices.Contains(b.events, "stop") {
+		t.Fatalf("events=%v err=%v", b.events, err)
+	}
+}
+func TestWindowsFeaturePreparationFailureReleasesGateWithoutReplacement(t *testing.T) {
+	b := &featureWindowsBackend{recordingWindowsActivationBackend: recordingWindowsActivationBackend{fail: "feature:prepare"}}
+	j := testWindowsActivationJournal()
+	j.Release.SupervisorMaintenance = false
+	j.PreviousRuntime = j.PreviousBinary
+	bindWindowsTestCandidate(&j)
+	_, err := executeWindowsActivation(context.Background(), b, j)
+	if err == nil || !slices.Contains(b.events, "feature:abort") || slices.Contains(b.events, "feature:activate") {
+		t.Fatalf("events=%v err=%v", b.events, err)
 	}
 }

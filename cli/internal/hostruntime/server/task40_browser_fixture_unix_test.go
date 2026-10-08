@@ -26,7 +26,6 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
@@ -119,7 +118,7 @@ func TestTask40HoldBrowserRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtimeServer, err := New(Config{Negotiator: protocol.Negotiator{Profile: config.BYOD, Available: map[string]bool{"terminal.v1": true, "health.v1": true}}, Journal: journal, Handler: dispatcher, MaxConcurrent: 8, HeartbeatInterval: time.Hour, MutationDeadline: 30 * time.Second})
+	runtimeServer, err := New(Config{Negotiator: protocol.Negotiator{Available: map[string]bool{"terminal.v1": true, "health.v1": true}}, Journal: journal, Handler: dispatcher, MaxConcurrent: 8, HeartbeatInterval: time.Hour, MutationDeadline: 30 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}

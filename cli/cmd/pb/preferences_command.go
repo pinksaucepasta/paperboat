@@ -250,7 +250,7 @@ func editPreferences(c *cobra.Command) error {
 		if preferenceDirty(original, draft) || loadErr != nil {
 			state = "Unsaved changes"
 		}
-		choice, err := selector.Choose(selector.Options{Context: c.Context(), Title: "Make Paperboat yours", Subtitle: state + " · local to this device", Header: "PAPERBOAT / CUSTOMIZE", Stdin: os.Stdin, Output: c.ErrOrStderr(), Footer: notice + "  ·  esc back", Items: []selector.Item{
+		choice, err := selector.Choose(selector.Options{Context: c.Context(), Title: "Make Paperboat yours", Subtitle: state + " · local to this machine", Header: "PAPERBOAT / CUSTOMIZE", Stdin: os.Stdin, Output: c.ErrOrStderr(), Footer: notice + "  ·  esc back", Items: []selector.Item{
 			{ID: "shortcuts", Title: "Shortcuts", Description: fmt.Sprintf("%d shortcuts · connect, SSH, file tools, and other Paperboat actions", len(draft.Shortcuts))},
 			{ID: "ports", Title: "Port shortcuts", Description: "pb 3000 → " + draft.PortAction},
 			{ID: "defaults", Title: "Command defaults", Description: fmt.Sprintf("%d commands customized · explicit flags always win", len(draft.Defaults))},
@@ -631,7 +631,7 @@ func addPreferenceShortcut(c *cobra.Command, doc *preferences.Document) error {
 			return err
 		}
 	} else {
-		device, e := preferenceText(c, "Machine name or ID", "Use the machine name you normally pass to pb; it will be resolved when the shortcut runs", "", func(value string) error {
+		machine, e := preferenceText(c, "Machine name or ID", "Use the machine name you normally pass to pb; it will be resolved when the shortcut runs", "", func(value string) error {
 			if value == "" || strings.ContainsAny(value, "{}\r\n\t:") || strings.HasPrefix(value, "-") {
 				return errors.New("enter a machine name or ID without template markers or a path")
 			}
@@ -642,15 +642,15 @@ func addPreferenceShortcut(c *cobra.Command, doc *preferences.Document) error {
 		}
 		operation, mode, _ := strings.Cut(kind.ID, "-")
 		command = []string{operation}
-		argv = []string{device, "{args}"}
+		argv = []string{machine, "{args}"}
 		if operation == "sftp" {
-			argv = []string{"{args}", device}
+			argv = []string{"{args}", machine}
 		}
 		if mode == "upload" {
-			argv = []string{"{args}", "{1}", device + ":{2}"}
+			argv = []string{"{args}", "{1}", machine + ":{2}"}
 		}
 		if mode == "download" {
-			argv = []string{"{args}", device + ":{1}", "{2}"}
+			argv = []string{"{args}", machine + ":{1}", "{2}"}
 		}
 	}
 	candidate := preferences.Clone(*doc)

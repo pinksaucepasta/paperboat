@@ -2,7 +2,7 @@
 .TH "PB-ENV-VAULT-UNLOCK" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-env-vault-unlock - Unlock this account's ENV vault on this device
+pb-env-vault-unlock - Unlock this account's ENV vault on this machine
 
 
 .SH SYNOPSIS
@@ -10,13 +10,13 @@ pb-env-vault-unlock - Unlock this account's ENV vault on this device
 
 
 .SH DESCRIPTION
-Unlock this account's ENV vault on this device
+Unlock this account's ENV vault on this machine
 
 .PP
-Unlock encrypted local custody with the password supplied interactively, by stdin, or from a private file. No ENV value is printed by unlocking.
+Unlock encrypted local custody with the password supplied interactively, by stdin, or from a private file. Authorized workspace layers refresh automatically after unlock; locked keys never publish a delivery. No ENV value is printed by unlocking.
 
 .PP
-The local vault protects ENV key custody with a password and optional recovery code. Locking clears unlocked keys from this device; removing local custody differs from resetting and deleting account values. Never place a password or recovery code in shell arguments.
+The local vault protects ENV key custody with a password and optional recovery code. Locking clears unlocked keys from this machine; removing local custody differs from resetting and deleting account values. Never place a password or recovery code in shell arguments.
 
 .PP
 JSON output is supported with --json.
@@ -50,6 +50,10 @@ JSON output is supported with --json.
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

@@ -7,7 +7,14 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
 	"golang.org/x/sys/windows"
 	"io/fs"
+	"os"
 )
+
+func openTelemetryDescriptor(path string) (*os.File, error) {
+	// Go's Windows file flags preserve O_APPEND while opening the reparse
+	// point itself, which the descriptor/path validation then rejects.
+	return os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY|int(windows.FILE_FLAG_OPEN_REPARSE_POINT), 0o600)
+}
 
 func telemetrySecurityDescriptor() (*windows.SECURITY_DESCRIPTOR, error) {
 	token, err := windows.OpenCurrentProcessToken()

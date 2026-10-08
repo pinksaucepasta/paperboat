@@ -4,11 +4,11 @@ package runtime
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"github.com/google/uuid"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,7 +18,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
-	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 )
 
 type productionConfigSyncConfig struct {
@@ -27,7 +26,6 @@ type productionConfigSyncConfig struct {
 	RepositoryHosts []string
 	HomeRoot        string
 	StateRoot       string
-	ChezmoiBinary   string
 	Identities      configsync.TokenSource
 	Proofs          configsync.ProofSource
 	OperationID     configsync.OperationIDSource
@@ -38,7 +36,6 @@ type ProductionConfigWorkerConfig struct {
 	ControlURL      string
 	StateRoot       string
 	HomeRoot        string
-	ChezmoiBinary   string
 	RepositoryHosts []string
 	Transport       http.RoundTripper
 }
@@ -54,7 +51,7 @@ func RunProductionConfigWorker(ctx context.Context, config ProductionConfigWorke
 	}
 	service, err := newProductionConfigSync(productionConfigSyncConfig{
 		ControlURL: controlURL.String(), ControlHost: controlURL.Hostname(), RepositoryHosts: config.RepositoryHosts,
-		HomeRoot: config.HomeRoot, StateRoot: config.StateRoot, ChezmoiBinary: config.ChezmoiBinary,
+		HomeRoot: config.HomeRoot, StateRoot: config.StateRoot,
 		Identities: identities, Proofs: identities, OperationID: randomProductionOperationID, Transport: config.Transport,
 	})
 	if err != nil {
@@ -72,11 +69,11 @@ func RunProductionConfigWorker(ctx context.Context, config ProductionConfigWorke
 }
 
 func randomProductionOperationID() (string, error) {
-	value := make([]byte, 16)
-	if _, err := rand.Read(value); err != nil {
+	id, err := uuid.NewRandom()
+	if err != nil {
 		return "", err
 	}
-	return "config-" + base64.RawURLEncoding.EncodeToString(value), nil
+	return "operation_" + id.String(), nil
 }
 
 func newProductionConfigSync(config productionConfigSyncConfig) (*configsync.Supervisor, error) {
@@ -88,9 +85,35 @@ func newProductionConfigSync(config productionConfigSyncConfig) (*configsync.Sup
 	if err != nil {
 		return nil, err
 	}
+	machinePath, err := configsync.DefaultMachineSourcePath()
+	if err != nil {
+		return nil, err
+	}
+	loadMachine := func() (configsync.SourceConfig, error) {
+		return configsync.LoadSourceConfig(machinePath, configsync.DefaultSourceConfigLimits())
+	}
 	return configsync.NewSupervisor(configsync.SupervisorConfig{
 		Credentials: client,
+		ConfigRevision: func(ctx context.Context) (string, error) {
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
+			source, err := loadMachine()
+			if err != nil {
+				return "", err
+			}
+			data, err := json.Marshal(source)
+			if err != nil {
+				return "", err
+			}
+			hash := sha256.Sum256(data)
+			return hex.EncodeToString(hash[:]), nil
+		},
 		Factory: func(ctx context.Context, credential configsync.Credential) (configsync.Runtime, error) {
+			machineSource, err := loadMachine()
+			if err != nil {
+				return nil, err
+			}
 			descriptor, err := client.RuntimeDescriptor(ctx)
 			if err != nil {
 				return nil, err
@@ -101,6 +124,7 @@ func newProductionConfigSync(config productionConfigSyncConfig) (*configsync.Sup
 				descriptor.WarningRevision != credential.WarningRevision {
 				return nil, configsync.ErrAuthorization
 			}
+			descriptor.Policy.AbsoluteRuntimeExclusionRoots = append(descriptor.Policy.AbsoluteRuntimeExclusionRoots, machinePath)
 			descriptor, err = protectConfigSyncRuntimeState(descriptor, config.HomeRoot, config.StateRoot)
 			if err != nil {
 				return nil, err
@@ -114,18 +138,11 @@ func newProductionConfigSync(config productionConfigSyncConfig) (*configsync.Sup
 			if err != nil {
 				return nil, err
 			}
-			transport := config.Transport
-			if transport == nil {
-				transport = httptransport.Default()
-			}
-			chezmoiBinary, err := ensureChezmoi(
-				ctx, config.ChezmoiBinary, assignmentRoot,
-				&http.Client{Transport: transport, Timeout: 2 * time.Minute},
-			)
-			if err != nil {
+			credentialRoot := filepath.Join(config.StateRoot, "config-sync", "repository-credentials")
+			if err := configsync.EnsureRepositoryCredentialRoot(credentialRoot); err != nil {
 				return nil, err
 			}
-			repository, reconciler, err := productionConfigRepository(config.HomeRoot, assignmentRoot, chezmoiBinary, descriptor, client)
+			repository, reconciler, err := productionConfigRepository(config.HomeRoot, assignmentRoot, credentialRoot, descriptor, machineSource, client)
 			if err != nil {
 				return nil, err
 			}
@@ -150,7 +167,7 @@ type productionConfigReconciler interface {
 	configsync.ManifestSource
 }
 
-func productionConfigRepository(homeRoot, assignmentRoot, chezmoiBinary string, descriptor configsync.RuntimeDescriptor, client *configsync.ControlClient) (configsync.Repository, productionConfigReconciler, error) {
+func productionConfigRepository(homeRoot, assignmentRoot, credentialRoot string, descriptor configsync.RuntimeDescriptor, machineSource configsync.SourceConfig, client *configsync.ControlClient) (configsync.Repository, productionConfigReconciler, error) {
 	if descriptor.PullRepositoryID == "" && descriptor.PushRepositoryID == "" {
 		if descriptor.Mode != configsync.ModePushOnly {
 			descriptor.PullRepositoryID = descriptor.RepositoryID
@@ -159,6 +176,18 @@ func productionConfigRepository(homeRoot, assignmentRoot, chezmoiBinary string, 
 			descriptor.PushRepositoryID = descriptor.RepositoryID
 		}
 	}
+	primaryDirection := "pull"
+	if descriptor.PullRepositoryID == "" {
+		primaryDirection = "push"
+	}
+	sharedSource := func(ctx context.Context) (configsync.SourceConfig, error) {
+		access, err := (configsync.DirectionalRepositoryAccess{Client: client, Direction: primaryDirection}).RepositoryAccess(ctx)
+		if err != nil {
+			return configsync.SourceConfig{}, err
+		}
+		source, _, err := configsync.ReadSharedAuthorizedRepositoryConfig(ctx, filepath.Join(assignmentRoot, "source-read"), credentialRoot, access, configsync.DefaultSourceConfigLimits())
+		return source, err
+	}
 	makeRepository := func(name, repositoryID string, mode configsync.AssignmentMode, direction string) (*configsync.GitRepository, *configsync.PlaintextWorkspaceReconciler, error) {
 		stateRoot := filepath.Join(assignmentRoot, name)
 		if err := os.MkdirAll(stateRoot, 0o700); err != nil {
@@ -166,11 +195,11 @@ func productionConfigRepository(homeRoot, assignmentRoot, chezmoiBinary string, 
 		}
 		child := descriptor
 		child.RepositoryID, child.Mode = repositoryID, mode
-		reconciler, err := configsync.NewPlaintextWorkspaceReconciler(configsync.WorkspaceReconcilerConfig{HomeRoot: homeRoot, StateRoot: stateRoot, Descriptor: child, Resolutions: client, ChezmoiBinary: chezmoiBinary})
+		reconciler, err := configsync.NewPlaintextWorkspaceReconciler(configsync.WorkspaceReconcilerConfig{HomeRoot: homeRoot, StateRoot: stateRoot, ComparisonStatusPath: filepath.Join(assignmentRoot, "status.json"), Descriptor: child, MachineSource: machineSource, ApprovedConfiguration: &descriptor, SharedSource: sharedSource, Resolutions: client})
 		if err != nil {
 			return nil, nil, err
 		}
-		repository, err := configsync.NewGitRepository(configsync.GitRepositoryConfig{Root: filepath.Join(stateRoot, "repository"), Access: configsync.DirectionalRepositoryAccess{Client: client, Direction: direction}, Reconciler: reconciler, PushTarget: direction == "push"})
+		repository, err := configsync.NewGitRepository(configsync.GitRepositoryConfig{Root: filepath.Join(stateRoot, "repository"), CredentialRoot: credentialRoot, Access: configsync.DirectionalRepositoryAccess{Client: client, Direction: direction}, Reconciler: reconciler, PushTarget: direction == "push"})
 		return repository, reconciler, err
 	}
 	if descriptor.Mode == configsync.ModePullOnly {
@@ -204,11 +233,19 @@ func (d combinedConfigDiagnostics) CurrentManifest() configsync.Manifest {
 	return d.pull.CurrentManifest()
 }
 
+func (d combinedConfigDiagnostics) ObservedLocalFile(name string) (configsync.FileState, bool) {
+	if state, known := d.push.ObservedLocalFile(name); known {
+		return state, true
+	}
+	return d.pull.ObservedLocalFile(name)
+}
+
 func protectConfigSyncRuntimeState(
 	descriptor configsync.RuntimeDescriptor,
 	homeRoot string,
 	stateRoot string,
 ) (configsync.RuntimeDescriptor, error) {
+	descriptor.Policy.AbsoluteRuntimeExclusionRoots = append(descriptor.Policy.AbsoluteRuntimeExclusionRoots, filepath.Clean(stateRoot))
 	relative, err := filepath.Rel(homeRoot, stateRoot)
 	if err != nil {
 		return configsync.RuntimeDescriptor{}, errors.Join(ErrProductionInvalid, err)

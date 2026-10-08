@@ -534,7 +534,7 @@ func TestCredentialPromotionIsAtomicAndIdempotentAcrossCrashRetry(t *testing.T) 
 		t.Fatal(err)
 	}
 	readyAt := time.Now().UTC()
-	previous := ActivationRequest{AccountID: "account_01", TunnelID: "tunnel_promotion_01", HostID: "host_01", ConnectorID: "connector_promotion_01", OperationID: "operation_enroll_01", StableEndpointID: "123e4567-e89b-12d3-a456-426614174000", CredentialReference: oldCredential.Reference, CredentialKeyID: oldCredential.KeyID, CredentialThumbprint: oldCredential.Thumbprint, CredentialPublicKey: oldCredential.PublicKey, CredentialGeneration: 3, ProcessGeneration: 7}
+	previous := ActivationRequest{AccountID: "account_01", TunnelID: "tunnel_promotion_01", HostID: "host_01", ConnectorID: "connector_promotion_01", OperationID: "operation_enroll_01", StableEndpointID: "endpoint_123e4567-e89b-42d3-a456-426614174000", CredentialReference: oldCredential.Reference, CredentialKeyID: oldCredential.KeyID, CredentialThumbprint: oldCredential.Thumbprint, CredentialPublicKey: oldCredential.PublicKey, CredentialGeneration: 3, ProcessGeneration: 7}
 	projection := Projection{Schema: Schema, Kind: "tunnel_connector", TunnelID: previous.TunnelID, HostID: previous.HostID, ConnectorID: previous.ConnectorID, OperationID: previous.OperationID, State: "ready", CredentialReference: previous.CredentialReference, CredentialGeneration: previous.CredentialGeneration, ReadyAt: &readyAt}
 	state := journal{Version: 1, Records: map[string]record{previous.TunnelID: {AccountID: previous.AccountID, TunnelID: previous.TunnelID, HostID: previous.HostID, LocalKey: "local-promotion-01", IssueKey: "issue-promotion-01", ExchangeKey: "exchange-promotion-01", Credential: oldCredential, EnrollmentID: "enrollment_promotion_01", TokenReference: "token-enrollment_promotion_01", ConnectorID: previous.ConnectorID, OperationID: previous.OperationID, StableEndpointID: previous.StableEndpointID, CredentialGeneration: previous.CredentialGeneration, ProcessGeneration: previous.ProcessGeneration, Phase: "active", Projection: &projection}}}
 	if err := store.saveJournal(state); err != nil {
@@ -795,7 +795,7 @@ func writeEnvelope(t *testing.T, w http.ResponseWriter, value any) {
 func testServerActivation(now time.Time, tunnelID, connectorID, operationID string) map[string]any {
 	return map[string]any{
 		"schema": "paperboat.preview-tunnel/v1", "kind": "connector_activation", "account_id": "account_01", "tunnel_id": tunnelID, "connector_id": connectorID, "host_id": "host_01",
-		"stable_endpoint_id":    "123e4567-e89b-12d3-a456-426614174000",
+		"stable_endpoint_id":    "endpoint_123e4567-e89b-42d3-a456-426614174000",
 		"credential_generation": 3, "process_generation": 2,
 		"operation": map[string]any{"schema": "paperboat.preview-tunnel/v1", "kind": "operation", "id": operationID, "resource_kind": "connector", "resource_id": connectorID, "phase": "connecting", "state": "running", "progress": 60, "retrying": false, "correlation_id": "correlation_01", "created_at": now, "updated_at": now},
 	}
@@ -822,7 +822,7 @@ func writeMultiResumeJournalFixture(t *testing.T, processGeneration uint64, tunn
 		projection := Projection{Schema: Schema, Kind: "tunnel_connector", TunnelID: tunnelID, HostID: "host_01", ConnectorID: connectorID, OperationID: operationID, State: "ready", CredentialReference: credential.Reference, CredentialGeneration: 3, ReadyAt: &now}
 		state.Records[tunnelID] = record{
 			AccountID: "account_01", TunnelID: tunnelID, HostID: "host_01", LocalKey: fmt.Sprintf("local-resume-multi-%02d", index+1), IssueKey: fmt.Sprintf("issue-resume-multi-%02d", index+1), ExchangeKey: fmt.Sprintf("exchange-resume-multi-%02d", index+1),
-			Credential: credential, EnrollmentID: fmt.Sprintf("enrollment-resume-multi-%02d", index+1), TokenReference: fmt.Sprintf("token-resume-multi-%02d", index+1), ConnectorID: connectorID, OperationID: operationID, StableEndpointID: "123e4567-e89b-12d3-a456-426614174000", CredentialGeneration: 3, ProcessGeneration: processGeneration, Phase: "active", Projection: &projection,
+			Credential: credential, EnrollmentID: fmt.Sprintf("enrollment-resume-multi-%02d", index+1), TokenReference: fmt.Sprintf("token-resume-multi-%02d", index+1), ConnectorID: connectorID, OperationID: operationID, StableEndpointID: "endpoint_123e4567-e89b-42d3-a456-426614174000", CredentialGeneration: 3, ProcessGeneration: processGeneration, Phase: "active", Projection: &projection,
 		}
 	}
 	if err := store.saveJournal(state); err != nil {
@@ -845,7 +845,7 @@ func writeResumeJournalFixture(t *testing.T, processGeneration uint64) (*FileCre
 	now := time.Now().UTC()
 	projection := Projection{Schema: Schema, Kind: "tunnel_connector", TunnelID: tunnelID, HostID: "host_01", ConnectorID: "connector_resume_claim_01", OperationID: "operation_resume_claim_01", State: "ready", CredentialReference: credential.Reference, CredentialGeneration: 3, ReadyAt: &now}
 	state := journal{Version: 1, Records: map[string]record{
-		tunnelID: {AccountID: "account_01", TunnelID: tunnelID, HostID: "host_01", LocalKey: "local-resume-claim-01", IssueKey: "issue-resume-claim-01", ExchangeKey: "exchange-resume-claim-01", Credential: credential, EnrollmentID: "enrollment-resume-claim-01", TokenReference: "token-resume-claim-01", ConnectorID: "connector_resume_claim_01", OperationID: "operation_resume_claim_01", StableEndpointID: "123e4567-e89b-12d3-a456-426614174000", CredentialGeneration: 3, ProcessGeneration: processGeneration, Phase: "active", Projection: &projection},
+		tunnelID: {AccountID: "account_01", TunnelID: tunnelID, HostID: "host_01", LocalKey: "local-resume-claim-01", IssueKey: "issue-resume-claim-01", ExchangeKey: "exchange-resume-claim-01", Credential: credential, EnrollmentID: "enrollment-resume-claim-01", TokenReference: "token-resume-claim-01", ConnectorID: "connector_resume_claim_01", OperationID: "operation_resume_claim_01", StableEndpointID: "endpoint_123e4567-e89b-42d3-a456-426614174000", CredentialGeneration: 3, ProcessGeneration: processGeneration, Phase: "active", Projection: &projection},
 	}}
 	if err := store.saveJournal(state); err != nil {
 		t.Fatal(err)

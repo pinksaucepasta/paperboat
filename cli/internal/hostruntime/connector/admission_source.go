@@ -76,6 +76,12 @@ type HTTPSAdmissionSource struct {
 	client   *http.Client
 }
 
+type observedAdmissionAttempt struct{ cause error }
+
+func (*observedAdmissionAttempt) Error() string            { return "connector admission HTTP attempt failed" }
+func (e *observedAdmissionAttempt) Unwrap() error          { return e.cause }
+func (*observedAdmissionAttempt) DiagnosticObserved() bool { return true }
+
 type admissionRequest struct {
 	OperationID     string `json:"operation_id"`
 	EnvironmentID   string `json:"environment_id"`
@@ -153,12 +159,12 @@ func (s *HTTPSAdmissionSource) Admission(ctx context.Context) (Admission, error)
 	request.Header.Set("Accept", "application/json")
 	response, err := s.client.Do(request)
 	if err != nil {
-		return Admission{}, err
+		return Admission{}, &observedAdmissionAttempt{cause: err}
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, s.config.MaxResponseBytes))
-		return Admission{}, ErrUnavailable
+		return Admission{}, &observedAdmissionAttempt{cause: ErrUnavailable}
 	}
 	limited := io.LimitReader(response.Body, s.config.MaxResponseBytes+1)
 	body, err := io.ReadAll(limited)

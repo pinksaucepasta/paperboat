@@ -27,6 +27,14 @@ func TestProbeOpenSSHReportsRequiredCapabilities(t *testing.T) {
 func TestProbeOpenSSHRejectsMissingClientAndCancellation(t *testing.T) {
 	if _, err := ProbeOpenSSH(context.Background(), "/not/a/real/ssh", time.Second); !errors.Is(err, ErrOpenSSHUnavailable) {
 		t.Fatalf("missing client error=%v", err)
+	} else {
+		var classified interface {
+			DiagnosticStage() string
+			DiagnosticCode() string
+		}
+		if !errors.As(err, &classified) || classified.DiagnosticStage() != "command" || classified.DiagnosticCode() != "managed_ssh_failed" {
+			t.Fatalf("missing client classification: %T %v", err, err)
+		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

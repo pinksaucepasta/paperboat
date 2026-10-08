@@ -153,7 +153,7 @@ func (t *PeerTerminalTunnel) Dial(ctx context.Context, info resolver.ConnectInfo
 }
 
 func (t *PeerTerminalTunnel) dial(ctx context.Context, info resolver.ConnectInfo, consumer string, application peerApplication) (Conn, error) {
-	if t == nil || ctx == nil || info.TargetKind != "machine" || info.ProjectID == "" || info.MachineGeneration == 0 || info.Terminal == nil || info.Terminal.EnvironmentID == "" || info.Terminal.Auth.ResourceID == "" || consumer == "" || (application.helper == nil) == (application.raw == nil) || application.raw != nil && application.stream == "" || application.helper != nil && application.stream != "" {
+	if t == nil || ctx == nil || info.TargetKind != "machine" || info.MachineID == "" || info.MachineGeneration == 0 || info.Terminal == nil || info.Terminal.EnvironmentID == "" || info.Terminal.Auth.ResourceID == "" || consumer == "" || (application.helper == nil) == (application.raw == nil) || application.raw != nil && application.stream == "" || application.helper != nil && application.stream != "" {
 		return nil, ErrPeerTerminalInvalid
 	}
 	credential, err := t.config.Auth.Credential()
@@ -165,10 +165,10 @@ func (t *PeerTerminalTunnel) dial(ctx context.Context, info resolver.ConnectInfo
 		return nil, err
 	}
 	client := api.New(t.config.Issuer, credential, t.config.HTTPClient)
-	authority, err := t.authorities.Resolve(ctx, clientauthority.Request{Store: t.config.Store, Client: client, Issuer: t.config.Issuer, AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID, MachineID: info.ProjectID, MachineGeneration: info.MachineGeneration, Now: t.config.Now().UTC()})
+	authority, err := t.authorities.Resolve(ctx, clientauthority.Request{Store: t.config.Store, Client: client, Issuer: t.config.Issuer, AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID, MachineID: info.MachineID, MachineGeneration: info.MachineGeneration, Now: t.config.Now().UTC()})
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return nil, contextOperationError(ctx)
 		}
 		return nil, err
 	}
@@ -179,7 +179,7 @@ func (t *PeerTerminalTunnel) dial(ctx context.Context, info resolver.ConnectInfo
 	if err != nil {
 		return nil, &terminalTransportError{transport: "native runtime", cause: err}
 	}
-	connection, err := runtime.openApplication(ctx, info.ProjectID, consumer, application, info.Terminal, t.config.Now)
+	connection, err := runtime.openApplication(ctx, info.MachineID, consumer, application, info.Terminal, t.config.Now)
 	if err != nil {
 		return nil, &terminalTransportError{transport: "native application", cause: err}
 	}
@@ -213,9 +213,16 @@ func (a peerApplication) authorizationHeader(target *resolver.TerminalTarget, co
 	if err != nil || !deadline.After(now) {
 		return streamauth.Header{}, ErrPeerTerminalInvalid
 	}
-	header, err := streamauth.New(operationID, consumer, streamID, target.Auth.Token, deadline, 1<<40)
+	maximum := uint64(1 << 40)
+	if consumer == "config_compare" {
+		maximum = 220 << 20
+	}
+	header, err := streamauth.New(operationID, consumer, streamID, target.Auth.Token, deadline, maximum)
 	if err == nil {
-		header.Resumable = true
+		header.Resumable = consumer != "config_compare"
+		if consumer == "config_compare" {
+			header.UsageSessionID = target.Auth.UsageSessionID
+		}
 	}
 	return header, err
 }

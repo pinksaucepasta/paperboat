@@ -2,21 +2,10 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"sync/atomic"
 
 	edgeruntime "github.com/pinksaucepasta/paperboat-tunnel/internal/runtime"
 )
-
-// This token authenticates only the private native TLS listener.
-func newPrivateAccessToken() (string, error) {
-	var value [32]byte
-	if _, err := rand.Read(value[:]); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(value[:]), nil
-}
 
 type trackedCarrierComponent struct {
 	edgeruntime.Component
@@ -33,4 +22,11 @@ func (c *trackedCarrierComponent) Start(ctx context.Context) error {
 func (c *trackedCarrierComponent) Shutdown(ctx context.Context) error {
 	c.running.Store(false)
 	return c.Component.Shutdown(ctx)
+}
+
+func (c *trackedCarrierComponent) Done() <-chan error {
+	if source, ok := c.Component.(interface{ Done() <-chan error }); ok {
+		return source.Done()
+	}
+	return nil
 }

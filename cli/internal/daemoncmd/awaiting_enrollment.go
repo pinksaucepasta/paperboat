@@ -43,7 +43,7 @@ func runAwaitingEnrollment(parent context.Context, cfg *config.Config, paths loc
 			}
 		}
 	}()
-	err := localdaemon.Run(ctx, localdaemon.DaemonConfig{Paths: paths, Source: awaitingEnrollmentSource{}, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), DeviceSuffix: cfg.DeviceSuffix, DeviceLoopbackCIDR: cfg.DeviceLoopbackCIDR})
+	err := localdaemon.Run(ctx, localdaemon.DaemonConfig{Paths: paths, Source: awaitingEnrollmentSource{}, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid()})
 	stop()
 	transitionErr := <-transition
 	if parent.Err() != nil {

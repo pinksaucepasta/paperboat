@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"path"
@@ -100,11 +101,22 @@ func (h *LocalFileTransferHandler) create(writer http.ResponseWriter, request *h
 
 func (h *LocalFileTransferHandler) createNative(writer http.ResponseWriter, request *http.Request, input localFileTransferCreate) {
 	clientID, err := h.config.ResolveRecipient(input.SessionID, input.DestinationMachineID)
-	if err != nil || clientID == "" {
+	if err != nil {
+		if errors.Is(err, filetransfer.ErrNoActiveWriter) {
+			writeHTTPError(writer, request.Header.Get(HeaderRequestID), "recipient_unavailable", http.StatusConflict, true)
+			return
+		}
+		writeFileTransferError(request.Context(), "peer_authority", writer, request.Header.Get(HeaderRequestID), err)
+		return
+	}
+	if clientID == "" {
 		writeHTTPError(writer, request.Header.Get(HeaderRequestID), "recipient_unavailable", http.StatusConflict, true)
 		return
 	}
-	if existing, found, matches := h.recover(request, input, clientID); found {
+	if existing, found, matches, recoverErr := h.recover(request, input, clientID); recoverErr != nil {
+		writeFileTransferError(request.Context(), "command", writer, request.Header.Get(HeaderRequestID), recoverErr)
+		return
+	} else if found {
 		if !matches {
 			writeHTTPError(writer, request.Header.Get(HeaderRequestID), "idempotency_conflict", http.StatusConflict, false)
 			return
@@ -114,19 +126,22 @@ func (h *LocalFileTransferHandler) createNative(writer http.ResponseWriter, requ
 	}
 	created, err := h.config.Service.Create(request.Context(), filetransfer.CreateRequest{BatchID: input.BatchID, SourceMachineID: h.config.MachineID, DestinationMachineID: input.DestinationMachineID, InitiatingUserID: input.InitiatingUserID, SessionID: input.SessionID, DeliveryClientID: clientID, Files: input.Files})
 	if err != nil {
-		writeFileTransferError(writer, request.Header.Get(HeaderRequestID), err)
+		writeFileTransferError(request.Context(), "command", writer, request.Header.Get(HeaderRequestID), err)
 		return
 	}
 	writeJSON(writer, http.StatusCreated, map[string]any{"batch_id": input.BatchID, "transfers": created})
 }
 
-func (h *LocalFileTransferHandler) recover(request *http.Request, input localFileTransferCreate, clientID string) ([]store.FileTransfer, bool, bool) {
+func (h *LocalFileTransferHandler) recover(request *http.Request, input localFileTransferCreate, clientID string) ([]store.FileTransfer, bool, bool, error) {
 	existing, err := h.config.Service.Batch(request.Context(), input.BatchID)
 	if err != nil {
-		return nil, false, false
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, false, false, nil
+		}
+		return nil, false, false, err
 	}
 	if len(existing) != len(input.Files) {
-		return existing, true, false
+		return existing, true, false, nil
 	}
 	matched := make([]bool, len(existing))
 	ordered := make([]store.FileTransfer, len(existing))
@@ -139,10 +154,10 @@ func (h *LocalFileTransferHandler) recover(request *http.Request, input localFil
 			}
 		}
 		if !found {
-			return existing, true, false
+			return existing, true, false, nil
 		}
 	}
-	return ordered, true, true
+	return ordered, true, true, nil
 }
 
 func (h *LocalFileTransferHandler) matchesNative(transfer store.FileTransfer, input localFileTransferCreate, file filetransfer.File, clientID string) bool {
@@ -158,9 +173,8 @@ func (h *LocalFileTransferHandler) status(writer http.ResponseWriter, request *h
 		methodNotAllowed(writer, http.MethodGet)
 		return
 	}
-	transfer, err := h.config.Service.Get(request.Context(), id)
-	if err != nil || !h.owns(transfer.SourceMachineID) {
-		writeHTTPError(writer, request.Header.Get(HeaderRequestID), "not_found", http.StatusNotFound, false)
+	transfer, ok := h.owned(writer, request, id)
+	if !ok {
 		return
 	}
 	writeJSON(writer, http.StatusOK, transfer)
@@ -171,9 +185,7 @@ func (h *LocalFileTransferHandler) content(writer http.ResponseWriter, request *
 		methodNotAllowed(writer, http.MethodPatch)
 		return
 	}
-	transfer, err := h.config.Service.Get(request.Context(), id)
-	if err != nil || !h.owns(transfer.SourceMachineID) {
-		writeHTTPError(writer, request.Header.Get(HeaderRequestID), "not_found", http.StatusNotFound, false)
+	if _, ok := h.owned(writer, request, id); !ok {
 		return
 	}
 	offset, err := strconv.ParseInt(request.Header.Get(HeaderUploadOffset), 10, 64)
@@ -183,7 +195,7 @@ func (h *LocalFileTransferHandler) content(writer http.ResponseWriter, request *
 	}
 	updated, err := h.config.Service.Append(request.Context(), id, offset, request.Body)
 	if err != nil {
-		writeFileTransferError(writer, request.Header.Get(HeaderRequestID), err)
+		writeFileTransferError(request.Context(), "delivery", writer, request.Header.Get(HeaderRequestID), err)
 		return
 	}
 	writer.Header().Set(HeaderUploadOffset, strconv.FormatInt(updated.CommittedOffset, 10))
@@ -195,14 +207,12 @@ func (h *LocalFileTransferHandler) complete(writer http.ResponseWriter, request 
 		methodNotAllowed(writer, http.MethodPost)
 		return
 	}
-	transfer, err := h.config.Service.Get(request.Context(), id)
-	if err != nil || !h.owns(transfer.SourceMachineID) {
-		writeHTTPError(writer, request.Header.Get(HeaderRequestID), "not_found", http.StatusNotFound, false)
+	if _, ok := h.owned(writer, request, id); !ok {
 		return
 	}
 	completed, err := h.config.Service.Complete(request.Context(), id)
 	if err != nil {
-		writeFileTransferError(writer, request.Header.Get(HeaderRequestID), err)
+		writeFileTransferError(request.Context(), "delivery", writer, request.Header.Get(HeaderRequestID), err)
 		return
 	}
 	if completed.State != "pending" && completed.State != "delivered" {
@@ -216,14 +226,29 @@ func (h *LocalFileTransferHandler) owns(sourceMachineID string) bool {
 	return sourceMachineID == h.config.MachineID
 }
 
-func (h *LocalFileTransferHandler) cancel(writer http.ResponseWriter, request *http.Request, id string) {
+func (h *LocalFileTransferHandler) owned(writer http.ResponseWriter, request *http.Request, id string) (store.FileTransfer, bool) {
 	transfer, err := h.config.Service.Get(request.Context(), id)
-	if err != nil || !h.owns(transfer.SourceMachineID) {
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeHTTPError(writer, request.Header.Get(HeaderRequestID), "not_found", http.StatusNotFound, false)
+		} else {
+			writeFileTransferError(request.Context(), "peer_authority", writer, request.Header.Get(HeaderRequestID), err)
+		}
+		return store.FileTransfer{}, false
+	}
+	if !h.owns(transfer.SourceMachineID) {
 		writeHTTPError(writer, request.Header.Get(HeaderRequestID), "not_found", http.StatusNotFound, false)
+		return store.FileTransfer{}, false
+	}
+	return transfer, true
+}
+
+func (h *LocalFileTransferHandler) cancel(writer http.ResponseWriter, request *http.Request, id string) {
+	if _, ok := h.owned(writer, request, id); !ok {
 		return
 	}
 	if err := h.config.Service.Cancel(request.Context(), id); err != nil {
-		writeFileTransferError(writer, request.Header.Get(HeaderRequestID), err)
+		writeFileTransferError(request.Context(), "delivery", writer, request.Header.Get(HeaderRequestID), err)
 		return
 	}
 	writer.WriteHeader(http.StatusNoContent)

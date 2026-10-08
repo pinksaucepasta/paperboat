@@ -6,6 +6,7 @@ package mesh
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -15,6 +16,19 @@ import (
 	"tailscale.com/tailcfg"
 	"tailscale.com/types/key"
 )
+
+func TestParseWirePreservesCBORDecodeCause(t *testing.T) {
+	raw, err := cbor.Marshal(map[string]any{"i": "invalid-region-id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := Addr("tc" + base64.RawURLEncoding.EncodeToString(raw))
+	_, err = parseWire(address)
+	var decodeErr *cbor.UnmarshalTypeError
+	if !errors.As(err, &decodeErr) {
+		t.Fatalf("CBOR decode cause was lost: %T %v", err, err)
+	}
+}
 
 func TestAddr(t *testing.T) {
 	akey := func(a [32]byte) NodePublic {

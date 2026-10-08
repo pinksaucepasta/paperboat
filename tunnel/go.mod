@@ -3,6 +3,7 @@ module github.com/pinksaucepasta/paperboat-tunnel
 go 1.27.1
 
 require (
+	github.com/google/uuid v1.6.0
 	github.com/coder/websocket v1.8.15
 	github.com/getsentry/sentry-go v0.49.0
 	github.com/libp2p/go-yamux/v5 v5.1.0

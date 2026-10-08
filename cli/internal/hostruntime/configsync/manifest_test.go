@@ -72,19 +72,6 @@ func TestParseManifestRejectsUnsafeAndInvalidInput(t *testing.T) {
 	}
 }
 
-func TestLoadManifestRequiresRegularInclude(t *testing.T) {
-	root := t.TempDir()
-	if _, err := LoadManifest(root, DefaultManifestLimits()); !errors.Is(err, ErrManifestMissing) {
-		t.Fatalf("missing include error = %v", err)
-	}
-	if err := os.Symlink("target", filepath.Join(root, ".pbinclude")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := LoadManifest(root, DefaultManifestLimits()); !errors.Is(err, ErrManifestInvalid) {
-		t.Fatalf("symlink include error = %v", err)
-	}
-}
-
 func TestManifestCannotNegateBeyondAllowlistOrHardExclusions(t *testing.T) {
 	manifest, err := ParseManifest([]byte(".config/tool/\n"), []byte("*\n!**\n"), DefaultManifestLimits())
 	if err != nil {
@@ -164,5 +151,39 @@ func TestTakeManifestSnapshotRejectsSymlinkedAncestor(t *testing.T) {
 	}
 	if _, err := TakeManifestSnapshot(root, manifestTestRuntimePolicy(), manifest); !errors.Is(err, ErrManifestUnsafePath) {
 		t.Fatalf("symlinked ancestor error = %v", err)
+	}
+}
+
+func TestTakeManifestSnapshotTraversesParentsOfExplicitFile(t *testing.T) {
+	root := t.TempDir()
+	directory := filepath.Join(root, ".config", "tool")
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{"settings.json": "selected", "other.json": "not selected"} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manifest, err := ParseManifest([]byte(".config/tool/settings.json\n"), nil, DefaultManifestLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := TakeManifestSnapshot(root, manifestTestRuntimePolicy(), manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Files) != 1 || snapshot.Files[".config/tool/settings.json"].Hash == "" {
+		t.Fatalf("explicit file snapshot=%v", snapshot.Files)
+	}
+	if manifest.MayManageDescendant(".config/other") || manifest.MayManageDescendant(".config/tool/settings.json/child") {
+		t.Fatal("explicit file expanded subtree selection")
+	}
+	if err := os.Remove(filepath.Join(directory, "settings.json")); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err = TakeManifestSnapshot(root, manifestTestRuntimePolicy(), manifest)
+	if err != nil || len(snapshot.Files) != 0 {
+		t.Fatal("removed selected file was not observed")
 	}
 }

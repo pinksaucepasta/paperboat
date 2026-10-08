@@ -225,6 +225,21 @@ func (c *ClientSession) ApplySnapshot(ctx context.Context, snapshot Snapshot) (A
 			return Ack{}, codeError(ErrContentHashMismatch, ReasonSnapshotRejected, false, nil)
 		}
 	}
+	// A full newer snapshot supersedes the pending candidate. Serialize its
+	// cleanup before staging the replacement; the ready active config stays.
+	previousPrepared := c.prepared
+	c.mu.Unlock()
+	if err := c.abortPrepared(previousPrepared); err != nil {
+		return Ack{}, codeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, err)
+	}
+	c.mu.Lock()
+	if c.hasCandidate {
+		c.prepared = nil
+		c.hasCandidate = false
+		c.candidate = Snapshot{}
+		c.needsSnapshot = !c.hasActive
+		c.restoreStateLocked()
+	}
 	c.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return Ack{}, codeError(ErrCanceled, ReasonCanceled, true, err)
@@ -265,8 +280,7 @@ func (c *ClientSession) ApplySnapshot(ctx context.Context, snapshot Snapshot) (A
 	c.hasCandidate = true
 	c.prepared = prepared
 	c.needsSnapshot = false
-	c.readyGeneration = 0
-	c.state = SessionAwaitingReady
+	c.restoreStateLocked()
 	ack := c.makeAckLocked(AckSnapshot, AckApplied, snapshot)
 	c.mu.Unlock()
 	return ack, nil
@@ -349,8 +363,7 @@ func (c *ClientSession) ApplyDelta(ctx context.Context, delta Delta) (Ack, error
 	c.candidate = Snapshot{AccountID: c.config.Hello.AccountID, TunnelID: delta.TunnelID, ConnectorID: c.config.Hello.ConnectorID, Generation: delta.Generation, SessionID: c.welcome.SessionID, ProcessGeneration: c.config.Hello.ProcessGeneration, ContentHash: delta.ContentHash, Payload: append([]byte(nil), delta.Payload...)}
 	c.hasCandidate = true
 	c.prepared = prepared
-	c.readyGeneration = 0
-	c.state = SessionAwaitingReady
+	c.restoreStateLocked()
 	ack := c.makeAckLocked(AckDelta, AckApplied, c.candidate)
 	c.mu.Unlock()
 	return ack, nil

@@ -9,7 +9,7 @@ An owner must transfer ownership before leaving. Removing a member withdraws tha
 active team access immediately. Their personal resources remain theirs, while personal
 resources they shared with the team are withdrawn. A machine already transferred into team
 ownership stays with the team when its original enroller leaves. Deleting the team revokes
-team-owned devices instead of converting them into personal devices. Team deletion also
+team-owned machines instead of converting them into personal machines. Team deletion also
 removes the team's encrypted receipt-SMTP configuration.
 
 Pending, approved, or consumed Team Inbox requests are revoked when team membership, the

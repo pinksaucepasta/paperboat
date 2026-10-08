@@ -13,6 +13,7 @@ import (
 
 func TestCapabilityForConsumerIsExact(t *testing.T) {
 	want := map[string]string{
+		"config_compare":    "config_compare",
 		"terminal":          "terminal",
 		"exec":              "exec",
 		"ssh":               "managed_ssh",

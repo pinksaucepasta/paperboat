@@ -84,7 +84,7 @@ func TestTransferStatusJSONUsesNativeStreamAndClosesLease(t *testing.T) {
 	if err := os.MkdirAll(inboxPath, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := identityStore.SaveRegistration(identity.Registration{ServerURL: backend.URL, MachineID: "machine_source", EnvironmentID: "environment_source", PublicKeyID: identityStore.Current().ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(identityStore.Current().Public()), InboxPath: inboxPath, InstallationGeneration: 1, SetupRoles: []string{"interactive"}, UpdatedAt: time.Now().UTC()}); err != nil {
+	if err := identityStore.SaveRegistration(identity.Registration{ServerURL: backend.URL, MachineID: "machine_source", EnvironmentID: "environment_source", PublicKeyID: identityStore.Current().ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(identityStore.Current().Public()), InboxPath: inboxPath, InstallationGeneration: 1, UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
 

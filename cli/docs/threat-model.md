@@ -5,7 +5,7 @@
 - Paperboat access and refresh credentials are high-value assets. They remain in
   the OS credential store, with owner-only `0600` files used automatically when
   the credential service is unavailable on a headless system.
-- Device codes are short-lived approval handles, not credentials. They are shown
+- Machine codes are short-lived approval handles, not credentials. They are shown
   only in the terminal and browser URL; tokens are never placed in URLs.
 - The CLI treats environment descriptors, route URLs, machine paths, and server error
   messages as untrusted input. Descriptor validation and issuer binding happen
@@ -18,8 +18,8 @@
   this claim.
 - Endpoint certificates bind account, endpoint ID, role, generation, and QUIC key,
   serial, and expiry under an authenticated registered signing key. CLI enrollment registers
-  an independent device signing identity under its account session; it does not require an
-  older device or download its private identity. Private signing and endpoint keys stay in
+  an independent machine signing identity under its account session; it does not require an
+  older machine or download its private identity. Private signing and endpoint keys stay in
   their endpoint credential boundary and never enter a server/tunnel request, database, log,
   metric, diagnostic bundle, or audit record.
 
@@ -29,7 +29,7 @@ The master password and optional recovery code unlock the same encrypted persona
 key inventory locally. Neither credential nor plaintext key inventory is sent to the
 control plane. Each encrypted head authenticates its account, generations, credential
 delegations and writer. Recovery requires normal account authentication and cannot grant
-team membership or restore a revoked device identity. Device private identities are not
+team membership or restore a revoked machine identity. Machine private identities are not
 part of the vault. Password/recovery rotation cannot erase an already stolen historical
 encrypted snapshot or previously disclosed keys and values.
 
@@ -68,7 +68,7 @@ terminal output, preview bodies, SSH payloads, or file manifests/chunks in plain
 
 | Threat | CLI control | Residual owner |
 | --- | --- | --- |
-| Device-code phishing or brute force | Server-authoritative expiry/interval; user sees the complete URL and short code; no token in output | Server/dashboard rate limits and approval UX |
+| Machine-code phishing or brute force | Server-authoritative expiry/interval; user sees the complete URL and short code; no token in output | Server/dashboard rate limits and approval UX |
 | Token theft or refresh replay | OS credential store, issuer-namespaced profiles, refresh rotation, durable revoke queue | Server session-family revocation |
 | Malicious route or descriptor | Scheme, issuer, environment, endpoint, scope, generation, and expiry validation; no raw VM/public-TCP fallback | Server route authorization and `paperboat-tunnel` enforcement |
 | Compromised relay or control plane | Authenticated registered signing keys and endpoint certificates, endpoint-authenticated QUIC handshakes, encrypted stream headers and records, replay/generation fencing | Traffic timing, endpoint addressing, ciphertext length, and authorized routing metadata remain observable |
@@ -82,7 +82,7 @@ terminal output, preview bodies, SSH payloads, or file manifests/chunks in plain
 
 ## Incident actions
 
-For a stolen device, revoke its client session and endpoint certificate, then remove the
+For a stolen machine, revoke its client session and endpoint certificate, then remove the
 local profile with `pb auth logout`. For a suspected incompatible or tampered server, stop
 retrying, capture only stable opaque IDs and fingerprints, and upgrade from a verified release.
 Never bypass the common Paperboat transport. `pb ssh` and the managed OpenSSH ProxyCommand are

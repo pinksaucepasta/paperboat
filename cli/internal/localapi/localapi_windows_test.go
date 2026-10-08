@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 type windowsSnapshotSource func(context.Context) (Snapshot, error)
@@ -35,15 +37,22 @@ func (f windowsPeerBroker) OpenPeerStream(ctx context.Context, peer Peer, reques
 }
 
 type windowsFileBroker struct {
-	remote   chan net.Conn
-	released chan string
+	remote     chan net.Conn
+	released   chan string
+	references chan string
 }
 
-func (b windowsFileBroker) PrepareFileTransfer(context.Context, Peer, FileTransferRequest) (FileTransferResult, error) {
+func (b windowsFileBroker) PrepareFileTransfer(ctx context.Context, _ Peer, _ FileTransferRequest) (FileTransferResult, error) {
+	if b.references != nil {
+		b.references <- supportref.FromContext(ctx)
+	}
 	return FileTransferResult{Handle: "transferhandle"}, nil
 }
 
-func (b windowsFileBroker) OpenFileTransferStream(context.Context, Peer, string) (net.Conn, error) {
+func (b windowsFileBroker) OpenFileTransferStream(ctx context.Context, _ Peer, _ string) (net.Conn, error) {
+	if b.references != nil {
+		b.references <- supportref.FromContext(ctx)
+	}
 	local, remote := net.Pipe()
 	b.remote <- remote
 	return local, nil
@@ -183,7 +192,7 @@ func TestWindowsPipeContractRejectsInvalidNamesAndUsesExactProtectedDACL(t *test
 func TestWindowsNamedPipePreservesFileTransferUpgradeAndLeaseCleanup(t *testing.T) {
 	ownerSID := testCurrentSID(t)
 	pipe := testPipePath(t)
-	broker := windowsFileBroker{remote: make(chan net.Conn, 1), released: make(chan string, 1)}
+	broker := windowsFileBroker{remote: make(chan net.Conn, 1), released: make(chan string, 1), references: make(chan string, 2)}
 	server, err := NewServer(ServerConfig{
 		SocketPath:    pipe,
 		OwnerSID:      ownerSID,
@@ -212,16 +221,23 @@ func TestWindowsNamedPipePreservesFileTransferUpgradeAndLeaseCleanup(t *testing.
 		Deadline:          time.Now().Add(time.Minute),
 		MaximumBytes:      1 << 20,
 	}
-	lease, err := client.PrepareFileTransfer(context.Background(), request)
+	reference := supportref.New()
+	requestCtx := supportref.WithContext(t.Context(), reference)
+	lease, err := client.PrepareFileTransfer(requestCtx, request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if lease.Handle != "transferhandle" {
 		t.Fatalf("lease=%#v", lease)
 	}
-	stream, err := client.OpenFileTransferStream(context.Background(), lease.Handle)
+	stream, err := client.OpenFileTransferStream(requestCtx, lease.Handle)
 	if err != nil {
 		t.Fatal(err)
+	}
+	for range 2 {
+		if got := <-broker.references; got != reference {
+			t.Fatal("named-pipe transfer lost its support reference")
+		}
 	}
 	remote := <-broker.remote
 	defer remote.Close()

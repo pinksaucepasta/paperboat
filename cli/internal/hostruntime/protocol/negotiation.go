@@ -5,8 +5,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 )
 
 var ErrInvalidCapabilities = errors.New("invalid available capabilities")
@@ -38,16 +36,12 @@ const ProtocolIncompatible Code = "protocol_incompatible"
 
 var requiredCapabilities = map[string]bool{"terminal.v1": true, "health.v1": true}
 
-var allowedCapabilities = map[config.Profile]map[string]bool{
-	config.BYOD: {
-		"terminal.v1": true, "health.v1": true, "exec.v1": true, "ssh.v1": true,
-		"config.apply.v1": true,
-		"update.tuf.v1":   true,
-	},
+var allowedCapabilities = map[string]bool{
+	"terminal.v1": true, "health.v1": true, "exec.v1": true, "ssh.v1": true,
+	"config.compare.v1": true, "config.apply.v1": true, "update.tuf.v1": true, "file-transfer.v1": true,
 }
 
 type Negotiator struct {
-	Profile          config.Profile
 	Available        map[string]bool
 	ConfigApplyProof bool
 }
@@ -63,10 +57,6 @@ func (n Negotiator) Negotiate(minVersion, maxVersion string, offered []string) (
 	if !minOK || !maxOK || minMajor != 1 || maxMajor != 1 || minMinor > 0 || maxMinor < 0 || minMinor > maxMinor {
 		return Welcome{}, &Error{Code: ProtocolIncompatible}
 	}
-	allowed, ok := allowedCapabilities[n.Profile]
-	if !ok {
-		return Welcome{}, &Error{Code: ProtocolIncompatible}
-	}
 	offeredSet := make(map[string]bool, len(offered))
 	for _, capability := range offered {
 		offeredSet[capability] = true
@@ -78,10 +68,10 @@ func (n Negotiator) Negotiate(minVersion, maxVersion string, offered []string) (
 	}
 	selected := make([]string, 0, len(offered))
 	for capability := range offeredSet {
-		if !allowed[capability] || !n.Available[capability] {
+		if !allowedCapabilities[capability] || !n.Available[capability] {
 			continue
 		}
-		if capability == "config.apply.v1" && n.Profile == config.BYOD && !n.ConfigApplyProof {
+		if capability == "config.apply.v1" && !n.ConfigApplyProof {
 			continue
 		}
 		selected = append(selected, capability)

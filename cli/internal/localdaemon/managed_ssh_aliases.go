@@ -16,7 +16,7 @@ func managedSSHAliasTargets(ctx context.Context, client *api.Client) ([]manageds
 	defer cancel()
 	machines, err := client.ListUserMachines(lookupCtx)
 	if err != nil {
-		return nil, err
+		return nil, managedSSHAuthorityError(err)
 	}
 	targets := make([]managedssh.OpenSSHAliasTarget, 0, len(machines))
 	var mu sync.Mutex
@@ -48,7 +48,7 @@ func managedSSHAliasTargets(ctx context.Context, client *api.Client) ([]manageds
 	}
 	wg.Wait()
 	if resultErr != nil || lookupCtx.Err() != nil {
-		return nil, errors.Join(resultErr, lookupCtx.Err())
+		return nil, managedSSHAuthorityError(errors.Join(resultErr, lookupCtx.Err()))
 	}
 	sort.Slice(targets, func(i, j int) bool { return targets[i].Alias < targets[j].Alias })
 	return targets, nil

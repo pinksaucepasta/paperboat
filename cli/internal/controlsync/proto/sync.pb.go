@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.12
 // 	protoc        v3.21.12
-// source: internal/controlsync/proto/sync.proto
+// source: sync.proto
 
 package proto
 
@@ -21,7 +21,7 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-type DeviceCapabilities struct {
+type MachineCapabilities struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	CanHostTerminals bool                   `protobuf:"varint,1,opt,name=can_host_terminals,json=canHostTerminals,proto3" json:"can_host_terminals,omitempty"`
 	CanMountSsh      bool                   `protobuf:"varint,2,opt,name=can_mount_ssh,json=canMountSsh,proto3" json:"can_mount_ssh,omitempty"`
@@ -31,21 +31,21 @@ type DeviceCapabilities struct {
 	sizeCache        protoimpl.SizeCache
 }
 
-func (x *DeviceCapabilities) Reset() {
-	*x = DeviceCapabilities{}
-	mi := &file_internal_controlsync_proto_sync_proto_msgTypes[0]
+func (x *MachineCapabilities) Reset() {
+	*x = MachineCapabilities{}
+	mi := &file_sync_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *DeviceCapabilities) String() string {
+func (x *MachineCapabilities) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*DeviceCapabilities) ProtoMessage() {}
+func (*MachineCapabilities) ProtoMessage() {}
 
-func (x *DeviceCapabilities) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_controlsync_proto_sync_proto_msgTypes[0]
+func (x *MachineCapabilities) ProtoReflect() protoreflect.Message {
+	mi := &file_sync_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -56,64 +56,64 @@ func (x *DeviceCapabilities) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DeviceCapabilities.ProtoReflect.Descriptor instead.
-func (*DeviceCapabilities) Descriptor() ([]byte, []int) {
-	return file_internal_controlsync_proto_sync_proto_rawDescGZIP(), []int{0}
+// Deprecated: Use MachineCapabilities.ProtoReflect.Descriptor instead.
+func (*MachineCapabilities) Descriptor() ([]byte, []int) {
+	return file_sync_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *DeviceCapabilities) GetCanHostTerminals() bool {
+func (x *MachineCapabilities) GetCanHostTerminals() bool {
 	if x != nil {
 		return x.CanHostTerminals
 	}
 	return false
 }
 
-func (x *DeviceCapabilities) GetCanMountSsh() bool {
+func (x *MachineCapabilities) GetCanMountSsh() bool {
 	if x != nil {
 		return x.CanMountSsh
 	}
 	return false
 }
 
-func (x *DeviceCapabilities) GetCanExportPorts() bool {
+func (x *MachineCapabilities) GetCanExportPorts() bool {
 	if x != nil {
 		return x.CanExportPorts
 	}
 	return false
 }
 
-func (x *DeviceCapabilities) GetExportedPorts() []int32 {
+func (x *MachineCapabilities) GetExportedPorts() []int32 {
 	if x != nil {
 		return x.ExportedPorts
 	}
 	return nil
 }
 
-type DevicePosture struct {
+type MachinePosture struct {
 	state                 protoimpl.MessageState `protogen:"open.v1"`
 	Os                    string                 `protobuf:"bytes,1,opt,name=os,proto3" json:"os,omitempty"`
 	OsVersion             string                 `protobuf:"bytes,2,opt,name=os_version,json=osVersion,proto3" json:"os_version,omitempty"`
 	Hostname              string                 `protobuf:"bytes,3,opt,name=hostname,proto3" json:"hostname,omitempty"`
-	RequestedCapabilities *DeviceCapabilities    `protobuf:"bytes,4,opt,name=requested_capabilities,json=requestedCapabilities,proto3" json:"requested_capabilities,omitempty"`
+	RequestedCapabilities *MachineCapabilities   `protobuf:"bytes,4,opt,name=requested_capabilities,json=requestedCapabilities,proto3" json:"requested_capabilities,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
 
-func (x *DevicePosture) Reset() {
-	*x = DevicePosture{}
-	mi := &file_internal_controlsync_proto_sync_proto_msgTypes[1]
+func (x *MachinePosture) Reset() {
+	*x = MachinePosture{}
+	mi := &file_sync_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *DevicePosture) String() string {
+func (x *MachinePosture) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*DevicePosture) ProtoMessage() {}
+func (*MachinePosture) ProtoMessage() {}
 
-func (x *DevicePosture) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_controlsync_proto_sync_proto_msgTypes[1]
+func (x *MachinePosture) ProtoReflect() protoreflect.Message {
+	mi := &file_sync_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -124,65 +124,65 @@ func (x *DevicePosture) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DevicePosture.ProtoReflect.Descriptor instead.
-func (*DevicePosture) Descriptor() ([]byte, []int) {
-	return file_internal_controlsync_proto_sync_proto_rawDescGZIP(), []int{1}
+// Deprecated: Use MachinePosture.ProtoReflect.Descriptor instead.
+func (*MachinePosture) Descriptor() ([]byte, []int) {
+	return file_sync_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *DevicePosture) GetOs() string {
+func (x *MachinePosture) GetOs() string {
 	if x != nil {
 		return x.Os
 	}
 	return ""
 }
 
-func (x *DevicePosture) GetOsVersion() string {
+func (x *MachinePosture) GetOsVersion() string {
 	if x != nil {
 		return x.OsVersion
 	}
 	return ""
 }
 
-func (x *DevicePosture) GetHostname() string {
+func (x *MachinePosture) GetHostname() string {
 	if x != nil {
 		return x.Hostname
 	}
 	return ""
 }
 
-func (x *DevicePosture) GetRequestedCapabilities() *DeviceCapabilities {
+func (x *MachinePosture) GetRequestedCapabilities() *MachineCapabilities {
 	if x != nil {
 		return x.RequestedCapabilities
 	}
 	return nil
 }
 
-type DevicePostureCheck struct {
+type MachinePostureCheck struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
 	Allowed             bool                   `protobuf:"varint,1,opt,name=allowed,proto3" json:"allowed,omitempty"`
 	RejectionReason     string                 `protobuf:"bytes,2,opt,name=rejection_reason,json=rejectionReason,proto3" json:"rejection_reason,omitempty"`
-	GrantedCapabilities *DeviceCapabilities    `protobuf:"bytes,3,opt,name=granted_capabilities,json=grantedCapabilities,proto3" json:"granted_capabilities,omitempty"`
+	GrantedCapabilities *MachineCapabilities   `protobuf:"bytes,3,opt,name=granted_capabilities,json=grantedCapabilities,proto3" json:"granted_capabilities,omitempty"`
 	RequiresApproval    bool                   `protobuf:"varint,4,opt,name=requires_approval,json=requiresApproval,proto3" json:"requires_approval,omitempty"`
 	Approved            bool                   `protobuf:"varint,5,opt,name=approved,proto3" json:"approved,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
 
-func (x *DevicePostureCheck) Reset() {
-	*x = DevicePostureCheck{}
-	mi := &file_internal_controlsync_proto_sync_proto_msgTypes[2]
+func (x *MachinePostureCheck) Reset() {
+	*x = MachinePostureCheck{}
+	mi := &file_sync_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *DevicePostureCheck) String() string {
+func (x *MachinePostureCheck) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*DevicePostureCheck) ProtoMessage() {}
+func (*MachinePostureCheck) ProtoMessage() {}
 
-func (x *DevicePostureCheck) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_controlsync_proto_sync_proto_msgTypes[2]
+func (x *MachinePostureCheck) ProtoReflect() protoreflect.Message {
+	mi := &file_sync_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -193,40 +193,40 @@ func (x *DevicePostureCheck) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DevicePostureCheck.ProtoReflect.Descriptor instead.
-func (*DevicePostureCheck) Descriptor() ([]byte, []int) {
-	return file_internal_controlsync_proto_sync_proto_rawDescGZIP(), []int{2}
+// Deprecated: Use MachinePostureCheck.ProtoReflect.Descriptor instead.
+func (*MachinePostureCheck) Descriptor() ([]byte, []int) {
+	return file_sync_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *DevicePostureCheck) GetAllowed() bool {
+func (x *MachinePostureCheck) GetAllowed() bool {
 	if x != nil {
 		return x.Allowed
 	}
 	return false
 }
 
-func (x *DevicePostureCheck) GetRejectionReason() string {
+func (x *MachinePostureCheck) GetRejectionReason() string {
 	if x != nil {
 		return x.RejectionReason
 	}
 	return ""
 }
 
-func (x *DevicePostureCheck) GetGrantedCapabilities() *DeviceCapabilities {
+func (x *MachinePostureCheck) GetGrantedCapabilities() *MachineCapabilities {
 	if x != nil {
 		return x.GrantedCapabilities
 	}
 	return nil
 }
 
-func (x *DevicePostureCheck) GetRequiresApproval() bool {
+func (x *MachinePostureCheck) GetRequiresApproval() bool {
 	if x != nil {
 		return x.RequiresApproval
 	}
 	return false
 }
 
-func (x *DevicePostureCheck) GetApproved() bool {
+func (x *MachinePostureCheck) GetApproved() bool {
 	if x != nil {
 		return x.Approved
 	}
@@ -235,10 +235,10 @@ func (x *DevicePostureCheck) GetApproved() bool {
 
 type SyncRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	MachineId     string                 `protobuf:"bytes,1,opt,name=machine_id,json=machineId,proto3" json:"machine_id,omitempty"`
 	AuthToken     string                 `protobuf:"bytes,2,opt,name=auth_token,json=authToken,proto3" json:"auth_token,omitempty"`
 	Alias         string                 `protobuf:"bytes,3,opt,name=alias,proto3" json:"alias,omitempty"`
-	Posture       *DevicePosture         `protobuf:"bytes,4,opt,name=posture,proto3" json:"posture,omitempty"`
+	Posture       *MachinePosture        `protobuf:"bytes,4,opt,name=posture,proto3" json:"posture,omitempty"`
 	Endpoints     []string               `protobuf:"bytes,5,rep,name=endpoints,proto3" json:"endpoints,omitempty"`
 	Tags          []string               `protobuf:"bytes,6,rep,name=tags,proto3" json:"tags,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -247,7 +247,7 @@ type SyncRequest struct {
 
 func (x *SyncRequest) Reset() {
 	*x = SyncRequest{}
-	mi := &file_internal_controlsync_proto_sync_proto_msgTypes[3]
+	mi := &file_sync_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -259,7 +259,7 @@ func (x *SyncRequest) String() string {
 func (*SyncRequest) ProtoMessage() {}
 
 func (x *SyncRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_controlsync_proto_sync_proto_msgTypes[3]
+	mi := &file_sync_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -272,12 +272,12 @@ func (x *SyncRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncRequest.ProtoReflect.Descriptor instead.
 func (*SyncRequest) Descriptor() ([]byte, []int) {
-	return file_internal_controlsync_proto_sync_proto_rawDescGZIP(), []int{3}
+	return file_sync_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *SyncRequest) GetDeviceId() string {
+func (x *SyncRequest) GetMachineId() string {
 	if x != nil {
-		return x.DeviceId
+		return x.MachineId
 	}
 	return ""
 }
@@ -296,7 +296,7 @@ func (x *SyncRequest) GetAlias() string {
 	return ""
 }
 
-func (x *SyncRequest) GetPosture() *DevicePosture {
+func (x *SyncRequest) GetPosture() *MachinePosture {
 	if x != nil {
 		return x.Posture
 	}
@@ -323,7 +323,7 @@ type PeerUpdate struct {
 	Alias         string                 `protobuf:"bytes,2,opt,name=alias,proto3" json:"alias,omitempty"`
 	AssignedIp    string                 `protobuf:"bytes,3,opt,name=assigned_ip,json=assignedIp,proto3" json:"assigned_ip,omitempty"`
 	Endpoints     []string               `protobuf:"bytes,4,rep,name=endpoints,proto3" json:"endpoints,omitempty"`
-	Capabilities  *DeviceCapabilities    `protobuf:"bytes,5,opt,name=capabilities,proto3" json:"capabilities,omitempty"`
+	Capabilities  *MachineCapabilities   `protobuf:"bytes,5,opt,name=capabilities,proto3" json:"capabilities,omitempty"`
 	Tags          []string               `protobuf:"bytes,6,rep,name=tags,proto3" json:"tags,omitempty"`
 	Online        bool                   `protobuf:"varint,7,opt,name=online,proto3" json:"online,omitempty"`
 	Approved      bool                   `protobuf:"varint,8,opt,name=approved,proto3" json:"approved,omitempty"`
@@ -334,7 +334,7 @@ type PeerUpdate struct {
 
 func (x *PeerUpdate) Reset() {
 	*x = PeerUpdate{}
-	mi := &file_internal_controlsync_proto_sync_proto_msgTypes[4]
+	mi := &file_sync_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -346,7 +346,7 @@ func (x *PeerUpdate) String() string {
 func (*PeerUpdate) ProtoMessage() {}
 
 func (x *PeerUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_controlsync_proto_sync_proto_msgTypes[4]
+	mi := &file_sync_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -359,7 +359,7 @@ func (x *PeerUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeerUpdate.ProtoReflect.Descriptor instead.
 func (*PeerUpdate) Descriptor() ([]byte, []int) {
-	return file_internal_controlsync_proto_sync_proto_rawDescGZIP(), []int{4}
+	return file_sync_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *PeerUpdate) GetPeerId() string {
@@ -390,7 +390,7 @@ func (x *PeerUpdate) GetEndpoints() []string {
 	return nil
 }
 
-func (x *PeerUpdate) GetCapabilities() *DeviceCapabilities {
+func (x *PeerUpdate) GetCapabilities() *MachineCapabilities {
 	if x != nil {
 		return x.Capabilities
 	}
@@ -429,7 +429,7 @@ type SyncResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Revision      uint64                 `protobuf:"varint,1,opt,name=revision,proto3" json:"revision,omitempty"`
 	AssignedIp    string                 `protobuf:"bytes,2,opt,name=assigned_ip,json=assignedIp,proto3" json:"assigned_ip,omitempty"`
-	PostureCheck  *DevicePostureCheck    `protobuf:"bytes,3,opt,name=posture_check,json=postureCheck,proto3" json:"posture_check,omitempty"`
+	PostureCheck  *MachinePostureCheck   `protobuf:"bytes,3,opt,name=posture_check,json=postureCheck,proto3" json:"posture_check,omitempty"`
 	Peers         []*PeerUpdate          `protobuf:"bytes,4,rep,name=peers,proto3" json:"peers,omitempty"`
 	RevokedPeers  []string               `protobuf:"bytes,5,rep,name=revoked_peers,json=revokedPeers,proto3" json:"revoked_peers,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -438,7 +438,7 @@ type SyncResponse struct {
 
 func (x *SyncResponse) Reset() {
 	*x = SyncResponse{}
-	mi := &file_internal_controlsync_proto_sync_proto_msgTypes[5]
+	mi := &file_sync_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -450,7 +450,7 @@ func (x *SyncResponse) String() string {
 func (*SyncResponse) ProtoMessage() {}
 
 func (x *SyncResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_controlsync_proto_sync_proto_msgTypes[5]
+	mi := &file_sync_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -463,7 +463,7 @@ func (x *SyncResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncResponse.ProtoReflect.Descriptor instead.
 func (*SyncResponse) Descriptor() ([]byte, []int) {
-	return file_internal_controlsync_proto_sync_proto_rawDescGZIP(), []int{5}
+	return file_sync_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SyncResponse) GetRevision() uint64 {
@@ -480,7 +480,7 @@ func (x *SyncResponse) GetAssignedIp() string {
 	return ""
 }
 
-func (x *SyncResponse) GetPostureCheck() *DevicePostureCheck {
+func (x *SyncResponse) GetPostureCheck() *MachinePostureCheck {
 	if x != nil {
 		return x.PostureCheck
 	}
@@ -503,7 +503,7 @@ func (x *SyncResponse) GetRevokedPeers() []string {
 
 type SetTagsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	MachineId     string                 `protobuf:"bytes,1,opt,name=machine_id,json=machineId,proto3" json:"machine_id,omitempty"`
 	Tags          []string               `protobuf:"bytes,2,rep,name=tags,proto3" json:"tags,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -511,7 +511,7 @@ type SetTagsRequest struct {
 
 func (x *SetTagsRequest) Reset() {
 	*x = SetTagsRequest{}
-	mi := &file_internal_controlsync_proto_sync_proto_msgTypes[6]
+	mi := &file_sync_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -523,7 +523,7 @@ func (x *SetTagsRequest) String() string {
 func (*SetTagsRequest) ProtoMessage() {}
 
 func (x *SetTagsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_controlsync_proto_sync_proto_msgTypes[6]
+	mi := &file_sync_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -536,12 +536,12 @@ func (x *SetTagsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetTagsRequest.ProtoReflect.Descriptor instead.
 func (*SetTagsRequest) Descriptor() ([]byte, []int) {
-	return file_internal_controlsync_proto_sync_proto_rawDescGZIP(), []int{6}
+	return file_sync_proto_rawDescGZIP(), []int{6}
 }
 
-func (x *SetTagsRequest) GetDeviceId() string {
+func (x *SetTagsRequest) GetMachineId() string {
 	if x != nil {
-		return x.DeviceId
+		return x.MachineId
 	}
 	return ""
 }
@@ -555,7 +555,7 @@ func (x *SetTagsRequest) GetTags() []string {
 
 type SetTagsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	MachineId     string                 `protobuf:"bytes,1,opt,name=machine_id,json=machineId,proto3" json:"machine_id,omitempty"`
 	Tags          []string               `protobuf:"bytes,2,rep,name=tags,proto3" json:"tags,omitempty"`
 	Success       bool                   `protobuf:"varint,3,opt,name=success,proto3" json:"success,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -564,7 +564,7 @@ type SetTagsResponse struct {
 
 func (x *SetTagsResponse) Reset() {
 	*x = SetTagsResponse{}
-	mi := &file_internal_controlsync_proto_sync_proto_msgTypes[7]
+	mi := &file_sync_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -576,7 +576,7 @@ func (x *SetTagsResponse) String() string {
 func (*SetTagsResponse) ProtoMessage() {}
 
 func (x *SetTagsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_controlsync_proto_sync_proto_msgTypes[7]
+	mi := &file_sync_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -589,12 +589,12 @@ func (x *SetTagsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetTagsResponse.ProtoReflect.Descriptor instead.
 func (*SetTagsResponse) Descriptor() ([]byte, []int) {
-	return file_internal_controlsync_proto_sync_proto_rawDescGZIP(), []int{7}
+	return file_sync_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *SetTagsResponse) GetDeviceId() string {
+func (x *SetTagsResponse) GetMachineId() string {
 	if x != nil {
-		return x.DeviceId
+		return x.MachineId
 	}
 	return ""
 }
@@ -613,60 +613,64 @@ func (x *SetTagsResponse) GetSuccess() bool {
 	return false
 }
 
-var File_internal_controlsync_proto_sync_proto protoreflect.FileDescriptor
+var File_sync_proto protoreflect.FileDescriptor
 
-const file_internal_controlsync_proto_sync_proto_rawDesc = "" +
+const file_sync_proto_rawDesc = "" +
 	"\n" +
-	"%internal/controlsync/proto/sync.proto\x12\x04sync\"\xb7\x01\n" +
-	"\x12DeviceCapabilities\x12,\n" +
+	"\n" +
+	"sync.proto\x12\x04sync\"\xb8\x01\n" +
+	"\x13MachineCapabilities\x12,\n" +
 	"\x12can_host_terminals\x18\x01 \x01(\bR\x10canHostTerminals\x12\"\n" +
 	"\rcan_mount_ssh\x18\x02 \x01(\bR\vcanMountSsh\x12(\n" +
 	"\x10can_export_ports\x18\x03 \x01(\bR\x0ecanExportPorts\x12%\n" +
-	"\x0eexported_ports\x18\x04 \x03(\x05R\rexportedPorts\"\xab\x01\n" +
-	"\rDevicePosture\x12\x0e\n" +
+	"\x0eexported_ports\x18\x04 \x03(\x05R\rexportedPorts\"\xad\x01\n" +
+	"\x0eMachinePosture\x12\x0e\n" +
 	"\x02os\x18\x01 \x01(\tR\x02os\x12\x1d\n" +
 	"\n" +
 	"os_version\x18\x02 \x01(\tR\tosVersion\x12\x1a\n" +
-	"\bhostname\x18\x03 \x01(\tR\bhostname\x12O\n" +
-	"\x16requested_capabilities\x18\x04 \x01(\v2\x18.sync.DeviceCapabilitiesR\x15requestedCapabilities\"\xef\x01\n" +
-	"\x12DevicePostureCheck\x12\x18\n" +
+	"\bhostname\x18\x03 \x01(\tR\bhostname\x12P\n" +
+	"\x16requested_capabilities\x18\x04 \x01(\v2\x19.sync.MachineCapabilitiesR\x15requestedCapabilities\"\xf1\x01\n" +
+	"\x13MachinePostureCheck\x12\x18\n" +
 	"\aallowed\x18\x01 \x01(\bR\aallowed\x12)\n" +
-	"\x10rejection_reason\x18\x02 \x01(\tR\x0frejectionReason\x12K\n" +
-	"\x14granted_capabilities\x18\x03 \x01(\v2\x18.sync.DeviceCapabilitiesR\x13grantedCapabilities\x12+\n" +
+	"\x10rejection_reason\x18\x02 \x01(\tR\x0frejectionReason\x12L\n" +
+	"\x14granted_capabilities\x18\x03 \x01(\v2\x19.sync.MachineCapabilitiesR\x13grantedCapabilities\x12+\n" +
 	"\x11requires_approval\x18\x04 \x01(\bR\x10requiresApproval\x12\x1a\n" +
-	"\bapproved\x18\x05 \x01(\bR\bapproved\"\xc0\x01\n" +
-	"\vSyncRequest\x12\x1b\n" +
-	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1d\n" +
+	"\bapproved\x18\x05 \x01(\bR\bapproved\"\xc3\x01\n" +
+	"\vSyncRequest\x12\x1d\n" +
+	"\n" +
+	"machine_id\x18\x01 \x01(\tR\tmachineId\x12\x1d\n" +
 	"\n" +
 	"auth_token\x18\x02 \x01(\tR\tauthToken\x12\x14\n" +
-	"\x05alias\x18\x03 \x01(\tR\x05alias\x12-\n" +
-	"\aposture\x18\x04 \x01(\v2\x13.sync.DevicePostureR\aposture\x12\x1c\n" +
+	"\x05alias\x18\x03 \x01(\tR\x05alias\x12.\n" +
+	"\aposture\x18\x04 \x01(\v2\x14.sync.MachinePostureR\aposture\x12\x1c\n" +
 	"\tendpoints\x18\x05 \x03(\tR\tendpoints\x12\x12\n" +
-	"\x04tags\x18\x06 \x03(\tR\x04tags\"\xa7\x02\n" +
+	"\x04tags\x18\x06 \x03(\tR\x04tags\"\xa8\x02\n" +
 	"\n" +
 	"PeerUpdate\x12\x17\n" +
 	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x14\n" +
 	"\x05alias\x18\x02 \x01(\tR\x05alias\x12\x1f\n" +
 	"\vassigned_ip\x18\x03 \x01(\tR\n" +
 	"assignedIp\x12\x1c\n" +
-	"\tendpoints\x18\x04 \x03(\tR\tendpoints\x12<\n" +
-	"\fcapabilities\x18\x05 \x01(\v2\x18.sync.DeviceCapabilitiesR\fcapabilities\x12\x12\n" +
+	"\tendpoints\x18\x04 \x03(\tR\tendpoints\x12=\n" +
+	"\fcapabilities\x18\x05 \x01(\v2\x19.sync.MachineCapabilitiesR\fcapabilities\x12\x12\n" +
 	"\x04tags\x18\x06 \x03(\tR\x04tags\x12\x16\n" +
 	"\x06online\x18\a \x01(\bR\x06online\x12\x1a\n" +
 	"\bapproved\x18\b \x01(\bR\bapproved\x12%\n" +
-	"\x0eexported_ports\x18\t \x03(\x05R\rexportedPorts\"\xd7\x01\n" +
+	"\x0eexported_ports\x18\t \x03(\x05R\rexportedPorts\"\xd8\x01\n" +
 	"\fSyncResponse\x12\x1a\n" +
 	"\brevision\x18\x01 \x01(\x04R\brevision\x12\x1f\n" +
 	"\vassigned_ip\x18\x02 \x01(\tR\n" +
-	"assignedIp\x12=\n" +
-	"\rposture_check\x18\x03 \x01(\v2\x18.sync.DevicePostureCheckR\fpostureCheck\x12&\n" +
+	"assignedIp\x12>\n" +
+	"\rposture_check\x18\x03 \x01(\v2\x19.sync.MachinePostureCheckR\fpostureCheck\x12&\n" +
 	"\x05peers\x18\x04 \x03(\v2\x10.sync.PeerUpdateR\x05peers\x12#\n" +
-	"\rrevoked_peers\x18\x05 \x03(\tR\frevokedPeers\"A\n" +
-	"\x0eSetTagsRequest\x12\x1b\n" +
-	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x12\n" +
-	"\x04tags\x18\x02 \x03(\tR\x04tags\"\\\n" +
-	"\x0fSetTagsResponse\x12\x1b\n" +
-	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x12\n" +
+	"\rrevoked_peers\x18\x05 \x03(\tR\frevokedPeers\"C\n" +
+	"\x0eSetTagsRequest\x12\x1d\n" +
+	"\n" +
+	"machine_id\x18\x01 \x01(\tR\tmachineId\x12\x12\n" +
+	"\x04tags\x18\x02 \x03(\tR\x04tags\"^\n" +
+	"\x0fSetTagsResponse\x12\x1d\n" +
+	"\n" +
+	"machine_id\x18\x01 \x01(\tR\tmachineId\x12\x12\n" +
 	"\x04tags\x18\x02 \x03(\tR\x04tags\x12\x18\n" +
 	"\asuccess\x18\x03 \x01(\bR\asuccess2x\n" +
 	"\vSyncService\x121\n" +
@@ -674,34 +678,34 @@ const file_internal_controlsync_proto_sync_proto_rawDesc = "" +
 	"\aSetTags\x12\x14.sync.SetTagsRequest\x1a\x15.sync.SetTagsResponseBFZDgithub.com/pinksaucepasta/paperboat/internal/controlsync/proto;protob\x06proto3"
 
 var (
-	file_internal_controlsync_proto_sync_proto_rawDescOnce sync.Once
-	file_internal_controlsync_proto_sync_proto_rawDescData []byte
+	file_sync_proto_rawDescOnce sync.Once
+	file_sync_proto_rawDescData []byte
 )
 
-func file_internal_controlsync_proto_sync_proto_rawDescGZIP() []byte {
-	file_internal_controlsync_proto_sync_proto_rawDescOnce.Do(func() {
-		file_internal_controlsync_proto_sync_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_controlsync_proto_sync_proto_rawDesc), len(file_internal_controlsync_proto_sync_proto_rawDesc)))
+func file_sync_proto_rawDescGZIP() []byte {
+	file_sync_proto_rawDescOnce.Do(func() {
+		file_sync_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_sync_proto_rawDesc), len(file_sync_proto_rawDesc)))
 	})
-	return file_internal_controlsync_proto_sync_proto_rawDescData
+	return file_sync_proto_rawDescData
 }
 
-var file_internal_controlsync_proto_sync_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
-var file_internal_controlsync_proto_sync_proto_goTypes = []any{
-	(*DeviceCapabilities)(nil), // 0: sync.DeviceCapabilities
-	(*DevicePosture)(nil),      // 1: sync.DevicePosture
-	(*DevicePostureCheck)(nil), // 2: sync.DevicePostureCheck
-	(*SyncRequest)(nil),        // 3: sync.SyncRequest
-	(*PeerUpdate)(nil),         // 4: sync.PeerUpdate
-	(*SyncResponse)(nil),       // 5: sync.SyncResponse
-	(*SetTagsRequest)(nil),     // 6: sync.SetTagsRequest
-	(*SetTagsResponse)(nil),    // 7: sync.SetTagsResponse
+var file_sync_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_sync_proto_goTypes = []any{
+	(*MachineCapabilities)(nil), // 0: sync.MachineCapabilities
+	(*MachinePosture)(nil),      // 1: sync.MachinePosture
+	(*MachinePostureCheck)(nil), // 2: sync.MachinePostureCheck
+	(*SyncRequest)(nil),         // 3: sync.SyncRequest
+	(*PeerUpdate)(nil),          // 4: sync.PeerUpdate
+	(*SyncResponse)(nil),        // 5: sync.SyncResponse
+	(*SetTagsRequest)(nil),      // 6: sync.SetTagsRequest
+	(*SetTagsResponse)(nil),     // 7: sync.SetTagsResponse
 }
-var file_internal_controlsync_proto_sync_proto_depIdxs = []int32{
-	0, // 0: sync.DevicePosture.requested_capabilities:type_name -> sync.DeviceCapabilities
-	0, // 1: sync.DevicePostureCheck.granted_capabilities:type_name -> sync.DeviceCapabilities
-	1, // 2: sync.SyncRequest.posture:type_name -> sync.DevicePosture
-	0, // 3: sync.PeerUpdate.capabilities:type_name -> sync.DeviceCapabilities
-	2, // 4: sync.SyncResponse.posture_check:type_name -> sync.DevicePostureCheck
+var file_sync_proto_depIdxs = []int32{
+	0, // 0: sync.MachinePosture.requested_capabilities:type_name -> sync.MachineCapabilities
+	0, // 1: sync.MachinePostureCheck.granted_capabilities:type_name -> sync.MachineCapabilities
+	1, // 2: sync.SyncRequest.posture:type_name -> sync.MachinePosture
+	0, // 3: sync.PeerUpdate.capabilities:type_name -> sync.MachineCapabilities
+	2, // 4: sync.SyncResponse.posture_check:type_name -> sync.MachinePostureCheck
 	4, // 5: sync.SyncResponse.peers:type_name -> sync.PeerUpdate
 	3, // 6: sync.SyncService.Sync:input_type -> sync.SyncRequest
 	6, // 7: sync.SyncService.SetTags:input_type -> sync.SetTagsRequest
@@ -714,26 +718,26 @@ var file_internal_controlsync_proto_sync_proto_depIdxs = []int32{
 	0, // [0:6] is the sub-list for field type_name
 }
 
-func init() { file_internal_controlsync_proto_sync_proto_init() }
-func file_internal_controlsync_proto_sync_proto_init() {
-	if File_internal_controlsync_proto_sync_proto != nil {
+func init() { file_sync_proto_init() }
+func file_sync_proto_init() {
+	if File_sync_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_controlsync_proto_sync_proto_rawDesc), len(file_internal_controlsync_proto_sync_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sync_proto_rawDesc), len(file_sync_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_internal_controlsync_proto_sync_proto_goTypes,
-		DependencyIndexes: file_internal_controlsync_proto_sync_proto_depIdxs,
-		MessageInfos:      file_internal_controlsync_proto_sync_proto_msgTypes,
+		GoTypes:           file_sync_proto_goTypes,
+		DependencyIndexes: file_sync_proto_depIdxs,
+		MessageInfos:      file_sync_proto_msgTypes,
 	}.Build()
-	File_internal_controlsync_proto_sync_proto = out.File
-	file_internal_controlsync_proto_sync_proto_goTypes = nil
-	file_internal_controlsync_proto_sync_proto_depIdxs = nil
+	File_sync_proto = out.File
+	file_sync_proto_goTypes = nil
+	file_sync_proto_depIdxs = nil
 }

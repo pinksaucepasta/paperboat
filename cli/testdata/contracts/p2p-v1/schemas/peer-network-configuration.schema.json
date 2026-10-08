@@ -174,7 +174,7 @@
           "enum": [
             "machine_access",
             "codex_session",
-            "device_network"
+            "machine_network"
           ]
         },
         "resource_id": {
@@ -235,7 +235,7 @@
             {
               "properties": {
                 "resource_kind": {
-                  "const": "device_network"
+                  "const": "machine_network"
                 },
                 "capability": {
                   "const": "connect"

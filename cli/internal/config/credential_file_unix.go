@@ -3,7 +3,7 @@
 package config
 
 import (
-	"fmt"
+	"errors"
 	"io"
 	"os"
 	"syscall"
@@ -20,25 +20,33 @@ func validateCredentialDirectory(path string) error {
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || !info.IsDir() || info.Mode().Perm() != 0o700 || stat.Uid != uint32(os.Getuid()) {
-		return fmt.Errorf("credential directory must be owner-controlled mode 0700")
+		return safeConfigCause("credential directory must be owner-controlled mode 0700", nil)
 	}
 	return nil
 }
 
-func readCredentialFile(path string) ([]byte, error) {
+func readCredentialFile(path string) (data []byte, resultErr error) {
 	descriptor, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, err
 	}
 	file := os.NewFile(uintptr(descriptor), path)
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			resultErr = errors.Join(resultErr, safeConfigCause("credential file could not be closed", closeErr))
+		}
+		if resultErr != nil {
+			clear(data)
+			data = nil
+		}
+	}()
 	info, err := file.Stat()
 	if err != nil {
 		return nil, err
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || stat.Uid != uint32(os.Getuid()) {
-		return nil, fmt.Errorf("credential file must be owner-owned regular mode 0600")
+		return nil, safeConfigCause("credential file must be owner-owned regular mode 0600", nil)
 	}
 	return io.ReadAll(io.LimitReader(file, 1<<20))
 }

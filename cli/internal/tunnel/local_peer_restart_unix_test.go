@@ -4,6 +4,7 @@ package tunnel
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -23,12 +24,21 @@ func TestLocalPeerDaemonRestartRemainsReconnectable(t *testing.T) {
 		t.Fatal(err)
 	}
 	peer := LocalPeerTunnel{Client: client}
-	info := resolver.ConnectInfo{ProjectID: "machine_1", MachineGeneration: 1, Terminal: &resolver.TerminalTarget{
+	info := resolver.ConnectInfo{MachineID: "machine_1", MachineGeneration: 1, Terminal: &resolver.TerminalTarget{
 		EnvironmentID: "environment_1", SessionID: "session_1",
 		Auth: resolver.AuthTarget{Token: "credential", ExpiresAt: time.Now().Add(time.Minute).UTC().Format(time.RFC3339)},
 	}}
 	if _, err = peer.Dial(context.Background(), info); !FallbackEligible(err) {
 		t.Fatalf("temporary daemon absence stopped reconnect: %v", err)
+	} else {
+		var staged interface{ DiagnosticStage() string }
+		var coded interface{ DiagnosticCode() string }
+		if !errors.Is(err, localapi.ErrTransportUnavailable) ||
+			!errors.As(err, &staged) || staged.DiagnosticStage() != "local_gateway" ||
+			!errors.As(err, &coded) || coded.DiagnosticCode() != "local_access_failed" ||
+			err.Error() != "local terminal transport unavailable" {
+			t.Fatalf("local transport failure lost cause or safe classification: %T %v", err, err)
+		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

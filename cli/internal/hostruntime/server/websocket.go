@@ -102,7 +102,9 @@ func (h *WebSocketHandler) ServeHTTP(writer http.ResponseWriter, request *http.R
 	}
 	connection.SetReadLimit(h.config.MaxMessageBytes)
 	wrapped := newWebSocketConnection(request.Context(), connection)
-	_ = h.config.Server.ServeAuthenticated(wrapped, authorizer)
+	if err := h.config.Server.ServeAuthenticated(wrapped, authorizer); err != nil {
+		reportConsumedServeFailure(request.Context(), err)
+	}
 }
 
 func bearerToken(values []string) (string, bool) {

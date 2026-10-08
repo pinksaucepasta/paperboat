@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"net"
 	"net/url"
@@ -27,6 +28,7 @@ import (
 var (
 	// These sentinels let callers and tests branch on a stable failure class
 	// without depending on the human-readable detail appended to the error.
+	ErrPreviewOriginUnavailable       = errors.New("preview origin unavailable")
 	ErrPreviewInvalidTarget           = errors.New("invalid preview target")
 	ErrPreviewInvalidDuration         = errors.New("invalid preview duration")
 	ErrPreviewCarrierUnavailable      = errors.New("preview carrier unavailable")
@@ -174,6 +176,8 @@ func ephemeralTunnelCommand(use, short string) *cobra.Command {
 		SilenceErrors: true,
 	}
 	list.Flags().Bool("json", false, "print canonical preview resources as JSON")
+	tunnelPageFlag(list)
+	inventoryFilterFlags(list)
 
 	stop := &cobra.Command{
 		Use:           "stop <preview>",
@@ -265,6 +269,9 @@ func runPreviewCobra(command *cobra.Command, args []string) error {
 }
 
 func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, private bool, duration time.Duration, background bool, jsonOutput bool, domains []string) (resultErr error) {
+	if !jsonOutput {
+		fmt.Fprintln(command.ErrOrStderr(), "Preparing preview… Ctrl+C to cancel.")
+	}
 	machineID, err := previewMachineID()
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrPreviewMachineNotConfigured, err)
@@ -358,6 +365,7 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 			resultErr = errors.Join(resultErr, cleanupErr)
 		}
 	}()
+	ownerSessionKind := preview.OwnerSessionForeground
 	needsOwnerLease := false
 	if marker, ok := carrier.(interface{ NeedsOwnerSessionLease() bool }); ok {
 		needsOwnerLease = marker.NeedsOwnerSessionLease()
@@ -367,6 +375,7 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 		return fmt.Errorf("%w: background mode requires paperboatd ownership", ErrPreviewOwnerSessionUnavailable)
 	}
 	if needsOwnerLease {
+		ownerSessionKind = preview.OwnerSessionLocalLease
 		ownerLeaseClient, err = previewOwnerSessionClientForCommand()
 		if err != nil {
 			_ = carrier.Close(context.WithoutCancel(command.Context()))
@@ -404,6 +413,17 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 		if !background {
 			startHeartbeat()
 		}
+		if checker, ok := carrier.(interface {
+			CheckOrigin(context.Context, preview.LeaseTarget) error
+		}); ok {
+			if err := checker.CheckOrigin(foregroundCtx, target); err != nil {
+				_ = carrier.Close(context.WithoutCancel(command.Context()))
+				if foregroundCtx.Err() != nil {
+					return foregroundCtx.Err()
+				}
+				return fmt.Errorf("%w: cannot connect to %s; start your app and check its listening address and port, then retry. No preview was published", ErrPreviewOriginUnavailable, formatPreviewTarget(target))
+			}
+		}
 	} else {
 		ownerSessionID, err = newPreviewOwnerSessionID()
 		if err != nil {
@@ -425,6 +445,9 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 		userDeadline = &deadline
 		sessionDuration = 0
 	}
+	if !jsonOutput {
+		fmt.Fprintln(command.ErrOrStderr(), "Waiting for preview readiness…")
+	}
 	foreground, err := servepkg.StartForeground(foregroundCtx, servepkg.ForegroundConfig{
 		Name:           "preview",
 		Target:         &targetCopy,
@@ -432,13 +455,18 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 		UserDeadline:   userDeadline,
 		LeaseClient:    leaseClient,
 		Carrier:        carrier,
-		OwnerDeviceID:  machineID,
-		OwnerSessionID: ownerSessionID,
-		AccessMode:     accessMode,
-		ReadyTimeout:   30 * time.Second,
-		DrainTimeout:   10 * time.Second,
+		OwnerMachineID: machineID,
+		OwnerSessionID: ownerSessionID, OwnerSessionKind: ownerSessionKind,
+		AccessMode:   accessMode,
+		ReadyTimeout: 30 * time.Second,
+		DrainTimeout: 10 * time.Second,
 	})
 	if err != nil {
+		if errors.Is(err, servepkg.ErrPreviewReadinessTimeout) {
+			if observer, ok := carrier.(interface{ ReadinessDetail() string }); ok {
+				return fmt.Errorf("%w: %s", err, observer.ReadinessDetail())
+			}
+		}
 		return err
 	}
 	if !background && !jsonOutput && previewInteractiveTerminal(command) {
@@ -581,7 +609,11 @@ func runPreviewListCobra(command *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	page, err := client.ListPreviewLeases(command.Context(), "", 0)
+	cursor, limit, err := tunnelPageFlags(command)
+	if err != nil {
+		return err
+	}
+	page, err := client.ListPreviewLeasesFiltered(command.Context(), cursor, limit, inventoryFilters(command))
 	if err != nil {
 		return err
 	}
@@ -592,7 +624,10 @@ func runPreviewListCobra(command *cobra.Command, _ []string) error {
 	if jsonOutput {
 		return encodePreviewLeasePage(command.OutOrStdout(), page)
 	}
-	return writePreviewLeaseTable(command.OutOrStdout(), page.Items)
+	if err := writePreviewLeaseTable(command.OutOrStdout(), page.Items); err != nil {
+		return err
+	}
+	return writeInventoryContinuation(command, nil, page.NextCursor, limit)
 }
 
 func runPreviewStopCobra(command *cobra.Command, args []string) error {
@@ -633,15 +668,27 @@ func previewStopCompletion(command *cobra.Command, args []string, toComplete str
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	page, err := client.ListPreviewLeases(ctx, "", 100)
-	if err != nil {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	values := make([]string, 0, len(page.Items))
-	for _, item := range page.Items {
-		if strings.HasPrefix(strings.ToLower(item.ID), strings.ToLower(toComplete)) {
-			values = append(values, item.ID+"\t"+item.State)
+	values := []string{}
+	cursor := ""
+	seen := map[string]bool{"": true}
+	for {
+		page, err := client.ListPreviewLeases(ctx, cursor, 200)
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
+		for _, item := range page.Items {
+			if strings.HasPrefix(strings.ToLower(item.ID), strings.ToLower(toComplete)) {
+				values = append(values, item.ID+"\t"+item.State)
+			}
+		}
+		if page.NextCursor == "" {
+			break
+		}
+		if len(page.Items) == 0 || seen[page.NextCursor] {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		seen[page.NextCursor] = true
+		cursor = page.NextCursor
 	}
 	sort.Strings(values)
 	return values, cobra.ShellCompDirectiveNoFileComp
@@ -720,11 +767,11 @@ func containsPreviewControl(value string) bool {
 }
 
 func newPreviewOwnerSessionID() (string, error) {
-	key, err := api.NewPreviewLeaseIdempotencyKey()
+	id, err := uuid.NewRandom()
 	if err != nil {
 		return "", err
 	}
-	return "session_" + strings.TrimPrefix(key, "preview_"), nil
+	return "session_" + id.String(), nil
 }
 
 func writePreviewReady(writer io.Writer, endpoint string, target preview.LeaseTarget) error {
@@ -783,12 +830,12 @@ func (c *previewDomainLeaseClient) Create(ctx context.Context, request preview.L
 		return preview.Lease{}, errors.New("preview domain lease client is unavailable")
 	}
 	lease, err := c.client.CreatePreviewLease(ctx, api.PreviewLeaseCreateRequest{
-		OwnerDeviceID:  request.OwnerDeviceID,
-		OwnerSessionID: request.OwnerSessionID,
-		Target:         api.PreviewLeaseTarget{Scheme: request.Target.Scheme, Address: request.Target.Address},
-		AccessMode:     request.AccessMode,
-		ExpiresAt:      request.UserDeadline,
-		Domains:        append([]string(nil), c.domains...),
+		OwnerMachineID: request.OwnerMachineID,
+		OwnerSessionID: request.OwnerSessionID, OwnerSessionKind: request.OwnerSessionKind,
+		Target:     api.PreviewLeaseTarget{Scheme: request.Target.Scheme, Address: request.Target.Address},
+		AccessMode: request.AccessMode,
+		ExpiresAt:  request.UserDeadline,
+		Domains:    append([]string(nil), c.domains...),
 	}, request.IdempotencyKey)
 	if err != nil {
 		return preview.Lease{}, err
@@ -828,13 +875,13 @@ func (c *previewDomainLeaseClient) Get(ctx context.Context, previewID string) (p
 
 func apiLeaseFromPreview(lease preview.Lease) api.PreviewLease {
 	return api.PreviewLease{
-		Schema:            lease.Schema,
-		Kind:              lease.Kind,
-		ID:                lease.ID,
-		AccountID:         lease.AccountID,
-		ActorID:           lease.ActorID,
-		OwnerDeviceID:     lease.OwnerDeviceID,
-		OwnerSessionID:    lease.OwnerSessionID,
+		Schema:         lease.Schema,
+		Kind:           lease.Kind,
+		ID:             lease.ID,
+		AccountID:      lease.AccountID,
+		ActorID:        lease.ActorID,
+		OwnerMachineID: lease.OwnerMachineID,
+		OwnerSessionID: lease.OwnerSessionID, OwnerSessionKind: lease.OwnerSessionKind,
 		Target:            api.PreviewLeaseTarget{Scheme: lease.Target.Scheme, Address: lease.Target.Address},
 		AccessMode:        lease.AccessMode,
 		Persistent:        lease.Persistent,
@@ -854,13 +901,13 @@ func apiLeaseFromPreview(lease preview.Lease) api.PreviewLease {
 
 func previewLeaseFromAPI(lease api.PreviewLease) preview.Lease {
 	return preview.Lease{
-		Schema:            lease.Schema,
-		Kind:              lease.Kind,
-		ID:                lease.ID,
-		AccountID:         lease.AccountID,
-		ActorID:           lease.ActorID,
-		OwnerDeviceID:     lease.OwnerDeviceID,
-		OwnerSessionID:    lease.OwnerSessionID,
+		Schema:         lease.Schema,
+		Kind:           lease.Kind,
+		ID:             lease.ID,
+		AccountID:      lease.AccountID,
+		ActorID:        lease.ActorID,
+		OwnerMachineID: lease.OwnerMachineID,
+		OwnerSessionID: lease.OwnerSessionID, OwnerSessionKind: lease.OwnerSessionKind,
 		Target:            preview.LeaseTarget{Scheme: lease.Target.Scheme, Address: lease.Target.Address},
 		AccessMode:        lease.AccessMode,
 		Persistent:        lease.Persistent,

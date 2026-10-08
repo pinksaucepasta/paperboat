@@ -16,20 +16,42 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 )
 
 func runServiceCommand(ctx context.Context, args []string, stdin io.Reader, _, _ io.Writer) error {
+	if len(args) == 1 && args[0] == "browser-domain" {
+		if os.Geteuid() != 0 {
+			return hostinstall.ErrNotPrivileged
+		}
+		request, err := decodeBrowserDomain(stdin)
+		if err != nil {
+			return err
+		}
+		executable, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		_, err = machineguard.InstallBrowserDomain(ctx, executable, request.Owner, request.Domain)
+		return err
+	}
 	if len(args) != 1 || args[0] != "install" && args[0] != "commit" && args[0] != "repair" && args[0] != "repair-persisted" && args[0] != "stop" && args[0] != "uninstall" && args[0] != "uninstall-persisted" && args[0] != "purge" && args[0] != "install-supplied" && args[0] != "commit-supplied" && args[0] != "rollback-supplied" {
 		return errors.New("service requires install, commit, repair, repair-persisted, stop, or uninstall")
 	}
 	if args[0] == "uninstall" && os.Geteuid() != 0 {
 		if _, err := os.Stat(systemWorkerExecutable()); errors.Is(err, os.ErrNotExist) {
+			if err := machineguard.CleanupUserTrust(ctx); err != nil {
+				return err
+			}
 			return removeSystemWorkerCommand()
 		} else if err != nil {
 			return err
 		}
 		if err := authorizePersistedUninstall(ctx); err != nil {
 			return err
+		}
+		if err := machineguard.CleanupUserTrust(ctx); err != nil {
+			return fmt.Errorf("remove browser certificate trust: %w", err)
 		}
 		return removeSystemWorkerCommand()
 	}

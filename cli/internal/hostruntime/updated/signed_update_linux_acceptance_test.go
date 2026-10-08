@@ -621,3 +621,5 @@ var _ workerupdate.Hostd = (*signedAcceptanceHostd)(nil)
 var _ workerupdate.HealthChecker = (*signedAcceptanceHealth)(nil)
 var _ workerupdate.SignedDeploymentProvider = (*signedAcceptanceDeploymentProvider)(nil)
 var _ workerupdate.EventSink = (*signedAcceptanceEvents)(nil)
+
+func (h *signedAcceptanceHostd) StopActive(context.Context) error { return nil }

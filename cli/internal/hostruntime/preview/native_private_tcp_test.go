@@ -5,12 +5,12 @@ import (
 	"errors"
 	"io"
 	"net"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 )
 
@@ -30,8 +30,16 @@ func TestNativePrivateTCPAccessClassifiesControlPlaneDenial(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = access.Resolve(context.Background(), "database"); !errors.Is(err, ErrPrivateTCPAccessForbidden) {
+	if _, err = access.DialMachine(context.Background(), "machine_1", 5432); !errors.Is(err, ErrPrivateTCPAccessForbidden) {
 		t.Fatalf("resolve error=%v, want definitive denial", err)
+	}
+	var original *api.APIError
+	if !errors.As(err, &original) || original.Status != 403 {
+		t.Fatal("grant denial discarded the original HTTP cause")
+	}
+	fault := errorreport.ProjectFault(t.Context(), "paperboat-daemon", "local_gateway", "local_gateway", "local_gateway_failed", err)
+	if fault.Stage != "grant_issue" || fault.HTTPStatus != 403 || fault.Cause != "permission_denied" {
+		t.Fatalf("grant denial cannot be diagnosed: %#v", fault)
 	}
 }
 
@@ -50,66 +58,7 @@ func (s *nativePrivateTestSession) OpenAuthorized(_ context.Context, header stre
 }
 func (*nativePrivateTestSession) Close() error { return nil }
 
-func TestNativePrivateTCPAccessFreshGrantPerConnection(t *testing.T) {
-	now := time.Now().UTC().Truncate(time.Second)
-	requests := make([]api.NativePrivateGrantRequest, 0, 4)
-	var requestsMu sync.Mutex
-	issuer := nativePrivateGrantIssuerFunc(func(_ context.Context, request api.NativePrivateGrantRequest) (api.NativePrivateGrant, error) {
-		requestsMu.Lock()
-		requests = append(requests, request)
-		requestsMu.Unlock()
-		var grant api.NativePrivateGrant
-		grant.Target.AccountID, grant.Target.UserID, grant.Target.EnvironmentID = "usr_1", "usr_1", "env_1"
-		grant.Target.MachineID, grant.Target.AccessSessionID = "machine_1", "umas_1"
-		grant.Target.ResourceKind, grant.Target.ResourceID, grant.Target.ResourceGeneration = "tunnel", "tun_1", 2
-		grant.Target.RouteID, grant.Target.RouteGeneration, grant.Target.TargetGeneration = "route_1", 3, 4
-		grant.Target.Protocol, grant.Target.TargetScheme, grant.Target.TargetAddress = "tcp", "tcp", "127.0.0.1:5432"
-		grant.Credential, grant.ExpiresAt = "credential", now.Add(time.Minute)
-		return grant, nil
-	})
-	session := &nativePrivateTestSession{}
-	access, err := NewNativePrivateTCPAccess(NativePrivateTCPAccessConfig{Grants: issuer, DialSession: func(context.Context, string) (NativePrivateSession, error) { return session, nil }, Now: func() time.Time { return now }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	routeID, tunnelID, err := access.Resolve(context.Background(), "database")
-	if err != nil || routeID != "route_1" || tunnelID != "tun_1" {
-		t.Fatalf("route=%q tunnel=%q err=%v", routeID, tunnelID, err)
-	}
-	proxy, err := access.Start(context.Background(), PrivateTCPAccessRequest{RouteID: routeID, ListenAddress: "127.0.0.1:0", MaximumConnections: 2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer proxy.Close()
-	connection, err := net.Dial("tcp4", strings.TrimPrefix(proxy.AccessURL(), "http://"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = connection.Write([]byte("ssh")); err != nil {
-		t.Fatal(err)
-	}
-	response := make([]byte, 3)
-	if _, err = io.ReadFull(connection, response); err != nil || string(response) != "ssh" {
-		t.Fatalf("response=%q err=%v", response, err)
-	}
-	_ = connection.Close()
-	requestsMu.Lock()
-	requestCount := len(requests)
-	issued := append([]api.NativePrivateGrantRequest(nil), requests...)
-	requestsMu.Unlock()
-	if requestCount != 3 {
-		t.Fatalf("grant requests=%d, want selector, preflight, connection", requestCount)
-	}
-	session.mu.Lock()
-	opened := append([]string(nil), session.accesses...)
-	session.mu.Unlock()
-	prefix := "umas_1:private_access:private_tcp:"
-	if len(opened) != 2 || !strings.HasPrefix(opened[0], prefix) || !strings.HasPrefix(opened[1], prefix) || strings.TrimPrefix(opened[0], prefix) != issued[1].OperationID || strings.TrimPrefix(opened[1], prefix) != issued[2].OperationID {
-		t.Fatalf("opened=%v issued=%v", opened, issued)
-	}
-}
-
-func deviceGrant(now time.Time) api.NativePrivateGrant {
+func machineGrant(now time.Time) api.NativePrivateGrant {
 	var g api.NativePrivateGrant
 	g.Target.AccountID = "owner"
 	g.Target.UserID = "owner"
@@ -117,7 +66,7 @@ func deviceGrant(now time.Time) api.NativePrivateGrant {
 	g.Target.MachineID = "machine"
 	g.Target.AccessSessionID = "access"
 	g.Target.CLIClientSessionID = "cli"
-	g.Target.ResourceKind = "device_service"
+	g.Target.ResourceKind = "machine_service"
 	g.Target.ResourceID = "machine"
 	g.Target.ResourceGeneration = 1
 	g.Target.RouteID = "tcp:5432"
@@ -134,7 +83,7 @@ func deviceGrant(now time.Time) api.NativePrivateGrant {
 	g.ExpiresAt = now.Add(time.Minute)
 	return g
 }
-func TestNativePrivateDeviceGrantBeforeDialAndExactTarget(t *testing.T) {
+func TestNativePrivateMachineGrantBeforeDialAndExactTarget(t *testing.T) {
 	for _, scenario := range []string{"denied", "wrong_machine", "wrong_port", "missing_fence", "success"} {
 		t.Run(scenario, func(t *testing.T) {
 			now := time.Now().UTC()
@@ -142,10 +91,10 @@ func TestNativePrivateDeviceGrantBeforeDialAndExactTarget(t *testing.T) {
 			requests := 0
 			access, err := NewNativePrivateTCPAccess(NativePrivateTCPAccessConfig{Grants: nativePrivateGrantIssuerFunc(func(_ context.Context, r api.NativePrivateGrantRequest) (api.NativePrivateGrant, error) {
 				requests++
-				if r.ResourceKind != "device_service" || r.ResourceID != "machine" || r.RouteID != "tcp:5432" || r.Protocol != "tcp" || r.OperationID == "" {
+				if r.ResourceKind != "machine_service" || r.ResourceID != "machine" || r.RouteID != "tcp:5432" || r.Protocol != "tcp" || r.OperationID == "" {
 					t.Fatalf("wrong request: %+v", r)
 				}
-				g := deviceGrant(now)
+				g := machineGrant(now)
 				switch scenario {
 				case "denied":
 					return g, &api.APIError{Status: 403}
@@ -165,7 +114,7 @@ func TestNativePrivateDeviceGrantBeforeDialAndExactTarget(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			conn, err := access.DialDevice(t.Context(), "machine", 5432)
+			conn, err := access.DialMachine(t.Context(), "machine", 5432)
 			if scenario != "success" {
 				if err == nil || dials != 0 {
 					t.Fatalf("unauthorized dial: %v %d", err, dials)
@@ -210,24 +159,24 @@ func (s *blockedPrivateSession) Close() error {
 	})
 	return nil
 }
-func TestNativePrivateDeviceCancellationClosesPendingReadiness(t *testing.T) {
+func TestNativePrivateMachineCancellationClosesPendingReadiness(t *testing.T) {
 	session := &blockedPrivateSession{closed: make(chan struct{})}
 	started := make(chan struct{})
 	access, err := NewNativePrivateTCPAccess(NativePrivateTCPAccessConfig{Grants: nativePrivateGrantIssuerFunc(func(context.Context, api.NativePrivateGrantRequest) (api.NativePrivateGrant, error) {
-		return deviceGrant(time.Now()), nil
+		return machineGrant(time.Now()), nil
 	}), DialSession: func(context.Context, string) (NativePrivateSession, error) { close(started); return session, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { _, err := access.DialDevice(ctx, "machine", 5432); done <- err }()
+	go func() { _, err := access.DialMachine(ctx, "machine", 5432); done <- err }()
 	<-started
 	cancel()
 	select {
 	case err := <-done:
-		if err == nil {
-			t.Fatal("canceled readiness succeeded")
+		if !errors.Is(err, context.Canceled) {
+			t.Fatal("canceled readiness lost its cancellation cause")
 		}
 	case <-time.After(time.Second):
 		t.Fatal("cancellation did not interrupt readiness")

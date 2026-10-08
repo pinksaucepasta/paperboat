@@ -28,7 +28,7 @@ func (staticCredentials) Proof(context.Context, string, string, string, []byte) 
 	return []byte("proof"), nil
 }
 
-func TestEnsureRegistersDeviceOwnedMachineKeyWithoutPairedCLI(t *testing.T) {
+func TestEnsureRegistersMachineOwnedMachineKeyWithoutPairedCLI(t *testing.T) {
 	stateRoot := filepath.Join(t.TempDir(), "identity")
 	store, err := identitystore.Open(identitystore.Config{StateRoot: stateRoot})
 	if err != nil {
@@ -36,7 +36,7 @@ func TestEnsureRegistersDeviceOwnedMachineKeyWithoutPairedCLI(t *testing.T) {
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	key := store.Current()
-	if err := store.SaveRegistration(identitystore.Registration{ServerURL: "https://api.example.test", AccountID: "account_01", MachineID: "machine_01", EnvironmentID: "env_01", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(stateRoot, "inbox"), InstallationGeneration: 3, SetupRoles: []string{"host"}, UpdatedAt: now}); err != nil {
+	if err := store.SaveRegistration(identitystore.Registration{ServerURL: "https://api.example.test", AccountID: "account_01", MachineID: "machine_01", EnvironmentID: "env_01", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(stateRoot, "inbox"), InstallationGeneration: 3, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	endpoint, err := store.PeerEndpoint()

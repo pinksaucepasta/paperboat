@@ -5,6 +5,7 @@ go 1.27.1
 replace tailscale.com => github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20260928002927-8c8b2e0dc313
 
 require (
+	github.com/google/uuid v1.6.0
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/adrg/xdg v0.5.3
 	github.com/anmitsu/go-shlex v0.0.0-20200514113438-38f4b401e2be
@@ -18,6 +19,7 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/coreos/go-systemd/v22 v22.6.0
 	github.com/creack/pty v1.1.24
+	github.com/ebitengine/purego v0.10.2
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/fxamacker/cbor/v2 v2.9.3
 	github.com/getsentry/sentry-go v0.49.0
@@ -62,7 +64,7 @@ require (
 	9fans.net/go v0.0.8-0.20250307142834-96bdba94b63f // indirect
 	dario.cat/mergo v1.0.2 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
-	github.com/BurntSushi/toml v1.6.0 // indirect
+	github.com/BurntSushi/toml v1.6.0
 	github.com/ProtonMail/go-crypto v1.4.1 // indirect
 	github.com/akutz/memconn v0.1.0 // indirect
 	github.com/alexbrainman/sspi v0.0.0-20250919150558-7d374ff0d59e // indirect
@@ -116,7 +118,6 @@ require (
 	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/google/nftables v0.3.0 // indirect
 	github.com/google/pprof v0.0.0-20250403155104-27863c87afa6 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/hdevalence/ed25519consensus v0.2.0 // indirect
 	github.com/huin/goupnp v1.3.0 // indirect
 	github.com/illarion/gonotify/v3 v3.0.2 // indirect

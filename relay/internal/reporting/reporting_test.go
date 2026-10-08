@@ -1,11 +1,16 @@
 package reporting
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -33,6 +38,33 @@ func (t *recordingTransport) FlushWithContext(context.Context) bool {
 	return true
 }
 func (t *recordingTransport) Close() { t.closed = true; t.closeCalls++ }
+
+func waitForEnvelopeContent(t *testing.T, mu *sync.Mutex, envelopes *[][]byte, notifications <-chan struct{}, expected ...string) []byte {
+	t.Helper()
+	timer := time.NewTimer(flushTimeout)
+	defer timer.Stop()
+	for {
+		mu.Lock()
+		payload := bytes.Join(*envelopes, nil)
+		mu.Unlock()
+		complete := true
+		for _, name := range expected {
+			if !bytes.Contains(payload, []byte(name)) {
+				complete = false
+				break
+			}
+		}
+		if complete {
+			return payload
+		}
+		select {
+		case <-notifications:
+		case <-timer.C:
+			t.Fatalf("timed out waiting for telemetry envelope content %v", expected)
+			return payload
+		}
+	}
+}
 
 func TestConfigurationDefaultsAndOverrides(t *testing.T) {
 	originalDSN, originalRelease := DefaultDSN, DefaultRelease
@@ -167,10 +199,10 @@ func TestSanitizesAndBoundsEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reporter := &Reporter{client: client, enabled: true}
-	ref := "pb-0123456789abcdef0123456789abcdef"
+	const ref = "support_01234567-89ab-4def-8123-456789abcdef"
+	reporter := &Reporter{client: client, enabled: true, component: "paperboat-relay", localFault: func(Fault) {}}
 	for i := 0; i < maxEvents+3; i++ {
-		reporter.Capture(ref, "service/run secret=value /private/path", 0)
+		reporter.CaptureFailure(WithSupportReference(context.Background(), ref), "service_run", errors.New("secret=value /private/path"))
 	}
 	reporter.Close()
 	if len(transport.events) != maxEvents {
@@ -183,11 +215,17 @@ func TestSanitizesAndBoundsEvents(t *testing.T) {
 	if event.Request != nil || len(event.Breadcrumbs) != 0 || len(event.Contexts) != 0 || len(event.Modules) != 0 || event.User.ID != "" {
 		t.Fatalf("unsafe SDK fields retained: %+v", event)
 	}
-	if event.Tags["support_reference"] != ref || event.Tags["component"] != "paperboat-relay" {
+	if event.Tags["support_reference"] != ref || event.Tags["correlation_id"] != ref || event.Tags["component"] != "paperboat-relay" {
 		t.Fatalf("tags=%v", event.Tags)
 	}
-	if event.Message != "unexpected service failure" || event.Release != "2026.09.19.1" {
+	if event.Message != "paperboat service failure" || event.Release != "2026.09.19.1" {
 		t.Fatalf("message=%q release=%q", event.Message, event.Release)
+	}
+	if event.Tags["stage"] != "serve" || event.Tags["code"] != "service_failed" || event.Tags["cause"] != "internal" || event.Tags["error_type"] != "errorString" || event.Tags["outcome"] != "failed" {
+		t.Fatalf("fault tags=%v", event.Tags)
+	}
+	if event.Tags["error_chain"] == "" || event.Tags["source_file"] != "reporting_test.go" || event.Tags["source_function"] == "" || event.Tags["source_line"] == "" {
+		t.Fatalf("missing safe fault metadata: %v", event.Tags)
 	}
 	for _, exception := range event.Exception {
 		if strings.Contains(exception.Value, "secret") || exception.Stacktrace == nil {
@@ -202,12 +240,12 @@ func TestSanitizesAndBoundsEvents(t *testing.T) {
 }
 
 func TestSanitizeReconstructsAllowlistedEvent(t *testing.T) {
-	ref := "pb-0123456789abcdef0123456789abcdef"
+	ref := "support_01234567-89ab-4def-8123-456789abcdef"
 	dirty := &sentry.Event{
 		Message: "token=secret", Logger: "private", Transaction: "/users/alice", ServerName: "host",
 		Environment: "private", Request: &sentry.Request{URL: "https://secret.invalid/path"},
 		Contexts: map[string]sentry.Context{"secret": {"value": "private"}},
-		Tags:     map[string]string{"support_reference": ref, "failure_kind": "service/run", "secret": "private"},
+		Tags:     map[string]string{"support_reference": ref, "operation": "service_lifecycle", "stage": "serve", "code": "service_failed", "cause": "internal", "error_type": "error", "outcome": "failed", "secret": "private"},
 		Exception: []sentry.Exception{{Value: "password", Stacktrace: &sentry.Stacktrace{Frames: []sentry.Frame{{
 			Function: "github.com/private/project/internal/service.run", Filename: "/home/alice/private/service.go",
 			AbsPath: "/home/alice/private/service.go", Vars: map[string]any{"token": "secret"}, Lineno: 42,
@@ -217,6 +255,9 @@ func TestSanitizeReconstructsAllowlistedEvent(t *testing.T) {
 	if clean.Request != nil || clean.Contexts != nil || clean.Logger != "" || clean.Transaction != "" || clean.ServerName != "" || clean.Environment != "" {
 		t.Fatalf("unsafe fields survived: %+v", clean)
 	}
+	if clean.Tags["support_reference"] != ref || clean.Tags["cause"] != "internal" || clean.Tags["operation"] != "service_lifecycle" || clean.Tags["secret"] != "" {
+		t.Fatalf("fault allowlist=%v", clean.Tags)
+	}
 	frame := clean.Exception[0].Stacktrace.Frames[0]
 	if frame.Filename != "service.go" || frame.Module != "service" || frame.Function != "run" || frame.Lineno != 42 || frame.AbsPath != "" || frame.Vars != nil {
 		t.Fatalf("frame=%+v", frame)
@@ -224,8 +265,122 @@ func TestSanitizeReconstructsAllowlistedEvent(t *testing.T) {
 }
 
 func TestReferenceFormat(t *testing.T) {
-	if reference := Reference(); !validReference(reference) {
-		t.Fatalf("invalid reference %q", reference)
+	seen := map[string]bool{}
+	for range 2 {
+		reference := Reference()
+		if !validReference(reference) || seen[reference] {
+			t.Fatalf("invalid or reused reference %q", reference)
+		}
+		seen[reference] = true
+	}
+	for _, reference := range []string{"", "pb-0123456789abcdef0123456789abcdef", "support_01234567-89ab-1def-8123-456789abcdef", "support_01234567-89ab-4def-0123-456789abcdef", "support_01234567-89AB-4def-8123-456789abcdef"} {
+		if validReference(reference) {
+			t.Errorf("accepted invalid reference %q", reference)
+		}
+	}
+}
+
+func TestCaptureFailureKeepsSafeMetadataWhenSentryIsDisabled(t *testing.T) {
+	var local []Fault
+	reporter := &Reporter{localFault: func(fault Fault) { local = append(local, fault) }}
+	const reference = "support_01234567-89ab-4def-8123-456789abcdef"
+	err := errors.Join(errors.New("token=private https://private.example/path"), context.DeadlineExceeded)
+	fault := reporter.CaptureFailure(WithSupportReference(context.Background(), reference), "service_run", err)
+	if len(local) != 1 || fault.CorrelationID != reference || local[0].CorrelationID != reference {
+		t.Fatalf("fault=%+v local=%+v", fault, local)
+	}
+	if fault.Schema != "paperboat.edge_event.v1" || fault.Stage != "serve" || fault.Code != "service_failed" || fault.Cause != "deadline_exceeded" || fault.Outcome != "failed" || fault.ErrorType == "" || len(fault.ErrorChain) == 0 || fault.SupportReference != reference || fault.CorrelationID != reference || fault.SourceFile == "" || fault.SourceFunction == "" || fault.SourceLine <= 0 {
+		t.Fatalf("incomplete fault projection: %+v", fault)
+	}
+	raw, err := json.Marshal(local[0])
+	if err != nil || strings.Contains(string(raw), "private") || strings.Contains(string(raw), "example") || strings.Contains(string(raw), "token=") {
+		t.Fatalf("local fault leaked private error content: %s err=%v", raw, err)
+	}
+}
+
+func TestConfigurationFailureIsLocalRejection(t *testing.T) {
+	var local Fault
+	reporter := &Reporter{localFault: func(fault Fault) { local = fault }}
+	fault := reporter.CaptureFailure(context.Background(), "service_config", errors.New("private config path and body"))
+	if fault.Stage != "configure" || fault.Code != "service_setup_failed" || fault.Outcome != "rejected" || fault.Severity != "warning" || fault.CorrelationID == "" || local.CorrelationID != fault.CorrelationID {
+		t.Fatalf("configuration fault=%+v local=%+v", fault, local)
+	}
+}
+
+type statusFailure struct{ status int }
+
+func (*statusFailure) Error() string           { return "token=private /customer/path" }
+func (e *statusFailure) DiagnosticStatus() int { return e.status }
+
+func TestFaultProjectionAddsTypedCauseMetadata(t *testing.T) {
+	var local Fault
+	reporter := &Reporter{localFault: func(fault Fault) { local = fault }}
+	const reference = "support_01234567-89ab-4def-8123-456789abcdef"
+	status := reporter.CaptureFailure(WithSupportReference(context.Background(), reference), "service_run", &statusFailure{status: 503})
+	if status.Cause != "service_unavailable" || status.HTTPStatus != 503 || status.Outcome != "failed" || local.SupportReference != reference || local.CorrelationID != reference {
+		t.Fatalf("status fault=%+v local=%+v", status, local)
+	}
+	rejected := reporter.CaptureFailure(WithSupportReference(context.Background(), reference), "service_run", &statusFailure{status: http.StatusForbidden})
+	if rejected.Cause != "permission_denied" || rejected.HTTPStatus != http.StatusForbidden || rejected.Outcome != "rejected" || rejected.Severity != "warning" || local.Outcome != "rejected" || local.Severity != "warning" {
+		t.Fatalf("rejected fault=%+v local=%+v", rejected, local)
+	}
+	errno := reporter.CaptureFailure(WithSupportReference(context.Background(), reference), "service_run", syscall.ECONNREFUSED)
+	if errno.Cause != "connection_refused" || errno.Errno != int(syscall.ECONNREFUSED) || len(errno.ErrorChain) == 0 {
+		t.Fatalf("errno fault=%+v", errno)
+	}
+}
+
+func TestCanceledControlTraceIsNotReportedAsSuccess(t *testing.T) {
+	transport := &recordingTransport{}
+	config := options("paperboat-relay", "release", "https://public@example.invalid/1", transport)
+	config.EnableTracing, config.TracesSampleRate = true, 1
+	client, err := sentry.NewClient(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reporter := &Reporter{client: client, hub: sentry.NewHub(client, sentry.NewScope()), enabled: true, traces: true, component: "paperboat-relay"}
+	_, _, finish := reporter.ControlTrace(context.Background(), "dependency_health")
+	finish("canceled", "shutdown")
+	reporter.Close()
+	var canceled bool
+	for _, event := range transport.events {
+		if event.Type != "transaction" {
+			continue
+		}
+		if event.Contexts["trace"]["status"] != "cancelled" {
+			t.Fatalf("canceled operation status=%v", event.Contexts["trace"]["status"])
+		}
+		canceled = true
+	}
+	if !canceled {
+		t.Fatal("canceled control operation emitted no trace")
+	}
+}
+
+func TestCanceledFailureHasNoSentryException(t *testing.T) {
+	transport := &recordingTransport{}
+	config := options("paperboat-relay", "release", "https://public@example.invalid/1", transport)
+	client, err := sentry.NewClient(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var local []Fault
+	reporter := &Reporter{client: client, hub: sentry.NewHub(client, sentry.NewScope()), enabled: true, logs: true, metrics: true, component: "paperboat-relay", localFault: func(fault Fault) { local = append(local, fault) }}
+	const reference = "support_01234567-89ab-4def-8123-456789abcdef"
+	fault := reporter.CaptureFailure(WithSupportReference(context.Background(), reference), "service_run", context.Canceled)
+	reporter.Close()
+	if fault.Outcome != "canceled" || fault.Severity != "info" || fault.Cause != "context_canceled" || len(local) != 1 || local[0].CorrelationID != reference {
+		t.Fatalf("fault=%+v local=%+v", fault, local)
+	}
+	for _, event := range transport.events {
+		if len(event.Exception) != 0 {
+			t.Fatalf("cancellation was sent as exception: %+v", event.Exception)
+		}
+		for _, log := range event.Logs {
+			if log.Attributes["outcome"].AsInterface() == "canceled" && log.Level != sentry.LogLevelInfo {
+				t.Fatalf("cancellation log level=%s", log.Level)
+			}
+		}
 	}
 }
 
@@ -295,9 +450,8 @@ func TestOperationEmitsLogMetricAndTraceEnvelopes(t *testing.T) {
 		t.Fatal(err)
 	}
 	reporter := &Reporter{client: client, hub: sentry.NewHub(client, sentry.NewScope()), enabled: true, logs: true, traces: true, metrics: true, component: "paperboat-relay"}
-	const reference = "pb-0123456789abcdef0123456789abcdef"
+	const reference = "support_01234567-89ab-4def-8123-456789abcdef"
 	reporter.Observe(context.Background(), "relay_admission", "rejected", "unauthorized", reference, time.Second)
-	reporter.Capture(reference, "service_run", 0)
 	reporter.ExportDrops(context.Background())
 	reporter.Close()
 	var logs, metrics, transactions int
@@ -364,8 +518,31 @@ func TestOperationRateLimitDropsAndRecoversNextWindow(t *testing.T) {
 }
 
 func TestSnapshotRotationSurvivesSaturatedDetailMetrics(t *testing.T) {
-	transport := &recordingTransport{}
-	client, err := sentry.NewClient(options("paperboat-relay", "release", "https://public@example.invalid/1", transport))
+	var mu sync.Mutex
+	var envelopes [][]byte
+	notifications := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		payload, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Errorf("read Sentry envelope: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		envelopes = append(envelopes, bytes.Clone(payload))
+		mu.Unlock()
+		select {
+		case notifications <- struct{}{}:
+		default:
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	dsn := "http://public@" + strings.TrimPrefix(server.URL, "http://") + "/1"
+	transport := sentry.NewHTTPTransport()
+	transport.BufferSize, transport.Timeout = maxEvents, flushTimeout
+	clientOptions := options("paperboat-relay", "release", dsn, transport)
+	client, err := sentry.NewClient(clientOptions)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,31 +551,43 @@ func TestSnapshotRotationSurvivesSaturatedDetailMetrics(t *testing.T) {
 		reporter.Observe(context.Background(), "relay_session", "success", "ok", "", 0)
 	}
 	snapshots := make([]Snapshot, maxSnapshots+1)
-	for i := range maxSnapshots {
+	snapshots[0] = Snapshot{Name: "paperboat_relay_sessions", Kind: "gauge", Value: 30}
+	snapshots[1] = Snapshot{Name: "paperboat_relay_capacity_limit", Kind: "gauge", Value: 256}
+	for i := 2; i < maxSnapshots; i++ {
 		snapshots[i] = Snapshot{Name: "paperboat_relay_sessions", Kind: "gauge", Value: float64(i)}
 	}
-	snapshots[maxSnapshots] = Snapshot{Name: "paperboat_relay_capacity_limit", Kind: "gauge", Value: 256}
+	snapshots[maxSnapshots] = Snapshot{Name: "paperboat_peer_relay_allocations", Kind: "gauge", Value: 12}
+	// The exact production SDK path has a 100-item queue. This window
+	// contains 28 detailed items, eight health gauges and 64 snapshots.
+	reporter.ExportDrops(context.Background())
 	reporter.MetricSnapshots(context.Background(), snapshots)
+	if !client.Flush(flushTimeout) {
+		t.Fatal("first snapshot window did not flush")
+	}
+	mu.Lock()
+	firstWindow := bytes.Join(envelopes, nil)
+	mu.Unlock()
+	for _, name := range []string{"paperboat_relay_sessions", "paperboat_relay_capacity_limit", "paperboat_reporting_metrics_dropped_total_snapshot"} {
+		if !bytes.Contains(firstWindow, []byte(name)) {
+			t.Fatalf("health snapshot missing after production drain: %s", name)
+		}
+	}
+	if count := metricItemCount(t, firstWindow); count != 100 {
+		t.Fatalf("first-window metric items=%d, want 100", count)
+	}
+	// A completed first window establishes its real HTTP receipt before
+	// testing the next scheduled snapshot rotation.
+	reporter.ExportDrops(context.Background())
 	reporter.MetricSnapshots(context.Background(), snapshots)
 	reporter.Close()
 	if reporter.snapshotCursor.Load() != 2*maxSnapshots {
 		t.Fatalf("cursor=%d", reporter.snapshotCursor.Load())
 	}
-	found := false
-	for _, event := range transport.events {
-		for _, metric := range event.Metrics {
-			if metric.Name == "paperboat_relay_capacity_limit" {
-				found = true
-			}
-		}
-	}
-	if !found {
-		t.Fatal("rotated tail snapshot was not exported")
-	}
+	waitForEnvelopeContent(t, &mu, &envelopes, notifications, "paperboat_peer_relay_allocations")
 }
 
 func TestSanitizersRejectMaliciousTraceAndMetricFields(t *testing.T) {
-	ref := "pb-0123456789abcdef0123456789abcdef"
+	ref := "support_01234567-89ab-4def-8123-456789abcdef"
 	event := &sentry.Event{Transaction: "relay_session", Tags: map[string]string{"outcome": "failed", "code": "internal", "support_reference": ref, "secret": "credential"}, Contexts: map[string]sentry.Context{"trace": {"trace_id": "0123456789abcdef0123456789abcdef", "span_id": "0123456789abcdef", "parent_span_id": "fedcba9876543210", "op": "secret/path", "description": "token=secret", "data": map[string]any{"key": "secret"}}, "request": {"url": "https://secret.invalid"}}}
 	clean := sanitizeTransaction(event, "paperboat-relay", "release", "production")
 	if clean == nil {
@@ -424,16 +613,16 @@ func TestErrorRateLimitRecoversAndCloseIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reporter := &Reporter{client: client, hub: sentry.NewHub(client, sentry.NewScope()), enabled: true, component: "paperboat-relay"}
-	ref := "pb-0123456789abcdef0123456789abcdef"
+	reporter := &Reporter{client: client, hub: sentry.NewHub(client, sentry.NewScope()), enabled: true, component: "paperboat-relay", localFault: func(Fault) {}}
+	const ref = "support_01234567-89ab-4def-8123-456789abcdef"
 	for range maxEvents + 1 {
-		reporter.Capture(ref, "service_run", 0)
+		reporter.CaptureFailure(WithSupportReference(context.Background(), ref), "service_run", errors.New("private cause"))
 	}
 	if reporter.droppedErrors.Load() != 1 {
 		t.Fatalf("drops=%d", reporter.droppedErrors.Load())
 	}
 	reporter.window.Store(reporter.window.Load() - 1)
-	reporter.Capture(ref, "service_run", 0)
+	reporter.CaptureFailure(WithSupportReference(context.Background(), ref), "service_run", errors.New("private cause"))
 	if reporter.sent.Load() != 1 {
 		t.Fatalf("window did not recover: %d", reporter.sent.Load())
 	}
@@ -441,5 +630,95 @@ func TestErrorRateLimitRecoversAndCloseIsIdempotent(t *testing.T) {
 	reporter.Close()
 	if transport.closeCalls != 1 {
 		t.Fatalf("close calls=%d", transport.closeCalls)
+	}
+}
+
+func TestConcurrentErrorQuotaNeverExceedsWindowLimit(t *testing.T) {
+	reporter := &Reporter{}
+	const attempts = 256
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	accepted := 0
+	for range attempts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if reporter.permit(&reporter.sent, &reporter.droppedErrors, maxEvents) {
+				mu.Lock()
+				accepted++
+				mu.Unlock()
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if accepted != maxEvents || reporter.sent.Load() != maxEvents || reporter.droppedErrors.Load() != attempts-maxEvents {
+		t.Fatalf("accepted=%d sent=%d dropped=%d", accepted, reporter.sent.Load(), reporter.droppedErrors.Load())
+	}
+}
+
+func TestObservedControlFailureIsLocalWithoutDuplicateCapture(t *testing.T) {
+	var local []Fault
+	disabled := &Reporter{localFault: func(f Fault) { local = append(local, f) }}
+	const reference = "support_01234567-89ab-4def-8123-456789abcdef"
+	ctx := WithSupportReference(context.Background(), reference)
+	fault := disabled.ObserveFailure(ctx, "control_request", &statusFailure{status: 503})
+	if len(local) != 1 || fault.Cause != "service_unavailable" || fault.HTTPStatus != 503 || fault.CorrelationID != reference || fault.SourceFile != "reporting_test.go" {
+		t.Fatalf("offline fault=%+v", fault)
+	}
+	transport := &recordingTransport{}
+	config := options("paperboat-relay", "release", "https://public@example.invalid/1", transport)
+	client, err := sentry.NewClient(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reporter := &Reporter{client: client, hub: sentry.NewHub(client, sentry.NewScope()), enabled: true, logs: true, metrics: true, component: "paperboat-relay", localFault: func(f Fault) { local = append(local, f) }}
+	_, ref, finish := reporter.ControlTrace(context.Background(), "dependency_health")
+	reporter.ObserveFailure(WithSupportReference(context.Background(), ref), "control_request", &statusFailure{status: 503})
+	finish("failed", "control_request_failed")
+	reporter.Close()
+	logs, metrics, exceptions := 0, 0, 0
+	for _, event := range transport.events {
+		logs += len(event.Logs)
+		metrics += len(event.Metrics)
+		exceptions += len(event.Exception)
+	}
+	if len(local) != 2 || logs != 1 || metrics != 2 || exceptions != 0 {
+		t.Fatalf("local=%d logs=%d metricitems=%d exceptions=%d", len(local), logs, metrics, exceptions)
+	}
+}
+
+func TestSelfhostFaultUsesFiniteComponentAndPreservesProcessReference(t *testing.T) {
+	transport := &recordingTransport{}
+	client, err := sentry.NewClient(options("paperboat-selfhost", "release", "https://public@example.invalid/1", transport))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var local []Fault
+	reporter := &Reporter{client: client, hub: sentry.NewHub(client, sentry.NewScope()), enabled: true, logs: true, metrics: true, component: "paperboat-selfhost", localFault: func(f Fault) { local = append(local, f) }}
+	reference := Reference()
+	ctx := WithSupportReference(context.Background(), reference)
+	reporter.ObserveFailure(ctx, "selfhost_child", syscall.ECONNREFUSED)
+	reporter.CaptureFailure(ctx, "selfhost_command", syscall.EACCES)
+	reporter.Close()
+	logs, exceptions := 0, 0
+	for _, event := range transport.events {
+		if len(event.Exception) > 0 {
+			exceptions++
+			if event.Tags["component"] != "paperboat-selfhost" || event.Tags["support_reference"] != reference || event.Tags["code"] != "selfhost_command_failed" {
+				t.Fatal("selfhost exception projection mismatch")
+			}
+		}
+		for _, log := range event.Logs {
+			logs++
+			if log.Attributes["component"].AsInterface() != "paperboat-selfhost" || log.Attributes["support_reference"].AsInterface() != reference {
+				t.Fatal("selfhost log projection mismatch")
+			}
+		}
+	}
+	if len(local) != 2 || logs != 2 || exceptions != 1 {
+		t.Fatalf("local=%d logs=%d exceptions=%d", len(local), logs, exceptions)
 	}
 }

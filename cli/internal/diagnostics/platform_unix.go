@@ -29,7 +29,7 @@ func ensureDiagnosticDirectory(path string, owner diagnosticOwner) error {
 	}
 	info, err := os.Lstat(path)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 || fileUID(info) != owner.uid {
-		return ErrInvalid
+		return invalidDiagnostic(err)
 	}
 	return nil
 }
@@ -37,7 +37,7 @@ func ensureDiagnosticDirectory(path string, owner diagnosticOwner) error {
 func verifiedDiagnosticFile(path string, owner diagnosticOwner) (os.FileInfo, error) {
 	info, err := os.Lstat(path)
 	if err != nil || !validDiagnosticFile(path, info, owner) {
-		return nil, ErrInvalid
+		return nil, invalidDiagnostic(err)
 	}
 	return info, nil
 }
@@ -73,7 +73,7 @@ func openDiagnosticAppend(path string, owner diagnosticOwner) (*os.File, error) 
 	info, err := file.Stat()
 	if err != nil || !validDiagnosticFile(path, info, owner) || !os.SameFile(before, info) {
 		_ = file.Close()
-		return nil, ErrInvalid
+		return nil, invalidDiagnostic(err)
 	}
 	return file, nil
 }
@@ -90,7 +90,7 @@ func openDiagnosticRead(path string, owner diagnosticOwner) (*os.File, error) {
 	info, err := file.Stat()
 	if err != nil || !validDiagnosticFile(path, info, owner) || !os.SameFile(before, info) {
 		_ = file.Close()
-		return nil, ErrInvalid
+		return nil, invalidDiagnostic(err)
 	}
 	return file, nil
 }

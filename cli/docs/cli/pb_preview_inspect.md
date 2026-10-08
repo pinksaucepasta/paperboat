@@ -37,6 +37,7 @@ pb preview inspect <preview> [flags]
       --config string      path to the CLI config file
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO

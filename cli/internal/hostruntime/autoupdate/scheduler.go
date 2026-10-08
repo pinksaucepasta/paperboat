@@ -43,12 +43,16 @@ type Config struct {
 	RetryLimit time.Duration
 	Now        func() time.Time
 	Random     func(time.Duration) (time.Duration, error)
+	// NextCheck can bring a calendar maintenance window forward without
+	// removing ordinary availability checks or failure backoff.
+	NextCheck func(time.Time, time.Time) time.Time
 }
 
 type Scheduler struct {
 	config Config
 	mu     sync.Mutex
 	state  Observation
+	wake   chan struct{}
 }
 
 func New(config Config) (*Scheduler, error) {
@@ -73,7 +77,15 @@ func New(config Config) (*Scheduler, error) {
 	if config.Interval < time.Minute || config.RetryFloor <= 0 || config.RetryFloor > config.RetryLimit || config.RetryLimit > config.Interval {
 		return nil, ErrInvalidConfig
 	}
-	return &Scheduler{config: config}, nil
+	return &Scheduler{config: config, wake: make(chan struct{}, 1)}, nil
+}
+
+// Wake applies changed machine preferences without restarting the updater.
+func (s *Scheduler) Wake() {
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
 }
 
 func (s *Scheduler) Snapshot() Observation {
@@ -112,6 +124,8 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			timer.Stop()
 			return ctx.Err()
 		case <-timer.C:
+		case <-s.wake:
+			timer.Stop()
 		}
 		if err := s.runOnce(ctx); err != nil && ctx.Err() != nil {
 			return ctx.Err()
@@ -151,7 +165,15 @@ func (s *Scheduler) runCheck(ctx context.Context, check Check) (Result, error) {
 		state.BlockedReason, state.RequiredVersion = "", ""
 	}
 	var active *ActiveTerminalSessionsError
-	if errors.As(err, &active) {
+	var maintenance *OwnerMaintenancePendingError
+	if errors.As(err, &maintenance) {
+		state.Failure, state.Failures = "", 0
+		state.BlockedReason, state.RequiredVersion = BlockedOwnerMaintenance, maintenance.Notice.Version
+		state.NextCheckAt = checkedAt.Add(s.config.RetryFloor)
+		if maintenance.Notice.Deadline.After(checkedAt) && maintenance.Notice.Deadline.Before(state.NextCheckAt) {
+			state.NextCheckAt = maintenance.Notice.Deadline
+		}
+	} else if errors.As(err, &active) {
 		state.Failure, state.Failures = "", 0
 		state.BlockedReason, state.RequiredVersion = BlockedActiveTerminalSessions, active.RequiredVersion
 		state.NextCheckAt = checkedAt.Add(s.config.RetryFloor)
@@ -166,6 +188,11 @@ func (s *Scheduler) runCheck(ctx context.Context, check Check) (Result, error) {
 		state.Failures++
 		state.Failure = "check_failed"
 		state.NextCheckAt = checkedAt.Add(s.retryDelay(state.Failures))
+	}
+	if s.config.NextCheck != nil {
+		if next := s.config.NextCheck(checkedAt, state.NextCheckAt); next.After(checkedAt) && next.Before(state.NextCheckAt) {
+			state.NextCheckAt = next
+		}
 	}
 	s.state = state
 	s.mu.Unlock()

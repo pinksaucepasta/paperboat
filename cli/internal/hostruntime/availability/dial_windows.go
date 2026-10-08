@@ -9,17 +9,31 @@ import (
 	"time"
 
 	"github.com/Microsoft/go-winio"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostservice"
+	hostruntimeservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"golang.org/x/sys/windows"
 )
 
-const windowsHostServicePipe = `\\.\pipe\PaperboatHostService`
+func windowsOwnerHostServicePipe() (string, error) {
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil || user == nil || user.User.Sid == nil {
+		return "", ErrInvalid
+	}
+	instance, err := hostruntimeservice.WindowsUserInstance(user.User.Sid.String())
+	if err != nil {
+		return "", ErrInvalid
+	}
+	return hostservice.WindowsSocketPath(instance)
+}
 
 func dialAvailabilityHostService(ctx context.Context, path string, timeout time.Duration) (net.Conn, error) {
-	if path != windowsHostServicePipe || timeout <= 0 {
+	canonical, err := windowsOwnerHostServicePipe()
+	if err != nil || !strings.EqualFold(path, canonical) || timeout <= 0 {
 		return nil, ErrInvalid
 	}
 	dialCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return winio.DialPipeContext(dialCtx, path)
+	return winio.DialPipeContext(dialCtx, canonical)
 }
 
 // Named pipes preserve message completion without a half-close. The server
@@ -27,8 +41,9 @@ func dialAvailabilityHostService(ctx context.Context, path string, timeout time.
 func closeAvailabilityHostServiceWrite(net.Conn) error { return nil }
 
 func NewHostClient(socketPath string, timeout time.Duration) (*HostClient, error) {
-	if !strings.EqualFold(socketPath, windowsHostServicePipe) || timeout <= 0 {
+	canonical, err := windowsOwnerHostServicePipe()
+	if err != nil || !strings.EqualFold(socketPath, canonical) || timeout <= 0 {
 		return nil, ErrInvalid
 	}
-	return &HostClient{socketPath: windowsHostServicePipe, timeout: timeout}, nil
+	return &HostClient{socketPath: canonical, timeout: timeout}, nil
 }

@@ -31,6 +31,14 @@ type confirmationChallenge struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
+type confirmationStateFailure struct{ cause error }
+
+func (confirmationStateFailure) Error() string {
+	return "Paperboat could not verify or finalize the stored confirmation state. Run the command again to create a fresh confirmation."
+}
+
+func (e confirmationStateFailure) Unwrap() error { return e.cause }
+
 func confirmationPath(command *cobra.Command) (string, string, error) {
 	configPath, _ := command.Flags().GetString("config")
 	cfg, err := config.Load(configPath)
@@ -124,7 +132,7 @@ func confirmMutation(command *cobra.Command, scope, impact string) error {
 	return confirmMutationWithArgs(command, scope, impact, nil)
 }
 
-func confirmMutationWithArgs(command *cobra.Command, scope, impact string, explicitArgs []string) error {
+func confirmMutationWithArgs(command *cobra.Command, scope, impact string, explicitArgs []string) (resultErr error) {
 	if ctx := command.Context(); ctx != nil && ctx.Value(configSyncInteractiveConfirmation{}) == true {
 		confirmed, err := prompt.Confirm(prompt.ConfirmOptions{Context: command.Context(), Title: "Confirm configuration change", Description: impact, Output: command.ErrOrStderr()})
 		if err != nil {
@@ -162,13 +170,10 @@ func confirmMutationWithArgs(command *cobra.Command, scope, impact string, expli
 		}
 		challenge := confirmationChallenge{Token: token, Command: current, Server: server, Scope: scope, ExpiresAt: time.Now().Add(confirmationLifetime)}
 		if err := json.NewEncoder(file).Encode(challenge); err != nil {
-			file.Close()
-			os.Remove(file.Name())
-			return err
+			return errors.Join(err, file.Close(), os.Remove(file.Name()))
 		}
 		if err := file.Close(); err != nil {
-			os.Remove(file.Name())
-			return err
+			return errors.Join(err, os.Remove(file.Name()))
 		}
 		copyCommand := confirmationCommandLine(command, token, explicitArgs, false)
 		if jsonOutputRequested(command) {
@@ -178,38 +183,51 @@ func confirmMutationWithArgs(command *cobra.Command, scope, impact string, expli
 		return exitCodeError{code: 2}
 	}
 	if !validConfirmationCode(token) {
-		return invocationError(errors.New("--confirm requires the six-character code shown by the preview"))
+		return localArgumentError("--confirm requires the six-character code shown by the preview")
 	}
 	path := basePath + "." + token
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return errors.New("confirmation code missing or already used; run the command without --confirm again")
+		if onlyNotExistCause(err) {
+			return localArgumentError("confirmation code missing or already used; run the command without --confirm again")
 		}
 		return err
 	}
 	var pending confirmationChallenge
-	if json.Unmarshal(data, &pending) != nil || pending.Token != token {
-		return errors.New("invalid confirmation code; run the command without --confirm again")
+	if err := json.Unmarshal(data, &pending); err != nil {
+		return confirmationStateFailure{cause: err}
+	}
+	if pending.Token != token {
+		return localArgumentError("invalid confirmation code; run the command without --confirm again")
 	}
 	claimed := fmt.Sprintf("%s.used.%d", path, os.Getpid())
 	if err := os.Rename(path, claimed); err != nil {
+		if onlyNotExistCause(err) {
+			return localArgumentError("confirmation code missing or already used; run the command without --confirm again")
+		}
 		return err
 	}
-	defer os.Remove(claimed)
+	defer func() {
+		if err := os.Remove(claimed); err != nil && !onlyNotExistCause(err) {
+			resultErr = errors.Join(resultErr, confirmationStateFailure{cause: err})
+		}
+	}()
 	data, err = os.ReadFile(claimed)
 	if err != nil {
+		if onlyNotExistCause(err) {
+			return localArgumentError("confirmation code missing or already used; run the command without --confirm again")
+		}
 		return err
 	}
 	var challenge confirmationChallenge
-	if json.Unmarshal(data, &challenge) != nil {
-		return errors.New("invalid confirmation state; run the command without --confirm again")
+	if err := json.Unmarshal(data, &challenge); err != nil {
+		return confirmationStateFailure{cause: err}
 	}
 	if time.Now().After(challenge.ExpiresAt) {
-		return errors.New("confirmation code expired; run the command without --confirm again")
+		return localArgumentError("confirmation code expired; run the command without --confirm again")
 	}
 	if challenge.Token != token || challenge.Command != current || challenge.Server != server || challenge.Scope != scope {
-		return errors.New("confirmation code does not match the current command, target, or resource state; run the command without --confirm again")
+		return localArgumentError("confirmation code does not match the current command, target, or resource state; run the command without --confirm again")
 	}
 	return nil
 }

@@ -14,7 +14,7 @@ type Event struct {
 	Name          string    `json:"name"`
 	At            time.Time `json:"at"`
 	RequestID     string    `json:"request_id,omitempty"`
-	ProjectID     string    `json:"project_id,omitempty"`
+	MachineID     string    `json:"machine_id,omitempty"`
 	EnvironmentID string    `json:"environment_id,omitempty"`
 	SessionID     string    `json:"session_id,omitempty"`
 	Outcome       string    `json:"outcome,omitempty"`
@@ -33,7 +33,7 @@ func (e Event) Validate() error {
 	if strings.TrimSpace(e.Name) == "" || !idPattern.MatchString(e.Name) {
 		return fmt.Errorf("invalid event name")
 	}
-	for label, value := range map[string]string{"request_id": e.RequestID, "project_id": e.ProjectID, "environment_id": e.EnvironmentID, "session_id": e.SessionID, "outcome": e.Outcome, "stage": e.Stage} {
+	for label, value := range map[string]string{"request_id": e.RequestID, "machine_id": e.MachineID, "environment_id": e.EnvironmentID, "session_id": e.SessionID, "outcome": e.Outcome, "stage": e.Stage} {
 		if value != "" && !idPattern.MatchString(value) {
 			return fmt.Errorf("invalid %s", label)
 		}

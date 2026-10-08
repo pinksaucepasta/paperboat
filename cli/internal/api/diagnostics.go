@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 	"io"
 	"net/http"
 	"net/url"
@@ -97,7 +98,7 @@ func (c *Client) UploadDiagnosticBundle(ctx context.Context, intent DiagnosticUp
 }
 
 func (value DiagnosticUploadIntent) validate(requireUpload bool) error {
-	if value.Schema != DiagnosticUploadIntentSchemaV1 || !strings.HasPrefix(value.IntentID, "diag_") || len(value.CorrelationID) != 35 || !strings.HasPrefix(value.CorrelationID, "pb-") || value.ExpiresAt.IsZero() || value.ExpiresAt.Location() != time.UTC || value.State != "pending" && value.State != "uploaded" {
+	if value.Schema != DiagnosticUploadIntentSchemaV1 || !validDiagnosticID(value.IntentID) || !supportref.Valid(value.CorrelationID) || value.ExpiresAt.IsZero() || value.ExpiresAt.Location() != time.UTC || value.State != "pending" && value.State != "uploaded" {
 		return errors.New("paperboat-server returned an invalid diagnostic upload intent")
 	}
 	if requireUpload && value.State == "pending" {
@@ -119,4 +120,16 @@ func forbiddenUploadHeader(name string) bool {
 	default:
 		return strings.HasPrefix(name, "X-Paperboat-")
 	}
+}
+
+func validDiagnosticID(value string) bool {
+	if len(value) < 1 || len(value) > 128 {
+		return false
+	}
+	for _, c := range value {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
+			return false
+		}
+	}
+	return true
 }

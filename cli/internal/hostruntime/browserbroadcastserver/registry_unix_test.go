@@ -3,6 +3,7 @@
 package browserbroadcastserver
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -10,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strings"
 	"sync"
@@ -17,9 +19,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcast"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 func TestOnePublisherServesOneHundredParticipantsAndRotatesOnDeparture(t *testing.T) {
@@ -152,7 +156,7 @@ func TestOnePublisherServesOneHundredParticipantsAndRotatesOnDeparture(t *testin
 	select {
 	case data := <-result:
 		if data == nil {
-			t.Fatal("shared output was not device-authenticated")
+			t.Fatal("shared output was not machine-authenticated")
 		}
 	case <-ctx.Done():
 		t.Fatal("shared output did not arrive")
@@ -258,4 +262,106 @@ func TestPublisherFailoverClosesOldEpochAndStartsFreshOutput(t *testing.T) {
 		t.Fatalf("failover epoch reused or publisher count=%d", opens.Load())
 	}
 	registry.SetPublisher(nil)
+}
+
+type failedPublisher struct{ failure error }
+
+func (p failedPublisher) Write([]byte) (int, error) { return 0, p.failure }
+func (failedPublisher) Close() error                { return nil }
+
+func TestPublisherDeliveryFailureIsCapturedOnceWithSafeCauseAndReference(t *testing.T) {
+	root := t.TempDir()
+	adapter, err := pty.NewAdapter(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := session.NewManager(session.ManagerConfig{
+		Launch:          func(command pty.Command) (session.PTYProcess, error) { return adapter.Start(command) },
+		MaxSessions:     1,
+		MaxAttachments:  8,
+		HistoryBytes:    1 << 20,
+		AttachmentBytes: 1 << 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	defer func() { _ = manager.Shutdown(ctx) }()
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("requires /bin/sh")
+	}
+	created, err := manager.Create(ctx, session.CreateRequest{
+		Name: "publisher-failure",
+		Command: pty.Command{
+			Path:       "/bin/sh",
+			Args:       []string{"-c", "sleep 0.2; printf 'browser-private-marker'; sleep 10"},
+			CWD:        root,
+			Env:        []string{"PATH=/usr/bin:/bin", "TERM=xterm"},
+			Dimensions: pty.Dimensions{Columns: 80, Rows: 24},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalPrivate := append(ed25519.PrivateKey(nil), private...)
+	registry, err := NewRegistry(manager, func(context.Context) (ed25519.PrivateKey, error) { return private, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.SetPublisher(nil)
+	secretCause := errors.New("private publisher failure: browser-private-marker")
+	registry.SetPublisher(func(context.Context, string) (io.WriteCloser, error) {
+		return failedPublisher{failure: secretCause}, nil
+	})
+
+	observed := make(chan errorreport.Fault, 8)
+	restore := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) { observed <- fault })
+	defer restore()
+	reference := supportref.New()
+	joinCtx := supportref.WithContext(context.Background(), reference)
+	if _, err := registry.Join(joinCtx, created.ID, created.Generation, "browser_viewer"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case fault := <-observed:
+		if fault.Operation != "sessions" || fault.Stage != deliveryStage || fault.Code != sessionCode || fault.SupportReference != reference {
+			t.Fatalf("publisher fault classification = %#v", fault)
+		}
+		serialized := strings.Join([]string{fault.Component, fault.Operation, fault.Stage, fault.Code, fault.Cause, fault.ErrorType, fault.SupportReference, strings.Join(fault.ErrorChain, ",")}, "|")
+		if strings.Contains(serialized, "browser-private-marker") || strings.Contains(serialized, "private publisher failure") {
+			t.Fatalf("fault retained private text: %q", serialized)
+		}
+	case <-ctx.Done():
+		t.Fatal("publisher failure was not reported")
+	}
+	if !bytes.Equal(private, originalPrivate) {
+		t.Fatal("publisher cleanup modified the shared signing identity")
+	}
+	select {
+	case fault := <-observed:
+		t.Fatalf("publisher failure was captured more than once: %#v", fault)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+type cyclicPublisherError struct{}
+
+func (*cyclicPublisherError) Error() string   { return "cyclic publisher error" }
+func (e *cyclicPublisherError) Unwrap() error { return e }
+
+func TestPublisherTerminationRequiresOnlyOrdinaryLeaves(t *testing.T) {
+	if !expectedPublisherEnd(errors.Join(context.Canceled, io.EOF, net.ErrClosed)) {
+		t.Fatal("ordinary joined termination was not suppressed")
+	}
+	if expectedPublisherEnd(errors.Join(context.Canceled, errors.New("substantive publisher failure"))) {
+		t.Fatal("mixed cancellation and failure was suppressed")
+	}
+	if expectedPublisherEnd(&cyclicPublisherError{}) {
+		t.Fatal("cyclic error was treated as ordinary termination")
+	}
 }

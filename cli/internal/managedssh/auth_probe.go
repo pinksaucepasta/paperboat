@@ -58,7 +58,7 @@ func ProbeSSHAuthentication(ctx context.Context, stream io.ReadWriteCloser, addr
 		return nil
 	case <-ctx.Done():
 		_ = stream.Close()
-		return errors.Join(ErrSSHAuthentication, context.Cause(ctx))
+		return errors.Join(ErrSSHAuthentication, managedSSHContextError(ctx))
 	}
 }
 

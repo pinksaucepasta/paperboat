@@ -58,19 +58,34 @@ func acquireProcessLock(name string) (*processLock, error) {
 	}
 	file := os.NewFile(uintptr(fd), name)
 	if file == nil {
-		_ = unix.Close(fd)
-		return nil, ErrInvalidState
+		return nil, safeStoreFailure("host state lock could not be opened", ErrInvalidState, unix.Close(fd))
 	}
+	locked := false
 	closeWith := func(cause error) (*processLock, error) {
-		_ = file.Close()
-		return nil, cause
+		causes := []error{cause}
+		if locked {
+			if unlockErr := syscall.Flock(int(file.Fd()), syscall.LOCK_UN); unlockErr != nil {
+				causes = append(causes, unlockErr)
+			}
+			locked = false
+		}
+		if closeErr := file.Close(); closeErr != nil {
+			causes = append(causes, closeErr)
+		}
+		return nil, safeStoreFailure("host state lock could not be initialized", causes...)
 	}
 	if err := file.Chmod(0o600); err != nil {
 		return closeWith(err)
 	}
 	info, err := file.Stat()
 	pathInfo, pathErr := os.Lstat(name)
-	if err != nil || pathErr != nil || !info.Mode().IsRegular() || pathInfo.Mode()&os.ModeSymlink != 0 || !os.SameFile(info, pathInfo) || fileOwner(info) != os.Geteuid() || fileLinkCount(info) != 1 || info.Mode().Perm()&0o077 != 0 {
+	if err != nil {
+		return closeWith(safeStoreFailure("host state lock could not be checked", ErrInvalidState, err))
+	}
+	if pathErr != nil {
+		return closeWith(safeStoreFailure("host state lock path could not be checked", ErrInvalidState, pathErr))
+	}
+	if !info.Mode().IsRegular() || pathInfo.Mode()&os.ModeSymlink != 0 || !os.SameFile(info, pathInfo) || fileOwner(info) != os.Geteuid() || fileLinkCount(info) != 1 || info.Mode().Perm()&0o077 != 0 {
 		return closeWith(ErrInvalidState)
 	}
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
@@ -79,6 +94,7 @@ func acquireProcessLock(name string) (*processLock, error) {
 		}
 		return closeWith(err)
 	}
+	locked = true
 	if err = file.Truncate(0); err == nil {
 		_, err = file.Seek(0, 0)
 	}
@@ -89,12 +105,10 @@ func acquireProcessLock(name string) (*processLock, error) {
 		err = file.Sync()
 	}
 	if err != nil {
-		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
 		return closeWith(fmt.Errorf("write host state lock owner: %w", err))
 	}
 	if created {
 		if err := syncDirectory(filepath.Dir(name)); err != nil {
-			_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
 			return closeWith(fmt.Errorf("sync host state lock parent: %w", err))
 		}
 	}
@@ -107,13 +121,18 @@ func (l *processLock) Close() error {
 	}
 	file := l.file
 	l.file = nil
-	return errors.Join(syscall.Flock(int(file.Fd()), syscall.LOCK_UN), file.Close())
+	unlockErr := syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+	closeErr := file.Close()
+	if unlockErr == nil && closeErr == nil {
+		return nil
+	}
+	return safeStoreFailure("host state lock could not be released", unlockErr, closeErr)
 }
 
-func readPrivateFile(name string, limit int64) ([]byte, error) {
+func readPrivateFile(name string, limit int64) (body []byte, resultErr error) {
 	info, err := os.Lstat(name)
 	if err != nil {
-		return nil, err
+		return nil, safeStoreFailure("host state file could not be inspected", err)
 	}
 	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 || fileOwner(info) != os.Geteuid() || info.Size() < 0 || info.Size() > limit {
 		return nil, ErrInvalidState
@@ -121,23 +140,34 @@ func readPrivateFile(name string, limit int64) ([]byte, error) {
 	fd, err := unix.Open(name, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	if err != nil {
 		if errors.Is(err, unix.ELOOP) {
-			return nil, ErrInvalidState
+			return nil, safeStoreFailure("host state file could not be opened", ErrInvalidState, err)
 		}
-		return nil, err
+		return nil, safeStoreFailure("host state file could not be opened", err)
 	}
 	file := os.NewFile(uintptr(fd), name)
 	if file == nil {
-		_ = unix.Close(fd)
-		return nil, ErrInvalidState
+		return nil, safeStoreFailure("host state file could not be opened", ErrInvalidState, unix.Close(fd))
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			body = nil
+			if resultErr == nil {
+				resultErr = safeStoreFailure("host state file could not be closed", closeErr)
+			} else {
+				resultErr = safeStoreFailure("host state file read and close failed", resultErr, closeErr)
+			}
+		}
+	}()
 	opened, err := file.Stat()
-	if err != nil || !os.SameFile(info, opened) || fileLinkCount(opened) != 1 {
+	if err != nil {
+		return nil, safeStoreFailure("host state file could not be checked", ErrInvalidState, err)
+	}
+	if !os.SameFile(info, opened) || fileLinkCount(opened) != 1 {
 		return nil, ErrInvalidState
 	}
 	buffer, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
-		return nil, err
+		return nil, safeStoreFailure("host state file could not be read", err)
 	}
 	if int64(len(buffer)) != opened.Size() || int64(len(buffer)) > limit {
 		return nil, ErrInvalidState

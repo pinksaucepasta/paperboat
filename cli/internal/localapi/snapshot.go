@@ -169,10 +169,26 @@ func (s *SnapshotStore) Watch(ctx context.Context, after uint64) (Snapshot, erro
 
 func cloneSnapshot(snapshot Snapshot) Snapshot {
 	copy := snapshot
-	copy.Health = append([]HealthItem(nil), snapshot.Health...)
+	copy.Health = cloneHealth(snapshot.Health)
 	copy.Machines = append([]MachineStatus(nil), snapshot.Machines...)
 	for index := range copy.Machines {
-		copy.Machines[index].Health = append([]HealthItem(nil), snapshot.Machines[index].Health...)
+		copy.Machines[index].Health = cloneHealth(snapshot.Machines[index].Health)
+		copy.Machines[index].TransportConsumers = append([]TransportConsumer(nil), snapshot.Machines[index].TransportConsumers...)
+		if snapshot.Machines[index].LastObservedAt != nil {
+			observed := *snapshot.Machines[index].LastObservedAt
+			copy.Machines[index].LastObservedAt = &observed
+		}
+	}
+	return copy
+}
+
+func cloneHealth(items []HealthItem) []HealthItem {
+	copy := append([]HealthItem(nil), items...)
+	for index := range copy {
+		if items[index].BrokenSince != nil {
+			broken := *items[index].BrokenSince
+			copy[index].BrokenSince = &broken
+		}
 	}
 	return copy
 }

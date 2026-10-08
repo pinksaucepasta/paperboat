@@ -42,12 +42,11 @@ type relayAuthority struct {
 	peerNodes    []*tailcfg.Node
 	controlPeers []key.NodePublic
 	nodes        map[tailcfg.DERPRegionID]RegionalNode
+	usagePeers   map[key.NodePublic]*relayUsageObservation
 	recovery     *regionalRecovery
 	// regionalRecoveryConfigured distinguishes dynamic regional recovery from
 	// the single fixed-node mode when a stopped worker has been detached.
 	regionalRecoveryConfigured bool
-	device                     *deviceRelay
-	deviceAddresses            []netip.AddrPort
 }
 
 // ApplyRelayGrants consumes only signed grants from the same network refresh.
@@ -294,6 +293,7 @@ func (a *Authority) configureRegionalRelays(config *tls.Config, only string) ([]
 		return nil, ErrRegionalAuthority
 	}
 	a.relay.nodes = selected
+	a.relay.updateUsagePeersLocked(a.current.Peers)
 	a.relay.node = RegionalNode{}
 	if len(regions) != 0 {
 		a.relay.node = selected[regions[0].RegionID]
@@ -343,9 +343,9 @@ func (a *Authority) configureRegionalRelays(config *tls.Config, only string) ([]
 			carrier = derpquic.NewFallbackCarrier(client, derpquic.NewWSSClient(derpquic.WSSClientConfig{URL: u, TLS: nodeTLS.Clone(), Credential: credential}), 5*time.Second)
 		}
 		if a.options.TestOnlyDERPCarrier != nil {
-			return a.options.TestOnlyDERPCarrier(carrier)
+			carrier = a.options.TestOnlyDERPCarrier(carrier)
 		}
-		return carrier
+		return &usageObservedCarrier{DERPCarrier: carrier, authority: &a.relay, node: node}
 	}
 	return regions, nil
 }

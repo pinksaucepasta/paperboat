@@ -15,6 +15,7 @@ type fakeLeaseAuthority struct {
 	expiresAt     time.Time
 	credentialErr error
 	renewErr      error
+	releaseErr    error
 }
 
 func (a *fakeLeaseAuthority) Credential(context.Context) (Credential, error) {
@@ -43,7 +44,7 @@ func (a *fakeLeaseAuthority) RenewLease(_ context.Context, lease Lease, _ time.D
 }
 func (a *fakeLeaseAuthority) ReleaseLease(_ context.Context, lease Lease) error {
 	*a.events = append(*a.events, "release:"+lease.BaseRevision)
-	return nil
+	return a.releaseErr
 }
 
 type fakeRepository struct {
@@ -119,6 +120,27 @@ func TestPublisherEnforcesPullReconcileRevalidateAndCASOrder(t *testing.T) {
 	}
 	if repository.publishFence != 1 {
 		t.Fatalf("publish fencing token = %d", repository.publishFence)
+	}
+}
+
+func TestPublisherPreservesPublicationAndLeaseReleaseFailures(t *testing.T) {
+	primary := errors.New("publish failure")
+	release := errors.New("lease release failure")
+	events := []string{}
+	authority := &fakeLeaseAuthority{events: &events, releaseErr: release}
+	repository := &fakeRepository{
+		events:     &events,
+		fetches:    []RemoteSnapshot{{Revision: "head"}, {Revision: "head"}, {Revision: "head"}},
+		prepared:   PreparedPublication{ExpectedRemoteRevision: "head", CommitID: "commit", HasChanges: true},
+		publishErr: primary,
+	}
+	publisher, err := NewPublisher(PublisherConfig{Authority: authority, Repository: repository})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = publisher.Sync(context.Background(), "head")
+	if !errors.Is(err, primary) || !errors.Is(err, release) {
+		t.Fatalf("publication failure = %v, want both original and release causes", err)
 	}
 }
 

@@ -99,3 +99,16 @@ func isZeroKey(key [32]byte) bool {
 	var zero [32]byte
 	return key == zero
 }
+
+func (s *PortableSource) LayerGenesisEstablished() (bool, error) {
+	if s == nil {
+		return false, ErrUnavailable
+	}
+	return s.keyring.LayerGenesisEstablished()
+}
+func (s *PortableSource) EstablishLayerGenesis() error {
+	if s == nil {
+		return ErrUnavailable
+	}
+	return s.keyring.EstablishLayerGenesis()
+}

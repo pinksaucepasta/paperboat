@@ -19,7 +19,6 @@ import (
 	"github.com/coder/websocket"
 	runtimeconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configapply"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/process"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
@@ -34,20 +33,7 @@ type hostAuthorizer struct{}
 const runtimeTestHostRecipientKeyID = "envk_IwY-MQtEprrsxiSheZeY7fXcsuKArWSF8qsJfiPSteM"
 
 func TestCommandManagedEnvironmentDoesNotMutatePersistedCommand(t *testing.T) {
-	variables := map[string]string{"API_TOKEN": "canary-secret", "EMPTY": ""}
-	path := filepath.Join(t.TempDir(), "environment-cache.json")
-	managed, err := envinject.Open(context.Background(), envinject.Config{
-		Path: path, HighWaterPath: filepath.Join(t.TempDir(), "environment-high-water.json"), IntegrityKey: bytes.Repeat([]byte{0x42}, 32), AllowHighWaterInitialize: true, AccountID: "acct_1", MachineID: "mach_1",
-		InstallationGeneration: 1, HostKeyGeneration: 1, HostRecipientKeyID: runtimeTestHostRecipientKeyID,
-		GenesisMarker: runtimeTestGenesisMarkerFor(t, path),
-		Processor:     runtimeTestEnvironmentProcessor{variables: variables},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := managed.Apply(context.Background(), envinject.Bundle{Schema: envinject.BundleSchema}); err != nil {
-		t.Fatal(err)
-	}
+	managed := fixedLaunchEnvironment{values: []string{"API_TOKEN=canary-secret", "EMPTY="}}
 	persisted := pty.Command{Path: "/bin/sh", Env: []string{"PATH=/bin", "API_TOKEN=base"}}
 	launched, err := commandWithManagedEnvironment(persisted, managed)
 	if err != nil {
@@ -70,7 +56,7 @@ type hostProber struct{}
 func (hostProber) Probe(context.Context, preview.Target) error { return nil }
 
 type testSessionLauncher struct {
-	sessions *session.Manager
+	sessions session.Service
 	path     string
 	args     []string
 	env      []string
@@ -80,8 +66,8 @@ func (l testSessionLauncher) Launch(ctx context.Context, request process.LaunchR
 	return l.sessions.Create(ctx, session.CreateRequest{ID: request.ID, Name: request.Name, Command: pty.Command{Path: l.path, Args: l.args, Env: l.env, CWD: request.CWD, Dimensions: request.Dimensions}})
 }
 
-func testSessionLauncherFactory(path string, args, env []string) func(*session.Manager) (server.SessionLauncher, error) {
-	return func(sessions *session.Manager) (server.SessionLauncher, error) {
+func testSessionLauncherFactory(path string, args, env []string) func(session.Service) (server.SessionLauncher, error) {
+	return func(sessions session.Service) (server.SessionLauncher, error) {
 		resolved, err := pty.ValidateProcessPolicy(path, args, env)
 		if err != nil {
 			return nil, err
@@ -129,7 +115,7 @@ func TestHostCompositionNegotiatesAuthenticatedHealthAndClosesDurableState(t *te
 	root := t.TempDir()
 	serverSide, clientSide := net.Pipe()
 	listener := &hostListener{conn: serverSide, closed: make(chan struct{})}
-	config := runtimeconfig.Config{Profile: runtimeconfig.BYOD, StateRoot: root, Version: "test", Limits: runtimeconfig.DefaultLimits, Resources: runtimeconfig.DefaultResources}
+	config := runtimeconfig.Config{StateRoot: root, Version: "test", Limits: runtimeconfig.DefaultLimits, Resources: runtimeconfig.DefaultResources}
 	previews, err := preview.New(preview.Config{Prober: hostProber{}, MaxTargets: 4, MaxConcurrentProbes: 1})
 	if err != nil {
 		t.Fatal(err)
@@ -219,7 +205,7 @@ func TestHostCompositionNegotiatesAuthenticatedHealthAndClosesDurableState(t *te
 
 func TestHostCompositionRejectsMissingTrustBoundaryBeforeStateCreation(t *testing.T) {
 	root := t.TempDir()
-	config := runtimeconfig.Config{Profile: runtimeconfig.BYOD, StateRoot: root, Version: "test", Limits: runtimeconfig.DefaultLimits, Resources: runtimeconfig.DefaultResources}
+	config := runtimeconfig.Config{StateRoot: root, Version: "test", Limits: runtimeconfig.DefaultLimits, Resources: runtimeconfig.DefaultResources}
 	if _, err := NewHost(context.Background(), HostConfig{Runtime: config, ListenAddress: "127.0.0.1:0", WorkspaceRoot: root}, HostDependencies{}); !errors.Is(err, ErrHostInvalid) {
 		t.Fatalf("err=%v", err)
 	}
@@ -230,7 +216,7 @@ func TestHostCompositionRejectsMissingTrustBoundaryBeforeStateCreation(t *testin
 
 func TestHostCompositionRejectsUnsafeBindBeforeStateCreation(t *testing.T) {
 	root := t.TempDir()
-	config := runtimeconfig.Config{Profile: runtimeconfig.BYOD, StateRoot: root, Version: "test", Limits: runtimeconfig.DefaultLimits, Resources: runtimeconfig.DefaultResources}
+	config := runtimeconfig.Config{StateRoot: root, Version: "test", Limits: runtimeconfig.DefaultLimits, Resources: runtimeconfig.DefaultResources}
 	_, err := NewHost(context.Background(), HostConfig{Runtime: config, ListenAddress: "0.0.0.0:8080", WorkspaceRoot: root}, HostDependencies{
 		Authorizer: func(string) (server.Authorizer, error) { return hostAuthorizer{}, nil },
 	})
@@ -240,4 +226,10 @@ func TestHostCompositionRejectsUnsafeBindBeforeStateCreation(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "state.db")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("state file err=%v", err)
 	}
+}
+
+type fixedLaunchEnvironment struct{ values []string }
+
+func (e fixedLaunchEnvironment) Environment() ([]string, error) {
+	return append([]string(nil), e.values...), nil
 }

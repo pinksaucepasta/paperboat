@@ -27,7 +27,7 @@ func StopReconnect(err error) error {
 }
 
 type TelemetryContext struct {
-	ProjectID     string
+	MachineID     string
 	EnvironmentID string
 }
 
@@ -119,7 +119,7 @@ func (c *ReconnectingConn) record(name, outcome string, started time.Time) {
 		now = c.now
 	}
 	ended := now()
-	e := telemetry.Event{Name: name, At: ended, ProjectID: c.correlation.ProjectID, EnvironmentID: c.correlation.EnvironmentID, Outcome: outcome, LatencyMS: ended.Sub(started).Milliseconds()}
+	e := telemetry.Event{Name: name, At: ended, MachineID: c.correlation.MachineID, EnvironmentID: c.correlation.EnvironmentID, Outcome: outcome, LatencyMS: ended.Sub(started).Milliseconds()}
 	if e.Validate() == nil {
 		c.telemetry.Record(e)
 	}
@@ -340,7 +340,7 @@ func (c *ReconnectingConn) recordOutputPerformance(outcome string) {
 	e := telemetry.Event{
 		Name:          "terminal.output",
 		At:            c.now(),
-		ProjectID:     c.correlation.ProjectID,
+		MachineID:     c.correlation.MachineID,
 		EnvironmentID: c.correlation.EnvironmentID,
 		Outcome:       outcome,
 		SizeBytes:     c.outputBytes.Load(),
@@ -361,7 +361,7 @@ func (c *ReconnectingConn) recordTerminalStage(stage string, bytes, count, laten
 	if c.telemetry == nil || count == 0 {
 		return
 	}
-	e := telemetry.Event{Name: "terminal.stage", At: c.now(), ProjectID: c.correlation.ProjectID, EnvironmentID: c.correlation.EnvironmentID, Outcome: outcome, Stage: stage, SizeBytes: bytes, LatencyMS: latencyMS, Count: count}
+	e := telemetry.Event{Name: "terminal.stage", At: c.now(), MachineID: c.correlation.MachineID, EnvironmentID: c.correlation.EnvironmentID, Outcome: outcome, Stage: stage, SizeBytes: bytes, LatencyMS: latencyMS, Count: count}
 	if e.Validate() == nil {
 		c.telemetry.Record(e)
 	}

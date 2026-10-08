@@ -12,7 +12,8 @@ import (
 	"time"
 )
 
-func ListenOwnerSocket(path string) (net.Listener, error) {
+func ListenOwnerSocket(path string) (listener net.Listener, resultErr error) {
+	defer func() { resultErr = managedSSHBoundary("listener_bind", resultErr) }()
 	if !filepath.IsAbs(path) {
 		return nil, errors.New("managed SSH agent socket path must be absolute")
 	}
@@ -44,16 +45,16 @@ func ListenOwnerSocket(path string) (net.Listener, error) {
 	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("inspect managed SSH agent socket: %w", err)
 	}
-	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	unixListener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
 		return nil, err
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
-		_ = listener.Close()
+		_ = unixListener.Close()
 		_ = os.Remove(path)
 		return nil, fmt.Errorf("protect managed SSH agent socket: %w", err)
 	}
-	return &ownedUnixListener{UnixListener: listener, path: path}, nil
+	return &ownedUnixListener{UnixListener: unixListener, path: path}, nil
 }
 
 type ownedUnixListener struct {

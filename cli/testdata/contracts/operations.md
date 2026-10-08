@@ -10,7 +10,7 @@ tokens, signatures, credential claims, signed URLs, request authorization/cookie
 or raw provider responses.
 
 Metric dimensions are allowlisted: service, operation, result, protocol major/minor,
-capability, profile, readiness state/reason, direction, and bounded retry bucket. User,
+capability, readiness state/reason, direction, and bounded retry bucket. User,
 environment, session, request, operation, route, connector, node, file, hostname, and token
 identifiers are prohibited metric labels. Logs retain correlation identifiers for 30 days;
 aggregate protocol/security metrics retain 13 months; debug sampling defaults off and may

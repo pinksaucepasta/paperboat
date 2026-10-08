@@ -1,8 +1,10 @@
 package filetransfer
 
 import (
+	"github.com/google/uuid"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -39,7 +41,7 @@ func TestPrepareAcceptsArbitraryAndEmptyFilesThroughOneDescriptor(t *testing.T) 
 	}
 }
 
-func TestPrepareRejectsRelativeTraversalSymlinkDeviceAndLimits(t *testing.T) {
+func TestPrepareRejectsRelativeTraversalSymlinkMachineAndLimits(t *testing.T) {
 	root := t.TempDir()
 	regular := filepath.Join(root, "regular")
 	if err := os.WriteFile(regular, []byte("data"), 0o600); err != nil {
@@ -74,7 +76,8 @@ func TestNewBatchIDIsUniquePerAction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first == second || len(first) != len("fb_")+32 || first[:3] != "fb_" {
+	parsed, parseErr := uuid.Parse(strings.TrimPrefix(first, "batch_"))
+	if first == second || parseErr != nil || parsed.Version() != 4 || parsed.Variant() != uuid.RFC4122 || "batch_"+parsed.String() != first {
 		t.Fatalf("batch IDs %q and %q", first, second)
 	}
 }

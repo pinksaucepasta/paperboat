@@ -90,11 +90,7 @@ func (a *Authority) regionalRecoveryLocked() (*regionalRecovery, bool) {
 func (a *Authority) relayControl(id tailcfg.DERPRegionID, peer key.NodePublic, packet []byte) bool {
 	a.relay.mu.Lock()
 	r := a.relay.recovery
-	device := a.relay.device
 	a.relay.mu.Unlock()
-	if device != nil && device.handle(id, peer, packet) {
-		return true
-	}
 	if r == nil || !bytes.HasPrefix(packet, regionalControlMagic) {
 		return false
 	}
@@ -563,7 +559,7 @@ func (r *regionalRecovery) run(ctx context.Context) {
 					if errors.As(probeErr, &fatal) && fatal.Fatal() {
 						denied.Store(true)
 					}
-					fail(n.NodeID, "prepare: "+probeErr.Error())
+					fail(n.NodeID, "prepare_failed")
 					return
 				}
 				start := time.Now()
@@ -665,7 +661,7 @@ func (r *regionalRecovery) run(ctx context.Context) {
 			}
 			if err != nil {
 				r.mu.Lock()
-				r.status = RegionalStatus{Redundancy: RedundancyNone, Reason: "promotion_not_acknowledged", ProbeFailures: map[string]string{chosen.node.NodeID: err.Error()}}
+				r.status = RegionalStatus{Redundancy: RedundancyNone, Reason: "promotion_not_acknowledged", ProbeFailures: map[string]string{chosen.node.NodeID: "promotion_failed"}}
 				r.mu.Unlock()
 				timer.Reset(regionalProbeDelay())
 				continue

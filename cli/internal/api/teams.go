@@ -193,3 +193,19 @@ func (c *Client) TeamActivity(ctx context.Context, team, cursor string, limit in
 	err := c.do(ctx, http.MethodGet, "/v1/teams/"+url.PathEscape(team)+"/activity?"+query.Encode(), nil, &out)
 	return out, err
 }
+
+// TeamInvitations discovers invitations bound to this account, or administered
+// by the account in the explicitly selected team. Resources remain authorized
+// by the server before returning their invitation IDs.
+func (c *Client) TeamInvitations(ctx context.Context, team string) ([]TeamInvitation, error) {
+	path := "/v1/team-invitations"
+	if team != "" {
+		path = "/v1/teams/" + url.PathEscape(team) + "/invitations"
+	}
+	return collectOffsetInventory[TeamInvitation](ctx, c, path, "items", nil)
+}
+func (c *Client) GetTeamInvitation(ctx context.Context, id string) (TeamInvitation, error) {
+	var out TeamInvitation
+	err := c.do(ctx, http.MethodGet, "/v1/team-invitations/"+url.PathEscape(id), nil, &out)
+	return out, err
+}

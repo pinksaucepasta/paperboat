@@ -62,6 +62,7 @@ func (s *ObservationStore) PublishObservation(ctx context.Context, peer localapi
 	if observation.ObservedAt.Before(now.Add(-30*time.Second)) || observation.ObservedAt.After(now.Add(5*time.Second)) || !observation.ExpiresAt.After(now) || observation.ExpiresAt.After(now.Add(30*time.Second)) {
 		return localapi.ErrStaleObservation
 	}
+	observation.TransportConsumers = append([]localapi.TransportConsumer(nil), observation.TransportConsumers...)
 	key := observationKey(peer, observation.SourceID)
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -73,6 +73,56 @@ columns and optional preview panels. Changes are staged until saved. See the
 [configuration example](../README.md#make-the-cli-yours) for the JSON schema and
 literal argument templates. Account synchronization is deferred.
 
+## Local browser URLs
+
+The default local browser domain is `local.pprbt.dev`; changing it affects
+browser URLs only and leaves Paperboat's native machine names unchanged. Set a
+custom domain with `pb config local-access domain set example.com`. Before using
+one, configure a DNS-only wildcard record `*.example.com` that resolves to
+`127.100.0.1`; Paperboat does not run a DNS server or edit resolver/hosts files.
+The command applies local certificate trust and helper configuration before
+reporting success. These commands apply to the installed user's active config;
+check its path with `pb config path`. Applying an alternate `--config` file is
+rejected because the installed helper reads the active config. To map an
+already authorized machine port to a readable name, run
+`pb config local-access alias set studio jellyfin 8989`. With the default
+domain, this creates `https://jellyfin.studio.local.pprbt.dev`; with
+`example.com`, the URL is `https://jellyfin.studio.example.com`. It does not
+grant access to the port, and Paperboat publishes the name only while that port
+is authorized. Use `pb config local-access show` to inspect the effective
+settings, `alias unset` to remove a mapping, and `apply` after editing the
+`local_access` section of the config file directly.
+
+### Coolify and other reverse proxies
+
+App-name routing automatically uses authorized port 80 on each machine.
+No Paperboat command is needed for Coolify’s default HTTP proxy.
+If your reverse proxy uses another port, configure that override on the browsing computer:
+
+```console
+pb config local-access proxy set homelab 8081
+```
+Set an application's HTTP domain in Coolify to `jellyfin.homelab.local.pprbt.dev`,
+then open `https://jellyfin.homelab.local.pprbt.dev` from this computer.
+Paperboat handles local HTTPS and forwards the original hostname privately to
+Coolify, which selects the application. Keep Coolify's backend HTTP configuration;
+it does not need to obtain a public certificate for these local names.
+New app names work without another Paperboat setting. No public tunnel or DNS
+changes are required for the default local browser domain.
+
+Numeric URLs such as `8080.homelab.local.pprbt.dev` always select port 8080;
+explicit service aliases take precedence over the proxy. The machine base URL
+keeps its service index. Only one nonnumeric app label is supported; nested app
+names are rejected. Proxy settings do not grant machine or port access and are
+active only while the machine and proxy port are authorized and available.
+Automatic service discovery covers this user’s ports from 1024 upward; port 80
+needs explicit private access authorization. An explicitly authorized loopback
+service can be a root-owned or Docker-published port; automatic discovery does
+not expose other users’ services.
+Use `pb config local-access show` to inspect settings or
+`pb config local-access proxy unset homelab` to restore the automatic port-80 default while
+keeping numeric ports and explicit aliases.
+
 ## Scripting and output
 
 Use explicit commands and supply required operands in scripts. Pass `--json`
@@ -107,20 +157,25 @@ not perform shell expansion or execute local shell statements.
 ## Authentication and recovery
 
 Install and enroll using the dashboard command, or generate both Linux/macOS and
-Windows install commands with `pb device add` on an authenticated device.
+Windows install commands with `pb machine add` on an authenticated machine.
 There is no shell selector.
 
-For CLI authentication on an existing installation, run `pb auth login` and
-paste the same 26-character enrollment token into the hidden prompt. This creates
-a CLI session without opening a browser, redirecting to the dashboard, installing
-services, or creating a machine. Tokens are single-use: use a fresh token for a
-separate installation. For scripts, use `pb auth login --token-file /absolute/path
---json` with a protected token file; the caller owns removal of that file.
+Run `pb login` (alias for `pb auth login`) to sign in through WorkOS and explicitly
+approve this CLI. The command prints a short-lived approval link and opens it when
+possible. On a headless or remote machine, open that link on another device; there is
+no localhost callback listener or token to paste. `--no-browser` prints the same link
+without trying to launch a browser. `--json` emits approval and completion states.
 
-Interrupted login resumes using protected local recovery state when you rerun
-`pb auth login`. Invalid, expired, cancelled, or already-used tokens require a
-fresh token. `pb auth logout` cancels pending login and removes local sessions;
-if cancellation cannot reach the server, retry logout when connectivity returns.
+If already signed in, choose to keep the current account, authenticate it again, or
+sign in with another account. Non-interactive callers choose `--reauth` or
+`--change-account` explicitly. The previous login remains usable until replacement
+succeeds. `pb switch` aliases `pb auth switch` and continues selecting Personal or a
+team for new commands without moving existing resources or machine ownership.
+
+Interrupted login resumes the same approval when you rerun `pb login`. Ctrl+C and
+`pb logout` cancel the pending request; cancellation that cannot reach the server is
+retained for retry. Dashboard `get.pprbt.dev/install?token=…` bootstrap keeps its direct
+installation-token flow, issuing the same account/session credentials as browser approval.
 
 Use `pb auth status` to inspect the current account and `pb doctor` for
 diagnostics. `--server` selects the control plane;
@@ -137,7 +192,7 @@ Follow the command's recovery instructions after interrupted preview/tunnel or
 update operations. See [operational guidance](operations.md), [runbooks](runbooks.md),
 [configuration sync](config-sync.md), and [team lifecycle](team-lifecycle.md) for
 workflow details and boundaries. Generated documentation describes the command
-interface; it is not evidence that a deployment or connected-device scenario has
+interface; it is not evidence that a deployment or connected-machine scenario has
 been verified.
 
 ## Maintain the reference
@@ -162,7 +217,35 @@ Review the reported version, platform, size and SHA-256 digest, then install wit
 download for confirmation; JSON and noninteractive use only download unless an
 exact candidate ID is supplied.
 
-Installation restarts Paperboat services and interrupts active connections. Clients
-reconnect afterward using the existing recovery paths. Check `pb update status`
-for completion or an actionable recovery error. A downloaded candidate survives
-service restart without being installed.
+Official installations have scheduled updates enabled by default. Source and custom
+installations default to availability checks only. Scheduled updates check for a
+release and download and verify it ahead of the maintenance window, then install it
+at 04:00 in the machine's local time zone. Configure or inspect this machine-level
+schedule with `pb update settings`:
+
+```sh
+pb update settings                 # show the current schedule
+pb update settings --time 22:15    # choose a local maintenance time
+pb update settings --auto=false    # disable scheduled downloads and installs
+pb update settings --auto=true     # enable them again
+```
+
+With automatic updates off, availability checks continue while downloads and
+installation wait for manual action. The manual `pb update check`, `download`, and
+`--approve` flows remain available; `pb update download` stages a verified release
+without installing it.
+
+Ordinary updates replace the feature worker while the process owner keeps shells
+and commands alive. Connections briefly interrupt and reconnect. A rare update
+that replaces the process owner announces a bounded deadline; running terminals
+and commands end at that restart. Manual approval warns about this interruption.
+`pb update settings --auto=false` cancels automatic installation while it is still
+pending. A terminal client retries an unexpected transport loss up to its configured retry
+limit (six attempts by default), with delays backing off to at most 30 seconds. It
+recovers available terminal output after reconnecting. Check `pb update status`
+for completion, pending maintenance, or an actionable recovery error.
+
+Administrators can set a minimum supported version and an enforcement date.
+Official releases warn ahead of that date and require an update on the next
+feature command once it takes effect. Local and custom builds are exempt.
+Login, update, diagnostics, and cleanup remain available for recovery.

@@ -8,14 +8,14 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	hostauth "github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/clientauthority"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/endpointidentity"
@@ -112,7 +112,7 @@ func (t *PeerTerminalTunnel) ProbeNative(ctx context.Context, machineID string, 
 	}
 	defer session.Close()
 	if err := ctx.Err(); err != nil {
-		return NativeProbe{}, err
+		return NativeProbe{}, contextOperationError(ctx)
 	}
 	path, err := runtime.authority.PeerPath(machineID)
 	if err != nil {
@@ -127,7 +127,6 @@ type cliNativeStreamGroup struct {
 	application peerApplication
 	consumer    string
 	now         func() time.Time
-	sequence    atomic.Uint64
 }
 
 type cliNativeTransferLease struct {
@@ -142,6 +141,44 @@ type cliNativeTransferLease struct {
 	closed      bool
 }
 
+type nativePhaseFailure struct {
+	stage string
+	code  string
+	err   error
+}
+
+func (e *nativePhaseFailure) Error() string {
+	if e == nil {
+		return "native peer operation failed"
+	}
+	switch e.stage {
+	case "peer_authority":
+		return "native peer authority could not be resolved"
+	case "stream_open":
+		return "native file transfer stream could not be opened"
+	default:
+		return "native peer operation failed"
+	}
+}
+func (e *nativePhaseFailure) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+func (e *nativePhaseFailure) DiagnosticStage() string {
+	if e == nil {
+		return ""
+	}
+	return e.stage
+}
+func (e *nativePhaseFailure) DiagnosticCode() string {
+	if e == nil {
+		return ""
+	}
+	return e.code
+}
+
 func (l *cliNativeTransferLease) OpenTransferStream(ctx context.Context) (net.Conn, error) {
 	if l == nil || ctx == nil {
 		return nil, ErrPeerTerminalInvalid
@@ -151,7 +188,14 @@ func (l *cliNativeTransferLease) OpenTransferStream(ctx context.Context) (net.Co
 	if l.closed {
 		return nil, net.ErrClosed
 	}
+	var lastOpenErr error
 	for attempt := 0; attempt < 2; attempt++ {
+		if err := ctx.Err(); err != nil {
+			if errors.Is(err, context.Canceled) || lastOpenErr == nil {
+				return nil, contextOperationError(ctx)
+			}
+			return nil, lastOpenErr
+		}
 		if l.session == nil {
 			var session nativeApplicationSession
 			var err error
@@ -172,8 +216,24 @@ func (l *cliNativeTransferLease) OpenTransferStream(ctx context.Context) (net.Co
 		if err == nil {
 			return connection, nil
 		}
+		lastOpenErr = err
 		_ = l.session.Close()
 		l.session = nil
+		if ctx.Err() != nil {
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return nil, contextOperationError(ctx)
+			}
+			return nil, lastOpenErr
+		}
+	}
+	if ctx.Err() != nil {
+		if errors.Is(ctx.Err(), context.Canceled) || lastOpenErr == nil {
+			return nil, contextOperationError(ctx)
+		}
+		return nil, lastOpenErr
+	}
+	if lastOpenErr != nil {
+		return nil, lastOpenErr
 	}
 	return nil, net.ErrClosed
 }
@@ -202,7 +262,7 @@ type nativeApplicationSession interface {
 }
 
 func (g *cliNativeStreamGroup) OpenStream(ctx context.Context) (nativeStream, error) {
-	streamID := "native_" + strconv.FormatUint(g.sequence.Add(1), 10)
+	streamID := "stream_" + uuid.NewString()
 	// A terminal attachment is the durable server-created session operation.
 	// Other applications must retain their explicit operation binding.
 	fallbackOperation := ""
@@ -213,7 +273,19 @@ func (g *cliNativeStreamGroup) OpenStream(ctx context.Context) (nativeStream, er
 	if err != nil {
 		return nil, err
 	}
-	return g.session.OpenAuthorized(ctx, header, g.target.Auth.ResourceID, nativeCapability(g.consumer))
+	stream, err := g.session.OpenAuthorized(ctx, header, g.target.Auth.ResourceID, nativeCapability(g.consumer))
+	if err != nil && g.consumer == "file_transfer" {
+		if ctx != nil && ctx.Err() != nil {
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return nil, contextOperationError(ctx)
+			}
+			err = errors.Join(err, contextOperationError(ctx))
+		}
+		if !errors.Is(err, context.Canceled) {
+			return nil, &nativePhaseFailure{stage: "stream_open", code: "file_transfer_failed", err: err}
+		}
+	}
+	return stream, err
 }
 
 func (g *cliNativeStreamGroup) Close() error { return g.session.Close() }
@@ -245,6 +317,8 @@ func (s *cliNativeAuthorizedStream) Close() error {
 
 func nativeCapability(consumer string) string {
 	switch consumer {
+	case "config_compare":
+		return "config_compare"
 	case "terminal":
 		return "terminal"
 	case "exec":
@@ -309,7 +383,7 @@ func (r *cliNativeRuntime) openApplication(ctx context.Context, machineID, consu
 // PrepareNativeFileTransfer retains one authorized native association in the
 // daemon and exposes only application-stream opening to the local CLI.
 func (t *PeerTerminalTunnel) PrepareNativeFileTransfer(ctx context.Context, info resolver.ConnectInfo, operationID string) (DirectTransferStreamOpener, error) {
-	if t == nil || ctx == nil || info.TargetKind != "machine" || info.ProjectID == "" || info.MachineGeneration == 0 || info.Terminal == nil || info.Terminal.EnvironmentID == "" || info.Terminal.Auth.ResourceID == "" || operationID == "" {
+	if t == nil || ctx == nil || info.TargetKind != "machine" || info.MachineID == "" || info.MachineGeneration == 0 || info.Terminal == nil || info.Terminal.EnvironmentID == "" || info.Terminal.Auth.ResourceID == "" || operationID == "" {
 		return nil, ErrPeerTerminalInvalid
 	}
 	credential, err := t.config.Auth.Credential()
@@ -321,7 +395,7 @@ func (t *PeerTerminalTunnel) PrepareNativeFileTransfer(ctx context.Context, info
 		return nil, err
 	}
 	client := api.New(t.config.Issuer, credential, t.config.HTTPClient)
-	authority, err := t.authorities.Resolve(ctx, clientauthority.Request{Store: t.config.Store, Client: client, Issuer: t.config.Issuer, AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID, MachineID: info.ProjectID, MachineGeneration: info.MachineGeneration, Now: t.config.Now().UTC()})
+	authority, err := t.authorities.Resolve(ctx, clientauthority.Request{Store: t.config.Store, Client: client, Issuer: t.config.Issuer, AccountID: profile.Account.ID, CLIClientSessionID: profile.CLIClientSessionID, MachineID: info.MachineID, MachineGeneration: info.MachineGeneration, Now: t.config.Now().UTC()})
 	if err != nil {
 		return nil, err
 	}
@@ -332,7 +406,7 @@ func (t *PeerTerminalTunnel) PrepareNativeFileTransfer(ctx context.Context, info
 	if err != nil {
 		return nil, err
 	}
-	return &cliNativeTransferLease{runtime: runtime, machineID: info.ProjectID, target: info.Terminal, application: peerApplication{operationID: operationID}, now: t.config.Now}, nil
+	return &cliNativeTransferLease{runtime: runtime, machineID: info.MachineID, target: info.Terminal, application: peerApplication{operationID: operationID}, now: t.config.Now}, nil
 }
 
 func (t *PeerTerminalTunnel) acquireNativeRuntime(ctx context.Context, accountID, endpointID string, identity clientauthority.Authority) (*cliNativeRuntime, bool, error) {
@@ -479,11 +553,7 @@ func newCLINativeRuntime(ctx context.Context, issuer string, store config.Profil
 		_ = authority.Close()
 		return nil, err
 	}
-	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: peerTLS, Observe: func(event native.Event) {
-		if event.Kind == "connected" {
-			diagnosticlog.TryInfo("native peer connected", "machine_id", event.PeerID, "underlay", event.Path)
-		}
-	}})
+	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: peerTLS, Observe: observeCLINativePeerEvent})
 	if err != nil {
 		_ = authority.Close()
 		return nil, err
@@ -497,13 +567,43 @@ func newCLINativeRuntime(ctx context.Context, issuer string, store config.Profil
 	return runtime, nil
 }
 
+func observeCLINativePeerEvent(event native.Event) {
+	if event.Kind == "connected" {
+		// The path is a bounded enum, but a static success record is enough here;
+		// peer identities and transport details stay out of process logs.
+		diagnosticlog.TryInfo("native peer connected")
+		return
+	}
+	if event.Err == nil || errors.Is(event.Err, context.Canceled) {
+		return
+	}
+	reporter := errorreport.Current()
+	switch event.Kind {
+	case "dial_failed":
+		// Dial returns the same typed error to the foreground owner, which is
+		// responsible for the single unexpected-failure capture.
+		reporter.ObserveFailure(context.Background(), "pb", "connect", "peer_connect", "native_private_failed", event.Err)
+	case "accept_failed":
+		// Per-peer accept workers terminate here, so this callback owns their
+		// final failure capture.
+		reporter.CaptureFailure(context.Background(), "pb", "connect", "peer_connect", "native_private_failed", event.Err)
+	case "serve_failed":
+		// A worker-level serving failure is a lifecycle failure unless a
+		// downstream boundary supplies its own more precise phase and code.
+		reporter.CaptureFailure(context.Background(), "pb", "serve", "lifecycle", "service_failed", event.Err)
+	}
+}
+
 func (r *cliNativeRuntime) Dial(ctx context.Context, machineID string, class peerquic.Class) (*native.Session, error) {
 	if r == nil || r.owner == nil || machineID == "" {
 		return nil, ErrPeerTerminalInvalid
 	}
 	descriptor, err := r.authority.Descriptor(machineID)
 	if err != nil {
-		return nil, err
+		if ctx != nil && ctx.Err() != nil {
+			return nil, contextOperationError(ctx)
+		}
+		return nil, &nativePhaseFailure{stage: "peer_authority", code: "peer_authority_failed", err: err}
 	}
 	return r.owner.Dial(ctx, descriptor, machineID, class)
 }

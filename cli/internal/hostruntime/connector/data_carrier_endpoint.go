@@ -31,6 +31,15 @@ var (
 	ErrDataCarrierTLS             = errors.New("data carrier TLS authentication failed")
 )
 
+type dataCarrierPeerAuthorityFailure struct{ cause error }
+
+func (*dataCarrierPeerAuthorityFailure) Error() string { return "connector peer identity rejected" }
+func (e *dataCarrierPeerAuthorityFailure) Unwrap() []error {
+	return []error{ErrDataCarrierTLS, e.cause}
+}
+func (*dataCarrierPeerAuthorityFailure) DiagnosticStage() string { return "peer_authority" }
+func (*dataCarrierPeerAuthorityFailure) DiagnosticCode() string  { return "peer_authority_failed" }
+
 // DataCarrierEndpointConfig describes one real network endpoint. A TLS
 // configuration is required for both transports and must authenticate both
 // peers. The caller may use RootCAs/ClientCAs or a custom VerifyConnection
@@ -120,13 +129,13 @@ func bindPeer(endpoint DataCarrierEndpointConfig, state tls.ConnectionState) (Da
 	}
 	identity, err := endpoint.PeerBinding(state)
 	if err != nil {
-		return DataCarrierIdentity{}, fmt.Errorf("%w: peer binding rejected: %v", ErrDataCarrierTLS, err)
+		return DataCarrierIdentity{}, &dataCarrierPeerAuthorityFailure{cause: err}
 	}
 	if err := identity.validate(); err != nil {
-		return DataCarrierIdentity{}, fmt.Errorf("%w: peer binding returned invalid identity", ErrDataCarrierTLS)
+		return DataCarrierIdentity{}, &dataCarrierPeerAuthorityFailure{cause: err}
 	}
 	if endpoint.ExpectedIdentity != (DataCarrierIdentity{}) && identity != endpoint.ExpectedIdentity {
-		return DataCarrierIdentity{}, fmt.Errorf("%w: peer identity does not match expected session", ErrDataCarrierTLS)
+		return DataCarrierIdentity{}, &dataCarrierPeerAuthorityFailure{cause: ErrDataCarrierAdmission}
 	}
 	return identity, nil
 }
@@ -232,8 +241,8 @@ func NewNetworkDialer(config NetworkDialerConfig) DataCarrierDialer {
 			link, peerIdentity, err = dialTCPMux(ctx, config.TCPMux)
 			if err == nil {
 				if request.Identity != (DataCarrierIdentity{}) && peerIdentity != request.Identity {
-					_ = link.Close()
-					return DataCarrierDialResult{}, newTransportDialError(TCPMux, ErrDataCarrierAdmission)
+					closeErr := link.Close()
+					return DataCarrierDialResult{}, newTransportDialError(TCPMux, &dataCarrierPeerAuthorityFailure{cause: errors.Join(ErrDataCarrierAdmission, closeErr)})
 				}
 				return DataCarrierDialResult{Link: link, PeerIdentity: peerIdentity, Transport: request.Transport, EdgeID: request.EdgeID, FailureDomain: request.FailureDomain}, nil
 			}
@@ -242,8 +251,8 @@ func NewNetworkDialer(config NetworkDialerConfig) DataCarrierDialer {
 			session, peerIdentity, err = dialQUIC(ctx, config.QUIC)
 			if err == nil {
 				if request.Identity != (DataCarrierIdentity{}) && peerIdentity != request.Identity {
-					_ = session.Close()
-					return DataCarrierDialResult{}, newTransportDialError(QUIC, ErrDataCarrierAdmission)
+					closeErr := session.Close()
+					return DataCarrierDialResult{}, newTransportDialError(QUIC, &dataCarrierPeerAuthorityFailure{cause: errors.Join(ErrDataCarrierAdmission, closeErr)})
 				}
 				return DataCarrierDialResult{Session: session, PeerIdentity: peerIdentity, Transport: request.Transport, EdgeID: request.EdgeID, FailureDomain: request.FailureDomain}, nil
 			}

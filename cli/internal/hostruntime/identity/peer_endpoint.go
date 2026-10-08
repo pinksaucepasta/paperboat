@@ -181,7 +181,7 @@ func (s *Store) loadPeerEndpoint(generation uint64, machineID string) (PeerEndpo
 	value := PeerEndpoint{Generation: generation, QUICPrivateKey: private, RootPublicKey: ed25519.PublicKey(rootPublic), RootKeyID: document.RootKeyID, TrustedKeys: trusted, Certificate: certificate}
 	if len(certificate) > 0 {
 		// A signed but expired certificate must remain loadable so enrollment can
-		// renew it with the same device keys. Live peers still check expiry.
+		// renew it with the same machine keys. Live peers still check expiry.
 		parsed, parseErr := endpointidentity.Parse(certificate)
 		if parseErr != nil {
 			return PeerEndpoint{}, ErrInvalidStore

@@ -152,3 +152,33 @@ func TestServicePropagatesComponentFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestServicePropagatesUnexpectedHealthListenerFailure(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	cfg := config.Config{NodeID: "edge_test_01", HealthAddress: listener.Addr().String(), ShutdownTimeout: time.Second}
+	service := New(cfg, node.New(cfg.NodeID))
+	service.listen = func(string, string) (net.Listener, error) { return listener, nil }
+	if err := service.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case cause := <-service.Done():
+		if !errors.Is(cause, net.ErrClosed) {
+			t.Fatalf("health cause lost: %T", cause)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("health failure was consumed")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := service.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+}

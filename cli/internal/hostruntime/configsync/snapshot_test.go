@@ -1,6 +1,25 @@
 package configsync
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
+
+type snapshotPrivateCause struct{}
+
+func (snapshotPrivateCause) Error() string { return "private snapshot path /Users/alice/.secret" }
+
+func TestSnapshotFailurePreservesCauseWithoutFormattingIt(t *testing.T) {
+	cause := snapshotPrivateCause{}
+	err := &snapshotFailure{cause: cause}
+	var preserved snapshotPrivateCause
+	if !errors.Is(err, ErrSnapshotInvalid) || !errors.Is(err, cause) || !errors.As(err, &preserved) {
+		t.Fatalf("snapshot cause was not preserved: %v", err)
+	}
+	if got := err.Error(); got != ErrSnapshotInvalid.Error() {
+		t.Fatalf("snapshot failure exposed cause text: %q", got)
+	}
+}
 
 func TestChangedPathsIncludesAddModifyAndDelete(t *testing.T) {
 	before := map[string]FileState{

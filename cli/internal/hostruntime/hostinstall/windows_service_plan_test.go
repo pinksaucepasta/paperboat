@@ -213,7 +213,7 @@ func TestWindowsRuntimeServicesUseCanonicalDaemon(t *testing.T) {
 
 func TestWindowsHostServicesInstallSSHBeforeStartingRuntime(t *testing.T) {
 	var events []string
-	err := executeWindowsServiceInstallPlan("host", func() error {
+	err := executeWindowsServiceInstallPlan(func() error {
 		events = append(events, "ssh")
 		return nil
 	}, func() error {
@@ -234,7 +234,7 @@ func TestWindowsHostServicesInstallSSHBeforeStartingRuntime(t *testing.T) {
 func TestWindowsHostServicesCleanSSHWhenRuntimeFails(t *testing.T) {
 	var events []string
 	runtimeFailure := errors.New("runtime failed")
-	err := executeWindowsServiceInstallPlan("host", func() error {
+	err := executeWindowsServiceInstallPlan(func() error {
 		events = append(events, "ssh")
 		return nil
 	}, func() error {
@@ -252,30 +252,10 @@ func TestWindowsHostServicesCleanSSHWhenRuntimeFails(t *testing.T) {
 	}
 }
 
-func TestWindowsClientServicesCleanSSHAfterRuntimeStarts(t *testing.T) {
-	var events []string
-	err := executeWindowsServiceInstallPlan("client", func() error {
-		events = append(events, "unexpected-ssh-install")
-		return nil
-	}, func() error {
-		events = append(events, "recover")
-		return nil
-	}, func() error {
-		events = append(events, "runtime")
-		return nil
-	}, func() error {
-		events = append(events, "cleanup-ssh")
-		return nil
-	})
-	if err != nil || !reflect.DeepEqual(events, []string{"recover", "runtime", "cleanup-ssh"}) {
-		t.Fatalf("events=%q err=%v", events, err)
-	}
-}
-
 func TestWindowsHostServicesCleanSSHWhenRuntimeRecoveryFails(t *testing.T) {
 	var events []string
 	recoveryFailure := errors.New("recovery failed")
-	err := executeWindowsServiceInstallPlan("host", func() error {
+	err := executeWindowsServiceInstallPlan(func() error {
 		events = append(events, "ssh")
 		return nil
 	}, func() error {
@@ -295,7 +275,7 @@ func TestWindowsHostServicesCleanSSHWhenRuntimeRecoveryFails(t *testing.T) {
 
 func TestWindowsRepairPlanKeepsSSHUntilFinalLifecycleRepair(t *testing.T) {
 	var events []string
-	err := executeWindowsServiceRepairPlan("host", func() error {
+	err := executeWindowsServiceRepairPlan(func() error {
 		events = append(events, "ssh")
 		return nil
 	}, func() error {
@@ -338,34 +318,11 @@ func TestWindowsRepairPlanCleansSSHOnlyAfterARepairPhaseFails(t *testing.T) {
 					return nil
 				}
 			}
-			err := executeWindowsServiceRepairPlan("host", phase("ssh"), phase("recover"), phase("binary-config"), phase("lifecycle-repair"), phase("cleanup-ssh"))
+			err := executeWindowsServiceRepairPlan(phase("ssh"), phase("recover"), phase("binary-config"), phase("lifecycle-repair"), phase("cleanup-ssh"))
 			if !errors.Is(err, failure) || !reflect.DeepEqual(events, test.wantEvents) {
 				t.Fatalf("events=%q err=%v", events, err)
 			}
 		})
-	}
-}
-
-func TestWindowsClientRepairPlanRepairsBeforeSSHCleanup(t *testing.T) {
-	var events []string
-	err := executeWindowsServiceRepairPlan("client", func() error {
-		events = append(events, "unexpected-ssh")
-		return nil
-	}, func() error {
-		events = append(events, "recover")
-		return nil
-	}, func() error {
-		events = append(events, "binary-config")
-		return nil
-	}, func() error {
-		events = append(events, "lifecycle-repair")
-		return nil
-	}, func() error {
-		events = append(events, "cleanup-ssh")
-		return nil
-	})
-	if err != nil || !reflect.DeepEqual(events, []string{"recover", "binary-config", "lifecycle-repair", "cleanup-ssh"}) {
-		t.Fatalf("events=%q err=%v", events, err)
 	}
 }
 

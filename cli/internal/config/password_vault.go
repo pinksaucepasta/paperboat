@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 
 	"github.com/pinksaucepasta/paperboat/internal/environmente2ee"
 )
@@ -37,11 +36,12 @@ type PasswordVaultRecord struct {
 // VaultOperation retains only an opaque encrypted mutation request. When Pending
 // is also present, the service must commit that vault and operation atomically.
 type VaultOperation struct {
-	Kind      string          `json:"kind"`
-	OwnerKind string          `json:"owner_kind,omitempty"`
-	OwnerID   string          `json:"owner_id,omitempty"`
-	MachineID string          `json:"machine_id,omitempty"`
-	Request   json.RawMessage `json:"request"`
+	WorkspaceID string          `json:"workspace_id"`
+	Kind        string          `json:"kind"`
+	OwnerKind   string          `json:"owner_kind,omitempty"`
+	OwnerID     string          `json:"owner_id,omitempty"`
+	MachineID   string          `json:"machine_id,omitempty"`
+	Request     json.RawMessage `json:"request"`
 }
 
 // PasswordVaultPending is the successor portion of PasswordVaultRecord.
@@ -200,7 +200,7 @@ func validatePasswordVaultRecord(record PasswordVaultRecord, issuer, accountID s
 			return ErrPasswordVaultInvalid
 		}
 		switch op.Kind {
-		case "scope-put", "team-create", "team-grant", "team-rotate", "reset", "host-provision", "personal-rotate":
+		case "scope-put", "team-create", "team-grant", "team-rotate", "reset", "layer-put", "personal-rotate":
 		default:
 			return ErrPasswordVaultInvalid
 		}
@@ -289,7 +289,7 @@ func storePasswordVaultRecord(store SecretStore, ref string, record PasswordVaul
 	}
 	defer clear(raw)
 	if err := store.Set(ref, string(raw)); err != nil {
-		return fmt.Errorf("store ENV password vault custody: %w", err)
+		return safeConfigCause("ENV password vault custody could not be stored", err)
 	}
 	return nil
 }
@@ -354,7 +354,7 @@ func (s ProfileStore) RemovePasswordVault(issuer, accountID string) (resultErr e
 	}
 	defer func() { resultErr = errors.Join(resultErr, unlock()) }()
 	if err := s.Secrets.Delete(passwordVaultSecretRef(normalized, accountID)); err != nil {
-		return fmt.Errorf("remove ENV password vault custody: %w", err)
+		return safeConfigCause("ENV password vault custody could not be removed", err)
 	}
 	return nil
 }

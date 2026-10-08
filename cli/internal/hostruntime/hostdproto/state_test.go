@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -46,9 +47,10 @@ func TestActivationPersistsFenceBeforePublishingIt(t *testing.T) {
 }
 
 func TestFailedFencePersistenceDoesNotActivateCandidate(t *testing.T) {
+	persistCause := errors.New("state storage path detail")
 	controller, err := NewController(ControllerConfig{
 		APIMin: 1, APIMax: 1, Random: bytes.NewReader(bytes.Repeat([]byte{8}, 32)),
-		PersistActivation: func(Status) error { return errors.New("disk full") },
+		PersistActivation: func(Status) error { return persistCause },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -62,6 +64,8 @@ func TestFailedFencePersistenceDoesNotActivateCandidate(t *testing.T) {
 	}
 	if _, err := controller.Activate(activateFor(welcome)); err == nil {
 		t.Fatal("activation unexpectedly succeeded")
+	} else if !errors.Is(err, persistCause) || strings.Contains(err.Error(), persistCause.Error()) {
+		t.Fatalf("unsafe or lost persistence cause: %v", err)
 	}
 	if got := controller.Status(); got.State != StateCandidate {
 		t.Fatalf("status=%+v", got)
@@ -75,5 +79,20 @@ func TestLoadFenceStateRejectsContradictoryRecord(t *testing.T) {
 	}
 	if _, err := LoadFenceState(path); !errors.Is(err, ErrInvalidFrame) {
 		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestLoadFenceStatePreservesReadCauseWithoutPathText(t *testing.T) {
+	path := t.TempDir()
+	_, err := LoadFenceState(path)
+	if err == nil {
+		t.Fatal("directory was accepted as fence state")
+	}
+	var pathErr *os.PathError
+	if !errors.As(err, &pathErr) {
+		t.Fatalf("read cause was lost: %v", err)
+	}
+	if strings.Contains(err.Error(), path) {
+		t.Fatalf("state path escaped in error: %v", err)
 	}
 }

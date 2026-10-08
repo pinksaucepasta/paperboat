@@ -3,10 +3,16 @@ package configsync
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 type recordingSyncer struct {
@@ -60,7 +66,7 @@ func TestEngineRunsInitialSyncAndBoundedShutdownFlush(t *testing.T) {
 	}
 	descriptor := RuntimeDescriptor{
 		WriteMode: "leased_writes", Mode: ModeBidirectional,
-		RepositoryID: "repository", AssignmentID: "assignment", EnvironmentID: "environment",
+		RepositoryID: "repository", AssignmentID: "assignment", AssignmentVersion: 1, EnvironmentID: "environment",
 		MachineID: "helper", WarningRevision: "warning",
 		InstallationGeneration: 1,
 		Policy: RuntimePolicy{
@@ -113,7 +119,7 @@ func TestEngineRestoresAndAdvancesSyncRevision(t *testing.T) {
 	}
 	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
 	descriptor := RuntimeDescriptor{
-		WriteMode: "leased_writes", Mode: ModeBidirectional, RepositoryID: "repository", AssignmentID: "assignment",
+		WriteMode: "leased_writes", Mode: ModeBidirectional, RepositoryID: "repository", AssignmentID: "assignment", AssignmentVersion: 1,
 		EnvironmentID: "environment", MachineID: "helper", WarningRevision: "warning",
 		InstallationGeneration: 1,
 		Policy: RuntimePolicy{
@@ -163,7 +169,7 @@ func TestEngineRecordsFailedSyncRevisionWithoutSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	descriptor := RuntimeDescriptor{
-		WriteMode: "leased_writes", Mode: ModeBidirectional, RepositoryID: "repository", AssignmentID: "assignment",
+		WriteMode: "leased_writes", Mode: ModeBidirectional, RepositoryID: "repository", AssignmentID: "assignment", AssignmentVersion: 1,
 		EnvironmentID: "environment", MachineID: "helper", WarningRevision: "warning",
 		InstallationGeneration: 1,
 		Policy: RuntimePolicy{
@@ -195,7 +201,7 @@ func TestEngineRetriesSafeFailuresAndReportsLeaseContention(t *testing.T) {
 		t.Fatal(err)
 	}
 	descriptor := RuntimeDescriptor{
-		WriteMode: "leased_writes", Mode: ModeBidirectional, RepositoryID: "repository", AssignmentID: "assignment",
+		WriteMode: "leased_writes", Mode: ModeBidirectional, RepositoryID: "repository", AssignmentID: "assignment", AssignmentVersion: 1,
 		EnvironmentID: "environment", MachineID: "helper", WarningRevision: "warning", InstallationGeneration: 1,
 		Policy: RuntimePolicy{
 			Format: "paperboat-config-plaintext-v1", Revision: "policy", ManifestContract: ManifestContractVersion,
@@ -250,7 +256,7 @@ func TestEngineDoesNotRetryUncertainPublication(t *testing.T) {
 
 func testEngineDescriptor(retryLimit int) RuntimeDescriptor {
 	return RuntimeDescriptor{
-		WriteMode: "leased_writes", Mode: ModeBidirectional, RepositoryID: "repository", AssignmentID: "assignment",
+		WriteMode: "leased_writes", Mode: ModeBidirectional, RepositoryID: "repository", AssignmentID: "assignment", AssignmentVersion: 1,
 		EnvironmentID: "environment", MachineID: "helper", WarningRevision: "warning", InstallationGeneration: 1,
 		Policy: RuntimePolicy{
 			Format: "paperboat-config-plaintext-v1", Revision: "policy", ManifestContract: ManifestContractVersion,
@@ -258,5 +264,104 @@ func testEngineDescriptor(retryLimit int) RuntimeDescriptor {
 			MaxFileBytes: 1 << 20, MaxBatchBytes: 2 << 20, Debounce: time.Second, MinimumPushInterval: time.Minute,
 			MaximumDirtyDelay: time.Minute, RemotePollInterval: time.Hour, RetryLimit: retryLimit, ShutdownFlushTimeout: time.Second, SummaryLimit: 10,
 		},
+	}
+}
+
+func TestEngineRepositoryRecoveryErrorsKeepConsentIntact(t *testing.T) {
+	for _, tc := range []struct {
+		err                 error
+		state, code, action string
+		calls               int
+	}{{ErrRepositoryCredentials, "error", "repository_credentials_required", "configure_repository_credentials", 1}, {ErrRepositoryUnavailable, "offline", "repository_unavailable", "check_repository_access", 2}, {&PathRuleError{Code: "unsafe_destination"}, "error", "config_path_invalid", "fix_path_rules", 1}} {
+		t.Run(tc.code, func(t *testing.T) {
+			home := resolvedTempDir(t)
+			syncer := &retryingSyncer{failures: 3, err: tc.err}
+			engine, err := NewEngine(EngineConfig{HomeRoot: home, Descriptor: testEngineDescriptor(2), Syncer: syncer})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := engine.Apply(context.Background()); !errors.Is(err, tc.err) {
+				t.Fatalf("error: %v", err)
+			}
+			if engine.status.State != tc.state || engine.status.ErrorCode != tc.code || len(engine.status.RecoveryActions) == 0 || engine.status.RecoveryActions[0] != tc.action || syncer.calls != tc.calls {
+				t.Fatalf("status %#v calls %d", engine.status, syncer.calls)
+			}
+		})
+	}
+}
+
+func TestEngineMixedRepositoryFailureStaysOperationalAndRecovers(t *testing.T) {
+	operational := repositoryUnavailableFailure(fmt.Errorf("private cache /home/user/.config/paperboat: %w", syscall.EIO))
+	mixed := errors.Join(repositoryCredentialsFailure(os.ErrNotExist), operational)
+	syncer := &retryingSyncer{failures: 1, err: mixed}
+	engine, err := NewEngine(EngineConfig{HomeRoot: resolvedTempDir(t), Descriptor: testEngineDescriptor(1), Syncer: syncer})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = engine.Apply(context.Background())
+	if !errors.Is(err, ErrRepositoryCredentials) || !errors.Is(err, ErrRepositoryUnavailable) || !errors.Is(err, os.ErrNotExist) || !errors.Is(err, syscall.EIO) || strings.Contains(err.Error(), "/home/user") {
+		t.Fatalf("mixed failure lost a cause/classification or exposed a path: %v", err)
+	}
+	if engine.status.State != "offline" || engine.status.ErrorCode != "repository_unavailable" || !retryableSyncError(err) {
+		t.Fatalf("mixed operational failure was treated as a credential rejection: status=%#v retryable=%t", engine.status, retryableSyncError(err))
+	}
+	if err := engine.Apply(context.Background()); err != nil {
+		t.Fatalf("repository did not recover on the next cycle: %v", err)
+	}
+	if engine.status.State != "healthy" || syncer.calls != 2 {
+		t.Fatalf("repository recovery state=%q calls=%d", engine.status.State, syncer.calls)
+	}
+}
+
+func TestEngineCleanupFailureDoesNotBecomeConfigurationValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name, state, code, action string
+		primary                   error
+	}{
+		{name: "validation", state: "offline", code: "repository_unavailable", action: "check_repository_access", primary: fmt.Errorf("invalid config: %w", ErrSourceConfigInvalid)},
+		{name: "publication_uncertain", state: "sync_uncertain", code: "sync_uncertain", action: "observe_remote", primary: ErrSyncUncertain},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cleanup := repositoryUnavailableFailure(fmt.Errorf("private staging cleanup: %w", syscall.EIO))
+			mixed := repositoryCleanupFailure(tc.primary, cleanup)
+			engine, err := NewEngine(EngineConfig{HomeRoot: resolvedTempDir(t), Descriptor: testEngineDescriptor(1), Syncer: failingSyncer{err: mixed}})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			err = engine.Apply(context.Background())
+			if !errors.Is(err, ErrRepositoryUnavailable) || !errors.Is(err, syscall.EIO) || !errors.Is(err, tc.primary) {
+				t.Fatalf("combined failure lost its original state or cleanup causes: %v", err)
+			}
+			if engine.status.State != tc.state || engine.status.ErrorCode != tc.code || len(engine.status.RecoveryActions) == 0 || engine.status.RecoveryActions[0] != tc.action {
+				t.Fatalf("cleanup failure changed the wrong owner state: %#v", engine.status)
+			}
+		})
+	}
+}
+
+func TestEnginePreservesSyncAndWatchResetFailuresTogether(t *testing.T) {
+	home := resolvedTempDir(t)
+	syncFailure := errors.New("sync unavailable")
+	engine, err := NewEngine(EngineConfig{
+		HomeRoot: home, Descriptor: testEngineDescriptor(1), Syncer: failingSyncer{err: syncFailure},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer watcher.Close()
+	engine.watcher = watcher
+	engine.mapping.rules = []PathRule{{
+		ID: "invalid-watch", RepositoryPath: ".", LocalPath: "relative-watch-root", Kind: "directory",
+	}}
+
+	got := engine.syncNow(context.Background())
+	if !errors.Is(got, syncFailure) || !errors.Is(got, ErrPathRuleInvalid) {
+		t.Fatalf("combined sync/watch failure lost a cause: %v", got)
 	}
 }

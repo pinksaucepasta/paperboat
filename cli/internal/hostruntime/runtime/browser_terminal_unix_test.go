@@ -32,7 +32,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcast"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcastserver"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/process"
@@ -165,7 +164,7 @@ func TestBrowserTerminalCredentialUsesRealHostProtocolAndPTY(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtimeServer, err := server.New(server.Config{Negotiator: protocol.Negotiator{Profile: config.BYOD, Available: map[string]bool{"terminal.v1": true, "health.v1": true}}, Journal: journal, Handler: dispatcher, MaxConcurrent: 8, HeartbeatInterval: time.Hour, MutationDeadline: 5 * time.Second})
+	runtimeServer, err := server.New(server.Config{Negotiator: protocol.Negotiator{Available: map[string]bool{"terminal.v1": true, "health.v1": true}}, Journal: journal, Handler: dispatcher, MaxConcurrent: 8, HeartbeatInterval: time.Hour, MutationDeadline: 5 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +235,7 @@ func TestBrowserTerminalCredentialUsesRealHostProtocolAndPTY(t *testing.T) {
 			_ = connection.Close(websocket.StatusInternalError, "tls_failed")
 			t.Fatalf("inner TLS handshake: %v", tlsErr)
 		}
-		client := &browserTerminalTestClient{tls: tlsConnection, websocket: connection, stream: stream, cancel: streamCancel, token: token, broadcast: records, inbox: make(chan browserTestMessage, 128), done: make(chan struct{}), epochs: make(map[[16]byte]browserbroadcast.Epoch), keyChanged: make(chan struct{}, 1), devicePublic: machinePublic, sessionID: created.ID, generation: created.Generation}
+		client := &browserTerminalTestClient{tls: tlsConnection, websocket: connection, stream: stream, cancel: streamCancel, token: token, broadcast: records, inbox: make(chan browserTestMessage, 128), done: make(chan struct{}), epochs: make(map[[16]byte]browserbroadcast.Epoch), keyChanged: make(chan struct{}, 1), machinePublic: machinePublic, sessionID: created.ID, generation: created.Generation}
 		go client.readLoop()
 		t.Cleanup(func() { _ = client.Close(websocket.StatusNormalClosure, "test cleanup") })
 		writeBrowserProtocolFrame(t, client, protocol.Frame{Type: "hello", RequestID: "hello_browser", Version: protocol.ProtocolVersion, Payload: json.RawMessage(`{"min_version":"1.0","max_version":"1.0","capabilities":["terminal.v1","health.v1"]}`)})
@@ -448,23 +447,23 @@ func browserTestShell(t *testing.T) string {
 }
 
 type browserTerminalTestClient struct {
-	tls          *tls.Conn
-	websocket    *websocket.Conn
-	stream       net.Conn
-	cancel       context.CancelFunc
-	token        string
-	broadcast    <-chan []byte
-	inbox        chan browserTestMessage
-	done         chan struct{}
-	readErr      error
-	mu           sync.Mutex
-	epochs       map[[16]byte]browserbroadcast.Epoch
-	keyChanged   chan struct{}
-	devicePublic ed25519.PublicKey
-	sessionID    string
-	generation   uint64
-	screen       []byte
-	cursor       uint64
+	tls           *tls.Conn
+	websocket     *websocket.Conn
+	stream        net.Conn
+	cancel        context.CancelFunc
+	token         string
+	broadcast     <-chan []byte
+	inbox         chan browserTestMessage
+	done          chan struct{}
+	readErr       error
+	mu            sync.Mutex
+	epochs        map[[16]byte]browserbroadcast.Epoch
+	keyChanged    chan struct{}
+	machinePublic ed25519.PublicKey
+	sessionID     string
+	generation    uint64
+	screen        []byte
+	cursor        uint64
 }
 
 type browserTestMessage struct {
@@ -793,7 +792,7 @@ func readBrowserTerminalOutput(t *testing.T, ctx context.Context, connection *br
 			epoch, ok := connection.epochs[hint]
 			connection.mu.Unlock()
 			if ok {
-				record, err := browserbroadcast.Open(pending, epoch, connection.devicePublic)
+				record, err := browserbroadcast.Open(pending, epoch, connection.machinePublic)
 				if err != nil || record.SessionID != connection.sessionID || record.Generation != connection.generation {
 					t.Fatalf("invalid authenticated output: %v", err)
 				}
@@ -815,13 +814,16 @@ func readBrowserTerminalOutput(t *testing.T, ctx context.Context, connection *br
 				continue
 			}
 		}
+		// Keys and ciphertext arrive on independent streams. Keep later records
+		// in the bounded feed until this record's authenticated key arrives.
+		broadcast := connection.broadcast
+		if len(pending) != 0 {
+			broadcast = nil
+		}
 		select {
-		case raw, ok := <-connection.broadcast:
+		case raw, ok := <-broadcast:
 			if !ok {
 				t.Fatal("shared output publisher stopped")
-			}
-			if len(pending) != 0 {
-				t.Fatal("new output arrived before its epoch key")
 			}
 			pending = raw
 		case <-connection.keyChanged:

@@ -105,7 +105,7 @@ func unprotectWindowsFileSecretV2(path string, protected []byte) ([]byte, error)
 	defer clear(entropy)
 	plain, err := dpapiTransformWithEntropy(protected[len(outer):], entropy, false, 0)
 	if err != nil {
-		return nil, fmt.Errorf("%w: decrypt machine-scope file secret: %v", ErrCredentialStoreUnavailable, err)
+		return nil, credentialStoreFailure("machine-scope file secret could not be decrypted", err)
 	}
 	defer clear(plain)
 	inner, err := windowsFileSecretV2Header(path, true)
@@ -138,7 +138,7 @@ func migrateLegacyWindowsFileSecret(path string, protected []byte, allowed bool)
 	plain, err := dpapiTransform(protected, false)
 	if err != nil {
 		clear(plain)
-		return nil, errors.Join(ErrCredentialStoreUnavailable, ErrCredentialRequiresInteractiveLogin, fmt.Errorf("decrypt legacy user-scope file secret: %w", err))
+		return nil, credentialStoreFailure("legacy user-scope file secret could not be decrypted; interactive login is required", errors.Join(ErrCredentialRequiresInteractiveLogin, err))
 	}
 	if len(plain) == 0 || plain[0] != 1 || len(plain)-1 > windowsCredentialBlobMaxBytes {
 		clear(plain)
@@ -148,7 +148,7 @@ func migrateLegacyWindowsFileSecret(path string, protected []byte, allowed bool)
 	clear(plain)
 	if err := writeCredentialFile(path, result); err != nil {
 		clear(result)
-		return nil, errors.Join(ErrCredentialStoreUnavailable, fmt.Errorf("migrate legacy user-scope file secret: %w", err))
+		return nil, credentialStoreFailure("legacy user-scope file secret could not be migrated", errors.Join(ErrCredentialRequiresInteractiveLogin, err))
 	}
 	return result, nil
 }
@@ -162,8 +162,11 @@ func validateCredentialDirectory(path string) error {
 		return ErrCredentialStoreUnavailable
 	}
 	attributes, err := windows.GetFileAttributes(windows.StringToUTF16Ptr(path))
-	if err != nil || attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-		return errors.Join(ErrCredentialStoreUnavailable, err)
+	if err != nil {
+		return credentialStoreFailure("credential directory could not be validated", err)
+	}
+	if attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+		return ErrCredentialStoreUnavailable
 	}
 	return nil
 }
@@ -178,7 +181,7 @@ func writeCredentialFile(path string, value []byte) error {
 	}
 	protected, err := protectWindowsFileSecretV2(path, value)
 	if err != nil {
-		return fmt.Errorf("%w: protect credential file: %v", ErrCredentialStoreUnavailable, err)
+		return credentialStoreFailure("credential file could not be protected", err)
 	}
 	defer clear(protected)
 	if err := atomicfile.Write(path, protected, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1, SecurityDescriptor: sddl}); err != nil {
@@ -189,10 +192,12 @@ func writeCredentialFile(path string, value []byte) error {
 		return err
 	}
 	if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION, ownerSID, nil, nil, nil); err != nil {
-		return fmt.Errorf("%w: set credential file owner: %v", ErrCredentialStoreUnavailable, err)
+		return credentialStoreFailure("credential file owner could not be set", err)
 	}
-	if !credentialFilePrivate(path) {
-		return fmt.Errorf("%w: written credential file owner or ACL is invalid", ErrCredentialStoreUnavailable)
+	if private, err := checkCredentialFilePrivate(path); err != nil {
+		return credentialStoreFailure("written credential file security could not be validated", err)
+	} else if !private {
+		return credentialStoreFailure("written credential file owner or ACL is invalid", nil)
 	}
 	return nil
 }
@@ -202,19 +207,30 @@ func readCredentialFile(path string) ([]byte, error) {
 		return nil, err
 	}
 	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+	if err != nil {
 		return nil, err
 	}
-	if !credentialFilePrivate(path) {
-		return nil, fmt.Errorf("credential file must have a protected owner-only ACL")
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, ErrCredentialStoreUnavailable
+	}
+	if private, err := checkCredentialFilePrivate(path); err != nil {
+		return nil, credentialStoreFailure("credential file security could not be validated", err)
+	} else if !private {
+		return nil, credentialStoreFailure("credential file must have a protected owner-only ACL", nil)
 	}
 	attributes, err := windows.GetFileAttributes(windows.StringToUTF16Ptr(path))
-	if err != nil || attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-		return nil, errors.Join(ErrCredentialStoreUnavailable, err)
+	if err != nil {
+		return nil, credentialStoreFailure("credential file could not be validated", err)
+	}
+	if attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+		return nil, ErrCredentialStoreUnavailable
 	}
 	protected, err := os.ReadFile(path)
-	if err != nil || len(protected) == 0 || len(protected) > windowsCredentialBlobMaxBytes*4+windowsFileSecretV2FixedHeaderSize {
-		return nil, errors.Join(ErrCredentialStoreUnavailable, err)
+	if err != nil {
+		return nil, credentialStoreFailure("credential file could not be read", err)
+	}
+	if len(protected) == 0 || len(protected) > windowsCredentialBlobMaxBytes*4+windowsFileSecretV2FixedHeaderSize {
+		return nil, ErrCredentialStoreUnavailable
 	}
 	defer clear(protected)
 	if bytes.HasPrefix(protected, windowsFileSecretV2Magic) {
@@ -224,22 +240,30 @@ func readCredentialFile(path string) ([]byte, error) {
 }
 
 func credentialFilePrivate(path string) bool {
+	private, err := checkCredentialFilePrivate(path)
+	return err == nil && private
+}
+
+func checkCredentialFilePrivate(path string) (private bool, resultErr error) {
 	token, err := currentEffectiveUserToken()
 	if err != nil {
-		return false
+		return false, err
 	}
-	defer token.Close()
+	defer func() { resultErr = errors.Join(resultErr, token.Close()) }()
 	user, err := token.GetTokenUser()
-	if err != nil || user == nil || user.User.Sid == nil || !windowssecurity.OwnerMatchesSID(path, user.User.Sid) {
-		return false
+	if err != nil {
+		return false, err
+	}
+	if user == nil || user.User.Sid == nil || !user.User.Sid.IsValid() {
+		return false, nil
+	}
+	owned, err := windowssecurity.CheckOwnerMatchesSID(path, user.User.Sid)
+	if err != nil || !owned {
+		return false, err
 	}
 	wantSDDL, err := currentUserCredentialSDDL()
 	if err != nil {
-		return false
+		return false, err
 	}
-	want, err := windows.SecurityDescriptorFromString(wantSDDL)
-	if err != nil {
-		return false
-	}
-	return windowssecurity.ProtectedDACLMatches(path, want.String())
+	return windowssecurity.CheckProtectedDACLMatches(path, wantSDDL)
 }

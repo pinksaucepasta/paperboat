@@ -112,7 +112,7 @@ func (c *HTTPClient) RuntimeCarrierAdmissions(ctx context.Context, nodeID, epoch
 	now := time.Now().UTC()
 	for _, a := range *result.Admissions {
 		if _, err := a.Expected(nodeID, epoch, now); err != nil {
-			return nil, ErrControlUnavailable
+			return nil, documentFailure{sentinel: ErrControlUnavailable, cause: err}
 		}
 	}
 	return *result.Admissions, nil

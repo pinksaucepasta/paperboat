@@ -14,8 +14,8 @@ import (
 )
 
 func TestControlRequestPropagatesAndPreservesSupportReference(t *testing.T) {
-	clientReference := "pb-0123456789abcdef0123456789abcdef"
-	serverReference := "pb-fedcba9876543210fedcba9876543210"
+	clientReference := "support_01234567-89ab-4def-8123-456789abcdef"
+	serverReference := "support_fedcba98-7654-4210-8edc-ba9876543210"
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if got := request.Header.Get(supportref.Header); got != clientReference {
 			t.Errorf("Support-Reference = %q", got)
@@ -43,19 +43,19 @@ func TestSupportReferenceIsNotSentToObjectStorage(t *testing.T) {
 	}))
 	defer server.Close()
 	intent := DiagnosticUploadIntent{
-		Schema: DiagnosticUploadIntentSchemaV1, IntentID: "diag_123", CorrelationID: "pb-0123456789abcdef0123456789abcdef",
+		Schema: DiagnosticUploadIntentSchemaV1, IntentID: "diag_123", CorrelationID: "support_01234567-89ab-4def-8123-456789abcdef",
 		State: "pending", ExpiresAt: time.Now().UTC().Add(time.Minute), UploadMethod: http.MethodPut,
 		UploadURL: server.URL, UploadHeaders: map[string]string{"Content-Type": "application/octet-stream"},
 	}
 	client := New("https://control.invalid", config.Credential{}, server.Client())
-	ctx := supportref.WithContext(context.Background(), "pb-fedcba9876543210fedcba9876543210")
+	ctx := supportref.WithContext(context.Background(), "support_fedcba98-7654-4210-8edc-ba9876543210")
 	if err := client.UploadDiagnosticBundle(ctx, intent, strings.NewReader("x"), 1); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestControlErrorFallsBackToInvocationSupportReference(t *testing.T) {
-	clientReference := "pb-0123456789abcdef0123456789abcdef"
+	clientReference := "support_01234567-89ab-4def-8123-456789abcdef"
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set(supportref.Header, "invalid")
 		writer.WriteHeader(http.StatusInternalServerError)
@@ -71,7 +71,7 @@ func TestControlErrorFallsBackToInvocationSupportReference(t *testing.T) {
 }
 
 func TestControlErrorAcceptsNestedSupportReference(t *testing.T) {
-	serverReference := "pb-fedcba9876543210fedcba9876543210"
+	serverReference := "support_fedcba98-7654-4210-8edc-ba9876543210"
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.WriteHeader(http.StatusInternalServerError)
 		_, _ = writer.Write([]byte(`{"error":{"code":"internal","message":"failed","support_reference":"` + serverReference + `"}}`))

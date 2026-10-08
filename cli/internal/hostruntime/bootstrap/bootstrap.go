@@ -15,8 +15,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -27,20 +27,17 @@ import (
 )
 
 var (
-	ErrInvalid                 = errors.New("invalid BYOD bootstrap")
-	ErrApprovalPending         = errors.New("BYOD pairing approval is pending")
-	ErrPairingDenied           = errors.New("BYOD pairing was denied")
-	ErrPairingExpired          = errors.New("BYOD pairing expired")
-	ErrInstallationUnavailable = errors.New("BYOD installation material is unavailable")
+	ErrInvalid                 = errors.New("invalid machine bootstrap")
+	ErrApprovalPending         = errors.New("machine pairing approval is pending")
+	ErrPairingDenied           = errors.New("machine pairing was denied")
+	ErrPairingExpired          = errors.New("machine pairing expired")
+	ErrInstallationUnavailable = errors.New("machine installation material is unavailable")
 )
 
 const (
 	// maxBootstrapResponseBody bounds bytes retained from a server response.
-	// The request path already limits response reads to this size; keep the
-	// same bound on diagnostics so a malformed server cannot fill the terminal
-	// or an error log with unbounded data.
+	// A malformed server cannot make the client retain an unbounded body.
 	maxBootstrapResponseBody = 64 << 10
-	maxBootstrapErrorBody    = 8 << 10
 	bootstrapRequestAttempts = 3
 )
 
@@ -60,22 +57,20 @@ type Pairing struct {
 }
 
 type Material struct {
-	Schema                  string          `json:"schema"`
-	UserMachineID           string          `json:"user_machine_id"`
-	UserMachineEnrollmentID string          `json:"user_machine_enrollment_id"`
-	EnvironmentID           string          `json:"environment_id"`
-	ControlURL              string          `json:"control_url"`
-	HelperID                string          `json:"helper_id"`
-	EnrollmentID            string          `json:"enrollment_id"`
-	EnrollmentCredential    string          `json:"enrollment_credential"`
-	ReuseIdentity           bool            `json:"reuse_identity,omitempty"`
-	ExpiresAt               time.Time       `json:"expires_at"`
-	Artifact                *ArtifactTarget `json:"artifact,omitempty"`
-	HelperListenAddress     string          `json:"helper_listen_address"`
-	InstallationGeneration  int64           `json:"installation_generation"`
-	SetupRoles              []string        `json:"setup_roles"`
-	SetupMode               string          `json:"setup_mode"`
-	ClientSession           *ClientSession  `json:"client_session,omitempty"`
+	Schema                 string          `json:"schema"`
+	UserMachineID          string          `json:"user_machine_id"`
+	PairingID              string          `json:"pairing_id"`
+	EnvironmentID          string          `json:"environment_id"`
+	ControlURL             string          `json:"control_url"`
+	HelperID               string          `json:"helper_id"`
+	EnrollmentID           string          `json:"enrollment_id"`
+	EnrollmentCredential   string          `json:"enrollment_credential"`
+	ReuseIdentity          bool            `json:"reuse_identity,omitempty"`
+	ExpiresAt              time.Time       `json:"expires_at"`
+	Artifact               *ArtifactTarget `json:"artifact,omitempty"`
+	HelperListenAddress    string          `json:"helper_listen_address"`
+	InstallationGeneration int64           `json:"installation_generation"`
+	ClientSession          *ClientSession  `json:"client_session,omitempty"`
 }
 
 type ClientSession struct {
@@ -108,7 +103,7 @@ func CreatePairing(ctx context.Context, config Config) (Pairing, error) {
 		return Pairing{}, err
 	}
 	if pairing.ID == "" || pairing.UserCode == "" || !time.Now().UTC().Before(pairing.ExpiresAt) {
-		return Pairing{}, ErrInvalid
+		return Pairing{}, bootstrapRequestFailure(ErrInvalid)
 	}
 	return pairing, nil
 }
@@ -127,7 +122,7 @@ func WaitForMaterial(ctx context.Context, config Config, expiresAt time.Time, in
 		if err == nil {
 			return material, nil
 		}
-		if !errors.Is(err, ErrApprovalPending) && !transientBootstrapError(err) {
+		if !bootstrapOnlyOutcome(err, ErrApprovalPending) && !transientBootstrapError(err) {
 			return Material{}, err
 		}
 		timer := time.NewTimer(interval)
@@ -160,10 +155,10 @@ func requestMaterial(ctx context.Context, config Config, base string, body []byt
 		return Material{}, err
 	}
 	if err := validateMaterial(material); err != nil {
-		return Material{}, err
+		return Material{}, bootstrapRequestFailure(err)
 	}
 	if normalizeBootstrapURL(material.ControlURL) != normalizeBootstrapURL(config.ServerURL) {
-		return Material{}, fmt.Errorf("%w: control URL does not match pairing server", ErrInvalid)
+		return Material{}, bootstrapRequestFailure(fmt.Errorf("%w: control URL does not match pairing server", ErrInvalid))
 	}
 	return material, nil
 }
@@ -177,25 +172,20 @@ func validateMaterial(material Material) error {
 // the server for renewed material instead of being mistaken for corruption.
 func validateMaterialFreshness(material Material, requireFresh bool) error {
 	validEnrollment := material.ReuseIdentity && material.EnrollmentID == "" && material.EnrollmentCredential == "" || !material.ReuseIdentity && material.EnrollmentID != "" && len(material.EnrollmentCredential) >= 32
-	validSetupMode := material.SetupMode == "host" || material.SetupMode == "client"
-	validSetupRole := (material.SetupMode == "host" && hasRole(material.SetupRoles, "host")) ||
-		(material.SetupMode == "client" && hasRole(material.SetupRoles, "interactive"))
-	validClientSession := material.ClientSession != nil && (material.SetupMode == "host" || material.SetupMode == "client") && validBootstrapClientSession(*material.ClientSession)
+	validClientSession := material.ClientSession != nil && validBootstrapClientSession(*material.ClientSession)
 	checks := []struct {
 		invalid bool
 		reason  string
 	}{
-		{material.Schema != "paperboat.byod-installation/v1", "schema"},
+		{material.Schema != "paperboat.machine-installation/v1", "schema"},
 		{material.UserMachineID == "", "user machine id"},
-		{material.UserMachineEnrollmentID == "", "enrollment id"},
+		{material.PairingID == "", "enrollment id"},
 		{material.EnvironmentID == "", "environment id"},
 		{material.HelperID == "", "helper id"},
 		{!validBootstrapControlURL(material.ControlURL), "control URL"},
 		{!validEnrollment, "enrollment credential"},
 		{!validLoopbackAddress(material.HelperListenAddress), "helper listen address"},
 		{material.InstallationGeneration < 1, "installation generation"},
-		{!validSetupMode, "setup mode"},
-		{!validSetupRole, "setup role"},
 		{!validClientSession, "client session"},
 		{requireFresh && !time.Now().UTC().Before(material.ExpiresAt), "expiration"},
 		{material.Artifact == nil, "artifact"},
@@ -206,7 +196,7 @@ func validateMaterialFreshness(material Material, requireFresh bool) error {
 		}
 	}
 	if err := VerifyArtifactTarget(*material.Artifact); err != nil {
-		return fmt.Errorf("%w: artifact target: %v", ErrInvalid, err)
+		return fmt.Errorf("%w: artifact target: %w", ErrInvalid, err)
 	}
 	return nil
 }
@@ -231,26 +221,69 @@ func boundedBootstrapValue(value string, minimum, maximum int) bool {
 	return len(value) >= minimum && len(value) <= maximum && !strings.ContainsAny(value, "\x00\r\n")
 }
 
-func hasRole(roles []string, wanted string) bool {
-	for _, role := range roles {
-		if role == wanted {
-			return true
-		}
-	}
-	return false
-}
-
 // transientBootstrapError reports errors that do not carry pairing-terminal
 // meaning: stalled or reset connections and timeouts. Approval polling must
 // survive them instead of abandoning a pairing that is still redeemable.
 func transientBootstrapError(err error) bool {
-	var networkErr net.Error
-	if errors.As(err, &networkErr) && networkErr.Timeout() {
+	if err == nil {
+		return false
+	}
+	remaining := []error{err}
+	seen := make(map[error]struct{})
+	leaves := 0
+	for visited := 0; len(remaining) > 0; visited++ {
+		if visited >= 16 {
+			return false
+		}
+		current := remaining[0]
+		remaining = remaining[1:]
+		if current == nil {
+			return false
+		}
+		value := reflect.ValueOf(current)
+		switch value.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+			if value.IsNil() {
+				return false
+			}
+		}
+		if value.Type().Comparable() {
+			if _, duplicate := seen[current]; duplicate {
+				return false
+			}
+			seen[current] = struct{}{}
+		}
+		switch wrapped := current.(type) {
+		case interface{ Unwrap() []error }:
+			children := wrapped.Unwrap()
+			if len(children) == 0 || len(children)+len(remaining) > 15-visited {
+				return false
+			}
+			remaining = append(remaining, children...)
+		case interface{ Unwrap() error }:
+			remaining = append(remaining, wrapped.Unwrap())
+		default:
+			if transientBootstrapLeaf(current) {
+				leaves++
+				continue
+			}
+			return false
+		}
+	}
+	return leaves > 0
+}
+
+func transientBootstrapLeaf(err error) bool {
+	if networkErr, ok := err.(net.Error); ok && networkErr.Timeout() {
 		return true
 	}
-	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
-		errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) ||
-		errors.Is(err, syscall.ECONNABORTED) || errors.Is(err, syscall.EPIPE)
+	if err == io.EOF || err == io.ErrUnexpectedEOF {
+		return true
+	}
+	if errno, ok := err.(syscall.Errno); ok {
+		return errno == syscall.ECONNREFUSED || errno == syscall.ECONNRESET || errno == syscall.ECONNABORTED || errno == syscall.EPIPE
+	}
+	return false
 }
 
 func validLoopbackAddress(address string) bool {
@@ -267,11 +300,17 @@ func ValidateWorkspace(root string) error {
 		return ErrInvalid
 	}
 	info, err := os.Lstat(root)
-	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+	if err != nil {
+		return fmt.Errorf("%w: inspect workspace: %w", ErrInvalid, err)
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return ErrInvalid
 	}
 	resolved, err := filepath.EvalSymlinks(root)
-	if err != nil || resolved != root {
+	if err != nil {
+		return fmt.Errorf("%w: resolve workspace: %w", ErrInvalid, err)
+	}
+	if resolved != root {
 		return ErrInvalid
 	}
 	return nil
@@ -281,8 +320,11 @@ func validate(config Config) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(config.ServerURL))
 	publicKey, keyErr := base64.RawURLEncoding.DecodeString(strings.TrimSpace(config.PublicIdentityKey))
 	token := strings.TrimSpace(config.EnrollmentToken)
-	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Hostname() == "" || parsed.RawQuery != "" || parsed.Fragment != "" || token != "" && (len(token) < 26 || len(token) > 256) || len(config.Verifier) < 32 || strings.TrimSpace(config.Alias) == "" || ValidateWorkspace(config.WorkspaceRoot) != nil || keyErr != nil || len(publicKey) != ed25519.PublicKeySize {
+	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Hostname() == "" || parsed.RawQuery != "" || parsed.Fragment != "" || token != "" && (len(token) < 26 || len(token) > 256) || len(config.Verifier) < 32 || strings.TrimSpace(config.Alias) == "" || keyErr != nil || len(publicKey) != ed25519.PublicKeySize {
 		return "", ErrInvalid
+	}
+	if err := ValidateWorkspace(config.WorkspaceRoot); err != nil {
+		return "", err
 	}
 	return strings.TrimRight(parsed.String(), "/"), nil
 }
@@ -302,7 +344,7 @@ func request(ctx context.Context, client *http.Client, method, target string, bo
 	for attempt := 0; attempt < bootstrapRequestAttempts; attempt++ {
 		request, err := http.NewRequestWithContext(ctx, method, target, bytes.NewReader(body))
 		if err != nil {
-			return err
+			return bootstrapRequestFailure(err)
 		}
 		request.Header.Set("Content-Type", "application/json")
 		var wroteRequest atomic.Bool
@@ -312,18 +354,23 @@ func request(ctx context.Context, client *http.Client, method, target string, bo
 		if err == nil {
 			break
 		}
-		if response != nil && response.Body != nil {
-			response.Body.Close()
+		closeErr := closeBootstrapResponse(response)
+		attemptErr := joinBootstrapErrors(err, closeErr)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			if closeErr == nil && bootstrapOnlyCause(err, ctxErr) {
+				return ctxErr
+			}
+			return bootstrapRequestFailure(joinBootstrapErrors(ctxErr, attemptErr))
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if closeErr != nil {
+			return bootstrapRequestFailure(attemptErr)
 		}
 		// A dashboard token is single-use and CreatePairing is not itself
 		// idempotent. Retry only while net/http proves that no request bytes
 		// reached the connection. Once WroteRequest fires, the protected
 		// verifier resume flow owns uncertain-outcome recovery.
 		if wroteRequest.Load() || !transientBootstrapError(err) || attempt+1 == bootstrapRequestAttempts {
-			return err
+			return bootstrapRequestFailure(err)
 		}
 		delay := 250 * time.Millisecond << attempt
 		timer := time.NewTimer(delay)
@@ -334,10 +381,28 @@ func request(ctx context.Context, client *http.Client, method, target string, bo
 		case <-timer.C:
 		}
 	}
-	defer response.Body.Close()
 	encoded, err := io.ReadAll(io.LimitReader(response.Body, maxBootstrapResponseBody+1))
-	if err != nil || len(encoded) > maxBootstrapResponseBody {
-		return ErrInvalid
+	defer clearBytes(encoded)
+	if err != nil {
+		cause := err
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			cause = joinBootstrapErrors(errorreport.HTTPStatusFailure(response), cause)
+		}
+		closeErr := closeBootstrapResponse(response)
+		failure := joinBootstrapErrors(cause, closeErr)
+		observeBootstrapFailure(ctx, joinBootstrapErrors(err, closeErr))
+		return bootstrapRequestFailure(failure)
+	}
+	if len(encoded) > maxBootstrapResponseBody {
+		closeErr := closeBootstrapResponse(response)
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			failure := bootstrapServerError(ErrInvalid, response)
+			if closeErr != nil {
+				failure = bootstrapRequestFailure(joinBootstrapErrors(failure, closeErr))
+			}
+			return failure
+		}
+		return bootstrapRequestFailure(joinBootstrapErrors(ErrInvalid, closeErr))
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		var envelope struct {
@@ -347,59 +412,221 @@ func request(ctx context.Context, client *http.Client, method, target string, bo
 			} `json:"error"`
 		}
 		_ = json.Unmarshal(encoded, &envelope)
+		var failure error
 		switch envelope.Error.Code {
 		case "machine_approval_pending", "user_machine_approval_pending":
-			return bootstrapServerError(ErrApprovalPending, response.StatusCode, envelope.Error.Code, envelope.Error.Message, encoded)
+			failure = bootstrapServerError(ErrApprovalPending, response)
 		case "machine_pairing_denied", "user_machine_pairing_denied":
-			return bootstrapServerError(ErrPairingDenied, response.StatusCode, envelope.Error.Code, envelope.Error.Message, encoded)
+			failure = bootstrapServerError(ErrPairingDenied, response)
 		case "machine_pairing_expired", "user_machine_pairing_expired":
-			return bootstrapServerError(ErrPairingExpired, response.StatusCode, envelope.Error.Code, envelope.Error.Message, encoded)
+			failure = bootstrapServerError(ErrPairingExpired, response)
 		case "machine_installation_unavailable", "user_machine_installation_unavailable":
-			return bootstrapServerError(ErrInstallationUnavailable, response.StatusCode, envelope.Error.Code, envelope.Error.Message, encoded)
+			failure = bootstrapServerError(ErrInstallationUnavailable, response)
 		default:
-			return bootstrapServerError(ErrInvalid, response.StatusCode, envelope.Error.Code, envelope.Error.Message, encoded)
+			failure = bootstrapServerError(ErrInvalid, response)
 		}
+		closeErr := closeBootstrapResponse(response)
+		if closeErr != nil {
+			failure = bootstrapRequestFailure(joinBootstrapErrors(failure, closeErr))
+		}
+		return failure
 	}
 	var envelope struct {
 		Data json.RawMessage `json:"data"`
 	}
-	if json.Unmarshal(encoded, &envelope) != nil || len(envelope.Data) == 0 || json.Unmarshal(envelope.Data, output) != nil {
-		return ErrInvalid
+	if err := json.Unmarshal(encoded, &envelope); err != nil {
+		closeErr := closeBootstrapResponse(response)
+		return bootstrapRequestFailure(joinBootstrapErrors(errors.Join(ErrInvalid, err), closeErr))
+	}
+	if len(envelope.Data) == 0 {
+		closeErr := closeBootstrapResponse(response)
+		return bootstrapRequestFailure(joinBootstrapErrors(ErrInvalid, closeErr))
+	}
+	if err := json.Unmarshal(envelope.Data, output); err != nil {
+		closeErr := closeBootstrapResponse(response)
+		return bootstrapRequestFailure(joinBootstrapErrors(errors.Join(ErrInvalid, err), closeErr))
+	}
+	if err := closeBootstrapResponse(response); err != nil {
+		observeBootstrapFailure(ctx, err)
+		return bootstrapRequestFailure(err)
 	}
 	return nil
 }
 
-func bootstrapServerError(kind error, status int, code, message string, body []byte) error {
-	// Keep the exact bounded response available in the diagnostic. Quoting it
-	// prevents server-controlled newlines or control bytes from forging output
-	// while retaining enough information to copy and inspect the body.
-	truncated := false
-	if len(body) > maxBootstrapErrorBody {
-		body = body[:maxBootstrapErrorBody]
-		truncated = true
-	}
-	bodyText := string(body)
-	parts := []string{fmt.Sprintf("server status %d", status)}
-	if code != "" {
-		parts = append(parts, "code "+quoteBootstrapDiagnostic(code, 256))
-	}
-	if message != "" {
-		parts = append(parts, "message "+quoteBootstrapDiagnostic(message, 2048))
-	}
-	if strings.TrimSpace(bodyText) != "" {
-		bodyDiagnostic := strconv.Quote(bodyText)
-		if truncated {
-			bodyDiagnostic += "...<truncated>"
-		}
-		parts = append(parts, "body "+bodyDiagnostic)
-	}
-	return fmt.Errorf("%w: %s", kind, strings.Join(parts, "; "))
+type bootstrapRequestError struct {
+	kind  error
+	cause error
 }
 
-func quoteBootstrapDiagnostic(value string, limit int) string {
-	value = strings.TrimSpace(value)
-	if len(value) > limit {
-		return strconv.Quote(value[:limit]) + "...<truncated>"
+func (failure bootstrapRequestError) Error() string {
+	if failure.kind != nil {
+		var status interface{ DiagnosticStatus() int }
+		if errors.As(failure.cause, &status) {
+			return fmt.Sprintf("%s (HTTP %d)", failure.kind.Error(), status.DiagnosticStatus())
+		}
+		return failure.kind.Error()
 	}
-	return strconv.Quote(value)
+	return "machine pairing request failed"
+}
+
+func (failure bootstrapRequestError) Unwrap() error { return failure.cause }
+
+func (failure bootstrapRequestError) Is(target error) bool {
+	return sameBootstrapError(failure.kind, target)
+}
+
+func (bootstrapRequestError) DiagnosticStage() string         { return "control_request" }
+func (bootstrapRequestError) DiagnosticCode() string          { return "control_request_failed" }
+func (failure bootstrapRequestError) bootstrapOutcome() error { return failure.kind }
+
+func bootstrapRequestFailure(cause error) error {
+	return bootstrapRequestError{cause: cause}
+}
+
+func bootstrapServerError(kind error, response *http.Response) error {
+	return bootstrapRequestError{kind: kind, cause: errorreport.HTTPStatusFailure(response)}
+}
+
+func closeBootstrapResponse(response *http.Response) error {
+	if response == nil || response.Body == nil {
+		return nil
+	}
+	return response.Body.Close()
+}
+
+func joinBootstrapErrors(primary, cleanup error) error {
+	if primary == nil {
+		return cleanup
+	}
+	if cleanup == nil || sameBootstrapError(primary, cleanup) {
+		return primary
+	}
+	return errors.Join(primary, cleanup)
+}
+
+func sameBootstrapError(left, right error) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	leftType, rightType := reflect.TypeOf(left), reflect.TypeOf(right)
+	return leftType == rightType && leftType.Comparable() && left == right
+}
+
+func observeBootstrapFailure(ctx context.Context, err error) {
+	if err == nil || errorreport.HTTPAttemptObserved(err) {
+		return
+	}
+	errorreport.Current().ObserveFailure(ctx, "paperboat-cli", "machine_pairing", "control_request", "control_request_failed", err)
+}
+
+func bootstrapOnlyCause(err, expected error) bool {
+	return bootstrapAllLeavesMatch(err, func(leaf error) bool { return sameBootstrapError(leaf, expected) })
+}
+
+func bootstrapAllLeavesMatch(err error, matches func(error) bool) bool {
+	if err == nil {
+		return false
+	}
+	remaining := []error{err}
+	seen := make(map[error]struct{})
+	leaves := 0
+	for visited := 0; len(remaining) > 0; visited++ {
+		if visited >= 16 {
+			return false
+		}
+		current := remaining[0]
+		remaining = remaining[1:]
+		if current == nil {
+			return false
+		}
+		value := reflect.ValueOf(current)
+		switch value.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+			if value.IsNil() {
+				return false
+			}
+		}
+		if value.Type().Comparable() {
+			if _, duplicate := seen[current]; duplicate {
+				return false
+			}
+			seen[current] = struct{}{}
+		}
+		switch wrapped := current.(type) {
+		case interface{ Unwrap() []error }:
+			children := wrapped.Unwrap()
+			if len(children) == 0 || len(children)+len(remaining) > 15-visited {
+				return false
+			}
+			remaining = append(remaining, children...)
+		case interface{ Unwrap() error }:
+			child := wrapped.Unwrap()
+			if child == nil {
+				return false
+			}
+			remaining = append(remaining, child)
+		default:
+			leaves++
+			if !matches(current) {
+				return false
+			}
+		}
+	}
+	return leaves > 0
+}
+
+func bootstrapOnlyOutcome(err, expected error) bool {
+	if err == nil {
+		return false
+	}
+	remaining := []error{err}
+	seen := make(map[error]struct{})
+	outcomes := 0
+	for visited := 0; len(remaining) > 0; visited++ {
+		if visited >= 16 {
+			return false
+		}
+		current := remaining[0]
+		remaining = remaining[1:]
+		if current == nil {
+			return false
+		}
+		value := reflect.ValueOf(current)
+		switch value.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+			if value.IsNil() {
+				return false
+			}
+		}
+		if value.Type().Comparable() {
+			if _, duplicate := seen[current]; duplicate {
+				return false
+			}
+			seen[current] = struct{}{}
+		}
+		if failure, ok := current.(interface{ bootstrapOutcome() error }); ok {
+			if !sameBootstrapError(failure.bootstrapOutcome(), expected) {
+				return false
+			}
+			outcomes++
+			continue
+		}
+		switch wrapped := current.(type) {
+		case interface{ Unwrap() []error }:
+			children := wrapped.Unwrap()
+			if len(children) == 0 || len(children)+len(remaining) > 15-visited {
+				return false
+			}
+			remaining = append(remaining, children...)
+		case interface{ Unwrap() error }:
+			child := wrapped.Unwrap()
+			if child == nil {
+				return false
+			}
+			remaining = append(remaining, child)
+		default:
+			return false
+		}
+	}
+	return outcomes > 0
 }

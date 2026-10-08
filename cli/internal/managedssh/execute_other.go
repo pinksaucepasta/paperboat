@@ -2,11 +2,15 @@
 
 package managedssh
 
-import "errors"
+import (
+	"context"
+	"errors"
+)
 
 var ErrOpenSSHExecution = errors.New("OpenSSH execution is unsupported on this platform")
 
-type ProcessExec func(path string, argv []string, envv []string) error
-type OpenSSHExecutor struct{ Exec ProcessExec }
+type OpenSSHExecutor struct{}
 
-func (OpenSSHExecutor) Execute(string, []string, []string) error { return ErrOpenSSHExecution }
+func (OpenSSHExecutor) Execute(context.Context, string, []string, []string) error {
+	return ErrOpenSSHExecution
+}

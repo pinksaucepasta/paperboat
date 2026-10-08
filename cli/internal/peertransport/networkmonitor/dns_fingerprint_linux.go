@@ -4,7 +4,6 @@ package networkmonitor
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"os"
 )
@@ -18,12 +17,12 @@ func SystemDNSFingerprint(ctx context.Context) ([32]byte, error) {
 	}
 	file, err := os.Open("/etc/resolv.conf")
 	if err != nil {
-		return [32]byte{}, fmt.Errorf("%w: open resolver configuration: %v", ErrDNSUnavailable, err)
+		return [32]byte{}, dnsUnavailable("resolver configuration open", err)
 	}
 	defer file.Close()
 	contents, err := io.ReadAll(io.LimitReader(file, maxDNSFingerprintInput+1))
 	if err != nil {
-		return [32]byte{}, fmt.Errorf("%w: read resolver configuration: %v", ErrDNSUnavailable, err)
+		return [32]byte{}, dnsUnavailable("resolver configuration read", err)
 	}
 	if len(contents) > maxDNSFingerprintInput {
 		return [32]byte{}, ErrDNSUnavailable

@@ -15,11 +15,11 @@ func TestRuntimeOwnerSessionRegistrySharesReferencesAndAllowsSafeReuse(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := registry.OwnerSessionDone("account_01", "machine_01", "owner_session_01")
+	first, err := registry.OwnerSessionDone("account_01", "machine_01", "owner_session_01", "foreground")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := registry.OwnerSessionDone("account_01", "machine_01", "owner_session_01")
+	second, err := registry.OwnerSessionDone("account_01", "machine_01", "owner_session_01", "foreground")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestRuntimeOwnerSessionRegistrySharesReferencesAndAllowsSafeReuse(t *testin
 	case <-time.After(time.Second):
 		t.Fatal("final owner release did not close the lifetime")
 	}
-	reused, err := registry.OwnerSessionDone("account_01", "machine_01", "owner_session_01")
+	reused, err := registry.OwnerSessionDone("account_01", "machine_01", "owner_session_01", "foreground")
 	if err != nil {
 		t.Fatalf("released owner session should be reusable: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestRuntimeOwnerSessionRegistryReusesCapacityAfterRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, ownerSessionID := range []string{"owner_session_01", "owner_session_02", "owner_session_03"} {
-		if _, err := registry.OwnerSessionDone("account_01", "machine_01", ownerSessionID); err != nil {
+		if _, err := registry.OwnerSessionDone("account_01", "machine_01", ownerSessionID, "foreground"); err != nil {
 			t.Fatalf("register %s: %v", ownerSessionID, err)
 		}
 		if err := registry.ReleaseOwnerSession("account_01", "machine_01", ownerSessionID); err != nil {
@@ -78,13 +78,13 @@ func TestRuntimeOwnerSessionRegistryBindsAccountMachineAndRuntime(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := registry.OwnerSessionDone("account_02", "machine_01", "owner_session_01"); !errors.Is(err, ErrOwnerSessionBinding) {
+	if _, err := registry.OwnerSessionDone("account_02", "machine_01", "owner_session_01", "foreground"); !errors.Is(err, ErrOwnerSessionBinding) {
 		t.Fatalf("wrong account error = %v", err)
 	}
-	if _, err := registry.OwnerSessionDone("account_01", "machine_02", "owner_session_01"); !errors.Is(err, ErrOwnerSessionBinding) {
+	if _, err := registry.OwnerSessionDone("account_01", "machine_02", "owner_session_01", "foreground"); !errors.Is(err, ErrOwnerSessionBinding) {
 		t.Fatalf("wrong machine error = %v", err)
 	}
-	done, err := registry.OwnerSessionDone("account_01", "machine_01", "owner_session_01")
+	done, err := registry.OwnerSessionDone("account_01", "machine_01", "owner_session_01", "foreground")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestRuntimeOwnerSessionRegistryBindsAccountMachineAndRuntime(t *testing.T) 
 	case <-time.After(time.Second):
 		t.Fatal("runtime shutdown did not close owner lifetime")
 	}
-	if _, err := registry.OwnerSessionDone("account_01", "machine_01", "owner_session_02"); !errors.Is(err, ErrOwnerSessionRegistryClosed) {
+	if _, err := registry.OwnerSessionDone("account_01", "machine_01", "owner_session_02", "foreground"); !errors.Is(err, ErrOwnerSessionRegistryClosed) {
 		t.Fatalf("post-shutdown registration error = %v", err)
 	}
 	if err := registry.Shutdown(context.Background()); err != nil {
@@ -117,11 +117,11 @@ func TestRuntimeOwnerSessionRegistryMachineWideKeysIncludeAccount(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := registry.OwnerSessionDone("account_01", "machine_01", "owner_session_01")
+	first, err := registry.OwnerSessionDone("account_01", "machine_01", "owner_session_01", "foreground")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := registry.OwnerSessionDone("account_02", "machine_01", "owner_session_01")
+	second, err := registry.OwnerSessionDone("account_02", "machine_01", "owner_session_01", "foreground")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,21 +158,21 @@ func TestSignedSharedPreviewOwnerSessionCannotClaimLocalSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = registry.OwnerSessionDoneForTarget("teammate", "machine_01", localID, target); !errors.Is(err, ErrOwnerSessionBinding) {
+	if _, err = registry.OwnerSessionDoneForTarget("teammate", "machine_01", localID, "local_lease", target); !errors.Is(err, ErrOwnerSessionBinding) {
 		t.Fatalf("foreign account claimed local session: %v", err)
 	}
-	first, err := registry.OwnerSessionDoneForTarget("teammate", "machine_01", "browser_nonce", target)
+	first, err := registry.OwnerSessionDoneForTarget("teammate", "machine_01", "browser_nonce", "foreground", target)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := registry.OwnerSessionDoneForTarget("another", "machine_01", "browser_nonce", target)
+	second, err := registry.OwnerSessionDoneForTarget("another", "machine_01", "browser_nonce", "foreground", target)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first == second {
 		t.Fatal("different accounts shared session lifetime")
 	}
-	if _, err = registry.OwnerSessionDoneForTarget("teammate", "machine_01", "browser_nonce", LeaseTarget{Scheme: "http", Address: "127.0.0.1:4000"}); !errors.Is(err, ErrOwnerSessionBinding) {
+	if _, err = registry.OwnerSessionDoneForTarget("teammate", "machine_01", "browser_nonce", "foreground", LeaseTarget{Scheme: "http", Address: "127.0.0.1:4000"}); !errors.Is(err, ErrOwnerSessionBinding) {
 		t.Fatalf("session target changed: %v", err)
 	}
 	if err = registry.ReleaseOwnerSession("teammate", "machine_01", "browser_nonce"); err != nil {

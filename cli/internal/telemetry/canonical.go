@@ -309,9 +309,9 @@ func NewCanonicalEvent(input CanonicalEventInput) (CanonicalEventResource, error
 // the caller to provide the durable event envelope. It maps only bounded safe
 // scalar fields into metadata and never derives an event ID or cursor.
 func ProjectEvent(input runtimeobs.Event, envelope CanonicalEventInput) (CanonicalEventResource, error) {
-	metadata := cloneCanonicalMetadata(envelope.SafeMetadata)
-	if metadata == nil {
-		metadata = make(map[string]any)
+	metadata, err := sanitizeCanonicalMetadata(envelope.SafeMetadata)
+	if err != nil {
+		return CanonicalEventResource{}, err
 	}
 	if input.Component != "" {
 		metadata["component"] = input.Component
@@ -641,31 +641,5 @@ func sanitizeCanonicalValue(value any, depth int) (any, error) {
 		return sanitizeCanonicalMap(typed, depth)
 	default:
 		return nil, ErrCanonicalUnsupported
-	}
-}
-
-func cloneCanonicalMetadata(input map[string]any) map[string]any {
-	if input == nil {
-		return nil
-	}
-	result := make(map[string]any, len(input))
-	for key, value := range input {
-		result[key] = cloneCanonicalValue(value)
-	}
-	return result
-}
-
-func cloneCanonicalValue(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		return cloneCanonicalMetadata(typed)
-	case []any:
-		result := make([]any, len(typed))
-		for index, item := range typed {
-			result[index] = cloneCanonicalValue(item)
-		}
-		return result
-	default:
-		return value
 	}
 }

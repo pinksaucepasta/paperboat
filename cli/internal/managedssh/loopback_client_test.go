@@ -263,6 +263,17 @@ func TestRunOneShotSSHLoopbackAcceptTimeoutKillsAndReaps(t *testing.T) {
 	if !errors.Is(err, ErrSSHLoopbackAccept) {
 		t.Fatalf("error=%v", err)
 	}
+	var staged interface{ DiagnosticStage() string }
+	var coded interface{ DiagnosticCode() string }
+	var timeout net.Error
+	if !errors.As(err, &staged) || staged.DiagnosticStage() != "listener_accept" ||
+		!errors.As(err, &coded) || coded.DiagnosticCode() != "managed_ssh_failed" ||
+		!errors.As(err, &timeout) || !timeout.Timeout() {
+		t.Fatalf("accept failure lost phase classification or timeout cause: %T %v", err, err)
+	}
+	if err.Error() != ErrSSHLoopbackAccept.Error() {
+		t.Fatalf("accept failure exposed local transport detail: %q", err)
+	}
 	assertLoopbackProcessStopped(t, process)
 }
 

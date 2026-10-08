@@ -1,6 +1,6 @@
-// Package browserbroadcast encodes the device's shared browser-terminal output.
+// Package browserbroadcast encodes the machine's shared browser-terminal output.
 // It uses the RFC 9052 COSE_Encrypt0(COSE_Sign1) structures: the edge may copy
-// these records but cannot read them or create a valid device signature.
+// these records but cannot read them or create a valid machine signature.
 package browserbroadcast
 
 import (
@@ -69,8 +69,8 @@ func NewEpoch() (Epoch, error) {
 	return value, nil
 }
 
-// Record fields are signed by the device and checked by every browser against
-// its expected terminal, device generation, epoch, and increasing record index.
+// Record fields are signed by the machine and checked by every browser against
+// its expected terminal, machine generation, epoch, and increasing record index.
 type Record struct {
 	SessionID     string
 	Generation    uint64
@@ -91,7 +91,7 @@ func Seal(value Record, epoch Epoch, private ed25519.PrivateKey) ([]byte, error)
 	if !validRecord(value) || value.EpochID != epoch.ID || len(private) != ed25519.PrivateKeySize {
 		return nil, ErrInvalidRecord
 	}
-	// Reuse the established terminal-v1 adaptive zstd codec once at the device;
+	// Reuse the established terminal-v1 adaptive zstd codec once at the machine;
 	// all edge subscribers receive the same compressed ciphertext.
 	output, err := protocol.EncodeTerminalOutputAdaptive(protocol.TerminalOutputFrame{Channel: value.Channel, StreamID: 1, StartSequence: value.StartSequence, Data: value.Data}, nil)
 	if err != nil {
@@ -129,7 +129,7 @@ func Seal(value Record, epoch Epoch, private ed25519.PrivateKey) ([]byte, error)
 	return result, nil
 }
 
-// Open authenticates both the AEAD and the device-only signature. The caller
+// Open authenticates both the AEAD and the machine-only signature. The caller
 // must reject duplicate or skipped indexes using its last accepted index.
 func Open(raw []byte, epoch Epoch, public ed25519.PublicKey) (Record, error) {
 	if len(raw) == 0 || len(raw) > MaxRecordBytes || len(public) != ed25519.PublicKeySize {

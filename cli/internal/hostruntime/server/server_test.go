@@ -4,19 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/observability"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
 	"io"
 	"net"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+	"strings"
 
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/observability"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	hostauth "github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 )
 
 type authorizerFunc func(context.Context, protocol.Frame) (Authorization, error)
@@ -112,7 +114,7 @@ func testServer(t *testing.T, authorize authorizerFunc, handle handlerFunc, maxC
 		t.Fatal(err)
 	}
 	server, err := New(Config{
-		Negotiator: protocol.Negotiator{Profile: config.BYOD, Available: map[string]bool{"terminal.v1": true, "health.v1": true}},
+		Negotiator: protocol.Negotiator{Available: map[string]bool{"terminal.v1": true, "health.v1": true}},
 		Journal:    journal, Authorizer: authorize, Handler: handle, MaxConcurrent: maxConcurrent,
 		HeartbeatInterval: time.Hour, MutationDeadline: 5 * time.Minute,
 	})
@@ -151,7 +153,7 @@ func TestServeDoesNotApplyApplicationIdleTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	server, err := New(Config{
-		Negotiator: protocol.Negotiator{Profile: config.BYOD, Available: map[string]bool{"terminal.v1": true, "health.v1": true}},
+		Negotiator: protocol.Negotiator{Available: map[string]bool{"terminal.v1": true, "health.v1": true}},
 		Journal:    journal,
 		Authorizer: authorizerFunc(func(context.Context, protocol.Frame) (Authorization, error) {
 			return Authorization{JournalBinding: "idle-test"}, nil
@@ -208,6 +210,41 @@ func TestServeRequiresHelloBeforeMutation(t *testing.T) {
 	}
 	if authorized.Load() != 0 || handled.Load() != 0 {
 		t.Fatalf("authorized=%d handled=%d", authorized.Load(), handled.Load())
+	}
+}
+
+func TestServeReportsUnexpectedAuthorizationFailureWithoutLeakingCause(t *testing.T) {
+	const privateText = "private credential database detail"
+	var faults []errorreport.Fault
+	restore := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) {
+		faults = append(faults, fault)
+	})
+	defer restore()
+	var handled atomic.Int32
+	server := testServer(t, func(context.Context, protocol.Frame) (Authorization, error) {
+		return Authorization{}, &hostauth.Error{Code: hostauth.KeyUnknown, Cause: errors.New(privateText)}
+	}, func(context.Context, Authorization, string, json.RawMessage) operation.Outcome {
+		handled.Add(1)
+		return operation.Outcome{}
+	}, 1)
+	client, peer := net.Pipe()
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(peer) }()
+	hello(t, client)
+	if err := protocol.WriteFrame(client, request("req_auth_failure", "op_auth_failure", json.RawMessage(`{}`))); err != nil {
+		t.Fatal(err)
+	}
+	frame, err := protocol.ReadFrame(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frame.Type != "error" || !strings.Contains(string(frame.Payload), "unavailable") || strings.Contains(string(frame.Payload), privateText) {
+		t.Fatalf("authorization error response = %#v", frame)
+	}
+	_ = client.Close()
+	<-done
+	if handled.Load() != 0 || len(faults) != 1 || faults[0].Stage != "peer_authority" || faults[0].Code != "peer_authority_failed" || strings.Contains(strings.Join(faults[0].ErrorChain, ","), privateText) {
+		t.Fatalf("authorization failure capture = handled:%d faults:%#v", handled.Load(), faults)
 	}
 }
 

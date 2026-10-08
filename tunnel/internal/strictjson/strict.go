@@ -12,8 +12,11 @@ import (
 var ErrInvalid = errors.New("invalid structured JSON")
 
 func Decode(data []byte, target any, maximumDepth int) error {
-	if target == nil || Validate(data, maximumDepth) != nil {
+	if target == nil {
 		return ErrInvalid
+	}
+	if err := Validate(data, maximumDepth); err != nil {
+		return err
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
@@ -73,7 +76,10 @@ func consumeValue(decoder *json.Decoder, depth, maximumDepth int) error {
 			}
 		}
 		closing, err := decoder.Token()
-		if err != nil || closing != json.Delim('}') {
+		if err != nil {
+			return err
+		}
+		if closing != json.Delim('}') {
 			return ErrInvalid
 		}
 	case '[':
@@ -83,7 +89,10 @@ func consumeValue(decoder *json.Decoder, depth, maximumDepth int) error {
 			}
 		}
 		closing, err := decoder.Token()
-		if err != nil || closing != json.Delim(']') {
+		if err != nil {
+			return err
+		}
+		if closing != json.Delim(']') {
 			return ErrInvalid
 		}
 	default:

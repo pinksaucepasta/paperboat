@@ -1,6 +1,7 @@
 package configsync
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -66,5 +67,21 @@ func TestReadStatusRejectsSymlinkAndPermissiveFile(t *testing.T) {
 	}
 	if _, err := ReadStatus(link, 10); !errors.Is(err, ErrStatusInvalid) {
 		t.Fatalf("symlink error = %v", err)
+	}
+}
+
+func TestReadStatusKeepsDecodeCauseWithoutEchoingInput(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "status.json")
+	const malformed = `{"state":"healthy","sync_revision":"private"}`
+	if err := os.WriteFile(path, []byte(malformed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ReadStatus(path, 10)
+	var typeErr *json.UnmarshalTypeError
+	if !errors.Is(err, ErrStatusInvalid) || !errors.As(err, &typeErr) {
+		t.Fatalf("decode cause was not preserved: %v", err)
+	}
+	if strings.Contains(err.Error(), "private") || strings.Contains(err.Error(), "/Users/alice") {
+		t.Fatalf("status error exposed file content: %q", err)
 	}
 }

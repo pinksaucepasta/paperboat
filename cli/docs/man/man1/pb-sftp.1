@@ -13,7 +13,7 @@ pb-sftp - Run sftp with Paperboat machine resolution
 Run sftp with Paperboat machine resolution
 
 .PP
-Run standard sftp with Paperboat device-name resolution and authorized connectivity. Interactive file operations and exit behavior remain OpenSSH-compatible; host identity checks stay enabled.
+Run standard sftp with Paperboat machine-name resolution and authorized connectivity. Interactive file operations and exit behavior remain OpenSSH-compatible; host identity checks stay enabled.
 
 .PP
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
@@ -39,6 +39,10 @@ This command does not support --json output; it rejects that mode before executi
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

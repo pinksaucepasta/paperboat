@@ -27,7 +27,7 @@ paths, and rejects unexpected ownership, symlinks, and malformed capability toke
 ## Self-hosted container
 
 Use [../self-hosted/compose.yaml](../self-hosted/compose.yaml). The first
-start consumes the normal one-time BYOD enrollment credential. Remove that
+start consumes the normal one-time machine enrollment credential. Remove that
 credential from the deployment configuration after enrollment. No SSH daemon
 or host port is exposed by the container; all connectivity uses normal Paperboat
 direct or relay paths.

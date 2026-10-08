@@ -28,7 +28,7 @@ type preferenceResolution struct {
 func preparePreferences(root *cobra.Command, args []string, ctx context.Context) ([]string, context.Context, error) {
 	if preferenceFlag(args, "no-customization") || preferenceCustomizeInvocation(root, args) || preferenceRecoveryInvocation(root, args) {
 		resolved, err := normalizeRawGlobalFlags(root, args)
-		return resolved, preferences.WithContext(ctx, preferences.Default()), err
+		return resolved, preferences.WithContext(ctx, preferences.Default()), invocationError(err)
 	}
 	configPath := preferenceFlagValue(root, args, "config")
 	path, err := preferences.Path(configPath)
@@ -40,14 +40,14 @@ func preparePreferences(root *cobra.Command, args []string, ctx context.Context)
 		return nil, ctx, err
 	}
 	if err := validatePreferencesCommands(root, doc); err != nil {
-		return nil, ctx, err
+		return nil, ctx, invocationError(err)
 	}
 	resolved, _, err := resolvePreferences(root, doc, args)
 	if err != nil {
-		return nil, ctx, err
+		return nil, ctx, invocationError(err)
 	}
 	resolved, err = normalizeRawGlobalFlags(root, resolved)
-	return resolved, preferences.WithContext(ctx, doc), err
+	return resolved, preferences.WithContext(ctx, doc), invocationError(err)
 }
 
 func explainPreferences(root *cobra.Command, doc preferences.Document, args []string) (preferenceResolution, error) {
@@ -315,7 +315,7 @@ func normalizeRawGlobalFlags(root *cobra.Command, args []string) ([]string, erro
 	if err != nil || command == nil || !command.DisableFlagParsing {
 		return slices.Clone(args), nil
 	}
-	allowed := map[string]bool{"config": true, "server": true, "json": true, "no-customization": true}
+	allowed := map[string]bool{"config": true, "server": true, "workspace": true, "json": true, "no-customization": true}
 	raw := []string{args[commandIndex]}
 	for i := 0; i < dash; i++ {
 		if i == commandIndex {

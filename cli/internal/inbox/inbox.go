@@ -11,18 +11,31 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/filetransfer"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 const (
 	journalName       = ".paperboat-receipts.json"
 	maxJournalEntries = 1024
+)
+
+var (
+	errInvalidPath        = errors.New("invalid_path")
+	errInvalidSize        = errors.New("invalid_size")
+	errDigestMismatch     = errors.New("digest_mismatch")
+	errOffsetConflict     = errors.New("offset_conflict")
+	errResourceLimit      = errors.New("resource_limit")
+	errStorageUnavailable = errors.New("storage_unavailable")
 )
 
 type Client interface {
@@ -58,12 +71,149 @@ type journal struct {
 
 // interruptedDownload retains the endpoint-owned partial for the next poll.
 // It must never be acknowledged as a permanent delivery failure.
-type interruptedDownload struct{ cause error }
+type interruptedDownload struct {
+	cause error
+	stage string
+}
 
 func (e *interruptedDownload) Error() string {
 	return "file download interrupted; partial retained for resume"
 }
 func (e *interruptedDownload) Unwrap() error { return e.cause }
+func (e *interruptedDownload) DiagnosticStage() string {
+	if e.stage == "stream_open" {
+		return "stream_open"
+	}
+	return "delivery"
+}
+func (*interruptedDownload) DiagnosticCode() string { return "file_transfer_failed" }
+
+// inboxFailure keeps external transport and filesystem error strings out of
+// Run's returned error while retaining the original cause for classification.
+type inboxFailure struct {
+	message string
+	stage   string
+	code    string
+	storage bool
+	cause   error
+}
+
+func (e *inboxFailure) Error() string           { return e.message }
+func (e *inboxFailure) Unwrap() error           { return e.cause }
+func (e *inboxFailure) DiagnosticStage() string { return e.stage }
+func (e *inboxFailure) DiagnosticCode() string  { return e.code }
+func (e *inboxFailure) Is(target error) bool    { return e.storage && target == errStorageUnavailable }
+
+type inboxStopped struct{ cause error }
+
+func (*inboxStopped) Error() string   { return "inbox run stopped after cancellation" }
+func (e *inboxStopped) Unwrap() error { return e.cause }
+
+type inboxFailureObservation struct {
+	reference string
+	faults    map[string]errorreport.Fault
+	causes    map[string]error
+}
+
+func (o *inboxFailureObservation) context(ctx context.Context) context.Context {
+	if o.reference == "" {
+		o.reference = supportref.FromContext(ctx)
+	}
+	if o.reference == "" {
+		o.reference = supportref.New()
+	}
+	if supportref.FromContext(ctx) == "" {
+		ctx = supportref.WithContext(ctx, o.reference)
+	}
+	return ctx
+}
+
+func (o *inboxFailureObservation) observe(ctx context.Context, key, stage, code string, err error) context.Context {
+	if err == nil {
+		return o.context(ctx)
+	}
+	ctx = o.context(ctx)
+	fault := errorreport.ProjectFault(ctx, "pb", "inbox", stage, code, err)
+	if fault.Code == "" || fault.Outcome == "canceled" {
+		return ctx
+	}
+	if o.faults == nil {
+		o.faults = make(map[string]errorreport.Fault, 3)
+		o.causes = make(map[string]error, 3)
+	}
+	previous := o.faults[key]
+	unchanged := sameInboxFault(previous, fault)
+	o.faults[key], o.causes[key] = fault, err
+	if fault.SupportReference != "" && supportref.FromContext(ctx) == "" {
+		ctx = supportref.WithContext(ctx, fault.SupportReference)
+	}
+	if !unchanged && !errorreport.HTTPAttemptObserved(err) {
+		errorreport.Current().ObserveFailure(ctx, "pb", "inbox", stage, code, err)
+	}
+	if fault.SupportReference != "" {
+		o.reference = fault.SupportReference
+	}
+	return ctx
+}
+
+func (o *inboxFailureObservation) recovered(ctx context.Context, key string) context.Context {
+	ctx = o.context(ctx)
+	previous := o.faults[key]
+	delete(o.faults, key)
+	delete(o.causes, key)
+	if previous.Code == "" {
+		return ctx
+	}
+	ctx = supportref.WithContext(ctx, previous.SupportReference)
+	errorreport.Current().Observe(ctx, "pb", "inbox", "success", -1)
+	if recorder := diagnostics.FromContext(ctx); recorder != nil {
+		_ = recorder.RecordWithSupportReference(previous.Stage, "recovered", "info", previous.SupportReference, map[string]string{
+			"component": "paperboat-cli",
+			"operation": "inbox",
+		})
+	}
+	return ctx
+}
+
+func (o *inboxFailureObservation) handled(key string) {
+	delete(o.causes, key)
+}
+
+func (o *inboxFailureObservation) finalCause() error {
+	var result error
+	for _, key := range []string{"pending", "delivery", "receipt"} {
+		result = errors.Join(result, o.causes[key])
+	}
+	return result
+}
+
+func sameInboxFault(left, right errorreport.Fault) bool {
+	return left.Code != "" && left.Code == right.Code && left.Stage == right.Stage &&
+		left.Cause == right.Cause && left.Errno == right.Errno && left.HTTPStatus == right.HTTPStatus
+}
+
+func stoppedError(ctx context.Context, operationErr error) error {
+	if ctx == nil || ctx.Err() == nil {
+		return operationErr
+	}
+	ctxErr := ctx.Err()
+	cause := context.Cause(ctx)
+	if operationErr == nil && (cause == context.Canceled || cause == context.DeadlineExceeded) {
+		return ctxErr
+	}
+	causes := []error{ctxErr}
+	if cause != nil {
+		causes = append(causes, cause)
+	}
+	if operationErr != nil {
+		causes = append(causes, operationErr)
+	}
+	return &inboxStopped{cause: errors.Join(causes...)}
+}
+
+func controlRequestFailure(err error) error {
+	return &inboxFailure{message: "inbox control request failed", stage: "control_request", code: "control_request_failed", cause: err}
+}
 
 type downloadReader struct {
 	io.Reader
@@ -76,6 +226,26 @@ func (r *downloadReader) Read(p []byte) (int, error) {
 		r.err = err
 	}
 	return n, err
+}
+
+func closeResponseBodyOnCancel(ctx context.Context, body io.ReadCloser) func() {
+	stopped := make(chan struct{})
+	joined := make(chan struct{})
+	var closeOnce sync.Once
+	closeBody := func() { closeOnce.Do(func() { _ = body.Close() }) }
+	go func() {
+		defer close(joined)
+		select {
+		case <-ctx.Done():
+			closeBody()
+		case <-stopped:
+		}
+	}()
+	return func() {
+		close(stopped)
+		<-joined
+		closeBody()
+	}
 }
 
 func New(config Config) (*Inbox, error) {
@@ -95,41 +265,63 @@ func New(config Config) (*Inbox, error) {
 }
 
 func (i *Inbox) Run(ctx context.Context) error {
+	var failures inboxFailureObservation
+	ctx = failures.context(ctx)
 	for {
 		transfers, err := i.config.Client.Pending(ctx, i.config.SessionID, i.config.PollSeconds)
 		if err != nil {
+			failure := controlRequestFailure(err)
+			ctx = failures.observe(ctx, "pending", "control_request", "control_request_failed", failure)
 			if ctx.Err() != nil {
-				return ctx.Err()
+				return stoppedError(ctx, failures.finalCause())
 			}
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return stoppedError(ctx, failures.finalCause())
 			case <-time.After(time.Second):
 			}
 			continue
 		}
+		ctx = failures.recovered(ctx, "pending")
 		for _, transfer := range transfers {
 			path, deliveryErr := i.Deliver(ctx, transfer)
 			if deliveryErr != nil {
+				ctx = failures.observe(ctx, "delivery", "delivery", "file_transfer_failed", deliveryErr)
 				if ctx.Err() != nil {
-					return ctx.Err()
+					return stoppedError(ctx, failures.finalCause())
 				}
 				var interrupted *interruptedDownload
 				if errors.As(deliveryErr, &interrupted) {
 					select {
 					case <-ctx.Done():
-						return ctx.Err()
+						return stoppedError(ctx, failures.finalCause())
 					case <-time.After(time.Second):
 					}
 					continue
 				}
 				code := errorCode(deliveryErr)
-				_ = i.config.Client.Receipt(ctx, transfer.TransferID, code, "")
+				if err := i.config.Client.Receipt(ctx, transfer.TransferID, code, ""); err != nil {
+					failure := controlRequestFailure(err)
+					ctx = failures.observe(ctx, "receipt", "control_request", "control_request_failed", failure)
+					if ctx.Err() != nil {
+						return stoppedError(ctx, failures.finalCause())
+					}
+					continue
+				}
+				ctx = failures.recovered(ctx, "receipt")
+				failures.handled("delivery")
 				continue
 			}
+			ctx = failures.recovered(ctx, "delivery")
 			if err := i.config.Client.Receipt(ctx, transfer.TransferID, "stored", path); err != nil {
+				failure := controlRequestFailure(err)
+				ctx = failures.observe(ctx, "receipt", "control_request", "control_request_failed", failure)
+				if ctx.Err() != nil {
+					return stoppedError(ctx, failures.finalCause())
+				}
 				continue
 			}
+			ctx = failures.recovered(ctx, "receipt")
 			if i.config.Notify != nil {
 				i.config.Notify("Saved to " + path)
 			}
@@ -137,7 +329,7 @@ func (i *Inbox) Run(ctx context.Context) error {
 	}
 }
 
-func (i *Inbox) Deliver(ctx context.Context, manifest filetransfer.Manifest) (string, error) {
+func (i *Inbox) Deliver(ctx context.Context, manifest filetransfer.Manifest) (path string, resultErr error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	if err := i.validateManifest(manifest); err != nil {
@@ -157,7 +349,7 @@ func (i *Inbox) Deliver(ctx context.Context, manifest filetransfer.Manifest) (st
 	prior, hasPrior := receipts.Entries[manifest.TransferID]
 	if hasPrior {
 		if prior.Digest != manifest.SHA256 {
-			return "", errors.New("digest_mismatch")
+			return "", errDigestMismatch
 		}
 		name := strings.TrimPrefix(filepath.ToSlash(prior.Path), "Paperboat Inbox/")
 		if name == prior.Path || filepath.Base(name) != name {
@@ -166,14 +358,14 @@ func (i *Inbox) Deliver(ctx context.Context, manifest filetransfer.Manifest) (st
 		finalPath := filepath.Join(root, filepath.FromSlash(name))
 		if info, statErr := os.Lstat(finalPath); statErr == nil && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 {
 			if info.Size() != manifest.Size {
-				return "", errors.New("digest_mismatch")
+				return "", errDigestMismatch
 			}
 			matches, verifyErr := fileDigestMatches(finalPath, manifest.SHA256)
 			if verifyErr != nil {
 				return "", storageError(verifyErr)
 			}
 			if !matches {
-				return "", errors.New("digest_mismatch")
+				return "", errDigestMismatch
 			}
 			return prior.Path, nil
 		} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
@@ -187,16 +379,33 @@ func (i *Inbox) Deliver(ctx context.Context, manifest filetransfer.Manifest) (st
 		return "", storageError(err)
 	}
 	keepTemp := true
+	fileClosed := false
 	defer func() {
-		_ = file.Close()
+		var cleanupErr error
+		if !fileClosed {
+			cleanupErr = errors.Join(cleanupErr, file.Close())
+		}
 		if !keepTemp {
-			_ = os.Remove(tempPath)
+			if err := os.Remove(tempPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+				cleanupErr = errors.Join(cleanupErr, err)
+			}
+		}
+		if cleanupErr != nil {
+			if resultErr != nil {
+				cleanupErr = errors.Join(resultErr, cleanupErr)
+			}
+			resultErr = storageError(cleanupErr)
 		}
 	}()
 	info, err := file.Stat()
-	if err != nil || info.Size() < 0 || info.Size() > manifest.Size {
-		_ = file.Truncate(0)
-		return "", errors.New("invalid_size")
+	if err != nil {
+		return "", storageError(err)
+	}
+	if info.Size() < 0 || info.Size() > manifest.Size {
+		if err := file.Truncate(0); err != nil {
+			return "", storageError(errors.Join(errInvalidSize, err))
+		}
+		return "", errInvalidSize
 	}
 	offset := info.Size()
 	hash := sha256.New()
@@ -211,13 +420,17 @@ func (i *Inbox) Deliver(ctx context.Context, manifest filetransfer.Manifest) (st
 		if err != nil {
 			var failure *filetransfer.Error
 			if errors.As(err, &failure) && failure.StatusCode != http.StatusBadGateway && failure.StatusCode != http.StatusServiceUnavailable && failure.StatusCode != http.StatusGatewayTimeout {
-				return "", err
+				return "", &inboxFailure{message: "file content stream could not be opened", stage: "stream_open", code: "file_transfer_failed", cause: err}
 			}
-			return "", &interruptedDownload{cause: err}
+			return "", &interruptedDownload{cause: err, stage: "stream_open"}
 		}
-		defer response.Body.Close()
+		if response == nil || response.Body == nil {
+			return "", &inboxFailure{message: "file content stream could not be opened", stage: "stream_open", code: "file_transfer_failed", cause: errors.New("missing content response body")}
+		}
+		stopBodyClose := closeResponseBodyOnCancel(ctx, response.Body)
+		defer stopBodyClose()
 		if offset > 0 && response.StatusCode != http.StatusPartialContent || offset == 0 && response.StatusCode != http.StatusOK {
-			return "", errors.New("offset_conflict")
+			return "", errOffsetConflict
 		}
 		if _, err := file.Seek(offset, io.SeekStart); err != nil {
 			return "", storageError(err)
@@ -242,19 +455,21 @@ func (i *Inbox) Deliver(ctx context.Context, manifest filetransfer.Manifest) (st
 		}
 		if written > remaining {
 			keepTemp = false
-			return "", errors.New("invalid_size")
+			return "", errInvalidSize
 		}
 	}
 	if hex.EncodeToString(hash.Sum(nil)) != manifest.SHA256 {
 		keepTemp = false
-		return "", errors.New("digest_mismatch")
+		return "", errDigestMismatch
 	}
 	if err := file.Sync(); err != nil {
 		return "", storageError(err)
 	}
 	if err := file.Close(); err != nil {
+		fileClosed = true
 		return "", storageError(err)
 	}
+	fileClosed = true
 
 	var finalName, relativePath string
 	if hasPrior {
@@ -358,14 +573,14 @@ func fileDigestMatches(path, expected string) (bool, error) {
 
 func (i *Inbox) validateManifest(manifest filetransfer.Manifest) error {
 	if manifest.TransferID == "" || manifest.DestinationMachineID != i.config.MachineID || manifest.Size < 0 || manifest.Size > 50<<20 || len(manifest.SHA256) != 64 {
-		return errors.New("invalid_size")
+		return errInvalidSize
 	}
 	if _, err := hex.DecodeString(manifest.SHA256); err != nil || manifest.SHA256 != strings.ToLower(manifest.SHA256) {
-		return errors.New("digest_mismatch")
+		return errDigestMismatch
 	}
 	name := manifest.Basename
 	if name == "" || name == "." || name == ".." || filepath.Base(name) != name || strings.ContainsAny(name, "/\\\x00") {
-		return errors.New("invalid_path")
+		return errInvalidPath
 	}
 	return nil
 }
@@ -408,7 +623,7 @@ func availableName(root, basename string) (string, error) {
 		}
 		return "", err
 	}
-	return "", errors.New("resource_limit")
+	return "", errResourceLimit
 }
 
 func loadJournal(root string) (journal, error) {
@@ -449,13 +664,113 @@ func boundJournal(value *journal) {
 	}
 }
 
-func storageError(err error) error { return fmt.Errorf("storage_unavailable: %w", err) }
+func storageError(err error) error {
+	return &inboxFailure{
+		message: "inbox storage operation failed", stage: "delivery", code: "file_transfer_failed", storage: true,
+		cause: err,
+	}
+}
 
 func errorCode(err error) string {
-	for _, code := range []string{"invalid_path", "invalid_size", "digest_mismatch", "offset_conflict", "resource_limit", "canceled"} {
-		if strings.Contains(err.Error(), code) {
-			return code
+	pending := []error{err}
+	seen := make(map[error]struct{})
+	result := ""
+	leaves := 0
+	for visited := 0; len(pending) > 0; visited++ {
+		if visited >= 16 {
+			return "storage_unavailable"
+		}
+		current := pending[0]
+		pending = pending[1:]
+		if current == nil {
+			return "storage_unavailable"
+		}
+		value := reflect.ValueOf(current)
+		if value.Kind() == reflect.Pointer && value.IsNil() {
+			return "storage_unavailable"
+		}
+		if value.Type().Comparable() {
+			if _, ok := seen[current]; ok {
+				return "storage_unavailable"
+			}
+			seen[current] = struct{}{}
+		}
+
+		if failure, ok := current.(*inboxFailure); ok && failure.storage {
+			result, leaves = mergeReceiptCode(result, leaves, "storage_unavailable")
+			continue
+		}
+		switch wrapped := current.(type) {
+		case interface{ Unwrap() []error }:
+			children := wrapped.Unwrap()
+			if len(children) == 0 || len(children)+len(pending) > 16-visited {
+				return "storage_unavailable"
+			}
+			pending = append(pending, children...)
+			continue
+		case interface{ Unwrap() error }:
+			if child := wrapped.Unwrap(); child != nil {
+				pending = append(pending, child)
+				continue
+			}
+		}
+		code, ok := inboxReceiptCode(current)
+		if !ok {
+			return "storage_unavailable"
+		}
+		result, leaves = mergeReceiptCode(result, leaves, code)
+		if result == "storage_unavailable" && code != "storage_unavailable" {
+			return result
 		}
 	}
-	return "storage_unavailable"
+	if leaves == 0 || result == "" {
+		return "storage_unavailable"
+	}
+	return result
+}
+
+func mergeReceiptCode(current string, leaves int, next string) (string, int) {
+	if current != "" && current != next {
+		return "storage_unavailable", leaves + 1
+	}
+	return next, leaves + 1
+}
+
+func inboxReceiptCode(err error) (string, bool) {
+	switch failure := err.(type) {
+	case *filetransfer.Error:
+		if failure == nil {
+			return "", false
+		}
+		switch failure.Code {
+		case "invalid_path", "invalid_size", "digest_mismatch", "offset_conflict", "recipient_unavailable", "storage_unavailable", "resource_limit", "canceled", "delivery_timeout":
+			return failure.Code, true
+		}
+	case *inboxFailure:
+		if failure != nil && failure.storage {
+			return "storage_unavailable", true
+		}
+	}
+	if err == errInvalidPath {
+		return "invalid_path", true
+	}
+	if err == errInvalidSize {
+		return "invalid_size", true
+	}
+	if err == errDigestMismatch {
+		return "digest_mismatch", true
+	}
+	if err == errOffsetConflict {
+		return "offset_conflict", true
+	}
+	if err == errResourceLimit {
+		return "resource_limit", true
+	}
+	if err == context.Canceled {
+		return "canceled", true
+	}
+	if err == context.DeadlineExceeded {
+		return "delivery_timeout", true
+	}
+	return "", false
 }

@@ -3,6 +3,7 @@
 package processlifetime
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -24,7 +25,7 @@ func TestArmParentDeathTerminatesChild(t *testing.T) {
 	pidFile := os.Getenv(parentDeathPIDEnv)
 	switch os.Getenv(parentDeathRoleEnv) {
 	case "child":
-		if err := ArmParentDeath(); err != nil {
+		if err := ArmParentDeath(context.Background()); err != nil {
 			panic(err)
 		}
 		if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {

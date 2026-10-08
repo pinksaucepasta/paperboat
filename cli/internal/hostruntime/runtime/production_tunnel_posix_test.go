@@ -10,7 +10,7 @@ import (
 )
 
 // TestPOSIXProductionTunnelEnrollmentRetainsLifecycle protects Linux and
-// macOS client mode. The local endpoint is useful only when the same stable
+// macOS machines. The local endpoint is useful only when the same stable
 // daemon starts its activator and recovery loop.
 func TestPOSIXProductionTunnelEnrollmentRetainsLifecycle(t *testing.T) {
 	service, err := NewProductionTunnelEnrollment(ProductionTunnelEnrollmentConfig{

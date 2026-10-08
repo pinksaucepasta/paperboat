@@ -25,6 +25,7 @@ import (
 )
 
 const (
+	privateAccessGrantKind = "private_access_authorization"
 	privateAccessGrantPath = "/v1/edge/private-access/grants"
 	privateAccessMaxBody   = 64 << 10
 	privateAccessGrantTTL  = 2 * time.Minute
@@ -152,7 +153,7 @@ func (c *privateAccessGrantClient) issue(ctx context.Context, request privateAcc
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	var result privateAccessGrantResponse
-	if decoder.Decode(&result) != nil || decoder.Decode(&struct{}{}) != io.EOF || result.Schema != connectorprotocol.PrivateAccessSchema || result.Kind != connectorprotocol.PrivateAccessKind || result.Request.Validate(c.now()) != nil || result.Grant == "" || result.ExpiresAt != result.Request.ExpiresAt || result.RequestID != request.RequestID || result.CorrelationID != request.CorrelationID {
+	if decoder.Decode(&result) != nil || decoder.Decode(&struct{}{}) != io.EOF || result.Schema != connectorprotocol.PrivateAccessSchema || result.Kind != privateAccessGrantKind || result.Request.Validate(c.now()) != nil || result.Grant == "" || result.ExpiresAt != result.Request.ExpiresAt || result.RequestID != request.RequestID || result.CorrelationID != request.CorrelationID {
 		return privateAccessGrantResponse{}, privatepreviewproxy.ErrAccessTemporarilyUnavailable
 	}
 	return result, nil
@@ -402,10 +403,19 @@ func (s *PrivateAccessSource) Open(ctx context.Context, host string) (io.ReadWri
 	if err != nil {
 		return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
 	}
+	requestID, err := newAttachmentTraceID("request")
+	if err != nil {
+		return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
+	}
+	correlationID, err := newAttachmentTraceID("correlation")
+	if err != nil {
+		return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
+	}
 	expires := s.now().Add(privateAccessGrantTTL)
 	if entry.admission.ExpiresAt.Before(expires) {
 		expires = entry.admission.ExpiresAt
 	}
+	expires = expires.UTC().Truncate(time.Second)
 	binding := entry.admission.Binding
 	issue := privateAccessGrantIssue{
 		ResourceKind: "preview", ResourceID: binding.PreviewID, RouteID: binding.RouteID, Audience: "paperboat-preview-http",
@@ -413,13 +423,13 @@ func (s *PrivateAccessSource) Open(ctx context.Context, host string) (io.ReadWri
 		RouteGeneration: binding.RouteGeneration, ProcessGeneration: binding.ProcessGeneration, ConfigGeneration: binding.ConfigGeneration,
 		SessionGeneration: binding.LeaseGeneration, AssignmentGeneration: binding.LeaseGeneration,
 		EdgeNodeID: binding.EdgeNodeID, EdgeProcessEpoch: binding.EdgeProcessEpoch, Protocol: "http", Method: http.MethodConnect,
-		Host: normalized, Path: "/", IdempotencyKey: "access_" + identifier, RequestID: "request_" + identifier, CorrelationID: "correlation_" + identifier,
+		Host: normalized, Path: "/", IdempotencyKey: "access_" + identifier, RequestID: requestID, CorrelationID: correlationID,
 	}
 	grant, err := s.grants.issue(ctx, issue)
 	if err != nil {
 		return nil, err
 	}
-	if !privateAccessRequestMatchesIssue(grant.Request, issue) || grant.Request.AccountID != entry.identity.AccountID || grant.Request.DeviceID != entry.identity.HostID {
+	if !privateAccessRequestMatchesIssue(grant.Request, issue) || grant.Request.AccountID != entry.identity.AccountID || grant.Request.MachineID != entry.identity.HostID {
 		return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
 	}
 	s.mu.RLock()
@@ -452,7 +462,7 @@ func (s *PrivateAccessSource) Open(ctx context.Context, host string) (io.ReadWri
 			_ = stream.Close()
 			return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
 		}
-		return stream, nil
+		return newPrivateAccessorStream(stream, result.ExpiresAt, nil), nil
 	case http.StatusUnauthorized:
 		_ = stream.Close()
 		return nil, privatepreviewproxy.ErrAccessAuthentication
@@ -484,79 +494,110 @@ func (s *PrivateAccessSource) openAccessor(ctx context.Context, host string, a a
 
 func (s *PrivateAccessSource) openAccessorProtocol(ctx context.Context, host string, a accessorAdmission, protocol string) (io.ReadWriteCloser, error) {
 	if protocol != "http" && protocol != "tcp" || a.Protocol != map[string]string{"http": "http", "tcp": "private_tcp"}[protocol] {
-		return nil, privatepreviewproxy.ErrAccessForbidden
+		return nil, privateAccessStageFailure("admission", privatepreviewproxy.ErrAccessForbidden, 0)
 	}
 	s.mu.RLock()
 	closed := s.closed
 	s.mu.RUnlock()
 	if closed {
-		return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
+		return nil, privateAccessStageFailure("closed", nil, 0)
 	}
-	session, err := s.sessions.AcquirePrivateAccessCarrier(ctx, AccessorCarrierAdmission{AccountID: a.AccountID, DeviceID: a.DeviceID, AccessorPublicKey: a.AccessorPublicKey, AccessorThumbprint: a.AccessorThumbprint, TunnelID: a.TunnelID, CarrierConnectorID: a.CarrierConnectorID, CarrierSessionID: a.CarrierSessionID, ProcessGeneration: a.ProcessGeneration, ConfigGeneration: a.ConfigGeneration, EdgeNodeID: a.EdgeNodeID, EdgeProcessEpoch: a.EdgeProcessEpoch, EdgeCarrierServerSPKISHA256: a.EdgeCarrierServerSPKISHA256, EdgeCarrierServerCertificateChainPEM: a.EdgeCarrierServerCertificateChainPEM, EdgeEndpoints: a.EdgeEndpoints, ExpiresAt: a.ExpiresAt})
+	session, err := s.sessions.AcquirePrivateAccessCarrier(ctx, AccessorCarrierAdmission{AccountID: a.AccountID, MachineID: a.MachineID, AccessorPublicKey: a.AccessorPublicKey, AccessorThumbprint: a.AccessorThumbprint, TunnelID: a.TunnelID, CarrierConnectorID: a.CarrierConnectorID, CarrierSessionID: a.CarrierSessionID, ProcessGeneration: a.ProcessGeneration, ConfigGeneration: a.ConfigGeneration, EdgeNodeID: a.EdgeNodeID, EdgeProcessEpoch: a.EdgeProcessEpoch, EdgeCarrierServerSPKISHA256: a.EdgeCarrierServerSPKISHA256, EdgeCarrierServerCertificateChainPEM: a.EdgeCarrierServerCertificateChainPEM, EdgeEndpoints: a.EdgeEndpoints, ExpiresAt: a.ExpiresAt})
 	if err != nil {
-		return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
+		return nil, privateAccessStageFailure("carrier_acquire", err, 0)
 	}
 	id, err := newPrivateAccessIdentifier()
 	if err != nil {
 		_ = session.Release(context.WithoutCancel(ctx))
-		return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
+		return nil, privateAccessStageFailure("identifier", err, 0)
+	}
+	requestID, err := newAttachmentTraceID("request")
+	if err != nil {
+		_ = session.Release(context.WithoutCancel(ctx))
+		return nil, privateAccessStageFailure("request_trace", err, 0)
+	}
+	correlationID, err := newAttachmentTraceID("correlation")
+	if err != nil {
+		_ = session.Release(context.WithoutCancel(ctx))
+		return nil, privateAccessStageFailure("correlation_trace", err, 0)
 	}
 	expires := s.now().Add(privateAccessGrantTTL)
 	if a.ExpiresAt.Before(expires) {
 		expires = a.ExpiresAt
 	}
+	expires = expires.UTC().Truncate(time.Second)
 	audience, method, path, kind := "paperboat-tunnel-http", http.MethodConnect, "/", connectorprotocol.PrivateAccessHTTP
+	if a.ResourceKind == "preview" {
+		audience = "paperboat-preview-http"
+	}
 	if protocol == "tcp" {
 		audience, method, path, kind = "paperboat-tunnel-tcp", "", "", connectorprotocol.PrivateAccessTCP
 	}
-	issue := privateAccessGrantIssue{ResourceKind: a.ResourceKind, ResourceID: a.ResourceID, RouteID: a.RouteID, Audience: audience, ExpiresAt: expires, Nonce: "nonce_" + id, OperationID: a.OperationID, ConnectorID: a.ConnectorID, CarrierSessionID: a.CarrierSessionID, RouteGeneration: a.RouteGeneration, ProcessGeneration: a.ProcessGeneration, ConfigGeneration: a.ConfigGeneration, SessionGeneration: a.SessionGeneration, AssignmentGeneration: a.AssignmentGeneration, EdgeNodeID: a.EdgeNodeID, EdgeProcessEpoch: a.EdgeProcessEpoch, Protocol: protocol, Method: method, Host: host, Path: path, IdempotencyKey: "access_" + id, RequestID: "request_" + id, CorrelationID: "correlation_" + id}
+	issue := privateAccessGrantIssue{ResourceKind: a.ResourceKind, ResourceID: a.ResourceID, RouteID: a.RouteID, Audience: audience, ExpiresAt: expires, Nonce: "nonce_" + id, OperationID: a.OperationID, ConnectorID: a.ConnectorID, CarrierSessionID: a.CarrierSessionID, RouteGeneration: a.RouteGeneration, ProcessGeneration: a.ProcessGeneration, ConfigGeneration: a.ConfigGeneration, SessionGeneration: a.SessionGeneration, AssignmentGeneration: a.AssignmentGeneration, EdgeNodeID: a.EdgeNodeID, EdgeProcessEpoch: a.EdgeProcessEpoch, Protocol: protocol, Method: method, Host: host, Path: path, IdempotencyKey: "access_" + id, RequestID: requestID, CorrelationID: correlationID}
 	grant, err := s.grants.issue(ctx, issue)
 	if err != nil {
 		_ = session.Release(context.WithoutCancel(ctx))
-		return nil, err
+		return nil, privateAccessStageFailure("grant_issue", err, 0)
 	}
-	if !privateAccessRequestMatchesIssue(grant.Request, issue) || grant.Request.AccountID != a.AccountID || grant.Request.DeviceID != a.DeviceID {
+	if !privateAccessRequestMatchesIssue(grant.Request, issue) || grant.Request.AccountID != a.AccountID || grant.Request.MachineID != a.MachineID {
 		_ = session.Release(context.WithoutCancel(ctx))
-		return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
+		return nil, privateAccessStageFailure("grant_binding", nil, 0)
 	}
 	stream, err := session.Active.OpenStream(ctx, connector.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: session.Identity.AccountID, TunnelID: session.Identity.TunnelID, ConnectorID: session.Identity.ConnectorID, SessionID: session.Identity.SessionID, ProcessGeneration: session.Identity.ProcessGeneration, Generation: session.Identity.Generation, RouteID: a.RouteID, RequestID: issue.RequestID, Kind: kind})
 	if err != nil {
 		_ = session.Release(context.WithoutCancel(ctx))
-		return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
+		return nil, privateAccessStageFailure("stream_open", err, 0)
 	}
 	if err = connectorprotocol.WritePrivateAccessOpen(stream, connectorprotocol.PrivateAccessOpen{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Grant: grant.Grant, Request: grant.Request}); err != nil {
 		_ = stream.Close()
 		_ = session.Release(context.WithoutCancel(ctx))
-		return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
+		return nil, privateAccessStageFailure("stream_write", err, 0)
 	}
 	result, err := connectorprotocol.ReadPrivateAccessResult(stream, s.now())
 	if err != nil || result.Status != http.StatusOK || result.ExpiresAt.After(grant.Request.ExpiresAt) {
 		_ = stream.Close()
 		_ = session.Release(context.WithoutCancel(ctx))
 		if result.Status == 401 {
-			return nil, privatepreviewproxy.ErrAccessAuthentication
+			return nil, privateAccessStageFailure("stream_result", privatepreviewproxy.ErrAccessAuthentication, result.Status)
 		}
 		if result.Status == 403 {
-			return nil, privatepreviewproxy.ErrAccessForbidden
+			return nil, privateAccessStageFailure("stream_result", privatepreviewproxy.ErrAccessForbidden, result.Status)
 		}
-		return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
+		return nil, privateAccessStageFailure("stream_result", err, result.Status)
 	}
-	return &privateAccessorStream{ReadWriteCloser: stream, release: session.Release}, nil
+	return newPrivateAccessorStream(stream, result.ExpiresAt, session.Release), nil
 }
 
 type privateAccessorStream struct {
 	io.ReadWriteCloser
-	once    sync.Once
-	release func(context.Context) error
+	once     sync.Once
+	release  func(context.Context) error
+	expiryMu sync.Mutex
+	expiry   *time.Timer
+}
+
+func newPrivateAccessorStream(stream io.ReadWriteCloser, expires time.Time, release func(context.Context) error) *privateAccessorStream {
+	s := &privateAccessorStream{ReadWriteCloser: stream, release: release}
+	s.expiryMu.Lock()
+	s.expiry = time.AfterFunc(time.Until(expires), func() { _ = s.Close() })
+	s.expiryMu.Unlock()
+	return s
 }
 
 func (s *privateAccessorStream) Close() error {
 	var result error
 	s.once.Do(func() {
+		s.expiryMu.Lock()
+		if s.expiry != nil {
+			s.expiry.Stop()
+		}
+		s.expiryMu.Unlock()
 		result = s.ReadWriteCloser.Close()
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		result = errors.Join(result, s.release(ctx))
+		if s.release != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			result = errors.Join(result, s.release(ctx))
+		}
 	})
 	return result
 }
@@ -607,3 +648,24 @@ func privateAccessRequestMatchesIssue(got connectorprotocol.PrivateAccessRequest
 }
 
 var _ privatepreviewproxy.AccessSource = (*PrivateAccessSource)(nil)
+
+// Emit only bounded diagnostic categories, never credentials, origin addresses,
+// payloads or raw transport errors.
+func privateAccessStageFailure(stage string, err error, status int) error {
+	code := "unavailable"
+	result := privatepreviewproxy.ErrAccessTemporarilyUnavailable
+	switch {
+	case errors.Is(err, privatepreviewproxy.ErrAccessAuthentication):
+		code, result = "authentication", privatepreviewproxy.ErrAccessAuthentication
+	case errors.Is(err, privatepreviewproxy.ErrAccessForbidden):
+		code, result = "forbidden", privatepreviewproxy.ErrAccessForbidden
+	case errors.Is(err, ErrMachineAttachmentSessionInvalid):
+		code = "carrier_identity_invalid"
+	case errors.Is(err, context.DeadlineExceeded):
+		code = "deadline"
+	case errors.Is(err, context.Canceled):
+		code = "canceled"
+	}
+	attachmentDiagnosticLogger.Warn("private access failed", "stage", stage, "code", code, "status", status)
+	return result
+}

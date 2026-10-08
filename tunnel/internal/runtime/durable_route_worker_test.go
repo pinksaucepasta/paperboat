@@ -74,8 +74,15 @@ func TestRouteWorkerSeparatesCanonicalHTTPPublicAndPrivateTCPFromLegacyRoutes(t 
 		{RouteID: "legacy_route", Revision: 1, Environment: "env", Generation: 1, NodeID: "edge_1", Kind: string(route.HelperHTTPSWSS), PublicHost: "helper.example.test", TargetHost: "127.0.0.1", TargetPort: 8080},
 	}, Complete: true, Canonical: true}}
 	observer := &appendRouteObserver{}
+	invalidated := false
 	worker := &RouteWorker{
 		Registry: canonical, LegacyRegistry: legacy, Source: source, Observer: observer, State: state,
+		InvalidateIngressAuthority: func() {
+			if len(observer.observations) == 0 || canonical.HasActiveGeneration() {
+				t.Error("authority invalidated outside ACK-before-promotion fence")
+			}
+			invalidated = true
+		},
 		NodeID: "edge_1", ProcessEpoch: "edge_epoch_1", Carrier: carrier, PublicTCP: carrier, DurableAdmissions: durable,
 		Ready: func(context.Context, []route.RouteRule) error { return nil }, Pulse: make(chan time.Time),
 	}
@@ -87,6 +94,9 @@ func TestRouteWorkerSeparatesCanonicalHTTPPublicAndPrivateTCPFromLegacyRoutes(t 
 		defer cancel()
 		_ = worker.Shutdown(ctx)
 	}()
+	if !invalidated {
+		t.Fatal("ready route published without invalidating ingress authority")
+	}
 	lease, _, err := canonical.Acquire(context.Background(), assignment.PublicHost, "/normal")
 	if err != nil {
 		t.Fatalf("canonical HTTP route unavailable: %v", err)
@@ -114,8 +124,13 @@ func TestRouteWorkerSeparatesCanonicalHTTPPublicAndPrivateTCPFromLegacyRoutes(t 
 	if carrier.routeProbes[publicTCP.TunnelID] != 1 {
 		t.Fatalf("public TCP connector probe count = %d", carrier.routeProbes[publicTCP.TunnelID])
 	}
-	if len(observer.observations) != 4 {
-		t.Fatalf("observations = %+v, want HTTP, public TCP, private TCP, and legacy", observer.observations)
+	if len(observer.observations) != 7 {
+		t.Fatalf("observations = %+v, want each canonical prepared then ready, plus legacy", observer.observations)
+	}
+	for i := 0; i < 3; i++ {
+		if observer.observations[i].ObservedState != "prepared" || observer.observations[i+3].ObservedState != "ready" || observer.observations[i].AssignmentID != observer.observations[i+3].AssignmentID {
+			t.Fatal("canonical preparation/publication tuples differ")
+		}
 	}
 	var legacyObservation *control.RouteObservation
 	for index := range observer.observations {
@@ -245,7 +260,7 @@ func TestRouteWorkerIsolatesCanonicalTunnelActivation(t *testing.T) {
 		defer cancel()
 		_ = worker.Shutdown(ctx)
 	}()
-	if len(observer.observations) != 1 || observer.observations[0].AssignmentID != tunnelB.AssignmentID || observer.observations[0].ObservedState != "ready" {
+	if len(observer.observations) != 2 || observer.observations[0].AssignmentID != tunnelB.AssignmentID || observer.observations[0].ObservedState != "prepared" || observer.observations[1].AssignmentID != tunnelB.AssignmentID || observer.observations[1].ObservedState != "ready" {
 		t.Fatalf("initial observations = %+v, want only tunnel B ready", observer.observations)
 	}
 	if _, err := canonical.Match(tunnelA.PublicHost, "/"); !errors.Is(err, route.ErrNoMatch) {
@@ -362,7 +377,7 @@ func TestRouteWorkerRestartDetachesSupersededActiveAssignmentAfterReplacement(t 
 	defer func() {
 		_ = restarted.Shutdown(ctx)
 	}()
-	if len(restartedObserver.observations) != 2 || restartedObserver.observations[0].AssignmentID != "assignment_new" || restartedObserver.observations[1].AssignmentID != "assignment_old" || restartedObserver.observations[1].ObservedState != "detached" {
+	if len(restartedObserver.observations) != 3 || restartedObserver.observations[0].AssignmentID != "assignment_new" || restartedObserver.observations[0].ObservedState != "prepared" || restartedObserver.observations[1].AssignmentID != "assignment_new" || restartedObserver.observations[1].ObservedState != "ready" || restartedObserver.observations[2].AssignmentID != "assignment_old" || restartedObserver.observations[2].ObservedState != "detached" {
 		t.Fatalf("restart observations = %+v, want new ready and old detached", restartedObserver.observations)
 	}
 }
@@ -579,5 +594,102 @@ func TestTLSCanonicalAssignmentUsesOpaqueReadinessAndExactDomains(t *testing.T) 
 		if err := validateCanonicalAssignment(candidate, candidate.NodeID, candidate.EdgeProcessEpoch); err == nil {
 			t.Fatal("unsafe TLS assignment accepted")
 		}
+	}
+}
+
+type publicationOrderObserver struct {
+	registry                  *route.Registry
+	host                      string
+	readyCalls, preparedCalls int
+	rejectReadyOnce           bool
+}
+
+func (o *publicationOrderObserver) ObserveRoutes(_ context.Context, _ string, values []control.RouteObservation) error {
+	for _, v := range values {
+		switch v.ObservedState {
+		case "prepared":
+			o.preparedCalls++
+		case "ready":
+			o.readyCalls++
+			if _, err := o.registry.Match(o.host, "/"); err != nil {
+				return errors.New("ready reported before local publication")
+			}
+			if o.rejectReadyOnce {
+				o.rejectReadyOnce = false
+				return errors.New("publication confirmation unavailable")
+			}
+		}
+	}
+	return nil
+}
+func TestCanonicalReadyFollowsPublicationAndRetriesConfirmation(t *testing.T) {
+	public, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thumb, _ := connectorprotocol.IdentityThumbprint(public)
+	a := durableWorkerAssignment(base64.RawURLEncoding.EncodeToString(public), thumb, "route_ready", "assignment_ready", route.TunnelHTTPSWSS)
+	a.State = "staged"
+	registry := route.NewRegistry("", "")
+	admissions, err := datacarrier.NewDurableAdmissionRegistry(datacarrier.DurableAdmissionRegistryConfig{NodeID: "edge_1", ProcessEpoch: "edge_epoch_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer := &publicationOrderObserver{registry: registry, host: a.PublicHost, rejectReadyOnce: true}
+	worker := &RouteWorker{Registry: registry, Source: &workerSnapshotSource{snapshot: control.RouteSnapshot{Routes: []control.RouteAssignment{a}, Complete: true, Canonical: true}}, Observer: observer, State: node.New("edge_1"), NodeID: "edge_1", ProcessEpoch: "edge_epoch_1", Carrier: &workerCarrierProbe{}, DurableAdmissions: admissions, Ready: func(context.Context, []route.RouteRule) error { return nil }, DrainTimeout: time.Second}
+	if err := worker.reconcile(context.Background()); err == nil {
+		t.Fatal("lost confirmation reported successful")
+	}
+	if _, err := registry.Match(a.PublicHost, "/"); err != nil {
+		t.Fatalf("prepared publication absent: %v", err)
+	}
+	if err := worker.reconcile(context.Background()); err != nil {
+		t.Fatalf("same publication confirmation retry failed: %v", err)
+	}
+	if observer.preparedCalls != 1 || observer.readyCalls != 2 {
+		t.Fatalf("prepared=%d ready=%d", observer.preparedCalls, observer.readyCalls)
+	}
+}
+
+func TestCanonicalPrimaryDomainAndReadyAliasPublishOnce(t *testing.T) {
+	for _, kind := range []string{route.MatchExact, route.MatchManagedExact, route.MatchOneLabelWildcard} {
+		t.Run(kind, func(t *testing.T) {
+			key, thumbprint := durableWorkerIdentity(t)
+			a := durableWorkerAssignment(key, thumbprint, "route_http", "assignment_http", route.TunnelHTTPSWSS)
+			a.MatchType = kind
+			a.MatchHostname = "app.customer.example"
+			aliasType := route.MatchExact
+			host := "app.customer.example"
+			if kind == route.MatchOneLabelWildcard {
+				a.MatchHostname = ""
+				a.WildcardSuffix = "apps.customer.example"
+				host = "*.apps.customer.example"
+				aliasType = kind
+			}
+			if kind == route.MatchManagedExact {
+				a.MatchHostname = "11111111-1111-4111-8111-111111111111.tunnels.example.test"
+				host = a.MatchHostname
+			}
+			before := canonicalRouteRules([]control.RouteAssignment{a})
+			a.DomainBindings = []control.DomainBinding{{ID: "domain_primary", Hostname: host, MatchType: aliasType, Generation: 4}}
+			after := canonicalRouteRules([]control.RouteAssignment{a})
+			if len(before) != 1 || len(after) != 1 || after[0].ID != a.RouteID || after[0].Target != a.RouteID || after[0].MatchType != before[0].MatchType || after[0].Hostname != before[0].Hostname || after[0].WildcardSuffix != before[0].WildcardSuffix {
+				t.Fatalf("TLS activation changed primary matcher: before=%+v after=%+v", before, after)
+			}
+			registry := route.NewGenerationRegistry(4)
+			for index, rules := range [][]route.RouteRule{before, after} {
+				generation := uint64(index + 1)
+				if err := registry.StageGeneration(generation, rules); err != nil {
+					t.Fatalf("TLS generation %d rejected: %v", generation, err)
+				}
+				if err := registry.MarkGenerationReady(generation); err != nil {
+					t.Fatal(err)
+				}
+				if err := registry.ActivateGeneration(context.Background(), generation, time.Second); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+		})
 	}
 }

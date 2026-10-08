@@ -22,7 +22,7 @@ func TestInitialSnapshotAcceptsServerConnectorIDWithOpaqueLocalCredentialReferen
 	const (
 		serverConnectorID = "con_server_assigned"
 		localReference    = "protected-file://paperboat/connectors/credential_local_01"
-		stableEndpointID  = "123e4567-e89b-12d3-a456-426614174000"
+		stableEndpointID  = "endpoint_123e4567-e89b-42d3-a456-426614174000"
 	)
 	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	root := t.TempDir()
@@ -46,7 +46,7 @@ func TestInitialSnapshotAcceptsServerConnectorIDWithOpaqueLocalCredentialReferen
 		Credential:         hoststate.CredentialReference{Reference: localReference, Generation: 4},
 		RotationGeneration: 4,
 	}
-	payload := []byte(`{"schema":"paperboat.preview-tunnel/v1","kind":"tunnel_config_snapshot","tunnel_id":"tunnel_01","generation":1,"name":"demo","desired_state":"active","access_mode":"public","stable_endpoint":"https://123e4567-e89b-12d3-a456-426614174000.tunnels.pprbt.dev","expires_at":null,"routes":[{"id":"route_01","name":"default","protocol":"http","match_type":"managed_exact","match_hostname":"preview.example.test","wildcard_suffix":"","path_prefix":null,"origin_scheme":"http","origin_address":"127.0.0.1:3000","preserve_host":true,"host_override":null,"tls_verification":"not_applicable","tls_server_name":null,"ca_reference":null,"mtls_credential_reference":null,"connect_timeout_ms":10000,"idle_timeout_ms":90000,"max_concurrent_streams":128,"desired_state":"active"}]}`)
+	payload := []byte(`{"schema":"paperboat.preview-tunnel/v1","kind":"tunnel_config_snapshot","tunnel_id":"tunnel_01","generation":1,"name":"demo","desired_state":"active","access_mode":"public","stable_endpoint":"https://123e4567-e89b-12d3-a456-426614174000.tunnels.pprbt.dev","stable_endpoint_id":"endpoint_123e4567-e89b-42d3-a456-426614174000","expires_at":null,"routes":[{"id":"route_01","name":"default","protocol":"http","match_type":"managed_exact","match_hostname":"preview.example.test","wildcard_suffix":"","path_prefix":null,"origin_scheme":"http","origin_address":"127.0.0.1:3000","preserve_host":true,"host_override":null,"tls_verification":"not_applicable","tls_server_name":null,"ca_reference":null,"mtls_credential_reference":null,"connect_timeout_ms":10000,"idle_timeout_ms":90000,"max_concurrent_streams":128,"desired_state":"active"}]}`)
 	snapshot, err := connectorprotocol.NewSnapshot("tunnel_01", 1, payload)
 	if err != nil {
 		_ = manager.Shutdown(context.Background())

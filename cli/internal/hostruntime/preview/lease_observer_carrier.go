@@ -44,6 +44,7 @@ type LeaseObserverCarrier struct {
 	cancel   context.CancelFunc
 	done     chan struct{}
 	closeErr error
+	observed Lease
 }
 
 type LeaseObserverCarrierConfig struct {
@@ -79,6 +80,29 @@ func (c *LeaseObserverCarrier) SetLeaseReader(reader LeaseReader) error {
 	}
 	c.reader = reader
 	return nil
+}
+
+// CheckOrigin uses the same connection and TLS policy as the host carrier.
+// The CLI calls it only after acquiring an authenticated local owner lease,
+// before publishing a preview. It does not replace host/edge readiness.
+func (c *LeaseObserverCarrier) CheckOrigin(ctx context.Context, target LeaseTarget) error {
+	probeCtx, cancel := context.WithTimeout(ctx, defaultDataCarrierPreviewDialTimeout)
+	defer cancel()
+	connection, err := dialPreviewOrigin(probeCtx, target)
+	if err != nil {
+		return err
+	}
+	return connection.Close()
+}
+
+// ReadinessDetail returns only dimensions from a validated owner-bound read.
+func (c *LeaseObserverCarrier) ReadinessDetail() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.observed.ID == "" {
+		return "No readiness response was received; check `pb doctor` and retry."
+	}
+	return fmt.Sprintf("Last readiness: allocation %s, edge %s, origin %s. Check `pb doctor` and retry.", c.observed.AllocationState, c.observed.EdgeState, c.observed.OriginState)
 }
 
 // MachineAuthSource exposes the renewable machine identity used for create,
@@ -151,6 +175,9 @@ func (c *LeaseObserverCarrier) Run(ctx context.Context, lease Lease, ready func(
 		if err := validateObservedLease(lease, observed); err != nil {
 			return err
 		}
+		c.mu.Lock()
+		c.observed = observed
+		c.mu.Unlock()
 		observed.CreateOperationID = lease.CreateOperationID
 		switch {
 		case isReadyLease(observed):

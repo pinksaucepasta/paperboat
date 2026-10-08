@@ -1,37 +1,41 @@
 package tunnelenrollment
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
 )
 
 // assemblyIngressAuthority independently reads the machine-authenticated server
-// projection. It is scoped to one connector assembly, never shared by hosts.
-type assemblyIngressAuthority struct {
-	source    *HTTPSProductionAssemblySource
-	request   ActivationRequest
-	mu        sync.Mutex
-	body      []byte
-	decisions []connectorprotocol.IngressDecision
-	fetched   time.Time
-}
+// projection. Each candidate owns its authority and bounded cache until drained.
+// Only fixed categories and validated protocol error codes are emitted.
+var ingressDiagnosticLogger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-func (a *assemblyIngressAuthority) bind(w connectorprotocol.Welcome, r tunnelmanager.ApplyRequest) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.body, _ = json.Marshal(carrierBootstrapRequest{Schema: carrierBootstrapSchema, Kind: "carrier_bootstrap_request", SessionID: w.SessionID, ProcessGeneration: a.request.ProcessGeneration, ConfigGeneration: r.Snapshot.Generation, ConfigContentHash: r.Snapshot.ContentHash})
-	a.decisions = nil
-	a.fetched = time.Time{}
+type assemblyIngressAuthority struct {
+	source      *HTTPSProductionAssemblySource
+	request     ActivationRequest
+	generation  uint64
+	contentHash string
+	mu          sync.Mutex
+	body        []byte
+	decisions   []connectorprotocol.IngressDecision
+	fetched     time.Time
 }
 
 func (a *assemblyIngressAuthority) lookup(ctx context.Context, open connectorprotocol.StreamOpen, claimed connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error) {
+	// The carrier has already authenticated this open tuple. Independently
+	// fence it to this assembly and immutable candidate before any lookup.
+	if open.Validate() != nil || open.AccountID != a.request.AccountID || open.TunnelID != a.request.TunnelID || open.ConnectorID != a.request.ConnectorID || open.ProcessGeneration != a.request.ProcessGeneration || open.Generation != a.generation || a.contentHash == "" {
+		ingressDiagnosticLogger.WarnContext(ctx, "durable ingress authority rejected", "code", "candidate_identity")
+		return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
+	}
 	if claimed.Binding.Audience != "public" {
 		if a.source.browserIngress == nil {
 			return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
@@ -40,8 +44,20 @@ func (a *assemblyIngressAuthority) lookup(ctx context.Context, open connectorpro
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if len(a.body) == 0 || ctx.Err() != nil {
+	if ctx.Err() != nil {
+		ingressDiagnosticLogger.WarnContext(ctx, "durable ingress authority rejected", "code", "unbound_or_cancelled")
 		return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
+	}
+	// Only one session's bounded cache exists per candidate; reconnecting a
+	// generation replaces it rather than retaining session-indexed state.
+	body, err := json.Marshal(carrierBootstrapRequest{Schema: carrierBootstrapSchema, Kind: "carrier_bootstrap_request", SessionID: open.SessionID, ProcessGeneration: a.request.ProcessGeneration, ConfigGeneration: a.generation, ConfigContentHash: a.contentHash})
+	if err != nil {
+		return connectorprotocol.IngressDecision{}, err
+	}
+	if !bytes.Equal(body, a.body) {
+		a.body = body
+		a.decisions = nil
+		a.fetched = time.Time{}
 	}
 	now := time.Now().UTC()
 	if a.fetched.IsZero() || now.Sub(a.fetched) >= connectorprotocol.IngressRefreshInterval {
@@ -49,15 +65,16 @@ func (a *assemblyIngressAuthority) lookup(ctx context.Context, open connectorpro
 		if err != nil {
 			var bootstrap *CarrierBootstrapError
 			if errors.As(err, &bootstrap) {
-				slog.WarnContext(ctx, "durable ingress authority refresh failed", "code", bootstrap.Code, "status", bootstrap.StatusCode)
+				ingressDiagnosticLogger.WarnContext(ctx, "durable ingress authority refresh failed", "code", bootstrap.Code, "status", bootstrap.StatusCode)
 			} else {
-				slog.WarnContext(ctx, "durable ingress authority refresh failed", "code", "unavailable")
+				ingressDiagnosticLogger.WarnContext(ctx, "durable ingress authority refresh failed", "code", "unavailable")
 			}
 			a.decisions = nil
 			a.fetched = time.Time{}
 			return connectorprotocol.IngressDecision{}, err
 		}
-		if d.AccountID != open.AccountID || d.TunnelID != open.TunnelID || d.ConnectorID != open.ConnectorID || d.SessionID != open.SessionID || d.ProcessGeneration != open.ProcessGeneration || d.ConfigGeneration != open.Generation || len(d.IngressDecisions) > 4096 {
+		if d.AccountID != open.AccountID || d.TunnelID != open.TunnelID || d.ConnectorID != open.ConnectorID || d.SessionID != open.SessionID || d.ProcessGeneration != open.ProcessGeneration || d.ConfigGeneration != open.Generation || d.ConfigContentHash != a.contentHash || len(d.IngressDecisions) > 4096 {
+			ingressDiagnosticLogger.WarnContext(ctx, "durable ingress authority rejected", "code", "descriptor_identity")
 			return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
 		}
 		a.decisions = d.IngressDecisions
@@ -68,5 +85,17 @@ func (a *assemblyIngressAuthority) lookup(ctx context.Context, open connectorpro
 			return d, nil
 		}
 	}
+	code := "authority_binding"
+	for _, d := range a.decisions {
+		if d.IssuedAt.After(time.Now().UTC().Add(connectorprotocol.MaxClockSkew)) {
+			code = "authority_not_yet_valid"
+			break
+		}
+		if !d.ExpiresAt.After(time.Now().UTC()) {
+			code = "authority_expired"
+			break
+		}
+	}
+	ingressDiagnosticLogger.WarnContext(ctx, "durable ingress authority rejected", "code", code)
 	return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
 }

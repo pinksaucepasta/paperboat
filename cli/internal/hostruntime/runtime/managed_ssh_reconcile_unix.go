@@ -14,6 +14,7 @@ import (
 	"time"
 
 	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 )
 
@@ -22,13 +23,13 @@ type managedSSHKeyReconciler struct {
 	identity         managedSSHIdentitySource
 	registration     runtimeidentity.Registration
 	workerGeneration uint64
-	setID            string
 	publicKeys       []string
 	home             string
 	ownerUID         uint32
 	interval         time.Duration
 	timeout          time.Duration
 	sequence         atomic.Uint64
+	ready            atomic.Bool
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -36,7 +37,7 @@ type managedSSHKeyReconciler struct {
 }
 
 func (s *managedSSHKeyReconciler) Start(ctx context.Context) error {
-	if ctx == nil || s.client == nil || s.identity == nil || s.registration.MachineID == "" || s.registration.InstallationGeneration < 1 || s.workerGeneration == 0 || s.setID == "" || len(s.publicKeys) == 0 || s.home == "" || s.interval <= 0 || s.timeout <= 0 {
+	if ctx == nil || s.client == nil || s.identity == nil || s.registration.MachineID == "" || s.registration.InstallationGeneration < 1 || s.workerGeneration == 0 || len(s.publicKeys) == 0 || s.home == "" || s.interval <= 0 || s.timeout <= 0 {
 		return ErrProductionInvalid
 	}
 	s.mu.Lock()
@@ -87,9 +88,10 @@ func (s *managedSSHKeyReconciler) run(ctx context.Context, done chan<- struct{})
 }
 
 func (s *managedSSHKeyReconciler) reconcile(ctx context.Context) error {
+	s.ready.Store(false)
 	sequence := s.sequence.Add(1)
 	suffix := s.registration.MachineID + "-" + strconv.FormatUint(uint64(s.registration.InstallationGeneration), 10) + "-" + strconv.FormatUint(s.workerGeneration, 10) + "-refresh-" + strconv.FormatUint(sequence, 10)
-	keys, active, err := reconcileManagedSSHAuthorityWithOperations(ctx, s.client, s.identity, s.registration, s.workerGeneration, s.setID, s.publicKeys, "managed-ssh-observe-"+suffix, "managed-ssh-keys-"+suffix)
+	keys, active, err := reconcileManagedSSHAuthorityWithOperations(ctx, s.client, s.identity, s.registration, s.workerGeneration, s.publicKeys, "managed-ssh-observe-"+suffix, "managed-ssh-keys-"+suffix)
 	if err != nil {
 		_, cleanupErr := reconcilePlatformAuthorizedKeys(s.home, s.ownerUID, nil)
 		if cleanupErr == nil && retryableManagedSSHAuthorityError(err) {
@@ -101,10 +103,12 @@ func (s *managedSSHKeyReconciler) reconcile(ctx context.Context) error {
 		keys.Keys = nil
 	}
 	_, err = reconcilePlatformAuthorizedKeys(s.home, s.ownerUID, keys.Keys)
+	s.ready.Store(err == nil && active)
 	return err
 }
 
 func (s *managedSSHKeyReconciler) Shutdown(ctx context.Context) error {
+	s.ready.Store(false)
 	s.mu.Lock()
 	cancel, done := s.cancel, s.done
 	s.cancel, s.done = nil, nil
@@ -144,4 +148,11 @@ func retryableManagedSSHAuthorityError(err error) bool {
 	}
 	var network *net.OpError
 	return errors.As(err, &network)
+}
+
+func (s *managedSSHKeyReconciler) CapabilityHealth() health.Capability {
+	if s.ready.Load() {
+		return health.Capability{State: health.Ready}
+	}
+	return health.Capability{State: health.Unavailable, Reason: "authority_unavailable", RetryAfterMs: uint64(s.interval / time.Millisecond)}
 }

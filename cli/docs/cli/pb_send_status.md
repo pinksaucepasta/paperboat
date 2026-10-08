@@ -6,9 +6,9 @@ Inspect a file transfer
 
 Inspect a file transfer
 
-Inspect one outgoing batch's delivery progress and receipt by transfer ID. --on selects the device when needed; successful publication is distinct from final receiver verification.
+Inspect one outgoing batch's delivery progress and receipt by transfer ID. --on selects the machine when needed; successful publication is distinct from final receiver verification.
 
-Send publishes a batch to a device's Paperboat Inbox. Completion means the receiver verified and recorded the files; status and cancel act on a transfer ID. A default destination can be set separately, while --to chooses one for the current send.
+Send publishes a batch to a machine's Paperboat Inbox. Completion means the receiver verified and recorded the files; status and cancel act on a transfer ID. A default destination can be set separately, while --to chooses one for the current send.
 
 JSON output is supported with --json.
 
@@ -31,9 +31,10 @@ pb send status <transfer-id> [flags]
       --config string      path to the CLI config file
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO
 
-* [pb send](pb_send.md)	 - Send files to a device's Paperboat Inbox
+* [pb send](pb_send.md)	 - Send files to a machine's Paperboat Inbox
 

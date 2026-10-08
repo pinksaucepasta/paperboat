@@ -2,7 +2,9 @@ package releaseeligibility
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,6 +122,48 @@ func TestFileStoreRejectsUnsafePaths(t *testing.T) {
 		if _, err := NewFileStore(path); !errors.Is(err, ErrInvalidStore) {
 			t.Fatalf("path=%q err=%v", path, err)
 		}
+	}
+}
+
+func TestFileStoreFilesystemFailureRetainsCauseWithoutExposingPath(t *testing.T) {
+	privatePath := filepath.Join(t.TempDir(), "private-user-state", "deferral.json")
+	store, err := NewFileStore(privatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, present, err := store.CurrentDeferral(context.Background())
+	var pathErr *os.PathError
+	if err == nil || present || !errors.Is(err, os.ErrNotExist) || !errors.As(err, &pathErr) || strings.Contains(err.Error(), privatePath) || strings.Contains(err.Error(), "private-user-state") {
+		t.Fatalf("present=%v error=%v", present, err)
+	}
+}
+
+func TestFileStoreInvalidRecordRetainsParserCauseWithoutExposingContents(t *testing.T) {
+	directory := privateStoreTestDirectory(t)
+	store, err := NewFileStore(filepath.Join(directory, "deferral.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const privateContents = `{"schema":"PRIVATE_DEFERRAL_CONTENT",`
+	if err := os.WriteFile(store.Path, []byte(privateContents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, present, err := store.CurrentDeferral(context.Background())
+	var syntaxErr *json.SyntaxError
+	if err == nil || present || !errors.Is(err, ErrInvalidRecord) || (!errors.As(err, &syntaxErr) && !errors.Is(err, io.ErrUnexpectedEOF)) || err.Error() != "release eligibility record is invalid" || strings.Contains(err.Error(), "PRIVATE_DEFERRAL_CONTENT") || strings.Contains(err.Error(), store.Path) {
+		t.Fatalf("present=%v error=%v", present, err)
+	}
+}
+
+func TestFileStoreInvalidDeferralRetainsPolicyCause(t *testing.T) {
+	directory := privateStoreTestDirectory(t)
+	store, err := NewFileStore(filepath.Join(directory, "deferral.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.Save(context.Background(), releasepolicy.Deferral{})
+	if err == nil || !errors.Is(err, ErrInvalidRecord) || !errors.Is(err, releasepolicy.ErrInvalidPolicy) || err.Error() != "release eligibility record is invalid" {
+		t.Fatalf("invalid deferral error=%v", err)
 	}
 }
 

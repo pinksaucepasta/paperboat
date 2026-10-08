@@ -65,7 +65,7 @@ func verifyWindowsSSHLoopbackOwner(ctx context.Context, connection *net.TCPConn,
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return context.Cause(ctx)
+			return managedSSHContextError(ctx)
 		case <-timer.C:
 		}
 	}

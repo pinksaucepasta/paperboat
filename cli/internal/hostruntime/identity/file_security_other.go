@@ -2,7 +2,9 @@
 
 package identity
 
-import "os"
+import (
+	"os"
+)
 
 func secureIdentityFile(_ string, info os.FileInfo, _ bool) bool {
 	return info != nil && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0

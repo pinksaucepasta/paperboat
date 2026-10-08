@@ -3,7 +3,6 @@ package managedssh
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"os"
@@ -56,7 +55,7 @@ func runOneShotSSHLoopback(ctx context.Context, stream LoopbackSSHStream, accept
 	listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
 		_ = stream.Close()
-		return fmt.Errorf("%w: %v", ErrSSHLoopbackAccept, err)
+		return managedSSHFailure("listener_bind", ErrSSHLoopbackAccept, err)
 	}
 	closeResources := func(connection *net.TCPConn) {
 		_ = listener.Close()
@@ -67,7 +66,7 @@ func runOneShotSSHLoopback(ctx context.Context, stream LoopbackSSHStream, accept
 	}
 	if err := listener.SetDeadline(time.Now().Add(acceptTimeout)); err != nil {
 		closeResources(nil)
-		return fmt.Errorf("%w: %v", ErrSSHLoopbackAccept, err)
+		return managedSSHFailure("listener_bind", ErrSSHLoopbackAccept, err)
 	}
 	port := uint16(listener.Addr().(*net.TCPAddr).Port)
 	process, err := start(port)
@@ -96,9 +95,9 @@ func runOneShotSSHLoopback(ctx context.Context, stream LoopbackSSHStream, accept
 			closeResources(nil)
 			_ = stopAndWaitSSHProcess(process, processDone)
 			if ctx.Err() != nil {
-				return context.Cause(ctx)
+				return managedSSHContextError(ctx)
 			}
-			return fmt.Errorf("%w: %v", ErrSSHLoopbackAccept, result.err)
+			return managedSSHFailure("listener_accept", ErrSSHLoopbackAccept, result.err)
 		}
 		connection = result.connection
 		remote, ok := connection.RemoteAddr().(*net.TCPAddr)
@@ -111,7 +110,7 @@ func runOneShotSSHLoopback(ctx context.Context, stream LoopbackSSHStream, accept
 			closeResources(connection)
 			_ = stopAndWaitSSHProcess(process, processDone)
 			if ctx.Err() != nil {
-				return context.Cause(ctx)
+				return managedSSHContextError(ctx)
 			}
 			return errors.Join(ErrSSHLoopbackOwner, err)
 		}
@@ -124,7 +123,7 @@ func runOneShotSSHLoopback(ctx context.Context, stream LoopbackSSHStream, accept
 	case <-ctx.Done():
 		closeResources(nil)
 		_ = stopAndWaitSSHProcess(process, processDone)
-		return context.Cause(ctx)
+		return managedSSHContextError(ctx)
 	}
 
 	bridgeDone := make(chan error, 1)
@@ -178,7 +177,7 @@ func runOneShotSSHLoopback(ctx context.Context, stream LoopbackSSHStream, accept
 			if !bridgeOK {
 				<-bridgeDone
 			}
-			return context.Cause(ctx)
+			return managedSSHContextError(ctx)
 		case <-shutdownC:
 			closeResources(connection)
 			if !processOK {
@@ -243,7 +242,7 @@ func bridgeOneShotSSHLoopback(ctx context.Context, local *net.TCPConn, stream Lo
 	}()
 	err := errors.Join(<-results, <-results)
 	if ctx.Err() != nil {
-		return context.Cause(ctx)
+		return managedSSHContextError(ctx)
 	}
 	return err
 }

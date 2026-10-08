@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"sort"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
 )
 
@@ -20,6 +22,7 @@ type PublicTCPAuthority interface {
 }
 
 type PublicTCPListenerConfig struct {
+	OnFailure              func(context.Context, string, error)
 	ListenHost             string
 	InfrastructureHostname string
 	Authority              PublicTCPAuthority
@@ -130,11 +133,11 @@ func (p *PublicTCPListeners) Start(ctx context.Context) error {
 		p.mu.Unlock()
 		return errors.New("public TCP listeners already started")
 	}
-	p.ctx, p.cancel = context.WithCancel(context.Background())
+	p.ctx, p.cancel = context.WithCancel(context.WithoutCancel(ctx))
 	p.done = make(chan struct{})
 	done := p.done
 	p.mu.Unlock()
-	_ = p.reconcile(ctx)
+	p.observe(ctx, "public_tcp_reconcile", p.reconcile(ctx))
 	go p.run(done)
 	return nil
 }
@@ -149,7 +152,7 @@ func (p *PublicTCPListeners) run(done chan struct{}) {
 			return
 		case <-ticker.C:
 			ctx, cancel := context.WithTimeout(p.ctx, p.cfg.Interval)
-			_ = p.reconcile(ctx)
+			p.observe(ctx, "public_tcp_reconcile", p.reconcile(ctx))
 			cancel()
 		}
 	}
@@ -227,6 +230,21 @@ func (p *PublicTCPListeners) accept(ctx context.Context, live *publicTCPListener
 	for {
 		connection, err := live.listener.Accept()
 		if err != nil {
+			p.mu.Lock()
+			for id, current := range p.listeners {
+				if current == live {
+					delete(p.listeners, id)
+					break
+				}
+			}
+			p.mu.Unlock()
+			failureCtx := ctx
+			if ctx.Err() == nil {
+				failureCtx = context.WithoutCancel(ctx)
+			}
+			live.cancel()
+			_ = live.listener.Close()
+			p.observe(failureCtx, "public_tcp_listener", err)
 			return
 		}
 		select {
@@ -239,12 +257,36 @@ func (p *PublicTCPListeners) accept(ctx context.Context, live *publicTCPListener
 				defer p.streams.Done()
 				defer func() { <-p.connections }()
 
-				_ = p.cfg.Routes.ForwardPublicTCP(ctx, connection, decision, p.cfg.Authority.ResolveDecision)
+				p.observe(ctx, "public_tcp_stream", p.cfg.Routes.ForwardPublicTCP(ctx, connection, decision, p.cfg.Authority.ResolveDecision))
 			}()
 		default:
 			_ = connection.Close()
 		}
 	}
+}
+
+func (p *PublicTCPListeners) observe(ctx context.Context, phase string, err error) {
+	if err == nil || p.cfg.OnFailure == nil {
+		return
+	}
+	if requestErrorLeaves(err, func(leaf error) bool {
+		return leaf == context.Canceled || leaf == io.EOF || ctxErr(ctx) == context.Canceled && (leaf == net.ErrClosed || leaf == io.ErrClosedPipe)
+	}, true) {
+		return
+	}
+	// A sole control failure was already published at the authenticated HTTP boundary.
+	current := err
+	for depth := 0; current != nil && depth < 8; depth++ {
+		if attempt, ok := current.(*control.RequestFailure); ok && attempt != nil {
+			return
+		}
+		wrapped, ok := current.(interface{ Unwrap() error })
+		if !ok {
+			break
+		}
+		current = wrapped.Unwrap()
+	}
+	p.cfg.OnFailure(ctx, phase, err)
 }
 
 func (p *PublicTCPListeners) withdrawAll() {
@@ -299,7 +341,15 @@ func (p *PublicTCPListeners) WrapTLSListener(listener net.Listener, httpsHostnam
 	}
 	// Opaque TLS streams, raw TCP streams and pending TLS inspections share
 	// the existing process admission budget.
-	shared := newSharedTLSListener(listener, p.cfg.Authority, p.cfg.Routes, httpsHostname, p.connections, p.cfg.InfrastructureHostname)
+	shared := newSharedTLSListener(listener, p.cfg.Authority, p.cfg.Routes, httpsHostname, p.connections, p.cfg.InfrastructureHostname, func(_ context.Context, phase string, cause error) {
+		p.mu.Lock()
+		ctx := p.ctx
+		p.mu.Unlock()
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		p.observe(ctx, phase, cause)
+	})
 	p.sharedTLS = shared
 	return shared, nil
 }

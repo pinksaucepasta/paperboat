@@ -60,6 +60,9 @@ func (a *Authority) PeerPath(endpointID string) (string, error) {
 	return "", ErrAdmission
 }
 func (a *Authority) replaceLocked() error {
+	a.relay.mu.Lock()
+	a.relay.updateUsagePeersLocked(a.current.Peers)
+	a.relay.mu.Unlock()
 	type admittedPeer struct {
 		binding NetworkBinding
 		scopes  []NetworkScope

@@ -3,20 +3,21 @@
 package main
 
 import (
-	"errors"
-	"fmt"
+	"context"
 	"os/exec"
-	"syscall"
+	"path/filepath"
+
+	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 )
 
-func executeManagedSSHTool(tool string, arguments, environment []string) error {
+func executeManagedSSHTool(ctx context.Context, tool string, arguments, environment []string) error {
 	path, err := exec.LookPath(tool)
 	if err != nil {
-		return fmt.Errorf("%s is not installed or not available on PATH: %w", tool, err)
+		return managedssh.NativeLaunchError{Err: err}
 	}
-	argv := append([]string{path}, arguments...)
-	if err := syscall.Exec(path, argv, environment); err != nil {
-		return fmt.Errorf("start %s: %w", tool, err)
+	path, err = filepath.Abs(path)
+	if err != nil {
+		return managedssh.NativeLaunchError{Err: err}
 	}
-	return errors.New("managed SSH tool unexpectedly returned")
+	return (managedssh.OpenSSHExecutor{}).Execute(ctx, path, arguments, environment)
 }

@@ -18,7 +18,10 @@ func createTemporaryFile(directory, base string) (*os.File, string, error) {
 // before this store is used for privileged update eligibility there.
 func validateParentSecurity(path string, _ os.FileInfo) error {
 	info, err := os.Lstat(path)
-	if err != nil || info == nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o022 != 0 {
+	if err != nil {
+		return safeStoreFailure("release eligibility directory could not be inspected", ErrUnsafePath, err)
+	}
+	if info == nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o022 != 0 {
 		return ErrUnsafePath
 	}
 	return nil

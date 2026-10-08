@@ -214,6 +214,8 @@ func inspectorStatus(err error) (int, string, map[string]string) {
 	switch {
 	case err == nil:
 		return http.StatusOK, "", nil
+	case errors.Is(err, ErrUpstream):
+		return http.StatusServiceUnavailable, "inspector_unavailable", nil
 	case errors.Is(err, inspector.ErrInvalid) || errors.Is(err, ErrInvalid):
 		return http.StatusBadRequest, "invalid_inspector_request", nil
 	case errors.Is(err, inspector.ErrDisabled):
@@ -240,8 +242,6 @@ func inspectorStatus(err error) (int, string, map[string]string) {
 		return http.StatusConflict, "inspector_replay_ambiguous", nil
 	case errors.Is(err, inspector.ErrDropped):
 		return http.StatusServiceUnavailable, "inspector_over_budget", nil
-	case errors.Is(err, ErrUpstream):
-		return http.StatusServiceUnavailable, "inspector_unavailable", nil
 	default:
 		return http.StatusInternalServerError, "inspector_unavailable", nil
 	}
@@ -465,13 +465,21 @@ func (s *Service) authorizeOp(ctx context.Context, request *http.Request, kind, 
 	}
 	decision, err := s.authorize(ctx, token, kind, resource, route, string(action))
 	if err != nil {
+		if !expectedAuthorityOutcome(err) {
+			err = unexpectedAuthorityFailure(err)
+			observeAuthorityFailure(ctx, err)
+		}
 		return inspector.Credential{}, err
 	}
 	now := s.currentTime()
 	if decision.Principal == "" || decision.ResourceKind != kind || decision.ResourceID != resource || decision.RouteID != route ||
 		decision.ResourceGeneration == 0 || decision.RouteGeneration == 0 || decision.TargetGeneration == 0 ||
-		decision.IssuedAt.IsZero() || decision.ExpiresAt.IsZero() || !decision.ExpiresAt.After(decision.IssuedAt) ||
-		!decision.ExpiresAt.After(now) || now.Sub(decision.IssuedAt) > inspector.AuthorityFreshness {
+		decision.IssuedAt.IsZero() || decision.ExpiresAt.IsZero() || !decision.ExpiresAt.After(decision.IssuedAt) {
+		err := invalidAuthorityDecision()
+		observeAuthorityFailure(ctx, err)
+		return inspector.Credential{}, err
+	}
+	if !decision.ExpiresAt.After(now) || now.Sub(decision.IssuedAt) > inspector.AuthorityFreshness {
 		return inspector.Credential{}, ErrDenied
 	}
 	return inspector.Credential{

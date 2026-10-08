@@ -18,7 +18,9 @@ import (
 
 	"github.com/Microsoft/go-winio"
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
+	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
 	"golang.org/x/sys/windows"
 )
 
@@ -146,17 +148,32 @@ func (s *Server) Run(ctx context.Context) error {
 		connection, acceptErr := listener.Accept()
 		if acceptErr != nil {
 			if ctx.Err() != nil || errors.Is(acceptErr, net.ErrClosed) || errors.Is(acceptErr, winio.ErrPipeListenerClosed) {
-				return errors.Join(ctx.Err(), s.config.Applier.Close(context.Background()))
+				return errors.Join(ctx.Err(), s.config.Applier.Close(context.WithoutCancel(ctx)))
 			}
 			return acceptErr
 		}
-		_ = s.serve(connection)
-		_ = connection.Close()
+		s.serveConnection(ctx, connection)
 	}
 }
 
+func (s *Server) serveConnection(ctx context.Context, connection net.Conn) {
+	serveErr := s.serveContext(ctx, connection)
+	closeErr := connection.Close()
+	observeUnexpected(ctx, "service", "lifecycle", "service_failed", errors.Join(serveErr, closeErr))
+}
+
 func (s *Server) serve(connection net.Conn) error {
-	_ = connection.SetDeadline(time.Now().Add(5 * time.Second))
+	return s.serveContext(context.Background(), connection)
+}
+
+func (s *Server) serveContext(ctx context.Context, connection net.Conn) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	requestCtx, cancelRequest := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelRequest()
+	deadline, _ := requestCtx.Deadline()
+	_ = connection.SetDeadline(deadline)
 	reader := bufio.NewReaderSize(io.LimitReader(connection, windowsHostServiceMaxRequestSize+1), windowsHostServiceMaxRequestSize+1)
 	body, err := reader.ReadBytes('\n')
 	if err != nil || len(body) == 0 || len(body) > windowsHostServiceMaxRequestSize {
@@ -185,7 +202,7 @@ func (s *Server) serve(connection net.Conn) error {
 		if request.Mode != "" || request.Version != 0 || request.Artifact == nil || request.AuthorizedKeys != nil || s.config.Updates == nil {
 			return s.respond(connection, s.errorResponse("invalid_request"))
 		}
-		version, activateErr := s.config.Updates.Activate(context.Background(), *request.Artifact)
+		version, activateErr := s.config.Updates.Activate(requestCtx, *request.Artifact)
 		if activateErr != nil {
 			return s.respond(connection, s.errorResponse("update_activation_failed"))
 		}
@@ -197,10 +214,13 @@ func (s *Server) serve(connection net.Conn) error {
 		if request.Mode != "" || request.Version != 0 || request.Artifact != nil || request.AuthorizedKeys == nil || len(*request.AuthorizedKeys) > maxAuthorizedKeys || s.config.AuthorizedKeys == nil {
 			return s.respond(connection, s.errorResponse("invalid_request"))
 		}
-		reconcileCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		changed, reconcileErr := s.config.AuthorizedKeys.ReconcileAuthorizedKeys(reconcileCtx, append([]string(nil), (*request.AuthorizedKeys)...))
-		cancel()
+		changed, reconcileErr := s.config.AuthorizedKeys.ReconcileAuthorizedKeys(requestCtx, append([]string(nil), (*request.AuthorizedKeys)...))
 		if reconcileErr != nil {
+			if !allErrorLeavesMatch(reconcileErr, func(leaf error) bool {
+				return leaf == windowsopenssh.ErrQualificationEnrollment || normalRequestLeaf(leaf)
+			}) {
+				errorreport.Current().CaptureFailure(requestCtx, "paperboatd", "ssh", "peer_authority", "managed_ssh_failed", failAt("peer_authority", "managed_ssh_failed", reconcileErr))
+			}
 			return s.respond(connection, s.errorResponse("ssh_authorized_keys_reconcile_failed"))
 		}
 		response := s.errorResponse("")
@@ -220,7 +240,8 @@ func (s *Server) serve(connection net.Conn) error {
 	if request.Version == current.DesiredVersion && current.Status == "applied" {
 		return s.respond(connection, s.response(current))
 	}
-	if err := s.apply(context.Background(), request.Mode, request.Version); err != nil {
+	if err := s.apply(requestCtx, request.Mode, request.Version); err != nil {
+		captureUnexpected(requestCtx, "service", "reconciliation", "availability_apply_failed", err)
 		s.mu.Lock()
 		result := s.state
 		s.mu.Unlock()
@@ -236,8 +257,9 @@ func (s *Server) apply(ctx context.Context, mode string, version int64) error {
 	s.mu.Lock()
 	s.state.DesiredMode, s.state.DesiredVersion, s.state.Status, s.state.ErrorCode = mode, version, "pending", ""
 	if err := s.persistLocked(); err != nil {
+		s.state.Status, s.state.ErrorCode = "error", "availability_apply_failed"
 		s.mu.Unlock()
-		return err
+		return failAt("diagnostic_storage", "diagnostic_storage_unavailable", err)
 	}
 	s.mu.Unlock()
 	err := s.config.Applier.Apply(ctx, mode)
@@ -246,17 +268,21 @@ func (s *Server) apply(ctx context.Context, mode string, version int64) error {
 	if err != nil {
 		s.state.ObservedMode, s.state.ObservedVersion = mode, version
 		s.state.ObservedAt, s.state.Status, s.state.ErrorCode = s.config.Now().UTC(), "error", "availability_apply_failed"
-		return errors.Join(err, s.persistLocked())
+		return failAt("reconciliation", "availability_apply_failed", errors.Join(err, s.persistLocked()))
 	}
 	s.state.ObservedMode, s.state.ObservedVersion = mode, version
 	s.state.ObservedAt, s.state.Status, s.state.ErrorCode = s.config.Now().UTC(), "applied", ""
-	return s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		s.state.Status, s.state.ErrorCode = "error", "availability_apply_failed"
+		return failAt("diagnostic_storage", "diagnostic_storage_unavailable", err)
+	}
+	return nil
 }
 func (s *Server) State() State { s.mu.Lock(); defer s.mu.Unlock(); return s.state }
 func (s *Server) load() error {
 	body, err := os.ReadFile(s.config.StatePath)
 	if err != nil {
-		return err
+		return failAt("diagnostic_storage", "diagnostic_storage_unavailable", err)
 	}
 	if len(body) > 16<<10 {
 		return ErrInvalidConfig
@@ -270,6 +296,10 @@ func (s *Server) load() error {
 	}
 	s.state = state
 	return nil
+}
+
+func isPeerClosedError(err error) bool {
+	return err == windows.ERROR_BROKEN_PIPE || err == windows.ERROR_NO_DATA || err == windows.ERROR_PIPE_NOT_CONNECTED
 }
 func (s *Server) persistLocked() error {
 	body, err := json.Marshal(s.state)

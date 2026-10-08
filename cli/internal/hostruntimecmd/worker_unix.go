@@ -41,7 +41,7 @@ func runHostd(ctx context.Context, args []string, output io.Writer) error {
 	}
 	return runHostdWith(ctx, output,
 		func(ctx context.Context, version string, environ func(string) string) (hostdHost, error) {
-			return hostruntime.NewProductionHost(ctx, version, environ)
+			return hostruntime.NewProductionOwner(ctx, version, environ)
 		},
 		func(ctx context.Context, request workerupdate.StartRequest) (workerupdate.Worker, error) {
 			return (workerupdate.ExecStarter{}).Start(ctx, request)
@@ -77,10 +77,24 @@ func runHostdWith(ctx context.Context, output io.Writer, newHost hostdHostFactor
 		_ = notifier.Degraded("hostd startup failed")
 		return err
 	}
-	server, err := hostdproto.NewServer(hostdproto.SocketConfig{SocketPath: socket, StatePath: filepath.Join(filepath.Dir(tokenPath), "hostd", "fence.json"), UID: os.Geteuid(), GID: os.Getegid(), Token: token, APIMin: 1, APIMax: 1, Workloads: host.WorkloadStatus, UpdateGate: host.UpdateGate(), RequestTimeout: 31 * time.Minute})
+	template := workerupdate.StartRequest{Executable: executable, Release: workerupdate.Release{Version: buildinfo.Version, Platform: gort.GOOS, Architecture: gort.GOARCH, HostdAPIMin: 1, HostdAPIMax: 1}, WorkerID: "runtime-" + strings.ReplaceAll(buildinfo.Version, " ", "-"), UID: os.Geteuid(), GID: os.Getegid(), HostdEndpoint: socket, Capability: token, MutationsDisabled: true}
+	owned := newOwnedWorkers(ctx, template, startWorker)
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = owned.shutdown(shutdownCtx)
+	}()
+	server, err := hostdproto.NewServer(hostdproto.SocketConfig{SocketPath: socket, StatePath: filepath.Join(filepath.Dir(tokenPath), "hostd", "fence.json"), UID: os.Geteuid(), GID: os.Getegid(), Token: token, APIMin: 1, APIMax: 1, Workloads: host.WorkloadStatus, UpdateGate: host.UpdateGate(), WorkerControl: owned, RequestTimeout: 31 * time.Minute})
 	if err != nil {
 		shutdownHostd(host)
 		return err
+	}
+	if owner, ok := host.(*hostruntime.ProcessOwner); ok {
+		owner.BindLifecycle(socket+".workloads", token, server.Status, server.AcquireActive)
+		if err := owner.StartBridge(ctx); err != nil {
+			shutdownHostd(host)
+			return err
+		}
 	}
 	serverCtx, stopServer := context.WithCancel(ctx)
 	serverDone := make(chan error, 1)
@@ -90,12 +104,12 @@ func runHostdWith(ctx context.Context, output io.Writer, newHost hostdHostFactor
 		shutdownHostd(host)
 		return err
 	}
-	worker, err := startWorker(ctx, workerupdate.StartRequest{Executable: executable, Release: workerupdate.Release{Version: buildinfo.Version, Platform: gort.GOOS, Architecture: gort.GOARCH, HostdAPIMin: 1, HostdAPIMax: 1}, WorkerID: "runtime-" + strings.ReplaceAll(buildinfo.Version, " ", "-"), UID: os.Geteuid(), GID: os.Getegid(), HostdEndpoint: socket, Capability: token, MutationsDisabled: true})
+	_, err = owned.HandleWorkerControl(ctx, hostdproto.WorkerControlRequest{Operation: "start", WorkerID: template.WorkerID, Executable: executable, Version: template.Release.Version, APIMin: 1, APIMax: 1})
 	if err == nil {
-		_, err = worker.Ready(ctx)
+		_, err = owned.HandleWorkerControl(ctx, hostdproto.WorkerControlRequest{Operation: "ready", WorkerID: template.WorkerID})
 	}
 	if err == nil {
-		_, err = worker.Activate(ctx)
+		_, err = owned.HandleWorkerControl(ctx, hostdproto.WorkerControlRequest{Operation: "activate", WorkerID: template.WorkerID})
 	}
 	if err != nil {
 		stopServer()
@@ -103,7 +117,7 @@ func runHostdWith(ctx context.Context, output io.Writer, newHost hostdHostFactor
 		return err
 	}
 	if err := notifier.Ready(); err != nil {
-		_ = worker.Stop(context.Background())
+		_ = owned.shutdown(context.Background())
 		stopServer()
 		shutdownHostd(host)
 		return err
@@ -133,7 +147,7 @@ run:
 	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	stopErr := worker.Stop(shutdownCtx)
+	stopErr := owned.shutdown(shutdownCtx)
 	stopServer()
 	serverErr := <-serverDone
 	return errors.Join(runErr, stopErr, serverErr, notifier.Stopping(), host.ShutdownHostd(shutdownCtx))
@@ -168,6 +182,9 @@ func shutdownHostd(host hostdHost) {
 }
 
 func runWorker(ctx context.Context, args []string, input io.Reader, output, stderr io.Writer) error {
+	return runWorkerWith(ctx, args, input, output, stderr, newWorkerFeature)
+}
+func runWorkerWith(ctx context.Context, args []string, input io.Reader, output, stderr io.Writer, newFeature workerFeatureFactory) error {
 	flags := flag.NewFlagSet("worker", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	socket := flags.String("socket", "", "hostd lifecycle socket")
@@ -232,6 +249,23 @@ func runWorker(ctx context.Context, args []string, input io.Reader, output, stde
 	if err != nil {
 		return err
 	}
+	feature, err := newFeature(ctx, *socket, token, *workerID, active.Epoch, *version)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = feature.Shutdown(shutdownCtx)
+	}()
+	// Activation fences the lease before feature startup. Readiness means the
+	// feature is usable and its heartbeat is fresh after that startup completes.
+	if err := feature.Health(ctx); err != nil {
+		return err
+	}
+	if err := candidate.Heartbeat(ctx); err != nil {
+		return fmt.Errorf("hostd worker heartbeat: %w", err)
+	}
 	fmt.Fprintf(output, "active %d %d\n", active.Epoch, active.APIVersion)
 	ticker := time.NewTicker(*heartbeat)
 	defer ticker.Stop()
@@ -240,6 +274,9 @@ func runWorker(ctx context.Context, args []string, input io.Reader, output, stde
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
+			if err := feature.Health(ctx); err != nil {
+				return err
+			}
 			if err := candidate.Heartbeat(ctx); err != nil {
 				return fmt.Errorf("hostd worker heartbeat: %w", err)
 			}

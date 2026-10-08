@@ -27,7 +27,7 @@ func TestCollectTunnelHostDiagnosticsUsesLoopbackNoProxyAndStrictBounds(t *testi
 	if err := tracker.Update(health.HealthUpdate{
 		Dimension: health.DimensionService, Status: health.StatusReady, Code: "ready",
 		Summary: "Runtime is ready.", RepairAction: "No action is required.",
-		CorrelationID: "corr_test", Retry: health.RetryNone,
+		CorrelationID: "correlation_test", Retry: health.RetryNone,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestCollectTunnelHostDiagnosticsUsesLoopbackNoProxyAndStrictBounds(t *testi
 		At: time.Unix(100, 0).UTC(), Severity: observability.SeverityInfo,
 		Component: observability.DimensionConfig, Name: "config_applied", Code: "ready",
 		Outcome: observability.OutcomeStateChange, Message: "Configuration applied.",
-		CorrelationID: "corr_test", Generations: observability.Generations{Config: 7}, Retry: observability.RetryNone,
+		CorrelationID: "correlation_test", Generations: observability.Generations{Config: 7}, Retry: observability.RetryNone,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestTunnelDoctorBundleIncludesTypedHostDiagnosticsAndEvidence(t *testing.T)
 	}
 	if err := tracker.Update(health.HealthUpdate{
 		Dimension: health.DimensionService, Status: health.StatusReady, Code: "ready",
-		Summary: "Runtime is ready.", RepairAction: "No action is required.", CorrelationID: "corr_test", Retry: health.RetryNone,
+		Summary: "Runtime is ready.", RepairAction: "No action is required.", CorrelationID: "correlation_test", Retry: health.RetryNone,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestTunnelDoctorBundleIncludesTypedHostDiagnosticsAndEvidence(t *testing.T)
 	if _, err := events.Record(observability.EventInput{
 		At: time.Unix(100, 0).UTC(), Severity: observability.SeverityInfo, Component: observability.DimensionConfig,
 		Name: "config_applied", Code: "ready", Outcome: observability.OutcomeStateChange, Message: "Configuration applied.",
-		CorrelationID: "corr_test", Generations: observability.Generations{Config: 7}, Retry: observability.RetryNone,
+		CorrelationID: "correlation_test", Generations: observability.Generations{Config: 7}, Retry: observability.RetryNone,
 	}); err != nil {
 		t.Fatal(err)
 	}

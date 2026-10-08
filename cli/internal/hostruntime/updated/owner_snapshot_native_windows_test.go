@@ -55,7 +55,7 @@ func TestNativeWindowsSystemOwnerReadiness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := WindowsConfig{Source: config.Source, StateRoot: layout.UpdateStateRoot, RuntimeStateRoot: config.StateRoot, Binary: layout.Binary, BinaryRollback: layout.BinaryRollback, BinaryStaged: layout.BinaryStaged, OwnerSID: config.OwnerSID, MachineID: config.MachineID, RepositoryURL: config.Artifact.RepositoryURL, TokenFile: config.TokenFile, InstallState: installPath, ControlSocket: layout.UpdaterSocket, HostdSocket: layout.HostdSocket, HealthURL: "http://" + config.ListenAddress + "/healthz", ActiveVersion: config.Source.Version, Architecture: config.Artifact.Architecture, SetupMode: config.SetupMode}
+	cfg := WindowsConfig{Source: config.Source, StateRoot: layout.UpdateStateRoot, RuntimeStateRoot: config.StateRoot, Binary: layout.Binary, BinaryRollback: layout.BinaryRollback, BinaryStaged: layout.BinaryStaged, OwnerSID: config.OwnerSID, MachineID: config.MachineID, RepositoryURL: config.Artifact.RepositoryURL, TokenFile: config.TokenFile, InstallState: installPath, ControlSocket: layout.UpdaterSocket, HostdSocket: layout.HostdSocket, HealthURL: "http://" + config.ListenAddress + "/healthz", ActiveVersion: config.Source.Version, Architecture: config.Artifact.Architecture}
 	backend := newWindowsSCMActivationBackend(cfg)
 	journal, err := loadWindowsActivationJournal(cfg)
 	if err != nil {

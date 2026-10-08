@@ -32,7 +32,7 @@ func TestDecodeRejectsUnknownAndTrailingFields(t *testing.T) {
 }
 
 func TestWorkerEnvironmentKeepsControlAndReleasePlanesOutsideSystemPAC(t *testing.T) {
-	environment := workerEnvironment(Request{ControlURL: "https://api.pprbt.dev", Artifact: bootstrap.ArtifactTarget{RepositoryURL: "https://get.pprbt.dev/tuf"}, SetupMode: "host"})
+	environment := workerEnvironment(Request{ControlURL: "https://api.pprbt.dev", Artifact: bootstrap.ArtifactTarget{RepositoryURL: "https://get.pprbt.dev/tuf"}})
 	if environment["PAPERBOAT_NO_PROXY"] != "api.pprbt.dev,get.pprbt.dev" {
 		t.Fatalf("PAPERBOAT_NO_PROXY=%q", environment["PAPERBOAT_NO_PROXY"])
 	}
@@ -197,7 +197,7 @@ func TestFinalizeUninstallFailsClosedBeforeRemovingState(t *testing.T) {
 	}
 	serviceErr := errors.New("native service removal failed")
 	powerRestores := 0
-	err := finalizeUninstall(context.Background(), Request{SetupMode: "host"}, paths,
+	err := finalizeUninstall(context.Background(), Request{}, paths,
 		func(context.Context) error { return serviceErr },
 		func(context.Context) error { powerRestores++; return nil })
 	if !errors.Is(err, serviceErr) {
@@ -233,7 +233,7 @@ func TestFinalizeUninstallFailsClosedBeforeRemovingStateOnPowerRestoreError(t *t
 		}
 	}
 	powerErr := errors.New("power baseline restore failed")
-	if err := finalizeUninstall(context.Background(), Request{SetupMode: "host"}, paths,
+	if err := finalizeUninstall(context.Background(), Request{}, paths,
 		func(context.Context) error { return nil },
 		func(context.Context) error { return powerErr }); !errors.Is(err, powerErr) {
 		t.Fatalf("finalize error=%v want=%v", err, powerErr)
@@ -278,6 +278,7 @@ func TestValidateBindsSuppliedBinaryAndInvokingUID(t *testing.T) {
 	}
 	for name, mutate := range map[string]func(*Request){
 		"wrong invoking uid": func(r *Request) { r.UID++ },
+		"missing generation": func(r *Request) { r.InstallationGeneration = 0 },
 		"network listener":   func(r *Request) { r.HelperListenAddress = "0.0.0.0:8080" },
 		"control downgrade":  func(r *Request) { r.ControlURL = "http://control.example.test" },
 		"relative state":     func(r *Request) { r.StateRoot = "state" },
@@ -391,8 +392,8 @@ func validRequest(t *testing.T) Request {
 		t.Fatal(err)
 	}
 	return Request{
-		SetupMode: "host", InstallationGeneration: 1,
-		Schema: SchemaV1, Platform: runtime.GOOS, User: account.Username, UID: uid, Group: group.Name, GID: gid,
+		InstallationGeneration: 1,
+		Schema:                 SchemaV1, Platform: runtime.GOOS, User: account.Username, UID: uid, Group: group.Name, GID: gid,
 		Executable: executable, Artifact: manifest, Source: source,
 		Home: account.HomeDir, Path: "/usr/bin:/bin", StateRoot: state, WorkspaceRoot: account.HomeDir,
 		ControlURL: "https://control.example.test", UserMachineID: "um_test", Shell: shell,

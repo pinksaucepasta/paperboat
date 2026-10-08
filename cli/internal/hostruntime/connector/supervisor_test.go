@@ -4,9 +4,13 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 type admissionSource struct {
@@ -69,6 +73,7 @@ func (w *recordingWaiter) Wait(ctx context.Context, delay time.Duration, wake <-
 type recoveringDialer struct {
 	mu          sync.Mutex
 	failDials   int
+	failErr     error
 	calls       int
 	connections []*fakeConnection
 }
@@ -78,6 +83,9 @@ func (d *recoveringDialer) Dial(context.Context, Transport, Admission) (Connecti
 	defer d.mu.Unlock()
 	d.calls++
 	if d.calls <= d.failDials {
+		if d.failErr != nil {
+			return nil, d.failErr
+		}
 		return nil, errors.New("network unavailable")
 	}
 	connection := &fakeConnection{done: make(chan error, 1)}
@@ -212,6 +220,155 @@ func TestNetworkChangeInterruptsBackoff(t *testing.T) {
 	defer cancel()
 	if err := supervisor.Shutdown(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSupervisorStopsWhenStartContextIsCanceled(t *testing.T) {
+	now := time.Now()
+	manager := manager(t, &fakeDialer{}, now)
+	entered := make(chan struct{}, 1)
+	supervisor, err := NewSupervisor(SupervisorConfig{
+		Manager:        manager,
+		Admissions:     failingSource{},
+		InitialBackoff: time.Hour,
+		MaxBackoff:     time.Hour,
+		Waiter:         wakeWaiter{entered: entered},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, cancel := context.WithCancel(context.Background())
+	if err := supervisor.Start(parent); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("supervisor did not enter its retry wait")
+	}
+	cancel()
+	select {
+	case <-supervisor.done:
+	case <-time.After(time.Second):
+		t.Fatal("supervisor ignored its parent cancellation")
+	}
+}
+
+func TestSupervisorObservesOneSafeFailurePerOutageAndRecovers(t *testing.T) {
+	now := time.Now()
+	secret := "private dial endpoint and credential"
+	dialer := &recoveringDialer{failDials: 2, failErr: errors.New(secret)}
+	manager := manager(t, dialer, now)
+	source := &admissionSource{now: now, calls: make(chan uint64, 16)}
+	supervisor, err := NewSupervisor(SupervisorConfig{
+		Manager:        manager,
+		Admissions:     source,
+		InitialBackoff: time.Millisecond,
+		MaxBackoff:     time.Millisecond,
+		Waiter:         &recordingWaiter{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := make(chan errorreport.Fault, 8)
+	restore := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) {
+		observed <- fault
+	})
+	defer restore()
+	reference := supportref.New()
+	ctx := supportref.WithContext(context.Background(), reference)
+	if err := supervisor.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	waitConnected := func(previous uint64) uint64 {
+		t.Helper()
+		deadline := time.NewTimer(2 * time.Second)
+		defer deadline.Stop()
+		ticker := time.NewTicker(time.Millisecond)
+		defer ticker.Stop()
+		for {
+			status := manager.Status()
+			if status.Connected && status.Generation > previous {
+				return status.Generation
+			}
+			select {
+			case <-ticker.C:
+			case <-deadline.C:
+				t.Fatalf("connector did not recover: status=%+v", status)
+			}
+		}
+	}
+	firstGeneration := waitConnected(0)
+	first := receiveConnectorFault(t, observed)
+	assertConnectorFault(t, first, reference, secret)
+
+	dialer.mu.Lock()
+	dialer.failDials = dialer.calls + 1
+	active := dialer.connections[len(dialer.connections)-1]
+	dialer.mu.Unlock()
+	active.done <- errors.New("private connection reset detail")
+	secondGeneration := waitConnected(firstGeneration)
+	if secondGeneration <= firstGeneration {
+		t.Fatalf("generation did not advance: %d -> %d", firstGeneration, secondGeneration)
+	}
+	second := receiveConnectorFault(t, observed)
+	assertConnectorFault(t, second, reference, "private connection reset detail")
+
+	quiet := time.NewTimer(25 * time.Millisecond)
+	defer quiet.Stop()
+	select {
+	case fault := <-observed:
+		t.Fatalf("duplicate failure observation: %+v", fault)
+	case <-quiet.C:
+	}
+	ctxShutdown, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := supervisor.Shutdown(ctxShutdown); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func receiveConnectorFault(t *testing.T, faults <-chan errorreport.Fault) errorreport.Fault {
+	t.Helper()
+	select {
+	case fault := <-faults:
+		return fault
+	case <-time.After(2 * time.Second):
+		t.Fatal("connector failure was not observed")
+		return errorreport.Fault{}
+	}
+}
+
+func assertConnectorFault(t *testing.T, fault errorreport.Fault, reference, secret string) {
+	t.Helper()
+	if fault.Component != "paperboat-daemon" || fault.Operation != "connector_admission" || fault.Stage != "peer_connect" || fault.Code != "transport_failed" {
+		t.Fatalf("fault classification=%+v", fault)
+	}
+	if fault.SupportReference != reference || !supportref.Valid(fault.SupportReference) {
+		t.Fatalf("support reference=%q want=%q", fault.SupportReference, reference)
+	}
+	if strings.Contains(strings.Join(fault.ErrorChain, ","), secret) || strings.Contains(fault.Cause, secret) || strings.Contains(fault.ErrorType, secret) {
+		t.Fatalf("raw failure detail escaped into fault: %+v", fault)
+	}
+}
+
+type connectorCycleError struct{}
+
+func (*connectorCycleError) Error() string   { return "cycle" }
+func (e *connectorCycleError) Unwrap() error { return e }
+
+func TestConnectorFailureClassificationRejectsJoinedAndCyclicTermination(t *testing.T) {
+	joined := errors.Join(context.Canceled, errors.New("substantive failure"))
+	if onlyConnectorCancellation(joined) || onlyConnectorTermination(joined) {
+		t.Fatal("joined cancellation and substantive failure was treated as normal termination")
+	}
+	cycle := &connectorCycleError{}
+	if onlyConnectorCancellation(cycle) || onlyConnectorTermination(cycle) {
+		t.Fatal("cyclic error was treated as normal termination")
+	}
+	if got := safeTransportLabel(string(Transport("credential=private"))); got != "none" {
+		t.Fatalf("unsafe transport label=%q", got)
 	}
 }
 

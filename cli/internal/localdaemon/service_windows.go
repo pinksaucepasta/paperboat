@@ -14,10 +14,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	hostruntimeservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
 	"golang.org/x/sys/windows"
@@ -123,6 +126,10 @@ func RemoveAllWindowsLegacyTasks(ctx context.Context) error {
 		// task. Do not strand a fresh installation when there is no safe task
 		// identity to delete; the exact owner-derived cleanup still runs when
 		// runtime-install.json survives.
+		if windowsTaskCancellationOnly(err) {
+			return err
+		}
+		errorreport.Current().ObserveFailure(ctx, "paperboatd", "service", "lifecycle", "service_failed", err)
 		return nil
 	}
 	var result error
@@ -612,34 +619,42 @@ func writeWindowsDaemonOwnerRecord(path, ownerSID string, record windowsDaemonOw
 		return err
 	}
 	temporary := path + ".new"
-	_ = os.Remove(temporary)
+	if err := removeWindowsOwnerRecord(temporary); err != nil {
+		return err
+	}
 	file, err := os.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
 	if err := setWindowsLockACL(temporary, ownerSID); err != nil {
-		_ = file.Close()
-		_ = os.Remove(temporary)
-		return err
+		return errors.Join(err, file.Close(), removeWindowsOwnerRecord(temporary))
 	}
 	_, writeErr := file.Write(encoded)
 	syncErr := file.Sync()
 	closeErr := file.Close()
 	if writeErr != nil || syncErr != nil || closeErr != nil {
-		_ = os.Remove(temporary)
-		return errors.Join(writeErr, syncErr, closeErr)
+		return errors.Join(writeErr, syncErr, closeErr, removeWindowsOwnerRecord(temporary))
 	}
 	from, fromErr := windows.UTF16PtrFromString(temporary)
 	to, toErr := windows.UTF16PtrFromString(path)
 	if fromErr != nil || toErr != nil {
-		_ = os.Remove(temporary)
-		return errors.Join(fromErr, toErr)
+		return errors.Join(fromErr, toErr, removeWindowsOwnerRecord(temporary))
 	}
 	if err := windows.MoveFileEx(from, to, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH); err != nil {
-		_ = os.Remove(temporary)
-		return err
+		return errors.Join(err, removeWindowsOwnerRecord(temporary))
 	}
-	return verifyWindowsLockACL(path, ownerSID)
+	if err := verifyWindowsLockACL(path, ownerSID); err != nil {
+		return errors.Join(err, removeWindowsOwnerRecord(path))
+	}
+	return nil
+}
+
+func removeWindowsOwnerRecord(path string) error {
+	err := os.Remove(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 func readWindowsDaemonOwnerRecord(path, ownerSID string) (windowsDaemonOwnerRecord, error) {
@@ -854,9 +869,11 @@ func defaultWindowsTaskCommand(ctx context.Context, arguments ...string) error {
 	}
 	command := exec.CommandContext(ctx, executable, arguments...)
 	processlaunch.ConfigureBackground(command)
-	output, err := command.CombinedOutput()
+	var output boundedWindowsTaskOutput
+	command.Stdout, command.Stderr = &output, &output
+	err := command.Run()
 	if err != nil {
-		return &windowsTaskCommandError{err: err, output: redactTaskOutput(output)}
+		return &windowsTaskCommandError{err: err, kind: classifyWindowsTaskCommandOutput(output.Bytes())}
 	}
 	return nil
 }
@@ -877,7 +894,7 @@ func defaultListWindowsTaskNames(ctx context.Context) ([]string, error) {
 	processlaunch.ConfigureBackground(command)
 	output, err := command.CombinedOutput()
 	if err != nil {
-		return nil, &windowsTaskCommandError{err: err, output: redactTaskOutput(output)}
+		return nil, &windowsTaskCommandError{err: err, kind: classifyWindowsTaskCommandOutput(output)}
 	}
 	reader := csv.NewReader(strings.NewReader(string(output)))
 	reader.FieldsPerRecord = -1
@@ -908,48 +925,129 @@ func validWindowsSystemExecutable(path string) bool {
 	return err == nil && attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT == 0
 }
 
+type windowsTaskErrorKind uint8
+
+const (
+	windowsTaskErrorOther windowsTaskErrorKind = iota
+	windowsTaskErrorMissing
+	windowsTaskErrorNotRunning
+)
+
+const maxWindowsTaskErrorOutput = 4 << 10
+
+type boundedWindowsTaskOutput struct {
+	mu   sync.Mutex
+	body []byte
+}
+
+func (b *boundedWindowsTaskOutput) Write(value []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	originalLength := len(value)
+	if remaining := maxWindowsTaskErrorOutput - len(b.body); remaining > 0 {
+		if len(value) > remaining {
+			value = value[:remaining]
+		}
+		b.body = append(b.body, value...)
+	}
+	return originalLength, nil
+}
+
+func (b *boundedWindowsTaskOutput) Bytes() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]byte(nil), b.body...)
+}
+
 type windowsTaskCommandError struct {
-	err    error
-	output string
+	err  error
+	kind windowsTaskErrorKind
 }
 
 func (e *windowsTaskCommandError) Error() string {
 	if e == nil {
 		return ""
 	}
-	if e.output == "" {
-		return e.err.Error()
-	}
-	return e.err.Error() + ": " + e.output
+	return "Windows scheduled task command failed"
 }
 
 func (e *windowsTaskCommandError) Unwrap() error { return e.err }
 
-func redactTaskOutput(value []byte) string {
-	const maximum = 4096
-	if len(value) > maximum {
-		value = value[:maximum]
+func (*windowsTaskCommandError) DiagnosticStage() string { return "lifecycle" }
+
+func (*windowsTaskCommandError) DiagnosticCode() string { return "service_failed" }
+
+func classifyWindowsTaskCommandOutput(value []byte) windowsTaskErrorKind {
+	text := strings.ToLower(string(value))
+	switch {
+	case strings.Contains(text, "does not exist"), strings.Contains(text, "cannot find"), strings.Contains(text, "not found"):
+		return windowsTaskErrorMissing
+	case strings.Contains(text, "not currently running"), strings.Contains(text, "is not running"):
+		return windowsTaskErrorNotRunning
+	default:
+		return windowsTaskErrorOther
 	}
-	return strings.TrimSpace(strings.Map(func(r rune) rune {
-		if r == '\r' || r == '\n' || r == '\t' || r >= 0x20 {
-			return r
-		}
-		return ' '
-	}, string(value)))
 }
 
 func isMissingWindowsTaskError(err error) bool {
-	if err == nil {
-		return false
-	}
-	value := strings.ToLower(err.Error())
-	return strings.Contains(value, "does not exist") || strings.Contains(value, "cannot find") || strings.Contains(value, "not found")
+	var taskErr *windowsTaskCommandError
+	return errors.As(err, &taskErr) && taskErr != nil && taskErr.kind == windowsTaskErrorMissing
 }
 
 func isWindowsTaskNotRunningError(err error) bool {
+	var taskErr *windowsTaskCommandError
+	return errors.As(err, &taskErr) && taskErr != nil && taskErr.kind == windowsTaskErrorNotRunning
+}
+
+// windowsTaskCancellationOnly keeps an unrelated task-scheduler error from
+// being hidden by a joined caller cancellation.
+func windowsTaskCancellationOnly(err error) bool {
 	if err == nil {
 		return false
 	}
-	value := strings.ToLower(err.Error())
-	return strings.Contains(value, "not currently running") || strings.Contains(value, "is not running")
+	pending := []error{err}
+	seen := make(map[error]struct{})
+	for visited := 0; len(pending) > 0; visited++ {
+		if visited >= 16 {
+			return false
+		}
+		current := pending[0]
+		pending = pending[1:]
+		if current == nil {
+			return false
+		}
+		typeOf := reflect.TypeOf(current)
+		value := reflect.ValueOf(current)
+		switch value.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+			if value.IsNil() {
+				return false
+			}
+		}
+		if typeOf.Comparable() {
+			if _, exists := seen[current]; exists {
+				return false
+			}
+			seen[current] = struct{}{}
+			if current == context.Canceled {
+				continue
+			}
+		}
+		switch wrapped := current.(type) {
+		case interface{ Unwrap() []error }:
+			children := wrapped.Unwrap()
+			if len(children) == 0 || len(children)+len(pending) > 15-visited {
+				return false
+			}
+			pending = append(pending, children...)
+		case interface{ Unwrap() error }:
+			if len(pending)+1 > 15-visited {
+				return false
+			}
+			pending = append(pending, wrapped.Unwrap())
+		default:
+			return false
+		}
+	}
+	return true
 }

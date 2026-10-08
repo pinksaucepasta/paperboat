@@ -11,11 +11,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
 )
@@ -25,15 +27,32 @@ func TestTask24ProductionBootstrapInstallsAuthenticatedIngressLookup(t *testing.
 	request, private := productionActivationRequest(t)
 	auth := &bootstrapMachineAuth{}
 	var calls atomic.Int32
+	var revoked atomic.Bool
+	var candidateAvailable atomic.Bool
 	var descriptor carrierBootstrapDescriptor
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
+		var requested carrierBootstrapRequest
+		if err := json.NewDecoder(r.Body).Decode(&requested); err != nil {
+			t.Error(err)
+		}
+		if requested.ConfigGeneration == 8 && !candidateAvailable.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		if r.URL.Path != rpath(request) || r.Method != http.MethodPost || r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" || r.Header.Get("X-Paperboat-Machine-Identity") != strings.Repeat("i", 48) || r.Header.Get("X-Paperboat-Machine-Proof") == "" || r.Header.Get("Idempotency-Key") == "" {
 			t.Errorf("lookup did not use exact machine-proof bootstrap request")
 		}
 		w.Header().Set("Content-Type", "application/json")
 		current := descriptor
-		if calls.Load() >= 3 {
+		current.ConfigGeneration, current.ConfigContentHash = requested.ConfigGeneration, requested.ConfigContentHash
+		current.ProcessGeneration = requested.ProcessGeneration
+		current.IngressDecisions = append([]connectorprotocol.IngressDecision(nil), descriptor.IngressDecisions...)
+		for i := range current.IngressDecisions {
+			current.IngressDecisions[i].ConfigGeneration = requested.ConfigGeneration
+			current.IngressDecisions[i].ProcessGeneration = requested.ProcessGeneration
+		}
+		if revoked.Load() {
 			current.IngressDecisions = nil
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": current})
@@ -71,8 +90,9 @@ func TestTask24ProductionBootstrapInstallsAuthenticatedIngressLookup(t *testing.
 	if _, err := config.CarrierDescriptorSource(context.Background(), welcome, apply); err != nil {
 		t.Fatal(err)
 	}
+	forwarder := config.OriginStreamsForGeneration(apply, connector.DataCarrierIdentity{AccountID: request.AccountID, TunnelID: request.TunnelID, ConnectorID: request.ConnectorID, HostID: request.HostID, ProcessGeneration: request.ProcessGeneration, Generation: apply.Snapshot.Generation})
 	open := connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: request.AccountID, TunnelID: request.TunnelID, ConnectorID: request.ConnectorID, SessionID: decision.SessionID, ProcessGeneration: request.ProcessGeneration, Generation: decision.ConfigGeneration, RouteID: decision.Binding.RouteID, RequestID: "request_01", Kind: "http"}
-	got, err := config.OriginStreams.IngressAuthority(context.Background(), open, decision)
+	got, err := forwarder.IngressAuthority(context.Background(), open, decision)
 	if err != nil || got != decision {
 		t.Fatalf("installed lookup=%+v err=%v", got, err)
 	}
@@ -83,8 +103,64 @@ func TestTask24ProductionBootstrapInstallsAuthenticatedIngressLookup(t *testing.
 	if !proofOK {
 		t.Fatal("machine proof did not bind exact lookup tuple/body")
 	}
+	candidate := apply
+	candidate.Snapshot.Generation = 8
+	candidate.Snapshot.ContentHash = "sha256:" + strings.Repeat("b", 64)
+	if _, err := config.CarrierDescriptorSource(context.Background(), welcome, candidate); err == nil {
+		t.Fatal("candidate bootstrap unexpectedly succeeded")
+	}
+	if _, err := forwarder.IngressAuthority(context.Background(), open, decision); err != nil {
+		t.Fatalf("failed candidate poisoned serving ingress authority: %v", err)
+	}
+	candidateAvailable.Store(true)
+	candidateForwarder := config.OriginStreamsForGeneration(candidate, connector.DataCarrierIdentity{AccountID: request.AccountID, TunnelID: request.TunnelID, ConnectorID: request.ConnectorID, HostID: request.HostID, ProcessGeneration: request.ProcessGeneration, Generation: candidate.Snapshot.Generation})
+	candidateOpen, candidateDecision := open, decision
+	candidateOpen.Generation, candidateDecision.ConfigGeneration = 8, 8
+	var group sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			if _, err := candidateForwarder.IngressAuthority(context.Background(), candidateOpen, candidateDecision); err != nil {
+				t.Errorf("candidate authority: %v", err)
+			}
+			if _, err := forwarder.IngressAuthority(context.Background(), open, decision); err != nil {
+				t.Errorf("overlapping serving authority: %v", err)
+			}
+		}()
+	}
+	group.Wait()
+	// A legitimate reconnect advances the authenticated carrier process fence.
+	identity := connector.DataCarrierIdentity{AccountID: request.AccountID, TunnelID: request.TunnelID, ConnectorID: request.ConnectorID, HostID: request.HostID, ProcessGeneration: request.ProcessGeneration + 1, Generation: apply.Snapshot.Generation}
+	reconnected := config.OriginStreamsForGeneration(apply, identity)
+	reconnectedOpen, reconnectedDecision := open, decision
+	reconnectedOpen.ProcessGeneration, reconnectedDecision.ProcessGeneration = identity.ProcessGeneration, identity.ProcessGeneration
+	if _, err := reconnected.IngressAuthority(context.Background(), reconnectedOpen, reconnectedDecision); err != nil {
+		t.Fatalf("legitimate reconnect rejected: %v", err)
+	}
+	if _, err := reconnected.IngressAuthority(context.Background(), open, decision); !errors.Is(err, connectorprotocol.ErrIngressDenied) {
+		t.Fatalf("previous process accepted after reconnect: %v", err)
+	}
+	before := calls.Load()
+	if _, err := forwarder.IngressAuthority(context.Background(), candidateOpen, candidateDecision); !errors.Is(err, connectorprotocol.ErrIngressDenied) {
+		t.Fatalf("wrong generation accepted: %v", err)
+	}
+	wrongProcess := open
+	wrongProcess.ProcessGeneration++
+	if _, err := forwarder.IngressAuthority(context.Background(), wrongProcess, decision); !errors.Is(err, connectorprotocol.ErrIngressDenied) {
+		t.Fatalf("wrong process accepted: %v", err)
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := forwarder.IngressAuthority(cancelled, open, decision); !errors.Is(err, connectorprotocol.ErrIngressDenied) {
+		t.Fatalf("cancelled request accepted: %v", err)
+	}
+	if calls.Load() != before {
+		t.Fatal("invalid tuple or cancelled context made backend request")
+	}
+	revoked.Store(true)
 	time.Sleep(connectorprotocol.IngressRefreshInterval + 50*time.Millisecond)
-	if _, err := config.OriginStreams.IngressAuthority(context.Background(), open, decision); !errors.Is(err, connectorprotocol.ErrIngressDenied) {
+	if _, err := forwarder.IngressAuthority(context.Background(), open, decision); !errors.Is(err, connectorprotocol.ErrIngressDenied) {
 		t.Fatalf("revoked refresh error=%v", err)
 	}
 }

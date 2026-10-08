@@ -16,8 +16,7 @@ func TestSetupMachineUsesCanonicalAliasContract(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		// Match the server's strict v1 request: obsolete display_name/setup_mode
-		// fields must not cross the authenticated setup boundary.
+		// Match the server's strict v1 request and reject fields outside its contract.
 		var body struct {
 			Alias             string            `json:"alias"`
 			Platform          string            `json:"platform"`
@@ -41,7 +40,7 @@ func TestSetupMachineUsesCanonicalAliasContract(t *testing.T) {
 		writeData(w, http.StatusOK, UserMachine{ID: "existing-machine"})
 	}))
 	defer server.Close()
-	got, err := New(server.URL, config.Credential{AccessToken: "fixture-token"}, nil).SetupMachine(context.Background(), MachineSetupInput{SetupMode: "host", Alias: " Studio ", Platform: "darwin", Architecture: "arm64", WorkspaceRoot: "/Users/studio", PublicIdentityKey: "existing-machine-key", RuntimeVersions: map[string]string{"pb": "test-build"}})
+	got, err := New(server.URL, config.Credential{AccessToken: "fixture-token"}, nil).SetupMachine(context.Background(), MachineSetupInput{Alias: " Studio ", Platform: "darwin", Architecture: "arm64", WorkspaceRoot: "/Users/studio", PublicIdentityKey: "existing-machine-key", RuntimeVersions: map[string]string{"pb": "test-build"}})
 	if err != nil {
 		t.Fatal(err)
 	}

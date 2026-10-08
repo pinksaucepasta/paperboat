@@ -7,6 +7,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"reflect"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -21,6 +22,8 @@ func TestInventoryDiagnosticsContainOnlySafeStageAndCategory(t *testing.T) {
 		{"deadline", context.DeadlineExceeded, "deadline"},
 		{"auth", api.ErrUnauthenticated, "unauthenticated"},
 		{"other", errors.New("secret-payload"), "source_error"},
+		{"mixed cancellation", errors.Join(context.Canceled, syscall.EIO), "system_error"},
+		{"mixed rejection", errors.Join(api.ErrUnauthenticated, syscall.EIO), "system_error"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := inventorySourceFailure("peer_approval", tc.err)

@@ -8,9 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
-	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 const (
@@ -75,7 +73,7 @@ type SafeIDs struct {
 	CertificateID string `json:"certificate_id,omitempty"`
 	AssignmentID  string `json:"assignment_id,omitempty"`
 	HostID        string `json:"host_id,omitempty"`
-	DeviceID      string `json:"device_id,omitempty"`
+	MachineID     string `json:"machine_id,omitempty"`
 	SessionID     string `json:"session_id,omitempty"`
 	OperationID   string `json:"operation_id,omitempty"`
 	RequestID     string `json:"request_id,omitempty"`
@@ -194,24 +192,24 @@ func validEventDimension(value Dimension) bool {
 }
 
 func validEventCorrelationID(value string) bool {
-	return hasEventSafePrefix(value, "corr_", "cor_", "correlation_", "request_", "pb-")
+	return hasEventSafePrefix(value, "correlation_", "request_", "support_")
 }
 
 func validSafeIDs(ids SafeIDs) bool {
-	return optionalEventID(ids.AccountID, "account_") &&
-		optionalEventID(ids.ActorID, "actor_") &&
+	return optionalEventID(ids.AccountID, "account_", "user_") &&
+		optionalEventID(ids.ActorID, "actor_", "user_", "guest_") &&
 		optionalEventID(ids.TunnelID, "tunnel_") &&
 		optionalEventID(ids.RouteID, "route_") &&
 		optionalEventID(ids.ConnectorID, "connector_") &&
 		optionalEventID(ids.DomainID, "domain_") &&
 		optionalEventID(ids.CertificateID, "certificate_") &&
 		optionalEventID(ids.AssignmentID, "assignment_") &&
-		optionalEventID(ids.HostID, "host_") &&
-		optionalEventID(ids.DeviceID, "device_") &&
-		optionalEventID(ids.SessionID, "session_", "carrier_") &&
+		optionalEventID(ids.HostID, "host_", "machine_") &&
+		optionalEventID(ids.MachineID, "device_", "machine_") &&
+		optionalEventID(ids.SessionID, "session_", "terminal_", "carrier_") &&
 		optionalEventID(ids.OperationID, "operation_", "op_") &&
 		optionalEventID(ids.RequestID, "request_", "req_") &&
-		optionalEventID(ids.EdgeNodeID, "edge_") &&
+		optionalEventID(ids.EdgeNodeID, "edge_", "node_") &&
 		optionalEventID(ids.ResourceID, "resource_", "res_") &&
 		optionalEventID(ids.ProcessID, "process_", "proc_") &&
 		optionalEventID(ids.ConfigID, "config_", "cfg_")
@@ -353,10 +351,6 @@ func (l *EventLog) drain() {
 }
 
 func (l *EventLog) append(event Event) {
-	ctx := supportref.WithContext(context.Background(), event.CorrelationID)
-	reporter := errorreport.Current()
-	reporter.Lifecycle(ctx, event.Component, event.Name, event.Code, string(event.Outcome))
-
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if len(l.events) == l.capacity {
@@ -432,6 +426,9 @@ func (l *EventLog) Flush(ctx context.Context) error {
 	}
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	command := flushCommand{done: make(chan struct{})}
 	select {

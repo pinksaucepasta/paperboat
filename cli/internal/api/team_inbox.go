@@ -53,11 +53,13 @@ func (c *Client) CreateTeamInboxRequest(ctx context.Context, request TeamInboxRe
 }
 
 func (c *Client) TeamInboxRequests(ctx context.Context) ([]TeamInboxRequest, error) {
-	var out struct {
-		Requests []TeamInboxRequest `json:"requests"`
-	}
-	err := c.do(ctx, http.MethodGet, "/v1/team-inbox/requests", nil, &out)
-	return out.Requests, err
+	return collectOffsetInventory[TeamInboxRequest](ctx, c, "/v1/team-inbox/requests", "requests", nil)
+}
+
+// PendingTeamInboxRequests filters at the authorization-owning server before
+// pagination so newer history cannot hide an actionable approval.
+func (c *Client) PendingTeamInboxRequests(ctx context.Context) ([]TeamInboxRequest, error) {
+	return collectOffsetInventory[TeamInboxRequest](ctx, c, "/v1/team-inbox/requests", "requests", url.Values{"state": {"pending"}, "owner": {"mine"}})
 }
 
 func (c *Client) TeamInboxRequest(ctx context.Context, requestID string) (TeamInboxRequest, error) {

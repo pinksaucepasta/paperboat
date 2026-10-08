@@ -18,7 +18,7 @@ func TestPreviewCarrierObservationsRetainEdgeServerBinding(t *testing.T) {
 	admission := datacarrier.ExpectedAdmission{
 		Schema: controlPreviewCarrierSchema, Kind: controlPreviewCarrierKind,
 		EdgeNodeID: "edge_1", PreviewID: "preview_spki", OperationID: "operation_spki",
-		OwnerDeviceID: "host_1", OwnerSessionID: "owner_session_1",
+		OwnerMachineID: "host_1", OwnerSessionID: "owner_session_1",
 		Identity: datacarrier.Identity{
 			AccountID: "account_1", HostID: "host_1", TunnelID: "tunnel_1", ConnectorID: "connector_1", SessionID: "session_1",
 			ProcessGeneration: 1, Generation: 1,
@@ -39,7 +39,7 @@ func TestPreviewCarrierObservationsRetainEdgeServerBinding(t *testing.T) {
 	fromRoute := observationFromRoute(edgehttp.DataCarrierPreviewRoute{
 		RouteID: admission.RouteID, Hostname: admission.Hostname, Kind: admission.RouteKind, Revision: admission.RouteRevision,
 		Identity: admission.Identity, PreviewID: admission.PreviewID, OperationID: admission.OperationID,
-		OwnerDeviceID: admission.OwnerDeviceID, OwnerSessionID: admission.OwnerSessionID, AccessMode: admission.AccessMode,
+		OwnerMachineID: admission.OwnerMachineID, OwnerSessionID: admission.OwnerSessionID, AccessMode: admission.AccessMode,
 		EdgeNodeID: admission.EdgeNodeID, EdgeProcessEpoch: admission.EdgeProcessEpoch,
 		EdgeCarrierServerSPKISHA256: trust.SPKISHA256, EdgeCarrierServerCertificateChainPEM: trust.CertificateChainPEM,
 		LeaseGeneration: admission.LeaseGeneration, AttachmentGeneration: admission.AttachmentGeneration,

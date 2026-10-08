@@ -21,7 +21,16 @@ func NewContext(set *flag.FlagSet) *Context {
 	return &Context{Context: context.Background(), set: set}
 }
 
-func (c *Context) String(name string) string { return c.set.Lookup(name).Value.String() }
+func (c *Context) String(name string) string {
+	if c == nil || c.set == nil {
+		return ""
+	}
+	entry := c.set.Lookup(name)
+	if entry == nil {
+		return ""
+	}
+	return entry.Value.String()
+}
 func (c *Context) Bool(name string) bool {
 	entry := c.set.Lookup(name)
 	if entry == nil {

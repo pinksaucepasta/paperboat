@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -51,7 +52,17 @@ wait "$child"
 	defer cancel()
 	done := make(chan error, 1)
 	var logs bytes.Buffer
-	go func() { done <- Run(ctx, dir, binaries, &logs) }()
+	attempts := make(chan error, 4)
+	observedContext := context.WithValue(ctx, supervisorContextKey{}, "process-reference")
+	go func() {
+		done <- Run(observedContext, dir, binaries, &logs, func(ctx context.Context, definition string, err error) {
+			if definition != "selfhost_child" || ctx.Value(supervisorContextKey{}) != "process-reference" {
+				attempts <- errors.New("invalid attempt context")
+				return
+			}
+			attempts <- err
+		})
+	}()
 	deadline := time.Now().Add(4 * time.Second)
 	var child, parent int
 	for {
@@ -84,6 +95,15 @@ wait "$child"
 		if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
 			t.Fatalf("owned process %d survived cancellation", pid)
 		}
+	}
+	select {
+	case err := <-attempts:
+		var exited *exec.ExitError
+		if !errors.As(err, &exited) || exited.ExitCode() != 1 {
+			t.Fatal("supervisor lost typed child failure")
+		}
+	default:
+		t.Fatal("supervisor dropped crash diagnostic")
 	}
 	if !strings.Contains(logs.String(), "restarting in 1s") {
 		t.Fatal("runtime crash recovery missing")
@@ -125,7 +145,7 @@ wait "$child"
 	done := make(chan error, 1)
 	renewals := make(chan time.Time, 1)
 	var logs bytes.Buffer
-	go func() { done <- run(ctx, dir, binaries, &logs, renewals) }()
+	go func() { done <- run(ctx, dir, binaries, &logs, renewals, nil) }()
 	readPID := func(previous int) int {
 		deadline := time.Now().Add(3 * time.Second)
 		for {
@@ -170,3 +190,5 @@ wait "$child"
 		t.Fatal("renewal restart was not recorded")
 	}
 }
+
+type supervisorContextKey struct{}

@@ -51,7 +51,7 @@ func TestControlClientCredentialAndLeaseLifecycle(t *testing.T) {
 			}
 			writeTestJSON(t, w, map[string]any{"data": map[string]any{
 				"credential": "config-credential", "environment_id": "env-1", "machine_id": "helper-1",
-				"assignment_id": "assignment-1", "warning_revision": "warning-1", "expires_at": now.Add(5 * time.Minute),
+				"assignment_id": "assignment-1", "assignment_version": 1, "warning_revision": "warning-1", "expires_at": now.Add(5 * time.Minute),
 			}})
 		case "/v1/config/leases/acquire":
 			assertLeaseAuthorization(t, r)
@@ -82,13 +82,13 @@ func TestControlClientCredentialAndLeaseLifecycle(t *testing.T) {
 			writeTestJSON(t, w, map[string]any{"data": RepositoryAccess{
 				RepositoryID: "repo-1", AssignmentID: "assignment-1", EnvironmentID: "env-1", MachineID: "helper-1",
 				CloneURL: "https://github.example.test/owner/config.git", PublishURL: "https://github.example.test/owner/config.git",
-				Branch: "main", Username: "x-access-token", Password: "installation-token", ExpiresAt: now.Add(time.Hour),
+				Transport: "https", Branch: "main", Username: "x-access-token", Password: "installation-token", ExpiresAt: now.Add(time.Hour),
 				Capability: "repository_contents_write",
 			}})
 		case "/v1/config/runtime":
 			assertLeaseAuthorization(t, r)
 			writeTestJSON(t, w, map[string]any{"data": RuntimeDescriptor{
-				WriteMode: "leased_writes", Mode: ModeBidirectional,
+				AssignmentVersion: 1, WriteMode: "leased_writes", Mode: ModeBidirectional,
 				RepositoryID: "repo-1", AssignmentID: "assignment-1", EnvironmentID: "env-1", MachineID: "helper-1",
 				InstallationGeneration: 1,
 				WarningRevision:        "warning-1",
@@ -178,7 +178,7 @@ func TestControlClientRevalidationRetainsUnexpiredRepositoryAccess(t *testing.T)
 			writeTestJSON(t, w, map[string]any{"data": RepositoryAccess{
 				RepositoryID: "repository", AssignmentID: "assignment", EnvironmentID: "env",
 				MachineID: "helper", CloneURL: "https://github.example.test/example/config.git",
-				PublishURL: "https://github.example.test/example/config.git", Branch: "main",
+				Transport: "https", PublishURL: "https://github.example.test/example/config.git", Branch: "main",
 				Username: "x-access-token", Password: "token", Capability: "repository_contents_write",
 				ExpiresAt: now.Add(time.Hour),
 			}})

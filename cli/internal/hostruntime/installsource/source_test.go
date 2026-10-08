@@ -1,8 +1,10 @@
 package installsource
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -48,7 +50,10 @@ func TestSuppliedSourceBindsBytesAndUpdatePolicy(t *testing.T) {
 	if source.Verify(path) == nil {
 		t.Fatal("same-length changed binary accepted")
 	}
-	if source.Verify(filepath.Join(t.TempDir(), "missing")) == nil {
-		t.Fatal("missing binary accepted")
+	missing := filepath.Join(t.TempDir(), "missing")
+	if err := source.Verify(missing); err == nil || !errors.Is(err, ErrInvalid) || !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing binary result=%v", err)
+	} else if strings.Contains(err.Error(), filepath.Dir(missing)) {
+		t.Fatalf("local path escaped in verification error: %v", err)
 	}
 }

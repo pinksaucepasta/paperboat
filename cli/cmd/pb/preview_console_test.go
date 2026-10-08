@@ -27,12 +27,12 @@ func TestPreviewConsoleTransferPreservesURLAndCleansCanceledHandoff(t *testing.T
 	for _, mode := range []string{"success", "cancel", "retry", "uncertain"} {
 		t.Run(mode, func(t *testing.T) {
 			cancelAfterTransfer := mode == "cancel" || mode == "uncertain"
-			registry, err := preview.NewRuntimeOwnerSessionRegistry(preview.RuntimeOwnerSessionRegistryConfig{MachineID: "device_cli", RuntimeDone: make(chan struct{})})
+			registry, err := preview.NewRuntimeOwnerSessionRegistry(preview.RuntimeOwnerSessionRegistryConfig{MachineID: "machine_cli", RuntimeDone: make(chan struct{})})
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer registry.Close()
-			manager, err := preview.NewOwnerSessionLeaseManager(preview.OwnerSessionLeaseManagerConfig{MachineID: "device_cli", ControlToken: "control_secret", Registry: registry})
+			manager, err := preview.NewOwnerSessionLeaseManager(preview.OwnerSessionLeaseManagerConfig{MachineID: "machine_cli", ControlToken: "control_secret", Registry: registry})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -66,11 +66,11 @@ func TestPreviewConsoleTransferPreservesURLAndCleansCanceledHandoff(t *testing.T
 					return nil, "", 500
 				}
 				owner := body["owner_session_id"].(string)
-				ownerDone, err = registry.OwnerSessionDoneForTarget("account_cli", "device_cli", owner, preview.LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"})
+				ownerDone, err = registry.OwnerSessionDoneForTarget("account_cli", "machine_cli", owner, preview.OwnerSessionLocalLease, preview.LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"})
 				if err != nil {
 					t.Error(err)
 				}
-				return previewCommandLease("prv_background_1", "device_cli", owner, "http", "127.0.0.1:3000", "connecting"), `"ptv1:preview_lease:cHJ2X2JhY2tncm91bmRfMQ:1"`, http.StatusOK
+				return previewCommandLease("prv_background_1", "machine_cli", owner, "local_lease", "http", "127.0.0.1:3000", "connecting"), `"ptv1:preview_lease:cHJ2X2JhY2tncm91bmRfMQ:1"`, http.StatusOK
 			})
 			defer apiServer.Close()
 			client := api.New(apiServer.URL, config.Credential{AccessToken: "test-token"}, apiServer.Client())
@@ -82,7 +82,7 @@ func TestPreviewConsoleTransferPreservesURLAndCleansCanceledHandoff(t *testing.T
 				previewInteractiveTerminal, runPreviewConsoleForCommand = oldTerminal, oldConsole
 			}()
 			previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return client, nil }
-			previewMachineID = func() (string, error) { return "device_cli", nil }
+			previewMachineID = func() (string, error) { return "machine_cli", nil }
 			newPreviewCarrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
 				return carrier, nil
 			}

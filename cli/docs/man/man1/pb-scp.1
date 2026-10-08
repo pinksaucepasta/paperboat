@@ -13,7 +13,7 @@ pb-scp - Run scp with Paperboat machine resolution
 Run scp with Paperboat machine resolution
 
 .PP
-Run standard scp with Paperboat device-name resolution and authorized connectivity. Source and destination syntax remains OpenSSH-compatible; host identity checks still apply.
+Run standard scp with Paperboat machine-name resolution and authorized connectivity. Source and destination syntax remains OpenSSH-compatible; host identity checks still apply.
 
 .PP
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
@@ -39,6 +39,10 @@ This command does not support --json output; it rejects that mode before executi
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

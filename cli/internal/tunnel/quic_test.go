@@ -10,7 +10,7 @@ import (
 )
 
 func TestNativeAndHelperHandshakesOfferManagedSSH(t *testing.T) {
-	if capabilities := helperCapabilities(); !slices.Equal(capabilities, []string{"terminal.v1", "health.v1", "exec.v1", "ssh.v1"}) {
+	if capabilities := helperCapabilities(); !slices.Equal(capabilities, []string{"terminal.v1", "health.v1", "exec.v1", "ssh.v1", "config.compare.v1"}) {
 		t.Fatalf("capabilities=%v", capabilities)
 	}
 }

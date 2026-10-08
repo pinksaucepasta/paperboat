@@ -110,3 +110,21 @@ func TestStableClaimsBindingKeepsExecRenewalButSeparatesOperations(t *testing.T)
 		t.Fatalf("other=%q first=%q err=%v", other, first, err)
 	}
 }
+
+func TestStableClaimsBindingSeparatesWorkspaceAndLaunchActor(t *testing.T) {
+	claims := auth.Claims{Issuer: "https://api.test", Subject: "usr_1", CredentialClass: "terminal_operation", WorkspaceID: "personal", ActorAccountID: "usr_1"}
+	first, err := stableClaimsBinding(claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims.WorkspaceID = "team-one"
+	team, err := stableClaimsBinding(claims)
+	if err != nil || team == first {
+		t.Fatal("workspace reused operation binding")
+	}
+	claims.ActorAccountID = "usr_2"
+	actor, err := stableClaimsBinding(claims)
+	if err != nil || actor == team {
+		t.Fatal("actor reused operation binding")
+	}
+}

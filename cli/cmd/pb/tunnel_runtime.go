@@ -62,11 +62,11 @@ func productionTunnelClientForCommand(command *cobra.Command) (*api.Client, erro
 	}
 	store, err := runtimeIdentityStore()
 	if err != nil {
-		return nil, fmt.Errorf("open Paperboat host identity: %w", err)
+		return nil, fmt.Errorf("open Paperboat machine identity: %w", err)
 	}
 	registration, err := store.Registration()
-	if err != nil || registration.SetupMode != "host" || registration.InstallationGeneration < 1 {
-		return nil, errors.New("durable tunnels require this machine to be enrolled as a Paperboat host; run `pb pair` once, then retry")
+	if err != nil || registration.InstallationGeneration < 1 {
+		return nil, errors.New("durable tunnels require this machine to be enrolled with Paperboat; run `pb pair` once, then retry")
 	}
 	configured, err := configuredTunnelServer(command)
 	if err != nil {

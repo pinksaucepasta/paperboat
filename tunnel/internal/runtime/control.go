@@ -7,9 +7,11 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
+	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
 )
 
 type ControlDependency struct {
+	Reporter    *reporting.Reporter
 	Source      control.RouteSource
 	TrustSource control.RevocationSource
 	ApplyTrust  func([]byte) error
@@ -46,7 +48,7 @@ func (c *ControlDependency) Start(ctx context.Context) error {
 			case <-workerCtx.Done():
 				return
 			case <-ticker.C:
-				c.recordError(c.refresh(workerCtx))
+				c.recordError(workerCtx, c.refresh(workerCtx))
 			}
 		}
 	}()
@@ -61,8 +63,13 @@ func (c *ControlDependency) refresh(ctx context.Context) error {
 	return c.ApplyTrust(document)
 }
 
-func (c *ControlDependency) recordError(err error) { c.mu.Lock(); c.lastErr = err; c.mu.Unlock() }
-func (c *ControlDependency) LastError() error      { c.mu.Lock(); defer c.mu.Unlock(); return c.lastErr }
+func (c *ControlDependency) recordError(ctx context.Context, err error) {
+	c.mu.Lock()
+	c.lastErr = err
+	c.mu.Unlock()
+	observeWorkerFailure(ctx, c.Reporter, "control_trust", err)
+}
+func (c *ControlDependency) LastError() error { c.mu.Lock(); defer c.mu.Unlock(); return c.lastErr }
 
 func (c *ControlDependency) Shutdown(ctx context.Context) error {
 	c.mu.Lock()

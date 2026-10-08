@@ -224,7 +224,7 @@ func parseWire(addr Addr) (*wireConnInfo, error) {
 	}
 	w := new(wireConnInfo)
 	if err := cbor.Unmarshal(x, w); err != nil {
-		return nil, fmt.Errorf("CBOR unmarshal: %v", err)
+		return nil, fmt.Errorf("CBOR unmarshal: %w", err)
 	}
 	return w, nil
 }

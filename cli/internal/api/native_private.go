@@ -16,7 +16,6 @@ type NativePrivateGrantRequest struct {
 	ResourceID   string `json:"resource_id"`
 	RouteID      string `json:"route_id"`
 	Protocol     string `json:"protocol"`
-	Selector     string `json:"selector,omitempty"`
 }
 type NativePrivateGrant struct {
 	Target struct {
@@ -53,7 +52,7 @@ func (c *Client) IssueNativePrivateGrant(ctx context.Context, request NativePriv
 	}
 	t := grant.Target
 	binding := nativeprivate.Binding{Schema: nativeprivate.SchemaV1, InstallationGeneration: t.InstallationGeneration, BootID: t.BootID, PolicyGeneration: t.PolicyGeneration, AnnouncementGeneration: t.AnnouncementGeneration, ResourceKind: t.ResourceKind, ResourceID: t.ResourceID, ResourceGeneration: t.ResourceGeneration, RouteID: t.RouteID, RouteGeneration: t.RouteGeneration, TargetGeneration: t.TargetGeneration, OwnerEndpointID: t.MachineID, Protocol: t.Protocol, TargetScheme: t.TargetScheme, TargetAddress: t.TargetAddress, ExpiresAt: grant.ExpiresAt}
-	if t.ResourceKind == "device_service" {
+	if t.ResourceKind == "machine_service" {
 		binding.UserID = t.UserID
 		binding.CLIClientSessionID = t.CLIClientSessionID
 		binding.AccessSessionID = t.AccessSessionID
@@ -67,7 +66,7 @@ func (c *Client) IssueNativePrivateGrant(ctx context.Context, request NativePriv
 func (g NativePrivateGrant) Binding() ([]byte, error) {
 	t := g.Target
 	binding := nativeprivate.Binding{Schema: nativeprivate.SchemaV1, InstallationGeneration: t.InstallationGeneration, BootID: t.BootID, PolicyGeneration: t.PolicyGeneration, AnnouncementGeneration: t.AnnouncementGeneration, ResourceKind: t.ResourceKind, ResourceID: t.ResourceID, ResourceGeneration: t.ResourceGeneration, RouteID: t.RouteID, RouteGeneration: t.RouteGeneration, TargetGeneration: t.TargetGeneration, OwnerEndpointID: t.MachineID, Protocol: t.Protocol, TargetScheme: t.TargetScheme, TargetAddress: t.TargetAddress, ExpiresAt: g.ExpiresAt}
-	if t.ResourceKind == "device_service" {
+	if t.ResourceKind == "machine_service" {
 		binding.UserID = t.UserID
 		binding.CLIClientSessionID = t.CLIClientSessionID
 		binding.AccessSessionID = t.AccessSessionID

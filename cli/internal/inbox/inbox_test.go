@@ -12,10 +12,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/filetransfer"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 type fakeClient struct {
@@ -29,6 +33,135 @@ type interruptedClient struct {
 	item     filetransfer.Manifest
 	cancel   context.CancelFunc
 	receipts []string
+}
+
+type pendingSequenceClient struct {
+	mu        sync.Mutex
+	errors    []error
+	calls     int
+	called    chan int
+	recovered chan struct{}
+}
+
+func (c *pendingSequenceClient) Pending(ctx context.Context, _ string, _ int) ([]filetransfer.Manifest, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	c.calls++
+	call := c.calls
+	c.mu.Unlock()
+	c.called <- call
+	if call <= len(c.errors) {
+		return nil, c.errors[call-1]
+	}
+	if call == len(c.errors)+1 {
+		close(c.recovered)
+		return nil, nil
+	}
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (*pendingSequenceClient) Content(context.Context, filetransfer.Manifest, int64) (*http.Response, error) {
+	return nil, errors.New("content request was unexpected")
+}
+func (*pendingSequenceClient) Receipt(context.Context, string, string, string) error { return nil }
+
+type receiptRecoveryClient struct {
+	fakeClient
+	item       filetransfer.Manifest
+	cancel     context.CancelFunc
+	receiptErr error
+	receipts   []string
+}
+
+func (c *receiptRecoveryClient) Pending(ctx context.Context, _ string, _ int) ([]filetransfer.Manifest, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return []filetransfer.Manifest{c.item}, nil
+}
+
+func (c *receiptRecoveryClient) Content(ctx context.Context, item filetransfer.Manifest, offset int64) (*http.Response, error) {
+	return c.fakeClient.Content(ctx, item, offset)
+}
+
+func (c *receiptRecoveryClient) Receipt(_ context.Context, _ string, code, _ string) error {
+	c.receipts = append(c.receipts, code)
+	if len(c.receipts) == 1 {
+		return c.receiptErr
+	}
+	c.cancel()
+	return nil
+}
+
+type blockingBody struct {
+	started chan struct{}
+	closed  chan struct{}
+	err     error
+	once    sync.Once
+}
+
+func (b *blockingBody) Read([]byte) (int, error) {
+	b.once.Do(func() { close(b.started) })
+	<-b.closed
+	return 0, b.err
+}
+
+func (b *blockingBody) Close() error {
+	select {
+	case <-b.closed:
+	default:
+		close(b.closed)
+	}
+	return nil
+}
+
+type blockedContentClient struct {
+	item    filetransfer.Manifest
+	body    *blockingBody
+	receipt int
+}
+
+func (c *blockedContentClient) Pending(ctx context.Context, _ string, _ int) ([]filetransfer.Manifest, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return []filetransfer.Manifest{c.item}, nil
+}
+
+func (c *blockedContentClient) Content(context.Context, filetransfer.Manifest, int64) (*http.Response, error) {
+	return &http.Response{StatusCode: http.StatusOK, Body: c.body, Header: make(http.Header)}, nil
+}
+
+func (c *blockedContentClient) Receipt(context.Context, string, string, string) error {
+	c.receipt++
+	return nil
+}
+
+type contentOpenFailureClient struct {
+	item       filetransfer.Manifest
+	cancel     context.CancelFunc
+	contentErr error
+	receipt    string
+}
+
+func (c *contentOpenFailureClient) Pending(ctx context.Context, _ string, _ int) ([]filetransfer.Manifest, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return []filetransfer.Manifest{c.item}, nil
+}
+
+func (c *contentOpenFailureClient) Content(context.Context, filetransfer.Manifest, int64) (*http.Response, error) {
+	return nil, c.contentErr
+}
+
+func (c *contentOpenFailureClient) Receipt(_ context.Context, _, code, _ string) error {
+	c.receipt = code
+	c.cancel()
+	return nil
 }
 
 func (c *interruptedClient) Pending(ctx context.Context, _ string, _ int) ([]filetransfer.Manifest, error) {
@@ -78,6 +211,281 @@ func TestRunResumesInterruptedDownloadBeforeSendingReceipt(t *testing.T) {
 	got, err := os.ReadFile(filepath.Join(root, "file.bin"))
 	if err != nil || !bytes.Equal(got, data) {
 		t.Fatalf("published content mismatch: %v", err)
+	}
+}
+
+func TestRunObservesPendingFailuresOnceAndRecoversWithTheSameReference(t *testing.T) {
+	private := errors.New("private credential response and machine label")
+	client := &pendingSequenceClient{
+		errors: []error{private, private}, called: make(chan int, 8), recovered: make(chan struct{}),
+	}
+	receiver, err := New(Config{Client: client, MachineID: "machine_local", SessionID: "session_1", Path: filepath.Join(t.TempDir(), "Paperboat Inbox")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reference := supportref.New()
+	recorder := diagnostics.NewMemoryRecorder()
+	base, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx := diagnostics.WithRecorder(supportref.WithContext(base, reference), recorder)
+	faults := make(chan errorreport.Fault, 4)
+	restore := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) { faults <- fault })
+	defer restore()
+	done := make(chan error, 1)
+	go func() { done <- receiver.Run(ctx) }()
+
+	select {
+	case call := <-client.called:
+		if call != 1 {
+			t.Fatalf("first pending call = %d", call)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run did not poll pending transfers")
+	}
+	var outage errorreport.Fault
+	select {
+	case outage = <-faults:
+	case <-time.After(time.Second):
+		t.Fatal("pending outage was not observed")
+	}
+	if outage.Stage != "control_request" || outage.Code != "control_request_failed" || outage.SupportReference != reference || outage.Outcome != "failed" {
+		t.Fatalf("pending fault = %#v", outage)
+	}
+	if strings.Contains(strings.Join(outage.ErrorChain, ","), "private") || strings.Contains(outage.Cause, "private") {
+		t.Fatalf("private response reached diagnostics: %#v", outage)
+	}
+	for want := 2; want <= 4; want++ {
+		select {
+		case call := <-client.called:
+			if call != want {
+				t.Fatalf("pending call = %d, want %d", call, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("Run did not reach pending call %d", want)
+		}
+	}
+	select {
+	case <-client.recovered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("pending service did not recover")
+	}
+	if len(faults) != 0 {
+		t.Fatalf("unchanged pending failures were emitted more than once: %d", len(faults))
+	}
+	waitInboxRecovery(t, recorder, outage.Stage, reference)
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run after recovery: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run did not stop after cancellation")
+	}
+}
+
+func TestRunObservesReceiptFailureAndRecoversWithoutResponseDetails(t *testing.T) {
+	data := []byte("private file payload")
+	base, cancel := context.WithCancel(context.Background())
+	client := &receiptRecoveryClient{
+		fakeClient: fakeClient{data: data}, item: manifest("ft_receipt", "result.bin", data), cancel: cancel,
+		receiptErr: &filetransfer.Error{Code: "storage_unavailable", Message: "private receipt body", StatusCode: http.StatusServiceUnavailable},
+	}
+	receiver, err := New(Config{Client: client, MachineID: "machine_local", SessionID: "session_1", Path: filepath.Join(t.TempDir(), "Paperboat Inbox")})
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	reference := supportref.New()
+	recorder := diagnostics.NewMemoryRecorder()
+	ctx := diagnostics.WithRecorder(supportref.WithContext(base, reference), recorder)
+	faults := make(chan errorreport.Fault, 2)
+	restore := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) { faults <- fault })
+	defer restore()
+	done := make(chan error, 1)
+	go func() { done <- receiver.Run(ctx) }()
+
+	var failure errorreport.Fault
+	select {
+	case failure = <-faults:
+	case <-time.After(2 * time.Second):
+		t.Fatal("receipt failure was not observed")
+	}
+	if failure.Stage != "control_request" || failure.Code != "file_transfer_failed" || failure.HTTPStatus != http.StatusServiceUnavailable || failure.SupportReference != reference {
+		t.Fatalf("receipt fault = %#v", failure)
+	}
+	if strings.Contains(strings.Join(failure.ErrorChain, ","), "private") || strings.Contains(failure.Cause, "private") {
+		t.Fatalf("private receipt details reached diagnostics: %#v", failure)
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run after receipt recovery: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("Run did not finish after receipt recovery")
+	}
+	if len(client.receipts) != 2 || client.receipts[0] != "stored" || client.receipts[1] != "stored" || client.contentCalls != 1 {
+		t.Fatalf("receipt retry changed delivery behavior: receipts=%v content_calls=%d", client.receipts, client.contentCalls)
+	}
+	if len(faults) != 0 {
+		t.Fatalf("receipt recovery produced extra failures: %d", len(faults))
+	}
+	waitInboxRecovery(t, recorder, failure.Stage, reference)
+}
+
+func TestRunClosesBlockedContentOnCancellationAndReturnsReadCause(t *testing.T) {
+	readFailure := errors.New("private stream read failure")
+	body := &blockingBody{started: make(chan struct{}), closed: make(chan struct{}), err: readFailure}
+	client := &blockedContentClient{item: manifest("ft_blocked", "result.bin", []byte("expected data")), body: body}
+	receiver, err := New(Config{Client: client, MachineID: "machine_local", SessionID: "session_1", Path: filepath.Join(t.TempDir(), "Paperboat Inbox")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reference := supportref.New()
+	recorder := diagnostics.NewMemoryRecorder()
+	base, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx := diagnostics.WithRecorder(supportref.WithContext(base, reference), recorder)
+	faults := make(chan errorreport.Fault, 2)
+	restore := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) { faults <- fault })
+	defer restore()
+	done := make(chan error, 1)
+	go func() { done <- receiver.Run(ctx) }()
+	select {
+	case <-body.started:
+	case <-time.After(time.Second):
+		t.Fatal("content reader did not block")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) || !errors.Is(err, readFailure) {
+			t.Fatalf("Run lost concurrent cancellation/read causes: %v", err)
+		}
+		if strings.Contains(err.Error(), "private stream") {
+			t.Fatalf("Run error exposed the read error text: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancellation did not close the content body and stop Run")
+	}
+	select {
+	case <-body.closed:
+	default:
+		t.Fatal("content body was not closed")
+	}
+	select {
+	case fault := <-faults:
+		if fault.Stage != "delivery" || fault.Code != "file_transfer_failed" || fault.SupportReference != reference {
+			t.Fatalf("canceled delivery fault = %#v", fault)
+		}
+		if strings.Contains(strings.Join(fault.ErrorChain, ","), "private") || strings.Contains(fault.Cause, "private") {
+			t.Fatalf("private stream details reached diagnostics: %#v", fault)
+		}
+	default:
+		t.Fatal("concurrent stream read failure was not observed")
+	}
+	if client.receipt != 0 {
+		t.Fatalf("canceled stream received a terminal receipt: %d", client.receipt)
+	}
+}
+
+func TestRunClassifiesContentOpenFailureAndSendsBoundedReceipt(t *testing.T) {
+	base, cancel := context.WithCancel(context.Background())
+	client := &contentOpenFailureClient{
+		item: manifest("ft_open", "result.bin", []byte("content")), cancel: cancel,
+		contentErr: &filetransfer.Error{Code: "digest_mismatch", Message: "private open response", StatusCode: http.StatusBadRequest},
+	}
+	receiver, err := New(Config{Client: client, MachineID: "machine_local", SessionID: "session_1", Path: filepath.Join(t.TempDir(), "Paperboat Inbox")})
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	reference := supportref.New()
+	faults := make(chan errorreport.Fault, 2)
+	restore := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) { faults <- fault })
+	defer restore()
+	done := make(chan error, 1)
+	go func() {
+		done <- receiver.Run(diagnostics.WithRecorder(supportref.WithContext(base, reference), diagnostics.NewMemoryRecorder()))
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run after open failure: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("Run did not stop after open failure receipt")
+	}
+	if client.receipt != "digest_mismatch" {
+		t.Fatalf("receipt code = %q", client.receipt)
+	}
+	select {
+	case fault := <-faults:
+		if fault.Stage != "stream_open" || fault.Code != "file_transfer_failed" || fault.HTTPStatus != http.StatusBadRequest || fault.SupportReference != reference {
+			t.Fatalf("content open fault = %#v", fault)
+		}
+		if strings.Contains(strings.Join(fault.ErrorChain, ","), "private") || strings.Contains(fault.Cause, "private") {
+			t.Fatalf("private open details reached diagnostics: %#v", fault)
+		}
+	default:
+		t.Fatal("content open failure was not observed")
+	}
+}
+
+func TestStorageErrorsRetainCauseWithoutFormattingLocalPath(t *testing.T) {
+	privatePath := filepath.Join(t.TempDir(), "private-user", "token.txt")
+	original := fmt.Errorf("write %s: %w", privatePath, os.ErrPermission)
+	err := storageError(original)
+	if !errors.Is(err, os.ErrPermission) || !errors.Is(err, errStorageUnavailable) || errorCode(err) != "storage_unavailable" {
+		t.Fatalf("storage classification lost its original cause: %v", err)
+	}
+	if strings.Contains(err.Error(), privatePath) || strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("storage error exposed local path or raw cause: %v", err)
+	}
+	var staged interface{ DiagnosticStage() string }
+	var coded interface{ DiagnosticCode() string }
+	if !errors.As(err, &staged) || staged.DiagnosticStage() != "delivery" || !errors.As(err, &coded) || coded.DiagnosticCode() != "file_transfer_failed" {
+		t.Fatalf("storage error lacks typed delivery phase: %T", err)
+	}
+}
+
+func TestErrorCodeUsesTypedClassesAndDoesNotParseMessages(t *testing.T) {
+	if got := errorCode(errors.New("private text contains digest_mismatch")); got != "storage_unavailable" {
+		t.Fatalf("message-sniffed code = %q", got)
+	}
+	if got := errorCode(errDigestMismatch); got != "digest_mismatch" {
+		t.Fatalf("typed local code = %q", got)
+	}
+	if got := errorCode(&filetransfer.Error{Code: "recipient_unavailable"}); got != "recipient_unavailable" {
+		t.Fatalf("typed transfer result code = %q", got)
+	}
+	if got := errorCode(&filetransfer.Error{Code: "private_error_code"}); got != "storage_unavailable" {
+		t.Fatalf("unbounded transfer code = %q", got)
+	}
+	if got := errorCode(errors.Join(errDigestMismatch, os.ErrPermission)); got != "storage_unavailable" {
+		t.Fatalf("mixed failure was hidden by a product code: %q", got)
+	}
+}
+
+func waitInboxRecovery(t *testing.T, recorder *diagnostics.Recorder, stage, reference string) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		for _, event := range recorder.Recent() {
+			if event.Code == "recovered" && event.Category == stage && event.SupportReference == reference {
+				return
+			}
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("recovery event missing for stage=%s reference=%s", stage, reference)
+		case <-ticker.C:
+		}
 	}
 }
 

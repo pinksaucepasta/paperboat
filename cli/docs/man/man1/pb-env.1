@@ -2,7 +2,7 @@
 .TH "PB-ENV" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-env - Manage ENV Injection for connected hosts
+pb-env - Manage automatic global ENV and device overrides
 
 
 .SH SYNOPSIS
@@ -10,7 +10,7 @@ pb-env - Manage ENV Injection for connected hosts
 
 
 .SH DESCRIPTION
-Manage ENV Injection for connected hosts
+Manage automatic global ENV and device overrides
 
 .PP
 Manage encrypted ENV values by personal, team, or host scope. Vault commands control key custody, while set and unset change exact values. Listing shows metadata without revealing a value.
@@ -39,6 +39,10 @@ With --json, this command group lists its available commands.
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

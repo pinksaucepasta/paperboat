@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"testing"
@@ -77,6 +78,50 @@ func TestServeNativePrivateTCPForwardsHalfClose(t *testing.T) {
 	}
 	<-originDone
 	close(revoked)
+}
+
+func TestServeNativePrivateTCPClassifiesAuthorityAndTargetFailures(t *testing.T) {
+	binding := nativeprivate.Binding{Schema: nativeprivate.SchemaV1, ResourceKind: "tunnel", ResourceID: "tun_1", ResourceGeneration: 1, RouteID: "route_1", RouteGeneration: 1, TargetGeneration: 1, OwnerEndpointID: "machine_1", Protocol: "tcp", TargetScheme: "tcp", TargetAddress: "127.0.0.1:5432", ExpiresAt: time.Now().UTC().Add(time.Minute)}
+	target, _ := json.Marshal(binding)
+	header, err := streamauth.NewNativePrivate("operation_failure", "private_tcp", "stream_failure", "credential", binding.ExpiresAt, 1024, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, testCase := range []struct {
+		name  string
+		stage string
+		code  string
+		serve func(net.Conn, error) error
+	}{
+		{name: "authority", stage: "peer_authority", code: "peer_authority_failed", serve: func(client net.Conn, cause error) error {
+			return ServeNativePrivateTCP(context.Background(), header, client, func(context.Context, nativeprivate.Binding) (time.Time, <-chan struct{}, error) {
+				return time.Time{}, nil, cause
+			}, func(context.Context, string, string) (net.Conn, error) {
+				t.Fatal("dial ran after failed authority check")
+				return nil, nil
+			})
+		}},
+		{name: "target dial", stage: "target_connect", code: "native_private_failed", serve: func(client net.Conn, cause error) error {
+			return ServeNativePrivateTCP(context.Background(), header, client, func(context.Context, nativeprivate.Binding) (time.Time, <-chan struct{}, error) {
+				return binding.ExpiresAt, nil, nil
+			}, func(context.Context, string, string) (net.Conn, error) { return nil, cause })
+		}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			client, peer := net.Pipe()
+			defer client.Close()
+			defer peer.Close()
+			cause := errors.New("private network detail")
+			got := testCase.serve(client, cause)
+			var staged interface{ DiagnosticStage() string }
+			var coded interface{ DiagnosticCode() string }
+			if !errors.Is(got, cause) || !errors.As(got, &staged) || staged.DiagnosticStage() != testCase.stage ||
+				!errors.As(got, &coded) || coded.DiagnosticCode() != testCase.code || got.Error() != "native private operation failed" {
+				t.Fatalf("classified failure = %T %v", got, got)
+			}
+		})
+	}
 }
 
 func TestServeNativePrivateTCPRevocationClosesActiveStream(t *testing.T) {

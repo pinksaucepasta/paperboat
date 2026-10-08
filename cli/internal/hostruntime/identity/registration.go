@@ -23,22 +23,17 @@ type Registration struct {
 	PublicIdentityKey      string    `json:"public_identity_key"`
 	InboxPath              string    `json:"inbox_path"`
 	InstallationGeneration int64     `json:"installation_generation"`
-	SetupMode              string    `json:"setup_mode"`
-	SetupRoles             []string  `json:"setup_roles"`
 	SSHUser                string    `json:"ssh_user,omitempty"`
 	SSHPort                uint16    `json:"ssh_port,omitempty"`
 	UpdatedAt              time.Time `json:"updated_at"`
 }
 
 func (s *Store) SaveRegistration(value Registration) error {
-	if value.SetupMode == "" {
-		value.SetupMode = setupModeFromRoles(value.SetupRoles)
-	}
+
 	if strings.TrimSpace(value.ServerURL) == "" || strings.TrimSpace(value.MachineID) == "" ||
 		strings.TrimSpace(value.EnvironmentID) == "" || value.PublicKeyID != s.key.ID ||
 		strings.TrimSpace(value.PublicIdentityKey) == "" || !filepath.IsAbs(value.InboxPath) || value.InstallationGeneration < 1 ||
-		!validSetupMode(value.SetupMode) || value.UpdatedAt.IsZero() || value.SSHPort == 0 != (strings.TrimSpace(value.SSHUser) == "") ||
-		value.SetupMode != "host" && (value.SSHPort != 0 || strings.TrimSpace(value.SSHUser) != "") {
+		value.UpdatedAt.IsZero() || value.SSHPort == 0 != (strings.TrimSpace(value.SSHUser) == "") {
 		return ErrInvalidStore
 	}
 	value.Version = 1
@@ -55,22 +50,6 @@ func (s *Store) SaveRegistration(value Registration) error {
 		return err
 	}
 	return atomicfile.Write(path, encoded, atomicfile.CurrentOwnerOptions(0o600))
-}
-
-func validSetupMode(mode string) bool {
-	return mode == "client" || mode == "host"
-}
-
-func setupModeFromRoles(roles []string) string {
-	for _, role := range roles {
-		if role == "host" {
-			return "host"
-		}
-		if role == "interactive" {
-			return "client"
-		}
-	}
-	return "client"
 }
 
 func (s *Store) Registration() (Registration, error) {
@@ -98,14 +77,8 @@ func (s *Store) Registration() (Registration, error) {
 		strings.TrimSpace(value.ServerURL) == "" || !filepath.IsAbs(value.InboxPath) || value.InstallationGeneration < 1 {
 		return Registration{}, ErrInvalidStore
 	}
-	if value.SetupMode == "" {
-		value.SetupMode = setupModeFromRoles(value.SetupRoles)
-	}
-	if value.SetupMode == "session" {
-		value.SetupMode = "client"
-	}
-	if !validSetupMode(value.SetupMode) || value.SSHPort == 0 != (strings.TrimSpace(value.SSHUser) == "") ||
-		value.SetupMode != "host" && (value.SSHPort != 0 || strings.TrimSpace(value.SSHUser) != "") {
+
+	if value.SSHPort == 0 != (strings.TrimSpace(value.SSHUser) == "") {
 		return Registration{}, ErrInvalidStore
 	}
 	return value, nil

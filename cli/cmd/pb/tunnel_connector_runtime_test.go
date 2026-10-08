@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/google/uuid"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -45,7 +46,8 @@ func TestRunProductionTunnelConnectorAddUsesStableHostdAndPrintsSafeProjection(t
 	if err := runProductionTunnelConnectorAdd(command, "tunnel_01"); err != nil {
 		t.Fatal(err)
 	}
-	if fake.tunnel != "tunnel_01" || !strings.HasPrefix(fake.key, "connector-add-") || !strings.Contains(output.String(), "connector_01") || strings.Contains(strings.ToLower(output.String()), "credential") {
+	parsed, parseErr := uuid.Parse(strings.TrimPrefix(fake.key, "operation_"))
+	if fake.tunnel != "tunnel_01" || parseErr != nil || parsed.Version() != 4 || parsed.Variant() != uuid.RFC4122 || "operation_"+parsed.String() != fake.key || !strings.Contains(output.String(), "connector_01") || strings.Contains(strings.ToLower(output.String()), "credential") {
 		t.Fatalf("tunnel=%q key=%q output=%q", fake.tunnel, fake.key, output.String())
 	}
 }

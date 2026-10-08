@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"os"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,11 +18,14 @@ import (
 	"time"
 
 	xterm "github.com/gitpod-io/xterm-go"
+	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 var (
@@ -84,29 +89,146 @@ type Manager struct {
 }
 
 type managedSession struct {
-	opMu          sync.Mutex
-	inputMu       sync.Mutex
-	persistMu     sync.Mutex
-	liveProcess   atomic.Pointer[liveProcess]
-	id            string
-	name          string
-	command       pty.Command
-	lifecycle     *Lifecycle
-	history       *history.History
-	fanout        *Fanout
-	inputs        *InputJournal
-	process       PTYProcess
-	exit          *pty.ExitResult
-	resizeID      string
-	resizeTime    time.Time
-	persistNotify chan struct{}
-	persistStop   chan struct{}
-	persistDone   chan error
-	persistErr    error
-	modes         terminalModeTracker
-	screen        *xterm.Terminal
-	continuation  screenContinuation
-	participants  map[string]Participant
+	opMu             sync.Mutex
+	inputMu          sync.Mutex
+	persistMu        sync.Mutex
+	liveProcess      atomic.Pointer[liveProcess]
+	id               string
+	name             string
+	supportReference atomic.Pointer[string]
+	command          pty.Command
+	lifecycle        *Lifecycle
+	history          *history.History
+	fanout           *Fanout
+	inputs           *InputJournal
+	process          PTYProcess
+	exit             *pty.ExitResult
+	resizeID         string
+	resizeTime       time.Time
+	persistNotify    chan struct{}
+	persistStop      chan struct{}
+	persistDone      chan error
+	persistErr       error
+	modes            terminalModeTracker
+	identification   identificationTracker
+	screen           *xterm.Terminal
+	continuation     screenContinuation
+	participants     map[string]Participant
+}
+
+type sessionFailure struct {
+	stage string
+	cause error
+}
+
+func (e *sessionFailure) Error() string {
+	switch e.stage {
+	case "command":
+		return "terminal process operation failed"
+	case "delivery":
+		return "terminal output delivery failed"
+	default:
+		return "terminal session lifecycle failed"
+	}
+}
+func (e *sessionFailure) Unwrap() error           { return e.cause }
+func (e *sessionFailure) DiagnosticStage() string { return e.stage }
+func (*sessionFailure) DiagnosticCode() string    { return "terminal_session_failed" }
+
+func classifySessionFailure(stage string, err error) error {
+	if err == nil || onlyContextEnd(err) {
+		return err
+	}
+	return &sessionFailure{stage: stage, cause: err}
+}
+
+func onlyContextEnd(err error) bool {
+	return allSessionErrorLeaves(err, func(leaf error) bool {
+		return leaf == context.Canceled || leaf == context.DeadlineExceeded
+	})
+}
+
+func normalSessionTermination(err error) bool {
+	return allSessionErrorLeaves(err, func(leaf error) bool {
+		return leaf == io.EOF || leaf == os.ErrClosed || leaf == net.ErrClosed || leaf == context.Canceled
+	})
+}
+
+func allSessionErrorLeaves(err error, isNormal func(error) bool) bool {
+	if err == nil {
+		return false
+	}
+	remaining := []error{err}
+	seen := make(map[error]struct{})
+	leaves := 0
+	for visited := 0; len(remaining) > 0; visited++ {
+		if visited >= 16 {
+			return false
+		}
+		current := remaining[0]
+		remaining = remaining[1:]
+		if current == nil {
+			return false
+		}
+		typeOf := reflect.TypeOf(current)
+		if typeOf.Comparable() {
+			if _, ok := seen[current]; ok {
+				return false
+			}
+			seen[current] = struct{}{}
+		}
+		value := reflect.ValueOf(current)
+		switch value.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+			if value.IsNil() {
+				return false
+			}
+		}
+		switch wrapped := current.(type) {
+		case interface{ Unwrap() []error }:
+			children := wrapped.Unwrap()
+			if len(children) == 0 || len(children) > 16-visited-1 || len(remaining)+len(children) > 16-visited-1 {
+				return false
+			}
+			remaining = append(remaining, children...)
+		case interface{ Unwrap() error }:
+			child := wrapped.Unwrap()
+			if child == nil || len(remaining)+1 > 16-visited-1 {
+				return false
+			}
+			remaining = append(remaining, child)
+		default:
+			leaves++
+			if !isNormal(current) {
+				return false
+			}
+		}
+	}
+	return leaves > 0
+}
+
+func observeSessionFailure(session *managedSession, stage string, err error) {
+	if err == nil || normalSessionTermination(err) {
+		return
+	}
+	ctx := supportref.WithContext(context.Background(), sessionSupportReference(session))
+	errorreport.Current().CaptureFailure(ctx, "paperboat-daemon", "sessions", stage, "terminal_session_failed", err)
+}
+
+func setSessionSupportReference(session *managedSession, reference string) {
+	if reference == "" {
+		return
+	}
+	value := reference
+	session.supportReference.Store(&value)
+}
+
+func sessionSupportReference(session *managedSession) string {
+	reference := session.supportReference.Load()
+	if reference == nil {
+		return ""
+	}
+	return *reference
 }
 
 // liveProcess is immutable after publication. Terminal v1 input can therefore
@@ -123,17 +245,20 @@ type CreateRequest struct {
 }
 
 type Snapshot struct {
-	ID               string          `json:"id"`
-	Name             string          `json:"name"`
-	CWD              string          `json:"cwd"`
-	Dimensions       pty.Dimensions  `json:"dimensions"`
-	State            State           `json:"state"`
-	Generation       uint64          `json:"generation"`
-	EarliestSequence uint64          `json:"earliest_sequence"`
-	LatestSequence   uint64          `json:"latest_sequence"`
-	Exit             *pty.ExitResult `json:"exit,omitempty"`
-	TerminalModes    TerminalModes   `json:"terminal_modes"`
-	Participants     []Participant   `json:"participants,omitempty"`
+	ID                string          `json:"id"`
+	Name              string          `json:"name"`
+	CWD               string          `json:"cwd"`
+	Title             string          `json:"title"`
+	CurrentDirectory  string          `json:"current_directory,omitempty"`
+	ForegroundProcess string          `json:"foreground_process,omitempty"`
+	Dimensions        pty.Dimensions  `json:"dimensions"`
+	State             State           `json:"state"`
+	Generation        uint64          `json:"generation"`
+	EarliestSequence  uint64          `json:"earliest_sequence"`
+	LatestSequence    uint64          `json:"latest_sequence"`
+	Exit              *pty.ExitResult `json:"exit,omitempty"`
+	TerminalModes     TerminalModes   `json:"terminal_modes"`
+	Participants      []Participant   `json:"participants,omitempty"`
 }
 
 type Participant struct {
@@ -220,10 +345,17 @@ func (m *Manager) launch(ctx context.Context, command pty.Command) (PTYProcess, 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	var process PTYProcess
+	var err error
 	if m.config.LaunchContext != nil {
-		return m.config.LaunchContext(ctx, command)
+		process, err = m.config.LaunchContext(ctx, command)
+	} else {
+		process, err = m.config.Launch(command)
 	}
-	return m.config.Launch(command)
+	if errors.Is(err, pty.ErrInvalidCommand) || errors.Is(err, pty.ErrInvalidCWD) || errors.Is(err, pty.ErrInvalidDimensions) {
+		return process, err
+	}
+	return process, classifySessionFailure("command", err)
 }
 
 func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, error) {
@@ -273,6 +405,7 @@ func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, 
 	}
 	retained, _ := history.New(m.config.HistoryBytes)
 	session := &managedSession{id: id, name: request.Name, command: request.Command, lifecycle: NewLifecycle(), history: retained, fanout: NewFanout(), participants: make(map[string]Participant), screen: xterm.New(xterm.WithCols(int(request.Command.Dimensions.Columns)), xterm.WithRows(int(request.Command.Dimensions.Rows)), xterm.WithScrollback(browserScreenScrollbackLines))}
+	setSessionSupportReference(session, supportref.FromContext(ctx))
 	if m.config.Store != nil {
 		if err := m.config.Store.CreateSession(ctx, store.Session{ID: id, Name: request.Name, CWD: request.Command.CWD, CommandPath: request.Command.Path, CommandArgs: request.Command.Args, CommandEnv: request.Command.Env, Columns: request.Command.Dimensions.Columns, Rows: request.Command.Dimensions.Rows, State: string(Creating), Generation: 0}); err != nil {
 			return Snapshot{}, err
@@ -281,23 +414,28 @@ func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, 
 	process, err := m.launch(ctx, request.Command)
 	if err != nil {
 		_ = session.lifecycle.Transition(Closed)
-		m.discardFailedCreate(ctx, session, Creating)
+		if cleanupErr := m.discardFailedCreate(ctx, session, Creating); cleanupErr != nil {
+			observeSessionFailure(session, "lifecycle", cleanupErr)
+		}
 		return Snapshot{}, err
 	}
 	if err := session.lifecycle.Transition(Running); err != nil {
-		_ = process.CloseIO()
-		return Snapshot{}, err
+		closeErr := process.CloseIO()
+		observeSessionFailure(session, "lifecycle", closeErr)
+		return Snapshot{}, classifySessionFailure("lifecycle", errors.Join(err, closeErr))
 	}
 	_, generation := session.lifecycle.Snapshot()
 	if err := m.persist(ctx, session, Creating); err != nil {
 		terminateCtx, cancel := context.WithTimeout(context.Background(), m.config.TerminationTimeout)
-		_, _ = process.Terminate(terminateCtx, 0)
+		_, terminateErr := process.Terminate(terminateCtx, 0)
 		cancel()
-		m.discardFailedCreate(context.Background(), session, Creating)
-		return Snapshot{}, err
+		cleanupErr := m.discardFailedCreate(context.Background(), session, Creating)
+		observeSessionFailure(session, "lifecycle", errors.Join(terminateErr, cleanupErr))
+		return Snapshot{}, errors.Join(err, classifySessionFailure("lifecycle", errors.Join(terminateErr, cleanupErr)))
 	}
 	session.inputs = NewBoundedInputJournal(generation, m.config.MaxInputDecisions)
 	session.process = process
+	session.identification = identificationTracker{}
 	session.liveProcess.Store(&liveProcess{process: process, generation: generation})
 	m.startOutputPersistence(session)
 	m.sessions[id] = session
@@ -680,11 +818,16 @@ func (m *Manager) AttachmentStatus(sessionID, attachmentID string) (AttachmentSt
 }
 
 func (m *Manager) Write(sessionID string, key InputKey, data []byte) (InputDecision, error) {
+	return m.WriteContext(context.Background(), sessionID, key, data)
+}
+func (m *Manager) WriteContext(ctx context.Context, sessionID string, key InputKey, data []byte) (InputDecision, error) {
 	session, err := m.get(sessionID)
 	if err != nil {
 		return InputDecision{}, err
 	}
-	session.opMu.Lock()
+	if err := pty.LockInput(ctx, &session.opMu); err != nil {
+		return InputDecision{}, err
+	}
 	defer session.opMu.Unlock()
 	state, generation := session.lifecycle.Snapshot()
 	if state != Running || session.process == nil || key.Generation != generation {
@@ -695,7 +838,7 @@ func (m *Manager) Write(sessionID string, key InputKey, data []byte) (InputDecis
 	}
 	key, _ = normalizeInputKey(key)
 	if _, queryErr := session.inputs.Query(key); queryErr == nil {
-		return session.inputs.Write(key, data, session.process)
+		return session.inputs.Write(key, data, contextInputWriter{ctx: ctx, writer: session.process})
 	} else if !errors.Is(queryErr, ErrInputUnknown) {
 		return InputDecision{}, queryErr
 	}
@@ -713,7 +856,7 @@ func (m *Manager) Write(sessionID string, key InputKey, data []byte) (InputDecis
 			return InputDecision{}, ErrInputConflict
 		}
 	}
-	decision, err := session.inputs.Write(key, data, session.process)
+	decision, err := session.inputs.Write(key, data, contextInputWriter{ctx: ctx, writer: session.process})
 	if err != nil {
 		return decision, err
 	}
@@ -749,6 +892,9 @@ func inputStorageID(key InputKey) string {
 // WriteStream writes ordered live terminal input without creating an
 // idempotency decision. Stream input is never replayed after disconnection.
 func (m *Manager) WriteStream(sessionID, attachmentID string, generation uint64, data []byte) error {
+	return m.WriteStreamContext(context.Background(), sessionID, attachmentID, generation, data)
+}
+func (m *Manager) WriteStreamContext(ctx context.Context, sessionID, attachmentID string, generation uint64, data []byte) error {
 	if len(data) == 0 || len(data) > 256<<10 {
 		return ErrInvalidInput
 	}
@@ -756,7 +902,9 @@ func (m *Manager) WriteStream(sessionID, attachmentID string, generation uint64,
 	if err != nil {
 		return err
 	}
-	session.inputMu.Lock()
+	if err := pty.LockInput(ctx, &session.inputMu); err != nil {
+		return err
+	}
 	defer session.inputMu.Unlock()
 	live := session.liveProcess.Load()
 	if live == nil || generation != live.generation {
@@ -766,7 +914,7 @@ func (m *Manager) WriteStream(sessionID, attachmentID string, generation uint64,
 	if !session.fanout.IsAttached(attachmentID) {
 		return ErrInvalidInput
 	}
-	n, writeErr := live.process.Write(data)
+	n, writeErr := (contextInputWriter{ctx: ctx, writer: live.process}).Write(data)
 	if writeErr != nil {
 		return writeErr
 	}
@@ -906,7 +1054,7 @@ func (m *Manager) clearOutputLocked(ctx context.Context, session *managedSession
 		session.screen = nil
 		session.continuation.reset()
 	}
-	return clearErr
+	return classifySessionFailure("lifecycle", clearErr)
 }
 
 func (m *Manager) Close(ctx context.Context, sessionID string) (Snapshot, error) {
@@ -970,21 +1118,25 @@ func (m *Manager) closeAtGeneration(ctx context.Context, sessionID string, expec
 		}
 		if err := m.persist(ctx, session, Running); err != nil {
 			terminateCtx, cancel := context.WithTimeout(context.Background(), m.config.TerminationTimeout)
-			result, _ := session.process.Terminate(terminateCtx, 0)
+			result, terminateErr := session.process.Terminate(terminateCtx, 0)
 			cancel()
 			session.exit, session.process = &result, nil
 			_ = session.lifecycle.Transition(Closed)
-			return Snapshot{}, errors.Join(err, m.clearOutputLocked(context.Background(), session, true))
+			cleanupErr := errors.Join(terminateErr, m.clearOutputLocked(context.Background(), session, true))
+			observeSessionFailure(session, "lifecycle", cleanupErr)
+			return Snapshot{}, errors.Join(err, cleanupErr)
 		}
 	}
 	terminateCtx, cancel := context.WithTimeout(ctx, m.config.TerminationTimeout)
 	result, terminateErr := session.process.Terminate(terminateCtx, m.config.TerminationGrace)
 	cancel()
-	if terminateErr != nil && (errors.Is(terminateErr, context.Canceled) || errors.Is(terminateErr, context.DeadlineExceeded)) {
+	if onlyContextEnd(terminateErr) {
 		process := session.process
+		setSessionSupportReference(session, supportref.FromContext(ctx))
 		go m.finishClosing(session, process)
 		return session.snapshotLocked(), terminateErr
 	}
+	terminateErr = classifySessionFailure("lifecycle", terminateErr)
 	session.liveProcess.Store(nil)
 	session.exit = &result
 	session.process = nil
@@ -1007,17 +1159,20 @@ func (m *Manager) finishClosing(session *managedSession, process PTYProcess) {
 	result, err := process.Terminate(terminateCtx, m.config.TerminationGrace)
 	cancel()
 	if err != nil {
+		observeSessionFailure(session, "lifecycle", err)
 		return
 	}
 	session.exit = &result
 	session.process = nil
-	if session.lifecycle.Transition(Closed) != nil {
+	if err := session.lifecycle.Transition(Closed); err != nil {
+		observeSessionFailure(session, "lifecycle", err)
 		return
 	}
 	persistErr := m.persist(context.Background(), session, Closing)
 	clearErr := m.clearOutputLocked(context.Background(), session, true)
 	if persistErr != nil || clearErr != nil {
 		session.persistErr = errors.Join(session.persistErr, persistErr, clearErr)
+		observeSessionFailure(session, "lifecycle", errors.Join(persistErr, clearErr))
 		if m.config.Metrics != nil {
 			_ = m.config.Metrics.Record("paperboat_runtime_terminal_persistence_failures_total", 1, nil)
 		}
@@ -1074,6 +1229,7 @@ func (m *Manager) restartAtGeneration(ctx context.Context, sessionID string, exp
 	if state != Exited && state != Closed {
 		return Snapshot{}, ErrSessionRunning
 	}
+	setSessionSupportReference(session, supportref.FromContext(ctx))
 	for attachmentID, participant := range session.participants {
 		if participant.Role != "owner" {
 			_ = session.fanout.Detach(attachmentID)
@@ -1090,28 +1246,33 @@ func (m *Manager) restartAtGeneration(ctx context.Context, sessionID string, exp
 	process, err := m.launch(ctx, session.command)
 	if err != nil {
 		_ = session.lifecycle.Transition(Closed)
-		_ = m.persist(context.Background(), session, Restarting)
+		if cleanupErr := m.persist(context.Background(), session, Restarting); cleanupErr != nil {
+			observeSessionFailure(session, "lifecycle", cleanupErr)
+		}
 		return Snapshot{}, err
 	}
 	if err := session.lifecycle.Transition(Running); err != nil {
-		_ = process.CloseIO()
-		return Snapshot{}, err
+		closeErr := process.CloseIO()
+		observeSessionFailure(session, "lifecycle", closeErr)
+		return Snapshot{}, classifySessionFailure("lifecycle", errors.Join(err, closeErr))
 	}
 	_, generation = session.lifecycle.Snapshot()
 	session.inputs.SetGeneration(generation)
 	session.screen = xterm.New(xterm.WithCols(int(session.command.Dimensions.Columns)), xterm.WithRows(int(session.command.Dimensions.Rows)), xterm.WithScrollback(browserScreenScrollbackLines))
 	session.continuation.reset()
 	session.process, session.exit = process, nil
+	session.identification = identificationTracker{}
 	session.liveProcess.Store(&liveProcess{process: process, generation: generation})
 	m.startOutputPersistence(session)
 	if err := m.persist(context.Background(), session, Restarting); err != nil {
 		terminateCtx, cancel := context.WithTimeout(context.Background(), m.config.TerminationTimeout)
-		_, _ = process.Terminate(terminateCtx, 0)
+		_, terminateErr := process.Terminate(terminateCtx, 0)
 		cancel()
 		session.liveProcess.Store(nil)
 		session.process = nil
 		_ = session.lifecycle.Transition(Exited)
-		return Snapshot{}, err
+		observeSessionFailure(session, "lifecycle", terminateErr)
+		return Snapshot{}, errors.Join(err, classifySessionFailure("lifecycle", terminateErr))
 	}
 	go m.capture(session, process)
 	return session.snapshotLocked(), nil
@@ -1191,12 +1352,29 @@ func (m *Manager) SnapshotAtGeneration(sessionID string, expectedGeneration uint
 		return Snapshot{}, err
 	}
 	session.opMu.Lock()
-	defer session.opMu.Unlock()
-	_, generation := session.lifecycle.Snapshot()
-	if expectedGeneration != 0 && generation != expectedGeneration {
-		return Snapshot{}, &StaleGenerationError{CurrentGeneration: generation}
+	snapshot := session.snapshotLocked()
+	process := session.process
+	session.opMu.Unlock()
+	if expectedGeneration != 0 && snapshot.Generation != expectedGeneration {
+		return Snapshot{}, &StaleGenerationError{CurrentGeneration: snapshot.Generation}
 	}
-	return session.snapshotLocked(), nil
+	// Native observation is request-time only, outside the output/input lock.
+	if observer, ok := process.(interface{ Identification() pty.Identification }); ok && (snapshot.State == Running || snapshot.State == Closing) {
+		observed := observer.Identification()
+		session.opMu.Lock()
+		state, generation := session.lifecycle.Snapshot()
+		current := session.process == process && generation == snapshot.Generation && (state == Running || state == Closing)
+		session.opMu.Unlock()
+		if current {
+			snapshot.ForegroundProcess = cleanIdentification(observed.ForegroundProcess, 128)
+			if observed.CurrentDirectory != "" {
+				snapshot.CurrentDirectory = cleanIdentification(observed.CurrentDirectory, 1024)
+			}
+		} else {
+			return m.SnapshotAtGeneration(sessionID, expectedGeneration)
+		}
+	}
+	return snapshot, nil
 }
 
 func (m *Manager) List() []Snapshot {
@@ -1208,9 +1386,9 @@ func (m *Manager) List() []Snapshot {
 	m.mu.RUnlock()
 	snapshots := make([]Snapshot, 0, len(sessions))
 	for _, session := range sessions {
-		session.opMu.Lock()
-		snapshots = append(snapshots, session.snapshotLocked())
-		session.opMu.Unlock()
+		if snapshot, err := m.Snapshot(session.id); err == nil {
+			snapshots = append(snapshots, snapshot)
+		}
 	}
 	sort.Slice(snapshots, func(i, j int) bool { return snapshots[i].Name < snapshots[j].Name })
 	return snapshots
@@ -1301,6 +1479,7 @@ func (m *Manager) ShutdownForRecovery(ctx context.Context) error {
 }
 
 func (m *Manager) capture(session *managedSession, process PTYProcess) {
+	var readErr error
 	for {
 		buffer := history.AcquireBuffer()
 		n, err := process.Read(buffer)
@@ -1309,6 +1488,7 @@ func (m *Manager) capture(session *managedSession, process PTYProcess) {
 			state, _ := session.lifecycle.Snapshot()
 			if state == Running || state == Closing {
 				session.modes.Consume(buffer[:n])
+				session.identification.Consume(buffer[:n])
 				event, appendErr := session.history.AppendBuffer(1, buffer[:n])
 				if appendErr == nil {
 					if session.screen != nil {
@@ -1327,15 +1507,20 @@ func (m *Manager) capture(session *managedSession, process PTYProcess) {
 			history.ReleaseBuffer(buffer)
 		}
 		if err != nil {
+			readErr = err
 			break
 		}
 	}
 	persistErr := m.stopOutputPersistence(session)
-	result, _ := process.Wait(context.Background())
-	_ = process.CloseIO()
+	result, waitErr := process.Wait(context.Background())
+	closeErr := process.CloseIO()
+	observeSessionFailure(session, "delivery", classifySessionFailure("delivery", readErr))
+	observeSessionFailure(session, "command", classifySessionFailure("command", waitErr))
+	lifecycleErr := errors.Join(persistErr, closeErr)
 	session.opMu.Lock()
 	defer session.opMu.Unlock()
 	if session.process != process {
+		observeSessionFailure(session, "lifecycle", lifecycleErr)
 		return
 	}
 	session.persistErr = persistErr
@@ -1344,23 +1529,28 @@ func (m *Manager) capture(session *managedSession, process PTYProcess) {
 	}
 	state, _ := session.lifecycle.Snapshot()
 	if state == Running {
-		_ = session.lifecycle.Transition(Exited)
+		if err := session.lifecycle.Transition(Exited); err != nil {
+			lifecycleErr = errors.Join(lifecycleErr, err)
+		}
 		session.exit = &result
 		session.liveProcess.CompareAndSwap(session.liveProcess.Load(), nil)
 		session.process = nil
 		if err := m.persist(context.Background(), session, Running); err != nil {
 			session.persistErr = errors.Join(session.persistErr, err)
+			lifecycleErr = errors.Join(lifecycleErr, err)
 			if m.config.Metrics != nil {
 				_ = m.config.Metrics.Record("paperboat_runtime_terminal_persistence_failures_total", 1, nil)
 			}
 		}
 		if clearErr := m.clearOutputLocked(context.Background(), session, true); clearErr != nil {
 			session.persistErr = errors.Join(session.persistErr, clearErr)
+			lifecycleErr = errors.Join(lifecycleErr, clearErr)
 			if m.config.Metrics != nil {
 				_ = m.config.Metrics.Record("paperboat_runtime_terminal_persistence_failures_total", 1, nil)
 			}
 		}
 	}
+	observeSessionFailure(session, "lifecycle", lifecycleErr)
 }
 
 func (m *Manager) startOutputPersistence(session *managedSession) {
@@ -1397,7 +1587,7 @@ func (m *Manager) stopOutputPersistence(session *managedSession) error {
 	close(session.persistStop)
 	err := <-session.persistDone
 	session.persistNotify, session.persistStop, session.persistDone = nil, nil, nil
-	return err
+	return classifySessionFailure("lifecycle", err)
 }
 
 func (m *Manager) runOutputPersistence(session *managedSession, notify, stop <-chan struct{}, done chan<- error) {
@@ -1491,6 +1681,11 @@ func (s *managedSession) snapshotLocked() Snapshot {
 	state, generation := s.lifecycle.Snapshot()
 	earliest, latest, _ := s.history.Bounds()
 	snapshot := Snapshot{ID: s.id, Name: s.name, CWD: s.command.CWD, Dimensions: s.command.Dimensions, State: state, Generation: generation, EarliestSequence: earliest, LatestSequence: latest, TerminalModes: s.modes.Modes()}
+	snapshot.Title = s.identification.title
+	if state == Running || state == Closing {
+		snapshot.CurrentDirectory = s.identification.directory
+
+	}
 	for _, participant := range s.participants {
 		state, _, err := s.fanout.Status(participant.AttachmentID)
 		if err == nil && state == Attached {
@@ -1523,15 +1718,16 @@ func (m *Manager) persist(ctx context.Context, session *managedSession, expected
 	if m.config.Store == nil {
 		return nil
 	}
-	return m.config.Store.UpdateSession(ctx, session.id, string(expected), session.storeRecordLocked())
+	return classifySessionFailure("lifecycle", m.config.Store.UpdateSession(ctx, session.id, string(expected), session.storeRecordLocked()))
 }
 
-func (m *Manager) discardFailedCreate(ctx context.Context, session *managedSession, expected State) {
+func (m *Manager) discardFailedCreate(ctx context.Context, session *managedSession, expected State) error {
 	if m.config.Store == nil {
-		return
+		return nil
 	}
-	_ = m.config.Store.UpdateSession(ctx, session.id, string(expected), session.storeRecordLocked())
-	_ = m.config.Store.DeleteSession(ctx, session.id)
+	updateErr := m.config.Store.UpdateSession(ctx, session.id, string(expected), session.storeRecordLocked())
+	deleteErr := m.config.Store.DeleteSession(ctx, session.id)
+	return classifySessionFailure("lifecycle", errors.Join(updateErr, deleteErr))
 }
 
 func (m *Manager) recover(ctx context.Context) error {
@@ -1622,11 +1818,11 @@ func (m *Manager) recover(ctx context.Context) error {
 }
 
 func randomID(random io.Reader) (string, error) {
-	var value [16]byte
-	if _, err := io.ReadFull(random, value[:]); err != nil {
+	id, err := uuid.NewRandomFromReader(random)
+	if err != nil {
 		return "", err
 	}
-	return "ses_" + hex.EncodeToString(value[:]), nil
+	return "terminal_" + id.String(), nil
 }
 
 func validSessionName(name string) bool {
@@ -1639,4 +1835,48 @@ func validSessionName(name string) bool {
 		}
 	}
 	return !strings.HasPrefix(name, "-")
+}
+
+// DetachAllAttachments releases transport participants when the active feature
+// worker changes. PTYs, screen state, input decisions and replay remain owned.
+func (m *Manager) DetachAllAttachments() error {
+	m.mu.RLock()
+	sessions := make([]*managedSession, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		sessions = append(sessions, s)
+	}
+	m.mu.RUnlock()
+	var result error
+	for _, s := range sessions {
+		s.opMu.Lock()
+		ids := make([]string, 0, len(s.participants))
+		for id := range s.participants {
+			ids = append(ids, id)
+		}
+		s.opMu.Unlock()
+		for _, id := range ids {
+			err := m.Detach(s.id, id)
+			if !errors.Is(err, ErrAttachmentUnknown) && !errors.Is(err, ErrSessionUnknown) {
+				result = errors.Join(result, err)
+			}
+		}
+	}
+	return result
+}
+
+type contextInputWriter struct {
+	ctx    context.Context
+	writer io.Writer
+}
+
+func (w contextInputWriter) Write(data []byte) (int, error) {
+	if err := w.ctx.Err(); err != nil {
+		return 0, err
+	}
+	if writer, ok := w.writer.(interface {
+		WriteContext(context.Context, []byte) (int, error)
+	}); ok {
+		return writer.WriteContext(w.ctx, data)
+	}
+	return w.writer.Write(data)
 }

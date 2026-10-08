@@ -93,14 +93,14 @@ func TestServerIssuedSharedPreviewRuntime(t *testing.T) {
 	clear(body)
 	now := time.Unix(timing.IssuedAt, 0).Add(time.Second)
 	verifier := auth.Verifier{Keys: sharedPreviewKey{key, h.Kid}, Clock: sharedPreviewClock(now)}
-	claims, err := verifier.Verify(context.Background(), f.Token, auth.Policy{Issuer: f.Issuer, Audience: "paperboat-machine", CredentialClass: "preview_launch", MachineID: f.Dispatch.OwnerDeviceID, OperationID: f.Dispatch.OperationID, Scopes: []string{"preview:launch"}})
+	claims, err := verifier.Verify(context.Background(), f.Token, auth.Policy{Issuer: f.Issuer, Audience: "paperboat-machine", CredentialClass: "preview_launch", MachineID: f.Dispatch.OwnerMachineID, OperationID: f.Dispatch.OperationID, Scopes: []string{"preview:launch"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if claims.AccountID == f.MachineIssuer || claims.AccountID != f.Dispatch.AccountID || claims.UserID != claims.ActorID {
 		t.Fatal("shared issuer was substituted for requester")
 	}
-	authorization := DispatchAuthorization{AccountID: claims.AccountID, ActorID: claims.ActorID, MachineID: claims.MachineID, OwnerSessionID: claims.OwnerSessionID, PreviewID: claims.PreviewID, OperationID: claims.OperationID, ExpectedGeneration: claims.ExpectedGeneration, IdempotencyKey: claims.IdempotencyKey, RequestID: claims.RequestID, CorrelationID: claims.CorrelationID, RequestHash: claims.RequestHash, ExpiresAt: time.Unix(claims.ExpiresAt, 0)}
+	authorization := DispatchAuthorization{AccountID: claims.AccountID, ActorID: claims.ActorID, MachineID: claims.MachineID, OwnerSessionID: claims.OwnerSessionID, OwnerSessionKind: claims.OwnerSessionKind, PreviewID: claims.PreviewID, OperationID: claims.OperationID, ExpectedGeneration: claims.ExpectedGeneration, IdempotencyKey: claims.IdempotencyKey, RequestID: claims.RequestID, CorrelationID: claims.CorrelationID, RequestHash: claims.RequestHash, ExpiresAt: time.Unix(claims.ExpiresAt, 0)}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	listener, err := net.Listen("tcp", f.Dispatch.Target.Address)
@@ -114,19 +114,19 @@ func TestServerIssuedSharedPreviewRuntime(t *testing.T) {
 	defer origin.Close()
 	identity := testPreviewCarrierIdentity(1)
 	identity.AccountID = f.Dispatch.AccountID
-	identity.HostID = f.Dispatch.OwnerDeviceID
+	identity.HostID = f.Dispatch.OwnerMachineID
 	pair := newPreviewCarrierPair(t, ctx, identity)
 	defer pair.close()
 	carrier, err := NewDataCarrierPreviewCarrier(DataCarrierPreviewCarrierConfig{Active: pair.active, Identity: identity, RouteID: f.Dispatch.PreviewID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	owners, err := NewRuntimeOwnerSessionRegistry(RuntimeOwnerSessionRegistryConfig{AccountID: f.MachineIssuer, MachineID: f.Dispatch.OwnerDeviceID, RuntimeDone: ctx.Done()})
+	owners, err := NewRuntimeOwnerSessionRegistry(RuntimeOwnerSessionRegistryConfig{AccountID: f.MachineIssuer, MachineID: f.Dispatch.OwnerMachineID, RuntimeDone: ctx.Done()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	leases := &sessionLeaseClient{}
-	manager, err := NewDispatchManager(DispatchManagerConfig{MachineID: f.Dispatch.OwnerDeviceID, Leases: leases, Carriers: &dispatchResolver{carrier: carrier}, Readiness: &dispatchObserver{}, Owners: owners, Now: func() time.Time { return now }, RunContext: ctx})
+	manager, err := NewDispatchManager(DispatchManagerConfig{MachineID: f.Dispatch.OwnerMachineID, Leases: leases, Carriers: &dispatchResolver{carrier: carrier}, Readiness: &dispatchObserver{}, Owners: owners, Now: func() time.Time { return now }, RunContext: ctx})
 	if err != nil {
 		t.Fatal(err)
 	}

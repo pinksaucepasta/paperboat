@@ -76,7 +76,7 @@ func testWindowsUpdaterConfig(t *testing.T) WindowsConfig {
 		t.Fatal(err)
 	}
 	instanceRoot, _ := hostinstall.WindowsInstanceRoot(layout.Instance)
-	return WindowsConfig{StateRoot: layout.UpdateStateRoot, RuntimeStateRoot: `C:\Users\Pujan\AppData\Local\Paperboat\runtime`, Binary: layout.Binary, BinaryRollback: layout.BinaryRollback, BinaryStaged: layout.BinaryStaged, OwnerSID: "S-1-5-21-1-2-3-1001", MachineID: "machine", RepositoryURL: "https://get.pprbt.dev", TokenFile: filepath.Join(instanceRoot, "hostd.token"), InstallState: filepath.Join(instanceRoot, "runtime-install.json"), ControlSocket: `\\.\pipe\PaperboatUpdatedControl-` + layout.Instance, HostdSocket: layout.HostdSocket, HealthURL: "http://127.0.0.1:8080/healthz", ActiveVersion: "2026.08.23.1", Architecture: "amd64", SetupMode: "client"}
+	return WindowsConfig{StateRoot: layout.UpdateStateRoot, RuntimeStateRoot: `C:\Users\Pujan\AppData\Local\Paperboat\runtime`, Binary: layout.Binary, BinaryRollback: layout.BinaryRollback, BinaryStaged: layout.BinaryStaged, OwnerSID: "S-1-5-21-1-2-3-1001", MachineID: "machine", RepositoryURL: "https://get.pprbt.dev", TokenFile: filepath.Join(instanceRoot, "hostd.token"), InstallState: filepath.Join(instanceRoot, "runtime-install.json"), ControlSocket: `\\.\pipe\PaperboatUpdatedControl-` + layout.Instance, HostdSocket: layout.HostdSocket, HealthURL: "http://127.0.0.1:8080/healthz", ActiveVersion: "2026.08.23.1", Architecture: "amd64"}
 }
 
 func TestWindowsUpdaterRejectsMutableTrustAndPathInputs(t *testing.T) {
@@ -92,7 +92,6 @@ func TestWindowsUpdaterRejectsMutableTrustAndPathInputs(t *testing.T) {
 		func(c *WindowsConfig) { c.ControlSocket = `\\.\pipe\attacker` },
 		func(c *WindowsConfig) { c.HealthURL = "http://10.0.0.1:8080/healthz" },
 		func(c *WindowsConfig) { c.Architecture = "386" },
-		func(c *WindowsConfig) { c.SetupMode = "both" },
 	}
 	for index, mutate := range tests {
 		candidate := baseline
@@ -226,10 +225,11 @@ func TestWindowsActivationPathsAcceptRollbackUpdaterDuringRecovery(t *testing.T)
 		Stage: windowsActivationStaged, Runtime: component, CLI: component, Hostd: component, Updater: component,
 		PreviousBinary: windowsActivationComponent{Path: layout.Binary, SHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Length: 1},
 		OldHostd:       windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-hostd", "--instance", layout.Instance}},
-		NewHostd:       windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-hostd", "--instance", layout.Instance}},
+		NewHostd:       windowsServiceTarget{Executable: paths.Runtime, Arguments: []string{"daemon", "__runtime-hostd", "--instance", layout.Instance}},
 		OldUpdater:     windowsServiceTarget{Executable: layout.BinaryRollback, Arguments: []string{"daemon", "__runtime-updated", "--instance", layout.Instance}},
-		NewUpdater:     windowsServiceTarget{Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-updated", "--instance", layout.Instance}},
+		NewUpdater:     windowsServiceTarget{Executable: paths.Runtime, Arguments: []string{"daemon", "__runtime-updated", "--instance", layout.Instance}},
 	}
+	journal.Release.SupervisorMaintenance = true
 	if !validWindowsActivationPaths(config, journal) {
 		t.Fatal("staged journal with rollback updater was rejected")
 	}

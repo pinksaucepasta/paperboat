@@ -131,95 +131,70 @@ func executeWindowsServiceStepsWithHook(
 	return rollback, nil
 }
 
-func windowsRuntimeServiceDefinitions(layout service.Layout) []windowsRuntimeServiceDefinition {
+func windowsRuntimeServiceDefinitions(layout service.Layout, pinned ...string) []windowsRuntimeServiceDefinition {
+	executable := layout.Binary
+	if len(pinned) == 1 {
+		executable = pinned[0]
+	}
 	var instanceArgs []string
 	if layout.Instance != "" {
 		instanceArgs = []string{"--instance", layout.Instance}
 	}
 	return []windowsRuntimeServiceDefinition{
-		{kind: service.HostdKind, executable: layout.Binary, arguments: append([]string{"daemon", "__runtime-hostd"}, instanceArgs...)},
-		{kind: service.DaemonKind, executable: layout.Binary, arguments: append([]string{"daemon", "__runtime-local-daemon"}, instanceArgs...)},
-		{kind: service.UpdaterKind, executable: layout.Binary, arguments: append([]string{"daemon", "__runtime-updated"}, instanceArgs...)},
+		{kind: service.HostdKind, executable: executable, arguments: append([]string{"daemon", "__runtime-hostd"}, instanceArgs...)},
+		{kind: service.DaemonKind, executable: executable, arguments: append([]string{"daemon", "__runtime-local-daemon"}, instanceArgs...)},
+		{kind: service.UpdaterKind, executable: executable, arguments: append([]string{"daemon", "__runtime-updated"}, instanceArgs...)},
 	}
 }
 
 // executeWindowsServiceInstallPlan is the ordering boundary for a Windows
-// role transition. Hostd performs a managed-SSH loopback reconciliation during
-// startup, so host-mode recovery must not restore/start Hostd until Paperboat's
+// runtime installation. Hostd performs a managed-SSH loopback reconciliation during
+// startup, so machine recovery must not restore/start Hostd until Paperboat's
 // dedicated OpenSSH service is installed and healthy. Keeping recovery in this
 // plan also covers a crash journal whose rollback would otherwise start Hostd
 // before the SSH callback runs.
-func executeWindowsServiceInstallPlan(setupMode string, installSSH, recoverRuntime, installRuntime, cleanupSSH func() error) error {
+func executeWindowsServiceInstallPlan(installSSH, recoverRuntime, installRuntime, cleanupSSH func() error) error {
 	if installSSH == nil || recoverRuntime == nil || installRuntime == nil || cleanupSSH == nil {
 		return ErrInvalidRequest
 	}
-	switch setupMode {
-	case "host":
-		// Hostd validates the managed SSH loopback endpoint as it starts. The
-		// service SID used by the host-key ACL is deterministic, so OpenSSH can
-		// be installed before Hostd is first registered.
-		if err := installSSH(); err != nil {
-			return err
-		}
-		if err := recoverRuntime(); err != nil {
-			return errors.Join(err, cleanupSSH())
-		}
-		if err := installRuntime(); err != nil {
-			return errors.Join(err, cleanupSSH())
-		}
-		return nil
-	case "client":
-		if err := recoverRuntime(); err != nil {
-			return err
-		}
-		if err := installRuntime(); err != nil {
-			return err
-		}
-		return cleanupSSH()
-	default:
-		return ErrInvalidRequest
+	// Hostd validates the managed SSH loopback endpoint as it starts. The
+	// service SID used by the host-key ACL is deterministic, so OpenSSH can
+	// be installed before Hostd is first registered.
+	if err := installSSH(); err != nil {
+		return err
 	}
+	if err := recoverRuntime(); err != nil {
+		return errors.Join(err, cleanupSSH())
+	}
+	if err := installRuntime(); err != nil {
+		return errors.Join(err, cleanupSSH())
+	}
+	return nil
 }
 
 // executeWindowsServiceRepairPlan is the bounded repair ordering boundary.
-// Host-mode repair keeps the managed-SSH service installed from the first
+// Machine repair keeps the managed-SSH service installed from the first
 // phase through lifecycle repair. Removing it between recovery and repair
 // creates a Windows SCM deletion race and lets Hostd start without its
 // required loopback authority. Cleanup is reserved for a failed phase after
 // the SSH prerequisite has been established.
-func executeWindowsServiceRepairPlan(setupMode string, installSSH, recoverRuntime, repairRuntime, repairServices, cleanupSSH func() error) error {
+func executeWindowsServiceRepairPlan(installSSH, recoverRuntime, repairRuntime, repairServices, cleanupSSH func() error) error {
 	if installSSH == nil || recoverRuntime == nil || repairRuntime == nil || repairServices == nil || cleanupSSH == nil {
 		return ErrInvalidRequest
 	}
-	switch setupMode {
-	case "host":
-		if err := installSSH(); err != nil {
-			return err
-		}
-		if err := recoverRuntime(); err != nil {
-			return errors.Join(err, cleanupSSH())
-		}
-		if err := repairRuntime(); err != nil {
-			return errors.Join(err, cleanupSSH())
-		}
-		if err := repairServices(); err != nil {
-			return errors.Join(err, cleanupSSH())
-		}
-		return nil
-	case "client":
-		if err := recoverRuntime(); err != nil {
-			return err
-		}
-		if err := repairRuntime(); err != nil {
-			return err
-		}
-		if err := repairServices(); err != nil {
-			return err
-		}
-		return cleanupSSH()
-	default:
-		return ErrInvalidRequest
+	if err := installSSH(); err != nil {
+		return err
 	}
+	if err := recoverRuntime(); err != nil {
+		return errors.Join(err, cleanupSSH())
+	}
+	if err := repairRuntime(); err != nil {
+		return errors.Join(err, cleanupSSH())
+	}
+	if err := repairServices(); err != nil {
+		return errors.Join(err, cleanupSSH())
+	}
+	return nil
 }
 
 func windowsActivatorExecutableOwned(layout service.Layout, executable string) bool {

@@ -4,6 +4,7 @@ package hostinstall
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -32,9 +33,23 @@ func TestWindowsAwaitingEnrollmentConfigRequiresSuppliedSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: instance, OwnerSID: ownerSID, User: "tester", StateRoot: `C:\State`, Workspace: `C:\Users\tester`, ListenAddress: "127.0.0.1:8080", SetupMode: "awaiting_enrollment", TokenFile: tokenPath, Source: source}
+	config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: instance, OwnerSID: ownerSID, User: "tester", StateRoot: `C:\State`, Workspace: `C:\Users\tester`, ListenAddress: "127.0.0.1:8080", EnrollmentPending: true, TokenFile: tokenPath, Source: source}
 	if !validWindowsConfig(config) {
 		t.Fatal("valid awaiting-enrollment declaration was rejected")
+	}
+	canonical, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{`"setup_mode":"host",`, `"setup_roles":["host"],`} {
+		input := []byte(strings.Replace(string(canonical), "{", "{"+field, 1))
+		if _, err := decodeWindowsRuntimeConfig(input); !errors.Is(err, ErrInvalidRequest) {
+			t.Fatalf("obsolete config accepted: %v", err)
+		}
+	}
+	loaded, err := decodeWindowsRuntimeConfig(canonical)
+	if err != nil || loaded.OwnerSID != config.OwnerSID || loaded.Source != config.Source {
+		t.Fatal("canonical declaration lost owner or artifact")
 	}
 	config.Source = installsource.Source{}
 	if validWindowsConfig(config) {
@@ -81,6 +96,7 @@ func TestStaleWindowsRuntimeProcessScriptIncludesEveryInstalledRuntimeRole(t *te
 	}{
 		{name: "hostd", line: `"C:\\Program Files\\Paperboat\\bin\\pb.exe" __runtime-hostd`, want: true},
 		{name: "worker", line: `"C:\\Program Files\\Paperboat\\bin\\pb.exe" __runtime-worker`, want: true},
+		{name: "config worker", line: `"C:\Program Files\Paperboat\bin\pb.exe" daemon __runtime-config --instance u123`, want: true},
 		{name: "updated", line: `"C:\\Program Files\\Paperboat\\bin\\pb.exe" __runtime-updated`, want: true},
 		{name: "local daemon supervisor", line: `"C:\\Program Files\\Paperboat\\bin\\pb.exe" __runtime-local-daemon`, want: true},
 		{name: "local daemon worker", line: `"C:\\Program Files\\Paperboat\\bin\\pb.exe" __local-daemon --server https://api.pprbt.dev`, want: true},
@@ -100,7 +116,7 @@ func TestStaleWindowsRuntimeProcessScriptIncludesEveryInstalledRuntimeRole(t *te
 	}
 }
 
-func TestWindowsSSHServiceSetFollowsHostClientTransition(t *testing.T) {
+func TestWindowsSSHServiceSetPreservesUnifiedInstallation(t *testing.T) {
 	layout, err := service.DefaultLayout("windows")
 	if err != nil {
 		t.Fatal(err)
@@ -125,31 +141,29 @@ func TestWindowsSSHServiceSetFollowsHostClientTransition(t *testing.T) {
 		installs = append(installs, config)
 		return windowsopenssh.SetupResult{}, nil
 	}
-	host := Request{SetupMode: "host", OwnerSID: "S-1-5-21-1-2-3-4"}
+	host := Request{OwnerSID: "S-1-5-21-1-2-3-4"}
 	if err := removeWindowsSSHBeforeActivation(context.Background(), host, layout); err != nil {
 		t.Fatal(err)
 	}
 	if err := installWindowsSSHAfterActivation(context.Background(), host, layout); err != nil {
 		t.Fatal(err)
 	}
-	client := Request{SetupMode: "client", OwnerSID: host.OwnerSID}
+	client := Request{OwnerSID: host.OwnerSID}
 	if err := removeWindowsSSHBeforeActivation(context.Background(), client, layout); err != nil {
 		t.Fatal(err)
 	}
 	if err := installWindowsSSHAfterActivation(context.Background(), client, layout); err != nil {
 		t.Fatal(err)
 	}
-	if len(removedService) != 2 || len(removedState) != 1 || len(installs) != 1 {
-		t.Fatalf("host/client SSH operations: remove service=%d remove state=%d install=%d", len(removedService), len(removedState), len(installs))
+	if len(removedService) != 2 || len(removedState) != 0 || len(installs) != 2 {
+		t.Fatalf("machine SSH operations: remove service=%d remove state=%d install=%d", len(removedService), len(removedState), len(installs))
 	}
 	for _, config := range removedService {
 		if config.ServiceExecutable != layout.Binary {
 			t.Fatalf("SSH ownership executable: service=%q want=%q", config.ServiceExecutable, layout.Binary)
 		}
 	}
-	if removedState[0].ServiceExecutable != layout.Binary {
-		t.Fatalf("SSH state ownership executable=%q want=%q", removedState[0].ServiceExecutable, layout.Binary)
-	}
+
 	if installs[0].ServiceExecutable != layout.Binary || installs[0].InstallRoot != `C:\Program Files\OpenSSH` || installs[0].StateRoot != `C:\ProgramData\Paperboat\ssh` {
 		t.Fatalf("host SSH install=%+v", installs[0])
 	}
@@ -179,7 +193,7 @@ func TestWindowsHostRuntimeFailurePreservesManagedSSHState(t *testing.T) {
 		stateRemovals = append(stateRemovals, config)
 		return nil
 	}
-	host := Request{SetupMode: "host", OwnerSID: "S-1-5-21-1-2-3-4"}
+	host := Request{OwnerSID: "S-1-5-21-1-2-3-4"}
 	hostKeyPath := filepath.Join(windowsopenssh.DefaultConfig(nil).StateRoot, "hostkeys", "ssh_host_ed25519_key.pub")
 	if err := os.MkdirAll(filepath.Dir(hostKeyPath), 0o700); err != nil {
 		t.Fatal(err)
@@ -193,12 +207,12 @@ func TestWindowsHostRuntimeFailurePreservesManagedSSHState(t *testing.T) {
 	if len(serviceRemovals) != 1 || len(stateRemovals) != 0 {
 		t.Fatalf("host cleanup removed service=%d state=%d", len(serviceRemovals), len(stateRemovals))
 	}
-	client := Request{SetupMode: "client", OwnerSID: host.OwnerSID}
+	client := Request{OwnerSID: host.OwnerSID}
 	if err := cleanupWindowsSSHAfterRuntimeFailure(context.Background(), client, layout); err != nil {
 		t.Fatal(err)
 	}
-	if len(serviceRemovals) != 1 || len(stateRemovals) != 1 {
-		t.Fatalf("client cleanup removed service=%d state=%d", len(serviceRemovals), len(stateRemovals))
+	if len(serviceRemovals) != 2 || len(stateRemovals) != 0 {
+		t.Fatalf("repeat cleanup removed service=%d state=%d", len(serviceRemovals), len(stateRemovals))
 	}
 	if contents, err := os.ReadFile(hostKeyPath); err != nil || string(contents) != "ssh-ed25519 AAAA preserved\n" {
 		t.Fatalf("host key after rollback=%q err=%v", contents, err)
@@ -207,11 +221,11 @@ func TestWindowsHostRuntimeFailurePreservesManagedSSHState(t *testing.T) {
 
 func TestWindowsRepairRequestCarriesPersistedReadinessEndpoint(t *testing.T) {
 	request := windowsRepairRequest(WindowsRuntimeConfig{
-		SetupMode: "host", OwnerSID: "S-1-5-21-1-2-3-4",
+		OwnerSID:      "S-1-5-21-1-2-3-4",
 		StateRoot:     `C:\Users\Pujan\AppData\Local\Paperboat\runtime`,
 		ListenAddress: "127.0.0.1:8080",
 	})
-	if request.SetupMode != "host" || request.OwnerSID != "S-1-5-21-1-2-3-4" || request.StateRoot == "" || request.HelperListenAddress != "127.0.0.1:8080" {
+	if request.OwnerSID != "S-1-5-21-1-2-3-4" || request.StateRoot == "" || request.HelperListenAddress != "127.0.0.1:8080" {
 		t.Fatalf("repair request=%+v", request)
 	}
 }
@@ -338,7 +352,7 @@ func TestWindowsRollbackProvenanceCannotComeFromClientJSON(t *testing.T) {
 	instance, _ := WindowsInstanceForSID(ownerSID)
 	token, _ := WindowsInstanceTokenPath(instance)
 	source := installsource.Source{Version: "dev", Platform: "windows", Architecture: runtime.GOARCH, SHA256: strings.Repeat("0", 64), Length: 1, Distribution: installsource.Custom}
-	config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: instance, OwnerSID: ownerSID, User: "tester", StateRoot: `C:\State`, Workspace: `C:\Users\tester`, ListenAddress: "127.0.0.1:8080", SetupMode: "awaiting_enrollment", TokenFile: token, Source: source, RollbackSigned: true}
+	config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: instance, OwnerSID: ownerSID, User: "tester", StateRoot: `C:\State`, Workspace: `C:\Users\tester`, ListenAddress: "127.0.0.1:8080", EnrollmentPending: true, TokenFile: token, Source: source, RollbackSigned: true}
 	if validWindowsConfig(config) {
 		t.Fatal("signed provenance without identity accepted")
 	}

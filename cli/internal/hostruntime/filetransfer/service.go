@@ -8,14 +8,17 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
 )
@@ -91,12 +94,87 @@ type Error struct {
 }
 
 func (e *Error) Error() string {
-	if e.Cause == nil {
-		return string(e.Code)
-	}
-	return string(e.Code) + ": " + e.Cause.Error()
+	return string(e.Code)
 }
 func (e *Error) Unwrap() error { return e.Cause }
+
+func lookupFailure(err error) error {
+	if onlyContextTermination(err) {
+		return err
+	}
+	code := StorageUnavailable
+	if errors.Is(err, store.ErrNotFound) {
+		code = InvalidPath
+	}
+	return &Error{Code: code, Cause: err}
+}
+
+type cleanupFailure struct{ cause error }
+
+func (*cleanupFailure) Error() string           { return "file transfer retention cleanup failed" }
+func (e *cleanupFailure) Unwrap() error         { return e.cause }
+func (*cleanupFailure) DiagnosticStage() string { return "lifecycle" }
+func (*cleanupFailure) DiagnosticCode() string  { return "file_transfer_failed" }
+
+func classifyCleanupFailure(err error) error {
+	if err == nil || onlyContextTermination(err) {
+		return err
+	}
+	return &cleanupFailure{cause: err}
+}
+
+func onlyContextTermination(err error) bool {
+	if err == nil {
+		return false
+	}
+	remaining := []error{err}
+	seen := make(map[error]struct{})
+	leaves := 0
+	for visited := 0; len(remaining) > 0; visited++ {
+		if visited >= 16 {
+			return false
+		}
+		current := remaining[0]
+		remaining = remaining[1:]
+		if current == nil {
+			return false
+		}
+		typeOf := reflect.TypeOf(current)
+		if typeOf.Comparable() {
+			if _, ok := seen[current]; ok {
+				return false
+			}
+			seen[current] = struct{}{}
+		}
+		value := reflect.ValueOf(current)
+		switch value.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+			if value.IsNil() {
+				return false
+			}
+		}
+		switch wrapped := current.(type) {
+		case interface{ Unwrap() []error }:
+			children := wrapped.Unwrap()
+			if len(children) == 0 || len(children) > 16-visited-1 || len(remaining)+len(children) > 16-visited-1 {
+				return false
+			}
+			remaining = append(remaining, children...)
+		case interface{ Unwrap() error }:
+			child := wrapped.Unwrap()
+			if child == nil || len(remaining)+1 > 16-visited-1 {
+				return false
+			}
+			remaining = append(remaining, child)
+		default:
+			leaves++
+			if current != context.Canceled && current != context.DeadlineExceeded {
+				return false
+			}
+		}
+	}
+	return leaves > 0
+}
 
 type File struct {
 	Basename string `json:"basename"`
@@ -198,7 +276,7 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) ([]store.Fi
 		if total > policy.MaxBatchBytes {
 			return nil, &Error{Code: BatchLimit}
 		}
-		id, err := s.newID("ft_")
+		id, err := s.newID()
 		if err != nil {
 			return nil, &Error{Code: StorageUnavailable, Cause: err}
 		}
@@ -235,17 +313,85 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) ([]store.Fi
 
 // CleanupExpired removes transfer records and content after their independent retention deadline.
 func (s *Service) CleanupExpired(ctx context.Context) error {
-	transfers, err := s.config.Store.ExpiredFileTransfers(ctx, s.config.Now())
+	now := s.config.Now()
+	transfers, err := s.config.Store.ExpiredFileTransfers(ctx, now)
 	if err != nil {
-		return err
+		return classifyCleanupFailure(err)
 	}
+	var result error
+	expired := make([]store.FileTransfer, 0, len(transfers))
 	for _, transfer := range transfers {
-		_ = os.Remove(s.partialPath(transfer.ID))
-		_ = os.Remove(s.contentPath(transfer.ID))
-		_ = os.Remove(s.publishedPath(transfer))
-		s.cancels.Delete(transfer.ID)
+		batchLock := s.lock("batch:" + transfer.BatchID)
+		batchLock.Lock()
+		s.signalCancel(transfer.ID)
+		if err := s.waitForWrites(ctx, []store.FileTransfer{transfer}); err != nil {
+			result = errors.Join(result, err)
+			batchLock.Unlock()
+			continue
+		}
+		transferLock := s.lock(transfer.ID)
+		transferLock.Lock()
+		current, getErr := s.config.Store.FileTransfer(ctx, transfer.ID)
+		if getErr != nil {
+			if errors.Is(getErr, store.ErrNotFound) {
+				transferLock.Unlock()
+				batchLock.Unlock()
+				continue
+			}
+			result = errors.Join(result, getErr)
+			transferLock.Unlock()
+			batchLock.Unlock()
+			continue
+		}
+		if current.ExpiresAt.After(now) || !expirationState(current.State) {
+			s.cancels.Delete(current.ID)
+			transferLock.Unlock()
+			batchLock.Unlock()
+			continue
+		}
+		if err := s.waitForWrites(ctx, []store.FileTransfer{current}); err != nil {
+			result = errors.Join(result, err)
+			transferLock.Unlock()
+			batchLock.Unlock()
+			continue
+		}
+		var removeErr error
+		for _, path := range []string{s.partialPath(current.ID), s.contentPath(current.ID), s.publishedPath(current)} {
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				removeErr = errors.Join(removeErr, err)
+			}
+		}
+		if removeErr != nil {
+			result = errors.Join(result, removeErr)
+			transferLock.Unlock()
+			batchLock.Unlock()
+			continue
+		}
+		expired = append(expired, current)
+		transferLock.Unlock()
+		batchLock.Unlock()
 	}
-	return s.config.Store.ExpireFileTransfers(ctx, transfers)
+	if len(expired) > 0 {
+		if err := syncDir(s.config.Root); err != nil {
+			result = errors.Join(result, err)
+		} else if err := s.config.Store.ExpireFileTransfers(ctx, expired); err != nil {
+			result = errors.Join(result, err)
+		} else {
+			for _, transfer := range expired {
+				s.cancels.Delete(transfer.ID)
+			}
+		}
+	}
+	return classifyCleanupFailure(result)
+}
+
+func expirationState(state string) bool {
+	switch state {
+	case "created", "uploading", "published", "pending":
+		return true
+	default:
+		return false
+	}
 }
 
 type CleanupWorker struct {
@@ -255,23 +401,38 @@ type CleanupWorker struct {
 	done     chan struct{}
 }
 
-func (w *CleanupWorker) Start(context.Context) error {
+func (w *CleanupWorker) Start(parent context.Context) error {
+	if w == nil || w.Service == nil || parent == nil {
+		return &Error{Code: InvalidPath}
+	}
 	interval := w.Interval
 	if interval <= 0 {
 		interval = time.Minute
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parent)
 	w.cancel, w.done = cancel, make(chan struct{})
 	go func() {
 		defer close(w.done)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
+		failureActive := false
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				_ = w.Service.CleanupExpired(context.Background())
+				err := w.Service.CleanupExpired(ctx)
+				if err == nil {
+					failureActive = false
+					continue
+				}
+				if onlyContextTermination(err) {
+					continue
+				}
+				if !failureActive {
+					errorreport.Current().CaptureFailure(ctx, "paperboat-daemon", "transfer", "lifecycle", "file_transfer_failed", err)
+					failureActive = true
+				}
 			}
 		}
 	}()
@@ -312,7 +473,7 @@ func (s *Service) append(ctx context.Context, id string, offset int64, body io.R
 	defer finish()
 	transfer, err := s.config.Store.FileTransfer(ctx, id)
 	if err != nil {
-		return store.FileTransfer{}, &Error{Code: InvalidPath, Cause: err}
+		return store.FileTransfer{}, lookupFailure(err)
 	}
 	if transfer.State == "canceled" {
 		return store.FileTransfer{}, &Error{Code: Canceled}
@@ -411,14 +572,14 @@ func (s *Service) release() { s.slotMu.Lock(); s.active--; s.slotMu.Unlock() }
 func (s *Service) Complete(ctx context.Context, id string) (store.FileTransfer, error) {
 	requested, err := s.config.Store.FileTransfer(ctx, id)
 	if err != nil {
-		return store.FileTransfer{}, &Error{Code: InvalidPath, Cause: err}
+		return store.FileTransfer{}, lookupFailure(err)
 	}
 	lock := s.lock("batch:" + requested.BatchID)
 	lock.Lock()
 	defer lock.Unlock()
 	transfers, err := s.config.Store.FileTransfersByBatch(ctx, requested.BatchID)
 	if err != nil {
-		return store.FileTransfer{}, &Error{Code: InvalidPath, Cause: err}
+		return store.FileTransfer{}, lookupFailure(err)
 	}
 	allTerminal := true
 	for _, transfer := range transfers {
@@ -427,7 +588,11 @@ func (s *Service) Complete(ctx context.Context, id string) (store.FileTransfer, 
 		}
 	}
 	if allTerminal {
-		return s.config.Store.FileTransfer(ctx, id)
+		transfer, getErr := s.config.Store.FileTransfer(ctx, id)
+		if getErr != nil {
+			return store.FileTransfer{}, lookupFailure(getErr)
+		}
+		return transfer, nil
 	}
 	for _, transfer := range transfers {
 		if transfer.CommittedOffset != transfer.Size || transfer.State != "created" && transfer.State != "uploading" {
@@ -487,8 +652,8 @@ func (s *Service) Get(ctx context.Context, id string) (store.FileTransfer, error
 func (s *Service) Batch(ctx context.Context, batchID string) ([]store.FileTransfer, error) {
 	return s.config.Store.FileTransfersByBatch(ctx, batchID)
 }
-func (s *Service) List(ctx context.Context, sourceMachineID, userID, sessionID string, limit int) ([]store.FileTransfer, error) {
-	return s.config.Store.FileTransfersForSource(ctx, sourceMachineID, userID, sessionID, limit)
+func (s *Service) List(ctx context.Context, sourceMachineID, userID, sessionID string, limit, offset int, q, state string) (store.FileTransferPage, error) {
+	return s.config.Store.FileTransfersForSource(ctx, sourceMachineID, userID, sessionID, limit, offset, q, state)
 }
 func (s *Service) Pending(ctx context.Context, clientID, sessionID string, limit int) ([]store.FileTransfer, error) {
 	return s.config.Store.PendingFileTransfers(ctx, clientID, sessionID, s.config.Now(), limit)
@@ -519,7 +684,7 @@ func (s *Service) ReceiptBatch(ctx context.Context, receipts []store.FileTransfe
 func (s *Service) OpenContent(ctx context.Context, id string) (*os.File, store.FileTransfer, error) {
 	transfer, err := s.config.Store.FileTransfer(ctx, id)
 	if err != nil {
-		return nil, transfer, &Error{Code: InvalidPath, Cause: err}
+		return nil, transfer, lookupFailure(err)
 	}
 	if transfer.State != "published" && transfer.State != "pending" && transfer.State != "delivered" {
 		return nil, transfer, &Error{Code: InvalidPath}
@@ -534,7 +699,7 @@ func (s *Service) OpenContent(ctx context.Context, id string) (*os.File, store.F
 func (s *Service) PublishedPath(ctx context.Context, id string) (string, error) {
 	transfer, err := s.config.Store.FileTransfer(ctx, id)
 	if err != nil {
-		return "", &Error{Code: InvalidPath, Cause: err}
+		return "", lookupFailure(err)
 	}
 	if transfer.DestinationMachineID != s.config.LocalMachineID || transfer.State != "published" {
 		return "", &Error{Code: InvalidPath}
@@ -564,7 +729,7 @@ func (s *Service) PublishedPath(ctx context.Context, id string) (string, error) 
 func (s *Service) ExistingPublishedPath(ctx context.Context, id string) (string, error) {
 	transfer, err := s.config.Store.FileTransfer(ctx, id)
 	if err != nil {
-		return "", &Error{Code: InvalidPath, Cause: err}
+		return "", lookupFailure(err)
 	}
 	if transfer.DestinationMachineID != s.config.LocalMachineID || transfer.State != "published" {
 		return "", &Error{Code: InvalidPath}
@@ -779,12 +944,12 @@ func (s *Service) waitForWrites(ctx context.Context, transfers []store.FileTrans
 	}
 	return nil
 }
-func (s *Service) newID(prefix string) (string, error) {
-	var value [16]byte
-	if _, err := io.ReadFull(s.config.Random, value[:]); err != nil {
+func (s *Service) newID() (string, error) {
+	id, err := uuid.NewRandomFromReader(s.config.Random)
+	if err != nil {
 		return "", err
 	}
-	return prefix + hex.EncodeToString(value[:]), nil
+	return "transfer_" + id.String(), nil
 }
 func validDigest(value string) bool {
 	if len(value) != 64 || strings.ToLower(value) != value {

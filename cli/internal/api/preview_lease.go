@@ -3,11 +3,11 @@ package api
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"net"
 	"net/http"
@@ -33,26 +33,27 @@ type PreviewLeaseTarget struct {
 // PreviewLease is the safe server projection of a temporary preview lease.
 // It deliberately contains no carrier credential or reusable secret.
 type PreviewLease struct {
-	Schema          string                 `json:"schema"`
-	Kind            string                 `json:"kind"`
-	ID              string                 `json:"id"`
-	AccountID       string                 `json:"account_id"`
-	ActorID         string                 `json:"actor_id"`
-	OwnerDeviceID   string                 `json:"owner_device_id"`
-	OwnerSessionID  string                 `json:"owner_session_id"`
-	Target          PreviewLeaseTarget     `json:"target"`
-	AccessMode      string                 `json:"access_mode"`
-	Persistent      bool                   `json:"persistent"`
-	Endpoint        string                 `json:"endpoint"`
-	LeaseDeadline   time.Time              `json:"lease_deadline"`
-	UserDeadline    *time.Time             `json:"user_deadline"`
-	State           string                 `json:"state"`
-	AllocationState string                 `json:"allocation_state"`
-	EdgeState       string                 `json:"edge_state"`
-	OriginState     string                 `json:"origin_state"`
-	CreatedAt       time.Time              `json:"created_at"`
-	LastRenewedAt   time.Time              `json:"last_renewed_at"`
-	Domains         []PreviewDomainSummary `json:"domains,omitempty"`
+	Schema           string                 `json:"schema"`
+	Kind             string                 `json:"kind"`
+	ID               string                 `json:"id"`
+	AccountID        string                 `json:"account_id"`
+	ActorID          string                 `json:"actor_id"`
+	OwnerMachineID   string                 `json:"owner_machine_id"`
+	OwnerSessionID   string                 `json:"owner_session_id"`
+	OwnerSessionKind string                 `json:"owner_session_kind"`
+	Target           PreviewLeaseTarget     `json:"target"`
+	AccessMode       string                 `json:"access_mode"`
+	Persistent       bool                   `json:"persistent"`
+	Endpoint         string                 `json:"endpoint"`
+	LeaseDeadline    time.Time              `json:"lease_deadline"`
+	UserDeadline     *time.Time             `json:"user_deadline"`
+	State            string                 `json:"state"`
+	AllocationState  string                 `json:"allocation_state"`
+	EdgeState        string                 `json:"edge_state"`
+	OriginState      string                 `json:"origin_state"`
+	CreatedAt        time.Time              `json:"created_at"`
+	LastRenewedAt    time.Time              `json:"last_renewed_at"`
+	Domains          []PreviewDomainSummary `json:"domains,omitempty"`
 
 	// CreateOperationID is transport-only metadata retained from the
 	// server's create operation. It is required when a host later requests a
@@ -67,12 +68,14 @@ type PreviewLease struct {
 // PreviewLeaseCreateRequest is the canonical POST /v1/previews payload.
 // Hostname allocation is server-owned; callers cannot request a vanity name.
 type PreviewLeaseCreateRequest struct {
-	OwnerDeviceID  string             `json:"owner_device_id"`
-	OwnerSessionID string             `json:"owner_session_id"`
-	Target         PreviewLeaseTarget `json:"target"`
-	AccessMode     string             `json:"access_mode,omitempty"`
-	ExpiresAt      *time.Time         `json:"expires_at,omitempty"`
-	Domains        []string           `json:"domains"`
+	Workspace        string             `json:"workspace,omitempty"`
+	OwnerMachineID   string             `json:"owner_machine_id"`
+	OwnerSessionID   string             `json:"owner_session_id"`
+	OwnerSessionKind string             `json:"owner_session_kind"`
+	Target           PreviewLeaseTarget `json:"target"`
+	AccessMode       string             `json:"access_mode,omitempty"`
+	ExpiresAt        *time.Time         `json:"expires_at,omitempty"`
+	Domains          []string           `json:"domains"`
 }
 
 // MaxPreviewDomains bounds the number of aliases that can be attached to one
@@ -222,11 +225,11 @@ func decodePreviewLeaseStrict(raw []byte, out any) error {
 // NewPreviewLeaseIdempotencyKey creates an opaque key suitable for one v1
 // lease mutation. It carries no credential and is safe to log as metadata.
 func NewPreviewLeaseIdempotencyKey() (string, error) {
-	bytes := make([]byte, 18)
-	if _, err := rand.Read(bytes); err != nil {
+	id, err := uuid.NewRandom()
+	if err != nil {
 		return "", err
 	}
-	return "preview_" + base64.RawURLEncoding.EncodeToString(bytes), nil
+	return "operation_" + id.String(), nil
 }
 
 // CreatePreviewLease creates a lease and fetches the resource when the server
@@ -236,7 +239,10 @@ func (c *Client) CreatePreviewLease(ctx context.Context, input PreviewLeaseCreat
 	if err := validatePreviewLeaseIdempotencyKey(idempotencyKey); err != nil {
 		return PreviewLease{}, err
 	}
-	input.OwnerDeviceID = strings.TrimSpace(input.OwnerDeviceID)
+	if err := c.bindCreateWorkspace(&input.Workspace); err != nil {
+		return PreviewLease{}, err
+	}
+	input.OwnerMachineID = strings.TrimSpace(input.OwnerMachineID)
 	input.OwnerSessionID = strings.TrimSpace(input.OwnerSessionID)
 	input.Target.Scheme = strings.ToLower(strings.TrimSpace(input.Target.Scheme))
 	input.Target.Address = strings.TrimSpace(input.Target.Address)
@@ -290,7 +296,7 @@ func (c *Client) CreatePreviewLease(ctx context.Context, input PreviewLeaseCreat
 	}
 	lease, err := c.GetPreviewLease(ctx, response.Operation.ResourceID)
 	if err != nil {
-		return PreviewLease{}, fmt.Errorf("fetch preview lease after operation %s: %w", response.Operation.ID, err)
+		return PreviewLease{}, fmt.Errorf("fetch preview lease after create operation: %w", err)
 	}
 	lease.CreateOperationID = response.Operation.ID
 	if err := validateRequestedPreviewDomains(input.Domains, lease); err != nil {
@@ -323,7 +329,7 @@ func (c *Client) GetPreviewLease(ctx context.Context, previewID string) (Preview
 		return PreviewLease{}, fmt.Errorf("%w: response ID does not match requested preview", ErrPreviewLeaseInvalid)
 	}
 	if _, err := previewLeaseETag(lease.ID, lease.ETag); err != nil {
-		return PreviewLease{}, fmt.Errorf("%w (received %q)", err, lease.ETag)
+		return PreviewLease{}, err
 	}
 	return lease, nil
 }
@@ -357,7 +363,7 @@ func (c *Client) RenewPreviewLease(ctx context.Context, lease PreviewLease, owne
 	if _, err := previewLeaseETag(renewed.ID, renewed.ETag); err != nil {
 		return PreviewLease{}, err
 	}
-	if renewed.ID != lease.ID || renewed.Endpoint != lease.Endpoint {
+	if renewed.ID != lease.ID || renewed.Endpoint != lease.Endpoint || renewed.OwnerSessionKind != lease.OwnerSessionKind {
 		return PreviewLease{}, fmt.Errorf("%w: renewal changed lease identity or endpoint", ErrPreviewLeaseInvalid)
 	}
 	return renewed, nil
@@ -372,11 +378,27 @@ func (c *Client) StopPreviewLease(ctx context.Context, lease PreviewLease, idemp
 	var stopped PreviewLease
 	var headers http.Header
 	path := "/v1/previews/" + url.PathEscape(lease.ID)
-	err := c.doRequestMeta(ctx, http.MethodDelete, path, nil, &stopped, http.Header{
-		"If-Match":        []string{lease.ETag},
-		"Idempotency-Key": []string{idempotencyKey},
-		"Accept-Encoding": []string{"identity"},
-	}, true, &headers)
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		err = c.doRequestMeta(ctx, http.MethodDelete, path, nil, &stopped, http.Header{
+			"If-Match": []string{lease.ETag}, "Idempotency-Key": []string{idempotencyKey},
+			"Accept-Encoding": []string{"identity"},
+		}, true, &headers)
+		var conflict *APIError
+		if !errors.As(err, &conflict) || conflict.Code != "generation_conflict" || attempt == 2 {
+			break
+		}
+		// Owner renewal can advance the lease between GET and DELETE. Refresh
+		// only this resource; reuse the mutation key and preserve its identity.
+		current, readErr := c.GetPreviewLease(ctx, lease.ID)
+		if readErr != nil {
+			return PreviewLease{}, readErr
+		}
+		if current.Endpoint != lease.Endpoint || current.OwnerMachineID != lease.OwnerMachineID || current.OwnerSessionID != lease.OwnerSessionID || current.OwnerSessionKind != lease.OwnerSessionKind {
+			return PreviewLease{}, ErrPreviewLeaseInvalid
+		}
+		lease = current
+	}
 	if err != nil {
 		return PreviewLease{}, err
 	}
@@ -387,7 +409,7 @@ func (c *Client) StopPreviewLease(ctx context.Context, lease PreviewLease, idemp
 	if _, err := previewLeaseETag(stopped.ID, stopped.ETag); err != nil {
 		return PreviewLease{}, err
 	}
-	if stopped.ID != lease.ID || stopped.Endpoint != lease.Endpoint {
+	if stopped.ID != lease.ID || stopped.Endpoint != lease.Endpoint || stopped.OwnerSessionKind != lease.OwnerSessionKind {
 		return PreviewLease{}, fmt.Errorf("%w: stop changed lease identity or endpoint", ErrPreviewLeaseInvalid)
 	}
 	return stopped, nil
@@ -406,6 +428,10 @@ type PreviewLeasePage struct {
 // cursor. A zero limit uses the protocol default; callers cannot request an
 // unbounded response.
 func (c *Client) ListPreviewLeases(ctx context.Context, cursor string, limit int) (PreviewLeasePage, error) {
+	return c.ListPreviewLeasesFiltered(ctx, cursor, limit, nil)
+}
+
+func (c *Client) ListPreviewLeasesFiltered(ctx context.Context, cursor string, limit int, filters url.Values) (PreviewLeasePage, error) {
 	if limit == 0 {
 		limit = 100
 	}
@@ -413,6 +439,11 @@ func (c *Client) ListPreviewLeases(ctx context.Context, cursor string, limit int
 		return PreviewLeasePage{}, fmt.Errorf("%w: preview page limit must be between 1 and 200", ErrPreviewLeaseInvalid)
 	}
 	values := url.Values{"limit": []string{strconv.Itoa(limit)}}
+	for _, key := range []string{"q", "state", "owner"} {
+		if value := filters.Get(key); value != "" {
+			values.Set(key, value)
+		}
+	}
 	if strings.TrimSpace(cursor) != "" {
 		cursor = strings.TrimSpace(cursor)
 		if len(cursor) > 4096 || strings.ContainsAny(cursor, "\r\n") {
@@ -438,7 +469,7 @@ func (c *Client) ListPreviewLeases(ctx context.Context, cursor string, limit int
 			return PreviewLeasePage{}, fmt.Errorf("%w: invalid preview at index %d: %v", ErrPreviewLeaseInvalid, index, err)
 		}
 		if _, ok := seen[item.ID]; ok {
-			return PreviewLeasePage{}, fmt.Errorf("%w: duplicate preview %q", ErrPreviewLeaseInvalid, item.ID)
+			return PreviewLeasePage{}, fmt.Errorf("%w: duplicate preview resource", ErrPreviewLeaseInvalid)
 		}
 		seen[item.ID] = struct{}{}
 	}
@@ -545,7 +576,7 @@ func validateRequestedPreviewDomains(requested []string, lease PreviewLease) err
 	seen := make(map[string]struct{}, len(lease.Domains))
 	for _, domain := range lease.Domains {
 		if _, ok := seen[domain.Hostname]; ok {
-			return fmt.Errorf("%w: server returned duplicate domain %q", ErrPreviewLeaseInvalid, domain.Hostname)
+			return fmt.Errorf("%w: server returned duplicate domain", ErrPreviewLeaseInvalid)
 		}
 		seen[domain.Hostname] = struct{}{}
 	}
@@ -575,10 +606,10 @@ func validatePreviewDomainSummaries(lease PreviewLease) error {
 			return fmt.Errorf("%w: invalid domain at index %d: %v", ErrPreviewLeaseInvalid, index, err)
 		}
 		if _, ok := seenIDs[domain.ID]; ok {
-			return fmt.Errorf("%w: duplicate domain ID %q", ErrPreviewLeaseInvalid, domain.ID)
+			return fmt.Errorf("%w: duplicate domain ID", ErrPreviewLeaseInvalid)
 		}
 		if _, ok := seenHosts[domain.Hostname]; ok {
-			return fmt.Errorf("%w: duplicate domain hostname %q", ErrPreviewLeaseInvalid, domain.Hostname)
+			return fmt.Errorf("%w: duplicate domain hostname", ErrPreviewLeaseInvalid)
 		}
 		seenIDs[domain.ID] = struct{}{}
 		seenHosts[domain.Hostname] = struct{}{}
@@ -737,8 +768,8 @@ func validatePreviewSafeObject(value map[string]any, depth int) error {
 }
 
 func validatePreviewLeaseCreateInput(input PreviewLeaseCreateRequest) error {
-	if !validPreviewID(input.OwnerDeviceID) || !validPreviewID(input.OwnerSessionID) {
-		return fmt.Errorf("%w: owner device and session are required", ErrPreviewLeaseInvalid)
+	if !validPreviewID(input.OwnerMachineID) || !validPreviewID(input.OwnerSessionID) || (input.OwnerSessionKind != "local_lease" && input.OwnerSessionKind != "foreground") {
+		return fmt.Errorf("%w: owner machine and session are required", ErrPreviewLeaseInvalid)
 	}
 	mode := strings.ToLower(strings.TrimSpace(input.AccessMode))
 	if mode != "" && mode != "public" && mode != "private" && mode != "team" {
@@ -793,11 +824,11 @@ func validatePreviewLeaseIdempotencyKey(value string) error {
 }
 
 func validatePreviewLease(lease PreviewLease) error {
-	if lease.Schema != PreviewTunnelSchemaV1 || lease.Kind != "preview_lease" || !validPreviewID(lease.ID) || !validPreviewID(lease.AccountID) || !validPreviewID(lease.ActorID) || !validPreviewID(lease.OwnerDeviceID) || !validPreviewID(lease.OwnerSessionID) {
+	if lease.Schema != PreviewTunnelSchemaV1 || lease.Kind != "preview_lease" || !validPreviewID(lease.ID) || !validPreviewID(lease.AccountID) || !validPreviewID(lease.ActorID) || !validPreviewID(lease.OwnerMachineID) || !validPreviewID(lease.OwnerSessionID) || !validPreviewOwnerSessionKind(lease.OwnerSessionKind) {
 		return fmt.Errorf("%w: required identity fields are missing", ErrPreviewLeaseInvalid)
 	}
 	if lease.AccessMode != "public" && lease.AccessMode != "private" && lease.AccessMode != "team" {
-		return fmt.Errorf("%w: unsupported access mode %q", ErrPreviewLeaseInvalid, lease.AccessMode)
+		return fmt.Errorf("%w: unsupported access mode", ErrPreviewLeaseInvalid)
 	}
 	if lease.Persistent {
 		return fmt.Errorf("%w: preview leases cannot be persistent", ErrPreviewLeaseInvalid)
@@ -844,6 +875,7 @@ func validatePreviewLeaseOperation(operation PreviewLeaseOperation) error {
 	if operation.Schema != PreviewTunnelSchemaV1 || operation.Kind != "operation" || !validPreviewID(operation.ID) || operation.ResourceKind != "preview_lease" || !validPreviewID(operation.ResourceID) || !validPreviewOperationPhase(operation.Phase) || operation.Progress < 0 || operation.Progress > 100 || !validPreviewID(operation.CorrelationID) || operation.CreatedAt.IsZero() || operation.UpdatedAt.IsZero() || operation.NextRetryAt != nil && operation.NextRetryAt.IsZero() {
 		return ErrPreviewLeaseInvalid
 	}
+	projectOperationError(operation.Error)
 	switch operation.State {
 	case "pending", "running", "succeeded", "failed", "canceled":
 		return nil
@@ -936,4 +968,8 @@ func previewLeaseETag(id, etag string) (int64, error) {
 func ValidatePreviewLeaseETag(id, etag string) error {
 	_, err := previewLeaseETag(id, etag)
 	return err
+}
+
+func validPreviewOwnerSessionKind(kind string) bool {
+	return kind == "local_lease" || kind == "foreground" || kind == "lazy_runtime"
 }

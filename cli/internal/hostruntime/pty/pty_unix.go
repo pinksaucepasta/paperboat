@@ -50,7 +50,10 @@ const (
 	Kill      Signal = "SIGKILL"
 )
 
-type Adapter struct{ root string }
+type Adapter struct {
+	root             string
+	shellDirectories bool
+}
 
 func NewAdapter(root string) (*Adapter, error) {
 	resolved, err := resolveDirectory(root)
@@ -60,13 +63,25 @@ func NewAdapter(root string) (*Adapter, error) {
 	return &Adapter{root: resolved}, nil
 }
 
+// NewShellAdapter allows managed interactive shells to start in any existing
+// absolute directory accessible to the enrolled OS user. NewAdapter retains
+// workspace confinement for exec and other scoped consumers.
+func NewShellAdapter(root string) (*Adapter, error) {
+	adapter, err := NewAdapter(root)
+	if err != nil {
+		return nil, err
+	}
+	adapter.shellDirectories = true
+	return adapter, nil
+}
+
 func (a *Adapter) Start(command Command) (*Process, error) {
 	path, err := ValidateProcessPolicy(command.Path, command.Args, command.Env)
 	if err != nil {
 		return nil, err
 	}
 	cwd, err := resolveDirectory(command.CWD)
-	if err != nil || !within(a.root, cwd) {
+	if err != nil || !filepath.IsAbs(command.CWD) || !a.shellDirectories && !within(a.root, cwd) {
 		return nil, ErrInvalidCWD
 	}
 	if !validDimensions(command.Dimensions) {
@@ -80,12 +95,32 @@ func (a *Adapter) Start(command Command) (*Process, error) {
 	if err != nil {
 		return nil, fmt.Errorf("start PTY: %w", err)
 	}
+	// The descriptor returned by creack/pty may be in blocking mode. Rewrap
+	// a duplicate marked nonblocking so Go's poller provides input deadlines;
+	// NewFile retains that flag when Resize obtains its descriptor later.
+	descriptor, err := syscall.Dup(int(terminal.Fd()))
+	if err == nil {
+		err = syscall.SetNonblock(descriptor, true)
+	}
+	if err != nil {
+		if descriptor >= 0 {
+			_ = syscall.Close(descriptor)
+		}
+		_ = terminal.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return nil, err
+	}
+	replacement := os.NewFile(uintptr(descriptor), terminal.Name())
+	_ = terminal.Close()
+	terminal = replacement
 	process := &Process{file: terminal, cmd: cmd, done: make(chan struct{})}
 	go process.wait()
 	return process, nil
 }
 
 type Process struct {
+	writeMu   sync.Mutex
 	file      *os.File
 	cmd       *exec.Cmd
 	done      chan struct{}
@@ -105,7 +140,15 @@ func (p *Process) Read(buffer []byte) (int, error) {
 	}
 	return n, err
 }
-func (p *Process) Write(data []byte) (int, error) { return p.file.Write(data) }
+func (p *Process) Write(data []byte) (int, error) { return p.WriteContext(context.Background(), data) }
+func (p *Process) WriteContext(ctx context.Context, data []byte) (int, error) {
+	if err := LockInput(ctx, &p.writeMu); err != nil {
+		return 0, err
+	}
+	defer p.writeMu.Unlock()
+	return writeInput(p.file, data, inputTimeout(ctx))
+}
+
 func (p *Process) Resize(dimensions Dimensions) error {
 	if !validDimensions(dimensions) {
 		return ErrInvalidDimensions

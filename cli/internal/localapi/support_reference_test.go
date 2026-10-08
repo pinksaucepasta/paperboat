@@ -17,7 +17,7 @@ func (f supportRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, 
 }
 
 func TestSupportReferenceTransportPropagatesInvocationReference(t *testing.T) {
-	reference := "pb-0123456789abcdef0123456789abcdef"
+	reference := "support_01234567-89ab-4def-8123-456789abcdef"
 	transport := supportReferenceTransport{base: supportRoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if got := request.Header.Get(supportref.Header); got != reference {
 			t.Fatalf("reference=%q", got)

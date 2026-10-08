@@ -6,9 +6,9 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/google/uuid"
 	"sort"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -38,11 +38,11 @@ func (v PasswordVault) dataClient() (VaultDataClient, error) {
 	return c, nil
 }
 func newVaultOperationID() (string, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
+	id, err := uuid.NewRandom()
+	if err != nil {
 		return "", err
 	}
-	return "envop_" + hex.EncodeToString(b[:]), nil
+	return "operation_" + id.String(), nil
 }
 func vaultEncoded(raw []byte) string { return base64.RawURLEncoding.EncodeToString(raw) }
 func (v PasswordVault) withVaultKeys(ctx context.Context, fn func(*config.PasswordVaultRecord, *environmente2ee.VaultKeys, VaultDataClient) error) (resultErr error) {
@@ -108,12 +108,15 @@ func (v PasswordVault) readVaultScope(ctx context.Context, c VaultDataClient, ke
 	if err != nil {
 		return environmente2ee.VaultScope{}, nil, err
 	}
-	state, err := c.GetVaultScope(ctx, kind, owner, machine)
+	state, err := readScopedVaultSource(ctx, c, v.scopeWorkspace(kind, owner), kind, owner, machine)
 	if err != nil {
-		return environmente2ee.VaultScope{}, nil, err
+		return environmente2ee.VaultScope{}, nil, wrapVaultIntegrityFailure(err)
 	}
 	scope, err := state.Decode()
-	if err != nil || scope.Claims.Issuer != v.Issuer || scope.Claims.OwnerKind != kind || scope.Claims.OwnerID != owner || scope.Claims.MachineID != machine || scope.Claims.KeyEpoch != epoch {
+	if err != nil {
+		return environmente2ee.VaultScope{}, nil, wrapVaultIntegrityFailure(err)
+	}
+	if scope.Claims.WorkspaceID != v.scopeWorkspace(kind, owner) || scope.Claims.Issuer != v.Issuer || scope.Claims.OwnerKind != kind || scope.Claims.OwnerID != owner || scope.Claims.MachineID != machine || scope.Claims.KeyEpoch != epoch {
 		return environmente2ee.VaultScope{}, nil, ErrIntegrity
 	}
 	values, err := environmente2ee.OpenVaultScope(ctx, scope, key)
@@ -142,7 +145,7 @@ func (v PasswordVault) MutateScope(ctx context.Context, kind, owner, machine str
 			}
 		}
 		old, values, err := v.readVaultScope(ctx, c, keys, kind, owner, machine)
-		if api.IsNotFound(err) {
+		if vaultAPIResourceAbsentOnly(err) {
 			values = map[string][]byte{}
 		} else if err != nil {
 			return err
@@ -155,7 +158,7 @@ func (v PasswordVault) MutateScope(ctx context.Context, kind, owner, machine str
 		if err != nil {
 			return err
 		}
-		claims := environmente2ee.VaultScopeClaims{Issuer: v.Issuer, OwnerKind: kind, OwnerID: owner, MachineID: machine, KeyEpoch: epoch, Revision: old.Claims.Revision + 1, Previous: old.ID[:], WriterAccount: v.AccountID, WriterVaultGeneration: local.Head.Generation}
+		claims := environmente2ee.VaultScopeClaims{Issuer: v.Issuer, OwnerKind: kind, OwnerID: owner, MachineID: machine, WorkspaceID: v.scopeWorkspace(kind, owner), KeyEpoch: epoch, Revision: old.Claims.Revision + 1, Previous: old.ID[:], WriterAccount: v.AccountID, WriterVaultGeneration: local.Head.Generation}
 		next, err := environmente2ee.SealVaultScope(ctx, claims, key, keys.WriterSeed, values)
 		if err != nil {
 			return err
@@ -172,7 +175,7 @@ func (v PasswordVault) stageOperation(ctx context.Context, local *config.Passwor
 	if err != nil {
 		return err
 	}
-	local.Operation = &config.VaultOperation{Kind: kind, OwnerKind: ownerKind, OwnerID: owner, MachineID: machine, Request: raw}
+	local.Operation = &config.VaultOperation{WorkspaceID: v.scopeWorkspace(ownerKind, owner), Kind: kind, OwnerKind: ownerKind, OwnerID: owner, MachineID: machine, Request: raw}
 	if err := v.Store.SavePasswordVault(*local); err != nil {
 		return err
 	}
@@ -188,14 +191,22 @@ func (v PasswordVault) publishOperation(ctx context.Context, local *config.Passw
 		return environmente2ee.ErrInvalid
 	}
 	switch op.Kind {
+	case "layer-put":
+		if err := v.publishLayerOperation(ctx, local); err != nil {
+			return err
+		}
 	case "scope-put":
 		var in api.VaultScopePut
 		if json.Unmarshal(op.Request, &in) != nil {
 			return ErrIntegrity
 		}
-		out, err := c.PutVaultScope(ctx, op.OwnerKind, op.OwnerID, op.MachineID, in)
+		out, err := putScopedVaultSource(ctx, c, op.WorkspaceID, op.OwnerKind, op.OwnerID, op.MachineID, in)
 		if err != nil {
-			return err
+			var rejected *api.APIError
+			if errors.As(err, &rejected) && rejected.Status == 409 && rejected.Code == "version_conflict" {
+				return v.reconcileScopeConflict(ctx, local, c, in, err)
+			}
+			return &ScopePublicationPending{Cause: err}
 		}
 		if out.Envelope != in.Envelope {
 			return ErrIntegrity
@@ -239,22 +250,6 @@ func (v PasswordVault) publishOperation(ctx context.Context, local *config.Passw
 	case "personal-rotate":
 		if err := v.publishPersonalRotation(ctx, local); err != nil {
 			return err
-		}
-	case "host-provision":
-		hostClient, ok := v.Client.(VaultHostClient)
-		if !ok {
-			return environmente2ee.ErrInvalid
-		}
-		var in api.VaultHostProvision
-		if json.Unmarshal(op.Request, &in) != nil {
-			return ErrIntegrity
-		}
-		out, err := hostClient.ProvisionVaultHost(ctx, op.MachineID, in)
-		if err != nil {
-			return err
-		}
-		if out.Envelope != in.Envelope || out.MachineID != op.MachineID || out.AccountID != v.AccountID || out.State != "ready" {
-			return ErrIntegrity
 		}
 	case "reset":
 		resetClient, ok := v.Client.(VaultResetClient)
@@ -346,7 +341,7 @@ func (v PasswordVault) CreateTeamAt(ctx context.Context, teamID string, expected
 		if err != nil {
 			return err
 		}
-		scope, err := environmente2ee.SealVaultScope(ctx, environmente2ee.VaultScopeClaims{Issuer: v.Issuer, OwnerKind: "team", OwnerID: teamID, KeyEpoch: 1, Revision: 1, Previous: make([]byte, 32), WriterAccount: v.AccountID, WriterVaultGeneration: local.Head.Generation}, key, keys.WriterSeed, map[string][]byte{})
+		scope, err := environmente2ee.SealVaultScope(ctx, environmente2ee.VaultScopeClaims{Issuer: v.Issuer, OwnerKind: "team", OwnerID: teamID, WorkspaceID: teamID, KeyEpoch: 1, Revision: 1, Previous: make([]byte, 32), WriterAccount: v.AccountID, WriterVaultGeneration: local.Head.Generation}, key, keys.WriterSeed, map[string][]byte{})
 		if err != nil {
 			return err
 		}
@@ -494,6 +489,9 @@ func (v PasswordVault) SyncTeamGrants(ctx context.Context) error {
 					return err
 				}
 			}
+			if item.Acknowledged {
+				return nil
+			}
 			return c.AckVaultGrant(ctx, item.DocumentID, local.Head.ID.String())
 		})
 		if err != nil {
@@ -527,7 +525,10 @@ func (v PasswordVault) RotateTeam(ctx context.Context, teamID string, remove []s
 		values := map[string][]byte{}
 		if !totalLoss {
 			previous, err = team.Scope.Decode()
-			if err != nil || previous.Claims.Issuer != v.Issuer || previous.Claims.OwnerKind != "team" || previous.Claims.OwnerID != teamID || previous.Claims.KeyEpoch != team.KeyEpoch || previous.ID != previousID {
+			if err != nil {
+				return wrapVaultIntegrityFailure(err)
+			}
+			if previous.Claims.Issuer != v.Issuer || previous.Claims.OwnerKind != "team" || previous.Claims.OwnerID != teamID || previous.Claims.KeyEpoch != team.KeyEpoch || previous.ID != previousID {
 				return ErrIntegrity
 			}
 			oldKey, epoch, err := scopeKey(keys, "team", teamID, v.AccountID)
@@ -562,7 +563,7 @@ func (v PasswordVault) RotateTeam(ctx context.Context, teamID string, remove []s
 		if err != nil {
 			return err
 		}
-		scope, err := environmente2ee.SealVaultScope(ctx, environmente2ee.VaultScopeClaims{Issuer: v.Issuer, OwnerKind: "team", OwnerID: teamID, KeyEpoch: team.KeyEpoch + 1, Revision: team.Scope.Revision + 1, Previous: previousID[:], WriterAccount: v.AccountID, WriterVaultGeneration: local.Head.Generation}, key, keys.WriterSeed, values)
+		scope, err := environmente2ee.SealVaultScope(ctx, environmente2ee.VaultScopeClaims{Issuer: v.Issuer, OwnerKind: "team", OwnerID: teamID, WorkspaceID: teamID, KeyEpoch: team.KeyEpoch + 1, Revision: team.Scope.Revision + 1, Previous: previousID[:], WriterAccount: v.AccountID, WriterVaultGeneration: local.Head.Generation}, key, keys.WriterSeed, values)
 		if err != nil {
 			return err
 		}
@@ -639,7 +640,7 @@ func (v PasswordVault) ListScopeNames(ctx context.Context, kind, owner, machine 
 	var names []string
 	err := v.withVaultKeys(ctx, func(_ *config.PasswordVaultRecord, keys *environmente2ee.VaultKeys, c VaultDataClient) error {
 		_, values, err := v.readVaultScope(ctx, c, keys, kind, owner, machine)
-		if api.IsNotFound(err) {
+		if vaultAPIResourceAbsentOnly(err) {
 			names = []string{}
 			return nil
 		}

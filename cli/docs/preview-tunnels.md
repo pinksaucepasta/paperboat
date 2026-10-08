@@ -17,8 +17,12 @@ pb preview ./dist
 pb tunnel --ephemeral 3000
 ```
 
-The command waits for origin and edge readiness before printing the managed
-URL. Keep it running in the foreground. Ctrl+C stops the owner session and
+Human output shows preparation immediately. The command checks the local origin
+before publishing a preview; if it cannot connect, start the app and check its
+listening address and port, then retry. It waits for authenticated origin and edge
+readiness before printing the managed URL. A readiness timeout includes the last
+observed allocation, edge, and origin states. `--json` omits progress messages.
+Keep it running in the foreground. Ctrl+C stops the owner session and
 withdraws the preview. A preview is never restored after reboot.
 
 Set an optional maximum lifetime, request account-private access, or attach

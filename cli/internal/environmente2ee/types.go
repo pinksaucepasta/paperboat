@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -111,6 +112,15 @@ func validVariableName(value string) bool {
 		return false
 	}
 	return true
+}
+
+// ValidateVariableName applies the same bounds and reserved startup-name policy
+// used when sealing and decoding ENV scopes, with an actionable browser error.
+func ValidateVariableName(name string) error {
+	if !validVariableName(name) {
+		return fmt.Errorf("ENV variable name is invalid or reserved. Use at most %d letters, digits or underscores, starting with a letter or underscore; choose a name outside reserved Paperboat and process-startup variables.", MaximumNameBytes)
+	}
+	return nil
 }
 
 func validateNames(names []string) error {

@@ -33,10 +33,12 @@ type RunningCarrier interface {
 }
 
 type RuntimeFactoryConfig struct {
-	Builder             CarrierBuilder
-	Origins             OriginProber
-	OriginStreams       *OriginStreamForwarder
-	MaximumOriginProbes int
+	Builder       CarrierBuilder
+	Origins       OriginProber
+	OriginStreams *OriginStreamForwarder
+	// OriginStreamsForGeneration scopes ingress authority to the candidate lifetime.
+	OriginStreamsForGeneration func(ApplyRequest, connector.DataCarrierIdentity) *OriginStreamForwarder
+	MaximumOriginProbes        int
 }
 
 // RuntimeFactory is the production TunnelManager factory boundary. It keeps
@@ -69,16 +71,18 @@ func (f *RuntimeFactory) Prepare(ctx context.Context, request ApplyRequest) (Can
 	}
 	routes := append([]hoststate.TunnelConfigRoute(nil), request.Decoded.Routes...)
 	sort.Slice(routes, func(i, j int) bool { return routes[i].ID < routes[j].ID })
-	return &runtimeCandidate{request: request, prepared: prepared, prober: f.config.Origins, originStreams: f.config.OriginStreams, maximumProbes: f.config.MaximumOriginProbes, routes: routes}, nil
+	originStreams := f.config.OriginStreams
+	return &runtimeCandidate{request: request, prepared: prepared, prober: f.config.Origins, originStreams: originStreams, originStreamsForGeneration: f.config.OriginStreamsForGeneration, maximumProbes: f.config.MaximumOriginProbes, routes: routes}, nil
 }
 
 type runtimeCandidate struct {
-	request       ApplyRequest
-	prepared      PreparedCarrier
-	prober        OriginProber
-	originStreams *OriginStreamForwarder
-	maximumProbes int
-	routes        []hoststate.TunnelConfigRoute
+	request                    ApplyRequest
+	prepared                   PreparedCarrier
+	prober                     OriginProber
+	originStreams              *OriginStreamForwarder
+	maximumProbes              int
+	originStreamsForGeneration func(ApplyRequest, connector.DataCarrierIdentity) *OriginStreamForwarder
+	routes                     []hoststate.TunnelConfigRoute
 }
 
 func (c *runtimeCandidate) ProbeOrigins(ctx context.Context) (ProbeResult, error) {
@@ -155,13 +159,25 @@ func (c *runtimeCandidate) Activate(ctx context.Context) (Active, error) {
 		}
 		return nil, err
 	}
-	if c.originStreams != nil {
+	if c.originStreams != nil || c.originStreamsForGeneration != nil {
 		provider, ok := running.(interface {
 			ActiveDataCarrier() *connector.ActiveDataCarrier
 		})
 		if !ok || provider.ActiveDataCarrier() == nil {
 			_ = running.Close(context.Background())
 			return nil, ErrConnectorUnavailable
+		}
+		if c.originStreamsForGeneration != nil {
+			identity, ok := provider.ActiveDataCarrier().Identity()
+			if !ok {
+				_ = running.Close(context.Background())
+				return nil, ErrConnectorUnavailable
+			}
+			c.originStreams = c.originStreamsForGeneration(c.request, identity)
+			if c.originStreams == nil {
+				_ = running.Close(context.Background())
+				return nil, ErrInvalidConfig
+			}
 		}
 		streams, streamErr := c.originStreams.Start(context.Background(), provider.ActiveDataCarrier(), c.routes)
 		if streamErr != nil {

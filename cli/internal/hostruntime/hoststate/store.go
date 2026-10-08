@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"time"
 
@@ -31,6 +32,95 @@ var (
 	ErrClosed       = errors.New("host state store is closed")
 	ErrUncertain    = errors.New("host state commit outcome is uncertain")
 )
+
+// safeStoreError keeps typed causes available to internal callers while its
+// public text contains no filesystem paths, state contents, or OS error text.
+type safeStoreError struct {
+	message string
+	causes  []error
+}
+
+func (err safeStoreError) Error() string { return err.message }
+
+func (err safeStoreError) Unwrap() []error {
+	causes := make([]error, len(err.causes))
+	copy(causes, err.causes)
+	return causes
+}
+
+func safeStoreFailure(message string, causes ...error) error {
+	retained := make([]error, 0, len(causes))
+	for _, cause := range causes {
+		if cause != nil {
+			retained = append(retained, cause)
+		}
+	}
+	return safeStoreError{message: message, causes: retained}
+}
+
+const maxAbsenceCauseNodes = 16
+
+// pureNotExist reports absence only when every bounded leaf in the error tree
+// is a platform-recognized missing-file error. This prevents a joined close,
+// validation, or probe failure from being hidden by errors.Is(os.ErrNotExist).
+func pureNotExist(err error) bool {
+	if nilError(err) {
+		return false
+	}
+	pending := []error{err}
+	visited := 0
+	hasLeaf := false
+	for len(pending) > 0 {
+		if visited >= maxAbsenceCauseNodes {
+			return false
+		}
+		current := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		if nilError(current) {
+			return false
+		}
+		visited++
+
+		switch wrapped := current.(type) {
+		case interface{ Unwrap() []error }:
+			causes := wrapped.Unwrap()
+			if len(causes) == 0 || len(causes) > maxAbsenceCauseNodes-visited-len(pending) {
+				return false
+			}
+			for _, cause := range causes {
+				if nilError(cause) {
+					return false
+				}
+			}
+			pending = append(pending, causes...)
+		case interface{ Unwrap() error }:
+			cause := wrapped.Unwrap()
+			if nilError(cause) || len(pending)+1 > maxAbsenceCauseNodes-visited {
+				return false
+			}
+			pending = append(pending, cause)
+		default:
+			hasLeaf = true
+			if !os.IsNotExist(current) {
+				return false
+			}
+		}
+	}
+	return hasLeaf
+}
+
+func nilError(err error) bool {
+	if err == nil {
+		return true
+	}
+	value := reflect.ValueOf(err)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
 
 type Phase string
 
@@ -71,11 +161,18 @@ type CommitError struct {
 }
 
 func (e *CommitError) Error() string {
+	if e == nil {
+		return "host state persistence failed"
+	}
 	outcome := "unchanged"
 	if e.Changed {
 		outcome = "uncertain"
 	}
-	return fmt.Sprintf("host state commit failed at %s (%s): %v", e.Phase, outcome, e.Err)
+	phase := string(e.Phase)
+	if !knownPhase(e.Phase) {
+		phase = "unknown"
+	}
+	return fmt.Sprintf("host state persistence failed during %s (%s)", phase, outcome)
 }
 
 func (e *CommitError) Unwrap() error {
@@ -83,6 +180,18 @@ func (e *CommitError) Unwrap() error {
 		return errors.Join(ErrUncertain, e.Err)
 	}
 	return e.Err
+}
+
+func knownPhase(phase Phase) bool {
+	switch phase {
+	case PhaseCommitStaged, PhaseCommitBackupSynced, PhaseCommitPrimarySynced, PhaseCommitCleanupSynced,
+		PhaseMigrationSourcePreserved, PhaseMigrationStaged, PhaseMigrationPrimarySynced,
+		PhaseMigrationBackupSynced, PhaseMigrationCleanupSynced, PhaseRecoveryCorruptionSaved,
+		PhaseRecoveryBackupRestored, PhaseRecoveryIncompleteSaved:
+		return true
+	default:
+		return false
+	}
 }
 
 type document struct {
@@ -137,15 +246,15 @@ func Open(config Config) (_ *Store, status StartupStatus, resultErr error) {
 		config.Clock = func() time.Time { return time.Now().UTC() }
 	}
 	if err := ensurePrivateDirectory(root); err != nil {
-		return nil, status, err
+		return nil, status, safeStoreFailure("host state directory could not be prepared", err)
 	}
 	lock, err := acquireProcessLock(filepath.Join(root, lockFile))
 	if err != nil {
-		return nil, status, err
+		return nil, status, safeStoreFailure("host state lock could not be acquired", err)
 	}
 	defer func() {
 		if resultErr != nil {
-			resultErr = errors.Join(resultErr, lock.Close())
+			resultErr = safeStoreFailure("host state could not be opened", resultErr, lock.Close())
 		}
 	}()
 	store := &Store{
@@ -158,6 +267,18 @@ func Open(config Config) (_ *Store, status StartupStatus, resultErr error) {
 	}
 	primary := store.readCandidate(store.primary)
 	backup := store.readCandidate(store.backup)
+	if primary.readFailed {
+		status.Degraded, status.Code, status.Source = true, "primary_unreadable", "none"
+		causes := []error{primary.err}
+		if backup.readFailed {
+			causes = append(causes, backup.err)
+		}
+		return nil, status, safeStoreFailure("host state primary could not be read safely", causes...)
+	}
+	if backup.readFailed {
+		status.Degraded, status.Code, status.Source = true, "backup_unreadable", "none"
+		return nil, status, safeStoreFailure("host state backup could not be read safely", backup.err)
+	}
 
 	if errors.Is(primary.err, ErrIncompatible) {
 		return nil, status, primary.err
@@ -165,10 +286,6 @@ func Open(config Config) (_ *Store, status StartupStatus, resultErr error) {
 	if primary.legacy != nil {
 		if errors.Is(backup.err, ErrIncompatible) {
 			return nil, status, backup.err
-		}
-		if backup.exists && backup.raw == nil {
-			status.Degraded, status.Code, status.Source = true, "backup_unreadable", "none"
-			return nil, status, ErrCorrupt
 		}
 		if backup.err == nil && backup.exists && backup.legacy == nil {
 			status.Degraded, status.Code, status.Source = true, "legacy_primary_with_current_backup", "none"
@@ -240,10 +357,6 @@ func Open(config Config) (_ *Store, status StartupStatus, resultErr error) {
 		return store, status, nil
 	}
 
-	if primary.exists && primary.raw == nil {
-		status.Degraded, status.Code, status.Source = true, "primary_unreadable", "none"
-		return nil, status, ErrCorrupt
-	}
 	if primary.exists {
 		preserved, preserveErr := store.preserve("corrupt-primary", primary.raw, PhaseRecoveryCorruptionSaved)
 		if preserveErr != nil {
@@ -277,10 +390,6 @@ func Open(config Config) (_ *Store, status StartupStatus, resultErr error) {
 		}
 		store.document, store.status = backup.document, status
 		return store, status, nil
-	}
-	if backup.exists && backup.raw == nil {
-		status.Degraded, status.Code, status.Source = true, "backup_unreadable", "none"
-		return nil, status, ErrCorrupt
 	}
 	if backup.exists {
 		preserved, preserveErr := store.preserve("corrupt-backup", backup.raw, PhaseRecoveryCorruptionSaved)
@@ -342,7 +451,7 @@ func (s *Store) Commit(expectedRevision uint64, next State) (uint64, error) {
 	}
 	next = normalizeState(next)
 	if err := next.Validate(); err != nil {
-		return 0, err
+		return 0, safeStoreFailure("host state is invalid", ErrInvalidState, err)
 	}
 	writtenAt := s.now().UTC()
 	if writtenAt.Before(s.document.WrittenAt) {
@@ -396,24 +505,28 @@ func (s *Store) Close() error {
 		return nil
 	}
 	s.closed = true
-	return s.lock.Close()
+	if err := s.lock.Close(); err != nil {
+		return safeStoreFailure("host state lock could not be released", err)
+	}
+	return nil
 }
 
 type candidate struct {
-	exists   bool
-	raw      []byte
-	document document
-	legacy   *legacyDocumentV0
-	err      error
+	exists     bool
+	raw        []byte
+	readFailed bool
+	document   document
+	legacy     *legacyDocumentV0
+	err        error
 }
 
 func (s *Store) readCandidate(name string) candidate {
 	raw, err := readPrivateFile(name, MaxStateBytes)
-	if errors.Is(err, os.ErrNotExist) {
+	if pureNotExist(err) {
 		return candidate{}
 	}
 	if err != nil {
-		return candidate{exists: true, err: fmt.Errorf("%w: %s: %v", ErrCorrupt, name, err)}
+		return candidate{exists: true, readFailed: true, err: safeStoreFailure("host state file could not be read safely", err)}
 	}
 	doc, legacy, err := decodeAnyDocument(raw)
 	return candidate{exists: true, raw: raw, document: doc, legacy: legacy, err: err}
@@ -449,7 +562,7 @@ func (s *Store) publishInitial(raw []byte) error {
 
 func (s *Store) migrate(source []byte, legacy legacyDocumentV0, status *StartupStatus) error {
 	if err := legacy.State.Validate(); err != nil {
-		return fmt.Errorf("%w: legacy state: %v", ErrCorrupt, err)
+		return safeStoreFailure("legacy host state is invalid", ErrCorrupt, err)
 	}
 	preserved, err := s.preserve("migration-v0", source, PhaseMigrationSourcePreserved)
 	if err != nil {
@@ -499,21 +612,21 @@ func (s *Store) migrate(source []byte, legacy legacyDocumentV0, status *StartupS
 
 func (s *Store) recoverIncomplete(status *StartupStatus) error {
 	raw, err := readPrivateFile(s.staging, MaxStateBytes)
-	if errors.Is(err, os.ErrNotExist) {
+	if pureNotExist(err) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("%w: incomplete state: %v", ErrCorrupt, err)
+		return safeStoreFailure("incomplete host state could not be read", err)
 	}
 	preserved, err := s.preserve("incomplete-commit", raw, PhaseRecoveryIncompleteSaved)
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(s.staging); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+	if err := os.Remove(s.staging); err != nil && !pureNotExist(err) {
+		return safeStoreFailure("incomplete host state could not be removed", err)
 	}
 	if err := syncDirectory(s.root); err != nil {
-		return err
+		return safeStoreFailure("host state directory could not be synced after recovery", err)
 	}
 	status.Degraded, status.Code = true, "incomplete_commit_preserved"
 	status.PreservedPaths = append(status.PreservedPaths, preserved)
@@ -531,8 +644,8 @@ func (s *Store) preserve(kind string, raw []byte, phase Phase) (string, error) {
 			return "", &CommitError{Phase: phase, Err: err}
 		}
 		return name, nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", err
+	} else if !pureNotExist(err) {
+		return "", safeStoreFailure("preserved host state could not be checked", err)
 	}
 	if err := s.writeDurable(name, raw); err != nil {
 		return "", &CommitError{Phase: phase, Err: err}
@@ -544,14 +657,20 @@ func (s *Store) preserve(kind string, raw []byte, phase Phase) (string, error) {
 }
 
 func (s *Store) writeDurable(name string, raw []byte) error {
-	return atomicfile.Write(name, raw, atomicfile.CurrentOwnerOptions(0o600))
+	if err := atomicfile.Write(name, raw, atomicfile.CurrentOwnerOptions(0o600)); err != nil {
+		return safeStoreFailure("host state file could not be written", err)
+	}
+	return nil
 }
 
 func (s *Store) removeStaging() error {
-	if err := os.Remove(s.staging); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+	if err := os.Remove(s.staging); err != nil && !pureNotExist(err) {
+		return safeStoreFailure("host state staging file could not be removed", err)
 	}
-	return syncDirectory(s.root)
+	if err := syncDirectory(s.root); err != nil {
+		return safeStoreFailure("host state directory could not be synced", err)
+	}
+	return nil
 }
 
 func (s *Store) runHook(phase Phase) error {
@@ -563,8 +682,11 @@ func (s *Store) runHook(phase Phase) error {
 
 func sealDocument(state State, revision uint64, writtenAt time.Time) (document, []byte, error) {
 	state = normalizeState(state)
-	if revision == 0 || writtenAt.IsZero() || state.Validate() != nil {
+	if revision == 0 || writtenAt.IsZero() {
 		return document{}, nil, ErrInvalidState
+	}
+	if err := state.Validate(); err != nil {
+		return document{}, nil, safeStoreFailure("host state is invalid", ErrInvalidState, err)
 	}
 	unsigned := unsignedDocument{Schema: Schema, SchemaVersion: SchemaVersion, Revision: revision, WrittenAt: writtenAt.UTC(), State: state}
 	canonical, err := json.Marshal(unsigned)
@@ -593,13 +715,16 @@ func decodeAnyDocument(raw []byte) (document, *legacyDocumentV0, error) {
 		return document{}, nil, ErrCorrupt
 	}
 	if err := validateSingleJSON(raw); err != nil {
-		return document{}, nil, fmt.Errorf("%w: %v", ErrCorrupt, err)
+		return document{}, nil, safeStoreFailure("host state document is invalid", ErrCorrupt, err)
 	}
 	var header struct {
 		Schema        string `json:"schema"`
 		SchemaVersion int    `json:"schema_version"`
 	}
-	if err := json.Unmarshal(raw, &header); err != nil || header.Schema != Schema {
+	if err := json.Unmarshal(raw, &header); err != nil {
+		return document{}, nil, safeStoreFailure("host state document header is invalid", ErrCorrupt, err)
+	}
+	if header.Schema != Schema {
 		return document{}, nil, ErrCorrupt
 	}
 	if header.SchemaVersion > SchemaVersion {
@@ -607,8 +732,14 @@ func decodeAnyDocument(raw []byte) (document, *legacyDocumentV0, error) {
 	}
 	if header.SchemaVersion == 0 {
 		var legacy legacyDocumentV0
-		if err := decodeStrict(raw, &legacy); err != nil || legacy.Schema != Schema || legacy.SchemaVersion != 0 || legacy.State.Validate() != nil {
+		if err := decodeStrict(raw, &legacy); err != nil {
+			return document{}, nil, safeStoreFailure("legacy host state document is invalid", ErrCorrupt, err)
+		}
+		if legacy.Schema != Schema || legacy.SchemaVersion != 0 {
 			return document{}, nil, ErrCorrupt
+		}
+		if err := legacy.State.Validate(); err != nil {
+			return document{}, nil, safeStoreFailure("legacy host state document is invalid", ErrCorrupt, err)
 		}
 		return document{}, &legacy, nil
 	}
@@ -616,8 +747,14 @@ func decodeAnyDocument(raw []byte) (document, *legacyDocumentV0, error) {
 		return document{}, nil, ErrCorrupt
 	}
 	var doc document
-	if err := decodeStrict(raw, &doc); err != nil || doc.Schema != Schema || doc.SchemaVersion != SchemaVersion || doc.Revision == 0 || doc.WrittenAt.IsZero() || doc.State.Validate() != nil {
+	if err := decodeStrict(raw, &doc); err != nil {
+		return document{}, nil, safeStoreFailure("host state document is invalid", ErrCorrupt, err)
+	}
+	if doc.Schema != Schema || doc.SchemaVersion != SchemaVersion || doc.Revision == 0 || doc.WrittenAt.IsZero() {
 		return document{}, nil, ErrCorrupt
+	}
+	if err := doc.State.Validate(); err != nil {
+		return document{}, nil, safeStoreFailure("host state document is invalid", ErrCorrupt, err)
 	}
 	unsigned := unsignedDocument{Schema: doc.Schema, SchemaVersion: doc.SchemaVersion, Revision: doc.Revision, WrittenAt: doc.WrittenAt, State: doc.State}
 	canonical, err := json.Marshal(unsigned)
@@ -640,6 +777,9 @@ func decodeStrict(raw []byte, destination any) error {
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
+		if err != nil {
+			return err
+		}
 		return ErrCorrupt
 	}
 	return nil
@@ -652,6 +792,9 @@ func validateSingleJSON(raw []byte) error {
 		return err
 	}
 	if _, err := decoder.Token(); err != io.EOF {
+		if err != nil {
+			return err
+		}
 		return ErrCorrupt
 	}
 	return nil

@@ -3,7 +3,6 @@ package native
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/quic-go/quic-go"
 )
@@ -18,7 +17,7 @@ type ReconnectRequiredError struct {
 }
 
 func (e *ReconnectRequiredError) Error() string {
-	return fmt.Sprintf("peer %s connection lost; reconnect required: %v", e.PeerID, e.Err)
+	return "peer connection lost; reconnect required"
 }
 
 func (e *ReconnectRequiredError) Unwrap() error { return e.Err }

@@ -3,7 +3,6 @@ package splitdns
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"net"
 	"net/http"
@@ -15,7 +14,7 @@ import (
 	"golang.org/x/net/publicsuffix"
 )
 
-func TestPublicBrowserNamespaceAndCertificateConstraint(t *testing.T) {
+func TestPublicBrowserNamespaceRejectsForeignNames(t *testing.T) {
 	host, err := BrowserHostname("hp", 6767, BrowserSuffix)
 	if err != nil || host != "6767.hp.local.pprbt.dev" || !IsPublicBrowserHostname(host) {
 		t.Fatalf("public hostname %q: %v", host, err)
@@ -25,60 +24,35 @@ func TestPublicBrowserNamespaceAndCertificateConstraint(t *testing.T) {
 			t.Fatalf("accepted %q", bad)
 		}
 	}
-	for _, bad := range []string{"dev", "pprbt.dev", "other.pprbt.dev"} {
-		if _, err := ValidateTrustSuffix(bad); err == nil {
-			t.Fatalf("accepted trust scope %q", bad)
-		}
-	}
-	ca, err := LoadOrCreateConstrainedCA(t.TempDir(), BrowserSuffix)
-	if err != nil {
-		t.Fatal(err)
-	}
-	roots := x509.NewCertPool()
-	roots.AppendCertsFromPEM(ca.CertPEM())
-	for _, name := range []string{host, "api.pprbt.dev", "unrelated.dev"} {
-		cert, key, err := ca.IssueCertificate([]string{name})
-		if err != nil {
-			t.Fatal(err)
-		}
-		pair, err := tls.X509KeyPair(cert, key)
-		if err != nil {
-			t.Fatal(err)
-		}
-		leaf, err := x509.ParseCertificate(pair.Certificate[0])
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, err = leaf.Verify(x509.VerifyOptions{DNSName: name, Roots: roots})
-		if (err == nil) != (name == host) {
-			t.Fatalf("constraint for %q: %v", name, err)
-		}
-	}
+
 }
 
-func TestBrowserHostsUseSelectedPortDeviceNames(t *testing.T) {
-	a, err := BrowserHostname("machine", 3000, "pprbt")
+func TestBrowserHostsUseSelectedPortMachineNames(t *testing.T) {
+	a, err := BrowserHostname("machine", 3000, BrowserSuffix)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _ := BrowserHostname("machine", 3001, "pprbt")
-	again, _ := BrowserHostname("machine", 3000, "pprbt")
-	if a != again || a == b || a != "3000.machine.pprbt" || b != "3001.machine.pprbt" {
+	b, _ := BrowserHostname("machine", 3001, BrowserSuffix)
+	again, _ := BrowserHostname("machine", 3000, BrowserSuffix)
+	if a != again || a == b || a != "3000.machine.local.pprbt.dev" || b != "3001.machine.local.pprbt.dev" {
 		t.Fatalf("bad stable browser names: %s %s", a, b)
 	}
 	for _, host := range []string{a, b} {
-		if site, err := publicsuffix.EffectiveTLDPlusOne(host); err != nil || site != "machine.pprbt" {
+		if site, err := publicsuffix.EffectiveTLDPlusOne(host); err != nil || site != "pprbt.dev" {
 			t.Fatalf("selected nested naming site %q: %v", site, err)
 		}
 	}
-	if _, err := BrowserHostname("machine", 3000, "home.pprbt"); err == nil {
-		t.Fatal("multi-label suffix accepted")
+	if host, err := BrowserHostname("machine", 3000, "mynet.xyz"); err != nil || host != "3000.machine.mynet.xyz" {
+		t.Fatalf("custom hostname %q: %v", host, err)
+	}
+	if _, err := BrowserHostname("machine", 3000, "co.uk"); err == nil {
+		t.Fatal("public suffix accepted")
 	}
 }
 
 func TestProxyRejectsUnregisteredHostSNIAndCrossSiteAuthorityBeforeDial(t *testing.T) {
 	dialed, issued := 0, 0
-	p, err := NewProxy(ProxyConfig{Suffix: "pprbt", Routes: map[string]BrowserRoute{"first.pprbt": {Address: netip.MustParseAddr("127.100.1.2"), Port: 3000}}, DialContext: func(context.Context, string, string) (net.Conn, error) {
+	p, err := NewProxy(ProxyConfig{Routes: map[string]BrowserRoute{"3000.first.local.pprbt.dev": {Address: netip.MustParseAddr("127.100.1.2"), Port: 3000}}, DialContext: func(context.Context, string, string) (net.Conn, error) {
 		dialed++
 		return nil, errors.New("unexpected dial")
 	}, IssueCertificate: func(context.Context, string) (tls.Certificate, error) {
@@ -88,7 +62,7 @@ func TestProxyRejectsUnregisteredHostSNIAndCrossSiteAuthorityBeforeDial(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, host := range []string{"unknown.pprbt", "4000.other.pprbt", "3000.first.pprbt", "child.first.pprbt", "first.pprbt.evil"} {
+	for _, host := range []string{"unknown.pprbt", "4000.other.pprbt", "3000.3000.first.local.pprbt.dev", "child.3000.first.local.pprbt.dev", "3000.first.local.pprbt.dev.evil"} {
 		req := httptest.NewRequest(http.MethodGet, "http://"+host+"/", nil)
 		rec := httptest.NewRecorder()
 		p.ServeHTTP(rec, req)
@@ -99,7 +73,7 @@ func TestProxyRejectsUnregisteredHostSNIAndCrossSiteAuthorityBeforeDial(t *testi
 			t.Fatalf("unknown SNI accepted %s", host)
 		}
 	}
-	req := httptest.NewRequest(http.MethodGet, "https://first.pprbt/", nil)
+	req := httptest.NewRequest(http.MethodGet, "https://3000.first.local.pprbt.dev/", nil)
 	req.TLS = &tls.ConnectionState{ServerName: "other.pprbt"}
 	rec := httptest.NewRecorder()
 	p.ServeHTTP(rec, req)
@@ -113,19 +87,19 @@ func TestProxyRebuildsForwardedMetadataFromActualRequest(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { observed <- r.Header.Clone(); w.WriteHeader(204) }))
 	defer backend.Close()
 	address := backend.Listener.Addr().(*net.TCPAddr)
-	p, err := NewProxy(ProxyConfig{Suffix: "pprbt", Routes: map[string]BrowserRoute{"site.pprbt": {Address: netip.MustParseAddr("127.0.0.1"), Port: address.Port}}, DialContext: (&net.Dialer{}).DialContext})
+	p, err := NewProxy(ProxyConfig{Routes: map[string]BrowserRoute{"3000.site.local.pprbt.dev": {Address: netip.MustParseAddr("127.0.0.1"), Port: address.Port}}, DialContext: (&net.Dialer{}).DialContext})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, secure := range []bool{false, true} {
-		req := httptest.NewRequest(http.MethodGet, "http://site.pprbt/", nil)
+		req := httptest.NewRequest(http.MethodGet, "http://3000.site.local.pprbt.dev/", nil)
 		req.Header.Set("Forwarded", "for=attacker;proto=evil")
 		req.Header.Set("X-Forwarded-For", "attacker")
 		req.Header.Set("X-Forwarded-Host", "attacker.example")
 		req.Header.Set("X-Forwarded-Proto", "evil")
 		want := "http"
 		if secure {
-			req.TLS = &tls.ConnectionState{ServerName: "site.pprbt"}
+			req.TLS = &tls.ConnectionState{ServerName: "3000.site.local.pprbt.dev"}
 			want = "https"
 		}
 		rec := httptest.NewRecorder()
@@ -134,8 +108,25 @@ func TestProxyRebuildsForwardedMetadataFromActualRequest(t *testing.T) {
 			t.Fatalf("status=%d", rec.Code)
 		}
 		headers := <-observed
-		if headers.Get("Forwarded") != "" || strings.Contains(headers.Get("X-Forwarded-For"), "attacker") || headers.Get("X-Forwarded-Host") != "site.pprbt" || headers.Get("X-Forwarded-Proto") != want {
+		if headers.Get("Forwarded") != "" || strings.Contains(headers.Get("X-Forwarded-For"), "attacker") || headers.Get("X-Forwarded-Host") != "3000.site.local.pprbt.dev" || headers.Get("X-Forwarded-Proto") != want {
 			t.Fatalf("spoofed forwarding metadata: %v", headers)
+		}
+	}
+}
+
+// Applying local browser configuration can stop a newly created gateway before
+// its serving goroutines have been scheduled.
+func TestProxyImmediateStopAndRestartKeepsListenerOwnership(t *testing.T) {
+	p, err := NewProxy(ProxyConfig{HTTPListenAddr: "127.0.0.1:0", HTTPSListenAddr: "127.0.0.1:0", DialContext: (&net.Dialer{}).DialContext, IssueCertificate: func(context.Context, string) (tls.Certificate, error) { return tls.Certificate{}, errors.New("unused") }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 30 {
+		if err := p.Start(); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.Stop(t.Context()); err != nil {
+			t.Fatal(err)
 		}
 	}
 }

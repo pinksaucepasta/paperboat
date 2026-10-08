@@ -578,28 +578,6 @@ func TestDecodeRemoteExecStartUncertainPreservesTypedCause(t *testing.T) {
 	}
 }
 
-func TestSafeErrorMessagePreservesJoinedCausesOnOneLine(t *testing.T) {
-	err := errors.Join(errors.New("initial peer dial: EOF"), errors.New("fresh peer dial retry: session shutdown"))
-	if got := safeErrorMessage(err); got != "initial peer dial: EOF; fresh peer dial retry: session shutdown" {
-		t.Fatalf("message=%q", got)
-	}
-}
-
-func TestSafeErrorMessageBoundsDiagnostics(t *testing.T) {
-	err := errors.New(strings.Repeat("x", 700))
-	got := safeErrorMessage(err)
-	if len(got) != 512 || got != strings.Repeat("x", 512) {
-		t.Fatalf("diagnostic length=%d", len(got))
-	}
-}
-
-func TestSafeErrorMessageRedactsStructuredTransportDiagnostics(t *testing.T) {
-	err := errors.New("peer path 3 failed (class 12): read QUIC stream (token=secret local=fingerprint handle=private): EOF")
-	if got := safeErrorMessage(err); got != "peer path 3 failed" {
-		t.Fatalf("message=%q", got)
-	}
-}
-
 func TestWriteErrorBoundsFinalEnvelopeMessage(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	writeError(recorder, http.StatusServiceUnavailable, "req_0123456789abcdef01234567", "peer_stream_unavailable", "peer stream is unavailable: "+strings.Repeat("x", 700))
@@ -726,7 +704,7 @@ func TestLocalAPIServesOwnerAuthorizedCompletionProjection(t *testing.T) {
 func TestLocalAPIDiagnosticOperationsUseSeparateAuthorization(t *testing.T) {
 	now := time.Now().UTC()
 	event, _ := diagnostics.NewEvent(now, "daemon", "lifecycle", "info", map[string]string{"state": "ready"})
-	service := &diagnosticServiceFake{snapshot: DiagnosticSnapshot{Schema: DiagnosticSnapshotSchemaV1, ObservedAt: now, Recent: []diagnostics.Event{event}}, bundle: diagnostics.Bundle{Schema: diagnostics.BundleSchemaV1, Correlation: "pb-0123456789abcdef0123456789abcdef", CreatedAt: now, Path: "/tmp/bugreport.zip", Bytes: 100, Categories: []string{"manifest", "recent_events", "redacted_events", "status"}}}
+	service := &diagnosticServiceFake{snapshot: DiagnosticSnapshot{Schema: DiagnosticSnapshotSchemaV1, ObservedAt: now, Recent: []diagnostics.Event{event}}, bundle: diagnostics.Bundle{Schema: diagnostics.BundleSchemaV1, Correlation: "support_01234567-89ab-4def-8123-456789abcdef", CreatedAt: now, Path: "/tmp/bugreport.zip", Bytes: 100, Categories: []string{"manifest", "recent_events", "redacted_events", "status"}}}
 	server, err := NewServer(ServerConfig{SocketPath: filepath.Join(localAPITestDir(t), "api.sock"), OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), Source: snapshotSourceFunc(func(context.Context) (Snapshot, error) { return validSnapshot(), nil }), Diagnostics: service, AuthorizeDiagnostics: func(peer Peer) bool { return peer.PID == 42 }})
 	if err != nil {
 		t.Fatal(err)

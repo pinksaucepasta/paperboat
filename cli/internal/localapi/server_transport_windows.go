@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net"
 	"runtime"
-	"strings"
 
 	"github.com/Microsoft/go-winio"
 	"golang.org/x/sys/windows"
@@ -19,11 +18,14 @@ const systemSID = "S-1-5-18"
 func currentUserSID() (string, error) {
 	token, err := windows.OpenCurrentProcessToken()
 	if err != nil {
-		return "", ErrPermission
+		return "", errors.Join(ErrPermission, err)
 	}
 	defer token.Close()
 	user, err := token.GetTokenUser()
-	if err != nil || user == nil || user.User.Sid == nil {
+	if err != nil {
+		return "", errors.Join(ErrPermission, err)
+	}
+	if user == nil || user.User.Sid == nil {
 		return "", ErrPermission
 	}
 	return user.User.Sid.String(), nil
@@ -56,8 +58,8 @@ func (s *Server) listen(context.Context) (net.Listener, error) {
 		OutputBufferSize:   maxHeaderBytes + maxJSONBytes + 64<<10,
 	})
 	if err != nil {
-		if errors.Is(err, windows.ERROR_ACCESS_DENIED) || strings.Contains(strings.ToLower(err.Error()), "exists") {
-			return nil, ErrAlreadyRunning
+		if errors.Is(err, windows.ERROR_ACCESS_DENIED) || errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
+			return nil, errors.Join(ErrAlreadyRunning, err)
 		}
 		return nil, err
 	}
@@ -107,12 +109,15 @@ func windowsPeerIdentity(connection net.Conn) (Peer, error) {
 	}
 	pipeHandle := windows.Handle(withHandle.Fd())
 	var pid uint32
-	if err := windows.GetNamedPipeClientProcessId(pipeHandle, &pid); err != nil || pid == 0 {
+	if err := windows.GetNamedPipeClientProcessId(pipeHandle, &pid); err != nil {
+		return Peer{}, errors.Join(ErrPermission, err)
+	}
+	if pid == 0 {
 		return Peer{}, ErrPermission
 	}
 	ownerSID, err := windowsNamedPipeClientSID(pipeHandle)
 	if err != nil {
-		return Peer{}, ErrPermission
+		return Peer{}, errors.Join(ErrPermission, err)
 	}
 	return Peer{UID: -1, GID: -1, PID: int(pid), SID: ownerSID}, nil
 }
@@ -153,7 +158,10 @@ func windowsNamedPipeClientSID(pipe windows.Handle) (string, error) {
 	defer token.Close()
 
 	user, err := token.GetTokenUser()
-	if err != nil || user == nil || user.User.Sid == nil || !user.User.Sid.IsValid() {
+	if err != nil {
+		return "", errors.Join(ErrPermission, err)
+	}
+	if user == nil || user.User.Sid == nil || !user.User.Sid.IsValid() {
 		return "", ErrPermission
 	}
 	return user.User.Sid.String(), nil

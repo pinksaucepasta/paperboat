@@ -16,7 +16,7 @@ Recover vault access and replace the password and recovery code
 Use the recovery code to regain vault access and replace the password and recovery code. Store the newly generated code in a new owner-only file.
 
 .PP
-The local vault protects ENV key custody with a password and optional recovery code. Locking clears unlocked keys from this device; removing local custody differs from resetting and deleting account values. Never place a password or recovery code in shell arguments.
+The local vault protects ENV key custody with a password and optional recovery code. Locking clears unlocked keys from this machine; removing local custody differs from resetting and deleting account values. Never place a password or recovery code in shell arguments.
 
 .PP
 JSON output is supported with --json.
@@ -58,6 +58,10 @@ JSON output is supported with --json.
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

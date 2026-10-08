@@ -3,6 +3,7 @@
 package managedssh
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -11,30 +12,48 @@ import (
 
 var ErrOpenSSHExecution = errors.New("OpenSSH execution request is invalid")
 
-type ProcessExec func(path string, argv []string, envv []string) error
-
-type OpenSSHExecutor struct{ Exec ProcessExec }
+type OpenSSHExecutor struct{}
 
 // Execute runs the native OpenSSH client with inherited standard streams and
 // returns its exact process error, including the native exit code.
-func (e OpenSSHExecutor) Execute(executable string, arguments, environment []string) error {
-	path, err := resolveOpenSSHExecutable(executable)
-	if err != nil || !validProcessValues(arguments) || !validEnvironment(environment) {
+func (OpenSSHExecutor) Execute(ctx context.Context, executable string, arguments, environment []string) error {
+	if ctx == nil || !validProcessValues(arguments) || !validEnvironment(environment) {
 		return ErrOpenSSHExecution
 	}
-	if e.Exec != nil {
-		argv := append([]string{path}, arguments...)
-		if environment == nil {
-			environment = os.Environ()
-		}
-		return e.Exec(path, argv, append([]string(nil), environment...))
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	path, err := resolveOpenSSHExecutable(executable)
+	if err != nil {
+		return NativeLaunchError{Err: errors.Join(ErrOpenSSHExecution, err)}
 	}
 	command := exec.Command(path, arguments...)
 	command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if environment != nil {
 		command.Env = append([]string(nil), environment...)
 	}
-	return command.Run()
+	// Reuse the existing native OpenSSH job owner; cancellation and normal exit
+	// retire its descendants without altering the inherited console.
+	process, err := startOpenSSHLoopbackProcess(command)
+	if err != nil {
+		return NativeLaunchError{Err: err}
+	}
+	done := make(chan error, 1)
+	go func() { done <- process.Wait() }()
+	select {
+	case err = <-done:
+	case <-ctx.Done():
+		_ = process.Kill()
+		err = <-done
+	}
+	if err == nil {
+		return nil
+	}
+	var exited *exec.ExitError
+	if errors.As(err, &exited) {
+		return NativeExitError{Code: exited.ExitCode(), Err: err}
+	}
+	return NativeLaunchError{Err: err}
 }
 
 func validProcessValues(values []string) bool {

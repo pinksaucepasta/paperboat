@@ -1,17 +1,17 @@
 ## pb send
 
-Send files to a device's Paperboat Inbox
+Send files to a machine's Paperboat Inbox
 
 ### Synopsis
 
-Send files to a device's Paperboat Inbox
+Send files to a machine's Paperboat Inbox
 
-Send one or more paths to the selected device's Inbox. The command succeeds only after receiver verification and a durable receipt; --session associates the transfer with a terminal session.
+Send one or more paths to the selected machine's Inbox. The command succeeds only after receiver verification and a durable receipt; --session associates the transfer with a terminal session.
 
 JSON output is supported with --json.
 
 ```
-pb send <path>... --to <device> [flags]
+pb send <path>... --to <machine> [flags]
 ```
 
 ### Options
@@ -29,6 +29,7 @@ pb send <path>... --to <device> [flags]
       --config string      path to the CLI config file
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO

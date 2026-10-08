@@ -193,3 +193,16 @@ func TestValidateLoopbackHealthRequiresPaperboatOwnedDualStackListeners(t *testi
 		}
 	}
 }
+
+func TestInventoryRecognizesCurrentOwnedOpenSSHService(t *testing.T) {
+	root := t.TempDir()
+	const instance = "u0123456789abcdef01234567"
+	config := Config{Platform: "windows", ServiceName: ServiceName + "-" + instance, ServiceExecutable: filepath.Join(root, "pb.exe"), InstallRoot: filepath.Join(root, "OpenSSH"), StateRoot: filepath.Join(root, "ssh"), ApprovedVersion: ApprovedVersion, ExpectedPublisher: "Microsoft", Port: 38222, Runner: &fakeRunner{}}
+	record := InventoryRecord{WingetRegistered: true, WingetVersion: ApprovedVersion,
+		ProgramFilesSSHD: BinaryRecord{Path: filepath.Join(config.InstallRoot, "sshd.exe"), Exists: true, Regular: true, SignatureValid: true, Publisher: "CN=Microsoft Corporation", Version: ApprovedVersion},
+		PaperboatService: ServiceRecord{Name: config.ServiceName, Exists: true, PathName: `"` + config.ServiceExecutable + `" daemon __windows-sshd-service --instance ` + instance},
+	}
+	if got := ClassifyInventory(record, config).Class; got != InstallationPaperboatApproved {
+		t.Fatalf("current owned service classification=%q", got)
+	}
+}

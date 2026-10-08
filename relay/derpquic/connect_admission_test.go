@@ -3,7 +3,9 @@ package derpquic
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
+	"github.com/quic-go/quic-go"
 	"net/netip"
 	"testing"
 	"time"
@@ -112,5 +114,22 @@ func TestCarrierCredentialExpiryDoesNotLatchPermanentDenial(t *testing.T) {
 				t.Fatalf("permanent denial was retried: %v calls=%d", err, calls)
 			}
 		})
+	}
+}
+
+func TestCarrierClassificationRetainsPrivateTypedCause(t *testing.T) {
+	app := &quic.ApplicationError{ErrorCode: 1, ErrorMessage: "PRIVATE_REMOTE_REASON"}
+	err := classify(app)
+	var original *quic.ApplicationError
+	if !errors.Is(err, ErrAdmission) || !errors.As(err, &original) || original != app || !fatalCarrier(err) || err.Error() != ErrAdmission.Error() {
+		t.Fatal("application cause or finite decision lost")
+	}
+	verification := &tls.CertificateVerificationError{Err: x509.UnknownAuthorityError{}}
+	for _, classify := range []func(error) error{classify, classifyWSS} {
+		err := classify(verification)
+		var original *tls.CertificateVerificationError
+		if !errors.Is(err, ErrAdmission) || !errors.As(err, &original) || original != verification || !fatalCarrier(err) || err.Error() != ErrAdmission.Error() {
+			t.Fatal("TLS cause or finite decision lost")
+		}
 	}
 }

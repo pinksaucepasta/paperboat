@@ -22,7 +22,6 @@ pb setup [flags]
       --json                     print JSON
       --managed-ssh              accept managed SSH tools (default true)
       --name string              machine name
-      --peer-relay               relay encrypted traffic for your devices
       --preview-tunnel           serve previews and tunnels (default true)
       --recovery-output string   new absolute file for the account recovery key
       --ssh-port uint            existing loopback sshd port (default 22)
@@ -36,6 +35,7 @@ pb setup [flags]
       --config string      path to the CLI config file
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO

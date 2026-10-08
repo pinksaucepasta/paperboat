@@ -9,7 +9,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
-	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 )
 
@@ -35,21 +34,24 @@ type InventoryConfig struct {
 	RefreshInterval time.Duration
 	RequestTimeout  time.Duration
 	Clock           func() time.Time
-	OnMachines      func(context.Context, []api.UserMachine)
-	OnRefresh       func(error)
+	// ReconcileMachines must finish before a successful refresh can publish ready.
+	ReconcileMachines func(context.Context, []api.UserMachine) error
+	OnMachines        func(context.Context, []api.UserMachine)
+	OnRefresh         func(error)
 }
 
 type Inventory struct {
-	source          MachineSource
-	store           *localapi.SnapshotStore
-	refreshInterval time.Duration
-	requestTimeout  time.Duration
-	clock           func() time.Time
-	onMachines      func(context.Context, []api.UserMachine)
-	onRefresh       func(error)
-	mu              sync.Mutex
-	completionMu    sync.RWMutex
-	completion      localapi.CompletionSnapshot
+	source            MachineSource
+	store             *localapi.SnapshotStore
+	refreshInterval   time.Duration
+	requestTimeout    time.Duration
+	clock             func() time.Time
+	reconcileMachines func(context.Context, []api.UserMachine) error
+	onMachines        func(context.Context, []api.UserMachine)
+	onRefresh         func(error)
+	mu                sync.Mutex
+	completionMu      sync.RWMutex
+	completion        localapi.CompletionSnapshot
 }
 
 func NewInventory(config InventoryConfig) (*Inventory, error) {
@@ -69,13 +71,14 @@ func NewInventory(config InventoryConfig) (*Inventory, error) {
 		config.Clock = time.Now
 	}
 	return &Inventory{
-		source:          config.Source,
-		store:           config.Store,
-		refreshInterval: config.RefreshInterval,
-		requestTimeout:  config.RequestTimeout,
-		clock:           config.Clock,
-		onMachines:      config.OnMachines,
-		onRefresh:       config.OnRefresh,
+		source:            config.Source,
+		store:             config.Store,
+		refreshInterval:   config.RefreshInterval,
+		requestTimeout:    config.RequestTimeout,
+		clock:             config.Clock,
+		reconcileMachines: config.ReconcileMachines,
+		onMachines:        config.OnMachines,
+		onRefresh:         config.OnRefresh,
 	}, nil
 }
 
@@ -97,14 +100,20 @@ func (i *Inventory) runTicker(ctx context.Context) error {
 	}
 }
 
-func (i *Inventory) Refresh(ctx context.Context) error {
+func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
+	defer func() {
+		if i.onRefresh != nil {
+			i.onRefresh(refreshErr)
+		}
+	}()
 
 	requestCtx, cancel := context.WithTimeout(ctx, i.requestTimeout)
 	machines, sourceErr := i.source.ListUserMachines(requestCtx)
-	if i.onRefresh != nil {
-		i.onRefresh(sourceErr)
+	var reconcileErr error
+	if sourceErr == nil && i.reconcileMachines != nil {
+		reconcileErr = i.reconcileMachines(requestCtx, machines)
 	}
 	var completionItems []localapi.CompletionItem
 	var completionErr error
@@ -114,17 +123,40 @@ func (i *Inventory) Refresh(ctx context.Context) error {
 		}
 	}
 	cancel()
+	for _, failure := range []error{sourceErr, reconcileErr, completionErr} {
+		if failure == nil {
+			continue
+		}
+		if refreshErr == nil {
+			refreshErr = failure
+		} else {
+			refreshErr = errors.Join(refreshErr, failure)
+		}
+	}
 
 	now := i.clock().UTC()
 	if _, err := i.store.Update(now, func(current *localapi.Snapshot) (localapi.Snapshot, error) {
 		desired := localapi.Snapshot{DaemonState: "ready", DaemonVersion: buildinfo.Version}
 		if current != nil {
 			desired.Machines = current.Machines
-			desired.DeviceSuffix = current.DeviceSuffix
-			desired.DeviceLoopbackCIDR = current.DeviceLoopbackCIDR
 		}
 		if sourceErr == nil {
 			desired.Machines = preserveLocalObservations(mapMachines(machines), current)
+			if reconcileErr != nil {
+				brokenSince := now
+				if current != nil && len(current.Health) == 1 && current.Health[0].Code == "local_access_unavailable" && current.Health[0].BrokenSince != nil {
+					brokenSince = *current.Health[0].BrokenSince
+				}
+				desired.DaemonState = "degraded"
+				desired.Health = []localapi.HealthItem{{
+					Code:        "local_access_unavailable",
+					Severity:    "error",
+					Title:       "Local machine access is unavailable",
+					BrokenSince: &brokenSince,
+					Recovery:    "Check Paperboat local access settings and repair the installation",
+					ETag:        "local_access_unavailable",
+				}}
+			}
 		} else {
 			brokenSince := now
 			if current != nil && len(current.Health) == 1 && current.Health[0].Code == "control_plane_unavailable" && current.Health[0].BrokenSince != nil {
@@ -139,28 +171,30 @@ func (i *Inventory) Refresh(ctx context.Context) error {
 				Recovery:    "Check network access and Paperboat authentication",
 				ETag:        "control_plane_unavailable",
 			}}
-			if errors.Is(sourceErr, config.ErrNoCredentials) || errors.Is(sourceErr, config.ErrSecretNotFound) || errors.Is(sourceErr, api.ErrUnauthenticated) {
+			if inventoryAuthenticationRequired(sourceErr) {
 				desired.DaemonState = "awaiting_enrollment"
 				desired.Machines = nil
-				desired.Health = []localapi.HealthItem{{Code: "authentication_required", Severity: "info", Title: "Paperboat is installed and waiting for sign-in", Recovery: "Enroll this device from the Paperboat dashboard", ETag: "authentication_required"}}
+				desired.Health = []localapi.HealthItem{{Code: "authentication_required", Severity: "info", Title: "Paperboat is installed and waiting for sign-in", Recovery: "Enroll this machine from the Paperboat dashboard", ETag: "authentication_required"}}
 			}
 		}
 		return desired, nil
 	}); err != nil {
-		return errors.Join(sourceErr, err)
+		return errors.Join(refreshErr, err)
 	}
 	if sourceErr == nil && completionErr == nil {
 		snapshot := localapi.CompletionSnapshot{Schema: localapi.CompletionSchemaV1, ObservedAt: now, Items: append([]localapi.CompletionItem(nil), completionItems...)}
-		if snapshot.Validate() == nil {
+		if validationErr := snapshot.Validate(); validationErr == nil {
 			i.completionMu.Lock()
 			i.completion = snapshot
 			i.completionMu.Unlock()
+		} else {
+			refreshErr = errors.Join(refreshErr, inventorySourceFailure("completion_projection", validationErr))
 		}
 	}
 	if sourceErr == nil && i.onMachines != nil {
 		i.onMachines(ctx, append([]api.UserMachine(nil), machines...))
 	}
-	return sourceErr
+	return refreshErr
 }
 
 func (i *Inventory) Completions(context.Context) (localapi.CompletionSnapshot, error) {
@@ -241,7 +275,7 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 		} else if generation > 0 && !machine.SSHLocalReady {
 			code := machine.SSHLocalCode
 			if code == "" {
-				code = "ssh_key_rejected"
+				code = "ssh_target_not_ready"
 			}
 			status.Health = []localapi.HealthItem{{Code: code, Severity: "warning", Title: "Managed SSH is not ready", Recovery: managedSSHDoctorRecovery, ETag: code}}
 		} else if generation > 0 && machine.SSHAuthority.TargetGeneration != generation {

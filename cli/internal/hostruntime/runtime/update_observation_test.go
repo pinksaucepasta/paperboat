@@ -3,6 +3,8 @@
 package runtime
 
 import (
+	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"testing"
 	"time"
 
@@ -12,6 +14,9 @@ import (
 )
 
 func TestRuntimeUpdateObservationUsesPlatformChannelAndFences(t *testing.T) {
+	prior := buildinfo.Distribution
+	buildinfo.Distribution = "official"
+	t.Cleanup(func() { buildinfo.Distribution = prior })
 	now := time.Now().UTC()
 	sender := &runtimeObservationSender{reporterVersion: "2026.08.20.12", installationGeneration: 4, workerGeneration: 9, osBootID: "boot-1"}
 	observation := sender.updateObservation(now, &availability.Observation{UpdateHealth: "healthy", UpdateRollbacks: 2})
@@ -65,5 +70,29 @@ func TestRuntimeUpdateObservationReportsWithoutAvailabilityService(t *testing.T)
 	}
 	if observation.State != "healthy" || observation.RollbackCount != 0 || observation.CurrentVersion != sender.reporterVersion {
 		t.Fatalf("client observation=%+v", observation)
+	}
+}
+
+func TestRuntimeUpdateObservationSeparatesCustomChannel(t *testing.T) {
+	prior := buildinfo.Distribution
+	t.Cleanup(func() { buildinfo.Distribution = prior })
+	sender := &runtimeObservationSender{reporterVersion: "2026.08.20.12", installationGeneration: 4, workerGeneration: 9, osBootID: "boot-1"}
+	for _, distribution := range []string{"custom", "official"} {
+		buildinfo.Distribution = distribution
+		want := "custom"
+		if distribution == "official" {
+			want = "stable"
+		}
+		for _, scenario := range []struct {
+			status *updated.ControlResponse
+			err    error
+		}{
+			{}, {err: errors.New("unavailable")}, {status: &updated.ControlResponse{Status: "ok", Version: "2026.08.20.13"}}, {status: &updated.ControlResponse{Status: "error", Version: "2026.08.20.13"}},
+		} {
+			observation := sender.updateObservationFrom(time.Now(), nil, scenario.status, scenario.err)
+			if observation == nil || observation.Channel != want {
+				t.Fatalf("distribution %s: %+v", distribution, observation)
+			}
+		}
 	}
 }

@@ -63,7 +63,7 @@ func PrepareWindowsNativeInstall(ctx context.Context, ownerSID string) (*hostins
 	if !errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return nil, nil, err
 	}
-	updateConfig := WindowsConfig{OwnerSID: ownerSID, StateRoot: layout.UpdateStateRoot, SetupMode: config.SetupMode}
+	updateConfig := WindowsConfig{OwnerSID: ownerSID, StateRoot: layout.UpdateStateRoot}
 	journal, err := loadWindowsActivationJournal(updateConfig)
 	if errors.Is(err, os.ErrNotExist) {
 		if err := config.Source.Verify(layout.Binary); err == nil {

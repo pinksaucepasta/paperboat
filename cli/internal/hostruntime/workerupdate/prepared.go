@@ -22,12 +22,13 @@ var (
 // PreparedCandidate identifies the signed artifact, never its private staging path
 // or the executable extracted from a signed macOS package.
 type PreparedCandidate struct {
-	ID           string `json:"id"`
-	Version      string `json:"version"`
-	Platform     string `json:"platform"`
-	Architecture string `json:"architecture"`
-	SHA256       string `json:"sha256"`
-	Length       int64  `json:"length"`
+	ID               string `json:"id"`
+	Version          string `json:"version"`
+	Platform         string `json:"platform"`
+	Architecture     string `json:"architecture"`
+	SHA256           string `json:"sha256"`
+	Length           int64  `json:"length"`
+	OwnerMaintenance bool   `json:"owner_maintenance"`
 }
 
 // PreparedCandidateForRelease binds approval to all verified release metadata,
@@ -41,11 +42,11 @@ func PreparedCandidateForRelease(release Release) (PreparedCandidate, error) {
 		return PreparedCandidate{}, ErrInvalidRelease
 	}
 	digest := sha256.Sum256(raw)
-	return PreparedCandidate{ID: hex.EncodeToString(digest[:]), Version: release.Version, Platform: release.Platform, Architecture: release.Architecture, SHA256: release.SHA256, Length: release.Length}, nil
+	return PreparedCandidate{ID: hex.EncodeToString(digest[:]), Version: release.Version, Platform: release.Platform, Architecture: release.Architecture, SHA256: release.SHA256, Length: release.Length, OwnerMaintenance: release.SupervisorMaintenance}, nil
 }
 
 func candidateFromJournal(j updateflow.Journal) PreparedCandidate {
-	return PreparedCandidate{ID: j.CandidateID, Version: j.CandidateVersion, Platform: j.ArtifactPlatform, Architecture: j.ArtifactArchitecture, SHA256: j.ArtifactDigest, Length: j.ArtifactLength}
+	return PreparedCandidate{ID: j.CandidateID, Version: j.CandidateVersion, Platform: j.ArtifactPlatform, Architecture: j.ArtifactArchitecture, SHA256: j.ArtifactDigest, Length: j.ArtifactLength, OwnerMaintenance: j.SupervisorMaintenance}
 }
 
 // Prepare downloads and verifies an artifact but never launches it or disturbs

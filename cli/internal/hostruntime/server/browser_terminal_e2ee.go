@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/pinksaucepasta/paperboat/internal/bandwidth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/endpointidentity"
 )
@@ -58,6 +59,8 @@ type BrowserTerminalCredentialKey interface {
 }
 
 type BrowserTerminalWebSocketHandlerConfig struct {
+	CompareOnly     bool
+	Bandwidth       *bandwidth.Recorder
 	Server          *Server
 	Authorizer      AuthorizerFactory
 	Identity        BrowserTerminalIdentityProvider
@@ -103,23 +106,45 @@ func (h *BrowserTerminalWebSocketHandler) ServeHTTP(writer http.ResponseWriter, 
 		http.Error(writer, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
-	keyAuthorizer, ok := authorizer.(BrowserTerminalCredentialKey)
-	if !ok {
-		http.Error(writer, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+	var pinnedDigest string
+	if h.config.CompareOnly {
+		keyAuthorizer, ok := authorizer.(interface {
+			BrowserConfigComparePublicKeySHA256(context.Context) (string, error)
+		})
+		if !ok {
+			http.Error(writer, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+			return
+		}
+		pinnedDigest, err = keyAuthorizer.BrowserConfigComparePublicKeySHA256(request.Context())
+	} else {
+		keyAuthorizer, ok := authorizer.(BrowserTerminalCredentialKey)
+		if !ok {
+			http.Error(writer, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+			return
+		}
+		pinnedDigest, err = keyAuthorizer.BrowserTerminalPublicKeySHA256(request.Context())
+	}
+	if err != nil {
+		if reportAuthorizationFailure(request.Context(), err) {
+			http.Error(writer, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+		} else {
+			http.Error(writer, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		}
 		return
 	}
-	pinnedDigest, err := keyAuthorizer.BrowserTerminalPublicKeySHA256(request.Context())
-	if err != nil || !validBrowserTerminalDigest(pinnedDigest) {
+	if !validBrowserTerminalDigest(pinnedDigest) {
 		http.Error(writer, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
 	identity, err := h.config.Identity(request.Context())
 	if err != nil {
+		reportAuthorizationFailure(request.Context(), err)
 		http.Error(writer, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
 	identityEnvelope, err := encodeBrowserTerminalIdentityEnvelope(identity)
 	if err != nil {
+		reportAuthorizationFailure(request.Context(), err)
 		http.Error(writer, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
@@ -147,6 +172,7 @@ func (h *BrowserTerminalWebSocketHandler) ServeHTTP(writer http.ResponseWriter, 
 	err = connection.Write(identityCtx, websocket.MessageBinary, identityEnvelope)
 	cancelIdentity()
 	if err != nil {
+		reportConsumedServeFailure(request.Context(), errors.Join(err, request.Context().Err()))
 		_ = connection.Close(websocket.StatusInternalError, "identity_unavailable")
 		return
 	}
@@ -173,8 +199,37 @@ func (h *BrowserTerminalWebSocketHandler) ServeHTTP(writer http.ResponseWriter, 
 		return
 	}
 
-	application := newBrowserTerminalApplicationConnection(request.Context(), connection, tlsConnection)
-	_ = h.config.Server.ServeAuthenticated(application, authorizer)
+	var plaintext net.Conn = tlsConnection
+	if h.config.Bandwidth != nil {
+		capability, consumer := "terminal.v1", "terminal"
+		if h.config.CompareOnly {
+			capability, consumer = "config.compare.v1", "config_compare"
+		}
+		authorization, authorizeErr := authorizer.Authorize(request.Context(), protocol.Frame{Capability: capability})
+		bindingID := authorization.BrowserAttachmentID
+		if h.config.CompareOnly {
+			bindingID = authorization.BrowserAttachmentID
+		}
+		if authorizeErr != nil || bindingID == "" || !h.config.CompareOnly && !authorization.BrowserTerminal {
+			authorityUnavailable := reportAuthorizationFailure(request.Context(), authorizeErr)
+			if closer, ok := authorizer.(AuthorizationCloser); ok {
+				closer.CloseAuthorization()
+			}
+			_ = tlsConnection.SetWriteDeadline(time.Now().Add(browserTerminalCloseTimeout))
+			_ = tlsConnection.Close()
+			if authorityUnavailable {
+				_ = connection.Close(websocket.StatusInternalError, "authorization_unavailable")
+			} else {
+				_ = connection.Close(websocket.StatusPolicyViolation, "authorization_required")
+			}
+			return
+		}
+		plaintext = h.config.Bandwidth.Wrap(tlsConnection, bandwidth.Binding{AccessSessionID: bindingID, StreamID: bindingID, Consumer: consumer}, func(string) bandwidth.Path { return bandwidth.Path{Mode: "edge"} })
+	}
+	application := newBrowserTerminalApplicationConnection(request.Context(), connection, plaintext)
+	if err := h.config.Server.ServeAuthenticated(application, authorizer); err != nil {
+		reportConsumedServeFailure(request.Context(), err)
+	}
 }
 
 type browserTerminalIdentityDocument struct {
@@ -381,7 +436,7 @@ func (a browserTerminalAddr) String() string  { return string(a) }
 
 type browserTerminalApplicationConnection struct {
 	connection *websocket.Conn
-	stream     *tls.Conn
+	stream     net.Conn
 	ctx        context.Context
 	cancel     context.CancelFunc
 	readMu     sync.Mutex
@@ -390,7 +445,7 @@ type browserTerminalApplicationConnection struct {
 	revoked    atomic.Bool
 }
 
-func newBrowserTerminalApplicationConnection(parent context.Context, websocketConnection *websocket.Conn, tlsConnection *tls.Conn) *browserTerminalApplicationConnection {
+func newBrowserTerminalApplicationConnection(parent context.Context, websocketConnection *websocket.Conn, tlsConnection net.Conn) *browserTerminalApplicationConnection {
 	ctx, cancel := context.WithCancel(parent)
 	connection := &browserTerminalApplicationConnection{connection: websocketConnection, stream: tlsConnection, ctx: ctx, cancel: cancel}
 	context.AfterFunc(ctx, func() { connection.revoked.Store(true) })

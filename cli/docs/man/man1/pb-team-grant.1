@@ -16,7 +16,7 @@ Set or revoke an explicit resource permission
 Set or revoke an explicit ENV, preview, or tunnel permission for one account and resource. --active selects grant state, and --generation rejects stale team edits.
 
 .PP
-Teams use explicit membership and resource grants. Membership alone does not grant device use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
 
 .PP
 JSON output is supported with --json.
@@ -50,6 +50,10 @@ JSON output is supported with --json.
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

@@ -3,6 +3,7 @@ package daemoncmd
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -17,12 +18,13 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/controlsync"
 	pbSync "github.com/pinksaucepasta/paperboat/internal/controlsync/proto"
 	"github.com/pinksaucepasta/paperboat/internal/daemonrpc"
-	"github.com/pinksaucepasta/paperboat/internal/deviceguard"
-	"github.com/pinksaucepasta/paperboat/internal/deviceloopback"
 	"github.com/pinksaucepasta/paperboat/internal/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/internal/machineguard"
+	"github.com/pinksaucepasta/paperboat/internal/machineloopback"
 	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 	"google.golang.org/protobuf/proto"
 )
@@ -35,20 +37,20 @@ type guardedNameClient interface {
 }
 
 type CoordinatorConfig struct {
-	SocketAddress      string
-	SyncAddress        string
-	DeviceID           string
-	Token              func(context.Context) (string, error)
-	TLSConfig          *tls.Config
-	Insecure           bool
-	DNSSuffix          string
-	DeviceLoopbackCIDR string
-	NameClient         guardedNameClient
-	ConnectNameClient  func(context.Context) (guardedNameClient, error)
-	DialDevice         func(context.Context, string, int) (net.Conn, error)
-	ApprovePeer        func(context.Context, string, bool) error
-	ReconcileTimeout   time.Duration
-	IssueCertificate   func(context.Context, guardedNameClient, string) (tls.Certificate, error)
+	LocalAccess          config.LocalAccessConfig
+	SocketAddress        string
+	SyncAddress          string
+	MachineID            string
+	Token                func(context.Context) (string, error)
+	TLSConfig            *tls.Config
+	Insecure             bool
+	NameClient           guardedNameClient
+	ConnectNameClient    func(context.Context) (guardedNameClient, error)
+	DialMachine          func(context.Context, string, int) (net.Conn, error)
+	ApprovePeer          func(context.Context, string, bool) error
+	ReconcileTimeout     time.Duration
+	ReportReconcileError func(error)
+	IssueCertificate     func(context.Context, string, string, int) (tls.Certificate, error)
 }
 
 type guardedRoute struct {
@@ -145,6 +147,8 @@ type Coordinator struct {
 	webRoutes          map[string]guardedWebRoute
 	connections        chan struct{}
 	wg                 sync.WaitGroup
+	snapshotMu         sync.Mutex
+	reconcileErr       error
 	inventoryMu        sync.Mutex
 	inventoryRevision  uint64
 	inventoryTimer     *time.Timer
@@ -152,36 +156,23 @@ type Coordinator struct {
 }
 
 func NewCoordinator(cfg CoordinatorConfig) (*Coordinator, error) {
-	if strings.TrimSpace(cfg.DeviceLoopbackCIDR) == "" {
-		cfg.DeviceLoopbackCIDR = deviceloopback.DefaultCIDR
-	}
-	loopbackCIDR, err := deviceloopback.NormalizeCIDR(cfg.DeviceLoopbackCIDR)
+	domain, err := splitdns.NormalizeBrowserDomain(cfg.LocalAccess.Domain)
 	if err != nil {
-		return nil, fmt.Errorf("device loopback CIDR: %w", err)
+		return nil, err
 	}
-	cfg.DeviceLoopbackCIDR = loopbackCIDR
+	cfg.LocalAccess.Domain = domain
 	if cfg.SocketAddress == "" {
 		cfg.SocketAddress = daemonrpc.DefaultSocketAddress()
 	}
-	if cfg.SyncAddress != "" && (cfg.DeviceID == "" || cfg.Token == nil) {
-		return nil, errors.New("control sync requires device identity and fresh authenticated credentials")
+	if cfg.SyncAddress != "" && (cfg.MachineID == "" || cfg.Token == nil) {
+		return nil, errors.New("control sync requires machine identity and fresh authenticated credentials")
 	}
 	if cfg.NameClient != nil && cfg.ConnectNameClient != nil {
 		return nil, errors.New("configure either an injected name client or a reconnect factory")
 	}
 	hasNames := cfg.NameClient != nil || cfg.ConnectNameClient != nil
-	if hasNames != (cfg.DialDevice != nil) {
-		return nil, errors.New("guarded names require an authenticated device dialer")
-	}
-	if cfg.DNSSuffix == "" {
-		cfg.DNSSuffix = "pprbt"
-	}
-	if hasNames {
-		clean, err := splitdns.ValidateSuffix(cfg.DNSSuffix)
-		if err != nil {
-			return nil, err
-		}
-		cfg.DNSSuffix = clean
+	if hasNames != (cfg.DialMachine != nil) {
+		return nil, errors.New("guarded names require an authenticated machine dialer")
 	}
 	if cfg.ReconcileTimeout <= 0 {
 		cfg.ReconcileTimeout = controlsync.SnapshotTimeout
@@ -213,14 +204,14 @@ func (c *Coordinator) Start(parent context.Context) error {
 		cancel()
 		if err != nil {
 			c.stopStarted()
-			return fmt.Errorf("connect protected device-name service: %w", err)
+			return fmt.Errorf("connect protected machine-name service: %w", err)
 		}
 		c.mu.Lock()
 		c.nameClient = client
 		c.mu.Unlock()
 	}
 	if c.cfg.SyncAddress != "" {
-		client := controlsync.NewClient(controlsync.ClientConfig{ServerAddr: c.cfg.SyncAddress, DeviceID: c.cfg.DeviceID, Token: c.cfg.Token, TLSConfig: c.cfg.TLSConfig, Insecure: c.cfg.Insecure, OnPeerUpdate: c.applySnapshot, OnError: func(err error) {
+		client := controlsync.NewClient(controlsync.ClientConfig{ServerAddr: c.cfg.SyncAddress, MachineID: c.cfg.MachineID, Token: c.cfg.Token, TLSConfig: c.cfg.TLSConfig, Insecure: c.cfg.Insecure, OnPeerUpdate: c.applySnapshot, OnError: func(err error) {
 			select {
 			case c.errors <- err:
 			default:
@@ -249,17 +240,26 @@ func (c *Coordinator) Start(parent context.Context) error {
 
 // ApplyMachines projects authenticated, unexpired service discovery when the
 // optional streaming topology endpoint is not configured.
-func (c *Coordinator) ApplyMachines(machines []api.UserMachine, services []api.DeviceServicesDevice) {
-	if c == nil || c.cfg.SyncAddress != "" {
-		return
+func (c *Coordinator) ApplyMachines(ctx context.Context, machines []api.UserMachine, services []api.MachineServicesMachine) error {
+	if c == nil {
+		return errors.New("local access coordinator is unavailable")
+	}
+	if c.cfg.SyncAddress != "" {
+		return c.ReconcileStatus(ctx)
 	}
 	c.inventoryMu.Lock()
 	defer c.inventoryMu.Unlock()
 	c.mu.Lock()
 	parent := c.ctx
 	c.mu.Unlock()
-	if parent == nil || parent.Err() != nil {
-		return
+	if parent == nil {
+		return errors.New("local access coordinator is not running")
+	}
+	if parent.Err() != nil {
+		return parent.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if c.inventoryTimer != nil {
 		c.inventoryTimer.Stop()
@@ -267,7 +267,7 @@ func (c *Coordinator) ApplyMachines(machines []api.UserMachine, services []api.D
 	if c.stopInventoryTimer != nil {
 		c.stopInventoryTimer()
 	}
-	byID := make(map[string]api.DeviceServicesDevice, len(services))
+	byID := make(map[string]api.MachineServicesMachine, len(services))
 	var expiry time.Time
 	for _, service := range services {
 		if service.ExpiresAt.After(time.Now()) {
@@ -296,9 +296,11 @@ func (c *Coordinator) ApplyMachines(machines []api.UserMachine, services []api.D
 	}
 	c.inventoryRevision++
 	revision := c.inventoryRevision
-	c.applySnapshot(peers, revision)
+	if err := c.reconcileSnapshot(ctx, peers, revision); err != nil {
+		return err
+	}
 	if expiry.IsZero() {
-		return
+		return nil
 	}
 	c.inventoryTimer = time.AfterFunc(time.Until(expiry), func() {
 		c.inventoryMu.Lock()
@@ -309,30 +311,78 @@ func (c *Coordinator) ApplyMachines(machines []api.UserMachine, services []api.D
 	})
 	timer := c.inventoryTimer
 	c.stopInventoryTimer = context.AfterFunc(parent, func() { timer.Stop() })
+	return nil
+}
+
+func (c *Coordinator) reportReconcileError(err error) {
+	if c.cfg.ReportReconcileError != nil {
+		c.cfg.ReportReconcileError(err)
+		return
+	}
+	diagnosticlog.TryInfo("local machine access reconciliation failed", "error", err)
 }
 
 func (c *Coordinator) applySnapshot(peers []*pbSync.PeerUpdate, revision uint64) {
-	localPeers, err := mapPeerSnapshot(peers, c.cfg.DeviceLoopbackCIDR)
-	if err != nil {
-		diagnosticlog.TryInfo("device snapshot rejected", "revision", revision, "error", err)
-		c.rpcBackend.ApplyPeerUpdates(nil, revision, nil)
-		return
-	}
 	c.mu.Lock()
 	parent := c.ctx
+	c.mu.Unlock()
+	if parent == nil {
+		parent = context.Background()
+	}
+	_ = c.reconcileSnapshot(parent, peers, revision)
+}
+
+func (c *Coordinator) reconcileSnapshot(ctx context.Context, peers []*pbSync.PeerUpdate, revision uint64) error {
+	c.snapshotMu.Lock()
+	defer c.snapshotMu.Unlock()
+	err := c.applySnapshotLocked(ctx, peers, revision)
+	c.reconcileErr = err
+	return err
+}
+
+// ReconcileStatus reports the latest streaming topology reconciliation. The
+// client's Start applies its first snapshot synchronously before readiness.
+func (c *Coordinator) ReconcileStatus(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	c.snapshotMu.Lock()
+	defer c.snapshotMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return c.reconcileErr
+}
+
+func (c *Coordinator) applySnapshotLocked(parent context.Context, peers []*pbSync.PeerUpdate, revision uint64) error {
+	localPeers, err := mapPeerSnapshot(peers, machineloopback.DefaultCIDR)
+	if err != nil {
+		c.mu.Lock()
+		guarded := c.nameClient != nil || c.cfg.ConnectNameClient != nil
+		c.mu.Unlock()
+		if guarded && parent != nil {
+			ctx, cancel := context.WithTimeout(parent, c.cfg.ReconcileTimeout)
+			_ = c.replaceGuardedRoutes(ctx, nil)
+			cancel()
+		}
+		c.reportReconcileError(fmt.Errorf("machine snapshot rejected: %w", err))
+		c.rpcBackend.ApplyPeerUpdates(nil, revision, nil)
+		return err
+	}
+	c.mu.Lock()
 	namesEnabled := c.nameClient != nil || c.cfg.ConnectNameClient != nil
 	c.mu.Unlock()
 	if namesEnabled {
 		if parent == nil {
-			return
+			return errors.New("local access coordinator is not running")
 		}
 		ctx, cancel := context.WithTimeout(parent, c.cfg.ReconcileTimeout)
 		err := c.replaceGuardedRoutes(ctx, localPeers)
 		cancel()
 		if err != nil {
-			diagnosticlog.TryInfo("protected device-name snapshot withdrawn", "revision", revision, "error", err)
+			c.reportReconcileError(fmt.Errorf("local machine access withdrawn; retry after repairing the machine guard or browser trust: %w", err))
 			c.rpcBackend.ApplyPeerUpdates(nil, revision, nil)
-			return
+			return err
 		}
 		// RPC status must describe acquired native listeners, while browser URLs
 		// can still offer an independently authorized route to an occupied port.
@@ -359,11 +409,12 @@ func (c *Coordinator) applySnapshot(peers []*pbSync.PeerUpdate, revision uint64)
 		c.mu.Unlock()
 	}
 	c.rpcBackend.ApplyPeerUpdates(localPeers, revision, c.BrowserURLs())
+	return nil
 }
 
 func mapPeerSnapshot(peers []*pbSync.PeerUpdate, cidr string) ([]*pbSync.PeerUpdate, error) {
 	if cidr == "" {
-		cidr = deviceloopback.DefaultCIDR
+		cidr = machineloopback.DefaultCIDR
 	}
 	mapped := make([]*pbSync.PeerUpdate, len(peers))
 	for index, peer := range peers {
@@ -376,7 +427,7 @@ func mapPeerSnapshot(peers []*pbSync.PeerUpdate, cidr string) ([]*pbSync.PeerUpd
 			if err != nil {
 				return nil, fmt.Errorf("peer %q has an invalid assigned address", peer.GetPeerId())
 			}
-			local, err := deviceloopback.MapCanonical(canonical, cidr)
+			local, err := machineloopback.MapCanonical(canonical, cidr)
 			if err != nil {
 				return nil, fmt.Errorf("peer %q assigned address: %w", peer.GetPeerId(), err)
 			}
@@ -396,20 +447,14 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.
 	nameClient := c.nameClient
 	if nameClient == nil {
 		if c.cfg.ConnectNameClient == nil {
-			return errors.New("protected device-name service is unavailable")
+			return errors.New("protected machine-name service is unavailable")
 		}
 		connected, err := c.cfg.ConnectNameClient(ctx)
 		if err != nil {
-			return fmt.Errorf("connect protected device-name service: %w", err)
+			return fmt.Errorf("connect protected machine-name service: %w", err)
 		}
 		c.nameClient = connected
 		nameClient = connected
-	}
-	var issueCertificate func(context.Context, string) (tls.Certificate, error)
-	if c.cfg.IssueCertificate != nil {
-		issueCertificate = func(certificateCtx context.Context, hostname string) (tls.Certificate, error) {
-			return c.cfg.IssueCertificate(certificateCtx, nameClient, hostname)
-		}
 	}
 	wanted := make(map[string]*guardedRoute)
 	wantedWeb := make(map[string]guardedWebRoute)
@@ -426,19 +471,30 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.
 		if err != nil {
 			continue
 		}
-		hostname := strings.ToLower(alias) + "." + c.cfg.DNSSuffix
+		hostname := strings.ToLower(alias) + "." + splitdns.BrowserSuffix
 		if prior, exists := names[hostname]; exists && prior != ip {
 			c.resetNameGenerationLocked(ctx)
-			return errors.New("control snapshot contains an ambiguous device alias")
+			return errors.New("control snapshot contains an ambiguous machine alias")
 		}
 		ports := peer.GetExportedPorts()
 		if len(ports) == 0 {
 			continue
 		}
-		if issueCertificate != nil {
+		_, localCertificates := nameClient.(interface {
+			Certificate(context.Context, string) (machineguard.CertificateBundle, error)
+		})
+		browserReady := c.cfg.IssueCertificate != nil || localCertificates
+		if browserReady {
+			proxyPort := 80
+			for _, machineProxy := range c.cfg.LocalAccess.MachineProxies {
+				if machineProxy.MachineAlias == strings.ToLower(alias) {
+					proxyPort = int(machineProxy.Port)
+					break
+				}
+			}
 			for _, raw := range ports {
 				port := int(raw)
-				name, err := splitdns.BrowserHostname(alias, port, splitdns.BrowserSuffix)
+				name, err := splitdns.BrowserHostname(alias, port, c.cfg.LocalAccess.Domain)
 				if err != nil {
 					c.resetNameGenerationLocked(ctx)
 					return err
@@ -449,6 +505,61 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.
 				}
 				browserRoutes[name] = splitdns.BrowserRoute{Address: ip, Port: port, MachineID: peer.GetPeerId()}
 				aliases[name] = splitdns.BrowserGatewayHostname
+				if len(aliases) > machineguard.MaxBrowserAliases {
+					c.resetNameGenerationLocked(ctx)
+					return fmt.Errorf("local browser routes exceed the limit of %d; remove service aliases or exported ports", machineguard.MaxBrowserAliases)
+				}
+				if port == proxyPort {
+					pattern, err := splitdns.BrowserWildcardPattern(strings.ToLower(alias), c.cfg.LocalAccess.Domain)
+					if err != nil {
+						c.resetNameGenerationLocked(ctx)
+						return err
+					}
+					browserRoutes[pattern] = browserRoutes[name]
+					aliases[pattern] = name
+					if len(aliases) > machineguard.MaxBrowserAliases {
+						c.resetNameGenerationLocked(ctx)
+						return errors.New("local browser routes exceed the alias limit")
+					}
+				}
+				for _, serviceAlias := range c.cfg.LocalAccess.ServiceAliases {
+					if serviceAlias.MachineAlias != strings.ToLower(alias) || int(serviceAlias.Port) != port {
+						continue
+					}
+					aliasName := serviceAlias.Name + "." + strings.ToLower(alias) + "." + c.cfg.LocalAccess.Domain
+					_, label, err := splitdns.ParseBrowserHostname(aliasName, c.cfg.LocalAccess.Domain)
+					if err != nil || label == "" {
+						c.resetNameGenerationLocked(ctx)
+						return errors.New("invalid configured browser alias")
+					}
+					if _, exists := browserRoutes[aliasName]; exists {
+						c.resetNameGenerationLocked(ctx)
+						return errors.New("ambiguous browser service alias")
+					}
+					browserRoutes[aliasName] = browserRoutes[name]
+					aliases[aliasName] = name
+					if len(aliases) > machineguard.MaxBrowserAliases {
+						c.resetNameGenerationLocked(ctx)
+						return fmt.Errorf("local browser routes exceed the limit of %d; remove service aliases or exported ports", machineguard.MaxBrowserAliases)
+					}
+				}
+			}
+
+			for _, serviceAlias := range c.cfg.LocalAccess.ServiceAliases {
+				if serviceAlias.MachineAlias != strings.ToLower(alias) {
+					continue
+				}
+				aliasName := serviceAlias.Name + "." + strings.ToLower(alias) + "." + c.cfg.LocalAccess.Domain
+				if _, active := browserRoutes[aliasName]; active {
+					continue
+				}
+				if _, proxy := aliases["*."+strings.ToLower(alias)+"."+c.cfg.LocalAccess.Domain]; proxy {
+					aliases[aliasName] = ""
+					if len(aliases) > machineguard.MaxBrowserAliases {
+						c.resetNameGenerationLocked(ctx)
+						return errors.New("local browser routes exceed the alias limit")
+					}
+				}
 			}
 		}
 		for _, raw := range ports {
@@ -463,7 +574,7 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.
 			}
 			listener, err := nameClient.Acquire(ctx, hostname, ip, port)
 			if err != nil {
-				if errors.Is(err, deviceguard.ErrPortInUse) {
+				if errors.Is(err, machineguard.ErrPortInUse) {
 					// The guard's default deny remains in force without a lease.
 					// Keep independent routes and retry this port on reconciliation.
 					conflictedPorts++
@@ -484,10 +595,10 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.
 		}
 	}
 	if conflictedPorts > 0 {
-		diagnosticlog.TryInfo("protected device ports remain blocked by local listener conflicts", "count", conflictedPorts, "first_port", firstConflictedPort)
+		diagnosticlog.TryInfo("protected machine ports remain blocked by local listener conflicts", "count", conflictedPorts, "first_port", firstConflictedPort)
 	}
 	if len(browserRoutes) > 0 {
-		web, err := c.prepareBrowserGatewayLocked(ctx, nameClient, browserRoutes, aliases, issueCertificate)
+		web, err := c.prepareBrowserGatewayLocked(ctx, nameClient, browserRoutes, aliases)
 		if err != nil {
 			c.resetNameGenerationLocked(ctx)
 			return err
@@ -537,7 +648,7 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*pbSync.
 
 // prepareBrowserGatewayLocked binds the public wildcard address once. Every
 // dial is bound to an exact route from the authenticated service snapshot.
-func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client guardedNameClient, routes map[string]splitdns.BrowserRoute, aliases map[string]string, issue func(context.Context, string) (tls.Certificate, error)) (guardedWebRoute, error) {
+func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client guardedNameClient, routes map[string]splitdns.BrowserRoute, aliases map[string]string) (guardedWebRoute, error) {
 	base := splitdns.BrowserGatewayHostname
 	if old, ok := c.webRoutes[base]; ok {
 		if maps.Equal(old.browserRoutes, routes) {
@@ -575,32 +686,53 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 			return guardedWebRoute{}, errors.New("ambiguous browser service address")
 		}
 		byAddress[address] = route.MachineID
-		if _, err := issue(ctx, name); err != nil {
+		if strings.HasPrefix(name, "*.") {
+			continue
+		}
+		if _, err := c.issueBrowserCertificate(ctx, client, name, route.MachineID, route.Port); err != nil {
 			closeListeners()
 			return guardedWebRoute{}, err
 		}
 	}
-	revocations := func(ctx context.Context, path string) ([]byte, []byte, error) {
-		certificates, ok := client.(interface {
-			Certificate(context.Context, string) (deviceguard.CertificateBundle, error)
+	deniedHosts := make(map[string]bool)
+	for name, target := range aliases {
+		if target == "" {
+			deniedHosts[name] = true
+		}
+	}
+	proxy, err := splitdns.NewProxy(splitdns.ProxyConfig{DeniedHosts: deniedHosts, Domain: c.cfg.LocalAccess.Domain, Routes: routes, IssueCertificate: func(certCtx context.Context, hostname string) (tls.Certificate, error) {
+		if deniedHosts[hostname] {
+			return tls.Certificate{}, errors.New("configured browser alias destination is unavailable")
+		}
+		route, ok := browserRouteForHostDomain(routes, hostname, c.cfg.LocalAccess.Domain)
+		if !ok {
+			return tls.Certificate{}, errors.New("unregistered browser certificate route")
+		}
+		return c.issueBrowserCertificate(certCtx, client, hostname, route.MachineID, route.Port)
+	}, RevocationList: func(crlCtx context.Context, _ string) ([]byte, []byte, error) {
+		issuer, ok := client.(interface {
+			Certificate(context.Context, string) (machineguard.CertificateBundle, error)
 		})
 		if !ok {
-			return nil, nil, errors.New("protected certificate status is unavailable")
+			return nil, nil, errors.New("local certificate status service is unavailable")
 		}
-		for hostname := range routes {
-			bundle, err := certificates.Certificate(ctx, hostname)
+		// This closure contains only the proxy's current registered routes.
+		for name := range routes {
+			if strings.HasPrefix(name, "*.") {
+				continue
+			}
+			bundle, err := issuer.Certificate(crlCtx, name)
 			if err != nil {
 				return nil, nil, err
 			}
-			block, _ := pem.Decode(bundle.RootCAPEM)
-			if block == nil || splitdns.CRLPath(block.Bytes) != path {
-				return nil, nil, errors.New("unknown local certificate issuer")
+			root, rest := pem.Decode(bundle.RootCAPEM)
+			if root == nil || root.Type != "CERTIFICATE" || len(strings.TrimSpace(string(rest))) != 0 {
+				return nil, nil, errors.New("invalid local certificate issuer")
 			}
-			return block.Bytes, bundle.RevocationListDER, nil
+			return root.Bytes, bundle.RevocationListDER, nil
 		}
-		return nil, nil, errors.New("browser certificate routes are withdrawn")
-	}
-	proxy, err := splitdns.NewProxy(splitdns.ProxyConfig{Routes: routes, IssueCertificate: issue, RevocationList: revocations, Suffix: splitdns.BrowserSuffix, DialContext: func(ctx context.Context, _, address string) (net.Conn, error) {
+		return nil, nil, errors.New("no active browser routes")
+	}, DialContext: func(ctx context.Context, _, address string) (net.Conn, error) {
 		machineID, ok := byAddress[address]
 		if !ok {
 			return nil, errors.New("unregistered browser service address")
@@ -613,7 +745,7 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 		if err != nil {
 			return nil, err
 		}
-		return c.cfg.DialDevice(ctx, machineID, port)
+		return c.cfg.DialMachine(ctx, machineID, port)
 	}})
 	if err == nil {
 		err = proxy.StartListeners(&limitedListener{Listener: httpListener, permits: c.connections}, &limitedListener{Listener: httpsListener, permits: c.connections})
@@ -695,7 +827,7 @@ func (c *Coordinator) serveRoute(route *guardedRoute) {
 
 func (c *Coordinator) forward(ctx context.Context, local net.Conn, machineID string, port int) {
 	defer local.Close()
-	remote, err := c.cfg.DialDevice(ctx, machineID, port)
+	remote, err := c.cfg.DialMachine(ctx, machineID, port)
 	if err != nil {
 		return
 	}
@@ -799,6 +931,10 @@ func (c *Coordinator) BrowserURLs() map[string]map[int32]string {
 	result := make(map[string]map[int32]string)
 	for _, web := range c.webRoutes {
 		for host, route := range web.browserRoutes {
+			_, label, err := splitdns.ParseBrowserHostname(host, c.cfg.LocalAccess.Domain)
+			if err != nil || label != strconv.Itoa(route.Port) {
+				continue
+			}
 			if result[route.MachineID] == nil {
 				result[route.MachineID] = make(map[int32]string)
 			}
@@ -806,4 +942,66 @@ func (c *Coordinator) BrowserURLs() map[string]map[int32]string {
 		}
 	}
 	return result
+}
+
+// browserRouteForHost admits a base machine URL only while one exact port route
+// for that machine is registered. The base page never selects a forwarding port.
+func browserRouteForHost(routes map[string]splitdns.BrowserRoute, host string) (splitdns.BrowserRoute, bool) {
+	return browserRouteForHostDomain(routes, host, splitdns.BrowserSuffix)
+}
+
+func browserRouteForHostDomain(routes map[string]splitdns.BrowserRoute, host, domain string) (splitdns.BrowserRoute, bool) {
+	if route, ok := splitdns.ResolveBrowserRoute(routes, host, domain); ok {
+		return route, true
+	}
+	for name, route := range routes {
+		if strings.HasPrefix(name, "*.") {
+			continue
+		}
+		if _, base, found := strings.Cut(name, "."); found && base == host {
+			return route, true
+		}
+	}
+	return splitdns.BrowserRoute{}, false
+}
+
+func (c *Coordinator) issueBrowserCertificate(ctx context.Context, client guardedNameClient, hostname, machineID string, port int) (tls.Certificate, error) {
+	if c.cfg.IssueCertificate != nil {
+		return c.cfg.IssueCertificate(ctx, hostname, machineID, port)
+	}
+	issuer, ok := client.(interface {
+		Certificate(context.Context, string) (machineguard.CertificateBundle, error)
+	})
+	if !ok {
+		return tls.Certificate{}, errors.New("local browser certificate service is unavailable; reinstall Paperboat")
+	}
+	bundle, err := issuer.Certificate(ctx, hostname)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	rootBlock, rest := pem.Decode(bundle.RootCAPEM)
+	if rootBlock == nil || rootBlock.Type != "CERTIFICATE" || len(strings.TrimSpace(string(rest))) != 0 {
+		return tls.Certificate{}, errors.New("invalid local certificate issuer")
+	}
+	root, err := x509.ParseCertificate(rootBlock.Bytes)
+	if err != nil || !root.IsCA || !root.PermittedDNSDomainsCritical || len(root.PermittedDNSDomains) != 1 || root.PermittedDNSDomains[0] != "."+c.cfg.LocalAccess.Domain {
+		return tls.Certificate{}, errors.New("local certificate issuer must be namespace constrained")
+	}
+	cert, err := tls.X509KeyPair(bundle.CertificatePEM, bundle.PrivateKeyPEM)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	leaf, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(root)
+	if _, err = leaf.Verify(x509.VerifyOptions{Roots: roots, DNSName: hostname}); err != nil {
+		return tls.Certificate{}, err
+	}
+	if err = machineguard.InstallUserTrust(ctx, bundle.RootCAPEM); err != nil {
+		return tls.Certificate{}, fmt.Errorf("install browser certificate trust: %w", err)
+	}
+	return cert, nil
 }

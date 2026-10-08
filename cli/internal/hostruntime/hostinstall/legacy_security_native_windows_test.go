@@ -120,8 +120,7 @@ func TestNativeLegacyOwnerFullSecurityMigration(t *testing.T) {
 	config := WindowsRuntimeConfig{
 		Schema: windowsConfigSchema, OwnerSID: ownerSID, User: "native-fixture",
 		StateRoot: filepath.Join(WindowsProgramDataRoot(), "user-state"), Workspace: filepath.Join(WindowsProgramDataRoot(), "workspace"),
-		ControlURL: "https://api.pprbt.dev", ListenAddress: "127.0.0.1:8080", MachineID: "native-legacy-security-fixture", SetupMode: "client",
-		TokenFile: WindowsHostdTokenPath(), InstalledAt: time.Now().UTC(), Committed: true,
+		ControlURL: "https://api.pprbt.dev", ListenAddress: "127.0.0.1:8080", MachineID: "native-legacy-security-fixture", TokenFile: WindowsHostdTokenPath(), InstalledAt: time.Now().UTC(), Committed: true,
 		Artifact: bootstrap.ArtifactTarget{Schema: bootstrap.ArtifactTargetSchemaV1, Kind: bootstrap.ArtifactKindPB, Version: "2026.08.23.1", Platform: "windows", Architecture: runtime.GOARCH, RepositoryURL: "https://get.pprbt.dev", TargetPath: "pb-windows-" + runtime.GOARCH},
 	}
 	body, err := json.Marshal(config)

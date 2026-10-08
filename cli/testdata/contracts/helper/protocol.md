@@ -80,3 +80,27 @@ internal unavailable `4503`. Normal detach uses `1000`.
 
 Errors use `common.error-envelope`. Error details never contain tokens, terminal content,
 config contents, staged paths outside their scoped display form, or provider identifiers.
+
+## Terminal identification metadata
+
+Authorized runtime snapshots expose `title` (application-reported OSC 0/2),
+`current_directory` (live foreground directory or OSC 7/Windows OSC 9;9 report), and
+`foreground_process` (native foreground executable name where available). `cwd`
+remains the launch directory; it must never be presented as a live directory.
+The editable catalog name is independent of these observations and the immutable
+session ID. Empty title falls back to foreground process only for display.
+
+Metadata parsing preserves all PTY/replay bytes. OSC bodies are bounded at 8192
+bytes; titles/process names at 128 Unicode characters and displayed paths at 1024.
+Control and directional-formatting characters are removed. Observations never
+authorize access, trigger path probes, or prove task progress. A new process
+generation clears prior application metadata; closed/offline sessions have no
+live directory/process observation. Native queries run only for requested
+snapshots, outside the session lock, with process/generation fencing.
+
+PowerShell prompts report filesystem location while preserving normal profiles
+and the existing prompt; CMD reports its directory through process-local PROMPT.
+Neither modifies profile files. Windows has no native foreground-process query;
+applications must report their title. Darwin/Linux query the terminal foreground
+group. Catalogs refresh observations while visible; unavailable current metadata
+may show the separately labeled launch “Started in” directory.

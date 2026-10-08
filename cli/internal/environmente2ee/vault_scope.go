@@ -27,6 +27,7 @@ type VaultScopeClaims struct {
 	WriterAccount         string
 	WriterVaultGeneration uint64
 	Nonce                 []byte
+	WorkspaceID           string
 }
 type VaultScope struct {
 	Claims VaultScopeClaims
@@ -44,7 +45,7 @@ func validVaultCounter(n uint64) bool { return n > 0 && n <= MaximumContractInte
 func validVaultIssuer(s string) bool  { return len(s) > 0 && len(s) <= 1024 && utf8.ValidString(s) }
 func validScopeClaims(c VaultScopeClaims) bool {
 	return c.Domain == "paperboat.environment.vault-scope" && c.Version == 1 && validVaultIssuer(c.Issuer) &&
-		(c.OwnerKind == "personal" || c.OwnerKind == "team") && validIdentifier(c.OwnerID) &&
+		(c.OwnerKind == "personal" || c.OwnerKind == "team") && validIdentifier(c.WorkspaceID) && (c.OwnerKind != "team" || c.WorkspaceID == c.OwnerID && c.WorkspaceID != "personal") && validIdentifier(c.OwnerID) &&
 		(c.MachineID == "" || c.OwnerKind == "personal" && validIdentifier(c.MachineID)) &&
 		validVaultCounter(c.KeyEpoch) && validVaultCounter(c.Revision) && len(c.Previous) == 32 &&
 		((c.Revision == 1) == bytes.Equal(c.Previous, make([]byte, 32))) && validIdentifier(c.WriterAccount) &&
@@ -60,6 +61,14 @@ func SealVaultScope(ctx context.Context, c VaultScopeClaims, key, writerSeed []b
 	}
 	if err := ctx.Err(); err != nil {
 		return VaultScope{}, err
+	}
+	if c.OwnerKind == "personal" {
+		derived, err := WorkspaceScopeKey(key, c.WorkspaceID)
+		if err != nil {
+			return VaultScope{}, err
+		}
+		defer clear(derived)
+		key = derived
 	}
 	c.Domain = "paperboat.environment.vault-scope"
 	c.Version = 1
@@ -110,6 +119,14 @@ func ParseVaultScope(raw, writerPublic []byte) (VaultScope, error) {
 	return VaultScope{Claims: c, ID: DocumentID(sha256.Sum256(raw)), Raw: bytes.Clone(raw)}, nil
 }
 func OpenVaultScope(ctx context.Context, scope VaultScope, key []byte) (map[string][]byte, error) {
+	if scope.Claims.OwnerKind == "personal" {
+		derived, err := WorkspaceScopeKey(key, scope.Claims.WorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+		defer clear(derived)
+		key = derived
+	}
 	if ctx == nil || len(key) != 32 || !validScopeClaims(scope.Claims) || scope.ID != DocumentID(sha256.Sum256(scope.Raw)) {
 		return nil, ErrInvalid
 	}

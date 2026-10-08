@@ -3,12 +3,9 @@
 main() {
 set -eu
 
-# The release-published copy pins a small verifier by immutable GitHub URL,
-# length, and SHA-256. That verifier checks TUF before downloading pb once.
-repository=${PAPERBOAT_GITHUB_REPOSITORY:-@PAPERBOAT_BOOTSTRAP_REPOSITORY@}
+# The publisher renders each product's immutable GitHub URL and verified
+# TUF digest directly into the first-party installer.
 requested_version=${PAPERBOAT_VERSION:-latest}
-tuf_url=${PAPERBOAT_TUF_URL:-https://get.pprbt.dev/tuf}
-bootstrap_version='@PAPERBOAT_BOOTSTRAP_VERSION@'
 install_dir=${PAPERBOAT_INSTALL_DIR:-"${HOME}/.local/bin"}
 install_dir_requested=false
 setup=false
@@ -24,7 +21,7 @@ usage() { cat <<'EOF'
 Install the current Paperboat release.
 
 Usage: install.sh [options]
-  --version VERSION             Require this signed release version
+  --version VERSION             Require the version published for this platform
   --install-dir DIRECTORY       Install Linux pb here (default: ~/.local/bin)
   --setup                       Run pb setup after installation
   --pair                        Run pb pair after installation
@@ -70,10 +67,6 @@ case $(uname -s) in Darwin) os=darwin ;; Linux) os=linux ;; *) echo "pb installe
 case $(uname -m) in x86_64|amd64) arch=amd64 ;; arm64|aarch64) arch=arm64 ;; *) echo "pb installer: unsupported architecture: $(uname -m)" >&2; exit 1 ;; esac
 [ "$os" != darwin ] || [ "$arch" = arm64 ] || { echo "pb installer: macOS releases support arm64" >&2; exit 1; }
 
-case "$repository" in */*) owner=${repository%%/*}; repo_name=${repository#*/} ;; *) owner=; repo_name= ;; esac
-case "$owner$repo_name" in ""|*[!A-Za-z0-9_.-]*) echo "pb installer: invalid GitHub repository" >&2; exit 1 ;; esac
-[ "$repository" = "$owner/$repo_name" ] || { echo "pb installer: invalid GitHub repository" >&2; exit 1; }
-case "$tuf_url" in https://*) ;; *) echo "pb installer: TUF URL must use HTTPS" >&2; exit 1 ;; esac
 command -v curl >/dev/null 2>&1 || { echo "pb installer: curl is required" >&2; exit 1; }
 
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/paperboat-install.XXXXXX")
@@ -97,48 +90,50 @@ if [ "$pair" = true ]; then
 fi
 asset="pb-${os}-${arch}"
 if [ "$os" = darwin ]; then asset="$asset.pkg"; fi
-bootstrap_asset="pb-bootstrap-${os}-${arch}"
 case "$os-$arch" in
-  linux-amd64) bootstrap_sha='@PAPERBOAT_BOOTSTRAP_LINUX_AMD64_SHA256@'; bootstrap_length='@PAPERBOAT_BOOTSTRAP_LINUX_AMD64_LENGTH@' ;;
-  linux-arm64) bootstrap_sha='@PAPERBOAT_BOOTSTRAP_LINUX_ARM64_SHA256@'; bootstrap_length='@PAPERBOAT_BOOTSTRAP_LINUX_ARM64_LENGTH@' ;;
-  darwin-arm64) bootstrap_sha='@PAPERBOAT_BOOTSTRAP_DARWIN_ARM64_SHA256@'; bootstrap_length='@PAPERBOAT_BOOTSTRAP_DARWIN_ARM64_LENGTH@' ;;
+  linux-amd64)
+    product_version='@PAPERBOAT_PRODUCT_LINUX_AMD64_VERSION@'
+    product_url='@PAPERBOAT_PRODUCT_LINUX_AMD64_URL@'
+    product_sha='@PAPERBOAT_PRODUCT_LINUX_AMD64_SHA256@'
+    product_length='@PAPERBOAT_PRODUCT_LINUX_AMD64_LENGTH@' ;;
+  linux-arm64)
+    product_version='@PAPERBOAT_PRODUCT_LINUX_ARM64_VERSION@'
+    product_url='@PAPERBOAT_PRODUCT_LINUX_ARM64_URL@'
+    product_sha='@PAPERBOAT_PRODUCT_LINUX_ARM64_SHA256@'
+    product_length='@PAPERBOAT_PRODUCT_LINUX_ARM64_LENGTH@' ;;
+  darwin-arm64)
+    product_version='@PAPERBOAT_PRODUCT_DARWIN_ARM64_VERSION@'
+    product_url='@PAPERBOAT_PRODUCT_DARWIN_ARM64_URL@'
+    product_sha='@PAPERBOAT_PRODUCT_DARWIN_ARM64_SHA256@'
+    product_length='@PAPERBOAT_PRODUCT_DARWIN_ARM64_LENGTH@' ;;
+  *) echo "pb installer: unsupported platform: $os-$arch" >&2; exit 1 ;;
 esac
-case "$bootstrap_version:$bootstrap_sha:$bootstrap_length" in *'@PAPERBOAT_'*) echo 'pb installer: unpublished bootstrap; use the release installer' >&2; exit 1 ;; esac
-bootstrap_url="https://github.com/${repository}/releases/download/${bootstrap_version}/${bootstrap_asset}"
-verifier="$temporary/$bootstrap_asset"
-curl --fail --location --show-error --silent --connect-timeout 15 --max-time 300 --proto '=https' --proto-redir '=https' "$bootstrap_url" -o "$verifier"
-[ "$(wc -c < "$verifier" | tr -d ' ')" = "$bootstrap_length" ] || { echo "pb installer: bootstrap verifier length mismatch" >&2; exit 1; }
-if command -v shasum >/dev/null 2>&1; then actual_sha=$(shasum -a 256 "$verifier" | awk '{print $1}');
-elif command -v sha256sum >/dev/null 2>&1; then actual_sha=$(sha256sum "$verifier" | awk '{print $1}');
-elif command -v openssl >/dev/null 2>&1; then actual_sha=$(openssl dgst -sha256 "$verifier" | awk '{print $NF}');
+case "$product_version:$product_url:$product_sha:$product_length" in *'@PAPERBOAT_PRODUCT_'*) echo 'pb installer: this platform has no published product record' >&2; exit 1 ;; esac
+[ "$requested_version" = latest ] || [ "$requested_version" = "$product_version" ] || { echo "pb installer: version $requested_version is unavailable for $os-$arch; available version is $product_version" >&2; exit 1; }
+expected_url="https://github.com/pinksaucepasta/paperboat-cli/releases/download/$product_version/$asset"
+[ "$product_url" = "$expected_url" ] || { echo 'pb installer: published product URL is not the canonical immutable asset URL' >&2; exit 1; }
+[ "${#product_sha}" -eq 64 ] || { echo 'pb installer: published product digest is invalid' >&2; exit 1; }
+case "$product_sha" in *[!0123456789abcdef]*) echo 'pb installer: published product digest is invalid' >&2; exit 1 ;; esac
+case "$product_length" in ''|0|0*|*[!0123456789]*) echo 'pb installer: published product length is invalid' >&2; exit 1 ;; esac
+[ "${#product_length}" -le 9 ] && [ "$product_length" -le 536870912 ] || { echo 'pb installer: published product length is invalid' >&2; exit 1; }
+product_file="$temporary/$asset"
+curl --fail --location --show-error --silent --connect-timeout 15 --max-time 300 --max-filesize "$product_length" --proto '=https' --proto-redir '=https' "$product_url" -o "$product_file"
+[ "$(wc -c < "$product_file" | tr -d ' ')" = "$product_length" ] || { echo "pb installer: product length mismatch" >&2; exit 1; }
+if command -v shasum >/dev/null 2>&1; then actual_sha=$(shasum -a 256 "$product_file" | awk '{print $1}');
+elif command -v sha256sum >/dev/null 2>&1; then actual_sha=$(sha256sum "$product_file" | awk '{print $1}');
+elif command -v openssl >/dev/null 2>&1; then actual_sha=$(openssl dgst -sha256 "$product_file" | awk '{print $NF}');
 else echo "pb installer: shasum, sha256sum, or openssl is required" >&2; exit 1; fi
-[ "$actual_sha" = "$bootstrap_sha" ] || { echo "pb installer: bootstrap verifier digest mismatch" >&2; exit 1; }
-chmod 0700 "$verifier"
-"$verifier" --tuf-url "$tuf_url" --state-dir "$temporary/tuf" --github-repository "$repository" --version "$requested_version" > "$temporary/verified.json"
-if [ "$os" = darwin ] && [ -x /usr/bin/plutil ]; then
-  download=$(/usr/bin/plutil -extract path raw -o - "$temporary/verified.json")
-else
-  command -v python3 >/dev/null 2>&1 || { echo 'pb installer: python3 is required to read verifier output' >&2; exit 1; }
-  download=$(python3 - "$temporary/verified.json" <<'PY'
-import json, os, sys
-value = json.load(open(sys.argv[1], encoding='utf-8'))
-path = value.get('path')
-if not isinstance(path, str) or not os.path.isabs(path): raise SystemExit('pb installer: verifier returned an invalid path')
-print(path)
-PY
-  )
-fi
-[ "$download" = "$temporary/tuf/product/$asset" ] && [ -f "$download" ] && [ ! -L "$download" ] || { echo 'pb installer: verifier returned an unexpected artifact' >&2; exit 1; }
+[ "$actual_sha" = "$product_sha" ] || { echo "pb installer: product digest mismatch" >&2; exit 1; }
 
 if [ "$os" = linux ]; then
   case "$install_dir" in /*) ;; *) echo "pb installer: --install-dir must be absolute" >&2; exit 2 ;; esac
-  chmod 0755 "$download"
-  installer_pb=$download
+  chmod 0755 "$product_file"
+  installer_pb=$product_file
 else
   [ "$install_dir_requested" = false ] && [ -z "${PAPERBOAT_INSTALL_DIR:-}" ] || { echo "pb installer: --install-dir is not supported on macOS" >&2; exit 2; }
   command -v pkgutil >/dev/null 2>&1 && command -v cpio >/dev/null 2>&1 || { echo "pb installer: pkgutil and cpio are required" >&2; exit 1; }
   expanded="$temporary/expanded"; payload="$temporary/payload"
-  pkgutil --expand "$download" "$expanded"
+  pkgutil --expand "$product_file" "$expanded"
   mkdir -p "$payload"
   (cd "$payload" && gzip -dc "$expanded/Payload" | cpio -idm >/dev/null 2>&1)
   payload_pb="$payload/Library/PrivilegedHelperTools/Paperboat/bin/pb"

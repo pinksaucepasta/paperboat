@@ -75,6 +75,9 @@ type Release struct {
 	Updater               ComponentTarget
 	Launcher              ComponentTarget
 	SupervisorMaintenance bool
+	// OwnerMaintenanceGraceSeconds is the verified policy's ceiling for a
+	// local announced maintenance window, not a rollout deferral grant.
+	OwnerMaintenanceGraceSeconds uint32
 }
 
 // ComponentTarget is the immutable target identity copied from the verified
@@ -135,10 +138,11 @@ type Starter interface {
 	Start(context.Context, StartRequest) (Worker, error)
 }
 
-// Hostd is intentionally limited to reading the active worker fence. The
-// updater cannot execute commands or alter workload state through this API.
+// Hostd owns feature-worker lifetime. StopActive waits for feature teardown;
+// terminal and execution processes remain with the native owner.
 type Hostd interface {
 	Active(context.Context) (hostdproto.Status, error)
+	StopActive(context.Context) error
 }
 
 // HealthChecker validates the newly active worker during the monitoring hold.
@@ -178,7 +182,9 @@ type Config struct {
 	NativeVerifier   NativeVerifier
 	// ActivateRuntime restarts the fixed native host service after the verified
 	// canonical binary changes and returns its newly active fence.
-	ActivateRuntime func(context.Context, string) (hostdproto.Status, error)
+	ActivateRuntime           func(context.Context, string) (hostdproto.Status, error)
+	AuthorizeOwnerMaintenance func(context.Context, Release, bool) error
+	AbortOwnerMaintenance     func(context.Context) error
 	// CommitRuntime refreshes installation metadata after durable native commit.
 	CommitRuntime func(context.Context, Release) error
 	// ExtractPackage is the macOS package extraction boundary. A pkg is never
@@ -318,8 +324,14 @@ func (m *Manager) Activate(ctx context.Context, release Release) (Result, error)
 	}
 	localRelease := release
 	localRelease.SHA256, localRelease.Length = journal.CandidateDigest, journal.CandidateLength
-	if m.config.ActivateRuntime != nil {
+	if release.SupervisorMaintenance {
+		if m.config.ActivateRuntime == nil {
+			return Result{Version: m.active.Version}, ErrInvalidConfig
+		}
 		return m.activatePreparedNative(ctx, journal, release, localRelease)
+	}
+	if m.config.Starter == nil || m.config.Gate == nil {
+		return Result{Version: m.active.Version}, ErrInvalidConfig
 	}
 	if journal, err = m.transition(journal, updateflow.StageStaged); err != nil {
 		return Result{Version: m.active.Version}, err
@@ -414,12 +426,26 @@ func (m *Manager) Activate(ctx context.Context, release Release) (Result, error)
 		}
 		return Result{Version: m.active.Version}, m.restoreAfterDrain(ctx, journal, release, worker, err)
 	}
+	// The candidate cannot bind the real feature listeners until the previous
+	// worker has completed shutdown. The owner keeps all terminal processes.
+	if err = m.config.Hostd.StopActive(ctx); err != nil {
+		return Result{Version: m.active.Version}, m.rollbackActive(ctx, journal, release, worker, err)
+	}
 	active, err := worker.Activate(ctx)
 	if err != nil || !matches(active, hostdproto.StateActive, request.WorkerID, ready.Epoch) {
 		if err == nil {
 			err = ErrInvalidRelease
 		}
-		return Result{Version: m.active.Version}, err
+		// A lost acknowledgement can follow successful activation. Keep the
+		// authenticated cutover journal for recovery instead of replacing a
+		// running candidate solely because its response was lost.
+		probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), m.config.RollbackTimeout)
+		observed, probeErr := m.config.Hostd.Active(probeCtx)
+		cancel()
+		if probeErr == nil && matches(observed, hostdproto.StateActive, request.WorkerID, ready.Epoch) {
+			return Result{Version: m.active.Version}, err
+		}
+		return Result{Version: m.active.Version}, m.rollbackActive(ctx, journal, release, worker, err)
 	}
 	journal.WorkerID, journal.WorkerEpoch = active.WorkerID, active.Epoch
 	if journal, err = m.transition(journal, updateflow.StageMonitoring); err != nil {
@@ -492,10 +518,10 @@ func (m *Manager) recoverLocked(ctx context.Context) error {
 		return m.restoreAfterDrain(ctx, journal, releaseFromJournal(journal), nil, errInterruptedDrainRecovery)
 	case updateflow.RecoveryQueryHostd:
 		status, statusErr := m.config.Hostd.Active(ctx)
-		if statusErr != nil && m.config.ActivateRuntime == nil {
+		if statusErr != nil && !journal.NativeActivation {
 			return statusErr
 		}
-		if m.config.ActivateRuntime == nil && statusErr == nil && matches(status, hostdproto.StateActive, journal.WorkerID, journal.WorkerEpoch) {
+		if !journal.NativeActivation && statusErr == nil && matches(status, hostdproto.StateActive, journal.WorkerID, journal.WorkerEpoch) {
 			if err := m.ensurePromoted(journal); err != nil {
 				return err
 			}
@@ -509,13 +535,24 @@ func (m *Manager) recoverLocked(ctx context.Context) error {
 			}
 			return m.monitorAndCommitRecovered(ctx, next)
 		}
+		if !journal.NativeActivation && (statusErr != nil || status.State != hostdproto.StateActive || status.WorkerID != workerID(m.active.Version)) {
+			return m.rollbackActive(ctx, journal, releaseFromJournal(journal), nil, errInterruptedDrainRecovery)
+		}
 		if err := m.authorizeStorageRestore(ctx, m.active); err != nil {
 			return errors.Join(errInterruptedDrainRecovery, err, ErrBlocked)
 		}
 		if err := m.restoreStorage(); err != nil {
 			return m.restoreAfterDrain(ctx, journal, releaseFromJournal(journal), nil, errors.Join(errInterruptedDrainRecovery, errStorageRestoreFailed, err))
 		}
-		if m.config.ActivateRuntime != nil {
+		if journal.NativeActivation {
+			if statusErr == nil && m.validActiveRuntime(status, m.active, "", 0) && m.config.Health.Check(ctx, status, m.active) == nil {
+				if m.config.AbortOwnerMaintenance != nil {
+					if err := m.config.AbortOwnerMaintenance(ctx); err != nil {
+						return errors.Join(err, ErrBlocked)
+					}
+				}
+				return m.restoreAfterDrain(ctx, journal, releaseFromJournal(journal), nil, errInterruptedDrainRecovery)
+			}
 			active, activateErr := m.activateRuntime(ctx, m.active)
 			if activateErr != nil || !m.validActiveRuntime(active, m.active, "", 0) {
 				if activateErr == nil {
@@ -546,6 +583,14 @@ func (m *Manager) recoverLocked(ctx context.Context) error {
 // fully authenticated by the journal and hostd; no local identity is guessed.
 // This keeps paperboat-updated available after a transient rollback failure.
 func (m *Manager) restoreBlockedTransaction(ctx context.Context, journal updateflow.Journal) error {
+	if journal.NativeActivation {
+		if err := m.authorizeStorageRestore(ctx, m.active); err != nil {
+			return errors.Join(err, ErrBlocked)
+		}
+		if err := m.restoreStorage(); err != nil {
+			return errors.Join(err, errStorageRestoreFailed, ErrBlocked)
+		}
+	}
 	rollback, err := m.transition(journal, updateflow.StageRollback)
 	if err != nil {
 		return ErrBlocked
@@ -595,13 +640,22 @@ func (m *Manager) commitGate(ctx context.Context, journal updateflow.Journal, re
 		}
 		return nil
 	}
-	return m.gate(ctx, releaseDuration(release.CanaryTimeout, m.config.CanaryTimeout), func(gateCtx context.Context) error {
+	err := m.gate(ctx, releaseDuration(release.CanaryTimeout, m.config.CanaryTimeout), func(gateCtx context.Context) error {
 		request := m.gateRequest(journal, release, hostdproto.Status{State: hostdproto.StateActive, WorkerID: journal.WorkerID, APIVersion: 1, Epoch: journal.WorkerEpoch})
 		if err := request.validate(hostdproto.StateActive); err != nil {
 			return err
 		}
 		return m.config.Gate.Commit(gateCtx, request)
 	})
+	if err != nil {
+		return err
+	}
+	if m.config.CommitRuntime != nil {
+		bounded, cancel := context.WithTimeout(ctx, m.config.RollbackTimeout)
+		defer cancel()
+		return m.config.CommitRuntime(bounded, release)
+	}
+	return nil
 }
 
 func (m *Manager) validActiveRuntime(status hostdproto.Status, release Release, expectedWorkerID string, epoch uint64) bool {
@@ -825,7 +879,11 @@ func (m *Manager) rollbackActive(ctx context.Context, journal updateflow.Journal
 		return err
 	}
 	previous := m.active
-	if err := m.authorizeRecovery(ctx, previous, m.config.BinaryRollback); err != nil {
+	previousPath := m.config.BinaryRollback
+	if journal.StagedPath != m.config.Binary && regularMatches(m.config.Binary, previous.Length, previous.SHA256) {
+		previousPath = m.config.Binary
+	}
+	if err := m.authorizeRecovery(ctx, previous, previousPath); err != nil {
 		next.LastFailure = updateflow.FailureRollback
 		if blocked, transitionErr := m.transition(next, updateflow.StageBlocked); transitionErr == nil {
 			_ = m.write(blocked)
@@ -833,8 +891,17 @@ func (m *Manager) rollbackActive(ctx context.Context, journal updateflow.Journal
 		return errors.Join(cause, err, ErrBlocked)
 	}
 	var startErr error
-	if m.config.ActivateRuntime == nil {
-		rollbackRequest := m.startRequest(previous, m.config.BinaryRollback)
+	if !journal.NativeActivation {
+		if candidate != nil {
+			if err := candidate.Stop(ctx); err != nil {
+				return errors.Join(cause, err, ErrBlocked)
+			}
+			candidate = nil
+		}
+		if err := m.config.Hostd.StopActive(ctx); err != nil {
+			return errors.Join(cause, err, ErrBlocked)
+		}
+		rollbackRequest := m.startRequest(previous, previousPath)
 		rollbackWorker, rollbackStartErr := m.config.Starter.Start(ctx, rollbackRequest)
 		startErr = rollbackStartErr
 		if startErr == nil {
@@ -863,7 +930,7 @@ func (m *Manager) rollbackActive(ctx context.Context, journal updateflow.Journal
 		}
 		return errors.Join(cause, startErr, ErrBlocked)
 	}
-	if err := m.authorizeRecovery(ctx, previous, m.config.BinaryRollback); err != nil {
+	if err := m.authorizeRecovery(ctx, previous, previousPath); err != nil {
 		return errors.Join(cause, err, ErrBlocked)
 	}
 	if err := m.restoreStorage(); err != nil {
@@ -871,7 +938,7 @@ func (m *Manager) rollbackActive(ctx context.Context, journal updateflow.Journal
 	}
 	var rollbackStatus hostdproto.Status
 	var statusErr error
-	if m.config.ActivateRuntime != nil {
+	if journal.NativeActivation {
 		rollbackStatus, statusErr = m.activateRuntime(ctx, previous)
 		candidate = nil // the host restart invalidated the old candidate process handle
 		if statusErr == nil && !m.validActiveRuntime(rollbackStatus, previous, "", 0) {
@@ -911,6 +978,9 @@ func (m *Manager) rollbackActive(ctx context.Context, journal updateflow.Journal
 	}
 	m.record(ctx, EventRolledBack, next, failed, safeFailure(cause))
 	m.record(ctx, EventQuarantined, next, failed, safeFailure(cause))
+	if errors.Is(cause, errInterruptedDrainRecovery) {
+		return nil
+	}
 	return cause
 }
 
@@ -1302,6 +1372,7 @@ func (m *Manager) startRequest(release Release, executable string) StartRequest 
 }
 
 func withRelease(journal updateflow.Journal, release Release, path string) updateflow.Journal {
+	journal.SupervisorMaintenance, journal.OwnerMaintenanceGraceSeconds = release.SupervisorMaintenance, release.OwnerMaintenanceGraceSeconds
 	journal.CandidateVersion, journal.CandidateDigest, journal.CandidateLength, journal.StagedPath = release.Version, release.SHA256, release.Length, path
 	journal.CandidateManifestDigest = release.ManifestSHA256
 	journal.CandidatePolicy = nil
@@ -1375,6 +1446,7 @@ func candidateMayBeActive(stage updateflow.Stage) bool {
 
 func releaseFromJournal(j updateflow.Journal) Release {
 	release := Release{Version: j.CandidateVersion, SHA256: j.CandidateDigest, ManifestSHA256: j.CandidateManifestDigest, Length: j.CandidateLength, Platform: runtime.GOOS, Architecture: runtime.GOARCH, HostdAPIMin: j.HostdAPIMin, HostdAPIMax: j.HostdAPIMax, RuntimeAPIMin: j.RuntimeAPIMin, RuntimeAPIMax: j.RuntimeAPIMax}
+	release.SupervisorMaintenance, release.OwnerMaintenanceGraceSeconds = j.SupervisorMaintenance, j.OwnerMaintenanceGraceSeconds
 	if p := j.CandidatePolicy; p != nil {
 		release.CanaryPath, release.CanaryStatus, release.CanarySamples = p.CanaryPath, p.CanaryStatus, p.CanarySamples
 		release.CanaryTimeout, release.DrainTimeout, release.StabilityWindow, release.StabilityInterval, release.RollbackTimeout = p.CanaryTimeout, p.DrainTimeout, p.StabilityWindow, p.StabilityInterval, p.RollbackTimeout

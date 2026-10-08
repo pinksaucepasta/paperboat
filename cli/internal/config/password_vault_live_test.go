@@ -67,7 +67,7 @@ func TestPasswordVaultProductionSecureCustody(t *testing.T) {
 	for i := 0; i < 8; i++ {
 		values[fmt.Sprintf("ENV_TEST_%d", i)] = bytes.Repeat([]byte("x"), 32000)
 	}
-	scope, err := environmente2ee.SealVaultScope(context.Background(), environmente2ee.VaultScopeClaims{Issuer: issuer, OwnerKind: "personal", OwnerID: account, KeyEpoch: 1, Revision: 1, Previous: make([]byte, 32), WriterAccount: account, WriterVaultGeneration: 1}, keys.PersonalKey, keys.WriterSeed, values)
+	scope, err := environmente2ee.SealVaultScope(context.Background(), environmente2ee.VaultScopeClaims{Issuer: issuer, OwnerKind: "personal", OwnerID: account, WorkspaceID: "personal", KeyEpoch: 1, Revision: 1, Previous: make([]byte, 32), WriterAccount: account, WriterVaultGeneration: 1}, keys.PersonalKey, keys.WriterSeed, values)
 	if err != nil {
 		t.Fatal(err)
 	}

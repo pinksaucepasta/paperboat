@@ -10,12 +10,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/userpaths"
 )
 
-type Profile string
-
-const (
-	BYOD Profile = "byod"
-)
-
 type Limits struct {
 	StructuredFrameBytes uint64
 	TerminalFrameBytes   uint64
@@ -27,7 +21,6 @@ type Limits struct {
 var DefaultLimits = Limits{64 << 10, 256 << 10, 1 << 20, 15 * time.Second, 5 * time.Minute}
 
 type Config struct {
-	Profile   Profile
 	StateRoot string
 	Version   string
 	Limits    Limits
@@ -48,9 +41,6 @@ type ResourceLimits struct {
 var DefaultResources = ResourceLimits{MaxSessions: 20, MaxAttachments: 128, MaxInputDecisions: 10_000, HistoryBytes: 64 << 10, MaxConcurrentTransfers: 2, MaxPreviewTargets: 20, MaxConcurrentProbes: 8, MaxConcurrentOps: 32}
 
 func (c Config) Validate() error {
-	if c.Profile != BYOD {
-		return fmt.Errorf("profile: %w", ErrInvalid)
-	}
 	if c.StateRoot == "" || !filepath.IsAbs(c.StateRoot) {
 		return fmt.Errorf("state root must be an absolute path: %w", ErrInvalid)
 	}
@@ -75,7 +65,6 @@ func (c Config) Validate() error {
 }
 
 func FromEnv(version string, environ func(string) string) (Config, error) {
-	profile := BYOD
 	root := environ("PAPERBOAT_RUNTIME_STATE_ROOT")
 	if root == "" {
 		var err error
@@ -84,7 +73,7 @@ func FromEnv(version string, environ func(string) string) (Config, error) {
 			return Config{}, err
 		}
 	}
-	c := Config{Profile: profile, StateRoot: root, Version: version, Limits: DefaultLimits, Resources: DefaultResources}
+	c := Config{StateRoot: root, Version: version, Limits: DefaultLimits, Resources: DefaultResources}
 	return c, c.Validate()
 }
 

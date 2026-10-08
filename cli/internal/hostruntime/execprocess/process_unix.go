@@ -33,6 +33,7 @@ func newProcess(config processConfig) (process, error) {
 }
 
 type pipeProcess struct {
+	writeMu   sync.Mutex
 	config    processConfig
 	cmd       *osExec.Cmd
 	stdin     io.WriteCloser
@@ -105,10 +106,21 @@ func (p *pipeProcess) copyOutput(stream string, reader io.Reader) {
 }
 
 func (p *pipeProcess) Write(data []byte) (int, error) {
+	return p.WriteContext(context.Background(), data)
+}
+func (p *pipeProcess) WriteContext(ctx context.Context, data []byte) (int, error) {
 	if p.stdin == nil {
 		return 0, ErrInvalid
 	}
-	return p.stdin.Write(data)
+	file, ok := p.stdin.(*os.File)
+	if !ok {
+		return 0, ErrInvalid
+	}
+	if err := pty.LockInput(ctx, &p.writeMu); err != nil {
+		return 0, err
+	}
+	defer p.writeMu.Unlock()
+	return pty.WriteInputContext(ctx, file, data)
 }
 func (p *pipeProcess) CloseInput() error {
 	var err error
@@ -206,10 +218,13 @@ func (p *ptyProcess) Start(context.Context) error {
 }
 
 func (p *ptyProcess) Write(data []byte) (int, error) {
+	return p.WriteContext(context.Background(), data)
+}
+func (p *ptyProcess) WriteContext(ctx context.Context, data []byte) (int, error) {
 	if p.process == nil {
 		return 0, ErrInvalid
 	}
-	return p.process.Write(data)
+	return p.process.WriteContext(ctx, data)
 }
 func (p *ptyProcess) CloseInput() error {
 	if p.process == nil {

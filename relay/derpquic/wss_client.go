@@ -64,17 +64,17 @@ func classifyWSS(err error) error {
 	}
 	switch websocket.CloseStatus(err) {
 	case 4001:
-		return ErrAdmission
+		return retainDecision(ErrAdmission, err)
 	case 4002:
-		return ErrProtocol
+		return retainDecision(ErrProtocol, err)
 	case 4003:
-		return ErrOverload
+		return retainDecision(ErrOverload, err)
 	case 4004:
-		return ErrExpired
+		return retainDecision(ErrExpired, err)
 	}
 	var cert *tls.CertificateVerificationError
 	if errors.As(err, &cert) {
-		return ErrAdmission
+		return retainDecision(ErrAdmission, err)
 	}
 	return err
 }
@@ -121,9 +121,9 @@ func (c *WSSClient) ensure(ctx context.Context) (*wssClientConn, error) {
 			return nil, dialCtx.Err()
 		}
 		if errors.Is(err, ErrExpired) {
-			return nil, ErrExpired
+			return nil, retainDecision(ErrExpired, err)
 		}
-		c.fatal = ErrAdmission
+		c.fatal = retainDecision(ErrAdmission, err)
 		return nil, c.fatal
 	}
 	proxy := c.config.Proxy
@@ -135,7 +135,7 @@ func (c *WSSClient) ensure(ctx context.Context) (*wssClientConn, error) {
 	ws, response, err := websocket.Dial(dialCtx, c.config.URL, &websocket.DialOptions{HTTPClient: &http.Client{Transport: transport}, Subprotocols: []string{WSSSubprotocol}, CompressionMode: websocket.CompressionDisabled})
 	if err != nil {
 		if response != nil && response.StatusCode == http.StatusUnauthorized {
-			c.fatal = ErrAdmission
+			c.fatal = retainDecision(ErrAdmission, err)
 			return nil, c.fatal
 		}
 		return nil, classifyWSS(err)

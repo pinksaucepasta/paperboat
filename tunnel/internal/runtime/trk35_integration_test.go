@@ -8,12 +8,12 @@ import (
 	"net"
 	"net/http"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgehttp"
@@ -180,6 +180,9 @@ func TestTRK35IntegratedRouteLifecycleFaultHarness(t *testing.T) {
 	if err != nil {
 		_ = lease.Close()
 		t.Fatalf("open first carrier stream: %v", err)
+	}
+	if _, err := io.WriteString(heldStream, "GET /held HTTP/1.1\r\nHost: "+oldAssignment.PublicHost+"\r\n\r\n"); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := secondPair.waitHeld(context.Background(), "hold_trk35_old"); err != nil {
 		_ = heldStream.Close()
@@ -484,34 +487,35 @@ func (p *trk35IntegrationCarrierPair) acceptHostStreams(ctx context.Context) {
 		if err != nil {
 			return
 		}
-		if strings.HasPrefix(open.RequestID, "edge-probe-") {
-			go p.serveProbe(stream)
-			continue
-		}
-		p.mu.Lock()
-		p.streams = append(p.streams, stream)
-		p.mu.Unlock()
-		select {
-		case p.held <- trk35IntegrationHeldStream{stream: stream, open: open}:
-		case <-ctx.Done():
-			_ = stream.Close()
-			return
-		}
-		go func() {
-			_, _ = io.Copy(io.Discard, stream)
-			_ = stream.Close()
-		}()
+		go p.serveHostStream(ctx, stream, open)
 	}
 }
 
-func (p *trk35IntegrationCarrierPair) serveProbe(stream *datacarrier.Stream) {
-	p.probes.Add(1)
-	request, err := http.ReadRequest(bufio.NewReader(stream))
-	if err == nil {
-		_ = request.Body.Close()
-		_, _ = io.WriteString(stream, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+func (p *trk35IntegrationCarrierPair) serveHostStream(ctx context.Context, stream *datacarrier.Stream, open connectorprotocol.StreamOpen) {
+	defer stream.Close()
+	reader := bufio.NewReader(stream)
+	request, err := http.ReadRequest(reader)
+	if err != nil || open.Kind != "https" || request.Method != http.MethodGet {
+		return
 	}
-	_ = stream.Close()
+	defer request.Body.Close()
+	if request.URL.Path == "/" && request.Header.Get("Connection") == "close" {
+		p.probes.Add(1)
+		_, _ = io.WriteString(stream, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+		return
+	}
+	if request.URL.Path != "/held" {
+		return
+	}
+	p.mu.Lock()
+	p.streams = append(p.streams, stream)
+	p.mu.Unlock()
+	select {
+	case p.held <- trk35IntegrationHeldStream{stream: stream, open: open}:
+	case <-ctx.Done():
+		return
+	}
+	_, _ = io.Copy(io.Discard, reader)
 }
 
 func (p *trk35IntegrationCarrierPair) waitHeld(ctx context.Context, requestID string) (*datacarrier.Stream, error) {

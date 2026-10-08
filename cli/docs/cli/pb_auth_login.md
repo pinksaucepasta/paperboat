@@ -1,12 +1,12 @@
 ## pb auth login
 
-Sign in with a 26-character enrollment token
+Sign in through browser approval on any device
 
 ### Synopsis
 
-Sign in with a 26-character enrollment token
+Sign in through browser approval on any device
 
-Enter the enrollment token interactively or read it from --token-file so it is not exposed in shell history. A successful redemption stores the client session for later authenticated commands.
+Print an approval link and open it when a browser is available. Sign in through WorkOS on this or another device and explicitly approve the requesting CLI. No local callback listener or copied token is needed. Interrupted attempts resume securely; the existing account remains active until replacement succeeds.
 
 Sign-in credentials are stored in the selected local profile for its configured Paperboat server. Account commands use that profile; a missing or rejected session must be repaired with pb auth login before protected resources can be used.
 
@@ -19,9 +19,11 @@ pb auth login [flags]
 ### Options
 
 ```
-  -h, --help                help for login
-      --json                print sign-in result as JSON
-      --token-file string   absolute protected file containing the enrollment token
+      --change-account   sign in with another account after browser approval
+  -h, --help             help for login
+      --json             print approval and sign-in states as JSON
+      --no-browser       print the approval link without opening a browser
+      --reauth           authenticate the current account again
 ```
 
 ### Options inherited from parent commands
@@ -30,6 +32,7 @@ pb auth login [flags]
       --config string      path to the CLI config file
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO

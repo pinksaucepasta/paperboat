@@ -62,13 +62,13 @@ func SuppliedBinary(ctx context.Context, input Request, operation string) error 
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	bound := err == nil && previous.SetupMode != "awaiting_enrollment"
-	request := Request{Schema: input.Schema, Platform: input.Platform, User: input.User, UID: input.UID, GID: input.GID, Group: input.Group, Home: input.Home, Executable: input.Executable, Source: input.Source, SetupMode: "awaiting_enrollment"}
+	bound := err == nil && !previous.EnrollmentPending
+	request := Request{Schema: input.Schema, Platform: input.Platform, User: input.User, UID: input.UID, GID: input.GID, Group: input.Group, Home: input.Home, Executable: input.Executable, Source: input.Source, EnrollmentPending: true}
 	if bound {
 		request = previous
 		request.Executable, request.Source = input.Executable, input.Source
 	} else {
-		request.SetupMode = "awaiting_enrollment"
+		request.EnrollmentPending = true
 	}
 	switch operation {
 	case "install-supplied":
@@ -80,7 +80,7 @@ func SuppliedBinary(ctx context.Context, input Request, operation string) error 
 				func(ctx context.Context) error { return Repair(ctx, previous) },
 			)
 		}
-		if err = installDeviceGuard(ctx, request); err != nil {
+		if err = installMachineGuard(ctx, request); err != nil {
 			return err
 		}
 		if err = ensureSharedUserParents(paths); err != nil {

@@ -481,7 +481,6 @@ func (r *Registry) Handler() http.Handler {
 
 type Diagnostics struct {
 	Version        string                       `json:"version"`
-	Profile        string                       `json:"profile"`
 	CheckedAt      time.Time                    `json:"checked_at"`
 	Live           bool                         `json:"live"`
 	Capabilities   map[string]health.Capability `json:"capabilities"`
@@ -489,8 +488,8 @@ type Diagnostics struct {
 	CorrelationIDs []string                     `json:"correlation_ids,omitempty"`
 }
 
-func BuildDiagnostics(version, profile string, snapshot health.Snapshot, queues map[string]uint64, correlationIDs []string, maxBytes int) ([]byte, error) {
-	if !safeValue(version) || !safeValue(profile) || maxBytes < 1 {
+func BuildDiagnostics(version string, snapshot health.Snapshot, queues map[string]uint64, correlationIDs []string, maxBytes int) ([]byte, error) {
+	if !safeValue(version) || maxBytes < 1 {
 		return nil, ErrUnsafeValue
 	}
 	allowedQueues := map[string]bool{"attachment_bytes": true, "cleanup_backlog": true, "connector_retries": true, "update_pending": true}
@@ -516,7 +515,7 @@ func BuildDiagnostics(version, profile string, snapshot health.Snapshot, queues 
 		}
 		capabilities[name] = capability
 	}
-	diagnostics := Diagnostics{Version: version, Profile: profile, CheckedAt: snapshot.CheckedAt, Live: snapshot.Live, Capabilities: capabilities, Queues: copyQueues, CorrelationIDs: ids}
+	diagnostics := Diagnostics{Version: version, CheckedAt: snapshot.CheckedAt, Live: snapshot.Live, Capabilities: capabilities, Queues: copyQueues, CorrelationIDs: ids}
 	encoded, err := json.Marshal(diagnostics)
 	if err != nil {
 		return nil, err

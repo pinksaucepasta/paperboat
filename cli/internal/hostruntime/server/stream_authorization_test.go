@@ -55,19 +55,22 @@ func TestCredentialStreamAuthorizerValidatesNativePrivateBindingBeforeDispatch(t
 func (a *streamCredentialAuthorizer) CloseAuthorization() { a.closed = true }
 
 func TestCredentialStreamAuthorizerUsesCanonicalApplicationPolicy(t *testing.T) {
-	for consumer, capability := range map[string]string{"terminal": "terminal.v1", "exec": "exec.v1", "ssh": "ssh.v1", "file_transfer": "file-transfer.v1", "private_preview": "preview.launch.v1", "codex": "codex.connect.v1"} {
+	for consumer, capability := range map[string]string{"config_compare": "config.compare.v1", "terminal": "terminal.v1", "exec": "exec.v1", "ssh": "ssh.v1", "file_transfer": "file-transfer.v1", "private_preview": "preview.launch.v1", "codex": "codex.connect.v1"} {
 		t.Run(consumer, func(t *testing.T) {
 			var created *streamCredentialAuthorizer
 			authorize := CredentialStreamAuthorizer(func(token string) (Authorizer, error) {
 				if token != "credential" {
 					t.Fatalf("token=%q", token)
 				}
-				created = &streamCredentialAuthorizer{}
+				created = &streamCredentialAuthorizer{value: hostauth.Claims{JTI: "compare_read_1"}}
 				return created, nil
 			})
 			header, err := streamauth.New("operation_1", consumer, "stream_1", "credential", time.Now().Add(time.Minute), 1024)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if consumer == "config_compare" {
+				header.UsageSessionID = "compare_read_1"
 			}
 			authorization, err := authorize(context.Background(), header)
 			if err != nil {
@@ -77,5 +80,25 @@ func TestCredentialStreamAuthorizerUsesCanonicalApplicationPolicy(t *testing.T) 
 				t.Fatalf("authorization=%+v frame=%+v closed=%t", authorization, created.frame, created.closed)
 			}
 		})
+	}
+}
+
+func TestConfigCompareStreamAccountingMustMatchVerifiedRead(t *testing.T) {
+	authorize := CredentialStreamAuthorizer(func(string) (Authorizer, error) {
+		return &streamCredentialAuthorizer{value: hostauth.Claims{JTI: "read_1"}}, nil
+	})
+	header, err := streamauth.New("operation_1", "config_compare", "stream_1", "credential", time.Now().Add(time.Minute), 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"", "read_2"} {
+		header.UsageSessionID = id
+		if _, err := authorize(t.Context(), header); err == nil {
+			t.Fatal("foreign accounting read accepted")
+		}
+	}
+	header.UsageSessionID = "read_1"
+	if _, err := authorize(t.Context(), header); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -39,7 +39,7 @@ func TestCOSERecordAuthenticatedAndBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := Open(raw, epoch, otherPublic); !errors.Is(err, ErrInvalidRecord) {
-		t.Fatalf("wrong device accepted: %v", err)
+		t.Fatalf("wrong machine accepted: %v", err)
 	}
 	otherEpoch, err := NewEpoch()
 	if err != nil {

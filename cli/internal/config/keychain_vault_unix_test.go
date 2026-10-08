@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 )
 
@@ -18,6 +19,7 @@ type keychainVaultTestSecretStore struct {
 	mu         sync.Mutex
 	values     map[string]string
 	failDelete bool
+	getErr     error
 }
 
 func (s *keychainVaultTestSecretStore) Set(ref, value string) error {
@@ -33,6 +35,9 @@ func (s *keychainVaultTestSecretStore) Set(ref, value string) error {
 func (s *keychainVaultTestSecretStore) Get(ref string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.getErr != nil {
+		return "", s.getErr
+	}
 	value, ok := s.values[ref]
 	if !ok {
 		return "", ErrSecretNotFound
@@ -155,6 +160,21 @@ func TestKeychainVaultStoreRoundTripAtBoundAndSmallWrappingSecret(t *testing.T) 
 	}
 	clear(before)
 	clear(after)
+}
+
+func TestKeychainVaultDoesNotReplaceAfterMixedMissingAndKeychainFailure(t *testing.T) {
+	store, secrets, directory, ref := newKeychainVaultTestStore(t)
+	secrets.getErr = errors.Join(ErrSecretNotFound, syscall.EIO)
+	err := store.Set(ref, "encrypted custody")
+	if err == nil || !errors.Is(err, syscall.EIO) || !errors.Is(err, ErrCredentialStoreUnavailable) {
+		t.Fatalf("mixed wrapping-key failure = %v", err)
+	}
+	if strings.Contains(err.Error(), "EIO") || len(secrets.snapshot()) != 0 {
+		t.Fatalf("provider text escaped or a replacement key was stored: %v", err)
+	}
+	if _, err := os.Stat(keychainVaultPath(directory, ref)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("vault file created after mixed read failure: %v", err)
+	}
 }
 
 func TestKeychainVaultStoreTamperSubstitutionAndMissingWrappingKeyFailClosed(t *testing.T) {

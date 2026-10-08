@@ -1,0 +1,60 @@
+.nh
+.TH "PB-CONFIG-SYNC-APPLY" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-sync-apply - Review the effective file configuration on this machine
+
+
+.SH SYNOPSIS
+\fBpb config sync apply [flags]\fP
+
+
+.SH DESCRIPTION
+Review the effective file configuration on this machine
+
+.PP
+Read and resolve the machine configuration, preview its effective assignment, then apply the confirmed revision. Use --confirm with the displayed code in noninteractive use. Synced files are plaintext in Git, and prior content remains in repository history.
+
+.PP
+Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--confirm\fP=""
+	six-character confirmation code from the preview
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for apply
+
+.PP
+\fB--json\fP[=false]
+	print safe effective projection as JSON
+
+.PP
+\fB--repository\fP=""
+	registered repository ID or name for initial bootstrap
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config-sync(1)\fP

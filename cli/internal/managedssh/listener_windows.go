@@ -11,7 +11,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func ListenOwnerSocket(path string) (net.Listener, error) {
+func ListenOwnerSocket(path string) (listener net.Listener, resultErr error) {
+	defer func() { resultErr = managedSSHBoundary("listener_bind", resultErr) }()
 	if !validWindowsAgentPipe(path) {
 		return nil, ErrAgentDenied
 	}
@@ -23,12 +24,17 @@ func ListenOwnerSocket(path string) (net.Listener, error) {
 	if err != nil || !strings.EqualFold(path, want) {
 		return nil, ErrAgentDenied
 	}
-	listener, err := winio.ListenPipe(path, &winio.PipeConfig{SecurityDescriptor: managedSSHPipeSDDL(sid), MessageMode: false, InputBufferSize: MaxAgentRequestBytes + 4, OutputBufferSize: MaxAgentRequestBytes + 4})
+	pipeListener, err := winio.ListenPipe(path, &winio.PipeConfig{SecurityDescriptor: managedSSHPipeSDDL(sid), MessageMode: false, InputBufferSize: MaxAgentRequestBytes + 4, OutputBufferSize: MaxAgentRequestBytes + 4})
 	if err != nil {
-		if errors.Is(err, windows.ERROR_ACCESS_DENIED) || strings.Contains(strings.ToLower(err.Error()), "exists") {
-			return nil, ErrAgentDenied
+		if managedSSHAgentPipeConflict(err) {
+			return nil, managedSSHFailure("listener_bind", ErrAgentDenied, err)
 		}
 		return nil, err
 	}
-	return listener, nil
+	return pipeListener, nil
+}
+
+func managedSSHAgentPipeConflict(err error) bool {
+	return errors.Is(err, windows.ERROR_ACCESS_DENIED) || errors.Is(err, windows.ERROR_FILE_EXISTS) ||
+		errors.Is(err, windows.ERROR_ALREADY_EXISTS) || errors.Is(err, windows.ERROR_PIPE_BUSY)
 }

@@ -9,10 +9,13 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	hostruntimeservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 	"golang.org/x/sys/windows"
 )
 
@@ -23,6 +26,11 @@ type fakeWindowsDaemonProcess struct {
 	terminated   bool
 	deadline     time.Time
 }
+
+type cyclicWindowsTaskError struct{}
+
+func (*cyclicWindowsTaskError) Error() string   { return "cyclic task error" }
+func (e *cyclicWindowsTaskError) Unwrap() error { return e }
 
 func (p *fakeWindowsDaemonProcess) Identity() (windowsDaemonProcessIdentity, error) {
 	return p.identity, p.identityErr
@@ -136,6 +144,108 @@ func TestRemoveAllWindowsLegacyTasksToleratesUnavailableScheduler(t *testing.T) 
 	}
 	if err := RemoveAllWindowsLegacyTasks(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRemoveAllWindowsLegacyTasksObservesSuppressedEnumerationFailure(t *testing.T) {
+	previousList := listWindowsTaskNames
+	t.Cleanup(func() { listWindowsTaskNames = previousList })
+	secretCause := errors.New("private task account and machine path")
+	listWindowsTaskNames = func(context.Context) ([]string, error) { return nil, secretCause }
+	observed := make(chan errorreport.Fault, 2)
+	restore := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) { observed <- fault })
+	defer restore()
+	reference := supportref.New()
+	ctx := supportref.WithContext(context.Background(), reference)
+	if err := RemoveAllWindowsLegacyTasks(ctx); err != nil {
+		t.Fatalf("best-effort task cleanup returned error: %v", err)
+	}
+	var fault errorreport.Fault
+	select {
+	case fault = <-observed:
+	case <-time.After(time.Second):
+		t.Fatal("suppressed task enumeration failure was not observed")
+	}
+	if fault.Component != errorreport.Component("paperboatd") || fault.Operation != "service" || fault.Stage != "lifecycle" || fault.Code != "service_failed" || fault.SupportReference != reference {
+		t.Fatalf("cleanup fault = %#v", fault)
+	}
+	serialized := strings.Join([]string{fault.Component, fault.Operation, fault.Stage, fault.Code, fault.Cause, fault.ErrorType, fault.SupportReference, strings.Join(fault.ErrorChain, ",")}, "|")
+	if strings.Contains(serialized, "private") || strings.Contains(serialized, "machine path") {
+		t.Fatalf("cleanup observation retained task output: %q", serialized)
+	}
+
+	listWindowsTaskNames = func(context.Context) ([]string, error) { return nil, context.Canceled }
+	if err := RemoveAllWindowsLegacyTasks(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("caller cancellation was swallowed: %v", err)
+	}
+	select {
+	case fault := <-observed:
+		t.Fatalf("cancellation was observed as a failure: %#v", fault)
+	default:
+	}
+
+	listWindowsTaskNames = func(context.Context) ([]string, error) { return nil, errors.Join(context.Canceled, secretCause) }
+	if err := RemoveAllWindowsLegacyTasks(ctx); err != nil {
+		t.Fatalf("mixed best-effort cleanup returned error: %v", err)
+	}
+	select {
+	case fault := <-observed:
+		if fault.Code != "service_failed" || fault.Stage != "lifecycle" {
+			t.Fatalf("mixed cleanup fault = %#v", fault)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("mixed operational failure was hidden by cancellation")
+	}
+}
+
+func TestWindowsTaskCommandErrorKeepsCauseWithoutRetainingOutput(t *testing.T) {
+	secretCause := errors.New("exit status with private account path")
+	var err error = &windowsTaskCommandError{err: secretCause, kind: classifyWindowsTaskCommandOutput([]byte("ERROR: The specified task does not exist."))}
+	if !errors.Is(err, secretCause) || !isMissingWindowsTaskError(err) {
+		t.Fatalf("classified command failure lost cause or missing-task class: %v", err)
+	}
+	staged, hasStage := err.(interface{ DiagnosticStage() string })
+	coded, hasCode := err.(interface{ DiagnosticCode() string })
+	if !hasStage || !hasCode || staged.DiagnosticStage() != "lifecycle" || coded.DiagnosticCode() != "service_failed" {
+		t.Fatalf("task command diagnostics are not lifecycle-scoped: %v", err)
+	}
+	if strings.Contains(err.Error(), "private") || strings.Contains(err.Error(), "account path") {
+		t.Fatalf("task output escaped through Error(): %q", err)
+	}
+	if isMissingWindowsTaskError(errors.New("task does not exist")) {
+		t.Fatal("caller classified an arbitrary error by its message")
+	}
+	if got := classifyWindowsTaskCommandOutput([]byte("ERROR: Task is not currently running.")); got != windowsTaskErrorNotRunning {
+		t.Fatalf("not-running classification = %d", got)
+	}
+
+	output := &boundedWindowsTaskOutput{}
+	large := strings.Repeat("x", maxWindowsTaskErrorOutput+100)
+	if written, err := output.Write([]byte(large)); err != nil || written != len(large) || len(output.Bytes()) != maxWindowsTaskErrorOutput {
+		t.Fatalf("bounded task output retained %d bytes (write=%d, err=%v)", len(output.Bytes()), written, err)
+	}
+	concurrent := &boundedWindowsTaskOutput{}
+	var group sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			_, _ = concurrent.Write([]byte(strings.Repeat("x", maxWindowsTaskErrorOutput)))
+		}()
+	}
+	group.Wait()
+	if got := len(concurrent.Bytes()); got != maxWindowsTaskErrorOutput {
+		t.Fatalf("concurrent task output retained %d bytes, want cap %d", got, maxWindowsTaskErrorOutput)
+	}
+	if windowsTaskCancellationOnly(&cyclicWindowsTaskError{}) {
+		t.Fatal("cyclic error was treated as an orderly cancellation")
+	}
+	joined := make([]error, 17)
+	for i := range joined {
+		joined[i] = context.Canceled
+	}
+	if windowsTaskCancellationOnly(errors.Join(joined...)) {
+		t.Fatal("oversized joined error was treated as an orderly cancellation")
 	}
 }
 
@@ -446,7 +556,9 @@ func TestRemoveWindowsCurrentUserServiceIgnoresMissingTaskAndStaleLock(t *testin
 	t.Cleanup(func() {
 		runWindowsTaskCommand, readWindowsDaemonPIDLock, stopWindowsLocalDaemonService = previousTask, previousRead, previousStop
 	})
-	runWindowsTaskCommand = func(context.Context, ...string) error { return errors.New("task does not exist") }
+	runWindowsTaskCommand = func(context.Context, ...string) error {
+		return &windowsTaskCommandError{err: errors.New("exit status 1"), kind: windowsTaskErrorMissing}
+	}
 	readWindowsDaemonPIDLock = func(string, string) (windowsDaemonPIDLock, error) { return windowsDaemonPIDLock{}, os.ErrNotExist }
 	stopWindowsLocalDaemonService = func(context.Context) error { return nil }
 	if err := removeWindowsCurrentUserService(context.Background(), executable); err != nil {

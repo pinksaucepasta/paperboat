@@ -91,6 +91,15 @@ oversized, stale-identity, and unauthorized prefices before forwarding any
 application bytes. The bearer or reusable session credential belongs only to
 carrier authentication and is never repeated in this per-stream preface.
 
+Native private durable HTTP carries the exact signed accessor grant and request
+in `IngressDecision.native_authorization`. This is v1 native authority: it is
+not a browser viewer grant. The publisher independently rechecks it through
+its machine-authenticated ingress admission endpoint on initial admission and
+every refresh. The publisher installation and accessor installation are distinct;
+account, route, target, carrier/config/assignment, edge epoch, signed request hash,
+revocation and expiry must all remain current. Neither a browser cookie nor a
+terminal attachment is required. The combined decision remains bounded to 16 KiB.
+
 For replacement ingress, `StreamOpen` is followed by a second strict four-byte
 big-endian length and JSON `IngressDecision`, also bounded by the 16 KiB stream
 preface limit. It includes `environment_id`, lifecycle (`ephemeral` or `durable`),
@@ -214,7 +223,7 @@ cannot remove or mutate a newer one.
 
 The control wire never carries an operating-system credential reference,
 bearer, cookie, private key, or secret. The connector keeps private material
-behind its local authenticator. The server resolves the enrolled host/device
+behind its local authenticator. The server resolves the enrolled host/machine
 public identity and the active or overlap credential public key from durable
 enrollment state, scoped by account, tunnel, connector, host, key ID, and
 credential generation. It never persists bearer bytes.
@@ -264,7 +273,7 @@ The payload is exactly a `tunnel_config_snapshot` object:
   "name":"...",
   "desired_state":"active|paused|deleted",
   "access_mode":"public|private",
-  "stable_endpoint":"https://<canonical-lowercase-uuid>.tunnels.pprbt.dev",
+  "stable_endpoint":"https://<quality>-<atmosphere>-<waypoint>-<four-digits>.tunnels.pprbt.dev",
   "expires_at":null,
   "routes":[{"id":"...","name":"...","protocol":"http|tls|tcp_private", "match_type":"managed_exact|exact|one_label_wildcard|catch_all", "match_hostname":"...", "wildcard_suffix":"...", "path_prefix":null, "origin_scheme":"http|https|h2c|unix|tcp", "origin_address":"...", "preserve_host":true, "host_override":null, "tls_verification":"not_applicable|system|custom_ca|mutual_tls|insecure_development", "tls_server_name":null, "ca_reference":null, "mtls_credential_reference":null, "connect_timeout_ms":10000, "idle_timeout_ms":90000, "max_concurrent_streams":128, "desired_state":"active|disabled|deleted"}]
 }
@@ -730,7 +739,7 @@ when supported native consumers still use it. hp's unrelated Coolify Caddy is ou
 | --- | --- |
 | Server `internal/controlplane/node_reconciliation.go`, `tunnel_edge_reconciliation.go`, `tunnel_edge_routes.go`, `internal/previewattachment/edge_node.go`, `internal/db/queries/control_plane.sql` and generated counterpart; origins in migrations 133/134 | Task 8 owns expiring registry/candidates; Task 30 owns ready primary/standby route assignments and public publication. Remove one-row selection, nullable-heartbeat eligibility and use of edge_pool as a physical failure domain |
 | Server `internal/relayselection/selector.go` and tests, native peer projections | Task 13 replaces region-only two-ended ranking with exact authorized common-node coordination; native private access cleanup is Task 19, not release Task 23 |
-| Tunnel `internal/edgehttp/policy.go`, `private_access_stream.go`, `private_connection.go`, old access grant control and private Caddy bridge tests/config | Task 26 replaces browser device/PAC authority; Task 19 owns native private TCP; remove accessor frames only after both consumers move |
+| Tunnel `internal/edgehttp/policy.go`, `private_access_stream.go`, `private_connection.go`, old access grant control and private Caddy bridge tests/config | Task 26 replaces browser machine/PAC authority; Task 19 owns native private TCP; remove accessor frames only after both consumers move |
 | Server `internal/tunnelv1/domain_reconciliation.go` and tests/SQL/OpenAPI; `internal/tunnelcert/acme.go`, `cloudflare_dns.go` and tests | Task 29 owns domain/certificate lifecycle and DNS01 authority; Task 30 adds separately scoped address publication and withdrawal. Keep provider secrets out of projections |
 | Tunnel `internal/caddyconfig`, `internal/certbroker`, `internal/runtime/certificate_broker.go`, certificate/runtime tests | Task 29 replaces Paperboat's Caddy TLS/config automation with the edge-owned certificate path; preserve issuance, renewal, revocation, custom domain and distribution proofs |
 | Tunnel `internal/node/state.go`, `manager.go`, `health.go`, `internal/route`, `internal/edgehttp/durable_carrier_transport.go`, related control/main wiring and tests | Task 30 adapts readiness and primary/standby observations; within-one-edge origin-carrier replica selection does not count as regional ingress recovery |

@@ -42,9 +42,6 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig) (*ManagedSSHRunt
 	if ctx == nil || strings.TrimSpace(cfg.ServerURL) == "" || cfg.Auth == nil || cfg.Store.Path == "" || strings.TrimSpace(cfg.CLIClientSessionID) == "" || !filepath.IsAbs(cfg.Home) || !filepath.IsAbs(cfg.RuntimeDirectory) || !filepath.IsAbs(cfg.Executable) {
 		return nil, ErrInvalidInventoryConfig
 	}
-	if cfg.AliasSuffix == "" {
-		cfg.AliasSuffix = managedssh.AliasSuffix
-	}
 	identity, err := cfg.Store.ManagedSSHIdentity(cfg.ServerURL, cfg.CLIClientSessionID)
 	if err != nil {
 		return nil, err
@@ -58,7 +55,7 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig) (*ManagedSSHRunt
 	_, err = client.RegisterManagedSSHClientKey(registerCtx, identity.PublicKey, identity.Fingerprint, "managed-ssh-register-"+hex.EncodeToString(identity.Fingerprint[:16]))
 	cancel()
 	if err != nil {
-		return nil, err
+		return nil, managedSSHAuthorityError(err)
 	}
 	capabilities, err := managedssh.ProbeOpenSSH(ctx, "ssh.exe", 5*time.Second)
 	if err != nil || !capabilities.Ready() {
@@ -76,8 +73,7 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig) (*ManagedSSHRunt
 		return installWindowsOpenSSHConfig(cfg, agentRuntime.socket, identity.PublicKey, targets)
 	}
 	if err := install(ctx); err != nil {
-		_ = agentRuntime.Close()
-		return nil, err
+		return nil, errors.Join(err, agentRuntime.Close())
 	}
 	return &ManagedSSHRuntime{closeFn: agentRuntime.Close, refresh: install}, nil
 }
@@ -100,14 +96,7 @@ func (r *ManagedSSHRuntime) Close() error {
 }
 
 func ManagedSSHHealthCode(err error) string {
-	switch {
-	case err == nil:
-		return ""
-	case errors.Is(err, managedssh.ErrOpenSSHUnavailable), errors.Is(err, managedssh.ErrOpenSSHConfigConflict), errors.Is(err, managedssh.ErrManagedIdentityFileConflict), errors.Is(err, managedssh.ErrAgentDenied):
-		return "ssh_target_not_ready"
-	default:
-		return "ssh_key_rejected"
-	}
+	return managedSSHHealthCode(err)
 }
 
 type windowsAgentRuntime struct {
@@ -138,30 +127,27 @@ func startWindowsAgent(parent context.Context, signer ssh.Signer, inherited stri
 	}
 	managed, err := managedssh.NewAgent(signer)
 	if err != nil {
-		_ = listener.Close()
-		return nil, err
+		return nil, errors.Join(err, listener.Close())
 	}
 	var delegate agent.ExtendedAgent
 	var delegateConnection net.Conn
 	if inherited != "" {
 		if !validWindowsAgentPipe(inherited) || strings.EqualFold(inherited, windowsManagedAgentPipe) {
-			_ = listener.Close()
-			return nil, managedssh.ErrAgentDenied
+			return nil, errors.Join(managedssh.ErrAgentDenied, listener.Close())
 		}
 		delegateConnection, err = winio.DialPipeContext(parent, inherited)
 		if err != nil {
-			_ = listener.Close()
-			return nil, err
+			return nil, errors.Join(err, listener.Close())
 		}
 		delegate = agent.NewClient(delegateConnection)
 	}
 	aggregate, err := managedssh.NewAggregate(managed, delegate)
 	if err != nil {
-		_ = listener.Close()
+		cleanupErr := listener.Close()
 		if delegateConnection != nil {
-			_ = delegateConnection.Close()
+			cleanupErr = errors.Join(cleanupErr, delegateConnection.Close())
 		}
-		return nil, err
+		return nil, errors.Join(err, cleanupErr)
 	}
 	runCtx, cancel := context.WithCancel(parent)
 	runtime := &windowsAgentRuntime{socket: windowsManagedAgentPipe, cancel: cancel, done: make(chan error, 1), delegate: delegateConnection}
@@ -197,7 +183,7 @@ func installWindowsOpenSSHConfig(cfg ManagedSSHConfig, agentSocket, publicKey st
 	identityFile := managedssh.ManagedIdentityPublicKeyPath(cfg.Home)
 	executable := quoteWindowsOpenSSH(cfg.Executable)
 	_, err := managedssh.InstallOpenSSHConfig(managedssh.OpenSSHConfig{
-		Home: cfg.Home, OwnerUID: cfg.OwnerUID, AliasSuffix: cfg.AliasSuffix,
+		Home: cfg.Home, OwnerUID: cfg.OwnerUID,
 		ProxyCommand:      executable + " __ssh-proxy --host %h --port %p --user %r",
 		KnownHostsCommand: executable + " __ssh-known-hosts --host %h --port %p",
 		AgentSocket:       agentSocket,

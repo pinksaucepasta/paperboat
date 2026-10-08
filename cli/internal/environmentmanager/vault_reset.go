@@ -36,7 +36,7 @@ func (v PasswordVault) ResetPersonal(ctx context.Context, password, recoveryCode
 	}
 	local, err := v.Store.LoadPasswordVault(v.Issuer, v.AccountID)
 	defer local.Clear()
-	if err != nil && !errors.Is(err, config.ErrSecretNotFound) {
+	if err != nil && !vaultCredentialAbsentOnly(err) {
 		return err
 	}
 	if local.Pending != nil || local.Operation != nil {
@@ -96,15 +96,15 @@ func (v PasswordVault) ResetPersonal(ctx context.Context, password, recoveryCode
 	replacements := make([]string, 0, len(inventory.Scopes))
 	seen := map[string]bool{}
 	for _, state := range inventory.Scopes {
-		if state.OwnerKind != "personal" || state.OwnerID != v.AccountID || state.KeyEpoch != inventory.KeyEpoch || seen[state.MachineID] || state.Revision == 0 || state.Revision >= environmente2ee.MaximumContractInteger {
+		if state.OwnerKind != "personal" || state.OwnerID != v.AccountID || state.KeyEpoch != inventory.KeyEpoch || seen[state.WorkspaceID+"\x00"+state.MachineID] || state.Revision == 0 || state.Revision >= environmente2ee.MaximumContractInteger {
 			return ErrIntegrity
 		}
 		previous, err := environmente2ee.ParseDocumentID(state.DocumentID)
 		if err != nil {
 			return ErrIntegrity
 		}
-		seen[state.MachineID] = true
-		scope, err := environmente2ee.SealVaultScope(ctx, environmente2ee.VaultScopeClaims{Issuer: v.Issuer, OwnerKind: "personal", OwnerID: v.AccountID, MachineID: state.MachineID, KeyEpoch: keys.PersonalEpoch, Revision: state.Revision + 1, Previous: previous[:], WriterAccount: v.AccountID, WriterVaultGeneration: next.Generation}, keys.PersonalKey, keys.WriterSeed, map[string][]byte{})
+		seen[state.WorkspaceID+"\x00"+state.MachineID] = true
+		scope, err := environmente2ee.SealVaultScope(ctx, environmente2ee.VaultScopeClaims{Issuer: v.Issuer, OwnerKind: "personal", OwnerID: v.AccountID, MachineID: state.MachineID, WorkspaceID: state.WorkspaceID, KeyEpoch: keys.PersonalEpoch, Revision: state.Revision + 1, Previous: previous[:], WriterAccount: v.AccountID, WriterVaultGeneration: next.Generation}, keys.PersonalKey, keys.WriterSeed, map[string][]byte{})
 		if err != nil {
 			return err
 		}
@@ -150,10 +150,10 @@ func (v PasswordVault) RotatePersonal(ctx context.Context) error {
 		seen := map[string]bool{}
 		for i := range inventory.Scopes {
 			state := &inventory.Scopes[i]
-			if state.OwnerKind != "personal" || state.OwnerID != v.AccountID || state.KeyEpoch != inventory.KeyEpoch || seen[state.MachineID] || state.Revision == 0 {
+			if state.OwnerKind != "personal" || state.OwnerID != v.AccountID || state.KeyEpoch != inventory.KeyEpoch || seen[state.WorkspaceID+"\x00"+state.MachineID] || state.Revision == 0 {
 				return ErrIntegrity
 			}
-			seen[state.MachineID] = true
+			seen[state.WorkspaceID+"\x00"+state.MachineID] = true
 			if _, err := environmente2ee.ParseDocumentID(state.DocumentID); err != nil {
 				return ErrIntegrity
 			}
@@ -213,7 +213,9 @@ func (v PasswordVault) publishPersonalRotation(ctx context.Context, local *confi
 				oldKeys.Clear()
 				return ErrIntegrity
 			}
-			scope, values, err := v.readVaultScope(ctx, c, &oldKeys, "personal", v.AccountID, state.MachineID)
+			scoped := v
+			scoped.WorkspaceID = state.WorkspaceID
+			scope, values, err := scoped.readVaultScope(ctx, c, &oldKeys, "personal", v.AccountID, state.MachineID)
 			oldKeys.Clear()
 			if err != nil {
 				nextKeys.Clear()
@@ -224,18 +226,18 @@ func (v PasswordVault) publishPersonalRotation(ctx context.Context, local *confi
 				nextKeys.Clear()
 				return ErrVaultChanged
 			}
-			next, err := environmente2ee.SealVaultScope(ctx, environmente2ee.VaultScopeClaims{Issuer: v.Issuer, OwnerKind: "personal", OwnerID: v.AccountID, MachineID: state.MachineID, KeyEpoch: nextKeys.PersonalEpoch, Revision: scope.Claims.Revision + 1, Previous: scope.ID[:], WriterAccount: v.AccountID, WriterVaultGeneration: local.Pending.Head.Generation}, nextKeys.PersonalKey, nextKeys.WriterSeed, values)
+			next, err := environmente2ee.SealVaultScope(ctx, environmente2ee.VaultScopeClaims{Issuer: v.Issuer, OwnerKind: "personal", OwnerID: v.AccountID, MachineID: state.MachineID, WorkspaceID: state.WorkspaceID, KeyEpoch: nextKeys.PersonalEpoch, Revision: scope.Claims.Revision + 1, Previous: scope.ID[:], WriterAccount: v.AccountID, WriterVaultGeneration: local.Pending.Head.Generation}, nextKeys.PersonalKey, nextKeys.WriterSeed, values)
 			clearVaultValues(values)
 			nextKeys.Clear()
 			if err != nil {
 				return err
 			}
-			journal.Upload = &api.VaultPersonalScopeStage{ExpectedVaultDocumentID: local.Head.ID.String(), MachineID: state.MachineID, Envelope: vaultEncoded(next.Raw)}
+			journal.Upload = &api.VaultPersonalScopeStage{WorkspaceID: state.WorkspaceID, ExpectedVaultDocumentID: local.Head.ID.String(), MachineID: state.MachineID, Envelope: vaultEncoded(next.Raw)}
 			if err := save(); err != nil {
 				return err
 			}
 		}
-		if journal.Upload.MachineID != state.MachineID || journal.Upload.ExpectedVaultDocumentID != local.Head.ID.String() {
+		if journal.Upload.WorkspaceID != state.WorkspaceID || journal.Upload.MachineID != state.MachineID || journal.Upload.ExpectedVaultDocumentID != local.Head.ID.String() {
 			return ErrIntegrity
 		}
 		raw, err := base64.RawURLEncoding.Strict().DecodeString(journal.Upload.Envelope)
@@ -247,7 +249,7 @@ func (v PasswordVault) publishPersonalRotation(ctx context.Context, local *confi
 		if err != nil {
 			return err
 		}
-		if out.MachineID != state.MachineID || out.DocumentID != id.String() {
+		if out.WorkspaceID != state.WorkspaceID || out.MachineID != state.MachineID || out.DocumentID != id.String() {
 			return ErrIntegrity
 		}
 		journal.Final.ScopeDocuments = append(journal.Final.ScopeDocuments, out)

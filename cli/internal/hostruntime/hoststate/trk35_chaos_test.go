@@ -179,16 +179,32 @@ func TestTRK35HostStatePermissionDeniedPrimaryFailsClosedWithoutTouchingBackup(t
 	if opened != nil {
 		_ = opened.Close()
 	}
-	if !errors.Is(err, ErrCorrupt) || !status.Degraded || status.Code != "primary_unreadable" || status.Source != "none" {
+	if !errors.Is(err, os.ErrPermission) || errors.Is(err, ErrCorrupt) || !status.Degraded || status.Code != "primary_unreadable" || status.Source != "none" {
 		t.Fatalf("permission-denied primary opened=%v status=%+v err=%v", opened != nil, status, err)
 	}
 	unchanged, err := os.ReadFile(backupPath)
 	if err != nil || !bytes.Equal(unchanged, primary) {
 		t.Fatalf("permission-denied recovery touched backup err=%v equal=%v", err, bytes.Equal(unchanged, primary))
 	}
+	if err := os.Chmod(primaryPath, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	unchanged, err = os.ReadFile(primaryPath)
+	if err != nil || !bytes.Equal(unchanged, primary) {
+		t.Fatalf("failed read changed primary err=%v equal=%v", err, bytes.Equal(unchanged, primary))
+	}
+	recovered, status, err := Open(Config{Root: root, Clock: func() time.Time { return testNow.Add(2 * time.Minute) }})
+	if err != nil {
+		t.Fatalf("open after restoring primary access: status=%+v err=%v", status, err)
+	}
+	defer recovered.Close()
+	state, revision, err := recovered.Snapshot()
+	if err != nil || revision != 2 || len(state.Tunnels) != 1 || state.Tunnels[0].LastKnownGood == nil || state.Tunnels[0].LastKnownGood.Generation != 1 {
+		t.Fatalf("recovered primary lost LKG revision=%d state=%+v err=%v", revision, state, err)
+	}
 }
 
-func TestTRK35HostStatePermissionDeniedBackupRetainsLKG(t *testing.T) {
+func TestTRK35HostStatePermissionDeniedBackupFailsClosedThenRecovers(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "host-state")
 	store, _, err := Open(Config{Root: root, Clock: func() time.Time { return testNow }})
 	if err != nil {
@@ -206,28 +222,40 @@ func TestTRK35HostStatePermissionDeniedBackupRetainsLKG(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	backup, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Chmod(backupPath, 0); err != nil {
 		t.Fatal(err)
 	}
 
-	recovered, status, err := Open(Config{Root: root, Clock: func() time.Time { return testNow.Add(time.Minute) }})
-	if err != nil {
+	opened, status, err := Open(Config{Root: root, Clock: func() time.Time { return testNow.Add(time.Minute) }})
+	if opened != nil {
+		_ = opened.Close()
+	}
+	if !errors.Is(err, os.ErrPermission) || errors.Is(err, ErrCorrupt) || !status.Degraded || status.Code != "backup_unreadable" || status.Source != "none" || len(status.PreservedPaths) != 0 {
+		t.Fatalf("permission-denied backup opened=%v status=%+v err=%v", opened != nil, status, err)
+	}
+	unchangedPrimary, err := os.ReadFile(primaryPath)
+	if err != nil || !bytes.Equal(unchangedPrimary, primary) {
+		t.Fatalf("failed read changed primary err=%v equal=%v", err, bytes.Equal(unchangedPrimary, primary))
+	}
+	if err := os.Chmod(backupPath, 0o600); err != nil {
 		t.Fatal(err)
+	}
+	unchangedBackup, err := os.ReadFile(backupPath)
+	if err != nil || !bytes.Equal(unchangedBackup, backup) {
+		t.Fatalf("failed read changed backup err=%v equal=%v", err, bytes.Equal(unchangedBackup, backup))
+	}
+	recovered, status, err := Open(Config{Root: root, Clock: func() time.Time { return testNow.Add(2 * time.Minute) }})
+	if err != nil {
+		t.Fatalf("open after restoring backup access: status=%+v err=%v", status, err)
 	}
 	defer recovered.Close()
-	if !status.Degraded || status.Code != "backup_corrupt_repaired" || status.Source != "primary" || len(status.PreservedPaths) != 1 {
-		t.Fatalf("permission-denied backup status=%+v", status)
-	}
 	state, revision, err := recovered.Snapshot()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if revision != 2 || len(state.Tunnels) != 1 || state.Tunnels[0].LastKnownGood == nil || state.Tunnels[0].LastKnownGood.Generation != 1 {
-		t.Fatalf("permission-denied backup lost LKG revision=%d state=%+v", revision, state)
-	}
-	repaired, err := os.ReadFile(backupPath)
-	if err != nil || !bytes.Equal(repaired, primary) {
-		t.Fatalf("permission-denied backup was not repaired err=%v equal=%v", err, bytes.Equal(repaired, primary))
+	if err != nil || revision != 2 || len(state.Tunnels) != 1 || state.Tunnels[0].LastKnownGood == nil || state.Tunnels[0].LastKnownGood.Generation != 1 {
+		t.Fatalf("recovered primary lost LKG revision=%d state=%+v err=%v", revision, state, err)
 	}
 }
 

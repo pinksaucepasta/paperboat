@@ -8,13 +8,14 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | --- | --- |
 | [pb](pb.md) | Open Paperboat or connect to an environment terminal |
 | [pb access](pb_access.md) | Open authenticated private access |
-| [pb access device](pb_access_device.md) | Forward a local port to an authorized device service |
+| [pb access machine](pb_access_machine.md) | Forward a local port to an authorized machine service |
 | [pb access tunnel](pb_access_tunnel.md) | Open private TCP access through stable hostd |
-| [pb approve](pb_approve.md) | Approve or revoke a peer device over gRPC IPC |
+| [pb approve](pb_approve.md) | Approve or revoke a peer machine over gRPC IPC |
 | [pb auth](pb_auth.md) | Manage Paperboat sign-in |
-| [pb auth login](pb_auth_login.md) | Sign in with a 26-character enrollment token |
+| [pb auth login](pb_auth_login.md) | Sign in through browser approval on any device |
 | [pb auth logout](pb_auth_logout.md) | Revoke and remove the active client session |
 | [pb auth status](pb_auth_status.md) | Show the active Paperboat account |
+| [pb auth switch](pb_auth_switch.md) | Switch the active Personal or team workspace |
 | [pb bugreport](pb_bugreport.md) | Create a redacted Paperboat diagnostic bundle |
 | [pb completion](pb_completion.md) | Generate the autocompletion script for the specified shell |
 | [pb completion bash](pb_completion_bash.md) | Generate the autocompletion script for bash |
@@ -23,8 +24,8 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb completion zsh](pb_completion_zsh.md) | Generate the autocompletion script for zsh |
 | [pb config](pb_config.md) | Inspect the local CLI config |
 | [pb config approve](pb_config_approve.md) | Approve the currently reviewed pull revision |
-| [pb config assign](pb_config_assign.md) | Assign a config repository to a machine |
 | [pb config conflict](pb_config_conflict.md) | Inspect and resolve configuration conflicts |
+| [pb config conflict compare](pb_config_conflict_compare.md) | Read current machine and repository conflict contents through an encrypted connection |
 | [pb config conflict list](pb_config_conflict_list.md) | List current path conflicts |
 | [pb config conflict resolve](pb_config_conflict_resolve.md) | Choose the machine or repository version |
 | [pb config conflict show](pb_config_conflict_show.md) | Show a current path conflict |
@@ -36,7 +37,25 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb config customize show](pb_config_customize_show.md) | Show the local preference document |
 | [pb config customize validate](pb_config_customize_validate.md) | Validate preferences without executing any action |
 | [pb config force](pb_config_force.md) | Force a scoped configuration direction |
+| [pb config local-access](pb_config_local-access.md) | Configure local browser domains, aliases and reverse proxies |
+| [pb config local-access alias](pb_config_local-access_alias.md) | Manage named browser aliases for authorized machine ports |
+| [pb config local-access alias set](pb_config_local-access_alias_set.md) | Set and apply a service alias |
+| [pb config local-access alias unset](pb_config_local-access_alias_unset.md) | Remove a service alias |
+| [pb config local-access apply](pb_config_local-access_apply.md) | Apply local browser settings from the config file |
+| [pb config local-access domain](pb_config_local-access_domain.md) | Set the local browser domain |
+| [pb config local-access domain reset](pb_config_local-access_domain_reset.md) | Restore the default local browser domain |
+| [pb config local-access domain set](pb_config_local-access_domain_set.md) | Set and apply the local browser domain |
+| [pb config local-access proxy](pb_config_local-access_proxy.md) | Route machine app names through Coolify or another reverse proxy |
+| [pb config local-access proxy set](pb_config_local-access_proxy_set.md) | Set the machine reverse-proxy port |
+| [pb config local-access proxy unset](pb_config_local-access_proxy_unset.md) | Restore the default reverse-proxy port |
+| [pb config local-access show](pb_config_local-access_show.md) | Show local browser domains and aliases |
 | [pb config path](pb_config_path.md) | Print the config file path |
+| [pb config repository](pb_config_repository.md) | Connect custom Git repositories and manage machine credentials |
+| [pb config repository connect](pb_config_repository_connect.md) | Connect an HTTPS, SSH, or local Git repository |
+| [pb config repository credentials](pb_config_repository_credentials.md) | Store credentials privately on this machine |
+| [pb config repository credentials remove](pb_config_repository_credentials_remove.md) | Remove this machine's saved repository credentials |
+| [pb config repository credentials set](pb_config_repository_credentials_set.md) | Read a credential profile from a private JSON file or stdin |
+| [pb config repository list](pb_config_repository_list.md) | List connected repositories |
 | [pb config set](pb_config_set.md) | Set a local configuration value |
 | [pb config show](pb_config_show.md) | Print the effective config |
 | [pb config status](pb_config_status.md) | Show configuration synchronization status |
@@ -45,6 +64,11 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb config status-bar reset](pb_config_status-bar_reset.md) | Restore status-bar defaults |
 | [pb config status-bar set](pb_config_status-bar_set.md) | Set a status-bar preference |
 | [pb config status-bar show](pb_config_status-bar_show.md) | Show the effective status-bar configuration |
+| [pb config sync](pb_config_sync.md) | Validate and apply this machine's configuration file |
+| [pb config sync apply](pb_config_sync_apply.md) | Review the effective file configuration on this machine |
+| [pb config sync init](pb_config_sync_init.md) | Create an empty machine configuration without overwriting existing files |
+| [pb config sync path](pb_config_sync_path.md) | Show the authoritative machine configuration path |
+| [pb config sync validate](pb_config_sync_validate.md) | Review the effective file configuration on this machine |
 | [pb config team-default-adopt](pb_config_team-default-adopt.md) | Adopt a team default using your provider access |
 | [pb config team-default-set](pb_config_team-default-set.md) | Set a team's default pull repository |
 | [pb config team-default-unadopt](pb_config_team-default-unadopt.md) | Stop inheriting a team configuration default |
@@ -52,26 +76,19 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb config unset](pb_config_unset.md) | Remove a local configuration value |
 | [pb connect](pb_connect.md) | Create and attach to an environment terminal session |
 | [pb daemon](pb_daemon.md) | Paperboat endpoint daemon |
-| [pb daemon device-guard](pb_daemon_device-guard.md) | Manage protected device-name access |
-| [pb daemon device-guard install](pb_daemon_device-guard_install.md) | Install the root-owned device guard service |
-| [pb daemon device-guard run](pb_daemon_device-guard_run.md) | Run the device guard under service supervision |
-| [pb daemon device-guard uninstall](pb_daemon_device-guard_uninstall.md) | Remove device access while retaining cached-address protection |
+| [pb daemon machine-guard](pb_daemon_machine-guard.md) | Manage protected local machine access |
+| [pb daemon machine-guard install](pb_daemon_machine-guard_install.md) | Install the root-owned machine guard service |
+| [pb daemon machine-guard run](pb_daemon_machine-guard_run.md) | Run the machine guard under service supervision |
+| [pb daemon machine-guard uninstall](pb_daemon_machine-guard_uninstall.md) | Remove machine access while retaining cached-address protection |
 | [pb daemon run](pb_daemon_run.md) | Run Paperboat daemon under service supervision |
-| [pb device](pb_device.md) | Manage devices |
-| [pb device add](pb_device_add.md) | Print Linux/macOS and Windows device enrollment commands |
-| [pb device availability](pb_device_availability.md) | Set device sleep availability |
-| [pb device capabilities](pb_device_capabilities.md) | Set incoming services for a device |
-| [pb device list](pb_device_list.md) | List enrolled devices |
-| [pb device rename](pb_device_rename.md) | Rename a device |
-| [pb device revoke](pb_device_revoke.md) | Disconnect and revoke a device |
 | [pb doctor](pb_doctor.md) | Check Paperboat connectivity and readiness |
 | [pb edge](pb_edge.md) | Inspect tunnel edges |
 | [pb edge list](pb_edge_list.md) | List hosted and self-hosted tunnel edges |
-| [pb env](pb_env.md) | Manage ENV Injection for connected hosts |
+| [pb env](pb_env.md) | Manage automatic global ENV and device overrides |
 | [pb env grants](pb_env_grants.md) | Reconcile encrypted ENV team grants |
 | [pb env grants sync](pb_env_grants_sync.md) | Accept pending team grants into this account's encrypted vault |
-| [pb env host](pb_env_host.md) | Manage encrypted host ENV projections |
-| [pb env host provision](pb_env_host_provision.md) | Provision an explicit encrypted ENV selection to a host |
+| [pb env host](pb_env_host.md) | Inspect automatic workspace ENV delivery |
+| [pb env host show](pb_env_host_show.md) | Show published ENV delivery and observed application on a host |
 | [pb env list](pb_env_list.md) | List configured environment-variable metadata |
 | [pb env rotate](pb_env_rotate.md) | Rotate personal ENV scope keys while preserving values |
 | [pb env rotate cancel](pb_env_rotate_cancel.md) | Cancel an uncommitted personal ENV key rotation |
@@ -89,10 +106,10 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb env vault password](pb_env_vault_password.md) | Rewrap unlocked ENV keys with a new password |
 | [pb env vault recover](pb_env_vault_recover.md) | Recover vault access and replace the password and recovery code |
 | [pb env vault recovery](pb_env_vault_recovery.md) | Enable, replace, or disable the optional recovery code |
-| [pb env vault remove](pb_env_vault_remove.md) | Remove this device's local ENV vault custody |
+| [pb env vault remove](pb_env_vault_remove.md) | Remove this machine's local ENV vault custody |
 | [pb env vault reset](pb_env_vault_reset.md) | Replace personal ENV keys and delete every personal value |
 | [pb env vault resume](pb_env_vault_resume.md) | Reconcile an interrupted vault publication |
-| [pb env vault unlock](pb_env_vault_unlock.md) | Unlock this account's ENV vault on this device |
+| [pb env vault unlock](pb_env_vault_unlock.md) | Unlock this account's ENV vault on this machine |
 | [pb environments](pb_environments.md) | List enrolled machines available to this account |
 | [pb exec](pb_exec.md) | Execute an exact command on a machine |
 | [pb inbox](pb_inbox.md) | Manage the Paperboat Inbox |
@@ -104,8 +121,17 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb inbox reset](pb_inbox_reset.md) |  |
 | [pb inbox set](pb_inbox_set.md) |  |
 | [pb install](pb_install.md) | Install this executable and its local service |
+| [pb login](pb_login.md) | Sign in through browser approval on any device |
 | [pb logout](pb_logout.md) | Revoke and remove the active client session |
-| [pb pair](pb_pair.md) | Enroll this device with a one-shot token |
+| [pb machine](pb_machine.md) | Manage machines |
+| [pb machine add](pb_machine_add.md) | Print Linux/macOS and Windows machine enrollment commands |
+| [pb machine availability](pb_machine_availability.md) | Set machine sleep availability |
+| [pb machine capabilities](pb_machine_capabilities.md) | Set incoming services for a machine |
+| [pb machine list](pb_machine_list.md) | List enrolled machines |
+| [pb machine rename](pb_machine_rename.md) | Rename a machine |
+| [pb machine revoke](pb_machine_revoke.md) | Disconnect and revoke a machine |
+| [pb new](pb_new.md) | Open a fresh terminal on this device in the current directory |
+| [pb pair](pb_pair.md) | Enroll this machine with a one-shot token |
 | [pb ping](pb_ping.md) | Measure authenticated connectivity to a machine |
 | [pb preview](pb_preview.md) | Expose a local target through a temporary preview |
 | [pb preview delete](pb_preview_delete.md) | Delete a temporary preview |
@@ -117,10 +143,10 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb relay](pb_relay.md) | Inspect hosted and self-hosted relays |
 | [pb relay list](pb_relay_list.md) | List hosted and self-hosted relays |
 | [pb reset](pb_reset.md) | Remove the current Paperboat setup before fresh enrollment |
-| [pb resolve](pb_resolve.md) | Resolve a peer device IP, port forwardings and tags over gRPC IPC |
+| [pb resolve](pb_resolve.md) | Resolve a peer machine IP, port forwardings and tags over gRPC IPC |
 | [pb rsync](pb_rsync.md) | Run rsync with Paperboat machine resolution |
 | [pb scp](pb_scp.md) | Run scp with Paperboat machine resolution |
-| [pb send](pb_send.md) | Send files to a device's Paperboat Inbox |
+| [pb send](pb_send.md) | Send files to a machine's Paperboat Inbox |
 | [pb send cancel](pb_send_cancel.md) | Cancel a file transfer batch |
 | [pb send destination](pb_send_destination.md) | Show the default transfer destination |
 | [pb send destination clear](pb_send_destination_clear.md) | Clear the default transfer destination |
@@ -152,7 +178,8 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb ssh doctor](pb_ssh_doctor.md) | Check SSH integration for a machine |
 | [pb ssh trust-host](pb_ssh_trust-host.md) | Approve a changed SSH host identity |
 | [pb status](pb_status.md) | Show local Paperboat machine status |
-| [pb tag](pb_tag.md) | Assign tags to a device over gRPC IPC |
+| [pb switch](pb_switch.md) | Switch the active Personal or team workspace |
+| [pb tag](pb_tag.md) | Assign tags to a machine over gRPC IPC |
 | [pb team](pb_team.md) | Manage teams and explicit resource permissions |
 | [pb team accept](pb_team_accept.md) | Accept an invitation bound to this account |
 | [pb team activity](pb_team_activity.md) | View owner/admin activity from the last 90 days |
@@ -160,17 +187,19 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb team cancel-invite](pb_team_cancel-invite.md) | Cancel an outstanding invitation |
 | [pb team create](pb_team_create.md) | Create a team |
 | [pb team delete](pb_team_delete.md) | Delete a team |
-| [pb team device](pb_team_device.md) | Share devices and manage exact team access |
-| [pb team device grant](pb_team_device_grant.md) | Set all-member or selected-member device capabilities |
-| [pb team device remove](pb_team_device_remove.md) | Revoke a team-owned device without personal takeover |
-| [pb team device share](pb_team_device_share.md) | Share your personal device with a team; grants are separate |
-| [pb team device transfer-to-team](pb_team_device_transfer-to-team.md) | Explicitly transfer your enrollment to team ownership |
-| [pb team device unshare](pb_team_device_unshare.md) | Withdraw the team's grants while retaining personal ownership |
 | [pb team get](pb_team_get.md) | Show one team and its current generation |
 | [pb team grant](pb_team_grant.md) | Set or revoke an explicit resource permission |
+| [pb team invitation](pb_team_invitation.md) | Show an invitation you may receive or administer |
+| [pb team invitations](pb_team_invitations.md) | Discover pending invitations received by you or administered for a team |
 | [pb team invite](pb_team_invite.md) | Invite an account as a member |
 | [pb team leave](pb_team_leave.md) | Leave a team |
 | [pb team list](pb_team_list.md) | List teams |
+| [pb team machine](pb_team_machine.md) | Share machines and manage exact team access |
+| [pb team machine grant](pb_team_machine_grant.md) | Set all-member or selected-member machine capabilities |
+| [pb team machine remove](pb_team_machine_remove.md) | Revoke a team-owned machine without personal takeover |
+| [pb team machine share](pb_team_machine_share.md) | Share your personal machine with a team; grants are separate |
+| [pb team machine transfer-to-team](pb_team_machine_transfer-to-team.md) | Explicitly transfer your enrollment to team ownership |
+| [pb team machine unshare](pb_team_machine_unshare.md) | Withdraw the team's grants while retaining personal ownership |
 | [pb team remove](pb_team_remove.md) | Remove a team member |
 | [pb team role](pb_team_role.md) | Change a team member's role |
 | [pb team transfer](pb_team_transfer.md) | Transfer team ownership |
@@ -213,5 +242,6 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb update](pb_update.md) | Update pb from the signed Paperboat release |
 | [pb update check](pb_update_check.md) | Check the signed Paperboat release without installing it |
 | [pb update download](pb_update_download.md) | Download and verify an update without installing it |
+| [pb update settings](pb_update_settings.md) | View or change automatic update settings |
 | [pb update status](pb_update_status.md) | Show installed Paperboat update state |
 | [pb wait](pb_wait.md) | Wait for a machine readiness condition |

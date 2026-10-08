@@ -6,12 +6,10 @@ package inspectorauth
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"net/http"
 	"strings"
@@ -19,6 +17,11 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/inspectorapi"
+)
+
+var (
+	errMissingMachineToken = errors.New("machine credential unavailable")
+	errMissingMachineProof = errors.New("machine proof unavailable")
 )
 
 // MachineSource issues the host's renewable machine identity material,
@@ -71,24 +74,30 @@ func (c Config) AuthorizeFunc() (inspectorapi.AuthorizeFunc, error) {
 		}
 		body, err := json.Marshal(map[string]any{"credential_token": grantToken, "resource_kind": kind, "resource_id": resource, "route_id": route, "action": action})
 		if err != nil {
-			return inspectorapi.Decision{}, inspectorapi.ErrInvalid
+			return inspectorapi.Decision{}, controlRequestFailure(inspectorapi.ErrUpstream, err)
 		}
 		const path = "/v1/inspector/authorize"
 		operationID, err := newOperationID()
 		if err != nil {
-			return inspectorapi.Decision{}, inspectorapi.ErrUpstream
+			return inspectorapi.Decision{}, controlRequestFailure(inspectorapi.ErrUpstream, err)
 		}
 		token, err := c.Source.Token(ctx)
-		if err != nil || strings.TrimSpace(token) == "" {
-			return inspectorapi.Decision{}, inspectorapi.ErrUpstream
+		if err != nil {
+			return inspectorapi.Decision{}, controlRequestFailure(inspectorapi.ErrUpstream, err)
+		}
+		if strings.TrimSpace(token) == "" {
+			return inspectorapi.Decision{}, controlRequestFailure(inspectorapi.ErrUpstream, errMissingMachineToken)
 		}
 		proof, err := c.Source.Proof(ctx, operationID, http.MethodPost, path, body)
-		if err != nil || len(proof) == 0 {
-			return inspectorapi.Decision{}, inspectorapi.ErrUpstream
+		if err != nil {
+			return inspectorapi.Decision{}, controlRequestFailure(inspectorapi.ErrUpstream, err)
+		}
+		if len(proof) == 0 {
+			return inspectorapi.Decision{}, controlRequestFailure(inspectorapi.ErrUpstream, errMissingMachineProof)
 		}
 		request, err := http.NewRequestWithContext(ctx, http.MethodPost, base+path, bytes.NewReader(body))
 		if err != nil {
-			return inspectorapi.Decision{}, inspectorapi.ErrUpstream
+			return inspectorapi.Decision{}, controlRequestFailure(inspectorapi.ErrUpstream, err)
 		}
 		request.Header.Set("Accept", "application/json")
 		request.Header.Set("Content-Type", "application/json")
@@ -101,33 +110,34 @@ func (c Config) AuthorizeFunc() (inspectorapi.AuthorizeFunc, error) {
 			if ctx.Err() != nil {
 				return inspectorapi.Decision{}, ctx.Err()
 			}
-			return inspectorapi.Decision{}, inspectorapi.ErrUpstream
+			return inspectorapi.Decision{}, controlRequestFailure(inspectorapi.ErrUpstream, err)
 		}
 		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			switch response.StatusCode {
+			case http.StatusBadRequest:
+				return inspectorapi.Decision{}, inspectorapi.ErrInvalid
+			case http.StatusForbidden, http.StatusNotFound, http.StatusGone:
+				return inspectorapi.Decision{}, inspectorapi.ErrDenied
+			default:
+				return inspectorapi.Decision{}, controlRequestFailure(inspectorapi.ErrUpstream, errorreport.HTTPStatusFailure(response))
+			}
+		}
 		payload, err := io.ReadAll(io.LimitReader(response.Body, 64<<10))
 		if err != nil {
-			return inspectorapi.Decision{}, inspectorapi.ErrUpstream
-		}
-		switch response.StatusCode {
-		case http.StatusOK:
-		case http.StatusBadRequest:
-			return inspectorapi.Decision{}, inspectorapi.ErrInvalid
-		case http.StatusForbidden, http.StatusNotFound, http.StatusGone:
-			return inspectorapi.Decision{}, inspectorapi.ErrDenied
-		default:
-			return inspectorapi.Decision{}, inspectorapi.ErrUpstream
+			return inspectorapi.Decision{}, controlRequestFailure(inspectorapi.ErrUpstream, err)
 		}
 		var envelope struct {
 			Data decisionWire `json:"data"`
 		}
 		if err := json.Unmarshal(payload, &envelope); err != nil {
-			return inspectorapi.Decision{}, inspectorapi.ErrUpstream
+			return inspectorapi.Decision{}, controlRequestFailure(inspectorapi.ErrUpstream, err)
 		}
 		wire := envelope.Data
 		if wire.CredentialID == "" || wire.AccountID == "" || wire.ResourceKind != kind || wire.ResourceID != resource || wire.RouteID != route ||
 			wire.ResourceGeneration == 0 || wire.RouteGeneration == 0 || wire.TargetGeneration == 0 ||
 			wire.IssuedAt.IsZero() || wire.ExpiresAt.IsZero() || !wire.ExpiresAt.After(wire.IssuedAt) {
-			return inspectorapi.Decision{}, inspectorapi.ErrDenied
+			return inspectorapi.Decision{}, invalidDecisionFailure()
 		}
 		return inspectorapi.Decision{
 			Principal: wire.AccountID, Owner: wire.OwnerAccountID, CredentialID: wire.CredentialID,
@@ -139,9 +149,9 @@ func (c Config) AuthorizeFunc() (inspectorapi.AuthorizeFunc, error) {
 }
 
 func newOperationID() (string, error) {
-	var value [16]byte
-	if _, err := rand.Read(value[:]); err != nil {
-		return "", fmt.Errorf("inspector operation id: %w", err)
+	id, err := uuid.NewRandom()
+	if err != nil {
+		return "", err
 	}
-	return "iia_" + hex.EncodeToString(value[:]), nil
+	return "operation_" + id.String(), nil
 }

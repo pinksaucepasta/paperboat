@@ -33,14 +33,17 @@ request headers. Retry a mutation only with its original idempotency key.
 ## Origin unavailable or replacement rejected
 
 1. Run `pb tunnel status <tunnel> --json` and identify the `origin` or
-   `configuration` health dimension and rejected generation.
+   `config` health dimension and rejected generation.
 2. Verify the origin is listening on the configured address and protocol. For
    HTTPS, check CA reference, server name, client credential reference, and
    clock before weakening verification.
-3. Keep the last-known-good route active. A new generation must pass carrier,
-   route, and origin readiness before the old generation drains.
-4. After correction, use the normal route update or resume operation and wait
-   for desired and applied generations to agree.
+3. Keep unchanged, authorized last-known-good routes active, including their
+   hostname publication. A pending replacement must pass carrier, route, and
+   origin readiness before the old generation drains. Revoked routes and
+   changed access policies never regain access through the retained generation.
+4. Correct or remove the unavailable route through the normal commands and
+   wait for readiness. Recovery must receive the newer desired generation over
+   the existing control connection, even when the previous candidate failed.
 
 ## Connector offline, drain, or rotation stuck
 

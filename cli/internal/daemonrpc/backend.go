@@ -138,8 +138,8 @@ func (b *LiveDaemonBackend) SubscribeStatus(ctx context.Context) (<-chan *pb.Sta
 	return ch, cancel, nil
 }
 
-// ResolveDevice finds a peer by alias or device ID and returns its dynamic exported ports.
-func (b *LiveDaemonBackend) ResolveDevice(ctx context.Context, query string) (*pb.DeviceAddress, error) {
+// ResolveMachine finds a peer by alias or machine ID and returns its dynamic exported ports.
+func (b *LiveDaemonBackend) ResolveMachine(ctx context.Context, query string) (*pb.MachineAddress, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -147,8 +147,8 @@ func (b *LiveDaemonBackend) ResolveDevice(ctx context.Context, query string) (*p
 		if p.PeerId == query || p.Alias == query {
 			portsCopy := append([]int32(nil), p.ForwardedPorts...)
 			tagsCopy := append([]string(nil), p.Tags...)
-			return &pb.DeviceAddress{
-				DeviceId:       p.PeerId,
+			return &pb.MachineAddress{
+				MachineId:      p.PeerId,
 				Alias:          p.Alias,
 				AssignedIp:     p.AssignedIp,
 				ForwardedPorts: portsCopy,
@@ -158,28 +158,28 @@ func (b *LiveDaemonBackend) ResolveDevice(ctx context.Context, query string) (*p
 		}
 	}
 
-	return nil, fmt.Errorf("device %q not found in peer table", query)
+	return nil, fmt.Errorf("machine %q not found in peer table", query)
 }
 
-// SetDeviceTags updates device tags via the control sync client.
-func (b *LiveDaemonBackend) SetDeviceTags(ctx context.Context, deviceID string, tags []string) error {
+// SetMachineTags updates machine tags via the control sync client.
+func (b *LiveDaemonBackend) SetMachineTags(ctx context.Context, machineID string, tags []string) error {
 	b.mu.RLock()
 	client := b.syncClient
 	b.mu.RUnlock()
 	if client == nil {
 		return fmt.Errorf("control sync unavailable; reconnect before changing tags")
 	}
-	return client.SetTags(ctx, deviceID, tags)
+	return client.SetTags(ctx, machineID, tags)
 }
 
 // ApprovePeer delegates to the account-root-signed enrollment owner, never the
 // topology projection or a locally invented admission flag.
-func (b *LiveDaemonBackend) ApprovePeer(ctx context.Context, deviceID string, approved bool) error {
+func (b *LiveDaemonBackend) ApprovePeer(ctx context.Context, machineID string, approved bool) error {
 	b.mu.RLock()
 	handler := b.approve
 	b.mu.RUnlock()
 	if handler == nil {
 		return fmt.Errorf("signed enrollment approval is unavailable; configure the account signing profile")
 	}
-	return handler(ctx, deviceID, approved)
+	return handler(ctx, machineID, approved)
 }

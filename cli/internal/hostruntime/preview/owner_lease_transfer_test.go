@@ -31,7 +31,7 @@ func TestOwnerSessionLeaseTransferPreservesLiveDispatch(t *testing.T) {
 	if _, err := manager.TransferBackground(lease.ID, lease.Token, deadline); !errors.Is(err, ErrOwnerSessionLeaseConflict) {
 		t.Fatalf("unattached transfer: %v", err)
 	}
-	done, err := registry.OwnerSessionDoneForTarget("account_01", "machine_01", lease.OwnerSessionID, target)
+	done, err := registry.OwnerSessionDoneForTarget("account_01", "machine_01", lease.OwnerSessionID, "local_lease", target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestOwnerSessionLeaseTransferClientReconcilesLostResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	done, err := registry.OwnerSessionDoneForTarget("account_01", "machine_01", lease.OwnerSessionID, lease.Target)
+	done, err := registry.OwnerSessionDoneForTarget("account_01", "machine_01", lease.OwnerSessionID, "local_lease", lease.Target)
 	if err != nil {
 		t.Fatal(err)
 	}

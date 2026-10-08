@@ -14,6 +14,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 )
 
+var ErrPreviewReadinessTimeout = errors.New("preview readiness timed out")
+
 // PreviewSession is the canonical v1 foreground lease lifecycle. A session
 // owns renewal, carrier reconnect, and revocation; serve only publishes its
 // endpoint after WaitReady succeeds.
@@ -44,12 +46,13 @@ type ForegroundConfig struct {
 	// canonical foreground preview session. When both are supplied and Session
 	// is nil, StartForeground creates the session after the listener chooses its
 	// actual port. No URL is published until that session reports readiness.
-	LeaseClient    preview.LeaseClient
-	Carrier        preview.Carrier
-	OwnerDeviceID  string
-	OwnerSessionID string
-	AccessMode     string
-	TargetScheme   string
+	LeaseClient      preview.LeaseClient
+	Carrier          preview.Carrier
+	OwnerMachineID   string
+	OwnerSessionID   string
+	OwnerSessionKind string
+	AccessMode       string
+	TargetScheme     string
 	// Target is the origin supplied to a canonical preview lease. When set,
 	// StartForeground skips the retired static loopback listener and lets the
 	// authenticated preview carrier connect to this explicit HTTP/HTTPS/h2c,
@@ -89,7 +92,7 @@ type LocalConfig struct {
 	Observe      func(LifecycleEvent)
 }
 
-// StartLocal serves a pinned source only on the initiating device's IPv4
+// StartLocal serves a pinned source only on the initiating machine's IPv4
 // loopback interface. It has no control-plane or machine-runtime dependency.
 func StartLocal(ctx context.Context, config LocalConfig) (*Local, error) {
 	startedAt := time.Now()
@@ -239,7 +242,11 @@ func StartForeground(ctx context.Context, config ForegroundConfig) (*Foreground,
 	}
 	emit("validation", "ok", startedAt)
 	previewCtx, cancelPreview := context.WithCancel(context.WithoutCancel(ctx))
-	ready := make(chan preview.Lease, 1)
+	type readinessResult struct {
+		lease preview.Lease
+		err   error
+	}
+	ready := make(chan readinessResult, 1)
 	previewDone := make(chan error, 1)
 	var session PreviewSession
 	var readyLease preview.Lease
@@ -262,7 +269,7 @@ func StartForeground(ctx context.Context, config ForegroundConfig) (*Foreground,
 			}
 			return preview.Start(sessionCtx, preview.SessionConfig{
 				LeaseClient: config.LeaseClient, Carrier: config.Carrier,
-				OwnerDeviceID: config.OwnerDeviceID, OwnerSessionID: config.OwnerSessionID,
+				OwnerMachineID: config.OwnerMachineID, OwnerSessionID: config.OwnerSessionID, OwnerSessionKind: config.OwnerSessionKind,
 				Target:     target,
 				AccessMode: config.AccessMode, UserDeadline: config.UserDeadline,
 				Duration: config.Duration, LeaseLifecycle: lifecycle,
@@ -286,12 +293,8 @@ func StartForeground(ctx context.Context, config ForegroundConfig) (*Foreground,
 		}()
 		go func() {
 			lease, readyErr := session.WaitReady(previewCtx)
-			if readyErr != nil {
-				return
-			}
-			readyLease = lease
 			select {
-			case ready <- lease:
+			case ready <- readinessResult{lease: lease, err: readyErr}:
 			case <-previewCtx.Done():
 			}
 		}()
@@ -318,7 +321,12 @@ func StartForeground(ctx context.Context, config ForegroundConfig) (*Foreground,
 	defer timer.Stop()
 	var lease preview.Lease
 	select {
-	case lease = <-ready:
+	case result := <-ready:
+		if result.err != nil {
+			return nil, cleanup(fmt.Errorf("create preview: %w", result.err))
+		}
+		lease = result.lease
+		readyLease = lease
 		if lease.Endpoint == "" || lease.State != "ready" {
 			return nil, cleanup(errors.New("preview became ready without a public URL"))
 		}
@@ -332,7 +340,7 @@ func StartForeground(ctx context.Context, config ForegroundConfig) (*Foreground,
 		return nil, cleanup(fmt.Errorf("static server stopped before readiness: %w", err))
 	case <-timer.C:
 		emit("readiness", "timeout", startedAt)
-		return nil, cleanup(errors.New("preview readiness timed out"))
+		return nil, cleanup(ErrPreviewReadinessTimeout)
 	case <-ctx.Done():
 		return nil, cleanup(ctx.Err())
 	}

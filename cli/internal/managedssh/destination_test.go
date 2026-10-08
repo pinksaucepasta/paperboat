@@ -6,11 +6,11 @@ import (
 )
 
 func TestAliasHostRoundTrip(t *testing.T) {
-	host, err := AliasHost("Build-01", "PPRBT")
-	if err != nil || host != "build-01.pprbt" {
+	host, err := AliasHost("Build-01")
+	if err != nil || host != "build-01.local.pprbt.dev" {
 		t.Fatalf("AliasHost() = %q, %v", host, err)
 	}
-	alias, err := ParseAliasHost(host, "pprbt")
+	alias, err := ParseAliasHost(host)
 	if err != nil || alias != "build-01" {
 		t.Fatalf("ParseAliasHost() = %q, %v", alias, err)
 	}
@@ -36,13 +36,13 @@ func TestParseMachineTarget(t *testing.T) {
 }
 
 func TestAliasHostRejectsNonCanonicalDestinations(t *testing.T) {
-	for _, host := range []string{"pprbt", "a.b.pprbt", "-bad.pprbt", "bad-.pprbt", "machine.pprbt.dev", "bad.other.dev", "127.0.0.1"} {
-		if _, err := ParseAliasHost(host, "pprbt"); !errors.Is(err, ErrSSHAliasInvalid) {
+	for _, host := range []string{"local.pprbt.dev", "a.b.local.pprbt.dev", "-bad.local.pprbt.dev", "bad-.local.pprbt.dev", "machine.pprbt", "machine.pprbt.dev", "bad.other.dev", "127.0.0.1"} {
+		if _, err := ParseAliasHost(host); !errors.Is(err, ErrSSHAliasInvalid) {
 			t.Fatalf("ParseAliasHost(%q) error = %v", host, err)
 		}
 	}
 	for _, alias := range []string{"", "-bad", "bad-", "bad.name", "bad/name"} {
-		if _, err := AliasHost(alias, "pprbt"); !errors.Is(err, ErrSSHAliasInvalid) {
+		if _, err := AliasHost(alias); !errors.Is(err, ErrSSHAliasInvalid) {
 			t.Fatalf("AliasHost(%q) error = %v", alias, err)
 		}
 	}
@@ -106,9 +106,9 @@ func TestResolveUsernameWindowsIsCaseInsensitiveAndCanonical(t *testing.T) {
 }
 
 func TestResolveDestinationFencesPort(t *testing.T) {
-	input := DestinationInput{Alias: "build", AliasSuffix: "pprbt", RegisteredPort: 2222, RequestedPort: 2222, RegisteredUser: "deploy", HasRegisteredUser: true}
+	input := DestinationInput{Alias: "build", RegisteredPort: 2222, RequestedPort: 2222, RegisteredUser: "deploy", HasRegisteredUser: true}
 	got, err := ResolveDestination(input)
-	if err != nil || got.Host != "build.pprbt" || got.Port != 2222 || got.User != "deploy" {
+	if err != nil || got.Host != "build.local.pprbt.dev" || got.Port != 2222 || got.User != "deploy" {
 		t.Fatalf("ResolveDestination() = %#v, %v", got, err)
 	}
 	input.RequestedPort = 22

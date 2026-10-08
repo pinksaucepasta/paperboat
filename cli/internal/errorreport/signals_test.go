@@ -32,7 +32,7 @@ func TestAllSignalEnvelopesAndPrivacy(t *testing.T) {
 	transport.BufferSize = 8
 	reporter := newSignalReporter(strings.Replace(server.URL, "http://", "http://public@", 1)+"/1", "test-release", transport, true, true, 1)
 	defer reporter.Flush(context.Background())
-	ctx := supportref.WithContext(context.Background(), "pb-0123456789abcdef0123456789abcdef")
+	ctx := supportref.WithContext(context.Background(), "support_01234567-89ab-4def-8123-456789abcdef")
 	ctx, end := reporter.Start(ctx, "paperboat-cli", "login")
 	reporter.Capture(ctx, "paperboat-cli", "unexpected_failure")
 	logger := sentry.NewLogger(reporter.context(ctx))
@@ -196,6 +196,53 @@ func TestSnapshotBudgetRotatesWithoutChangingCumulativeValues(t *testing.T) {
 		t.Fatalf("rotation starved %d series", len(samples)-len(seen))
 	}
 }
+func TestSnapshotHealthPriorityAndWeightedDetails(t *testing.T) {
+	transport := &sentry.MockTransport{}
+	r := newSignalReporter("https://public@example.invalid/1", "test", transport, false, true, 0)
+	defer r.Flush(context.Background())
+	samples := []MetricSample{}
+	descriptors := []MetricDescriptor{}
+	for i := 0; i < 80; i++ {
+		name := fmt.Sprintf("paperboat_runtime_%03d_snapshot", i)
+		samples = append(samples, MetricSample{Name: name, Value: float64(i)})
+		descriptors = append(descriptors, MetricDescriptor{Name: name})
+	}
+	health := []string{DiagnosticRecordsDroppedMetric, DiagnosticRecordsFailedMetric, DiagnosticQueueDroppedMetric, DiagnosticPersistenceAvailableMetric}
+	for _, name := range health {
+		samples = append(samples, MetricSample{Name: name, Value: 1})
+		descriptors = append(descriptors, MetricDescriptor{Name: name})
+	}
+	r.RegisterMetrics(func() []MetricSample { return samples }, descriptors)
+	seen := map[string]bool{}
+	for window := 0; window < 2; window++ {
+		r.sampleMetrics()
+		r.client.Flush(time.Second)
+		counts := map[string]int{}
+		for _, event := range transport.Events() {
+			for _, metric := range event.Metrics {
+				counts[metric.Name]++
+				seen[metric.Name] = true
+			}
+		}
+		for _, name := range health {
+			if counts[name] != window+1 {
+				t.Fatalf("health starved: %s=%d", name, counts[name])
+			}
+		}
+	}
+	if len(seen) != 84 || r.SnapshotDropped() != 32 {
+		t.Fatalf("rotation=%d dropped=%d", len(seen), r.SnapshotDropped())
+	}
+	for i := 0; i < 16; i++ {
+		r.Observe(context.Background(), "pb", "connect", "success", time.Millisecond)
+	}
+	r.Observe(context.Background(), "pb", "connect", "success", time.Millisecond)
+	r.Observe(context.Background(), "pb", "connect", "success", -1)
+	if r.Dropped()[1] != 3 {
+		t.Fatalf("metric items rejected=%d", r.Dropped()[1])
+	}
+}
+
 func TestTransactionContextAndLifecycleRejectUnknownValues(t *testing.T) {
 	var trace sentry.TraceID
 	trace[0] = 1
@@ -233,8 +280,8 @@ type referenceRoundTripper func(*http.Request) (*http.Response, error)
 
 func (f referenceRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 func TestOwnedReferenceIndependentOfReportingAndHeaderWins(t *testing.T) {
-	const contextRef = "pb-0123456789abcdef0123456789abcdef"
-	const headerRef = "pb-fedcba9876543210fedcba9876543210"
+	const contextRef = "support_01234567-89ab-4def-8123-456789abcdef"
+	const headerRef = "support_fedcba98-7654-4210-8edc-ba9876543210"
 	for _, test := range []struct {
 		name                     string
 		enabled                  bool

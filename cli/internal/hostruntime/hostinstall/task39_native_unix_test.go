@@ -177,7 +177,7 @@ func TestTask39NativeUserFixture(t *testing.T) {
 	control := os.Getenv("PAPERBOAT_TASK39_ORIGIN")
 	machine := "task39_machine_" + account.Username
 	environment := "task39_env_" + account.Username
-	if err = store.SaveRegistration(identity.Registration{AccountID: "task39_account_" + account.Username, ServerURL: control, MachineID: machine, EnvironmentID: environment, PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: workspace, InstallationGeneration: 1, SetupMode: "host", SetupRoles: []string{"host"}, UpdatedAt: time.Now().UTC()}); err != nil {
+	if err = store.SaveRegistration(identity.Registration{AccountID: "task39_account_" + account.Username, ServerURL: control, MachineID: machine, EnvironmentID: environment, PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: workspace, InstallationGeneration: 1, UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	endpoint, err := store.PeerEndpoint()
@@ -240,7 +240,7 @@ func TestTask39NativeUserFixture(t *testing.T) {
 	}
 	listen := listener.Addr().String()
 	listener.Close()
-	request := Request{Schema: SchemaV1, Platform: runtime.GOOS, User: account.Username, UID: os.Getuid(), Group: group.Name, GID: gid, Executable: path, Artifact: artifact, Home: account.HomeDir, Path: "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", StateRoot: state, WorkspaceRoot: workspace, ControlURL: control, UserMachineID: machine, Shell: "/bin/bash", HelperListenAddress: listen, SetupMode: "host", InstallationGeneration: 1}
+	request := Request{Schema: SchemaV1, Platform: runtime.GOOS, User: account.Username, UID: os.Getuid(), Group: group.Name, GID: gid, Executable: path, Artifact: artifact, Home: account.HomeDir, Path: "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", StateRoot: state, WorkspaceRoot: workspace, ControlURL: control, UserMachineID: machine, Shell: "/bin/bash", HelperListenAddress: listen, InstallationGeneration: 1}
 	raw, err = json.Marshal(request)
 	if err != nil {
 		t.Fatal(err)
@@ -512,4 +512,101 @@ func TestTask39ArtifactFaultSurvivesFixtureURLMapping(t *testing.T) {
 			t.Fatal("asset fault injection did not reach response bytes")
 		}
 	}
+}
+
+// This opt-in gate consumes only an already enrolled disposable installation.
+// Its identity and credentials originate from the real production bootstrap.
+func TestTask39CustomNativeInstalledLifecycle(t *testing.T) {
+	value := os.Getenv("PAPERBOAT_TASK39_NATIVE_UID")
+	if value == "" {
+		t.Skip("actual disposable custom installation required")
+	}
+	uid, err := strconv.Atoi(value)
+	if err != nil || os.Geteuid() != 0 {
+		t.Fatal("privileged disposable owner required")
+	}
+	account, err := user.LookupId(value)
+	if err != nil || !strings.HasPrefix(account.Username, "pb39") {
+		t.Fatal("refusing a non-task owner")
+	}
+	t.Setenv("PAPERBOAT_INVOKING_UID", value)
+	paths := platformPaths(uid)
+	request, err := loadInstallMetadata(paths.metadata, uid)
+	if err != nil || request.Source.Distribution != "custom" || request.Source.AutomaticUpdates {
+		t.Fatal("committed custom source required")
+	}
+	beforeBinary, err := os.ReadFile(paths.worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(beforeBinary)
+	beforeMetadata, err := os.ReadFile(paths.metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requirePreserved := func() {
+		t.Helper()
+		binary, err := os.ReadFile(paths.worker)
+		if err != nil || sha256.Sum256(binary) != digest {
+			t.Fatal("failed candidate changed installed bytes")
+		}
+		metadata, err := os.ReadFile(paths.metadata)
+		if err != nil || !bytes.Equal(metadata, beforeMetadata) {
+			t.Fatal("failed candidate changed protected installation declaration")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		client := &http.Client{Timeout: time.Second}
+		for {
+			response, err := client.Get("http://" + request.HelperListenAddress + "/healthz")
+			if err == nil {
+				var health struct {
+					Live bool `json:"live"`
+				}
+				decodeErr := json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&health)
+				response.Body.Close()
+				if response.StatusCode == http.StatusOK && decodeErr == nil && health.Live {
+					break
+				}
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatal("original installation did not recover liveness")
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+	}
+	requirePreserved()
+	candidate := filepath.Join(t.TempDir(), "pb-corrupt")
+	corrupted := append([]byte(nil), beforeBinary...)
+	corrupted[len(corrupted)-1] ^= 1
+	if err := os.WriteFile(candidate, corrupted, 0755); err != nil {
+		t.Fatal(err)
+	}
+	clear(corrupted)
+	clear(beforeBinary)
+	invalid := request
+	invalid.Executable = candidate
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	err = Install(ctx, invalid)
+	cancel()
+	if err == nil {
+		t.Fatal("artifact whose bytes differ from approved source was accepted")
+	}
+	requirePreserved()
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupied.Close()
+	failed := request
+	failed.HelperListenAddress = occupied.Addr().String()
+	ctx, cancel = context.WithTimeout(context.Background(), 45*time.Second)
+	err = Install(ctx, failed)
+	cancel()
+	if err == nil {
+		t.Fatal("candidate with unavailable runtime listener was accepted")
+	}
+	requirePreserved()
+	t.Logf("actual custom artifact digest %x preserved after invalid bytes and failed native activation", digest)
 }

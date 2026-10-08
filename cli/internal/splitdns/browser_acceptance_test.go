@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/internal/testcert"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -58,18 +59,18 @@ func TestBrowserIsolationFixture(t *testing.T) {
 	hosts := make([]string, 0, 2)
 	for _, server := range []*httptest.Server{a, b} {
 		port := server.Listener.Addr().(*net.TCPAddr).Port
-		host, err := BrowserHostname("browser-fixture-machine", port, "pprbt")
+		host, err := BrowserHostname("browser-fixture-machine", port, BrowserSuffix)
 		if err != nil {
 			t.Fatal(err)
 		}
 		hosts = append(hosts, host)
 		routes[host] = BrowserRoute{Address: netip.MustParseAddr("127.0.0.1"), Port: port}
 	}
-	ca, err := LoadOrCreateConstrainedCA(t.TempDir(), "pprbt")
+	ca, err := testcert.New()
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy, err := NewProxy(ProxyConfig{Routes: routes, CA: ca, Suffix: "pprbt", DialContext: (&net.Dialer{}).DialContext})
+	proxy, err := NewProxy(ProxyConfig{Routes: routes, IssueCertificate: func(_ context.Context, name string) (tls.Certificate, error) { return ca.TLS(name) }, DialContext: (&net.Dialer{}).DialContext})
 	if err != nil {
 		t.Fatal(err)
 	}

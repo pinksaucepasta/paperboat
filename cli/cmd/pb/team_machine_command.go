@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -9,7 +8,7 @@ import (
 )
 
 func teamMachineCommand() *cobra.Command {
-	c := &cobra.Command{Use: "device", Short: "Share devices and manage exact team access", Long: "Share a personal enrollment or explicitly transfer it to a team. Each teammate uses their own PB account and starts separate terminal sessions. All remote work runs as the enrolled OS user, so it shares that user's OS file and process permissions. Tunnel management covers existing private/team tunnels; create tunnels locally on the target device. Device grants do not grant ENV administration, public publication, resharing, or attachment to another person's terminal.", Args: commandArgs(cobra.NoArgs)}
+	c := &cobra.Command{Use: "machine", Short: "Share machines and manage exact team access", Long: "Share a personal enrollment or explicitly transfer it to a team. Each teammate uses their own PB account and starts separate terminal sessions. All remote work runs as the enrolled OS user, so it shares that user's OS file and process permissions. Tunnel management covers existing private/team tunnels; create tunnels locally on the target machine. Machine grants do not grant ENV administration, public publication, resharing, or attachment to another person's terminal.", Args: commandArgs(cobra.NoArgs)}
 	for _, action := range []string{"share", "unshare", "transfer-to-team", "remove"} {
 		c.AddCommand(teamMachineActionCommand(action))
 	}
@@ -17,20 +16,20 @@ func teamMachineCommand() *cobra.Command {
 	return c
 }
 func teamMachineActionCommand(action string) *cobra.Command {
-	descriptions := map[string]string{"share": "Share your personal device with a team; grants are separate", "unshare": "Withdraw the team's grants while retaining personal ownership", "transfer-to-team": "Explicitly transfer your enrollment to team ownership", "remove": "Revoke a team-owned device without personal takeover"}
-	c := &cobra.Command{Use: action + " <team> <device-id>", Short: descriptions[action], Args: commandArgs(cobra.ExactArgs(2)), RunE: func(c *cobra.Command, args []string) error {
+	descriptions := map[string]string{"share": "Share your personal machine with a team; grants are separate", "unshare": "Withdraw the team's grants while retaining personal ownership", "transfer-to-team": "Explicitly transfer your enrollment to team ownership", "remove": "Revoke a team-owned machine without personal takeover"}
+	c := &cobra.Command{Use: action + " <team> <machine-id>", Short: descriptions[action], Args: commandArgs(cobra.ExactArgs(2)), RunE: func(c *cobra.Command, args []string) error {
 		generation, err := requiredTeamGeneration(c)
 		if err != nil {
 			return err
 		}
 		if !validTeamCLIIdentifier(args[0]) || !validTeamCLIIdentifier(args[1]) {
-			return invocationError(errors.New("team and device must be valid identifiers"))
+			return localArgumentError("team and machine must be valid identifiers")
 		}
 		confirmation := ""
 		if action == "transfer-to-team" || action == "remove" {
 			confirmation, _ = c.Flags().GetString("confirm")
 			if confirmation != args[1] {
-				return invocationError(errors.New("ownership transfer or removal requires --confirm with the exact device identifier"))
+				return localArgumentError("ownership transfer or removal requires --confirm with the exact machine identifier")
 			}
 		}
 		client, err := backendForCommand(c)
@@ -47,12 +46,12 @@ func teamMachineActionCommand(action string) *cobra.Command {
 	teamGenerationFlag(c)
 	c.Flags().Bool("json", false, "print canonical JSON")
 	if action == "transfer-to-team" || action == "remove" {
-		c.Flags().String("confirm", "", "exact device identifier acknowledging the ownership or revocation effect")
+		c.Flags().String("confirm", "", "exact machine identifier acknowledging the ownership or revocation effect")
 	}
 	return c
 }
 func teamMachineGrantCommand() *cobra.Command {
-	c := &cobra.Command{Use: "grant <team> <device-id>", Short: "Set all-member or selected-member device capabilities", Long: "Set the complete capability list for one all-member or selected-member grant. Effective access is the union of both grants. Use --active=false to revoke this grant. Team roles alone do not grant device use.", Args: commandArgs(cobra.ExactArgs(2)), RunE: func(c *cobra.Command, args []string) error {
+	c := &cobra.Command{Use: "grant <team> <machine-id>", Short: "Set all-member or selected-member machine capabilities", Long: "Set the complete capability list for one all-member or selected-member grant. Effective access is the union of both grants. Use --active=false to revoke this grant. Team roles alone do not grant machine use.", Args: commandArgs(cobra.ExactArgs(2)), RunE: func(c *cobra.Command, args []string) error {
 		generation, err := requiredTeamGeneration(c)
 		if err != nil {
 			return err
@@ -62,16 +61,16 @@ func teamMachineGrantCommand() *cobra.Command {
 		caps, _ := c.Flags().GetStringSlice("capability")
 		active, _ := c.Flags().GetBool("active")
 		if !validTeamCLIIdentifier(args[0]) || !validTeamCLIIdentifier(args[1]) {
-			return invocationError(errors.New("team and device must be valid identifiers"))
+			return localArgumentError("team and machine must be valid identifiers")
 		}
 		if all == (member != "") {
-			return invocationError(errors.New("choose exactly one of --all-members or --member ACCOUNT"))
+			return localArgumentError("choose exactly one of --all-members or --member ACCOUNT")
 		}
 		if member != "" && !validTeamCLIIdentifier(member) {
-			return invocationError(errors.New("member must be an account identifier"))
+			return localArgumentError("member must be an account identifier")
 		}
 		if err = validateMachineGrantCapabilities(caps); err != nil {
-			return invocationError(err)
+			return err
 		}
 		audience := "selected_member"
 		if all {
@@ -98,17 +97,17 @@ func teamMachineGrantCommand() *cobra.Command {
 }
 func validateMachineGrantCapabilities(caps []string) error {
 	if len(caps) < 1 || len(caps) > 6 {
-		return errors.New("provide one to six exact --capability values")
+		return localArgumentError("provide one to six exact --capability values")
 	}
 	seen := map[string]bool{}
 	for _, capability := range caps {
 		switch capability {
 		case "terminal", "exec", "managed_ssh", "files", "preview_manage", "tunnel_manage":
 		default:
-			return errors.New("capability must be terminal, exec, managed_ssh, files, preview_manage, or tunnel_manage")
+			return localArgumentError("capability must be terminal, exec, managed_ssh, files, preview_manage, or tunnel_manage")
 		}
 		if seen[capability] {
-			return errors.New("capabilities must not contain duplicates")
+			return localArgumentError("capabilities must not contain duplicates")
 		}
 		seen[capability] = true
 	}

@@ -1,5 +1,5 @@
 // Package controlsync consumes authorized full control-plane snapshots. It owns
-// connection recovery, never admission or device identity.
+// connection recovery, never admission or machine identity.
 package controlsync
 
 import (
@@ -31,7 +31,7 @@ type ClientConfig struct {
 	ServerAddr   string
 	Insecure     bool // isolated loopback tests only
 	TLSConfig    *tls.Config
-	DeviceID     string
+	MachineID    string
 	AuthToken    string
 	Token        func(context.Context) (string, error)
 	OnPeerUpdate func([]*pb.PeerUpdate, uint64)
@@ -46,7 +46,7 @@ type Client struct {
 	cancel       context.CancelFunc
 	done         chan struct{}
 	assignedIP   string
-	postureCheck *pb.DevicePostureCheck
+	postureCheck *pb.MachinePostureCheck
 	peers        []*pb.PeerUpdate
 	revision     uint64
 }
@@ -171,7 +171,7 @@ func (c *Client) open(ctx context.Context) (*grpc.ClientConn, pb.SyncService_Syn
 	watchdog := time.AfterFunc(SnapshotTimeout, cancel)
 	stream, err := pb.NewSyncServiceClient(conn).Sync(streamCtx)
 	if err == nil {
-		err = stream.Send(&pb.SyncRequest{DeviceId: c.cfg.DeviceID})
+		err = stream.Send(&pb.SyncRequest{MachineId: c.cfg.MachineID})
 	}
 	var response *pb.SyncResponse
 	if err == nil {
@@ -214,7 +214,7 @@ func (c *Client) processResponse(resp *pb.SyncResponse) {
 	c.revision = resp.GetRevision()
 	c.postureCheck = nil
 	if resp.PostureCheck != nil {
-		c.postureCheck = proto.Clone(resp.PostureCheck).(*pb.DevicePostureCheck)
+		c.postureCheck = proto.Clone(resp.PostureCheck).(*pb.MachinePostureCheck)
 	}
 	c.peers = make([]*pb.PeerUpdate, 0, len(resp.Peers))
 	for _, peer := range resp.Peers {
@@ -246,15 +246,15 @@ func (c *Client) Peers() []*pb.PeerUpdate {
 }
 func (c *Client) Revision() uint64   { c.mu.RLock(); defer c.mu.RUnlock(); return c.revision }
 func (c *Client) AssignedIP() string { c.mu.RLock(); defer c.mu.RUnlock(); return c.assignedIP }
-func (c *Client) PostureCheck() *pb.DevicePostureCheck {
+func (c *Client) PostureCheck() *pb.MachinePostureCheck {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if c.postureCheck == nil {
 		return nil
 	}
-	return proto.Clone(c.postureCheck).(*pb.DevicePostureCheck)
+	return proto.Clone(c.postureCheck).(*pb.MachinePostureCheck)
 }
-func (c *Client) SetTags(ctx context.Context, deviceID string, tags []string) error {
+func (c *Client) SetTags(ctx context.Context, machineID string, tags []string) error {
 	c.mu.RLock()
 	conn := c.conn
 	c.mu.RUnlock()
@@ -267,7 +267,7 @@ func (c *Client) SetTags(ctx context.Context, deviceID string, tags []string) er
 	}
 	rpcCtx, cancel := context.WithTimeout(metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+token), ConnectTimeout)
 	defer cancel()
-	_, err = pb.NewSyncServiceClient(conn).SetTags(rpcCtx, &pb.SetTagsRequest{DeviceId: deviceID, Tags: tags})
+	_, err = pb.NewSyncServiceClient(conn).SetTags(rpcCtx, &pb.SetTagsRequest{MachineId: machineID, Tags: tags})
 	return err
 }
 func (c *Client) Close() error {
@@ -316,11 +316,11 @@ func terminalSyncError(err error) error {
 	}
 	switch status.Code(err) {
 	case codes.Unauthenticated:
-		return status.Error(codes.Unauthenticated, "control sync authentication rejected; local device access was withdrawn; sign in again and restart the daemon")
+		return status.Error(codes.Unauthenticated, "control sync authentication rejected; local machine access was withdrawn; sign in again and restart the daemon")
 	case codes.PermissionDenied:
-		return status.Error(codes.PermissionDenied, "control sync authorization denied; local device access was withdrawn; restore access or select an authorized device, then restart the daemon")
+		return status.Error(codes.PermissionDenied, "control sync authorization denied; local machine access was withdrawn; restore access or select an authorized machine, then restart the daemon")
 	case codes.InvalidArgument, codes.FailedPrecondition, codes.Unimplemented:
-		return status.Error(status.Code(err), "control sync configuration or protocol rejected; local device access was withdrawn; correct the configuration or update Paperboat, then restart the daemon")
+		return status.Error(status.Code(err), "control sync configuration or protocol rejected; local machine access was withdrawn; correct the configuration or update Paperboat, then restart the daemon")
 	default:
 		return nil
 	}

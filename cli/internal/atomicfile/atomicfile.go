@@ -4,7 +4,6 @@ package atomicfile
 
 import (
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -29,8 +28,13 @@ type Error struct {
 	Err   error
 }
 
-func (e *Error) Error() string { return fmt.Sprintf("atomic file %s %s: %v", e.Stage, e.Path, e.Err) }
-func (e *Error) Unwrap() error { return e.Err }
+func (e *Error) Error() string { return "atomic file write failed" }
+func (e *Error) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
 
 type Options struct {
 	Mode     fs.FileMode
@@ -38,7 +42,7 @@ type Options struct {
 	OwnerGID int
 }
 
-func Write(path string, data []byte, options Options) error {
+func Write(path string, data []byte, options Options) (resultErr error) {
 	path = filepath.Clean(path)
 	if !filepath.IsAbs(path) || options.Mode.Perm() == 0 || options.Mode&^fs.ModePerm != 0 || options.OwnerUID < -1 || options.OwnerGID < -1 {
 		return &Error{Stage: StageValidate, Path: path, Err: errors.New("invalid path, mode, or owner")}
@@ -69,7 +73,11 @@ func Write(path string, data []byte, options Options) error {
 	if err != nil {
 		return &Error{Stage: StageCreate, Path: path, Err: err}
 	}
-	defer pending.Cleanup()
+	defer func() {
+		if err := pending.Cleanup(); err != nil {
+			resultErr = errors.Join(resultErr, &Error{Stage: StageWrite, Path: path, Err: err})
+		}
+	}()
 	if _, err := pending.Write(data); err != nil {
 		return &Error{Stage: StageWrite, Path: path, Err: err}
 	}

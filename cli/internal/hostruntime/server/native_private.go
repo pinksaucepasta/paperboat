@@ -24,7 +24,7 @@ func RevalidateNativePrivate(authorization Authorization, encodedTarget string, 
 		claims.RouteGeneration != int64(binding.RouteGeneration) || claims.TargetGeneration != int64(binding.TargetGeneration) || time.Unix(claims.ExpiresAt, 0).Before(binding.ExpiresAt) {
 		return nativeprivate.Binding{}, ErrNativePrivateBinding
 	}
-	if binding.ResourceKind == "device_service" && (claims.UserID != binding.UserID || claims.CLIClientSessionID != binding.CLIClientSessionID || claims.AssignmentID != binding.AccessSessionID) {
+	if binding.ResourceKind == "machine_service" && (claims.UserID != binding.UserID || claims.CLIClientSessionID != binding.CLIClientSessionID || claims.AssignmentID != binding.AccessSessionID) {
 		return nativeprivate.Binding{}, ErrNativePrivateBinding
 	}
 	return binding, nil

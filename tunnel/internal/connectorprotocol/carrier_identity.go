@@ -49,7 +49,7 @@ type CarrierIdentityBinding struct {
 func (b CarrierIdentityBinding) Validate() error {
 	if ValidateIdentifier(b.AccountID) != nil || ValidateIdentifier(b.HostID) != nil ||
 		ValidateIdentifier(b.TunnelID) != nil || ValidateIdentifier(b.ConnectorID) != nil ||
-		ValidateIdentifier(b.SessionID) != nil || b.TunnelID == b.ConnectorID ||
+		ValidateIdentifier(b.SessionID) != nil ||
 		b.ProcessGeneration == 0 || b.ConfigGeneration == 0 || ValidateOpaqueEpoch(b.EdgeProcessEpoch) != nil {
 		return ErrCarrierIdentityBinding
 	}

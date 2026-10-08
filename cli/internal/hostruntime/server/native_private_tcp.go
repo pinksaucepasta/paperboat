@@ -29,7 +29,10 @@ func ServeNativePrivateTCP(ctx context.Context, header streamauth.Header, client
 	runCtx, cancel := context.WithDeadline(ctx, binding.ExpiresAt)
 	defer cancel()
 	validUntil, revoked, err := current(runCtx, binding)
-	if err != nil || !validUntil.After(time.Now().UTC()) {
+	if err != nil {
+		return classifyNativePrivateFailure("peer_authority", "peer_authority_failed", err)
+	}
+	if !validUntil.After(time.Now().UTC()) {
 		return ErrNativePrivateBinding
 	}
 	if binding.ExpiresAt.Before(validUntil) {
@@ -52,19 +55,19 @@ func ServeNativePrivateTCP(ctx context.Context, header streamauth.Header, client
 	default:
 	}
 	if err := deadlineCtx.Err(); err != nil {
-		return err
+		return classifyNativePrivateFailure("peer_authority", "peer_authority_failed", err)
 	}
 	origin, err := dial(deadlineCtx, "tcp", binding.TargetAddress)
 	if err != nil {
-		return err
+		return classifyNativePrivateFailure("target_connect", "native_private_failed", err)
 	}
 	defer origin.Close()
 	stopOrigin := context.AfterFunc(deadlineCtx, func() { _ = origin.Close() })
 	defer stopOrigin()
 	if _, err = client.Write([]byte{0}); err != nil {
-		return err
+		return classifyNativePrivateFailure("stream_open", "native_private_failed", err)
 	}
-	return bridgeNativePrivateTCP(client, origin)
+	return classifyNativePrivateFailure("delivery", "native_private_failed", bridgeNativePrivateTCP(client, origin))
 }
 
 func bridgeNativePrivateTCP(left, right net.Conn) error {

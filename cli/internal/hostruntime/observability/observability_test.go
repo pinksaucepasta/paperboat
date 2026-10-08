@@ -166,17 +166,17 @@ func TestTerminalCompressionMetricsUseOnlyBoundedLabels(t *testing.T) {
 func TestDiagnosticsAreBoundedAndRejectPrivateFields(t *testing.T) {
 	checked := time.Now().UTC()
 	snapshot := health.Snapshot{Live: true, Version: "1.0.0", CheckedAt: checked, Capabilities: map[string]health.Capability{"terminal.v1": {State: health.Ready}}}
-	encoded, err := BuildDiagnostics("1.0.0", "byod", snapshot, map[string]uint64{"attachment_bytes": 2}, []string{"req_1"}, 4096)
+	encoded, err := BuildDiagnostics("1.0.0", snapshot, map[string]uint64{"attachment_bytes": 2}, []string{"req_1"}, 4096)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(encoded), "/Users/") {
+	if strings.Contains(string(encoded), "/Users/") || strings.Contains(string(encoded), `"profile"`) {
 		t.Fatalf("diagnostics=%s", encoded)
 	}
-	if _, err := BuildDiagnostics("1.0.0", "byod", snapshot, map[string]uint64{"private_path": 1}, nil, 4096); !errors.Is(err, ErrUnsafeValue) {
+	if _, err := BuildDiagnostics("1.0.0", snapshot, map[string]uint64{"private_path": 1}, nil, 4096); !errors.Is(err, ErrUnsafeValue) {
 		t.Fatalf("err=%v", err)
 	}
-	if _, err := BuildDiagnostics("1.0.0", "byod", snapshot, nil, nil, 8); !errors.Is(err, ErrDiagnosticLimit) {
+	if _, err := BuildDiagnostics("1.0.0", snapshot, nil, nil, 8); !errors.Is(err, ErrDiagnosticLimit) {
 		t.Fatalf("err=%v", err)
 	}
 }

@@ -72,7 +72,7 @@ func TestWindowsProductionTunnelEnrollmentHasOneStableOwner(t *testing.T) {
 }
 
 // TestWindowsProductionHostSourceKeepsAllEnrollmentAssignments protects the
-// two production branches in production_unix.go. Constructing a full
+// unified production composition in production_unix.go. Constructing a full
 // production Host requires a real enrolled machine and server, so this source
 // contract test makes omission of the lifecycle assignment fail deterministically
 // at review time rather than relying on an external enrollment environment.
@@ -84,9 +84,9 @@ func TestWindowsProductionHostSourceKeepsAllEnrollmentAssignments(t *testing.T) 
 	}
 
 	want := map[string]int{
-		"TunnelEnrollment":          2,
-		"TunnelEnrollmentLifecycle": 2,
-		"TunnelManager":             2,
+		"TunnelEnrollment":          1,
+		"TunnelEnrollmentLifecycle": 1,
+		"TunnelManager":             1,
 	}
 	got := map[string]int{}
 	ast.Inspect(file, func(node ast.Node) bool {

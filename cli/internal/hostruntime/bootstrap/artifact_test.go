@@ -235,19 +235,60 @@ func TestArtifactRetryTransportDoesNotRetryWritesOrPermanentTLSFailures(t *testi
 	}
 }
 
+func TestArtifactRetryTransportDoesNotRetryMixedOrCyclicFailures(t *testing.T) {
+	cycle := &bootstrapCycleFailure{}
+	mixed := errors.Join(transientArtifactError{}, errors.New("independent artifact failure"))
+	wrappedMixed := &net.OpError{Op: "dial", Net: "tcp", Err: errors.Join(os.ErrDeadlineExceeded, errors.New("independent wrapped artifact failure"))}
+	for name, failure := range map[string]error{"mixed": mixed, "cyclic": cycle, "timeout wrapper with mixed cause": wrappedMixed} {
+		t.Run(name, func(t *testing.T) {
+			calls := 0
+			transport := &artifactRetryTransport{base: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls++
+				return nil, failure
+			}), delays: []time.Duration{0, 0}}
+			request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://get.pprbt.dev/metadata/timestamp.json", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, gotErr := transport.RoundTrip(request)
+			if calls != 1 || gotErr != failure {
+				t.Fatalf("calls=%d error identity preserved=%t", calls, gotErr == failure)
+			}
+		})
+	}
+}
+
+func TestArtifactRetryTransportPreservesResponseCloseFailure(t *testing.T) {
+	closeFailure := errors.New("independent artifact response close failure")
+	calls := 0
+	transport := &artifactRetryTransport{base: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		return &http.Response{StatusCode: http.StatusBadGateway, Header: make(http.Header), Body: &bootstrapTestBody{reader: strings.NewReader("ignored"), closeErr: closeFailure}, Request: request}, transientArtifactError{}
+	}), delays: []time.Duration{0, 0}}
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://get.pprbt.dev/metadata/timestamp.json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = transport.RoundTrip(request)
+	var timeoutFailure transientArtifactError
+	if calls != 1 || !errors.Is(err, closeFailure) || !errors.As(err, &timeoutFailure) {
+		t.Fatalf("calls=%d error=%v", calls, err)
+	}
+}
+
 func TestArtifactRetryTransportStopsWhenRequestIsCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	calls := 0
 	transport := &artifactRetryTransport{base: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		calls++
-		cancel()
 		return nil, transientArtifactError{}
 	}), delays: []time.Duration{time.Hour}}
+	time.AfterFunc(time.Millisecond, cancel)
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://get.pprbt.dev/metadata/timestamp.json", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := transport.RoundTrip(request); !errors.Is(err, context.Canceled) || calls != 1 {
+	if _, err := transport.RoundTrip(request); !errors.Is(err, context.Canceled) || !errors.Is(err, transientArtifactError{}) || calls != 1 {
 		t.Fatalf("calls=%d err=%v", calls, err)
 	}
 }

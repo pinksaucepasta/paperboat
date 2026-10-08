@@ -126,7 +126,7 @@ func sessionTestLease(request LeaseRequest) Lease {
 	}
 	return Lease{
 		Schema: PreviewTunnelSchemaV1, Kind: PreviewLeaseKind, ID: "prv_session_1", AccountID: "acct_1", ActorID: "actor_1",
-		OwnerDeviceID: request.OwnerDeviceID, OwnerSessionID: request.OwnerSessionID, Target: request.Target,
+		OwnerMachineID: request.OwnerMachineID, OwnerSessionID: request.OwnerSessionID, OwnerSessionKind: request.OwnerSessionKind, Target: request.Target,
 		AccessMode: request.AccessMode, Endpoint: "https://quiet-river-7.preview.example.test", ETag: formatLeaseETag("prv_session_1", 1),
 		LeaseDeadline: deadline, UserDeadline: userDeadline, State: "connecting", AllocationState: "pending", EdgeState: "pending", OriginState: "unknown",
 		CreatedAt: now, LastRenewedAt: now,
@@ -146,7 +146,7 @@ func newSessionTest(t *testing.T, carrierRun func(context.Context, Lease, func(L
 	client := &sessionLeaseClient{}
 	carrier := &sessionCarrier{closed: make(chan struct{}), run: carrierRun}
 	session, err := Start(context.Background(), SessionConfig{
-		LeaseClient: client, Carrier: carrier, OwnerDeviceID: "device_1", OwnerSessionID: "session_1",
+		LeaseClient: client, Carrier: carrier, OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground",
 		Target:        LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"},
 		RenewInterval: time.Hour, ShutdownTimeout: time.Second, ReconnectBackoff: time.Millisecond,
 		MaxReconnectBackoff: 2 * time.Millisecond, DisableParentWatch: true,
@@ -244,7 +244,7 @@ func TestSessionOwnerLossStopsCarrierAndRevokesLease(t *testing.T) {
 		return ctx.Err()
 	}}
 	session, err := Start(context.Background(), SessionConfig{
-		LeaseClient: client, Carrier: carrier, OwnerDeviceID: "device_1", OwnerSessionID: "session_1",
+		LeaseClient: client, Carrier: carrier, OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground",
 		Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, OwnerDone: ownerDone,
 		RenewInterval: time.Hour, ShutdownTimeout: time.Second, DisableParentWatch: true,
 	})
@@ -282,7 +282,7 @@ func TestSessionRenewalLossStopsTheCarrier(t *testing.T) {
 		return ctx.Err()
 	}}
 	session, err := Start(context.Background(), SessionConfig{
-		LeaseClient: client, Carrier: carrier, OwnerDeviceID: "device_1", OwnerSessionID: "session_1",
+		LeaseClient: client, Carrier: carrier, OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground",
 		Target:        LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"},
 		RenewInterval: time.Millisecond, ShutdownTimeout: time.Second, DisableParentWatch: true,
 	})
@@ -312,7 +312,7 @@ func TestSessionDurationBecomesMaximumUserDeadline(t *testing.T) {
 		return ctx.Err()
 	}}
 	session, err := Start(context.Background(), SessionConfig{
-		LeaseClient: client, Carrier: carrier, OwnerDeviceID: "device_1", OwnerSessionID: "session_1",
+		LeaseClient: client, Carrier: carrier, OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground",
 		Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, Duration: time.Minute,
 		RenewInterval: time.Hour, ShutdownTimeout: time.Second, DisableParentWatch: true,
 	})
@@ -344,7 +344,7 @@ func TestSessionExpiryUsesInjectedClock(t *testing.T) {
 		return ctx.Err()
 	}}
 	session, err := Start(context.Background(), SessionConfig{
-		LeaseClient: client, Carrier: carrier, OwnerDeviceID: "device_1", OwnerSessionID: "session_1",
+		LeaseClient: client, Carrier: carrier, OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground",
 		Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, Now: now,
 		RenewInterval: time.Hour, ShutdownTimeout: time.Second, DisableParentWatch: true,
 	})
@@ -386,7 +386,7 @@ func TestSessionIdempotencyKeyUsesInjectedRandomSource(t *testing.T) {
 		return ctx.Err()
 	}}
 	_, err = Start(context.Background(), SessionConfig{
-		LeaseClient: client, Carrier: carrier, OwnerDeviceID: "device_1", OwnerSessionID: "session_1",
+		LeaseClient: client, Carrier: carrier, OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground",
 		Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, Random: sessionReaderFunc(func([]byte) (int, error) {
 			return 0, io.ErrUnexpectedEOF
 		}),
@@ -402,7 +402,7 @@ func TestSessionIdempotencyKeyUsesInjectedRandomSource(t *testing.T) {
 
 	client = &sessionLeaseClient{}
 	_, err = Start(context.Background(), SessionConfig{
-		LeaseClient: client, Carrier: carrier, OwnerDeviceID: "device_1", OwnerSessionID: "session_1",
+		LeaseClient: client, Carrier: carrier, OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground",
 		Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, IdempotencyKey: "same-key", StopIdempotencyKey: "same-key",
 	})
 	if !errors.Is(err, ErrSessionInvalid) {
@@ -422,7 +422,7 @@ func TestSessionParentDeathStopsAndRevokes(t *testing.T) {
 		return ctx.Err()
 	}}
 	session, err := Start(context.Background(), SessionConfig{
-		LeaseClient: client, Carrier: carrier, OwnerDeviceID: "device_1", OwnerSessionID: "session_1",
+		LeaseClient: client, Carrier: carrier, OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground",
 		Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, ParentPID: func() int { return int(parent.Load()) },
 		ParentPollInterval: time.Millisecond, RenewInterval: time.Hour, ShutdownTimeout: time.Second,
 	})
@@ -454,7 +454,7 @@ func TestSessionExpiryRevokesOnceAfterRenewalRetriesReachDeadline(t *testing.T) 
 	}}
 	deadline := time.Now().UTC().Add(120 * time.Millisecond)
 	session, err := Start(context.Background(), SessionConfig{
-		LeaseClient: client, Carrier: carrier, OwnerDeviceID: "device_1", OwnerSessionID: "session_1",
+		LeaseClient: client, Carrier: carrier, OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground",
 		Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, UserDeadline: &deadline,
 		RenewInterval: 60 * time.Millisecond, ReconnectBackoff: 10 * time.Millisecond, MaxReconnectBackoff: 10 * time.Millisecond,
 		ShutdownTimeout: time.Second, DisableParentWatch: true,
@@ -513,7 +513,7 @@ func TestSessionRenewalUsesLeaseAdvancedDuringRenewalWait(t *testing.T) {
 		return ctx.Err()
 	}}
 	session, err := Start(context.Background(), SessionConfig{
-		LeaseClient: client, Carrier: carrier, OwnerDeviceID: "device_1", OwnerSessionID: "session_1",
+		LeaseClient: client, Carrier: carrier, OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground",
 		Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"},
 		Now:    now, RenewInterval: time.Millisecond, ShutdownTimeout: time.Second, DisableParentWatch: true,
 	})
@@ -563,7 +563,7 @@ func TestObservedSessionDelegatesRenewAndStopToStableRuntime(t *testing.T) {
 		return ctx.Err()
 	}}
 	session, err := Start(context.Background(), SessionConfig{
-		LeaseClient: client, Carrier: carrier, OwnerDeviceID: "device_1", OwnerSessionID: "session_1",
+		LeaseClient: client, Carrier: carrier, OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground",
 		Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, LeaseLifecycle: LeaseLifecycleObserved,
 		RenewInterval: time.Millisecond, ShutdownTimeout: time.Second, DisableParentWatch: true,
 	})

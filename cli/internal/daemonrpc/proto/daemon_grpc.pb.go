@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             v3.21.12
-// source: internal/daemonrpc/proto/daemon.proto
+// source: daemon.proto
 
 package proto
 
@@ -19,10 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DaemonService_StreamStatus_FullMethodName  = "/daemonrpc.DaemonService/StreamStatus"
-	DaemonService_ResolveDevice_FullMethodName = "/daemonrpc.DaemonService/ResolveDevice"
-	DaemonService_SetDeviceTags_FullMethodName = "/daemonrpc.DaemonService/SetDeviceTags"
-	DaemonService_ApprovePeer_FullMethodName   = "/daemonrpc.DaemonService/ApprovePeer"
+	DaemonService_StreamStatus_FullMethodName   = "/daemonrpc.DaemonService/StreamStatus"
+	DaemonService_ResolveMachine_FullMethodName = "/daemonrpc.DaemonService/ResolveMachine"
+	DaemonService_SetMachineTags_FullMethodName = "/daemonrpc.DaemonService/SetMachineTags"
+	DaemonService_ApprovePeer_FullMethodName    = "/daemonrpc.DaemonService/ApprovePeer"
 )
 
 // DaemonServiceClient is the client API for DaemonService service.
@@ -30,8 +30,8 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type DaemonServiceClient interface {
 	StreamStatus(ctx context.Context, in *Empty, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StatusResponse], error)
-	ResolveDevice(ctx context.Context, in *DeviceQuery, opts ...grpc.CallOption) (*DeviceAddress, error)
-	SetDeviceTags(ctx context.Context, in *SetDeviceTagsRequest, opts ...grpc.CallOption) (*SetDeviceTagsResponse, error)
+	ResolveMachine(ctx context.Context, in *MachineQuery, opts ...grpc.CallOption) (*MachineAddress, error)
+	SetMachineTags(ctx context.Context, in *SetMachineTagsRequest, opts ...grpc.CallOption) (*SetMachineTagsResponse, error)
 	ApprovePeer(ctx context.Context, in *ApprovePeerRequest, opts ...grpc.CallOption) (*ApprovePeerResponse, error)
 }
 
@@ -62,20 +62,20 @@ func (c *daemonServiceClient) StreamStatus(ctx context.Context, in *Empty, opts 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type DaemonService_StreamStatusClient = grpc.ServerStreamingClient[StatusResponse]
 
-func (c *daemonServiceClient) ResolveDevice(ctx context.Context, in *DeviceQuery, opts ...grpc.CallOption) (*DeviceAddress, error) {
+func (c *daemonServiceClient) ResolveMachine(ctx context.Context, in *MachineQuery, opts ...grpc.CallOption) (*MachineAddress, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(DeviceAddress)
-	err := c.cc.Invoke(ctx, DaemonService_ResolveDevice_FullMethodName, in, out, cOpts...)
+	out := new(MachineAddress)
+	err := c.cc.Invoke(ctx, DaemonService_ResolveMachine_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *daemonServiceClient) SetDeviceTags(ctx context.Context, in *SetDeviceTagsRequest, opts ...grpc.CallOption) (*SetDeviceTagsResponse, error) {
+func (c *daemonServiceClient) SetMachineTags(ctx context.Context, in *SetMachineTagsRequest, opts ...grpc.CallOption) (*SetMachineTagsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SetDeviceTagsResponse)
-	err := c.cc.Invoke(ctx, DaemonService_SetDeviceTags_FullMethodName, in, out, cOpts...)
+	out := new(SetMachineTagsResponse)
+	err := c.cc.Invoke(ctx, DaemonService_SetMachineTags_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -97,8 +97,8 @@ func (c *daemonServiceClient) ApprovePeer(ctx context.Context, in *ApprovePeerRe
 // for forward compatibility.
 type DaemonServiceServer interface {
 	StreamStatus(*Empty, grpc.ServerStreamingServer[StatusResponse]) error
-	ResolveDevice(context.Context, *DeviceQuery) (*DeviceAddress, error)
-	SetDeviceTags(context.Context, *SetDeviceTagsRequest) (*SetDeviceTagsResponse, error)
+	ResolveMachine(context.Context, *MachineQuery) (*MachineAddress, error)
+	SetMachineTags(context.Context, *SetMachineTagsRequest) (*SetMachineTagsResponse, error)
 	ApprovePeer(context.Context, *ApprovePeerRequest) (*ApprovePeerResponse, error)
 	mustEmbedUnimplementedDaemonServiceServer()
 }
@@ -113,11 +113,11 @@ type UnimplementedDaemonServiceServer struct{}
 func (UnimplementedDaemonServiceServer) StreamStatus(*Empty, grpc.ServerStreamingServer[StatusResponse]) error {
 	return status.Error(codes.Unimplemented, "method StreamStatus not implemented")
 }
-func (UnimplementedDaemonServiceServer) ResolveDevice(context.Context, *DeviceQuery) (*DeviceAddress, error) {
-	return nil, status.Error(codes.Unimplemented, "method ResolveDevice not implemented")
+func (UnimplementedDaemonServiceServer) ResolveMachine(context.Context, *MachineQuery) (*MachineAddress, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResolveMachine not implemented")
 }
-func (UnimplementedDaemonServiceServer) SetDeviceTags(context.Context, *SetDeviceTagsRequest) (*SetDeviceTagsResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method SetDeviceTags not implemented")
+func (UnimplementedDaemonServiceServer) SetMachineTags(context.Context, *SetMachineTagsRequest) (*SetMachineTagsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetMachineTags not implemented")
 }
 func (UnimplementedDaemonServiceServer) ApprovePeer(context.Context, *ApprovePeerRequest) (*ApprovePeerResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ApprovePeer not implemented")
@@ -154,38 +154,38 @@ func _DaemonService_StreamStatus_Handler(srv interface{}, stream grpc.ServerStre
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type DaemonService_StreamStatusServer = grpc.ServerStreamingServer[StatusResponse]
 
-func _DaemonService_ResolveDevice_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(DeviceQuery)
+func _DaemonService_ResolveMachine_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MachineQuery)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DaemonServiceServer).ResolveDevice(ctx, in)
+		return srv.(DaemonServiceServer).ResolveMachine(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: DaemonService_ResolveDevice_FullMethodName,
+		FullMethod: DaemonService_ResolveMachine_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonServiceServer).ResolveDevice(ctx, req.(*DeviceQuery))
+		return srv.(DaemonServiceServer).ResolveMachine(ctx, req.(*MachineQuery))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DaemonService_SetDeviceTags_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SetDeviceTagsRequest)
+func _DaemonService_SetMachineTags_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetMachineTagsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DaemonServiceServer).SetDeviceTags(ctx, in)
+		return srv.(DaemonServiceServer).SetMachineTags(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: DaemonService_SetDeviceTags_FullMethodName,
+		FullMethod: DaemonService_SetMachineTags_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DaemonServiceServer).SetDeviceTags(ctx, req.(*SetDeviceTagsRequest))
+		return srv.(DaemonServiceServer).SetMachineTags(ctx, req.(*SetMachineTagsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -216,12 +216,12 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*DaemonServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "ResolveDevice",
-			Handler:    _DaemonService_ResolveDevice_Handler,
+			MethodName: "ResolveMachine",
+			Handler:    _DaemonService_ResolveMachine_Handler,
 		},
 		{
-			MethodName: "SetDeviceTags",
-			Handler:    _DaemonService_SetDeviceTags_Handler,
+			MethodName: "SetMachineTags",
+			Handler:    _DaemonService_SetMachineTags_Handler,
 		},
 		{
 			MethodName: "ApprovePeer",
@@ -235,5 +235,5 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "internal/daemonrpc/proto/daemon.proto",
+	Metadata: "daemon.proto",
 }

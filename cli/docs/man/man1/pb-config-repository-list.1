@@ -1,0 +1,52 @@
+.nh
+.TH "PB-CONFIG-REPOSITORY-LIST" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-repository-list - List connected repositories
+
+
+.SH SYNOPSIS
+\fBpb config repository list [flags]\fP
+
+
+.SH DESCRIPTION
+List connected repositories
+
+.PP
+List the connected repositories available to your signed-in account, including their stable IDs, display names, and providers. Use the stable repository ID when names are ambiguous or when scripting later configuration commands.
+
+.PP
+Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for list
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config-repository(1)\fP

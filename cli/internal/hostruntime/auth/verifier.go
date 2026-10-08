@@ -42,6 +42,8 @@ func (e *Error) Error() string {
 func (e *Error) Unwrap() error { return e.Cause }
 
 type Claims struct {
+	WorkspaceID            string `json:"workspace_id,omitempty"`
+	ActorAccountID         string `json:"actor_account_id,omitempty"`
 	BootID                 string `json:"boot_id,omitempty"`
 	PolicyGeneration       int64  `json:"policy_generation,omitempty"`
 	AnnouncementGeneration int64  `json:"announcement_generation,omitempty"`
@@ -69,6 +71,7 @@ type Claims struct {
 	OperationID            string              `json:"operation_id,omitempty"`
 	PreviewID              string              `json:"preview_id,omitempty"`
 	OwnerSessionID         string              `json:"owner_session_id,omitempty"`
+	OwnerSessionKind       string              `json:"owner_session_kind,omitempty"`
 	TargetScheme           string              `json:"target_scheme,omitempty"`
 	TargetAddress          string              `json:"target_address,omitempty"`
 	ResourceKind           string              `json:"resource_kind,omitempty"`
@@ -94,6 +97,10 @@ type Claims struct {
 	CorrelationID          string              `json:"correlation_id,omitempty"`
 	RequestHash            string              `json:"request_hash,omitempty"`
 	AssignmentID           string              `json:"assignment_id,omitempty"`
+	AssignmentVersion      int64               `json:"assignment_version,omitempty"`
+	ConfigPath             string              `json:"config_path,omitempty"`
+	ConflictRevision       string              `json:"conflict_revision,omitempty"`
+	ExpectedRemoteRevision string              `json:"expected_remote_revision,omitempty"`
 	WarningRevision        string              `json:"warning_revision,omitempty"`
 	ConnectorID            string              `json:"connector_id,omitempty"`
 	ConnectorGeneration    uint64              `json:"connector_generation,omitempty"`
@@ -129,24 +136,25 @@ type Policy struct {
 	Scopes                   []string
 	// AnyScopes permits one of several exact scope sets. It is mutually
 	// exclusive with Scopes and never performs subset matching.
-	AnyScopes           [][]string
-	EnvironmentID       string
-	UserID              string
-	CLIClientSessionID  string
-	HelperID            string
-	MachineID           string
-	SourceMachineID     string
-	SessionID           string
-	OperationID         string
-	AssignmentID        string
-	WarningRevision     string
-	ConnectorID         string
-	ConnectorGeneration uint64
-	EdgePool            string
-	EdgeNodeID          string
-	CounterEpoch        string
-	MaxLifetime         time.Duration
-	SingleUse           bool
+	AnyScopes              [][]string
+	EnvironmentID          string
+	UserID                 string
+	CLIClientSessionID     string
+	HelperID               string
+	MachineID              string
+	SourceMachineID        string
+	SessionID              string
+	OperationID            string
+	AssignmentID           string
+	InstallationGeneration int64
+	WarningRevision        string
+	ConnectorID            string
+	ConnectorGeneration    uint64
+	EdgePool               string
+	EdgeNodeID             string
+	CounterEpoch           string
+	MaxLifetime            time.Duration
+	SingleUse              bool
 }
 
 type Clock interface{ Now() time.Time }
@@ -217,7 +225,7 @@ func (v Verifier) Verify(ctx context.Context, token string, policy Policy) (Clai
 	if err := decodeSegment(parts[1], &claims); err != nil {
 		return Claims{}, &Error{Code: Malformed, Cause: err}
 	}
-	if claims.CredentialClass == "browser_terminal_operation" {
+	if claims.CredentialClass == "browser_terminal_operation" || claims.CredentialClass == "browser_config_compare" {
 		if !validBrowserPublicKeyDigest(claims.BrowserPublicKeySHA256) {
 			return Claims{}, &Error{Code: BindingInvalid}
 		}
@@ -387,7 +395,7 @@ func rejectDuplicateKeys(data []byte) error {
 }
 
 func bindingsMatch(c Claims, p Policy) bool {
-	return match(p.EnvironmentID, c.EnvironmentID) && match(p.MachineID, c.MachineID) && match(p.SourceMachineID, c.SourceMachineID) && match(p.UserID, c.UserID) && match(p.CLIClientSessionID, c.CLIClientSessionID) && match(p.HelperID, c.HelperID) && match(p.SessionID, c.SessionID) && match(p.OperationID, c.OperationID) && match(p.AssignmentID, c.AssignmentID) && match(p.WarningRevision, c.WarningRevision) && match(p.ConnectorID, c.ConnectorID) && matchUint(p.ConnectorGeneration, c.ConnectorGeneration) && match(p.EdgePool, c.EdgePool) && match(p.EdgeNodeID, c.EdgeNodeID) && match(p.CounterEpoch, c.CounterEpoch)
+	return (p.InstallationGeneration == 0 || p.InstallationGeneration == c.InstallationGeneration) && match(p.EnvironmentID, c.EnvironmentID) && match(p.MachineID, c.MachineID) && match(p.SourceMachineID, c.SourceMachineID) && match(p.UserID, c.UserID) && match(p.CLIClientSessionID, c.CLIClientSessionID) && match(p.HelperID, c.HelperID) && match(p.SessionID, c.SessionID) && match(p.OperationID, c.OperationID) && match(p.AssignmentID, c.AssignmentID) && match(p.WarningRevision, c.WarningRevision) && match(p.ConnectorID, c.ConnectorID) && matchUint(p.ConnectorGeneration, c.ConnectorGeneration) && match(p.EdgePool, c.EdgePool) && match(p.EdgeNodeID, c.EdgeNodeID) && match(p.CounterEpoch, c.CounterEpoch)
 }
 func match(expected, actual string) bool     { return expected == "" || expected == actual }
 func matchUint(expected, actual uint64) bool { return expected == 0 || expected == actual }

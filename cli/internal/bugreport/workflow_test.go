@@ -8,12 +8,27 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 )
+
+type failingPrompt struct{ cause error }
+
+func (w failingPrompt) Write([]byte) (int, error) { return 0, w.cause }
+
+func TestRecordingPromptFailureKeepsCauseAndStillEndsRecording(t *testing.T) {
+	cause := errors.New("PRIVATE_PROMPT_FAILURE")
+	local := &localStub{bundle: testBundle(t, []byte("PK bundle"))}
+	result, err := Run(t.Context(), Options{Record: true, Input: bytes.NewReader(nil), Prompt: failingPrompt{cause}, Local: local})
+	var stage *StageError
+	if !errors.Is(err, cause) || !errors.As(err, &stage) || result.Recorded || !result.BundleCreated || !slices.Equal(local.markers, []string{"start", "end"}) || strings.Contains(err.Error(), "PRIVATE") {
+		t.Fatal("recording lost prompt failure, cleanup or private-message protection")
+	}
+}
 
 type localStub struct {
 	bundle  diagnostics.Bundle
@@ -57,7 +72,7 @@ func (s *serverStub) CompleteDiagnosticUploadIntent(_ context.Context, _ string)
 	if s.fail != nil {
 		return api.DiagnosticUploadIntent{}, s.fail
 	}
-	return api.DiagnosticUploadIntent{Schema: api.DiagnosticUploadIntentSchemaV1, IntentID: "diag_0123456789abcdef", CorrelationID: "pb-0123456789abcdef0123456789abcdef", State: "uploaded", ExpiresAt: time.Now().UTC().Add(time.Minute)}, nil
+	return api.DiagnosticUploadIntent{Schema: api.DiagnosticUploadIntentSchemaV1, IntentID: "diag_0123456789abcdef", CorrelationID: "support_01234567-89ab-4def-8123-456789abcdef", State: "uploaded", ExpiresAt: time.Now().UTC().Add(time.Minute)}, nil
 }
 
 func TestWorkflowRecordsAndUploadsExactBundle(t *testing.T) {
@@ -99,9 +114,9 @@ func TestWorkflowCreatesBundleButReportsEndMarkerFailure(t *testing.T) {
 
 func testBundle(t *testing.T, content []byte) diagnostics.Bundle {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "bugreport-pb-0123456789abcdef0123456789abcdef.zip")
+	path := filepath.Join(t.TempDir(), "bugreport-support_01234567-89ab-4def-8123-456789abcdef.zip")
 	if err := writeTestBundle(path, content); err != nil {
 		t.Fatal(err)
 	}
-	return diagnostics.Bundle{Schema: diagnostics.BundleSchemaV1, Correlation: "pb-0123456789abcdef0123456789abcdef", CreatedAt: time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC), Path: path, Bytes: int64(len(content)), Categories: []string{"manifest", "recent_events", "redacted_events", "status"}}
+	return diagnostics.Bundle{Schema: diagnostics.BundleSchemaV1, Correlation: "support_01234567-89ab-4def-8123-456789abcdef", CreatedAt: time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC), Path: path, Bytes: int64(len(content)), Categories: []string{"manifest", "recent_events", "redacted_events", "status"}}
 }

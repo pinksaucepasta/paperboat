@@ -182,7 +182,6 @@ function Read-InstallConfig([pscustomobject]$Paths) {
     $ownerSID = [string](Get-JsonValue $config 'owner_sid')
     $stateRoot = [string](Get-JsonValue $config 'state_root')
     $listenAddress = [string](Get-JsonValue $config 'listen_address')
-    $setupMode = [string](Get-JsonValue $config 'setup_mode')
     $artifact = Get-JsonValue $config 'artifact'
     $artifactVersion = [string](Get-JsonValue $artifact 'version')
     $artifactPlatform = [string](Get-JsonValue $artifact 'platform')
@@ -190,7 +189,6 @@ function Read-InstallConfig([pscustomobject]$Paths) {
     if ($schema -ne 'paperboat.windows-runtime-install/v1' -or -not $committed -or
         $tokenFile -ne $Paths.TokenFile -or [string]::IsNullOrWhiteSpace($machineID) -or
         [string]::IsNullOrWhiteSpace($ownerSID) -or [string]::IsNullOrWhiteSpace($stateRoot) -or
-        ($setupMode -ne 'host' -and $setupMode -ne 'client') -or
         $artifactPlatform -ne 'windows' -or ($artifactArchitecture -ne 'amd64' -and $artifactArchitecture -ne 'arm64') -or
         $artifactVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$') {
         throw 'invalid installation metadata'
@@ -278,14 +276,8 @@ function Assert-ServiceProcess([pscustomobject]$Paths, [string]$Name, [string]$A
 function Assert-SSHService([pscustomobject]$Paths, [pscustomobject]$Config) {
     $sshName = 'PaperboatSshd'
     $service = Get-ServiceRecord $sshName
-    if ([string]$Config.setup_mode -eq 'client') {
-        if ($null -ne $service) {
-            throw 'client mode unexpectedly has PaperboatSshd'
-        }
-        return
-    }
     if ($null -eq $service) {
-        throw 'host mode is missing PaperboatSshd'
+        throw 'installation is missing PaperboatSshd'
     }
     Require-RegularFile $Paths.SSHDPath (64 * 1024 * 1024)
     Require-RegularFile $Paths.SSHConfig (64 * 1024)
@@ -635,7 +627,6 @@ Invoke-ReadOnlyCheck 'tunnel command surface and read-only list' {
 
 if ($null -ne $config) {
     Write-Output ('[info] installed Paperboat version: ' + [string](Get-JsonValue (Get-JsonValue $config 'artifact') 'version'))
-    Write-Output ('[info] installed setup mode: ' + [string](Get-JsonValue $config 'setup_mode'))
 }
 Write-FeatureCommands
 

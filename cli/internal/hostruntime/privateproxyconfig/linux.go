@@ -86,3 +86,26 @@ func (a *LinuxAdapter) Restore(ctx context.Context, raw json.RawMessage) error {
 	_, err := a.runner.Run(ctx, gsettings, "set", gnomeProxySchema, "mode", s.Mode)
 	return err
 }
+
+func (a *LinuxAdapter) OwnsTransition(ctx context.Context, oldURL, newURL string) (bool, error) {
+	owned, err := a.Owns(ctx, oldURL)
+	if err != nil || owned {
+		return owned, err
+	}
+	return a.Owns(ctx, newURL)
+}
+
+func (a *LinuxAdapter) OwnsRestoration(ctx context.Context, prior json.RawMessage, pacURL, previousPACURL string) (bool, error) {
+	raw, err := a.Snapshot(ctx)
+	if err != nil {
+		return false, err
+	}
+	var current, want linuxState
+	if json.Unmarshal(raw, &current) != nil || json.Unmarshal(prior, &want) != nil {
+		return false, nil
+	}
+	ownedURL := func(pac string) bool {
+		return pac != "" && (current.URL == strconv.Quote(pac) || current.URL == "'"+pac+"'")
+	}
+	return (current.Mode == want.Mode || current.Mode == "'auto'") && (current.URL == want.URL || ownedURL(pacURL) || ownedURL(previousPACURL)), nil
+}

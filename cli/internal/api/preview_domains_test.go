@@ -66,7 +66,7 @@ func TestCreatePreviewLeaseSendsOrderedDomainsAndSafeSummaries(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	lease := PreviewLease{
 		Schema: PreviewTunnelSchemaV1, Kind: "preview_lease", ID: "prv_domains", AccountID: "acct_1", ActorID: "actor_1",
-		OwnerDeviceID: "device_1", OwnerSessionID: "session_1", Target: PreviewLeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"},
+		OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground", Target: PreviewLeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"},
 		AccessMode: "public", Endpoint: "https://preview.example.test", LeaseDeadline: now.Add(time.Hour), State: "connecting",
 		AllocationState: "pending", EdgeState: "pending", OriginState: "unknown", CreatedAt: now, LastRenewedAt: now,
 		Domains: []PreviewDomainSummary{{
@@ -97,7 +97,7 @@ func TestCreatePreviewLeaseSendsOrderedDomainsAndSafeSummaries(t *testing.T) {
 	defer server.Close()
 	client := New(server.URL, config.Credential{AccessToken: "access-token"}, server.Client())
 	got, err := client.CreatePreviewLease(context.Background(), PreviewLeaseCreateRequest{
-		OwnerDeviceID: "device_1", OwnerSessionID: "session_1", Target: PreviewLeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, Domains: []string{"EXAMPLE.COM.", "app.example.com"},
+		OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground", Target: PreviewLeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, Domains: []string{"EXAMPLE.COM.", "app.example.com"},
 	}, "create-domains")
 	if err != nil {
 		t.Fatal(err)
@@ -117,7 +117,7 @@ func TestCreatePreviewLeaseSendsOrderedDomainsAndSafeSummaries(t *testing.T) {
 func TestPreviewLeaseRejectsMixedDomainTargetBinding(t *testing.T) {
 	now := time.Now().UTC()
 	lease := PreviewLease{
-		Schema: PreviewTunnelSchemaV1, Kind: "preview_lease", ID: "prv_1", AccountID: "acct_1", ActorID: "actor_1", OwnerDeviceID: "device_1", OwnerSessionID: "session_1",
+		Schema: PreviewTunnelSchemaV1, Kind: "preview_lease", ID: "prv_1", AccountID: "acct_1", ActorID: "actor_1", OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground",
 		Target: PreviewLeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, AccessMode: "public", Endpoint: "https://preview.example.test", LeaseDeadline: now.Add(time.Hour), State: "ready", AllocationState: "ready", EdgeState: "ready", OriginState: "ready", CreatedAt: now, LastRenewedAt: now,
 		Domains: []PreviewDomainSummary{{ID: "dom_1", TargetKind: "tunnel_route", PreviewID: "prv_1", Hostname: "app.example.com", MatchType: "exact", State: "ready", DNS: PreviewDomainDNS{Target: "dns.example.test"}, Certificate: PreviewDomainCertificate{State: "ready"}, Generation: 1, ETag: `"dom_1:1"`}},
 	}

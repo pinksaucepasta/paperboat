@@ -17,7 +17,7 @@ func hostStatePayload(generation uint64) []byte {
 
 func hostStatePayloadWithState(generation uint64, desiredState string) []byte {
 	return []byte(`{"schema":"paperboat.preview-tunnel/v1","kind":"tunnel_config_snapshot","tunnel_id":"tun_01","generation":` +
-		formatUint(generation) + `,"name":"demo","desired_state":"` + desiredState + `","access_mode":"public","stable_endpoint":"https://123e4567-e89b-12d3-a456-426614174000.tunnels.example.test","expires_at":null,"routes":[{"id":"rte_01","name":"default","protocol":"http","match_type":"catch_all","path_prefix":null,"origin_scheme":"http","origin_address":"127.0.0.1:3000","preserve_host":true,"host_override":null,"tls_verification":"not_applicable","tls_server_name":null,"ca_reference":null,"mtls_credential_reference":null,"connect_timeout_ms":10000,"idle_timeout_ms":90000,"max_concurrent_streams":128,"desired_state":"active"}]}`)
+		formatUint(generation) + `,"name":"demo","desired_state":"` + desiredState + `","access_mode":"public","stable_endpoint":"https://123e4567-e89b-12d3-a456-426614174000.tunnels.example.test","stable_endpoint_id":"endpoint_123e4567-e89b-42d3-a456-426614174000","expires_at":null,"routes":[{"id":"rte_01","name":"default","protocol":"http","match_type":"catch_all","path_prefix":null,"origin_scheme":"http","origin_address":"127.0.0.1:3000","preserve_host":true,"host_override":null,"tls_verification":"not_applicable","tls_server_name":null,"ca_reference":null,"mtls_credential_reference":null,"connect_timeout_ms":10000,"idle_timeout_ms":90000,"max_concurrent_streams":128,"desired_state":"active"}]}`)
 }
 
 func formatUint(value uint64) string {
@@ -41,7 +41,7 @@ func TestHostStateApplierStagesThenPromotesLKG(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	applier := &HostStateApplier{Store: store, Clock: clock, StableEndpointID: "123e4567-e89b-12d3-a456-426614174000"}
+	applier := &HostStateApplier{Store: store, Clock: clock, StableEndpointID: "endpoint_123e4567-e89b-42d3-a456-426614174000"}
 	first, err := NewSnapshot("tun_01", 1, hostStatePayload(1))
 	if err != nil {
 		t.Fatal(err)
@@ -91,8 +91,7 @@ func TestHostStateApplierRequiresCanonicalStableEndpointIdentity(t *testing.T) {
 	}{
 		{name: "missing", stableEndpointID: ""},
 		{name: "hash-like fallback", stableEndpointID: "tep_0123456789abcdef"},
-		{name: "mismatched", stableEndpointID: "123e4567-e89b-12d3-a456-426614174001"},
-		{name: "endpoint hostname", stableEndpointID: "123e4567-e89b-12d3-a456-426614174000", endpointReplace: "demo.tunnels.example.test"},
+		{name: "mismatched", stableEndpointID: "endpoint_123e4567-e89b-42d3-a456-426614174001"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -129,7 +128,7 @@ func TestHostStateApplierRejectsHashAndDeltaBaseMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	applier := &HostStateApplier{Store: store, Clock: clock, StableEndpointID: "123e4567-e89b-12d3-a456-426614174000"}
+	applier := &HostStateApplier{Store: store, Clock: clock, StableEndpointID: "endpoint_123e4567-e89b-42d3-a456-426614174000"}
 	first, err := NewSnapshot("tun_01", 1, hostStatePayload(1))
 	if err != nil {
 		t.Fatal(err)
@@ -167,7 +166,7 @@ func TestHostStateApplierStagesIsolatedStateAndPromotesBoundConnector(t *testing
 		t.Fatal(err)
 	}
 	defer store.Close()
-	applier := &HostStateApplier{Store: store, Clock: clock, StableEndpointID: "123e4567-e89b-12d3-a456-426614174000"}
+	applier := &HostStateApplier{Store: store, Clock: clock, StableEndpointID: "endpoint_123e4567-e89b-42d3-a456-426614174000"}
 	first, err := NewSnapshot("tun_01", 1, hostStatePayload(1))
 	if err != nil {
 		t.Fatal(err)
@@ -237,7 +236,7 @@ func TestHostStatePreparedDurablyStagesDesiredBeforeManagerReadiness(t *testing.
 		t.Fatal(err)
 	}
 	defer store.Close()
-	applier := &HostStateApplier{Store: store, Clock: clock, StableEndpointID: "123e4567-e89b-12d3-a456-426614174000"}
+	applier := &HostStateApplier{Store: store, Clock: clock, StableEndpointID: "endpoint_123e4567-e89b-42d3-a456-426614174000"}
 	first, err := NewSnapshot("tun_01", 1, hostStatePayload(1))
 	if err != nil {
 		t.Fatal(err)
@@ -303,7 +302,7 @@ func TestHostStateApplierPersistsPausedStateAndRemovesDeletedTunnel(t *testing.T
 		t.Fatal(err)
 	}
 	defer store.Close()
-	applier := &HostStateApplier{Store: store, Clock: clock, StableEndpointID: "123e4567-e89b-12d3-a456-426614174000"}
+	applier := &HostStateApplier{Store: store, Clock: clock, StableEndpointID: "endpoint_123e4567-e89b-42d3-a456-426614174000"}
 	for _, test := range []struct {
 		generation   uint64
 		desiredState string

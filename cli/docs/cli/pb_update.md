@@ -6,7 +6,7 @@ Update pb from the signed Paperboat release
 
 Update pb from the signed Paperboat release
 
-Download and verify a signed Paperboat release, then review and approve its exact candidate before installation. Check and status are read-only; download never restarts services. Installation interrupts connections while services restart, with trusted recovery on failure.
+Download and verify a signed Paperboat release, then review and approve its exact candidate before installation. Check and status are read-only; download never restarts services. Ordinary installation reconnects connections while preserving running shells; process-owner updates warn before ending running work. Recovery uses trusted artifacts.
 
 JSON output is supported with --json.
 
@@ -28,6 +28,7 @@ pb update [flags]
       --config string      path to the CLI config file
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO
@@ -35,5 +36,6 @@ pb update [flags]
 * [pb](pb.md)	 - Open Paperboat or connect to an environment terminal
 * [pb update check](pb_update_check.md)	 - Check the signed Paperboat release without installing it
 * [pb update download](pb_update_download.md)	 - Download and verify an update without installing it
+* [pb update settings](pb_update_settings.md)	 - View or change automatic update settings
 * [pb update status](pb_update_status.md)	 - Show installed Paperboat update state
 

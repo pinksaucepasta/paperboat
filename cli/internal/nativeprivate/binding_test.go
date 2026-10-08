@@ -60,9 +60,9 @@ func TestDecodeIsStrictAndBounded(t *testing.T) {
 	}
 }
 
-func TestDeviceServiceBindingRequiresActorAndGenerationFences(t *testing.T) {
+func TestMachineServiceBindingRequiresActorAndGenerationFences(t *testing.T) {
 	now := time.Now()
-	binding := Binding{Schema: SchemaV1, ResourceKind: "device_service", ResourceID: "machine", ResourceGeneration: 1, RouteID: "tcp:5432", RouteGeneration: 2, TargetGeneration: 3, OwnerEndpointID: "machine", Protocol: "tcp", TargetScheme: "tcp", TargetAddress: "127.0.0.1:5432", ExpiresAt: now.Add(time.Minute), InstallationGeneration: 1, BootID: "boot", PolicyGeneration: 2, AnnouncementGeneration: 3, UserID: "user", CLIClientSessionID: "cli", AccessSessionID: "access"}
+	binding := Binding{Schema: SchemaV1, ResourceKind: "machine_service", ResourceID: "machine", ResourceGeneration: 1, RouteID: "tcp:5432", RouteGeneration: 2, TargetGeneration: 3, OwnerEndpointID: "machine", Protocol: "tcp", TargetScheme: "tcp", TargetAddress: "127.0.0.1:5432", ExpiresAt: now.Add(time.Minute), InstallationGeneration: 1, BootID: "boot", PolicyGeneration: 2, AnnouncementGeneration: 3, UserID: "user", CLIClientSessionID: "cli", AccessSessionID: "access"}
 	if err := binding.Validate(now); err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestDeviceServiceBindingRequiresActorAndGenerationFences(t *testing.T) {
 		mutated := binding
 		change(&mutated)
 		if mutated.Validate(now) == nil {
-			t.Fatal("incomplete device service binding accepted")
+			t.Fatal("incomplete machine service binding accepted")
 		}
 	}
 }

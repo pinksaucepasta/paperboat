@@ -5,6 +5,7 @@ package localapi
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"path/filepath"
 
 	"golang.org/x/sys/windows"
@@ -26,13 +27,16 @@ func CurrentPaths(uid int) (Paths, error) {
 	}
 	base, err := windows.KnownFolderPath(windows.FOLDERID_LocalAppData, windows.KF_FLAG_DEFAULT)
 	if err != nil {
-		return Paths{}, ErrInvalidConfig
+		return Paths{}, errors.Join(ErrInvalidConfig, err)
 	}
 	if !filepath.IsAbs(base) || filepath.Clean(base) != base {
 		return Paths{}, ErrInvalidConfig
 	}
 	tokenUser, err := windows.GetCurrentProcessToken().GetTokenUser()
-	if err != nil || tokenUser == nil || tokenUser.User.Sid == nil || !tokenUser.User.Sid.IsValid() {
+	if err != nil {
+		return Paths{}, errors.Join(ErrInvalidConfig, err)
+	}
+	if tokenUser == nil || tokenUser.User.Sid == nil || !tokenUser.User.Sid.IsValid() {
 		return Paths{}, ErrInvalidConfig
 	}
 	ownerSID := tokenUser.User.Sid.String()

@@ -8,8 +8,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -267,4 +269,124 @@ func metricValue(samples []edgetelemetry.MetricSample, name string, labels ...st
 		}
 	}
 	return 0
+}
+
+func TestRequestTelemetryMixedFailuresAndDeadlineRemainFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		cause    error
+		canceled bool
+		outcome  string
+	}{
+		{"pure cancel", context.Canceled, true, "canceled"},
+		{"refused plus cancel", errors.Join(syscall.ECONNREFUSED, context.Canceled), true, "failed"},
+		{"EOF plus IO", errors.Join(io.EOF, syscall.EIO), false, "failed"},
+		{"deadline plus cancel", errors.Join(context.DeadlineExceeded, context.Canceled), true, "failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			producer, metrics, events := newTestRequestTelemetry(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.canceled {
+				cancel()
+			}
+			request := httptest.NewRequest(http.MethodGet, "http://private.example.test", nil).WithContext(ctx)
+			_, err := producer.RoundTripper(telemetryRoundTripFunc(func(*http.Request) (*http.Response, error) { return nil, tc.cause })).RoundTrip(request)
+			if err != tc.cause {
+				t.Fatal("original cause replaced")
+			}
+			if metricValue(metrics.Snapshot(), edgetelemetry.MetricRouteRequests, "tunnel_https_wss", tc.outcome) != 1 {
+				t.Fatal("terminal outcome lost")
+			}
+			for _, event := range events.Snapshot() {
+				if event.Name == requestEventFailed && event.Severity != edgetelemetry.SeverityError {
+					t.Fatal("failure severity lost")
+				}
+			}
+		})
+	}
+}
+
+func TestRequestTelemetryImmediateCancellationJoinsResponseCleanup(t *testing.T) {
+	producer, _, _ := newTestRequestTelemetry(t)
+	for range 32 {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		body := newBlockingResponseBody()
+		wrapped := newResponseBody(ctx, body, producer.startRequest(ctx, RequestInfo{}, "http", false))
+		if err := wrapped.Close(); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-body.closed:
+		case <-time.After(time.Second):
+			t.Fatal("response did not close")
+		}
+	}
+}
+
+func TestRequestTelemetryPanicIsFailureAndPreservesAbortBoundary(t *testing.T) {
+	producer, metrics, _ := newTestRequestTelemetry(t)
+	func() {
+		defer func() {
+			if recover() != "PRIVATE_panic" {
+				t.Fatal("panic contract changed")
+			}
+		}()
+		producer.Handler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("PRIVATE_panic") })).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://private.example.test", nil))
+	}()
+	if metricValue(metrics.Snapshot(), edgetelemetry.MetricEdgeRequests, "http", "failed") != 1 || metricValue(metrics.Snapshot(), edgetelemetry.MetricEdgeRequests, "http", "success") != 0 {
+		t.Fatal("panic counted as success")
+	}
+}
+
+type privateProxyCause struct{ calls int }
+
+func (e *privateProxyCause) Error() string { e.calls++; return "PRIVATE origin credential" }
+func (e *privateProxyCause) Unwrap() error { return syscall.EIO }
+
+func TestProxyFailureOwnerPreservesCauseAndRecoveryWithoutFormatting(t *testing.T) {
+	cause := &privateProxyCause{}
+	calls := 0
+	observed := 0
+	type contextKey struct{}
+	ctx := context.WithValue(context.Background(), contextKey{}, "borrowed")
+	proxy := &httputil.ReverseProxy{Rewrite: func(pr *httputil.ProxyRequest) { pr.Out.URL.Scheme = "http"; pr.Out.URL.Host = "private.example.test" }, Transport: telemetryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			return nil, cause
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("recovered")), Request: r}, nil
+	})}
+	configureProxyDiagnostics(proxy, func(got context.Context, err error) {
+		observed++
+		if got.Value(contextKey{}) != "borrowed" || !errors.Is(err, syscall.EIO) {
+			t.Fatal("owner lost original cause/context")
+		}
+	})
+	first := httptest.NewRecorder()
+	proxy.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "http://public.example.test", nil).WithContext(ctx))
+	if first.Code != 502 || first.Body.String() != "Bad Gateway\n" || observed != 1 || cause.calls != 0 {
+		t.Fatalf("status=%d observed=%d formatted=%d", first.Code, observed, cause.calls)
+	}
+	second := httptest.NewRecorder()
+	proxy.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "http://public.example.test", nil).WithContext(ctx))
+	if second.Code != 200 || second.Body.String() != "recovered" || observed != 1 {
+		t.Fatal("recovery duplicated failure")
+	}
+	proxy.ErrorHandler(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://public.example.test", nil), http.ErrAbortHandler)
+	if observed != 1 {
+		t.Fatal("explicit abort reported")
+	}
+	diagnosticObserved := 0
+	configureProxyDiagnostics(proxy, func(_ context.Context, err error) {
+		diagnosticObserved++
+		if err != errProxyHTTPDiagnostic {
+			t.Fatal("raw diagnostic retained")
+		}
+	})
+	proxy.ErrorLog.Print("PRIVATE formatted message")
+	if diagnosticObserved != 1 {
+		t.Fatal("diagnostic omitted")
+	}
 }

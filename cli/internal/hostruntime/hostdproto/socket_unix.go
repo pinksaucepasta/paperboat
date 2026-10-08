@@ -44,8 +44,9 @@ type SocketConfig struct {
 	MaxConcurrent  int
 	// Workloads is read-only stable-host state. It is evaluated only when a
 	// status request is returned to the updater.
-	Workloads  func() WorkloadStatus
-	UpdateGate UpdateGateHandler
+	Workloads     func() WorkloadStatus
+	WorkerControl WorkerControlHandler
+	UpdateGate    UpdateGateHandler
 
 	// peerUID is test-only injection for platform credential checks. Production
 	// callers always use the OS-specific implementation.
@@ -160,7 +161,27 @@ func (s *Server) serveOne(connection *net.UnixConn) {
 		return
 	}
 	var response Message
-	if gate, ok := request.(*UpdateGateRequest); ok {
+	if control, ok := request.(*WorkerControlRequest); ok && control.Operation == "prepare_maintenance" {
+		maintenanceCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		status, preparationErr := s.controller.PrepareMaintenance(maintenanceCtx, control.Force, s.config.Workloads)
+		cancel()
+		response, err = &WorkerControlResponse{Status: &status, Completed: true}, preparationErr
+	} else if control, ok := request.(*WorkerControlRequest); ok && control.Operation == "abort_maintenance" {
+		s.controller.AbortMaintenance()
+		response = &WorkerControlResponse{Completed: true}
+	} else if control, ok := request.(*WorkerControlRequest); ok {
+		if s.config.WorkerControl == nil {
+			s.writeError(connection, ErrNotReady)
+			return
+		}
+		controlCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		value, controlErr := s.config.WorkerControl.HandleWorkerControl(controlCtx, *control)
+		if controlErr == nil && control.Operation == "stop_active" {
+			controlErr = s.controller.FinishWorkerStop(controlCtx)
+		}
+		cancel()
+		response, err = &value, controlErr
+	} else if gate, ok := request.(*UpdateGateRequest); ok {
 		if s.config.UpdateGate == nil {
 			s.writeError(connection, ErrNotReady)
 			return
@@ -193,6 +214,8 @@ func (s *Server) writeError(connection *net.UnixConn, err error) {
 		code = "incompatible"
 	case errors.Is(err, ErrFenced):
 		code = "fenced"
+	case errors.Is(err, ErrMaintenanceBusy):
+		code = "maintenance_busy"
 	case errors.Is(err, ErrNotReady):
 		code = "not_ready"
 	}
@@ -348,6 +371,8 @@ func errorForCode(code string) error {
 		return ErrIncompatible
 	case "fenced":
 		return ErrFenced
+	case "maintenance_busy":
+		return ErrMaintenanceBusy
 	case "not_ready":
 		return ErrNotReady
 	default:
@@ -357,4 +382,22 @@ func errorForCode(code string) error {
 
 func (s *Server) String() string {
 	return fmt.Sprintf("hostd lifecycle socket %s", s.config.SocketPath)
+}
+
+func (s *Server) AcquireActive(workerID string, epoch uint64) (func(), error) {
+	return s.controller.AcquireActive(workerID, epoch)
+}
+
+func (c *Client) StopActive(ctx context.Context) error {
+	_, err := ControlWorker(ctx, c, WorkerControlRequest{Operation: "stop_active"})
+	return err
+}
+
+func (c *Client) PrepareMaintenance(ctx context.Context, force bool) error {
+	_, err := ControlWorker(ctx, c, WorkerControlRequest{Operation: "prepare_maintenance", Force: force})
+	return err
+}
+func (c *Client) AbortMaintenance(ctx context.Context) error {
+	_, err := ControlWorker(ctx, c, WorkerControlRequest{Operation: "abort_maintenance"})
+	return err
 }

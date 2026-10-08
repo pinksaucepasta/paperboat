@@ -29,21 +29,23 @@ var (
 )
 
 type HTTPConfig struct {
-	BaseURL      string
-	Credential   string
-	Timeout      time.Duration
-	TLS          *tls.Config
-	Client       *http.Client
-	ControlTrace func(context.Context, string) (string, string, func(string, string))
+	BaseURL        string
+	Credential     string
+	Timeout        time.Duration
+	TLS            *tls.Config
+	Client         *http.Client
+	ControlFailure func(context.Context, string, error)
+	ControlTrace   func(context.Context, string) (string, string, func(string, string))
 }
 
 type HTTPClient struct {
-	base         *url.URL
-	credential   string
-	client       *http.Client
-	controlTrace func(context.Context, string) (string, string, func(string, string))
-	signerMu     sync.RWMutex
-	signer       DistributionRequestSigner
+	base           *url.URL
+	credential     string
+	client         *http.Client
+	controlFailure func(context.Context, string, error)
+	controlTrace   func(context.Context, string) (string, string, func(string, string))
+	signerMu       sync.RWMutex
+	signer         DistributionRequestSigner
 }
 
 func NewHTTPClient(config HTTPConfig) (*HTTPClient, error) {
@@ -69,7 +71,7 @@ func NewHTTPClient(config HTTPConfig) (*HTTPClient, error) {
 	}
 	client.Timeout = config.Timeout
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return ErrControlUnavailable }
-	return &HTTPClient{base: base, credential: config.Credential, client: client, controlTrace: config.ControlTrace}, nil
+	return &HTTPClient{base: base, credential: config.Credential, client: client, controlTrace: config.ControlTrace, controlFailure: config.ControlFailure}, nil
 }
 
 // SetDistributionRequestSigner installs the node-private signer used for
@@ -292,17 +294,8 @@ func (c *HTTPClient) DesiredRouteSnapshot(ctx context.Context, nodeID, processEp
 }
 
 func (c *HTTPClient) Revocations(ctx context.Context) (data []byte, resultErr error) {
-	if c.controlTrace != nil {
-		trace, reference, finish := c.controlTrace(ctx, "dependency_health")
-		defer func() {
-			outcome, code := "success", "ok"
-			if resultErr != nil {
-				outcome, code = "failed", "unavailable"
-			}
-			finish(outcome, code)
-		}()
-		ctx = context.WithValue(ctx, controlTraceKey{}, controlCorrelation{trace: trace, reference: reference})
-	}
+	ctx, finish := c.startRequest(ctx, "dependency_health")
+	defer func() { finish(resultErr) }()
 	endpoint := c.base.ResolveReference(&url.URL{Path: "/v1/trust/revocations"})
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
 	if err != nil {
@@ -318,15 +311,18 @@ func (c *HTTPClient) Revocations(ctx context.Context) (data []byte, resultErr er
 	request.Header.Set("Accept", "application/json")
 	response, err := c.client.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrControlUnavailable, err)
+		return nil, &RequestFailure{Path: "/v1/trust/revocations", Category: "transport", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: err}
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, maxControlDocument))
-		return nil, ErrControlUnavailable
+		return nil, &RequestFailure{Path: "/v1/trust/revocations", Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrControlUnavailable}
 	}
 	data, err = io.ReadAll(io.LimitReader(response.Body, maxControlDocument+1))
-	if err != nil || len(data) == 0 || len(data) > maxControlDocument {
+	if err != nil {
+		return nil, &RequestFailure{Path: "/v1/trust/revocations", Category: "transport", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: err}
+	}
+	if len(data) == 0 || len(data) > maxControlDocument {
 		return nil, ErrControlUnavailable
 	}
 	return data, nil
@@ -359,30 +355,16 @@ func (c *HTTPClient) postNodeWithMaximum(ctx context.Context, path, nodeID strin
 // derive the authenticated principal independently; these headers are only
 // a binding check and are never an authority by themselves.
 func (c *HTTPClient) postNodeWithMaximumAndIdentity(ctx context.Context, path, nodeID, processEpoch string, input, output any, maximum int) (resultErr error) {
-	if c.controlTrace != nil {
-		operation := "control_reconcile"
-		if path == "/v1/edge/usage-reports" {
-			operation = "usage_delivery"
-		} else if strings.Contains(path, "carrier") {
-			operation = "connector_attach"
-		} else if strings.Contains(path, "/nodes/") || strings.Contains(path, "/trust/") {
-			operation = "dependency_health"
-		}
-		trace, reference, finish := c.controlTrace(ctx, operation)
-		defer func() {
-			outcome, code := "success", "ok"
-			if resultErr != nil {
-				outcome, code = "failed", "unavailable"
-				if errors.Is(resultErr, context.Canceled) {
-					outcome, code = "canceled", "shutdown"
-				} else if errors.Is(resultErr, ErrControlInvalid) || errors.Is(resultErr, ErrNodeObservationStale) {
-					outcome, code = "rejected", "invalid"
-				}
-			}
-			finish(outcome, code)
-		}()
-		ctx = context.WithValue(ctx, controlTraceKey{}, controlCorrelation{trace: trace, reference: reference})
+	operation := "control_reconcile"
+	if path == "/v1/edge/usage-reports" {
+		operation = "usage_delivery"
+	} else if strings.Contains(path, "carrier") {
+		operation = "connector_attach"
+	} else if strings.Contains(path, "/nodes/") || strings.Contains(path, "/trust/") {
+		operation = "dependency_health"
 	}
+	ctx, finish := c.startRequest(ctx, operation)
+	defer func() { finish(resultErr) }()
 	if maximum <= 0 || maximum > 16<<20 {
 		return ErrControlInvalid
 	}
@@ -396,12 +378,7 @@ func (c *HTTPClient) postNodeWithMaximumAndIdentity(ctx context.Context, path, n
 		return ErrControlInvalid
 	}
 	request.Header.Set("Authorization", "Bearer "+c.credential)
-	if correlation, _ := ctx.Value(controlTraceKey{}).(controlCorrelation); correlation.trace != "" {
-		request.Header.Set("sentry-trace", correlation.trace)
-	}
-	if correlation, _ := ctx.Value(controlTraceKey{}).(controlCorrelation); correlation.reference != "" {
-		request.Header.Set("Support-Reference", correlation.reference)
-	}
+	c.applyTraceHeaders(ctx, request.Header)
 	if nodeID != "" {
 		request.Header.Set("X-Paperboat-Edge-Node-ID", nodeID)
 	}
@@ -429,15 +406,15 @@ func (c *HTTPClient) postNodeWithMaximumAndIdentity(ctx context.Context, path, n
 	request.Header.Set("Accept", "application/json")
 	response, err := c.client.Do(request)
 	if err != nil {
-		return &RequestFailure{Path: path, Category: "transport", Err: ErrControlUnavailable}
+		return &RequestFailure{Path: path, Category: "transport", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: err}
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, int64(maximum)))
 		if path == "/v1/nodes/heartbeat" && response.StatusCode == http.StatusConflict {
-			return ErrNodeObservationStale
+			return &RequestFailure{Path: path, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrNodeObservationStale}
 		}
-		return &RequestFailure{Path: path, Status: response.StatusCode, Category: "http_status", Err: ErrControlUnavailable}
+		return &RequestFailure{Path: path, Status: response.StatusCode, Category: "http_status", SupportReference: controlReference(ctx), Err: ErrControlUnavailable}
 	}
 	if output == nil {
 		_, err = io.Copy(io.Discard, io.LimitReader(response.Body, int64(maximum)+1))
@@ -446,11 +423,14 @@ func (c *HTTPClient) postNodeWithMaximumAndIdentity(ctx context.Context, path, n
 	limited := io.LimitReader(response.Body, int64(maximum)+1)
 	data, err := io.ReadAll(limited)
 	defer clearControlBytes(data)
-	if err != nil || len(data) > maximum {
+	if err != nil {
+		return &RequestFailure{Path: path, Category: "transport", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: err}
+	}
+	if len(data) > maximum {
 		return ErrControlUnavailable
 	}
 	if err := strictjson.Decode(data, output, 64); err != nil {
-		return &RequestFailure{Path: path, Status: response.StatusCode, Category: "response_invalid", Err: ErrControlUnavailable}
+		return &RequestFailure{Path: path, Status: response.StatusCode, Category: "response_invalid", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: err}
 	}
 	return nil
 }
@@ -458,8 +438,51 @@ func (c *HTTPClient) postNodeWithMaximumAndIdentity(ctx context.Context, path, n
 type controlTraceKey struct{}
 type controlCorrelation struct{ trace, reference string }
 
+func controlReference(ctx context.Context) string {
+	correlation, _ := ctx.Value(controlTraceKey{}).(controlCorrelation)
+	return correlation.reference
+}
+
 func clearControlBytes(value []byte) {
 	for index := range value {
 		value[index] = 0
+	}
+}
+
+// startRequest keeps the attempt callback and trace under the HTTP owner. The
+// final runtime owner decides whether a failed attempt ends the service.
+func (c *HTTPClient) startRequest(ctx context.Context, operation string) (context.Context, func(error)) {
+	finish := func(string, string) {}
+	if c.controlTrace != nil {
+		trace, reference, end := c.controlTrace(ctx, operation)
+		finish = end
+		ctx = context.WithValue(ctx, controlTraceKey{}, controlCorrelation{trace: trace, reference: reference})
+	}
+	return ctx, func(err error) {
+		outcome, code := "success", "ok"
+		if err != nil {
+			outcome, code = "failed", "unavailable"
+			var status interface{ DiagnosticStatus() int }
+			if errors.Is(err, context.Canceled) {
+				outcome, code = "canceled", "shutdown"
+			} else if errors.Is(err, ErrControlInvalid) || errors.Is(err, ErrNodeObservationStale) || errors.As(err, &status) && status.DiagnosticStatus() >= 400 && status.DiagnosticStatus() < 500 {
+				outcome, code = "rejected", "invalid"
+			}
+			if c.controlFailure != nil {
+				c.controlFailure(ctx, controlReference(ctx), err)
+				code = "control_request_failed"
+			}
+		}
+		finish(outcome, code)
+	}
+}
+
+func (c *HTTPClient) applyTraceHeaders(ctx context.Context, headers http.Header) {
+	correlation, _ := ctx.Value(controlTraceKey{}).(controlCorrelation)
+	if correlation.trace != "" {
+		headers.Set("sentry-trace", correlation.trace)
+	}
+	if correlation.reference != "" {
+		headers.Set("Support-Reference", correlation.reference)
 	}
 }

@@ -16,7 +16,7 @@ import (
 func testPrivateAccessGrantRequest(now time.Time) connectorprotocol.PrivateAccessRequest {
 	return connectorprotocol.PrivateAccessRequest{
 		AccountID: "account_1", ResourceKind: "tunnel", ResourceID: "tunnel_1", RouteID: "route_1",
-		Audience: "paperboat-tunnel-http", DeviceID: "machine_1", SessionID: "installation_1", InstallationGeneration: 1,
+		Audience: "paperboat-tunnel-http", MachineID: "machine_1", SessionID: "installation_1", InstallationGeneration: 1,
 		ExpiresAt: now.Add(time.Minute), Nonce: "nonce_1", ConnectorID: "connector_1", CarrierSessionID: "session_1",
 		RouteGeneration: 2, ProcessGeneration: 3, ConfigGeneration: 4, SessionGeneration: 5, AssignmentGeneration: 6,
 		EdgeNodeID: "edge_1", EdgeProcessEpoch: "edge_epoch_1", Protocol: "http", Method: http.MethodConnect,
@@ -89,7 +89,7 @@ func TestPrivateAccessGrantClientMapsAuthorizationStatus(t *testing.T) {
 }
 
 func TestAccessorAdmissionCarriesAuthoritativeAssignment(t *testing.T) {
-	a := PrivateAccessCarrierAdmission{AccountID: "account_1", DeviceID: "machine_1", TunnelID: "tunnel_1", CarrierConnectorID: "connector_1", CarrierSessionID: "session_1", ProcessGeneration: 2, ConfigGeneration: 3, EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_1", AssignmentID: "assignment_1", RouteID: "route_1", AssignmentGeneration: 9, RouteGeneration: 7, ConfigContentHash: "sha256:" + strings.Repeat("a", 64), AccessorPublicKey: "key", AccessorThumbprint: "thumb", ExpiresAt: time.Now().Add(time.Minute)}
+	a := PrivateAccessCarrierAdmission{AccountID: "account_1", MachineID: "machine_1", TunnelID: "tunnel_1", CarrierConnectorID: "connector_1", CarrierSessionID: "session_1", ProcessGeneration: 2, ConfigGeneration: 3, EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_1", AssignmentID: "assignment_1", RouteID: "route_1", AssignmentGeneration: 9, RouteGeneration: 7, ConfigContentHash: "sha256:" + strings.Repeat("a", 64), AccessorPublicKey: "key", AccessorThumbprint: "thumb", ExpiresAt: time.Now().Add(time.Minute)}
 	got := a.Durable()
 	if got.AssignmentID != a.AssignmentID || got.ConfigContentHash != a.ConfigContentHash || got.AssignmentID == got.RouteID {
 		t.Fatalf("durable admission fabricated assignment binding: %#v", got)
@@ -103,7 +103,7 @@ func TestAccessorAdmissionRejectsMalformedWireFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	valid := func() PrivateAccessCarrierAdmission {
-		return PrivateAccessCarrierAdmission{Schema: connectorprotocol.PrivateAccessSchema, Kind: "private_access_carrier_admission", AccountID: "account_1", DeviceID: "machine_1", InstallationGeneration: 1, AccessorPublicKey: "ugS1P3D8QWeKLIzyLOMZD8l_wp1lo6uY6NdicTbDz58", AccessorThumbprint: "ACVmA_IRxdrb0sXXfLqW6uB5U1oI6rRLPxHcQ0jimlg", ResourceKind: "tunnel", ResourceID: "tunnel_1", TunnelName: "payments", RouteName: "postgres", ConnectorID: "connector_1", CarrierSessionID: "session_1", RouteID: "route_1", RouteGeneration: 1, SessionGeneration: 1, ProcessGeneration: 1, ConfigGeneration: 1, AssignmentGeneration: 1, AssignmentID: "assignment_1", ConfigContentHash: "sha256:" + strings.Repeat("a", 64), EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_1", EdgeCarrierServerSPKISHA256: trust.SPKISHA256, EdgeCarrierServerCertificateChainPEM: trust.CertificateChainPEM, Protocol: "http", Hostname: "web.example.test", MatchType: "exact", EdgeEndpoints: []string{"h2://edge.example.test:25001", "h3://edge.example.test:25002"}, ExpiresAt: now.Add(time.Minute), TunnelID: "tunnel_1", CarrierConnectorID: "connector_1"}
+		return PrivateAccessCarrierAdmission{Schema: connectorprotocol.PrivateAccessSchema, Kind: "private_access_carrier_admission", AccountID: "account_1", MachineID: "machine_1", InstallationGeneration: 1, AccessorPublicKey: "ugS1P3D8QWeKLIzyLOMZD8l_wp1lo6uY6NdicTbDz58", AccessorThumbprint: "ACVmA_IRxdrb0sXXfLqW6uB5U1oI6rRLPxHcQ0jimlg", ResourceKind: "tunnel", ResourceID: "tunnel_1", TunnelName: "payments", RouteName: "postgres", ConnectorID: "connector_1", CarrierSessionID: "session_1", RouteID: "route_1", RouteGeneration: 1, SessionGeneration: 1, ProcessGeneration: 1, ConfigGeneration: 1, AssignmentGeneration: 1, AssignmentID: "assignment_1", ConfigContentHash: "sha256:" + strings.Repeat("a", 64), EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_1", EdgeCarrierServerSPKISHA256: trust.SPKISHA256, EdgeCarrierServerCertificateChainPEM: trust.CertificateChainPEM, Protocol: "http", Hostname: "web.example.test", MatchType: "exact", EdgeEndpoints: []string{"h2://edge.example.test:25001", "h3://edge.example.test:25002"}, ExpiresAt: now.Add(time.Minute), TunnelID: "tunnel_1", CarrierConnectorID: "connector_1"}
 	}
 	for name, mutate := range map[string]func(*PrivateAccessCarrierAdmission){
 		"uppercase hash": func(a *PrivateAccessCarrierAdmission) { a.ConfigContentHash = "sha256:" + strings.Repeat("A", 64) },

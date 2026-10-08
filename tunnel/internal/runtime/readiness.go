@@ -15,13 +15,18 @@ type Readiness struct {
 }
 
 func (r Readiness) Start(ctx context.Context) error {
-	if r.Probe == nil || r.Timeout <= 0 || r.Interval <= 0 {
+	if ctx == nil || r.Probe == nil || r.Timeout <= 0 || r.Interval <= 0 {
 		return ErrProcessInvalid
 	}
 	deadline := time.NewTimer(r.Timeout)
 	defer deadline.Stop()
+	var lastErr error
 	for {
-		if err := r.Probe(); err == nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		lastErr = r.Probe()
+		if lastErr == nil {
 			return nil
 		}
 		timer := time.NewTimer(r.Interval)
@@ -31,7 +36,7 @@ func (r Readiness) Start(ctx context.Context) error {
 			return ctx.Err()
 		case <-deadline.C:
 			timer.Stop()
-			return ErrReadinessTimeout
+			return errors.Join(ErrReadinessTimeout, context.DeadlineExceeded, lastErr)
 		case <-timer.C:
 		}
 	}

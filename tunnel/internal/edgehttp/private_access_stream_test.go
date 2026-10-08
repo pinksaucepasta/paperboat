@@ -1,12 +1,19 @@
 package edgehttp
 
 import (
+	"bufio"
 	"context"
+	"crypto/tls"
 	"errors"
+	"fmt"
+	yamux "github.com/libp2p/go-yamux/v5"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -34,7 +41,7 @@ func TestPrivateTCPFullAuthenticatedEdgePath(t *testing.T) {
 	accessorIdentity := durableIdentity
 	accessorIdentity.HostID = "accessor_1"
 	request := edgePrivateAccessRequest(now)
-	request.AccountID, request.DeviceID = accessorIdentity.AccountID, accessorIdentity.HostID
+	request.AccountID, request.MachineID = accessorIdentity.AccountID, accessorIdentity.HostID
 	request.ResourceKind, request.ResourceID = "tunnel", durableIdentity.TunnelID
 	request.Audience, request.Protocol = "paperboat-tunnel-tcp", "tcp"
 	request.Method, request.Host, request.Path = "", "", ""
@@ -205,7 +212,7 @@ func TestPrivateTCPFullAuthenticatedEdgePath(t *testing.T) {
 func edgePrivateAccessRequest(now time.Time) connectorprotocol.PrivateAccessRequest {
 	return connectorprotocol.PrivateAccessRequest{
 		AccountID: "account_1", ResourceKind: "preview", ResourceID: "preview_1", RouteID: "route_1",
-		Audience: "paperboat-preview-http", DeviceID: "machine_1", SessionID: "installation_1", InstallationGeneration: 1,
+		Audience: "paperboat-preview-http", MachineID: "machine_1", SessionID: "installation_1", InstallationGeneration: 1,
 		ExpiresAt: now.Add(time.Minute), Nonce: "nonce_1", OperationID: "operation_1", CarrierSessionID: "session_1",
 		RouteGeneration: 1, ProcessGeneration: 2, ConfigGeneration: 3, SessionGeneration: 4, AssignmentGeneration: 5,
 		EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_1", Protocol: "http", Method: http.MethodConnect,
@@ -219,7 +226,7 @@ func TestPrivateAccessStreamBridgeAuthorizesBeforeOpaqueDuplex(t *testing.T) {
 	server, client := testEdgePreviewCarrierPair(t, identity)
 	request := edgePrivateAccessRequest(now)
 	request.AccountID = identity.AccountID
-	request.DeviceID = identity.HostID
+	request.MachineID = identity.HostID
 	request.CarrierSessionID = identity.SessionID
 	request.ProcessGeneration = identity.ProcessGeneration
 	request.ConfigGeneration = identity.Generation
@@ -304,5 +311,427 @@ func TestPrivateTCPRuleRequiresExactDurableGenerationTuple(t *testing.T) {
 	}
 	if _, err := privateTCPRule([]route.RouteRule{rule, rule}, request); !errors.Is(err, ErrPrivateAccessStreamInvalid) {
 		t.Fatalf("duplicate route error=%v", err)
+	}
+}
+
+type privateTLSStreamConn struct{ *datacarrier.Stream }
+
+func (c privateTLSStreamConn) LocalAddr() net.Addr  { return &net.TCPAddr{} }
+func (c privateTLSStreamConn) RemoteAddr() net.Addr { return &net.TCPAddr{} }
+
+func TestPrivatePreviewGrantReachesTLSHTTPIngress(t *testing.T) {
+	now := time.Now().UTC()
+	identity := testEdgePreviewIdentity(2, 3)
+	id := func(noun string) string { return noun + "_11111111-1111-4111-8111-111111111111" }
+	identity.AccountID, identity.TunnelID, identity.ConnectorID, identity.HostID, identity.SessionID = id("user"), id("machine"), id("machine"), id("machine"), id("session")
+	server, client := testEdgePreviewCarrierPair(t, identity)
+	request := edgePrivateAccessRequest(now)
+	request.AccountID, request.MachineID, request.CarrierSessionID = identity.AccountID, identity.HostID, identity.SessionID
+	request.ResourceID, request.RouteID, request.OperationID = id("preview"), id("route"), id("operation")
+	request.SessionID, request.IdempotencyKey, request.RequestID, request.CorrelationID = id("session"), id("operation"), id("request"), id("correlation")
+	request.ProcessGeneration, request.ConfigGeneration = identity.ProcessGeneration, identity.Generation
+	request.SessionGeneration, request.AssignmentGeneration = 1, 1
+	request.EdgeProcessEpoch = "epoch_private_preview_12345678"
+	preview := DataCarrierPreviewRoute{Identity: identity, RouteID: request.RouteID, Revision: request.RouteGeneration, PreviewID: request.ResourceID, OperationID: request.OperationID, LeaseGeneration: 1, AttachmentGeneration: 1, EdgeNodeID: request.EdgeNodeID, EdgeProcessEpoch: request.EdgeProcessEpoch, Kind: dataCarrierPreviewPrivateRouteKind, AccessMode: "private", Hostname: request.Host, Endpoint: "https://" + request.Host}
+	preview.Server, preview.OwnerMachineID, preview.OwnerSessionID = server, identity.HostID, id("session")
+	preview.ConfigContentHash, preview.ExpiresAt = "sha256:"+strings.Repeat("a", 64), request.ExpiresAt
+	preview.MachineIdentityPublicKey, preview.MachineIdentityThumbprint = "test-public-key", "test-thumbprint"
+	published, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: request.EdgeProcessEpoch, MaximumRoutes: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer published.Close()
+	if err = published.Attach(preview); err != nil {
+		t.Fatal(err)
+	}
+	_, decision := browserTestMatch()
+	decision.Binding.Lifecycle = connectorprotocol.TunnelEphemeral
+	decision.Binding.AccountID = request.AccountID
+	decision.Binding.TunnelID = identity.TunnelID
+	decision.Binding.HostID = identity.HostID
+	decision.Binding.Hostname = request.Host
+	decision.Binding.PublicationID = request.ResourceID
+	decision.Binding.RouteID = request.RouteID
+	decision.Binding.RouteGeneration = request.RouteGeneration
+	decision.Binding.TargetID = request.RouteID
+	decision.Binding.TargetGeneration = request.RouteGeneration
+	decision.ConnectorID = identity.ConnectorID
+	decision.SessionID = identity.SessionID
+	decision.ProcessGeneration = identity.ProcessGeneration
+	decision.ConfigGeneration = identity.Generation
+	decision.AssignmentGeneration = request.AssignmentGeneration
+	decision.EdgeNodeID = request.EdgeNodeID
+	decision.EdgeProcessEpoch = request.EdgeProcessEpoch
+	decision.PrincipalID = request.MachineID
+	decision.GrantID = request.Nonce
+	decision.GrantGeneration = request.InstallationGeneration
+	decision.MembershipGeneration = 0
+	decision.IssuedAt = now
+	decision.ExpiresAt = now.Add(10 * time.Second)
+	decision.NativeAuthorization = &connectorprotocol.PrivateAccessOpen{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Grant: "signed-grant", Request: request}
+	if err := decision.Validate(now); err != nil {
+		t.Fatal(err)
+	}
+	recorder := &ingressUsageRecorder{}
+	metering, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 1, IngressLimits: testIngressLimits(1, 1<<20), Usage: recorder})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer metering.Close()
+	transport, err := NewDataCarrierPreviewTransport(DataCarrierPreviewTransportConfig{Registry: published, IngressRegistry: metering})
+	if err != nil {
+		t.Fatal(err)
+	}
+	originDone := make(chan error, 2)
+	go func() {
+		for i := 0; i < 2; i++ {
+			stream, open, err := client.AcceptStream(context.Background())
+			if err != nil {
+				originDone <- err
+				return
+			}
+			defer stream.Close()
+			if open.Kind != "https" || open.RouteID != request.RouteID || open.SessionID != identity.SessionID {
+				originDone <- fmt.Errorf("incorrect private origin stream binding")
+				return
+			}
+			originDone <- datacarrier.ServeHTTPStream(context.Background(), stream, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "private origin reached") }), 4096, time.Second)
+		}
+	}()
+	var revoked atomic.Bool
+	var reauthorizations atomic.Int32
+	transport.privateAuthority = func(_ context.Context, evidence connectorprotocol.PrivateAccessOpen) (connectorprotocol.IngressDecision, error) {
+		reauthorizations.Add(1)
+		if revoked.Load() || evidence.Request != request || evidence.Grant != "signed-grant" {
+			return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
+		}
+		fresh := decision
+		fresh.IssuedAt = time.Now().UTC()
+		fresh.ExpiresAt = fresh.IssuedAt.Add(4 * time.Second)
+		return fresh, nil
+	}
+	registry, _ := NewPrivateAccessConnectionRegistry(8)
+	policy, err := New(Config{SelfHosted: true, MaxHeaderBytes: 4096, MaxBodyBytes: 1024, Routes: NewPreviewCarrierRouteMatcher(published), PrivateAccessConnections: registry}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		response, err := transport.RoundTrip(r)
+		if err != nil {
+			if !revoked.Load() {
+				t.Errorf("private origin transport: %v", err)
+			}
+			http.Error(w, "origin failed", 502)
+			return
+		}
+		defer response.Body.Close()
+		w.WriteHeader(response.StatusCode)
+		io.Copy(w, response.Body)
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tlsServer := httptest.NewTLSServer(policy)
+	defer tlsServer.Close()
+	bridge, err := NewPrivateAccessStreamBridge(PrivateAccessStreamBridgeConfig{Authorizer: privateAccessGrantAuthorizerFunc(func(_ context.Context, _ string, got connectorprotocol.PrivateAccessRequest) (control.PrivateAccessGrantDecision, error) {
+		if got != request {
+			t.Error("grant binding changed")
+		}
+		return control.PrivateAccessGrantDecision{Allowed: true, ExpiresAt: request.ExpiresAt, Ingress: &decision}, nil
+	}), Target: PrivateAccessHTTPTarget{Address: tlsServer.Listener.Addr().String(), Connections: registry}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go bridge.Serve(ctx, server)
+	stream, err := client.OpenStream(ctx, connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: request.AccountID, TunnelID: identity.TunnelID, ConnectorID: identity.ConnectorID, SessionID: request.CarrierSessionID, ProcessGeneration: request.ProcessGeneration, Generation: request.ConfigGeneration, RouteID: request.RouteID, RequestID: request.RequestID, Kind: connectorprotocol.PrivateAccessHTTP})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	if err = connectorprotocol.WritePrivateAccessOpen(stream, connectorprotocol.PrivateAccessOpen{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Grant: "signed-grant", Request: request}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := connectorprotocol.ReadPrivateAccessResult(stream, now)
+	if err != nil || result.Status != 200 {
+		t.Fatalf("open=%+v err=%v", result, err)
+	}
+	config := tlsServer.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+	config.ServerName = "example.com"
+	secured := tls.Client(privateTLSStreamConn{stream}, config)
+	defer secured.Close()
+	secured.SetDeadline(time.Now().Add(5 * time.Second))
+	if err = secured.Handshake(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = io.WriteString(secured, "GET / HTTP/1.1\r\nHost: "+request.Host+"\r\nConnection: keep-alive\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.ReadResponse(bufio.NewReader(secured), &http.Request{Method: http.MethodGet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != 200 || string(body) != "private origin reached" {
+		t.Fatalf("HTTP status=%d body=%q err=%v", response.StatusCode, body, err)
+	}
+	response.Body.Close()
+	// The same admitted TLS connection retains proof after its short ingress
+	// snapshot expires; every new request must obtain current server authority.
+	registry.mu.Lock()
+	for address, entry := range registry.entries {
+		expired := *entry.ingress
+		expired.IssuedAt = time.Now().Add(-11 * time.Second)
+		expired.ExpiresAt = expired.IssuedAt.Add(10 * time.Second)
+		entry.ingress = &expired
+		registry.entries[address] = entry
+	}
+	registry.mu.Unlock()
+	if _, err = io.WriteString(secured, "GET / HTTP/1.1\r\nHost: "+request.Host+"\r\nConnection: keep-alive\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	second, err := http.ReadResponse(bufio.NewReader(secured), &http.Request{Method: http.MethodGet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err = io.ReadAll(second.Body)
+	second.Body.Close()
+	if err != nil || second.StatusCode != 200 || string(body) != "private origin reached" {
+		t.Fatalf("persistent native preview failed status=%d body=%q err=%v", second.StatusCode, body, err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := <-originDone; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	recorder.mu.Lock()
+	var upload, download uint64
+	for _, r := range recorder.records {
+		if r.route != request.RouteID || r.revision != request.RouteGeneration {
+			t.Fatal("wrong native preview accounting binding")
+		}
+		upload += r.ingress
+		download += r.egress
+	}
+	recorder.mu.Unlock()
+	if upload == 0 || download < uint64(len("private origin reached")) {
+		t.Fatalf("native preview unmetered upload=%d download=%d", upload, download)
+	}
+	lease, err := metering.AcquireIngress(context.Background(), decision)
+	if err != nil {
+		t.Fatalf("native response retained capacity: %v", err)
+	}
+	lease.Release()
+	missing := httptest.NewRequest("GET", "https://"+request.Host+"/", nil)
+	missing = missing.WithContext(context.WithValue(missing.Context(), privateAccessRequestContextKey{}, request))
+	if response, err := transport.RoundTrip(missing); err == nil {
+		response.Body.Close()
+		t.Fatal("native preview admitted without accounting authority")
+	}
+
+	revoked.Store(true)
+	if _, err = io.WriteString(secured, "GET / HTTP/1.1\r\nHost: "+request.Host+"\r\nConnection: close\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	denied, err := http.ReadResponse(bufio.NewReader(secured), &http.Request{Method: http.MethodGet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, denied.Body)
+	denied.Body.Close()
+	if denied.StatusCode != 502 || reauthorizations.Load() != 3 {
+		t.Fatalf("revoked request status=%d authorization calls=%d", denied.StatusCode, reauthorizations.Load())
+	}
+	recorder.mu.Lock()
+	var afterUpload, afterDownload uint64
+	for _, r := range recorder.records {
+		afterUpload += r.ingress
+		afterDownload += r.egress
+	}
+	recorder.mu.Unlock()
+	if afterUpload != upload || afterDownload != download {
+		t.Fatal("revoked request recorded application bytes")
+	}
+
+	for name, mutate := range map[string]func(*connectorprotocol.PrivateAccessRequest){
+		"operation": func(q *connectorprotocol.PrivateAccessRequest) { q.OperationID = id("other") },
+		"session":   func(q *connectorprotocol.PrivateAccessRequest) { q.CarrierSessionID = id("other") },
+		"expired":   func(q *connectorprotocol.PrivateAccessRequest) { q.ExpiresAt = now.Add(-time.Second) },
+		"account":   func(q *connectorprotocol.PrivateAccessRequest) { q.AccountID = id("other") },
+	} {
+		invalid := request
+		mutate(&invalid)
+		originRequest := httptest.NewRequest(http.MethodGet, "https://"+request.Host+"/", nil)
+		originRequest = originRequest.WithContext(context.WithValue(originRequest.Context(), privateAccessRequestContextKey{}, invalid))
+		if _, err := transport.RoundTrip(originRequest); !errors.Is(err, ErrDataCarrierPreviewTransport) {
+			t.Fatalf("%s invalid grant transport error=%v", name, err)
+		}
+	}
+	// An unregistered public connection cannot gain this grant using headers.
+	publicReq := httptest.NewRequest(http.MethodGet, "https://"+request.Host+"/", nil)
+	publicReq.Header.Set("X-Paperboat-Private-Carrier", "forged")
+	publicReq.Header.Set("X-Paperboat-Private-Connection", tlsServer.Listener.Addr().String())
+	publicResponse := httptest.NewRecorder()
+	policy.ServeHTTP(publicResponse, publicReq)
+	if publicResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("unregistered public request status=%d", publicResponse.Code)
+	}
+}
+
+func TestPrivateAccessTargetFailureRecoveryAndJoinedShutdown(t *testing.T) {
+	now := time.Now().UTC()
+	identity := testEdgePreviewIdentity(2, 3)
+	server, client := testEdgePreviewCarrierPair(t, identity)
+	request := edgePrivateAccessRequest(now)
+	request.AccountID, request.MachineID, request.CarrierSessionID = identity.AccountID, identity.HostID, identity.SessionID
+	request.ProcessGeneration, request.ConfigGeneration = identity.ProcessGeneration, identity.Generation
+	target, origin := net.Pipe()
+	defer origin.Close()
+	failures := make(chan error, 4)
+	var opens atomic.Int32
+	bridge, err := NewPrivateAccessStreamBridge(PrivateAccessStreamBridgeConfig{
+		Authorizer: privateAccessGrantAuthorizerFunc(func(context.Context, string, connectorprotocol.PrivateAccessRequest) (control.PrivateAccessGrantDecision, error) {
+			return control.PrivateAccessGrantDecision{Allowed: true, ExpiresAt: now.Add(time.Minute)}, nil
+		}),
+		Target: PrivateAccessTargetFunc(func(context.Context, connectorprotocol.PrivateAccessRequest) (io.ReadWriteCloser, error) {
+			if opens.Add(1) == 1 {
+				return nil, syscall.EIO
+			}
+			return target, nil
+		}),
+		OnFailure: func(ctx context.Context, phase string, cause error) { failures <- cause },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- bridge.Serve(ctx, server) }()
+	open := func(id string, want int) *datacarrier.Stream {
+		r := request
+		r.RequestID = id
+		stream, err := client.OpenStream(ctx, connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: r.AccountID, TunnelID: identity.TunnelID, ConnectorID: identity.ConnectorID, SessionID: r.CarrierSessionID, ProcessGeneration: r.ProcessGeneration, Generation: r.ConfigGeneration, RouteID: r.RouteID, RequestID: id, Kind: connectorprotocol.PrivateAccessHTTP})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := connectorprotocol.WritePrivateAccessOpen(stream, connectorprotocol.PrivateAccessOpen{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Grant: "private-grant", Request: r}); err != nil {
+			t.Fatal(err)
+		}
+		result, err := connectorprotocol.ReadPrivateAccessResult(stream, now)
+		if err != nil || result.Status != want {
+			t.Fatalf("unexpected access result: %d cause %T", result.Status, err)
+		}
+		return stream
+	}
+	failed := open("request_failed", http.StatusServiceUnavailable)
+	failed.Close()
+	select {
+	case err := <-failures:
+		if !errors.Is(err, syscall.EIO) {
+			t.Fatal("lost open cause")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("missing open diagnostic")
+	}
+	recovered := open("request_recovered", http.StatusOK)
+	defer recovered.Close()
+	sent := make(chan error, 1)
+	go func() { _, err := io.WriteString(recovered, "opaque"); sent <- err }()
+	payload := make([]byte, 6)
+	if _, err := io.ReadFull(origin, payload); err != nil || string(payload) != "opaque" {
+		t.Fatal("target did not recover")
+	}
+	if err := <-sent; err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("accepted stream workers did not join")
+	}
+	select {
+	case err := <-failures:
+		var types []string
+		requestErrorLeaves(err, func(leaf error) bool {
+			label := fmt.Sprintf("%T", leaf)
+			if leaf == io.ErrClosedPipe {
+				label = "closed_pipe"
+			}
+			if leaf == context.Canceled {
+				label = "canceled"
+			}
+			if leaf == io.EOF {
+				label = "eof"
+			}
+			if leaf == yamux.ErrStreamClosed {
+				label = "stream_closed"
+			}
+			if leaf == yamux.ErrStreamReset {
+				label = "stream_reset"
+			}
+			if leaf == yamux.ErrTimeout {
+				label = "timeout"
+			}
+			types = append(types, label)
+			return false
+		}, false)
+		t.Fatalf("normal shutdown produced extra failure: %v", types)
+	default:
+	}
+}
+
+func TestPrivateAccessObserverPreservesMixedCausesAndSkipsOwnedAttempt(t *testing.T) {
+	var got []error
+	b := &PrivateAccessStreamBridge{onFailure: func(_ context.Context, _ string, err error) { got = append(got, err) }}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	b.observe(ctx, "private_stream_copy", errors.Join(context.Canceled, io.EOF))
+	attempt := &control.RequestFailure{Status: 503, Cause: syscall.ECONNREFUSED}
+	b.observe(ctx, "private_stream_authorize", fmt.Errorf("%w", attempt))
+	b.observe(ctx, "private_stream_authorize", errors.Join(attempt, syscall.EIO))
+	b.observe(ctx, "private_stream_copy", errors.Join(context.Canceled, syscall.EIO))
+	if len(got) != 2 || !errors.Is(got[0], syscall.EIO) || !errors.Is(got[1], syscall.EIO) {
+		t.Fatal("mixed failure policy")
+	}
+}
+
+func TestPrivateAccessShutdownJoinsBlockedOpenEnvelope(t *testing.T) {
+	identity := testEdgePreviewIdentity(2, 3)
+	server, client := testEdgePreviewCarrierPair(t, identity)
+	bridge, err := NewPrivateAccessStreamBridge(PrivateAccessStreamBridgeConfig{
+		Authorizer: privateAccessGrantAuthorizerFunc(func(context.Context, string, connectorprotocol.PrivateAccessRequest) (control.PrivateAccessGrantDecision, error) {
+			t.Error("incomplete request reached authorization")
+			return control.PrivateAccessGrantDecision{}, nil
+		}),
+		Target: PrivateAccessTargetFunc(func(context.Context, connectorprotocol.PrivateAccessRequest) (io.ReadWriteCloser, error) {
+			t.Error("incomplete request reached target")
+			return nil, nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	stream, err := client.OpenStream(ctx, connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: identity.AccountID, TunnelID: identity.TunnelID, ConnectorID: identity.ConnectorID, SessionID: identity.SessionID, ProcessGeneration: identity.ProcessGeneration, Generation: identity.Generation, RouteID: "route_incomplete", RequestID: "request_incomplete", Kind: connectorprotocol.PrivateAccessHTTP})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	accepted, metadata, err := server.AcceptAccessStream(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { done <- bridge.serveStream(ctx, accepted, metadata, identity) }()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("blocked envelope prevented shutdown")
+	}
+	if server.ActiveStreams() != 0 {
+		t.Fatal("accepted stream permit leaked")
 	}
 }

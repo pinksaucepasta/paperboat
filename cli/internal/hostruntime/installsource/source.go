@@ -25,6 +25,18 @@ const (
 
 var ErrInvalid = errors.New("supplied executable identity is invalid or its bytes changed")
 
+type sourceIOError struct{ cause error }
+
+func (e sourceIOError) Error() string   { return ErrInvalid.Error() }
+func (e sourceIOError) Unwrap() []error { return []error{ErrInvalid, e.cause} }
+
+func sourceIOFailure(err error) error {
+	if err == nil {
+		return nil
+	}
+	return sourceIOError{cause: err}
+}
+
 // Source travels with the existing protected installation declaration. Hashes
 // bind the administrator-approved source to staged bytes; they do not establish
 // publisher authenticity. Download verification happens before invoking install.
@@ -41,11 +53,11 @@ type Source struct {
 func Current() (string, Source, error) {
 	path, err := os.Executable()
 	if err != nil {
-		return "", Source{}, err
+		return "", Source{}, sourceIOFailure(err)
 	}
 	path, err = filepath.EvalSymlinks(path)
 	if err != nil {
-		return "", Source{}, err
+		return "", Source{}, sourceIOFailure(err)
 	}
 	source, err := Inspect(path, buildinfo.Version, buildinfo.Distribution)
 	return path, source, err
@@ -83,7 +95,10 @@ func (s Source) Verify(path string) error {
 		return err
 	}
 	length, digest, err := digestFile(path)
-	if err != nil || length != s.Length || digest != s.SHA256 {
+	if err != nil {
+		return err
+	}
+	if length != s.Length || digest != s.SHA256 {
 		return ErrInvalid
 	}
 	return binarytarget.Validate(path, s.Platform, s.Architecture)
@@ -94,25 +109,37 @@ func digestFile(path string) (int64, string, error) {
 		return 0, "", ErrInvalid
 	}
 	before, err := os.Lstat(path)
-	if err != nil || !before.Mode().IsRegular() || before.Mode()&os.ModeSymlink != 0 || before.Size() < 1 || before.Size() > MaxBytes {
+	if err != nil {
+		return 0, "", sourceIOFailure(err)
+	}
+	if !before.Mode().IsRegular() || before.Mode()&os.ModeSymlink != 0 || before.Size() < 1 || before.Size() > MaxBytes {
 		return 0, "", ErrInvalid
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return 0, "", err
+		return 0, "", sourceIOFailure(err)
 	}
 	defer f.Close()
 	opened, err := f.Stat()
-	if err != nil || !os.SameFile(before, opened) {
+	if err != nil {
+		return 0, "", sourceIOFailure(err)
+	}
+	if !os.SameFile(before, opened) {
 		return 0, "", ErrInvalid
 	}
 	h := sha256.New()
 	n, err := io.Copy(h, io.LimitReader(f, MaxBytes+1))
-	if err != nil || n != before.Size() {
+	if err != nil {
+		return 0, "", sourceIOFailure(err)
+	}
+	if n != before.Size() {
 		return 0, "", ErrInvalid
 	}
 	after, err := f.Stat()
-	if err != nil || after.Size() != before.Size() || !after.ModTime().Equal(before.ModTime()) {
+	if err != nil {
+		return 0, "", sourceIOFailure(err)
+	}
+	if after.Size() != before.Size() || !after.ModTime().Equal(before.ModTime()) {
 		return 0, "", ErrInvalid
 	}
 	return n, hex.EncodeToString(h.Sum(nil)), nil

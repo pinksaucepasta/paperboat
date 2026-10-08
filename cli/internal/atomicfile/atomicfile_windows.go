@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -35,8 +34,13 @@ type Error struct {
 	Err   error
 }
 
-func (e *Error) Error() string { return fmt.Sprintf("atomic file %s %s: %v", e.Stage, e.Path, e.Err) }
-func (e *Error) Unwrap() error { return e.Err }
+func (e *Error) Error() string { return "atomic file write failed" }
+func (e *Error) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
 
 type Options struct {
 	Mode     fs.FileMode
@@ -54,7 +58,7 @@ type Options struct {
 // replaces the destination with MOVEFILE_WRITE_THROUGH. It deliberately
 // rejects POSIX ownership requests: treating a Windows token as a UID would
 // be fake security.
-func Write(path string, data []byte, options Options) error {
+func Write(path string, data []byte, options Options) (resultErr error) {
 	path = filepath.Clean(path)
 	if !filepath.IsAbs(path) || options.Mode.Perm() == 0 || options.Mode&^fs.ModePerm != 0 || options.OwnerUID != -1 || options.OwnerGID != -1 {
 		return &Error{Stage: StageValidate, Path: path, Err: errors.New("invalid Windows path, mode, or POSIX owner")}
@@ -82,16 +86,28 @@ func Write(path string, data []byte, options Options) error {
 	if err != nil {
 		return &Error{Stage: StageCreate, Path: path, Err: err}
 	}
-	defer os.Remove(temporaryPath)
+	published := false
+	defer func() {
+		var closeErr, removeErr error
+		if temporary != nil {
+			closeErr = temporary.Close()
+		}
+		if !published {
+			removeErr = os.Remove(temporaryPath)
+		}
+		if err := errors.Join(closeErr, removeErr); err != nil {
+			resultErr = errors.Join(resultErr, &Error{Stage: StageWrite, Path: path, Err: err})
+		}
+	}()
 	if _, err := temporary.Write(data); err != nil {
-		temporary.Close()
 		return &Error{Stage: StageWrite, Path: path, Err: err}
 	}
 	if err := temporary.Sync(); err != nil {
-		temporary.Close()
 		return &Error{Stage: StageWrite, Path: path, Err: err}
 	}
-	if err := temporary.Close(); err != nil {
+	closeErr := temporary.Close()
+	temporary = nil
+	if err := closeErr; err != nil {
 		return &Error{Stage: StageWrite, Path: path, Err: err}
 	}
 	from, err := windows.UTF16PtrFromString(temporaryPath)
@@ -105,6 +121,7 @@ func Write(path string, data []byte, options Options) error {
 	if err := windows.MoveFileEx(from, to, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH); err != nil {
 		return &Error{Stage: StageReplace, Path: path, Err: err}
 	}
+	published = true
 	return nil
 }
 
@@ -116,7 +133,10 @@ func createProtectedTemporary(parent, descriptor string) (*os.File, string, erro
 	creationDescriptorText := descriptor
 	finalOwner, _, ownerErr := finalDescriptor.Owner()
 	systemOwner, systemOwnerErr := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
-	transitionToSystem := ownerErr == nil && systemOwnerErr == nil && finalOwner != nil && finalOwner.Equals(systemOwner)
+	if err := errors.Join(ownerErr, systemOwnerErr); err != nil {
+		return nil, "", err
+	}
+	transitionToSystem := finalOwner != nil && finalOwner.Equals(systemOwner)
 	var administratorsOwner *windows.SID
 	if transitionToSystem {
 		if !strings.HasPrefix(descriptor, "O:SY") {
@@ -173,11 +193,16 @@ func createProtectedTemporary(parent, descriptor string) (*os.File, string, erro
 			return nil, "", err
 		}
 		if transitionToSystem {
-			transitionErr := error(nil)
-			if !windowssecurity.HandleOwnerMatchesSID(handle, administratorsOwner) {
-				transitionErr = fmt.Errorf("validate protected temporary creation owner: %w", windows.ERROR_INVALID_SECURITY_DESCR)
-			} else if !windowssecurity.ProtectedHandleDACLMatches(handle, creationDescriptorText) {
-				transitionErr = fmt.Errorf("validate protected temporary creation DACL: %w", windows.ERROR_INVALID_SECURITY_DESCR)
+			ownerMatches, transitionErr := windowssecurity.CheckHandleOwnerMatchesSID(handle, administratorsOwner)
+			if transitionErr == nil && !ownerMatches {
+				transitionErr = windows.ERROR_INVALID_SECURITY_DESCR
+			}
+			if transitionErr == nil {
+				daclMatches, probeErr := windowssecurity.CheckProtectedHandleDACLMatches(handle, creationDescriptorText)
+				transitionErr = probeErr
+				if probeErr == nil && !daclMatches {
+					transitionErr = windows.ERROR_INVALID_SECURITY_DESCR
+				}
 			}
 			absoluteDescriptor, absoluteErr := finalDescriptor.ToAbsolute()
 			transitionErr = errors.Join(transitionErr, absoluteErr)
@@ -193,46 +218,55 @@ func createProtectedTemporary(parent, descriptor string) (*os.File, string, erro
 						return err
 					}
 					runtime.KeepAlive(absoluteDescriptor)
-					if !windowssecurity.ProtectedHandleDACLMatches(handle, descriptor) {
-						return fmt.Errorf("validate protected temporary final DACL: %w", windows.ERROR_INVALID_SECURITY_DESCR)
+					matches, err := windowssecurity.CheckProtectedHandleDACLMatches(handle, descriptor)
+					if err != nil {
+						return err
+					}
+					if !matches {
+						return windows.ERROR_INVALID_SECURITY_DESCR
 					}
 					return windows.SetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION, systemOwner, nil, nil, nil)
 				})
 				runtime.KeepAlive(absoluteDescriptor)
 			}
-			if transitionErr == nil && !windowssecurity.HandleOwnerMatchesSID(handle, systemOwner) {
-				actual := "unavailable"
-				if current, queryErr := windows.GetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION); queryErr == nil && current != nil {
-					if currentOwner, _, ownerQueryErr := current.Owner(); ownerQueryErr == nil && currentOwner != nil {
-						actual = currentOwner.String()
-					}
+			if transitionErr == nil {
+				matches, probeErr := windowssecurity.CheckHandleOwnerMatchesSID(handle, systemOwner)
+				transitionErr = probeErr
+				if probeErr == nil && !matches {
+					transitionErr = windows.ERROR_INVALID_SECURITY_DESCR
 				}
-				transitionErr = fmt.Errorf("validate protected temporary final owner (got %s want %s): %w", actual, systemOwner.String(), windows.ERROR_INVALID_SECURITY_DESCR)
-			} else if transitionErr == nil && !windowssecurity.ProtectedHandleDACLMatches(handle, descriptor) {
-				transitionErr = fmt.Errorf("validate protected temporary final DACL: %w", windows.ERROR_INVALID_SECURITY_DESCR)
+			}
+			if transitionErr == nil {
+				matches, probeErr := windowssecurity.CheckProtectedHandleDACLMatches(handle, descriptor)
+				transitionErr = probeErr
+				if probeErr == nil && !matches {
+					transitionErr = windows.ERROR_INVALID_SECURITY_DESCR
+				}
 			}
 			if transitionErr != nil {
-				windows.CloseHandle(handle)
-				_ = os.Remove(path)
-				return nil, "", transitionErr
+				return nil, "", errors.Join(transitionErr, windows.CloseHandle(handle), os.Remove(path))
 			}
 		}
 		file := os.NewFile(uintptr(handle), path)
 		if file == nil {
-			windows.CloseHandle(handle)
-			return nil, "", errors.New("wrap protected temporary file handle")
+			return nil, "", errors.Join(errors.New("wrap protected temporary file handle"), windows.CloseHandle(handle), os.Remove(path))
 		}
 		return file, path, nil
 	}
 	return nil, "", windows.ERROR_FILE_EXISTS
 }
 
-func currentOwnerSecurityDescriptor() (string, error) {
+func currentOwnerSecurityDescriptor() (descriptor string, resultErr error) {
 	token, err := windows.OpenCurrentProcessToken()
 	if err != nil {
 		return "", err
 	}
-	defer token.Close()
+	defer func() {
+		resultErr = errors.Join(resultErr, token.Close())
+		if resultErr != nil {
+			descriptor = ""
+		}
+	}()
 	user, err := token.GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil || !user.User.Sid.IsValid() {
 		if err == nil {
@@ -241,7 +275,7 @@ func currentOwnerSecurityDescriptor() (string, error) {
 		return "", err
 	}
 	sid := user.User.Sid.String()
-	descriptor := "D:P(A;;FA;;;SY)(A;;FA;;;BA)"
+	descriptor = "D:P(A;;FA;;;SY)(A;;FA;;;BA)"
 	if sid != "S-1-5-18" {
 		descriptor += "(A;;FA;;;" + sid + ")"
 	}
@@ -256,7 +290,11 @@ func secureDirectory(path string) error {
 		}
 		return err
 	}
-	attributes, err := windows.GetFileAttributes(windows.StringToUTF16Ptr(path))
+	nativePath, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return err
+	}
+	attributes, err := windows.GetFileAttributes(nativePath)
 	if err != nil || attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		if err == nil {
 			err = errors.New("parent is a reparse point")
@@ -277,7 +315,11 @@ func regularNonReparse(path string, allowMissing bool) error {
 		}
 		return err
 	}
-	attributes, err := windows.GetFileAttributes(windows.StringToUTF16Ptr(path))
+	nativePath, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return err
+	}
+	attributes, err := windows.GetFileAttributes(nativePath)
 	if err != nil || attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		if err == nil {
 			err = errors.New("destination is a reparse point")

@@ -27,6 +27,18 @@ JSON output is supported with --json.
 \fB--json\fP[=false]
 	print JSON
 
+.PP
+\fB--owner\fP=""
+	filter owner: mine, shared, or an authorized account ID
+
+.PP
+\fB--q\fP=""
+	filter by resource name or ID
+
+.PP
+\fB--state\fP=""
+	filter by resource state
+
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS
 \fB--config\fP=""
@@ -39,6 +51,10 @@ JSON output is supported with --json.
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

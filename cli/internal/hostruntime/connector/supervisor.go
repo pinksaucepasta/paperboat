@@ -3,10 +3,12 @@ package connector
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"math/rand/v2"
+	"reflect"
 	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 )
 
 var ErrSupervisorInvalid = errors.New("invalid connector supervisor configuration")
@@ -113,7 +115,7 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	if s.running {
 		return ErrSupervisorInvalid
 	}
-	runCtx, cancel := context.WithCancel(context.Background())
+	runCtx, cancel := context.WithCancel(ctx)
 	s.cancel, s.done, s.running = cancel, make(chan struct{}), true
 	go s.loop(runCtx)
 	return nil
@@ -183,17 +185,26 @@ func (s *Supervisor) loop(ctx context.Context) {
 	defer func() { s.mu.Lock(); s.running = false; close(s.done); s.mu.Unlock() }()
 	backoff := s.config.InitialBackoff
 	var recoveryStarted time.Time
+	failureReported := false
+	observeFailure := func(stage, code string, err error) {
+		if err == nil || onlyConnectorCancellation(err) || failureReported {
+			return
+		}
+		errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "connector_admission", stage, code, err)
+		failureReported = true
+	}
 	for ctx.Err() == nil {
 		admission, err := s.config.Admissions.Admission(ctx)
 		if err == nil {
 			// QUIC probing is bounded separately, but TCP login and proxy
 			// publication can legitimately take several seconds on a cold edge.
-			// Keep the acceptance bound below the hosted service readiness budget
+			// Keep the acceptance bound below the service readiness budget
 			// while leaving enough time for that control exchange to settle.
 			acceptCtx, cancelAccept := context.WithTimeout(ctx, 25*time.Second)
 			result, acceptErr := s.config.Manager.Accept(acceptCtx, admission)
 			cancelAccept()
 			if acceptErr == nil {
+				failureReported = false
 				if !recoveryStarted.IsZero() && s.config.Metrics != nil {
 					_ = s.config.Metrics.Record("paperboat_runtime_connector_recovery_seconds", time.Since(recoveryStarted).Seconds(), nil)
 					recoveryStarted = time.Time{}
@@ -215,19 +226,34 @@ func (s *Supervisor) loop(ctx context.Context) {
 					waitErr = <-waitResult
 				}
 				cancelWait()
-				if errors.Is(waitErr, context.Canceled) && ctx.Err() == nil {
+				if onlyConnectorTermination(waitErr) && ctx.Err() == nil {
 					continue
 				}
 				if waitErr != nil && ctx.Err() == nil {
+					observeFailure("peer_connect", "transport_failed", waitErr)
 					if s.config.Waiter.Wait(ctx, s.jitter(backoff), s.wake) != nil {
 						return
 					}
 				}
 				continue
 			}
-			slog.Warn("connector admission acceptance failed", "error", acceptErr)
+			if errors.Is(acceptErr, ErrShuttingDown) {
+				return
+			}
+			var classified interface {
+				DiagnosticStage() string
+				DiagnosticCode() string
+			}
+			if errors.As(acceptErr, &classified) {
+				observeFailure(classified.DiagnosticStage(), classified.DiagnosticCode(), acceptErr)
+			} else {
+				observeFailure("peer_authority", "peer_authority_failed", acceptErr)
+			}
 		} else {
-			slog.Warn("connector admission request failed", "error", err)
+			var observed interface{ DiagnosticObserved() bool }
+			if !errors.As(err, &observed) || !observed.DiagnosticObserved() {
+				observeFailure("peer_authority", "peer_authority_failed", err)
+			}
 		}
 		s.recordRetry("none", "failed")
 		if recoveryStarted.IsZero() {
@@ -243,9 +269,83 @@ func (s *Supervisor) loop(ctx context.Context) {
 	}
 }
 
+func onlyConnectorCancellation(err error) bool {
+	return connectorErrorLeaves(err, func(leaf error) bool {
+		return leaf == context.Canceled || leaf == context.DeadlineExceeded
+	})
+}
+
+func onlyConnectorTermination(err error) bool {
+	return connectorErrorLeaves(err, func(leaf error) bool {
+		return leaf == context.Canceled || leaf == context.DeadlineExceeded || leaf == ErrGenerationStale
+	})
+}
+
+func connectorErrorLeaves(err error, expected func(error) bool) bool {
+	if err == nil {
+		return false
+	}
+	remaining := []error{err}
+	seen := make(map[error]struct{})
+	leaves := 0
+	for visited := 0; len(remaining) > 0; visited++ {
+		if visited >= 16 {
+			return false
+		}
+		current := remaining[0]
+		remaining = remaining[1:]
+		if current == nil {
+			return false
+		}
+		typeOf := reflect.TypeOf(current)
+		if typeOf.Comparable() {
+			if _, ok := seen[current]; ok {
+				return false
+			}
+			seen[current] = struct{}{}
+		}
+		value := reflect.ValueOf(current)
+		switch value.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+			if value.IsNil() {
+				return false
+			}
+		}
+		switch wrapped := current.(type) {
+		case interface{ Unwrap() []error }:
+			children := wrapped.Unwrap()
+			if len(children) == 0 || len(children) > 16-visited-1 || len(remaining)+len(children) > 16-visited-1 {
+				return false
+			}
+			remaining = append(remaining, children...)
+		case interface{ Unwrap() error }:
+			child := wrapped.Unwrap()
+			if child == nil || len(remaining)+1 > 16-visited-1 {
+				return false
+			}
+			remaining = append(remaining, child)
+		default:
+			leaves++
+			if !expected(current) {
+				return false
+			}
+		}
+	}
+	return leaves > 0
+}
+
 func (s *Supervisor) recordRetry(transport, result string) {
 	if s.config.Metrics != nil {
-		_ = s.config.Metrics.Record("paperboat_runtime_connector_retries_total", 1, map[string]string{"transport": transport, "result": result})
+		_ = s.config.Metrics.Record("paperboat_runtime_connector_retries_total", 1, map[string]string{"transport": safeTransportLabel(transport), "result": result})
+	}
+}
+
+func safeTransportLabel(value string) string {
+	switch Transport(value) {
+	case Auto, QUIC, TCPDedicated, TCPMux:
+		return value
+	default:
+		return "none"
 	}
 }
 

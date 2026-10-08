@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -39,7 +40,7 @@ func TestEnvironmentVariableCommandSurfaceKeepsValuesOutOfArguments(t *testing.T
 	for _, path := range [][]string{
 		{"env", "rotate"}, {"env", "rotate", "cancel"},
 		{"env", "team", "create"}, {"env", "team", "grant"}, {"env", "team", "rotate"}, {"env", "team", "revoke"}, {"env", "team", "reset"},
-		{"env", "grants", "sync"}, {"env", "host", "provision"}, {"env", "vault", "remove"}, {"env", "vault", "reset"},
+		{"env", "grants", "sync"}, {"env", "host", "select"}, {"env", "vault", "remove"}, {"env", "vault", "reset"},
 	} {
 		command, _, err := root.Find(path)
 		if err != nil || command == nil {
@@ -62,26 +63,9 @@ func TestEnvironmentVariableCommandSurfaceKeepsValuesOutOfArguments(t *testing.T
 	}
 }
 
-func TestVaultHostSelectionParsingIsExplicitAndRedacted(t *testing.T) {
-	selection, err := parseVaultHostSelections([]string{"personal:API_MODE", "team:team_1:DEPLOY_TOKEN"}, "account_1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(selection) != 2 || selection[0] != (api.VaultHostSelection{OwnerKind: "personal", OwnerID: "account_1", Name: "API_MODE"}) || selection[1] != (api.VaultHostSelection{OwnerKind: "team", OwnerID: "team_1", Name: "DEPLOY_TOKEN"}) {
-		t.Fatalf("selection=%+v", selection)
-	}
-	for _, references := range [][]string{
-		{"personal:api-mode"}, {"team:team_1:bad-name"}, {"team:team_1:API_MODE", "team:team_1:API_MODE"}, {"team:team_1"},
-	} {
-		if _, err := parseVaultHostSelections(references, "account_1"); err == nil {
-			t.Fatalf("references %q unexpectedly accepted", references)
-		}
-	}
-}
-
 func TestVaultScopeTargetRejectsMixedTeamMachineSelection(t *testing.T) {
 	target, err := vaultScopeTargetForCommand(newEnvironmentTestCommand(strings.NewReader(""), io.Discard), nil, "account_1", "team_1", "machine_1")
-	if err == nil || target.owner != "" || !strings.Contains(err.Error(), "cannot be combined") {
+	if err == nil || target.owner != "" || !errors.Is(err, errUsage) || err.Error() != "The command arguments are invalid. Run `pb COMMAND --help` and retry." || strings.Contains(err.Error(), "team_1") || strings.Contains(err.Error(), "machine_1") {
 		t.Fatalf("target=%+v err=%v", target, err)
 	}
 }
@@ -103,10 +87,15 @@ func TestEnvironmentVariableStdinIsRawBoundedAndAllowsEmpty(t *testing.T) {
 	if got, err := readBoundedEnvironmentVariableStdin(bytes.NewReader([]byte{0xff})); err == nil || got != nil || !strings.Contains(err.Error(), "UTF-8") {
 		t.Fatalf("invalid UTF-8 stdin got=%q err=%v", got, err)
 	}
-	if got, err := readBoundedEnvironmentVariableStdin(errorReader{}); err == nil || got != nil || !strings.Contains(err.Error(), "could not read") {
+	readCause := syscall.EIO
+	if got, err := readBoundedEnvironmentVariableStdin(environmentVariableErrorReader{cause: readCause}); err == nil || got != nil || !errors.Is(err, readCause) || strings.Contains(err.Error(), "input fault") || !strings.Contains(err.Error(), "could not read") {
 		t.Fatalf("reader error got=%q err=%v", got, err)
 	}
 }
+
+type environmentVariableErrorReader struct{ cause error }
+
+func (r environmentVariableErrorReader) Read([]byte) (int, error) { return 0, r.cause }
 
 func TestEnvironmentVariableValueFileIsBoundedAndRequiresAbsolutePath(t *testing.T) {
 	root := t.TempDir()
@@ -125,6 +114,11 @@ func TestEnvironmentVariableValueFileIsBoundedAndRequiresAbsolutePath(t *testing
 	}
 	if _, err := readEnvironmentVariableValueFile(newEnvironmentTestCommand(strings.NewReader("stdin"), io.Discard), true, path); err == nil || !strings.Contains(err.Error(), "choose") {
 		t.Fatalf("combined value input error=%v", err)
+	}
+
+	missing := filepath.Join(root, "missing-value.txt")
+	if _, err := readEnvironmentVariableValueFile(newEnvironmentTestCommand(strings.NewReader(""), io.Discard), false, missing); err == nil || !errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), missing) {
+		t.Fatalf("missing value file lost its private cause or exposed its path: %v", err)
 	}
 }
 
@@ -154,6 +148,9 @@ func TestEnvironmentVariableSetCommandEncryptsLocallyAndHidesInput(t *testing.T)
 	if err := setEnvironmentVariable(command, "", "API_MODE", true); err != nil {
 		t.Fatal(err)
 	}
+	if fixture.control.hostRefreshes != 1 {
+		t.Fatal("source mutation did not automatically refresh selected recipients")
+	}
 	scope := fixture.control.scopes[commandVaultScopeKey("personal", commandVaultAccount, "")]
 	raw, err := base64.RawURLEncoding.Strict().DecodeString(scope.Envelope)
 	if err != nil {
@@ -175,7 +172,7 @@ func TestEnvironmentVariableSetCommandRoutesTeamScopeWithoutPlaintext(t *testing
 	teamKey := bytes.Repeat([]byte{0x42}, 32)
 	defer clear(teamKey)
 	if err := fixture.manager.UpdateKeys(context.Background(), func(keys *environmente2ee.VaultKeys) error {
-		keys.Teams = append(keys.Teams, environmente2ee.VaultTeamKey{TeamID: "team_1", Epoch: 1, MembershipGeneration: 1, Key: bytes.Clone(teamKey)})
+		keys.Teams = append(keys.Teams, environmente2ee.VaultTeamKey{TeamID: "team-one", Epoch: 1, MembershipGeneration: 1, Key: bytes.Clone(teamKey)})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -193,31 +190,115 @@ func TestEnvironmentVariableSetCommandRoutesTeamScopeWithoutPlaintext(t *testing
 		passwordVaultForCommand = previousVault
 	})
 	var output bytes.Buffer
-	if err := setEnvironmentVariableForScope(newEnvironmentTestCommand(strings.NewReader(canary), &output), "team_1", "", "API_MODE", true, ""); err != nil {
+	teamCommand := newEnvironmentTestCommand(strings.NewReader(canary), &output)
+	teamCommand.PersistentFlags().String("workspace", "", "")
+	if err := teamCommand.PersistentFlags().Set("workspace", "team-one"); err != nil {
 		t.Fatal(err)
 	}
-	scope := fixture.control.scopes[commandVaultScopeKey("team", "team_1", "")]
+	if err := setEnvironmentVariableForScope(teamCommand, "team-one", "", "API_MODE", true, ""); err != nil {
+		t.Fatal(err)
+	}
+	scope := fixture.control.scopes[commandVaultScopeKey("team", "team-one", "")]
 	raw, err := base64.RawURLEncoding.Strict().DecodeString(scope.Envelope)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(raw, []byte(canary)) || strings.Contains(output.String(), canary) || !strings.Contains(output.String(), "team team_1") {
+	if bytes.Contains(raw, []byte(canary)) || strings.Contains(output.String(), canary) || !strings.Contains(output.String(), "team team-one") {
 		t.Fatalf("team scope or output exposed plaintext: output=%q", output.String())
 	}
 }
 
 func TestEnvironmentVariableSetCommandHidesServerEcho(t *testing.T) {
 	const canary = "command-error-canary"
-	if got := safeEnvironmentVariableCommandError(errors.New("server echoed " + canary + "\\nwith escaped details")); got == nil || strings.Contains(got.Error(), canary) || got.Error() != "environment variable update failed" {
+	cause := errors.New("server echoed " + canary + "\\nwith escaped details")
+	if got := safeEnvironmentVariableCommandError(cause); got == nil || !errors.Is(got, cause) || strings.Contains(got.Error(), canary) || got.Error() != "environment variable update failed" {
 		t.Fatalf("unsafe command error=%v", got)
 	}
 }
 
 func TestEnvironmentVariableSetConflictErrorUsesOnlyStableCode(t *testing.T) {
 	const canary = "conflict-secret-canary"
-	err := safeEnvironmentVariableCommandError(&api.APIError{Code: "version_conflict", Message: canary, Details: map[string]any{"message": canary}})
-	if err == nil || strings.Contains(err.Error(), canary) || err.Error() != "environment variable scope changed; fetch it and retry" {
+	apiCause := &api.APIError{Code: "version_conflict", Message: canary, Details: map[string]any{"message": canary}}
+	err := safeEnvironmentVariableCommandError(apiCause)
+	var projected *api.APIError
+	if err == nil || !errors.As(err, &projected) || projected != apiCause || !errors.Is(err, apiCause) || strings.Contains(err.Error(), canary) || err.Error() != "environment variable scope changed; fetch it and retry" {
 		t.Fatalf("unsafe conflict error=%v", err)
+	}
+	operational := syscall.EIO
+	mixed := safeEnvironmentVariableCommandError(errors.Join(apiCause, operational))
+	if !errors.Is(mixed, apiCause) || !errors.Is(mixed, operational) || mixed.Error() != "environment variable update failed" {
+		t.Fatalf("mixed API and I/O failure lost cause or received conflict-only advice: %v", mixed)
+	}
+}
+
+func TestEnvironmentVariableCommandErrorKeepsExpectedStateCauseOnlyWhenUnmixed(t *testing.T) {
+	pure := safeEnvironmentVariableCommandError(environmentmanager.ErrVaultLocked)
+	if !errors.Is(pure, environmentmanager.ErrVaultLocked) || !strings.Contains(pure.Error(), "pb env vault unlock") {
+		t.Fatalf("pure locked state lost recovery guidance or cause: %v", pure)
+	}
+	operational := syscall.EIO
+	mixed := safeEnvironmentVariableCommandError(errors.Join(environmentmanager.ErrVaultLocked, operational))
+	if !errors.Is(mixed, environmentmanager.ErrVaultLocked) || !errors.Is(mixed, operational) || mixed.Error() != "environment variable update failed" {
+		t.Fatalf("mixed failure was hidden or received misleading state guidance: %v", mixed)
+	}
+}
+
+func TestResumeSuppressesOnlyAnUnmixedLayerRefreshConflict(t *testing.T) {
+	conflict := &environmentmanager.LayerRefreshConflict{Cause: &api.APIError{Status: 409, Code: "version_conflict"}}
+	if !onlyEnvironmentLayerRefreshConflict(errors.Join(conflict, nil)) {
+		t.Fatal("definitive host refresh conflict was not recognized")
+	}
+	operational := syscall.EIO
+	if onlyEnvironmentLayerRefreshConflict(errors.Join(conflict, operational)) {
+		t.Fatal("host refresh conflict hid a joined operational failure")
+	}
+	if onlyEnvironmentLayerRefreshConflict(errors.Join(conflict, errors.Join(operational))) {
+		t.Fatal("host refresh conflict hid an operational failure in a nested join")
+	}
+}
+
+func TestENVRecipientRecoveryAdviceRequiresUnmixedCause(t *testing.T) {
+	pureLock := (&envHostRefreshFailure{cause: errors.Join(environmentmanager.ErrVaultLocked, nil)}).Error()
+	if !strings.Contains(pureLock, "pb env vault unlock") {
+		t.Fatalf("pure lock did not retain unlock recovery: %q", pureLock)
+	}
+	operational := syscall.EIO
+	mixedLock := (&envHostRefreshFailure{cause: errors.Join(environmentmanager.ErrVaultLocked, operational)}).Error()
+	if strings.Contains(mixedLock, "pb env vault unlock") || !strings.Contains(mixedLock, "pb env vault resume") {
+		t.Fatalf("mixed lock and I/O failure received misleading recovery: %q", mixedLock)
+	}
+	pureAuth := (&envHostRefreshFailure{cause: &api.APIError{Status: 401}}).Error()
+	if !strings.Contains(pureAuth, "pb auth login") {
+		t.Fatalf("pure authorization rejection lost recovery: %q", pureAuth)
+	}
+	mixedAuth := (&envHostRefreshFailure{cause: errors.Join(&api.APIError{Status: 401}, operational)}).Error()
+	if strings.Contains(mixedAuth, "pb auth login") || !strings.Contains(mixedAuth, "pb env vault resume") {
+		t.Fatalf("mixed authorization and I/O failure received misleading recovery: %q", mixedAuth)
+	}
+
+}
+
+type cyclicEnvironmentCause struct{}
+
+func (cyclicEnvironmentCause) Error() string       { return "cyclic environment cause" }
+func (cause cyclicEnvironmentCause) Unwrap() error { return cause }
+
+func TestENVRecoveryCauseInspectionRejectsCyclicAndOversizedTrees(t *testing.T) {
+	matchLocked := func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrVaultLocked) }
+	cycle := cyclicEnvironmentCause{}
+	if onlyEnvironmentFailureLeaves(cycle, matchLocked) || onlyEnvironmentLayerRefreshConflict(cycle) || environmentFailureHasMarker(cycle, func(error) bool { return true }) || !environmentFailureContainsJoin(cycle) {
+		t.Fatal("cyclic cause was accepted as an ordinary ENV state")
+	}
+	cycleMessage := (&envHostRefreshFailure{cause: cycle}).Error()
+	if !strings.Contains(cycleMessage, "pb env vault resume") || strings.Contains(cycleMessage, "pb auth login") {
+		t.Fatalf("cyclic cause did not receive bounded generic recovery: %q", cycleMessage)
+	}
+	causes := make([]error, 17)
+	for index := range causes {
+		causes[index] = environmentmanager.ErrVaultLocked
+	}
+	if onlyEnvironmentFailureLeaves(errors.Join(causes...), matchLocked) {
+		t.Fatal("oversized joined cause tree was accepted as an ordinary ENV state")
 	}
 }
 
@@ -265,6 +346,9 @@ func TestEnvironmentVariableUnsetCommandUsesEncryptedManagerAndYes(t *testing.T)
 	if err := unsetEnvironmentVariable(command, "", "API_MODE"); err != nil {
 		t.Fatal(err)
 	}
+	if fixture.control.hostRefreshes != 1 {
+		t.Fatal("source mutation did not automatically refresh selected recipients")
+	}
 	if !strings.Contains(output.String(), "Unset API_MODE") || !strings.Contains(output.String(), "encrypted vault scope") {
 		t.Fatalf("output=%q", output.String())
 	}
@@ -306,18 +390,18 @@ func TestEnvironmentVariableListCommandReportsNamesWithoutValues(t *testing.T) {
 	}
 }
 
-func TestEnvironmentVariableHostFilteringAndCaseInsensitiveNames(t *testing.T) {
-	clientOnly := api.UserMachine{ID: "client", Alias: "client"}
-	hostByMode := api.UserMachine{ID: "host-mode", Alias: "device-one", Capabilities: api.MachineCapabilities{EnvironmentInjection: api.MachineCapability{Configured: true}}}
-	hostByRole := api.UserMachine{ID: "host-role", Alias: "device-two", Capabilities: api.MachineCapabilities{EnvironmentInjection: api.MachineCapability{Configured: true}}}
-	filtered := environmentVariableMachines([]api.UserMachine{clientOnly, hostByMode, hostByRole})
-	if len(filtered) != 2 || filtered[0].ID != hostByMode.ID || filtered[1].ID != hostByRole.ID {
+func TestEnvironmentVariableCapabilityFilteringAndCaseInsensitiveNames(t *testing.T) {
+	unconfiguredMachine := api.UserMachine{ID: "unconfigured-machine", Alias: "unconfigured-machine"}
+	firstConfiguredMachine := api.UserMachine{ID: "machine-one", Alias: "machine-one", Capabilities: api.MachineCapabilities{EnvironmentInjection: api.MachineCapability{Configured: true}}}
+	secondConfiguredMachine := api.UserMachine{ID: "machine-two", Alias: "machine-two", Capabilities: api.MachineCapabilities{EnvironmentInjection: api.MachineCapability{Configured: true}}}
+	filtered := environmentVariableMachines([]api.UserMachine{unconfiguredMachine, firstConfiguredMachine, secondConfiguredMachine})
+	if len(filtered) != 2 || filtered[0].ID != firstConfiguredMachine.ID || filtered[1].ID != secondConfiguredMachine.ID {
 		t.Fatalf("filtered machines=%+v", filtered)
 	}
-	actions := machineHomeActions(clientOnly)
+	actions := machineHomeActions(unconfiguredMachine)
 	for _, action := range actions {
 		if action.ID == "environment-variables" {
-			t.Fatal("client-only machine exposed ENV Injection action")
+			t.Fatal("unconfigured machine exposed ENV Injection action")
 		}
 	}
 	if !environmentVariableConfigured([]api.EnvironmentVariable{{Name: "PATH", Configured: true}}, "path") {
@@ -325,9 +409,9 @@ func TestEnvironmentVariableHostFilteringAndCaseInsensitiveNames(t *testing.T) {
 	}
 }
 
-func TestEnvironmentVariableScopePickerUsesPersonalScopeAndExplicitHostSelections(t *testing.T) {
+func TestEnvironmentVariableScopePickerUsesGlobalScopeAndDevices(t *testing.T) {
 	items := environmentVariableScopePickerItems([]api.UserMachine{{ID: "host_1", Alias: "host-one", Capabilities: api.MachineCapabilities{EnvironmentInjection: api.MachineCapability{Configured: true}}}})
-	if len(items) != 2 || items[0].ID != "personal" || items[0].Title != "Personal" || strings.Contains(items[0].Description, "every connected") || !strings.Contains(items[0].Description, "explicit host selections") {
+	if len(items) != 2 || items[0].ID != "workspace" || items[0].Title != "Personal" || strings.Contains(items[0].Description, "every connected") || !strings.Contains(items[0].Description, "automatic delivery") {
 		t.Fatalf("personal picker item=%+v", items[0])
 	}
 	if items[1].ID != "host_1" || items[1].Title != "host-one" {
@@ -358,12 +442,12 @@ func TestSafeEnvironmentVariableCommandErrorUsesCurrentVaultRecoveryActions(t *t
 func TestEnvironmentVariableTargetRejectsClientMachineLocally(t *testing.T) {
 	previous := environmentVariableResolveMachine
 	environmentVariableResolveMachine = func(context.Context, *api.Client, string) (api.UserMachine, error) {
-		return api.UserMachine{ID: "client", Alias: "client"}, nil
+		return api.UserMachine{ID: "unconfigured-machine", Alias: "unconfigured-machine"}, nil
 	}
 	defer func() { environmentVariableResolveMachine = previous }()
 
 	target, err := environmentVariableTargetForCommand(newEnvironmentTestCommand(strings.NewReader(""), io.Discard), nil, "client")
-	if err == nil || !strings.Contains(err.Error(), "disabled on this device") || target.machineID != "" {
+	if err == nil || !strings.Contains(err.Error(), "disabled on this machine") || target.machineID != "" {
 		t.Fatalf("target=%+v err=%v", target, err)
 	}
 }
@@ -388,4 +472,147 @@ func allZero(value []byte) bool {
 		}
 	}
 	return true
+}
+
+func TestENVSafeFailureKeepsRecoveryAndCauseInRealFormatter(t *testing.T) {
+	for _, scenario := range []struct {
+		cause    error
+		recovery string
+	}{
+		{environmentmanager.ErrVaultLocked, "pb env vault unlock"},
+		{environmentmanager.ErrVaultPending, "pb env vault resume"},
+		{&api.APIError{Status: 403, Code: "team_entitlement_required", Message: "PRIVATE_PROVIDER_VALUE"}, "Team Billing"},
+		{&api.APIError{Status: 409, Code: "version_conflict", Message: "PRIVATE_PROVIDER_VALUE"}, "retry"},
+	} {
+		err := safeEnvironmentVariableCommandError(scenario.cause)
+		if !errors.Is(err, scenario.cause) {
+			t.Fatal("ENV recovery erased the typed cause")
+		}
+		message := userFacingError(err)
+		result := classifyCLIJSONError(err)
+		if !strings.Contains(message, scenario.recovery) || strings.Contains(message, "PRIVATE") || !strings.Contains(result.Message, scenario.recovery) || strings.Contains(result.Message, "PRIVATE") {
+			t.Fatalf("safe ENV recovery lost: %#v", result)
+		}
+	}
+}
+
+func TestVaultScopeMachineOverrideUsesPrivateActiveWorkspace(t *testing.T) {
+	command := newEnvironmentTestCommand(strings.NewReader(""), io.Discard)
+	command.PersistentFlags().String("workspace", "", "")
+	if err := command.PersistentFlags().Set("workspace", "team-one"); err != nil {
+		t.Fatal(err)
+	}
+	client := api.New("https://control.invalid", config.Credential{}, nil)
+	if err := client.SetWorkspace("team-one"); err != nil {
+		t.Fatal(err)
+	}
+	previous := environmentVariableResolveMachine
+	defer func() { environmentVariableResolveMachine = previous }()
+	for _, owned := range []bool{true, false} {
+		environmentVariableResolveMachine = func(_ context.Context, scoped *api.Client, requested string) (api.UserMachine, error) {
+			if scoped.Workspace() != "personal" || requested != "machine_1" {
+				t.Fatal("machine lookup did not use owner-only Personal authorization")
+			}
+			if !owned {
+				return api.UserMachine{}, &api.APIError{Status: 403, Code: "forbidden"}
+			}
+			return api.UserMachine{ID: "machine_1", Alias: "owned", Capabilities: api.MachineCapabilities{EnvironmentInjection: api.MachineCapability{Configured: true}}}, nil
+		}
+		target, err := vaultScopeTargetForCommand(command, client, "account_1", "", "machine_1")
+		if owned && (err != nil || target.kind != "personal" || target.owner != "account_1" || target.machine != "machine_1" || !strings.Contains(target.label, "team-one")) {
+			t.Fatalf("Personal override target=%+v error=%v", target, err)
+		}
+		if !owned && err == nil {
+			t.Fatal("foreign Team-owned machine gained a Personal override")
+		}
+		if client.Workspace() != "team-one" {
+			t.Fatal("override changed the active Team workspace")
+		}
+	}
+	_, err := vaultScopeTargetForCommand(command, client, "account_1", "team-one", "machine_1")
+	if !errors.Is(err, errUsage) {
+		t.Fatal("explicit Team and machine were accepted")
+	}
+}
+
+func TestENVSourceConflictRecoveryKeepsExactMachineOutcome(t *testing.T) {
+	cause := &environmentmanager.ScopeRefreshConflict{Cause: &api.APIError{Status: 409, Code: "version_conflict", Message: "PRIVATE_PROVIDER_VALUE"}}
+	err := safeEnvironmentVariableCommandError(errors.Join(cause, nil))
+	result := classifyCLIJSONError(err)
+	if result.Code != "env_source_conflict" || result.StateChanged != false || result.OutcomeUncertain || !strings.Contains(result.Message, "submit the intended edit again") || strings.Contains(result.Message, "PRIVATE") {
+		t.Fatalf("conflict result lost: %#v", result)
+	}
+}
+
+func TestENVHostHasNoManualProvisionOrSelection(t *testing.T) {
+	root := newRootCommand()
+	host, _, err := root.Find([]string{"env", "host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := root.Find([]string{"env", "host", "show"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range host.Commands() {
+		if c.Name() == "provision" || c.Name() == "select" {
+			t.Fatal("obsolete manual ENV setup exists")
+		}
+	}
+}
+
+func TestEnvironmentVariableTeamPickerRoutesExactThreeLevels(t *testing.T) {
+	machines := []api.UserMachine{{ID: "host_1", Alias: "host-one", Capabilities: api.MachineCapabilities{EnvironmentInjection: api.MachineCapability{Configured: true}}}}
+	items := environmentVariableScopePickerItemsFor(machines, "team_1")
+	if len(items) != 3 || items[0].ID != "team-global" || items[1].ID != "workspace" || !strings.Contains(items[2].Description, "Team team_1") {
+		t.Fatalf("Team scope picker: %+v", items)
+	}
+	for _, target := range []environmentVariableTarget{{teamID: "team_1"}, {}, {machineID: "host_1"}} {
+		scope, err := environmentVariablePickerScope("team_1", "account_1", target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if target.teamID != "" {
+			if scope.kind != "team" || scope.owner != "team_1" || scope.machine != "" {
+				t.Fatalf("shared scope: %+v", scope)
+			}
+		} else if scope.kind != "personal" || scope.owner != "account_1" || scope.machine != target.machineID {
+			t.Fatalf("private scope: %+v", scope)
+		}
+	}
+	for _, workspace := range []string{"personal", "team_2"} {
+		if _, err := environmentVariablePickerScope(workspace, "account_1", environmentVariableTarget{teamID: "team_1"}); err == nil {
+			t.Fatal("foreign Team target accepted")
+		}
+	}
+}
+
+func TestEnvironmentVariableTeamInitializationRequiresCurrentOwner(t *testing.T) {
+	team := api.Team{TeamID: "team_1", OwnerAccount: "account_1", Generation: 9, Members: []api.TeamMember{{AccountID: "account_1", Role: "owner", Active: true, MembershipGeneration: 7}}}
+	if generation, err := vaultTeamInitializationMembership(team, "account_1"); err != nil || generation != 7 {
+		t.Fatalf("owner binding: %d %v", generation, err)
+	}
+	if _, err := vaultTeamInitializationMembership(team, "other"); err == nil || !strings.Contains(err.Error(), "private member and device scopes remain available") {
+		t.Fatalf("nonowner initialization: %v", err)
+	}
+	team.Members[0].Active = false
+	if _, err := vaultTeamInitializationMembership(team, "account_1"); err == nil {
+		t.Fatal("unaccepted owner initialized Team")
+	}
+	team.Members[0].Active = true
+	team.Deleted = true
+	if _, err := vaultTeamInitializationMembership(team, "account_1"); err == nil {
+		t.Fatal("deleted Team initialized")
+	}
+}
+
+func TestEnvironmentVariableSharedReadOnlyActionsRemainUseful(t *testing.T) {
+	metadata := vaultScopeMetadata{Names: []string{"NAME"}, Revision: 3}
+	readOnly := environmentVariableScopeActions(metadata, false)
+	if len(readOnly) != 2 || readOnly[0].ID != "read-only" || readOnly[1].ID != "show:NAME" {
+		t.Fatalf("read-only actions: %+v", readOnly)
+	}
+	writable := environmentVariableScopeActions(metadata, true)
+	if writable[0].ID != "set" || writable[1].ID != "unset:NAME" {
+		t.Fatalf("writer actions: %+v", writable)
+	}
 }

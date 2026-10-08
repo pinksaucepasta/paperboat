@@ -6,10 +6,10 @@ versioned `User-Agent`. Unsupported protocols must be rejected with HTTP 426 or
 `incompatible_client_version`; `pb` reports the upgrade message and does not
 retry.
 
-- Never put device, access, or refresh tokens in URLs or logs.
+- Never put machine, access, or refresh tokens in URLs or logs.
 - A rejected session requires enrollment using the command from the dashboard; there is no local-shell fallback.
 - Upload failures are fail-open only for the affected paste. Image bytes and paths are never logged.
-- For a stolen device, revoke its client session in the dashboard, then run `pb auth logout`.
+- For a stolen machine, revoke its client session in the dashboard, then run `pb auth logout`.
 - During outages, use `pb doctor`; never bypass the common Paperboat transport or expose a raw
   machine port. `pb ssh` is allowed only when its stream succeeds through the normal selected
   direct/relay/WSS carrier and terminates at the machine's system `sshd`.
@@ -102,16 +102,17 @@ Enrollment derives a stable label, avoids reserved Paperboat command and infrast
 names, and allocates deterministic `-2`, `-3`, and later suffixes under account-scoped
 transaction serialization. Local inventory rejects absent or malformed aliases.
 
-Managed SSH uses the canonical OpenSSH host `<machine>.pprbt`; the former `.pprbt.dev`
-form is not accepted. `pb ssh <machine>` delegates to the system OpenSSH client as
-`<setup-user>@<machine>.pprbt`, where the setup user is the operating-system account that
+Managed SSH uses the canonical OpenSSH host `<machine>.local.pprbt.dev`. SSH aliases are
+handled by the installed Paperboat `ProxyCommand`; they do not depend on local DNS or the
+browser gateway. `pb ssh <machine>` delegates to the system OpenSSH client as
+`<setup-user>@<machine>.local.pprbt.dev`, where the setup user is the operating-system account that
 ran `pb setup`. That registered user is an authorization boundary: an explicit username
 is accepted only when it exactly matches the registered target, and any other username
-fails before the SSH stream opens. The installed `Host *.pprbt` configuration uses the
+fails before the SSH stream opens. The installed `Host *.local.pprbt.dev` configuration uses the
 same ProxyCommand, public selector for the credential-store-backed managed identity, and
 strict host-key source for native `ssh`, `scp`, `sftp`, `rsync`, Git-over-SSH, and OpenSSH
 forwarding. Native ecosystem commands should spell the registered user explicitly, for
-example `scp file root@hn.pprbt:/tmp/file`.
+example `scp file root@hn.local.pprbt.dev:/tmp/file`.
 
 ### Native editor remoting
 
@@ -119,17 +120,17 @@ Native editors use the installed managed OpenSSH configuration. They must invoke
 system `ssh` client against the canonical host, not replace it with `pb ssh`: editor
 backends need OpenSSH's normal command, dynamic-forwarding, file-operation, and reconnect
 behavior. The daemon owns the `~/.ssh/paperboat_config` include, the per-machine
-`<alias>.pprbt` target block, the Paperboat `ProxyCommand`, the managed identity agent,
+`<alias>.local.pprbt.dev` target block, the Paperboat `ProxyCommand`, the managed identity agent,
 and the generation-bound `KnownHostsCommand`.
 
 The setup flow is:
 
 1. Complete `pb setup`/`pb pair` and wait for the machine's runtime and SSH readiness.
-   `pb device list --json` exposes the server-owned alias; do not substitute the
+   `pb machine list --json` exposes the server-owned alias; do not substitute the
    display name. `pb ssh doctor <machine>` checks OpenSSH parsing, the managed agent,
    current host-key authority, and the native SSH path.
 2. In the editor's native SSH or remote-development connection flow, select
-   `<registered-os-user>@<alias>.pprbt`. Keep the editor on its normal system OpenSSH
+   `<registered-os-user>@<alias>.local.pprbt.dev`. Keep the editor on its normal system OpenSSH
    executable so it reads the Paperboat include and preserves OpenSSH forwarding.
 3. Allow the editor to start its remote backend in a task-owned workspace. Verify a
    file create/edit/save/reopen, one editor port-forward, and a reconnect after the
@@ -170,14 +171,14 @@ generation-bound `KnownHostsCommand` cutover remain separate Task 20 evidence.
 
 | Editor/client | Intended first qualification | Status | Limitation |
 | --- | --- | --- | --- |
-| VS Code Desktop + Remote-SSH | Linux client/backend | SSH operations verified | VS Code 1.136.1 / Remote-SSH 0.128.0 also started a backend, saved/reopened a file and forwarded a port through the native fixture on Ubuntu24 amd64. The automation exited after forced disconnection; full editor reconnect is unverified. |
+| VS Code Desktop + Remote-SSH | Linux client/backend | SSH operations verified | VS Code 1.136.1 / Remote-SSH 0.128.0 also started a backend, saved/reopened a file and forwarded a port through the native fixture on retired Linux test VM amd64. The automation exited after forced disconnection; full editor reconnect is unverified. |
 | JetBrains Gateway | Linux amd64 client to an approved Linux machine | Unqualified | Gateway's OpenSSH-config, host-key, backend, and reconnect behavior has not been measured. |
 | Zed | Linux amd64 client to an approved Linux machine | Unqualified | No Zed client was available for the required end-to-end scenario. |
 | Cursor | Linux amd64 client to an approved Linux machine | Unqualified | No Cursor client was available; VS Code compatibility cannot be inferred. |
 
 The operation suite ran in the Linux arm64 workspace; the partial desktop scenario ran
-with client and backend on Ubuntu24 amd64 under Xvfb. It does not establish a separate
-HP-to-Ubuntu24 network scenario. Windows amd64 and macOS arm64 editor combinations remain
+with client and backend on retired Linux test VM amd64 under Xvfb. It does not establish a separate
+HP-to-retired Linux test VM network scenario. Windows amd64 and macOS arm64 editor combinations remain
 unqualified. Compatibility with the verified SSH operations is expected; universal
 native-editor compatibility and full editor recovery are not claimed.
 
@@ -210,7 +211,7 @@ browser traffic carries no Paperboat credential or browser login state.
 
 `pb tunnel doctor --bundle /absolute/output.zip` previews a bounded, redacted host-runtime
 support bundle without returning source paths or secrets. Add `--write-bundle` to publish
-the previewed file. Device capability changes, device revocation, and uninstall revoke runtime authority
+the previewed file. Machine capability changes, machine revocation, and uninstall revoke runtime authority
 and retire affected preview routes.
 
 Machine-control credentials renew in memory and are bound to the enrolled Ed25519 key and

@@ -30,3 +30,18 @@ func TestOwnedServiceCommandRequiresExactPaperboatExecutable(t *testing.T) {
 		t.Fatal("foreign service executable was accepted as Paperboat-owned")
 	}
 }
+
+func TestInventoryRequiresExactCurrentOwnedServiceCommand(t *testing.T) {
+	config := DefaultConfig(nil)
+	config.ServiceName = "PaperboatSshd-u0123456789abcdef01234567"
+	config.ServiceExecutable = `C:\Program Files\Paperboat\bin\pb.exe`
+	command := `"` + config.ServiceExecutable + `" daemon __windows-sshd-service --instance u0123456789abcdef01234567`
+	if paperboatServiceConflicts(ServiceRecord{Exists: true, PathName: command}, config) {
+		t.Fatal("current owned service was classified conflicting")
+	}
+	for _, invalid := range []string{strings.Replace(command, "u0123456789abcdef01234567", "u111111111111111111111111", 1), strings.Replace(command, "pb.exe", "foreign.exe", 1), command + " --unexpected"} {
+		if !paperboatServiceConflicts(ServiceRecord{Exists: true, PathName: invalid}, config) {
+			t.Fatal("foreign or changed service command was accepted")
+		}
+	}
+}

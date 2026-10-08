@@ -126,6 +126,11 @@ func TestVaultPasswordInputRejectsUnsafeFilesAndConflictingSources(t *testing.T)
 	if err == nil || !strings.Contains(err.Error(), "owner-only") || called {
 		t.Fatalf("unsafe password file err=%v manager_called=%t", err, called)
 	}
+	missing := filepath.Join(t.TempDir(), "missing-password")
+	_, _, err = executePasswordVaultCommand(t, "vault", "init", "--json", "--password-file", missing)
+	if err == nil || !errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), missing) || called {
+		t.Fatalf("missing password file lost its private cause or exposed its path: err=%v manager_called=%t", err, called)
+	}
 	called = false
 	tooLarge := writeVaultInputFile(t, bytes.Repeat([]byte{'x'}, vaultSecretMaximumBytes+1), 0o600)
 	_, _, err = executePasswordVaultCommand(t, "vault", "init", "--json", "--password-file", tooLarge)
@@ -136,6 +141,23 @@ func TestVaultPasswordInputRejectsUnsafeFilesAndConflictingSources(t *testing.T)
 	_, _, err = executePasswordVaultCommand(t, "vault", "init", "--json", "--password-file", unsafe, "--password-stdin")
 	if err == nil || !strings.Contains(err.Error(), "choose --password-file or --password-stdin") || called {
 		t.Fatalf("conflicting password sources err=%v manager_called=%t", err, called)
+	}
+}
+
+func TestVaultRecoveryInputReadFailureRetainsCauseWithoutPath(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing-recovery-code")
+	replacement := filepath.Join(t.TempDir(), "replacement-code")
+	_, _, err := executePasswordVaultCommand(t, "vault", "recover", "--json", "--recovery-input-file", missing, "--password-stdin", "--recovery-file", replacement)
+	if err == nil || !errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), missing) {
+		t.Fatalf("missing recovery input lost its private cause or exposed its path: %v", err)
+	}
+	if _, statErr := os.Lstat(replacement); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("missing recovery input wrote replacement output: %v", statErr)
+	}
+	privateCause := errors.New("PRIVATE_PASSWORD_READER_FAILURE")
+	secret, readErr := readBoundedVaultSecret(environmentVariableErrorReader{cause: privateCause})
+	if secret != nil || !errors.Is(readErr, privateCause) || strings.Contains(readErr.Error(), "PRIVATE_PASSWORD_READER_FAILURE") {
+		t.Fatalf("password read failure lost its private cause or exposed its details: %v", readErr)
 	}
 }
 

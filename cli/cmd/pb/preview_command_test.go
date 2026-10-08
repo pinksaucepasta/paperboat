@@ -150,9 +150,9 @@ func TestPreviewForegroundPublishesCanonicalResourceOnlyAfterReadiness(t *testin
 			if body["access_mode"] != "public" {
 				t.Fatalf("create access_mode = %#v", body["access_mode"])
 			}
-			return previewCommandLease("prv_cli_1", "device_cli", body["owner_session_id"].(string), "http", "127.0.0.1:3000", "connecting"), `"ptv1:preview_lease:cHJ2X2NsaV8x:1"`, http.StatusOK
+			return previewCommandLease("prv_cli_1", "machine_cli", body["owner_session_id"].(string), "foreground", "http", "127.0.0.1:3000", "connecting"), `"ptv1:preview_lease:cHJ2X2NsaV8x:1"`, http.StatusOK
 		case http.MethodDelete + " /v1/previews/prv_cli_1":
-			value := previewCommandLease("prv_cli_1", "device_cli", "session_unused", "http", "127.0.0.1:3000", "stopped")
+			value := previewCommandLease("prv_cli_1", "machine_cli", "session_unused", "foreground", "http", "127.0.0.1:3000", "stopped")
 			value["allocation_state"] = "released"
 			value["edge_state"] = "down"
 			return value, `"ptv1:preview_lease:cHJ2X2NsaV8x:2"`, http.StatusOK
@@ -173,7 +173,7 @@ func TestPreviewForegroundPublishesCanonicalResourceOnlyAfterReadiness(t *testin
 		newPreviewCarrier = previousCarrier
 	})
 	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return client, nil }
-	previewMachineID = func() (string, error) { return "device_cli", nil }
+	previewMachineID = func() (string, error) { return "machine_cli", nil }
 	carrier := &cliPreviewCarrier{ready: make(chan struct{})}
 	newPreviewCarrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
 		return carrier, nil
@@ -235,12 +235,12 @@ func TestPreviewForegroundProductionOwnerLeaseBindsCreateAndReleasesOnExit(t *te
 		switch r.Method + " " + r.URL.Path {
 		case http.MethodPost + " /v1/previews":
 			owner, ok := body["owner_session_id"].(string)
-			if !ok || !strings.HasPrefix(owner, "owner_") {
+			if !ok || !strings.HasPrefix(owner, "session_") || body["owner_session_kind"] != "local_lease" {
 				t.Fatalf("create was not bound to a hostd-minted owner session: %#v", body["owner_session_id"])
 			}
-			return previewCommandLease("prv_owner_1", "device_cli", owner, "http", "127.0.0.1:3000", "connecting"), `"ptv1:preview_lease:cHJ2X293bmVyXzE:1"`, http.StatusOK
+			return previewCommandLease("prv_owner_1", "machine_cli", owner, "local_lease", "http", "127.0.0.1:3000", "connecting"), `"ptv1:preview_lease:cHJ2X293bmVyXzE:1"`, http.StatusOK
 		case http.MethodDelete + " /v1/previews/prv_owner_1":
-			value := previewCommandLease("prv_owner_1", "device_cli", "session_unused", "http", "127.0.0.1:3000", "stopped")
+			value := previewCommandLease("prv_owner_1", "machine_cli", "session_unused", "local_lease", "http", "127.0.0.1:3000", "stopped")
 			value["allocation_state"], value["edge_state"] = "released", "down"
 			return value, `"ptv1:preview_lease:cHJ2X293bmVyXzE:2"`, http.StatusOK
 		default:
@@ -250,12 +250,12 @@ func TestPreviewForegroundProductionOwnerLeaseBindsCreateAndReleasesOnExit(t *te
 	})
 	defer apiServer.Close()
 	runtimeDone := make(chan struct{})
-	registry, err := preview.NewRuntimeOwnerSessionRegistry(preview.RuntimeOwnerSessionRegistryConfig{MachineID: "device_cli", RuntimeDone: runtimeDone})
+	registry, err := preview.NewRuntimeOwnerSessionRegistry(preview.RuntimeOwnerSessionRegistryConfig{MachineID: "machine_cli", RuntimeDone: runtimeDone})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ownerHandler := &recordingOwnerLeaseHandler{}
-	ownerManager, err := preview.NewOwnerSessionLeaseManager(preview.OwnerSessionLeaseManagerConfig{MachineID: "device_cli", ControlToken: "control_secret", Registry: registry})
+	ownerManager, err := preview.NewOwnerSessionLeaseManager(preview.OwnerSessionLeaseManagerConfig{MachineID: "machine_cli", ControlToken: "control_secret", Registry: registry})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +280,7 @@ func TestPreviewForegroundProductionOwnerLeaseBindsCreateAndReleasesOnExit(t *te
 		_ = ownerManager.Close()
 	})
 	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return apiClient, nil }
-	previewMachineID = func() (string, error) { return "device_cli", nil }
+	previewMachineID = func() (string, error) { return "machine_cli", nil }
 	newPreviewCarrier = func(_ context.Context, _ preview.LeaseTarget, _, ownerID string) (preview.Carrier, error) {
 		if ownerID != "" {
 			t.Fatalf("production carrier received a CLI-generated owner ID %q", ownerID)
@@ -303,7 +303,7 @@ func TestPreviewForegroundProductionOwnerLeaseBindsCreateAndReleasesOnExit(t *te
 	case <-time.After(2 * time.Second):
 		t.Fatal("production carrier did not receive hostd owner session")
 	}
-	if ownerID == "" || !strings.HasPrefix(ownerID, "owner_") {
+	if ownerID == "" || !strings.HasPrefix(ownerID, "session_") {
 		t.Fatalf("owner session = %q", ownerID)
 	}
 	select {
@@ -348,17 +348,17 @@ func TestPreviewBackgroundReturnsAfterReadyAndLeavesOwnershipWithDaemon(t *testi
 		if err != nil || time.Until(deadline) < 29*time.Minute || time.Until(deadline) > 31*time.Minute {
 			t.Fatalf("default background deadline=%q err=%v", expires, err)
 		}
-		value := previewCommandLease("prv_background_1", "device_cli", owner, "http", "127.0.0.1:3000", "connecting")
+		value := previewCommandLease("prv_background_1", "machine_cli", owner, "local_lease", "http", "127.0.0.1:3000", "connecting")
 		value["lease_deadline"], value["user_deadline"] = expires, expires
 		return value, `"ptv1:preview_lease:cHJ2X2JhY2tncm91bmRfMQ:1"`, http.StatusOK
 	})
 	defer apiServer.Close()
-	registry, err := preview.NewRuntimeOwnerSessionRegistry(preview.RuntimeOwnerSessionRegistryConfig{MachineID: "device_cli", RuntimeDone: make(chan struct{})})
+	registry, err := preview.NewRuntimeOwnerSessionRegistry(preview.RuntimeOwnerSessionRegistryConfig{MachineID: "machine_cli", RuntimeDone: make(chan struct{})})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ownerHandler := &recordingOwnerLeaseHandler{}
-	ownerManager, err := preview.NewOwnerSessionLeaseManager(preview.OwnerSessionLeaseManagerConfig{MachineID: "device_cli", ControlToken: "control_secret", Registry: registry})
+	ownerManager, err := preview.NewOwnerSessionLeaseManager(preview.OwnerSessionLeaseManagerConfig{MachineID: "machine_cli", ControlToken: "control_secret", Registry: registry})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,7 +377,7 @@ func TestPreviewBackgroundReturnsAfterReadyAndLeavesOwnershipWithDaemon(t *testi
 		_ = ownerManager.Close()
 	})
 	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return apiClient, nil }
-	previewMachineID = func() (string, error) { return "device_cli", nil }
+	previewMachineID = func() (string, error) { return "machine_cli", nil }
 	newPreviewCarrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
 		return carrier, nil
 	}
@@ -412,12 +412,12 @@ func TestPreviewBackgroundStartupFailureCancelsAndReleasesDaemonOwnership(t *tes
 	})
 	defer apiServer.Close()
 	runtimeDone := make(chan struct{})
-	registry, err := preview.NewRuntimeOwnerSessionRegistry(preview.RuntimeOwnerSessionRegistryConfig{MachineID: "device_cli", RuntimeDone: runtimeDone})
+	registry, err := preview.NewRuntimeOwnerSessionRegistry(preview.RuntimeOwnerSessionRegistryConfig{MachineID: "machine_cli", RuntimeDone: runtimeDone})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ownerHandler := &recordingOwnerLeaseHandler{}
-	ownerManager, err := preview.NewOwnerSessionLeaseManager(preview.OwnerSessionLeaseManagerConfig{MachineID: "device_cli", ControlToken: "control_secret", Registry: registry, TTL: 3 * time.Second})
+	ownerManager, err := preview.NewOwnerSessionLeaseManager(preview.OwnerSessionLeaseManagerConfig{MachineID: "machine_cli", ControlToken: "control_secret", Registry: registry, TTL: 3 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,7 +442,7 @@ func TestPreviewBackgroundStartupFailureCancelsAndReleasesDaemonOwnership(t *tes
 		_ = ownerManager.Close()
 	})
 	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return apiClient, nil }
-	previewMachineID = func() (string, error) { return "device_cli", nil }
+	previewMachineID = func() (string, error) { return "machine_cli", nil }
 	newPreviewCarrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
 		return carrier, nil
 	}
@@ -459,14 +459,72 @@ func TestPreviewBackgroundStartupFailureCancelsAndReleasesDaemonOwnership(t *tes
 	}
 }
 
+func TestPreviewOriginFailureReleasesOwnerWithoutPublishing(t *testing.T) {
+	apiServer := newPreviewCommandServer(t, func(r *http.Request, _ map[string]any) (any, string, int) {
+		t.Errorf("origin failure published a resource: %s %s", r.Method, r.URL.Path)
+		return nil, "", http.StatusInternalServerError
+	})
+	defer apiServer.Close()
+	runtimeDone := make(chan struct{})
+	registry, err := preview.NewRuntimeOwnerSessionRegistry(preview.RuntimeOwnerSessionRegistryConfig{MachineID: "machine_cli", RuntimeDone: runtimeDone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerHandler := &recordingOwnerLeaseHandler{}
+	ownerManager, err := preview.NewOwnerSessionLeaseManager(preview.OwnerSessionLeaseManagerConfig{MachineID: "machine_cli", ControlToken: "control_secret", Registry: registry, TTL: 3 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerHandler.next = ownerManager
+	ownerServer := httptest.NewServer(ownerHandler)
+	defer ownerServer.Close()
+	ownerClient, err := preview.NewLocalOwnerSessionClient(ownerServer.URL, "control_secret", ownerServer.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	apiClient := api.New(apiServer.URL, config.Credential{AccessToken: "test-token"}, apiServer.Client())
+	carrier := &productionOwnerLeaseCarrier{ready: make(chan struct{}), owner: make(chan string, 1), originErr: errors.New("connection refused")}
+	previousClient := previewClientForCommand
+	previousMachine := previewMachineID
+	previousCarrier := newPreviewCarrier
+	previousOwnerClient := previewOwnerSessionClientForCommand
+	t.Cleanup(func() {
+		previewClientForCommand = previousClient
+		previewMachineID = previousMachine
+		newPreviewCarrier = previousCarrier
+		previewOwnerSessionClientForCommand = previousOwnerClient
+		_ = ownerManager.Close()
+	})
+	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return apiClient, nil }
+	previewMachineID = func() (string, error) { return "machine_cli", nil }
+	newPreviewCarrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
+		return carrier, nil
+	}
+	previewOwnerSessionClientForCommand = func() (*preview.LocalOwnerSessionClient, error) { return ownerClient, nil }
+	command := previewCobraCommandV1()
+	command.SetOut(io.Discard)
+	var progress bytes.Buffer
+	command.SetErr(&progress)
+	command.SetArgs([]string{"3000", "--background", "--ttl", "30m"})
+	if err := command.ExecuteContext(context.Background()); !errors.Is(err, ErrPreviewOriginUnavailable) || !strings.Contains(err.Error(), "No preview was published") {
+		t.Fatalf("origin error = %v", err)
+	}
+	if !strings.Contains(progress.String(), "Preparing preview") {
+		t.Fatalf("missing startup progress: %q", progress.String())
+	}
+	if ownerHandler.count(http.MethodPost) != 1 || ownerHandler.count(http.MethodDelete) != 1 {
+		t.Fatalf("local owner lease calls = %v", ownerHandler.methods())
+	}
+}
+
 func TestPreviewForegroundProductionOwnerLeaseHeartbeatFailureCancels(t *testing.T) {
 	apiServer := newPreviewCommandServer(t, func(r *http.Request, body map[string]any) (any, string, int) {
 		switch r.Method + " " + r.URL.Path {
 		case http.MethodPost + " /v1/previews":
 			owner := body["owner_session_id"].(string)
-			return previewCommandLease("prv_owner_2", "device_cli", owner, "http", "127.0.0.1:3000", "connecting"), `"ptv1:preview_lease:cHJ2X293bmVyXzI:1"`, http.StatusOK
+			return previewCommandLease("prv_owner_2", "machine_cli", owner, "local_lease", "http", "127.0.0.1:3000", "connecting"), `"ptv1:preview_lease:cHJ2X293bmVyXzI:1"`, http.StatusOK
 		case http.MethodDelete + " /v1/previews/prv_owner_2":
-			value := previewCommandLease("prv_owner_2", "device_cli", "session_unused", "http", "127.0.0.1:3000", "stopped")
+			value := previewCommandLease("prv_owner_2", "machine_cli", "session_unused", "local_lease", "http", "127.0.0.1:3000", "stopped")
 			value["allocation_state"], value["edge_state"] = "released", "down"
 			return value, `"ptv1:preview_lease:cHJ2X293bmVyXzI:2"`, http.StatusOK
 		default:
@@ -476,12 +534,12 @@ func TestPreviewForegroundProductionOwnerLeaseHeartbeatFailureCancels(t *testing
 	})
 	defer apiServer.Close()
 	runtimeDone := make(chan struct{})
-	registry, err := preview.NewRuntimeOwnerSessionRegistry(preview.RuntimeOwnerSessionRegistryConfig{MachineID: "device_cli", RuntimeDone: runtimeDone})
+	registry, err := preview.NewRuntimeOwnerSessionRegistry(preview.RuntimeOwnerSessionRegistryConfig{MachineID: "machine_cli", RuntimeDone: runtimeDone})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ownerHandler := &recordingOwnerLeaseHandler{}
-	ownerManager, err := preview.NewOwnerSessionLeaseManager(preview.OwnerSessionLeaseManagerConfig{MachineID: "device_cli", ControlToken: "control_secret", Registry: registry, TTL: 3 * time.Second})
+	ownerManager, err := preview.NewOwnerSessionLeaseManager(preview.OwnerSessionLeaseManagerConfig{MachineID: "machine_cli", ControlToken: "control_secret", Registry: registry, TTL: 3 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -508,7 +566,7 @@ func TestPreviewForegroundProductionOwnerLeaseHeartbeatFailureCancels(t *testing
 		_ = ownerManager.Close()
 	})
 	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return apiClient, nil }
-	previewMachineID = func() (string, error) { return "device_cli", nil }
+	previewMachineID = func() (string, error) { return "machine_cli", nil }
 	newPreviewCarrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
 		return carrier, nil
 	}
@@ -539,7 +597,7 @@ func TestPreviewForegroundProductionOwnerLeaseHeartbeatFailureCancels(t *testing
 
 func TestPreviewListAndStopUseCanonicalLeaseClient(t *testing.T) {
 	server := newPreviewCommandServer(t, func(r *http.Request, _ map[string]any) (any, string, int) {
-		lease := previewCommandLease("prv_cli_2", "device_cli", "session_cli", "https", "localhost:8443", "ready")
+		lease := previewCommandLease("prv_cli_2", "machine_cli", "session_cli", "foreground", "https", "localhost:8443", "ready")
 		switch r.Method + " " + r.URL.Path {
 		case http.MethodGet + " /v1/previews":
 			if r.URL.Query().Get("limit") != "100" {
@@ -597,15 +655,20 @@ type cliPreviewCarrier struct {
 }
 
 type productionOwnerLeaseCarrier struct {
-	ready chan struct{}
-	owner chan string
-	once  sync.Once
+	originErr error
+	ready     chan struct{}
+	owner     chan string
+	once      sync.Once
 }
 
 type backgroundOwnerLeaseCarrier struct{ productionOwnerLeaseCarrier }
 
 func (*backgroundOwnerLeaseCarrier) LeaseLifecycleOwnership() preview.LeaseLifecycleOwnership {
 	return preview.LeaseLifecycleObserved
+}
+
+func (c *productionOwnerLeaseCarrier) CheckOrigin(context.Context, preview.LeaseTarget) error {
+	return c.originErr
 }
 
 func (*productionOwnerLeaseCarrier) NeedsOwnerSessionLease() bool { return true }
@@ -744,11 +807,11 @@ func newPreviewCommandServer(t *testing.T, handler func(*http.Request, map[strin
 	}))
 }
 
-func previewCommandLease(id, device, session, scheme, address, state string) map[string]any {
+func previewCommandLease(id, machine, session, ownerSessionKind, scheme, address, state string) map[string]any {
 	now := time.Now().UTC()
 	return map[string]any{
 		"schema": api.PreviewTunnelSchemaV1, "kind": "preview_lease", "id": id, "account_id": "acct_cli", "actor_id": "actor_cli",
-		"owner_device_id": device, "owner_session_id": session, "target": map[string]string{"scheme": scheme, "address": address},
+		"owner_machine_id": machine, "owner_session_id": session, "owner_session_kind": ownerSessionKind, "target": map[string]string{"scheme": scheme, "address": address},
 		"access_mode": "public", "persistent": false, "endpoint": "https://quiet-river-7.preview.example.test", "lease_deadline": now.Add(time.Hour),
 		"state": state, "allocation_state": map[bool]string{true: "ready", false: "pending"}[state == "ready"], "edge_state": map[bool]string{true: "ready", false: "pending"}[state == "ready"],
 		"origin_state": map[bool]string{true: "ready", false: "unknown"}[state == "ready"], "created_at": now, "last_renewed_at": now,

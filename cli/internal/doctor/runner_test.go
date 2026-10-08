@@ -2,9 +2,29 @@ package doctor
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestInvalidProbeDoesNotStartEarlierWorkAndCorrelationKeepsCause(t *testing.T) {
+	var started atomic.Bool
+	config := Config{Timeout: time.Second, ProbeTimeout: time.Second, Clock: time.Now, Correlation: func() (string, error) { return "doctor_test", nil }}
+	_, err := Run(t.Context(), config, nil, []Probe{
+		{Code: "valid", Run: func(context.Context) Check { started.Store(true); return Check{} }},
+		{Code: "invalid", Run: nil},
+	})
+	if err == nil || started.Load() {
+		t.Fatal("invalid input launched partial diagnostic work")
+	}
+	cause := errors.New("PRIVATE_RANDOM_SOURCE")
+	config.Correlation = func() (string, error) { return "", cause }
+	_, err = Run(t.Context(), config, nil, []Probe{{Code: "valid", Run: func(context.Context) Check { return Check{} }}})
+	if !errors.Is(err, cause) || err.Error() != "create doctor correlation" {
+		t.Fatal("correlation failure lost its original cause or exposed its message")
+	}
+}
 
 func TestRunIsConcurrentBoundedAndDeterministic(t *testing.T) {
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)

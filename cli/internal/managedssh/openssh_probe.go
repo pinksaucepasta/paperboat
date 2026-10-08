@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -30,7 +29,8 @@ func (c OpenSSHCapabilities) Ready() bool {
 	return c.Executable != "" && c.Include && c.ProxyCommand && c.IdentityAgent && c.KnownHostsCommand
 }
 
-func ProbeOpenSSH(ctx context.Context, executable string, timeout time.Duration) (OpenSSHCapabilities, error) {
+func ProbeOpenSSH(ctx context.Context, executable string, timeout time.Duration) (capabilities OpenSSHCapabilities, resultErr error) {
+	defer func() { resultErr = managedSSHBoundary("command", resultErr) }()
 	if ctx == nil || timeout <= 0 || timeout > 30*time.Second {
 		return OpenSSHCapabilities{}, ErrOpenSSHUnavailable
 	}
@@ -56,12 +56,15 @@ func ProbeOpenSSH(ctx context.Context, executable string, timeout time.Duration)
 	defer os.RemoveAll(directory)
 	probeEnvironment := isolatedOpenSSHProbeEnvironment(directory)
 
-	capabilities := OpenSSHCapabilities{Executable: resolved}
+	capabilities = OpenSSHCapabilities{Executable: resolved}
 	versionCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	versionOutput, err := runOpenSSHProbeEnv(versionCtx, probeEnvironment, resolved, "-V")
 	cancel()
 	if err != nil {
-		return OpenSSHCapabilities{}, fmt.Errorf("%w: %v", ErrOpenSSHUnavailable, err)
+		if ctx.Err() != nil {
+			return OpenSSHCapabilities{}, managedSSHContextError(ctx)
+		}
+		return OpenSSHCapabilities{}, managedSSHFailure("command", ErrOpenSSHUnavailable, err)
 	}
 	capabilities.Version = strings.Join(strings.Fields(versionOutput), " ")
 	if len(capabilities.Version) > 512 {
@@ -83,7 +86,10 @@ func ProbeOpenSSH(ctx context.Context, executable string, timeout time.Duration)
 	if probeErr != nil {
 		var exitErr *exec.ExitError
 		if !errors.As(probeErr, &exitErr) {
-			return OpenSSHCapabilities{}, probeErr
+			if ctx.Err() != nil {
+				return OpenSSHCapabilities{}, managedSSHContextError(ctx)
+			}
+			return OpenSSHCapabilities{}, managedSSHFailure("command", ErrOpenSSHUnavailable, probeErr)
 		}
 		return capabilities, nil
 	}
@@ -109,7 +115,7 @@ func runOpenSSHProbeEnv(ctx context.Context, environment []string, executable st
 		command.Env = append([]string(nil), environment...)
 	}
 	// Windows OpenSSH hangs on -G when stdin is a Go-managed anonymous pipe,
-	// even after the empty pipe is closed. An explicit null-device handle keeps
+	// even after the empty pipe is closed. An explicit null-machine handle keeps
 	// the probe non-interactive without inheriting a user's terminal or input.
 	stdin, err := os.Open(os.DevNull)
 	if err != nil {
@@ -121,7 +127,7 @@ func runOpenSSHProbeEnv(ctx context.Context, environment []string, executable st
 	command.Stdout, command.Stderr = output, output
 	err = runOpenSSHProbeCommand(ctx, command)
 	if ctx.Err() != nil {
-		return output.String(), context.Cause(ctx)
+		return output.String(), managedSSHContextError(ctx)
 	}
 	return output.String(), err
 }

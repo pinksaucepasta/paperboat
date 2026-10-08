@@ -19,7 +19,7 @@ type redactionRule struct {
 	replacement string
 }
 
-var safeStringRedactions = []redactionRule{
+var secretStringRedactions = []redactionRule{
 	{regexp.MustCompile(`(?is)-----BEGIN (?:[A-Z0-9 ]* )?PRIVATE KEY-----.*?-----END (?:[A-Z0-9 ]* )?PRIVATE KEY-----`), RedactedValue},
 	{regexp.MustCompile(`(?im)^\s*(?:authorization|proxy-authorization|cookie|set-cookie)\s*:\s*.*$`), RedactedValue},
 	{regexp.MustCompile(`(?i)\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+`), RedactedValue},
@@ -30,12 +30,15 @@ var safeStringRedactions = []redactionRule{
 	{regexp.MustCompile(`\bgh[opusr]_[A-Za-z0-9]{20,}\b`), RedactedValue},
 	{regexp.MustCompile(`\bxox[baprs]-[A-Za-z0-9-]{10,}\b`), RedactedValue},
 	{regexp.MustCompile(`\bsk_(?:live|test)_[A-Za-z0-9]{16,}\b`), RedactedValue},
+}
+
+var safeStringRedactions = append(secretStringRedactions, []redactionRule{
 	{regexp.MustCompile(`(?i)\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b`), RedactedValue},
 	{regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://[^\s]+`), RedactedValue},
 	{regexp.MustCompile(`(?i)(?:/Users/|/home/|[A-Z]:\\Users\\)[^\s,;]+`), RedactedValue},
-	{regexp.MustCompile(`\b(?:account|actor|assignment|certificate|connector|correlation|device|domain|edge|host|operation|request|route|session|tunnel)_[A-Za-z0-9_.:-]+\b`), RedactedValue},
+	{regexp.MustCompile(`\b(?:account|actor|assignment|certificate|connector|correlation|machine|domain|edge|host|operation|request|route|session|tunnel)_[A-Za-z0-9_.:-]+\b`), RedactedValue},
 	{regexp.MustCompile(`(?i)\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b`), RedactedValue},
-}
+}...)
 
 // Redact returns a bounded, printable, secret-safe form of value. It never
 // returns an error, so it is safe for last-resort logging paths.
@@ -90,4 +93,33 @@ func cloneTime(value *time.Time) *time.Time {
 	}
 	copy := *value
 	return &copy
+}
+
+// SafeOpaqueID validates bounded identity fields without interpreting their
+// spelling as a resource type. Free text and recognizable credential material
+// must never become durable telemetry identity.
+func SafeOpaqueID(value string) bool {
+	if len(value) < 3 || len(value) > 128 {
+		return false
+	}
+	for _, c := range value {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
+			return false
+		}
+	}
+	lower := strings.ToLower(value)
+	if strings.HasPrefix(lower, "pbce_") || strings.HasPrefix(lower, "pbnative_") {
+		return false
+	}
+	for _, marker := range []string{"bearer", "password", "passwd", "secret", "token", "credential", "private_key", "api_key", "client_secret"} {
+		if strings.Contains(lower, marker) {
+			return false
+		}
+	}
+	for _, rule := range secretStringRedactions {
+		if rule.pattern.MatchString(value) {
+			return false
+		}
+	}
+	return true
 }

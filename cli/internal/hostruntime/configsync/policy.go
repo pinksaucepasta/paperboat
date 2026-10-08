@@ -2,6 +2,7 @@ package configsync
 
 import (
 	"errors"
+	pathpkg "path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -12,7 +13,7 @@ import (
 var ErrPolicyInvalid = errors.New("invalid config sync policy")
 
 var requiredMandatoryExclusions = []string{
-	".git", "**/.git", ".paperboat", "**/.paperboat",
+	".paperboat-*", "**/.paperboat-*", ".git", "**/.git", ".paperboat", "**/.paperboat",
 	".config/paperboat", ".config/paperboat/**",
 	".local/bin/pb",
 	".config/systemd/user/paperboat-runtime-host.service",
@@ -28,7 +29,7 @@ var requiredMandatoryExclusions = []string{
 func validateRuntimeDescriptor(descriptor RuntimeDescriptor, credential Credential) error {
 	policy := descriptor.Policy
 	if (descriptor.WriteMode != "read_only" && descriptor.WriteMode != "leased_writes") || !descriptor.Mode.Valid() ||
-		descriptor.RepositoryID == "" || descriptor.AssignmentID != credential.AssignmentID ||
+		descriptor.AssignmentVersion < 1 || descriptor.AssignmentVersion != credential.AssignmentVersion || descriptor.RepositoryID == "" || descriptor.AssignmentID != credential.AssignmentID ||
 		((descriptor.PullRepositoryID != "" || descriptor.PushRepositoryID != "") &&
 			((descriptor.Mode != ModePushOnly && descriptor.PullRepositoryID == "") ||
 				(descriptor.Mode != ModePullOnly && descriptor.PushRepositoryID == ""))) ||
@@ -49,24 +50,29 @@ func validateRuntimeDescriptor(descriptor RuntimeDescriptor, credential Credenti
 		!validManifestLimits(policy.ManifestLimits()) {
 		return ErrPolicyInvalid
 	}
+	for _, root := range policy.AbsoluteRuntimeExclusionRoots {
+		if !canonicalAbsolutePath(root) {
+			return ErrPolicyInvalid
+		}
+	}
 	return nil
 }
 
 func mandatoryExcluded(path string, policy RuntimePolicy) bool {
-	path = filepath.ToSlash(filepath.Clean(path))
+	path = strings.ToLower(filepath.ToSlash(filepath.Clean(path)))
 	if path == "." || strings.HasPrefix(path, "../") || strings.HasPrefix(path, "/") {
 		return true
 	}
 	for _, root := range policy.RuntimeExclusionRoots {
-		root = filepath.ToSlash(filepath.Clean(root))
+		root = strings.ToLower(filepath.ToSlash(filepath.Clean(root)))
 		if root != "." && root != ".." && !strings.HasPrefix(root, "../") &&
 			(path == root || strings.HasPrefix(path, root+"/")) {
 			return true
 		}
 	}
 	for _, pattern := range requiredMandatoryExclusions {
-		for candidate := path; candidate != "."; candidate = filepath.ToSlash(filepath.Dir(candidate)) {
-			if matched, err := doublestar.Match(pattern, candidate); err == nil && matched {
+		for candidate := path; candidate != "."; candidate = pathpkg.Dir(candidate) {
+			if matched, err := doublestar.Match(strings.ToLower(pattern), candidate); err == nil && matched {
 				return true
 			}
 		}

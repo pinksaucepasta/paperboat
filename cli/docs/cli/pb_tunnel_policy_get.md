@@ -8,7 +8,7 @@ Show an on-demand port policy
 
 Show one on-demand port policy, including its target and authorization state. Use its identity and generation for a deliberate revoke.
 
-An on-demand policy authorizes an exact machine port for private or team access. A policy does not publish a public URL or grant every port on the device. Revocation fences subsequent activation.
+An on-demand policy authorizes an exact machine port for private or team access. A policy does not publish a public URL or grant every port on the machine. Revocation fences subsequent activation.
 
 JSON output is supported with --json.
 
@@ -30,6 +30,7 @@ pb tunnel policy get <policy> [flags]
       --ephemeral          use the temporary preview lifecycle
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO

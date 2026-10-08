@@ -3,11 +3,16 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/http/httptrace"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type timeoutError string
@@ -33,7 +38,8 @@ func TestTLSHandshakeRetryTransportRetriesReplayableRequest(t *testing.T) {
 			}
 			bodies = append(bodies, string(body))
 			if calls == 1 {
-				return nil, timeoutError("net/http: TLS handshake timeout")
+				httptrace.ContextClientTrace(req.Context()).TLSHandshakeDone(tls.ConnectionState{}, timeoutError("timeout"))
+				return nil, timeoutError("timeout")
 			}
 			return &http.Response{
 				StatusCode: http.StatusOK,
@@ -125,5 +131,53 @@ func TestTLSHandshakeRetryTransportDoesNotRetryPOSTHeaderTimeout(t *testing.T) {
 	_, err = transport.RoundTrip(req)
 	if err == nil || calls != 1 {
 		t.Fatalf("err = %v, calls = %d; want one attempt", err, calls)
+	}
+}
+
+func TestMutationTimeoutTextCannotAuthorizeRetry(t *testing.T) {
+	calls := 0
+	transport := &tlsHandshakeRetryTransport{attempts: 3, base: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, timeoutError("net/http: TLS handshake timeout")
+	})}
+	req, _ := http.NewRequest(http.MethodPost, "https://control.invalid/v1/mutation", nil)
+	_, err := transport.RoundTrip(req)
+	if err == nil || calls != 1 {
+		t.Fatalf("unproven mutation replay: calls=%d", calls)
+	}
+}
+
+func TestActualTLSHandshakeTimeoutRecoversWithoutReplayingMutation(t *testing.T) {
+	var handshakes, requests atomic.Int32
+	release := make(chan struct{})
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != "exact-mutation" {
+			t.Error("request body changed")
+		}
+		w.WriteHeader(204)
+	}))
+	server.TLS = &tls.Config{GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
+		if handshakes.Add(1) == 1 {
+			<-release
+		}
+		return nil, nil
+	}}
+	server.StartTLS()
+	defer server.Close()
+	defer close(release)
+	base := server.Client().Transport.(*http.Transport).Clone()
+	base.TLSHandshakeTimeout = 20 * time.Millisecond
+	defer base.CloseIdleConnections()
+	transport := &tlsHandshakeRetryTransport{attempts: 2, base: base}
+	req, _ := http.NewRequest(http.MethodPost, server.URL, strings.NewReader("exact-mutation"))
+	response, err := transport.RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if requests.Load() != 1 || handshakes.Load() != 2 {
+		t.Fatalf("TLS recovery requests=%d handshakes=%d", requests.Load(), handshakes.Load())
 	}
 }

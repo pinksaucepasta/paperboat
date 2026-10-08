@@ -9,13 +9,15 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"net/netip"
 	"path/filepath"
 	"sync"
 	"time"
 
 	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/bandwidth"
 	clientconfig "github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesession"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
@@ -26,6 +28,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=optional-authorized-relay-region
 	"tailscale.com/tailcfg"
 )
@@ -44,6 +47,7 @@ type productionNativePeerConfig struct {
 	privateDial                              server.NativePrivateTCPDial
 	inspector                                http.Handler
 	inspectorStore                           *inspector.Store
+	usage                                    *bandwidth.Recorder
 }
 
 type productionNativePeerService struct {
@@ -73,6 +77,13 @@ const productionNativePeerRestartDelay = time.Second
 const productionNativePrivateCurrentInterval = time.Second
 
 var errNativePeerPending = errors.New("machine endpoint certificate is pending")
+
+type nativePeerListenerError struct{ cause error }
+
+func (e nativePeerListenerError) Error() string         { return "native peer listener could not start" }
+func (e nativePeerListenerError) Unwrap() error         { return e.cause }
+func (nativePeerListenerError) DiagnosticStage() string { return "listener_bind" }
+func (nativePeerListenerError) DiagnosticCode() string  { return "native_private_failed" }
 
 type productionNativePrivateValidator func(context.Context, nativeprivate.Binding) error
 
@@ -156,9 +167,7 @@ func (s *productionNativePeerService) Start(ctx context.Context) error {
 	generation, err := s.startGeneration(runCtx)
 	if err != nil {
 		if runCtx.Err() == nil && transientNativePeerStart(err) {
-			s.mu.Lock()
-			s.lastErr = err
-			s.mu.Unlock()
+			s.recordPeerState(runCtx, err)
 			// Keep initial control or approval failure under the same bounded
 			// supervisor as later failures. No listener exists until admission passes.
 			go s.supervise(runCtx, nil)
@@ -245,16 +254,31 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 		_ = authority.Close()
 		return nil, err
 	}
-	if err := authority.ConfigureDeviceRelay(deviceRelayAddresses(41642)); err != nil {
-		_ = authority.Close()
-		return nil, errors.Join(ErrProductionInvalid, errors.New("device peer relay requires a usable unicast network address on UDP port 41642"), err)
-	}
 	regions, err := authority.ConfigureRegionalRelays(relayTLS)
 	if err != nil {
 		_ = authority.Close()
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
-	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, RefreshAuthority: func(refreshCtx context.Context) error {
+	usage := s.config.usage
+	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, MeterIncoming: func(conn net.Conn, binding native.MeterBinding) net.Conn {
+		return usage.Wrap(conn, bandwidth.Binding{AccessSessionID: binding.AccessSessionID, StreamID: binding.StreamID, Consumer: binding.Consumer, Reverse: binding.Reverse}, func(direction string) bandwidth.Path {
+			mode, node := binding.Path(direction)
+			return bandwidth.Path{Mode: mode, NodeID: node}
+		})
+	}, Observe: func(event native.Event) {
+		if event.Err == nil || ctx.Err() != nil {
+			return
+		}
+		switch event.Kind {
+		case "accept_failed":
+			// These workers have no foreground caller to own their final failure.
+			errorreport.Current().CaptureFailure(ctx, "paperboat-daemon", "peer_stream", "peer_connect", "native_private_failed", event.Err)
+		case "serve_failed":
+			errorreport.Current().CaptureFailure(ctx, "paperboat-daemon", "peer_stream", "lifecycle", "service_failed", event.Err)
+		case "dial_failed":
+			errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "peer_stream", "peer_connect", "native_private_failed", event.Err)
+		}
+	}, RefreshAuthority: func(refreshCtx context.Context) error {
 		request, cancel := context.WithTimeout(refreshCtx, 15*time.Second)
 		defer cancel()
 		return authority.Refresh(request, control)
@@ -263,7 +287,13 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 		_ = authority.Close()
 		return nil, err
 	}
-	appsConfig := nativesession.Config{Authorize: s.inspectorNetworkAuthorizer(), ServeTransfer: func(serveCtx context.Context, connection net.Conn) error {
+	appsConfig := nativesession.Config{Authorize: s.inspectorNetworkAuthorizer(), ObserveFailure: func(serveCtx context.Context, kind nativesession.FailureKind, err error) {
+		stage, code := "lifecycle", "service_failed"
+		if kind == nativesession.FailureTransfer {
+			stage, code = "delivery", "file_transfer_failed"
+		}
+		errorreport.Current().CaptureFailure(serveCtx, "paperboat-daemon", "peer_stream", stage, code, err)
+	}, ServeTransfer: func(serveCtx context.Context, connection net.Conn) error {
 		return server.ServeHTTPConnection(serveCtx, connection, s.config.transfer)
 	}, ServeStream: s.serveStream}
 	if s.config.privateCurrent != nil && s.config.privateDial != nil {
@@ -273,16 +303,14 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 	}
 	apps, err := nativesession.New(appsConfig)
 	if err != nil {
-		_ = owner.Close()
-		return nil, err
+		return nil, errors.Join(err, owner.Close())
 	}
 	var firstRegion *tailcfg.DERPRegion
 	if len(regions) != 0 {
 		firstRegion = regions[0]
 	}
 	if _, err := authority.Listen(firstRegion); err != nil {
-		_ = owner.Close()
-		return nil, err
+		return nil, nativePeerListenerError{cause: errors.Join(err, owner.Close())}
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	generation := &productionNativePeerGeneration{cancel: cancel, owner: owner, apps: apps, errors: make(chan error, 2), identityFingerprint: certificate.Fingerprint(), authority: authority, control: control}
@@ -293,37 +321,27 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 	}()
 	go func() {
 		defer generation.done.Done()
-		generation.errors <- owner.Listen(runCtx, firstRegion, apps.Serve)
+		generation.errors <- owner.Listen(runCtx, firstRegion, func(serveCtx context.Context, session *native.Session) error {
+			return apps.Serve(nativePeerApplicationContext(serveCtx, ctx), session)
+		})
 	}()
 	return generation, nil
 }
 
-func (s *productionNativePeerService) ReconcilePeerRelay(ctx context.Context, _ bool) error {
-	s.mu.Lock()
-	generation := s.current
-	s.mu.Unlock()
-	if generation == nil || generation.authority == nil || generation.control == nil {
-		return ErrProductionInvalid
-	}
-	request, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	return generation.authority.Refresh(request, generation.control)
-}
-
-func deviceRelayAddresses(port uint16) []netip.AddrPort {
-	addresses, _ := net.InterfaceAddrs()
-	result := make([]netip.AddrPort, 0, 4)
-	for _, value := range addresses {
-		prefix, err := netip.ParsePrefix(value.String())
-		if err != nil || !prefix.Addr().IsValid() || prefix.Addr().IsLoopback() || prefix.Addr().IsUnspecified() || prefix.Addr().IsMulticast() {
-			continue
-		}
-		result = append(result, netip.AddrPortFrom(prefix.Addr().Unmap(), port))
-		if len(result) == 4 {
-			break
+// The native owner supplies its own cancellation lifetime. Lend the daemon's
+// diagnostic metadata without replacing that lifetime or closing its recorder.
+func nativePeerApplicationContext(serveCtx, daemonCtx context.Context) context.Context {
+	if diagnostics.FromContext(serveCtx) == nil {
+		if local := diagnostics.FromContext(daemonCtx); local != nil {
+			serveCtx = diagnostics.WithRecorder(serveCtx, local)
 		}
 	}
-	return result
+	if supportref.FromContext(serveCtx) == "" {
+		if reference := supportref.FromContext(daemonCtx); reference != "" {
+			serveCtx = supportref.WithContext(serveCtx, reference)
+		}
+	}
+	return serveCtx
 }
 
 func (g *productionNativePeerGeneration) stop() error {
@@ -339,6 +357,7 @@ func (g *productionNativePeerGeneration) stop() error {
 		if g.apps != nil {
 			g.apps.Wait()
 		}
+
 	})
 	return result
 }
@@ -370,13 +389,11 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 			case <-ticker.C:
 			}
 			next, err := s.startGeneration(ctx)
+			s.recordPeerState(ctx, err)
 			s.mu.Lock()
 			if err == nil {
 				generation = next
 				s.current = next
-				s.lastErr = nil
-			} else {
-				s.lastErr = err
 			}
 			s.mu.Unlock()
 		}
@@ -389,10 +406,14 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 			if ctx.Err() != nil {
 				return
 			}
-			s.mu.Lock()
-			s.lastErr = err
-			s.mu.Unlock()
+			if err == nil {
+				err = errors.New("native peer worker stopped unexpectedly")
+			}
+			s.recordPeerState(ctx, err)
 			stopErr := generation.stop()
+			if stopErr != nil {
+				errorreport.Current().CaptureFailure(ctx, "paperboat-daemon", "peer_identity", "component_shutdown", "service_failed", stopErr)
+			}
 			s.mu.Lock()
 			s.lastErr = errors.Join(s.lastErr, stopErr)
 			s.mu.Unlock()
@@ -403,11 +424,17 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 			}
 			if err == nil {
 				err = errors.New("native endpoint identity changed")
+				s.recordPeerEvent(ctx, "identity_renewed")
+			} else {
+				s.recordPeerState(ctx, err)
 			}
 			s.mu.Lock()
 			s.lastErr = err
 			s.mu.Unlock()
 			stopErr := generation.stop()
+			if stopErr != nil {
+				errorreport.Current().CaptureFailure(ctx, "paperboat-daemon", "peer_identity", "component_shutdown", "service_failed", stopErr)
+			}
 			s.mu.Lock()
 			s.lastErr = errors.Join(s.lastErr, stopErr)
 			s.mu.Unlock()
@@ -421,6 +448,7 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 		}
 		for {
 			next, err := s.startGeneration(ctx)
+			s.recordPeerState(ctx, err)
 			if err == nil {
 				generation = next
 				s.mu.Lock()
@@ -429,9 +457,6 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 				s.mu.Unlock()
 				break
 			}
-			s.mu.Lock()
-			s.lastErr = err
-			s.mu.Unlock()
 			timer.Reset(productionNativePeerRestartDelay)
 			select {
 			case <-ctx.Done():
@@ -440,6 +465,51 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 			case <-timer.C:
 			}
 		}
+	}
+}
+
+// Publish transitions rather than every retry. The retained error remains the
+// original typed cause; diagnostic comparison uses only bounded safe metadata.
+func (s *productionNativePeerService) recordPeerState(ctx context.Context, err error) {
+	s.mu.Lock()
+	previous := s.lastErr
+	s.lastErr = err
+	s.mu.Unlock()
+	if ctx.Err() != nil {
+		return
+	}
+	if err == nil {
+		if previous != nil {
+			s.recordPeerEvent(ctx, "recovered")
+		}
+		return
+	}
+	if errors.Is(err, errNativePeerPending) {
+		if !errors.Is(previous, errNativePeerPending) {
+			s.recordPeerEvent(ctx, "approval_pending")
+		}
+		return
+	}
+	fault := errorreport.ProjectFault(ctx, "paperboat-daemon", "peer_identity", "peer_authority", "peer_authority_failed", err)
+	if previous != nil && !errors.Is(previous, errNativePeerPending) {
+		prior := errorreport.ProjectFault(ctx, "paperboat-daemon", "peer_identity", "peer_authority", "peer_authority_failed", previous)
+		if fault.Stage == prior.Stage && fault.Code == prior.Code && fault.Cause == prior.Cause && fault.Errno == prior.Errno && fault.HTTPStatus == prior.HTTPStatus {
+			return
+		}
+	}
+	errorreport.Current().CaptureFailure(ctx, "paperboat-daemon", "peer_identity", "peer_authority", "peer_authority_failed", err)
+}
+
+func (s *productionNativePeerService) recordPeerEvent(ctx context.Context, code string) {
+	outcome := "success"
+	if code == "approval_pending" {
+		outcome = "rejected"
+	}
+	errorreport.Current().Lifecycle(ctx, "access", "peer_identity", code, outcome)
+	if local := diagnostics.FromContext(ctx); local != nil {
+		_ = local.RecordWithSupportReference("peer_authority", code, "info", supportref.FromContext(ctx), map[string]string{
+			"component": "paperboat-daemon", "operation": "peer_identity",
+		})
 	}
 }
 
@@ -470,7 +540,7 @@ func (s *productionNativePeerService) serveStream(ctx context.Context, header st
 	switch header.Consumer {
 	case "inspector":
 		return s.serveInspector(ctx, header, stream)
-	case "terminal", "exec":
+	case "terminal", "exec", "config_compare":
 		return s.config.serve(stream)
 	case "ssh":
 		if s.config.ssh == nil {

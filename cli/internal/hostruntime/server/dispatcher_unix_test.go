@@ -8,16 +8,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
-	"io"
-	"net"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
-	"testing"
-	"time"
-
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
@@ -26,6 +16,14 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+	"io"
+	"net"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
 )
 
 type testSessionLauncher struct {
@@ -259,6 +257,51 @@ func TestSSHDispatcherBridgesOpaqueBytesAndEOF(t *testing.T) {
 	}
 }
 
+func TestSSHStreamPreservesBridgeDiagnosticCause(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := uint16(listener.Addr().(*net.TCPAddr).Port)
+	host, err := managedssh.NewHost(managedssh.HostConfig{MaxStreams: 1, ProbeTimeout: time.Second, DialTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := host.ReconcileTarget(context.Background(), 9, port); err != nil {
+		t.Fatal(err)
+	}
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	dispatcher, _ := execDispatcher(t)
+	dispatcher.config.SSH = host
+	authorization := Authorization{ClientID: "cli_1"}
+	payload := json.RawMessage(`{"operation_id":"operation_ssh_failure","generation":9}`)
+	outcome := dispatcher.HandleOperation(context.Background(), authorization, "ssh.v1", "operation_ssh_failure", payload)
+	if outcome.ErrorCode != "" {
+		t.Fatalf("outcome=%#v", outcome)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	stream, opened, err := dispatcher.OpenStream(ctx, authorization, "ssh.v1", payload, outcome, false)
+	if err != nil || !opened {
+		t.Fatalf("opened=%v err=%v", opened, err)
+	}
+	defer stream.Close()
+	_, err = stream.Next(ctx)
+	if err == nil {
+		t.Fatal("failed SSH bridge returned a successful stream result")
+	}
+	var staged interface{ DiagnosticStage() string }
+	var coded interface{ DiagnosticCode() string }
+	if !errors.As(err, &staged) || staged.DiagnosticStage() != "target_connect" ||
+		!errors.As(err, &coded) || coded.DiagnosticCode() != "managed_ssh_failed" ||
+		!errors.Is(err, managedssh.ErrSSHTargetUnavailable) {
+		t.Fatalf("stream failure lost its typed cause: %T %v", err, err)
+	}
+}
+
 func TestExecDispatcherResumesFromJournalSequenceWithoutOutputReplay(t *testing.T) {
 	dispatcher, root := execDispatcher(t)
 	authorization := Authorization{ClientID: "cli_1"}
@@ -384,7 +427,7 @@ func verticalServerCommand(t *testing.T, shellArgs []string) *Server {
 	}
 	journal, _ := operation.NewJournal(32)
 	server, err := New(Config{
-		Negotiator: protocol.Negotiator{Profile: config.BYOD, Available: map[string]bool{"terminal.v1": true, "health.v1": true}},
+		Negotiator: protocol.Negotiator{Available: map[string]bool{"terminal.v1": true, "health.v1": true}},
 		Journal:    journal,
 		Authorizer: authorizerFunc(func(context.Context, protocol.Frame) (Authorization, error) {
 			return Authorization{JournalBinding: "env:env_test_01:user:usr_1", EnvironmentID: "env_test_01", UserID: "usr_1", ClientID: "cli_1", ResourceID: "p-abcdefghijklmnopqrstuvwxyz"}, nil

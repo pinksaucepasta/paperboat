@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
@@ -225,6 +227,10 @@ func syncUnixDirectory(path string) error {
 }
 
 func (s *Service) queueActivation(ctx context.Context, approvalID string) (workerupdate.Result, error) {
+	return s.queueActivationWithApproval(ctx, approvalID, true)
+}
+
+func (s *Service) queueActivationWithApproval(ctx context.Context, approvalID string, manual bool) (workerupdate.Result, error) {
 	if !approvalIDPattern.MatchString(approvalID) {
 		return workerupdate.Result{}, ErrApprovalRequired
 	}
@@ -259,7 +265,11 @@ func (s *Service) queueActivation(ctx context.Context, approvalID string) (worke
 	}
 	manager := s.currentManager()
 	result.Version = manager.ActiveVersion()
-	release, found, err := s.source.ResolveManual(ctx)
+	resolve := s.source.ResolveManual
+	if !manual {
+		resolve = s.source.Resolve
+	}
+	release, found, err := resolve(ctx)
 	if err != nil || !found {
 		return result, err
 	}
@@ -276,6 +286,13 @@ func (s *Service) queueActivation(ctx context.Context, approvalID string) (worke
 	}
 	if prepared.ID != approvalID || current.ID != prepared.ID {
 		return result, ErrCandidateChanged
+	}
+	owner, err := hostdproto.NewClient(s.config.SocketPath, s.config.Token, 35*time.Second)
+	if err != nil {
+		return result, err
+	}
+	if err := planOwnerMaintenance(ctx, s.config.StateRoot, owner, release, manual); err != nil {
+		return result, err
 	}
 	state, err := manager.TransactionState()
 	if err != nil {
@@ -301,7 +318,7 @@ func (s *Service) queueActivation(ctx context.Context, approvalID string) (worke
 	if err = manager.Approve(ctx, approvalID); err != nil {
 		return result, err
 	}
-	handoff = &unixActivationHandoff{Schema: unixHandoffSchema, ApprovalID: approvalID, Previous: s.config.Active, Candidate: release.Version, Manual: true, RecoveryTimeout: release.RollbackTimeout, Baseline: baseline, RequireInventory: baseline.Machines > 0 || baseline.State == "ready"}
+	handoff = &unixActivationHandoff{Schema: unixHandoffSchema, ApprovalID: approvalID, Previous: s.config.Active, Candidate: release.Version, Manual: manual, RecoveryTimeout: release.RollbackTimeout, Baseline: baseline, RequireInventory: baseline.Machines > 0 || baseline.State == "ready"}
 	if _, err = secureChild(s.config.StateRoot, "activation"); err != nil {
 		return result, err
 	}
@@ -342,7 +359,7 @@ func (s *Service) currentManager() *workerupdate.Manager {
 
 // RunActivationHelper is the only process permitted to mutate a handed-off
 // worker transaction. Its executable is the policy-authorized previous release.
-func (s *Service) RunActivationHelper(ctx context.Context) error {
+func (s *Service) RunActivationHelper(ctx context.Context) (resultErr error) {
 	lock, err := unixActivationLock(s.config.StateRoot)
 	if err != nil {
 		return err
@@ -355,7 +372,18 @@ func (s *Service) RunActivationHelper(ctx context.Context) error {
 	if handoff == nil {
 		return s.config.ActivationController.Retire(ctx)
 	}
-	if !s.config.AutomaticUpdates && !handoff.Manual && !handoff.Started {
+	var activationErr error
+	diagnosticWritten := false
+	defer func() {
+		if !diagnosticWritten {
+			writeActivationFailure(os.Stderr, errors.Join(activationErr, resultErr), handoff.Previous.Version, handoff.Candidate)
+		}
+	}()
+	preferences, err := machineUpdateSettings(s.config.StateRoot, s.config.AutomaticUpdates, nil)
+	if err != nil {
+		return err
+	}
+	if !preferences.Enabled && !handoff.Manual && !handoff.Started {
 		return retireUnixHandoff(ctx, s.config.StateRoot, s.config.ActivationController)
 	}
 	executable, err := os.Executable()
@@ -393,7 +421,11 @@ func (s *Service) RunActivationHelper(ctx context.Context) error {
 		if err = writeUnixHandoff(s.config.StateRoot, handoff); err != nil {
 			return err
 		}
-		release, found, resolveErr := s.source.ResolveManual(ctx)
+		resolve := s.source.ResolveManual
+		if !handoff.Manual {
+			resolve = s.source.Resolve
+		}
+		release, found, resolveErr := resolve(ctx)
 		if resolveErr != nil {
 			return resolveErr
 		}
@@ -409,6 +441,7 @@ func (s *Service) RunActivationHelper(ctx context.Context) error {
 		}
 		_, err = manager.Activate(ctx, release)
 	}
+	activationErr = err
 	state, stateErr := manager.TransactionState()
 	if stateErr != nil {
 		return errors.Join(err, stateErr)
@@ -436,6 +469,10 @@ func (s *Service) RunActivationHelper(ctx context.Context) error {
 	// No participant restart is needed when staging failed before cutover.
 	// After a cutover, gate Active/Rollback has already proven exact processes.
 	if err != nil {
+		// Retirement can stop this native helper. Emit the safe cause before
+		// asking its supervisor to retire it, rather than relying on a defer.
+		writeActivationFailure(os.Stderr, err, handoff.Previous.Version, handoff.Candidate)
+		diagnosticWritten = true
 		slog.Error("verified update activation did not complete; previous installation retained", "error", err)
 	}
 	return retireUnixHandoff(ctx, s.config.StateRoot, s.config.ActivationController)
@@ -483,13 +520,16 @@ func removeUnixHandoff(root string) error {
 // may preserve that same degraded state after local recovery.
 func unixParticipantReady(probe UnixParticipantProbe, version string, baseline UnixParticipantProbe, requireInventory bool) error {
 	if probe.UpdaterVersion != version {
-		return fmt.Errorf("%w: ordinary updater version does not match %s", ErrParticipantReadiness, version)
+		return participantFailure("updater_version", ErrParticipantReadiness)
 	}
 	if !baseline.Running {
 		return nil
 	}
-	if !probe.Running || probe.Version != version {
-		return fmt.Errorf("%w: enrolled daemon version does not match %s", ErrParticipantReadiness, version)
+	if !probe.Running {
+		return participantFailure("daemon_stopped", ErrParticipantReadiness)
+	}
+	if probe.Version != version {
+		return participantFailure("daemon_version", ErrParticipantReadiness)
 	}
 	if probe.State == "ready" {
 		return nil
@@ -497,7 +537,42 @@ func unixParticipantReady(probe UnixParticipantProbe, version string, baseline U
 	if !requireInventory && baseline.State == "degraded" && baseline.Machines == 0 && baseline.ControlPlaneUnavailableOnly && probe.State == "degraded" && probe.Machines == 0 && probe.ControlPlaneUnavailableOnly {
 		return nil
 	}
-	return fmt.Errorf("%w: enrolled daemon has not recovered its prior usable state", ErrParticipantReadiness)
+	return participantFailure("daemon_state", ErrParticipantReadiness)
+}
+
+func participantFailure(reason string, cause error) error {
+	return &activationFailure{phase: "participant", reason: reason, cause: cause}
+}
+
+// The helper runs under native service supervision. This single bounded stderr
+// record remains available even when the privacy-filtered diagnostic store
+// cannot be written. No wrapped error or arbitrary probe value is formatted.
+func writeActivationFailure(writer io.Writer, err error, previous, candidate string) {
+	if err == nil {
+		return
+	}
+	phase, reason := "activation", "failed"
+	var failure *activationFailure
+	if errors.As(err, &failure) {
+		switch failure.phase + "/" + failure.reason {
+		case "health/owner_identity", "health/heartbeat_missing", "health/heartbeat_stale", "health/endpoint_invalid", "health/request_invalid", "health/transport", "health/http_redirect", "health/http_status", "health/http_body", "health/http_not_live", "participant/updater_version", "participant/daemon_stopped", "participant/daemon_version", "participant/daemon_state", "participant/probe", "participant/restart_updater", "participant/restart_daemon":
+			phase, reason = failure.phase, failure.reason
+		}
+	}
+	classification := "failure"
+	var timeout interface{ Timeout() bool }
+	if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &timeout) && timeout.Timeout() {
+		classification = "timeout"
+	} else if errors.Is(err, context.Canceled) {
+		classification = "canceled"
+	}
+	validVersion := func(value string) string {
+		if len(value) <= 64 && exactReleasePattern.MatchString(value) {
+			return value
+		}
+		return "unknown"
+	}
+	_, _ = fmt.Fprintf(writer, "paperboat-update-failure phase=%s reason=%s previous=%s candidate=%s classification=%s\n", phase, reason, validVersion(previous), validVersion(candidate), classification)
 }
 
 type unixParticipantGate struct {
@@ -514,7 +589,7 @@ func (g *unixParticipantGate) Candidate(ctx context.Context, r workerupdate.Gate
 func (g *unixParticipantGate) Drain(ctx context.Context, r workerupdate.GateRequest) error {
 	probe, err := g.participants.Probe(ctx)
 	if err != nil {
-		return errors.Join(ErrParticipantReadiness, err)
+		return participantFailure("probe", errors.Join(ErrParticipantReadiness, err))
 	}
 	if probe.Running {
 		g.handoff.Baseline.Running = true
@@ -609,11 +684,11 @@ func (g *unixParticipantGate) restart(ctx context.Context, version string) error
 		return err
 	}
 	if err := g.controller.RestartUpdater(ctx); err != nil {
-		return errors.Join(ErrParticipantReadiness, err)
+		return participantFailure("restart_updater", errors.Join(ErrParticipantReadiness, err))
 	}
 	if g.handoff.Baseline.Running {
 		if err := g.participants.Restart(ctx); err != nil {
-			return errors.Join(ErrParticipantReadiness, err)
+			return participantFailure("restart_daemon", errors.Join(ErrParticipantReadiness, err))
 		}
 	}
 	ticker := time.NewTicker(200 * time.Millisecond)
@@ -633,7 +708,7 @@ func (g *unixParticipantGate) restart(ctx context.Context, version string) error
 func (g *unixParticipantGate) probe(ctx context.Context, version string) error {
 	probe, err := g.participants.Probe(ctx)
 	if err != nil {
-		return errors.Join(ErrParticipantReadiness, err)
+		return participantFailure("probe", errors.Join(ErrParticipantReadiness, err))
 	}
 	return unixParticipantReady(probe, version, g.handoff.Baseline, g.handoff.RequireInventory)
 }

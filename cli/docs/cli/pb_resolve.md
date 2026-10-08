@@ -1,12 +1,12 @@
 ## pb resolve
 
-Resolve a peer device IP, port forwardings and tags over gRPC IPC
+Resolve a peer machine IP, port forwardings and tags over gRPC IPC
 
 ### Synopsis
 
-Resolve a peer device IP, port forwardings and tags over gRPC IPC
+Resolve a peer machine IP, port forwardings and tags over gRPC IPC
 
-Ask the local daemon to resolve a peer device query into authorized address, forwarding, and tag information. This reports locally known peer state; it does not approve a new device.
+Ask the local daemon to resolve a peer machine query into authorized address, forwarding, and tag information. This reports locally known peer state; it does not approve a new machine.
 
 JSON output is supported with --json.
 
@@ -27,6 +27,7 @@ pb resolve <query> [flags]
       --config string      path to the CLI config file
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO

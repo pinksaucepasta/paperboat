@@ -40,7 +40,8 @@ type windowsRegressionPAC struct {
 	recoverErr error
 }
 
-func (p windowsRegressionPAC) Recover(context.Context) error { return p.recoverErr }
+func (p windowsRegressionPAC) Refresh(context.Context, string) error { return nil }
+func (p windowsRegressionPAC) Recover(context.Context) error         { return p.recoverErr }
 func (windowsRegressionPAC) Install(context.Context, string) error {
 	return errors.New("PAC install must not be reached after recovery failure")
 }
@@ -288,7 +289,7 @@ func TestWindowsHostDoesNotDoubleStartProductionTunnelEnrollment(t *testing.T) {
 }
 
 // TestWindowsHostProductionCompositionStartsTunnelEnrollment protects the
-// production host-mode regression where the enrollment handler was mounted
+// production machine regression where the enrollment handler was mounted
 // but its lifecycle was omitted. In that state enrollment reached exchange,
 // then every connector activation failed locally before opening control.
 func TestWindowsHostProductionCompositionStartsTunnelEnrollment(t *testing.T) {
@@ -321,7 +322,6 @@ func newWindowsRegressionCoordinator(t *testing.T, endpoint http.Handler, lifecy
 	t.Helper()
 	root := t.TempDir()
 	config := runtimeconfig.Config{
-		Profile:   runtimeconfig.BYOD,
 		StateRoot: root,
 		Version:   "windows-regression-test",
 		Limits:    runtimeconfig.DefaultLimits,
@@ -329,7 +329,8 @@ func newWindowsRegressionCoordinator(t *testing.T, endpoint http.Handler, lifecy
 	}
 	dependencies := HostDependencies{
 		Authorizer: func(string) (server.Authorizer, error) { return hostAuthorizer{}, nil },
-		Connector:  clientServiceStub{}, RuntimeObservationService: clientServiceStub{},
+		Connector:  machineServiceStub{}, RuntimeObservationService: machineServiceStub{},
+		SessionLauncherFactory: func(session.Service) (server.SessionLauncher, error) { return windowsRegressionSessionLauncher{}, nil },
 		Listener: func() (net.Listener, error) {
 			return newWindowsRegressionListener(), nil
 		},
@@ -339,7 +340,7 @@ func newWindowsRegressionCoordinator(t *testing.T, endpoint http.Handler, lifecy
 	if lifecycle != nil {
 		dependencies.TunnelEnrollmentLifecycle = lifecycle
 	}
-	host, err := NewClientCoordinator(context.Background(), HostConfig{
+	host, err := NewHost(context.Background(), HostConfig{
 		Runtime:       config,
 		ListenAddress: "127.0.0.1:0",
 		WorkspaceRoot: root,
@@ -364,7 +365,6 @@ func newWindowsRegressionHostWithDependencies(t *testing.T, extra HostDependenci
 	t.Helper()
 	root := t.TempDir()
 	config := runtimeconfig.Config{
-		Profile:   runtimeconfig.BYOD,
 		StateRoot: root,
 		Version:   "windows-regression-test",
 		Limits:    runtimeconfig.DefaultLimits,
@@ -375,7 +375,7 @@ func newWindowsRegressionHostWithDependencies(t *testing.T, extra HostDependenci
 		Listener: func() (net.Listener, error) {
 			return newWindowsRegressionListener(), nil
 		},
-		SessionLauncherFactory: func(*session.Manager) (server.SessionLauncher, error) {
+		SessionLauncherFactory: func(session.Service) (server.SessionLauncher, error) {
 			return windowsRegressionSessionLauncher{}, nil
 		},
 		LocalControlToken: "local-control-token",

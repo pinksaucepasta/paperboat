@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -47,7 +48,7 @@ func TestConfirmationCodesAreIndependentAndServerBound(t *testing.T) {
 	if !strings.Contains(first.String(), "--server 'https://one.example.test'") {
 		t.Fatalf("preview command lost server override: %q", first.String())
 	}
-	if err := confirmMutation(newCommand("https://two.example.test", firstToken, &bytes.Buffer{}), "first", "Delete first?"); err == nil || !strings.Contains(err.Error(), "does not match") {
+	if err := confirmMutation(newCommand("https://two.example.test", firstToken, &bytes.Buffer{}), "first", "Delete first?"); err == nil || !errors.Is(err, errUsage) || strings.Contains(err.Error(), "https://one.example.test") {
 		t.Fatalf("cross-server code accepted: %v", err)
 	}
 	if err := confirmMutation(newCommand("https://one.example.test", secondToken, &bytes.Buffer{}), "second", "Delete second?"); err != nil {
@@ -87,7 +88,7 @@ func TestSessionDeleteAllTokenScopeExpiryAndReplay(t *testing.T) {
 		return code, output.String()
 	}
 	code, output := runDelete("--yes")
-	if code != 2 || deletes != 0 || !strings.Contains(output, "unknown flag") {
+	if code != 2 || deletes != 0 || !strings.Contains(output, "The command arguments are invalid.") || !strings.Contains(output, "Usage:") {
 		t.Fatalf("--yes bypassed preview: code=%d deletes=%d output=%q", code, deletes, output)
 	}
 	code, output = runDelete()
@@ -99,11 +100,11 @@ func TestSessionDeleteAllTokenScopeExpiryAndReplay(t *testing.T) {
 	if token == wrong {
 		wrong = "BBBBBB"
 	}
-	if code, output = runDelete("--confirm", wrong); code == 0 || deletes != 0 || !strings.Contains(output, "missing or already used") {
+	if code, output = runDelete("--confirm", wrong); code != 2 || deletes != 0 || !strings.Contains(output, "confirmation code missing or already used") || strings.Contains(output, wrong) || strings.Contains(output, configPath) {
 		t.Fatalf("wrong token accepted: code=%d deletes=%d output=%q", code, deletes, output)
 	}
 	ids = append(ids, "ses_2")
-	if code, output = runDelete("--confirm", token); code == 0 || deletes != 0 || !strings.Contains(output, "does not match") {
+	if code, output = runDelete("--confirm", token); code != 2 || deletes != 0 || !strings.Contains(output, "does not match") || strings.Contains(output, token) || strings.Contains(output, configPath) {
 		t.Fatalf("changed scope accepted: code=%d deletes=%d output=%q", code, deletes, output)
 	}
 	code, output = runDelete()
@@ -128,7 +129,7 @@ func TestSessionDeleteAllTokenScopeExpiryAndReplay(t *testing.T) {
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if code, output = runDelete("--confirm", token); code == 0 || deletes != 0 || !strings.Contains(output, "expired") {
+	if code, output = runDelete("--confirm", token); code != 2 || deletes != 0 || !strings.Contains(output, "expired") || strings.Contains(output, token) || strings.Contains(output, configPath) {
 		t.Fatalf("expired token accepted: code=%d deletes=%d output=%q", code, deletes, output)
 	}
 	code, output = runDelete()
@@ -139,7 +140,37 @@ func TestSessionDeleteAllTokenScopeExpiryAndReplay(t *testing.T) {
 	if code, output = runDelete("--confirm", token); code != 0 || deletes != 2 {
 		t.Fatalf("confirmation failed: code=%d deletes=%d output=%q", code, deletes, output)
 	}
-	if code, output = runDelete("--confirm", token); code == 0 || deletes != 2 || !strings.Contains(output, "already used") {
+	if code, output = runDelete("--confirm", token); code != 2 || deletes != 2 || !strings.Contains(output, "confirmation code missing or already used") || strings.Contains(output, token) || strings.Contains(output, configPath) {
 		t.Fatalf("token replay accepted: code=%d deletes=%d output=%q", code, deletes, output)
+	}
+}
+
+func TestCorruptConfirmationStateKeepsCauseWithoutDisclosingFileContents(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	newCommand := func(token string, output *bytes.Buffer) *cobra.Command {
+		command := &cobra.Command{Use: "delete"}
+		command.Flags().String("config", configPath, "")
+		command.Flags().String("server", "", "")
+		command.Flags().String("confirm", token, "")
+		command.SetOut(output)
+		return command
+	}
+	var preview bytes.Buffer
+	if err := confirmMutation(newCommand("", &preview), "scope", "Change the resource?"); err == nil {
+		t.Fatal("confirmation preview did not require a token")
+	}
+	token := previewConfirmationCode(t, preview.String())
+	marker := `{"credential":"confirmation-private-marker"`
+	path := configPath + ".confirmation.json." + token
+	if err := os.WriteFile(path, []byte(marker), 0o600); err != nil {
+		t.Fatal("write malformed confirmation")
+	}
+	err := confirmMutation(newCommand(token, &bytes.Buffer{}), "scope", "Change the resource?")
+	if err == nil || errors.Is(err, errUsage) || strings.Contains(err.Error(), marker) || strings.Contains(err.Error(), token) || strings.Contains(err.Error(), configPath) {
+		t.Fatalf("corrupt confirmation was not safely classified: %v", err)
+	}
+	var syntaxErr *json.SyntaxError
+	if !errors.As(err, &syntaxErr) {
+		t.Fatalf("confirmation parser cause lost: %T", err)
 	}
 }

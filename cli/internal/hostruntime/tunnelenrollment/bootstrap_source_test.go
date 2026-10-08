@@ -379,7 +379,7 @@ func TestCarrierBootstrapDescriptorRequiresExactStableEndpointUUID(t *testing.T)
 	}{
 		{name: "missing", id: ""},
 		{name: "malformed", id: "endpoint_01"},
-		{name: "mismatched", id: "123e4567-e89b-12d3-a456-426614174001"},
+		{name: "mismatched", id: "endpoint_123e4567-e89b-42d3-a456-426614174001"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			descriptor := base
@@ -390,7 +390,7 @@ func TestCarrierBootstrapDescriptorRequiresExactStableEndpointUUID(t *testing.T)
 		})
 	}
 	changed := request
-	changed.StableEndpointID = "123e4567-e89b-12d3-a456-426614174001"
+	changed.StableEndpointID = "endpoint_123e4567-e89b-42d3-a456-426614174001"
 	if sameActivation(request, changed) {
 		t.Fatal("stable endpoint replacement was treated as the same activation")
 	}
@@ -509,7 +509,7 @@ func productionActivationRequest(t *testing.T) (ActivationRequest, ed25519.Priva
 	}
 	return ActivationRequest{
 		AccountID: "account_01", TunnelID: "tunnel_01", HostID: "host_01", ConnectorID: "connector_01", OperationID: "operation_01",
-		StableEndpointID:    "123e4567-e89b-12d3-a456-426614174000",
+		StableEndpointID:    "endpoint_123e4567-e89b-42d3-a456-426614174000",
 		CredentialReference: "protected-file://paperboat/connectors/credential_01", CredentialKeyID: "ed25519:" + thumbprint,
 		CredentialThumbprint: thumbprint, CredentialPublicKey: append([]byte(nil), public...), CredentialGeneration: 3, ProcessGeneration: 2,
 	}, private

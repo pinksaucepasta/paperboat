@@ -44,9 +44,12 @@ func TestManagerRecoversHistoryInputAndRestartGeneration(t *testing.T) {
 	state := open()
 	manager := newManager(state, random)
 	command := shellCommand("/bin/sh", workspace, "printf abc; read line; printf done; exit 7")
-	created, err := manager.Create(context.Background(), CreateRequest{Name: "default", Command: command})
+	created, err := manager.Create(context.Background(), CreateRequest{ID: "terminal_00000000-0000-4000-8000-000000000001", Name: "default", Command: command})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if created.ID != "terminal_00000000-0000-4000-8000-000000000001" {
+		t.Fatalf("runtime changed authoritative terminal identity: %s", created.ID)
 	}
 	waitLatest(t, manager, created.ID, 3)
 	if _, err := manager.Attach(created.ID, "att_1", 0); err != nil {

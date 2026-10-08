@@ -56,7 +56,7 @@ func (c *personalRotationControl) StageVaultPersonalScope(_ context.Context, op 
 		c.failStage = false
 		return api.VaultScopeDocument{}, errors.New("lost stage response")
 	}
-	return api.VaultScopeDocument{MachineID: in.MachineID, DocumentID: scope.DocumentID}, nil
+	return api.VaultScopeDocument{WorkspaceID: in.WorkspaceID, MachineID: in.MachineID, DocumentID: scope.DocumentID}, nil
 }
 func (c *personalRotationControl) RotateVaultPersonal(_ context.Context, in api.VaultPersonalRotate) (api.PasswordVaultState, error) {
 	c.finalCalls = append(c.finalCalls, in)

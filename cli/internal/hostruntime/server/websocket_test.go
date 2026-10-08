@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 )
@@ -84,7 +83,7 @@ func websocketTestHandler(t *testing.T, tokenSeen *string) *WebSocketHandler {
 	t.Helper()
 	journal, _ := operation.NewJournal(16)
 	server, err := New(Config{
-		Negotiator: protocol.Negotiator{Profile: config.BYOD, Available: map[string]bool{"terminal.v1": true, "health.v1": true}},
+		Negotiator: protocol.Negotiator{Available: map[string]bool{"terminal.v1": true, "health.v1": true}},
 		Journal:    journal, Handler: websocketDomainHandler{}, MaxConcurrent: 4,
 		HeartbeatInterval: time.Hour, MutationDeadline: 5 * time.Minute,
 	})

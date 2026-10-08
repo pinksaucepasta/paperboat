@@ -11,7 +11,7 @@ The **Edge migration decisions** section is the frozen replacement v1 declaratio
 from Task 3b (2026-09-05), not a claim that browser access, lazy activation, or capture
 exists. Earlier wire schemas/fixtures and the remaining current-runtime sections
 below describe the preserved installation. In particular, current `access_mode`
-accepts public/private and private uses device-assisted access; these are not the
+accepts public/private and private uses machine-assisted access; these are not the
 replacement audience/method semantics. Tasks 24–32 replace their owning schemas,
 producers, consumers, OpenAPI, and positive/negative vectors together at the gates
 listed below. Do not teach the old runtime to accept unsupported fields, add a v2,
@@ -22,11 +22,17 @@ paperboat-web give each consumer the same declaration.
 ## Fixed vocabulary
 
 - A `preview_lease` is temporary, owns one random managed endpoint and local target, and is
-  bound to an owner device and owner session. It is never restored after reboot. It may
+  bound to an owner machine and owner session. It is never restored after reboot. It may
   request up to eight normalized exact, apex, or one-label wildcard domain aliases.
 - A `tunnel` is durable desired state owned by an account. Its stable identity is not
   a connector session.
 - A `route` maps protocol, hostname and optional path to an origin.
+- A public `tls` route uses an exact managed hostname, a `tcp` origin, and the
+  server-owned shared TCP443 listener (`listener_tls_443`, port `443`). A canonical
+  hostname has one mode across HTTP routes, previews and domain aliases; conflicting
+  HTTP/TLS publication is rejected atomically. Verified custom domains with certificate
+  strategy `none` become additional exact SNI decisions. The origin terminates
+  TLS; wildcard TLS matches and HTTP path/header settings are invalid.
 - A `domain_binding` owns hostname verification, DNS instructions and certificate
   state independently from connector availability. Its `target_kind` is exactly one
   of `tunnel_route` or `preview_lease`; tunnel bindings require only `tunnel_id` and
@@ -51,9 +57,9 @@ name for these resources.
 ## Exposure and creation
 
 `public` is the default access mode for previews and tunnels. There is no positive `--public` option.
-`private` means the edge authenticates and authorizes a same-account device before forwarding.
+`private` means the edge authenticates and authorizes a same-account machine before forwarding.
 
-A preview requires `owner_device_id` and `owner_session_id`, has
+A preview requires `owner_machine_id`, `owner_session_id`, and `owner_session_kind`, has
   `persistent: false`, accepts an optional maximum `user_deadline`, and ends on stop,
   deadline, or owner loss beyond the reconnect grace period. The create request may
   include `domains`, a sorted, duplicate-free list of normalized IDNA hostnames. A
@@ -62,13 +68,17 @@ A preview requires `owner_device_id` and `owner_session_id`, has
   readiness-gated independently from aliases. `owner_session_id` is an opaque preview-owner nonce
 selected for this lease and bound to the selected machine and create operation. It is
   not a browser session ID; closing a dashboard or browser session does not stop the
-  preview. Device-authenticated local CLI creation uses the machine identity path and
-  the verified machine ID, never a CLI client-session ID as `owner_device_id`.
+  preview. Machine-authenticated local CLI creation uses the machine identity path and
+  the verified machine ID, never a CLI client-session ID as `owner_machine_id`.
 
-The managed preview endpoint is `https://<opaque-id>.preview.pprbt.dev` in production
-(or the same opaque label under a configured development base). The server generates
-the DNS-safe leftmost label, keeps it immutable for the lease, and never prefixes it
-with `preview-` or derives it from a user-controlled name.
+The managed preview endpoint is `https://<quality>-<atmosphere>-<waypoint>-<four-digits>.preview.pprbt.dev` in production
+(or that label under the configured development base). The server selects each of
+three words independently with cryptographic randomness from disjoint 64-word lists
+and a uniformly random `0000`–`9999` suffix. Labels are allocated once, persisted,
+reserved atomically across managed URL producers, and stable for the lease. They
+never derive from user-controlled names. Machine-service and lazy preview URLs use
+the same format and retain an exact persisted machine/port binding; the URL no longer
+encodes the port. Authorization must precede materialization or origin probing.
 
 A ready preview resource exposes bounded `domains` summaries. Every summary uses
 `target_kind: "preview_lease"` and the owning `preview_id`, and contains only DNS,
@@ -82,12 +92,14 @@ A tunnel is created only by a host-scoped actor. It has stable `id` and
 multiple connectors. Connector loss never deletes the tunnel, route, domain binding,
 DNS state, or certificate state.
 
-The managed tunnel endpoint is `https://<canonical-lowercase-uuid>.tunnels.pprbt.dev`
-under the production tunnel base (or the same UUID label under a configured
-development base). The leftmost label is a server-generated opaque endpoint UUID,
-not the tunnel name, display name, host name, internal tunnel ID, connector ID, or
-any other user-controlled value. The endpoint UUID is immutable, persisted with the
-tunnel, and replayed unchanged after retries or tunnel renames.
+The managed tunnel endpoint uses the same random word/digit format under
+`tunnels.pprbt.dev` (or a configured development base). The readable hostname and
+opaque `stable_endpoint_id` are independent. The endpoint ID uses canonical
+`endpoint_UUIDv4` used by signed connector/runtime bindings; consumers must read the
+persisted ID rather than infer it from the hostname. Both the URL and ID persist
+unchanged through retries and tunnel renames. Automatic terminal handles use the
+same three word lists without digits and reserve retained names across the owner's
+machines. Explicit terminal and tunnel display names retain their existing semantics.
 
 ## Mutation and reconciliation
 
@@ -111,7 +123,7 @@ routes every preview owner session over that one authenticated carrier identity.
 
 The JSON request has `kind: "preview_dispatch"` and the following fixed field order:
 `schema`, `kind`, `preview_id`, `operation_id`, `account_id`, `actor_id`,
-`owner_device_id`, `owner_session_id`, `target`, `access_mode`, `endpoint`,
+`owner_machine_id`, `owner_session_id`, `owner_session_kind`, `target`, `access_mode`, `endpoint`,
 `lease_deadline`, optional `user_deadline`, `lease_etag`, `state`, `allocation_state`,
 `edge_state`, `origin_state`, `created_at`, `last_renewed_at`, `expected_generation`,
 `idempotency_key`, `request_id`, `correlation_id`, `request_hash`. The request hash is
@@ -121,7 +133,7 @@ no URL credential, bearer token, private key, or reusable secret.
 
 The server authenticates the request with a short-lived, single-use
 `preview_launch` credential. Its claims and the request must exactly agree on account,
-actor, owner machine and session, preview, operation, typed target, access mode,
+actor, owner machine, session and session kind, preview, operation, typed target, access mode,
 endpoint, lease and user deadlines, lease ETag, lifecycle dimensions, expected
 generation, request hash, idempotency key, request ID, and correlation ID. A mismatch,
 replay, expired lease, stale generation, or inactive route is rejected without
@@ -130,7 +142,7 @@ starting a second carrier.
 The only safe dispatch response is `{schema, kind, preview_id, operation_id, state,
 generation}`, where `state` is `accepted`, `ready`, or `failed`. `accepted` is only a
 transport acknowledgement; it never completes the create operation. The owner machine
-must observe real edge and origin readiness through the device-auth-only
+must observe real edge and origin readiness through the machine-auth-only
 `POST /v1/previews/{id}/readiness` endpoint, using the server operation ID as both the
 machine proof operation and `Idempotency-Key`, and the exact strong lease ETag in
 `If-Match`. Only that compare-and-swap observation can complete the create operation.
@@ -193,9 +205,9 @@ a token, private key, password, authorization header, or reusable secret.
 The server owns attachment allocation and all terminal generations. The owner host
 requests or renews an attachment using renewable machine identity and proof, the exact
 lease ETag in `If-Match`, and the create operation ID as its idempotency and proof
-operation. The binding fixes account, preview, operation, owner device and owner
+operation. The binding fixes account, preview, operation, owner machine and owner
 session, host, lease generation, tunnel, connector, carrier session and process/config
-generations, route and edge node. `host_id` must equal `owner_device_id`; tunnel and
+generations, route and edge node. `host_id` must equal `owner_machine_id`; tunnel and
 connector IDs must differ. `edge_process_epoch` fences an old process that briefly
 overlaps a replacement using the same stable edge node ID. Endpoint addresses are
 transport metadata only. The two
@@ -233,6 +245,16 @@ processes never open competing machine carriers. The host runtime owns that carr
 uses a bounded local owner-session lease to stop only the preview whose invoking CLI
 exits, disconnects, or misses its heartbeat. Dashboard-dispatched previews use the same
 host-runtime dispatcher and do not depend on a browser connection remaining open.
+
+`owner_session_kind` is immutable: `local_lease` requires a live hostd-issued local
+lease bound to the exact account, machine and target; `foreground` uses the selected
+authenticated runtime lifetime; `lazy_runtime` uses the current authorized lazy
+activation and installation/boot binding. Public create accepts only `local_lease`
+and `foreground`; lazy activation supplies `lazy_runtime` internally. The kind is
+persisted, covered by create/dispatch hashes and signed `preview_launch` claims,
+and must match at host admission. Local owner IDs are `session_UUID`; their spelling
+never selects lifetime behavior. An unknown or released local lease fails admission,
+including after its registry entry has been removed. No kind is inferred or defaulted.
 
 An admitted preview may also carry at most 64 requested custom-domain aliases. Each
 alias is a metadata-only record containing `domain_id`, `hostname`, `match_type`, and
@@ -278,17 +300,17 @@ the server-normalized signed `request` returned by that call. After receiving th
 carrier, the edge sends that normalized `request` to
 `/v1/edge/private-access/authorize` with its own authenticated edge control
 channel and the grant in a write-only header. Browser request headers are never an
-identity source. The request body never accepts an account, device, or client
+identity source. The request body never accepts an account, machine, or client
 session as authority. The server derives those values from the verified machine
 proof and returns them only as safe binding metadata in the grant response.
 
 The grant response is `{schema, kind, grant, expires_at, request_id, correlation_id,
 request}`. `grant` is write-only, short-lived, audience-bound, and must not be logged,
 cached, persisted, or returned by an edge decision. The normalized `request` is the
-exact input for the second call and includes the verified account, accessor device and
+exact input for the second call and includes the verified account, accessor machine and
 access session, route, carrier session, connector (for durable tunnels), process,
-config, and route generations. A caller must not substitute the preview owner device
-or owner session for the accessing device/session.
+config, and route generations. A caller must not substitute the preview owner machine
+or owner session for the accessing machine/session.
 
 The authorize request is a full normalized request. The edge supplies the grant in a
 write-only header and the current authenticated edge node and process epoch in the
@@ -321,7 +343,7 @@ proof, private-key, cookie, authorization-header, origin-body, or reusable-secre
 bytes.
 
 The local proxy returns `401 Unauthorized` when the machine session is missing, logged
-out, expired, or revoked; `403 Forbidden` when an authenticated device is not allowed
+out, expired, or revoked; `403 Forbidden` when an authenticated machine is not allowed
 to use the route; and `503 Service Unavailable` when hostd, the carrier, or control-plane
 verification is temporarily unavailable. Cross-account responses remain
 non-enumerating. Private TCP uses the same authorization boundary through a bounded
@@ -414,7 +436,7 @@ times are UTC instants, and all fields below are required unless marked optional
 | Declaration | Fields and invariant | Producer → consumer |
 | --- | --- | --- |
 | Resource binding | `account_id`, `resource_kind` (preview_lease/tunnel), `resource_id`, `resource_generation`, `route_id`, `route_generation`, `target_id`, `target_generation`, `audience`, `connection_method`; exact normalized hostname, path match and protocol | Server desired state → edge and daemon |
-| Target binding | Above binding plus `owner_device_id`, `installation_generation`, `boot_id`, exact scheme/address and origin TLS policy; explicit previews also bind `owner_session_id`, while lazy leases bind current daemon registration and policy ownership; durable tunnels use their explicitly configured connector/target ownership, not a synthetic preview session | Server-approved daemon registration → server projection → edge/daemon |
+| Target binding | Above binding plus `owner_machine_id`, `installation_generation`, `boot_id`, exact scheme/address and origin TLS policy; explicit previews also bind `owner_session_id`, while lazy leases bind current daemon registration and policy ownership; durable tunnels use their explicitly configured connector/target ownership, not a synthetic preview session | Server-approved daemon registration → server projection → edge/daemon |
 | Subject grant | `grant_id`, `grant_generation`, principal user or scoped machine identity, exact resource/route/target selector, actions subset of view/inspect/replay, `expires_at`; team grants also bind `team_id` and `membership_generation` | Server membership/resource authorization → edge/daemon |
 | Edge decision | Exact resolved binding, principal, granted action, `policy_generation`, optional membership/grant generations when applicable, `issued_at`, `expires_at`, `decision_id`; additionally connector session/process, config/assignment generations and edge node/process epoch | Server authorization → authenticated edge → exact daemon stream |
 | Lazy policy | `policy_id`, `policy_generation`, owner/environment identity, audience private/team, exact allowed targets with permission following replacement listeners, reservation identity, expiry, and limits below | Owner mutation at server → daemon activation and edge lookup |
@@ -454,9 +476,8 @@ connector metadata, never client-supplied headers or reusable browser credential
 
 ### Browser origin and session isolation
 
-Keep the existing managed URL shapes: random explicit preview labels and stable
-opaque tunnel labels; lazy labels are `p<port>-<server-issued-environment-id>` under
-`preview.pprbt.dev`. Display names are not DNS identity. No managed label is ever
+Managed preview, tunnel and lazy labels use the random three-word/four-digit
+format defined above. Display names are not DNS identity. No managed label is ever
 reassigned to another resource/account, including after deletion.
 
 The chosen deployment prerequisite is Public Suffix List PRIVATE entries for
@@ -570,11 +591,11 @@ right and consumes no connector/origin resources while dormant.
 
 Lazy permission shares the approved exact port by default and follows replacement
 listeners at that target within the approved environment. The owner approves the
-device and target; applications need no registration, PID checks or service-instance
-proof. Bind the policy and each activation to the owner device, installation
+machine and target; applications need no registration, PID checks or service-instance
+proof. Bind the policy and each activation to the owner machine, installation
 generation, fresh daemon boot ID and current authenticated daemon registration.
 Application exit does not revoke the port policy; a missing listener is
-`origin_unavailable`. Changed device, installation, boot or policy bindings fence
+`origin_unavailable`. Changed machine, installation, boot or policy bindings fence
 old activations and leases; they cannot adopt a replacement registration implicitly.
 
 Port permission persists as policy across application and daemon restarts, not as
@@ -583,7 +604,7 @@ current installation and boot is required before a post-reboot request can creat
 a new lease. Machine re-enrollment or transfer requires owner reapproval; an old
 reservation or still-valid team membership cannot adopt a new machine. Current
 owner/team grants, exact target authorization, revocation and lease deadlines remain
-mandatory. It never starts apps, scans, wakes devices, or restores a forwarder during
+mandatory. It never starts apps, scans, wakes machines, or restores a forwarder during
 boot. Durable tunnel reboot reconciliation remains Task 28.
 
 | Lazy policy budget | Fixed v1 value and exhaustion behavior |
@@ -721,8 +742,8 @@ these owning cutovers, not a license to retain two production paths.
 | Existing surface | Replacement and gate |
 | --- | --- |
 | Server `internal/previewtunnelstore/preview_lease_v1.go`, `internal/previewtunnelapi`, `internal/httpapi/preview_lease_handlers.go`, attachment adapters/queries; all copies of resources/dispatch/attachment schemas and fixtures | Tasks 24–25: resource/target generations and explicit publication; Task 27: reserved lazy identity and ownership policy; Task 28: durable ownership |
-| Server `internal/privateaccess` and `internal/db/queries/private_access_routes.sql`; `/v1/private-access/routes`, `/v1/edge/private-access/carrier-admissions`, `/v1/edge/private-access/grants`, `/v1/edge/private-access/authorize` and OpenAPI definitions | Task 26 replaces browser device-proof/accessor discovery authority with browser/scoped access. Native pair/resource consumers move at Task 19; remove old endpoints once both replacements pass |
-| All `preview-tunnel-v1/schemas/private_access.schema.json` and `fixtures/private_access.ndjson`; `internal/contracttest/private_access_v1_test.go`, server machine/grant tests, OpenAPI tests | Task 26 replaces device/PAC browser vectors with handoff, isolation, team/revocation vectors; native coverage belongs to Task 19 |
+| Server `internal/privateaccess` and `internal/db/queries/private_access_routes.sql`; `/v1/private-access/routes`, `/v1/edge/private-access/carrier-admissions`, `/v1/edge/private-access/grants`, `/v1/edge/private-access/authorize` and OpenAPI definitions | Task 26 replaces browser machine-proof/accessor discovery authority with browser/scoped access. Native pair/resource consumers move at Task 19; remove old endpoints once both replacements pass |
+| All `preview-tunnel-v1/schemas/private_access.schema.json` and `fixtures/private_access.ndjson`; `internal/contracttest/private_access_v1_test.go`, server machine/grant tests, OpenAPI tests | Task 26 replaces machine/PAC browser vectors with handoff, isolation, team/revocation vectors; native coverage belongs to Task 19 |
 | Server `internal/auth/auth.go` cookie names and browser CSRF/session consumers/tests, web login/session consumers | Task 26 replaces non-prefixed cookies and exact-origin handling together; no old-cookie reader survives cutover |
 | paperboat `internal/privatepreviewproxy`, `internal/hostruntime/privateproxyconfig`, `internal/hostruntime/preview/private_access.go`, `accessor_discovery.go`, private TCP manager, `cmd/pb/access_tunnel_command.go` and their tests/config wiring | Tasks 19/26 replace native access and browser PAC/local-daemon paths respectively; remove PAC/system-proxy setup and cleanup its installed state at cutover |
 | Tunnel `internal/edgehttp/private_access_stream.go`, `internal/edgehttp/private_connection.go` and Caddy binding in policy, `internal/control/private_access_grant.go`, `Config.PrivateAccessToken`, `internal/config/deployment.go` (`caddy_private_access_listen_address`) and corresponding tests | Tasks 24/26 replace carrier and browser ingress authority; Task 19 owns native private TCP. Remove the shared listener secret and accessor carrier path after those gates |

@@ -19,10 +19,13 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	clienttransfer "github.com/pinksaucepasta/paperboat/internal/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
@@ -102,7 +105,7 @@ func TestDaemonPublishesSnapshotServesAPIAndStopsCleanly(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(ctx, DaemonConfig{Paths: paths, Source: source, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), RefreshInterval: time.Second, RequestTimeout: time.Second, DeviceSuffix: "mydev", DeviceLoopbackCIDR: "127.212.0.0/16"})
+		done <- Run(ctx, DaemonConfig{Paths: paths, Source: source, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), RefreshInterval: time.Second, RequestTimeout: time.Second})
 	}()
 	waitForDaemonSocket(t, paths.SocketPath)
 	client, err := localapi.NewClient(paths.SocketPath, time.Second)
@@ -110,7 +113,7 @@ func TestDaemonPublishesSnapshotServesAPIAndStopsCleanly(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot, err := client.Snapshot(context.Background())
-	if err != nil || snapshot.DaemonState != "ready" || len(snapshot.Machines) != 1 || snapshot.Machines[0].Alias != "studio-mac" || snapshot.DeviceSuffix != "mydev" || snapshot.DeviceLoopbackCIDR != "127.212.0.0/16" {
+	if err != nil || snapshot.DaemonState != "ready" || len(snapshot.Machines) != 1 || snapshot.Machines[0].Alias != "studio-mac" {
 		t.Fatalf("snapshot=%#v err=%v", snapshot, err)
 	}
 	now := time.Now().UTC()
@@ -133,6 +136,56 @@ func TestDaemonPublishesSnapshotServesAPIAndStopsCleanly(t *testing.T) {
 	}
 	if _, err := os.Lstat(paths.SocketPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("socket cleanup err=%v", err)
+	}
+}
+
+func TestDaemonBorrowsProcessDiagnosticsAndLeavesRecorderUsable(t *testing.T) {
+	paths := daemonTestPaths(t)
+	recorder, err := diagnostics.NewRecorder(diagnostics.DiskConfig{Directory: filepath.Join(paths.StateRoot, "diagnostics"), OwnerUID: os.Geteuid()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recorder.Close()
+	if err := recorder.Record("process", "before_daemon", "info", nil); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(diagnostics.WithRecorder(t.Context(), recorder))
+	defer cancel()
+	source := &scriptedMachineSource{results: []machineResult{{}}}
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, DaemonConfig{Paths: paths, Source: source, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), RefreshInterval: time.Second})
+	}()
+	waitForDaemonSocket(t, paths.SocketPath)
+	client, err := localapi.NewClient(paths.SocketPath, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := client.Diagnostics(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, event := range snapshot.Recent {
+		found = found || event.Code == "before_daemon"
+	}
+	if !found || !snapshot.PersistenceAvailable {
+		t.Fatal("daemon API did not use the process recorder")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("daemon shutdown error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("daemon did not stop")
+	}
+	if err := recorder.Record("process", "after_daemon", "info", nil); err != nil {
+		t.Fatal("component shutdown closed the process recorder")
+	}
+	if err := recorder.Flush(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -297,7 +350,7 @@ func TestDaemonSurfacesManagedSSHStartupFailureWithoutStopping(t *testing.T) {
 		t.Fatalf("snapshot=%#v err=%v", snapshot, err)
 	}
 	machine := snapshot.Machines[0]
-	if machine.SSHReadiness != "degraded" || len(machine.Health) != 1 || machine.Health[0].Code != "ssh_key_rejected" || machine.Health[0].Recovery != managedSSHDoctorRecovery {
+	if machine.SSHReadiness != "degraded" || len(machine.Health) != 1 || machine.Health[0].Code != "ssh_target_not_ready" || machine.Health[0].Recovery != managedSSHDoctorRecovery {
 		t.Fatalf("managed SSH failure was not surfaced: %#v", machine)
 	}
 	diagnostics, err := client.Diagnostics(context.Background())
@@ -305,7 +358,7 @@ func TestDaemonSurfacesManagedSSHStartupFailureWithoutStopping(t *testing.T) {
 		t.Fatalf("diagnostics=%#v err=%v", diagnostics, err)
 	}
 	startup := diagnostics.Recent[1]
-	if startup.Category != "ssh" || startup.Code != "managed_startup" || startup.Severity != "warning" || startup.Fields["outcome"] != "degraded" || startup.Fields["reason"] != "ssh_key_rejected" {
+	if startup.Category != "ssh" || startup.Code != "managed_startup" || startup.Severity != "warning" || startup.Fields["outcome"] != "degraded" || startup.Fields["reason"] != "ssh_target_not_ready" {
 		t.Fatalf("managed SSH startup diagnostic=%#v", startup)
 	}
 	cancel()
@@ -328,4 +381,41 @@ func waitForDaemonSocket(t *testing.T, path string) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("daemon socket %s was not ready", path)
+}
+
+type failingTransferCleanup struct{}
+
+func (failingTransferCleanup) PrepareFileTransfer(context.Context, localapi.Peer, localapi.FileTransferRequest) (localapi.FileTransferResult, error) {
+	return localapi.FileTransferResult{}, localapi.ErrInvalidConfig
+}
+func (failingTransferCleanup) OpenFileTransferStream(context.Context, localapi.Peer, string) (net.Conn, error) {
+	return nil, localapi.ErrInvalidConfig
+}
+func (failingTransferCleanup) ReleaseFileTransfer(localapi.Peer, string) error {
+	return localapi.ErrInvalidConfig
+}
+func (failingTransferCleanup) Close() error { return syscall.EIO }
+
+func TestDaemonShutdownPreservesCleanupCauseAlongsideCancellation(t *testing.T) {
+	paths := daemonTestPaths(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, DaemonConfig{Paths: paths, Source: &scriptedMachineSource{results: []machineResult{{}}}, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), FileTransfers: failingTransferCleanup{}})
+	}()
+	waitForDaemonSocket(t, paths.SocketPath)
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) || !errors.Is(err, syscall.EIO) {
+			t.Fatal("shutdown lost cleanup or cancellation cause")
+		}
+		fault := errorreport.ProjectFault(t.Context(), "paperboatd", "daemon", "lifecycle", "service_failed", err)
+		if fault.Outcome == "canceled" || fault.Errno != int(syscall.EIO) || fault.Stage != "component_shutdown" {
+			t.Fatalf("cleanup fault=%+v", fault)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("daemon failed to stop")
+	}
 }

@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-func TestLinuxInstallerRunsVerifiedPublicInstall(t *testing.T) {
+func TestLinuxInstallerRunsPinnedProductAndRejectsWrongDigest(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX installer")
 	}
@@ -31,9 +31,9 @@ func TestLinuxInstallerRunsVerifiedPublicInstall(t *testing.T) {
 			}
 			payload := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$PB_TEST_LOG\"\nif [ \"$1\" = install ] && [ \"$2\" = --install-dir ] && [ \"$4\" = --json ]; then mkdir -p \"$3\"; cp \"$0\" \"$3/pb\"; chmod 0755 \"$3/pb\"; printf '{\"ok\":true,\"data\":{\"executable\":\"%s\"}}\\n' \"$3/pb\"; fi\n"
 			write(filepath.Join(dir, "binary"), payload)
-			verifier := "#!/bin/sh\nwhile [ \"$#\" -gt 0 ]; do case \"$1\" in --state-dir) state=$2; shift 2;; *) shift;; esac; done\nmkdir -p \"$state/product\"\ncp \"$PB_TEST_ROOT/binary\" \"$state/product/pb-linux-amd64\"\nprintf '{\"path\":\"%s\",\"version\":\"2026.09.19.1\"}\\n' \"$state/product/pb-linux-amd64\"\n"
-			write(filepath.Join(dir, "verifier"), verifier)
-			digest := fmt.Sprintf("%x", sha256.Sum256([]byte(verifier)))
+			version := "2026.09.19.1"
+			url := "https://github.com/pinksaucepasta/paperboat-cli/releases/download/" + version + "/pb-linux-amd64"
+			digest := fmt.Sprintf("%x", sha256.Sum256([]byte(payload)))
 			if !valid {
 				digest = strings.Repeat("0", 64)
 			}
@@ -41,20 +41,26 @@ func TestLinuxInstallerRunsVerifiedPublicInstall(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			rendered := strings.ReplaceAll(string(body), "@PAPERBOAT_BOOTSTRAP_VERSION@", "2026.09.19.1")
-			rendered = strings.ReplaceAll(rendered, "@PAPERBOAT_BOOTSTRAP_REPOSITORY@", "pinksaucepasta/paperboat-cli")
-			rendered = strings.ReplaceAll(rendered, "@PAPERBOAT_BOOTSTRAP_LINUX_AMD64_SHA256@", digest)
-			rendered = strings.ReplaceAll(rendered, "@PAPERBOAT_BOOTSTRAP_LINUX_AMD64_LENGTH@", fmt.Sprint(len(verifier)))
+			rendered := strings.ReplaceAll(string(body), "@PAPERBOAT_PRODUCT_LINUX_AMD64_VERSION@", version)
+			rendered = strings.ReplaceAll(rendered, "@PAPERBOAT_PRODUCT_LINUX_AMD64_URL@", url)
+			rendered = strings.ReplaceAll(rendered, "@PAPERBOAT_PRODUCT_LINUX_AMD64_SHA256@", digest)
+			rendered = strings.ReplaceAll(rendered, "@PAPERBOAT_PRODUCT_LINUX_AMD64_LENGTH@", fmt.Sprint(len(payload)))
 			installer := filepath.Join(dir, "install")
 			write(installer, rendered)
-			write(filepath.Join(bin, "curl"), "#!/bin/sh\nwhile [ \"$#\" -gt 0 ]; do if [ \"$1\" = -o ]; then cp \"$PB_TEST_ROOT/verifier\" \"$2\"; exit; fi; shift; done\nexit 1\n")
+			downloadLog := filepath.Join(dir, "downloads")
+			curl := "#!/bin/sh\nset -eu\nout=\nurl=\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    -o) out=$2; shift 2 ;;\n    --connect-timeout|--max-time|--max-filesize|--proto|--proto-redir) shift 2 ;;\n    --*) shift ;;\n    *) url=$1; shift ;;\n  esac\ndone\n[ \"$url\" = \"$PB_TEST_EXPECTED_URL\" ] || exit 3\nprintf '%s\\n' \"$url\" >> \"$PB_TEST_DOWNLOAD_LOG\"\ncp \"$PB_TEST_ROOT/binary\" \"$out\"\n"
+			write(filepath.Join(bin, "curl"), curl)
 			write(filepath.Join(bin, "uname"), "#!/bin/sh\ncase \"$1\" in -s) echo Linux;; -m) echo x86_64;; esac\n")
 			write(filepath.Join(bin, "id"), "#!/bin/sh\necho 1000\n")
 			write(filepath.Join(bin, "sudo"), "#!/bin/sh\n[ \"$*\" = '-n true' ]\n")
 			command := exec.Command("sh", installer, "--no-setup", "--install-dir", filepath.Join(prefix, "bin"))
-			command.Env = append(os.Environ(), "HOME="+dir, "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "PB_TEST_ROOT="+dir, "PB_TEST_LOG="+filepath.Join(dir, "calls"), "PAPERBOAT_ENROLLMENT_TOKEN=", "PAPERBOAT_MACHINE_NAME=", "PAPERBOAT_VERSION=latest", "PAPERBOAT_GITHUB_REPOSITORY=pinksaucepasta/paperboat-cli")
+			command.Env = append(os.Environ(), "HOME="+dir, "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "PB_TEST_ROOT="+dir, "PB_TEST_LOG="+filepath.Join(dir, "calls"), "PB_TEST_DOWNLOAD_LOG="+downloadLog, "PB_TEST_EXPECTED_URL="+url, "PAPERBOAT_ENROLLMENT_TOKEN=", "PAPERBOAT_MACHINE_NAME=", "PAPERBOAT_VERSION=latest")
 			output, err := command.CombinedOutput()
 			calls, _ := os.ReadFile(filepath.Join(dir, "calls"))
+			downloads, downloadErr := os.ReadFile(downloadLog)
+			if downloadErr != nil || string(downloads) != url+"\n" {
+				t.Fatalf("downloaded product URL = %q (err %v), want %q", downloads, downloadErr, url)
+			}
 			if !valid {
 				if err == nil || len(calls) != 0 {
 					t.Fatalf("unverified payload executed: %v %s %s", err, calls, output)

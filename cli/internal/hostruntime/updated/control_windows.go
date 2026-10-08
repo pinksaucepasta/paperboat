@@ -23,6 +23,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 	"github.com/pinksaucepasta/paperboat/internal/selfupdate"
+	"golang.org/x/sys/windows"
 )
 
 var ErrWindowsActivationUnavailable = errors.New("Windows updater activation is unavailable")
@@ -72,7 +73,11 @@ func newWindowsController(config WindowsConfig) (*windowsController, error) {
 		source:        source,
 		handoff:       make(chan struct{}),
 	}
-	scheduler, err := autoupdate.New(autoupdate.Config{Check: controller.checkRelease})
+	scheduler, err := autoupdate.New(autoupdate.Config{Check: controller.automaticCheck,
+		NextCheck: func(now, next time.Time) time.Time {
+			return nextMachineUpdateCheck(config.StateRoot, config.AutomaticChecks, now, next)
+		},
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -127,9 +132,7 @@ func (c *windowsController) run(ctx context.Context, ready func() error) error {
 		}
 		_ = listener.Close()
 	}()
-	if c.config.AutomaticChecks {
-		go func() { _ = c.scheduler.Run(ctx) }()
-	}
+	go func() { _ = c.scheduler.Run(ctx) }()
 	if ready != nil {
 		if err := ready(); err != nil {
 			return err
@@ -146,30 +149,62 @@ func (c *windowsController) run(ctx context.Context, ready func() error) error {
 		activationPending, _ := c.handle(connection)
 		_ = connection.Close()
 		if activationPending {
-			delay := windowsActivationHandoffDelay
-			if delay > 0 {
-				timer := time.NewTimer(delay)
-				select {
-				case <-ctx.Done():
-					timer.Stop()
+			if err := c.handoffActivation(ctx, func(context.Context) error {
+				err := startWindowsActivator(c.config.OwnerSID)
+				if errors.Is(err, windows.ERROR_SERVICE_ALREADY_RUNNING) {
 					return nil
-				case <-timer.C:
 				}
-			}
-			if err := startWindowsActivator(c.config.OwnerSID); err != nil {
+				return err
+			}); err != nil {
 				continue
 			}
-			c.handoffOnce.Do(func() { close(c.handoff) })
 			return nil
 		}
 	}
 }
 
+// Launch must acknowledge SCM ownership before the updater relinquishes its
+// control pipe. Failed launches keep the controller available for retry.
+func (c *windowsController) handoffActivation(ctx context.Context, launch func(context.Context) error) error {
+	c.activationMu.Lock()
+	defer c.activationMu.Unlock()
+	if activationRequested(c.handoff) {
+		return nil
+	}
+	bounded, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if delay := windowsActivationHandoffDelay; delay > 0 {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-bounded.Done():
+			return bounded.Err()
+		case <-timer.C:
+		}
+	}
+	if err := bounded.Err(); err != nil {
+		return err
+	}
+	if err := launch(bounded); err != nil {
+		return err
+	}
+	c.handoffOnce.Do(func() { close(c.handoff) })
+	return nil
+}
+
 func (c *windowsController) handle(connection net.Conn) (bool, error) {
+	return handleWindowsControl(context.Background(), connection, c.invoke)
+}
+
+func handleWindowsControl(ctx context.Context, connection net.Conn, invoke func(context.Context, ControlRequest) (ControlResponse, error)) (bool, error) {
 	if connection == nil {
 		return false, ErrInvalidControl
 	}
-	_ = connection.SetDeadline(time.Now().Add(maxUpdateControlTimeout))
+	deadline := time.Now().Add(maxUpdateControlTimeout)
+	if requestDeadline, ok := ctx.Deadline(); ok && requestDeadline.Before(deadline) {
+		deadline = requestDeadline
+	}
+	_ = connection.SetDeadline(deadline)
 	reader := bufio.NewReaderSize(io.LimitReader(connection, (4<<10)+1), (4<<10)+1)
 	body, err := reader.ReadBytes('\n')
 	if err != nil || len(body) == 0 || len(body) > 4<<10 {
@@ -182,7 +217,7 @@ func (c *windowsController) handle(connection net.Conn) (bool, error) {
 	if decoder.Decode(&request) != nil || decoder.Decode(&extra) != io.EOF || request.Schema != ControlProtocolV1 || !validControlRequest(request) {
 		return false, json.NewEncoder(connection).Encode(ControlResponse{Schema: ControlProtocolV1, Status: "error", ErrorCode: "invalid_request"})
 	}
-	response, invokeErr := c.invoke(context.Background(), request)
+	response, invokeErr := invoke(ctx, request)
 	if invokeErr != nil {
 		response.Schema = ControlProtocolV1
 		response.Status = "error"
@@ -202,9 +237,36 @@ func (c *windowsController) handle(connection net.Conn) (bool, error) {
 }
 
 func (c *windowsController) invoke(ctx context.Context, request ControlRequest) (ControlResponse, error) {
+	return c.invokeWithAutomatic(ctx, request, false)
+}
+
+func (c *windowsController) invokeWithAutomatic(ctx context.Context, request ControlRequest, automatic bool) (ControlResponse, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	response := ControlResponse{Schema: ControlProtocolV1, Status: "ok", Version: c.activeVersion, Observation: c.scheduler.Snapshot()}
+	if request.Operation == "settings" {
+		settings, err := machineUpdateSettings(c.config.StateRoot, c.config.AutomaticChecks, request.Settings)
+		if err != nil {
+			return response, err
+		}
+		response.Settings = &settings
+		if settings.Enabled {
+			response.NextMaintenanceAt = settings.NextMaintenance(time.Now())
+		}
+		if request.Settings != nil {
+			c.scheduler.Wake()
+		}
+		return response, nil
+	}
+	if err := populateMachineSettings(&response, c.config.StateRoot, c.config.AutomaticChecks); err != nil {
+		return response, err
+	}
+	// Settings can change after the scheduler's initial read or its download.
+	// Recheck under the same lock as activation before accepting an automatic
+	// install, so opting out cannot race the scheduler into a cutover.
+	if automatic && response.Settings != nil && !response.Settings.Enabled {
+		return response, nil
+	}
 	blocked, blockErr := c.activationBlockedReadOnlyContext(ctx)
 	if blockErr != nil {
 		return response, blockErr
@@ -221,6 +283,15 @@ func (c *windowsController) invoke(ctx context.Context, request ControlRequest) 
 		if blockErr != nil {
 			return response, blockErr
 		}
+		if blocked {
+			// Recovery has acknowledged the existing activator. Return the
+			// pending handoff to run so this controller also releases its pipe.
+			response.Pending = true
+			response.Transaction = windowsTransactionState(journal)
+			candidate := journal.Candidate
+			response.Candidate = &candidate
+			return response, nil
+		}
 	}
 	if blocked && request.Operation != "status" {
 		return response, ErrWindowsActivationUnavailable
@@ -229,7 +300,7 @@ func (c *windowsController) invoke(ctx context.Context, request ControlRequest) 
 	case "status":
 		if journal, err := loadWindowsActivationJournalForController(c.config); err == nil {
 			response.Transaction = windowsTransactionState(journal)
-			if journal.Stage == windowsActivationAwaitingApproval {
+			if journal.Stage != windowsActivationCommitted && journal.Stage != windowsActivationRolledBack {
 				if err := verifyWindowsPreparedCandidate(ctx, journal); err != nil {
 					return response, err
 				}
@@ -271,11 +342,18 @@ func (c *windowsController) invoke(ctx context.Context, request ControlRequest) 
 		if err != nil {
 			return response, err
 		}
-		release, found, err := source.ResolveManual(ctx)
+		resolve := source.ResolveManual
+		if automatic {
+			resolve = source.Resolve
+		}
+		release, found, err := resolve(ctx)
 		if err != nil {
 			return response, err
 		}
 		if !found {
+			if automatic {
+				return response, nil
+			}
 			return response, workerupdate.ErrPreparedCandidate
 		}
 		comparison, err := compareWindowsInstalledVersion(release.Version, c.activeVersion, c.config.Source)
@@ -312,10 +390,20 @@ func (c *windowsController) invoke(ctx context.Context, request ControlRequest) 
 			return response, err
 		}
 		backend := newWindowsSCMActivationBackend(c.config)
+		if release.SupervisorMaintenance {
+			owner, ownerErr := backend.ownerControlClient()
+			if ownerErr != nil {
+				return response, ownerErr
+			}
+			if err := planOwnerMaintenance(ctx, c.config.StateRoot, owner, release, !automatic); err != nil {
+				return response, err
+			}
+		}
 		if err = backend.AuthorizeRecovery(ctx, journal); err != nil {
 			return response, err
 		}
 		journal.ApprovedCandidateID = candidate.ID
+		journal.ManualApproval = !automatic
 		if err = backend.WriteJournal(journal); err != nil {
 			return response, err
 		}
@@ -374,9 +462,6 @@ func activationRequested(channel <-chan struct{}) bool {
 }
 
 func (c *windowsController) checkRelease(ctx context.Context) (autoupdate.Result, error) {
-	if !c.config.AutomaticChecks {
-		return autoupdate.Result{Version: c.activeVersion}, nil
-	}
 	c.checkMu.Lock()
 	defer c.checkMu.Unlock()
 	result, err := resolveRelease(ctx, c.activeVersion, c.resolve)

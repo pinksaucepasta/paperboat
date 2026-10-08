@@ -160,7 +160,7 @@ func validateVerifierOnlyRoot(ctx context.Context, store config.ProfileStore, pr
 	}
 	trusted, err := trustedkeys.Root(remote)
 	if err != nil {
-		return errors.New("automatic peer enrollment returned an invalid account root")
+		return inventorySourceFailure("peer_root", err)
 	}
 	defer trustedkeys.Clear(trusted)
 	if _, ok := trustedkeys.ByPublic(trusted, local); !ok {

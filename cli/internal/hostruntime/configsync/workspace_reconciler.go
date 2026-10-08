@@ -6,9 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -23,13 +21,15 @@ import (
 var ErrWorkspaceReconcilerInvalid = errors.New("invalid config workspace reconciler")
 
 type WorkspaceReconcilerConfig struct {
-	HomeRoot      string
-	StateRoot     string
-	Descriptor    RuntimeDescriptor
-	Resolutions   ConflictResolutionAuthority
-	ChezmoiBinary string
-	ChezmoiRunner ChezmoiRunner
-	Clock         func() time.Time
+	HomeRoot              string
+	StateRoot             string
+	ComparisonStatusPath  string
+	Descriptor            RuntimeDescriptor
+	MachineSource         SourceConfig
+	ApprovedConfiguration *RuntimeDescriptor
+	SharedSource          func(context.Context) (SourceConfig, error)
+	Resolutions           ConflictResolutionAuthority
+	Clock                 func() time.Time
 }
 
 type pendingBaseline struct {
@@ -54,54 +54,61 @@ type DiagnosticsSource interface {
 }
 
 type PlaintextWorkspaceReconciler struct {
-	homeRoot      string
-	stateRoot     string
-	baselinePath  string
-	descriptor    RuntimeDescriptor
-	resolutions   ConflictResolutionAuthority
-	chezmoiBinary string
-	chezmoiRunner ChezmoiRunner
-	clock         func() time.Time
+	mapping               *PathMapping
+	homeRoot              string
+	stateRoot             string
+	comparisonStatusPath  string
+	baselinePath          string
+	descriptor            RuntimeDescriptor
+	machineSource         SourceConfig
+	approvedConfiguration RuntimeDescriptor
+	sharedSource          func(context.Context) (SourceConfig, error)
+	resolutions           ConflictResolutionAuthority
+	clock                 func() time.Time
 
 	mu          sync.Mutex
 	pending     *pendingBaseline
 	diagnostics ReconciliationDiagnostics
 	manifest    Manifest
+	observed    map[string]FileState
 }
 
 func NewPlaintextWorkspaceReconciler(config WorkspaceReconcilerConfig) (*PlaintextWorkspaceReconciler, error) {
 	if !canonicalAbsolutePath(config.HomeRoot) || !canonicalAbsolutePath(config.StateRoot) ||
-		config.ChezmoiBinary == "" || validateRuntimeDescriptor(config.Descriptor, Credential{
-		EnvironmentID: config.Descriptor.EnvironmentID, MachineID: config.Descriptor.MachineID,
-		AssignmentID: config.Descriptor.AssignmentID, WarningRevision: config.Descriptor.WarningRevision,
-	}) != nil {
+		(config.ComparisonStatusPath != "" && !canonicalAbsolutePath(config.ComparisonStatusPath)) ||
+		validateRuntimeDescriptor(config.Descriptor, Credential{
+			EnvironmentID: config.Descriptor.EnvironmentID, MachineID: config.Descriptor.MachineID,
+			AssignmentID: config.Descriptor.AssignmentID, AssignmentVersion: config.Descriptor.AssignmentVersion, WarningRevision: config.Descriptor.WarningRevision,
+		}) != nil {
 		return nil, ErrWorkspaceReconcilerInvalid
 	}
 	for _, root := range []string{config.HomeRoot, config.StateRoot} {
+		if err := checkSafeAbsolutePath(root); err != nil {
+			return nil, errors.Join(ErrWorkspaceReconcilerInvalid, err)
+		}
 		info, err := os.Lstat(root)
 		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return nil, errors.Join(ErrWorkspaceReconcilerInvalid, err)
 		}
 		resolved, err := filepath.EvalSymlinks(root)
-		if err != nil || resolved != root {
+		if err != nil || !mappedPlatformPathsEqual(resolved, root) {
 			return nil, errors.Join(ErrWorkspaceReconcilerInvalid, err)
 		}
 	}
+	config.Descriptor.Policy.AbsoluteRuntimeExclusionRoots = append(append([]string(nil), config.Descriptor.Policy.AbsoluteRuntimeExclusionRoots...), config.StateRoot)
 	if config.Clock == nil {
 		config.Clock = func() time.Time { return time.Now().UTC() }
 	}
-	reconciler := &PlaintextWorkspaceReconciler{
-		homeRoot: config.HomeRoot, stateRoot: config.StateRoot,
-		baselinePath: filepath.Join(config.StateRoot, "baseline.json"),
-		descriptor:   config.Descriptor, resolutions: config.Resolutions,
-		chezmoiBinary: config.ChezmoiBinary, chezmoiRunner: config.ChezmoiRunner, clock: config.Clock,
+	approved := config.Descriptor
+	if config.ApprovedConfiguration != nil {
+		approved = *config.ApprovedConfiguration
 	}
-	if err := recoverApplyJournal(
-		filepath.Join(config.StateRoot, "apply-journal.json"), config.HomeRoot,
-		config.Descriptor.RepositoryID,
-		config.Descriptor.AssignmentID, config.Descriptor.Policy.MaxBatchBytes,
-	); err != nil {
-		return nil, err
+	reconciler := &PlaintextWorkspaceReconciler{
+		approvedConfiguration: approved, sharedSource: config.SharedSource,
+		homeRoot: config.HomeRoot, stateRoot: config.StateRoot, comparisonStatusPath: config.ComparisonStatusPath,
+		baselinePath: filepath.Join(config.StateRoot, "baseline.json"),
+		descriptor:   config.Descriptor, machineSource: config.MachineSource, resolutions: config.Resolutions,
+		clock: config.Clock,
 	}
 	return reconciler, nil
 }
@@ -135,15 +142,35 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 	if err := ValidateConfigRepository(repositoryRoot); err != nil {
 		return PreparedPublication{}, err
 	}
-	manifest, err := LoadManifest(repositoryRoot, r.descriptor.Policy.ManifestLimits())
+	var shared SourceConfig
+	var sourceErr error
+	if r.sharedSource != nil {
+		shared, sourceErr = r.sharedSource(ctx)
+	} else {
+		shared, sourceErr = LoadSharedSourceConfig(repositoryRoot, DefaultSourceConfigLimits())
+	}
+	err = sourceErr
 	if err != nil {
-		if errors.Is(err, ErrManifestMissing) {
-			r.diagnostics.ManifestHealth = "missing"
-		} else {
-			r.diagnostics.ManifestHealth = "invalid"
-		}
+		r.diagnostics.ManifestHealth = "invalid"
 		return PreparedPublication{}, err
 	}
+	effective, err := MergeSourceConfigs(shared, r.machineSource)
+	if err != nil {
+		return PreparedPublication{}, err
+	}
+	approved := r.approvedConfiguration
+	if !effective.Enabled || effective.Revision != approved.ConfigurationRevision || ProjectionRevision(effective.Mode, effective.AutomaticUpdates, effective.PathRules) != ProjectionRevision(approved.Mode, approved.AutomaticUpdates, approved.PathRules) || !r.targetsMatch(effective) {
+		return PreparedPublication{}, ErrConfigurationChanged
+	}
+	mapping, err := ResolveEffectiveConfig(r.homeRoot, effective)
+	if err != nil {
+		return PreparedPublication{}, err
+	}
+	r.mapping = mapping
+	if err := recoverApplyJournal(filepath.Join(r.stateRoot, "apply-journal.json"), r.homeRoot, r.descriptor.RepositoryID, r.descriptor.AssignmentID, r.descriptor.Policy.MaxBatchBytes, mapping); err != nil {
+		return PreparedPublication{}, err
+	}
+	manifest := effective.Manifest()
 	r.manifest = manifest.Clone()
 	r.diagnostics.ManifestRevision = manifest.Revision
 	r.diagnostics.ManifestHealth = "healthy"
@@ -151,39 +178,12 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 		r.diagnostics.ManifestHealth = "empty"
 	}
 
-	remoteHome, err := os.MkdirTemp(r.stateRoot, "remote-home-")
+	remoteHome := repositoryRoot
+	remoteFiles, err := r.mapping.SnapshotContext(ctx, r.descriptor.Policy, manifest, repositoryRoot, false)
 	if err != nil {
 		return PreparedPublication{}, err
 	}
-	defer os.RemoveAll(remoteHome)
-	remoteHome, err = filepath.EvalSymlinks(remoteHome)
-	if err != nil {
-		return PreparedPublication{}, err
-	}
-	remoteRuntime, err := os.MkdirTemp(r.stateRoot, "remote-runtime-")
-	if err != nil {
-		return PreparedPublication{}, err
-	}
-	defer os.RemoveAll(remoteRuntime)
-	remoteRuntime, err = filepath.EvalSymlinks(remoteRuntime)
-	if err != nil {
-		return PreparedPublication{}, err
-	}
-	remoteSource, err := NewChezmoiSource(ChezmoiSourceConfig{
-		Binary: r.chezmoiBinary, RuntimeRoot: remoteRuntime, SourceRoot: repositoryRoot,
-		HomeRoot: remoteHome, Runner: r.chezmoiRunner,
-	})
-	if err != nil {
-		return PreparedPublication{}, err
-	}
-	if err := remoteSource.Apply(ctx); err != nil {
-		return PreparedPublication{}, err
-	}
-	remoteFiles, err := TakeManifestSnapshot(remoteHome, r.descriptor.Policy, manifest)
-	if err != nil {
-		return PreparedPublication{}, err
-	}
-	localFiles, err := TakeManifestSnapshot(r.homeRoot, r.descriptor.Policy, manifest)
+	localFiles, err := r.mapping.SnapshotContext(ctx, r.descriptor.Policy, manifest, repositoryRoot, true)
 	if err != nil {
 		return PreparedPublication{}, err
 	}
@@ -212,9 +212,27 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 			baseline.PolicyRevision != r.descriptor.Policy.Revision {
 			return PreparedPublication{}, ErrBaselineInvalid
 		}
-		baselineFiles = baseline.Files
-		baselineRevision = baseline.RemoteRevision
-		baselineFrozen = baseline.FrozenPaths
+		if baseline.MappingRevision == r.mapping.Revision() || len(baseline.PathDestinations) > 0 {
+			baselineFiles = baseline.Files
+			baselineRevision = baseline.RemoteRevision
+			baselineFrozen = baseline.FrozenPaths
+			if baseline.MappingRevision != r.mapping.Revision() {
+				for name := range baselineFiles {
+					target, ok := r.mapping.LocalPath(name)
+					if !ok || baseline.PathDestinations[name] != target {
+						delete(baselineFiles, name)
+						delete(baselineFrozen, name)
+					}
+				}
+			}
+		}
+		for name := range baselineFiles {
+			target, ok := r.mapping.LocalPath(name)
+			if !ok || !r.mapping.eligible(name, target, r.descriptor.Policy, manifest) {
+				delete(baselineFiles, name)
+				delete(baselineFrozen, name)
+			}
+		}
 	} else {
 		return PreparedPublication{}, baselineErr
 	}
@@ -227,15 +245,6 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 	if !writesEnabled {
 		plan.PublishUpdates = nil
 		plan.PublishDeletes = nil
-	}
-	if writesEnabled && effectiveMode != ModePullOnly {
-		for name := range baselineFiles {
-			if !manifest.Manages(name, false) {
-				plan.PublishDeletes = append(plan.PublishDeletes, name)
-			}
-		}
-		sort.Strings(plan.PublishDeletes)
-		plan.PublishDeletes = uniqueSortedStrings(plan.PublishDeletes)
 	}
 	mergedContents := map[string]mergedContent{}
 	baseHome := ""
@@ -353,22 +362,6 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 	}
 	r.diagnostics.PendingCleanPathCount = len(plan.PublishUpdates) + len(plan.PublishDeletes) + len(plan.ApplyRemote) + len(plan.DeleteLocal)
 
-	localRuntime, err := os.MkdirTemp(r.stateRoot, "local-runtime-")
-	if err != nil {
-		return PreparedPublication{}, err
-	}
-	defer os.RemoveAll(localRuntime)
-	localRuntime, err = filepath.EvalSymlinks(localRuntime)
-	if err != nil {
-		return PreparedPublication{}, err
-	}
-	localSource, err := NewChezmoiSource(ChezmoiSourceConfig{
-		Binary: r.chezmoiBinary, RuntimeRoot: localRuntime, SourceRoot: repositoryRoot,
-		HomeRoot: r.homeRoot, Runner: r.chezmoiRunner,
-	})
-	if err != nil {
-		return PreparedPublication{}, err
-	}
 	applyPaths := append(append([]string(nil), plan.ApplyRemote...), plan.DeleteLocal...)
 	for name := range mergedContents {
 		applyPaths = append(applyPaths, name)
@@ -377,7 +370,7 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 	if len(applyPaths) > 0 {
 		if err := beginApplyJournal(
 			journalPath, r.homeRoot, r.descriptor.RepositoryID, r.descriptor.AssignmentID,
-			remote.Revision, applyPaths, r.descriptor.Policy.MaxBatchBytes,
+			remote.Revision, applyPaths, r.descriptor.Policy.MaxBatchBytes, r.mapping,
 		); err != nil {
 			return PreparedPublication{}, err
 		}
@@ -387,22 +380,26 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 		if len(applyPaths) > 0 && !applySucceeded {
 			_ = recoverApplyJournal(
 				journalPath, r.homeRoot, r.descriptor.RepositoryID, r.descriptor.AssignmentID,
-				r.descriptor.Policy.MaxBatchBytes,
+				r.descriptor.Policy.MaxBatchBytes, r.mapping,
 			)
 		}
 	}()
-	if len(plan.ApplyRemote) > 0 {
-		if err := localSource.ApplyPaths(ctx, plan.ApplyRemote); err != nil {
+	for _, name := range plan.ApplyRemote {
+		value, err := readVerifiedState(repositoryRoot, name, remoteFiles.Files[name], r.descriptor.Policy.MaxFileBytes)
+		if err != nil {
+			return PreparedPublication{}, err
+		}
+		if err := r.mapping.write(name, value, remoteFiles.Files[name].Mode); err != nil {
 			return PreparedPublication{}, err
 		}
 	}
 	for _, path := range plan.DeleteLocal {
-		if err := removeManagedPath(r.homeRoot, path); err != nil {
+		if err := r.mapping.remove(path); err != nil {
 			return PreparedPublication{}, err
 		}
 	}
 	for name, merged := range mergedContents {
-		if err := writeMergedTarget(r.homeRoot, name, merged); err != nil {
+		if err := r.mapping.write(name, merged.Value, merged.Mode); err != nil {
 			return PreparedPublication{}, err
 		}
 	}
@@ -417,11 +414,24 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 	if len(applyPaths) > 0 {
 		r.diagnostics.LastAppliedRevision = remote.Revision
 	}
-	if err := localSource.Add(ctx, plan.PublishUpdates); err != nil {
-		return PreparedPublication{}, err
+	for _, name := range plan.PublishUpdates {
+		state, ok := localFiles.Files[name]
+		if !ok {
+			state = FileState{Hash: hashSnapshotBytes(mergedContents[name].Value), Bytes: int64(len(mergedContents[name].Value)), Mode: mergedContents[name].Mode}
+		}
+		if merged, ok := mergedContents[name]; ok {
+			state = FileState{Hash: hashSnapshotBytes(merged.Value), Bytes: int64(len(merged.Value)), Mode: merged.Mode}
+		}
+		value, err := r.mapping.read(name, state, r.descriptor.Policy.MaxFileBytes)
+		if err != nil {
+			return PreparedPublication{}, err
+		}
+		if err := writeMergedTarget(repositoryRoot, name, mergedContent{value, state.Mode}); err != nil {
+			return PreparedPublication{}, err
+		}
 	}
-	for _, path := range plan.PublishDeletes {
-		if err := localSource.Forget(ctx, path); err != nil {
+	for _, name := range plan.PublishDeletes {
+		if err := removeManagedPath(repositoryRoot, name); err != nil {
 			return PreparedPublication{}, err
 		}
 	}
@@ -433,17 +443,18 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 		return PreparedPublication{}, err
 	}
 	if status.IsClean() {
-		merged, snapshotErr := TakeManifestSnapshot(r.homeRoot, r.descriptor.Policy, manifest)
+		merged, snapshotErr := r.mapping.SnapshotContext(ctx, r.descriptor.Policy, manifest, repositoryRoot, true)
 		if snapshotErr != nil {
 			return PreparedPublication{}, snapshotErr
 		}
+		r.observeLocal(merged.Files, plan.DeleteLocal)
 		accepted := AcceptedBaseline(baselineFiles, merged.Files, remoteFiles.Files, r.descriptor.Mode, writesEnabled)
 		freezeConflictBaseline(accepted, baselineFiles, plan.Conflicts)
 		frozen := nextFrozenPaths(baselineFrozen, plan.Conflicts, baselineRevision)
 		r.pending = &pendingBaseline{CommitID: remote.Revision, Value: Baseline{
 			Format: "paperboat-config-baseline-v1", RepositoryID: r.descriptor.RepositoryID,
 			AssignmentID: r.descriptor.AssignmentID, PolicyRevision: r.descriptor.Policy.Revision,
-			ManifestRevision: manifest.Revision, SelectedRoots: append([]ManifestRoot(nil), manifest.Roots...),
+			MappingRevision: r.mapping.Revision(), PathDestinations: r.mapping.destinations(accepted), ManifestRevision: manifest.Revision, SelectedRoots: append([]ManifestRoot{}, manifest.Roots...),
 			FrozenPaths: frozen, RemoteRevision: remote.Revision, Files: accepted,
 		}}
 		r.diagnostics.PendingCleanPathCount = 0
@@ -458,17 +469,18 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 	if err != nil {
 		return PreparedPublication{}, err
 	}
-	merged, err := TakeManifestSnapshot(r.homeRoot, r.descriptor.Policy, manifest)
+	merged, err := r.mapping.SnapshotContext(ctx, r.descriptor.Policy, manifest, repositoryRoot, true)
 	if err != nil {
 		return PreparedPublication{}, err
 	}
+	r.observeLocal(merged.Files, plan.DeleteLocal)
 	accepted := AcceptedBaseline(baselineFiles, merged.Files, merged.Files, r.descriptor.Mode, writesEnabled)
 	freezeConflictBaseline(accepted, baselineFiles, plan.Conflicts)
 	frozen := nextFrozenPaths(baselineFrozen, plan.Conflicts, baselineRevision)
 	r.pending = &pendingBaseline{CommitID: commit.String(), Value: Baseline{
 		Format: "paperboat-config-baseline-v1", RepositoryID: r.descriptor.RepositoryID,
 		AssignmentID: r.descriptor.AssignmentID, PolicyRevision: r.descriptor.Policy.Revision,
-		ManifestRevision: manifest.Revision, SelectedRoots: append([]ManifestRoot(nil), manifest.Roots...),
+		MappingRevision: r.mapping.Revision(), PathDestinations: r.mapping.destinations(accepted), ManifestRevision: manifest.Revision, SelectedRoots: append([]ManifestRoot{}, manifest.Roots...),
 		FrozenPaths: frozen, RemoteRevision: commit.String(), Files: accepted,
 	}}
 	r.diagnostics.PendingCleanPathCount = 0
@@ -484,7 +496,7 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 func (r *PlaintextWorkspaceReconciler) Rollback() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	err := recoverApplyJournal(filepath.Join(r.stateRoot, "rollback.json"), r.homeRoot, r.descriptor.RepositoryID, r.descriptor.AssignmentID, r.descriptor.Policy.MaxBatchBytes)
+	err := recoverApplyJournal(filepath.Join(r.stateRoot, "rollback.json"), r.homeRoot, r.descriptor.RepositoryID, r.descriptor.AssignmentID, r.descriptor.Policy.MaxBatchBytes, r.mapping)
 	if err != nil {
 		return err
 	}
@@ -593,22 +605,23 @@ func (r *PlaintextWorkspaceReconciler) materializeRevision(
 		_ = restore()
 		return "", func() {}, err
 	}
-	baseRuntime, err := os.MkdirTemp(r.stateRoot, "base-runtime-")
-	if err != nil {
-		_ = os.RemoveAll(baseHome)
-		_ = restore()
-		return "", func() {}, err
-	}
-	cleanup := func() {
-		_ = os.RemoveAll(baseRuntime)
-		_ = os.RemoveAll(baseHome)
-	}
-	baseSource, err := NewChezmoiSource(ChezmoiSourceConfig{
-		Binary: r.chezmoiBinary, RuntimeRoot: baseRuntime, SourceRoot: repositoryRoot,
-		HomeRoot: baseHome, Runner: r.chezmoiRunner,
-	})
+	cleanup := func() { _ = os.RemoveAll(baseHome) }
+	snapshot, err := r.mapping.SnapshotContext(ctx, r.descriptor.Policy, r.manifest, repositoryRoot, false)
 	if err == nil {
-		err = baseSource.Apply(ctx)
+		for name, state := range snapshot.Files {
+			if err = ctx.Err(); err != nil {
+				break
+			}
+			var value []byte
+			value, err = readVerifiedState(repositoryRoot, name, state, r.descriptor.Policy.MaxFileBytes)
+			if err != nil {
+				break
+			}
+			err = writeMergedTarget(baseHome, name, mergedContent{value, state.Mode})
+			if err != nil {
+				break
+			}
+		}
 	}
 	restoreErr := restore()
 	if err != nil || restoreErr != nil {
@@ -626,10 +639,6 @@ func (r *PlaintextWorkspaceReconciler) mergeConflicts(
 ) ([]PathSummary, map[string]mergedContent, error) {
 	remaining := make([]PathSummary, 0, len(conflicts))
 	merged := make(map[string]mergedContent)
-	gitBinary, err := exec.LookPath("git")
-	if err != nil {
-		return append([]PathSummary(nil), conflicts...), merged, nil
-	}
 	for _, conflict := range conflicts {
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
@@ -653,14 +662,14 @@ func (r *PlaintextWorkspaceReconciler) mergeConflicts(
 			continue
 		}
 		baseValue, baseErr := readVerifiedState(baseHome, conflict.Path, baseState, r.descriptor.Policy.MaxFileBytes)
-		localValue, localErr := readVerifiedState(r.homeRoot, conflict.Path, localState, r.descriptor.Policy.MaxFileBytes)
+		localValue, localErr := r.mapping.read(conflict.Path, localState, r.descriptor.Policy.MaxFileBytes)
 		remoteValue, remoteErr := readVerifiedState(remoteHome, conflict.Path, remoteState, r.descriptor.Policy.MaxFileBytes)
 		if baseErr != nil || localErr != nil || remoteErr != nil {
 			conflict.Reason = "source_changed"
 			remaining = append(remaining, conflict)
 			continue
 		}
-		value, mergeErr := mergeRegularText(ctx, gitBinary, baseValue, localValue, remoteValue, r.descriptor.Policy.MaxFileBytes)
+		value, mergeErr := mergeRegularText(ctx, baseValue, localValue, remoteValue, r.descriptor.Policy.MaxFileBytes)
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
 		}
@@ -681,10 +690,13 @@ func readVerifiedState(root, relative string, expected FileState, maxBytes int64
 	path := filepath.Join(root, filepath.FromSlash(relative))
 	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 ||
-		info.Size() != expected.Bytes || snapshotFileMode(info) != expected.Mode.Perm() {
+		info.Size() != expected.Bytes || (canonicalMappedMode(info) != expected.Mode.Perm() && snapshotFileMode(info) != expected.Mode.Perm()) {
 		return nil, errors.Join(ErrSourceChanged, err)
 	}
-	value, err := os.ReadFile(path)
+	value, opened, err := secureReadFile(path, maxBytes)
+	if err == nil && !os.SameFile(info, opened) {
+		return nil, ErrSourceChanged
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -700,33 +712,7 @@ func writeMergedTarget(root, relative string, merged mergedContent) error {
 		return ErrWorkspaceReconcilerInvalid
 	}
 	target := filepath.Join(root, filepath.FromSlash(relative))
-	if err := ensurePrivateParent(root, filepath.Dir(target)); err != nil {
-		return err
-	}
-	//paperboat:allow-source-policy atomic-replacement owner=config-sync reason=validated-workspace-merge-staging
-	temporary, err := os.CreateTemp(filepath.Dir(target), ".paperboat-merge-*")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if err = temporary.Chmod(merged.Mode.Perm()); err == nil {
-		_, err = temporary.Write(merged.Value)
-	}
-	if err == nil {
-		err = temporary.Sync()
-	}
-	err = errors.Join(err, temporary.Close())
-	if err != nil {
-		return err
-	}
-	if info, statErr := os.Lstat(target); statErr == nil && (info.IsDir() || info.Mode()&os.ModeSymlink != 0) {
-		return ErrWorkspaceReconcilerInvalid
-	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-		return statErr
-	}
-	//paperboat:allow-source-policy atomic-replacement owner=config-sync reason=validated-workspace-merge-publication
-	return os.Rename(temporaryPath, target)
+	return secureWriteFile(target, merged.Value, merged.Mode)
 }
 
 func uniqueSortedStrings(values []string) []string {
@@ -762,7 +748,7 @@ func (r *PlaintextWorkspaceReconciler) CurrentManifest() Manifest {
 func (r *PlaintextWorkspaceReconciler) PublicationCommitted(ctx context.Context, prepared PreparedPublication, revision string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.pending == nil || prepared.CommitID == "" ||
+	if r.pending == nil || r.pending.Value.MappingRevision != r.mapping.Revision() || prepared.CommitID == "" ||
 		r.pending.CommitID != prepared.CommitID || revision != prepared.CommitID {
 		return ErrBaselineInvalid
 	}
@@ -800,7 +786,7 @@ func (r *PlaintextWorkspaceReconciler) PublicationCommitted(ctx context.Context,
 func (r *PlaintextWorkspaceReconciler) PublicationPrepared(_ context.Context, prepared PreparedPublication) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.pending == nil || prepared.CommitID == "" || r.pending.CommitID != prepared.CommitID {
+	if r.pending == nil || r.pending.Value.MappingRevision != r.mapping.Revision() || prepared.CommitID == "" || r.pending.CommitID != prepared.CommitID {
 		return ErrBaselineInvalid
 	}
 	if len(r.pending.Resolutions) == 0 {
@@ -910,6 +896,13 @@ func (r *PlaintextWorkspaceReconciler) preserveConflicts(
 				continue
 			}
 			source := filepath.Join(side.root, filepath.FromSlash(conflict.Path))
+			if side.name == "local" {
+				var ok bool
+				source, ok = r.mapping.LocalPath(conflict.Path)
+				if !ok {
+					return ErrPathRuleInvalid
+				}
+			}
 			if err := writeConflictFile(target, source, side.state); err != nil {
 				return err
 			}
@@ -948,27 +941,14 @@ func writeConflictFile(target, source string, expected FileState) error {
 	if err != nil || !info.Mode().IsRegular() || info.Size() != expected.Bytes {
 		return errors.Join(ErrSourceChanged, err)
 	}
-	input, err := os.Open(source)
+	value, opened, err := secureReadFile(source, expected.Bytes)
+	if err == nil && (!os.SameFile(info, opened) || hashSnapshotBytes(value) != expected.Hash) {
+		return ErrSourceChanged
+	}
 	if err != nil {
 		return err
 	}
-	defer input.Close()
-	return writePrivateReader(target, input)
-}
-
-func writePrivateReader(target string, input io.Reader) error {
-	file, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
-	}
-	_, err = io.Copy(file, input)
-	syncErr := file.Sync()
-	closeErr := file.Close()
-	if err != nil || syncErr != nil || closeErr != nil {
-		_ = os.Remove(target)
-		return errors.Join(err, syncErr, closeErr)
-	}
-	return nil
+	return writePrivateAtomic(target, value)
 }
 
 func removeManagedPath(root, relative string) error {
@@ -979,18 +959,7 @@ func removeManagedPath(root, relative string) error {
 	if !sameOrInsidePath(target, root) {
 		return ErrWorkspaceReconcilerInvalid
 	}
-	parent, err := filepath.EvalSymlinks(filepath.Dir(target))
-	if err != nil || !sameOrInsidePath(parent, root) {
-		return errors.Join(ErrWorkspaceReconcilerInvalid, err)
-	}
-	info, err := os.Lstat(target)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil || info.IsDir() {
-		return errors.Join(ErrWorkspaceReconcilerInvalid, err)
-	}
-	return os.Remove(target)
+	return secureRemoveFile(target)
 }
 
 func validateRepositoryBatch(root string, status git.Status, policy RuntimePolicy) error {
@@ -1034,4 +1003,53 @@ func boundPathSummaries(values []PathSummary, limit int) []PathSummary {
 		}
 	}
 	return result
+}
+
+func (r *PlaintextWorkspaceReconciler) observeLocal(files map[string]FileState, deleted []string) {
+	r.observed = cloneFileStates(files)
+	for _, name := range deleted {
+		r.observed[name] = FileState{}
+	}
+}
+
+// ObservedLocalFile lets watches distinguish already-reconciled output from
+// subsequent user changes without ignoring edits that happen during sync.
+func (r *PlaintextWorkspaceReconciler) ObservedLocalFile(name string) (FileState, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	state, ok := r.observed[name]
+	return state, ok
+}
+
+func (r *PlaintextWorkspaceReconciler) targetsMatch(config EffectiveConfig) bool {
+	for direction, entry := range []struct {
+		target *RepositoryTarget
+		id     string
+	}{{config.Pull, r.approvedConfiguration.PullRepositoryID}, {config.Push, r.approvedConfiguration.PushRepositoryID}} {
+		if direction == 0 && config.Mode == ModePushOnly || direction == 1 && config.Mode == ModePullOnly {
+			continue
+		}
+		if entry.target == nil {
+			continue
+		}
+		id := entry.id
+		if id == "" {
+			id = r.approvedConfiguration.RepositoryID
+		}
+		if entry.target.RepositoryID != id {
+			return false
+		}
+		if entry.target.URL != "" {
+			matched := false
+			for _, binding := range r.approvedConfiguration.RepositoryBindings {
+				if binding.RepositoryID == id && entry.target.URL == binding.URL {
+					matched = true
+				}
+			}
+			if !matched {
+				return false
+			}
+		}
+	}
+	return true
 }

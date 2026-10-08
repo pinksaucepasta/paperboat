@@ -62,10 +62,21 @@ func validateDNSContext(ctx context.Context) error {
 	}
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return dnsContextError(ctx)
 	default:
 	}
 	return nil
+}
+
+func dnsContextError(ctx context.Context) error {
+	status, cause := ctx.Err(), context.Cause(ctx)
+	if cause == nil {
+		return status
+	}
+	if errors.Is(cause, status) {
+		return cause
+	}
+	return errors.Join(status, cause)
 }
 
 type netMonitor interface {

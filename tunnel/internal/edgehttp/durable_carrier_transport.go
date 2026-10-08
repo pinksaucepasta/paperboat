@@ -13,9 +13,9 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
@@ -26,6 +26,11 @@ const (
 	maximumDataCarrierRoutes           = 4096
 	maximumDataCarrierProbeHeader      = 64 << 10
 )
+
+type originProbeStatusError struct{ status int }
+
+func (e originProbeStatusError) Error() string         { return "origin readiness request failed" }
+func (e originProbeStatusError) DiagnosticStatus() int { return e.status }
 
 var (
 	ErrDataCarrierRouteInvalid     = errors.New("invalid durable data-carrier route")
@@ -415,16 +420,10 @@ func (r *DataCarrierRouteRegistry) entryForExactAssignment(rule route.RouteRule)
 	defer r.mu.RUnlock()
 	entry := r.byKey[carrierRouteIdentityKey(identity)]
 	if entry == nil {
-		candidates := 0
-		for _, candidate := range r.byKey {
-			if candidate != nil && candidate.identity.AccountID == rule.AccountID && candidate.identity.TunnelID == rule.TunnelID {
-				candidates++
-			}
-		}
-		return nil, fmt.Errorf("%w: exact carrier missing for connector=%s session=%s process=%d config=%d candidates=%d", ErrDataCarrierRouteUnavailable, rule.ConnectorID, rule.ConnectorSessionID, rule.ConnectorProcessGeneration, rule.ConfigGeneration, candidates)
+		return nil, fmt.Errorf("%w: exact carrier missing", ErrDataCarrierRouteUnavailable)
 	}
 	if entry.identity != identity || entry.server == nil || !entry.state.Ready || entry.state.Generation != rule.ConfigGeneration || uint32(entry.server.ActiveStreams()) >= entry.state.Capacity {
-		return nil, fmt.Errorf("%w: exact carrier is not ready for connector=%s session=%s process=%d config=%d", ErrDataCarrierRouteUnavailable, rule.ConnectorID, rule.ConnectorSessionID, rule.ConnectorProcessGeneration, rule.ConfigGeneration)
+		return nil, fmt.Errorf("%w: exact carrier is not ready", ErrDataCarrierRouteUnavailable)
 	}
 	select {
 	case <-entry.server.Done():
@@ -433,7 +432,7 @@ func (r *DataCarrierRouteRegistry) entryForExactAssignment(rule route.RouteRule)
 	}
 	binding, ok := replicaRouteBinding(entry.state.RouteBindings, carrierRouteID(rule))
 	if !ok || !sortedContains(entry.state.HealthyRoutes, carrierRouteID(rule)) || binding.AssignmentID != rule.AssignmentID || binding.AssignmentGeneration != rule.AssignmentGeneration || binding.RouteGeneration != rule.RouteGeneration || binding.ConfigContentHash != rule.ConfigContentHash {
-		return nil, fmt.Errorf("%w: exact route binding mismatch route=%s assignment=%s generation=%d", ErrDataCarrierRouteUnavailable, carrierRouteID(rule), rule.AssignmentID, rule.AssignmentGeneration)
+		return nil, fmt.Errorf("%w: exact route binding mismatch", ErrDataCarrierRouteUnavailable)
 	}
 	return entry, nil
 }
@@ -483,6 +482,9 @@ func (r *DataCarrierRouteRegistry) OpenRouteStream(ctx context.Context, rule rou
 		return nil, ErrDataCarrierRouteInvalid
 	}
 	entry, err := r.entryFor(rule, requestID)
+	if _, native := ctx.Value(privateIngressDecisionKey{}).(connectorprotocol.IngressDecision); native {
+		entry, err = r.entryForExactAssignment(rule)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -552,14 +554,16 @@ func (r *DataCarrierRouteRegistry) ProbeRoutes(ctx context.Context, rules []rout
 	if r.ingressAuthority != nil {
 		for _, rule := range rules {
 			probe, cancel := context.WithTimeout(ctx, defaultDataCarrierRouteOpenTimeout)
-			stream, err := r.openExactAssignmentWithTimeout(probe, probe, rule, fmt.Sprintf("ready-%d", time.Now().UnixNano()), "connector_ready")
+			stream, err := r.openExactAssignmentWithTimeout(probe, probe, rule, "request_"+uuid.NewString(), "connector_ready")
 			if err == nil {
 				var ack [1]byte
 				_, err = io.ReadFull(stream, ack[:])
 				if err == nil && ack[0] != 1 {
 					err = ErrDataCarrierRouteUnavailable
 				}
-				_ = stream.Close()
+				if closeErr := stream.Close(); !expectedPrivateStreamClose(closeErr) {
+					err = errors.Join(err, closeErr)
+				}
 			}
 			cancel()
 			if err != nil {
@@ -570,9 +574,9 @@ func (r *DataCarrierRouteRegistry) ProbeRoutes(ctx context.Context, rules []rout
 	}
 	ordered := append([]route.RouteRule(nil), rules...)
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
-	for index, rule := range ordered {
+	for _, rule := range ordered {
 		probeContext, cancel := context.WithTimeout(ctx, defaultDataCarrierRouteOpenTimeout)
-		requestID := fmt.Sprintf("edge-probe-%d-%d", time.Now().UnixNano(), index)
+		requestID := "request_" + uuid.NewString()
 		stream, err := r.openExactAssignmentWithTimeout(probeContext, probeContext, rule, requestID)
 		if err != nil {
 			cancel()
@@ -583,17 +587,25 @@ func (r *DataCarrierRouteRegistry) ProbeRoutes(ctx context.Context, rules []rout
 			host = rule.HostOverride
 		}
 		_, writeErr := io.WriteString(stream, "GET / HTTP/1.1\r\nHost: "+host+"\r\nConnection: close\r\n\r\n")
+		var response *http.Response
 		if writeErr == nil {
-			response, readErr := http.ReadResponse(bufio.NewReader(io.LimitReader(stream, maximumDataCarrierProbeHeader)), &http.Request{Method: http.MethodGet})
-			if response != nil && response.Body != nil {
-				_ = response.Body.Close()
-			}
+			var readErr error
+			response, readErr = http.ReadResponse(bufio.NewReader(io.LimitReader(stream, maximumDataCarrierProbeHeader)), &http.Request{Method: http.MethodGet})
 			writeErr = readErr
 			if writeErr == nil && response.StatusCode >= 500 {
-				writeErr = fmt.Errorf("origin returned status %d", response.StatusCode)
+				writeErr = originProbeStatusError{status: response.StatusCode}
 			}
 		}
-		_ = stream.Close()
+		// Readiness consumes headers only. Close the carrier before the HTTP
+		// body: net/http may otherwise drain an indefinitely stalled origin.
+		if closeErr := stream.Close(); !expectedPrivateStreamClose(closeErr) {
+			writeErr = errors.Join(writeErr, closeErr)
+		}
+		if response != nil && response.Body != nil {
+			if closeErr := response.Body.Close(); !expectedPrivateStreamClose(closeErr) {
+				writeErr = errors.Join(writeErr, closeErr)
+			}
+		}
 		cancel()
 		if writeErr != nil {
 			return writeErr
@@ -613,12 +625,12 @@ func (r *DataCarrierRouteRegistry) ProbePrivateRoutes(ctx context.Context, rules
 	}
 	ordered := append([]route.RouteRule(nil), rules...)
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
-	for index, rule := range ordered {
+	for _, rule := range ordered {
 		if rule.Kind != route.TunnelPrivateTCP || rule.AccessMode != "private" || rule.Protocol != "private_tcp" {
 			return ErrDataCarrierRouteInvalid
 		}
 		probeContext, cancel := context.WithTimeout(ctx, defaultDataCarrierRouteOpenTimeout)
-		requestID := fmt.Sprintf("edge-private-probe-%d-%d", time.Now().UnixNano(), index)
+		requestID := "request_" + uuid.NewString()
 		stream, err := r.openExactAssignmentWithTimeout(probeContext, probeContext, rule, requestID)
 		if err == nil {
 			err = stream.Close()
@@ -668,7 +680,6 @@ func carrierRouteID(rule route.RouteRule) string {
 type DataCarrierRouteTransport struct {
 	registry *DataCarrierRouteRegistry
 	openWait time.Duration
-	nextID   atomic.Uint64
 }
 
 type DataCarrierRouteTransportConfig struct {
@@ -700,21 +711,37 @@ func (t *DataCarrierRouteTransport) RoundTrip(request *http.Request) (*http.Resp
 	if !ok || match.Rule.Kind != route.TunnelHTTPSWSS {
 		return nil, ErrDataCarrierRouteInvalid
 	}
-	if (match.Rule.AccessMode == "private" || match.Rule.AccessMode == "team") && !hasBrowserDecision(request.Context(), match) {
+	if (match.Rule.AccessMode == "private" || match.Rule.AccessMode == "team") && !hasBrowserDecision(request.Context(), match) && !hasNativeIngressDecision(request.Context(), match) {
 		// Private durable routes require the explicit private-access decision
 		// contract. This transport has no proof source, so never downgrade one
 		// to public forwarding.
 		return nil, ErrDataCarrierRouteInvalid
 	}
-	requestID := fmt.Sprintf("edge-http-%d", t.nextID.Add(1))
+	requestID := requestIDFor(request)
 	openContext, cancel := context.WithTimeout(request.Context(), t.openWait)
 	defer cancel()
 	stream, err := t.registry.openWithTimeout(openContext, request.Context(), match.Rule, requestID)
 	if err != nil {
 		return nil, err
 	}
-	stopCancel := context.AfterFunc(request.Context(), func() { _ = stream.Close() })
 	out := request.Clone(request.Context())
+	originalBody := out.Body
+	var closeRequestOnce sync.Once
+	var closeRequestErr error
+	closeRequestBody := func() error {
+		closeRequestOnce.Do(func() {
+			if originalBody != nil {
+				closeRequestErr = originalBody.Close()
+			}
+		})
+		return closeRequestErr
+	}
+	var upload *requestUploadBody
+	if originalBody != nil {
+		upload = &requestUploadBody{body: originalBody, closeBody: closeRequestBody}
+		out.Body = upload
+	}
+	stopCancel := context.AfterFunc(request.Context(), func() { _ = closeRequestBody(); _ = stream.Close() })
 	out.RequestURI = ""
 	out.URL.Scheme = ""
 	out.URL.Host = ""
@@ -723,10 +750,10 @@ func (t *DataCarrierRouteTransport) RoundTrip(request *http.Request) (*http.Resp
 	}
 	writeDone := make(chan error, 1)
 	go func() {
-		if out.Body != nil {
-			defer out.Body.Close()
+		writeErr := upload.preserve(out.Write(stream))
+		if closeErr := closeRequestBody(); closeErr != nil && !expectedPrivateStreamClose(closeErr) {
+			writeErr = errors.Join(writeErr, closeErr)
 		}
-		writeErr := out.Write(stream)
 		if writeErr != nil {
 			_ = stream.Close()
 		}
@@ -736,14 +763,16 @@ func (t *DataCarrierRouteTransport) RoundTrip(request *http.Request) (*http.Resp
 	response, err := http.ReadResponse(responseReader, out)
 	if err != nil {
 		stopCancel()
-		_ = stream.Close()
-		return nil, errors.Join(ErrDataCarrierRouteTransport, err)
+		closeErr := stream.Close()
+		requestCloseErr := closeRequestBody()
+		writeErr := <-writeDone
+		return nil, errors.Join(ErrDataCarrierRouteTransport, err, request.Context().Err(), closeErr, requestCloseErr, writeErr)
 	}
 	response.Request = request
 	if response.StatusCode == http.StatusSwitchingProtocols {
-		response.Body = &dataCarrierRouteUpgradeBody{reader: responseReader, stream: stream, stopCancel: stopCancel, writeDone: writeDone}
+		response.Body = &dataCarrierRouteUpgradeBody{reader: responseReader, stream: stream, stopCancel: stopCancel, writeDone: writeDone, closeRequestBody: closeRequestBody}
 	} else {
-		response.Body = &dataCarrierPreviewResponseBody{body: response.Body, stream: stream, stopCancel: stopCancel, writeDone: writeDone}
+		response.Body = &dataCarrierPreviewResponseBody{body: response.Body, stream: stream, stopCancel: stopCancel, writeDone: writeDone, closeRequestBody: closeRequestBody}
 	}
 	return response, nil
 }
@@ -753,14 +782,15 @@ func (t *DataCarrierRouteTransport) RoundTrip(request *http.Request) (*http.Resp
 // ReverseProxy requires the response body to be an io.ReadWriteCloser before
 // it will bridge an upgraded connection.
 type dataCarrierRouteUpgradeBody struct {
-	reader         io.Reader
-	stream         io.ReadWriteCloser
-	stopCancel     func() bool
-	writeDone      <-chan error
-	lifetimeCancel context.CancelFunc
-	lifetimeTimer  *time.Timer
-	once           sync.Once
-	err            error
+	reader           io.Reader
+	stream           io.ReadWriteCloser
+	stopCancel       func() bool
+	writeDone        <-chan error
+	closeRequestBody func() error
+	lifetimeCancel   context.CancelFunc
+	lifetimeTimer    *time.Timer
+	once             sync.Once
+	err              error
 }
 
 func (b *dataCarrierRouteUpgradeBody) Read(payload []byte) (int, error) {
@@ -786,19 +816,14 @@ func (b *dataCarrierRouteUpgradeBody) Close() error {
 		if b.stopCancel != nil {
 			b.stopCancel()
 		}
+		if b.closeRequestBody != nil {
+			b.err = joinPrivateStreamError(b.err, b.closeRequestBody())
+		}
 		if b.stream != nil {
-			if err := b.stream.Close(); !expectedPrivateStreamClose(err) {
-				b.err = err
-			}
+			b.err = joinPrivateStreamError(b.err, b.stream.Close())
 		}
 		if b.writeDone != nil {
-			select {
-			case err := <-b.writeDone:
-				if b.err == nil && !expectedPrivateStreamClose(err) {
-					b.err = err
-				}
-			default:
-			}
+			b.err = joinPrivateStreamError(b.err, <-b.writeDone)
 		}
 	})
 	return b.err
@@ -809,6 +834,9 @@ func (r *DataCarrierRouteRegistry) openWithTimeout(openCtx, lifetimeCtx context.
 		return nil, ErrDataCarrierRouteInvalid
 	}
 	entry, err := r.entryFor(rule, requestID)
+	if _, native := openCtx.Value(privateIngressDecisionKey{}).(connectorprotocol.IngressDecision); native {
+		entry, err = r.entryForExactAssignment(rule)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -880,3 +908,8 @@ var _ interface {
 	ProbeRoutes(context.Context, []route.RouteRule) error
 	OpenRouteStream(context.Context, route.RouteRule, string) (io.ReadWriteCloser, error)
 } = (*DataCarrierRouteRegistry)(nil)
+
+func hasNativeIngressDecision(ctx context.Context, match route.RouteMatch) bool {
+	d, ok := ctx.Value(privateIngressDecisionKey{}).(connectorprotocol.IngressDecision)
+	return ok && nativeIngressMatches(d, match.Rule)
+}

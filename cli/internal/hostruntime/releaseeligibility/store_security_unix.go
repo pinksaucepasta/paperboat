@@ -22,7 +22,10 @@ func createTemporaryFile(directory, base string) (*os.File, string, error) {
 // real, private directory owned by this updater process.
 func validateParentSecurity(path string, _ os.FileInfo) error {
 	info, err := os.Lstat(path)
-	if err != nil || info == nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+	if err != nil {
+		return safeStoreFailure("release eligibility directory could not be inspected", ErrUnsafePath, err)
+	}
+	if info == nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return ErrUnsafePath
 	}
 	if info.Mode().Perm()&0o022 != 0 || !ownedByCurrentUser(info) {

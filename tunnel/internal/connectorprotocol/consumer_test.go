@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -230,13 +231,13 @@ func TestConsumerReturnsRejectedAckWhenSnapshotPreparationFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot.AccountID, snapshot.ConnectorID, snapshot.SessionID, snapshot.ProcessGeneration = auth.AccountID, auth.ConnectorID, welcome.SessionID, 1
-	runtime.stageErr = errors.New("staging failed")
+	runtime.stageErr = syscall.EIO
 	frame, err := NewFrame(MessageSnapshot, "req_snapshot_rejected", snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
 	response, applyErr := consumer.HandleFrame(context.Background(), frame)
-	if applyErr == nil || CodeOf(applyErr) != CodeSnapshotRejected {
+	if applyErr == nil || CodeOf(applyErr) != CodeSnapshotRejected || !errors.Is(applyErr, syscall.EIO) || applyErr.Error() != string(CodeSnapshotRejected) {
 		t.Fatalf("apply error=%v", applyErr)
 	}
 	if response.Type != MessageAck {
@@ -248,6 +249,24 @@ func TestConsumerReturnsRejectedAckWhenSnapshotPreparationFails(t *testing.T) {
 	}
 	if ack.Status != AckRejected || ack.Code != CodeSnapshotRejected || ack.Generation != snapshot.Generation || ack.ContentHash != snapshot.ContentHash {
 		t.Fatalf("rejection ack=%+v", ack)
+	}
+	runtime.stageErr = nil
+	recovered, err := consumer.HandleFrame(context.Background(), frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ack = Ack{}
+	if err := recovered.DecodePayload(&ack); err != nil {
+		t.Fatal(err)
+	}
+	if ack.Status != AckApplied || ack.Code != "" || ack.Generation != snapshot.Generation {
+		t.Fatalf("recovery ack=%+v", ack)
+	}
+	if _, err := consumer.ReadyFrame("req_recovered_ready", context.Background(), true, true, true); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.activations != 1 {
+		t.Fatalf("activations=%d", runtime.activations)
 	}
 }
 

@@ -54,23 +54,23 @@ func (c *Client) StreamStatus(ctx context.Context) (pb.DaemonService_StreamStatu
 	return c.client.StreamStatus(rpcContext(ctx), &pb.Empty{})
 }
 
-// ResolveDevice queries the daemon to resolve a peer device to its 127.100.x.x IP and ports.
-func (c *Client) ResolveDevice(ctx context.Context, query string) (*pb.DeviceAddress, error) {
-	return c.client.ResolveDevice(rpcContext(ctx), &pb.DeviceQuery{Query: query})
+// ResolveMachine queries the daemon to resolve a peer machine to its 127.100.x.x IP and ports.
+func (c *Client) ResolveMachine(ctx context.Context, query string) (*pb.MachineAddress, error) {
+	return c.client.ResolveMachine(rpcContext(ctx), &pb.MachineQuery{Query: query})
 }
 
-// SetDeviceTags sets or replaces the tags associated with a device.
-func (c *Client) SetDeviceTags(ctx context.Context, deviceID string, tags []string) (*pb.SetDeviceTagsResponse, error) {
-	return c.client.SetDeviceTags(rpcContext(ctx), &pb.SetDeviceTagsRequest{
-		DeviceId: deviceID,
-		Tags:     tags,
+// SetMachineTags sets or replaces the tags associated with a machine.
+func (c *Client) SetMachineTags(ctx context.Context, machineID string, tags []string) (*pb.SetMachineTagsResponse, error) {
+	return c.client.SetMachineTags(rpcContext(ctx), &pb.SetMachineTagsRequest{
+		MachineId: machineID,
+		Tags:      tags,
 	})
 }
 
 // ApprovePeer approves or revokes peer access.
-func (c *Client) ApprovePeer(ctx context.Context, deviceID string, approved bool) (*pb.ApprovePeerResponse, error) {
+func (c *Client) ApprovePeer(ctx context.Context, machineID string, approved bool) (*pb.ApprovePeerResponse, error) {
 	return c.client.ApprovePeer(rpcContext(ctx), &pb.ApprovePeerRequest{
-		DeviceId: deviceID,
-		Approved: approved,
+		MachineId: machineID,
+		Approved:  approved,
 	})
 }

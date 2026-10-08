@@ -10,12 +10,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 var (
@@ -32,8 +34,11 @@ func (e *ReplacementCommittedError) Error() string {
 	if e == nil || e.Err == nil {
 		return "worker replacement committed"
 	}
-	return "worker replacement committed: " + e.Err.Error()
+	return "worker replacement committed; the new worker is active, but previous worker cleanup failed. Run pb doctor to check runtime health"
 }
+
+func (*ReplacementCommittedError) DiagnosticStage() string { return "component_shutdown" }
+func (*ReplacementCommittedError) DiagnosticCode() string  { return "shutdown_failed" }
 
 func (e *ReplacementCommittedError) Unwrap() error {
 	if e == nil {
@@ -69,8 +74,8 @@ type TunnelWorkloads interface {
 // exposed read-only through Daemon so protocol handlers can use the same
 // managers without duplicating process ownership in workers.
 type Workloads struct {
-	Sessions   *session.Manager
-	Executions *execprocess.Manager
+	Sessions   session.Service
+	Executions execprocess.Service
 	Transfers  *filetransfer.Service
 	Previews   *preview.Registry
 	ManagedSSH *managedssh.Host
@@ -78,9 +83,8 @@ type Workloads struct {
 }
 
 func (w Workloads) valid() bool {
-	// Host mode owns sessions and executions as a pair. Client mode owns no
-	// command workloads, but it still needs the stable transfer manager so file
-	// receipt survives coordination-worker replacement.
+	// Sessions and executions share terminal workload ownership. Transfers
+	// remain durable across coordination-worker replacement.
 	return w.Transfers != nil && (w.Sessions == nil) == (w.Executions == nil)
 }
 
@@ -94,11 +98,13 @@ type Config struct {
 // actual hostd shutdown.  Worker replacement is performed by WorkerController
 // and never invokes Daemon.Shutdown.
 type Daemon struct {
-	mu      sync.RWMutex
-	config  Config
-	started []Component
-	running bool
-	stopped bool
+	mu        sync.RWMutex
+	config    Config
+	started   []Component
+	running   bool
+	stopped   bool
+	recorder  *diagnostics.Recorder
+	reference string
 }
 
 func New(config Config) (*Daemon, error) {
@@ -127,20 +133,29 @@ func New(config Config) (*Daemon, error) {
 func (d *Daemon) Workloads() Workloads { return d.config.Workloads }
 
 func (d *Daemon) Start(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.running || d.stopped {
 		return ErrInvalidState
 	}
+	d.recorder = diagnostics.FromContext(ctx)
+	d.reference = supportref.FromContext(ctx)
+	if d.reference == "" {
+		d.reference = supportref.New()
+	}
+	ctx = d.diagnosticContext(ctx)
 	for _, component := range d.config.Components {
 		if err := invokeComponent(ctx, component, "component_start", component.Service.Start); err != nil {
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), d.config.ShutdownTimeout)
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), d.config.ShutdownTimeout)
 			failedCleanupErr := invokeComponent(cleanupCtx, component, "component_rollback", component.Service.Shutdown)
 			cancel()
 			if !component.Required && failedCleanupErr == nil {
 				continue
 			}
-			cleanupCtx, cancel = context.WithTimeout(context.Background(), d.config.ShutdownTimeout)
+			cleanupCtx, cancel = context.WithTimeout(context.WithoutCancel(ctx), d.config.ShutdownTimeout)
 			cleanupErr := d.shutdownStarted(cleanupCtx, "component_rollback")
 			cancel()
 			return errors.Join(fmt.Errorf("start stable %s: %w", component.Name, err), failedCleanupErr, cleanupErr)
@@ -152,6 +167,9 @@ func (d *Daemon) Start(ctx context.Context) error {
 }
 
 func (d *Daemon) Shutdown(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.stopped {
@@ -160,11 +178,23 @@ func (d *Daemon) Shutdown(ctx context.Context) error {
 	if !d.running {
 		return ErrInvalidState
 	}
+	ctx = d.diagnosticContext(ctx)
 	shutdownCtx, cancel := context.WithTimeout(ctx, d.config.ShutdownTimeout)
 	defer cancel()
 	err := d.shutdownStarted(shutdownCtx, "component_shutdown")
 	d.running, d.stopped = false, true
 	return err
+}
+
+// The process owns the recorder; supervisor shutdown only borrows it.
+func (d *Daemon) diagnosticContext(ctx context.Context) context.Context {
+	if supportref.FromContext(ctx) == "" {
+		ctx = supportref.WithContext(ctx, d.reference)
+	}
+	if diagnostics.FromContext(ctx) == nil && d.recorder != nil {
+		ctx = diagnostics.WithRecorder(ctx, d.recorder)
+	}
+	return ctx
 }
 
 func (d *Daemon) shutdownStarted(ctx context.Context, stage string) error {
@@ -265,6 +295,21 @@ func (c *WorkerController) Shutdown(ctx context.Context) error {
 
 func invokeComponent(ctx context.Context, component Component, stage string, run func(context.Context) error) error {
 	err := run(ctx)
+	if err == nil {
+		err = ctx.Err()
+	}
 	errorreport.Current().ServiceLifecycle(ctx, component.Name, stage, err)
+	if err == nil {
+		if recorder := diagnostics.FromContext(ctx); recorder != nil {
+			code := "ready"
+			if stage != "component_start" {
+				code = "stopped"
+			}
+			_ = recorder.RecordWithSupportReference(stage, code, "info", supportref.FromContext(ctx), map[string]string{
+				"component": "paperboat-daemon", "service_component": errorreport.ServiceComponent(component.Name),
+				"operation": stage, "outcome": "success",
+			})
+		}
+	}
 	return err
 }

@@ -93,11 +93,7 @@ func stageSnapshot(state hoststate.State, snapshot Snapshot, now time.Time, stab
 	if err != nil {
 		return hoststate.State{}, false, err
 	}
-	endpointID, err := hoststate.StableEndpointIDForEndpoint(decoded.StableEndpoint)
-	if err != nil {
-		return hoststate.State{}, false, err
-	}
-	if endpointID != stableEndpointID {
+	if decoded.StableEndpointID != stableEndpointID {
 		return hoststate.State{}, false, codeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, hoststate.ErrInvalidState)
 	}
 	converted, err := hoststate.NewConfigSnapshot(snapshot.TunnelID, snapshot.Generation, snapshot.Payload)

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -51,7 +52,8 @@ func (e *workflowAcceptanceEnrollment) Enroll(ctx context.Context, tunnelID, req
 	if e.harness.event("hostd.connector.enroll") {
 		return tunnelenrollment.Projection{}, ctx.Err()
 	}
-	if tunnelID != "tun_workflow" || !strings.HasPrefix(requestID, "connector-add-") {
+	parsed, parseErr := uuid.Parse(strings.TrimPrefix(requestID, "operation_"))
+	if tunnelID != "tun_workflow" || parseErr != nil || parsed.Version() != 4 || parsed.Variant() != uuid.RFC4122 || "operation_"+parsed.String() != requestID {
 		return tunnelenrollment.Projection{}, tunnelenrollment.ErrInvalid
 	}
 	if e.fail != nil {
@@ -131,20 +133,24 @@ func (w *workflowAcceptanceWriter) Write(body []byte) (int, error) {
 }
 
 type workflowAcceptanceHarness struct {
-	t              *testing.T
-	events         workflowAcceptanceEvents
-	stateRoot      string
-	server         *httptest.Server
-	ready          bool
-	keySequence    int
-	createCalls    int
-	domainCalls    int
-	cancelAt       string
-	cancel         context.CancelFunc
-	commandContext context.Context
-	lastRequest    tunnelCreateWorkflowRequest
-	hasRequest     bool
-	enrollment     *workflowAcceptanceEnrollment
+	t                    *testing.T
+	events               workflowAcceptanceEvents
+	stateRoot            string
+	server               *httptest.Server
+	ready                bool
+	keySequence          int
+	createCalls          int
+	completedReplay      bool
+	failedReplay         bool
+	wrongReplayOperation bool
+	wrongReplayTunnel    bool
+	domainCalls          int
+	cancelAt             string
+	cancel               context.CancelFunc
+	commandContext       context.Context
+	lastRequest          tunnelCreateWorkflowRequest
+	hasRequest           bool
+	enrollment           *workflowAcceptanceEnrollment
 }
 
 func newWorkflowAcceptanceHarness(t *testing.T) *workflowAcceptanceHarness {
@@ -198,7 +204,7 @@ func newWorkflowAcceptanceHarness(t *testing.T) *workflowAcceptanceHarness {
 	}
 	newTunnelIdempotencyKey = func() (string, error) {
 		h.keySequence++
-		return fmt.Sprintf("workflow_key_%02d", h.keySequence), nil
+		return fmt.Sprintf("operation_00000000-0000-4000-8000-%012d", h.keySequence), nil
 	}
 	beginTunnelCreateWorkflowForCommand = func(ctx context.Context, request tunnelCreateWorkflowRequest) (tunnelCreateWorkflow, error) {
 		h.events.add("workflow.begin")
@@ -240,7 +246,7 @@ func (h *workflowAcceptanceHarness) serveControlPlane(w http.ResponseWriter, r *
 			return
 		}
 		h.createCalls++
-		if key := r.Header.Get("Idempotency-Key"); key != "workflow_key_01" {
+		if key := r.Header.Get("Idempotency-Key"); key != "operation_00000000-0000-4000-8000-000000000001" {
 			h.t.Errorf("tunnel idempotency key=%q", key)
 		}
 		var input api.TunnelCreateInput
@@ -256,7 +262,32 @@ func (h *workflowAcceptanceHarness) serveControlPlane(w http.ResponseWriter, r *
 		tunnel.ETag = `"tunnel:tun_workflow:1"`
 		operation := validCommandOperation("tunnel", tunnel.ID)
 		operation.ID = "operation_workflow"
-		_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelMutation{Tunnel: tunnel, Operation: operation, Replayed: h.createCalls > 1, Changed: h.createCalls == 1}})
+		if h.createCalls > 1 && h.wrongReplayOperation {
+			operation.ID = "operation_wrong"
+		}
+		if h.createCalls > 1 && h.wrongReplayTunnel {
+			operation.ResourceID = "tun_wrong"
+		}
+		if h.createCalls > 1 && h.completedReplay {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": tunnel})
+		} else {
+			operation.State, operation.Phase = "running", "connecting"
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": operation})
+		}
+	case r.Method == http.MethodGet && (r.URL.Path == "/v1/tunnels/tun_workflow" || r.URL.Path == "/v1/tunnels/tun_wrong"):
+		tunnel := validCommandTunnel()
+		tunnel.ID, tunnel.Name, tunnel.AccessMode = strings.TrimPrefix(r.URL.Path, "/v1/tunnels/"), "workflow", "public"
+		tunnel.ETag = `"tunnel:` + tunnel.ID + `:1"`
+		w.Header().Set("ETag", tunnel.ETag)
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": tunnel})
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/operations/operation_workflow":
+		operation := validCommandOperation("tunnel", "tun_workflow")
+		operation.ID = "operation_workflow"
+		if h.failedReplay {
+			operation.State, operation.Phase = "failed", "failed"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": operation})
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/tunnels/tun_workflow/routes":
 		if h.event("control.routes.list") {
 			w.WriteHeader(499)
@@ -271,7 +302,7 @@ func (h *workflowAcceptanceHarness) serveControlPlane(w http.ResponseWriter, r *
 			return
 		}
 		h.domainCalls++
-		if key := r.Header.Get("Idempotency-Key"); key != "workflow_key_02" {
+		if key := r.Header.Get("Idempotency-Key"); key != "operation_00000000-0000-4000-8000-000000000002" {
 			h.t.Errorf("domain idempotency key=%q", key)
 		}
 		var input api.TunnelDomainInput
@@ -344,7 +375,7 @@ func (h *workflowAcceptanceHarness) assertJournalLockReleased(t *testing.T) {
 func assertWorkflowAcceptanceSecretSafe(t *testing.T, values ...string) {
 	t.Helper()
 	for _, value := range values {
-		for _, secret := range []string{workflowAcceptanceSecret, "workflow_key_01", "workflow_key_02", "workflow_key_03"} {
+		for _, secret := range []string{workflowAcceptanceSecret, "operation_00000000-0000-4000-8000-000000000001", "operation_00000000-0000-4000-8000-000000000002", "operation_00000000-0000-4000-8000-000000000003"} {
 			if strings.Contains(value, secret) {
 				t.Fatalf("secret %q escaped in %q", secret, value)
 			}
@@ -385,7 +416,7 @@ func TestTunnelCreateWorkflowHumanOutputIsFinalAndSecretSafe(t *testing.T) {
 			t.Fatalf("output missing %q: %s", expected, stdout)
 		}
 	}
-	if stderr != "" {
+	if stderr != "Creating tunnel… Ctrl+C to cancel.\nWaiting for the tunnel connector to become ready…\n" {
 		t.Fatalf("stderr=%q", stderr)
 	}
 	assertWorkflowAcceptanceSecretSafe(t, stdout, stderr)
@@ -456,5 +487,39 @@ func TestTunnelCreateWorkflowHarnessRejectsTrailingOutputSecrets(t *testing.T) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&output); err != nil || decoder.Decode(&struct{}{}) != io.EOF || output.Connector.ConnectorID != "connector_workflow" {
 		t.Fatalf("unsafe output=%q decode=%v", stdout, err)
+	}
+}
+
+func TestTunnelCreateWorkflowCanonicalReplayIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name                                           string
+		completed, wrongOperation, wrongTunnel, failed bool
+	}{
+		{name: "completed", completed: true}, {name: "failed", completed: true, failed: true}, {name: "wrong_operation", wrongOperation: true}, {name: "wrong_tunnel", wrongTunnel: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newWorkflowAcceptanceHarness(t)
+			h.enrollment.fail = tunnelenrollment.ErrUnavailable
+			_, _, err := h.execute(true, false)
+			var changed *TunnelCreateChangedError
+			if !errors.As(err, &changed) {
+				t.Fatalf("first create: %v", err)
+			}
+			h.completedReplay, h.wrongReplayOperation, h.wrongReplayTunnel = tc.completed, tc.wrongOperation, tc.wrongTunnel
+			h.failedReplay = tc.failed
+			out, _, err := h.execute(true, false)
+			if tc.failed {
+				var outcome *TunnelOperationOutcomeError
+				if !errors.As(err, &outcome) || out != "" {
+					t.Fatalf("failed replay: %s %v", out, err)
+				}
+			} else if tc.completed {
+				if err != nil || !strings.Contains(out, `"replayed":true`) {
+					t.Fatalf("completed replay: %s %v", out, err)
+				}
+			} else if !errors.Is(err, api.ErrUnsafeTunnelResponse) {
+				t.Fatalf("identity mismatch accepted: %v", err)
+			}
+		})
 	}
 }

@@ -35,7 +35,7 @@ func NewFileCredentialStore(stateRoot string) (*FileCredentialStore, error) {
 	}
 	root := filepath.Join(stateRoot, "tunnel-enrollment")
 	if err := os.MkdirAll(root, 0o700); err != nil {
-		return nil, errors.Join(ErrSecretStore, err)
+		return nil, safeEnrollmentFailure("tunnel enrollment credential store is unavailable", ErrSecretStore, err)
 	}
 	return &FileCredentialStore{root: root, secrets: config.FileSecretStore{Dir: filepath.Join(root, "credentials")}}, nil
 }
@@ -58,7 +58,7 @@ func (s *FileCredentialStore) CreateKey(ctx context.Context, refID string) (Cred
 	}
 	reference := "protected-file://paperboat/connectors/" + refID
 	if err := s.secrets.Set(keyRef(reference), base64.RawURLEncoding.EncodeToString(private)); err != nil {
-		return Credential{}, errors.Join(ErrSecretStore, err)
+		return Credential{}, safeEnrollmentFailure("tunnel enrollment credential store is unavailable", ErrSecretStore, err)
 	}
 	return Credential{Reference: reference, KeyID: "ed25519:" + thumbprint, Thumbprint: thumbprint, PublicKey: append([]byte(nil), public...)}, nil
 }
@@ -73,7 +73,7 @@ func (s *FileCredentialStore) Put(ctx context.Context, private ed25519.PrivateKe
 	if err := ctx.Err(); err != nil {
 		return connectorrotation.KeyReference{}, err
 	}
-	refID, err := randomID("credential")
+	refID, err := randomID("key")
 	if err != nil {
 		return connectorrotation.KeyReference{}, err
 	}
@@ -84,7 +84,7 @@ func (s *FileCredentialStore) Put(ctx context.Context, private ed25519.PrivateKe
 	}
 	reference := "protected-file://paperboat/connectors/" + refID
 	if err := s.secrets.Set(keyRef(reference), base64.RawURLEncoding.EncodeToString(private)); err != nil {
-		return connectorrotation.KeyReference{}, errors.Join(ErrSecretStore, err)
+		return connectorrotation.KeyReference{}, safeEnrollmentFailure("tunnel enrollment credential store is unavailable", ErrSecretStore, err)
 	}
 	return connectorrotation.KeyReference{Reference: reference, KeyID: "ed25519:" + thumbprint, Thumbprint: thumbprint, PublicKey: public}, nil
 }
@@ -97,8 +97,8 @@ func (s *FileCredentialStore) Delete(ctx context.Context, reference string) erro
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := s.secrets.Delete(keyRef(reference)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return errors.Join(ErrSecretStore, err)
+	if err := s.secrets.Delete(keyRef(reference)); err != nil {
+		return safeEnrollmentFailure("tunnel enrollment credential store is unavailable", ErrSecretStore, err)
 	}
 	return nil
 }
@@ -109,12 +109,12 @@ func (s *FileCredentialStore) Sign(ctx context.Context, reference string, payloa
 	}
 	encoded, err := s.secrets.Get(keyRef(reference))
 	if err != nil {
-		return nil, errors.Join(ErrSecretStore, err)
+		return nil, safeEnrollmentFailure("tunnel enrollment credential store is unavailable", ErrSecretStore, err)
 	}
 	private, err := base64.RawURLEncoding.Strict().DecodeString(encoded)
 	if err != nil || len(private) != ed25519.PrivateKeySize {
 		clear(private)
-		return nil, ErrSecretStore
+		return nil, safeEnrollmentFailure("tunnel enrollment credential is unavailable", ErrSecretStore, err)
 	}
 	defer clear(private)
 	return ed25519.Sign(ed25519.PrivateKey(private), payload), nil
@@ -126,7 +126,7 @@ func (s *FileCredentialStore) PutEnrollmentToken(ctx context.Context, refID, tok
 	}
 	reference := "token-" + refID
 	if err := s.secrets.Set(reference, token); err != nil {
-		return "", errors.Join(ErrSecretStore, err)
+		return "", safeEnrollmentFailure("tunnel enrollment credential store is unavailable", ErrSecretStore, err)
 	}
 	return reference, nil
 }
@@ -136,7 +136,7 @@ func (s *FileCredentialStore) EnrollmentToken(ctx context.Context, reference str
 	}
 	value, err := s.secrets.Get(reference)
 	if err != nil || len(value) < 32 || len(value) > 256 {
-		return "", errors.Join(ErrSecretStore, err)
+		return "", safeEnrollmentFailure("tunnel enrollment credential is unavailable", ErrSecretStore, err)
 	}
 	return value, nil
 }
@@ -144,7 +144,10 @@ func (s *FileCredentialStore) DeleteEnrollmentToken(ctx context.Context, referen
 	if s == nil || ctx == nil || !safeID(reference) {
 		return ErrInvalid
 	}
-	return s.secrets.Delete(reference)
+	if err := s.secrets.Delete(reference); err != nil {
+		return safeEnrollmentFailure("tunnel enrollment credential store is unavailable", ErrSecretStore, err)
+	}
+	return nil
 }
 
 func keyRef(reference string) string {
@@ -305,16 +308,36 @@ func (s *FileCredentialStore) saveJournal(value journal) error {
 }
 func (s *FileCredentialStore) loadJournalLocked() (journal, error) {
 	value := journal{Version: 1, Records: map[string]record{}}
-	data, err := os.ReadFile(filepath.Join(s.root, "journal.json"))
+	file, err := os.Open(filepath.Join(s.root, "journal.json"))
 	if errors.Is(err, os.ErrNotExist) {
 		return value, nil
 	}
-	if err != nil || len(data) > maximumJournalBytes || rejectDuplicateJSON(data) != nil {
+	if err != nil {
+		return journal{}, safeEnrollmentFailure("tunnel enrollment credential store is unavailable", ErrSecretStore, err)
+	}
+	data, readErr := io.ReadAll(io.LimitReader(file, maximumJournalBytes+1))
+	closeErr := file.Close()
+	if readErr != nil || closeErr != nil {
+		return journal{}, safeEnrollmentFailure("tunnel enrollment credential store is unavailable", ErrSecretStore, readErr, closeErr)
+	}
+	if len(data) > maximumJournalBytes {
 		return journal{}, ErrConflict
+	}
+	if err := rejectDuplicateJSON(data); err != nil {
+		return journal{}, safeEnrollmentFailure("tunnel enrollment journal conflicts with durable state", ErrConflict, err)
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&value) != nil || decoder.Decode(&struct{}{}) != io.EOF || value.Version != 1 || value.Records == nil || len(value.Records) > 256 {
+	if err := decoder.Decode(&value); err != nil {
+		return journal{}, safeEnrollmentFailure("tunnel enrollment journal conflicts with durable state", ErrConflict, err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err != nil {
+			return journal{}, safeEnrollmentFailure("tunnel enrollment journal conflicts with durable state", ErrConflict, err)
+		}
+		return journal{}, ErrConflict
+	}
+	if value.Version != 1 || value.Records == nil || len(value.Records) > 256 {
 		return journal{}, ErrConflict
 	}
 	for tunnelID, record := range value.Records {
@@ -341,7 +364,10 @@ func (s *FileCredentialStore) saveJournalLocked(value journal) error {
 	if err != nil || len(encoded) > maximumJournalBytes {
 		return ErrConflict
 	}
-	return atomicfile.Write(filepath.Join(s.root, "journal.json"), append(encoded, '\n'), atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1})
+	if err := atomicfile.Write(filepath.Join(s.root, "journal.json"), append(encoded, '\n'), atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1}); err != nil {
+		return safeEnrollmentFailure("tunnel enrollment credential store is unavailable", ErrSecretStore, err)
+	}
+	return nil
 }
 
 func rejectDuplicateJSON(data []byte) error {

@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"unsafe"
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"golang.org/x/sys/windows"
@@ -21,7 +23,7 @@ type diagnosticOwner struct {
 func resolveDiagnosticOwner(config DiskConfig) (diagnosticOwner, error) {
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil || !user.User.Sid.IsValid() {
-		return diagnosticOwner{}, fmt.Errorf("%w: resolve current Windows SID", ErrInvalid)
+		return diagnosticOwner{}, invalidDiagnostic(err)
 	}
 	sid := user.User.Sid.String()
 	if config.OwnerSID != "" {
@@ -66,7 +68,7 @@ func verifiedDiagnosticFile(path string, owner diagnosticOwner) (os.FileInfo, er
 	}
 	info, err := os.Lstat(path)
 	if err != nil || !validDiagnosticFile(path, info, owner) {
-		return nil, ErrInvalid
+		return nil, invalidDiagnostic(err)
 	}
 	return info, nil
 }
@@ -76,7 +78,31 @@ func validDiagnosticFile(path string, info os.FileInfo, owner diagnosticOwner) b
 }
 
 func createDiagnosticSegment(path string, owner diagnosticOwner) error {
-	return writeDiagnosticAtomic(path, nil, owner)
+	if err := rejectReparseAncestors(filepath.Dir(path)); err != nil {
+		return err
+	}
+	descriptor, err := windows.SecurityDescriptorFromString(diagnosticSDDL(owner))
+	if err != nil {
+		return err
+	}
+	attributes := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: descriptor}
+	pointer, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return err
+	}
+	// Rotation must never replace an existing segment, including another
+	// process's segment created with the same clock tick.
+	handle, err := windows.CreateFile(pointer, windows.GENERIC_READ|windows.GENERIC_WRITE, windows.FILE_SHARE_READ, &attributes, windows.CREATE_NEW, windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	runtime.KeepAlive(descriptor)
+	if err != nil {
+		return err
+	}
+	file := os.NewFile(uintptr(handle), path)
+	info, statErr := file.Stat()
+	if statErr != nil || !validDiagnosticFile(path, info, owner) {
+		return errors.Join(ErrInvalid, statErr, file.Close())
+	}
+	return file.Close()
 }
 
 func openDiagnosticAppend(path string, owner diagnosticOwner) (*os.File, error) {
@@ -91,7 +117,7 @@ func openDiagnosticAppend(path string, owner diagnosticOwner) (*os.File, error) 
 	info, err := file.Stat()
 	if err != nil || !validDiagnosticFile(path, info, owner) || !os.SameFile(before, info) {
 		_ = file.Close()
-		return nil, ErrInvalid
+		return nil, invalidDiagnostic(err)
 	}
 	return file, nil
 }
@@ -108,7 +134,7 @@ func openDiagnosticRead(path string, owner diagnosticOwner) (*os.File, error) {
 	info, err := file.Stat()
 	if err != nil || !validDiagnosticFile(path, info, owner) || !os.SameFile(before, info) {
 		_ = file.Close()
-		return nil, ErrInvalid
+		return nil, invalidDiagnostic(err)
 	}
 	return file, nil
 }
@@ -154,7 +180,7 @@ func rejectReparseAncestors(path string) error {
 			break
 		}
 		if statErr != nil || info.Mode()&os.ModeSymlink != 0 || isReparsePoint(current) {
-			return fmt.Errorf("%w: diagnostic path contains reparse point", ErrInvalid)
+			return invalidDiagnostic(statErr)
 		}
 	}
 	return nil
@@ -168,7 +194,7 @@ func isReparsePoint(path string) bool {
 func verifyDiagnosticDirectory(path string, owner diagnosticOwner) error {
 	info, err := os.Lstat(path)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || isReparsePoint(path) {
-		return ErrInvalid
+		return invalidDiagnostic(err)
 	}
 	return verifyDiagnosticACL(path, owner)
 }
@@ -192,15 +218,15 @@ func applyDiagnosticACL(path string, owner diagnosticOwner) error {
 func verifyDiagnosticACL(path string, owner diagnosticOwner) error {
 	descriptor, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
 	if err != nil || descriptor == nil || !descriptor.IsValid() {
-		return ErrInvalid
+		return invalidDiagnostic(err)
 	}
 	control, _, err := descriptor.Control()
 	if err != nil || control&windows.SE_DACL_PROTECTED == 0 {
-		return ErrInvalid
+		return invalidDiagnostic(err)
 	}
 	want, err := windows.SecurityDescriptorFromString(diagnosticSDDL(owner))
 	if err != nil || daclPart(descriptor.String()) != daclPart(want.String()) {
-		return ErrInvalid
+		return invalidDiagnostic(err)
 	}
 	return nil
 }

@@ -151,3 +151,12 @@ func TestCanonicalMetadataBoundsAndRedaction(t *testing.T) {
 		t.Fatalf("metadata overflow error = %v", err)
 	}
 }
+
+func TestProjectEventRejectsRecursiveMetadataBeforeCopying(t *testing.T) {
+	metadata := map[string]any{}
+	metadata["nested"] = metadata
+	_, err := ProjectEvent(runtimeobs.Event{}, CanonicalEventInput{SafeMetadata: metadata})
+	if !errors.Is(err, ErrCanonicalMetadata) {
+		t.Fatalf("recursive projection=%v", err)
+	}
+}

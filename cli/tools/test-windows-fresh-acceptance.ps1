@@ -50,8 +50,6 @@ param(
     [string]$TUFUrl = '',
     [string]$ExpectedVersion = '',
     [string]$MachineName = '',
-    [ValidateSet('host', 'client')]
-    [string]$SetupMode = '',
     [string]$EnrollmentTokenFile = '',
     [Alias('EnrollmentURLFile', 'EnrollmentCommandFile')]
     [string]$EnrollmentBootstrapFile = '',
@@ -253,7 +251,6 @@ function Read-InstallConfig([pscustomobject]$Paths) {
         [string]$config.token_file -ne $Paths.TokenFile -or
         [string]$config.machine_id -eq '' -or
         [string]$config.owner_sid -eq '' -or
-        ([string]$config.setup_mode -ne 'host' -and [string]$config.setup_mode -ne 'client') -or
         [string]$config.listen_address -eq '' -or
         [string]$config.state_root -eq '') {
         Fail 'Windows runtime installation metadata failed its strict acceptance checks.'
@@ -366,7 +363,7 @@ function Assert-PaperboatSSH([pscustomobject]$Paths) {
     }
     $service = Get-ServiceRecord 'PaperboatSshd'
     if ($null -eq $service) {
-        Fail 'PaperboatSshd is missing from a host-mode installation.'
+        Fail 'PaperboatSshd is missing from the installation.'
     }
     if ([string]$service.StartMode -ne 'Auto' -or [string]$service.ServiceStartName -ine 'LocalSystem') {
         Fail 'PaperboatSshd is not configured as an automatic LocalSystem service.'
@@ -419,33 +416,8 @@ function Assert-PaperboatSSH([pscustomobject]$Paths) {
     Check ('PaperboatSshd is running with owned sshd.exe listeners on both loopback families at port ' + $sshConfig.Port)
 }
 
-function Assert-NoPaperboatSSH {
-    if ($null -ne (Get-ServiceRecord 'PaperboatSshd')) {
-        Fail 'PaperboatSshd must not be installed for a client-mode installation.'
-    }
-    $processes = @(Get-CimInstance -ClassName Win32_Process -Filter "Name='pb.exe'" -ErrorAction Stop)
-    foreach ($process in $processes) {
-        if ([string]$process.CommandLine -match '(?i)(^|\s)__windows-sshd-service(\s|$)') {
-            Fail 'A Paperboat SSH service wrapper is still running for a client-mode installation.'
-        }
-    }
-    Check 'client-mode installation has no PaperboatSshd service or orphan SSH wrapper'
-}
-
 function Assert-SSHHealth([pscustomobject]$Paths, [pscustomobject]$Config) {
-    switch ([string]$Config.setup_mode) {
-        'host' {
-            Assert-PaperboatSSH $Paths
-            return
-        }
-        'client' {
-            Assert-NoPaperboatSSH
-            return
-        }
-        default {
-            Fail 'The installed setup role is not a recognized Windows host or client mode.'
-        }
-    }
+    Assert-PaperboatSSH $Paths
 }
 
 function Get-ListenUri([pscustomobject]$Config) {
@@ -607,14 +579,13 @@ function Get-IdentitySnapshot([pscustomobject]$Paths) {
         MachineID       = [string]$machine.id
         EnvironmentID   = [string]$machine.environment_id
         Alias           = [string]$machine.alias
-        SetupMode       = [string]$config.setup_mode
         IdentityHash    = Get-IdentityFingerprint $config
         InstallVersion  = [string]$config.artifact.version
     }
 }
 
 function Assert-IdentityUnchanged($Before, $After, [string]$Boundary) {
-    foreach ($field in @('MachineID', 'EnvironmentID', 'Alias', 'SetupMode', 'IdentityHash')) {
+    foreach ($field in @('MachineID', 'EnvironmentID', 'Alias', 'IdentityHash')) {
         if ([string]$Before.$field -cne [string]$After.$field) {
             Fail ('Machine identity changed across ' + $Boundary + '.')
         }
@@ -674,9 +645,6 @@ function Assert-Installed([pscustomobject]$Paths) {
         if ([string]$versionOutput -notmatch [regex]::Escape($ExpectedVersion)) {
             Fail 'The installed Paperboat executable reports an unexpected version.'
         }
-    }
-    if (-not [string]::IsNullOrWhiteSpace($SetupMode) -and [string]$config.setup_mode -cne $SetupMode) {
-        Fail 'The installed setup role does not match the requested acceptance role.'
     }
     Check 'fresh installation metadata, binary, services, health, and identity are valid'
     return $config
@@ -970,7 +938,7 @@ function Invoke-FreshInstaller([pscustomobject]$Paths) {
     if (-not (Test-Path -LiteralPath $InstallerPath -PathType Leaf) -or (Test-ReparsePoint $InstallerPath)) {
         Fail 'The Windows bootstrap installer script is missing or unsafe.'
     }
-    if ((Get-Content -LiteralPath $InstallerPath -Raw).Contains('@PAPERBOAT_BOOTSTRAP_')) {
+    if ((Get-Content -LiteralPath $InstallerPath -Raw) -match '@PAPERBOAT_[A-Z0-9_]+@') {
         Fail 'The Windows bootstrap installer must be the release-rendered script from the published origin.'
     }
     $token = Read-EnrollmentToken $EnrollmentTokenFile

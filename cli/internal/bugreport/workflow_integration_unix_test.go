@@ -44,12 +44,12 @@ func TestWorkflowAcrossLocalAndControlAPIsUploadsExactDaemonBundle(t *testing.T)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	bundleBytes := []byte("PK exact daemon bundle across APIs")
-	bundlePath := filepath.Join(root, "bugreport-pb-0123456789abcdef0123456789abcdef.zip")
+	bundlePath := filepath.Join(root, "bugreport-support_01234567-89ab-4def-8123-456789abcdef.zip")
 	if err := os.WriteFile(bundlePath, bundleBytes, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	diagnosticsService := &unixDiagnosticService{bundle: diagnostics.Bundle{Schema: diagnostics.BundleSchemaV1, Correlation: "pb-0123456789abcdef0123456789abcdef", CreatedAt: now, Path: bundlePath, Bytes: int64(len(bundleBytes)), Categories: []string{"manifest", "recent_events", "redacted_events", "status"}}}
+	diagnosticsService := &unixDiagnosticService{bundle: diagnostics.Bundle{Schema: diagnostics.BundleSchemaV1, Correlation: "support_01234567-89ab-4def-8123-456789abcdef", CreatedAt: now, Path: bundlePath, Bytes: int64(len(bundleBytes)), Categories: []string{"manifest", "recent_events", "redacted_events", "status"}}}
 	snapshot, _ := localapi.NewSnapshotStore(&localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now, DaemonState: "ready", DaemonVersion: "dev"})
 	socket := filepath.Join(root, "daemon.sock")
 	localServer, err := localapi.NewServer(localapi.ServerConfig{SocketPath: socket, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), Source: snapshot, Diagnostics: diagnosticsService})
@@ -96,7 +96,7 @@ func TestWorkflowAcrossLocalAndControlAPIsUploadsExactDaemonBundle(t *testing.T)
 			uploaded, _ = io.ReadAll(r.Body)
 			w.WriteHeader(http.StatusOK)
 		case "/v1/diagnostic-upload-intents/diag_0123456789abcdef/complete":
-			writeIntegrationData(w, http.StatusOK, api.DiagnosticUploadIntent{Schema: api.DiagnosticUploadIntentSchemaV1, IntentID: "diag_0123456789abcdef", CorrelationID: "pb-0123456789abcdef0123456789abcdef", State: "uploaded", ExpiresAt: time.Now().UTC().Add(time.Minute)})
+			writeIntegrationData(w, http.StatusOK, api.DiagnosticUploadIntent{Schema: api.DiagnosticUploadIntentSchemaV1, IntentID: "diag_0123456789abcdef", CorrelationID: "support_01234567-89ab-4def-8123-456789abcdef", State: "uploaded", ExpiresAt: time.Now().UTC().Add(time.Minute)})
 		default:
 			http.NotFound(w, r)
 		}

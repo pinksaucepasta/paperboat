@@ -4,7 +4,11 @@ package localapi
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net"
+
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 )
 
 // Hijacked stream bridges observe local EOF themselves. Process exit is the
@@ -26,17 +30,25 @@ func watchPeerHangup(ctx context.Context, _ net.Conn, peer Peer, cancel context.
 func watchControlHangup(ctx context.Context, connection net.Conn, peer Peer, cancel context.CancelFunc) {
 	processExit, closeProcessExit := watchProcessExit(peer.PID)
 	defer closeProcessExit()
-	closed := make(chan struct{})
+	closed := make(chan error, 1)
 	go func() {
 		var value [1]byte
-		_, _ = connection.Read(value[:])
-		close(closed)
+		_, err := connection.Read(value[:])
+		closed <- err
 	}()
 	select {
 	case <-ctx.Done():
 	case <-processExit:
 		cancel()
-	case <-closed:
+	case err := <-closed:
 		cancel()
+		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
+			errorreport.Current().ObserveFailure(ctx, "paperboatd", "transfer", "local_gateway", "local_gateway_failed", err)
+		}
+		return
 	}
+	// This dedicated control connection carries no application bytes. Closing
+	// it interrupts the owned reader, which is joined before releasing the lease.
+	_ = connection.Close()
+	<-closed
 }

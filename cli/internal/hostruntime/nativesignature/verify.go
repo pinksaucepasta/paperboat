@@ -1,6 +1,6 @@
-// Package nativesignature verifies optional operating-system signatures. TUF
-// establishes release identity and the Windows PE validator establishes the
-// executable format; Windows Authenticode is not a Paperboat release gate.
+// Package nativesignature verifies operating-system signature integrity. TUF
+// establishes release identity; publisher certificates and notarization are
+// optional. Darwin executable code signatures must remain valid.
 package nativesignature
 
 import (
@@ -33,7 +33,7 @@ func (CommandRunner) Run(ctx context.Context, name string, arguments ...string) 
 
 // Verifier performs the native checks for a staged target. Linux targets have
 // no additional platform signing format in this release; their TUF digest and
-// ELF validation remain mandatory. Darwin and Windows both fail closed.
+// ELF validation remain mandatory. Callers also validate each executable format.
 type Verifier struct {
 	Runner Runner
 }
@@ -69,25 +69,17 @@ func (v Verifier) verifyDarwin(ctx context.Context, path string) error {
 		if err != nil && !isUnsignedPackage(output) {
 			return fmt.Errorf("%w: package signature", ErrInvalid)
 		}
-		// Development releases may intentionally publish an unsigned PKG when
-		// no Apple installer identity is available. TUF authenticates the bytes;
-		// a signed package, when present, still receives the full Gatekeeper check.
-		if isUnsignedPackage(output) {
-			return nil
-		}
-		if _, err := v.Runner.Run(ctx, "/usr/sbin/spctl", "--assess", "--type", "install", "--verbose=4", path); err != nil {
-			return fmt.Errorf("%w: package gatekeeper assessment", ErrInvalid)
-		}
+		// TUF authenticates unsigned packages. When a publisher signature is
+		// present, pkgutil must validate it. Gatekeeper admission additionally
+		// requires optional publisher/notarization credentials, so it is not an
+		// updater release-identity check.
 		return nil
 	}
-	// codesign validates the embedded signature and designated requirements.
-	// spctl performs Gatekeeper assessment, which rejects code that is not
-	// accepted for execution, including an unnotarized distribution.
+	// Validate the embedded code signature, including the ad-hoc signature
+	// produced by the package builder. TUF establishes publisher identity;
+	// Gatekeeper admission is not required by the release trust policy.
 	if _, err := v.Runner.Run(ctx, "codesign", "--verify", "--deep", "--strict", "--verbose=2", path); err != nil {
 		return fmt.Errorf("%w: codesign", ErrInvalid)
-	}
-	if _, err := v.Runner.Run(ctx, "spctl", "--assess", "--type", "execute", "--verbose=4", path); err != nil {
-		return fmt.Errorf("%w: gatekeeper assessment", ErrInvalid)
 	}
 	return nil
 }

@@ -9,6 +9,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func executeManagedSSH(_ *cobra.Command, _ *command.Context, _ api.UserMachine, destination managedssh.Destination, passthrough []string, includePassthrough bool, environment []string) error {
-	return (managedssh.OpenSSHExecutor{}).Execute("ssh", openSSHArguments(destination, passthrough, includePassthrough), environment)
+func executeManagedSSH(cobraCommand *cobra.Command, _ *command.Context, _ api.UserMachine, destination managedssh.Destination, passthrough []string, includePassthrough bool, environment []string) error {
+	return (managedssh.OpenSSHExecutor{}).Execute(cobraCommand.Context(), "ssh", openSSHArguments(destination, passthrough, includePassthrough), environment)
 }

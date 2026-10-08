@@ -6,7 +6,7 @@ Connect to a machine with OpenSSH
 
 Connect to a machine with OpenSSH
 
-Connect to an enrolled device through OpenSSH using Paperboat resolution. Optional arguments after -- go to OpenSSH; the command preserves SSH host-key verification and reports identity changes for deliberate approval.
+Connect to an enrolled machine through OpenSSH using Paperboat resolution. Optional arguments after -- go to OpenSSH; the command preserves SSH host-key verification and reports identity changes for deliberate approval.
 
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
 
@@ -28,6 +28,7 @@ pb ssh [user@]<machine> [-- <OpenSSH arguments...>] [flags]
       --json               print machine-readable JSON
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO

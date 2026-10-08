@@ -13,10 +13,29 @@ const EventSchemaV1 = "paperboat.diagnostic-event/v1"
 
 var ErrInvalid = errors.New("invalid diagnostic event")
 
+// Filesystem validation keeps a stable public error while fault projection can
+// still inspect the original OS cause without formatting paths or values.
+type diagnosticValidationError struct{ cause error }
+
+func (*diagnosticValidationError) Error() string           { return ErrInvalid.Error() }
+func (e *diagnosticValidationError) Unwrap() []error       { return []error{ErrInvalid, e.cause} }
+func (*diagnosticValidationError) DiagnosticStage() string { return "diagnostic_storage" }
+func (*diagnosticValidationError) DiagnosticCode() string  { return "diagnostic_storage_unavailable" }
+func invalidDiagnostic(cause error) error {
+	if cause == nil {
+		return ErrInvalid
+	}
+	return &diagnosticValidationError{cause: cause}
+}
+
 var allowedFields = map[string]bool{
 	"capability": true, "generation": true, "operation": true, "outcome": true,
 	"path_category": true, "phase": true, "reason": true, "relay_region": true,
 	"retry_class": true, "state": true, "transport": true,
+	"cause": true, "error_type": true, "error_chain": true,
+	"component": true, "service_component": true, "errno": true, "http_status": true,
+	"source_file": true, "source_function": true, "source_line": true,
+	"sdk_submissions_dropped": true, "sdk_http_failures": true,
 }
 
 type Event struct {
@@ -50,11 +69,15 @@ func NewEventWithSupportReference(at time.Time, category, code, severity, refere
 }
 
 func (e Event) Validate() error {
-	if e.Schema != EventSchemaV1 || e.At.IsZero() || e.At.Location() != time.UTC || !safeIdentifier(e.Category, 32) || !safeIdentifier(e.Code, 64) || e.Severity != "info" && e.Severity != "warning" && e.Severity != "error" || len(e.Fields) > 12 || e.SupportReference != "" && !supportref.Valid(e.SupportReference) {
+	if e.Schema != EventSchemaV1 || e.At.IsZero() || e.At.Location() != time.UTC || !safeIdentifier(e.Category, 32) || !safeIdentifier(e.Code, 64) || e.Severity != "info" && e.Severity != "warning" && e.Severity != "error" || len(e.Fields) > 16 || e.SupportReference != "" && !supportref.Valid(e.SupportReference) {
 		return ErrInvalid
 	}
 	for key, value := range e.Fields {
-		if !allowedFields[key] || !safeIdentifier(value, 128) {
+		limit := 128
+		if key == "error_chain" {
+			limit = 1024
+		}
+		if !allowedFields[key] || !safeIdentifier(value, limit) {
 			return ErrInvalid
 		}
 	}

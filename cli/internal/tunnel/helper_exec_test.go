@@ -31,6 +31,9 @@ func TestHelperExecClassifiesLostStartResponseAsUncertain(t *testing.T) {
 	if !errors.As(err, &uncertain) || !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v, want uncertain start wrapping cancellation", err)
 	}
+	if err.Error() != "remote execution start outcome is uncertain" {
+		t.Fatalf("uncertain-start error exposed transport details: %q", err)
+	}
 }
 
 func TestHelperExecReconnectUsesAttachAction(t *testing.T) {

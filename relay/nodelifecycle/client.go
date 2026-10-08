@@ -30,6 +30,7 @@ type Config struct {
 	ExpectedGeneration                 uint64
 	HTTP                               *http.Client
 	ControlTrace                       func(context.Context, string) (string, string, func(string, string))
+	ControlFailure                     func(context.Context, string, error)
 }
 type Lease struct {
 	NodeID        string                      `json:"node_id"`
@@ -84,14 +85,21 @@ func (c *Client) post(ctx context.Context, path string, in any) (out Lease, resu
 				outcome, code = "rejected", "unauthorized"
 			}
 		}
+		if resultErr != nil && c.cfg.ControlFailure != nil {
+			c.cfg.ControlFailure(ctx, reference, resultErr)
+			code = "control_request_failed"
+		}
 		finish(outcome, code)
 	}()
-	body, _ := json.Marshal(in)
+	body, err := json.Marshal(in)
+	if err != nil {
+		return out, failure(err, 0, false)
+	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.URL+path, bytes.NewReader(body))
 	if err != nil {
-		return out, ErrControl
+		return out, failure(err, 0, false)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.cfg.Credential)
 	if trace != "" {
@@ -103,22 +111,31 @@ func (c *Client) post(ctx context.Context, path string, in any) (out Lease, resu
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.cfg.HTTP.Do(req)
 	if err != nil {
-		return out, ErrControl
+		return out, failure(err, 0, false)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusConflict {
-		return out, ErrFenced
+		return out, failure(nil, resp.StatusCode, true)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return out, ErrControl
+		return out, failure(nil, resp.StatusCode, false)
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 256<<10))
-	if err != nil || len(raw) >= 256<<10 {
+	if err != nil {
+		return out, failure(err, 0, true)
+	}
+	if len(raw) >= 256<<10 {
 		return out, ErrFenced
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
-	if d.Decode(&out) != nil || d.Decode(new(any)) != io.EOF || out.NodeID != c.cfg.NodeID || out.Generation == 0 || out.ProcessEpoch == "" || out.CapacityLimit == 0 || out.CapacityLimit > derpquic.MaxConnections || len(out.Revocations) > derpquic.MaxConnections {
+	if err := d.Decode(&out); err != nil {
+		return Lease{}, failure(err, 0, true)
+	}
+	if err := d.Decode(new(any)); err != io.EOF {
+		return Lease{}, failure(err, 0, true)
+	}
+	if out.NodeID != c.cfg.NodeID || out.Generation == 0 || out.ProcessEpoch == "" || out.CapacityLimit == 0 || out.CapacityLimit > derpquic.MaxConnections || len(out.Revocations) > derpquic.MaxConnections {
 		return Lease{}, ErrFenced
 	}
 	now := time.Now()
@@ -134,11 +151,11 @@ func (c *Client) post(ctx context.Context, path string, in any) (out Lease, resu
 func (c *Client) save(s diskState) error {
 	dir := filepath.Dir(c.cfg.StatePath)
 	if err := os.MkdirAll(dir, 0700); err != nil {
-		return ErrControl
+		return failure(err, 0, false)
 	}
 	f, err := os.CreateTemp(dir, ".relay-state-")
 	if err != nil {
-		return ErrControl
+		return failure(err, 0, false)
 	}
 	name := f.Name()
 	defer os.Remove(name)
@@ -147,31 +164,34 @@ func (c *Client) save(s diskState) error {
 		err = f.Sync()
 	}
 	closeErr := f.Close()
-	if err != nil || closeErr != nil {
-		return ErrControl
+	if err != nil {
+		return failure(err, 0, false)
 	}
-	if os.Rename(name, c.cfg.StatePath) != nil {
-		return ErrControl
+	if closeErr != nil {
+		return failure(closeErr, 0, false)
+	}
+	if err := os.Rename(name, c.cfg.StatePath); err != nil {
+		return failure(err, 0, false)
 	}
 	directory, err := os.Open(dir)
 	if err != nil {
-		return ErrControl
+		return failure(err, 0, false)
 	}
 	defer directory.Close()
-	if directory.Sync() != nil {
-		return ErrControl
+	if err := directory.Sync(); err != nil {
+		return failure(err, 0, false)
 	}
 	return nil
 }
 
 func (c *Client) Start(ctx context.Context) (Lease, error) {
 	if c.lock == nil {
-		if os.MkdirAll(filepath.Dir(c.cfg.StatePath), 0700) != nil {
-			return Lease{}, ErrControl
+		if err := os.MkdirAll(filepath.Dir(c.cfg.StatePath), 0700); err != nil {
+			return Lease{}, failure(err, 0, false)
 		}
 		lock, err := lockState(c.cfg.StatePath + ".lock")
 		if err != nil {
-			return Lease{}, ErrControl
+			return Lease{}, failure(err, 0, false)
 		}
 		c.lock = lock
 	}
@@ -181,28 +201,37 @@ func (c *Client) Start(ctx context.Context) (Lease, error) {
 			return Lease{}, ErrControl
 		}
 		b, err := os.ReadFile(c.cfg.StatePath)
-		if err != nil || json.Unmarshal(b, &s) != nil || s.NodeID != c.cfg.NodeID || s.Generation == 0 {
+		if err != nil {
+			return Lease{}, failure(err, 0, false)
+		}
+		if err := json.Unmarshal(b, &s); err != nil {
+			return Lease{}, failure(err, 0, false)
+		}
+		if s.NodeID != c.cfg.NodeID || s.Generation == 0 {
 			return Lease{}, ErrControl
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return Lease{}, ErrControl
+		return Lease{}, failure(err, 0, false)
 	}
 	if s.PendingEpoch == "" {
 		var epoch [16]byte
 		rand.Read(epoch[:])
 		s.PendingEpoch = hex.EncodeToString(epoch[:])
-		if c.save(s) != nil {
-			return Lease{}, ErrControl
+		if err := c.save(s); err != nil {
+			return Lease{}, err
 		}
 	}
 	out, err := c.post(ctx, "/v1/relay/nodes/start", map[string]any{"node_id": s.NodeID, "expected_generation": s.Generation, "process_epoch": s.PendingEpoch})
-	if err != nil || out.Generation != s.Generation+1 || out.ProcessEpoch != s.PendingEpoch {
+	if err != nil {
+		return Lease{}, err
+	}
+	if out.Generation != s.Generation+1 || out.ProcessEpoch != s.PendingEpoch {
 		return Lease{}, ErrControl
 	}
 	s.Generation = out.Generation
 	s.PendingEpoch = ""
-	if c.save(s) != nil {
-		return Lease{}, ErrControl
+	if err := c.save(s); err != nil {
+		return Lease{}, err
 	}
 	c.lease = out
 	return out, nil
@@ -283,7 +312,7 @@ func (c *Client) Run(ctx context.Context, server *derpquic.Server) error {
 		if err != nil && !time.Now().Before(deadline) {
 			server.Drain(time.Now())
 			server.Close()
-			return ErrControl
+			return err
 		}
 		delay := Interval
 		if remain := time.Until(time.Unix(c.lease.ExpiresAt, 0)); remain < delay {

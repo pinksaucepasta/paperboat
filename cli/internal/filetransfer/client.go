@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 )
 
@@ -102,6 +103,18 @@ func (e *Error) Error() string {
 	}
 	return "file transfer failed: " + code
 }
+
+// DiagnosticStatus exposes only the bounded HTTP status to the local
+// classifier. Response messages and identifiers remain outside diagnostics.
+func (e *Error) DiagnosticStatus() int {
+	if e == nil {
+		return 0
+	}
+	return e.StatusCode
+}
+
+// DiagnosticCode keeps remote result codes from becoming local event classes.
+func (*Error) DiagnosticCode() string { return "file_transfer_failed" }
 
 type Client struct {
 	Endpoint        string
@@ -307,7 +320,7 @@ func (c *Client) WaitReceipt(ctx context.Context, id string) (Manifest, error) {
 			}
 			select {
 			case <-ctx.Done():
-				return Manifest{}, ctx.Err()
+				return Manifest{}, deliveryContextError(ctx)
 			case <-time.After(250 * time.Millisecond):
 				continue
 			}
@@ -316,13 +329,13 @@ func (c *Client) WaitReceipt(ctx context.Context, id string) (Manifest, error) {
 		case "delivered":
 			return manifest, nil
 		case "failed":
-			return manifest, errors.New("file delivery failed: " + manifest.ResultCode)
+			return manifest, fileTransferPhaseFailure("delivery", errors.New("file delivery failed"))
 		case "canceled":
-			return manifest, errors.New("file delivery canceled")
+			return manifest, fileTransferPhaseFailure("delivery", errors.New("file delivery canceled"))
 		}
 		select {
 		case <-ctx.Done():
-			return Manifest{}, ctx.Err()
+			return Manifest{}, deliveryContextError(ctx)
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
@@ -468,19 +481,62 @@ func (c *Client) Status(ctx context.Context, id string) (Manifest, error) {
 	return manifest, err
 }
 
-func (c *Client) List(ctx context.Context, sessionID string, limit int) ([]Manifest, error) {
-	if limit <= 0 || limit > 200 {
-		limit = 50
+type HistoryPage struct {
+	Items      []Manifest                      `json:"items"`
+	Pagination protocol.FileTransferPagination `json:"pagination"`
+}
+
+func (c *Client) ListPage(ctx context.Context, sessionID string, limit, offset int, query, state string) (HistoryPage, error) {
+	if limit < 1 || limit > 200 || offset < 0 || !protocol.ValidFileTransferHistoryFilters(query, state) {
+		return HistoryPage{}, errors.New("transfer history requires limit 1-200 and a non-negative offset")
 	}
-	values := url.Values{"limit": {strconv.Itoa(limit)}}
+	values := url.Values{"limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(offset)}}
 	if sessionID != "" {
 		values.Set("session_id", sessionID)
 	}
-	var page struct {
-		Items []Manifest `json:"items"`
+	if query != "" {
+		values.Set("q", query)
 	}
+	if state != "" {
+		values.Set("state", state)
+	}
+	var page HistoryPage
 	err := c.retryJSONRequest(ctx, http.MethodGet, c.Endpoint+"?"+values.Encode(), operationID("list", c.binding.DestinationMachineID), "", 0, nil, &page)
-	return page.Items, err
+	if err != nil {
+		return HistoryPage{}, err
+	}
+	if page.Pagination.Limit != limit || page.Pagination.Offset != offset || page.Pagination.Total < 0 || len(page.Items) > 0 && page.Pagination.Total < offset+len(page.Items) {
+		return HistoryPage{}, errors.New("invalid transfer history page metadata")
+	}
+	if len(page.Items) > limit {
+		return HistoryPage{}, errors.New("transfer history exceeds requested limit")
+	}
+	for _, item := range page.Items {
+		if item.SourceMachineID != c.binding.SourceMachineID || item.DestinationMachineID != c.binding.DestinationMachineID || item.InitiatingUserID != c.binding.InitiatingUserID || sessionID != "" && item.SessionID != sessionID {
+			return HistoryPage{}, errors.New("transfer history does not match the authorized destination")
+		}
+	}
+	if next := page.Pagination.NextOffset; next != nil && (len(page.Items) == 0 || *next != offset+len(page.Items) || *next >= page.Pagination.Total) {
+		return HistoryPage{}, errors.New("transfer history pagination did not advance consistently")
+	}
+	return page, nil
+}
+func (c *Client) List(ctx context.Context, sessionID string, limit int) ([]Manifest, error) {
+	if limit < 1 || limit > 200 {
+		return nil, errors.New("transfer history requires limit 1-200")
+	}
+	items := []Manifest{}
+	for offset := 0; ; {
+		page, err := c.ListPage(ctx, sessionID, limit, offset, "", "")
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, page.Items...)
+		if page.Pagination.NextOffset == nil {
+			return items, nil
+		}
+		offset = *page.Pagination.NextOffset
+	}
 }
 
 func (c *Client) patchRequest(ctx context.Context, id string, offset int64, source Source) error {
@@ -539,7 +595,7 @@ func (c *Client) retryJSONRequest(ctx context.Context, method, url, operation, m
 		}
 		if waitErr := wait(retryCtx, attempt); waitErr != nil {
 			if ctx.Err() != nil {
-				return ctx.Err()
+				return callerContextError(ctx)
 			}
 			return err
 		}
@@ -567,7 +623,7 @@ func waitOperationRetry(ctx context.Context, attempt int) error {
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return callerContextError(ctx)
 	case <-timer.C:
 		return nil
 	}

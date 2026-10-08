@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
+	"log/slog"
 	"net"
 	"net/http"
 	"sync"
@@ -14,12 +16,13 @@ import (
 )
 
 type HTTP3Server struct {
-	address string
-	server  *http3.Server
-	mu      sync.Mutex
-	packet  net.PacketConn
-	done    chan error
-	closed  bool
+	Reporter *reporting.Reporter
+	address  string
+	server   *http3.Server
+	mu       sync.Mutex
+	packet   net.PacketConn
+	done     chan error
+	closed   bool
 }
 
 func NewHTTP3Server(address string, handler http.Handler, tlsConfig *tls.Config, maxHeaderBytes int) (*HTTP3Server, error) {
@@ -30,7 +33,13 @@ func NewHTTP3Server(address string, handler http.Handler, tlsConfig *tls.Config,
 	return &HTTP3Server{address: address, server: server}, nil
 }
 
-func (s *HTTP3Server) Start(context.Context) error {
+func (s *HTTP3Server) Start(ctx context.Context) error {
+	if ctx == nil {
+		return ErrHTTPServerInvalid
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed || s.packet != nil {
@@ -40,6 +49,8 @@ func (s *HTTP3Server) Start(context.Context) error {
 	if err != nil {
 		return err
 	}
+	s.server.Handler = httpDiagnosticHandler(ctx, s.Reporter, s.server.Handler)
+	s.server.Logger = slog.New(slog.NewTextHandler(httpDiagnosticWriter{ctx: ctx, reporter: s.Reporter}, nil))
 	s.packet, s.done = packet, make(chan error, 1)
 	go func() {
 		err := s.server.Serve(packet)

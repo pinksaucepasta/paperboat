@@ -62,15 +62,23 @@ func currentUserCredentialSDDL() (string, error) {
 	return "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;" + sid.String() + ")", nil
 }
 
-func currentUserSID() (*windows.SID, error) {
+func currentUserSID() (sid *windows.SID, resultErr error) {
 	token, err := currentEffectiveUserToken()
 	if err != nil {
-		return nil, fmt.Errorf("%w: open current Windows token: %v", ErrCredentialStoreUnavailable, err)
+		return nil, credentialStoreFailure("current Windows token could not be opened", err)
 	}
-	defer token.Close()
+	defer func() {
+		if closeErr := token.Close(); closeErr != nil {
+			resultErr = credentialStoreFailure("current Windows token could not be closed", errors.Join(resultErr, closeErr))
+			sid = nil
+		}
+	}()
 	user, err := token.GetTokenUser()
-	if err != nil || user == nil || user.User.Sid == nil || !user.User.Sid.IsValid() {
-		return nil, fmt.Errorf("%w: resolve current Windows SID: %v", ErrCredentialStoreUnavailable, err)
+	if err != nil {
+		return nil, credentialStoreFailure("current Windows SID could not be resolved", err)
+	}
+	if user == nil || user.User.Sid == nil || !user.User.Sid.IsValid() {
+		return nil, credentialStoreFailure("current Windows SID is invalid", nil)
 	}
 	return user.User.Sid, nil
 }

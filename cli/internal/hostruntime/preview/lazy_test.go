@@ -46,7 +46,7 @@ func TestSessionRenewalPreservesDaemonLocalLazyLifecycle(t *testing.T) {
 	now := time.Now().UTC()
 	lifecycle := newLazyLifecycle(context.Background(), func() time.Time { return time.Now().UTC() }, time.Hour, time.Hour, now.Add(time.Hour))
 	defer lifecycle.Stop()
-	previous := sessionTestLease(LeaseRequest{OwnerDeviceID: "machine_1", OwnerSessionID: "lazy_0123456789abcdef", Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, AccessMode: "team"})
+	previous := sessionTestLease(LeaseRequest{OwnerMachineID: "machine_1", OwnerSessionID: "session_01234567-89ab-4cde-8fab-0123456789ab", OwnerSessionKind: "lazy_runtime", Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, AccessMode: "team"})
 	previous.ETag = formatLeaseETag(previous.ID, 1)
 	previous.Generation = 1
 	previous.LazyLifecycle = lifecycle
@@ -54,7 +54,7 @@ func TestSessionRenewalPreservesDaemonLocalLazyLifecycle(t *testing.T) {
 	renewed.ETag = formatLeaseETag(previous.ID, 2)
 	renewed.Generation = 0
 	renewed.LazyLifecycle = nil // HTTP decoding cannot recreate daemon-local state.
-	session := &Session{config: SessionConfig{OwnerDeviceID: previous.OwnerDeviceID, OwnerSessionID: previous.OwnerSessionID, Target: previous.Target, AccessMode: previous.AccessMode, DisableParentWatch: true, Now: func() time.Time { return now }}, lease: previous, cancel: func() {}}
+	session := &Session{config: SessionConfig{OwnerMachineID: previous.OwnerMachineID, OwnerSessionID: previous.OwnerSessionID, OwnerSessionKind: previous.OwnerSessionKind, Target: previous.Target, AccessMode: previous.AccessMode, DisableParentWatch: true, Now: func() time.Time { return now }}, lease: previous, cancel: func() {}}
 	if err := session.acceptRenewal(renewed, previous); err != nil {
 		t.Fatal(err)
 	}

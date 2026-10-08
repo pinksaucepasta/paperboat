@@ -143,6 +143,7 @@ func (c *vaultScopesControl) scopeState(kind, owner, machine, encoded string) (a
 	}
 	claims := scope.Claims
 	return api.VaultScopeState{
+		WorkspaceID:  claims.WorkspaceID,
 		OwnerKind:    kind,
 		OwnerID:      owner,
 		MachineID:    machine,
@@ -253,10 +254,11 @@ func (c *vaultScopesControl) RotateVaultTeam(context.Context, string, api.VaultT
 }
 
 func (c *vaultScopesControl) GetVaultGrants(context.Context) ([]api.VaultGrantState, error) {
-	if c.ackCommitted {
-		return nil, nil
+	grants := append([]api.VaultGrantState(nil), c.grants...)
+	for i := range grants {
+		grants[i].Acknowledged = c.ackCommitted
 	}
-	return append([]api.VaultGrantState(nil), c.grants...), nil
+	return grants, nil
 }
 
 func (c *vaultScopesControl) AckVaultGrant(_ context.Context, digest, vaultID string) error {
@@ -290,7 +292,7 @@ func newVaultScopesFixture(t *testing.T) (PasswordVault, *vaultScopesControl, co
 		scopes:  make(map[string]api.VaultScopeState),
 		teams:   make(map[string]api.VaultTeamState),
 	}
-	vault := PasswordVault{Client: control, Store: store, Issuer: control.issuer, AccountID: control.account}
+	vault := PasswordVault{WorkspaceID: "personal", Client: control, Store: store, Issuer: control.issuer, AccountID: control.account}
 	if err := vault.InitializeWithRecovery(context.Background(), []byte("test master password"), nil); err != nil {
 		t.Fatal(err)
 	}

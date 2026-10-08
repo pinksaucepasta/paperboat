@@ -44,7 +44,7 @@ type HostWorkloadCounts struct {
 	Uploads     uint64 `json:"uploads"`
 }
 
-func hostWorkloadCounts(sessions *session.Manager, transfers *filetransfer.Service) HostWorkloadCounts {
+func hostWorkloadCounts(sessions session.Service, transfers *filetransfer.Service) HostWorkloadCounts {
 	counts := HostWorkloadCounts{Uploads: transfers.ActiveCount()}
 	// Client-only hosts have no terminal manager or incoming terminal capability.
 	if sessions != nil {

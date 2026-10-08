@@ -4,7 +4,6 @@ package networkmonitor
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"os/exec"
 	"sort"
@@ -24,9 +23,9 @@ func SystemDNSFingerprint(ctx context.Context) ([32]byte, error) {
 	command.Stderr = io.Discard
 	if err := command.Run(); err != nil {
 		if ctx.Err() != nil {
-			return [32]byte{}, ctx.Err()
+			return [32]byte{}, dnsContextError(ctx)
 		}
-		return [32]byte{}, fmt.Errorf("%w: scutil: %v", ErrDNSUnavailable, err)
+		return [32]byte{}, dnsUnavailable("scutil", err)
 	}
 	if output.overflow {
 		return [32]byte{}, ErrDNSUnavailable

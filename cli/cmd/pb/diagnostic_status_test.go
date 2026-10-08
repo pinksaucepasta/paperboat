@@ -84,7 +84,7 @@ func TestHomeRuntimeDiagnosticsDoesNotUseLivenessAsWorkloadCounts(t *testing.T) 
 			body, _ := json.Marshal(map[string]string{"schema": "paperboat.worker-local/v1", "listen_address": strings.TrimPrefix(server.URL, "http://")})
 			os.WriteFile(filepath.Join(root, "runtime", "worker-local.json"), body, 0600)
 			report := localDoctorReport{WorkloadCounts: "unavailable"}
-			inspectLocalRuntimeHealth(&report, root)
+			inspectLocalRuntimeHealth(t.Context(), &report, root)
 			if report.HostRuntime != "ready" || report.WorkloadCounts != tc.want {
 				t.Fatalf("runtime=%q counts=%q", report.HostRuntime, report.WorkloadCounts)
 			}

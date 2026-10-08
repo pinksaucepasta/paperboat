@@ -34,7 +34,7 @@ func executeManagedSSH(cobraCommand *cobra.Command, ctx *command.Context, machin
 	if err != nil {
 		return friendlyCommandError(err)
 	}
-	liveDestination, err := managedssh.ResolveDestination(managedssh.DestinationInput{Alias: liveMachine.Alias, AliasSuffix: managedssh.AliasSuffix, RegisteredPort: liveTarget.Port, RequestedUser: destination.User, RegisteredUser: liveTarget.OSUser, HasRegisteredUser: true, Platform: liveMachine.Platform})
+	liveDestination, err := managedssh.ResolveDestination(managedssh.DestinationInput{Alias: liveMachine.Alias, RegisteredPort: liveTarget.Port, RequestedUser: destination.User, RegisteredUser: liveTarget.OSUser, HasRegisteredUser: true, Platform: liveMachine.Platform})
 	if err != nil {
 		return err
 	}

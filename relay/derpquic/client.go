@@ -52,18 +52,18 @@ func classify(err error) error {
 	if errors.As(err, &app) {
 		switch app.ErrorCode {
 		case 1:
-			return ErrAdmission
+			return retainDecision(ErrAdmission, err)
 		case 2:
-			return ErrProtocol
+			return retainDecision(ErrProtocol, err)
 		case 3:
-			return ErrOverload
+			return retainDecision(ErrOverload, err)
 		case 4:
-			return ErrExpired
+			return retainDecision(ErrExpired, err)
 		}
 	}
 	var cert *tls.CertificateVerificationError
 	if errors.As(err, &cert) {
-		return ErrAdmission
+		return retainDecision(ErrAdmission, err)
 	}
 	return err
 }
@@ -108,9 +108,9 @@ func (c *Client) ensure(ctx context.Context) (*clientConn, error) {
 			return nil, dialCtx.Err()
 		}
 		if errors.Is(err, ErrExpired) {
-			return nil, ErrExpired
+			return nil, retainDecision(ErrExpired, err)
 		}
-		c.fatal = ErrAdmission
+		c.fatal = retainDecision(ErrAdmission, err)
 		return nil, c.fatal
 	}
 	if token == "" || len(token) > MaxControl {

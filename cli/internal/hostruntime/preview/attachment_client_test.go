@@ -19,8 +19,16 @@ import (
 
 func TestAttachmentClientSendsExactMachineProofAndDecodesSafeAttachment(t *testing.T) {
 	now := time.Now().UTC()
-	lease, attachment := providerTestLeaseAttachment(t, now, "preview_client", "operation_client_01", "route_client_01", testPreviewCarrierIdentity(1), 1)
-	request, err := AttachmentRequestForLease(lease, "request_client_01", "correlation_client_01")
+	identity := testPreviewCarrierIdentity(1)
+	identity.AccountID = "user_10000000-0000-4000-8000-000000000001"
+	identity.HostID = "machine_10000000-0000-4000-8000-000000000002"
+	identity.TunnelID, identity.ConnectorID = identity.HostID, identity.HostID
+	identity.SessionID = "session_10000000-0000-4000-8000-000000000003"
+	lease, attachment := providerTestLeaseAttachment(t, now, "preview_10000000-0000-4000-8000-000000000004", "operation_10000000-0000-4000-8000-000000000005", "route_10000000-0000-4000-8000-000000000006", identity, 1)
+	lease.ActorID = identity.AccountID
+	lease.OwnerSessionID = "session_10000000-0000-4000-8000-000000000007"
+	attachment.Binding.OwnerSessionID = lease.OwnerSessionID
+	request, err := AttachmentRequestForLease(lease, "request_10000000-0000-4000-8000-000000000008", "correlation_10000000-0000-4000-8000-000000000009")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +41,7 @@ func TestAttachmentClientSendsExactMachineProofAndDecodesSafeAttachment(t *testi
 	var proofOperation, proofMethod, proofPath string
 	var proofBody []byte
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/previews/preview_client/carrier-attachment" {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/previews/preview_10000000-0000-4000-8000-000000000004/carrier-attachment" {
 			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
 		}
 		if r.Header.Get("Authorization") != "Bearer machine-token" || r.Header.Get("X-Paperboat-Machine-Identity") != "machine-proof-identity" {
@@ -79,7 +87,7 @@ func TestAttachmentClientSendsExactMachineProofAndDecodesSafeAttachment(t *testi
 	if got.Binding != attachment.Binding || got.AttachmentGeneration != attachment.AttachmentGeneration {
 		t.Fatalf("attachment = %#v", got)
 	}
-	if proofOperation != request.OperationID || proofMethod != http.MethodPost || proofPath != "/v1/previews/preview_client/carrier-attachment" || len(proofBody) == 0 {
+	if proofOperation != request.OperationID || proofMethod != http.MethodPost || proofPath != "/v1/previews/preview_10000000-0000-4000-8000-000000000004/carrier-attachment" || len(proofBody) == 0 {
 		t.Fatalf("proof input = op=%q method=%q path=%q body=%q", proofOperation, proofMethod, proofPath, proofBody)
 	}
 	encodedRequest, err := json.Marshal(request)
@@ -89,6 +97,18 @@ func TestAttachmentClientSendsExactMachineProofAndDecodesSafeAttachment(t *testi
 	if string(proofBody) != string(encodedRequest) {
 		t.Fatalf("proof body = %s, request body = %s", proofBody, encodedRequest)
 	}
+	// A deadline-only renewal advances the lease ETag while the authorized
+	// carrier admission and its signed binding retain their generation.
+	lease.ETag = formatLeaseETag(lease.ID, 2)
+	request.LeaseETag = lease.ETag
+	renewed, err := client.Allocate(context.Background(), request)
+	if err != nil {
+		t.Fatalf("renewed lease could not retain its admitted carrier: %v", err)
+	}
+	if renewed.Binding != attachment.Binding || renewed.AttachmentGeneration != attachment.AttachmentGeneration {
+		t.Fatal("lease renewal changed the carrier admission")
+	}
+
 }
 
 func TestAttachmentAdmissionAllowsDialOnlyAfterServerAdmission(t *testing.T) {
@@ -157,11 +177,11 @@ func TestAttachmentClientRejectsUnsafeEndpointAndMissingCreateOperation(t *testi
 			t.Fatalf("endpoint=%s error=%v", endpoint, err)
 		}
 	}
-	lease := Lease{ID: "preview_missing", OwnerDeviceID: "machine_01", OwnerSessionID: "owner_session_01"}
+	lease := Lease{ID: "preview_missing", OwnerMachineID: "machine_01", OwnerSessionID: "owner_session_01"}
 	if _, err := AttachmentRequestForLease(lease, "request_missing", "correlation_missing"); !errors.Is(err, ErrAttachmentBinding) {
 		t.Fatalf("missing operation error = %v", err)
 	}
-	if _, err := AttachmentRequestForLease(Lease{ID: "preview_missing", OwnerDeviceID: "machine_01", OwnerSessionID: "owner_session_01", CreateOperationID: "operation_01", ETag: formatLeaseETag("preview_missing", 1)}, "x\ny", "correlation_missing"); !errors.Is(err, ErrAttachmentClientInvalid) {
+	if _, err := AttachmentRequestForLease(Lease{ID: "preview_missing", OwnerMachineID: "machine_01", OwnerSessionID: "owner_session_01", OwnerSessionKind: "foreground", CreateOperationID: "operation_01", ETag: formatLeaseETag("preview_missing", 1)}, "x\ny", "correlation_missing"); !errors.Is(err, ErrAttachmentClientInvalid) {
 		t.Fatalf("unsafe request ID error = %v", err)
 	}
 }

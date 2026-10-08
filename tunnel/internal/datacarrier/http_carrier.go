@@ -5,32 +5,42 @@ import (
 	"crypto/tls"
 	"errors"
 	"io"
+	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
 )
+
+var ErrCarrierHTTPPanic = errors.New("data carrier HTTP handler panicked")
+var errCarrierHTTPDiagnostic = errors.New("data carrier HTTP server reported an internal diagnostic")
+var errCarrierListener = errors.New("data carrier listener failed")
 
 const httpCarrierPath = "/_paperboat/connector-v1"
 
 // HTTPService serves authenticated, full-duplex CONNECT carriers over real
 // HTTP/2 and HTTP/3 listeners.
 type HTTPService struct {
-	ctx        context.Context
-	cancel     context.CancelFunc
-	config     Config
-	tcp        net.Listener
-	udp        net.PacketConn
-	h2         *http.Server
-	h3         *http3.Server
-	accepted   chan *Server
-	admissions chan struct{}
-	done       chan struct{}
-	once       sync.Once
-	serversMu  sync.Mutex
-	servers    map[*Server]struct{}
+	ctx            context.Context
+	cancel         context.CancelFunc
+	config         Config
+	tcp            net.Listener
+	udp            net.PacketConn
+	h2             *http.Server
+	h3             *http3.Server
+	accepted       chan *Server
+	admissions     chan struct{}
+	done           chan struct{}
+	once           sync.Once
+	failure        error
+	onFailure      func(context.Context, error)
+	observationCtx atomic.Pointer[context.Context]
+	serversMu      sync.Mutex
+	servers        map[*Server]struct{}
 }
 
 func NewHTTPService(ctx context.Context, config ServiceConfig) (*HTTPService, error) {
@@ -42,7 +52,7 @@ func NewHTTPService(ctx context.Context, config ServiceConfig) (*HTTPService, er
 		return nil, err
 	}
 	serviceCtx, cancel := context.WithCancel(ctx)
-	s := &HTTPService{ctx: serviceCtx, cancel: cancel, config: carrier, accepted: make(chan *Server, carrier.QueueDepth), admissions: make(chan struct{}, carrier.QueueDepth), done: make(chan struct{}), servers: make(map[*Server]struct{})}
+	s := &HTTPService{ctx: serviceCtx, cancel: cancel, config: carrier, onFailure: config.OnFailure, accepted: make(chan *Server, carrier.QueueDepth), admissions: make(chan struct{}, carrier.QueueDepth), done: make(chan struct{}), servers: make(map[*Server]struct{})}
 	if config.TCP != nil {
 		if err := config.TCP.validateServer(); err != nil {
 			cancel()
@@ -61,7 +71,7 @@ func NewHTTPService(ctx context.Context, config ServiceConfig) (*HTTPService, er
 		}
 		s.tcp = listener
 		handler := s.handler(*config.TCP, "h2")
-		s.h2 = &http.Server{Handler: handler, TLSConfig: tlsConfig, ReadHeaderTimeout: carrier.StreamOpenLimit, MaxHeaderBytes: 16 << 10, ConnContext: func(ctx context.Context, connection net.Conn) context.Context {
+		s.h2 = &http.Server{Handler: s.safeHandler(handler), ErrorLog: log.New(carrierHTTPDiagnosticWriter{s}, "", 0), TLSConfig: tlsConfig, ReadHeaderTimeout: carrier.StreamOpenLimit, MaxHeaderBytes: 16 << 10, ConnContext: func(ctx context.Context, connection net.Conn) context.Context {
 			return context.WithValue(ctx, httpTLSConnectionKey{}, connection)
 		}}
 		if err := http2.ConfigureServer(s.h2, &http2.Server{MaxConcurrentStreams: uint32(carrier.MaximumStreams)}); err != nil {
@@ -71,7 +81,7 @@ func NewHTTPService(ctx context.Context, config ServiceConfig) (*HTTPService, er
 		}
 		go func() {
 			if err := s.h2.Serve(tlsConfigListener(listener, tlsConfig)); err != nil && !errors.Is(err, http.ErrServerClosed) && serviceCtx.Err() == nil {
-				_ = s.Close()
+				s.shutdown(carrierFailure{sentinel: errCarrierListener, cause: err})
 			}
 		}()
 	}
@@ -94,10 +104,10 @@ func NewHTTPService(ctx context.Context, config ServiceConfig) (*HTTPService, er
 		s.udp = packet
 		quicConfig := endpointQUICConfig(carrier)
 		quicConfig.MaxIncomingUniStreams = 3
-		s.h3 = &http3.Server{Handler: s.handler(*config.QUIC, "h3"), TLSConfig: tlsConfig, QUICConfig: quicConfig, MaxHeaderBytes: 16 << 10}
+		s.h3 = &http3.Server{Handler: s.safeHandler(s.handler(*config.QUIC, "h3")), Logger: slog.New(slog.NewTextHandler(carrierHTTPDiagnosticWriter{s}, nil)), TLSConfig: tlsConfig, QUICConfig: quicConfig, MaxHeaderBytes: 16 << 10}
 		go func() {
 			if err := s.h3.Serve(packet); err != nil && !errors.Is(err, http.ErrServerClosed) && serviceCtx.Err() == nil {
-				_ = s.Close()
+				s.shutdown(carrierFailure{sentinel: errCarrierListener, cause: err})
 			}
 		}()
 	}
@@ -153,8 +163,12 @@ func (s *HTTPService) handler(endpoint EndpointConfig, alpn string) http.Handler
 		link := &httpServerLink{body: r.Body, writer: w, flush: flusher, ctx: r.Context(), done: make(chan struct{})}
 		carrierConfig := s.config
 		carrierConfig.Identity = identity
+		// Session keepalives may write immediately; serialize the initial HTTP
+		// headers with all later carrier writes through the existing link owner.
+		link.writeMu.Lock()
 		server, err := NewServer(s.ctx, link, carrierConfig)
 		if err != nil {
+			link.writeMu.Unlock()
 			_ = link.Close()
 			return
 		}
@@ -162,6 +176,7 @@ func (s *HTTPService) handler(endpoint EndpointConfig, alpn string) http.Handler
 		select {
 		case <-s.done:
 			s.serversMu.Unlock()
+			link.writeMu.Unlock()
 			_ = server.Close()
 			return
 		default:
@@ -170,6 +185,7 @@ func (s *HTTPService) handler(endpoint EndpointConfig, alpn string) http.Handler
 		s.serversMu.Unlock()
 		w.WriteHeader(http.StatusOK)
 		flusher.Flush()
+		link.writeMu.Unlock()
 		select {
 		case s.accepted <- server:
 		case <-s.done:
@@ -195,10 +211,15 @@ func (s *HTTPService) Accept(ctx context.Context) (*Server, error) {
 	if s == nil || ctx == nil {
 		return nil, ErrInvalidEndpoint
 	}
+	// The single assembly consumer supplies the borrowed invocation context.
+	s.observationCtx.CompareAndSwap(nil, &ctx)
 	select {
 	case server := <-s.accepted:
 		return server, nil
 	case <-s.done:
+		if s.failure != nil {
+			return nil, s.failure
+		}
 		return nil, ErrCarrierClosed
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -220,7 +241,13 @@ func (s *HTTPService) Close() error {
 	if s == nil {
 		return nil
 	}
+	s.shutdown(nil)
+	return nil
+}
+
+func (s *HTTPService) shutdown(failure error) {
 	s.once.Do(func() {
+		s.failure = failure
 		close(s.done)
 		s.cancel()
 		if s.h2 != nil {
@@ -241,7 +268,40 @@ func (s *HTTPService) Close() error {
 		}
 		s.serversMu.Unlock()
 	})
-	return nil
+}
+
+func (s *HTTPService) observeFailure(err error) {
+	if s.onFailure == nil {
+		return
+	}
+	ctx := s.ctx
+	if borrowed := s.observationCtx.Load(); borrowed != nil {
+		ctx = *borrowed
+	}
+	s.onFailure(ctx, err)
+}
+
+func (s *HTTPService) safeHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		defer func() {
+			if value := recover(); value != nil {
+				if value != http.ErrAbortHandler {
+					s.observeFailure(ErrCarrierHTTPPanic)
+				}
+				panic(http.ErrAbortHandler)
+			}
+		}()
+		next.ServeHTTP(writer, request)
+	})
+}
+
+// Already formatted SDK/stdlib messages may contain private peer or panic data.
+// Their bytes are discarded, rather than inspected or sanitized heuristically.
+type carrierHTTPDiagnosticWriter struct{ service *HTTPService }
+
+func (writer carrierHTTPDiagnosticWriter) Write(data []byte) (int, error) {
+	writer.service.observeFailure(errCarrierHTTPDiagnostic)
+	return len(data), nil
 }
 
 type httpServerLink struct {

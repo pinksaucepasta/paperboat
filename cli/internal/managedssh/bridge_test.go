@@ -107,6 +107,42 @@ func TestProbeAndBridgeSSHUsesOnlySelectedLoopbackTarget(t *testing.T) {
 	}
 }
 
+func TestProbeLoopbackSSHUnavailablePreservesDialCauseWithStaticClassification(t *testing.T) {
+	listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := uint16(listener.Addr().(*net.TCPAddr).Port)
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ProbeLoopbackSSH(t.Context(), port, 250*time.Millisecond)
+	if !errors.Is(err, ErrSSHTargetUnavailable) {
+		t.Fatalf("target error=%v", err)
+	}
+	var staged interface{ DiagnosticStage() string }
+	var coded interface{ DiagnosticCode() string }
+	var dialErr *net.OpError
+	if !errors.As(err, &staged) || staged.DiagnosticStage() != "target_connect" ||
+		!errors.As(err, &coded) || coded.DiagnosticCode() != "managed_ssh_failed" ||
+		!errors.As(err, &dialErr) {
+		t.Fatalf("target failure lost classification or dial cause: %T %v", err, err)
+	}
+	if err.Error() != ErrSSHTargetUnavailable.Error() {
+		t.Fatalf("target failure exposed transport details: %q", err)
+	}
+}
+
+func TestProbeLoopbackSSHCancellationIsReturnedUnwrapped(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := ProbeLoopbackSSH(ctx, 22, time.Second)
+	if err != context.Canceled {
+		t.Fatalf("canceled probe error=%v", err)
+	}
+}
+
 func TestBridgeSSHCancellationAndTargetValidation(t *testing.T) {
 	if _, err := NewLoopbackTarget("localhost", 22); !errors.Is(err, ErrSSHTargetInvalid) {
 		t.Fatalf("hostname target error=%v", err)

@@ -1,28 +1,26 @@
-// Package runtimeattachment connects an installed device's loopback runtime to
+// Package runtimeattachment connects an installed machine's loopback runtime to
 // its server-authorized edge route. The edge never receives the loopback target.
 package runtimeattachment
 
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"github.com/google/uuid"
 	"io"
 	jitterrand "math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcastserver"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/edgeplacement"
@@ -30,6 +28,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 const path = "/v1/runtime/carrier-attachment"
@@ -38,7 +37,7 @@ type Config struct {
 	ControlURL             string
 	StateRoot              string
 	Transport              http.RoundTripper
-	DeviceID               string
+	MachineID              string
 	WorkerGeneration       uint64
 	InstallationGeneration uint64
 	ListenAddress          string
@@ -127,7 +126,7 @@ type retryState struct {
 
 func New(config Config) (*Service, error) {
 	u, err := url.Parse(config.ControlURL)
-	if err != nil || u.Scheme != "https" || u.Hostname() == "" || config.StateRoot == "" || config.DeviceID == "" || config.WorkerGeneration == 0 || config.InstallationGeneration == 0 || config.ListenAddress == "" {
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || config.StateRoot == "" || config.MachineID == "" || config.WorkerGeneration == 0 || config.InstallationGeneration == 0 || config.ListenAddress == "" {
 		return nil, errors.New("invalid runtime attachment configuration")
 	}
 	host, portText, err := net.SplitHostPort(config.ListenAddress)
@@ -148,7 +147,7 @@ func New(config Config) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	processID, err := randomID("runtime-process-")
+	processID, err := randomID("process")
 	if err != nil {
 		return nil, err
 	}
@@ -156,6 +155,15 @@ func New(config Config) (*Service, error) {
 }
 
 func (s *Service) Start(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("runtime attachment start context required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !supportref.Valid(supportref.FromContext(ctx)) {
+		ctx = supportref.WithContext(ctx, supportref.New())
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.done != nil {
@@ -190,24 +198,34 @@ func (s *Service) run(ctx context.Context) {
 	lives := map[string]*live{}
 	retries := map[string]retryState{}
 	publisherKey := ""
-	lastFailure := ""
+	var lastFailure *failureClass
 	defer func() {
+		var cleanupErr error
 		if s.broadcaster != nil {
 			s.broadcaster.SetPublisher(nil)
 		}
 		for _, item := range lives {
-			closeLive(item)
+			cleanupErr = errors.Join(cleanupErr, closeLive(item))
 		}
 		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = s.sessions.Close(cleanup)
+		cleanupErr = errors.Join(cleanupErr, s.sessions.Close(cleanup))
+		if cleanupErr != nil {
+			failure := cleanupFailure(cleanupErr)
+			fault := errorreport.ProjectFault(ctx, "paperboat-daemon", "preview_attachment", "lifecycle", "service_failed", failure)
+			if fault.Outcome != "canceled" {
+				errorreport.Current().CaptureFailure(ctx, "paperboat-daemon", "preview_attachment", "lifecycle", "service_failed", failure)
+			}
+		}
 	}()
 	for ctx.Err() == nil {
 		response, err := s.fetch(ctx, "", "")
 		if err == nil && len(response.EdgeCandidates) != 0 && (s.lastProbe.IsZero() || time.Since(s.lastProbe) >= 30*time.Second) {
 			measurements, probeErr := edgeplacement.Probe(ctx, response.EdgeCandidates, nil)
 			s.lastProbe = time.Now()
-			if probeErr == nil {
+			if probeErr != nil {
+				err = peerConnectFailure(probeErr)
+			} else {
 				eligible := measurements[:0]
 				for _, measurement := range measurements {
 					failed := false
@@ -223,8 +241,11 @@ func (s *Service) run(ctx context.Context) {
 				}
 				measurements = eligible
 			}
-			if probeErr == nil && len(measurements) != 0 {
-				if selected, selectErr := s.selector.Select(s.lastProbe, measurements); selectErr == nil && (s.preference == nil || *s.preference != selected) {
+			if err == nil && len(measurements) != 0 {
+				selected, selectErr := s.selector.Select(s.lastProbe, measurements)
+				if selectErr != nil {
+					err = classifyFailure(selectErr, "reconciliation", "service_failed")
+				} else if s.preference == nil || *s.preference != selected {
 					s.preference = &selected
 					response, err = s.fetch(ctx, "", "")
 				}
@@ -246,7 +267,9 @@ func (s *Service) run(ctx context.Context) {
 						s.broadcaster.SetPublisher(nil)
 						publisherKey = ""
 					}
-					closeLive(item)
+					if closeErr := closeLive(item); closeErr != nil {
+						err = errors.Join(err, cleanupFailure(closeErr))
+					}
 					delete(lives, key)
 				}
 			}
@@ -311,25 +334,6 @@ func (s *Service) run(ctx context.Context) {
 				publisherKey = chosen.key
 			}
 		}
-		if err != nil {
-			s.lastProbe = time.Time{}
-			code := "request"
-			if errors.Is(err, preview.ErrMachineAttachmentSessionInvalid) {
-				code = "carrier_binding"
-			}
-			if errors.Is(err, preview.ErrMachineAttachmentTrustRequired) {
-				code = "carrier_trust"
-			}
-			if errors.Is(err, preview.ErrMachineAttachmentSessionUnavailable) {
-				code = "carrier_unavailable"
-			}
-			if code != lastFailure {
-				fmt.Fprintln(os.Stderr, "paperboat runtime carrier pending:", code)
-				lastFailure = code
-			}
-		} else {
-			lastFailure = ""
-		}
 		for key, item := range lives {
 			if time.Now().Before(item.expiresAt) && item.active.Pool().State() == connector.DataCarrierPoolReady {
 				continue
@@ -338,8 +342,17 @@ func (s *Service) run(ctx context.Context) {
 				s.broadcaster.SetPublisher(nil)
 				publisherKey = ""
 			}
-			closeLive(item)
+			if closeErr := closeLive(item); closeErr != nil {
+				err = errors.Join(err, cleanupFailure(closeErr))
+			}
 			delete(lives, key)
+		}
+		if err != nil {
+			s.lastProbe = time.Time{}
+			lastFailure = s.observeFailure(ctx, err, lastFailure)
+		} else if lastFailure != nil {
+			errorreport.Current().Lifecycle(ctx, "edge", "preview_attachment", "recovered", "success")
+			lastFailure = nil
 		}
 		wait := 20 * time.Second
 		if err != nil {
@@ -384,11 +397,31 @@ func chooseLive(ordered []admissionBinding, lives map[string]*live, activeNode, 
 	return nil, admissionBinding{}
 }
 
+type failureClass struct {
+	stage, code, cause string
+	errno, status      int
+}
+
+func (s *Service) observeFailure(ctx context.Context, err error, previous *failureClass) *failureClass {
+	fault := errorreport.ProjectFault(ctx, "paperboat-daemon", "preview_attachment", "lifecycle", "service_failed", err)
+	if fault.Outcome == "canceled" {
+		return previous
+	}
+	class := failureClass{stage: fault.Stage, code: fault.Code, cause: fault.Cause, errno: fault.Errno, status: fault.HTTPStatus}
+	if previous != nil && *previous == class {
+		return previous
+	}
+	if !errorreport.HTTPAttemptObserved(err) {
+		errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "preview_attachment", "lifecycle", "service_failed", err)
+	}
+	return &class
+}
+
 func (s *Service) fetch(ctx context.Context, activeNode, activeEpoch string) (admission, error) {
 	var out admission
-	op, err := randomID("runtime-attach-")
+	op, err := randomID("operation")
 	if err != nil {
-		return out, err
+		return out, controlFailure(err)
 	}
 	_, portText, _ := net.SplitHostPort(s.config.ListenAddress)
 	port, _ := strconv.Atoi(portText) // validated by New
@@ -401,25 +434,25 @@ func (s *Service) fetch(ctx context.Context, activeNode, activeEpoch string) (ad
 	}
 	body, err := json.Marshal(request)
 	if err != nil {
-		return out, err
+		return out, controlFailure(err)
 	}
 	token, err := s.auth.Token(ctx)
 	if err != nil {
 		// A long-idle installation may have missed the renewal window. Its
-		// enrolled device identity can recover the control credential.
+		// enrolled machine identity can recover the control credential.
 		token, err = s.auth.EnsureInitial(ctx)
 		if err != nil {
-			return out, err
+			return out, controlFailure(err)
 		}
 	}
 	proof, err := s.auth.Proof(ctx, op, http.MethodPost, path, body)
 	if err != nil {
-		return out, err
+		return out, controlFailure(err)
 	}
 	endpoint := strings.TrimRight(s.config.ControlURL, "/") + path
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return out, err
+		return out, controlFailure(err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("X-Paperboat-Machine-Identity", token)
@@ -427,25 +460,25 @@ func (s *Service) fetch(ctx context.Context, activeNode, activeEpoch string) (ad
 	req.Header.Set("Content-Type", "application/json")
 	res, err := s.client.Do(req)
 	if err != nil {
-		return out, err
+		return out, controlFailure(err)
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		_, _ = io.CopyN(io.Discard, res.Body, 4096)
-		return out, fmt.Errorf("runtime attachment unavailable (%d)", res.StatusCode)
+		return out, controlFailure(errorreport.HTTPStatusFailure(res))
 	}
 	var envelope struct {
 		Data admission `json:"data"`
 	}
 	if err := json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&envelope); err != nil {
-		return out, err
+		return out, controlFailure(errors.Join(preview.ErrMachineAttachmentSessionInvalid, err))
 	}
 	out = envelope.Data
-	if out.Schema != "paperboat.runtime-carrier/v1" || out.Binding.HostID != s.config.DeviceID || out.Binding.InstallationGeneration != s.config.InstallationGeneration || out.Binding.ProcessGeneration != s.config.WorkerGeneration || out.Binding.RouteID == "" || out.Binding.SessionID == "" || out.RouteKind != "runtime_https_wss" || !out.ExpiresAt.After(time.Now()) {
-		return admission{}, errors.New("runtime attachment binding invalid")
+	if out.Schema != "paperboat.runtime-carrier/v1" || out.Binding.HostID != s.config.MachineID || out.Binding.InstallationGeneration != s.config.InstallationGeneration || out.Binding.ProcessGeneration != s.config.WorkerGeneration || out.Binding.RouteID == "" || out.Binding.SessionID == "" || out.RouteKind != "runtime_https_wss" || !out.ExpiresAt.After(time.Now()) {
+		return admission{}, controlFailure(preview.ErrMachineAttachmentSessionInvalid)
 	}
 	if out.Backup != nil && (out.Backup.Schema != out.Schema || out.Backup.Binding.HostID != out.Binding.HostID || out.Backup.Binding.AccountID != out.Binding.AccountID || out.Backup.Binding.RouteID != out.Binding.RouteID || out.Backup.Binding.EdgeNodeID == out.Binding.EdgeNodeID || out.Backup.Binding.EdgeProcessEpoch == "" || out.Backup.Binding.InstallationGeneration != out.Binding.InstallationGeneration || out.Backup.Binding.ProcessGeneration != out.Binding.ProcessGeneration || out.Backup.RouteKind != out.RouteKind || !out.Backup.ExpiresAt.After(time.Now())) {
-		return admission{}, errors.New("runtime backup binding invalid")
+		return admission{}, controlFailure(preview.ErrMachineAttachmentSessionInvalid)
 	}
 	return out, nil
 }
@@ -460,9 +493,9 @@ func carrierKey(a admissionBinding) string {
 
 func (s *Service) connect(ctx context.Context, a admissionBinding, key string) (*live, error) {
 	b := a.Binding
-	carrier, err := s.sessions.AcquirePrivateAccessCarrier(ctx, preview.AccessorCarrierAdmission{AccountID: b.AccountID, DeviceID: b.HostID, AccessorPublicKey: b.MachineIdentityPublicKey, AccessorThumbprint: b.MachineIdentityThumbprint, TunnelID: b.TunnelID, CarrierConnectorID: b.ConnectorID, CarrierSessionID: b.SessionID, ProcessGeneration: b.ProcessGeneration, ConfigGeneration: b.ConfigGeneration, EdgeNodeID: b.EdgeNodeID, EdgeProcessEpoch: b.EdgeProcessEpoch, EdgeCarrierServerSPKISHA256: b.EdgeCarrierServerSPKISHA256, EdgeCarrierServerCertificateChainPEM: b.EdgeCarrierServerCertificateChainPEM, EdgeEndpoints: a.EdgeEndpoints, ExpiresAt: a.ExpiresAt})
+	carrier, err := s.sessions.AcquireRuntimeCarrier(ctx, preview.RuntimeCarrierAdmission{AccountID: b.AccountID, MachineID: b.HostID, MachineIdentityPublicKey: b.MachineIdentityPublicKey, MachineIdentityThumbprint: b.MachineIdentityThumbprint, TunnelID: b.TunnelID, ConnectorID: b.ConnectorID, SessionID: b.SessionID, ProcessGeneration: b.ProcessGeneration, ConfigGeneration: b.ConfigGeneration, EdgeNodeID: b.EdgeNodeID, EdgeProcessEpoch: b.EdgeProcessEpoch, EdgeCarrierServerSPKISHA256: b.EdgeCarrierServerSPKISHA256, EdgeCarrierServerCertificateChainPEM: b.EdgeCarrierServerCertificateChainPEM, EdgeEndpoints: a.EdgeEndpoints, ExpiresAt: a.ExpiresAt})
 	if err != nil {
-		return nil, err
+		return nil, carrierFailure(err)
 	}
 	forwarder := tunnelmanager.OriginStreamForwarder{Transport: &tunnelmanager.OriginHTTPTransport{}}
 	route := hoststate.TunnelConfigRoute{ID: b.RouteID, Protocol: "http", MatchType: "exact", MatchHostname: a.Hostname, OriginScheme: "http", OriginAddress: s.config.ListenAddress, PreserveHost: true, TLSVerification: "not_applicable", ConnectTimeoutMs: 5000, IdleTimeoutMs: 3600000, MaxConcurrentStreams: 256, DesiredState: "active"}
@@ -470,8 +503,8 @@ func (s *Service) connect(ctx context.Context, a admissionBinding, key string) (
 	if err != nil {
 		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = carrier.Release(cleanup)
-		return nil, err
+		releaseErr := carrier.Release(cleanup)
+		return nil, streamOpenFailure(errors.Join(err, releaseErr))
 	}
 	opener := browserbroadcastserver.OpenPublisher(func(openCtx context.Context, terminalSessionID string) (io.WriteCloser, error) {
 		if err := openCtx.Err(); err != nil {
@@ -487,24 +520,26 @@ func (s *Service) connect(ctx context.Context, a admissionBinding, key string) (
 	return &live{key: key, expiresAt: a.ExpiresAt, active: carrier.Active, streams: streams, release: carrier.Release, open: opener}, nil
 }
 
-func closeLive(l *live) {
+func closeLive(l *live) error {
 	if l == nil {
-		return
+		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	var err error
 	if l.streams != nil {
-		_ = l.streams.Close(ctx)
+		err = errors.Join(err, l.streams.Close(ctx))
 	}
 	if l.release != nil {
-		_ = l.release(ctx)
+		err = errors.Join(err, l.release(ctx))
 	}
+	return err
 }
 
-func randomID(prefix string) (string, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
+func randomID(noun string) (string, error) {
+	id, err := uuid.NewRandom()
+	if err != nil {
 		return "", err
 	}
-	return prefix + hex.EncodeToString(b[:]), nil
+	return noun + "_" + id.String(), nil
 }

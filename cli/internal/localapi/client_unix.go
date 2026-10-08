@@ -178,19 +178,12 @@ func (c *Client) OpenPeerStream(ctx context.Context, value PeerStreamRequest) (n
 	if err != nil {
 		return nil, localDialFailure(err)
 	}
-	watchDone := make(chan struct{})
-	go func() {
-		select {
-		case <-ctx.Done():
-			_ = connection.Close()
-		case <-watchDone:
-		}
-	}()
-	defer close(watchDone)
+	stopWatching := watchStreamSetup(ctx, connection)
+	defer stopWatching()
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://paperboat.local/v1/peer-streams", bytes.NewReader(body))
 	if err != nil {
 		_ = connection.Close()
-		return nil, err
+		return nil, streamSetupFailure(ctx, err)
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Paperboat-Request-ID", localRequestID())
@@ -200,13 +193,13 @@ func (c *Client) OpenPeerStream(ctx context.Context, value PeerStreamRequest) (n
 	request.Header.Set("Connection", "close")
 	if err := request.Write(connection); err != nil {
 		_ = connection.Close()
-		return nil, err
+		return nil, streamSetupFailure(ctx, err)
 	}
 	reader := bufio.NewReader(connection)
 	response, err := http.ReadResponse(reader, request)
 	if err != nil {
 		_ = connection.Close()
-		return nil, err
+		return nil, streamSetupFailure(ctx, err)
 	}
 	if response.StatusCode != http.StatusOK || response.Header.Get("X-Paperboat-Protocol") != ProtocolV1 {
 		defer response.Body.Close()
@@ -228,24 +221,29 @@ func (c *Client) PrepareFileTransfer(ctx context.Context, value FileTransferRequ
 	}
 	connection, err := c.dial(ctx)
 	if err != nil {
-		return nil, err
+		return nil, localDialFailure(err)
 	}
+	stopWatching := watchStreamSetup(ctx, connection)
+	defer stopWatching()
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://paperboat.local/v1/file-transfers", bytes.NewReader(body))
 	if err != nil {
 		_ = connection.Close()
-		return nil, err
+		return nil, streamSetupFailure(ctx, err)
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Paperboat-Request-ID", localRequestID())
+	if reference := supportref.FromContext(ctx); reference != "" {
+		request.Header.Set(supportref.Header, reference)
+	}
 	request.Header.Set("Connection", "close")
 	if err := request.Write(connection); err != nil {
 		_ = connection.Close()
-		return nil, err
+		return nil, streamSetupFailure(ctx, err)
 	}
 	response, err := http.ReadResponse(bufio.NewReader(connection), request)
 	if err != nil {
 		_ = connection.Close()
-		return nil, err
+		return nil, streamSetupFailure(ctx, err)
 	}
 	if response.StatusCode != http.StatusOK || response.Header.Get("X-Paperboat-Protocol") != ProtocolV1 {
 		defer response.Body.Close()
@@ -282,24 +280,29 @@ func (c *Client) OpenFileTransferStream(ctx context.Context, handle string) (net
 	}
 	connection, err := c.dial(ctx)
 	if err != nil {
-		return nil, err
+		return nil, localDialFailure(err)
 	}
+	stopWatching := watchStreamSetup(ctx, connection)
+	defer stopWatching()
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://paperboat.local/v1/file-transfer-streams", nil)
 	if err != nil {
 		_ = connection.Close()
-		return nil, err
+		return nil, streamSetupFailure(ctx, err)
 	}
 	request.Header.Set("X-Paperboat-Request-ID", localRequestID())
+	if reference := supportref.FromContext(ctx); reference != "" {
+		request.Header.Set(supportref.Header, reference)
+	}
 	request.Header.Set("X-Paperboat-Transfer-Handle", handle)
 	request.Header.Set("Connection", "close")
 	if err := request.Write(connection); err != nil {
 		_ = connection.Close()
-		return nil, err
+		return nil, streamSetupFailure(ctx, err)
 	}
 	response, err := http.ReadResponse(bufio.NewReader(connection), request)
 	if err != nil {
 		_ = connection.Close()
-		return nil, err
+		return nil, streamSetupFailure(ctx, err)
 	}
 	if response.StatusCode != http.StatusOK || response.Header.Get("X-Paperboat-Protocol") != ProtocolV1 {
 		defer response.Body.Close()
@@ -310,6 +313,28 @@ func (c *Client) OpenFileTransferStream(ctx context.Context, handle string) (net
 		return nil, ErrVersionMismatch
 	}
 	return &peerStreamConn{Conn: connection, reader: response.Body}, nil
+}
+
+func streamSetupFailure(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return errors.Join(ctx.Err(), err)
+	}
+	return err
+}
+
+// Only setup borrows the caller's lifetime. Join an in-flight close before
+// returning so no cancellation worker survives ownership of the upgraded stream.
+func watchStreamSetup(ctx context.Context, connection net.Conn) func() {
+	done := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(done)
+		_ = connection.Close()
+	})
+	return func() {
+		if !stop() {
+			<-done
+		}
+	}
 }
 
 type peerStreamConn struct {
@@ -586,6 +611,12 @@ func (e *RemoteError) Error() string {
 }
 
 func (e *RemoteError) Unwrap() error { return e.cause }
+func (e *RemoteError) DiagnosticStatus() int {
+	if e == nil {
+		return 0
+	}
+	return e.StatusCode
+}
 
 func decodeRemoteErrorReader(status int, reader io.Reader) error {
 	var remote struct {

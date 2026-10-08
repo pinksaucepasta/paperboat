@@ -8,9 +8,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/observability"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 var (
@@ -67,6 +69,8 @@ type Runtime struct {
 	typedComponents map[health.Dimension]map[string]componentHealthState
 	typedSequence   uint64
 	startedAt       time.Time
+	recorder        *diagnostics.Recorder
+	reference       string
 }
 
 type componentHealthState struct {
@@ -80,7 +84,7 @@ func stableCorrelationID(value string) string {
 		return "correlation_runtime"
 	}
 	validPrefix := false
-	for _, prefix := range []string{"corr_", "cor_", "correlation_", "request_", "pb-"} {
+	for _, prefix := range []string{"correlation_", "request_", "support_"} {
 		if strings.HasPrefix(value, prefix) && len(value) > len(prefix) {
 			validPrefix = true
 			break
@@ -141,8 +145,18 @@ func (r *Runtime) Start(ctx context.Context) error {
 	}
 	r.state = Starting
 	r.mu.Unlock()
+	r.recorder = diagnostics.FromContext(ctx)
+	r.reference = supportref.FromContext(ctx)
+	if r.reference == "" {
+		r.reference = supportref.New()
+	}
+	ctx = r.diagnosticContext(ctx)
+	if r.correlation == "correlation_runtime" {
+		r.correlation = r.reference
+	}
 	if err := ctx.Err(); err != nil {
-		r.recordLifecycle(Component{Capability: "service", Required: true}, lifecycleStart, "start_canceled", health.StatusDown, health.RetryWaitForChange, time.Time{}, observability.OutcomeCanceled, observability.SeverityWarn, "Runtime start was canceled.")
+		code, outcome, severity := lifecycleFailure(lifecycleStart, err)
+		r.recordLifecycle(ctx, Component{Capability: "service", Required: true}, lifecycleStart, code, health.StatusDown, health.RetryWaitForChange, time.Time{}, outcome, severity, "Runtime start could not proceed.", err)
 		r.mu.Lock()
 		r.state = Failed
 		r.mu.Unlock()
@@ -155,7 +169,7 @@ func (r *Runtime) Start(ctx context.Context) error {
 			err = ctx.Err()
 		}
 		if err != nil {
-			cleanupErr := r.cleanupFailed(component)
+			cleanupErr := r.cleanupFailed(ctx, component)
 			code, outcome, severity := lifecycleFailure(lifecycleStart, err)
 			status := health.StatusDown
 			if !component.Required {
@@ -164,13 +178,13 @@ func (r *Runtime) Start(ctx context.Context) error {
 			retry, nextRetry := lifecycleRetry(r.telemetryNow(), outcome)
 			if !component.Required {
 				r.health.Set(component.Capability, health.Unavailable, "start_failed", 0)
-				r.recordLifecycle(component, lifecycleStart, code, status, retry, nextRetry, outcome, severity, "Component failed to start.")
+				r.recordLifecycle(ctx, component, lifecycleStart, code, status, retry, nextRetry, outcome, severity, "Component failed to start.", err)
 				continue
 			}
 			r.health.Set(component.Capability, health.Unavailable, "start_failed", 0)
-			r.recordLifecycle(component, lifecycleStart, code, status, retry, nextRetry, outcome, severity, "Required component failed to start.")
+			r.recordLifecycle(ctx, component, lifecycleStart, code, status, retry, nextRetry, outcome, severity, "Required component failed to start.", err)
 			r.updateServiceHealth(status, code, retry, nextRetry)
-			rollbackErr := r.rollback()
+			rollbackErr := r.rollback(ctx)
 			r.mu.Lock()
 			r.state = Failed
 			r.mu.Unlock()
@@ -179,7 +193,7 @@ func (r *Runtime) Start(ctx context.Context) error {
 		}
 		r.started = append(r.started, component)
 		r.health.Set(component.Capability, health.Ready, "", 0)
-		r.recordLifecycle(component, lifecycleStart, "ready", health.StatusReady, health.RetryNone, time.Time{}, observability.OutcomeStateChange, observability.SeverityInfo, "Component started.")
+		r.recordLifecycle(ctx, component, lifecycleStart, "ready", health.StatusReady, health.RetryNone, time.Time{}, observability.OutcomeStateChange, observability.SeverityInfo, "Component started.", nil)
 	}
 	r.mu.Lock()
 	r.state = Running
@@ -210,6 +224,7 @@ func (r *Runtime) Shutdown(ctx context.Context) error {
 	}
 	r.state = Stopping
 	r.mu.Unlock()
+	ctx = r.diagnosticContext(ctx)
 	shutdownCtx, cancel := context.WithTimeout(ctx, r.config.ShutdownTimeout)
 	defer cancel()
 	var result error
@@ -224,10 +239,10 @@ func (r *Runtime) Shutdown(ctx context.Context) error {
 			r.health.Set(component.Capability, health.Degraded, "shutdown_failed", 0)
 			code, outcome, severity := lifecycleFailure(lifecycleShutdown, err)
 			retry, nextRetry := lifecycleRetry(r.telemetryNow(), outcome)
-			r.recordLifecycle(component, lifecycleShutdown, code, health.StatusDegraded, retry, nextRetry, outcome, severity, "Component shutdown failed.")
+			r.recordLifecycle(ctx, component, lifecycleShutdown, code, health.StatusDegraded, retry, nextRetry, outcome, severity, "Component shutdown failed.", err)
 		} else {
 			r.health.Set(component.Capability, health.Unavailable, "stopped", 0)
-			r.recordLifecycle(component, lifecycleShutdown, "stopped", health.StatusNotApplicable, health.RetryNone, time.Time{}, observability.OutcomeStateChange, observability.SeverityInfo, "Component stopped.")
+			r.recordLifecycle(ctx, component, lifecycleShutdown, "stopped", health.StatusNotApplicable, health.RetryNone, time.Time{}, observability.OutcomeStateChange, observability.SeverityInfo, "Component stopped.", nil)
 		}
 	}
 	r.started = nil
@@ -259,8 +274,8 @@ func (r *Runtime) TypedHealth() health.HealthSnapshot {
 	return r.typedHealth.Snapshot()
 }
 
-func (r *Runtime) rollback() error {
-	ctx, cancel := context.WithTimeout(context.Background(), r.config.ShutdownTimeout)
+func (r *Runtime) rollback(parent context.Context) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), r.config.ShutdownTimeout)
 	defer cancel()
 	var result error
 	rollbackOutcome := "success"
@@ -275,13 +290,13 @@ func (r *Runtime) rollback() error {
 			r.health.Set(component.Capability, health.Degraded, "rollback_failed", 0)
 			code, outcome, severity := lifecycleFailure(lifecycleRollback, err)
 			retry, nextRetry := lifecycleRetry(r.telemetryNow(), outcome)
-			r.recordLifecycle(component, lifecycleRollback, code, health.StatusDegraded, retry, nextRetry, outcome, severity, "Component rollback failed.")
+			r.recordLifecycle(ctx, component, lifecycleRollback, code, health.StatusDegraded, retry, nextRetry, outcome, severity, "Component rollback failed.", err)
 			if outcome == observability.OutcomeCanceled {
 				rollbackOutcome = "canceled"
 			}
 		} else {
 			r.health.Set(component.Capability, health.Unavailable, "stopped", 0)
-			r.recordLifecycle(component, lifecycleRollback, "stopped", health.StatusNotApplicable, health.RetryNone, time.Time{}, observability.OutcomeStateChange, observability.SeverityInfo, "Component rolled back.")
+			r.recordLifecycle(ctx, component, lifecycleRollback, "stopped", health.StatusNotApplicable, health.RetryNone, time.Time{}, observability.OutcomeStateChange, observability.SeverityInfo, "Component rolled back.", nil)
 		}
 	}
 	r.started = nil
@@ -294,10 +309,17 @@ func (r *Runtime) rollback() error {
 	return result
 }
 
-func (r *Runtime) cleanupFailed(component Component) error {
-	ctx, cancel := context.WithTimeout(context.Background(), r.config.ShutdownTimeout)
+func (r *Runtime) cleanupFailed(parent context.Context, component Component) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), r.config.ShutdownTimeout)
 	defer cancel()
-	if err := component.Service.Shutdown(ctx); err != nil {
+	err := component.Service.Shutdown(ctx)
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err != nil {
+		code, outcome, severity := lifecycleFailure(lifecycleRollback, err)
+		retry, nextRetry := lifecycleRetry(r.telemetryNow(), outcome)
+		r.recordLifecycle(ctx, component, lifecycleRollback, code, health.StatusDegraded, retry, nextRetry, outcome, severity, "Failed-start cleanup could not complete.", err)
 		return fmt.Errorf("cleanup failed start %s: %w", component.Capability, err)
 	}
 	return nil
@@ -312,10 +334,10 @@ const (
 func lifecycleFailure(operation string, err error) (string, observability.EventOutcome, observability.EventSeverity) {
 	prefix := strings.TrimPrefix(operation, "component_")
 	if errors.Is(err, context.Canceled) {
-		return prefix + "_canceled", observability.OutcomeCanceled, observability.SeverityWarn
+		return prefix + "_canceled", observability.OutcomeCanceled, observability.SeverityInfo
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return prefix + "_deadline", observability.OutcomeCanceled, observability.SeverityWarn
+		return prefix + "_deadline", observability.OutcomeFailed, observability.SeverityError
 	}
 	return prefix + "_failed", observability.OutcomeFailed, observability.SeverityError
 }
@@ -339,7 +361,19 @@ func (r *Runtime) telemetryNow() time.Time {
 	return time.Now().UTC().Round(0)
 }
 
-func (r *Runtime) recordLifecycle(component Component, operation, code string, status health.HealthStatus, retry health.RetryDecision, nextRetry time.Time, outcome observability.EventOutcome, severity observability.EventSeverity, message string) {
+// diagnosticContext borrows process metadata across independently canceled
+// startup, rollback and shutdown contexts. Runtime never closes the recorder.
+func (r *Runtime) diagnosticContext(ctx context.Context) context.Context {
+	if supportref.FromContext(ctx) == "" {
+		ctx = supportref.WithContext(ctx, r.reference)
+	}
+	if diagnostics.FromContext(ctx) == nil && r.recorder != nil {
+		ctx = diagnostics.WithRecorder(ctx, r.recorder)
+	}
+	return ctx
+}
+
+func (r *Runtime) recordLifecycle(ctx context.Context, component Component, operation, code string, status health.HealthStatus, retry health.RetryDecision, nextRetry time.Time, outcome observability.EventOutcome, severity observability.EventSeverity, message string, failure error) {
 	dimension := componentDimension(component.Capability)
 	correlation := r.correlation
 	if correlation == "" {
@@ -362,8 +396,14 @@ func (r *Runtime) recordLifecycle(component Component, operation, code string, s
 			"result":    metricResult(outcome, code),
 		})
 	}
+	errorreport.Current().ServiceLifecycle(ctx, component.Capability, operation, failure)
+	if failure == nil && r.recorder != nil {
+		_ = r.recorder.RecordWithSupportReference(operation, code, "info", supportref.FromContext(ctx), map[string]string{
+			"component": "paperboat-daemon", "operation": operation,
+			"capability": string(dimension), "outcome": string(outcome), "retry_class": string(retry),
+		})
+	}
 	if r.eventLog == nil {
-		errorreport.Current().Lifecycle(context.Background(), string(dimension), operation, code, string(outcome))
 		return
 	}
 	now := r.telemetryNow()
@@ -524,11 +564,11 @@ func metricComponent(capability string) string {
 }
 
 func metricResult(outcome observability.EventOutcome, code string) string {
+	if strings.HasSuffix(code, "_deadline") {
+		return "deadline"
+	}
 	switch outcome {
 	case observability.OutcomeCanceled:
-		if strings.HasSuffix(code, "_deadline") {
-			return "deadline"
-		}
 		return "canceled"
 	case observability.OutcomeFailed, observability.OutcomeRejected:
 		return "unavailable"

@@ -129,7 +129,7 @@ func verifyIdentityEnvelope(data []byte, rootPublic ed25519.PublicKey, rootKeyID
 		EndpointID: machineID,
 	}, now)
 	if err != nil {
-		return machineIdentity{}, fmt.Errorf("%w: %v", errInvalidPeerIdentity, err)
+		return machineIdentity{}, fmt.Errorf("%w: %w", errInvalidPeerIdentity, err)
 	}
 	return machineIdentity{Certificate: certificate, RootPublic: append(ed25519.PublicKey(nil), rootPublic...), Raw: raw}, nil
 }
@@ -188,13 +188,12 @@ func writeApplicationFrame(w io.Writer, kind byte, payload []byte) error {
 	if kind != appKindStructured && kind != appKindBinary || len(payload) == 0 || len(payload) > maximum {
 		return errors.New("invalid terminal application frame")
 	}
-	var header [5]byte
-	header[0] = kind
-	binary.BigEndian.PutUint32(header[1:], uint32(len(payload)))
-	if err := writeFull(w, header[:]); err != nil {
-		return err
-	}
-	return writeFull(w, payload)
+	// One TLS write avoids a separate encrypted record for the tiny header.
+	wire := make([]byte, 5+len(payload))
+	wire[0] = kind
+	binary.BigEndian.PutUint32(wire[1:5], uint32(len(payload)))
+	copy(wire[5:], payload)
+	return writeFull(w, wire)
 }
 
 func readApplicationFrame(r io.Reader) (byte, []byte, error) {

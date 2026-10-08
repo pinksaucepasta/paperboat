@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 type fakeAuthorizer struct {
@@ -284,5 +287,64 @@ func TestUpstreamFailureIsUnavailable(t *testing.T) {
 	service.ServeHTTP(recorder, testRequest(t, http.MethodGet, "/v1/inspector/records?resource=tun_01&route=rte_01&kind=tunnel", nil, "grant_owner"))
 	if recorder.Code != http.StatusServiceUnavailable {
 		t.Fatalf("upstream failure = %d, want 503", recorder.Code)
+	}
+}
+
+func TestAuthorityFailuresAreObservedOnceAndDeniedOutcomesStayQuiet(t *testing.T) {
+	observed := make(chan errorreport.Fault, 8)
+	restore := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) { observed <- fault })
+	defer restore()
+	secretCause := errors.New("private authority credential detail")
+	authorizer := &fakeAuthorizer{err: secretCause}
+	service, _, _ := testService(t, authorizer)
+	reference := supportref.New()
+	request := testRequest(t, http.MethodGet, "/v1/inspector/records?resource=tun_01&route=rte_01&kind=tunnel", nil, "private_grant")
+	request = request.WithContext(supportref.WithContext(request.Context(), reference))
+	credential, err := service.authorizeOp(request.Context(), request, "tunnel", "tun_01", "rte_01", inspector.ActionInspect)
+	if credential.PrincipalID != "" || !errors.Is(err, ErrUpstream) || !errors.Is(err, secretCause) {
+		t.Fatalf("authority cause was lost: credential=%#v err=%v", credential, err)
+	}
+	if fault := <-observed; fault.Operation != "inspector_authorization" || fault.Stage != peerAuthorityStage || fault.Code != peerAuthorityCode || fault.SupportReference != reference {
+		t.Fatalf("direct authority observation = %#v", fault)
+	}
+	recorder := httptest.NewRecorder()
+	service.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusServiceUnavailable || strings.Contains(recorder.Body.String(), "private") {
+		t.Fatalf("authority failure response = %d %s", recorder.Code, recorder.Body.String())
+	}
+	fault := <-observed
+	if fault.Operation != "inspector_authorization" || fault.Stage != peerAuthorityStage || fault.Code != peerAuthorityCode || fault.SupportReference != reference {
+		t.Fatalf("authority observation = %#v", fault)
+	}
+	serialized := strings.Join([]string{fault.Component, fault.Operation, fault.Stage, fault.Code, fault.Cause, fault.ErrorType, fault.SupportReference, strings.Join(fault.ErrorChain, ",")}, "|")
+	if strings.Contains(serialized, "private") {
+		t.Fatalf("authority observation retained private text: %q", serialized)
+	}
+
+	authorizer.err = ErrDenied
+	recorder = httptest.NewRecorder()
+	service.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("intentional denial = %d, want 403", recorder.Code)
+	}
+	select {
+	case fault := <-observed:
+		t.Fatalf("intentional denial was observed: %#v", fault)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	authorizer.err = errors.Join(ErrDenied, secretCause)
+	recorder = httptest.NewRecorder()
+	service.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("mixed rejection and failure was treated as a denial: %d", recorder.Code)
+	}
+	select {
+	case fault := <-observed:
+		if fault.Operation != "inspector_authorization" || fault.Stage != peerAuthorityStage || fault.Code != peerAuthorityCode {
+			t.Fatalf("mixed authority observation = %#v", fault)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("mixed operational failure was not observed")
 	}
 }

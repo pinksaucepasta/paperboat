@@ -8,12 +8,12 @@ package hostdproto
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"regexp"
 	"strings"
@@ -31,11 +31,20 @@ var (
 	ErrInvalidFrame    = errors.New("invalid hostd worker frame")
 	ErrIncompatible    = errors.New("incompatible hostd worker API")
 	ErrFenced          = errors.New("hostd worker is fenced")
+	ErrMaintenanceBusy = errors.New("hostd owner maintenance is busy")
 	ErrNotReady        = errors.New("hostd worker is not ready")
 	ErrEpochExhausted  = errors.New("hostd worker epoch is exhausted")
 	ErrLeaseGeneration = errors.New("hostd worker lease generation failed")
 	ErrInvalidConfig   = errors.New("invalid hostd worker controller configuration")
 )
+
+type causedFailure struct {
+	message string
+	cause   error
+}
+
+func (e causedFailure) Error() string { return e.message }
+func (e causedFailure) Unwrap() error { return e.cause }
 
 var workerIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
 
@@ -241,6 +250,10 @@ func Decode(frame []byte) (Message, error) {
 		message = &Status{}
 	case TypeError:
 		message = &Error{}
+	case TypeWorkerControlRequest:
+		message = &WorkerControlRequest{}
+	case TypeWorkerControlResponse:
+		message = &WorkerControlResponse{}
 	case TypeUpdateGateRequest:
 		message = &UpdateGateRequest{}
 	case TypeUpdateGateResponse:
@@ -333,7 +346,7 @@ func validLease(value string) bool {
 	return err == nil && len(decoded) == 32
 }
 func validErrorCode(value string) bool {
-	return value == "incompatible" || value == "fenced" || value == "not_ready" || value == "invalid"
+	return value == "incompatible" || value == "fenced" || value == "not_ready" || value == "maintenance_busy" || value == "invalid"
 }
 
 // Controller owns the active-worker fence. It is intentionally in-memory: the
@@ -341,15 +354,20 @@ func validErrorCode(value string) bool {
 // application work. Keeping this type free of filesystem and service-manager
 // concerns makes its fence behavior deterministic and easy to test.
 type Controller struct {
-	mu        sync.Mutex
-	apiMin    uint16
-	apiMax    uint16
-	random    io.Reader
-	active    worker
-	candidate worker
-	lastEpoch uint64
-	persist   func(Status) error
-	now       func() time.Time
+	mu                    sync.Mutex
+	mutations             uint64
+	replacing             bool
+	mutationDone          chan struct{}
+	maintenanceUntil      time.Time
+	maintenanceGeneration uint64
+	apiMin                uint16
+	apiMax                uint16
+	random                io.Reader
+	active                worker
+	candidate             worker
+	lastEpoch             uint64
+	persist               func(Status) error
+	now                   func() time.Time
 }
 
 type worker struct {
@@ -441,16 +459,20 @@ func (c *Controller) Activate(message Activate) (Status, error) {
 	if !matches(c.candidate, message.WorkerID, message.APIVersion, message.Epoch, message.Lease) {
 		return Status{}, ErrFenced
 	}
+	if c.mutations != 0 || c.maintenanceActiveLocked() {
+		return Status{}, ErrMaintenanceBusy
+	}
 	if !c.candidate.ready {
 		return Status{}, ErrNotReady
 	}
 	status := statusFor(c.candidate, StateActive)
 	if c.persist != nil {
 		if err := c.persist(status); err != nil {
-			return Status{}, fmt.Errorf("persist hostd worker activation: %w", err)
+			return Status{}, causedFailure{message: "hostd worker activation persistence failed", cause: err}
 		}
 	}
 	c.active, c.candidate = c.candidate, worker{}
+	c.replacing = false
 	return status, nil
 }
 
@@ -574,7 +596,7 @@ func selectVersion(hostMin, hostMax, workerMin, workerMax uint16) (uint16, bool)
 func newLease(random io.Reader) (string, error) {
 	buffer := make([]byte, 32)
 	if _, err := io.ReadFull(random, buffer); err != nil {
-		return "", fmt.Errorf("create worker lease: %w", err)
+		return "", causedFailure{message: "hostd worker lease generation failed", cause: err}
 	}
 	return base64.RawURLEncoding.EncodeToString(buffer), nil
 }
@@ -590,4 +612,117 @@ func (c *Controller) newUniqueLeaseLocked() (string, error) {
 		}
 	}
 	return "", ErrLeaseGeneration
+}
+
+// AcquireActive admits one mutation without holding the lifecycle mutex during
+// process IO. Activation cannot cross an admitted operation.
+func (c *Controller) AcquireActive(workerID string, epoch uint64) (func(), error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.active.workerID != workerID || c.active.epoch != epoch || epoch == 0 {
+		return nil, ErrFenced
+	}
+	if c.replacing || c.maintenanceActiveLocked() {
+		return nil, ErrMaintenanceBusy
+	}
+	if c.mutations == 0 {
+		c.mutationDone = make(chan struct{})
+	}
+	c.mutations++
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			c.mutations--
+			if c.mutations == 0 {
+				close(c.mutationDone)
+			}
+		})
+	}, nil
+}
+
+const OwnerMaintenanceLease = 5 * time.Minute
+
+func (c *Controller) maintenanceActiveLocked() bool {
+	if !c.maintenanceUntil.IsZero() && !c.now().Before(c.maintenanceUntil) {
+		c.maintenanceUntil = time.Time{}
+	}
+	return !c.maintenanceUntil.IsZero()
+}
+
+// PrepareMaintenance closes admissions before awaiting already admitted IO.
+// An abandoned preparation expires; unsuccessful preparation reopens admission.
+func (c *Controller) PrepareMaintenance(ctx context.Context, force bool, workloads func() WorkloadStatus) (Status, error) {
+	c.mu.Lock()
+	if c.maintenanceActiveLocked() {
+		c.mu.Unlock()
+		return Status{}, ErrMaintenanceBusy
+	}
+	c.maintenanceGeneration++
+	generation := c.maintenanceGeneration
+	c.maintenanceUntil = c.now().Add(OwnerMaintenanceLease)
+	done := c.mutationDone
+	pending := c.mutations != 0
+	c.mu.Unlock()
+	success := false
+	defer func() {
+		if !success {
+			c.mu.Lock()
+			if c.maintenanceGeneration == generation {
+				c.maintenanceUntil = time.Time{}
+			}
+			c.mu.Unlock()
+		}
+	}()
+	if pending {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return Status{}, ErrMaintenanceBusy
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return Status{}, ErrMaintenanceBusy
+	}
+	// No admitted mutation can now alter process membership. Exits only reduce it.
+	workload := WorkloadStatus{}
+	if workloads != nil {
+		workload = workloads()
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.maintenanceGeneration != generation || !c.maintenanceActiveLocked() {
+		return Status{}, ErrMaintenanceBusy
+	}
+	if !force && workload.Protected != 0 {
+		return Status{}, ErrMaintenanceBusy
+	}
+	status := statusFor(c.active, StateActive)
+	if c.active.epoch == 0 {
+		status = Status{State: StateEmpty}
+	} else {
+		status.WorkloadGeneration, status.ProtectedWorkloads = workload.Generation, workload.Protected
+	}
+	success = true
+	return status, nil
+}
+
+func (c *Controller) AbortMaintenance() { c.mu.Lock(); c.maintenanceUntil = time.Time{}; c.mu.Unlock() }
+
+// FinishWorkerStop closes old-worker admission and acknowledges only when its
+// admitted owner mutations have settled. A replacement activation reopens it.
+func (c *Controller) FinishWorkerStop(ctx context.Context) error {
+	c.mu.Lock()
+	c.replacing = true
+	pending, done := c.mutations != 0, c.mutationDone
+	c.mu.Unlock()
+	if pending {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ErrMaintenanceBusy
+		}
+	}
+	return nil
 }

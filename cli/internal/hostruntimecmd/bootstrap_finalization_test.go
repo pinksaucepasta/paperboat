@@ -13,14 +13,14 @@ import (
 func TestBootstrapFinalizationRetainsExpiredMaterialWithoutRenewingAuthority(t *testing.T) {
 	now, root := time.Now().UTC(), t.TempDir()
 	material := testClientBootstrapMaterial("https://control.example.test", now.Add(-time.Minute))
-	record := bootstrap.NewResumeRecord(material.ControlURL, "public-key", "token", "Laptop", "client", strings.Repeat("v", 40), now.Add(-time.Minute))
+	record := bootstrap.NewResumeRecord(material.ControlURL, "public-key", "token", "Laptop", strings.Repeat("v", 40), now.Add(-time.Minute))
 	record.Material, record.PairingStarted = &material, true
 	record.ClientInstalled, record.RuntimeEnrolled, record.RuntimeReady = true, true, true
 	record.RuntimeListenAddress = "127.0.0.1:12345"
 	if err := bootstrap.SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}
-	reloaded, err := bootstrap.LoadResume(root, record.ServerURL, record.PublicIdentityKey, "", record.Alias, record.SetupMode, now)
+	reloaded, err := bootstrap.LoadResume(root, record.ServerURL, record.PublicIdentityKey, "", record.Alias, now)
 	if !errors.Is(err, bootstrap.ErrResumeExpired) || !reloaded.RuntimeReady {
 		t.Fatalf("finalization checkpoint lost: ready=%t err=%v", reloaded.RuntimeReady, err)
 	}
@@ -53,11 +53,11 @@ func TestBootstrapFinalizationRetainsExpiredMaterialWithoutRenewingAuthority(t *
 func TestBootstrapFinalizationRequiresExactCurrentEnrollment(t *testing.T) {
 	material := testClientBootstrapMaterial("https://control.example.test", time.Now().Add(-time.Minute))
 	record := bootstrap.ResumeRecord{RuntimeReady: true, RuntimeEnrolled: true, ClientInstalled: true, Material: &material, ServerURL: material.ControlURL, PublicIdentityKey: "public-key"}
-	registration := identity.Registration{AccountID: "account-a", ServerURL: record.ServerURL, PublicIdentityKey: record.PublicIdentityKey, MachineID: material.UserMachineID, EnvironmentID: material.EnvironmentID, InstallationGeneration: material.InstallationGeneration, SetupMode: material.SetupMode}
+	registration := identity.Registration{AccountID: "account-a", ServerURL: record.ServerURL, PublicIdentityKey: record.PublicIdentityKey, MachineID: material.UserMachineID, EnvironmentID: material.EnvironmentID, InstallationGeneration: material.InstallationGeneration}
 	if err := validateBootstrapFinalizationBinding(registration, "account-a", record); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"account", "server", "key", "machine", "environment", "generation", "mode"} {
+	for _, field := range []string{"account", "server", "key", "machine", "environment", "generation"} {
 		t.Run(field, func(t *testing.T) {
 			changed := registration
 			switch field {
@@ -73,8 +73,6 @@ func TestBootstrapFinalizationRequiresExactCurrentEnrollment(t *testing.T) {
 				changed.EnvironmentID = "other"
 			case "generation":
 				changed.InstallationGeneration++
-			case "mode":
-				changed.SetupMode = "host"
 			}
 			if err := validateBootstrapFinalizationBinding(changed, "account-a", record); !errors.Is(err, bootstrap.ErrResumeBinding) {
 				t.Fatalf("changed enrollment accepted: %v", err)

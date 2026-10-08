@@ -30,7 +30,7 @@ func TestWorkerUpdateCutsOverWithoutRestartingHostd(t *testing.T) {
 	if !result.Updated || result.Version != fixture.candidate.Version {
 		t.Fatalf("result=%+v", result)
 	}
-	if fixture.hostd.activations != 1 || fixture.hostd.active.WorkerID != workerID(fixture.candidate.Version) {
+	if fixture.hostd.stopActiveCalls != 1 || fixture.hostd.activations != 1 || fixture.hostd.active.WorkerID != workerID(fixture.candidate.Version) {
 		t.Fatalf("hostd=%+v", fixture.hostd)
 	}
 	if fixture.starter.starts != 1 || fixture.starter.requests[0].Executable != fixture.paths.staged || fixture.starter.requests[0].UID <= 0 || !fixture.starter.requests[0].MutationsDisabled {
@@ -523,6 +523,7 @@ func TestNativeRuntimeActivationAdoptsRestartedHostdFence(t *testing.T) {
 	fixture := newFixture(t)
 	var activated []string
 	var monitoring updateflow.Journal
+	fixture.candidate.SupervisorMaintenance = true
 	fixture.manager.config.ActivateRuntime = func(_ context.Context, version string) (hostdproto.Status, error) {
 		activated = append(activated, version)
 		status := hostdproto.Status{State: hostdproto.StateActive, WorkerID: workerID(version), APIVersion: 1, Epoch: 41}
@@ -555,6 +556,7 @@ func TestNativeRuntimeHealthyRollbackRestartsRestoredCanonicalHostd(t *testing.T
 	fixture := newFixture(t)
 	fixture.health.err = errors.New("candidate unhealthy")
 	var activated []string
+	fixture.candidate.SupervisorMaintenance = true
 	fixture.manager.config.ActivateRuntime = func(_ context.Context, version string) (hostdproto.Status, error) {
 		activated = append(activated, version)
 		if version == fixture.active.Version {
@@ -577,6 +579,7 @@ func TestApprovedNativeRuntimeUpdateAllowsTerminalInterruption(t *testing.T) {
 	fixture := newFixture(t)
 	fixture.manager.config.Gate = &busyActivationGate{drainErr: &autoupdate.ActiveTerminalSessionsError{RequiredVersion: fixture.candidate.Version}}
 	calls := 0
+	fixture.candidate.SupervisorMaintenance = true
 	fixture.manager.config.ActivateRuntime = func(_ context.Context, version string) (hostdproto.Status, error) {
 		calls++
 		status := hostdproto.Status{State: hostdproto.StateActive, WorkerID: workerID(version), APIVersion: 1, Epoch: 42}
@@ -591,12 +594,24 @@ func TestApprovedNativeRuntimeUpdateAllowsTerminalInterruption(t *testing.T) {
 
 func TestNativeRuntimeCrashAtCutoverRestoresSignedPreviousHostd(t *testing.T) {
 	fixture := newFixture(t)
-	fixture.starter.activateError = errors.New("activation response lost")
-	if _, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate); err == nil {
-		t.Fatal("cutover did not remain interrupted")
+	// Persist the actual supervisor cutover boundary before simulating a
+	// process crash. Ordinary worker rollback uses the owner's child registry.
+	fixture.candidate.SupervisorMaintenance = true
+	if _, err := fixture.manager.Prepare(context.Background(), fixture.candidate); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := updateflow.Load(fixture.paths.journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal.NativeActivation = true
+	journal.Stage = updateflow.StageCutover
+	if err := updateflow.Write(fixture.paths.journal, journal, os.Geteuid(), os.Getegid()); err != nil {
+		t.Fatal(err)
 	}
 	fixture.hostd.activeErr = errors.New("new hostd unavailable")
 	var activated []string
+	fixture.candidate.SupervisorMaintenance = true
 	fixture.manager.config.ActivateRuntime = func(_ context.Context, version string) (hostdproto.Status, error) {
 		activated = append(activated, version)
 		status := hostdproto.Status{State: hostdproto.StateActive, WorkerID: workerID(version), APIVersion: 1, Epoch: 91}
@@ -616,6 +631,7 @@ func TestNativeRuntimeCutoverHookIsBoundedAndFailureRestoresPrevious(t *testing.
 	fixture.manager.config.RollbackTimeout = 25 * time.Millisecond
 	var activated []string
 	var forwardAllowance time.Duration
+	fixture.candidate.SupervisorMaintenance = true
 	fixture.manager.config.ActivateRuntime = func(ctx context.Context, version string) (hostdproto.Status, error) {
 		activated = append(activated, version)
 		if version == fixture.candidate.Version {
@@ -645,6 +661,7 @@ func TestNativeRuntimeDoesNotStartOrStopWorkerCandidate(t *testing.T) {
 	stopErr := errors.New("candidate did not exit")
 	fixture.starter.stopError = stopErr
 	var activated []string
+	fixture.candidate.SupervisorMaintenance = true
 	fixture.manager.config.ActivateRuntime = func(_ context.Context, version string) (hostdproto.Status, error) {
 		activated = append(activated, version)
 		status := hostdproto.Status{State: hostdproto.StateActive, WorkerID: workerID(version), APIVersion: 1, Epoch: 93}
@@ -664,6 +681,7 @@ func TestNativeRuntimeParentCancellationStillRestoresPrevious(t *testing.T) {
 	fixture := newFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	var activated []string
+	fixture.candidate.SupervisorMaintenance = true
 	fixture.manager.config.ActivateRuntime = func(hookCtx context.Context, version string) (hostdproto.Status, error) {
 		activated = append(activated, version)
 		if version == fixture.candidate.Version {
@@ -698,6 +716,7 @@ func TestNativeRuntimePromotedJournalFailureRestoresWithoutCandidate(t *testing.
 		return updateflow.Write(path, journal, uid, gid)
 	}
 	var activated []string
+	fixture.candidate.SupervisorMaintenance = true
 	fixture.manager.config.ActivateRuntime = func(_ context.Context, version string) (hostdproto.Status, error) {
 		activated = append(activated, version)
 		status := hostdproto.Status{State: hostdproto.StateActive, WorkerID: workerID(version), APIVersion: 1, Epoch: 95}
@@ -708,8 +727,15 @@ func TestNativeRuntimePromotedJournalFailureRestoresWithoutCandidate(t *testing.
 	if !errors.Is(err, writeErr) || errors.Is(err, ErrBlocked) {
 		t.Fatalf("error=%v", err)
 	}
-	if fixture.starter.starts != 0 || fixture.starter.stops != 0 || len(activated) != 1 || activated[0] != fixture.active.Version || fixture.hostd.activations != 0 {
+	if fixture.starter.starts != 0 || fixture.starter.stops != 0 || len(activated) != 0 || fixture.hostd.activations != 0 {
 		t.Fatalf("stops=%d activated=%v stale activations=%d", fixture.starter.stops, activated, fixture.hostd.activations)
+	}
+	state, stateErr := fixture.manager.TransactionState()
+	if stateErr != nil || state.Stage != "idle" {
+		t.Fatalf("pre-stop failure stranded journal: %+v, %v", state, stateErr)
+	}
+	if err := fixture.manager.Recover(context.Background()); err != nil || len(activated) != 0 {
+		t.Fatalf("recovery restarted healthy owner: %v, %v", err, activated)
 	}
 }
 
@@ -811,9 +837,11 @@ func (f *fakeFetcher) AuthorizeRecovery(ctx context.Context, version, _, _ strin
 }
 
 type fakeHostd struct {
-	active      hostdproto.Status
-	activeErr   error
-	activations int
+	active          hostdproto.Status
+	activeErr       error
+	activations     int
+	stopActiveCalls int
+	stopActiveError error
 }
 
 func (h *fakeHostd) Active(context.Context) (hostdproto.Status, error) { return h.active, h.activeErr }
@@ -945,4 +973,49 @@ func activatePrepared(ctx context.Context, manager *Manager, release Release) (R
 		return Result{Version: manager.ActiveVersion()}, err
 	}
 	return manager.Activate(ctx, release)
+}
+
+func (h *fakeHostd) StopActive(context.Context) error {
+	h.stopActiveCalls++
+	err := h.stopActiveError
+	h.stopActiveError = nil
+	return err
+}
+
+func TestWorkerReplacementStopFailureRestoresPrevious(t *testing.T) {
+	f := newFixture(t)
+	stopErr := errors.New("old worker did not complete shutdown")
+	f.hostd.stopActiveError = stopErr
+	_, err := activatePrepared(context.Background(), f.manager, f.candidate)
+	if !errors.Is(err, stopErr) || errors.Is(err, ErrBlocked) {
+		t.Fatalf("stop failure: %v", err)
+	}
+	if f.hostd.activations != 1 || f.hostd.active.WorkerID != workerID(f.active.Version) || f.starter.requests[len(f.starter.requests)-1].WorkerID != workerID(f.active.Version) {
+		t.Fatalf("candidate crossed failed shutdown: %+v", f.hostd)
+	}
+	if !regularMatches(f.paths.current, f.active.Length, f.active.SHA256) {
+		t.Fatal("known installation not restored")
+	}
+	state, e := f.manager.TransactionState()
+	if e != nil || state.Stage != "idle" {
+		t.Fatalf("recovery incomplete: %+v %v", state, e)
+	}
+}
+func TestNativeOwnerAdmissionDenialLeavesPreparedCandidate(t *testing.T) {
+	f := newFixture(t)
+	f.candidate.SupervisorMaintenance = true
+	deny := errors.New("owner maintenance not yet permitted")
+	f.manager.config.AuthorizeOwnerMaintenance = func(context.Context, Release, bool) error { return deny }
+	f.manager.config.ActivateRuntime = func(context.Context, string) (hostdproto.Status, error) {
+		t.Fatal("owner restarted before admission")
+		return hostdproto.Status{}, nil
+	}
+	_, err := activatePrepared(context.Background(), f.manager, f.candidate)
+	if !errors.Is(err, deny) {
+		t.Fatal(err)
+	}
+	state, e := f.manager.TransactionState()
+	if e != nil || state.Stage != updateflow.StageAwaitingApproval || !regularMatches(f.paths.current, f.active.Length, f.active.SHA256) {
+		t.Fatalf("denial changed installation: %+v %v", state, e)
+	}
 }

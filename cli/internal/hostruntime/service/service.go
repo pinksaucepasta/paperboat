@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/coreos/go-systemd/v22/unit"
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"howett.net/plist"
 )
 
@@ -49,6 +48,8 @@ type Config struct {
 	Kind                 string
 	Instance             string
 	ConfigRoot           string
+	ExecutableSHA256     string
+	ExecutableLength     int64
 	Executable           string
 	User                 string
 	Group                string
@@ -237,7 +238,9 @@ func (i *Installer) Install(ctx context.Context) error {
 	if renderErr != nil {
 		return renderErr
 	}
-	activateUpgrade := upgrading && !bytes.Equal(previous, definition) && i.config.UpgradeMode != UpgradeReload
+	// Applying file-owned configuration must activate the current executable
+	// and source snapshot even when its stable service declaration is unchanged.
+	activateUpgrade := upgrading && (i.config.Kind == ConfigKind || !bytes.Equal(previous, definition)) && i.config.UpgradeMode != UpgradeReload
 	if err := i.config.Controller.Apply(ctx, i.definitionPath, activateUpgrade); err != nil {
 		rollbackErr := i.rollback(ctx, previous, upgrading)
 		return errors.Join(fmt.Errorf("apply service declaration: %w", err), rollbackErr)
@@ -498,7 +501,7 @@ func renderSystemd(config Config) ([]byte, error) {
 	privateTmp := "true"
 	if config.Kind == DaemonKind {
 		// User-service mount isolation also creates a user namespace on Linux.
-		// Unmapped root appears as nobody and cannot authenticate deviceguard.
+		// Unmapped root appears as nobody and cannot authenticate machineguard.
 		privateTmp = "false"
 	}
 	options = append(options, unit.NewUnitOption("Service", "PrivateTmp", privateTmp))
@@ -534,7 +537,7 @@ func atomicWrite(path string, data []byte, mode os.FileMode) error {
 	if err := prepareAtomicDirectory(directory); err != nil {
 		return err
 	}
-	return atomicfile.Write(path, data, atomicfile.Options{Mode: mode, OwnerUID: -1, OwnerGID: -1})
+	return writeServiceDefinition(path, data, mode)
 }
 func safeExecutable(path string) error {
 	info, err := os.Lstat(path)
@@ -619,4 +622,11 @@ func ensureRoot(path string) error {
 		return ErrInvalidDefinition
 	}
 	return nil
+}
+
+// PublishDefinition records the exact native service target without starting
+// or stopping it. A transaction owner performs SCM cutover and rollback.
+func (i *Installer) PublishDefinition(ctx context.Context) error {
+	_, _, err := i.writeDefinition(ctx)
+	return err
 }

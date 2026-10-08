@@ -174,6 +174,7 @@ type meteredIngressStream struct {
 	stream           io.ReadWriteCloser
 	lease            *IngressLease
 	once             sync.Once
+	closeErr         error
 }
 
 func (s *meteredIngressStream) Read(payload []byte) (int, error)  { return s.transfer(payload, false) }
@@ -215,7 +216,7 @@ func (s *meteredIngressStream) transfer(payload []byte, ingress bool) (int, erro
 					usageErr = s.lease.usage.Record(s.lease.decision.Binding.EnvironmentID, s.lease.decision.Binding.RouteID, s.lease.decision.Binding.RouteGeneration, 0, uint64(n), ingressUsageAuthority(s.lease.decision))
 				}
 				if usageErr != nil {
-					return total, usageErr
+					return total, errors.Join(usageErr, err)
 				}
 			}
 		}
@@ -251,18 +252,17 @@ func (s *meteredIngressStream) CloseWrite() error {
 }
 
 func (s *meteredIngressStream) Close() error {
-	var err error
 	s.once.Do(func() {
 		if s.unsubscribeQuota != nil {
 			s.unsubscribeQuota()
 		}
-		err = s.stream.Close()
+		s.closeErr = s.stream.Close()
 		s.lease.Release()
 	})
 	if s.cancel != nil {
 		s.cancel()
 	}
-	return err
+	return s.closeErr
 }
 
 func ingressUsageAuthority(d connectorprotocol.IngressDecision) string {

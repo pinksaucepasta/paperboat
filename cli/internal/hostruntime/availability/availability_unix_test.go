@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -17,7 +18,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostservice"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 type tokenStub struct{}
@@ -55,6 +58,53 @@ func TestResolverUsesExactProofAndStrictResponse(t *testing.T) {
 	}
 	if !bytes.Equal(proofs.body, []byte("{}")) {
 		t.Fatalf("proof body=%q", proofs.body)
+	}
+}
+
+func TestResolverPreservesTypedSafeStatusAndDecodeCauses(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		status      int
+		body        string
+		wantStatus  int
+		wantInvalid bool
+	}{
+		{name: "upstream status", status: http.StatusServiceUnavailable, body: "private-response-value", wantStatus: http.StatusServiceUnavailable},
+		{name: "malformed response", status: http.StatusOK, body: `{"data":{"schema":"private-response-value`, wantInvalid: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(test.status)
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer server.Close()
+			client := server.Client()
+			client.Timeout = time.Second
+			resolver, err := NewResolver(server.URL+"/v1/helper-runtime-policies/resolve", tokenStub{}, &proofStub{}, func() (string, error) { return "operation", nil }, client)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = resolver.Resolve(context.Background())
+			if err == nil || strings.Contains(err.Error(), "private-response-value") {
+				t.Fatalf("unsafe or missing resolver error: %v", err)
+			}
+			var diagnostic interface {
+				DiagnosticStage() string
+				DiagnosticCode() string
+				DiagnosticStatus() int
+			}
+			if !errors.As(err, &diagnostic) || diagnostic.DiagnosticStage() != controlRequestStage || diagnostic.DiagnosticCode() != controlRequestCode || diagnostic.DiagnosticStatus() != test.wantStatus {
+				t.Fatalf("diagnostic classification=%v", err)
+			}
+			if test.wantInvalid && !errors.Is(err, ErrInvalid) {
+				t.Fatalf("malformed response lost invalid-contract sentinel: %v", err)
+			}
+			if test.wantInvalid {
+				if !errors.Is(err, io.ErrUnexpectedEOF) {
+					t.Fatalf("malformed response lost decode cause: %v", err)
+				}
+			}
+		})
 	}
 }
 
@@ -189,5 +239,188 @@ func TestServiceStartsOfflineAndEventuallyPublishesObservation(t *testing.T) {
 	defer shutdownCancel()
 	if err := service.Shutdown(shutdownCtx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestServiceRejectsAlreadyCanceledStart(t *testing.T) {
+	service, err := NewService(immediateResolver{}, hostStub{applied: make(chan Resolution, 1)}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := service.Start(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled start error=%v", err)
+	}
+	if observation := service.Observation(); observation != nil {
+		t.Fatalf("canceled start installed work: %+v", observation)
+	}
+}
+
+func TestServiceObservesLocalGatewayOutageOnceAndRecovers(t *testing.T) {
+	type observedFault struct {
+		ctx   context.Context
+		fault errorreport.Fault
+	}
+	var mu sync.Mutex
+	var faults []observedFault
+	restoreObserver := errorreport.InstallFaultObserver(func(ctx context.Context, fault errorreport.Fault) {
+		mu.Lock()
+		faults = append(faults, observedFault{ctx: ctx, fault: fault})
+		mu.Unlock()
+	})
+	defer restoreObserver()
+
+	socket := filepath.Join(t.TempDir(), "host.sock")
+	host, err := NewHostClient(socket, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(immediateResolver{}, host, 30*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reference := supportref.New()
+	ctx, cancel := context.WithCancel(supportref.WithContext(context.Background(), reference))
+	defer cancel()
+	if err := service.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		mu.Lock()
+		observed := len(faults) > 0
+		mu.Unlock()
+		if observed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("local gateway outage was not observed")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	serveDone := make(chan struct{})
+	go func() {
+		defer close(serveDone)
+		connection, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer connection.Close()
+		var request hostservice.Request
+		if json.NewDecoder(connection).Decode(&request) != nil || request.Operation != "apply_availability" {
+			return
+		}
+		_ = json.NewEncoder(connection).Encode(hostservice.Response{
+			Schema: hostservice.ProtocolV1, Status: "applied", DesiredMode: "keep_awake", DesiredVersion: 3,
+			ObservedMode: "keep_awake", ObservedVersion: 3, ObservedAt: time.Now().UTC(),
+			HostServiceVersion: "test", Scope: "system", UpdateHealth: "healthy",
+		})
+	}()
+
+	deadline = time.Now().Add(4 * time.Second)
+	for {
+		if observation := service.Observation(); observation != nil {
+			if observation.Version != 3 || observation.Status != "applied" {
+				t.Fatalf("recovered availability observation=%+v", observation)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("availability did not recover after local gateway returned")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	select {
+	case <-serveDone:
+	case <-time.After(time.Second):
+		t.Fatal("host service did not complete the recovery request")
+	}
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), time.Second)
+	defer shutdownCancel()
+	if err := service.Shutdown(shutdownCtx); err != nil {
+		t.Fatal(err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(faults) != 1 {
+		t.Fatalf("repeated local outage observations=%d, want one", len(faults))
+	}
+	fault := faults[0].fault
+	if fault.Stage != localGatewayStage || fault.Code != localGatewayCode || fault.Cause != "not_found" || fault.SupportReference != reference || supportref.FromContext(faults[0].ctx) != reference {
+		t.Fatalf("local gateway fault=%+v", fault)
+	}
+}
+
+func TestServiceDoesNotDuplicateOwnedControlAttempt(t *testing.T) {
+	type observedFault struct {
+		fault errorreport.Fault
+	}
+	var mu sync.Mutex
+	var faults []observedFault
+	restoreObserver := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) {
+		mu.Lock()
+		faults = append(faults, observedFault{fault: fault})
+		mu.Unlock()
+	})
+	defer restoreObserver()
+
+	var requests int
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		if requests == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("private-response-value"))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": Resolution{Schema: PolicySchemaV1, UserMachineID: "um_1", Mode: "keep_awake", Version: 3}})
+	}))
+	defer server.Close()
+	client := server.Client()
+	client.Timeout = time.Second
+	client.Transport = errorreport.TransportOperation(client.Transport, server.URL, "runtime_observation")
+	resolver, err := NewResolver(server.URL+"/v1/helper-runtime-policies/resolve", tokenStub{}, &proofStub{}, func() (string, error) { return "operation", nil }, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := hostStub{applied: make(chan Resolution, 1)}
+	service, err := NewService(resolver, host, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := service.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-host.applied:
+	case <-time.After(time.Second):
+		t.Fatal("control request did not recover")
+	}
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), time.Second)
+	defer shutdownCancel()
+	if err := service.Shutdown(shutdownCtx); err != nil {
+		t.Fatal(err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(faults) != 1 {
+		t.Fatalf("owned control attempt was reported %d times, want once", len(faults))
+	}
+	fault := faults[0].fault
+	if fault.Stage != controlRequestStage || fault.Code != controlRequestCode || fault.HTTPStatus != http.StatusServiceUnavailable {
+		t.Fatalf("owned control attempt fault=%+v", fault)
+	}
+	if strings.Contains(faults[0].fault.Cause, "private-response-value") {
+		t.Fatalf("response body escaped in fault: %+v", fault)
 	}
 }

@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	testManagedTunnelEndpointID  = "123e4567-e89b-12d3-a456-426614174000"
-	testManagedTunnelEndpointID2 = "123e4567-e89b-12d3-a456-426614174001"
+	testManagedTunnelEndpointID  = "endpoint_123e4567-e89b-42d3-a456-426614174000"
+	testManagedTunnelEndpointID2 = "endpoint_123e4567-e89b-42d3-a456-426614174001"
 )
 
 type memoryStateStore struct {
@@ -512,7 +512,7 @@ func TestManagerRejectsReconcileOutsideLifecycle(t *testing.T) {
 
 func TestValidateNativePrivateTargetUsesDurableAndLiveGeneration(t *testing.T) {
 	state := tunnelState(t, 1, 1)
-	payload := []byte(`{"schema":"paperboat.preview-tunnel/v1","kind":"tunnel_config_snapshot","tunnel_id":"tunnel_01","generation":1,"name":"demo","desired_state":"active","access_mode":"private","stable_endpoint":"https://123e4567-e89b-12d3-a456-426614174000.tunnel.example.test","expires_at":null,"routes":[{"id":"route_01","name":"default","protocol":"http","match_type":"catch_all","path_prefix":null,"origin_scheme":"http","origin_address":"127.0.0.1:3000","preserve_host":true,"host_override":null,"tls_verification":"not_applicable","tls_server_name":null,"ca_reference":null,"mtls_credential_reference":null,"connect_timeout_ms":10000,"idle_timeout_ms":90000,"max_concurrent_streams":128,"desired_state":"active"}]}`)
+	payload := []byte(`{"schema":"paperboat.preview-tunnel/v1","kind":"tunnel_config_snapshot","tunnel_id":"tunnel_01","generation":1,"name":"demo","desired_state":"active","access_mode":"private","stable_endpoint":"https://123e4567-e89b-12d3-a456-426614174000.tunnel.example.test","stable_endpoint_id":"endpoint_123e4567-e89b-42d3-a456-426614174000","expires_at":null,"routes":[{"id":"route_01","name":"default","protocol":"http","match_type":"catch_all","path_prefix":null,"origin_scheme":"http","origin_address":"127.0.0.1:3000","preserve_host":true,"host_override":null,"tls_verification":"not_applicable","tls_server_name":null,"ca_reference":null,"mtls_credential_reference":null,"connect_timeout_ms":10000,"idle_timeout_ms":90000,"max_concurrent_streams":128,"desired_state":"active"}]}`)
 	snapshot, err := hoststate.NewConfigSnapshot("tunnel_01", 1, payload)
 	if err != nil {
 		t.Fatal(err)
@@ -711,12 +711,14 @@ func tunnelSnapshotDesired(t *testing.T, generation uint64, desiredState string)
 func tunnelSnapshotFor(t *testing.T, tunnelID string, generation uint64, desiredState string) hoststate.ConfigSnapshot {
 	t.Helper()
 	routeID := "route_01"
-	endpoint := "https://" + testManagedTunnelEndpointID + ".tunnel.example.test"
+	endpointID := testManagedTunnelEndpointID
+	endpoint := "https://brave-blue-beacon-0421.tunnel.example.test"
 	if tunnelID == "tunnel_02" {
 		routeID = "route_02"
-		endpoint = "https://" + testManagedTunnelEndpointID2 + ".tunnel.example.test"
+		endpointID = testManagedTunnelEndpointID2
+		endpoint = "https://calm-green-harbor-0317.tunnel.example.test"
 	}
-	payload := fmt.Sprintf(`{"schema":"paperboat.preview-tunnel/v1","kind":"tunnel_config_snapshot","tunnel_id":%q,"generation":%d,"name":"demo","desired_state":%q,"access_mode":"public","stable_endpoint":%q,"expires_at":null,"routes":[{"id":%q,"name":"default","protocol":"http","match_type":"catch_all","path_prefix":null,"origin_scheme":"http","origin_address":"127.0.0.1:3000","preserve_host":true,"host_override":null,"tls_verification":"not_applicable","tls_server_name":null,"ca_reference":null,"mtls_credential_reference":null,"connect_timeout_ms":10000,"idle_timeout_ms":90000,"max_concurrent_streams":128,"desired_state":"active"}]}`, tunnelID, generation, desiredState, endpoint, routeID)
+	payload := fmt.Sprintf(`{"schema":"paperboat.preview-tunnel/v1","kind":"tunnel_config_snapshot","tunnel_id":%q,"generation":%d,"name":"demo","desired_state":%q,"access_mode":"public","stable_endpoint":%q,"stable_endpoint_id":%q,"expires_at":null,"routes":[{"id":%q,"name":"default","protocol":"http","match_type":"catch_all","path_prefix":null,"origin_scheme":"http","origin_address":"127.0.0.1:3000","preserve_host":true,"host_override":null,"tls_verification":"not_applicable","tls_server_name":null,"ca_reference":null,"mtls_credential_reference":null,"connect_timeout_ms":10000,"idle_timeout_ms":90000,"max_concurrent_streams":128,"desired_state":"active"}]}`, tunnelID, generation, desiredState, endpoint, endpointID, routeID)
 	snapshot, err := hoststate.NewConfigSnapshot(tunnelID, generation, []byte(payload))
 	if err != nil {
 		t.Fatal(err)

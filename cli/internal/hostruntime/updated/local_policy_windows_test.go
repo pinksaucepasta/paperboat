@@ -10,14 +10,14 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 )
 
-func TestWindowsAutomaticUpdatesDisabledDoesNotResolve(t *testing.T) {
+func TestWindowsAutomaticUpdatesDisabledStillChecksAvailability(t *testing.T) {
 	calls := 0
 	c := &windowsController{activeVersion: "local-dev", config: WindowsConfig{AutomaticChecks: false}, resolve: func(context.Context) (workerupdate.Release, bool, error) {
 		calls++
 		return workerupdate.Release{}, false, nil
 	}}
 	got, err := c.checkRelease(context.Background())
-	if err != nil || got.Version != "local-dev" || calls != 0 {
+	if err != nil || got.Version != "local-dev" || calls != 1 {
 		t.Fatalf("disabled automatic request: %+v calls=%d err=%v", got, calls, err)
 	}
 }
@@ -30,7 +30,7 @@ func TestWindowsLocalBaselineJournalRemainsDistinctFromCandidate(t *testing.T) {
 	if !validWindowsActivationJournal(j) {
 		t.Fatal("local installed baseline rejected")
 	}
-	j.PreviousSource.SHA256 = j.ManifestSHA256
+	j.PreviousSource.SHA256 = j.Release.ManifestSHA256
 	if validWindowsActivationJournal(j) {
 		t.Fatal("mismatched local baseline accepted")
 	}

@@ -51,6 +51,7 @@ type PeerStreamRequest struct {
 	OperationID       string          `json:"operation_id"`
 	Credential        string          `json:"credential"`
 	AccessSessionID   string          `json:"access_session_id,omitempty"`
+	UsageSessionID    string          `json:"usage_session_id,omitempty"`
 	Deadline          time.Time       `json:"deadline"`
 	MaximumBytes      uint64          `json:"maximum_bytes"`
 	QUICEndpoint      string          `json:"quic_endpoint,omitempty"`
@@ -62,8 +63,6 @@ type PeerTerminalPayload struct {
 	Scopes              []string          `json:"scopes,omitempty"`
 	Protocol            string            `json:"protocol"`
 	Debug               bool              `json:"debug,omitempty"`
-	ThreadID            string            `json:"thread_id,omitempty"`
-	TerminalID          string            `json:"terminal_id,omitempty"`
 	SessionID           string            `json:"session_id,omitempty"`
 	CWD                 string            `json:"cwd,omitempty"`
 	Environment         map[string]string `json:"environment,omitempty"`
@@ -134,7 +133,10 @@ func NewPendingPeerStreamRequest(machineID, environmentID string, machineGenerat
 }
 
 func (r PeerStreamRequest) Validate(now time.Time) error {
-	if r.Schema != PeerStreamSchemaV1 || !safeValue(r.MachineID) || !safeValue(r.EnvironmentID) || r.MachineGeneration == 0 || !oneOf(r.Consumer, "terminal", "exec", "ssh", "private_preview", "codex", "health_probe", "file_transfer_key") || !safeValue(r.OperationID) || r.Credential == "" || len(r.Credential) > 16<<10 || r.Deadline.IsZero() || !r.Deadline.After(now) || r.Deadline.Sub(now) > 24*time.Hour || r.MaximumBytes == 0 || len(r.Payload) > 64<<10 || len(r.Payload) > 0 && !json.Valid(r.Payload) {
+	if r.UsageSessionID != "" && (r.Consumer != "config_compare" || !safeValue(r.UsageSessionID)) {
+		return ErrInvalidConfig
+	}
+	if r.Schema != PeerStreamSchemaV1 || !safeValue(r.MachineID) || !safeValue(r.EnvironmentID) || r.MachineGeneration == 0 || !oneOf(r.Consumer, "terminal", "exec", "ssh", "private_preview", "codex", "health_probe", "file_transfer_key", "config_compare") || !safeValue(r.OperationID) || r.Credential == "" || len(r.Credential) > 16<<10 || r.Deadline.IsZero() || !r.Deadline.After(now) || r.Deadline.Sub(now) > 24*time.Hour || r.MaximumBytes == 0 || len(r.Payload) > 64<<10 || len(r.Payload) > 0 && !json.Valid(r.Payload) {
 		return ErrInvalidConfig
 	}
 	return nil
@@ -255,15 +257,13 @@ type TransportConsumer struct {
 }
 
 type Snapshot struct {
-	Schema             string          `json:"schema"`
-	Generation         uint64          `json:"generation"`
-	ObservedAt         time.Time       `json:"observed_at"`
-	DaemonState        string          `json:"daemon_state"`
-	DaemonVersion      string          `json:"daemon_version"`
-	DeviceSuffix       string          `json:"device_suffix,omitempty"`
-	DeviceLoopbackCIDR string          `json:"device_loopback_cidr,omitempty"`
-	Health             []HealthItem    `json:"health"`
-	Machines           []MachineStatus `json:"machines"`
+	Schema        string          `json:"schema"`
+	Generation    uint64          `json:"generation"`
+	ObservedAt    time.Time       `json:"observed_at"`
+	DaemonState   string          `json:"daemon_state"`
+	DaemonVersion string          `json:"daemon_version"`
+	Health        []HealthItem    `json:"health"`
+	Machines      []MachineStatus `json:"machines"`
 }
 
 type StatusEvent struct {

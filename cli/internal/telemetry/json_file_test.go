@@ -18,7 +18,7 @@ func TestJSONFileSinkWritesValidatedMetadataWithPrivateMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sink.Record(Event{Name: "connect.result", At: time.Unix(10, 0), ProjectID: "prj_1", Outcome: "success", LatencyMS: 12})
+	sink.Record(Event{Name: "connect.result", At: time.Unix(10, 0), MachineID: "prj_1", Outcome: "success", LatencyMS: 12})
 	if err := sink.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestJSONFileSinkWritesValidatedMetadataWithPrivateMode(t *testing.T) {
 	if err := json.Unmarshal(data, &event); err != nil {
 		t.Fatal(err)
 	}
-	if event.ProjectID != "prj_1" || event.LatencyMS != 12 {
+	if event.MachineID != "prj_1" || event.LatencyMS != 12 {
 		t.Fatalf("event = %+v", event)
 	}
 }
@@ -61,6 +61,36 @@ func TestJSONFileSinkDropsInvalidContent(t *testing.T) {
 	}
 }
 
+func TestJSONFileSinkRejectsSymlinkWithoutChangingTarget(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target")
+	if err := os.WriteFile(target, []byte("existing content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "events.jsonl")
+	if err := os.Symlink(target, path); err != nil {
+		t.Skipf("symbolic-link creation unavailable: %v", err)
+	}
+	if sink, err := NewJSONFileSink(path); !errors.Is(err, ErrJSONFileSinkOpen) {
+		if sink != nil {
+			_ = sink.Close()
+		}
+		t.Fatalf("symlink sink=%v", err)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil || string(data) != "existing content" {
+		t.Fatal("rejected sink changed target content")
+	}
+	after, err := os.Stat(target)
+	if err != nil || after.Mode() != before.Mode() {
+		t.Fatal("rejected sink changed target permissions")
+	}
+}
+
 func TestJSONFileSinkRecordAndCloseConcurrently(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "telemetry.jsonl")
 	sink, err := NewJSONFileSink(path)
@@ -73,7 +103,7 @@ func TestJSONFileSinkRecordAndCloseConcurrently(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for range 100 {
-				sink.Record(Event{Name: "terminal.reconnect", At: time.Now(), ProjectID: "prj_1", Outcome: "success"})
+				sink.Record(Event{Name: "terminal.reconnect", At: time.Now(), MachineID: "prj_1", Outcome: "success"})
 			}
 		}()
 	}
@@ -95,7 +125,7 @@ func TestJSONFileSinkBoundsFileSize(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 20 {
-		sink.Record(Event{Name: "connect.result", At: time.Now(), ProjectID: "prj_1", EnvironmentID: "env_1", Outcome: "success", LatencyMS: 12})
+		sink.Record(Event{Name: "connect.result", At: time.Now(), MachineID: "prj_1", EnvironmentID: "env_1", Outcome: "success", LatencyMS: 12})
 	}
 	if err := sink.Close(); err != nil {
 		t.Fatal(err)
@@ -161,6 +191,9 @@ func TestJSONFileSinkFlushAndCloseSurfaceStableWriteFailure(t *testing.T) {
 	if err := sink.Close(); !errors.Is(err, ErrJSONFileSinkWrite) {
 		t.Fatalf("close error = %v", err)
 	}
+	if !errors.Is(sink.LastError(), os.ErrClosed) || sink.FailedEvents() != 1 {
+		t.Fatal("filesystem cause or failed-event count was lost")
+	}
 	if strings.Contains(errString(sink.LastError()), path) {
 		t.Fatal("write error leaked local path")
 	}
@@ -173,7 +206,7 @@ func TestJSONFileSinkRotatesWithBoundedBackups(t *testing.T) {
 		t.Fatal(err)
 	}
 	for index := 0; index < 20; index++ {
-		sink.Record(Event{Name: "rotation.event", At: time.Unix(int64(index), 0), ProjectID: "prj_01", Outcome: "accepted"})
+		sink.Record(Event{Name: "rotation.event", At: time.Unix(int64(index), 0), MachineID: "prj_01", Outcome: "accepted"})
 	}
 	if err := sink.Close(); err != nil {
 		t.Fatal(err)
@@ -210,4 +243,118 @@ func errString(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+func TestJSONFileSinkFinalizeRetainsSyncCauseWithoutPanic(t *testing.T) {
+	sink, err := NewJSONFileSink(filepath.Join(t.TempDir(), "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink.stateMu.Lock()
+	err = sink.file.Close()
+	sink.stateMu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = sink.Close()
+	if !errors.Is(err, ErrJSONFileSinkSync) || !errors.Is(err, os.ErrClosed) {
+		t.Fatal("final sync cause was lost")
+	}
+}
+
+func TestJSONFileSinkCloseAndFlushRespectDeadlineAndFinishCleanup(t *testing.T) {
+	sink, err := NewJSONFileSink(filepath.Join(t.TempDir(), "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink.stateMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			sink.stateMu.Unlock()
+		}
+		_ = sink.Close()
+	}()
+	if err := sink.RecordEvent(Event{Name: "pending.event", At: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := sink.CloseContext(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("close = %v", err)
+	}
+	if err := sink.Flush(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("flush = %v", err)
+	}
+	sink.stateMu.Unlock()
+	locked = false
+	select {
+	case <-sink.done:
+	case <-time.After(time.Second):
+		t.Fatal("sink worker did not finish cleanup")
+	}
+	if err := sink.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSaturatedJSONFlushDoesNotBlockProducersOrShutdown(t *testing.T) {
+	sink, err := NewJSONFileSinkWithQueueLimit(filepath.Join(t.TempDir(), "events.jsonl"), 4096, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink.stateMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			sink.stateMu.Unlock()
+		}
+		_ = sink.Close()
+	}()
+	event := Event{Name: "pending.event", At: time.Now()}
+	if err := sink.RecordEvent(event); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for len(sink.queue) != 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(sink.queue) != 0 {
+		t.Fatal("worker did not take first event")
+	}
+	if err := sink.RecordEvent(event); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	flushed := make(chan error, 1)
+	go func() { flushed <- sink.Flush(ctx) }()
+	time.Sleep(10 * time.Millisecond)
+	produced := make(chan error, 1)
+	go func() { produced <- sink.RecordEvent(event) }()
+	select {
+	case err := <-produced:
+		if err != nil || sink.DroppedEvents() != 1 {
+			t.Fatalf("saturated producer err=%v drops=%d", err, sink.DroppedEvents())
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("flush blocked the producer")
+	}
+	shutdown, stop := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer stop()
+	if err := sink.CloseContext(shutdown); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("contended close=%v", err)
+	}
+	sink.stateMu.Unlock()
+	locked = false
+	select {
+	case <-sink.done:
+	case <-time.After(time.Second):
+		t.Fatal("writer leaked after file boundary released")
+	}
+	select {
+	case <-flushed:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("flush did not release after shutdown")
+	}
 }

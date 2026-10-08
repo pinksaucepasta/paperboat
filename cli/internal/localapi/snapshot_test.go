@@ -52,6 +52,38 @@ func TestSnapshotStorePublishesMonotonicImmutableSnapshots(t *testing.T) {
 	}
 }
 
+func TestSnapshotStoreIsolatesTransportAndHealthTimestamps(t *testing.T) {
+	initial := validSnapshot()
+	broken, observed := initial.ObservedAt, initial.ObservedAt.Add(time.Minute)
+	initial.Machines[0].ActiveConsumers = 1
+	initial.Machines[0].TransportConsumers = []TransportConsumer{{Path: "relay", ActiveConsumers: 1, RelayRegion: "bom"}}
+	initial.Machines[0].Health[0].BrokenSince = &broken
+	initial.Machines[0].LastObservedAt = &observed
+	initial.Health = append([]HealthItem(nil), initial.Machines[0].Health...)
+	store, err := NewSnapshotStore(&initial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantBroken, wantObserved := broken, observed
+	initial.Machines[0].TransportConsumers[0].Path = "direct"
+	broken, observed = time.Time{}, time.Time{}
+	current, err := store.Snapshot(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Machines[0].TransportConsumers[0].Path != "relay" || !current.Health[0].BrokenSince.Equal(wantBroken) || !current.Machines[0].LastObservedAt.Equal(wantObserved) {
+		t.Fatal("source mutation changed stored diagnostics")
+	}
+	current.Machines[0].TransportConsumers[0].Path = "direct"
+	*current.Health[0].BrokenSince = time.Time{}
+	*current.Machines[0].Health[0].BrokenSince = time.Time{}
+	*current.Machines[0].LastObservedAt = time.Time{}
+	again, err := store.Watch(t.Context(), initial.Generation-1)
+	if err != nil || again.Validate() != nil || again.Machines[0].TransportConsumers[0].Path != "relay" || !again.Health[0].BrokenSince.Equal(wantBroken) || !again.Machines[0].Health[0].BrokenSince.Equal(wantBroken) || !again.Machines[0].LastObservedAt.Equal(wantObserved) {
+		t.Fatal("client mutation changed diagnostic snapshots")
+	}
+}
+
 func TestSnapshotStoreWatchReturnsNextGenerationAndCoalesces(t *testing.T) {
 	initial := validSnapshot()
 	store, _ := NewSnapshotStore(&initial)

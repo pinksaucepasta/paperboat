@@ -17,8 +17,11 @@ pb environments [flags]
 ### Options
 
 ```
-  -h, --help   help for environments
-      --json   print JSON
+  -h, --help           help for environments
+      --json           print JSON
+      --owner string   filter owner: mine, shared, or an authorized account ID
+      --q string       filter by resource name or ID
+      --state string   filter by resource state
 ```
 
 ### Options inherited from parent commands
@@ -27,6 +30,7 @@ pb environments [flags]
       --config string      path to the CLI config file
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO

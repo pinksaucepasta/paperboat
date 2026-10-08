@@ -23,7 +23,7 @@ func TestBrowserTerminalControlChannelIsNodeBoundAndFailClosed(t *testing.T) {
 		}
 		defer connection.CloseNow()
 		kind, raw, err := connection.Read(r.Context())
-		if err != nil || kind != websocket.MessageText || string(raw) != `{"ticket":"one-use","origin":"https://dashboard.example.test","host":"device.runtime.example.test"}` {
+		if err != nil || kind != websocket.MessageText || string(raw) != `{"ticket":"one-use","origin":"https://dashboard.example.test","host":"machine.runtime.example.test"}` {
 			return
 		}
 		requests <- struct{}{}
@@ -42,7 +42,7 @@ func TestBrowserTerminalControlChannelIsNodeBoundAndFailClosed(t *testing.T) {
 	client := &BrowserTerminalClient{HTTP: httpClient, NodeID: "edge_1", ProcessEpoch: "epoch_01"}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	admission, err := client.Admit(ctx, "one-use", "https://dashboard.example.test", "device.runtime.example.test")
+	admission, err := client.Admit(ctx, "one-use", "https://dashboard.example.test", "machine.runtime.example.test")
 	if err != nil || admission.Credential != "host-credential" || admission.TerminalSessionID != "term_1" || admission.AttachmentID != "attach_1" {
 		t.Fatalf("admission: %v", err)
 	}

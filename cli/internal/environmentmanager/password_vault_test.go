@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -13,7 +15,10 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/environmente2ee"
 )
 
-type secureMemoryStore struct{ values map[string]string }
+type secureMemoryStore struct {
+	values map[string]string
+	getErr error
+}
 
 func (*secureMemoryStore) EnvironmentSecureStore() {}
 func (store *secureMemoryStore) Set(ref, value string) error {
@@ -26,11 +31,78 @@ func (store *secureMemoryStore) Set(ref, value string) error {
 func (store *secureMemoryStore) Get(ref string) (string, error) {
 	value, ok := store.values[ref]
 	if !ok {
+		if store.getErr != nil {
+			return "", store.getErr
+		}
 		return "", config.ErrSecretNotFound
 	}
 	return value, nil
 }
 func (store *secureMemoryStore) Delete(ref string) error { delete(store.values, ref); return nil }
+
+func TestPasswordVaultInitializationDoesNotTreatMixedStoreFailureAsMissing(t *testing.T) {
+	secrets := &secureMemoryStore{getErr: errors.Join(config.ErrSecretNotFound, syscall.EIO)}
+	store := config.ProfileStore{Path: filepath.Join(t.TempDir(), "profiles.json"), Secrets: secrets}
+	control := &vaultControl{store: store}
+	vault := PasswordVault{WorkspaceID: "personal", Client: control, Store: store, Issuer: "https://control.example", AccountID: "account_1"}
+
+	err := vault.Initialize(context.Background(), []byte("test master password"))
+	if !errors.Is(err, config.ErrSecretNotFound) || !errors.Is(err, syscall.EIO) {
+		t.Fatalf("initialization did not preserve the mixed secure-store failure: %v", err)
+	}
+	if len(secrets.values) != 0 || control.state.DocumentID != "" {
+		t.Fatal("mixed secure-store failure authorized vault initialization")
+	}
+}
+
+type vaultTestCauseTree struct{ causes []error }
+
+func (vaultTestCauseTree) Error() string        { return "test cause tree" }
+func (tree vaultTestCauseTree) Unwrap() []error { return tree.causes }
+
+type vaultTestCauseChain struct{ cause error }
+
+func (vaultTestCauseChain) Error() string       { return "test cause chain" }
+func (chain vaultTestCauseChain) Unwrap() error { return chain.cause }
+
+type vaultTestCauseCycle struct{ cause error }
+
+func (vaultTestCauseCycle) Error() string        { return "test cause cycle" }
+func (cycle *vaultTestCauseCycle) Unwrap() error { return cycle.cause }
+
+func TestVaultExpectedAbsenceProofRejectsMixedAndUnboundedCauses(t *testing.T) {
+	if !vaultCredentialAbsentOnly(vaultTestCauseTree{causes: []error{config.ErrSecretNotFound, config.ErrSecretNotFound}}) {
+		t.Fatal("uncomparable wrapper with only missing-secret causes was rejected")
+	}
+	if !vaultCredentialAbsentOnly(&os.PathError{Op: "open", Err: syscall.ENOENT}) {
+		t.Fatal("wrapped filesystem absence was rejected")
+	}
+	if vaultCredentialAbsentOnly(errors.Join(config.ErrSecretNotFound, syscall.EIO)) {
+		t.Fatal("mixed missing-secret and I/O failure authorized absence")
+	}
+	if !vaultAPIResourceAbsentOnly(vaultTestCauseChain{cause: &api.APIError{Status: 404}}) {
+		t.Fatal("pure wrapped not-found status was rejected")
+	}
+	if vaultAPIResourceAbsentOnly(errors.Join(&api.APIError{Status: 404}, syscall.EIO)) {
+		t.Fatal("mixed not-found status and I/O failure authorized absence")
+	}
+	var typedNil *vaultTestCauseCycle
+	if vaultCredentialAbsentOnly(typedNil) {
+		t.Fatal("typed-nil cause authorized absence")
+	}
+	cycle := &vaultTestCauseCycle{}
+	cycle.cause = cycle
+	if vaultCredentialAbsentOnly(cycle) {
+		t.Fatal("cyclic cause authorized absence")
+	}
+	var oversized error = config.ErrSecretNotFound
+	for i := 0; i < 16; i++ {
+		oversized = vaultTestCauseChain{cause: oversized}
+	}
+	if vaultCredentialAbsentOnly(oversized) {
+		t.Fatal("oversized cause tree authorized absence")
+	}
+}
 
 type vaultControl struct {
 	store           config.ProfileStore
@@ -63,11 +135,11 @@ func (c *vaultControl) PutPasswordVault(_ context.Context, raw []byte) (api.Pass
 	return c.state, nil
 }
 
-func TestPasswordVaultOfflineDeviceAndInterruptedRewrap(t *testing.T) {
+func TestPasswordVaultOfflineMachineAndInterruptedRewrap(t *testing.T) {
 	ctx := context.Background()
 	store := config.ProfileStore{Path: filepath.Join(t.TempDir(), "profiles.json"), Secrets: &secureMemoryStore{}}
 	control := &vaultControl{store: store}
-	a := PasswordVault{Client: control, Store: store, Issuer: "https://control.example", AccountID: "account_1"}
+	a := PasswordVault{WorkspaceID: "personal", Client: control, Store: store, Issuer: "https://control.example", AccountID: "account_1"}
 	password := []byte("first test master password")
 	if err := a.Initialize(ctx, password); err != nil {
 		t.Fatal(err)
@@ -97,7 +169,7 @@ func TestPasswordVaultOfflineDeviceAndInterruptedRewrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(initial.Payload, bKeys.Payload) {
-		t.Fatal("offline-device unlock changed key material")
+		t.Fatal("offline-machine unlock changed key material")
 	}
 	bKeys.Clear()
 	control.failAfterCommit = true
@@ -146,7 +218,7 @@ func TestRecoveryKeepsTeamKeysCurrentAndResumesExactSuccessor(t *testing.T) {
 	ctx := context.Background()
 	store := config.ProfileStore{Path: filepath.Join(t.TempDir(), "profiles.json"), Secrets: &secureMemoryStore{}}
 	control := &vaultControl{store: store}
-	a := PasswordVault{Client: control, Store: store, Issuer: "https://control.example", AccountID: "account_1"}
+	a := PasswordVault{WorkspaceID: "personal", Client: control, Store: store, Issuer: "https://control.example", AccountID: "account_1"}
 	code, err := environmente2ee.GenerateVaultRecoveryCode()
 	if err != nil {
 		t.Fatal(err)

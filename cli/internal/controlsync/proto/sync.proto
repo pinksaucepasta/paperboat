@@ -3,33 +3,33 @@ syntax = "proto3";
 package sync;
 option go_package = "github.com/pinksaucepasta/paperboat/internal/controlsync/proto;proto";
 
-message DeviceCapabilities {
+message MachineCapabilities {
   bool can_host_terminals = 1;
   bool can_mount_ssh = 2;
   bool can_export_ports = 3;
   repeated int32 exported_ports = 4;
 }
 
-message DevicePosture {
+message MachinePosture {
   string os = 1;
   string os_version = 2;
   string hostname = 3;
-  DeviceCapabilities requested_capabilities = 4;
+  MachineCapabilities requested_capabilities = 4;
 }
 
-message DevicePostureCheck {
+message MachinePostureCheck {
   bool allowed = 1;
   string rejection_reason = 2;
-  DeviceCapabilities granted_capabilities = 3;
+  MachineCapabilities granted_capabilities = 3;
   bool requires_approval = 4;
   bool approved = 5;
 }
 
 message SyncRequest {
-  string device_id = 1;
+  string machine_id = 1;
   string auth_token = 2;
   string alias = 3;
-  DevicePosture posture = 4;
+  MachinePosture posture = 4;
   repeated string endpoints = 5;
   repeated string tags = 6;
 }
@@ -39,7 +39,7 @@ message PeerUpdate {
   string alias = 2;
   string assigned_ip = 3;
   repeated string endpoints = 4;
-  DeviceCapabilities capabilities = 5;
+  MachineCapabilities capabilities = 5;
   repeated string tags = 6;
   bool online = 7;
   bool approved = 8;
@@ -49,18 +49,18 @@ message PeerUpdate {
 message SyncResponse {
   uint64 revision = 1;
   string assigned_ip = 2;
-  DevicePostureCheck posture_check = 3;
+  MachinePostureCheck posture_check = 3;
   repeated PeerUpdate peers = 4;
   repeated string revoked_peers = 5;
 }
 
 message SetTagsRequest {
-  string device_id = 1;
+  string machine_id = 1;
   repeated string tags = 2;
 }
 
 message SetTagsResponse {
-  string device_id = 1;
+  string machine_id = 1;
   repeated string tags = 2;
   bool success = 3;
 }

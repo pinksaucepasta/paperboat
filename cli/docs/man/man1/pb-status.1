@@ -13,7 +13,7 @@ pb-status - Show local Paperboat machine status
 Show local Paperboat machine status
 
 .PP
-Show the local endpoint's Paperboat state or the selected device's observed status. This is a snapshot rather than a readiness wait; use doctor for a deeper check, service status for supervisor state, and pb wait for a named readiness condition.
+Show the local endpoint's Paperboat state or the selected machine's observed status. This is a snapshot rather than a readiness wait; use doctor for a deeper check, service status for supervisor state, and pb wait for a named readiness condition.
 
 .PP
 JSON output is supported with --json.
@@ -39,6 +39,10 @@ JSON output is supported with --json.
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

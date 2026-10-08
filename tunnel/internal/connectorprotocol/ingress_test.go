@@ -80,3 +80,53 @@ func TestIngressStrictWireAndTCPBinding(t *testing.T) {
 		t.Fatal("nonloopback target accepted")
 	}
 }
+
+func TestIngressNativeEvidenceExactPublisherAndAccessor(t *testing.T) {
+	now := time.Now().UTC()
+	d, open := ingressFixture(now)
+	d.Binding.Audience = "private"
+	d.PrincipalID, d.GrantID, d.GrantGeneration = "accessor-1", "nonce-1", 3
+	q := PrivateAccessRequest{AccountID: d.Binding.AccountID, ResourceKind: "tunnel", ResourceID: d.Binding.TunnelID, RouteID: d.Binding.RouteID, Audience: "paperboat-tunnel-http", MachineID: d.PrincipalID, SessionID: "accessor-install-1", InstallationGeneration: 3, ExpiresAt: now.Add(time.Minute), Nonce: d.GrantID, ConnectorID: d.ConnectorID, CarrierSessionID: d.SessionID, RouteGeneration: d.Binding.RouteGeneration, SessionGeneration: 1, ProcessGeneration: d.ProcessGeneration, ConfigGeneration: d.ConfigGeneration, AssignmentGeneration: d.AssignmentGeneration, EdgeNodeID: d.EdgeNodeID, EdgeProcessEpoch: d.EdgeProcessEpoch, Protocol: "http", Method: "CONNECT", Host: d.Binding.Hostname, Path: "/", IdempotencyKey: "operation-1", RequestID: "request-1", CorrelationID: "correlation-1"}
+	d.NativeAuthorization = &PrivateAccessOpen{Schema: PrivateAccessSchema, Kind: PrivateAccessKind, Grant: "signed-native-grant", Request: q}
+	if d.Binding.HostID == q.MachineID || d.Authorize(d, open, d.EdgeNodeID, d.EdgeProcessEpoch, now) != nil {
+		t.Fatal("independent accessor/publisher denied")
+	}
+	var wire bytes.Buffer
+	if err := WriteIngressDecision(&wire, d, now); err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := ReadIngressDecision(&wire, now)
+	if err != nil || decoded.NativeAuthorization == nil || *decoded.NativeAuthorization != *d.NativeAuthorization {
+		t.Fatalf("native evidence roundtrip: %v", err)
+	}
+	for _, field := range []string{"grant", "hash", "accessor-install", "route", "config", "assignment", "node", "expired", "removed"} {
+		t.Run(field, func(t *testing.T) {
+			current := d
+			evidence := *d.NativeAuthorization
+			current.NativeAuthorization = &evidence
+			switch field {
+			case "grant":
+				evidence.Grant = "other-grant"
+			case "hash":
+				evidence.Request.Path = "/other"
+			case "accessor-install":
+				evidence.Request.InstallationGeneration++
+			case "route":
+				current.Binding.RouteGeneration++
+			case "config":
+				current.ConfigGeneration++
+			case "assignment":
+				current.AssignmentGeneration++
+			case "node":
+				current.EdgeProcessEpoch = "epoch_other12345678901234567890"
+			case "expired":
+				evidence.Request.ExpiresAt = now
+			case "removed":
+				current.NativeAuthorization = nil
+			}
+			if d.Authorize(current, open, d.EdgeNodeID, d.EdgeProcessEpoch, now) == nil {
+				t.Fatal("changed native authority admitted")
+			}
+		})
+	}
+}

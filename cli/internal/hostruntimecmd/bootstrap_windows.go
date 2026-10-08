@@ -9,6 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"net/http"
 	"os"
@@ -57,13 +58,10 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	tokenFile := flags.String("enrollment-token-file", "", "absolute dashboard enrollment token file")
 	name := flags.String("name", "", "User machine name")
 	stateRoot := flags.String("state-root", "", "Paperboat runtime state directory")
-	setupMode := flags.String("setup-mode", "host", "enrollment role: host or client")
 	if flags.Parse(args) != nil || flags.NArg() != 0 {
 		return errors.New("bootstrap accepts flags only")
 	}
-	if *setupMode != "host" && *setupMode != "client" {
-		return errors.New("setup-mode must be host or client")
-	}
+
 	if *legacyToken != "" && *tokenFile != "" {
 		return errors.New("use only one enrollment token source")
 	}
@@ -122,7 +120,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		return err
 	}
 	publicIdentityKey := base64.RawURLEncoding.EncodeToString(identityStore.Current().Public())
-	resume, resumeErr := bootstrap.LoadResume(*stateRoot, *serverURL, publicIdentityKey, token, *name, *setupMode, time.Now().UTC())
+	resume, resumeErr := bootstrap.LoadResume(*stateRoot, *serverURL, publicIdentityKey, token, *name, time.Now().UTC())
 	if err := rejectFreshBootstrapOverEnrollment(identityStore, resumeErr); err != nil {
 		return err
 	}
@@ -171,7 +169,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 			return err
 		}
 		config := bootstrap.Config{ServerURL: *serverURL, EnrollmentToken: token, Alias: *name, WorkspaceRoot: home, Verifier: base64.RawURLEncoding.EncodeToString(verifier), PublicIdentityKey: publicIdentityKey, RuntimeVersions: map[string]string{"pb": sourceIdentity.Version}, SSHUser: windowsAccountName(account.Username), SSHPort: sshConfig.Port, CanReuseRuntimeIdentity: reusableIdentityErr == nil}
-		resume = bootstrap.NewResumeRecord(*serverURL, publicIdentityKey, token, *name, *setupMode, config.Verifier, time.Now().UTC().Add(15*time.Minute))
+		resume = bootstrap.NewResumeRecord(*serverURL, publicIdentityKey, token, *name, config.Verifier, time.Now().UTC().Add(15*time.Minute))
 		if err := bootstrap.SaveResume(*stateRoot, resume); err != nil {
 			return fmt.Errorf("persist machine enrollment resume state: %w", err)
 		}
@@ -262,10 +260,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 			return err
 		}
 	}
-	// Both modes receive the local CLI profile and daemon, then install the same
-	// managed hostd/updater runtime below. Host mode additionally provisions
-	// machine-control authority; the server-issued CLI session is bound to this
-	// enrollment's independent endpoint identity.
+	// Each enrollment initializes its CLI profile and durable runtime.
 	if shouldInstallBootstrapCLI(material) && !resume.ClientInstalled {
 		if err := installBootstrapCLI(ctx, material.ClientSession, *serverURL); err != nil {
 			return fmt.Errorf("initialize Paperboat CLI session: %w", err)
@@ -278,8 +273,8 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	if err := saveBootstrapRegistration(identityStore, *serverURL, material, windowsAccountName(account.Username), sshConfig.Port); err != nil {
 		return fmt.Errorf("save machine registration: %w", err)
 	}
-	if !shouldInstallBootstrapHostRuntime(material) {
-		return errors.New("enrollment setup mode does not install a managed runtime")
+	if !shouldInstallBootstrapRuntime(material) {
+		return errors.New("enrollment does not contain a managed runtime identity")
 	}
 	if err := prepareBootstrapListener(*stateRoot, &material, &resume); err != nil {
 		return err
@@ -307,7 +302,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		return err
 	}
 
-	request := hostinstall.Request{Schema: hostinstall.SchemaV1, Platform: runtime.GOOS, User: windowsAccountName(account.Username), Group: "Paperboat", OwnerSID: sid, Executable: artifactPath, Artifact: *material.Artifact, Source: sourceIdentity, Home: home, Path: os.Getenv("PATH"), StateRoot: *stateRoot, WorkspaceRoot: home, ControlURL: material.ControlURL, UserMachineID: material.UserMachineID, Shell: filepath.Join(os.Getenv("WINDIR"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), HelperListenAddress: material.HelperListenAddress, SetupMode: *setupMode}
+	request := hostinstall.Request{Schema: hostinstall.SchemaV1, Platform: runtime.GOOS, User: windowsAccountName(account.Username), Group: "Paperboat", OwnerSID: sid, Executable: artifactPath, Artifact: *material.Artifact, Source: sourceIdentity, Home: home, Path: os.Getenv("PATH"), StateRoot: *stateRoot, WorkspaceRoot: home, ControlURL: material.ControlURL, UserMachineID: material.UserMachineID, Shell: filepath.Join(os.Getenv("WINDIR"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), HelperListenAddress: material.HelperListenAddress}
 	if err := hostinstall.Validate(request, 0); err != nil {
 		return fmt.Errorf("validate Windows host installation request: %w", err)
 	}
@@ -347,11 +342,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	if err := bootstrap.ClearResume(*stateRoot); err != nil {
 		return fmt.Errorf("clear completed machine enrollment resume state: %w", err)
 	}
-	if material.SetupMode == "client" {
-		fmt.Fprintln(stdout, "Paperboat Windows client runtime is installed. It will resume after reboot.")
-	} else {
-		fmt.Fprintln(stdout, "Paperboat Windows host runtime is installed. It will resume after reboot.")
-	}
+	fmt.Fprintln(stdout, "Paperboat Windows machine runtime is installed. It will resume after reboot.")
 	return nil
 }
 
@@ -377,11 +368,11 @@ func ensureWindowsRuntimeEnrollment(ctx context.Context, material bootstrap.Mate
 			Transport:  httptransport.Default(),
 			Timeout:    15 * time.Second,
 			OperationID: func() (string, error) {
-				var value [16]byte
-				if _, err := rand.Read(value[:]); err != nil {
+				id, err := uuid.NewRandom()
+				if err != nil {
 					return "", err
 				}
-				return "bootstrap-runtime-renew-" + base64.RawURLEncoding.EncodeToString(value[:]), nil
+				return "operation_" + id.String(), nil
 			},
 		})
 		if sourceErr != nil {
@@ -408,12 +399,7 @@ func ensureWindowsRuntimeEnrollment(ctx context.Context, material bootstrap.Mate
 }
 
 func ensureWindowsMachineControl(ctx context.Context, material bootstrap.Material, stateRoot string) error {
-	// Machine-control credentials are host-only. Client enrollments must not
-	// mint one, while Windows hosts need the same initial credential bootstrap
-	// as Unix hosts before their managed service starts.
-	if material.SetupMode != "host" {
-		return nil
-	}
+	// Persist the enrolled machine control credential before its service starts.
 	source, err := machinecontrol.NewSource(machinecontrol.Config{ControlURL: material.ControlURL, StateRoot: stateRoot, Timeout: 15 * time.Second})
 	if err != nil {
 		return err

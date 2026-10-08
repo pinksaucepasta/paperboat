@@ -6,7 +6,6 @@ import (
 	"context"
 	"io"
 
-	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
@@ -65,16 +64,19 @@ func runActivator(_ context.Context, args []string, _ io.Writer, _ io.Writer) er
 
 func windowsUpdatedConfig(instance windowsRuntimeInstance) (updated.WindowsConfig, error) {
 	config, layout := instance.config, instance.layout
-	result := windowsUpdatedConfigFor(config, layout, buildinfo.Version)
+	result := windowsUpdatedConfigFor(config, layout, config.Source.Version)
+	version, err := updated.WindowsFeatureVersion(context.Background(), result)
+	if err != nil {
+		return updated.WindowsConfig{}, err
+	}
+	result.ActiveVersion = version
 	return result, nil
 }
 
-func windowsUpdatedConfigFor(config hostinstall.WindowsRuntimeConfig, layout service.Layout, runningVersion string) updated.WindowsConfig {
-	// The running signed executable is the active updater during activation.
-	// runtime-install.json deliberately remains on the previous version until
-	// health verification commits the transaction, so using its version here
-	// makes every candidate updater report the old version and forces rollback.
+func windowsUpdatedConfigFor(config hostinstall.WindowsRuntimeConfig, layout service.Layout, _ string) updated.WindowsConfig {
+	// The protected Source describes current feature code; the pinned native
+	// executable retains its own identity in the existing service declaration.
 	tokenFile := config.TokenFile
 	installState, _ := hostinstall.WindowsInstanceConfigPath(config.Instance)
-	return updated.WindowsConfig{Source: config.Source, StateRoot: layout.UpdateStateRoot, RuntimeStateRoot: config.StateRoot, Binary: layout.Binary, BinaryRollback: layout.BinaryRollback, BinaryStaged: layout.BinaryStaged, OwnerSID: config.OwnerSID, MachineID: config.MachineID, RepositoryURL: config.Artifact.RepositoryURL, TokenFile: tokenFile, InstallState: installState, ControlSocket: layout.UpdaterSocket, HostdSocket: layout.HostdSocket, HealthURL: "http://" + config.ListenAddress + "/healthz", ActiveVersion: runningVersion, Architecture: config.Artifact.Architecture, AutomaticChecks: config.Source.AutomaticUpdates, SetupMode: config.SetupMode}
+	return updated.WindowsConfig{Source: config.Source, StateRoot: layout.UpdateStateRoot, RuntimeStateRoot: config.StateRoot, Binary: layout.Binary, BinaryRollback: layout.BinaryRollback, BinaryStaged: layout.BinaryStaged, OwnerSID: config.OwnerSID, MachineID: config.MachineID, RepositoryURL: config.Artifact.RepositoryURL, TokenFile: tokenFile, InstallState: installState, ControlSocket: layout.UpdaterSocket, HostdSocket: layout.HostdSocket, HealthURL: "http://" + config.ListenAddress + "/healthz", ActiveVersion: config.Source.Version, Architecture: config.Artifact.Architecture, AutomaticChecks: config.Source.AutomaticUpdates}
 }

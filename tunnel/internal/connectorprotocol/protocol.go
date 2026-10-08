@@ -10,7 +10,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
@@ -20,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -127,13 +127,18 @@ func (e *Error) Error() string {
 	if e == nil {
 		return ""
 	}
-	if e.Cause == nil {
+	if validCode(e.Code) {
 		return string(e.Code)
 	}
-	return string(e.Code) + ": " + e.Cause.Error()
+	return "connector operation failed"
 }
 
-func (e *Error) Unwrap() error { return e.Cause }
+func (e *Error) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
 
 func (e *Error) Is(target error) bool {
 	other, ok := target.(*Error)
@@ -176,17 +181,50 @@ func codeError(base *Error, reason DisconnectReason, retryable bool, cause error
 	return &Error{Code: base.Code, Reason: reason, Retryable: retryable, Cause: cause}
 }
 
+// protocolError projects only owned finite labels. A fixed traversal budget also
+// keeps malformed callback error chains from blocking diagnostic publication.
+func protocolError(err error) *Error {
+	pending := []error{err}
+	for remaining := 16; remaining > 0 && len(pending) > 0; remaining-- {
+		current := pending[0]
+		pending = pending[1:]
+		if current == nil {
+			continue
+		}
+		value := reflect.ValueOf(current)
+		if value.Kind() == reflect.Pointer && value.IsNil() {
+			continue
+		}
+		if typed, ok := current.(*Error); ok && validCode(typed.Code) {
+			return typed
+		}
+		switch wrapped := current.(type) {
+		case interface{ Unwrap() []error }:
+			children := wrapped.Unwrap()
+			capacity := remaining - 1 - len(pending)
+			if capacity < 0 {
+				capacity = 0
+			}
+			if len(children) > capacity {
+				children = children[:capacity]
+			}
+			pending = append(children, pending...)
+		case interface{ Unwrap() error }:
+			pending = append([]error{wrapped.Unwrap()}, pending...)
+		}
+	}
+	return nil
+}
+
 func CodeOf(err error) Code {
-	var typed *Error
-	if errors.As(err, &typed) && typed != nil {
+	if typed := protocolError(err); typed != nil {
 		return typed.Code
 	}
 	return ""
 }
 
 func ReasonOf(err error) DisconnectReason {
-	var typed *Error
-	if errors.As(err, &typed) && typed != nil {
+	if typed := protocolError(err); typed != nil && validDisconnectReason(typed.Reason) {
 		return typed.Reason
 	}
 	return ""
@@ -629,7 +667,10 @@ func (f Frame) DecodePayload(target any) error {
 	if err := f.Validate(); err != nil {
 		return err
 	}
-	return decodeStrict(f.Payload, target)
+	if err := decodeStrict(f.Payload, target); err != nil {
+		return codeError(ErrMalformedFrame, ReasonMalformed, false, err)
+	}
+	return nil
 }
 
 func ReadFrame(reader io.Reader) (Frame, error) {
@@ -1101,17 +1142,20 @@ func (s Snapshot) Validate() error {
 	return nil
 }
 
+var stableEndpointIDPattern = regexp.MustCompile(`^endpoint_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+
 type wireConfigSnapshot struct {
-	Schema         string            `json:"schema"`
-	Kind           string            `json:"kind"`
-	TunnelID       string            `json:"tunnel_id"`
-	Generation     uint64            `json:"generation"`
-	Name           string            `json:"name"`
-	DesiredState   string            `json:"desired_state"`
-	AccessMode     string            `json:"access_mode"`
-	StableEndpoint string            `json:"stable_endpoint"`
-	ExpiresAt      *time.Time        `json:"expires_at"`
-	Routes         []wireConfigRoute `json:"routes"`
+	Schema           string            `json:"schema"`
+	Kind             string            `json:"kind"`
+	TunnelID         string            `json:"tunnel_id"`
+	Generation       uint64            `json:"generation"`
+	Name             string            `json:"name"`
+	DesiredState     string            `json:"desired_state"`
+	AccessMode       string            `json:"access_mode"`
+	StableEndpointID string            `json:"stable_endpoint_id"`
+	StableEndpoint   string            `json:"stable_endpoint"`
+	ExpiresAt        *time.Time        `json:"expires_at"`
+	Routes           []wireConfigRoute `json:"routes"`
 }
 
 type wireConfigRoute struct {
@@ -1141,7 +1185,7 @@ func validateConfigSnapshotPayload(payload []byte, tunnelID string, generation u
 	if err := json.Unmarshal(payload, &fields); err != nil || fields == nil {
 		return ErrSnapshotRejected
 	}
-	for _, field := range []string{"schema", "kind", "tunnel_id", "generation", "name", "desired_state", "access_mode", "stable_endpoint", "expires_at", "routes"} {
+	for _, field := range []string{"schema", "kind", "tunnel_id", "generation", "name", "desired_state", "access_mode", "stable_endpoint_id", "stable_endpoint", "expires_at", "routes"} {
 		if _, ok := fields[field]; !ok {
 			return fmt.Errorf("%w: snapshot field %s is required", ErrSnapshotRejected, field)
 		}
@@ -1150,13 +1194,13 @@ func validateConfigSnapshotPayload(payload []byte, tunnelID string, generation u
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&snapshot); err != nil {
-		return fmt.Errorf("%w: snapshot shape: %v", ErrSnapshotRejected, err)
+		return codeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, err)
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return ErrSnapshotRejected
 	}
-	if snapshot.Schema != "paperboat.preview-tunnel/v1" || snapshot.Kind != "tunnel_config_snapshot" || snapshot.TunnelID != tunnelID || snapshot.Generation != generation || strings.TrimSpace(snapshot.Name) != snapshot.Name || len(snapshot.Name) == 0 || len(snapshot.Name) > 80 || snapshot.DesiredState != "active" && snapshot.DesiredState != "paused" && snapshot.DesiredState != "deleted" || snapshot.AccessMode != "public" && snapshot.AccessMode != "private" && snapshot.AccessMode != "team" || snapshot.Routes == nil || !validWireStableEndpoint(snapshot.StableEndpoint) {
+	if snapshot.Schema != "paperboat.preview-tunnel/v1" || snapshot.Kind != "tunnel_config_snapshot" || snapshot.TunnelID != tunnelID || snapshot.Generation != generation || strings.TrimSpace(snapshot.Name) != snapshot.Name || len(snapshot.Name) == 0 || len(snapshot.Name) > 80 || snapshot.DesiredState != "active" && snapshot.DesiredState != "paused" && snapshot.DesiredState != "deleted" || snapshot.AccessMode != "public" && snapshot.AccessMode != "private" && snapshot.AccessMode != "team" || snapshot.Routes == nil || !stableEndpointIDPattern.MatchString(snapshot.StableEndpointID) || !validWireStableEndpoint(snapshot.StableEndpoint) {
 		return ErrSnapshotRejected
 	}
 	var rawRoutes []json.RawMessage
@@ -1177,7 +1221,7 @@ func validateConfigSnapshotPayload(payload []byte, tunnelID string, generation u
 			return ErrSnapshotRejected
 		}
 		if err := validateWireConfigRoute(route); err != nil {
-			return fmt.Errorf("%w: route %d: %v", ErrSnapshotRejected, index, err)
+			return codeError(ErrSnapshotRejected, ReasonSnapshotRejected, false, err)
 		}
 	}
 	return nil
@@ -1723,12 +1767,4 @@ func rejectSecretFields(value any) error {
 		return nil
 	}
 	return visit(value)
-}
-
-func newOpaqueID(prefix string) (string, error) {
-	var random [18]byte
-	if _, err := rand.Read(random[:]); err != nil {
-		return "", err
-	}
-	return prefix + "_" + hex.EncodeToString(random[:]), nil
 }

@@ -33,9 +33,14 @@ type TerminalSharingGrant struct {
 	Generation uint64 `json:"generation"`
 }
 type SharedTerminalSession struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Target struct {
+	Title             string `json:"title"`
+	CurrentDirectory  string `json:"current_directory,omitempty"`
+	ForegroundProcess string `json:"foreground_process,omitempty"`
+	StartedIn         string `json:"started_in"`
+	Machine           string `json:"machine"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Target            struct {
 		Kind              string `json:"kind"`
 		ID                string `json:"id"`
 		Name              string `json:"name"`
@@ -68,12 +73,13 @@ type TerminalSharingMutation struct {
 }
 
 func (c *Client) SharedTerminalSessions(ctx context.Context) ([]SharedTerminalSession, error) {
-	var out struct {
-		Sessions []SharedTerminalSession `json:"sessions"`
-	}
-	err := c.do(ctx, http.MethodGet, "/v1/terminal-sessions", nil, &out)
-	return out.Sessions, err
+	return c.SharedTerminalSessionsFiltered(ctx, nil)
 }
+
+func (c *Client) SharedTerminalSessionsFiltered(ctx context.Context, filters url.Values) ([]SharedTerminalSession, error) {
+	return collectOffsetInventory[SharedTerminalSession](ctx, c, "/v1/terminal-sessions", "sessions", filters)
+}
+
 func (c *Client) TerminalSharing(ctx context.Context, id string) (SharedTerminalSession, error) {
 	var out SharedTerminalSession
 	err := c.do(ctx, http.MethodGet, "/v1/terminal-sessions/"+url.PathEscape(id)+"/sharing", nil, &out)

@@ -1,10 +1,12 @@
 package api
 
 import (
+	"crypto/tls"
 	"errors"
 	"net"
 	"net/http"
-	"strings"
+	"net/http/httptrace"
+	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
@@ -50,8 +52,14 @@ func (t *tlsHandshakeRetryTransport) RoundTrip(req *http.Request) (*http.Respons
 		if err != nil {
 			return nil, err
 		}
+		var tlsFailed, wroteHeaders atomic.Bool
+		trace := &httptrace.ClientTrace{
+			TLSHandshakeDone: func(_ tls.ConnectionState, err error) { tlsFailed.Store(err != nil) },
+			WroteHeaders:     func() { wroteHeaders.Store(true) },
+		}
+		request = request.WithContext(httptrace.WithClientTrace(request.Context(), trace))
 		resp, err := t.base.RoundTrip(request)
-		if err == nil || !retryableTransportError(request, err) || attempt == attempts-1 {
+		if err == nil || !retryableTransportError(request, err, tlsFailed.Load(), wroteHeaders.Load()) || attempt == attempts-1 {
 			return resp, err
 		}
 		select {
@@ -79,23 +87,16 @@ func requestForAttempt(req *http.Request, attempt int) (*http.Request, error) {
 	return clone, nil
 }
 
-func isTLSHandshakeTimeout(err error) bool {
-	var netErr net.Error
-	return errors.As(err, &netErr) && netErr.Timeout() &&
-		strings.Contains(strings.ToLower(err.Error()), "tls handshake timeout")
-}
-
-func retryableTransportError(req *http.Request, err error) bool {
-	if isTLSHandshakeTimeout(err) {
-		return true
-	}
-	// A response-header timeout is safe to retry for read-only requests. It is
-	// deliberately excluded for POST/PUT/PATCH because the server may have
-	// already applied the mutation before the response was lost.
-	if req.Method != http.MethodGet && req.Method != http.MethodHead {
+func retryableTransportError(req *http.Request, err error, tlsFailed, wroteHeaders bool) bool {
+	var timeout net.Error
+	if !errors.As(err, &timeout) || !timeout.Timeout() {
 		return false
 	}
-	var netErr net.Error
-	return errors.As(err, &netErr) && netErr.Timeout() &&
-		strings.Contains(strings.ToLower(err.Error()), "awaiting headers")
+	// The standard transport's TLSHandshakeDone callback proves this timeout
+	// preceded HTTP headers. Error text cannot establish mutation replay safety.
+	if tlsFailed && !wroteHeaders {
+		return true
+	}
+	// Read-only requests may safely retry timeouts at any transport phase.
+	return req.Method == http.MethodGet || req.Method == http.MethodHead
 }

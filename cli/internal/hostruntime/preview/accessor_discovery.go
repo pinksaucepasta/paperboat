@@ -34,7 +34,7 @@ type accessorAdmission struct {
 	Schema                               string    `json:"schema"`
 	Kind                                 string    `json:"kind"`
 	AccountID                            string    `json:"account_id"`
-	DeviceID                             string    `json:"device_id"`
+	MachineID                            string    `json:"machine_id"`
 	InstallationGeneration               uint64    `json:"installation_generation"`
 	AccessorPublicKey                    string    `json:"accessor_public_key"`
 	AccessorThumbprint                   string    `json:"accessor_thumbprint"`
@@ -68,7 +68,7 @@ type accessorAdmission struct {
 }
 
 func (a accessorAdmission) validate(now time.Time) error {
-	for _, value := range []string{a.AccountID, a.DeviceID, a.ResourceID, a.CarrierSessionID, a.RouteID, a.AssignmentID, a.EdgeNodeID, a.TunnelID, a.CarrierConnectorID} {
+	for _, value := range []string{a.AccountID, a.MachineID, a.ResourceID, a.CarrierSessionID, a.RouteID, a.AssignmentID, a.EdgeNodeID, a.TunnelID, a.CarrierConnectorID} {
 		if connectorprotocol.ValidateIdentifier(value) != nil {
 			return ErrPrivateAccessInvalid
 		}
@@ -207,7 +207,7 @@ func (c *accessorDiscoveryClient) snapshot(ctx context.Context) ([]accessorAdmis
 		if admission.validate(time.Now().UTC()) != nil {
 			return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
 		}
-		key := admission.DeviceID + "\x00" + admission.ResourceID + "\x00" + admission.RouteID + "\x00" + admission.AssignmentID
+		key := admission.MachineID + "\x00" + admission.ResourceID + "\x00" + admission.RouteID + "\x00" + admission.AssignmentID
 		if _, ok := seen[key]; ok {
 			return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
 		}

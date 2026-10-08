@@ -11,7 +11,7 @@ import (
 func TestStructuredAPIErrorIncludesSeparateSupportReference(t *testing.T) {
 	value := classifyCLIJSONError(&api.APIError{
 		Status: http.StatusBadGateway, Code: "upstream_failed",
-		RequestID: "req_123", SupportReference: "pb-0123456789abcdef0123456789abcdef",
+		RequestID: "req_123", SupportReference: "support_01234567-89ab-4def-8123-456789abcdef",
 	})
 	encoded, err := json.Marshal(value)
 	if err != nil {
@@ -21,7 +21,7 @@ func TestStructuredAPIErrorIncludesSeparateSupportReference(t *testing.T) {
 	if err := json.Unmarshal(encoded, &got); err != nil {
 		t.Fatal(err)
 	}
-	if _, exists := got["request_id"]; exists || got["support_reference"] != "pb-0123456789abcdef0123456789abcdef" {
+	if _, exists := got["request_id"]; exists || got["support_reference"] != "support_01234567-89ab-4def-8123-456789abcdef" {
 		t.Fatalf("structured error = %s", encoded)
 	}
 }

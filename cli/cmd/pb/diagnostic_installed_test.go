@@ -17,7 +17,7 @@ func TestInstalledHomeDiagnostics(t *testing.T) {
 	if os.Getenv("PAPERBOAT_TEST_INSTALLED_DIAGNOSTICS") != "1" {
 		t.Skip("requires an enrolled native installation")
 	}
-	report := collectLocalDoctor()
+	report := collectLocalDoctor(t.Context())
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 	cmd := &cobra.Command{}

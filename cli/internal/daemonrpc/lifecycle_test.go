@@ -11,11 +11,11 @@ import (
 
 func TestBrowserURLsFollowOwnedSnapshot(t *testing.T) {
 	b := NewLiveDaemonBackend(nil, "test")
-	peer := &pbSync.PeerUpdate{PeerId: "device", Alias: "office", Approved: true, Online: true, ExportedPorts: []int32{3000}}
-	urls := map[string]map[int32]string{"device": {3000: "https://0123456789abcdef.pprbt"}}
+	peer := &pbSync.PeerUpdate{PeerId: "machine", Alias: "office", Approved: true, Online: true, ExportedPorts: []int32{3000}}
+	urls := map[string]map[int32]string{"machine": {3000: "https://0123456789abcdef.pprbt"}}
 	b.ApplyPeerUpdates([]*pbSync.PeerUpdate{peer}, 1, urls)
-	urls["device"][3000] = "mutated"
-	resolved, err := b.ResolveDevice(t.Context(), "device")
+	urls["machine"][3000] = "mutated"
+	resolved, err := b.ResolveMachine(t.Context(), "machine")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,16 +41,16 @@ func TestSnapshotWithdrawalAndConcurrentSubscriberCancellation(t *testing.T) {
 	b := NewLiveDaemonBackend(nil, "test")
 	peer := &pbSync.PeerUpdate{PeerId: "machine_a", Alias: "alpha", AssignedIp: "127.100.0.2", Approved: true, Online: true}
 	b.ApplyPeerUpdates([]*pbSync.PeerUpdate{peer}, 1, nil)
-	if _, err := b.ResolveDevice(context.Background(), "alpha"); err != nil {
+	if _, err := b.ResolveMachine(context.Background(), "alpha"); err != nil {
 		t.Fatal(err)
 	}
 	b.ApplyPeerUpdates(nil, 2, nil)
-	if _, err := b.ResolveDevice(context.Background(), "alpha"); err == nil {
+	if _, err := b.ResolveMachine(context.Background(), "alpha"); err == nil {
 		t.Fatal("withdrawn peer remained resolvable")
 	}
 	peer.Approved = false
 	b.ApplyPeerUpdates([]*pbSync.PeerUpdate{peer}, 3, nil)
-	if _, err := b.ResolveDevice(context.Background(), "alpha"); err == nil {
+	if _, err := b.ResolveMachine(context.Background(), "alpha"); err == nil {
 		t.Fatal("unapproved peer remained resolvable")
 	}
 	var wg sync.WaitGroup
@@ -84,7 +84,7 @@ func TestSnapshotWithdrawalAndConcurrentSubscriberCancellation(t *testing.T) {
 	if last != 0 {
 		t.Fatal("slow subscriber missed final withdrawal", last)
 	}
-	if err := b.SetDeviceTags(context.Background(), "machine_a", []string{"tag"}); err == nil {
+	if err := b.SetMachineTags(context.Background(), "machine_a", []string{"tag"}); err == nil {
 		t.Fatal("unconfigured mutation reported success")
 	}
 	if err := b.ApprovePeer(context.Background(), "machine_a", true); err == nil {

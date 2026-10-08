@@ -17,7 +17,7 @@ func TestPreviewLeaseClientFollowsCreateOperationAndUsesETags(t *testing.T) {
 	now := time.Now().UTC()
 	lease := PreviewLease{
 		Schema: PreviewTunnelSchemaV1, Kind: "preview_lease", ID: "prv_1", AccountID: "acct_1", ActorID: "actor_1",
-		OwnerDeviceID: "device_1", OwnerSessionID: "session_1", Target: PreviewLeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"},
+		OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground", Target: PreviewLeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"},
 		AccessMode: "public", Persistent: false, Endpoint: "https://quiet-river-7.preview.example.test",
 		LeaseDeadline: now.Add(time.Hour), State: "connecting", AllocationState: "pending", EdgeState: "pending", OriginState: "unknown",
 		CreatedAt: now, LastRenewedAt: now,
@@ -70,7 +70,7 @@ func TestPreviewLeaseClientFollowsCreateOperationAndUsesETags(t *testing.T) {
 	defer server.Close()
 	client := New(server.URL, config.Credential{AccessToken: "access-token"}, server.Client())
 	created, err := client.CreatePreviewLease(context.Background(), PreviewLeaseCreateRequest{
-		OwnerDeviceID: "device_1", OwnerSessionID: "session_1", Target: PreviewLeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"},
+		OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground", Target: PreviewLeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"},
 	}, "create-key")
 	if err != nil {
 		t.Fatal(err)
@@ -100,12 +100,12 @@ func TestPreviewLeaseClientFollowsCreateOperationAndUsesETags(t *testing.T) {
 func TestPreviewLeaseClientRejectsUnsafeResource(t *testing.T) {
 	client := New("https://api.example.test", config.Credential{}, nil)
 	if _, err := client.CreatePreviewLease(context.Background(), PreviewLeaseCreateRequest{
-		OwnerDeviceID: "device_1", OwnerSessionID: "session_1", Target: PreviewLeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, ExpiresAt: func() *time.Time { value := time.Now().Add(-time.Minute); return &value }(),
+		OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground", Target: PreviewLeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, ExpiresAt: func() *time.Time { value := time.Now().Add(-time.Minute); return &value }(),
 	}, "create-key"); !errors.Is(err, ErrPreviewLeaseInvalid) {
 		t.Fatalf("past deadline error = %v", err)
 	}
 	unsafe := PreviewLease{
-		Schema: PreviewTunnelSchemaV1, Kind: "preview_lease", ID: "prv_1", AccountID: "acct_1", OwnerDeviceID: "device_1", OwnerSessionID: "session_1",
+		Schema: PreviewTunnelSchemaV1, Kind: "preview_lease", ID: "prv_1", AccountID: "acct_1", OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground",
 		AccessMode: "public", Endpoint: "http://unsafe.example.test", LeaseDeadline: time.Now().Add(time.Hour), ETag: `"etag"`,
 	}
 	if err := validatePreviewLease(unsafe); !errors.Is(err, ErrPreviewLeaseInvalid) {
@@ -118,5 +118,94 @@ func writePreviewLeaseEnvelope(t *testing.T, writer http.ResponseWriter, value a
 	writer.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(writer).Encode(map[string]any{"data": value}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPreviewStopRefreshesRenewalConflictWithSameKey(t *testing.T) {
+	now := time.Now().UTC()
+	lease := PreviewLease{Schema: PreviewTunnelSchemaV1, Kind: "preview_lease", ID: "prv_1", AccountID: "acct_1", ActorID: "actor_1", OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground", Target: PreviewLeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, AccessMode: "public", Endpoint: "https://quiet-river-7.preview.example.test", LeaseDeadline: now.Add(time.Hour), State: "ready", AllocationState: "ready", EdgeState: "ready", OriginState: "ready", CreatedAt: now, LastRenewedAt: now, ETag: `"ptv1:preview_lease:cHJ2XzE:1"`}
+	deletes := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			deletes++
+			if r.Header.Get("Idempotency-Key") != "stop-key" {
+				t.Error("mutation key changed")
+			}
+			if deletes == 1 {
+				w.WriteHeader(409)
+				_, _ = w.Write([]byte(`{"error":{"code":"generation_conflict","message":"renewed"}}`))
+				return
+			}
+			if r.Header.Get("If-Match") != `"ptv1:preview_lease:cHJ2XzE:2"` {
+				t.Error("stale generation reused")
+			}
+			lease.State = "stopped"
+			lease.AllocationState = "released"
+			lease.EdgeState = "down"
+		}
+		w.Header().Set("ETag", `"ptv1:preview_lease:cHJ2XzE:2"`)
+		writePreviewLeaseEnvelope(t, w, lease)
+	}))
+	defer server.Close()
+	client := New(server.URL, config.Credential{AccessToken: "access-token"}, server.Client())
+	stopped, err := client.StopPreviewLease(context.Background(), lease, "stop-key")
+	if err != nil || stopped.State != "stopped" || deletes != 2 {
+		t.Fatalf("state=%s deletes=%d error=%v", stopped.State, deletes, err)
+	}
+}
+
+func TestPreviewStopConflictRetriesAreBounded(t *testing.T) {
+	now := time.Now().UTC()
+	lease := PreviewLease{Schema: PreviewTunnelSchemaV1, Kind: "preview_lease", ID: "prv_1", AccountID: "acct_1", ActorID: "actor_1", OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground", Target: PreviewLeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, AccessMode: "public", Endpoint: "https://quiet-river-7.preview.example.test", LeaseDeadline: now.Add(time.Hour), State: "ready", AllocationState: "ready", EdgeState: "ready", OriginState: "ready", CreatedAt: now, LastRenewedAt: now, ETag: `"ptv1:preview_lease:cHJ2XzE:1"`}
+	for _, code := range []string{"generation_conflict", "forbidden"} {
+		t.Run(code, func(t *testing.T) {
+			deletes, reads := 0, 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodDelete {
+					deletes++
+					w.WriteHeader(409)
+					_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": code}})
+					return
+				}
+				reads++
+				w.Header().Set("ETag", lease.ETag)
+				writePreviewLeaseEnvelope(t, w, lease)
+			}))
+			defer server.Close()
+			client := New(server.URL, config.Credential{AccessToken: "access-token"}, server.Client())
+			_, err := client.StopPreviewLease(context.Background(), lease, "same-key")
+			want := 1
+			if code == "generation_conflict" {
+				want = 3
+			}
+			if err == nil || deletes != want || reads != want-1 {
+				t.Fatalf("deletes=%d reads=%d error=%v", deletes, reads, err)
+			}
+		})
+	}
+}
+
+func TestPreviewResponseValidationDoesNotExposePayload(t *testing.T) {
+	now := time.Now().UTC()
+	lease := PreviewLease{Schema: PreviewTunnelSchemaV1, Kind: "preview_lease", ID: "prv_1", AccountID: "acct_1", ActorID: "actor_1", OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground", Target: PreviewLeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, AccessMode: "public", Endpoint: "https://preview.example.test", LeaseDeadline: now.Add(time.Hour), State: "ready", AllocationState: "ready", EdgeState: "ready", OriginState: "ready", CreatedAt: now, LastRenewedAt: now}
+	for _, field := range []string{"etag", "access_mode"} {
+		t.Run(field, func(t *testing.T) {
+			response := lease
+			etag := `"ptv1:preview_lease:cHJ2XzE:1"`
+			if field == "etag" {
+				etag = "PRIVATE_TOKEN"
+			} else {
+				response.AccessMode = "PRIVATE_TOKEN"
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("ETag", etag)
+				writePreviewLeaseEnvelope(t, w, response)
+			}))
+			defer server.Close()
+			_, err := New(server.URL, config.Credential{}, server.Client()).GetPreviewLease(context.Background(), "prv_1")
+			if !errors.Is(err, ErrPreviewLeaseInvalid) || strings.Contains(err.Error(), "PRIVATE_TOKEN") {
+				t.Fatalf("unsafe or untyped validation error: %v", err)
+			}
+		})
 	}
 }

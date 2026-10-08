@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -58,11 +59,17 @@ func infrastructureTLS(d config.Deployment, base *tls.Config) (*tls.Config, erro
 	}
 	certificate, err := tls.LoadX509KeyPair(d.InfrastructureTLSCertFile, d.InfrastructureTLSKeyFile)
 	if err != nil {
-		return nil, errors.New("cannot load infrastructure TLS certificate and key")
+		return nil, fmt.Errorf("load infrastructure TLS certificate and key: %w", err)
 	}
 	leaf, err := x509.ParseCertificate(certificate.Certificate[0])
-	if err != nil || leaf.VerifyHostname(d.ConnectorAdvertiseHost) != nil || time.Now().Before(leaf.NotBefore) || !time.Now().Before(leaf.NotAfter) {
-		return nil, errors.New("infrastructure TLS certificate must currently cover the installation hostname")
+	if err != nil {
+		return nil, fmt.Errorf("parse infrastructure TLS certificate: %w", err)
+	}
+	if err := leaf.VerifyHostname(d.ConnectorAdvertiseHost); err != nil {
+		return nil, fmt.Errorf("verify infrastructure TLS hostname: %w", err)
+	}
+	if time.Now().Before(leaf.NotBefore) || !time.Now().Before(leaf.NotAfter) {
+		return nil, fmt.Errorf("verify infrastructure TLS validity: %w", x509.CertificateInvalidError{Cert: leaf, Reason: x509.Expired})
 	}
 	result := base.Clone()
 	fallback := result.GetCertificate
@@ -83,7 +90,7 @@ func carrierServerTrust(d config.Deployment, nodeID, epoch, host string, now tim
 	}
 	certificate, err := tls.LoadX509KeyPair(d.InfrastructureTLSCertFile, d.InfrastructureTLSKeyFile)
 	if err != nil {
-		return control.ProcessCarrierServerTrust{}, errors.New("cannot load claimed carrier TLS certificate and key")
+		return control.ProcessCarrierServerTrust{}, fmt.Errorf("load claimed carrier TLS certificate and key: %w", err)
 	}
 	pin, err := control.CarrierServerSPKISHA256(certificate)
 	if err != nil {
@@ -103,7 +110,7 @@ func carrierServerTrust(d config.Deployment, nodeID, epoch, host string, now tim
 	roots := x509.NewCertPool()
 	roots.AddCert(leaf)
 	if _, err = leaf.Verify(x509.VerifyOptions{Roots: roots, CurrentTime: now, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}); err != nil {
-		return control.ProcessCarrierServerTrust{}, errors.New("claimed carrier TLS certificate requires server-auth usage")
+		return control.ProcessCarrierServerTrust{}, fmt.Errorf("verify claimed carrier TLS server-auth usage: %w", err)
 	}
 	return control.ProcessCarrierServerTrust{Certificate: certificate, SPKISHA256: pin, CertificateChainPEM: chain}, nil
 }

@@ -6,15 +6,34 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestWindowsOpenSSHOptionConflictOmitsConfiguredCommandValues(t *testing.T) {
+	err := &OpenSSHOptionConflict{Line: 12, Option: "KnownHostsCommand", Existing: `C:\private-user\pb.exe --token secret`, Required: `C:\Program Files\Paperboat\pb.exe --known-hosts`}
+	if !errors.Is(err, ErrOpenSSHConfigConflict) {
+		t.Fatalf("conflict sentinel lost: %v", err)
+	}
+	for _, private := range []string{"private-user", "secret", "known-hosts"} {
+		if strings.Contains(err.Error(), private) {
+			t.Fatalf("conflict error exposed configured value %q: %q", private, err)
+		}
+	}
+	var classified interface {
+		DiagnosticStage() string
+		DiagnosticCode() string
+	}
+	if !errors.As(err, &classified) || classified.DiagnosticStage() != "command" || classified.DiagnosticCode() != "managed_ssh_failed" {
+		t.Fatalf("conflict classification missing: %#v", err)
+	}
+}
 
 func TestValidateInstalledOpenSSHConfigAcceptsTargetBlocks(t *testing.T) {
 	home := managedSSHWindowsTestHome(t)
 	agentSocket := `\\.\pipe\paperboat-ssh-agent-test`
 	config := OpenSSHConfig{
 		Home:              home,
-		AliasSuffix:       "pprbt",
 		ProxyCommand:      `"C:\Program Files\Paperboat\bin\pb.exe" __ssh-proxy --host %h --port %p --user %r`,
 		KnownHostsCommand: `"C:\Program Files\Paperboat\bin\pb.exe" __ssh-known-hosts --host %h --port %p`,
 		AgentSocket:       agentSocket,
@@ -27,10 +46,10 @@ func TestValidateInstalledOpenSSHConfigAcceptsTargetBlocks(t *testing.T) {
 	if _, err := InstallOpenSSHConfig(config); err != nil {
 		t.Fatal(err)
 	}
-	if err := ValidateInstalledOpenSSHConfig(home, 0, config.AliasSuffix, agentSocket); err != nil {
+	if err := ValidateInstalledOpenSSHConfig(home, 0, agentSocket); err != nil {
 		t.Fatalf("target-bearing installed config was rejected: %v", err)
 	}
-	if err := ValidateInstalledOpenSSHConfig(home, 0, config.AliasSuffix, `\\.\pipe\paperboat-ssh-agent-other`); !errors.Is(err, ErrOpenSSHConfigConflict) {
+	if err := ValidateInstalledOpenSSHConfig(home, 0, `\\.\pipe\paperboat-ssh-agent-other`); !errors.Is(err, ErrOpenSSHConfigConflict) {
 		t.Fatalf("mismatched agent socket error=%v", err)
 	}
 }

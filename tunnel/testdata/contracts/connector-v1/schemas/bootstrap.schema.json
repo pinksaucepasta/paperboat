@@ -34,7 +34,7 @@
     },
     "endpoint_uuid": {
       "type": "string",
-      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+      "pattern": "^endpoint_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     },
     "generation": {
       "type": "integer",
@@ -739,6 +739,35 @@
         "expires_at": {
           "type": "string",
           "format": "date-time"
+        },
+        "native_authorization": {
+          "$ref": "#/definitions/native_authorization"
+        }
+      },
+      "additionalProperties": false
+    },
+    "native_authorization": {
+      "type": "object",
+      "required": [
+        "schema",
+        "kind",
+        "grant",
+        "request"
+      ],
+      "properties": {
+        "schema": {
+          "const": "paperboat.preview-tunnel/v1"
+        },
+        "kind": {
+          "const": "private_access_stream"
+        },
+        "grant": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "request": {
+          "$ref": "../../preview-tunnel-v1/schemas/private_access.schema.json#/definitions/authorize_request"
         }
       },
       "additionalProperties": false

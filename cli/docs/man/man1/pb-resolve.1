@@ -2,7 +2,7 @@
 .TH "PB-RESOLVE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-resolve - Resolve a peer device IP, port forwardings and tags over gRPC IPC
+pb-resolve - Resolve a peer machine IP, port forwardings and tags over gRPC IPC
 
 
 .SH SYNOPSIS
@@ -10,10 +10,10 @@ pb-resolve - Resolve a peer device IP, port forwardings and tags over gRPC IPC
 
 
 .SH DESCRIPTION
-Resolve a peer device IP, port forwardings and tags over gRPC IPC
+Resolve a peer machine IP, port forwardings and tags over gRPC IPC
 
 .PP
-Ask the local daemon to resolve a peer device query into authorized address, forwarding, and tag information. This reports locally known peer state; it does not approve a new device.
+Ask the local daemon to resolve a peer machine query into authorized address, forwarding, and tag information. This reports locally known peer state; it does not approve a new machine.
 
 .PP
 JSON output is supported with --json.
@@ -39,6 +39,10 @@ JSON output is supported with --json.
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

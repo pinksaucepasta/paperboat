@@ -11,11 +11,24 @@ import (
 
 // activatePreparedNative uses the explicitly approved interruption boundary.
 // Native service replacement needs no parallel worker, canary route or drain grant.
-func (m *Manager) activatePreparedNative(ctx context.Context, j updateflow.Journal, signed, local Release) (Result, error) {
-	result := Result{Version: m.active.Version}
+func (m *Manager) activatePreparedNative(ctx context.Context, j updateflow.Journal, signed, local Release) (result Result, activationErr error) {
+	result = Result{Version: m.active.Version}
 	if err := m.authorizeRecovery(ctx, m.active, m.config.Binary); err != nil {
 		return result, err
 	}
+	if m.config.AuthorizeOwnerMaintenance != nil {
+		if err := m.config.AuthorizeOwnerMaintenance(ctx, signed, m.config.ManualActivation); err != nil {
+			return result, err
+		}
+	}
+	ownerStopped := false
+	defer func() {
+		if !ownerStopped && m.config.AbortOwnerMaintenance != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			activationErr = errors.Join(activationErr, m.config.AbortOwnerMaintenance(cleanupCtx))
+		}
+	}()
 	j.NativeActivation = true
 	var err error
 	j, err = m.transition(j, updateflow.StageCutover)
@@ -27,12 +40,13 @@ func (m *Manager) activatePreparedNative(ctx context.Context, j updateflow.Journ
 	}
 	m.record(ctx, EventActivating, j, signed, "")
 	if err = m.promoteStorage(); err != nil {
-		return result, m.restoreCanonicalRuntime(ctx, j, signed, err)
+		return result, m.restoreUnstoppedOwner(ctx, j, signed, err)
 	}
 	j.StagedPath = m.config.Binary
 	if err = m.write(j); err != nil {
-		return result, m.restoreCanonicalRuntime(ctx, j, signed, err)
+		return result, m.restoreUnstoppedOwner(ctx, j, signed, err)
 	}
+	ownerStopped = true
 	active, err := m.activateRuntime(ctx, signed)
 	if err != nil || !m.validActiveRuntime(active, signed, "", 0) {
 		if err == nil {
@@ -68,6 +82,18 @@ func (m *Manager) activatePreparedNative(ctx context.Context, j updateflow.Journ
 	}
 	m.record(ctx, EventCommitted, j, signed, "")
 	return Result{Version: local.Version, Updated: true}, nil
+}
+
+func (m *Manager) restoreUnstoppedOwner(ctx context.Context, j updateflow.Journal, release Release, cause error) error {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), m.config.RollbackTimeout)
+	defer cancel()
+	if err := m.authorizeStorageRestore(cleanupCtx, m.active); err != nil {
+		return errors.Join(cause, err, ErrBlocked)
+	}
+	if err := m.restoreStorage(); err != nil {
+		cause = errors.Join(cause, errStorageRestoreFailed, err)
+	}
+	return m.restoreAfterDrain(cleanupCtx, j, release, nil, cause)
 }
 
 func (m *Manager) monitorNative(ctx context.Context, j updateflow.Journal, release Release) error {

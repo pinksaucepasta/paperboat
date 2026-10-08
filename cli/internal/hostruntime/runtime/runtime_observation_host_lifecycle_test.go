@@ -35,9 +35,8 @@ func TestRuntimeObservationRemainsStableAcrossWorkerReplacement(t *testing.T) {
 	observation := &runtimeObservationService{sender: sender, interval: 15 * time.Millisecond, timeout: 250 * time.Millisecond}
 	listener := &hostListener{closed: make(chan struct{})}
 	root := t.TempDir()
-	authorization := &clientLifecycleService{}
+	authorization := &machineLifecycleService{}
 	runtimeConfig := runtimeconfig.Config{
-		Profile:   runtimeconfig.BYOD,
 		StateRoot: root,
 		Version:   "test",
 		Limits:    runtimeconfig.DefaultLimits,
@@ -133,10 +132,9 @@ func TestStartHostdKeepsProductionObservationGroupAlive(t *testing.T) {
 	}
 	observation := &runtimeObservationService{sender: sender, interval: 15 * time.Millisecond, timeout: 250 * time.Millisecond}
 	root := t.TempDir()
-	authorization := &clientLifecycleService{}
+	authorization := &machineLifecycleService{}
 	host, err := NewHost(context.Background(), HostConfig{
 		Runtime: runtimeconfig.Config{
-			Profile:   runtimeconfig.BYOD,
 			StateRoot: root,
 			Version:   "test",
 			Limits:    runtimeconfig.DefaultLimits,

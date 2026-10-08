@@ -23,7 +23,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	clienttransfer "github.com/pinksaucepasta/paperboat/internal/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
-	hostconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
 	hosttransfer "github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
@@ -78,8 +77,8 @@ type serverIssuedSharedFixture struct {
 	SharedConfiguration                     string                         `json:"shared_cli_configuration"`
 	SharedRevoked                           string                         `json:"shared_cli_revoked_configuration"`
 	MachineShared                           string                         `json:"machine_shared_configuration"`
-	SharedDeviceDisabled                    string                         `json:"shared_device_disabled_configuration"`
-	MachineDeviceDisabled                   string                         `json:"machine_device_disabled_configuration"`
+	SharedMachineDisabled                   string                         `json:"shared_machine_disabled_configuration"`
+	MachineMachineDisabled                  string                         `json:"machine_machine_disabled_configuration"`
 	MachineRevoked                          string                         `json:"machine_shared_revoked_configuration"`
 	EnvironmentID                           string                         `json:"environment_id"`
 	HelperID                                string                         `json:"helper_id"`
@@ -233,7 +232,7 @@ func TestServerIssuedCrossAccountNativeRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	journal, _ := operation.NewJournal(32)
-	protocolServer, err := hostserver.New(hostserver.Config{Negotiator: protocol.Negotiator{Profile: hostconfig.BYOD, Available: map[string]bool{"terminal.v1": true, "health.v1": true, "exec.v1": true}}, Journal: journal, Handler: dispatcher, MaxConcurrent: 4, HeartbeatInterval: time.Hour, MutationDeadline: time.Minute})
+	protocolServer, err := hostserver.New(hostserver.Config{Negotiator: protocol.Negotiator{Available: map[string]bool{"terminal.v1": true, "health.v1": true, "exec.v1": true}}, Journal: journal, Handler: dispatcher, MaxConcurrent: 4, HeartbeatInterval: time.Hour, MutationDeadline: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -552,10 +551,10 @@ func TestServerIssuedCrossAccountNativeRuntime(t *testing.T) {
 			t.Fatalf("shared rsync download=%q error=%v", content, readErr)
 		}
 	}
-	if err := machineAuthority.Apply(t.Context(), fixture.MachineDeviceDisabled); err != nil {
+	if err := machineAuthority.Apply(t.Context(), fixture.MachineMachineDisabled); err != nil {
 		t.Fatal(err)
 	}
-	if err := sharedAuthority.Apply(t.Context(), fixture.SharedDeviceDisabled); err != nil {
+	if err := sharedAuthority.Apply(t.Context(), fixture.SharedMachineDisabled); err != nil {
 		t.Fatal(err)
 	}
 	sharedSession, err = shared.Dial(t.Context(), descriptor, fixture.Machine.EndpointID, peerquic.ClassInteractive)
@@ -610,6 +609,13 @@ func TestServerIssuedCrossAccountNativeRuntime(t *testing.T) {
 	_ = activeOwner.Close()
 	if _, err := shared.Dial(t.Context(), descriptor, fixture.Machine.EndpointID, peerquic.ClassInteractive); !errors.Is(err, tailnet.ErrAdmission) {
 		t.Fatalf("revoked reconnect error=%v", err)
+	} else {
+		var staged interface{ DiagnosticStage() string }
+		var coded interface{ DiagnosticCode() string }
+		if !errors.As(err, &staged) || staged.DiagnosticStage() != "peer_authority" ||
+			!errors.As(err, &coded) || coded.DiagnosticCode() != "peer_authority_failed" {
+			t.Fatalf("revoked reconnect classification missing: %T %v", err, err)
+		}
 	}
 	if err := machineAuthority.Apply(t.Context(), fixture.FinalMachineConfiguration); err != nil {
 		t.Fatalf("apply machine config after issuer departure: %v", err)

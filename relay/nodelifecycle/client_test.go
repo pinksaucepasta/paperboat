@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"math/big"
 	"net"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -176,7 +178,7 @@ func TestNativeRelayLifecycleRevokesConnectedCarrier(t *testing.T) {
 		t.Fatal("revoked grant readmitted")
 	}
 	c.lease.ExpiresAt = time.Now().Unix()
-	if err = c.Run(ctx, server); err != ErrControl || !server.Snapshot().Draining {
+	if err = c.Run(ctx, server); !errors.Is(err, ErrControl) || !server.Snapshot().Draining {
 		t.Fatal("expired lease did not stop relay")
 	}
 }
@@ -184,7 +186,7 @@ func TestNativeRelayLifecycleRevokesConnectedCarrier(t *testing.T) {
 func TestControlTraceFailureThenRecovery(t *testing.T) {
 	var calls int
 	var outcomes []string
-	const reference = "pb-0123456789abcdef0123456789abcdef"
+	const reference = "support_01234567-89ab-4def-8123-456789abcdef"
 	api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		if r.Header.Get("sentry-trace") == "" || r.Header.Get("Support-Reference") != reference || r.Header.Get("baggage") != "" || r.Header.Get("traceparent") != "" {
@@ -206,7 +208,7 @@ func TestControlTraceFailureThenRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = client.post(context.Background(), "/v1/relay/nodes/observe", map[string]any{}); err != ErrControl {
+	if _, err = client.post(context.Background(), "/v1/relay/nodes/observe", map[string]any{}); !errors.Is(err, ErrControl) {
 		t.Fatalf("failure=%v", err)
 	}
 	if _, err = client.post(context.Background(), "/v1/relay/nodes/observe", map[string]any{}); err != nil {
@@ -218,7 +220,7 @@ func TestControlTraceFailureThenRecovery(t *testing.T) {
 }
 
 func TestControlCorrelationPropagatesWithoutTrace(t *testing.T) {
-	const reference = "pb-fedcba9876543210fedcba9876543210"
+	const reference = "support_fedcba98-7654-4a32-8fed-cba987654321"
 	api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Support-Reference") != reference || r.Header.Get("sentry-trace") != "" {
 			t.Fatalf("correlation headers=%v", r.Header)
@@ -292,7 +294,68 @@ func TestNativeRelayControlRejectionFailsImmediately(t *testing.T) {
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if err = c.Run(ctx, server); err != ErrFenced || !server.Snapshot().Draining {
+	if err = c.Run(ctx, server); !errors.Is(err, ErrFenced) || !server.Snapshot().Draining {
 		t.Fatal("fenced node retained control lease")
+	}
+}
+
+func TestControlFailurePreservesCauseStatusAndRecovery(t *testing.T) {
+	const reference = "support_01234567-89ab-4def-8123-456789abcdef"
+	calls := 0
+	var observed []error
+	api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Header.Get("Support-Reference") != reference {
+			t.Error("request reference lost")
+		}
+		if calls == 1 {
+			http.Error(w, "PRIVATE_RESPONSE", 503)
+			return
+		}
+		if calls == 2 {
+			http.Error(w, "PRIVATE_RESPONSE", 409)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(Lease{NodeID: "relay", Generation: 2, ProcessEpoch: "epoch", ExpiresAt: time.Now().Add(10 * time.Second).Unix(), CapacityLimit: 8})
+	}))
+	defer api.Close()
+	c, err := New(Config{URL: api.URL, HTTP: api.Client(), Credential: strings.Repeat("test", 16), NodeID: "relay", ExpectedGeneration: 1, StatePath: filepath.Join(t.TempDir(), "state"), ControlTrace: func(context.Context, string) (string, string, func(string, string)) {
+		return "", reference, func(outcome, code string) {
+			if outcome != "success" && code != "control_request_failed" {
+				t.Error("typed attempt emitted generic duplicate")
+			}
+		}
+	}, ControlFailure: func(_ context.Context, ref string, err error) {
+		if ref != reference {
+			t.Error("fault reference differs")
+		}
+		observed = append(observed, err)
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []int{503, 409} {
+		_, err = c.post(context.Background(), "/v1/relay/nodes/observe", struct{}{})
+		var failure *RequestFailure
+		if !errors.As(err, &failure) || failure.Status != status || strings.Contains(err.Error(), "PRIVATE") {
+			t.Fatalf("status cause=%v", err)
+		}
+		if status == 409 && !errors.Is(err, ErrFenced) || status == 503 && !errors.Is(err, ErrControl) {
+			t.Fatal("authority decision lost")
+		}
+	}
+	if _, err = c.post(context.Background(), "/v1/relay/nodes/observe", struct{}{}); err != nil || len(observed) != 2 {
+		t.Fatalf("recovery=%v faults=%d", err, len(observed))
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err = c.post(ctx, "/v1/relay/nodes/observe", struct{}{}); !errors.Is(err, context.Canceled) || !errors.Is(err, ErrControl) {
+		t.Fatalf("cancellation cause lost: %v", err)
+	}
+	original := &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+	wrapped := failure(original, 0, false)
+	var operation *net.OpError
+	if !errors.Is(wrapped, syscall.ECONNREFUSED) || !errors.As(wrapped, &operation) || operation != original {
+		t.Fatal("original transport cause lost")
 	}
 }

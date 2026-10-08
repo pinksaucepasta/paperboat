@@ -13,7 +13,7 @@ pb-ssh - Connect to a machine with OpenSSH
 Connect to a machine with OpenSSH
 
 .PP
-Connect to an enrolled device through OpenSSH using Paperboat resolution. Optional arguments after -- go to OpenSSH; the command preserves SSH host-key verification and reports identity changes for deliberate approval.
+Connect to an enrolled machine through OpenSSH using Paperboat resolution. Optional arguments after -- go to OpenSSH; the command preserves SSH host-key verification and reports identity changes for deliberate approval.
 
 .PP
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
@@ -43,6 +43,10 @@ This command does not support --json output; it rejects that mode before executi
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

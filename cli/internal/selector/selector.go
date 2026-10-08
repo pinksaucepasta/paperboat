@@ -117,6 +117,7 @@ type Item struct {
 
 type Options struct {
 	Context        context.Context
+	Refresh        func(context.Context) ([]Item, error)
 	Header         string
 	Title          string
 	Subtitle       string
@@ -351,6 +352,13 @@ func ChooseWithAction(options Options) (selection Result, err error) {
 	model := chooserModel{options: options, choices: NewModel(options.Items, 8), input: input, width: 80, height: 24}
 	model.choices.requireFilter = options.RequireFilter
 	model.choices.SetFilter(options.Initial)
+	refreshParent := options.Context
+	if refreshParent == nil {
+		refreshParent = context.Background()
+	}
+	refreshContext, cancelRefresh := context.WithCancel(refreshParent)
+	defer cancelRefresh()
+	model.options.Context = refreshContext
 	programOptions := ProgramOptions(options.Stdin, options.Output)
 	if options.Context != nil {
 		programOptions = append(programOptions, tea.WithContext(options.Context))
@@ -477,10 +485,67 @@ type chooserModel struct {
 	interrupted bool
 }
 
-func (m chooserModel) Init() tea.Cmd { return textinput.Blink }
+type choicesRefreshTick struct{}
+type choicesRefreshed struct {
+	items []Item
+	err   error
+}
+
+func (m chooserModel) refreshTick() tea.Cmd {
+	if m.options.Refresh == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		timer := time.NewTimer(5 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			return choicesRefreshTick{}
+		case <-m.options.Context.Done():
+			return nil
+		}
+	}
+}
+
+func (m chooserModel) Init() tea.Cmd { return tea.Batch(textinput.Blink, m.refreshTick()) }
 
 func (m chooserModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
+	case choicesRefreshTick:
+		if m.options.Refresh == nil {
+			return m, nil
+		}
+		return m, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(m.options.Context, 4*time.Second)
+			defer cancel()
+			items, err := m.options.Refresh(ctx)
+			return choicesRefreshed{items: items, err: err}
+		}
+	case choicesRefreshed:
+		if message.err == nil {
+			selected, _ := m.choices.Selected()
+			items := slices.Clone(message.items)
+			for index := range items {
+				items[index].Title = SanitizeText(items[index].Title)
+				items[index].Description = SanitizeText(items[index].Description)
+				items[index].Search = SanitizeText(items[index].Search)
+			}
+			rows := m.choices.rows
+			m.choices = NewModel(items, rows)
+			m.choices.requireFilter = m.options.RequireFilter
+			m.choices.SetFilter(m.input.Value())
+			for position, index := range m.choices.visible {
+				if m.choices.items[index].ID == selected.ID {
+					m.choices.selected = position
+					break
+				}
+			}
+			m.choices.ensureVisible()
+			m.options.Subtitle = strings.TrimSuffix(m.options.Subtitle, " · refresh failed; showing last observation")
+		} else if !strings.HasSuffix(m.options.Subtitle, " · refresh failed; showing last observation") {
+			m.options.Subtitle += " · refresh failed; showing last observation"
+		}
+		return m, m.refreshTick()
 	case tea.WindowSizeMsg:
 		m.width, m.height = viewWidth(message.Width), viewHeight(message.Height)
 		m.input.Width = filterInputWidth(m.width, m.options.RequireFilter)

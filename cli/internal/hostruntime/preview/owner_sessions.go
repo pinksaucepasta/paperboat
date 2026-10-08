@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"strings"
 	"sync"
 )
@@ -17,11 +18,9 @@ var (
 
 const defaultRuntimeOwnerSessionLimit = 1024
 
-const localOwnerSessionPrefix = "owner_local_"
-
 // RuntimeOwnerSessionRegistry binds dashboard-dispatched owner_session_id
 // values to the authenticated host runtime lifetime. A browser request is
-// never used as the lifetime source: the selected device keeps owning the
+// never used as the lifetime source: the selected machine keeps owning the
 // lease until its control/runtime session ends or this registry shuts down.
 type RuntimeOwnerSessionRegistry struct {
 	accountID   string
@@ -92,19 +91,19 @@ func (r *RuntimeOwnerSessionRegistry) watchRuntime() {
 	_ = r.Close()
 }
 
-// OwnerSessionDone implements DispatchOwnerSessions. Unknown IDs are
+// OwnerSessionDone implements DispatchOwnerSessions. Foreground IDs are
 // registered on first dispatch, which is intentional because the dashboard
 // creates the opaque owner-session nonce, the server validates/persists/signs
 // it, and the authenticated host binds it here. No browser context is
 // accepted or retained here.
-func (r *RuntimeOwnerSessionRegistry) OwnerSessionDone(accountID, machineID, ownerSessionID string) (<-chan struct{}, error) {
+func (r *RuntimeOwnerSessionRegistry) OwnerSessionDone(accountID, machineID, ownerSessionID, ownerSessionKind string) (<-chan struct{}, error) {
 	if r == nil {
 		return nil, ErrOwnerSessionRegistryInvalid
 	}
 	accountID = strings.TrimSpace(accountID)
 	machineID = strings.TrimSpace(machineID)
 	ownerSessionID = strings.TrimSpace(ownerSessionID)
-	if !validLeaseID(accountID) || !validLeaseID(machineID) || !validLeaseID(ownerSessionID) {
+	if !validLeaseID(accountID) || !validLeaseID(machineID) || !validLeaseID(ownerSessionID) || ownerSessionKind != OwnerSessionLocalLease && ownerSessionKind != OwnerSessionForeground {
 		return nil, ErrOwnerSessionBinding
 	}
 	r.mu.Lock()
@@ -117,14 +116,14 @@ func (r *RuntimeOwnerSessionRegistry) OwnerSessionDone(accountID, machineID, own
 	}
 	key := runtimeOwnerSessionKey{accountID: accountID, ownerSessionID: ownerSessionID}
 	if existing := r.sessions[key]; existing != nil {
-		if existing.closed {
+		if ownerSessionKind != OwnerSessionForeground || existing.closed {
 			return nil, fmt.Errorf("%w: owner session is closed", ErrOwnerSessionBinding)
 		}
 		existing.refs++
 		return existing.done, nil
 	}
 	if existing := r.unbound[ownerSessionID]; existing != nil {
-		if existing.closed || existing.boundAccount != "" && existing.boundAccount != accountID {
+		if ownerSessionKind != OwnerSessionLocalLease || existing.closed || existing.boundAccount != "" && existing.boundAccount != accountID {
 			return nil, fmt.Errorf("%w: owner session is closed or bound to another account", ErrOwnerSessionBinding)
 		}
 		existing.boundAccount = accountID
@@ -132,8 +131,8 @@ func (r *RuntimeOwnerSessionRegistry) OwnerSessionDone(accountID, machineID, own
 		existing.refs++
 		return existing.done, nil
 	}
-	if strings.HasPrefix(ownerSessionID, localOwnerSessionPrefix) {
-		// Hostd-minted IDs are capabilities issued by the local lease manager.
+	if ownerSessionKind == OwnerSessionLocalLease {
+		// Local owners are capabilities issued by the local lease manager.
 		// An unknown one must never be treated like a dashboard nonce after its
 		// retirement record is gone, otherwise a delayed dispatch could revive a
 		// process that already released its local lease.
@@ -150,14 +149,14 @@ func (r *RuntimeOwnerSessionRegistry) OwnerSessionDone(accountID, machineID, own
 // OwnerSessionDoneForTarget is the generation-safe form used by preview
 // dispatch. Local hostd owner leases bind both the minted session ID and the
 // exact origin target before the server dispatch is accepted.
-func (r *RuntimeOwnerSessionRegistry) OwnerSessionDoneForTarget(accountID, machineID, ownerSessionID string, target LeaseTarget) (<-chan struct{}, error) {
+func (r *RuntimeOwnerSessionRegistry) OwnerSessionDoneForTarget(accountID, machineID, ownerSessionID, ownerSessionKind string, target LeaseTarget) (<-chan struct{}, error) {
 	if err := validateLeaseTarget(target); err != nil {
 		return nil, fmt.Errorf("%w: target: %v", ErrOwnerSessionBinding, err)
 	}
 	accountID = strings.TrimSpace(accountID)
 	machineID = strings.TrimSpace(machineID)
 	ownerSessionID = strings.TrimSpace(ownerSessionID)
-	if !validLeaseID(accountID) || !validLeaseID(machineID) || !validLeaseID(ownerSessionID) {
+	if !validLeaseID(accountID) || !validLeaseID(machineID) || !validLeaseID(ownerSessionID) || ownerSessionKind != OwnerSessionLocalLease && ownerSessionKind != OwnerSessionForeground {
 		return nil, ErrOwnerSessionBinding
 	}
 	r.mu.Lock()
@@ -170,7 +169,7 @@ func (r *RuntimeOwnerSessionRegistry) OwnerSessionDoneForTarget(accountID, machi
 	}
 	key := runtimeOwnerSessionKey{accountID: accountID, ownerSessionID: ownerSessionID}
 	if existing := r.sessions[key]; existing != nil {
-		if existing.closed || existing.hasTarget && existing.target != target {
+		if ownerSessionKind != OwnerSessionForeground || existing.closed || existing.hasTarget && existing.target != target {
 			return nil, fmt.Errorf("%w: owner session target differs", ErrOwnerSessionBinding)
 		}
 		existing.refs++
@@ -180,7 +179,7 @@ func (r *RuntimeOwnerSessionRegistry) OwnerSessionDoneForTarget(accountID, machi
 		if r.accountID != "" && accountID != r.accountID {
 			return nil, fmt.Errorf("%w: foreign dispatch cannot claim a local owner session", ErrOwnerSessionBinding)
 		}
-		if existing.closed || existing.boundAccount != "" && existing.boundAccount != accountID || existing.hasTarget && existing.target != target {
+		if ownerSessionKind != OwnerSessionLocalLease || existing.closed || existing.boundAccount != "" && existing.boundAccount != accountID || existing.hasTarget && existing.target != target {
 			return nil, fmt.Errorf("%w: owner session target or account differs", ErrOwnerSessionBinding)
 		}
 		existing.boundAccount = accountID
@@ -188,7 +187,7 @@ func (r *RuntimeOwnerSessionRegistry) OwnerSessionDoneForTarget(accountID, machi
 		existing.refs++
 		return existing.done, nil
 	}
-	if strings.HasPrefix(ownerSessionID, localOwnerSessionPrefix) {
+	if ownerSessionKind == OwnerSessionLocalLease {
 		return nil, fmt.Errorf("%w: local owner session was not acquired", ErrOwnerSessionBinding)
 	}
 	if len(r.sessions)+len(r.unbound) >= r.max {
@@ -310,18 +309,18 @@ func (r *RuntimeOwnerSessionRegistry) MachineOwnerSessionDispatchState(machineID
 }
 
 func newOwnerSessionID() (string, error) {
-	value, err := newSessionIdempotencyKey(nil)
+	id, err := uuid.NewRandom()
 	if err != nil {
 		return "", err
 	}
-	return localOwnerSessionPrefix + strings.TrimPrefix(value, "preview_"), nil
+	return "session_" + id.String(), nil
 }
 
 // Register is an explicit spelling for composition code that wants to bind a
 // dispatch owner before sending a request. It has exactly the same account,
 // machine, limit, and shutdown guarantees as OwnerSessionDone.
-func (r *RuntimeOwnerSessionRegistry) Register(accountID, machineID, ownerSessionID string) (<-chan struct{}, error) {
-	return r.OwnerSessionDone(accountID, machineID, ownerSessionID)
+func (r *RuntimeOwnerSessionRegistry) Register(accountID, machineID, ownerSessionID, ownerSessionKind string) (<-chan struct{}, error) {
+	return r.OwnerSessionDone(accountID, machineID, ownerSessionID, ownerSessionKind)
 }
 
 // ReleaseOwnerSession drops one foreground preview's reference to an owner

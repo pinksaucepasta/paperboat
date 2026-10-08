@@ -13,20 +13,7 @@ const BrowserSuffix = "local.pprbt.dev"
 const BrowserGatewayIP = "127.100.0.1"
 const BrowserGatewayHostname = "gateway." + BrowserSuffix
 
-func validateBrowserSuffix(suffix string) (string, error) {
-	if suffix == BrowserSuffix {
-		return suffix, nil
-	}
-	return ValidateSuffix(suffix)
-}
-
-// ValidateTrustSuffix permits native private suffixes and only the selected
-// public browser namespace. It never admits an entire public TLD as CA scope.
-func ValidateTrustSuffix(suffix string) (string, error) {
-	return validateBrowserSuffix(suffix)
-}
-
-// IsPublicBrowserHostname admits only a canonical port and device label in the
+// IsPublicBrowserHostname admits only a canonical port and machine label in the
 // selected browser namespace. Reachability never supplies service authorization.
 func IsPublicBrowserHostname(host string) bool {
 	if host != strings.ToLower(host) || !strings.HasSuffix(host, "."+BrowserSuffix) {
@@ -44,9 +31,11 @@ type BrowserRoute struct {
 }
 
 // BrowserHostname identifies an explicit browser service as <port>.<alias>.<suffix>.
-// Services on one device share a registrable browser site.
+// Services on one machine share a registrable browser site.
 func BrowserHostname(aliasOrMachine string, port int, suffix string) (string, error) {
-	if _, err := validateBrowserSuffix(suffix); err != nil {
+	var err error
+	suffix, err = NormalizeBrowserDomain(suffix)
+	if err != nil {
 		return "", err
 	}
 	alias := strings.ToLower(strings.TrimSpace(aliasOrMachine))
@@ -54,7 +43,11 @@ func BrowserHostname(aliasOrMachine string, port int, suffix string) (string, er
 		return "", errors.New("invalid browser service identity")
 	}
 
-	return strconv.Itoa(port) + "." + alias + "." + suffix, nil
+	hostname := strconv.Itoa(port) + "." + alias + "." + suffix
+	if _, _, err := ParseBrowserHostname(hostname, suffix); err != nil {
+		return "", err
+	}
+	return hostname, nil
 }
 
 func validBrowserHost(host, suffix string) bool {
@@ -82,6 +75,45 @@ func validLabel(label string) bool {
 	}
 	for _, r := range label {
 		if r != '-' && (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// BrowserWildcardPattern reserves one machine's application namespace.
+func BrowserWildcardPattern(machine, domain string) (string, error) {
+	base := machine + "." + domain
+	parsed, label, err := ParseBrowserHostname(base, domain)
+	if err != nil || label != "" || parsed == "gateway" {
+		return "", errors.New("invalid browser proxy machine")
+	}
+	return "*." + base, nil
+}
+
+// ResolveBrowserRoute keeps numeric services and exact named aliases authoritative.
+// A machine proxy accepts only a single nonnumeric application label.
+func ResolveBrowserRoute(routes map[string]BrowserRoute, host, domain string) (BrowserRoute, bool) {
+	machine, label, err := ParseBrowserHostname(host, domain)
+	if err != nil || label == "" {
+		return BrowserRoute{}, false
+	}
+	if route, ok := routes[host]; ok {
+		return route, true
+	}
+	if NumericBrowserLabel(label) {
+		return BrowserRoute{}, false
+	}
+	route, ok := routes["*."+machine+"."+domain]
+	return route, ok
+}
+
+func NumericBrowserLabel(label string) bool {
+	if label == "" {
+		return false
+	}
+	for _, c := range label {
+		if c < '0' || c > '9' {
 			return false
 		}
 	}

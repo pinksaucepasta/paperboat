@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/google/uuid"
 	"os"
 	"path/filepath"
 	"strings"
@@ -148,9 +149,9 @@ func TestDiskRingRejectsUnsafeFilesystemAndExpiresOldSegments(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = ring.Close()
-	entries, _ = os.ReadDir(directory)
-	if len(entries) != 0 {
-		t.Fatalf("expired entries=%v", entries)
+	segments, _, err := ring.segments()
+	if err != nil || len(segments) != 0 {
+		t.Fatalf("expired segments=%v err=%v", segments, err)
 	}
 }
 
@@ -167,7 +168,8 @@ func TestBundleIsRedactedBoundedOwnerOnlyAndCorrelated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bundle.Schema != BundleSchemaV1 || !strings.HasPrefix(bundle.Correlation, "pb-") || bundle.Bytes <= 0 || bundle.Bytes > MaximumBundleBytes {
+	parsed, parseErr := uuid.Parse(strings.TrimPrefix(bundle.Correlation, "support_"))
+	if bundle.Schema != BundleSchemaV1 || parseErr != nil || parsed.Version() != 4 || parsed.Variant() != uuid.RFC4122 || "support_"+parsed.String() != bundle.Correlation || bundle.Bytes <= 0 || bundle.Bytes > MaximumBundleBytes {
 		t.Fatalf("bundle=%#v", bundle)
 	}
 	info, err := os.Stat(bundle.Path)

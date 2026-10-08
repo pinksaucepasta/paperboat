@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-const AliasSuffix = "pprbt"
+const AliasSuffix = "local.pprbt.dev"
 
 var (
 	ErrSSHAliasInvalid       = errors.New("managed SSH alias is invalid")
@@ -52,7 +52,6 @@ type Destination struct {
 
 type DestinationInput struct {
 	Alias             string
-	AliasSuffix       string
 	RegisteredPort    uint16
 	RequestedPort     uint16
 	RequestedUser     string
@@ -66,7 +65,7 @@ type DestinationInput struct {
 // ResolveDestination applies the account alias, registered target, and username
 // policy before OpenSSH or a proxy process is started.
 func ResolveDestination(input DestinationInput) (Destination, error) {
-	host, err := AliasHost(input.Alias, input.AliasSuffix)
+	host, err := AliasHost(input.Alias)
 	if err != nil {
 		return Destination{}, err
 	}
@@ -83,23 +82,21 @@ func ResolveDestination(input DestinationInput) (Destination, error) {
 	return Destination{Alias: strings.ToLower(input.Alias), Host: host, Port: input.RegisteredPort, User: user}, nil
 }
 
-func AliasHost(alias, suffix string) (string, error) {
+func AliasHost(alias string) (string, error) {
 	alias = strings.ToLower(strings.TrimSpace(alias))
-	suffix = strings.ToLower(strings.TrimSpace(suffix))
-	if !validAliasLabel(alias) || !validAliasSuffix(suffix) {
+	if !validAliasLabel(alias) {
 		return "", ErrSSHAliasInvalid
 	}
-	return alias + "." + suffix, nil
+	return alias + "." + AliasSuffix, nil
 }
 
-// ParseAliasHost accepts exactly one alias label beneath the configured suffix.
-func ParseAliasHost(host, suffix string) (string, error) {
+// ParseAliasHost accepts exactly one alias label beneath the canonical suffix.
+func ParseAliasHost(host string) (string, error) {
 	host = strings.ToLower(strings.TrimSpace(host))
-	suffix = strings.ToLower(strings.TrimSpace(suffix))
-	if !validAliasSuffix(suffix) || !strings.HasSuffix(host, "."+suffix) {
+	if !strings.HasSuffix(host, "."+AliasSuffix) {
 		return "", ErrSSHAliasInvalid
 	}
-	alias := strings.TrimSuffix(host, "."+suffix)
+	alias := strings.TrimSuffix(host, "."+AliasSuffix)
 	if !validAliasLabel(alias) {
 		return "", ErrSSHAliasInvalid
 	}

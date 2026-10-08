@@ -3,6 +3,7 @@ package privatepreviewproxy
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -72,17 +73,21 @@ type AccessProxy struct {
 	ProxyAddress string
 	PACURL       string
 
-	listener net.Listener
-	server   *http.Server
-	source   AccessSource
-	maximum  int
-	openWait time.Duration
-	cancel   context.CancelFunc
-	done     chan error
+	listener   net.Listener
+	server     *http.Server
+	source     AccessSource
+	maximum    int
+	openWait   time.Duration
+	runContext context.Context
+	cancel     context.CancelFunc
+	done       chan error
 
-	mu     sync.Mutex
-	active map[io.Closer]struct{}
-	once   sync.Once
+	snapshotGate chan struct{}
+	pacMu        sync.RWMutex
+	pacBodies    map[string][]byte
+	mu           sync.Mutex
+	active       map[io.Closer]struct{}
+	once         sync.Once
 }
 
 // StartAccessProxy starts one hostd-owned proxy. The PAC URL and proxy address
@@ -113,8 +118,8 @@ func StartAccessProxy(ctx context.Context, config AccessProxyConfig) (*AccessPro
 	runContext, cancel := context.WithCancel(ctx)
 	proxy := &AccessProxy{
 		listener: listener, source: config.Source, maximum: config.MaximumRoutes,
-		openWait: config.OpenTimeout, cancel: cancel, done: make(chan error, 1),
-		active: make(map[io.Closer]struct{}),
+		openWait: config.OpenTimeout, runContext: runContext, cancel: cancel, done: make(chan error, 1),
+		active: make(map[io.Closer]struct{}), snapshotGate: make(chan struct{}, 1),
 	}
 	address := listener.Addr().String()
 	proxy.ProxyAddress = address
@@ -146,7 +151,7 @@ func (p *AccessProxy) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		writeAccessProxyError(writer, http.StatusServiceUnavailable)
 		return
 	}
-	if request.Method == http.MethodGet && request.URL.Path == "/proxy.pac" {
+	if request.Method == http.MethodGet && (request.URL.Path == "/proxy.pac" || strings.HasPrefix(request.URL.Path, "/proxy-")) {
 		p.servePAC(writer, request)
 		return
 	}
@@ -163,7 +168,18 @@ func (p *AccessProxy) servePAC(writer http.ResponseWriter, request *http.Request
 		writeAccessProxyError(writer, http.StatusBadRequest)
 		return
 	}
-	routes, err := p.source.Snapshot(request.Context())
+	if request.URL.Path != "/proxy.pac" {
+		p.pacMu.RLock()
+		payload, ok := p.pacBodies[request.URL.Path]
+		p.pacMu.RUnlock()
+		if !ok {
+			writeAccessProxyError(writer, http.StatusNotFound)
+			return
+		}
+		writePAC(writer, payload)
+		return
+	}
+	routes, err := p.snapshot(request.Context())
 	if err != nil {
 		writeAccessProxyError(writer, accessHTTPStatus(err))
 		return
@@ -178,11 +194,7 @@ func (p *AccessProxy) servePAC(writer http.ResponseWriter, request *http.Request
 		writeAccessProxyError(writer, http.StatusServiceUnavailable)
 		return
 	}
-	writer.Header().Set("Cache-Control", "no-store, max-age=0")
-	writer.Header().Set("Content-Type", "application/x-ns-proxy-autoconfig")
-	writer.Header().Set("X-Content-Type-Options", "nosniff")
-	writer.WriteHeader(http.StatusOK)
-	_, _ = writer.Write(payload)
+	writePAC(writer, payload)
 }
 
 func (p *AccessProxy) serveConnect(writer http.ResponseWriter, request *http.Request) {
@@ -195,7 +207,7 @@ func (p *AccessProxy) serveConnect(writer http.ResponseWriter, request *http.Req
 		writeAccessProxyError(writer, http.StatusBadRequest)
 		return
 	}
-	routes, err := p.source.Snapshot(request.Context())
+	routes, err := p.snapshot(request.Context())
 	if err != nil {
 		writeAccessProxyError(writer, accessHTTPStatus(err))
 		return
@@ -209,9 +221,28 @@ func (p *AccessProxy) serveConnect(writer http.ResponseWriter, request *http.Req
 		writeAccessProxyError(writer, http.StatusForbidden)
 		return
 	}
-	openContext, cancel := context.WithTimeout(request.Context(), p.openWait)
-	remote, err := p.source.Open(openContext, host)
-	cancel()
+	// Opening is bounded, but the admitted stream belongs to this CONNECT
+	// connection until client disconnect, grant expiry or daemon shutdown.
+	connectionContext, cancel := context.WithCancel(p.runContext)
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			cancel()
+		}
+	}()
+	stopRequest := context.AfterFunc(request.Context(), cancel)
+	openingTimer := time.AfterFunc(p.openWait, cancel)
+	remote, err := p.source.Open(connectionContext, host)
+	if !openingTimer.Stop() {
+		cancel()
+		err = context.DeadlineExceeded
+	}
+	if !stopRequest() {
+		cancel()
+	}
+	if err == nil {
+		err = connectionContext.Err()
+	}
 	if err != nil || remote == nil {
 		if remote != nil {
 			_ = remote.Close()
@@ -237,7 +268,9 @@ func (p *AccessProxy) serveConnect(writer http.ResponseWriter, request *http.Req
 	}
 	p.track(local, true)
 	p.track(remote, true)
+	handedOff = true
 	go func() {
+		defer cancel()
 		_ = copyBoth(local, remote)
 		p.track(local, false)
 		p.track(remote, false)
@@ -256,6 +289,11 @@ func writeConnectEstablished(writer *bufio.ReadWriter) error {
 func (p *AccessProxy) track(closer io.Closer, add bool) {
 	p.mu.Lock()
 	if add {
+		if p.runContext.Err() != nil {
+			p.mu.Unlock()
+			_ = closer.Close()
+			return
+		}
 		p.active[closer] = struct{}{}
 	} else {
 		delete(p.active, closer)
@@ -451,4 +489,64 @@ func writeAccessProxyError(writer http.ResponseWriter, status int) {
 	writer.Header().Set("X-Content-Type-Options", "nosniff")
 	writer.WriteHeader(status)
 	_, _ = io.WriteString(writer, message)
+}
+
+// snapshot serializes route discovery across PAC requests, admission and monitoring.
+func (p *AccessProxy) snapshot(ctx context.Context) ([]AccessRoute, error) {
+	select {
+	case p.snapshotGate <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	defer func() { <-p.snapshotGate }()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return p.source.Snapshot(ctx)
+}
+
+// publishPAC retains the installed and candidate revisions for refresh rollback.
+// Its digest covers only sorted routing tuples, never authority or expiration.
+func (p *AccessProxy) publishPAC(ctx context.Context, installed string) (string, error) {
+	routes, err := p.snapshot(ctx)
+	if err != nil {
+		return "", err
+	}
+	normalized, err := normalizeAccessRoutes(routes, p.maximum)
+	if err != nil {
+		return "", err
+	}
+	payload, err := renderPAC(p.ProxyAddress, normalized)
+	if err != nil {
+		return "", err
+	}
+	tuples, err := json.Marshal(normalized)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(tuples)
+	path := fmt.Sprintf("/proxy-%x.pac", digest)
+	p.pacMu.Lock()
+	defer p.pacMu.Unlock()
+	if p.pacBodies == nil {
+		p.pacBodies = make(map[string][]byte)
+	}
+	if _, exists := p.pacBodies[path]; !exists {
+		p.pacBodies[path] = payload
+	}
+	installedPath := strings.TrimPrefix(installed, "http://"+p.ProxyAddress)
+	for key := range p.pacBodies {
+		if key != path && key != installedPath {
+			delete(p.pacBodies, key)
+		}
+	}
+	return "http://" + p.ProxyAddress + path, nil
+}
+
+func writePAC(writer http.ResponseWriter, payload []byte) {
+	writer.Header().Set("Cache-Control", "no-store, max-age=0")
+	writer.Header().Set("Content-Type", "application/x-ns-proxy-autoconfig")
+	writer.Header().Set("X-Content-Type-Options", "nosniff")
+	writer.WriteHeader(http.StatusOK)
+	_, _ = writer.Write(payload)
 }

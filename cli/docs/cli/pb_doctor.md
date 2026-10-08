@@ -6,7 +6,7 @@ Check Paperboat connectivity and readiness
 
 Check Paperboat connectivity and readiness
 
-Check authentication, local runtime, and connectivity for the current setup or one selected device. --repair performs supported local fixes; without it, the command reports findings and recovery guidance.
+Check authentication, local runtime, and connectivity for the current setup or one selected machine. --repair performs supported local fixes; without it, the command reports findings and recovery guidance.
 
 JSON output is supported with --json.
 
@@ -28,6 +28,7 @@ pb doctor [machine] [flags]
       --config string      path to the CLI config file
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO

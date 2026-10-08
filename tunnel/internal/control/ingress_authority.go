@@ -20,6 +20,17 @@ type IngressAuthority struct {
 	fetched      time.Time
 }
 
+// Invalidate fences snapshots fetched before a newly acknowledged route
+// becomes locally selectable. It serializes with an in-flight refresh.
+func (a *IngressAuthority) Invalidate() {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	a.fetched = time.Time{}
+	a.mu.Unlock()
+}
+
 func (a *IngressAuthority) Snapshot(ctx context.Context) ([]connectorprotocol.IngressDecision, error) {
 	if a == nil || a.Client == nil || ctx == nil {
 		return nil, ErrControlInvalid
@@ -70,6 +81,21 @@ func (a *IngressAuthority) Resolve(ctx context.Context, r route.RouteRule) (conn
 	}
 	for _, d := range decisions {
 		if d.Binding.Hostname == r.Hostname && d.Binding.RouteID == id && d.Binding.TunnelID == r.TunnelID && d.Binding.AccountID == r.AccountID && d.ConnectorID == r.ConnectorID && d.SessionID == r.ConnectorSessionID && d.ProcessGeneration == r.ConnectorProcessGeneration && d.ConfigGeneration == r.ConfigGeneration && d.AssignmentGeneration == r.AssignmentGeneration && d.Binding.RouteGeneration == r.RouteGeneration && d.Binding.Audience == r.AccessMode && d.PolicyGeneration == r.ViewerPolicyGeneration && d.Validate(time.Now().UTC()) == nil {
+			return d, nil
+		}
+	}
+	return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
+}
+
+// ResolvePreview matches the ready local carrier against a current server
+// publication. A hostname alone cannot supply accounting or forwarding authority.
+func (a *IngressAuthority) ResolvePreview(ctx context.Context, publication, hostname string, revision uint64, open connectorprotocol.StreamOpen) (connectorprotocol.IngressDecision, error) {
+	decisions, err := a.Snapshot(ctx)
+	if err != nil {
+		return connectorprotocol.IngressDecision{}, err
+	}
+	for _, d := range decisions {
+		if d.Binding.Lifecycle == connectorprotocol.TunnelEphemeral && d.Binding.Audience == "public" && d.Binding.PublicationID == publication && d.Binding.Hostname == hostname && d.Binding.RouteGeneration == revision && d.Authorize(d, open, a.NodeID, a.ProcessEpoch, time.Now().UTC()) == nil {
 			return d, nil
 		}
 	}

@@ -6,7 +6,7 @@ Create an encrypted ENV team scope
 
 Create an encrypted ENV team scope
 
-Create an encrypted scope for the selected team. Values added later remain separate from personal ENV values and require explicit member grants.
+Create an encrypted scope for the selected team. Team globals sync to authorized Team devices. Members decrypt Team globals through encrypted key grants, while their private global and device values remain isolated in the Team workspace.
 
 Team ENV scopes have their own encrypted keys and explicit account grants. Rotation preserves values while replacing access keys; reset discards values. Review the confirmation and affected members before changing custody.
 
@@ -29,6 +29,7 @@ pb env team create <team> [flags]
       --config string      path to the CLI config file
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO

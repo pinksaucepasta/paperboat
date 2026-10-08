@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -43,6 +42,7 @@ type EngineConfig struct {
 }
 
 type Engine struct {
+	mapping     *PathMapping
 	homeRoot    string
 	descriptor  RuntimeDescriptor
 	syncer      Syncer
@@ -51,6 +51,10 @@ type Engine struct {
 	manifest    ManifestSource
 	statusPath  string
 	clock       func() time.Time
+
+	syncFailures       configSyncFailureObservation
+	statusFileFailures configSyncFailureObservation
+	statusAPIFailures  configSyncFailureObservation
 
 	mu             sync.Mutex
 	syncMu         sync.Mutex
@@ -72,17 +76,24 @@ func NewEngine(config EngineConfig) (*Engine, error) {
 	if !canonicalAbsolutePath(config.HomeRoot) || config.Syncer == nil ||
 		validateRuntimeDescriptor(config.Descriptor, Credential{
 			EnvironmentID: config.Descriptor.EnvironmentID, MachineID: config.Descriptor.MachineID,
-			AssignmentID: config.Descriptor.AssignmentID, WarningRevision: config.Descriptor.WarningRevision,
+			AssignmentID: config.Descriptor.AssignmentID, AssignmentVersion: config.Descriptor.AssignmentVersion, WarningRevision: config.Descriptor.WarningRevision,
 		}) != nil || (config.StatusPath != "" && !canonicalAbsolutePath(config.StatusPath)) {
 		return nil, ErrEngineInvalid
+	}
+	if err := checkSafeAbsolutePath(config.HomeRoot); err != nil {
+		return nil, errors.Join(ErrEngineInvalid, err)
 	}
 	info, err := os.Lstat(config.HomeRoot)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return nil, errors.Join(ErrEngineInvalid, err)
 	}
 	resolved, err := filepath.EvalSymlinks(config.HomeRoot)
-	if err != nil || resolved != config.HomeRoot {
+	if err != nil || !mappedPlatformPathsEqual(resolved, config.HomeRoot) {
 		return nil, errors.Join(ErrEngineInvalid, err)
+	}
+	mapping, err := resolvePathRules(config.HomeRoot, config.Descriptor.PathRules, false)
+	if err != nil {
+		return nil, err
 	}
 	if config.Clock == nil {
 		config.Clock = func() time.Time { return time.Now().UTC() }
@@ -102,7 +113,7 @@ func NewEngine(config EngineConfig) (*Engine, error) {
 		}
 	}
 	return &Engine{
-		homeRoot: config.HomeRoot, descriptor: config.Descriptor, syncer: config.Syncer,
+		mapping: mapping, homeRoot: config.HomeRoot, descriptor: config.Descriptor, syncer: config.Syncer,
 		statuses: config.Statuses, statusPath: config.StatusPath, clock: config.Clock,
 		diagnostics: config.Diagnostics, manifest: config.Manifest, syncRevision: syncRevision,
 		status: Status{
@@ -118,23 +129,69 @@ func NewEngine(config EngineConfig) (*Engine, error) {
 
 func (e *Engine) Start(ctx context.Context) error {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	if e.cancel != nil {
+		e.mu.Unlock()
 		return nil
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	e.cancel, e.done = cancel, done
+	e.mu.Unlock()
+	started := false
+	defer func() {
+		if !started {
+			cancel()
+			e.mu.Lock()
+			if e.done == done {
+				e.cancel, e.done, e.watcher = nil, nil, nil
+			}
+			e.mu.Unlock()
+			close(done)
+		}
+	}()
+	// Source approval is checked by the real reconciler before any mapped watch
+	// is opened. A stale projection cannot drive filesystem discovery.
+	if err := e.syncNow(runCtx); err != nil && !errors.Is(err, ErrConfigConflict) {
+		return err
 	}
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return err
 	}
-	if err := resetManifestWatches(watcher, e.homeRoot, e.currentManifest()); err != nil {
-		_ = watcher.Close()
+	if err := resetMappedWatches(watcher, e.mapping, e.descriptor.Policy, e.currentManifest()); err != nil {
+		watcher.Close()
 		return err
 	}
-	runCtx, cancel := context.WithCancel(ctx)
-	e.cancel, e.watcher, e.done = cancel, watcher, make(chan struct{})
-	e.dirtySince = e.clock().UTC()
-	go e.run(runCtx, e.done, watcher)
+	e.mu.Lock()
+	if runCtx.Err() != nil || e.done != done {
+		e.mu.Unlock()
+		watcher.Close()
+		return context.Canceled
+	}
+	e.watcher = watcher
+	e.mu.Unlock()
+	started = true
+	go e.run(runCtx, done, watcher)
 	return nil
+}
+
+// PauseConfiguration reports the file-edit pause after the supervisor joins
+// the runtime, retaining the last reconciled state until approval resumes it.
+func (e *Engine) PauseConfiguration(ctx context.Context, err error) {
+	e.mu.Lock()
+	e.syncRevision++
+	e.status.SyncRevision = e.syncRevision
+	e.status.UpdatedAt = e.clock().UTC()
+	e.status.State = "pending"
+	e.status.ErrorCode = "configuration_changed"
+	e.status.RecoveryActions = []string{"apply_configuration"}
+	if errors.Is(err, ErrSourceConfigInvalid) {
+		e.status.State = "error"
+		e.status.ErrorCode = "configuration_invalid"
+		e.status.RecoveryActions = []string{"fix_configuration"}
+	}
+	e.mu.Unlock()
+	e.report(ctx)
 }
 
 func (e *Engine) Shutdown(ctx context.Context) error {
@@ -149,10 +206,17 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 	select {
 	case <-done:
 	case <-ctx.Done():
-		_ = watcher.Close()
+		if watcher != nil {
+			_ = watcher.Close()
+		}
 		return ctx.Err()
 	}
-	_ = watcher.Close()
+	if watcher != nil {
+		_ = watcher.Close()
+	}
+	if !FinalFlushAllowed(ctx) {
+		return nil
+	}
 	flushTimeout := e.descriptor.Policy.ShutdownFlushTimeout
 	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < flushTimeout {
 		flushTimeout = time.Until(deadline)
@@ -167,7 +231,8 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 
 func (e *Engine) run(ctx context.Context, done chan<- struct{}, watcher *fsnotify.Watcher) {
 	defer close(done)
-	debounce := time.NewTimer(0)
+	debounce := time.NewTimer(time.Hour)
+	debounce.Stop()
 	defer debounce.Stop()
 	poll := time.NewTicker(e.descriptor.Policy.RemotePollInterval)
 	defer poll.Stop()
@@ -181,21 +246,42 @@ func (e *Engine) run(ctx context.Context, done chan<- struct{}, watcher *fsnotif
 			}
 			if event.Op&(fsnotify.Create|fsnotify.Rename) != 0 {
 				if info, err := os.Lstat(event.Name); err == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
-					_ = resetManifestWatches(watcher, e.homeRoot, e.currentManifest())
+					if err := resetMappedWatches(watcher, e.mapping, e.descriptor.Policy, e.currentManifest()); err != nil {
+						e.syncFailures.observe(ctx, "reconciliation", err)
+					}
 				}
 			}
 			if e.managedEvent(event.Name) {
 				e.markDirty()
 				resetTimer(debounce, e.nextDelay())
 			}
-		case <-watcher.Errors:
+		case watchErr, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+			if watchErr != nil {
+				e.syncFailures.observe(ctx, "reconciliation", watchErr)
+			}
 			e.markDirty()
 			resetTimer(debounce, e.descriptor.Policy.Debounce)
 		case <-debounce.C:
-			_ = e.syncNow(ctx)
+			e.backgroundSync(ctx)
 		case <-poll.C:
-			_ = e.syncNow(ctx)
+			e.backgroundSync(ctx)
 		}
+	}
+}
+
+func (e *Engine) backgroundSync(ctx context.Context) {
+	if err := e.syncNow(ctx); err != nil {
+		e.syncFailures.observe(ctx, "reconciliation", err)
+		return
+	}
+	e.mu.Lock()
+	usable := e.status.State == "healthy" || e.status.State == "warning" || e.status.State == "conflict"
+	e.mu.Unlock()
+	if usable {
+		e.syncFailures.recovered(ctx)
 	}
 }
 
@@ -229,18 +315,24 @@ func (e *Engine) nextDelay() time.Duration {
 }
 
 func (e *Engine) managedEvent(full string) bool {
-	relative, err := filepath.Rel(e.homeRoot, full)
-	if err != nil || relative == "." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+	if !e.mapping.managedEvent(full, e.descriptor.Policy, e.currentManifest()) {
 		return false
 	}
-	info, err := os.Lstat(full)
-	isDir := err == nil && info.IsDir()
-	manifest := e.currentManifest()
-	relative = filepath.ToSlash(relative)
-	if mandatoryExcluded(relative, e.descriptor.Policy) {
-		return false
+	if observation, ok := e.manifest.(interface {
+		ObservedLocalFile(string) (FileState, bool)
+	}); ok {
+		if name, ok := e.mapping.RepositoryPath(full); ok {
+			if state, known := observation.ObservedLocalFile(name); known {
+				if state.Hash == "" {
+					_, err := os.Lstat(full)
+					return !errors.Is(err, os.ErrNotExist)
+				}
+				_, err := e.mapping.read(name, state, e.descriptor.Policy.MaxFileBytes)
+				return err != nil
+			}
+		}
 	}
-	return manifest.Manages(relative, isDir) || isDir && manifest.MayManageDescendant(relative)
+	return true
 }
 
 func (e *Engine) currentManifest() Manifest {
@@ -269,7 +361,13 @@ func (e *Engine) syncNow(ctx context.Context) error {
 	watcher := e.watcher
 	e.mu.Unlock()
 	if watcher != nil {
-		_ = resetManifestWatches(watcher, e.homeRoot, e.currentManifest())
+		if watchErr := resetMappedWatches(watcher, e.mapping, e.descriptor.Policy, e.currentManifest()); watchErr != nil {
+			if err == nil {
+				err = watchErr
+			} else {
+				err = errors.Join(err, watchErr)
+			}
+		}
 	}
 	diagnostics := ReconciliationDiagnostics{}
 	if e.diagnostics != nil {
@@ -297,7 +395,17 @@ func (e *Engine) syncNow(ctx context.Context) error {
 	if result.Review != nil {
 		e.status.Review = boundPathSummaries(result.Review, e.descriptor.Policy.SummaryLimit)
 	}
+	if result.Landed {
+		// Publication progress survives cleanup/acknowledgement failures.
+		e.lastPush = now
+		e.dirtySince = time.Time{}
+		e.status.LastSuccessfulAt = &now
+	}
 	switch {
+	case result.Landed && err != nil:
+		e.status.State = "warning"
+		e.status.ErrorCode = "repository_unavailable"
+		e.status.RecoveryActions = []string{"check_status"}
 	case err == nil && result.Landed && len(diagnostics.Conflicts) > 0:
 		e.remoteRevision = result.RemoteRevision
 		e.lastPush = now
@@ -319,14 +427,18 @@ func (e *Engine) syncNow(ctx context.Context) error {
 		e.status.LastSuccessfulAt = &now
 		e.status.ErrorCode = ""
 		e.status.RecoveryActions = nil
-	case errors.Is(err, ErrConfigConflict):
-		e.status.State = "conflict"
-		e.status.ErrorCode = "config_conflict"
-		e.status.RecoveryActions = []string{"keep_local", "keep_remote"}
 	case errors.Is(err, ErrSyncUncertain):
 		e.status.State = "sync_uncertain"
 		e.status.ErrorCode = "sync_uncertain"
 		e.status.RecoveryActions = []string{"observe_remote"}
+	case errors.Is(err, ErrRepositoryUnavailable):
+		e.status.State = "offline"
+		e.status.ErrorCode = "repository_unavailable"
+		e.status.RecoveryActions = []string{"check_repository_access", "retry"}
+	case errors.Is(err, ErrConfigConflict):
+		e.status.State = "conflict"
+		e.status.ErrorCode = "config_conflict"
+		e.status.RecoveryActions = []string{"keep_local", "keep_remote"}
 	case errors.Is(err, ErrWritesDisabled):
 		e.status.State = "warning"
 		e.status.ErrorCode = "writes_disabled"
@@ -347,6 +459,22 @@ func (e *Engine) syncNow(ctx context.Context) error {
 		e.status.State = "pending"
 		e.status.ErrorCode = "review_required"
 		e.status.RecoveryActions = []string{"review_revision"}
+	case errors.Is(err, ErrConfigurationChanged):
+		e.status.State = "pending"
+		e.status.ErrorCode = "configuration_changed"
+		e.status.RecoveryActions = []string{"apply_configuration"}
+	case errors.Is(err, ErrSourceConfigInvalid):
+		e.status.State = "error"
+		e.status.ErrorCode = "configuration_invalid"
+		e.status.RecoveryActions = []string{"fix_configuration"}
+	case errors.Is(err, ErrRepositoryCredentials):
+		e.status.State = "error"
+		e.status.ErrorCode = "repository_credentials_required"
+		e.status.RecoveryActions = []string{"configure_repository_credentials"}
+	case errors.Is(err, ErrPathRuleInvalid):
+		e.status.State = "error"
+		e.status.ErrorCode = "config_path_invalid"
+		e.status.RecoveryActions = []string{"fix_path_rules"}
 	case errors.Is(err, ErrManifestMissing):
 		e.status.State = "error"
 		e.status.ErrorCode = "manifest_missing"
@@ -355,7 +483,7 @@ func (e *Engine) syncNow(ctx context.Context) error {
 		e.status.State = "error"
 		e.status.ErrorCode = "manifest_invalid"
 		e.status.RecoveryActions = []string{"fix_manifest"}
-	case errors.Is(err, ErrAuthorization):
+	case expectedAuthorizationDenial(err):
 		e.status.State = "revoked"
 		e.status.ErrorCode = "credential_expired"
 	default:
@@ -368,11 +496,13 @@ func (e *Engine) syncNow(ctx context.Context) error {
 }
 
 func (e *Engine) syncWithRetry(ctx context.Context, remoteRevision string) (PublishResult, error) {
+	var lastErr error
 	for attempt := 0; attempt < e.descriptor.Policy.RetryLimit; attempt++ {
 		result, err := e.syncer.Sync(ctx, remoteRevision)
-		if err == nil || !retryableSyncError(err) || attempt+1 == e.descriptor.Policy.RetryLimit {
+		if result.Landed || result.Uncertain || err == nil || !retryableSyncError(err) || attempt+1 == e.descriptor.Policy.RetryLimit {
 			return result, err
 		}
+		lastErr = err
 		delay := syncRetryDelay(attempt)
 		timer := time.NewTimer(delay)
 		select {
@@ -380,7 +510,7 @@ func (e *Engine) syncWithRetry(ctx context.Context, remoteRevision string) (Publ
 			if !timer.Stop() {
 				<-timer.C
 			}
-			return PublishResult{}, ctx.Err()
+			return PublishResult{}, errors.Join(ctx.Err(), lastErr)
 		case <-timer.C:
 		}
 	}
@@ -399,7 +529,11 @@ func retryableSyncError(err error) bool {
 		!errors.Is(err, ErrManifestMissing) &&
 		!errors.Is(err, ErrManifestInvalid) &&
 		!errors.Is(err, ErrManifestUnsafePath) &&
-		!errors.Is(err, ErrBaselineInvalid)
+		!errors.Is(err, ErrBaselineInvalid) &&
+		!errors.Is(err, ErrPathRuleInvalid) &&
+		(!errors.Is(err, ErrRepositoryCredentials) || errors.Is(err, ErrRepositoryUnavailable)) &&
+		!errors.Is(err, ErrConfigurationChanged) &&
+		!errors.Is(err, ErrSourceConfigInvalid)
 }
 
 func syncRetryDelay(attempt int) time.Duration {
@@ -418,73 +552,19 @@ func (e *Engine) report(ctx context.Context) {
 	status := e.status
 	e.mu.Unlock()
 	if e.statusPath != "" {
-		_ = WriteStatus(e.statusPath, status, e.descriptor.Policy.SummaryLimit)
+		if err := WriteStatus(e.statusPath, status, e.descriptor.Policy.SummaryLimit); err != nil {
+			e.statusFileFailures.observe(ctx, "reconciliation", err)
+		} else {
+			e.statusFileFailures.recovered(ctx)
+		}
 	}
 	if e.statuses != nil {
-		_ = e.statuses.ReportStatus(ctx, status, e.descriptor.Policy.SummaryLimit)
-	}
-}
-
-func resetManifestWatches(watcher *fsnotify.Watcher, root string, manifest Manifest) error {
-	for _, watched := range watcher.WatchList() {
-		if err := watcher.Remove(watched); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
+		if err := e.statuses.ReportStatus(ctx, status, e.descriptor.Policy.SummaryLimit); err != nil {
+			e.statusAPIFailures.observe(ctx, "control_request", err)
+		} else {
+			e.statusAPIFailures.recovered(ctx)
 		}
 	}
-	if err := watcher.Add(root); err != nil {
-		return err
-	}
-	seen := map[string]struct{}{root: {}}
-	for _, selected := range manifest.Roots {
-		full := filepath.Join(root, filepath.FromSlash(selected.Path))
-		start := full
-		if !selected.Directory {
-			start = filepath.Dir(full)
-		}
-		for {
-			info, err := os.Lstat(start)
-			if err == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
-				break
-			}
-			parent := filepath.Dir(start)
-			if parent == start || !sameOrInsidePath(parent, root) {
-				start = root
-				break
-			}
-			start = parent
-		}
-		if _, ok := seen[start]; !ok {
-			if err := watcher.Add(start); err != nil {
-				return err
-			}
-			seen[start] = struct{}{}
-		}
-		if !selected.Directory || start != full {
-			continue
-		}
-		if err := filepath.WalkDir(start, func(path string, entry os.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if !entry.IsDir() {
-				return nil
-			}
-			info, err := os.Lstat(path)
-			if err != nil || info.Mode()&os.ModeSymlink != 0 {
-				return errors.Join(ErrEngineInvalid, err)
-			}
-			if _, ok := seen[path]; !ok {
-				if err := watcher.Add(path); err != nil {
-					return err
-				}
-				seen[path] = struct{}{}
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func resetTimer(timer *time.Timer, duration time.Duration) {

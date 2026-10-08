@@ -68,6 +68,59 @@ func TestLocalSenderNativeOmitsKeysAndCancelsKnownBatch(t *testing.T) {
 	}
 }
 
+func TestLocalSenderClassifiesDeliveryDeadlineAtReceiptBoundary(t *testing.T) {
+	var getCalls int
+	statusStarted := make(chan struct{})
+	digest := sha256.Sum256([]byte("data"))
+	expires := time.Now().UTC().Truncate(time.Second).Add(time.Minute)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.Method == http.MethodPost && request.URL.Path == "/v1/local-file-transfers":
+			writeJSONTest(writer, http.StatusCreated, map[string]any{"batch_id": "native_batch", "transfers": []Manifest{{TransferID: "ft_generated", BatchID: "native_batch", SourceMachineID: "machine_host", DestinationMachineID: "machine_cli", InitiatingUserID: "user_1", SessionID: "ses_1", Basename: "data.bin", Size: 4, SHA256: hex.EncodeToString(digest[:]), State: "created", ExpiresAt: expires}}})
+		case request.Method == http.MethodGet:
+			getCalls++
+			if getCalls == 1 {
+				writeJSONTest(writer, http.StatusOK, Manifest{TransferID: "ft_generated", CommittedOffset: 4, State: "uploading", ExpiresAt: expires})
+				return
+			}
+			close(statusStarted)
+			<-request.Context().Done()
+		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/complete"):
+			writeJSONTest(writer, http.StatusOK, Manifest{TransferID: "ft_generated", State: "pending"})
+		default:
+			writer.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	sender := &LocalSender{Endpoint: server.URL + "/v1/local-file-transfers", Token: strings.Repeat("t", 43), HTTPClient: server.Client()}
+	done := make(chan error, 1)
+	go func() {
+		_, err := sender.SendNativeBatch(ctx, "native_batch", "machine_host", "machine_cli", "user_1", "ses_1", []Source{{Basename: "data.bin", Size: 4, SHA256: digest, Reader: bytes.NewReader([]byte("data"))}}, expires)
+		done <- err
+	}()
+
+	select {
+	case <-statusStarted:
+	case <-time.After(time.Second):
+		t.Fatal("delivery receipt polling did not start")
+	}
+	err := <-done
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("send error=%v, want deadline cause", err)
+	}
+	var staged interface{ DiagnosticStage() string }
+	var coded interface{ DiagnosticCode() string }
+	if !errors.As(err, &staged) || staged.DiagnosticStage() != "delivery" || !errors.As(err, &coded) || coded.DiagnosticCode() != "file_transfer_failed" {
+		t.Fatalf("delivery failure classification=%T %v", err, err)
+	}
+	if err.Error() != "file delivery timed out" {
+		t.Fatalf("delivery failure exposed internal detail: %q", err)
+	}
+}
+
 func writeJSONTest(writer http.ResponseWriter, status int, value any) {
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(status)

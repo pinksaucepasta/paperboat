@@ -8,7 +8,7 @@ Cancel an uncommitted personal ENV key rotation
 
 Cancel an uncommitted personal key rotation using the exact confirmation. A completed rotation cannot be undone by this command.
 
-ENV values are encrypted before they leave the client. Commands select personal, team, or host scope explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
+ENV values are encrypted before they leave the client. The interactive picker separates shared Team globals, your private member globals, and device overrides in the active workspace; commands select exact scopes explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
 
 JSON output is supported with --json.
 
@@ -30,6 +30,7 @@ pb env rotate cancel [flags]
       --config string      path to the CLI config file
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO

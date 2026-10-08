@@ -45,7 +45,7 @@ func (s Server) Serve(ctx context.Context, listener net.Listener) error {
 			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
 				return nil
 			}
-			return err
+			return managedSSHBoundary("listener_accept", err)
 		}
 		select {
 		case connections <- struct{}{}:

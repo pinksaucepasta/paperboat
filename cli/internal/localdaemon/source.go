@@ -50,7 +50,7 @@ func (s AuthenticatedMachineSource) IssuePeerStream(ctx context.Context, request
 	var token string
 	var quicEndpoint, wssEndpoint string
 	if request.Consumer != "exec" && request.Consumer != "ssh" {
-		return request, errors.New("daemon descriptor issuance is not available for consumer " + request.Consumer)
+		return request, errors.New("daemon descriptor issuance is unavailable for this consumer")
 	}
 	var descriptor api.ExecDescriptor
 	for attempt := 0; attempt < 2; attempt++ {
@@ -74,6 +74,8 @@ func (s AuthenticatedMachineSource) IssuePeerStream(ctx context.Context, request
 			}); ok {
 				if _, refreshErr := refresher.Refresh(); refreshErr == nil {
 					continue
+				} else {
+					return request, inventorySourceFailure("credential", errors.Join(err, refreshErr))
 				}
 			}
 		}
@@ -105,7 +107,7 @@ func (s AuthenticatedMachineSource) ListCompletionItems(ctx context.Context, mac
 	if err != nil {
 		return nil, err
 	}
-	client := api.New(s.ServerURL, credential, nil)
+	client := api.New(s.ServerURL, credential, s.HTTPClient)
 	items := make([]localapi.CompletionItem, 0, len(machines)*3)
 	for _, machine := range machines {
 		description := completionDescription(machine.Alias, machine.State)
@@ -130,6 +132,7 @@ func (s AuthenticatedMachineSource) ListCompletionItems(ctx context.Context, mac
 	const maximumConcurrentSessionLists = 8
 	var sessionMu sync.Mutex
 	var sessionWG sync.WaitGroup
+	var sessionErr error
 	sem := make(chan struct{}, maximumConcurrentSessionLists)
 	for _, machine := range machines {
 		machine := machine
@@ -144,6 +147,11 @@ func (s AuthenticatedMachineSource) ListCompletionItems(ctx context.Context, mac
 			}
 			sessions, listErr := client.ListUserMachineTerminalSessions(ctx, machine.ID)
 			if listErr != nil {
+				sessionMu.Lock()
+				if sessionErr == nil {
+					sessionErr = inventorySourceFailure("completion_list", listErr)
+				}
+				sessionMu.Unlock()
 				return
 			}
 			values := make([]localapi.CompletionItem, 0, len(sessions)*2)
@@ -175,7 +183,7 @@ func (s AuthenticatedMachineSource) ListCompletionItems(ctx context.Context, mac
 	if len(items) > maximumCompletionItems {
 		items = items[:maximumCompletionItems]
 	}
-	return items, nil
+	return items, sessionErr
 }
 
 func completionDescription(values ...string) string {
@@ -209,7 +217,7 @@ func (s AuthenticatedMachineSource) ListUserMachines(ctx context.Context) ([]api
 	if strings.TrimSpace(credential.AccessToken) == "" {
 		return nil, inventorySourceFailure("credential", api.ErrUnauthenticated)
 	}
-	client := api.New(s.ServerURL, credential, nil)
+	client := api.New(s.ServerURL, credential, s.HTTPClient)
 	machines, err := client.ListUserMachines(ctx)
 	if err != nil {
 		return nil, inventorySourceFailure("machine_list", err)
@@ -226,8 +234,8 @@ func (s AuthenticatedMachineSource) ListUserMachines(ctx context.Context) ([]api
 		}
 	}
 	for index := range machines {
-		if _, err := managedssh.AliasHost(machines[index].Alias, managedssh.AliasSuffix); err != nil {
-			return nil, inventorySourceFailure("machine_alias", errors.New("invalid machine alias"))
+		if _, err := managedssh.AliasHost(machines[index].Alias); err != nil {
+			return nil, inventorySourceFailure("machine_alias", err)
 		}
 		machines[index].SSHLocalReady = s.SSHLocalReady
 		machines[index].SSHLocalCode = s.SSHLocalCode

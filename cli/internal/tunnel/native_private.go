@@ -37,13 +37,13 @@ func (t *PeerTerminalTunnel) DialPrivateSession(ctx context.Context, machineID s
 	}
 
 	if generation == 0 {
-		devices, listErr := client.DeviceServices(ctx)
+		machines, listErr := client.MachineServices(ctx)
 		if listErr != nil {
 			return nil, listErr
 		}
-		for _, device := range devices {
-			if device.MachineID == machineID && device.InstallationGeneration > 0 && device.ExpiresAt.After(t.config.Now()) {
-				generation = uint64(device.InstallationGeneration)
+		for _, machine := range machines {
+			if machine.MachineID == machineID && machine.InstallationGeneration > 0 && machine.ExpiresAt.After(t.config.Now()) {
+				generation = uint64(machine.InstallationGeneration)
 				break
 			}
 		}
@@ -63,7 +63,7 @@ func (t *PeerTerminalTunnel) DialPrivateSession(ctx context.Context, machineID s
 	if err != nil {
 		return nil, err
 	}
-	// Device access carries authorized raw TCP streams. The preview class
+	// Machine access carries authorized raw TCP streams. The preview class
 	// negotiates HTTP/3 and is dispatched to a different host handler.
 	return runtime.Dial(ctx, machineID, peerquic.ClassInteractive)
 }

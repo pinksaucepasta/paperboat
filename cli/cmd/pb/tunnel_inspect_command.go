@@ -188,7 +188,11 @@ func productionInspectorClients(command *cobra.Command) (*inspectorClients, erro
 		_ = peer.Close()
 		return nil, err
 	}
-	server := api.New(d.cfg.ServerURL, credential, nil)
+	server, err := newWorkspaceAPIClient(actionContext(command, nil), d.cfg.ServerURL, credential)
+	if err != nil {
+		_ = peer.Close()
+		return nil, err
+	}
 	remote := &inspectorNativeClient{peer: peer}
 	return &inspectorClients{server: server, daemon: remote, ctx: command.Context(), close: peer.Close,
 		prepare: func(ctx context.Context, grant api.InspectorCredential, target inspectorTarget, action string) error {
@@ -537,7 +541,7 @@ func runInspectorReplay(command *cobra.Command, clients *inspectorClients, targe
 		if err != nil {
 			return err
 		}
-		key = "pb_replay_" + strings.TrimPrefix(generated, "pb_tunnel_")
+		key = generated
 	}
 	if len(key) > 256 || strings.TrimSpace(key) == "" {
 		return errors.New("idempotency key is invalid")

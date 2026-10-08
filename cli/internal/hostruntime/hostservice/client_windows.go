@@ -18,6 +18,14 @@ const defaultSocketPath = `\\.\pipe\PaperboatHostService`
 
 var windowsInstancePattern = regexp.MustCompile(`^u[0-9a-f]{24}$`)
 
+var (
+	errResponseInvalidRequest     = errors.New("invalid_request")
+	errResponseStalePolicy        = errors.New("stale_policy")
+	errResponseAvailabilityFailed = errors.New("availability_apply_failed")
+	errResponseUpdateFailed       = errors.New("update_activation_failed")
+	errResponseSSHFailed          = errors.New("ssh_authorized_keys_reconcile_failed")
+)
+
 func WindowsSocketPath(instance string) (string, error) {
 	if !windowsInstancePattern.MatchString(instance) {
 		return "", ErrInvalidConfig
@@ -101,7 +109,24 @@ func (c *Client) call(ctx context.Context, request Request) (Response, error) {
 		return Response{}, ErrInvalidRequest
 	}
 	if response.ErrorCode != "" {
-		return Response{}, errors.New(response.ErrorCode)
+		return Response{}, responseError(response.ErrorCode)
 	}
 	return response, nil
+}
+
+func responseError(code string) error {
+	switch code {
+	case "invalid_request":
+		return errResponseInvalidRequest
+	case "stale_policy":
+		return errResponseStalePolicy
+	case "availability_apply_failed":
+		return errResponseAvailabilityFailed
+	case "update_activation_failed":
+		return errResponseUpdateFailed
+	case "ssh_authorized_keys_reconcile_failed":
+		return errResponseSSHFailed
+	default:
+		return ErrInvalidRequest
+	}
 }

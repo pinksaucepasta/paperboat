@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -47,10 +46,39 @@ type terminalTransportError struct {
 var errInvalidNativeWelcome = errors.New("helper returned an invalid native protocol welcome")
 var ErrPeerStreamOpen = errors.New("peer application stream open failed")
 
+func contextOperationError(ctx context.Context) error {
+	if ctx == nil || ctx.Err() == nil {
+		return nil
+	}
+	status, cause := ctx.Err(), context.Cause(ctx)
+	if cause == nil {
+		return status
+	}
+	if errors.Is(cause, status) {
+		return cause
+	}
+	return errors.Join(status, cause)
+}
+
 func (e *terminalTransportError) Error() string {
-	return fmt.Sprintf("%s terminal transport unavailable: %v", e.transport, e.cause)
+	if e != nil && e.transport == "local" {
+		return "local terminal transport unavailable"
+	}
+	return "native terminal transport unavailable"
 }
 func (e *terminalTransportError) Unwrap() error { return e.cause }
+func (e *terminalTransportError) DiagnosticStage() string {
+	if e != nil && e.transport == "local" {
+		return "local_gateway"
+	}
+	return "unknown"
+}
+func (e *terminalTransportError) DiagnosticCode() string {
+	if e != nil && e.transport == "local" {
+		return "local_access_failed"
+	}
+	return ""
+}
 func FallbackEligible(err error) bool {
 	var target *terminalTransportError
 	return errors.As(err, &target)
@@ -138,7 +166,7 @@ func classifyNativeHandshakeError(ctx context.Context, transport string, err err
 		return nil
 	}
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return contextOperationError(ctx)
 	}
 	var remote *helperRemoteError
 	if errors.As(err, &remote) && !remote.Retryable || errors.Is(err, errInvalidNativeWelcome) {
@@ -149,7 +177,7 @@ func classifyNativeHandshakeError(ctx context.Context, transport string, err err
 
 func nativeHandshake(ctx context.Context, message helperMessageConnection) ([]byte, error) {
 	payload, _ := json.Marshal(map[string]any{"min_version": helperProtocolVersion, "max_version": helperProtocolVersion, "capabilities": helperCapabilities()})
-	id := helperID("req_")
+	id := helperID("request")
 	if err := writeHelperFrame(ctx, message, helperFrame{Type: "hello", RequestID: id, Version: helperProtocolVersion, Payload: payload}); err != nil {
 		return nil, err
 	}
@@ -227,7 +255,7 @@ func (c *nativeMessageConnection) ReadMessage(ctx context.Context) (helperMessag
 	case result := <-c.reads:
 		return result.kind, result.data, result.err
 	case <-ctx.Done():
-		return 0, nil, ctx.Err()
+		return 0, nil, contextOperationError(ctx)
 	case <-c.ctx.Done():
 		return 0, nil, io.EOF
 	}
@@ -261,7 +289,7 @@ func (c *nativeMessageConnection) WriteMessage(ctx context.Context, kind helperM
 	}
 	_ = stream.SetWriteDeadline(time.Time{})
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return contextOperationError(ctx)
 	}
 	if c.ctx.Err() != nil {
 		return io.EOF

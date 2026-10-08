@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"net/http"
 	"sort"
 	"strings"
@@ -107,7 +108,7 @@ func (m *Manager) Enroll(ctx context.Context, tunnelID, localKey string) (Projec
 		// The first local key remains durable so concurrent callers cannot create
 		// a second connector identity.
 	} else {
-		credentialID, err := randomID("credential")
+		credentialID, err := randomID("key")
 		if err != nil {
 			return Projection{}, err
 		}
@@ -115,11 +116,11 @@ func (m *Manager) Enroll(ctx context.Context, tunnelID, localKey string) (Projec
 		if err != nil {
 			return Projection{}, err
 		}
-		issueKey, err := randomID("connector-issue")
+		issueKey, err := randomID("operation")
 		if err != nil {
 			return Projection{}, err
 		}
-		exchangeKey, err := randomID("connector-exchange")
+		exchangeKey, err := randomID("operation")
 		if err != nil {
 			return Projection{}, err
 		}
@@ -144,7 +145,7 @@ func (m *Manager) Enroll(ctx context.Context, tunnelID, localKey string) (Projec
 				// token was lost. Persist a new issue key for the next explicit retry;
 				// the unusable enrollment expires server-side.
 				if errors.Is(issueErr, ErrUnavailable) || errors.Is(issueErr, ErrConflict) {
-					newIssueKey, keyErr := randomID("connector-issue")
+					newIssueKey, keyErr := randomID("operation")
 					if keyErr != nil {
 						return Projection{}, errors.Join(issueErr, keyErr)
 					}
@@ -238,11 +239,11 @@ func (m *Manager) resetExpiredEnrollment(state *journal, tunnelID string, curren
 	if m == nil || m.store == nil || state == nil || current == nil || current.Phase != "issued" || current.TunnelID != tunnelID || current.TokenReference == "" {
 		return errors.Join(ErrEnrollmentRetryable, ErrConflict)
 	}
-	issueKey, err := randomID("connector-issue")
+	issueKey, err := randomID("operation")
 	if err != nil {
 		return errors.Join(ErrEnrollmentRetryable, err)
 	}
-	exchangeKey, err := randomID("connector-exchange")
+	exchangeKey, err := randomID("operation")
 	if err != nil {
 		return errors.Join(ErrEnrollmentRetryable, err)
 	}
@@ -440,7 +441,7 @@ func sameActivationRequest(left, right ActivationRequest) bool {
 	return left.AccountID == right.AccountID && left.TunnelID == right.TunnelID && left.HostID == right.HostID && left.ConnectorID == right.ConnectorID && left.OperationID == right.OperationID && left.StableEndpointID == right.StableEndpointID && left.CredentialReference == right.CredentialReference && left.CredentialKeyID == right.CredentialKeyID && left.CredentialThumbprint == right.CredentialThumbprint && left.CredentialGeneration == right.CredentialGeneration && left.ProcessGeneration == right.ProcessGeneration && bytes.Equal(left.CredentialPublicKey, right.CredentialPublicKey)
 }
 
-func randomID(prefix string) (string, error) {
+func randomNonce(prefix string) (string, error) {
 	var value [18]byte
 	if _, err := rand.Read(value[:]); err != nil {
 		return "", err
@@ -455,4 +456,12 @@ func clearString(value *string) {
 
 func (m *Manager) String() string {
 	return fmt.Sprintf("tunnel enrollment manager for host %s", m.hostID)
+}
+
+func randomID(noun string) (string, error) {
+	id, err := uuid.NewRandom()
+	if err != nil {
+		return "", err
+	}
+	return noun + "_" + id.String(), nil
 }

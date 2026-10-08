@@ -5,8 +5,6 @@ package daemoncmd
 import (
 	"errors"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
@@ -69,12 +67,4 @@ func ownerSIDMatches(ownerSID string) bool {
 	}
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	return err == nil && user != nil && user.User.Sid != nil && user.User.Sid.Equals(want)
-}
-
-func defaultChezmoiPath() string {
-	programFiles := strings.TrimSpace(os.Getenv("ProgramFiles"))
-	if programFiles == "" {
-		programFiles = `C:\Program Files`
-	}
-	return filepath.Join(programFiles, "Paperboat", "chezmoi.exe")
 }

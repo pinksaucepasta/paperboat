@@ -13,7 +13,7 @@ pb-rsync - Run rsync with Paperboat machine resolution
 Run rsync with Paperboat machine resolution
 
 .PP
-Run standard rsync arguments with Paperboat device-name resolution and authorized connectivity. File selection, deletion flags, and exit behavior remain rsync's responsibility; inspect its command line before synchronizing.
+Run standard rsync arguments with Paperboat machine-name resolution and authorized connectivity. File selection, deletion flags, and exit behavior remain rsync's responsibility; inspect its command line before synchronizing.
 
 .PP
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
@@ -39,6 +39,10 @@ This command does not support --json output; it rejects that mode before executi
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

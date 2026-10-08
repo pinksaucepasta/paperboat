@@ -70,13 +70,15 @@ func (s *commandVaultSecureStore) snapshot() []string {
 }
 
 type commandVaultControl struct {
-	store           config.ProfileStore
-	state           api.PasswordVaultState
-	scopes          map[string]api.VaultScopeState
-	failAfterCommit bool
-	puts            int
-	envelopes       [][]byte
-	beforePut       func([]byte) error
+	hostRefreshes    int
+	hostRefreshError error
+	store            config.ProfileStore
+	state            api.PasswordVaultState
+	scopes           map[string]api.VaultScopeState
+	failAfterCommit  bool
+	puts             int
+	envelopes        [][]byte
+	beforePut        func([]byte) error
 }
 
 func commandVaultScopeKey(kind, owner, machine string) string {
@@ -156,7 +158,8 @@ func (c *commandVaultControl) PutVaultScope(_ context.Context, kind, owner, mach
 		return api.VaultScopeState{}, err
 	}
 	state := api.VaultScopeState{
-		OwnerKind: kind, OwnerID: owner, MachineID: machine,
+		WorkspaceID: scope.Claims.WorkspaceID,
+		OwnerKind:   kind, OwnerID: owner, MachineID: machine,
 		KeyEpoch: scope.Claims.KeyEpoch, Revision: scope.Claims.Revision,
 		DocumentID: scope.ID.String(), Envelope: in.Envelope,
 	}
@@ -191,7 +194,7 @@ func (c *commandVaultControl) RotateVaultTeam(context.Context, string, api.Vault
 	return api.VaultTeamState{}, errors.New("unexpected RotateVaultTeam")
 }
 func (c *commandVaultControl) GetVaultGrants(context.Context) ([]api.VaultGrantState, error) {
-	return nil, errors.New("unexpected GetVaultGrants")
+	return []api.VaultGrantState{}, nil
 }
 func (c *commandVaultControl) AckVaultGrant(context.Context, string, string) error {
 	return errors.New("unexpected AckVaultGrant")
@@ -216,7 +219,7 @@ func newCommandVaultFixture(t *testing.T) commandVaultFixture {
 		}
 	})
 	return commandVaultFixture{
-		manager: environmentmanager.PasswordVault{Client: control, Store: store, Issuer: commandVaultIssuer, AccountID: commandVaultAccount},
+		manager: environmentmanager.PasswordVault{WorkspaceID: "personal", Client: control, Store: store, Issuer: commandVaultIssuer, AccountID: commandVaultAccount},
 		control: control,
 		store:   store,
 		secrets: secrets,
@@ -306,6 +309,9 @@ func TestPasswordVaultCommandSavesRecoveryBeforePublicationAndHidesCode(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	if fixture.control.hostRefreshes != 1 {
+		t.Fatal("initialization did not refresh already registered recipients after publication")
+	}
 	defer clear(code)
 	if len(code) == 0 || !publicationSawFile || !strings.Contains(stdout, "ENV vault operation completed.") {
 		t.Fatalf("publicationSawFile=%t code=%q stdout=%q", publicationSawFile, code, stdout)
@@ -334,6 +340,9 @@ func TestPasswordVaultCommandCommitErrorRetainsCodeAndResumeRetriesExactBytes(t 
 	stdout, stderr, err := executePasswordVaultCommand(t, "vault", "init", "--recovery-file", path)
 	if err == nil || !strings.Contains(err.Error(), "retain the new recovery file") || !strings.Contains(err.Error(), "pb env vault resume") {
 		t.Fatalf("commit error=%v; want actionable custody/resume guidance", err)
+	}
+	if fixture.control.hostRefreshes != 0 {
+		t.Fatal("unconfirmed initialization refreshed recipients before publication recovery")
 	}
 	code, mode := readCommandRecoveryFile(t, path)
 	defer clear(code)
@@ -512,10 +521,99 @@ func TestPersonalRotationCancelRequiresAccountBoundConfirmation(t *testing.T) {
 	}
 	t.Cleanup(func() { passwordVaultForCommand = previousManager })
 	_, _, err := executePasswordVaultCommand(t, "rotate", "cancel", "--confirm", "CANCEL ENV ROTATE other-account")
-	if err == nil || !strings.Contains(err.Error(), "CANCEL ENV ROTATE <account_id>") {
+	if err == nil || !errors.Is(err, errUsage) || err.Error() != "The command arguments are invalid. Run `pb COMMAND --help` and retry." || strings.Contains(err.Error(), "other-account") {
 		t.Fatalf("rotation cancel confirmation error=%v", err)
+	}
+	if _, err := fixture.store.LoadPasswordVault(commandVaultIssuer, commandVaultAccount); !errors.Is(err, config.ErrSecretNotFound) {
+		t.Fatalf("wrong confirmation changed local vault custody: %v", err)
 	}
 }
 
 var _ environmentmanager.PasswordVaultClient = (*commandVaultControl)(nil)
 var _ config.EnvironmentSecureSecretStore = (*commandVaultSecureStore)(nil)
+
+func TestPasswordVaultUnlockRefreshesRecipientsAndKeepsPendingRecovery(t *testing.T) {
+	fixture := newCommandVaultFixture(t)
+	password := []byte("refresh master password")
+	defer clear(password)
+	if err := fixture.manager.Initialize(context.Background(), password); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.manager.Store.LockPasswordVault(fixture.manager.Issuer, fixture.manager.AccountID); err != nil {
+		t.Fatal(err)
+	}
+	installPasswordVaultCommandDependencies(t, fixture.manager, map[string][][]byte{"Master password": {password}})
+	stdout, stderr, err := executePasswordVaultCommand(t, "vault", "unlock")
+	if err != nil || fixture.control.hostRefreshes != 1 || !strings.Contains(stdout, "completed") {
+		t.Fatalf("refreshes=%d err=%v stdout=%q stderr=%q", fixture.control.hostRefreshes, err, stdout, stderr)
+	}
+	private := errors.New("PRIVATE_REFRESH_TRANSPORT")
+	fixture.control.hostRefreshError = private
+	_, _, err = executePasswordVaultCommand(t, "vault", "resume")
+	var pending *envHostRefreshFailure
+	if !errors.As(err, &pending) || !errors.Is(err, private) || fixture.control.hostRefreshes != 2 {
+		t.Fatal("resume did not retain recipient refresh failure")
+	}
+	message := userFacingError(err)
+	result := classifyCLIJSONError(err)
+	if strings.Contains(message, "PRIVATE") || !strings.Contains(message, "pb env vault resume") || result.Code != "env_recipient_refresh_pending" || result.StateChanged != true || !result.Retryable {
+		t.Fatalf("unsafe pending refresh=%#v", result)
+	}
+	fixture.control.hostRefreshError = nil
+	if _, _, err = executePasswordVaultCommand(t, "vault", "resume"); err != nil || fixture.control.hostRefreshes != 3 {
+		t.Fatal("recipient refresh did not recover")
+	}
+}
+
+func (c *commandVaultControl) GetVaultPersonalScopes(context.Context) (api.VaultPersonalInventory, error) {
+	c.hostRefreshes++
+	out := api.VaultPersonalInventory{Scopes: []api.VaultScopeState{}}
+	for _, scope := range c.scopes {
+		if scope.OwnerKind == "personal" {
+			out.Scopes = append(out.Scopes, scope)
+		}
+	}
+	return out, c.hostRefreshError
+}
+func (c *commandVaultControl) VaultLayerRecipients(context.Context, api.VaultLayerCoordinate) ([]api.VaultLayerRecipient, error) {
+	return []api.VaultLayerRecipient{}, nil
+}
+func (c *commandVaultControl) PutVaultLayer(context.Context, string, string, api.VaultLayerPut) (api.VaultLayerDelivery, error) {
+	return api.VaultLayerDelivery{}, errors.New("unexpected layer publication without recipients")
+}
+
+type uninitializedPickerTeamControl struct {
+	*commandVaultControl
+	teamReads int
+}
+
+func (c *uninitializedPickerTeamControl) GetVaultTeam(context.Context, string) (api.VaultTeamState, error) {
+	c.teamReads++
+	return api.VaultTeamState{}, &api.APIError{Status: 404}
+}
+
+func TestEnvironmentVariablePrivateTeamPickerWorksWithoutSharedInitialization(t *testing.T) {
+	fixture := newCommandVaultFixture(t)
+	control := &uninitializedPickerTeamControl{commandVaultControl: fixture.control}
+	fixture.manager.Client = control
+	if err := fixture.manager.Initialize(context.Background(), []byte("picker-test-password")); err != nil {
+		t.Fatal(err)
+	}
+	fixture.manager.WorkspaceID = "team_1"
+	for _, target := range []environmentVariableTarget{{}, {machineID: "host_1"}} {
+		scope, err := environmentVariablePickerScope("team_1", commandVaultAccount, target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		metadata, err := readVaultScopeMetadata(context.Background(), fixture.manager, scope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if metadata.OwnerKind != "personal" || metadata.OwnerID != commandVaultAccount || metadata.MachineID != target.machineID || len(metadata.Names) != 0 {
+			t.Fatalf("private scope metadata: %+v", metadata)
+		}
+	}
+	if control.teamReads != 0 {
+		t.Fatal("private scopes depended on shared Team initialization")
+	}
+}

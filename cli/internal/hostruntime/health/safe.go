@@ -33,7 +33,7 @@ var safeStringRedactions = []redactionRule{
 	{regexp.MustCompile(`(?i)\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b`), RedactedValue},
 	{regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://[^\s]+`), RedactedValue},
 	{regexp.MustCompile(`(?i)(?:/Users/|/home/|[A-Z]:\\Users\\)[^\s,;]+`), RedactedValue},
-	{regexp.MustCompile(`\b(?:account|actor|assignment|certificate|connector|correlation|device|domain|edge|host|operation|process|request|resource|route|session|tunnel)_[A-Za-z0-9_.:-]+\b`), RedactedValue},
+	{regexp.MustCompile(`\b(?:account|actor|assignment|certificate|connector|correlation|machine|domain|edge|host|operation|process|request|resource|route|session|tunnel)_[A-Za-z0-9_.:-]+\b`), RedactedValue},
 	{regexp.MustCompile(`(?i)\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b`), RedactedValue},
 }
 

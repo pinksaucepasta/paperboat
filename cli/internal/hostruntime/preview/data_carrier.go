@@ -694,6 +694,10 @@ func (c *DataCarrierPreviewCarrier) dialOrigin(ctx context.Context, target Lease
 	if c.dialer != nil {
 		return c.dialer(ctx, target)
 	}
+	return dialPreviewOrigin(ctx, target)
+}
+
+func dialPreviewOrigin(ctx context.Context, target LeaseTarget) (io.ReadWriteCloser, error) {
 	scheme := strings.ToLower(strings.TrimSpace(target.Scheme))
 	if strings.TrimSpace(target.Address) == "" {
 		return nil, ErrDataCarrierPreviewInvalid

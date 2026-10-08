@@ -6,7 +6,7 @@ Remove the current Paperboat setup before fresh enrollment
 
 Remove the current Paperboat setup before fresh enrollment
 
-Remove the current local Paperboat setup before fresh enrollment. Exact confirmation and host identity guard against resetting the wrong device; use uninstall for a complete local removal.
+Remove the current local Paperboat setup before fresh enrollment. Exact confirmation and host identity guard against resetting the wrong machine; use uninstall for a complete local removal.
 
 JSON output is supported with --json.
 
@@ -31,6 +31,7 @@ pb reset [flags]
       --config string      path to the CLI config file
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO

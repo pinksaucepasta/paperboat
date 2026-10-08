@@ -78,29 +78,29 @@ terminal scope, or `file:transfer` scope is rejected.
 1. Stop new private operations and record only endpoint IDs, certificate fingerprints, generations,
    and timestamps. Never export private key material for diagnosis.
 2. For one endpoint, revoke its certificate, advance authorization state, remove its local endpoint
-   state through `pb logout` for a CLI or `pb device revoke <device>` for a machine, then re-enroll under the existing account root.
+   state through `pb logout` for a CLI or `pb machine revoke <machine>` for a machine, then re-enroll under the existing account root.
 3. For account-root loss or suspected compromise, revoke every endpoint certificate, advance the
    account authorization generation, complete the explicit root reset/recovery flow, and re-pair
    every CLI and machine. The server must not fabricate or escrow a replacement root.
 4. Verify old certificates, descriptors, relay admissions, and encrypted transfer resources fail;
    then verify one newly paired terminal and file transfer on the new generations.
 
-## Stuck device grant
+## Stuck machine grant
 
 Detection: polling remains pending beyond the authoritative expiry or an approved
 grant cannot be consumed exactly once.
 
-1. Stop polling at expiry and preserve no device code locally.
+1. Stop polling at expiry and preserve no machine code locally.
 2. Check grant state transitions and rate-limit events by hashed grant/network identifiers.
 3. Expire or deny the grant through the server-owned operation; do not issue tokens manually.
 4. Verify a new flow succeeds and the old code remains unusable.
 
-## Stolen device
+## Stolen machine
 
-1. Revoke the device's client session from the dashboard immediately.
+1. Revoke the machine's client session from the dashboard immediately.
 2. Verify the Paperboat token family, endpoint certificate, runtime sessions, and tunnel access
    are revoked within the configured bound.
-3. Run `pb auth logout` on the device if recovered so queued local cleanup completes.
+3. Run `pb auth logout` on the machine if recovered so queued local cleanup completes.
 4. Review metadata-only access events; rotate unrelated account credentials only if evidence warrants it.
 
 ## File-transfer cleanup failure
@@ -142,7 +142,7 @@ procedures are collected in
 
 ## One support reference and optional Sentry
 
-Each CLI invocation carries one `pb-` plus 32 lowercase hexadecimal support reference.
+Each CLI invocation carries one `support_` plus canonical lowercase UUIDv4 support reference.
 The same reference crosses PB control API requests, local daemon HTTP IPC and daemon RPC;
 human and JSON errors show this reference, while request IDs remain internal. Keep the
 reference and the safe error explanation when contacting support. It is not a credential.

@@ -20,18 +20,18 @@ func managedToolTestResolver(calls *[]string) managedToolTargetResolver {
 		if user == "" {
 			user = "adam"
 		}
-		return managedssh.Destination{Alias: target, Host: target + ".pprbt", Port: 22, User: user}, nil
+		return managedssh.Destination{Alias: target, Host: target + "." + managedssh.AliasSuffix, Port: 22, User: user}, nil
 	}
 }
 
 func TestRewriteManagedSCPOperandsPreservesFlagsAndLocalPaths(t *testing.T) {
 	var calls []string
 	input := []string{"-q", "-o", "ProxyCommand=helper:x", "./local:file", "mac:/tmp/file"}
-	got, err := rewriteManagedToolArguments(managedToolTestContext(), "scp", input, "pprbt", managedToolTestResolver(&calls))
+	got, err := rewriteManagedToolArguments(managedToolTestContext(), "scp", input, managedToolTestResolver(&calls))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"-q", "-o", "ProxyCommand=helper:x", "./local:file", "adam@mac.pprbt:/tmp/file"}
+	want := []string{"-q", "-o", "ProxyCommand=helper:x", "./local:file", "adam@mac.local.pprbt.dev:/tmp/file"}
 	if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(calls, []string{"mac@"}) {
 		t.Fatalf("rewrite=%q calls=%q, want %q", got, calls, want)
 	}
@@ -43,16 +43,16 @@ func TestRewriteManagedSCPOperandsPreservesFlagsAndLocalPaths(t *testing.T) {
 func TestRewriteManagedToolsApplyExplicitUserAndNamespace(t *testing.T) {
 	var calls []string
 	resolver := managedToolTestResolver(&calls)
-	scp, err := rewriteManagedToolArguments(managedToolTestContext(), "scp", []string{"payload", "bob@mac.pprbt:dest"}, "pprbt", resolver)
-	if err != nil || !reflect.DeepEqual(scp, []string{"payload", "bob@mac.pprbt:dest"}) {
+	scp, err := rewriteManagedToolArguments(managedToolTestContext(), "scp", []string{"payload", "bob@mac.local.pprbt.dev:dest"}, resolver)
+	if err != nil || !reflect.DeepEqual(scp, []string{"payload", "bob@mac.local.pprbt.dev:dest"}) {
 		t.Fatalf("scp=%q error=%v", scp, err)
 	}
-	sftp, err := rewriteManagedToolArguments(managedToolTestContext(), "sftp", []string{"-o", "ConnectTimeout=5", "mac"}, "pprbt", resolver)
-	if err != nil || !reflect.DeepEqual(sftp, []string{"-o", "ConnectTimeout=5", "adam@mac.pprbt"}) {
+	sftp, err := rewriteManagedToolArguments(managedToolTestContext(), "sftp", []string{"-o", "ConnectTimeout=5", "mac"}, resolver)
+	if err != nil || !reflect.DeepEqual(sftp, []string{"-o", "ConnectTimeout=5", "adam@mac.local.pprbt.dev"}) {
 		t.Fatalf("sftp=%q error=%v", sftp, err)
 	}
-	rsync, err := rewriteManagedToolArguments(managedToolTestContext(), "rsync", []string{"-a", "bob@mac:src", "C:\\local\\dest"}, "pprbt", resolver)
-	if err != nil || !reflect.DeepEqual(rsync, []string{"-a", "bob@mac.pprbt:src", "C:\\local\\dest"}) {
+	rsync, err := rewriteManagedToolArguments(managedToolTestContext(), "rsync", []string{"-a", "bob@mac:src", "C:\\local\\dest"}, resolver)
+	if err != nil || !reflect.DeepEqual(rsync, []string{"-a", "bob@mac.local.pprbt.dev:src", "C:\\local\\dest"}) {
 		t.Fatalf("rsync=%q error=%v", rsync, err)
 	}
 	wantCalls := []string{"mac@bob", "mac@", "mac@bob"}
@@ -63,7 +63,7 @@ func TestRewriteManagedToolsApplyExplicitUserAndNamespace(t *testing.T) {
 
 func TestRewriteManagedToolRejectsMissingRemoteOperand(t *testing.T) {
 	var calls []string
-	if _, err := rewriteManagedToolArguments(managedToolTestContext(), "scp", []string{"local-a", "local-b"}, "pprbt", managedToolTestResolver(&calls)); err == nil {
+	if _, err := rewriteManagedToolArguments(managedToolTestContext(), "scp", []string{"local-a", "local-b"}, managedToolTestResolver(&calls)); err == nil {
 		t.Fatal("missing remote operand accepted")
 	}
 	if len(calls) != 0 {
@@ -71,14 +71,14 @@ func TestRewriteManagedToolRejectsMissingRemoteOperand(t *testing.T) {
 	}
 }
 
-func TestRewriteManagedToolUsesConfiguredDeviceSuffix(t *testing.T) {
+func TestRewriteManagedToolUsesCanonicalMachineSuffix(t *testing.T) {
 	var target string
 	resolver := func(_ *command.Context, value, user string) (managedssh.Destination, error) {
 		target = value
-		return managedssh.Destination{Host: value + ".devbox", User: user, Port: 22}, nil
+		return managedssh.Destination{Host: value + "." + managedssh.AliasSuffix, User: user, Port: 22}, nil
 	}
-	got, err := rewriteManagedToolArguments(managedToolTestContext(), "scp", []string{"file", "bob@studio.devbox:/tmp"}, "devbox", resolver)
-	if err != nil || target != "studio" || !reflect.DeepEqual(got, []string{"file", "bob@studio.devbox:/tmp"}) {
+	got, err := rewriteManagedToolArguments(managedToolTestContext(), "scp", []string{"file", "bob@studio.local.pprbt.dev:/tmp"}, resolver)
+	if err != nil || target != "studio" || !reflect.DeepEqual(got, []string{"file", "bob@studio.local.pprbt.dev:/tmp"}) {
 		t.Fatalf("rewrite=%q target=%q err=%v", got, target, err)
 	}
 }

@@ -72,3 +72,18 @@ func TestValidateOpaqueEpochAcceptsRawBase64URLPrefixes(t *testing.T) {
 		}
 	}
 }
+
+func TestCarrierIdentityURNBindsSharedMachineCarrier(t *testing.T) {
+	binding := CarrierIdentityBinding{AccountID: "account_1", HostID: "machine_1", TunnelID: "machine_1", ConnectorID: "machine_1", SessionID: "session_01234567-89ab-4cde-8fab-0123456789ab", ProcessGeneration: 1, ConfigGeneration: 1, EdgeProcessEpoch: "epoch_12345678"}
+	uri, err := CarrierIdentityURN(binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := MatchCarrierIdentityURN([]*url.URL{uri}, binding); err != nil {
+		t.Fatal(err)
+	}
+	binding.SessionID = "session_11234567-89ab-4cde-8fab-0123456789ab"
+	if err := MatchCarrierIdentityURN([]*url.URL{uri}, binding); !errors.Is(err, ErrCarrierIdentityBinding) {
+		t.Fatalf("replacement session matched signed URI: %v", err)
+	}
+}

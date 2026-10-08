@@ -2,8 +2,10 @@ package binarytarget
 
 import (
 	"encoding/binary"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -51,5 +53,17 @@ func TestValidateExecutableTargets(t *testing.T) {
 				t.Fatal("mismatch accepted")
 			}
 		})
+	}
+}
+
+func TestValidatePreservesSafeFilesystemCause(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "missing", "paperboat")
+	err := Validate(path, "linux", "amd64")
+	if !errors.Is(err, ErrInvalid) || !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing executable cause=%v", err)
+	}
+	if strings.Contains(err.Error(), root) {
+		t.Fatalf("filesystem path escaped in validation error: %v", err)
 	}
 }

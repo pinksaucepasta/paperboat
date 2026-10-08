@@ -91,9 +91,9 @@ func RunSSHCommand(ctx context.Context, stream io.ReadWriteCloser, config SSHCom
 		closeSSHCommandInput(config.Input)
 		_ = stream.Close()
 		if !waitSSHCommandHandshake(handshakeDone) {
-			return errors.Join(context.Cause(ctx), ErrSSHCommandShutdown)
+			return errors.Join(managedSSHContextError(ctx), ErrSSHCommandShutdown)
 		}
-		return context.Cause(ctx)
+		return managedSSHContextError(ctx)
 	}
 	if handshake.err != nil {
 		closeSSHCommandInput(config.Input)
@@ -139,9 +139,9 @@ func RunSSHCommand(ctx context.Context, stream io.ReadWriteCloser, config SSHCom
 		_ = stream.Close()
 		_ = session.Close()
 		if !waitSSHCommandRun(runDone) || !waitSSHCommandInput(inputDone) {
-			return errors.Join(context.Cause(ctx), ErrSSHCommandShutdown)
+			return errors.Join(managedSSHContextError(ctx), ErrSSHCommandShutdown)
 		}
-		return context.Cause(ctx)
+		return managedSSHContextError(ctx)
 	}
 	closeSSHCommandInput(config.Input)
 	_ = session.Close()

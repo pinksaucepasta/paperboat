@@ -4,6 +4,7 @@ package execprocess
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,8 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 func testManager(t *testing.T, root string, configure func(*Config)) *Manager {
@@ -30,7 +33,7 @@ func testManager(t *testing.T, root string, configure func(*Config)) *Manager {
 	return manager
 }
 
-func collect(t *testing.T, execution *Execution) []Event {
+func collect(t *testing.T, execution ExecutionService) []Event {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -133,6 +136,107 @@ func TestManagedEnvironmentFailureFailsClosed(t *testing.T) {
 	snapshot, err := execution.Wait(context.Background())
 	if err != nil || snapshot.State != StateFailed || snapshot.ErrorCode != "environment_unavailable" || strings.Contains(snapshot.ErrorCode, "secret detail") {
 		t.Fatalf("snapshot=%#v err=%v", snapshot, err)
+	}
+}
+
+func TestManagedEnvironmentTimeoutRemainsCancellation(t *testing.T) {
+	var faults []errorreport.Fault
+	restore := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) {
+		faults = append(faults, fault)
+	})
+	defer restore()
+	root := t.TempDir()
+	manager := testManager(t, root, func(config *Config) {
+		config.ManagedEnvironment = func(ctx context.Context) ([]string, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+	})
+	execution, _, err := manager.Start(context.Background(), Request{OperationID: "operation_environment_timeout", Argv: []string{"/bin/true"}, CWD: root, Timeout: 20 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := execution.Wait(context.Background())
+	if err != nil || snapshot.State != StateCanceled || snapshot.ErrorCode != "exec_timeout" {
+		t.Fatalf("snapshot=%#v err=%v", snapshot, err)
+	}
+	if len(faults) != 0 {
+		t.Fatalf("timeout emitted failure observations: %+v", faults)
+	}
+}
+
+func TestExecExitObservationKeepsResultAndOriginalReference(t *testing.T) {
+	var faults []errorreport.Fault
+	restore := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) {
+		faults = append(faults, fault)
+	})
+	defer restore()
+	root := t.TempDir()
+	reference := supportref.New()
+	ctx := supportref.WithContext(context.Background(), reference)
+	manager := testManager(t, root, nil)
+	execution, _, err := manager.Start(ctx, Request{OperationID: "operation_private_user_label", Argv: []string{"/bin/sh", "-c", "exit 9"}, CWD: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := execution.Wait(context.Background())
+	if err != nil || snapshot.State != StateExited || snapshot.ErrorCode != "" || snapshot.Result == nil || snapshot.Result.Code != 9 {
+		t.Fatalf("snapshot=%#v err=%v", snapshot, err)
+	}
+	if len(faults) != 1 {
+		t.Fatalf("fault observations=%+v, want one bounded exit attempt", faults)
+	}
+	fault := faults[0]
+	if fault.Component != "paperboat-daemon" || fault.Operation != "exec" || fault.Stage != "command" || fault.Code != "exec_operation_failed" || fault.SupportReference != reference || fault.ErrorType != "commandExitFailure" {
+		t.Fatalf("fault=%+v", fault)
+	}
+	if strings.Contains(fault.ErrorType+fault.Operation+fault.Stage+fault.Code, "private_user_label") {
+		t.Fatal("operation label entered local fault metadata")
+	}
+}
+
+func TestExecPersistenceFailureHasSafeTextAndPreservesCause(t *testing.T) {
+	var faults []errorreport.Fault
+	restore := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) {
+		faults = append(faults, fault)
+	})
+	defer restore()
+	root := t.TempDir()
+	durable, err := store.Open(context.Background(), store.Config{Root: filepath.Join(root, "state")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewPersistent(context.Background(), Config{WorkspaceRoot: root, BaseEnvironment: []string{"PATH=/usr/bin:/bin"}, MaximumActive: 2, MaximumOperations: 16, ReplayBytes: 64 << 10, Store: durable})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reference := supportref.New()
+	ctx := supportref.WithContext(context.Background(), reference)
+	execution, _, err := manager.Start(ctx, Request{OperationID: "operation_private_storage_label", Argv: []string{"/bin/sh", "-c", "sleep 0.2"}, CWD: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := durable.Close(); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, waitErr := execution.Wait(context.Background())
+	if waitErr == nil || snapshot.ErrorCode != "persistence_failed" {
+		t.Fatalf("snapshot=%#v wait error=%v", snapshot, waitErr)
+	}
+	var failure *persistenceFailure
+	if !errors.As(waitErr, &failure) || failure.Unwrap() == nil || waitErr.Error() != "exec operation result persistence failed" {
+		t.Fatalf("unsafe or unwrapped persistence failure: %T %v", waitErr, waitErr)
+	}
+	if len(faults) != 1 {
+		t.Fatalf("fault observations=%+v, want one persistence failure", faults)
+	}
+	fault := faults[0]
+	if fault.Operation != "exec" || fault.Stage != "lifecycle" || fault.Code != "exec_persistence_failed" || fault.SupportReference != reference {
+		t.Fatalf("fault=%+v", fault)
+	}
+	encoded, err := json.Marshal(fault)
+	if err != nil || strings.Contains(string(encoded), "operation_private_storage_label") || strings.Contains(string(encoded), "database is closed") {
+		t.Fatalf("raw persistence details leaked: fault=%s err=%v", encoded, err)
 	}
 }
 

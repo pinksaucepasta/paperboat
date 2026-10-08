@@ -26,7 +26,10 @@ func defaultReadAuthorizer(config ServerConfig) ReadAuthorizer {
 func (s *Server) listen(ctx context.Context) (net.Listener, error) {
 	directory := filepath.Dir(s.config.SocketPath)
 	info, err := os.Stat(directory)
-	if err != nil || !info.IsDir() || info.Mode().Perm()&0o077 != 0 || fileOwner(info) != s.config.OwnerUID {
+	if err != nil {
+		return nil, errors.Join(ErrUnsafeSocket, err)
+	}
+	if !info.IsDir() || info.Mode().Perm()&0o077 != 0 || fileOwner(info) != s.config.OwnerUID {
 		return nil, ErrUnsafeSocket
 	}
 	if info, err := os.Lstat(s.config.SocketPath); err == nil {
@@ -43,7 +46,7 @@ func (s *Server) listen(ctx context.Context) (net.Listener, error) {
 		}
 		identity, err := socketIdentityFromInfo(info)
 		if err != nil {
-			return nil, ErrUnsafeSocket
+			return nil, errors.Join(ErrUnsafeSocket, err)
 		}
 		if err := removeVerifiedSocket(s.config.SocketPath, identity, s.config.OwnerUID); err != nil {
 			return nil, err
@@ -58,10 +61,9 @@ func (s *Server) listen(ctx context.Context) (net.Listener, error) {
 	listener.SetUnlinkOnClose(false)
 	identity, err := socketIdentityFromListener(listener, s.config.SocketPath, os.Geteuid())
 	if err != nil {
-		_ = listener.Close()
-		return nil, err
+		return nil, errors.Join(err, listener.Close())
 	}
-	removeOwnSocket := func() { _ = removeVerifiedSocket(s.config.SocketPath, identity, s.config.OwnerUID) }
+	removeOwnSocket := func() error { return removeVerifiedSocket(s.config.SocketPath, identity, s.config.OwnerUID) }
 	if os.Geteuid() == 0 {
 		err = os.Chown(s.config.SocketPath, s.config.OwnerUID, s.config.OwnerGID)
 	}
@@ -69,22 +71,18 @@ func (s *Server) listen(ctx context.Context) (net.Listener, error) {
 		err = os.Chmod(s.config.SocketPath, 0o600)
 	}
 	if err != nil {
-		_ = listener.Close()
-		removeOwnSocket()
-		return nil, err
+		return nil, errors.Join(err, listener.Close(), removeOwnSocket())
 	}
 	if err := verifySocketIdentity(s.config.SocketPath, identity, s.config.OwnerUID); err != nil {
-		_ = listener.Close()
-		removeOwnSocket()
-		return nil, err
+		return nil, errors.Join(err, listener.Close(), removeOwnSocket())
 	}
 	s.cleanup = removeOwnSocket
 	return listener, nil
 }
 
 type socketIdentity struct {
-	device uint64
-	inode  uint64
+	machine uint64
+	inode   uint64
 }
 
 func socketIdentityFromInfo(info os.FileInfo) (socketIdentity, error) {
@@ -92,7 +90,7 @@ func socketIdentityFromInfo(info os.FileInfo) (socketIdentity, error) {
 	if !ok {
 		return socketIdentity{}, ErrUnsafeSocket
 	}
-	return socketIdentity{device: uint64(stat.Dev), inode: uint64(stat.Ino)}, nil
+	return socketIdentity{machine: uint64(stat.Dev), inode: uint64(stat.Ino)}, nil
 }
 
 func socketIdentityFromListener(listener *net.UnixListener, path string, ownerUID int) (socketIdentity, error) {
@@ -115,7 +113,10 @@ func socketIdentityFromListener(listener *net.UnixListener, path string, ownerUI
 	// Use Fstat to prove the listener itself is a socket, then capture the pathname
 	// vnode that all later cleanup must match exactly.
 	info, err := os.Lstat(path)
-	if err != nil || info.Mode()&os.ModeSocket == 0 || info.Mode()&os.ModeSymlink != 0 || fileOwner(info) != ownerUID {
+	if err != nil {
+		return socketIdentity{}, errors.Join(ErrUnsafeSocket, err)
+	}
+	if info.Mode()&os.ModeSocket == 0 || info.Mode()&os.ModeSymlink != 0 || fileOwner(info) != ownerUID {
 		return socketIdentity{}, ErrUnsafeSocket
 	}
 	return socketIdentityFromInfo(info)

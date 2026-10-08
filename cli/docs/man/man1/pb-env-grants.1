@@ -13,10 +13,10 @@ pb-env-grants - Reconcile encrypted ENV team grants
 Reconcile encrypted ENV team grants
 
 .PP
-Reconcile encrypted grants offered by a team into this account's vault. Use sync after a team has explicitly granted access.
+Reconcile encrypted grants offered by a team into this account's vault. Current grants are accepted automatically on unlock and refresh; sync provides an explicit recovery action.
 
 .PP
-ENV values are encrypted before they leave the client. Commands select personal, team, or host scope explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
+ENV values are encrypted before they leave the client. The interactive picker separates shared Team globals, your private member globals, and device overrides in the active workspace; commands select exact scopes explicitly; list output shows metadata rather than secret values. Unlock the local vault when a key operation requires it.
 
 .PP
 With --json, this command group lists its available commands.
@@ -42,6 +42,10 @@ With --json, this command group lists its available commands.
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

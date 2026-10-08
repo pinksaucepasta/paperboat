@@ -21,7 +21,7 @@ func TestPeerEndpointKeysRemainLocalAndAcceptOnlyMatchingCertificate(t *testing.
 	}
 	key := store.Current()
 	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
-	if err := store.SaveRegistration(Registration{ServerURL: "https://api.example.test", MachineID: "machine_01", EnvironmentID: "env_01", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 4, SetupRoles: []string{"host"}, UpdatedAt: now}); err != nil {
+	if err := store.SaveRegistration(Registration{ServerURL: "https://api.example.test", MachineID: "machine_01", EnvironmentID: "env_01", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 4, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	endpoint, err := store.PeerEndpoint()
@@ -66,7 +66,7 @@ func TestPeerEndpointRotatesKeysForNewInstallationGeneration(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	key := store.Current()
-	registration := Registration{ServerURL: "https://api.example.test", MachineID: "machine_01", EnvironmentID: "env_01", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, SetupRoles: []string{"host"}, UpdatedAt: now}
+	registration := Registration{ServerURL: "https://api.example.test", MachineID: "machine_01", EnvironmentID: "env_01", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, UpdatedAt: now}
 	if err := store.SaveRegistration(registration); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestPeerEndpointRecoversMalformedUnsignedState(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := store.Current()
-	registration := Registration{ServerURL: "https://api.example.test", MachineID: "machine_01", EnvironmentID: "env_01", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, SetupRoles: []string{"host"}, UpdatedAt: time.Now().UTC()}
+	registration := Registration{ServerURL: "https://api.example.test", MachineID: "machine_01", EnvironmentID: "env_01", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, UpdatedAt: time.Now().UTC()}
 	if err := store.SaveRegistration(registration); err != nil {
 		t.Fatal(err)
 	}

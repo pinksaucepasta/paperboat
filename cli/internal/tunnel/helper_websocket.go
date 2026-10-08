@@ -3,12 +3,11 @@ package tunnel
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"strings"
 	"sync"
@@ -210,7 +209,7 @@ func (c *helperTerminalConn) TerminalRuntimeVersion() string { return c.runtimeV
 
 func helperHandshake(ctx context.Context, message helperMessageConnection) (bool, error) {
 	payload, _ := json.Marshal(map[string]any{"min_version": helperProtocolVersion, "max_version": helperProtocolVersion, "capabilities": helperCapabilities()})
-	requestID := helperID("req_")
+	requestID := helperID("request")
 	if err := writeHelperFrame(ctx, message, helperFrame{Type: "hello", RequestID: requestID, Version: helperProtocolVersion, Payload: payload}); err != nil {
 		return false, err
 	}
@@ -235,7 +234,7 @@ func helperHandshake(ctx context.Context, message helperMessageConnection) (bool
 }
 
 func helperCapabilities() []string {
-	return []string{"terminal.v1", "health.v1", "exec.v1", "ssh.v1"}
+	return []string{"terminal.v1", "health.v1", "exec.v1", "ssh.v1", "config.compare.v1"}
 }
 
 // initialize attaches the canonical terminal session with a create-or-get
@@ -356,7 +355,7 @@ func (c *helperTerminalConn) finishAttachment(frame helperFrame, existingSession
 	if c.generation == 0 {
 		return errors.New("helper terminal session has no generation")
 	}
-	diagnosticlog.TryInfo("peer terminal attachment initialized", "session_id", c.target.SessionID, "existing", existingSession, "snapshot_latest", snapshotLatest, "from_sequence", fromSequence, "initial_binary_frames", len(c.initialBinary), "initial_binary_bytes", c.initialDecodedBytes)
+	diagnosticlog.TryInfo("peer terminal attachment initialized", "existing", existingSession, "snapshot_latest", snapshotLatest, "from_sequence", fromSequence, "initial_binary_frames", len(c.initialBinary), "initial_binary_bytes", c.initialDecodedBytes)
 	for _, data := range c.initialBinary {
 		output, decodeErr := c.decodeHelperBinary(data)
 		if decodeErr != nil {
@@ -386,8 +385,8 @@ func helperResponseSessionExisting(frame helperFrame) bool {
 func (c *helperTerminalConn) requestSync(ctx context.Context, capability string, payload json.RawMessage) (helperFrame, error) {
 	operationCtx, cancel := context.WithTimeout(ctx, helperRequestTimeout)
 	defer cancel()
-	requestID := helperID("req_")
-	frame := helperFrame{Type: "request", RequestID: requestID, Version: helperProtocolVersion, OperationID: helperID("op_"), Capability: capability, DeadlineMS: uint32(min(helperRequestTimeout, deadlineRemaining(operationCtx)) / time.Millisecond), Payload: payload}
+	requestID := helperID("request")
+	frame := helperFrame{Type: "request", RequestID: requestID, Version: helperProtocolVersion, OperationID: helperID("operation"), Capability: capability, DeadlineMS: uint32(min(helperRequestTimeout, deadlineRemaining(operationCtx)) / time.Millisecond), Payload: payload}
 	if frame.DeadlineMS == 0 {
 		frame.DeadlineMS = 1
 	}
@@ -570,7 +569,7 @@ func (c *helperTerminalConn) readLoop() {
 	firstOutput := true
 	for _, output := range c.initial {
 		if firstOutput {
-			diagnosticlog.TryInfo("peer terminal first output", "session_id", c.target.SessionID, "source", "initial", "bytes", len(output.data))
+			diagnosticlog.TryInfo("peer terminal first output", "source", "initial", "bytes", len(output.data))
 			firstOutput = false
 		}
 		select {
@@ -619,7 +618,7 @@ func (c *helperTerminalConn) readLoop() {
 				return
 			}
 			if firstOutput {
-				diagnosticlog.TryInfo("peer terminal first output", "session_id", c.target.SessionID, "source", "live", "bytes", len(output.data))
+				diagnosticlog.TryInfo("peer terminal first output", "source", "live", "bytes", len(output.data))
 				firstOutput = false
 			}
 			select {
@@ -851,7 +850,7 @@ func (c *helperTerminalConn) Close() error {
 		return nil
 	}
 	payload, _ := json.Marshal(map[string]any{"session_id": c.target.SessionID, "attachment_id": c.attachmentID})
-	_ = c.writeFrame(helperFrame{Type: "detach", RequestID: helperID("req_"), Version: helperProtocolVersion, Payload: payload})
+	_ = c.writeFrame(helperFrame{Type: "detach", RequestID: helperID("request"), Version: helperProtocolVersion, Payload: payload})
 	return c.message.Close()
 }
 
@@ -949,12 +948,8 @@ func decodeHelperError(frame helperFrame) error {
 	return &remote
 }
 
-func helperID(prefix string) string {
-	var value [12]byte
-	if _, err := io.ReadFull(rand.Reader, value[:]); err != nil {
-		return prefix + fmt.Sprintf("%d", time.Now().UnixNano())
-	}
-	return prefix + hex.EncodeToString(value[:])
+func helperID(noun string) string {
+	return noun + "_" + uuid.NewString()
 }
 
 func deadlineRemaining(ctx context.Context) time.Duration {

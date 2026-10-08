@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -19,6 +18,16 @@ var (
 	ErrStatusInvalid = errors.New("invalid config sync status")
 	safeStatusCode   = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 )
+
+type statusReadFailure struct{ cause error }
+
+func (*statusReadFailure) Error() string { return ErrStatusInvalid.Error() }
+func (e *statusReadFailure) Unwrap() []error {
+	if e == nil || e.cause == nil {
+		return []error{ErrStatusInvalid}
+	}
+	return []error{ErrStatusInvalid, e.cause}
+}
 
 var canonicalStates = map[string]struct{}{
 	"disabled": {}, "consent_required": {}, "restoring": {}, "watching": {},
@@ -140,7 +149,7 @@ func ReadStatus(path string, summaryLimit int) (Status, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&status); err != nil {
-		return Status{}, fmt.Errorf("%w: %v", ErrStatusInvalid, err)
+		return Status{}, &statusReadFailure{cause: err}
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return Status{}, ErrStatusInvalid

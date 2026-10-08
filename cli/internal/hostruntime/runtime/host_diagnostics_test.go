@@ -24,7 +24,7 @@ func TestHostDiagnosticsIsLoopbackBoundedAndDeterministic(t *testing.T) {
 	if err := tracker.Update(health.HealthUpdate{
 		Dimension: health.DimensionService, Status: health.StatusReady, Code: "ready",
 		Summary: "Runtime is ready at /Users/alice and https://runtime.example.test.", RepairAction: "No action is required.",
-		CorrelationID: "corr_test", Retry: health.RetryNone,
+		CorrelationID: "correlation_test", Retry: health.RetryNone,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestHostDiagnosticsIsLoopbackBoundedAndDeterministic(t *testing.T) {
 	if _, err := events.Record(observability.EventInput{
 		At: now, Severity: observability.SeverityInfo, Component: observability.DimensionService,
 		Name: "runtime_ready", Code: "ready", Outcome: observability.OutcomeStateChange,
-		Message: "Runtime is ready.", CorrelationID: "corr_test",
+		Message: "Runtime is ready.", CorrelationID: "correlation_test",
 		Generations: observability.Generations{Config: 3}, Retry: observability.RetryNone,
 	}); err != nil {
 		t.Fatal(err)
@@ -136,7 +136,7 @@ func TestHostDiagnosticsEventLimitIsBounded(t *testing.T) {
 		if _, err := events.Record(observability.EventInput{
 			At: at.Add(time.Duration(index) * time.Second), Severity: observability.SeverityInfo,
 			Component: observability.DimensionService, Name: "runtime_ready", Code: "ready",
-			Outcome: observability.OutcomeSuccess, Message: "ready", CorrelationID: "corr_test",
+			Outcome: observability.OutcomeSuccess, Message: "ready", CorrelationID: "correlation_test",
 			Retry: observability.RetryNone,
 		}); err != nil {
 			t.Fatal(err)

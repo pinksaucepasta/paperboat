@@ -212,7 +212,7 @@ func newRuntimeEnrollmentServer(t *testing.T) *httptest.Server {
 			writeRuntimeEnvelope(t, w, map[string]any{
 				"schema": api.TunnelV1Schema, "kind": "connector_activation", "account_id": "account_01",
 				"tunnel_id": parts[3], "connector_id": "connector_runtime_01", "host_id": "host_01",
-				"stable_endpoint_id": "123e4567-e89b-12d3-a456-426614174000", "credential_generation": 3, "process_generation": 2,
+				"stable_endpoint_id": "endpoint_123e4567-e89b-42d3-a456-426614174000", "credential_generation": 3, "process_generation": 2,
 				"operation": map[string]any{
 					"schema": api.TunnelV1Schema, "kind": "operation", "id": "operation_runtime_01", "resource_kind": "connector", "resource_id": "connector_runtime_01",
 					"phase": "connecting", "state": "running", "progress": 60, "retrying": false,

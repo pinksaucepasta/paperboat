@@ -56,9 +56,9 @@ func createTemporaryFile(directory, base string) (*os.File, string, error) {
 		}
 		file := os.NewFile(uintptr(handle), path)
 		if file == nil {
-			_ = windows.CloseHandle(handle)
-			_ = os.Remove(path)
-			return nil, "", ErrUnsafePath
+			closeErr := windows.CloseHandle(handle)
+			removeErr := os.Remove(path)
+			return nil, "", safeStoreFailure("release eligibility staging file could not be owned", ErrUnsafePath, closeErr, removeErr)
 		}
 		return file, path, nil
 	}
@@ -66,14 +66,14 @@ func createTemporaryFile(directory, base string) (*os.File, string, error) {
 }
 
 func validateParentSecurity(path string, _ os.FileInfo) error {
-	if !windowsRealDirectory(path) {
+	real, err := windowsRealDirectory(path)
+	if err != nil {
+		return safeStoreFailure("release eligibility directory could not be inspected", ErrUnsafePath, err)
+	}
+	if !real {
 		return ErrUnsafePath
 	}
-	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
-	if err != nil || !windowssecurity.OwnerMatchesSID(path, system) || !windowssecurity.ProtectedDACLMatches(path, windowsEligibilityDirectoryDACL) {
-		return ErrUnsafePath
-	}
-	return nil
+	return validateWindowsObjectSecurity(path, windowsEligibilityDirectoryDACL)
 }
 
 func validateRecordSecurity(path string, info os.FileInfo) error {
@@ -87,59 +87,101 @@ func validateRecordSecurity(path string, info os.FileInfo) error {
 // final names. It is called before bytes are written and after replacement, so
 // os.CreateTemp never exposes an unprotected deferral payload.
 func secureRecordFile(path string) error {
-	if !windowsRealFile(path) {
+	real, err := windowsRealFile(path)
+	if err != nil {
+		return safeStoreFailure("release eligibility record could not be inspected", ErrUnsafePath, err)
+	}
+	if !real {
 		return ErrUnsafePath
 	}
 	descriptor, err := windows.SecurityDescriptorFromString(windowsEligibilityRecordDACL)
 	if err != nil {
-		return ErrUnsafePath
+		return safeStoreFailure("release eligibility record security descriptor is unavailable", ErrUnsafePath, err)
 	}
 	dacl, _, err := descriptor.DACL()
 	if err != nil {
-		return ErrUnsafePath
+		return safeStoreFailure("release eligibility record ACL is unavailable", ErrUnsafePath, err)
 	}
 	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
 	if err != nil {
-		return ErrUnsafePath
+		return safeStoreFailure("release eligibility system owner is unavailable", ErrUnsafePath, err)
 	}
 	if err := windowssecurity.WithRestorePrivilege(func() error {
 		return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, system, nil, dacl, nil)
 	}); err != nil {
-		return ErrUnsafePath
+		return safeStoreFailure("release eligibility record security could not be applied", ErrUnsafePath, err)
 	}
-	if !windowssecurity.OwnerMatchesSID(path, system) || !windowssecurity.ProtectedDACLMatches(path, windowsEligibilityRecordDACL) {
-		return ErrUnsafePath
-	}
-	return nil
+	return validateWindowsObjectSecurity(path, windowsEligibilityRecordDACL)
 }
 
-func windowsRealDirectory(path string) bool {
+func windowsRealDirectory(path string) (bool, error) {
 	info, err := os.Lstat(path)
-	if err != nil || info == nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return false
+	if err != nil {
+		return false, err
 	}
-	attributes, err := windows.GetFileAttributes(windows.StringToUTF16Ptr(path))
-	return err == nil && attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT == 0
+	if info == nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return false, nil
+	}
+	encoded, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return false, err
+	}
+	attributes, err := windows.GetFileAttributes(encoded)
+	if err != nil {
+		return false, err
+	}
+	return attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT == 0, nil
 }
 
-func windowsRealFile(path string) bool {
+func windowsRealFile(path string) (bool, error) {
 	info, err := os.Lstat(path)
-	if err != nil || info == nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-		return false
+	if err != nil {
+		return false, err
 	}
-	attributes, err := windows.GetFileAttributes(windows.StringToUTF16Ptr(path))
-	return err == nil && attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT == 0
+	if info == nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return false, nil
+	}
+	encoded, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return false, err
+	}
+	attributes, err := windows.GetFileAttributes(encoded)
+	if err != nil {
+		return false, err
+	}
+	return attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT == 0, nil
 }
 
 // validateRecordPath performs the path-dependent Windows owner/DACL check.
-// It exists separately from validateRecordSecurity because os.FileInfo does
-// not retain its full path.
+// os.FileInfo does not retain its full path.
 func validateRecordPath(path string) error {
-	if !windowsRealFile(path) {
+	real, err := windowsRealFile(path)
+	if err != nil {
+		return safeStoreFailure("release eligibility record could not be inspected", ErrUnsafePath, err)
+	}
+	if !real {
 		return ErrUnsafePath
 	}
+	return validateWindowsObjectSecurity(path, windowsEligibilityRecordDACL)
+}
+
+func validateWindowsObjectSecurity(path, expected string) error {
 	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
-	if err != nil || !windowssecurity.OwnerMatchesSID(path, system) || !windowssecurity.ProtectedDACLMatches(path, windowsEligibilityRecordDACL) {
+	if err != nil {
+		return safeStoreFailure("release eligibility system owner is unavailable", ErrUnsafePath, err)
+	}
+	owner, err := windowssecurity.CheckOwnerMatchesSID(path, system)
+	if err != nil {
+		return safeStoreFailure("release eligibility owner could not be inspected", ErrUnsafePath, err)
+	}
+	if !owner {
+		return ErrUnsafePath
+	}
+	protected, err := windowssecurity.CheckProtectedDACLMatches(path, expected)
+	if err != nil {
+		return safeStoreFailure("release eligibility ACL could not be inspected", ErrUnsafePath, err)
+	}
+	if !protected {
 		return ErrUnsafePath
 	}
 	return nil

@@ -4,17 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
 	"io"
-	"log/slog"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcastserver"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configapply"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
@@ -45,26 +44,30 @@ type TerminalJoinRecorder func(context.Context, TerminalJoin) error
 type DispatcherConfig struct {
 	RecordTerminalJoin TerminalJoinRecorder
 	BrowserOutput      *browserbroadcastserver.Registry
-	Sessions           *session.Manager
+	Sessions           session.Service
 	ConfigApply        configapply.Handler
+	ConfigCompare      ConfigComparisonReader
 	Health             HealthSource
 	SessionLauncher    SessionLauncher
 	WorkspaceRoot      string
 	Random             io.Reader
 	Now                func() time.Time
+	FileTransfers      *filetransfer.Service
 	Writers            *filetransfer.WriterRegistry
-	Exec               *execprocess.Manager
+	Exec               execprocess.Service
 	SSH                *managedssh.Host
 	Capabilities       CapabilityGate
 }
 
 type Dispatcher struct {
-	config DispatcherConfig
-	ssh    sshStreamRegistry
+	compareGate           chan struct{}
+	config                DispatcherConfig
+	browserTransferCreate chan struct{}
+	ssh                   sshStreamRegistry
 }
 
 type terminalOutputStream struct {
-	manager            *session.Manager
+	manager            session.Service
 	sessionID          string
 	attachmentID       string
 	expectedGeneration uint64
@@ -86,12 +89,18 @@ func NewDispatcher(config DispatcherConfig) (*Dispatcher, error) {
 	if config.Now == nil {
 		config.Now = func() time.Time { return time.Now().UTC() }
 	}
-	return &Dispatcher{config: config}, nil
+	return &Dispatcher{compareGate: make(chan struct{}, 1), config: config, browserTransferCreate: make(chan struct{}, 1)}, nil
 }
 
 func (d *Dispatcher) Capabilities() []string {
 	capabilities := []string{"health.v1"}
 	capabilities = append(capabilities, "terminal.v1")
+	if d.config.FileTransfers != nil {
+		capabilities = append(capabilities, "file-transfer.v1")
+	}
+	if d.config.ConfigCompare != nil {
+		capabilities = append(capabilities, "config.compare.v1")
+	}
 	if d.config.ConfigApply != nil {
 		capabilities = append(capabilities, "config.apply.v1")
 	}
@@ -105,14 +114,19 @@ func (d *Dispatcher) Capabilities() []string {
 }
 
 func (d *Dispatcher) Handle(ctx context.Context, authorization Authorization, capability string, payload json.RawMessage) operation.Outcome {
+	ctx = envinject.WithLaunchContext(ctx, authorization.WorkspaceID, authorization.ActorAccountID)
 	if capability != "health.v1" && !d.capabilityEnabled(capability) {
 		return failure("capability_disabled")
 	}
 	switch capability {
+	case "file-transfer.v1":
+		return d.browserFileTransfer(ctx, authorization, payload)
 	case "terminal.v1":
 		return d.terminal(ctx, authorization, payload)
 	case "health.v1":
 		return result(d.config.Health.Snapshot())
+	case "config.compare.v1":
+		return d.configCompare(ctx, authorization, payload)
 	case "config.apply.v1":
 		return d.configApply(ctx, authorization, payload)
 	case "exec.v1":
@@ -265,6 +279,9 @@ func (d *Dispatcher) HandleControl(_ context.Context, authorization Authorizatio
 }
 
 func (d *Dispatcher) OpenStream(ctx context.Context, authorization Authorization, capability string, payload json.RawMessage, outcome operation.Outcome, replay bool) (OutputStream, bool, error) {
+	if capability == "config.compare.v1" && outcome.ErrorCode == "" {
+		return d.openConfigComparison(ctx, authorization, payload, outcome)
+	}
 	if capability == "ssh.v1" {
 		return d.openSSHStream(ctx, authorization, payload, outcome)
 	}
@@ -463,8 +480,8 @@ func execResult(value any, err error) operation.Outcome {
 }
 
 type execOutputStream struct {
-	execution          *execprocess.Execution
-	reader             *execprocess.Reader
+	execution          execprocess.ExecutionService
+	reader             execprocess.ReaderService
 	lastOutputSequence uint64
 }
 
@@ -766,20 +783,13 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 		}
 		value, err := d.config.SessionLauncher.Launch(ctx, process.LaunchRequest{ID: request.SessionID, Name: request.Name, CWD: cwd, Dimensions: pty.Dimensions{Columns: request.Columns, Rows: request.Rows}, Environment: request.Environment})
 		if err != nil && !errors.Is(err, session.ErrSessionExists) {
-			// Keep terminal names, paths, output, and environment out of logs.
-			root := err
-			for errors.Unwrap(root) != nil {
-				root = errors.Unwrap(root)
-			}
-			var errno syscall.Errno
-			_ = errors.As(err, &errno)
-			slog.Warn("terminal creation failed", "error_type", fmt.Sprintf("%T", root), "errno", int(errno), "invalid_cwd", errors.Is(err, pty.ErrInvalidCWD), "invalid_session", errors.Is(err, session.ErrInvalidSession), "launch_rejected", errors.Is(err, process.ErrLaunchRejected))
+			fault := errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "sessions", "command", "terminal_session_failed", err)
 			outcome := domainResult(nil, err)
 			if outcome.ErrorCode == "invalid_request" {
 				return failureDetails("terminal_create_failed", struct {
 					ErrorType string `json:"error_type"`
 					Errno     int    `json:"errno"`
-				}{fmt.Sprintf("%T", root), int(errno)})
+				}{fault.ErrorType, fault.Errno})
 			}
 			return outcome
 		}
@@ -813,7 +823,7 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 			attachmentID = authorization.BrowserAttachmentID
 		}
 		if attachmentID == "" {
-			attachmentID = d.randomID("att_")
+			attachmentID = d.randomID()
 		}
 		if attachmentID == "" {
 			return failure("unavailable")
@@ -974,17 +984,17 @@ func (d *Dispatcher) cwd(value string) (string, bool) {
 	if !filepath.IsAbs(value) {
 		value = filepath.Join(d.config.WorkspaceRoot, value)
 	}
-	clean := filepath.Clean(value)
-	relative, err := filepath.Rel(d.config.WorkspaceRoot, clean)
-	return clean, err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+	// Authenticated terminal creation launches the enrolled user's shell. The
+	// workspace root is the default, not a filesystem sandbox for that shell.
+	return filepath.Clean(value), !strings.ContainsRune(value, '\x00')
 }
 
-func (d *Dispatcher) randomID(prefix string) string {
-	var data [16]byte
-	if _, err := io.ReadFull(d.config.Random, data[:]); err != nil {
+func (d *Dispatcher) randomID() string {
+	id, err := uuid.NewRandomFromReader(d.config.Random)
+	if err != nil {
 		return ""
 	}
-	return prefix + hex.EncodeToString(data[:])
+	return "attachment_" + id.String()
 }
 
 func decodeStrict(payload []byte, target any) error {

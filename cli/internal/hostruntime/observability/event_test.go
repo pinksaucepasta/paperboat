@@ -21,7 +21,7 @@ func testEventInput() EventInput {
 		Code:          "route_stale",
 		Outcome:       OutcomeStateChange,
 		Message:       "Route assignment is stale.",
-		CorrelationID: "corr_event_1",
+		CorrelationID: "correlation_event_1",
 		IDs:           SafeIDs{AccountID: "account_01", TunnelID: "tunnel_01", RouteID: "route_02", ConnectorID: "connector_03", ResourceID: "resource_04", SessionID: "session_05", ProcessID: "process_06", ConfigID: "config_07"},
 		Generations:   Generations{Config: 4, Route: 5, Assignment: 6, Process: 7, Session: 8},
 		Retry:         RetryScheduled,

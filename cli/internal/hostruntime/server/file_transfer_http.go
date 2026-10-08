@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
@@ -170,8 +171,13 @@ func (h *FileTransferHandler) authorize(writer http.ResponseWriter, request *htt
 		return Authorization{}, release, false
 	}
 	authorizer, err := h.config.Authorizer(token)
-	if err != nil || authorizer == nil {
+	if err != nil {
 		writeHTTPError(writer, requestID, "unauthorized", http.StatusUnauthorized, false)
+		return Authorization{}, release, false
+	}
+	if authorizer == nil {
+		reportAuthorizationFailure(request.Context(), ErrInvalidConfiguration)
+		writeHTTPError(writer, requestID, "storage_unavailable", http.StatusServiceUnavailable, true)
 		return Authorization{}, release, false
 	}
 	if closer, ok := authorizer.(AuthorizationCloser); ok {
@@ -181,7 +187,11 @@ func (h *FileTransferHandler) authorize(writer http.ResponseWriter, request *htt
 	authz, err := authorizer.Authorize(request.Context(), frame)
 	if err != nil || authz.JournalBinding == "" {
 		release()
-		writeHTTPError(writer, requestID, "unauthorized", http.StatusUnauthorized, false)
+		if reportAuthorizationFailure(request.Context(), err) {
+			writeHTTPError(writer, requestID, "storage_unavailable", http.StatusServiceUnavailable, true)
+		} else {
+			writeHTTPError(writer, requestID, "unauthorized", http.StatusUnauthorized, false)
+		}
 		return Authorization{}, func() {}, false
 	}
 	return authz, release, true
@@ -202,17 +212,30 @@ func (h *FileTransferHandler) serveCollection(writer http.ResponseWriter, reques
 			}
 			limit = parsed
 		}
+		offset := 0
+		if raw := request.URL.Query().Get("offset"); raw != "" {
+			value, err := strconv.Atoi(raw)
+			if err != nil || value < 0 {
+				writeHTTPError(writer, requestID, "invalid_request", http.StatusBadRequest, false)
+				return
+			}
+			offset = value
+		}
 		sessionID := request.URL.Query().Get("session_id")
 		if authorization.SessionID != "" && sessionID != authorization.SessionID {
 			writeHTTPError(writer, requestID, "not_found_or_forbidden", http.StatusNotFound, false)
 			return
 		}
-		items, err := h.config.Service.List(request.Context(), authorization.SourceMachineID, authorization.UserID, sessionID, limit)
-		if err != nil {
-			writeFileTransferError(writer, requestID, err)
+		if !protocol.ValidFileTransferHistoryFilters(request.URL.Query().Get("q"), request.URL.Query().Get("state")) {
+			writeHTTPError(writer, requestID, "invalid_request", http.StatusBadRequest, false)
 			return
 		}
-		writeJSON(writer, http.StatusOK, map[string]any{"items": items})
+		page, err := h.config.Service.List(request.Context(), authorization.SourceMachineID, authorization.UserID, sessionID, limit, offset, request.URL.Query().Get("q"), request.URL.Query().Get("state"))
+		if err != nil {
+			writeFileTransferError(request.Context(), "command", writer, requestID, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, page)
 		return
 	}
 	if request.Method != http.MethodPost {
@@ -240,7 +263,10 @@ func (h *FileTransferHandler) serveCollection(writer http.ResponseWriter, reques
 		writeHTTPError(writer, requestID, "invalid_request", http.StatusBadRequest, false)
 		return
 	}
-	if transfers, exists, matches := h.recoverBatch(request.Context(), authorization, input); exists {
+	if transfers, exists, matches, recoverErr := h.recoverBatch(request.Context(), authorization, input); recoverErr != nil {
+		writeFileTransferError(request.Context(), "command", writer, requestID, recoverErr)
+		return
+	} else if exists {
 		if !matches {
 			writeHTTPError(writer, requestID, "operation_conflict", http.StatusConflict, false)
 			return
@@ -259,26 +285,36 @@ func (h *FileTransferHandler) serveCollection(writer http.ResponseWriter, reques
 		clientID, resolveErr = h.config.ResolveDeliveryClient(authorization, input)
 	}
 	if resolveErr != nil {
-		writeHTTPError(writer, requestID, "no_active_writer", http.StatusConflict, false)
+		writeFileTransferError(request.Context(), "peer_authority", writer, requestID, resolveErr)
 		return
 	}
+	var createFailure error
 	outcome, replay, err := h.config.Journal.Execute(request.Context(), operationID, canonical, func(ctx context.Context) operation.Outcome {
 		create := filetransfer.CreateRequest{BatchID: input.BatchID, SourceMachineID: input.SourceMachineID, DestinationMachineID: input.DestinationMachineID, InitiatingUserID: input.InitiatingUserID, SessionID: input.SessionID, DeliveryClientID: clientID, Files: input.Files}
 		transfers, createErr := h.config.Service.Create(ctx, create)
 		if createErr != nil {
+			createFailure = createErr
 			return operation.Outcome{ErrorCode: fileTransferErrorCode(createErr)}
 		}
 		encoded, marshalErr := json.Marshal(createFileTransferResponse{BatchID: input.BatchID, Transfers: transfers})
 		if marshalErr != nil {
+			createFailure = marshalErr
 			return operation.Outcome{ErrorCode: "storage_unavailable"}
 		}
 		return operation.Outcome{Result: encoded}
 	})
 	if err != nil {
-		writeHTTPError(writer, requestID, operationErrorCode(err), operationHTTPStatus(operationErrorCode(err)), false)
+		code := operationErrorCode(err)
+		if code == "storage_unavailable" {
+			reportFileTransferFailure(request.Context(), "command", err)
+		}
+		writeHTTPError(writer, requestID, code, operationHTTPStatus(code), false)
 		return
 	}
 	if outcome.ErrorCode != "" {
+		if createFailure != nil {
+			reportFileTransferFailure(request.Context(), "command", createFailure)
+		}
 		writeHTTPError(writer, requestID, outcome.ErrorCode, fileTransferHTTPStatus(outcome.ErrorCode), false)
 		return
 	}
@@ -290,13 +326,16 @@ func (h *FileTransferHandler) serveCollection(writer http.ResponseWriter, reques
 	_, _ = writer.Write(outcome.Result)
 }
 
-func (h *FileTransferHandler) recoverBatch(ctx context.Context, authorization Authorization, input CreateFileTransferRequest) ([]store.FileTransfer, bool, bool) {
+func (h *FileTransferHandler) recoverBatch(ctx context.Context, authorization Authorization, input CreateFileTransferRequest) ([]store.FileTransfer, bool, bool, error) {
 	existing, err := h.config.Service.Batch(ctx, input.BatchID)
 	if err != nil {
-		return nil, false, false
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, false, false, nil
+		}
+		return nil, false, false, err
 	}
 	if len(existing) != len(input.Files) {
-		return nil, true, false
+		return nil, true, false, nil
 	}
 	ordered := make([]store.FileTransfer, len(input.Files))
 	used := make([]bool, len(existing))
@@ -312,12 +351,12 @@ func (h *FileTransferHandler) recoverBatch(ctx context.Context, authorization Au
 			}
 		}
 		if matched < 0 {
-			return nil, true, false
+			return nil, true, false, nil
 		}
 		used[matched] = true
 		ordered[inputIndex] = existing[matched]
 	}
-	return ordered, true, true
+	return ordered, true, true, nil
 }
 
 func (h *FileTransferHandler) serveManifest(writer http.ResponseWriter, request *http.Request, requestID string, authorization Authorization, id string) {
@@ -330,7 +369,7 @@ func (h *FileTransferHandler) serveManifest(writer http.ResponseWriter, request 
 		writeJSON(writer, http.StatusOK, transfer)
 	case http.MethodDelete:
 		if err := h.config.Service.Cancel(request.Context(), id); err != nil {
-			writeFileTransferError(writer, requestID, err)
+			writeFileTransferError(request.Context(), "delivery", writer, requestID, err)
 			return
 		}
 		writer.WriteHeader(http.StatusNoContent)
@@ -381,7 +420,7 @@ func (h *FileTransferHandler) serveContent(writer http.ResponseWriter, request *
 		updated, err := h.config.Service.AppendVerified(request.Context(), id, offset, request.Body, [sha256.Size]byte(decoded))
 		close(stopClose)
 		if err != nil {
-			writeFileTransferError(writer, requestID, err)
+			writeFileTransferError(request.Context(), "delivery", writer, requestID, err)
 			return
 		}
 		writer.Header().Set(HeaderUploadOffset, strconv.FormatInt(updated.CommittedOffset, 10))
@@ -393,7 +432,7 @@ func (h *FileTransferHandler) serveContent(writer http.ResponseWriter, request *
 		}
 		file, current, err := h.config.Service.OpenContent(request.Context(), id)
 		if err != nil {
-			writeFileTransferError(writer, requestID, err)
+			writeFileTransferError(request.Context(), "stream_open", writer, requestID, err)
 			return
 		}
 		defer file.Close()
@@ -435,7 +474,7 @@ func (h *FileTransferHandler) serveComplete(writer http.ResponseWriter, request 
 	}
 	transfer, err := h.config.Service.Complete(request.Context(), id)
 	if err != nil {
-		writeFileTransferError(writer, requestID, err)
+		writeFileTransferError(request.Context(), "delivery", writer, requestID, err)
 		return
 	}
 	result := completeFileTransferResponse{Transfer: transfer}
@@ -446,7 +485,7 @@ func (h *FileTransferHandler) serveComplete(writer http.ResponseWriter, request 
 	if transfer.State == "published" {
 		published, err := h.config.Service.PublishedPath(request.Context(), id)
 		if err != nil {
-			writeFileTransferError(writer, requestID, err)
+			writeFileTransferError(request.Context(), "delivery", writer, requestID, err)
 			return
 		}
 		result.Result.Path = published
@@ -476,7 +515,7 @@ func (h *FileTransferHandler) servePending(writer http.ResponseWriter, request *
 	for {
 		transfers, err := h.config.Service.Pending(request.Context(), authorization.ClientID, sessionID, 10)
 		if err != nil {
-			writeFileTransferError(writer, requestID, err)
+			writeFileTransferError(request.Context(), "delivery", writer, requestID, err)
 			return
 		}
 		if len(transfers) > 0 {
@@ -518,7 +557,7 @@ func (h *FileTransferHandler) serveReceipt(writer http.ResponseWriter, request *
 		return
 	}
 	if err := h.config.Service.Receipt(request.Context(), id, transfer.DeliveryClientID, input.ResultCode, input.Path); err != nil {
-		writeFileTransferError(writer, requestID, err)
+		writeFileTransferError(request.Context(), "delivery", writer, requestID, err)
 		return
 	}
 	writer.WriteHeader(http.StatusNoContent)
@@ -541,6 +580,14 @@ func validReceipt(code, path string) bool {
 
 func (h *FileTransferHandler) owned(writer http.ResponseWriter, request *http.Request, requestID string, authorization Authorization, id string) (store.FileTransfer, bool) {
 	transfer, err := h.config.Service.Get(request.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeHTTPError(writer, requestID, "not_found_or_forbidden", http.StatusNotFound, false)
+		} else {
+			writeFileTransferError(request.Context(), "peer_authority", writer, requestID, err)
+		}
+		return store.FileTransfer{}, false
+	}
 	owned := transfer.DeliveryClientID != "" && transfer.DeliveryClientID == authorization.ClientID && (authorization.SessionID == "" || transfer.SessionID == authorization.SessionID)
 	if authorization.SourceMachineID != "" && transfer.SourceMachineID == authorization.SourceMachineID && (authorization.UserID == "" || transfer.InitiatingUserID == authorization.UserID) && (authorization.SessionID == "" || transfer.SessionID == authorization.SessionID) {
 		owned = true
@@ -551,7 +598,7 @@ func (h *FileTransferHandler) owned(writer http.ResponseWriter, request *http.Re
 	if h.config.Owns != nil {
 		owned = h.config.Owns(authorization, transfer)
 	}
-	if err != nil || !owned {
+	if !owned {
 		writeHTTPError(writer, requestID, "not_found_or_forbidden", http.StatusNotFound, false)
 		return store.FileTransfer{}, false
 	}
@@ -566,26 +613,47 @@ func writeJSON(writer http.ResponseWriter, status int, value any) {
 	writer.WriteHeader(status)
 	_ = json.NewEncoder(writer).Encode(value)
 }
-func writeFileTransferError(writer http.ResponseWriter, requestID string, err error) {
-	code := fileTransferErrorCode(err)
-	writeHTTPError(writer, requestID, code, fileTransferHTTPStatus(code), code == "storage_unavailable" || code == "resource_limit")
+func writeFileTransferError(ctx context.Context, stage string, writer http.ResponseWriter, requestID string, err error) {
+	code := reportFileTransferFailure(ctx, stage, err)
+	writeHTTPError(writer, requestID, code, fileTransferHTTPStatus(code), code == "storage_unavailable" || code == "resource_limit" || code == "no_active_writer")
 }
+
+func reportFileTransferFailure(ctx context.Context, stage string, err error) string {
+	code := fileTransferErrorCode(err)
+	switch code {
+	case "storage_unavailable":
+		errorreport.Current().CaptureFailure(ctx, "paperboat-daemon", "transfer", stage, "file_transfer_failed", err)
+	case "delivery_timeout":
+		errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "transfer", stage, "file_transfer_failed", err)
+	}
+	return code
+}
+
 func fileTransferErrorCode(err error) string {
 	var transferErr *filetransfer.Error
-	if errors.As(err, &transferErr) {
+	if errors.As(err, &transferErr) && transferErr != nil {
 		return string(transferErr.Code)
 	}
-	if errors.Is(err, context.Canceled) {
-		return "canceled"
+	if errors.Is(err, store.ErrNotFound) {
+		return "not_found"
 	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return "delivery_timeout"
+	if errors.Is(err, store.ErrConflict) {
+		return "state_conflict"
+	}
+	if errors.Is(err, filetransfer.ErrNoActiveWriter) {
+		return "no_active_writer"
+	}
+	if allErrorLeavesMatch(err, func(leaf error) bool { return leaf == context.Canceled || leaf == context.DeadlineExceeded }) {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return "delivery_timeout"
+		}
+		return "canceled"
 	}
 	return "storage_unavailable"
 }
 func fileTransferHTTPStatus(code string) int {
 	switch code {
-	case "invalid_path":
+	case "invalid_path", "not_found":
 		return http.StatusNotFound
 	case "invalid_size", "batch_limit":
 		return http.StatusBadRequest

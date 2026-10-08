@@ -22,7 +22,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
-	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 )
 
 func InstallRunningBinary(ctx context.Context, executable string, source installsource.Source, directory string) (string, error) {
@@ -67,7 +66,7 @@ func InstallRunningBinary(ctx context.Context, executable string, source install
 		return "", err
 	}
 	defer lock.Close()
-	request := hostinstall.Request{Schema: hostinstall.SchemaV1, Platform: runtime.GOOS, User: account.Username, UID: uid, GID: gid, Group: group.Name, Home: account.HomeDir, Executable: executable, Source: source, SetupMode: "awaiting_enrollment"}
+	request := hostinstall.Request{Schema: hostinstall.SchemaV1, Platform: runtime.GOOS, User: account.Username, UID: uid, GID: gid, Group: group.Name, Home: account.HomeDir, Executable: executable, Source: source, EnrollmentPending: true}
 	invoke := func(callCtx context.Context, operation string) error {
 		body, err := json.Marshal(request)
 		if err != nil {
@@ -152,15 +151,5 @@ func InstallRunningBinary(ctx context.Context, executable string, source install
 		return "", fmt.Errorf("Paperboat is installed, but its manuals could not be installed; retry pb install to repair them: %w", err)
 	}
 	installed := filepath.Join(directory, "pb")
-	if runtime.GOOS == "darwin" {
-		// This foreground approval occurs after the verified local service and
-		// its installation have committed. A denied browser CA must not prevent
-		// native access or undo that working installation.
-		trust := exec.CommandContext(ctx, "/usr/bin/sudo", "--", layout.Binary, "--no-customization", "daemon", "device-guard", "trust", "--suffix", splitdns.BrowserSuffix)
-		trust.Stdin, trust.Stdout, trust.Stderr = os.Stdin, os.Stderr, os.Stderr
-		if err := trust.Run(); err != nil {
-			return installed, &BrowserTrustPendingError{Cause: err, Recovery: "retry Paperboat installation and approve its macOS certificate trust request"}
-		}
-	}
 	return installed, nil
 }

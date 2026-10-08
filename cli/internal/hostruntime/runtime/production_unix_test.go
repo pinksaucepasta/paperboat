@@ -11,13 +11,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"reflect"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -25,7 +22,6 @@ import (
 
 	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
 	"golang.org/x/crypto/ssh"
@@ -99,10 +95,10 @@ type managedSSHTestClient struct {
 	keysProof        []byte
 }
 
-func (c *managedSSHTestClient) ObserveManagedSSHHostKeys(_ context.Context, machineID, identity, operationID, setID string, generation, observation uint64, keys []string, proof []byte) (clientapi.ManagedSSHHostKeySet, error) {
+func (c *managedSSHTestClient) ObserveManagedSSHHostKeys(_ context.Context, machineID, identity, operationID string, generation, observation uint64, keys []string, proof []byte) (clientapi.ManagedSSHHostKeySet, error) {
 	wantFingerprint := sha256.Sum256([]byte("host-set-one"))
 	wantObserveOperation, _ := managedSSHInitialOperationIDs(runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, 7, wantFingerprint)
-	if machineID != "machine_1" || operationID != wantObserveOperation || setID != "set_1" || generation != 4 || observation != 7 || len(keys) != 1 {
+	if machineID != "machine_1" || operationID != wantObserveOperation || generation != 4 || observation != 7 || len(keys) != 1 {
 		return clientapi.ManagedSSHHostKeySet{}, errors.New("wrong host-key observation")
 	}
 	c.observedIdentity, c.observedProof = identity, append([]byte(nil), proof...)
@@ -123,7 +119,7 @@ func TestManagedSSHAuthorityUsesCurrentCredentialAndExactProofBodies(t *testing.
 	registration := runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}
 	fingerprint := sha256.Sum256([]byte("host-set-one"))
 	observeOperationID, keyOperationID := managedSSHInitialOperationIDs(registration, 7, fingerprint)
-	keys, active, err := reconcileManagedSSHAuthorityWithFingerprint(t.Context(), client, identity, registration, 7, "set_1", fingerprint, []string{"ssh-ed25519 AAAA host"})
+	keys, active, err := reconcileManagedSSHAuthorityWithFingerprint(t.Context(), client, identity, registration, 7, fingerprint, []string{"ssh-ed25519 AAAA host"})
 	if err != nil || !active || len(keys.Keys) != 1 {
 		t.Fatalf("keys=%#v active=%t err=%v", keys, active, err)
 	}
@@ -131,11 +127,10 @@ func TestManagedSSHAuthorityUsesCurrentCredentialAndExactProofBodies(t *testing.
 		t.Fatalf("identities=%q,%q proofs=%d", client.observedIdentity, client.keysIdentity, len(identity.proofs))
 	}
 	var observed struct {
-		SetID                 string   `json:"set_id"`
 		ObservationGeneration uint64   `json:"observation_generation"`
 		PublicKeys            []string `json:"public_keys"`
 	}
-	if json.Unmarshal(identity.proofs[0].body, &observed) != nil || observed.SetID != "set_1" || observed.ObservationGeneration != 7 || len(observed.PublicKeys) != 1 || identity.proofs[0].method != http.MethodPut || identity.proofs[0].path != "/v1/machines/machine_1/ssh-host-keys" {
+	if json.Unmarshal(identity.proofs[0].body, &observed) != nil || observed.ObservationGeneration != 7 || len(observed.PublicKeys) != 1 || identity.proofs[0].method != http.MethodPut || identity.proofs[0].path != "/v1/machines/machine_1/ssh-host-keys" {
 		t.Fatalf("observation proof = %#v body=%s", identity.proofs[0], identity.proofs[0].body)
 	}
 	if string(identity.proofs[1].body) != "{}" || identity.proofs[1].method != http.MethodPost || identity.proofs[1].path != "/v1/machines/machine_1/ssh-authorized-keys" {
@@ -163,6 +158,11 @@ func TestManagedSSHInitialOperationIDsBindExactHostKeyFingerprint(t *testing.T) 
 	if observeFirst == observeLater || keysFirst == keysLater {
 		t.Fatalf("different observation generations reused operation IDs: %q/%q vs %q/%q", observeFirst, keysFirst, observeLater, keysLater)
 	}
+	registration.InstallationGeneration++
+	observeReplacement, keysReplacement := managedSSHInitialOperationIDs(registration, 7, first)
+	if observeReplacement == observeFirst || keysReplacement == keysFirst {
+		t.Fatal("replacement installation reused prior observation identity")
+	}
 	if len(observeFirst) > 128 || len(keysFirst) > 128 {
 		t.Fatalf("operation IDs exceed machine-proof bound: %d/%d", len(observeFirst), len(keysFirst))
 	}
@@ -177,7 +177,7 @@ type rotatingManagedSSHClient struct {
 	hostCalls     int
 }
 
-func (c *rotatingManagedSSHClient) ObserveManagedSSHHostKeys(context.Context, string, string, string, string, uint64, uint64, []string, []byte) (clientapi.ManagedSSHHostKeySet, error) {
+func (c *rotatingManagedSSHClient) ObserveManagedSSHHostKeys(context.Context, string, string, string, uint64, uint64, []string, []byte) (clientapi.ManagedSSHHostKeySet, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	index := c.hostCalls
@@ -248,7 +248,7 @@ func TestManagedSSHKeyReconcilerConvergesAddAndRevocation(t *testing.T) {
 	home := managedSSHRuntimeTestHome(t)
 	client := &rotatingManagedSSHClient{keys: [][]string{{key}, nil}}
 	identity := &refreshingManagedSSHIdentity{}
-	service := &managedSSHKeyReconciler{client: client, identity: identity, registration: runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, workerGeneration: 9, setID: "set_1", publicKeys: []string{"ssh-ed25519 AAAA host"}, home: home, ownerUID: uint32(os.Getuid()), interval: 10 * time.Millisecond, timeout: time.Second}
+	service := &managedSSHKeyReconciler{client: client, identity: identity, registration: runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, workerGeneration: 9, publicKeys: []string{"ssh-ed25519 AAAA host"}, home: home, ownerUID: uint32(os.Getuid()), interval: 10 * time.Millisecond, timeout: time.Second}
 	if err := service.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +282,7 @@ func TestManagedSSHKeyReconcilerActivatesPromotedHostWithoutRestart(t *testing.T
 	home := managedSSHRuntimeTestHome(t)
 	client := &rotatingManagedSSHClient{hostStates: []string{"pending", "active"}, keys: [][]string{{key}}}
 	identity := &refreshingManagedSSHIdentity{}
-	service := &managedSSHKeyReconciler{client: client, identity: identity, registration: runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, workerGeneration: 10, setID: "set_1", publicKeys: []string{"ssh-ed25519 AAAA host"}, home: home, ownerUID: uint32(os.Getuid()), interval: 10 * time.Millisecond, timeout: time.Second}
+	service := &managedSSHKeyReconciler{client: client, identity: identity, registration: runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, workerGeneration: 10, publicKeys: []string{"ssh-ed25519 AAAA host"}, home: home, ownerUID: uint32(os.Getuid()), interval: 10 * time.Millisecond, timeout: time.Second}
 	if err := service.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +309,7 @@ func TestManagedSSHKeyReconcilerFailsClosedWhenAuthorityRefreshFails(t *testing.
 	key := managedSSHTestPublicKey(t)
 	home := managedSSHRuntimeTestHome(t)
 	client := &rotatingManagedSSHClient{keys: [][]string{{key}}, observeErrors: []error{nil, errors.New("authority unavailable")}}
-	service := &managedSSHKeyReconciler{client: client, identity: &refreshingManagedSSHIdentity{}, registration: runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, workerGeneration: 11, setID: "set_1", publicKeys: []string{"ssh-ed25519 AAAA host"}, home: home, ownerUID: uint32(os.Getuid()), interval: 10 * time.Millisecond, timeout: time.Second}
+	service := &managedSSHKeyReconciler{client: client, identity: &refreshingManagedSSHIdentity{}, registration: runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, workerGeneration: 11, publicKeys: []string{"ssh-ed25519 AAAA host"}, home: home, ownerUID: uint32(os.Getuid()), interval: 10 * time.Millisecond, timeout: time.Second}
 	if err := service.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +329,7 @@ func TestManagedSSHKeyReconcilerFailsClosedWhenAuthorityRefreshFails(t *testing.
 }
 
 func TestManagedSSHKeyReconcilerReportsTypedInitialAuthorityFailure(t *testing.T) {
-	service := &managedSSHKeyReconciler{client: &rotatingManagedSSHClient{observeErrors: []error{errors.New("authority unavailable")}}, identity: &refreshingManagedSSHIdentity{}, registration: runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, workerGeneration: 13, setID: "set_1", publicKeys: []string{"ssh-ed25519 AAAA host"}, home: t.TempDir(), ownerUID: uint32(os.Getuid()), interval: time.Hour, timeout: time.Second}
+	service := &managedSSHKeyReconciler{client: &rotatingManagedSSHClient{observeErrors: []error{errors.New("authority unavailable")}}, identity: &refreshingManagedSSHIdentity{}, registration: runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, workerGeneration: 13, publicKeys: []string{"ssh-ed25519 AAAA host"}, home: t.TempDir(), ownerUID: uint32(os.Getuid()), interval: time.Hour, timeout: time.Second}
 	if err := service.Start(t.Context()); !errors.Is(err, ErrManagedSSHUnavailable) {
 		t.Fatalf("Start error=%v, want managed SSH unavailable", err)
 	}
@@ -338,7 +338,7 @@ func TestManagedSSHKeyReconcilerReportsTypedInitialAuthorityFailure(t *testing.T
 func TestManagedSSHKeyReconcilerRemovesManagedKeysOnShutdown(t *testing.T) {
 	key := managedSSHTestPublicKey(t)
 	home := managedSSHRuntimeTestHome(t)
-	service := &managedSSHKeyReconciler{client: &rotatingManagedSSHClient{keys: [][]string{{key}}}, identity: &refreshingManagedSSHIdentity{}, registration: runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, workerGeneration: 12, setID: "set_1", publicKeys: []string{"ssh-ed25519 AAAA host"}, home: home, ownerUID: uint32(os.Getuid()), interval: time.Hour, timeout: time.Second}
+	service := &managedSSHKeyReconciler{client: &rotatingManagedSSHClient{keys: [][]string{{key}}}, identity: &refreshingManagedSSHIdentity{}, registration: runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, workerGeneration: 12, publicKeys: []string{"ssh-ed25519 AAAA host"}, home: home, ownerUID: uint32(os.Getuid()), interval: time.Hour, timeout: time.Second}
 	if err := service.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -371,7 +371,7 @@ func TestRuntimeObservationUsesRenewableIdentityAndExactBodyProof(t *testing.T) 
 	}))
 	defer server.Close()
 	proofs := &testProofSource{}
-	sender := &runtimeObservationSender{endpoint: server.URL + "/v1/runtime-observations", tokens: testTokenSource{}, proofs: proofs, operationID: func() (string, error) { return "op-1", nil }, environmentID: "prj_1", machineID: "mach_1", reporterVersion: "test", client: server.Client(), environment: &envinject.Provider{}, workerGeneration: 1, osBootID: "boot-1", serviceScope: "system", connector: runtimeObservationConnector{}}
+	sender := &runtimeObservationSender{endpoint: server.URL + "/v1/runtime-observations", tokens: testTokenSource{}, proofs: proofs, operationID: func() (string, error) { return "op-1", nil }, environmentID: "prj_1", machineID: "mach_1", reporterVersion: "test", client: server.Client(), workerGeneration: 1, osBootID: "boot-1", serviceScope: "system", connector: runtimeObservationConnector{}}
 	if err := sender.Send(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -383,97 +383,14 @@ func TestRuntimeObservationUsesRenewableIdentityAndExactBodyProof(t *testing.T) 
 	}
 }
 
-func TestEnvironmentInjectionRequiresHostSetup(t *testing.T) {
-	registration := runtimeidentity.Registration{SetupMode: "host", MachineID: "mach_1", InstallationGeneration: 1}
+func TestEnvironmentInjectionRequiresEnrollment(t *testing.T) {
+	registration := runtimeidentity.Registration{MachineID: "mach_1", InstallationGeneration: 1}
 	if !environmentInjectionEligible(registration) {
-		t.Fatal("BYOD host runtime did not enable ENV local key custody")
+		t.Fatal("machine host runtime did not enable ENV local key custody")
 	}
-	registration.SetupMode = "client"
+	registration.InstallationGeneration = 0
 	if environmentInjectionEligible(registration) {
-		t.Fatal("client-only machine enabled host ENV custody")
-	}
-}
-
-type runtimeTestEnvironmentProcessor struct {
-	variables map[string]string
-}
-
-func (p runtimeTestEnvironmentProcessor) Restore(context.Context, envinject.Cache) (envinject.Verified, error) {
-	return envinject.Verified{}, nil
-}
-
-func (p runtimeTestEnvironmentProcessor) Apply(_ context.Context, cache envinject.Cache, _ envinject.Bundle) (envinject.Cache, envinject.Verified, error) {
-	cache.Authority = &envinject.Cursor{Generation: 9, AuthorityID: "sha256:" + strings.Repeat("a", 64)}
-	cache.GlobalManifest = &envinject.ManifestEnvelope{Version: 7, KeyEpoch: 2, ManifestID: "sha256:" + strings.Repeat("b", 64), Envelope: "ciphertext-global"}
-	cache.MachineManifest = &envinject.ManifestEnvelope{Version: 4, KeyEpoch: 1, ManifestID: "sha256:" + strings.Repeat("c", 64), Envelope: "ciphertext-machine"}
-	return cache, envinject.Verified{
-		Authority: cache.Authority,
-		Global:    &envinject.ManifestCursor{Version: 7, KeyEpoch: 2, ManifestID: cache.GlobalManifest.ManifestID},
-		Machine:   &envinject.ManifestCursor{Version: 4, KeyEpoch: 1, ManifestID: cache.MachineManifest.ManifestID},
-		Variables: p.variables,
-		Ready:     true,
-	}, nil
-}
-
-func TestRuntimeObservationAppliesEncryptedBundleAndAcknowledgesIt(t *testing.T) {
-	variables := map[string]string{"GLOBAL_TOKEN": "global-secret", "MACHINE_TOKEN": "machine-secret"}
-	var observations []envinject.Observation
-	requestCount := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if bytes.Contains(body, []byte("global-secret")) || bytes.Contains(body, []byte("machine-secret")) {
-			t.Fatal("plaintext environment value reached the runtime request")
-		}
-		var request struct {
-			Environment        envinject.Observation         `json:"environment"`
-			RuntimeDiagnostics runtimeDiagnosticsObservation `json:"runtime_diagnostics"`
-		}
-		if err := json.Unmarshal(body, &request); err != nil {
-			t.Fatal(err)
-		}
-		requestCount++
-		observations = append(observations, request.Environment)
-		if requestCount == 1 && slices.Contains(request.RuntimeDiagnostics.Capabilities, "environment_injection") {
-			t.Fatal("unverified ENV binding advertised environment_injection")
-		}
-		if requestCount > 1 && !slices.Contains(request.RuntimeDiagnostics.Capabilities, "environment_injection") {
-			t.Fatal("verified ENV binding omitted environment_injection")
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusAccepted)
-		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
-			"accepted": true,
-			"environment_bundle": envinject.Bundle{
-				Schema: envinject.BundleSchema,
-			},
-		}})
-	}))
-	defer server.Close()
-	path := filepath.Join(t.TempDir(), "environment-cache.json")
-	store, err := envinject.Open(context.Background(), envinject.Config{
-		Path: path, HighWaterPath: filepath.Join(t.TempDir(), "environment-high-water.json"), IntegrityKey: bytes.Repeat([]byte{0x42}, 32), AllowHighWaterInitialize: true, AccountID: "acct_1", MachineID: "mach_1",
-		InstallationGeneration: 1, HostKeyGeneration: 1, HostRecipientKeyID: runtimeTestHostRecipientKeyID,
-		GenesisMarker: runtimeTestGenesisMarkerFor(t, path),
-		Processor:     runtimeTestEnvironmentProcessor{variables: variables},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	sender := &runtimeObservationSender{endpoint: server.URL, tokens: testTokenSource{}, proofs: &testProofSource{}, operationID: func() (string, error) { return "op-1", nil }, environmentID: "prj_1", machineID: "mach_1", reporterVersion: "test", client: server.Client(), environment: store, workerGeneration: 1, osBootID: "boot-1", serviceScope: "system", connector: runtimeObservationConnector{}}
-	if err := sender.Send(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if err := sender.Send(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if len(observations) != 2 || observations[0].State != "pending" || observations[1].State != "applied" || observations[1].Global == nil || observations[1].Global.Version != 7 || observations[1].Machine == nil || observations[1].Machine.Version != 4 || observations[1].ObservationSeq != 2 {
-		t.Fatalf("observations=%+v", observations)
-	}
-	if got, err := store.Environment(); err != nil || !reflect.DeepEqual(got, []string{"GLOBAL_TOKEN=global-secret", "MACHINE_TOKEN=machine-secret"}) {
-		t.Fatalf("environment=%q err=%v", got, err)
+		t.Fatal("unenrolled machine enabled ENV custody")
 	}
 }
 
@@ -483,35 +400,20 @@ func TestProductionHelperRequiresHTTPSControl(t *testing.T) {
 	base["PAPERBOAT_CONTROL_URL"] = "http://control.example.test"
 	base["PAPERBOAT_MACHINE_ID"] = "um_1"
 	if _, err := NewProductionHost(context.Background(), "test", func(name string) string { return base[name] }); !errors.Is(err, ErrProductionInvalid) {
-		t.Fatalf("byod control error=%v", err)
+		t.Fatalf("machine control error=%v", err)
 	}
 }
 
-func TestInstalledHostModeOverridesClientRegistrationDuringUpgrade(t *testing.T) {
-	if shouldRunClientCoordinator("client", "host") {
-		t.Fatal("host installation started the client coordinator")
-	}
-	if !shouldRunClientCoordinator("client", "client") {
-		t.Fatal("client installation did not start the client coordinator")
-	}
-	if shouldRunClientCoordinator("host", "host") {
-		t.Fatal("host registration started the client coordinator")
-	}
-	if shouldRunClientCoordinator("receive", "client") {
-		t.Fatal("retired receive registration started the client coordinator")
-	}
-}
-
-func TestValidatedBYODShellRequiresExecutableAbsoluteFile(t *testing.T) {
+func TestValidatedMachineShellRequiresExecutableAbsoluteFile(t *testing.T) {
 	shell := filepath.Join(t.TempDir(), "shell")
 	if err := os.WriteFile(shell, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := validatedBYODShell(shell); err != nil || got != shell {
+	if got, err := validatedMachineShell(shell); err != nil || got != shell {
 		t.Fatalf("shell=%q err=%v", got, err)
 	}
 	for _, invalid := range []string{"relative", filepath.Join(t.TempDir(), "missing")} {
-		if _, err := validatedBYODShell(invalid); !errors.Is(err, ErrProductionInvalid) {
+		if _, err := validatedMachineShell(invalid); !errors.Is(err, ErrProductionInvalid) {
 			t.Fatalf("invalid shell %q err=%v", invalid, err)
 		}
 	}
@@ -519,31 +421,31 @@ func TestValidatedBYODShellRequiresExecutableAbsoluteFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := validatedBYODShell(""); err != nil || got != wantDefault {
+	if got, err := validatedMachineShell(""); err != nil || got != wantDefault {
 		t.Fatalf("fallback shell=%q err=%v", got, err)
 	}
 }
 
-func TestValidateBYODWorkspaceRejectsNonCanonicalAndSymlinkRoots(t *testing.T) {
+func TestValidateMachineWorkspaceRejectsNonCanonicalAndSymlinkRoots(t *testing.T) {
 	root := t.TempDir()
 	root, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := validateBYODWorkspace(root); err != nil {
+	if err := validateMachineWorkspace(root); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateBYODWorkspace(root + string(os.PathSeparator) + "."); !errors.Is(err, ErrProductionInvalid) {
+	if err := validateMachineWorkspace(root + string(os.PathSeparator) + "."); !errors.Is(err, ErrProductionInvalid) {
 		t.Fatalf("non-canonical error=%v", err)
 	}
 	link := filepath.Join(t.TempDir(), "workspace")
 	if err := os.Symlink(root, link); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateBYODWorkspace(link); !errors.Is(err, ErrProductionInvalid) {
+	if err := validateMachineWorkspace(link); !errors.Is(err, ErrProductionInvalid) {
 		t.Fatalf("symlink error=%v", err)
 	}
-	if err := validateBYODWorkspace("relative"); !errors.Is(err, ErrProductionInvalid) {
+	if err := validateMachineWorkspace("relative"); !errors.Is(err, ErrProductionInvalid) {
 		t.Fatalf("relative error=%v", err)
 	}
 }

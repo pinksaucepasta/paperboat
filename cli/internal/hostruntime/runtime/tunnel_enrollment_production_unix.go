@@ -163,6 +163,15 @@ func (s *reconnectSafeProductionAssemblySource) BindProductionAssembly(request t
 	return binder.BindProductionAssembly(request, assembly)
 }
 
+func (s *reconnectSafeProductionAssemblySource) UnbindProductionAssembly(request tunnelenrollment.ActivationRequest, assembly *tunnelmanager.ProductionAssembly) {
+	if s == nil || s.inner == nil {
+		return
+	}
+	if unbinder, ok := s.inner.(tunnelenrollment.ProductionAssemblyUnbinder); ok {
+		unbinder.UnbindProductionAssembly(request, assembly)
+	}
+}
+
 func (s *reconnectSafeProductionAssemblySource) Start(ctx context.Context) error {
 	if s == nil || s.inner == nil {
 		return tunnelenrollment.ErrActivation
@@ -246,4 +255,5 @@ func (b *reconnectSafeAssemblyBinding) controlSessionFactory(ctx context.Context
 
 var _ tunnelenrollment.ProductionAssemblySource = (*reconnectSafeProductionAssemblySource)(nil)
 var _ tunnelenrollment.ProductionAssemblyBinder = (*reconnectSafeProductionAssemblySource)(nil)
+var _ tunnelenrollment.ProductionAssemblyUnbinder = (*reconnectSafeProductionAssemblySource)(nil)
 var _ tunnelenrollment.ProductionAssemblySourceLifecycle = (*reconnectSafeProductionAssemblySource)(nil)

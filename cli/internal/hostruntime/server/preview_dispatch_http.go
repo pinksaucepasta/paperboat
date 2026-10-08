@@ -17,7 +17,7 @@ import (
 
 const maxPreviewDispatchBytes = 32 << 10
 
-// PreviewDispatcher is the canonical dashboard-to-device foreground preview
+// PreviewDispatcher is the canonical dashboard-to-machine foreground preview
 // boundary. The durable lease is created by paperboat-server before this is
 // called; a dispatcher must never allocate a second lease or endpoint.
 type PreviewDispatcher interface {
@@ -121,8 +121,8 @@ func previewDispatchAuthorization(claims auth.Claims, request preview.DispatchRe
 		return preview.DispatchAuthorization{}, errors.New("preview dispatch authorization is incomplete")
 	}
 	if claims.Subject != claims.ActorID || claims.UserID != claims.ActorID ||
-		claims.AccountID != request.AccountID || claims.ActorID != request.ActorID || claims.MachineID != request.OwnerDeviceID ||
-		claims.OwnerSessionID != request.OwnerSessionID || claims.PreviewID != request.PreviewID || claims.OperationID != request.OperationID ||
+		claims.AccountID != request.AccountID || claims.ActorID != request.ActorID || claims.MachineID != request.OwnerMachineID ||
+		claims.OwnerSessionID != request.OwnerSessionID || claims.OwnerSessionKind != request.OwnerSessionKind || claims.PreviewID != request.PreviewID || claims.OperationID != request.OperationID ||
 		claims.TargetScheme != request.Target.Scheme || claims.TargetAddress != request.Target.Address || claims.AccessMode != request.AccessMode ||
 		claims.Endpoint != request.Endpoint || claims.LeaseDeadline != request.LeaseDeadline.UTC().Unix() ||
 		!matchingDispatchDeadline(claims.UserDeadline, request.UserDeadline) || claims.LeaseETag != request.LeaseETag ||
@@ -134,7 +134,7 @@ func previewDispatchAuthorization(claims auth.Claims, request preview.DispatchRe
 	}
 	return preview.DispatchAuthorization{
 		AccountID: claims.AccountID, ActorID: claims.ActorID, MachineID: claims.MachineID,
-		OwnerSessionID: claims.OwnerSessionID, PreviewID: claims.PreviewID, OperationID: claims.OperationID,
+		OwnerSessionID: claims.OwnerSessionID, OwnerSessionKind: claims.OwnerSessionKind, PreviewID: claims.PreviewID, OperationID: claims.OperationID,
 		ExpectedGeneration: claims.ExpectedGeneration, IdempotencyKey: claims.IdempotencyKey,
 		RequestID: claims.RequestID, CorrelationID: claims.CorrelationID, RequestHash: claims.RequestHash,
 		ExpiresAt: time.Unix(claims.ExpiresAt, 0).UTC(),
@@ -164,5 +164,5 @@ func writePreviewDispatchError(writer http.ResponseWriter, err error) {
 	writer.Header().Set("Content-Type", "application/json")
 	writer.Header().Set("Cache-Control", "no-store")
 	writer.WriteHeader(status)
-	_ = json.NewEncoder(writer).Encode(map[string]any{"error": map[string]any{"code": code, "message": "The selected device could not accept this preview request.", "retryable": retryable}})
+	_ = json.NewEncoder(writer).Encode(map[string]any{"error": map[string]any{"code": code, "message": "The selected machine could not accept this preview request.", "retryable": retryable}})
 }

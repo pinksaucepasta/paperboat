@@ -46,7 +46,7 @@ func (ConformanceHandler) Handle(_ context.Context, request Request) (Result, er
 	return Result{AssignmentID: request.AssignmentID, Revision: request.ObservedRevision, Applied: false}, nil
 }
 
-// SyncHandler binds authenticated config.apply requests to the hosted config
+// SyncHandler binds authenticated config.apply requests to the machine config
 // restore operation while preserving immutable assignment revision checks.
 type SyncHandler struct {
 	Apply func(context.Context) error

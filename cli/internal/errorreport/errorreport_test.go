@@ -36,7 +36,7 @@ func TestDisabledByDefaultAndIncompleteConfiguration(t *testing.T) {
 func TestCaptureIsSanitizedAndRateBounded(t *testing.T) {
 	transport := &recordingTransport{}
 	reporter := newReporter("https://public@example.invalid/1", "paperboat-test", transport)
-	ctx := supportref.WithContext(context.Background(), "pb-0123456789abcdef0123456789abcdef")
+	ctx := supportref.WithContext(context.Background(), "support_01234567-89ab-4def-8123-456789abcdef")
 	for i := 0; i < maximumPerMinute+2; i++ {
 		reporter.Capture(ctx, "pb", "unexpected_failure")
 	}

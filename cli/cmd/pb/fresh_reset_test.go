@@ -93,7 +93,7 @@ func TestFreshEnrollmentResetPreservesMatchingResume(t *testing.T) {
 	}
 	root := t.TempDir()
 	token := "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	record := bootstrap.NewResumeRecord("https://api.example.test", "public-key", token, "device", "host", "verifier-012345678901234567890123456789", time.Now().Add(time.Hour))
+	record := bootstrap.NewResumeRecord("https://api.example.test", "public-key", token, "machine", "verifier-012345678901234567890123456789", time.Now().Add(time.Hour))
 	if err := bootstrap.SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}

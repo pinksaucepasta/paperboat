@@ -1,11 +1,10 @@
 package filetransfer
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"os"
 	"path/filepath"
@@ -194,9 +193,9 @@ func PrepareDescriptors(paths []string, files []*os.File, limits Limits) ([]Sour
 }
 
 func NewBatchID() (string, error) {
-	var value [16]byte
-	if _, err := rand.Read(value[:]); err != nil {
+	id, err := uuid.NewRandom()
+	if err != nil {
 		return "", err
 	}
-	return "fb_" + hex.EncodeToString(value[:]), nil
+	return "batch_" + id.String(), nil
 }

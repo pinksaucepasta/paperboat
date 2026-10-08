@@ -9,12 +9,14 @@ import (
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/edgehttp"
+	"github.com/pinksaucepasta/paperboat-tunnel/internal/reporting"
 )
 
 // RuntimeCarrierWorker owns runtime-only admissions and routes. A successful
 // complete pull replaces authority; a failed pull retains it only until expiry.
 // Runtime endpoints authenticate the forwarded helper credential themselves.
 type RuntimeCarrierWorker struct {
+	Reporter           *reporting.Reporter
 	Source             control.RuntimeCarrierSource
 	Expected           *datacarrier.ExpectedAdmissionRegistry
 	Routes             *edgehttp.DataCarrierPreviewRegistry
@@ -74,7 +76,8 @@ func (w *RuntimeCarrierWorker) changed() {
 	}
 }
 
-func (w *RuntimeCarrierWorker) reconcile(parent context.Context) {
+func (w *RuntimeCarrierWorker) reconcile(parent context.Context) (failure error) {
+	defer func() { observeWorkerFailure(parent, w.Reporter, "runtime_admission", failure) }()
 	ctx, cancel := context.WithTimeout(parent, w.Timeout)
 	defer cancel()
 	values, err := w.Source.RuntimeCarrierAdmissions(ctx, w.Expected.NodeID(), w.Expected.ProcessEpoch())
@@ -83,12 +86,12 @@ func (w *RuntimeCarrierWorker) reconcile(parent context.Context) {
 		for _, value := range values {
 			a, e := value.Expected(w.Expected.NodeID(), w.Expected.ProcessEpoch(), time.Now().UTC())
 			if e != nil {
-				return
+				return e
 			}
 			expected = append(expected, a)
 		}
 		if err = w.Expected.Replace(expected, time.Now().UTC()); err != nil {
-			return
+			return err
 		}
 	}
 	// Even control failures cannot extend a lease or keep a revoked local route.
@@ -108,9 +111,11 @@ func (w *RuntimeCarrierWorker) reconcile(parent context.Context) {
 		}
 	}
 	w.observe(parent)
+	return err
 }
 
-func (w *RuntimeCarrierWorker) observe(parent context.Context) {
+func (w *RuntimeCarrierWorker) observe(parent context.Context) (failure error) {
+	defer func() { observeWorkerFailure(parent, w.Reporter, "runtime_observation", failure) }()
 	observations := make([]control.RuntimeCarrierObservation, 0)
 	for _, a := range w.Expected.Snapshot() {
 		r, ok := w.Routes.Route(a.RouteID)
@@ -126,7 +131,7 @@ func (w *RuntimeCarrierWorker) observe(parent context.Context) {
 	}
 	ctx, cancel := context.WithTimeout(parent, w.Timeout)
 	defer cancel()
-	_ = w.Source.ObserveRuntimeCarriers(ctx, w.Expected.NodeID(), w.Expected.ProcessEpoch(), observations)
+	return w.Source.ObserveRuntimeCarriers(ctx, w.Expected.NodeID(), w.Expected.ProcessEpoch(), observations)
 }
 
 func (w *RuntimeCarrierWorker) Handle(ctx context.Context, server *datacarrier.Server) error {

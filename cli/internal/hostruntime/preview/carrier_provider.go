@@ -382,7 +382,7 @@ func (p *AttachmentPreviewCarrierProvider) Shutdown(ctx context.Context) error {
 }
 
 func validateAttachmentLease(lease Lease, attachment Attachment, now time.Time) error {
-	if lease.Schema != PreviewTunnelSchemaV1 || lease.Kind != PreviewLeaseKind || !validLeaseID(lease.ID) || !validLeaseID(lease.AccountID) || !validLeaseID(lease.OwnerDeviceID) || !validLeaseID(lease.OwnerSessionID) {
+	if lease.Schema != PreviewTunnelSchemaV1 || lease.Kind != PreviewLeaseKind || !validLeaseID(lease.ID) || !validLeaseID(lease.AccountID) || !validLeaseID(lease.OwnerMachineID) || !validLeaseID(lease.OwnerSessionID) {
 		return fmt.Errorf("%w: lease identity is invalid", ErrAttachmentBinding)
 	}
 	if lease.Persistent || lease.LeaseDeadline.IsZero() || !lease.LeaseDeadline.After(now) || lease.Generation < 1 || !validLeaseID(lease.CreateOperationID) {
@@ -394,7 +394,7 @@ func validateAttachmentLease(lease Lease, attachment Attachment, now time.Time) 
 	if err := attachment.Validate(now); err != nil {
 		return err
 	}
-	if attachment.PreviewID != lease.ID || attachment.AccountID != lease.AccountID || attachment.OperationID != lease.CreateOperationID || attachment.OwnerDeviceID != lease.OwnerDeviceID || attachment.OwnerSessionID != lease.OwnerSessionID || attachment.Target != lease.Target || attachment.AccessMode != lease.AccessMode || attachment.Endpoint != lease.Endpoint || attachment.Binding.LeaseGeneration != uint64(lease.Generation) {
+	if attachment.PreviewID != lease.ID || attachment.AccountID != lease.AccountID || attachment.OperationID != lease.CreateOperationID || attachment.OwnerMachineID != lease.OwnerMachineID || attachment.OwnerSessionID != lease.OwnerSessionID || attachment.Target != lease.Target || attachment.AccessMode != lease.AccessMode || attachment.Endpoint != lease.Endpoint || attachment.Binding.LeaseGeneration != uint64(lease.Generation) {
 		return fmt.Errorf("%w: attachment does not match lease", ErrAttachmentBinding)
 	}
 	if attachment.ExpiresAt.After(lease.LeaseDeadline) {

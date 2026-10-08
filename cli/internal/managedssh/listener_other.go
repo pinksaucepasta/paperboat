@@ -8,5 +8,6 @@ import (
 )
 
 func ListenOwnerSocket(string) (net.Listener, error) {
-	return nil, errors.New("managed SSH agent sockets are unsupported on this platform")
+	err := errors.New("managed SSH agent sockets are unsupported on this platform")
+	return nil, managedSSHFailure("listener_bind", err, err)
 }

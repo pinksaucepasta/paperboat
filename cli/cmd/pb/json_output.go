@@ -1,9 +1,7 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -11,6 +9,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/environmentmanager"
 	"github.com/pinksaucepasta/paperboat/internal/preferences"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
 	"github.com/spf13/cobra"
@@ -18,6 +17,8 @@ import (
 )
 
 const cliJSONSchemaVersion = "1.0"
+
+const teamSubscriptionRecovery = "Ask a team owner or admin to manage team billing, or retry with --workspace personal."
 
 type cliJSONError struct {
 	Code             string `json:"code"`
@@ -59,83 +60,156 @@ func writeCLIJSON(writer io.Writer, data any) error {
 }
 
 func writeCLIJSONError(writer io.Writer, err error) error {
+	return writeCLIJSONErrorWithReference(writer, err, "")
+}
+
+func writeCLIJSONErrorWithReference(writer io.Writer, err error, reference string) error {
 	value := classifyCLIJSONError(err)
+	if value.SupportReference == "" && supportref.Valid(reference) {
+		value.SupportReference = reference
+	}
 	encoder := json.NewEncoder(writer)
 	encoder.SetEscapeHTML(false)
 	return encoder.Encode(cliJSONEnvelope{SchemaVersion: cliJSONSchemaVersion, OK: false, Error: &value})
 }
 
 func classifyCLIJSONError(err error) cliJSONError {
-	result := cliJSONError{Code: "operation_failed", Category: "local_io", Message: userFacingError(err), StateChanged: "unknown"}
+	return classifyCLIJSONFailure(err, classifyCommandFailure(err))
+}
+
+func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
+	result := cliJSONError{Code: "operation_failed", Category: "local_io", Message: boundedCLIJSONMessage(commandFailureMessage(err, failure)), StateChanged: "unknown", SupportReference: failure.supportReference}
 	if result.Message == "" {
 		result.Message = "The operation failed."
 	}
-	result.Message = boundedCLIJSONMessage(result.Message)
-	var apiErr *api.APIError
-	if errors.As(err, &apiErr) {
-		if validCLIJSONCode(apiErr.Code) {
-			result.Code = apiErr.Code
+	owner := soleCommandOwner(err)
+	switch typed := owner.(type) {
+	case *envCommandFailure:
+		if failure.kind != commandOperational && failure.kind != commandRejected {
+			break
 		}
-		if supportref.Valid(apiErr.SupportReference) {
-			result.SupportReference = apiErr.SupportReference
+		result.Code = "env_operation_failed"
+		result.Category, result.Retryable = "unavailable_retryable", true
+		result.Recovery = typed.message
+		if failure.kind == commandRejected {
+			result.Category, result.Retryable = "conflict", false
 		}
-		switch apiErr.Status {
+		if environmentFailureHasMarker(typed.cause, func(cause error) bool { _, ok := cause.(*environmentmanager.ScopePublicationPending); return ok }) {
+			result.Code = "env_source_publication_pending"
+			result.OutcomeUncertain = true
+		}
+		sourceConflict := onlyEnvironmentFailureUnderMarker(typed.cause, func(cause error) bool { _, ok := cause.(*environmentmanager.ScopeRefreshConflict); return ok })
+		if sourceConflict {
+			result.Code = "env_source_conflict"
+			result.Category = "conflict"
+			result.StateChanged = false
+			result.OutcomeUncertain = false
+		}
+		if onlyEnvironmentFailureLeaves(typed.cause, func(leaf error) bool {
+			return leaf == environmentmanager.ErrVaultLocked || leaf == environmentmanager.ErrVaultPending || leaf == environmentmanager.ErrVaultChanged || leaf == environmentmanager.ErrVaultTeamGrantRequired || leaf == environmentmanager.ErrVariableNotConfigured
+		}) {
+			result.StateChanged = false
+		}
+		if rejected, ok := failure.owner.(*api.APIError); ok && !sourceConflict && !failure.apiCauseInvalid && !environmentFailureContainsJoin(typed.cause) {
+			switch rejected.Code {
+			case "team_entitlement_required":
+				result.Code, result.Category, result.Retryable = rejected.Code, "authorization_or_entitlement", false
+			case "version_conflict", "precondition_failed", "vault_conflict", "operation_conflict":
+				result.Code, result.Category = rejected.Code, "conflict"
+			case "rotation_required", "key_authorization_required":
+				result.Code = rejected.Code
+			}
+		}
+	case *envHostRefreshFailure:
+		result.Code, result.Category, result.StateChanged = "env_recipient_refresh_pending", "unavailable_retryable", "unknown"
+		result.Retryable = true
+		result.Recovery = typed.recovery()
+		changed := typed.sourceChanged || typed.operationCompleted || typed.completed > 0
+		result.OutcomeUncertain = typed.publicationPending || failure.kind == commandUnexpected || !changed
+		if changed {
+			result.StateChanged = true
+		}
+	case *configComparisonFailure:
+		result.Code, result.Category, result.StateChanged = "config_comparison_unavailable", "unavailable_retryable", false
+		result.Retryable = true
+		result.Recovery = "Refresh pb config status and retry the exact conflict comparison."
+	case *api.APIError:
+		if failure.owner != typed || failure.apiCauseInvalid {
+			break
+		}
+		result.Code = typed.PublicCode()
+		if supportref.Valid(typed.SupportReference) {
+			result.SupportReference = typed.SupportReference
+		}
+		switch typed.Status {
 		case 401:
 			result.Category = "authentication"
 		case 403:
 			result.Category = "authorization_or_entitlement"
 		case 409, 412:
 			result.Category = "conflict"
-		case 429, 500, 502, 503, 504:
+		case 408, 429, 500, 502, 503, 504:
 			result.Category, result.Retryable = "unavailable_retryable", true
 		}
-	}
-	var unsupported unsupportedJSONOutputError
-	if errors.As(err, &unsupported) {
+		if typed.Status == 403 && typed.Code == "team_subscription_required" {
+			result.StateChanged = false
+			result.Recovery = teamSubscriptionRecovery
+		}
+		if typed.Status == 426 && typed.Code == "update_required" {
+			result.Category, result.StateChanged = "conflict", false
+			result.Message = typed.Error()
+			result.Recovery = "Run `pb update` to install a supported official release."
+		}
+	case commandRejection:
+		if failure.kind == commandRejected && typed.valid() {
+			result.Code, result.Category, result.Message = "operation_refused", "conflict", typed.Error()
+			if typed.cause == nil {
+				result.StateChanged = false
+			}
+		}
+	case unsupportedJSONOutputError:
 		result.Code, result.Category, result.StateChanged = "unsupported_output", "usage", false
 		result.Recovery = "Run this command without --json."
-		return result
-	}
-	var existing *TunnelCreateExistingError
-	if errors.As(err, &existing) {
+	case *TunnelCreateExistingError:
 		result.Code, result.Category, result.StateChanged = "tunnel_name_exists", "conflict", false
-		result.Recovery, result.Message = existing.RecoveryCommand, boundedCLIJSONMessage(existing.Error())
-		return result
-	}
-	var changed *TunnelCreateChangedError
-	if errors.As(err, &changed) {
+		result.Recovery = "Run pb tunnel status <tunnel> to inspect the existing tunnel."
+	case *TunnelCreateChangedError:
 		result.Code, result.Category, result.StateChanged = "tunnel_create_partial", "conflict", true
-		result.OutcomeUncertain = changed.OutcomeUncertain
-		result.Recovery, result.Message = changed.RecoveryCommand, boundedCLIJSONMessage(changed.Error())
-		return result
-	}
-	var outcome *TunnelOperationOutcomeError
-	if errors.As(err, &outcome) {
+		result.OutcomeUncertain = typed.OutcomeUncertain
+		result.Recovery = "Run pb tunnel status <tunnel> before retrying the failed step."
+	case *TunnelOperationOutcomeError:
 		result.Code, result.Category, result.StateChanged = "tunnel_operation_failed", "conflict", true
-		result.Message = boundedCLIJSONMessage(outcome.Error())
-		return result
-	}
-	var waitTimeout *TunnelOperationWaitTimeoutError
-	if errors.As(err, &waitTimeout) {
+	case *TunnelOperationWaitTimeoutError:
 		result.Code, result.Category, result.StateChanged = "tunnel_operation_wait_timeout", "unavailable_retryable", true
 		result.Retryable, result.OutcomeUncertain = true, true
-		result.Message = boundedCLIJSONMessage(waitTimeout.Error())
-		return result
 	}
-	switch {
-	case errors.Is(err, preferences.ErrChanged):
-		result.Code, result.Category, result.StateChanged = "preferences_changed", "conflict", false
-		result.Recovery = "Reload the preference file and reapply your changes; no changes were saved."
-	case errors.Is(err, preferences.ErrBusy):
-		result.Code, result.Category, result.StateChanged = "preferences_busy", "conflict", false
-		result.Retryable = true
-		result.Recovery = "Another process is saving preferences. Retry after it finishes."
-	case errors.Is(err, errUsage) || isCobraUsageError(err):
-		result.Code, result.Category, result.StateChanged = "invalid_invocation", "usage", false
-	case errors.Is(err, context.Canceled):
+	switch failure.kind {
+	case commandUsage:
+		if result.Code == "operation_failed" {
+			result.Code, result.Category, result.StateChanged = "invalid_invocation", "usage", false
+		}
+	case commandDeadline:
+		if result.Code == "operation_failed" {
+			result.Code, result.Category, result.Retryable = "operation_timeout", "unavailable_retryable", true
+		}
+	case commandCanceled, commandInteractiveCanceled:
 		result.Code, result.Category = "operation_canceled", "canceled"
-	case errors.Is(err, api.ErrUnauthenticated), errors.Is(err, config.ErrSecretNotFound):
-		result.Code, result.Category = "authentication_required", "authentication"
+	case commandRejected:
+		switch failure.owner {
+		case api.ErrUnauthenticated, config.ErrSecretNotFound:
+			result.Code, result.Category = "authentication_required", "authentication"
+		case preferences.ErrChanged:
+			if owner == preferences.ErrChanged {
+				result.Code, result.Category, result.StateChanged = "preferences_changed", "conflict", false
+				result.Recovery = "Reload the preference file and reapply your changes; no changes were saved."
+			}
+		case preferences.ErrBusy:
+			if owner == preferences.ErrBusy {
+				result.Code, result.Category, result.StateChanged = "preferences_busy", "conflict", false
+				result.Retryable = true
+				result.Recovery = "Another process is saving preferences. Retry after it finishes."
+			}
+		}
 	}
 	return result
 }
@@ -147,18 +221,6 @@ func boundedCLIJSONMessage(value string) string {
 		value = string(characters[:237]) + "..."
 	}
 	return value
-}
-
-func validCLIJSONCode(value string) bool {
-	if len(value) < 3 || len(value) > 64 || value[0] < 'a' || value[0] > 'z' {
-		return false
-	}
-	for _, character := range value[1:] {
-		if character != '_' && (character < 'a' || character > 'z') && (character < '0' || character > '9') {
-			return false
-		}
-	}
-	return true
 }
 
 func jsonArgumentRequested(args []string) bool {

@@ -23,7 +23,9 @@ func watchProcessExit(pid int) (<-chan struct{}, func()) {
 	}
 	started := process.Proc.P_starttime
 	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
 	go func() {
+		defer close(stopped)
 		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
 		for {
@@ -39,5 +41,5 @@ func watchProcessExit(pid int) (<-chan struct{}, func()) {
 			}
 		}
 	}()
-	return done, cancel
+	return done, func() { cancel(); <-stopped }
 }

@@ -3,7 +3,6 @@ package hostdproto
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -31,10 +30,13 @@ func LoadFenceState(path string) (FenceState, error) {
 		return FenceState{Schema: stateSchemaV1}, nil
 	}
 	if err != nil {
-		return FenceState{}, fmt.Errorf("read hostd fence state: %w", err)
+		return FenceState{}, causedFailure{message: "hostd fence state read failed", cause: err}
 	}
 	var state FenceState
-	if err := decodeStrict(data, &state); err != nil || state.Schema != stateSchemaV1 {
+	if err := decodeStrict(data, &state); err != nil {
+		return FenceState{}, causedFailure{message: "hostd fence state is invalid", cause: errors.Join(ErrInvalidFrame, err)}
+	}
+	if state.Schema != stateSchemaV1 {
 		return FenceState{}, ErrInvalidFrame
 	}
 	if state.Epoch == 0 {
@@ -57,10 +59,13 @@ func NewFenceStatePersister(path string, ownerUID, ownerGID int) func(Status) er
 			APIVersion: status.APIVersion, Epoch: status.Epoch,
 		})
 		if err != nil {
-			return err
+			return causedFailure{message: "hostd fence state encoding failed", cause: err}
 		}
-		return atomicfile.Write(path, append(encoded, '\n'), atomicfile.Options{
+		if err := atomicfile.Write(path, append(encoded, '\n'), atomicfile.Options{
 			Mode: 0o600, OwnerUID: ownerUID, OwnerGID: ownerGID,
-		})
+		}); err != nil {
+			return causedFailure{message: "hostd fence state write failed", cause: err}
+		}
+		return nil
 	}
 }

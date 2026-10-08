@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 const localBodyLimit = 8 << 10
@@ -31,6 +33,9 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if m == nil || subtle.ConstantTimeCompare([]byte(strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))), []byte(m.controlToken)) != 1 {
 		writeError(w, http.StatusUnauthorized, "authentication_required")
 		return
+	}
+	if supportref.FromContext(r.Context()) == "" {
+		r = r.WithContext(supportref.WithContext(r.Context(), r.Header.Get(supportref.Header)))
 	}
 	if r.Method != http.MethodPost || r.URL.Path != "/v1/tunnel-connectors/enroll" {
 		writeError(w, http.StatusNotFound, "not_found")
@@ -51,19 +56,20 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	projection, err := m.Enroll(r.Context(), document.TunnelID, key)
 	if err != nil {
+		observeLocalEnrollmentFailure(r.Context(), err)
 		switch {
-		case err == context.Canceled || err == context.DeadlineExceeded:
+		case enrollmentOutcomeOnly(err, context.Canceled) || enrollmentOutcomeOnly(err, context.DeadlineExceeded):
 			writeError(w, http.StatusServiceUnavailable, "runtime_unavailable")
-		case errors.Is(err, ErrAuthentication):
+		case enrollmentOutcomeOnly(err, ErrAuthentication):
 			writeError(w, http.StatusUnauthorized, "authentication_required")
-		case errors.Is(err, ErrForbidden):
+		case enrollmentOutcomeOnly(err, ErrForbidden):
 			writeError(w, http.StatusForbidden, "forbidden")
 		case errors.Is(err, ErrActivation):
 			writeError(w, http.StatusServiceUnavailable, "activation_unavailable", activationDiagnosticCodeOf(err))
-		case errors.Is(err, ErrConflict):
-			writeError(w, http.StatusConflict, "enrollment_conflict")
 		case errors.Is(err, ErrSecretStore):
 			writeError(w, http.StatusServiceUnavailable, "credential_store_unavailable")
+		case enrollmentOutcomeOnly(err, ErrConflict):
+			writeError(w, http.StatusConflict, "enrollment_conflict")
 		default:
 			writeError(w, http.StatusServiceUnavailable, "runtime_unavailable")
 		}
@@ -72,6 +78,17 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(projection)
 }
+
+func observeLocalEnrollmentFailure(ctx context.Context, err error) {
+	if err == nil || enrollmentOutcomeOnly(err, context.Canceled) || enrollmentOutcomeOnly(err, context.DeadlineExceeded) || enrollmentOutcomeOnly(err, ErrAuthentication) || enrollmentOutcomeOnly(err, ErrForbidden) || enrollmentOutcomeOnly(err, ErrConflict) {
+		return
+	}
+	if errorreport.HTTPAttemptObserved(err) {
+		return
+	}
+	errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "tunnel_enrollment", "local_gateway", "local_gateway_failed", err)
+}
+
 func writeError(w http.ResponseWriter, status int, code string, diagnostic ...string) {
 	w.WriteHeader(status)
 	errorBody := map[string]string{"code": code}
@@ -124,17 +141,19 @@ func (c *LocalClient) Enroll(ctx context.Context, tunnel, key string) (Projectio
 	req.Header.Set("Idempotency-Key", key)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	if reference := supportref.FromContext(ctx); reference != "" {
+		req.Header.Set(supportref.Header, reference)
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
-			return Projection{}, ctx.Err()
+			return Projection{}, safeEnrollmentFailure("local tunnel enrollment request was interrupted", ctx.Err(), err)
 		}
-		return Projection{}, ErrUnavailable
+		return Projection{}, safeEnrollmentFailure("local tunnel enrollment service is unavailable", ErrUnavailable, err)
 	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, localBodyLimit+1))
-	if err != nil || len(raw) > localBodyLimit {
-		return Projection{}, ErrUnavailable
+	raw, tooLarge, bodyErr := readAndCloseResponseBody(resp.Body, localBodyLimit)
+	if bodyErr != nil || tooLarge {
+		return Projection{}, safeEnrollmentFailure("local tunnel enrollment response is unavailable", ErrUnavailable, bodyErr)
 	}
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
 		var envelope struct {
@@ -164,13 +183,22 @@ func (c *LocalClient) Enroll(ctx context.Context, tunnel, key string) (Projectio
 			return Projection{}, ErrUnavailable
 		}
 	}
-	if rejectDuplicateJSON(raw) != nil {
-		return Projection{}, ErrUnavailable
+	if err := rejectDuplicateJSON(raw); err != nil {
+		return Projection{}, safeEnrollmentFailure("local tunnel enrollment response is invalid", ErrUnavailable, err)
 	}
 	var out Projection
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&out) != nil || decoder.Decode(&struct{}{}) != io.EOF || !out.valid() || out.TunnelID != tunnel {
+	if err := decoder.Decode(&out); err != nil {
+		return Projection{}, safeEnrollmentFailure("local tunnel enrollment response is invalid", ErrUnavailable, err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err != nil {
+			return Projection{}, safeEnrollmentFailure("local tunnel enrollment response is invalid", ErrUnavailable, err)
+		}
+		return Projection{}, ErrUnavailable
+	}
+	if !out.valid() || out.TunnelID != tunnel {
 		return Projection{}, ErrUnavailable
 	}
 	return out, nil

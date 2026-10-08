@@ -24,3 +24,5 @@ func BaseEnvironment(shell string) ([]string, error) {
 	}
 	return values, nil
 }
+
+func platformShellEnvironment(_ string, environment []string) []string { return environment }

@@ -251,16 +251,16 @@ func TestStandaloneUpdateGateRollsBackAfterInvalidWorkloadSnapshot(t *testing.T)
 
 func TestHostsAlwaysExposeUpdateGate(t *testing.T) {
 	root := t.TempDir()
-	runtimeConfig := runtimeconfig.Config{Profile: runtimeconfig.BYOD, StateRoot: root, Version: "test", Limits: runtimeconfig.DefaultLimits, Resources: runtimeconfig.DefaultResources}
-	host, err := NewClientCoordinator(context.Background(), HostConfig{Runtime: runtimeConfig, ListenAddress: "127.0.0.1:0", WorkspaceRoot: root, MachineID: "machine_01", InboxPath: root}, HostDependencies{
-		Authorizer: func(string) (server.Authorizer, error) { return hostAuthorizer{}, nil }, Connector: clientServiceStub{}, RuntimeObservationService: clientServiceStub{},
+	runtimeConfig := runtimeconfig.Config{StateRoot: root, Version: "test", Limits: runtimeconfig.DefaultLimits, Resources: runtimeconfig.DefaultResources}
+	host, err := NewHost(context.Background(), HostConfig{Runtime: runtimeConfig, ListenAddress: "127.0.0.1:0", WorkspaceRoot: root, MachineID: "machine_01", InboxPath: root}, HostDependencies{
+		SessionLauncherFactory: machineTestLauncherFactory, Authorizer: func(string) (server.Authorizer, error) { return hostAuthorizer{}, nil }, Connector: machineServiceStub{}, RuntimeObservationService: machineServiceStub{},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer host.Shutdown(context.Background())
 	if host.UpdateGate() == nil {
-		t.Fatal("client coordinator omitted standalone update gate")
+		t.Fatal("machine runtime omitted standalone update gate")
 	}
 }
 

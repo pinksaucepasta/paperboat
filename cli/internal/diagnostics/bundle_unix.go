@@ -4,10 +4,10 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
+	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 	"path/filepath"
 	"time"
 )
@@ -38,7 +38,7 @@ type Bundle struct {
 }
 
 func (b Bundle) Validate() error {
-	if b.Schema != BundleSchemaV1 || len(b.Correlation) != 35 || b.Correlation[:3] != "pb-" || !safeHex(b.Correlation[3:]) || b.CreatedAt.IsZero() || b.CreatedAt.Location() != time.UTC || !filepath.IsAbs(b.Path) || filepath.Clean(b.Path) != b.Path || b.Bytes <= 0 || b.Bytes > MaximumBundleBytes || len(b.Categories) != 4 {
+	if b.Schema != BundleSchemaV1 || !supportref.Valid(b.Correlation) || b.CreatedAt.IsZero() || b.CreatedAt.Location() != time.UTC || !filepath.IsAbs(b.Path) || filepath.Clean(b.Path) != b.Path || b.Bytes <= 0 || b.Bytes > MaximumBundleBytes || len(b.Categories) != 4 {
 		return ErrInvalid
 	}
 	want := []string{"manifest", "recent_events", "redacted_events", "status"}
@@ -51,12 +51,17 @@ func (b Bundle) Validate() error {
 }
 
 type bundleManifest struct {
-	Schema         string    `json:"schema"`
-	Correlation    string    `json:"correlation"`
-	CreatedAt      time.Time `json:"created_at"`
-	Categories     []string  `json:"categories"`
-	DroppedRecords uint64    `json:"dropped_records"`
-	DroppedBytes   uint64    `json:"dropped_bytes"`
+	PersistentFlushSucceeded  bool      `json:"persistent_flush_succeeded"`
+	PersistentEventsAvailable bool      `json:"persistent_events_available"`
+	PersistenceError          string    `json:"persistence_error,omitempty"`
+	PersistenceAvailable      bool      `json:"persistence_available"`
+	FailedRecords             uint64    `json:"failed_records"`
+	Schema                    string    `json:"schema"`
+	Correlation               string    `json:"correlation"`
+	CreatedAt                 time.Time `json:"created_at"`
+	Categories                []string  `json:"categories"`
+	DroppedRecords            uint64    `json:"dropped_records"`
+	DroppedBytes              uint64    `json:"dropped_bytes"`
 }
 
 func CreateBundle(ctx context.Context, config BundleConfig) (Bundle, error) {
@@ -78,12 +83,27 @@ func CreateBundle(ctx context.Context, config BundleConfig) (Bundle, error) {
 		return Bundle{}, err
 	}
 	createdAt := config.Clock().UTC()
-	if err := config.Recorder.Flush(ctx); err != nil {
+	flushErr := config.Recorder.Flush(ctx)
+	if err := ctx.Err(); err != nil {
 		return Bundle{}, err
 	}
-	events, err := config.Recorder.ReadDiskTail(ctx, maximumEventExport)
-	if err != nil {
+	var events []byte
+	var readErr error
+	if config.Recorder.disk != nil {
+		events, readErr = config.Recorder.ReadDiskTail(ctx, maximumEventExport)
+	}
+	if err := ctx.Err(); err != nil {
 		return Bundle{}, err
+	}
+	// Storage failure must not prevent exporting the bounded memory evidence.
+	// The manifest exposes missing persistence rather than implying completeness.
+	persistenceError := ""
+	storageErr := flushErr
+	if readErr != nil {
+		storageErr = readErr
+	}
+	if storageErr != nil {
+		persistenceError = errorreport.ProjectFault(ctx, "pb", "bugreport", "diagnostic_storage", "diagnostic_storage_unavailable", storageErr).Cause
 	}
 	recent, err := marshalEvents(config.Recorder.Recent())
 	if err != nil {
@@ -91,7 +111,7 @@ func CreateBundle(ctx context.Context, config BundleConfig) (Bundle, error) {
 	}
 	categories := []string{"manifest", "recent_events", "redacted_events", "status"}
 	stats := config.Recorder.Stats()
-	manifest, err := json.Marshal(bundleManifest{Schema: BundleSchemaV1, Correlation: correlation, CreatedAt: createdAt, Categories: categories, DroppedRecords: stats.DroppedRecords, DroppedBytes: stats.DroppedBytes})
+	manifest, err := json.Marshal(bundleManifest{PersistentFlushSucceeded: config.Recorder.disk != nil && flushErr == nil, PersistentEventsAvailable: config.Recorder.disk != nil && readErr == nil, PersistenceError: persistenceError, Schema: BundleSchemaV1, Correlation: correlation, CreatedAt: createdAt, Categories: categories, PersistenceAvailable: stats.PersistenceAvailable, FailedRecords: stats.FailedRecords, DroppedRecords: stats.DroppedRecords, DroppedBytes: stats.DroppedBytes})
 	if err != nil {
 		return Bundle{}, err
 	}
@@ -172,9 +192,9 @@ func marshalEvents(events []Event) ([]byte, error) {
 }
 
 func newCorrelation() (string, error) {
-	var value [16]byte
-	if _, err := rand.Read(value[:]); err != nil {
-		return "", fmt.Errorf("generate bugreport correlation: %w", err)
+	id, err := uuid.NewRandom()
+	if err != nil {
+		return "", err
 	}
-	return "pb-" + hex.EncodeToString(value[:]), nil
+	return "support_" + id.String(), nil
 }

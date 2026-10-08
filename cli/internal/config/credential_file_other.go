@@ -2,10 +2,7 @@
 
 package config
 
-import (
-	"fmt"
-	"os"
-)
+import "os"
 
 func writeCredentialFile(path string, value []byte) error { return atomicWrite(path, value, 0o600) }
 
@@ -15,7 +12,7 @@ func validateCredentialDirectory(path string) error {
 		return err
 	}
 	if !info.IsDir() || info.Mode().Perm() != 0o700 {
-		return fmt.Errorf("credential directory must be mode 0700")
+		return safeConfigCause("credential directory must be mode 0700", nil)
 	}
 	return nil
 }
@@ -26,7 +23,7 @@ func readCredentialFile(path string) ([]byte, error) {
 		return nil, err
 	}
 	if !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
-		return nil, fmt.Errorf("credential file must be regular mode 0600")
+		return nil, safeConfigCause("credential file must be regular mode 0600", nil)
 	}
 	return os.ReadFile(path)
 }

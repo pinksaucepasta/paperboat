@@ -16,7 +16,7 @@ Clear the default transfer destination
 Remove the saved default recipient for future sends. Existing transfers and received files are unaffected; a later send must specify --to or set another default.
 
 .PP
-Send publishes a batch to a device's Paperboat Inbox. Completion means the receiver verified and recorded the files; status and cancel act on a transfer ID. A default destination can be set separately, while --to chooses one for the current send.
+Send publishes a batch to a machine's Paperboat Inbox. Completion means the receiver verified and recorded the files; status and cancel act on a transfer ID. A default destination can be set separately, while --to chooses one for the current send.
 
 .PP
 JSON output is supported with --json.
@@ -46,6 +46,10 @@ JSON output is supported with --json.
 .PP
 \fB--session\fP=""
 	terminal session ID for a session-specific destination
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

@@ -2,16 +2,21 @@ package api
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 )
 
 type machineAuthTestSource struct{}
@@ -70,7 +75,7 @@ func TestCreatePreviewLeaseMachineMutationThenClientRead(t *testing.T) {
 	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
 	lease := PreviewLease{
 		Schema: PreviewTunnelSchemaV1, Kind: "preview_lease", ID: "prv_01", AccountID: "acct_01", ActorID: "actor_01",
-		OwnerDeviceID: "device_01", OwnerSessionID: "session_01", Target: PreviewLeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"},
+		OwnerMachineID: "machine_01", OwnerSessionID: "session_01", OwnerSessionKind: "foreground", Target: PreviewLeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"},
 		AccessMode: "public", Endpoint: "https://quiet-river-7.preview.example.test", LeaseDeadline: now.Add(time.Hour),
 		State: "connecting", AllocationState: "pending", EdgeState: "pending", OriginState: "unknown", CreatedAt: now, LastRenewedAt: now,
 	}
@@ -108,7 +113,7 @@ func TestCreatePreviewLeaseMachineMutationThenClientRead(t *testing.T) {
 	client := New(server.URL, config.Credential{AccessToken: "cli-session"}, server.Client())
 	client.SetMachineAuth(machineAuthTestSource{})
 	created, err := client.CreatePreviewLease(context.Background(), PreviewLeaseCreateRequest{
-		OwnerDeviceID: "device_01", OwnerSessionID: "session_01", Target: lease.Target,
+		OwnerMachineID: "machine_01", OwnerSessionID: "session_01", OwnerSessionKind: "foreground", Target: lease.Target,
 	}, "create-op-01")
 	if err != nil {
 		t.Fatal(err)
@@ -137,12 +142,122 @@ func TestCreatePreviewLeaseMachineMutationWithoutClientReadCredentialFailsClosed
 	client := New(server.URL, config.Credential{}, server.Client())
 	client.SetMachineAuth(machineAuthTestSource{})
 	_, err := client.CreatePreviewLease(context.Background(), PreviewLeaseCreateRequest{
-		OwnerDeviceID: "device_01", OwnerSessionID: "session_01", Target: PreviewLeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"},
+		OwnerMachineID: "machine_01", OwnerSessionID: "session_01", OwnerSessionKind: "foreground", Target: PreviewLeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"},
 	}, "create-op-01")
 	if err != ErrMachineAuthReadRequiresClientSession {
 		t.Fatalf("error = %v, want %v", err, ErrMachineAuthReadRequiresClientSession)
 	}
 	if reads != 0 {
 		t.Fatalf("GET requests = %d, want 0", reads)
+	}
+}
+
+type canonicalMachineAuthTestSource struct{ store *identity.Store }
+
+func (s canonicalMachineAuthTestSource) Token(context.Context) (string, error) {
+	return "machine-token", nil
+}
+func (s canonicalMachineAuthTestSource) Proof(_ context.Context, operation, method, path string, body []byte) ([]byte, error) {
+	return s.store.MachineProof(operation, method, path, body, time.Now().UTC())
+}
+
+// Exercise the server's canonical URL.Path and exact body-hash boundary with
+// the production Ed25519 signer, including workspace tamper rejection.
+func TestScopedMachineProofUsesCanonicalPathAndSignsWorkspaceBody(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "identity")
+	store, err := identity.Open(identity.Config{StateRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := store.Current()
+	if err := store.SaveRegistration(identity.Registration{ServerURL: "https://api.example.test", MachineID: "machine_1", EnvironmentID: "machine_1", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/v1/previews", "/v1/tunnels"} {
+		t.Run(path, func(t *testing.T) {
+			var checked atomic.Bool
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Error(err)
+					w.WriteHeader(500)
+					return
+				}
+				raw, err := base64.RawURLEncoding.DecodeString(r.Header.Get("X-Paperboat-Machine-Proof"))
+				if err != nil {
+					t.Error(err)
+					w.WriteHeader(401)
+					return
+				}
+				var envelope struct {
+					Algorithm string `json:"alg"`
+					Payload   string `json:"payload"`
+					Signature string `json:"signature"`
+				}
+				if err := json.Unmarshal(raw, &envelope); err != nil {
+					t.Error(err)
+					w.WriteHeader(401)
+					return
+				}
+				payload, payloadErr := base64.RawURLEncoding.DecodeString(envelope.Payload)
+				signature, signatureErr := base64.RawURLEncoding.DecodeString(envelope.Signature)
+				if payloadErr != nil || signatureErr != nil || envelope.Algorithm != "EdDSA" || !ed25519.Verify(key.Public(), payload, signature) {
+					t.Error("invalid real machine signature")
+					w.WriteHeader(401)
+					return
+				}
+				var claims struct {
+					Method     string `json:"method"`
+					Path       string `json:"path"`
+					BodySHA256 string `json:"body_sha256"`
+				}
+				if err := json.Unmarshal(payload, &claims); err != nil {
+					t.Error(err)
+					w.WriteHeader(401)
+					return
+				}
+				digest := sha256.Sum256(body)
+				if claims.Method != r.Method || claims.Path != r.URL.Path || claims.BodySHA256 != base64.RawURLEncoding.EncodeToString(digest[:]) {
+					t.Errorf("canonical server proof mismatch: method=%q path=%q want=%q", claims.Method, claims.Path, r.URL.Path)
+					w.WriteHeader(401)
+					return
+				}
+				var input struct {
+					Workspace string `json:"workspace"`
+				}
+				if err := json.Unmarshal(body, &input); err != nil || input.Workspace != "team-a" || input.Workspace != r.URL.Query().Get("workspace") {
+					t.Errorf("signed body/query workspace mismatch: %q", input.Workspace)
+					w.WriteHeader(400)
+					return
+				}
+				changedDigest := sha256.Sum256([]byte(strings.Replace(string(body), "team-a", "team-b", 1)))
+				if claims.BodySHA256 == base64.RawURLEncoding.EncodeToString(changedDigest[:]) {
+					t.Error("workspace mutation retained signed body authority")
+				}
+				checked.Store(true)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"data":{"accepted":true}}`)
+			}))
+			defer server.Close()
+			client := New(server.URL, config.Credential{}, server.Client())
+			if err := client.SetWorkspace("team-a"); err != nil {
+				t.Fatal(err)
+			}
+			client.SetMachineAuth(canonicalMachineAuthTestSource{store})
+			body := map[string]string{"workspace": "team-a"}
+			headers := http.Header{"Idempotency-Key": []string{"workspace-operation"}}
+			var err error
+			if path == "/v1/tunnels" {
+				err = client.doTunnelRequest(context.Background(), http.MethodPost, path, body, nil, headers, nil)
+			} else {
+				err = client.doRequestMeta(context.Background(), http.MethodPost, path, body, nil, headers, false, nil)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !checked.Load() {
+				t.Fatal("proof verifier was not reached")
+			}
+		})
 	}
 }

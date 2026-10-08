@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 )
 
@@ -19,6 +20,24 @@ func writeData(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
+}
+
+func TestConfigSyncStatusPreservesFileRecovery(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/config-sync/status" || r.Header.Get("Authorization") != "Bearer native" {
+			t.Fatal("incorrect authenticated status request")
+		}
+		writeData(w, http.StatusOK, map[string]any{"state": "pending", "environments": []map[string]any{{"machine_id": "machine", "state": "pending", "error_code": "configuration_changed", "recovery_actions": []string{"apply_configuration"}, "managed_path_count": 2}}})
+	}))
+	defer server.Close()
+	status, err := New(server.URL, config.Credential{AccessToken: "native"}, nil).ConfigSyncStatus(context.Background())
+	if err != nil || len(status.Environments) != 1 {
+		t.Fatalf("status unavailable: %v", err)
+	}
+	item := status.Environments[0]
+	if item.ErrorCode != "configuration_changed" || len(item.RecoveryActions) != 1 || item.RecoveryActions[0] != "apply_configuration" || item.ManagedPathCount != 2 {
+		t.Fatal("file-edit recovery or reconciled counters were lost")
+	}
 }
 
 func TestClientConfigurationUsesServerOwnedURLWithoutAuthentication(t *testing.T) {
@@ -58,7 +77,7 @@ func TestMachineExecDescriptorBindsSourceAndOperation(t *testing.T) {
 			t.Fatalf("body=%#v", body)
 		}
 		expiresAt := time.Now().Add(time.Minute)
-		writeData(w, http.StatusOK, ExecDescriptor{OperationID: "operation_exec_1", Environment: &Environment{ID: "env_1", Kind: "byod", ResourceID: "um_1", State: "ready", Root: "/workspace"}, Endpoints: TerminalEndpoints{QUIC: "quic://machine.test:443", WSS: "wss://machine.test/v1/runtime"}, Auth: AuthMaterial{Method: "bearer", Token: "exec-token", ExpiresAt: expiresAt, Scopes: []string{"exec:operate"}}, ExpiresAt: expiresAt})
+		writeData(w, http.StatusOK, ExecDescriptor{OperationID: "operation_exec_1", Environment: &Environment{ID: "env_1", Kind: "machine", ResourceID: "um_1", State: "ready", Root: "/workspace"}, Endpoints: TerminalEndpoints{QUIC: "quic://machine.test:443", WSS: "wss://machine.test/v1/runtime"}, Auth: AuthMaterial{Method: "bearer", Token: "exec-token", ExpiresAt: expiresAt, Scopes: []string{"exec:operate"}}, ExpiresAt: expiresAt})
 	}))
 	defer server.Close()
 	client := New(server.URL, config.Credential{AccessToken: "token"}, nil)
@@ -69,10 +88,10 @@ func TestMachineExecDescriptorBindsSourceAndOperation(t *testing.T) {
 	}
 }
 
-func TestPrepareAuthenticatedHostSetupBindsMachineOperationAndGeneration(t *testing.T) {
+func TestPrepareAuthenticatedMachineInstallationBindsMachineOperationAndGeneration(t *testing.T) {
 	expiresAt := time.Now().UTC().Add(10 * time.Minute)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/machines/mch_1/host-setup-installations" || r.Header.Get("Authorization") != "Bearer token" || r.Header.Get("Idempotency-Key") != "host-setup-operation-1" {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/machines/mch_1/machine-installations" || r.Header.Get("Authorization") != "Bearer token" || r.Header.Get("Idempotency-Key") != "machine-installation-operation-1" {
 			t.Fatalf("request=%s %s headers=%v", r.Method, r.URL.Path, r.Header)
 		}
 		var input struct {
@@ -87,10 +106,10 @@ func TestPrepareAuthenticatedHostSetupBindsMachineOperationAndGeneration(t *test
 		if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input.InstallationGeneration != 7 || input.PublicIdentityKey != "public-key" || input.Verifier != "verifier-012345678901234567890123" || input.Artifact.Version != "2026.08.24.1" || input.Artifact.TargetPath != "pb-windows-amd64" || input.SSHUser != "pujan" || input.SSHPort != 22 || !input.CanReuseRuntimeIdentity {
 			t.Fatalf("input=%+v err=%v", input, err)
 		}
-		writeData(w, http.StatusCreated, AuthenticatedHostSetupInstallation{ExpiresAt: expiresAt})
+		writeData(w, http.StatusCreated, AuthenticatedMachineInstallation{ExpiresAt: expiresAt})
 	}))
 	defer server.Close()
-	result, err := New(server.URL, config.Credential{AccessToken: "token"}, server.Client()).PrepareAuthenticatedHostSetup(context.Background(), "mch_1", "host-setup-operation-1", AuthenticatedHostSetupInput{
+	result, err := New(server.URL, config.Credential{AccessToken: "token"}, server.Client()).PrepareAuthenticatedMachineInstallation(context.Background(), "mch_1", "machine-installation-operation-1", AuthenticatedMachineInstallationInput{
 		Verifier: "verifier-012345678901234567890123", PublicIdentityKey: "public-key",
 		InstallationGeneration: 7, SSHUser: "pujan", SSHPort: 22, CanReuseRuntimeIdentity: true,
 		Artifact: MachineArtifact{Schema: "paperboat.tuf-target/v1", Kind: "pb", Version: "2026.08.24.1", Platform: "windows", Architecture: "amd64", RepositoryURL: "https://updates.example.test/paperboat", TargetPath: "pb-windows-amd64"},
@@ -113,7 +132,7 @@ func TestMachineSSHDescriptorRequiresExactScope(t *testing.T) {
 					t.Fatalf("body=%#v", body)
 				}
 				expiresAt := time.Now().Add(time.Minute)
-				writeData(w, http.StatusOK, SSHDescriptor{OperationID: "operation_ssh_1", Environment: &Environment{ID: "env_1", Kind: "byod", ResourceID: "um_1", State: "ready", Root: "/workspace"}, Endpoints: TerminalEndpoints{QUIC: "quic://machine.test:443", WSS: "wss://machine.test/v1/runtime"}, Auth: AuthMaterial{Method: "bearer", Token: "ssh-token", ExpiresAt: expiresAt, Scopes: []string{scope}}, ExpiresAt: expiresAt})
+				writeData(w, http.StatusOK, SSHDescriptor{OperationID: "operation_ssh_1", Environment: &Environment{ID: "env_1", Kind: "machine", ResourceID: "um_1", State: "ready", Root: "/workspace"}, Endpoints: TerminalEndpoints{QUIC: "quic://machine.test:443", WSS: "wss://machine.test/v1/runtime"}, Auth: AuthMaterial{Method: "bearer", Token: "ssh-token", ExpiresAt: expiresAt, Scopes: []string{scope}}, ExpiresAt: expiresAt})
 			}))
 			defer server.Close()
 			client := New(server.URL, config.Credential{AccessToken: "token"}, nil)
@@ -135,12 +154,12 @@ func TestManagedSSHAuthorizedKeysReportsSafeContractMismatch(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		writeData(w, http.StatusOK, ManagedSSHAuthorizedKeys{Type: "authorized_key_set", Version: 1, MachineID: "machine_1", MachineGeneration: 2})
+		writeData(w, http.StatusOK, ManagedSSHAuthorizedKeys{Type: "PRIVATE_PAYLOAD", Version: 1, MachineID: "PRIVATE_MACHINE", MachineGeneration: 2})
 	}))
 	defer server.Close()
 
 	_, err := New(server.URL, config.Credential{}, server.Client()).ManagedSSHAuthorizedKeys(t.Context(), "machine_1", "credential_1", 1, []byte("proof"))
-	if err == nil || !strings.Contains(err.Error(), `got type="authorized_key_set" version=1 machine="machine_1" generation=2 keys=0 expected machine="machine_1" generation=1`) {
+	if err == nil || err.Error() != "paperboat-server returned an invalid managed SSH authorized-key set" || strings.Contains(err.Error(), "PRIVATE") {
 		t.Fatalf("err=%v", err)
 	}
 }
@@ -261,16 +280,16 @@ func TestConfigAssignmentRequestsUseBearerAndSnakeCase(t *testing.T) {
 		case "GET /v1/config-repositories":
 			writeData(w, http.StatusOK, map[string]any{"items": []map[string]any{{"id": "cfgrepo_1", "provider": "github", "external_ref": "acme/config", "display_name": "Config"}}})
 		case "GET /v1/machines/mch_1/config-assignment":
-			writeData(w, http.StatusOK, map[string]any{"id": "cfgasn_1", "environment_id": "mch_1", "repository_id": "cfgrepo_1", "consent_state": "not_required", "version": 2})
+			writeData(w, http.StatusOK, map[string]any{"id": "cfgasn_1", "environment_id": "mch_1", "repository_id": "cfgrepo_1", "consent_state": "pending", "version": 2})
 		case "PUT /v1/machines/mch_1/config-assignment":
 			var body map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatal(err)
 			}
-			if body["repository_id"] != "cfgrepo_1" || body["mode"] != "push_only" || body["expected_version"] != float64(2) {
+			if body["push_repository_id"] != "cfgrepo_1" || body["mode"] != "push_only" || body["expected_version"] != float64(2) || body["configuration_revision"] != strings.Repeat("a", 64) {
 				t.Fatalf("body=%v", body)
 			}
-			writeData(w, http.StatusOK, map[string]any{"id": "cfgasn_1", "environment_id": "mch_1", "repository_id": "cfgrepo_1", "consent_state": "not_required", "version": 3})
+			writeData(w, http.StatusOK, map[string]any{"id": "cfgasn_1", "environment_id": "mch_1", "repository_id": "cfgrepo_1", "consent_state": "pending", "version": 3})
 		case "DELETE /v1/machines/mch_1/config-assignment":
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -287,7 +306,7 @@ func TestConfigAssignmentRequestsUseBearerAndSnakeCase(t *testing.T) {
 	if err != nil || assignment.Version != 2 || assignment.RepositoryID == nil {
 		t.Fatalf("assignment=%+v err=%v", assignment, err)
 	}
-	if _, err := c.AssignConfig(context.Background(), "mch_1", "cfgrepo_1", "push_only", 2); err != nil {
+	if _, err := c.ConfigureConfigProjection(context.Background(), "mch_1", "", "cfgrepo_1", "push_only", false, 2, nil, nil, strings.Repeat("a", 64)); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.UnassignConfig(context.Background(), "mch_1", 3); err != nil {
@@ -305,7 +324,7 @@ func TestPreviewRequestsUseAccountScopeAndIdempotency(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer token" {
 			t.Fatalf("authorization=%q", r.Header.Get("Authorization"))
 		}
-		preview := map[string]any{"id": "prv_1", "environment_id": "env_1", "project_id": "prj_1", "resource_id": "um_1", "user_id": "usr_1", "logical_name": "web", "preview_key": "p-abcdefghijklmnopqrstuvwxyz", "url": "https://p-abcdefghijklmnopqrstuvwxyz.preview.example.test", "target_port": 3000, "state": "registering", "version": 1}
+		preview := map[string]any{"id": "prv_1", "environment_id": "env_1", "resource_id": "um_1", "user_id": "usr_1", "logical_name": "web", "preview_key": "p-abcdefghijklmnopqrstuvwxyz", "url": "https://p-abcdefghijklmnopqrstuvwxyz.preview.example.test", "target_port": 3000, "state": "registering", "version": 1}
 		switch r.Method + " " + r.URL.Path {
 		case "GET /v1/previews":
 			writeData(w, http.StatusOK, []any{preview})
@@ -322,7 +341,7 @@ func TestPreviewRequestsUseAccountScopeAndIdempotency(t *testing.T) {
 	defer srv.Close()
 	client := New(srv.URL, config.Credential{AccessToken: "token"}, srv.Client())
 	items, err := client.ListPreviews(context.Background())
-	if err != nil || len(items) != 1 || items[0].LogicalName != "web" || items[0].ProjectID != "prj_1" || items[0].ResourceID != "um_1" || items[0].UserID != "usr_1" {
+	if err != nil || len(items) != 1 || items[0].LogicalName != "web" || items[0].ResourceID != "um_1" || items[0].UserID != "usr_1" {
 		t.Fatalf("items=%v err=%v", items, err)
 	}
 	removed, err := client.RemovePreview(context.Background(), "prv_1", "preview-remove-1")
@@ -419,7 +438,7 @@ func TestUserMachineCapabilitiesDecodeEnvironmentInjection(t *testing.T) {
 			t.Fatalf("request path=%q", r.URL.Path)
 		}
 		writeData(w, http.StatusOK, UserMachinePage{
-			Items: []UserMachine{{ID: "um_env", SetupMode: "host", Capabilities: MachineCapabilities{
+			Items: []UserMachine{{ID: "um_env", Capabilities: MachineCapabilities{
 				EnvironmentInjection: MachineCapability{Configured: true, Observed: true},
 			}}},
 			Pagination: Pagination{},
@@ -462,7 +481,7 @@ func TestManagedSSHReadinessRecordsAreGenerationBound(t *testing.T) {
 		case "/v1/machines/machine_1/ssh-target":
 			writeData(writer, http.StatusOK, ManagedSSHTarget{Type: "machine_target", Version: 1, MachineID: "machine_1", MachineGeneration: 4, OSUser: "deploy", Port: 22, ReconciliationVersion: 2})
 		case "/v1/machines/machine_1/ssh-host-keys":
-			writeData(writer, http.StatusOK, ManagedSSHHostKeySet{Type: "host_key_set", Version: 1, SetID: "sshks_test", MachineID: "machine_1", MachineGeneration: 4, ObservationGeneration: 3, Keys: []string{"ssh-ed25519 AAAA test"}, Fingerprint: "SHA256:test", State: "active", ReconciliationVersion: 5})
+			writeData(writer, http.StatusOK, ManagedSSHHostKeySet{Type: "host_key_set", Version: 1, SetID: "keyset_01234567-89ab-4cde-8fab-0123456789ab", MachineID: "machine_1", MachineGeneration: 4, ObservationGeneration: 3, Keys: []string{"ssh-ed25519 AAAA test"}, Fingerprint: "SHA256:test", State: "active", ReconciliationVersion: 5})
 		default:
 			http.NotFound(writer, request)
 		}
@@ -479,11 +498,11 @@ func TestManagedSSHReadinessRecordsAreGenerationBound(t *testing.T) {
 
 func TestObserveManagedSSHHostKeysAcceptsReusedActiveSet(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		writeData(writer, http.StatusOK, ManagedSSHHostKeySet{Type: "host_key_set", Version: 1, SetID: "sshks_test", MachineID: "machine_1", MachineGeneration: 4, ObservationGeneration: 3, Keys: []string{"ssh-ed25519 AAAA test"}, Fingerprint: "SHA256:test", State: "active", ReconciliationVersion: 5})
+		writeData(writer, http.StatusOK, ManagedSSHHostKeySet{Type: "host_key_set", Version: 1, SetID: "keyset_01234567-89ab-4cde-8fab-0123456789ab", MachineID: "machine_1", MachineGeneration: 4, ObservationGeneration: 3, Keys: []string{"ssh-ed25519 AAAA test"}, Fingerprint: "SHA256:test", State: "active", ReconciliationVersion: 5})
 	}))
 	defer server.Close()
 	client := New(server.URL, config.Credential{}, server.Client())
-	set, err := client.ObserveManagedSSHHostKeys(context.Background(), "machine_1", "identity", "managed-ssh-observe-4-47", "sshks_test", 4, 47, []string{"ssh-ed25519 AAAA test"}, []byte("proof"))
+	set, err := client.ObserveManagedSSHHostKeys(context.Background(), "machine_1", "identity", "managed-ssh-observe-4-47", 4, 47, []string{"ssh-ed25519 AAAA test"}, []byte("proof"))
 	if err != nil || set.ObservationGeneration != 3 {
 		t.Fatalf("set=%+v err=%v", set, err)
 	}
@@ -640,7 +659,7 @@ func TestDeviceAuthorizeIncompatibleVersionIsActionable(t *testing.T) {
 		_, _ = io.WriteString(w, `{"error":{"code":"incompatible_client_version","message":"upgrade pb before signing in","details":{"required_protocol":"2"}}}`)
 	}))
 	defer srv.Close()
-	_, err := DeviceAuthorize(context.Background(), srv.URL, "device", "desktop", "darwin", nil)
+	_, err := DeviceAuthorize(context.Background(), srv.URL, "machine", "desktop", "darwin", nil)
 	var versionErr *ErrIncompatibleVersion
 	if !errors.As(err, &versionErr) || versionErr.Required != "2" || !strings.Contains(versionErr.Error(), "upgrade pb") {
 		t.Fatalf("err = %v", err)
@@ -655,7 +674,7 @@ func TestClientUnauthenticated(t *testing.T) {
 
 	c := New(srv.URL, config.Credential{}, nil)
 	_, err := c.ListUserMachines(context.Background())
-	if err != ErrUnauthenticated {
+	if !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("err = %v, want ErrUnauthenticated", err)
 	}
 }
@@ -673,7 +692,7 @@ func TestClientStructuredError(t *testing.T) {
 	if !ok {
 		t.Fatalf("err type = %T, want *APIError", err)
 	}
-	if apiErr.Code != "machine_not_ready" || apiErr.Status != http.StatusConflict || apiErr.RequestID != "req_123" || !strings.Contains(apiErr.Error(), "request req_123") {
+	if apiErr.Code != "machine_not_ready" || apiErr.Status != http.StatusConflict || apiErr.RequestID != "req_123" || strings.Contains(apiErr.Error(), "req_123") {
 		t.Fatalf("apiErr = %+v", apiErr)
 	}
 }
@@ -715,7 +734,7 @@ func TestNormalizeCanonicalConnectionDescriptor(t *testing.T) {
 	expires := time.Now().Add(time.Minute).UTC()
 	response := ConnectionDescriptor{
 		Schema: ConnectionSchemaV1, Issuer: "https://api.paperboat.test", Connectable: true, ExpiresAt: expires,
-		Environment:  &Environment{ID: "env_1", Kind: "byod", ResourceID: "um_1", Alias: "studio", State: "ready", Root: "/Users/paperboat"},
+		Environment:  &Environment{ID: "env_1", Kind: "machine", ResourceID: "um_1", Alias: "studio", State: "ready", Root: "/Users/paperboat"},
 		Terminal:     &Terminal{Protocol: "paperboat.terminal.v1", Endpoints: TerminalEndpoints{QUIC: "quic://edge.paperboat.test:443", WSS: "wss://edge.paperboat.test/v1/runtime"}, SessionID: "session_1"},
 		FileTransfer: &FileTransfer{Endpoint: "https://edge.paperboat.test/v1/file-transfers"},
 	}
@@ -748,8 +767,8 @@ func TestUserMachineConnectionDescriptorDecodesCanonicalDescriptor(t *testing.T)
 		}
 		writeData(w, http.StatusOK, map[string]any{
 			"schema": ConnectionSchemaV1, "issuer": "https://api.paperboat.test", "connectable": true, "expires_at": expires,
-			"environment":   map[string]any{"id": "env_1", "kind": "byod", "resource_id": "um_1", "state": "ready", "root": "/workspace"},
-			"terminal":      map[string]any{"protocol": "paperboat.terminal.v1", "endpoints": map[string]any{"quic": "quic://edge.paperboat.test:443", "wss": "wss://edge.paperboat.test/v1/runtime"}, "session_id": "session_1", "thread_id": "thread_1", "terminal_id": "term_1", "cwd": "/workspace"},
+			"environment":   map[string]any{"id": "env_1", "kind": "machine", "resource_id": "um_1", "state": "ready", "root": "/workspace"},
+			"terminal":      map[string]any{"protocol": "paperboat.terminal.v1", "endpoints": map[string]any{"quic": "quic://edge.paperboat.test:443", "wss": "wss://edge.paperboat.test/v1/runtime"}, "session_id": "session_1", "cwd": "/workspace"},
 			"file_transfer": map[string]any{"endpoint": "https://edge.paperboat.test/v1/file-transfers"},
 		})
 	}))
@@ -797,5 +816,25 @@ func TestConfigRepositoryDiscoveryAndConnectionUseNativeCredential(t *testing.T)
 	repository, err := client.ConnectConfigRepository(context.Background(), candidates[0])
 	if err != nil || repository.ID != "repo" || repository.State != "active" || requests != 2 {
 		t.Fatalf("connection %+v %v requests=%d", repository, err, requests)
+	}
+}
+
+func TestClientSendsBuildDistribution(t *testing.T) {
+	prior := buildinfo.Distribution
+	t.Cleanup(func() { buildinfo.Distribution = prior })
+	for _, distribution := range []string{"official", "custom"} {
+		t.Run(distribution, func(t *testing.T) {
+			buildinfo.Distribution = distribution
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("X-Paperboat-Distribution") != distribution || r.Header.Get("X-Paperboat-Client") != "paperboat" {
+					t.Error("incorrect CLI distribution marker")
+				}
+				writeData(w, http.StatusOK, Me{ID: "usr_1"})
+			}))
+			defer srv.Close()
+			if _, err := New(srv.URL, config.Credential{AccessToken: "test-token"}, nil).Me(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

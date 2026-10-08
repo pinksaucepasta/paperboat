@@ -95,7 +95,7 @@ func collectWindowsDoctor(ctx context.Context) doctorReport {
 		if host.Status == "error" || host.ErrorCode != "" {
 			state = "error"
 		}
-		add("availability", state, fmt.Sprintf("Desired %s version %d; observed %s version %d (%s).", host.DesiredMode, host.DesiredVersion, host.ObservedMode, host.ObservedVersion, host.Status), "Run `pb device availability <device> --mode allow-sleep` and wait for it to apply.")
+		add("availability", state, fmt.Sprintf("Desired %s version %d; observed %s version %d (%s).", host.DesiredMode, host.DesiredVersion, host.ObservedMode, host.ObservedVersion, host.Status), "Run `pb machine availability <machine> --mode allow-sleep` and wait for it to apply.")
 	}
 
 	client, err := windowsHostdClient()

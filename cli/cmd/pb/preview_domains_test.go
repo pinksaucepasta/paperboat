@@ -72,7 +72,7 @@ func TestPreviewCommandDomainsUsesCanonicalRequestAndSafeProjection(t *testing.T
 		newPreviewCarrier = previousCarrier
 	})
 	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return client, nil }
-	previewMachineID = func() (string, error) { return "device_cli", nil }
+	previewMachineID = func() (string, error) { return "machine_cli", nil }
 	carrier := &cliPreviewCarrier{ready: make(chan struct{})}
 	newPreviewCarrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
 		return carrier, nil
@@ -176,7 +176,7 @@ func TestPreviewCommandDomainsUsesCanonicalRequestAndSafeProjection(t *testing.T
 func previewDomainCommandLease(now time.Time, state, ownerSessionID string) map[string]any {
 	lease := map[string]any{
 		"schema": api.PreviewTunnelSchemaV1, "kind": "preview_lease", "id": "prv_domains", "account_id": "acct_cli", "actor_id": "actor_cli",
-		"owner_device_id": "device_cli", "owner_session_id": ownerSessionID,
+		"owner_machine_id": "machine_cli", "owner_session_id": ownerSessionID, "owner_session_kind": "foreground",
 		"target": map[string]string{"scheme": "http", "address": "127.0.0.1:3000"}, "access_mode": "public", "persistent": false,
 		"endpoint": "https://preview-domain.preview.example.test", "lease_deadline": now.Add(time.Hour), "user_deadline": nil,
 		"state": state, "allocation_state": "pending", "edge_state": "pending", "origin_state": "unknown",
@@ -318,7 +318,7 @@ func TestPreviewDomainJSONOutputFailureStopsSession(t *testing.T) {
 		previewClientForCommand, previewMachineID, newPreviewCarrier = oldClient, oldMachine, oldCarrier
 	}()
 	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return client, nil }
-	previewMachineID = func() (string, error) { return "device_cli", nil }
+	previewMachineID = func() (string, error) { return "machine_cli", nil }
 	newPreviewCarrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
 		return &cliPreviewCarrier{ready: make(chan struct{})}, nil
 	}

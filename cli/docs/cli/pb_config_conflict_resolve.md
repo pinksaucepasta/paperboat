@@ -6,7 +6,7 @@ Choose the machine or repository version
 
 Choose the machine or repository version
 
-Resolve one exact path with --keep to select the machine or repository version. Use show first to inspect both sides; the chosen direction is recorded for synchronization.
+Resolve one exact path with --keep to select the machine or repository version. Use compare first to inspect both sides; the chosen direction is recorded for the next synchronization step.
 
 Conflicts identify exact paths whose local and repository versions cannot be merged automatically. Review the affected path before choosing a side; resolution records a deliberate decision for the next synchronization step.
 
@@ -30,6 +30,7 @@ pb config conflict resolve <environment> <path> [flags]
       --config string      path to the CLI config file
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO

@@ -3,7 +3,6 @@ package managedssh
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"strconv"
@@ -60,9 +59,11 @@ func ProbeLoopbackSSH(ctx context.Context, port uint16, timeout time.Duration) (
 		}(host)
 	}
 	var readiness SSHReadiness
+	probeFailures := make([]error, 0, 2)
 	for range 2 {
 		result := <-results
 		if result.err != nil {
+			probeFailures = append(probeFailures, result.err)
 			continue
 		}
 		if result.host == "127.0.0.1" {
@@ -78,7 +79,10 @@ func ProbeLoopbackSSH(ctx context.Context, port uint16, timeout time.Duration) (
 		selected = "::1"
 	}
 	if selected == "" {
-		return readiness, ErrSSHTargetUnavailable
+		if ctx.Err() != nil {
+			return readiness, managedSSHContextError(ctx)
+		}
+		return readiness, managedSSHFailure("target_connect", ErrSSHTargetUnavailable, errors.Join(probeFailures...))
 	}
 	readiness.Target = LoopbackTarget{Host: selected, Port: port}
 	return readiness, nil
@@ -96,9 +100,9 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 	cancelDial()
 	if err != nil {
 		if ctx.Err() != nil {
-			return BridgeResult{}, context.Cause(ctx)
+			return BridgeResult{}, managedSSHContextError(ctx)
 		}
-		return BridgeResult{}, fmt.Errorf("%w: %w", ErrSSHTargetUnavailable, err)
+		return BridgeResult{}, managedSSHFailure("target_connect", ErrSSHTargetUnavailable, err)
 	}
 	defer sshd.Close()
 	defer stream.Close()
@@ -158,7 +162,7 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 	}
 	finish()
 	if ctx.Err() != nil {
-		return result, context.Cause(ctx)
+		return result, managedSSHContextError(ctx)
 	}
 	return result, resultErr
 }

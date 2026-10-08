@@ -17,6 +17,14 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
+func TestReconnectRequiredErrorDoesNotExposePeerOrCause(t *testing.T) {
+	cause := errors.New("private peer address and transport detail")
+	err := &ReconnectRequiredError{PeerID: "machine_private_identifier", Err: cause}
+	if err.Error() != "peer connection lost; reconnect required" || !errors.Is(err, cause) {
+		t.Fatalf("reconnect error text/cause=%q / %v", err, err)
+	}
+}
+
 func TestReconnectRequiredClassification(t *testing.T) {
 	peerID := "peer_01"
 	tests := []struct {

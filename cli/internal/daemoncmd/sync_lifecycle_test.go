@@ -46,7 +46,7 @@ func (s *terminalCoordinatorSync) Sync(stream pbSync.SyncService_SyncServer) err
 	if _, err := stream.Recv(); err != nil {
 		return err
 	}
-	if err := stream.Send(&pbSync.SyncResponse{Revision: 1, Peers: []*pbSync.PeerUpdate{{PeerId: "device", Approved: true, Online: true, AssignedIp: "127.100.0.2"}}}); err != nil {
+	if err := stream.Send(&pbSync.SyncResponse{Revision: 1, Peers: []*pbSync.PeerUpdate{{PeerId: "machine", Approved: true, Online: true, AssignedIp: "127.100.0.2"}}}); err != nil {
 		return err
 	}
 	select {
@@ -72,7 +72,7 @@ func TestCoordinatorForwardsTerminalSyncFailureAfterWithdrawal(t *testing.T) {
 	if err = os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	c, err := NewCoordinator(CoordinatorConfig{SocketAddress: filepath.Join(dir, "d.sock"), SyncAddress: listener.Addr().String(), DeviceID: "source", Token: func(context.Context) (string, error) { return "fixture", nil }, Insecure: true})
+	c, err := NewCoordinator(CoordinatorConfig{SocketAddress: filepath.Join(dir, "d.sock"), SyncAddress: listener.Addr().String(), MachineID: "source", Token: func(context.Context) (string, error) { return "fixture", nil }, Insecure: true})
 	if err != nil {
 		t.Fatal(err)
 	}

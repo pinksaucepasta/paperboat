@@ -59,7 +59,7 @@ type Request struct {
 	UserMachineID          string                   `json:"machine_id"`
 	Shell                  string                   `json:"shell"`
 	HelperListenAddress    string                   `json:"helper_listen_address"`
-	SetupMode              string                   `json:"setup_mode"`
+	EnrollmentPending      bool                     `json:"enrollment_pending"`
 	InstallationGeneration int64                    `json:"installation_generation"`
 }
 
@@ -96,7 +96,7 @@ func Install(ctx context.Context, request Request) error {
 	// hostd now owns the runtime control plane. The separate privileged host
 	// service is retained only for power policy and must not bind the same
 	// loopback address as hostd.
-	if request.SetupMode == "host" && runtime.GOOS != "darwin" {
+	if runtime.GOOS != "darwin" {
 		legacyHost, err = hostInstallerWithMissing(request, paths, true)
 		if err != nil {
 			return errors.Join(ErrInvalidRequest, err)
@@ -116,7 +116,7 @@ func Install(ctx context.Context, request Request) error {
 	if err := lifecycle.Recover(ctx); err != nil {
 		return err
 	}
-	if err := installDeviceGuard(ctx, request); err != nil {
+	if err := installMachineGuard(ctx, request); err != nil {
 		return err
 	}
 	if err := ensureHostdToken(paths, request); err != nil {
@@ -189,7 +189,7 @@ func Install(ctx context.Context, request Request) error {
 	// while the privileged role owns only power policy. Remove the obsolete
 	// declaration before starting hostd so both cannot contend for the port.
 	var obsoleteDarwinHost *service.Installer
-	if request.SetupMode == "host" && runtime.GOOS == "darwin" {
+	if runtime.GOOS == "darwin" {
 		obsoleteDarwinHost, err = hostInstallerWithMissing(request, paths, true)
 		if err != nil {
 			return restoreLegacyWorker(errors.Join(err, rollbackFiles(paths, journal)))
@@ -201,21 +201,7 @@ func Install(ctx context.Context, request Request) error {
 	if err := lifecycle.Install(ctx); err != nil {
 		return restoreLegacyWorker(errors.Join(err, rollbackFiles(paths, journal)))
 	}
-	if request.SetupMode == "client" {
-		obsoleteHost, hostErr := hostInstaller(request, paths)
-		if hostErr != nil {
-			return restoreLegacyWorker(errors.Join(hostErr, lifecycle.Uninstall(ctx), rollbackFiles(paths, journal)))
-		}
-		_, statErr := os.Lstat(obsoleteHost.DefinitionPath())
-		if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-			return restoreLegacyWorker(errors.Join(statErr, lifecycle.Uninstall(ctx), rollbackFiles(paths, journal)))
-		}
-		if statErr == nil {
-			if err := obsoleteHost.Uninstall(ctx); err != nil {
-				return restoreLegacyWorker(errors.Join(err, lifecycle.Uninstall(ctx), rollbackFiles(paths, journal)))
-			}
-		}
-	}
+
 	journal.Stage, journal.UpdatedAt = "services_started", time.Now().UTC()
 	return writeJournal(paths.journal, journal)
 }
@@ -304,7 +290,7 @@ func Repair(ctx context.Context, request Request) error {
 		return errors.Join(ErrInvalidRequest, err)
 	}
 	var legacyHost *service.Installer
-	if request.SetupMode == "host" && runtime.GOOS != "darwin" {
+	if runtime.GOOS != "darwin" {
 		legacyHost, err = hostInstallerWithMissing(request, paths, true)
 		if err != nil {
 			return errors.Join(ErrInvalidRequest, err)
@@ -374,7 +360,7 @@ func Stop(ctx context.Context, request Request) error {
 		return errors.Join(ErrInvalidRequest, err)
 	}
 	var legacyHost *service.Installer
-	if request.SetupMode == "host" && runtime.GOOS != "darwin" {
+	if runtime.GOOS != "darwin" {
 		legacyHost, err = hostInstallerWithMissing(request, paths, true)
 		if err != nil {
 			return errors.Join(ErrInvalidRequest, err)
@@ -396,7 +382,7 @@ func uninstallValidated(ctx context.Context, request Request, paths installPaths
 		return errors.Join(ErrInvalidRequest, err)
 	}
 	var legacyHost *service.Installer
-	if request.SetupMode == "host" && runtime.GOOS != "darwin" {
+	if runtime.GOOS != "darwin" {
 		legacyHost, err = hostInstallerWithMissing(request, paths, true)
 		if err != nil {
 			return errors.Join(ErrInvalidRequest, err)
@@ -421,7 +407,7 @@ func uninstallValidated(ctx context.Context, request Request, paths installPaths
 		return err
 	}
 	restorePower := func(context.Context) error { return nil }
-	if request.SetupMode == "host" {
+	{
 		restorePower = func(restoreCtx context.Context) error {
 			return hostservice.NewPlatformApplier(filepath.Join(paths.runtimeState, "power-baseline.json")).Apply(restoreCtx, hostservice.AllowSleep)
 		}
@@ -477,7 +463,7 @@ func installersWithMissing(request Request, paths installPaths, allowMissingExec
 		Layout: layout, User: request.User, Group: request.Group, UID: request.UID, GID: request.GID,
 		HostdTokenFile: paths.hostdToken, Environment: workerEnvironment(request), Controller: hostdController,
 	}
-	if request.Platform == "linux" && request.SetupMode == "host" {
+	if request.Platform == "linux" {
 		hostdConfig.EncryptedCredentials = map[string]string{environmentkey.CredentialName: paths.environmentCredential}
 	}
 	var hostd *service.Installer
@@ -738,7 +724,7 @@ func ensureManagedDirectories(paths installPaths, request Request) error {
 }
 
 func ensureEnvironmentHostCredential(ctx context.Context, paths installPaths, request Request) (bool, error) {
-	if request.SetupMode != "host" || request.Platform != "linux" {
+	if request.Platform != "linux" {
 		return false, nil
 	}
 	if request.InstallationGeneration < 1 {
@@ -811,6 +797,9 @@ func loadInstallMetadata(path string, sudoUID int) (Request, error) {
 	}
 	group, err := user.LookupGroup(request.Group)
 	if err != nil || group.Gid != strconv.Itoa(request.GID) {
+		return Request{}, ErrInvalidRequest
+	}
+	if !request.EnrollmentPending && request.InstallationGeneration < 1 {
 		return Request{}, ErrInvalidRequest
 	}
 	return request, nil
@@ -1043,8 +1032,8 @@ func secureRootDirectory(path string, mode os.FileMode) error {
 
 func Validate(request Request, sudoUID int) error {
 	if request.Schema != SchemaV1 || request.Platform != runtime.GOOS || !validRunIdentity(request) || sudoUID != request.UID ||
-		request.UserMachineID == "" || !slices.Contains([]string{"client", "host"}, request.SetupMode) || strings.ContainsAny(request.UserMachineID, "\x00\r\n") ||
-		request.SetupMode == "host" && request.InstallationGeneration < 1 {
+		request.EnrollmentPending || request.UserMachineID == "" || strings.ContainsAny(request.UserMachineID, "\x00\r\n") ||
+		request.InstallationGeneration < 1 {
 		return fmt.Errorf("%w: identity contract", ErrInvalidRequest)
 	}
 	account, err := user.Lookup(request.User)
@@ -1109,7 +1098,6 @@ func workerEnvironment(request Request) map[string]string {
 		"PAPERBOAT_CONTROL_URL": request.ControlURL, "PAPERBOAT_MACHINE_ID": request.UserMachineID,
 		"PAPERBOAT_SHELL": request.Shell, "PAPERBOAT_RUNTIME_LISTEN_ADDRESS": request.HelperListenAddress,
 		"PAPERBOAT_RUNTIME_SERVICE_SCOPE": "system",
-		"PAPERBOAT_SETUP_MODE":            request.SetupMode,
 		// Paperboat's own narrow private-preview PAC applies to browsers. The
 		// managed control plane must remain direct so enabling that PAC cannot
 		// prevent hostd/updater from starting.

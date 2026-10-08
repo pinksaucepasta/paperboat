@@ -150,3 +150,25 @@ func TestObservationStoreEnforcesOwnerTimeAndSourceBounds(t *testing.T) {
 }
 
 func pointerSnapshot(snapshot localapi.Snapshot) *localapi.Snapshot { return &snapshot }
+
+func TestObservationStoreOwnsConsumerProjection(t *testing.T) {
+	now := time.Now().UTC()
+	store, _ := localapi.NewSnapshotStore(pointerSnapshot(observationSnapshot(now)))
+	observations, err := NewObservationStore(ObservationConfig{Store: store, OwnerUID: 501, Clock: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := transportObservation("source", 1, now, 1, "direct")
+	value.TransportConsumers = []localapi.TransportConsumer{{Path: "direct", ActiveConsumers: 1}}
+	peer := localapi.Peer{UID: 501, PID: 1}
+	if err := observations.PublishObservation(t.Context(), peer, value); err != nil {
+		t.Fatal(err)
+	}
+	value.TransportConsumers[0].Path = "PRIVATE invalid projection"
+	observations.mu.Lock()
+	stored := observations.sources[observationKey(peer, value.SourceID)].TransportConsumers[0]
+	observations.mu.Unlock()
+	if stored.Path != "direct" {
+		t.Fatal("caller mutated retained transport diagnostics")
+	}
+}

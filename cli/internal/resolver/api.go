@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"slices"
 	"strings"
@@ -31,7 +32,7 @@ type userMachineSessionClient interface {
 }
 
 type userMachineCreateSessionClient interface {
-	UserMachineConnectionDescriptorWithSessionCreate(context.Context, string, string, string) (api.ConnectionDescriptor, api.TerminalSession, error)
+	UserMachineConnectionDescriptorWithSessionCreate(context.Context, string, string, string, string) (api.ConnectionDescriptor, api.TerminalSession, error)
 }
 
 type target struct {
@@ -85,7 +86,7 @@ func (r *APIResolver) Resolve(ctx context.Context, req ConnectRequest) (ConnectI
 		}
 		resolved = target{kind: targetUserMachine, id: req.ResolvedMachine.ID, name: req.ResolvedMachine.Name, state: req.ResolvedMachine.State, generation: req.ResolvedMachine.Generation}
 	} else {
-		found, resolveErr := r.findTarget(ctx, req.Project)
+		found, resolveErr := r.findTarget(ctx, req.Machine)
 		if resolveErr != nil {
 			return ConnectInfo{}, resolveErr
 		}
@@ -100,13 +101,13 @@ func (r *APIResolver) Resolve(ctx context.Context, req ConnectRequest) (ConnectI
 		var createErr error
 		resp, createdSession, createErr = r.connectWithSessionCreate(ctx, target, req.CreateTerminalSession)
 		if createErr != nil {
-			return ConnectInfo{}, fmt.Errorf("connect to environment %q: %w", req.Project, createErr)
+			return ConnectInfo{}, fmt.Errorf("connect to environment %q: %w", req.Machine, createErr)
 		}
 	} else {
 		var connectErr error
 		resp, connectErr = r.connect(ctx, target, req.TerminalSessionID)
 		if connectErr != nil {
-			return ConnectInfo{}, fmt.Errorf("connect to environment %q: %w", req.Project, connectErr)
+			return ConnectInfo{}, fmt.Errorf("connect to environment %q: %w", req.Machine, connectErr)
 		}
 	}
 
@@ -124,14 +125,14 @@ func (r *APIResolver) Resolve(ctx context.Context, req ConnectRequest) (ConnectI
 	}
 
 	if !completeTerminalDescriptor(resp.Terminal) {
-		return ConnectInfo{}, fmt.Errorf("connect to environment %q: server did not return a terminal endpoint", req.Project)
+		return ConnectInfo{}, fmt.Errorf("connect to environment %q: server did not return a terminal endpoint", req.Machine)
 	}
 
 	info := ConnectInfo{
 		TargetKind:        target.kind,
-		ProjectID:         target.id,
-		Project:           target.name,
-		ProjectState:      targetState(target, resp),
+		MachineID:         target.id,
+		Machine:           target.name,
+		MachineState:      targetState(target, resp),
 		MachineGeneration: target.generation,
 		TunnelTarget:      resp.Terminal.Endpoints.WSS,
 		Local:             false,
@@ -141,8 +142,6 @@ func (r *APIResolver) Resolve(ctx context.Context, req ConnectRequest) (ConnectI
 			QUICEndpoint:  resp.Terminal.Endpoints.QUIC,
 			WSSEndpoint:   resp.Terminal.Endpoints.WSS,
 			Auth:          mapAuth(resp.Terminal.Auth),
-			ThreadID:      resp.Terminal.ThreadID,
-			TerminalID:    resp.Terminal.TerminalID,
 			SessionID:     resp.Terminal.SessionID,
 			CWD:           resp.Terminal.CWD,
 			ReplayHistory: true,
@@ -175,7 +174,7 @@ func (r *APIResolver) connectWithSessionCreate(ctx context.Context, target targe
 	if !ok {
 		return api.ConnectionDescriptor{}, nil, errors.New("this server client does not support create-and-connect for machines")
 	}
-	descriptor, session, err := client.UserMachineConnectionDescriptorWithSessionCreate(ctx, target.id, create.Name, create.IdempotencyKey)
+	descriptor, session, err := client.UserMachineConnectionDescriptorWithSessionCreate(ctx, target.id, create.Name, create.IdempotencyKey, create.CWD)
 	if err != nil {
 		return api.ConnectionDescriptor{}, nil, err
 	}
@@ -200,12 +199,12 @@ func (r *APIResolver) now() time.Time {
 	return time.Now()
 }
 
-func (r *APIResolver) record(name, outcome, projectID, environmentID, stage string, started time.Time) {
+func (r *APIResolver) record(name, outcome, machineID, environmentID, stage string, started time.Time) {
 	if r.Telemetry == nil {
 		return
 	}
 	ended := r.now()
-	e := telemetry.Event{Name: name, At: ended, Outcome: outcome, ProjectID: projectID, EnvironmentID: environmentID, Stage: stage, LatencyMS: ended.Sub(started).Milliseconds()}
+	e := telemetry.Event{Name: name, At: ended, Outcome: outcome, MachineID: machineID, EnvironmentID: environmentID, Stage: stage, LatencyMS: ended.Sub(started).Milliseconds()}
 	if e.Validate() == nil {
 		r.Telemetry.Record(e)
 	}
@@ -269,13 +268,13 @@ func (r *APIResolver) findTarget(ctx context.Context, requested string) (target,
 
 func terminalCapabilityError(machine api.UserMachine) error {
 	if !machine.Capabilities.TerminalHost.Configured {
-		return &api.APIError{Code: "machine_capability_unavailable", Message: "This machine is not configured to host terminals."}
+		return &api.APIError{Status: http.StatusConflict, Code: "machine_capability_unavailable", Message: "This machine is not configured to host terminals."}
 	}
 	if slices.Contains([]string{"revoked", "disconnected", "deleted"}, machine.State) {
 		return nil
 	}
 	if !machine.Online || !machine.Capabilities.TerminalHost.Observed {
-		return &api.APIError{Code: "machine_offline", Message: "This terminal host is offline."}
+		return &api.APIError{Status: http.StatusConflict, Code: "machine_offline", Message: "This terminal host is offline."}
 	}
 	return nil
 }
@@ -295,7 +294,7 @@ func (r *APIResolver) waitConnectable(ctx context.Context, target target, termin
 	defer cancel()
 	for {
 		if time.Now().After(deadline) {
-			return api.ConnectionDescriptor{}, fmt.Errorf("timed out waiting for the machine to become ready (last status: %s)", statusReason(resp))
+			return api.ConnectionDescriptor{}, fmt.Errorf("timed out waiting for the machine to become ready: %w", context.DeadlineExceeded)
 		}
 		interval := r.pollInterval
 		if resp.RetryAfterSeconds > 0 {
@@ -303,7 +302,7 @@ func (r *APIResolver) waitConnectable(ctx context.Context, target target, termin
 		}
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
-			return api.ConnectionDescriptor{}, fmt.Errorf("timed out waiting for the machine to become ready (last status: %s)", statusReason(resp))
+			return api.ConnectionDescriptor{}, fmt.Errorf("timed out waiting for the machine to become ready: %w", context.DeadlineExceeded)
 		}
 		if interval > remaining {
 			interval = remaining
@@ -314,7 +313,7 @@ func (r *APIResolver) waitConnectable(ctx context.Context, target target, termin
 		r.record("connect.stage", "waiting", target.id, "", resp.Status, r.now())
 		if err := r.wait(pollCtx, interval); err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
-				return api.ConnectionDescriptor{}, fmt.Errorf("timed out waiting for the machine to become ready (last status: %s)", statusReason(resp))
+				return api.ConnectionDescriptor{}, fmt.Errorf("timed out waiting for the machine to become ready: %w", context.DeadlineExceeded)
 			}
 			return api.ConnectionDescriptor{}, err
 		}
@@ -349,7 +348,7 @@ func (r *APIResolver) waitConnectable(ctx context.Context, target target, termin
 func terminalConnectionError(resp api.ConnectionDescriptor) error {
 	switch resp.Status {
 	case "machine_revoked":
-		return &api.APIError{Code: resp.Status, Message: "machine access was revoked"}
+		return &api.APIError{Status: http.StatusForbidden, Code: resp.Status, Message: "machine access was revoked"}
 	}
 	return nil
 }
@@ -378,7 +377,7 @@ func (r *APIResolver) validateDescriptor(resp api.ConnectionDescriptor, target t
 	if resp.Terminal.Protocol != "paperboat.terminal.v1" || resp.Environment == nil || strings.TrimSpace(resp.Environment.EnvironmentID) == "" || !environmentMatchesTarget(resp.Environment, target) {
 		return api.ConnectionDescriptor{}, errors.New("server returned an invalid environment descriptor")
 	}
-	if strings.TrimSpace(resp.Environment.ProjectRoot) == "" || strings.TrimSpace(resp.Terminal.ThreadID) == "" || strings.TrimSpace(resp.Terminal.TerminalID) == "" || strings.TrimSpace(resp.Terminal.CWD) == "" {
+	if strings.TrimSpace(resp.Environment.ProjectRoot) == "" || strings.TrimSpace(resp.Terminal.SessionID) == "" || strings.TrimSpace(resp.Terminal.CWD) == "" {
 		return api.ConnectionDescriptor{}, errors.New("server returned incomplete environment or terminal identity")
 	}
 	wsURL, err := secureEndpoint(resp.Terminal.Endpoints.WSS, "wss")
@@ -406,8 +405,10 @@ func (r *APIResolver) validateDescriptor(resp api.ConnectionDescriptor, target t
 		if resp.FileTransfer != nil {
 			return api.ConnectionDescriptor{}, errors.New("shared terminal descriptor must not include file transfer authority")
 		}
-	} else if err := r.validateFileTransfer(resp.FileTransfer, wsURL, resp.ExpiresAt); err != nil {
-		return api.ConnectionDescriptor{}, err
+	} else if resp.FileTransfer != nil {
+		if err := r.validateFileTransfer(resp.FileTransfer, wsURL, resp.ExpiresAt); err != nil {
+			return api.ConnectionDescriptor{}, err
+		}
 	}
 	return resp, nil
 }
@@ -503,20 +504,6 @@ func (r *APIResolver) wait(ctx context.Context, d time.Duration) error {
 	case <-timer.C:
 		return nil
 	}
-}
-
-func statusReason(resp api.ConnectionDescriptor) string {
-	parts := make([]string, 0, 2)
-	if resp.Status != "" {
-		parts = append(parts, resp.Status)
-	}
-	if resp.Reason != "" {
-		parts = append(parts, resp.Reason)
-	}
-	if len(parts) == 0 {
-		return "unknown"
-	}
-	return strings.Join(parts, ": ")
 }
 
 func mapAuth(auth api.AuthMaterial) AuthTarget {

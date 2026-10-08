@@ -709,3 +709,56 @@ func TestDrainHookFailureRejectsWithoutWithdrawingReadySession(t *testing.T) {
 		t.Fatalf("client state=%s, want ready after rejected drain", client.State())
 	}
 }
+
+func TestNewSnapshotReplacesUnreadyCandidateWithoutLosingServingSession(t *testing.T) {
+	server, client, _, applier, first := testSessionPair(t)
+	second, _ := NewSnapshot(first.TunnelID, 2, testConfigPayload(2, "unavailable.example.test"))
+	second.AccountID, second.ConnectorID, second.SessionID, second.ProcessGeneration = client.config.Hello.AccountID, client.config.Hello.ConnectorID, client.welcome.SessionID, client.config.Hello.ProcessGeneration
+	if err := server.OfferSnapshot(context.Background(), second); err != nil {
+		t.Fatal(err)
+	}
+	ack, err := client.ApplySnapshot(context.Background(), second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := server.HandleAck(context.Background(), ack); err != nil {
+		t.Fatal(err)
+	}
+	third, _ := NewSnapshot(first.TunnelID, 3, testConfigPayload(3, "recovered.example.test"))
+	third.AccountID, third.ConnectorID, third.SessionID, third.ProcessGeneration = client.config.Hello.AccountID, client.config.Hello.ConnectorID, client.welcome.SessionID, client.config.Hello.ProcessGeneration
+	if err := server.OfferSnapshot(context.Background(), third); err != nil {
+		t.Fatal(err)
+	}
+	abortFailure := errors.New("pending cleanup failed")
+	applier.abortErr = abortFailure
+	if _, err := client.ApplySnapshot(context.Background(), third); !errors.Is(err, abortFailure) {
+		t.Fatalf("cleanup failure hidden: %v", err)
+	}
+	if pending, ok := client.Candidate(); !ok || pending.Generation != second.Generation || client.prepared == nil {
+		t.Fatal("cleanup failure lost pending resource ownership")
+	}
+	applier.abortErr = nil
+	ack, err = client.ApplySnapshot(context.Background(), third)
+	if err != nil {
+		t.Fatalf("replacement forced session reconnect: %v", err)
+	}
+	if err := server.HandleAck(context.Background(), ack); err != nil {
+		t.Fatal(err)
+	}
+	if !applier.prepared[1].aborted {
+		t.Fatal("superseded pending configuration not cleaned")
+	}
+	if current, ready, generation := server.Current(); !ready || generation != first.Generation || current.ContentHash != first.ContentHash {
+		t.Fatal("replacement lost serving LKG")
+	}
+	ready, err := client.MarkReady(true, true, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.HandleReadiness(context.Background(), ready); err != nil {
+		t.Fatal(err)
+	}
+	if current, ok, generation := server.Current(); !ok || generation != third.Generation || current.SessionID != client.welcome.SessionID {
+		t.Fatal("recovery did not use original session")
+	}
+}

@@ -90,12 +90,12 @@ func (a *MacOSAdapter) Install(ctx context.Context, pac string) error {
 	if err := json.Unmarshal(raw, &state); err != nil {
 		return err
 	}
-	for i, service := range state.Services {
+	for _, service := range state.Services {
 		if _, err := a.runner.Run(ctx, networksetup, "-setautoproxyurl", service.Name, pac); err != nil {
-			return a.rollback(ctx, state.Services[:i], err)
+			return err
 		}
 		if _, err := a.runner.Run(ctx, networksetup, "-setautoproxystate", service.Name, "on"); err != nil {
-			return a.rollback(ctx, state.Services[:i+1], err)
+			return err
 		}
 	}
 	return nil
@@ -151,13 +151,6 @@ func (a *MacOSAdapter) Restore(ctx context.Context, raw json.RawMessage) error {
 	}
 	return result
 }
-func (a *MacOSAdapter) rollback(ctx context.Context, services []macService, cause error) error {
-	result := cause
-	for _, s := range services {
-		result = errors.Join(result, a.restoreOne(ctx, s))
-	}
-	return result
-}
 func (a *MacOSAdapter) restoreOne(ctx context.Context, s macService) error {
 	var result error
 	if s.URL != "" {
@@ -170,4 +163,48 @@ func (a *MacOSAdapter) restoreOne(ctx context.Context, s macService) error {
 	}
 	_, err := a.runner.Run(ctx, networksetup, "-setautoproxystate", s.Name, state)
 	return errors.Join(result, err)
+}
+
+func (a *MacOSAdapter) OwnsTransition(ctx context.Context, oldURL, newURL string) (bool, error) {
+	raw, err := a.Snapshot(ctx)
+	if err != nil {
+		return false, err
+	}
+	var state macState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return false, err
+	}
+	for _, service := range state.Services {
+		if !service.Enabled || (service.URL != oldURL && service.URL != newURL) {
+			return false, nil
+		}
+	}
+	return len(state.Services) > 0, nil
+}
+
+func (a *MacOSAdapter) OwnsRestoration(ctx context.Context, prior json.RawMessage, pacURL, previousPACURL string) (bool, error) {
+	raw, err := a.Snapshot(ctx)
+	if err != nil {
+		return false, err
+	}
+	var current, want macState
+	if json.Unmarshal(raw, &current) != nil || json.Unmarshal(prior, &want) != nil || len(current.Services) != len(want.Services) {
+		return false, nil
+	}
+	for i, s := range current.Services {
+		p := want.Services[i]
+		if s.Name != p.Name {
+			return false, nil
+		}
+		ownedURL := s.URL == pacURL || (previousPACURL != "" && s.URL == previousPACURL)
+		priorURL := s.URL == p.URL || (p.URL == "" && ownedURL)
+		if s.Enabled == p.Enabled && priorURL {
+			continue
+		}
+		// URL and enablement are separate platform writes during restoration.
+		if (!priorURL && !ownedURL) || (!s.Enabled && p.Enabled) {
+			return false, nil
+		}
+	}
+	return true, nil
 }

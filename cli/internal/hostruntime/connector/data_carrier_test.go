@@ -6,9 +6,12 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 func testDataCarrierConfig() DataCarrierConfig {
@@ -106,6 +109,156 @@ func TestDataCarrierContextCancelsStream(t *testing.T) {
 		t.Fatal("write succeeded after stream context cancellation")
 	}
 	_ = stream.Close()
+}
+
+func TestDataCarrierAdmissionContextRetainsReferenceAndCancelsWithCarrier(t *testing.T) {
+	identity := testDataCarrierIdentity()
+	local, remote := net.Pipe()
+	carrierContext, cancelCarrier := context.WithCancel(supportref.WithContext(context.Background(), supportref.New()))
+	reference := supportref.FromContext(carrierContext)
+	if reference == "" {
+		cancelCarrier()
+		t.Fatal("test support reference was not valid")
+	}
+	authorized := make(chan string, 1)
+	authorizeDone := make(chan error, 1)
+	server, err := NewDataCarrierServer(carrierContext, remote, testDataCarrierConfig(), DataCarrierAdmission{
+		Identity: identity,
+		Authorize: func(ctx context.Context, _ StreamOpen) error {
+			authorized <- supportref.FromContext(ctx)
+			<-ctx.Done()
+			authorizeDone <- ctx.Err()
+			return ctx.Err()
+		},
+	})
+	if err != nil {
+		cancelCarrier()
+		_ = local.Close()
+		_ = remote.Close()
+		t.Fatal(err)
+	}
+	client, err := NewDataCarrierClient(context.Background(), local, testDataCarrierConfig(), identity)
+	if err != nil {
+		cancelCarrier()
+		_ = server.Close()
+		t.Fatal(err)
+	}
+	defer client.Close()
+	defer server.Close()
+	defer cancelCarrier()
+	stream, err := client.OpenStream(context.Background(), testDataCarrierStreamOpen("route-a", "request-reference"))
+	if err != nil {
+		t.Fatalf("open stream: %v", err)
+	}
+	defer stream.Close()
+	select {
+	case got := <-authorized:
+		if got != reference {
+			t.Fatalf("authorization support reference=%q want=%q", got, reference)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stream authorization did not start")
+	}
+	cancelCarrier()
+	select {
+	case err := <-authorizeDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("authorization cancellation=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("carrier cancellation did not stop stream authorization")
+	}
+}
+
+func TestDataCarrierAuthorizationFailurePreservesCauseWithoutRawText(t *testing.T) {
+	identity := testDataCarrierIdentity()
+	secret := errors.New("private authorization claim")
+	local, remote := net.Pipe()
+	server, err := NewDataCarrierServer(context.Background(), remote, testDataCarrierConfig(), DataCarrierAdmission{
+		Identity: identity,
+		Authorize: func(context.Context, StreamOpen) error {
+			return secret
+		},
+	})
+	if err != nil {
+		_ = local.Close()
+		_ = remote.Close()
+		t.Fatal(err)
+	}
+	client, err := NewDataCarrierClient(context.Background(), local, testDataCarrierConfig(), identity)
+	if err != nil {
+		_ = server.Close()
+		t.Fatal(err)
+	}
+	defer client.Close()
+	defer server.Close()
+	stream, err := client.OpenStream(context.Background(), testDataCarrierStreamOpen("route-a", "request-denied"))
+	if err != nil {
+		t.Fatalf("open stream preface: %v", err)
+	}
+	defer stream.Close()
+	_, _, err = server.AcceptStream(context.Background())
+	if !errors.Is(err, ErrDataCarrierAdmission) || !errors.Is(err, secret) {
+		t.Fatalf("authorization sentinels or cause were lost: %v", err)
+	}
+	var diagnostic interface {
+		DiagnosticStage() string
+		DiagnosticCode() string
+	}
+	if !errors.As(err, &diagnostic) || diagnostic.DiagnosticStage() != "peer_authority" || diagnostic.DiagnosticCode() != "peer_authority_failed" {
+		t.Fatalf("peer authority classification missing: %T", err)
+	}
+	if strings.Contains(err.Error(), secret.Error()) {
+		t.Fatalf("raw authorization detail escaped: %v", err)
+	}
+}
+
+type failingOpenCarrierSession struct {
+	err  error
+	done chan struct{}
+	once sync.Once
+}
+
+func (s *failingOpenCarrierSession) OpenStream(context.Context) (DataCarrierStreamLink, error) {
+	return nil, s.err
+}
+func (s *failingOpenCarrierSession) AcceptStream(ctx context.Context) (DataCarrierStreamLink, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.done:
+		return nil, ErrDataCarrierClosed
+	}
+}
+func (*failingOpenCarrierSession) Ping(context.Context) error { return nil }
+func (s *failingOpenCarrierSession) Close() error {
+	s.once.Do(func() { close(s.done) })
+	return nil
+}
+func (s *failingOpenCarrierSession) CloseChan() <-chan struct{} { return s.done }
+
+func TestDataCarrierStreamOpenFailureHasSafeTypedCause(t *testing.T) {
+	secret := errors.New("private carrier address and credential")
+	session := &failingOpenCarrierSession{err: secret, done: make(chan struct{})}
+	carrier, err := NewDataCarrierClientWithSession(context.Background(), session, testDataCarrierConfig(), testDataCarrierIdentity())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer carrier.Close()
+	_, err = carrier.OpenStream(context.Background(), testDataCarrierStreamOpen("route-a", "request-open-failure"))
+	if !errors.Is(err, secret) {
+		t.Fatalf("stream-open cause was not retained: %v", err)
+	}
+	var diagnostic interface {
+		DiagnosticStage() string
+		DiagnosticCode() string
+	}
+	if !errors.As(err, &diagnostic) || diagnostic.DiagnosticStage() != "stream_open" || diagnostic.DiagnosticCode() != "native_private_failed" {
+		t.Fatalf("stream-open classification missing: %T", err)
+	}
+	if strings.Contains(err.Error(), secret.Error()) {
+		t.Fatalf("raw stream-open cause escaped: %v", err)
+	}
 }
 
 func TestDataCarrierAcceptCancellationLeavesCarrierUsable(t *testing.T) {

@@ -13,10 +13,10 @@ pb-env-vault-init - Create a password-protected ENV vault
 Create a password-protected ENV vault
 
 .PP
-Create password-protected local key custody for this account. Read the password from a private file or stdin; --recovery-file saves a newly generated recovery code to a new file.
+Create password-protected local key custody for this account. Read the password from a private file or stdin; --recovery-file saves a newly generated recovery code to a new file. Already registered owned hosts receive an empty encrypted delivery without authorizing new names.
 
 .PP
-The local vault protects ENV key custody with a password and optional recovery code. Locking clears unlocked keys from this device; removing local custody differs from resetting and deleting account values. Never place a password or recovery code in shell arguments.
+The local vault protects ENV key custody with a password and optional recovery code. Locking clears unlocked keys from this machine; removing local custody differs from resetting and deleting account values. Never place a password or recovery code in shell arguments.
 
 .PP
 JSON output is supported with --json.
@@ -54,6 +54,10 @@ JSON output is supported with --json.
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

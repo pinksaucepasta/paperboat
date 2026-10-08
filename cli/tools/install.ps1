@@ -1,38 +1,41 @@
-<# The release-published script pins a verifier which authenticates the product through TUF before downloading it. #>
+<# The trusted first-party HTTPS installer pins the immutable product bytes.
+   Installed updates independently verify TUF metadata and rollback policy. #>
 $ErrorActionPreference = 'Stop'
 $server = if ($env:PAPERBOAT_SERVER) { [string]$env:PAPERBOAT_SERVER } else { 'https://api.pprbt.dev' }
-$tufUrl = if ($env:PAPERBOAT_TUF_URL) { [string]$env:PAPERBOAT_TUF_URL } else { 'https://get.pprbt.dev/tuf' }
-$bootstrapVersion = '@PAPERBOAT_BOOTSTRAP_VERSION@'
 $requestedVersion = if ($env:PAPERBOAT_VERSION) { [string]$env:PAPERBOAT_VERSION } else { 'latest' }
-$repo = if ($env:PAPERBOAT_GITHUB_REPOSITORY) { [string]$env:PAPERBOAT_GITHUB_REPOSITORY } else { '@PAPERBOAT_BOOTSTRAP_REPOSITORY@' }
 $token = [string]$env:PAPERBOAT_ENROLLMENT_TOKEN
 $tokenSource = [string]$env:PAPERBOAT_ENROLLMENT_TOKEN_FILE
 $name = if ($env:PAPERBOAT_MACHINE_ALIAS) { [string]$env:PAPERBOAT_MACHINE_ALIAS } else { [string]$env:PAPERBOAT_MACHINE_NAME }
 if ($server -notmatch '^https://') { throw 'Paperboat server URL must use HTTPS.' }
-if ($tufUrl -notmatch '^https://') { throw 'Paperboat TUF URL must use HTTPS.' }
-if ($repo -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw 'Paperboat release repository is invalid.' }
 if (-not [string]::IsNullOrWhiteSpace($token) -and -not [string]::IsNullOrWhiteSpace($tokenSource)) { throw 'Use only one Paperboat enrollment token source.' }
 $arch = if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { 'arm64' } elseif ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'X64') { 'amd64' } else { throw 'Paperboat supports only Windows AMD64 and ARM64.' }
 $asset = "pb-windows-$arch.exe"
-$bootstrapAsset = "pb-bootstrap-windows-$arch.exe"
 if ($arch -eq 'amd64') {
-  $bootstrapSha = '@PAPERBOAT_BOOTSTRAP_WINDOWS_AMD64_SHA256@'
-  $bootstrapLength = '@PAPERBOAT_BOOTSTRAP_WINDOWS_AMD64_LENGTH@'
+  $productVersion = '@PAPERBOAT_PRODUCT_WINDOWS_AMD64_VERSION@'
+  $productUrl = '@PAPERBOAT_PRODUCT_WINDOWS_AMD64_URL@'
+  $productSha = '@PAPERBOAT_PRODUCT_WINDOWS_AMD64_SHA256@'
+  $productLength = '@PAPERBOAT_PRODUCT_WINDOWS_AMD64_LENGTH@'
 } else {
-  $bootstrapSha = '@PAPERBOAT_BOOTSTRAP_WINDOWS_ARM64_SHA256@'
-  $bootstrapLength = '@PAPERBOAT_BOOTSTRAP_WINDOWS_ARM64_LENGTH@'
+  $productVersion = '@PAPERBOAT_PRODUCT_WINDOWS_ARM64_VERSION@'
+  $productUrl = '@PAPERBOAT_PRODUCT_WINDOWS_ARM64_URL@'
+  $productSha = '@PAPERBOAT_PRODUCT_WINDOWS_ARM64_SHA256@'
+  $productLength = '@PAPERBOAT_PRODUCT_WINDOWS_ARM64_LENGTH@'
 }
-if ($bootstrapVersion.Contains('@PAPERBOAT_') -or $bootstrapSha.Contains('@PAPERBOAT_') -or $bootstrapLength.Contains('@PAPERBOAT_')) { throw 'Use the published Paperboat installer.' }
+if ($productVersion -notmatch '^20[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.(0|[1-9][0-9]*)$' -or $productSha -cnotmatch '^[0-9a-f]{64}$' -or $productLength -notmatch '^[1-9][0-9]*$') { throw 'Use the published Paperboat installer.' }
+if ([int64]$productLength -gt 536870912) { throw 'Paperboat product length exceeds the release bound.' }
+$expectedUrl = '^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/download/' + [regex]::Escape($productVersion) + '/' + [regex]::Escape($asset) + '$'
+if ($productUrl -cnotmatch $expectedUrl) { throw 'Paperboat product URL does not match its immutable release identity.' }
+if ($requestedVersion -ne 'latest' -and $requestedVersion -ne $productVersion) { throw "Requested Paperboat version does not match this platform's published version $productVersion." }
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 if (-not [IO.Path]::IsPathRooted($tempRoot)) { throw 'Paperboat temporary directory must be absolute.' }
-$dir = Join-Path $tempRoot ('Paperboat\bootstrap-' + [guid]::NewGuid().ToString('N'))
+$dir = Join-Path $tempRoot ('Paperboat\install-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
 
-function Download-HttpsFile([string]$Url, [string]$Output, [int]$TimeoutSeconds) {
+function Download-HttpsFile([string]$Url, [string]$Output, [int]$TimeoutSeconds, [int64]$MaximumBytes) {
   if ($Url -notmatch '^https://') { throw 'Paperboat downloads require HTTPS.' }
-  $curl = Get-Command curl.exe -CommandType Application -ErrorAction SilentlyContinue
+  $curl = Get-Command curl.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($null -eq $curl) { throw 'Paperboat installation requires curl.exe.' }
-  & $curl.Source '--silent' '--show-error' '--location' '--fail' '--connect-timeout' '20' '--max-time' ([string]$TimeoutSeconds) '--proto' '=https' '--proto-redir' '=https' '--output' $Output $Url
+  & $curl.Source '--silent' '--show-error' '--location' '--fail' '--connect-timeout' '20' '--max-time' ([string]$TimeoutSeconds) '--max-filesize' ([string]$MaximumBytes) '--proto' '=https' '--proto-redir' '=https' '--output' $Output $Url
   if ($LASTEXITCODE -ne 0) { throw "Download failed for $Url with curl exit $LASTEXITCODE." }
 }
 function Invoke-Paperboat([string]$FilePath, [object[]]$Arguments, [string]$Operation) {
@@ -71,19 +74,12 @@ try {
     Set-Acl -LiteralPath $tokenFile -AclObject $security
     $token = $null
   }
-  $bootstrapUrl = "https://github.com/$repo/releases/download/$bootstrapVersion/$bootstrapAsset"
-  $verifier = Join-Path $dir $bootstrapAsset
-  Download-HttpsFile $bootstrapUrl $verifier 300
-  if ((Get-Item -LiteralPath $verifier).Length -ne [int64]$bootstrapLength) { throw 'Paperboat bootstrap verifier length mismatch.' }
-  if ((Get-FileHash -Algorithm SHA256 -LiteralPath $verifier).Hash.ToLowerInvariant() -ne $bootstrapSha) { throw 'Paperboat bootstrap verifier digest mismatch.' }
-  Unblock-File -LiteralPath $verifier -ErrorAction SilentlyContinue
-  $verifiedRaw = & $verifier '--tuf-url' $tufUrl '--state-dir' (Join-Path $dir 'tuf') '--github-repository' $repo '--version' $requestedVersion
-  if ($LASTEXITCODE -ne 0) { throw "Paperboat signed release verification failed with exit code $LASTEXITCODE." }
-  try { $verified = ([string]::Join([Environment]::NewLine, [string[]]$verifiedRaw)) | ConvertFrom-Json } catch { throw 'Paperboat verifier returned invalid JSON.' }
-  $download = [string]$verified.path
-  $expectedDownload = Join-Path (Join-Path $dir 'tuf') (Join-Path 'product' $asset)
-  if ($download -ne $expectedDownload -or -not (Test-Path -LiteralPath $download -PathType Leaf)) { throw 'Paperboat verifier returned an unexpected artifact.' }
-  if (((Get-Item -LiteralPath $download).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Paperboat verifier returned a reparse-point artifact.' }
+  $download = Join-Path $dir $asset
+  Download-HttpsFile $productUrl $download 300 ([int64]$productLength)
+  $downloadItem = Get-Item -LiteralPath $download -Force
+  if ($downloadItem.PSIsContainer -or ($downloadItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Paperboat product must be a regular non-reparse file.' }
+  if ($downloadItem.Length -ne [int64]$productLength) { throw 'Paperboat product length mismatch.' }
+  if ((Get-FileHash -Algorithm SHA256 -LiteralPath $download).Hash.ToLowerInvariant() -ne $productSha) { throw 'Paperboat product digest mismatch.' }
   Unblock-File -LiteralPath $download -ErrorAction SilentlyContinue
 
   if ($null -ne $tokenFile) {

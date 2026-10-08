@@ -119,7 +119,6 @@ func prepareS4UPreviewIdentityFixture(t *testing.T, reportPath string) string {
 		PublicIdentityKey:      base64.RawURLEncoding.EncodeToString(key.Public()),
 		InboxPath:              filepath.Join(stateRoot, "inbox"),
 		InstallationGeneration: 1,
-		SetupRoles:             []string{"host"},
 		UpdatedAt:              time.Now().UTC(),
 	}
 	if err := store.SaveRegistration(registration); err != nil {

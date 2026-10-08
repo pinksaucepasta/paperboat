@@ -25,7 +25,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	clienttransfer "github.com/pinksaucepasta/paperboat/internal/filetransfer"
-	hostconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesession"
@@ -273,7 +272,7 @@ func runRealTerminalAndFileProtocols(t *testing.T, clientOwner, serverOwner *nat
 		t.Fatal(err)
 	}
 	journal, _ := operation.NewJournal(32)
-	protocolServer, err := hostserver.New(hostserver.Config{Negotiator: protocol.Negotiator{Profile: hostconfig.BYOD, Available: map[string]bool{"terminal.v1": true, "health.v1": true, "exec.v1": true}}, Journal: journal, Handler: dispatcher, MaxConcurrent: 4, HeartbeatInterval: time.Hour, MutationDeadline: time.Minute})
+	protocolServer, err := hostserver.New(hostserver.Config{Negotiator: protocol.Negotiator{Available: map[string]bool{"terminal.v1": true, "health.v1": true, "exec.v1": true}}, Journal: journal, Handler: dispatcher, MaxConcurrent: 4, HeartbeatInterval: time.Hour, MutationDeadline: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}

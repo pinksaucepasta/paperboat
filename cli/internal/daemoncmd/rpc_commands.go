@@ -17,7 +17,7 @@ func rpcResolveCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "resolve <query>",
-		Short: "Resolve a peer device IP, port forwardings and tags over gRPC IPC",
+		Short: "Resolve a peer machine IP, port forwardings and tags over gRPC IPC",
 		Args:  commandArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)
@@ -29,7 +29,7 @@ func rpcResolveCommand() *cobra.Command {
 			}
 			defer client.Close()
 
-			addr, err := client.ResolveDevice(ctx, args[0])
+			addr, err := client.ResolveMachine(ctx, args[0])
 			if err != nil {
 				return err
 			}
@@ -38,7 +38,7 @@ func rpcResolveCommand() *cobra.Command {
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(addr)
 			}
 
-			cmd.Printf("Device:   %s\n", addr.DeviceId)
+			cmd.Printf("Machine:   %s\n", addr.MachineId)
 			cmd.Printf("Alias:    %s\n", addr.Alias)
 			cmd.Printf("IP:       %s\n", addr.AssignedIp)
 			if len(addr.ForwardedPorts) > 0 {
@@ -72,8 +72,8 @@ func rpcResolveCommand() *cobra.Command {
 
 func rpcTagCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "tag <device-id> <tag1> [tag2...]",
-		Short: "Assign tags to a device over gRPC IPC",
+		Use:   "tag <machine-id> <tag1> [tag2...]",
+		Short: "Assign tags to a machine over gRPC IPC",
 		Args:  commandArgs(cobra.MinimumNArgs(2)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)
@@ -85,15 +85,15 @@ func rpcTagCommand() *cobra.Command {
 			}
 			defer client.Close()
 
-			deviceID := args[0]
+			machineID := args[0]
 			tags := args[1:]
 
-			resp, err := client.SetDeviceTags(ctx, deviceID, tags)
+			resp, err := client.SetMachineTags(ctx, machineID, tags)
 			if err != nil {
-				return fmt.Errorf("set device tags: %w", err)
+				return fmt.Errorf("set machine tags: %w", err)
 			}
 
-			return writeDaemonCommandResult(cmd, resp, fmt.Sprintf("Assigned tags %v to device %s (success=%v)", resp.Tags, resp.DeviceId, resp.Success))
+			return writeDaemonCommandResult(cmd, resp, fmt.Sprintf("Assigned tags %v to machine %s (success=%v)", resp.Tags, resp.MachineId, resp.Success))
 		},
 	}
 	cmd.Flags().Bool("json", false, "print JSON")
@@ -103,8 +103,8 @@ func rpcTagCommand() *cobra.Command {
 func rpcApproveCommand() *cobra.Command {
 	var revoke bool
 	cmd := &cobra.Command{
-		Use:   "approve <device-id>",
-		Short: "Approve or revoke a peer device over gRPC IPC",
+		Use:   "approve <machine-id>",
+		Short: "Approve or revoke a peer machine over gRPC IPC",
 		Args:  commandArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)
@@ -116,9 +116,9 @@ func rpcApproveCommand() *cobra.Command {
 			}
 			defer client.Close()
 
-			deviceID := args[0]
+			machineID := args[0]
 			approved := !revoke
-			resp, err := client.ApprovePeer(ctx, deviceID, approved)
+			resp, err := client.ApprovePeer(ctx, machineID, approved)
 			if err != nil {
 				return fmt.Errorf("approve peer: %w", err)
 			}
@@ -127,7 +127,7 @@ func rpcApproveCommand() *cobra.Command {
 			if !approved {
 				action = "revoked"
 			}
-			return writeDaemonCommandResult(cmd, resp, fmt.Sprintf("Peer %s %s successfully (success: %v)", resp.DeviceId, action, resp.Success))
+			return writeDaemonCommandResult(cmd, resp, fmt.Sprintf("Peer %s %s successfully (success: %v)", resp.MachineId, action, resp.Success))
 		},
 	}
 	cmd.Flags().BoolVar(&revoke, "revoke", false, "revoke peer admission")

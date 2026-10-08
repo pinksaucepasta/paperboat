@@ -182,7 +182,7 @@ func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time)
 		}
 		for _, s := range p.Scopes {
 			scopes++
-			validResource := s.ResourceKind == "device_network" && s.Capability == "connect" || s.ResourceKind == "inspector" && s.Capability == "inspector" || s.ResourceKind == "machine_access" && (s.Capability == "terminal" || s.Capability == "exec" || s.Capability == "managed_ssh" || s.Capability == "file_transfer" || s.Capability == "private_access") || s.ResourceKind == "codex_session" && s.Capability == "codex"
+			validResource := s.ResourceKind == "machine_network" && s.Capability == "connect" || s.ResourceKind == "inspector" && s.Capability == "inspector" || s.ResourceKind == "machine_access" && (s.Capability == "terminal" || s.Capability == "exec" || s.Capability == "managed_ssh" || s.Capability == "file_transfer" || s.Capability == "private_access") || s.ResourceKind == "codex_session" && s.Capability == "codex"
 			if scopes > 128 || !validResource || s.ResourceID == "" || len(s.ResourceID) > 256 || s.ResourceGeneration == 0 || s.Port != 443 || (s.Direction != "dial" && s.Direction != "accept") || s.ExpiresAt < g.ExpiresAt {
 				return Grant{}, ErrAdmission
 			}
@@ -211,7 +211,7 @@ func allowed(a, b Grant, now time.Time) bool {
 			}
 			for _, s := range p.Scopes {
 				for _, t := range q.Scopes {
-					if (s.ResourceKind != "device_network" || a.AccountID == b.AccountID) && s.ResourceKind == t.ResourceKind && s.ResourceID == t.ResourceID && s.ResourceGeneration == t.ResourceGeneration && s.Capability == t.Capability && s.Port == t.Port && s.Direction != t.Direction && s.ExpiresAt > now.Unix() && t.ExpiresAt > now.Unix() {
+					if (s.ResourceKind != "machine_network" || a.AccountID == b.AccountID) && s.ResourceKind == t.ResourceKind && s.ResourceID == t.ResourceID && s.ResourceGeneration == t.ResourceGeneration && s.Capability == t.Capability && s.Port == t.Port && s.Direction != t.Direction && s.ExpiresAt > now.Unix() && t.ExpiresAt > now.Unix() {
 						return true
 					}
 				}
@@ -237,4 +237,20 @@ func (d ServiceDescriptor) Valid() bool {
 	_, e2 := ParseDiscoKey(d.DiscoPublicKey)
 	address, e3 := netip.ParseAddr(d.VirtualAddress)
 	return e1 == nil && e2 == nil && e3 == nil && address.String() == d.VirtualAddress && netip.MustParsePrefix("fd7a:115c:a1e0::/48").Contains(address)
+}
+
+// classifiedFailure preserves a transport or credential cause alongside the
+// finite relay decision. Its text never copies remote close reasons or URLs.
+type classifiedFailure struct {
+	decision *Error
+	cause    error
+}
+
+func (e classifiedFailure) Error() string   { return e.decision.Error() }
+func (e classifiedFailure) Unwrap() []error { return []error{e.decision, e.cause} }
+func retainDecision(decision *Error, cause error) error {
+	if cause == nil || cause == decision {
+		return decision
+	}
+	return classifiedFailure{decision: decision, cause: cause}
 }

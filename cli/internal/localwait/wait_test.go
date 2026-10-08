@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -144,11 +145,62 @@ func TestResolveMachinePrefersExactIDAndRejectsAmbiguity(t *testing.T) {
 	if err != nil || selected.ID != "Studio" {
 		t.Fatalf("selected=%#v err=%v", selected, err)
 	}
-	if _, err := ResolveMachine(machines, "STUDIO"); err == nil {
+	if _, err := ResolveMachine(machines, "STUDIO"); !errors.Is(err, ErrMachineAmbiguous) {
 		t.Fatal("ambiguous alias was accepted")
 	}
-	if _, err := ResolveMachine(machines, "missing"); err == nil {
+	if _, err := ResolveMachine(machines, "missing"); !errors.Is(err, ErrMachineNotFound) {
 		t.Fatal("missing machine was accepted")
+	}
+}
+
+func TestWaitExpiredContextCannotClaimStaleReadiness(t *testing.T) {
+	machine := waitMachine()
+	machine.RuntimeState, machine.SelectedPath, machine.SSHReadiness = "ready", "direct", "ready"
+	for _, condition := range []string{"runtime", "transport", "ssh"} {
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		client := &fakeClient{initial: waitSnapshot(1, machine)}
+		result, err := WaitTargetFromSnapshot(ctx, client, client.initial, machine.ID, condition)
+		cancel()
+		if err != nil || result.Outcome != "timeout" || result.Code != "wait_timeout" || client.watches != 0 {
+			t.Fatal("expired wait claimed cached readiness or created a watch")
+		}
+	}
+}
+
+func TestWaitMixedEOFFailureIsNotSilentlyRetried(t *testing.T) {
+	machine := waitMachine()
+	mixed := errors.Join(io.EOF, syscall.EIO)
+	client := &fakeClient{initial: waitSnapshot(1, machine), batches: []watchBatch{{err: mixed}}}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := Wait(ctx, client, machine.ID, "transport")
+	if !errors.Is(err, syscall.EIO) || !errors.Is(err, io.EOF) || client.watches != 1 {
+		t.Fatal("independent watch failure was lost or retried as clean EOF")
+	}
+}
+
+type cyclicWatchFailure struct{}
+
+func (e *cyclicWatchFailure) Error() string { panic("private failure must not be formatted") }
+func (e *cyclicWatchFailure) Unwrap() error { return e }
+
+func TestWatchTerminationRequiresCompleteOwnedCleanup(t *testing.T) {
+	for _, tc := range []struct {
+		err, contextErr error
+		want            bool
+	}{
+		{io.EOF, nil, true},
+		{errors.Join(io.EOF, syscall.EIO), nil, false},
+		{context.Canceled, context.Canceled, true},
+		{errors.Join(context.Canceled, syscall.EIO), context.Canceled, false},
+		{context.DeadlineExceeded, context.DeadlineExceeded, true},
+		{context.DeadlineExceeded, context.Canceled, false},
+		{&cyclicWatchFailure{}, context.Canceled, false},
+		{(*cyclicWatchFailure)(nil), context.Canceled, false},
+	} {
+		if normalWatchTermination(tc.err, tc.contextErr) != tc.want {
+			t.Fatalf("watch classification wrong for %T", tc.err)
+		}
 	}
 }
 

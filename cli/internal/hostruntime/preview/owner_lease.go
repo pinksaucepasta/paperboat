@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/google/uuid"
 	"io"
 	"net/http"
 	"net/url"
@@ -226,7 +227,7 @@ func (m *OwnerSessionLeaseManager) Acquire(request OwnerSessionLeaseRequest, ide
 		}
 		return OwnerSessionLease{}, err
 	}
-	leaseID, err := m.randomID("osl_")
+	leaseID, err := m.randomID()
 	if err != nil {
 		_ = m.registry.CloseMachineOwnerSession(m.machineID, ownerSessionID)
 		_ = m.registry.ReleaseMachineOwnerSession(m.machineID, ownerSessionID)
@@ -506,12 +507,12 @@ func ownerSessionLeaseRequestHash(request OwnerSessionLeaseRequest) (string, err
 	return hex.EncodeToString(hash[:]), nil
 }
 
-func (m *OwnerSessionLeaseManager) randomID(prefix string) (string, error) {
-	value := make([]byte, 18)
-	if _, err := io.ReadFull(m.random, value); err != nil {
+func (m *OwnerSessionLeaseManager) randomID() (string, error) {
+	id, err := uuid.NewRandomFromReader(m.random)
+	if err != nil {
 		return "", err
 	}
-	return prefix + base64.RawURLEncoding.EncodeToString(value), nil
+	return "lease_" + id.String(), nil
 }
 
 func (m *OwnerSessionLeaseManager) randomToken() (string, error) {

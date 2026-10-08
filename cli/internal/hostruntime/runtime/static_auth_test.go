@@ -213,3 +213,42 @@ func TestStaticAuthorizerRejectsInvalidConfiguration(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestBrowserFileTransferAuthorizationIsOwnerAndBrowserTransportOnly(t *testing.T) {
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 19, 0, 0, 0, 0, time.UTC)
+	verifier := auth.Verifier{Keys: staticKeys{keys: map[string]ed25519.PublicKey{"key-1": public}}, Clock: staticClock{now}, ClockSkew: time.Minute}
+	config := CredentialAuthConfig{Issuer: "https://control.test", EnvironmentID: "env_test", MachineID: "machine_test", HelperID: "hlp_test", Verifier: verifier}
+	browserFactory, err := NewBrowserTerminalCredentialAuthorizer(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plainFactory, err := NewCredentialAuthorizer(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range []string{"terminal:operate", "terminal:view", "terminal:control"} {
+		t.Run(scope, func(t *testing.T) {
+			claims := auth.Claims{Issuer: config.Issuer, Audience: "paperboat-machine", Subject: "owner", JTI: "jti_browser_file", IssuedAt: now.Add(-time.Minute).Unix(), ExpiresAt: now.Add(time.Minute).Unix(), Scope: []string{scope}, CredentialClass: "browser_terminal_operation", EnvironmentID: config.EnvironmentID, AccountID: "owner", UserID: "owner", MachineID: config.MachineID, SessionID: "ses_browser", BrowserAttachmentID: "att_browser", BrowserPublicKeySHA256: base64.RawURLEncoding.EncodeToString(make([]byte, 32)), ExpectedGeneration: 3, PolicyGeneration: 7}
+			token := signStaticCredential(t, private, "key-1", claims)
+			browser, err := browserFactory(token)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = browser.Authorize(context.Background(), protocol.Frame{Type: "request", Capability: "file-transfer.v1"})
+			if (err == nil) != (scope == "terminal:operate") {
+				t.Fatalf("scope %s accepted=%v", scope, err == nil)
+			}
+			plain, err := plainFactory(token)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = plain.Authorize(context.Background(), protocol.Frame{Type: "request", Capability: "file-transfer.v1"}); err == nil {
+				t.Fatal("plain transport accepted browser file grant")
+			}
+		})
+	}
+}

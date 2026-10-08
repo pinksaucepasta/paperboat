@@ -45,7 +45,7 @@ func TestGitHubProviderAcceptance(t *testing.T) {
 	}
 
 	access := func(repositoryID, cloneURL, capability string) staticAccessSource {
-		return staticAccessSource{RepositoryAccess{
+		return staticAccessSource{RepositoryAccess{Transport: "https",
 			RepositoryID: repositoryID, AssignmentID: "task42-acceptance", EnvironmentID: "task42-environment",
 			MachineID: "task42-machine", CloneURL: cloneURL, PublishURL: cloneURL, Branch: "main",
 			Username: "x-access-token", Password: token, Capability: capability, ExpiresAt: time.Now().Add(15 * time.Minute),
@@ -116,7 +116,7 @@ func TestGitHubProviderRejectsProtectedPush(t *testing.T) {
 	}
 	root := filepath.Join(t.TempDir(), "protected")
 	repository, err := NewGitRepository(GitRepositoryConfig{Root: root, PushTarget: true,
-		Access: staticAccessSource{RepositoryAccess{
+		Access: staticAccessSource{RepositoryAccess{Transport: "https",
 			RepositoryID: "task42-protected", AssignmentID: "task42-acceptance", EnvironmentID: "task42-environment",
 			MachineID: "task42-machine", CloneURL: repositoryURL, PublishURL: repositoryURL, Branch: "main",
 			Username: "x-access-token", Password: token, Capability: "repository_contents_write", ExpiresAt: time.Now().Add(15 * time.Minute),

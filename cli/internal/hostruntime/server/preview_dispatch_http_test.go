@@ -27,7 +27,7 @@ func previewDispatchHTTPFixture(t *testing.T) (preview.DispatchRequest, auth.Cla
 	request := preview.DispatchRequest{
 		Schema: preview.PreviewTunnelSchemaV1, Kind: preview.PreviewDispatchKind,
 		PreviewID: "prv_dispatch_1", OperationID: "operation_dispatch_1", AccountID: "account_1", ActorID: "actor_1",
-		OwnerDeviceID: "machine_1", OwnerSessionID: "session_dispatch_1",
+		OwnerMachineID: "machine_1", OwnerSessionID: "session_dispatch_1", OwnerSessionKind: "foreground",
 		Target: preview.LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, AccessMode: "public",
 		Endpoint: "https://preview-dispatch.preview.example.test", LeaseDeadline: now.Add(time.Hour),
 		LeaseETag: `"ptv1:preview_lease:cHJ2X2Rpc3BhdGNoXzE:1"`, ExpectedGeneration: 1,
@@ -42,7 +42,7 @@ func previewDispatchHTTPFixture(t *testing.T) (preview.DispatchRequest, auth.Cla
 	request.RequestHash = hash
 	claims := auth.Claims{
 		CredentialClass: "preview_launch", Subject: request.ActorID, UserID: request.ActorID, AccountID: request.AccountID, ActorID: request.ActorID,
-		MachineID: request.OwnerDeviceID, OwnerSessionID: request.OwnerSessionID, PreviewID: request.PreviewID,
+		MachineID: request.OwnerMachineID, OwnerSessionID: request.OwnerSessionID, OwnerSessionKind: request.OwnerSessionKind, PreviewID: request.PreviewID,
 		OperationID: request.OperationID, ExpectedGeneration: request.ExpectedGeneration, RequestHash: request.RequestHash,
 		IdempotencyKey: request.IdempotencyKey, RequestID: request.RequestID, CorrelationID: request.CorrelationID,
 		TargetScheme: request.Target.Scheme, TargetAddress: request.Target.Address, AccessMode: request.AccessMode,
@@ -165,6 +165,7 @@ func TestPreviewDispatchAuthorizationRejectsEveryClaimClassMismatch(t *testing.T
 		"user":             func(value *auth.Claims) { value.UserID = "actor_other" },
 		"created time":     func(value *auth.Claims) { value.CreatedAt++ },
 		"renewed time":     func(value *auth.Claims) { value.LastRenewedAt++ },
+		"owner kind":       func(value *auth.Claims) { value.OwnerSessionKind = "local_lease" },
 		"owner session":    func(value *auth.Claims) { value.OwnerSessionID = "session_other" },
 		"preview":          func(value *auth.Claims) { value.PreviewID = "prv_other" },
 		"operation":        func(value *auth.Claims) { value.OperationID = "operation_other" },

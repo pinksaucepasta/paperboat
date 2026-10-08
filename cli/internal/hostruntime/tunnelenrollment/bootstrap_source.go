@@ -224,15 +224,21 @@ func (s *HTTPSProductionAssemblySource) resolveProductionAssembly(ctx context.Co
 	controlStream := func(streamCtx context.Context) (io.ReadWriteCloser, error) {
 		return s.openControlStream(streamCtx, request)
 	}
-	ingress := &assemblyIngressAuthority{source: s, request: request}
-	originStreams := s.originStreams
-	if originStreams != nil {
-		copy := *originStreams
-		copy.IngressAuthority = ingress.lookup
-		originStreams = &copy
+	originStreamsFor := func(apply tunnelmanager.ApplyRequest, carrierIdentity connector.DataCarrierIdentity) *tunnelmanager.OriginStreamForwarder {
+		if s.originStreams == nil {
+			return nil
+		}
+		if carrierIdentity.AccountID != request.AccountID || carrierIdentity.TunnelID != request.TunnelID || carrierIdentity.ConnectorID != request.ConnectorID || carrierIdentity.HostID != request.HostID || carrierIdentity.ProcessGeneration == 0 || carrierIdentity.Generation != apply.Snapshot.Generation {
+			return nil
+		}
+		candidateRequest := request
+		candidateRequest.ProcessGeneration = carrierIdentity.ProcessGeneration
+		ingress := &assemblyIngressAuthority{source: s, request: candidateRequest, generation: apply.Snapshot.Generation, contentHash: apply.Snapshot.ContentHash}
+		forwarder := *s.originStreams
+		forwarder.IngressAuthority = ingress.lookup
+		return &forwarder
 	}
 	descriptors := func(descriptorCtx context.Context, welcome connectorprotocol.Welcome, apply tunnelmanager.ApplyRequest) (connector.DataCarrierSessionSource, error) {
-		ingress.bind(welcome, apply)
 		return s.carrierSessionSource(descriptorCtx, request, identity, hello, welcome, apply, signer)
 	}
 	controlFactory := func(factoryCtx context.Context, _ *tunnelmanager.CoordinatedConfigApplier) (connectorrotation.ControlSessionConfig, error) {
@@ -255,7 +261,7 @@ func (s *HTTPSProductionAssemblySource) resolveProductionAssembly(ctx context.Co
 			Report: s.report, InspectorPurge: s.inspectorPurge,
 		},
 		StableEndpointID: request.StableEndpointID,
-		Clock:            s.clock, Origins: s.origins, OriginStreams: originStreams,
+		Clock:            s.clock, Origins: s.origins, OriginStreamsForGeneration: originStreamsFor,
 		CarrierDescriptorSource: descriptors,
 		InitialConnector: &hoststate.Connector{
 			ID: request.ConnectorID, TunnelID: request.TunnelID, HostID: request.HostID,
@@ -341,7 +347,7 @@ func (s *HTTPSProductionAssemblySource) UnbindProductionAssembly(request Activat
 
 func (s *HTTPSProductionAssemblySource) newHello(ctx context.Context, request ActivationRequest, identity ControlIdentity, signer CredentialSigner) (connectorprotocol.Hello, error) {
 	now := s.clock.Now().UTC()
-	nonce, err := randomID("control-auth")
+	nonce, err := randomNonce("control-auth")
 	if err != nil {
 		return connectorprotocol.Hello{}, err
 	}
@@ -385,6 +391,11 @@ func (s *HTTPSProductionAssemblySource) openControlStream(ctx context.Context, r
 	// The stream lifetime is owned by stable hostd's context. An ordinary HTTP
 	// response timeout would tear down a healthy long-lived control session.
 	websocketClient.Timeout = 0
+	closeCapture := &responseBodyCloseCapture{}
+	if websocketClient.Transport == nil {
+		websocketClient.Transport = http.DefaultTransport
+	}
+	websocketClient.Transport = closeCapturingTransport{base: websocketClient.Transport, capture: closeCapture}
 	// Bound only the initial handshake. Passing the stable lifetime context to
 	// websocket.Dial directly lets a dead/unroutable control endpoint keep
 	// activation stuck forever, leaving the enrollment manager's activating
@@ -394,12 +405,13 @@ func (s *HTTPSProductionAssemblySource) openControlStream(ctx context.Context, r
 	dialCtx, cancel := context.WithTimeout(ctx, controlDialTimeout)
 	defer cancel()
 	connection, response, err := websocket.Dial(dialCtx, endpoint.String(), &websocket.DialOptions{HTTPClient: &websocketClient, Subprotocols: []string{controlSubprotocol}, CompressionMode: websocket.CompressionDisabled})
-	if response != nil && response.Body != nil {
-		_ = response.Body.Close()
+	responseClosed, responseCloseErr := closeCapture.result()
+	if response != nil && response.Body != nil && !responseClosed {
+		responseCloseErr = response.Body.Close()
 	}
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return nil, safeEnrollmentFailure("tunnel control stream setup was interrupted", ctx.Err(), err, responseCloseErr)
 		}
 		if response != nil {
 			code := ActivationDiagnosticControlHTTPUnavailable
@@ -407,13 +419,21 @@ func (s *HTTPSProductionAssemblySource) openControlStream(ctx context.Context, r
 			case http.StatusUnauthorized, http.StatusForbidden:
 				code = ActivationDiagnosticControlHTTPDenied
 			}
-			return nil, errors.Join(ErrUnavailable, &ActivationDiagnostic{Code: code})
+			diagnostic := &ActivationDiagnostic{Code: code, Cause: err}
+			return nil, safeEnrollmentFailure("tunnel control stream is unavailable", ErrUnavailable, diagnostic, responseCloseErr)
 		}
-		return nil, errors.Join(ErrUnavailable, &ActivationDiagnostic{Code: ActivationDiagnosticControlNetworkTLS, Cause: err})
+		diagnostic := &ActivationDiagnostic{Code: ActivationDiagnosticControlNetworkTLS, Cause: err}
+		return nil, safeEnrollmentFailure("tunnel control stream is unavailable", ErrUnavailable, diagnostic, responseCloseErr)
+	}
+	if responseCloseErr != nil {
+		closeErr := connection.Close(websocket.StatusInternalError, "control handshake cleanup failed")
+		diagnostic := &ActivationDiagnostic{Code: ActivationDiagnosticControlNetworkTLS, Cause: responseCloseErr}
+		return nil, safeEnrollmentFailure("tunnel control stream cleanup failed", ErrUnavailable, diagnostic, closeErr)
 	}
 	if connection.Subprotocol() != controlSubprotocol {
-		_ = connection.Close(websocket.StatusPolicyViolation, "connector subprotocol required")
-		return nil, errors.Join(ErrUnavailable, &ActivationDiagnostic{Code: ActivationDiagnosticInvalidSessionConfig})
+		closeErr := connection.Close(websocket.StatusPolicyViolation, "connector subprotocol required")
+		diagnostic := &ActivationDiagnostic{Code: ActivationDiagnosticInvalidSessionConfig}
+		return nil, safeEnrollmentFailure("tunnel control stream configuration is invalid", ErrUnavailable, diagnostic, closeErr)
 	}
 	connection.SetReadLimit(connectorprotocol.MaxFrameBytes + 4)
 	return websocket.NetConn(ctx, connection, websocket.MessageBinary), nil
@@ -557,7 +577,7 @@ func (s *HTTPSProductionAssemblySource) carrierSessionSource(ctx context.Context
 }
 
 func (s *HTTPSProductionAssemblySource) fetchCarrierDescriptor(ctx context.Context, request ActivationRequest, body []byte) (carrierBootstrapDescriptor, error) {
-	operationID, err := randomID("carrier-bootstrap")
+	operationID, err := randomID("operation")
 	if err != nil {
 		return carrierBootstrapDescriptor{}, err
 	}
@@ -585,34 +605,54 @@ func (s *HTTPSProductionAssemblySource) fetchCarrierDescriptor(ctx context.Conte
 	response, err := s.http.Do(httpRequest)
 	if err != nil {
 		if ctx.Err() != nil {
-			return carrierBootstrapDescriptor{}, ctx.Err()
+			return carrierBootstrapDescriptor{}, safeEnrollmentFailure("carrier bootstrap request was interrupted", ctx.Err(), err)
 		}
-		return carrierBootstrapDescriptor{}, errors.Join(ErrUnavailable, err)
+		return carrierBootstrapDescriptor{}, safeEnrollmentFailure("carrier bootstrap control request is unavailable", ErrUnavailable, err)
 	}
-	defer response.Body.Close()
-	raw, readErr := io.ReadAll(io.LimitReader(response.Body, bootstrapResponseLimit+1))
-	if readErr != nil || len(raw) == 0 || len(raw) > bootstrapResponseLimit {
-		return carrierBootstrapDescriptor{}, ErrUnavailable
+	raw, tooLarge, bodyErr := readAndCloseResponseBody(response.Body, bootstrapResponseLimit)
+	if bodyErr != nil || tooLarge || len(raw) == 0 {
+		return carrierBootstrapDescriptor{}, safeEnrollmentFailure("carrier bootstrap response is unavailable", ErrUnavailable, bodyErr)
 	}
 	if response.StatusCode != http.StatusOK {
 		return carrierBootstrapDescriptor{}, classifyCarrierBootstrapError(response.StatusCode, raw)
 	}
 	contentType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
-	if err != nil || contentType != "application/json" || rejectDuplicateJSON(raw) != nil {
+	if err != nil {
+		return carrierBootstrapDescriptor{}, safeEnrollmentFailure("carrier bootstrap response is invalid", ErrUnavailable, err)
+	}
+	if contentType != "application/json" {
 		return carrierBootstrapDescriptor{}, ErrUnavailable
+	}
+	if err := rejectDuplicateJSON(raw); err != nil {
+		return carrierBootstrapDescriptor{}, safeEnrollmentFailure("carrier bootstrap response is invalid", ErrUnavailable, err)
 	}
 	var envelope struct {
 		Data json.RawMessage `json:"data"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&envelope) != nil || decoder.Decode(&struct{}{}) != io.EOF || len(envelope.Data) == 0 {
+	if err := decoder.Decode(&envelope); err != nil {
+		return carrierBootstrapDescriptor{}, safeEnrollmentFailure("carrier bootstrap response is invalid", ErrUnavailable, err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err != nil {
+			return carrierBootstrapDescriptor{}, safeEnrollmentFailure("carrier bootstrap response is invalid", ErrUnavailable, err)
+		}
+		return carrierBootstrapDescriptor{}, ErrUnavailable
+	}
+	if len(envelope.Data) == 0 {
 		return carrierBootstrapDescriptor{}, ErrUnavailable
 	}
 	var descriptor carrierBootstrapDescriptor
 	decoder = json.NewDecoder(bytes.NewReader(envelope.Data))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&descriptor) != nil || decoder.Decode(&struct{}{}) != io.EOF {
+	if err := decoder.Decode(&descriptor); err != nil {
+		return carrierBootstrapDescriptor{}, safeEnrollmentFailure("carrier bootstrap response is invalid", ErrUnavailable, err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err != nil {
+			return carrierBootstrapDescriptor{}, safeEnrollmentFailure("carrier bootstrap response is invalid", ErrUnavailable, err)
+		}
 		return carrierBootstrapDescriptor{}, ErrUnavailable
 	}
 	return descriptor, nil

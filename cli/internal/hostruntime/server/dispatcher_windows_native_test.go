@@ -7,20 +7,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"net"
-	"os"
-	"path/filepath"
-	"strings"
-	"testing"
-	"time"
-
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/process"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
 )
 
 type nativeWindowsSessionLauncher struct {
@@ -80,7 +78,7 @@ func nativeWindowsProtocolServer(t *testing.T, shellArgs []string) *Server {
 		t.Fatal(err)
 	}
 	server, err := New(Config{
-		Negotiator: protocol.Negotiator{Profile: config.BYOD, Available: map[string]bool{"terminal.v1": true, "health.v1": true}},
+		Negotiator: protocol.Negotiator{Available: map[string]bool{"terminal.v1": true, "health.v1": true}},
 		Journal:    journal,
 		Authorizer: authorizerFunc(func(context.Context, protocol.Frame) (Authorization, error) {
 			return Authorization{JournalBinding: "env:native:user:owner", EnvironmentID: "native", UserID: "owner", ClientID: "windows-client"}, nil

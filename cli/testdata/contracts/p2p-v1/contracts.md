@@ -25,9 +25,9 @@ and application capabilities. The endpoint verifies the signature and monotonic
 generation before installing it. WireGuard reachability does not itself authorize an
 application operation.
 
-Personal same-account devices and their enrolled CLI endpoints receive a
-`device_network` / `connect` scope for connectivity without an active application
-session. Team-owned devices are excluded. This scope uses an account-bound canonical
+Personal same-account machines and their enrolled CLI endpoints receive a
+`machine_network` / `connect` scope for connectivity without an active application
+session. Team-owned machines are excluded. This scope uses an account-bound canonical
 endpoint-pair identifier and complementary directions for relay admission. It cannot
 satisfy an application capability check. Network configuration remains limited to
 five minutes, 64 peers and 128 scopes; source grants and endpoint certificates bound

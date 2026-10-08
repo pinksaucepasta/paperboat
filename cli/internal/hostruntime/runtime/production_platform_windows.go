@@ -15,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/availability"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostservice"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	hostruntimeservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
@@ -48,14 +49,17 @@ func windowsWorkspace(environ func(string) string) (string, error) {
 	return workspace, nil
 }
 
-func productionManagedSSH(ctx context.Context, controlURL string, transport http.RoundTripper, registration runtimeidentity.Registration, identity managedSSHIdentitySource, generation uint64) (*managedssh.Host, Service, error) {
-	if registration.MachineID == "" || registration.InstallationGeneration < 1 || registration.SSHPort == 0 || registration.SSHUser == "" || identity == nil {
-		return nil, nil, errors.Join(ErrManagedSSHUnavailable, errors.New("Windows managed SSH registration is incomplete"))
+func initializeProductionManagedSSH(ctx context.Context, host *managedssh.Host, controlURL string, transport http.RoundTripper, registration runtimeidentity.Registration, identity managedSSHIdentitySource, generation uint64) (Service, error) {
+	if registration.MachineID == "" || registration.InstallationGeneration < 1 || identity == nil {
+		return nil, errors.Join(ErrManagedSSHUnavailable, errors.New("Windows managed SSH registration is incomplete"))
 	}
-	host, err := managedssh.NewHost(managedssh.HostConfig{MaxStreams: 32, ProbeTimeout: 3 * time.Second, DialTimeout: 10 * time.Second})
-	if err != nil {
-		return nil, nil, err
+	if registration.SSHPort == 0 && registration.SSHUser == "" {
+		return nil, nil
 	}
+	if registration.SSHPort == 0 || registration.SSHUser == "" {
+		return nil, ErrManagedSSHUnavailable
+	}
+	var err error
 	// PaperboatSshd is an SCM-managed service and can still be binding its
 	// loopback sockets while the owner-scoped host supervisor starts. A single
 	// probe here turns that normal startup race into a permanent stopped hostd.
@@ -81,71 +85,41 @@ func productionManagedSSH(ctx context.Context, controlURL string, transport http
 		}
 	}
 	if errors.Is(err, managedssh.ErrSSHTargetUnavailable) {
-		return nil, nil, errors.Join(ErrManagedSSHUnavailable, errors.New("PaperboatSshd loopback target is unavailable"), err)
+		return nil, errors.Join(ErrManagedSSHUnavailable, errors.New("PaperboatSshd loopback target is unavailable"), err)
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	user, sidErr := windows.GetCurrentProcessToken().GetTokenUser()
 	if sidErr != nil || user == nil || user.User.Sid == nil {
-		return nil, nil, errors.Join(ErrManagedSSHUnavailable, sidErr)
+		return nil, errors.Join(ErrManagedSSHUnavailable, sidErr)
 	}
 	instance, instanceErr := hostruntimeservice.WindowsUserInstance(user.User.Sid.String())
 	if instanceErr != nil {
-		return nil, nil, errors.Join(ErrManagedSSHUnavailable, instanceErr)
+		return nil, errors.Join(ErrManagedSSHUnavailable, instanceErr)
 	}
 	instanceRoot, rootErr := hostinstall.WindowsInstanceRoot(instance)
 	if rootErr != nil {
-		return nil, nil, errors.Join(ErrManagedSSHUnavailable, rootErr)
+		return nil, errors.Join(ErrManagedSSHUnavailable, rootErr)
 	}
 	sshStateRoot := filepath.Join(instanceRoot, "ssh")
 	paths := []string{filepath.Join(sshStateRoot, "hostkeys", "ssh_host_ed25519_key.pub")}
 	inventory, err := managedssh.ReadHostPublicKeys(paths, 0)
 	if err != nil {
-		return nil, nil, errors.Join(ErrManagedSSHUnavailable, errors.New("read Windows Paperboat host keys"), err)
+		return nil, errors.Join(ErrManagedSSHUnavailable, errors.New("read Windows Paperboat host keys"), err)
 	}
 	if len(inventory.Keys) == 0 || generation == 0 {
-		return nil, nil, errors.Join(ErrManagedSSHUnavailable, errors.New("Windows Paperboat host-key inventory is empty"))
+		return nil, errors.Join(ErrManagedSSHUnavailable, errors.New("Windows Paperboat host-key inventory is empty"))
 	}
 	publicKeys := make([]string, len(inventory.Keys))
 	for i := range inventory.Keys {
 		publicKeys[i] = inventory.Keys[i].PublicKey
 	}
-	// Include the installation generation so a previously rejected observation
-	// cannot permanently reserve the fingerprint-only set ID. This matters when
-	// a host is repaired or re-enrolled with the same persisted host key: the
-	// rejected historical row remains immutable, while the new observation gets
-	// a distinct set identity.
-	setID := "sshks_" + fmtHex(inventory.Fingerprint[:16]) + "_" + fmtHexUint(uint64(registration.InstallationGeneration))
 	client := api.New(controlURL, config.Credential{}, &http.Client{Transport: transport, Timeout: 15 * time.Second})
-	return host, &managedSSHKeyReconciler{client: client, identity: identity, registration: registration, workerGeneration: generation, setID: setID, publicKeys: publicKeys, home: sshStateRoot, interval: 30 * time.Second, timeout: 10 * time.Second}, nil
+	return &managedSSHKeyReconciler{client: client, identity: identity, registration: registration, workerGeneration: generation, publicKeys: publicKeys, home: sshStateRoot, interval: 30 * time.Second, timeout: 10 * time.Second}, nil
 }
 
-func fmtHex(value []byte) string {
-	const digits = "0123456789abcdef"
-	result := make([]byte, len(value)*2)
-	for i, v := range value {
-		result[i*2], result[i*2+1] = digits[v>>4], digits[v&15]
-	}
-	return string(result)
-}
-
-func fmtHexUint(value uint64) string {
-	const digits = "0123456789abcdef"
-	if value == 0 {
-		return "0"
-	}
-	var reversed [16]byte
-	index := len(reversed)
-	for value != 0 {
-		index--
-		reversed[index] = digits[value&15]
-		value >>= 4
-	}
-	return string(reversed[index:])
-}
-
-func validatedBYODShell(path string) (string, error) {
+func validatedMachineShell(path string) (string, error) {
 	if strings.TrimSpace(path) == "" {
 		path = os.Getenv("ComSpec")
 	}
@@ -159,7 +133,7 @@ func validatedBYODShell(path string) (string, error) {
 	return path, nil
 }
 
-func validateBYODWorkspace(path string) error {
+func validateMachineWorkspace(path string) error {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return ErrProductionInvalid
 	}
@@ -171,5 +145,37 @@ func validateBYODWorkspace(path string) error {
 }
 
 func newProductionAvailabilityHostClient(timeout time.Duration) (*availability.HostClient, error) {
-	return availability.NewHostClient(`\\.\pipe\PaperboatHostService`, timeout)
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil || user == nil || user.User.Sid == nil || !user.User.Sid.IsValid() {
+		return nil, errors.Join(ErrProductionInvalid, err)
+	}
+	instance, err := hostruntimeservice.WindowsUserInstance(user.User.Sid.String())
+	if err != nil {
+		return nil, err
+	}
+	socket, err := hostservice.WindowsSocketPath(instance)
+	if err != nil {
+		return nil, err
+	}
+	return availability.NewHostClient(socket, timeout)
+}
+
+func cleanupProductionManagedSSH(ctx context.Context, _ runtimeidentity.Registration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil || user == nil || user.User.Sid == nil {
+		return ErrManagedSSHUnavailable
+	}
+	instance, err := hostruntimeservice.WindowsUserInstance(user.User.Sid.String())
+	if err != nil {
+		return err
+	}
+	root, err := hostinstall.WindowsInstanceRoot(instance)
+	if err != nil {
+		return err
+	}
+	_, err = reconcilePlatformAuthorizedKeys(filepath.Join(root, "ssh"), 0, nil)
+	return err
 }

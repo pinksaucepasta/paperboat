@@ -42,7 +42,7 @@
       "required": ["type", "version", "set_id", "machine_id", "machine_generation", "observation_generation", "fingerprint", "keys", "state", "reconciliation_version"],
       "properties": {
         "type": { "const": "host_key_set" }, "version": { "const": 1 },
-        "set_id": { "type": "string", "pattern": "^sshks_[A-Za-z0-9_-]{16,128}$" },
+        "set_id": { "type": "string", "pattern": "^keyset_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
         "machine_id": { "$ref": "#/$defs/id" },
         "machine_generation": { "$ref": "#/$defs/generation" },
         "observation_generation": { "$ref": "#/$defs/generation" },

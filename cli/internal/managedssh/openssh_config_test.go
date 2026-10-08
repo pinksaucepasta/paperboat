@@ -21,7 +21,7 @@ func TestOpenSSHConfigInstallRepairAndExactUninstall(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(directory, "config"), original, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	config := openSSHTestConfig(home, "pprbt")
+	config := openSSHTestConfig(home)
 	installed, err := InstallOpenSSHConfig(config)
 	if err != nil || !installed.Changed {
 		t.Fatalf("installed=%+v error=%v", installed, err)
@@ -29,7 +29,7 @@ func TestOpenSSHConfigInstallRepairAndExactUninstall(t *testing.T) {
 	if err := ValidateOpenSSHConfig(config); err != nil {
 		t.Fatalf("validate installed config: %v", err)
 	}
-	if err := ValidateInstalledOpenSSHConfig(home, uint32(os.Getuid()), config.AliasSuffix, config.AgentSocket); err != nil {
+	if err := ValidateInstalledOpenSSHConfig(home, uint32(os.Getuid()), config.AgentSocket); err != nil {
 		t.Fatalf("validate daemon-installed config: %v", err)
 	}
 	alternate := config
@@ -38,7 +38,7 @@ func TestOpenSSHConfigInstallRepairAndExactUninstall(t *testing.T) {
 	if err := ValidateOpenSSHConfig(alternate); !errors.Is(err, ErrOpenSSHConfigConflict) {
 		t.Fatalf("path-specific validation error=%v", err)
 	}
-	if err := ValidateInstalledOpenSSHConfig(home, uint32(os.Getuid()), config.AliasSuffix, config.AgentSocket); err != nil {
+	if err := ValidateInstalledOpenSSHConfig(home, uint32(os.Getuid()), config.AgentSocket); err != nil {
 		t.Fatalf("path-independent validation error=%v", err)
 	}
 	main := readOpenSSHTestFile(t, filepath.Join(directory, "config"))
@@ -48,7 +48,7 @@ func TestOpenSSHConfigInstallRepairAndExactUninstall(t *testing.T) {
 		t.Fatalf("main config=%q", main)
 	}
 	owned := string(readOpenSSHTestFile(t, filepath.Join(directory, "paperboat_config")))
-	for _, required := range []string{"Host *.pprbt", "ProxyCommand " + config.ProxyCommand, "KnownHostsCommand " + config.KnownHostsCommand, "IdentityAgent \"" + config.AgentSocket + "\"", "IdentityFile \"" + config.IdentityFile + "\"", "IdentitiesOnly yes", "BatchMode yes", "PasswordAuthentication no", "KbdInteractiveAuthentication no", "StrictHostKeyChecking yes", "CheckHostIP no", "UserKnownHostsFile none", "GlobalKnownHostsFile none"} {
+	for _, required := range []string{"Host *.local.pprbt.dev", "ProxyCommand " + config.ProxyCommand, "KnownHostsCommand " + config.KnownHostsCommand, "IdentityAgent \"" + config.AgentSocket + "\"", "IdentityFile \"" + config.IdentityFile + "\"", "IdentitiesOnly yes", "BatchMode yes", "PasswordAuthentication no", "KbdInteractiveAuthentication no", "StrictHostKeyChecking yes", "CheckHostIP no", "UserKnownHostsFile none", "GlobalKnownHostsFile none"} {
 		if !strings.Contains(owned, required) {
 			t.Fatalf("owned config missing %q: %q", required, owned)
 		}
@@ -56,19 +56,6 @@ func TestOpenSSHConfigInstallRepairAndExactUninstall(t *testing.T) {
 	replay, err := InstallOpenSSHConfig(config)
 	if err != nil || replay.Changed {
 		t.Fatalf("replay=%+v error=%v", replay, err)
-	}
-	updated := config
-	updated.AliasSuffix = "new.pprbt"
-	if err := ValidateOpenSSHConfig(updated); !errors.Is(err, ErrOpenSSHConfigConflict) {
-		t.Fatalf("mismatched config validation error=%v", err)
-	}
-	repaired, err := InstallOpenSSHConfig(updated)
-	if err != nil || !repaired.Changed {
-		t.Fatalf("repaired=%+v error=%v", repaired, err)
-	}
-	mainAfterRepair := readOpenSSHTestFile(t, filepath.Join(directory, "config"))
-	if string(mainAfterRepair) != string(main) || strings.Contains(string(readOpenSSHTestFile(t, filepath.Join(directory, "paperboat_config"))), "Host *.pprbt\n") {
-		t.Fatal("suffix repair changed include or retained the old suffix")
 	}
 	uninstalled, err := UninstallOpenSSHConfig(home, uint32(os.Getuid()))
 	if err != nil || !uninstalled.Changed {
@@ -90,17 +77,17 @@ func TestOpenSSHConfigInstallRepairAndExactUninstall(t *testing.T) {
 
 func TestOpenSSHConfigRendersCanonicalAliasPortWithoutUser(t *testing.T) {
 	home := openSSHTestHome(t)
-	config := openSSHTestConfig(home, "pprbt")
+	config := openSSHTestConfig(home)
 	config.Targets = []OpenSSHAliasTarget{{Alias: "victus-windows-e2e-fresh", User: "Pujan", Port: 38222}}
 	if _, err := InstallOpenSSHConfig(config); err != nil {
 		t.Fatal(err)
 	}
 	owned := string(readOpenSSHTestFile(t, filepath.Join(home, ".ssh", "paperboat_config")))
-	want := "Host victus-windows-e2e-fresh.pprbt\n    Port 38222\n"
+	want := "Host victus-windows-e2e-fresh.local.pprbt.dev\n    Port 38222\n"
 	if !strings.Contains(owned, want) {
 		t.Fatalf("owned config missing authoritative target: %q", owned)
 	}
-	if strings.Contains(owned, "Victus-Windows-E2E-Fresh.pprbt") {
+	if strings.Contains(owned, "Victus-Windows-E2E-Fresh.local.pprbt.dev") {
 		t.Fatalf("managed config contains a noncanonical machine name: %q", owned)
 	}
 	if strings.Contains(owned, "\n    User ") {
@@ -113,7 +100,7 @@ func TestOpenSSHConfigRendersCanonicalAliasPortWithoutUser(t *testing.T) {
 
 func TestOpenSSHConfigMigratesOwnedTargetUsersWithoutChangingUserConfig(t *testing.T) {
 	home := openSSHTestHome(t)
-	config := openSSHTestConfig(home, "pprbt")
+	config := openSSHTestConfig(home)
 	config.Targets = []OpenSSHAliasTarget{{Alias: "mac", User: "adam", Port: 22}}
 	if _, err := InstallOpenSSHConfig(config); err != nil {
 		t.Fatal(err)
@@ -121,7 +108,7 @@ func TestOpenSSHConfigMigratesOwnedTargetUsersWithoutChangingUserConfig(t *testi
 	directory := filepath.Join(home, ".ssh")
 	ownedPath := filepath.Join(directory, "paperboat_config")
 	owned := readOpenSSHTestFile(t, ownedPath)
-	oldOwned := bytes.Replace(owned, []byte("Host mac.pprbt\n    Port 22\n"), []byte("Host mac.pprbt\n    User adam\n    Port 22\n"), 1)
+	oldOwned := bytes.Replace(owned, []byte("Host mac.local.pprbt.dev\n    Port 22\n"), []byte("Host mac.local.pprbt.dev\n    User adam\n    Port 22\n"), 1)
 	if bytes.Equal(oldOwned, owned) {
 		t.Fatal("failed to construct preceding owned format")
 	}
@@ -153,7 +140,7 @@ func TestOpenSSHConfigMigratesOwnedTargetUsersWithoutChangingUserConfig(t *testi
 
 func TestOpenSSHConfigRemovesCreatedMainConfigOnUninstall(t *testing.T) {
 	home := openSSHTestHome(t)
-	if _, err := InstallOpenSSHConfig(openSSHTestConfig(home, "pprbt")); err != nil {
+	if _, err := InstallOpenSSHConfig(openSSHTestConfig(home)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := UninstallOpenSSHConfig(home, uint32(os.Getuid())); err != nil {
@@ -166,7 +153,7 @@ func TestOpenSSHConfigRemovesCreatedMainConfigOnUninstall(t *testing.T) {
 
 func TestOpenSSHConfigAtomicallyUpgradesLegacyManagedFragment(t *testing.T) {
 	home := openSSHTestHome(t)
-	config := openSSHTestConfig(home, "pprbt")
+	config := openSSHTestConfig(home)
 	if _, err := InstallOpenSSHConfig(config); err != nil {
 		t.Fatal(err)
 	}
@@ -192,6 +179,7 @@ func TestOpenSSHConfigAtomicallyUpgradesLegacyManagedFragment(t *testing.T) {
 	if err := json.Unmarshal(readOpenSSHTestFile(t, recordPath), &record); err != nil {
 		t.Fatal(err)
 	}
+	record.AliasSuffix = "pprbt"
 	record.OwnedHash = hashOpenSSHBytes(legacy)
 	recordJSON, err := json.Marshal(record)
 	if err != nil {
@@ -221,10 +209,10 @@ func TestGeneratedOpenSSHConfigIsAcceptedByInstalledClient(t *testing.T) {
 		t.Skip("OpenSSH client is not installed")
 	}
 	home := openSSHTestHome(t)
-	if _, err := InstallOpenSSHConfig(openSSHTestConfig(home, "pprbt")); err != nil {
+	if _, err := InstallOpenSSHConfig(openSSHTestConfig(home)); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(executable, "-G", "-F", filepath.Join(home, ".ssh", "paperboat_config"), "probe.pprbt")
+	command := exec.Command(executable, "-G", "-F", filepath.Join(home, ".ssh", "paperboat_config"), "probe.local.pprbt.dev")
 	var stderr bytes.Buffer
 	var stdout bytes.Buffer
 	command.Stdout = &stdout
@@ -246,12 +234,12 @@ func TestInstalledOpenSSHConfigResolvesEditorHostAlias(t *testing.T) {
 		t.Skip("OpenSSH client is not installed")
 	}
 	home := openSSHTestHome(t)
-	config := openSSHTestConfig(home, "pprbt")
+	config := openSSHTestConfig(home)
 	config.Targets = []OpenSSHAliasTarget{{Alias: "editor-host", User: "remote-user", Port: 38222}}
 	if _, err := InstallOpenSSHConfig(config); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(executable, "-G", "-F", filepath.Join(home, ".ssh", "config"), "editor-host.pprbt")
+	command := exec.Command(executable, "-G", "-F", filepath.Join(home, ".ssh", "config"), "editor-host.local.pprbt.dev")
 	command.Env = openSSHTestEnvironment(home)
 	var stderr bytes.Buffer
 	var stdout bytes.Buffer
@@ -264,7 +252,7 @@ func TestInstalledOpenSSHConfigResolvesEditorHostAlias(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{"user " + strings.ToLower(current.Username) + "\n", "port 38222\n", "canonicalizehostname true\n"} {
+	for _, required := range []string{"user " + strings.ToLower(current.Username) + "\n", "port 38222\n", "canonicalizehostname true\n", "proxycommand \"/usr/local/bin/pb\" internal ssh-proxy --host %h --port %p\n"} {
 		if !strings.Contains(effective, required) {
 			t.Fatalf("effective editor target missing %q:\n%s", required, stdout.String())
 		}
@@ -288,11 +276,11 @@ func openSSHTestEnvironment(home string) []string {
 func TestOpenSSHConfigRejectsConflictsSymlinksAndModifiedOwnedState(t *testing.T) {
 	home := openSSHTestHome(t)
 	directory := filepath.Join(home, ".ssh")
-	conflicting := "Host *.pprbt\n    ProxyCommand /tmp/other-proxy %h %p\n"
+	conflicting := "Host *.local.pprbt.dev\n    ProxyCommand /tmp/other-proxy %h %p\n"
 	if err := os.WriteFile(filepath.Join(directory, "config"), []byte(conflicting), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := InstallOpenSSHConfig(openSSHTestConfig(home, "pprbt"))
+	_, err := InstallOpenSSHConfig(openSSHTestConfig(home))
 	var optionConflict *OpenSSHOptionConflict
 	if !errors.As(err, &optionConflict) || optionConflict.Line != 2 || optionConflict.Option != "ProxyCommand" || optionConflict.Existing != "/tmp/other-proxy %h %p" {
 		t.Fatalf("option conflict=%+v error=%v", optionConflict, err)
@@ -307,7 +295,7 @@ func TestOpenSSHConfigRejectsConflictsSymlinksAndModifiedOwnedState(t *testing.T
 	if err := os.Symlink(target, filepath.Join(directory, "config")); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
-	if _, err := InstallOpenSSHConfig(openSSHTestConfig(home, "pprbt")); err == nil {
+	if _, err := InstallOpenSSHConfig(openSSHTestConfig(home)); err == nil {
 		t.Fatal("symlinked main config was accepted")
 	}
 	if string(readOpenSSHTestFile(t, target)) != "Host outside\n" {
@@ -316,7 +304,7 @@ func TestOpenSSHConfigRejectsConflictsSymlinksAndModifiedOwnedState(t *testing.T
 	if err := os.Remove(filepath.Join(directory, "config")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := InstallOpenSSHConfig(openSSHTestConfig(home, "pprbt")); err != nil {
+	if _, err := InstallOpenSSHConfig(openSSHTestConfig(home)); err != nil {
 		t.Fatal(err)
 	}
 	ownedPath := filepath.Join(directory, "paperboat_config")
@@ -328,10 +316,49 @@ func TestOpenSSHConfigRejectsConflictsSymlinksAndModifiedOwnedState(t *testing.T
 	}
 }
 
+func TestOpenSSHOptionConflictOmitsConfiguredCommandValues(t *testing.T) {
+	err := &OpenSSHOptionConflict{Line: 12, Option: "ProxyCommand", Existing: "/tmp/private-agent --token secret", Required: "/home/private-user/pb --known-hosts"}
+	if !errors.Is(err, ErrOpenSSHConfigConflict) {
+		t.Fatalf("conflict sentinel lost: %v", err)
+	}
+	for _, private := range []string{"private-agent", "secret", "private-user", "known-hosts"} {
+		if strings.Contains(err.Error(), private) {
+			t.Fatalf("conflict error exposed configured value %q: %q", private, err)
+		}
+	}
+	if got, want := err.Error(), "Paperboat OpenSSH configuration conflicts with existing state: line 12 contains a conflicting ProxyCommand"; got != want {
+		t.Fatalf("conflict error=%q want=%q", got, want)
+	}
+	var classified interface {
+		DiagnosticStage() string
+		DiagnosticCode() string
+	}
+	if !errors.As(err, &classified) || classified.DiagnosticStage() != "command" || classified.DiagnosticCode() != "managed_ssh_failed" {
+		t.Fatalf("conflict classification missing: %#v", err)
+	}
+}
+
+func TestOpenSSHConfigBoundaryClassifiesValidationFailure(t *testing.T) {
+	err := ValidateOpenSSHConfig(OpenSSHConfig{Home: "relative-private-home"})
+	if !errors.Is(err, ErrOpenSSHConfigConflict) {
+		t.Fatalf("invalid home error=%v", err)
+	}
+	var classified interface {
+		DiagnosticStage() string
+		DiagnosticCode() string
+	}
+	if !errors.As(err, &classified) || classified.DiagnosticStage() != "command" || classified.DiagnosticCode() != "managed_ssh_failed" {
+		t.Fatalf("configuration validation classification missing: %T %v", err, err)
+	}
+	if strings.Contains(err.Error(), "relative-private-home") {
+		t.Fatalf("configuration error exposed path: %q", err)
+	}
+}
+
 func TestOpenSSHConfigRecoversInterruptedTransaction(t *testing.T) {
 	home := openSSHTestHome(t)
 	directory := filepath.Join(home, ".ssh")
-	config := openSSHTestConfig(home, "pprbt")
+	config := openSSHTestConfig(home)
 	if _, err := InstallOpenSSHConfig(config); err != nil {
 		t.Fatal(err)
 	}
@@ -378,9 +405,9 @@ func openSSHTestHome(t *testing.T) string {
 	return home
 }
 
-func openSSHTestConfig(home, suffix string) OpenSSHConfig {
+func openSSHTestConfig(home string) OpenSSHConfig {
 	return OpenSSHConfig{
-		Home: home, OwnerUID: uint32(os.Getuid()), AliasSuffix: suffix,
+		Home: home, OwnerUID: uint32(os.Getuid()),
 		ProxyCommand:      "\"/usr/local/bin/pb\" internal ssh-proxy --host %h --port %p",
 		KnownHostsCommand: "\"/usr/local/bin/pb\" internal ssh-known-hosts --host %h --port %p",
 		AgentSocket:       filepath.Join(home, ".paperboat", "run", "ssh-agent.sock"),

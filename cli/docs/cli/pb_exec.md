@@ -6,7 +6,7 @@ Execute an exact command on a machine
 
 Execute an exact command on a machine
 
-Run the exact argv after -- on the selected device, with optional working directory, environment entries, PTY, and timeout. Output and exit status come from the remote command; use --json for structured events.
+Run the exact argv after -- on the selected machine, with optional working directory, environment entries, PTY, and timeout. Output and exit status come from the remote command; use --json for structured events.
 
 JSON output is supported with --json.
 
@@ -31,6 +31,7 @@ pb exec <machine> [flags] -- <argv...>
       --config string      path to the CLI config file
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO

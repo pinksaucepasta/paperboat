@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"net/netip"
 	"os"
@@ -19,15 +20,71 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 )
 
-const resumeSchema = "paperboat.byod-resume/v1"
+const resumeSchema = "paperboat.machine-resume/v1"
 
 var (
-	ErrResumeNotFound      = errors.New("BYOD bootstrap resume state was not found")
-	ErrResumeBinding       = errors.New("BYOD bootstrap resume state does not match this machine or enrollment")
+	ErrResumeNotFound      = errors.New("machine bootstrap resume state was not found")
+	ErrResumeBinding       = errors.New("machine bootstrap resume state does not match this machine or enrollment")
 	ErrResumeTokenChanged  = fmt.Errorf("%w: enrollment token changed", ErrResumeBinding)
-	ErrResumeExpired       = errors.New("BYOD bootstrap resume state has expired")
-	ErrResumeTokenRequired = errors.New("BYOD bootstrap resume state requires the original enrollment token")
+	ErrResumeExpired       = errors.New("machine bootstrap resume state has expired")
+	ErrResumeTokenRequired = errors.New("machine bootstrap resume state requires the original enrollment token")
 )
+
+type resumeStorageOperation uint8
+
+const (
+	resumeStoragePrepare resumeStorageOperation = iota + 1
+	resumeStorageInspect
+	resumeStorageRead
+	resumeStorageWrite
+	resumeStorageRemove
+)
+
+type resumeStorageFailure struct {
+	operation resumeStorageOperation
+	cause     error
+}
+
+func (failure resumeStorageFailure) Error() string {
+	switch failure.operation {
+	case resumeStoragePrepare:
+		return "machine bootstrap resume state could not be prepared"
+	case resumeStorageInspect:
+		return "machine bootstrap resume state could not be inspected"
+	case resumeStorageRead:
+		return "machine bootstrap resume state could not be read"
+	case resumeStorageWrite:
+		return "machine bootstrap resume state could not be saved"
+	case resumeStorageRemove:
+		return "machine bootstrap resume state could not be cleared"
+	default:
+		return "machine bootstrap resume state operation failed"
+	}
+}
+
+func (failure resumeStorageFailure) Unwrap() error   { return failure.cause }
+func (resumeStorageFailure) DiagnosticStage() string { return "reconciliation" }
+func (resumeStorageFailure) DiagnosticCode() string  { return "command_failed" }
+
+type resumeBindingFailure struct{ cause error }
+
+func (failure resumeBindingFailure) Error() string { return ErrResumeBinding.Error() }
+func (failure resumeBindingFailure) Unwrap() error { return failure.cause }
+func (resumeBindingFailure) Is(target error) bool  { return target == ErrResumeBinding }
+
+func resumeBindingError(cause error) error {
+	if cause == nil {
+		return ErrResumeBinding
+	}
+	return resumeBindingFailure{cause: cause}
+}
+
+func resumeStorageError(operation resumeStorageOperation, cause error) error {
+	if cause == nil {
+		return nil
+	}
+	return resumeStorageFailure{operation: operation, cause: cause}
+}
 
 // ResumeRecord is the protected, local journal for a one-shot machine
 // enrollment. It never stores the enrollment token itself, only its digest.
@@ -41,7 +98,6 @@ type ResumeRecord struct {
 	EnrollmentTokenSHA      string    `json:"enrollment_token_sha256"`
 	EnrollmentTokenRequired bool      `json:"enrollment_token_required,omitempty"`
 	Alias                   string    `json:"alias"`
-	SetupMode               string    `json:"setup_mode"`
 	Verifier                string    `json:"verifier"`
 	PairingExpiresAt        time.Time `json:"pairing_expires_at"`
 	PairingStarted          bool      `json:"pairing_started,omitempty"`
@@ -72,7 +128,7 @@ func ResumePath(stateRoot string) string {
 // NewResumeRecord creates the pre-pairing journal. Keeping the verifier lets
 // a process that dies after server pairing but before material delivery resume
 // polling without attempting a second pairing.
-func NewResumeRecord(serverURL, publicIdentityKey, enrollmentToken, alias, setupMode, verifier string, expiresAt time.Time) ResumeRecord {
+func NewResumeRecord(serverURL, publicIdentityKey, enrollmentToken, alias, verifier string, expiresAt time.Time) ResumeRecord {
 	return ResumeRecord{
 		Schema:                  resumeSchema,
 		ServerURL:               strings.TrimRight(strings.TrimSpace(serverURL), "/"),
@@ -80,7 +136,6 @@ func NewResumeRecord(serverURL, publicIdentityKey, enrollmentToken, alias, setup
 		EnrollmentTokenSHA:      enrollmentTokenDigest(enrollmentToken),
 		EnrollmentTokenRequired: strings.TrimSpace(enrollmentToken) != "",
 		Alias:                   strings.TrimSpace(alias),
-		SetupMode:               strings.TrimSpace(setupMode),
 		Verifier:                strings.TrimSpace(verifier),
 		PairingExpiresAt:        expiresAt,
 	}
@@ -97,7 +152,10 @@ func SaveResume(stateRoot string, record ResumeRecord) error {
 	if err != nil {
 		return err
 	}
-	return atomicfile.Write(ResumePath(stateRoot), encoded, atomicfile.CurrentOwnerOptions(0o600))
+	if err := atomicfile.Write(ResumePath(stateRoot), encoded, atomicfile.CurrentOwnerOptions(0o600)); err != nil {
+		return resumeStorageError(resumeStorageWrite, err)
+	}
+	return nil
 }
 
 // LoadResume validates the file and its immutable binding. An empty token is
@@ -105,7 +163,7 @@ func SaveResume(stateRoot string, record ResumeRecord) error {
 // necessary when a token-file installer consumed the local file before a
 // later process failed. Before pairing, a token-backed journal must still be
 // given its original token so it cannot silently become an identity pairing.
-func LoadResume(stateRoot, serverURL, publicIdentityKey, enrollmentToken, alias, setupMode string, now time.Time) (ResumeRecord, error) {
+func LoadResume(stateRoot, serverURL, publicIdentityKey, enrollmentToken, alias string, now time.Time) (ResumeRecord, error) {
 	if !filepath.IsAbs(stateRoot) || now.IsZero() {
 		return ResumeRecord{}, ErrResumeBinding
 	}
@@ -115,8 +173,7 @@ func LoadResume(stateRoot, serverURL, publicIdentityKey, enrollmentToken, alias,
 	}
 	if strings.TrimRight(strings.TrimSpace(serverURL), "/") != record.ServerURL ||
 		strings.TrimSpace(publicIdentityKey) != record.PublicIdentityKey ||
-		strings.TrimSpace(alias) != record.Alias ||
-		strings.TrimSpace(setupMode) != record.SetupMode {
+		strings.TrimSpace(alias) != record.Alias {
 		return ResumeRecord{}, ErrResumeBinding
 	}
 	if record.requiresEnrollmentToken() && strings.TrimSpace(enrollmentToken) == "" && !record.PairingStarted {
@@ -163,11 +220,11 @@ func PrepareAuthenticatedSetupResume(stateRoot, serverURL, publicIdentityKey, al
 		return ResumeRecord{}, ErrResumeBinding
 	}
 	if err := VerifyArtifactTarget(artifact); err != nil {
-		return ResumeRecord{}, ErrResumeBinding
+		return ResumeRecord{}, resumeBindingError(err)
 	}
 	existing, err := loadResumeDocument(stateRoot)
 	if err == nil {
-		exactBase := existing.ServerURL == serverURL && existing.PublicIdentityKey == publicIdentityKey && existing.Alias == alias && existing.SetupMode == "host"
+		exactBase := existing.ServerURL == serverURL && existing.PublicIdentityKey == publicIdentityKey && existing.Alias == alias
 		exactAuthenticatedBinding := exactBase && existing.ExpectedUserMachineID == machineID && existing.ExpectedGeneration == installationGeneration
 		expired := !now.UTC().Before(existing.PairingExpiresAt)
 		if existing.Material != nil && !now.UTC().Before(existing.Material.ExpiresAt) {
@@ -209,16 +266,17 @@ func PrepareAuthenticatedSetupResume(stateRoot, serverURL, publicIdentityKey, al
 	} else if !errors.Is(err, ErrResumeNotFound) {
 		return ResumeRecord{}, err
 	}
-	verifierBytes, operationBytes := make([]byte, 32), make([]byte, 16)
+	verifierBytes := make([]byte, 32)
 	if _, err := io.ReadFull(rand.Reader, verifierBytes); err != nil {
 		return ResumeRecord{}, err
 	}
-	if _, err := io.ReadFull(rand.Reader, operationBytes); err != nil {
+	operation, err := uuid.NewRandom()
+	if err != nil {
 		return ResumeRecord{}, err
 	}
-	record := NewResumeRecord(serverURL, publicIdentityKey, "", alias, "host", base64.RawURLEncoding.EncodeToString(verifierBytes), now.UTC().Add(15*time.Minute))
+	record := NewResumeRecord(serverURL, publicIdentityKey, "", alias, base64.RawURLEncoding.EncodeToString(verifierBytes), now.UTC().Add(15*time.Minute))
 	record.AuthenticatedSetup = true
-	record.SetupOperationID = "host-setup-" + base64.RawURLEncoding.EncodeToString(operationBytes)
+	record.SetupOperationID = "operation_" + operation.String()
 	record.ExpectedUserMachineID = machineID
 	record.ExpectedGeneration = installationGeneration
 	record.RequestedArtifact = cloneArtifactTarget(artifact)
@@ -247,25 +305,31 @@ func loadResumeDocument(stateRoot string) (ResumeRecord, error) {
 	if errors.Is(err, os.ErrNotExist) {
 		return ResumeRecord{}, ErrResumeNotFound
 	}
-	if err != nil || !secureResumeFile(path, info, 512<<10) {
+	if err != nil {
+		return ResumeRecord{}, resumeStorageError(resumeStorageInspect, err)
+	}
+	if !secureResumeFile(path, info, 512<<10) {
 		return ResumeRecord{}, ErrResumeBinding
 	}
 	body, err := os.ReadFile(path)
 	if err != nil {
-		return ResumeRecord{}, err
+		return ResumeRecord{}, resumeStorageError(resumeStorageRead, err)
 	}
 	var record ResumeRecord
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&record); err != nil {
-		return ResumeRecord{}, ErrResumeBinding
+		return ResumeRecord{}, resumeBindingError(err)
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
-		return ResumeRecord{}, ErrResumeBinding
+		if err == nil {
+			return ResumeRecord{}, ErrResumeBinding
+		}
+		return ResumeRecord{}, resumeBindingError(err)
 	}
 	if err := validateResumeRecord(record, true); err != nil {
-		return ResumeRecord{}, err
+		return ResumeRecord{}, resumeBindingError(err)
 	}
 	return record, nil
 }
@@ -275,11 +339,14 @@ func ClearResume(stateRoot string) error {
 	if info, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
 		return nil
 	} else if err != nil {
-		return err
+		return resumeStorageError(resumeStorageInspect, err)
 	} else if !secureResumeFile(path, info, 512<<10) {
 		return ErrResumeBinding
 	}
-	return os.Remove(path)
+	if err := os.Remove(path); err != nil {
+		return resumeStorageError(resumeStorageRemove, err)
+	}
+	return nil
 }
 
 // ValidateRecoveredMaterial binds renewed/replayed credentials to the exact
@@ -288,22 +355,21 @@ func ClearResume(stateRoot string) error {
 // generation must not change under the same verifier.
 func ValidateRecoveredMaterial(previous, recovered Material, runtimeEnrolled bool) error {
 	if previous.UserMachineID != recovered.UserMachineID ||
-		previous.UserMachineEnrollmentID != recovered.UserMachineEnrollmentID ||
+		previous.PairingID != recovered.PairingID ||
 		previous.EnvironmentID != recovered.EnvironmentID ||
 		runtimeEnrolled && previous.HelperID != recovered.HelperID ||
 		previous.InstallationGeneration != recovered.InstallationGeneration ||
-		previous.SetupMode != recovered.SetupMode ||
 		normalizeBootstrapURL(previous.ControlURL) != normalizeBootstrapURL(recovered.ControlURL) {
 		return fmt.Errorf("%w: recovered material changed the bound machine installation", ErrResumeBinding)
 	}
 	return nil
 }
 
-// ValidateAuthenticatedSetupMaterial binds authenticated Host material to the
+// ValidateAuthenticatedSetupMaterial binds authenticated machine material to the
 // exact setup transition and, on recovery, to the artifact that was verified
 // before the one-shot installation authority was issued.
 func ValidateAuthenticatedSetupMaterial(record ResumeRecord, material Material) error {
-	if !record.AuthenticatedSetup || material.UserMachineID != record.ExpectedUserMachineID || material.InstallationGeneration != record.ExpectedGeneration || material.SetupMode != "host" {
+	if !record.AuthenticatedSetup || material.UserMachineID != record.ExpectedUserMachineID || material.InstallationGeneration != record.ExpectedGeneration {
 		return ErrResumeBinding
 	}
 	if record.Material == nil {
@@ -349,19 +415,19 @@ func validateResumeRecord(record ResumeRecord, loaded bool) error {
 			return ErrResumeBinding
 		}
 	}
-	if record.Schema != resumeSchema || !validResumeServer(record.ServerURL) || record.PublicIdentityKey == "" || len(record.EnrollmentTokenSHA) != sha256.Size*2 || record.Alias == "" || record.SetupMode != "host" && record.SetupMode != "client" || len(record.Verifier) < 32 || record.PairingExpiresAt.IsZero() {
+	if record.Schema != resumeSchema || !validResumeServer(record.ServerURL) || record.PublicIdentityKey == "" || len(record.EnrollmentTokenSHA) != sha256.Size*2 || record.Alias == "" || len(record.Verifier) < 32 || record.PairingExpiresAt.IsZero() {
 		return ErrResumeBinding
 	}
 	if _, err := hex.DecodeString(record.EnrollmentTokenSHA); err != nil {
 		return ErrResumeBinding
 	}
 	if record.AuthenticatedSetup {
-		if record.SetupMode != "host" || record.requiresEnrollmentToken() || len(record.SetupOperationID) < 8 || len(record.SetupOperationID) > 128 || record.ExpectedUserMachineID == "" || record.ExpectedGeneration < 1 {
+		if record.requiresEnrollmentToken() || len(record.SetupOperationID) < 8 || len(record.SetupOperationID) > 128 || record.ExpectedUserMachineID == "" || record.ExpectedGeneration < 1 {
 			return ErrResumeBinding
 		}
 		if record.RequestedArtifact != nil {
 			if err := VerifyArtifactTarget(*record.RequestedArtifact); err != nil {
-				return fmt.Errorf("%w: requested artifact: %v", ErrResumeBinding, err)
+				return resumeBindingError(err)
 			}
 		}
 	} else if record.SetupOperationID != "" || record.ExpectedUserMachineID != "" || record.ExpectedGeneration != 0 {
@@ -375,13 +441,11 @@ func validateResumeRecord(record ResumeRecord, loaded bool) error {
 			return fmt.Errorf("%w: material exists before pairing started", ErrResumeBinding)
 		}
 		if err := validateMaterialFreshness(*record.Material, !loaded && !record.RuntimeReady); err != nil {
-			return fmt.Errorf("%w: material validation: %v", ErrResumeBinding, err)
+			return resumeBindingError(err)
 		}
-		if record.Material.SetupMode != record.SetupMode {
-			return fmt.Errorf("%w: material setup mode %q does not match journal setup mode %q", ErrResumeBinding, record.Material.SetupMode, record.SetupMode)
-		}
+
 		if strings.TrimRight(strings.TrimSpace(record.Material.ControlURL), "/") != record.ServerURL {
-			return fmt.Errorf("%w: material control URL %q does not match journal server URL %q", ErrResumeBinding, record.Material.ControlURL, record.ServerURL)
+			return fmt.Errorf("%w: material control URL does not match journal server URL", ErrResumeBinding)
 		}
 	}
 	return nil
@@ -396,14 +460,17 @@ func ensureResumeDirectory(stateRoot string) error {
 		return ErrResumeBinding
 	}
 	if err := os.MkdirAll(stateRoot, 0o700); err != nil {
-		return err
+		return resumeStorageError(resumeStoragePrepare, err)
 	}
 	info, err := os.Lstat(stateRoot)
-	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+	if err != nil {
+		return resumeStorageError(resumeStorageInspect, err)
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return ErrResumeBinding
 	}
 	if err := os.Chmod(stateRoot, 0o700); err != nil {
-		return err
+		return resumeStorageError(resumeStoragePrepare, err)
 	}
 	return nil
 }

@@ -27,7 +27,6 @@ type ManagedSSHConfig struct {
 	Executable           string
 	OwnerUID             uint32
 	InheritedAgentSocket string
-	AliasSuffix          string
 }
 
 type ManagedSSHRuntime struct {
@@ -39,9 +38,6 @@ type ManagedSSHRuntime struct {
 func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig) (*ManagedSSHRuntime, error) {
 	if ctx == nil || strings.TrimSpace(cfg.ServerURL) == "" || cfg.Auth == nil || cfg.Store.Path == "" || strings.TrimSpace(cfg.CLIClientSessionID) == "" || !filepath.IsAbs(cfg.Home) || !filepath.IsAbs(cfg.RuntimeDirectory) || !filepath.IsAbs(cfg.Executable) {
 		return nil, ErrInvalidInventoryConfig
-	}
-	if cfg.AliasSuffix == "" {
-		cfg.AliasSuffix = managedssh.AliasSuffix
 	}
 	identity, err := cfg.Store.ManagedSSHIdentity(cfg.ServerURL, cfg.CLIClientSessionID)
 	if err != nil {
@@ -56,7 +52,7 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig) (*ManagedSSHRunt
 	_, err = client.RegisterManagedSSHClientKey(registerCtx, identity.PublicKey, identity.Fingerprint, "managed-ssh-register-"+hex.EncodeToString(identity.Fingerprint[:16]))
 	cancel()
 	if err != nil {
-		return nil, err
+		return nil, managedSSHAuthorityError(err)
 	}
 	capabilities, err := managedssh.ProbeOpenSSH(ctx, "ssh", 5*time.Second)
 	if err != nil || !capabilities.Ready() {
@@ -67,8 +63,7 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig) (*ManagedSSHRunt
 		return nil, err
 	}
 	if err := managedssh.InstallManagedIdentityPublicKey(cfg.Home, cfg.OwnerUID, identity.PublicKey); err != nil {
-		_ = agent.Close()
-		return nil, err
+		return nil, errors.Join(err, agent.Close())
 	}
 	command := strconv.Quote(cfg.Executable)
 	install := func(refreshCtx context.Context) error {
@@ -77,7 +72,7 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig) (*ManagedSSHRunt
 			return err
 		}
 		_, err = managedssh.InstallOpenSSHConfig(managedssh.OpenSSHConfig{
-			Home: cfg.Home, OwnerUID: cfg.OwnerUID, AliasSuffix: cfg.AliasSuffix,
+			Home: cfg.Home, OwnerUID: cfg.OwnerUID,
 			ProxyCommand:      command + " __ssh-proxy --host %h --port %p --user %r",
 			KnownHostsCommand: command + " __ssh-known-hosts --host %h --port %p",
 			AgentSocket:       agent.Socket(),
@@ -88,8 +83,7 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig) (*ManagedSSHRunt
 	}
 	err = install(ctx)
 	if err != nil {
-		_ = agent.Close()
-		return nil, err
+		return nil, errors.Join(err, agent.Close())
 	}
 	return &ManagedSSHRuntime{agent: agent, refresh: install}, nil
 }
@@ -111,12 +105,5 @@ func (r *ManagedSSHRuntime) Close() error {
 }
 
 func ManagedSSHHealthCode(err error) string {
-	switch {
-	case err == nil:
-		return ""
-	case errors.Is(err, managedssh.ErrOpenSSHUnavailable), errors.Is(err, managedssh.ErrOpenSSHConfigConflict), errors.Is(err, managedssh.ErrManagedIdentityFileConflict), errors.Is(err, managedssh.ErrAgentDenied):
-		return "ssh_target_not_ready"
-	default:
-		return "ssh_key_rejected"
-	}
+	return managedSSHHealthCode(err)
 }

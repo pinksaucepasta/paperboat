@@ -93,7 +93,7 @@ type locoBackend struct {
 	stunServers            []string
 	logf                   logger.Logf
 	allowedPeers           map[key.NodePublic]netip.Addr
-	policyMu               sync.Mutex // serializes policy replacement through device synchronization
+	policyMu               sync.Mutex // serializes policy replacement through machine synchronization
 	nextClientID           tailcfg.NodeID
 
 	// discoPublic returns the node's disco public key, memoized to
@@ -526,7 +526,7 @@ func (s *Server) validateAuthority() error {
 
 // ReplaceAllowedPeers atomically replaces authority admission. Nil and empty maps
 // deny all peers. Removed or rebound peers are removed from the network map and
-// active WireGuard device before return. Callers must close their revoked flow
+// active WireGuard machine before return. Callers must close their revoked flow
 // leases as well. It may run concurrently with peer admission after Start; Start
 // and Close must not run concurrently with this method.
 func (s *Server) ReplaceAllowedPeers(peers map[key.NodePublic]netip.Addr) error {
@@ -832,7 +832,7 @@ func (b *locoBackend) onMeow(src key.NodePublic, discoPub key.DiscoPublic) bool 
 
 	b.updateServerMapLocked()
 
-	// No engine reconfig needed: the WireGuard device learns about the
+	// No engine reconfig needed: the WireGuard machine learns about the
 	// new peer lazily via the config source installed with
 	// SetPeerConfigFunc when the client's handshake arrives.
 

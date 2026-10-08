@@ -11,18 +11,19 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcast"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 type Epoch = browserbroadcast.Epoch
 
 var ErrUnavailable = errors.New("browser terminal broadcast unavailable")
 
-// OpenPublisher opens one authenticated host-to-edge stream on the device's
+// OpenPublisher opens one authenticated host-to-edge stream on the machine's
 // existing runtime carrier. The stream carries only opaque COSE output records.
 type OpenPublisher func(context.Context, string) (io.WriteCloser, error)
 
 type Registry struct {
-	manager    *session.Manager
+	manager    session.Service
 	signingKey func(context.Context) (ed25519.PrivateKey, error)
 	mu         sync.Mutex
 	open       OpenPublisher
@@ -30,18 +31,20 @@ type Registry struct {
 }
 
 type publication struct {
-	sessionID    string
-	generation   uint64
-	attachmentID string
-	epoch        Epoch
-	index        uint64
-	subscribers  map[string]chan Epoch
-	stream       io.WriteCloser
-	cancel       context.CancelFunc
-	mu           sync.Mutex
+	sessionID     string
+	generation    uint64
+	attachmentID  string
+	epoch         Epoch
+	index         uint64
+	subscribers   map[string]chan Epoch
+	stream        io.WriteCloser
+	cancel        context.CancelFunc
+	diagnosticCtx context.Context
+	mu            sync.Mutex
+	stopOnce      sync.Once
 }
 
-func NewRegistry(manager *session.Manager, signingKey func(context.Context) (ed25519.PrivateKey, error)) (*Registry, error) {
+func NewRegistry(manager session.Service, signingKey func(context.Context) (ed25519.PrivateKey, error)) (*Registry, error) {
 	if manager == nil || signingKey == nil {
 		return nil, ErrUnavailable
 	}
@@ -58,8 +61,7 @@ func (r *Registry) SetPublisher(open OpenPublisher) {
 	r.sessions = make(map[string]*publication)
 	r.mu.Unlock()
 	for _, p := range old {
-		p.stop()
-		r.manager.Detach(p.sessionID, p.attachmentID)
+		r.stop(p)
 	}
 }
 
@@ -68,6 +70,9 @@ func (r *Registry) SetPublisher(open OpenPublisher) {
 func (r *Registry) Join(ctx context.Context, sessionID string, generation uint64, attachmentID string) (<-chan Epoch, error) {
 	if r == nil || ctx == nil || sessionID == "" || generation == 0 || attachmentID == "" {
 		return nil, ErrUnavailable
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -88,29 +93,39 @@ func (r *Registry) Join(ctx context.Context, sessionID string, generation uint64
 	if _, err := r.manager.SnapshotAtGeneration(sessionID, generation); err != nil {
 		return nil, err
 	}
+	var workerKey ed25519.PrivateKey
+	defer func() { clearPrivateKey(workerKey) }()
 	key, err := r.signingKey(ctx)
-	if err != nil || len(key) != ed25519.PrivateKeySize {
+	if err != nil {
+		return nil, classifiedFailure(err, streamOpenStage, sessionCode)
+	}
+	if len(key) != ed25519.PrivateKeySize {
 		return nil, ErrUnavailable
 	}
+	workerKey = append(ed25519.PrivateKey(nil), key...)
 	epoch, err := browserbroadcast.NewEpoch()
 	if err != nil {
-		return nil, err
+		return nil, classifiedFailure(err, streamOpenStage, sessionCode)
 	}
 	publisher, err := r.open(ctx, sessionID)
 	if err != nil {
-		return nil, err
+		return nil, classifiedFailure(err, streamOpenStage, transportCode)
 	}
 	producerAttachment := "broadcast_" + sessionID
 	if _, err = r.manager.AttachLive(sessionID, producerAttachment); err != nil {
-		publisher.Close()
-		return nil, err
+		return nil, classifiedFailure(errors.Join(err, publisher.Close()), streamOpenStage, sessionCode)
 	}
-	runCtx, cancel := context.WithCancel(context.Background())
+	diagnosticCtx := context.WithoutCancel(ctx)
+	if !supportref.Valid(supportref.FromContext(diagnosticCtx)) {
+		diagnosticCtx = supportref.WithContext(diagnosticCtx, supportref.New())
+	}
+	runCtx, cancel := context.WithCancel(diagnosticCtx)
 	updates := make(chan Epoch, 1)
 	updates <- epoch
-	p := &publication{sessionID: sessionID, generation: generation, attachmentID: producerAttachment, epoch: epoch, subscribers: map[string]chan Epoch{attachmentID: updates}, stream: publisher, cancel: cancel}
+	p := &publication{sessionID: sessionID, generation: generation, attachmentID: producerAttachment, epoch: epoch, subscribers: map[string]chan Epoch{attachmentID: updates}, stream: publisher, cancel: cancel, diagnosticCtx: diagnosticCtx}
 	r.sessions[sessionID] = p
-	go r.publish(runCtx, p, append(ed25519.PrivateKey(nil), key...))
+	go r.publish(runCtx, p, workerKey)
+	workerKey = nil
 	return updates, nil
 }
 
@@ -137,8 +152,7 @@ func (r *Registry) Leave(sessionID, attachmentID string) {
 		delete(r.sessions, sessionID)
 		p.mu.Unlock()
 		r.mu.Unlock()
-		p.stop()
-		_ = r.manager.Detach(sessionID, p.attachmentID)
+		r.stop(p)
 		return
 	}
 	// A former viewer must not decrypt future output even if it later obtains
@@ -149,8 +163,8 @@ func (r *Registry) Leave(sessionID, attachmentID string) {
 		delete(r.sessions, sessionID)
 		p.mu.Unlock()
 		r.mu.Unlock()
-		p.stop()
-		_ = r.manager.Detach(sessionID, p.attachmentID)
+		reportPublisherFailure(p.diagnosticCtx, deliveryStage, err)
+		r.stop(p)
 		return
 	}
 	p.epoch = next
@@ -163,43 +177,53 @@ func (r *Registry) Leave(sessionID, attachmentID string) {
 			delete(p.subscribers, id)
 		}
 	}
+	if len(p.subscribers) == 0 {
+		delete(r.sessions, sessionID)
+		p.mu.Unlock()
+		r.mu.Unlock()
+		r.stop(p)
+		return
+	}
 	p.mu.Unlock()
 	r.mu.Unlock()
 }
 
-func (p *publication) stop() {
-	p.cancel()
-	_ = p.stream.Close()
-	p.mu.Lock()
-	for id, subscriber := range p.subscribers {
-		close(subscriber)
-		delete(p.subscribers, id)
-	}
-	p.mu.Unlock()
+func (r *Registry) stop(p *publication) {
+	p.stopOnce.Do(func() {
+		p.cancel()
+		closeErr := p.stream.Close()
+		p.mu.Lock()
+		for id, subscriber := range p.subscribers {
+			close(subscriber)
+			delete(p.subscribers, id)
+		}
+		p.mu.Unlock()
+		detachErr := r.manager.Detach(p.sessionID, p.attachmentID)
+		reportPublisherCleanupFailure(p.diagnosticCtx, errors.Join(closeErr, detachErr))
+	})
 }
 
 func (r *Registry) publish(ctx context.Context, p *publication, key ed25519.PrivateKey) {
 	defer func() {
-		for i := range key {
-			key[i] = 0
-		}
+		clearPrivateKey(key)
 		r.mu.Lock()
 		if r.sessions[p.sessionID] == p {
 			delete(r.sessions, p.sessionID)
 		}
 		r.mu.Unlock()
-		p.stop()
-		_ = r.manager.Detach(p.sessionID, p.attachmentID)
+		r.stop(p)
 	}()
 	for {
 		event, err := r.manager.WaitNext(ctx, p.sessionID, p.attachmentID)
 		if err != nil {
+			reportPublisherFailure(p.diagnosticCtx, deliveryStage, err)
 			return
 		}
 		p.mu.Lock()
 		if p.index == ^uint64(0) {
 			p.mu.Unlock()
 			event.Release()
+			reportPublisherFailure(p.diagnosticCtx, deliveryStage, errOutputIndexExhausted)
 			return
 		}
 		p.index++
@@ -210,8 +234,15 @@ func (r *Registry) publish(ctx context.Context, p *publication, key ed25519.Priv
 		p.mu.Unlock()
 		event.Release()
 		if encodeErr != nil {
+			reportPublisherFailure(p.diagnosticCtx, deliveryStage, encodeErr)
 			return
 		}
+	}
+}
+
+func clearPrivateKey(key ed25519.PrivateKey) {
+	for i := range key {
+		key[i] = 0
 	}
 }
 

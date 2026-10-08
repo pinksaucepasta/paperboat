@@ -5,13 +5,14 @@ import (
 	"errors"
 	"io"
 	"net"
-	"regexp"
-	"strings"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	edgetelemetry "github.com/pinksaucepasta/paperboat-tunnel/internal/telemetry"
+
+	"github.com/google/uuid"
 )
 
 // ErrInvalidCarrierTelemetry identifies an invalid producer input. Telemetry
@@ -37,8 +38,7 @@ const (
 )
 
 var (
-	carrierTelemetryIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{2,127}$`)
-	carrierRouteKinds         = map[string]struct{}{
+	carrierRouteKinds = map[string]struct{}{
 		"preview_public_https_wss": {},
 		"tunnel_https_wss":         {},
 		"tunnel_tcp":               {},
@@ -187,7 +187,8 @@ func (p *CarrierTelemetry) open(ctx context.Context, supplied StreamInfo, operat
 		if p != nil {
 			p.recordOpenFailure(info, failName, failMessage, ctx, err)
 		}
-		p.observeOperation(ctx, accepted, "canceled", "shutdown", p.now().Sub(started))
+		outcome, code := carrierFailureOutcome(err)
+		p.observeOperation(ctx, accepted, outcome, code, p.now().Sub(started))
 		return nil, err
 	}
 	stream, err := operation(ctx)
@@ -200,10 +201,7 @@ func (p *CarrierTelemetry) open(ctx context.Context, supplied StreamInfo, operat
 		}
 		if p != nil {
 			p.recordOpenFailure(info, failName, failMessage, ctx, err)
-			outcome, code := "failed", "unavailable"
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				outcome, code = "canceled", "timeout"
-			}
+			outcome, code := carrierFailureOutcome(err)
 			p.observeOperation(ctx, accepted, outcome, code, p.now().Sub(started))
 		}
 		return nil, err
@@ -250,9 +248,11 @@ func (p *CarrierTelemetry) WrapStream(ctx context.Context, stream io.ReadWriteCl
 		p.setActiveGauge()
 		p.activeMu.Unlock()
 	}
+	wrapped.stopMu.Lock()
 	wrapped.stop = context.AfterFunc(ctx, func() {
 		wrapped.closeWithReason(contextCancellationReason(ctx))
 	})
+	wrapped.stopMu.Unlock()
 	return wrapped
 }
 
@@ -308,7 +308,10 @@ func (p *CarrierTelemetry) FlowStall(direction string) error {
 }
 
 func (p *CarrierTelemetry) infoFor(supplied StreamInfo) StreamInfo {
-	info := p.base
+	info := StreamInfo{}
+	if p != nil {
+		info = p.base
+	}
 	if supplied.IDs != (edgetelemetry.SafeIDs{}) {
 		info.IDs = supplied.IDs
 	}
@@ -341,7 +344,7 @@ func (p *CarrierTelemetry) infoFor(supplied StreamInfo) StreamInfo {
 		info.RouteKind = ""
 	}
 	if !safeCarrierCorrelation(info.CorrelationID) {
-		info.CorrelationID = ""
+		info.CorrelationID = "correlation_" + uuid.NewString()
 	}
 	if _, ok := carrierDirections[info.ReadDirection]; !ok {
 		info.ReadDirection = "ingress"
@@ -373,12 +376,12 @@ func (p *CarrierTelemetry) emit(at time.Time, name string, severity edgetelemetr
 
 func (p *CarrierTelemetry) recordOpenFailure(info StreamInfo, name, message string, ctx context.Context, err error) {
 	outcome := edgetelemetry.OutcomeFailed
-	severity := edgetelemetry.SeverityWarn
-	if errors.Is(err, context.Canceled) || errors.Is(ctxErr(ctx), context.Canceled) || errors.Is(ctxErr(ctx), context.DeadlineExceeded) {
-		outcome = edgetelemetry.OutcomeCanceled
+	severity := edgetelemetry.SeverityError
+	if allCarrierLeaves(err, func(leaf error) bool { return leaf == context.Canceled }) {
+		outcome, severity = edgetelemetry.OutcomeCanceled, edgetelemetry.SeverityInfo
 	}
 	p.emit(p.now(), name, severity, outcome, message, info)
-	if outcome == edgetelemetry.OutcomeCanceled && p.metrics != nil {
+	if (outcome == edgetelemetry.OutcomeCanceled || carrierHasDeadline(err)) && p.metrics != nil {
 		reason := contextCancellationReason(ctx)
 		if reason == "" {
 			reason = carrierCancellationReasonFromError(err)
@@ -419,6 +422,7 @@ type TelemetryStream struct {
 	info     StreamInfo
 	started  time.Time
 	stop     func() bool
+	stopMu   sync.Mutex
 	once     sync.Once
 	closeErr error
 }
@@ -466,8 +470,11 @@ func (s *TelemetryStream) closeWithReason(reason string) error {
 		return nil
 	}
 	s.once.Do(func() {
-		if s.stop != nil {
-			s.stop()
+		s.stopMu.Lock()
+		stop := s.stop
+		s.stopMu.Unlock()
+		if stop != nil {
+			stop()
 		}
 		s.closeErr = s.raw.Close()
 		if s.producer != nil {
@@ -552,17 +559,35 @@ func (p *CarrierTelemetry) finishStream(stream *TelemetryStream, reason string, 
 			}
 		}
 	}
+	if reason == "" && carrierHasDeadline(closeErr) {
+		reason = "timeout"
+	}
 	if reason != "" {
-		outcome = edgetelemetry.OutcomeCanceled
+		if outcome != edgetelemetry.OutcomeFailed {
+			if reason == "timeout" {
+				outcome = edgetelemetry.OutcomeFailed
+			} else {
+				outcome = edgetelemetry.OutcomeCanceled
+			}
+		}
 		if p.metrics != nil {
 			_ = p.metrics.IncCounter(edgetelemetry.MetricStreamCancellations, edgetelemetry.MetricLabels{"reason": reason})
 		}
 	}
-	p.emit(p.now(), carrierStreamClosed, edgetelemetry.SeverityDebug, outcome, carrierMessageClosed, stream.info)
+	severity := edgetelemetry.SeverityDebug
+	if outcome == edgetelemetry.OutcomeFailed {
+		severity = edgetelemetry.SeverityError
+	} else if outcome == edgetelemetry.OutcomeCanceled {
+		severity = edgetelemetry.SeverityInfo
+	}
+	p.emit(p.now(), carrierStreamClosed, severity, outcome, carrierMessageClosed, stream.info)
 	if p.observe != nil {
 		observed, code := string(outcome), "ok"
 		if outcome == edgetelemetry.OutcomeFailed {
 			code = "internal"
+			if reason == "timeout" || carrierHasDeadline(closeErr) {
+				code = "timeout"
+			}
 		} else if outcome == edgetelemetry.OutcomeCanceled {
 			code = "shutdown"
 		}
@@ -585,11 +610,92 @@ func (s *TelemetryStream) durationSeconds() float64 {
 }
 
 func isExpectedStreamClose(err error) bool {
-	return err == nil || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, net.ErrClosed) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+	return err == nil || allCarrierLeaves(err, func(leaf error) bool {
+		return leaf == io.EOF || leaf == io.ErrUnexpectedEOF || leaf == net.ErrClosed || leaf == context.Canceled
+	})
+}
+
+func carrierHasDeadline(err error) bool {
+	remaining := []error{err}
+	for visited := 0; len(remaining) > 0 && visited < 16; visited++ {
+		current := remaining[0]
+		remaining = remaining[1:]
+		if current == nil {
+			continue
+		}
+		value := reflect.ValueOf(current)
+		if value.Kind() == reflect.Pointer && value.IsNil() {
+			continue
+		}
+		if value.Type().Comparable() && current == context.DeadlineExceeded {
+			return true
+		}
+		switch wrapper := current.(type) {
+		case interface{ Unwrap() []error }:
+			children := wrapper.Unwrap()
+			limit := 15 - visited - len(remaining)
+			if limit < 0 {
+				limit = 0
+			}
+			if len(children) > limit {
+				children = children[:limit]
+			}
+			remaining = append(remaining, children...)
+		case interface{ Unwrap() error }:
+			remaining = append(remaining, wrapper.Unwrap())
+		}
+	}
+	return false
+}
+
+func carrierFailureOutcome(err error) (string, string) {
+	if carrierHasDeadline(err) {
+		return "failed", "timeout"
+	}
+	if allCarrierLeaves(err, func(leaf error) bool { return leaf == context.Canceled }) {
+		return "canceled", "shutdown"
+	}
+	return "failed", "unavailable"
+}
+
+// Cleanup is expected only when every bounded terminal cause is expected.
+// Cyclic, truncated, nil, or unknown causes cannot prove an orderly close.
+func allCarrierLeaves(err error, expected func(error) bool) bool {
+	remaining := []error{err}
+	for visited := 0; len(remaining) > 0; visited++ {
+		if visited >= 16 {
+			return false
+		}
+		current := remaining[0]
+		remaining = remaining[1:]
+		if current == nil {
+			return false
+		}
+		value := reflect.ValueOf(current)
+		if value.Kind() == reflect.Pointer && value.IsNil() {
+			return false
+		}
+		if value.Type().Comparable() && expected(current) {
+			continue
+		}
+		switch wrapper := current.(type) {
+		case interface{ Unwrap() []error }:
+			children := wrapper.Unwrap()
+			if len(children) == 0 || len(children)+len(remaining) > 15-visited {
+				return false
+			}
+			remaining = append(remaining, children...)
+		case interface{ Unwrap() error }:
+			remaining = append(remaining, wrapper.Unwrap())
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func isTimeoutError(err error) bool {
-	if errors.Is(err, context.DeadlineExceeded) {
+	if carrierHasDeadline(err) {
 		return true
 	}
 	var timeout interface{ Timeout() bool }
@@ -609,7 +715,7 @@ func contextCancellationReason(ctx context.Context) string {
 
 func carrierCancellationReasonFromError(err error) string {
 	switch {
-	case errors.Is(err, context.DeadlineExceeded):
+	case carrierHasDeadline(err):
 		return "timeout"
 	case errors.Is(err, context.Canceled):
 		return "client"
@@ -633,35 +739,30 @@ func ctxErr(ctx context.Context) error {
 }
 
 func safeCarrierCorrelation(value string) bool {
-	return carrierTelemetryIDPattern.MatchString(value) && (strings.HasPrefix(value, "corr_") || strings.HasPrefix(value, "cor_") || strings.HasPrefix(value, "correlation_") || strings.HasPrefix(value, "request_") || strings.HasPrefix(value, "pb-"))
+	return edgetelemetry.SafeOpaqueID(value)
 }
 
 func safeCarrierIDs(ids edgetelemetry.SafeIDs) edgetelemetry.SafeIDs {
-	ids.AccountID = safeCarrierID(ids.AccountID, "account_")
-	ids.ActorID = safeCarrierID(ids.ActorID, "actor_")
-	ids.TunnelID = safeCarrierID(ids.TunnelID, "tunnel_")
-	ids.RouteID = safeCarrierID(ids.RouteID, "route_")
-	ids.ConnectorID = safeCarrierID(ids.ConnectorID, "connector_")
-	ids.DomainID = safeCarrierID(ids.DomainID, "domain_")
-	ids.CertificateID = safeCarrierID(ids.CertificateID, "certificate_")
-	ids.AssignmentID = safeCarrierID(ids.AssignmentID, "assignment_")
-	ids.HostID = safeCarrierID(ids.HostID, "host_")
-	ids.DeviceID = safeCarrierID(ids.DeviceID, "device_")
-	ids.SessionID = safeCarrierID(ids.SessionID, "session_", "carrier_")
-	ids.OperationID = safeCarrierID(ids.OperationID, "operation_", "op_")
-	ids.RequestID = safeCarrierID(ids.RequestID, "request_", "req_")
-	ids.EdgeNodeID = safeCarrierID(ids.EdgeNodeID, "edge_")
+	ids.AccountID = safeCarrierID(ids.AccountID)
+	ids.ActorID = safeCarrierID(ids.ActorID)
+	ids.TunnelID = safeCarrierID(ids.TunnelID)
+	ids.RouteID = safeCarrierID(ids.RouteID)
+	ids.ConnectorID = safeCarrierID(ids.ConnectorID)
+	ids.DomainID = safeCarrierID(ids.DomainID)
+	ids.CertificateID = safeCarrierID(ids.CertificateID)
+	ids.AssignmentID = safeCarrierID(ids.AssignmentID)
+	ids.HostID = safeCarrierID(ids.HostID)
+	ids.MachineID = safeCarrierID(ids.MachineID)
+	ids.SessionID = safeCarrierID(ids.SessionID)
+	ids.OperationID = safeCarrierID(ids.OperationID)
+	ids.RequestID = safeCarrierID(ids.RequestID)
+	ids.EdgeNodeID = safeCarrierID(ids.EdgeNodeID)
 	return ids
 }
 
-func safeCarrierID(value string, prefixes ...string) string {
-	if value == "" || !carrierTelemetryIDPattern.MatchString(value) {
-		return ""
-	}
-	for _, prefix := range prefixes {
-		if strings.HasPrefix(value, prefix) && len(value) > len(prefix) {
-			return value
-		}
+func safeCarrierID(value string) string {
+	if edgetelemetry.SafeOpaqueID(value) {
+		return value
 	}
 	return ""
 }

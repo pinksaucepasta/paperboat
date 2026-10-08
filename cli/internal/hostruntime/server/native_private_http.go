@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -27,7 +26,7 @@ func ServeNativePrivateHTTP3(ctx context.Context, session *native.Session, autho
 	}
 	connection, err := session.HTTP3Connection()
 	if err != nil {
-		return err
+		return classifyNativePrivateFailure("stream_open", "native_private_failed", err)
 	}
 	var handled atomic.Bool
 	server := &http3.Server{Handler: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -37,8 +36,23 @@ func ServeNativePrivateHTTP3(ctx context.Context, session *native.Session, autho
 		}
 		encoded, decodeErr := base64.RawURLEncoding.DecodeString(request.Header.Get("X-Paperboat-Native-Authorization"))
 		header, parseErr := streamauth.Parse(encoded, time.Now().UTC())
-		if decodeErr != nil || parseErr != nil || header.Consumer != "private_http" || session.AuthorizeHTTP3(request.Context(), header, authorize) != nil {
+		var accessSessionID string
+		meterAuthorize := func(ctx context.Context, header streamauth.Header) (string, error) {
+			var err error
+			accessSessionID, err = authorize(ctx, header)
+			return accessSessionID, err
+		}
+		if decodeErr != nil || parseErr != nil || header.Consumer != "private_http" {
 			http.Error(writer, "private HTTP access denied", http.StatusForbidden)
+			return
+		}
+		if authorizeErr := session.AuthorizeHTTP3(request.Context(), header, meterAuthorize); authorizeErr != nil {
+			if expectedNativePrivateAuthorizationRejection(authorizeErr) {
+				http.Error(writer, "private HTTP access denied", http.StatusForbidden)
+				return
+			}
+			reportNativePrivateFailure(request.Context(), "peer_authority", "peer_authority_failed", authorizeErr, true)
+			http.Error(writer, "private HTTP authority unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		binding, bindingErr := nativeprivate.Decode([]byte(header.Target), time.Now().UTC())
@@ -47,7 +61,16 @@ func ServeNativePrivateHTTP3(ctx context.Context, session *native.Session, autho
 			return
 		}
 		validUntil, revoked, currentErr := current(request.Context(), binding)
-		if currentErr != nil || !validUntil.After(time.Now().UTC()) {
+		if currentErr != nil {
+			if expectedNativePrivateBindingFailure(currentErr) || expectedNativePrivateTermination(currentErr) {
+				http.Error(writer, "private HTTP access denied", http.StatusForbidden)
+				return
+			}
+			reportNativePrivateFailure(request.Context(), "peer_authority", "peer_authority_failed", currentErr, true)
+			http.Error(writer, "private HTTP authority unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if !validUntil.After(time.Now().UTC()) {
 			http.Error(writer, "private HTTP access denied", http.StatusForbidden)
 			return
 		}
@@ -74,9 +97,11 @@ func ServeNativePrivateHTTP3(ctx context.Context, session *native.Session, autho
 		}
 		origin, dialErr := dial(request.Context(), "tcp", binding.TargetAddress)
 		if dialErr != nil {
+			reportNativePrivateFailure(request.Context(), "target_connect", "native_private_failed", dialErr, false)
 			http.Error(writer, "private HTTP origin unavailable", http.StatusBadGateway)
 			return
 		}
+		origin = session.MeterIncoming(origin, header, accessSessionID, true)
 		defer origin.Close()
 		lifetime, cancel := context.WithDeadline(request.Context(), validUntil)
 		defer cancel()
@@ -93,24 +118,40 @@ func ServeNativePrivateHTTP3(ctx context.Context, session *native.Session, autho
 		if flusher, ok := writer.(http.Flusher); ok {
 			flusher.Flush()
 		}
-		type result struct{ err error }
+		type result struct {
+			direction string
+			err       error
+		}
 		done := make(chan result, 2)
 		go func() {
 			_, copyErr := io.Copy(origin, request.Body)
 			if closer, ok := origin.(interface{ CloseWrite() error }); ok {
 				copyErr = errors.Join(copyErr, closer.CloseWrite())
 			}
-			done <- result{copyErr}
+			done <- result{direction: "request_to_origin", err: copyErr}
 		}()
-		go func() { _, copyErr := io.Copy(flushingNativePrivateWriter{writer}, origin); done <- result{copyErr} }()
-		<-done
-		<-done
+		go func() {
+			_, copyErr := io.Copy(flushingNativePrivateWriter{writer}, origin)
+			done <- result{direction: "origin_to_response", err: copyErr}
+		}()
+		var copyErr error
+		for range 2 {
+			result := <-done
+			copyErr = errors.Join(copyErr, result.err)
+			if result.direction == "origin_to_response" || result.err != nil && !expectedNativePrivateTermination(result.err) {
+				_ = request.Body.Close()
+				_ = origin.Close()
+			}
+		}
+		if copyErr != nil {
+			reportNativePrivateFailure(request.Context(), "delivery", "native_private_failed", copyErr, true)
+		}
 	})}
 	err = server.ServeQUICConn(connection)
-	if errors.Is(err, context.Canceled) || errors.Is(err, net.ErrClosed) {
+	if expectedNativePrivateTermination(err) {
 		return nil
 	}
-	return err
+	return classifyNativePrivateFailure("lifecycle", "native_private_failed", err)
 }
 
 type flushingNativePrivateWriter struct{ http.ResponseWriter }

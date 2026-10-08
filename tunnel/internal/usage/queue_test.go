@@ -2,6 +2,7 @@ package usage
 
 import (
 	"math"
+	"strconv"
 	"testing"
 )
 
@@ -102,5 +103,29 @@ func TestQueueByteBoundsRejectBeforeIntegerOverflow(t *testing.T) {
 	latest.bytes = math.MaxInt
 	if err := latest.EnqueueLatest(Report{OperationID: "new", Key: key, Bytes: 2, Payload: []byte("12")}); err != ErrQueueFull {
 		t.Fatalf("latest error=%v", err)
+	}
+}
+
+func TestQueueAcknowledgementsBoundRetentionAndPreserveFIFO(t *testing.T) {
+	q, _ := NewQueue(2, 64)
+	for iteration := 0; iteration < 1000; iteration++ {
+		first, second := "first_"+strconv.Itoa(iteration), "second_"+strconv.Itoa(iteration)
+		for _, id := range []string{first, second} {
+			if err := q.Enqueue(Report{OperationID: id, Payload: []byte("signed")}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if report, ok := q.Next(); !ok || report.OperationID != first {
+			t.Fatal("FIFO changed")
+		}
+		if !q.Ack(first) {
+			t.Fatal("first ACK failed")
+		}
+		if report, ok := q.Next(); !ok || report.OperationID != second {
+			t.Fatal("ACK removed sibling")
+		}
+		if !q.Ack(second) || len(q.order) != 0 || cap(q.order) > q.maxReports || q.Stats().Bytes != 0 || len(q.Snapshot().Reports) != 0 {
+			t.Fatal("ACK retained unbounded ordering or payload state")
+		}
 	}
 }

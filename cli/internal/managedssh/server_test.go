@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -61,6 +62,32 @@ func TestServerRejectsOversizedFrame(t *testing.T) {
 		t.Fatalf("oversized frame error=%v", err)
 	}
 	_ = client.Close()
+}
+
+type failingAcceptListener struct{ err error }
+
+func (l failingAcceptListener) Accept() (net.Conn, error) { return nil, l.err }
+func (failingAcceptListener) Close() error                { return nil }
+func (failingAcceptListener) Addr() net.Addr              { return &net.TCPAddr{} }
+
+func TestServerClassifiesTerminalListenerAcceptFailure(t *testing.T) {
+	signer, _ := testKey(t)
+	managed, err := NewAgent(signer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cause := errors.New("private socket path /home/user/.ssh/agent.sock")
+	err = (Server{Agent: managed, MaxConnections: 1, IdleTimeout: time.Second}).Serve(context.Background(), failingAcceptListener{err: cause})
+	if !errors.Is(err, cause) || err.Error() != errManagedSSHOperation.Error() {
+		t.Fatalf("listener failure text/cause mismatch: %v", err)
+	}
+	var classified interface {
+		DiagnosticStage() string
+		DiagnosticCode() string
+	}
+	if !errors.As(err, &classified) || classified.DiagnosticStage() != "listener_accept" || classified.DiagnosticCode() != "managed_ssh_failed" {
+		t.Fatalf("listener failure classification missing: %T %v", err, err)
+	}
 }
 
 func TestListenOwnerSocketEnforcesPathOwnership(t *testing.T) {

@@ -223,7 +223,7 @@ func (f providerSessionSourceFunc) AcquirePreviewDataCarrier(ctx context.Context
 
 func providerTestLeaseAttachment(t *testing.T, now time.Time, previewID, operationID, routeID string, identity connector.DataCarrierIdentity, leaseGeneration uint64) (Lease, Attachment) {
 	t.Helper()
-	request := AttachmentRequest{PreviewID: previewID, OperationID: operationID, OwnerDeviceID: identity.HostID, OwnerSessionID: "owner_session_01", IdempotencyKey: operationID, RequestID: "request_" + previewID, CorrelationID: "correlation_" + previewID}
+	request := AttachmentRequest{PreviewID: previewID, OperationID: operationID, OwnerMachineID: identity.HostID, OwnerSessionID: "owner_session_01", IdempotencyKey: operationID, RequestID: "request_" + previewID, CorrelationID: "correlation_" + previewID}
 	accountID := identity.AccountID
 	hash, err := request.Hash(accountID)
 	if err != nil {
@@ -233,14 +233,14 @@ func providerTestLeaseAttachment(t *testing.T, now time.Time, previewID, operati
 	configHash := sha256.Sum256([]byte("config:" + strconv.FormatUint(identity.Generation, 10)))
 	lease := Lease{
 		Schema: PreviewTunnelSchemaV1, Kind: PreviewLeaseKind, ID: previewID, AccountID: accountID, ActorID: "actor_01",
-		OwnerDeviceID: identity.HostID, OwnerSessionID: request.OwnerSessionID, Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"},
+		OwnerMachineID: identity.HostID, OwnerSessionID: request.OwnerSessionID, OwnerSessionKind: "foreground", Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"},
 		AccessMode: "public", Endpoint: "https://preview.example.test", LeaseDeadline: now.Add(time.Hour),
 		State: "connecting", AllocationState: "pending", EdgeState: "pending", OriginState: "unknown", CreatedAt: now.Add(-time.Minute), LastRenewedAt: now,
 		CreateOperationID: operationID, Generation: int64(leaseGeneration), ETag: formatLeaseETag(previewID, int64(leaseGeneration)),
 	}
 	attachment := Attachment{
 		Schema: PreviewTunnelSchemaV1, Kind: PreviewCarrierAttachmentKind,
-		Binding:        Binding{AccountID: accountID, PreviewID: previewID, OperationID: operationID, OwnerDeviceID: identity.HostID, OwnerSessionID: request.OwnerSessionID, HostID: identity.HostID, LeaseGeneration: leaseGeneration, TunnelID: identity.TunnelID, ConnectorID: identity.ConnectorID, SessionID: identity.SessionID, ProcessGeneration: identity.ProcessGeneration, ConfigGeneration: identity.Generation, RouteID: routeID, RouteGeneration: 1, EdgeNodeID: "edge_node_01", EdgeProcessEpoch: "edge_epoch_01", MachineIdentityPublicKey: machinePublicKey, MachineIdentityThumbprint: machineIdentityThumbprint(machinePublicKey)},
+		Binding:        Binding{AccountID: accountID, PreviewID: previewID, OperationID: operationID, OwnerMachineID: identity.HostID, OwnerSessionID: request.OwnerSessionID, HostID: identity.HostID, LeaseGeneration: leaseGeneration, TunnelID: identity.TunnelID, ConnectorID: identity.ConnectorID, SessionID: identity.SessionID, ProcessGeneration: identity.ProcessGeneration, ConfigGeneration: identity.Generation, RouteID: routeID, RouteGeneration: 1, EdgeNodeID: "edge_node_01", EdgeProcessEpoch: "edge_epoch_01", MachineIdentityPublicKey: machinePublicKey, MachineIdentityThumbprint: machineIdentityThumbprint(machinePublicKey)},
 		IdempotencyKey: operationID, RequestID: request.RequestID, CorrelationID: request.CorrelationID, RequestHash: hash,
 		Endpoint: lease.Endpoint, Target: lease.Target, AccessMode: lease.AccessMode, ConfigContentHash: "sha256:" + hex.EncodeToString(configHash[:]), EdgeEndpoints: []string{"h2://edge.example.test"}, AttachmentGeneration: 1,
 		IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(30 * time.Minute), State: "edge_ready", EdgeReady: true,

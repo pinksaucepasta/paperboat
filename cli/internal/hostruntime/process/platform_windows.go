@@ -23,7 +23,7 @@ func platformExecutable(path string, info fs.FileInfo) bool {
 func platformShellArguments(path string) []string {
 	switch strings.ToLower(filepath.Base(path)) {
 	case "powershell.exe", "pwsh.exe":
-		return []string{"-NoLogo"}
+		return []string{"-NoLogo", "-NoExit", "-Command", paperboatPowerShellPrompt}
 	case "cmd.exe":
 		return []string{"/d"}
 	default:
@@ -37,7 +37,7 @@ var windowsEnvironmentKeys = map[string]bool{
 	"USERPROFILE": true, "APPDATA": true, "LOCALAPPDATA": true,
 	"HOMEDRIVE": true, "HOMEPATH": true, "USERNAME": true, "USERDOMAIN": true,
 	"SYSTEMROOT": true, "WINDIR": true, "COMSPEC": true, "TEMP": true, "TMP": true,
-	"PATHEXT": true, "PROGRAMDATA": true, "ALLUSERSPROFILE": true,
+	"PROMPT": true, "PATHEXT": true, "PROGRAMDATA": true, "ALLUSERSPROFILE": true,
 }
 
 func platformEnvironmentKey(key string) bool { return windowsEnvironmentKeys[key] }
@@ -100,4 +100,22 @@ func BaseEnvironment(shell string) ([]string, error) {
 		return nil, ErrLaunchRejected
 	}
 	return result, nil
+}
+
+// Install a session-local prompt after normal profiles have loaded. Preserve the
+// user's prompt and never write profile files or inspect another process's memory.
+const paperboatPowerShellPrompt = `$global:__paperboatOriginalPrompt = (Get-Item Function:\prompt).ScriptBlock; function global:prompt { [Console]::Write(([char]27).ToString()+"]2;"+[char]7); $text = & $global:__paperboatOriginalPrompt; $location = Get-Location; if ($location.Provider.Name -eq 'FileSystem') { try { $uri = ([Uri]$location.ProviderPath).AbsoluteUri; [Console]::Write(([char]27).ToString()+"]7;"+$uri+[char]7) } catch {} } else { [Console]::Write(([char]27).ToString()+"]9;9;"+[char]7) }; $text }`
+
+func platformShellEnvironment(path string, environment []string) []string {
+	if !strings.EqualFold(filepath.Base(path), "cmd.exe") {
+		return environment
+	}
+	prompt := "$P$G"
+	for _, entry := range environment {
+		if key, value, ok := strings.Cut(entry, "="); ok && strings.EqualFold(key, "PROMPT") {
+			prompt = value
+		}
+	}
+	// $E is CMD's escape token; $P expands the actual directory at each prompt.
+	return replaceEnvironment(environment, "PROMPT", "$E]2;\x07$E]9;9;$P\x07"+prompt)
 }

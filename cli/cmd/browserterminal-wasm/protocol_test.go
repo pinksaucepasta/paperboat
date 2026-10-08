@@ -164,6 +164,31 @@ func TestMachineTLSLeafMustMatchRootSignedEndpointKeyAndALPN(t *testing.T) {
 	}
 }
 
+type countedFrameWriter struct {
+	bytes.Buffer
+	writes int
+}
+
+func (w *countedFrameWriter) Write(data []byte) (int, error) {
+	w.writes++
+	return w.Buffer.Write(data)
+}
+
+func TestApplicationFrameUsesOneWriteForHeaderAndPayload(t *testing.T) {
+	var writer countedFrameWriter
+	payload := []byte("terminal input")
+	if err := writeApplicationFrame(&writer, appKindBinary, payload); err != nil {
+		t.Fatal(err)
+	}
+	if writer.writes != 1 {
+		t.Fatalf("application frame used %d TLS writes", writer.writes)
+	}
+	kind, got, err := readApplicationFrame(&writer)
+	if err != nil || kind != appKindBinary || !bytes.Equal(got, payload) {
+		t.Fatalf("combined frame did not round trip: kind=%d err=%v", kind, err)
+	}
+}
+
 func TestApplicationFramesAreBoundedAndIndependentOfReadChunking(t *testing.T) {
 	var wire bytes.Buffer
 	structured := []byte(`{"type":"hello"}`)

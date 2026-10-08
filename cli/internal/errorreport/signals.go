@@ -40,7 +40,7 @@ func Component(s string) string {
 }
 func Operation(s string) string {
 	switch s {
-	case "machine_pairing", "preview_observation", "private_authorization", "preview_attachment", "runtime_observation", "authorization_keys", "browser_authorization", "revocation_refresh", "accessor_discovery", "helper_enrollment", "config_sync", "identity_renewal", "machine_control", "peer_identity", "environment_enrollment", "tunnel_enrollment", "connector_admission", "tunnel_bootstrap", "inspector_authorization", "component_start", "component_shutdown", "component_rollback", "route_transition", "exec", "sftp", "rsync", "environments", "team", "desktop", "ping", "relay", "auth", "inbox", "session", "sessions", "machine", "pair", "setup", "uninstall", "install", "send", "transfer", "wait", "bugreport", "resolve", "tag", "approve", "service", "edge", "route", "origin", "dns", "certificate", "access", "login", "logout", "device", "project", "workspace", "connect", "terminal", "ssh", "scp", "serve", "preview", "tunnel", "env", "vault", "config", "sync", "update", "doctor", "status", "version", "help", "daemon", "control_request", "runtime_lifecycle", "diagnostic":
+	case "bandwidth", "peer_stream", "peer_probe", "machine_pairing", "preview_observation", "private_authorization", "preview_attachment", "runtime_observation", "authorization_keys", "browser_authorization", "revocation_refresh", "accessor_discovery", "helper_enrollment", "config_sync", "identity_renewal", "machine_control", "peer_identity", "environment_enrollment", "tunnel_enrollment", "connector_admission", "tunnel_bootstrap", "inspector_authorization", "component_start", "component_shutdown", "component_rollback", "route_transition", "exec", "sftp", "rsync", "environments", "team", "desktop", "ping", "relay", "auth", "inbox", "session", "sessions", "machine", "pair", "setup", "uninstall", "install", "send", "transfer", "wait", "bugreport", "resolve", "tag", "approve", "service", "edge", "route", "origin", "dns", "certificate", "access", "login", "logout", "project", "workspace", "connect", "terminal", "ssh", "scp", "serve", "preview", "tunnel", "env", "vault", "config", "sync", "update", "doctor", "status", "version", "help", "daemon", "control_request", "runtime_lifecycle", "diagnostic":
 		return s
 	}
 	if strings.HasPrefix(s, "__runtime-") {
@@ -60,7 +60,13 @@ func Outcome(s string) string {
 	return "state_change"
 }
 func (r *Reporter) admitSignal(signal int) bool {
-	if !r.Enabled() {
+	return r.admitSignalItems(signal, 1)
+}
+
+func (r *Reporter) admitSignalItems(signal int, items uint64) bool {
+	// Callers hold the submission gate. Already admitted work must complete
+	// even when shutdown has closed admission to subsequent producers.
+	if r == nil || r.client == nil {
 		return false
 	}
 	r.mu.Lock()
@@ -71,16 +77,16 @@ func (r *Reporter) admitSignal(signal int) bool {
 		l.window = now
 		l.count = 0
 	}
-	limits := [3]uint64{120, 600, 120}
-	if l.count >= limits[signal] {
-		l.dropped++
+	limits := [3]uint64{120, detailMetricLimit, 120}
+	if items > limits[signal]-l.count {
+		l.dropped += items
 		return false
 	}
-	l.count++
+	l.count += items
 	return true
 }
 
-// Dropped returns locally rejected log, metric and trace counts.
+// Dropped returns locally rejected log, metric item and trace counts.
 func (r *Reporter) Dropped() [3]uint64 {
 	if r == nil {
 		return [3]uint64{}
@@ -98,9 +104,10 @@ func (r *Reporter) context(ctx context.Context) context.Context {
 	return sentry.SetHubOnContext(ctx, sentry.NewHub(r.client, sentry.NewScope()))
 }
 func (r *Reporter) Observe(ctx context.Context, component, operation, outcome string, duration time.Duration) {
-	if !r.Enabled() {
+	if !r.beginSubmit(false) {
 		return
 	}
+	defer r.submitMu.RUnlock()
 	component = Component(component)
 	operation = Operation(operation)
 	outcome = Outcome(outcome)
@@ -124,9 +131,17 @@ func (r *Reporter) Observe(ctx context.Context, component, operation, outcome st
 		}
 		logger := sentry.NewLogger(ctx)
 		logger.SetAttributes(a...)
-		logger.Info().Emit("paperboat.operation")
+		if outcome == "failed" {
+			logger.Error().Emit("paperboat.operation")
+		} else {
+			logger.Info().Emit("paperboat.operation")
+		}
 	}
-	if r.metrics && r.admitSignal(1) {
+	metricItems := uint64(1)
+	if duration >= 0 {
+		metricItems++
+	}
+	if r.metrics && r.admitSignalItems(1, metricItems) {
 		m := sentry.NewMeter(ctx)
 		m.SetAttributes(attrs...)
 		m.Count("paperboat.operation.count", 1)
@@ -136,9 +151,17 @@ func (r *Reporter) Observe(ctx context.Context, component, operation, outcome st
 	}
 }
 func (r *Reporter) Start(ctx context.Context, component, operation string) (context.Context, func(string)) {
-	if !r.Enabled() {
+	if r != nil {
+		processComponent := Component(component)
+		r.component.CompareAndSwap(nil, &processComponent)
+		if ref := supportref.FromContext(ctx); ref != "" {
+			r.ambientReference.CompareAndSwap(nil, &ref)
+		}
+	}
+	if !r.beginSubmit(false) {
 		return ctx, func(string) {}
 	}
+	defer r.submitMu.RUnlock()
 	operation = Operation(operation)
 	component = Component(component)
 	r.component.CompareAndSwap(nil, &component)
@@ -167,13 +190,22 @@ func (r *Reporter) Start(ctx context.Context, component, operation string) (cont
 			return
 		}
 		outcome = Outcome(outcome)
-		r.Observe(ctx, component, operation, outcome, time.Since(started))
+		alreadyObserved, _ := ctx.Value(attemptFaultKey{}).(*attemptFault)
+		if alreadyObserved == nil || !alreadyObserved.observed.Load() {
+			r.Observe(ctx, component, operation, outcome, time.Since(started))
+		}
 		if span != nil {
+			if !r.beginSubmit(false) {
+				return
+			}
+			defer r.submitMu.RUnlock()
 			span.SetTag("outcome", outcome)
 			if outcome == "failed" {
 				span.Status = sentry.SpanStatusInternalError
 			} else if outcome == "canceled" {
 				span.Status = sentry.SpanStatusCanceled
+			} else if outcome == "rejected" {
+				span.Status = sentry.SpanStatusPermissionDenied
 			} else {
 				span.Status = sentry.SpanStatusOK
 			}
@@ -229,13 +261,15 @@ func (t ownedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	clone.Header.Set(supportref.Header, reference)
 	requestContext := supportref.WithContext(req.Context(), reference)
 	clone = clone.WithContext(requestContext)
-	if !r.Enabled() {
-		return t.base.RoundTrip(clone)
-	}
 	component := "paperboat-cli"
-	if value := r.component.Load(); value != nil {
-		component = *value
+	if r != nil {
+		if value := r.component.Load(); value != nil {
+			component = *value
+		}
 	}
+	observed := &attemptFault{}
+	observed.duration.Store(-1)
+	requestContext = context.WithValue(requestContext, attemptFaultKey{}, observed)
 	ctx, end := r.Start(requestContext, component, t.operation)
 	clone = clone.WithContext(ctx)
 	if ref := supportref.FromContext(ctx); ref != "" && clone.Header.Get(supportref.Header) == "" {
@@ -244,7 +278,19 @@ func (t ownedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if span := sentry.SpanFromContext(ctx); span != nil {
 		clone.Header.Set("sentry-trace", span.ToSentryTrace())
 	}
+	started := time.Now()
 	response, err := t.base.RoundTrip(clone)
+	if response == nil && err == nil {
+		err = errors.New("control transport returned no response")
+	}
+	if response != nil {
+		// Preserve the transport's recorded attempt context even when a custom
+		// RoundTripper omits Request or supplies a different one.
+		copy := *response
+		copy.Request = clone
+		response = &copy
+	}
+	observed.duration.Store(int64(time.Since(started)))
 	outcome := "success"
 	if err != nil {
 		outcome = "failed"
@@ -256,9 +302,29 @@ func (t ownedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	} else if response.StatusCode >= 400 {
 		outcome = "rejected"
 	}
+	if err != nil || response.StatusCode >= 400 {
+		observed.observed.Store(true)
+	}
+	if err != nil {
+		r.ObserveFailure(ctx, component, t.operation, "control_request", "control_request_failed", err)
+		err = recordedHTTPFailure(err)
+	} else if response.StatusCode >= 400 {
+		r.ObserveFailure(ctx, component, t.operation, "control_request", "control_request_failed", responseFault(response.StatusCode))
+	}
 	end(outcome)
 	return response, err
 }
+
+type attemptFaultKey struct{}
+type attemptFault struct {
+	observed atomic.Bool
+	duration atomic.Int64
+}
+
+type responseFault int
+
+func (f responseFault) Error() string         { return "control request rejected" }
+func (f responseFault) DiagnosticStatus() int { return int(f) }
 
 func cleanAttributes(in map[string]attribute.Value, metric bool) map[string]attribute.Value {
 	out := map[string]attribute.Value{}
@@ -273,8 +339,44 @@ func cleanAttributes(in map[string]attribute.Value, metric bool) map[string]attr
 			out[k] = attribute.StringValue(Operation(s))
 		case "outcome":
 			out[k] = attribute.StringValue(Outcome(s))
+		case "stage":
+			if !metric && faultStage(s) == s {
+				out[k] = v
+			}
+		case "cause":
+			if !metric && validCause(s) {
+				out[k] = v
+			}
+		case "error_type":
+			if !metric && validErrorType(s) {
+				out[k] = v
+			}
+		case "error_chain":
+			if !metric && validTypeChain(s) {
+				out[k] = v
+			}
+		case "errno":
+			if !metric && validErrno(s) {
+				out[k] = v
+			}
+		case "source_file":
+			if !metric && validSourceFile(s) {
+				out[k] = v
+			}
+		case "source_function":
+			if !metric && s != "" && safeSourceFunction(s) == s {
+				out[k] = v
+			}
+		case "source_line":
+			if !metric && validErrno(s) {
+				out[k] = v
+			}
+		case "http_status":
+			if !metric && validHTTPStatus(s) {
+				out[k] = v
+			}
 		case "service_component":
-			if !metric && serviceComponent(s) == s {
+			if !metric && ServiceComponent(s) == s {
 				out[k] = v
 			}
 		case "dimension":
@@ -282,7 +384,7 @@ func cleanAttributes(in map[string]attribute.Value, metric bool) map[string]attr
 				out[k] = v
 			}
 		case "code":
-			if !metric && (s == "operation_failed" || s == "operation_rejected" || s == "operation_canceled" || s == "operation_succeeded" || s == "state_changed" || lifecycleCode(s) == s) {
+			if !metric && (s == "operation_failed" || s == "operation_rejected" || s == "operation_canceled" || s == "operation_succeeded" || s == "state_changed" || lifecycleCode(s) == s || faultCode(s) == s) {
 				out[k] = v
 			}
 		case "sentry.release", "sentry.environment":
@@ -418,7 +520,7 @@ func safeSpanStatus(value any) sentry.SpanStatus {
 }
 func lifecycleCode(code string) string {
 	switch code {
-	case "ready", "stopped", "start_failed", "start_canceled", "start_deadline", "shutdown_failed", "shutdown_canceled", "shutdown_deadline", "rollback_failed", "rollback_canceled", "rollback_deadline", "route_state", "route_stale":
+	case "ready", "stopped", "recovered", "approval_pending", "identity_renewed", "start_failed", "start_canceled", "start_deadline", "shutdown_failed", "shutdown_canceled", "shutdown_deadline", "rollback_failed", "rollback_canceled", "rollback_deadline", "route_state", "route_stale":
 		return code
 	}
 	return "lifecycle_state"
@@ -451,18 +553,21 @@ func lifecycleDimension(value string) string {
 
 type lifecycleComponentKey struct{}
 
+// ServiceComponent returns a finite, payload-free runtime component label.
+func ServiceComponent(s string) string { return serviceComponent(s) }
+
 func serviceComponent(s string) string {
 	switch s {
-	case "storage", "file_transfer_cleanup", "inspector_retention", "authorization", "preview_recovery", "tunnel_enrollment", "peer_transport", "runtime_observation", "edge", "control_plane", "sessions", "config_sync", "protocol", "managed_ssh_authority", "tunnel_manager", "hosted_lifecycle", "worker_lifecycle":
+	case "storage", "file_transfer_cleanup", "inspector_retention", "authorization", "preview_recovery", "tunnel_enrollment", "peer_transport", "runtime_observation", "edge", "control_plane", "sessions", "config_sync", "protocol", "managed_ssh_authority", "tunnel_manager", "worker_lifecycle", "runtime_attachment":
 		return s
 	}
 	return "unknown"
 }
 func (r *Reporter) ServiceLifecycle(ctx context.Context, component, stage string, err error) {
-	if !r.Enabled() {
-		return
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	ctx = context.WithValue(ctx, lifecycleComponentKey{}, serviceComponent(component))
+	ctx = context.WithValue(ctx, lifecycleComponentKey{}, ServiceComponent(component))
 	prefix := "start"
 	if stage == "component_shutdown" {
 		prefix = "shutdown"
@@ -474,15 +579,21 @@ func (r *Reporter) ServiceLifecycle(ctx context.Context, component, stage string
 		code = "stopped"
 	}
 	if err != nil {
-		code = prefix + "_failed"
-		outcome = "failed"
-		if errors.Is(err, context.Canceled) {
-			code = prefix + "_canceled"
-			outcome = "canceled"
-		} else if errors.Is(err, context.DeadlineExceeded) {
-			code = prefix + "_deadline"
-			outcome = "canceled"
+		fault := ProjectFault(ctx, "paperboat-daemon", stage, stage, prefix+"_failed", err)
+		if r != nil && supportref.FromContext(ctx) == "" {
+			if reference := r.ambientReference.Load(); reference != nil {
+				fault.SupportReference = *reference
+			}
 		}
+		switch fault.Cause {
+		case "context_canceled":
+			fault.Code = prefix + "_canceled"
+		case "deadline_exceeded":
+			fault.Code = prefix + "_deadline"
+		}
+		r.captureFault(ctx, fault, true)
+		return
 	}
+
 	r.Lifecycle(ctx, "service", stage, code, outcome)
 }

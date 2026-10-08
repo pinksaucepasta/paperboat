@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/google/uuid"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -218,10 +220,17 @@ func TestTunnelReplayTransportFailurePreservesGeneratedRecoveryKey(t *testing.T)
 	})
 	wireInspectorTestClients(client)
 	output, err := runInspectorCommand(t, tunnelCobraCommandV1, "replay", "tun_01", "cap_01", "--route", "rte_01", "--json")
-	if err == nil || !strings.Contains(err.Error(), "--idempotency-key pb_replay_") {
+	var result struct {
+		IdempotencyKey string `json:"idempotency_key"`
+	}
+	if jsonErr := json.Unmarshal([]byte(output), &result); jsonErr != nil {
+		t.Fatal(jsonErr)
+	}
+	parsed, parseErr := uuid.Parse(strings.TrimPrefix(result.IdempotencyKey, "operation_"))
+	if err == nil || parseErr != nil || parsed.Version() != 4 || parsed.Variant() != uuid.RFC4122 || "operation_"+parsed.String() != result.IdempotencyKey || !strings.Contains(err.Error(), "--idempotency-key "+result.IdempotencyKey) {
 		t.Fatalf("missing recovery instruction: %v", err)
 	}
-	if !strings.Contains(output, `"idempotency_key":"pb_replay_`) || !strings.Contains(output, `"side_effects":"unknown"`) {
+	if !strings.Contains(output, `"side_effects":"unknown"`) {
 		t.Fatalf("missing machine recovery result: %q", output)
 	}
 	if hits.Load() != 1 {

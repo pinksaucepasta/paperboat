@@ -3,15 +3,34 @@ package configsync
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 )
+
+func TestSanitizedGitErrorKeepsCauseWithoutExposingIt(t *testing.T) {
+	cause := fmt.Errorf("private repository path /Users/alice/.ssh/config: %w", syscall.ENOSPC)
+	err := sanitizeGitError(cause)
+	if !errors.Is(err, ErrGitRepositoryInvalid) || !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("sanitized error lost classification or cause: %v", err)
+	}
+	if strings.Contains(err.Error(), "/Users/alice") {
+		t.Fatalf("sanitized error exposed a private path: %q", err)
+	}
+	fault := errorreport.ProjectFault(context.Background(), configSyncComponent, configSyncOperation, "reconciliation", configSyncFailureCode, err)
+	if fault.Errno != int(syscall.ENOSPC) || fault.Cause != "resource_exhausted" {
+		t.Fatalf("fault lost filesystem cause: %#v", fault)
+	}
+}
 
 type staticAccessSource struct{ access RepositoryAccess }
 
@@ -45,6 +64,8 @@ func (committingReconciler) Reconcile(_ context.Context, root string, remote Rem
 }
 
 func TestGitRepositoryFetchPublishAndObserve(t *testing.T) {
+	initRepositoryTransports()
+	t.Setenv("PATH", "")
 	root := t.TempDir()
 	barePath := filepath.Join(root, "remote.git")
 	if _, err := git.PlainInit(barePath, true); err != nil {
@@ -76,9 +97,9 @@ func TestGitRepositoryFetchPublishAndObserve(t *testing.T) {
 	repository, err := NewGitRepository(GitRepositoryConfig{
 		Root: checkout, Access: staticAccessSource{RepositoryAccess{
 			RepositoryID: "repository", AssignmentID: "assignment", EnvironmentID: "environment", MachineID: "helper",
-			CloneURL: barePath, PublishURL: barePath, Branch: "master", Username: "x-access-token",
-			Password: "must-never-be-persisted", Capability: "repository_contents_write",
-			ExpiresAt: time.Now().Add(time.Hour),
+			CloneURL: barePath, PublishURL: barePath, Branch: "master", Transport: "local",
+			Capability: "repository_contents_write",
+			ExpiresAt:  time.Now().Add(time.Hour),
 		}}, Reconciler: committingReconciler{},
 	})
 	if err != nil {
@@ -99,8 +120,8 @@ func TestGitRepositoryFetchPublishAndObserve(t *testing.T) {
 	readOnly, err := NewGitRepository(GitRepositoryConfig{
 		Root: checkout, Access: staticAccessSource{RepositoryAccess{
 			RepositoryID: "repository", AssignmentID: "assignment", EnvironmentID: "environment", MachineID: "helper",
-			CloneURL: barePath, PublishURL: barePath, Branch: "master", Username: "x-access-token",
-			Password: "read-token", Capability: "repository_contents_read", ExpiresAt: time.Now().Add(time.Hour),
+			CloneURL: barePath, PublishURL: barePath, Branch: "master", Transport: "local",
+			Capability: "repository_contents_read", ExpiresAt: time.Now().Add(time.Hour),
 		}}, Reconciler: committingReconciler{},
 	})
 	if err != nil {

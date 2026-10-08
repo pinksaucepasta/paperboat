@@ -104,6 +104,7 @@ func TestNativeCommitFailureRecoversWithoutRollback(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
 	calls := 0
+	f.candidate.SupervisorMaintenance = true
 	f.manager.config.ActivateRuntime = func(_ context.Context, version string) (hostdproto.Status, error) {
 		calls++
 		status := hostdproto.Status{State: hostdproto.StateActive, WorkerID: workerID(version), Epoch: 82, APIVersion: 1}

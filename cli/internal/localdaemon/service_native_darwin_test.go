@@ -61,7 +61,7 @@ func TestNativeDarwinInstalledCandidateLifecycle(t *testing.T) {
 	if err := store.SaveRegistration(identity.Registration{
 		ServerURL: cfg.ServerURL, MachineID: "machine_task22", EnvironmentID: "environment_task22",
 		PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()),
-		InboxPath: filepath.Join(home, "inbox"), InstallationGeneration: 1, SetupMode: "client", UpdatedAt: time.Now(),
+		InboxPath: filepath.Join(home, "inbox"), InstallationGeneration: 1, UpdatedAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)
 	}

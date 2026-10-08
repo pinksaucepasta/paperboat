@@ -13,7 +13,7 @@ pb-exec - Execute an exact command on a machine
 Execute an exact command on a machine
 
 .PP
-Run the exact argv after -- on the selected device, with optional working directory, environment entries, PTY, and timeout. Output and exit status come from the remote command; use --json for structured events.
+Run the exact argv after -- on the selected machine, with optional working directory, environment entries, PTY, and timeout. Output and exit status come from the remote command; use --json for structured events.
 
 .PP
 JSON output is supported with --json.
@@ -55,6 +55,10 @@ JSON output is supported with --json.
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

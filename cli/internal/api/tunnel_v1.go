@@ -19,12 +19,13 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 const TunnelV1Schema = "paperboat.preview-tunnel/v1"
 
-var tunnelEndpointUUIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+var tunnelEndpointUUIDPattern = regexp.MustCompile(`^endpoint_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
 var (
 	ErrUnsafeTunnelResponse = errors.New("paperboat-server returned an unsafe tunnel response")
@@ -88,6 +89,7 @@ type TunnelOriginInput struct {
 	HostOverride *string `json:"host_override,omitempty"`
 }
 type TunnelCreateInput struct {
+	Workspace  string            `json:"workspace,omitempty"`
 	Name       string            `json:"name"`
 	AccessMode string            `json:"access_mode,omitempty"`
 	Origin     TunnelOriginInput `json:"origin"`
@@ -381,7 +383,7 @@ type TunnelPrivateAccessAdmission struct {
 	Schema                               string    `json:"schema"`
 	Kind                                 string    `json:"kind"`
 	AccountID                            string    `json:"account_id"`
-	DeviceID                             string    `json:"device_id"`
+	MachineID                            string    `json:"machine_id"`
 	InstallationGeneration               uint64    `json:"installation_generation"`
 	AccessorPublicKey                    string    `json:"accessor_public_key"`
 	AccessorThumbprint                   string    `json:"accessor_thumbprint"`
@@ -765,8 +767,7 @@ func validateOperation(v *TunnelOperation, resourceKind, resourceID string) erro
 		if v.Error.Schema != TunnelV1Schema || v.Error.Kind != "error" || v.Error.Code == "" || len(v.Error.Code) > 128 || len(v.Error.Message) > 1000 || len(v.Error.RepairAction) > 500 || containsTunnelControl(v.Error.Code+v.Error.Component+v.Error.Outcome+v.Error.RequestID+v.Error.CorrelationID+v.Error.Message+v.Error.RepairAction) {
 			return ErrUnsafeTunnelResponse
 		}
-		v.Error.Message = redactTunnelText(v.Error.Message)
-		v.Error.RepairAction = redactTunnelText(v.Error.RepairAction)
+		projectOperationError(v.Error)
 	}
 	return nil
 }
@@ -813,7 +814,7 @@ func validateTunnel(v Tunnel) error {
 		return ErrUnsafeTunnelResponse
 	}
 	hostLabels := strings.Split(u.Hostname(), ".")
-	if !tunnelEndpointUUIDPattern.MatchString(v.StableEndpointID) || u.Scheme != "https" || len(hostLabels) < 2 || hostLabels[0] != v.StableEndpointID || u.User != nil || u.Port() != "" || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+	if !tunnelEndpointUUIDPattern.MatchString(v.StableEndpointID) || u.Scheme != "https" || len(hostLabels) < 2 || validateDomainHostname(u.Hostname()) != nil || u.Hostname() != strings.ToLower(u.Hostname()) || strings.Contains(u.Hostname(), "*") || net.ParseIP(u.Hostname()) != nil || u.User != nil || u.Port() != "" || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
 		return ErrUnsafeTunnelResponse
 	}
 	return nil
@@ -1115,6 +1116,11 @@ func (c *Client) doTunnelRequest(ctx context.Context, method, requestPath string
 	if requestPath == "" || !strings.HasPrefix(requestPath, "/v1/") || strings.ContainsAny(requestPath, "\x00\r\n") || strings.Contains(requestPath, "://") {
 		return errors.New("invalid tunnel API path")
 	}
+	var err error
+	requestPath, err = c.workspaceRequestPath(requestPath)
+	if err != nil {
+		return err
+	}
 	var encodedBody []byte
 	if body != nil {
 		var err error
@@ -1139,6 +1145,9 @@ func (c *Client) doTunnelRequest(ctx context.Context, method, requestPath string
 	req.Header.Set("X-Paperboat-Client", "paperboat")
 	req.Header.Set("X-Paperboat-Protocol", buildinfo.ProtocolVersion)
 	requestSupportReference := supportref.FromContext(ctx)
+	if requestSupportReference == "" {
+		requestSupportReference = supportref.New()
+	}
 	if requestSupportReference != "" {
 		req.Header.Set(supportref.Header, requestSupportReference)
 	}
@@ -1167,7 +1176,9 @@ func (c *Client) doTunnelRequest(ctx context.Context, method, requestPath string
 		if operationID == "" {
 			return errors.New("machine-authenticated mutation requires Idempotency-Key")
 		}
-		proof, proofErr := c.machineAuth.Proof(ctx, operationID, method, requestPath, encodedBody)
+		// Match the canonical route path used by the server verifier; the
+		// signed body carries workspace selection independently of the query.
+		proof, proofErr := c.machineAuth.Proof(ctx, operationID, method, req.URL.Path, encodedBody)
 		if proofErr != nil {
 			return fmt.Errorf("machine authentication proof: %w", proofErr)
 		}
@@ -1211,17 +1222,14 @@ func (c *Client) doTunnelRequest(ctx context.Context, method, requestPath string
 	var envelope tunnelWireEnvelope
 	if err := decodeTunnelJSONStrict(raw, &envelope); err != nil {
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return &APIError{Status: resp.StatusCode, Code: "invalid_server_response", Message: "paperboat-server returned an invalid error response", RequestID: responseRequestID(resp.Header), SupportReference: responseOrRequestSupportReference(resp.Header, "", requestSupportReference)}
+			return &APIError{Status: resp.StatusCode, Code: "invalid_server_response", Message: "paperboat-server returned an invalid error response", RequestID: responseRequestID(resp.Header), SupportReference: responseOrRequestSupportReference(resp.Header, "", requestSupportReference), cause: errors.Join(errorreport.HTTPStatusFailure(resp), &ResponseDecodeError{Err: err})}
 		}
-		return fmt.Errorf("decode %s %s response: %w", method, requestPath, err)
+		return &ResponseDecodeError{Err: err}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		if resp.StatusCode == http.StatusUpgradeRequired || envelope.Error.Code == "incompatible_client_version" {
 			required, _ := envelope.Error.Details["required_protocol"].(string)
-			return &ErrIncompatibleVersion{Required: required, Message: redactTunnelText(envelope.Error.Message)}
-		}
-		if resp.StatusCode == http.StatusUnauthorized {
-			return ErrUnauthenticated
+			return &ErrIncompatibleVersion{Required: safeRequiredProtocol(required), Message: apiErrorMessage("incompatible_client_version", resp.StatusCode)}
 		}
 		details, detailsErr := redactTunnelMetadata(envelope.Error.Details, 0)
 		if detailsErr != nil {
@@ -1231,13 +1239,13 @@ func (c *Client) doTunnelRequest(ctx context.Context, method, requestPath string
 		if code == "" {
 			code = "server_error"
 		}
-		return &APIError{Status: resp.StatusCode, Code: code, Message: redactTunnelText(envelope.Error.Message), RequestID: responseRequestID(resp.Header), SupportReference: responseOrRequestSupportReference(resp.Header, envelope.Error.SupportReference, requestSupportReference), Details: details}
+		return c.workspaceRequestError(requestPath, &APIError{Status: resp.StatusCode, Code: code, Message: apiErrorMessage(code, resp.StatusCode), RequestID: responseRequestID(resp.Header), SupportReference: responseOrRequestSupportReference(resp.Header, envelope.Error.SupportReference, requestSupportReference), Details: details, cause: errorreport.HTTPStatusFailure(resp)})
 	}
 	if out == nil {
 		return nil
 	}
 	if err := decodeTunnelData(envelope.Data, out); err != nil {
-		return fmt.Errorf("decode %s %s data: %w", method, requestPath, err)
+		return &ResponseDecodeError{Err: err}
 	}
 	return nil
 }
@@ -1249,7 +1257,10 @@ func responseOrRequestSupportReference(header http.Header, bodyReference, reques
 	if supportref.Valid(bodyReference) {
 		return bodyReference
 	}
-	return requestReference
+	if supportref.Valid(requestReference) {
+		return requestReference
+	}
+	return ""
 }
 
 func tunnelResponseKind(raw json.RawMessage) (string, error) {
@@ -1377,9 +1388,25 @@ func (m *TunnelConnectorMutation) UnmarshalJSON(raw []byte) error {
 }
 
 func (c *Client) ListTunnelsV1(ctx context.Context, cursor string, limit int) (TunnelPage, error) {
+	return c.ListTunnelsV1Filtered(ctx, cursor, limit, nil)
+}
+
+func (c *Client) ListTunnelsV1Filtered(ctx context.Context, cursor string, limit int, filters url.Values) (TunnelPage, error) {
 	q, e := pageQuery(cursor, limit)
 	if e != nil {
 		return TunnelPage{}, e
+	}
+	if len(filters) > 0 {
+		values, err := url.ParseQuery(strings.TrimPrefix(q, "?"))
+		if err != nil {
+			return TunnelPage{}, err
+		}
+		for _, key := range []string{"q", "state", "owner"} {
+			if value := filters.Get(key); value != "" {
+				values.Set(key, value)
+			}
+		}
+		q = "?" + values.Encode()
 	}
 	var out TunnelPage
 	e = c.doTunnelRequest(ctx, http.MethodGet, "/v1/tunnels"+q, nil, &out, nil, nil)
@@ -1418,6 +1445,9 @@ func (c *Client) GetTunnelV1(ctx context.Context, id string) (Tunnel, error) {
 	return out, e
 }
 func (c *Client) CreateTunnelV1(ctx context.Context, in TunnelCreateInput, key string) (TunnelMutation, error) {
+	if err := c.bindCreateWorkspace(&in.Workspace); err != nil {
+		return TunnelMutation{}, err
+	}
 	if err := validateTunnelCreateInput(in); err != nil {
 		return TunnelMutation{}, err
 	}
@@ -1449,7 +1479,7 @@ func (c *Client) CreateTunnelV1(ctx context.Context, in TunnelCreateInput, key s
 		}
 		resolved, fetchErr := c.GetTunnelV1(ctx, out.Operation.ResourceID)
 		if fetchErr != nil {
-			return out, fmt.Errorf("fetch tunnel after operation %s: %w", out.Operation.ID, fetchErr)
+			return out, fmt.Errorf("fetch tunnel after create operation: %w", fetchErr)
 		}
 		if resolved.ID != out.Operation.ResourceID {
 			return out, ErrUnsafeTunnelResponse
@@ -1520,7 +1550,10 @@ func (c *Client) tunnelMutation(ctx context.Context, method, id, action, etag, k
 		e = validateTunnel(out.Tunnel)
 	}
 	if e == nil && out.Operation.Schema != "" {
-		e = validateOperation(&out.Operation, "tunnel", out.Tunnel.ID)
+		e = validateOperation(&out.Operation, "tunnel", id)
+	}
+	if e == nil && out.Tunnel.Schema == "" && out.Operation.Schema != "" {
+		out.Tunnel, e = c.GetTunnelV1(ctx, id)
 	}
 	if e == nil && out.Tunnel.Schema == "" && out.Operation.Schema == "" {
 		e = ErrUnsafeTunnelResponse
@@ -1695,7 +1728,7 @@ func (c *Client) GetTunnelDomainV1(ctx context.Context, tunnel, id string) (Tunn
 	}
 	var out TunnelDomain
 	var h http.Header
-	e = c.doTunnelRequest(ctx, http.MethodGet, p, nil, &out, nil, &h)
+	e = c.doTunnelRequest(ctx, http.MethodGet, p, nil, &out, http.Header{"Accept-Encoding": []string{"identity"}}, &h)
 	if e == nil {
 		e = validateDomain(&out)
 	}
@@ -1759,6 +1792,9 @@ func (c *Client) domainMutation(ctx context.Context, method, path, etag, key str
 	}
 	if e == nil && out.Domain.Schema == "" && out.Operation.Schema == "" {
 		e = ErrUnsafeTunnelResponse
+	}
+	if e == nil && out.Domain.Schema == "" && out.Operation.Schema != "" && method != http.MethodDelete {
+		out.Domain, e = c.GetTunnelDomainV1(ctx, parts[0], out.Operation.ResourceID)
 	}
 	return out, e
 }
@@ -2155,7 +2191,7 @@ func validateTunnelPrivateAccessAdmission(v TunnelPrivateAccessAdmission) error 
 	if v.Schema != TunnelV1Schema || v.Kind != "private_access_carrier_admission" {
 		return ErrUnsafeTunnelResponse
 	}
-	for _, value := range []string{v.AccountID, v.DeviceID, v.ResourceID, v.CarrierSessionID, v.RouteID, v.AssignmentID, v.EdgeNodeID, v.TunnelID, v.CarrierConnectorID} {
+	for _, value := range []string{v.AccountID, v.MachineID, v.ResourceID, v.CarrierSessionID, v.RouteID, v.AssignmentID, v.EdgeNodeID, v.TunnelID, v.CarrierConnectorID} {
 		if !validTunnelID(value) {
 			return ErrUnsafeTunnelResponse
 		}

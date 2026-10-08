@@ -54,8 +54,8 @@ func (s ProfileStore) managedSSHIdentity(ref string, lock credentialLock) (ident
 	if err == nil {
 		return decodeManagedSSHIdentity(encoded)
 	}
-	if !errors.Is(err, ErrSecretNotFound) {
-		return ManagedSSHIdentity{}, fmt.Errorf("load managed SSH identity: %w", err)
+	if !credentialAbsenceOnly(err) {
+		return ManagedSSHIdentity{}, safeConfigCause("managed SSH identity could not be loaded", err)
 	}
 	_, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -72,7 +72,7 @@ func (s ProfileStore) managedSSHIdentity(ref string, lock credentialLock) (ident
 		return ManagedSSHIdentity{}, err
 	}
 	if err := s.Secrets.Set(ref, encoded); err != nil {
-		return ManagedSSHIdentity{}, fmt.Errorf("store managed SSH identity: %w", err)
+		return ManagedSSHIdentity{}, safeConfigCause("managed SSH identity could not be stored", err)
 	}
 	return identity, nil
 }
@@ -91,7 +91,7 @@ func (s ProfileStore) DeleteManagedSSHIdentity(issuer, cliClientSessionID string
 	}
 	defer func() { resultErr = errors.Join(resultErr, lock.Unlock()) }()
 	if err := s.Secrets.Delete(managedSSHSecretRef(issuer, cliClientSessionID)); err != nil {
-		return fmt.Errorf("delete managed SSH identity: %w", err)
+		return safeConfigCause("managed SSH identity could not be deleted", err)
 	}
 	return nil
 }
@@ -103,14 +103,17 @@ func decodeManagedSSHIdentity(encoded string) (ManagedSSHIdentity, error) {
 	}
 	private, err := ssh.ParseRawPrivateKey([]byte(encoded))
 	if err != nil {
-		return ManagedSSHIdentity{}, errors.New("managed SSH identity is invalid")
+		return ManagedSSHIdentity{}, safeConfigCause("managed SSH identity is invalid", err)
 	}
 	ed25519Private, ok := private.(*ed25519.PrivateKey)
 	if !ok || len(*ed25519Private) != ed25519.PrivateKeySize {
 		return ManagedSSHIdentity{}, errors.New("managed SSH identity is not Ed25519")
 	}
 	signer, err := ssh.NewSignerFromKey(*ed25519Private)
-	if err != nil || signer.PublicKey().Type() != ssh.KeyAlgoED25519 {
+	if err != nil {
+		return ManagedSSHIdentity{}, safeConfigCause("managed SSH identity is invalid", err)
+	}
+	if signer.PublicKey().Type() != ssh.KeyAlgoED25519 {
 		return ManagedSSHIdentity{}, errors.New("managed SSH identity is invalid")
 	}
 	public := signer.PublicKey()

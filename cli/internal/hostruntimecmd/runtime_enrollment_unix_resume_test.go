@@ -46,7 +46,7 @@ func TestUnixRuntimeEnrollmentResumesCrashBeforeCheckpointWithoutCredentialRepla
 	counting := &countingRuntimeEnrollmentClient{inner: client}
 	material := testClientBootstrapMaterial(server.URL, now.Add(time.Hour))
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-	record := bootstrap.NewResumeRecord(server.URL, publicKey, "token", "Laptop", "client", "verifier-012345678901234567890123456789", now.Add(time.Hour))
+	record := bootstrap.NewResumeRecord(server.URL, publicKey, "token", "Laptop", "verifier-012345678901234567890123456789", now.Add(time.Hour))
 	record.PairingStarted, record.Material = true, &material
 	if err := bootstrap.SaveResume(root, record); err != nil {
 		t.Fatal(err)
@@ -64,7 +64,7 @@ func TestUnixRuntimeEnrollmentResumesCrashBeforeCheckpointWithoutCredentialRepla
 	if !errors.As(err, &checkpointErr) || !errors.Is(err, crash) {
 		t.Fatalf("checkpoint error = %v", err)
 	}
-	reloaded, err := bootstrap.LoadResume(root, server.URL, publicKey, "", "Laptop", "client", now)
+	reloaded, err := bootstrap.LoadResume(root, server.URL, publicKey, "", "Laptop", now)
 	if err != nil || reloaded.RuntimeEnrolled {
 		t.Fatalf("journal after crash = %#v, err=%v", reloaded, err)
 	}
@@ -76,7 +76,7 @@ func TestUnixRuntimeEnrollmentResumesCrashBeforeCheckpointWithoutCredentialRepla
 	if err != nil {
 		t.Fatal(err)
 	}
-	reloaded, err = bootstrap.LoadResume(root, server.URL, publicKey, "", "Laptop", "client", now)
+	reloaded, err = bootstrap.LoadResume(root, server.URL, publicKey, "", "Laptop", now)
 	if err != nil || !reloaded.RuntimeEnrolled || path != artifactPath || counting.calls != 1 || enrollmentRequests != 1 {
 		t.Fatalf("journal=%#v path=%q client_calls=%d requests=%d err=%v", reloaded, path, counting.calls, enrollmentRequests, err)
 	}

@@ -8,7 +8,7 @@ Allow on-demand access to an exact machine port
 
 Authorize on-demand access to one machine port or URL with an exact access audience and optional expiry. --generation protects updates to an existing policy.
 
-An on-demand policy authorizes an exact machine port for private or team access. A policy does not publish a public URL or grant every port on the device. Revocation fences subsequent activation.
+An on-demand policy authorizes an exact machine port for private or team access. A policy does not publish a public URL or grant every port on the machine. Revocation fences subsequent activation.
 
 JSON output is supported with --json.
 
@@ -34,6 +34,7 @@ pb tunnel policy allow <machine> <port|url> [flags]
       --ephemeral          use the temporary preview lifecycle
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO

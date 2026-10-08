@@ -2,18 +2,18 @@
 .TH "PB-TAG" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-tag - Assign tags to a device over gRPC IPC
+pb-tag - Assign tags to a machine over gRPC IPC
 
 
 .SH SYNOPSIS
-\fBpb tag <device-id> <tag1> [tag2...] [flags]\fP
+\fBpb tag <machine-id> <tag1> [tag2...] [flags]\fP
 
 
 .SH DESCRIPTION
-Assign tags to a device over gRPC IPC
+Assign tags to a machine over gRPC IPC
 
 .PP
-Assign the supplied tags to an exact device ID through the local daemon. Tags aid device discovery and resolution; they do not grant access by themselves.
+Assign the supplied tags to an exact machine ID through the local daemon. Tags aid machine discovery and resolution; they do not grant access by themselves.
 
 .PP
 JSON output is supported with --json.
@@ -39,6 +39,10 @@ JSON output is supported with --json.
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

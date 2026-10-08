@@ -39,6 +39,7 @@ pb tunnel inspect <tunnel> [flags]
       --ephemeral          use the temporary preview lifecycle
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO

@@ -269,7 +269,7 @@ def validate_target(name, target):
     plan_bytes = (json.dumps(deployment_plan, separators=(",", ":"), ensure_ascii=True) + "\n").encode()
     if hashlib.sha256(plan_bytes).hexdigest() != deployment_plan_sha256:
         raise SystemExit(f"TUF release index deployment-plan digest does not match for {name}")
-    return target_version_parts, repository
+    return target_version_parts, target_version, repository, url, digest, length
 
 def require_equal(actual, wanted, message):
     if type(actual) is not type(wanted) or actual != wanted:
@@ -285,13 +285,15 @@ requested_version_parts = version_parts(version, "candidate")
 candidate_repositories = set()
 live_repositories = set()
 selected = []
+candidate_product_pins = {}
 for name in expected:
-    live_version, live_repository = validate_target(name, live_targets[name])
-    candidate_version, candidate_repository = validate_target(name, candidate_targets[name])
+    live_version_parts, _, live_repository, _, _, _ = validate_target(name, live_targets[name])
+    candidate_version_parts, candidate_version, candidate_repository, url, digest, length = validate_target(name, candidate_targets[name])
+    candidate_product_pins[name] = (candidate_version, url, digest, length)
     live_repositories.add(live_repository)
     candidate_repositories.add(candidate_repository)
-    if candidate_version == requested_version_parts:
-        if compare_versions(candidate_version, live_version) <= 0:
+    if candidate_version_parts == requested_version_parts:
+        if compare_versions(candidate_version_parts, live_version_parts) <= 0:
             raise SystemExit(f"selected TUF target version does not advance the live target for {name}")
         selected.append(name)
     elif candidate_targets[name] != live_targets[name]:
@@ -301,16 +303,87 @@ if len(selected) == 0:
     raise SystemExit("TUF targets metadata does not select any target at the requested release version")
 if len(live_repositories) != 1 or len(candidate_repositories) != 1 or live_repositories != candidate_repositories:
     raise SystemExit("TUF targets disagree on the immutable GitHub repository")
-release_repository = next(iter(candidate_repositories))
 
 root = targets_path.parent.parent.parent
-for script, version_pin, repository_pin in (
-    ("install", f"bootstrap_version='{version}'", f"repository=${{PAPERBOAT_GITHUB_REPOSITORY:-{release_repository}}}"),
-    ("windows", f"$bootstrapVersion = '{version}'", f"else {{ '{release_repository}' }}"),
+def read_installer(name):
+    try:
+        body = (root / name).read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise SystemExit(f"{name} installer is unavailable or invalid: {error}")
+    old_markers = ("pb-bootstrap", "paperboat_bootstrap_", "bootstrap_version", "$bootstrapversion", "paperboat_github_repository", "verifier")
+    if re.search(r"@PAPERBOAT_[A-Z0-9_]+@", body) or any(marker in body.lower() for marker in old_markers):
+        raise SystemExit(f"{name} installer contains an unresolved pin or removed verifier reference")
+    return body
+
+def shell_product_branches(body):
+    branch_names = ("linux-amd64", "linux-arm64", "darwin-arm64")
+    matches = list(re.finditer(r"(?m)^[ \t]*(linux-amd64|linux-arm64|darwin-arm64)\)[ \t]*$", body))
+    if tuple(match.group(1) for match in matches) != branch_names:
+        raise SystemExit("shell installer product branches are missing, duplicated, or reordered")
+    branches = {}
+    for index, match in enumerate(matches):
+        if index + 1 < len(matches):
+            end = matches[index + 1].start()
+        else:
+            default_branch = re.search(r"(?m)^[ \t]*\*\)", body[match.end():])
+            if default_branch is None:
+                raise SystemExit("shell installer default platform branch is missing")
+            end = match.end() + default_branch.start()
+        branches[match.group(1)] = body[match.start():end]
+    return branches
+
+def windows_product_branches(body):
+    start_matches = list(re.finditer(r"(?m)^if \(\$arch -eq 'amd64'\) \{[ \t]*$", body))
+    if len(start_matches) != 1:
+        raise SystemExit("Windows installer architecture branches are missing or ambiguous")
+    else_match = re.search(r"(?m)^\} else \{[ \t]*$", body[start_matches[0].end():])
+    if else_match is None:
+        raise SystemExit("Windows installer ARM64 branch is missing")
+    else_start = start_matches[0].end() + else_match.start()
+    else_end = start_matches[0].end() + else_match.end()
+    end_match = re.search(r"(?m)^\}[ \t]*$", body[else_end:])
+    if end_match is None:
+        raise SystemExit("Windows installer ARM64 branch is unterminated")
+    arm_end = else_end + end_match.start()
+    return {
+        "amd64": body[start_matches[0].end():else_start],
+        "arm64": body[else_end:arm_end],
+    }
+
+def require_product_pins(branch, name, pin, powershell):
+    version, url, digest, length = pin
+    fields = (
+        ("version", "$productVersion" if powershell else "product_version", version),
+        ("URL", "$productUrl" if powershell else "product_url", url),
+        ("SHA-256", "$productSha" if powershell else "product_sha", digest),
+        ("length", "$productLength" if powershell else "product_length", str(length)),
+    )
+    for field, variable, value in fields:
+        variable_pattern = re.escape(variable)
+        if powershell:
+            pattern = re.compile(rf"(?m)^[ \t]*{variable_pattern}[ \t]*=[ \t]*'([^']*)'[ \t]*$")
+        else:
+            pattern = re.compile(rf"(?m)^[ \t]*{variable_pattern}='([^']*)'[ \t]*(?:;;)?[ \t]*$")
+        matches = pattern.findall(branch)
+        if len(matches) != 1 or matches[0] != value:
+            raise SystemExit(f"installer product pin mismatch for {name}: {field}")
+
+install_body = read_installer("install")
+install_branches = shell_product_branches(install_body)
+for name, branch_name in (
+    ("pb-linux-amd64", "linux-amd64"),
+    ("pb-linux-arm64", "linux-arm64"),
+    ("pb-darwin-arm64.pkg", "darwin-arm64"),
 ):
-    body = (root / script).read_text(encoding="utf-8")
-    if version_pin not in body or repository_pin not in body or "@PAPERBOAT_BOOTSTRAP_" in body:
-        raise SystemExit(f"{script} verifier pins do not match the signed release")
+    require_product_pins(install_branches[branch_name], name, candidate_product_pins[name], False)
+
+windows_body = read_installer("windows")
+windows_branches = windows_product_branches(windows_body)
+for name, architecture in (
+    ("pb-windows-amd64.exe", "amd64"),
+    ("pb-windows-arm64.exe", "arm64"),
+):
+    require_product_pins(windows_branches[architecture], name, candidate_product_pins[name], True)
 PY
 
 for required in install windows tuf/metadata/root.json tuf/metadata/targets.json tuf/metadata/snapshot.json tuf/metadata/timestamp.json; do
@@ -323,12 +396,102 @@ for directory in "$next/tuf/metadata" "$next/tuf/targets"; do
 done
 [[ -z "$(find "$next/tuf/targets" -mindepth 1 -print -quit)" ]] || { echo "release bundle must not contain TUF target blobs" >&2; exit 1; }
 
+# Selfhost has a separate release owner. Carry its existing public distribution
+# through this CLI metadata/installer transaction instead of deleting its routes.
+python3 - "$live/selfhost" "$next/selfhost" <<'PY'
+import os
+import pathlib
+import re
+import stat
+import sys
+
+source, destination = map(pathlib.Path, sys.argv[1:])
+if not source.exists() and not source.is_symlink():
+    raise SystemExit(0)
+files = []
+total = 0
+
+def reject(message):
+    raise SystemExit("live selfhost distribution is unsafe: " + message)
+
+def directory(path):
+    if not stat.S_ISDIR(path.lstat().st_mode):
+        reject("non-directory or symlink")
+
+def regular(path, limit):
+    global total
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= limit:
+        reject("non-regular, empty, or oversized file")
+    total += info.st_size
+    if total > 2 << 30:
+        reject("distribution exceeds 2 GiB preservation bound")
+    files.append((path, info))
+
+directory(source)
+entries = {p.name for p in source.iterdir()}
+if not {"install", "manifest.json"} <= entries or entries - {"install", "manifest.json", "versions"}:
+    reject("unexpected top-level entry")
+regular(source / "install", 1 << 20)
+regular(source / "manifest.json", 64 << 10)
+versions = source / "versions"
+releases = []
+if "versions" in entries:
+    directory(versions)
+    releases = list(versions.iterdir())
+if len(releases) > 32:
+    reject("version count exceeds preservation bound")
+for release in releases:
+    if re.fullmatch(r"[0-9.]{1,128}", release.name) is None:
+        reject("unexpected version path")
+    directory(release)
+    entries = list(release.iterdir())
+    packages = 0
+    for entry in entries:
+        if entry.name in {"paperboat-selfhost-linux-amd64.tar.gz", "paperboat-selfhost-linux-arm64.tar.gz"}:
+            regular(entry, 512 << 20)
+            packages += 1
+        elif entry.name == "install":
+            regular(entry, 1 << 20)
+        elif entry.name == "manifest.json":
+            regular(entry, 64 << 10)
+        else:
+            reject("unexpected version entry")
+    if packages == 0:
+        reject("version has no package")
+
+# Validate before copying; O_NOFOLLOW and a stable open-file identity also
+# prevent a file replacement from being followed during the copy.
+for path, expected in files:
+    target = destination / path.relative_to(source)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as input_file:
+        actual = os.fstat(input_file.fileno())
+        if not stat.S_ISREG(actual.st_mode) or (actual.st_dev, actual.st_ino, actual.st_size, actual.st_mtime_ns) != (expected.st_dev, expected.st_ino, expected.st_size, expected.st_mtime_ns):
+            reject("file changed before preservation")
+        with target.open("xb") as output_file:
+            remaining = actual.st_size
+            while remaining:
+                block = input_file.read(min(remaining, 1 << 20))
+                if not block:
+                    reject("file truncated during preservation")
+                output_file.write(block)
+                remaining -= len(block)
+            if input_file.read(1):
+                reject("file grew during preservation")
+        after = os.fstat(input_file.fileno())
+        if (after.st_size, after.st_mtime_ns) != (actual.st_size, actual.st_mtime_ns) or target.stat().st_size != actual.st_size:
+            reject("file changed during preservation")
+    target.chmod(stat.S_IMODE(expected.st_mode) & 0o755)
+PY
+
 chown -R 501:root "$next"
 chmod 0700 "$next"
 verify_live_mount_contract "$release_root"
 
 # This must remain the final command. The server resolves current through the
 # releases-parent mount on every request, so the exchange exposes TUF,
-# installers together. The old tree stays in transaction/next
+# installers and the preserved selfhost distribution together. The old tree stays in transaction/next
 # until a later release performs its pre-activation cleanup.
 atomic_exchange "$live" "$next"

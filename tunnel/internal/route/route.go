@@ -2,7 +2,7 @@ package route
 
 import (
 	"context"
-	"regexp"
+	"net"
 	"sort"
 	"strings"
 	"sync"
@@ -88,32 +88,39 @@ func normalizeHost(host string) string {
 	return strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
 }
 
-var opaqueTunnelEndpointLabelPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
-
-// ValidManagedTunnelHostname accepts only the server-owned managed endpoint
-// form: one canonical lowercase UUID label directly below the configured
-// tunnel base domain. Custom domains are validated by their route/domain
-// ownership records and must not use this predicate.
+// ValidManagedTunnelHostname requires one canonical DNS label directly below
+// the configured tunnel domain. Allocation and route ownership are established
+// by the control plane; readable hostnames are independent from endpoint IDs.
 func ValidManagedTunnelHostname(host, baseDomain string) bool {
-	host = strings.TrimSpace(host)
 	baseDomain = normalizeHost(baseDomain)
-	if host == "" || host != normalizeHost(host) || baseDomain == "" {
+	if !ValidTunnelHostname(host) || baseDomain == "" {
 		return false
 	}
 	prefix, matches := strings.CutSuffix(host, "."+baseDomain)
-	return matches && opaqueTunnelEndpointLabelPattern.MatchString(prefix) && !strings.Contains(prefix, ".")
+	return matches && prefix != "" && !strings.Contains(prefix, ".")
 }
 
-// ValidOpaqueTunnelHostname verifies the immutable endpoint shape without
-// binding it to a deployment's base domain. It is used when validating a
-// control assignment before the deployment domain is available at that layer.
-func ValidOpaqueTunnelHostname(host string) bool {
-	host = strings.TrimSpace(host)
-	if host == "" || host != normalizeHost(host) {
+// ValidTunnelHostname validates DNS syntax when the deployment domain is not
+// available. The serving boundary also checks the configured managed domain.
+func ValidTunnelHostname(host string) bool {
+	if host == "" || host != normalizeHost(host) || len(host) > 253 || net.ParseIP(host) != nil {
 		return false
 	}
 	labels := strings.Split(host, ".")
-	return len(labels) >= 2 && opaqueTunnelEndpointLabelPattern.MatchString(labels[0])
+	if len(labels) < 2 {
+		return false
+	}
+	for _, label := range labels {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, c := range label {
+			if c != '-' && (c < 'a' || c > 'z') && (c < '0' || c > '9') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (r *Registry) Attach(a Attachment) (Attachment, error) {

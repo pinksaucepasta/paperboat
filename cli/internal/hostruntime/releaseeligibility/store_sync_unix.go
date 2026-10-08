@@ -2,7 +2,10 @@
 
 package releaseeligibility
 
-import "os"
+import (
+	"errors"
+	"os"
+)
 
 func syncDirectory(path string) error {
 	directory, err := os.Open(path)
@@ -11,8 +14,5 @@ func syncDirectory(path string) error {
 	}
 	syncErr := directory.Sync()
 	closeErr := directory.Close()
-	if syncErr != nil {
-		return syncErr
-	}
-	return closeErr
+	return errors.Join(syncErr, closeErr)
 }

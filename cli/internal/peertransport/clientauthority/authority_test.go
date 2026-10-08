@@ -60,7 +60,7 @@ func TestResolveBindsLocalCustodyAndRemoteCertificateToOneRoot(t *testing.T) {
 	machineRaw, _ := machine.MarshalBinary()
 	machineFingerprint := sha256.Sum256(machineRaw)
 	rootPublic := keys.RootPrivate.Public().(ed25519.PublicKey)
-	if err := store.SavePeerDeviceSigningPublic(issuer, accountID, rootPublic); err != nil {
+	if err := store.SavePeerMachineSigningPublic(issuer, accountID, rootPublic); err != nil {
 		t.Fatal(err)
 	}
 	rootFingerprint := sha256.Sum256(rootPublic)
@@ -92,6 +92,51 @@ func TestResolveBindsLocalCustodyAndRemoteCertificateToOneRoot(t *testing.T) {
 	}
 }
 
+func TestResolveFailurePreservesSentinelAndHasStaticAuthorityClassification(t *testing.T) {
+	_, err := Resolve(context.Background(), Request{})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("resolution error=%v", err)
+	}
+	var staged interface{ DiagnosticStage() string }
+	var coded interface{ DiagnosticCode() string }
+	if !errors.As(err, &staged) || staged.DiagnosticStage() != "peer_authority" ||
+		!errors.As(err, &coded) || coded.DiagnosticCode() != "peer_authority_failed" {
+		t.Fatalf("resolution classification missing: %T %v", err, err)
+	}
+	if got := err.Error(); got != "peer authority resolution failed" {
+		t.Fatalf("resolution error text=%q", got)
+	}
+}
+
+func TestClassifyResolutionFailurePreservesCustomCancellationCauseAndStatus(t *testing.T) {
+	cause := errors.New("caller stopped peer authority resolution")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(cause)
+	err := classifyResolutionFailure(ctx, errors.New("private authority response"))
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, cause) {
+		t.Fatalf("cancellation status or cause lost: %v", err)
+	}
+	var staged interface{ DiagnosticStage() string }
+	if errors.As(err, &staged) {
+		t.Fatalf("canceled authority operation gained a diagnostic phase: %T %v", err, err)
+	}
+}
+
+func TestClassifyResolutionDeadlineKeepsAuthorityPhaseAndCause(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	cause := errors.New("private authority response")
+	err := classifyResolutionFailure(ctx, cause)
+	if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, cause) {
+		t.Fatalf("deadline or authority cause lost: %v", err)
+	}
+	var staged interface{ DiagnosticStage() string }
+	var coded interface{ DiagnosticCode() string }
+	if !errors.As(err, &staged) || staged.DiagnosticStage() != "peer_authority" || !errors.As(err, &coded) || coded.DiagnosticCode() != "peer_authority_failed" {
+		t.Fatalf("authority deadline classification=%T %v", err, err)
+	}
+}
+
 func TestResolveUsesVerifierOnlyRootWithoutCreatingPrivateCustody(t *testing.T) {
 	root := t.TempDir()
 	store := config.ProfileStore{Path: root, Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}}
@@ -100,7 +145,7 @@ func TestResolveUsesVerifierOnlyRootWithoutCreatingPrivateCustody(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SavePeerDeviceSigningPublic(issuer, accountID, rootPublic); err != nil {
+	if err := store.SavePeerMachineSigningPublic(issuer, accountID, rootPublic); err != nil {
 		t.Fatal(err)
 	}
 	keys, err := store.PeerEndpointKeys(issuer, accountID, cliID)

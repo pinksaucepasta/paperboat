@@ -2,11 +2,15 @@
 
 package processlifetime
 
-import "golang.org/x/sys/unix"
+import (
+	"context"
+
+	"golang.org/x/sys/unix"
+)
 
 // ArmParentDeath asks the kernel to terminate this process when its current
 // parent exits. The second parent check closes the fork-to-prctl race.
-func ArmParentDeath() error {
+func ArmParentDeath(_ context.Context) error {
 	parent := unix.Getppid()
 	if parent <= 1 {
 		return ErrParentUnavailable

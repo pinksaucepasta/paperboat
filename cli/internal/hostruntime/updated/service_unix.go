@@ -28,6 +28,20 @@ import (
 
 var ErrInvalidConfig = errors.New("invalid paperboat-updated configuration")
 
+// activationFailure retains the original error identity while exposing only a
+// finite local diagnostic reason. Error text never formats the wrapped cause.
+type activationFailure struct {
+	phase, reason string
+	cause         error
+}
+
+func (e *activationFailure) Error() string { return "update " + e.phase + " failed: " + e.reason }
+func (e *activationFailure) Unwrap() error { return e.cause }
+
+func healthFailure(reason string, cause error) error {
+	return &activationFailure{phase: "health", reason: reason, cause: cause}
+}
+
 type Config struct {
 	AutomaticUpdates     bool
 	StateRoot            string
@@ -83,9 +97,22 @@ func New(config Config) (*Service, error) {
 			return nil, err
 		}
 	}
-	client, err := hostdproto.NewClient(config.SocketPath, config.Token, 5*time.Second)
+	client, err := hostdproto.NewClient(config.SocketPath, config.Token, 35*time.Second)
 	if err != nil {
 		return nil, err
+	}
+	if config.ActivationGate == nil {
+		// Stability checks can span the signed policy's full 30-minute window.
+		// The request context bounds the check; short control RPC deadlines must
+		// not truncate it and roll back an otherwise healthy installation.
+		gateClient, clientErr := hostdproto.NewClient(config.SocketPath, config.Token, 31*time.Minute)
+		if clientErr != nil {
+			return nil, clientErr
+		}
+		config.ActivationGate, err = workerupdate.NewDeploymentActivationGate(workerupdate.DeploymentActivationGateConfig{Provider: workerupdate.HostdDeploymentProvider{Client: gateClient}})
+		if err != nil {
+			return nil, err
+		}
 	}
 	deferral, err := releaseeligibility.NewFileStore(filepath.Join(config.StateRoot, "deferral.json"))
 	if err != nil {
@@ -94,6 +121,11 @@ func New(config Config) (*Service, error) {
 	source := workerupdate.TUFSource{RepositoryURL: config.RepositoryURL, StateRoot: filepath.Join(config.StateRoot, "tuf"), MachineID: config.MachineID, FailureDomain: workerupdate.HostdFailureDomainSource{Client: client, MachineID: config.MachineID}, Deferral: deferral}
 	service := &Service{source: source, config: config, managerConfig: workerupdate.Config{StatePath: filepath.Join(config.StateRoot, "transaction.json"), Binary: config.Binary, BinaryRollback: config.BinaryRollback, BinaryStaged: config.BinaryStaged, Active: config.Active, OwnerUID: 0, OwnerGID: 0, WorkerUID: config.WorkerUID, WorkerGID: config.WorkerGID, HostdEndpoint: config.SocketPath, Capability: config.Token, Fetcher: source, Hostd: client, Health: config.Health, Gate: config.ActivationGate, Events: config.Events, MonitorWindow: 10 * time.Minute, HealthInterval: time.Second}}
 	service.managerConfig.ActivateRuntime = service.activateRuntime
+	service.managerConfig.Starter = workerupdate.OwnerStarter{Client: client}
+	service.managerConfig.AuthorizeOwnerMaintenance = func(ctx context.Context, release workerupdate.Release, manual bool) error {
+		return authorizeOwnerMaintenance(ctx, config.StateRoot, client, release, manual)
+	}
+	service.managerConfig.AbortOwnerMaintenance = client.AbortMaintenance
 	service.managerConfig.CommitRuntime = func(ctx context.Context, release workerupdate.Release) error {
 		if err := verifyUnixExecutable(service.config.Binary, release); err != nil {
 			return err
@@ -104,19 +136,22 @@ func New(config Config) (*Service, error) {
 			}
 		}
 		if service.config.RefreshManuals != nil {
-			return service.config.RefreshManuals(ctx)
+			if err := service.config.RefreshManuals(ctx); err != nil {
+				return err
+			}
 		}
-		return nil
+		return autoupdate.ClearOwnerMaintenance(filepath.Join(config.StateRoot, "owner-maintenance.json"))
 	}
 	manager, err := service.newManager(config.Active)
 	if err != nil {
 		return nil, err
 	}
 	service.manager = manager
-	scheduler, err := autoupdate.New(autoupdate.Config{Check: func(ctx context.Context) (autoupdate.Result, error) {
-		workerResult, workerErr := resolveRelease(ctx, service.currentManager().ActiveVersion(), service.source.Resolve)
-		return autoupdate.Result{Version: workerResult.Version, Updated: workerResult.Updated}, workerErr
-	}})
+	scheduler, err := autoupdate.New(autoupdate.Config{Check: service.automaticCheck,
+		NextCheck: func(now, next time.Time) time.Time {
+			return nextMachineUpdateCheck(config.StateRoot, config.AutomaticUpdates, now, next)
+		},
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -286,15 +321,15 @@ serveControl:
 			return err
 		}
 	}
-	if !s.config.AutomaticUpdates {
-		<-ctx.Done()
-		return ctx.Err()
-	}
 	return s.scheduler.Run(ctx)
 }
 
 // Download prepares the signed candidate without launching it or stopping services.
 func (s *Service) Download(ctx context.Context) (workerupdate.PreparedCandidate, error) {
+	return s.downloadWithResolver(ctx, s.source.ResolveManual)
+}
+
+func (s *Service) downloadWithResolver(ctx context.Context, resolve workerupdate.Resolver) (workerupdate.PreparedCandidate, error) {
 	if s == nil || s.currentManager() == nil {
 		return workerupdate.PreparedCandidate{}, ErrInvalidConfig
 	}
@@ -309,7 +344,7 @@ func (s *Service) Download(ctx context.Context) (workerupdate.PreparedCandidate,
 	if err = s.refreshManager(); err != nil {
 		return workerupdate.PreparedCandidate{}, err
 	}
-	release, found, err := s.source.ResolveManual(ctx)
+	release, found, err := resolve(ctx)
 	if err != nil || !found {
 		return workerupdate.PreparedCandidate{}, err
 	}
@@ -371,12 +406,18 @@ type HTTPHealth struct {
 }
 
 func (h HTTPHealth) Check(ctx context.Context, status hostdproto.Status, _ workerupdate.Release) error {
-	if status.State != hostdproto.StateActive || status.WorkerID == "" || status.Epoch == 0 || status.LastHeartbeatUnixMilli == 0 || time.Since(time.UnixMilli(status.LastHeartbeatUnixMilli)) > 15*time.Second {
-		return ErrInvalidConfig
+	if status.State != hostdproto.StateActive || status.WorkerID == "" || status.Epoch == 0 {
+		return healthFailure("owner_identity", ErrInvalidConfig)
+	}
+	if status.LastHeartbeatUnixMilli == 0 {
+		return healthFailure("heartbeat_missing", ErrInvalidConfig)
+	}
+	if time.Since(time.UnixMilli(status.LastHeartbeatUnixMilli)) > 15*time.Second {
+		return healthFailure("heartbeat_stale", ErrInvalidConfig)
 	}
 	parsed, err := url.Parse(h.Endpoint)
 	if err != nil || parsed.Scheme != "http" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path != "/healthz" || net.ParseIP(parsed.Hostname()) == nil || !net.ParseIP(parsed.Hostname()).IsLoopback() {
-		return ErrInvalidConfig
+		return healthFailure("endpoint_invalid", ErrInvalidConfig)
 	}
 	client := h.Client
 	if client == nil {
@@ -384,18 +425,27 @@ func (h HTTPHealth) Check(ctx context.Context, status hostdproto.Status, _ worke
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.Endpoint, nil)
 	if err != nil {
-		return err
+		return healthFailure("request_invalid", err)
 	}
 	response, err := client.Do(req)
 	if err != nil {
-		return err
+		return healthFailure("transport", err)
 	}
 	defer response.Body.Close()
 	var body struct {
 		Live bool `json:"live"`
 	}
-	if response.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(response.Body, 8<<10)).Decode(&body) != nil || !body.Live {
-		return ErrInvalidConfig
+	if response.StatusCode >= 300 && response.StatusCode < 400 {
+		return healthFailure("http_redirect", ErrInvalidConfig)
+	}
+	if response.StatusCode != http.StatusOK {
+		return healthFailure("http_status", ErrInvalidConfig)
+	}
+	if json.NewDecoder(io.LimitReader(response.Body, 8<<10)).Decode(&body) != nil {
+		return healthFailure("http_body", ErrInvalidConfig)
+	}
+	if !body.Live {
+		return healthFailure("http_not_live", ErrInvalidConfig)
 	}
 	return nil
 }

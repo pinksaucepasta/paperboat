@@ -4,7 +4,6 @@ package networkmonitor
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"sort"
 	"strings"
@@ -39,7 +38,7 @@ func SystemDNSFingerprint(ctx context.Context) ([32]byte, error) {
 			break
 		}
 		if errorCode != windows.ERROR_BUFFER_OVERFLOW {
-			return [32]byte{}, fmt.Errorf("%w: GetAdaptersAddresses: %v", ErrDNSUnavailable, errorCode)
+			return [32]byte{}, dnsUnavailable("adapter address query", errorCode)
 		}
 		if attempt == 2 {
 			return [32]byte{}, ErrDNSUnavailable

@@ -3,9 +3,9 @@ package localdaemon
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/api"
-	"net"
 	"strconv"
+
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 )
 
 type inventorySourceError struct {
@@ -37,27 +37,31 @@ func inventoryRefreshDiagnostic(err error) (string, map[string]string) {
 		fields["phase"] = source.stage
 	}
 	reason := "source_error"
-	var response *api.APIError
-	var network net.Error
+	fault := errorreport.ProjectFault(context.Background(), "paperboatd", "machine_control", "reconciliation", "control_request_failed", err)
 	switch {
-	case errors.Is(err, context.Canceled):
+	case fault.Outcome == "canceled":
 		reason = "canceled"
-	case errors.Is(err, context.DeadlineExceeded):
+	case fault.Cause == "deadline_exceeded":
 		reason = "deadline"
-	case errors.Is(err, api.ErrUnauthenticated):
+	case inventoryAuthenticationRequired(err):
 		reason = "unauthenticated"
-	case errors.As(err, &response):
-		if response.Status >= 100 && response.Status <= 599 {
-			reason = "http_" + strconv.Itoa(response.Status)
-		} else {
-			reason = "http_invalid_status"
-		}
-	case errors.As(err, &network):
-		reason = "network"
-		if network.Timeout() {
-			reason = "network_timeout"
-		}
+	case fault.HTTPStatus >= 400 && fault.HTTPStatus <= 599 && fault.Errno == 0 && fault.Cause != "internal" && fault.Cause != "network_timeout":
+		reason = "http_" + strconv.Itoa(fault.HTTPStatus)
+	case fault.Cause != "internal":
+		reason = fault.Cause
 	}
 	fields["reason"] = reason
 	return "warning", fields
 }
+
+func (e *inventorySourceError) DiagnosticStage() string {
+	switch e.stage {
+	case "credential", "peer_approval", "peer_signer", "peer_root", "peer_approve":
+		return "peer_authority"
+	case "configuration", "machine_alias", "completion_projection":
+		return "reconciliation"
+	default:
+		return "control_request"
+	}
+}
+func (*inventorySourceError) DiagnosticCode() string { return "control_request_failed" }

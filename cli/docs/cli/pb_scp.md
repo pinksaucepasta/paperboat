@@ -6,7 +6,7 @@ Run scp with Paperboat machine resolution
 
 Run scp with Paperboat machine resolution
 
-Run standard scp with Paperboat device-name resolution and authorized connectivity. Source and destination syntax remains OpenSSH-compatible; host identity checks still apply.
+Run standard scp with Paperboat machine-name resolution and authorized connectivity. Source and destination syntax remains OpenSSH-compatible; host identity checks still apply.
 
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
 
@@ -27,6 +27,7 @@ pb scp <standard scp arguments...> [flags]
       --json               print machine-readable JSON
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO

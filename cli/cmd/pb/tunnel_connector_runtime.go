@@ -40,7 +40,7 @@ func runProductionTunnelConnectorAdd(command *cobra.Command, tunnelID string) er
 	if err != nil {
 		return err
 	}
-	projection, err := client.Enroll(command.Context(), tunnelID, "connector-add-"+strings.TrimPrefix(key, "pb_tunnel_"))
+	projection, err := client.Enroll(command.Context(), tunnelID, key)
 	if err != nil {
 		return err
 	}

@@ -53,14 +53,34 @@ type Authority struct {
 }
 
 func Resolve(ctx context.Context, request Request) (Authority, error) {
-	return resolve(ctx, request, false)
+	result, err := resolve(ctx, request, false)
+	return result, classifyResolutionFailure(ctx, err)
 }
 
 // ResolveLocal loads only the authenticated CLI identity. Native networking
 // authenticates remote peers using server-signed key bindings, including
 // inspector grants to another account's daemon.
 func ResolveLocal(ctx context.Context, request Request) (Authority, error) {
-	return resolve(ctx, request, true)
+	result, err := resolve(ctx, request, true)
+	return result, classifyResolutionFailure(ctx, err)
+}
+
+func classifyResolutionFailure(ctx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	if ctx != nil && ctx.Err() != nil {
+		cause := context.Cause(ctx)
+		contextErr := cause
+		if cause == nil || !errors.Is(cause, ctx.Err()) {
+			contextErr = errors.Join(ctx.Err(), cause)
+		}
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return contextErr
+		}
+		return &resolutionFailure{err: errors.Join(err, contextErr)}
+	}
+	return &resolutionFailure{err: err}
 }
 
 func resolve(ctx context.Context, request Request, localOnly bool) (Authority, error) {
@@ -68,7 +88,7 @@ func resolve(ctx context.Context, request Request, localOnly bool) (Authority, e
 		return Authority{}, ErrInvalid
 	}
 	// A long-lived CLI session renews its own certificate before expiry. The
-	// authenticated session remains the authority; no other device participates.
+	// authenticated session remains the authority; no other machine participates.
 	if state, err := request.Store.LoadPeerCertificate(request.Issuer, request.CLIClientSessionID); err == nil {
 		parsed, parseErr := endpointidentity.Parse(state.Raw)
 		clear(state.Raw)
@@ -113,7 +133,7 @@ func resolve(ctx context.Context, request Request, localOnly bool) (Authority, e
 	if err != nil {
 		return fail(ErrInvalid)
 	}
-	rootPublic, rootErr = request.Store.LoadPeerDeviceSigningPublic(request.Issuer, request.AccountID)
+	rootPublic, rootErr = request.Store.LoadPeerMachineSigningPublic(request.Issuer, request.AccountID)
 	if rootErr != nil {
 		return fail(rootErr)
 	}

@@ -74,7 +74,7 @@ func (w *boundedWriter) Write(value []byte) (int, error) {
 	return w.writer.Write(value)
 }
 
-// EnsureSystemdCredential creates or validates the host-only encrypted
+// EnsureSystemdCredential creates or validates the machine encrypted
 // credential. No plaintext key is written to a file or passed in argv.
 func EnsureSystemdCredential(ctx context.Context, config ProvisionConfig) (bool, error) {
 	if ctx == nil || !validProvisionConfig(config) {

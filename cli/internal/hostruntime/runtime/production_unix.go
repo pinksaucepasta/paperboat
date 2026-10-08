@@ -13,7 +13,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"io"
 	"log/slog"
 	"net"
@@ -31,8 +32,9 @@ import (
 
 	clientapi "github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/internal/bandwidth"
 	clientconfig "github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/internal/deviceservices"
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/availability"
@@ -56,8 +58,10 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/internal/httptransport"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
+	"github.com/pinksaucepasta/paperboat/internal/machineservices"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/endpointidentity"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 var (
@@ -86,7 +90,7 @@ func NewProductionHostWithTunnelAssembly(ctx context.Context, version string, en
 	return newProductionHost(ctx, version, environ, provider)
 }
 
-func newProductionHost(ctx context.Context, version string, environ func(string) string, tunnelProvider ProductionTunnelAssemblyProvider) (*Host, error) {
+func newProductionHost(ctx context.Context, version string, environ func(string) string, tunnelProvider ProductionTunnelAssemblyProvider, ownerDependencies ...HostDependencies) (*Host, error) {
 	if environ == nil {
 		return nil, ErrProductionInvalid
 	}
@@ -103,18 +107,11 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		return nil, err
 	}
 	_ = metrics.Record("paperboat_runtime_restart_total", float64(bootState.Generation), nil)
-	store, openErr := runtimeidentity.Open(runtimeidentity.Config{StateRoot: runtimeConfig.StateRoot})
-	if openErr == nil {
-		registration, registrationErr := store.Registration()
-		if registrationErr == nil && shouldRunClientCoordinator(registration.SetupMode, environ("PAPERBOAT_SETUP_MODE")) {
-			return newProductionClientCoordinator(ctx, version, environ, runtimeConfig, bootState, recoveryExitSignal, metrics, registration, tunnelProvider)
-		}
-	}
-	lazyBootBytes := make([]byte, 24)
-	if _, err := rand.Read(lazyBootBytes); err != nil {
+	lazyBoot, err := uuid.NewRandom()
+	if err != nil {
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
-	lazyBootID := hex.EncodeToString(lazyBootBytes)
+	lazyBootID := "process_" + lazyBoot.String()
 	lazyStartedAt := time.Now().UTC()
 	controlURL, err := validatedControlURL(environ("PAPERBOAT_CONTROL_URL"))
 	if err != nil {
@@ -126,11 +123,11 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		return nil, err
 	}
 	operationID := func() (string, error) {
-		bytes := make([]byte, 16)
-		if _, err := rand.Read(bytes); err != nil {
+		id, err := uuid.NewRandom()
+		if err != nil {
 			return "", err
 		}
-		return "op_admit_" + hex.EncodeToString(bytes), nil
+		return "operation_" + id.String(), nil
 	}
 	renewingTokens, err := enrollment.NewRenewingTokenSource(enrollment.RenewingTokenConfig{ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport, RenewBefore: 10 * time.Minute, Timeout: 15 * time.Second, Clock: func() time.Time { return time.Now().UTC() }, OperationID: operationID, Metrics: metrics})
 	if err != nil {
@@ -191,11 +188,11 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		return nil, err
 	}
 	var managedEnvironment envinject.EnvironmentSource
-	var runtimeProjection *projectionEnvironmentService
+	var runtimeLayers *layerEnvironmentService
 	var environmentBootstrap Service
 	if environmentInjectionEligible(machineRegistration) {
-		runtimeProjection = newProjectionEnvironmentService(runtimeConfig.StateRoot, controlURL, transport, machineRegistration, managedSSHIdentity)
-		managedEnvironment, environmentBootstrap = runtimeProjection, runtimeProjection
+		runtimeLayers = newLayerEnvironmentService(runtimeConfig.StateRoot, controlURL, transport, machineRegistration, managedSSHIdentity)
+		managedEnvironment, environmentBootstrap = runtimeLayers, runtimeLayers
 	}
 	fetcher, err := auth.NewHTTPJWKSFetcher(controlURL.ResolveReference(&url.URL{Path: "/.well-known/jwks.json"}).String(), []string{controlURL.Hostname()}, transport)
 	if err != nil {
@@ -218,7 +215,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		authorizationRefresh = append(authorizationRefresh, environmentBootstrap)
 	}
 	verifier := auth.Verifier{Keys: cache, Clock: productionClock{}, Replays: auth.NewReplayCache(4096, productionClock{}), Revocations: revocations, ClockSkew: 30 * time.Second, RefreshTimeout: 2 * time.Second}
-	credentialConfig := CredentialAuthConfig{Issuer: issuer, EnvironmentID: identity.EnvironmentID, MachineID: machineID, HelperID: identity.HelperID, Verifier: verifier, Revocations: revocations}
+	credentialConfig := CredentialAuthConfig{InstallationGeneration: machineRegistration.InstallationGeneration, Issuer: issuer, EnvironmentID: identity.EnvironmentID, MachineID: machineID, HelperID: identity.HelperID, Verifier: verifier, Revocations: revocations}
 	authorizer, err := NewCredentialAuthorizer(credentialConfig)
 	if err != nil {
 		return nil, err
@@ -229,7 +226,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	}
 	// No transfer is admitted until the authenticated heartbeat supplies policy.
 	transferPolicy := &filetransfer.PolicyStore{}
-	capabilityController := newDeviceCapabilityController(nil)
+	capabilityController := newMachineCapabilityController(nil)
 	networkHandler, err := newNetworkChangeHandler(metrics)
 	if err != nil {
 		return nil, err
@@ -245,22 +242,19 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	}
 	connectorService := &dedicatedConnectorService{networkChanges: networkChanges}
 	var runtimeObservation *runtimeObservationService
-	var availabilityService *availability.Service
-	if runtimeConfig.Profile == runtimeconfig.BYOD {
-		resolver, resolverErr := availability.NewResolver(controlURL.ResolveReference(&url.URL{Path: "/v1/helper-runtime-policies/resolve"}).String(), renewingTokens, enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}, operationID, &http.Client{Transport: transport, Timeout: 10 * time.Second})
-		if resolverErr != nil {
-			return nil, resolverErr
-		}
-		hostClient, hostErr := newProductionAvailabilityHostClient(5 * time.Second)
-		if hostErr != nil {
-			return nil, hostErr
-		}
-		availabilityService, err = availability.NewService(resolver, hostClient, runtimeConfig.Limits.HeartbeatInterval, metrics)
-		if err != nil {
-			return nil, err
-		}
+	resolver, resolverErr := availability.NewResolver(controlURL.ResolveReference(&url.URL{Path: "/v1/helper-runtime-policies/resolve"}).String(), renewingTokens, enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}, operationID, &http.Client{Transport: transport, Timeout: 10 * time.Second})
+	if resolverErr != nil {
+		return nil, resolverErr
 	}
-	var deviceServiceObserver *runtimeObservationSender
+	hostClient, hostErr := newProductionAvailabilityHostClient(5 * time.Second)
+	if hostErr != nil {
+		return nil, hostErr
+	}
+	availabilityService, err := availability.NewService(resolver, hostClient, runtimeConfig.Limits.HeartbeatInterval, metrics)
+	if err != nil {
+		return nil, err
+	}
+	var machineServiceObserver *runtimeObservationSender
 	{
 		runtimeEndpoint := controlURL.ResolveReference(&url.URL{Path: "/v1/runtime-observations"}).String()
 		scope := environ("PAPERBOAT_RUNTIME_SERVICE_SCOPE")
@@ -281,10 +275,10 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		if observationTokensErr != nil {
 			return nil, observationTokensErr
 		}
-		sender := &runtimeObservationSender{endpoint: runtimeEndpoint, tokens: observationTokens, proofs: enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}, operationID: operationID, environmentID: identity.EnvironmentID, machineID: machineID, reporterVersion: version, client: &http.Client{Transport: errorreport.TransportOperation(transport, controlURL.String(), "runtime_observation"), Timeout: 10 * time.Second, CheckRedirect: rejectRuntimePolicyRedirect}, availability: availabilityService, receiptPath: filepath.Join(runtimeConfig.StateRoot, "runtime", "server-heartbeat.json"), installationGeneration: uint64(machineRegistration.InstallationGeneration), workerGeneration: bootState.Generation, osBootID: bootState.OSBootID, setupMode: machineRegistration.SetupMode, lazyBootID: lazyBootID, lazyStartedAt: lazyStartedAt, serviceScope: scope, connector: connectorService, transferPolicy: transferPolicy, capabilitiesController: capabilityController, capabilities: capabilities}
-		deviceServiceObserver = sender
-		if runtimeProjection != nil {
-			sender.projection = runtimeProjection
+		sender := &runtimeObservationSender{endpoint: runtimeEndpoint, tokens: observationTokens, proofs: enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}, operationID: operationID, environmentID: identity.EnvironmentID, machineID: machineID, reporterVersion: version, client: &http.Client{Transport: errorreport.TransportOperation(transport, controlURL.String(), "runtime_observation"), Timeout: 10 * time.Second, CheckRedirect: rejectRuntimePolicyRedirect}, availability: availabilityService, receiptPath: filepath.Join(runtimeConfig.StateRoot, "runtime", "server-heartbeat.json"), installationGeneration: uint64(machineRegistration.InstallationGeneration), workerGeneration: bootState.Generation, osBootID: bootState.OSBootID, lazyBootID: lazyBootID, lazyStartedAt: lazyStartedAt, serviceScope: scope, connector: connectorService, transferPolicy: transferPolicy, capabilitiesController: capabilityController, capabilities: capabilities}
+		machineServiceObserver = sender
+		if runtimeLayers != nil {
+			sender.layers = runtimeLayers
 		}
 		updaterClient, updaterErr := newProductionUpdaterClient()
 		if updaterErr != nil {
@@ -297,10 +291,10 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if strings.TrimSpace(workspaceRoot) == "" {
 		workspaceRoot, err = os.UserHomeDir()
 		if err != nil {
-			return nil, errors.Join(ErrProductionInvalid, errors.New("resolve BYOD home workspace"), err)
+			return nil, errors.Join(ErrProductionInvalid, errors.New("resolve machine home workspace"), err)
 		}
 	}
-	agentShell, err := validatedBYODShell(environ("PAPERBOAT_SHELL"))
+	agentShell, err := validatedMachineShell(environ("PAPERBOAT_SHELL"))
 	if err != nil {
 		return nil, err
 	}
@@ -309,7 +303,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
 	shutdownTimeout := 30 * time.Second
-	if err := validateBYODWorkspace(workspaceRoot); err != nil {
+	if err := validateMachineWorkspace(workspaceRoot); err != nil {
 		return nil, err
 	}
 	listen := valueOrRuntime(environ("PAPERBOAT_RUNTIME_LISTEN_ADDRESS"), runtimeport.Primary)
@@ -324,10 +318,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err := writeWorkerLocal(runtimeConfig.StateRoot, listen); err != nil {
 		return nil, err
 	}
-	runtimeService := Service(runtimeObservation)
-	if availabilityService != nil {
-		runtimeService = serviceGroup{availabilityService, runtimeObservation}
-	}
+	runtimeService := serviceGroup{availabilityService, runtimeObservation}
 	previewAssembly, err := newProductionPreviewAssembly(productionPreviewAssemblyConfig{
 		ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, MachineID: machineID, InstallationGeneration: machineRegistration.InstallationGeneration, BootID: lazyBootID,
 		LocalControlToken: localControlToken, Transport: transport, RunContext: ctx,
@@ -336,26 +327,46 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, err
 	}
-	managedSSHHost, managedSSHService, err := productionManagedSSH(ctx, controlURL.String(), transport, machineRegistration, managedSSHIdentity, uint64(bootState.Generation))
+	managedSSHHost, managedSSHService, err := newProductionManagedSSH(controlURL.String(), transport, machineRegistration, managedSSHIdentity, uint64(bootState.Generation), capabilityController)
 	if err != nil {
 		return nil, err
 	}
-	dependencies := HostDependencies{Authorizer: authorizer, BrowserTerminalAuthorizer: browserTerminalAuthorizer, BrowserTerminalIdentity: func(identityCtx context.Context) (server.BrowserTerminalIdentity, error) {
+	browserCompareAuthorizer, err := NewBrowserConfigCompareCredentialAuthorizer(credentialConfig)
+	if err != nil {
+		return nil, err
+	}
+	compareIdentity, err := machinecontrol.NewSource(machinecontrol.Config{ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport})
+	if err != nil {
+		return nil, err
+	}
+	comparisonHome, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	comparisonHosts := []string{"github.com"}
+	if raw := strings.TrimSpace(environ("PAPERBOAT_CONFIG_REPOSITORY_HOSTS")); raw != "" {
+		comparisonHosts = strings.Split(raw, ",")
+	}
+	comparison, err := productionConfigComparison(productionConfigSyncConfig{ControlURL: controlURL.String(), ControlHost: controlURL.Hostname(), RepositoryHosts: comparisonHosts, HomeRoot: filepath.Clean(comparisonHome), StateRoot: runtimeConfig.StateRoot, Identities: compareIdentity, Proofs: compareIdentity, OperationID: operationID, Transport: transport})
+	if err != nil {
+		return nil, err
+	}
+	dependencies := HostDependencies{ConfigCompare: comparison, BrowserConfigCompareAuthorizer: browserCompareAuthorizer, Authorizer: authorizer, BrowserTerminalAuthorizer: browserTerminalAuthorizer, BrowserTerminalIdentity: func(identityCtx context.Context) (server.BrowserTerminalIdentity, error) {
 		if err := identityCtx.Err(); err != nil {
 			return server.BrowserTerminalIdentity{}, err
 		}
 		return productionBrowserTerminalIdentity(runtimeConfig.StateRoot, machineID, uint64(machineRegistration.InstallationGeneration))
 	}, AuthorizationService: authorizationRefresh, Connector: connectorService, PreviewDispatcher: previewAssembly, PreviewRecovery: previewAssembly, PreviewOwnerSessions: previewAssembly.OwnerSessionLeases(), RuntimeObservationService: runtimeService, RecordTerminalJoin: runtimeObservation.sender.RecordTerminalJoin, ManagedEnvironment: managedEnvironment, Metrics: metrics, LocalControlToken: localControlToken, Inspector: inspectorService, ManagedSSH: managedSSHHost, ManagedSSHService: managedSSHService, Capabilities: capabilityController}
-	if machineRegistration.SetupMode == "host" && runtimeConfig.Profile == runtimeconfig.BYOD {
-		attachment, attachErr := runtimeattachment.New(runtimeattachment.Config{ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport, DeviceID: machineID, WorkerGeneration: bootState.Generation, InstallationGeneration: uint64(machineRegistration.InstallationGeneration), ListenAddress: listen})
+	{
+		attachment, attachErr := runtimeattachment.New(runtimeattachment.Config{ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport, MachineID: machineID, WorkerGeneration: bootState.Generation, InstallationGeneration: uint64(machineRegistration.InstallationGeneration), ListenAddress: listen})
 		if attachErr != nil {
 			return nil, attachErr
 		}
 		dependencies.RuntimeAttachmentService = attachment
 	}
 	nativePrivateValidators := []productionNativePrivateValidator{localNativePrivateValidator(previewAssembly.dispatcher)}
-	if deviceServiceObserver != nil {
-		nativePrivateValidators = append(nativePrivateValidators, deviceServiceObserver.validateDeviceService)
+	if machineServiceObserver != nil {
+		nativePrivateValidators = append(nativePrivateValidators, machineServiceObserver.validateMachineService)
 	}
 	if tunnelProvider == nil {
 		tunnelEnrollment, enrollmentErr := newProductionTunnelEnrollmentService(controlURL.String(), runtimeConfig.StateRoot, machineID, localControlToken, transport, inspectorStore, inspectorRegistry, inspectorService)
@@ -388,18 +399,32 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	}
 	if managedSSHIdentity != nil {
 		dependencies.NativePeerFactory = func(serve func(net.Conn) error, transferHandler http.Handler) (Service, error) {
-			return newProductionNativePeerService(productionNativePeerConfig{controlURL: controlURL.String(), issuer: issuer, stateRoot: runtimeConfig.StateRoot, machineID: machineID, generation: uint64(machineRegistration.InstallationGeneration), transport: transport, identity: managedSSHIdentity, keys: cache, authorizer: authorizer, serve: serve, transfer: transferHandler, ssh: managedSSHHost, privateCurrent: productionNativeCurrent(nativePrivateValidators...), privateDial: productionNativePrivateDial, inspector: http.HandlerFunc(inspectorService.ServeAuthenticatedHTTP), inspectorStore: inspectorStore})
+			return newProductionNativePeerService(productionNativePeerConfig{controlURL: controlURL.String(), issuer: issuer, stateRoot: runtimeConfig.StateRoot, machineID: machineID, generation: uint64(machineRegistration.InstallationGeneration), transport: transport, identity: managedSSHIdentity, keys: cache, authorizer: authorizer, serve: serve, transfer: transferHandler, ssh: managedSSHHost, privateCurrent: productionNativeCurrent(nativePrivateValidators...), privateDial: productionNativePrivateDial, inspector: http.HandlerFunc(inspectorService.ServeAuthenticatedHTTP), inspectorStore: inspectorStore, usage: dependencies.Bandwidth})
 		}
+	}
+	if managedSSHIdentity != nil {
+		usageControl := clientapi.New(controlURL.String(), clientconfig.Credential{}, &http.Client{Transport: transport, Timeout: 15 * time.Second})
+		usageControl.SetMachineAuth(managedSSHIdentity)
+		observeBandwidth := newBandwidthObservation(ctx)
+		dependencies.Bandwidth, err = bandwidth.Open(filepath.Join(runtimeConfig.StateRoot, "bandwidth-usage.json"), usageControl, observeBandwidth)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(ownerDependencies) != 0 {
+		dependencies.Sessions = ownerDependencies[0].Sessions
+		dependencies.Executions = ownerDependencies[0].Executions
+		dependencies.ReuseAgentToken = true
 	}
 	result, err := NewHost(ctx, HostConfig{Runtime: runtimeConfig, ListenAddress: listen, WorkspaceRoot: workspaceRoot, ShellPath: agentShell, AgentEnvironment: agentEnvironment, EnvironmentID: identity.EnvironmentID, MachineID: machineID, InboxPath: inboxPath, ShutdownTimeout: shutdownTimeout, RecoveryExitSignal: recoveryExitSignal, FileTransferPolicy: transferPolicy}, dependencies)
 	if err == nil {
-		capabilityController.SetReconciler(result.reconcileDeviceCapabilities)
+		capabilityController.SetReconciler(result.reconcileMachineCapabilities)
 	}
 	return result, err
 }
 
 func environmentInjectionEligible(registration runtimeidentity.Registration) bool {
-	return registration.SetupMode == "host"
+	return registration.MachineID != "" && registration.InstallationGeneration > 0
 }
 
 type managedSSHIdentitySource interface {
@@ -429,55 +454,51 @@ func (s renewingMachineIdentity) Proof(ctx context.Context, operationID, method,
 }
 
 type managedSSHControlClient interface {
-	ObserveManagedSSHHostKeys(context.Context, string, string, string, string, uint64, uint64, []string, []byte) (clientapi.ManagedSSHHostKeySet, error)
+	ObserveManagedSSHHostKeys(context.Context, string, string, string, uint64, uint64, []string, []byte) (clientapi.ManagedSSHHostKeySet, error)
 	ManagedSSHAuthorizedKeys(context.Context, string, string, uint64, []byte) (clientapi.ManagedSSHAuthorizedKeys, error)
 }
 
-func productionManagedSSHUnix(ctx context.Context, controlURL string, transport http.RoundTripper, registration runtimeidentity.Registration, identitySource managedSSHIdentitySource, observationGeneration uint64) (*managedssh.Host, Service, error) {
+func initializeProductionManagedSSHUnix(ctx context.Context, host *managedssh.Host, controlURL string, transport http.RoundTripper, registration runtimeidentity.Registration, identitySource managedSSHIdentitySource, observationGeneration uint64) (Service, error) {
 	if registration.MachineID == "" || registration.InstallationGeneration < 1 || registration.SSHPort == 0 || registration.SSHUser == "" || identitySource == nil {
-		return nil, nil, nil
+		return nil, nil
 	}
-	host, err := managedssh.NewHost(managedssh.HostConfig{MaxStreams: 32, ProbeTimeout: 3 * time.Second, DialTimeout: 10 * time.Second})
-	if err != nil {
-		return nil, nil, err
-	}
+	var err error
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	_, err = host.ReconcileTarget(probeCtx, uint64(registration.InstallationGeneration), registration.SSHPort)
 	cancel()
 	if err != nil {
-		return nil, nil, errors.Join(ErrManagedSSHUnavailable, err)
+		return nil, errors.Join(ErrManagedSSHUnavailable, err)
 	}
 	paths := existingSSHHostPublicKeyPathsUnix()
 	if len(paths) == 0 {
-		return nil, nil, errors.Join(ErrManagedSSHUnavailable, errors.New("no SSH host public key is published"))
+		return nil, errors.Join(ErrManagedSSHUnavailable, errors.New("no SSH host public key is published"))
 	}
 	inventory, err := managedssh.ReadHostPublicKeys(paths, 0)
 	if err != nil {
-		return nil, nil, errors.Join(ErrManagedSSHUnavailable, err)
+		return nil, errors.Join(ErrManagedSSHUnavailable, err)
 	}
 	if observationGeneration == 0 {
-		return nil, nil, errors.New("managed SSH observation generation is unavailable")
+		return nil, errors.New("managed SSH observation generation is unavailable")
 	}
 	publicKeys := make([]string, len(inventory.Keys))
 	for index := range inventory.Keys {
 		publicKeys[index] = inventory.Keys[index].PublicKey
 	}
-	setID := "sshks_" + hex.EncodeToString(inventory.Fingerprint[:16])
 	client := clientapi.New(controlURL, clientconfig.Credential{}, &http.Client{Transport: transport, Timeout: 15 * time.Second})
 	account, err := user.Lookup(registration.SSHUser)
 	if err != nil || !filepath.IsAbs(account.HomeDir) {
-		return nil, nil, errors.Join(ErrManagedSSHUnavailable, errors.New("managed SSH operating-system user is unavailable"), err)
+		return nil, errors.Join(ErrManagedSSHUnavailable, errors.New("managed SSH operating-system user is unavailable"), err)
 	}
 	uid, err := strconv.ParseUint(account.Uid, 10, 32)
 	if err != nil {
-		return nil, nil, errors.Join(ErrManagedSSHUnavailable, errors.New("managed SSH operating-system user identifier is invalid"), err)
+		return nil, errors.Join(ErrManagedSSHUnavailable, errors.New("managed SSH operating-system user identifier is invalid"), err)
 	}
 	reconciler := &managedSSHKeyReconciler{
 		client: client, identity: identitySource, registration: registration,
-		workerGeneration: observationGeneration, setID: setID, publicKeys: publicKeys,
+		workerGeneration: observationGeneration, publicKeys: publicKeys,
 		home: account.HomeDir, ownerUID: uint32(uid), interval: 30 * time.Second, timeout: 10 * time.Second,
 	}
-	return host, reconciler, nil
+	return reconciler, nil
 }
 
 func managedSSHInitialOperationIDs(registration runtimeidentity.Registration, observationGeneration uint64, fingerprint [32]byte) (string, string) {
@@ -490,17 +511,17 @@ func managedSSHInitialOperationIDs(registration runtimeidentity.Registration, ob
 	return "managed-ssh-observe-" + suffix, "managed-ssh-keys-" + suffix
 }
 
-func reconcileManagedSSHAuthorityWithFingerprint(ctx context.Context, client managedSSHControlClient, identitySource managedSSHIdentitySource, registration runtimeidentity.Registration, observationGeneration uint64, setID string, fingerprint [32]byte, publicKeys []string) (clientapi.ManagedSSHAuthorizedKeys, bool, error) {
+func reconcileManagedSSHAuthorityWithFingerprint(ctx context.Context, client managedSSHControlClient, identitySource managedSSHIdentitySource, registration runtimeidentity.Registration, observationGeneration uint64, fingerprint [32]byte, publicKeys []string) (clientapi.ManagedSSHAuthorizedKeys, bool, error) {
 	observeOperationID, keyOperationID := managedSSHInitialOperationIDs(registration, observationGeneration, fingerprint)
-	return reconcileManagedSSHAuthorityWithOperations(ctx, client, identitySource, registration, observationGeneration, setID, publicKeys,
+	return reconcileManagedSSHAuthorityWithOperations(ctx, client, identitySource, registration, observationGeneration, publicKeys,
 		observeOperationID, keyOperationID)
 }
 
-func reconcileManagedSSHAuthorityWithOperations(ctx context.Context, client managedSSHControlClient, identitySource managedSSHIdentitySource, registration runtimeidentity.Registration, observationGeneration uint64, setID string, publicKeys []string, observeOperationID, keyOperationID string) (clientapi.ManagedSSHAuthorizedKeys, bool, error) {
-	if ctx == nil || client == nil || identitySource == nil || registration.MachineID == "" || registration.InstallationGeneration < 1 || observationGeneration == 0 || setID == "" || len(publicKeys) == 0 {
+func reconcileManagedSSHAuthorityWithOperations(ctx context.Context, client managedSSHControlClient, identitySource managedSSHIdentitySource, registration runtimeidentity.Registration, observationGeneration uint64, publicKeys []string, observeOperationID, keyOperationID string) (clientapi.ManagedSSHAuthorizedKeys, bool, error) {
+	if ctx == nil || client == nil || identitySource == nil || registration.MachineID == "" || registration.InstallationGeneration < 1 || observationGeneration == 0 || len(publicKeys) == 0 {
 		return clientapi.ManagedSSHAuthorizedKeys{}, false, ErrProductionInvalid
 	}
-	body, err := json.Marshal(map[string]any{"set_id": setID, "observation_generation": observationGeneration, "public_keys": publicKeys})
+	body, err := json.Marshal(map[string]any{"observation_generation": observationGeneration, "public_keys": publicKeys})
 	if err != nil {
 		return clientapi.ManagedSSHAuthorizedKeys{}, false, err
 	}
@@ -513,7 +534,7 @@ func reconcileManagedSSHAuthorityWithOperations(ctx context.Context, client mana
 	if err != nil {
 		return clientapi.ManagedSSHAuthorizedKeys{}, false, err
 	}
-	set, err := client.ObserveManagedSSHHostKeys(ctx, registration.MachineID, identityCredential, observeOperationID, setID, uint64(registration.InstallationGeneration), observationGeneration, publicKeys, proof)
+	set, err := client.ObserveManagedSSHHostKeys(ctx, registration.MachineID, identityCredential, observeOperationID, uint64(registration.InstallationGeneration), observationGeneration, publicKeys, proof)
 	if err != nil {
 		return clientapi.ManagedSSHAuthorizedKeys{}, false, err
 	}
@@ -551,167 +572,6 @@ func existingSSHHostPublicKeyPathsUnix() []string {
 		}
 	}
 	return result
-}
-
-func shouldRunClientCoordinator(registrationMode, installedMode string) bool {
-	return registrationMode == "client" && installedMode != "host"
-}
-
-func newProductionClientCoordinator(ctx context.Context, version string, environ func(string) string, runtimeConfig runtimeconfig.Config, bootState workerBootState, recoveryExitSignal string, metrics *observability.Registry, registration runtimeidentity.Registration, tunnelProvider ProductionTunnelAssemblyProvider) (*Host, error) {
-	controlURL, err := validatedControlURL(environ("PAPERBOAT_CONTROL_URL"))
-	if err != nil || registration.MachineID != environ("PAPERBOAT_MACHINE_ID") || registration.EnvironmentID == "" {
-		return nil, errors.Join(ErrProductionInvalid, err)
-	}
-	issuer := strings.TrimRight(valueOrRuntime(environ("PAPERBOAT_CONTROL_ISSUER"), controlURL.String()), "/")
-	transport, err := productionTransport(environ("PAPERBOAT_CONTROL_CA_FILE"), environ)
-	if err != nil {
-		return nil, err
-	}
-	operationID := func() (string, error) {
-		value := make([]byte, 16)
-		if _, err := rand.Read(value); err != nil {
-			return "", err
-		}
-		return "op_client_" + hex.EncodeToString(value), nil
-	}
-	identity, err := enrollment.LoadRuntimeIdentityForRenewal(runtimeConfig.StateRoot, time.Now().UTC())
-	if err != nil || identity.MachineID != registration.MachineID || identity.EnvironmentID != registration.EnvironmentID {
-		return nil, errors.Join(ErrProductionInvalid, err)
-	}
-	// Client-mode runtimes are enrolled helpers, not host machine-control
-	// principals. Use their renewable runtime identity for control-plane calls,
-	// exactly as the shared host runtime does. A machine-control source rejects
-	// client registrations and prevents hostd from ever becoming ready.
-	runtimeTokens, err := enrollment.NewRenewingTokenSource(enrollment.RenewingTokenConfig{
-		ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport,
-		RenewBefore: 10 * time.Minute, Timeout: 15 * time.Second, Clock: func() time.Time { return time.Now().UTC() }, OperationID: operationID, Metrics: metrics,
-	})
-	if err != nil {
-		return nil, err
-	}
-	runtimeProofs := enrollment.ProofSource{StateRoot: runtimeConfig.StateRoot}
-	runtimeIdentity := renewingMachineIdentity{tokens: runtimeTokens, proofs: runtimeProofs}
-	peerEnrollment, err := peeridentityenrollment.New(peeridentityenrollment.Config{ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport, Timeout: 15 * time.Second}, runtimeIdentity)
-	if err != nil {
-		return nil, err
-	}
-	if err := allowPendingPeerEnrollment(ctx, peerEnrollment); err != nil {
-		return nil, err
-	}
-	fetcher, err := auth.NewHTTPJWKSFetcher(controlURL.ResolveReference(&url.URL{Path: "/.well-known/jwks.json"}).String(), []string{controlURL.Hostname()}, transport)
-	if err != nil {
-		return nil, err
-	}
-	cache, err := auth.NewJWKSCache(auth.JWKSConfig{Fetcher: fetcher, Clock: productionClock{}, TTL: 5 * time.Minute, RetainMissing: auth.DefaultRetainMissing, PersistencePath: filepath.Join(runtimeConfig.StateRoot, "authorization", "jwks.json")})
-	if err != nil {
-		return nil, err
-	}
-	refreshCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	_ = cache.Refresh(refreshCtx)
-	cancel()
-	revocations := auth.NewRevocationCache()
-	revocationRefresh, err := newRevocationRefreshService(controlURL.ResolveReference(&url.URL{Path: "/v1/helper-trust/revocations"}).String(), runtimeTokens, runtimeProofs, operationID, revocations, transport, 15*time.Second)
-	if err != nil {
-		return nil, err
-	}
-	authorizationRefresh := serviceGroup{&jwksRefreshService{cache: cache, interval: time.Minute}, revocationRefresh, newPeerEnrollmentRuntimeService(peerEnrollment, 2*time.Second)}
-	verifier := auth.Verifier{Keys: cache, Clock: productionClock{}, Replays: auth.NewReplayCache(4096, productionClock{}), Revocations: revocations, ClockSkew: 30 * time.Second, RefreshTimeout: 2 * time.Second}
-	credentialConfig := CredentialAuthConfig{Issuer: issuer, EnvironmentID: registration.EnvironmentID, MachineID: registration.MachineID, HelperID: identity.HelperID, Verifier: verifier, Revocations: revocations}
-	authorizer, err := NewCredentialAuthorizer(credentialConfig)
-	if err != nil {
-		return nil, err
-	}
-	browserTerminalAuthorizer, err := NewBrowserTerminalCredentialAuthorizer(credentialConfig)
-	if err != nil {
-		return nil, err
-	}
-	transferPolicy := &filetransfer.PolicyStore{}
-	capabilityController := newDeviceCapabilityController(nil)
-	networkHandler, err := newNetworkChangeHandler(metrics)
-	if err != nil {
-		return nil, err
-	}
-	identityStore, err := runtimeidentity.Open(runtimeidentity.Config{StateRoot: runtimeConfig.StateRoot})
-	if err != nil {
-		return nil, err
-	}
-	networkFingerprintSecret, err := identityStore.NetworkFingerprintSecret()
-	if err != nil {
-		return nil, err
-	}
-	defer clear(networkFingerprintSecret)
-	networkChanges, err := newFingerprintingNetworkChangeService(networkFingerprintSecret, networkHandler.Handle)
-	if err != nil {
-		return nil, err
-	}
-	connectorService := &dedicatedConnectorService{networkChanges: networkChanges}
-	scope := environ("PAPERBOAT_RUNTIME_SERVICE_SCOPE")
-	if scope != "system" && scope != "user" {
-		scope = "unknown"
-	}
-	sender := &runtimeObservationSender{endpoint: controlURL.ResolveReference(&url.URL{Path: "/v1/runtime-observations"}).String(), tokens: runtimeTokens, proofs: runtimeProofs, operationID: operationID, environmentID: registration.EnvironmentID, machineID: registration.MachineID, reporterVersion: version, client: &http.Client{Transport: errorreport.TransportOperation(transport, controlURL.String(), "runtime_observation"), Timeout: 10 * time.Second, CheckRedirect: rejectRuntimePolicyRedirect}, receiptPath: filepath.Join(runtimeConfig.StateRoot, "runtime", "server-heartbeat.json"), installationGeneration: uint64(registration.InstallationGeneration), workerGeneration: bootState.Generation, osBootID: bootState.OSBootID, serviceScope: scope, connector: connectorService, transferPolicy: transferPolicy, capabilitiesController: capabilityController, capabilities: []string{"file_receive", "preview_launch"}}
-	updaterClient, updaterErr := newProductionUpdaterClient()
-	if updaterErr != nil {
-		return nil, updaterErr
-	}
-	sender.updater = updaterClient
-	observation := &runtimeObservationService{sender: sender, interval: runtimeConfig.Limits.HeartbeatInterval, timeout: 10 * time.Second}
-	listen := valueOrRuntime(environ("PAPERBOAT_RUNTIME_LISTEN_ADDRESS"), runtimeport.Primary)
-	localControlToken, err := writeLocalControlToken(runtimeConfig.StateRoot)
-	if err != nil {
-		return nil, err
-	}
-	clientInspectorService, clientInspectorStore, clientInspectorRegistry, err := newInspectorService(controlURL.String(), runtimeConfig.StateRoot, transport)
-	if err != nil {
-		return nil, err
-	}
-	if err := writeWorkerLocal(runtimeConfig.StateRoot, listen); err != nil {
-		return nil, err
-	}
-	var nativePrivateValidators []productionNativePrivateValidator
-	nativePeerFactory := func(serve func(net.Conn) error, transferHandler http.Handler) (Service, error) {
-		return newProductionNativePeerService(productionNativePeerConfig{controlURL: controlURL.String(), issuer: issuer, stateRoot: runtimeConfig.StateRoot, machineID: registration.MachineID, generation: uint64(registration.InstallationGeneration), transport: transport, identity: runtimeIdentity, keys: cache, authorizer: authorizer, serve: serve, transfer: transferHandler, privateCurrent: productionNativeCurrent(nativePrivateValidators...), privateDial: productionNativePrivateDial, inspector: http.HandlerFunc(clientInspectorService.ServeAuthenticatedHTTP), inspectorStore: clientInspectorStore})
-	}
-	dependencies := HostDependencies{Authorizer: authorizer, BrowserTerminalAuthorizer: browserTerminalAuthorizer, BrowserTerminalIdentity: func(identityCtx context.Context) (server.BrowserTerminalIdentity, error) {
-		if err := identityCtx.Err(); err != nil {
-			return server.BrowserTerminalIdentity{}, err
-		}
-		return productionBrowserTerminalIdentity(runtimeConfig.StateRoot, registration.MachineID, uint64(registration.InstallationGeneration))
-	}, AuthorizationService: authorizationRefresh, Connector: connectorService, PreviewRecovery: nil, RuntimeObservationService: observation, Metrics: metrics, LocalControlToken: localControlToken, Inspector: clientInspectorService, NativePeerFactory: nativePeerFactory, Capabilities: capabilityController}
-	if tunnelProvider == nil {
-		tunnelEnrollment, enrollmentErr := newProductionTunnelEnrollmentService(controlURL.String(), runtimeConfig.StateRoot, registration.MachineID, localControlToken, transport, clientInspectorStore, clientInspectorRegistry, clientInspectorService)
-		if enrollmentErr != nil {
-			return nil, errors.Join(ErrProductionInvalid, enrollmentErr)
-		}
-		dependencies.TunnelEnrollment = tunnelEnrollment
-		dependencies.TunnelEnrollmentLifecycle = platformTunnelEnrollmentLifecycle(tunnelEnrollment)
-		dependencies.TunnelManager = tunnelEnrollment
-		connectorService.status = tunnelEnrollment.Status
-		networkHandler.SetCanonical(tunnelEnrollment)
-	} else {
-		tunnelAssembly, assemblyErr := productionTunnelAssembly(ctx, tunnelProvider, ProductionTunnelAssemblyInputs{
-			StateRoot: runtimeConfig.StateRoot, ControlURL: controlURL.String(), ControlTransport: transport,
-			EnvironmentID: registration.EnvironmentID, MachineID: registration.MachineID,
-			InstallationGeneration: uint64(registration.InstallationGeneration), Metrics: metrics,
-		})
-		if assemblyErr != nil {
-			return nil, errors.Join(ErrProductionInvalid, assemblyErr)
-		}
-		dependencies.TunnelManager = tunnelAssembly
-		connectorService.status = tunnelAssembly.ConnectorStatus
-		nativePrivateValidators = append(nativePrivateValidators, localNativePrivateValidator(tunnelAssembly.Manager.Manager))
-		updateGate, gateErr := tunnelmanager.NewUpdateGate(tunnelmanager.UpdateGateConfig{MachineID: registration.MachineID, Manager: tunnelAssembly.Manager.Manager, StatePath: filepath.Join(runtimeConfig.StateRoot, "updates", "deployment-gate.json")})
-		if gateErr != nil {
-			return nil, errors.Join(ErrProductionInvalid, gateErr)
-		}
-		dependencies.UpdateGate = updateGate
-		networkHandler.SetCanonical(tunnelAssembly)
-	}
-	result, err := NewClientCoordinator(ctx, HostConfig{Runtime: runtimeConfig, ListenAddress: listen, WorkspaceRoot: registration.InboxPath, EnvironmentID: registration.EnvironmentID, MachineID: registration.MachineID, InboxPath: registration.InboxPath, ShutdownTimeout: 30 * time.Second, RecoveryExitSignal: recoveryExitSignal, FileTransferPolicy: transferPolicy}, dependencies)
-	if err == nil {
-		capabilityController.SetReconciler(result.reconcileDeviceCapabilities)
-	}
-	return result, err
 }
 
 type peerEnrollmentEnsurer interface {
@@ -907,43 +767,43 @@ func writeWorkerLocal(stateRoot, listenAddress string) error {
 	return atomicfile.Write(path, body, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1})
 }
 
-func validatedBYODShellUnix(path string) (string, error) {
+func validatedMachineShellUnix(path string) (string, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		path = "/bin/sh"
 	}
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
-		return "", errors.Join(ErrProductionInvalid, errors.New("BYOD shell must be an absolute canonical path"))
+		return "", errors.Join(ErrProductionInvalid, errors.New("machine shell must be an absolute canonical path"))
 	}
 	info, err := os.Lstat(path)
 	if err != nil {
-		return "", errors.Join(ErrProductionInvalid, errors.New("BYOD shell must resolve to an absolute canonical path"))
+		return "", errors.Join(ErrProductionInvalid, errors.New("machine shell must resolve to an absolute canonical path"))
 	}
 	resolved := path
 	if info.Mode()&os.ModeSymlink != 0 {
 		resolved, err = filepath.EvalSymlinks(path)
 	}
 	if err != nil || !filepath.IsAbs(resolved) || filepath.Clean(resolved) != resolved {
-		return "", errors.Join(ErrProductionInvalid, errors.New("BYOD shell must resolve to an absolute canonical path"))
+		return "", errors.Join(ErrProductionInvalid, errors.New("machine shell must resolve to an absolute canonical path"))
 	}
 	info, err = os.Lstat(resolved)
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
-		return "", errors.Join(ErrProductionInvalid, errors.New("BYOD shell must be an executable regular file"))
+		return "", errors.Join(ErrProductionInvalid, errors.New("machine shell must be an executable regular file"))
 	}
 	return resolved, nil
 }
 
-func validateBYODWorkspaceUnix(root string) error {
+func validateMachineWorkspaceUnix(root string) error {
 	if strings.TrimSpace(root) == "" || !filepath.IsAbs(root) || filepath.Clean(root) != root {
-		return errors.Join(ErrProductionInvalid, errors.New("BYOD workspace must be an absolute canonical path"))
+		return errors.Join(ErrProductionInvalid, errors.New("machine workspace must be an absolute canonical path"))
 	}
 	info, err := os.Lstat(root)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return errors.Join(ErrProductionInvalid, errors.New("BYOD workspace must be an existing non-symlink directory"))
+		return errors.Join(ErrProductionInvalid, errors.New("machine workspace must be an existing non-symlink directory"))
 	}
 	resolved, err := filepath.EvalSymlinks(root)
 	if err != nil || resolved != root {
-		return errors.Join(ErrProductionInvalid, errors.New("BYOD workspace symlink resolution is not permitted"))
+		return errors.Join(ErrProductionInvalid, errors.New("machine workspace symlink resolution is not permitted"))
 	}
 	return nil
 }
@@ -970,6 +830,9 @@ func (s *runtimeObservationService) Start(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	initial, cancel := context.WithTimeout(ctx, s.timeout)
 	err := s.sender.Send(initial)
 	cancel()
@@ -979,7 +842,10 @@ func (s *runtimeObservationService) Start(ctx context.Context) error {
 		// recovering. Do not let one transient failure make the optional
 		// component disappear permanently: install the stable loop and let its
 		// bounded sends retry on the normal heartbeat cadence.
-		slog.Warn("initial runtime observation failed; continuing heartbeat retries", "error", err)
+		reportRuntimeObservationAttempt(initial, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -991,7 +857,7 @@ func (s *runtimeObservationService) Start(ctx context.Context) error {
 	// startup context silently stops machine presence after successful startup
 	// on supervisors that cancel that context. Partial starts are still safe
 	// because hostd always invokes Shutdown for an accepted or failed component.
-	runCtx, stop := context.WithCancel(context.Background())
+	runCtx, stop := context.WithCancel(context.WithoutCancel(ctx))
 	s.cancel, s.done = stop, make(chan struct{})
 	go s.loop(runCtx, s.done)
 	return nil
@@ -1008,7 +874,7 @@ func (s *runtimeObservationService) loop(ctx context.Context, done chan<- struct
 		case <-ticker.C:
 			sendCtx, cancel := context.WithTimeout(ctx, s.timeout)
 			if err := s.sender.Send(sendCtx); err != nil {
-				slog.Warn("runtime observation failed", "error", err)
+				reportRuntimeObservationAttempt(sendCtx, err)
 			}
 			cancel()
 		}
@@ -1039,11 +905,11 @@ func (s *runtimeObservationService) Shutdown(ctx context.Context) error {
 }
 
 type runtimeObservationSender struct {
-	deviceServicesDiscover                              func(context.Context) ([]deviceservices.Service, error)
-	deviceServicesMu                                    sync.Mutex
-	deviceServicesPolicy                                clientapi.DeviceServicesPolicy
-	deviceServicesPorts                                 []clientapi.DeviceServicePort
-	deviceServicesGeneration                            uint64
+	machineServicesDiscover                             func(context.Context) ([]machineservices.Service, error)
+	machineServicesMu                                   sync.Mutex
+	machineServicesPolicy                               clientapi.MachineServicesPolicy
+	machineServicesPorts                                []clientapi.MachineServicePort
+	machineServicesGeneration                           uint64
 	endpoint, environmentID, machineID, reporterVersion string
 	tokens                                              interface {
 		Token(context.Context) (string, error)
@@ -1059,63 +925,27 @@ type runtimeObservationSender struct {
 	updater interface {
 		Status(context.Context) (updated.ControlResponse, error)
 	}
-	environment interface {
-		NextObservation(time.Time) (envinject.Observation, error)
-		Apply(context.Context, envinject.Bundle) error
-		BindingState() envinject.BindingState
-	}
-	projection interface {
-		NextObservation(time.Time) (envinject.ProjectionObservation, error)
-		Apply(context.Context, envinject.ProjectionBundle) error
-		BindingState() envinject.BindingState
-	}
-	onEnvironmentObservation func()
-	receiptPath              string
-	installationGeneration   uint64
-	workerGeneration         uint64
-	osBootID                 string
-	setupMode                string
-	lazyBootID               string
-	lazyStartedAt            time.Time
-	serviceScope             string
-	connector                interface{ Status() connector.Status }
-	transferPolicy           *filetransfer.PolicyStore
-	capabilities             []string
-	capabilitiesController   *deviceCapabilityController
+	layers                 interface{ FlushLayerObservations(context.Context) error }
+	receiptPath            string
+	installationGeneration uint64
+	workerGeneration       uint64
+	osBootID               string
+	lazyBootID             string
+	lazyStartedAt          time.Time
+	serviceScope           string
+	connector              interface{ Status() connector.Status }
+	transferPolicy         *filetransfer.PolicyStore
+	capabilities           []string
+	capabilitiesController *machineCapabilityController
+	environmentFaultMu     sync.Mutex
+	environmentFaults      [4]errorreport.Fault
 }
 
 func (s *runtimeObservationSender) Send(ctx context.Context) error {
+	if s.layers != nil {
+		s.observeEnvironmentFailure(ctx, 0, s.layers.FlushLayerObservations(ctx))
+	}
 	now := time.Now().UTC()
-	var environmentObservation *envinject.Observation
-	var projectionObservation *envinject.ProjectionObservation
-	environmentObservationSent := false
-	if s.environment != nil {
-		observation, err := s.environment.NextObservation(now)
-		if err != nil {
-			if !errors.Is(err, envinject.ErrNotReady) {
-				// ENV is an auxiliary observation. Its local encrypted store can
-				// be unavailable or revoked while machine presence remains valid;
-				// never suppress the authenticated heartbeat in that case.
-				slog.Warn("runtime environment observation failed", "error", err)
-			}
-		} else {
-			environmentObservation = &observation
-			environmentObservationSent = true
-		}
-	}
-	if s.projection != nil {
-		observation, err := s.projection.NextObservation(now)
-		if err == nil {
-			projectionObservation = &observation
-		}
-	}
-	var observationPayload any
-	if projectionObservation != nil {
-		observationPayload = projectionObservation
-	} else if environmentObservation != nil {
-		observationPayload = environmentObservation
-	}
-	environmentReady := s.projection != nil && s.projection.BindingState() == envinject.BindingActive || environmentObservation != nil && s.environment.BindingState() == envinject.BindingActive
 	availabilityState := availabilityObservation(s.availability)
 	var updaterState *updated.ControlResponse
 	var updaterErr error
@@ -1128,29 +958,27 @@ func (s *runtimeObservationSender) Send(ctx context.Context) error {
 		}
 	}
 	body, err := json.Marshal(struct {
-		DeviceServices     *clientapi.DeviceServicesSnapshot `json:"device_services,omitempty"`
-		LazyRuntime        *lazyRuntimeObservation           `json:"lazy_runtime,omitempty"`
-		EnvironmentID      string                            `json:"environment_id"`
-		ResourceID         string                            `json:"resource_id"`
-		ReporterVersion    string                            `json:"reporter_version"`
-		SampledAt          time.Time                         `json:"sampled_at"`
-		Environment        any                               `json:"environment,omitempty"`
-		Availability       *availability.Observation         `json:"availability,omitempty"`
-		RuntimeDiagnostics *runtimeDiagnosticsObservation    `json:"runtime_diagnostics,omitempty"`
-		Update             *runtimeUpdateObservation         `json:"update,omitempty"`
-		DeviceCapabilities *deviceCapabilitiesObservation    `json:"device_capabilities,omitempty"`
+		MachineServices     *clientapi.MachineServicesSnapshot `json:"machine_services,omitempty"`
+		LazyRuntime         *lazyRuntimeObservation            `json:"lazy_runtime,omitempty"`
+		EnvironmentID       string                             `json:"environment_id"`
+		ResourceID          string                             `json:"resource_id"`
+		ReporterVersion     string                             `json:"reporter_version"`
+		SampledAt           time.Time                          `json:"sampled_at"`
+		Availability        *availability.Observation          `json:"availability,omitempty"`
+		RuntimeDiagnostics  *runtimeDiagnosticsObservation     `json:"runtime_diagnostics,omitempty"`
+		Update              *runtimeUpdateObservation          `json:"update,omitempty"`
+		MachineCapabilities *machineCapabilitiesObservation    `json:"machine_capabilities,omitempty"`
 	}{
-		DeviceServices:     s.deviceServicesObservation(ctx),
-		LazyRuntime:        s.lazyRuntimeObservation(),
-		EnvironmentID:      s.environmentID,
-		ResourceID:         s.machineID,
-		ReporterVersion:    s.reporterVersion,
-		SampledAt:          now,
-		Environment:        observationPayload,
-		Availability:       availabilityState,
-		RuntimeDiagnostics: s.runtimeDiagnostics(now, environmentReady),
-		Update:             s.updateObservationFrom(now, availabilityState, updaterState, updaterErr),
-		DeviceCapabilities: s.capabilitiesController.Observation(now),
+		MachineServices:     s.machineServicesObservation(ctx),
+		LazyRuntime:         s.lazyRuntimeObservation(),
+		EnvironmentID:       s.environmentID,
+		ResourceID:          s.machineID,
+		ReporterVersion:     s.reporterVersion,
+		SampledAt:           now,
+		Availability:        availabilityState,
+		RuntimeDiagnostics:  s.runtimeDiagnostics(now, s.layers != nil),
+		Update:              s.updateObservationFrom(now, availabilityState, updaterState, updaterErr),
+		MachineCapabilities: s.capabilitiesController.Observation(now),
 	})
 	if err != nil {
 		return err
@@ -1161,7 +989,7 @@ func (s *runtimeObservationSender) Send(ctx context.Context) error {
 	}
 	token, err := s.tokens.Token(ctx)
 	if err != nil {
-		return err
+		return runtimeObservationFailure{stage: "peer_authority", cause: err}
 	}
 	operationID, err := s.operationID()
 	if err != nil {
@@ -1169,14 +997,14 @@ func (s *runtimeObservationSender) Send(ctx context.Context) error {
 	}
 	proof, err := s.proofs.Proof(ctx, operationID, http.MethodPost, "/v1/runtime-observations", body)
 	if err != nil {
-		return err
+		return runtimeObservationFailure{stage: "peer_authority", cause: err}
 	}
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString(proof))
 	request.Header.Set("Content-Type", "application/json")
 	response, err := s.client.Do(request)
 	if err != nil {
-		return err
+		return runtimeObservationFailure{stage: "control_request", cause: err}
 	}
 	defer response.Body.Close()
 	responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, 8<<20+1))
@@ -1185,53 +1013,78 @@ func (s *runtimeObservationSender) Send(ctx context.Context) error {
 			responseBody[index] = 0
 		}
 	}()
-	if readErr != nil || len(responseBody) > 8<<20 {
+	if readErr != nil {
+		return runtimeObservationFailure{stage: "delivery", cause: readErr}
+	}
+	if len(responseBody) > 8<<20 {
 		return errors.New("runtime observation response is invalid")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		s.applyDeviceServicesPolicy(nil)
-		return fmt.Errorf("runtime observation rejected with status %d", response.StatusCode)
+		s.applyMachineServicesPolicy(nil)
+		return runtimeObservationFailure{stage: "control_request", cause: errorreport.HTTPStatusFailure(response)}
 	}
-	s.applyDeviceServicesPolicy(responseBody)
+	s.applyMachineServicesPolicy(responseBody)
 	if s.transferPolicy != nil {
 		if err := applyRuntimeTransferPolicy(responseBody, s.transferPolicy); err != nil {
 			return err
 		}
 	}
 	if s.capabilitiesController != nil {
-		if err := applyRuntimeDeviceCapabilities(ctx, responseBody, s.capabilitiesController); err != nil {
+		if err := applyRuntimeMachineCapabilities(ctx, responseBody, s.capabilitiesController); err != nil {
 			return err
 		}
-	}
-	if projectionObservation != nil {
-		bundle, err := envinject.DecodeProjectionResponse(responseBody, "environment_bundle")
-		if err != nil {
-			return err
-		}
-		if bundle != nil {
-			if err := s.projection.Apply(ctx, *bundle); err != nil {
-				return err
-			}
-		}
-	}
-
-	if environmentObservation != nil {
-		bundle, err := envinject.DecodeRuntimeResponse(responseBody)
-		if err != nil {
-			slog.Warn("runtime environment response could not be applied", "error", err)
-		} else if bundle != nil {
-			if err := s.environment.Apply(ctx, *bundle); err != nil {
-				slog.Warn("runtime environment bundle could not be applied", "error", err)
-			}
-		}
-	}
-	if environmentObservationSent && s.onEnvironmentObservation != nil {
-		s.onEnvironmentObservation()
 	}
 	if s.receiptPath == "" {
 		return nil
 	}
 	return writeServerHeartbeatReceipt(s.receiptPath, serverHeartbeatReceipt{Schema: "paperboat.server-heartbeat/v1", WorkerGeneration: s.workerGeneration, ReporterVersion: s.reporterVersion, AcceptedAt: time.Now().UTC()})
+}
+
+type runtimeObservationFailure struct {
+	stage string
+	cause error
+}
+
+func (runtimeObservationFailure) Error() string                   { return "runtime observation failed" }
+func (failure runtimeObservationFailure) Unwrap() error           { return failure.cause }
+func (failure runtimeObservationFailure) DiagnosticStage() string { return failure.stage }
+func (runtimeObservationFailure) DiagnosticCode() string          { return "control_request_failed" }
+
+func reportRuntimeObservationAttempt(ctx context.Context, err error) {
+	if errorreport.HTTPAttemptObserved(err) {
+		return
+	}
+	errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "runtime_observation", "reconciliation", "control_request_failed", err)
+}
+
+// Four producer-owned phases bound the retained retry classifications. Only a
+// changed fault or actual successful recovery produces another local event.
+func (s *runtimeObservationSender) observeEnvironmentFailure(ctx context.Context, phase int, err error) {
+	stage := "reconciliation"
+	if phase < 2 {
+		stage = "diagnostic_storage"
+	}
+	fault := errorreport.ProjectFault(ctx, "paperboat-daemon", "config_sync", stage, "environment_sync_failed", err)
+	if fault.Outcome == "canceled" {
+		return
+	}
+	s.environmentFaultMu.Lock()
+	previous := s.environmentFaults[phase]
+	s.environmentFaults[phase] = fault
+	s.environmentFaultMu.Unlock()
+	if err == nil {
+		if previous.Code != "" {
+			errorreport.Current().Lifecycle(ctx, "config", "config_sync", "recovered", "success")
+			if local := diagnostics.FromContext(ctx); local != nil {
+				_ = local.RecordWithSupportReference(stage, "recovered", "info", supportref.FromContext(ctx), map[string]string{"component": "paperboat-daemon", "operation": "config_sync"})
+			}
+		}
+		return
+	}
+	if previous.Code == fault.Code && previous.Stage == fault.Stage && previous.Cause == fault.Cause && previous.Errno == fault.Errno && previous.HTTPStatus == fault.HTTPStatus {
+		return
+	}
+	errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "config_sync", stage, "environment_sync_failed", err)
 }
 
 type lazyRuntimeObservation struct {
@@ -1242,7 +1095,7 @@ type lazyRuntimeObservation struct {
 }
 
 func (s *runtimeObservationSender) lazyRuntimeObservation() *lazyRuntimeObservation {
-	if s.setupMode != "host" || s.lazyBootID == "" || s.installationGeneration == 0 || s.lazyStartedAt.IsZero() {
+	if s.lazyBootID == "" || s.installationGeneration == 0 || s.lazyStartedAt.IsZero() {
 		return nil
 	}
 	return &lazyRuntimeObservation{Schema: "paperboat.lazy-runtime/v1", BootID: s.lazyBootID, InstallationGeneration: s.installationGeneration, StartedAt: s.lazyStartedAt.UTC()}
@@ -1272,11 +1125,15 @@ func (s *runtimeObservationSender) updateObservationFrom(now time.Time, availabi
 		return nil
 	}
 	state, target, errorCode := "healthy", "", ""
+	channel := "custom"
+	if buildinfo.Distribution == "official" {
+		channel = "stable"
+	}
 	var rollbackCount uint64
 	if updaterErr != nil {
 		return &runtimeUpdateObservation{
 			Schema: "paperboat.update-observation/v1", State: "failed", CurrentVersion: s.reporterVersion,
-			TargetVersion: s.reporterVersion, Channel: "stable", OperationID: "update-" + strconv.FormatUint(s.workerGeneration, 10) + "-" + strconv.FormatInt(now.UnixNano(), 10),
+			TargetVersion: s.reporterVersion, Channel: channel, OperationID: "update-" + strconv.FormatUint(s.workerGeneration, 10) + "-" + strconv.FormatInt(now.UnixNano(), 10),
 			InstallationGeneration: s.installationGeneration, WorkerGeneration: s.workerGeneration, OSBootID: s.osBootID,
 			ErrorCode: "updater_unavailable", ObservedAt: now,
 		}
@@ -1289,7 +1146,7 @@ func (s *runtimeObservationSender) updateObservationFrom(now time.Time, availabi
 		if updaterState.Observation.Failure != "" || updaterState.Status != "ok" {
 			return &runtimeUpdateObservation{
 				Schema: "paperboat.update-observation/v1", State: "failed", CurrentVersion: currentVersion,
-				TargetVersion: currentVersion, Channel: "stable", OperationID: "update-" + strconv.FormatUint(s.workerGeneration, 10) + "-" + strconv.FormatInt(now.UnixNano(), 10),
+				TargetVersion: currentVersion, Channel: channel, OperationID: "update-" + strconv.FormatUint(s.workerGeneration, 10) + "-" + strconv.FormatInt(now.UnixNano(), 10),
 				InstallationGeneration: s.installationGeneration, WorkerGeneration: s.workerGeneration, OSBootID: s.osBootID,
 				ErrorCode: "update_failed", ObservedAt: now,
 			}
@@ -1298,7 +1155,7 @@ func (s *runtimeObservationSender) updateObservationFrom(now time.Time, availabi
 		// version. The runtime process can remain alive across that activation.
 		return &runtimeUpdateObservation{
 			Schema: "paperboat.update-observation/v1", State: "healthy", CurrentVersion: currentVersion,
-			Channel: "stable", OperationID: "update-" + strconv.FormatUint(s.workerGeneration, 10) + "-" + strconv.FormatInt(now.UnixNano(), 10),
+			Channel: channel, OperationID: "update-" + strconv.FormatUint(s.workerGeneration, 10) + "-" + strconv.FormatInt(now.UnixNano(), 10),
 			InstallationGeneration: s.installationGeneration, WorkerGeneration: s.workerGeneration, OSBootID: s.osBootID,
 			ObservedAt: now,
 		}
@@ -1312,7 +1169,6 @@ func (s *runtimeObservationSender) updateObservationFrom(now time.Time, availabi
 			state, target, errorCode = "failed", s.reporterVersion, "recovery_required"
 		}
 	}
-	channel := "stable"
 	return &runtimeUpdateObservation{
 		Schema:                 "paperboat.update-observation/v1",
 		State:                  state,

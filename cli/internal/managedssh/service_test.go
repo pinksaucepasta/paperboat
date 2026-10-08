@@ -51,6 +51,20 @@ func TestAgentServiceOwnsSocketAndManagedIdentityLifecycle(t *testing.T) {
 	}
 }
 
+func TestAgentServiceStartupFailureHasBoundedLifecycleClassification(t *testing.T) {
+	_, err := StartAgentService(context.Background(), AgentServiceConfig{})
+	if !errors.Is(err, ErrAgentDenied) {
+		t.Fatalf("invalid startup error=%v, want managed agent denial", err)
+	}
+	var classified interface {
+		DiagnosticStage() string
+		DiagnosticCode() string
+	}
+	if !errors.As(err, &classified) || classified.DiagnosticStage() != "component_start" || classified.DiagnosticCode() != "managed_ssh_failed" {
+		t.Fatalf("startup classification missing: %T %v", err, err)
+	}
+}
+
 func TestAgentServiceAggregatesValidatedInheritedAgent(t *testing.T) {
 	if os.PathSeparator != '/' {
 		t.Skip("Windows OpenSSH exposes one owner agent named pipe")

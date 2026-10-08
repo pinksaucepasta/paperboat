@@ -50,7 +50,10 @@ const (
 	Kill      Signal = "SIGKILL"
 )
 
-type Adapter struct{ root string }
+type Adapter struct {
+	root             string
+	shellDirectories bool
+}
 
 func NewAdapter(root string) (*Adapter, error) {
 	resolved, err := resolveDirectory(root)
@@ -60,13 +63,25 @@ func NewAdapter(root string) (*Adapter, error) {
 	return &Adapter{root: resolved}, nil
 }
 
+// NewShellAdapter allows managed interactive shells to start in any existing
+// absolute directory accessible to the enrolled OS user. NewAdapter retains
+// workspace confinement for exec and other scoped consumers.
+func NewShellAdapter(root string) (*Adapter, error) {
+	adapter, err := NewAdapter(root)
+	if err != nil {
+		return nil, err
+	}
+	adapter.shellDirectories = true
+	return adapter, nil
+}
+
 func (a *Adapter) Start(command Command) (*Process, error) {
 	path, err := ValidateProcessPolicy(command.Path, command.Args, command.Env)
 	if err != nil {
 		return nil, err
 	}
 	cwd, err := resolveDirectory(command.CWD)
-	if err != nil || !within(a.root, cwd) {
+	if err != nil || !filepath.IsAbs(command.CWD) || !a.shellDirectories && !within(a.root, cwd) {
 		return nil, ErrInvalidCWD
 	}
 	if !validDimensions(command.Dimensions) {
@@ -148,11 +163,12 @@ func (a *Adapter) Start(command Command) (*Process, error) {
 	}
 	startup := windows.StartupInfoEx{}
 	startup.Cb = uint32(unsafe.Sizeof(startup))
-	// Do not set STARTF_USESTDHANDLES here. ConPTY owns the child console
-	// streams through PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE; advertising null
-	// standard handles makes CreateProcess reject the launch with
-	// ERROR_INVALID_HANDLE, which is especially visible when hostd runs as a
-	// Windows service without inherited console handles.
+	// ConPTY owns the child's console streams. Explicit null standard handles
+	// prevent Windows from implicitly copying the parent's redirected streams;
+	// enrolled daemon workers use NUL streams, which otherwise make shells exit
+	// immediately instead of reading their pseudoconsole. This changes only the
+	// child's startup record, never the concurrent host process's handles.
+	startup.Flags = windows.STARTF_USESTDHANDLES
 	startup.ProcThreadAttributeList = attributes.List()
 	var processInfo windows.ProcessInformation
 	// CREATE_NEW_PROCESS_GROUP disables Ctrl+C handling for the new process.
@@ -194,6 +210,7 @@ func (a *Adapter) Start(command Command) (*Process, error) {
 }
 
 type Process struct {
+	writeMu     sync.Mutex
 	input       *os.File
 	output      *os.File
 	console     windows.Handle
@@ -209,7 +226,15 @@ type Process struct {
 }
 
 func (p *Process) Read(buffer []byte) (int, error) { return p.output.Read(buffer) }
-func (p *Process) Write(data []byte) (int, error)  { return p.input.Write(data) }
+func (p *Process) Write(data []byte) (int, error)  { return p.WriteContext(context.Background(), data) }
+func (p *Process) WriteContext(ctx context.Context, data []byte) (int, error) {
+	if err := LockInput(ctx, &p.writeMu); err != nil {
+		return 0, err
+	}
+	defer p.writeMu.Unlock()
+	return writeInput(p.input, data, inputTimeout(ctx))
+}
+
 func (p *Process) Resize(dimensions Dimensions) error {
 	if !validDimensions(dimensions) {
 		return ErrInvalidDimensions

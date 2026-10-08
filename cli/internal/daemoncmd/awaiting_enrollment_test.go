@@ -62,7 +62,7 @@ func TestAwaitingEnrollmentServesIPCAndTransitions(t *testing.T) {
 					t.Fatal(err)
 				}
 				key := store.Current()
-				err = store.SaveRegistration(identity.Registration{ServerURL: "https://control.invalid", MachineID: "machine_test", EnvironmentID: "environment_test", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, SetupMode: "client", UpdatedAt: time.Now()})
+				err = store.SaveRegistration(identity.Registration{ServerURL: "https://control.invalid", MachineID: "machine_test", EnvironmentID: "environment_test", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, UpdatedAt: time.Now()})
 				if err != nil {
 					t.Fatal(err)
 				}

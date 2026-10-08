@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"syscall"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
@@ -16,7 +15,7 @@ func chooseBootstrapLoopbackAddress(primary, secondary string) (string, error) {
 	for _, address := range []string{primary, secondary} {
 		listener, err := net.Listen("tcp4", address)
 		if err != nil {
-			if !errors.Is(err, syscall.EADDRINUSE) {
+			if !bootstrapAddressInUse(err) {
 				return "", fmt.Errorf("check Paperboat runtime listener %s: %w", address, err)
 			}
 			continue
@@ -69,7 +68,7 @@ func rejectFreshBootstrapOverEnrollment(store *identity.Store, resumeErr error) 
 		return fmt.Errorf("inspect existing machine enrollment: %w", err)
 	}
 	if registration.MachineID != "" {
-		return errors.New("this OS user already has a Paperboat machine enrollment; to complete or repair this device, sign in to the same account and run `pb setup --name <device-alias>`; run `pb uninstall` only before enrolling another account")
+		return errors.New("this OS user already has a Paperboat machine enrollment; to complete or repair this machine, sign in to the same account and run `pb setup --name <machine-alias>`; run `pb uninstall` only before enrolling another account")
 	}
 	return nil
 }

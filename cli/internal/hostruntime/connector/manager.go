@@ -3,7 +3,6 @@ package connector
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -111,6 +110,13 @@ type activeConnection struct {
 	transport  Transport
 	connection Connection
 }
+
+type transportFailure struct{ cause error }
+
+func (*transportFailure) Error() string           { return "connector transport failed" }
+func (e *transportFailure) Unwrap() []error       { return []error{ErrUnavailable, e.cause} }
+func (*transportFailure) DiagnosticStage() string { return "peer_connect" }
+func (*transportFailure) DiagnosticCode() string  { return "transport_failed" }
 
 type Manager struct {
 	opMu              sync.Mutex
@@ -239,10 +245,13 @@ func (m *Manager) dial(ctx context.Context, admission Admission) (Connection, Tr
 		}
 		return connection, transport, nil
 	}
-	if connection != nil {
-		_ = connection.Close()
+	if err == nil {
+		err = ErrUnavailable
 	}
-	return nil, "", fmt.Errorf("%w: %s: %w", ErrUnavailable, transport, err)
+	if connection != nil {
+		err = errors.Join(err, connection.Close())
+	}
+	return nil, "", &transportFailure{cause: err}
 }
 
 func (m *Manager) Status() Status {

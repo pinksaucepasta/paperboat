@@ -30,6 +30,7 @@ const (
 	localPeerTerminalData
 	localPeerTerminalSequence
 	localPeerReplayGap
+	localPeerExecCancelAck
 )
 
 type localPeerReplayGapPayload struct{ requested, earliest, latest uint64 }
@@ -126,7 +127,7 @@ func readLocalPeerFrame(reader io.Reader) (byte, []byte, error) {
 		return 0, nil, err
 	}
 	size := binary.BigEndian.Uint32(header[1:])
-	if size > localPeerMaximumFrame || header[0] < localPeerData || header[0] > localPeerReplayGap {
+	if size > localPeerMaximumFrame || header[0] < localPeerData || header[0] > localPeerExecCancelAck {
 		return 0, nil, ErrPeerTerminalInvalid
 	}
 	payload := make([]byte, size)
@@ -156,12 +157,26 @@ func ServeLocalPeerDebugTerminalConn(ctx context.Context, local net.Conn, remote
 	return serveLocalPeerConn(ctx, local, remote, true, cursor)
 }
 
-func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includeMetadata bool, cursor *LocalPeerCursorBridge) error {
+func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includeMetadata bool, cursor *LocalPeerCursorBridge) (returnErr error) {
 	if ctx == nil || local == nil || remote == nil {
 		return ErrPeerTerminalInvalid
 	}
-	defer local.Close()
-	defer remote.Close()
+	remoteExec, isExec := remote.(ExecConn)
+	stop := make(chan struct{})
+	var workers sync.WaitGroup
+	defer func() {
+		close(stop)
+		// Losing an attachment must not terminate its durable remote operation.
+		if isExec {
+			returnErr = errors.Join(returnErr, remoteExec.Detach())
+		} else {
+			returnErr = errors.Join(returnErr, remote.Close())
+		}
+		returnErr = errors.Join(returnErr, local.Close())
+		if isExec {
+			workers.Wait()
+		}
+	}()
 	writer := &localPeerWriter{writer: local}
 	if includeMetadata {
 		metadata, err := json.Marshal(localPeerMetadataPayload{RuntimeVersion: TerminalRuntimeVersion(remote)})
@@ -172,15 +187,26 @@ func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includ
 			return err
 		}
 	}
-	remoteExec, isExec := remote.(ExecConn)
 	done := make(chan error, 3)
 	outputDone := make(chan struct{})
 	waitStarted := false
 	if isExec {
+		workers.Add(1)
 		go func() {
+			defer workers.Done()
 			defer close(outputDone)
 			terminal := false
-			for event := range remoteExec.Events() {
+			for {
+				var event ExecEvent
+				var ok bool
+				select {
+				case event, ok = <-remoteExec.Events():
+				case <-stop:
+					return
+				}
+				if !ok {
+					break
+				}
 				if event.Stream == "" && event.State != "" && event.State != "started" {
 					terminal = true
 				}
@@ -191,6 +217,9 @@ func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includ
 				}
 				if err := writer.write(localPeerExecEvent, encoded); err != nil {
 					done <- err
+					return
+				}
+				if terminal {
 					return
 				}
 			}
@@ -254,7 +283,9 @@ func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includ
 			}
 		}()
 	}
+	workers.Add(1)
 	go func() {
+		defer workers.Done()
 		for {
 			kind, payload, err := readLocalPeerFrame(local)
 			if err != nil {
@@ -274,13 +305,17 @@ func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includ
 				}
 				rows, cols := binary.BigEndian.Uint16(payload[:2]), binary.BigEndian.Uint16(payload[2:])
 				if resizeErr := remote.Resize(rows, cols); resizeErr != nil {
-					done <- ErrPeerTerminalInvalid
+					done <- resizeErr
 					return
 				}
 			case localPeerCloseWrite:
 				closer, ok := remote.(InputHalfCloser)
-				if !ok || closer.CloseWrite() != nil {
+				if !ok {
 					done <- ErrInputEOFUnsupported
+					return
+				}
+				if err := closer.CloseWrite(); err != nil {
+					done <- err
 					return
 				}
 			case localPeerWait:
@@ -289,11 +324,11 @@ func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includ
 					return
 				}
 				waitStarted = true
+				workers.Add(1)
 				go func() {
+					defer workers.Done()
 					code, waitErr := remote.Wait()
-					if !isExec {
-						<-outputDone
-					}
+					<-outputDone
 					result := make([]byte, 4)
 					binary.BigEndian.PutUint32(result, uint32(int32(code)))
 					kind := localPeerResult
@@ -310,18 +345,34 @@ func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includ
 				done <- errors.Join(closeErr, ackErr)
 				return
 			case localPeerExecCancel:
-				if !isExec || remoteExec.Cancel() != nil {
+				if !isExec {
 					done <- ErrPeerTerminalInvalid
+					return
+				}
+				if err := remoteExec.Cancel(); err != nil {
+					done <- err
+					return
+				}
+				if err := writer.write(localPeerExecCancelAck, nil); err != nil {
+					done <- err
 					return
 				}
 			case localPeerExecSignal:
-				if !isExec || len(payload) == 0 || len(payload) > 64 || remoteExec.Signal(string(payload)) != nil {
+				if !isExec || len(payload) == 0 || len(payload) > 64 {
 					done <- ErrPeerTerminalInvalid
 					return
 				}
+				if err := remoteExec.Signal(string(payload)); err != nil {
+					done <- err
+					return
+				}
 			case localPeerExecDetach:
-				if !isExec || remoteExec.Detach() != nil {
+				if !isExec {
 					done <- ErrPeerTerminalInvalid
+					return
+				}
+				if err := remoteExec.Detach(); err != nil {
+					done <- err
 					return
 				}
 			default:
@@ -351,6 +402,8 @@ type localPeerConn struct {
 	result            chan localPeerWaitResult
 	done              chan struct{}
 	closed            chan struct{}
+	cancelAck         chan struct{}
+	cancelOnce        sync.Once
 	stop              chan struct{}
 	events            chan ExecEvent
 	exec              bool
@@ -362,6 +415,7 @@ type localPeerConn struct {
 	replayGapSink     func(uint64, uint64, uint64)
 	once              sync.Once
 	stopOnce          sync.Once
+	closeErr          error
 }
 
 type localPeerOutput struct {
@@ -411,7 +465,7 @@ func newLocalPeerConn(connection net.Conn, exec, expectMetadata bool, sequenceSi
 	if connection == nil {
 		return nil, ErrPeerTerminalInvalid
 	}
-	value := &localPeerConn{connection: connection, writer: &localPeerWriter{writer: connection}, data: make(chan localPeerOutput, 16), result: make(chan localPeerWaitResult, 1), done: make(chan struct{}), closed: make(chan struct{}), stop: make(chan struct{}), events: make(chan ExecEvent, 256), exec: exec, sequenceSink: sequenceSink, replayGapSink: replayGapSink}
+	value := &localPeerConn{connection: connection, writer: &localPeerWriter{writer: connection}, data: make(chan localPeerOutput, 16), result: make(chan localPeerWaitResult, 1), done: make(chan struct{}), closed: make(chan struct{}), cancelAck: make(chan struct{}), stop: make(chan struct{}), events: make(chan ExecEvent, 256), exec: exec, sequenceSink: sequenceSink, replayGapSink: replayGapSink}
 	if expectMetadata {
 		_ = connection.SetReadDeadline(time.Now().Add(time.Second))
 		kind, payload, err := readLocalPeerFrame(connection)
@@ -460,7 +514,7 @@ func (c *localPeerConn) readLoop() {
 		switch kind {
 		case localPeerTerminalData:
 			if c.exec || len(payload) < 8 {
-				c.result <- localPeerWaitResult{err: ErrPeerTerminalInvalid}
+				c.publishResult(localPeerWaitResult{err: ErrPeerTerminalInvalid})
 				return
 			}
 			if !c.enqueue(localPeerOutput{data: payload[8:], sequence: binary.BigEndian.Uint64(payload)}) {
@@ -468,7 +522,7 @@ func (c *localPeerConn) readLoop() {
 			}
 		case localPeerTerminalSequence:
 			if c.exec || len(payload) != 8 {
-				c.result <- localPeerWaitResult{err: ErrPeerTerminalInvalid}
+				c.publishResult(localPeerWaitResult{err: ErrPeerTerminalInvalid})
 				return
 			}
 			if !c.enqueue(localPeerOutput{sequence: binary.BigEndian.Uint64(payload)}) {
@@ -476,12 +530,12 @@ func (c *localPeerConn) readLoop() {
 			}
 		case localPeerReplayGap:
 			if c.exec || len(payload) != 24 {
-				c.result <- localPeerWaitResult{err: ErrPeerTerminalInvalid}
+				c.publishResult(localPeerWaitResult{err: ErrPeerTerminalInvalid})
 				return
 			}
 			requested, earliest, latest := binary.BigEndian.Uint64(payload), binary.BigEndian.Uint64(payload[8:]), binary.BigEndian.Uint64(payload[16:])
 			if earliest > latest {
-				c.result <- localPeerWaitResult{err: ErrPeerTerminalInvalid}
+				c.publishResult(localPeerWaitResult{err: ErrPeerTerminalInvalid})
 				return
 			}
 			if c.replayGapSink != nil {
@@ -489,23 +543,27 @@ func (c *localPeerConn) readLoop() {
 			}
 		case localPeerResult:
 			if len(payload) != 4 {
-				c.result <- localPeerWaitResult{err: ErrPeerTerminalInvalid}
+				c.publishResult(localPeerWaitResult{err: ErrPeerTerminalInvalid})
 				return
 			}
-			c.result <- localPeerWaitResult{code: int(int32(binary.BigEndian.Uint32(payload)))}
+			c.publishResult(localPeerWaitResult{code: int(int32(binary.BigEndian.Uint32(payload)))})
 		case localPeerFailure:
-			c.result <- localPeerWaitResult{err: ErrTransportLost}
+			c.publishResult(localPeerWaitResult{err: ErrTransportLost})
 		case localPeerExecEvent:
 			if !c.exec {
-				c.result <- localPeerWaitResult{err: ErrPeerTerminalInvalid}
+				c.publishResult(localPeerWaitResult{err: ErrPeerTerminalInvalid})
 				return
 			}
 			var event ExecEvent
 			if json.Unmarshal(payload, &event) != nil || event.OperationID == "" {
-				c.result <- localPeerWaitResult{err: ErrPeerTerminalInvalid}
+				c.publishResult(localPeerWaitResult{err: ErrPeerTerminalInvalid})
 				return
 			}
-			c.events <- event
+			select {
+			case c.events <- event:
+			case <-c.stop:
+				return
+			}
 			if event.Stream == "" && event.State != "" && event.State != "started" {
 				result := localPeerWaitResult{}
 				if event.Result != nil {
@@ -522,14 +580,38 @@ func (c *localPeerConn) readLoop() {
 				default:
 				}
 			}
+		case localPeerExecCancelAck:
+			if !c.exec || len(payload) != 0 {
+				c.publishResult(localPeerWaitResult{err: ErrPeerTerminalInvalid})
+				return
+			}
+			c.cancelOnce.Do(func() { close(c.cancelAck) })
 		case localPeerClosed:
 			close(c.closed)
 			return
 		default:
-			c.result <- localPeerWaitResult{err: ErrPeerTerminalInvalid}
+			c.publishResult(localPeerWaitResult{err: ErrPeerTerminalInvalid})
 			return
 		}
 	}
+}
+
+func (c *localPeerConn) publishResult(result localPeerWaitResult) {
+	select {
+	case c.result <- result:
+	default:
+	}
+}
+
+// Abort releases only the local attachment. It never sends remote cancel.
+// Closing the owned carrier interrupts pending writes and joins its reader.
+func (c *localPeerConn) Abort() error {
+	c.once.Do(func() {
+		c.stopOnce.Do(func() { close(c.stop) })
+		c.closeErr = c.connection.Close()
+		<-c.done
+	})
+	return c.closeErr
 }
 
 func (c *localPeerConn) enqueue(output localPeerOutput) bool {
@@ -626,17 +708,26 @@ func (c *localPeerConn) Wait() (int, error) {
 		}
 		return 1, err
 	}
-	result := <-c.result
-	return result.code, result.err
+	select {
+	case result := <-c.result:
+		return result.code, result.err
+	case <-c.done:
+		select {
+		case result := <-c.result:
+			return result.code, result.err
+		default:
+			return 1, ErrTransportLost
+		}
+	}
 }
 func (c *localPeerConn) Close() error {
-	var err error
 	c.once.Do(func() {
 		c.stopOnce.Do(func() { close(c.stop) })
 		deadline := time.Now().Add(3 * time.Second)
 		// Bound the request and any preceding writer before taking its mutex.
 		if deadlineErr := c.connection.SetWriteDeadline(deadline); deadlineErr != nil {
-			err = errors.Join(deadlineErr, c.connection.Close())
+			c.closeErr = errors.Join(deadlineErr, c.connection.Close())
+			<-c.done
 			return
 		}
 		if writeErr := c.writer.write(localPeerClose, nil); writeErr == nil {
@@ -646,9 +737,10 @@ func (c *localPeerConn) Close() error {
 			case <-time.After(time.Until(deadline)):
 			}
 		}
-		err = c.connection.Close()
+		c.closeErr = c.connection.Close()
+		<-c.done
 	})
-	return err
+	return c.closeErr
 }
 
 func (c *localPeerConn) Events() <-chan ExecEvent { return c.events }
@@ -656,7 +748,20 @@ func (c *localPeerConn) Cancel() error {
 	if !c.exec {
 		return ErrPeerTerminalInvalid
 	}
-	return c.writer.write(localPeerExecCancel, nil)
+	if err := c.writer.write(localPeerExecCancel, nil); err != nil {
+		return err
+	}
+	select {
+	case <-c.cancelAck:
+		return nil
+	case <-c.done:
+		select {
+		case <-c.cancelAck:
+			return nil
+		default:
+			return ErrTransportLost
+		}
+	}
 }
 func (c *localPeerConn) Signal(signal string) error {
 	if !c.exec || signal == "" || len(signal) > 64 {

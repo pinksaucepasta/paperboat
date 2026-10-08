@@ -135,7 +135,7 @@ func TestAttachmentCarrierRequiresDurableCreateOperation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lease := Lease{ID: "preview_missing", OwnerDeviceID: "machine_01", OwnerSessionID: "owner_session_01"}
+	lease := Lease{ID: "preview_missing", OwnerMachineID: "machine_01", OwnerSessionID: "owner_session_01"}
 	if err := carrier.Run(context.Background(), lease, func(Lease) error { return nil }); !errors.Is(err, ErrAttachmentBinding) {
 		t.Fatalf("missing create operation error = %v, want binding error", err)
 	}

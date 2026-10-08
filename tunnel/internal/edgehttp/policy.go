@@ -3,14 +3,12 @@ package edgehttp
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
 	"crypto/sha1" // #nosec G505 -- required by RFC 6455 for the WebSocket handshake.
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"io"
+	"log"
 	"log/slog"
 	"net"
 	"net/http"
@@ -20,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/admission"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
@@ -36,10 +35,15 @@ type RouteMatcher interface {
 }
 
 type Config struct {
+	// OnFailure observes final proxy failures; the caller owns hosted exception policy.
+	OnFailure       func(context.Context, error)
 	SelfHosted      bool
 	BrowserAccess   *BrowserAccess
 	BrowserTerminal interface {
 		Admit(context.Context, string, string, string) (control.BrowserTerminalAdmission, error)
+	}
+	BrowserConfigCompare interface {
+		Admit(context.Context, string, string, string) (control.BrowserConfigCompareAdmission, error)
 	}
 	BrowserTerminalHub       *BrowserTerminalHub
 	BrowserTerminalEdgeHost  string
@@ -52,7 +56,6 @@ type Config struct {
 	MaxHeaderBytes           int64
 	MaxBodyBytes             int64
 	Routes                   RouteMatcher
-	PrivateAccessToken       string
 	PrivateAccessConnections *PrivateAccessConnectionRegistry
 	RequestID                func() string
 	Readiness                interface {
@@ -86,7 +89,7 @@ type Policy struct {
 }
 
 func New(config Config, next http.Handler) (*Policy, error) {
-	if next == nil || (!config.SelfHosted || config.BrowserAccess != nil) && (config.PreviewBaseDomain == "" || config.TunnelBaseDomain == "" || config.RuntimeBaseDomain == "") || config.MaxHeaderBytes < 1024 || config.MaxBodyBytes < 1 || config.PrivateAccessToken != "" && (len(config.PrivateAccessToken) < 32 || len(config.PrivateAccessToken) > 256 || strings.TrimSpace(config.PrivateAccessToken) != config.PrivateAccessToken || strings.ContainsAny(config.PrivateAccessToken, "\r\n\x00")) {
+	if next == nil || (!config.SelfHosted || config.BrowserAccess != nil) && (config.PreviewBaseDomain == "" || config.TunnelBaseDomain == "" || config.RuntimeBaseDomain == "") || config.MaxHeaderBytes < 1024 || config.MaxBodyBytes < 1 {
 		return nil, http.ErrNotSupported
 	}
 	trusted := make([]net.IPNet, 0, len(config.TrustedProxies))
@@ -126,6 +129,7 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 	}
 	legacy := httputil.NewSingleHostReverseProxy(target)
 	legacy.FlushInterval = -1
+	configureProxyDiagnostics(legacy, config.OnFailure)
 	legacy.ModifyResponse = func(response *http.Response) error {
 		response.Header.Del("X-Robots-Tag")
 		stripBrowserResponseCredentials(response.Header)
@@ -133,7 +137,7 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 	}
 	var canonical http.Handler
 	if canonicalTransport != nil {
-		canonical = &httputil.ReverseProxy{
+		proxy := &httputil.ReverseProxy{
 			Transport:     canonicalTransport,
 			FlushInterval: -1,
 			Rewrite: func(request *httputil.ProxyRequest) {
@@ -142,6 +146,8 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 			},
 			ModifyResponse: legacy.ModifyResponse,
 		}
+		configureProxyDiagnostics(proxy, config.OnFailure)
+		canonical = proxy
 	}
 	var legacyHandler http.Handler = legacy
 	if privateUpstream == "" {
@@ -151,7 +157,7 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 	if previewTransport != nil || canonicalTransport != nil || config.RuntimeCarrierTransport != nil {
 		var runtimeHandler http.Handler
 		if config.RuntimeCarrierTransport != nil {
-			runtimeHandler = &httputil.ReverseProxy{Transport: config.RuntimeCarrierTransport, FlushInterval: -1, Rewrite: func(request *httputil.ProxyRequest) {
+			proxy := &httputil.ReverseProxy{Transport: config.RuntimeCarrierTransport, FlushInterval: -1, Rewrite: func(request *httputil.ProxyRequest) {
 				request.Out.URL.Scheme = "http"
 				request.Out.URL.Host = request.In.Host
 			}, ModifyResponse: func(response *http.Response) error {
@@ -159,16 +165,13 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 					slog.InfoContext(response.Request.Context(), "browser terminal host response", "status", response.StatusCode)
 				}
 				return legacy.ModifyResponse(response)
-			}, ErrorHandler: func(writer http.ResponseWriter, request *http.Request, err error) {
-				if request.URL.Path == "/v1/browser-terminal" {
-					slog.WarnContext(request.Context(), "browser terminal host proxy failed", "error", err)
-				}
-				http.Error(writer, http.StatusText(http.StatusBadGateway), http.StatusBadGateway)
 			}}
+			configureProxyDiagnostics(proxy, config.OnFailure)
+			runtimeHandler = proxy
 		}
 		var preview http.Handler
 		if previewTransport != nil {
-			preview = &httputil.ReverseProxy{
+			proxy := &httputil.ReverseProxy{
 				Transport:     retryPreviewTransport{next: previewTransport},
 				FlushInterval: -1,
 				Rewrite: func(request *httputil.ProxyRequest) {
@@ -177,6 +180,8 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 				},
 				ModifyResponse: legacy.ModifyResponse,
 			}
+			configureProxyDiagnostics(proxy, config.OnFailure)
+			preview = proxy
 		}
 		next = http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			if match, ok := RouteMatchFromContext(request.Context()); ok {
@@ -212,11 +217,37 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 	return New(config, next)
 }
 
+var errProxyHTTPDiagnostic = errors.New("edge proxy HTTP diagnostic")
+
+type proxyDiagnosticWriter struct{ observe func(context.Context, error) }
+
+func (w proxyDiagnosticWriter) Write(p []byte) (int, error) {
+	if w.observe != nil {
+		w.observe(context.Background(), errProxyHTTPDiagnostic)
+	}
+	return len(p), nil
+}
+func configureProxyDiagnostics(proxy *httputil.ReverseProxy, observe func(context.Context, error)) {
+	proxy.ErrorLog = log.New(proxyDiagnosticWriter{observe: observe}, "", 0)
+	proxy.ErrorHandler = func(writer http.ResponseWriter, request *http.Request, err error) {
+		if err == http.ErrAbortHandler {
+			return
+		}
+		if observe != nil {
+			observe(request.Context(), err)
+		}
+		http.Error(writer, http.StatusText(http.StatusBadGateway), http.StatusBadGateway)
+	}
+}
+
 type retryPreviewTransport struct{ next http.RoundTripper }
 
 func (t retryPreviewTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	response, err := t.next.RoundTrip(request)
 	if _, restricted := request.Context().Value(browserDecisionKey{}).(connectorprotocol.IngressDecision); restricted {
+		return response, err
+	}
+	if _, private := request.Context().Value(privateAccessRequestContextKey{}).(connectorprotocol.PrivateAccessRequest); private {
 		return response, err
 	}
 	if err == nil || !retryablePreviewRequest(request) || !retryablePreviewTransportError(err) {
@@ -265,11 +296,14 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// cannot send a fresh admission to the former active edge. The path names
 	// only a candidate route; the one-use ticket and current node/epoch are
 	// still checked before any terminal stream is opened.
-	if p.config.BrowserTerminalEdgeHost != "" && r.Host == p.config.BrowserTerminalEdgeHost && (strings.HasPrefix(r.URL.Path, "/v1/browser-terminal/") || strings.HasPrefix(r.URL.Path, "/v1/runtime/")) {
+	if p.config.BrowserTerminalEdgeHost != "" && r.Host == p.config.BrowserTerminalEdgeHost && (strings.HasPrefix(r.URL.Path, "/v1/browser-terminal/") || strings.HasPrefix(r.URL.Path, "/v1/runtime/") || strings.HasPrefix(r.URL.Path, "/v1/browser-config-compare/")) {
 		browserTerminal := strings.HasPrefix(r.URL.Path, "/v1/browser-terminal/")
+		browserCompare := strings.HasPrefix(r.URL.Path, "/v1/browser-config-compare/")
 		prefix := "/v1/runtime/"
 		if browserTerminal {
 			prefix = "/v1/browser-terminal/"
+		} else if browserCompare {
+			prefix = "/v1/browser-config-compare/"
 		}
 		runtimeHost := strings.TrimPrefix(r.URL.Path, prefix)
 		_, kind, allowed := p.allowedHost(runtimeHost)
@@ -281,6 +315,8 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Host = runtimeHost
 		if browserTerminal {
 			r.URL.Path = "/v1/browser-terminal"
+		} else if browserCompare {
+			r.URL.Path = "/v1/browser-config-compare"
 		} else {
 			r.URL.Path = "/v1/runtime"
 		}
@@ -342,13 +378,13 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		matched, lease = acquired, candidateLease
 	acquiredRoute:
+		defer lease.Close()
 		host, expectedKind, ok = matched.Host, string(matched.Rule.Kind), true
 		if expectedKind == string(route.TunnelHTTPSWSS) && (matched.Rule.MatchType == route.MatchManagedExact || strings.HasSuffix(host, "."+strings.ToLower(p.config.TunnelBaseDomain))) && !route.ValidManagedTunnelHostname(host, p.config.TunnelBaseDomain) {
 			http.NotFound(w, r)
 			return
 		}
 		r = r.WithContext(context.WithValue(lease.Context(), routeMatchContextKey{}, matched))
-		defer lease.Close()
 	}
 	if !ok || !normalizeRequestTarget(r, host) || headerBytes(r.Header) > p.config.MaxHeaderBytes {
 		http.NotFound(w, r)
@@ -365,8 +401,15 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Header.Set("Connection", "Upgrade")
 		r.Header.Set("Upgrade", "websocket")
 	}
+	privateStatus, privateAuthorized := http.StatusUnauthorized, false
+	var privateRequest connectorprotocol.PrivateAccessRequest
+	if p.config.PrivateAccessConnections != nil {
+		privateRequest, privateStatus, privateAuthorized = p.config.PrivateAccessConnections.authorizeRequest(r.RemoteAddr, matched)
+	}
+	r.Header.Del("X-Paperboat-Private-Carrier")
+	r.Header.Del("X-Paperboat-Private-Connection")
 	browserAuthorized := false
-	if (matched.Rule.AccessMode == "private" || matched.Rule.AccessMode == "team") && p.config.BrowserAccess != nil && r.Header.Get("X-Paperboat-Private-Carrier") == "" {
+	if (matched.Rule.AccessMode == "private" || matched.Rule.AccessMode == "team") && p.config.BrowserAccess != nil && !privateAuthorized {
 		var finish func()
 		r, finish, browserAuthorized = p.config.BrowserAccess.authorize(w, r, matched)
 		if !browserAuthorized {
@@ -384,36 +427,39 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// client-initiated carrier stream. Public edge requests never become
 		// private access based on browser cookies, Authorization, or custom
 		// headers.
-		connectionID := r.Header.Get("X-Paperboat-Private-Connection")
-		if !p.consumePrivateCarrierToken(r.Header) {
-			stripPrivate(r.Header, expectedKind)
-			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		if !privateAuthorized {
+			http.Error(w, http.StatusText(privateStatus), privateStatus)
 			return
 		}
-		r.Header.Del("X-Paperboat-Private-Connection")
-		if p.config.PrivateAccessConnections == nil {
-			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
-			return
-		}
-		status, allowed := p.config.PrivateAccessConnections.Authorize(connectionID, matched)
-		if !allowed {
-			http.Error(w, http.StatusText(status), status)
-			return
+	}
+	if privateAuthorized {
+		r = r.WithContext(context.WithValue(r.Context(), privateAccessRequestContextKey{}, privateRequest))
+		if ingress, ok := p.config.PrivateAccessConnections.ingress(r.RemoteAddr, matched); ok {
+			r = r.WithContext(context.WithValue(r.Context(), privateIngressDecisionKey{}, ingress))
 		}
 	}
 	stripPrivate(r.Header, expectedKind)
 	r.Header.Set("X-Forwarded-For", clientIP)
 	r.Header.Set("X-Forwarded-Host", host)
 	r.Header.Set("X-Forwarded-Proto", "https")
-	requestID, requestIDErr := p.trustedRequestID()
+	info, _ := RequestTelemetryInfo(r.Context())
+	requestID, requestIDErr := info.IDs.RequestID, error(nil)
+	if !validRequestID(requestID) {
+		requestID, requestIDErr = p.trustedRequestID()
+	}
 	if requestIDErr != nil {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
 	r.Header.Set("Forwarded", formatForwarded(clientIP, host))
 	r.Header.Set("X-Request-ID", requestID)
+	info.IDs.RequestID = requestID
+	r = r.WithContext(WithRequestTelemetryInfo(r.Context(), info))
 	if matched.Rule.HostOverride != "" {
 		r.Host = matched.Rule.HostOverride
+	}
+	if r.Body != nil && r.Body != http.NoBody {
+		r.Body = &proxyRequestBody{body: r.Body, controller: http.NewResponseController(w)}
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, p.config.MaxBodyBytes)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -449,6 +495,24 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, http.StatusText(status), status)
 			return
 		}
+	}
+	if expectedKind == "runtime_https_wss" && r.URL.Path == browserConfigComparePath {
+		if r.Method != http.MethodGet || !websocket || r.URL.RawQuery != "" || p.config.BrowserConfigCompare == nil || p.config.RuntimeCarrierTransport == nil {
+			http.NotFound(w, r)
+			return
+		}
+		ticket, valid := browserOperationTicket(r.Header, browserConfigCompareSubprotocol)
+		if !valid || len(r.Header.Values("Origin")) != 1 || r.Header.Get("Origin") == "" {
+			http.Error(w, "Invalid comparison ticket", 403)
+			return
+		}
+		admission, err := p.config.BrowserConfigCompare.Admit(r.Context(), ticket, r.Header.Get("Origin"), host)
+		if err != nil {
+			http.Error(w, "Comparison admission unavailable", 503)
+			return
+		}
+		p.serveBrowserConfigCompare(w, r, host, admission)
+		return
 	}
 	if expectedKind == "runtime_https_wss" && !helperPublicPath(r.URL.Path) {
 		http.NotFound(w, r)
@@ -516,18 +580,6 @@ func lazyPreviewHostname(rawHost, canonicalHost, baseDomain string) bool {
 		}
 	}
 	return true
-}
-
-func (p *Policy) consumePrivateCarrierToken(headers http.Header) bool {
-	if p == nil || headers == nil {
-		return false
-	}
-	values := headers.Values("X-Paperboat-Private-Carrier")
-	headers.Del("X-Paperboat-Private-Carrier")
-	if len(values) != 1 || len(values[0]) != len(p.config.PrivateAccessToken) {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(values[0]), []byte(p.config.PrivateAccessToken)) == 1
 }
 
 func normalizeRequestTarget(r *http.Request, canonicalHost string) bool {
@@ -725,11 +777,11 @@ func (p *Policy) trustedRequestID() (string, error) {
 			return value, nil
 		}
 	}
-	var data [16]byte
-	if _, err := rand.Read(data[:]); err != nil {
+	value, err := uuid.NewRandom()
+	if err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(data[:]), nil
+	return "request_" + value.String(), nil
 }
 
 func validRequestID(value string) bool {

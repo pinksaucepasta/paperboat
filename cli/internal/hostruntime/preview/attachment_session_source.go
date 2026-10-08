@@ -110,14 +110,37 @@ type machineAttachmentSessionEntry struct {
 // AccessorCarrierAdmission is the server-issued, short-lived authority for an
 // enrolled accessor machine. It is independent of preview ownership.
 type AccessorCarrierAdmission struct {
-	AccountID, DeviceID, AccessorPublicKey, AccessorThumbprint string
-	TunnelID, CarrierConnectorID, CarrierSessionID             string
-	ProcessGeneration, ConfigGeneration                        uint64
-	EdgeNodeID, EdgeProcessEpoch                               string
-	EdgeCarrierServerSPKISHA256                                string
-	EdgeCarrierServerCertificateChainPEM                       string
-	EdgeEndpoints                                              []string
-	ExpiresAt                                                  time.Time
+	AccountID, MachineID, AccessorPublicKey, AccessorThumbprint string
+	TunnelID, CarrierConnectorID, CarrierSessionID              string
+	ProcessGeneration, ConfigGeneration                         uint64
+	EdgeNodeID, EdgeProcessEpoch                                string
+	EdgeCarrierServerSPKISHA256                                 string
+	EdgeCarrierServerCertificateChainPEM                        string
+	EdgeEndpoints                                               []string
+	ExpiresAt                                                   time.Time
+}
+
+// RuntimeCarrierAdmission binds the owning machine's runtime carrier. Its
+// fingerprint hashes the raw Ed25519 key, as defined by runtime-carrier/v1.
+type RuntimeCarrierAdmission struct {
+	AccountID, MachineID, MachineIdentityPublicKey, MachineIdentityThumbprint string
+	TunnelID, ConnectorID, SessionID                                          string
+	ProcessGeneration, ConfigGeneration                                       uint64
+	EdgeNodeID, EdgeProcessEpoch                                              string
+	EdgeCarrierServerSPKISHA256, EdgeCarrierServerCertificateChainPEM         string
+	EdgeEndpoints                                                             []string
+	ExpiresAt                                                                 time.Time
+}
+
+func (s *MachineAttachmentSessionSource) AcquireRuntimeCarrier(ctx context.Context, a RuntimeCarrierAdmission) (AttachmentSession, error) {
+	if s == nil || ctx == nil || a.AccountID == "" || a.MachineID == "" || a.TunnelID == "" || a.ConnectorID == "" || a.SessionID == "" || a.ProcessGeneration == 0 || a.ConfigGeneration == 0 || a.EdgeNodeID == "" || a.EdgeProcessEpoch == "" || len(a.EdgeEndpoints) == 0 || !a.ExpiresAt.After(s.clock().UTC()) || !validMachineIdentityPublicKey(a.MachineIdentityPublicKey) || machineIdentityThumbprint(a.MachineIdentityPublicKey) != a.MachineIdentityThumbprint {
+		return AttachmentSession{}, ErrMachineAttachmentSessionInvalid
+	}
+	key, localIdentity, _, endpoints, poolConfig, err := s.prepareCarrier(a.AccountID, a.MachineID, a.MachineIdentityPublicKey, a.TunnelID, a.ConnectorID, a.SessionID, a.ProcessGeneration, a.ConfigGeneration, a.EdgeNodeID, a.EdgeProcessEpoch, a.EdgeCarrierServerSPKISHA256, a.EdgeCarrierServerCertificateChainPEM, a.EdgeEndpoints, a.ExpiresAt, s.clock().UTC())
+	if err != nil {
+		return AttachmentSession{}, err
+	}
+	return s.acquirePrepared(ctx, key, localIdentity, endpoints, poolConfig)
 }
 
 func NewMachineAttachmentSessionSource(config MachineAttachmentSessionSourceConfig) (*MachineAttachmentSessionSource, error) {
@@ -165,6 +188,9 @@ func boundedMachineAttachmentDialer(base connector.DataCarrierDialer, timeout ti
 		}
 		attemptContext, cancel := context.WithTimeout(ctx, timeout)
 		result, err := base(attemptContext, request)
+		if err != nil {
+			logAttachmentFailure(ctx, "dial_"+string(request.Transport), err)
+		}
 		timedOut := attemptContext.Err() == context.DeadlineExceeded && ctx.Err() == nil
 		cancel()
 		// The caller's context is the operation boundary. Do not let the
@@ -280,10 +306,15 @@ func (s *MachineAttachmentSessionSource) AcquirePreviewDataCarrier(ctx context.C
 }
 
 func (s *MachineAttachmentSessionSource) AcquirePrivateAccessCarrier(ctx context.Context, admission AccessorCarrierAdmission) (AttachmentSession, error) {
-	if s == nil || ctx == nil || admission.AccountID == "" || admission.DeviceID == "" || admission.TunnelID == "" || admission.CarrierConnectorID == "" || admission.CarrierSessionID == "" || admission.ProcessGeneration == 0 || admission.ConfigGeneration == 0 || admission.EdgeNodeID == "" || admission.EdgeProcessEpoch == "" || len(admission.EdgeEndpoints) == 0 || !admission.ExpiresAt.After(s.clock().UTC()) {
+	if s == nil || ctx == nil || admission.AccountID == "" || admission.MachineID == "" || admission.TunnelID == "" || admission.CarrierConnectorID == "" || admission.CarrierSessionID == "" || admission.ProcessGeneration == 0 || admission.ConfigGeneration == 0 || admission.EdgeNodeID == "" || admission.EdgeProcessEpoch == "" || len(admission.EdgeEndpoints) == 0 || !admission.ExpiresAt.After(s.clock().UTC()) {
 		return AttachmentSession{}, ErrMachineAttachmentSessionInvalid
 	}
-	key, localIdentity, _, endpoints, poolConfig, err := s.prepareCarrier(admission.AccountID, admission.DeviceID, admission.AccessorPublicKey, admission.AccessorThumbprint, admission.TunnelID, admission.CarrierConnectorID, admission.CarrierSessionID, admission.ProcessGeneration, admission.ConfigGeneration, admission.EdgeNodeID, admission.EdgeProcessEpoch, admission.EdgeCarrierServerSPKISHA256, admission.EdgeCarrierServerCertificateChainPEM, admission.EdgeEndpoints, admission.ExpiresAt, s.clock().UTC())
+	publicKey, decodeErr := base64.RawURLEncoding.Strict().DecodeString(admission.AccessorPublicKey)
+	thumbprint, thumbErr := connectorprotocol.IdentityThumbprint(publicKey)
+	if decodeErr != nil || thumbErr != nil || thumbprint != admission.AccessorThumbprint {
+		return AttachmentSession{}, ErrMachineAttachmentSessionInvalid
+	}
+	key, localIdentity, _, endpoints, poolConfig, err := s.prepareCarrier(admission.AccountID, admission.MachineID, admission.AccessorPublicKey, admission.TunnelID, admission.CarrierConnectorID, admission.CarrierSessionID, admission.ProcessGeneration, admission.ConfigGeneration, admission.EdgeNodeID, admission.EdgeProcessEpoch, admission.EdgeCarrierServerSPKISHA256, admission.EdgeCarrierServerCertificateChainPEM, admission.EdgeEndpoints, admission.ExpiresAt, s.clock().UTC())
 	if err != nil {
 		return AttachmentSession{}, err
 	}
@@ -296,6 +327,7 @@ func (s *MachineAttachmentSessionSource) acquirePrepared(ctx context.Context, ke
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
+		logAttachmentFailure(ctx, "carrier_source_closed", ErrMachineAttachmentSessionUnavailable)
 		return AttachmentSession{}, ErrMachineAttachmentSessionUnavailable
 	}
 	if existing := s.entries[key]; existing != nil && machineAttachmentEntryReady(existing, localIdentity) {
@@ -311,14 +343,17 @@ func (s *MachineAttachmentSessionSource) acquirePrepared(ctx context.Context, ke
 	}
 	source, err := s.factory(localIdentity, poolConfig, endpoints)
 	if err != nil {
+		logAttachmentFailure(ctx, "carrier_factory", err)
 		return AttachmentSession{}, errors.Join(ErrMachineAttachmentSessionUnavailable, err)
 	}
 	prepared, err := source.Prepare(ctx)
 	if err != nil {
+		logAttachmentFailure(ctx, "carrier_prepare", err)
 		return AttachmentSession{}, errors.Join(ErrMachineAttachmentSessionUnavailable, err)
 	}
 	active, err := prepared.Activate(ctx)
 	if err != nil {
+		logAttachmentFailure(ctx, "carrier_activate", err)
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		_ = prepared.Abort(cleanup)
 		cancel()
@@ -329,6 +364,7 @@ func (s *MachineAttachmentSessionSource) acquirePrepared(ctx context.Context, ke
 	if s.closed {
 		s.mu.Unlock()
 		_ = active.Close(context.WithoutCancel(ctx))
+		logAttachmentFailure(ctx, "carrier_source_closed", ErrMachineAttachmentSessionUnavailable)
 		return AttachmentSession{}, ErrMachineAttachmentSessionUnavailable
 	}
 	s.entries[key] = entry
@@ -420,10 +456,10 @@ func machineAttachmentEntryReady(entry *machineAttachmentSessionEntry, identity 
 
 func (s *MachineAttachmentSessionSource) prepareAdmission(admission CarrierAdmission, now time.Time) (machineAttachmentSessionKey, connector.DataCarrierIdentity, tls.Certificate, connector.NetworkDialerConfig, connector.DataCarrierPoolConfig, error) {
 	binding := admission.Binding
-	return s.prepareCarrier(binding.AccountID, binding.HostID, binding.MachineIdentityPublicKey, binding.MachineIdentityThumbprint, binding.TunnelID, binding.ConnectorID, binding.SessionID, binding.ProcessGeneration, binding.ConfigGeneration, binding.EdgeNodeID, binding.EdgeProcessEpoch, binding.EdgeCarrierServerSPKISHA256, binding.EdgeCarrierServerCertificateChainPEM, admission.EdgeEndpoints, admission.ExpiresAt, now)
+	return s.prepareCarrier(binding.AccountID, binding.HostID, binding.MachineIdentityPublicKey, binding.TunnelID, binding.ConnectorID, binding.SessionID, binding.ProcessGeneration, binding.ConfigGeneration, binding.EdgeNodeID, binding.EdgeProcessEpoch, binding.EdgeCarrierServerSPKISHA256, binding.EdgeCarrierServerCertificateChainPEM, admission.EdgeEndpoints, admission.ExpiresAt, now)
 }
 
-func (s *MachineAttachmentSessionSource) prepareCarrier(accountID, hostID, machinePublicKey, machineThumbprint, tunnelID, connectorID, sessionID string, processGeneration, configGeneration uint64, edgeNodeID, edgeProcessEpoch, edgeCarrierServerSPKISHA256, edgeCarrierServerCertificateChainPEM string, edgeEndpoints []string, expiresAt, now time.Time) (machineAttachmentSessionKey, connector.DataCarrierIdentity, tls.Certificate, connector.NetworkDialerConfig, connector.DataCarrierPoolConfig, error) {
+func (s *MachineAttachmentSessionSource) prepareCarrier(accountID, hostID, machinePublicKey, tunnelID, connectorID, sessionID string, processGeneration, configGeneration uint64, edgeNodeID, edgeProcessEpoch, edgeCarrierServerSPKISHA256, edgeCarrierServerCertificateChainPEM string, edgeEndpoints []string, expiresAt, now time.Time) (machineAttachmentSessionKey, connector.DataCarrierIdentity, tls.Certificate, connector.NetworkDialerConfig, connector.DataCarrierPoolConfig, error) {
 	store, err := identity.Open(identity.Config{StateRoot: s.stateRoot})
 	if err != nil {
 		return machineAttachmentSessionKey{}, connector.DataCarrierIdentity{}, tls.Certificate{}, connector.NetworkDialerConfig{}, connector.DataCarrierPoolConfig{}, errors.Join(ErrMachineAttachmentSessionUnavailable, err)
@@ -434,7 +470,7 @@ func (s *MachineAttachmentSessionSource) prepareCarrier(accountID, hostID, machi
 	}
 	key := store.Current()
 	publicKey := base64.RawURLEncoding.EncodeToString(key.Public())
-	if registration.MachineID != hostID || registration.PublicKeyID != key.ID || registration.PublicIdentityKey != publicKey || publicKey != machinePublicKey || machineIdentityThumbprint(publicKey) != machineThumbprint {
+	if registration.MachineID != hostID || registration.PublicKeyID != key.ID || registration.PublicIdentityKey != publicKey || publicKey != machinePublicKey {
 		return machineAttachmentSessionKey{}, connector.DataCarrierIdentity{}, tls.Certificate{}, connector.NetworkDialerConfig{}, connector.DataCarrierPoolConfig{}, fmt.Errorf("%w: admission machine identity does not match local registration", ErrMachineAttachmentSessionInvalid)
 	}
 	lifetime := s.tlsLeafLifetime

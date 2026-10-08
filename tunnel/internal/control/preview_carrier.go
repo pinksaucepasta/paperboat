@@ -57,7 +57,7 @@ type PreviewCarrierBinding struct {
 	AccountID                            string `json:"account_id"`
 	PreviewID                            string `json:"preview_id"`
 	OperationID                          string `json:"operation_id"`
-	OwnerDeviceID                        string `json:"owner_device_id"`
+	OwnerMachineID                       string `json:"owner_machine_id"`
 	OwnerSessionID                       string `json:"owner_session_id"`
 	HostID                               string `json:"host_id"`
 	LeaseGeneration                      uint64 `json:"lease_generation"`
@@ -110,7 +110,7 @@ func (a PreviewCarrierAdmission) Normalize() (PreviewCarrierAdmission, error) {
 	if a.Hostname == "" {
 		parsed, err := url.Parse(a.Endpoint)
 		if err != nil {
-			return PreviewCarrierAdmission{}, fmt.Errorf("%w: endpoint: %v", ErrPreviewCarrierInvalid, err)
+			return PreviewCarrierAdmission{}, documentFailure{sentinel: ErrPreviewCarrierInvalid, cause: err}
 		}
 		a.Hostname = strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
 	}
@@ -158,7 +158,7 @@ func (a PreviewCarrierAdmission) Validate(nodeID string, now time.Time, processE
 	}
 	for name, value := range map[string]string{
 		"account_id": normalized.Binding.AccountID, "preview_id": normalized.Binding.PreviewID,
-		"operation_id": normalized.Binding.OperationID, "owner_device_id": normalized.Binding.OwnerDeviceID,
+		"operation_id": normalized.Binding.OperationID, "owner_machine_id": normalized.Binding.OwnerMachineID,
 		"owner_session_id": normalized.Binding.OwnerSessionID, "host_id": normalized.Binding.HostID,
 		"tunnel_id": normalized.Binding.TunnelID, "connector_id": normalized.Binding.ConnectorID,
 		"session_id": normalized.Binding.SessionID, "route_id": normalized.Binding.RouteID,
@@ -170,7 +170,7 @@ func (a PreviewCarrierAdmission) Validate(nodeID string, now time.Time, processE
 	if connectorprotocol.ValidateOpaqueEpoch(normalized.Binding.EdgeProcessEpoch) != nil {
 		return fmt.Errorf("%w: edge_process_epoch is invalid", ErrPreviewCarrierInvalid)
 	}
-	if normalized.Binding.HostID != normalized.Binding.OwnerDeviceID || normalized.Binding.TunnelID == normalized.Binding.ConnectorID {
+	if normalized.Binding.HostID != normalized.Binding.OwnerMachineID {
 		return fmt.Errorf("%w: owner and carrier identity do not bind", ErrPreviewCarrierInvalid)
 	}
 	if normalized.Binding.LeaseGeneration == 0 || normalized.Binding.ProcessGeneration == 0 || normalized.Binding.ConfigGeneration == 0 || normalized.Binding.RouteGeneration == 0 || normalized.AttachmentGeneration == 0 || normalized.RouteRevision == 0 || normalized.RouteRevision != normalized.Binding.RouteGeneration {
@@ -276,7 +276,7 @@ func (a PreviewCarrierAdmission) Expected(nodeID string, now time.Time) (datacar
 	return datacarrier.ExpectedAdmission{
 		Schema: normalized.Schema, Kind: normalized.Kind, EdgeNodeID: normalized.Binding.EdgeNodeID,
 		PreviewID: normalized.Binding.PreviewID, OperationID: normalized.Binding.OperationID,
-		OwnerDeviceID: normalized.Binding.OwnerDeviceID, OwnerSessionID: normalized.Binding.OwnerSessionID,
+		OwnerMachineID: normalized.Binding.OwnerMachineID, OwnerSessionID: normalized.Binding.OwnerSessionID,
 		Identity:        datacarrier.Identity{AccountID: normalized.Binding.AccountID, HostID: normalized.Binding.HostID, TunnelID: normalized.Binding.TunnelID, ConnectorID: normalized.Binding.ConnectorID, SessionID: normalized.Binding.SessionID, ProcessGeneration: normalized.Binding.ProcessGeneration, Generation: normalized.Binding.ConfigGeneration},
 		LeaseGeneration: normalized.Binding.LeaseGeneration, ConfigGeneration: normalized.Binding.ConfigGeneration,
 		ConfigContentHash: normalized.ConfigContentHash, RouteID: normalized.Binding.RouteID, EdgeProcessEpoch: normalized.Binding.EdgeProcessEpoch,
@@ -353,10 +353,10 @@ func (c *HTTPClient) PreviewCarrierSnapshot(ctx context.Context, nodeID, process
 	admissions := append([]PreviewCarrierAdmission(nil), (*result.Admissions)...)
 	for index := range admissions {
 		if _, err := admissions[index].Normalize(); err != nil {
-			return PreviewCarrierSnapshot{}, ErrControlUnavailable
+			return PreviewCarrierSnapshot{}, documentFailure{sentinel: ErrControlUnavailable, cause: err}
 		}
 		if err := admissions[index].Validate(nodeID, now, processEpoch); err != nil {
-			return PreviewCarrierSnapshot{}, ErrControlUnavailable
+			return PreviewCarrierSnapshot{}, documentFailure{sentinel: ErrControlUnavailable, cause: err}
 		}
 	}
 	detachments := append([]PreviewCarrierDetachment(nil), (*result.Detachments)...)
@@ -461,7 +461,7 @@ func validatePreviewCarrierDetachment(nodeID, processEpoch string, value Preview
 }
 
 func validatePreviewCarrierBinding(nodeID, processEpoch string, binding PreviewCarrierBinding) error {
-	for _, value := range []string{binding.AccountID, binding.PreviewID, binding.OperationID, binding.OwnerDeviceID, binding.OwnerSessionID, binding.HostID, binding.TunnelID, binding.ConnectorID, binding.SessionID, binding.RouteID, binding.EdgeNodeID} {
+	for _, value := range []string{binding.AccountID, binding.PreviewID, binding.OperationID, binding.OwnerMachineID, binding.OwnerSessionID, binding.HostID, binding.TunnelID, binding.ConnectorID, binding.SessionID, binding.RouteID, binding.EdgeNodeID} {
 		if connectorprotocol.ValidateIdentifier(value) != nil {
 			return ErrPreviewCarrierInvalid
 		}
@@ -469,7 +469,7 @@ func validatePreviewCarrierBinding(nodeID, processEpoch string, binding PreviewC
 	if connectorprotocol.ValidateOpaqueEpoch(binding.EdgeProcessEpoch) != nil {
 		return ErrPreviewCarrierInvalid
 	}
-	if binding.EdgeNodeID != nodeID || binding.EdgeProcessEpoch != processEpoch || binding.HostID != binding.OwnerDeviceID || binding.TunnelID == binding.ConnectorID || binding.LeaseGeneration == 0 || binding.ProcessGeneration == 0 || binding.ConfigGeneration == 0 || binding.RouteGeneration == 0 {
+	if binding.EdgeNodeID != nodeID || binding.EdgeProcessEpoch != processEpoch || binding.HostID != binding.OwnerMachineID || binding.LeaseGeneration == 0 || binding.ProcessGeneration == 0 || binding.ConfigGeneration == 0 || binding.RouteGeneration == 0 {
 		return ErrPreviewCarrierInvalid
 	}
 	_, err := machineKey(binding.MachineIdentityPublicKey, binding.MachineIdentityThumbprint)

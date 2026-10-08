@@ -97,7 +97,7 @@ func TestKeyBindingAllowsDifferentAuthorizedEndpointAndBindingRoots(t *testing.T
 	certificate, err := endpointidentity.Sign(endpointRoot, endpointidentity.Claims{
 		AccountID: "acct_01", Role: endpointidentity.RoleCLI, EndpointID: "cli_01",
 		QUICPublicKey: ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x23}, 32)).Public().(ed25519.PublicKey),
-		Generation: 1, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour),
+		Generation:    1, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -145,7 +145,7 @@ func TestAuthorityAllowsEndpointRootDistinctFromBindingRoot(t *testing.T) {
 	certificate, err := endpointidentity.Sign(endpointRoot, endpointidentity.Claims{
 		AccountID: "acct_01", Role: endpointidentity.RoleCLI, EndpointID: "cli_01",
 		QUICPublicKey: ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x42}, ed25519.SeedSize)).Public().(ed25519.PublicKey),
-		Generation: 1, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour),
+		Generation:    1, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour),
 	})
 	if err != nil {
 		t.Fatal(err)

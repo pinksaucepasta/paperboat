@@ -45,8 +45,8 @@ func NewHTTPNetworkDialer(config NetworkDialerConfig) DataCarrierDialer {
 			return DataCarrierDialResult{}, newTransportDialError(request.Transport, err)
 		}
 		if request.Identity != (DataCarrierIdentity{}) && identity != request.Identity {
-			_ = link.Close()
-			return DataCarrierDialResult{}, newTransportDialError(request.Transport, ErrDataCarrierAdmission)
+			closeErr := link.Close()
+			return DataCarrierDialResult{}, newTransportDialError(request.Transport, &dataCarrierPeerAuthorityFailure{cause: errors.Join(ErrDataCarrierAdmission, closeErr)})
 		}
 		return DataCarrierDialResult{Link: link, PeerIdentity: identity, Transport: request.Transport, EdgeID: request.EdgeID, FailureDomain: request.FailureDomain}, nil
 	}

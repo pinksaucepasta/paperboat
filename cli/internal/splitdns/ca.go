@@ -8,6 +8,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"os"
@@ -36,11 +37,39 @@ const (
 // validated private suffix. Existing unconstrained or differently constrained
 // roots are rejected and preserved for explicit operator recovery.
 func LoadOrCreateConstrainedCA(caDir, suffix string) (*CA, error) {
-	clean, err := validateBrowserSuffix(suffix)
+	clean, err := NormalizeBrowserDomain(suffix)
 	if err != nil {
 		return nil, err
 	}
 	return loadOrCreateCA(caDir, clean)
+}
+
+// LoadConstrainedCA loads an already provisioned root. Runtime callers cannot
+// recreate retired roots, even if deletion races a certificate request.
+func LoadConstrainedCA(directory, domain string) (*CA, error) {
+	clean, err := NormalizeBrowserDomain(domain)
+	if err != nil {
+		return nil, err
+	}
+	certBytes, err := readCAFile(filepath.Join(directory, "rootCA.pem"), 16<<10)
+	if err != nil {
+		return nil, err
+	}
+	keyBytes, err := readCAFile(filepath.Join(directory, "rootCA-key.pem"), 16<<10)
+	if err != nil {
+		return nil, err
+	}
+	cert, key, err := parseCA(certBytes, keyBytes, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	if !cert.PermittedDNSDomainsCritical || len(cert.PermittedDNSDomains) != 1 || cert.PermittedDNSDomains[0] != "."+clean {
+		return nil, errors.New("approved CA namespace does not match protected selection")
+	}
+	if cert.NotAfter.Before(time.Now().Add(minimumLeafLifetime)) {
+		return nil, errors.New("approved CA expires too soon; reinstall Paperboat to renew local HTTPS trust")
+	}
+	return &CA{caCert: cert, caKey: key, caCertPEM: certBytes, directory: directory}, nil
 }
 
 func loadOrCreateCA(caDir, suffix string) (*CA, error) {
@@ -53,17 +82,17 @@ func loadOrCreateCA(caDir, suffix string) (*CA, error) {
 
 	ca := &CA{directory: caDir}
 
-	certBytes, errCert := os.ReadFile(certPath)
-	keyBytes, errKey := os.ReadFile(keyPath)
+	certBytes, errCert := readCAFile(certPath, 16<<10)
+	keyBytes, errKey := readCAFile(keyPath, 16<<10)
 
 	if errCert == nil && errKey == nil {
 		now := time.Now()
 		cert, key, err := parseCA(certBytes, keyBytes, now)
 		if err != nil {
-			return nil, fmt.Errorf("load existing Paperboat CA (remove its installed trust, then delete both %s and %s for explicit recovery): %w", certPath, keyPath, err)
+			return nil, fmt.Errorf("load existing Paperboat CA (reinstall Paperboat for scoped local HTTPS trust repair (state retained at %s and %s)): %w", certPath, keyPath, err)
 		}
 		if cert.NotAfter.Before(now.Add(minimumLeafLifetime)) {
-			return nil, fmt.Errorf("existing Paperboat CA expires at %s and cannot issue a certificate valid for 24 hours; remove its installed trust, then delete both %s and %s before restarting to create a new root", cert.NotAfter.UTC().Format(time.RFC3339), certPath, keyPath)
+			return nil, fmt.Errorf("existing Paperboat CA expires at %s and cannot issue a certificate valid for 24 hours; reinstall Paperboat to renew local HTTPS trust (state retained at %s and %s)", cert.NotAfter.UTC().Format(time.RFC3339), certPath, keyPath)
 		}
 		if suffix != "" && (!cert.PermittedDNSDomainsCritical || len(cert.PermittedDNSDomains) != 1 || cert.PermittedDNSDomains[0] != "."+suffix) {
 			return nil, errors.New("existing Paperboat CA is not constrained to the active private suffix")
@@ -141,7 +170,7 @@ func loadOrCreateCA(caDir, suffix string) (*CA, error) {
 func (c *CA) CertPEM() []byte {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.caCertPEM
+	return append([]byte(nil), c.caCertPEM...)
 }
 
 // IssueCertificate issues a dynamic TLS leaf certificate for domain patterns (e.g. "*.homelab.pprbt", "homelab.pprbt").
@@ -162,6 +191,13 @@ func (c *CA) IssueCertificate(domains []string) ([]byte, []byte, error) {
 		return nil, nil, fmt.Errorf("generate leaf serial: %w", err)
 	}
 
+	if !c.caCert.PermittedDNSDomainsCritical || len(c.caCert.PermittedDNSDomains) != 1 {
+		return nil, nil, errors.New("leaf issuance requires a constrained browser CA")
+	}
+	domain := strings.TrimPrefix(c.caCert.PermittedDNSDomains[0], ".")
+	if clean, err := NormalizeBrowserDomain(domain); err != nil || clean != domain {
+		return nil, nil, errors.New("invalid browser CA constraint")
+	}
 	var dnsNames []string
 	var ipAddresses []net.IP
 
@@ -170,11 +206,15 @@ func (c *CA) IssueCertificate(domains []string) ([]byte, []byte, error) {
 		if d == "" || len(d) > 253 || strings.ContainsAny(d, "/:@") {
 			return nil, nil, errors.New("invalid certificate name")
 		}
-		if ip := net.ParseIP(d); ip != nil {
-			ipAddresses = append(ipAddresses, ip)
-		} else {
-			dnsNames = append(dnsNames, d)
+		if net.ParseIP(d) != nil || !strings.HasSuffix(d, "."+domain) || strings.Contains(strings.TrimPrefix(d, "*."), "*") {
+			return nil, nil, errors.New("certificate name is outside local browser namespace")
 		}
+		for _, label := range strings.Split(strings.TrimPrefix(d, "*."), ".") {
+			if !validLabel(label) {
+				return nil, nil, errors.New("invalid browser certificate label")
+			}
+		}
+		dnsNames = append(dnsNames, d)
 	}
 
 	commonName := "localhost"
@@ -184,7 +224,7 @@ func (c *CA) IssueCertificate(domains []string) ([]byte, []byte, error) {
 
 	now := time.Now()
 	if c.caCert.NotAfter.Before(now.Add(minimumLeafLifetime)) {
-		return nil, nil, fmt.Errorf("Paperboat root CA expires at %s and cannot issue a certificate valid for 24 hours; remove installed trust and recreate both root certificate and key", c.caCert.NotAfter.UTC().Format(time.RFC3339))
+		return nil, nil, fmt.Errorf("Paperboat root CA expires at %s and cannot issue a certificate valid for 24 hours; reinstall Paperboat to renew local HTTPS trust", c.caCert.NotAfter.UTC().Format(time.RFC3339))
 	}
 	notBefore := now.Add(-leafBackdate)
 	if c.caCert.NotBefore.After(notBefore) {
@@ -203,7 +243,7 @@ func (c *CA) IssueCertificate(domains []string) ([]byte, []byte, error) {
 		NotBefore:             notBefore,
 		NotAfter:              notAfter,
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		DNSNames:              dnsNames,
 		IPAddresses:           ipAddresses,
 		BasicConstraintsValid: true,
@@ -237,7 +277,7 @@ func parseCA(certPEM, keyPEM []byte, now time.Time) (*x509.Certificate, *rsa.Pri
 	if err != nil {
 		return nil, nil, err
 	}
-	if !cert.IsCA || cert.KeyUsage&x509.KeyUsageCertSign == 0 || cert.PublicKeyAlgorithm != x509.RSA || cert.PublicKey.(*rsa.PublicKey).N.Cmp(key.PublicKey.N) != 0 || cert.PublicKey.(*rsa.PublicKey).E != key.PublicKey.E {
+	if !cert.IsCA || !cert.BasicConstraintsValid || cert.CheckSignatureFrom(cert) != nil || cert.KeyUsage&x509.KeyUsageCertSign == 0 || cert.KeyUsage&x509.KeyUsageCRLSign == 0 || cert.PublicKeyAlgorithm != x509.RSA || cert.PublicKey.(*rsa.PublicKey).N.Cmp(key.PublicKey.N) != 0 || cert.PublicKey.(*rsa.PublicKey).E != key.PublicKey.E {
 		return nil, nil, errors.New("certificate and key are not a valid matching CA")
 	}
 	if now.Before(cert.NotBefore) {
@@ -250,26 +290,30 @@ func parseCA(certPEM, keyPEM []byte, now time.Time) (*x509.Certificate, *rsa.Pri
 }
 
 func atomicWrite(path string, content []byte, mode os.FileMode) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".paperboat-ca-*")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	defer os.Remove(name)
-	if err = tmp.Chmod(mode); err == nil {
-		_, err = tmp.Write(content)
-	}
-	if err == nil {
-		err = tmp.Sync()
-	}
-	if closeErr := tmp.Close(); err == nil {
-		err = closeErr
-	}
-	if err == nil {
-		err = replaceFile(name, path)
-	}
-	if err != nil {
-		return err
-	}
-	return syncDirectory(filepath.Dir(path))
+	return writeCAState(path, content, mode)
 }
+func readCAFile(path string, limit int64) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > limit {
+		return nil, errors.New("unsafe or oversized local CA state")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !os.SameFile(info, opened) {
+		return nil, errors.New("local CA file changed while opening")
+	}
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if len(data) > int(limit) {
+		return nil, errors.New("oversized local CA state")
+	}
+	return data, err
+}
+
+func (c *CA) ExpiresAt() time.Time { c.mu.RLock(); defer c.mu.RUnlock(); return c.caCert.NotAfter }

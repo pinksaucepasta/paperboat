@@ -132,7 +132,7 @@ func TestRunSSHCommandPreservesOutputStderrNoOutputAndExitStatus(t *testing.T) {
 			})
 			var stdout, stderr bytes.Buffer
 			err := RunSSHCommand(t.Context(), stream, SSHCommandConfig{
-				Address: "hn.pprbt:22", User: "root", Command: "/usr/bin/printf canary",
+				Address: "hn.local.pprbt.dev:22", User: "root", Command: "/usr/bin/printf canary",
 				Signer: clientSigner, AuthorizedHostKeys: []string{authorizedSSHKey(hostSigner)},
 				Output: &stdout, ErrorOutput: &stderr,
 			})
@@ -198,7 +198,7 @@ func TestRunSSHCommandStreamsFinitePipedInput(t *testing.T) {
 	input := &trackedSSHCommandInput{Reader: bytes.NewReader(payload), closed: make(chan struct{})}
 	var output bytes.Buffer
 	err := RunSSHCommand(t.Context(), stream, SSHCommandConfig{
-		Address: "hn.pprbt:22", User: "root", Command: "/usr/bin/sha256sum",
+		Address: "hn.local.pprbt.dev:22", User: "root", Command: "/usr/bin/sha256sum",
 		Signer: clientSigner, AuthorizedHostKeys: []string{authorizedSSHKey(hostSigner)},
 		Input: input, Output: &output, ErrorOutput: io.Discard,
 	})
@@ -237,7 +237,7 @@ func TestRunSSHCommandRejectsHostKeySubstitutionAndWrongSigner(t *testing.T) {
 				return completeSSHCommand(channel, "", "", 0)
 			})
 			err := RunSSHCommand(t.Context(), stream, SSHCommandConfig{
-				Address: "hn.pprbt:22", User: "root", Command: "true", Signer: test.signer,
+				Address: "hn.local.pprbt.dev:22", User: "root", Command: "true", Signer: test.signer,
 				AuthorizedHostKeys: []string{test.hostKey}, Output: io.Discard, ErrorOutput: io.Discard,
 			})
 			if err == nil {
@@ -267,7 +267,7 @@ func TestRunSSHCommandCancellationBeforeAndDuringHandshake(t *testing.T) {
 				time.AfterFunc(20*time.Millisecond, cancel)
 			}
 			err := RunSSHCommand(ctx, client, SSHCommandConfig{
-				Address: "hn.pprbt:22", User: "root", Command: "true", Signer: clientSigner,
+				Address: "hn.local.pprbt.dev:22", User: "root", Command: "true", Signer: clientSigner,
 				AuthorizedHostKeys: []string{authorizedSSHKey(hostSigner)}, Output: io.Discard, ErrorOutput: io.Discard,
 			})
 			if !errors.Is(err, context.Canceled) {
@@ -296,7 +296,7 @@ func TestRunSSHCommandCancellationDuringSessionAndEarlyEOF(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- RunSSHCommand(ctx, stream, SSHCommandConfig{
-			Address: "hn.pprbt:22", User: "root", Command: "sleep 60", Signer: clientSigner,
+			Address: "hn.local.pprbt.dev:22", User: "root", Command: "sleep 60", Signer: clientSigner,
 			AuthorizedHostKeys: []string{authorizedSSHKey(hostSigner)}, Input: input,
 			Output: io.Discard, ErrorOutput: io.Discard,
 		})
@@ -316,7 +316,7 @@ func TestRunSSHCommandCancellationDuringSessionAndEarlyEOF(t *testing.T) {
 	client, remote := net.Pipe()
 	_ = remote.Close()
 	err := RunSSHCommand(t.Context(), client, SSHCommandConfig{
-		Address: "hn.pprbt:22", User: "root", Command: "true", Signer: clientSigner,
+		Address: "hn.local.pprbt.dev:22", User: "root", Command: "true", Signer: clientSigner,
 		AuthorizedHostKeys: []string{authorizedSSHKey(hostSigner)}, Output: io.Discard, ErrorOutput: io.Discard,
 	})
 	if err == nil {

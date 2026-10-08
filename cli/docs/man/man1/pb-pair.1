@@ -2,7 +2,7 @@
 .TH "PB-PAIR" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-pair - Enroll this device with a one-shot token
+pb-pair - Enroll this machine with a one-shot token
 
 
 .SH SYNOPSIS
@@ -10,10 +10,10 @@ pb-pair - Enroll this device with a one-shot token
 
 
 .SH DESCRIPTION
-Enroll this device with a one-shot token
+Enroll this machine with a one-shot token
 
 .PP
-Enroll this device with a one-shot token, optionally reading it from a private file. Name, shell, and state-root options target the local installation; enrollment binds a new device identity to the account.
+Enroll this machine with a one-shot token, optionally reading it from a private file. Name, shell, and state-root options target the local installation; enrollment binds a new machine identity to the account.
 
 .PP
 JSON output is supported with --json.
@@ -59,6 +59,10 @@ JSON output is supported with --json.
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

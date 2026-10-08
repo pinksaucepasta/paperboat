@@ -101,16 +101,16 @@ func (s *LocalSender) sendBatch(ctx context.Context, batchID, sourceMachineID, d
 		}
 		select {
 		case <-ctx.Done():
-			return Batch{}, ctx.Err()
+			return Batch{}, deliveryContextError(ctx)
 		case <-deadline.C:
-			return Batch{}, errors.New("file delivery timed out")
+			return Batch{}, fileTransferPhaseFailure("delivery", context.DeadlineExceeded)
 		case <-ticker.C:
 		}
 	}
 	paths := make([]string, len(results))
 	for index, result := range results {
 		if result.State != "delivered" || result.ResultCode != "stored" || result.ReceiptPath == "" {
-			return Batch{BatchID: batchID, Transfers: results}, errors.New("file delivery failed")
+			return Batch{BatchID: batchID, Transfers: results}, fileTransferPhaseFailure("delivery", errors.New("file delivery failed"))
 		}
 		paths[index] = result.ReceiptPath
 	}

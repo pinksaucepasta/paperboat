@@ -312,14 +312,15 @@ func releaseFromIndex(index releaseindex.Index) (Release, bool) {
 		CLISHA256:         target.SHA256, CLILength: target.Length, CLIPlatform: target.Platform, CLIArchitecture: target.Architecture,
 		Hostd: component, Updater: component, Launcher: component,
 		HostdAPIMin: index.HostdAPIMin, HostdAPIMax: index.HostdAPIMax, RuntimeAPIMin: index.RuntimeAPIMin, RuntimeAPIMax: index.RuntimeAPIMax,
-		SupervisorMaintenance: index.SupervisorMaintenance,
+		SupervisorMaintenance:        index.SupervisorMaintenance,
+		OwnerMaintenanceGraceSeconds: index.DeploymentPlan.SecurityDeferral.MaxSeconds,
 	}, true
 }
 
 func sameReleaseTargets(a, b Release) bool {
 	return a.Version == b.Version && a.SHA256 == b.SHA256 && a.Length == b.Length && a.Platform == b.Platform && a.Architecture == b.Architecture &&
 		a.ManifestSHA256 == b.ManifestSHA256 && a.CanaryPath == b.CanaryPath && a.CanaryStatus == b.CanaryStatus && a.CanarySamples == b.CanarySamples && a.CanaryTimeout == b.CanaryTimeout && a.DrainTimeout == b.DrainTimeout && a.StabilityWindow == b.StabilityWindow && a.StabilityInterval == b.StabilityInterval && a.RollbackTimeout == b.RollbackTimeout &&
-		a.HostdAPIMin == b.HostdAPIMin && a.HostdAPIMax == b.HostdAPIMax && a.RuntimeAPIMin == b.RuntimeAPIMin && a.RuntimeAPIMax == b.RuntimeAPIMax && a.SupervisorMaintenance == b.SupervisorMaintenance
+		a.HostdAPIMin == b.HostdAPIMin && a.HostdAPIMax == b.HostdAPIMax && a.RuntimeAPIMin == b.RuntimeAPIMin && a.RuntimeAPIMax == b.RuntimeAPIMax && a.SupervisorMaintenance == b.SupervisorMaintenance && a.OwnerMaintenanceGraceSeconds == b.OwnerMaintenanceGraceSeconds
 }
 
 func openReadOnly(path string) (io.ReadCloser, error) { return os.Open(path) }

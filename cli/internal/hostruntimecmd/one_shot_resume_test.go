@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -21,7 +22,7 @@ func TestOneShotResumeRecoversAmbiguousPairingCommitWithoutToken(t *testing.T) {
 	server := "https://api.example.test"
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	token := "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP"
-	resume, resumeErr := bootstrap.LoadResume(root, server, publicKey, token, "Laptop", "client", now)
+	resume, resumeErr := bootstrap.LoadResume(root, server, publicKey, token, "Laptop", now)
 	createCalls, waitCalls, consumeCalls := 0, 0, 0
 	operations := testOneShotResumeOperations(now)
 	operations.WaitForMaterial = func(context.Context, bootstrap.Config, time.Time, time.Duration) (bootstrap.Material, error) {
@@ -43,7 +44,7 @@ func TestOneShotResumeRecoversAmbiguousPairingCommitWithoutToken(t *testing.T) {
 	if _, _, err := resumeOneShotEnrollment(context.Background(), input, operations); err == nil || err.Error() != "pairing response was lost" {
 		t.Fatalf("first run error = %v", err)
 	}
-	journal, err := bootstrap.LoadResume(root, server, publicKey, "", "Laptop", "client", now)
+	journal, err := bootstrap.LoadResume(root, server, publicKey, "", "Laptop", now)
 	if err != nil || !journal.PairingStarted || journal.Material != nil {
 		t.Fatalf("paired journal = %#v, err=%v", journal, err)
 	}
@@ -66,12 +67,12 @@ func TestOneShotResumeReplacesOnlyServerClosedPairing(t *testing.T) {
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	oldToken := "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP"
 	newToken := "BCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPA"
-	record := bootstrap.NewResumeRecord(server, publicKey, oldToken, "Laptop", "client", "verifier-012345678901234567890123456789", now.Add(time.Hour))
+	record := bootstrap.NewResumeRecord(server, publicKey, oldToken, "Laptop", "verifier-012345678901234567890123456789", now.Add(time.Hour))
 	record.PairingStarted = true
 	if err := bootstrap.SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}
-	loaded, loadErr := bootstrap.LoadResume(root, server, publicKey, newToken, "Laptop", "client", now)
+	loaded, loadErr := bootstrap.LoadResume(root, server, publicKey, newToken, "Laptop", now)
 	if !errors.Is(loadErr, bootstrap.ErrResumeTokenChanged) {
 		t.Fatalf("load error = %v", loadErr)
 	}
@@ -93,7 +94,7 @@ func TestOneShotResumeReplacesOnlyServerClosedPairing(t *testing.T) {
 	if !errors.Is(err, context.Canceled) || probes != 1 {
 		t.Fatalf("replacement error=%v probes=%d", err, probes)
 	}
-	replaced, err := bootstrap.LoadResume(root, server, publicKey, newToken, "Laptop", "client", now)
+	replaced, err := bootstrap.LoadResume(root, server, publicKey, newToken, "Laptop", now)
 	if err != nil || replaced.Verifier == record.Verifier {
 		t.Fatalf("replacement journal=%+v error=%v", replaced, err)
 	}
@@ -106,12 +107,12 @@ func TestOneShotResumeRetainsAmbiguousOldPairing(t *testing.T) {
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	oldToken := "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP"
 	newToken := "BCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPA"
-	record := bootstrap.NewResumeRecord(server, publicKey, oldToken, "Laptop", "client", "verifier-012345678901234567890123456789", now.Add(time.Hour))
+	record := bootstrap.NewResumeRecord(server, publicKey, oldToken, "Laptop", "verifier-012345678901234567890123456789", now.Add(time.Hour))
 	record.PairingStarted = true
 	if err := bootstrap.SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}
-	loaded, loadErr := bootstrap.LoadResume(root, server, publicKey, newToken, "Laptop", "client", now)
+	loaded, loadErr := bootstrap.LoadResume(root, server, publicKey, newToken, "Laptop", now)
 	operations := testOneShotResumeOperations(now)
 	operations.RecoverMaterial = func(context.Context, bootstrap.Config, bool) (bootstrap.Material, error) {
 		return bootstrap.Material{}, context.DeadlineExceeded
@@ -120,7 +121,7 @@ func TestOneShotResumeRetainsAmbiguousOldPairing(t *testing.T) {
 	if !errors.Is(err, bootstrap.ErrResumeBinding) {
 		t.Fatalf("ambiguous recovery error=%v", err)
 	}
-	retained, err := bootstrap.LoadResume(root, server, publicKey, oldToken, "Laptop", "client", now)
+	retained, err := bootstrap.LoadResume(root, server, publicKey, oldToken, "Laptop", now)
 	if err != nil || retained.Verifier != record.Verifier {
 		t.Fatalf("retained journal=%+v error=%v", retained, err)
 	}
@@ -132,7 +133,7 @@ func TestOneShotResumeContinuesAfterTokenConsumptionAndApprovalTimeout(t *testin
 	server := "https://api.example.test"
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	token := "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP"
-	resume, resumeErr := bootstrap.LoadResume(root, server, publicKey, token, "Laptop", "client", now)
+	resume, resumeErr := bootstrap.LoadResume(root, server, publicKey, token, "Laptop", now)
 	createCalls, waitCalls, consumeCalls := 0, 0, 0
 	operations := testOneShotResumeOperations(now)
 	operations.WaitForMaterial = func(context.Context, bootstrap.Config, time.Time, time.Duration) (bootstrap.Material, error) {
@@ -159,7 +160,7 @@ func TestOneShotResumeContinuesAfterTokenConsumptionAndApprovalTimeout(t *testin
 	if _, _, err := resumeOneShotEnrollment(context.Background(), input, operations); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("approval timeout error = %v", err)
 	}
-	journal, err := bootstrap.LoadResume(root, server, publicKey, "", "Laptop", "client", now)
+	journal, err := bootstrap.LoadResume(root, server, publicKey, "", "Laptop", now)
 	if err != nil || !journal.PairingStarted || journal.Material != nil {
 		t.Fatalf("journal after timeout = %#v, err=%v", journal, err)
 	}
@@ -181,7 +182,7 @@ func TestOneShotResumeConsumesTokenLeftAfterMaterialCheckpoint(t *testing.T) {
 	server := "https://api.example.test"
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	material := testClientBootstrapMaterial(server, now.Add(time.Hour))
-	record := bootstrap.NewResumeRecord(server, publicKey, "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", "Laptop", "client", "verifier-012345678901234567890123456789", now.Add(time.Hour))
+	record := bootstrap.NewResumeRecord(server, publicKey, "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", "Laptop", "verifier-012345678901234567890123456789", now.Add(time.Hour))
 	record.PairingStarted, record.Material = true, &material
 	if err := bootstrap.SaveResume(root, record); err != nil {
 		t.Fatal(err)
@@ -200,9 +201,9 @@ func TestOneShotResumeConsumesTokenLeftAfterMaterialCheckpoint(t *testing.T) {
 	}
 }
 
-func TestUnixBootstrapRejectsUnknownSetupModeBeforeEnrollment(t *testing.T) {
-	err := runBootstrap(context.Background(), []string{"--setup-mode", "session"}, nil, nil, nil)
-	if err == nil || err.Error() != "setup-mode must be host or client" {
+func TestUnixBootstrapRejectsRetiredSetupModeFlag(t *testing.T) {
+	err := runBootstrap(context.Background(), []string{"--setup-mode", "session"}, nil, io.Discard, io.Discard)
+	if err == nil || err.Error() != "bootstrap accepts flags only" {
 		t.Fatalf("setup mode error = %v", err)
 	}
 }
@@ -213,7 +214,7 @@ func TestBootstrapCLIResumeRetriesTimeoutAndCrashBeforeCheckpoint(t *testing.T) 
 	server := "https://api.example.test"
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	material := testClientBootstrapMaterial(server, now.Add(time.Hour))
-	record := bootstrap.NewResumeRecord(server, publicKey, "token", "Laptop", "client", "verifier-012345678901234567890123456789", now.Add(time.Hour))
+	record := bootstrap.NewResumeRecord(server, publicKey, "token", "Laptop", "verifier-012345678901234567890123456789", now.Add(time.Hour))
 	record.PairingStarted, record.Material = true, &material
 	if err := bootstrap.SaveResume(root, record); err != nil {
 		t.Fatal(err)
@@ -229,7 +230,7 @@ func TestBootstrapCLIResumeRetriesTimeoutAndCrashBeforeCheckpoint(t *testing.T) 
 	if err := completeBootstrapCLIResume(context.Background(), root, server, material, &record, install, bootstrap.SaveResume); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("approval error = %v", err)
 	}
-	reloaded, err := bootstrap.LoadResume(root, server, publicKey, "", "Laptop", "client", now)
+	reloaded, err := bootstrap.LoadResume(root, server, publicKey, "", "Laptop", now)
 	if err != nil || reloaded.ClientInstalled {
 		t.Fatalf("checkpoint after timeout = %#v, err=%v", reloaded, err)
 	}
@@ -237,14 +238,14 @@ func TestBootstrapCLIResumeRetriesTimeoutAndCrashBeforeCheckpoint(t *testing.T) 
 	if err := completeBootstrapCLIResume(context.Background(), root, server, material, &reloaded, install, func(string, bootstrap.ResumeRecord) error { return crash }); !errors.Is(err, crash) {
 		t.Fatalf("simulated crash error = %v", err)
 	}
-	reloaded, err = bootstrap.LoadResume(root, server, publicKey, "", "Laptop", "client", now)
+	reloaded, err = bootstrap.LoadResume(root, server, publicKey, "", "Laptop", now)
 	if err != nil || reloaded.ClientInstalled {
 		t.Fatalf("durable checkpoint after crash = %#v, err=%v", reloaded, err)
 	}
 	if err := completeBootstrapCLIResume(context.Background(), root, server, material, &reloaded, install, bootstrap.SaveResume); err != nil {
 		t.Fatal(err)
 	}
-	reloaded, err = bootstrap.LoadResume(root, server, publicKey, "", "Laptop", "client", now)
+	reloaded, err = bootstrap.LoadResume(root, server, publicKey, "", "Laptop", now)
 	if err != nil || !reloaded.ClientInstalled || installCalls != 3 {
 		t.Fatalf("completed checkpoint = %#v, calls=%d, err=%v", reloaded, installCalls, err)
 	}
@@ -257,12 +258,12 @@ func TestExpiredOneShotResumeInstallsRotatedSameSession(t *testing.T) {
 	server := "https://api.example.test"
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	previous := testClientBootstrapMaterial(server, now.Add(time.Hour))
-	record := bootstrap.NewResumeRecord(server, publicKey, "token", "Laptop", "client", "verifier-012345678901234567890123456789", now.Add(-time.Minute))
+	record := bootstrap.NewResumeRecord(server, publicKey, "token", "Laptop", "verifier-012345678901234567890123456789", now.Add(-time.Minute))
 	record.PairingStarted, record.Material, record.ClientInstalled, record.RuntimeEnrolled = true, &previous, true, true
 	if err := bootstrap.SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}
-	loaded, loadErr := bootstrap.LoadResume(root, server, publicKey, "", "Laptop", "client", loadNow)
+	loaded, loadErr := bootstrap.LoadResume(root, server, publicKey, "", "Laptop", loadNow)
 	if !errors.Is(loadErr, bootstrap.ErrResumeExpired) {
 		t.Fatalf("load error = %v", loadErr)
 	}
@@ -280,7 +281,7 @@ func TestExpiredOneShotResumeInstallsRotatedSameSession(t *testing.T) {
 	if err != nil || journal.ClientInstalled || material.ClientSession.AccessToken != recovered.ClientSession.AccessToken {
 		t.Fatalf("recovery did not checkpoint pending credential install: installed=%t err=%v", journal.ClientInstalled, err)
 	}
-	reloaded, reloadErr := bootstrap.LoadResume(root, server, publicKey, "", "Laptop", "client", loadNow)
+	reloaded, reloadErr := bootstrap.LoadResume(root, server, publicKey, "", "Laptop", loadNow)
 	if reloadErr != nil || reloaded.ClientInstalled || reloaded.Material.ClientSession.RefreshToken != recovered.ClientSession.RefreshToken {
 		t.Fatalf("durable rotated material missing: installed=%t err=%v", reloaded.ClientInstalled, reloadErr)
 	}
@@ -307,12 +308,12 @@ func TestExpiredOneShotResumeRejectsDifferentClientSession(t *testing.T) {
 	server := "https://api.example.test"
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	previous := testClientBootstrapMaterial(server, now.Add(time.Hour))
-	record := bootstrap.NewResumeRecord(server, publicKey, "token", "Laptop", "client", "verifier-012345678901234567890123456789", now.Add(-time.Minute))
+	record := bootstrap.NewResumeRecord(server, publicKey, "token", "Laptop", "verifier-012345678901234567890123456789", now.Add(-time.Minute))
 	record.PairingStarted, record.Material, record.ClientInstalled, record.RuntimeEnrolled = true, &previous, true, true
 	if err := bootstrap.SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}
-	loaded, loadErr := bootstrap.LoadResume(root, server, publicKey, "", "Laptop", "client", loadNow)
+	loaded, loadErr := bootstrap.LoadResume(root, server, publicKey, "", "Laptop", loadNow)
 	recovered := testClientBootstrapMaterial(server, loadNow.Add(time.Hour))
 	recovered.ClientSession.SessionID = "cli_other"
 	operations := testOneShotResumeOperations(loadNow)
@@ -320,7 +321,7 @@ func TestExpiredOneShotResumeRejectsDifferentClientSession(t *testing.T) {
 	if _, _, err := resumeOneShotEnrollment(context.Background(), testOneShotResumeInput(root, server, publicKey, "", loaded, loadErr), operations); !errors.Is(err, bootstrap.ErrResumeBinding) {
 		t.Fatalf("different session recovery error = %v", err)
 	}
-	reloaded, _ := bootstrap.LoadResume(root, server, publicKey, "", "Laptop", "client", loadNow)
+	reloaded, _ := bootstrap.LoadResume(root, server, publicKey, "", "Laptop", loadNow)
 	if !reloaded.ClientInstalled || reloaded.Material.ClientSession.SessionID != previous.ClientSession.SessionID {
 		t.Fatal("rejected recovery changed durable journal")
 	}
@@ -344,9 +345,9 @@ func TestAuthenticatedSetupRecoveryNeverCreatesPairingAndPreservesFailedJournal(
 			if test.expired {
 				expiresAt = now.Add(-time.Minute)
 			}
-			record := bootstrap.NewResumeRecord(server, publicKey, "", "Laptop", "host", "verifier-012345678901234567890123456789", expiresAt)
+			record := bootstrap.NewResumeRecord(server, publicKey, "", "Laptop", "verifier-012345678901234567890123456789", expiresAt)
 			record.AuthenticatedSetup = true
-			record.SetupOperationID = "host-setup-operation"
+			record.SetupOperationID = "machine-install-operation"
 			record.ExpectedUserMachineID = "mch_host"
 			record.ExpectedGeneration = 7
 			record.PairingStarted = test.expired
@@ -357,7 +358,7 @@ func TestAuthenticatedSetupRecoveryNeverCreatesPairingAndPreservesFailedJournal(
 			if err != nil {
 				t.Fatal(err)
 			}
-			loaded, loadErr := bootstrap.LoadResume(root, server, publicKey, "", "Laptop", "host", now)
+			loaded, loadErr := bootstrap.LoadResume(root, server, publicKey, "", "Laptop", now)
 			if test.expired != errors.Is(loadErr, bootstrap.ErrResumeExpired) || !test.expired && loadErr != nil {
 				t.Fatalf("load error = %v", loadErr)
 			}
@@ -400,18 +401,16 @@ func testOneShotResumeOperations(now time.Time) oneShotResumeOperations {
 
 func testOneShotResumeInput(root, server, publicKey, token string, resume bootstrap.ResumeRecord, resumeErr error) oneShotResumeInput {
 	return oneShotResumeInput{
-		StateRoot: root, SetupMode: "client",
-		Config: bootstrap.Config{ServerURL: server, EnrollmentToken: token, Alias: "Laptop", WorkspaceRoot: root, PublicIdentityKey: publicKey},
+		StateRoot: root, Config: bootstrap.Config{ServerURL: server, EnrollmentToken: token, Alias: "Laptop", WorkspaceRoot: root, PublicIdentityKey: publicKey},
 		Resume: resume, ResumeErr: resumeErr, PollInterval: time.Millisecond,
 	}
 }
 
 func testClientBootstrapMaterial(server string, expiresAt time.Time) bootstrap.Material {
 	return bootstrap.Material{
-		Schema: "paperboat.byod-installation/v1", UserMachineID: "mch_client", UserMachineEnrollmentID: "ume_client", EnvironmentID: "env_client",
+		Schema: "paperboat.machine-installation/v1", UserMachineID: "mch_client", PairingID: "ume_client", EnvironmentID: "env_client",
 		ControlURL: server, HelperID: "helper_client", EnrollmentID: "henr_client", EnrollmentCredential: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP",
 		ExpiresAt: expiresAt, Artifact: &bootstrap.ArtifactTarget{Schema: bootstrap.ArtifactTargetSchemaV1, Kind: bootstrap.ArtifactKindPB, Version: "2026.08.24.1", Platform: runtime.GOOS, Architecture: runtime.GOARCH, RepositoryURL: server, TargetPath: releaseindex.AssetName(runtime.GOOS, runtime.GOARCH)},
-		HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 1, SetupRoles: []string{"interactive"}, SetupMode: "client",
-		ClientSession: &bootstrap.ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cli_client", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600, Scope: "machines:read machines:connect"},
+		HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 1, ClientSession: &bootstrap.ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cli_client", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600, Scope: "machines:read machines:connect"},
 	}
 }

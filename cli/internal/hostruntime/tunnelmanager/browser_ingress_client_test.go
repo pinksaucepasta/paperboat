@@ -34,8 +34,20 @@ func browserDecisionFixture(now time.Time) (connectorprotocol.IngressDecision, c
 }
 
 func TestBrowserIngressMachineProofRefreshAndExactBinding(t *testing.T) {
+	testBrowserIngressMachineProofRefreshAndExactBinding(t, false)
+}
+func TestNativeIngressMachineProofRefreshAndExactBinding(t *testing.T) {
+	testBrowserIngressMachineProofRefreshAndExactBinding(t, true)
+}
+func testBrowserIngressMachineProofRefreshAndExactBinding(t *testing.T, native bool) {
 	auth := &browserTestAuth{}
 	original, open := browserDecisionFixture(time.Now().Add(-time.Minute))
+	if native {
+		original.Binding.Audience = "private"
+		original.PrincipalID, original.GrantID, original.GrantGeneration, original.MembershipGeneration = "accessor-1", "nonce-1", 3, 0
+		q := connectorprotocol.PrivateAccessRequest{AccountID: original.Binding.AccountID, ResourceKind: "tunnel", ResourceID: original.Binding.TunnelID, RouteID: original.Binding.RouteID, Audience: "paperboat-tunnel-http", MachineID: original.PrincipalID, SessionID: "accessor-install-1", InstallationGeneration: 3, ExpiresAt: time.Now().UTC().Add(time.Minute), Nonce: original.GrantID, ConnectorID: original.ConnectorID, CarrierSessionID: original.SessionID, RouteGeneration: 1, SessionGeneration: 1, ProcessGeneration: 1, ConfigGeneration: 1, AssignmentGeneration: 1, EdgeNodeID: original.EdgeNodeID, EdgeProcessEpoch: original.EdgeProcessEpoch, Protocol: "http", Method: "CONNECT", Host: original.Binding.Hostname, Path: "/", IdempotencyKey: "operation-1", RequestID: "request-1", CorrelationID: "correlation-1"}
+		original.NativeAuthorization = &connectorprotocol.PrivateAccessOpen{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Grant: "signed-native-grant", Request: q}
+	}
 	current := original
 	mutate := ""
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -43,10 +55,25 @@ func TestBrowserIngressMachineProofRefreshAndExactBinding(t *testing.T) {
 		if r.Method != "POST" || r.URL.Path != "/v1/browser-access/ingress/authorize" || auth.path != r.URL.Path || auth.operation != r.Header.Get("Idempotency-Key") || !bytes.Equal(body, auth.body) || r.Header.Get("X-Paperboat-Machine-Identity") != "machine-identity" || r.Header.Get("X-Paperboat-Machine-Proof") == "" || r.Header.Get("Authorization") != "Bearer machine-identity" {
 			t.Error("machine proof is not bound to exact request")
 		}
+		var submitted struct {
+			Decision connectorprotocol.IngressDecision `json:"decision"`
+			Open     connectorprotocol.StreamOpen      `json:"open"`
+		}
+		if json.Unmarshal(body, &submitted) != nil || (submitted.Decision.NativeAuthorization == nil) != (original.NativeAuthorization == nil) || submitted.Decision.NativeAuthorization != nil && *submitted.Decision.NativeAuthorization != *original.NativeAuthorization {
+			t.Error("native authorization not sent exactly")
+		}
 		current = original
 		current.IssuedAt = time.Now()
 		current.ExpiresAt = current.IssuedAt.Add(10 * time.Second)
 		switch mutate {
+		case "native-grant":
+			evidence := *current.NativeAuthorization
+			evidence.Grant = "different-grant"
+			current.NativeAuthorization = &evidence
+		case "native-expired":
+			evidence := *current.NativeAuthorization
+			evidence.Request.ExpiresAt = time.Now().Add(-time.Second)
+			current.NativeAuthorization = &evidence
 		case "principal":
 			current.PrincipalID = "other-viewer"
 		case "grant":
@@ -72,7 +99,7 @@ func TestBrowserIngressMachineProofRefreshAndExactBinding(t *testing.T) {
 		if mutate == "duplicate" || mutate == "duplicate-envelope" {
 			raw, _ := json.Marshal(current)
 			if mutate == "duplicate" {
-				raw = bytes.Replace(raw, []byte(`"principal_id":"viewer-1"`), []byte(`"principal_id":"viewer-1","principal_id":"viewer-1"`), 1)
+				raw = bytes.Replace(raw, []byte(`"principal_id":"`+current.PrincipalID+`"`), []byte(`"principal_id":"`+current.PrincipalID+`","principal_id":"`+current.PrincipalID+`"`), 1)
 				_, _ = w.Write(append(append([]byte(`{"data":`), raw...), '}'))
 			} else {
 				_, _ = io.WriteString(w, `{"data":`+string(raw)+`,"data":`+string(raw)+`}`)
@@ -89,7 +116,11 @@ func TestBrowserIngressMachineProofRefreshAndExactBinding(t *testing.T) {
 	if got, err := lookup(context.Background(), open, original); err != nil || got.Authorize(current, open, current.EdgeNodeID, current.EdgeProcessEpoch, time.Now()) != nil {
 		t.Fatalf("refresh failed: %v", err)
 	}
-	for _, mode := range []string{"principal", "grant", "membership", "target", "expired", "denied", "redirect", "oversized", "duplicate", "duplicate-envelope"} {
+	modes := []string{"principal", "grant", "membership", "target", "expired", "denied", "redirect", "oversized", "duplicate", "duplicate-envelope"}
+	if native {
+		modes = append(modes, "native-grant", "native-expired")
+	}
+	for _, mode := range modes {
 		t.Run(mode, func(t *testing.T) {
 			mutate = mode
 			if _, err := lookup(context.Background(), open, original); err == nil {

@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const (
@@ -67,6 +69,16 @@ func (o JSONFileSinkOptions) normalized() (JSONFileSinkOptions, error) {
 	return o, nil
 }
 
+// fileSinkFailure exposes a stable public class while retaining the original
+// filesystem cause for metadata-only fault projection.
+type fileSinkFailure struct{ class, cause error }
+
+func (e *fileSinkFailure) Error() string         { return e.class.Error() }
+func (e *fileSinkFailure) Unwrap() []error       { return []error{e.class, e.cause} }
+func (*fileSinkFailure) DiagnosticStage() string { return "diagnostic_storage" }
+func (*fileSinkFailure) DiagnosticCode() string  { return "diagnostic_storage_unavailable" }
+func sinkFailure(class, cause error) error       { return &fileSinkFailure{class: class, cause: cause} }
+
 type telemetryFileItem struct {
 	event   *Event
 	barrier chan error
@@ -94,6 +106,7 @@ type JSONFileSink struct {
 	closeErr error
 
 	dropped atomic.Uint64
+	failed  atomic.Uint64
 }
 
 func NewJSONFileSink(path string) (*JSONFileSink, error) {
@@ -124,33 +137,33 @@ func NewJSONFileSinkWithOptions(path string, options JSONFileSinkOptions) (*JSON
 		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, ErrJSONFileSinkOpen
+		return nil, sinkFailure(ErrJSONFileSinkOpen, err)
 	}
 
 	file, err := openTelemetryFile(path)
 	if err != nil {
-		return nil, ErrJSONFileSinkOpen
+		return nil, sinkFailure(ErrJSONFileSinkOpen, err)
 	}
 	info, err := file.Stat()
 	if err != nil {
 		_ = file.Close()
-		return nil, ErrJSONFileSinkOpen
+		return nil, sinkFailure(ErrJSONFileSinkOpen, err)
 	}
 	if info.Size() > options.MaxBytes {
 		// Do not begin with an already-unbounded active file. Keep the old
 		// content in the same bounded backup scheme before accepting events.
 		if err := rotateTelemetryFiles(path, file, options.MaxBackups); err != nil {
 			_ = file.Close()
-			return nil, ErrJSONFileSinkRotate
+			return nil, sinkFailure(ErrJSONFileSinkRotate, err)
 		}
 		file, err = openTelemetryFile(path)
 		if err != nil {
-			return nil, ErrJSONFileSinkOpen
+			return nil, sinkFailure(ErrJSONFileSinkOpen, err)
 		}
 		info, err = file.Stat()
 		if err != nil {
 			_ = file.Close()
-			return nil, ErrJSONFileSinkOpen
+			return nil, sinkFailure(ErrJSONFileSinkOpen, err)
 		}
 	}
 
@@ -230,27 +243,42 @@ func (s *JSONFileSink) Flush(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-
-	barrier := make(chan error, 1)
-	s.lifecycleMu.Lock()
-	if s.closed {
-		done := s.done
-		s.lifecycleMu.Unlock()
-		<-done
-		return s.lastError()
-	}
-	select {
-	case s.queue <- telemetryFileItem{barrier: barrier}:
-		s.lifecycleMu.Unlock()
-	case <-ctx.Done():
-		s.lifecycleMu.Unlock()
-		return ctx.Err()
-	}
-	select {
-	case err := <-barrier:
+	if err := ctx.Err(); err != nil {
 		return err
-	case <-ctx.Done():
-		return ctx.Err()
+	}
+	barrier := make(chan error, 1)
+	retry := time.NewTicker(time.Millisecond)
+	defer retry.Stop()
+	for {
+		s.lifecycleMu.Lock()
+		if s.closed {
+			done := s.done
+			s.lifecycleMu.Unlock()
+			select {
+			case <-done:
+				return s.lastError()
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		select {
+		case s.queue <- telemetryFileItem{barrier: barrier}:
+			s.lifecycleMu.Unlock()
+			select {
+			case err := <-barrier:
+				return err
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		default:
+			s.lifecycleMu.Unlock()
+		}
+		// Keep producers and Close independent of a stalled filesystem worker.
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-retry.C:
+		}
 	}
 }
 
@@ -299,14 +327,17 @@ func (s *JSONFileSink) writeEvent(event Event) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	if s.writeErr != nil || s.file == nil {
+		s.failed.Add(1)
 		return
 	}
 	if int64(len(line)) > s.maxBytes {
+		s.failed.Add(1)
 		s.setErrorLocked(ErrJSONFileSinkEventLarge)
 		return
 	}
 	if s.size > 0 && s.size+int64(len(line)) > s.maxBytes {
 		if err := s.rotateLocked(); err != nil {
+			s.failed.Add(1)
 			s.setErrorLocked(err)
 			return
 		}
@@ -314,7 +345,11 @@ func (s *JSONFileSink) writeEvent(event Event) {
 	n, err := s.file.Write(line)
 	s.size += int64(n)
 	if err != nil || n != len(line) {
-		s.setErrorLocked(ErrJSONFileSinkWrite)
+		s.failed.Add(1)
+		if err == nil {
+			err = io.ErrShortWrite
+		}
+		s.setErrorLocked(sinkFailure(ErrJSONFileSinkWrite, err))
 	}
 }
 
@@ -323,18 +358,18 @@ func (s *JSONFileSink) rotateLocked() error {
 		return ErrJSONFileSinkWrite
 	}
 	if err := s.file.Sync(); err != nil {
-		return ErrJSONFileSinkSync
+		return sinkFailure(ErrJSONFileSinkSync, err)
 	}
 	if err := s.file.Close(); err != nil {
-		return ErrJSONFileSinkRotate
+		return sinkFailure(ErrJSONFileSinkRotate, err)
 	}
 	s.file = nil
 	if err := rotateTelemetryFiles(s.path, nil, s.maxBackups); err != nil {
-		return ErrJSONFileSinkRotate
+		return sinkFailure(ErrJSONFileSinkRotate, err)
 	}
 	file, err := openTelemetryFile(s.path)
 	if err != nil {
-		return ErrJSONFileSinkOpen
+		return sinkFailure(ErrJSONFileSinkOpen, err)
 	}
 	s.file = file
 	s.size = 0
@@ -351,8 +386,8 @@ func (s *JSONFileSink) sync() error {
 		return s.lastErrorLocked()
 	}
 	if err := s.file.Sync(); err != nil {
-		s.setErrorLocked(ErrJSONFileSinkSync)
-		return ErrJSONFileSinkSync
+		s.setErrorLocked(sinkFailure(ErrJSONFileSinkSync, err))
+		return sinkFailure(ErrJSONFileSinkSync, err)
 	}
 	return nil
 }
@@ -365,11 +400,12 @@ func (s *JSONFileSink) finalize() {
 	}
 	if s.writeErr == nil {
 		if err := s.file.Sync(); err != nil {
-			s.setErrorLocked(ErrJSONFileSinkSync)
+			s.setErrorLocked(sinkFailure(ErrJSONFileSinkSync, err))
+			return // setErrorLocked already closes and clears the descriptor.
 		}
 	}
 	if err := s.file.Close(); err != nil && s.closeErr == nil {
-		s.closeErr = ErrJSONFileSinkWrite
+		s.closeErr = sinkFailure(ErrJSONFileSinkWrite, err)
 	}
 	s.file = nil
 }
@@ -385,8 +421,16 @@ func (s *JSONFileSink) DroppedEvents() uint64 {
 
 func (s *JSONFileSink) DropCount() uint64 { return s.DroppedEvents() }
 
+// FailedEvents counts accepted events that could not be persisted.
+func (s *JSONFileSink) FailedEvents() uint64 {
+	if s == nil {
+		return 0
+	}
+	return s.failed.Load()
+}
+
 // LastError returns a stable, content-free error class for asynchronous write
-// failures. It never returns an underlying filesystem error.
+// failures. Its public text is content-free; errors.Is/As retain the cause.
 func (s *JSONFileSink) LastError() error {
 	if s == nil {
 		return nil
@@ -424,6 +468,15 @@ func (s *JSONFileSink) setErrorLocked(err error) {
 }
 
 func (s *JSONFileSink) Close() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return s.CloseContext(ctx)
+}
+
+func (s *JSONFileSink) CloseContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if s == nil {
 		return nil
 	}
@@ -437,22 +490,48 @@ func (s *JSONFileSink) Close() error {
 	if s.closed {
 		done := s.done
 		s.lifecycleMu.Unlock()
-		<-done
-		return s.lastError()
+		select {
+		case <-done:
+			return s.lastError()
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 	s.closed = true
 	close(s.stop)
 	done := s.done
 	s.lifecycleMu.Unlock()
-	<-done
-	return s.lastError()
+	select {
+	case <-done:
+		return s.lastError()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func openTelemetryFile(path string) (*os.File, error) {
-	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	before, err := os.Lstat(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	if err == nil && !before.Mode().IsRegular() {
+		return nil, ErrJSONFileSinkOpen
+	}
+	file, err := openTelemetryDescriptor(path)
 	if err != nil {
 		return nil, err
 	}
+	info, statErr := file.Stat()
+	pathInfo, pathErr := os.Lstat(path)
+	if statErr != nil || pathErr != nil {
+		_ = file.Close()
+		return nil, errors.Join(statErr, pathErr)
+	}
+	if !info.Mode().IsRegular() || !pathInfo.Mode().IsRegular() || !os.SameFile(info, pathInfo) || before != nil && !os.SameFile(before, info) {
+		_ = file.Close()
+		return nil, ErrJSONFileSinkOpen
+	}
+	// Validate the opened inode before changing permissions or appending data.
 	if err := file.Chmod(0o600); err != nil {
 		_ = file.Close()
 		return nil, err

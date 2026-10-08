@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -63,6 +64,17 @@ func TestConcurrentOperationWritesWaitForSQLiteWriter(t *testing.T) {
 func testSession() Session {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	return Session{ID: "ses_1", Name: "default", CWD: "/workspace", Columns: 80, Rows: 24, State: "running", Generation: 1, CreatedAt: now, UpdatedAt: now}
+}
+
+func TestFileTransferLookupDistinguishesMissingRows(t *testing.T) {
+	state, _ := openStore(t, nil)
+	defer state.Close()
+	if _, err := state.FileTransfer(context.Background(), "ft_missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing transfer error = %v, want ErrNotFound", err)
+	}
+	if _, err := state.FileTransfersByBatch(context.Background(), "fb_missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing batch error = %v, want ErrNotFound", err)
+	}
 }
 
 func BenchmarkPersistenceFlush32KiB(b *testing.B) {
@@ -658,6 +670,54 @@ func TestCancelBatchAndReceiptNeverPartiallyCancel(t *testing.T) {
 			}
 		} else if !errors.Is(cancelErr, ErrConflict) || receiptErr != nil || first.State != "delivered" || second.State != "pending" {
 			t.Fatalf("receipt winner states=%s/%s cancel=%v receipt=%v", first.State, second.State, cancelErr, receiptErr)
+		}
+	}
+}
+
+func TestFileTransferHistoryPagesPreserveAuthorizationAndFilters(t *testing.T) {
+	state, _ := openStore(t, nil)
+	defer state.Close()
+	now := time.Now().UTC()
+	for i := 0; i < 205; i++ {
+		transfer := FileTransfer{ID: fmt.Sprintf("ft_%03d", i), BatchID: fmt.Sprintf("fb_%03d", i), SourceMachineID: "source", DestinationMachineID: "target", InitiatingUserID: "account", SessionID: "session", Basename: "data.txt", Size: 0, SHA256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}
+		if i == 204 {
+			transfer.SourceMachineID = "other-source"
+		}
+		if i == 203 {
+			transfer.InitiatingUserID = "other-account"
+		}
+		if i == 202 {
+			transfer.SessionID = "other-session"
+		}
+		if err := state.CreateFileTransfers(context.Background(), []FileTransfer{transfer}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := state.FileTransfersForSource(context.Background(), "source", "account", "session", 200, 0, "", "")
+	if err != nil || len(first.Items) != 200 || first.Pagination.Total != 202 || first.Pagination.NextOffset == nil || *first.Pagination.NextOffset != 200 {
+		t.Fatalf("first page: %d %#v err=%v", len(first.Items), first.Pagination, err)
+	}
+	second, err := state.FileTransfersForSource(context.Background(), "source", "account", "session", 200, 200, "", "")
+	if err != nil || len(second.Items) != 2 || second.Pagination.NextOffset != nil {
+		t.Fatalf("second page: %d %#v err=%v", len(second.Items), second.Pagination, err)
+	}
+	seen := map[string]bool{}
+	for _, item := range append(first.Items, second.Items...) {
+		if seen[item.ID] {
+			t.Fatalf("duplicate %s", item.ID)
+		}
+		seen[item.ID] = true
+	}
+	filtered, err := state.FileTransfersForSource(context.Background(), "source", "account", "session", 50, 0, "FT_001", "created")
+	if err != nil || len(filtered.Items) != 1 || filtered.Items[0].ID != "ft_001" {
+		t.Fatalf("filtered=%#v err=%v", filtered, err)
+	}
+	for _, params := range []struct {
+		limit, offset int
+		q, state      string
+	}{{0, 0, "", ""}, {201, 0, "", ""}, {50, -1, "", ""}, {50, 0, "", "invalid"}, {50, 0, "\x00", ""}} {
+		if _, err := state.FileTransfersForSource(context.Background(), "source", "account", "session", params.limit, params.offset, params.q, params.state); err == nil {
+			t.Fatalf("accepted %#v", params)
 		}
 	}
 }

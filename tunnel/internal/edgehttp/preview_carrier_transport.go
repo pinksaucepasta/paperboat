@@ -5,13 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	yamux "github.com/libp2p/go-yamux/v5"
 	"io"
 	"net"
 	"net/http"
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
@@ -48,7 +48,7 @@ type DataCarrierPreviewRoute struct {
 	Server                               *datacarrier.Server
 	PreviewID                            string
 	OperationID                          string
-	OwnerDeviceID                        string
+	OwnerMachineID                       string
 	OwnerSessionID                       string
 	AccessMode                           string
 	EdgeNodeID                           string
@@ -197,7 +197,7 @@ func (r *DataCarrierPreviewRegistry) AttachAdmission(admission datacarrier.Expec
 		RouteID: admission.RouteID, Hostname: admission.Hostname, Kind: admission.RouteKind,
 		Revision: admission.RouteRevision, Identity: admission.Identity, Server: server,
 		PreviewID: admission.PreviewID, OperationID: admission.OperationID,
-		OwnerDeviceID: admission.OwnerDeviceID, OwnerSessionID: admission.OwnerSessionID,
+		OwnerMachineID: admission.OwnerMachineID, OwnerSessionID: admission.OwnerSessionID,
 		AccessMode:                           admission.AccessMode,
 		EdgeNodeID:                           admission.EdgeNodeID,
 		EdgeProcessEpoch:                     admission.EdgeProcessEpoch,
@@ -249,7 +249,7 @@ func (r *DataCarrierPreviewRegistry) validateRoute(route DataCarrierPreviewRoute
 	route.Hostname = host
 	route.Identity = identity
 	if route.AttachmentGeneration != 0 && route.Kind != datacarrier.RuntimeCarrierRoute {
-		if connectorprotocol.ValidateIdentifier(route.OperationID) != nil || connectorprotocol.ValidateIdentifier(route.PreviewID) != nil || connectorprotocol.ValidateIdentifier(route.OwnerDeviceID) != nil || connectorprotocol.ValidateIdentifier(route.OwnerSessionID) != nil || route.OwnerDeviceID != identity.HostID || route.LeaseGeneration == 0 || route.ConfigContentHash == "" || route.Endpoint == "" || route.ExpiresAt.IsZero() || !route.ExpiresAt.After(time.Now().UTC()) {
+		if connectorprotocol.ValidateIdentifier(route.OperationID) != nil || connectorprotocol.ValidateIdentifier(route.PreviewID) != nil || connectorprotocol.ValidateIdentifier(route.OwnerMachineID) != nil || connectorprotocol.ValidateIdentifier(route.OwnerSessionID) != nil || route.OwnerMachineID != identity.HostID || route.LeaseGeneration == 0 || route.ConfigContentHash == "" || route.Endpoint == "" || route.ExpiresAt.IsZero() || !route.ExpiresAt.After(time.Now().UTC()) {
 			return DataCarrierPreviewRoute{}, ErrDataCarrierPreviewRegistryInvalid
 		}
 		if route.MachineIdentityPublicKey == "" || route.MachineIdentityThumbprint == "" {
@@ -463,13 +463,13 @@ func (r *DataCarrierPreviewRegistry) Close() error {
 }
 
 func sameDataCarrierPreviewRoute(left, right DataCarrierPreviewRoute) bool {
-	return left.RouteID == right.RouteID && left.Hostname == right.Hostname && left.Kind == right.Kind && left.Revision == right.Revision && left.Identity == right.Identity && left.Server == right.Server && left.PreviewID == right.PreviewID && left.OperationID == right.OperationID && left.OwnerDeviceID == right.OwnerDeviceID && left.OwnerSessionID == right.OwnerSessionID && left.AccessMode == right.AccessMode && left.EdgeNodeID == right.EdgeNodeID && left.EdgeProcessEpoch == right.EdgeProcessEpoch && left.LeaseGeneration == right.LeaseGeneration && left.AttachmentGeneration == right.AttachmentGeneration && left.ConfigContentHash == right.ConfigContentHash && left.Endpoint == right.Endpoint && left.ExpiresAt.Equal(right.ExpiresAt) && left.MachineIdentityPublicKey == right.MachineIdentityPublicKey && left.MachineIdentityThumbprint == right.MachineIdentityThumbprint
+	return left.RouteID == right.RouteID && left.Hostname == right.Hostname && left.Kind == right.Kind && left.Revision == right.Revision && left.Identity == right.Identity && left.Server == right.Server && left.PreviewID == right.PreviewID && left.OperationID == right.OperationID && left.OwnerMachineID == right.OwnerMachineID && left.OwnerSessionID == right.OwnerSessionID && left.AccessMode == right.AccessMode && left.EdgeNodeID == right.EdgeNodeID && left.EdgeProcessEpoch == right.EdgeProcessEpoch && left.LeaseGeneration == right.LeaseGeneration && left.AttachmentGeneration == right.AttachmentGeneration && left.ConfigContentHash == right.ConfigContentHash && left.Endpoint == right.Endpoint && left.ExpiresAt.Equal(right.ExpiresAt) && left.MachineIdentityPublicKey == right.MachineIdentityPublicKey && left.MachineIdentityThumbprint == right.MachineIdentityThumbprint
 }
 
 func newerDataCarrierPreviewRoute(old, next DataCarrierPreviewRoute) bool {
 	if next.RouteID != old.RouteID || next.Hostname != old.Hostname || next.Kind != old.Kind ||
 		next.Identity.AccountID != old.Identity.AccountID || next.Identity.HostID != old.Identity.HostID ||
-		next.Identity.TunnelID != old.Identity.TunnelID || next.Identity.ConnectorID != old.Identity.ConnectorID || next.OperationID != old.OperationID || next.PreviewID != old.PreviewID || next.OwnerDeviceID != old.OwnerDeviceID || next.OwnerSessionID != old.OwnerSessionID || next.AccessMode != old.AccessMode || next.EdgeNodeID != old.EdgeNodeID {
+		next.Identity.TunnelID != old.Identity.TunnelID || next.Identity.ConnectorID != old.Identity.ConnectorID || next.OperationID != old.OperationID || next.PreviewID != old.PreviewID || next.OwnerMachineID != old.OwnerMachineID || next.OwnerSessionID != old.OwnerSessionID || next.AccessMode != old.AccessMode || next.EdgeNodeID != old.EdgeNodeID {
 		return false
 	}
 	if next.AttachmentGeneration != 0 && old.AttachmentGeneration != 0 && next.AttachmentGeneration < old.AttachmentGeneration {
@@ -524,14 +524,19 @@ func previewHostInBaseDomain(host, base string) bool {
 // edge Server. It is a streaming RoundTripper: request and response bodies
 // stay on the carrier stream and cancellation closes the stream immediately.
 type DataCarrierPreviewTransport struct {
-	registry *DataCarrierPreviewRegistry
-	openWait time.Duration
-	nextID   atomic.Uint64
+	registry         *DataCarrierPreviewRegistry
+	openWait         time.Duration
+	ingressRegistry  *DataCarrierRouteRegistry
+	publicAuthority  func(context.Context, DataCarrierPreviewRoute) (connectorprotocol.IngressDecision, error)
+	privateAuthority func(context.Context, connectorprotocol.PrivateAccessOpen) (connectorprotocol.IngressDecision, error)
 }
 
 type DataCarrierPreviewTransportConfig struct {
 	Registry          *DataCarrierPreviewRegistry
 	StreamOpenTimeout time.Duration
+	IngressRegistry   *DataCarrierRouteRegistry
+	PublicAuthority   func(context.Context, DataCarrierPreviewRoute) (connectorprotocol.IngressDecision, error)
+	PrivateAuthority  func(context.Context, connectorprotocol.PrivateAccessOpen) (connectorprotocol.IngressDecision, error)
 }
 
 func NewDataCarrierPreviewTransport(config DataCarrierPreviewTransportConfig) (*DataCarrierPreviewTransport, error) {
@@ -544,7 +549,7 @@ func NewDataCarrierPreviewTransport(config DataCarrierPreviewTransportConfig) (*
 	if config.StreamOpenTimeout <= 0 || config.StreamOpenTimeout > time.Minute {
 		return nil, ErrDataCarrierPreviewRegistryInvalid
 	}
-	return &DataCarrierPreviewTransport{registry: config.Registry, openWait: config.StreamOpenTimeout}, nil
+	return &DataCarrierPreviewTransport{registry: config.Registry, openWait: config.StreamOpenTimeout, ingressRegistry: config.IngressRegistry, publicAuthority: config.PublicAuthority, privateAuthority: config.PrivateAuthority}, nil
 }
 
 func (t *DataCarrierPreviewTransport) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -566,18 +571,28 @@ func (t *DataCarrierPreviewTransport) RoundTrip(request *http.Request) (*http.Re
 		return nil, fmt.Errorf("%w: attachment expired", ErrDataCarrierPreviewRegistryUnavailable)
 	}
 	decision, browser := request.Context().Value(browserDecisionKey{}).(connectorprotocol.IngressDecision)
+	privateRequest, private := request.Context().Value(privateAccessRequestContextKey{}).(connectorprotocol.PrivateAccessRequest)
+	if private && (route.AccessMode != "private" || privateRequest.Validate(time.Now().UTC()) != nil || !privateAccessRouteMatches(privateRequest, previewRouteMatch(route))) {
+		return nil, ErrDataCarrierPreviewTransport
+	}
 	restricted := route.AccessMode == "private" || route.AccessMode == "team"
-	if restricted && (!browser || decision.Binding.Audience != route.AccessMode || decision.Binding.PublicationID != route.PreviewID || decision.Binding.Hostname != route.Hostname || decision.Binding.RouteGeneration != route.Revision) {
+	if restricted && !private && (!browser || decision.Binding.Audience != route.AccessMode || decision.Binding.PublicationID != route.PreviewID || decision.Binding.Hostname != route.Hostname || decision.Binding.RouteGeneration != route.Revision) {
 		return nil, ErrDataCarrierPreviewTransport
 	}
-	if !restricted && browser {
+	if !restricted && (browser || private) || browser && private {
 		return nil, ErrDataCarrierPreviewTransport
 	}
-	openContext := request.Context()
 	lifetimeContext := request.Context()
 	var lifetimeCancel context.CancelFunc
 	var lifetimeTimer *time.Timer
-	openContext, cancelOpen := context.WithTimeout(openContext, t.openWait)
+	if private {
+		expires := privateRequest.ExpiresAt
+		if !route.ExpiresAt.IsZero() && route.ExpiresAt.Before(expires) {
+			expires = route.ExpiresAt
+		}
+		lifetimeContext, lifetimeCancel = context.WithDeadline(lifetimeContext, expires)
+	}
+	openContext, cancelOpen := context.WithTimeout(lifetimeContext, t.openWait)
 	open := connectorprotocol.StreamOpen{
 		Protocol:          connectorprotocol.ProtocolName,
 		Version:           connectorprotocol.ProtocolVersion,
@@ -588,10 +603,10 @@ func (t *DataCarrierPreviewTransport) RoundTrip(request *http.Request) (*http.Re
 		ProcessGeneration: route.Identity.ProcessGeneration,
 		Generation:        route.Identity.Generation,
 		RouteID:           route.RouteID,
-		RequestID:         fmt.Sprintf("preview-http-%d", t.nextID.Add(1)),
+		RequestID:         requestIDFor(request),
 		Kind:              previewStreamKind(request),
 	}
-	if restricted {
+	if restricted && !private {
 		open.Kind = "http_browser"
 		if decision.Authorize(decision, open, route.EdgeNodeID, route.EdgeProcessEpoch, time.Now().UTC()) != nil {
 			cancelOpen()
@@ -608,6 +623,49 @@ func (t *DataCarrierPreviewTransport) RoundTrip(request *http.Request) (*http.Re
 			Protocol: "http",
 		})
 	}
+	if private {
+		var ok bool
+		decision, ok = request.Context().Value(privateIngressDecisionKey{}).(connectorprotocol.IngressDecision)
+		if ok && decision.NativeAuthorization != nil && decision.NativeAuthorization.Request == privateRequest && t.privateAuthority != nil {
+			var err error
+			decision, err = t.privateAuthority(openContext, *decision.NativeAuthorization)
+			if err != nil {
+				cancelOpen()
+				stopPreviewStreamLifetime(lifetimeCancel, lifetimeTimer)
+				return nil, errors.Join(ErrDataCarrierPreviewTransport, err)
+			}
+		}
+		if !ok || decision.NativeAuthorization == nil || decision.NativeAuthorization.Request != privateRequest || decision.Binding.PublicationID != route.PreviewID || decision.Authorize(decision, open, route.EdgeNodeID, route.EdgeProcessEpoch, time.Now().UTC()) != nil {
+			cancelOpen()
+			stopPreviewStreamLifetime(lifetimeCancel, lifetimeTimer)
+			return nil, ErrDataCarrierPreviewTransport
+		}
+		openContext = datacarrier.WithPrivateAccessDecision(openContext, datacarrier.PrivateAccessDecision{Allowed: true, ExpiresAt: privateRequest.ExpiresAt, ResourceID: privateRequest.ResourceID, RouteID: privateRequest.RouteID, OperationID: privateRequest.OperationID, CarrierSessionID: privateRequest.CarrierSessionID, RouteGeneration: privateRequest.RouteGeneration, ProcessGeneration: privateRequest.ProcessGeneration, ConfigGeneration: privateRequest.ConfigGeneration, Protocol: privateRequest.Protocol})
+	}
+	if !restricted && t.publicAuthority != nil {
+		var err error
+		decision, err = t.publicAuthority(openContext, route)
+		if err != nil || decision.Binding.PublicationID != route.PreviewID || decision.Binding.Hostname != route.Hostname || decision.Binding.RouteGeneration != route.Revision || decision.Binding.Audience != "public" || decision.Authorize(decision, open, route.EdgeNodeID, route.EdgeProcessEpoch, time.Now().UTC()) != nil {
+			cancelOpen()
+			stopPreviewStreamLifetime(lifetimeCancel, lifetimeTimer)
+			return nil, errors.Join(ErrDataCarrierPreviewTransport, err)
+		}
+	}
+	var ingressLease *IngressLease
+	if (browser || private || !restricted && t.publicAuthority != nil) && t.ingressRegistry != nil {
+		var err error
+		ingressLease, err = t.ingressRegistry.AcquireIngress(openContext, decision)
+		if err != nil {
+			cancelOpen()
+			stopPreviewStreamLifetime(lifetimeCancel, lifetimeTimer)
+			return nil, err
+		}
+		defer func() {
+			if ingressLease != nil {
+				ingressLease.Release()
+			}
+		}()
+	}
 	stream, err := route.Server.OpenStreamWithLifetime(openContext, lifetimeContext, open)
 	cancelOpen()
 	if err != nil {
@@ -617,32 +675,53 @@ func (t *DataCarrierPreviewTransport) RoundTrip(request *http.Request) (*http.Re
 		}
 		return nil, errors.Join(ErrDataCarrierPreviewTransport, err)
 	}
-	if restricted {
+	if restricted && !private {
 		if err := connectorprotocol.WriteIngressDecision(stream, decision, time.Now().UTC()); err != nil {
 			_ = stream.Close()
 			return nil, err
 		}
 	}
-	stopCancel := context.AfterFunc(request.Context(), func() { _ = stream.Close() })
+	var application io.ReadWriteCloser = stream
+	if ingressLease != nil {
+		application = ingressLease.Wrap(lifetimeContext, stream)
+		ingressLease = nil
+	}
 	out := request.Clone(request.Context())
+	originalBody := out.Body
+	var closeRequestOnce sync.Once
+	var closeRequestErr error
+	closeRequestBody := func() error {
+		closeRequestOnce.Do(func() {
+			if originalBody != nil {
+				closeRequestErr = originalBody.Close()
+			}
+		})
+		return closeRequestErr
+	}
+	var upload *requestUploadBody
+	if originalBody != nil {
+		upload = &requestUploadBody{body: originalBody, closeBody: closeRequestBody}
+		out.Body = upload
+	}
+	stopCancel := context.AfterFunc(request.Context(), func() { _ = closeRequestBody(); _ = application.Close() })
 	out.RequestURI = ""
 	out.URL.Scheme = ""
 	out.URL.Host = ""
 	out.Host = route.Hostname
 	writeDone := make(chan error, 1)
 	go func() {
-		if out.Body != nil {
-			defer out.Body.Close()
+		writeErr := upload.preserve(out.Write(application))
+		if closeErr := closeRequestBody(); closeErr != nil && !expectedPrivateStreamClose(closeErr) {
+			writeErr = errors.Join(writeErr, closeErr)
 		}
-		writeErr := out.Write(stream)
 		if writeErr != nil {
-			_ = stream.Close()
+			_ = application.Close()
 		}
 		writeDone <- writeErr
 	}()
 	headerContext, cancelHeader := context.WithTimeout(request.Context(), t.openWait)
-	stopHeader := context.AfterFunc(headerContext, func() { _ = stream.Close() })
-	headerReader := &boundedPreviewResponseHeaderReader{reader: stream, maximum: dataCarrierPreviewMaxResponseHeader}
+	stopHeader := context.AfterFunc(headerContext, func() { _ = application.Close() })
+	headerReader := &boundedPreviewResponseHeaderReader{reader: application, maximum: dataCarrierPreviewMaxResponseHeader}
 	responseReader := bufio.NewReader(headerReader)
 	response, err := http.ReadResponse(responseReader, out)
 	headerTimedOut := errors.Is(headerContext.Err(), context.DeadlineExceeded)
@@ -651,30 +730,21 @@ func (t *DataCarrierPreviewTransport) RoundTrip(request *http.Request) (*http.Re
 	if err != nil {
 		stopCancel()
 		stopPreviewStreamLifetime(lifetimeCancel, lifetimeTimer)
-		_ = stream.Close()
+		_ = application.Close()
+		requestCloseErr := closeRequestBody()
+		writeErr := <-writeDone
 		if headerTimedOut {
-			timeoutErr := &dataCarrierPreviewResponseHeaderTimeoutError{timeout: t.openWait}
-			select {
-			case writeErr := <-writeDone:
-				return nil, errors.Join(ErrDataCarrierPreviewTransport, timeoutErr, writeErr)
-			default:
-				return nil, errors.Join(ErrDataCarrierPreviewTransport, timeoutErr)
-			}
+			return nil, errors.Join(ErrDataCarrierPreviewTransport, err, &dataCarrierPreviewResponseHeaderTimeoutError{timeout: t.openWait}, writeErr, requestCloseErr)
 		}
-		select {
-		case writeErr := <-writeDone:
-			return nil, errors.Join(ErrDataCarrierPreviewTransport, err, writeErr)
-		default:
-			return nil, errors.Join(ErrDataCarrierPreviewTransport, err)
-		}
+		return nil, errors.Join(ErrDataCarrierPreviewTransport, err, request.Context().Err(), writeErr, requestCloseErr)
 	}
 	response.Request = request
 	if response.StatusCode == http.StatusSwitchingProtocols {
 		// ReverseProxy bridges upgraded connections only when the response body
 		// is writable. Keep the buffered reader for bytes arriving with the 101.
-		response.Body = &dataCarrierRouteUpgradeBody{reader: responseReader, stream: stream, stopCancel: stopCancel, writeDone: writeDone, lifetimeCancel: lifetimeCancel, lifetimeTimer: lifetimeTimer}
+		response.Body = &dataCarrierRouteUpgradeBody{reader: responseReader, stream: application, stopCancel: stopCancel, writeDone: writeDone, closeRequestBody: closeRequestBody, lifetimeCancel: lifetimeCancel, lifetimeTimer: lifetimeTimer}
 	} else {
-		response.Body = &dataCarrierPreviewResponseBody{body: response.Body, stream: stream, stopCancel: stopCancel, writeDone: writeDone, lifetimeCancel: lifetimeCancel, lifetimeTimer: lifetimeTimer}
+		response.Body = &dataCarrierPreviewResponseBody{body: response.Body, stream: application, stopCancel: stopCancel, writeDone: writeDone, closeRequestBody: closeRequestBody, lifetimeCancel: lifetimeCancel, lifetimeTimer: lifetimeTimer}
 	}
 	return response, nil
 }
@@ -742,14 +812,15 @@ func previewStreamKind(request *http.Request) string {
 }
 
 type dataCarrierPreviewResponseBody struct {
-	body           io.ReadCloser
-	stream         io.Closer
-	stopCancel     func() bool
-	writeDone      <-chan error
-	lifetimeCancel context.CancelFunc
-	lifetimeTimer  *time.Timer
-	once           sync.Once
-	err            error
+	body             io.ReadCloser
+	stream           io.Closer
+	stopCancel       func() bool
+	writeDone        <-chan error
+	closeRequestBody func() error
+	lifetimeCancel   context.CancelFunc
+	lifetimeTimer    *time.Timer
+	once             sync.Once
+	err              error
 }
 
 func (b *dataCarrierPreviewResponseBody) Read(payload []byte) (int, error) {
@@ -758,7 +829,12 @@ func (b *dataCarrierPreviewResponseBody) Read(payload []byte) (int, error) {
 	}
 	n, err := b.body.Read(payload)
 	if err != nil {
-		_ = b.Close()
+		if closeErr := b.Close(); closeErr != nil {
+			if err == io.EOF {
+				return n, closeErr
+			}
+			return n, errors.Join(err, closeErr)
+		}
 	}
 	return n, err
 }
@@ -772,31 +848,37 @@ func (b *dataCarrierPreviewResponseBody) Close() error {
 		if b.stopCancel != nil {
 			b.stopCancel()
 		}
-		if b.body != nil {
-			if err := b.body.Close(); !expectedPrivateStreamClose(err) {
-				b.err = err
-			}
+		if b.closeRequestBody != nil {
+			b.err = joinPrivateStreamError(b.err, b.closeRequestBody())
 		}
 		if b.stream != nil {
-			if err := b.stream.Close(); b.err == nil && !expectedPrivateStreamClose(err) {
-				b.err = err
-			}
+			b.err = joinPrivateStreamError(b.err, b.stream.Close())
+		}
+		if b.body != nil {
+			b.err = joinPrivateStreamError(b.err, b.body.Close())
 		}
 		if b.writeDone != nil {
-			select {
-			case err := <-b.writeDone:
-				if b.err == nil && !expectedPrivateStreamClose(err) {
-					b.err = err
-				}
-			default:
-			}
+			b.err = joinPrivateStreamError(b.err, <-b.writeDone)
 		}
 	})
 	return b.err
 }
 
 func expectedPrivateStreamClose(err error) bool {
-	return err == nil || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, net.ErrClosed) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+	current := err
+	for depth := 0; current != nil && depth < 8; depth++ {
+		if stopped, ok := current.(*proxyUploadStopped); ok && stopped != nil {
+			return uploadReadTimeout(stopped.cause)
+		}
+		wrapper, ok := current.(interface{ Unwrap() error })
+		if !ok {
+			break
+		}
+		current = wrapper.Unwrap()
+	}
+	return err == nil || requestErrorLeaves(err, func(leaf error) bool {
+		return leaf == io.EOF || leaf == net.ErrClosed || leaf == io.ErrClosedPipe || leaf == http.ErrBodyReadAfterClose || leaf == context.Canceled || leaf == yamux.ErrStreamReset || leaf == yamux.ErrStreamClosed
+	}, true)
 }
 
 func stopPreviewStreamLifetime(cancel context.CancelFunc, timer *time.Timer) {
@@ -806,4 +888,11 @@ func stopPreviewStreamLifetime(cancel context.CancelFunc, timer *time.Timer) {
 	if cancel != nil {
 		cancel()
 	}
+}
+
+func joinPrivateStreamError(existing, err error) error {
+	if expectedPrivateStreamClose(err) {
+		return existing
+	}
+	return errors.Join(existing, err)
 }

@@ -46,30 +46,53 @@ type Favorite struct {
 	ID   string `json:"id"`
 }
 
+const (
+	DefaultLocalAccessDomain = splitdns.BrowserSuffix
+	MaxLocalServiceAliases   = 128
+	MaxLocalMachineProxies   = 128
+)
+
+// LocalAccessConfig controls this user's local browser domain and named
+// service URLs. It does not grant access to ports; runtime publication remains
+// limited to ports already authorized for the machine.
+type LocalAccessConfig struct {
+	Domain         string              `json:"domain,omitempty"`
+	ServiceAliases []LocalServiceAlias `json:"service_aliases,omitempty"`
+	MachineProxies []LocalMachineProxy `json:"machine_proxies,omitempty"`
+}
+
+// LocalServiceAlias names one authorized machine port below the browser
+// hostname for its machine alias.
+type LocalServiceAlias struct {
+	MachineAlias string `json:"machine_alias"`
+	Name         string `json:"name"`
+	Port         uint16 `json:"port"`
+}
+
+// LocalMachineProxy forwards otherwise-unmapped nonnumeric browser names to
+// one already authorized reverse-proxy port. Numeric URLs and aliases take priority.
+type LocalMachineProxy struct {
+	MachineAlias string `json:"machine_alias"`
+	Port         uint16 `json:"port"`
+}
+
 // Config is the on-disk CLI configuration.
 type Config struct {
 	// ServerURL is the paperboat-server base URL. It is required for production commands.
 	ServerURL string `json:"server_url,omitempty"`
 	// ControlSyncAddress is the optional authenticated topology stream endpoint.
 	// It must be an HTTPS host:port and is never inferred from the public API URL.
-	ControlSyncAddress string `json:"control_sync_address,omitempty"`
-	// DeviceSuffix is the private device-name suffix. A daemon restart applies changes.
-	DeviceSuffix string `json:"device_suffix,omitempty"`
-	// DeviceLoopbackCIDR selects the local /16 used to project canonical
-	// server-assigned device addresses. A daemon and device-guard restart applies it.
-	DeviceLoopbackCIDR string `json:"device_loopback_cidr,omitempty"`
-	// LastEnvironmentID is the last successfully connected stable project or
-	// user machine ID. Names are never persisted because they may become
-	// ambiguous or change ownership.
-	LastEnvironmentID string     `json:"last_environment_id,omitempty"`
-	Favorites         []Favorite `json:"favorites,omitempty"`
-	Auth              AuthConfig `json:"auth,omitempty"`
+	ControlSyncAddress string     `json:"control_sync_address,omitempty"`
+	Favorites          []Favorite `json:"favorites,omitempty"`
+	Auth               AuthConfig `json:"auth,omitempty"`
 	// FilePaste configures generic file-paste detection.
 	FilePaste FilePasteConfig `json:"file_paste,omitempty"`
 	// Connect tunes the pre-connect broker + readiness polling.
 	Connect ConnectConfig `json:"connect,omitempty"`
 	// Observability controls the local metadata-only event log.
 	Observability ObservabilityConfig `json:"observability,omitempty"`
+	// LocalAccess contains user-local browser names and service aliases.
+	LocalAccess LocalAccessConfig `json:"local_access,omitempty"`
 	// StatusBar controls the local terminal status line during interactive sessions.
 	StatusBar StatusBarConfig `json:"status_bar,omitempty"`
 
@@ -229,7 +252,7 @@ func DefaultPath() (string, error) {
 	}
 	path, err := userpaths.Config("paperboat/config.json")
 	if err != nil {
-		return "", fmt.Errorf("resolve user config dir: %w", err)
+		return "", safeConfigCause("user config location could not be resolved", err)
 	}
 	return path, nil
 }
@@ -248,13 +271,13 @@ func Load(path string) (*Config, error) {
 	cfg := &Config{path: path}
 	data, err := os.ReadFile(path)
 	switch {
-	case os.IsNotExist(err):
+	case credentialAbsenceOnly(err):
 		// No file yet: fall through with defaults applied below.
 	case err != nil:
-		return nil, fmt.Errorf("read config %s: %w", path, err)
+		return nil, safeConfigCause("config file could not be read", err)
 	default:
 		if err := json.Unmarshal(data, cfg); err != nil {
-			return nil, fmt.Errorf("parse config %s: %w", path, err)
+			return nil, safeConfigCause("config file is invalid", err)
 		}
 		cfg.path = path
 		var raw struct {
@@ -275,12 +298,6 @@ func Load(path string) (*Config, error) {
 func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.ServerURL) == "" {
 		c.ServerURL = strings.TrimSpace(buildinfo.DefaultServerURL)
-	}
-	if strings.TrimSpace(c.DeviceSuffix) == "" {
-		c.DeviceSuffix = "pprbt"
-	}
-	if strings.TrimSpace(c.DeviceLoopbackCIDR) == "" {
-		c.DeviceLoopbackCIDR = DefaultDeviceLoopbackCIDR
 	}
 	if c.Observability.MaxEventLogBytes == 0 {
 		c.Observability.MaxEventLogBytes = DefaultTelemetryMaxBytes
@@ -353,16 +370,52 @@ func normalizeStatusWidgets(values []string) []string {
 // Validate checks the complete effective configuration. Callers that mutate a
 // loaded Config can use it before presenting success.
 func (c *Config) Validate() error {
-	deviceSuffix, err := splitdns.ValidateSuffix(c.DeviceSuffix)
+	domain, err := splitdns.NormalizeBrowserDomain(c.LocalAccess.Domain)
 	if err != nil {
-		return fmt.Errorf("device_suffix: %w", err)
+		return fmt.Errorf("local_access.domain: %w", err)
 	}
-	c.DeviceSuffix = deviceSuffix
-	loopbackCIDR, err := NormalizeDeviceLoopbackCIDR(c.DeviceLoopbackCIDR)
-	if err != nil {
-		return fmt.Errorf("device_loopback_cidr: %w", err)
+	c.LocalAccess.Domain = domain
+	if len(c.LocalAccess.ServiceAliases) > MaxLocalServiceAliases {
+		return fmt.Errorf("local_access.service_aliases cannot contain more than %d items", MaxLocalServiceAliases)
 	}
-	c.DeviceLoopbackCIDR = loopbackCIDR
+	seenLocalAliases := make(map[string]struct{}, len(c.LocalAccess.ServiceAliases))
+	for index := range c.LocalAccess.ServiceAliases {
+		alias := &c.LocalAccess.ServiceAliases[index]
+		alias.MachineAlias = strings.ToLower(strings.TrimSpace(alias.MachineAlias))
+		alias.Name = strings.ToLower(strings.TrimSpace(alias.Name))
+		if _, label, err := splitdns.ParseBrowserHostname(alias.MachineAlias+"."+domain, domain); err != nil || label != "" {
+			return fmt.Errorf("local_access.service_aliases[%d].machine_alias must be one DNS label", index)
+		}
+		if _, label, err := splitdns.ParseBrowserHostname(alias.Name+"."+alias.MachineAlias+"."+domain, domain); err != nil || label != alias.Name || localAliasNameIsNumeric(alias.Name) {
+			return fmt.Errorf("local_access.service_aliases[%d].name must be a nonnumeric DNS label", index)
+		}
+		if alias.Port == 0 {
+			return fmt.Errorf("local_access.service_aliases[%d].port must be between 1 and 65535", index)
+		}
+		key := alias.MachineAlias + "\x00" + alias.Name
+		if _, exists := seenLocalAliases[key]; exists {
+			return fmt.Errorf("local_access.service_aliases contains duplicate %q for machine %q", alias.Name, alias.MachineAlias)
+		}
+		seenLocalAliases[key] = struct{}{}
+	}
+	if len(c.LocalAccess.MachineProxies) > MaxLocalMachineProxies {
+		return fmt.Errorf("local_access.machine_proxies cannot contain more than %d items", MaxLocalMachineProxies)
+	}
+	seenProxies := make(map[string]struct{}, len(c.LocalAccess.MachineProxies))
+	for index := range c.LocalAccess.MachineProxies {
+		proxy := &c.LocalAccess.MachineProxies[index]
+		proxy.MachineAlias = strings.ToLower(strings.TrimSpace(proxy.MachineAlias))
+		if _, label, err := splitdns.ParseBrowserHostname(proxy.MachineAlias+"."+domain, domain); err != nil || label != "" {
+			return fmt.Errorf("local_access.machine_proxies[%d].machine_alias must be one DNS label", index)
+		}
+		if proxy.Port == 0 {
+			return fmt.Errorf("local_access.machine_proxies[%d].port must be between 1 and 65535", index)
+		}
+		if _, exists := seenProxies[proxy.MachineAlias]; exists {
+			return fmt.Errorf("local_access.machine_proxies contains duplicate machine %q", proxy.MachineAlias)
+		}
+		seenProxies[proxy.MachineAlias] = struct{}{}
+	}
 	if c.ControlSyncAddress != "" {
 		value := strings.TrimSpace(c.ControlSyncAddress)
 		if !strings.HasPrefix(value, "https://") {
@@ -447,6 +500,18 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+func localAliasNameIsNumeric(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, char := range value {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func (c *Config) IsFavorite(kind, id string) bool {
 	for _, favorite := range c.Favorites {
 		if favorite.Kind == kind && favorite.ID == id {
@@ -511,15 +576,15 @@ func (c *Config) Save() error {
 		c.path = p
 	}
 	if err := os.MkdirAll(filepath.Dir(c.path), 0o700); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
+		return safeConfigCause("config directory could not be created", err)
 	}
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
-		return fmt.Errorf("encode config: %w", err)
+		return safeConfigCause("config file could not be encoded", err)
 	}
 	data = append(data, '\n')
 	if err := atomicfile.Write(c.path, data, atomicfile.CurrentOwnerOptions(0o600)); err != nil {
-		return fmt.Errorf("replace config %s: %w", c.path, err)
+		return safeConfigCause("config file could not be stored", err)
 	}
 	return nil
 }
@@ -529,8 +594,11 @@ func (c *Config) Save() error {
 func NormalizeServerURL(value string) (string, error) {
 	raw := strings.TrimSpace(value)
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return "", fmt.Errorf("invalid Paperboat server URL %q", value)
+	if err != nil {
+		return "", safeConfigCause("invalid Paperboat server URL", err)
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return "", errorsNewServerURL()
 	}
 	if u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" && u.Path != "/" {
 		return "", errorsNewServerURL()

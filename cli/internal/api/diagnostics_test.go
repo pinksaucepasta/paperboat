@@ -22,7 +22,7 @@ func TestDiagnosticUploadUsesExactDirectBytesWithoutBearer(t *testing.T) {
 			if r.Header.Get("Authorization") != "Bearer access-token" || r.Header.Get("Idempotency-Key") != "operation-00000001" {
 				t.Errorf("control headers=%v", r.Header)
 			}
-			writeAPIData(t, w, http.StatusCreated, DiagnosticUploadIntent{Schema: DiagnosticUploadIntentSchemaV1, IntentID: "diag_0123456789abcdef", CorrelationID: "pb-0123456789abcdef0123456789abcdef", State: "pending", ExpiresAt: time.Now().UTC().Add(10 * time.Minute), UploadMethod: http.MethodPut, UploadURL: server.URL + "/object", UploadHeaders: map[string]string{"Content-Type": "application/zip", "If-None-Match": "*"}})
+			writeAPIData(t, w, http.StatusCreated, DiagnosticUploadIntent{Schema: DiagnosticUploadIntentSchemaV1, IntentID: "diag_0123456789abcdef", CorrelationID: "support_01234567-89ab-4def-8123-456789abcdef", State: "pending", ExpiresAt: time.Now().UTC().Add(10 * time.Minute), UploadMethod: http.MethodPut, UploadURL: server.URL + "/object", UploadHeaders: map[string]string{"Content-Type": "application/zip", "If-None-Match": "*"}})
 		case "/object":
 			if r.Header.Get("Authorization") != "" || r.Header.Get("If-None-Match") != "*" || r.Header.Get("Content-Type") != "application/zip" || r.ContentLength != int64(len(bundle)) {
 				t.Errorf("object headers=%v length=%d", r.Header, r.ContentLength)
@@ -33,7 +33,7 @@ func TestDiagnosticUploadUsesExactDirectBytesWithoutBearer(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusOK)
 		case "/v1/diagnostic-upload-intents/diag_0123456789abcdef/complete":
-			writeAPIData(t, w, http.StatusOK, DiagnosticUploadIntent{Schema: DiagnosticUploadIntentSchemaV1, IntentID: "diag_0123456789abcdef", CorrelationID: "pb-0123456789abcdef0123456789abcdef", State: "uploaded", ExpiresAt: time.Now().UTC().Add(10 * time.Minute)})
+			writeAPIData(t, w, http.StatusOK, DiagnosticUploadIntent{Schema: DiagnosticUploadIntentSchemaV1, IntentID: "diag_0123456789abcdef", CorrelationID: "support_01234567-89ab-4def-8123-456789abcdef", State: "uploaded", ExpiresAt: time.Now().UTC().Add(10 * time.Minute)})
 		default:
 			http.NotFound(w, r)
 		}
@@ -65,7 +65,7 @@ func TestDiagnosticUploadRejectsRedirectAndUnsafeHeader(t *testing.T) {
 	}))
 	defer server.Close()
 	client := New(server.URL, config.Credential{}, server.Client())
-	base := DiagnosticUploadIntent{Schema: DiagnosticUploadIntentSchemaV1, IntentID: "diag_0123456789abcdef", CorrelationID: "pb-0123456789abcdef0123456789abcdef", State: "pending", ExpiresAt: time.Now().UTC().Add(time.Minute), UploadMethod: http.MethodPut, UploadURL: server.URL + "/redirect", UploadHeaders: map[string]string{"Content-Type": "application/zip"}}
+	base := DiagnosticUploadIntent{Schema: DiagnosticUploadIntentSchemaV1, IntentID: "diag_0123456789abcdef", CorrelationID: "support_01234567-89ab-4def-8123-456789abcdef", State: "pending", ExpiresAt: time.Now().UTC().Add(time.Minute), UploadMethod: http.MethodPut, UploadURL: server.URL + "/redirect", UploadHeaders: map[string]string{"Content-Type": "application/zip"}}
 	if err := client.UploadDiagnosticBundle(context.Background(), base, bytes.NewReader([]byte("x")), 1); err == nil || redirected {
 		t.Fatalf("redirect error=%v followed=%t", err, redirected)
 	}

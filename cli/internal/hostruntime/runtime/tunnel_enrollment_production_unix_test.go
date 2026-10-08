@@ -64,7 +64,7 @@ func (c *fakeProcessGenerationClaimer) ClaimProcessGeneration(_ context.Context,
 func testReconnectActivationRequest() tunnelenrollment.ActivationRequest {
 	return tunnelenrollment.ActivationRequest{
 		AccountID: "account_reconnect_01", TunnelID: "tunnel_reconnect_01", HostID: "host_reconnect_01", ConnectorID: "connector_reconnect_01",
-		OperationID: "operation_reconnect_01", StableEndpointID: "123e4567-e89b-12d3-a456-426614174000",
+		OperationID: "operation_reconnect_01", StableEndpointID: "endpoint_123e4567-e89b-42d3-a456-426614174000",
 		CredentialReference: "protected-file://paperboat/connectors/reconnect-credential-01", CredentialKeyID: "ed25519:thumbprint_reconnect_01",
 		CredentialThumbprint: "thumbprint_reconnect_01", CredentialPublicKey: make([]byte, 32), CredentialGeneration: 3, ProcessGeneration: 2,
 	}
@@ -132,5 +132,54 @@ func TestReconnectSafeProductionAssemblySourceRejectsCompetingStaleClaim(t *test
 	defer claimer.mu.Unlock()
 	if len(claimer.claimed) != 1 || claimer.claimed[0].ProcessGeneration != request.ProcessGeneration+1 {
 		t.Fatalf("competing claims=%+v", claimer.claimed)
+	}
+}
+
+type retryAssemblyTestSource struct {
+	reconnectAssemblyTestSource
+	bound *tunnelmanager.ProductionAssembly
+}
+
+func (s *retryAssemblyTestSource) BindProductionAssembly(_ tunnelenrollment.ActivationRequest, assembly *tunnelmanager.ProductionAssembly) error {
+	if s.bound != nil && s.bound != assembly {
+		return tunnelenrollment.ErrConflict
+	}
+	s.bound = assembly
+	return nil
+}
+
+func (s *retryAssemblyTestSource) UnbindProductionAssembly(_ tunnelenrollment.ActivationRequest, assembly *tunnelmanager.ProductionAssembly) {
+	if s.bound == assembly {
+		s.bound = nil
+	}
+}
+
+func TestReconnectSafeProductionAssemblySourceReleasesFailedActivationForRetry(t *testing.T) {
+	inner := &retryAssemblyTestSource{}
+	wrapper := newReconnectSafeProductionAssemblySource(inner)
+	request := testReconnectActivationRequest()
+	first, retry := &tunnelmanager.ProductionAssembly{}, &tunnelmanager.ProductionAssembly{}
+	binder := wrapper.(tunnelenrollment.ProductionAssemblyBinder)
+	if err := binder.BindProductionAssembly(request, first); err != nil {
+		t.Fatal(err)
+	}
+	// Match the activator's optional cleanup boundary after activation times
+	// out. Retrying the same durable connector must release its old assembly.
+	cleanup := func(assembly *tunnelmanager.ProductionAssembly) {
+		if unbinder, ok := wrapper.(tunnelenrollment.ProductionAssemblyUnbinder); ok {
+			unbinder.UnbindProductionAssembly(request, assembly)
+		}
+	}
+	cleanup(first)
+	if err := binder.BindProductionAssembly(request, retry); err != nil {
+		t.Fatalf("retry after failed activation retained stale binding: %v", err)
+	}
+	cleanup(first)
+	if inner.bound != retry {
+		t.Fatal("late cleanup removed replacement assembly")
+	}
+	cleanup(retry)
+	if inner.bound != nil {
+		t.Fatal("replacement cleanup retained assembly")
 	}
 }

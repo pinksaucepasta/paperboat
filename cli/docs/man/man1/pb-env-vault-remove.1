@@ -2,7 +2,7 @@
 .TH "PB-ENV-VAULT-REMOVE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-env-vault-remove - Remove this device's local ENV vault custody
+pb-env-vault-remove - Remove this machine's local ENV vault custody
 
 
 .SH SYNOPSIS
@@ -10,13 +10,13 @@ pb-env-vault-remove - Remove this device's local ENV vault custody
 
 
 .SH DESCRIPTION
-Remove this device's local ENV vault custody
+Remove this machine's local ENV vault custody
 
 .PP
-Remove this device's local vault custody after exact confirmation. This differs from reset: account ENV values and other authorized devices are not deleted.
+Remove this machine's local vault custody after exact confirmation. This differs from reset: account ENV values and other authorized machines are not deleted.
 
 .PP
-The local vault protects ENV key custody with a password and optional recovery code. Locking clears unlocked keys from this device; removing local custody differs from resetting and deleting account values. Never place a password or recovery code in shell arguments.
+The local vault protects ENV key custody with a password and optional recovery code. Locking clears unlocked keys from this machine; removing local custody differs from resetting and deleting account values. Never place a password or recovery code in shell arguments.
 
 .PP
 JSON output is supported with --json.
@@ -46,6 +46,10 @@ JSON output is supported with --json.
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 const ClientID = "paperboat"
@@ -68,6 +68,13 @@ func publicCall(ctx context.Context, baseURL, path string, body any, bearer stri
 	if err != nil {
 		return err
 	}
+	requestSupportReference := supportref.FromContext(ctx)
+	if requestSupportReference == "" {
+		requestSupportReference = supportref.New()
+	}
+	if requestSupportReference != "" {
+		req.Header.Set(supportref.Header, requestSupportReference)
+	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "paperboat/"+buildinfo.Version)
 	req.Header.Set("X-Paperboat-Client", ClientID)
@@ -83,27 +90,42 @@ func publicCall(ctx context.Context, baseURL, path string, body any, bearer stri
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNoContent && out == nil {
+		return nil
+	}
 	var env struct {
 		Data  json.RawMessage `json:"data"`
 		Error struct {
-			Code    string         `json:"code"`
-			Message string         `json:"message"`
-			Details map[string]any `json:"details"`
+			Code             string         `json:"code"`
+			Message          string         `json:"message"`
+			Details          map[string]any `json:"details"`
+			SupportReference string         `json:"support_reference"`
 		} `json:"error"`
 	}
 	decodeErr := json.NewDecoder(resp.Body).Decode(&env)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		if resp.StatusCode == http.StatusUpgradeRequired || env.Error.Code == "incompatible_client_version" {
 			required, _ := env.Error.Details["required_protocol"].(string)
-			return &ErrIncompatibleVersion{Required: required, Message: env.Error.Message}
+			return &ErrIncompatibleVersion{Required: safeRequiredProtocol(required), Message: apiErrorMessage("incompatible_client_version", resp.StatusCode)}
 		}
-		return &APIError{Status: resp.StatusCode, Code: env.Error.Code, Message: env.Error.Message, RequestID: responseRequestID(resp.Header), Details: env.Error.Details}
+		return &APIError{Status: resp.StatusCode, Code: env.Error.Code, Message: apiErrorMessage(env.Error.Code, resp.StatusCode), RequestID: responseRequestID(resp.Header), SupportReference: responseOrRequestSupportReference(resp.Header, env.Error.SupportReference, requestSupportReference), Details: env.Error.Details}
 	}
 	if decodeErr != nil {
-		return fmt.Errorf("decode auth response: %w", decodeErr)
+		return &ResponseDecodeError{Err: decodeErr}
 	}
 	if out != nil {
-		return json.Unmarshal(env.Data, out)
+		if err := json.Unmarshal(env.Data, out); err != nil {
+			return &ResponseDecodeError{Err: err}
+		}
+		return nil
 	}
 	return nil
+}
+
+func PollDeviceLogin(ctx context.Context, baseURL, deviceCode string, hc *http.Client) (out TokenSet, err error) {
+	err = publicCall(ctx, baseURL, "/v1/auth/device/token", map[string]string{"client_id": ClientID, "device_code": deviceCode}, "", &out, hc)
+	return
+}
+func CancelDeviceLogin(ctx context.Context, baseURL, deviceCode string, hc *http.Client) error {
+	return publicCall(ctx, baseURL, "/v1/auth/device/cancel", map[string]string{"client_id": ClientID, "device_code": deviceCode}, "", nil, hc)
 }

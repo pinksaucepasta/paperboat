@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -17,6 +16,16 @@ var (
 	ErrSnapshotInvalid = errors.New("invalid config snapshot")
 	ErrSourceChanged   = errors.New("config source changed while reading")
 )
+
+type snapshotFailure struct{ cause error }
+
+func (*snapshotFailure) Error() string { return ErrSnapshotInvalid.Error() }
+func (e *snapshotFailure) Unwrap() []error {
+	if e == nil || e.cause == nil {
+		return []error{ErrSnapshotInvalid}
+	}
+	return []error{ErrSnapshotInvalid, e.cause}
+}
 
 type FileState struct {
 	Hash   string      `json:"hash"`
@@ -134,7 +143,7 @@ func takeSelectedSnapshot(
 	})
 	sort.Slice(result.Skipped, func(i, j int) bool { return result.Skipped[i].Path < result.Skipped[j].Path })
 	if err != nil {
-		return result, fmt.Errorf("%w: %v", ErrSnapshotInvalid, err)
+		return result, &snapshotFailure{cause: err}
 	}
 	return result, nil
 }
@@ -156,7 +165,7 @@ func validateManifestRoots(root string, manifest Manifest) error {
 				return errors.Join(ErrSnapshotInvalid, err)
 			}
 			if info.Mode()&os.ModeSymlink != 0 && (index < len(parts)-1 || selected.Directory) {
-				return fmt.Errorf("%w: %s", ErrManifestUnsafePath, selected.Path)
+				return ErrManifestUnsafePath
 			}
 			if index < len(parts)-1 && !info.IsDir() {
 				break

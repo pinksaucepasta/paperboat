@@ -52,10 +52,10 @@ func (r *APIResolver) ResolveShared(ctx context.Context, sessionID string) (Conn
 		if _, err := r.validateDescriptor(resp, target); err != nil {
 			return ConnectInfo{}, err
 		}
-		terminal := &TerminalTarget{Protocol: resp.Terminal.Protocol, EnvironmentID: resp.Environment.EnvironmentID, QUICEndpoint: resp.Terminal.Endpoints.QUIC, WSSEndpoint: resp.Terminal.Endpoints.WSS, Auth: mapAuth(resp.Terminal.Auth), ThreadID: resp.Terminal.ThreadID, TerminalID: resp.Terminal.TerminalID, SessionID: sessionID, CWD: resp.Terminal.CWD, ReplayHistory: true}
+		terminal := &TerminalTarget{Protocol: resp.Terminal.Protocol, EnvironmentID: resp.Environment.EnvironmentID, QUICEndpoint: resp.Terminal.Endpoints.QUIC, WSSEndpoint: resp.Terminal.Endpoints.WSS, Auth: mapAuth(resp.Terminal.Auth), SessionID: sessionID, CWD: resp.Terminal.CWD, ReplayHistory: true}
 		if !terminal.Shared() || terminal.Auth.ResourceID == "" {
 			return ConnectInfo{}, errors.New("server returned invalid shared terminal role")
 		}
-		return ConnectInfo{TargetKind: targetUserMachine, ProjectID: resp.UserMachineID, Project: resp.Environment.Alias, ProjectState: resp.UserMachineState, MachineGeneration: resp.MachineGeneration, TunnelTarget: resp.Terminal.Endpoints.WSS, Terminal: terminal}, nil
+		return ConnectInfo{TargetKind: targetUserMachine, MachineID: resp.UserMachineID, Machine: resp.Environment.Alias, MachineState: resp.UserMachineState, MachineGeneration: resp.MachineGeneration, TunnelTarget: resp.Terminal.Endpoints.WSS, Terminal: terminal}, nil
 	}
 }

@@ -4,6 +4,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,14 +33,16 @@ const (
 )
 
 type windowsServiceDefinition struct {
-	Schema      string            `json:"schema"`
-	Name        string            `json:"name"`
-	DisplayName string            `json:"display_name"`
-	Description string            `json:"description"`
-	Executable  string            `json:"executable"`
-	Arguments   []string          `json:"arguments"`
-	Environment map[string]string `json:"environment,omitempty"`
-	Account     string            `json:"account"`
+	Schema           string            `json:"schema"`
+	Name             string            `json:"name"`
+	DisplayName      string            `json:"display_name"`
+	Description      string            `json:"description"`
+	ExecutableSHA256 string            `json:"executable_sha256,omitempty"`
+	ExecutableLength int64             `json:"executable_length,omitempty"`
+	Executable       string            `json:"executable"`
+	Arguments        []string          `json:"arguments"`
+	Environment      map[string]string `json:"environment,omitempty"`
+	Account          string            `json:"account"`
 }
 
 func windowsServiceName(kind, instance string) string {
@@ -260,6 +264,23 @@ func renderWindowsService(config Config) ([]byte, error) {
 		Arguments: append([]string(nil), config.Arguments...), Environment: copyEnvironment(config.Environment),
 		Account: config.User,
 	}
+	if config.Instance != "" && (config.Kind == HostdKind || config.Kind == UpdaterKind || config.Kind == DaemonKind) {
+		file, err := os.Open(config.Executable)
+		if err == nil {
+			digest := sha256.New()
+			length, copyErr := io.Copy(digest, io.LimitReader(file, (256<<20)+1))
+			closeErr := file.Close()
+			if copyErr != nil || closeErr != nil || length < 1 || length > 256<<20 {
+				return nil, ErrInvalidDefinition
+			}
+			definition.ExecutableSHA256, definition.ExecutableLength = hex.EncodeToString(digest.Sum(nil)), length
+			if config.ExecutableSHA256 != "" && (definition.ExecutableSHA256 != config.ExecutableSHA256 || length != config.ExecutableLength) {
+				return nil, ErrInvalidDefinition
+			}
+		} else if config.ExecutableSHA256 != "" || !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+	}
 	return json.MarshalIndent(definition, "", "  ")
 }
 
@@ -424,7 +445,7 @@ func windowsServiceConfigurationTrustedForTransition(config mgr.Config, definiti
 		return false
 	}
 	layout, err := windowsLayoutForInstance(instance)
-	if err != nil || !exactWindowsPath(filepath.Clean(arguments[0]), layout.Binary) {
+	if err != nil || !windowsServiceExecutableOwned(layout, filepath.Clean(arguments[0])) {
 		return false
 	}
 	wantArgument := windowsServiceRoleArgument(definition.Name)
@@ -837,7 +858,7 @@ func readWindowsServiceDefinitionWithExecutablePolicy(path string, allowMissingE
 	if instance := windowsServiceInstanceFromName(definition.Name); instance != "" {
 		layout, layoutErr := windowsLayoutForInstance(instance)
 		role := windowsServiceRoleArgument(definition.Name)
-		if layoutErr != nil || !exactWindowsPath(definition.Executable, layout.Binary) || len(definition.Arguments) != 4 || definition.Arguments[0] != "daemon" || definition.Arguments[1] != role || definition.Arguments[2] != "--instance" || definition.Arguments[3] != instance {
+		if layoutErr != nil || !windowsServiceExecutableOwned(layout, definition.Executable) || len(definition.Arguments) != 4 || definition.Arguments[0] != "daemon" || definition.Arguments[1] != role || definition.Arguments[2] != "--instance" || definition.Arguments[3] != instance {
 			return windowsServiceDefinition{}, ErrInvalidDefinition
 		}
 	}
@@ -984,4 +1005,13 @@ var (
 
 func (d windowsServiceDefinition) String() string {
 	return fmt.Sprintf("%s (%s)", d.Name, d.Executable)
+}
+
+func windowsServiceExecutableOwned(layout Layout, path string) bool {
+	if exactWindowsPath(path, layout.Binary) {
+		return true
+	}
+	relative, err := filepath.Rel(filepath.Join(layout.ReleasesRoot, "versions"), path)
+	parts := strings.Split(relative, string(filepath.Separator))
+	return err == nil && len(parts) == 2 && parts[0] != "." && parts[0] != ".." && len(parts[0]) <= 128 && !strings.ContainsAny(parts[0], `:*?"<>|`+"\x00\r\n") && strings.EqualFold(parts[1], "pb.exe")
 }

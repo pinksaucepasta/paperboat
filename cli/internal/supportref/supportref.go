@@ -4,26 +4,27 @@ package supportref
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
+	"github.com/google/uuid"
 	"regexp"
 )
 
 const Header = "Support-Reference"
 
-var valid = regexp.MustCompile(`^pb-[0-9a-f]{32}$`)
+var valid = regexp.MustCompile(`^support_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
 type contextKey struct{}
 
 func New() string {
-	var value [16]byte
-	if _, err := rand.Read(value[:]); err != nil {
+	id, err := uuid.NewRandom()
+	if err != nil {
 		return ""
 	}
-	return "pb-" + hex.EncodeToString(value[:])
+	return "support_" + id.String()
 }
 
-func Valid(value string) bool { return valid.MatchString(value) }
+func Valid(value string) bool {
+	return valid.MatchString(value)
+}
 
 func WithContext(ctx context.Context, value string) context.Context {
 	if !Valid(value) {

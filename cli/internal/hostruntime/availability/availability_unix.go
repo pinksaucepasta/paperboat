@@ -8,14 +8,15 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostservice"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 const PolicySchemaV1 = "paperboat.availability-policy/v1"
@@ -69,31 +70,31 @@ func (r *Resolver) Resolve(ctx context.Context) (Resolution, error) {
 	body := []byte("{}")
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, r.endpoint.String(), bytes.NewReader(body))
 	if err != nil {
-		return Resolution{}, err
+		return Resolution{}, controlFailure(err)
 	}
 	token, err := r.identities.Token(ctx)
 	if err != nil {
-		return Resolution{}, err
+		return Resolution{}, controlFailure(err)
 	}
 	operationID, err := r.operationID()
 	if err != nil {
-		return Resolution{}, err
+		return Resolution{}, controlFailure(err)
 	}
 	proof, err := r.proofs.Proof(ctx, operationID, http.MethodPost, r.endpoint.Path, body)
 	if err != nil {
-		return Resolution{}, err
+		return Resolution{}, controlFailure(err)
 	}
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString(proof))
 	request.Header.Set("Content-Type", "application/json")
 	response, err := r.client.Do(request)
 	if err != nil {
-		return Resolution{}, err
+		return Resolution{}, controlFailure(err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
-		return Resolution{}, fmt.Errorf("availability policy resolve rejected with status %d", response.StatusCode)
+		return Resolution{}, controlFailure(errorreport.HTTPStatusFailure(response))
 	}
 	decoder := json.NewDecoder(io.LimitReader(response.Body, 16<<10))
 	decoder.DisallowUnknownFields()
@@ -101,8 +102,17 @@ func (r *Resolver) Resolve(ctx context.Context) (Resolution, error) {
 		Data Resolution `json:"data"`
 	}
 	var extra any
-	if decoder.Decode(&envelope) != nil || decoder.Decode(&extra) != io.EOF || envelope.Data.Schema != PolicySchemaV1 || envelope.Data.UserMachineID == "" || !validMode(envelope.Data.Mode) || envelope.Data.Version < 0 {
-		return Resolution{}, ErrInvalid
+	if err := decoder.Decode(&envelope); err != nil {
+		return Resolution{}, controlFailure(errors.Join(ErrInvalid, err))
+	}
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err != nil {
+			return Resolution{}, controlFailure(errors.Join(ErrInvalid, err))
+		}
+		return Resolution{}, controlFailure(ErrInvalid)
+	}
+	if envelope.Data.Schema != PolicySchemaV1 || envelope.Data.UserMachineID == "" || !validMode(envelope.Data.Mode) || envelope.Data.Version < 0 {
+		return Resolution{}, controlFailure(ErrInvalid)
 	}
 	return envelope.Data, nil
 }
@@ -118,23 +128,34 @@ func (c *HostClient) Apply(ctx context.Context, policy Resolution) (Observation,
 	}
 	connection, err := dialAvailabilityHostService(ctx, c.socketPath, c.timeout)
 	if err != nil {
-		return Observation{}, err
+		return Observation{}, localFailure(err)
 	}
 	defer connection.Close()
-	_ = connection.SetDeadline(time.Now().Add(c.timeout))
+	if err := connection.SetDeadline(time.Now().Add(c.timeout)); err != nil {
+		return Observation{}, localFailure(err)
+	}
 	request := hostservice.Request{Schema: hostservice.ProtocolV1, Operation: "apply_availability", Mode: policy.Mode, Version: policy.Version}
 	if err := json.NewEncoder(connection).Encode(request); err != nil {
-		return Observation{}, err
+		return Observation{}, localFailure(err)
 	}
 	if err := closeAvailabilityHostServiceWrite(connection); err != nil {
-		return Observation{}, ErrInvalid
+		return Observation{}, localFailure(err)
 	}
 	decoder := json.NewDecoder(io.LimitReader(connection, 16<<10))
 	decoder.DisallowUnknownFields()
 	var response hostservice.Response
 	var extra any
-	if decoder.Decode(&response) != nil || decoder.Decode(&extra) != io.EOF || response.Schema != hostservice.ProtocolV1 || response.DesiredMode != policy.Mode || response.DesiredVersion != policy.Version || response.ObservedMode != policy.Mode || response.ObservedVersion != policy.Version || response.ObservedAt.IsZero() || response.HostServiceVersion == "" || response.Scope != "system" || !validStatus(response.Status, response.ErrorCode) || !validUpdateHealth(response.UpdateHealth) {
-		return Observation{}, ErrInvalid
+	if err := decoder.Decode(&response); err != nil {
+		return Observation{}, localFailure(errors.Join(ErrInvalid, err))
+	}
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err != nil {
+			return Observation{}, localFailure(errors.Join(ErrInvalid, err))
+		}
+		return Observation{}, localFailure(ErrInvalid)
+	}
+	if response.Schema != hostservice.ProtocolV1 || response.DesiredMode != policy.Mode || response.DesiredVersion != policy.Version || response.ObservedMode != policy.Mode || response.ObservedVersion != policy.Version || response.ObservedAt.IsZero() || response.HostServiceVersion == "" || response.Scope != "system" || !validStatus(response.Status, response.ErrorCode) || !validUpdateHealth(response.UpdateHealth) {
+		return Observation{}, localFailure(ErrInvalid)
 	}
 	return Observation{Schema: PolicySchemaV1, Mode: response.ObservedMode, Version: response.ObservedVersion, Status: response.Status, ObservedAt: response.ObservedAt.UTC(), ErrorCode: response.ErrorCode, HostServiceVersion: response.HostServiceVersion, HostServiceScope: response.Scope, UpdateRollbacks: response.UpdateRollbacks, UpdateHealth: response.UpdateHealth}, nil
 }
@@ -155,6 +176,7 @@ type Service struct {
 		Record(string, float64, map[string]string) error
 	}
 	lastRollbacks uint64
+	lastFailure   *failureClass
 }
 
 func NewService(resolver interface {
@@ -178,12 +200,25 @@ func NewService(resolver interface {
 }
 
 func (s *Service) Start(ctx context.Context) error {
+	if ctx == nil {
+		return ErrInvalid
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	if s.cancel != nil {
 		s.mu.Unlock()
 		return ErrInvalid
 	}
-	runCtx, cancel := context.WithCancel(ctx)
+	// The daemon owns the background reconciliation lifetime. Retain the
+	// startup reference and recorder values without retaining a short-lived
+	// caller cancellation; Shutdown remains the explicit lifetime boundary.
+	lifetimeCtx := context.WithoutCancel(ctx)
+	if !supportref.Valid(supportref.FromContext(lifetimeCtx)) {
+		lifetimeCtx = supportref.WithContext(lifetimeCtx, supportref.New())
+	}
+	runCtx, cancel := context.WithCancel(lifetimeCtx)
 	s.cancel, s.done = cancel, make(chan struct{})
 	done := s.done
 	s.mu.Unlock()
@@ -223,21 +258,54 @@ func (s *Service) run(ctx context.Context, done chan struct{}) {
 func (s *Service) applyOnce(ctx context.Context) error {
 	resolution, err := s.resolver.Resolve(ctx)
 	if err != nil {
-		return err
+		failure := controlFailure(err)
+		s.observeFailure(ctx, controlRequestStage, controlRequestCode, failure)
+		return failure
 	}
 	observation, err := s.host.Apply(ctx, resolution)
 	if err != nil {
-		return err
+		failure := localFailure(err)
+		s.observeFailure(ctx, localGatewayStage, localGatewayCode, failure)
+		return failure
 	}
+	var recovered bool
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if observation.UpdateRollbacks > s.lastRollbacks && s.metrics != nil {
 		_ = s.metrics.Record("paperboat_runtime_update_rollbacks_total", float64(observation.UpdateRollbacks-s.lastRollbacks), nil)
 	}
 	s.lastRollbacks = observation.UpdateRollbacks
 	copy := observation
 	s.current = &copy
+	recovered = s.lastFailure != nil
+	s.lastFailure = nil
+	s.mu.Unlock()
+	if recovered {
+		errorreport.Current().Lifecycle(ctx, "service", "runtime_observation", "recovered", "success")
+	}
 	return nil
+}
+
+type failureClass struct {
+	stage, code, cause string
+	errno, status      int
+}
+
+func (s *Service) observeFailure(ctx context.Context, stage, code string, err error) {
+	fault := errorreport.ProjectFault(ctx, "paperboat-daemon", "runtime_observation", stage, code, err)
+	if isObservedCancellation(fault) {
+		return
+	}
+	class := failureClass{stage: fault.Stage, code: fault.Code, cause: fault.Cause, errno: fault.Errno, status: fault.HTTPStatus}
+	s.mu.Lock()
+	if s.lastFailure != nil && *s.lastFailure == class {
+		s.mu.Unlock()
+		return
+	}
+	s.lastFailure = &class
+	s.mu.Unlock()
+	if !errorreport.HTTPAttemptObserved(err) {
+		errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "runtime_observation", stage, code, err)
+	}
 }
 
 func (s *Service) Shutdown(ctx context.Context) error {

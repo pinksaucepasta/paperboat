@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/testcert"
 	"io"
 	"net"
 	"net/http"
@@ -14,13 +15,13 @@ import (
 	"testing"
 )
 
-func TestProxyUsesAndCachesGuardCertificateCallback(t *testing.T) {
-	ca, err := LoadOrCreateConstrainedCA(t.TempDir(), "pprbt")
+func TestProxyUsesRenewableCertificateProvider(t *testing.T) {
+	ca, err := testcert.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	calls := 0
-	proxy, err := NewProxy(ProxyConfig{Routes: map[string]BrowserRoute{"studio.pprbt": {Address: netip.MustParseAddr("127.0.0.1"), Port: 3000}}, Suffix: "pprbt", DialContext: (&net.Dialer{}).DialContext, IssueCertificate: func(_ context.Context, hostname string) (tls.Certificate, error) {
+	proxy, err := NewProxy(ProxyConfig{Routes: map[string]BrowserRoute{"3000.studio.local.pprbt.dev": {Address: netip.MustParseAddr("127.0.0.1"), Port: 3000}}, DialContext: (&net.Dialer{}).DialContext, IssueCertificate: func(_ context.Context, hostname string) (tls.Certificate, error) {
 		calls++
 		certificate, key, issueErr := ca.IssueCertificate([]string{hostname})
 		if issueErr != nil {
@@ -32,12 +33,12 @@ func TestProxyUsesAndCachesGuardCertificateCallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if _, err := proxy.GetCertificate(&tls.ClientHelloInfo{ServerName: "studio.pprbt"}); err != nil {
+		if _, err := proxy.GetCertificate(&tls.ClientHelloInfo{ServerName: "3000.studio.local.pprbt.dev"}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if calls != 1 {
-		t.Fatalf("certificate callback calls=%d want=1", calls)
+	if calls != 2 {
+		t.Fatalf("certificate callback calls=%d want=2", calls)
 	}
 }
 
@@ -66,18 +67,17 @@ func TestProxySubdomainRoutingAndTLS(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	ca, err := LoadOrCreateConstrainedCA(tempDir, "pprbt")
+	ca, err := testcert.New()
 	if err != nil {
 		t.Fatalf("load CA: %v", err)
 	}
 
 	proxy, err := NewProxy(ProxyConfig{
-		HTTPListenAddr:  "127.0.0.1:0",
-		HTTPSListenAddr: "127.0.0.1:0",
-		Routes:          map[string]BrowserRoute{"first.pprbt": {Address: netip.MustParseAddr("127.0.0.1"), Port: port3000}, "second.pprbt": {Address: netip.MustParseAddr("127.0.0.1"), Port: portNextjs}},
-		CA:              ca,
-		Suffix:          "pprbt",
-		DialContext:     (&net.Dialer{}).DialContext,
+		HTTPListenAddr:   "127.0.0.1:0",
+		HTTPSListenAddr:  "127.0.0.1:0",
+		Routes:           map[string]BrowserRoute{"3000.first.local.pprbt.dev": {Address: netip.MustParseAddr("127.0.0.1"), Port: port3000}, "3000.second.local.pprbt.dev": {Address: netip.MustParseAddr("127.0.0.1"), Port: portNextjs}},
+		IssueCertificate: func(_ context.Context, name string) (tls.Certificate, error) { return ca.TLS(name) },
+		DialContext:      (&net.Dialer{}).DialContext,
 	})
 	if err != nil {
 		t.Fatalf("NewProxy failed: %v", err)
@@ -85,7 +85,7 @@ func TestProxySubdomainRoutingAndTLS(t *testing.T) {
 
 	// Test 1: Direct port routing (e.g. <port3000>.homelab.pprbt)
 	req := httptest.NewRequest("GET", "/", nil)
-	req.Host = "first.pprbt"
+	req.Host = "3000.first.local.pprbt.dev"
 	rec := httptest.NewRecorder()
 	proxy.ServeHTTP(rec, req)
 
@@ -97,13 +97,13 @@ func TestProxySubdomainRoutingAndTLS(t *testing.T) {
 		t.Fatalf("expected backend port-3000, got %s", resp.Header.Get("X-Backend"))
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if string(body) != "hello from port 3000 (host: first.pprbt, proto: http)" {
+	if string(body) != "hello from port 3000 (host: 3000.first.local.pprbt.dev, proto: http)" {
 		t.Fatalf("unexpected body: %s", string(body))
 	}
 
-	// Test 2: Service subdomain routing (e.g. second.pprbt)
+	// Test 2: Service subdomain routing (e.g. 3000.second.local.pprbt.dev)
 	req2 := httptest.NewRequest("GET", "/", nil)
-	req2.Host = "second.pprbt"
+	req2.Host = "3000.second.local.pprbt.dev"
 	rec2 := httptest.NewRecorder()
 	proxy.ServeHTTP(rec2, req2)
 
@@ -117,7 +117,7 @@ func TestProxySubdomainRoutingAndTLS(t *testing.T) {
 
 	// Test 3: Dynamic TLS certificate generation via GetCertificate
 	hello := &tls.ClientHelloInfo{
-		ServerName: "first.pprbt",
+		ServerName: "3000.first.local.pprbt.dev",
 	}
 	cert, err := proxy.GetCertificate(hello)
 	if err != nil {
@@ -130,20 +130,20 @@ func TestProxySubdomainRoutingAndTLS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse leaf: %v", err)
 	}
-	if _, err := leaf.Verify(x509.VerifyOptions{Roots: roots, DNSName: "first.pprbt"}); err != nil {
+	if _, err := leaf.Verify(x509.VerifyOptions{Roots: roots, DNSName: "3000.first.local.pprbt.dev"}); err != nil {
 		t.Fatalf("leaf verification failed: %v", err)
 	}
 }
 
 func TestProxyRejectsUnauthorizedDialAndOutOfSuffixCertificate(t *testing.T) {
-	if _, err := NewProxy(ProxyConfig{Suffix: "pprbt"}); err == nil {
+	if _, err := NewProxy(ProxyConfig{}); err == nil {
 		t.Fatal("proxy accepted no authorized dialer")
 	}
-	ca, err := LoadOrCreateConstrainedCA(t.TempDir(), "pprbt")
+	ca, err := testcert.New()
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy, err := NewProxy(ProxyConfig{CA: ca, Suffix: "pprbt", DialContext: (&net.Dialer{}).DialContext})
+	proxy, err := NewProxy(ProxyConfig{IssueCertificate: func(_ context.Context, name string) (tls.Certificate, error) { return ca.TLS(name) }, DialContext: (&net.Dialer{}).DialContext})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestProxyStartReportsBindFailureSynchronously(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	proxy, err := NewProxy(ProxyConfig{HTTPListenAddr: listener.Addr().String(), Suffix: "pprbt", DialContext: (&net.Dialer{}).DialContext})
+	proxy, err := NewProxy(ProxyConfig{HTTPListenAddr: listener.Addr().String(), DialContext: (&net.Dialer{}).DialContext})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,11 +179,11 @@ func TestProxyStartRollsBackHTTPWhenHTTPSBindFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer httpsBlocker.Close()
-	ca, err := LoadOrCreateConstrainedCA(t.TempDir(), "pprbt")
+	ca, err := testcert.New()
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy, err := NewProxy(ProxyConfig{HTTPListenAddr: httpAddress, HTTPSListenAddr: httpsBlocker.Addr().String(), CA: ca, Suffix: "pprbt", DialContext: (&net.Dialer{}).DialContext})
+	proxy, err := NewProxy(ProxyConfig{HTTPListenAddr: httpAddress, HTTPSListenAddr: httpsBlocker.Addr().String(), IssueCertificate: func(_ context.Context, name string) (tls.Certificate, error) { return ca.TLS(name) }, DialContext: (&net.Dialer{}).DialContext})
 	if err != nil {
 		t.Fatal(err)
 	}

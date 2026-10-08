@@ -3,9 +3,8 @@ package inspector
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
+	"github.com/google/uuid"
 	"net/http"
 	"strings"
 	"sync"
@@ -24,9 +23,6 @@ const (
 	// rejected instead of dropping audit history. Replays are deliberate and
 	// infrequent, so 512 entries is ample without unbounded growth.
 	ReplayAuditMaxEntries = 512
-	// ReplayOperationIDPrefix marks derived request IDs so a replay is never
-	// reported as the uninterrupted original exchange.
-	ReplayOperationIDPrefix = "replay_"
 )
 
 var (
@@ -227,11 +223,7 @@ func uint64String(value uint64) string {
 }
 
 func newReplayOperationID() string {
-	var value [16]byte
-	if _, err := rand.Read(value[:]); err != nil {
-		panic("inspector: crypto/rand unavailable")
-	}
-	return ReplayOperationIDPrefix + hex.EncodeToString(value[:])
+	return "operation_" + uuid.NewString()
 }
 
 func (m *Manager) expireLocked(now time.Time) {

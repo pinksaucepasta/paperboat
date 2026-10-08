@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store/storesqlc"
 	_ "modernc.org/sqlite"
 )
@@ -26,6 +27,7 @@ var (
 	ErrIncompatible   = errors.New("store version is incompatible")
 	ErrCorrupt        = errors.New("store is corrupt")
 	ErrConflict       = errors.New("store state conflict")
+	ErrNotFound       = errors.New("store record not found")
 	ErrReplayGap      = errors.New("replay gap")
 	ErrResultTooLarge = errors.New("operation result is too large")
 )
@@ -173,6 +175,9 @@ func (s *Store) CreateFileTransfersWithinLimits(ctx context.Context, transfers [
 func (s *Store) FileTransfer(ctx context.Context, id string) (FileTransfer, error) {
 	row, err := s.q.FileTransfer(ctx, id)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return FileTransfer{}, ErrNotFound
+		}
 		return FileTransfer{}, err
 	}
 	return fileTransferFromSQLC(row), nil
@@ -191,40 +196,68 @@ func (s *Store) FileTransfersByBatch(ctx context.Context, batchID string) ([]Fil
 		transfers = append(transfers, fileTransferFromSQLC(row))
 	}
 	if len(transfers) == 0 {
-		return nil, ErrConflict
+		return nil, ErrNotFound
 	}
 	return transfers, nil
 }
 
-func (s *Store) FileTransfersForSource(ctx context.Context, sourceMachineID, userID, sessionID string, limit int) ([]FileTransfer, error) {
-	if sourceMachineID == "" || userID == "" {
-		return nil, ErrConflict
+type FileTransferPage struct {
+	Items      []FileTransfer                  `json:"items"`
+	Pagination protocol.FileTransferPagination `json:"pagination"`
+}
+
+func (s *Store) FileTransfersForSource(ctx context.Context, sourceMachineID, userID, sessionID string, limit, offset int, q, state string) (FileTransferPage, error) {
+	if sourceMachineID == "" || userID == "" || limit < 1 || limit > 200 || offset < 0 || !protocol.ValidFileTransferHistoryFilters(q, state) {
+		return FileTransferPage{}, ErrConflict
 	}
-	if limit <= 0 || limit > 200 {
-		limit = 50
-	}
-	query := fileTransferSelect + ` WHERE source_machine_id=? AND initiating_user_id=?`
+	where := ` WHERE source_machine_id=? AND initiating_user_id=?`
 	args := []any{sourceMachineID, userID}
 	if sessionID != "" {
-		query += ` AND session_id=?`
+		where += ` AND session_id=?`
 		args = append(args, sessionID)
 	}
-	query += ` ORDER BY created_at DESC,id DESC LIMIT ?`
-	args = append(args, limit)
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	if state != "" {
+		where += ` AND state=?`
+		args = append(args, state)
+	}
+	if q != "" {
+		where += ` AND (instr(lower(id),lower(?))>0 OR instr(lower(basename),lower(?))>0)`
+		args = append(args, q, q)
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return nil, err
+		return FileTransferPage{}, err
 	}
-	defer rows.Close()
-	transfers := make([]FileTransfer, 0)
+	defer tx.Rollback()
+	page := FileTransferPage{Items: []FileTransfer{}, Pagination: protocol.FileTransferPagination{Limit: limit, Offset: offset}}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM file_transfers`+where, args...).Scan(&page.Pagination.Total); err != nil {
+		return FileTransferPage{}, err
+	}
+	pageArgs := append(append([]any{}, args...), limit, offset)
+	rows, err := tx.QueryContext(ctx, fileTransferSelect+where+` ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?`, pageArgs...)
+	if err != nil {
+		return FileTransferPage{}, err
+	}
 	for rows.Next() {
-		transfer, scanErr := scanFileTransfer(rows)
-		if scanErr != nil {
-			return nil, scanErr
+		transfer, err := scanFileTransfer(rows)
+		if err != nil {
+			rows.Close()
+			return FileTransferPage{}, err
 		}
-		transfers = append(transfers, transfer)
+		page.Items = append(page.Items, transfer)
 	}
-	return transfers, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return FileTransferPage{}, err
+	}
+	if next := offset + len(page.Items); next < page.Pagination.Total {
+		page.Pagination.NextOffset = &next
+	}
+	if err := tx.Commit(); err != nil {
+		return FileTransferPage{}, err
+	}
+	return page, nil
 }
 
 func (s *Store) CommitFileTransferOffset(ctx context.Context, id string, expected, next int64) error {

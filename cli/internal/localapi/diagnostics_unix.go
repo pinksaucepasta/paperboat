@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 )
 
 func (s *Server) serveDiagnostics(writer http.ResponseWriter, request *http.Request, requestID string) {
@@ -27,7 +29,11 @@ func (s *Server) serveDiagnostics(writer http.ResponseWriter, request *http.Requ
 			return
 		}
 		snapshot, err := s.config.Diagnostics.Diagnostics(request.Context())
-		if err != nil || snapshot.Validate() != nil {
+		if err == nil {
+			err = snapshot.Validate()
+		}
+		if err != nil {
+			errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "diagnostic", "diagnostic_storage", "diagnostic_storage_unavailable", err)
 			writeError(writer, http.StatusServiceUnavailable, requestID, "diagnostics_unavailable", "diagnostics are unavailable")
 			return
 		}
@@ -48,6 +54,7 @@ func (s *Server) serveDiagnostics(writer http.ResponseWriter, request *http.Requ
 			return
 		}
 		if err := s.config.Diagnostics.RecordBugreportMarker(request.Context(), marker.Phase); err != nil {
+			errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "bugreport", "diagnostic_storage", "diagnostic_storage_unavailable", err)
 			writeError(writer, http.StatusServiceUnavailable, requestID, "diagnostics_unavailable", "bugreport marker could not be recorded")
 			return
 		}
@@ -64,7 +71,11 @@ func (s *Server) serveDiagnostics(writer http.ResponseWriter, request *http.Requ
 			return
 		}
 		bundle, err := s.config.Diagnostics.CreateBugreport(request.Context())
-		if err != nil || bundle.Validate() != nil {
+		if err == nil {
+			err = bundle.Validate()
+		}
+		if err != nil {
+			errorreport.Current().CaptureFailure(request.Context(), "paperboatd", "bugreport", "diagnostic_storage", "diagnostic_storage_unavailable", err)
 			writeError(writer, http.StatusServiceUnavailable, requestID, "bugreport_unavailable", "bugreport could not be created")
 			return
 		}

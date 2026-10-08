@@ -19,8 +19,13 @@ pb preview list [flags]
 ### Options
 
 ```
-  -h, --help   help for list
-      --json   print canonical preview resources as JSON
+      --cursor string   continue a previous page
+  -h, --help            help for list
+      --json            print canonical preview resources as JSON
+      --limit int       maximum results (1-200) (default 100)
+      --owner string    filter owner: mine, shared, or an authorized account ID
+      --q string        filter by resource name or ID
+      --state string    filter by resource state
 ```
 
 ### Options inherited from parent commands
@@ -29,6 +34,7 @@ pb preview list [flags]
       --config string      path to the CLI config file
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO

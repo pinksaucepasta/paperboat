@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             v3.21.12
-// source: internal/controlsync/proto/sync.proto
+// source: sync.proto
 
 package proto
 
@@ -150,5 +150,5 @@ var SyncService_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "internal/controlsync/proto/sync.proto",
+	Metadata: "sync.proto",
 }

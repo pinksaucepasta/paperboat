@@ -46,13 +46,10 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	name := flags.String("name", "", "User machine name")
 	shell := flags.String("shell", "", "Absolute login shell (default: auto-detect)")
 	stateRoot := flags.String("state-root", "", "Paperboat runtime state directory")
-	setupMode := flags.String("setup-mode", "host", "enrollment role: host or client")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
 		return errors.New("bootstrap accepts flags only")
 	}
-	if *setupMode != "host" && *setupMode != "client" {
-		return errors.New("setup-mode must be host or client")
-	}
+
 	if *legacyToken != "" && *tokenFile != "" {
 		return errors.New("use only one enrollment token source")
 	}
@@ -126,8 +123,8 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		return err
 	}
 	publicIdentityKey := base64.RawURLEncoding.EncodeToString(identityStore.Current().Public())
-	pairingSSHUser, pairingSSHPort := unixBootstrapSSHFields(*setupMode, account.Username)
-	resume, resumeErr := bootstrap.LoadResume(*stateRoot, *serverURL, publicIdentityKey, token, *name, *setupMode, time.Now().UTC())
+	pairingSSHUser, pairingSSHPort := unixBootstrapSSHFields(account.Username)
+	resume, resumeErr := bootstrap.LoadResume(*stateRoot, *serverURL, publicIdentityKey, token, *name, time.Now().UTC())
 	if err := rejectFreshBootstrapOverEnrollment(identityStore, resumeErr); err != nil {
 		return err
 	}
@@ -144,7 +141,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		fmt.Fprintln(stderr, "Finishing the existing machine enrollment...")
 	} else if authenticatedResume {
 		config := bootstrap.Config{ServerURL: *serverURL, Alias: *name, WorkspaceRoot: workspace, Verifier: resume.Verifier, PublicIdentityKey: publicIdentityKey, RuntimeVersions: map[string]string{"pb": buildinfo.Version}, SSHUser: pairingSSHUser, SSHPort: pairingSSHPort}
-		fmt.Fprintln(stderr, "Completing authenticated device setup...")
+		fmt.Fprintln(stderr, "Completing authenticated machine setup...")
 		material, err = bootstrap.RecoverMaterial(ctx, config, resume.RuntimeEnrolled)
 		if err == nil {
 			err = bootstrap.ValidateAuthenticatedSetupMaterial(resume, material)
@@ -155,11 +152,11 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		resume.PairingStarted = true
 		resume.Material = &material
 		if err := bootstrap.SaveResume(*stateRoot, resume); err != nil {
-			return fmt.Errorf("persist authenticated device setup material: %w", err)
+			return fmt.Errorf("persist authenticated machine setup material: %w", err)
 		}
 	} else {
 		material, resume, err = resumeOneShotEnrollment(ctx, oneShotResumeInput{
-			StateRoot: *stateRoot, SetupMode: *setupMode, TokenFile: *tokenFile, TokenFileErr: tokenFileErr,
+			StateRoot: *stateRoot, TokenFile: *tokenFile, TokenFileErr: tokenFileErr,
 			Config: bootstrap.Config{ServerURL: *serverURL, EnrollmentToken: token, Alias: *name, WorkspaceRoot: workspace, PublicIdentityKey: publicIdentityKey, RuntimeVersions: map[string]string{"pb": buildinfo.Version}, SSHUser: pairingSSHUser, SSHPort: pairingSSHPort},
 			Resume: resume, ResumeErr: resumeErr, Status: stderr,
 		}, defaultOneShotResumeOperations())
@@ -167,27 +164,21 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 			return err
 		}
 	}
-	// Both modes receive the local CLI profile and daemon. Host mode then adds
-	// the managed runtime below; the server-issued CLI session is bound to this
-	// enrollment's independent endpoint identity.
+	// Each enrollment initializes its CLI profile and durable runtime.
 	if err := completeBootstrapCLIResume(ctx, *stateRoot, *serverURL, material, &resume, installBootstrapCLI, bootstrap.SaveResume); err != nil {
 		if shouldInstallBootstrapCLI(material) {
 			return fmt.Errorf("initialize Paperboat CLI session: %w", err)
 		}
 		return err
 	}
-	sshUser, sshPort := unixBootstrapSSHFields(material.SetupMode, account.Username)
+	sshUser, sshPort := unixBootstrapSSHFields(account.Username)
 	if err := saveBootstrapRegistration(identityStore, *serverURL, material, sshUser, sshPort); err != nil {
 		return fmt.Errorf("save machine registration: %w", err)
 	}
-	if !shouldInstallBootstrapHostRuntime(material) {
-		return errors.New("enrollment setup mode does not install a managed runtime")
+	if !shouldInstallBootstrapRuntime(material) {
+		return errors.New("enrollment does not contain a managed runtime identity")
 	}
-	if material.SetupMode == "client" {
-		fmt.Fprintln(stderr, "Enrollment accepted. Setting up the device service...")
-	} else {
-		fmt.Fprintln(stderr, "Enrollment accepted. Setting up the device service...")
-	}
+	fmt.Fprintln(stderr, "Enrollment accepted. Setting up the machine service...")
 	client, err := enrollment.NewClient(nil, 15*time.Second)
 	if err != nil {
 		return failBootstrapBeforeRuntime(ctx, err, material, *stateRoot, "artifact_verification")
@@ -217,7 +208,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		}
 		return failBootstrapInstallation(ctx, err, material, *stateRoot, "artifact_verification")
 	}
-	if material.SetupMode == "host" {
+	{
 		controlSource, err := machinecontrol.NewSource(machinecontrol.Config{ControlURL: material.ControlURL, StateRoot: *stateRoot, Timeout: 15 * time.Second})
 		if err != nil {
 			return fmt.Errorf("initialize machine control credential source: %w", err)
@@ -246,7 +237,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		Executable: executable, Artifact: *material.Artifact, Source: source,
 		Home: home, Path: servicePath, StateRoot: *stateRoot, WorkspaceRoot: workspace, ControlURL: material.ControlURL,
 		UserMachineID: material.UserMachineID, Shell: resolvedShell, HelperListenAddress: material.HelperListenAddress,
-		SetupMode: material.SetupMode, InstallationGeneration: material.InstallationGeneration,
+		InstallationGeneration: material.InstallationGeneration,
 	}
 	previousGeneration := workerGeneration(*stateRoot)
 	minimumGeneration := previousGeneration + 1
@@ -280,7 +271,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	for {
 		request, _ := http.NewRequestWithContext(readyCtx, http.MethodGet, "http://"+material.HelperListenAddress+"/healthz", nil)
 		response, requestErr := healthClient.Do(request)
-		if requestErr == nil && bootstrapWorkerReady(readyCtx, response, *stateRoot, source.Version, minimumGeneration, readinessStarted, material.SetupMode == "host") &&
+		if requestErr == nil && bootstrapWorkerReady(readyCtx, response, *stateRoot, source.Version, minimumGeneration, readinessStarted, true) &&
 			bootstrapUpdaterReady(readyCtx, source.Version, uid) {
 			resume.RuntimeReady = true
 			if err := bootstrap.SaveResume(*stateRoot, resume); err != nil {
@@ -307,11 +298,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 			if err := bootstrap.ClearResume(*stateRoot); err != nil {
 				return fmt.Errorf("clear completed machine enrollment resume state: %w", err)
 			}
-			if material.SetupMode == "client" {
-				fmt.Fprintln(stdout, "Paperboat client runtime is ready.")
-			} else {
-				fmt.Fprintln(stdout, "Paperboat host runtime is ready.")
-			}
+			fmt.Fprintln(stdout, "Paperboat machine runtime is ready.")
 			return nil
 		}
 		if response != nil && response.Body != nil {
@@ -331,7 +318,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 
 // bootstrapUpdaterReady verifies that the newly installed managed updater is
 // actually serving its authenticated control socket before enrollment is
-// reported complete. A client runtime must not return with pb update/check
+// reported complete. A machine runtime must not return with pb update/check
 // pointing at a service that has not started yet.
 
 func bootstrapUpdaterReady(ctx context.Context, expectedVersion string, uid int) bool {
@@ -359,7 +346,7 @@ func bootstrapWorkerReady(ctx context.Context, response *http.Response, stateRoo
 	if !requireSystemService {
 		return true
 	}
-	_, err := systemServiceScopeFor(ctx, true)
+	_, err := systemServiceScope(ctx)
 	return err == nil
 }
 
@@ -692,15 +679,15 @@ func reportInstallationFailureWithClient(ctx context.Context, material bootstrap
 		return bootstrap.ErrInvalid
 	}
 	body, err := json.Marshal(struct {
-		EnrollmentID       string `json:"enrollment_id"`
+		PairingID          string `json:"pairing_id"`
 		HelperID           string `json:"helper_id"`
 		HelperEnrollmentID string `json:"helper_enrollment_id"`
 		Stage              string `json:"stage"`
-	}{material.UserMachineEnrollmentID, material.HelperID, material.EnrollmentID, stage})
+	}{material.PairingID, material.HelperID, material.EnrollmentID, stage})
 	if err != nil {
 		return err
 	}
-	operationID := "install-failure-" + material.UserMachineEnrollmentID + "-" + stage
+	operationID := "install-failure-" + material.PairingID + "-" + stage
 	proof, err := (enrollment.ProofSource{StateRoot: stateRoot}).Proof(ctx, operationID, http.MethodPost, "/v1/machine-installation-failures", body)
 	if err != nil {
 		return err
@@ -732,11 +719,11 @@ func reportInstallationFailureWithEnrollmentCredential(ctx context.Context, mate
 
 func reportInstallationFailureWithEnrollmentCredentialClient(ctx context.Context, material bootstrap.Material, stage string, client *http.Client) error {
 	body, err := json.Marshal(struct {
-		EnrollmentID       string `json:"enrollment_id"`
+		PairingID          string `json:"pairing_id"`
 		HelperID           string `json:"helper_id"`
 		HelperEnrollmentID string `json:"helper_enrollment_id"`
 		Stage              string `json:"stage"`
-	}{material.UserMachineEnrollmentID, material.HelperID, material.EnrollmentID, stage})
+	}{material.PairingID, material.HelperID, material.EnrollmentID, stage})
 	if err != nil {
 		return err
 	}

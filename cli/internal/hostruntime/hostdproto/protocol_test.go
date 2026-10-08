@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 )
@@ -258,6 +259,21 @@ func TestControllerRejectsEpochWrapAndRepeatedLease(t *testing.T) {
 	}
 }
 
+func TestControllerLeaseRandomFailurePreservesCauseWithoutText(t *testing.T) {
+	cause := errors.New("random source path detail")
+	controller, err := NewController(ControllerConfig{APIMin: 1, APIMax: 1, Random: failureReader{err: cause}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = controller.Negotiate(Hello{WorkerID: "runtime", Version: "1", APIMin: 1, APIMax: 1})
+	if !errors.Is(err, cause) {
+		t.Fatalf("lease generation cause=%v", err)
+	}
+	if strings.Contains(err.Error(), cause.Error()) {
+		t.Fatalf("random source detail escaped: %v", err)
+	}
+}
+
 func readyFor(value Welcome) Ready {
 	return Ready(value)
 }
@@ -275,6 +291,10 @@ func testLease(byteValue byte) string {
 }
 
 type shortWriter struct{ bytes.Buffer }
+
+type failureReader struct{ err error }
+
+func (r failureReader) Read([]byte) (int, error) { return 0, r.err }
 
 func (w *shortWriter) Write(data []byte) (int, error) {
 	if len(data) > 2 {

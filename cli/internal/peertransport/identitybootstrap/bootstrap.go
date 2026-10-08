@@ -1,4 +1,4 @@
-// Package identitybootstrap creates and registers device-owned CLI identities.
+// Package identitybootstrap creates and registers machine-owned CLI identities.
 package identitybootstrap
 
 import (
@@ -105,9 +105,9 @@ type CLIRequest struct {
 }
 
 // EnrollCLI registers an identity owned by this authenticated CLI session.
-// Every device has a distinct signing key as well as a distinct QUIC
+// Every machine has a distinct signing key as well as a distinct QUIC
 // keys; enrollment never loads an account-wide private key or waits for an
-// existing endpoint to approve the new device.
+// existing endpoint to approve the new machine.
 func EnrollCLI(ctx context.Context, request CLIRequest) (Result, error) {
 	return Bootstrap(ctx, Request{
 		Store: request.Store, Client: request.Client, Issuer: request.Issuer,
@@ -116,7 +116,7 @@ func EnrollCLI(ctx context.Context, request CLIRequest) (Result, error) {
 	})
 }
 
-// EnrollExistingRoot performs the second-device CLI enrollment handshake. It
+// EnrollExistingRoot performs the second-machine CLI enrollment handshake. It
 // creates endpoint-only transport keys, asks the paired daemon to sign them,
 // then verifies and persists the returned certificate and root public key.
 // No root private key is loaded or generated in this path.
@@ -413,7 +413,7 @@ func Bootstrap(ctx context.Context, request Request) (Result, error) {
 	if request.AllowRootReplacement {
 		fresh, ok := request.Client.(FreshClient)
 		if !ok {
-			return Result{}, invalidResponseError{Stage: "device_enrollment_client"}
+			return Result{}, invalidResponseError{Stage: "machine_enrollment_client"}
 		}
 		response, err = fresh.BootstrapE2EEFresh(ctx, operationID, input)
 	} else {
@@ -446,7 +446,7 @@ func Bootstrap(ctx context.Context, request Request) (Result, error) {
 		}
 		return Result{}, err
 	}
-	if err := request.Store.SavePeerDeviceSigningPublic(request.Issuer, request.AccountID, rootPublic); err != nil {
+	if err := request.Store.SavePeerMachineSigningPublic(request.Issuer, request.AccountID, rootPublic); err != nil {
 		return Result{}, err
 	}
 	if _, err := request.Store.SavePeerCertificate(request.Issuer, request.CLIClientSessionID, raw); err != nil {

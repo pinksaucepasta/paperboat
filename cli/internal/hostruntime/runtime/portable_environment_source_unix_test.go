@@ -129,31 +129,6 @@ func TestProductionEnvironmentKeySourceSelectsPortableWithoutNativeBoundary(t *t
 	material.Destroy()
 }
 
-func TestResetLegacyEnvironmentCacheForPortableSource(t *testing.T) {
-	if goruntime.GOOS != "darwin" {
-		t.Skip("macOS migration")
-	}
-	root := t.TempDir()
-	cache := filepath.Join(root, "environment", "cache.json")
-	highWater := filepath.Join(root, "environment-high-water.json")
-	if err := os.MkdirAll(filepath.Dir(cache), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range []string{cache, highWater} {
-		if err := os.WriteFile(path, []byte("encrypted"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := resetLegacyEnvironmentCacheForPortableSource(root); err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range []string{cache, highWater} {
-		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("%s still exists: %v", path, err)
-		}
-	}
-}
-
 func TestProductionEnvironmentKeySourceLiveIntegration(t *testing.T) {
 	stateRoot := os.Getenv("PAPERBOAT_TEST_ENV_STATE_ROOT")
 	machineID := os.Getenv("PAPERBOAT_TEST_ENV_MACHINE_ID")

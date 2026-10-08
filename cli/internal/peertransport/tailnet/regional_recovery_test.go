@@ -3,10 +3,14 @@ package tailnet
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat-relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=regional-recovery-test
+	"tailscale.com/tailcfg"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=regional-recovery-test
 	"tailscale.com/types/key"
 )
@@ -116,4 +120,65 @@ func TestRegionalRetryBoundsAndProcessReset(t *testing.T) {
 	if r.next.Sub(now) != 3*time.Second {
 		t.Fatal("replacement process inherited old failure backoff")
 	}
+}
+
+type failingRegionalEngine struct{ cause error }
+
+func (*failingRegionalEngine) SetRelayRegions([]*tailcfg.DERPRegion) error { return nil }
+func (*failingRegionalEngine) SetPeerRelayNodes([]*tailcfg.Node) error     { return nil }
+func (*failingRegionalEngine) RelayTransport(tailcfg.DERPRegionID) string  { return "direct" }
+func (e *failingRegionalEngine) PrepareRelay(context.Context, tailcfg.DERPRegionID) error {
+	return e.cause
+}
+func (*failingRegionalEngine) SetPeerRelayRegion(key.NodePublic, tailcfg.DERPRegionID) error {
+	return nil
+}
+func (*failingRegionalEngine) SendRelayControl(key.NodePublic, tailcfg.DERPRegionID, []byte) error {
+	return nil
+}
+
+func TestRegionalStatusDoesNotExposePreparationErrorText(t *testing.T) {
+	a, configuration, signer, _ := networkTestAuthority(t)
+	if err := a.Apply(t.Context(), networkToken(t, signer, configuration)); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	node := RegionalNode{
+		NodeID: "relay_test", NodeGeneration: 1, ProcessEpoch: "epoch_test", Region: "test", FailureDomain: "domain_test",
+		Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: 443,
+		State: "ready", ObservedAt: now, ExpiresAt: now + 60, CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now,
+	}
+	a.regional = &RegionalCandidates{ExpiresAt: now + 60, Nodes: []RegionalNode{node}}
+	a.relay.mu.Lock()
+	a.relay.grants = map[string]derpquic.Grant{node.NodeID: {NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, ExpiresAt: now + 60}}
+	r := &regionalRecovery{
+		authority: a, control: newRegionalControl(a.private, time.Now), engine: &failingRegionalEngine{cause: errors.New("private relay hostname and token")},
+		peerID: "machine_test", done: make(chan struct{}), ready: make(chan struct{}), inbox: make(chan regionalInbound, 64),
+	}
+	a.relay.recovery = r
+	a.relay.mu.Unlock()
+	ctx, cancel := context.WithCancel(t.Context())
+	go r.run(ctx)
+	defer cancel()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		status := a.RegionalStatus()
+		if status.Reason == "no_mutually_reachable_node" {
+			if got := status.ProbeFailures[node.NodeID]; got != "prepare_failed" {
+				t.Fatalf("preparation status=%q", got)
+			}
+			if strings.Contains(status.ProbeFailures[node.NodeID], "private relay") || strings.Contains(status.ProbeFailures[node.NodeID], "token") {
+				t.Fatalf("status exposed transport text: %+v", status)
+			}
+			cancel()
+			select {
+			case <-r.done:
+			case <-time.After(time.Second):
+				t.Fatal("regional recovery worker did not stop after cancellation")
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("regional status did not report failed preparation: %+v", a.RegionalStatus())
 }

@@ -190,6 +190,26 @@ func TestServiceDefinitionUpgradeDoesNotRestartStableBinary(t *testing.T) {
 	}
 }
 
+func TestConfigApplyRestartsUnchangedDeclaration(t *testing.T) {
+	layout := canonicalLayout(t, "linux")
+	control := &controller{}
+	installer, err := New(Config{
+		Platform: "linux", Kind: ConfigKind, ConfigRoot: t.TempDir(), Executable: layout.Binary,
+		User: "alice", Group: "staff", Arguments: []string{"daemon", "__runtime-config"}, Controller: control,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := installer.Install(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(control.applied) != 2 || control.applied[0] || !control.applied[1] {
+		t.Fatalf("config activation flags=%v", control.applied)
+	}
+}
+
 func TestHostdInstallerAcceptsOnlyExactRootEnrollment(t *testing.T) {
 	if _, err := NewHostdInstaller(ComponentConfig{Layout: canonicalLayout(t, "linux"), User: "root", Group: "root", UID: 0, GID: 0, HostdTokenFile: "/tmp/token", Controller: &controller{}}); err != nil {
 		t.Fatalf("root hostd err=%v", err)

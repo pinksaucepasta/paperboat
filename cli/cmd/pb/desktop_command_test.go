@@ -1,62 +1,16 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 )
-
-func TestDesktopLocalPreferenceBridgeCASAndReset(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.json")
-	run := func(request string) cliJSONEnvelope {
-		t.Helper()
-		c := newRootCommand()
-		var out bytes.Buffer
-		c.SetContext(context.Background())
-		c.SetIn(strings.NewReader(request))
-		c.SetOut(&out)
-		c.SetErr(&out)
-		c.SetArgs([]string{"--config", path, "__desktop", "request"})
-		if err := c.Execute(); err != nil {
-			t.Fatal(err)
-		}
-		var result cliJSONEnvelope
-		if err := json.Unmarshal(out.Bytes(), &result); err != nil {
-			t.Fatal(err, out.String())
-		}
-		return result
-	}
-	got := run(`{"action":"network.get","payload":{"scope":"local"}}`)
-	if !got.OK {
-		t.Fatalf("get: %+v", got.Error)
-	}
-	got = run(`{"action":"network.set","payload":{"scope":"local","expected_revision":"absent","device_suffix":"mydevices","device_loopback_cidr":"127.42.0.0/16"}}`)
-	if !got.OK {
-		t.Fatalf("save: %+v", got.Error)
-	}
-	data, _ := json.Marshal(got.Data)
-	var pref config.NetworkPreferences
-	if err := json.Unmarshal(data, &pref); err != nil {
-		t.Fatal(err)
-	}
-	got = run(`{"action":"network.set","payload":{"scope":"local","expected_revision":"absent","device_suffix":null,"device_loopback_cidr":null}}`)
-	if got.OK {
-		t.Fatal("stale mutation succeeded")
-	}
-	request, _ := json.Marshal(map[string]any{"action": "network.set", "payload": map[string]any{"scope": "local", "expected_revision": pref.Revision, "device_suffix": nil, "device_loopback_cidr": nil}})
-	if !run(string(request)).OK {
-		t.Fatal("reset failed")
-	}
-}
 
 func TestDesktopAuthUsesDashboardEnrollmentAndRejectsRevokedCredential(t *testing.T) {
 	dashboard := "https://dashboard.paperboat.test/dashboard/machines"
@@ -129,18 +83,5 @@ func TestDesktopStrictRequestRejectsCommandInjectionFields(t *testing.T) {
 		if decodeDesktop([]byte(input), &value) == nil {
 			t.Fatalf("accepted %s", input)
 		}
-	}
-}
-
-func TestDesktopEffectiveNetworkPreservesIndependentFieldSources(t *testing.T) {
-	remote := api.EffectiveNetworkPreferences{Effective: api.NetworkPreferenceValues{DeviceSuffix: "teamnet", DeviceLoopbackCIDR: "127.55.0.0/16"}, Sources: api.NetworkPreferenceValues{DeviceSuffix: "team", DeviceLoopbackCIDR: "account"}}
-	suffix := "localnet"
-	values, sources := resolveDesktopNetwork(config.NetworkPreferences{DeviceSuffix: &suffix}, remote)
-	if values.DeviceSuffix != "localnet" || sources.DeviceSuffix != "local" || values.DeviceLoopbackCIDR != "127.55.0.0/16" || sources.DeviceLoopbackCIDR != "account" {
-		t.Fatal(values, sources)
-	}
-	values, sources = resolveDesktopNetwork(config.NetworkPreferences{}, remote)
-	if values != remote.Effective || sources != remote.Sources {
-		t.Fatal("reset failed to restore inheritance")
 	}
 }

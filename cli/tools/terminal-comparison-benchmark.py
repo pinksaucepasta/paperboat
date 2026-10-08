@@ -468,7 +468,7 @@ class Runner:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--target", default="hn-byod-ready")
+    parser.add_argument("--target", default="machine-ready")
     parser.add_argument("--pb", default="pb")
     parser.add_argument("--ssh-user", default="root")
     parser.add_argument("--direct-host", default="root@157.180.74.88")

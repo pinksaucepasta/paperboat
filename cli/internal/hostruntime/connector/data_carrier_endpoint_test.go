@@ -12,10 +12,12 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	quic "github.com/quic-go/quic-go"
 )
 
@@ -35,6 +37,36 @@ func TestDataCarrierEndpointPeerBindingRejectsUnexpectedIdentity(t *testing.T) {
 	endpoint := DataCarrierEndpointConfig{PeerBinding: func(tls.ConnectionState) (DataCarrierIdentity, error) { return identity, nil }, ExpectedIdentity: expected}
 	if _, err := bindPeer(endpoint, tls.ConnectionState{}); !errors.Is(err, ErrDataCarrierTLS) {
 		t.Fatalf("unexpected peer identity error = %v, want TLS authentication error", err)
+	}
+}
+
+func TestDataCarrierPeerBindingFailureIsSafeAndTyped(t *testing.T) {
+	secret := errors.New("private peer identity detail")
+	endpoint := DataCarrierEndpointConfig{PeerBinding: func(tls.ConnectionState) (DataCarrierIdentity, error) { return DataCarrierIdentity{}, secret }}
+	_, err := bindPeer(endpoint, tls.ConnectionState{})
+	if !errors.Is(err, ErrDataCarrierTLS) || !errors.Is(err, secret) {
+		t.Fatalf("peer binding sentinels or cause were lost: %v", err)
+	}
+	var diagnostic interface {
+		DiagnosticStage() string
+		DiagnosticCode() string
+	}
+	if !errors.As(err, &diagnostic) || diagnostic.DiagnosticStage() != "peer_authority" || diagnostic.DiagnosticCode() != "peer_authority_failed" {
+		t.Fatalf("peer authority classification missing: %T", err)
+	}
+	if strings.Contains(err.Error(), secret.Error()) {
+		t.Fatalf("raw peer binding failure escaped: %v", err)
+	}
+	dialErr := &TransportDialError{Transport: Transport(secret.Error()), Err: err}
+	if !errors.Is(dialErr, secret) || !errors.Is(dialErr, ErrDataCarrierTLS) || !errors.As(dialErr, &diagnostic) {
+		t.Fatalf("transport wrapper lost identity failure: %v", dialErr)
+	}
+	if dialErr.Error() != "connector transport failed" || strings.Contains(dialErr.Error(), secret.Error()) {
+		t.Fatalf("transport error is not privacy-safe: %q", dialErr.Error())
+	}
+	fault := errorreport.ProjectFault(context.Background(), "paperboat-daemon", "peer_stream", "peer_connect", "transport_failed", dialErr)
+	if fault.Stage != "peer_authority" || fault.Code != "peer_authority_failed" {
+		t.Fatalf("peer authority phase did not override transport wrapper: %+v", fault)
 	}
 }
 

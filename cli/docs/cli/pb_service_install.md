@@ -29,6 +29,7 @@ pb service install [flags]
 
 ```
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO

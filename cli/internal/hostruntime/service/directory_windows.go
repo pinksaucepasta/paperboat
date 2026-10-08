@@ -4,6 +4,7 @@ package service
 
 import (
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"os"
 
 	"golang.org/x/sys/windows"
@@ -41,4 +42,10 @@ func syncServiceDirectory(path string) error {
 		return nil
 	}
 	return err
+}
+
+func serviceDefinitionSecurityDescriptor() string { return "D:P(A;;FA;;;SY)(A;;FA;;;BA)" }
+
+func writeServiceDefinition(path string, data []byte, mode os.FileMode) error {
+	return atomicfile.Write(path, data, atomicfile.Options{Mode: mode, OwnerUID: -1, OwnerGID: -1, SecurityDescriptor: serviceDefinitionSecurityDescriptor()})
 }

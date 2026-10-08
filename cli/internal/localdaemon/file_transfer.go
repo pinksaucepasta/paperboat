@@ -68,8 +68,8 @@ func (b *FileTransferBroker) PrepareFileTransfer(ctx context.Context, peer local
 	if b == nil || ctx == nil || peer.PID <= 0 || request.Validate(b.now().UTC()) != nil {
 		return localapi.FileTransferResult{}, ErrInvalidInventoryConfig
 	}
-	info := resolver.ConnectInfo{TargetKind: "machine", ProjectID: request.MachineID, MachineGeneration: request.MachineGeneration, Terminal: &resolver.TerminalTarget{EnvironmentID: request.EnvironmentID, Auth: resolver.AuthTarget{Method: "bearer", Token: request.Credential, ExpiresAt: request.Deadline.UTC().Format(time.RFC3339Nano), ResourceID: request.AccessSessionID}}}
-	leaseCtx, cancelLease := context.WithCancel(context.Background())
+	info := resolver.ConnectInfo{TargetKind: "machine", MachineID: request.MachineID, MachineGeneration: request.MachineGeneration, Terminal: &resolver.TerminalTarget{EnvironmentID: request.EnvironmentID, Auth: resolver.AuthTarget{Method: "bearer", Token: request.Credential, ExpiresAt: request.Deadline.UTC().Format(time.RFC3339Nano), ResourceID: request.AccessSessionID}}}
+	leaseCtx, cancelLease := context.WithCancel(context.WithoutCancel(ctx))
 	stopSetupCancel := context.AfterFunc(ctx, cancelLease)
 	opener, err := b.tunnel.PrepareNativeFileTransfer(leaseCtx, info, request.OperationID)
 	if err != nil {

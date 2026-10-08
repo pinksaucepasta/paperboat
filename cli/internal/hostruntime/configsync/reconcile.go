@@ -145,6 +145,8 @@ type Baseline struct {
 	AssignmentID     string                `json:"assignment_id"`
 	PolicyRevision   string                `json:"policy_revision"`
 	ManifestRevision string                `json:"manifest_revision"`
+	MappingRevision  string                `json:"mapping_revision,omitempty"`
+	PathDestinations map[string]string     `json:"path_destinations,omitempty"`
 	SelectedRoots    []ManifestRoot        `json:"selected_roots"`
 	FrozenPaths      map[string]FrozenPath `json:"frozen_paths"`
 	RemoteRevision   string                `json:"remote_revision"`
@@ -199,6 +201,17 @@ func validBaseline(baseline Baseline) bool {
 		len(baseline.ManifestRevision) != 64 || baseline.SelectedRoots == nil || baseline.FrozenPaths == nil ||
 		baseline.RemoteRevision == "" || baseline.Files == nil {
 		return false
+	}
+	if baseline.MappingRevision != "" && len(baseline.MappingRevision) != 64 {
+		return false
+	}
+	for name, destination := range baseline.PathDestinations {
+		if !safeRelativeStatusPath(name) || !canonicalAbsolutePath(destination) {
+			return false
+		}
+		if _, ok := baseline.Files[name]; !ok {
+			return false
+		}
 	}
 	for path, frozen := range baseline.FrozenPaths {
 		if !safeRelativeStatusPath(path) || frozen.BaseRevision == "" || !safeConflictRevision(frozen.ConflictRevision) {

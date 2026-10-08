@@ -30,7 +30,6 @@ import (
 
 	clienttransfer "github.com/pinksaucepasta/paperboat/internal/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
-	hostconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
 	hosttransfer "github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
@@ -206,7 +205,7 @@ func TestTask44ConnectedRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtimeServer, err := server.New(server.Config{Negotiator: protocol.Negotiator{Profile: hostconfig.BYOD, Available: map[string]bool{"terminal.v1": true, "health.v1": true}}, Journal: journal, Handler: dispatcher, MaxConcurrent: 8, HeartbeatInterval: time.Hour, MutationDeadline: 15 * time.Second})
+	runtimeServer, err := server.New(server.Config{Negotiator: protocol.Negotiator{Available: map[string]bool{"terminal.v1": true, "health.v1": true}}, Journal: journal, Handler: dispatcher, MaxConcurrent: 8, HeartbeatInterval: time.Hour, MutationDeadline: 15 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +311,7 @@ func TestTask44ConnectedRuntime(t *testing.T) {
 				SourceMachineID     string `json:"source_machine_id"`
 				InitiatingUserID    string `json:"initiating_user_id"`
 				RequestID           string `json:"request_id"`
-				OwnDevice           bool   `json:"own_device"`
+				OwnMachine          bool   `json:"own_machine"`
 				ConfigEndpoint      string `json:"config_endpoint"`
 				ConfigCA            string `json:"config_ca_pem"`
 				ConfigEnvironmentID string `json:"config_environment_id"`
@@ -322,7 +321,6 @@ func TestTask44ConnectedRuntime(t *testing.T) {
 				ConfigHelperID      string `json:"config_proof_helper_id"`
 				ConfigGeneration    string `json:"config_installation_generation"`
 				ConfigPath          string `json:"config_home_relative_path"`
-				ChezmoiBinary       string `json:"chezmoi_binary"`
 				Content             string `json:"content"`
 				ExpectedError       string `json:"expected_error"`
 			}
@@ -366,11 +364,7 @@ func TestTask44ConnectedRuntime(t *testing.T) {
 					identity := &task43JoinCredentials{fixture: task43JoinFixture{EnvironmentID: action.ConfigEnvironmentID, MachineID: action.ConfigMachineID, IdentityToken: action.ConfigIdentityToken, InstallationGeneration: generation, ProofHelperID: action.ConfigHelperID}, key: ed25519.PrivateKey(key)}
 					transport := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots}}
 					defer transport.CloseIdleConnections()
-					binary := action.ChezmoiBinary
-					if binary == "" {
-						binary = "/usr/local/bin/chezmoi"
-					}
-					configWorker, err = newProductionConfigSync(productionConfigSyncConfig{ControlURL: endpoint.String(), ControlHost: endpoint.Hostname(), RepositoryHosts: []string{"github.com"}, HomeRoot: configHome, StateRoot: filepath.Join(configRoot, "state"), ChezmoiBinary: binary, Identities: identity, Proofs: identity, OperationID: randomProductionOperationID, Transport: task44ConfigTransport{base: transport, t: t}})
+					configWorker, err = newProductionConfigSync(productionConfigSyncConfig{ControlURL: endpoint.String(), ControlHost: endpoint.Hostname(), RepositoryHosts: []string{"github.com"}, HomeRoot: configHome, StateRoot: filepath.Join(configRoot, "state"), Identities: identity, Proofs: identity, OperationID: randomProductionOperationID, Transport: task44ConfigTransport{base: transport, t: t}})
 					if err != nil {
 						code = "config_construction_failed"
 						break
@@ -420,7 +414,7 @@ func TestTask44ConnectedRuntime(t *testing.T) {
 				continue
 			}
 			if action.Action == "file" {
-				code := task44TransferFile(t, ctx, verifier, revocations, in.Issuer, in.EnvironmentID, in.MachineID, owner.AccountID, action.Token, action.BatchID, action.SourceMachineID, action.InitiatingUserID, action.RequestID, action.OwnDevice)
+				code := task44TransferFile(t, ctx, verifier, revocations, in.Issuer, in.EnvironmentID, in.MachineID, owner.AccountID, action.Token, action.BatchID, action.SourceMachineID, action.InitiatingUserID, action.RequestID, action.OwnMachine)
 				write("result.json", map[string]any{"id": action.ID, "ok": code == "", "error_code": code})
 				continue
 			}
@@ -488,7 +482,7 @@ func TestTask44ConnectedRuntime(t *testing.T) {
 // The in-memory stream replaces only transport plumbing. Every HTTP operation
 // verifies the actual server-signed file credential and native publication checks
 // the approved manifest, chunk digest and completed file digest.
-func task44TransferFile(t *testing.T, parent context.Context, verifier auth.Verifier, revocations *auth.RevocationCache, issuer, environmentID, machineID, ownerAccount, token, batchID, sourceID, actorID, requestID string, ownDevice bool) string {
+func task44TransferFile(t *testing.T, parent context.Context, verifier auth.Verifier, revocations *auth.RevocationCache, issuer, environmentID, machineID, ownerAccount, token, batchID, sourceID, actorID, requestID string, ownMachine bool) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(parent, 20*time.Second)
 	var workers sync.WaitGroup
@@ -529,9 +523,9 @@ func task44TransferFile(t *testing.T, parent context.Context, verifier auth.Veri
 	if err != nil {
 		return "file_credential_rejected"
 	}
-	if ownDevice {
+	if ownMachine {
 		if actorID != ownerAccount || requestID != "" || authorization.RequestID != "" || authorization.RequestHash != "" || authorization.IdempotencyKey != "" {
-			return "own_device_binding_invalid"
+			return "own_machine_binding_invalid"
 		}
 	} else if requestID == "" || authorization.RequestID != requestID || authorization.IdempotencyKey != batchID || authorization.RequestHash == "" {
 		return "file_approval_binding_invalid"
@@ -541,7 +535,7 @@ func task44TransferFile(t *testing.T, parent context.Context, verifier auth.Veri
 		if !identity {
 			return false
 		}
-		if ownDevice {
+		if ownMachine {
 			return a.UserID == ownerAccount && a.RequestID == "" && a.RequestHash == "" && a.IdempotencyKey == ""
 		}
 		return a.RequestID == requestID && a.IdempotencyKey == r.BatchID && a.RequestHash == server.FileTransferManifestDigest(r.Files)

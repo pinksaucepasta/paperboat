@@ -26,8 +26,8 @@ func (c *APILeaseClient) Create(ctx context.Context, request LeaseRequest) (Leas
 		return Lease{}, fmt.Errorf("%w: API client is required", ErrSessionInvalid)
 	}
 	lease, err := c.client.CreatePreviewLease(ctx, api.PreviewLeaseCreateRequest{
-		OwnerDeviceID:  request.OwnerDeviceID,
-		OwnerSessionID: request.OwnerSessionID,
+		OwnerMachineID: request.OwnerMachineID,
+		OwnerSessionID: request.OwnerSessionID, OwnerSessionKind: request.OwnerSessionKind,
 		Target: api.PreviewLeaseTarget{
 			Scheme: request.Target.Scheme, Address: request.Target.Address,
 		},
@@ -83,7 +83,7 @@ func (c *APILeaseClient) Get(ctx context.Context, previewID string) (Lease, erro
 func leaseFromAPI(value api.PreviewLease) Lease {
 	lease := Lease{
 		Schema: value.Schema, Kind: value.Kind, ID: value.ID, AccountID: value.AccountID, ActorID: value.ActorID,
-		OwnerDeviceID: value.OwnerDeviceID, OwnerSessionID: value.OwnerSessionID,
+		OwnerMachineID: value.OwnerMachineID, OwnerSessionID: value.OwnerSessionID, OwnerSessionKind: value.OwnerSessionKind,
 		Target: LeaseTarget{Scheme: value.Target.Scheme, Address: value.Target.Address}, AccessMode: value.AccessMode,
 		Persistent: value.Persistent, Endpoint: value.Endpoint, LeaseDeadline: value.LeaseDeadline,
 		UserDeadline: value.UserDeadline, State: value.State, AllocationState: value.AllocationState,
@@ -97,7 +97,7 @@ func leaseFromAPI(value api.PreviewLease) Lease {
 func leaseToAPI(value Lease) api.PreviewLease {
 	return api.PreviewLease{
 		Schema: value.Schema, Kind: value.Kind, ID: value.ID, AccountID: value.AccountID, ActorID: value.ActorID,
-		OwnerDeviceID: value.OwnerDeviceID, OwnerSessionID: value.OwnerSessionID,
+		OwnerMachineID: value.OwnerMachineID, OwnerSessionID: value.OwnerSessionID, OwnerSessionKind: value.OwnerSessionKind,
 		Target: api.PreviewLeaseTarget{Scheme: value.Target.Scheme, Address: value.Target.Address}, AccessMode: value.AccessMode,
 		Persistent: value.Persistent, Endpoint: value.Endpoint, LeaseDeadline: value.LeaseDeadline,
 		UserDeadline: value.UserDeadline, State: value.State, AllocationState: value.AllocationState,

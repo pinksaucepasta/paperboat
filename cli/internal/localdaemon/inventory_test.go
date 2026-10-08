@@ -129,6 +129,199 @@ func TestInventoryRefreshRetainsDaemonVersionAcrossPublications(t *testing.T) {
 	}
 }
 
+func TestInventoryDoesNotPublishReadyBeforeMachineReconciliation(t *testing.T) {
+	now := time.Date(2026, 8, 4, 8, 30, 0, 0, time.UTC)
+	store, err := localapi.NewSnapshotStore(&localapi.Snapshot{
+		Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now,
+		DaemonState: "starting", DaemonVersion: buildinfo.Version,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reconcileStarted := make(chan struct{})
+	releaseReconcile := make(chan struct{})
+	onMachinesState := make(chan string, 1)
+	inventory, err := NewInventory(InventoryConfig{
+		Source:          &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio"}}}}},
+		Store:           store,
+		RefreshInterval: time.Second,
+		RequestTimeout:  time.Second,
+		Clock:           func() time.Time { return now.Add(time.Second) },
+		ReconcileMachines: func(ctx context.Context, _ []api.UserMachine) error {
+			close(reconcileStarted)
+			select {
+			case <-releaseReconcile:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		},
+		OnMachines: func(ctx context.Context, _ []api.UserMachine) {
+			snapshot, snapshotErr := store.Snapshot(ctx)
+			if snapshotErr != nil {
+				onMachinesState <- "snapshot-error"
+				return
+			}
+			onMachinesState <- snapshot.DaemonState
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- inventory.Refresh(context.Background()) }()
+	select {
+	case <-reconcileStarted:
+	case <-time.After(time.Second):
+		t.Fatal("machine reconciliation did not start")
+	}
+	beforeRelease, err := store.Snapshot(context.Background())
+	if err != nil || beforeRelease.DaemonState != "starting" || beforeRelease.Generation != 1 || len(beforeRelease.Machines) != 0 {
+		t.Fatalf("snapshot before reconciliation completed=%#v err=%v", beforeRelease, err)
+	}
+	select {
+	case state := <-onMachinesState:
+		t.Fatalf("post-publication callback ran before reconciliation completed with state %q", state)
+	default:
+	}
+	close(releaseReconcile)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("inventory refresh did not finish after reconciliation was released")
+	}
+	afterRelease, err := store.Snapshot(context.Background())
+	if err != nil || afterRelease.DaemonState != "ready" || afterRelease.Generation != 2 || len(afterRelease.Machines) != 1 {
+		t.Fatalf("snapshot after reconciliation=%#v err=%v", afterRelease, err)
+	}
+	select {
+	case state := <-onMachinesState:
+		if state != "ready" {
+			t.Fatalf("post-publication callback observed state %q, want ready", state)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("post-publication callback did not run")
+	}
+}
+
+func TestInventoryReconciliationFailurePublishesDegradedMachinesAndRecovers(t *testing.T) {
+	now := time.Date(2026, 8, 4, 8, 45, 0, 0, time.UTC)
+	clockCalls := 0
+	clock := func() time.Time {
+		clockCalls++
+		return now.Add(time.Duration(clockCalls) * time.Second)
+	}
+	reconcileErr := errors.New("local machine access unavailable")
+	reconcileCalls := 0
+	refreshErrors := make(chan error, 2)
+	postPublish := make(chan localapi.Snapshot, 2)
+	store, err := localapi.NewSnapshotStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := NewInventory(InventoryConfig{
+		Source:          &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio"}}}}},
+		Store:           store,
+		RefreshInterval: time.Second,
+		RequestTimeout:  time.Second,
+		Clock:           clock,
+		ReconcileMachines: func(context.Context, []api.UserMachine) error {
+			reconcileCalls++
+			if reconcileCalls == 1 {
+				return reconcileErr
+			}
+			return nil
+		},
+		OnRefresh: func(err error) { refreshErrors <- err },
+		OnMachines: func(ctx context.Context, _ []api.UserMachine) {
+			snapshot, snapshotErr := store.Snapshot(ctx)
+			if snapshotErr != nil {
+				postPublish <- localapi.Snapshot{}
+				return
+			}
+			postPublish <- snapshot
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := inventory.Refresh(context.Background()); !errors.Is(err, reconcileErr) {
+		t.Fatalf("degraded refresh err=%v", err)
+	}
+	first, err := store.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.DaemonState != "degraded" || len(first.Machines) != 1 || first.Machines[0].ID != "machine_1" || len(first.Health) != 1 {
+		t.Fatalf("degraded snapshot=%#v", first)
+	}
+	health := first.Health[0]
+	if health.Code != "local_access_unavailable" || health.Severity != "error" || health.Title != "Local machine access is unavailable" || health.Recovery != "Check Paperboat local access settings and repair the installation" || health.ETag != health.Code || health.BrokenSince == nil {
+		t.Fatalf("local access health=%#v", health)
+	}
+	if diagnosticErr := <-refreshErrors; !errors.Is(diagnosticErr, reconcileErr) {
+		t.Fatalf("refresh diagnostic error=%v", diagnosticErr)
+	}
+	if published := <-postPublish; published.DaemonState != "degraded" || len(published.Machines) != 1 || len(published.Health) != 1 || published.Health[0].Code != "local_access_unavailable" {
+		t.Fatalf("post-publication callback observed %#v", published)
+	}
+
+	if err := inventory.Refresh(context.Background()); err != nil {
+		t.Fatalf("recovered refresh err=%v", err)
+	}
+	second, err := store.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.DaemonState != "ready" || len(second.Machines) != 1 || len(second.Health) != 0 || second.Generation != first.Generation+1 {
+		t.Fatalf("recovered snapshot=%#v", second)
+	}
+	if diagnosticErr := <-refreshErrors; diagnosticErr != nil {
+		t.Fatalf("recovered refresh diagnostic error=%v", diagnosticErr)
+	}
+	if published := <-postPublish; published.DaemonState != "ready" || len(published.Health) != 0 {
+		t.Fatalf("post-publication callback observed %#v", published)
+	}
+}
+
+func TestInventoryBoundsMachineReconciliationByRequestTimeout(t *testing.T) {
+	now := time.Date(2026, 8, 4, 9, 15, 0, 0, time.UTC)
+	store, err := localapi.NewSnapshotStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := NewInventory(InventoryConfig{
+		Source:          &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio"}}}}},
+		Store:           store,
+		RefreshInterval: time.Second,
+		RequestTimeout:  20 * time.Millisecond,
+		Clock:           func() time.Time { return now },
+		ReconcileMachines: func(ctx context.Context, _ []api.UserMachine) error {
+			<-ctx.Done()
+			return ctx.Err()
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	err = inventory.Refresh(context.Background())
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > time.Second {
+		t.Fatalf("refresh err=%v elapsed=%s", err, time.Since(started))
+	}
+	snapshot, err := store.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.DaemonState != "degraded" || len(snapshot.Machines) != 1 || len(snapshot.Health) != 1 || snapshot.Health[0].Code != "local_access_unavailable" {
+		t.Fatalf("timed-out reconciliation snapshot=%#v", snapshot)
+	}
+}
+
 func TestInventoryPublishesBoundedCompletionProjection(t *testing.T) {
 	now := time.Date(2026, 8, 4, 8, 0, 0, 0, time.UTC)
 	source := completionMachineSource{&scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio", EnvironmentID: "environment_1"}}}}}}

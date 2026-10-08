@@ -69,6 +69,8 @@ type Authorizer interface {
 }
 
 type Authorization struct {
+	WorkspaceID    string
+	ActorAccountID string
 	// JournalBinding is a stable, non-secret identity and resource binding. It is
 	// included in idempotency hashing so operation IDs cannot cross principals.
 	JournalBinding      string
@@ -122,9 +124,11 @@ type StreamError struct {
 	Code      string
 	Details   json.RawMessage
 	CloseCode int
+	Cause     error
 }
 
 func (e *StreamError) Error() string { return e.Code }
+func (e *StreamError) Unwrap() error { return e.Cause }
 
 type StreamEnd struct {
 	Payload json.RawMessage
@@ -380,8 +384,17 @@ func (s *Server) ServeAuthenticated(conn Connection, authorizer Authorizer) (ser
 			case "cancel":
 				cancelCtx, cancel := context.WithTimeout(s.ctx, min(s.config.MutationDeadline, 5*time.Second))
 				authorization, authErr := authorizer.Authorize(cancelCtx, result.frame)
+				authorityUnavailable := reportAuthorizationFailure(cancelCtx, authErr)
 				cancel()
-				if authErr != nil || authorization.JournalBinding == "" {
+				if authErr != nil {
+					if authorityUnavailable {
+						_ = writer.write(errorFrame(result.frame.RequestID, "unavailable", "authorization is temporarily unavailable", true))
+					} else {
+						_ = writer.write(errorFrame(result.frame.RequestID, "not_found_or_forbidden", "operation was not found or is not available", false))
+					}
+					continue
+				}
+				if authorization.JournalBinding == "" {
 					_ = writer.write(errorFrame(result.frame.RequestID, "not_found_or_forbidden", "operation was not found or is not available", false))
 					continue
 				}
@@ -679,7 +692,15 @@ func (s *Server) handleControl(frame protocol.Frame, writer *lockedWriter, autho
 	ctx, cancel := context.WithTimeout(s.ctx, min(s.config.MutationDeadline, 5*time.Second))
 	defer cancel()
 	authorization, err := authorizer.Authorize(ctx, frame)
-	if err != nil || authorization.JournalBinding == "" {
+	if err != nil {
+		if reportAuthorizationFailure(ctx, err) {
+			_ = writer.write(errorFrame(frame.RequestID, "unavailable", "authorization is temporarily unavailable", true))
+		} else {
+			_ = writer.write(errorFrame(frame.RequestID, "not_found_or_forbidden", "resource was not found or is not available", false))
+		}
+		return
+	}
+	if authorization.JournalBinding == "" {
 		_ = writer.write(errorFrame(frame.RequestID, "not_found_or_forbidden", "resource was not found or is not available", false))
 		return
 	}
@@ -730,9 +751,22 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 		if deadline > s.config.MutationDeadline {
 			deadline = s.config.MutationDeadline
 		}
-		opCtx, cancel := context.WithTimeout(s.ctx, deadline)
+		operationParent := s.ctx
+		if frame.Capability == "config.compare.v1" {
+			operationParent = connectionCtx
+		}
+		opCtx, cancel := context.WithTimeout(operationParent, deadline)
 		authorization, err := authorizer.Authorize(opCtx, frame)
-		if err != nil || authorization.JournalBinding == "" {
+		if err != nil {
+			if reportAuthorizationFailure(opCtx, err) {
+				_ = writer.write(errorFrame(frame.RequestID, "unavailable", "authorization is temporarily unavailable", true))
+			} else {
+				_ = writer.write(errorFrame(frame.RequestID, "not_found_or_forbidden", "resource was not found or is not available", false))
+			}
+			cancel()
+			return
+		}
+		if authorization.JournalBinding == "" {
 			cancel()
 			s.recordOperation("auth", "rejected")
 			_ = writer.write(errorFrame(frame.RequestID, "not_found_or_forbidden", "resource was not found or is not available", false))
@@ -761,12 +795,19 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 			_ = writer.write(errorFrame(frame.RequestID, "invalid_request", "invalid operation", false))
 			return
 		}
-		outcome, replay, err := s.config.Journal.Execute(opCtx, journalOperationID, journalRequest, func(ctx context.Context) operation.Outcome {
+		execute := func(ctx context.Context) operation.Outcome {
 			if handler, ok := s.config.Handler.(OperationHandler); ok {
 				return handler.HandleOperation(ctx, authorization, frame.Capability, frame.OperationID, frame.Payload)
 			}
 			return s.config.Handler.Handle(ctx, authorization, frame.Capability, frame.Payload)
-		})
+		}
+		var outcome operation.Outcome
+		var replay bool
+		if frame.Capability == "config.compare.v1" {
+			outcome = execute(opCtx)
+		} else {
+			outcome, replay, err = s.config.Journal.Execute(opCtx, journalOperationID, journalRequest, execute)
+		}
 		if err != nil {
 			code := operationErrorCode(err)
 			s.recordOperation(componentForCapability(frame.Capability), metricResult(code, false))
@@ -780,6 +821,7 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 		}
 		stream, hasStream, streamErr := s.openStream(connectionCtx, authorization, frame, outcome, replay)
 		if streamErr != nil {
+			reportStreamOpenFailure(connectionCtx, frame.Capability, streamErr)
 			_ = writer.write(errorFrame(frame.RequestID, "unavailable", "output stream could not be opened", true))
 			return
 		}
@@ -788,14 +830,14 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 		if hasStream {
 			streamID, streamErr = terminalState.bind(authorization, frame, outcome)
 			if streamErr != nil {
-				_ = stream.Close()
+				reportStreamCloseFailure(connectionCtx, frame.Capability, stream.Close())
 				_ = writer.write(errorFrame(frame.RequestID, "invalid_request", "terminal stream could not be bound", false))
 				return
 			}
 			outcome.Result, streamErr = addStreamID(outcome.Result, streamID)
 			if streamErr != nil {
 				terminalState.remove(streamID)
-				_ = stream.Close()
+				reportStreamCloseFailure(connectionCtx, frame.Capability, stream.Close())
 				_ = writer.write(errorFrame(frame.RequestID, "unavailable", "terminal stream could not be opened", true))
 				return
 			}
@@ -807,7 +849,7 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 		if err := writer.write(protocol.Frame{Type: "response", RequestID: frame.RequestID, Version: protocol.ProtocolVersion, OperationID: frame.OperationID, Payload: responsePayload}); err != nil {
 			if hasStream {
 				terminalState.remove(streamID)
-				_ = stream.Close()
+				reportStreamCloseFailure(connectionCtx, frame.Capability, stream.Close())
 			}
 			return
 		}
@@ -838,6 +880,8 @@ func (s *terminalConnectionState) bind(authorization Authorization, frame protoc
 	binding := &terminalStreamBinding{authorization: authorization}
 	if frame.Capability == "terminal.v1" && decodeStrict(frame.Payload, &request) == nil && request.Action == "attach" && json.Unmarshal(outcome.Result, &response) == nil && request.SessionID != "" && response.AttachmentID != "" && response.Session.Snapshot.Generation != 0 {
 		binding.kind, binding.sessionID, binding.attachmentID, binding.generation, binding.inputSequence = "terminal", request.SessionID, response.AttachmentID, response.Session.Snapshot.Generation, response.InputSequence
+	} else if frame.Capability == "config.compare.v1" {
+		binding.kind = "config_compare"
 	} else if frame.Capability == "exec.v1" {
 		var execRequest execRequest
 		if decodeStrict(frame.Payload, &execRequest) != nil || execRequest.OperationID == "" || execRequest.Action != "start" && execRequest.Action != "attach" {
@@ -882,7 +926,7 @@ func (s *terminalConnectionState) bind(authorization Authorization, frame protoc
 				}
 			}(authorization.RevokedSignal)
 		}
-		if authorization.BrowserTerminal || authorization.TerminalRole == TerminalRoleViewer || authorization.TerminalRole == TerminalRoleInteractive {
+		if frame.Capability == "config.compare.v1" || authorization.BrowserTerminal || authorization.TerminalRole == TerminalRoleViewer || authorization.TerminalRole == TerminalRoleInteractive {
 			deadline := authorization.ExpiresAt
 			s.expiryWatchOnce.Do(func() {
 				go func() {
@@ -936,17 +980,35 @@ func (s *Server) openStream(ctx context.Context, authorization Authorization, fr
 func (s *Server) stream(ctx context.Context, writer *lockedWriter, conn Connection, stream OutputStream, state *terminalConnectionState, streamID uint32, capability string) {
 	defer s.wg.Done()
 	defer state.remove(streamID)
-	defer stream.Close()
+	var streamFailure error
+	failureStage := "delivery"
+	defer func() {
+		if closeErr := stream.Close(); closeErr != nil {
+			if streamFailure == nil {
+				streamFailure = closeErr
+				failureStage = "lifecycle"
+			} else {
+				streamFailure = errors.Join(streamFailure, closeErr)
+			}
+		}
+		reportStreamFailure(ctx, capability, failureStage, streamFailure)
+	}()
 	for {
 		frame, err := stream.Next(ctx)
 		if err != nil {
 			var streamEnd *StreamEnd
 			if errors.As(err, &streamEnd) {
+				if capability == "config.compare.v1" {
+					streamEnd.Payload, _ = addStreamID(streamEnd.Payload, streamID)
+				}
 				_ = writer.write(protocol.Frame{Type: "event", RequestID: "stream", Version: protocol.ProtocolVersion, Capability: capability, Payload: streamEnd.Payload})
 				return
 			}
 			var streamError *StreamError
 			if errors.As(err, &streamError) {
+				if streamError.Cause != nil {
+					streamFailure = err
+				}
 				_ = writer.write(errorFrameWithDetails("stream", streamError.Code, "output stream closed", false, streamError.Details))
 				if closer, ok := conn.(ProtocolCloser); ok {
 					_ = closer.CloseProtocol(streamError.CloseCode, streamError.Code)
@@ -955,6 +1017,7 @@ func (s *Server) stream(ctx context.Context, writer *lockedWriter, conn Connecti
 				}
 				return
 			}
+			streamFailure = err
 			if ctx.Err() == nil && !errors.Is(err, ErrStreamClosed) {
 				_ = conn.Close()
 			}
@@ -966,6 +1029,7 @@ func (s *Server) stream(ctx context.Context, writer *lockedWriter, conn Connecti
 			frame.Release()
 		}
 		if writeErr != nil {
+			streamFailure = writeErr
 			_ = conn.Close()
 			return
 		}

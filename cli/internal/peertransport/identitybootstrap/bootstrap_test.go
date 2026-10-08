@@ -128,7 +128,7 @@ func (c *existingEnrollmentClient) EndpointCertificate(context.Context, string, 
 	return c.certificate, nil
 }
 
-func TestEnrollCLIExistingAccountCreatesIndependentDeviceIdentity(t *testing.T) {
+func TestEnrollCLIExistingAccountCreatesIndependentMachineIdentity(t *testing.T) {
 	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
 	rootPublic, _, _ := ed25519.GenerateKey(nil)
 	rootDir := t.TempDir()
@@ -147,7 +147,7 @@ func TestEnrollCLIExistingAccountCreatesIndependentDeviceIdentity(t *testing.T) 
 	if err != nil || second.RootFingerprint != first.RootFingerprint || second.CertificateFingerprint != first.CertificateFingerprint {
 		t.Fatalf("second enrollment failed: result=%+v err=%v", second, err)
 	}
-	storedRoot, err := store.LoadPeerDeviceSigningPublic(request.Issuer, request.AccountID)
+	storedRoot, err := store.LoadPeerMachineSigningPublic(request.Issuer, request.AccountID)
 	if err != nil || !bytes.Equal(storedRoot, enrolledPublic) || bytes.Equal(enrolledPublic, rootPublic) {
 		t.Fatalf("stored root=%x err=%v", storedRoot, err)
 	}
@@ -261,7 +261,7 @@ func TestFreshBootstrapPersistsIdentityBeforeReturning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootPublic, err := store.LoadPeerDeviceSigningPublic(request.Issuer, request.AccountID)
+	rootPublic, err := store.LoadPeerMachineSigningPublic(request.Issuer, request.AccountID)
 	if err != nil || len(rootPublic) != ed25519.PublicKeySize {
 		t.Fatalf("stored root err=%v", err)
 	}
@@ -314,7 +314,7 @@ func TestFreshBootstrapUsesEndpointScopedSigningKeyAndExactlyReplays(t *testing.
 	}
 }
 
-func TestFreshCLICertificateRenewsWithoutAnotherDevice(t *testing.T) {
+func TestFreshCLICertificateRenewsWithoutAnotherMachine(t *testing.T) {
 	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
 	root := t.TempDir()
 	store := config.ProfileStore{Path: root, Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}}
@@ -324,7 +324,7 @@ func TestFreshCLICertificateRenewsWithoutAnotherDevice(t *testing.T) {
 		if signer == "" {
 			signer = input.RootPublicKey
 		} else if signer != input.RootPublicKey {
-			t.Fatal("renewal changed the device signing key")
+			t.Fatal("renewal changed the machine signing key")
 		}
 		raw, err := base64.RawURLEncoding.DecodeString(input.Certificate.Certificate)
 		if err != nil {
@@ -381,7 +381,7 @@ func TestFreshBootstrapBackdatesCertificateForBoundedWindowsClockSkew(t *testing
 	}
 }
 
-func TestEnrollCLIReplacesObsoleteLocalAccountRootWithDeviceIdentity(t *testing.T) {
+func TestEnrollCLIReplacesObsoleteLocalAccountRootWithMachineIdentity(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		seed bool

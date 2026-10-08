@@ -2,12 +2,12 @@ package route
 
 import (
 	"errors"
-	"fmt"
-	"strings"
 	"sync"
 	"time"
 
 	edgetelemetry "github.com/pinksaucepasta/paperboat-tunnel/internal/telemetry"
+
+	"github.com/google/uuid"
 )
 
 type LifecycleType string
@@ -59,7 +59,7 @@ type CoreTelemetrySink struct {
 	health     *edgetelemetry.HealthTracker
 	metrics    *edgetelemetry.Metrics
 	events     *edgetelemetry.EventLog
-	overloaded map[uint64]bool
+	overloaded bool
 	active     uint64
 }
 
@@ -67,7 +67,7 @@ func NewCoreTelemetrySink(health *edgetelemetry.HealthTracker, metrics *edgetele
 	if health == nil || metrics == nil || events == nil {
 		return nil, ErrInvalid
 	}
-	return &CoreTelemetrySink{health: health, metrics: metrics, events: events, overloaded: make(map[uint64]bool)}, nil
+	return &CoreTelemetrySink{health: health, metrics: metrics, events: events}, nil
 }
 
 func (s *CoreTelemetrySink) RecordRouteTelemetry(record RouteTelemetryRecord) error {
@@ -92,6 +92,7 @@ func (s *CoreTelemetrySink) RecordRouteTelemetry(record RouteTelemetryRecord) er
 		healthErr = s.updateHealth(edgetelemetry.DimensionConfig, edgetelemetry.StatusReady, "generation_ready", "The staged route generation passed readiness checks.", "Activate the ready route generation.", record, edgetelemetry.RetryNone)
 	case LifecycleActivated:
 		s.active = record.Generation
+		s.overloaded = false
 		configErr := s.updateHealth(edgetelemetry.DimensionConfig, edgetelemetry.StatusReady, "generation_active", "The active route configuration is current.", "No action is required.", record, edgetelemetry.RetryNone)
 		routeErr := s.updateHealth(edgetelemetry.DimensionRoute, edgetelemetry.StatusReady, "ready", "Route admission is ready.", "No action is required.", record, edgetelemetry.RetryNone)
 		healthErr = errors.Join(configErr, routeErr)
@@ -101,11 +102,11 @@ func (s *CoreTelemetrySink) RecordRouteTelemetry(record RouteTelemetryRecord) er
 		if record.Generation != s.active {
 			break
 		}
-		s.overloaded[record.Generation] = true
+		s.overloaded = true
 		healthErr = s.updateHealth(edgetelemetry.DimensionRoute, edgetelemetry.StatusDegraded, "stream_capacity_reached", "Route stream capacity is exhausted.", "Wait for active streams to finish or increase the configured capacity.", record, edgetelemetry.RetryWaitForChange)
 	case LifecycleStreamReleased:
-		if record.Generation == s.active && s.overloaded[record.Generation] && record.ActiveStreams < record.MaximumStreams {
-			delete(s.overloaded, record.Generation)
+		if record.Generation == s.active && s.overloaded && record.ActiveStreams < record.MaximumStreams {
+			s.overloaded = false
 			healthErr = s.updateHealth(edgetelemetry.DimensionRoute, edgetelemetry.StatusReady, "ready", "Route stream capacity is available.", "No action is required.", record, edgetelemetry.RetryNone)
 		}
 	}
@@ -134,6 +135,12 @@ func (s *CoreTelemetrySink) updateHealth(dimension edgetelemetry.Dimension, stat
 		"dimension": string(dimension), "status": string(after.Status),
 	}, 1)
 	return errors.Join(metricErr, oldGaugeErr, newGaugeErr)
+}
+
+// EventInput projects only the finite route lifecycle catalog. Operational IDs
+// remain available to the local route owner; exporters select their own fields.
+func (record RouteTelemetryRecord) EventInput() (edgetelemetry.EventInput, error) {
+	return routeEventInput(record)
 }
 
 func routeEventInput(record RouteTelemetryRecord) (edgetelemetry.EventInput, error) {
@@ -172,17 +179,17 @@ func routeEventInput(record RouteTelemetryRecord) (edgetelemetry.EventInput, err
 }
 
 func routeTelemetryIdentity(generation uint64, rules []RouteRule) (string, edgetelemetry.SafeIDs, edgetelemetry.Generations) {
-	correlationID := fmt.Sprintf("corr_route_generation_%d", generation)
+	correlationID := "correlation_" + uuid.NewString()
 	ids := edgetelemetry.SafeIDs{}
 	generations := edgetelemetry.Generations{Route: generation}
 	if len(rules) == 0 {
 		return correlationID, ids, generations
 	}
 	rule := rules[0]
-	ids.RouteID = allowedTelemetryID(firstNonempty(rule.RouteID, rule.ID), "route_")
-	ids.TunnelID = allowedTelemetryID(rule.TunnelID, "tunnel_")
-	ids.ConnectorID = allowedTelemetryID(rule.ConnectorID, "connector_")
-	ids.SessionID = allowedTelemetryID(rule.ConnectorSessionID, "session_", "carrier_")
+	ids.RouteID = allowedTelemetryID(firstNonempty(rule.RouteID, rule.ID))
+	ids.TunnelID = allowedTelemetryID(rule.TunnelID)
+	ids.ConnectorID = allowedTelemetryID(rule.ConnectorID)
+	ids.SessionID = allowedTelemetryID(rule.ConnectorSessionID)
 	generations.Config = firstNonzero(rule.ConfigGeneration, generation)
 	generations.Route = firstNonzero(rule.RouteGeneration, generation)
 	generations.Assignment = rule.AssignmentGeneration
@@ -191,23 +198,9 @@ func routeTelemetryIdentity(generation uint64, rules []RouteRule) (string, edget
 	return correlationID, ids, generations
 }
 
-func allowedTelemetryID(value string, prefixes ...string) string {
-	if len(value) < 3 || len(value) > 128 {
-		return ""
-	}
-	for _, prefix := range prefixes {
-		if strings.HasPrefix(value, prefix) && len(value) > len(prefix) {
-			for _, character := range value {
-				if character < 'a' || character > 'z' {
-					if character < '0' || character > '9' {
-						if character != '_' && character != '-' {
-							return ""
-						}
-					}
-				}
-			}
-			return value
-		}
+func allowedTelemetryID(value string) string {
+	if edgetelemetry.SafeOpaqueID(value) {
+		return value
 	}
 	return ""
 }

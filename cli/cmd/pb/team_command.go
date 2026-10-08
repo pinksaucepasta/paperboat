@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -15,7 +14,7 @@ import (
 func teamCobraCommand() *cobra.Command {
 	root := &cobra.Command{Use: "team", Short: "Manage teams and explicit resource permissions", Long: "Manage teams and explicit resource permissions. Owners appoint admins, transfer ownership, delete teams and reset ENV. Admins manage ordinary members and grants; ENV rotation requires authorized keys. Owners must transfer ownership before leaving. Removal ends team access and adopted defaults; independently granted Git access and previously received files or secrets remain. Team deletion revokes team-owned machines and preserves personal resources.", Args: commandArgs(cobra.NoArgs)}
 	root.AddCommand(
-		teamActivityCommand(), teamReadCommand("list"), teamReadCommand("get"), teamCreateCommand(), teamInviteCommand(),
+		teamInvitationsCommand(), teamInvitationShowCommand(), teamActivityCommand(), teamReadCommand("list"), teamReadCommand("get"), teamCreateCommand(), teamInviteCommand(),
 		teamAcceptCommand(), teamCancelInviteCommand(), teamMutationCommand("role"),
 		teamMutationCommand("remove"), teamMutationCommand("leave"), teamMutationCommand("transfer"),
 		teamMutationCommand("delete"), teamGrantCommand(), teamAttachCommand(), teamMachineCommand(),
@@ -41,7 +40,7 @@ func teamReadCommand(action string) *cobra.Command {
 		jsonOutput, _ := c.Flags().GetBool("json")
 		if action == "get" {
 			if !validTeamCLIIdentifier(values[0]) {
-				return invocationError(errors.New("team must be a valid identifier"))
+				return localArgumentError("team must be a valid identifier")
 			}
 			team, err := client.GetTeam(c.Context(), values[0])
 			if err != nil {
@@ -69,7 +68,7 @@ func teamReadCommand(action string) *cobra.Command {
 func teamCreateCommand() *cobra.Command {
 	c := &cobra.Command{Use: "create <team>", Short: "Create a team", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(c *cobra.Command, args []string) error {
 		if !validTeamCLIIdentifier(args[0]) {
-			return invocationError(errors.New("team must be a valid identifier"))
+			return localArgumentError("team must be a valid identifier")
 		}
 		client, err := backendForCommand(c)
 		if err != nil {
@@ -93,7 +92,7 @@ func teamInviteCommand() *cobra.Command {
 			return err
 		}
 		if !validTeamCLIIdentifier(args[0]) || !validTeamCLIIdentifier(args[1]) {
-			return invocationError(errors.New("team and account must be valid identifiers"))
+			return localArgumentError("team and account must be valid identifiers")
 		}
 		client, err := backendForCommand(c)
 		if err != nil {
@@ -118,7 +117,7 @@ func teamInviteCommand() *cobra.Command {
 func teamAcceptCommand() *cobra.Command {
 	c := &cobra.Command{Use: "accept <invitation>", Short: "Accept an invitation bound to this account", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(c *cobra.Command, args []string) error {
 		if !validTeamCLIIdentifier(args[0]) {
-			return invocationError(errors.New("invitation must be a valid identifier"))
+			return localArgumentError("invitation must be a valid identifier")
 		}
 		client, err := backendForCommand(c)
 		if err != nil {
@@ -142,7 +141,7 @@ func teamCancelInviteCommand() *cobra.Command {
 			return err
 		}
 		if !validTeamCLIIdentifier(args[0]) || !validTeamCLIIdentifier(args[1]) {
-			return invocationError(errors.New("team and invitation must be valid identifiers"))
+			return localArgumentError("team and invitation must be valid identifiers")
 		}
 		client, err := backendForCommand(c)
 		if err != nil {
@@ -187,13 +186,13 @@ func teamMutationCommand(action string) *cobra.Command {
 		}
 		for _, v := range args {
 			if !validTeamCLIIdentifier(v) {
-				return invocationError(errors.New("team, account, and role values must be valid identifiers"))
+				return localArgumentError("team, account, and role values must be valid identifiers")
 			}
 		}
 		in := api.TeamMutationRequest{OperationID: newIdempotencyKey(), ExpectedGeneration: generation, Action: action}
 		if action == "role" {
 			if args[2] != "admin" && args[2] != "member" {
-				return invocationError(errors.New("role must be admin or member"))
+				return localArgumentError("role must be admin or member")
 			}
 			in.AccountID, in.Role = args[1], args[2]
 		} else if action == "remove" || action == "transfer" {
@@ -202,7 +201,7 @@ func teamMutationCommand(action string) *cobra.Command {
 		if action == "delete" {
 			confirm, _ := c.Flags().GetString("confirm")
 			if confirm != args[0] {
-				return invocationError(errors.New("team deletion requires --confirm with the exact team identifier"))
+				return localArgumentError("team deletion requires --confirm with the exact team identifier")
 			}
 			in.Confirmation = confirm
 		}
@@ -233,11 +232,11 @@ func teamGrantCommand() *cobra.Command {
 		}
 		active, _ := c.Flags().GetBool("active")
 		if err := validateTeamResource(args[2], args[4]); err != nil {
-			return invocationError(err)
+			return err
 		}
 		for _, v := range args[:4] {
 			if !validTeamCLIIdentifier(v) {
-				return invocationError(errors.New("team, account, kind, and resource must be valid identifiers"))
+				return localArgumentError("team, account, kind, and resource must be valid identifiers")
 			}
 		}
 		client, err := backendForCommand(c)
@@ -264,11 +263,11 @@ func teamAttachCommand() *cobra.Command {
 			return err
 		}
 		if args[1] != "preview" && args[1] != "tunnel" {
-			return invocationError(errors.New("only preview or tunnel resources may be attached"))
+			return localArgumentError("only preview or tunnel resources may be attached")
 		}
 		for _, v := range args {
 			if !validTeamCLIIdentifier(v) {
-				return invocationError(errors.New("team, kind, and resource must be valid identifiers"))
+				return localArgumentError("team, kind, and resource must be valid identifiers")
 			}
 		}
 		active, _ := c.Flags().GetBool("active")
@@ -295,7 +294,7 @@ func teamGenerationFlag(c *cobra.Command) {
 func requiredTeamGeneration(c *cobra.Command) (uint64, error) {
 	g, _ := c.Flags().GetUint64("generation")
 	if g == 0 {
-		return 0, invocationError(errors.New("--generation must be the current positive team generation"))
+		return 0, localArgumentError("--generation must be the current positive team generation")
 	}
 	return g, nil
 }
@@ -323,7 +322,7 @@ func validateTeamResource(kind, permission string) error {
 			return nil
 		}
 	}
-	return errors.New("permission must be read/write for env or use/manage/inspect/replay for preview/tunnel")
+	return localArgumentError("permission must be read/write for env or use/manage/inspect/replay for preview/tunnel")
 }
 func writeTeamOutput(c *cobra.Command, jsonOutput bool, team api.Team) error {
 	if jsonOutput {
@@ -370,7 +369,7 @@ func teamActivityCommand() *cobra.Command {
 		limit, _ := c.Flags().GetInt("limit")
 		cursor, _ := c.Flags().GetString("cursor")
 		if !validTeamCLIIdentifier(args[0]) || limit < 1 || limit > 200 {
-			return invocationError(errors.New("use a valid team and limit between 1 and 200"))
+			return localArgumentError("use a valid team and limit between 1 and 200")
 		}
 		client, err := backendForCommand(c)
 		if err != nil {
@@ -398,4 +397,56 @@ func teamActivityCommand() *cobra.Command {
 	c.Flags().String("cursor", "", "next_cursor from the previous page")
 	c.Flags().Bool("json", false, "print canonical JSON including metadata and next_cursor")
 	return c
+}
+
+func teamInvitationsCommand() *cobra.Command {
+	command := &cobra.Command{Use: "invitations [team]", Short: "Discover pending invitations received by you or administered for a team", Args: commandArgs(cobra.MaximumNArgs(1)), RunE: func(command *cobra.Command, args []string) error {
+		team := ""
+		if len(args) > 0 {
+			team = args[0]
+			if !validTeamCLIIdentifier(team) {
+				return localArgumentError("use an exact team ID")
+			}
+		}
+		client, err := backendForCommand(command)
+		if err != nil {
+			return err
+		}
+		items, err := client.TeamInvitations(command.Context(), team)
+		if err != nil {
+			return err
+		}
+		if jsonOutput, _ := command.Flags().GetBool("json"); jsonOutput {
+			return json.NewEncoder(command.OutOrStdout()).Encode(items)
+		}
+		if len(items) == 0 {
+			_, err = fmt.Fprintln(command.OutOrStdout(), "No pending invitations.")
+			return err
+		}
+		for _, item := range items {
+			if _, err = fmt.Fprintf(command.OutOrStdout(), "%s\t%s\t%s\t%s\n", item.InvitationID, item.TeamID, item.AccountID, item.ExpiresAt.Format("2006-01-02T15:04:05Z07:00")); err != nil {
+				return err
+			}
+		}
+		return nil
+	}}
+	command.Flags().Bool("json", false, "print canonical JSON")
+	return command
+}
+func teamInvitationShowCommand() *cobra.Command {
+	command := &cobra.Command{Use: "invitation <invitation>", Short: "Show an invitation you may receive or administer", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(command *cobra.Command, args []string) error {
+		if !validTeamCLIIdentifier(args[0]) {
+			return localArgumentError("use an exact invitation ID")
+		}
+		client, err := backendForCommand(command)
+		if err != nil {
+			return err
+		}
+		item, err := client.GetTeamInvitation(command.Context(), args[0])
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(command.OutOrStdout()).Encode(item)
+	}}
+	return command
 }

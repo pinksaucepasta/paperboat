@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -32,20 +33,21 @@ func homeItems() []selector.Item {
 		{ID: "config", Title: "Configuration", Description: "Sync status, CLI settings, and status bar preferences"},
 		{ID: "doctor", Title: "Diagnostics", Description: "Check setup, authentication, and connectivity"},
 		{ID: "account", Title: "Account", Description: "Sign in, switch accounts, or sign out"},
+		{ID: "switch-workspace", Title: "Switch workspace", Description: "Choose Personal or a team workspace for new resource operations"},
 		{ID: "customize", Title: "Customize", Description: "Make this CLI yours: shortcuts, appearance, keys, and layout"},
 		{ID: "commands", Title: "All commands", Description: "Search current commands, inspect options, and run an exact invocation"},
 	}
 }
 
 func interactiveCanceled(err error) bool {
-	return errors.Is(err, selector.ErrCanceled) || errors.Is(err, prompt.ErrCanceled)
+	return classifyCommandFailure(err).kind == commandInteractiveCanceled
 }
 
 // Build child invocations with the parent's explicit connection settings. Never
 // carry unrelated flags (or credentials) from the command that opened the menu.
 func interactiveArgs(parent *cobra.Command, args []string) []string {
 	result := make([]string, 0, len(args)+4)
-	for _, name := range []string{"config", "server", "no-customization"} {
+	for _, name := range []string{"config", "server", "workspace", "no-customization"} {
 		if flag := parent.Flags().Lookup(name); flag != nil && flag.Value.String() != "" {
 			if name == "no-customization" {
 				if flag.Value.String() == "true" {
@@ -155,11 +157,13 @@ func actionHomePreviewList(command *cobra.Command) error {
 		return err
 	}
 	cursor := ""
+	history := []string{}
+	filters := url.Values{}
 	for {
 		var page api.PreviewLeasePage
 		err := homeLoading(command, "Temporary previews", "Loading previews", func(ctx context.Context) error {
 			var err error
-			page, err = client.ListPreviewLeases(ctx, cursor, 50)
+			page, err = client.ListPreviewLeasesFiltered(ctx, cursor, 50, filters)
 			return err
 		})
 		if err != nil {
@@ -170,6 +174,10 @@ func actionHomePreviewList(command *cobra.Command) error {
 			items = append(items, selector.Item{ID: lease.ID, Title: lease.Endpoint, Description: preferenceDetails(command.Context(), "previews", map[string]string{"state": lease.State, "access": lease.AccessMode, "id": lease.ID})})
 		}
 		items = append(items, selector.Item{ID: "refresh", Title: "Refresh", Action: true})
+		items = append(items, selector.Item{ID: "filter", Title: "Filter inventory", Description: "Name, state and owner", Action: true})
+		if len(history) > 0 {
+			items = append(items, selector.Item{ID: "previous", Title: "Previous page", Action: true})
+		}
 		if page.NextCursor != "" {
 			items = append(items, selector.Item{ID: "next", Title: "Next page", Action: true})
 		}
@@ -177,11 +185,34 @@ func actionHomePreviewList(command *cobra.Command) error {
 		if err != nil {
 			return err
 		}
+		if choice.ID == "filter" {
+			updated, err := promptInventoryFilters(command, filters)
+			if interactiveCanceled(err) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			filters = updated
+			cursor = ""
+			history = nil
+			continue
+		}
+		if choice.ID == "previous" {
+			cursor = history[len(history)-1]
+			history = history[:len(history)-1]
+			continue
+		}
 		if choice.ID == "refresh" {
 			cursor = ""
+			history = nil
 			continue
 		}
 		if choice.ID == "next" {
+			if page.NextCursor == cursor || slicesContainCursor(history, page.NextCursor) {
+				return errors.New("inventory pagination did not advance")
+			}
+			history = append(history, cursor)
 			cursor = page.NextCursor
 			continue
 		}
@@ -203,7 +234,9 @@ func actionHomePreviewList(command *cobra.Command) error {
 		}
 		err = runHomeResult(command, []string{"preview", action.ID, choice.ID})
 		if err != nil && !interactiveCanceled(err) {
-			return err
+			if err := showHomeFailure(command, err); err != nil {
+				return err
+			}
 		}
 	}
 }
@@ -214,11 +247,13 @@ func actionHomeTunnelList(command *cobra.Command) error {
 		return err
 	}
 	cursor := ""
+	history := []string{}
+	filters := url.Values{}
 	for {
 		var page api.TunnelPage
 		err := homeLoading(command, "Durable tunnels", "Loading tunnels", func(ctx context.Context) error {
 			var err error
-			page, err = client.ListTunnelsV1(ctx, cursor, 50)
+			page, err = client.ListTunnelsV1Filtered(ctx, cursor, 50, filters)
 			return err
 		})
 		if err != nil {
@@ -229,6 +264,10 @@ func actionHomeTunnelList(command *cobra.Command) error {
 			items = append(items, selector.Item{ID: tunnel.ID, Title: tunnel.Name, Description: preferenceDetails(command.Context(), "tunnels", map[string]string{"state": tunnel.DesiredState, "access": tunnel.AccessMode, "endpoint": tunnel.StableEndpoint})})
 		}
 		items = append(items, selector.Item{ID: "refresh", Title: "Refresh", Action: true}, selector.Item{ID: "advanced", Title: "All tunnel commands", Description: "Routes, domains, policies, connectors, credentials, and inspector", Action: true})
+		items = append(items, selector.Item{ID: "filter", Title: "Filter inventory", Description: "Name, state and owner", Action: true})
+		if len(history) > 0 {
+			items = append(items, selector.Item{ID: "previous", Title: "Previous page", Action: true})
+		}
 		if page.NextCursor != "" {
 			items = append(items, selector.Item{ID: "next", Title: "Next page", Action: true})
 		}
@@ -236,11 +275,34 @@ func actionHomeTunnelList(command *cobra.Command) error {
 		if err != nil {
 			return err
 		}
+		if choice.ID == "filter" {
+			updated, err := promptInventoryFilters(command, filters)
+			if interactiveCanceled(err) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			filters = updated
+			cursor = ""
+			history = nil
+			continue
+		}
+		if choice.ID == "previous" {
+			cursor = history[len(history)-1]
+			history = history[:len(history)-1]
+			continue
+		}
 		if choice.ID == "refresh" {
 			cursor = ""
+			history = nil
 			continue
 		}
 		if choice.ID == "next" {
+			if page.NextCursor == cursor || slicesContainCursor(history, page.NextCursor) {
+				return errors.New("inventory pagination did not advance")
+			}
+			history = append(history, cursor)
 			cursor = page.NextCursor
 			continue
 		}
@@ -272,14 +334,25 @@ func actionHomeTunnelList(command *cobra.Command) error {
 			args := []string{"tunnel", action.ID, choice.ID}
 			switch action.ID {
 			case "route", "domain", "connector":
-				args = []string{"tunnel", action.ID, "list", choice.ID}
+				if err := actionHomeTunnelInventory(command, client, choice.ID, action.ID); err != nil && !interactiveCanceled(err) {
+					return err
+				}
+				continue
 			case "delete":
 				args = append(args, "--wait")
 			case "pause", "resume":
 				args = append(args, "--wait")
 			}
 			if err = runHomeResult(command, args); err != nil {
-				return err
+				if errors.Is(err, selector.ErrInterrupted) {
+					return err
+				}
+				if !interactiveCanceled(err) {
+					if err := showHomeFailure(command, err); err != nil {
+						return err
+					}
+				}
+				continue
 			}
 			if action.ID == "delete" {
 				break
@@ -393,12 +466,22 @@ func interactiveStreaming(args []string) bool {
 	if len(args) == 0 {
 		return false
 	}
-	if len(args) == 1 && (args[0] == "config" || args[0] == "env") {
+	if len(args) == 1 && (args[0] == "config" || args[0] == "env" || args[0] == "session" || args[0] == "machine" || args[0] == "environments" || args[0] == "daemon") {
 		return true
 	}
 	switch args[0] {
-	case "connect", "ssh", "scp", "sftp", "exec", "preview", "access", "auth", "setup", "pair", "uninstall":
+	case "new", "connect", "ssh", "scp", "sftp", "rsync", "exec", "preview", "access", "auth", "setup", "pair", "uninstall":
 		return true
+	}
+	if args[0] == "daemon" && (len(args) > 1 && args[1] == "run" || len(args) > 2 && args[1] == "machine-guard" && args[2] == "run") {
+		return true
+	}
+	if args[0] == "send" && len(args) > 1 {
+		switch args[1] {
+		case "list", "status", "cancel", "destination":
+		default:
+			return true
+		}
 	}
 	for _, arg := range args {
 		if arg == "--watch" || arg == "--follow" || arg == "--ephemeral" || arg == "attach" || arg == "login" {
@@ -450,22 +533,43 @@ func runHomeResult(parent *cobra.Command, args []string) error {
 	restore := selector.SuspendScreen(parent.ErrOrStderr())
 	err = child.ExecuteContext(ctx)
 	restore()
-	if interactiveCanceled(err) || errors.Is(err, selector.ErrInterrupted) {
+	if interactiveCanceled(err) || classifyCommandFailure(err).kind == commandCanceled {
 		return err
 	}
 	text := strings.TrimSpace(output.String())
 	if err != nil {
-		if message := userFacingError(err); message != "" {
+		if message := homeFailureMessage(parent, err); message != "" {
 			text += "\n\n" + message
 		}
 	} else if text == "" {
 		text = "Completed successfully."
 	}
-	return showHomeText(parent, "pb "+strings.Join(args[:min(2, len(args))], " "), text)
+	if displayErr := showHomeText(parent, "pb "+strings.Join(args[:min(2, len(args))], " "), text); displayErr != nil {
+		return errors.Join(err, displayErr)
+	}
+	if err != nil {
+		observeHomeFailure(parent, err)
+		return &homeResultError{Err: err}
+	}
+	return nil
 }
 
+type homeResultError struct{ Err error }
+
+func (e *homeResultError) Error() string {
+	return "interactive command failed; the result was displayed"
+}
+func (e *homeResultError) Unwrap() error { return e.Err }
+
 func showHomeFailure(command *cobra.Command, err error) error {
-	return showHomeText(command, "Action needs attention", userFacingError(err)+"\n\nYour menu is still available. Go back to adjust the input or retry.")
+	if homeFailureAlreadyDisplayed(err) {
+		return nil
+	}
+	if displayErr := showHomeText(command, "Action needs attention", homeFailureMessage(command, err)+"\n\nYour menu is still available. Go back to adjust the input or retry."); displayErr != nil {
+		return errors.Join(err, displayErr)
+	}
+	observeHomeFailure(command, err)
+	return nil
 }
 
 type homeTextModel struct {
@@ -516,7 +620,10 @@ func (m homeTextModel) View() string {
 	lines := strings.Split(rendered, "\n")
 	return strings.Join(lines[:min(len(lines), max(1, m.height))], "\n")
 }
-func showHomeText(command *cobra.Command, title, content string) error {
+
+var showHomeText = renderHomeText
+
+func renderHomeText(command *cobra.Command, title, content string) error {
 	// Strip terminal escape sequences from command/API output before rendering it
 	// as UI content; the viewer owns all terminal control sequences.
 	content = ansi.Strip(content)
@@ -531,10 +638,7 @@ func showHomeText(command *cobra.Command, title, content string) error {
 	options := append(selector.ProgramOptions(os.Stdin, command.ErrOrStderr()), tea.WithContext(command.Context()))
 	result, err := tea.NewProgram(homeTextModel{ctx: command.Context(), title: title, content: content, view: view, width: 80, height: 24}, options...).Run()
 	if err != nil {
-		if errors.Is(err, tea.ErrProgramKilled) && command.Context().Err() != nil {
-			return context.Canceled
-		}
-		return err
+		return homeProgramFailure(command.Context(), err)
 	}
 	if result.(homeTextModel).interrupted {
 		return selector.ErrInterrupted
@@ -543,3 +647,190 @@ func showHomeText(command *cobra.Command, title, content string) error {
 }
 
 var _ io.Writer = (*homeOutput)(nil)
+
+func actionHomeTunnelInventory(command *cobra.Command, client *api.Client, tunnelID, kind string) error {
+	cursor := ""
+	history := []string{}
+	for {
+		items := []selector.Item{}
+		details := map[string]string{}
+		next := ""
+		err := homeLoading(command, "Tunnel "+kind, "Loading "+kind, func(ctx context.Context) error {
+			switch kind {
+			case "route":
+				page, err := client.ListTunnelRoutesV1(ctx, tunnelID, cursor, 100)
+				if err != nil {
+					return err
+				}
+				next = page.NextCursor
+				for _, item := range page.Items {
+					description := item.Protocol + " · " + item.DesiredState + " · " + item.Origin.Scheme + "://" + item.Origin.Address
+					items = append(items, selector.Item{ID: item.ID, Title: item.Name, Description: description})
+					details[item.ID] = description + "\nID: " + item.ID + "\nHost match: " + item.HostMatch.Type + " " + item.HostMatch.Hostname
+				}
+			case "domain":
+				page, err := client.ListTunnelDomainsV1(ctx, tunnelID, cursor, 100)
+				if err != nil {
+					return err
+				}
+				next = page.NextCursor
+				for _, item := range page.Items {
+					description := item.State + " · certificate " + item.Certificate.State
+					items = append(items, selector.Item{ID: item.ID, Title: item.Hostname, Description: description})
+					details[item.ID] = description + "\nDNS target: " + item.DNS.Target + "\nID: " + item.ID
+				}
+			case "connector":
+				page, err := client.ListTunnelConnectorsV1(ctx, tunnelID, cursor, 100)
+				if err != nil {
+					return err
+				}
+				next = page.NextCursor
+				for _, item := range page.Items {
+					description := item.DesiredState + " · " + item.DrainState
+					items = append(items, selector.Item{ID: item.ID, Title: item.HostID, Description: description})
+					details[item.ID] = description + "\nID: " + item.ID
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		items = append(items, selector.Item{ID: "refresh", Title: "Refresh", Action: true})
+		if len(history) > 0 {
+			items = append(items, selector.Item{ID: "previous", Title: "Previous page", Action: true})
+		}
+		if next != "" {
+			items = append(items, selector.Item{ID: "next", Title: "Next page", Action: true})
+		}
+		choice, err := chooseHomeAction(command, "Tunnel "+kind, items)
+		if err != nil {
+			return err
+		}
+		switch choice.ID {
+		case "refresh":
+			cursor = ""
+			history = nil
+		case "previous":
+			cursor = history[len(history)-1]
+			history = history[:len(history)-1]
+		case "next":
+			if next == cursor {
+				return errors.New("tunnel pagination did not advance")
+			}
+			history = append(history, cursor)
+			cursor = next
+		default:
+			if err := showHomeText(command, choice.Title, details[choice.ID]); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func actionHomeTeams(command *cobra.Command) error {
+	for {
+		choice, err := chooseHomeAction(command, "Teams", []selector.Item{{ID: "invitations", Title: "Received invitations", Description: "Review and accept invitations bound to your account"}, {ID: "sent", Title: "Sent invitations", Description: "Review or cancel invitations you administer"}, {ID: "commands", Title: "Team administration", Description: "Members, grants, resources and activity"}})
+		if err != nil {
+			return err
+		}
+		if choice.ID == "commands" {
+			err = actionHomeCommands(command, []string{"team"})
+		} else {
+			err = actionHomeInvitations(command, choice.ID == "sent")
+		}
+		if err != nil && !interactiveCanceled(err) {
+			if err := showHomeFailure(command, err); err != nil {
+				return err
+			}
+		}
+	}
+}
+func actionHomeInvitations(command *cobra.Command, sent bool) error {
+	client, err := backendForCommand(command)
+	if err != nil {
+		return err
+	}
+	team := ""
+	if sent {
+		teams, err := client.ListTeams(command.Context())
+		if err != nil {
+			return err
+		}
+		items := []selector.Item{}
+		for _, item := range teams {
+			items = append(items, selector.Item{ID: item.TeamID, Title: item.TeamID})
+		}
+		choice, err := chooseHomeAction(command, "Choose team", items)
+		if err != nil {
+			return err
+		}
+		team = choice.ID
+	}
+	for {
+		invitations, err := client.TeamInvitations(command.Context(), team)
+		if err != nil {
+			return err
+		}
+		items := []selector.Item{}
+		byID := map[string]api.TeamInvitation{}
+		for _, item := range invitations {
+			items = append(items, selector.Item{ID: item.InvitationID, Title: item.TeamID, Description: item.AccountID + " · expires " + relativeTimestamp(item.ExpiresAt)})
+			byID[item.InvitationID] = item
+		}
+		items = append(items, selector.Item{ID: "refresh", Title: "Refresh", Action: true})
+		choice, err := chooseHomeAction(command, "Invitations", items)
+		if err != nil {
+			return err
+		}
+		if choice.ID == "refresh" {
+			continue
+		}
+		item := byID[choice.ID]
+		action := "accept"
+		args := []string{"team", "accept", item.InvitationID}
+		if sent {
+			action = "cancel"
+			args = []string{"team", "cancel-invite", item.TeamID, item.InvitationID}
+		}
+		yes, err := prompt.Confirm(prompt.ConfirmOptions{Title: strings.ToUpper(action[:1]) + action[1:] + " invitation?", Description: item.TeamID + " · " + item.AccountID, Context: command.Context(), Stdin: os.Stdin, Output: command.ErrOrStderr()})
+		if interactiveCanceled(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if !yes {
+			continue
+		}
+		if err := runHomeResult(command, args); err != nil {
+			return err
+		}
+	}
+}
+
+func slicesContainCursor(cursors []string, cursor string) bool {
+	for _, previous := range cursors {
+		if previous == cursor {
+			return true
+		}
+	}
+	return false
+}
+func promptInventoryFilters(command *cobra.Command, current url.Values) (url.Values, error) {
+	result := url.Values{}
+	for _, field := range []struct{ key, title, description string }{
+		{"q", "Search resources", "Name or ID; empty matches all"},
+		{"state", "Resource state", "Exact resource state; empty matches all"},
+		{"owner", "Resource owner", "mine, shared, or an authorized account ID; empty matches all"},
+	} {
+		value, err := prompt.Text(prompt.TextOptions{Title: field.title, Description: field.description, Initial: current.Get(field.key), Context: command.Context(), Stdin: os.Stdin, Output: command.ErrOrStderr()})
+		if err != nil {
+			return nil, err
+		}
+		if value = strings.TrimSpace(value); value != "" {
+			result.Set(field.key, value)
+		}
+	}
+	return result, nil
+}

@@ -2,11 +2,14 @@ package updated
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 )
@@ -35,6 +38,8 @@ type windowsActivationComponent struct {
 
 type windowsServiceTarget struct {
 	Executable string   `json:"executable"`
+	SHA256     string   `json:"sha256,omitempty"`
+	Length     int64    `json:"length,omitempty"`
 	Arguments  []string `json:"arguments"`
 	WasRunning bool     `json:"was_running"`
 }
@@ -49,14 +54,11 @@ type windowsActivationJournal struct {
 	OldHostd, NewHostd, OldUpdater, NewUpdater, OldSSH, NewSSH    windowsServiceTarget
 	PreviousCLIRecord, NewCLIRecord                               string
 	LocalDaemonWasRunning                                         bool
+	ManualApproval                                                bool `json:"manual_approval,omitempty"`
+	Release                                                       workerupdate.Release
+	PreviousRuntime                                               windowsActivationComponent
+	GateTarget                                                    *hostdproto.UpdateGateTargetBinding
 	Failure                                                       string
-	ManifestSHA256                                                string
-	CanaryPath                                                    string
-	CanaryStatus                                                  int
-	CanarySamples                                                 uint16
-	CanaryTimeout, DrainTimeout, StabilityWindow                  time.Duration
-	StabilityInterval, RollbackTimeout                            time.Duration
-	HostdAPIMin, HostdAPIMax, RuntimeAPIMin, RuntimeAPIMax        uint16
 }
 
 var errInvalidWindowsActivation = errors.New("invalid Windows activation transaction")
@@ -65,6 +67,8 @@ var errInvalidWindowsActivation = errors.New("invalid Windows activation transac
 // has deterministic tests without pretending a macOS filesystem models SCM.
 type windowsActivationBackend interface {
 	AuthorizeRecovery(context.Context, windowsActivationJournal) error
+	AuthorizeOwnerMaintenance(context.Context, workerupdate.Release, bool) error
+	AbortOwnerMaintenance(context.Context) error
 	WriteJournal(windowsActivationJournal) error
 	StopServices(context.Context, bool) error
 	ActivateBinary(context.Context, windowsActivationJournal) error
@@ -79,12 +83,28 @@ type windowsActivationBackend interface {
 	FinalizeServices(context.Context, windowsActivationJournal) error
 }
 
+type windowsFeatureActivationBackend interface {
+	PrepareFeature(context.Context, windowsActivationJournal) (hostdproto.UpdateGateTargetBinding, error)
+	AbortFeature(context.Context, windowsActivationJournal) error
+	ActivateFeature(context.Context, windowsActivationJournal) error
+	RestoreFeature(context.Context, windowsActivationJournal) error
+	VerifyFeature(context.Context, windowsActivationJournal) error
+	CompleteFeature(context.Context, windowsActivationJournal) error
+}
+
 func executeWindowsActivation(ctx context.Context, backend windowsActivationBackend, journal windowsActivationJournal) (result windowsActivationJournal, err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if backend == nil || !validWindowsActivationJournal(journal) {
 		return journal, errInvalidWindowsActivation
+	}
+	if !journal.Release.SupervisorMaintenance {
+		feature, ok := backend.(windowsFeatureActivationBackend)
+		if !ok {
+			return journal, errInvalidWindowsActivation
+		}
+		return executeWindowsFeatureActivation(ctx, backend, feature, journal)
 	}
 	if journal.Stage == windowsActivationAwaitingApproval {
 		return journal, workerupdate.ErrApprovalRequired
@@ -113,14 +133,17 @@ func executeWindowsActivation(ctx context.Context, backend windowsActivationBack
 	if journal.Stage != windowsActivationStaged {
 		return rollbackWindowsActivation(ctx, backend, journal, errors.New("interrupted activation recovered"))
 	}
+	if err := backend.AuthorizeOwnerMaintenance(ctx, journal.Release, journal.ManualApproval); err != nil {
+		return journal, err
+	}
 	// Refuse cutover before touching services when the trusted previous
 	// installation is no longer permitted by signed recovery policy.
 	if err := backend.AuthorizeRecovery(ctx, journal); err != nil {
-		return journal, err
+		return journal, errors.Join(err, backend.AbortOwnerMaintenance(context.WithoutCancel(ctx)))
 	}
 	journal.Stage = windowsActivationSwitching
 	if err = backend.WriteJournal(journal); err != nil {
-		return rollbackWindowsActivation(ctx, backend, journal, err)
+		return journal, errors.Join(err, backend.AbortOwnerMaintenance(context.WithoutCancel(ctx)))
 	}
 	if err = backend.StopServices(ctx, journal.LocalDaemonWasRunning); err != nil {
 		return rollbackWindowsActivation(ctx, backend, journal, fmt.Errorf("stop Windows services: %w", err))
@@ -178,7 +201,7 @@ func rollbackWindowsActivation(ctx context.Context, backend windowsActivationBac
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), journal.RollbackTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), journal.Release.RollbackTimeout)
 	defer cancel()
 	if err := backend.AuthorizeRecovery(ctx, journal); err != nil {
 		return journal, errors.Join(cause, err)
@@ -203,7 +226,7 @@ func rollbackWindowsActivation(ctx context.Context, backend windowsActivationBac
 	// Restore the durable version and CLI pointer before restarting the old
 	// updater. Otherwise the old updater can observe candidate state and race
 	// this rollback.
-	cliErr := backend.CommitCLI(ctx, windowsActivationJournal{Version: journal.PreviousVersion, PreviousCLIRecord: journal.NewCLIRecord, NewCLIRecord: journal.PreviousCLIRecord})
+	cliErr := backend.CommitCLI(ctx, journal)
 	quarantineErr := backend.Quarantine(ctx, journal)
 	// The binary and SCM target restoration are the safety boundary. Cleanup
 	// of the durable CLI record or quarantining the candidate is best effort at
@@ -230,7 +253,7 @@ func rollbackWindowsActivation(ctx context.Context, backend windowsActivationBac
 }
 
 func completeWindowsRollback(_ context.Context, backend windowsActivationBackend, journal windowsActivationJournal, cause error) (windowsActivationJournal, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), journal.RollbackTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), journal.Release.RollbackTimeout)
 	defer cancel()
 	if journal.Stage != windowsActivationRollbackReady {
 		return journal, errors.Join(cause, errInvalidWindowsActivation)
@@ -252,6 +275,24 @@ func completeWindowsRollback(_ context.Context, backend windowsActivationBackend
 }
 
 func validWindowsActivationJournal(j windowsActivationJournal) bool {
+	raw, err := json.Marshal(j.Release)
+	if err != nil {
+		return false
+	}
+	digest := sha256.Sum256(raw)
+	if j.Candidate.ID != hex.EncodeToString(digest[:]) || j.Candidate.OwnerMaintenance != j.Release.SupervisorMaintenance {
+		return false
+	}
+
+	if !j.Release.SupervisorMaintenance && (j.PreviousRuntime.Path == "" || j.PreviousRuntime.SHA256 != j.PreviousBinary.SHA256 || j.PreviousRuntime.Length != j.PreviousBinary.Length) {
+		return false
+	}
+	if j.GateTarget != nil && j.GateTarget.Validate() != nil {
+		return false
+	}
+	if j.Release.Version != j.Version || j.Release.Platform != "windows" || j.Release.Architecture != j.Architecture || j.Release.SHA256 != j.Runtime.SHA256 || j.Release.Length != j.Runtime.Length {
+		return false
+	}
 	if j.CLI != j.Runtime || j.Hostd != j.Runtime || j.Updater != j.Runtime {
 		return false
 	}
@@ -265,7 +306,7 @@ func validWindowsActivationJournal(j windowsActivationJournal) bool {
 	if j.PreviousSource != nil && !validWindowsLocalPrevious(j) {
 		return false
 	}
-	if j.Schema != windowsActivationJournalSchema || len(j.TransactionID) != 32 || !lowerHex(j.TransactionID) || !exactReleasePattern.MatchString(j.Version) || !(exactReleasePattern.MatchString(j.PreviousVersion) || validWindowsLocalPrevious(j)) || !validWindowsActivationStage(j.Stage) || j.Architecture != "amd64" && j.Architecture != "arm64" || len(j.Failure) > 4096 || invalidWindowsAPIRange(j.HostdAPIMin, j.HostdAPIMax) || invalidWindowsAPIRange(j.RuntimeAPIMin, j.RuntimeAPIMax) || workerupdate.ValidateActivationPolicy(windowsCandidateRelease(j)) != nil {
+	if j.Schema != windowsActivationJournalSchema || len(j.TransactionID) != 32 || !lowerHex(j.TransactionID) || !exactReleasePattern.MatchString(j.Version) || !(exactReleasePattern.MatchString(j.PreviousVersion) || validWindowsLocalPrevious(j)) || !validWindowsActivationStage(j.Stage) || j.Architecture != "amd64" && j.Architecture != "arm64" || len(j.Failure) > 4096 || invalidWindowsAPIRange(j.Release.HostdAPIMin, j.Release.HostdAPIMax) || invalidWindowsAPIRange(j.Release.RuntimeAPIMin, j.Release.RuntimeAPIMax) || workerupdate.ValidateActivationPolicy(windowsCandidateRelease(j)) != nil {
 		return false
 	}
 	for _, component := range []windowsActivationComponent{j.Runtime, j.CLI, j.Hostd, j.Updater, j.PreviousBinary} {
@@ -339,7 +380,7 @@ func validWindowsActivationStage(stage windowsActivationStage) bool {
 }
 
 func windowsCandidateRelease(j windowsActivationJournal) workerupdate.Release {
-	return workerupdate.Release{Version: j.Version, SHA256: j.Runtime.SHA256, Length: j.Runtime.Length, Platform: "windows", Architecture: j.Architecture, ManifestSHA256: j.ManifestSHA256, CanaryPath: j.CanaryPath, CanaryStatus: j.CanaryStatus, CanarySamples: j.CanarySamples, CanaryTimeout: j.CanaryTimeout, DrainTimeout: j.DrainTimeout, StabilityWindow: j.StabilityWindow, StabilityInterval: j.StabilityInterval, RollbackTimeout: j.RollbackTimeout, HostdAPIMin: j.HostdAPIMin, HostdAPIMax: j.HostdAPIMax, RuntimeAPIMin: j.RuntimeAPIMin, RuntimeAPIMax: j.RuntimeAPIMax}
+	return j.Release
 }
 
 func lowerHex(value string) bool {
@@ -351,16 +392,13 @@ func lowerHex(value string) bool {
 	return true
 }
 
-func windowsActivationServiceNames(setupMode, instance string) []string {
-	if setupMode == "host" {
-		return []string{"PaperboatSshd-" + instance, "PaperboatHostd-" + instance, "PaperboatUpdated-" + instance}
-	}
-	return []string{"PaperboatHostd-" + instance, "PaperboatUpdated-" + instance}
+func windowsActivationServiceNames(instance string) []string {
+	return []string{"PaperboatSshd-" + instance, "PaperboatHostd-" + instance, "PaperboatUpdated-" + instance}
 }
 
-func windowsActivationServiceStartNames(setupMode, instance string, hostd, updater, ssh bool) []string {
+func windowsActivationServiceStartNames(instance string, hostd, updater, ssh bool) []string {
 	names := make([]string, 0, 3)
-	if setupMode == "host" && ssh {
+	if ssh {
 		names = append(names, "PaperboatSshd-"+instance)
 	}
 	if hostd {
@@ -372,8 +410,8 @@ func windowsActivationServiceStartNames(setupMode, instance string, hostd, updat
 	return names
 }
 
-func validWindowsSSHRoleTarget(setupMode string, target windowsServiceTarget) bool {
-	return setupMode == "host" && target.Executable != "" || setupMode == "client" && target.Executable == ""
+func validWindowsSSHTarget(target windowsServiceTarget) bool {
+	return target.Executable != ""
 }
 
 func windowsActivationBlocksVersion(journal windowsActivationJournal, version string) bool {

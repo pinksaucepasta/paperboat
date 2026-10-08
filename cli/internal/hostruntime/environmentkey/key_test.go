@@ -259,3 +259,41 @@ func (r zeroReader) Read(value []byte) (int, error) {
 	}
 	return len(value), nil
 }
+
+func TestLayerGenesisEstablishedPersistsAcrossLegacyGenesisAndRestart(t *testing.T) {
+	store := &memoryStore{}
+	source := KeyringSource{Store: store, MachineID: "mch_one", Generation: 7, Random: zeroReader{}, NotFound: func(err error) bool { return errors.Is(err, errMemoryMissing) }}
+	material, err := source.Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	material.Destroy()
+	if err := source.PrepareGenesis(); err != nil {
+		t.Fatal(err)
+	}
+	if err := source.CommitGenesis(); err != nil {
+		t.Fatal(err)
+	}
+	if established, err := source.LayerGenesisEstablished(); err != nil || established {
+		t.Fatal("old projection genesis silently established layer floor")
+	}
+	if err := source.EstablishLayerGenesis(); err != nil {
+		t.Fatal(err)
+	}
+	restarted := source
+	if established, err := restarted.LayerGenesisEstablished(); err != nil || !established {
+		t.Fatal("layer marker lost across restart")
+	}
+	if err := restarted.EstablishLayerGenesis(); err != nil {
+		t.Fatal("layer marker is not idempotent")
+	}
+	if state, err := source.GenesisState(); err != nil || state != GenesisEstablished {
+		t.Fatal("layer cutover changed old recipient genesis")
+	}
+	if err := store.Delete(source.genesisReference()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.LayerGenesisEstablished(); !errors.Is(err, ErrGenesisMarkerMissing) {
+		t.Fatal("lost secure layer marker regenerated")
+	}
+}

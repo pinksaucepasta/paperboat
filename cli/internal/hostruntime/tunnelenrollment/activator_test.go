@@ -119,7 +119,7 @@ func TestResolvedAssemblyRequiresLazyWelcomeBoundCarrierAndExactCredential(t *te
 
 func activationRequestFixture() ActivationRequest {
 	return ActivationRequest{
-		AccountID: "account_01", TunnelID: "tunnel_01", HostID: "host_01", ConnectorID: "connector_01", OperationID: "operation_01", StableEndpointID: "123e4567-e89b-12d3-a456-426614174000",
+		AccountID: "account_01", TunnelID: "tunnel_01", HostID: "host_01", ConnectorID: "connector_01", OperationID: "operation_01", StableEndpointID: "endpoint_123e4567-e89b-42d3-a456-426614174000",
 		CredentialReference: "protected-file://paperboat/connectors/credential_01",
 		CredentialKeyID:     "ed25519:thumbprint-01", CredentialThumbprint: "thumbprint-01",
 		CredentialPublicKey: make([]byte, 32), CredentialGeneration: 3, ProcessGeneration: 2,

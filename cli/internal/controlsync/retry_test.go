@@ -24,7 +24,7 @@ func (s *rejectedSyncServer) Sync(stream pb.SyncService_SyncServer) error {
 		return err
 	}
 	if s.calls.Add(1) == 1 {
-		if err := stream.Send(&pb.SyncResponse{Revision: 1, Peers: []*pb.PeerUpdate{{PeerId: "device", Approved: true}}}); err != nil {
+		if err := stream.Send(&pb.SyncResponse{Revision: 1, Peers: []*pb.PeerUpdate{{PeerId: "machine", Approved: true}}}); err != nil {
 			return err
 		}
 	}

@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"reflect"
 	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync"
 	"github.com/pinksaucepasta/paperboat/internal/prompt"
 	"github.com/pinksaucepasta/paperboat/internal/selector"
 	"github.com/spf13/cobra"
@@ -17,14 +21,126 @@ import (
 // copy-and-repeat confirmation contract used by noninteractive commands.
 type configSyncInteractiveConfirmation struct{}
 
+type configSyncRegistrationFailure struct{ cause error }
+
+func (configSyncRegistrationFailure) Error() string {
+	return "Paperboat could not inspect this machine's enrollment for config sync."
+}
+
+func (e configSyncRegistrationFailure) Unwrap() error { return e.cause }
+
+type configSyncSourceInspectionFailure struct{ cause error }
+
+func (configSyncSourceInspectionFailure) Error() string {
+	return "Paperboat could not inspect the machine's config sync file."
+}
+
+func (e configSyncSourceInspectionFailure) Unwrap() error { return e.cause }
+
+func (configSyncSourceInspectionFailure) DiagnosticStage() string { return "reconciliation" }
+
+func (configSyncSourceInspectionFailure) DiagnosticCode() string { return "config_sync_failed" }
+
+type githubLinkCancelFailure struct{ cause error }
+
+func (githubLinkCancelFailure) Error() string {
+	return "The pending GitHub connection could not be canceled and will expire automatically."
+}
+
+func (e githubLinkCancelFailure) Unwrap() error { return e.cause }
+
+// onlyNotExistCause accepts a missing-file outcome only when every bounded
+// leaf is a not-exist cause. A joined operational error must remain visible.
+func onlyNotExistCause(err error) bool {
+	if err == nil {
+		return false
+	}
+	pending := []error{err}
+	leaves := 0
+	steps := 0
+	for len(pending) != 0 {
+		if steps == 16 {
+			return false
+		}
+		current := pending[0]
+		pending = pending[1:]
+		steps++
+		if current == nil {
+			return false
+		}
+		value := reflect.ValueOf(current)
+		switch value.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+			if value.IsNil() {
+				return false
+			}
+		}
+		if joined, ok := current.(interface{ Unwrap() []error }); ok {
+			children := joined.Unwrap()
+			if len(children) == 0 || len(pending)+len(children) > 16-steps {
+				return false
+			}
+			pending = append(pending, children...)
+			continue
+		}
+		if wrapped, ok := current.(interface{ Unwrap() error }); ok {
+			child := wrapped.Unwrap()
+			if child == nil || len(pending)+1 > 16-steps {
+				return false
+			}
+			pending = append(pending, child)
+			continue
+		}
+		if !errors.Is(current, os.ErrNotExist) {
+			return false
+		}
+		leaves++
+	}
+	return leaves != 0
+}
+
+func configSyncSourceExists(path string) (bool, error) {
+	if _, err := os.Stat(path); err == nil {
+		return true, nil
+	} else if onlyNotExistCause(err) {
+		return false, nil
+	} else {
+		return false, configSyncSourceInspectionFailure{cause: err}
+	}
+}
+
+func configSyncEnrollmentError(machineID string, err error) error {
+	if err != nil {
+		if onlyNotExistCause(err) {
+			return errors.New("this machine is not enrolled; complete Paperboat setup before enabling config sync")
+		}
+		return configSyncRegistrationFailure{cause: err}
+	}
+	if machineID == "" {
+		return errors.New("this machine is not enrolled; complete Paperboat setup before enabling config sync")
+	}
+	return nil
+}
+
+func githubLinkCleanupContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
+}
+
+func joinGitHubLinkCancelFailure(parentErr, cancelErr error) error {
+	if cancelErr == nil {
+		return parentErr
+	}
+	return errors.Join(parentErr, githubLinkCancelFailure{cause: cancelErr})
+}
+
 func actionHomeConfigSync(command *cobra.Command) error {
 	store, err := runtimeIdentityStore()
 	if err != nil {
-		return fmt.Errorf("inspect this machine's registration: %w", err)
+		return configSyncRegistrationFailure{cause: err}
 	}
 	registration, err := store.Registration()
-	if err != nil || registration.MachineID == "" {
-		return errors.New("this machine is not enrolled; complete Paperboat setup before enabling config sync")
+	if err := configSyncEnrollmentError(registration.MachineID, err); err != nil {
+		return err
 	}
 	client, err := backendForCommand(command)
 	if err != nil {
@@ -48,10 +164,26 @@ func actionHomeConfigSync(command *cobra.Command) error {
 		switch choice.ID {
 		case "status":
 			err = runHomeResult(command, []string{"config", "status", machineID})
+		case "conflicts":
+			err = reviewConfigConflictsInteractive(command, client, machineID)
 		case "configure":
 			err = configureSyncInteractive(command, client, machineID, assignment)
 		case "disable":
 			err = runConfigSyncResult(command, []string{"config", "unassign", machineID})
+		case "credentials":
+			repository, chooseErr := chooseConfigRepositoryInteractive(command, client, "Repository credentials", nil)
+			err = chooseErr
+			if err == nil {
+				for _, binding := range assignment.RepositoryBindings {
+					if binding.RepositoryID == repository.ID {
+						repository.ExternalRef = binding.URL
+						break
+					}
+				}
+				err = configureRepositoryCredentialsInteractive(command, repository)
+			}
+		case "custom-repository":
+			_, err = connectCustomConfigRepositoryInteractive(command, client)
 		case "repositories":
 			_, err = connectConfigRepositoryInteractive(command, client)
 		case "github":
@@ -84,13 +216,14 @@ func configSyncMenuItems(assignment api.ConfigAssignment) []selector.Item {
 	if configAssignmentEnabled(assignment) {
 		items = append(items,
 			selector.Item{ID: "configure", Title: "Configure sync", Description: strings.ReplaceAll(assignment.Mode, "_", " ") + " · automatic updates " + onOff(assignment.AutomaticUpdates)},
+			selector.Item{ID: "conflicts", Title: "Compare and resolve conflicts", Description: "Read this machine and repository versions through an encrypted connection"},
 			selector.Item{ID: "review", Title: "Review pending updates", Description: "Inspect changes before approving a repository revision"},
 			selector.Item{ID: "repair", Title: "Start or repair worker", Description: "Retry local worker installation without changing repositories"},
 			selector.Item{ID: "disable", Title: "Disable sync", Description: "Stop this machine's worker and remove its assignment; keep repository content", Action: true})
 	} else {
 		items = append(items, selector.Item{ID: "configure", Title: "Enable sync", Description: "Choose repositories, sync direction and update behavior", Action: true})
 	}
-	return append(items, selector.Item{ID: "repositories", Title: "Add repository", Description: "Choose a repository from your connected provider account"}, selector.Item{ID: "github", Title: "Connect GitHub", Description: "Approve account access in your browser, then return here"})
+	return append(items, selector.Item{ID: "credentials", Title: "Repository credentials", Description: "Private machine-local HTTPS credentials or SSH key/agent and trusted hosts"}, selector.Item{ID: "custom-repository", Title: "Add custom Git repository", Description: "HTTPS, SSH, or an explicit local repository; GitHub is optional"}, selector.Item{ID: "repositories", Title: "Add repository", Description: "Choose a repository from your connected provider account"}, selector.Item{ID: "github", Title: "Connect GitHub", Description: "Approve account access in your browser, then return here"})
 }
 
 func runConfigSyncResult(parent *cobra.Command, args []string) error {
@@ -101,67 +234,34 @@ func runConfigSyncResult(parent *cobra.Command, args []string) error {
 }
 
 func configureSyncInteractive(command *cobra.Command, client *api.Client, machineID string, current api.ConfigAssignment) error {
-	modeItems := []selector.Item{
-		{ID: "pull-only", Title: "Pull only", Description: "Apply repository configuration to this machine"},
-		{ID: "push-only", Title: "Push only", Description: "Publish selected machine configuration to the repository"},
-		{ID: "bidirectional", Title: "Pull and push", Description: "Apply repository updates and publish machine changes"},
-	}
-	// Put the current direction first so changing a repository preserves the
-	// existing direction unless the user explicitly chooses another.
-	currentMode := strings.ReplaceAll(current.Mode, "_", "-")
-	for i, item := range modeItems {
-		if item.ID == currentMode {
-			modeItems[0], modeItems[i] = modeItems[i], modeItems[0]
-			break
-		}
-	}
-	mode, err := chooseHomeAction(command, "Sync direction", modeItems)
+	path, err := configsync.DefaultMachineSourcePath()
 	if err != nil {
 		return err
 	}
-	var pull, push api.ConfigRepository
-	if mode.ID != "push-only" {
-		pull, err = chooseConfigRepositoryInteractive(command, client, "Pull repository", current.PullRepositoryID)
-		if err != nil {
+	exists, err := configSyncSourceExists(path)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		if err := runHomeResult(command, []string{"config", "sync", "init"}); err != nil {
 			return err
 		}
 	}
-	if mode.ID != "pull-only" {
-		push, err = chooseConfigRepositoryInteractive(command, client, "Push repository", current.PushRepositoryID)
-		if err != nil {
-			return err
-		}
+	choice, err := chooseHomeAction(command, "File-based config sync", []selector.Item{
+		{ID: "instructions", Title: "Configuration file", Description: path},
+		{ID: "apply", Title: "Apply current configuration", Description: "Review file-defined destinations and approve sync", Action: true},
+	})
+	if err != nil {
+		return err
 	}
-	automatic := false
-	if mode.ID != "push-only" {
-		options := []selector.Item{
-			{ID: "review", Title: "Review each update", Description: "Inspect changed paths and approve before applying later updates"},
-			{ID: "automatic", Title: "Apply updates automatically", Description: "Apply later updates within the selected scope; conflicts remain visible"},
-		}
-		if current.AutomaticUpdates {
-			options[0], options[1] = options[1], options[0]
-		}
-		selected, chooseErr := chooseHomeAction(command, "Repository updates", options)
-		if chooseErr != nil {
-			return chooseErr
-		}
-		automatic = selected.ID == "automatic"
+	if choice.ID == "instructions" {
+		return showHomeText(command, "Config sync files", "Edit "+path+" for machine overrides. Optional repository defaults belong in .paperboat/config-sync.json. Shared defaults may include explicit OS destinations. An empty machine file inherits applicable defaults. Run pb config sync validate to review, then pb config sync apply to approve.")
 	}
-	repository := pull.ID
-	if repository == "" {
-		repository = push.ID
+	repository, err := chooseConfigRepositoryInteractive(command, client, "Configuration repository", current.RepositoryID)
+	if err != nil {
+		return err
 	}
-	args := []string{"config", "assign", repository, machineID, "--mode", mode.ID}
-	if pull.ID != "" {
-		args = append(args, "--pull-repository", pull.ID)
-	}
-	if push.ID != "" {
-		args = append(args, "--push-repository", push.ID)
-	}
-	if automatic {
-		args = append(args, "--automatic-updates")
-	}
-	return runConfigSyncResult(command, args)
+	return runConfigSyncResult(command, []string{"config", "sync", "apply", "--repository", repository.ID})
 }
 
 func chooseConfigRepositoryInteractive(command *cobra.Command, client *api.Client, title string, current *string) (api.ConfigRepository, error) {
@@ -187,10 +287,13 @@ func chooseConfigRepositoryInteractive(command *cobra.Command, client *api.Clien
 				items = append(items, item)
 			}
 		}
-		items = append(items, selector.Item{ID: "add", Title: "Add repository", Description: "Choose from your connected provider account", Action: true})
+		items = append(items, selector.Item{ID: "custom", Title: "Add custom Git repository", Description: "HTTPS, SSH or local repository", Action: true}, selector.Item{ID: "add", Title: "Add repository", Description: "Choose from your connected provider account", Action: true})
 		choice, err := chooseHomeAction(command, title, items)
 		if err != nil {
 			return api.ConfigRepository{}, err
+		}
+		if choice.ID == "custom" {
+			return connectCustomConfigRepositoryInteractive(command, client)
 		}
 		if choice.ID == "add" {
 			connected, err := connectConfigRepositoryInteractive(command, client)
@@ -334,12 +437,10 @@ func connectGitHubInteractive(command *cobra.Command, client *api.Client) (resul
 		if completed || link.ID == "" {
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := githubLinkCleanupContext(command.Context())
 		defer cancel()
 		state, err := client.CancelGitHubNativeLink(ctx, link.ID)
-		if err != nil {
-			resultErr = errors.Join(resultErr, errors.New("the pending GitHub connection could not be canceled; it expires automatically, and no provider credentials were returned to this CLI"))
-		}
+		resultErr = joinGitHubLinkCancelFailure(resultErr, err)
 		if err == nil && state.State == "completed" && interactiveCanceled(resultErr) {
 			resultErr = errors.New("GitHub finished connecting before cancellation; return to Add repository to use the connection")
 		}
@@ -349,15 +450,30 @@ func connectGitHubInteractive(command *cobra.Command, client *api.Client) (resul
 	}
 	choice, err := chooseHomeAction(command, "Approve GitHub access", []selector.Item{
 		{ID: "browser", Title: "Open browser on this machine", Description: "Approve access to your GitHub account"},
-		{ID: "link", Title: "Use a browser on another device", Description: "Show a one-use link for remote or headless terminals"},
+		{ID: "link", Title: "Use a browser on another machine", Description: "Show a one-use link for remote or headless terminals"},
 	})
 	if err != nil {
 		return err
 	}
-	if choice.ID == "link" || openGitHubAuthorizationBrowser(command.Context(), link.BrowserURL) != nil {
+	showLink := choice.ID == "link"
+	handoffMessage := "Open this one-use link in your browser, check the Paperboat account, and approve GitHub access. Then press Esc to return and wait for completion."
+	if !showLink {
+		if browserErr := openGitHubAuthorizationBrowser(command.Context(), link.BrowserURL); browserErr != nil {
+			if contextErr := command.Context().Err(); contextErr != nil {
+				return errors.Join(contextErr, browserErr)
+			}
+			// Opening a browser is optional: the link is a complete recovery
+			// path. Keep the launcher's original cause in safe local evidence,
+			// without recording its arguments or the one-use authorization URL.
+			errorreport.Current().ObserveFailure(command.Context(), "pb", "browser_authorization", "command", "command_failed", browserErr)
+			showLink = true
+			handoffMessage = "Paperboat could not open a browser on this machine. " + handoffMessage
+		}
+	}
+	if showLink {
 		// Deliberately show the one-use browser handoff only in this interactive
 		// screen. Never include it in errors, diagnostics or logs.
-		if err = showHomeText(command, "Connect GitHub in your browser", "Open this one-use link in your browser, check the Paperboat account, and approve GitHub access. Then press Esc to return and wait for completion.\n\n"+link.BrowserURL); err != nil {
+		if err = showHomeText(command, "Connect GitHub in your browser", handoffMessage+"\n\n"+link.BrowserURL); err != nil {
 			return err
 		}
 	}
@@ -411,6 +527,81 @@ func waitForGitHubNativeLink(ctx context.Context, client *api.Client, link api.G
 			}
 			return ctx.Err()
 		case <-timer.C:
+		}
+	}
+}
+
+func configRuleText(command *cobra.Command, title, description, initial string) (string, error) {
+	return prompt.Text(prompt.TextOptions{Context: command.Context(), Title: title, Description: description, Initial: initial, Stdin: os.Stdin, Output: command.ErrOrStderr()})
+}
+
+func connectCustomConfigRepositoryInteractive(command *cobra.Command, client *api.Client) (api.ConfigRepository, error) {
+	endpoint, err := configRuleText(command, "Custom Git repository", "HTTPS, SSH URL or absolute local bare repository path. Do not include passwords or tokens.", "")
+	if err != nil {
+		return api.ConfigRepository{}, err
+	}
+	name, err := configRuleText(command, "Repository name", "Display name", "")
+	if err != nil {
+		return api.ConfigRepository{}, err
+	}
+	branch, err := configRuleText(command, "Repository branch", "Exact Git branch", "main")
+	if err != nil {
+		return api.ConfigRepository{}, err
+	}
+	repository, err := client.ConnectCustomConfigRepository(command.Context(), endpoint, name, branch)
+	if err != nil {
+		return api.ConfigRepository{}, friendlyCommandError(err)
+	}
+	choice, err := chooseHomeAction(command, "Repository connected", []selector.Item{{ID: "credentials", Title: "Set up credentials on this machine", Description: "Private HTTPS authentication or SSH key/agent with verified host keys"}, {ID: "later", Title: "Configure credentials later", Description: "Use pb config repository credentials set; explicit path rules are still required"}})
+	if err == nil && choice.ID == "credentials" {
+		err = configureRepositoryCredentialsInteractive(command, repository)
+	}
+	return repository, err
+}
+
+func reviewConfigConflictsInteractive(command *cobra.Command, client *api.Client, machineID string) error {
+	for {
+		status, err := client.ConfigSyncStatus(command.Context())
+		if err != nil {
+			return friendlyCommandError(err)
+		}
+		var rows []selector.Item
+		for _, environment := range status.Environments {
+			if environment.MachineID == machineID {
+				for _, conflict := range environment.Conflicts {
+					rows = append(rows, selector.Item{ID: conflict.Path, Title: conflict.Path, Description: strings.ReplaceAll(conflict.Reason, "_", " ")})
+				}
+			}
+		}
+		if len(rows) == 0 {
+			return showHomeText(command, "Configuration conflicts", "This machine has no current configuration conflicts.")
+		}
+		selected, err := chooseHomeAction(command, "Configuration conflicts", rows)
+		if err != nil {
+			return err
+		}
+		action, err := chooseHomeAction(command, selected.Title, []selector.Item{{ID: "compare", Title: "Compare versions", Description: "Read this machine and repository content without changing files"}, {ID: "machine", Title: "Keep this machine's version", Action: true}, {ID: "repository", Title: "Use repository version", Action: true}})
+		if err != nil {
+			if errors.Is(err, selector.ErrCanceled) {
+				continue
+			}
+			return err
+		}
+		args := []string{"config", "conflict", "compare", machineID, selected.ID}
+		if action.ID != "compare" {
+			approved, err := prompt.Confirm(prompt.ConfirmOptions{Context: command.Context(), Title: "Resolve " + selected.ID, Description: "Keep the " + action.ID + " version?", Stdin: os.Stdin, Output: command.ErrOrStderr()})
+			if err != nil {
+				return err
+			}
+			if !approved {
+				continue
+			}
+			args = []string{"config", "conflict", "resolve", machineID, selected.ID, "--keep", action.ID}
+		}
+		if err := runHomeResult(command, args); err != nil {
+			if showErr := showHomeFailure(command, err); showErr != nil {
+				return showErr
+			}
 		}
 	}
 }

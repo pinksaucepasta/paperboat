@@ -98,13 +98,13 @@ type execWorker struct {
 	ready    hostdproto.Status
 }
 
-func (w *execWorker) Ready(context.Context) (hostdproto.Status, error) {
+func (w *execWorker) Ready(ctx context.Context) (hostdproto.Status, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.ready.Epoch != 0 {
 		return w.ready, nil
 	}
-	line, err := readWorkerLine(w.lines)
+	line, err := readWorkerLineContext(ctx, w.lines)
 	if err != nil {
 		return hostdproto.Status{}, err
 	}
@@ -115,7 +115,7 @@ func (w *execWorker) Ready(context.Context) (hostdproto.Status, error) {
 	return status, err
 }
 
-func (w *execWorker) Activate(context.Context) (hostdproto.Status, error) {
+func (w *execWorker) Activate(ctx context.Context) (hostdproto.Status, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.ready.Epoch == 0 || w.control == nil {
@@ -128,7 +128,7 @@ func (w *execWorker) Activate(context.Context) (hostdproto.Status, error) {
 		return hostdproto.Status{}, err
 	}
 	w.control = nil
-	line, err := readWorkerLine(w.lines)
+	line, err := readWorkerLineContext(ctx, w.lines)
 	if err != nil {
 		return hostdproto.Status{}, err
 	}
@@ -148,15 +148,20 @@ func (w *execWorker) Stop(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		_ = w.command.Process.Kill()
+		<-done
 		return ctx.Err()
 	case err := <-done:
 		if err != nil {
-			return err
+			var exited *exec.ExitError
+			if !errors.As(err, &exited) {
+				return err
+			}
 		}
 		return nil
 	case <-time.After(5 * time.Second):
 		_ = w.command.Process.Kill()
-		return <-done
+		<-done
+		return nil
 	}
 }
 
@@ -186,4 +191,19 @@ func readWorkerLine(reader *bufio.Reader) (string, error) {
 		return "", fmt.Errorf("worker lifecycle response exceeds limit")
 	}
 	return line, nil
+}
+
+func readWorkerLineContext(ctx context.Context, reader *bufio.Reader) (string, error) {
+	type result struct {
+		line string
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() { line, err := readWorkerLine(reader); done <- result{line, err} }()
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case r := <-done:
+		return r.line, r.err
+	}
 }

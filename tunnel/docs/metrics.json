@@ -2,8 +2,612 @@
   "schema_version": 1,
   "metrics": [
     {
+      "name": "paperboat_edge_access_decisions_total",
+      "kind": "counter",
+      "labels": {
+        "decision": [
+          "allowed",
+          "denied",
+          "unavailable"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_active_streams",
+      "kind": "gauge"
+    },
+    {
+      "name": "paperboat_edge_certificate_expiry_horizon_seconds",
+      "kind": "gauge"
+    },
+    {
+      "name": "paperboat_edge_certificate_failures_total",
+      "kind": "counter",
+      "labels": {
+        "operation": [
+          "issue",
+          "renew",
+          "replace",
+          "revoke"
+        ],
+        "reason": [
+          "acme",
+          "distribution",
+          "dns",
+          "expired",
+          "revoked",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_certificate_operations_total",
+      "kind": "counter",
+      "labels": {
+        "operation": [
+          "issue",
+          "renew",
+          "replace",
+          "revoke"
+        ],
+        "outcome": [
+          "canceled",
+          "failed",
+          "success"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_config_applied_generation",
+      "kind": "gauge"
+    },
+    {
+      "name": "paperboat_edge_config_desired_generation",
+      "kind": "gauge"
+    },
+    {
+      "name": "paperboat_edge_connector_backoff_seconds",
+      "kind": "gauge"
+    },
+    {
+      "name": "paperboat_edge_connector_connections_total",
+      "kind": "counter",
+      "labels": {
+        "outcome": [
+          "canceled",
+          "failed",
+          "success"
+        ],
+        "transport": [
+          "quic",
+          "wss"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_connector_disconnects_total",
+      "kind": "counter",
+      "labels": {
+        "reason": [
+          "auth",
+          "error",
+          "protocol",
+          "remote",
+          "shutdown",
+          "stale",
+          "timeout",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_connector_handshake_latency_seconds",
+      "kind": "histogram",
+      "labels": {
+        "transport": [
+          "quic",
+          "wss"
+        ]
+      },
+      "buckets": [
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1,
+        2,
+        5,
+        10
+      ]
+    },
+    {
+      "name": "paperboat_edge_connector_reconnects_total",
+      "kind": "counter",
+      "labels": {
+        "reason": [
+          "control",
+          "lease",
+          "network",
+          "shutdown",
+          "stale",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_connector_sessions",
+      "kind": "gauge",
+      "labels": {
+        "state": [
+          "attached",
+          "draining",
+          "offline"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_crash_loop",
+      "kind": "gauge"
+    },
+    {
+      "name": "paperboat_edge_domain_verification_failures_total",
+      "kind": "counter",
+      "labels": {
+        "reason": [
+          "conflict",
+          "dns",
+          "provider",
+          "timeout",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_domain_verification_seconds",
+      "kind": "histogram",
+      "labels": {
+        "outcome": [
+          "failed",
+          "success",
+          "timeout"
+        ]
+      },
+      "buckets": [
+        0.1,
+        0.5,
+        1,
+        2,
+        5,
+        10,
+        30,
+        60,
+        300,
+        900
+      ]
+    },
+    {
+      "name": "paperboat_edge_flow_control_stalls_total",
+      "kind": "counter",
+      "labels": {
+        "direction": [
+          "egress",
+          "ingress"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_health_dimension",
+      "kind": "gauge",
+      "labels": {
+        "dimension": [
+          "access",
+          "certificate",
+          "config",
+          "dns",
+          "edge",
+          "origin",
+          "route",
+          "service",
+          "update"
+        ],
+        "status": [
+          "degraded",
+          "down",
+          "not_applicable",
+          "ready",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_health_probes_total",
+      "kind": "counter",
+      "labels": {
+        "dimension": [
+          "access",
+          "certificate",
+          "config",
+          "dns",
+          "edge",
+          "origin",
+          "route",
+          "service",
+          "update"
+        ],
+        "outcome": [
+          "canceled",
+          "failed",
+          "success",
+          "timeout"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_health_transitions_total",
+      "kind": "counter",
+      "labels": {
+        "dimension": [
+          "access",
+          "certificate",
+          "config",
+          "dns",
+          "edge",
+          "origin",
+          "route",
+          "service",
+          "update"
+        ],
+        "from": [
+          "degraded",
+          "down",
+          "not_applicable",
+          "ready",
+          "unknown"
+        ],
+        "to": [
+          "degraded",
+          "down",
+          "not_applicable",
+          "ready",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_operation_conflicts_total",
+      "kind": "counter",
+      "labels": {
+        "operation": [
+          "access",
+          "certificate",
+          "create",
+          "delete",
+          "reconcile",
+          "update"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_operation_idempotency_reuse_total",
+      "kind": "counter",
+      "labels": {
+        "operation": [
+          "access",
+          "certificate",
+          "create",
+          "delete",
+          "reconcile",
+          "update"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_operation_latency_seconds",
+      "kind": "histogram",
+      "labels": {
+        "operation": [
+          "access",
+          "certificate",
+          "create",
+          "delete",
+          "reconcile",
+          "update"
+        ]
+      },
+      "buckets": [
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1,
+        2,
+        5,
+        10
+      ]
+    },
+    {
+      "name": "paperboat_edge_origin_connect_failures_total",
+      "kind": "counter",
+      "labels": {
+        "protocol": [
+          "h2c",
+          "http1",
+          "http2",
+          "tcp",
+          "websocket"
+        ],
+        "reason": [
+          "refused",
+          "reset",
+          "timeout",
+          "tls",
+          "unavailable",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_origin_connections_total",
+      "kind": "counter",
+      "labels": {
+        "outcome": [
+          "canceled",
+          "failed",
+          "success",
+          "timeout"
+        ],
+        "protocol": [
+          "h2c",
+          "http1",
+          "http2",
+          "tcp",
+          "websocket"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_preview_allocations_total",
+      "kind": "counter",
+      "labels": {
+        "outcome": [
+          "canceled",
+          "expired",
+          "failed",
+          "success"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_preview_lease_cleanup_total",
+      "kind": "counter",
+      "labels": {
+        "reason": [
+          "edge_lost",
+          "expiry",
+          "owner_lost",
+          "shutdown",
+          "stop",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_protocol_upgrades_total",
+      "kind": "counter",
+      "labels": {
+        "from": [
+          "h2c",
+          "http1",
+          "http2",
+          "tcp"
+        ],
+        "to": [
+          "h2c",
+          "http2",
+          "tcp",
+          "websocket"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_queue_depth",
+      "kind": "gauge",
+      "labels": {
+        "queue": [
+          "control",
+          "route",
+          "stream",
+          "telemetry",
+          "usage"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_requests_total",
+      "kind": "counter",
+      "labels": {
+        "outcome": [
+          "canceled",
+          "failed",
+          "rejected",
+          "success"
+        ],
+        "protocol": [
+          "http",
+          "https",
+          "tcp",
+          "websocket"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_route_errors_total",
+      "kind": "counter",
+      "labels": {
+        "reason": [
+          "internal",
+          "not_found",
+          "origin",
+          "protocol",
+          "rejected",
+          "timeout"
+        ],
+        "route_kind": [
+          "preview_public_https_wss",
+          "tunnel_https_wss",
+          "tunnel_private_tcp",
+          "tunnel_tcp"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_route_latency_seconds",
+      "kind": "histogram",
+      "labels": {
+        "route_kind": [
+          "preview_public_https_wss",
+          "tunnel_https_wss",
+          "tunnel_private_tcp",
+          "tunnel_tcp"
+        ]
+      },
+      "buckets": [
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1,
+        2,
+        5,
+        10
+      ]
+    },
+    {
+      "name": "paperboat_edge_route_requests_total",
+      "kind": "counter",
+      "labels": {
+        "outcome": [
+          "canceled",
+          "failed",
+          "rejected",
+          "success"
+        ],
+        "route_kind": [
+          "preview_public_https_wss",
+          "tunnel_https_wss",
+          "tunnel_private_tcp",
+          "tunnel_tcp"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_service_restarts_total",
+      "kind": "counter",
+      "labels": {
+        "reason": [
+          "crash",
+          "shutdown",
+          "unknown",
+          "upgrade"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_service_uptime_seconds",
+      "kind": "gauge"
+    },
+    {
+      "name": "paperboat_edge_stream_cancellations_total",
+      "kind": "counter",
+      "labels": {
+        "reason": [
+          "client",
+          "edge",
+          "origin",
+          "shutdown",
+          "timeout",
+          "unknown"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_stream_duration_seconds",
+      "kind": "histogram",
+      "labels": {
+        "route_kind": [
+          "preview_public_https_wss",
+          "tunnel_https_wss",
+          "tunnel_private_tcp",
+          "tunnel_tcp"
+        ]
+      },
+      "buckets": [
+        0.1,
+        0.5,
+        1,
+        2,
+        5,
+        10,
+        30,
+        60,
+        300,
+        900
+      ]
+    },
+    {
       "name": "paperboat_edge_telemetry_dropped_total",
       "kind": "counter"
+    },
+    {
+      "name": "paperboat_edge_traffic_bytes_total",
+      "kind": "counter",
+      "labels": {
+        "direction": [
+          "egress",
+          "ingress"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_update_operations_total",
+      "kind": "counter",
+      "labels": {
+        "outcome": [
+          "canceled",
+          "failed",
+          "success"
+        ],
+        "phase": [
+          "activate",
+          "download",
+          "health_gate",
+          "quarantine",
+          "rollback",
+          "stage",
+          "verify"
+        ]
+      }
+    },
+    {
+      "name": "paperboat_edge_watchdog_failures_total",
+      "kind": "counter",
+      "labels": {
+        "reason": [
+          "crash",
+          "timeout",
+          "unhealthy",
+          "unknown"
+        ]
+      }
     },
     {
       "name": "paperboat_tunnel_active_streams",
@@ -30,36 +634,6 @@
           "control",
           "routes",
           "usage"
-        ]
-      }
-    },
-    {
-      "name": "paperboat_tunnel_events_total",
-      "kind": "counter",
-      "labels": {
-        "direction": [
-          "",
-          "egress",
-          "ingress"
-        ],
-        "kind": [
-          "admission",
-          "cleanup",
-          "node",
-          "route",
-          "stream",
-          "usage"
-        ],
-        "result": [
-          "canceled",
-          "failed",
-          "rejected",
-          "success"
-        ],
-        "route_kind": [
-          "",
-          "preview_public_https_wss",
-          "runtime_https_wss"
         ]
       }
     },

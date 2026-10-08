@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"strings"
 	"sync/atomic"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/internal/selector"
 	"github.com/pinksaucepasta/paperboat/internal/session"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 	"github.com/spf13/cobra"
@@ -39,6 +41,10 @@ func terminalSharingCommand(action string) *cobra.Command {
 	}
 	c := &cobra.Command{Use: use, Short: map[string]string{"shared": "List owned and explicitly shared terminal sessions", "participants": "Show terminal sharing and connected participants", "share": "Grant a team or teammate viewer or interactive access", "remove": "Remove a teammate, including access through an all-team grant", "unshare": "End sharing while preserving the owner's terminal"}[action], Args: commandArgs(nargs)}
 	c.Flags().Bool("json", false, "print canonical JSON")
+	if action == "shared" {
+		inventoryFilterFlags(c)
+		c.Flags().Bool("closed", false, "filter explicitly by closed state")
+	}
 	if action == "share" {
 		c.Long = terminalSharingNotice
 		c.Flags().String("team", "", "team ID")
@@ -59,7 +65,7 @@ func terminalSharingCommand(action string) *cobra.Command {
 			in.Role, _ = c.Flags().GetString("role")
 			all, _ := c.Flags().GetBool("all")
 			if !validTeamCLIIdentifier(in.TeamID) || (all == (in.AccountID != "")) || in.AccountID != "" && !validTeamCLIIdentifier(in.AccountID) || in.Role != "viewer" && in.Role != "interactive" {
-				return invocationError(errors.New("share requires --team, exactly one of --all or --member, and --role viewer or interactive"))
+				return localArgumentError("share requires --team, exactly one of --all or --member, and --role viewer or interactive")
 			}
 			in.Audience = "selected_member"
 			if all {
@@ -73,7 +79,7 @@ func terminalSharingCommand(action string) *cobra.Command {
 		}
 		jsonOutput, _ := c.Flags().GetBool("json")
 		if action == "shared" {
-			sessions, err := client.SharedTerminalSessions(c.Context())
+			sessions, err := client.SharedTerminalSessionsFiltered(c.Context(), inventoryFilters(c))
 			if err != nil {
 				return err
 			}
@@ -81,7 +87,7 @@ func terminalSharingCommand(action string) *cobra.Command {
 				return json.NewEncoder(c.OutOrStdout()).Encode(sessions)
 			}
 			for _, s := range sessions {
-				fmt.Fprintf(c.OutOrStdout(), "%s\t%s\t%s\t%s\t%s\n", s.ID, s.Name, s.Target.Name, s.Role, s.Sharing.Audience)
+				fmt.Fprintf(c.OutOrStdout(), "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", s.ID, selector.SanitizeText(s.Name), sessionActivityLabel(api.TerminalSession{Title: s.Title, ForegroundProcess: s.ForegroundProcess}), sessionDirectoryLabel(api.TerminalSession{CurrentDirectory: s.CurrentDirectory, StartedIn: s.StartedIn}), s.Target.Name, s.Role, s.Sharing.Audience)
 			}
 			return nil
 		}
@@ -152,14 +158,17 @@ func joinSharedTerminal(c *cobra.Command, args []string) error {
 		return err
 	}
 	var cursor atomic.Int64
-	attachment := "att_" + newIdempotencyKey()
+	attachment := "attachment_" + uuid.NewString()
 	inputQueue := resolver.NewTerminalInputQueue(256)
 	resolve := func(ctx context.Context) (resolver.ConnectInfo, error) {
 		credential, err := d.auth.Credential()
 		if err != nil {
 			return resolver.ConnectInfo{}, err
 		}
-		client := api.New(d.cfg.ServerURL, credential, nil)
+		client, err := newWorkspaceAPIClient(actionContext(c, nil), d.cfg.ServerURL, credential)
+		if err != nil {
+			return resolver.ConnectInfo{}, err
+		}
 		client.SetSourceMachineID(source)
 		r := resolver.NewAPIResolver(client, d.cfg)
 		r.Progress = func(status, reason string, retryAfter time.Duration) {

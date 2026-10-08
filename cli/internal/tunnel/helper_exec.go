@@ -54,10 +54,7 @@ type ExecStartUncertainError struct {
 }
 
 func (e *ExecStartUncertainError) Error() string {
-	if e == nil || e.Cause == nil {
-		return "remote execution start outcome is uncertain"
-	}
-	return "remote execution start outcome is uncertain: " + e.Cause.Error()
+	return "remote execution start outcome is uncertain"
 }
 func (e *ExecStartUncertainError) Unwrap() error        { return e.Cause }
 func (e *ExecStartUncertainError) LocalAPICode() string { return "exec_start_uncertain" }
@@ -78,6 +75,7 @@ type helperExecConn struct {
 	streamID           uint32
 	events             chan ExecEvent
 	done               chan struct{}
+	readLoopDone       chan struct{}
 	inputSeq           atomic.Uint64
 	resizeSeq          atomic.Uint64
 	writeMu            sync.Mutex
@@ -90,6 +88,7 @@ type helperExecConn struct {
 	finishOnce         sync.Once
 	terminalSeen       atomic.Bool
 	closeOnce          sync.Once
+	closeErr           error
 	exitCode           int
 	exitErr            error
 }
@@ -149,12 +148,13 @@ func (c *helperExecConn) initialize(ctx context.Context) error {
 	}
 	c.streamID = response.Result.StreamID
 	c.emit(ExecEvent{OperationID: c.request.OperationID, State: "started"})
+	c.readLoopDone = make(chan struct{})
 	go c.readLoop()
 	return nil
 }
 
 func helperRequestSyncOperation(ctx context.Context, message helperMessageConnection, capability, operationID string, payload json.RawMessage) (helperFrame, error) {
-	requestID := helperID("req_")
+	requestID := helperID("request")
 	frame := helperFrame{Type: "request", RequestID: requestID, Version: helperProtocolVersion, OperationID: operationID, Capability: capability, DeadlineMS: uint32(helperRequestTimeout / time.Millisecond), Payload: payload}
 	if err := writeHelperFrame(ctx, message, frame); err != nil {
 		return helperFrame{}, err
@@ -176,6 +176,9 @@ func helperRequestSyncOperation(ctx context.Context, message helperMessageConnec
 }
 
 func (c *helperExecConn) readLoop() {
+	if c.readLoopDone != nil {
+		defer close(c.readLoopDone)
+	}
 	defer close(c.events)
 	for {
 		kind, data, err := c.message.ReadMessage(context.Background())
@@ -313,6 +316,14 @@ func (c *helperExecConn) control(action string, values map[string]any) error {
 		}
 		return nil
 	case <-c.done:
+		if action == "cancel" && c.terminalSeen.Load() {
+			if c.exitErr == nil {
+				return nil
+			}
+			if remote, ok := c.exitErr.(*RemoteExecError); ok && (remote.Code == "exec_canceled" || remote.Code == "exec_timeout") {
+				return nil
+			}
+		}
 		return c.waitError()
 	case <-time.After(helperRequestTimeout):
 		return errors.New("helper execution control outcome is uncertain")
@@ -325,7 +336,7 @@ func (c *helperExecConn) controlFrame(action string, values map[string]any) (str
 	if err != nil {
 		return "", helperFrame{}, err
 	}
-	requestID := helperID("req_")
+	requestID := helperID("request")
 	frame := helperFrame{Type: "request", RequestID: requestID, Version: helperProtocolVersion, OperationID: c.request.OperationID, Capability: "exec.v1", DeadlineMS: uint32(helperRequestTimeout / time.Millisecond), Payload: payload}
 	return requestID, frame, nil
 }
@@ -408,21 +419,43 @@ func (c *helperExecConn) Resize(rows, cols uint16) error {
 }
 func (c *helperExecConn) Close() error {
 	c.closeOnce.Do(func() {
+		// Finish first so a full event queue cannot prevent carrier shutdown.
+		c.finish(1, ErrTransportLost)
 		cancelCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-		_, frame, frameErr := c.controlFrame("cancel", map[string]any{})
-		if frameErr == nil {
-			_ = c.writeControl(cancelCtx, frame)
+		defer cancel()
+		var closeOnce sync.Once
+		var closeErr error
+		closeMessage := func() { closeOnce.Do(func() { closeErr = c.message.Close() }) }
+		callbackDone := make(chan struct{})
+		stop := context.AfterFunc(cancelCtx, func() { defer close(callbackDone); closeMessage() })
+		var frameErr error
+		if !c.terminalSeen.Load() {
+			var frame helperFrame
+			_, frame, frameErr = c.controlFrame("cancel", map[string]any{})
+			if frameErr == nil {
+				frameErr = c.writeControl(cancelCtx, frame)
+			}
 		}
-		cancel()
-		_ = c.message.Close()
+		if !stop() {
+			<-callbackDone
+		}
+		closeMessage()
+		c.closeErr = errors.Join(frameErr, closeErr)
+		if c.readLoopDone != nil {
+			<-c.readLoopDone
+		}
 	})
-	return nil
+	return c.closeErr
 }
 func (c *helperExecConn) Detach() error {
 	c.closeOnce.Do(func() {
-		_ = c.message.Close()
+		c.finish(1, ErrTransportLost)
+		c.closeErr = c.message.Close()
+		if c.readLoopDone != nil {
+			<-c.readLoopDone
+		}
 	})
-	return nil
+	return c.closeErr
 }
 func (c *helperExecConn) Wait() (int, error) {
 	<-c.done

@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"time"
@@ -453,31 +454,69 @@ func (t *artifactRetryTransport) RoundTrip(request *http.Request) (*http.Respons
 	for attempt := 0; ; attempt++ {
 		response, err := t.base.RoundTrip(request.Clone(request.Context()))
 		if contextErr := request.Context().Err(); contextErr != nil {
-			if response != nil && response.Body != nil {
-				_ = response.Body.Close()
-			}
-			return nil, contextErr
+			return nil, joinBootstrapErrors(joinBootstrapErrors(contextErr, err), closeBootstrapResponse(response))
 		}
 		if err == nil || !retryableRequest || attempt >= len(t.delays) || !transientArtifactTransportError(request.Context(), err) {
 			return response, err
 		}
-		if response != nil && response.Body != nil {
-			_ = response.Body.Close()
+		if closeErr := closeBootstrapResponse(response); closeErr != nil {
+			return nil, joinBootstrapErrors(err, closeErr)
 		}
 		timer := time.NewTimer(t.delays[attempt])
 		select {
 		case <-request.Context().Done():
 			timer.Stop()
-			return nil, request.Context().Err()
+			return nil, joinBootstrapErrors(request.Context().Err(), err)
 		case <-timer.C:
 		}
 	}
 }
 
 func transientArtifactTransportError(ctx context.Context, err error) bool {
-	if err == nil || ctx.Err() != nil || errors.Is(err, context.Canceled) {
+	if err == nil || ctx.Err() != nil {
 		return false
 	}
-	var networkError net.Error
-	return errors.As(err, &networkError) && networkError.Timeout()
+	remaining := []error{err}
+	seen := make(map[error]struct{})
+	leaves := 0
+	for visited := 0; len(remaining) > 0; visited++ {
+		if visited >= 16 {
+			return false
+		}
+		current := remaining[0]
+		remaining = remaining[1:]
+		if current == nil {
+			return false
+		}
+		value := reflect.ValueOf(current)
+		switch value.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+			if value.IsNil() {
+				return false
+			}
+		}
+		if value.Type().Comparable() {
+			if _, duplicate := seen[current]; duplicate {
+				return false
+			}
+			seen[current] = struct{}{}
+		}
+		switch wrapped := current.(type) {
+		case interface{ Unwrap() []error }:
+			children := wrapped.Unwrap()
+			if len(children) == 0 || len(children)+len(remaining) > 15-visited {
+				return false
+			}
+			remaining = append(remaining, children...)
+		case interface{ Unwrap() error }:
+			remaining = append(remaining, wrapped.Unwrap())
+		default:
+			networkError, ok := current.(net.Error)
+			if !ok || !networkError.Timeout() {
+				return false
+			}
+			leaves++
+		}
+	}
+	return leaves > 0
 }

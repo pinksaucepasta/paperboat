@@ -22,8 +22,11 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostservice"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	hostruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/runtime"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
 	"golang.org/x/sys/windows"
 )
@@ -100,12 +103,13 @@ func windowsHostdWorkerEnvironment(install hostinstall.WindowsRuntimeConfig, lay
 		"PAPERBOAT_HOSTD_SOCKET":           layout.HostdSocket,
 		"PAPERBOAT_HOSTD_TOKEN_FILE":       install.TokenFile,
 		"PAPERBOAT_RUNTIME_CURRENT":        runtimeExecutable,
+		"PAPERBOAT_BINARY_ROLLBACK":        layout.BinaryRollback,
+		"PAPERBOAT_BINARY_STAGED":          layout.BinaryStaged,
 		"PAPERBOAT_RUNTIME_STATE_ROOT":     install.StateRoot,
 		"PAPERBOAT_WORKSPACE_ROOT":         install.Workspace,
 		"PAPERBOAT_CONTROL_URL":            install.ControlURL,
 		"PAPERBOAT_RUNTIME_LISTEN_ADDRESS": install.ListenAddress,
 		"PAPERBOAT_MACHINE_ID":             install.MachineID,
-		"PAPERBOAT_SETUP_MODE":             install.SetupMode,
 		"PAPERBOAT_RUNTIME_SERVICE_SCOPE":  "user",
 		// CreateEnvironmentBlock does not guarantee ComSpec for S4U and
 		// service-created owner tokens. Pin the native system shell explicitly;
@@ -119,11 +123,30 @@ func windowsHostdWorkerEnvironment(install hostinstall.WindowsRuntimeConfig, lay
 // LocalSystem process cannot accidentally run the workload itself.
 func runWindowsHostdService(install hostinstall.WindowsRuntimeConfig, instance windowsRuntimeInstance) error {
 	layout := instance.layout
-	hostdExecutable, runtimeExecutable := layout.Binary, layout.Binary
+	hostdExecutable, executableErr := os.Executable()
+	if executableErr != nil {
+		return executableErr
+	}
+	if _, err := service.VerifyOwnedWindowsRoleExecutable(service.HostdKind, layout.Instance, hostdExecutable); err != nil {
+		return err
+	}
+	runtimeExecutable := layout.Binary
 	environment, err := windowsHostdWorkerEnvironment(install, layout, runtimeExecutable)
 	if err != nil {
 		return err
 	}
+	version, err := updated.WindowsFeatureVersion(context.Background(), windowsUpdatedConfigFor(install, layout, install.Source.Version))
+	if err != nil {
+		return err
+	}
+	identity, err := installsource.Inspect(runtimeExecutable, version, install.Source.Distribution)
+	if err != nil {
+		return err
+	}
+	environment["PAPERBOAT_FEATURE_VERSION"] = version
+	environment["PAPERBOAT_FEATURE_SHA256"] = identity.SHA256
+	environment["PAPERBOAT_FEATURE_LENGTH"] = strconv.FormatInt(identity.Length, 10)
+
 	return service.RunWindowsService(service.ServiceEntryConfig{
 		Name:        windowsInstanceServiceName("PaperboatHostd", instance.name),
 		Executable:  hostdExecutable,
@@ -248,11 +271,11 @@ func runOwnerHostd(ctx context.Context, output io.Writer, install hostinstall.Wi
 			return err
 		}
 	}
-	host, err := hostruntime.NewProductionHost(ctx, buildinfo.Version, os.Getenv)
+	host, err := hostruntime.NewProductionOwner(ctx, buildinfo.Version, os.Getenv)
 	if err != nil {
 		return err
 	}
-	if err := host.StartStable(ctx); err != nil {
+	if err := host.StartHostd(ctx); err != nil {
 		return err
 	}
 	statePath, err := windowsHostdFencePath()
@@ -264,8 +287,35 @@ func runOwnerHostd(ctx context.Context, output io.Writer, install hostinstall.Wi
 		shutdownWindowsStableHost(host)
 		return err
 	}
-	server, err := hostdproto.NewServer(hostdproto.SocketConfig{SocketPath: socket, StatePath: statePath, SID: sid, Token: token, APIMin: 1, APIMax: 1, Workloads: host.WorkloadStatus, UpdateGate: host.UpdateGate(), RequestTimeout: 31 * time.Minute})
+
+	version := os.Getenv("PAPERBOAT_FEATURE_VERSION")
+	length, lengthErr := strconv.ParseInt(os.Getenv("PAPERBOAT_FEATURE_LENGTH"), 10, 64)
+	identity := installsource.Source{Version: version, Platform: "windows", Architecture: gort.GOARCH, SHA256: os.Getenv("PAPERBOAT_FEATURE_SHA256"), Length: length, Distribution: install.Source.Distribution}
+	if lengthErr != nil || identity.Validate() != nil {
+		shutdownWindowsStableHost(host)
+		return errors.New("native owner feature identity is invalid")
+	}
+	if err := identity.Verify(executable); err != nil {
+		shutdownWindowsStableHost(host)
+		return err
+	}
+
+	template := workerupdate.StartRequest{Executable: executable, Release: workerupdate.Release{Version: version, Platform: gort.GOOS, Architecture: gort.GOARCH, HostdAPIMin: 1, HostdAPIMax: 1}, WorkerID: "runtime-" + strings.ReplaceAll(version, " ", "-"), HostdEndpoint: socket, Capability: token, MutationsDisabled: true}
+	owned := newOwnedWorkers(ctx, template, func(ctx context.Context, r workerupdate.StartRequest) (workerupdate.Worker, error) {
+		return startWindowsRuntimeWorkerForRelease(ctx, r.Executable, socket, tokenPath, sid, r.WorkerID, r.Release.Version, r.Release.HostdAPIMin, r.Release.HostdAPIMax)
+	})
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = owned.shutdown(shutdownCtx)
+	}()
+	server, err := hostdproto.NewServer(hostdproto.SocketConfig{SocketPath: socket, StatePath: statePath, SID: sid, Token: token, APIMin: 1, APIMax: 1, Workloads: host.WorkloadStatus, UpdateGate: host.UpdateGate(), WorkerControl: owned, RequestTimeout: 31 * time.Minute})
 	if err != nil {
+		shutdownWindowsStableHost(host)
+		return err
+	}
+	host.BindLifecycle(socket+".workloads", token, server.Status, server.AcquireActive)
+	if err := host.StartBridge(ctx); err != nil {
 		shutdownWindowsStableHost(host)
 		return err
 	}
@@ -277,17 +327,14 @@ func runOwnerHostd(ctx context.Context, output io.Writer, install hostinstall.Wi
 		shutdownWindowsStableHost(host)
 		return err
 	}
-	worker, err := startWindowsRuntimeWorker(ctx, executable, socket, tokenPath, install.OwnerSID, "runtime-"+strings.ReplaceAll(buildinfo.Version, " ", "-"))
+	_, err = owned.HandleWorkerControl(ctx, hostdproto.WorkerControlRequest{Operation: "start", WorkerID: template.WorkerID, Executable: executable, Version: template.Release.Version, APIMin: 1, APIMax: 1})
 	if err == nil {
-		_, err = worker.Ready(ctx)
+		_, err = owned.HandleWorkerControl(ctx, hostdproto.WorkerControlRequest{Operation: "ready", WorkerID: template.WorkerID})
 	}
 	if err == nil {
-		_, err = worker.Activate(ctx)
+		_, err = owned.HandleWorkerControl(ctx, hostdproto.WorkerControlRequest{Operation: "activate", WorkerID: template.WorkerID})
 	}
 	if err != nil {
-		if worker != nil {
-			_ = worker.Stop(context.Background())
-		}
 		stopServer()
 		shutdownWindowsStableHost(host)
 		return err
@@ -296,10 +343,10 @@ func runOwnerHostd(ctx context.Context, output io.Writer, install hostinstall.Wi
 	<-ctx.Done()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	stopErr := worker.Stop(shutdownCtx)
+	stopErr := owned.shutdown(shutdownCtx)
 	stopServer()
 	serverErr := <-serverDone
-	return errors.Join(stopErr, serverErr, host.ShutdownStable(shutdownCtx))
+	return errors.Join(stopErr, serverErr, host.ShutdownHostd(shutdownCtx))
 }
 
 func ensureWindowsHostdStateDirectory(path, sidValue string) error {
@@ -347,6 +394,9 @@ func setWindowsHostdStateSecurity(path string, owner *windows.SID, dacl *windows
 }
 
 func runWorker(ctx context.Context, args []string, input io.Reader, output, stderr io.Writer) error {
+	return runWorkerWith(ctx, args, input, output, stderr, newWorkerFeature)
+}
+func runWorkerWith(ctx context.Context, args []string, input io.Reader, output, stderr io.Writer, newFeature workerFeatureFactory) error {
 	flags := flag.NewFlagSet("worker", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	socket := flags.String("socket", "", "hostd lifecycle named pipe")
@@ -391,6 +441,23 @@ func runWorker(ctx context.Context, args []string, input io.Reader, output, stde
 	if err != nil {
 		return err
 	}
+	feature, err := newFeature(ctx, *socket, token, *workerID, active.Epoch, *version)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = feature.Shutdown(shutdownCtx)
+	}()
+	// Activation fences the lease before feature startup. Readiness means the
+	// feature is usable and its heartbeat is fresh after that startup completes.
+	if err := feature.Health(ctx); err != nil {
+		return err
+	}
+	if err := candidate.Heartbeat(ctx); err != nil {
+		return fmt.Errorf("hostd worker heartbeat: %w", err)
+	}
 	fmt.Fprintf(output, "active %d %d\n", active.Epoch, active.APIVersion)
 	ticker := time.NewTicker(*heartbeat)
 	defer ticker.Stop()
@@ -399,6 +466,9 @@ func runWorker(ctx context.Context, args []string, input io.Reader, output, stde
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
+			if err := feature.Health(ctx); err != nil {
+				return err
+			}
 			if err := candidate.Heartbeat(ctx); err != nil {
 				return fmt.Errorf("hostd worker heartbeat: %w", err)
 			}
@@ -496,13 +566,13 @@ func waitForWindowsHostdPipe(ctx context.Context, socket string, token []byte, d
 	}
 }
 
-func shutdownWindowsStableHost(host *hostruntime.Host) {
+func shutdownWindowsStableHost(host *hostruntime.ProcessOwner) {
 	if host == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	_ = host.ShutdownStable(ctx)
+	_ = host.ShutdownHostd(ctx)
 }
 
 type windowsRuntimeWorker struct {
@@ -596,6 +666,7 @@ func (w *windowsRuntimeWorker) Stop(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		_ = w.command.Process.Kill()
+		<-done
 		return ctx.Err()
 	case <-done:
 		// Stop is a cleanup operation. The private worker intentionally exits

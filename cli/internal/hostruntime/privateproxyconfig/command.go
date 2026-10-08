@@ -3,6 +3,7 @@ package privateproxyconfig
 import (
 	"context"
 	"os/exec"
+	"time"
 )
 
 type CommandRunner interface {
@@ -11,5 +12,7 @@ type CommandRunner interface {
 type ExecRunner struct{}
 
 func (ExecRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+	command := exec.CommandContext(ctx, name, args...)
+	command.WaitDelay = time.Second
+	return command.CombinedOutput()
 }

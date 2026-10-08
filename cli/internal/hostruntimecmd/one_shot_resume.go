@@ -15,7 +15,6 @@ import (
 
 type oneShotResumeInput struct {
 	StateRoot    string
-	SetupMode    string
 	TokenFile    string
 	TokenFileErr error
 	Config       bootstrap.Config
@@ -79,7 +78,7 @@ func resumeOneShotEnrollment(ctx context.Context, input oneShotResumeInput, oper
 			_, err := operations.RecoverMaterial(ctx, oldConfig, false)
 			if !errors.Is(err, bootstrap.ErrPairingExpired) && !errors.Is(err, bootstrap.ErrPairingDenied) {
 				// Pending, recoverable, and ambiguous server responses all retain
-				// the old verifier so an installed device cannot be replaced.
+				// the old verifier so an installed machine cannot be replaced.
 				return bootstrap.Material{}, resume, bootstrap.ErrResumeBinding
 			}
 		}
@@ -119,7 +118,7 @@ func resumeOneShotEnrollment(ctx context.Context, input oneShotResumeInput, oper
 		if err != nil {
 			return bootstrap.Material{}, resume, err
 		}
-		resume = bootstrap.NewResumeRecord(input.Config.ServerURL, input.Config.PublicIdentityKey, input.Config.EnrollmentToken, input.Config.Alias, input.SetupMode, verifier, now.Add(15*time.Minute))
+		resume = bootstrap.NewResumeRecord(input.Config.ServerURL, input.Config.PublicIdentityKey, input.Config.EnrollmentToken, input.Config.Alias, verifier, now.Add(15*time.Minute))
 		if err := operations.SaveResume(input.StateRoot, resume); err != nil {
 			return bootstrap.Material{}, resume, fmt.Errorf("persist machine enrollment resume state: %w", err)
 		}

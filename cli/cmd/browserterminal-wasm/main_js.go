@@ -6,12 +6,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
-	"crypto/rand"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"github.com/google/uuid"
 	"io"
 	"net"
 	"net/url"
@@ -69,11 +69,16 @@ type browserTerminal struct {
 	inputSequence   uint64
 	resizeSequence  uint64
 	cursorRequestID string
+	fileRequests    map[string]chan protocol.Frame
+	fileDone        chan struct{}
+	fileCloseOnce   sync.Once
+	filesAvailable  bool
 	attached        bool
 	stopping        atomic.Bool
 	ended           atomic.Bool
 	stopOnce        sync.Once
 	keyEvents       chan browserbroadcast.Epoch
+	writes          *terminalWriterQueue
 }
 
 type websocketMessage struct {
@@ -85,7 +90,7 @@ type browserWSConn struct {
 	socket js.Value
 
 	messages   chan websocketMessage
-	broadcasts chan []byte
+	broadcasts *terminalReceiveQueue
 	opened     chan struct{}
 	done       chan struct{}
 	failure    chan error
@@ -113,6 +118,9 @@ func main() {
 	api.Set("resize", js.FuncOf(apiResize))
 	api.Set("ack", js.FuncOf(apiAck))
 	api.Set("cursor", js.FuncOf(apiCursor))
+	api.Set("hashFile", js.FuncOf(apiHashFile))
+	api.Set("fileRequest", js.FuncOf(apiFileRequest))
+	api.Set("compareConfig", js.FuncOf(apiCompareConfig))
 	api.Set("leave", js.FuncOf(apiLeave))
 	js.Global().Set("paperboatBrowserTerminal", api)
 	select {}
@@ -123,7 +131,7 @@ func apiCreateIdentity(_ js.Value, _ []js.Value) any {
 	if err != nil {
 		return errorObject("identity_generation_failed", "A temporary browser key could not be created.")
 	}
-	id, err := randomID("browser_")
+	id, err := randomID("key")
 	if err != nil {
 		zero(identity.PrivateKey)
 		return errorObject("identity_generation_failed", "A temporary browser key could not be created.")
@@ -176,12 +184,12 @@ func apiConnect(_ js.Value, args []js.Value) any {
 	if identity == nil {
 		return errorObject("identity_missing", "The temporary browser key expired. Start the connection again.")
 	}
-	id, err := randomID("browser_connection_")
+	id, err := randomID("connection")
 	if err != nil {
 		zero(identity.PrivateKey)
 		return errorObject("connection_failed", "The encrypted connection could not be started.")
 	}
-	connection := &browserTerminal{id: id, identity: identity, callback: args[2], config: config}
+	connection := &browserTerminal{id: id, identity: identity, callback: args[2], config: config, writes: newTerminalWriterQueue(), fileRequests: make(map[string]chan protocol.Frame), fileDone: make(chan struct{})}
 	browserRuntime.Lock()
 	browserRuntime.connections[id] = connection
 	browserRuntime.Unlock()
@@ -270,6 +278,9 @@ func apiLeave(_ js.Value, args []js.Value) any {
 }
 
 func parseTerminalConfig(value js.Value) (terminalConfig, error) {
+	return parseBrowserTransportConfig(value, true)
+}
+func parseBrowserTransportConfig(value js.Value, terminal bool) (terminalConfig, error) {
 	config := terminalConfig{
 		URL:               stringProperty(value, "url"),
 		OwnerAccountID:    stringProperty(value, "owner_account_id"),
@@ -297,7 +308,7 @@ func parseTerminalConfig(value js.Value) (terminalConfig, error) {
 	for index := 0; index < protocolValues.Get("length").Int(); index++ {
 		config.Subprotocols = append(config.Subprotocols, protocolValues.Index(index).String())
 	}
-	if config.Role != "owner" && config.Role != "viewer" && config.Role != "interactive" {
+	if terminal && config.Role != "owner" && config.Role != "viewer" && config.Role != "interactive" {
 		return terminalConfig{}, errors.New("invalid browser terminal role")
 	}
 	if len(config.RootPublicKey) == 0 || len(config.RootFingerprint) != 64 || config.RootKeyID == "" {
@@ -315,7 +326,11 @@ func parseTerminalConfig(value js.Value) (terminalConfig, error) {
 	if err != nil || parsedURL.Host == "" || parsedURL.User != nil || parsedURL.Fragment != "" || parsedURL.RawQuery != "" || parsedURL.Path == "" || parsedURL.Scheme != "wss" {
 		return terminalConfig{}, errors.New("invalid browser stream URL")
 	}
-	if len(config.Subprotocols) != 2 || config.Subprotocols[0] != websocketSubprotocol || !strings.HasPrefix(config.Subprotocols[1], "pb-ticket.") || len(config.Subprotocols[1]) > 128 {
+	expectedProtocol := websocketSubprotocol
+	if !terminal {
+		expectedProtocol = "paperboat.browser-config-compare.e2ee.v1"
+	}
+	if len(config.Subprotocols) != 2 || config.Subprotocols[0] != expectedProtocol || !strings.HasPrefix(config.Subprotocols[1], "pb-ticket.") || len(config.Subprotocols[1]) > 128 {
 		return terminalConfig{}, errors.New("invalid browser stream subprotocols")
 	}
 	ticket := strings.TrimPrefix(config.Subprotocols[1], "pb-ticket.")
@@ -323,7 +338,7 @@ func parseTerminalConfig(value js.Value) (terminalConfig, error) {
 	if err != nil || len(ticketBytes) != 32 || base64.RawURLEncoding.EncodeToString(ticketBytes) != ticket {
 		return terminalConfig{}, errors.New("invalid browser stream ticket")
 	}
-	if config.OwnerAccountID == "" || config.MachineID == "" || config.TerminalSessionID == "" {
+	if config.OwnerAccountID == "" || config.MachineID == "" || terminal && config.TerminalSessionID == "" {
 		return terminalConfig{}, errors.New("missing terminal identity")
 	}
 	return config, nil
@@ -349,19 +364,10 @@ func (connection *browserTerminal) run() {
 	}
 }
 
-type terminalConnectError struct {
-	state   string
-	code    string
-	message string
-	details map[string]any
-}
-
-func (e *terminalConnectError) Error() string { return e.message }
-
 func (connection *browserTerminal) connectAndServe() error {
 	ws, err := newBrowserWSConn(connection.config.URL, connection.config.Subprotocols)
 	if err != nil {
-		return &terminalConnectError{state: "transport-error", code: "connection_failed", message: "The encrypted terminal connection could not be opened."}
+		return &terminalConnectError{state: "transport-error", code: "connection_failed", message: "The encrypted terminal connection could not be opened.", cause: err}
 	}
 	connection.mu.Lock()
 	connection.websocket = ws
@@ -369,23 +375,23 @@ func (connection *browserTerminal) connectAndServe() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := ws.waitOpen(ctx); err != nil {
-		return &terminalConnectError{state: "transport-error", code: "connection_failed", message: "The encrypted terminal connection could not be opened."}
+		return &terminalConnectError{state: "transport-error", code: "connection_failed", message: "The encrypted terminal connection could not be opened.", cause: err}
 	}
 	identityMessage, err := ws.readInitialMessage(ctx)
 	if err != nil || !identityMessage.binary {
-		return &terminalConnectError{state: "transport-error", code: "machine_identity_unverified", message: "The machine did not provide a valid signed identity."}
+		return &terminalConnectError{state: "transport-error", code: "machine_identity_unverified", message: "The machine did not provide a valid signed identity.", cause: err}
 	}
 	rootBytes, _ := base64.RawURLEncoding.DecodeString(connection.config.RootPublicKey)
 	peer, err := verifyIdentityEnvelope(identityMessage.data, ed25519.PublicKey(rootBytes), connection.config.RootKeyID, connection.config.OwnerAccountID, connection.config.MachineID, time.Now())
 	if err != nil {
-		return &terminalConnectError{state: "denied", code: "machine_identity_unverified", message: "The machine key did not match the trusted owner key and expected machine."}
+		return &terminalConnectError{state: "denied", code: "machine_identity_unverified", message: "The machine key did not match the trusted owner key and expected machine.", cause: err}
 	}
 	if ws.socket.Get("protocol").String() != websocketSubprotocol {
 		return &terminalConnectError{state: "transport-error", code: "subprotocol_mismatch", message: "The browser terminal transport did not select its encrypted protocol."}
 	}
 	clientTLS := tls.Client(ws, tlsClientConfig(connection.identity, peer, time.Now))
 	if err := clientTLS.HandshakeContext(ctx); err != nil {
-		return &terminalConnectError{state: "denied", code: "machine_identity_unverified", message: "The machine did not prove the key in its signed identity."}
+		return &terminalConnectError{state: "denied", code: "machine_identity_unverified", message: "The machine did not prove the key in its signed identity.", cause: err}
 	}
 	connection.mu.Lock()
 	connection.tls = clientTLS
@@ -396,17 +402,28 @@ func (connection *browserTerminal) connectAndServe() error {
 		"root_key_id":      connection.config.RootKeyID,
 	})
 	if err := connection.sendHello(clientTLS); err != nil {
-		return &terminalConnectError{state: "transport-error", code: "protocol_error", message: "The machine rejected the encrypted terminal handshake."}
+		return &terminalConnectError{state: "transport-error", code: "protocol_error", message: "The machine rejected the encrypted terminal handshake.", cause: err}
 	}
 	welcome, err := readStructuredFrame(clientTLS)
 	if err != nil || welcome.Type != "welcome" || welcome.Version != protocol.ProtocolVersion {
-		return &terminalConnectError{state: "transport-error", code: "protocol_error", message: "The machine rejected the encrypted terminal handshake."}
+		return &terminalConnectError{state: "transport-error", code: "protocol_error", message: "The machine rejected the encrypted terminal handshake.", cause: err}
 	}
-	requestID, err := randomID("req_browser_")
+	var negotiation struct {
+		Capabilities []string `json:"capabilities"`
+	}
+	if json.Unmarshal(welcome.Payload, &negotiation) != nil {
+		return errors.New("invalid capabilities")
+	}
+	for _, capability := range negotiation.Capabilities {
+		if capability == "file-transfer.v1" {
+			connection.filesAvailable = true
+		}
+	}
+	requestID, err := randomID("request")
 	if err != nil {
 		return err
 	}
-	operationID, err := randomID("op_browser_")
+	operationID, err := randomID("operation")
 	if err != nil {
 		return err
 	}
@@ -416,11 +433,11 @@ func (connection *browserTerminal) connectAndServe() error {
 	}
 	attach := protocol.Frame{Type: "request", RequestID: requestID, Version: protocol.ProtocolVersion, OperationID: operationID, Capability: "terminal.v1", DeadlineMS: 10000, Payload: attachPayload}
 	if err := writeStructuredFrame(clientTLS, attach); err != nil {
-		return &terminalConnectError{state: "transport-error", code: "connection_failed", message: "The terminal attachment could not be requested."}
+		return &terminalConnectError{state: "transport-error", code: "connection_failed", message: "The terminal attachment could not be requested.", cause: err}
 	}
 	response, err := readStructuredFrame(clientTLS)
 	if err != nil {
-		return &terminalConnectError{state: "transport-error", code: "connection_failed", message: "The terminal attachment response could not be read."}
+		return &terminalConnectError{state: "transport-error", code: "connection_failed", message: "The terminal attachment response could not be read.", cause: err}
 	}
 	if response.Type == "error" {
 		var serverError struct {
@@ -446,14 +463,14 @@ func (connection *browserTerminal) connectAndServe() error {
 		if serverError.Code == "terminal_closed" || serverError.Code == "closed" {
 			return &terminalConnectError{state: "closed", code: serverError.Code, message: "This terminal has closed."}
 		}
-		return &terminalConnectError{state: "transport-error", code: serverError.Code, message: "The machine could not attach this terminal."}
+		return &terminalConnectError{state: "transport-error", code: "protocol_error", message: "The machine could not attach this terminal."}
 	}
 	if response.Type != "response" || response.RequestID != requestID {
 		return &terminalConnectError{state: "transport-error", code: "invalid_attach_response", message: "The machine returned an invalid terminal attachment."}
 	}
 	attachState, err := parseAttachResponse(response.Payload)
 	if err != nil {
-		return &terminalConnectError{state: "transport-error", code: "invalid_attach_response", message: "The machine returned an invalid terminal attachment."}
+		return &terminalConnectError{state: "transport-error", code: "invalid_attach_response", message: "The machine returned an invalid terminal attachment.", cause: err}
 	}
 	connection.mu.Lock()
 	connection.streamID = attachState.StreamID
@@ -464,9 +481,10 @@ func (connection *browserTerminal) connectAndServe() error {
 	connection.mu.Unlock()
 	checkpoint, checkpointSequence, err := readScreenCheckpoint(clientTLS, attachState.StreamID)
 	if err != nil {
-		return &terminalConnectError{state: "transport-error", code: "invalid_checkpoint", message: "The machine could not restore the terminal screen."}
+		return &terminalConnectError{state: "transport-error", code: "invalid_checkpoint", message: "The machine could not restore the terminal screen.", cause: err}
 	}
 	connection.keyEvents = make(chan browserbroadcast.Epoch, 4)
+	go connection.writeLoop(clientTLS, ws)
 	connection.emit("attached", map[string]any{
 		"role":              connection.config.Role,
 		"stream_id":         attachState.StreamID,
@@ -514,11 +532,11 @@ func readScreenCheckpoint(stream io.Reader, streamID uint32) ([]byte, uint64, er
 }
 
 func (connection *browserTerminal) sendHello(writer io.Writer) error {
-	requestID, err := randomID("req_browser_")
+	requestID, err := randomID("request")
 	if err != nil {
 		return err
 	}
-	payload := json.RawMessage(`{"min_version":"1.0","max_version":"1.0","capabilities":["terminal.v1","health.v1"]}`)
+	payload := json.RawMessage(`{"min_version":"1.0","max_version":"1.0","capabilities":["terminal.v1","health.v1","file-transfer.v1"]}`)
 	return writeStructuredFrame(writer, protocol.Frame{Type: "hello", RequestID: requestID, Version: protocol.ProtocolVersion, Payload: payload})
 }
 
@@ -583,14 +601,14 @@ func (connection *browserTerminal) readTerminalStream(stream io.Reader) error {
 		kind, payload, err := readApplicationFrame(stream)
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
-				return &terminalConnectError{state: "reconnecting", code: "connection_lost", message: "The terminal connection was interrupted. Reconnect to resume."}
+				return &terminalConnectError{state: "reconnecting", code: "connection_lost", message: "The terminal connection was interrupted. Reconnect to resume.", cause: err}
 			}
-			return &terminalConnectError{state: "reconnecting", code: "connection_lost", message: "The terminal connection was interrupted. Reconnect to resume."}
+			return &terminalConnectError{state: "reconnecting", code: "connection_lost", message: "The terminal connection was interrupted. Reconnect to resume.", cause: err}
 		}
 		if kind == appKindBinary {
 			frame, decodeErr := protocol.DecodeTerminalOutput(payload)
 			if decodeErr != nil {
-				return &terminalConnectError{state: "transport-error", code: "invalid_output", message: "The machine sent invalid terminal output."}
+				return &terminalConnectError{state: "transport-error", code: "invalid_output", message: "The machine sent invalid terminal output.", cause: decodeErr}
 			}
 			connection.mu.Lock()
 			streamID := connection.streamID
@@ -600,7 +618,7 @@ func (connection *browserTerminal) readTerminalStream(stream io.Reader) error {
 			}
 			if frame.Channel == protocol.TerminalBroadcastKey {
 				if len(frame.Data) != 49 || frame.Data[0] != 1 {
-					return &terminalConnectError{state: "transport-error", code: "invalid_output_key", message: "The device sent an invalid output key."}
+					return &terminalConnectError{state: "transport-error", code: "invalid_output_key", message: "The machine sent an invalid output key."}
 				}
 				var epoch browserbroadcast.Epoch
 				copy(epoch.ID[:], frame.Data[1:17])
@@ -624,6 +642,9 @@ func (connection *browserTerminal) readTerminalStream(stream io.Reader) error {
 		frame, decodeErr := decodeStructuredFrame(payload)
 		if decodeErr != nil {
 			return &terminalConnectError{state: "transport-error", code: "invalid_frame", message: "The machine sent an invalid terminal frame."}
+		}
+		if connection.deliverFileResponse(frame) {
+			continue
 		}
 		connection.mu.Lock()
 		cursorResponse := frame.RequestID != "" && frame.RequestID == connection.cursorRequestID
@@ -657,7 +678,7 @@ func (connection *browserTerminal) readTerminalStream(stream io.Reader) error {
 			if serverError.Code == "not_found_or_forbidden" || serverError.Code == "stale_generation" {
 				return &terminalConnectError{state: "denied", code: serverError.Code, message: "Terminal access was revoked. Ask its owner to restore access."}
 			}
-			return &terminalConnectError{state: "transport-error", code: serverError.Code, message: "The machine ended the terminal connection."}
+			return &terminalConnectError{state: "transport-error", code: "protocol_error", message: "The machine ended the terminal connection."}
 		}
 		if frame.Type == "event" {
 			var event struct {
@@ -678,13 +699,18 @@ func (connection *browserTerminal) readTerminalStream(stream io.Reader) error {
 }
 
 // readBroadcast consumes one ordered edge fanout feed. Output is accepted only
-// after the device sends its epoch key over the independently authenticated
-// inner TLS channel; every record must also carry the device's Ed25519 proof.
-func (connection *browserTerminal) readBroadcast(ws *browserWSConn, devicePublic ed25519.PublicKey, generation, checkpointSequence uint64) {
+// after the machine sends its epoch key over the independently authenticated
+// inner TLS channel; every record must also carry the machine's Ed25519 proof.
+func (connection *browserTerminal) readBroadcast(ws *browserWSConn, machinePublic ed25519.PublicKey, generation, checkpointSequence uint64) {
 	keys := make(map[[16]byte]browserbroadcast.Epoch)
 	indexes := make(map[[16]byte]uint64)
 	keyOrder := make([][16]byte, 0, 4)
 	pending := make([][]byte, 0, 16)
+	defer func() {
+		for _, record := range pending {
+			ws.broadcasts.release(record)
+		}
+	}()
 	cursor := checkpointSequence
 	process := func() error {
 		for len(pending) > 0 {
@@ -696,7 +722,7 @@ func (connection *browserTerminal) readBroadcast(ws *browserWSConn, devicePublic
 			if !ok {
 				return nil
 			}
-			record, err := browserbroadcast.Open(pending[0], epoch, devicePublic)
+			record, err := browserbroadcast.Open(pending[0], epoch, machinePublic)
 			if err != nil || record.SessionID != connection.config.TerminalSessionID || record.Generation != generation || record.Channel != protocol.TerminalStdout && record.Channel != protocol.TerminalStderr {
 				return browserbroadcast.ErrInvalidRecord
 			}
@@ -705,6 +731,7 @@ func (connection *browserTerminal) readBroadcast(ws *browserWSConn, devicePublic
 				return browserbroadcast.ErrInvalidRecord
 			}
 			indexes[hint] = record.Index
+			ws.broadcasts.release(pending[0])
 			pending[0] = nil
 			pending = pending[1:]
 			end := record.StartSequence + uint64(len(record.Data))
@@ -747,8 +774,9 @@ func (connection *browserTerminal) readBroadcast(ws *browserWSConn, devicePublic
 				delete(indexes, keyOrder[0])
 				keyOrder = keyOrder[1:]
 			}
-		case record := <-ws.broadcasts:
-			if len(pending) >= 256 {
+		case record := <-ws.broadcasts.items:
+			if len(pending) >= terminalBroadcastQueueDepth {
+				ws.broadcasts.release(record)
 				ws.fail(errors.New("terminal output is behind; reconnect for a fresh screen"))
 				return
 			}
@@ -802,19 +830,23 @@ func (connection *browserTerminal) sendInput(data []byte) error {
 	if connection.config.Role == "viewer" {
 		return errors.New("viewer input is disabled")
 	}
+	sequence := connection.inputSequence
+	item := terminalWrite{kind: appKindBinary}
 	for len(data) > 0 {
 		count := min(len(data), terminalInputLimit)
-		connection.inputSequence++
-		encoded, err := protocol.EncodeTerminalInput(protocol.TerminalInputFrame{StreamID: connection.streamID, Sequence: connection.inputSequence, Data: data[:count]}, nil)
+		sequence++
+		encoded, err := protocol.EncodeTerminalInput(protocol.TerminalInputFrame{StreamID: connection.streamID, Sequence: sequence, Data: data[:count]}, nil)
 		if err != nil {
-			connection.inputSequence--
 			return err
 		}
-		if err := writeApplicationFrame(connection.tls, appKindBinary, encoded); err != nil {
-			return err
-		}
+		item.payloads = append(item.payloads, encoded)
+		item.bytes += len(encoded) + 5
 		data = data[count:]
 	}
+	if err := connection.writes.enqueue(item); err != nil {
+		return err
+	}
+	connection.inputSequence = sequence
 	return nil
 }
 
@@ -827,13 +859,16 @@ func (connection *browserTerminal) sendResize(columns, rows uint16) error {
 	if !connection.attached || connection.tls == nil || connection.stopping.Load() {
 		return net.ErrClosed
 	}
-	connection.resizeSequence++
-	encoded, err := protocol.EncodeTerminalResize(protocol.TerminalResizeFrame{StreamID: connection.streamID, Columns: columns, Rows: rows, Sequence: connection.resizeSequence}, nil)
+	sequence := connection.resizeSequence + 1
+	encoded, err := protocol.EncodeTerminalResize(protocol.TerminalResizeFrame{StreamID: connection.streamID, Columns: columns, Rows: rows, Sequence: sequence}, nil)
 	if err != nil {
-		connection.resizeSequence--
 		return err
 	}
-	return writeApplicationFrame(connection.tls, appKindBinary, encoded)
+	if err := connection.writes.enqueue(terminalWrite{kind: appKindBinary, payloads: [][]byte{encoded}, bytes: len(encoded) + 5}); err != nil {
+		return err
+	}
+	connection.resizeSequence = sequence
+	return nil
 }
 
 func (connection *browserTerminal) sendAck(nextSequence uint64) error {
@@ -842,19 +877,91 @@ func (connection *browserTerminal) sendAck(nextSequence uint64) error {
 	if !connection.attached || connection.tls == nil || connection.stopping.Load() {
 		return net.ErrClosed
 	}
-	encoded, err := protocol.EncodeTerminalACK(protocol.TerminalACKFrame{StreamID: connection.streamID, NextSequence: nextSequence}, nil)
-	if err != nil {
-		return err
+	return connection.writes.ack(nextSequence)
+}
+
+// This writer preserves command order after attach; graceful detach is sent
+// during leave. Network operations never hold connection.mu or a JS callback.
+func (connection *browserTerminal) writeLoop(writer io.Writer, ws *browserWSConn) {
+	var timer *time.Timer
+	var timerC <-chan time.Time
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
+	defer connection.writes.close()
+	fail := func(err error) {
+		connection.mu.Lock()
+		requestID := connection.cursorRequestID
+		connection.cursorRequestID = ""
+		connection.attached = false
+		connection.mu.Unlock()
+		if requestID != "" {
+			connection.emit("cursor-error", map[string]any{"request_id": requestID})
+		}
+		ws.fail(err)
 	}
-	return writeApplicationFrame(connection.tls, appKindBinary, encoded)
+	for {
+		select {
+		case <-ws.done:
+			return
+		case item := <-connection.writes.items:
+			var err error
+			if !connection.stopping.Load() {
+				for _, payload := range item.payloads {
+					if err = writeApplicationFrame(writer, item.kind, payload); err != nil {
+						break
+					}
+				}
+			}
+			connection.writes.release(item)
+			if err != nil {
+				fail(err)
+				return
+			}
+			continue
+		case <-connection.writes.ackNotify:
+			if connection.writes.pendingACK() == 0 {
+				continue
+			}
+			if !connection.writes.urgentACK() {
+				if timerC == nil {
+					timer = time.NewTimer(5 * time.Millisecond)
+					timerC = timer.C
+				}
+				continue
+			}
+			if timer != nil {
+				timer.Stop()
+			}
+			timerC = nil
+		case <-timerC:
+			timerC = nil
+		}
+		if connection.stopping.Load() {
+			continue
+		}
+		if sequence := connection.writes.pendingACK(); sequence != 0 {
+			encoded, err := protocol.EncodeTerminalACK(protocol.TerminalACKFrame{StreamID: connection.streamID, NextSequence: sequence}, nil)
+			if err == nil {
+				err = writeApplicationFrame(writer, appKindBinary, encoded)
+			}
+			if err != nil {
+				fail(err)
+				return
+			}
+			connection.writes.sentACK(sequence)
+		}
+	}
 }
 
 func (connection *browserTerminal) sendCursor() (string, error) {
-	requestID, err := randomID("req_cursor_")
+	requestID, err := randomID("request")
 	if err != nil {
 		return "", err
 	}
-	operationID, err := randomID("op_cursor_")
+	operationID, err := randomID("operation")
 	if err != nil {
 		return "", err
 	}
@@ -869,7 +976,14 @@ func (connection *browserTerminal) sendCursor() (string, error) {
 	}
 	connection.cursorRequestID = requestID
 	frame := protocol.Frame{Type: "request", RequestID: requestID, Version: protocol.ProtocolVersion, OperationID: operationID, Capability: "terminal.v1", DeadlineMS: 10000, Payload: payload}
-	if err := writeStructuredFrame(connection.tls, frame); err != nil {
+	encoded, err := json.Marshal(frame)
+	if err == nil {
+		err = frame.Validate()
+	}
+	if err == nil {
+		err = connection.writes.enqueue(terminalWrite{kind: appKindStructured, payloads: [][]byte{encoded}, bytes: len(encoded) + 5})
+	}
+	if err != nil {
 		connection.cursorRequestID = ""
 		return "", err
 	}
@@ -887,7 +1001,7 @@ func (connection *browserTerminal) sendDetach() {
 	connection.attached = false
 	connection.mu.Unlock()
 	payload, _ := json.Marshal(map[string]string{"session_id": sessionID, "attachment_id": attachmentID})
-	requestID, err := randomID("req_browser_")
+	requestID, err := randomID("request")
 	if err != nil {
 		return
 	}
@@ -897,13 +1011,25 @@ func (connection *browserTerminal) sendDetach() {
 func (connection *browserTerminal) leave() {
 	connection.stopOnce.Do(func() {
 		connection.stopping.Store(true)
-		connection.sendDetach()
+		connection.closeFileRequests()
+		connection.mu.Lock()
+		websocket := connection.websocket
+		connection.mu.Unlock()
+		if websocket != nil {
+			_ = websocket.SetWriteDeadline(time.Now().Add(time.Second))
+		}
+		connection.writes.close()
 		connection.emit("state", map[string]any{"state": "left"})
-		connection.closeTransport()
+		go func() {
+			connection.sendDetach()
+			connection.closeTransport()
+		}()
 	})
 }
 
 func (connection *browserTerminal) cleanup() {
+	connection.closeFileRequests()
+	connection.writes.close()
 	connection.closeTransport()
 	zero(connection.identity.PrivateKey)
 	browserRuntime.Lock()
@@ -944,7 +1070,7 @@ func newBrowserWSConn(url string, protocols []string) (*browserWSConn, error) {
 	}
 	socket := constructor.New(url, protocolArray)
 	socket.Set("binaryType", "arraybuffer")
-	connection := &browserWSConn{socket: socket, messages: make(chan websocketMessage, websocketQueueDepth), broadcasts: make(chan []byte, 256), opened: make(chan struct{}), done: make(chan struct{}), failure: make(chan error, 1)}
+	connection := &browserWSConn{socket: socket, messages: make(chan websocketMessage, websocketQueueDepth), broadcasts: newTerminalReceiveQueue(), opened: make(chan struct{}), done: make(chan struct{}), failure: make(chan error, 1)}
 	connection.handlers = append(connection.handlers,
 		js.FuncOf(func(_ js.Value, _ []js.Value) any {
 			connection.openOnce.Do(func() { close(connection.opened) })
@@ -966,6 +1092,20 @@ func newBrowserWSConn(url string, protocols []string) (*browserWSConn, error) {
 				connection.fail(errors.New("WebSocket message size is invalid"))
 				return nil
 			}
+			// Check and reserve encrypted output before allocating/copying it.
+			if bytesValue.Index(0).Int() == 1 {
+				if length <= 1 || length-1 > browserbroadcast.MaxRecordBytes {
+					connection.fail(errors.New("terminal output record size is invalid"))
+					return nil
+				}
+				payload := bytesValue.Call("subarray", 1)
+				if err := connection.broadcasts.copyAndEnqueue(length-1, func(data []byte) bool {
+					return js.CopyBytesToGo(data, payload) == len(data)
+				}); err != nil {
+					connection.fail(err)
+				}
+				return nil
+			}
 			data := make([]byte, length)
 			if js.CopyBytesToGo(data, bytesValue) != length {
 				connection.fail(errors.New("WebSocket message could not be copied"))
@@ -981,16 +1121,6 @@ func newBrowserWSConn(url string, protocols []string) (*browserWSConn, error) {
 				case connection.messages <- websocketMessage{data: data[1:], binary: true}:
 				default:
 					connection.fail(errors.New("WebSocket receive queue is full"))
-				}
-			case 1:
-				if len(data) == 1 {
-					connection.fail(errors.New("empty output envelope"))
-					return nil
-				}
-				select {
-				case connection.broadcasts <- data[1:]:
-				default:
-					connection.fail(errors.New("terminal output receive queue is full"))
 				}
 			default:
 				connection.fail(errors.New("unknown terminal transport envelope"))
@@ -1125,6 +1255,10 @@ func (connection *browserWSConn) Write(data []byte) (written int, err error) {
 		deadline = time.Now().Add(websocketWriteWait)
 	}
 	for connection.socket.Get("readyState").Int() == 1 && connection.socket.Get("bufferedAmount").Int() > websocketWriteLimit {
+		// Leave can shorten an active write's wait before graceful detach.
+		if updated := connection.currentWriteDeadline(); !updated.IsZero() && updated.Before(deadline) {
+			deadline = updated
+		}
 		if !deadline.IsZero() && !time.Now().Before(deadline) {
 			return 0, timeoutError{}
 		}
@@ -1195,6 +1329,7 @@ func (connection *browserWSConn) fail(err error) {
 
 func (connection *browserWSConn) finish(err error) {
 	connection.doneOnce.Do(func() {
+		connection.broadcasts.close()
 		connection.mu.Lock()
 		connection.closeErr = err
 		connection.mu.Unlock()
@@ -1244,12 +1379,12 @@ func getConnection(id string) *browserTerminal {
 	return browserRuntime.connections[id]
 }
 
-func randomID(prefix string) (string, error) {
-	buffer := make([]byte, 16)
-	if _, err := rand.Read(buffer); err != nil {
+func randomID(noun string) (string, error) {
+	id, err := uuid.NewRandom()
+	if err != nil {
 		return "", err
 	}
-	return prefix + base64.RawURLEncoding.EncodeToString(buffer), nil
+	return noun + "_" + id.String(), nil
 }
 
 func stringProperty(value js.Value, name string) string {

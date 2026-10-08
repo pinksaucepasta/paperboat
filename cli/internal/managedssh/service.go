@@ -28,7 +28,8 @@ type AgentService struct {
 	err      error
 }
 
-func StartAgentService(parent context.Context, config AgentServiceConfig) (*AgentService, error) {
+func StartAgentService(parent context.Context, config AgentServiceConfig) (service *AgentService, resultErr error) {
+	defer func() { resultErr = managedSSHBoundary("component_start", resultErr) }()
 	if parent == nil || !filepath.IsAbs(config.RuntimeDirectory) || config.Signer == nil || config.MaxConnections <= 0 || config.IdleTimeout <= 0 {
 		return nil, ErrAgentDenied
 	}
@@ -66,7 +67,7 @@ func StartAgentService(parent context.Context, config AgentServiceConfig) (*Agen
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(parent)
-	service := &AgentService{socket: socket, cancel: cancel, done: make(chan error, 1), delegate: delegate}
+	service = &AgentService{socket: socket, cancel: cancel, done: make(chan error, 1), delegate: delegate}
 	go func() {
 		service.done <- (Server{Agent: aggregate, MaxConnections: config.MaxConnections, IdleTimeout: config.IdleTimeout}).Serve(ctx, listener)
 	}()
@@ -80,7 +81,8 @@ func (s *AgentService) Socket() string {
 	return s.socket
 }
 
-func (s *AgentService) Close() error {
+func (s *AgentService) Close() (resultErr error) {
+	defer func() { resultErr = managedSSHBoundary("component_shutdown", resultErr) }()
 	if s == nil {
 		return nil
 	}

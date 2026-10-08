@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -15,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
 )
@@ -101,9 +101,10 @@ type Manager struct {
 }
 
 type Execution struct {
-	manager *Manager
-	request Request
-	hash    [sha256.Size]byte
+	launchEnvironment []string
+	manager           *Manager
+	request           Request
+	hash              [sha256.Size]byte
 
 	mu              sync.Mutex
 	state           State
@@ -142,6 +143,17 @@ type process interface {
 	Wait(context.Context) (Result, error)
 	Terminate(context.Context, time.Duration) (Result, error)
 }
+
+type persistenceFailure struct{ cause error }
+
+func (*persistenceFailure) Error() string           { return "exec operation result persistence failed" }
+func (e *persistenceFailure) Unwrap() error         { return e.cause }
+func (*persistenceFailure) DiagnosticStage() string { return "lifecycle" }
+func (*persistenceFailure) DiagnosticCode() string  { return "exec_persistence_failed" }
+
+type commandExitFailure struct{}
+
+func (commandExitFailure) Error() string { return "user command exited unsuccessfully" }
 
 var environmentKey = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
@@ -191,7 +203,7 @@ func NewPersistent(ctx context.Context, config Config) (*Manager, error) {
 	return manager, nil
 }
 
-func (m *Manager) Start(ctx context.Context, request Request) (*Execution, bool, error) {
+func (m *Manager) Start(ctx context.Context, request Request) (ExecutionService, bool, error) {
 	if ctx == nil {
 		return nil, false, ErrInvalid
 	}
@@ -243,7 +255,7 @@ func (m *Manager) Start(ctx context.Context, request Request) (*Execution, bool,
 			return recovered, true, nil
 		}
 	}
-	execution := &Execution{manager: m, request: request, hash: hash, state: StateAuthorized, earliest: 1, next: 1, wake: make(chan struct{}), done: make(chan struct{}), streamSequences: make(map[string]uint64), readers: make(map[uint64]uint64)}
+	execution := &Execution{launchEnvironment: LaunchEnvironment(ctx), manager: m, request: request, hash: hash, state: StateAuthorized, earliest: 1, next: 1, wake: make(chan struct{}), done: make(chan struct{}), streamSequences: make(map[string]uint64), readers: make(map[uint64]uint64)}
 	m.operations[request.OperationID] = execution
 	m.active++
 	m.mu.Unlock()
@@ -251,7 +263,7 @@ func (m *Manager) Start(ctx context.Context, request Request) (*Execution, bool,
 	return execution, false, nil
 }
 
-func (m *Manager) Get(operationID string) (*Execution, error) {
+func (m *Manager) Get(operationID string) (ExecutionService, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	execution := m.operations[operationID]
@@ -379,7 +391,7 @@ func (e *Execution) Next(ctx context.Context, from uint64) (Event, error) {
 // OpenReader registers a live delivery cursor. Replay remains bounded when no
 // reader is attached; an attached reader pins unread events and backpressures
 // the child process instead of allowing ordinary live output to become a gap.
-func (e *Execution) OpenReader(from uint64) (*Reader, error) {
+func (e *Execution) OpenReader(from uint64) (ReaderService, error) {
 	if e == nil || from == 0 {
 		return nil, ErrInvalid
 	}
@@ -463,11 +475,19 @@ func (e *Execution) removeReader(id uint64) {
 }
 
 func (e *Execution) Write(data []byte) (int, error) {
+	return e.WriteContext(context.Background(), data)
+}
+func (e *Execution) WriteContext(ctx context.Context, data []byte) (int, error) {
 	e.mu.Lock()
 	process := e.process
 	e.mu.Unlock()
 	if process == nil {
 		return 0, ErrInvalid
+	}
+	if writer, ok := process.(interface {
+		WriteContext(context.Context, []byte) (int, error)
+	}); ok {
+		return writer.WriteContext(ctx, data)
 	}
 	return process.Write(data)
 }
@@ -516,7 +536,7 @@ func (e *Execution) Cancel(ctx context.Context) error {
 	}
 	result, err := process.Terminate(ctx, e.manager.config.CancelGrace)
 	if err == nil {
-		e.finish(StateCanceled, result, "exec_canceled")
+		e.finish(ctx, StateCanceled, result, "exec_canceled")
 	}
 	return err
 }
@@ -529,30 +549,62 @@ func (e *Execution) run(parent context.Context) {
 		ctx, cancel = context.WithTimeout(parent, e.request.Timeout)
 		defer cancel()
 	}
-	baseEnvironment := e.manager.config.BaseEnvironment
+	baseEnvironment := mergedEnvironmentLists(e.manager.config.BaseEnvironment, e.launchEnvironment)
 	if provider := e.manager.config.ManagedEnvironment; provider != nil {
 		managed, environmentErr := provider(ctx)
 		if environmentErr != nil || !validBaseEnvironment(managed) {
-			e.finish(StateFailed, Result{ExitedAt: e.manager.config.Clock()}, "environment_unavailable")
+			if ctx.Err() != nil || errors.Is(environmentErr, context.Canceled) {
+				code := "exec_canceled"
+				if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(environmentErr, context.DeadlineExceeded) {
+					code = "exec_timeout"
+				}
+				e.finish(parent, StateCanceled, Result{ExitedAt: e.manager.config.Clock()}, code)
+				return
+			}
+			failure := environmentErr
+			if failure == nil {
+				failure = ErrInvalid
+			}
+			reportExecutionFailure(parent, "command", "exec_operation_failed", failure)
+			e.finish(parent, StateFailed, Result{ExitedAt: e.manager.config.Clock()}, "environment_unavailable")
 			return
 		}
 		baseEnvironment = mergedEnvironmentLists(baseEnvironment, managed)
 	}
 	if !validBaseEnvironment(mergedEnvironment(baseEnvironment, e.request.Environment)) {
-		e.finish(StateFailed, Result{ExitedAt: e.manager.config.Clock()}, "environment_unavailable")
+		reportExecutionFailure(parent, "command", "exec_operation_failed", ErrInvalid)
+		e.finish(parent, StateFailed, Result{ExitedAt: e.manager.config.Clock()}, "environment_unavailable")
 		return
 	}
 	process, err := newProcess(processConfig{Request: e.request, WorkspaceRoot: e.manager.config.WorkspaceRoot, BaseEnvironment: baseEnvironment, ChunkBytes: e.manager.config.ChunkBytes, Output: e.output})
 	if err != nil {
-		e.finish(StateFailed, Result{ExitedAt: e.manager.config.Clock()}, "exec_start_failed")
+		reportExecutionFailure(parent, "command", "exec_operation_failed", err)
+		e.finish(parent, StateFailed, Result{ExitedAt: e.manager.config.Clock()}, "exec_start_failed")
 		return
 	}
 	if e.canceled() || ctx.Err() != nil {
-		e.finish(StateCanceled, Result{ExitedAt: e.manager.config.Clock()}, "exec_canceled")
+		code := "exec_canceled"
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			code = "exec_timeout"
+		}
+		e.finish(parent, StateCanceled, Result{ExitedAt: e.manager.config.Clock()}, code)
 		return
 	}
 	if err := process.Start(ctx); err != nil {
-		e.finish(StateFailed, Result{ExitedAt: e.manager.config.Clock()}, "exec_start_failed")
+		if e.canceled() || ctx.Err() != nil {
+			code := "exec_canceled"
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				code = "exec_timeout"
+			}
+			e.finish(parent, StateCanceled, Result{ExitedAt: e.manager.config.Clock()}, code)
+			return
+		}
+		if errors.Is(err, ErrInvalid) || errors.Is(err, pty.ErrInvalidCommand) {
+			reportExecutionAttempt(parent, "command", "exec_operation_failed", err)
+		} else {
+			reportExecutionFailure(parent, "command", "exec_operation_failed", err)
+		}
+		e.finish(parent, StateFailed, Result{ExitedAt: e.manager.config.Clock()}, "exec_start_failed")
 		return
 	}
 	e.mu.Lock()
@@ -564,9 +616,10 @@ func (e *Execution) run(parent context.Context) {
 		result, terminateErr := process.Terminate(cleanupCtx, e.manager.config.CancelGrace)
 		cleanupCancel()
 		if terminateErr != nil {
-			e.finish(StateFailed, Result{ExitedAt: e.manager.config.Clock()}, "exec_cancel_failed")
+			reportExecutionFailure(parent, "lifecycle", "exec_operation_failed", terminateErr)
+			e.finish(parent, StateFailed, Result{ExitedAt: e.manager.config.Clock()}, "exec_cancel_failed")
 		} else {
-			e.finish(StateCanceled, result, "exec_canceled")
+			e.finish(parent, StateCanceled, result, "exec_canceled")
 		}
 		return
 	}
@@ -584,6 +637,7 @@ func (e *Execution) run(parent context.Context) {
 		cleanupCancel()
 		if terminateErr != nil {
 			state, code = StateFailed, "exec_cancel_failed"
+			reportExecutionFailure(parent, "lifecycle", "exec_operation_failed", terminateErr)
 		} else {
 			state, code = StateCanceled, "exec_timeout"
 		}
@@ -591,10 +645,14 @@ func (e *Execution) run(parent context.Context) {
 		state, code = StateCanceled, "exec_canceled"
 	} else if err != nil {
 		state, code = StateFailed, "exec_wait_failed"
+		reportExecutionFailure(parent, "command", "exec_operation_failed", err)
 	} else if result.Signal != "" {
 		state = StateSignaled
 	}
-	e.finish(state, result, code)
+	if err == nil && result.Code != 0 {
+		reportExecutionAttempt(parent, "command", "exec_operation_failed", commandExitFailure{})
+	}
+	e.finish(parent, state, result, code)
 }
 
 func (e *Execution) output(stream string, data []byte) {
@@ -629,7 +687,7 @@ func (e *Execution) transition(state State, result *Result, code string) {
 	e.appendLocked(Event{State: state, Result: result, ErrorCode: code})
 }
 
-func (e *Execution) finish(state State, result Result, code string) {
+func (e *Execution) finish(ctx context.Context, state State, result Result, code string) {
 	e.doneOnce.Do(func() {
 		var persistenceErr error
 		if e.manager.config.Store != nil {
@@ -641,7 +699,8 @@ func (e *Execution) finish(state State, result Result, code string) {
 				persistenceErr = e.manager.config.Store.CompleteOperation(context.Background(), store.OperationResult{OperationID: persistencePrefix + e.request.OperationID, RequestHash: e.hash[:], State: "completed", Result: encoded, ErrorCode: code, CompletedAt: e.manager.config.Clock(), ExpiresAt: e.manager.config.Clock().Add(e.manager.config.Retention)})
 			}
 			if persistenceErr != nil {
-				log.Printf("exec operation persistence failed operation_id=%s: %v", e.request.OperationID, persistenceErr)
+				persistenceErr = &persistenceFailure{cause: persistenceErr}
+				errorreport.Current().CaptureFailure(ctx, "paperboatd", "exec", "lifecycle", "exec_persistence_failed", persistenceErr)
 				code = "persistence_failed"
 			}
 		}
@@ -655,6 +714,20 @@ func (e *Execution) finish(state State, result Result, code string) {
 		e.manager.order = append(e.manager.order, e.request.OperationID)
 		e.manager.mu.Unlock()
 	})
+}
+
+func reportExecutionFailure(ctx context.Context, stage, code string, err error) {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return
+	}
+	errorreport.Current().CaptureFailure(ctx, "paperboatd", "exec", stage, code, err)
+}
+
+func reportExecutionAttempt(ctx context.Context, stage, code string, err error) {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return
+	}
+	errorreport.Current().ObserveFailure(ctx, "paperboatd", "exec", stage, code, err)
 }
 
 func (m *Manager) load(ctx context.Context) error {
@@ -835,6 +908,26 @@ func mergedEnvironmentLists(base, overrides []string) []string {
 	result := make([]string, 0, len(keys))
 	for _, key := range keys {
 		result = append(result, key+"="+values[key])
+	}
+	return result
+}
+
+// Shutdown terminates explicit executions only when the native process owner
+// stops. Feature worker shutdown never calls this method.
+func (m *Manager) Shutdown(ctx context.Context) error {
+	m.mu.Lock()
+	executions := make([]*Execution, 0, len(m.operations))
+	for _, e := range m.operations {
+		executions = append(executions, e)
+	}
+	m.mu.Unlock()
+	var result error
+	for _, e := range executions {
+		result = errors.Join(result, e.Cancel(ctx))
+	}
+	for _, e := range executions {
+		_, err := e.Wait(ctx)
+		result = errors.Join(result, err)
 	}
 	return result
 }

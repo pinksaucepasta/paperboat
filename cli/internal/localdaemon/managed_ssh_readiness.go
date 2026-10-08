@@ -1,7 +1,10 @@
 package localdaemon
 
 import (
+	"context"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/supportref"
 )
 
 const managedSSHDoctorRecovery = "Run pb ssh doctor <machine>."
@@ -12,7 +15,10 @@ type managedSSHReadinessSource interface {
 	SetManagedSSHReadiness(ready bool, code string)
 }
 
-func reportManagedSSHStartup(source MachineSource, recorder *diagnostics.Recorder, startupErr error) {
+func reportManagedSSHStartup(ctx context.Context, source MachineSource, recorder *diagnostics.Recorder, startupErr error) {
+	if startupErr != nil && !errorreport.HTTPAttemptObserved(startupErr) && errorreport.ProjectFault(ctx, "paperboatd", "ssh", "command", "managed_ssh_failed", startupErr).Outcome != "canceled" {
+		errorreport.Current().ObserveFailure(ctx, "paperboatd", "ssh", "command", "managed_ssh_failed", startupErr)
+	}
 	readiness, ok := source.(managedSSHReadinessSource)
 	if !ok {
 		return
@@ -25,7 +31,7 @@ func reportManagedSSHStartup(source MachineSource, recorder *diagnostics.Recorde
 	readiness.SetManagedSSHReadiness(false, code)
 	// Do not record startupErr: it can contain operating-system or credential
 	// details. The typed code and recovery action are sufficient for support.
-	_ = recorder.Record("ssh", "managed_startup", "warning", map[string]string{
+	_ = recorder.RecordWithSupportReference("ssh", "managed_startup", "warning", supportref.FromContext(ctx), map[string]string{
 		"outcome": "degraded",
 		"reason":  code,
 	})

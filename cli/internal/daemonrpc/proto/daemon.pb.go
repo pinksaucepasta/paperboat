@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.12
 // 	protoc        v3.21.12
-// source: internal/daemonrpc/proto/daemon.proto
+// source: daemon.proto
 
 package proto
 
@@ -29,7 +29,7 @@ type Empty struct {
 
 func (x *Empty) Reset() {
 	*x = Empty{}
-	mi := &file_internal_daemonrpc_proto_daemon_proto_msgTypes[0]
+	mi := &file_daemon_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -41,7 +41,7 @@ func (x *Empty) String() string {
 func (*Empty) ProtoMessage() {}
 
 func (x *Empty) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_daemonrpc_proto_daemon_proto_msgTypes[0]
+	mi := &file_daemon_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -54,7 +54,7 @@ func (x *Empty) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Empty.ProtoReflect.Descriptor instead.
 func (*Empty) Descriptor() ([]byte, []int) {
-	return file_internal_daemonrpc_proto_daemon_proto_rawDescGZIP(), []int{0}
+	return file_daemon_proto_rawDescGZIP(), []int{0}
 }
 
 type StatusResponse struct {
@@ -71,7 +71,7 @@ type StatusResponse struct {
 
 func (x *StatusResponse) Reset() {
 	*x = StatusResponse{}
-	mi := &file_internal_daemonrpc_proto_daemon_proto_msgTypes[1]
+	mi := &file_daemon_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -83,7 +83,7 @@ func (x *StatusResponse) String() string {
 func (*StatusResponse) ProtoMessage() {}
 
 func (x *StatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_daemonrpc_proto_daemon_proto_msgTypes[1]
+	mi := &file_daemon_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -96,7 +96,7 @@ func (x *StatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatusResponse.ProtoReflect.Descriptor instead.
 func (*StatusResponse) Descriptor() ([]byte, []int) {
-	return file_internal_daemonrpc_proto_daemon_proto_rawDescGZIP(), []int{1}
+	return file_daemon_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *StatusResponse) GetDaemonState() string {
@@ -159,7 +159,7 @@ type PeerStatus struct {
 
 func (x *PeerStatus) Reset() {
 	*x = PeerStatus{}
-	mi := &file_internal_daemonrpc_proto_daemon_proto_msgTypes[2]
+	mi := &file_daemon_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -171,7 +171,7 @@ func (x *PeerStatus) String() string {
 func (*PeerStatus) ProtoMessage() {}
 
 func (x *PeerStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_daemonrpc_proto_daemon_proto_msgTypes[2]
+	mi := &file_daemon_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -184,7 +184,7 @@ func (x *PeerStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeerStatus.ProtoReflect.Descriptor instead.
 func (*PeerStatus) Descriptor() ([]byte, []int) {
-	return file_internal_daemonrpc_proto_daemon_proto_rawDescGZIP(), []int{2}
+	return file_daemon_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *PeerStatus) GetPeerId() string {
@@ -269,7 +269,7 @@ type DERPStatus struct {
 
 func (x *DERPStatus) Reset() {
 	*x = DERPStatus{}
-	mi := &file_internal_daemonrpc_proto_daemon_proto_msgTypes[3]
+	mi := &file_daemon_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -281,7 +281,7 @@ func (x *DERPStatus) String() string {
 func (*DERPStatus) ProtoMessage() {}
 
 func (x *DERPStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_daemonrpc_proto_daemon_proto_msgTypes[3]
+	mi := &file_daemon_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -294,7 +294,7 @@ func (x *DERPStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DERPStatus.ProtoReflect.Descriptor instead.
 func (*DERPStatus) Descriptor() ([]byte, []int) {
-	return file_internal_daemonrpc_proto_daemon_proto_rawDescGZIP(), []int{3}
+	return file_daemon_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *DERPStatus) GetRegionCode() string {
@@ -325,28 +325,28 @@ func (x *DERPStatus) GetLatencyMs() int64 {
 	return 0
 }
 
-type DeviceQuery struct {
+type MachineQuery struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Query         string                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *DeviceQuery) Reset() {
-	*x = DeviceQuery{}
-	mi := &file_internal_daemonrpc_proto_daemon_proto_msgTypes[4]
+func (x *MachineQuery) Reset() {
+	*x = MachineQuery{}
+	mi := &file_daemon_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *DeviceQuery) String() string {
+func (x *MachineQuery) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*DeviceQuery) ProtoMessage() {}
+func (*MachineQuery) ProtoMessage() {}
 
-func (x *DeviceQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_daemonrpc_proto_daemon_proto_msgTypes[4]
+func (x *MachineQuery) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -357,21 +357,21 @@ func (x *DeviceQuery) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DeviceQuery.ProtoReflect.Descriptor instead.
-func (*DeviceQuery) Descriptor() ([]byte, []int) {
-	return file_internal_daemonrpc_proto_daemon_proto_rawDescGZIP(), []int{4}
+// Deprecated: Use MachineQuery.ProtoReflect.Descriptor instead.
+func (*MachineQuery) Descriptor() ([]byte, []int) {
+	return file_daemon_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *DeviceQuery) GetQuery() string {
+func (x *MachineQuery) GetQuery() string {
 	if x != nil {
 		return x.Query
 	}
 	return ""
 }
 
-type DeviceAddress struct {
+type MachineAddress struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
-	DeviceId       string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	MachineId      string                 `protobuf:"bytes,1,opt,name=machine_id,json=machineId,proto3" json:"machine_id,omitempty"`
 	Alias          string                 `protobuf:"bytes,2,opt,name=alias,proto3" json:"alias,omitempty"`
 	AssignedIp     string                 `protobuf:"bytes,3,opt,name=assigned_ip,json=assignedIp,proto3" json:"assigned_ip,omitempty"`
 	ForwardedPorts []int32                `protobuf:"varint,4,rep,packed,name=forwarded_ports,json=forwardedPorts,proto3" json:"forwarded_ports,omitempty"`
@@ -381,21 +381,21 @@ type DeviceAddress struct {
 	sizeCache      protoimpl.SizeCache
 }
 
-func (x *DeviceAddress) Reset() {
-	*x = DeviceAddress{}
-	mi := &file_internal_daemonrpc_proto_daemon_proto_msgTypes[5]
+func (x *MachineAddress) Reset() {
+	*x = MachineAddress{}
+	mi := &file_daemon_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *DeviceAddress) String() string {
+func (x *MachineAddress) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*DeviceAddress) ProtoMessage() {}
+func (*MachineAddress) ProtoMessage() {}
 
-func (x *DeviceAddress) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_daemonrpc_proto_daemon_proto_msgTypes[5]
+func (x *MachineAddress) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -406,76 +406,76 @@ func (x *DeviceAddress) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DeviceAddress.ProtoReflect.Descriptor instead.
-func (*DeviceAddress) Descriptor() ([]byte, []int) {
-	return file_internal_daemonrpc_proto_daemon_proto_rawDescGZIP(), []int{5}
+// Deprecated: Use MachineAddress.ProtoReflect.Descriptor instead.
+func (*MachineAddress) Descriptor() ([]byte, []int) {
+	return file_daemon_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *DeviceAddress) GetDeviceId() string {
+func (x *MachineAddress) GetMachineId() string {
 	if x != nil {
-		return x.DeviceId
+		return x.MachineId
 	}
 	return ""
 }
 
-func (x *DeviceAddress) GetAlias() string {
+func (x *MachineAddress) GetAlias() string {
 	if x != nil {
 		return x.Alias
 	}
 	return ""
 }
 
-func (x *DeviceAddress) GetAssignedIp() string {
+func (x *MachineAddress) GetAssignedIp() string {
 	if x != nil {
 		return x.AssignedIp
 	}
 	return ""
 }
 
-func (x *DeviceAddress) GetForwardedPorts() []int32 {
+func (x *MachineAddress) GetForwardedPorts() []int32 {
 	if x != nil {
 		return x.ForwardedPorts
 	}
 	return nil
 }
 
-func (x *DeviceAddress) GetTags() []string {
+func (x *MachineAddress) GetTags() []string {
 	if x != nil {
 		return x.Tags
 	}
 	return nil
 }
 
-func (x *DeviceAddress) GetBrowserUrls() map[int32]string {
+func (x *MachineAddress) GetBrowserUrls() map[int32]string {
 	if x != nil {
 		return x.BrowserUrls
 	}
 	return nil
 }
 
-type SetDeviceTagsRequest struct {
+type SetMachineTagsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	MachineId     string                 `protobuf:"bytes,1,opt,name=machine_id,json=machineId,proto3" json:"machine_id,omitempty"`
 	Tags          []string               `protobuf:"bytes,2,rep,name=tags,proto3" json:"tags,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SetDeviceTagsRequest) Reset() {
-	*x = SetDeviceTagsRequest{}
-	mi := &file_internal_daemonrpc_proto_daemon_proto_msgTypes[6]
+func (x *SetMachineTagsRequest) Reset() {
+	*x = SetMachineTagsRequest{}
+	mi := &file_daemon_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SetDeviceTagsRequest) String() string {
+func (x *SetMachineTagsRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SetDeviceTagsRequest) ProtoMessage() {}
+func (*SetMachineTagsRequest) ProtoMessage() {}
 
-func (x *SetDeviceTagsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_daemonrpc_proto_daemon_proto_msgTypes[6]
+func (x *SetMachineTagsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -486,49 +486,49 @@ func (x *SetDeviceTagsRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SetDeviceTagsRequest.ProtoReflect.Descriptor instead.
-func (*SetDeviceTagsRequest) Descriptor() ([]byte, []int) {
-	return file_internal_daemonrpc_proto_daemon_proto_rawDescGZIP(), []int{6}
+// Deprecated: Use SetMachineTagsRequest.ProtoReflect.Descriptor instead.
+func (*SetMachineTagsRequest) Descriptor() ([]byte, []int) {
+	return file_daemon_proto_rawDescGZIP(), []int{6}
 }
 
-func (x *SetDeviceTagsRequest) GetDeviceId() string {
+func (x *SetMachineTagsRequest) GetMachineId() string {
 	if x != nil {
-		return x.DeviceId
+		return x.MachineId
 	}
 	return ""
 }
 
-func (x *SetDeviceTagsRequest) GetTags() []string {
+func (x *SetMachineTagsRequest) GetTags() []string {
 	if x != nil {
 		return x.Tags
 	}
 	return nil
 }
 
-type SetDeviceTagsResponse struct {
+type SetMachineTagsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	MachineId     string                 `protobuf:"bytes,1,opt,name=machine_id,json=machineId,proto3" json:"machine_id,omitempty"`
 	Tags          []string               `protobuf:"bytes,2,rep,name=tags,proto3" json:"tags,omitempty"`
 	Success       bool                   `protobuf:"varint,3,opt,name=success,proto3" json:"success,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SetDeviceTagsResponse) Reset() {
-	*x = SetDeviceTagsResponse{}
-	mi := &file_internal_daemonrpc_proto_daemon_proto_msgTypes[7]
+func (x *SetMachineTagsResponse) Reset() {
+	*x = SetMachineTagsResponse{}
+	mi := &file_daemon_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SetDeviceTagsResponse) String() string {
+func (x *SetMachineTagsResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SetDeviceTagsResponse) ProtoMessage() {}
+func (*SetMachineTagsResponse) ProtoMessage() {}
 
-func (x *SetDeviceTagsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_daemonrpc_proto_daemon_proto_msgTypes[7]
+func (x *SetMachineTagsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_daemon_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -539,26 +539,26 @@ func (x *SetDeviceTagsResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SetDeviceTagsResponse.ProtoReflect.Descriptor instead.
-func (*SetDeviceTagsResponse) Descriptor() ([]byte, []int) {
-	return file_internal_daemonrpc_proto_daemon_proto_rawDescGZIP(), []int{7}
+// Deprecated: Use SetMachineTagsResponse.ProtoReflect.Descriptor instead.
+func (*SetMachineTagsResponse) Descriptor() ([]byte, []int) {
+	return file_daemon_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *SetDeviceTagsResponse) GetDeviceId() string {
+func (x *SetMachineTagsResponse) GetMachineId() string {
 	if x != nil {
-		return x.DeviceId
+		return x.MachineId
 	}
 	return ""
 }
 
-func (x *SetDeviceTagsResponse) GetTags() []string {
+func (x *SetMachineTagsResponse) GetTags() []string {
 	if x != nil {
 		return x.Tags
 	}
 	return nil
 }
 
-func (x *SetDeviceTagsResponse) GetSuccess() bool {
+func (x *SetMachineTagsResponse) GetSuccess() bool {
 	if x != nil {
 		return x.Success
 	}
@@ -567,7 +567,7 @@ func (x *SetDeviceTagsResponse) GetSuccess() bool {
 
 type ApprovePeerRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	MachineId     string                 `protobuf:"bytes,1,opt,name=machine_id,json=machineId,proto3" json:"machine_id,omitempty"`
 	Approved      bool                   `protobuf:"varint,2,opt,name=approved,proto3" json:"approved,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -575,7 +575,7 @@ type ApprovePeerRequest struct {
 
 func (x *ApprovePeerRequest) Reset() {
 	*x = ApprovePeerRequest{}
-	mi := &file_internal_daemonrpc_proto_daemon_proto_msgTypes[8]
+	mi := &file_daemon_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -587,7 +587,7 @@ func (x *ApprovePeerRequest) String() string {
 func (*ApprovePeerRequest) ProtoMessage() {}
 
 func (x *ApprovePeerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_daemonrpc_proto_daemon_proto_msgTypes[8]
+	mi := &file_daemon_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -600,12 +600,12 @@ func (x *ApprovePeerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApprovePeerRequest.ProtoReflect.Descriptor instead.
 func (*ApprovePeerRequest) Descriptor() ([]byte, []int) {
-	return file_internal_daemonrpc_proto_daemon_proto_rawDescGZIP(), []int{8}
+	return file_daemon_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *ApprovePeerRequest) GetDeviceId() string {
+func (x *ApprovePeerRequest) GetMachineId() string {
 	if x != nil {
-		return x.DeviceId
+		return x.MachineId
 	}
 	return ""
 }
@@ -619,7 +619,7 @@ func (x *ApprovePeerRequest) GetApproved() bool {
 
 type ApprovePeerResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	MachineId     string                 `protobuf:"bytes,1,opt,name=machine_id,json=machineId,proto3" json:"machine_id,omitempty"`
 	Approved      bool                   `protobuf:"varint,2,opt,name=approved,proto3" json:"approved,omitempty"`
 	Success       bool                   `protobuf:"varint,3,opt,name=success,proto3" json:"success,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -628,7 +628,7 @@ type ApprovePeerResponse struct {
 
 func (x *ApprovePeerResponse) Reset() {
 	*x = ApprovePeerResponse{}
-	mi := &file_internal_daemonrpc_proto_daemon_proto_msgTypes[9]
+	mi := &file_daemon_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -640,7 +640,7 @@ func (x *ApprovePeerResponse) String() string {
 func (*ApprovePeerResponse) ProtoMessage() {}
 
 func (x *ApprovePeerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_daemonrpc_proto_daemon_proto_msgTypes[9]
+	mi := &file_daemon_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -653,12 +653,12 @@ func (x *ApprovePeerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApprovePeerResponse.ProtoReflect.Descriptor instead.
 func (*ApprovePeerResponse) Descriptor() ([]byte, []int) {
-	return file_internal_daemonrpc_proto_daemon_proto_rawDescGZIP(), []int{9}
+	return file_daemon_proto_rawDescGZIP(), []int{9}
 }
 
-func (x *ApprovePeerResponse) GetDeviceId() string {
+func (x *ApprovePeerResponse) GetMachineId() string {
 	if x != nil {
-		return x.DeviceId
+		return x.MachineId
 	}
 	return ""
 }
@@ -677,11 +677,11 @@ func (x *ApprovePeerResponse) GetSuccess() bool {
 	return false
 }
 
-var File_internal_daemonrpc_proto_daemon_proto protoreflect.FileDescriptor
+var File_daemon_proto protoreflect.FileDescriptor
 
-const file_internal_daemonrpc_proto_daemon_proto_rawDesc = "" +
+const file_daemon_proto_rawDesc = "" +
 	"\n" +
-	"%internal/daemonrpc/proto/daemon.proto\x12\tdaemonrpc\"\a\n" +
+	"\fdaemon.proto\x12\tdaemonrpc\"\a\n" +
 	"\x05Empty\"\x89\x02\n" +
 	"\x0eStatusResponse\x12!\n" +
 	"\fdaemon_state\x18\x01 \x01(\tR\vdaemonState\x12%\n" +
@@ -719,79 +719,84 @@ const file_internal_daemonrpc_proto_daemon_proto_rawDesc = "" +
 	"regionName\x12\x1c\n" +
 	"\treachable\x18\x03 \x01(\bR\treachable\x12\x1d\n" +
 	"\n" +
-	"latency_ms\x18\x04 \x01(\x03R\tlatencyMs\"#\n" +
-	"\vDeviceQuery\x12\x14\n" +
-	"\x05query\x18\x01 \x01(\tR\x05query\"\xae\x02\n" +
-	"\rDeviceAddress\x12\x1b\n" +
-	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x14\n" +
+	"latency_ms\x18\x04 \x01(\x03R\tlatencyMs\"$\n" +
+	"\fMachineQuery\x12\x14\n" +
+	"\x05query\x18\x01 \x01(\tR\x05query\"\xb2\x02\n" +
+	"\x0eMachineAddress\x12\x1d\n" +
+	"\n" +
+	"machine_id\x18\x01 \x01(\tR\tmachineId\x12\x14\n" +
 	"\x05alias\x18\x02 \x01(\tR\x05alias\x12\x1f\n" +
 	"\vassigned_ip\x18\x03 \x01(\tR\n" +
 	"assignedIp\x12'\n" +
 	"\x0fforwarded_ports\x18\x04 \x03(\x05R\x0eforwardedPorts\x12\x12\n" +
-	"\x04tags\x18\x05 \x03(\tR\x04tags\x12L\n" +
-	"\fbrowser_urls\x18\x06 \x03(\v2).daemonrpc.DeviceAddress.BrowserUrlsEntryR\vbrowserUrls\x1a>\n" +
+	"\x04tags\x18\x05 \x03(\tR\x04tags\x12M\n" +
+	"\fbrowser_urls\x18\x06 \x03(\v2*.daemonrpc.MachineAddress.BrowserUrlsEntryR\vbrowserUrls\x1a>\n" +
 	"\x10BrowserUrlsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\x05R\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"G\n" +
-	"\x14SetDeviceTagsRequest\x12\x1b\n" +
-	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x12\n" +
-	"\x04tags\x18\x02 \x03(\tR\x04tags\"b\n" +
-	"\x15SetDeviceTagsResponse\x12\x1b\n" +
-	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x12\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"J\n" +
+	"\x15SetMachineTagsRequest\x12\x1d\n" +
+	"\n" +
+	"machine_id\x18\x01 \x01(\tR\tmachineId\x12\x12\n" +
+	"\x04tags\x18\x02 \x03(\tR\x04tags\"e\n" +
+	"\x16SetMachineTagsResponse\x12\x1d\n" +
+	"\n" +
+	"machine_id\x18\x01 \x01(\tR\tmachineId\x12\x12\n" +
 	"\x04tags\x18\x02 \x03(\tR\x04tags\x12\x18\n" +
-	"\asuccess\x18\x03 \x01(\bR\asuccess\"M\n" +
-	"\x12ApprovePeerRequest\x12\x1b\n" +
-	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1a\n" +
-	"\bapproved\x18\x02 \x01(\bR\bapproved\"h\n" +
-	"\x13ApprovePeerResponse\x12\x1b\n" +
-	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1a\n" +
+	"\asuccess\x18\x03 \x01(\bR\asuccess\"O\n" +
+	"\x12ApprovePeerRequest\x12\x1d\n" +
+	"\n" +
+	"machine_id\x18\x01 \x01(\tR\tmachineId\x12\x1a\n" +
+	"\bapproved\x18\x02 \x01(\bR\bapproved\"j\n" +
+	"\x13ApprovePeerResponse\x12\x1d\n" +
+	"\n" +
+	"machine_id\x18\x01 \x01(\tR\tmachineId\x12\x1a\n" +
 	"\bapproved\x18\x02 \x01(\bR\bapproved\x12\x18\n" +
-	"\asuccess\x18\x03 \x01(\bR\asuccess2\xb3\x02\n" +
+	"\asuccess\x18\x03 \x01(\bR\asuccess2\xb9\x02\n" +
 	"\rDaemonService\x12=\n" +
-	"\fStreamStatus\x12\x10.daemonrpc.Empty\x1a\x19.daemonrpc.StatusResponse0\x01\x12A\n" +
-	"\rResolveDevice\x12\x16.daemonrpc.DeviceQuery\x1a\x18.daemonrpc.DeviceAddress\x12R\n" +
-	"\rSetDeviceTags\x12\x1f.daemonrpc.SetDeviceTagsRequest\x1a .daemonrpc.SetDeviceTagsResponse\x12L\n" +
+	"\fStreamStatus\x12\x10.daemonrpc.Empty\x1a\x19.daemonrpc.StatusResponse0\x01\x12D\n" +
+	"\x0eResolveMachine\x12\x17.daemonrpc.MachineQuery\x1a\x19.daemonrpc.MachineAddress\x12U\n" +
+	"\x0eSetMachineTags\x12 .daemonrpc.SetMachineTagsRequest\x1a!.daemonrpc.SetMachineTagsResponse\x12L\n" +
 	"\vApprovePeer\x12\x1d.daemonrpc.ApprovePeerRequest\x1a\x1e.daemonrpc.ApprovePeerResponseBDZBgithub.com/pinksaucepasta/paperboat/internal/daemonrpc/proto;protob\x06proto3"
 
 var (
-	file_internal_daemonrpc_proto_daemon_proto_rawDescOnce sync.Once
-	file_internal_daemonrpc_proto_daemon_proto_rawDescData []byte
+	file_daemon_proto_rawDescOnce sync.Once
+	file_daemon_proto_rawDescData []byte
 )
 
-func file_internal_daemonrpc_proto_daemon_proto_rawDescGZIP() []byte {
-	file_internal_daemonrpc_proto_daemon_proto_rawDescOnce.Do(func() {
-		file_internal_daemonrpc_proto_daemon_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_daemonrpc_proto_daemon_proto_rawDesc), len(file_internal_daemonrpc_proto_daemon_proto_rawDesc)))
+func file_daemon_proto_rawDescGZIP() []byte {
+	file_daemon_proto_rawDescOnce.Do(func() {
+		file_daemon_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_daemon_proto_rawDesc), len(file_daemon_proto_rawDesc)))
 	})
-	return file_internal_daemonrpc_proto_daemon_proto_rawDescData
+	return file_daemon_proto_rawDescData
 }
 
-var file_internal_daemonrpc_proto_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
-var file_internal_daemonrpc_proto_daemon_proto_goTypes = []any{
-	(*Empty)(nil),                 // 0: daemonrpc.Empty
-	(*StatusResponse)(nil),        // 1: daemonrpc.StatusResponse
-	(*PeerStatus)(nil),            // 2: daemonrpc.PeerStatus
-	(*DERPStatus)(nil),            // 3: daemonrpc.DERPStatus
-	(*DeviceQuery)(nil),           // 4: daemonrpc.DeviceQuery
-	(*DeviceAddress)(nil),         // 5: daemonrpc.DeviceAddress
-	(*SetDeviceTagsRequest)(nil),  // 6: daemonrpc.SetDeviceTagsRequest
-	(*SetDeviceTagsResponse)(nil), // 7: daemonrpc.SetDeviceTagsResponse
-	(*ApprovePeerRequest)(nil),    // 8: daemonrpc.ApprovePeerRequest
-	(*ApprovePeerResponse)(nil),   // 9: daemonrpc.ApprovePeerResponse
-	nil,                           // 10: daemonrpc.PeerStatus.BrowserUrlsEntry
-	nil,                           // 11: daemonrpc.DeviceAddress.BrowserUrlsEntry
+var file_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_daemon_proto_goTypes = []any{
+	(*Empty)(nil),                  // 0: daemonrpc.Empty
+	(*StatusResponse)(nil),         // 1: daemonrpc.StatusResponse
+	(*PeerStatus)(nil),             // 2: daemonrpc.PeerStatus
+	(*DERPStatus)(nil),             // 3: daemonrpc.DERPStatus
+	(*MachineQuery)(nil),           // 4: daemonrpc.MachineQuery
+	(*MachineAddress)(nil),         // 5: daemonrpc.MachineAddress
+	(*SetMachineTagsRequest)(nil),  // 6: daemonrpc.SetMachineTagsRequest
+	(*SetMachineTagsResponse)(nil), // 7: daemonrpc.SetMachineTagsResponse
+	(*ApprovePeerRequest)(nil),     // 8: daemonrpc.ApprovePeerRequest
+	(*ApprovePeerResponse)(nil),    // 9: daemonrpc.ApprovePeerResponse
+	nil,                            // 10: daemonrpc.PeerStatus.BrowserUrlsEntry
+	nil,                            // 11: daemonrpc.MachineAddress.BrowserUrlsEntry
 }
-var file_internal_daemonrpc_proto_daemon_proto_depIdxs = []int32{
+var file_daemon_proto_depIdxs = []int32{
 	2,  // 0: daemonrpc.StatusResponse.peers:type_name -> daemonrpc.PeerStatus
 	3,  // 1: daemonrpc.StatusResponse.derp_relays:type_name -> daemonrpc.DERPStatus
 	10, // 2: daemonrpc.PeerStatus.browser_urls:type_name -> daemonrpc.PeerStatus.BrowserUrlsEntry
-	11, // 3: daemonrpc.DeviceAddress.browser_urls:type_name -> daemonrpc.DeviceAddress.BrowserUrlsEntry
+	11, // 3: daemonrpc.MachineAddress.browser_urls:type_name -> daemonrpc.MachineAddress.BrowserUrlsEntry
 	0,  // 4: daemonrpc.DaemonService.StreamStatus:input_type -> daemonrpc.Empty
-	4,  // 5: daemonrpc.DaemonService.ResolveDevice:input_type -> daemonrpc.DeviceQuery
-	6,  // 6: daemonrpc.DaemonService.SetDeviceTags:input_type -> daemonrpc.SetDeviceTagsRequest
+	4,  // 5: daemonrpc.DaemonService.ResolveMachine:input_type -> daemonrpc.MachineQuery
+	6,  // 6: daemonrpc.DaemonService.SetMachineTags:input_type -> daemonrpc.SetMachineTagsRequest
 	8,  // 7: daemonrpc.DaemonService.ApprovePeer:input_type -> daemonrpc.ApprovePeerRequest
 	1,  // 8: daemonrpc.DaemonService.StreamStatus:output_type -> daemonrpc.StatusResponse
-	5,  // 9: daemonrpc.DaemonService.ResolveDevice:output_type -> daemonrpc.DeviceAddress
-	7,  // 10: daemonrpc.DaemonService.SetDeviceTags:output_type -> daemonrpc.SetDeviceTagsResponse
+	5,  // 9: daemonrpc.DaemonService.ResolveMachine:output_type -> daemonrpc.MachineAddress
+	7,  // 10: daemonrpc.DaemonService.SetMachineTags:output_type -> daemonrpc.SetMachineTagsResponse
 	9,  // 11: daemonrpc.DaemonService.ApprovePeer:output_type -> daemonrpc.ApprovePeerResponse
 	8,  // [8:12] is the sub-list for method output_type
 	4,  // [4:8] is the sub-list for method input_type
@@ -800,26 +805,26 @@ var file_internal_daemonrpc_proto_daemon_proto_depIdxs = []int32{
 	0,  // [0:4] is the sub-list for field type_name
 }
 
-func init() { file_internal_daemonrpc_proto_daemon_proto_init() }
-func file_internal_daemonrpc_proto_daemon_proto_init() {
-	if File_internal_daemonrpc_proto_daemon_proto != nil {
+func init() { file_daemon_proto_init() }
+func file_daemon_proto_init() {
+	if File_daemon_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_daemonrpc_proto_daemon_proto_rawDesc), len(file_internal_daemonrpc_proto_daemon_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_daemon_proto_rawDesc), len(file_daemon_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_internal_daemonrpc_proto_daemon_proto_goTypes,
-		DependencyIndexes: file_internal_daemonrpc_proto_daemon_proto_depIdxs,
-		MessageInfos:      file_internal_daemonrpc_proto_daemon_proto_msgTypes,
+		GoTypes:           file_daemon_proto_goTypes,
+		DependencyIndexes: file_daemon_proto_depIdxs,
+		MessageInfos:      file_daemon_proto_msgTypes,
 	}.Build()
-	File_internal_daemonrpc_proto_daemon_proto = out.File
-	file_internal_daemonrpc_proto_daemon_proto_goTypes = nil
-	file_internal_daemonrpc_proto_daemon_proto_depIdxs = nil
+	File_daemon_proto = out.File
+	file_daemon_proto_goTypes = nil
+	file_daemon_proto_depIdxs = nil
 }

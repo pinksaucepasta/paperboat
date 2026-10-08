@@ -78,7 +78,7 @@ type AttachmentReadinessObserver interface {
 type AttachmentRequest struct {
 	PreviewID      string `json:"preview_id"`
 	OperationID    string `json:"operation_id"`
-	OwnerDeviceID  string `json:"owner_device_id"`
+	OwnerMachineID string `json:"owner_machine_id"`
 	OwnerSessionID string `json:"owner_session_id"`
 	IdempotencyKey string `json:"idempotency_key"`
 	RequestID      string `json:"request_id"`
@@ -94,12 +94,12 @@ type AttachmentRequest struct {
 // substitute a client idempotency key or preview ID when that operation is
 // unavailable.
 func AttachmentRequestForLease(lease Lease, requestID, correlationID string) (AttachmentRequest, error) {
-	if !validLeaseID(lease.ID) || !validLeaseID(lease.OwnerDeviceID) || !validLeaseID(lease.OwnerSessionID) || !validLeaseID(lease.CreateOperationID) {
+	if !validLeaseID(lease.ID) || !validLeaseID(lease.OwnerMachineID) || !validLeaseID(lease.OwnerSessionID) || !validLeaseID(lease.CreateOperationID) {
 		return AttachmentRequest{}, fmt.Errorf("%w: lease has no durable create operation", ErrAttachmentBinding)
 	}
 	request := AttachmentRequest{
 		PreviewID: lease.ID, OperationID: lease.CreateOperationID,
-		OwnerDeviceID: lease.OwnerDeviceID, OwnerSessionID: lease.OwnerSessionID,
+		OwnerMachineID: lease.OwnerMachineID, OwnerSessionID: lease.OwnerSessionID,
 		IdempotencyKey: lease.CreateOperationID, RequestID: requestID, CorrelationID: correlationID,
 		LeaseETag: strings.TrimSpace(lease.ETag),
 	}
@@ -116,7 +116,7 @@ func AttachmentRequestForLease(lease Lease, requestID, correlationID string) (At
 }
 
 func (r AttachmentRequest) Validate() error {
-	if !validAttachmentID(r.PreviewID) || !validAttachmentID(r.OperationID) || !validAttachmentID(r.OwnerDeviceID) || !validAttachmentID(r.OwnerSessionID) {
+	if !validAttachmentID(r.PreviewID) || !validAttachmentID(r.OperationID) || !validAttachmentID(r.OwnerMachineID) || !validAttachmentID(r.OwnerSessionID) {
 		return fmt.Errorf("%w: incomplete attachment request", ErrAttachmentClientInvalid)
 	}
 	if r.OperationID != r.IdempotencyKey || !validAttachmentID(r.IdempotencyKey) {
@@ -147,12 +147,12 @@ func (r AttachmentRequest) Hash(accountID string) (string, error) {
 		AccountID      string `json:"account_id"`
 		PreviewID      string `json:"preview_id"`
 		OperationID    string `json:"operation_id"`
-		OwnerDeviceID  string `json:"owner_device_id"`
+		OwnerMachineID string `json:"owner_machine_id"`
 		OwnerSessionID string `json:"owner_session_id"`
 		IdempotencyKey string `json:"idempotency_key"`
 		RequestID      string `json:"request_id"`
 		CorrelationID  string `json:"correlation_id"`
-	}{accountID, r.PreviewID, r.OperationID, r.OwnerDeviceID, r.OwnerSessionID, r.IdempotencyKey, r.RequestID, r.CorrelationID}
+	}{accountID, r.PreviewID, r.OperationID, r.OwnerMachineID, r.OwnerSessionID, r.IdempotencyKey, r.RequestID, r.CorrelationID}
 	encoded, err := json.Marshal(envelope)
 	if err != nil {
 		return "", fmt.Errorf("%w: canonical request: %v", ErrAttachmentClientInvalid, err)
@@ -167,7 +167,7 @@ type Binding struct {
 	AccountID                            string `json:"account_id"`
 	PreviewID                            string `json:"preview_id"`
 	OperationID                          string `json:"operation_id"`
-	OwnerDeviceID                        string `json:"owner_device_id"`
+	OwnerMachineID                       string `json:"owner_machine_id"`
 	OwnerSessionID                       string `json:"owner_session_id"`
 	HostID                               string `json:"host_id"`
 	LeaseGeneration                      uint64 `json:"lease_generation"`
@@ -189,7 +189,7 @@ type Binding struct {
 func (b Binding) Validate() error {
 	for name, value := range map[string]string{
 		"account_id": b.AccountID, "preview_id": b.PreviewID, "operation_id": b.OperationID,
-		"owner_device_id": b.OwnerDeviceID, "owner_session_id": b.OwnerSessionID,
+		"owner_machine_id": b.OwnerMachineID, "owner_session_id": b.OwnerSessionID,
 		"host_id": b.HostID, "tunnel_id": b.TunnelID, "connector_id": b.ConnectorID,
 		"session_id": b.SessionID, "route_id": b.RouteID,
 		"edge_node_id": b.EdgeNodeID, "edge_process_epoch": b.EdgeProcessEpoch,
@@ -198,12 +198,10 @@ func (b Binding) Validate() error {
 			return fmt.Errorf("%w: invalid %s", ErrAttachmentBinding, name)
 		}
 	}
-	if b.HostID != b.OwnerDeviceID {
-		return fmt.Errorf("%w: host and owner device differ", ErrAttachmentBinding)
+	if b.HostID != b.OwnerMachineID {
+		return fmt.Errorf("%w: host and owner machine differ", ErrAttachmentBinding)
 	}
-	if b.TunnelID == b.ConnectorID {
-		return fmt.Errorf("%w: tunnel and connector identities must differ", ErrAttachmentBinding)
-	}
+
 	if b.LeaseGeneration == 0 || b.ProcessGeneration == 0 || b.ConfigGeneration == 0 || b.RouteGeneration == 0 {
 		return fmt.Errorf("%w: carrier generations must be positive", ErrAttachmentBinding)
 	}
@@ -837,10 +835,13 @@ func decodeAttachmentEnvelope(data []byte, now time.Time) (Attachment, error) {
 }
 
 func validateAttachmentForRequest(attachment Attachment, request AttachmentRequest) error {
-	if attachment.PreviewID != request.PreviewID || attachment.OperationID != request.OperationID || attachment.OwnerDeviceID != request.OwnerDeviceID || attachment.OwnerSessionID != request.OwnerSessionID || attachment.IdempotencyKey != request.IdempotencyKey || attachment.RequestID != request.RequestID || attachment.CorrelationID != request.CorrelationID {
+	if attachment.PreviewID != request.PreviewID || attachment.OperationID != request.OperationID || attachment.OwnerMachineID != request.OwnerMachineID || attachment.OwnerSessionID != request.OwnerSessionID || attachment.IdempotencyKey != request.IdempotencyKey || attachment.RequestID != request.RequestID || attachment.CorrelationID != request.CorrelationID {
 		return fmt.Errorf("%w: response identity differs from request", ErrAttachmentBinding)
 	}
-	if attachment.Binding.PreviewID != request.PreviewID || attachment.Binding.OperationID != request.OperationID || attachment.Binding.OwnerDeviceID != request.OwnerDeviceID || attachment.Binding.OwnerSessionID != request.OwnerSessionID || leaseGenerationForID(request.PreviewID, request.LeaseETag) != int64(attachment.Binding.LeaseGeneration) {
+	// The authenticated lease revision can advance on a deadline-only renewal
+	// while the server retains the exact admitted carrier generation.
+	leaseGeneration := leaseGenerationForID(request.PreviewID, request.LeaseETag)
+	if attachment.Binding.PreviewID != request.PreviewID || attachment.Binding.OperationID != request.OperationID || attachment.Binding.OwnerMachineID != request.OwnerMachineID || attachment.Binding.OwnerSessionID != request.OwnerSessionID || leaseGeneration < 1 || attachment.Binding.LeaseGeneration == 0 || attachment.Binding.LeaseGeneration > uint64(leaseGeneration) {
 		return fmt.Errorf("%w: response binding differs from request", ErrAttachmentBinding)
 	}
 	want, err := request.Hash(attachment.AccountID)

@@ -1,11 +1,15 @@
 package bootstrap
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,11 +22,11 @@ func TestResumeRecordSurvivesMaterialDeliveryAndRequiresExactBinding(t *testing.
 	now := time.Date(2099, 8, 22, 12, 0, 0, 0, time.UTC)
 	server := "https://api.example.test"
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-	record := NewResumeRecord(server, publicKey, "token-1", "Victus", "client", "verifier-012345678901234567890123456789", now.Add(time.Hour))
+	record := NewResumeRecord(server, publicKey, "token-1", "Victus", "verifier-012345678901234567890123456789", now.Add(time.Hour))
 	if err := SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := LoadResume(root, server, publicKey, "token-1", "Victus", "client", now)
+	loaded, err := LoadResume(root, server, publicKey, "token-1", "Victus", now)
 	if err != nil || loaded.Verifier != record.Verifier {
 		t.Fatalf("initial resume = %#v, err=%v", loaded, err)
 	}
@@ -33,40 +37,87 @@ func TestResumeRecordSurvivesMaterialDeliveryAndRequiresExactBinding(t *testing.
 	// The installer may have consumed a token file before the process failed;
 	// the protected local journal still permits the exact same enrollment to
 	// resume without making the server replay its one-shot credential.
-	if _, err := LoadResume(root, server, publicKey, "", "Victus", "client", now); err != nil {
+	if _, err := LoadResume(root, server, publicKey, "", "Victus", now); err != nil {
 		t.Fatalf("resume without consumed token file: %v", err)
 	}
 	for name, args := range map[string][]string{
-		"wrong token":   {server, publicKey, "token-2", "Victus", "client"},
-		"wrong machine": {server, base64.RawURLEncoding.EncodeToString(func() []byte { value := make([]byte, 32); value[0] = 1; return value }()), "token-1", "Victus", "client"},
-		"wrong role":    {server, publicKey, "token-1", "Victus", "host"},
-		"wrong name":    {server, publicKey, "token-1", "Other", "client"},
+		"wrong token":   {server, publicKey, "token-2", "Victus"},
+		"wrong machine": {server, base64.RawURLEncoding.EncodeToString(func() []byte { value := make([]byte, 32); value[0] = 1; return value }()), "token-1", "Victus"},
+		"wrong name":    {server, publicKey, "token-1", "Other"},
 	} {
-		if _, err := LoadResume(root, args[0], args[1], args[2], args[3], args[4], now); !errors.Is(err, ErrResumeBinding) {
+		if _, err := LoadResume(root, args[0], args[1], args[2], args[3], now); !errors.Is(err, ErrResumeBinding) {
 			t.Fatalf("%s error=%v", name, err)
 		}
 	}
 	material := Material{
-		Schema: "paperboat.byod-installation/v1", UserMachineID: "mch_1", UserMachineEnrollmentID: "ume_1", EnvironmentID: "env_1",
+		Schema: "paperboat.machine-installation/v1", UserMachineID: "mch_1", PairingID: "ume_1", EnvironmentID: "env_1",
 		ControlURL: server, HelperID: "helper_1", EnrollmentID: "henr_1", EnrollmentCredential: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP",
 		ExpiresAt: now.Add(time.Hour), Artifact: &ArtifactTarget{Schema: ArtifactTargetSchemaV1, Kind: ArtifactKindPB, Version: "2026.08.22.22", Platform: runtime.GOOS, Architecture: runtime.GOARCH, RepositoryURL: server, TargetPath: releaseindex.AssetName(runtime.GOOS, runtime.GOARCH)},
-		HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 1, SetupRoles: []string{"interactive"}, SetupMode: "client",
-		ClientSession: &ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cls_1", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600},
+		HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 1, ClientSession: &ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cls_1", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600},
 	}
 	record.PairingStarted = true
 	record.Material = &material
 	if err := SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err = LoadResume(root, server, publicKey, "token-1", "Victus", "client", now)
+	loaded, err = LoadResume(root, server, publicKey, "token-1", "Victus", now)
 	if err != nil || loaded.Material == nil || loaded.Material.UserMachineID != "mch_1" {
 		t.Fatalf("material resume = %#v, err=%v", loaded, err)
 	}
 	if err := ClearResume(root); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadResume(root, server, publicKey, "token-1", "Victus", "client", now); !errors.Is(err, ErrResumeNotFound) {
+	if _, err := LoadResume(root, server, publicKey, "token-1", "Victus", now); !errors.Is(err, ErrResumeNotFound) {
 		t.Fatalf("cleared resume error=%v", err)
+	}
+}
+
+func TestResumeStorageFailureKeepsCauseAndRecoversWithoutExposingPath(t *testing.T) {
+	parent := t.TempDir()
+	stateRoot := filepath.Join(parent, "state")
+	if err := os.WriteFile(stateRoot, []byte("blocker"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	record := NewResumeRecord("https://api.example.test", base64.RawURLEncoding.EncodeToString(make([]byte, 32)), "", "studio", strings.Repeat("v", 32), time.Now().UTC().Add(time.Hour))
+	err := SaveResume(stateRoot, record)
+	var pathErr *os.PathError
+	if !errors.As(err, &pathErr) {
+		t.Fatalf("save error=%v, want original filesystem cause", err)
+	}
+	if strings.Contains(err.Error(), parent) {
+		t.Fatalf("filesystem path escaped in error: %v", err)
+	}
+	var diagnostic interface {
+		DiagnosticStage() string
+		DiagnosticCode() string
+	}
+	if !errors.As(err, &diagnostic) || diagnostic.DiagnosticStage() != "reconciliation" || diagnostic.DiagnosticCode() != "command_failed" {
+		t.Fatalf("resume storage diagnostic=%v", err)
+	}
+	if err := os.Remove(stateRoot); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveResume(stateRoot, record); err != nil {
+		t.Fatalf("save after storage recovery: %v", err)
+	}
+	loaded, err := LoadResume(stateRoot, record.ServerURL, record.PublicIdentityKey, "", record.Alias, time.Now().UTC())
+	if err != nil || loaded.Verifier != record.Verifier {
+		t.Fatalf("resume after storage recovery=%+v err=%v", loaded, err)
+	}
+}
+
+func TestResumeBindingFailureKeepsCauseWithoutExposingMalformedContent(t *testing.T) {
+	root := t.TempDir()
+	secret := "RESUME_PRIVATE_CONTENT_DO_NOT_EXPORT"
+	if err := os.WriteFile(ResumePath(root), []byte(`{"schema":"`+secret+`"`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := loadResumeDocument(root)
+	if !errors.Is(err, ErrResumeBinding) || !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("resume binding failure=%v, want binding sentinel and JSON cause", err)
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("malformed journal content escaped in error: %v", err)
 	}
 }
 
@@ -75,7 +126,7 @@ func TestResumeMatchesEnrollmentTokenDistinguishesRetryFromNewEnrollment(t *test
 	if matched, err := ResumeMatchesEnrollmentToken(root, "token-one"); err != nil || matched {
 		t.Fatalf("missing resume = %v, %v", matched, err)
 	}
-	record := NewResumeRecord("https://api.example.test", "public-key", "token-one", "device", "host", "verifier-012345678901234567890123456789", time.Now().Add(time.Hour))
+	record := NewResumeRecord("https://api.example.test", "public-key", "token-one", "machine", "verifier-012345678901234567890123456789", time.Now().Add(time.Hour))
 	if err := SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}
@@ -92,18 +143,18 @@ func TestTokenBackedResumeCannotDowngradeBeforePairing(t *testing.T) {
 	now := time.Date(2099, 8, 22, 12, 0, 0, 0, time.UTC)
 	server := "https://api.example.test"
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-	record := NewResumeRecord(server, publicKey, "token-1", "Victus", "client", "verifier-012345678901234567890123456789", now.Add(time.Hour))
+	record := NewResumeRecord(server, publicKey, "token-1", "Victus", "verifier-012345678901234567890123456789", now.Add(time.Hour))
 	if err := SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadResume(root, server, publicKey, "", "Victus", "client", now); !errors.Is(err, ErrResumeTokenRequired) {
+	if _, err := LoadResume(root, server, publicKey, "", "Victus", now); !errors.Is(err, ErrResumeTokenRequired) {
 		t.Fatalf("pre-pair token omission error=%v", err)
 	}
 	record.PairingStarted = true
 	if err := SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadResume(root, server, publicKey, "", "Victus", "client", now); err != nil {
+	if _, err := LoadResume(root, server, publicKey, "", "Victus", now); err != nil {
 		t.Fatalf("post-pair token omission should resume by verifier: %v", err)
 	}
 }
@@ -113,11 +164,11 @@ func TestResumeRecordRejectsTamperedOrExpiredState(t *testing.T) {
 	now := time.Date(2099, 8, 22, 12, 0, 0, 0, time.UTC)
 	server := "https://api.example.test"
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-	record := NewResumeRecord(server, publicKey, "token-1", "Victus", "client", "verifier-012345678901234567890123456789", now.Add(-time.Minute))
+	record := NewResumeRecord(server, publicKey, "token-1", "Victus", "verifier-012345678901234567890123456789", now.Add(-time.Minute))
 	if err := SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := LoadResume(root, server, publicKey, "token-1", "Victus", "client", now)
+	loaded, err := LoadResume(root, server, publicKey, "token-1", "Victus", now)
 	if !errors.Is(err, ErrResumeExpired) {
 		t.Fatalf("expired resume error=%v", err)
 	}
@@ -128,14 +179,14 @@ func TestResumeRecordRejectsTamperedOrExpiredState(t *testing.T) {
 	if err := SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err = LoadResume(root, server, publicKey, "", "Victus", "client", now)
+	loaded, err = LoadResume(root, server, publicKey, "", "Victus", now)
 	if !errors.Is(err, ErrResumeExpired) || !loaded.PairingStarted || loaded.Verifier != record.Verifier {
 		t.Fatalf("expired paired resume = %#v, err=%v", loaded, err)
 	}
-	if err := os.WriteFile(ResumePath(root), []byte(`{"schema":"paperboat.byod-resume/v1"}`), 0o600); err != nil {
+	if err := os.WriteFile(ResumePath(root), []byte(`{"schema":"paperboat.machine-resume/v1"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadResume(root, server, publicKey, "token-1", "Victus", "client", now.Add(-time.Hour)); !errors.Is(err, ErrResumeBinding) {
+	if _, err := LoadResume(root, server, publicKey, "token-1", "Victus", now.Add(-time.Hour)); !errors.Is(err, ErrResumeBinding) {
 		t.Fatalf("tampered resume error=%v", err)
 	}
 }
@@ -145,14 +196,13 @@ func TestLoadResumeReturnsExpiredMaterialForVerifierRecovery(t *testing.T) {
 	now := time.Now().UTC()
 	server := "https://api.example.test"
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-	record := NewResumeRecord(server, publicKey, "token-1", "Victus", "client", "verifier-012345678901234567890123456789", now.Add(-time.Hour))
+	record := NewResumeRecord(server, publicKey, "token-1", "Victus", "verifier-012345678901234567890123456789", now.Add(-time.Hour))
 	record.PairingStarted = true
 	record.Material = &Material{
-		Schema: "paperboat.byod-installation/v1", UserMachineID: "mch_1", UserMachineEnrollmentID: "ume_1", EnvironmentID: "env_1",
+		Schema: "paperboat.machine-installation/v1", UserMachineID: "mch_1", PairingID: "ume_1", EnvironmentID: "env_1",
 		ControlURL: server, HelperID: "helper_1", EnrollmentID: "henr_1", EnrollmentCredential: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP",
 		ExpiresAt: now.Add(-time.Minute), Artifact: &ArtifactTarget{Schema: ArtifactTargetSchemaV1, Kind: ArtifactKindPB, Version: "2026.08.22.22", Platform: runtime.GOOS, Architecture: runtime.GOARCH, RepositoryURL: server, TargetPath: releaseindex.AssetName(runtime.GOOS, runtime.GOARCH)},
-		HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 1, SetupRoles: []string{"interactive"}, SetupMode: "client",
-		ClientSession: &ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cls_1", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600},
+		HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 1, ClientSession: &ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cls_1", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600},
 	}
 	// SaveResume deliberately rejects expired material. Write an otherwise valid
 	// historical journal to exercise the loader's recovery behavior.
@@ -166,14 +216,14 @@ func TestLoadResumeReturnsExpiredMaterialForVerifierRecovery(t *testing.T) {
 	if err := atomicfile.Write(ResumePath(root), encoded, atomicfile.CurrentOwnerOptions(0o600)); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := LoadResume(root, server, publicKey, "", "Victus", "client", now)
+	loaded, err := LoadResume(root, server, publicKey, "", "Victus", now)
 	if !errors.Is(err, ErrResumeExpired) || loaded.Material == nil || loaded.Material.UserMachineID != "mch_1" {
 		t.Fatalf("expired material resume = %#v, err=%v", loaded, err)
 	}
 }
 
 func TestRecoveredMaterialCannotChangeBoundMachine(t *testing.T) {
-	previous := Material{UserMachineID: "mch_1", UserMachineEnrollmentID: "ume_1", EnvironmentID: "env_1", HelperID: "helper_1", InstallationGeneration: 7, SetupMode: "client", ControlURL: "https://api.example.test"}
+	previous := Material{UserMachineID: "mch_1", PairingID: "ume_1", EnvironmentID: "env_1", HelperID: "helper_1", InstallationGeneration: 7, ControlURL: "https://api.example.test"}
 	recovered := previous
 	if err := ValidateRecoveredMaterial(previous, recovered, true); err != nil {
 		t.Fatal(err)
@@ -192,7 +242,7 @@ func TestRecoveredMaterialCannotChangeBoundMachine(t *testing.T) {
 	}
 }
 
-func TestAuthenticatedHostSetupResumeReusesLiveAndReplacesOnlyExactExpiredEmptyJournal(t *testing.T) {
+func TestAuthenticatedMachineSetupResumeReusesLiveAndReplacesOnlyExactExpiredEmptyJournal(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now().UTC()
 	server := "https://api.example.test"
@@ -209,7 +259,7 @@ func TestAuthenticatedHostSetupResumeReusesLiveAndReplacesOnlyExactExpiredEmptyJ
 	if err := ClearResume(root); err != nil {
 		t.Fatal(err)
 	}
-	legacy := NewResumeRecord(server, publicKey, "", "Victus", "host", "legacy-verifier-01234567890123456789", now.Add(-time.Minute))
+	legacy := NewResumeRecord(server, publicKey, "", "Victus", "legacy-verifier-01234567890123456789", now.Add(-time.Minute))
 	legacy.PairingStarted = true
 	if err := SaveResume(root, legacy); err != nil {
 		t.Fatal(err)
@@ -259,11 +309,10 @@ func TestAuthenticatedHostSetupResumeReusesLiveAndReplacesOnlyExactExpiredEmptyJ
 	expiredMaterial.PairingStarted = true
 	expiredMaterial.PairingExpiresAt = now.Add(-time.Minute)
 	expiredMaterial.Material = &Material{
-		Schema: "paperboat.byod-installation/v1", UserMachineID: "mch_1", UserMachineEnrollmentID: "ume_1", EnvironmentID: "env_1",
+		Schema: "paperboat.machine-installation/v1", UserMachineID: "mch_1", PairingID: "ume_1", EnvironmentID: "env_1",
 		ControlURL: server, HelperID: "helper_1", ReuseIdentity: true, ExpiresAt: now.Add(-time.Minute),
 		Artifact:            &artifact,
-		HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 7, SetupRoles: []string{"host"}, SetupMode: "host",
-		ClientSession: &ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cls_1", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600},
+		HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 7, ClientSession: &ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cls_1", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600},
 	}
 	encoded, err := json.Marshal(expiredMaterial)
 	if err != nil {
@@ -307,10 +356,10 @@ func TestAuthenticatedHostSetupResumeReusesLiveAndReplacesOnlyExactExpiredEmptyJ
 	}
 }
 
-func TestAuthenticatedHostSetupMaterialCannotChangeMachineGenerationOrVerifiedArtifact(t *testing.T) {
+func TestAuthenticatedMachineSetupMaterialCannotChangeMachineGenerationOrVerifiedArtifact(t *testing.T) {
 	record := ResumeRecord{AuthenticatedSetup: true, ExpectedUserMachineID: "mch_1", ExpectedGeneration: 7}
 	artifact := &ArtifactTarget{Schema: ArtifactTargetSchemaV1, Kind: ArtifactKindPB, Version: "2026.08.24.1", Platform: "windows", Architecture: "amd64", RepositoryURL: "https://updates.example.test/paperboat", TargetPath: releaseindex.AssetName("windows", "amd64")}
-	material := Material{UserMachineID: "mch_1", UserMachineEnrollmentID: "ump_1", EnvironmentID: "env_1", ControlURL: "https://api.example.test", HelperID: "helper_1", InstallationGeneration: 7, SetupMode: "host", Artifact: artifact}
+	material := Material{UserMachineID: "mch_1", PairingID: "ump_1", EnvironmentID: "env_1", ControlURL: "https://api.example.test", HelperID: "helper_1", InstallationGeneration: 7, Artifact: artifact}
 	if err := ValidateAuthenticatedSetupMaterial(record, material); err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +376,7 @@ func TestAuthenticatedHostSetupMaterialCannotChangeMachineGenerationOrVerifiedAr
 	}
 }
 
-func TestAuthenticatedHostSetupResumeRotatesExpiredJournalForChangedArtifact(t *testing.T) {
+func TestAuthenticatedMachineSetupResumeRotatesExpiredJournalForChangedArtifact(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now().UTC()
 	server := "https://api.example.test"
@@ -342,10 +391,9 @@ func TestAuthenticatedHostSetupResumeRotatesExpiredJournalForChangedArtifact(t *
 	first.PairingStarted = true
 	first.PairingExpiresAt = now.Add(-time.Minute)
 	first.Material = &Material{
-		Schema: "paperboat.byod-installation/v1", UserMachineID: "mch_1", UserMachineEnrollmentID: "ume_1", EnvironmentID: "env_1",
+		Schema: "paperboat.machine-installation/v1", UserMachineID: "mch_1", PairingID: "ume_1", EnvironmentID: "env_1",
 		ControlURL: server, HelperID: "helper_1", ReuseIdentity: true, ExpiresAt: now.Add(-time.Minute), Artifact: &oldArtifact,
-		HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 7, SetupRoles: []string{"host"}, SetupMode: "host",
-		ClientSession: &ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cls_1", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600},
+		HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 7, ClientSession: &ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cls_1", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600},
 	}
 	encoded, err := json.Marshal(first)
 	if err != nil {
@@ -366,7 +414,7 @@ func TestAuthenticatedHostSetupResumeRotatesExpiredJournalForChangedArtifact(t *
 	}
 }
 
-func TestAuthenticatedHostSetupResumeRejectsChangedArtifactAfterProgress(t *testing.T) {
+func TestAuthenticatedMachineSetupResumeRejectsChangedArtifactAfterProgress(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now().UTC()
 	server := "https://api.example.test"
@@ -382,10 +430,9 @@ func TestAuthenticatedHostSetupResumeRejectsChangedArtifactAfterProgress(t *test
 	record.RuntimeEnrolled = true
 	record.PairingExpiresAt = now.Add(-time.Minute)
 	record.Material = &Material{
-		Schema: "paperboat.byod-installation/v1", UserMachineID: "mch_1", UserMachineEnrollmentID: "ume_1", EnvironmentID: "env_1",
+		Schema: "paperboat.machine-installation/v1", UserMachineID: "mch_1", PairingID: "ume_1", EnvironmentID: "env_1",
 		ControlURL: server, HelperID: "helper_1", ReuseIdentity: true, ExpiresAt: now.Add(-time.Minute), Artifact: &oldArtifact,
-		HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 7, SetupRoles: []string{"host"}, SetupMode: "host",
-		ClientSession: &ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cls_1", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600},
+		HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 7, ClientSession: &ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cls_1", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600},
 	}
 	encoded, err := json.Marshal(record)
 	if err != nil {
@@ -403,15 +450,15 @@ func TestAuthenticatedHostSetupResumeRejectsChangedArtifactAfterProgress(t *test
 	}
 }
 
-func TestAuthenticatedHostSetupResumeRejectsUnknownActiveArtifact(t *testing.T) {
+func TestAuthenticatedMachineSetupResumeRejectsUnknownActiveArtifact(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now().UTC()
 	server := "https://api.example.test"
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	artifact := ArtifactTarget{Schema: ArtifactTargetSchemaV1, Kind: ArtifactKindPB, Version: "2026.08.22.22", Platform: runtime.GOOS, Architecture: runtime.GOARCH, RepositoryURL: server, TargetPath: releaseindex.AssetName(runtime.GOOS, runtime.GOARCH)}
-	record := NewResumeRecord(server, publicKey, "", "Victus", "host", "legacy-verifier-01234567890123456789", now.Add(time.Hour))
+	record := NewResumeRecord(server, publicKey, "", "Victus", "legacy-verifier-01234567890123456789", now.Add(time.Hour))
 	record.AuthenticatedSetup = true
-	record.SetupOperationID = "host-setup-legacy"
+	record.SetupOperationID = "machine-install-legacy"
 	record.ExpectedUserMachineID = "mch_1"
 	record.ExpectedGeneration = 7
 	if err := SaveResume(root, record); err != nil {
@@ -429,7 +476,7 @@ func TestAuthenticatedHostSetupResumeRejectsUnknownActiveArtifact(t *testing.T) 
 func TestResumeJournalUsesAliasAndRejectsObsoleteDisplayName(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now().UTC()
-	record := NewResumeRecord("https://api.example.test", testPublicIdentityKey, "token", "studio", "host", "verifier-012345678901234567890123456789", now.Add(time.Hour))
+	record := NewResumeRecord("https://api.example.test", testPublicIdentityKey, "token", "studio", "verifier-012345678901234567890123456789", now.Add(time.Hour))
 	if err := SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}
@@ -453,7 +500,61 @@ func TestResumeJournalUsesAliasAndRejectsObsoleteDisplayName(t *testing.T) {
 	if err := os.WriteFile(ResumePath(root), body, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadResume(root, record.ServerURL, record.PublicIdentityKey, "token", "studio", "host", now); !errors.Is(err, ErrResumeBinding) {
+	if _, err := LoadResume(root, record.ServerURL, record.PublicIdentityKey, "token", "studio", now); !errors.Is(err, ErrResumeBinding) {
 		t.Fatalf("obsolete journal error = %v", err)
+	}
+}
+
+func TestResumeRejectsObsoleteFieldsAndSchemasWithoutWrite(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now().UTC()
+	record := NewResumeRecord("https://api.example.test", testPublicIdentityKey, "token", "machine", "verifier-012345678901234567890123456789", now.Add(time.Hour))
+	if err := SaveResume(root, record); err != nil {
+		t.Fatal(err)
+	}
+	path := ResumePath(root)
+	canonical, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(map[string]json.RawMessage){
+		"retired mode":      func(d map[string]json.RawMessage) { d["setup_mode"] = json.RawMessage(`"host"`) },
+		"old schema":        func(d map[string]json.RawMessage) { d["schema"] = json.RawMessage(`"paperboat.byod-resume/v1"`) },
+		"unknown authority": func(d map[string]json.RawMessage) { d["unexpected_authority"] = json.RawMessage(`true`) },
+		"material mode":     func(d map[string]json.RawMessage) { d["material"] = json.RawMessage(`{"setup_mode":"host"}`) },
+		"material roles":    func(d map[string]json.RawMessage) { d["material"] = json.RawMessage(`{"setup_roles":["host"]}`) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			var document map[string]json.RawMessage
+			if err := json.Unmarshal(canonical, &document); err != nil {
+				t.Fatal(err)
+			}
+			mutate(document)
+			input, err := json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := atomicfile.Write(path, input, atomicfile.CurrentOwnerOptions(0600)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := LoadResume(root, record.ServerURL, record.PublicIdentityKey, "token", record.Alias, now); !errors.Is(err, ErrResumeBinding) {
+				t.Fatalf("obsolete resume accepted: %v", err)
+			}
+			retained, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(retained, input) {
+				t.Fatal("invalid resume was rewritten")
+			}
+		})
+	}
+	if err := atomicfile.Write(path, canonical, atomicfile.CurrentOwnerOptions(0600)); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadResume(root, record.ServerURL, record.PublicIdentityKey, "token", record.Alias, now)
+	if err != nil || loaded.Verifier != record.Verifier || loaded.EnrollmentTokenSHA != record.EnrollmentTokenSHA {
+		t.Fatal("canonical resume lost verifier or token binding")
+	}
+	retained, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(retained, canonical) {
+		t.Fatal("canonical resume read wrote state")
 	}
 }

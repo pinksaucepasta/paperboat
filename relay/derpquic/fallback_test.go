@@ -243,7 +243,7 @@ func TestFallbackCarrierReachabilityRecoveryAndFatalDenial(t *testing.T) {
 	deniedFallback := &fakeCarrier{}
 	denied := NewFallbackCarrier(&fakeCarrier{connectErr: ErrAdmission}, deniedFallback, time.Millisecond)
 	defer denied.Close()
-	if err := denied.Connect(context.Background()); err != ErrAdmission {
+	if err := denied.Connect(context.Background()); !errors.Is(err, ErrAdmission) {
 		t.Fatalf("denial: %v", err)
 	}
 	deniedFallback.mu.Lock()

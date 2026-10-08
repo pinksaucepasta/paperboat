@@ -35,7 +35,7 @@ func runProduction(ctx context.Context, output io.Writer) error {
 		status, statusErr := client.Active(readyCtx)
 		if statusErr == nil && status.State == hostdproto.StateActive {
 			if !announced {
-				fmt.Fprintln(output, "pb device runtime ready")
+				fmt.Fprintln(output, "pb machine runtime ready")
 				announced = true
 			}
 			select {

@@ -189,7 +189,7 @@ func TestProductionNativePeerBuildGenerationClassifiesUnsignedEndpointAsPending(
 		t.Fatal(err)
 	}
 	key := store.Current()
-	if err := store.SaveRegistration(runtimeidentity.Registration{ServerURL: "https://api.example.test", MachineID: "machine_1", EnvironmentID: "environment_1", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, SetupMode: "client", SetupRoles: []string{"interactive"}, UpdatedAt: time.Now().UTC()}); err != nil {
+	if err := store.SaveRegistration(runtimeidentity.Registration{ServerURL: "https://api.example.test", MachineID: "machine_1", EnvironmentID: "environment_1", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.PeerEndpoint(); err != nil {
@@ -209,7 +209,7 @@ func TestProductionNativePeerReloadsRenewedEndpointIdentity(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	key := store.Current()
-	if err := store.SaveRegistration(runtimeidentity.Registration{ServerURL: "https://api.example.test", MachineID: "machine_1", EnvironmentID: "environment_1", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, SetupRoles: []string{"host"}, UpdatedAt: now}); err != nil {
+	if err := store.SaveRegistration(runtimeidentity.Registration{ServerURL: "https://api.example.test", MachineID: "machine_1", EnvironmentID: "environment_1", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 1, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	endpoint, err := store.PeerEndpoint()

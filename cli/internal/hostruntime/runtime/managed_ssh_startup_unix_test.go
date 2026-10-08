@@ -42,7 +42,7 @@ func TestManagedSSHStartsClosedDuringHTTPOutageAndRecovers(t *testing.T) {
 				w.WriteHeader(405)
 				return
 			}
-			value = clientapi.ManagedSSHHostKeySet{Type: "host_key_set", Version: 1, SetID: "set_1", MachineID: "machine_1", MachineGeneration: 4, ObservationGeneration: 9, Keys: []string{key}, State: "active", ReconciliationVersion: 1}
+			value = clientapi.ManagedSSHHostKeySet{Type: "host_key_set", Version: 1, SetID: "keyset_01234567-89ab-4cde-8fab-0123456789ab", MachineID: "machine_1", MachineGeneration: 4, ObservationGeneration: 9, Keys: []string{key}, State: "active", ReconciliationVersion: 1}
 		case "/v1/machines/machine_1/ssh-authorized-keys":
 			if r.Method != http.MethodPost {
 				w.WriteHeader(405)
@@ -56,7 +56,7 @@ func TestManagedSSHStartsClosedDuringHTTPOutageAndRecovers(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": value})
 	}))
 	defer server.Close()
-	service := &managedSSHKeyReconciler{client: clientapi.New(server.URL, clientconfig.Credential{}, server.Client()), identity: &refreshingManagedSSHIdentity{}, registration: runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, workerGeneration: 9, setID: "set_1", publicKeys: []string{key}, home: home, ownerUID: uint32(os.Getuid()), interval: 10 * time.Millisecond, timeout: time.Second}
+	service := &managedSSHKeyReconciler{client: clientapi.New(server.URL, clientconfig.Credential{}, server.Client()), identity: &refreshingManagedSSHIdentity{}, registration: runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, workerGeneration: 9, publicKeys: []string{key}, home: home, ownerUID: uint32(os.Getuid()), interval: 10 * time.Millisecond, timeout: time.Second}
 	if err := service.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestManagedSSHInitialAuthorityPolicyAndLocalFailure(t *testing.T) {
 			if _, err := reconcilePlatformAuthorizedKeys(home, uint32(os.Getuid()), []string{key}); err != nil {
 				t.Fatal(err)
 			}
-			service := &managedSSHKeyReconciler{client: &rotatingManagedSSHClient{observeErrors: []error{tc.err}, keys: [][]string{{key}}}, identity: &refreshingManagedSSHIdentity{}, registration: runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, workerGeneration: 9, setID: "set_1", publicKeys: []string{key}, home: home, ownerUID: uint32(os.Getuid()), interval: time.Hour, timeout: time.Second}
+			service := &managedSSHKeyReconciler{client: &rotatingManagedSSHClient{observeErrors: []error{tc.err}, keys: [][]string{{key}}}, identity: &refreshingManagedSSHIdentity{}, registration: runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, workerGeneration: 9, publicKeys: []string{key}, home: home, ownerUID: uint32(os.Getuid()), interval: time.Hour, timeout: time.Second}
 			err := service.Start(t.Context())
 			defer service.Shutdown(context.Background())
 			if (err == nil) != tc.retry {
@@ -126,7 +126,7 @@ func TestManagedSSHInitialAuthorityPolicyAndLocalFailure(t *testing.T) {
 			t.Fatal(err)
 		}
 		client := &rotatingManagedSSHClient{observeErrors: []error{authorityErr}, keys: [][]string{{managedSSHTestPublicKey(t)}}}
-		service := &managedSSHKeyReconciler{client: client, identity: &refreshingManagedSSHIdentity{}, registration: runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, workerGeneration: 9, setID: "set_1", publicKeys: []string{"ssh-ed25519 AAAA host"}, home: home, ownerUID: uint32(os.Getuid()), interval: time.Hour, timeout: time.Second}
+		service := &managedSSHKeyReconciler{client: client, identity: &refreshingManagedSSHIdentity{}, registration: runtimeidentity.Registration{MachineID: "machine_1", InstallationGeneration: 4}, workerGeneration: 9, publicKeys: []string{"ssh-ed25519 AAAA host"}, home: home, ownerUID: uint32(os.Getuid()), interval: time.Hour, timeout: time.Second}
 		if err := service.Start(t.Context()); !errors.Is(err, ErrManagedSSHUnavailable) {
 			t.Fatalf("unsafe local key path did not fail startup: %v", err)
 		}

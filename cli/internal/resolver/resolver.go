@@ -114,7 +114,7 @@ func (q *TerminalInputQueue) Pending() []TerminalInput {
 
 // ConnectRequest describes what the user asked to connect to.
 type ConnectRequest struct {
-	Project string
+	Machine string
 	// Credential is the current Paperboat client-session access credential.
 	Credential config.Credential
 	// TerminalSessionID is the immutable server catalog ID. It is required for
@@ -142,23 +142,22 @@ type ResolvedMachine struct {
 // TerminalSessionCreate describes the durable terminal session the resolver
 // should create while issuing the connection descriptor.
 type TerminalSessionCreate struct {
+	CWD            string
 	Name           string
 	IdempotencyKey string
 }
 
 // ConnectInfo is what the resolver hands back to the tunnel + session layers.
 type ConnectInfo struct {
-	// TargetKind identifies the Paperboat environment provider. It is
-	// "project" for a hosted Fly environment and "machine" for an
-	// enrolled customer machine.
+	// TargetKind is "machine" for the enrolled machine resolved by the catalog.
 	TargetKind        string
-	ProjectID         string
-	Project           string
-	ProjectState      string
+	MachineID         string
+	Machine           string
+	MachineState      string
 	MachineGeneration uint64
 	// TunnelTarget identifies how the tunnel layer should reach the helper.
 	TunnelTarget string
-	// Local is true when this resolves to a local dev target (no real VM).
+	// Local is true when this resolves to a local development target.
 	Local bool
 	// Terminal is the helper WebSocket attach descriptor returned by paperboat-server's
 	// pre-connect broker.
@@ -187,7 +186,8 @@ type AuthTarget struct {
 	Scopes    []string
 	// ResourceID is the authoritative machine-access grant shared by the
 	// operation credential and signed native network scope.
-	ResourceID string
+	ResourceID     string
+	UsageSessionID string
 }
 
 // TerminalTarget is the client-safe environment WebSocket endpoint returned
@@ -199,8 +199,6 @@ type TerminalTarget struct {
 	QUICEndpoint  string
 	WSSEndpoint   string
 	Auth          AuthTarget
-	ThreadID      string
-	TerminalID    string
 	SessionID     string
 	CWD           string
 	// Debug requests connection-scoped runtime diagnostics for the local

@@ -22,7 +22,6 @@ type ManagedSSHConfig struct {
 	Executable           string
 	OwnerUID             uint32
 	InheritedAgentSocket string
-	AliasSuffix          string
 }
 
 type DaemonConfig struct {
@@ -42,8 +41,7 @@ type DaemonConfig struct {
 	WarmPeerMetadata        func(context.Context, []api.UserMachine) error
 	IssuePeerStream         func(context.Context, localapi.PeerStreamRequest) (localapi.PeerStreamRequest, error)
 	FileTransfers           localapi.FileTransferBroker
-	DeviceSuffix            string
-	DeviceLoopbackCIDR      string
+	ReconcileMachines       func(context.Context, []api.UserMachine) error
 	OnMachines              func(context.Context, []api.UserMachine)
 }
 

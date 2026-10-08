@@ -6,10 +6,14 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 )
@@ -22,7 +26,8 @@ type ingressBindingKey struct{}
 type ingressExpiryKey struct{}
 
 func (f OriginStreamForwarder) admitIngress(parent context.Context, stream io.ReadWriteCloser, open connectorprotocol.StreamOpen, route hoststate.TunnelConfigRoute) (context.Context, context.CancelFunc, error) {
-	ctx, cancel := context.WithCancel(parent)
+	ctx, cancelCause := context.WithCancelCause(parent)
+	cancel := func() { cancelCause(nil) }
 	fail := func(err error) (context.Context, context.CancelFunc, error) { cancel(); return nil, nil, err }
 	// A peer cannot hold origin admission indefinitely with a partial preface.
 	stopRead := time.AfterFunc(10*time.Second, func() { _ = stream.Close() })
@@ -48,7 +53,8 @@ func (f OriginStreamForwarder) admitIngress(parent context.Context, stream io.Re
 	stopLookup()
 	if err != nil {
 		originDiagnosticLogger.WarnContext(ctx, "durable ingress rejected", "stage", "authority_lookup")
-		return fail(connectorprotocol.ErrIngressDenied)
+		captureIngressFailure(ctx, "peer_authority", err)
+		return fail(ingressOperationFailure{cause: err})
 	}
 	if decision.Authorize(current, open, current.EdgeNodeID, current.EdgeProcessEpoch, time.Now().UTC()) != nil {
 		originDiagnosticLogger.WarnContext(ctx, "durable ingress rejected", "stage", "authority_binding")
@@ -60,7 +66,8 @@ func (f OriginStreamForwarder) admitIngress(parent context.Context, stream io.Re
 	}
 	ctx = context.WithValue(ctx, ingressBindingKey{}, current.Binding)
 	ctx = context.WithValue(ctx, ingressExpiryKey{}, current.ExpiresAt)
-	expire := time.AfterFunc(time.Until(current.ExpiresAt), func() { cancel(); _ = stream.Close() })
+	terminate := ingressTermination(ctx, cancelCause, stream)
+	expire := time.AfterFunc(time.Until(current.ExpiresAt), func() { terminate(nil) })
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -72,16 +79,9 @@ func (f OriginStreamForwarder) admitIngress(parent context.Context, stream io.Re
 			case <-ctx.Done():
 				return
 			case <-tick.C:
-				refresh, stop := context.WithDeadline(ctx, current.ExpiresAt)
-				next, err := f.IngressAuthority(refresh, open, decision)
-				stop()
-				prior := current
-				// Refresh grants time only; every independent authority dimension
-				// must remain identical for an existing application stream.
-				prior.IssuedAt, prior.ExpiresAt = next.IssuedAt, next.ExpiresAt
-				if err != nil || prior.Authorize(next, open, next.EdgeNodeID, next.EdgeProcessEpoch, time.Now().UTC()) != nil {
-					cancel()
-					_ = stream.Close()
+				next, err := f.refreshIngress(ctx, open, decision, current)
+				if err != nil {
+					terminate(err)
 					return
 				}
 				if ctx.Err() != nil {
@@ -93,6 +93,118 @@ func (f OriginStreamForwarder) admitIngress(parent context.Context, stream io.Re
 		}
 	}()
 	return ctx, func() { cancel(); <-done }, nil
+}
+
+// ingressOperationFailure keeps operational causes distinct from a proven
+// authorization rejection without exposing authority or origin error text.
+type ingressOperationFailure struct{ cause error }
+
+func (ingressOperationFailure) Error() string         { return "Tunnel ingress operation failed." }
+func (failure ingressOperationFailure) Unwrap() error { return failure.cause }
+
+func captureIngressFailure(ctx context.Context, stage string, err error) {
+	if err == nil || ingressDenialOnly(err) {
+		return
+	}
+	code, operation := "peer_authority_failed", "browser_authorization"
+	if stage == "target_connect" {
+		code, operation = "transport_failed", "origin"
+	}
+	errorreport.Current().CaptureFailure(ctx, "paperboat-daemon", operation, stage, code, err)
+}
+
+// ingressTermination owns one carrier close and one final failure capture.
+// Expiry can win the close race while an in-flight authority lookup still
+// returns an independent error; that late cause must remain observable.
+func ingressTermination(ctx context.Context, cancel context.CancelCauseFunc, stream io.Closer) func(error) error {
+	var closeOnce, captureOnce sync.Once
+	var closeErr error
+	return func(cause error) error {
+		// Revoke before closing: Close may wait on work which needs ctx canceled.
+		cancel(cause)
+		closeOnce.Do(func() { closeErr = stream.Close() })
+		result := errors.Join(cause, closeErr)
+		if result != nil && !ingressExpectedOnly(result, true) {
+			faultCause := result
+			if cause != nil && ingressExpectedOnly(closeErr, true) {
+				// Keep expected teardown in the returned cause tree, but do not
+				// let it replace the independent operational fault projection.
+				faultCause = cause
+			}
+			captured := false
+			captureOnce.Do(func() {
+				captured = true
+				captureIngressFailure(ctx, "peer_authority", faultCause)
+			})
+			if !captured && cause != nil {
+				// Cleanup may already own the final exception; retain the late
+				// authority cause as an observation without a second exception.
+				errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "browser_authorization", "peer_authority", "peer_authority_failed", cause)
+			}
+		}
+		return result
+	}
+}
+
+func ingressDenialOnly(err error) bool { return ingressExpectedOnly(err, false) }
+
+// Lifecycle-only quiet leaves never apply to initial lookup/origin failures.
+func ingressExpectedOnly(err error, lifecycle bool) bool {
+	budget := 16
+	active := make(map[error]bool)
+	var visit func(error) bool
+	visit = func(err error) bool {
+		if err == nil || budget == 0 {
+			return false
+		}
+		budget--
+		v := reflect.ValueOf(err)
+		if v.Kind() == reflect.Pointer && v.IsNil() {
+			return false
+		}
+		if v.Type().Comparable() {
+			if active[err] {
+				return false
+			}
+			active[err] = true
+			defer delete(active, err)
+		}
+		if joined, ok := err.(interface{ Unwrap() []error }); ok {
+			children := joined.Unwrap()
+			if len(children) == 0 {
+				return false
+			}
+			for _, child := range children {
+				if !visit(child) {
+					return false
+				}
+			}
+			return true
+		}
+		if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+			if child := wrapped.Unwrap(); child != nil {
+				return visit(child)
+			}
+		}
+		return err == connectorprotocol.ErrIngressDenied || lifecycle && (err == net.ErrClosed || err == os.ErrClosed || err == context.Canceled)
+	}
+	return visit(err)
+}
+
+func (f OriginStreamForwarder) refreshIngress(ctx context.Context, open connectorprotocol.StreamOpen, decision, current connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error) {
+	refresh, stop := context.WithDeadline(ctx, current.ExpiresAt)
+	defer stop()
+	next, err := f.IngressAuthority(refresh, open, decision)
+	if err != nil {
+		return next, ingressOperationFailure{cause: err}
+	}
+	// Refresh grants time only; all independent authority dimensions remain
+	// identical for the existing application stream.
+	current.IssuedAt, current.ExpiresAt = next.IssuedAt, next.ExpiresAt
+	if err := current.Authorize(next, open, next.EdgeNodeID, next.EdgeProcessEpoch, time.Now().UTC()); err != nil {
+		return next, err
+	}
+	return next, nil
 }
 
 func ingressRouteMatches(b connectorprotocol.IngressBinding, r hoststate.TunnelConfigRoute) bool {
@@ -141,7 +253,8 @@ func (f OriginStreamForwarder) serveTCP(ctx context.Context, stream io.ReadWrite
 	}
 	connection, err := dialer.DialContext(ctx, "tcp", route.OriginAddress)
 	if err != nil {
-		return ErrOriginUnavailable
+		captureIngressFailure(ctx, "target_connect", err)
+		return ingressOperationFailure{cause: errors.Join(ErrOriginUnavailable, err)}
 	}
 	defer connection.Close()
 	half, ok := connection.(interface{ CloseWrite() error })

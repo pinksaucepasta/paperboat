@@ -20,12 +20,25 @@ type Config struct {
 	Correlation  func() (string, error)
 }
 
+type correlationError struct{ cause error }
+
+func (e correlationError) Error() string { return "create doctor correlation" }
+func (e correlationError) Unwrap() error { return e.cause }
+
 func Run(ctx context.Context, config Config, machine *Machine, probes []Probe) (Report, error) {
 	if ctx == nil || config.Timeout <= 0 || config.Timeout > time.Minute || config.ProbeTimeout <= 0 || config.ProbeTimeout > config.Timeout || config.Clock == nil || config.Correlation == nil || len(probes) == 0 || len(probes) > 64 {
 		return Report{}, errors.New("invalid doctor runner configuration")
 	}
+	for _, probe := range probes {
+		if !safeIdentifier.MatchString(probe.Code) || probe.Run == nil {
+			return Report{}, errors.New("invalid doctor probe")
+		}
+	}
 	correlationID, err := config.Correlation()
-	if err != nil || !safeIdentifier.MatchString(correlationID) {
+	if err != nil {
+		return Report{}, correlationError{cause: err}
+	}
+	if !safeIdentifier.MatchString(correlationID) {
 		return Report{}, errors.New("create doctor correlation")
 	}
 	runCtx, cancel := context.WithTimeout(ctx, config.Timeout)
@@ -33,9 +46,6 @@ func Run(ctx context.Context, config Config, machine *Machine, probes []Probe) (
 	checks := make([]Check, len(probes))
 	var wait sync.WaitGroup
 	for index, probe := range probes {
-		if !safeIdentifier.MatchString(probe.Code) || probe.Run == nil {
-			return Report{}, errors.New("invalid doctor probe")
-		}
 		wait.Add(1)
 		go func(index int, probe Probe) {
 			defer wait.Done()

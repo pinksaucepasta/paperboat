@@ -94,17 +94,18 @@ func TestRetryJSONRequestHonorsCancellationDuringBackoff(t *testing.T) {
 		calls++
 		return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: make(http.Header), Body: http.NoBody, Request: request}, nil
 	})})
-	ctx, cancel := context.WithCancel(context.Background())
+	cause := errors.New("caller stopped file transfer")
+	ctx, cancel := context.WithCancelCause(context.Background())
 	client.retryWait = func(retryCtx context.Context, attempt int) error {
 		if attempt != 0 {
 			t.Fatalf("attempt=%d", attempt)
 		}
-		cancel()
+		cancel(cause)
 		return retryCtx.Err()
 	}
 
 	err := client.retryJSONRequest(ctx, http.MethodPost, client.Endpoint, "ft_create_cancel", "application/json", 0, []byte(`{}`), &Batch{})
-	if !errors.Is(err, context.Canceled) || calls != 1 {
+	if !errors.Is(err, cause) || !errors.Is(err, context.Canceled) || calls != 1 {
 		t.Fatalf("error=%v calls=%d", err, calls)
 	}
 }

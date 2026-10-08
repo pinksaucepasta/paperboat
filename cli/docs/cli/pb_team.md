@@ -21,6 +21,7 @@ With --json, this command group lists its available commands.
       --json               print machine-readable JSON
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO
@@ -32,12 +33,14 @@ With --json, this command group lists its available commands.
 * [pb team cancel-invite](pb_team_cancel-invite.md)	 - Cancel an outstanding invitation
 * [pb team create](pb_team_create.md)	 - Create a team
 * [pb team delete](pb_team_delete.md)	 - Delete a team
-* [pb team device](pb_team_device.md)	 - Share devices and manage exact team access
 * [pb team get](pb_team_get.md)	 - Show one team and its current generation
 * [pb team grant](pb_team_grant.md)	 - Set or revoke an explicit resource permission
+* [pb team invitation](pb_team_invitation.md)	 - Show an invitation you may receive or administer
+* [pb team invitations](pb_team_invitations.md)	 - Discover pending invitations received by you or administered for a team
 * [pb team invite](pb_team_invite.md)	 - Invite an account as a member
 * [pb team leave](pb_team_leave.md)	 - Leave a team
 * [pb team list](pb_team_list.md)	 - List teams
+* [pb team machine](pb_team_machine.md)	 - Share machines and manage exact team access
 * [pb team remove](pb_team_remove.md)	 - Remove a team member
 * [pb team role](pb_team_role.md)	 - Change a team member's role
 * [pb team transfer](pb_team_transfer.md)	 - Transfer team ownership

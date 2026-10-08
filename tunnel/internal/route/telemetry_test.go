@@ -258,3 +258,29 @@ func equalLifecycleTypes(left, right []LifecycleType) bool {
 	}
 	return true
 }
+
+func TestCoreTelemetrySinkGenerationReplacementClearsOverload(t *testing.T) {
+	health, _ := edgetelemetry.NewHealthTracker(time.Now)
+	events, _ := edgetelemetry.NewEventLog(32)
+	defer events.Close()
+	sink, _ := NewCoreTelemetrySink(health, edgetelemetry.NewMetrics(), events)
+	for generation := uint64(1); generation <= 32; generation++ {
+		for _, kind := range []LifecycleType{LifecycleActivated, LifecycleStreamOverloaded} {
+			if err := sink.RecordRouteTelemetry(RouteTelemetryRecord{At: time.Now(), Type: kind, Generation: generation, MaximumStreams: 1, ActiveStreams: 1, CorrelationID: "correlation_test"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := sink.RecordRouteTelemetry(RouteTelemetryRecord{At: time.Now(), Type: LifecycleStreamReleased, Generation: generation - 1, MaximumStreams: 1, CorrelationID: "correlation_test"}); err != nil {
+			t.Fatal(err)
+		}
+		if health.Snapshot().Dimensions.Route.Status != edgetelemetry.StatusDegraded {
+			t.Fatal("old release recovered current overloaded route")
+		}
+	}
+	if err := sink.RecordRouteTelemetry(RouteTelemetryRecord{At: time.Now(), Type: LifecycleActivated, Generation: 33, CorrelationID: "correlation_test"}); err != nil {
+		t.Fatal(err)
+	}
+	if sink.overloaded || health.Snapshot().Dimensions.Route.Status != edgetelemetry.StatusReady {
+		t.Fatal("replacement retained old exhaustion")
+	}
+}

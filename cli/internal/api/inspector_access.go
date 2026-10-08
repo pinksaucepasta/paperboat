@@ -11,7 +11,7 @@ import (
 type InspectorCarrier struct {
 	LeaseGeneration      uint64 `json:"lease_generation"`
 	AttachmentGeneration uint64 `json:"attachment_generation"`
-	OwnerDeviceID        string `json:"owner_device_id"`
+	OwnerMachineID       string `json:"owner_machine_id"`
 	MachineID            string `json:"machine_id"`
 	RouteGeneration      uint64 `json:"route_generation"`
 	AccountID            string `json:"account_id"`

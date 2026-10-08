@@ -3,18 +3,17 @@ package configsync
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/go-git/go-git/v5/plumbing/transport/http"
+	"time"
 )
 
 var ErrGitRepositoryInvalid = errors.New("invalid config Git repository")
@@ -28,19 +27,21 @@ type WorkspaceReconciler interface {
 }
 
 type GitRepositoryConfig struct {
-	Root       string
-	Access     RepositoryAccessSource
-	Reconciler WorkspaceReconciler
-	PushTarget bool
+	Root           string
+	Access         RepositoryAccessSource
+	Reconciler     WorkspaceReconciler
+	PushTarget     bool
+	CredentialRoot string
 }
 
 type GitRepository struct {
-	root       string
-	access     RepositoryAccessSource
-	reconciler WorkspaceReconciler
-	pushTarget bool
-	lastRemote string
-	mu         sync.Mutex
+	root           string
+	access         RepositoryAccessSource
+	reconciler     WorkspaceReconciler
+	pushTarget     bool
+	credentialRoot string
+	lastRemote     string
+	mu             sync.Mutex
 }
 
 func NewGitRepository(config GitRepositoryConfig) (*GitRepository, error) {
@@ -53,19 +54,26 @@ func NewGitRepository(config GitRepositoryConfig) (*GitRepository, error) {
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return nil, errors.Join(ErrGitRepositoryInvalid, err)
 	}
-	return &GitRepository{root: config.Root, access: config.Access, reconciler: config.Reconciler, pushTarget: config.PushTarget}, nil
+	initRepositoryTransports()
+	return &GitRepository{credentialRoot: config.CredentialRoot, root: config.Root, access: config.Access, reconciler: config.Reconciler, pushTarget: config.PushTarget}, nil
 }
 
-func (r *GitRepository) Fetch(ctx context.Context) (RemoteSnapshot, error) {
+func (r *GitRepository) Fetch(ctx context.Context) (result RemoteSnapshot, resultErr error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	access, repository, err := r.open(ctx)
 	if err != nil {
 		return RemoteSnapshot{}, err
 	}
-	auth := &http.BasicAuth{Username: access.Username, Password: access.Password}
+	ctx, cancel := context.WithDeadline(ctx, access.ExpiresAt)
+	defer cancel()
+	opts, err := r.transportAccess(ctx, access)
+	if err != nil {
+		return RemoteSnapshot{}, err
+	}
+	defer func() { resultErr = repositoryCleanupFailure(resultErr, opts.close()) }()
 	err = repository.FetchContext(ctx, &git.FetchOptions{
-		RemoteName: "origin", Auth: auth, Prune: true,
+		RemoteName: "origin", Auth: opts.auth, CABundle: opts.ca, Prune: true,
 		RefSpecs: []config.RefSpec{config.RefSpec("+refs/heads/" + access.Branch + ":refs/remotes/origin/" + access.Branch)},
 		Tags:     git.NoTags, Force: true,
 	})
@@ -150,10 +158,10 @@ func (r *GitRepository) Reconcile(ctx context.Context, remote RemoteSnapshot) (P
 	return r.reconciler.Reconcile(ctx, r.root, remote)
 }
 
-func (r *GitRepository) Publish(ctx context.Context, prepared PreparedPublication, fencingToken int64) (PublishResult, error) {
+func (r *GitRepository) Publish(ctx context.Context, prepared PreparedPublication, fencingToken int64) (result PublishResult, resultErr error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if prepared.CommitID == "" || prepared.ExpectedRemoteRevision == "" || fencingToken < 1 {
+	if !plumbing.IsHash(prepared.CommitID) || !plumbing.IsHash(prepared.ExpectedRemoteRevision) || fencingToken < 1 {
 		return PublishResult{}, ErrGitRepositoryInvalid
 	}
 	access, repository, err := r.open(ctx)
@@ -167,10 +175,25 @@ func (r *GitRepository) Publish(ctx context.Context, prepared PreparedPublicatio
 	if err != nil || localReference.Hash().String() != prepared.CommitID {
 		return PublishResult{}, ErrGitRepositoryInvalid
 	}
-	auth := &http.BasicAuth{Username: access.Username, Password: access.Password}
+	ctx, cancel := context.WithDeadline(ctx, access.ExpiresAt)
+	defer cancel()
+	if access.Transport == "local" {
+		return publishLocal(ctx, repository, access, prepared)
+	}
+	opts, err := r.transportAccess(ctx, access)
+	if err != nil {
+		return PublishResult{}, err
+	}
+	defer func() { resultErr = repositoryCleanupFailure(resultErr, opts.close()) }()
+	expected := plumbing.NewHash(prepared.ExpectedRemoteRevision)
+	reachable, err := commitReachable(repository, expected, localReference.Hash(), 10_000)
+	if err != nil || !reachable {
+		return PublishResult{}, ErrRemoteRevisionChanged
+	}
 	err = repository.PushContext(ctx, &git.PushOptions{
-		RemoteName: "origin", Auth: auth, Atomic: true,
-		RefSpecs: []config.RefSpec{config.RefSpec("refs/heads/" + access.Branch + ":refs/heads/" + access.Branch)},
+		RemoteName: "origin", Auth: opts.auth, CABundle: opts.ca,
+		RefSpecs:       []config.RefSpec{config.RefSpec("refs/heads/" + access.Branch + ":refs/heads/" + access.Branch)},
+		ForceWithLease: &git.ForceWithLease{RefName: plumbing.NewBranchReferenceName(access.Branch), Hash: expected},
 	})
 	if err != nil {
 		if errors.Is(err, git.NoErrAlreadyUpToDate) {
@@ -181,7 +204,7 @@ func (r *GitRepository) Publish(ctx context.Context, prepared PreparedPublicatio
 	return PublishResult{RemoteRevision: prepared.CommitID, Landed: true}, nil
 }
 
-func (r *GitRepository) ObserveCommit(ctx context.Context, commitID string) (bool, string, error) {
+func (r *GitRepository) ObserveCommit(ctx context.Context, commitID string) (landedResult bool, revisionResult string, resultErr error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !plumbing.IsHash(commitID) {
@@ -191,9 +214,15 @@ func (r *GitRepository) ObserveCommit(ctx context.Context, commitID string) (boo
 	if err != nil {
 		return false, "", err
 	}
-	auth := &http.BasicAuth{Username: access.Username, Password: access.Password}
+	ctx, cancel := context.WithDeadline(ctx, access.ExpiresAt)
+	defer cancel()
+	opts, err := r.transportAccess(ctx, access)
+	if err != nil {
+		return false, "", err
+	}
+	defer func() { resultErr = repositoryCleanupFailure(resultErr, opts.close()) }()
 	err = repository.FetchContext(ctx, &git.FetchOptions{
-		RemoteName: "origin", Auth: auth,
+		RemoteName: "origin", Auth: opts.auth, CABundle: opts.ca,
 		RefSpecs: []config.RefSpec{config.RefSpec("+refs/heads/" + access.Branch + ":refs/remotes/origin/" + access.Branch)},
 		Tags:     git.NoTags, Force: true,
 	})
@@ -236,12 +265,15 @@ func (r *GitRepository) PublicationAborted(ctx context.Context, prepared Prepare
 	return nil
 }
 
-func (r *GitRepository) open(ctx context.Context) (RepositoryAccess, *git.Repository, error) {
+func (r *GitRepository) open(ctx context.Context) (accessResult RepositoryAccess, repositoryResult *git.Repository, resultErr error) {
 	access, err := r.access.RepositoryAccess(ctx)
 	if err != nil {
 		return RepositoryAccess{}, nil, err
 	}
-	if access.Password == "" || access.Username != "x-access-token" || access.Branch == "" ||
+	if !access.ExpiresAt.After(time.Now()) {
+		return RepositoryAccess{}, nil, ErrAuthorization
+	}
+	if access.Branch == "" || plumbing.NewBranchReferenceName(access.Branch).Validate() != nil ||
 		(access.Capability != "repository_contents_read" && access.Capability != "repository_contents_write") {
 		return RepositoryAccess{}, nil, ErrGitRepositoryInvalid
 	}
@@ -249,16 +281,44 @@ func (r *GitRepository) open(ctx context.Context) (RepositoryAccess, *git.Reposi
 	if r.pushTarget {
 		repositoryURL = access.PublishURL
 	}
+	normalized, kind, err := NormalizeRepositoryEndpoint(repositoryURL)
+	if err != nil || kind != access.Transport || normalized != repositoryURL {
+		return RepositoryAccess{}, nil, ErrGitRepositoryInvalid
+	}
+	ctx, cancel := context.WithDeadline(ctx, access.ExpiresAt)
+	defer cancel()
+	if kind == "local" {
+		if _, err := openLocalRepositoryContext(ctx, repositoryURL); err != nil {
+			return RepositoryAccess{}, nil, err
+		}
+	}
+	opts, err := r.transportAccess(ctx, access)
+	if err != nil {
+		return RepositoryAccess{}, nil, err
+	}
+	defer func() { resultErr = repositoryCleanupFailure(resultErr, opts.close()) }()
 	info, statErr := os.Lstat(r.root)
 	switch {
 	case errors.Is(statErr, os.ErrNotExist):
-		repository, cloneErr := git.PlainCloneContext(ctx, r.root, false, &git.CloneOptions{
-			URL: repositoryURL, Auth: &http.BasicAuth{Username: access.Username, Password: access.Password},
+		staging, err := newPrivateRepositoryTemporaryDirectory(filepath.Dir(r.root), ".pb-config-clone-")
+		if err != nil {
+			return RepositoryAccess{}, nil, repositoryUnavailableFailure(err)
+		}
+		defer func() { resultErr = repositoryCleanupFailure(resultErr, os.RemoveAll(staging)) }()
+		_, cloneErr := git.PlainCloneContext(ctx, staging, false, &git.CloneOptions{
+			URL: repositoryURL, Auth: opts.auth, CABundle: opts.ca,
 			RemoteName: "origin", ReferenceName: plumbing.NewBranchReferenceName(access.Branch),
 			SingleBranch: true, NoCheckout: false, Tags: git.NoTags,
 		})
 		if cloneErr != nil {
 			return RepositoryAccess{}, nil, sanitizeGitError(cloneErr)
+		}
+		if err := os.Rename(staging, r.root); err != nil {
+			return RepositoryAccess{}, nil, repositoryUnavailableFailure(err)
+		}
+		repository, err := git.PlainOpen(r.root)
+		if err != nil {
+			return RepositoryAccess{}, nil, errors.Join(ErrGitRepositoryInvalid, sanitizeGitError(err))
 		}
 		return access, repository, nil
 	case statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0:
@@ -266,11 +326,11 @@ func (r *GitRepository) open(ctx context.Context) (RepositoryAccess, *git.Reposi
 	}
 	repository, err := git.PlainOpen(r.root)
 	if err != nil {
-		return RepositoryAccess{}, nil, ErrGitRepositoryInvalid
+		return RepositoryAccess{}, nil, errors.Join(ErrGitRepositoryInvalid, sanitizeGitError(err))
 	}
 	remote, err := repository.Remote("origin")
 	if err != nil || len(remote.Config().URLs) != 1 || remote.Config().URLs[0] != repositoryURL {
-		return RepositoryAccess{}, nil, ErrGitRepositoryInvalid
+		return RepositoryAccess{}, nil, errors.Join(ErrGitRepositoryInvalid, sanitizeGitError(err))
 	}
 	return access, repository, nil
 }
@@ -312,17 +372,44 @@ func commitReachable(repository *git.Repository, want, head plumbing.Hash, limit
 }
 
 func providerOutcomeUncertain(err error) bool {
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		return true
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "timeout") || strings.Contains(message, "connection") ||
-		strings.Contains(message, "eof") || strings.Contains(message, "reset")
+	err = gitUnderlyingError(err)
+	var network net.Error
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, net.ErrClosed) || errors.As(err, &network)
 }
 
 func sanitizeGitError(err error) error {
+	err = gitUnderlyingError(err)
 	if err == nil {
 		return nil
 	}
-	return fmt.Errorf("%w: repository operation failed", ErrGitRepositoryInvalid)
+	return &sanitizedGitFailure{cause: err}
+}
+
+type sanitizedGitFailure struct{ cause error }
+
+func (*sanitizedGitFailure) Error() string { return "repository operation failed" }
+func (e *sanitizedGitFailure) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+func (*sanitizedGitFailure) Is(target error) bool { return target == ErrGitRepositoryInvalid }
+
+// go-git v5 plumbing errors expose Err without implementing Unwrap.
+func gitUnderlyingError(err error) error {
+	for range 8 {
+		var unexpected *plumbing.UnexpectedError
+		var permanent *plumbing.PermanentError
+		if errors.As(err, &unexpected) && unexpected.Err != nil {
+			err = unexpected.Err
+			continue
+		}
+		if errors.As(err, &permanent) && permanent.Err != nil {
+			err = permanent.Err
+			continue
+		}
+		break
+	}
+	return err
 }

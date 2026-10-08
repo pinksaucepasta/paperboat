@@ -2,9 +2,11 @@ package errorreport
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"syscall"
 	"testing"
 	"time"
 
@@ -17,13 +19,13 @@ func TestLiveSentryNativeFailureRecovery(t *testing.T) {
 		t.Skip("set PB_LIVE_SENTRY_DSN and PB_LIVE_SENTRY_REF")
 	}
 	if !supportref.Valid(reference) {
-		t.Fatal("PB_LIVE_SENTRY_REF must be pb-32lowerhex")
+		t.Fatal("PB_LIVE_SENTRY_REF must be support_UUIDv4")
 	}
 	for _, component := range []string{"paperboat-cli", "paperboat-daemon"} {
 		t.Run(component, func(t *testing.T) {
 			t.Setenv("PB_SENTRY_ENABLED", "true")
 			t.Setenv("PB_SENTRY_DSN", dsn)
-			t.Setenv("PB_SENTRY_RELEASE", component+":validation-20260919")
+			t.Setenv("PB_SENTRY_RELEASE", component+":validation-20261008")
 			t.Setenv("PB_SENTRY_ENVIRONMENT", "sentry-validation")
 			t.Setenv("PB_SENTRY_LOGS_ENABLED", "true")
 			t.Setenv("PB_SENTRY_METRICS_ENABLED", "true")
@@ -36,6 +38,15 @@ func TestLiveSentryNativeFailureRecovery(t *testing.T) {
 			defer restore()
 			defer reporter.Flush(context.Background())
 			ctx := supportref.WithContext(context.Background(), reference)
+			var local []Fault
+			restoreObserver := InstallFaultObserver(func(_ context.Context, fault Fault) { local = append(local, fault) })
+			defer restoreObserver()
+			nativeCtx, recoverNative := reporter.Start(ctx, component, "connect")
+			fault := reporter.CaptureFailure(nativeCtx, component, "connect", "target_connect", "native_private_failed", fmt.Errorf("private target contents must not export: %w", syscall.ECONNREFUSED))
+			if len(local) != 1 || local[0].Cause != "connection_refused" || local[0].SupportReference != reference || fault.SourceFile != "live_sentry_test.go" || fault.SourceFunction == "" || fault.SourceLine <= 0 {
+				t.Fatal("enabled local fault/source projection failed")
+			}
+			recoverNative("success")
 			ctx, complete := reporter.Start(ctx, component, "control_request")
 			calls := 0
 			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
@@ -65,7 +76,6 @@ func TestLiveSentryNativeFailureRecovery(t *testing.T) {
 				reporter.Observe(ctx, component, "control_request", outcome, time.Millisecond)
 			}
 			complete("success")
-			reporter.Capture(ctx, component, "unexpected_failure")
 			reporter.RegisterMetrics(func() []MetricSample {
 				return []MetricSample{{Name: "paperboat_reporting_signal_enabled", Value: 1, Labels: map[string]string{"signal": "metrics"}}, {Name: "paperboat_reporting_errors_dropped_total_snapshot", Value: 0}}
 			}, []MetricDescriptor{{Name: "paperboat_reporting_signal_enabled", Labels: map[string]map[string]bool{"signal": {"metrics": true}}}, {Name: "paperboat_reporting_errors_dropped_total_snapshot"}})

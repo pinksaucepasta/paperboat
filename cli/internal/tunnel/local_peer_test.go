@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -528,5 +529,160 @@ func TestLocalExecPeerConnFailsWhenEventsCloseWithoutTerminalOutcome(t *testing.
 		}
 	case <-time.After(time.Second):
 		t.Fatal("server did not stop after remote event stream closed")
+	}
+}
+
+func TestLocalExecAbortJoinsSaturatedReaderAndAllowsFreshAttachment(t *testing.T) {
+	for attempt := 0; attempt < 2; attempt++ {
+		client, server := net.Pipe()
+		connection, err := NewLocalExecPeerConn(client)
+		if err != nil {
+			t.Fatal(err)
+		}
+		peer := connection.(*localPeerConn)
+		t.Cleanup(func() { _ = peer.Abort(); _ = server.Close() })
+		written := make(chan struct{})
+		go func() {
+			defer close(written)
+			writer := &localPeerWriter{writer: server}
+			payload, _ := json.Marshal(ExecEvent{OperationID: "same-operation", Stream: "stdout", Data: []byte("x")})
+			for i := 0; i < 300; i++ {
+				if writer.write(localPeerExecEvent, payload) != nil {
+					return
+				}
+			}
+		}()
+		deadline := time.Now().Add(time.Second)
+		for len(peer.events) < cap(peer.events) && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		if len(peer.events) != cap(peer.events) {
+			t.Fatal("reader did not reach real bounded event queue")
+		}
+		done := make(chan error, 1)
+		go func() { done <- peer.Abort() }()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("abort did not join saturated reader")
+		}
+		select {
+		case <-peer.done:
+		default:
+			t.Fatal("reader remains alive")
+		}
+		select {
+		case <-written:
+		case <-time.After(time.Second):
+			t.Fatal("peer writer remains alive")
+		}
+		if err := peer.Abort(); err != nil {
+			t.Fatal(err)
+		}
+		_ = server.Close()
+	}
+}
+
+type abortExecRemote struct {
+	*localPeerExecRemote
+	closeCalls int
+}
+
+func (r *abortExecRemote) Close() error {
+	r.mu.Lock()
+	r.closeCalls++
+	r.mu.Unlock()
+	return r.localPeerRemote.Close()
+}
+
+func TestLocalExecAttachmentLossDetachesWithoutRemoteCancel(t *testing.T) {
+	client, server := net.Pipe()
+	remoteServer, remotePeer := net.Pipe()
+	defer remotePeer.Close()
+	remote := &abortExecRemote{localPeerExecRemote: &localPeerExecRemote{localPeerRemote: &localPeerRemote{Conn: remoteServer}, events: make(chan ExecEvent)}}
+	served := make(chan error, 1)
+	go func() { served <- ServeLocalPeerConn(context.Background(), server, remote) }()
+	connection, err := NewLocalExecPeerConn(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := connection.(*localPeerConn).Abort(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-served:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("bridge workers did not join")
+	}
+	remote.mu.Lock()
+	detached, canceled, closes := remote.detached, remote.cancelled, remote.closeCalls
+	remote.mu.Unlock()
+	if !detached || canceled || closes != 0 {
+		t.Fatalf("detach=%v cancel=%v close=%d", detached, canceled, closes)
+	}
+	_ = remoteServer.Close()
+}
+
+type acknowledgedExecRemote struct {
+	*localPeerExecRemote
+	entered chan struct{}
+	release chan struct{}
+	failure error
+}
+
+func (r *acknowledgedExecRemote) Cancel() error {
+	close(r.entered)
+	<-r.release
+	return r.failure
+}
+func TestLocalExecCancelWaitsForActualRemoteAcknowledgment(t *testing.T) {
+	for _, failure := range []error{nil, io.ErrUnexpectedEOF} {
+		client, server := net.Pipe()
+		remoteServer, remotePeer := net.Pipe()
+		remote := &acknowledgedExecRemote{localPeerExecRemote: &localPeerExecRemote{localPeerRemote: &localPeerRemote{Conn: remoteServer}, events: make(chan ExecEvent)}, entered: make(chan struct{}), release: make(chan struct{}), failure: failure}
+		served := make(chan error, 1)
+		go func() { served <- ServeLocalPeerConn(context.Background(), server, remote) }()
+		connection, err := NewLocalExecPeerConn(client)
+		if err != nil {
+			t.Fatal(err)
+		}
+		canceled := make(chan error, 1)
+		go func() { canceled <- connection.Cancel() }()
+		select {
+		case <-remote.entered:
+		case <-time.After(time.Second):
+			t.Fatal("cancel did not reach remote owner")
+		}
+		select {
+		case <-canceled:
+			t.Fatal("frame write falsely confirmed remote cancellation")
+		default:
+		}
+		close(remote.release)
+		select {
+		case err := <-canceled:
+			if (err == nil) != (failure == nil) {
+				t.Fatalf("cancel result=%v remote failure=%v", err, failure)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("cancel acknowledgment did not complete")
+		}
+		_ = connection.(*localPeerConn).Abort()
+		select {
+		case err := <-served:
+			if failure != nil && !errors.Is(err, failure) {
+				t.Fatal("remote original cause lost")
+			}
+		case <-time.After(time.Second):
+			t.Fatal("bridge did not join")
+		}
+		_ = remoteServer.Close()
+		_ = remotePeer.Close()
 	}
 }

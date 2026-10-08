@@ -16,7 +16,7 @@ Revoke an on-demand port policy
 Revoke one exact on-demand port policy at its expected generation. Subsequent activations are denied; this does not delete unrelated tunnel routes.
 
 .PP
-An on-demand policy authorizes an exact machine port for private or team access. A policy does not publish a public URL or grant every port on the device. Revocation fences subsequent activation.
+An on-demand policy authorizes an exact machine port for private or team access. A policy does not publish a public URL or grant every port on the machine. Revocation fences subsequent activation.
 
 .PP
 JSON output is supported with --json.
@@ -50,6 +50,10 @@ JSON output is supported with --json.
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

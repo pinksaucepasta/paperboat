@@ -13,7 +13,7 @@ pb-wait - Wait for a machine readiness condition
 Wait for a machine readiness condition
 
 .PP
-Wait for the selected device to satisfy a named readiness condition from --for. --timeout bounds the wait, and an expired wait reports a failure instead of treating mere connectivity as readiness.
+Wait for the selected machine to satisfy a named readiness condition from --for. --timeout bounds the wait, and an expired wait reports a failure instead of treating mere connectivity as readiness.
 
 .PP
 JSON output is supported with --json.
@@ -47,6 +47,10 @@ JSON output is supported with --json.
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

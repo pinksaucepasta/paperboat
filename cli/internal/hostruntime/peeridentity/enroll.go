@@ -98,8 +98,8 @@ func (c *Client) Ensure(ctx context.Context) error {
 			return fmt.Errorf("machine endpoint certificate: %w", ErrInvalid)
 		}
 		// Previously approved certificates may still be signed by an old
-		// account key. Renew them with this device's existing endpoint key;
-		// expiry alone would leave an installed device unable to restart.
+		// account key. Renew them with this machine's existing endpoint key;
+		// expiry alone would leave an installed machine unable to restart.
 		_, ownCertificateErr := endpointidentity.Verify(endpoint.Certificate, quicPublic, endpointidentity.Expected{AccountID: registration.AccountID, Role: endpointidentity.RoleMachine, EndpointID: registration.MachineID, Generation: endpoint.Generation}, now)
 		if !previous.Claims.ExpiresAt.After(now.Add(7*24*time.Hour)) || ownCertificateErr != nil {
 			serial = previous.Claims.Serial + 1

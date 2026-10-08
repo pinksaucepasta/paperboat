@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
@@ -191,21 +192,39 @@ func (s *Server) serveListener(ctx context.Context, listener *net.UnixListener) 
 			default:
 			}
 			if ctx.Err() != nil {
-				return errors.Join(ctx.Err(), s.config.Applier.Close(context.Background()))
+				return errors.Join(ctx.Err(), s.config.Applier.Close(context.WithoutCancel(ctx)))
 			}
 			return err
 		}
-		_ = s.serve(connection)
-		connection.Close()
+		s.serveConnection(ctx, connection)
 	}
 }
 
+func (s *Server) serveConnection(ctx context.Context, connection *net.UnixConn) {
+	serveErr := s.serveContext(ctx, connection)
+	closeErr := connection.Close()
+	observeUnexpected(ctx, "service", "lifecycle", "service_failed", errors.Join(serveErr, closeErr))
+}
+
 func (s *Server) serve(connection *net.UnixConn) error {
+	return s.serveContext(context.Background(), connection)
+}
+
+func (s *Server) serveContext(ctx context.Context, connection *net.UnixConn) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	uid, err := peerUID(connection)
-	if err != nil || uid != s.config.UID {
+	if err != nil {
+		return failAt("peer_authority", "peer_authority_failed", err)
+	}
+	if uid != s.config.UID {
 		return ErrPeerDenied
 	}
-	_ = connection.SetDeadline(time.Now().Add(5 * time.Second))
+	requestCtx, cancelRequest := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelRequest()
+	deadline, _ := requestCtx.Deadline()
+	_ = connection.SetDeadline(deadline)
 	reader := bufio.NewReaderSize(io.LimitReader(connection, (16<<10)+1), (16<<10)+1)
 	body, err := reader.ReadBytes('\n')
 	if err != nil || len(body) == 0 || len(body) > 16<<10 {
@@ -242,11 +261,12 @@ func (s *Server) serve(connection *net.UnixConn) error {
 	if request.Version == current.DesiredVersion && current.Status == "applied" {
 		return s.respond(connection, s.response(current))
 	}
-	err = s.apply(context.Background(), request.Mode, request.Version)
+	err = s.apply(requestCtx, request.Mode, request.Version)
 	s.mu.Lock()
 	result := s.state
 	s.mu.Unlock()
 	if err != nil {
+		captureUnexpected(requestCtx, "service", "reconciliation", "availability_apply_failed", err)
 		return s.respond(connection, s.response(result))
 	}
 	return s.respond(connection, s.response(result))
@@ -256,8 +276,9 @@ func (s *Server) apply(ctx context.Context, mode string, version int64) error {
 	s.mu.Lock()
 	s.state.DesiredMode, s.state.DesiredVersion, s.state.Status, s.state.ErrorCode = mode, version, "pending", ""
 	if err := s.persistLocked(); err != nil {
+		s.state.Status, s.state.ErrorCode = "error", "availability_apply_failed"
 		s.mu.Unlock()
-		return err
+		return failAt("diagnostic_storage", "diagnostic_storage_unavailable", err)
 	}
 	s.mu.Unlock()
 	err := s.config.Applier.Apply(ctx, mode)
@@ -266,11 +287,15 @@ func (s *Server) apply(ctx context.Context, mode string, version int64) error {
 	if err != nil {
 		s.state.ObservedMode, s.state.ObservedVersion = mode, version
 		s.state.ObservedAt, s.state.Status, s.state.ErrorCode = s.config.Now().UTC(), "error", "availability_apply_failed"
-		return errors.Join(err, s.persistLocked())
+		return failAt("reconciliation", "availability_apply_failed", errors.Join(err, s.persistLocked()))
 	}
 	s.state.ObservedMode, s.state.ObservedVersion = mode, version
 	s.state.ObservedAt, s.state.Status, s.state.ErrorCode = s.config.Now().UTC(), "applied", ""
-	return s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		s.state.Status, s.state.ErrorCode = "error", "availability_apply_failed"
+		return failAt("diagnostic_storage", "diagnostic_storage_unavailable", err)
+	}
+	return nil
 }
 
 func (s *Server) State() State {
@@ -312,7 +337,7 @@ func (s *Server) listen() (*net.UnixListener, error) {
 func (s *Server) load() error {
 	body, err := os.ReadFile(s.config.StatePath)
 	if err != nil {
-		return err
+		return failAt("diagnostic_storage", "diagnostic_storage_unavailable", err)
 	}
 	if len(body) > 16<<10 {
 		return ErrInvalidConfig
@@ -325,6 +350,10 @@ func (s *Server) load() error {
 	}
 	s.state = state
 	return nil
+}
+
+func isPeerClosedError(err error) bool {
+	return err == syscall.EPIPE || err == syscall.ECONNRESET || err == syscall.ENOTCONN
 }
 
 func (s *Server) persistLocked() error {

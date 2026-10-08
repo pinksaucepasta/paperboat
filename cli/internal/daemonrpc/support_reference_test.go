@@ -9,7 +9,7 @@ import (
 )
 
 func TestRPCSupportReferenceRoundTripContext(t *testing.T) {
-	reference := "pb-0123456789abcdef0123456789abcdef"
+	reference := "support_01234567-89ab-4def-8123-456789abcdef"
 	outgoing := rpcContext(supportref.WithContext(context.Background(), reference))
 	metadataOut, ok := metadata.FromOutgoingContext(outgoing)
 	if !ok || len(metadataOut.Get(supportReferenceMetadata)) != 1 {

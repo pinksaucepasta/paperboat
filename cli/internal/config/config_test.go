@@ -92,40 +92,6 @@ func TestControlSyncAddressIsExplicitAndTLS(t *testing.T) {
 	}
 }
 
-func TestDeviceSuffixDefaultsAndValidatesOffline(t *testing.T) {
-	cfg := &Config{}
-	cfg.applyDefaults()
-	if err := cfg.Validate(); err != nil || cfg.DeviceSuffix != "pprbt" {
-		t.Fatalf("default suffix=%q err=%v", cfg.DeviceSuffix, err)
-	}
-	cfg.DeviceSuffix = "devbox"
-	if err := cfg.Validate(); err != nil || cfg.DeviceSuffix != "devbox" {
-		t.Fatalf("custom suffix=%q err=%v", cfg.DeviceSuffix, err)
-	}
-	cfg.DeviceSuffix = "com"
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("public TLD accepted as a private device suffix")
-	}
-}
-
-func TestDeviceLoopbackCIDRDefaultsAndValidates(t *testing.T) {
-	cfg := &Config{}
-	cfg.applyDefaults()
-	if err := cfg.Validate(); err != nil || cfg.DeviceLoopbackCIDR != "127.100.0.0/16" {
-		t.Fatalf("default CIDR=%q err=%v", cfg.DeviceLoopbackCIDR, err)
-	}
-	cfg.DeviceLoopbackCIDR = "127.212.0.0/16"
-	if err := cfg.Validate(); err != nil || cfg.DeviceLoopbackCIDR != "127.212.0.0/16" {
-		t.Fatalf("custom CIDR=%q err=%v", cfg.DeviceLoopbackCIDR, err)
-	}
-	for _, invalid := range []string{"127.0.0.0/16", "127.255.0.0/16", "127.212.1.0/16", "127.212.0.0/24"} {
-		cfg.DeviceLoopbackCIDR = invalid
-		if err := cfg.Validate(); err == nil {
-			t.Errorf("invalid CIDR %q accepted", invalid)
-		}
-	}
-}
-
 func TestSaveUsesRestrictedPermissions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	cfg := &Config{path: path, ServerURL: "https://api.example"}
@@ -138,6 +104,110 @@ func TestSaveUsesRestrictedPermissions(t *testing.T) {
 	}
 	if !configTestFilePrivate(path, info) {
 		t.Fatalf("config file is not private: mode=%o", info.Mode().Perm())
+	}
+}
+
+func TestRemovedNetworkOverridesAreNotLoadedOrSaved(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"server_url":"https://api.example","machine_suffix":"devbox","machine_loopback_cidr":"127.212.0.0/16"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "machine_suffix") || strings.Contains(string(data), "machine_loopback_cidr") {
+		t.Fatalf("retired network overrides persisted: %s", data)
+	}
+}
+
+func TestLocalAccessDefaultsCanonicalizesAndPersists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"local_access":{"domain":" DEV.Example.COM ","service_aliases":[{"machine_alias":" HP ","name":"JellyFin","port":8989}]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.LocalAccess.Domain != "dev.example.com" || len(cfg.LocalAccess.ServiceAliases) != 1 {
+		t.Fatalf("local access = %+v", cfg.LocalAccess)
+	}
+	want := LocalServiceAlias{MachineAlias: "hp", Name: "jellyfin", Port: 8989}
+	if got := cfg.LocalAccess.ServiceAliases[0]; got != want {
+		t.Fatalf("service alias = %+v, want %+v", got, want)
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.LocalAccess.Domain != "dev.example.com" {
+		t.Fatalf("reloaded domain = %q", reloaded.LocalAccess.Domain)
+	}
+	if got := reloaded.LocalAccess.ServiceAliases; len(got) != 1 || got[0] != want {
+		t.Fatalf("reloaded aliases = %+v, want %+v", got, want)
+	}
+}
+
+func TestLocalAccessDefaultsToPaperboatDomain(t *testing.T) {
+	cfg, err := Load(filepath.Join(t.TempDir(), "missing.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.LocalAccess.Domain != DefaultLocalAccessDomain {
+		t.Fatalf("default browser domain = %q, want %q", cfg.LocalAccess.Domain, DefaultLocalAccessDomain)
+	}
+}
+
+func TestLocalAccessValidationRejectsUnsafeOrAmbiguousSettings(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cfg  LocalAccessConfig
+	}{
+		{name: "public suffix", cfg: LocalAccessConfig{Domain: "com"}},
+		{name: "scheme", cfg: LocalAccessConfig{Domain: "https://example.com"}},
+		{name: "wildcard", cfg: LocalAccessConfig{Domain: "*.example.com"}},
+		{name: "numeric service label", cfg: LocalAccessConfig{Domain: "dev.example.com", ServiceAliases: []LocalServiceAlias{{MachineAlias: "hp", Name: "8989", Port: 8989}}}},
+		{name: "invalid service label", cfg: LocalAccessConfig{Domain: "dev.example.com", ServiceAliases: []LocalServiceAlias{{MachineAlias: "hp", Name: "jellyfin.web", Port: 8989}}}},
+		{name: "invalid machine label", cfg: LocalAccessConfig{Domain: "dev.example.com", ServiceAliases: []LocalServiceAlias{{MachineAlias: "hp.other", Name: "jellyfin", Port: 8989}}}},
+		{name: "zero port", cfg: LocalAccessConfig{Domain: "dev.example.com", ServiceAliases: []LocalServiceAlias{{MachineAlias: "hp", Name: "jellyfin", Port: 0}}}},
+		{name: "duplicate after canonicalization", cfg: LocalAccessConfig{Domain: "dev.example.com", ServiceAliases: []LocalServiceAlias{{MachineAlias: "HP", Name: "Jellyfin", Port: 8989}, {MachineAlias: "hp", Name: "jellyfin", Port: 3000}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{LocalAccess: tc.cfg}
+			cfg.applyDefaults()
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("invalid local access configuration was accepted")
+			}
+		})
+	}
+}
+
+func TestLocalAccessAllows128AliasesAndRejects129(t *testing.T) {
+	makeConfig := func(count int) *Config {
+		aliases := make([]LocalServiceAlias, count)
+		for index := range aliases {
+			aliases[index] = LocalServiceAlias{MachineAlias: "hp", Name: fmt.Sprintf("service-%d", index), Port: 8989}
+		}
+		cfg := &Config{LocalAccess: LocalAccessConfig{Domain: "dev.example.com", ServiceAliases: aliases}}
+		cfg.applyDefaults()
+		return cfg
+	}
+	if err := makeConfig(MaxLocalServiceAliases).Validate(); err != nil {
+		t.Fatalf("maximum alias count rejected: %v", err)
+	}
+	if err := makeConfig(MaxLocalServiceAliases + 1).Validate(); err == nil {
+		t.Fatal("alias count above guard limit was accepted")
 	}
 }
 
@@ -305,5 +375,29 @@ func TestTelemetryPathDefaultsBesideConfigAndCanBeDisabled(t *testing.T) {
 	cfg.Observability.EventLogPath = "events/custom.jsonl"
 	if got, want := cfg.TelemetryPath(), filepath.Join(filepath.Dir(path), "events", "custom.jsonl"); got != want {
 		t.Fatalf("relative TelemetryPath() = %q, want %q", got, want)
+	}
+}
+
+func TestLocalMachineProxyValidationAndBounds(t *testing.T) {
+	c, err := Load(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.LocalAccess.MachineProxies = []LocalMachineProxy{{MachineAlias: " HOMELAB ", Port: 80}}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if c.LocalAccess.MachineProxies[0].MachineAlias != "homelab" {
+		t.Fatal("machine alias not normalized")
+	}
+	for _, proxies := range [][]LocalMachineProxy{{{MachineAlias: "bad.machine", Port: 80}}, {{MachineAlias: "hp", Port: 0}}, {{MachineAlias: "HP", Port: 80}, {MachineAlias: "hp", Port: 81}}} {
+		c.LocalAccess.MachineProxies = proxies
+		if err := c.Validate(); err == nil {
+			t.Fatalf("invalid proxy accepted: %+v", proxies)
+		}
+	}
+	c.LocalAccess.MachineProxies = make([]LocalMachineProxy, MaxLocalMachineProxies+1)
+	if err := c.Validate(); err == nil {
+		t.Fatal("proxy bound not enforced")
 	}
 }

@@ -10,7 +10,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
@@ -1101,17 +1100,20 @@ func (s Snapshot) Validate() error {
 	return nil
 }
 
+var stableEndpointIDPattern = regexp.MustCompile(`^endpoint_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+
 type wireConfigSnapshot struct {
-	Schema         string            `json:"schema"`
-	Kind           string            `json:"kind"`
-	TunnelID       string            `json:"tunnel_id"`
-	Generation     uint64            `json:"generation"`
-	Name           string            `json:"name"`
-	DesiredState   string            `json:"desired_state"`
-	AccessMode     string            `json:"access_mode"`
-	StableEndpoint string            `json:"stable_endpoint"`
-	ExpiresAt      *time.Time        `json:"expires_at"`
-	Routes         []wireConfigRoute `json:"routes"`
+	Schema           string            `json:"schema"`
+	Kind             string            `json:"kind"`
+	TunnelID         string            `json:"tunnel_id"`
+	Generation       uint64            `json:"generation"`
+	Name             string            `json:"name"`
+	DesiredState     string            `json:"desired_state"`
+	AccessMode       string            `json:"access_mode"`
+	StableEndpointID string            `json:"stable_endpoint_id"`
+	StableEndpoint   string            `json:"stable_endpoint"`
+	ExpiresAt        *time.Time        `json:"expires_at"`
+	Routes           []wireConfigRoute `json:"routes"`
 }
 
 type wireConfigRoute struct {
@@ -1141,7 +1143,7 @@ func validateConfigSnapshotPayload(payload []byte, tunnelID string, generation u
 	if err := json.Unmarshal(payload, &fields); err != nil || fields == nil {
 		return ErrSnapshotRejected
 	}
-	for _, field := range []string{"schema", "kind", "tunnel_id", "generation", "name", "desired_state", "access_mode", "stable_endpoint", "expires_at", "routes"} {
+	for _, field := range []string{"schema", "kind", "tunnel_id", "generation", "name", "desired_state", "access_mode", "stable_endpoint_id", "stable_endpoint", "expires_at", "routes"} {
 		if _, ok := fields[field]; !ok {
 			return fmt.Errorf("%w: snapshot field %s is required", ErrSnapshotRejected, field)
 		}
@@ -1156,7 +1158,7 @@ func validateConfigSnapshotPayload(payload []byte, tunnelID string, generation u
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return ErrSnapshotRejected
 	}
-	if snapshot.Schema != "paperboat.preview-tunnel/v1" || snapshot.Kind != "tunnel_config_snapshot" || snapshot.TunnelID != tunnelID || snapshot.Generation != generation || strings.TrimSpace(snapshot.Name) != snapshot.Name || len(snapshot.Name) == 0 || len(snapshot.Name) > 80 || snapshot.DesiredState != "active" && snapshot.DesiredState != "paused" && snapshot.DesiredState != "deleted" || snapshot.AccessMode != "public" && snapshot.AccessMode != "private" && snapshot.AccessMode != "team" || snapshot.Routes == nil || !validWireStableEndpoint(snapshot.StableEndpoint) {
+	if snapshot.Schema != "paperboat.preview-tunnel/v1" || snapshot.Kind != "tunnel_config_snapshot" || snapshot.TunnelID != tunnelID || snapshot.Generation != generation || strings.TrimSpace(snapshot.Name) != snapshot.Name || len(snapshot.Name) == 0 || len(snapshot.Name) > 80 || snapshot.DesiredState != "active" && snapshot.DesiredState != "paused" && snapshot.DesiredState != "deleted" || snapshot.AccessMode != "public" && snapshot.AccessMode != "private" && snapshot.AccessMode != "team" || snapshot.Routes == nil || !stableEndpointIDPattern.MatchString(snapshot.StableEndpointID) || !validWireStableEndpoint(snapshot.StableEndpoint) {
 		return ErrSnapshotRejected
 	}
 	var rawRoutes []json.RawMessage
@@ -1712,12 +1714,4 @@ func rejectSecretFields(value any) error {
 		return nil
 	}
 	return visit(value)
-}
-
-func newOpaqueID(prefix string) (string, error) {
-	var random [18]byte
-	if _, err := rand.Read(random[:]); err != nil {
-		return "", err
-	}
-	return prefix + "_" + hex.EncodeToString(random[:]), nil
 }

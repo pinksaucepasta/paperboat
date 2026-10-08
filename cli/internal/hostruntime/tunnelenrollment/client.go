@@ -105,12 +105,36 @@ func (c *serverClient) do(ctx context.Context, method, path, key string, body []
 	endpoint.Path = strings.TrimRight(c.base.Path, "/") + path
 	endpoint.RawPath = ""
 	token, err := c.auth.Token(ctx)
-	if err != nil || strings.TrimSpace(token) == "" {
+	if err != nil {
+		if enrollmentOutcomeOnly(err, ErrAuthentication) {
+			return 0, ErrAuthentication
+		}
+		if enrollmentOutcomeOnly(err, context.Canceled) {
+			return 0, safeEnrollmentClassFailure("tunnel enrollment authentication was interrupted", context.Canceled, err)
+		}
+		if enrollmentOutcomeOnly(err, context.DeadlineExceeded) {
+			return 0, safeEnrollmentClassFailure("tunnel enrollment authentication was interrupted", context.DeadlineExceeded, err)
+		}
+		return 0, safeEnrollmentClassFailure("tunnel enrollment authentication is unavailable", ErrUnavailable, err)
+	}
+	if strings.TrimSpace(token) == "" {
 		return 0, ErrAuthentication
 	}
 	proof, err := c.auth.Proof(ctx, key, method, endpoint.Path, body)
-	if err != nil || len(proof) == 0 {
-		return 0, ErrAuthentication
+	if err != nil {
+		if enrollmentOutcomeOnly(err, ErrAuthentication) {
+			return 0, ErrAuthentication
+		}
+		if enrollmentOutcomeOnly(err, context.Canceled) {
+			return 0, safeEnrollmentClassFailure("tunnel enrollment authentication was interrupted", context.Canceled, err)
+		}
+		if enrollmentOutcomeOnly(err, context.DeadlineExceeded) {
+			return 0, safeEnrollmentClassFailure("tunnel enrollment authentication was interrupted", context.DeadlineExceeded, err)
+		}
+		return 0, safeEnrollmentClassFailure("tunnel enrollment authentication is unavailable", ErrUnavailable, err)
+	}
+	if len(proof) == 0 {
+		return 0, safeEnrollmentFailure("tunnel enrollment authentication is unavailable", ErrUnavailable)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, endpoint.String(), bytes.NewReader(body))
 	if err != nil {
@@ -125,14 +149,16 @@ func (c *serverClient) do(ctx context.Context, method, path, key string, body []
 	resp, err := c.http.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
-			return 0, ctx.Err()
+			if enrollmentOutcomeOnly(err, context.Canceled) || enrollmentOutcomeOnly(err, context.DeadlineExceeded) {
+				return 0, safeEnrollmentClassFailure("tunnel enrollment request was interrupted", ctx.Err(), err)
+			}
+			return 0, safeEnrollmentFailure("tunnel enrollment request was interrupted", ErrUnavailable, ctx.Err(), err)
 		}
-		return 0, errors.Join(ErrUnavailable, err)
+		return 0, safeEnrollmentClassFailure("tunnel enrollment control request is unavailable", ErrUnavailable, err)
 	}
-	defer resp.Body.Close()
-	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, serverResponseLimit+1))
-	if readErr != nil || len(raw) > serverResponseLimit {
-		return resp.StatusCode, ErrUnavailable
+	raw, tooLarge, bodyErr := readAndCloseResponseBody(resp.Body, serverResponseLimit)
+	if bodyErr != nil || tooLarge {
+		return resp.StatusCode, safeEnrollmentFailure("tunnel enrollment control response is unavailable", ErrUnavailable, bodyErr)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		switch resp.StatusCode {
@@ -150,23 +176,38 @@ func (c *serverClient) do(ctx context.Context, method, path, key string, body []
 		case http.StatusConflict:
 			return resp.StatusCode, ErrConflict
 		default:
-			return resp.StatusCode, ErrUnavailable
+			return resp.StatusCode, safeEnrollmentClassFailure("tunnel enrollment control request failed", ErrUnavailable, errorreport.HTTPStatusFailure(resp))
 		}
 	}
-	if rejectDuplicateJSON(raw) != nil {
-		return resp.StatusCode, ErrUnavailable
+	if err := rejectDuplicateJSON(raw); err != nil {
+		return resp.StatusCode, safeEnrollmentFailure("tunnel enrollment control response is invalid", ErrUnavailable, err)
 	}
 	var envelope struct {
 		Data json.RawMessage `json:"data"`
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
-	if dec.Decode(&envelope) != nil || dec.Decode(&struct{}{}) != io.EOF || len(envelope.Data) == 0 {
+	if err := dec.Decode(&envelope); err != nil {
+		return resp.StatusCode, safeEnrollmentFailure("tunnel enrollment control response is invalid", ErrUnavailable, err)
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		if err != nil {
+			return resp.StatusCode, safeEnrollmentFailure("tunnel enrollment control response is invalid", ErrUnavailable, err)
+		}
+		return resp.StatusCode, ErrUnavailable
+	}
+	if len(envelope.Data) == 0 {
 		return resp.StatusCode, ErrUnavailable
 	}
 	dec = json.NewDecoder(bytes.NewReader(envelope.Data))
 	dec.DisallowUnknownFields()
-	if dec.Decode(out) != nil || dec.Decode(&struct{}{}) != io.EOF {
+	if err := dec.Decode(out); err != nil {
+		return resp.StatusCode, safeEnrollmentFailure("tunnel enrollment control response is invalid", ErrUnavailable, err)
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		if err != nil {
+			return resp.StatusCode, safeEnrollmentFailure("tunnel enrollment control response is invalid", ErrUnavailable, err)
+		}
 		return resp.StatusCode, ErrUnavailable
 	}
 	return resp.StatusCode, nil

@@ -39,7 +39,7 @@ type InspectorCarrier struct {
 	RouteGeneration      uint64 `json:"route_generation"`
 	LeaseGeneration      uint64 `json:"lease_generation,omitempty"`
 	AttachmentGeneration uint64 `json:"attachment_generation,omitempty"`
-	OwnerDeviceID        string `json:"owner_device_id,omitempty"`
+	OwnerMachineID       string `json:"owner_machine_id,omitempty"`
 	ConfigContentHash    string `json:"config_content_hash"`
 	EdgeNodeID           string `json:"edge_node_id"`
 	EdgeProcessEpoch     string `json:"edge_process_epoch"`
@@ -74,7 +74,7 @@ func (c *InspectorAccessClient) Authorize(ctx context.Context, token, kind, reso
 	in := InspectorAccessRequest{EdgeNodeID: c.NodeID, ProcessEpoch: c.ProcessEpoch, CredentialToken: token, ResourceKind: kind, ResourceID: resource, RouteID: route, Action: action}
 	var out InspectorAccess
 	if err := c.HTTP.postNodeWithMaximumAndIdentity(ctx, InspectorAccessPath, c.NodeID, c.ProcessEpoch, in, &out, 64<<10); err != nil {
-		return InspectorAccess{}, ErrInspectorAccessUnavailable
+		return InspectorAccess{}, errors.Join(ErrInspectorAccessUnavailable, err)
 	}
 	if out.CredentialID == "" || out.OwnerAccountID == "" || out.MachineID == "" || out.ResourceKind != kind || out.ResourceID != resource || out.RouteID != route || out.ResourceGeneration == 0 || out.RouteGeneration == 0 || out.TargetGeneration == 0 || !out.ExpiresAt.After(time.Now().UTC()) || out.Carrier.AccountID != out.OwnerAccountID || out.Carrier.MachineID != out.MachineID || out.Carrier.EdgeNodeID != c.NodeID || out.Carrier.EdgeProcessEpoch != c.ProcessEpoch || out.Carrier.TunnelID == "" || out.Carrier.ConnectorID == "" || out.Carrier.SessionID == "" || out.Carrier.RouteID == "" || out.Carrier.ProcessGeneration == 0 || out.Carrier.Generation == 0 || out.Carrier.AssignmentID == "" || out.Carrier.AssignmentGeneration == 0 || out.Carrier.RouteGeneration == 0 || out.Carrier.ConfigContentHash == "" {
 		return InspectorAccess{}, ErrInspectorAccessInvalid

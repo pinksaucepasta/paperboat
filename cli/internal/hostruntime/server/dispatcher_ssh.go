@@ -171,8 +171,8 @@ func (s *sshOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, error
 			return frame, nil
 		}
 		bridgeErr := <-s.done
-		if bridgeErr != nil && !errors.Is(bridgeErr, context.Canceled) {
-			return protocol.BinaryFrame{}, &StreamError{Code: "ssh_target_not_ready"}
+		if bridgeErr != nil && !expectedStreamFailure(bridgeErr) {
+			return protocol.BinaryFrame{}, &StreamError{Code: "ssh_target_not_ready", Cause: bridgeErr}
 		}
 		return protocol.BinaryFrame{}, &StreamEnd{Payload: json.RawMessage(`{"state":"closed"}`)}
 	}

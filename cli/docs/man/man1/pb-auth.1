@@ -13,7 +13,7 @@ pb-auth - Manage Paperboat sign-in
 Manage Paperboat sign-in
 
 .PP
-Use login to redeem a 26-character enrollment token, status to inspect the active profile, and logout to revoke it. The command group opens account settings interactively when run in a terminal.
+Use login for browser approval on any device, switch for Personal/team workspace selection, status to inspect the active profile, and logout to revoke it. Installation tokens remain part of machine setup, not interactive login.
 
 .PP
 With --json, this command group lists its available commands.
@@ -40,6 +40,10 @@ With --json, this command group lists its available commands.
 \fB--server\fP=""
 	paperboat-server base URL override
 
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
 
 .SH SEE ALSO
-\fBpb(1)\fP, \fBpb-auth-login(1)\fP, \fBpb-auth-logout(1)\fP, \fBpb-auth-status(1)\fP
+\fBpb(1)\fP, \fBpb-auth-login(1)\fP, \fBpb-auth-logout(1)\fP, \fBpb-auth-status(1)\fP, \fBpb-auth-switch(1)\fP

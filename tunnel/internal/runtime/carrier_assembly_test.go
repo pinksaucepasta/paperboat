@@ -287,3 +287,92 @@ func TestDataPlaneStopsCarrierBeforeRouteAndIngress(t *testing.T) {
 		t.Fatalf("events = %v, want %v", events, want)
 	}
 }
+
+type queuedCarrierService struct {
+	*fakeCarrierService
+	peers chan *datacarrier.Server
+}
+
+func (s *queuedCarrierService) Accept(ctx context.Context) (*datacarrier.Server, error) {
+	select {
+	case peer := <-s.peers:
+		return peer, nil
+	case <-s.closed:
+		return nil, datacarrier.ErrCarrierClosed
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+func TestCarrierAssemblyPeerFailureRetainsAcceptAndFatalFailureReachesOwner(t *testing.T) {
+	identity := datacarrier.Identity{AccountID: "account", HostID: "host", TunnelID: "tunnel", ConnectorID: "connector", SessionID: "session", ProcessGeneration: 1, Generation: 1}
+	service := &queuedCarrierService{fakeCarrierService: newFakeCarrierService(), peers: make(chan *datacarrier.Server, 2)}
+	failure := errors.New("handler failed")
+	observed := make(chan error, 1)
+	healthy := make(chan struct{})
+	calls := 0
+	carrier, err := NewCarrierAssembly(CarrierAssemblyConfig{Service: service, MaximumHandlers: 1, Handle: func(context.Context, *datacarrier.Server) error {
+		calls++
+		if calls == 1 {
+			return failure
+		}
+		close(healthy)
+		return nil
+	}, ObserveError: func(err error) { observed <- err }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := carrier.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		service.peers <- newPreviewCarrierTestServer(t, identity)
+	}
+	select {
+	case got := <-observed:
+		if !errors.Is(got, failure) {
+			t.Fatal("handler cause lost")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("handler failure not observed")
+	}
+	select {
+	case <-healthy:
+	case <-time.After(time.Second):
+		t.Fatal("peer failure stopped accepting")
+	}
+	select {
+	case <-carrier.Done():
+		t.Fatal("recoverable peer failure marked listener fatal")
+	default:
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := carrier.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	fatal := errors.New("accept owner failed")
+	fs := newFakeCarrierService()
+	fs.acceptErr = fatal
+	fatalCarrier, err := NewCarrierAssembly(CarrierAssemblyConfig{Service: fs, Handle: func(context.Context, *datacarrier.Server) error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := &Assembly{done: make(chan error, 1), stop: make(chan struct{}), carrierDone: fatalCarrier.Done()}
+	go owner.watchCarrier()
+	if err := fatalCarrier.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-owner.Done():
+		if !errors.Is(got, fatal) {
+			t.Fatal("fatal accept cause lost at service assembly owner")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("fatal accept did not reach assembly owner")
+	}
+	close(owner.stop)
+	if err := fatalCarrier.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+}

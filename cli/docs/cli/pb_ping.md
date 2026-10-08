@@ -6,7 +6,7 @@ Measure authenticated connectivity to a machine
 
 Measure authenticated connectivity to a machine
 
-Send authenticated health exchanges to one enrolled device. --count and --timeout bound the measurements; a reachable transport alone is not a claim that the target service is ready.
+Send authenticated health exchanges to one enrolled machine. --count and --timeout bound the measurements; a reachable transport alone is not a claim that the target service is ready.
 
 JSON output is supported with --json.
 
@@ -29,6 +29,7 @@ pb ping <machine> [flags]
       --config string      path to the CLI config file
       --no-customization   ignore local shortcuts, command defaults, and TUI preferences
       --server string      paperboat-server base URL override
+      --workspace string   resource workspace selector: personal or a team slug
 ```
 
 ### SEE ALSO

@@ -24,7 +24,7 @@ var (
 )
 
 // DispatchRequest is the secret-free, operation-bound instruction delivered
-// by paperboat-server to the selected online device. LeaseETag is transport
+// by paperboat-server to the selected online machine. LeaseETag is transport
 // metadata required for generation-safe renew and stop calls.
 type DispatchRequest struct {
 	Lazy               *LazyBinding `json:"lazy,omitempty"`
@@ -34,8 +34,9 @@ type DispatchRequest struct {
 	OperationID        string       `json:"operation_id"`
 	AccountID          string       `json:"account_id"`
 	ActorID            string       `json:"actor_id"`
-	OwnerDeviceID      string       `json:"owner_device_id"`
+	OwnerMachineID     string       `json:"owner_machine_id"`
 	OwnerSessionID     string       `json:"owner_session_id"`
+	OwnerSessionKind   string       `json:"owner_session_kind"`
 	Target             LeaseTarget  `json:"target"`
 	AccessMode         string       `json:"access_mode"`
 	Endpoint           string       `json:"endpoint"`
@@ -74,6 +75,7 @@ type DispatchAuthorization struct {
 	ActorID            string
 	MachineID          string
 	OwnerSessionID     string
+	OwnerSessionKind   string
 	PreviewID          string
 	OperationID        string
 	ExpectedGeneration int64
@@ -98,7 +100,7 @@ type DispatchReadinessObserver interface {
 }
 
 // DispatchReadiness carries the stable operation and trace bindings required
-// to sign and idempotently replay the device readiness observation. It has no
+// to sign and idempotently replay the machine readiness observation. It has no
 // reusable credential material.
 type DispatchReadiness struct {
 	OperationID    string
@@ -107,18 +109,18 @@ type DispatchReadiness struct {
 	CorrelationID  string
 }
 
-// DispatchOwnerSessions returns the lifetime of the selected device session.
-// Closing the browser is unrelated; closing this channel means the device no
+// DispatchOwnerSessions returns the lifetime of the selected machine session.
+// Closing the browser is unrelated; closing this channel means the machine no
 // longer owns the foreground preview and must trigger lease cleanup.
 type DispatchOwnerSessions interface {
-	OwnerSessionDone(accountID, machineID, ownerSessionID string) (<-chan struct{}, error)
+	OwnerSessionDone(accountID, machineID, ownerSessionID, ownerSessionKind string) (<-chan struct{}, error)
 }
 
 // DispatchOwnerSessionTargetValidator is an optional stronger boundary used
 // by hostd-minted local owner leases. It binds the local lease to the exact
 // target before a delayed server dispatch can start forwarding traffic.
 type DispatchOwnerSessionTargetValidator interface {
-	OwnerSessionDoneForTarget(accountID, machineID, ownerSessionID string, target LeaseTarget) (<-chan struct{}, error)
+	OwnerSessionDoneForTarget(accountID, machineID, ownerSessionID, ownerSessionKind string, target LeaseTarget) (<-chan struct{}, error)
 }
 
 // DispatchOwnerSessionReleaser is optional. A runtime owner registry may use
@@ -239,7 +241,7 @@ func (m *DispatchManager) Dispatch(ctx context.Context, authorization DispatchAu
 	lazy := request.Lazy != nil
 	var lazyDeadline time.Time
 	if request.Lazy != nil {
-		if request.AccessMode != "private" && request.AccessMode != "team" || request.Lazy.InstallationGeneration != m.config.InstallationGeneration || request.Lazy.BootID != m.config.BootID || request.OwnerSessionID != "lazy_"+m.config.BootID {
+		if request.AccessMode != "private" && request.AccessMode != "team" || request.Lazy.InstallationGeneration != m.config.InstallationGeneration || request.Lazy.BootID != m.config.BootID {
 			return DispatchOutcome{}, ErrDispatchInvalid
 		}
 		lazyDeadline = request.CreatedAt.UTC().Add(LazyAbsoluteLifetime)
@@ -251,9 +253,9 @@ func (m *DispatchManager) Dispatch(ctx context.Context, authorization DispatchAu
 		}
 	}
 	baseSessionConfig := SessionConfig{
-		LeaseClient:        m.config.Leases,
-		OwnerDeviceID:      lease.OwnerDeviceID,
-		OwnerSessionID:     lease.OwnerSessionID,
+		LeaseClient:    m.config.Leases,
+		OwnerMachineID: lease.OwnerMachineID,
+		OwnerSessionID: lease.OwnerSessionID, OwnerSessionKind: lease.OwnerSessionKind,
 		Target:             lease.Target,
 		AccessMode:         lease.AccessMode,
 		UserDeadline:       lease.UserDeadline,
@@ -302,16 +304,15 @@ func (m *DispatchManager) Dispatch(ctx context.Context, authorization DispatchAu
 	if lazy {
 		ownerDone = lazyLifecycle.Done()
 	} else if targetValidator, ok := m.config.Owners.(DispatchOwnerSessionTargetValidator); ok {
-		ownerDone, err = targetValidator.OwnerSessionDoneForTarget(request.AccountID, request.OwnerDeviceID, request.OwnerSessionID, request.Target)
+		ownerDone, err = targetValidator.OwnerSessionDoneForTarget(request.AccountID, request.OwnerMachineID, request.OwnerSessionID, request.OwnerSessionKind, request.Target)
+	} else if request.OwnerSessionKind == OwnerSessionLocalLease {
+		err = ErrOwnerSessionBinding
 	} else {
-		ownerDone, err = m.config.Owners.OwnerSessionDone(request.AccountID, request.OwnerDeviceID, request.OwnerSessionID)
+		ownerDone, err = m.config.Owners.OwnerSessionDone(request.AccountID, request.OwnerMachineID, request.OwnerSessionID, request.OwnerSessionKind)
 	}
 	if err != nil || ownerDone == nil {
 		m.releaseReservation(request.OperationID, hash)
 		lazyLifecycle.Stop()
-		if !lazy {
-			m.releaseOwnerSession(request.AccountID, request.OwnerDeviceID, request.OwnerSessionID)
-		}
 		closeCtx, cancel := context.WithTimeout(context.Background(), PreviewLeaseDefaultShutdown)
 		_ = carrier.Close(closeCtx)
 		cancel()
@@ -329,7 +330,7 @@ func (m *DispatchManager) Dispatch(ctx context.Context, authorization DispatchAu
 		m.releaseReservation(request.OperationID, hash)
 		lazyLifecycle.Stop()
 		if !lazy {
-			m.releaseOwnerSession(request.AccountID, request.OwnerDeviceID, request.OwnerSessionID)
+			m.releaseOwnerSession(request.AccountID, request.OwnerMachineID, request.OwnerSessionID)
 		}
 		closeCtx, cancel := context.WithTimeout(context.Background(), PreviewLeaseDefaultShutdown)
 		_ = carrier.Close(closeCtx)
@@ -341,7 +342,7 @@ func (m *DispatchManager) Dispatch(ctx context.Context, authorization DispatchAu
 		m.releaseReservation(request.OperationID, hash)
 		lazyLifecycle.Stop()
 		if !lazy {
-			m.releaseOwnerSession(request.AccountID, request.OwnerDeviceID, request.OwnerSessionID)
+			m.releaseOwnerSession(request.AccountID, request.OwnerMachineID, request.OwnerSessionID)
 		}
 		stopCtx, cancel := context.WithTimeout(context.Background(), PreviewLeaseDefaultShutdown)
 		_ = session.Stop(stopCtx)
@@ -355,7 +356,7 @@ func (m *DispatchManager) Dispatch(ctx context.Context, authorization DispatchAu
 		m.mu.Unlock()
 		lazyLifecycle.Stop()
 		if !lazy {
-			m.releaseOwnerSession(request.AccountID, request.OwnerDeviceID, request.OwnerSessionID)
+			m.releaseOwnerSession(request.AccountID, request.OwnerMachineID, request.OwnerSessionID)
 		}
 		stopCtx, cancel := context.WithTimeout(context.Background(), PreviewLeaseDefaultShutdown)
 		_ = session.Stop(stopCtx)
@@ -405,7 +406,7 @@ func (m *DispatchManager) observeSession(operationID, hash string, session *Sess
 	}
 	lease := session.currentLease()
 	if releaseOwner {
-		m.releaseOwnerSession(lease.AccountID, lease.OwnerDeviceID, lease.OwnerSessionID)
+		m.releaseOwnerSession(lease.AccountID, lease.OwnerMachineID, lease.OwnerSessionID)
 	}
 	m.mu.Lock()
 	if current, ok := m.operations[operationID]; ok && current.hash == hash && current.session == session {
@@ -482,7 +483,7 @@ func (m *DispatchManager) Shutdown(ctx context.Context) error {
 }
 
 func (a DispatchAuthorization) validate(request DispatchRequest, now time.Time) error {
-	if a.ExpiresAt.IsZero() || !a.ExpiresAt.After(now.UTC()) || a.AccountID != request.AccountID || a.ActorID != request.ActorID || a.MachineID != request.OwnerDeviceID || a.OwnerSessionID != request.OwnerSessionID || a.PreviewID != request.PreviewID || a.OperationID != request.OperationID || a.ExpectedGeneration != request.ExpectedGeneration || a.IdempotencyKey != request.IdempotencyKey || a.RequestID != request.RequestID || a.CorrelationID != request.CorrelationID || a.RequestHash != request.RequestHash {
+	if a.ExpiresAt.IsZero() || !a.ExpiresAt.After(now.UTC()) || a.AccountID != request.AccountID || a.ActorID != request.ActorID || a.MachineID != request.OwnerMachineID || a.OwnerSessionID != request.OwnerSessionID || a.OwnerSessionKind != request.OwnerSessionKind || a.PreviewID != request.PreviewID || a.OperationID != request.OperationID || a.ExpectedGeneration != request.ExpectedGeneration || a.IdempotencyKey != request.IdempotencyKey || a.RequestID != request.RequestID || a.CorrelationID != request.CorrelationID || a.RequestHash != request.RequestHash {
 		return fmt.Errorf("%w: verified authorization does not match request", ErrDispatchInvalid)
 	}
 	return nil
@@ -504,7 +505,7 @@ func (r DispatchRequest) Validate(machineID string, now time.Time) (string, erro
 // ComputeRequestHash is shared by trusted dispatch senders and tests. It does
 // not include RequestHash itself and uses a fixed struct for stable field order.
 func (r DispatchRequest) ComputeRequestHash() (string, error) {
-	canonical, err := r.canonicalHashInput(r.OwnerDeviceID, time.Time{})
+	canonical, err := r.canonicalHashInput(r.OwnerMachineID, time.Time{})
 	if err != nil {
 		return "", err
 	}
@@ -519,7 +520,7 @@ func (r DispatchRequest) canonicalHashInput(machineID string, now time.Time) ([]
 	r.OperationID = strings.TrimSpace(r.OperationID)
 	r.AccountID = strings.TrimSpace(r.AccountID)
 	r.ActorID = strings.TrimSpace(r.ActorID)
-	r.OwnerDeviceID = strings.TrimSpace(r.OwnerDeviceID)
+	r.OwnerMachineID = strings.TrimSpace(r.OwnerMachineID)
 	r.OwnerSessionID = strings.TrimSpace(r.OwnerSessionID)
 	r.Target.Scheme = strings.ToLower(strings.TrimSpace(r.Target.Scheme))
 	r.Target.Address = strings.TrimSpace(r.Target.Address)
@@ -538,7 +539,7 @@ func (r DispatchRequest) canonicalHashInput(machineID string, now time.Time) ([]
 			return nil, ErrDispatchInvalid
 		}
 	}
-	if r.Schema != PreviewTunnelSchemaV1 || r.Kind != PreviewDispatchKind || !validLeaseID(r.PreviewID) || !validLeaseID(r.OperationID) || !validLeaseID(r.AccountID) || !validLeaseID(r.ActorID) || r.OwnerDeviceID != strings.TrimSpace(machineID) || !validLeaseID(r.OwnerSessionID) || r.ExpectedGeneration < 1 {
+	if r.Schema != PreviewTunnelSchemaV1 || r.Kind != PreviewDispatchKind || !validLeaseID(r.PreviewID) || !validLeaseID(r.OperationID) || !validLeaseID(r.AccountID) || !validLeaseID(r.ActorID) || r.OwnerMachineID != strings.TrimSpace(machineID) || !validLeaseID(r.OwnerSessionID) || !validOwnerSessionKind(r.OwnerSessionKind) || (r.OwnerSessionKind == OwnerSessionLazyRuntime) != (r.Lazy != nil) || r.ExpectedGeneration < 1 {
 		return nil, ErrDispatchInvalid
 	}
 	if !validDispatchTrace(r.IdempotencyKey, 1, 256) || !validDispatchTrace(r.RequestID, 3, 128) || !validDispatchTrace(r.CorrelationID, 3, 128) {
@@ -565,8 +566,9 @@ func (r DispatchRequest) canonicalHashInput(machineID string, now time.Time) ([]
 		OperationID        string       `json:"operation_id"`
 		AccountID          string       `json:"account_id"`
 		ActorID            string       `json:"actor_id"`
-		OwnerDeviceID      string       `json:"owner_device_id"`
+		OwnerMachineID     string       `json:"owner_machine_id"`
 		OwnerSessionID     string       `json:"owner_session_id"`
+		OwnerSessionKind   string       `json:"owner_session_kind"`
 		Target             LeaseTarget  `json:"target"`
 		AccessMode         string       `json:"access_mode"`
 		Endpoint           string       `json:"endpoint"`
@@ -583,7 +585,7 @@ func (r DispatchRequest) canonicalHashInput(machineID string, now time.Time) ([]
 		IdempotencyKey     string       `json:"idempotency_key"`
 		RequestID          string       `json:"request_id"`
 		CorrelationID      string       `json:"correlation_id"`
-	}{r.Lazy, r.Schema, r.Kind, r.PreviewID, r.OperationID, r.AccountID, r.ActorID, r.OwnerDeviceID, r.OwnerSessionID, r.Target, r.AccessMode, r.Endpoint, r.LeaseDeadline.UTC(), utcTimePointer(r.UserDeadline), r.LeaseETag, r.State, r.AllocationState, r.EdgeState, r.OriginState, r.CreatedAt.UTC(), r.LastRenewedAt.UTC(), r.ExpectedGeneration, r.IdempotencyKey, r.RequestID, r.CorrelationID})
+	}{r.Lazy, r.Schema, r.Kind, r.PreviewID, r.OperationID, r.AccountID, r.ActorID, r.OwnerMachineID, r.OwnerSessionID, r.OwnerSessionKind, r.Target, r.AccessMode, r.Endpoint, r.LeaseDeadline.UTC(), utcTimePointer(r.UserDeadline), r.LeaseETag, r.State, r.AllocationState, r.EdgeState, r.OriginState, r.CreatedAt.UTC(), r.LastRenewedAt.UTC(), r.ExpectedGeneration, r.IdempotencyKey, r.RequestID, r.CorrelationID})
 }
 
 func validDispatchTrace(value string, minimum, maximum int) bool {
@@ -609,7 +611,7 @@ func utcTimePointer(value *time.Time) *time.Time {
 func (r DispatchRequest) Lease() Lease {
 	return Lease{
 		Schema: PreviewTunnelSchemaV1, Kind: PreviewLeaseKind, ID: r.PreviewID,
-		AccountID: r.AccountID, ActorID: r.ActorID, OwnerDeviceID: r.OwnerDeviceID, OwnerSessionID: r.OwnerSessionID,
+		AccountID: r.AccountID, ActorID: r.ActorID, OwnerMachineID: r.OwnerMachineID, OwnerSessionID: r.OwnerSessionID, OwnerSessionKind: r.OwnerSessionKind,
 		Target: r.Target, AccessMode: r.AccessMode, Persistent: false, Endpoint: r.Endpoint,
 		LeaseDeadline: r.LeaseDeadline.UTC(), UserDeadline: utcTimePointer(r.UserDeadline), State: r.State,
 		AllocationState: r.AllocationState, EdgeState: r.EdgeState, OriginState: r.OriginState, CreatedAt: r.CreatedAt.UTC(),
@@ -720,7 +722,7 @@ func isReadyLease(lease Lease) bool {
 }
 
 func sameLeaseIdentity(left, right Lease) bool {
-	return right.Schema == left.Schema && right.Kind == left.Kind && right.ID == left.ID && right.AccountID == left.AccountID && right.ActorID == left.ActorID && right.OwnerDeviceID == left.OwnerDeviceID && right.OwnerSessionID == left.OwnerSessionID && right.Target == left.Target && right.AccessMode == left.AccessMode && right.Persistent == left.Persistent && right.Endpoint == left.Endpoint && right.CreatedAt.Equal(left.CreatedAt) && equalOptionalTime(right.UserDeadline, left.UserDeadline)
+	return right.Schema == left.Schema && right.Kind == left.Kind && right.ID == left.ID && right.AccountID == left.AccountID && right.ActorID == left.ActorID && right.OwnerMachineID == left.OwnerMachineID && right.OwnerSessionID == left.OwnerSessionID && right.OwnerSessionKind == left.OwnerSessionKind && right.Target == left.Target && right.AccessMode == left.AccessMode && right.Persistent == left.Persistent && right.Endpoint == left.Endpoint && right.CreatedAt.Equal(left.CreatedAt) && equalOptionalTime(right.UserDeadline, left.UserDeadline)
 }
 
 func equalOptionalTime(left, right *time.Time) bool {

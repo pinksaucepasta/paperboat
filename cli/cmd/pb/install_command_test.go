@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 )
 
 func TestInstallSuppliesCurrentExecutableAndPropagatesFailure(t *testing.T) {
@@ -35,11 +34,9 @@ func TestInstallSuppliesCurrentExecutableAndPropagatesFailure(t *testing.T) {
 	}
 	var result struct {
 		Data struct {
-			Executable       string   `json:"executable"`
-			AutomaticUpdates bool     `json:"automatic_update_checks"`
-			Enrollment       string   `json:"enrollment"`
-			BrowserHTTPS     string   `json:"browser_https"`
-			Warnings         []string `json:"warnings"`
+			Executable       string `json:"executable"`
+			AutomaticUpdates bool   `json:"automatic_update_checks"`
+			Enrollment       string `json:"enrollment"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
@@ -55,18 +52,6 @@ func TestInstallSuppliesCurrentExecutableAndPropagatesFailure(t *testing.T) {
 	}
 	if out.Len() != 0 {
 		t.Fatal("failed installation reported success")
-	}
-	var warnings bytes.Buffer
-	command.SetErr(&warnings)
-	failure = &hostruntimecmd.BrowserTrustPendingError{Cause: errors.New("administrator approval unavailable"), Recovery: "sudo pb daemon device-guard trust"}
-	if err := command.Execute(); err != nil {
-		t.Fatalf("committed core installation was reported as failed: %v", err)
-	}
-	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
-		t.Fatal(err)
-	}
-	if result.Data.Executable != "/commands/pb" || result.Data.BrowserHTTPS != "trust_pending" || len(result.Data.Warnings) != 1 || warnings.Len() == 0 {
-		t.Fatalf("browser trust pending state was hidden: result=%s warning=%s", out.String(), warnings.String())
 	}
 	for _, flag := range []string{"skip-verification", "skip-download", "fresh", "source", "source-version"} {
 		if command.Flags().Lookup(flag) != nil {

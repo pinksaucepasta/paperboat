@@ -46,7 +46,7 @@ func TestOpenRejectsHardLinkedState(t *testing.T) {
 	if reopened != nil {
 		reopened.Close()
 	}
-	if !errors.Is(err, ErrCorrupt) || !status.Degraded || status.Code != "primary_unreadable" {
+	if !errors.Is(err, ErrInvalidState) || errors.Is(err, ErrCorrupt) || !status.Degraded || status.Code != "primary_unreadable" || status.Source != "none" {
 		t.Fatalf("hard-linked state opened=%v status=%+v err=%v", reopened != nil, status, err)
 	}
 }
@@ -67,7 +67,7 @@ func TestOpenRejectsWorldReadableState(t *testing.T) {
 	if reopened != nil {
 		reopened.Close()
 	}
-	if !errors.Is(err, ErrCorrupt) || !status.Degraded || status.Code != "primary_unreadable" {
+	if !errors.Is(err, ErrInvalidState) || errors.Is(err, ErrCorrupt) || !status.Degraded || status.Code != "primary_unreadable" || status.Source != "none" {
 		t.Fatalf("permissive state opened=%v status=%+v err=%v", reopened != nil, status, err)
 	}
 }

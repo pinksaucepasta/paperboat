@@ -97,7 +97,7 @@ func TestExpectedAdmissionRegistryRejectsStaleCraftedRemoval(t *testing.T) {
 		"edge node":                  func(value *ExpectedAdmission) { value.EdgeNodeID = "edge_2" },
 		"edge process epoch":         func(value *ExpectedAdmission) { value.EdgeProcessEpoch = "_epoch13" },
 		"preview":                    func(value *ExpectedAdmission) { value.PreviewID = "preview_2" },
-		"owner device":               func(value *ExpectedAdmission) { value.OwnerDeviceID = "host_2" },
+		"owner machine":              func(value *ExpectedAdmission) { value.OwnerMachineID = "host_2" },
 		"owner session":              func(value *ExpectedAdmission) { value.OwnerSessionID = "owner_session_2" },
 		"carrier session":            func(value *ExpectedAdmission) { value.Identity.SessionID = "session_2" },
 		"carrier process generation": func(value *ExpectedAdmission) { value.Identity.ProcessGeneration++ },
@@ -154,7 +154,7 @@ func testExpectedAdmissionForRegistry(expiresAt time.Time) ExpectedAdmission {
 	return ExpectedAdmission{
 		Schema: PreviewCarrierSchema, Kind: PreviewCarrierKind,
 		EdgeNodeID: "edge_1", PreviewID: "preview_1", OperationID: "operation_1",
-		OwnerDeviceID: "host_1", OwnerSessionID: "owner_session_1",
+		OwnerMachineID: "host_1", OwnerSessionID: "owner_session_1",
 		Identity:        Identity{AccountID: "account_1", HostID: "host_1", TunnelID: "tunnel_1", ConnectorID: "connector_1", SessionID: "session_1", ProcessGeneration: 1, Generation: 1},
 		LeaseGeneration: 1, ConfigGeneration: 1,
 		ConfigContentHash: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",

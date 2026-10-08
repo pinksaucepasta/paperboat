@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -170,21 +172,21 @@ func TestCarrierTelemetryCancellationAndOpenFailure(t *testing.T) {
 		t.Fatalf("client cancellation count = %d", got)
 	}
 	closed := 0
-	canceledOpen := 0
+	timedOutOpen := 0
 	for _, event := range events.Snapshot() {
 		if event.Name == carrierStreamClosed {
 			closed++
 		}
-		if event.Name == carrierStreamAcceptFailed && event.Outcome == edgetelemetry.OutcomeCanceled {
-			canceledOpen++
+		if event.Name == carrierStreamAcceptFailed && event.Outcome == edgetelemetry.OutcomeFailed && event.Severity == edgetelemetry.SeverityError {
+			timedOutOpen++
 		}
 		encoded, _ := json.Marshal(event)
 		if strings.Contains(string(encoded), "context deadline") || strings.Contains(string(encoded), "secret") {
 			t.Fatalf("event leaked error data: %s", encoded)
 		}
 	}
-	if closed != 1 || canceledOpen != 1 {
-		t.Fatalf("closed=%d canceled accepts=%d", closed, canceledOpen)
+	if closed != 1 || timedOutOpen != 1 {
+		t.Fatalf("closed=%d timed-out accepts=%d", closed, timedOutOpen)
 	}
 }
 
@@ -224,4 +226,120 @@ func carrierMetricValue(samples []edgetelemetry.MetricSample, name string, label
 		}
 	}
 	return 0
+}
+
+func TestCarrierTelemetryMixedCancellationKeepsFailureAndDeadline(t *testing.T) {
+	for _, test := range []struct {
+		err           error
+		outcome, code string
+	}{
+		{fmt.Errorf("PRIVATE: %w", context.Canceled), "canceled", "shutdown"},
+		{errors.Join(syscall.EIO, context.Canceled), "failed", "unavailable"},
+		{errors.Join(context.DeadlineExceeded, context.Canceled), "failed", "timeout"},
+		{errors.Join(errors.New("PRIVATE_FAILURE"), context.Canceled), "failed", "unavailable"},
+	} {
+		producer, _, events := newTestCarrierTelemetry(t)
+		var observed string
+		producer.observe = func(_ context.Context, _, outcome, code string, _ time.Duration) { observed = outcome + ":" + code }
+		_, err := producer.Open(t.Context(), StreamInfo{}, func(context.Context) (io.ReadWriteCloser, error) { return nil, test.err })
+		if err != test.err || observed != test.outcome+":"+test.code {
+			t.Fatalf("original error or classification lost: %s", observed)
+		}
+		if err := events.Flush(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range events.Snapshot() {
+			if event.Name == carrierStreamOpenFailed && string(event.Outcome) != test.outcome {
+				t.Fatal("local outcome disagrees with SDK owner")
+			}
+		}
+	}
+	if isExpectedStreamClose(errors.Join(io.EOF, syscall.EIO)) {
+		t.Fatal("cleanup masked independent close failure")
+	}
+}
+
+func TestCarrierTelemetryAlreadyCanceledWrapCleansUp(t *testing.T) {
+	producer, _, _ := newTestCarrierTelemetry(t)
+	for range 32 {
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		local, remote := net.Pipe()
+		stream := producer.WrapStream(ctx, local, StreamInfo{})
+		remote.SetReadDeadline(time.Now().Add(time.Second))
+		if _, err := remote.Read(make([]byte, 1)); err == nil {
+			t.Fatal("already-canceled wrapper did not close borrowed stream")
+		}
+		stream.Close()
+		remote.Close()
+	}
+	if producer.ActiveStreams() != 0 {
+		t.Fatal("canceled wrappers leaked active permits")
+	}
+	cycle := &carrierTelemetryCycle{}
+	var missing *carrierTelemetryCycle
+	for _, err := range []error{cycle, missing, errors.Join(context.Canceled, context.Canceled, context.Canceled, context.Canceled, context.Canceled, context.Canceled, context.Canceled, context.Canceled, context.Canceled, context.Canceled, context.Canceled, context.Canceled, context.Canceled, context.Canceled, context.Canceled, context.Canceled, context.Canceled)} {
+		if outcome, _ := carrierFailureOutcome(err); outcome == "canceled" {
+			t.Fatal("unresolved error chain suppressed failure")
+		}
+	}
+}
+
+type carrierTelemetryCycle struct{}
+
+func (*carrierTelemetryCycle) Error() string     { return "PRIVATE_CYCLE" }
+func (err *carrierTelemetryCycle) Unwrap() error { return err }
+
+func TestCarrierTelemetryCloseFailureOutranksCleanupCancellation(t *testing.T) {
+	for _, cause := range []error{syscall.EIO, context.DeadlineExceeded} {
+		producer, _, events := newTestCarrierTelemetry(t)
+		observed := make(chan string, 1)
+		producer.observe = func(_ context.Context, _, outcome, code string, _ time.Duration) { observed <- outcome + ":" + code }
+		ctx, cancel := context.WithCancel(t.Context())
+		local, remote := net.Pipe()
+		stream := producer.WrapStream(ctx, &carrierCloseCause{ReadWriteCloser: local, cause: cause}, StreamInfo{})
+		cancel()
+		remote.SetReadDeadline(time.Now().Add(time.Second))
+		remote.Read(make([]byte, 1))
+		remote.Close()
+		if err := stream.Close(); !errors.Is(err, cause) {
+			t.Fatal("original close cause lost")
+		}
+		want := "failed:internal"
+		if cause == context.DeadlineExceeded {
+			want = "failed:timeout"
+		}
+		select {
+		case got := <-observed:
+			if got != want {
+				t.Fatalf("close outcome=%s want=%s", got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("close observation missing")
+		}
+		if err := events.Flush(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		closed := 0
+		for _, event := range events.Snapshot() {
+			if event.Name == carrierStreamClosed {
+				closed++
+				if event.Outcome != edgetelemetry.OutcomeFailed || event.Severity != edgetelemetry.SeverityError {
+					t.Fatal("cleanup suppressed local close failure")
+				}
+			}
+		}
+		if closed != 1 || producer.ActiveStreams() != 0 {
+			t.Fatal("close was duplicated or leaked active stream")
+		}
+	}
+}
+
+type carrierCloseCause struct {
+	io.ReadWriteCloser
+	cause error
+}
+
+func (stream *carrierCloseCause) Close() error {
+	return errors.Join(stream.ReadWriteCloser.Close(), stream.cause)
 }

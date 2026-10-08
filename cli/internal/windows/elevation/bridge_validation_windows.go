@@ -21,7 +21,7 @@ func validOperationAction(operation, action string) bool {
 	switch operation {
 	case OperationRuntimeService:
 		switch action {
-		case ActionInstall, ActionInstallCommit, ActionCommit, ActionUninstall, ActionUninstallPersist, ActionPurge, ActionRepair, ActionStop, ActionConfigInstall, ActionConfigRemove:
+		case ActionInstall, ActionInstallCommit, ActionCommit, ActionUninstall, ActionUninstallPersist, ActionPurge, ActionRepair, ActionStop, ActionConfigInstall, ActionConfigRemove, ActionBrowserDomain:
 			return true
 		}
 	case OperationOpenSSH:
@@ -34,7 +34,7 @@ func validOperationAction(operation, action string) bool {
 }
 
 func actionNeedsPayload(operation, action string) bool {
-	return operation == OperationRuntimeService && (action == ActionInstall || action == ActionInstallCommit || action == ActionCommit || action == ActionUninstall)
+	return operation == OperationRuntimeService && (action == ActionInstall || action == ActionInstallCommit || action == ActionCommit || action == ActionUninstall || action == ActionBrowserDomain)
 }
 
 func validateRequest(request Request) error {

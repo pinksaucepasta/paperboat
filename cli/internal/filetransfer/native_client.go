@@ -39,7 +39,7 @@ func (c *Client) uploadNative(ctx context.Context, manifest Manifest, source Sou
 	previous := int64(-1)
 	for failures := 0; failures < 4; {
 		if err := ctx.Err(); err != nil {
-			return err
+			return callerContextError(ctx)
 		}
 		offset, err := c.Offset(ctx, manifest.TransferID)
 		if err == nil {

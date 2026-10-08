@@ -2,18 +2,18 @@
 .TH "PB-APPROVE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-approve - Approve or revoke a peer device over gRPC IPC
+pb-approve - Approve or revoke a peer machine over gRPC IPC
 
 
 .SH SYNOPSIS
-\fBpb approve <device-id> [flags]\fP
+\fBpb approve <machine-id> [flags]\fP
 
 
 .SH DESCRIPTION
-Approve or revoke a peer device over gRPC IPC
+Approve or revoke a peer machine over gRPC IPC
 
 .PP
-Approve an exact peer device ID for local access, or use --revoke to withdraw that approval. This changes the local daemon's device trust decision; inspect the ID before approving an unfamiliar peer.
+Approve an exact peer machine ID for local access, or use --revoke to withdraw that approval. This changes the local daemon's machine trust decision; inspect the ID before approving an unfamiliar peer.
 
 .PP
 JSON output is supported with --json.
@@ -43,6 +43,10 @@ JSON output is supported with --json.
 .PP
 \fB--server\fP=""
 	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
 
 
 .SH SEE ALSO

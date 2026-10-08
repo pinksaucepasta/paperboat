@@ -45,6 +45,7 @@ type GenesisMarker interface {
 }
 
 type genesisMarkerRecord struct {
+	LayersEstablished      bool         `json:"layers_established,omitempty"`
 	Schema                 string       `json:"schema"`
 	MachineID              string       `json:"machine_id"`
 	InstallationGeneration uint64       `json:"installation_generation"`
@@ -320,3 +321,41 @@ func genesisMAC(material Material, record genesisMarkerRecord) [sha256.Size]byte
 	copy(result[:], mac.Sum(nil))
 	return result
 }
+
+// LayerGenesisMarker fences loss of the aggregate layer high-water independently
+// of the retired single-projection cache. It lives beside the recipient key.
+type LayerGenesisMarker interface {
+	LayerGenesisEstablished() (bool, error)
+	EstablishLayerGenesis() error
+}
+
+func (s KeyringSource) layerGenesis(establish bool) (value bool, resultErr error) {
+	if err := s.validate(); err != nil {
+		return false, err
+	}
+	unlock, err := s.lockEnvironmentHostKey()
+	if err != nil {
+		return false, err
+	}
+	defer func() { resultErr = errors.Join(resultErr, unlock()) }()
+	material, err := s.loadExistingMaterial()
+	if err != nil {
+		return false, err
+	}
+	defer material.Destroy()
+	genesisMarkerMu.Lock()
+	defer genesisMarkerMu.Unlock()
+	record, err := s.readGenesisMarker(material)
+	if err != nil {
+		return false, err
+	}
+	if establish && !record.LayersEstablished {
+		record.LayersEstablished = true
+		if err := s.writeGenesisMarker(material, record); err != nil {
+			return false, err
+		}
+	}
+	return record.LayersEstablished, nil
+}
+func (s KeyringSource) LayerGenesisEstablished() (bool, error) { return s.layerGenesis(false) }
+func (s KeyringSource) EstablishLayerGenesis() error           { _, err := s.layerGenesis(true); return err }

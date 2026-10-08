@@ -13,7 +13,7 @@ pb-access - Open authenticated private access
 Open authenticated private access
 
 .PP
-Choose device access for an enrolled device service or tunnel access for an existing private tunnel route. Each child command opens a local listener and keeps the forwarding process alive until it exits.
+Choose machine access for an enrolled machine service or tunnel access for an existing private tunnel route. Each child command opens a local listener and keeps the forwarding process alive until it exits.
 
 .PP
 With --json, this command group lists its available commands.
@@ -40,6 +40,10 @@ With --json, this command group lists its available commands.
 \fB--server\fP=""
 	paperboat-server base URL override
 
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
 
 .SH SEE ALSO
-\fBpb(1)\fP, \fBpb-access-device(1)\fP, \fBpb-access-tunnel(1)\fP
+\fBpb(1)\fP, \fBpb-access-machine(1)\fP, \fBpb-access-tunnel(1)\fP

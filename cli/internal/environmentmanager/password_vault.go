@@ -22,10 +22,39 @@ type PasswordVaultClient interface {
 // PasswordVault owns local custody and publication reconciliation. None of these
 // operations authorizes enrollment, team membership, or host execution.
 type PasswordVault struct {
-	Client    PasswordVaultClient
-	Store     config.ProfileStore
-	Issuer    string
-	AccountID string
+	WorkspaceID string
+	Client      PasswordVaultClient
+	Store       config.ProfileStore
+	Issuer      string
+	AccountID   string
+}
+
+// vaultIntegrityFailure owns an in-memory API verification failure, preserving
+// parser evidence while retaining the manager's deliberate integrity category.
+type vaultIntegrityFailure struct{ cause error }
+
+func (*vaultIntegrityFailure) Error() string { return "ENV encrypted state failed verification" }
+func (failure *vaultIntegrityFailure) Is(target error) bool {
+	return failure != nil && target == ErrIntegrity
+}
+func (failure *vaultIntegrityFailure) Unwrap() error {
+	if failure == nil {
+		return nil
+	}
+	return failure.cause
+}
+
+// OwnsIntegrityFailure recognizes this package's direct verification owner.
+// It does not bless independent joined operational failures.
+func OwnsIntegrityFailure(err error) bool {
+	failure, ok := err.(*vaultIntegrityFailure)
+	return ok && failure != nil && api.OwnsENVIntegrityFailure(failure.cause)
+}
+func wrapVaultIntegrityFailure(err error) error {
+	if api.OwnsENVIntegrityFailure(err) {
+		return &vaultIntegrityFailure{cause: err}
+	}
+	return err
 }
 
 func (v PasswordVault) lock() (func() error, error) {
@@ -38,10 +67,13 @@ func (v PasswordVault) lock() (func() error, error) {
 func (v PasswordVault) current(ctx context.Context) (environmente2ee.VaultHead, []byte, error) {
 	state, err := v.Client.GetPasswordVault(ctx)
 	if err != nil {
-		return environmente2ee.VaultHead{}, nil, err
+		return environmente2ee.VaultHead{}, nil, wrapVaultIntegrityFailure(err)
 	}
 	head, raw, err := state.Decode()
-	if err != nil || head.Issuer != v.Issuer || head.AccountID != v.AccountID {
+	if err != nil {
+		return environmente2ee.VaultHead{}, nil, wrapVaultIntegrityFailure(err)
+	}
+	if head.Issuer != v.Issuer || head.AccountID != v.AccountID {
 		return environmente2ee.VaultHead{}, nil, ErrIntegrity
 	}
 	return head, raw, nil
@@ -63,10 +95,10 @@ func (v PasswordVault) InitializeWithRecovery(ctx context.Context, password, rec
 	if err == nil {
 		return ErrVaultChanged
 	}
-	if !errors.Is(err, config.ErrSecretNotFound) {
+	if !vaultCredentialAbsentOnly(err) {
 		return err
 	}
-	if _, _, err := v.current(ctx); !api.IsNotFound(err) {
+	if _, _, err := v.current(ctx); !vaultAPIResourceAbsentOnly(err) {
 		if err == nil {
 			return ErrVaultChanged
 		}
@@ -106,7 +138,7 @@ func (v PasswordVault) Unlock(ctx context.Context, password []byte) (resultErr e
 	defer func() { resultErr = errors.Join(resultErr, unlock()) }()
 	local, err := v.Store.LoadPasswordVault(v.Issuer, v.AccountID)
 	defer local.Clear()
-	if err != nil && !errors.Is(err, config.ErrSecretNotFound) {
+	if err != nil && !vaultCredentialAbsentOnly(err) {
 		return err
 	}
 	if local.Operation != nil && local.Operation.Kind == "personal-rotate" && local.Pending != nil {
@@ -157,7 +189,7 @@ func (v PasswordVault) Unlock(ctx context.Context, password []byte) (resultErr e
 	return v.Store.SavePasswordVault(config.PasswordVaultRecord{Head: head, Envelope: raw, Payload: payload})
 }
 
-// ChangePassword also supports surviving-unlocked-device recovery: the old
+// ChangePassword also supports surviving-unlocked-machine recovery: the old
 // password is not needed when usable keys remain in authorized secure custody.
 func (v PasswordVault) ChangePassword(ctx context.Context, password []byte) (resultErr error) {
 	unlock, err := v.lock()
@@ -234,10 +266,13 @@ func (v PasswordVault) publish(ctx context.Context, local *config.PasswordVaultR
 	}
 	state, err := v.Client.PutPasswordVault(ctx, pending.Envelope)
 	if err != nil {
-		return err
+		return wrapVaultIntegrityFailure(err)
 	} // Keep exact pending bytes for an idempotent retry.
 	head, _, err := state.Decode()
-	if err != nil || head != pending.Head {
+	if err != nil {
+		return wrapVaultIntegrityFailure(err)
+	}
+	if head != pending.Head {
 		return ErrIntegrity
 	}
 	next := config.PasswordVaultRecord{Head: pending.Head, Envelope: pending.Envelope, Payload: bytes.Clone(pending.Payload)}
@@ -287,7 +322,7 @@ func (v PasswordVault) ReplaceRecovery(ctx context.Context, code []byte) (result
 	return v.stageVault(ctx, &local, protection, local.Payload)
 }
 
-// Recover never restores device credentials or grants membership. The caller must
+// Recover never restores machine credentials or grants membership. The caller must
 // display and acknowledge the replacement code before calling this operation.
 func (v PasswordVault) Recover(ctx context.Context, code, password, replacementCode []byte) (resultErr error) {
 	if len(replacementCode) == 0 {
@@ -300,7 +335,7 @@ func (v PasswordVault) Recover(ctx context.Context, code, password, replacementC
 	defer func() { resultErr = errors.Join(resultErr, unlock()) }()
 	local, err := v.Store.LoadPasswordVault(v.Issuer, v.AccountID)
 	defer local.Clear()
-	if err != nil && !errors.Is(err, config.ErrSecretNotFound) {
+	if err != nil && !vaultCredentialAbsentOnly(err) {
 		return err
 	}
 	if local.Pending != nil || local.Operation != nil {
@@ -394,4 +429,11 @@ func (v PasswordVault) stageVault(ctx context.Context, local *config.PasswordVau
 		return err
 	}
 	return v.publish(ctx, local)
+}
+
+func (v PasswordVault) scopeWorkspace(kind, owner string) string {
+	if kind == "team" {
+		return owner
+	}
+	return v.WorkspaceID
 }
