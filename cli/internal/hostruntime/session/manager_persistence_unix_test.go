@@ -5,6 +5,8 @@ package session
 import (
 	"bytes"
 	"context"
+	"database/sql"
+	"errors"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -347,5 +349,109 @@ func TestManagerRecoveryClearsLegacyExitedHistory(t *testing.T) {
 	attached, err := manager.Attach(record.ID, "att_compact", snapshot.EarliestSequence)
 	if err != nil || len(attached.Replay.Events) != 0 {
 		t.Fatalf("attached=%#v err=%v", attached, err)
+	}
+}
+
+// Close must retain recovery across both history and lifecycle write failures.
+func TestManagerCloseRecoversPersistenceFailures(t *testing.T) {
+	for _, fault := range []string{"output", "lifecycle"} {
+		t.Run(fault, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "state")
+			injected := errors.New("injected output persistence failure")
+			failed := make(chan struct{}, 1)
+			state, err := store.Open(t.Context(), store.Config{Root: root, FailureHook: func(point string) error {
+				if fault == "output" && point == "append_before_commit" {
+					select {
+					case failed <- struct{}{}:
+					default:
+					}
+					return injected
+				}
+				return nil
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer state.Close()
+			workspace := t.TempDir()
+			adapter, err := pty.NewAdapter(workspace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			manager, err := NewManager(ManagerConfig{Store: state, Launch: func(command pty.Command) (PTYProcess, error) { return adapter.Start(command) }, TerminationTimeout: time.Second, TerminationGrace: 10 * time.Millisecond})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer manager.Shutdown(context.Background())
+			created, err := manager.Create(t.Context(), CreateRequest{Name: "close-recovery", Command: shellCommand("/bin/sh", workspace, "printf ready; read line")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			waitLatest(t, manager, created.ID, 5)
+			var db *sql.DB
+			if fault == "output" {
+				select {
+				case <-failed:
+				case <-time.After(time.Second):
+					t.Fatal("output failure not reached")
+				}
+			} else {
+				db, err = sql.Open("sqlite", filepath.Join(root, "state.db"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer db.Close()
+				_, err = db.Exec(`CREATE TRIGGER reject_close BEFORE UPDATE OF state ON sessions WHEN NEW.state IN ('closing','closed') BEGIN SELECT RAISE(ABORT,'injected lifecycle failure'); END`)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			closed, err := manager.Close(t.Context(), created.ID)
+			if err == nil {
+				t.Fatal("injected persistence failure was hidden")
+			}
+			if fault == "output" && !errors.Is(err, injected) {
+				t.Fatal("output cause lost")
+			}
+			if closed.State != Closed || closed.Exit == nil || closed.Exit.ExitedAt.IsZero() {
+				t.Fatalf("close did not reap process: state=%s", closed.State)
+			}
+			if fault == "lifecycle" {
+				if _, err = db.Exec(`DROP TRIGGER reject_close`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			closed, err = manager.CloseAtGeneration(t.Context(), created.ID, created.Generation)
+			if err != nil || closed.State != Closed || closed.Generation != created.Generation {
+				t.Fatalf("close retry state=%s generation=%d err=%v", closed.State, closed.Generation, err)
+			}
+			records, err := state.Sessions(t.Context())
+			if err != nil || len(records) != 1 || records[0].State != string(Closed) || records[0].Generation != created.Generation {
+				t.Fatalf("durable close not recovered: records=%d err=%v", len(records), err)
+			}
+			output, earliest, latest, err := state.Replay(t.Context(), created.ID, closed.LatestSequence, 0)
+			if err != nil || len(output) != 0 || earliest != latest {
+				t.Fatal("closed output not cleared")
+			}
+			if err = manager.Shutdown(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if err = state.Close(); err != nil {
+				t.Fatal(err)
+			}
+			reopened, err := store.Open(t.Context(), store.Config{Root: root})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reopened.Close()
+			recovered, err := NewManager(ManagerConfig{Store: reopened, Launch: func(pty.Command) (PTYProcess, error) { t.Fatal("closed recovery launched process"); return nil, nil }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := recovered.Snapshot(created.ID)
+			if err != nil || snapshot.State != Closed || snapshot.Generation != created.Generation {
+				t.Fatal("reopen lost closed generation")
+			}
+		})
 	}
 }

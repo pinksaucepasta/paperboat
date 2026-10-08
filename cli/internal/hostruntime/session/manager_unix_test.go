@@ -262,7 +262,7 @@ func TestManagerUpdateFenceSerializesConcurrentCreateAdmission(t *testing.T) {
 
 func TestManagerUpdateFenceSerializesConcurrentRestartAdmission(t *testing.T) {
 	manager, root, shell := realManager(t)
-	created, err := manager.Create(context.Background(), CreateRequest{Name: "restart-race", Command: shellCommand(shell, root, "exit")})
+	created, err := manager.Create(context.Background(), CreateRequest{Name: "restart-race", Command: shellCommand(shell, root, "if test -f restart-started; then read line; else touch restart-started; exit; fi")})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,10 +13,53 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
 	"golang.org/x/sys/windows"
 )
+
+// Verify the complete restoration gate against a real enrolled installation,
+// including SCM targets and protected role declarations. This check only reads
+// the installation; it never starts services, commits identity or changes ACLs.
+func TestNativeWindowsInstalledFeatureNativePins(t *testing.T) {
+	instance := os.Getenv("PAPERBOAT_NATIVE_OWNER_INSTANCE")
+	if instance == "" {
+		t.Skip("requires enrolled native Windows fixture")
+	}
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil || user.User.Sid.String() != "S-1-5-18" {
+		t.Fatal("requires native SYSTEM protected-installation reader")
+	}
+	installed, err := hostinstall.LoadWindowsRuntimeConfigForInstance(instance)
+	if err != nil {
+		t.Fatal("protected installation config unavailable")
+	}
+	layout, err := service.WindowsUserLayout(installed.OwnerSID)
+	if err != nil || layout.Instance != instance {
+		t.Fatal("protected installation owner mismatch")
+	}
+	config := WindowsConfig{OwnerSID: installed.OwnerSID, StateRoot: layout.UpdateStateRoot}
+	if !windowsMachineFileSecurityMatches(windowsActivationJournalPath(config.StateRoot), "D:P(A;;FA;;;SY)(A;;FA;;;BA)") {
+		t.Fatal("activation journal is not SYSTEM-owned and protected")
+	}
+	journal, err := loadWindowsActivationJournal(config)
+	if err != nil {
+		t.Fatal("protected activation journal unavailable or invalid")
+	}
+	if journal.Stage != windowsActivationCommitted || journal.Release.SupervisorMaintenance || journal.Version != installed.Source.Version {
+		t.Fatal("requires committed ordinary transaction matching installed feature version")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	if err := newWindowsSCMActivationBackend(config).verifyFeatureNativePins(ctx, journal); err != nil {
+		t.Fatalf("installed native restoration gate rejected: %v", err)
+	}
+	if err := verifyWindowsNativeInstallRolePins(ctx, config, journal); err != nil {
+		t.Fatalf("installed native installer recovery gate rejected: %v", err)
+	}
+}
 
 // Real PE bytes and OS ACLs exercise the immutable executable verification
 // boundary. This test never changes an installed pin or touches SCM services.

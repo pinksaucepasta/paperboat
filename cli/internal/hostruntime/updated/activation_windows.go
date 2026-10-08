@@ -1828,27 +1828,7 @@ func RunWindowsActivator(ctx context.Context, config WindowsConfig) error {
 		controlErr = control.Close()
 	}
 	finishErr := finishWindowsActivatorResult(ctx, result, activationErr, backend.restoreFeatureUpdater, func() error {
-		manager, err := mgr.Connect()
-		if err != nil {
-			return err
-		}
-		defer manager.Disconnect()
-		_, _, _, _, name, err := windowsInstanceNames(config.OwnerSID)
-		if err != nil {
-			return err
-		}
-		item, err := manager.OpenService(name)
-		if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		defer item.Close()
-		if err := item.Delete(); err != nil && !errors.Is(err, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
-			return err
-		}
-		return nil
+		return retireWindowsActivatorService(config, result, false)
 	})
 	return errors.Join(controlErr, finishErr)
 }

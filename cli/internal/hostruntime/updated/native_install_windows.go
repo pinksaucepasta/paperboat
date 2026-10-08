@@ -181,13 +181,18 @@ func RecoverWindowsNativeInstall(ctx context.Context, config WindowsConfig) erro
 			return stopNamedWindowsServices(ctx, name)
 		},
 		resume: func(ctx context.Context, j windowsActivationJournal) error {
-			// Retirement retries reuse the verified registered activator. The general
-			// resume predicate deliberately excludes terminal journals.
-			if nativeWindowsJournalRetirable(j) {
-				return startWindowsActivatorService(config.OwnerSID)
-			}
 			_, err := startVerifiedWindowsActivation(ctx, config, j)
 			return err
+		},
+		finishTerminal: func(ctx context.Context, j windowsActivationJournal) error {
+			// The installed activator can contain the bug that prevented retirement.
+			// Finish its terminal transaction with the current verified installer,
+			// without rerunning cutover or launching that older executable.
+			backend := newWindowsSCMActivationBackend(config)
+			result, activationErr := executeWindowsActivation(ctx, backend, j)
+			return finishWindowsActivatorResult(ctx, result, activationErr, backend.restoreFeatureUpdater, func() error {
+				return retireWindowsActivatorService(config, result, true)
+			})
 		},
 	}
 	return recoverWindowsNativeInstall(ctx, ops)
@@ -202,6 +207,7 @@ type windowsNativeInstallRecoveryOps struct {
 	owner            func(windowsActivationJournal) (registered, running bool, err error)
 	stopUpdater      func(context.Context) error
 	resume           func(context.Context, windowsActivationJournal) error
+	finishTerminal   func(context.Context, windowsActivationJournal) error
 }
 
 func recoverWindowsNativeInstall(ctx context.Context, ops windowsNativeInstallRecoveryOps) error {
@@ -235,6 +241,7 @@ func recoverWindowsNativeInstall(ctx context.Context, ops windowsNativeInstallRe
 	}
 	journal := initial
 	started := false
+	terminalFinished := false
 	for {
 		if err := bounded.Err(); err != nil {
 			return err
@@ -249,7 +256,23 @@ func recoverWindowsNativeInstall(ctx context.Context, ops windowsNativeInstallRe
 		if nativeWindowsJournalRetirable(journal) && !registered {
 			return nil
 		}
-		if !running && !started {
+		if !running && nativeWindowsJournalRetirable(journal) && !terminalFinished {
+			if err := ops.validateMutation(bounded, journal); err != nil {
+				return err
+			}
+			// Validation may take time. Never steal a service that acquired the
+			// transaction while those checks were running.
+			_, running, err = ops.owner(journal)
+			if err != nil {
+				return err
+			}
+			if !running {
+				if err := ops.finishTerminal(bounded, journal); err != nil {
+					return err
+				}
+				terminalFinished = true
+			}
+		} else if !running && !started && !nativeWindowsJournalRetirable(journal) {
 			if err := ops.validateMutation(bounded, journal); err != nil {
 				return err
 			}
@@ -302,19 +325,61 @@ func windowsNativeInstallActivatorState(config WindowsConfig, j windowsActivatio
 	if err != nil {
 		return true, false, err
 	}
+	running, err := windowsActivatorRunning(item, definition, instance, j)
+	return true, running, err
+}
+
+func windowsActivatorRunning(item *mgr.Service, definition mgr.Config, instance string, j windowsActivationJournal) (bool, error) {
 	arguments, err := windows.DecomposeCommandLine(definition.BinaryPathName)
 	expected := []string{j.Updater.Path, "daemon", "__runtime-activate", "--instance", instance}
 	if err != nil || len(arguments) != len(expected) || !strings.EqualFold(arguments[0], expected[0]) || !slices.Equal(arguments[1:], expected[1:]) || !validPrivilegedWindowsServiceConfig(definition, mgr.StartAutomatic, mgr.ErrorSevere) {
-		return true, false, errInvalidWindowsActivation
+		return false, errInvalidWindowsActivation
 	}
 	if err := validateWindowsRecovery(item); err != nil {
-		return true, false, err
+		return false, err
 	}
 	status, err := item.Query()
 	if err != nil {
-		return true, false, err
+		return false, err
 	}
-	return true, status.State != svc.Stopped, nil
+	return status.State != svc.Stopped, nil
+}
+
+// Delete only the exact approved registered service. The installer requires a
+// stopped owner; the activator itself uses the same check while it is running.
+func retireWindowsActivatorService(config WindowsConfig, j windowsActivationJournal, requireStopped bool) error {
+	instance, _, _, _, name, err := windowsInstanceNames(config.OwnerSID)
+	if err != nil {
+		return err
+	}
+	manager, err := mgr.Connect()
+	if err != nil {
+		return err
+	}
+	defer manager.Disconnect()
+	item, err := manager.OpenService(name)
+	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) || errors.Is(err, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer item.Close()
+	definition, err := item.Config()
+	if err != nil {
+		return err
+	}
+	running, err := windowsActivatorRunning(item, definition, instance, j)
+	if err != nil {
+		return err
+	}
+	if requireStopped && running {
+		return ErrWindowsActivationUnavailable
+	}
+	if err := item.Delete(); err != nil && !errors.Is(err, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
+		return err
+	}
+	return nil
 }
 
 func verifyWindowsNativeInstallRolePins(ctx context.Context, config WindowsConfig, j windowsActivationJournal) error {
@@ -345,7 +410,11 @@ func verifyWindowsNativeInstallRolePins(ctx context.Context, config WindowsConfi
 			return errInvalidWindowsActivation
 		}
 		target := workerupdate.ComponentTarget{SHA256: identity.SHA256, Length: identity.Length, Platform: "windows", Architecture: j.Architecture}
-		if err := verifyWindowsStableBinary(ctx, actual.Executable, target, config.OwnerSID); err != nil {
+		verifyBinary := verifyWindowsStableBinary
+		if windowsPinnedServiceExecutable(layout, actual.Executable) {
+			verifyBinary = verifyWindowsPinnedBinary
+		}
+		if err := verifyBinary(ctx, actual.Executable, target, config.OwnerSID); err != nil {
 			return err
 		}
 	}

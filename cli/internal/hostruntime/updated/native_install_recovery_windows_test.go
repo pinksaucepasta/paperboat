@@ -129,26 +129,84 @@ func TestWindowsNativeInstallRecoveryRetiresTerminalWithoutRecutover(t *testing.
 			journal := testWindowsActivationJournal()
 			journal.Stage = stage
 			registered := true
-			starts := 0
+			finishes := 0
 			ops := windowsNativeInstallRecoveryOps{
 				load:             func() (windowsActivationJournal, error) { return journal, nil },
 				validate:         func(context.Context, windowsActivationJournal) error { return nil },
 				validateMutation: func(context.Context, windowsActivationJournal) error { return nil },
 				owner:            func(windowsActivationJournal) (bool, bool, error) { return registered, false, nil },
-				stopUpdater:      func(context.Context) error { return nil },
-				resume: func(_ context.Context, j windowsActivationJournal) error {
+				stopUpdater:      func(context.Context) error { t.Fatal("terminal recovery stopped native updater"); return nil },
+				resume: func(context.Context, windowsActivationJournal) error {
+					t.Fatal("terminal recovery launched old activator")
+					return nil
+				},
+				finishTerminal: func(_ context.Context, j windowsActivationJournal) error {
 					if !nativeWindowsJournalRetirable(j) {
 						t.Fatal("terminal retirement recut over")
 					}
-					starts++
+					finishes++
 					registered = false
 					return nil
 				},
 			}
-			if err := recoverWindowsNativeInstall(context.Background(), ops); err != nil || starts != 1 {
-				t.Fatalf("starts=%d err=%v", starts, err)
+			if err := recoverWindowsNativeInstall(context.Background(), ops); err != nil || finishes != 1 {
+				t.Fatalf("finishes=%d err=%v", finishes, err)
 			}
 		})
+	}
+}
+
+func TestWindowsNativeInstallTerminalFailureRetainsRegistrationForRetry(t *testing.T) {
+	journal := testWindowsFeatureJournal()
+	journal.Stage = windowsActivationCommitted
+	registered := true
+	failure := errors.New("native restoration unavailable")
+	retired, restores := 0, 0
+	ops := windowsNativeInstallRecoveryOps{
+		load:             func() (windowsActivationJournal, error) { return journal, nil },
+		validate:         func(context.Context, windowsActivationJournal) error { return nil },
+		validateMutation: func(context.Context, windowsActivationJournal) error { return nil },
+		owner:            func(windowsActivationJournal) (bool, bool, error) { return registered, false, nil },
+		stopUpdater:      func(context.Context) error { t.Fatal("terminal updater stopped"); return nil },
+		resume:           func(context.Context, windowsActivationJournal) error { t.Fatal("old activator launched"); return nil },
+		finishTerminal: func(ctx context.Context, j windowsActivationJournal) error {
+			return finishWindowsActivatorResult(ctx, j, nil, func(context.Context, windowsActivationJournal) error {
+				restores++
+				return failure
+			}, func() error { retired++; registered = false; return nil })
+		},
+	}
+	if err := recoverWindowsNativeInstall(context.Background(), ops); !errors.Is(err, failure) || !registered || retired != 0 {
+		t.Fatalf("failed restoration lost retry ownership: registered=%t retired=%d err=%v", registered, retired, err)
+	}
+	failure = nil
+	if err := recoverWindowsNativeInstall(context.Background(), ops); err != nil || registered || retired != 1 || restores != 2 {
+		t.Fatalf("terminal retry: registered=%t retired=%d restores=%d err=%v", registered, retired, restores, err)
+	}
+}
+
+func TestWindowsNativeInstallTerminalRecoveryRechecksRunningOwner(t *testing.T) {
+	journal := testWindowsFeatureJournal()
+	journal.Stage = windowsActivationCommitted
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	queries := 0
+	ops := windowsNativeInstallRecoveryOps{
+		load:             func() (windowsActivationJournal, error) { return journal, nil },
+		validate:         func(context.Context, windowsActivationJournal) error { return nil },
+		validateMutation: func(context.Context, windowsActivationJournal) error { return nil },
+		owner: func(windowsActivationJournal) (bool, bool, error) {
+			queries++
+			if queries > 1 {
+				cancel()
+				return true, true, nil
+			}
+			return true, false, nil
+		},
+		finishTerminal: func(context.Context, windowsActivationJournal) error { t.Fatal("running owner stolen"); return nil },
+	}
+	if err := recoverWindowsNativeInstall(ctx, ops); !errors.Is(err, context.Canceled) {
+		t.Fatalf("running-owner cancellation: %v", err)
 	}
 }
 
