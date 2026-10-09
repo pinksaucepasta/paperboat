@@ -32,7 +32,7 @@ var runWindowsTaskCommand = defaultWindowsTaskCommand
 var listWindowsTaskNames = defaultListWindowsTaskNames
 var readWindowsDaemonPIDLock = defaultReadWindowsDaemonPIDLock
 var openWindowsDaemonProcess = defaultOpenWindowsDaemonProcess
-var windowsDaemonLayout = hostruntimeservice.DefaultLayout
+var windowsDaemonLayout = hostruntimeservice.WindowsUserLayout
 var probeWindowsLocalDaemonService = defaultProbeWindowsLocalDaemonService
 var stopWindowsLocalDaemonService = defaultStopWindowsLocalDaemonService
 var startWindowsLocalDaemonService = defaultStartWindowsLocalDaemonService
@@ -538,7 +538,7 @@ func validateOwnedWindowsDaemon(identity windowsDaemonProcessIdentity, lock wind
 	record := lock.Record
 	executable := identity.Executable
 	if !strings.EqualFold(filepath.Clean(executable), record.Executable) {
-		layout, layoutErr := windowsDaemonLayout("windows")
+		layout, layoutErr := windowsDaemonLayout(ownerSID)
 		if layoutErr != nil || !strings.EqualFold(record.Executable, layout.Binary) || !strings.EqualFold(filepath.Clean(executable), layout.BinaryRollback) {
 			return errUnsafeWindowsDaemonProcess
 		}

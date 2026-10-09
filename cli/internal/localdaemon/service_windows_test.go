@@ -482,7 +482,11 @@ func TestValidateOwnedWindowsDaemonAcceptsCanonicalRollbackRename(t *testing.T) 
 		BinaryRollback: filepath.Join(root, "releases", "pb.rollback.exe"),
 	}
 	previousLayout := windowsDaemonLayout
-	windowsDaemonLayout = func(string) (hostruntimeservice.Layout, error) { return layout, nil }
+	layoutOwnerSID := ""
+	windowsDaemonLayout = func(ownerSID string) (hostruntimeservice.Layout, error) {
+		layoutOwnerSID = ownerSID
+		return layout, nil
+	}
 	t.Cleanup(func() { windowsDaemonLayout = previousLayout })
 	for _, path := range []string{layout.Binary, layout.BinaryRollback} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -503,6 +507,17 @@ func TestValidateOwnedWindowsDaemonAcceptsCanonicalRollbackRename(t *testing.T) 
 	identity.Executable = layout.BinaryRollback
 	if err := validateOwnedWindowsDaemon(identity, record, identity.OwnerSID); err != nil {
 		t.Fatalf("canonical rollback rename rejected: %v", err)
+	}
+	if layoutOwnerSID != identity.OwnerSID {
+		t.Fatal("rollback validation did not resolve the owner-specific layout")
+	}
+	globalLayout, err := hostruntimeservice.DefaultLayout("windows")
+	if err != nil {
+		t.Fatal("global Windows layout unavailable")
+	}
+	identity.Executable = globalLayout.BinaryRollback
+	if err := validateOwnedWindowsDaemon(identity, record, identity.OwnerSID); !errors.Is(err, errUnsafeWindowsDaemonProcess) {
+		t.Fatal("global rollback path accepted for an enrolled owner")
 	}
 
 	identity.Executable = filepath.Join(layout.ReleasesRoot, "arbitrary.exe")
