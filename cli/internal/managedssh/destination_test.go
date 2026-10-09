@@ -18,10 +18,11 @@ func TestAliasHostRoundTrip(t *testing.T) {
 
 func TestParseMachineTarget(t *testing.T) {
 	for input, want := range map[string][2]string{
-		"build-01":        {"build-01", ""},
-		"root@build-01":   {"build-01", "root"},
-		"Deploy@BUILD-01": {"BUILD-01", "Deploy"},
-		"root@machine_01": {"machine_01", "root"},
+		"build-01":            {"build-01", ""},
+		"root@build-01":       {"build-01", "root"},
+		"Deploy@BUILD-01":     {"BUILD-01", "Deploy"},
+		"root@machine_01":     {"machine_01", "root"},
+		`VICTUS\Pujan@victus`: {"victus", `VICTUS\Pujan`},
 	} {
 		alias, username, err := ParseMachineTarget(input)
 		if err != nil || alias != want[0] || username != want[1] {
@@ -96,6 +97,20 @@ func TestResolveUsernameRejectsConflictAndUnsafeValues(t *testing.T) {
 }
 
 func TestResolveUsernameWindowsIsCaseInsensitiveAndCanonical(t *testing.T) {
+	for _, request := range []string{"", `victus\pujan`} {
+		got, err := ResolveUsernameForPlatform(request, "", `VICTUS\Pujan`, "local", true, "windows")
+		if err != nil || got != `VICTUS\Pujan` {
+			t.Fatalf("qualified Windows identity = %q, %v", got, err)
+		}
+	}
+	if _, err := ResolveUsernameForPlatform(`VICTUS\Pujan`, "", "", "", false, "linux"); !errors.Is(err, ErrSSHUsernameInvalid) {
+		t.Fatalf("Unix accepted qualified Windows identity: %v", err)
+	}
+	for _, value := range []string{`\Pujan`, `VICTUS\`, `VICTUS\Pujan\extra`, `-domain\Pujan`, `VICTUS\-user`, `VICTUS/Pujan`, `VICTUS\bad user`, `VICTUS\bad;user`} {
+		if _, err := ResolveUsernameForPlatform(value, "", "", "", false, "windows"); !errors.Is(err, ErrSSHUsernameInvalid) {
+			t.Fatalf("unsafe qualified identity %q accepted: %v", value, err)
+		}
+	}
 	got, err := ResolveUsernameForPlatform("pujan", "Pujan", "Pujan", "local", true, "windows")
 	if err != nil || got != "Pujan" {
 		t.Fatalf("ResolveUsernameForPlatform() = %q, %v", got, err)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -10,6 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/environmentmanager"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/internal/preferences"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
 	"github.com/spf13/cobra"
@@ -22,6 +24,7 @@ const teamSubscriptionRecovery = "Ask a team owner or admin to manage team billi
 
 type cliJSONError struct {
 	Code             string `json:"code"`
+	Stage            string `json:"stage,omitempty"`
 	Category         string `json:"category"`
 	Message          string `json:"message"`
 	Retryable        bool   `json:"retryable"`
@@ -81,6 +84,10 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 	result := cliJSONError{Code: "operation_failed", Category: "local_io", Message: boundedCLIJSONMessage(commandFailureMessage(err, failure)), StateChanged: "unknown", SupportReference: failure.supportReference}
 	if result.Message == "" {
 		result.Message = "The operation failed."
+	}
+	var updaterFailure *updated.ControlError
+	if errors.As(err, &updaterFailure) {
+		result = classifyUpdaterControlJSONError(result, updaterFailure)
 	}
 	owner := soleCommandOwner(err)
 	switch typed := owner.(type) {
@@ -212,6 +219,93 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 		}
 	}
 	return result
+}
+
+func classifyUpdaterControlJSONError(result cliJSONError, failure *updated.ControlError) cliJSONError {
+	if failure == nil {
+		return result
+	}
+	result.Code = failure.DiagnosticCode()
+	result.Stage = failure.DiagnosticStage()
+	result.Category = "local_io"
+	result.Retryable = false
+	result.Message = "The local updater request failed."
+	result.Recovery = "Run `pb update status` and check the support reference before retrying."
+
+	switch failure.Code {
+	case "invalid_request":
+		result.Category = "protocol_incompatible"
+		result.StateChanged = false
+		result.Message = "The local updater rejected the request."
+		result.Recovery = "Update the CLI and managed updater together before retrying."
+	case "custom_installation":
+		result.Category = "conflict"
+		result.StateChanged = false
+		result.Message = "Official updates are unavailable for this custom installation."
+		result.Recovery = "Install a fresh official build to switch to official updates."
+	case "approval_required":
+		result.Category = "conflict"
+		result.StateChanged = false
+		result.Message = "The update requires explicit approval before installation."
+		result.Recovery = "Run `pb update` to review the signed candidate, then approve its exact ID."
+	case "candidate_changed":
+		result.Category = "conflict"
+		result.StateChanged = false
+		result.Message = "The signed update candidate changed before installation."
+		result.Recovery = "Run `pb update` again to download and review the current candidate."
+	case "active_terminal_sessions":
+		result.Category = "conflict"
+		result.Message = "The update is blocked while terminal sessions are active."
+		result.Recovery = "Close the active sessions or wait for them to finish, then check `pb update status`."
+	case "activation_unavailable":
+		result.Category, result.Retryable = "unavailable_retryable", true
+		result.Message = "The local updater is unavailable or recovering."
+		result.Recovery = "Run `pb update status` and retry after the updater is ready."
+	case "recovery_required":
+		result.Category = "conflict"
+		result.Message = "The local updater requires recovery before continuing."
+		result.Recovery = "Run `pb update status` and follow its recovery state before retrying."
+	case "release_not_found":
+		result.Category = "conflict"
+		result.Message = "No eligible signed release was found or validated."
+		result.Recovery = "Run `pb update check` and retry when an eligible signed release is available."
+	case "update_failed", "check_failed":
+		result.Category, result.Retryable = "unavailable_retryable", true
+		result.Message = updaterControlFailureMessage(result.Stage)
+		result.Recovery = updaterControlRecovery(result.Stage)
+	default:
+		result.Code = "control_request_failed"
+	}
+	if result.Stage == "update_install" && result.Category == "unavailable_retryable" {
+		result.OutcomeUncertain = true
+	}
+	return result
+}
+
+func updaterControlFailureMessage(stage string) string {
+	switch stage {
+	case "update_check":
+		return "The local updater could not check signed release metadata."
+	case "update_download":
+		return "The local updater could not verify or download the signed update."
+	case "update_install":
+		return "The local updater could not complete the approved update."
+	default:
+		return "The local updater request failed."
+	}
+}
+
+func updaterControlRecovery(stage string) string {
+	switch stage {
+	case "update_check":
+		return "Run `pb update status` before retrying the check."
+	case "update_download":
+		return "Run `pb update status` to inspect the candidate before retrying the download."
+	case "update_install":
+		return "Run `pb update status` and follow any recovery state before retrying."
+	default:
+		return "Run `pb update status` and check the support reference before retrying."
+	}
 }
 
 func boundedCLIJSONMessage(value string) string {

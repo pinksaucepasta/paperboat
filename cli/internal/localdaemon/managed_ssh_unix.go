@@ -73,7 +73,7 @@ func StartManagedSSH(ctx context.Context, cfg ManagedSSHConfig) (*ManagedSSHRunt
 		}
 		_, err = managedssh.InstallOpenSSHConfig(managedssh.OpenSSHConfig{
 			Home: cfg.Home, OwnerUID: cfg.OwnerUID,
-			ProxyCommand:      command + " __ssh-proxy --host %h --port %p --user %r",
+			ProxyCommand:      managedSSHProxyCommand(command),
 			KnownHostsCommand: command + " __ssh-known-hosts --host %h --port %p",
 			AgentSocket:       agent.Socket(),
 			IdentityFile:      managedssh.ManagedIdentityPublicKeyPath(cfg.Home),

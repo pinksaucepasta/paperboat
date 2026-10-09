@@ -87,7 +87,7 @@ func (s ProofSource) proof(operationID, method, path string, body []byte, allowE
 	if err != nil {
 		return nil, unavailableEnrollment(err)
 	}
-	if len(operationID) < 8 || len(operationID) > 128 || method != http.MethodPost && method != http.MethodPut || path == "" || len(body) > 1<<20 {
+	if len(operationID) < 8 || len(operationID) > 128 || method != http.MethodGet && method != http.MethodPost && method != http.MethodPut || path == "" || len(body) > 1<<20 {
 		return nil, ErrInvalid
 	}
 	store, err := identity.Open(identity.Config{StateRoot: s.StateRoot})

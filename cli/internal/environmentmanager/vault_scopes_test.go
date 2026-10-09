@@ -68,12 +68,19 @@ type vaultScopesControl struct {
 	ackCount       int
 	events         []string
 
-	failCreateAfterCommit bool
-	failAckAfterCommit    bool
-	ackCommitted          bool
-	sawAtomicCreate       bool
-	sawScopeOperation     bool
-	canary                []byte
+	failCreateAfterCommit   bool
+	failAckAfterCommit      bool
+	ackCommitted            bool
+	sawAtomicCreate         bool
+	sawScopeOperation       bool
+	canary                  []byte
+	records                 map[string]api.VaultRecordsResult
+	recordOperations        map[string]api.VaultRecordsResult
+	recordOperationRequests map[string]api.VaultRecordsPut
+	recordPuts              []api.VaultRecordsPut
+	recordSnapshots         int
+	recordGets              int
+	recordFailure           string
 }
 
 func scopeControlKey(kind, owner, machine string) string {
@@ -454,17 +461,17 @@ func TestVaultScopesMutationPublishesCiphertextWithoutPlaintext(t *testing.T) {
 	if !allZeroBytes(callbackValue) {
 		t.Fatal("scope mutation retained callback plaintext after sealing")
 	}
-	if !control.sawScopeOperation || len(control.scopePuts) != 1 || len(control.events) != 1 || control.events[0] != "scope" {
+	if !control.sawScopeOperation || len(control.scopePuts) != 1 || len(control.events) != 2 || control.events[0] != "scope" || control.events[1] != "records" || len(control.recordPuts) != 1 {
 		t.Fatalf("scope staging/publication sequence: staged=%v puts=%d events=%v", control.sawScopeOperation, len(control.scopePuts), control.events)
 	}
-	requestJSON, err := json.Marshal(control.scopePuts[0])
+	requestJSON, err := json.Marshal(control.recordPuts[0])
 	if err != nil {
 		t.Fatal(err)
 	}
 	if bytes.Contains(requestJSON, canary) {
 		t.Fatal("scope API request contained plaintext canary")
 	}
-	raw, err := decodeVaultTestEnvelope(control.scopePuts[0].Envelope)
+	raw, err := decodeVaultTestEnvelope(control.recordPuts[0].Records[0].Envelope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -477,15 +484,31 @@ func TestVaultScopesMutationPublishesCiphertextWithoutPlaintext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	values, err := environmente2ee.OpenVaultScope(context.Background(), scope, personalKey)
+	anchor, err := environmente2ee.OpenVaultScope(context.Background(), scope, personalKey)
+	if err != nil || len(anchor) != 0 {
+		clearScopeTestValues(anchor)
+		t.Fatal("scope anchor contains values", err)
+	}
+	clearScopeTestValues(anchor)
+	key, err := environmente2ee.VaultRecordKey(personalKey, scope.Claims.WorkspaceID, scope.Claims.OwnerKind, scope.Claims.OwnerID, scope.Claims.MachineID, scope.Claims.KeyEpoch)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(values["APP_SECRET"], canary) {
-		clearScopeTestValues(values)
-		t.Fatalf("native scope decode returned %q", values["APP_SECRET"])
+	defer clear(key)
+	records, err := control.VaultRecords(context.Background(), recordCoordinate(scope), 0)
+	if err != nil || len(records.Records) != 1 {
+		t.Fatal("record mutation missing", err)
 	}
-	clearScopeTestValues(values)
+	parsed, err := records.Records[0].Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, value, err := environmente2ee.OpenVaultRecord(context.Background(), parsed, key)
+	if err != nil || name != "APP_SECRET" || !bytes.Equal(value, canary) {
+		clear(value)
+		t.Fatal("native record decode failed", err)
+	}
+	clear(value)
 
 	final, err := store.LoadPasswordVault(vaultScopesTestIssuer, vaultScopesTestAccount)
 	if err != nil {

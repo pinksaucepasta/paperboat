@@ -68,6 +68,7 @@ type VaultTeamMember struct {
 	EnvPermission        string `json:"env_permission"`
 }
 type VaultTeamState struct {
+	RecordSequence   uint64            `json:"record_sequence"`
 	Entitled         bool              `json:"entitled"`
 	RotationRequired bool              `json:"rotation_required"`
 	TeamID           string            `json:"team_id"`
@@ -93,13 +94,14 @@ type VaultMemberGrant struct {
 	GrantEnvelope                string `json:"grant_envelope"`
 }
 type VaultTeamRotate struct {
-	ConfirmTotalLoss       bool     `json:"confirm_total_loss"`
-	VaultEnvelope          string   `json:"vault_envelope"`
-	OperationID            string   `json:"operation_id"`
-	ExpectedTeamGeneration uint64   `json:"expected_team_generation"`
-	RemoveAccountIDs       []string `json:"remove_account_ids"`
-	ScopeEnvelope          string   `json:"scope_envelope"`
-	GrantEnvelopes         []string `json:"grant_envelopes"`
+	Records                VaultRecordReplacement `json:"records"`
+	ConfirmTotalLoss       bool                   `json:"confirm_total_loss"`
+	VaultEnvelope          string                 `json:"vault_envelope"`
+	OperationID            string                 `json:"operation_id"`
+	ExpectedTeamGeneration uint64                 `json:"expected_team_generation"`
+	RemoveAccountIDs       []string               `json:"remove_account_ids"`
+	ScopeEnvelope          string                 `json:"scope_envelope"`
+	GrantEnvelopes         []string               `json:"grant_envelopes"`
 }
 type VaultGrantState struct {
 	Acknowledged         bool   `json:"acknowledged"`
@@ -238,10 +240,11 @@ type VaultScopeDocument struct {
 	DocumentID  string `json:"document_id"`
 }
 type VaultPersonalScopeStage struct {
-	WorkspaceID             string `json:"workspace_id"`
-	ExpectedVaultDocumentID string `json:"expected_vault_document_id"`
-	MachineID               string `json:"machine_id"`
-	Envelope                string `json:"envelope"`
+	Records                 VaultRecordReplacement `json:"records"`
+	WorkspaceID             string                 `json:"workspace_id"`
+	ExpectedVaultDocumentID string                 `json:"expected_vault_document_id"`
+	MachineID               string                 `json:"machine_id"`
+	Envelope                string                 `json:"envelope"`
 }
 
 func (c *Client) StageVaultPersonalScope(ctx context.Context, operation string, in VaultPersonalScopeStage) (VaultScopeDocument, error) {
@@ -287,4 +290,10 @@ func (c *Client) PutVaultScopeInWorkspace(ctx context.Context, workspace, kind, 
 		return VaultScopeState{}, err
 	}
 	return scoped.PutVaultScope(ctx, kind, owner, machine, in)
+}
+
+type VaultRecordReplacement struct {
+	ExpectedSequence uint64   `json:"expected_sequence"`
+	DocumentIDs      []string `json:"document_ids"`
+	Envelopes        []string `json:"envelopes"`
 }

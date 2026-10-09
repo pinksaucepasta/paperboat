@@ -215,24 +215,39 @@ func (v PasswordVault) publishPersonalRotation(ctx context.Context, local *confi
 			}
 			scoped := v
 			scoped.WorkspaceID = state.WorkspaceID
-			scope, values, err := scoped.readVaultScope(ctx, c, &oldKeys, "personal", v.AccountID, state.MachineID)
-			oldKeys.Clear()
+			oldState, err := readScopedVaultSource(ctx, c, state.WorkspaceID, "personal", v.AccountID, state.MachineID)
 			if err != nil {
+				oldKeys.Clear()
 				nextKeys.Clear()
 				return err
 			}
-			if scope.ID.String() != state.DocumentID || scope.Claims.Revision != state.Revision {
-				clearVaultValues(values)
+			scope, err := oldState.Decode()
+			if err != nil || scope.ID.String() != state.DocumentID || scope.Claims.Revision != state.Revision || scope.Claims.Issuer != v.Issuer || scope.Claims.WorkspaceID != state.WorkspaceID || scope.Claims.OwnerKind != "personal" || scope.Claims.OwnerID != v.AccountID || scope.Claims.MachineID != state.MachineID || scope.Claims.KeyEpoch != oldKeys.PersonalEpoch {
+				oldKeys.Clear()
 				nextKeys.Clear()
 				return ErrVaultChanged
 			}
-			next, err := environmente2ee.SealVaultScope(ctx, environmente2ee.VaultScopeClaims{Issuer: v.Issuer, OwnerKind: "personal", OwnerID: v.AccountID, MachineID: state.MachineID, WorkspaceID: state.WorkspaceID, KeyEpoch: nextKeys.PersonalEpoch, Revision: scope.Claims.Revision + 1, Previous: scope.ID[:], WriterAccount: v.AccountID, WriterVaultGeneration: local.Pending.Head.Generation}, nextKeys.PersonalKey, nextKeys.WriterSeed, values)
-			clearVaultValues(values)
+			anchor, err := environmente2ee.OpenVaultScope(ctx, scope, oldKeys.PersonalKey)
+			if err != nil || len(anchor) != 0 {
+				clearVaultValues(anchor)
+				oldKeys.Clear()
+				nextKeys.Clear()
+				return ErrIntegrity
+			}
+			clearVaultValues(anchor)
+			next, err := environmente2ee.SealVaultScope(ctx, environmente2ee.VaultScopeClaims{Issuer: v.Issuer, OwnerKind: "personal", OwnerID: v.AccountID, MachineID: state.MachineID, WorkspaceID: state.WorkspaceID, KeyEpoch: nextKeys.PersonalEpoch, Revision: scope.Claims.Revision + 1, Previous: scope.ID[:], WriterAccount: v.AccountID, WriterVaultGeneration: local.Pending.Head.Generation}, nextKeys.PersonalKey, nextKeys.WriterSeed, map[string][]byte{})
+			if err != nil {
+				oldKeys.Clear()
+				nextKeys.Clear()
+				return err
+			}
+			replacement, err := scoped.prepareRecordReplacement(ctx, scope, next, &oldKeys, &nextKeys, local.Pending.Head.Generation)
+			oldKeys.Clear()
 			nextKeys.Clear()
 			if err != nil {
 				return err
 			}
-			journal.Upload = &api.VaultPersonalScopeStage{WorkspaceID: state.WorkspaceID, ExpectedVaultDocumentID: local.Head.ID.String(), MachineID: state.MachineID, Envelope: vaultEncoded(next.Raw)}
+			journal.Upload = &api.VaultPersonalScopeStage{WorkspaceID: state.WorkspaceID, ExpectedVaultDocumentID: local.Head.ID.String(), MachineID: state.MachineID, Envelope: vaultEncoded(next.Raw), Records: replacement}
 			if err := save(); err != nil {
 				return err
 			}

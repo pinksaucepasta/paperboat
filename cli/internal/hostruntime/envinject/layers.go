@@ -21,8 +21,16 @@ type LayerConfig struct {
 	InstallationGeneration             uint64
 	Keys                               environmentkey.Source
 	Marker                             environmentkey.LayerGenesisMarker
+	Records                            LayerRecordSource
 }
+type LayerRecordSource interface {
+	VaultRecordPage(context.Context, LaunchContext, api.VaultLayerSource, uint64, uint64, string) (api.VaultRecordsPage, error)
+}
+
 type layerFloor struct {
+	RecordFloors   []layerRecordFloor         `json:"record_floors,omitempty"`
+	RecordSequence uint64                     `json:"record_sequence"`
+	Records        []api.VaultRecordState     `json:"records,omitempty"`
 	ObservationSeq uint64                     `json:"observation_seq"`
 	ObservedState  string                     `json:"observed_state"`
 	Pending        *api.VaultLayerObservation `json:"pending,omitempty"`
@@ -97,19 +105,39 @@ func (s *LayerStore) Environment(ctx context.Context, binding LaunchContext, bun
 		return nil, err
 	}
 	err = readLayerState(c.Path, integrity[:], &floor)
-	if errors.Is(err, os.ErrNotExist) {
+	missing := errors.Is(err, os.ErrNotExist)
+	if missing {
 		if established {
-			return nil, ErrObservationLost
+			return nil, errors.Join(ErrObservationLost, err)
 		}
 		floor = layerHighWater{Schema: "paperboat.environment-layer-high-water/v1", AccountID: c.AccountID, MachineID: c.MachineID, InstallationGeneration: c.InstallationGeneration, HostKeyGeneration: material.Generation, HostPublic: r.HostPublic, Floors: map[string]layerFloor{}}
 	} else if err != nil {
-		return nil, ErrObservationLost
+		return nil, errors.Join(ErrObservationLost, err)
 	}
 	if !established && floor.Schema == "paperboat.environment-layer-high-water/v1" && floor.AccountID == c.AccountID && floor.MachineID == c.MachineID && floor.InstallationGeneration < c.InstallationGeneration && floor.HostKeyGeneration < material.Generation {
 		floor = layerHighWater{Schema: "paperboat.environment-layer-high-water/v1", AccountID: c.AccountID, MachineID: c.MachineID, InstallationGeneration: c.InstallationGeneration, HostKeyGeneration: material.Generation, HostPublic: r.HostPublic, Floors: map[string]layerFloor{}}
 	}
 	if floor.Schema != "paperboat.environment-layer-high-water/v1" || floor.AccountID != c.AccountID || floor.MachineID != c.MachineID || floor.InstallationGeneration != c.InstallationGeneration || floor.HostKeyGeneration != material.Generation || floor.HostPublic != r.HostPublic || floor.Floors == nil || len(floor.Floors) > 1024 {
 		return nil, ErrInvalidSnapshot
+	}
+	if err := validateRecordFloors(floor.Floors); err != nil {
+		return nil, err
+	}
+	committedFloor := floor
+	committedFloor.Floors = make(map[string]layerFloor, len(floor.Floors))
+	for coordinate, previous := range floor.Floors {
+		committedFloor.Floors[coordinate] = previous
+	}
+	// Retain rollback floors for previous workspaces, but only cache the current three sources.
+	active := map[string]bool{}
+	for _, delivery := range bundle.Layers {
+		active[layerCoordinate(delivery.Source)] = true
+	}
+	for coordinate, previous := range floor.Floors {
+		if !active[coordinate] {
+			previous.Records = nil
+			floor.Floors[coordinate] = previous
+		}
 	}
 	values := map[string][]byte{}
 	defer func() {
@@ -147,15 +175,15 @@ func (s *LayerStore) Environment(ctx context.Context, binding LaunchContext, bun
 		}
 		writer, err := base64.RawURLEncoding.Strict().DecodeString(delivery.WriterPublic)
 		if err != nil {
-			return nil, ErrInvalidSnapshot
+			return nil, errors.Join(ErrInvalidSnapshot, s.recordLayerFailure(ctx, &committedFloor, integrity[:], public[:], delivery))
 		}
 		raw, err := base64.RawURLEncoding.Strict().DecodeString(delivery.Envelope)
 		if err != nil {
-			return nil, ErrInvalidSnapshot
+			return nil, errors.Join(ErrInvalidSnapshot, s.recordLayerFailure(ctx, &committedFloor, integrity[:], public[:], delivery))
 		}
 		layer, err := env.ParseVaultLayer(raw, writer)
 		if err != nil {
-			return nil, errors.Join(ErrInvalidSnapshot, s.recordLayerFailure(ctx, &floor, integrity[:], public[:], delivery))
+			return nil, errors.Join(ErrInvalidSnapshot, s.recordLayerFailure(ctx, &committedFloor, integrity[:], public[:], delivery))
 		}
 		claims := layer.Claims
 		sourceID, err := env.ParseDocumentID(delivery.Source.DocumentID)
@@ -177,18 +205,23 @@ func (s *LayerStore) Environment(ctx context.Context, binding LaunchContext, bun
 		if source.KeyEpoch == previous.Epoch && source.Revision == previous.Revision && previous.Revision > 0 && source.DocumentID != previous.SourceID {
 			return nil, ErrInvalidSnapshot
 		}
-		opened, err := env.OpenVaultLayer(ctx, layer, claims, material.Private[:])
+		scopeKey, err := env.OpenVaultScopeKey(ctx, layer, claims, material.Private[:])
 		if err != nil {
 			if ctx.Err() == nil {
-				err = errors.Join(err, s.recordLayerFailure(ctx, &floor, integrity[:], public[:], delivery))
+				err = errors.Join(err, s.recordLayerFailure(ctx, &committedFloor, integrity[:], public[:], delivery))
 			}
+			return nil, err
+		}
+		opened, records, recordFloors, err := s.openRecords(ctx, binding, delivery, previous, scopeKey)
+		clear(scopeKey)
+		if err != nil {
 			return nil, err
 		}
 		for name, value := range opened {
 			clear(values[name])
 			values[name] = value
 		}
-		next := layerFloor{Generation: recipient.DeliveryGeneration, DocumentID: recipient.DocumentID, Fence: recipient.FenceGeneration, Epoch: source.KeyEpoch, Revision: source.Revision, SourceID: source.DocumentID, ObservationSeq: previous.ObservationSeq, ObservedState: previous.ObservedState, Pending: previous.Pending}
+		next := layerFloor{RecordFloors: recordFloors, RecordSequence: delivery.RecordSequence, Records: records, Generation: recipient.DeliveryGeneration, DocumentID: recipient.DocumentID, Fence: recipient.FenceGeneration, Epoch: source.KeyEpoch, Revision: source.Revision, SourceID: source.DocumentID, ObservationSeq: previous.ObservationSeq, ObservedState: previous.ObservedState, Pending: previous.Pending}
 		if previous.Generation != next.Generation || previous.DocumentID != next.DocumentID || previous.Fence != next.Fence || previous.ObservedState != "applied" {
 			keyID, err := env.KeyIDX25519(public[:])
 			if err != nil {
@@ -211,7 +244,10 @@ func (s *LayerStore) Environment(ctx context.Context, binding LaunchContext, bun
 		}
 	}
 	if len(floor.Floors) > 1024 {
-		return nil, ErrInvalidSnapshot
+		return nil, ErrResourceExhausted
+	}
+	if err := validateRecordFloors(floor.Floors); err != nil {
+		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -247,7 +283,13 @@ func (s *LayerStore) pendingState(ctx context.Context) (layerHighWater, []byte, 
 		return layerHighWater{}, nil, err
 	}
 	floor := layerHighWater{}
-	if err := readLayerState(s.config.Path, integrity[:], &floor); err != nil {
+	err = readLayerState(s.config.Path, integrity[:], &floor)
+	missing := errors.Is(err, os.ErrNotExist)
+	if missing {
+		clear(integrity[:])
+		return floor, nil, errors.Join(ErrObservationLost, err)
+	}
+	if err != nil {
 		clear(integrity[:])
 		return floor, nil, err
 	}
@@ -320,6 +362,13 @@ func (s *LayerStore) recordLayerFailure(ctx context.Context, floor *layerHighWat
 		return err
 	}
 	next := layerFloor{Generation: r.DeliveryGeneration, DocumentID: r.DocumentID, Fence: r.FenceGeneration, Epoch: source.KeyEpoch, Revision: source.Revision, SourceID: source.DocumentID, ObservationSeq: previous.ObservationSeq + 1, ObservedState: "failed"}
+	// A failed grant must never discard authenticated record rollback floors.
+	next.RecordSequence = previous.RecordSequence
+	next.Records = previous.Records
+	next.RecordFloors = previous.RecordFloors
+	if previous.Epoch > 0 && source.KeyEpoch > previous.Epoch {
+		next.Epoch, next.Revision, next.SourceID = previous.Epoch, previous.Revision, previous.SourceID
+	}
 	code := "environment_projection_invalid"
 	next.Pending = &api.VaultLayerObservation{WorkspaceID: source.WorkspaceID, OwnerKind: source.OwnerKind, OwnerID: source.OwnerID, SourceMachineID: source.MachineID, DeliveryGeneration: next.Generation, DocumentID: next.DocumentID, FenceGeneration: next.Fence, HostRecipientKeyID: keyID, ObservationSeq: next.ObservationSeq, State: "failed", ErrorCode: &code, ObservedAt: time.Now().UTC()}
 	floor.Floors[coordinate] = next

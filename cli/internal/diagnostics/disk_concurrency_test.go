@@ -3,8 +3,11 @@
 package diagnostics
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -70,6 +73,82 @@ func TestMultipleProcessesShareRetentionAndPreserveAcceptedRecords(t *testing.T)
 	data, err := ring.ReadAll(ctx, DefaultMaximumBytes)
 	if err != nil || strings.Count(string(data), "\n") != 128 {
 		t.Fatalf("accepted records=%d err=%v", strings.Count(string(data), "\n"), err)
+	}
+}
+
+func TestConcurrentStartupWithMaximumDiagnosticHistory(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "diagnostics")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	event := concurrencyEvent(t, "shared")
+	encoded, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded = append(encoded, '\n')
+	recordsPerSegment := int(defaultSegmentBytes)/len(encoded) - 1
+	segmentData := bytes.Repeat(encoded, recordsPerSegment)
+	now := time.Now().UTC()
+	for index := 0; index < DefaultMaximumBytes/defaultSegmentBytes; index++ {
+		name := fmt.Sprintf("events-%020d-%02d.ndjson", now.Add(-time.Duration(index)*time.Second).UnixNano(), 0)
+		if err := os.WriteFile(filepath.Join(directory, name), segmentData, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	const concurrentInitializers = 8
+	start := make(chan struct{})
+	type startupResult struct {
+		ring *DiskRing
+		err  error
+	}
+	results := make(chan startupResult, concurrentInitializers)
+	for range concurrentInitializers {
+		go func() {
+			<-start
+			ring, err := NewDiskRing(DiskConfig{Directory: directory, OwnerUID: os.Geteuid()})
+			results <- startupResult{ring: ring, err: err}
+		}()
+	}
+	close(start)
+	rings := make([]*DiskRing, 0, concurrentInitializers)
+	var startupErr error
+	for range concurrentInitializers {
+		result := <-results
+		if result.err != nil && startupErr == nil {
+			startupErr = result.err
+		}
+		if result.ring != nil {
+			rings = append(rings, result.ring)
+		}
+	}
+	if startupErr != nil {
+		for _, ring := range rings {
+			_ = ring.Close()
+		}
+		t.Fatalf("diagnostic store startup failed under shared history contention: %T", startupErr)
+	}
+	t.Cleanup(func() {
+		for _, ring := range rings {
+			if err := ring.Close(); err != nil {
+				t.Errorf("close diagnostic store: %T", err)
+			}
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if err := rings[0].Record(event); err != nil {
+		t.Fatalf("record after concurrent startup: %T", err)
+	}
+	if err := rings[0].Flush(ctx); err != nil {
+		t.Fatalf("flush after concurrent startup: %T", err)
+	}
+	data, err := rings[0].ReadAll(ctx, DefaultMaximumBytes)
+	wantRecords := (DefaultMaximumBytes/defaultSegmentBytes)*recordsPerSegment + 1
+	if err != nil || bytes.Count(data, []byte{'\n'}) != wantRecords {
+		t.Fatalf("history records=%d want=%d err=%T", bytes.Count(data, []byte{'\n'}), wantRecords, err)
 	}
 }
 

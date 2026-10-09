@@ -215,19 +215,10 @@ func setEnvironmentVariableForScope(command *cobra.Command, team, requestedMachi
 		return err
 	}
 	defer clear(value)
-	if err := manager.MutateScope(command.Context(), target.kind, target.owner, target.machine, func(values map[string][]byte) error {
-		canonical, exists := vaultScopeConfiguredName(values, name)
-		if exists {
-			clear(values[canonical])
-			values[canonical] = append([]byte(nil), value...)
-			return nil
-		}
-		values[name] = append([]byte(nil), value...)
-		return nil
-	}); err != nil {
+	if err := manager.SetScopeVariable(command.Context(), target.kind, target.owner, target.machine, name, value); err != nil {
 		return safeEnvironmentVariableCommandError(err)
 	}
-	if err := refreshENVLayers(command, manager, true); err != nil {
+	if err := refreshENVRecordScope(command, manager, target.kind, target.owner, target.machine); err != nil {
 		return err
 	}
 	if jsonOutputRequested(command) {
@@ -259,18 +250,10 @@ func unsetEnvironmentVariableForScope(command *cobra.Command, team, requestedMac
 	if err := confirmMutation(command, "env-unset:"+target.kind+":"+target.owner+":"+target.machine+":"+name, fmt.Sprintf("Remove ENV name %s from %s? New processes will no longer receive it; other names remain.", name, target.label)); err != nil {
 		return err
 	}
-	if err := manager.MutateScope(command.Context(), target.kind, target.owner, target.machine, func(values map[string][]byte) error {
-		canonical, exists := vaultScopeConfiguredName(values, name)
-		if !exists {
-			return environmentmanager.ErrVariableNotConfigured
-		}
-		clear(values[canonical])
-		delete(values, canonical)
-		return nil
-	}); err != nil {
+	if err := manager.RemoveScopeVariable(command.Context(), target.kind, target.owner, target.machine, name); err != nil {
 		return safeEnvironmentVariableCommandError(err)
 	}
-	if err := refreshENVLayers(command, manager, true); err != nil {
+	if err := refreshENVRecordScope(command, manager, target.kind, target.owner, target.machine); err != nil {
 		return err
 	}
 	if jsonOutputRequested(command) {

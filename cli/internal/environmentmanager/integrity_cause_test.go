@@ -36,7 +36,7 @@ func TestENVDecodeIntegrityRetainsParserCauseAndRecovers(t *testing.T) {
 	}
 	defer clear(raw)
 	validVault := api.PasswordVaultState{Issuer: head.Issuer, AccountID: head.AccountID, Generation: head.Generation, DocumentID: head.ID.String(), Envelope: base64.RawURLEncoding.EncodeToString(raw)}
-	sealed, err := environmente2ee.SealVaultScope(t.Context(), environmente2ee.VaultScopeClaims{WorkspaceID: "personal", Issuer: head.Issuer, OwnerKind: "personal", OwnerID: head.AccountID, KeyEpoch: 1, Revision: 1, Previous: make([]byte, 32), WriterAccount: head.AccountID, WriterVaultGeneration: 1}, keys.PersonalKey, keys.WriterSeed, map[string][]byte{"NAME": []byte("fixture")})
+	sealed, err := environmente2ee.SealVaultScope(t.Context(), environmente2ee.VaultScopeClaims{WorkspaceID: "personal", Issuer: head.Issuer, OwnerKind: "personal", OwnerID: head.AccountID, KeyEpoch: 1, Revision: 1, Previous: make([]byte, 32), WriterAccount: head.AccountID, WriterVaultGeneration: 1}, keys.PersonalKey, keys.WriterSeed, map[string][]byte{})
 	if err != nil {
 		t.Fatal("scope fixture sealing failed")
 	}
@@ -65,6 +65,8 @@ func TestENVDecodeIntegrityRetainsParserCauseAndRecovers(t *testing.T) {
 				state.Envelope = canary
 			}
 			data = state
+		} else if strings.HasSuffix(r.URL.Path, "/records") {
+			data = api.VaultRecordsPage{Records: []api.VaultRecordState{}, Sequence: 0}
 		} else {
 			state := validScope
 			if mode.Load() == 0 {

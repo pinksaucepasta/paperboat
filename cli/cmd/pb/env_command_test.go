@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -148,13 +149,20 @@ func TestEnvironmentVariableSetCommandEncryptsLocallyAndHidesInput(t *testing.T)
 	if err := setEnvironmentVariable(command, "", "API_MODE", true); err != nil {
 		t.Fatal(err)
 	}
-	if fixture.control.hostRefreshes != 1 {
+	if len(fixture.control.sourceRefreshes) != 1 || fixture.control.sourceRefreshes[0] != (api.VaultLayerCoordinate{WorkspaceID: "personal", OwnerKind: "personal", OwnerID: commandVaultAccount}) {
 		t.Fatal("source mutation did not automatically refresh selected recipients")
 	}
 	scope := fixture.control.scopes[commandVaultScopeKey("personal", commandVaultAccount, "")]
-	raw, err := base64.RawURLEncoding.Strict().DecodeString(scope.Envelope)
+	if scope.Revision != 1 || scope.KeyEpoch != 1 {
+		t.Fatal("record mutation changed stable anchor")
+	}
+	raw, err := base64.RawURLEncoding.Strict().DecodeString(fixture.control.recordRequests[0].Records[0].Envelope)
 	if err != nil {
 		t.Fatal(err)
+	}
+	requestJSON, marshalErr := json.Marshal(fixture.control.recordRequests[0])
+	if marshalErr != nil || bytes.Contains(requestJSON, []byte(canary)) || bytes.Contains(requestJSON, []byte("API_MODE")) {
+		t.Fatal("record request exposed plaintext name or value")
 	}
 	if bytes.Contains(raw, []byte(canary)) || strings.Contains(output.String(), canary) || !strings.Contains(output.String(), "Set API_MODE") || !strings.Contains(output.String(), "encrypted vault scope") {
 		t.Fatalf("ciphertext or output exposed input: output=%q", output.String())
@@ -199,9 +207,16 @@ func TestEnvironmentVariableSetCommandRoutesTeamScopeWithoutPlaintext(t *testing
 		t.Fatal(err)
 	}
 	scope := fixture.control.scopes[commandVaultScopeKey("team", "team-one", "")]
-	raw, err := base64.RawURLEncoding.Strict().DecodeString(scope.Envelope)
+	if scope.Revision != 1 || scope.KeyEpoch != 1 || len(fixture.control.sourceRefreshes) != 1 || fixture.control.sourceRefreshes[0] != (api.VaultLayerCoordinate{WorkspaceID: "team-one", OwnerKind: "team", OwnerID: "team-one"}) {
+		t.Fatal("team record mutation selected another source")
+	}
+	raw, err := base64.RawURLEncoding.Strict().DecodeString(fixture.control.recordRequests[0].Records[0].Envelope)
 	if err != nil {
 		t.Fatal(err)
+	}
+	requestJSON, marshalErr := json.Marshal(fixture.control.recordRequests[0])
+	if marshalErr != nil || bytes.Contains(requestJSON, []byte(canary)) || bytes.Contains(requestJSON, []byte("API_MODE")) {
+		t.Fatal("record request exposed plaintext name or value")
 	}
 	if bytes.Contains(raw, []byte(canary)) || strings.Contains(output.String(), canary) || !strings.Contains(output.String(), "team team-one") {
 		t.Fatalf("team scope or output exposed plaintext: output=%q", output.String())
@@ -336,6 +351,9 @@ func TestEnvironmentVariableUnsetCommandUsesEncryptedManagerAndYes(t *testing.T)
 	if err := unsetEnvironmentVariable(previewCommand, "", "API_MODE"); err == nil || err.(exitCodeError).code != 2 {
 		t.Fatalf("preview error=%v", err)
 	}
+	if len(fixture.control.recordRequests) != 1 || len(fixture.control.sourceRefreshes) != 0 {
+		t.Fatal("preview mutated ENV before confirmation")
+	}
 	var output bytes.Buffer
 	command := newEnvironmentTestCommand(strings.NewReader(""), &output)
 	command.Flags().String("config", configPath, "")
@@ -346,8 +364,12 @@ func TestEnvironmentVariableUnsetCommandUsesEncryptedManagerAndYes(t *testing.T)
 	if err := unsetEnvironmentVariable(command, "", "API_MODE"); err != nil {
 		t.Fatal(err)
 	}
-	if fixture.control.hostRefreshes != 1 {
+	if len(fixture.control.sourceRefreshes) != 1 || fixture.control.sourceRefreshes[0] != (api.VaultLayerCoordinate{WorkspaceID: "personal", OwnerKind: "personal", OwnerID: commandVaultAccount}) {
 		t.Fatal("source mutation did not automatically refresh selected recipients")
+	}
+	coordinate := api.VaultLayerCoordinate{WorkspaceID: "personal", OwnerKind: "personal", OwnerID: commandVaultAccount}
+	if len(fixture.control.recordRequests) != 2 || !fixture.control.records[commandVaultRecordKey(coordinate)].Records[0].Deleted {
+		t.Fatal("confirmed unset did not publish encrypted tombstone")
 	}
 	if !strings.Contains(output.String(), "Unset API_MODE") || !strings.Contains(output.String(), "encrypted vault scope") {
 		t.Fatalf("output=%q", output.String())
@@ -401,7 +423,7 @@ func TestEnvironmentVariableCapabilityFilteringAndCaseInsensitiveNames(t *testin
 	actions := machineHomeActions(unconfiguredMachine)
 	for _, action := range actions {
 		if action.ID == "environment-variables" {
-			t.Fatal("unconfigured machine exposed ENV Injection action")
+			t.Fatal("unconfigured machine exposed Environment variables action")
 		}
 	}
 	if !environmentVariableConfigured([]api.EnvironmentVariable{{Name: "PATH", Configured: true}}, "path") {

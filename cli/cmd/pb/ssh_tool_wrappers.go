@@ -29,7 +29,7 @@ func newManagedSSHToolCommand(name string) *cobra.Command {
 }
 
 func actionManagedSSHTool(cobraCommand *cobra.Command, tool string, args []string) error {
-	ctx := actionContext(cobraCommand, args)
+	ctx := actionContext(cobraCommand, nil)
 	resolve := func(ctx *command.Context, target, requestedUser string) (managedssh.Destination, error) {
 		_, machine, sshTarget, err := resolveSSHCommandTargetFast(ctx, target)
 		if err != nil {
@@ -45,7 +45,11 @@ func actionManagedSSHTool(cobraCommand *cobra.Command, tool string, args []strin
 	if err != nil {
 		return err
 	}
-	return executeManagedSSHTool(cobraCommand.Context(), tool, rewritten, os.Environ())
+	environment, err := managedSSHEnvironment(ctx, os.Environ())
+	if err != nil {
+		return err
+	}
+	return executeManagedSSHTool(cobraCommand.Context(), tool, rewritten, environment)
 }
 
 func rewriteManagedToolArguments(ctx *command.Context, tool string, args []string, resolve managedToolTargetResolver) ([]string, error) {

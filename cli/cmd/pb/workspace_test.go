@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -322,5 +324,42 @@ func writeWorkspaceAuthProfile(t *testing.T, dir, configPath, serverURL, account
 	}, config.Credential{AccessToken: "workspace-test-token", RefreshToken: "workspace-test-refresh", ExpiresAt: expires})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestManagedSSHWorkspaceCallbackSelection(t *testing.T) {
+	if os.Getenv("PB_TEST_SSH_CALLBACK") == "1" {
+		selected, err := resolveWorkspaceInvocation(newRootCommand())
+		if err != nil {
+			os.Exit(2)
+		}
+		fmt.Fprint(os.Stdout, selected)
+		os.Exit(0)
+	}
+	t.Setenv("PAPERBOAT_WORKSPACE", "team-inherited")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, selected := range []string{"team-selected", "personal"} {
+		t.Run(selected, func(t *testing.T) {
+			root := newRootCommand()
+			root.SetContext(t.Context())
+			if err := root.PersistentFlags().Set("workspace", selected); err != nil {
+				t.Fatal(err)
+			}
+			environment, err := managedSSHEnvironment(actionContext(root, nil), append(os.Environ(), "PAPERBOAT_WORKSPACE=team-shadow"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			child := exec.CommandContext(ctx, executable, "-test.run=^TestManagedSSHWorkspaceCallbackSelection$")
+			child.Env = append(environment, "PB_TEST_SSH_CALLBACK=1")
+			got, err := child.Output()
+			if err != nil || string(got) != selected {
+				t.Fatalf("SSH callback changed invocation workspace: %q, %v", got, err)
+			}
+		})
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -100,7 +101,7 @@ func (s *layerEnvironmentService) layerEnvironmentForLaunch(ctx context.Context)
 	}
 	bundle := *envelope.Data
 	if s.layers == nil {
-		s.layers, err = envinject.NewLayerStore(envinject.LayerConfig{Path: filepath.Join(s.stateRoot, "environment", "layer-high-water.json"), Issuer: strings.TrimRight(s.base.String(), "/"), AccountID: s.layerRecipient.RecipientAccount, MachineID: s.registration.MachineID, InstallationGeneration: uint64(s.registration.InstallationGeneration), Keys: keys, Marker: marker})
+		s.layers, err = envinject.NewLayerStore(envinject.LayerConfig{Path: filepath.Join(s.stateRoot, "environment", "layer-high-water.json"), Issuer: strings.TrimRight(s.base.String(), "/"), AccountID: s.layerRecipient.RecipientAccount, MachineID: s.registration.MachineID, InstallationGeneration: uint64(s.registration.InstallationGeneration), Keys: keys, Marker: marker, Records: s})
 		if err != nil {
 			return nil, err
 		}
@@ -314,4 +315,72 @@ func (s *layerEnvironmentService) registerLayerRecipient(ctx context.Context) er
 	s.layerRecipient = recipient
 	s.layerRegistered = true
 	return nil
+}
+
+// VaultRecordPage uses the machine proof path and exact fresh launch actor. The
+// server reauthorizes all queried coordinates against that machine context.
+func (s *layerEnvironmentService) VaultRecordPage(ctx context.Context, binding envinject.LaunchContext, source api.VaultLayerSource, after, through uint64, cursor string) (api.VaultRecordsPage, error) {
+	var out api.VaultRecordsPage
+	if s == nil || s.isClosed() || source.WorkspaceID != binding.WorkspaceID {
+		return out, envinject.ErrNotReady
+	}
+	path := "/v1/environment/layers/" + url.PathEscape(s.registration.MachineID) + "/records"
+	q := url.Values{"workspace": {binding.WorkspaceID}, "actor_account_id": {binding.ActorAccountID}, "owner_kind": {source.OwnerKind}, "owner_id": {source.OwnerID}, "source_machine_id": {source.MachineID}, "after_sequence": {strconv.FormatUint(after, 10)}, "through_sequence": {strconv.FormatUint(through, 10)}, "limit": {"200"}}
+	if cursor != "" {
+		q.Set("cursor", cursor)
+	}
+	operation, err := uuid.NewRandom()
+	if err != nil {
+		return out, err
+	}
+	operationID := "operation_" + operation.String()
+	token, err := s.credentials.Token(ctx)
+	if err != nil {
+		return out, err
+	}
+	proof, err := s.credentials.Proof(ctx, operationID, http.MethodGet, path, nil)
+	if err != nil {
+		return out, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, s.base.ResolveReference(&url.URL{Path: path, RawQuery: q.Encode()}).String(), nil)
+	if err != nil {
+		return out, err
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString(proof))
+	request.Header.Set("Idempotency-Key", operationID)
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Cache-Control", "no-store")
+	client := &http.Client{Transport: s.transport, Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrProductionInvalid }}
+	response, err := client.Do(request)
+	if err != nil {
+		return out, err
+	}
+	defer response.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
+	if err != nil {
+		return out, err
+	}
+	if len(raw) > 1<<20 {
+		return out, envinject.ErrInvalidSnapshot
+	}
+	if response.StatusCode != http.StatusOK {
+		var rejected struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		_ = json.Unmarshal(raw, &rejected)
+		if rejected.Error.Code == "record_snapshot_required" {
+			return out, &api.APIError{Status: response.StatusCode, Code: "record_snapshot_required", Message: "Encrypted ENV history expired; a complete snapshot is required."}
+		}
+		return out, envinject.ErrNotReady
+	}
+	var envelope struct {
+		Data *api.VaultRecordsPage `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil || envelope.Data == nil {
+		return out, envinject.ErrInvalidSnapshot
+	}
+	return *envelope.Data, nil
 }

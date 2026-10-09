@@ -7382,7 +7382,10 @@ func actionSSH(command *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	environment := os.Environ()
+	environment, err := managedSSHEnvironment(ctx, os.Environ())
+	if err != nil {
+		return err
+	}
 	return executeManagedSSH(command, ctx, machine, destination, args[1:], dash == 1, environment)
 }
 

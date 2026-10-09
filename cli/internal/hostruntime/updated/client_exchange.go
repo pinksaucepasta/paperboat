@@ -84,7 +84,7 @@ func exchangeControl(ctx context.Context, connection net.Conn, request ControlRe
 		return ControlResponse{}, ErrInvalidControl
 	}
 	if response.ErrorCode != "" {
-		return ControlResponse{}, &ControlError{Code: response.ErrorCode, Message: response.ErrorMessage}
+		return ControlResponse{}, &ControlError{Code: response.ErrorCode, Message: response.ErrorMessage, operation: request.Operation}
 	}
 	return response, nil
 }

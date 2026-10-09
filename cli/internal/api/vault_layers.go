@@ -32,14 +32,15 @@ type VaultLayerRecipient struct {
 	FenceGeneration        uint64 `json:"fence_generation"`
 }
 type VaultLayerDelivery struct {
-	Observation   *VaultLayerObservation `json:"observation"`
-	Applied       bool                   `json:"applied"`
-	Recipient     VaultLayerRecipient    `json:"recipient"`
-	Source        VaultLayerSource       `json:"source"`
-	WriterAccount string                 `json:"writer_account"`
-	WriterPublic  string                 `json:"writer_public"`
-	Envelope      string                 `json:"envelope"`
-	State         string                 `json:"state"`
+	RecordSequence uint64                 `json:"record_sequence"`
+	Observation    *VaultLayerObservation `json:"observation"`
+	Applied        bool                   `json:"applied"`
+	Recipient      VaultLayerRecipient    `json:"recipient"`
+	Source         VaultLayerSource       `json:"source"`
+	WriterAccount  string                 `json:"writer_account"`
+	WriterPublic   string                 `json:"writer_public"`
+	Envelope       string                 `json:"envelope"`
+	State          string                 `json:"state"`
 }
 type VaultLayerPut struct {
 	OperationID string `json:"operation_id"`

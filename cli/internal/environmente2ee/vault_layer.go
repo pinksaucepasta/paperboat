@@ -129,3 +129,52 @@ func OpenVaultLayer(ctx context.Context, p VaultLayer, expected VaultLayerClaims
 	values, _, err := decodeScope(plain)
 	return values, err
 }
+
+// SealVaultScopeKey grants an exact scope key once per recipient/key epoch.
+// Ordinary variable edits do not invalidate or republish this grant.
+func SealVaultScopeKey(ctx context.Context, c VaultLayerClaims, writerSeed, scopeKey []byte) (VaultLayer, error) {
+	if ctx == nil || len(writerSeed) != 32 || len(scopeKey) != 32 || allZero(scopeKey) {
+		return VaultLayer{}, ErrInvalid
+	}
+	c.Domain, c.Version = "paperboat.environment.host-layer", 1
+	signer := ed25519.NewKeyFromSeed(writerSeed)
+	defer clear(signer)
+	c.WriterPublic = bytes.Clone(signer.Public().(ed25519.PublicKey))
+	if !validLayer(c) {
+		return VaultLayer{}, ErrInvalid
+	}
+	claims, err := encode(c)
+	if err != nil {
+		return VaultLayer{}, err
+	}
+	raw, err := sealVaultDelivery(ctx, c.Domain, claims, c.HostPublic, writerSeed, scopeKey)
+	if err != nil {
+		return VaultLayer{}, err
+	}
+	return VaultLayer{Claims: c, ID: DocumentID(sha256.Sum256(raw)), Raw: raw}, nil
+}
+
+func OpenVaultScopeKey(ctx context.Context, p VaultLayer, expected VaultLayerClaims, privateBytes []byte) ([]byte, error) {
+	claims, err := encode(expected)
+	actual, actualErr := encode(p.Claims)
+	if ctx == nil || err != nil || actualErr != nil || !bytes.Equal(claims, actual) || !validLayer(p.Claims) || p.ID != DocumentID(sha256.Sum256(p.Raw)) {
+		return nil, ErrInvalid
+	}
+	private, err := ecdh.X25519().NewPrivateKey(privateBytes)
+	if err != nil || !bytes.Equal(private.PublicKey().Bytes(), p.Claims.HostPublic) {
+		return nil, ErrInvalid
+	}
+	e, err := parseVaultDelivery(p.Raw, expected.WriterPublic, "paperboat.environment.host-layer", 4096)
+	if err != nil || !bytes.Equal(e.Claims, claims) {
+		return nil, ErrInvalid
+	}
+	key, err := openVaultDelivery(ctx, p.Claims.Domain, e, privateBytes)
+	if err != nil {
+		return nil, err
+	}
+	if len(key) != 32 || allZero(key) {
+		clear(key)
+		return nil, ErrInvalid
+	}
+	return key, nil
+}

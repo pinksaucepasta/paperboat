@@ -67,6 +67,17 @@ func refreshENVLayers(command *cobra.Command, manager environmentmanager.Passwor
 	return nil
 }
 
+// Ordinary edits only reconcile missing key grants for their exact source.
+// Existing grants remain valid across record revisions.
+func refreshENVRecordScope(command *cobra.Command, manager environmentmanager.PasswordVault, kind, owner, machine string) error {
+	completed, err := manager.RefreshSource(command.Context(), kind, owner, machine)
+	if err == nil {
+		return nil
+	}
+	pending := environmentFailureHasMarker(err, func(cause error) bool { _, ok := cause.(*environmentmanager.LayerPublicationPending); return ok })
+	return &envHostRefreshFailure{cause: err, sourceChanged: true, completed: completed, publicationPending: pending, operationCompleted: true}
+}
+
 // envCommandFailure exposes only local, command-owned recovery text. The cause
 // remains available for typed recovery and diagnostics, never public formatting.
 type envCommandFailure struct {

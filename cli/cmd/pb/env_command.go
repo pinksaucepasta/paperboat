@@ -744,28 +744,19 @@ func runEnvironmentVariableScopeTUI(command *cobra.Command, client *api.Client, 
 			if valueErr != nil {
 				return valueErr
 			}
-			setErr := manager.MutateScope(command.Context(), scope.kind, scope.owner, scope.machine, func(values map[string][]byte) error {
-				canonical, exists := vaultScopeConfiguredName(values, name)
-				if exists {
-					clear(values[canonical])
-					values[canonical] = append([]byte(nil), value...)
-					return nil
-				}
-				values[name] = append([]byte(nil), value...)
-				return nil
-			})
+			setErr := manager.SetScopeVariable(command.Context(), scope.kind, scope.owner, scope.machine, name, value)
 			clear(value)
 			if setErr != nil {
 				return safeEnvironmentVariableCommandError(setErr)
 			}
-			if err := refreshENVLayers(command, manager, true); err != nil {
+			if err := refreshENVRecordScope(command, manager, scope.kind, scope.owner, scope.machine); err != nil {
 				return err
 			}
-			_, _ = fmt.Fprintf(command.ErrOrStderr(), "Set %s on %s (encrypted vault scope). Encrypted layers for authorized devices were refreshed.\n", name, scope.label)
+			_, _ = fmt.Fprintf(command.ErrOrStderr(), "Set %s on %s (encrypted).\n", name, scope.label)
 			continue
 		}
 		name := strings.TrimPrefix(selection.ID, "unset:")
-		confirmed, confirmErr := prompt.Confirm(prompt.ConfirmOptions{Context: command.Context(), Title: "Unset " + name + "?", Description: "Remove this value from the encrypted scope and refresh authorized devices. Running processes retain their existing environment.", Stdin: os.Stdin, Output: command.ErrOrStderr()})
+		confirmed, confirmErr := prompt.Confirm(prompt.ConfirmOptions{Context: command.Context(), Title: "Unset " + name + "?", Description: "Remove this encrypted variable. Running processes retain their existing environment.", Stdin: os.Stdin, Output: command.ErrOrStderr()})
 		if errors.Is(confirmErr, prompt.ErrCanceled) || confirmErr != nil {
 			if confirmErr != nil && !errors.Is(confirmErr, prompt.ErrCanceled) {
 				return confirmErr
@@ -775,22 +766,14 @@ func runEnvironmentVariableScopeTUI(command *cobra.Command, client *api.Client, 
 		if !confirmed {
 			continue
 		}
-		deleteErr := manager.MutateScope(command.Context(), scope.kind, scope.owner, scope.machine, func(values map[string][]byte) error {
-			canonical, exists := vaultScopeConfiguredName(values, name)
-			if !exists {
-				return environmentmanager.ErrVariableNotConfigured
-			}
-			clear(values[canonical])
-			delete(values, canonical)
-			return nil
-		})
+		deleteErr := manager.RemoveScopeVariable(command.Context(), scope.kind, scope.owner, scope.machine, name)
 		if deleteErr != nil {
 			return safeEnvironmentVariableCommandError(deleteErr)
 		}
-		if err := refreshENVLayers(command, manager, true); err != nil {
+		if err := refreshENVRecordScope(command, manager, scope.kind, scope.owner, scope.machine); err != nil {
 			return err
 		}
-		_, _ = fmt.Fprintf(command.ErrOrStderr(), "Unset %s from %s (encrypted vault scope). Encrypted layers for authorized devices were refreshed.\n", name, scope.label)
+		_, _ = fmt.Fprintf(command.ErrOrStderr(), "Unset %s from %s (encrypted).\n", name, scope.label)
 	}
 }
 

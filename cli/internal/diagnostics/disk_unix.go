@@ -297,11 +297,31 @@ func (r *DiskRing) persist(encoded []byte) (result error) {
 	if err != nil {
 		return err
 	}
-	_, writeErr := file.Write(encoded)
+	before, statErr := file.Stat()
+	if statErr != nil {
+		return errors.Join(statErr, file.Close())
+	}
+	written, writeErr := file.Write(encoded)
+	if written != len(encoded) && writeErr == nil {
+		writeErr = io.ErrShortWrite
+	}
 	syncErr := file.Sync()
+	var rollbackErr error
+	if writeErr != nil || syncErr != nil {
+		if truncateErr := file.Truncate(before.Size()); truncateErr != nil {
+			rollbackErr = truncateErr
+		} else {
+			rollbackErr = file.Sync()
+		}
+	}
 	closeErr := file.Close()
-	if writeErr != nil || syncErr != nil || closeErr != nil {
-		return errors.Join(writeErr, syncErr, closeErr)
+	if rollbackErr != nil {
+		// A failed rollback is rare, but do not leave a partial tail for the next
+		// writer if the file can still be repaired under the lock we already hold.
+		rollbackErr = errors.Join(rollbackErr, recoverSegment(path, r.owner))
+	}
+	if writeErr != nil || syncErr != nil || rollbackErr != nil || closeErr != nil {
+		return errors.Join(writeErr, syncErr, rollbackErr, closeErr)
 	}
 	r.persistedBytes.Add(uint64(len(encoded)))
 	return nil
@@ -403,9 +423,19 @@ func (r *DiskRing) recover() (result error) {
 		total -= segments[0].size
 		segments = segments[1:]
 	}
-	for _, segment := range segments {
-		if err := recoverSegment(segment.path, r.owner); err != nil {
+	// Writes append validated, newline-terminated records to the newest segment
+	// under writer.lock. Older segments are immutable. A crash can leave only an
+	// incomplete final record, so inspect the active tail before a full repair.
+	if len(segments) > 0 {
+		latest := segments[len(segments)-1]
+		partial, err := hasPartialTail(latest.path, r.owner)
+		if err != nil {
 			return err
+		}
+		if partial {
+			if err := recoverSegment(latest.path, r.owner); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -525,4 +555,31 @@ func recoverSegment(path string, owner diagnosticOwner) error {
 		}
 	}
 	return file.Close()
+}
+
+func hasPartialTail(path string, owner diagnosticOwner) (bool, error) {
+	file, err := openDiagnosticRead(path, owner)
+	if err != nil {
+		return false, err
+	}
+	info, statErr := file.Stat()
+	if statErr != nil {
+		return false, errors.Join(statErr, file.Close())
+	}
+	if info.Size() == 0 {
+		return false, file.Close()
+	}
+	var finalByte [1]byte
+	read, readErr := file.ReadAt(finalByte[:], info.Size()-1)
+	if read != len(finalByte) && readErr == nil {
+		readErr = io.ErrUnexpectedEOF
+	}
+	if errors.Is(readErr, io.EOF) {
+		readErr = io.ErrUnexpectedEOF
+	}
+	closeErr := file.Close()
+	if readErr != nil || closeErr != nil {
+		return false, errors.Join(readErr, closeErr)
+	}
+	return finalByte[0] != '\n', nil
 }

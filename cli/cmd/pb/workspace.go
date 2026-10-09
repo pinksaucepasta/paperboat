@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -481,4 +482,22 @@ func e2eeWorkspaceIdentity(commandContext *command.Context) (*config.Config, con
 		return nil, config.ProfileStore{}, config.Profile{}, err
 	}
 	return cfg, store, profile, nil
+}
+
+// managedSSHEnvironment carries the invocation's scope to fresh proxy and
+// known-host callbacks without changing the user's saved workspace.
+func managedSSHEnvironment(commandContext *command.Context, environment []string) ([]string, error) {
+	selected, err := workspaceForCommandContext(commandContext)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]string, 0, len(environment)+1)
+	for _, entry := range environment {
+		name, _, _ := strings.Cut(entry, "=")
+		if name == "PAPERBOAT_WORKSPACE" || runtime.GOOS == "windows" && strings.EqualFold(name, "PAPERBOAT_WORKSPACE") {
+			continue
+		}
+		result = append(result, entry)
+	}
+	return append(result, "PAPERBOAT_WORKSPACE="+selected), nil
 }

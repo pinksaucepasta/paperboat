@@ -3,6 +3,7 @@ package enrollment
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -88,7 +89,29 @@ func TestEnrollBindsKeyAndPersistsPrivateIdentity(t *testing.T) {
 	if _, err := proofSource.Proof(context.Background(), "op_host_keys_0001", http.MethodPut, "/v1/machines/machine_1/ssh-host-keys", []byte(`{"keys":[]}`)); err != nil {
 		t.Fatalf("PUT machine proof: %v", err)
 	}
-	for _, method := range []string{http.MethodGet, http.MethodPatch, http.MethodDelete} {
+	getProof, err := proofSource.Proof(context.Background(), "op_records_read_0001", http.MethodGet, "/v1/environment/layers/machine_1/records", nil)
+	if err != nil {
+		t.Fatalf("GET record proof: %v", err)
+	}
+	if err := json.Unmarshal(getProof, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	payload, payloadErr = base64.RawURLEncoding.DecodeString(envelope.Payload)
+	signature, signatureErr = base64.RawURLEncoding.DecodeString(envelope.Signature)
+	if payloadErr != nil || signatureErr != nil || !ed25519.Verify(ed25519.PublicKey(public), payload, signature) {
+		t.Fatal("GET proof signature is invalid")
+	}
+	var getClaims struct {
+		Method      string `json:"method"`
+		Path        string `json:"path"`
+		OperationID string `json:"operation_id"`
+		BodySHA256  string `json:"body_sha256"`
+	}
+	emptyHash := sha256.Sum256(nil)
+	if err := json.Unmarshal(payload, &getClaims); err != nil || getClaims.Method != http.MethodGet || getClaims.Path != "/v1/environment/layers/machine_1/records" || getClaims.OperationID != "op_records_read_0001" || getClaims.BodySHA256 != base64.RawURLEncoding.EncodeToString(emptyHash[:]) {
+		t.Fatal("GET proof does not bind the exact empty-body request")
+	}
+	for _, method := range []string{http.MethodPatch, http.MethodDelete} {
 		if _, err := proofSource.Proof(context.Background(), "op_rejected_0001", method, "/v1/resource", nil); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("method %s error=%v", method, err)
 		}

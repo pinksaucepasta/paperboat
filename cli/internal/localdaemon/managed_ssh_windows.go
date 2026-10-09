@@ -184,7 +184,7 @@ func installWindowsOpenSSHConfig(cfg ManagedSSHConfig, agentSocket, publicKey st
 	executable := quoteWindowsOpenSSH(cfg.Executable)
 	_, err := managedssh.InstallOpenSSHConfig(managedssh.OpenSSHConfig{
 		Home: cfg.Home, OwnerUID: cfg.OwnerUID,
-		ProxyCommand:      executable + " __ssh-proxy --host %h --port %p --user %r",
+		ProxyCommand:      managedSSHProxyCommand(executable),
 		KnownHostsCommand: executable + " __ssh-known-hosts --host %h --port %p",
 		AgentSocket:       agentSocket,
 		IdentityFile:      identityFile,

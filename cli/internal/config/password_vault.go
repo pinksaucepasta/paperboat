@@ -200,7 +200,7 @@ func validatePasswordVaultRecord(record PasswordVaultRecord, issuer, accountID s
 			return ErrPasswordVaultInvalid
 		}
 		switch op.Kind {
-		case "scope-put", "team-create", "team-grant", "team-rotate", "reset", "layer-put", "personal-rotate":
+		case "scope-put", "records-put", "team-create", "team-grant", "team-rotate", "reset", "layer-put", "personal-rotate":
 		default:
 			return ErrPasswordVaultInvalid
 		}

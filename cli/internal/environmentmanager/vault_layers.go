@@ -45,11 +45,15 @@ func (v PasswordVault) RefreshSource(ctx context.Context, kind, owner, machine s
 		if !ok {
 			return env.ErrInvalid
 		}
-		scope, values, err := v.readVaultScope(ctx, c, keys, kind, owner, machine)
+		scope, err := v.ensureRecordAnchor(ctx, local, keys, c, kind, owner, machine)
 		if err != nil {
 			return err
 		}
-		defer clearVaultValues(values)
+		key, err := v.recordKey(keys, scope)
+		if err != nil {
+			return err
+		}
+		defer clear(key)
 		coordinate := api.VaultLayerCoordinate{WorkspaceID: scope.Claims.WorkspaceID, OwnerKind: kind, OwnerID: owner, MachineID: machine}
 		recipients, err := layers.VaultLayerRecipients(ctx, coordinate)
 		if err != nil {
@@ -77,7 +81,7 @@ func (v PasswordVault) RefreshSource(ctx context.Context, kind, owner, machine s
 			} else if recipient.DocumentID != "" {
 				return ErrIntegrity
 			}
-			layer, err := env.SealVaultLayer(ctx, env.VaultLayerClaims{Issuer: v.Issuer, RecipientAccount: recipient.RecipientAccount, MachineID: recipient.MachineID, InstallationGeneration: recipient.InstallationGeneration, HostKeyGeneration: recipient.HostKeyGeneration, HostPublic: public, DeliveryGeneration: recipient.DeliveryGeneration + 1, Previous: previous[:], FenceGeneration: recipient.FenceGeneration, Source: env.VaultLayerSource{WorkspaceID: scope.Claims.WorkspaceID, OwnerKind: kind, OwnerID: owner, MachineID: machine, KeyEpoch: scope.Claims.KeyEpoch, Revision: scope.Claims.Revision, Digest: scope.ID[:]}, WriterAccount: v.AccountID, WriterVaultGeneration: local.Head.Generation}, keys.WriterSeed, values)
+			layer, err := env.SealVaultScopeKey(ctx, env.VaultLayerClaims{Issuer: v.Issuer, RecipientAccount: recipient.RecipientAccount, MachineID: recipient.MachineID, InstallationGeneration: recipient.InstallationGeneration, HostKeyGeneration: recipient.HostKeyGeneration, HostPublic: public, DeliveryGeneration: recipient.DeliveryGeneration + 1, Previous: previous[:], FenceGeneration: recipient.FenceGeneration, Source: env.VaultLayerSource{WorkspaceID: scope.Claims.WorkspaceID, OwnerKind: kind, OwnerID: owner, MachineID: machine, KeyEpoch: scope.Claims.KeyEpoch, Revision: scope.Claims.Revision, Digest: scope.ID[:]}, WriterAccount: v.AccountID, WriterVaultGeneration: local.Head.Generation}, keys.WriterSeed, key)
 			if err != nil {
 				return err
 			}

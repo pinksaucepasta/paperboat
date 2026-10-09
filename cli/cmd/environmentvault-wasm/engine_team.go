@@ -20,6 +20,7 @@ type teamMember struct {
 	Permission string `json:"env_permission"`
 }
 type teamState struct {
+	RecordSequence   uint64       `json:"record_sequence"`
 	ID               string       `json:"team_id"`
 	Owner            string       `json:"owner_account"`
 	Generation       uint64       `json:"generation"`
@@ -266,10 +267,13 @@ func (e *engine) teamOperation(ctx context.Context, r request) (any, error) {
 			}
 		}
 		defer func() {
-			for _, v := range values {
-				clear(v)
+			for _, value := range values {
+				clear(value)
 			}
 		}()
+		if len(values) != 0 {
+			return nil, env.ErrInvalid
+		}
 		removed := map[string]bool{}
 		for _, id := range r.Remove {
 			if id == e.head.AccountID || removed[id] {
@@ -295,6 +299,13 @@ func (e *engine) teamOperation(ctx context.Context, r request) (any, error) {
 		}
 		defer clear(key)
 		scope, err := env.SealVaultScope(ctx, env.VaultScopeClaims{Issuer: e.head.Issuer, OwnerKind: "team", OwnerID: t.ID, WorkspaceID: t.ID, KeyEpoch: t.Epoch + 1, Revision: t.Scope.Revision + 1, Previous: old.ID[:], WriterAccount: e.head.AccountID, WriterVaultGeneration: e.head.Generation}, key, e.keys.WriterSeed, values)
+		if err != nil {
+			return nil, err
+		}
+		if r.TotalLoss {
+			r.RecordSequence = t.RecordSequence
+		}
+		replacement, err := e.rotateRecords(ctx, r, old, oldKey, key, t.Epoch+1, e.head.Generation)
 		if err != nil {
 			return nil, err
 		}
@@ -348,7 +359,7 @@ func (e *engine) teamOperation(ctx context.Context, r request) (any, error) {
 			keys.Clear()
 			return nil, err
 		}
-		return map[string]any{"operation_id": r.Operation, "expected_team_generation": t.Generation, "remove_account_ids": r.Remove, "scope_envelope": encoded(scope.Raw), "grant_envelopes": grants, "vault_envelope": vault, "confirm_total_loss": r.TotalLoss}, nil
+		return map[string]any{"operation_id": r.Operation, "expected_team_generation": t.Generation, "remove_account_ids": r.Remove, "scope_envelope": encoded(scope.Raw), "grant_envelopes": grants, "vault_envelope": vault, "confirm_total_loss": r.TotalLoss, "records": replacement}, nil
 	}
 	return nil, env.ErrInvalid
 }

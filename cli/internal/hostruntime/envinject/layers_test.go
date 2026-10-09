@@ -34,7 +34,8 @@ func TestLayerStoreWorkspaceHierarchyFloorsAndForeignActor(t *testing.T) {
 	recipient := api.VaultLayerRecipient{RecipientAccount: "account_1", MachineID: "machine_1", InstallationGeneration: 11, HostKeyGeneration: 7, HostPublic: base64.RawURLEncoding.EncodeToString(public[:])}
 	marker := &layerTestMarker{}
 	path := filepath.Join(t.TempDir(), "floor.json")
-	config := LayerConfig{Path: path, Issuer: "https://control.example", AccountID: "account_1", MachineID: "machine_1", InstallationGeneration: 11, Keys: layerStaticHostKey{material}, Marker: marker}
+	recordPages := layerTestRecordPages{}
+	config := LayerConfig{Path: path, Issuer: "https://control.example", AccountID: "account_1", MachineID: "machine_1", InstallationGeneration: 11, Keys: layerStaticHostKey{material}, Marker: marker, Records: recordPages}
 	store, err := NewLayerStore(config)
 	if err != nil {
 		t.Fatal(err)
@@ -51,15 +52,26 @@ func TestLayerStoreWorkspaceHierarchyFloorsAndForeignActor(t *testing.T) {
 			}
 		}
 		defer clearLayerValues(contents)
-		layer, err := env.SealVaultLayer(ctx, env.VaultLayerClaims{Issuer: config.Issuer, RecipientAccount: recipient.RecipientAccount, MachineID: recipient.MachineID, InstallationGeneration: 11, HostKeyGeneration: 7, HostPublic: public[:], DeliveryGeneration: generation, Previous: previous[:], FenceGeneration: fence, Source: env.VaultLayerSource{WorkspaceID: workspace, OwnerKind: kind, OwnerID: owner, MachineID: machine, KeyEpoch: 1, Revision: generation, Digest: id[:]}, WriterAccount: "account_1", WriterVaultGeneration: 1}, writer, contents)
+		scopeKey := bytes.Repeat([]byte{byte(7)}, 32)
+		layer, err := env.SealVaultScopeKey(ctx, env.VaultLayerClaims{Issuer: config.Issuer, RecipientAccount: recipient.RecipientAccount, MachineID: recipient.MachineID, InstallationGeneration: 11, HostKeyGeneration: 7, HostPublic: public[:], DeliveryGeneration: generation, Previous: previous[:], FenceGeneration: fence, Source: env.VaultLayerSource{WorkspaceID: workspace, OwnerKind: kind, OwnerID: owner, MachineID: machine, KeyEpoch: 1, Revision: generation, Digest: id[:]}, WriterAccount: "account_1", WriterVaultGeneration: 1}, writer, scopeKey)
 		if err != nil {
 			t.Fatal(err)
 		}
+
+		states := []api.VaultRecordState{}
+		for name, value := range contents {
+			record, err := env.SealVaultRecord(ctx, env.VaultRecordClaims{Issuer: config.Issuer, WorkspaceID: workspace, OwnerKind: kind, OwnerID: owner, MachineID: machine, KeyEpoch: 1, Revision: generation, WriterAccount: "account_1", WriterVaultGeneration: 1}, scopeKey, writer, name, value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			states = append(states, api.VaultRecordState{WorkspaceID: workspace, OwnerKind: kind, OwnerID: owner, MachineID: machine, KeyEpoch: 1, RecordID: record.Claims.RecordID, Revision: generation, Sequence: generation, DocumentID: record.ID.String(), WriterPublic: base64.RawURLEncoding.EncodeToString(layer.Claims.WriterPublic), Envelope: base64.RawURLEncoding.EncodeToString(record.Raw)})
+		}
+		recordPages[layerCoordinate(source)] = api.VaultRecordsPage{Records: states, Sequence: generation}
 		r := recipient
 		r.DeliveryGeneration = generation
 		r.FenceGeneration = fence
 		r.DocumentID = layer.ID.String()
-		return api.VaultLayerDelivery{Recipient: r, Source: source, WriterAccount: "account_1", WriterPublic: base64.RawURLEncoding.EncodeToString(layer.Claims.WriterPublic), Envelope: base64.RawURLEncoding.EncodeToString(layer.Raw), State: "ready"}
+		return api.VaultLayerDelivery{RecordSequence: generation, Recipient: r, Source: source, WriterAccount: "account_1", WriterPublic: base64.RawURLEncoding.EncodeToString(layer.Claims.WriterPublic), Envelope: base64.RawURLEncoding.EncodeToString(layer.Raw), State: "ready"}
 	}
 	boundedConfig := config
 	boundedConfig.Path = filepath.Join(t.TempDir(), "bounded-floor.json")
@@ -142,6 +154,16 @@ func TestLayerStoreWorkspaceHierarchyFloorsAndForeignActor(t *testing.T) {
 	if err != nil || len(pending) != 1 || pending[0].DeliveryGeneration != 2 || pending[0].ObservationSeq != 2 {
 		t.Fatal("old ACK cleared newer report")
 	}
+	malformed := updated
+	malformed.Envelope = "%"
+	bundle.Layers = []api.VaultLayerDelivery{malformed}
+	if _, err := store.Environment(ctx, binding, bundle); err == nil {
+		t.Fatal("malformed encrypted layer was applied")
+	}
+	pending, err = store.PendingObservations(ctx)
+	if err != nil || len(pending) != 1 || pending[0].State != "failed" || pending[0].ErrorCode == nil || *pending[0].ErrorCode != "environment_projection_invalid" || pending[0].ObservationSeq != 3 {
+		t.Fatal("malformed envelope failure was not durably observed")
+	}
 	corrupted := updated
 	damaged, _ := base64.RawURLEncoding.Strict().DecodeString(corrupted.Envelope)
 	damaged[len(damaged)-1] ^= 1
@@ -185,4 +207,14 @@ type layerStaticHostKey struct{ material environmentkey.Material }
 
 func (k layerStaticHostKey) Load(ctx context.Context) (environmentkey.Material, error) {
 	return k.material, ctx.Err()
+}
+
+// The production page interface lets this fixture supply signed ciphertext; the
+// store still owns pagination integrity, decryption, and durable publication.
+type layerTestRecordPages map[string]api.VaultRecordsPage
+
+func (p layerTestRecordPages) VaultRecordPage(_ context.Context, _ LaunchContext, source api.VaultLayerSource, after, through uint64, _ string) (api.VaultRecordsPage, error) {
+	page := p[layerCoordinate(source)]
+	page.AfterSequence = after
+	return page, nil
 }

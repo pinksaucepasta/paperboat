@@ -5,10 +5,12 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -71,6 +73,9 @@ func (s *commandVaultSecureStore) snapshot() []string {
 
 type commandVaultControl struct {
 	hostRefreshes    int
+	sourceRefreshes  []api.VaultLayerCoordinate
+	records          map[string]api.VaultRecordsResult
+	recordRequests   []api.VaultRecordsPut
 	hostRefreshError error
 	store            config.ProfileStore
 	state            api.PasswordVaultState
@@ -575,8 +580,9 @@ func (c *commandVaultControl) GetVaultPersonalScopes(context.Context) (api.Vault
 	}
 	return out, c.hostRefreshError
 }
-func (c *commandVaultControl) VaultLayerRecipients(context.Context, api.VaultLayerCoordinate) ([]api.VaultLayerRecipient, error) {
-	return []api.VaultLayerRecipient{}, nil
+func (c *commandVaultControl) VaultLayerRecipients(_ context.Context, source api.VaultLayerCoordinate) ([]api.VaultLayerRecipient, error) {
+	c.sourceRefreshes = append(c.sourceRefreshes, source)
+	return []api.VaultLayerRecipient{}, c.hostRefreshError
 }
 func (c *commandVaultControl) PutVaultLayer(context.Context, string, string, api.VaultLayerPut) (api.VaultLayerDelivery, error) {
 	return api.VaultLayerDelivery{}, errors.New("unexpected layer publication without recipients")
@@ -616,4 +622,82 @@ func TestEnvironmentVariablePrivateTeamPickerWorksWithoutSharedInitialization(t 
 	if control.teamReads != 0 {
 		t.Fatal("private scopes depended on shared Team initialization")
 	}
+}
+
+func commandVaultRecordKey(coordinate api.VaultLayerCoordinate) string {
+	return coordinate.WorkspaceID + "\x00" + commandVaultScopeKey(coordinate.OwnerKind, coordinate.OwnerID, coordinate.MachineID)
+}
+func (c *commandVaultControl) VaultRecords(_ context.Context, coordinate api.VaultLayerCoordinate, _ uint64) (api.VaultRecordsResult, error) {
+	result := c.records[commandVaultRecordKey(coordinate)]
+	result.Records = append([]api.VaultRecordState{}, result.Records...)
+	return result, nil
+}
+func (c *commandVaultControl) GetVaultRecord(_ context.Context, coordinate api.VaultLayerCoordinate, id string) (api.VaultRecordState, error) {
+	for _, record := range c.records[commandVaultRecordKey(coordinate)].Records {
+		if record.RecordID == id {
+			return record, nil
+		}
+	}
+	return api.VaultRecordState{}, &api.APIError{Status: 404}
+}
+func (c *commandVaultControl) PutVaultRecords(_ context.Context, coordinate api.VaultLayerCoordinate, in api.VaultRecordsPut) (api.VaultRecordsResult, error) {
+	local, err := c.store.LoadPasswordVault(commandVaultIssuer, commandVaultAccount)
+	if err != nil {
+		return api.VaultRecordsResult{}, err
+	}
+	defer local.Clear()
+	var staged api.VaultRecordsPut
+	if local.Operation == nil || local.Operation.Kind != "records-put" || local.Operation.WorkspaceID != coordinate.WorkspaceID || local.Operation.OwnerKind != coordinate.OwnerKind || local.Operation.OwnerID != coordinate.OwnerID || local.Operation.MachineID != coordinate.MachineID || json.Unmarshal(local.Operation.Request, &staged) != nil || !reflect.DeepEqual(staged, in) {
+		return api.VaultRecordsResult{}, errors.New("record operation not exactly staged")
+	}
+	keys, err := environmente2ee.ParseVaultKeys(local.Payload)
+	if err != nil {
+		return api.VaultRecordsResult{}, err
+	}
+	defer keys.Clear()
+	writer := scopeWriterPublic(keys.WriterSeed)
+	defer clear(writer)
+	key := commandVaultRecordKey(coordinate)
+	prior := c.records[key]
+	next := api.VaultRecordsResult{Sequence: prior.Sequence + 1, Records: append([]api.VaultRecordState{}, prior.Records...)}
+	out := api.VaultRecordsResult{Sequence: next.Sequence}
+	for _, mutation := range in.Records {
+		raw, err := base64.RawURLEncoding.Strict().DecodeString(mutation.Envelope)
+		if err != nil {
+			return out, err
+		}
+		record, err := environmente2ee.ParseVaultRecord(raw, writer)
+		if err != nil {
+			return out, err
+		}
+		claims := record.Claims
+		if claims.WorkspaceID != coordinate.WorkspaceID || claims.OwnerKind != coordinate.OwnerKind || claims.OwnerID != coordinate.OwnerID || claims.MachineID != coordinate.MachineID || claims.Revision != mutation.ExpectedRevision+1 {
+			return out, errors.New("incorrect record namespace or revision")
+		}
+		state := api.VaultRecordState{WorkspaceID: claims.WorkspaceID, OwnerKind: claims.OwnerKind, OwnerID: claims.OwnerID, MachineID: claims.MachineID, KeyEpoch: claims.KeyEpoch, RecordID: claims.RecordID, Revision: claims.Revision, Deleted: claims.Deleted, Sequence: next.Sequence, DocumentID: record.ID.String(), WriterPublic: base64.RawURLEncoding.EncodeToString(writer), Envelope: mutation.Envelope}
+		index := -1
+		for i, old := range next.Records {
+			if old.RecordID == state.RecordID {
+				index = i
+				if old.Revision != mutation.ExpectedRevision {
+					return out, &api.APIError{Status: 409, Code: "version_conflict"}
+				}
+			}
+		}
+		if index < 0 && mutation.ExpectedRevision != 0 {
+			return out, &api.APIError{Status: 409, Code: "version_conflict"}
+		}
+		if index < 0 {
+			next.Records = append(next.Records, state)
+		} else {
+			next.Records[index] = state
+		}
+		out.Records = append(out.Records, state)
+	}
+	if c.records == nil {
+		c.records = map[string]api.VaultRecordsResult{}
+	}
+	c.records[key] = next
+	c.recordRequests = append(c.recordRequests, in)
+	return out, nil
 }

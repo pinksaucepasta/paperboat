@@ -134,12 +134,21 @@ func TestLayerEnvironmentObservationLostAckRetainsDurableExactReport(t *testing.
 	var delivery api.VaultLayerDelivery
 	sends := 0
 	accept := false
+	var records []api.VaultRecordState
 	var first api.VaultLayerObservation
 	var firstOperation string
 	var firstBody []byte
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/environment/hosts/machine_1/key" {
 			writeLayerRecipientRegistrationResponse(t, w, r, credentials, registration, material.Generation, public[:])
+			return
+		}
+		if r.URL.Path == "/v1/environment/layers/machine_1/records" {
+			operation, method, path, body, _ := credentials.snapshot()
+			if method != http.MethodGet || path != r.URL.Path || len(body) != 0 || operation != r.Header.Get("Idempotency-Key") || r.Header.Get("X-Paperboat-Machine-Proof") != base64.RawURLEncoding.EncodeToString(credentials.proof) || r.URL.Query().Get("actor_account_id") != "account_1" || r.URL.Query().Get("workspace") != "personal" || r.URL.Query().Get("through_sequence") != "1" || r.URL.Query().Get("owner_id") != "account_1" {
+				t.Error("incorrect authenticated record request")
+			}
+			json.NewEncoder(w).Encode(map[string]any{"data": api.VaultRecordsPage{Records: records, Sequence: 1}})
 			return
 		}
 		if r.URL.Path == "/v1/environment/hosts/machine_1/layers" {
@@ -190,11 +199,16 @@ func TestLayerEnvironmentObservationLostAckRetainsDurableExactReport(t *testing.
 	defer clear(writer)
 	sourceID := env.DocumentID([32]byte{1})
 	claims := env.VaultLayerClaims{Issuer: server.URL, RecipientAccount: "account_1", MachineID: "machine_1", InstallationGeneration: uint64(registration.InstallationGeneration), HostKeyGeneration: material.Generation, HostPublic: public[:], DeliveryGeneration: 1, Previous: make([]byte, 32), FenceGeneration: 1, Source: env.VaultLayerSource{WorkspaceID: "personal", OwnerKind: "personal", OwnerID: "account_1", KeyEpoch: 1, Revision: 1, Digest: sourceID[:]}, WriterAccount: "account_1", WriterVaultGeneration: 1}
-	layer, err := env.SealVaultLayer(context.Background(), claims, writer, map[string][]byte{"VALUE": []byte("test-value")})
+	layer, err := env.SealVaultScopeKey(context.Background(), claims, writer, bytes.Repeat([]byte{7}, 32))
 	if err != nil {
 		t.Fatal(err)
 	}
-	delivery = api.VaultLayerDelivery{Recipient: api.VaultLayerRecipient{RecipientAccount: "account_1", MachineID: "machine_1", InstallationGeneration: uint64(registration.InstallationGeneration), HostKeyGeneration: material.Generation, HostPublic: base64.RawURLEncoding.EncodeToString(public[:]), DeliveryGeneration: 1, DocumentID: layer.ID.String(), FenceGeneration: 1}, Source: api.VaultLayerSource{VaultLayerCoordinate: api.VaultLayerCoordinate{WorkspaceID: "personal", OwnerKind: "personal", OwnerID: "account_1"}, KeyEpoch: 1, Revision: 1, DocumentID: sourceID.String()}, WriterAccount: "account_1", WriterPublic: base64.RawURLEncoding.EncodeToString(layer.Claims.WriterPublic), Envelope: base64.RawURLEncoding.EncodeToString(layer.Raw), State: "ready"}
+	record, recordErr := env.SealVaultRecord(context.Background(), env.VaultRecordClaims{Issuer: server.URL, WorkspaceID: "personal", OwnerKind: "personal", OwnerID: "account_1", KeyEpoch: 1, Revision: 1, WriterAccount: "account_1", WriterVaultGeneration: 1}, bytes.Repeat([]byte{7}, 32), writer, "VALUE", []byte("test-value"))
+	if recordErr != nil {
+		t.Fatal(recordErr)
+	}
+	records = []api.VaultRecordState{{WorkspaceID: "personal", OwnerKind: "personal", OwnerID: "account_1", KeyEpoch: 1, RecordID: record.Claims.RecordID, Revision: 1, Sequence: 1, DocumentID: record.ID.String(), WriterPublic: base64.RawURLEncoding.EncodeToString(layer.Claims.WriterPublic), Envelope: base64.RawURLEncoding.EncodeToString(record.Raw)}}
+	delivery = api.VaultLayerDelivery{RecordSequence: 1, Recipient: api.VaultLayerRecipient{RecipientAccount: "account_1", MachineID: "machine_1", InstallationGeneration: uint64(registration.InstallationGeneration), HostKeyGeneration: material.Generation, HostPublic: base64.RawURLEncoding.EncodeToString(public[:]), DeliveryGeneration: 1, DocumentID: layer.ID.String(), FenceGeneration: 1}, Source: api.VaultLayerSource{VaultLayerCoordinate: api.VaultLayerCoordinate{WorkspaceID: "personal", OwnerKind: "personal", OwnerID: "account_1"}, KeyEpoch: 1, Revision: 1, DocumentID: sourceID.String()}, WriterAccount: "account_1", WriterPublic: base64.RawURLEncoding.EncodeToString(layer.Claims.WriterPublic), Envelope: base64.RawURLEncoding.EncodeToString(layer.Raw), State: "ready"}
 	service := newLayerEnvironmentService(root, layerServiceURL(t, server.URL), server.Client().Transport, registration, credentials, observationCredentials)
 	ctx := envinject.WithLaunchContext(context.Background(), "personal", "account_1")
 	values, err := service.EnvironmentForLaunch(ctx)
@@ -325,7 +339,7 @@ func TestLayerObservationFlushTraverses129ContextsAndKeepsRejectedWorkspace(t *t
 		workspace := fmt.Sprintf("team_%03d", i)
 		id := env.DocumentID([32]byte{1})
 		claims := env.VaultLayerClaims{Issuer: "https://control.example", RecipientAccount: "account_1", MachineID: "machine_1", InstallationGeneration: uint64(registration.InstallationGeneration), HostKeyGeneration: material.Generation, HostPublic: public[:], DeliveryGeneration: 1, Previous: make([]byte, 32), FenceGeneration: 1, Source: env.VaultLayerSource{WorkspaceID: workspace, OwnerKind: "team", OwnerID: workspace, KeyEpoch: 1, Revision: 1, Digest: id[:]}, WriterAccount: "account_1", WriterVaultGeneration: 1}
-		layer, err := env.SealVaultLayer(ctx, claims, writer, map[string][]byte{"VALUE": []byte("fixture")})
+		layer, err := env.SealVaultScopeKey(ctx, claims, writer, bytes.Repeat([]byte{7}, 32))
 		if err != nil {
 			t.Fatal(err)
 		}

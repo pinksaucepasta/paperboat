@@ -56,13 +56,20 @@ func (e *engine) rotatePersonal(ctx context.Context, r request) (any, error) {
 		return nil, err
 	}
 	defer func() {
-		for _, v := range values {
-			clear(v)
+		for _, value := range values {
+			clear(value)
 		}
 	}()
+	if len(values) != 0 {
+		return nil, env.ErrInvalid
+	}
+	replacement, err := e.rotateRecords(ctx, r, scope, e.keys.PersonalKey, e.pendingKeys.PersonalKey, e.pendingKeys.PersonalEpoch, e.pendingHead.Generation)
+	if err != nil {
+		return nil, err
+	}
 	next, err := env.SealVaultScope(ctx, env.VaultScopeClaims{Issuer: h.Issuer, OwnerKind: "personal", OwnerID: h.AccountID, MachineID: state.Machine, WorkspaceID: state.WorkspaceID, KeyEpoch: e.pendingKeys.PersonalEpoch, Revision: scope.Claims.Revision + 1, Previous: scope.ID[:], WriterAccount: h.AccountID, WriterVaultGeneration: e.pendingHead.Generation}, e.pendingKeys.PersonalKey, e.pendingKeys.WriterSeed, values)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"envelope": encoded(next.Raw), "document_id": digest(next.ID)}, nil
+	return map[string]any{"envelope": encoded(next.Raw), "document_id": digest(next.ID), "records": replacement}, nil
 }

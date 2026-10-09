@@ -132,7 +132,7 @@ func ResolveUsernameForPlatform(requested, openSSH, registered, local string, ha
 	if selected == "" {
 		return "", ErrSSHUsernameMissing
 	}
-	if !validSSHUsername(selected) {
+	if !validSSHUsername(selected) || (!strings.EqualFold(platform, "windows") && strings.ContainsRune(selected, '\\')) {
 		return "", ErrSSHUsernameInvalid
 	}
 	if hasRegistered && requested == "" && openSSH == "" {
@@ -168,6 +168,22 @@ func validAliasLabel(value string) bool {
 }
 
 func validSSHUsername(value string) bool {
+	if len(value) > 255 {
+		return false
+	}
+	parts := strings.Split(value, `\`)
+	if len(parts) > 2 {
+		return false
+	}
+	for _, part := range parts {
+		if !validUnqualifiedSSHUsername(part) {
+			return false
+		}
+	}
+	return true
+}
+
+func validUnqualifiedSSHUsername(value string) bool {
 	if value == "" || len(value) > 255 || value[0] == '-' || strings.TrimSpace(value) != value || strings.ContainsAny(value, "\x00\r\n@") {
 		return false
 	}

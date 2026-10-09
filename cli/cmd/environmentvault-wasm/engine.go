@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"sort"
 	"sync"
 
 	env "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
@@ -32,6 +31,10 @@ type scopeState struct {
 	Envelope     string `json:"envelope"`
 }
 type request struct {
+	Records        []recordState   `json:"records"`
+	RecordSequence uint64          `json:"record_sequence"`
+	Record         *recordState    `json:"record"`
+	Deleted        bool            `json:"deleted"`
 	WorkspaceID    string          `json:"workspace_id"`
 	LayerRecipient *layerRecipient `json:"recipient_metadata"`
 	Envelope       string          `json:"envelope"`
@@ -132,6 +135,8 @@ func (e *engine) run(ctx context.Context, r request) (any, error) {
 		return nil, ctx.Err()
 	}
 	switch r.Action {
+	case "record-id", "record-read", "record-write", "scope-create":
+		return e.recordOperation(ctx, r)
 	case "scope-candidate", "scope-reconcile":
 		return e.reconcileScope(r)
 	case "personal-rotate", "personal-rotate-scope":
@@ -327,91 +332,7 @@ func (e *engine) run(ctx context.Context, r request) (any, error) {
 		return e.hostLayer(ctx, r)
 	case "team-create", "team-grant", "team-accept", "team-rotate":
 		return e.teamOperation(ctx, r)
-	case "names", "set", "remove", "reset-scope":
-		if err := e.current(r.Vault); err != nil {
-			return nil, err
-		}
-		key, epoch := e.keys.PersonalKey, e.keys.PersonalEpoch
-		if r.Kind == "personal" {
-			if r.Owner != e.head.AccountID {
-				return nil, env.ErrInvalid
-			}
-		} else if r.Kind == "team" {
-			if r.Team == nil || r.Team.ID != r.Owner {
-				return nil, env.ErrInvalid
-			}
-			permission := "write"
-			if r.Action == "names" {
-				permission = "read"
-			}
-			var err error
-			key, _, err = e.teamKey(*r.Team, permission)
-			if err != nil {
-				return nil, err
-			}
-			epoch = r.Team.Epoch
-		} else {
-			return nil, env.ErrInvalid
-		}
-		old := env.VaultScope{}
-		values := map[string][]byte{}
-		if r.Scope != nil {
-			raw, err := decode(r.Scope.Envelope)
-			if err != nil {
-				return nil, env.ErrInvalid
-			}
-			writer, err := decode(r.Scope.WriterPublic)
-			if err != nil {
-				return nil, env.ErrInvalid
-			}
-			old, err = env.ParseVaultScope(raw, writer)
-			if err != nil {
-				return nil, err
-			}
-			c := old.Claims
-			if c.WorkspaceID != r.WorkspaceID || c.Issuer != e.head.Issuer || c.OwnerKind != r.Kind || c.OwnerID != r.Owner || c.MachineID != r.Machine || c.KeyEpoch != epoch || c.KeyEpoch != r.Scope.Epoch || c.Revision != r.Scope.Revision || digest(old.ID) != r.Scope.DocumentID {
-				return nil, env.ErrInvalid
-			}
-			values, err = env.OpenVaultScope(ctx, old, key)
-			if err != nil {
-				return nil, err
-			}
-		}
-		defer func() {
-			for _, v := range values {
-				clear(v)
-			}
-		}()
-		if r.Action == "names" {
-			names := []string{}
-			for k := range values {
-				names = append(names, k)
-			}
-			sort.Strings(names)
-			return map[string]any{"names": names}, nil
-		}
-		if r.Action == "reset-scope" {
-			for k, v := range values {
-				clear(v)
-				delete(values, k)
-			}
-		} else {
-			if err := env.ValidateVariableName(r.Name); err != nil {
-				return nil, err
-			}
-			clear(values[r.Name])
-			if r.Action == "remove" {
-				delete(values, r.Name)
-			} else {
-				values[r.Name] = []byte(r.Value)
-			}
-		}
-		c := env.VaultScopeClaims{Issuer: e.head.Issuer, OwnerKind: r.Kind, OwnerID: r.Owner, MachineID: r.Machine, WorkspaceID: r.WorkspaceID, KeyEpoch: epoch, Revision: old.Claims.Revision + 1, Previous: old.ID[:], WriterAccount: e.head.AccountID, WriterVaultGeneration: e.head.Generation}
-		next, err := env.SealVaultScope(ctx, c, key, e.keys.WriterSeed, values)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]string{"envelope": encoded(next.Raw), "document_id": digest(next.ID)}, nil
+
 	}
 	return nil, env.ErrInvalid
 }

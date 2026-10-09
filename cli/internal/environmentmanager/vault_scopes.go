@@ -119,7 +119,15 @@ func (v PasswordVault) readVaultScope(ctx context.Context, c VaultDataClient, ke
 	if scope.Claims.WorkspaceID != v.scopeWorkspace(kind, owner) || scope.Claims.Issuer != v.Issuer || scope.Claims.OwnerKind != kind || scope.Claims.OwnerID != owner || scope.Claims.MachineID != machine || scope.Claims.KeyEpoch != epoch {
 		return environmente2ee.VaultScope{}, nil, ErrIntegrity
 	}
-	values, err := environmente2ee.OpenVaultScope(ctx, scope, key)
+	anchor, err := environmente2ee.OpenVaultScope(ctx, scope, key)
+	if err != nil {
+		return scope, nil, err
+	}
+	defer clearVaultValues(anchor)
+	if len(anchor) != 0 {
+		return scope, nil, ErrIntegrity
+	}
+	values, _, err := v.readScopeRecords(ctx, keys, scope)
 	return scope, values, err
 }
 func clearVaultValues(values map[string][]byte) {
@@ -134,42 +142,9 @@ func (v PasswordVault) MutateScope(ctx context.Context, kind, owner, machine str
 	if mutate == nil {
 		return environmente2ee.ErrInvalid
 	}
-	return v.withVaultKeys(ctx, func(local *config.PasswordVaultRecord, keys *environmente2ee.VaultKeys, c VaultDataClient) error {
-		if kind == "team" {
-			team, err := c.GetVaultTeam(ctx, owner)
-			if err != nil {
-				return err
-			}
-			if _, ok := vaultTeamActor(team, v.AccountID, "write"); !ok {
-				return ErrIntegrity
-			}
-		}
-		old, values, err := v.readVaultScope(ctx, c, keys, kind, owner, machine)
-		if vaultAPIResourceAbsentOnly(err) {
-			values = map[string][]byte{}
-		} else if err != nil {
-			return err
-		}
-		defer clearVaultValues(values)
-		if err := mutate(values); err != nil {
-			return err
-		}
-		key, epoch, err := scopeKey(keys, kind, owner, v.AccountID)
-		if err != nil {
-			return err
-		}
-		claims := environmente2ee.VaultScopeClaims{Issuer: v.Issuer, OwnerKind: kind, OwnerID: owner, MachineID: machine, WorkspaceID: v.scopeWorkspace(kind, owner), KeyEpoch: epoch, Revision: old.Claims.Revision + 1, Previous: old.ID[:], WriterAccount: v.AccountID, WriterVaultGeneration: local.Head.Generation}
-		next, err := environmente2ee.SealVaultScope(ctx, claims, key, keys.WriterSeed, values)
-		if err != nil {
-			return err
-		}
-		op, err := newVaultOperationID()
-		if err != nil {
-			return err
-		}
-		return v.stageOperation(ctx, local, "scope-put", kind, owner, machine, api.VaultScopePut{OperationID: op, Envelope: vaultEncoded(next.Raw)})
-	})
+	return v.mutateScopeRecords(ctx, kind, owner, machine, mutate)
 }
+
 func (v PasswordVault) stageOperation(ctx context.Context, local *config.PasswordVaultRecord, kind, ownerKind, owner, machine string, request any) error {
 	raw, err := json.Marshal(request)
 	if err != nil {
@@ -191,6 +166,10 @@ func (v PasswordVault) publishOperation(ctx context.Context, local *config.Passw
 		return environmente2ee.ErrInvalid
 	}
 	switch op.Kind {
+	case "records-put":
+		if err := v.publishRecordsOperation(ctx, local); err != nil {
+			return err
+		}
 	case "layer-put":
 		if err := v.publishLayerOperation(ctx, local); err != nil {
 			return err
@@ -519,7 +498,7 @@ func (v PasswordVault) RotateTeam(ctx context.Context, teamID string, remove []s
 		}
 		var previous environmente2ee.VaultScope
 		previousID, err := environmente2ee.ParseDocumentID(team.Scope.DocumentID)
-		if err != nil || team.Scope.OwnerKind != "team" || team.Scope.OwnerID != teamID || team.Scope.KeyEpoch != team.KeyEpoch || team.Scope.Revision == 0 {
+		if err != nil || team.Scope.OwnerKind != "team" || team.Scope.OwnerID != teamID || team.Scope.WorkspaceID != teamID || team.Scope.MachineID != "" || team.Scope.KeyEpoch != team.KeyEpoch || team.Scope.Revision == 0 || team.RecordSequence > environmente2ee.MaximumContractInteger {
 			return ErrIntegrity
 		}
 		values := map[string][]byte{}
@@ -544,6 +523,10 @@ func (v PasswordVault) RotateTeam(ctx context.Context, teamID string, remove []s
 			}
 		}
 		defer clearVaultValues(values)
+		if len(values) != 0 {
+			return ErrIntegrity
+		}
+
 		removed := make(map[string]bool, len(remove))
 		for _, account := range remove {
 			if account == v.AccountID || removed[account] {
@@ -600,13 +583,30 @@ func (v PasswordVault) RotateTeam(ctx context.Context, teamID string, remove []s
 		if ownMembership == 0 {
 			return ErrIntegrity
 		}
+		oldKeys := *keys
+		oldKeys.Teams = append([]environmente2ee.VaultTeamKey(nil), keys.Teams...)
+		for i := range oldKeys.Teams {
+			oldKeys.Teams[i].Key = bytes.Clone(oldKeys.Teams[i].Key)
+		}
+		defer func() {
+			for _, team := range oldKeys.Teams {
+				clear(team.Key)
+			}
+		}()
 		if err := replaceTeamKey(keys, environmente2ee.VaultTeamKey{TeamID: teamID, Epoch: team.KeyEpoch + 1, MembershipGeneration: ownMembership, Key: bytes.Clone(key)}); err != nil {
+			return err
+		}
+		records := api.VaultRecordReplacement{ExpectedSequence: team.RecordSequence, DocumentIDs: []string{}, Envelopes: []string{}}
+		if !totalLoss {
+			records, err = v.prepareRecordReplacement(ctx, previous, scope, &oldKeys, keys, local.Head.Generation)
+		}
+		if err != nil {
 			return err
 		}
 		if err := v.prepareKeySuccessor(ctx, local, keys); err != nil {
 			return err
 		}
-		return v.stageOperation(ctx, local, "team-rotate", "team", teamID, "", api.VaultTeamRotate{OperationID: op, ExpectedTeamGeneration: team.Generation, RemoveAccountIDs: append([]string{}, remove...), ScopeEnvelope: vaultEncoded(scope.Raw), GrantEnvelopes: grants, VaultEnvelope: vaultEncoded(local.Pending.Envelope), ConfirmTotalLoss: totalLoss})
+		return v.stageOperation(ctx, local, "team-rotate", "team", teamID, "", api.VaultTeamRotate{Records: records, OperationID: op, ExpectedTeamGeneration: team.Generation, RemoveAccountIDs: append([]string{}, remove...), ScopeEnvelope: vaultEncoded(scope.Raw), GrantEnvelopes: grants, VaultEnvelope: vaultEncoded(local.Pending.Envelope), ConfirmTotalLoss: totalLoss})
 	})
 }
 

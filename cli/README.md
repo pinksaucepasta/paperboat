@@ -112,6 +112,8 @@ uploads to that machine. Shortcut names only apply at the top level; explicit
 `pb ssh mac` continues to resolve a machine normally. Built-in command names are reserved. Shell completion offers local shortcuts at the
 first argument alongside machine names.
 
+Managed SSH defaults to the target's registered OS account, including `DOMAIN\user` on Windows. Quote an explicit qualified target in your shell, for example `pb ssh 'DOMAIN\user@homelab'`.
+
 `{1}`, `{2}`, etc. substitute positional arguments as literal text, including inside
 `machine:{2}`. `{args}` must occupy a whole argument and inserts the remaining arguments
 in their original order. Missing or unused arguments fail before execution. There is

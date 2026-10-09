@@ -43,21 +43,11 @@ func TestVaultScopeConflictReconcilesOnlyVerifiedCurrentCursor(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			v, control, store := newVaultScopesFixture(t)
 			ctx := context.Background()
-			if err := v.MutateScope(ctx, "personal", v.AccountID, "", func(m map[string][]byte) error { m["BASE"] = []byte("base"); return nil }); err != nil {
-				t.Fatal(err)
-			}
-			oldState := control.scopes[scopeControlKey("personal", v.AccountID, "")]
 			before, keys := loadVaultKeysForScopeTest(t, store)
 			defer before.Clear()
 			defer keys.Clear()
-			old, err := oldState.Decode()
-			if err != nil {
-				t.Fatal(err)
-			}
-			claims := old.Claims
-			claims.Revision++
-			claims.Previous = old.ID[:]
-			candidate, err := environmente2ee.SealVaultScope(ctx, claims, keys.PersonalKey, keys.WriterSeed, map[string][]byte{"BASE": []byte("base"), "INTENT": []byte("intent")})
+			claims := environmente2ee.VaultScopeClaims{Issuer: v.Issuer, WorkspaceID: "personal", OwnerKind: "personal", OwnerID: v.AccountID, KeyEpoch: keys.PersonalEpoch, Revision: 1, Previous: make([]byte, 32), WriterAccount: v.AccountID, WriterVaultGeneration: before.Head.Generation}
+			candidate, err := environmente2ee.SealVaultScope(ctx, claims, keys.PersonalKey, keys.WriterSeed, map[string][]byte{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -102,7 +92,7 @@ func TestVaultScopeConflictReconcilesOnlyVerifiedCurrentCursor(t *testing.T) {
 					concurrent.OwnerID = "other_account"
 					concurrent.WriterAccount = "other_account"
 				}
-				next, err := environmente2ee.SealVaultScope(ctx, concurrent, keys.PersonalKey, keys.WriterSeed, map[string][]byte{"COMPETING": []byte("concurrent")})
+				next, err := environmente2ee.SealVaultScope(ctx, concurrent, keys.PersonalKey, keys.WriterSeed, map[string][]byte{})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -111,7 +101,7 @@ func TestVaultScopeConflictReconcilesOnlyVerifiedCurrentCursor(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "stale":
-				c.current = oldState
+				c.readErr = &api.APIError{Status: 404}
 			case "invalid-signature":
 				raw, err := decodeVaultTestEnvelope(c.current.Envelope)
 				if err != nil {

@@ -105,7 +105,7 @@ func TestVaultLayerFanoutAutomaticGlobalAndExactResume(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		values, err := env.OpenVaultLayer(ctx, layer, layer.Claims, host.Bytes())
+		values, err := openLayerRecordValues(ctx, c, delivery, layer, host.Bytes())
 		if err != nil || string(values["FIRST"]) != "one" || string(values["SECOND"]) != "two" {
 			t.Fatal("global values required a name selection")
 		}
@@ -137,7 +137,7 @@ func TestVaultLayerFanoutAutomaticGlobalAndExactResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	values, err := env.OpenVaultLayer(ctx, layer, layer.Claims, host.Bytes())
+	values, err := openLayerRecordValues(ctx, c, delivery, layer, host.Bytes())
 	if err != nil || len(values) != 1 || string(values["SECOND"]) != "two" {
 		t.Fatal("removed global value survived delivery")
 	}
@@ -265,9 +265,40 @@ func TestVaultLayerReconcileAcceptsAndReusesAcknowledgedTeamGrant(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	values, err := env.OpenVaultLayer(ctx, layer, layer.Claims, host.Bytes())
+	values, err := openLayerRecordValues(ctx, c, delivery, layer, host.Bytes())
 	defer clearVaultValues(values)
 	if err != nil || string(values["TEAM_GLOBAL"]) != "test-global" {
 		t.Fatal("acknowledged Team global encrypted delivery did not decrypt")
 	}
+}
+
+func openLayerRecordValues(ctx context.Context, c *layerControl, delivery api.VaultLayerDelivery, layer env.VaultLayer, private []byte) (map[string][]byte, error) {
+	key, err := env.OpenVaultScopeKey(ctx, layer, layer.Claims, private)
+	if err != nil {
+		return nil, err
+	}
+	defer clear(key)
+	result, err := c.VaultRecords(ctx, delivery.Source.VaultLayerCoordinate, 0)
+	if err != nil {
+		return nil, err
+	}
+	values := map[string][]byte{}
+	for _, state := range result.Records {
+		record, err := state.Decode()
+		if err != nil {
+			clearVaultValues(values)
+			return nil, err
+		}
+		name, value, err := env.OpenVaultRecord(ctx, record, key)
+		if err != nil {
+			clearVaultValues(values)
+			return nil, err
+		}
+		if state.Deleted {
+			clear(value)
+			continue
+		}
+		values[name] = value
+	}
+	return values, nil
 }

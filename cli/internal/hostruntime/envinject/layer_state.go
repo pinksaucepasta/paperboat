@@ -14,10 +14,11 @@ import (
 	"strings"
 )
 
-const maximumLayerStateBytes = 1 << 20
+const maximumLayerStateBytes = 8 << 20
 
 var ErrInvalidSnapshot = errors.New("invalid encrypted environment state")
 var ErrObservationLost = errors.New("environment layer floor is unavailable")
+var ErrResourceExhausted = errors.New("encrypted environment rollback protection reached its storage limit; rotate the affected scope keys or remove unused scopes before retrying")
 var ErrNotReady = errors.New("encrypted environment is not ready")
 
 type EnvironmentSource interface{ Environment() ([]string, error) }
@@ -28,7 +29,10 @@ type authenticatedLayerState struct {
 
 func writeLayerState(path string, key []byte, value any) error {
 	record, err := json.Marshal(value)
-	if err != nil || len(record) > maximumLayerStateBytes || len(key) != 32 {
+	if len(record) > maximumLayerStateBytes {
+		return ErrResourceExhausted
+	}
+	if err != nil || len(key) != 32 {
 		return ErrInvalidSnapshot
 	}
 	mac := hmac.New(sha256.New, key)
