@@ -46,6 +46,29 @@ func TestTeamClientRoutesAndIdempotency(t *testing.T) {
 	}
 }
 
+func TestTeamInvitationsOnlyPendingForIntendedAudience(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("state") != "pending" {
+			t.Error("completed invitations offered as actions")
+		}
+		if r.URL.Path == "/v1/team-invitations" {
+			if r.URL.Query().Get("owner") != "mine" {
+				t.Error("administered invitations offered as received")
+			}
+		} else if r.URL.Path != "/v1/teams/team_1/invitations" || r.URL.Query().Get("owner") != "" {
+			t.Error("team invitation scope changed")
+		}
+		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"items": []any{}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 0, "has_more": false}}})
+	}))
+	defer server.Close()
+	c := New(server.URL, config.Credential{AccessToken: "token"}, server.Client())
+	for _, team := range []string{"", "team_1"} {
+		if _, err := c.TeamInvitations(context.Background(), team); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestTeamMachineClientExactCapabilityAndOwnershipRoutes(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -8,6 +8,10 @@ Share a personal enrollment or explicitly transfer it to a team. Each teammate u
 
 With --json, this command group lists its available commands.
 
+```
+pb team machine [flags]
+```
+
 ### Options
 
 ```

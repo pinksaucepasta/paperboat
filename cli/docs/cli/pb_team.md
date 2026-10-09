@@ -8,6 +8,10 @@ Manage teams and explicit resource permissions. Owners appoint admins, transfer 
 
 With --json, this command group lists its available commands.
 
+```
+pb team [flags]
+```
+
 ### Options
 
 ```
@@ -32,6 +36,7 @@ With --json, this command group lists its available commands.
 * [pb team attach](pb_team_attach.md)	 - Attach or detach an explicitly selected personal resource
 * [pb team cancel-invite](pb_team_cancel-invite.md)	 - Cancel an outstanding invitation
 * [pb team create](pb_team_create.md)	 - Create a team
+* [pb team decline](pb_team_decline.md)	 - Decline an invitation bound to this account
 * [pb team delete](pb_team_delete.md)	 - Delete a team
 * [pb team get](pb_team_get.md)	 - Show one team and its current generation
 * [pb team grant](pb_team_grant.md)	 - Set or revoke an explicit resource permission

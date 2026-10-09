@@ -76,7 +76,7 @@ func executeManagedSSH(cobraCommand *cobra.Command, ctx *command.Context, machin
 	}
 	operationID := newSSHOperationID()
 	descriptor := pendingSSHDescriptor(machine, operationID)
-	connectInfo := sshConnectInfo(machine, descriptor)
+	connectInfo := sshConnectInfo(machine, descriptor, client.Workspace())
 	connection, err := d.peerApplications.DialSSH(cobraCommand.Context(), connectInfo, operationID)
 	if err != nil {
 		return err

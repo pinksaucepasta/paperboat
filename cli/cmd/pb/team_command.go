@@ -12,10 +12,21 @@ import (
 )
 
 func teamCobraCommand() *cobra.Command {
-	root := &cobra.Command{Use: "team", Short: "Manage teams and explicit resource permissions", Long: "Manage teams and explicit resource permissions. Owners appoint admins, transfer ownership, delete teams and reset ENV. Admins manage ordinary members and grants; ENV rotation requires authorized keys. Owners must transfer ownership before leaving. Removal ends team access and adopted defaults; independently granted Git access and previously received files or secrets remain. Team deletion revokes team-owned machines and preserves personal resources.", Args: commandArgs(cobra.NoArgs)}
+	root := &cobra.Command{
+		Use:   "team",
+		Short: "Manage teams and explicit resource permissions",
+		Long:  "Manage teams and explicit resource permissions. Owners appoint admins, transfer ownership, delete teams and reset ENV. Admins manage ordinary members and grants; ENV rotation requires authorized keys. Owners must transfer ownership before leaving. Removal ends team access and adopted defaults; independently granted Git access and previously received files or secrets remain. Team deletion revokes team-owned machines and preserves personal resources.",
+		Args: func(_ *cobra.Command, args []string) error {
+			if len(args) != 0 {
+				return localArgumentError("unknown team action; run `pb team --help` to list supported actions")
+			}
+			return nil
+		},
+		RunE: func(command *cobra.Command, _ []string) error { return command.Help() },
+	}
 	root.AddCommand(
 		teamInvitationsCommand(), teamInvitationShowCommand(), teamActivityCommand(), teamReadCommand("list"), teamReadCommand("get"), teamCreateCommand(), teamInviteCommand(),
-		teamAcceptCommand(), teamCancelInviteCommand(), teamMutationCommand("role"),
+		teamAcceptCommand(), teamDeclineCommand(), teamCancelInviteCommand(), teamMutationCommand("role"),
 		teamMutationCommand("remove"), teamMutationCommand("leave"), teamMutationCommand("transfer"),
 		teamMutationCommand("delete"), teamGrantCommand(), teamAttachCommand(), teamMachineCommand(),
 	)
@@ -129,6 +140,29 @@ func teamAcceptCommand() *cobra.Command {
 		}
 		j, _ := c.Flags().GetBool("json")
 		return writeTeamOutput(c, j, team)
+	}}
+	c.Flags().Bool("json", false, "print canonical JSON")
+	return c
+}
+
+func teamDeclineCommand() *cobra.Command {
+	c := &cobra.Command{Use: "decline <invitation>", Short: "Decline an invitation bound to this account", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(c *cobra.Command, args []string) error {
+		if !validTeamCLIIdentifier(args[0]) {
+			return localArgumentError("invitation must be a valid identifier")
+		}
+		client, err := backendForCommand(c)
+		if err != nil {
+			return err
+		}
+		invitation, err := client.DeclineTeamInvitation(c.Context(), args[0], api.TeamAcceptRequest{OperationID: newIdempotencyKey()})
+		if err != nil {
+			return err
+		}
+		if jsonOutput, _ := c.Flags().GetBool("json"); jsonOutput {
+			return json.NewEncoder(c.OutOrStdout()).Encode(invitation)
+		}
+		_, err = fmt.Fprintf(c.OutOrStdout(), "Declined invitation %s to %s.\n", invitation.InvitationID, invitation.TeamID)
+		return err
 	}}
 	c.Flags().Bool("json", false, "print canonical JSON")
 	return c

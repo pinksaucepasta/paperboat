@@ -60,6 +60,7 @@ type TeamInvitation struct {
 	Role         string    `json:"role"`
 	ExpiresAt    time.Time `json:"expires_at"`
 	Generation   uint64    `json:"generation"`
+	State        string    `json:"state,omitempty"`
 }
 type TeamGrantRequest struct {
 	OperationID        string `json:"operation_id"`
@@ -106,6 +107,11 @@ func (c *Client) InviteTeamMember(ctx context.Context, id string, in TeamInviteR
 func (c *Client) AcceptTeamInvitation(ctx context.Context, id string, in TeamAcceptRequest) (Team, error) {
 	var out Team
 	err := c.doWithHeaders(ctx, http.MethodPost, "/v1/team-invitations/"+url.PathEscape(id)+"/accept", in, &out, teamHeaders(in.OperationID))
+	return out, err
+}
+func (c *Client) DeclineTeamInvitation(ctx context.Context, id string, in TeamAcceptRequest) (TeamInvitation, error) {
+	var out TeamInvitation
+	err := c.doWithHeaders(ctx, http.MethodPost, "/v1/team-invitations/"+url.PathEscape(id)+"/decline", in, &out, teamHeaders(in.OperationID))
 	return out, err
 }
 func (c *Client) CancelTeamInvitation(ctx context.Context, team, invitation string, in TeamMutationRequest) (Team, error) {
@@ -199,10 +205,13 @@ func (c *Client) TeamActivity(ctx context.Context, team, cursor string, limit in
 // by the server before returning their invitation IDs.
 func (c *Client) TeamInvitations(ctx context.Context, team string) ([]TeamInvitation, error) {
 	path := "/v1/team-invitations"
+	filters := url.Values{"state": {"pending"}}
 	if team != "" {
 		path = "/v1/teams/" + url.PathEscape(team) + "/invitations"
+	} else {
+		filters.Set("owner", "mine")
 	}
-	return collectOffsetInventory[TeamInvitation](ctx, c, path, "items", nil)
+	return collectOffsetInventory[TeamInvitation](ctx, c, path, "items", filters)
 }
 func (c *Client) GetTeamInvitation(ctx context.Context, id string) (TeamInvitation, error) {
 	var out TeamInvitation

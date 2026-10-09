@@ -44,6 +44,9 @@ func (t LocalPeerTunnel) request(info resolver.ConnectInfo, consumer, operationI
 	if err != nil {
 		return localapi.PeerStreamRequest{}, err
 	}
+	if info.Workspace != "" {
+		request.Workspace = info.Workspace
+	}
 	request.AccessSessionID = info.Terminal.Auth.ResourceID
 	if request.Credential == "" {
 		if validationErr := request.ValidatePending(time.Now().UTC()); validationErr != nil {

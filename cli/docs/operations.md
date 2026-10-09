@@ -67,6 +67,14 @@ The complete v1 preview and tunnel workflow is in
 [preview-tunnels.md](preview-tunnels.md), with focused recovery procedures in
 [runbooks-preview-tunnels.md](runbooks-preview-tunnels.md).
 
+Native exec and SSH peer requests carry the canonical selected `workspace` through
+`paperboat.peer-stream-request/v1` to daemon descriptor issuance. Personal launches
+explicitly use `personal`; Team launches retain the exact team slug on retry.
+The daemon validates selector syntax, and the control plane authorizes the selected
+workspace and exact resource before issuing execution credentials. Connections with
+an existing browser or shared-session credential retain that credential's resource
+and workspace authority; a local selector cannot replace it.
+
 ## Machine runtime services
 
 `make build` builds the single `bin/pb` executable. For a foreground development

@@ -163,12 +163,14 @@ func TestRateLimitedPeerApprovalReporterBoundsRepeatedRefreshes(t *testing.T) {
 func TestIssuePeerStreamRefreshesRejectedCredentialOnce(t *testing.T) {
 	expires := time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano)
 	var operations []string
+	var workspaces []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		var body struct {
 			OperationID string `json:"operation_id"`
 		}
 		_ = json.NewDecoder(request.Body).Decode(&body)
 		operations = append(operations, body.OperationID)
+		workspaces = append(workspaces, request.URL.Query().Get("workspace"))
 		writer.Header().Set("Content-Type", "application/json")
 		if request.Header.Get("Authorization") == "Bearer token-1" {
 			writer.WriteHeader(http.StatusUnauthorized)
@@ -179,8 +181,11 @@ func TestIssuePeerStreamRefreshesRejectedCredentialOnce(t *testing.T) {
 	}))
 	defer server.Close()
 	source := AuthenticatedMachineSource{ServerURL: server.URL, Auth: &rotatingAuthSource{}, SourceMachineID: "source_1"}
-	request := localapi.PeerStreamRequest{Schema: localapi.PeerStreamSchemaV1, Consumer: "exec", MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, OperationID: "operation_1", Deadline: time.Now().UTC().Add(time.Minute), MaximumBytes: 1024, Payload: json.RawMessage(`{"operation_id":"operation_1"}`)}
+	request := localapi.PeerStreamRequest{Workspace: "team-audit", Schema: localapi.PeerStreamSchemaV1, Consumer: "exec", MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, OperationID: "operation_1", Deadline: time.Now().UTC().Add(time.Minute), MaximumBytes: 1024, Payload: json.RawMessage(`{"operation_id":"operation_1"}`)}
 	result, err := source.IssuePeerStream(context.Background(), request)
+	if !reflect.DeepEqual(workspaces, []string{"team-audit", "team-audit"}) {
+		t.Fatalf("descriptor workspace changed or missing: %v", workspaces)
+	}
 	if err != nil || result.Credential != "operation-token" || !reflect.DeepEqual(operations, []string{"operation_1", "operation_1"}) {
 		t.Fatalf("result=%+v operations=%v err=%v", result, operations, err)
 	}
@@ -222,7 +227,7 @@ func TestIssuePeerStreamPreservesRefreshFailureAfterRejection(t *testing.T) {
 	defer server.Close()
 	cause := syscall.EIO
 	source := AuthenticatedMachineSource{ServerURL: server.URL, Auth: failedRefreshAuth{cause}, SourceMachineID: "source_1"}
-	request := localapi.PeerStreamRequest{Schema: localapi.PeerStreamSchemaV1, Consumer: "exec", MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, OperationID: "operation_1", Deadline: time.Now().UTC().Add(time.Minute), MaximumBytes: 1024, Payload: json.RawMessage(`{"operation_id":"operation_1"}`)}
+	request := localapi.PeerStreamRequest{Workspace: "personal", Schema: localapi.PeerStreamSchemaV1, Consumer: "exec", MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, OperationID: "operation_1", Deadline: time.Now().UTC().Add(time.Minute), MaximumBytes: 1024, Payload: json.RawMessage(`{"operation_id":"operation_1"}`)}
 	_, err := source.IssuePeerStream(t.Context(), request)
 	if !errors.Is(err, cause) || !errors.Is(err, api.ErrUnauthenticated) {
 		t.Fatal("refresh error or original rejection lost")
@@ -230,5 +235,21 @@ func TestIssuePeerStreamPreservesRefreshFailureAfterRejection(t *testing.T) {
 	fault := errorreport.ProjectFault(t.Context(), "paperboatd", "peer_stream", "control_request", "control_request_failed", err)
 	if fault.Errno != int(cause) || fault.Outcome == "rejected" || fault.Stage != "peer_authority" {
 		t.Fatalf("refresh cause masked: %+v", fault)
+	}
+}
+
+func TestIssuePeerStreamRejectsInvalidWorkspaceBeforeProvider(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; w.WriteHeader(500) }))
+	defer server.Close()
+	source := AuthenticatedMachineSource{ServerURL: server.URL, Auth: &rotatingAuthSource{}, SourceMachineID: "source_1"}
+	for _, selector := range []string{"", "INVALID/team"} {
+		_, err := source.IssuePeerStream(t.Context(), localapi.PeerStreamRequest{Consumer: "exec", Workspace: selector})
+		if err == nil {
+			t.Fatalf("workspace %q accepted", selector)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("invalid selector reached provider: %d calls", calls)
 	}
 }

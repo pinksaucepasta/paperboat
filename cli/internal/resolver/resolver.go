@@ -149,6 +149,7 @@ type TerminalSessionCreate struct {
 
 // ConnectInfo is what the resolver hands back to the tunnel + session layers.
 type ConnectInfo struct {
+	Workspace string
 	// TargetKind is "machine" for the enrolled machine resolved by the catalog.
 	TargetKind        string
 	MachineID         string

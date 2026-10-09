@@ -1,19 +1,19 @@
 .nh
-.TH "PB-TEAM-INVITATIONS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+.TH "PB-TEAM-DECLINE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-team-invitations - Discover pending invitations received by you or administered for a team
+pb-team-decline - Decline an invitation bound to this account
 
 
 .SH SYNOPSIS
-\fBpb team invitations [team] [flags]\fP
+\fBpb team decline <invitation> [flags]\fP
 
 
 .SH DESCRIPTION
-Discover pending invitations received by you or administered for a team
+Decline an invitation bound to this account
 
 .PP
-Discover pending invitations addressed to your account, or list pending invitations for a team you administer. Inventory pagination is followed to completion. Use the exact invitation identity to inspect, accept or decline a received invitation, or cancel an invitation you administer.
+Decline a pending invitation explicitly addressed to this account without joining the team. The invitation is cancelled; completed or changed invitations require reloading their current status. Invitations for other accounts cannot be declined.
 
 .PP
 Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
@@ -24,7 +24,7 @@ JSON output is supported with --json.
 
 .SH OPTIONS
 \fB-h\fP, \fB--help\fP[=false]
-	help for invitations
+	help for decline
 
 .PP
 \fB--json\fP[=false]

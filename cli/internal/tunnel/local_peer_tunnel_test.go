@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 )
 
@@ -24,5 +25,21 @@ func TestLocalPeerTunnelInvalidTargetDoesNotEchoTargetIdentifiers(t *testing.T) 
 	}
 	if err.Error() != ErrPeerTerminalInvalid.Error() {
 		t.Fatalf("invalid target error=%q", err)
+	}
+}
+
+func TestLocalPeerPendingRequestPreservesWorkspace(t *testing.T) {
+	for _, selector := range []string{"personal", "team-audit", "INVALID/team"} {
+		info := resolver.ConnectInfo{Workspace: selector, MachineID: "machine_1", MachineGeneration: 1, Terminal: &resolver.TerminalTarget{EnvironmentID: "environment_1"}}
+		request, err := (LocalPeerTunnel{Client: &localapi.Client{}}).request(info, "exec", "operation_1", nil)
+		if selector == "INVALID/team" {
+			if err == nil {
+				t.Fatal("invalid workspace accepted")
+			}
+			continue
+		}
+		if err != nil || request.Workspace != selector {
+			t.Fatalf("workspace=%s request=%s err=%v", selector, request.Workspace, err)
+		}
 	}
 }

@@ -8,7 +8,18 @@ import (
 )
 
 func teamMachineCommand() *cobra.Command {
-	c := &cobra.Command{Use: "machine", Short: "Share machines and manage exact team access", Long: "Share a personal enrollment or explicitly transfer it to a team. Each teammate uses their own PB account and starts separate terminal sessions. All remote work runs as the enrolled OS user, so it shares that user's OS file and process permissions. Tunnel management covers existing private/team tunnels; create tunnels locally on the target machine. Machine grants do not grant ENV administration, public publication, resharing, or attachment to another person's terminal.", Args: commandArgs(cobra.NoArgs)}
+	c := &cobra.Command{
+		Use:   "machine",
+		Short: "Share machines and manage exact team access",
+		Long:  "Share a personal enrollment or explicitly transfer it to a team. Each teammate uses their own PB account and starts separate terminal sessions. All remote work runs as the enrolled OS user, so it shares that user's OS file and process permissions. Tunnel management covers existing private/team tunnels; create tunnels locally on the target machine. Machine grants do not grant ENV administration, public publication, resharing, or attachment to another person's terminal.",
+		Args: func(_ *cobra.Command, args []string) error {
+			if len(args) != 0 {
+				return localArgumentError("unknown team machine action; run `pb team machine --help` to list supported actions")
+			}
+			return nil
+		},
+		RunE: func(command *cobra.Command, _ []string) error { return command.Help() },
+	}
 	for _, action := range []string{"share", "unshare", "transfer-to-team", "remove"} {
 		c.AddCommand(teamMachineActionCommand(action))
 	}

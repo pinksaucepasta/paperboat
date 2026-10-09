@@ -1,25 +1,25 @@
-## pb team invitations
+## pb team decline
 
-Discover pending invitations received by you or administered for a team
+Decline an invitation bound to this account
 
 ### Synopsis
 
-Discover pending invitations received by you or administered for a team
+Decline an invitation bound to this account
 
-Discover pending invitations addressed to your account, or list pending invitations for a team you administer. Inventory pagination is followed to completion. Use the exact invitation identity to inspect, accept or decline a received invitation, or cancel an invitation you administer.
+Decline a pending invitation explicitly addressed to this account without joining the team. The invitation is cancelled; completed or changed invitations require reloading their current status. Invitations for other accounts cannot be declined.
 
 Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
 
 JSON output is supported with --json.
 
 ```
-pb team invitations [team] [flags]
+pb team decline <invitation> [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help   help for invitations
+  -h, --help   help for decline
       --json   print canonical JSON
 ```
 

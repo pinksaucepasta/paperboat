@@ -6471,6 +6471,9 @@ func probeDaemonPeer(ctx context.Context, client peerProber, target resolver.Con
 	if err != nil {
 		return tunnel.NativeProbe{}, err
 	}
+	if target.Workspace != "" {
+		request.Workspace = target.Workspace
+	}
 	probe, err := client.ProbePeer(ctx, request)
 	if err != nil {
 		return tunnel.NativeProbe{}, err
@@ -7432,7 +7435,7 @@ func actionSSHProxy(command *cobra.Command, _ []string) error {
 		return err
 	}
 	ctx := actionContext(command, nil)
-	_, machine, target, err := resolveSSHCommandTargetLive(ctx, alias)
+	client, machine, target, err := resolveSSHCommandTargetLive(ctx, alias)
 	if err != nil {
 		return friendlyCommandError(err)
 	}
@@ -7451,7 +7454,7 @@ func actionSSHProxy(command *cobra.Command, _ []string) error {
 	}
 	operationID := newSSHOperationID()
 	descriptor := pendingSSHDescriptor(machine, operationID)
-	connection, err := d.peerApplications.DialSSH(command.Context(), sshConnectInfo(machine, descriptor), operationID)
+	connection, err := d.peerApplications.DialSSH(command.Context(), sshConnectInfo(machine, descriptor, client.Workspace()), operationID)
 	if err != nil {
 		return err
 	}
@@ -7638,7 +7641,7 @@ func actionSSHDoctor(command *cobra.Command, args []string) error {
 	descriptor := pendingSSHDescriptor(machine, operationID)
 	probeCtx, cancel := context.WithTimeout(command.Context(), 20*time.Second)
 	defer cancel()
-	connection, err := d.peerApplications.DialSSH(probeCtx, sshConnectInfo(machine, descriptor), operationID)
+	connection, err := d.peerApplications.DialSSH(probeCtx, sshConnectInfo(machine, descriptor, client.Workspace()), operationID)
 	if err != nil {
 		return fmt.Errorf("managed SSH transport or loopback target is not ready: %w", err)
 	}
@@ -7799,8 +7802,10 @@ func newSSHOperationID() string {
 	return "operation_" + uuid.NewString()
 }
 
-func sshConnectInfo(machine api.UserMachine, descriptor api.SSHDescriptor) resolver.ConnectInfo {
+func sshConnectInfo(machine api.UserMachine, descriptor api.SSHDescriptor, selectedWorkspace string) resolver.ConnectInfo {
+	workspace := selectedWorkspace
 	return resolver.ConnectInfo{
+		Workspace:  workspace,
 		TargetKind: "machine", MachineID: machine.ID, Machine: machine.Alias, MachineState: machine.State,
 		MachineGeneration: uint64(machine.InstallationGeneration), TunnelTarget: descriptor.Endpoints.WSS,
 		Terminal: &resolver.TerminalTarget{Protocol: "paperboat.ssh.v1", EnvironmentID: descriptor.Environment.ID, QUICEndpoint: descriptor.Endpoints.QUIC, WSSEndpoint: descriptor.Endpoints.WSS, Auth: resolver.AuthTarget{Method: descriptor.Auth.Method, Token: descriptor.Auth.Token, ExpiresAt: descriptor.Auth.ExpiresAt.Format(time.RFC3339Nano), Scopes: descriptor.Auth.Scopes, ResourceID: descriptor.Auth.AccessSessionID}, CWD: descriptor.Environment.Root},
@@ -7908,7 +7913,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		dialCtx, cancelDial := context.WithCancel(context.WithoutCancel(c.Context))
 		defer cancelDial()
 		stopCallerCancel := context.AfterFunc(c.Context, cancelDial)
-		connection, dialErr := d.peerApplications.DialExec(dialCtx, execConnectInfo(machine, current), request)
+		connection, dialErr := d.peerApplications.DialExec(dialCtx, execConnectInfo(machine, current, client.Workspace()), request)
 		if dialErr != nil {
 			stopCallerCancel()
 			cancelDial()
@@ -7975,7 +7980,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 			if descriptorErr != nil {
 				return execCancelOutcome{err: errors.Join(append(failures, descriptorErr)...)}
 			}
-			replacement, dialErr := d.peerApplications.DialExec(ctx, execConnectInfo(machine, retryDescriptor), request)
+			replacement, dialErr := d.peerApplications.DialExec(ctx, execConnectInfo(machine, retryDescriptor, client.Workspace()), request)
 			if dialErr != nil {
 				failures = append(failures, dialErr)
 				observeExecFailure(ctx, dialErr)
@@ -8449,8 +8454,10 @@ func safeExecError(err error) string {
 	return "Remote execution did not finish. Check the machine connection and retry; the remote outcome may be unknown."
 }
 
-func execConnectInfo(machine api.UserMachine, descriptor api.ExecDescriptor) resolver.ConnectInfo {
+func execConnectInfo(machine api.UserMachine, descriptor api.ExecDescriptor, selectedWorkspace string) resolver.ConnectInfo {
+	workspace := selectedWorkspace
 	return resolver.ConnectInfo{
+		Workspace:  workspace,
 		TargetKind: "machine", MachineID: machine.ID, Machine: machine.Alias, MachineState: machine.State,
 		MachineGeneration: uint64(machine.InstallationGeneration), TunnelTarget: descriptor.Endpoints.WSS,
 		Terminal: &resolver.TerminalTarget{Protocol: "paperboat.exec.v1", EnvironmentID: descriptor.Environment.ID, QUICEndpoint: descriptor.Endpoints.QUIC, WSSEndpoint: descriptor.Endpoints.WSS, Auth: resolver.AuthTarget{Method: descriptor.Auth.Method, Token: descriptor.Auth.Token, ExpiresAt: descriptor.Auth.ExpiresAt.Format(time.RFC3339Nano), Scopes: descriptor.Auth.Scopes, ResourceID: descriptor.Auth.AccessSessionID}, CWD: descriptor.Environment.Root},

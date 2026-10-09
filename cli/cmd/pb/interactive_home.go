@@ -730,7 +730,7 @@ func actionHomeTunnelInventory(command *cobra.Command, client *api.Client, tunne
 
 func actionHomeTeams(command *cobra.Command) error {
 	for {
-		choice, err := chooseHomeAction(command, "Teams", []selector.Item{{ID: "invitations", Title: "Received invitations", Description: "Review and accept invitations bound to your account"}, {ID: "sent", Title: "Sent invitations", Description: "Review or cancel invitations you administer"}, {ID: "commands", Title: "Team administration", Description: "Members, grants, resources and activity"}})
+		choice, err := chooseHomeAction(command, "Teams", []selector.Item{{ID: "invitations", Title: "Received invitations", Description: "Accept or decline pending invitations bound to your account"}, {ID: "sent", Title: "Sent invitations", Description: "Review or cancel invitations you administer"}, {ID: "commands", Title: "Team administration", Description: "Members, grants, resources and activity"}})
 		if err != nil {
 			return err
 		}
@@ -792,6 +792,16 @@ func actionHomeInvitations(command *cobra.Command, sent bool) error {
 		if sent {
 			action = "cancel"
 			args = []string{"team", "cancel-invite", item.TeamID, item.InvitationID}
+		} else {
+			choice, err := chooseHomeAction(command, "Invitation to "+item.TeamID, []selector.Item{{ID: "accept", Title: "Accept invitation"}, {ID: "decline", Title: "Decline invitation"}})
+			if interactiveCanceled(err) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			action = choice.ID
+			args = []string{"team", action, item.InvitationID}
 		}
 		yes, err := prompt.Confirm(prompt.ConfirmOptions{Title: strings.ToUpper(action[:1]) + action[1:] + " invitation?", Description: item.TeamID + " · " + item.AccountID, Context: command.Context(), Stdin: os.Stdin, Output: command.ErrOrStderr()})
 		if interactiveCanceled(err) {

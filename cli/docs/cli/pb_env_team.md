@@ -12,6 +12,10 @@ ENV values are encrypted before they leave the client. The interactive picker se
 
 With --json, this command group lists its available commands.
 
+```
+pb env team [flags]
+```
+
 ### Options
 
 ```

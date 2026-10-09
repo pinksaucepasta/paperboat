@@ -3,6 +3,7 @@ package localapi
 import (
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"strings"
 	"time"
 )
@@ -43,6 +44,7 @@ type FileTransferResult struct {
 }
 
 type PeerStreamRequest struct {
+	Workspace         string          `json:"workspace,omitempty"`
 	Schema            string          `json:"schema"`
 	MachineID         string          `json:"machine_id"`
 	EnvironmentID     string          `json:"environment_id"`
@@ -117,7 +119,7 @@ type PeerPreviewPayload struct {
 }
 
 func NewPeerStreamRequest(machineID, environmentID string, machineGeneration uint64, consumer, operationID, credential string, deadline time.Time, maximumBytes uint64, payload json.RawMessage) (PeerStreamRequest, error) {
-	value := PeerStreamRequest{Schema: PeerStreamSchemaV1, MachineID: machineID, EnvironmentID: environmentID, MachineGeneration: machineGeneration, Consumer: consumer, OperationID: operationID, Credential: credential, Deadline: deadline.UTC(), MaximumBytes: maximumBytes, Payload: append(json.RawMessage(nil), payload...)}
+	value := PeerStreamRequest{Workspace: "personal", Schema: PeerStreamSchemaV1, MachineID: machineID, EnvironmentID: environmentID, MachineGeneration: machineGeneration, Consumer: consumer, OperationID: operationID, Credential: credential, Deadline: deadline.UTC(), MaximumBytes: maximumBytes, Payload: append(json.RawMessage(nil), payload...)}
 	if value.Validate(time.Now().UTC()) != nil {
 		return PeerStreamRequest{}, ErrInvalidConfig
 	}
@@ -125,7 +127,7 @@ func NewPeerStreamRequest(machineID, environmentID string, machineGeneration uin
 }
 
 func NewPendingPeerStreamRequest(machineID, environmentID string, machineGeneration uint64, consumer, operationID string, deadline time.Time, maximumBytes uint64, payload json.RawMessage) (PeerStreamRequest, error) {
-	value := PeerStreamRequest{Schema: PeerStreamSchemaV1, MachineID: machineID, EnvironmentID: environmentID, MachineGeneration: machineGeneration, Consumer: consumer, OperationID: operationID, Deadline: deadline.UTC(), MaximumBytes: maximumBytes, Payload: append(json.RawMessage(nil), payload...)}
+	value := PeerStreamRequest{Workspace: "personal", Schema: PeerStreamSchemaV1, MachineID: machineID, EnvironmentID: environmentID, MachineGeneration: machineGeneration, Consumer: consumer, OperationID: operationID, Deadline: deadline.UTC(), MaximumBytes: maximumBytes, Payload: append(json.RawMessage(nil), payload...)}
 	if value.ValidatePending(time.Now().UTC()) != nil {
 		return PeerStreamRequest{}, ErrInvalidConfig
 	}
@@ -133,6 +135,9 @@ func NewPendingPeerStreamRequest(machineID, environmentID string, machineGenerat
 }
 
 func (r PeerStreamRequest) Validate(now time.Time) error {
+	if r.Workspace != "" && api.ValidateWorkspaceSelector(r.Workspace) != nil {
+		return ErrInvalidConfig
+	}
 	if r.UsageSessionID != "" && (r.Consumer != "config_compare" || !safeValue(r.UsageSessionID)) {
 		return ErrInvalidConfig
 	}
@@ -146,6 +151,9 @@ func (r PeerStreamRequest) Validate(now time.Time) error {
 // credential immediately before opening the peer stream. Pending requests are
 // accepted only by the daemon broker; they are never sent to a peer.
 func (r PeerStreamRequest) ValidatePending(now time.Time) error {
+	if api.ValidateWorkspaceSelector(r.Workspace) != nil {
+		return ErrInvalidConfig
+	}
 	if r.Credential != "" {
 		return r.Validate(now)
 	}

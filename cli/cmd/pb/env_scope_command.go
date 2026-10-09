@@ -77,7 +77,17 @@ func addVaultScopeCommands(root *cobra.Command) {
 	rotate.AddCommand(cancel)
 	root.AddCommand(rotate)
 
-	team := &cobra.Command{Use: "team", Short: "Manage encrypted ENV team scopes", Args: commandArgs(cobra.NoArgs)}
+	team := &cobra.Command{
+		Use:   "team",
+		Short: "Manage encrypted ENV team scopes",
+		Args: func(_ *cobra.Command, args []string) error {
+			if len(args) != 0 {
+				return localArgumentError("unknown ENV team action; run `pb env team --help` to list supported actions")
+			}
+			return nil
+		},
+		RunE: func(command *cobra.Command, _ []string) error { return command.Help() },
+	}
 	create := &cobra.Command{
 		Use:   "create <team>",
 		Short: "Create an encrypted ENV team scope",

@@ -46,6 +46,9 @@ func (s AuthenticatedMachineSource) IssuePeerStream(ctx context.Context, request
 	if strings.TrimSpace(s.ServerURL) == "" || s.Auth == nil || request.Credential != "" {
 		return request, ErrInvalidInventoryConfig
 	}
+	if err := api.ValidateWorkspaceSelector(request.Workspace); err != nil {
+		return request, err
+	}
 	var expires time.Time
 	var token string
 	var quicEndpoint, wssEndpoint string
@@ -59,6 +62,9 @@ func (s AuthenticatedMachineSource) IssuePeerStream(ctx context.Context, request
 			return request, err
 		}
 		client := api.New(s.ServerURL, credential, s.HTTPClient)
+		if err := client.SetWorkspace(request.Workspace); err != nil {
+			return request, err
+		}
 		client.SetSourceMachineID(s.SourceMachineID)
 		if request.Consumer == "exec" {
 			descriptor, err = client.MachineExecDescriptor(ctx, request.MachineID, request.OperationID)
