@@ -466,6 +466,8 @@ func execResult(value any, err error) operation.Outcome {
 	switch {
 	case err == nil:
 		return result(value)
+	case allErrorLeavesMatch(err, func(leaf error) bool { return leaf == envinject.ErrNotReady }):
+		return failure("environment_unavailable")
 	case errors.Is(err, execprocess.ErrNotFound):
 		return failure("not_found_or_forbidden")
 	case errors.Is(err, execprocess.ErrConflict):

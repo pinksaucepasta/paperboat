@@ -43,3 +43,16 @@ func TestLocalPeerPendingRequestPreservesWorkspace(t *testing.T) {
 		}
 	}
 }
+
+func TestHelperRemoteErrorExposesOnlySafeEnvironmentCode(t *testing.T) {
+	for _, code := range []string{"environment_unavailable", "invalid_request", "secret_error_detail"} {
+		exposed := (&helperRemoteError{Code: code, Message: "private value"}).LocalAPICode()
+		if code == "environment_unavailable" {
+			if exposed != code {
+				t.Fatal("ENV denial lost")
+			}
+		} else if exposed != "" {
+			t.Fatal("unapproved remote code escaped")
+		}
+	}
+}

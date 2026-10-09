@@ -594,7 +594,7 @@ func classifyCommandFailure(err error) (failure commandFailure) {
 				set(commandDeadline, current)
 			case "exec_canceled", "canceled":
 				set(commandCanceled, current)
-			case "exec_result_unavailable", "exec_failed", "exec_start_failed", "exec_start_uncertain", "exec_cancel_failed", "exec_wait_failed", "exec_already_running", "failed":
+			case "environment_unavailable", "exec_result_unavailable", "exec_failed", "exec_start_failed", "exec_start_uncertain", "exec_cancel_failed", "exec_wait_failed", "exec_already_running", "failed":
 				set(commandOperational, current)
 			default:
 				set(commandUnexpected, current)
@@ -843,6 +843,9 @@ func commandFailureMessage(err error, failure commandFailure) string {
 	case *envCommandFailure:
 		return owner.Error()
 	case *localapi.RemoteError:
+		if owner.Code == "environment_unavailable" {
+			return "Encrypted ENV is not ready on the target. Wait for ENV delivery to apply, then retry; check ENV host status if this continues."
+		}
 		return "The local Paperboat service could not complete the request. Check its status with `pb status`, then retry; run `pb doctor` if this continues."
 	case *TunnelCreateExistingError:
 		return "A tunnel with this name already exists; nothing was changed. Inspect it with `pb tunnel status <tunnel>`."
@@ -7946,6 +7949,9 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		if initialUncertain || errors.As(err, &uncertain) || errors.Is(err, localapi.ErrExecStartUncertain) {
 			return fail(255, "exec_start_uncertain", true, true, err)
 		}
+		if remote, ok := err.(*localapi.RemoteError); ok && remote.Code == "environment_unavailable" {
+			return fail(125, "environment_unavailable", false, false, err)
+		}
 		return fail(255, "transport_unavailable", false, false, err)
 	}
 	connectionRef := newExecConnectionRef(connection)
@@ -8430,7 +8436,7 @@ func writeExecJSONFailure(writer io.Writer, operationID, errorCode, detail strin
 
 func publicExecErrorCode(code string) string {
 	switch code {
-	case "", "exec_timeout", "exec_canceled", "exec_result_unavailable", "exec_failed", "exec_start_failed", "exec_start_uncertain", "exec_cancel_failed", "exec_wait_failed", "exec_already_running", "failed", "canceled":
+	case "environment_unavailable", "", "exec_timeout", "exec_canceled", "exec_result_unavailable", "exec_failed", "exec_start_failed", "exec_start_uncertain", "exec_cancel_failed", "exec_wait_failed", "exec_already_running", "failed", "canceled":
 		return code
 	default:
 		return "exec_failed"
@@ -8441,8 +8447,13 @@ func safeExecError(err error) string {
 	if err == nil {
 		return ""
 	}
+	if remote, ok := err.(*localapi.RemoteError); ok && remote.Code == "environment_unavailable" {
+		return "Encrypted ENV is not ready on the target. Wait for ENV delivery to apply, then retry; check ENV host status if this continues."
+	}
 	if remote, ok := soleExecRemoteError(err); ok {
 		switch remote.Code {
+		case "environment_unavailable":
+			return "Encrypted ENV is not ready on the target. Wait for ENV delivery to apply, then retry; check ENV host status if this continues."
 		case "exec_timeout":
 			return "Remote execution exceeded its time limit. Check the operation before retrying."
 		case "exec_canceled", "canceled":

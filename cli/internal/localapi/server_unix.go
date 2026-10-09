@@ -479,9 +479,15 @@ func (s *Server) peerStream(writer http.ResponseWriter, request *http.Request, r
 		message := "peer stream could not open; refresh the target and check connectivity with pb doctor"
 		code := "peer_stream_unavailable"
 		var coded interface{ LocalAPICode() string }
-		if errors.As(err, &coded) && coded.LocalAPICode() == "exec_start_uncertain" {
-			code = coded.LocalAPICode()
-			message = "remote execution start outcome is uncertain; check the execution status before starting it again"
+		if errors.As(err, &coded) {
+			switch coded.LocalAPICode() {
+			case "exec_start_uncertain":
+				code = "exec_start_uncertain"
+				message = "remote execution start outcome is uncertain; check the execution status before starting it again"
+			case "environment_unavailable":
+				code = "environment_unavailable"
+				message = "Encrypted ENV is not ready on the target. Wait for ENV delivery to apply, then retry; check ENV host status if this continues."
+			}
 		}
 		writeError(writer, http.StatusServiceUnavailable, requestID, code, message)
 		return

@@ -67,6 +67,10 @@ The complete v1 preview and tunnel workflow is in
 [preview-tunnels.md](preview-tunnels.md), with focused recovery procedures in
 [runbooks-preview-tunnels.md](runbooks-preview-tunnels.md).
 
+When encrypted ENV delivery is not ready, native exec returns the established
+`environment_unavailable` code through the local API and an instruction to wait
+for ENV delivery to apply. Remote error text and private ENV data are not forwarded.
+
 Native exec and SSH peer requests carry the canonical selected `workspace` through
 `paperboat.peer-stream-request/v1` to daemon descriptor issuance. Personal launches
 explicitly use `personal`; Team launches retain the exact team slug on retry.

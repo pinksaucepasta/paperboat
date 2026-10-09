@@ -48,6 +48,14 @@ type helperRemoteError struct {
 	Details   *helperReplayGapDetails `json:"details,omitempty"`
 }
 
+// LocalAPICode exposes only safe, established launch-denial codes.
+func (e *helperRemoteError) LocalAPICode() string {
+	if e.Code == "environment_unavailable" {
+		return e.Code
+	}
+	return ""
+}
+
 type helperReplayGapDetails struct {
 	RequestedSequence uint64 `json:"requested_sequence"`
 	EarliestSequence  uint64 `json:"earliest_sequence"`

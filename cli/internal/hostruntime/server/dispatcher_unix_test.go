@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
@@ -721,5 +722,20 @@ func TestDispatcherCreateOrGetReturnsExistingSnapshot(t *testing.T) {
 	response = sendRequest(t, client, request("req_attach", "op_attach_cog_1", attach))
 	if response.Type != "response" {
 		t.Fatalf("attach=%s", response.Payload)
+	}
+}
+
+type unreadyEnvironmentExecution struct{ execprocess.Service }
+
+func (s unreadyEnvironmentExecution) Start(context.Context, execprocess.Request) (execprocess.ExecutionService, bool, error) {
+	return nil, false, envinject.ErrNotReady
+}
+func TestExecDispatcherPreservesEnvironmentNotReady(t *testing.T) {
+	dispatcher, root := execDispatcher(t)
+	dispatcher.config.Exec = unreadyEnvironmentExecution{dispatcher.config.Exec}
+	payload, _ := json.Marshal(map[string]any{"action": "start", "operation_id": "operation_env", "argv": []string{"/bin/true"}, "cwd": root})
+	outcome := dispatcher.Handle(context.Background(), Authorization{ClientID: "cli_1"}, "exec.v1", payload)
+	if outcome.ErrorCode != "environment_unavailable" {
+		t.Fatalf("launch denial=%s", outcome.ErrorCode)
 	}
 }

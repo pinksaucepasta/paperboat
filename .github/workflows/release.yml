@@ -16,7 +16,7 @@ permissions:
 
 env:
   RELEASE_VERSION: ${{ github.ref_name }}
-  SUPERVISOR_MAINTENANCE: 'false'
+  SUPERVISOR_MAINTENANCE: 'true'
   SENTRY_DSN: ${{ vars.SENTRY_DSN }}
   # Preserve the repository identity already signed into production TUF.
   # GitHub redirects this alias to the canonical repository.
