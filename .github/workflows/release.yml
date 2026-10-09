@@ -1,6 +1,16 @@
 name: Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Exact already-qualified immutable release tag'
+        required: true
+        type: string
+      qualification_run:
+        description: 'Original tag-push Release run with six successful qualification jobs'
+        required: true
+        type: string
   push:
     tags:
       - '20[0-9][0-9].[0-9][0-9].[0-9][0-9].*'
@@ -15,7 +25,7 @@ permissions:
   contents: read
 
 env:
-  RELEASE_VERSION: ${{ github.ref_name }}
+  RELEASE_VERSION: ${{ inputs.release_tag || github.ref_name }}
   SUPERVISOR_MAINTENANCE: 'true'
   SENTRY_DSN: ${{ vars.SENTRY_DSN }}
   # Preserve the repository identity already signed into production TUF.
@@ -34,7 +44,11 @@ jobs:
     environment: paperboat-tuf-published
     permissions:
       contents: read
+      actions: read
     outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
+      artifact_run_id: ${{ steps.source.outputs.artifact_run_id }}
+      maintenance: ${{ steps.source.outputs.maintenance }}
       server_url: ${{ steps.endpoints.outputs.server_url }}
       release_url: ${{ steps.endpoints.outputs.release_url }}
       release_host: ${{ steps.endpoints.outputs.release_host }}
@@ -43,17 +57,60 @@ jobs:
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
-      - name: Validate immutable tag and source before network work
+      - name: Validate immutable source and existing qualification
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QUALIFICATION_RUN: ${{ inputs.qualification_run }}
         shell: bash
         run: |
           set -euo pipefail
-          test "$GITHUB_EVENT_NAME" = push
-          test "$GITHUB_REF" = "refs/tags/$RELEASE_VERSION"
           ./tools/release-version.sh validate-format "$RELEASE_VERSION"
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          # Annotated tags report a peeled commit; lightweight tags report HEAD.
-          remote_commit=$(git ls-remote origin "$GITHUB_REF" "$GITHUB_REF^{}" | awk '$2 ~ /\^\{\}$/ { peeled=$1 } $2 !~ /\^\{\}$/ { commit=$1 } END { print peeled ? peeled : commit }')
-          test "$remote_commit" = "$GITHUB_SHA" || { echo 'Release tag no longer identifies this source commit.' >&2; exit 1; }
+          tag_ref="refs/tags/$RELEASE_VERSION"
+          source_sha=$(git ls-remote origin "$tag_ref" "$tag_ref^{}" | awk '$2 ~ /\^\{\}$/ { peeled=$1 } $2 !~ /\^\{\}$/ { commit=$1 } END { print peeled ? peeled : commit }')
+          test -n "$source_sha"
+          if test "$GITHUB_EVENT_NAME" = push; then
+            test "$GITHUB_REF" = "$tag_ref"
+            test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+            test "$source_sha" = "$GITHUB_SHA"
+            artifact_run_id="$GITHUB_RUN_ID"
+          else
+            test "$GITHUB_EVENT_NAME" = workflow_dispatch
+            [[ "$QUALIFICATION_RUN" =~ ^[0-9]+$ ]]
+            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml" > "$RUNNER_TEMP/qualification-workflow.json"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFICATION_RUN" > "$RUNNER_TEMP/qualification-run.json"
+            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFICATION_RUN/jobs?filter=all&per_page=100" > "$RUNNER_TEMP/qualification-jobs.json"
+            SOURCE_SHA="$source_sha" python3 - <<'PYVERIFY'
+          import json, os, pathlib
+          root = pathlib.Path(os.environ['RUNNER_TEMP'])
+          run = json.loads((root/'qualification-run.json').read_text())
+          workflow = json.loads((root/'qualification-workflow.json').read_text())
+          repository = os.environ['GITHUB_REPOSITORY']
+          if (run.get('repository', {}).get('full_name') != repository or
+              run.get('head_repository', {}).get('full_name') != repository or
+              run.get('path') != '.github/workflows/release.yml' or
+              run.get('workflow_id') != workflow.get('id') or run.get('event') != 'push' or
+              run.get('head_branch') != os.environ['RELEASE_VERSION'] or
+              run.get('head_sha') != os.environ['SOURCE_SHA'] or
+              run.get('status') != 'completed'):
+              raise SystemExit('Qualification run does not identify this exact repository/tag/source.')
+          expected = {'Validate trusted source and read-only origin access',
+                      'Build Linux amd64 executable', 'Build Linux arm64 executable',
+                      'Build and natively qualify Windows amd64 executable',
+                      'Build and natively qualify Windows arm64 executable',
+                      'Build macOS arm64 package'}
+          jobs = [job for page in json.loads((root/'qualification-jobs.json').read_text()) for job in page['jobs']]
+          qualified = {job['name'] for job in jobs if job.get('status') == 'completed' and job.get('conclusion') == 'success'}
+          if not expected <= qualified:
+              raise SystemExit('Required source authority or native qualification is missing.')
+          PYVERIFY
+            artifact_run_id="$QUALIFICATION_RUN"
+          fi
+          git fetch --depth=1 origin "$tag_ref"
+          test "$(git rev-parse FETCH_HEAD^{commit})" = "$source_sha"
+          maintenance=$(git show "$source_sha:.github/workflows/release.yml" | sed -n "s/^  SUPERVISOR_MAINTENANCE: '\(true\|false\)'$/\1/p")
+          test "$maintenance" = true || test "$maintenance" = false
+          printf 'source_sha=%s\nartifact_run_id=%s\nmaintenance=%s\n' "$source_sha" "$artifact_run_id" "$maintenance" >> "$GITHUB_OUTPUT"
       - name: Validate protected release endpoints
         id: endpoints
         env:
@@ -122,6 +179,7 @@ jobs:
             "$RELEASE_URL/metadata/root.json" -o "$RUNNER_TEMP/paperboat-root.json"
 
   linux-amd64:
+    if: github.event_name == 'push'
     name: Build Linux amd64 executable
     needs: release-authority
     runs-on: ubuntu-latest
@@ -177,6 +235,7 @@ jobs:
           retention-days: 7
 
   windows-amd64:
+    if: github.event_name == 'push'
     name: Build and natively qualify Windows amd64 executable
     needs: release-authority
     runs-on: windows-2025
@@ -270,6 +329,7 @@ jobs:
           retention-days: 7
 
   linux-arm64:
+    if: github.event_name == 'push'
     name: Build Linux arm64 executable
     needs: release-authority
     runs-on: ubuntu-24.04-arm
@@ -325,6 +385,7 @@ jobs:
           retention-days: 7
 
   windows-arm64:
+    if: github.event_name == 'push'
     name: Build and natively qualify Windows arm64 executable
     needs: release-authority
     runs-on: windows-11-arm
@@ -418,6 +479,7 @@ jobs:
           retention-days: 7
 
   darwin-arm64:
+    if: github.event_name == 'push'
     name: Build macOS arm64 package
     needs: release-authority
     runs-on: macos-14
@@ -543,6 +605,7 @@ jobs:
           retention-days: 7
 
   release-publication:
+    if: ${{ always() && needs.release-authority.result == 'success' && (github.event_name == 'workflow_dispatch' || (needs.linux-amd64.result == 'success' && needs.linux-arm64.result == 'success' && needs.windows-amd64.result == 'success' && needs.windows-arm64.result == 'success' && needs.darwin-arm64.result == 'success')) }}
     name: Publish five qualified products and signed TUF metadata
     needs: [release-authority, linux-amd64, linux-arm64, windows-amd64, windows-arm64, darwin-arm64]
     runs-on: ubuntu-24.04-arm
@@ -550,7 +613,10 @@ jobs:
     environment: paperboat-tuf-published
     permissions:
       contents: write
+      actions: read
     env:
+      RELEASE_SOURCE_SHA: ${{ needs.release-authority.outputs.source_sha }}
+      SUPERVISOR_MAINTENANCE: ${{ needs.release-authority.outputs.maintenance }}
       RELEASE_HOST: ${{ needs.release-authority.outputs.release_host }}
       PAPERBOAT_TUF_CI: '1'
       PAPERBOAT_TUF_KEY_TARGETS_1: ${{ secrets.PAPERBOAT_TUF_KEY_TARGETS_1 }}
@@ -560,7 +626,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.release-authority.outputs.source_sha }}
           fetch-depth: 1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -569,15 +635,21 @@ jobs:
           cache-dependency-path: cli/go.sum
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
+          run-id: ${{ needs.release-authority.outputs.artifact_run_id }}
+          github-token: ${{ github.token }}
           pattern: paperboat-candidate-product-*
           path: ${{ runner.temp }}/candidate-artifacts
           merge-multiple: true
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
+          run-id: ${{ needs.release-authority.outputs.artifact_run_id }}
+          github-token: ${{ github.token }}
           name: paperboat-candidate-windows-amd64-qualification
           path: ${{ runner.temp }}/candidate-qualification
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
+          run-id: ${{ needs.release-authority.outputs.artifact_run_id }}
+          github-token: ${{ github.token }}
           name: paperboat-candidate-windows-arm64-qualification
           path: ${{ runner.temp }}/candidate-qualification
       - name: Validate the exact five-asset candidate set
@@ -615,7 +687,7 @@ jobs:
           mkdir -p "$input_dir"
           go run ./tools/release-plan manifest \
             -version "$RELEASE_VERSION" \
-            -source-commit "$GITHUB_SHA" \
+            -source-commit "$RELEASE_SOURCE_SHA" \
             -toolchain "$(go env GOVERSION)" \
             -artifacts "$RUNNER_TEMP/candidate-artifacts" \
             -output "$input_dir/manifest.json"
@@ -662,10 +734,10 @@ jobs:
           set -euo pipefail
           # Recheck after qualification: a tag changed during the builds must
           # never publish these bytes under a different source identity.
-          remote_commit=$(git ls-remote origin "$GITHUB_REF" "$GITHUB_REF^{}" | awk '$2 ~ /\^\{\}$/ { peeled=$1 } $2 !~ /\^\{\}$/ { commit=$1 } END { print peeled ? peeled : commit }')
-          test "$remote_commit" = "$GITHUB_SHA" || { echo 'Release tag changed during qualification.' >&2; exit 1; }
+          remote_commit=$(git ls-remote origin "refs/tags/$RELEASE_VERSION" "refs/tags/$RELEASE_VERSION^{}" | awk '$2 ~ /\^\{\}$/ { peeled=$1 } $2 !~ /\^\{\}$/ { commit=$1 } END { print peeled ? peeled : commit }')
+          test "$remote_commit" = "$RELEASE_SOURCE_SHA" || { echo 'Release tag changed during qualification.' >&2; exit 1; }
           if ! gh release view "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --verify-tag --title "Paperboat $RELEASE_VERSION" --notes "Paperboat $RELEASE_VERSION; source $GITHUB_SHA" --draft --latest=false
+            gh release create "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --verify-tag --title "Paperboat $RELEASE_VERSION" --notes "Paperboat $RELEASE_VERSION; source $RELEASE_SOURCE_SHA" --draft --latest=false
           fi
       - name: Upload only missing draft assets; never replace published bytes
         env:
@@ -755,10 +827,16 @@ jobs:
           # TUF must never point at a draft-only asset. Make the
           # verified assets public first, while leaving the Latest selector
           # unchanged until the origin exchange succeeds below.
-          # `gh release edit` leaves the Latest selector untouched when the
-          # --latest flag is omitted. Explicitly passing make_latest=false
-          # would unset an already-latest release during a retry.
-          gh release edit "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --draft=false --target "$GITHUB_SHA"
+          # Publishing an existing public release is a no-op. A draft must not
+          # advance Latest before the signed origin exchange is verified.
+          if test "$(gh release view "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true; then
+            latest_tag=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+            if test "$latest_tag" = "$RELEASE_VERSION"; then
+              gh release edit "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --draft=false --latest=true
+            else
+              gh release edit "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
+            fi
+          fi
       - name: Verify published GitHub download URLs
         env:
           GH_TOKEN: ${{ github.token }}
@@ -908,7 +986,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
-        run: gh release edit "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --draft=false --latest --target "$GITHUB_SHA"
+        run: gh release edit "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --draft=false --latest=true
       - name: Summarize the completed release
         shell: bash
         run: |
