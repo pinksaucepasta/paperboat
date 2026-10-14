@@ -36,6 +36,17 @@ func TestPostgresInboxLifecycleActivityAndCurrentAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// File grants require a current paid team workspace, as in production.
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_workspaces
+ (id,team_id,state,quantity,period_start,period_end)
+ VALUES($1,$2,'active',2,now()-interval '1 day',now()+interval '30 days')
+ ON CONFLICT(id) DO UPDATE SET state='active',quantity=2,period_start=EXCLUDED.period_start,period_end=EXCLUDED.period_end`, "team:"+team, team); err != nil {
+		t.Fatal(err)
+	}
+	current, err = authority.Get(ctx, recipient, team)
+	if err != nil {
+		t.Fatal(err)
+	}
 	invite, err := authority.Invite(ctx, recipient, team, teams.InviteRequest{OperationID: "invite_" + suffix, ExpectedGeneration: current.Generation, AccountID: sender})
 	if err != nil {
 		t.Fatal(err)

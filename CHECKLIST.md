@@ -254,7 +254,7 @@ that use them; say which in Evidence.
 | F6-01 | Single and multiple files and folders up to the limits (50 MiB per file, 10 files, 500 MiB per batch); received hash matches — all pairs. | [ ] | [ ] | [ ] | — |
 | F6-02 | Interrupted transfer resumes from the committed offset; no corruption or duplicates. | [ ] | [ ] | [ ] | — |
 | F6-03 | `pb send list/status/cancel/destination set/clear`. | [ ] | [ ] | [ ] | — |
-| F6-04 | `pb inbox` (path, set, reset, requests, approve, decline, policy) and team file requests expire correctly. | [ ] | [ ] | [ ] | — |
+| F6-04 | `pb inbox` (path, set, reset, requests, approve, decline, policy) and team file requests expire correctly. | [ ] | [ ] | [ ] | Server TestPostgresInboxLifecycleActivityAndCurrentAuthority race PASS with valid paid workspace and current team generation; all activity, departure, consumed authorization and receipt privacy checks retained. Device/console qualification pending. |
 | F6-05 | Over-limit, offline target, full disk → clear messages. | [ ] | [ ] | [ ] | — |
 | F6-06 | Console Files screens list, download and remove Inbox items; team requests can be approved there. | [ ] | [ ] | [ ] |  |
 
