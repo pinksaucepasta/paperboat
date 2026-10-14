@@ -610,6 +610,7 @@ func (t *DataCarrierPreviewTransport) RoundTrip(request *http.Request) (*http.Re
 		open.Kind = "http_browser"
 		if decision.Authorize(decision, open, route.EdgeNodeID, route.EdgeProcessEpoch, time.Now().UTC()) != nil {
 			cancelOpen()
+			stopPreviewStreamLifetime(lifetimeCancel, lifetimeTimer)
 			return nil, ErrDataCarrierPreviewTransport
 		}
 		// The carrier registry independently checks the exact local admission.
@@ -678,6 +679,7 @@ func (t *DataCarrierPreviewTransport) RoundTrip(request *http.Request) (*http.Re
 	if restricted && !private {
 		if err := connectorprotocol.WriteIngressDecision(stream, decision, time.Now().UTC()); err != nil {
 			_ = stream.Close()
+			stopPreviewStreamLifetime(lifetimeCancel, lifetimeTimer)
 			return nil, err
 		}
 	}
