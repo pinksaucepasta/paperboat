@@ -122,9 +122,9 @@ func TestACMEIssuerPebbleWildcard(t *testing.T) {
 	// written directly at _acme-challenge.<base>, so this order deliberately has
 	// no delegated CNAME configured in challtestsrv.
 	platformDomain := Domain{
-		ID: PlatformPreviewTargetID, AccountID: PlatformAccountID,
+		ID: PlatformPublicTargetID, AccountID: PlatformAccountID,
 		TargetKind: TargetPlatformWildcard, Hostname: "*.platform.example.test",
-		ChallengeReference: PlatformPreviewChallengeReference, Generation: 1,
+		ChallengeReference: PlatformPublicChallengeReference, Generation: 1,
 		Strategy: StrategyPlatformDNS01, OwnershipState: "verified", CAAState: "not_applicable",
 	}
 	platformBundle, err := issuer.IssueDNS01(context.Background(), platformDomain)

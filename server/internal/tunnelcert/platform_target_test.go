@@ -8,20 +8,19 @@ import (
 
 func TestPlatformCertificateTargetDefinitionsAreDeterministic(t *testing.T) {
 	definitions, err := PlatformCertificateTargetDefinitions(PlatformCertificateBases{
-		PreviewBaseDomain: "Preview.Pprbt.dev.",
-		TunnelBaseDomain:  "tunnels.pprbt.dev",
-		RuntimeBaseDomain: "Runtime.Pprbt.dev.",
+		PreviewBaseDomain: "Public.Example.test.",
+		TunnelBaseDomain:  "public.example.test",
+		RuntimeBaseDomain: "Runtime.Example.test.",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(definitions) != 3 {
-		t.Fatalf("platform definitions = %d, want 3", len(definitions))
+	if len(definitions) != 2 {
+		t.Fatalf("platform definitions = %d, want 2", len(definitions))
 	}
 	want := []PlatformCertificateTargetDefinition{
-		{ID: PlatformPreviewTargetID, Kind: PlatformPreviewWildcardTarget, Hostname: "*.preview.pprbt.dev", AccountID: PlatformAccountID, ChallengeReference: PlatformPreviewChallengeReference, Generation: 1},
-		{ID: PlatformTunnelTargetID, Kind: PlatformTunnelWildcardTarget, Hostname: "*.tunnels.pprbt.dev", AccountID: PlatformAccountID, ChallengeReference: PlatformTunnelChallengeReference, Generation: 1},
-		{ID: PlatformRuntimeTargetID, Kind: PlatformRuntimeWildcardTarget, Hostname: "*.runtime.pprbt.dev", AccountID: PlatformAccountID, ChallengeReference: PlatformRuntimeChallengeReference, Generation: 1},
+		{ID: PlatformPublicTargetID, Kind: PlatformPublicWildcardTarget, Hostname: "*.public.example.test", AccountID: PlatformAccountID, ChallengeReference: PlatformPublicChallengeReference, Generation: 1},
+		{ID: PlatformRuntimeTargetID, Kind: PlatformRuntimeWildcardTarget, Hostname: "*.runtime.example.test", AccountID: PlatformAccountID, ChallengeReference: PlatformRuntimeChallengeReference, Generation: 1},
 	}
 	for index := range want {
 		if definitions[index] != want[index] {
@@ -29,10 +28,10 @@ func TestPlatformCertificateTargetDefinitionsAreDeterministic(t *testing.T) {
 		}
 	}
 	for _, bases := range []PlatformCertificateBases{
-		{PreviewBaseDomain: "*.preview.pprbt.dev", TunnelBaseDomain: "tunnels.pprbt.dev"},
-		{PreviewBaseDomain: "preview.pprbt.dev", TunnelBaseDomain: "127.0.0.1"},
-		{PreviewBaseDomain: "preview.pprbt.dev", TunnelBaseDomain: "tunnels.pprbt.dev", RuntimeBaseDomain: "*.runtime.pprbt.dev"},
-		{PreviewBaseDomain: "preview.pprbt.dev", TunnelBaseDomain: "tunnels.pprbt.dev"},
+		{PreviewBaseDomain: "*.preview.example.test", TunnelBaseDomain: "tunnels.example.test"},
+		{PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "127.0.0.1"},
+		{PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "*.runtime.example.test"},
+		{PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test"},
 	} {
 		if _, err := PlatformCertificateTargetDefinitions(bases); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("invalid platform bases %+v error = %v", bases, err)
@@ -42,9 +41,9 @@ func TestPlatformCertificateTargetDefinitionsAreDeterministic(t *testing.T) {
 
 func TestPlatformCertificateTargetGenerationFitsPostgresBigint(t *testing.T) {
 	definition := PlatformCertificateTargetDefinition{
-		ID: PlatformPreviewTargetID, Kind: PlatformPreviewWildcardTarget,
-		Hostname: "*.preview.pprbt.dev", AccountID: PlatformAccountID,
-		ChallengeReference: PlatformPreviewChallengeReference, Generation: maxPlatformGeneration + 1,
+		ID: PlatformPublicTargetID, Kind: PlatformPublicWildcardTarget,
+		Hostname: "*.preview.example.test", AccountID: PlatformAccountID,
+		ChallengeReference: PlatformPublicChallengeReference, Generation: maxPlatformGeneration + 1,
 	}
 	if err := definition.Validate(); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("generation above BIGINT error = %v", err)
@@ -57,16 +56,16 @@ func TestPlatformCertificateTargetGenerationFitsPostgresBigint(t *testing.T) {
 
 func TestPlatformCertificateTargetDefinitionFencesBuiltInIdentity(t *testing.T) {
 	definition := PlatformCertificateTargetDefinition{
-		ID: PlatformPreviewTargetID, Kind: PlatformPreviewWildcardTarget,
-		Hostname: "*.preview.pprbt.dev", AccountID: PlatformAccountID,
-		ChallengeReference: PlatformPreviewChallengeReference, Generation: 1,
+		ID: PlatformPublicTargetID, Kind: PlatformPublicWildcardTarget,
+		Hostname: "*.preview.example.test", AccountID: PlatformAccountID,
+		ChallengeReference: PlatformPublicChallengeReference, Generation: 1,
 	}
 	for name, mutate := range map[string]func(*PlatformCertificateTargetDefinition){
 		"account": func(value *PlatformCertificateTargetDefinition) { value.AccountID = "user-account" },
-		"kind":    func(value *PlatformCertificateTargetDefinition) { value.Kind = PlatformTunnelWildcardTarget },
-		"id":      func(value *PlatformCertificateTargetDefinition) { value.ID = PlatformTunnelTargetID },
+		"kind":    func(value *PlatformCertificateTargetDefinition) { value.Kind = PlatformRuntimeWildcardTarget },
+		"id":      func(value *PlatformCertificateTargetDefinition) { value.ID = PlatformRuntimeTargetID },
 		"challenge": func(value *PlatformCertificateTargetDefinition) {
-			value.ChallengeReference = PlatformTunnelChallengeReference
+			value.ChallengeReference = PlatformRuntimeChallengeReference
 		},
 	} {
 		invalid := definition
@@ -77,16 +76,16 @@ func TestPlatformCertificateTargetDefinitionFencesBuiltInIdentity(t *testing.T) 
 	}
 }
 
-func TestPlatformCertificateTargetDefinitionsRejectDuplicateBases(t *testing.T) {
+func TestPlatformCertificateTargetDefinitionsRejectUnsharedOrRuntimeBases(t *testing.T) {
 	for name, bases := range map[string]PlatformCertificateBases{
 		"preview and tunnel": {
-			PreviewBaseDomain: "shared.pprbt.dev", TunnelBaseDomain: "shared.pprbt.dev", RuntimeBaseDomain: "runtime.pprbt.dev",
+			PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnel.example.test", RuntimeBaseDomain: "runtime.example.test",
 		},
 		"preview and runtime": {
-			PreviewBaseDomain: "shared.pprbt.dev", TunnelBaseDomain: "tunnels.pprbt.dev", RuntimeBaseDomain: "shared.pprbt.dev",
+			PreviewBaseDomain: "shared.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "shared.example.test",
 		},
 		"tunnel and runtime": {
-			PreviewBaseDomain: "preview.pprbt.dev", TunnelBaseDomain: "shared.pprbt.dev", RuntimeBaseDomain: "shared.pprbt.dev",
+			PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "shared.example.test", RuntimeBaseDomain: "shared.example.test",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -99,9 +98,9 @@ func TestPlatformCertificateTargetDefinitionsRejectDuplicateBases(t *testing.T) 
 
 func TestPlatformCertificateTargetValidationFencesRetryAndRevocationState(t *testing.T) {
 	definition := PlatformCertificateTargetDefinition{
-		ID: PlatformPreviewTargetID, Kind: PlatformPreviewWildcardTarget,
-		Hostname: "*.preview.pprbt.dev", AccountID: PlatformAccountID,
-		ChallengeReference: PlatformPreviewChallengeReference, Generation: 1,
+		ID: PlatformPublicTargetID, Kind: PlatformPublicWildcardTarget,
+		Hostname: "*.preview.example.test", AccountID: PlatformAccountID,
+		ChallengeReference: PlatformPublicChallengeReference, Generation: 1,
 	}
 	for name, mutate := range map[string]func(*PlatformCertificateTarget){
 		"retry overflow":      func(value *PlatformCertificateTarget) { value.RetryCount = 31 },
@@ -118,8 +117,8 @@ func TestPlatformCertificateTargetValidationFencesRetryAndRevocationState(t *tes
 func TestPlatformStoredCertificateRejectsPEMMaterial(t *testing.T) {
 	now := time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC)
 	value := StoredCertificate{
-		ID: "tcert-platform-test", DomainID: PlatformPreviewTargetID, AccountID: PlatformAccountID,
-		TargetKind: TargetPlatformWildcard, Hostname: "*.preview.pprbt.dev", DomainGeneration: 1,
+		ID: "tcert-platform-test", DomainID: PlatformPublicTargetID, AccountID: PlatformAccountID,
+		TargetKind: TargetPlatformWildcard, Hostname: "*.preview.example.test", DomainGeneration: 1,
 		CertificateGeneration: 1, Strategy: StrategyPlatformDNS01, State: StateStaged,
 		CertificateReference: "tcert_platform_test", MasterKeyReference: "master/current",
 		CertificateCiphertext: []byte("-----BEGIN CERTIFICATE----- plaintext material -----END CERTIFICATE-----"),
@@ -134,20 +133,20 @@ func TestPlatformStoredCertificateRejectsPEMMaterial(t *testing.T) {
 
 func TestPlatformDNSChallengeTargetWritesAuthorizationNameDirectly(t *testing.T) {
 	domain := Domain{
-		ID: PlatformPreviewTargetID, AccountID: PlatformAccountID,
-		TargetKind: TargetPlatformWildcard, Hostname: "*.Preview.Pprbt.dev",
+		ID: PlatformPublicTargetID, AccountID: PlatformAccountID,
+		TargetKind: TargetPlatformWildcard, Hostname: "*.Preview.Example.test",
 	}
 	if _, err := PlatformDNSChallengeTargetForDomain(domain); !errors.Is(err, ErrDNSChallengeUnavailable) {
 		// Hostname canonicalization is an explicit storage contract. Keep this
 		// check to prevent silently accepting a mixed-case platform projection.
 		t.Fatalf("mixed-case platform hostname error = %v", err)
 	}
-	domain.Hostname = "*.preview.pprbt.dev"
+	domain.Hostname = "*.preview.example.test"
 	target, err := PlatformDNSChallengeTargetForDomain(domain)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if target != "_acme-challenge.preview.pprbt.dev" {
+	if target != "_acme-challenge.preview.example.test" {
 		t.Fatalf("direct platform challenge target = %q", target)
 	}
 	delegated, err := DelegatedChallengeTargetForDomain(domain, "not-a-valid-zone")
@@ -161,8 +160,8 @@ func TestPlatformDNSChallengeTargetWritesAuthorizationNameDirectly(t *testing.T)
 
 func TestPlatformWildcardDomainRejectsRouteAndLeaseIdentity(t *testing.T) {
 	base := Domain{
-		ID: PlatformTunnelTargetID, AccountID: PlatformAccountID,
-		TargetKind: TargetPlatformWildcard, Hostname: "*.tunnels.pprbt.dev",
+		ID: PlatformRuntimeTargetID, AccountID: PlatformAccountID,
+		TargetKind: TargetPlatformWildcard, Hostname: "*.tunnels.example.test",
 		Generation: 1, Strategy: StrategyPlatformDNS01, OwnershipState: "verified",
 		CAAState: "not_applicable",
 	}
@@ -186,5 +185,17 @@ func TestPlatformWildcardDomainRejectsRouteAndLeaseIdentity(t *testing.T) {
 	user.Strategy = StrategyPlatformDNS01
 	if err := user.Validate(); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("platform strategy on user target error = %v", err)
+	}
+}
+
+func TestSharedPublicBaseHasOneCertificateOwner(t *testing.T) {
+	definitions, err := PlatformCertificateTargetDefinitions(PlatformCertificateBases{
+		PreviewBaseDomain: "public.example.test", TunnelBaseDomain: "public.example.test", RuntimeBaseDomain: "runtime.example.test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(definitions) != 2 || definitions[0].Hostname != "*.public.example.test" || definitions[1].Hostname != "*.runtime.example.test" {
+		t.Fatalf("shared public certificate owners = %+v", definitions)
 	}
 }

@@ -194,8 +194,8 @@ check_source_policy() {
   grep -Fq 'PAPERBOAT_CERTIFICATES_RETRY_MAX=2m' "$EXAMPLE_ENV_FILE" || fail "the example retry maximum must stay within the runtime validation bound"
   grep -Fq 'PAPERBOAT_CERTIFICATES_ENABLED=false' "$runbook" && fail "the production runbook must not document enabled=false as a workaround"
   grep -Fq 'baseline migration 1' "$runbook" || fail "runbook does not gate rollout on baseline migration 1"
-  grep -Fq 'platform_cert_preview_v1' "$runbook" || fail "runbook does not name the preview platform target"
-  grep -Fq 'platform_cert_tunnel_v1' "$runbook" || fail "runbook does not name the tunnel platform target"
+  grep -Fq 'platform_cert_public_v1' "$runbook" || fail "runbook does not name the preview platform target"
+  grep -Fq 'platform_cert_runtime_v1' "$runbook" || fail "runbook does not name the tunnel platform target"
   grep -Fq "edge.state = 'active'" "$runbook" || fail "runbook does not require active edge distributions"
   grep -Fq 'distribution credential must equal the edge control credential' "$runbook" || fail "runbook does not state credential equality"
   grep -Fq 'exactly the same bytes' "$runbook" || fail "runbook does not state byte equality"
@@ -270,7 +270,7 @@ check_runtime_settings() {
 
   preview_domain=$(read_env_value PAPERBOAT_PREVIEW_BASE_DOMAIN "$ENV_FILE")
   tunnel_domain=$(read_env_value PAPERBOAT_TUNNEL_BASE_DOMAIN "$ENV_FILE")
-  [ "$preview_domain" != "$tunnel_domain" ] || fail "preview and tunnel base domains must differ"
+  [ "$preview_domain" = "$tunnel_domain" ] || fail "preview and tunnel must share the public base domain"
   case "$preview_domain$tunnel_domain" in
     *[!A-Za-z0-9.-]*) fail "preview/tunnel base domains contain unsupported characters" ;;
   esac
@@ -321,7 +321,7 @@ check_distribution_credential_equality() {
 wait_for_certificate_state() {
   require_command psql
   preview_base_domain=$(read_env_value PAPERBOAT_PREVIEW_BASE_DOMAIN "$ENV_FILE")
-  tunnel_base_domain=$(read_env_value PAPERBOAT_TUNNEL_BASE_DOMAIN "$ENV_FILE")
+  runtime_base_domain=$(read_env_value PAPERBOAT_RUNTIME_BASE_DOMAIN "$ENV_FILE")
   deadline=$(( $(date +%s) + WAIT_SECONDS ))
   while :; do
     now=$(date +%s)
@@ -335,8 +335,8 @@ wait_for_certificate_state() {
       certificate_state_sql="
 WITH expected(id, kind, hostname) AS (
   VALUES
-    ('platform_cert_preview_v1', 'preview_wildcard', '*.$preview_base_domain'),
-    ('platform_cert_tunnel_v1', 'tunnel_wildcard', '*.$tunnel_base_domain')
+    ('platform_cert_public_v1', 'public_wildcard', '*.$preview_base_domain'),
+    ('platform_cert_runtime_v1', 'runtime_wildcard', '*.$runtime_base_domain')
 ),
 targets AS (
   SELECT target.*

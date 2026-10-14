@@ -450,7 +450,7 @@ func (w *PlatformCertificateWorker) Revoke(ctx context.Context, targetID, reason
 }
 
 func validPlatformTargetID(id string) bool {
-	return id == tunnelcert.PlatformPreviewTargetID || id == tunnelcert.PlatformTunnelTargetID || id == tunnelcert.PlatformRuntimeTargetID
+	return id == tunnelcert.PlatformPublicTargetID || id == tunnelcert.PlatformRuntimeTargetID
 }
 
 func (w *PlatformCertificateWorker) Worker(interval time.Duration, limit int) workers.Worker {

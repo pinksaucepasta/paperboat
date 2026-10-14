@@ -53,7 +53,7 @@ that use them; say which in Evidence.
 |---|---|---|---|---|---|
 | S1-01 | **No domain is hardcoded anywhere** (AGENTS.md). Remove every domain literal from code in all modules. Find them with `grep -rnE "pprbt\.dev/pprbt\.app/ppr\.boats/paperboat\.cloud"` (today `local.pprbt.dev` ~43 files, `get.pprbt.dev` ~19, `api.pprbt.dev` ~12, `preview.pprbt.dev`/`tunnels.pprbt.dev` ~7 each). Sources: server/tunnel/relay = deployment configuration; CLI/daemon = API address from build config (`DefaultServerURL`, overridable with `--server`), all other domains from a server discovery response fetched at login/pair and cached; console = environment config + the same discovery response; marketing = site config; tests = `example.test`. Afterwards the grep returns nothing in code. | [!] | — | — | Server discovery producer implemented at GET /v1/client-configuration with configured installer/console/domain fields; machine-service hostname suffix now configuration-owned. TestClientConfigurationPublishesConfiguredDomains (two deployment domain sets) and RejectsMissingOrInvalidDeployment PASS. Cross-lane CLI/relay/console/marketing literals and remaining imported server/tunnel test fixtures still require removal; consumer request in PLAN Log. |
 | S1-02 | Local access names: `<machine>.ppr.boats`, `<port>.<machine>.ppr.boats` (lazy URL), `<machine>.ppr.boats:<port>`; local CA name constraint and leaves use the configured local domain; OpenSSH aliases `<machine>.<local domain>`. DNS is done (not on Cloudflare; already verified 2026-10-14: `x.ppr.boats` and `3000.x.ppr.boats` → `127.100.0.1`); never automate ppr.boats DNS. | [!] | — | — | Server NativeBrowserHostname now uses PAPERBOAT_LOCAL_ACCESS_BASE_DOMAIN; canonical port/alias/domain switch and invalid-domain checks PASS in TestNativeBrowserHostnameUsesCanonicalPortAndAccountScopedAlias. Lane A must consume discovery for CA constraints/leaves, local URLs and SSH aliases; real-device verification pending. No ppr.boats DNS automated. |
-| S1-03 | Previews and tunnels at `<name>.pprbt.app`; names from the existing name generator; preview names immutable; tunnel rename in server, CLI and console; global uniqueness. | [ ] | — | — |  |
+| S1-03 | Previews and tunnels at `<name>.pprbt.app`; names from the existing name generator; preview names immutable; tunnel rename in server, CLI and console; global uniqueness. | [!] | — | — | Shared public certificate owner implemented: platform_cert_public_v1/public_wildcard plus separate runtime target, matching fresh baseline schema and preflight. TestSharedPublicBaseHasOneCertificateOwner failed before repair and passes after; target/worker suites and race PASS; make gate/server check PASS. Live shared-domain TLS, global naming/rename and cross-lane verification await deployment and pprbt.app DNS access. |
 | S1-04 | Console origin `app.paperboat.cloud` and marketing `paperboat.cloud` configured for production (links, CORS/allowed origins, WorkOS redirects) while the dev console keeps https://oracle.newt-mermaid.ts.net — configuration only. | [ ] | — | — |  |
 | S1-05 | Unit tests use the configured test domain; switching the deployment's domains in configuration works without a code change (verify once). | [!] | — | — | Discovery and native hostname unit checks prove two configured test-domain sets work without source change. Broad fixture literal cleanup and full deployed-domain switch remain unverified; S1-01 consumers/deployment pending. |
 | S1-06 | Server stack (server, PostgreSQL 17 with migrations from zero, diagnostics store, edge/proxy for the API and get domains) deployed on the formatted coolify from the server image with the `deploy/` compose file; all domains from env. | [~] | — | — | Tailscale SSH authenticated at user-supplied 100.74.80.82; Ubuntu 26.04.1 amd64, Docker preparation started; stack not deployed. |
@@ -86,41 +86,41 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F1-01 | The console one-liner installs **the build under test**, then pairs, on L, M, W as a normal user; administrator approval is asked once (sudo / UAC / macOS prompt) and nothing else. | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| F1-02 | After pairing the machine is online in `pb environments` and the console within 30 s; `pb doctor` healthy; a terminal and an exec to it work immediately. | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| F1-03 | Token expired / already used / revoked / wrong platform shape → specific message; nothing half-installed. | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| F1-04 | Ctrl-C or network loss at any point of install or pair → rerunning the same command completes or restarts cleanly; no manual cleanup. | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| F1-05 | Re-running install on an installed machine is a no-op or clean upgrade; enrollment kept. | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| F1-06 | macOS: browser HTTPS trust needing GUI approval → install completes; output says trust is pending and gives the exact command to finish it. | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| F1-07 | Strict umask (077); zsh, fish and PowerShell 7 as login shell; `~/.local/bin` not on PATH; non-ASCII user/home path (Windows); user without sudo rights → clear refusal. | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| F1-08 | Pair with no ENV assigned and with ENV pending: pair succeeds; pending is explained. | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| F1-09 | `pb uninstall` (prompts, and `--confirmation 'UNINSTALL PAPERBOAT' --hostname <h>`) removes **everything** (services, processes, files, accounts, CA trust, nft/PF/WFP rules, scheduled tasks, PATH entries, credentials); Inbox preserved; works on a broken or half-installed machine; the smoke suite's uninstall inventory check reports zero leftovers on L, M, W. | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| F1-10 | `pb reset` + pair again on the same machine works; the old machine record is replaced. | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| F1-11 | `pb service install/start/stop/restart/status/uninstall` behave as documented; the daemon restarts itself after a crash and after a reboot. | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
+| F1-01 | The console one-liner installs **the build under test**, then pairs, on L, M, W as a normal user; administrator approval is asked once (sudo / UAC / macOS prompt) and nothing else. | [ ] | [ ] | [ ] | — |
+| F1-02 | After pairing the machine is online in `pb environments` and the console within 30 s; `pb doctor` healthy; a terminal and an exec to it work immediately. | [ ] | [ ] | [ ] | — |
+| F1-03 | Token expired / already used / revoked / wrong platform shape → specific message; nothing half-installed. | [ ] | [ ] | [ ] | — |
+| F1-04 | Ctrl-C or network loss at any point of install or pair → rerunning the same command completes or restarts cleanly; no manual cleanup. | [ ] | [ ] | [ ] | — |
+| F1-05 | Re-running install on an installed machine is a no-op or clean upgrade; enrollment kept. | [ ] | [ ] | [ ] | — |
+| F1-06 | macOS: browser HTTPS trust needing GUI approval → install completes; output says trust is pending and gives the exact command to finish it. | [ ] | [ ] | [ ] | — |
+| F1-07 | Strict umask (077); zsh, fish and PowerShell 7 as login shell; `~/.local/bin` not on PATH; non-ASCII user/home path (Windows); user without sudo rights → clear refusal. | [ ] | [ ] | [ ] | — |
+| F1-08 | Pair with no ENV assigned and with ENV pending: pair succeeds; pending is explained. | [ ] | [ ] | [ ] | — |
+| F1-09 | `pb uninstall` (prompts, and `--confirmation 'UNINSTALL PAPERBOAT' --hostname <h>`) removes **everything** (services, processes, files, accounts, CA trust, nft/PF/WFP rules, scheduled tasks, PATH entries, credentials); Inbox preserved; works on a broken or half-installed machine; the smoke suite's uninstall inventory check reports zero leftovers on L, M, W. | [ ] | [ ] | [ ] | — |
+| F1-10 | `pb reset` + pair again on the same machine works; the old machine record is replaced. | [ ] | [ ] | [ ] | — |
+| F1-11 | `pb service install/start/stop/restart/status/uninstall` behave as documented; the daemon restarts itself after a crash and after a reboot. | [ ] | [ ] | [ ] | — |
 | F1-12 | Console install dialog shows correct commands for every platform and live-updates when the machine connects. | [ ] | [ ] | [ ] |  |
 
 **Commands**
 
 | ID | Command | Purpose | L | M | W | Evidence |
 |---|---|---|---|---|---|---|
-| C004 | `pb daemon` | Paperboat endpoint daemon | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| C005 | `pb daemon machine-guard` | Manage protected local machine access | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| C006 | `pb daemon machine-guard install` | Install the root-owned machine guard service | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| C007 | `pb daemon machine-guard run` | Run the machine guard under service supervision | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| C008 | `pb daemon machine-guard uninstall` | Remove machine access while retaining cached-address protection | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| C009 | `pb daemon run` | Run Paperboat daemon under service supervision | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| C010 | `pb install` | Install this executable and its local service | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| C011 | `pb pair` | Enroll this machine with a one-shot token | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| C012 | `pb reset` | Remove the current Paperboat setup before fresh enrollment | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| C013 | `pb service` | Manage the Paperboat background daemon service | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| C014 | `pb service install` | Install Paperboat daemon as the current-user service | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| C015 | `pb service restart` | Restart Paperboat daemon current-user service | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| C016 | `pb service start` | Start Paperboat daemon current-user service | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| C017 | `pb service status` | Show Paperboat daemon current-user service status | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| C018 | `pb service stop` | Stop Paperboat daemon current-user service | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| C019 | `pb service uninstall` | Uninstall Paperboat daemon current-user service | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| C020 | `pb setup` | Set up this machine for Paperboat | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
-| C021 | `pb uninstall` | Completely remove Paperboat from this machine | [!] | [!] | [!] | S1 server/enrollment and installer build under test are unavailable; API health HTTP 521. No fresh pair or device baseline; blocked on Lane B (PLAN Log 2026-10-14). |
+| C004 | `pb daemon` | Paperboat endpoint daemon | [ ] | [ ] | [ ] | — |
+| C005 | `pb daemon machine-guard` | Manage protected local machine access | [ ] | [ ] | [ ] | — |
+| C006 | `pb daemon machine-guard install` | Install the root-owned machine guard service | [ ] | [ ] | [ ] | — |
+| C007 | `pb daemon machine-guard run` | Run the machine guard under service supervision | [ ] | [ ] | [ ] | — |
+| C008 | `pb daemon machine-guard uninstall` | Remove machine access while retaining cached-address protection | [ ] | [ ] | [ ] | — |
+| C009 | `pb daemon run` | Run Paperboat daemon under service supervision | [ ] | [ ] | [ ] | — |
+| C010 | `pb install` | Install this executable and its local service | [ ] | [ ] | [ ] | — |
+| C011 | `pb pair` | Enroll this machine with a one-shot token | [ ] | [ ] | [ ] | — |
+| C012 | `pb reset` | Remove the current Paperboat setup before fresh enrollment | [ ] | [ ] | [ ] | — |
+| C013 | `pb service` | Manage the Paperboat background daemon service | [ ] | [ ] | [ ] | — |
+| C014 | `pb service install` | Install Paperboat daemon as the current-user service | [ ] | [ ] | [ ] | — |
+| C015 | `pb service restart` | Restart Paperboat daemon current-user service | [ ] | [ ] | [ ] | — |
+| C016 | `pb service start` | Start Paperboat daemon current-user service | [ ] | [ ] | [ ] | — |
+| C017 | `pb service status` | Show Paperboat daemon current-user service status | [ ] | [ ] | [ ] | — |
+| C018 | `pb service stop` | Stop Paperboat daemon current-user service | [ ] | [ ] | [ ] | — |
+| C019 | `pb service uninstall` | Uninstall Paperboat daemon current-user service | [ ] | [ ] | [ ] | — |
+| C020 | `pb setup` | Set up this machine for Paperboat | [ ] | [ ] | [ ] | — |
+| C021 | `pb uninstall` | Completely remove Paperboat from this machine | [ ] | [ ] | [ ] | — |
 
 ---
 
@@ -128,35 +128,35 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F2-01 | `pb login` with browser approval on L, M, W, and from a headless VPS via the printed link; `pb logout`; `pb auth status`. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live account/workspace APIs; CLI approval page is Lane C. Device command contracts remain unverified (PLAN Log 2026-10-14). |
+| F2-01 | `pb login` with browser approval on L, M, W, and from a headless VPS via the printed link; `pb logout`; `pb auth status`. | [ ] | [ ] | [ ] | — |
 | F2-02 | The console CLI-approval page exists and works end to end. | [ ] | [ ] | [ ] |  |
-| F2-03 | `pb switch` / `pb auth switch` between personal and each team workspace; everything afterwards uses the selected workspace. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live account/workspace APIs; CLI approval page is Lane C. Device command contracts remain unverified (PLAN Log 2026-10-14). |
-| F2-04 | `pb environments`, `pb machine list/add/rename/revoke`, `pb status` correct on L, M, W. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live account/workspace APIs; CLI approval page is Lane C. Device command contracts remain unverified (PLAN Log 2026-10-14). |
-| F2-05 | A revoked machine loses access immediately and says so; credential refresh failures back off and stop at a clear "signed out" state (no tight retry loops). | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live account/workspace APIs; CLI approval page is Lane C. Device command contracts remain unverified (PLAN Log 2026-10-14). |
-| F2-06 | Machine availability (keep awake / allow sleep) and capabilities set from CLI and console take effect on the device. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live account/workspace APIs; CLI approval page is Lane C. Device command contracts remain unverified (PLAN Log 2026-10-14). |
+| F2-03 | `pb switch` / `pb auth switch` between personal and each team workspace; everything afterwards uses the selected workspace. | [ ] | [ ] | [ ] | — |
+| F2-04 | `pb environments`, `pb machine list/add/rename/revoke`, `pb status` correct on L, M, W. | [ ] | [ ] | [ ] | — |
+| F2-05 | A revoked machine loses access immediately and says so; credential refresh failures back off and stop at a clear "signed out" state (no tight retry loops). | [ ] | [ ] | [ ] | — |
+| F2-06 | Machine availability (keep awake / allow sleep) and capabilities set from CLI and console take effect on the device. | [ ] | [ ] | [ ] | — |
 | F2-07 | Console: sign-in/sign-out, workspace switching, machine list (paging beyond one page), details, rename, revoke, ownership label correct (the server's `shared` field fixed or replaced), machine hostname shown with the configured local domain. | [ ] | [ ] | [ ] |  |
 
 **Commands**
 
 | ID | Command | Purpose | L | M | W | Evidence |
 |---|---|---|---|---|---|---|
-| C022 | `pb auth` | Manage Paperboat sign-in | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live account/workspace APIs; CLI approval page is Lane C. Device command contracts remain unverified (PLAN Log 2026-10-14). |
-| C023 | `pb auth login` | Sign in through browser approval on any device | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live account/workspace APIs; CLI approval page is Lane C. Device command contracts remain unverified (PLAN Log 2026-10-14). |
-| C024 | `pb auth logout` | Revoke and remove the active client session | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live account/workspace APIs; CLI approval page is Lane C. Device command contracts remain unverified (PLAN Log 2026-10-14). |
-| C025 | `pb auth status` | Show the active Paperboat account | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live account/workspace APIs; CLI approval page is Lane C. Device command contracts remain unverified (PLAN Log 2026-10-14). |
-| C026 | `pb auth switch` | Switch the active Personal or team workspace | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live account/workspace APIs; CLI approval page is Lane C. Device command contracts remain unverified (PLAN Log 2026-10-14). |
-| C027 | `pb environments` | List enrolled machines available to this account | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live account/workspace APIs; CLI approval page is Lane C. Device command contracts remain unverified (PLAN Log 2026-10-14). |
-| C028 | `pb login` | Sign in through browser approval on any device | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live account/workspace APIs; CLI approval page is Lane C. Device command contracts remain unverified (PLAN Log 2026-10-14). |
-| C029 | `pb logout` | Revoke and remove the active client session | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live account/workspace APIs; CLI approval page is Lane C. Device command contracts remain unverified (PLAN Log 2026-10-14). |
-| C030 | `pb machine` | Manage machines | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live account/workspace APIs; CLI approval page is Lane C. Device command contracts remain unverified (PLAN Log 2026-10-14). |
-| C031 | `pb machine add` | Print Linux/macOS and Windows machine enrollment commands | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live account/workspace APIs; CLI approval page is Lane C. Device command contracts remain unverified (PLAN Log 2026-10-14). |
-| C032 | `pb machine availability` | Set machine sleep availability | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live account/workspace APIs; CLI approval page is Lane C. Device command contracts remain unverified (PLAN Log 2026-10-14). |
-| C033 | `pb machine capabilities` | Set incoming services for a machine | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live account/workspace APIs; CLI approval page is Lane C. Device command contracts remain unverified (PLAN Log 2026-10-14). |
-| C034 | `pb machine list` | List enrolled machines | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live account/workspace APIs; CLI approval page is Lane C. Device command contracts remain unverified (PLAN Log 2026-10-14). |
-| C035 | `pb machine rename` | Rename a machine | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live account/workspace APIs; CLI approval page is Lane C. Device command contracts remain unverified (PLAN Log 2026-10-14). |
-| C036 | `pb machine revoke` | Disconnect and revoke a machine | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live account/workspace APIs; CLI approval page is Lane C. Device command contracts remain unverified (PLAN Log 2026-10-14). |
-| C037 | `pb switch` | Switch the active Personal or team workspace | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live account/workspace APIs; CLI approval page is Lane C. Device command contracts remain unverified (PLAN Log 2026-10-14). |
-| C001 | `pb approve` | Approve or revoke a peer machine over gRPC IPC | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live account/workspace APIs; CLI approval page is Lane C. Device command contracts remain unverified (PLAN Log 2026-10-14). Retained live RPC command; validation blocked by S1 enrollment/API outage (HTTP 521 on 2026-10-14). |
+| C022 | `pb auth` | Manage Paperboat sign-in | [ ] | [ ] | [ ] | — |
+| C023 | `pb auth login` | Sign in through browser approval on any device | [ ] | [ ] | [ ] | — |
+| C024 | `pb auth logout` | Revoke and remove the active client session | [ ] | [ ] | [ ] | — |
+| C025 | `pb auth status` | Show the active Paperboat account | [ ] | [ ] | [ ] | — |
+| C026 | `pb auth switch` | Switch the active Personal or team workspace | [ ] | [ ] | [ ] | — |
+| C027 | `pb environments` | List enrolled machines available to this account | [ ] | [ ] | [ ] | — |
+| C028 | `pb login` | Sign in through browser approval on any device | [ ] | [ ] | [ ] | — |
+| C029 | `pb logout` | Revoke and remove the active client session | [ ] | [ ] | [ ] | — |
+| C030 | `pb machine` | Manage machines | [ ] | [ ] | [ ] | — |
+| C031 | `pb machine add` | Print Linux/macOS and Windows machine enrollment commands | [ ] | [ ] | [ ] | — |
+| C032 | `pb machine availability` | Set machine sleep availability | [ ] | [ ] | [ ] | — |
+| C033 | `pb machine capabilities` | Set incoming services for a machine | [ ] | [ ] | [ ] | — |
+| C034 | `pb machine list` | List enrolled machines | [ ] | [ ] | [ ] | — |
+| C035 | `pb machine rename` | Rename a machine | [ ] | [ ] | [ ] | — |
+| C036 | `pb machine revoke` | Disconnect and revoke a machine | [ ] | [ ] | [ ] | — |
+| C037 | `pb switch` | Switch the active Personal or team workspace | [ ] | [ ] | [ ] | — |
+| C001 | `pb approve` | Approve or revoke a peer machine over gRPC IPC | [ ] | [ ] | [ ] | — |
 
 ---
 
@@ -164,41 +164,41 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F3-01 | Create, type, output, resize, colours, full-screen apps (vim, htop, less), Ctrl-C / Ctrl-D / Ctrl-Z, large paste, unicode — all pairs. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| F3-02 | Detach and reattach the same session with output replay; reattach from another device. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| F3-03 | Network drop, sleep/wake, Wi-Fi switch → reconnects to the same shell; no lost or duplicated input. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| F3-04 | A session idle for 8 hours is still usable. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| F3-05 | `pb session list/attach/close/rename/delete`; the 20-session limit gives a clear message (closed and unavailable sessions don't count). | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| F3-06 | Sharing: `pb session share` (view / interact), `shared`, `participants`, `join`, `unshare`, `remove`; revoking while connected ends access immediately. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| F3-07 | Browser terminal from the console (browser on M → targets L, M, W): open, type, resize, reconnect, close. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
+| F3-01 | Create, type, output, resize, colours, full-screen apps (vim, htop, less), Ctrl-C / Ctrl-D / Ctrl-Z, large paste, unicode — all pairs. | [ ] | [ ] | [ ] | — |
+| F3-02 | Detach and reattach the same session with output replay; reattach from another device. | [ ] | [ ] | [ ] | — |
+| F3-03 | Network drop, sleep/wake, Wi-Fi switch → reconnects to the same shell; no lost or duplicated input. | [ ] | [ ] | [ ] | — |
+| F3-04 | A session idle for 8 hours is still usable. | [ ] | [ ] | [ ] | — |
+| F3-05 | `pb session list/attach/close/rename/delete`; the 20-session limit gives a clear message (closed and unavailable sessions don't count). | [ ] | [ ] | [ ] | — |
+| F3-06 | Sharing: `pb session share` (view / interact), `shared`, `participants`, `join`, `unshare`, `remove`; revoking while connected ends access immediately. | [ ] | [ ] | [ ] | — |
+| F3-07 | Browser terminal from the console (browser on M → targets L, M, W): open, type, resize, reconnect, close. | [ ] | [ ] | [ ] | — |
 | F3-08 | Console sharing panel: participants show real identities, join codes and guests work (with and without an account), presence updates. | [ ] | [ ] | [ ] |  |
-| F3-09 | Windows target: PowerShell sessions behave like Unix shells for all of the above. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| F3-10 | Status bar (`pb config status-bar …`) and `--status-bar` work in sessions. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
+| F3-09 | Windows target: PowerShell sessions behave like Unix shells for all of the above. | [ ] | [ ] | [ ] | — |
+| F3-10 | Status bar (`pb config status-bar …`) and `--status-bar` work in sessions. | [ ] | [ ] | [ ] | — |
 
 **Commands**
 
 | ID | Command | Purpose | L | M | W | Evidence |
 |---|---|---|---|---|---|---|
-| C038 | `pb` | Open Paperboat or connect to an environment terminal | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| C039 | `pb config status-bar` | Configure the interactive terminal status bar | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| C040 | `pb config status-bar preview` | Preview the configured status bar | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| C041 | `pb config status-bar reset` | Restore status-bar defaults | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| C042 | `pb config status-bar set` | Set a status-bar preference | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| C043 | `pb config status-bar show` | Show the effective status-bar configuration | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| C044 | `pb connect` | Create and attach to an environment terminal session | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| C045 | `pb new` | Open a fresh terminal on this device in the current directory | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| C046 | `pb session` | Manage environment terminal sessions | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| C047 | `pb session attach` | Choose and attach to a durable terminal session | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| C048 | `pb session close` | Close one or all terminal sessions | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| C049 | `pb session delete` | Delete a closed terminal session record | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| C050 | `pb session join` | Join an explicitly shared terminal with recent output | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| C051 | `pb session list` | List durable terminal sessions | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| C052 | `pb session participants` | Show terminal sharing and connected participants | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| C053 | `pb session remove` | Remove a teammate, including access through an all-team grant | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| C054 | `pb session rename` | Rename a terminal session | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| C055 | `pb session share` | Grant a team or teammate viewer or interactive access | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| C056 | `pb session shared` | List owned and explicitly shared terminal sessions | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
-| C057 | `pb session unshare` | End sharing while preserving the owner's terminal | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline, terminal/session/sharing APIs, and Lane C browser flows. No device continuity or 8-hour idle evidence yet (PLAN Log 2026-10-14). |
+| C038 | `pb` | Open Paperboat or connect to an environment terminal | [ ] | [ ] | [ ] | — |
+| C039 | `pb config status-bar` | Configure the interactive terminal status bar | [ ] | [ ] | [ ] | — |
+| C040 | `pb config status-bar preview` | Preview the configured status bar | [ ] | [ ] | [ ] | — |
+| C041 | `pb config status-bar reset` | Restore status-bar defaults | [ ] | [ ] | [ ] | — |
+| C042 | `pb config status-bar set` | Set a status-bar preference | [ ] | [ ] | [ ] | — |
+| C043 | `pb config status-bar show` | Show the effective status-bar configuration | [ ] | [ ] | [ ] | — |
+| C044 | `pb connect` | Create and attach to an environment terminal session | [ ] | [ ] | [ ] | — |
+| C045 | `pb new` | Open a fresh terminal on this device in the current directory | [ ] | [ ] | [ ] | — |
+| C046 | `pb session` | Manage environment terminal sessions | [ ] | [ ] | [ ] | — |
+| C047 | `pb session attach` | Choose and attach to a durable terminal session | [ ] | [ ] | [ ] | — |
+| C048 | `pb session close` | Close one or all terminal sessions | [ ] | [ ] | [ ] | — |
+| C049 | `pb session delete` | Delete a closed terminal session record | [ ] | [ ] | [ ] | — |
+| C050 | `pb session join` | Join an explicitly shared terminal with recent output | [ ] | [ ] | [ ] | — |
+| C051 | `pb session list` | List durable terminal sessions | [ ] | [ ] | [ ] | — |
+| C052 | `pb session participants` | Show terminal sharing and connected participants | [ ] | [ ] | [ ] | — |
+| C053 | `pb session remove` | Remove a teammate, including access through an all-team grant | [ ] | [ ] | [ ] | — |
+| C054 | `pb session rename` | Rename a terminal session | [ ] | [ ] | [ ] | — |
+| C055 | `pb session share` | Grant a team or teammate viewer or interactive access | [ ] | [ ] | [ ] | — |
+| C056 | `pb session shared` | List owned and explicitly shared terminal sessions | [ ] | [ ] | [ ] | — |
+| C057 | `pb session unshare` | End sharing while preserving the owner's terminal | [ ] | [ ] | [ ] | — |
 
 ---
 
@@ -206,20 +206,20 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F4-01 | Output, exit codes, stderr, stdin, very large output, unicode — all pairs. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline before all-pair, long exec, timeout and stream reliability reproduction. API unavailable; device checks not run (PLAN Log 2026-10-14). |
-| F4-02 | Commands running 30+ minutes return their final output and exit code. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline before all-pair, long exec, timeout and stream reliability reproduction. API unavailable; device checks not run (PLAN Log 2026-10-14). |
-| F4-03 | `--timeout` ends the remote command; Ctrl-C ends it; target reboot mid-command reports an unknown outcome clearly. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline before all-pair, long exec, timeout and stream reliability reproduction. API unavailable; device checks not run (PLAN Log 2026-10-14). |
-| F4-04 | Target offline → clear message; ENV assigned but undeliverable → the specific ENV error. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline before all-pair, long exec, timeout and stream reliability reproduction. API unavailable; device checks not run (PLAN Log 2026-10-14). |
-| F4-05 | `pb ping` reports real reachability and path (direct/relay); `pb wait` waits for each documented condition. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline before all-pair, long exec, timeout and stream reliability reproduction. API unavailable; device checks not run (PLAN Log 2026-10-14). |
-| F4-06 | 50 short execs in a row and 10 in parallel all succeed (no intermittent stream failures). | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline before all-pair, long exec, timeout and stream reliability reproduction. API unavailable; device checks not run (PLAN Log 2026-10-14). |
+| F4-01 | Output, exit codes, stderr, stdin, very large output, unicode — all pairs. | [ ] | [ ] | [ ] | — |
+| F4-02 | Commands running 30+ minutes return their final output and exit code. | [ ] | [ ] | [ ] | — |
+| F4-03 | `--timeout` ends the remote command; Ctrl-C ends it; target reboot mid-command reports an unknown outcome clearly. | [ ] | [ ] | [ ] | — |
+| F4-04 | Target offline → clear message; ENV assigned but undeliverable → the specific ENV error. | [ ] | [ ] | [ ] | — |
+| F4-05 | `pb ping` reports real reachability and path (direct/relay); `pb wait` waits for each documented condition. | [ ] | [ ] | [ ] | — |
+| F4-06 | 50 short execs in a row and 10 in parallel all succeed (no intermittent stream failures). | [ ] | [ ] | [ ] | — |
 
 **Commands**
 
 | ID | Command | Purpose | L | M | W | Evidence |
 |---|---|---|---|---|---|---|
-| C058 | `pb exec` | Execute an exact command on a machine | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline before all-pair, long exec, timeout and stream reliability reproduction. API unavailable; device checks not run (PLAN Log 2026-10-14). |
-| C059 | `pb ping` | Measure authenticated connectivity to a machine | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline before all-pair, long exec, timeout and stream reliability reproduction. API unavailable; device checks not run (PLAN Log 2026-10-14). |
-| C060 | `pb wait` | Wait for a machine readiness condition | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline before all-pair, long exec, timeout and stream reliability reproduction. API unavailable; device checks not run (PLAN Log 2026-10-14). |
+| C058 | `pb exec` | Execute an exact command on a machine | [ ] | [ ] | [ ] | — |
+| C059 | `pb ping` | Measure authenticated connectivity to a machine | [ ] | [ ] | [ ] | — |
+| C060 | `pb wait` | Wait for a machine readiness condition | [ ] | [ ] | [ ] | — |
 
 ---
 
@@ -227,23 +227,23 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F5-01 | Interactive `pb ssh <m>` and `pb ssh <m> -- cmd` work on the first attempt every time — all pairs. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline before first-attempt SSH, held sessions and file-tool matrix. Device SSH failure not yet reproduced on this build (PLAN Log 2026-10-14). |
-| F5-02 | SSH sessions held 1+ hour stay connected. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline before first-attempt SSH, held sessions and file-tool matrix. Device SSH failure not yet reproduced on this build (PLAN Log 2026-10-14). |
-| F5-03 | `pb scp`, `pb sftp`, `pb rsync` both directions, large trees, resume after interruption. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline before first-attempt SSH, held sessions and file-tool matrix. Device SSH failure not yet reproduced on this build (PLAN Log 2026-10-14). |
-| F5-04 | Plain `ssh <m>.<local domain>` and VS Code Remote-SSH connect through the generated aliases; host-key verification normal; `pb ssh trust-host` handles a changed key. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline before first-attempt SSH, held sessions and file-tool matrix. Device SSH failure not yet reproduced on this build (PLAN Log 2026-10-14). |
-| F5-05 | `pb ssh doctor` finds and explains broken integration. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline before first-attempt SSH, held sessions and file-tool matrix. Device SSH failure not yet reproduced on this build (PLAN Log 2026-10-14). |
-| F5-06 | Windows as target (Paperboat-managed OpenSSH) and as client. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline before first-attempt SSH, held sessions and file-tool matrix. Device SSH failure not yet reproduced on this build (PLAN Log 2026-10-14). |
+| F5-01 | Interactive `pb ssh <m>` and `pb ssh <m> -- cmd` work on the first attempt every time — all pairs. | [ ] | [ ] | [ ] | — |
+| F5-02 | SSH sessions held 1+ hour stay connected. | [ ] | [ ] | [ ] | — |
+| F5-03 | `pb scp`, `pb sftp`, `pb rsync` both directions, large trees, resume after interruption. | [ ] | [ ] | [ ] | — |
+| F5-04 | Plain `ssh <m>.<local domain>` and VS Code Remote-SSH connect through the generated aliases; host-key verification normal; `pb ssh trust-host` handles a changed key. | [ ] | [ ] | [ ] | — |
+| F5-05 | `pb ssh doctor` finds and explains broken integration. | [ ] | [ ] | [ ] | — |
+| F5-06 | Windows as target (Paperboat-managed OpenSSH) and as client. | [ ] | [ ] | [ ] | — |
 
 **Commands**
 
 | ID | Command | Purpose | L | M | W | Evidence |
 |---|---|---|---|---|---|---|
-| C061 | `pb rsync` | Run rsync with Paperboat machine resolution | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline before first-attempt SSH, held sessions and file-tool matrix. Device SSH failure not yet reproduced on this build (PLAN Log 2026-10-14). |
-| C062 | `pb scp` | Run scp with Paperboat machine resolution | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline before first-attempt SSH, held sessions and file-tool matrix. Device SSH failure not yet reproduced on this build (PLAN Log 2026-10-14). |
-| C063 | `pb sftp` | Run sftp with Paperboat machine resolution | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline before first-attempt SSH, held sessions and file-tool matrix. Device SSH failure not yet reproduced on this build (PLAN Log 2026-10-14). |
-| C064 | `pb ssh` | Connect to a machine with OpenSSH | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline before first-attempt SSH, held sessions and file-tool matrix. Device SSH failure not yet reproduced on this build (PLAN Log 2026-10-14). |
-| C065 | `pb ssh doctor` | Check SSH integration for a machine | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline before first-attempt SSH, held sessions and file-tool matrix. Device SSH failure not yet reproduced on this build (PLAN Log 2026-10-14). |
-| C066 | `pb ssh trust-host` | Approve a changed SSH host identity | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline before first-attempt SSH, held sessions and file-tool matrix. Device SSH failure not yet reproduced on this build (PLAN Log 2026-10-14). |
+| C061 | `pb rsync` | Run rsync with Paperboat machine resolution | [ ] | [ ] | [ ] | — |
+| C062 | `pb scp` | Run scp with Paperboat machine resolution | [ ] | [ ] | [ ] | — |
+| C063 | `pb sftp` | Run sftp with Paperboat machine resolution | [ ] | [ ] | [ ] | — |
+| C064 | `pb ssh` | Connect to a machine with OpenSSH | [ ] | [ ] | [ ] | — |
+| C065 | `pb ssh doctor` | Check SSH integration for a machine | [ ] | [ ] | [ ] | — |
+| C066 | `pb ssh trust-host` | Approve a changed SSH host identity | [ ] | [ ] | [ ] | — |
 
 ---
 
@@ -251,32 +251,32 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F6-01 | Single and multiple files and folders up to the limits (50 MiB per file, 10 files, 500 MiB per batch); received hash matches — all pairs. | [!] | [!] | [!] | Requires S1/F1 enrolled source/target machines and live transfer/team-inbox authority. No real-device hash/resume/limits evidence (PLAN Log 2026-10-14). |
-| F6-02 | Interrupted transfer resumes from the committed offset; no corruption or duplicates. | [!] | [!] | [!] | Requires S1/F1 enrolled source/target machines and live transfer/team-inbox authority. No real-device hash/resume/limits evidence (PLAN Log 2026-10-14). |
-| F6-03 | `pb send list/status/cancel/destination set/clear`. | [!] | [!] | [!] | Requires S1/F1 enrolled source/target machines and live transfer/team-inbox authority. No real-device hash/resume/limits evidence (PLAN Log 2026-10-14). |
-| F6-04 | `pb inbox` (path, set, reset, requests, approve, decline, policy) and team file requests expire correctly. | [!] | [!] | [!] | Requires S1/F1 enrolled source/target machines and live transfer/team-inbox authority. No real-device hash/resume/limits evidence (PLAN Log 2026-10-14). |
-| F6-05 | Over-limit, offline target, full disk → clear messages. | [!] | [!] | [!] | Requires S1/F1 enrolled source/target machines and live transfer/team-inbox authority. No real-device hash/resume/limits evidence (PLAN Log 2026-10-14). |
+| F6-01 | Single and multiple files and folders up to the limits (50 MiB per file, 10 files, 500 MiB per batch); received hash matches — all pairs. | [ ] | [ ] | [ ] | — |
+| F6-02 | Interrupted transfer resumes from the committed offset; no corruption or duplicates. | [ ] | [ ] | [ ] | — |
+| F6-03 | `pb send list/status/cancel/destination set/clear`. | [ ] | [ ] | [ ] | — |
+| F6-04 | `pb inbox` (path, set, reset, requests, approve, decline, policy) and team file requests expire correctly. | [ ] | [ ] | [ ] | — |
+| F6-05 | Over-limit, offline target, full disk → clear messages. | [ ] | [ ] | [ ] | — |
 | F6-06 | Console Files screens list, download and remove Inbox items; team requests can be approved there. | [ ] | [ ] | [ ] |  |
 
 **Commands**
 
 | ID | Command | Purpose | L | M | W | Evidence |
 |---|---|---|---|---|---|---|
-| C067 | `pb inbox` | Manage the Paperboat Inbox | [!] | [!] | [!] | Requires S1/F1 enrolled source/target machines and live transfer/team-inbox authority. No real-device hash/resume/limits evidence (PLAN Log 2026-10-14). |
-| C068 | `pb inbox approve` | Approve an exact team file request | [!] | [!] | [!] | Requires S1/F1 enrolled source/target machines and live transfer/team-inbox authority. No real-device hash/resume/limits evidence (PLAN Log 2026-10-14). |
-| C069 | `pb inbox decline` | Decline an exact team file request | [!] | [!] | [!] | Requires S1/F1 enrolled source/target machines and live transfer/team-inbox authority. No real-device hash/resume/limits evidence (PLAN Log 2026-10-14). |
-| C070 | `pb inbox path` |  | [!] | [!] | [!] | Requires S1/F1 enrolled source/target machines and live transfer/team-inbox authority. No real-device hash/resume/limits evidence (PLAN Log 2026-10-14). |
-| C071 | `pb inbox policy` | Show or update team file acceptance | [!] | [!] | [!] | Requires S1/F1 enrolled source/target machines and live transfer/team-inbox authority. No real-device hash/resume/limits evidence (PLAN Log 2026-10-14). |
-| C072 | `pb inbox requests` | List team file requests | [!] | [!] | [!] | Requires S1/F1 enrolled source/target machines and live transfer/team-inbox authority. No real-device hash/resume/limits evidence (PLAN Log 2026-10-14). |
-| C073 | `pb inbox reset` |  | [!] | [!] | [!] | Requires S1/F1 enrolled source/target machines and live transfer/team-inbox authority. No real-device hash/resume/limits evidence (PLAN Log 2026-10-14). |
-| C074 | `pb inbox set` |  | [!] | [!] | [!] | Requires S1/F1 enrolled source/target machines and live transfer/team-inbox authority. No real-device hash/resume/limits evidence (PLAN Log 2026-10-14). |
-| C075 | `pb send` | Send files to a machine's Paperboat Inbox | [!] | [!] | [!] | Requires S1/F1 enrolled source/target machines and live transfer/team-inbox authority. No real-device hash/resume/limits evidence (PLAN Log 2026-10-14). |
-| C076 | `pb send cancel` | Cancel a file transfer batch | [!] | [!] | [!] | Requires S1/F1 enrolled source/target machines and live transfer/team-inbox authority. No real-device hash/resume/limits evidence (PLAN Log 2026-10-14). |
-| C077 | `pb send destination` | Show the default transfer destination | [!] | [!] | [!] | Requires S1/F1 enrolled source/target machines and live transfer/team-inbox authority. No real-device hash/resume/limits evidence (PLAN Log 2026-10-14). |
-| C078 | `pb send destination clear` | Clear the default transfer destination | [!] | [!] | [!] | Requires S1/F1 enrolled source/target machines and live transfer/team-inbox authority. No real-device hash/resume/limits evidence (PLAN Log 2026-10-14). |
-| C079 | `pb send destination set` | Set the default transfer destination | [!] | [!] | [!] | Requires S1/F1 enrolled source/target machines and live transfer/team-inbox authority. No real-device hash/resume/limits evidence (PLAN Log 2026-10-14). |
-| C080 | `pb send list` | List file transfers | [!] | [!] | [!] | Requires S1/F1 enrolled source/target machines and live transfer/team-inbox authority. No real-device hash/resume/limits evidence (PLAN Log 2026-10-14). |
-| C081 | `pb send status` | Inspect a file transfer | [!] | [!] | [!] | Requires S1/F1 enrolled source/target machines and live transfer/team-inbox authority. No real-device hash/resume/limits evidence (PLAN Log 2026-10-14). |
+| C067 | `pb inbox` | Manage the Paperboat Inbox | [ ] | [ ] | [ ] | — |
+| C068 | `pb inbox approve` | Approve an exact team file request | [ ] | [ ] | [ ] | — |
+| C069 | `pb inbox decline` | Decline an exact team file request | [ ] | [ ] | [ ] | — |
+| C070 | `pb inbox path` |  | [ ] | [ ] | [ ] | — |
+| C071 | `pb inbox policy` | Show or update team file acceptance | [ ] | [ ] | [ ] | — |
+| C072 | `pb inbox requests` | List team file requests | [ ] | [ ] | [ ] | — |
+| C073 | `pb inbox reset` |  | [ ] | [ ] | [ ] | — |
+| C074 | `pb inbox set` |  | [ ] | [ ] | [ ] | — |
+| C075 | `pb send` | Send files to a machine's Paperboat Inbox | [ ] | [ ] | [ ] | — |
+| C076 | `pb send cancel` | Cancel a file transfer batch | [ ] | [ ] | [ ] | — |
+| C077 | `pb send destination` | Show the default transfer destination | [ ] | [ ] | [ ] | — |
+| C078 | `pb send destination clear` | Clear the default transfer destination | [ ] | [ ] | [ ] | — |
+| C079 | `pb send destination set` | Set the default transfer destination | [ ] | [ ] | [ ] | — |
+| C080 | `pb send list` | List file transfers | [ ] | [ ] | [ ] | — |
+| C081 | `pb send status` | Inspect a file transfer | [ ] | [ ] | [ ] | — |
 
 ---
 
@@ -284,25 +284,25 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F7-01 | `pb preview <port>` foreground and `--background`; URL opens in a browser from another network — on L, M, W. | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B ready preview edge, configured public domain/TLS and grants. No public/private preview evidence (PLAN Log 2026-10-14). |
-| F7-02 | `--ttl` expiry, `stop`, `delete`, `list`, `status` behave as documented. | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B ready preview edge, configured public domain/TLS and grants. No public/private preview evidence (PLAN Log 2026-10-14). |
-| F7-03 | `--private` (only you) and `--team` (team grant) enforce access; others are refused. | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B ready preview edge, configured public domain/TLS and grants. No public/private preview evidence (PLAN Log 2026-10-14). |
-| F7-04 | Preview survives daemon restart (background) and ends cleanly when the origin stops. | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B ready preview edge, configured public domain/TLS and grants. No public/private preview evidence (PLAN Log 2026-10-14). |
-| F7-05 | HTTP/1.1, HTTP/2, HTTP/3, WebSocket and large bodies work through a preview. | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B ready preview edge, configured public domain/TLS and grants. No public/private preview evidence (PLAN Log 2026-10-14). |
+| F7-01 | `pb preview <port>` foreground and `--background`; URL opens in a browser from another network — on L, M, W. | [ ] | [ ] | [ ] | — |
+| F7-02 | `--ttl` expiry, `stop`, `delete`, `list`, `status` behave as documented. | [ ] | [ ] | [ ] | — |
+| F7-03 | `--private` (only you) and `--team` (team grant) enforce access; others are refused. | [ ] | [ ] | [ ] | — |
+| F7-04 | Preview survives daemon restart (background) and ends cleanly when the origin stops. | [ ] | [ ] | [ ] | — |
+| F7-05 | HTTP/1.1, HTTP/2, HTTP/3, WebSocket and large bodies work through a preview. | [ ] | [ ] | [ ] | — |
 | F7-06 | Console: create a preview, see stop/expiry times, stop it. | [ ] | [ ] | [ ] |  |
-| F7-07 | `pb preview inspect/replay`: verify if it works; otherwise hide it from the product. | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B ready preview edge, configured public domain/TLS and grants. No public/private preview evidence (PLAN Log 2026-10-14). |
+| F7-07 | `pb preview inspect/replay`: verify if it works; otherwise hide it from the product. | [ ] | [ ] | [ ] | — |
 
 **Commands**
 
 | ID | Command | Purpose | L | M | W | Evidence |
 |---|---|---|---|---|---|---|
-| C082 | `pb preview` | Expose a local target through a temporary preview | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B ready preview edge, configured public domain/TLS and grants. No public/private preview evidence (PLAN Log 2026-10-14). |
-| C083 | `pb preview delete` | Delete a temporary preview | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B ready preview edge, configured public domain/TLS and grants. No public/private preview evidence (PLAN Log 2026-10-14). |
-| C084 | `pb preview inspect` | Show daemon-local HTTP captures | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B ready preview edge, configured public domain/TLS and grants. No public/private preview evidence (PLAN Log 2026-10-14). |
-| C085 | `pb preview list` | List temporary previews | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B ready preview edge, configured public domain/TLS and grants. No public/private preview evidence (PLAN Log 2026-10-14). |
-| C086 | `pb preview replay` | Deliberately replay one retained HTTP request to the same origin | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B ready preview edge, configured public domain/TLS and grants. No public/private preview evidence (PLAN Log 2026-10-14). |
-| C087 | `pb preview status` | Show temporary preview status | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B ready preview edge, configured public domain/TLS and grants. No public/private preview evidence (PLAN Log 2026-10-14). |
-| C088 | `pb preview stop` | Stop a temporary preview | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B ready preview edge, configured public domain/TLS and grants. No public/private preview evidence (PLAN Log 2026-10-14). |
+| C082 | `pb preview` | Expose a local target through a temporary preview | [ ] | [ ] | [ ] | — |
+| C083 | `pb preview delete` | Delete a temporary preview | [ ] | [ ] | [ ] | — |
+| C084 | `pb preview inspect` | Show daemon-local HTTP captures | [ ] | [ ] | [ ] | — |
+| C085 | `pb preview list` | List temporary previews | [ ] | [ ] | [ ] | — |
+| C086 | `pb preview replay` | Deliberately replay one retained HTTP request to the same origin | [ ] | [ ] | [ ] | — |
+| C087 | `pb preview status` | Show temporary preview status | [ ] | [ ] | [ ] | — |
+| C088 | `pb preview stop` | Stop a temporary preview | [ ] | [ ] | [ ] | — |
 
 ---
 
@@ -310,54 +310,54 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F8-01 | Create a tunnel, add/update/remove routes, rename it, delete it — on L, M, W. | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| F8-02 | Custom domain add → DNS instructions → verify → serves with TLS → remove. | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| F8-03 | Tunnel survives daemon restart, machine reboot and update; pause/resume; stop. | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| F8-04 | Connectors add/list/drain/revoke and credential rotation without downtime. | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| F8-05 | On-demand port policy (`pb tunnel policy allow/get/revoke`). | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| F8-06 | HTTP/1.1, HTTP/2, HTTP/3, WebSocket, large uploads/downloads. | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| F8-07 | `pb tunnel doctor/logs/status` explain real failures. | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
+| F8-01 | Create a tunnel, add/update/remove routes, rename it, delete it — on L, M, W. | [ ] | [ ] | [ ] | — |
+| F8-02 | Custom domain add → DNS instructions → verify → serves with TLS → remove. | [ ] | [ ] | [ ] | — |
+| F8-03 | Tunnel survives daemon restart, machine reboot and update; pause/resume; stop. | [ ] | [ ] | [ ] | — |
+| F8-04 | Connectors add/list/drain/revoke and credential rotation without downtime. | [ ] | [ ] | [ ] | — |
+| F8-05 | On-demand port policy (`pb tunnel policy allow/get/revoke`). | [ ] | [ ] | [ ] | — |
+| F8-06 | HTTP/1.1, HTTP/2, HTTP/3, WebSocket, large uploads/downloads. | [ ] | [ ] | [ ] | — |
+| F8-07 | `pb tunnel doctor/logs/status` explain real failures. | [ ] | [ ] | [ ] | — |
 | F8-08 | Console: create, rename, route editing, domains, list filters (no deleted tombstones) all work against the server. | [ ] | [ ] | [ ] |  |
 
 **Commands**
 
 | ID | Command | Purpose | L | M | W | Evidence |
 |---|---|---|---|---|---|---|
-| C089 | `pb tunnel` | Manage durable tunnels or start an ephemeral tunnel | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C090 | `pb tunnel connector` | Manage tunnel connectors | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C091 | `pb tunnel connector add` | Add a connector on this host | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C092 | `pb tunnel connector drain` | Drain a tunnel connector | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C093 | `pb tunnel connector list` | List tunnel connectors | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C094 | `pb tunnel connector revoke` | Revoke a tunnel connector | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C095 | `pb tunnel create` | Create a durable tunnel | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C096 | `pb tunnel credentials` | Manage tunnel credentials | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C097 | `pb tunnel credentials rotate` | Rotate tunnel connector credentials | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C098 | `pb tunnel delete` | Delete endpoints and routes and revoke connectors while preserving user DNS records | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C099 | `pb tunnel doctor` | Diagnose tunnel health | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C100 | `pb tunnel domain` | Manage tunnel domains | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C101 | `pb tunnel domain add` | Add a tunnel domain | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C102 | `pb tunnel domain instructions` | Show authoritative DNS instructions for a tunnel domain | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C103 | `pb tunnel domain list` | List tunnel domains | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C104 | `pb tunnel domain remove` | Remove a tunnel domain | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C105 | `pb tunnel domain verify` | Verify a tunnel domain | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C106 | `pb tunnel inspect` | Show daemon-local HTTP captures | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C107 | `pb tunnel list` | List durable tunnels | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C108 | `pb tunnel logs` | Show tunnel logs | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C109 | `pb tunnel pause` | Pause new traffic while preserving tunnel identity and configuration | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C110 | `pb tunnel policy` | Manage permission to activate a private port on demand | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C111 | `pb tunnel policy allow` | Allow on-demand access to an exact machine port | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C112 | `pb tunnel policy get` | Show an on-demand port policy | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C113 | `pb tunnel policy revoke` | Revoke an on-demand port policy | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C114 | `pb tunnel replay` | Deliberately replay one retained HTTP request to the same origin | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C115 | `pb tunnel resume` | Resume new traffic for a preserved tunnel | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C116 | `pb tunnel route` | Manage tunnel routes | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C117 | `pb tunnel route add` | Add a tunnel route | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C118 | `pb tunnel route list` | List tunnel routes | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C119 | `pb tunnel route remove` | Remove a tunnel route | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C120 | `pb tunnel route update` | Update a tunnel route | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C121 | `pb tunnel show` | Show a durable tunnel | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C122 | `pb tunnel status` | Show tunnel health | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
-| C123 | `pb tunnel stop` | Stop an ephemeral tunnel | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B tunnel/edge/connector/domain APIs and TLS. No real-device durability, route or custom-domain evidence (PLAN Log 2026-10-14). |
+| C089 | `pb tunnel` | Manage durable tunnels or start an ephemeral tunnel | [ ] | [ ] | [ ] | — |
+| C090 | `pb tunnel connector` | Manage tunnel connectors | [ ] | [ ] | [ ] | — |
+| C091 | `pb tunnel connector add` | Add a connector on this host | [ ] | [ ] | [ ] | — |
+| C092 | `pb tunnel connector drain` | Drain a tunnel connector | [ ] | [ ] | [ ] | — |
+| C093 | `pb tunnel connector list` | List tunnel connectors | [ ] | [ ] | [ ] | — |
+| C094 | `pb tunnel connector revoke` | Revoke a tunnel connector | [ ] | [ ] | [ ] | — |
+| C095 | `pb tunnel create` | Create a durable tunnel | [ ] | [ ] | [ ] | — |
+| C096 | `pb tunnel credentials` | Manage tunnel credentials | [ ] | [ ] | [ ] | — |
+| C097 | `pb tunnel credentials rotate` | Rotate tunnel connector credentials | [ ] | [ ] | [ ] | — |
+| C098 | `pb tunnel delete` | Delete endpoints and routes and revoke connectors while preserving user DNS records | [ ] | [ ] | [ ] | — |
+| C099 | `pb tunnel doctor` | Diagnose tunnel health | [ ] | [ ] | [ ] | — |
+| C100 | `pb tunnel domain` | Manage tunnel domains | [ ] | [ ] | [ ] | — |
+| C101 | `pb tunnel domain add` | Add a tunnel domain | [ ] | [ ] | [ ] | — |
+| C102 | `pb tunnel domain instructions` | Show authoritative DNS instructions for a tunnel domain | [ ] | [ ] | [ ] | — |
+| C103 | `pb tunnel domain list` | List tunnel domains | [ ] | [ ] | [ ] | — |
+| C104 | `pb tunnel domain remove` | Remove a tunnel domain | [ ] | [ ] | [ ] | — |
+| C105 | `pb tunnel domain verify` | Verify a tunnel domain | [ ] | [ ] | [ ] | — |
+| C106 | `pb tunnel inspect` | Show daemon-local HTTP captures | [ ] | [ ] | [ ] | — |
+| C107 | `pb tunnel list` | List durable tunnels | [ ] | [ ] | [ ] | — |
+| C108 | `pb tunnel logs` | Show tunnel logs | [ ] | [ ] | [ ] | — |
+| C109 | `pb tunnel pause` | Pause new traffic while preserving tunnel identity and configuration | [ ] | [ ] | [ ] | — |
+| C110 | `pb tunnel policy` | Manage permission to activate a private port on demand | [ ] | [ ] | [ ] | — |
+| C111 | `pb tunnel policy allow` | Allow on-demand access to an exact machine port | [ ] | [ ] | [ ] | — |
+| C112 | `pb tunnel policy get` | Show an on-demand port policy | [ ] | [ ] | [ ] | — |
+| C113 | `pb tunnel policy revoke` | Revoke an on-demand port policy | [ ] | [ ] | [ ] | — |
+| C114 | `pb tunnel replay` | Deliberately replay one retained HTTP request to the same origin | [ ] | [ ] | [ ] | — |
+| C115 | `pb tunnel resume` | Resume new traffic for a preserved tunnel | [ ] | [ ] | [ ] | — |
+| C116 | `pb tunnel route` | Manage tunnel routes | [ ] | [ ] | [ ] | — |
+| C117 | `pb tunnel route add` | Add a tunnel route | [ ] | [ ] | [ ] | — |
+| C118 | `pb tunnel route list` | List tunnel routes | [ ] | [ ] | [ ] | — |
+| C119 | `pb tunnel route remove` | Remove a tunnel route | [ ] | [ ] | [ ] | — |
+| C120 | `pb tunnel route update` | Update a tunnel route | [ ] | [ ] | [ ] | — |
+| C121 | `pb tunnel show` | Show a durable tunnel | [ ] | [ ] | [ ] | — |
+| C122 | `pb tunnel status` | Show tunnel health | [ ] | [ ] | [ ] | — |
+| C123 | `pb tunnel stop` | Stop an ephemeral tunnel | [ ] | [ ] | [ ] | — |
 
 ---
 
@@ -365,38 +365,38 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F9-01 | `https://<port>.<m>.<local domain>` and `https://<m>.<local domain>:<port>` open with trusted HTTPS from every client platform — all pairs. | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| F9-02 | Raw TCP via `127.100.x.x` and `pb access machine <m> --port <p> --listen 127.0.0.1:<q>`. | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| F9-03 | `pb config local-access` alias, domain and proxy settings apply and reset correctly. | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| F9-04 | Access is denied without permission; revoking access ends active flows. | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| F9-05 | Works over direct P2P and over relay fallback (block UDP to force relay). | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| F9-06 | `pb edge list`, `pb relay list` correct; console Network shows edges, relays and real latency. | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
+| F9-01 | `https://<port>.<m>.<local domain>` and `https://<m>.<local domain>:<port>` open with trusted HTTPS from every client platform — all pairs. | [ ] | [ ] | [ ] | — |
+| F9-02 | Raw TCP via `127.100.x.x` and `pb access machine <m> --port <p> --listen 127.0.0.1:<q>`. | [ ] | [ ] | [ ] | — |
+| F9-03 | `pb config local-access` alias, domain and proxy settings apply and reset correctly. | [ ] | [ ] | [ ] | — |
+| F9-04 | Access is denied without permission; revoking access ends active flows. | [ ] | [ ] | [ ] | — |
+| F9-05 | Works over direct P2P and over relay fallback (block UDP to force relay). | [ ] | [ ] | [ ] | — |
+| F9-06 | `pb edge list`, `pb relay list` correct; console Network shows edges, relays and real latency. | [ ] | [ ] | [ ] | — |
 
 **Commands**
 
 | ID | Command | Purpose | L | M | W | Evidence |
 |---|---|---|---|---|---|---|
-| C124 | `pb access` | Open authenticated private access | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| C125 | `pb access machine` | Forward a local port to an authorized machine service | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| C126 | `pb access tunnel` | Open private TCP access through stable hostd | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| C127 | `pb config local-access` | Configure local browser domains, aliases and reverse proxies | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| C128 | `pb config local-access alias` | Manage named browser aliases for authorized machine ports | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| C129 | `pb config local-access alias set` | Set and apply a service alias | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| C130 | `pb config local-access alias unset` | Remove a service alias | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| C131 | `pb config local-access apply` | Apply local browser settings from the config file | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| C132 | `pb config local-access domain` | Set the local browser domain | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| C133 | `pb config local-access domain reset` | Restore the default local browser domain | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| C134 | `pb config local-access domain set` | Set and apply the local browser domain | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| C135 | `pb config local-access proxy` | Route machine app names through Coolify or another reverse proxy | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| C136 | `pb config local-access proxy set` | Set the machine reverse-proxy port | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| C137 | `pb config local-access proxy unset` | Restore the default reverse-proxy port | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| C138 | `pb config local-access show` | Show local browser domains and aliases | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| C139 | `pb edge` | Inspect tunnel edges | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| C140 | `pb edge list` | List hosted and self-hosted tunnel edges | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| C141 | `pb relay` | Inspect hosted and self-hosted relays | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| C142 | `pb relay list` | List hosted and self-hosted relays | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). |
-| C002 | `pb resolve` | Resolve a peer machine IP, port forwardings and tags over gRPC IPC | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). Retained live RPC command; validation blocked by S1 enrollment/API outage (HTTP 521 on 2026-10-14). |
-| C003 | `pb tag` | Assign tags to a machine over gRPC IPC | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B authoritative domain discovery/network inventory; consumers must follow the committed producer. No direct/relay device matrix (PLAN Log 2026-10-14). Retained live RPC command; validation blocked by S1 enrollment/API outage (HTTP 521 on 2026-10-14). |
+| C124 | `pb access` | Open authenticated private access | [ ] | [ ] | [ ] | — |
+| C125 | `pb access machine` | Forward a local port to an authorized machine service | [ ] | [ ] | [ ] | — |
+| C126 | `pb access tunnel` | Open private TCP access through stable hostd | [ ] | [ ] | [ ] | — |
+| C127 | `pb config local-access` | Configure local browser domains, aliases and reverse proxies | [ ] | [ ] | [ ] | — |
+| C128 | `pb config local-access alias` | Manage named browser aliases for authorized machine ports | [ ] | [ ] | [ ] | — |
+| C129 | `pb config local-access alias set` | Set and apply a service alias | [ ] | [ ] | [ ] | — |
+| C130 | `pb config local-access alias unset` | Remove a service alias | [ ] | [ ] | [ ] | — |
+| C131 | `pb config local-access apply` | Apply local browser settings from the config file | [ ] | [ ] | [ ] | — |
+| C132 | `pb config local-access domain` | Set the local browser domain | [ ] | [ ] | [ ] | — |
+| C133 | `pb config local-access domain reset` | Restore the default local browser domain | [ ] | [ ] | [ ] | — |
+| C134 | `pb config local-access domain set` | Set and apply the local browser domain | [ ] | [ ] | [ ] | — |
+| C135 | `pb config local-access proxy` | Route machine app names through Coolify or another reverse proxy | [ ] | [ ] | [ ] | — |
+| C136 | `pb config local-access proxy set` | Set the machine reverse-proxy port | [ ] | [ ] | [ ] | — |
+| C137 | `pb config local-access proxy unset` | Restore the default reverse-proxy port | [ ] | [ ] | [ ] | — |
+| C138 | `pb config local-access show` | Show local browser domains and aliases | [ ] | [ ] | [ ] | — |
+| C139 | `pb edge` | Inspect tunnel edges | [ ] | [ ] | [ ] | — |
+| C140 | `pb edge list` | List hosted and self-hosted tunnel edges | [ ] | [ ] | [ ] | — |
+| C141 | `pb relay` | Inspect hosted and self-hosted relays | [ ] | [ ] | [ ] | — |
+| C142 | `pb relay list` | List hosted and self-hosted relays | [ ] | [ ] | [ ] | — |
+| C002 | `pb resolve` | Resolve a peer machine IP, port forwardings and tags over gRPC IPC | [ ] | [ ] | [ ] | — |
+| C003 | `pb tag` | Assign tags to a machine over gRPC IPC | [ ] | [ ] | [ ] | — |
 
 ---
 
@@ -404,43 +404,43 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F10-01 | Set/unset/list for personal, team and per-machine overrides; values appear in new terminals and execs on L, M, W targets; never in logs or diagnostics. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| F10-02 | Vault init/unlock/lock/password/recovery/recover/remove/reset/resume with the OS keychain (M, W, L desktop) and on headless Linux (password unlock, 15-minute memory key). | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| F10-03 | No ENV assigned → commands run normally; pending → clear message; undeliverable → the specific error. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| F10-04 | Team scopes: create, grant, revoke, rotate, reset; `pb env grants sync`; access follows roles. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| F10-05 | Rotation after a machine is revoked; `pb env host show` reports delivery truthfully. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
+| F10-01 | Set/unset/list for personal, team and per-machine overrides; values appear in new terminals and execs on L, M, W targets; never in logs or diagnostics. | [ ] | [ ] | [ ] | — |
+| F10-02 | Vault init/unlock/lock/password/recovery/recover/remove/reset/resume with the OS keychain (M, W, L desktop) and on headless Linux (password unlock, 15-minute memory key). | [ ] | [ ] | [ ] | — |
+| F10-03 | No ENV assigned → commands run normally; pending → clear message; undeliverable → the specific error. | [ ] | [ ] | [ ] | — |
+| F10-04 | Team scopes: create, grant, revoke, rotate, reset; `pb env grants sync`; access follows roles. | [ ] | [ ] | [ ] | — |
+| F10-05 | Rotation after a machine is revoked; `pb env host show` reports delivery truthfully. | [ ] | [ ] | [ ] | — |
 | F10-06 | Console Environment screens work end to end. | [ ] | [ ] | [ ] |  |
 
 **Commands**
 
 | ID | Command | Purpose | L | M | W | Evidence |
 |---|---|---|---|---|---|---|
-| C143 | `pb env` | Manage automatic global ENV and device overrides | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C144 | `pb env grants` | Reconcile encrypted ENV team grants | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C145 | `pb env grants sync` | Accept pending team grants into this account's encrypted vault | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C146 | `pb env host` | Inspect automatic workspace ENV delivery | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C147 | `pb env host show` | Show published ENV delivery and observed application on a host | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C148 | `pb env list` | List configured environment-variable metadata | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C149 | `pb env rotate` | Rotate personal ENV scope keys while preserving values | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C150 | `pb env rotate cancel` | Cancel an uncommitted personal ENV key rotation | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C151 | `pb env set` | Set one environment variable through a hidden prompt or bounded stdin | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C152 | `pb env team` | Manage encrypted ENV team scopes | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C153 | `pb env team create` | Create an encrypted ENV team scope | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C154 | `pb env team grant` | Grant an account access to an encrypted ENV team scope | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C155 | `pb env team reset` | Discard all values and replace an encrypted ENV team key | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C156 | `pb env team revoke` | Rotate an ENV team scope and revoke selected members | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C157 | `pb env team rotate` | Rotate an encrypted ENV team key while preserving its values | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C158 | `pb env unset` | Remove one environment variable | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C159 | `pb env vault` | Manage password-protected ENV key custody | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C160 | `pb env vault init` | Create a password-protected ENV vault | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C161 | `pb env vault lock` | Clear unlocked vault keys while retaining encrypted custody | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C162 | `pb env vault password` | Rewrap unlocked ENV keys with a new password | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C163 | `pb env vault recover` | Recover vault access and replace the password and recovery code | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C164 | `pb env vault recovery` | Enable, replace, or disable the optional recovery code | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C165 | `pb env vault remove` | Remove this machine's local ENV vault custody | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C166 | `pb env vault reset` | Replace personal ENV keys and delete every personal value | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C167 | `pb env vault resume` | Reconcile an interrupted vault publication | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
-| C168 | `pb env vault unlock` | Unlock this account's ENV vault on this machine | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live encrypted ENV/vault/grant authority; no OS-keychain or headless delivery matrix on this build (PLAN Log 2026-10-14). |
+| C143 | `pb env` | Manage automatic global ENV and device overrides | [ ] | [ ] | [ ] | — |
+| C144 | `pb env grants` | Reconcile encrypted ENV team grants | [ ] | [ ] | [ ] | — |
+| C145 | `pb env grants sync` | Accept pending team grants into this account's encrypted vault | [ ] | [ ] | [ ] | — |
+| C146 | `pb env host` | Inspect automatic workspace ENV delivery | [ ] | [ ] | [ ] | — |
+| C147 | `pb env host show` | Show published ENV delivery and observed application on a host | [ ] | [ ] | [ ] | — |
+| C148 | `pb env list` | List configured environment-variable metadata | [ ] | [ ] | [ ] | — |
+| C149 | `pb env rotate` | Rotate personal ENV scope keys while preserving values | [ ] | [ ] | [ ] | — |
+| C150 | `pb env rotate cancel` | Cancel an uncommitted personal ENV key rotation | [ ] | [ ] | [ ] | — |
+| C151 | `pb env set` | Set one environment variable through a hidden prompt or bounded stdin | [ ] | [ ] | [ ] | — |
+| C152 | `pb env team` | Manage encrypted ENV team scopes | [ ] | [ ] | [ ] | — |
+| C153 | `pb env team create` | Create an encrypted ENV team scope | [ ] | [ ] | [ ] | — |
+| C154 | `pb env team grant` | Grant an account access to an encrypted ENV team scope | [ ] | [ ] | [ ] | — |
+| C155 | `pb env team reset` | Discard all values and replace an encrypted ENV team key | [ ] | [ ] | [ ] | — |
+| C156 | `pb env team revoke` | Rotate an ENV team scope and revoke selected members | [ ] | [ ] | [ ] | — |
+| C157 | `pb env team rotate` | Rotate an encrypted ENV team key while preserving its values | [ ] | [ ] | [ ] | — |
+| C158 | `pb env unset` | Remove one environment variable | [ ] | [ ] | [ ] | — |
+| C159 | `pb env vault` | Manage password-protected ENV key custody | [ ] | [ ] | [ ] | — |
+| C160 | `pb env vault init` | Create a password-protected ENV vault | [ ] | [ ] | [ ] | — |
+| C161 | `pb env vault lock` | Clear unlocked vault keys while retaining encrypted custody | [ ] | [ ] | [ ] | — |
+| C162 | `pb env vault password` | Rewrap unlocked ENV keys with a new password | [ ] | [ ] | [ ] | — |
+| C163 | `pb env vault recover` | Recover vault access and replace the password and recovery code | [ ] | [ ] | [ ] | — |
+| C164 | `pb env vault recovery` | Enable, replace, or disable the optional recovery code | [ ] | [ ] | [ ] | — |
+| C165 | `pb env vault remove` | Remove this machine's local ENV vault custody | [ ] | [ ] | [ ] | — |
+| C166 | `pb env vault reset` | Replace personal ENV keys and delete every personal value | [ ] | [ ] | [ ] | — |
+| C167 | `pb env vault resume` | Reconcile an interrupted vault publication | [ ] | [ ] | [ ] | — |
+| C168 | `pb env vault unlock` | Unlock this account's ENV vault on this machine | [ ] | [ ] | [ ] | — |
 
 ---
 
@@ -448,39 +448,39 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F11-01 | Connect HTTPS, SSH and local repositories; store/remove credentials privately. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| F11-02 | Assign, sync, apply and validate on L, M, W. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| F11-03 | Conflicts listed, shown, compared and resolved both ways; consent and approve flow. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| F11-04 | Force direction, unassign, team defaults set/adopt/unadopt. | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
+| F11-01 | Connect HTTPS, SSH and local repositories; store/remove credentials privately. | [ ] | [ ] | [ ] | — |
+| F11-02 | Assign, sync, apply and validate on L, M, W. | [ ] | [ ] | [ ] | — |
+| F11-03 | Conflicts listed, shown, compared and resolved both ways; consent and approve flow. | [ ] | [ ] | [ ] | — |
+| F11-04 | Force direction, unassign, team defaults set/adopt/unadopt. | [ ] | [ ] | [ ] | — |
 | F11-05 | Console Config sync screens work end to end. | [ ] | [ ] | [ ] |  |
 
 **Commands**
 
 | ID | Command | Purpose | L | M | W | Evidence |
 |---|---|---|---|---|---|---|
-| C169 | `pb config approve` | Approve the currently reviewed pull revision | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| C170 | `pb config conflict` | Inspect and resolve configuration conflicts | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| C171 | `pb config conflict compare` | Read current machine and repository conflict contents through an encrypted connection | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| C172 | `pb config conflict list` | List current path conflicts | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| C173 | `pb config conflict resolve` | Choose the machine or repository version | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| C174 | `pb config conflict show` | Show a current path conflict | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| C175 | `pb config force` | Force a scoped configuration direction | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| C176 | `pb config repository` | Connect custom Git repositories and manage machine credentials | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| C177 | `pb config repository connect` | Connect an HTTPS, SSH, or local Git repository | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| C178 | `pb config repository credentials` | Store credentials privately on this machine | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| C179 | `pb config repository credentials remove` | Remove this machine's saved repository credentials | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| C180 | `pb config repository credentials set` | Read a credential profile from a private JSON file or stdin | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| C181 | `pb config repository list` | List connected repositories | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| C182 | `pb config status` | Show configuration synchronization status | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| C183 | `pb config sync` | Validate and apply this machine's configuration file | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| C184 | `pb config sync apply` | Review the effective file configuration on this machine | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| C185 | `pb config sync init` | Create an empty machine configuration without overwriting existing files | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| C186 | `pb config sync path` | Show the authoritative machine configuration path | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| C187 | `pb config sync validate` | Review the effective file configuration on this machine | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| C188 | `pb config team-default-adopt` | Adopt a team default using your provider access | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| C189 | `pb config team-default-set` | Set a team's default pull repository | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| C190 | `pb config team-default-unadopt` | Stop inheriting a team configuration default | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
-| C191 | `pb config unassign` | Remove a config repository assignment | [!] | [!] | [!] | Requires S1/F1 enrolled-device baseline and live repository/assignment/consent APIs; no device conflict or credential-storage matrix (PLAN Log 2026-10-14). |
+| C169 | `pb config approve` | Approve the currently reviewed pull revision | [ ] | [ ] | [ ] | — |
+| C170 | `pb config conflict` | Inspect and resolve configuration conflicts | [ ] | [ ] | [ ] | — |
+| C171 | `pb config conflict compare` | Read current machine and repository conflict contents through an encrypted connection | [ ] | [ ] | [ ] | — |
+| C172 | `pb config conflict list` | List current path conflicts | [ ] | [ ] | [ ] | — |
+| C173 | `pb config conflict resolve` | Choose the machine or repository version | [ ] | [ ] | [ ] | — |
+| C174 | `pb config conflict show` | Show a current path conflict | [ ] | [ ] | [ ] | — |
+| C175 | `pb config force` | Force a scoped configuration direction | [ ] | [ ] | [ ] | — |
+| C176 | `pb config repository` | Connect custom Git repositories and manage machine credentials | [ ] | [ ] | [ ] | — |
+| C177 | `pb config repository connect` | Connect an HTTPS, SSH, or local Git repository | [ ] | [ ] | [ ] | — |
+| C178 | `pb config repository credentials` | Store credentials privately on this machine | [ ] | [ ] | [ ] | — |
+| C179 | `pb config repository credentials remove` | Remove this machine's saved repository credentials | [ ] | [ ] | [ ] | — |
+| C180 | `pb config repository credentials set` | Read a credential profile from a private JSON file or stdin | [ ] | [ ] | [ ] | — |
+| C181 | `pb config repository list` | List connected repositories | [ ] | [ ] | [ ] | — |
+| C182 | `pb config status` | Show configuration synchronization status | [ ] | [ ] | [ ] | — |
+| C183 | `pb config sync` | Validate and apply this machine's configuration file | [ ] | [ ] | [ ] | — |
+| C184 | `pb config sync apply` | Review the effective file configuration on this machine | [ ] | [ ] | [ ] | — |
+| C185 | `pb config sync init` | Create an empty machine configuration without overwriting existing files | [ ] | [ ] | [ ] | — |
+| C186 | `pb config sync path` | Show the authoritative machine configuration path | [ ] | [ ] | [ ] | — |
+| C187 | `pb config sync validate` | Review the effective file configuration on this machine | [ ] | [ ] | [ ] | — |
+| C188 | `pb config team-default-adopt` | Adopt a team default using your provider access | [ ] | [ ] | [ ] | — |
+| C189 | `pb config team-default-set` | Set a team's default pull repository | [ ] | [ ] | [ ] | — |
+| C190 | `pb config team-default-unadopt` | Stop inheriting a team configuration default | [ ] | [ ] | [ ] | — |
+| C191 | `pb config unassign` | Remove a config repository assignment | [ ] | [ ] | [ ] | — |
 
 ---
 
@@ -488,42 +488,42 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F12-01 | Create, get, list, delete a team (payment handled in F13). | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| F12-02 | Invite by email (also people without an account), accept, decline, cancel, invitations listing. | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| F12-03 | Roles owner/admin/member; change role; remove member; leave; transfer ownership. | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| F12-04 | Team machines: enroll into team, share personal machine, grant, unshare, transfer-to-team, remove; default access shown while enrolling. | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| F12-05 | Explicit resource grants and `pb team attach`; `pb team activity`. | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| F12-06 | Suspension and recovery behave as documented. | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
+| F12-01 | Create, get, list, delete a team (payment handled in F13). | [ ] | [ ] | [ ] | — |
+| F12-02 | Invite by email (also people without an account), accept, decline, cancel, invitations listing. | [ ] | [ ] | [ ] | — |
+| F12-03 | Roles owner/admin/member; change role; remove member; leave; transfer ownership. | [ ] | [ ] | [ ] | — |
+| F12-04 | Team machines: enroll into team, share personal machine, grant, unshare, transfer-to-team, remove; default access shown while enrolling. | [ ] | [ ] | [ ] | — |
+| F12-05 | Explicit resource grants and `pb team attach`; `pb team activity`. | [ ] | [ ] | [ ] | — |
+| F12-06 | Suspension and recovery behave as documented. | [ ] | [ ] | [ ] | — |
 | F12-07 | Console Teams screens per console/NOTES.md "Teams". | [ ] | [ ] | [ ] |  |
 
 **Commands**
 
 | ID | Command | Purpose | L | M | W | Evidence |
 |---|---|---|---|---|---|---|
-| C192 | `pb team` | Manage teams and explicit resource permissions | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| C193 | `pb team accept` | Accept an invitation bound to this account | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| C194 | `pb team activity` | View owner/admin activity from the last 90 days | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| C195 | `pb team attach` | Attach or detach an explicitly selected personal resource | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| C196 | `pb team cancel-invite` | Cancel an outstanding invitation | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| C197 | `pb team create` | Create a team | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| C198 | `pb team decline` | Decline an invitation bound to this account | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| C199 | `pb team delete` | Delete a team | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| C200 | `pb team get` | Show one team and its current generation | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| C201 | `pb team grant` | Set or revoke an explicit resource permission | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| C202 | `pb team invitation` | Show an invitation you may receive or administer | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| C203 | `pb team invitations` | Discover pending invitations received by you or administered for a team | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| C204 | `pb team invite` | Invite an account as a member | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| C205 | `pb team leave` | Leave a team | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| C206 | `pb team list` | List teams | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| C207 | `pb team machine` | Share machines and manage exact team access | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| C208 | `pb team machine grant` | Set all-member or selected-member machine capabilities | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| C209 | `pb team machine remove` | Revoke a team-owned machine without personal takeover | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| C210 | `pb team machine share` | Share your personal machine with a team; grants are separate | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| C211 | `pb team machine transfer-to-team` | Explicitly transfer your enrollment to team ownership | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| C212 | `pb team machine unshare` | Withdraw the team's grants while retaining personal ownership | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| C213 | `pb team remove` | Remove a team member | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| C214 | `pb team role` | Change a team member's role | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
-| C215 | `pb team transfer` | Transfer team ownership | [!] | [!] | [!] | Requires S1/F1 device baseline and Lane B live team/member/invitation/resource authority; invitation/role/suspension matrix not verified (PLAN Log 2026-10-14). |
+| C192 | `pb team` | Manage teams and explicit resource permissions | [ ] | [ ] | [ ] | — |
+| C193 | `pb team accept` | Accept an invitation bound to this account | [ ] | [ ] | [ ] | — |
+| C194 | `pb team activity` | View owner/admin activity from the last 90 days | [ ] | [ ] | [ ] | — |
+| C195 | `pb team attach` | Attach or detach an explicitly selected personal resource | [ ] | [ ] | [ ] | — |
+| C196 | `pb team cancel-invite` | Cancel an outstanding invitation | [ ] | [ ] | [ ] | — |
+| C197 | `pb team create` | Create a team | [ ] | [ ] | [ ] | — |
+| C198 | `pb team decline` | Decline an invitation bound to this account | [ ] | [ ] | [ ] | — |
+| C199 | `pb team delete` | Delete a team | [ ] | [ ] | [ ] | — |
+| C200 | `pb team get` | Show one team and its current generation | [ ] | [ ] | [ ] | — |
+| C201 | `pb team grant` | Set or revoke an explicit resource permission | [ ] | [ ] | [ ] | — |
+| C202 | `pb team invitation` | Show an invitation you may receive or administer | [ ] | [ ] | [ ] | — |
+| C203 | `pb team invitations` | Discover pending invitations received by you or administered for a team | [ ] | [ ] | [ ] | — |
+| C204 | `pb team invite` | Invite an account as a member | [ ] | [ ] | [ ] | — |
+| C205 | `pb team leave` | Leave a team | [ ] | [ ] | [ ] | — |
+| C206 | `pb team list` | List teams | [ ] | [ ] | [ ] | — |
+| C207 | `pb team machine` | Share machines and manage exact team access | [ ] | [ ] | [ ] | — |
+| C208 | `pb team machine grant` | Set all-member or selected-member machine capabilities | [ ] | [ ] | [ ] | — |
+| C209 | `pb team machine remove` | Revoke a team-owned machine without personal takeover | [ ] | [ ] | [ ] | — |
+| C210 | `pb team machine share` | Share your personal machine with a team; grants are separate | [ ] | [ ] | [ ] | — |
+| C211 | `pb team machine transfer-to-team` | Explicitly transfer your enrollment to team ownership | [ ] | [ ] | [ ] | — |
+| C212 | `pb team machine unshare` | Withdraw the team's grants while retaining personal ownership | [ ] | [ ] | [ ] | — |
+| C213 | `pb team remove` | Remove a team member | [ ] | [ ] | [ ] | — |
+| C214 | `pb team role` | Change a team member's role | [ ] | [ ] | [ ] | — |
+| C215 | `pb team transfer` | Transfer team ownership | [ ] | [ ] | [ ] | — |
 
 ---
 
@@ -544,26 +544,26 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F14-01 | `pb update --from <build>` on L, M, W succeeds and reports the new version. | [!] | [!] | [!] | Requires S1/F1 working device baseline for supplied-update/rollback/continuity; signed/offline release checks also need the pending update-trust decision and Lane B release infrastructure (PLAN Log 2026-10-14). |
-| F14-02 | During an update, afterwards without user action: idle and foreground terminals reconnect to the same shell, an open `pb ssh` session stays connected, a running exec returns its result, a running transfer finishes or resumes, previews and tunnels come back on the same URL — on L, M, W (smoke `--update`). | [!] | [!] | [!] | Requires S1/F1 working device baseline for supplied-update/rollback/continuity; signed/offline release checks also need the pending update-trust decision and Lane B release infrastructure (PLAN Log 2026-10-14). |
-| F14-03 | Any failure (bad file, wrong platform, killed mid-update, failed restart, disk full) leaves the previous version working with a clear error — on L, M, W. | [!] | [!] | [!] | Requires S1/F1 working device baseline for supplied-update/rollback/continuity; signed/offline release checks also need the pending update-trust decision and Lane B release infrastructure (PLAN Log 2026-10-14). |
-| F14-04 | Old session-owner generations stop and are removed after their last session closes. | [!] | [!] | [!] | Requires S1/F1 working device baseline for supplied-update/rollback/continuity; signed/offline release checks also need the pending update-trust decision and Lane B release infrastructure (PLAN Log 2026-10-14). |
-| F14-05 | Real signed release → `pb update` and `--force` on L, M, W; tampered metadata or file rejected. | [!] | [!] | [!] | Requires S1/F1 working device baseline for supplied-update/rollback/continuity; signed/offline release checks also need the pending update-trust decision and Lane B release infrastructure (PLAN Log 2026-10-14). |
-| F14-06 | Automatic update at a configured time on L, M, W; `pb update settings` changes and disables it. | [!] | [!] | [!] | Requires S1/F1 working device baseline for supplied-update/rollback/continuity; signed/offline release checks also need the pending update-trust decision and Lane B release infrastructure (PLAN Log 2026-10-14). |
-| F14-07 | Minimum supported version blocks an old official build with a clear message; custom builds unaffected. | [!] | [!] | [!] | Requires S1/F1 working device baseline for supplied-update/rollback/continuity; signed/offline release checks also need the pending update-trust decision and Lane B release infrastructure (PLAN Log 2026-10-14). |
-| F14-08 | `pb update bundle` + `--from <file.pb-update>` installs offline on L, M, W. | [!] | [!] | [!] | Requires S1/F1 working device baseline for supplied-update/rollback/continuity; signed/offline release checks also need the pending update-trust decision and Lane B release infrastructure (PLAN Log 2026-10-14). |
-| F14-09 | `pb update check/download/status` accurate; console update summary accurate per workspace. | [!] | [!] | [!] | Requires S1/F1 working device baseline for supplied-update/rollback/continuity; signed/offline release checks also need the pending update-trust decision and Lane B release infrastructure (PLAN Log 2026-10-14). |
+| F14-01 | `pb update --from <build>` on L, M, W succeeds and reports the new version. | [ ] | [ ] | [ ] | — |
+| F14-02 | During an update, afterwards without user action: idle and foreground terminals reconnect to the same shell, an open `pb ssh` session stays connected, a running exec returns its result, a running transfer finishes or resumes, previews and tunnels come back on the same URL — on L, M, W (smoke `--update`). | [ ] | [ ] | [ ] | — |
+| F14-03 | Any failure (bad file, wrong platform, killed mid-update, failed restart, disk full) leaves the previous version working with a clear error — on L, M, W. | [ ] | [ ] | [ ] | — |
+| F14-04 | Old session-owner generations stop and are removed after their last session closes. | [ ] | [ ] | [ ] | — |
+| F14-05 | Real signed release → `pb update` and `--force` on L, M, W; tampered metadata or file rejected. | [ ] | [ ] | [ ] | — |
+| F14-06 | Automatic update at a configured time on L, M, W; `pb update settings` changes and disables it. | [ ] | [ ] | [ ] | — |
+| F14-07 | Minimum supported version blocks an old official build with a clear message; custom builds unaffected. | [ ] | [ ] | [ ] | — |
+| F14-08 | `pb update bundle` + `--from <file.pb-update>` installs offline on L, M, W. | [ ] | [ ] | [ ] | — |
+| F14-09 | `pb update check/download/status` accurate; console update summary accurate per workspace. | [ ] | [ ] | [ ] | — |
 
 **Commands**
 
 | ID | Command | Purpose | L | M | W | Evidence |
 |---|---|---|---|---|---|---|
-| C216 | `pb update` | Update pb from the signed Paperboat release | [!] | [!] | [!] | Requires S1/F1 working device baseline for supplied-update/rollback/continuity; signed/offline release checks also need the pending update-trust decision and Lane B release infrastructure (PLAN Log 2026-10-14). |
-| C217 | `pb update bundle` | Save an official update and its signed proof for offline installation | [!] | [!] | [!] | Requires S1/F1 working device baseline for supplied-update/rollback/continuity; signed/offline release checks also need the pending update-trust decision and Lane B release infrastructure (PLAN Log 2026-10-14). |
-| C218 | `pb update check` | Check the signed Paperboat release without installing it | [!] | [!] | [!] | Requires S1/F1 working device baseline for supplied-update/rollback/continuity; signed/offline release checks also need the pending update-trust decision and Lane B release infrastructure (PLAN Log 2026-10-14). |
-| C219 | `pb update download` | Download and verify an update without installing it | [!] | [!] | [!] | Requires S1/F1 working device baseline for supplied-update/rollback/continuity; signed/offline release checks also need the pending update-trust decision and Lane B release infrastructure (PLAN Log 2026-10-14). |
-| C220 | `pb update settings` | View or change automatic update settings | [!] | [!] | [!] | Requires S1/F1 working device baseline for supplied-update/rollback/continuity; signed/offline release checks also need the pending update-trust decision and Lane B release infrastructure (PLAN Log 2026-10-14). |
-| C221 | `pb update status` | Show installed Paperboat update state | [!] | [!] | [!] | Requires S1/F1 working device baseline for supplied-update/rollback/continuity; signed/offline release checks also need the pending update-trust decision and Lane B release infrastructure (PLAN Log 2026-10-14). |
+| C216 | `pb update` | Update pb from the signed Paperboat release | [ ] | [ ] | [ ] | — |
+| C217 | `pb update bundle` | Save an official update and its signed proof for offline installation | [ ] | [ ] | [ ] | — |
+| C218 | `pb update check` | Check the signed Paperboat release without installing it | [ ] | [ ] | [ ] | — |
+| C219 | `pb update download` | Download and verify an update without installing it | [ ] | [ ] | [ ] | — |
+| C220 | `pb update settings` | View or change automatic update settings | [ ] | [ ] | [ ] | — |
+| C221 | `pb update status` | Show installed Paperboat update state | [ ] | [ ] | [ ] | — |
 
 ---
 
@@ -571,37 +571,37 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F15-01 | `pb doctor` is healthy only when terminal and exec actually work; every failing check says what to do; `--repair` fixes what it claims. | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
-| F15-02 | `pb bugreport` produces a bundle with no secrets; support references resolve in the server support lookup. | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
-| F15-03 | Diagnostics are written on L, M, W (confirm the Windows location) and never contain credentials, ENV values, terminal or file content. | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
-| F15-04 | `pb config customize` (shortcuts, defaults, TUI), `status-bar`, `set/unset/show/path` work and survive updates. | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
-| F15-05 | Shell completion for bash, zsh, fish, PowerShell installs and completes commands and machine names. | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
+| F15-01 | `pb doctor` is healthy only when terminal and exec actually work; every failing check says what to do; `--repair` fixes what it claims. | [ ] | [ ] | [ ] | — |
+| F15-02 | `pb bugreport` produces a bundle with no secrets; support references resolve in the server support lookup. | [ ] | [ ] | [ ] | — |
+| F15-03 | Diagnostics are written on L, M, W (confirm the Windows location) and never contain credentials, ENV values, terminal or file content. | [ ] | [ ] | [ ] | — |
+| F15-04 | `pb config customize` (shortcuts, defaults, TUI), `status-bar`, `set/unset/show/path` work and survive updates. | [ ] | [ ] | [ ] | — |
+| F15-05 | Shell completion for bash, zsh, fish, PowerShell installs and completes commands and machine names. | [ ] | [ ] | [ ] | — |
 | F15-06 | Console Activity feed shows real events. | [ ] | [ ] | [ ] |  |
 
 **Commands**
 
 | ID | Command | Purpose | L | M | W | Evidence |
 |---|---|---|---|---|---|---|
-| C222 | `pb bugreport` | Create a redacted Paperboat diagnostic bundle | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
-| C223 | `pb completion` | Generate the autocompletion script for the specified shell | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
-| C224 | `pb completion bash` | Generate the autocompletion script for bash | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
-| C225 | `pb completion fish` | Generate the autocompletion script for fish | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
-| C226 | `pb completion powershell` | Generate the autocompletion script for powershell | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
-| C227 | `pb completion zsh` | Generate the autocompletion script for zsh | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
-| C228 | `pb config` | Inspect the local CLI config | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
-| C229 | `pb config customize` | Customize local shortcuts, command defaults, and TUI appearance | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
-| C230 | `pb config customize explain` | Show command expansion without executing it | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
-| C231 | `pb config customize import` | Validate and replace local preferences from a JSON file | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
-| C232 | `pb config customize path` | Print the local preference file path | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
-| C233 | `pb config customize reset` | Reset only local CLI preferences; keep account and connection settings | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
-| C234 | `pb config customize show` | Show the local preference document | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
-| C235 | `pb config customize validate` | Validate preferences without executing any action | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
-| C236 | `pb config path` | Print the config file path | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
-| C237 | `pb config set` | Set a local configuration value | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
-| C238 | `pb config show` | Print the effective config | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
-| C239 | `pb config unset` | Remove a local configuration value | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
-| C240 | `pb doctor` | Check Paperboat connectivity and readiness | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
-| C241 | `pb status` | Show local Paperboat machine status | [!] | [!] | [!] | Requires an accepted S0 gate and S1/F1 build on real devices; doctor/support/completion targets and settings persistence across updates remain unverified (PLAN Log 2026-10-14). |
+| C222 | `pb bugreport` | Create a redacted Paperboat diagnostic bundle | [ ] | [ ] | [ ] | — |
+| C223 | `pb completion` | Generate the autocompletion script for the specified shell | [ ] | [ ] | [ ] | — |
+| C224 | `pb completion bash` | Generate the autocompletion script for bash | [ ] | [ ] | [ ] | — |
+| C225 | `pb completion fish` | Generate the autocompletion script for fish | [ ] | [ ] | [ ] | — |
+| C226 | `pb completion powershell` | Generate the autocompletion script for powershell | [ ] | [ ] | [ ] | — |
+| C227 | `pb completion zsh` | Generate the autocompletion script for zsh | [ ] | [ ] | [ ] | — |
+| C228 | `pb config` | Inspect the local CLI config | [ ] | [ ] | [ ] | — |
+| C229 | `pb config customize` | Customize local shortcuts, command defaults, and TUI appearance | [ ] | [ ] | [ ] | — |
+| C230 | `pb config customize explain` | Show command expansion without executing it | [ ] | [ ] | [ ] | — |
+| C231 | `pb config customize import` | Validate and replace local preferences from a JSON file | [ ] | [ ] | [ ] | — |
+| C232 | `pb config customize path` | Print the local preference file path | [ ] | [ ] | [ ] | — |
+| C233 | `pb config customize reset` | Reset only local CLI preferences; keep account and connection settings | [ ] | [ ] | [ ] | — |
+| C234 | `pb config customize show` | Show the local preference document | [ ] | [ ] | [ ] | — |
+| C235 | `pb config customize validate` | Validate preferences without executing any action | [ ] | [ ] | [ ] | — |
+| C236 | `pb config path` | Print the config file path | [ ] | [ ] | [ ] | — |
+| C237 | `pb config set` | Set a local configuration value | [ ] | [ ] | [ ] | — |
+| C238 | `pb config show` | Print the effective config | [ ] | [ ] | [ ] | — |
+| C239 | `pb config unset` | Remove a local configuration value | [ ] | [ ] | [ ] | — |
+| C240 | `pb doctor` | Check Paperboat connectivity and readiness | [ ] | [ ] | [ ] | — |
+| C241 | `pb status` | Show local Paperboat machine status | [ ] | [ ] | [ ] | — |
 
 ---
 

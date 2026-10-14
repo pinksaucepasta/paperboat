@@ -20,7 +20,7 @@ command -v jq >/dev/null 2>&1 || {
 
 sh -n "$SCRIPT_DIR/certificate-preflight.sh"
 grep -Fq "'*.\$preview_base_domain'" "$SCRIPT_DIR/certificate-preflight.sh"
-grep -Fq "'*.\$tunnel_base_domain'" "$SCRIPT_DIR/certificate-preflight.sh"
+grep -Fq "'*.\$runtime_base_domain'" "$SCRIPT_DIR/certificate-preflight.sh"
 ! grep -Fq ":'preview_base_domain'" "$SCRIPT_DIR/certificate-preflight.sh"
 ! grep -Fq ":'tunnel_base_domain'" "$SCRIPT_DIR/certificate-preflight.sh"
 "$SCRIPT_DIR/certificate-preflight.sh" --source-only

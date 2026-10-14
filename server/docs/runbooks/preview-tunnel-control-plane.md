@@ -35,8 +35,8 @@ hostnames.
    hostname, authoritative CNAME or TXT target, provider proxy mode, DNSSEC,
    and CAA result. Never infer instructions from an edge node.
 3. For a customer-owned domain, verify its `_acme-challenge` CNAME points to
-   the immutable Paperboat challenge target before retrying issuance. The two
-   Paperboat-owned preview/tunnel wildcard parents are different: the server
+   the immutable Paperboat challenge target before retrying issuance. The shared
+   Paperboat-owned public wildcard and separate runtime wildcard have one owner each: the server
    writes their TXT records directly through the configured provider and must
    not depend on an external CNAME.
 4. Confirm one issuance lease owns the domain and certificate generation.
@@ -115,7 +115,7 @@ distribution handler, and edge broker must all be composed together.
    ```
 
    The gate waits for baseline migration 1, both durable platform targets
-   (`platform_cert_preview_v1` and `platform_cert_tunnel_v1`), and active edge
+   (`platform_cert_public_v1` and `platform_cert_runtime_v1`), and active edge
    distributions for every current ready edge process. A distribution counts
    only when `edge.state = 'active'` and its observed certificate generation
    matches the active server certificate. Do not admit public preview/tunnel
@@ -128,20 +128,20 @@ distribution handler, and edge broker must all be composed together.
    psql "$PAPERBOAT_DATABASE_DSN" \
      --set=ON_ERROR_STOP=1 \
      --set=preview_base_domain="$PAPERBOAT_PREVIEW_BASE_DOMAIN" \
-     --set=tunnel_base_domain="$PAPERBOAT_TUNNEL_BASE_DOMAIN" <<'SQL'
+     --set=runtime_base_domain="$PAPERBOAT_RUNTIME_BASE_DOMAIN" <<'SQL'
    BEGIN READ ONLY;
    SELECT 'platform_target' AS source, id, kind, hostname, desired_state,
           certificate_state, certificate_reference, certificate_expires_at,
           certificate_failure_code, retry_count, next_retry_at
      FROM paperboat.tunnel_platform_certificate_targets
-    WHERE hostname IN ('*.' || :'preview_base_domain', '*.' || :'tunnel_base_domain')
+    WHERE hostname IN ('*.' || :'preview_base_domain', '*.' || :'runtime_base_domain')
    ORDER BY id;
 
    SELECT 'certificate' AS source, target_kind, hostname, leaf_hostname, state,
           strategy, certificate_generation, expires_at, renewal_at,
           failure_code
      FROM paperboat.tunnel_certificate_records
-    WHERE hostname IN ('*.' || :'preview_base_domain', '*.' || :'tunnel_base_domain')
+    WHERE hostname IN ('*.' || :'preview_base_domain', '*.' || :'runtime_base_domain')
    ORDER BY 2, 3, 7 DESC;
 
    SELECT 'distribution' AS source, cert.target_kind, cert.hostname,
@@ -151,7 +151,7 @@ distribution handler, and edge broker must all be composed together.
      FROM paperboat.tunnel_certificate_edge_distributions AS edge
      JOIN paperboat.tunnel_certificate_records AS cert
        ON cert.id = edge.certificate_id
-    WHERE cert.hostname IN ('*.' || :'preview_base_domain', '*.' || :'tunnel_base_domain')
+    WHERE cert.hostname IN ('*.' || :'preview_base_domain', '*.' || :'runtime_base_domain')
    ORDER BY 2, 3, 4, 5;
 
    SELECT domain_id, owner_id, domain_generation, lease_until
@@ -161,7 +161,7 @@ distribution handler, and edge broker must all be composed together.
             SELECT 1
               FROM paperboat.tunnel_platform_certificate_targets AS target
              WHERE target.id = tunnel_certificate_issuance_locks.domain_id
-               AND target.hostname IN ('*.' || :'preview_base_domain', '*.' || :'tunnel_base_domain')
+               AND target.hostname IN ('*.' || :'preview_base_domain', '*.' || :'runtime_base_domain')
           )
    ORDER BY domain_id;
    ROLLBACK;

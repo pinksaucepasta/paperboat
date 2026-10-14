@@ -5524,15 +5524,15 @@ CREATE TABLE paperboat.tunnel_platform_certificate_targets (
     CONSTRAINT tunnel_platform_certificate_targets_certificate_reference_check CHECK (((certificate_reference IS NULL) OR ((length(TRIM(BOTH FROM certificate_reference)) >= 1) AND (length(TRIM(BOTH FROM certificate_reference)) <= 256)))),
     CONSTRAINT tunnel_platform_certificate_targets_certificate_state_check CHECK ((certificate_state = ANY (ARRAY['pending'::text, 'failed'::text, 'ready'::text, 'revoked'::text]))),
     CONSTRAINT tunnel_platform_certificate_targets_challenge_reference_check CHECK ((((length(TRIM(BOTH FROM challenge_reference)) >= 1) AND (length(TRIM(BOTH FROM challenge_reference)) <= 256)) AND (challenge_reference !~ '[\r\n]'::text))),
-    CONSTRAINT tunnel_platform_certificate_targets_check CHECK ((((id = 'platform_cert_preview_v1'::text) AND (kind = 'preview_wildcard'::text)) OR ((id = 'platform_cert_tunnel_v1'::text) AND (kind = 'tunnel_wildcard'::text)) OR ((id = 'platform_cert_runtime_v1'::text) AND (kind = 'runtime_wildcard'::text)))),
+    CONSTRAINT tunnel_platform_certificate_targets_check CHECK ((((id = 'platform_cert_public_v1'::text) AND (kind = 'public_wildcard'::text)) OR ((id = 'platform_cert_runtime_v1'::text) AND (kind = 'runtime_wildcard'::text)))),
     CONSTRAINT tunnel_platform_certificate_targets_check1 CHECK (((certificate_expires_at IS NULL) OR (certificate_expires_at > created_at))),
     CONSTRAINT tunnel_platform_certificate_targets_check2 CHECK (((next_retry_at IS NULL) OR (next_retry_at > updated_at))),
     CONSTRAINT tunnel_platform_certificate_targets_check3 CHECK (((certificate_state = 'revoked'::text) = (desired_state = 'revoked'::text))),
     CONSTRAINT tunnel_platform_certificate_targets_desired_state_check CHECK ((desired_state = ANY (ARRAY['active'::text, 'revoked'::text]))),
     CONSTRAINT tunnel_platform_certificate_targets_generation_check CHECK ((generation > 0)),
     CONSTRAINT tunnel_platform_certificate_targets_hostname_check CHECK ((((length(TRIM(BOTH FROM hostname)) >= 3) AND (length(TRIM(BOTH FROM hostname)) <= 253)) AND (hostname = lower(hostname)) AND (hostname ~~ '*.%'::text) AND (hostname !~ '[.]$'::text))),
-    CONSTRAINT tunnel_platform_certificate_targets_id_check CHECK ((id = ANY (ARRAY['platform_cert_preview_v1'::text, 'platform_cert_tunnel_v1'::text, 'platform_cert_runtime_v1'::text]))),
-    CONSTRAINT tunnel_platform_certificate_targets_kind_check CHECK ((kind = ANY (ARRAY['preview_wildcard'::text, 'tunnel_wildcard'::text, 'runtime_wildcard'::text]))),
+    CONSTRAINT tunnel_platform_certificate_targets_id_check CHECK ((id = ANY (ARRAY['platform_cert_public_v1'::text, 'platform_cert_runtime_v1'::text]))),
+    CONSTRAINT tunnel_platform_certificate_targets_kind_check CHECK ((kind = ANY (ARRAY['public_wildcard'::text, 'runtime_wildcard'::text]))),
     CONSTRAINT tunnel_platform_certificate_targets_retry_count_check CHECK (((retry_count >= 0) AND (retry_count <= 30)))
 );
 

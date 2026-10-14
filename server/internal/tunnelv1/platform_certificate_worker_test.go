@@ -27,15 +27,15 @@ func TestPlatformCertificateWorkerTelemetryUsesTargetIdentityAndRetry(t *testing
 		t.Fatal(err)
 	}
 	next := time.Date(2026, time.September, 1, 12, 1, 0, 0, time.UTC)
-	worker.emitTelemetry(context.Background(), tunnelcert.PlatformPreviewTargetID, "", "issue", "failed", next)
-	worker.emitTelemetry(context.Background(), tunnelcert.PlatformPreviewTargetID, "cert_platform_1", "issue", "success", time.Time{})
+	worker.emitTelemetry(context.Background(), tunnelcert.PlatformPublicTargetID, "", "issue", "failed", next)
+	worker.emitTelemetry(context.Background(), tunnelcert.PlatformPublicTargetID, "cert_platform_1", "issue", "success", time.Time{})
 	if len(events) != 2 {
 		t.Fatalf("telemetry events = %d, want 2", len(events))
 	}
-	if events[0].DomainID != tunnelcert.PlatformPreviewTargetID || events[0].Operation != "issue" || events[0].Outcome != "failed" || !events[0].NextRetryAt.Equal(next) {
+	if events[0].DomainID != tunnelcert.PlatformPublicTargetID || events[0].Operation != "issue" || events[0].Outcome != "failed" || !events[0].NextRetryAt.Equal(next) {
 		t.Fatalf("failure event = %+v", events[0])
 	}
-	if events[1].DomainID != tunnelcert.PlatformPreviewTargetID || events[1].CertificateID != "cert_platform_1" || events[1].Outcome != "success" || !events[1].NextRetryAt.IsZero() {
+	if events[1].DomainID != tunnelcert.PlatformPublicTargetID || events[1].CertificateID != "cert_platform_1" || events[1].Outcome != "success" || !events[1].NextRetryAt.IsZero() {
 		t.Fatalf("success event = %+v", events[1])
 	}
 }
@@ -79,8 +79,8 @@ func TestPlatformCertificateWorkerBackoffRestoresTypedFailure(t *testing.T) {
 
 func TestPlatformCertificateWorkerAcceptsEveryBuiltInTarget(t *testing.T) {
 	for _, targetID := range []string{
-		tunnelcert.PlatformPreviewTargetID,
-		tunnelcert.PlatformTunnelTargetID,
+		tunnelcert.PlatformPublicTargetID,
+		tunnelcert.PlatformRuntimeTargetID,
 		tunnelcert.PlatformRuntimeTargetID,
 	} {
 		if !validPlatformTargetID(targetID) {
@@ -116,7 +116,7 @@ func TestPlatformCertificateRevokePreservesMarkerFailureWithCoordinatorCause(t *
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	err = worker.Revoke(context.Background(), tunnelcert.PlatformPreviewTargetID, "test_revocation")
+	err = worker.Revoke(context.Background(), tunnelcert.PlatformPublicTargetID, "test_revocation")
 	if !errors.Is(err, tunnelcert.ErrCertificateNotReady) || !errors.Is(err, puddle.ErrClosedPool) {
 		t.Fatalf("revoke lost coordinator or target-marker failure: %v", err)
 	}
