@@ -12,7 +12,7 @@ GATE = Path(__file__).resolve().parents[2] / "tools" / "gate.sh"
 
 
 class SmokePrerequisiteTest(unittest.TestCase):
-    def run_gate(self, checklist, smoke=None, go_status=0):
+    def run_gate(self, checklist, smoke=None, go_status=0, history=(), runtime_changed=True):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "tools/device-smoke/results").mkdir(parents=True)
@@ -23,6 +23,8 @@ class SmokePrerequisiteTest(unittest.TestCase):
             (root / "CHECKLIST.md").write_text(checklist)
             if smoke is not None:
                 (root / "tools/device-smoke/results/smoke.json").write_text(json.dumps(smoke))
+            for index, previous in enumerate(history):
+                (root / f"tools/device-smoke/results/previous-{index}.json").write_text(json.dumps(previous))
             scripts = {
                 "go": f"#!/bin/sh\nexit {go_status}\n",
                 "bun": "#!/bin/sh\nexit 0\n",
@@ -39,39 +41,43 @@ esac
                 path = root / "bin" / name
                 path.write_text(source)
                 path.chmod(0o755)
+            if not runtime_changed:
+                scripts["git"] = scripts["git"].replace("echo cli/runtime.go", "echo .github/workflows/release.yml")
+                (root / "bin/git").write_text(scripts["git"])
             env = dict(os.environ, PATH=f"{root / 'bin'}:{os.environ['PATH']}")
             return subprocess.run(["bash", str(root / "tools/gate.sh")], env=env,
                                   capture_output=True, text=True, timeout=10)
 
-    def test_bootstrap_does_not_require_device_smoke(self):
-        result = self.run_gate("## S0. Groundwork\n| S0-03 | Units | [x] | — | — | PASS |\n"
-                               "## F1. Install\n| F1-01 | Install | [!] | [ ] | [ ] | mentions [x] |\n")
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("no feature checks already verified", result.stdout)
+    def test_runtime_push_requires_head_smoke_independent_of_checklist(self):
+        for cells in ["[ ] | [ ] | [ ]", "[!] | [ ] | [ ]", "[x] | [x] | [x]"]:
+            with self.subTest(cells=cells):
+                result = self.run_gate(f"## F1. Install\n| F1-01 | Install | {cells} | |\n")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("no smoke result for build dev-abc1234", result.stdout)
 
-    def test_verified_scenario_requires_smoke(self):
-        result = self.run_gate("## F1. Install\n| F1-01 | Install | [x] | [ ] | [ ] | PASS |\n")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("no all-PASS smoke result", result.stdout)
-
-    def test_verified_command_requires_smoke(self):
-        result = self.run_gate("## F2. Login\n| C001 | `pb login` | Login | [ ] | [x] | [ ] | PASS |\n")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("no all-PASS smoke result", result.stdout)
-
-    def test_verified_feature_accepts_only_passing_head_evidence(self):
-        checklist = "## F1. Install\n| F1-01 | Install | [x] | [x] | [x] | PASS |\n"
-        for version, status, expected in [("dev-old", "PASS", 1),
-                                           ("dev-abc1234", "FAIL", 1),
-                                           ("dev-abc1234", "PASS", 0)]:
-            with self.subTest(version=version, status=status):
-                result = self.run_gate(checklist, {
-                    "expect_version": version, "results": [{"status": status}],
-                })
+    def test_every_historical_pass_must_pass_on_head(self):
+        history = [
+            {"expect_version": "dev-older", "results": [{"id": "ssh", "status": "PASS"}]},
+            {"expect_version": "dev-old", "results": [{"id": "exec", "status": "PASS"},
+                                                       {"id": "ssh", "status": "FAIL"}]},
+        ]
+        for version, results, expected in [
+            ("dev-wrong", [{"id": "ssh", "status": "PASS"}, {"id": "exec", "status": "PASS"}], 1),
+            ("dev-abc1234", [{"id": "exec", "status": "PASS"}], 1),
+            ("dev-abc1234", [{"id": "ssh", "status": "FAIL"}, {"id": "exec", "status": "PASS"}], 1),
+            ("dev-abc1234", [{"id": "ssh", "status": "PASS"}, {"id": "exec", "status": "PASS"},
+                             {"id": "new-check", "status": "FAIL"}], 0),
+        ]:
+            with self.subTest(version=version, results=results):
+                result = self.run_gate("", {"expect_version": version, "results": results}, history=history)
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
 
-    def test_bootstrap_still_rejects_failed_module(self):
-        result = self.run_gate("## F1. Install\n| F1-01 | Install | [ ] | [ ] | [ ] | |\n", go_status=1)
+    def test_nonruntime_changes_do_not_require_device_smoke(self):
+        result = self.run_gate("", runtime_changed=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_module_failure_blocks_push_with_passing_smoke(self):
+        result = self.run_gate("", {"expect_version": "dev-abc1234", "results": []}, go_status=1)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("FAIL: cli", result.stdout)
 
