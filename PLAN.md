@@ -441,3 +441,4 @@ The coolify format (P1) also removes the old dev deployment and its test backups
 ## 5. Log
 
 One line per completed step: `date | section/feature | commit | smoke results file | note`.
+2026-10-14 | P0 handoff merge + initial import | 75a0130 | — | old repos read-only from here
