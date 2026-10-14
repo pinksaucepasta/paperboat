@@ -60,8 +60,8 @@ Regressions are the most expensive failure in this project. They are prevented m
    feature completion; say which).
 2. **`make gate` before every push.** It runs vet and unit tests for every Go module, the
    console lint/build, and, when anything under `cli/`, `relay/`, `tunnel/` or `server/`
-   changed, the device smoke suite for **every feature already `[x]`** (not only the one
-   being worked on).
+   changed, the device smoke suite on a build of HEAD. **Every smoke check that has ever
+   passed must still pass**, whether or not its feature is `[x]` yet.
 3. **A previously green check that fails blocks the push.** Fix it in this lane, or revert
    the change that broke it. Never push with a known regression, never mark it `n/a`, never
    weaken the check.

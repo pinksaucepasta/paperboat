@@ -2,9 +2,9 @@
 # Regression gate. Run before every push (AGENTS.md "Regression gate").
 #   1. go vet + go test for every Go module, console lint + build.
 #   2. If runtime code (cli/ relay/ tunnel/ server/ helper/) changed relative to origin/main,
-#      and any feature scenario/command is already verified in CHECKLIST.md,
-#      require a device smoke result for a build of HEAD with no failures:
-#      tools/device-smoke/results/*.json whose expect_version is dev-<short HEAD>.
+#      require a device smoke result for a build of HEAD (tools/device-smoke/results/*.json
+#      whose expect_version is dev-<short HEAD>) in which every check that passed in any
+#      earlier result still passes. Feature status in CHECKLIST.md does not matter.
 # Exit status is non-zero if anything fails.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
@@ -22,45 +22,34 @@ step "console lint + build"
 
 base=$(git merge-base HEAD origin/main 2>/dev/null || git rev-list --max-parents=0 HEAD | tail -1)
 changed=$( { git diff --name-only "$base" HEAD; git diff --name-only; } | grep -E '^(cli|relay|tunnel|server|helper)/' | head -1)
-verified=$(python3 - <<'PYTHON'
-import pathlib, re
-feature = False
-for line in pathlib.Path('CHECKLIST.md').read_text().splitlines():
-    if line.startswith('## '):
-        feature = bool(re.match(r'## F\d+\.', line))
-    if feature and re.match(r'\| (?:F\d+-\d+|C\d+) \|', line):
-        cells = [cell.strip() for cell in line.split('|')]
-        # Status cells precede Evidence; an [x] quoted in prose is not a check.
-        start = 3 if cells[1].startswith('F') else 4
-        if '[x]' in cells[start:start + 3]:
-            print('yes')
-            break
-PYTHON
-) || { echo "FAIL: could not read verified features from CHECKLIST.md"; exit 1; }
-if [ -n "$changed" ] && [ -n "$verified" ]; then
-  step "device smoke evidence for HEAD"
+if [ -n "$changed" ]; then
+  step "device smoke for HEAD: no check that ever passed may fail"
   want="dev-$(git rev-parse --short HEAD)"
-  ok=$(python3 - "$want" <<'PY'
+  python3 - "$want" <<'PY' || fail=1
 import glob, json, sys
 want = sys.argv[1]
+passed, head = set(), None
 for f in sorted(glob.glob('tools/device-smoke/results/*.json')):
     try:
         d = json.load(open(f))
     except Exception:
         continue
-    if d.get('expect_version') == want and d.get('results') and all(r['status'] in ('PASS', 'SKIP') for r in d['results']):
-        print(f)
+    if d.get('expect_version') == want:
+        head = (f, d.get('results') or [])
+    else:
+        passed |= {r['id'] for r in d.get('results') or [] if r['status'] == 'PASS'}
+if head is None:
+    print(f"FAIL: runtime code changed but no smoke result for build {want}.")
+    print(f"      Build HEAD for all devices, install it, run tools/device-smoke/smoke.sh --expect-version {want}")
+    sys.exit(1)
+f, results = head
+status = {r['id']: r['status'] for r in results}
+regressed = sorted(i for i in passed if status.get(i) != 'PASS')
+if regressed:
+    print(f"FAIL: regression in {f}: previously passing checks not passing now: {', '.join(regressed)}")
+    sys.exit(1)
+print(f"OK: {f} ({len(passed)} previously passing checks still pass)")
 PY
-)
-  if [ -n "$ok" ]; then
-    echo "OK: $(echo "$ok" | tail -1)"
-  else
-    echo "FAIL: runtime code changed but no all-PASS smoke result for build $want."
-    echo "      Build HEAD for all devices, install it, run tools/device-smoke/smoke.sh --expect-version $want"
-    fail=1
-  fi
-elif [ -n "$changed" ]; then
-  step "no feature checks already verified; device smoke not required"
 else
   step "no runtime code changed; device smoke not required"
 fi
