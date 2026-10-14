@@ -58,9 +58,9 @@ func TestRequestInputRequiresBoundedExactIdentity(t *testing.T) {
 	if !validInput(valid, now) {
 		t.Fatal("valid input rejected")
 	}
-	valid.DestinationMachineID = valid.SourceMachineID
+	valid.DestinationMachineID = "invalid machine"
 	if validInput(valid, now) {
-		t.Fatal("same source and destination accepted")
+		t.Fatal("malformed machine identity accepted")
 	}
 	valid.DestinationMachineID = "machine_2"
 	valid.ExpiresAt = now.Add(MaximumLifetime + time.Second)

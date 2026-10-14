@@ -247,7 +247,7 @@ func validInput(in RequestInput, now time.Time) bool {
 			return false
 		}
 	}
-	return in.SourceMachineID != in.DestinationMachineID && in.ExpiresAt.After(now) && in.ExpiresAt.Sub(now) <= MaximumLifetime
+	return in.ExpiresAt.After(now) && in.ExpiresAt.Sub(now) <= MaximumLifetime
 }
 
 func auditLifecycleTx(ctx context.Context, tx *db.Tx, actor string, request Request, action, operation, status string) error {
@@ -278,16 +278,26 @@ func (s *Service) Create(ctx context.Context, in RequestInput) (Request, error) 
 		if err := teams.Lock(ctx, tx); err != nil {
 			return err
 		}
-		var sameAccount bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM user_machines source JOIN user_machines destination ON destination.id=$2 WHERE source.id=$1 AND source.user_id=$3 AND destination.user_id=$3 AND source.revoked_at IS NULL AND source.deleted_at IS NULL AND destination.revoked_at IS NULL AND destination.deleted_at IS NULL)`, in.SourceMachineID, in.DestinationMachineID, in.SenderAccount).Scan(&sameAccount); err != nil {
-			return err
-		}
-		if sameAccount {
+		var destinationState string
+		var online, configured, observed bool
+		ownedErr := tx.QueryRow(ctx, `SELECT destination.state,destination.online,
+ destination.configured_capabilities @> ARRAY['file_receive'],destination.observed_capabilities @> ARRAY['file_receive']
+ FROM user_machines source JOIN user_machines destination ON destination.id=$2
+ WHERE source.id=$1 AND source.user_id=$3 AND destination.user_id=$3
+ AND source.owner_team_id IS NULL AND destination.owner_team_id IS NULL
+ AND source.revoked_at IS NULL AND source.deleted_at IS NULL
+ AND destination.revoked_at IS NULL AND destination.deleted_at IS NULL`, in.SourceMachineID, in.DestinationMachineID, in.SenderAccount).Scan(&destinationState, &online, &configured, &observed)
+		if ownedErr == nil {
+			if destinationState != "online" || !online || !configured || !observed {
+				return ErrOffline
+			}
 			result = Request{RequestID: in.RequestID, SenderAccount: in.SenderAccount, RecipientAccount: in.SenderAccount, SourceMachineID: in.SourceMachineID, DestinationMachineID: in.DestinationMachineID, BatchID: in.BatchID, ManifestDigest: digest, Files: in.Files, Status: "not_required", ExpiresAt: in.ExpiresAt.UTC()}
 			return nil
 		}
-		var recipient, team, destinationState string
-		var online, configured, observed bool
+		if !noRows(ownedErr) {
+			return ownedErr
+		}
+		var recipient, team string
 		err := tx.QueryRow(ctx, `SELECT destination.user_id,b.team_id,destination.state,destination.online,destination.configured_capabilities @> ARRAY['file_receive'],destination.observed_capabilities @> ARRAY['file_receive'] FROM user_machines source JOIN user_machines destination ON destination.id=$2 JOIN team_resource_bindings b ON b.resource_kind='machine' AND b.resource_id=destination.id AND b.active JOIN team_members recipient_member ON recipient_member.team_id=b.team_id AND recipient_member.account_id=destination.user_id AND recipient_member.active WHERE source.id=$1 AND source.user_id=$3 AND source.revoked_at IS NULL AND source.deleted_at IS NULL AND destination.user_id<>$3 AND destination.revoked_at IS NULL AND destination.deleted_at IS NULL AND team_machine_capability_allowed($3,b.team_id,destination.id,'files') ORDER BY b.team_id LIMIT 1`, in.SourceMachineID, in.DestinationMachineID, in.SenderAccount).Scan(&recipient, &team, &destinationState, &online, &configured, &observed)
 		if noRows(err) {
 			return ErrForbidden
