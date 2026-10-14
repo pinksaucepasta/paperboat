@@ -64,8 +64,8 @@ that use them; say which in Evidence.
 | S1-03 | Previews and tunnels at `<name>.pprbt.app`; names from the existing name generator; preview names immutable; tunnel rename in server, CLI and console; global uniqueness. | [ ] | — | — |  |
 | S1-04 | Console origin `app.paperboat.cloud` and marketing `paperboat.cloud` configured for production (links, CORS/allowed origins, WorkOS redirects) while the dev console keeps https://oracle.newt-mermaid.ts.net — configuration only. | [ ] | — | — |  |
 | S1-05 | Unit tests use the configured test domain; switching the deployment's domains in configuration works without a code change (verify once). | [ ] | — | — |  |
-| S1-06 | Server stack (server, PostgreSQL 17 with migrations from zero, diagnostics store, edge/proxy for the API and get domains) deployed on the formatted coolify from the server image with the `deploy/` compose file; all domains from env. | [ ] | — | — |  |
-| S1-07 | Secrets restored from `~/paperboat-archive/coolify-backup/` into the deployment (never printed or committed). | [ ] | — | — |  |
+| S1-06 | Server stack (server, PostgreSQL 17 with migrations from zero, diagnostics store, edge/proxy for the API and get domains) deployed on the formatted coolify from the server image with the `deploy/` compose file; all domains from env. | [~] | — | — | Tailscale SSH authenticated at user-supplied 100.74.80.82; Ubuntu 26.04.1 amd64, Docker preparation started; stack not deployed. |
+| S1-07 | Secrets restored from `~/paperboat-archive/coolify-backup/` into the deployment (never printed or committed). | [~] | — | — | 22 current archived secret files restored to /opt/paperboat/secrets on new coolify; directory 0700 root, files 0600. No secret contents printed or committed; service mounts not yet verified. |
 | S1-08 | DNS records for all of 1.2; TLS certificates issued and renewing (`*.pprbt.app` wildcard, `api`/`get.pprbt.dev`). | [ ] | — | — |  |
 | S1-09 | Tunnel edge serving `*.pprbt.app` (HTTP/1.1, HTTP/2, HTTP/3, WebSocket). | [ ] | — | — |  |
 | S1-10 | Our relays and tunnel edge installed with the `pbh` installer (S4), enrolled as global nodes, reported ready by the server. | [ ] | — | — |  |
@@ -80,7 +80,7 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| S4-00 | Move `pbh` out of `relay/` into a top-level `helper/` module (directory and module named helper; the built command stays `pbh`) (own `go.mod`, added to `go.work`; its own copy or a small shared package instead of importing `paperboat-relay/internal/reporting`), with its installer, packaging script and README; no `pbh` code left under `relay/`; gate and pbh tests pass. | [ ] | — | — | |
+| S4-00 | Move `pbh` out of `relay/` into a top-level `helper/` module (directory and module named helper; the built command stays `pbh`) (own `go.mod`, added to `go.work`; its own copy or a small shared package instead of importing `paperboat-relay/internal/reporting`), with its installer, packaging script and README; no `pbh` code left under `relay/`; gate and pbh tests pass. | [!] | — | — | helper producer vet/tests PASS in isolated workspace; Linux amd64/arm64 pbh cross-builds PASS. Root owner must add helper to go.work; Lane A must remove old relay-owned pbh files after producer commit. Docker installer replacement belongs to S4-02. |
 | S4-01 | Docker images for server, relay and tunnel build for linux/amd64 and linux/arm64 from this repo (multi-arch manifests), tagged with the release version. | [ ] | — | — | |
 | S4-02 | The `pbh` installer implements 1.4b on a fresh Ubuntu 24.04 VPS for `relay`, `tunnel` and `both`: installs Docker, runs the images, health-checks, prints the claim code. The server image deploys from `deploy/` compose and is not part of this installer. | [ ] | — | — | |
 | S4-03 | Re-running it upgrades in place to a newer image version, keeping data and secrets; a failed upgrade leaves the previous version running. | [ ] | — | — | |
@@ -627,4 +627,4 @@ that use them; say which in Evidence.
 | S3-03 | Server, relay and tunnel images built from the release commit and deployed. | [ ] | — | — |  |
 | S3-04 | Full smoke suite (every feature F1–F15) green on the release build on L, M, W. | [ ] | — | — |  |
 | S3-05 | User and operator docs (`cli/docs`, `server/docs`, READMEs) match behaviour (each feature's docs fixed when the feature is verified). | [ ] | — | — |  |
-| S3-06 | Operator admin frontend: **USER DECIDES**. | [ ] | — | — |  |
+| S3-06 | Operator admin frontend: **USER DECIDES**. | [!] | — | — | USER DECIDES: operator admin frontend decision pending (PLAN 1.6); Claude owns frontend. |
