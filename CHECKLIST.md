@@ -531,7 +531,7 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F13-01 | Free plan: new accounts pair machines with no subscription or trial; the old "active subscription required" gates are replaced by the allowance model. | [ ] | [ ] | [ ] |  |
+| F13-01 | Free plan: new accounts pair machines with no subscription or trial; the old "active subscription required" gates are replaced by the allowance model. | [ ] | [ ] | [ ] |  Server producer: TestFreeAccountSetupWithoutSubscription PASS on isolated VPS PostgreSQL with no published artifact/subscription; installation release dependency removed per 92b5ad9. Lane A device and full allowance verification pending. |
 | F13-02 | Metering of relay and edge bytes per workspace (personal) and per member + pool (team); direct P2P never metered. | [ ] | [ ] | [ ] |  |
 | F13-03 | Caps enforced as in 1.3; CLI and console messages with upgrade/top-up links; team owners/admins notified. | [ ] | [ ] | [ ] |  |
 | F13-04 | Stripe test mode: Pro monthly/yearly, upgrade/downgrade/cancel, top-ups, Team seats monthly/yearly, seat changes mid-cycle (charged immediately, billing date fixed), failed payment → grace → suspension → recovery, invoices. | [ ] | [ ] | [ ] |  |

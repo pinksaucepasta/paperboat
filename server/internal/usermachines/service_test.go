@@ -214,64 +214,6 @@ func TestSetupAndPairingRejectDarwinAMD64BeforePersistence(t *testing.T) {
 	}
 }
 
-func TestConfigureMachineArtifactsBuildsTUFDescriptor(t *testing.T) {
-	service := &Service{}
-	if err := service.ConfigureMachineArtifacts("https://updates.example.test/paperboat/", "2026.08.07"); err != nil {
-		t.Fatal(err)
-	}
-	artifact, ok := service.machineArtifact("linux", "amd64")
-	if !ok || artifact.Schema != "paperboat.tuf-target/v1" || artifact.RepositoryURL != "https://updates.example.test/paperboat" || artifact.TargetPath != "pb-linux-amd64" || artifact.Version != "2026.08.07" {
-		t.Fatalf("artifact=%+v ok=%v", artifact, ok)
-	}
-	if err := service.ConfigureMachineArtifacts("http://updates.example.test", "2026.08.07"); err == nil {
-		t.Fatal("insecure artifact repository was accepted")
-	}
-	for _, target := range []struct {
-		platform     string
-		architecture string
-	}{
-		{platform: "darwin", architecture: "arm64"},
-		{platform: "linux", architecture: "amd64"},
-		{platform: "linux", architecture: "arm64"},
-		{platform: "windows", architecture: "amd64"},
-		{platform: "windows", architecture: "arm64"},
-	} {
-		if _, ok := service.machineArtifact(target.platform, target.architecture); !ok {
-			t.Fatalf("supported artifact %s/%s was rejected", target.platform, target.architecture)
-		}
-	}
-	if artifact, ok := service.machineArtifact("darwin", "amd64"); ok || artifact != (MachineArtifact{}) {
-		t.Fatalf("darwin amd64 artifact = %+v, ok=%v", artifact, ok)
-	}
-}
-
-func TestMachineArtifactUsesCurrentReleaseResolver(t *testing.T) {
-	service := New(nil, nil, Policy{}, nil)
-	if err := service.ConfigureMachineArtifacts("https://example.test/tuf", "bootstrap"); err != nil {
-		t.Fatal(err)
-	}
-	service.ConfigureMachineArtifactVersionResolver(func(platform, architecture string) string {
-		if platform == "linux" && architecture == "arm64" {
-			return "2026.08.17.1"
-		}
-		if platform == "linux" && architecture == "amd64" {
-			return "2026.08.18.1"
-		}
-		return ""
-	})
-	artifact, ok := service.machineArtifact("linux", "arm64")
-	if !ok || artifact.Version != "2026.08.17.1" || artifact.RepositoryURL != "https://example.test/tuf" {
-		t.Fatalf("artifact = %#v, %v", artifact, ok)
-	}
-	artifact, ok = service.machineArtifact("linux", "amd64")
-	if !ok || artifact.Version != "2026.08.18.1" {
-		t.Fatalf("selected amd64 artifact = %#v, %v", artifact, ok)
-	}
-	if _, ok := service.machineArtifact("windows", "amd64"); ok {
-		t.Fatal("unavailable platform artifact accepted")
-	}
-}
-
 func TestConnectionDescriptorSerializesCanonicalPayload(t *testing.T) {
 	expires := time.Now().UTC().Add(time.Minute)
 	response := ConnectionDescriptor{

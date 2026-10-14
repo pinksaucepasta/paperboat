@@ -17,7 +17,6 @@ import (
 	"strings"
 )
 
-var tufTargetPathPattern = regexp.MustCompile(`^/targets/[a-f0-9]{64}\.[A-Za-z0-9._-]+$`)
 var selfhostPackagePathPattern = regexp.MustCompile(`^/selfhost/versions/[0-9.]+/paperboat-selfhost-linux-(amd64|arm64)\.tar\.gz$`)
 var enrollmentTokenPattern = regexp.MustCompile(`^[0-9A-Z]{26}$`)
 
@@ -29,7 +28,7 @@ func NewReleaseFiles(directory string) (http.Handler, error) {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		relative := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(r.URL.Path)), "/")
-		if relative != "install" && relative != "windows" && !strings.HasPrefix(relative, "tuf/") && relative != "selfhost/install" && !strings.HasPrefix(relative, "selfhost/versions/") {
+		if relative != "install" && relative != "windows" && !strings.HasPrefix(relative, "tuf/metadata/") && relative != "selfhost/install" && !strings.HasPrefix(relative, "selfhost/versions/") {
 			http.NotFound(w, r)
 			return
 		}
@@ -180,18 +179,14 @@ func splitEnrollmentParameter(value string) (string, string, bool) {
 func tufRepository(prefix string, files http.Handler) http.Handler {
 	return http.StripPrefix(prefix, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		metadata := strings.HasPrefix(r.URL.Path, "/metadata/") && strings.HasSuffix(r.URL.Path, ".json") && !strings.HasSuffix(r.URL.Path, "/")
-		target := tufTargetPathPattern.MatchString(r.URL.Path)
-		if (!metadata && !target) || strings.Contains(r.URL.Path, "/.") {
+		if !metadata || strings.Contains(r.URL.Path, "/.") {
 			http.NotFound(w, r)
 			return
 		}
 		if strings.HasSuffix(r.URL.Path, "/timestamp.json") {
 			w.Header().Set("Cache-Control", "no-store")
-		} else if metadata {
-			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 		} else {
-			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 		}
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		clone := r.Clone(r.Context())

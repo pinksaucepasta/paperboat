@@ -26,10 +26,8 @@ import (
 )
 
 func (s *Service) validateAuthenticatedMachineInstallationMachine(machine UserMachine, in AuthenticatedMachineInstallationInput) (UserMachine, error) {
-	expectedArtifact, artifactAvailable := s.machineArtifact(machine.Platform, machine.Architecture)
 	if machine.SeatState != "occupied" ||
-		machine.InstallationGeneration != in.InstallationGeneration || machine.PublicIdentityKey != in.PublicIdentityKey ||
-		!artifactAvailable || in.Artifact != expectedArtifact {
+		machine.InstallationGeneration != in.InstallationGeneration || machine.PublicIdentityKey != in.PublicIdentityKey {
 		return UserMachine{}, ErrInvalidMachineInstallation
 	}
 	pairingInput := PairingInput{
@@ -70,9 +68,9 @@ func (s *Service) authenticatedMachineInstallationMaterialForRetry(pairing dbsql
 	}
 	binding, err := authenticatedMachineInstallationMaterialBindingFromPlaintext([]byte(plaintext))
 	if err != nil || binding.MachineID != machine.ID || binding.EnvironmentID != machine.EnvironmentID ||
-		binding.Generation != in.InstallationGeneration || binding.Artifact != in.Artifact ||
+		binding.Generation != in.InstallationGeneration ||
 		binding.ReuseIdentity != in.CanReuseRuntimeIdentity ||
-		!s.authenticatedMachineInstallationMaterialMatches(pairing.InstallationConfigCiphertext, machine.ID, machine.EnvironmentID, in.InstallationGeneration, in.Artifact, pairing.AuthenticatedSetupHelperEnrollmentID) {
+		!s.authenticatedMachineInstallationMaterialMatches(pairing.InstallationConfigCiphertext, machine.ID, machine.EnvironmentID, in.InstallationGeneration, pairing.AuthenticatedSetupHelperEnrollmentID) {
 		return "", ErrMachineInstallationOperationConflict
 	}
 	return authenticatedMachineInstallationMaterialSessionID([]byte(plaintext))
@@ -142,8 +140,7 @@ func (s *Service) Setup(ctx context.Context, userID string, in SetupInput) (User
 		keyErr != nil || len(publicKey) != ed25519.PublicKeySize {
 		return UserMachine{}, ErrInvalidSetup
 	}
-	artifact, artifactAvailable := s.machineArtifact(strings.ToLower(strings.TrimSpace(in.Platform)), strings.ToLower(strings.TrimSpace(in.Architecture)))
-	if !artifactAvailable || s.issuer == "" || s.helperListenPort == 0 {
+	if s.issuer == "" || s.helperListenPort == 0 {
 		return UserMachine{}, ErrProvisioningUnavailable
 	}
 	in.WorkspaceRoot = workspaceRoot
@@ -240,7 +237,7 @@ func (s *Service) Setup(ctx context.Context, userID string, in SetupInput) (User
 	}
 
 	if err == nil {
-		result.Installation = &ClientInstallation{ControlURL: s.issuer, HelperListenAddress: fmt.Sprintf("127.0.0.1:%d", s.helperListenPort), Artifact: artifact}
+		result.Installation = &ClientInstallation{ControlURL: s.issuer, HelperListenAddress: fmt.Sprintf("127.0.0.1:%d", s.helperListenPort)}
 	}
 	return result, err
 }
@@ -404,9 +401,8 @@ type UserMachine struct {
 }
 
 type ClientInstallation struct {
-	ControlURL          string          `json:"control_url"`
-	HelperListenAddress string          `json:"helper_listen_address"`
-	Artifact            MachineArtifact `json:"artifact"`
+	ControlURL          string `json:"control_url"`
+	HelperListenAddress string `json:"helper_listen_address"`
 }
 
 type CapabilityAvailability struct {

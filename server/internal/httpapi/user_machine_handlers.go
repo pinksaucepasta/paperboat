@@ -111,14 +111,13 @@ func machineSetup(service *usermachines.Service) http.HandlerFunc {
 
 func authenticatedMachineInstallation(service *usermachines.Service) http.HandlerFunc {
 	type request struct {
-		Verifier                string                       `json:"verifier"`
-		PublicIdentityKey       string                       `json:"public_identity_key"`
-		InstallationGeneration  int64                        `json:"installation_generation"`
-		Artifact                usermachines.MachineArtifact `json:"artifact"`
-		SSHUser                 string                       `json:"ssh_user,omitempty"`
-		SSHPort                 uint16                       `json:"ssh_port,omitempty"`
-		CanReuseRuntimeIdentity bool                         `json:"can_reuse_runtime_identity,omitempty"`
-		KeepAwake               bool                         `json:"keep_awake,omitempty"`
+		Verifier                string `json:"verifier"`
+		PublicIdentityKey       string `json:"public_identity_key"`
+		InstallationGeneration  int64  `json:"installation_generation"`
+		SSHUser                 string `json:"ssh_user,omitempty"`
+		SSHPort                 uint16 `json:"ssh_port,omitempty"`
+		CanReuseRuntimeIdentity bool   `json:"can_reuse_runtime_identity,omitempty"`
+		KeepAwake               bool   `json:"keep_awake,omitempty"`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		principal, ok := principalFromContext(r.Context())
@@ -136,7 +135,7 @@ func authenticatedMachineInstallation(service *usermachines.Service) http.Handle
 		result, err := service.PrepareAuthenticatedMachineInstallation(r.Context(), principal.User.ID, principal.Client.SessionID, r.PathValue("machine_id"), usermachines.AuthenticatedMachineInstallationInput{
 			OperationID: r.Header.Get("Idempotency-Key"), Verifier: body.Verifier,
 			PublicIdentityKey: body.PublicIdentityKey, InstallationGeneration: body.InstallationGeneration,
-			Artifact: body.Artifact, SSHUser: body.SSHUser, SSHPort: body.SSHPort,
+			SSHUser: body.SSHUser, SSHPort: body.SSHPort,
 			CanReuseRuntimeIdentity: body.CanReuseRuntimeIdentity,
 			KeepAwake:               body.KeepAwake,
 		})

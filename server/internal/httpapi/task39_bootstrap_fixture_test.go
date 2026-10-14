@@ -113,13 +113,7 @@ func TestTask39ServeAuthenticatedEnrollment(t *testing.T) {
 	if err := machines.ConfigureRuntimeRoute("task39.invalid", int32(helperPort)); err != nil {
 		t.Fatal(err)
 	}
-	version := strings.TrimSpace(os.Getenv("PAPERBOAT_TASK39_BOOTSTRAP_VERSION"))
-	if version == "" {
-		version = "2026.09.08.390"
-	}
-	if err := machines.ConfigureMachineArtifacts(os.Getenv("PAPERBOAT_TASK39_BOOTSTRAP_REPOSITORY"), version); err != nil {
-		t.Fatal(err)
-	}
+
 	enrollment := controlplane.NewEnrollmentService(database, signer, writer, base, secret)
 	machines.ConfigureHelperEnrollment(func(ctx context.Context, actor, operation, environment string, lifetime time.Duration) (usermachines.HelperEnrollmentGrant, error) {
 		grant, err := enrollment.Issue(ctx, actor, operation, environment, lifetime)

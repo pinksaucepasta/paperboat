@@ -109,7 +109,6 @@ func TestSetupIsIdempotentAndPreservesCapabilities(t *testing.T) {
 	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)
 	}
-	configureSignedTestArtifact(t, service)
 	first, err := service.Setup(ctx, userID, input)
 	if err != nil {
 		t.Fatal(err)
@@ -216,7 +215,6 @@ func TestOnlineMachinePairingPreservesIdentity(t *testing.T) {
 	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)
 	}
-	configureSignedTestArtifact(t, service)
 	machine, err := service.Setup(ctx, userID, SetupInput{Alias: "studio", Platform: "linux", Architecture: "amd64", WorkspaceRoot: "/home/paperboat", PublicIdentityKey: publicKey, RuntimeVersions: json.RawMessage(`{"pb":"test"}`)})
 	if err != nil {
 		t.Fatal(err)
@@ -291,7 +289,6 @@ func TestAuthenticatedMachineInstallationIsBoundIdempotentAndGenerationFenced(t 
 	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)
 	}
-	configureSignedTestArtifact(t, service)
 	input := SetupInput{Alias: "studio", Platform: "linux", Architecture: "amd64", WorkspaceRoot: "/home/paperboat", PublicIdentityKey: publicKey, RuntimeVersions: json.RawMessage(`{"pb":"test"}`)}
 	clientMachine, err := service.Setup(ctx, userID, input)
 	if err != nil {
@@ -308,7 +305,7 @@ func TestAuthenticatedMachineInstallationIsBoundIdempotentAndGenerationFenced(t 
 		t.Fatalf("Machine installation availability=%q, want allow_sleep before installation opt-in", hostMachine.Availability.DesiredMode)
 	}
 	verifier := "authenticated-host-verifier-" + suffix
-	request := AuthenticatedMachineInstallationInput{OperationID: "host-setup-operation-" + suffix, Verifier: verifier, PublicIdentityKey: publicKey, InstallationGeneration: hostMachine.InstallationGeneration, Artifact: hostMachine.Installation.Artifact, KeepAwake: true}
+	request := AuthenticatedMachineInstallationInput{OperationID: "host-setup-operation-" + suffix, Verifier: verifier, PublicIdentityKey: publicKey, InstallationGeneration: hostMachine.InstallationGeneration, KeepAwake: true}
 	first, err := service.PrepareAuthenticatedMachineInstallation(ctx, userID, clientSessionID, hostMachine.ID, request)
 	if err != nil {
 		t.Fatal(err)
@@ -350,7 +347,7 @@ func TestAuthenticatedMachineInstallationIsBoundIdempotentAndGenerationFenced(t 
 	if err := json.Unmarshal(material, &wire); err != nil {
 		t.Fatal(err)
 	}
-	for _, retired := range []string{"setup_mode", "setup_roles"} {
+	for _, retired := range []string{"setup_mode", "setup_roles", "artifact"} {
 		if _, ok := wire[retired]; ok {
 			t.Fatalf("installation exposes retired field %s", retired)
 		}
@@ -384,13 +381,7 @@ func TestAuthenticatedMachineInstallationIsBoundIdempotentAndGenerationFenced(t 
 	if _, err := service.PrepareAuthenticatedMachineInstallation(ctx, userID, clientSessionID, hostMachine.ID, conflict); !errors.Is(err, ErrMachineInstallationOperationConflict) {
 		t.Fatalf("operation conflict error=%v", err)
 	}
-	conflict = request
-	conflict.Artifact.Version += "-different"
-	service.ConfigureMachineArtifactVersionResolver(func(string, string) string { return conflict.Artifact.Version })
-	if _, err := service.PrepareAuthenticatedMachineInstallation(ctx, userID, clientSessionID, hostMachine.ID, conflict); !errors.Is(err, ErrMachineInstallationOperationConflict) {
-		t.Fatalf("artifact conflict error=%v", err)
-	}
-	service.ConfigureMachineArtifactVersionResolver(nil)
+
 	rolledBack, err := invalidateTestInstallation(ctx, service, userID, hostMachine.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -452,7 +443,7 @@ func TestAuthenticatedMachineInstallationIsBoundIdempotentAndGenerationFenced(t 
 		},
 	)
 	raceVerifier := "authenticated-host-race-verifier-" + suffix
-	raceRequest := AuthenticatedMachineInstallationInput{OperationID: "host-setup-race-operation-" + suffix, Verifier: raceVerifier, PublicIdentityKey: publicKey, InstallationGeneration: raceHost.InstallationGeneration, Artifact: raceHost.Installation.Artifact}
+	raceRequest := AuthenticatedMachineInstallationInput{OperationID: "host-setup-race-operation-" + suffix, Verifier: raceVerifier, PublicIdentityKey: publicKey, InstallationGeneration: raceHost.InstallationGeneration}
 	type prepareResult struct {
 		value AuthenticatedMachineInstallation
 		err   error
@@ -552,7 +543,7 @@ func TestAuthenticatedMachineInstallationIsBoundIdempotentAndGenerationFenced(t 
 		},
 	)
 	recoveryVerifier := "authenticated-host-recovery-verifier-" + suffix
-	recoveryRequest := AuthenticatedMachineInstallationInput{OperationID: "host-setup-recovery-operation-" + suffix, Verifier: recoveryVerifier, PublicIdentityKey: publicKey, InstallationGeneration: recoveryHost.InstallationGeneration, Artifact: recoveryHost.Installation.Artifact}
+	recoveryRequest := AuthenticatedMachineInstallationInput{OperationID: "host-setup-recovery-operation-" + suffix, Verifier: recoveryVerifier, PublicIdentityKey: publicKey, InstallationGeneration: recoveryHost.InstallationGeneration}
 	if _, err := service.PrepareAuthenticatedMachineInstallation(ctx, userID, clientSessionID, recoveryHost.ID, recoveryRequest); err != nil {
 		t.Fatal(err)
 	}
@@ -705,7 +696,7 @@ func TestAuthenticatedMachineInstallationIsBoundIdempotentAndGenerationFenced(t 
 		},
 	)
 	sessionVerifier := "authenticated-host-session-verifier-" + suffix
-	sessionRequest := AuthenticatedMachineInstallationInput{OperationID: "host-setup-session-operation-" + suffix, Verifier: sessionVerifier, PublicIdentityKey: publicKey, InstallationGeneration: sessionHost.InstallationGeneration, Artifact: sessionHost.Installation.Artifact}
+	sessionRequest := AuthenticatedMachineInstallationInput{OperationID: "host-setup-session-operation-" + suffix, Verifier: sessionVerifier, PublicIdentityKey: publicKey, InstallationGeneration: sessionHost.InstallationGeneration}
 	sessionCtx, cancelSessionRace := context.WithTimeout(ctx, 60*time.Second)
 	defer cancelSessionRace()
 	sessionPrepareDone := make(chan prepareResult, 1)
@@ -1074,7 +1065,6 @@ authenticated_setup_cli_session_id,authenticated_setup_operation_id,authenticate
 	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)
 	}
-	configureSignedTestArtifact(t, service)
 	rolledBack, err := service.approve(ctx, userID, legacyUserCode)
 	if err != nil {
 		t.Fatal(err)
@@ -1654,7 +1644,6 @@ func TestDashboardEnrollmentIsIdempotentSingleClaimAndIssuesMaterial(t *testing.
 	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)
 	}
-	configureSignedTestArtifact(t, service)
 	service.ConfigureHelperEnrollment(func(context.Context, string, string, string, time.Duration) (HelperEnrollmentGrant, error) {
 		return HelperEnrollmentGrant{EnrollmentID: "henr_enrollment_" + suffix, HelperID: "hlp_enrollment_" + suffix, Credential: "enrollment-credential", ExpiresAt: time.Now().UTC().Add(10 * time.Minute)}, nil
 	})
@@ -1750,7 +1739,6 @@ func TestDashboardEnrollmentsStayBoundToTheirOwnTokenAndInstallation(t *testing.
 	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)
 	}
-	configureSignedTestArtifact(t, service)
 	grantNumber := 0
 	service.ConfigureHelperEnrollment(func(context.Context, string, string, string, time.Duration) (HelperEnrollmentGrant, error) {
 		grantNumber++
@@ -2018,7 +2006,6 @@ func TestInstallationMaterialIsSingleUseAndExpiryBound(t *testing.T) {
 	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)
 	}
-	configureSignedTestArtifact(t, service)
 	start, err := service.StartEnrollment(ctx, userID, "idem-install-"+suffix)
 	if err != nil {
 		t.Fatal(err)
@@ -2108,7 +2095,6 @@ func TestExpiredInstallationRecoveryIsCrashSafeConcurrentAndIdentityBound(t *tes
 	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)
 	}
-	configureSignedTestArtifact(t, service)
 	var grantMu sync.Mutex
 	grantCalls := map[string]int{}
 	service.ConfigureHelperEnrollment(func(_ context.Context, _ string, operationKey, environmentID string, _ time.Duration) (HelperEnrollmentGrant, error) {
@@ -2356,7 +2342,6 @@ func TestInstallationFailureRevokesIdentityReleasesSeatAndRetryIssuesNewIdentity
 	if err := service.ConfigureRuntimeRoute("example.test", 38080); err != nil {
 		t.Fatal(err)
 	}
-	configureSignedTestArtifact(t, service)
 	grantCalls := 0
 	service.ConfigureHelperEnrollment(func(context.Context, string, string, string, time.Duration) (HelperEnrollmentGrant, error) {
 		grantCalls++
@@ -2622,13 +2607,6 @@ func TestInitialMachineControlPreservesDatabaseFailure(t *testing.T) {
 	_, err = service.IssueInitialMachineControl(context.Background(), "machine_1", "environment_1", "initial-machine-control-test")
 	if err == nil || errors.Is(err, ErrMachineControlInvalid) {
 		t.Fatalf("initial machine-control error=%v; want underlying database failure rather than invalid proof", err)
-	}
-}
-
-func configureSignedTestArtifact(t *testing.T, service *Service) {
-	t.Helper()
-	if err := service.ConfigureMachineArtifacts("https://updates.example.test/paperboat", "test"); err != nil {
-		t.Fatal(err)
 	}
 }
 

@@ -11,7 +11,6 @@ import (
 	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
 	pbgithub "github.com/pinksaucepasta/paperboat-server/internal/github"
 	"github.com/pinksaucepasta/paperboat-server/internal/mint"
-	"github.com/pinksaucepasta/paperboat-server/internal/releases"
 	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
 	"github.com/pinksaucepasta/paperboat-server/internal/telemetry"
 	"log/slog"
@@ -291,11 +290,7 @@ func (r readinessChecker) Ready(ctx context.Context) error {
 	if err := r.db.Ping(ctx); err != nil {
 		return fmt.Errorf("database is not ready: %w", err)
 	}
-	if r.cfg.Environment == config.EnvironmentProduction {
-		if err := releases.Ready(r.cfg.ReleaseDirectory); err != nil {
-			return fmt.Errorf("release distribution is not ready: %w", err)
-		}
-	}
+
 	if r.cfg.Secrets.WorkOSClientID == "" || r.cfg.Secrets.WorkOSAPIKey == "" || r.cfg.Providers.WorkOS.BaseURL == "" {
 		return errors.New("WorkOS is not configured")
 	}

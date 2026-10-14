@@ -23,6 +23,8 @@ func TestReadinessDoesNotRequireRetiredOrUnconfiguredBilling(t *testing.T) {
 	}
 	defer store.Close()
 	cfg := config.Default()
+	cfg.Environment = config.EnvironmentProduction
+	cfg.ReleaseDirectory = ""
 	cfg.Secrets.WorkOSClientID = "client_test"
 	cfg.Secrets.WorkOSAPIKey = "sk_test_configured"
 	r := readinessChecker{cfg: cfg, db: store}

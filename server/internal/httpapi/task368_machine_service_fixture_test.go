@@ -117,9 +117,7 @@ func TestTask368ServeMachineServices(t *testing.T) {
 	if err := machines.ConfigureRuntimeRoute("task368.invalid", 38080); err != nil {
 		t.Fatal(err)
 	}
-	if err := machines.ConfigureMachineArtifacts(os.Getenv("PAPERBOAT_TASK368_MACHINE_REPOSITORY"), "2026.09.08.390"); err != nil {
-		t.Fatal(err)
-	}
+
 	enrollment := controlplane.NewEnrollmentService(database, signer, writer, base, secret)
 	machines.ConfigureHelperEnrollment(func(ctx context.Context, actor, operation, environment string, lifetime time.Duration) (usermachines.HelperEnrollmentGrant, error) {
 		grant, err := enrollment.Issue(ctx, actor, operation, environment, lifetime)

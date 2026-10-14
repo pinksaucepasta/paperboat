@@ -14579,8 +14579,7 @@
             "type": "object",
             "required": [
               "control_url",
-              "helper_listen_address",
-              "artifact"
+              "helper_listen_address"
             ],
             "properties": {
               "control_url": {
@@ -14589,41 +14588,6 @@
               },
               "helper_listen_address": {
                 "type": "string"
-              },
-              "artifact": {
-                "type": "object",
-                "required": [
-                  "schema",
-                  "kind",
-                  "version",
-                  "platform",
-                  "architecture",
-                  "repository_url",
-                  "target_path"
-                ],
-                "properties": {
-                  "schema": {
-                    "type": "string"
-                  },
-                  "kind": {
-                    "type": "string"
-                  },
-                  "version": {
-                    "type": "string"
-                  },
-                  "platform": {
-                    "type": "string"
-                  },
-                  "architecture": {
-                    "type": "string"
-                  },
-                  "repository_url": {
-                    "type": "string"
-                  },
-                  "target_path": {
-                    "type": "string"
-                  }
-                }
               }
             }
           }
@@ -16270,7 +16234,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Signed metadata or content-addressed target."
+            "description": "Signed update metadata; CLI binaries are distributed independently."
           },
           "404": {
             "description": "Repository object not found."
@@ -16295,7 +16259,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Signed metadata or content-addressed target."
+            "description": "Signed update metadata; CLI binaries are distributed independently."
           },
           "404": {
             "description": "Repository object not found."
@@ -24815,7 +24779,7 @@
       ],
       "post": {
         "summary": "Prepare authenticated machine installation material",
-        "description": "Idempotently issues verifier-bound installation material for the exact authenticated CLI session, machine identity, unified service composition, and installation generation after the release artifact has been verified locally.",
+        "description": "Idempotently issues verifier-bound installation material for the exact authenticated CLI session, machine identity, unified service composition and installation generation. The local CLI binary is independent of server-published artifacts.",
         "security": [
           {
             "bearerAccess": []
@@ -24856,8 +24820,7 @@
                 "required": [
                   "verifier",
                   "public_identity_key",
-                  "installation_generation",
-                  "artifact"
+                  "installation_generation"
                 ],
                 "properties": {
                   "verifier": {
@@ -24873,43 +24836,6 @@
                   "installation_generation": {
                     "type": "integer",
                     "minimum": 1
-                  },
-                  "artifact": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "schema",
-                      "kind",
-                      "version",
-                      "platform",
-                      "architecture",
-                      "repository_url",
-                      "target_path"
-                    ],
-                    "properties": {
-                      "schema": {
-                        "type": "string"
-                      },
-                      "kind": {
-                        "type": "string"
-                      },
-                      "version": {
-                        "type": "string"
-                      },
-                      "platform": {
-                        "type": "string"
-                      },
-                      "architecture": {
-                        "type": "string"
-                      },
-                      "repository_url": {
-                        "type": "string",
-                        "format": "uri"
-                      },
-                      "target_path": {
-                        "type": "string"
-                      }
-                    }
                   },
                   "ssh_user": {
                     "type": "string",

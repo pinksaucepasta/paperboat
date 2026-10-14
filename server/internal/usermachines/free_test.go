@@ -22,7 +22,6 @@ func TestFreeAccountSetupWithoutSubscription(t *testing.T) {
 	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)
 	}
-	configureSignedTestArtifact(t, service)
 	_, err := service.Setup(ctx, user, SetupInput{Alias: "free", Platform: "linux", Architecture: "amd64", WorkspaceRoot: "/home/paperboat", PublicIdentityKey: newIntegrationPublicIdentityKey(t), RuntimeVersions: json.RawMessage(`{"pb":"test"}`)})
 	if err != nil {
 		t.Fatal(err)

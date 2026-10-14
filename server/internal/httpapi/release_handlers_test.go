@@ -223,11 +223,17 @@ func TestTUFRepositoryDoesNotExposePrivateOrUnrelatedFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(directory, "tuf", ".signing-state.json"), []byte("private"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(directory, "tuf", "targets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "tuf", "targets", strings.Repeat("a", 64)+".pb-linux-amd64"), []byte("binary"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	files, err := NewReleaseFiles(directory)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/tuf/.signing-state.json", "/tuf/unrelated.txt"} {
+	for _, path := range []string{"/tuf/.signing-state.json", "/tuf/unrelated.txt", "/tuf/targets/" + strings.Repeat("a", 64) + ".pb-linux-amd64"} {
 		recorder := httptest.NewRecorder()
 		tufRepository("/tuf", files).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
 		if recorder.Code != http.StatusNotFound {

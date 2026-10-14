@@ -70,7 +70,6 @@ func TestAuthenticatedMachineScopeRefreshPreservesInstallation(t *testing.T) {
 	if err = service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)
 	}
-	configureSignedTestArtifact(t, service)
 	machine, err := service.Setup(ctx, user, SetupInput{Alias: "scope-refresh", Platform: "linux", Architecture: "amd64", WorkspaceRoot: "/workspace", PublicIdentityKey: publicKey, RuntimeVersions: json.RawMessage(`{"pb":"test"}`)})
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +85,7 @@ func TestAuthenticatedMachineScopeRefreshPreservesInstallation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := AuthenticatedMachineInstallationInput{OperationID: "operation_" + uuid.NewString(), Verifier: "scope-verifier-" + uuid.NewString(), PublicIdentityKey: publicKey, InstallationGeneration: machine.InstallationGeneration, Artifact: machine.Installation.Artifact, CanReuseRuntimeIdentity: false}
+	input := AuthenticatedMachineInstallationInput{OperationID: "operation_" + uuid.NewString(), Verifier: "scope-verifier-" + uuid.NewString(), PublicIdentityKey: publicKey, InstallationGeneration: machine.InstallationGeneration, CanReuseRuntimeIdentity: false}
 	first, err := service.PrepareAuthenticatedMachineInstallation(ctx, user, client, machine.ID, input)
 	if err != nil {
 		t.Fatal(err)

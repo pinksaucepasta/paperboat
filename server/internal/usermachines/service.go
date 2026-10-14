@@ -16,14 +16,12 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat-server/internal/helperruntime"
 	"github.com/pinksaucepasta/paperboat-server/internal/mint"
-	"github.com/pinksaucepasta/paperboat-server/internal/releases"
 	"github.com/pinksaucepasta/paperboat-server/internal/secrets"
 	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
 	"github.com/pinksaucepasta/paperboat-server/internal/teaminbox"
 	"github.com/pinksaucepasta/paperboat-server/internal/workers"
 	"io"
 	"net/http"
-	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -259,9 +257,6 @@ type Service struct {
 	helperRecovery              func(context.Context, string, string, string, string, time.Duration) (HelperEnrollmentGrant, error)
 	authenticatedHelperGrant    func(context.Context, string, string, string, time.Duration, HelperEnrollmentAuthorityGuard) (HelperEnrollmentGrant, error)
 	authenticatedHelperRecovery func(context.Context, string, string, string, string, time.Duration, HelperEnrollmentAuthorityGuard) (HelperEnrollmentGrant, error)
-	artifactRepository          string
-	artifactVersion             string
-	artifactVersionFn           func(string, string) string
 	helperBaseDomain            string
 	helperListenPort            int32
 	cliClientID                 string
@@ -359,16 +354,6 @@ func (s *Service) FailInstallation(ctx context.Context, enrollmentID, environmen
 		}
 		return s.audit.WriteTx(ctx, tx, audit.Event{ActorType: audit.ActorSystem, EventType: "user_machine.installation_failed", ResourceType: "pairing", ResourceID: enrollmentID, IdempotencyKey: "user_machine.installation_failed:" + enrollmentID + ":" + stage, Metadata: map[string]any{"environment_id": environmentID, "helper_id": helperID, "stage": stage}})
 	})
-}
-
-type MachineArtifact struct {
-	Schema        string `json:"schema"`
-	Kind          string `json:"kind"`
-	Version       string `json:"version"`
-	Platform      string `json:"platform"`
-	Architecture  string `json:"architecture"`
-	RepositoryURL string `json:"repository_url"`
-	TargetPath    string `json:"target_path"`
 }
 
 // Worker retries revocations after the connector becomes reachable again. A
@@ -470,41 +455,6 @@ func (s *Service) ConfigureAuthenticatedHelperEnrollment(
 	recover func(context.Context, string, string, string, string, time.Duration, HelperEnrollmentAuthorityGuard) (HelperEnrollmentGrant, error),
 ) {
 	s.authenticatedHelperGrant, s.authenticatedHelperRecovery = issuer, recover
-}
-
-func (s *Service) ConfigureMachineArtifacts(repositoryURL, version string) error {
-	repositoryURL, version = strings.TrimRight(strings.TrimSpace(repositoryURL), "/"), strings.TrimSpace(version)
-	if repositoryURL == "" && version == "" {
-		return nil
-	}
-	parsed, err := url.Parse(repositoryURL)
-	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Hostname() == "" || parsed.RawQuery != "" || parsed.Fragment != "" || version == "" || len(version) > 64 || strings.ContainsAny(version, "\x00\r\n/\\") {
-		return errors.New("user-machine artifacts are invalid")
-	}
-	s.artifactRepository, s.artifactVersion = repositoryURL, version
-	return nil
-}
-
-func (s *Service) ConfigureMachineArtifactVersionResolver(resolve func(string, string) string) {
-	s.artifactVersionFn = resolve
-}
-
-func (s *Service) machineArtifact(platform, architecture string) (MachineArtifact, bool) {
-	version := s.artifactVersion
-	if s.artifactVersionFn != nil {
-		version = strings.TrimSpace(s.artifactVersionFn(platform, architecture))
-	}
-	if s.artifactRepository == "" || version == "" || len(version) > 64 || strings.ContainsAny(version, "\x00\r\n/\\") || !releases.SupportedPlatformArchitecture(platform, architecture) {
-		return MachineArtifact{}, false
-	}
-	targetPath := "pb-" + platform + "-" + architecture
-	if platform == "windows" {
-		targetPath += ".exe"
-	}
-	if platform == "darwin" {
-		targetPath += ".pkg"
-	}
-	return MachineArtifact{Schema: "paperboat.tuf-target/v1", Kind: "pb", Version: version, Platform: platform, Architecture: architecture, RepositoryURL: s.artifactRepository, TargetPath: targetPath}, true
 }
 
 func New(store *db.DB, auditWriter *audit.Writer, policy Policy, seats SeatAuthorizer) *Service {
@@ -688,7 +638,6 @@ type Pairing struct {
 type AuthenticatedMachineInstallationInput struct {
 	OperationID, Verifier, PublicIdentityKey string
 	InstallationGeneration                   int64
-	Artifact                                 MachineArtifact
 	SSHUser                                  string
 	SSHPort                                  uint16
 	CanReuseRuntimeIdentity                  bool
@@ -846,7 +795,7 @@ func (s *Service) PrepareAuthenticatedMachineInstallation(ctx context.Context, u
 			}
 			return nil
 		}
-		build, buildErr := s.buildInstallationMaterial(ctx, userID, pairing, machine, operationKey, nil, in.CanReuseRuntimeIdentity, "", &in.Artifact, authorityGuard)
+		build, buildErr := s.buildInstallationMaterial(ctx, userID, pairing, machine, operationKey, nil, in.CanReuseRuntimeIdentity, "", authorityGuard)
 		if buildErr != nil {
 			return AuthenticatedMachineInstallation{}, buildErr
 		}
@@ -872,7 +821,7 @@ func (s *Service) PrepareAuthenticatedMachineInstallation(ctx context.Context, u
 			}
 			current.InstallationConfigCiphertext = candidateCiphertext
 		}
-		if !s.authenticatedMachineInstallationMaterialMatches(current.InstallationConfigCiphertext, currentMachine.ID, currentMachine.EnvironmentID, in.InstallationGeneration, in.Artifact, current.AuthenticatedSetupHelperEnrollmentID) {
+		if !s.authenticatedMachineInstallationMaterialMatches(current.InstallationConfigCiphertext, currentMachine.ID, currentMachine.EnvironmentID, in.InstallationGeneration, current.AuthenticatedSetupHelperEnrollmentID) {
 			return ErrMachineInstallationOperationConflict
 		}
 		pairing = current

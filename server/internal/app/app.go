@@ -50,7 +50,6 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/previewv1"
 	"github.com/pinksaucepasta/paperboat-server/internal/privateaccess"
 	"github.com/pinksaucepasta/paperboat-server/internal/releaseauthority"
-	"github.com/pinksaucepasta/paperboat-server/internal/releases"
 	"github.com/pinksaucepasta/paperboat-server/internal/resourceusage"
 	"github.com/pinksaucepasta/paperboat-server/internal/runtimeattachment"
 	"github.com/pinksaucepasta/paperboat-server/internal/selfhost"
@@ -277,25 +276,7 @@ func New(opts Options) (*App, error) {
 	if err := userMachineService.ConfigureRuntimeRoute(opts.Config.RuntimeBaseDomain, opts.Config.UserMachines.RuntimeListenPort); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(opts.Config.ReleaseDirectory) != "" {
-		if err := userMachineService.ConfigureMachineArtifacts(releaseBaseURL+"/tuf", "bootstrap"); err != nil {
-			return nil, err
-		}
-		userMachineService.ConfigureMachineArtifactVersionResolver(func(platform, architecture string) string {
-			current, currentErr := releases.ReadCurrent(opts.Config.ReleaseDirectory)
-			if currentErr != nil {
-				return ""
-			}
-			name := "pb-" + platform + "-" + architecture
-			if platform == "windows" {
-				name += ".exe"
-			}
-			if platform == "darwin" {
-				name += ".pkg"
-			}
-			return current.Assets[name].Version
-		})
-	}
+
 	var releaseAuthorityService *releaseauthority.Service
 	if len(opts.Config.ReleaseAuthority.PublicKeys) > 0 {
 		authorityKeys, authorityErr := releaseauthority.ParseKeys(opts.Config.ReleaseAuthority.PublicKeys)

@@ -415,19 +415,12 @@ func (s *Service) persistInstallationCLISessionTx(ctx context.Context, tx *db.Tx
 	return nil
 }
 
-func (s *Service) buildInstallationMaterial(ctx context.Context, userID string, pairing dbsqlc.UserMachinePairing, machine UserMachine, operationKey string, existingClientSession json.RawMessage, reuseRuntimeIdentity bool, expectedHelperID string, exactArtifact *MachineArtifact, authorityGuard HelperEnrollmentAuthorityGuard) (installationMaterialBuild, error) {
+func (s *Service) buildInstallationMaterial(ctx context.Context, userID string, pairing dbsqlc.UserMachinePairing, machine UserMachine, operationKey string, existingClientSession json.RawMessage, reuseRuntimeIdentity bool, expectedHelperID string, authorityGuard HelperEnrollmentAuthorityGuard) (installationMaterialBuild, error) {
 	if strings.TrimSpace(s.encryptionKey) == "" {
 		return installationMaterialBuild{}, errors.New("user-machine provisioning encryption is not configured")
 	}
 	if s.helperGrant == nil {
 		return installationMaterialBuild{}, ErrProvisioningUnavailable
-	}
-	artifact, ok := s.machineArtifact(machine.Platform, machine.Architecture)
-	if exactArtifact != nil {
-		artifact, ok = *exactArtifact, *exactArtifact == artifact
-	}
-	if !ok {
-		return installationMaterialBuild{}, errors.New("user-machine artifact is unavailable or changed")
 	}
 	installationEnrollmentID := pairing.ID
 	operationKeyProvided := strings.TrimSpace(operationKey) != ""
@@ -493,7 +486,6 @@ func (s *Service) buildInstallationMaterial(ctx context.Context, userID string, 
 		"schema": "paperboat.machine-installation/v1", "user_machine_id": machine.ID, "pairing_id": installationEnrollmentID, "environment_id": machine.EnvironmentID,
 		"control_url": s.issuer, "helper_id": grant.HelperID, "enrollment_id": grant.EnrollmentID,
 		"enrollment_credential": grant.Credential, "reuse_identity": reuseIdentity, "expires_at": grant.ExpiresAt,
-		"artifact":                artifact,
 		"helper_listen_address":   fmt.Sprintf("127.0.0.1:%d", s.helperListenPort),
 		"installation_generation": machine.InstallationGeneration,
 	}
@@ -533,7 +525,7 @@ func (s *Service) provisionApprovedUserMachineWithOperation(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	build, err := s.buildInstallationMaterial(ctx, userID, pairing, machine, operationKey, nil, pairing.CanReuseRuntimeIdentity, "", nil, nil)
+	build, err := s.buildInstallationMaterial(ctx, userID, pairing, machine, operationKey, nil, pairing.CanReuseRuntimeIdentity, "", nil)
 	if err != nil {
 		return err
 	}
@@ -559,7 +551,6 @@ func (s *Service) provisionRecoveredUserMachine(ctx context.Context, userID stri
 	}
 	var existingClientSession json.RawMessage
 	var expectedHelperID string
-	var exactArtifact *MachineArtifact
 	var authenticatedBinding *authenticatedMachineInstallationMaterialBinding
 	var materialSessionID string
 	if len(pairing.InstallationConfigCiphertext) > 0 {
@@ -596,14 +587,13 @@ func (s *Service) provisionRecoveredUserMachine(ctx context.Context, userID stri
 				return nil, ErrInstallationUnavailable
 			}
 			authenticatedBinding = &binding
-			exactArtifact = &binding.Artifact
 		}
 	}
 	var authorityGuard HelperEnrollmentAuthorityGuard
 	if authenticatedBinding != nil {
 		authorityGuard = s.authenticatedMachineInstallationRecoveryAuthorityGuard(userID, pairing, *authenticatedBinding, materialSessionID)
 	}
-	build, err := s.buildInstallationMaterial(ctx, userID, pairing, machine, operationKey, existingClientSession, runtimeEnrolled, expectedHelperID, exactArtifact, authorityGuard)
+	build, err := s.buildInstallationMaterial(ctx, userID, pairing, machine, operationKey, existingClientSession, runtimeEnrolled, expectedHelperID, authorityGuard)
 	if err != nil {
 		return nil, err
 	}
@@ -638,7 +628,7 @@ func (s *Service) provisionRecoveredUserMachine(ctx context.Context, userID stri
 			if currentErr != nil {
 				return currentErr
 			}
-			if !s.authenticatedMachineInstallationMaterialMatches(build.ciphertext, machine.ID, machine.EnvironmentID, machine.InstallationGeneration, *exactArtifact, current.AuthenticatedSetupHelperEnrollmentID) {
+			if !s.authenticatedMachineInstallationMaterialMatches(build.ciphertext, machine.ID, machine.EnvironmentID, machine.InstallationGeneration, current.AuthenticatedSetupHelperEnrollmentID) {
 				return ErrInstallationUnavailable
 			}
 		}
@@ -732,13 +722,12 @@ func helperIDFromInstallationMaterial(material []byte) (string, error) {
 }
 
 type authenticatedMachineInstallationMaterialBinding struct {
-	MachineID     string          `json:"user_machine_id"`
-	EnvironmentID string          `json:"environment_id"`
-	HelperID      string          `json:"helper_id"`
-	EnrollmentID  string          `json:"enrollment_id"`
-	ReuseIdentity bool            `json:"reuse_identity"`
-	Generation    int64           `json:"installation_generation"`
-	Artifact      MachineArtifact `json:"artifact"`
+	MachineID     string `json:"user_machine_id"`
+	EnvironmentID string `json:"environment_id"`
+	HelperID      string `json:"helper_id"`
+	EnrollmentID  string `json:"enrollment_id"`
+	ReuseIdentity bool   `json:"reuse_identity"`
+	Generation    int64  `json:"installation_generation"`
 }
 
 func authenticatedMachineInstallationMaterialBindingFromPlaintext(material []byte) (authenticatedMachineInstallationMaterialBinding, error) {
@@ -750,13 +739,13 @@ func authenticatedMachineInstallationMaterialBindingFromPlaintext(material []byt
 	return binding, nil
 }
 
-func (s *Service) authenticatedMachineInstallationMaterialMatches(ciphertext []byte, machineID, environmentID string, generation int64, artifact MachineArtifact, helperEnrollmentID sql.NullString) bool {
+func (s *Service) authenticatedMachineInstallationMaterialMatches(ciphertext []byte, machineID, environmentID string, generation int64, helperEnrollmentID sql.NullString) bool {
 	plaintext, err := secrets.Decrypt(s.encryptionKey, ciphertext)
 	if err != nil {
 		return false
 	}
 	binding, err := authenticatedMachineInstallationMaterialBindingFromPlaintext([]byte(plaintext))
-	if err != nil || binding.MachineID != machineID || binding.EnvironmentID != environmentID || binding.Generation != generation || binding.Artifact != artifact {
+	if err != nil || binding.MachineID != machineID || binding.EnvironmentID != environmentID || binding.Generation != generation {
 		return false
 	}
 	if binding.ReuseIdentity {
@@ -787,9 +776,8 @@ func (s *Service) authenticatedMachineInstallationRecoveryAuthorityGuard(userID 
 			return ErrInstallationUnavailable
 		}
 		machine := mapMachine(row)
-		artifact, artifactAvailable := s.machineArtifact(machine.Platform, machine.Architecture)
 		if machine.EnvironmentID != binding.EnvironmentID || machine.SeatState != "occupied" ||
-			machine.InstallationGeneration != binding.Generation || machine.PublicIdentityKey != expected.PublicIdentityKey.String || !artifactAvailable || artifact != binding.Artifact {
+			machine.InstallationGeneration != binding.Generation || machine.PublicIdentityKey != expected.PublicIdentityKey.String {
 			return ErrInstallationUnavailable
 		}
 		if !authenticatedMachineInstallationRecoveryPairingMatches(current, expected, userID, machine, binding, s.now().UTC()) {
@@ -839,7 +827,7 @@ func authenticatedMachineInstallationRecoveryPairingMatches(current, expected db
 		current.State == "consumed" && current.InstallationConfigConsumedAt.Valid && current.InstallationConfigConsumedAt == expected.InstallationConfigConsumedAt &&
 		current.InstallationRecoveryOperationKey.Valid && current.InstallationRecoveryOperationKey == expected.InstallationRecoveryOperationKey &&
 		bytes.Equal(current.InstallationConfigCiphertext, expected.InstallationConfigCiphertext) && current.ExpiresAt.Equal(expected.ExpiresAt) && now.Before(current.ExpiresAt) &&
-		binding.MachineID == machine.ID && binding.EnvironmentID == machine.EnvironmentID && binding.Artifact.Platform == machine.Platform && binding.Artifact.Architecture == machine.Architecture
+		binding.MachineID == machine.ID && binding.EnvironmentID == machine.EnvironmentID
 }
 
 func replaceInstallationClientSession(material []byte, session installationClientSession) ([]byte, error) {
