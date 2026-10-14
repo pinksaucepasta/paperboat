@@ -84,6 +84,12 @@ PLAN.md (section 5) and done by that lane. **Only Lane A uses the test devices.*
 finishes and pushes the Go/API side, then writes the frontend request (API, fields, states,
 errors) in the PLAN.md Log; Claude does it. Go changes the frontend needs are done by Codex.
 
+**Blocking rows first.** Before picking each next row, read the PLAN.md Log for lines where
+another lane waits for one of your rows ("waits for S1", a request naming your lane). Those rows
+come before everything else you own, including later rows, tidy-ups and other lanes' requests,
+and you work them until they are `[x]` or truly `[!]`. A lane that waits writes exactly one such
+line naming the rows it needs.
+
 **Keep going until done.** A lane works its rows in PLAN.md order and does not stop until every
 row it owns is `[x]` or `[!]`. Do not ask the user to confirm routine choices. `[!]` means blocked on something
 specific (named in Evidence); rows that simply come later in PLAN.md order stay `[ ]`; one Log
