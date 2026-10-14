@@ -7,7 +7,7 @@ done when **all** its scenario rows and command rows are `[x]` on L, M and W. Th
 ## How to mark
 
 - Cells: **L** = Linux (hp), **M** = macOS (apple), **W** = Windows (victus). For S-sections
-  (groundwork, release) only the first cell is used.
+  (groundwork, infrastructure, release) only the first cell is used.
 - `[ ]` not verified · `[~]` in progress · `[x]` verified on the real device · `[!]` fails
   (write the failure in Evidence) · `n/a` impossible on that platform (say why in Evidence).
 - Mark `[x]` **only** with evidence: a smoke-suite test id with its results file
@@ -73,6 +73,19 @@ that use them; say which in Evidence.
 | S1-12 | Daily database backup runs; one restore into a scratch database tested. | [ ] | — | — |  |
 | S1-13 | Server `/healthz` and Sentry error reporting (if configured in the backup) work. | [ ] | — | — |  |
 | S1-14 | Console ↔ server contract fixes from console/NOTES.md that every feature depends on: unknown `/v1/` paths return 404 (not 401); OpenAPI response schemas for `/v1/me` and machine endpoints; sign-in return path. | [ ] | — | — |  |
+
+---
+
+## S4. Self-host installer and images (Lane B; needed by S1)
+
+| ID | Scenario | L | M | W | Evidence |
+|---|---|---|---|---|---|
+| S4-01 | Docker images for server, relay and tunnel build for linux/amd64 and linux/arm64 from this repo (multi-arch manifests), tagged with the release version. | [ ] | — | — | |
+| S4-02 | `self-host.sh` implements 1.4b on a fresh Ubuntu 24.04 VPS: installs Docker, generates secrets, starts the selected role(s), health-checks them, prints the result. | [ ] | — | — | |
+| S4-03 | Re-running it upgrades in place to a newer image version, keeping data and secrets; a failed upgrade leaves the previous version running. | [ ] | — | — | |
+| S4-04 | Works on amd64 and arm64 (arm64: build-only plus one run in an arm64 container/VM if available), and on Debian 12; unsupported systems get a clear refusal. | [ ] | — | — | |
+| S4-05 | Uninstall/teardown option removes containers and (only with explicit confirmation) data. | [ ] | — | — | |
+| S4-06 | Self-host documentation: how to run your own server/relay/tunnel and connect `pb` to it (`--server`), written from the actual script behaviour. | [ ] | — | — | |
 
 ---
 
