@@ -49,9 +49,10 @@ ARM builds must compile, pass unit tests and be included in every release.
   (unreleased; no compatibility, no redirects).
 - Public Suffix List submission for `pprbt.app`: the user handles it. Not in this plan.
 - DNS: `pprbt.dev` and `pprbt.app` are on Cloudflare (added by the user 2026-10-14).
-  `ppr.boats` is not on Cloudflare and is already set up. The old Cloudflare DNS token is not in
-  the backup (only a secret reference); Lane B asks the user for a zone-scoped token (DNS edit
-  on pprbt.dev and pprbt.app) when S1 needs it.
+  `ppr.boats` is not on Cloudflare and is already set up. The existing Cloudflare DNS token is saved
+  owner-only in `~/paperboat-archive/coolify-backup/cloudflare-dns-token`; verified 2026-10-14 it
+  can access zone `pprbt.dev` only. The user must add `pprbt.app` (Zone DNS Edit) to that token
+  before S1 needs preview/tunnel certificates.
 
 ### 1.3 Plans and billing (live Stripe at launch)
 
