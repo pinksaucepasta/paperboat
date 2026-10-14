@@ -330,7 +330,8 @@ func (p *CloudflareDNSProvider) request(ctx context.Context, method, path string
 			}
 			continue
 		}
-		return cloudflareFailure(ErrDNSChallengeUnavailable, "Cloudflare returned an unsuccessful status", response.StatusCode)
+		detail := fmt.Sprintf("Cloudflare DNS request failed with HTTP %d; check the DNS configuration and retry", response.StatusCode)
+		return cloudflareFailure(ErrDNSChallengeUnavailable, detail, response.StatusCode)
 	}
 	return ErrDNSChallengeUnavailable
 }
