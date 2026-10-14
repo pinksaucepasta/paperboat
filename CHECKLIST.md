@@ -149,7 +149,7 @@ that use them; say which in Evidence.
 | C028 | `pb login` | Sign in through browser approval on any device | [ ] | [ ] | [ ] | — |
 | C029 | `pb logout` | Revoke and remove the active client session | [ ] | [ ] | [ ] | — |
 | C030 | `pb machine` | Manage machines | [ ] | [ ] | [ ] | — |
-| C031 | `pb machine add` | Print Linux/macOS and Windows machine enrollment commands | [ ] | [ ] | [ ] | — |
+| C031 | `pb machine add` | Print Linux/macOS and Windows machine enrollment commands | [ ] | [ ] | [ ] | Workspace: TestMachineAddPrintsOneShotEnrollmentCommands fails before/PASS after configured installer discovery + distinct POSIX/PowerShell tokens; missing discovery issues no token; partial failure cancels unused enrollment. CLI/API race PASS; real-device qualification waits for artifact-free F1 pairing producer. |
 | C032 | `pb machine availability` | Set machine sleep availability | [ ] | [ ] | [ ] | — |
 | C033 | `pb machine capabilities` | Set incoming services for a machine | [ ] | [ ] | [ ] | — |
 | C034 | `pb machine list` | List enrolled machines | [ ] | [ ] | [ ] | — |

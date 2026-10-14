@@ -477,11 +477,23 @@ func TestMachineAddPrintsOneShotEnrollmentCommands(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/client-configuration" {
+			writeAPIData(t, w, map[string]string{"version": "1", "machines_url": "https://console.example.test/machines", "installer_base_url": "https://install.example.test/custom"})
+			return
+		}
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/machine-enrollments" {
 			http.NotFound(w, r)
 			return
 		}
-		writeAPIData(t, w, api.MachineEnrollmentStart{ID: "ume_1", BootstrapToken: "one-shot-token", ServerURL: "https://api.paperboat.test"})
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		token := "posix-token"
+		if body["shell"] == "powershell" {
+			token = "windows-token"
+		}
+		writeAPIData(t, w, api.MachineEnrollmentStart{ID: "ume_" + body["shell"], BootstrapToken: token, ServerURL: "https://api.example.test"})
 	}))
 	defer srv.Close()
 	writeTestProfile(t, dir, configPath, srv.URL)
@@ -490,7 +502,7 @@ func TestMachineAddPrintsOneShotEnrollmentCommands(t *testing.T) {
 	if code := run(context.Background(), []string{"--config", configPath, "machine", "add", "--name", "Victus"}, &output, &output); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, output.String())
 	}
-	if !strings.Contains(output.String(), "Victus-one-shot-token") || !strings.Contains(output.String(), "get.pprbt.dev/install?p=") || !strings.Contains(output.String(), "PowerShell or Command Prompt") || !strings.Contains(output.String(), `powershell -c "iex (irm '`) || !strings.Contains(output.String(), `')"`) || strings.Contains(output.String(), `| iex`) || strings.Contains(output.String(), "iwr '") || strings.Contains(output.String(), "-OutFile") || strings.Contains(output.String(), "powershell -NoLogo") || strings.Contains(output.String(), "--setup-mode") || strings.Contains(output.String(), "PAPERBOAT_SERVER") {
+	if !strings.Contains(output.String(), "Victus-posix-token") || !strings.Contains(output.String(), "install.example.test/custom/install?p=Victus-windows-token") || !strings.Contains(output.String(), "PowerShell or Command Prompt") || !strings.Contains(output.String(), `powershell -c "iex (irm '`) || !strings.Contains(output.String(), `')"`) || strings.Contains(output.String(), `| iex`) || strings.Contains(output.String(), "iwr '") || strings.Contains(output.String(), "-OutFile") || strings.Contains(output.String(), "powershell -NoLogo") || strings.Contains(output.String(), "--setup-mode") || strings.Contains(output.String(), "PAPERBOAT_SERVER") {
 		t.Fatalf("output=%q", output.String())
 	}
 }

@@ -220,6 +220,7 @@ type Me struct {
 // ClientConfiguration contains server-owned URLs used by Paperboat clients.
 type ClientConfiguration struct {
 	Version            string `json:"version"`
+	InstallerBaseURL   string `json:"installer_base_url"`
 	CLIVerificationURL string `json:"cli_verification_url"`
 	MachinesURL        string `json:"machines_url"`
 }
@@ -550,13 +551,20 @@ type MachineEnrollmentStart struct {
 
 // StartMachineEnrollment creates the single-use credential used by the
 // dashboard, CLI, and TUI one-shot installers.
-func (c *Client) StartMachineEnrollment(ctx context.Context, idempotencyKey string) (MachineEnrollmentStart, error) {
+func (c *Client) StartMachineEnrollment(ctx context.Context, idempotencyKey, shell string) (MachineEnrollmentStart, error) {
 	var out MachineEnrollmentStart
 	if strings.TrimSpace(idempotencyKey) == "" {
 		return out, errors.New("machine enrollment idempotency key is required")
 	}
-	err := c.doWithHeaders(ctx, http.MethodPost, "/v1/machine-enrollments", map[string]string{}, &out, http.Header{"Idempotency-Key": []string{idempotencyKey}})
+	if shell != "posix" && shell != "powershell" {
+		return out, errors.New("machine enrollment shell must be posix or powershell")
+	}
+	err := c.doWithHeaders(ctx, http.MethodPost, "/v1/machine-enrollments", map[string]string{"shell": shell}, &out, http.Header{"Idempotency-Key": []string{idempotencyKey}})
 	return out, err
+}
+
+func (c *Client) CancelMachineEnrollment(ctx context.Context, id, key string) error {
+	return c.doWithHeaders(ctx, http.MethodPost, "/v1/machine-enrollments/"+url.PathEscape(id)+"/cancel", nil, nil, http.Header{"Idempotency-Key": []string{key}})
 }
 
 func (c *Client) SetupMachine(ctx context.Context, input MachineSetupInput) (UserMachine, error) {
