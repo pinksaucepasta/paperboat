@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"io"
 	"sync"
@@ -111,7 +112,7 @@ func (r *Registry) Join(ctx context.Context, sessionID string, generation uint64
 	if err != nil {
 		return nil, classifiedFailure(err, streamOpenStage, transportCode)
 	}
-	producerAttachment := "broadcast_" + sessionID
+	producerAttachment := "broadcast_" + hex.EncodeToString(epoch.ID[:])
 	if _, err = r.manager.AttachLive(sessionID, producerAttachment); err != nil {
 		return nil, classifiedFailure(errors.Join(err, publisher.Close()), streamOpenStage, sessionCode)
 	}
