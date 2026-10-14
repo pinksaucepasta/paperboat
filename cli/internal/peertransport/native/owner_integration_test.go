@@ -74,6 +74,13 @@ func TestAuthorizedTerminalAndLiveTransferRevocationReconnect(t *testing.T) {
 	dm := integration.RunDERPAndSTUN(t, func(string, ...any) {}, "127.0.0.1")
 	signerPublic, signerPrivate, _ := ed25519.GenerateKey(rand.Reader)
 	clientTLS, clientFingerprint := testTLS(t, "cli")
+	var rejectHandshake atomic.Bool
+	clientTLS.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+		if rejectHandshake.Load() {
+			return nil, errors.New("new handshake rejected by certificate source")
+		}
+		return &clientTLS.Certificates[0], nil
+	}
 	serverTLS, serverFingerprint := testTLS(t, "machine")
 	clientBinding := tailnet.NetworkBinding{AccountID: "account_test", EndpointID: "cli_test", Role: "cli", EndpointGeneration: 1, QUICCertificateFingerprint: clientFingerprint, VirtualAddress: "fd7a:115c:a1e0::1"}
 	serverBinding := tailnet.NetworkBinding{AccountID: "account_test", EndpointID: "machine_test", Role: "machine", MachineID: "machine_test", EndpointGeneration: 1, MachineGeneration: 1, QUICCertificateFingerprint: serverFingerprint, VirtualAddress: "fd7a:115c:a1e0::2"}
@@ -141,6 +148,30 @@ func TestAuthorizedTerminalAndLiveTransferRevocationReconnect(t *testing.T) {
 	if _, err = io.ReadFull(sshConn, sshResponse); err != nil || string(sshResponse) != string(sshPayload) {
 		t.Fatalf("SSH response=%q err=%v", sshResponse, err)
 	}
+	t.Run("FailedNewHandshakePreservesLiveSSHStream", func(t *testing.T) {
+		rejectHandshake.Store(true)
+		defer rejectHandshake.Store(false)
+		dialCtx, stop := context.WithTimeout(t.Context(), 5*time.Second)
+		defer stop()
+		failed, err := clientOwner.Dial(dialCtx, descriptor, "machine_test", peerquic.ClassInteractive)
+		if err == nil {
+			failed.Close()
+			t.Fatal("bad client certificate unexpectedly admitted")
+		}
+		if dialCtx.Err() != nil {
+			t.Fatal("handshake failed only because test deadline expired")
+		}
+		timer := time.AfterFunc(3*time.Second, func() { sshConn.Close() })
+		defer timer.Stop()
+		payload := []byte("ssh-after-failed-handshake")
+		if _, err := sshConn.Write(payload); err != nil {
+			t.Fatal("live SSH write after unrelated failed handshake:", err)
+		}
+		response := make([]byte, len(payload))
+		if _, err := io.ReadFull(sshConn, response); err != nil || string(response) != string(payload) {
+			t.Fatal("live SSH stream was lost after unrelated failed handshake:", err)
+		}
+	})
 	if err = sshConn.(tunnel.InputHalfCloser).CloseWrite(); err != nil {
 		t.Fatal(err)
 	}
@@ -555,11 +586,9 @@ func startTestServer(t *testing.T, owner *native.Owner, authority *tailnet.Autho
 				}
 				go func(connection net.Conn) {
 					defer connection.Close()
-					buffer := make([]byte, 1024)
-					count, readErr := connection.Read(buffer)
-					if readErr == nil {
-						_, _ = connection.Write(buffer[:count])
-					}
+					// Keep the fixture stream alive until its client closes it.
+					// A one-message echo cannot prove active-flow isolation.
+					_, _ = io.Copy(connection, connection)
 				}(stream)
 			}
 		})

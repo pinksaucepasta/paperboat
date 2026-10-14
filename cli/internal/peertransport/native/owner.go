@@ -250,9 +250,8 @@ func (o *Owner) Dial(ctx context.Context, descriptor mesh.Addr, peerID string, c
 	}
 	quicSession, err := peerquic.DialPacket(ctx, socket, tlsConfig, peerquic.DevelopmentSessionConfig(class))
 	if err != nil {
-		if ctx.Err() == nil {
-			o.authority.InvalidateClient(client)
-		}
+		// DialPacket owns this socket, including failed TLS setup. A failed
+		// handshake does not invalidate other sessions on the shared client.
 		return nil, o.dialFailure(ctx, peerID, "peer_connect", "native_private_failed", err)
 	}
 	if current, currentErr := o.authority.Peer(peerID); currentErr != nil || current != peer {
