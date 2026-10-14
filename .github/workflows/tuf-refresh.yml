@@ -75,23 +75,19 @@ jobs:
           printf '%s\n' "$PAPERBOAT_RELEASE_SSH_KEY" > "$HOME/.ssh/paperboat-release"
           printf '%s\n' "$PAPERBOAT_RELEASE_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 0600 "$HOME/.ssh/paperboat-release" "$HOME/.ssh/known_hosts"
-      - name: Fetch and validate production TUF signing state
+      - name: Fetch and validate production TUF root and online signer
         env:
-          PAPERBOAT_TUF_KEY_TARGETS_1: ${{ secrets.PAPERBOAT_TUF_KEY_TARGETS_1 }}
-          PAPERBOAT_TUF_KEY_TARGETS_2: ${{ secrets.PAPERBOAT_TUF_KEY_TARGETS_2 }}
-          PAPERBOAT_TUF_KEY_SNAPSHOT_1: ${{ secrets.PAPERBOAT_TUF_KEY_SNAPSHOT_1 }}
-          PAPERBOAT_TUF_KEY_TIMESTAMP_2: ${{ secrets.PAPERBOAT_TUF_KEY_TIMESTAMP_2 }}
+          PAPERBOAT_TUF_ONLINE_KEY: ${{ secrets.PAPERBOAT_TUF_ONLINE_KEY }}
         shell: bash
         run: |
           set -euo pipefail
-          for name in PAPERBOAT_TUF_KEY_TARGETS_1 PAPERBOAT_TUF_KEY_TARGETS_2 PAPERBOAT_TUF_KEY_SNAPSHOT_1 PAPERBOAT_TUF_KEY_TIMESTAMP_2; do
+          for name in PAPERBOAT_TUF_ONLINE_KEY; do
             test -n "${!name}" || { echo "$name is required" >&2; exit 1; }
           done
           repository="$RUNNER_TEMP/tuf-production"
           mkdir -p "$repository/targets"
           ssh -i "$HOME/.ssh/paperboat-release" -o BatchMode=yes -o StrictHostKeyChecking=yes "root@$RELEASE_HOST" \
             'tar -C /opt/paperboat/releases/current/tuf -cf - metadata' | tar -C "$repository" -xf -
-          install -m 0600 tools/tuf-repository/active-signing-state.json "$repository/.signing-state.json"
           go run ./tools/tuf-repository validate-signers \
             -repository "$repository" \
             -trusted-root "$GITHUB_WORKSPACE/cli/internal/hostruntime/bootstrap/trusted-root.json"
@@ -99,10 +95,7 @@ jobs:
           printf 'PAPERBOAT_TUF_REPOSITORY=%s\n' "$repository" >> "$GITHUB_ENV"
       - name: Refresh snapshot and timestamp metadata
         env:
-          PAPERBOAT_TUF_KEY_TARGETS_1: ${{ secrets.PAPERBOAT_TUF_KEY_TARGETS_1 }}
-          PAPERBOAT_TUF_KEY_TARGETS_2: ${{ secrets.PAPERBOAT_TUF_KEY_TARGETS_2 }}
-          PAPERBOAT_TUF_KEY_SNAPSHOT_1: ${{ secrets.PAPERBOAT_TUF_KEY_SNAPSHOT_1 }}
-          PAPERBOAT_TUF_KEY_TIMESTAMP_2: ${{ secrets.PAPERBOAT_TUF_KEY_TIMESTAMP_2 }}
+          PAPERBOAT_TUF_ONLINE_KEY: ${{ secrets.PAPERBOAT_TUF_ONLINE_KEY }}
         shell: bash
         run: |
           set -euo pipefail

@@ -31,5 +31,6 @@ jobs:
             relay/go.sum
             tunnel/go.sum
             go.work.sum
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-yaml python3-cryptography
       - run: python3 -m unittest discover -s ../.github/tests -p 'test_*.py'
       - run: make check race reproducible-builds binary-size-check static-analysis vulnerability-check license-check
