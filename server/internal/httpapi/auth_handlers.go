@@ -290,30 +290,6 @@ func bearerToken(r *http.Request) (string, bool) {
 	return parts[1], true
 }
 
-func requireEntitlement(service *auth.Service, next http.Handler) http.Handler {
-	return requireCSRF(service, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p, ok := principalFromContext(r.Context())
-		if !ok {
-			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "Authentication is required.")
-			return
-		}
-		ok, err := service.HasActiveEntitlement(r.Context(), p.User.ID)
-		if err != nil {
-			writeError(w, r, http.StatusInternalServerError, "internal_error", "Internal server error.", err)
-			return
-		}
-		if !ok {
-			paymentRequired(w, r)
-			return
-		}
-		next.ServeHTTP(w, r)
-	}))
-}
-
-func paymentRequired(w http.ResponseWriter, r *http.Request) {
-	writeError(w, r, http.StatusPaymentRequired, "payment_required", "An active subscription or trial is required to use this feature.")
-}
-
 func principalFromContext(ctx context.Context) (principal, bool) {
 	p, ok := ctx.Value(authContextKey{}).(principal)
 	return p, ok

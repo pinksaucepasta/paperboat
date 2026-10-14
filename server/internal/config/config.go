@@ -377,7 +377,7 @@ func Default() Config {
 			Driver: "postgres",
 			DSN:    "postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable",
 		},
-		Billing:           Billing{},
+		Billing:           Billing{PersonalAllowanceBytes: new(int64(5_000_000_000))},
 		RuntimeBaseDomain: "localhost",
 		UserMachines:      UserMachines{PairingLifetime: 10 * time.Minute, OfflineAfter: 2 * time.Minute, AllowedPlatforms: []string{"darwin", "linux", "windows"}, RuntimeListenPort: 38080},
 		TerminalSessions:  TerminalSessions{MaxActivePerProject: 20, OperationTimeout: 15 * time.Second, RetryBackoff: time.Second, WorkerInterval: time.Second, MaxAttemptsBeforeAlert: 10},

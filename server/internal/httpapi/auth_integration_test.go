@@ -164,7 +164,7 @@ func TestCookieWriteRequiresCSRFButPersonalFreeNeedsNoSubscription(t *testing.T)
 	store, router := newAuthIntegrationRouter(t)
 	cookies := loginCookies(t, router, "workos_free:free@example.com:Free User")
 	accounts := auth.NewService(store, audit.NewWriter(store), testauth.FakeWorkOSVerifier{}, []string{"test-session-key"}, true, "https://login.pprbt.dev")
-	protected := authTestOriginHandler{next: requireAuth(accounts, requireEntitlement(accounts, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })))}
+	protected := authTestOriginHandler{next: requireAuth(accounts, requireCSRF(accounts, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })))}
 	for _, withCSRF := range []bool{false, true} {
 		r := httptest.NewRequest(http.MethodPost, "/personal-action", strings.NewReader(`{}`))
 		addCookies(r, cookies)
