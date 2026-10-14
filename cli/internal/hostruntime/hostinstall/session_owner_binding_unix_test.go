@@ -63,6 +63,10 @@ func TestSessionOwnerPolicyChangeReusesProtectedBinding(t *testing.T) {
 	}
 	for _, custom := range []bool{false, true} {
 		desired := original
+		desired.Shell, err = filepath.EvalSymlinks(original.Shell)
+		if err != nil {
+			t.Fatal(err)
+		}
 		desired.InitialStore = false
 		desired.Source.AutomaticUpdates = false
 		desired.Executable = filepath.Join(root, "candidate-policy-pin")

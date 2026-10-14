@@ -139,6 +139,13 @@ func bindInitialSessionStore(ctx context.Context, c sessionowner.Catalog, d sess
 			d.InitialStore = existing.InitialStore
 			d.Source = existing.Source
 			d.Executable = existing.Executable
+			// A shell alias resolving to the same executable does not change
+			// authority. Retain the published path for this live generation.
+			oldShell, oldErr := os.Stat(existing.Shell)
+			newShell, newErr := os.Stat(d.Shell)
+			if oldErr == nil && newErr == nil && os.SameFile(oldShell, newShell) {
+				d.Shell = existing.Shell
+			}
 			return d, nil
 		}
 	}
