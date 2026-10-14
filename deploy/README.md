@@ -37,3 +37,17 @@ the script does not silently delete existing backups.
 Run `verify-backup.sh <dump-file>` on the VPS to restore into a new
 `paperboat_restore_test`, verify schema count and migration version, and remove
 only the scratch database it created. It refuses an existing scratch database.
+
+Build the diagnostics image from its official source using `diagnostics.Dockerfile`:
+set `PAPERBOAT_DIAGNOSTICS_MODULE` to the upstream module and
+`PAPERBOAT_DIAGNOSTICS_COMMIT` to its reviewed 40-character commit, then supply both
+as Docker build arguments. The pinned builder/runtime images and upstream license
+are included; no unavailable upstream container tag is required. Set the resulting
+image reference in the protected deployment environment. The entrypoint reads the
+mounted credential files and refuses missing or empty credentials.
+
+Install the distribution's `python3-boto3` on the managed VPS and run
+`verify-diagnostics.py --endpoint <configured-HTTPS-endpoint> --region <region>
+--bucket <bucket> --secrets-directory <protected-directory>`. It creates the private
+bucket if absent, checks upload/download, verifies anonymous reads are denied, and
+removes its random disposable object. It never prints credentials or payloads.
