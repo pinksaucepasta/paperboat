@@ -6,8 +6,11 @@ import {
   relayCookies,
   safeReturnPath,
 } from "@/lib/server/control-plane"
+import { connection } from "next/server"
 
 export async function GET(request: Request): Promise<Response> {
+  // Every sign-in needs a fresh WorkOS state; never prerender this redirect.
+  await connection()
   const clientId = process.env.WORKOS_CLIENT_ID
   if (!clientId) return failed()
   try {
