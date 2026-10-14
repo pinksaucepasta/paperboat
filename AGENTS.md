@@ -6,8 +6,9 @@ and tunnels, ENV (end-to-end encrypted environment variables), teams, config syn
 web console. Privacy matters: native access is end-to-end encrypted and peer-to-peer
 where possible. UX comes first: setup, daily use, failure and recovery must be obvious.
 
-Launch target: **2026-10-20**. The plan and its status live in [PLAN.md](PLAN.md); it is
-the only planning/status document. Post-launch ideas live in [WHITEBOARD.md](WHITEBOARD.md).
+Launch target: **2026-10-20**. [PLAN.md](PLAN.md) says what to build and in which order;
+[CHECKLIST.md](CHECKLIST.md) is the only progress tracker (every scenario and every `pb`
+command, per platform, with evidence). Post-launch ideas live in [WHITEBOARD.md](WHITEBOARD.md).
 Machine access and credentials are in `REMOTE_TESTING.md` (local only, never committed).
 
 ## Repository
@@ -30,7 +31,7 @@ component directory. Go 1.27.1.
 1. **Feature by feature.** Take one feature from PLAN.md, make it work on every supported
    platform (Linux, macOS, Windows) in every way a user can use it, including edge cases,
    failures and recovery, before moving to the next. A feature is done only when its PLAN
-   checklist is green on real devices.
+   rows in CHECKLIST.md are `[x]` on real devices.
 2. **One commit per fix.** Message: what broke, root cause, the change, the test that proves
    it. Push `main` to `origin` (github.com/pinksaucepasta/paperboat, private) after every
    commit. Never leave work uncommitted or unpushed at the end of a step. Never force-push or
@@ -44,8 +45,8 @@ component directory. Go 1.27.1.
    step installs builds on or tests against the test machines.
 6. **Report results, not prose.** Lead with what works and what doesn't, with evidence
    (smoke table, test names, commit hashes). Plain language, short.
-7. **Keep PLAN.md current** after each step (status + commit). Do not create other plan,
-   tracker, handoff or report files.
+7. **Mark CHECKLIST.md as you go** (cell + evidence) and commit it with the work. Do not
+   create other plan, tracker, handoff or report files.
 
 ## Code quality
 
@@ -77,7 +78,7 @@ component directory. Go 1.27.1.
 - **Device smoke suite** after every device build:
   `tools/device-smoke/smoke.sh --expect-version <version>` (needs `APPLE_PASS`, `VICTUS_PASS`
   from `REMOTE_TESTING.md`). Report its PASS/FAIL table and record the result file and the
-  build's commit hash in PLAN.md. Extend the suite when a feature's checks are added; never
+  build's commit hash in CHECKLIST.md evidence. Extend the suite when a feature's checks are added; never
   weaken a check to pass.
 - Device builds are made from a clean, committed tree, once for all platforms:
   ```sh
