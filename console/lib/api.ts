@@ -25,13 +25,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { accept: "application/json", ...init?.headers },
   })
   if (response.status === 401) {
-    // The control plane answers 401 for paths it doesn't serve yet, too (its /v1/ fallback is the
-    // edge-control handler), so a 401 alone doesn't mean the session ended. Only when /me is
-    // refused as well does the console send you to sign in; otherwise this one request fails in
-    // place, and a page calling a not-yet-built endpoint can't loop through sign-in.
-    if (path !== "me" && (await sessionAlive())) {
-      throw new ApiError(401, "unavailable", "Paperboat can’t do this yet.")
-    }
+    // A 401 means the session ended; unknown paths are a structured 404.
     const here = window.location.pathname + window.location.search
     // Sign-in is a route handler that redirects to WorkOS, so it needs a full navigation.
     // eslint-disable-next-line @next/next/no-location-assign-relative-destination
@@ -50,16 +44,6 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     )
   }
   return body.data
-}
-
-/** Whether the signed-in session still works, asked once at a time however many requests failed. */
-let sessionCheck: Promise<boolean> | null = null
-function sessionAlive(): Promise<boolean> {
-  sessionCheck ??= fetch("/api/v1/me", { headers: { accept: "application/json" }, cache: "no-store" })
-    .then((response) => response.status !== 401)
-    .catch(() => true)
-    .finally(() => setTimeout(() => (sessionCheck = null), 5_000))
-  return sessionCheck
 }
 
 /** For actions the server answers without a body (200/202/204), such as closing a terminal. */
@@ -119,7 +103,7 @@ export function useApiQuery<TQueryFnData, TError = Error, TData = TQueryFnData, 
   } as UseQueryResult<TData, TError>
 }
 
-/** Server schemas, generated from paperboat-server's OpenAPI document (`bun run api:types`). */
+/** Server schemas, generated from server/docs/openapi.json (`bun run api:types`). */
 type Schemas = components["schemas"]
 
 /** The `data` of a path's successful JSON response, as the server documents it. */
@@ -129,8 +113,8 @@ export type Data<P extends keyof paths, M extends "get" | "post" | "put" | "patc
   ? NonNullable<T>
   : never
 
-// `/v1/me` and `/v1/machines` have no response schema in the OpenAPI document yet (NOTES.md), so
-// `Me` and `Machine` are written by hand from the server's handlers.
+// Hand-written until the server types `runtime_versions` (PLAN.md Log, S1-14 Lane C request);
+// then these become Schemas["Me"] and Schemas["Machine"].
 export type Me = {
   id: string
   email: string

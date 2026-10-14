@@ -4423,7 +4423,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** List authorized invitations for one Team */
+        get: operations["list_team_invitations_for_team"];
         put?: never;
         /**
          * Team invite
@@ -6922,6 +6923,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/team-invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List invitations visible to the recipient or current Team owner/admin */
+        get: operations["list_team_invitations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/team-invitations/{invitation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one authorized invitation */
+        get: operations["get_team_invitation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/team-invitations/{invitation_id}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decline an invitation as its exact recipient
+         * @description Browser mutations require CSRF. Reuse the same operation_id for an uncertain outcome; accepted or changed invitations require refresh.
+         */
+        post: operations["decline_team_invitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -6929,6 +6984,8 @@ export interface components {
         SelfhostInstallation: {
             installation_id: string;
             node_id: string;
+            /** @description Verified endpoint hostname currently registered for this installation; may be empty until registration is complete. */
+            endpoint_host: string;
             name: string;
             /** @enum {string} */
             capability: "relay" | "tunnel";
@@ -6944,8 +7001,11 @@ export interface components {
             enrollment_state: "pending" | "enrolled";
         };
         SelfhostPolicy: {
-            /** @enum {string} */
-            mode: "mixed" | "self-hosted-only";
+            /**
+             * @description Allowed values depend on capability: relay accepts mixed or self-hosted-only; tunnel accepts managed-only or self-hosted-only. managed-only requires no installation IDs; self-hosted-only requires 1 to 32 enrolled installation IDs.
+             * @enum {string}
+             */
+            mode: "managed-only" | "mixed" | "self-hosted-only";
             installation_ids: string[];
         } & (unknown & unknown);
         SelfhostPolicyEnvelope: {
@@ -7357,6 +7417,20 @@ export interface components {
             cli_verification_url: string;
             /** Format: uri */
             machines_url: string;
+            /** Format: uri */
+            issuer: string;
+            /** Format: uri */
+            installer_base_url: string;
+            /** Format: uri */
+            console_url: string;
+            /** Format: hostname */
+            local_access_base_domain: string;
+            /** Format: hostname */
+            preview_base_domain: string;
+            /** Format: hostname */
+            tunnel_base_domain: string;
+            /** Format: hostname */
+            runtime_base_domain: string;
         };
         ErrorResponse: {
             error: components["schemas"]["APIError"];
@@ -7676,7 +7750,7 @@ export interface components {
         DNSRecordInstruction: {
             name: string;
             /** @enum {unknown} */
-            type: "CNAME";
+            type: "A" | "AAAA" | "ALIAS" | "ANAME" | "CNAME";
             value: string;
             ttl: number;
         };
@@ -7739,6 +7813,7 @@ export interface components {
             access_mode: "public" | "private";
             /** @constant */
             persistent: false;
+            /** @description Projected public HTTPS URL. Empty only when endpoint_state is custom_domain_not_ready. */
             endpoint: string;
             /** Format: date-time */
             lease_deadline: string;
@@ -7758,6 +7833,11 @@ export interface components {
             domains: components["schemas"]["PreviewDomain"][];
             /** @description Owning team slug when team-owned; absent for Personal. Independent of viewer audience and persistence account. */
             owner_team_id?: string;
+            /**
+             * @description The public endpoint projection state. custom_domain_not_ready is used only when self-hosted customer DNS/certificate verification has not produced a usable URL.
+             * @enum {string}
+             */
+            endpoint_state: "ready" | "custom_domain_not_ready";
         } & (unknown & unknown);
         PreviewLeasePage: {
             items: components["schemas"]["PreviewLease"][];
@@ -7815,7 +7895,6 @@ export interface components {
             generation: number;
             etag: string;
             stable_endpoint_id: string;
-            /** Format: uri */
             stable_endpoint: string;
             created_by_host_id: string;
             created_by_actor_id: string;
@@ -7827,7 +7906,7 @@ export interface components {
             updated_at: string;
             /** @description Owning team slug when team-owned; absent for Personal. Independent of viewer audience and persistence account. */
             owner_team_id?: string;
-        };
+        } & (unknown & unknown);
         TunnelPage: {
             items: components["schemas"]["Tunnel"][];
             next_cursor?: string;
@@ -10361,6 +10440,105 @@ export interface components {
             document_ids: string[];
             envelopes: string[];
         };
+        TeamInvitationSummary: {
+            invitation_id: string;
+            team_id: string;
+            account_id: string;
+            role: string;
+            /** Format: date-time */
+            expires_at: string;
+            generation: number;
+            /** @enum {string} */
+            state: "pending" | "accepted" | "cancelled" | "expired";
+            created_by: string;
+        };
+        Me: {
+            id: string;
+            email: string;
+            display_name: string;
+            status: string;
+            role: string;
+            workos_subject: string;
+        };
+        Machine: {
+            ownership: string;
+            owner_account?: string;
+            owner_team_id?: string;
+            id: string;
+            environment_id: string;
+            description?: string;
+            alias: string;
+            platform: string;
+            architecture: string;
+            workspace_root: string;
+            state: string;
+            seat_state: string;
+            public_identity_key: string;
+            assigned_ip?: string;
+            can_manage: boolean;
+            shared: boolean;
+            online: boolean;
+            network_approved: boolean;
+            permissions: string[] | null;
+            /** Format: int64 */
+            installation_generation: number;
+            runtime_versions: unknown;
+            capabilities: components["schemas"]["MachineCapabilities"];
+            availability: components["schemas"]["AvailabilityPolicy"];
+            runtime_diagnostics: components["schemas"]["UserMachineRuntimeDiagnostics"];
+            /** Format: date-time */
+            enrolled_at?: string;
+            /** Format: date-time */
+            last_seen_at?: string;
+            machine_capabilities: {
+                /** @constant */
+                schema: "paperboat.machine-capabilities/v1";
+                desired: {
+                    terminal: boolean;
+                    managed_ssh: boolean;
+                    file_receive: boolean;
+                    preview_tunnel: boolean;
+                };
+                applied: {
+                    terminal: boolean;
+                    managed_ssh: boolean;
+                    file_receive: boolean;
+                    preview_tunnel: boolean;
+                };
+                /** Format: int64 */
+                desired_version: number;
+                /** Format: int64 */
+                applied_version: number;
+                status: string;
+                error_code?: string;
+            };
+            installation?: {
+                /** Format: uri */
+                control_url: string;
+                helper_listen_address: string;
+                artifact: {
+                    schema: string;
+                    kind: string;
+                    version: string;
+                    platform: string;
+                    architecture: string;
+                    repository_url: string;
+                    target_path: string;
+                };
+            };
+        };
+        MeResponse: {
+            data: components["schemas"]["Me"];
+        };
+        MachineResponse: {
+            data: components["schemas"]["Machine"];
+        };
+        MachineListResponse: {
+            data: {
+                items: components["schemas"]["Machine"][];
+                pagination: components["schemas"]["InventoryOffsetPagination"];
+            };
+        };
     };
     responses: {
         /** @description Structured API error. */
@@ -10546,8 +10724,11 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @enum {string} */
-                    mode: "mixed" | "self-hosted-only";
+                    /**
+                     * @description Allowed values depend on capability: relay accepts mixed or self-hosted-only; tunnel accepts managed-only or self-hosted-only. managed-only requires an empty installation_ids array; self-hosted-only requires at least one ID.
+                     * @enum {string}
+                     */
+                    mode: "managed-only" | "mixed" | "self-hosted-only";
                     installation_ids: string[];
                 } & (unknown & unknown);
             };
@@ -10580,6 +10761,14 @@ export interface operations {
             query?: {
                 /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
                 workspace?: string;
+                limit?: number;
+                offset?: number;
+                /** @description Search text, at most 160 UTF-8 bytes; NUL is rejected. */
+                q?: string;
+                state?: "running" | "closed" | "unavailable";
+                /** @description Exact owner identifier, at most 128 UTF-8 bytes; whitespace and NUL are rejected. */
+                owner?: string;
+                closed?: boolean;
             };
             header?: never;
             path?: never;
@@ -11014,6 +11203,15 @@ export interface operations {
                     "application/json": {
                         data: components["schemas"]["ClientConfiguration"];
                     };
+                };
+            };
+            /** @description Discovery deployment configuration missing or invalid; client_configuration_unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -11674,6 +11872,13 @@ export interface operations {
             query?: {
                 /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
                 workspace?: string;
+                limit?: number;
+                offset?: number;
+                /** @description Search text, at most 160 UTF-8 bytes; NUL is rejected. */
+                q?: string;
+                state?: "active";
+                /** @description Exact owner identifier, at most 128 UTF-8 bytes; whitespace and NUL are rejected. */
+                owner?: string;
             };
             header?: never;
             path?: never;
@@ -11721,6 +11926,8 @@ export interface operations {
             query?: {
                 /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
                 workspace?: string;
+                limit?: number;
+                cursor?: string;
             };
             header?: never;
             path?: never;
@@ -12118,6 +12325,11 @@ export interface operations {
                 limit?: components["parameters"]["PageLimit"];
                 /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
                 workspace?: string;
+                /** @description Search text, at most 160 UTF-8 bytes; NUL is rejected. */
+                q?: string;
+                state?: "allocating" | "connecting" | "ready" | "owner_disconnected" | "expired" | "stopped" | "active";
+                /** @description Exact owner identifier, at most 128 UTF-8 bytes; whitespace and NUL are rejected. */
+                owner?: string;
             };
             header?: never;
             path?: never;
@@ -12582,6 +12794,11 @@ export interface operations {
                 limit?: components["parameters"]["PageLimit"];
                 /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
                 workspace?: string;
+                /** @description Search text, at most 160 UTF-8 bytes; NUL is rejected. */
+                q?: string;
+                state?: "active" | "paused" | "deleted";
+                /** @description Exact owner identifier, at most 128 UTF-8 bytes; whitespace and NUL are rejected. */
+                owner?: string;
             };
             header?: never;
             path?: never;
@@ -14552,7 +14769,10 @@ export interface operations {
     };
     get_v1_admin_release_authority_bundles: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14677,7 +14897,10 @@ export interface operations {
     };
     get_v1_admin_release_authority_requests: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15062,7 +15285,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
+                    "application/json": components["schemas"]["MeResponse"];
                 };
             };
             401: components["responses"]["Error"];
@@ -15134,8 +15357,10 @@ export interface operations {
                 workspace?: string;
                 limit?: number;
                 offset?: number;
+                /** @description Search text, at most 160 UTF-8 bytes; NUL is rejected. */
                 q?: string;
-                state?: string;
+                state?: "disabled" | "revoked" | "consent_required" | "pending" | "offline" | "conflict" | "error" | "syncing" | "healthy" | "watching" | "restoring" | "warning" | "sync_uncertain";
+                /** @description Exact owner identifier, at most 128 UTF-8 bytes; whitespace and NUL are rejected. */
                 owner?: string;
             };
             header?: never;
@@ -15582,7 +15807,10 @@ export interface operations {
     };
     get_v1_github_repositories: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+                cursor?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -15892,6 +16120,13 @@ export interface operations {
             query?: {
                 /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
                 workspace?: string;
+                limit?: number;
+                offset?: number;
+                /** @description Search text, at most 160 UTF-8 bytes; NUL is rejected. */
+                q?: string;
+                state?: "online" | "offline" | "disconnected" | "revoked" | "pending";
+                /** @description Exact owner identifier, at most 128 UTF-8 bytes; whitespace and NUL are rejected. */
+                owner?: string;
             };
             header?: never;
             path?: never;
@@ -15904,7 +16139,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["MachineListResponse"];
+                };
             };
         };
     };
@@ -16091,7 +16328,7 @@ export interface operations {
                 limit?: number;
                 /** @description Zero-based offset in filtered machines ordered by alias and ID. */
                 offset?: number;
-                /** @description Literal, case-insensitive search over machine ID, alias and description; at most 160 UTF-8 bytes. */
+                /** @description Search text, at most 160 UTF-8 bytes; NUL is rejected. */
                 q?: string;
                 state?: "not_reporting" | "idle" | "checking" | "downloading" | "staged" | "activating" | "deferred" | "healthy" | "failed" | "rolled_back";
             };
@@ -16135,7 +16372,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["MachineResponse"];
+                };
             };
             404: components["responses"]["Error"];
         };
@@ -16190,7 +16429,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["MachineResponse"];
+                };
             };
             400: components["responses"]["Error"];
             404: components["responses"]["Error"];
@@ -16235,7 +16476,7 @@ export interface operations {
                 limit?: number;
                 /** @description Zero-based offset in filtered history, ordered by creation time and ID descending. */
                 offset?: number;
-                /** @description Literal, case-insensitive search over approval ID, action, target version and reason; at most 160 UTF-8 bytes. */
+                /** @description Search text, at most 160 UTF-8 bytes; NUL is rejected. */
                 q?: string;
                 /** @description Filter the current approval state; due pending requests become expired before counting. */
                 state?: "pending" | "approved" | "rejected" | "expired" | "consumed";
@@ -16807,6 +17048,14 @@ export interface operations {
             query?: {
                 /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
                 workspace?: string;
+                limit?: number;
+                offset?: number;
+                /** @description Search text, at most 160 UTF-8 bytes; NUL is rejected. */
+                q?: string;
+                state?: "running" | "closed" | "unavailable";
+                /** @description Exact owner identifier, at most 128 UTF-8 bytes; whitespace and NUL are rejected. */
+                owner?: string;
+                closed?: boolean;
             };
             header?: never;
             path: {
@@ -18899,6 +19148,13 @@ export interface operations {
             query?: {
                 /** @description Selected Personal or canonical team workspace. Validated against the current authenticated account; selecting a team does not grant resource access. */
                 workspace?: string;
+                limit?: number;
+                offset?: number;
+                /** @description Search text, at most 160 UTF-8 bytes; NUL is rejected. */
+                q?: string;
+                state?: "pending" | "approved" | "rejected" | "revoked" | "expired" | "completed";
+                /** @description Exact owner identifier, at most 128 UTF-8 bytes; whitespace and NUL are rejected. */
+                owner?: string;
             };
             header?: never;
             path?: never;
@@ -18906,7 +19162,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description At most 128 recent requests. */
+            /** @description Authorized filtered page with total and next_offset continuation. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -19228,6 +19484,43 @@ export interface operations {
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
             412: components["responses"]["Error"];
+        };
+    };
+    list_team_invitations_for_team: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Search text, at most 160 UTF-8 bytes; NUL is rejected. */
+                q?: string;
+                state?: "pending" | "accepted" | "cancelled" | "expired";
+                /** @description Filter by recipient or creator account ID, mine (recipient is current account), or shared (creator is current account). At most 128 UTF-8 bytes; whitespace and NUL are rejected. */
+                owner?: string;
+            };
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current authorized invitation state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            items: components["schemas"]["TeamInvitationSummary"][];
+                            pagination: components["schemas"]["InventoryOffsetPagination"];
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
     team_invite: {
@@ -25249,6 +25542,101 @@ export interface operations {
                 };
                 content?: never;
             };
+        };
+    };
+    list_team_invitations: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Search text, at most 160 UTF-8 bytes; NUL is rejected. */
+                q?: string;
+                state?: "pending" | "accepted" | "cancelled" | "expired";
+                /** @description Filter by recipient or creator account ID, mine (recipient is current account), or shared (creator is current account). At most 128 UTF-8 bytes; whitespace and NUL are rejected. */
+                owner?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current authorized invitation state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            items: components["schemas"]["TeamInvitationSummary"][];
+                            pagination: components["schemas"]["InventoryOffsetPagination"];
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    get_team_invitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invitation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current authorized invitation state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TeamInvitationSummary"];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    decline_team_invitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invitation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TeamAcceptRequest"];
+            };
+        };
+        responses: {
+            /** @description Current authorized invitation state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TeamInvitationSummary"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
 }
