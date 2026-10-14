@@ -68,22 +68,27 @@ func timeout(duration time.Duration, logger *slog.Logger, next http.Handler) htt
 			next.ServeHTTP(tw, r.WithContext(ctx))
 		}()
 
+		var result handlerResult
 		select {
-		case result := <-results:
-			if result.panicValue != nil {
-				writePanicError(w, r, logger, result.panicValue, result.panicStack)
-				return
-			}
+		case result = <-results:
 		case <-ctx.Done():
-			if errors.Is(ctx.Err(), context.Canceled) {
+		}
+		// A handler can return because its deadline expired. Completion and
+		// cancellation may both be ready; that must not produce an empty 200.
+		if err := ctx.Err(); err != nil {
+			if errors.Is(err, context.Canceled) {
 				tw.markTimedOut()
 				return
 			}
-			if !tw.markTimedOut() {
-				return
+			if tw.markTimedOut() {
+				writeError(w, r, http.StatusServiceUnavailable, "provider_unavailable", "Request timed out.", err)
 			}
-			writeError(w, r, http.StatusServiceUnavailable, "provider_unavailable", "Request timed out.", ctx.Err())
+			return
 		}
+		if result.panicValue != nil {
+			writePanicError(w, r, logger, result.panicValue, result.panicStack)
+		}
+
 	})
 }
 

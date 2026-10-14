@@ -307,24 +307,26 @@ func TestUnknownEndpointIsStructuredError(t *testing.T) {
 }
 
 func TestTimeoutUsesStructuredError(t *testing.T) {
-	handler := requestID(timeout(time.Nanosecond, slog.New(slog.NewTextHandler(io.Discard, nil)), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		<-r.Context().Done()
-	})))
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/slow", nil)
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	var payload ErrorResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatal(err)
-	}
-	if payload.Error.Code != "provider_unavailable" {
-		t.Fatalf("error code = %q", payload.Error.Code)
-	}
-	if payload.Error.RequestID == "" {
-		t.Fatal("missing request id in timeout response")
+	for iteration := 0; iteration < 32; iteration++ {
+		handler := requestID(timeout(time.Nanosecond, slog.New(slog.NewTextHandler(io.Discard, nil)), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			<-r.Context().Done()
+		})))
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/slow", nil)
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var payload ErrorResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Error.Code != "provider_unavailable" {
+			t.Fatalf("error code = %q", payload.Error.Code)
+		}
+		if payload.Error.RequestID == "" {
+			t.Fatal("missing request id in timeout response")
+		}
 	}
 }
 
