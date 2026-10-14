@@ -22,7 +22,9 @@ Configure DNS before starting the proxy. Keep releases in `releases/` and publis
 through its atomic `current` directory. The proxy serves only `/tuf/targets/*`
 from that read-only release mount on the configured download host; API requests,
 installer scripts and TUF metadata still reach the server. Publish target files
-under `releases/tuf/targets/` before activating metadata that references them.
+under the staged bundle’s `tuf/targets/` before its atomic `current` activation.
+The route follows `releases/current/` and requires cache revalidation because
+target paths can be reused across releases.
 Missing qualified artifacts do not make an installer available.
 
 PostgreSQL is reachable only on VPS loopback and the private Compose network.

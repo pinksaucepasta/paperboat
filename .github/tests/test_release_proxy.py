@@ -19,11 +19,11 @@ class ReleaseProxyRoutingTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             releases = root / "releases"
-            targets = releases / "tuf" / "targets"
+            targets = releases / "current" / "tuf" / "targets"
             targets.mkdir(parents=True)
             payload = b"public-artifact-fixture"
             (targets / "fixture.bin").write_bytes(payload)
-            (releases / "protected-marker.txt").write_bytes(b"outside-target-directory")
+            (releases / "current" / "protected-marker.txt").write_bytes(b"outside-target-directory")
             config = root / "Caddyfile"
             config.write_bytes((ROOT / "deploy/Caddyfile").read_bytes())
             command = docker + ["run", "-d", "--name", name, "--network", "none", "--read-only",
