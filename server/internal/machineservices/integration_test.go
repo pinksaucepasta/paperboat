@@ -47,7 +47,7 @@ func TestMachineServicePostgresAuthorityLifecycle(t *testing.T) {
 	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, environment, owner)
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'office','linux','amd64','/workspace','online','occupied',true,1)`, machine, owner, environment)
 	exec(`UPDATE paperboat.user_machines SET seat_state='occupied' WHERE id=$1`, machine)
-	s := machineservices.New(store)
+	s := machineservices.New(store, "local.example.test")
 	resolver, e := nativeprivateaccess.NewSQLResolver(store)
 	if e != nil {
 		t.Fatal(e)

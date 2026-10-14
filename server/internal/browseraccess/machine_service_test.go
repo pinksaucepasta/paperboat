@@ -91,7 +91,7 @@ func TestAutomaticBrowserDormantAuthorityPostgres(t *testing.T) {
 		t.Fatalf("old authority fingerprint reused %+v %v", newer, e)
 	}
 	snapshot := machineservices.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "boot-browser-family-0123", StartedAt: time.Now().UTC(), Generation: 1, Services: []machineservices.Port{{Port: 3000, AddressFamily: "ipv6"}, {Port: 3001, AddressFamily: "ipv6"}}}
-	discovery := machineservices.New(store)
+	discovery := machineservices.New(store, "local.example.test")
 	if e = discovery.RecordMachineServices(ctx, environment, machine, snapshot, time.Now().UTC()); e != nil {
 		t.Fatal(e)
 	}

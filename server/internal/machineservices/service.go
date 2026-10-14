@@ -20,7 +20,6 @@ import (
 )
 
 const MaxMachines = 128
-const BrowserSuffix = "local.pprbt.dev"
 const MaxServices = 64
 const MaxBrowserPolicies = 32
 const SnapshotLifetime = 30 * time.Second
@@ -68,8 +67,9 @@ type Authority struct {
 	Generation                   int64
 }
 type Service struct {
-	DB  *sql.DB
-	Now func() time.Time
+	LocalAccessBaseDomain string
+	DB                    *sql.DB
+	Now                   func() time.Time
 }
 
 // serviceCleanupFailure keeps an operation failure and its transaction/row
@@ -112,7 +112,9 @@ func captureServiceRollback(tx *sql.Tx, result *error) {
 	}
 }
 
-func New(database *db.DB) *Service { return &Service{DB: database.SQL(), Now: time.Now} }
+func New(database *db.DB, localAccessBaseDomain string) *Service {
+	return &Service{DB: database.SQL(), Now: time.Now, LocalAccessBaseDomain: localAccessBaseDomain}
+}
 func (s *Service) now() time.Time {
 	if s.Now != nil {
 		return s.Now().UTC()
@@ -423,7 +425,7 @@ func (s *Service) List(ctx context.Context, actor string) (items []Item, resultE
 		for _, p := range i.Services {
 			_, e := ResolveTx(ctx, tx, actor, i.MachineID, p.Port)
 			if e == nil {
-				hostname, err := NativeBrowserHostname(i.Alias, p.Port)
+				hostname, err := NativeBrowserHostname(i.Alias, p.Port, s.LocalAccessBaseDomain)
 				if err != nil {
 					return nil, err
 				}
@@ -518,9 +520,9 @@ func validBrowserHostname(host string) bool {
 
 // NativeBrowserHostname is the authoritative readable native browser URL name.
 // It is resolved through account-scoped local routing, never public edge state.
-func NativeBrowserHostname(alias string, port int) (string, error) {
-	if !machinealias.Valid(alias) || port < 1 || port > 65535 {
+func NativeBrowserHostname(alias string, port int, baseDomain string) (string, error) {
+	if !machinealias.Valid(alias) || port < 1 || port > 65535 || (!validBrowserHostname(baseDomain) || net.ParseIP(baseDomain) != nil) {
 		return "", ErrInvalid
 	}
-	return strconv.Itoa(port) + "." + alias + "." + BrowserSuffix, nil
+	return strconv.Itoa(port) + "." + alias + "." + baseDomain, nil
 }

@@ -45,7 +45,7 @@ func TestMachineServiceSignedRuntimePostgres(t *testing.T) {
 	exec(`INSERT INTO paperboat.cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES($1,$1,$1,'machine service','desktop','linux',ARRAY['machines:connect'],'active',now(),now())`, owner)
 	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, environment, owner)
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'office','linux','amd64','/workspace','online','occupied',true,1)`, machine, owner, environment)
-	service := machineservices.New(store)
+	service := machineservices.New(store, "local.example.test")
 	identity := &machineServiceProof{fakeRuntimeIdentity: &fakeRuntimeIdentity{}}
 	repo := &fakeRuntimeObservationRepository{}
 	now := time.Now().UTC()
@@ -87,7 +87,7 @@ func TestMachineServiceSignedRuntimePostgres(t *testing.T) {
 	list = list.WithContext(context.WithValue(list.Context(), authContextKey{}, principal{User: auth.User{ID: owner}}))
 	listed := httptest.NewRecorder()
 	machineServiceList(service).ServeHTTP(listed, list)
-	if listed.Code != 200 || !strings.Contains(listed.Body.String(), `"browser_url":"https://`) || !strings.Contains(listed.Body.String(), "5432.office.local.pprbt.dev") {
+	if listed.Code != 200 || !strings.Contains(listed.Body.String(), `"browser_url":"https://`) || !strings.Contains(listed.Body.String(), "5432.office.local.example.test") {
 		t.Fatalf("dashboard discovery: %d %s", listed.Code, listed.Body.String())
 	}
 	var policyRows int

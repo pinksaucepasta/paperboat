@@ -15,6 +15,7 @@ func TestLoadOverlaysEnvAndSecretFiles(t *testing.T) {
 	}
 	env := map[string]string{
 		"PAPERBOAT_ENV":                                         "test",
+		"PAPERBOAT_LOCAL_ACCESS_BASE_DOMAIN":                    "local.example.test",
 		"PAPERBOAT_RUNTIME_BASE_DOMAIN":                         "runtime.example.test",
 		"PAPERBOAT_PREVIEW_BASE_DOMAIN":                         "preview.example.test",
 		"PAPERBOAT_TUNNEL_BASE_DOMAIN":                          "tunnels.example.test",
@@ -50,6 +51,9 @@ func TestLoadOverlaysEnvAndSecretFiles(t *testing.T) {
 	}
 	if cfg.CLIAuth.MachinesURL != env["PAPERBOAT_MACHINES_URL"] {
 		t.Fatalf("machines URL = %q", cfg.CLIAuth.MachinesURL)
+	}
+	if cfg.LocalAccessBaseDomain != "local.example.test" {
+		t.Fatalf("local access domain = %q", cfg.LocalAccessBaseDomain)
 	}
 	if cfg.RuntimeBaseDomain != "runtime.example.test" {
 		t.Fatalf("runtime base domain = %q", cfg.RuntimeBaseDomain)
@@ -189,6 +193,7 @@ func validProductionConfig() Config {
 	cfg.Secrets.GitHubClientSecret = "github-client-secret"
 	cfg.GitHub.AppID = "12345"
 	cfg.Secrets.EdgeControlCredential = "edge-control-credential-0123456789"
+	cfg.LocalAccessBaseDomain = "local.example.test"
 	cfg.ReleaseDirectory = "/srv/paperboat-releases"
 	cfg.ReleaseBaseURL = "https://get.example.test"
 	cfg.Preview.BaseDomain = "preview.example.test"

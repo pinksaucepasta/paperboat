@@ -147,7 +147,7 @@ func TestPolicyRegrantPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	services := machineservices.New(store)
+	services := machineservices.New(store, "local.example.test")
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	snapshot := machineservices.Snapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: 1, BootID: "boot-regrant-" + suffix, StartedAt: now.Add(-time.Minute), Generation: 1, Services: []machineservices.Port{{Port: 80, AddressFamily: "ipv4"}}}
 	if err = services.RecordMachineServices(ctx, environment, machine, snapshot, now); err != nil {

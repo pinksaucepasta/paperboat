@@ -52,17 +52,25 @@ func TestBrowserHostnameValidation(t *testing.T) {
 }
 
 func TestNativeBrowserHostnameUsesCanonicalPortAndAccountScopedAlias(t *testing.T) {
-	host, err := NativeBrowserHostname("hp", 3000)
-	if err != nil || host != "3000.hp.local.pprbt.dev" {
+	host, err := NativeBrowserHostname("hp", 3000, "local.example.test")
+	if err != nil || host != "3000.hp.local.example.test" {
 		t.Fatalf("host=%q err=%v", host, err)
 	}
+	for _, domain := range []string{"", "https://local.example.test", "UPPER.example.test", "bad..test", "127.0.0.1"} {
+		if _, err := NativeBrowserHostname("hp", 3000, domain); err == nil {
+			t.Fatalf("accepted domain %q", domain)
+		}
+	}
+	if host, err := NativeBrowserHostname("hp", 3000, "another.example.test"); err != nil || host != "3000.hp.another.example.test" {
+		t.Fatalf("changed domain host=%q err=%v", host, err)
+	}
 	for _, alias := range []string{"HP", "hp.other", "hp/path", "-hp", ""} {
-		if _, err := NativeBrowserHostname(alias, 3000); err == nil {
+		if _, err := NativeBrowserHostname(alias, 3000, "local.example.test"); err == nil {
 			t.Fatalf("accepted alias %q", alias)
 		}
 	}
 	for _, port := range []int{0, -1, 65536} {
-		if _, err := NativeBrowserHostname("hp", port); err == nil {
+		if _, err := NativeBrowserHostname("hp", port, "local.example.test"); err == nil {
 			t.Fatalf("accepted port %d", port)
 		}
 	}

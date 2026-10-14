@@ -205,7 +205,7 @@ func TestTask368ServeMachineServices(t *testing.T) {
 		t.Fatal(err)
 	}
 	browserHandlers := &BrowserAccessHandlers{Lazy: lazy, Access: browser, Ingress: &browseringress.Service{DB: database, Access: browser, Quota: billingService}, Edge: edgeVerifier, Machine: machineVerifier}
-	machineServices := machineservices.New(database)
+	machineServices := machineservices.New(database, "local.example.test")
 	router := authTestOriginHandler{next: NewRouter(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Auth: accounts, DeviceAuth: cliAuth, WorkspaceBilling: billingService, Machines: machines, MintKeys: signer, MachineServices: machineServices, NativePrivateAccess: &nativeprivateaccess.Service{Resolver: nativeResolver, Signer: signer, Issuer: base}, Enrollment: enrollment, RuntimeIdentity: enrollment, PeerIdentity: identities, PeerNetwork: network, LazyActivation: lazy, LazyPolicies: policies, PreviewLeases: previews, PreviewTunnelAPI: previewAPI, BrowserAccess: browserHandlers, PreviewCarrierAttachment: attachmentHTTP, PreviewCarrierEdge: edgeHTTP, MeteringRepo: metering.NewRuntimeRepository(database, secret, cfg.ConfigSync.StaleHeartbeatAfter)})}
 	type actor struct {
 		Name      string         `json:"name"`

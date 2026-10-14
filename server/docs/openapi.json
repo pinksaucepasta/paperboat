@@ -1688,7 +1688,14 @@
         "required": [
           "version",
           "cli_verification_url",
-          "machines_url"
+          "machines_url",
+          "issuer",
+          "installer_base_url",
+          "console_url",
+          "local_access_base_domain",
+          "preview_base_domain",
+          "tunnel_base_domain",
+          "runtime_base_domain"
         ],
         "properties": {
           "version": {
@@ -1701,6 +1708,34 @@
           "machines_url": {
             "type": "string",
             "format": "uri"
+          },
+          "issuer": {
+            "type": "string",
+            "format": "uri"
+          },
+          "installer_base_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "console_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "local_access_base_domain": {
+            "type": "string",
+            "format": "hostname"
+          },
+          "preview_base_domain": {
+            "type": "string",
+            "format": "hostname"
+          },
+          "tunnel_base_domain": {
+            "type": "string",
+            "format": "hostname"
+          },
+          "runtime_base_domain": {
+            "type": "string",
+            "format": "hostname"
           }
         }
       },
@@ -15840,6 +15875,16 @@
                       "$ref": "#/components/schemas/ClientConfiguration"
                     }
                   }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Discovery deployment configuration missing or invalid; client_configuration_unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -42004,7 +42049,7 @@
         },
         "responses": {
           "204": {
-            "description": "Cancelled; a consumed grant’s client session is revoked."
+            "description": "Cancelled; a consumed grant\u2019s client session is revoked."
           },
           "400": {
             "description": "Invalid client or device code."
