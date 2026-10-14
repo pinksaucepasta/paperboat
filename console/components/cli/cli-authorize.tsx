@@ -2,11 +2,10 @@
 
 import { CheckCircleIcon, CircleNotchIcon, XCircleIcon } from "@phosphor-icons/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useState } from "react"
 import { api, ApiError, type Data } from "@/lib/api"
-import { Logo } from "@/components/logo"
+import { BrandScreen, brandPrimary, brandSecondary } from "@/components/brand-screen"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -27,22 +26,7 @@ const requestPath = (code: string) => `auth/device/requests/${encodeURIComponent
  */
 export function CliAuthorize() {
   const code = useSearchParams().get("code")?.trim().toUpperCase() ?? ""
-  return (
-    <main className="brand-bar min-h-svh text-white">
-      {/* .brand-bar makes its children position: relative (for its texture), so the layers live in one. */}
-      <div className="flex min-h-svh flex-col items-center justify-center px-6 py-24">
-        <Link
-          href="/"
-          aria-label="Paperboat home"
-          className="absolute top-6 left-6 flex items-center gap-3 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-white/50"
-        >
-          <Logo className="h-[18px]" />
-          <span className="font-heading text-[18px] leading-none font-medium tracking-[-0.025em]">paperboat</span>
-        </Link>
-        <div className="flex w-full max-w-md flex-col gap-6">{code ? <Request code={code} /> : <CodeForm />}</div>
-      </div>
-    </main>
-  )
+  return <BrandScreen>{code ? <Request code={code} /> : <CodeForm />}</BrandScreen>
 }
 
 function CodeForm() {
@@ -71,7 +55,7 @@ function CodeForm() {
           onChange={(event) => setValue(event.target.value)}
         />
       </Field>
-      <Button type="submit" size="lg" className="bg-white text-[#0f3dd8] hover:bg-white/90" disabled={!value.trim()}>
+      <Button type="submit" size="lg" className={brandPrimary} disabled={!value.trim()}>
         Continue
       </Button>
     </form>
@@ -135,7 +119,7 @@ function Request({ code }: { code: string }) {
       <div className="flex gap-2">
         <Button
           size="lg"
-          className="flex-1 bg-white text-[#0f3dd8] hover:bg-white/90"
+          className={`flex-1 ${brandPrimary}`}
           disabled={decide.isPending}
           onClick={() => decide.mutate("approve")}
         >
@@ -144,7 +128,7 @@ function Request({ code }: { code: string }) {
         <Button
           size="lg"
           variant="secondary"
-          className="flex-1 bg-white/15 text-white hover:bg-white/25"
+          className={`flex-1 ${brandSecondary}`}
           disabled={decide.isPending}
           onClick={() => decide.mutate("deny")}
         >
