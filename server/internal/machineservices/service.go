@@ -524,5 +524,9 @@ func NativeBrowserHostname(alias string, port int, baseDomain string) (string, e
 	if !machinealias.Valid(alias) || port < 1 || port > 65535 || (!validBrowserHostname(baseDomain) || net.ParseIP(baseDomain) != nil) {
 		return "", ErrInvalid
 	}
-	return strconv.Itoa(port) + "." + alias + "." + baseDomain, nil
+	hostname := strconv.Itoa(port) + "." + alias + "." + baseDomain
+	if !validBrowserHostname(hostname) {
+		return "", ErrInvalid
+	}
+	return hostname, nil
 }

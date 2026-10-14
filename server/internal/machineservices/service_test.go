@@ -61,6 +61,10 @@ func TestNativeBrowserHostnameUsesCanonicalPortAndAccountScopedAlias(t *testing.
 			t.Fatalf("accepted domain %q", domain)
 		}
 	}
+	longBase := strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 58)
+	if _, err := NativeBrowserHostname("hp", 3000, longBase); err == nil {
+		t.Fatal("published hostname exceeding DNS total length")
+	}
 	if host, err := NativeBrowserHostname("hp", 3000, "another.example.test"); err != nil || host != "3000.hp.another.example.test" {
 		t.Fatalf("changed domain host=%q err=%v", host, err)
 	}
