@@ -42080,7 +42080,8 @@
           "503": {
             "description": "Policy or operator audit unavailable"
           }
-        }
+        },
+        "x-operator-capability": "admin"
       },
       "put": {
         "operationId": "admin_put_client_update_policy",
@@ -42160,7 +42161,8 @@
           "503": {
             "description": "release_unavailable, client_update_policy_unavailable or uncertain operator_result_unavailable; retry exact request with same key"
           }
-        }
+        },
+        "x-operator-capability": "admin"
       }
     },
     "/v1/config-sync/environments/{environment_id}/status": {
