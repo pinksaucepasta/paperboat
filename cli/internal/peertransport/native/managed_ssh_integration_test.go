@@ -32,7 +32,7 @@ func TestSystemOpenSSHOverNativeTailnet(t *testing.T) {
 	if testing.Short() {
 		t.Skip("real OpenSSH over native Tailnet integration")
 	}
-	for _, name := range []string{"ssh", "sshd", "ssh-keygen", "scp", "sftp", "nc"} {
+	for _, name := range []string{"ssh", "sshd", "ssh-keygen", "scp", "sftp", "python3"} {
 		if _, err := exec.LookPath(name); err != nil {
 			t.Skipf("requires %s: %v", name, err)
 		}
@@ -119,12 +119,22 @@ func TestSystemOpenSSHOverNativeTailnet(t *testing.T) {
 		t.Fatal(err)
 	}
 	proxyCommand := filepath.Join(t.TempDir(), "proxy")
-	if err = os.WriteFile(proxyCommand, []byte("#!/bin/sh\nexec nc "+proxyHost+" "+proxyPort+"\n"), 0o700); err != nil {
+	if err = os.WriteFile(proxyCommand, []byte(nativeSSHProxyScript(proxyHost, proxyPort)), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	common := []string{"-F", "/dev/null", "-o", "StrictHostKeyChecking=yes", "-o", "UserKnownHostsFile=" + knownHosts, "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-i", identity, "-o", "ProxyCommand=" + proxyCommand}
 	current, _ := user.Current()
 	target := current.Username + "@paperboat"
+	t.Run("ProxyCommandExitsOnNativeEOFWithInputOpen", func(t *testing.T) {
+		checkNativeProxyEOF(t, ctx, proxyCommand, func() {
+			sessionMu.Lock()
+			defer sessionMu.Unlock()
+			if active != nil {
+				_ = active.Close()
+				active = nil
+			}
+		})
+	})
 	runOpenSSH(t, ctx, "ssh", nil, append(append([]string{}, common...), target, "printf paperboat-native-ssh")...)
 	echoListener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
