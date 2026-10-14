@@ -106,8 +106,8 @@ ARM builds must compile, pass unit tests and be included in every release.
 - **The server is not self-hostable and has no curl installer.** We run it ourselves on the
   coolify VPS from its image with a compose file in `deploy/` (server, PostgreSQL 17, its
   edge/proxy), using config/env for every domain.
-- **Self-hosting is relay and tunnel only, through `pbh`**, its own top-level module `pbh/`
-  in `go.work` (today misplaced in `relay/cmd/pbh`, `relay/deploy/install.sh`,
+- **Self-hosting is relay and tunnel only, through `pbh`**, its own top-level module `helper/`
+  in `go.work` (the command stays `pbh`) (today misplaced in `relay/cmd/pbh`, `relay/deploy/install.sh`,
   `relay/deploy/package-selfhost.sh`, `relay/deploy/README.md`; S4-00 moves it). The one-liner, modelled
   on `curl -fsSL https://cdn.coollabs.io/coolify/install.sh | sudo bash` (read it first), is
   `curl -fsSL <get domain>/selfhost/install | sh -s -- --enable relay|tunnel|both`. It installs
@@ -197,7 +197,7 @@ Prerequisite: the user has formatted coolify and said so.
 
 ### S4. Images and the pbh self-host installer (Lane B; needed by S1)
 
-- S4-00: Move `pbh` out of `relay/` into a top-level `pbh/` module (own `go.mod`, added to `go.work`; its own copy or a small shared package instead of importing `paperboat-relay/internal/reporting`), with its installer, packaging script and README; no `pbh` code left under `relay/`; gate and pbh tests pass.
+- S4-00: Move `pbh` out of `relay/` into a top-level `helper/` module (directory and module named helper; the built command stays `pbh`) (own `go.mod`, added to `go.work`; its own copy or a small shared package instead of importing `paperboat-relay/internal/reporting`), with its installer, packaging script and README; no `pbh` code left under `relay/`; gate and pbh tests pass.
 - S4-01: Docker images for server, relay and tunnel build for linux/amd64 and linux/arm64 from this repo (multi-arch manifests), tagged with the release version.
 - S4-02: The `pbh` installer implements 1.4b on a fresh Ubuntu 24.04 VPS for `relay`, `tunnel` and `both`: installs Docker, runs the images, health-checks, prints the claim code. The server image deploys from `deploy/` compose and is not part of this installer.
 - S4-03: Re-running it upgrades in place to a newer image version, keeping data and secrets; a failed upgrade leaves the previous version running.

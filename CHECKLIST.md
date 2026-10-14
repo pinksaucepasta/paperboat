@@ -80,7 +80,7 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| S4-00 | Move `pbh` out of `relay/` into a top-level `pbh/` module (own `go.mod`, added to `go.work`; its own copy or a small shared package instead of importing `paperboat-relay/internal/reporting`), with its installer, packaging script and README; no `pbh` code left under `relay/`; gate and pbh tests pass. | [ ] | — | — | |
+| S4-00 | Move `pbh` out of `relay/` into a top-level `helper/` module (directory and module named helper; the built command stays `pbh`) (own `go.mod`, added to `go.work`; its own copy or a small shared package instead of importing `paperboat-relay/internal/reporting`), with its installer, packaging script and README; no `pbh` code left under `relay/`; gate and pbh tests pass. | [ ] | — | — | |
 | S4-01 | Docker images for server, relay and tunnel build for linux/amd64 and linux/arm64 from this repo (multi-arch manifests), tagged with the release version. | [ ] | — | — | |
 | S4-02 | The `pbh` installer implements 1.4b on a fresh Ubuntu 24.04 VPS for `relay`, `tunnel` and `both`: installs Docker, runs the images, health-checks, prints the claim code. The server image deploys from `deploy/` compose and is not part of this installer. | [ ] | — | — | |
 | S4-03 | Re-running it upgrades in place to a newer image version, keeping data and secrets; a failed upgrade leaves the previous version running. | [ ] | — | — | |
