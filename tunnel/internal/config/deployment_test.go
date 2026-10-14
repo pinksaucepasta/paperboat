@@ -146,3 +146,24 @@ func TestLoadDeploymentRetainsFileReadCause(t *testing.T) {
 		t.Fatalf("file read cause lost: %T", err)
 	}
 }
+
+func TestDeploymentAllowsSharedPublicBaseAndRejectsRuntimeOverlap(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "deployment.json")
+	shared := strings.ReplaceAll(validDeploymentJSON(), "preview.example.test", "public.example.test")
+	shared = strings.ReplaceAll(shared, "tunnels.example.test", "public.example.test")
+	if err := os.WriteFile(path, []byte(shared), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadDeployment(path); err != nil {
+		t.Fatal(err)
+	}
+	for _, runtime := range []string{"public.example.test", "nested.public.example.test"} {
+		value := strings.ReplaceAll(shared, "runtime.example.test", runtime)
+		if err := os.WriteFile(path, []byte(value), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadDeployment(path); err == nil {
+			t.Fatal("runtime authority overlapped public namespace")
+		}
+	}
+}

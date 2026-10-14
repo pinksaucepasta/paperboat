@@ -178,7 +178,7 @@ func (d Deployment) validate() error {
 			return errors.New("route base domain is invalid")
 		}
 	}
-	if overlappingDomains(d.PreviewBaseDomain, d.TunnelBaseDomain) || overlappingDomains(d.PreviewBaseDomain, d.RuntimeBaseDomain) || overlappingDomains(d.TunnelBaseDomain, d.RuntimeBaseDomain) {
+	if d.PreviewBaseDomain != d.TunnelBaseDomain && overlappingDomains(d.PreviewBaseDomain, d.TunnelBaseDomain) || overlappingDomains(d.PreviewBaseDomain, d.RuntimeBaseDomain) || overlappingDomains(d.TunnelBaseDomain, d.RuntimeBaseDomain) {
 		return errors.New("route base domains must not overlap")
 	}
 	for _, cidr := range d.TrustedProxyCIDRs {
