@@ -241,6 +241,37 @@ func TestWorkspaceScopedMachineListGetAndAccess(t *testing.T) {
 	if err := access(teamOne, "ws_access_revoked_team_"+f.suffix); !errors.Is(err, workspace.ErrForbidden) {
 		t.Fatalf("revoked workspace fell back to Personal: %v", err)
 	}
+
+	// A shared personal host remains personally owned on each real inventory
+	// page; team selection must never turn ownership into a sharing label.
+	second := "ws_paged_" + f.suffix
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if _, err := f.store.SQL().ExecContext(ctx, `DELETE FROM paperboat.user_machines WHERE id=$1`, second); err != nil {
+			t.Errorf("paged fixture cleanup: %v", err)
+		}
+	})
+	if _, err := f.store.SQL().ExecContext(f.ctx, `UPDATE paperboat.user_machines SET alias='alpha' WHERE id=$1`, f.machine); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.SQL().ExecContext(f.ctx, `INSERT INTO paperboat.user_machines
+ (id,user_id,environment_id,alias,platform,architecture,workspace_root)
+ VALUES($1,$2,$1,'beta','linux','amd64','/workspace')`, second, f.account); err != nil {
+		t.Fatal(err)
+	}
+	for offset, id := range []string{f.machine, second} {
+		items, total, err := f.service.ListInventory(personal, f.account, InventoryOptions{Limit: 1, Offset: offset})
+		if err != nil || total != 2 || len(items) != 1 || items[0].ID != id {
+			t.Fatalf("personal page %d: incorrect authorized inventory", offset)
+		}
+		if items[0].Ownership != "personal" || items[0].OwnerAccount != f.account || items[0].OwnerTeamID != "" || !items[0].CanManage {
+			t.Fatalf("personal page %d: incorrect owner/management authority", offset)
+		}
+	}
+	if items, total, err := f.service.ListInventory(personal, f.account, InventoryOptions{Limit: 1, Offset: 2}); err != nil || total != 2 || len(items) != 0 {
+		t.Fatal("exhausted personal page lost total or repeated an item")
+	}
 }
 
 func TestWorkspaceScopedTerminalOwnership(t *testing.T) {
