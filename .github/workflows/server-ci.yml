@@ -31,5 +31,5 @@ jobs:
             relay/go.sum
             tunnel/go.sum
             go.work.sum
-      - run: python3 -m unittest discover -s ../.github/tests -p 'test_gate.py'
+      - run: python3 -m unittest discover -s ../.github/tests -p 'test_*.py'
       - run: make check race reproducible-builds binary-size-check static-analysis vulnerability-check license-check

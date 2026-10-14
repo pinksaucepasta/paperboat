@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily Paperboat database backup
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=30m
+Persistent=true
+Unit=paperboat-backup.service
+[Install]
+WantedBy=timers.target

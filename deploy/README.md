@@ -27,3 +27,13 @@ Preserve the named volumes and protected secret files during upgrades; do not us
 `down --volumes` for ordinary teardown. Back up PostgreSQL and test a restore before
 calling this deployment complete. The self-host installer manages relay/tunnel
 nodes separately; this stack does not provide a self-hostable server.
+
+Install `paperboat-backup.service` and `paperboat-backup.timer` into systemd on
+the VPS and enable the timer. `backup-database.sh` publishes a mode-0600 custom
+PostgreSQL dump atomically into protected `backups/`, preserving previous backups
+on failure. Monitor disk capacity and retain backups according to your policy;
+the script does not silently delete existing backups.
+
+Run `verify-backup.sh <dump-file>` on the VPS to restore into a new
+`paperboat_restore_test`, verify schema count and migration version, and remove
+only the scratch database it created. It refuses an existing scratch database.

@@ -1,0 +1,10 @@
+[Unit]
+Description=Paperboat protected database backup
+Requires=docker.service
+After=docker.service
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/paperboat
+ExecStart=/opt/paperboat/backup-database.sh
+TimeoutStartSec=330
+UMask=0077
