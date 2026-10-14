@@ -202,6 +202,7 @@ func New(store Store, cfg Config) (*Service, error) {
 		transport.Timeout = 2 * time.Second
 		options.Dsn, options.Release, options.Environment = cfg.DSN, release, cfg.Environment
 		options.Transport, options.MaxBreadcrumbs = transport, -1
+		//paperboat:allow-source-policy default-http owner=supportreport reason=sdk_http_client_timeout_2s
 		options.HTTPTransport = sentryHTTPRoundTripper{service: s, base: http.DefaultTransport}
 		options.Integrations = func([]sentry.Integration) []sentry.Integration { return nil }
 		options.BeforeSend = func(e *sentry.Event, _ *sentry.EventHint) *sentry.Event {

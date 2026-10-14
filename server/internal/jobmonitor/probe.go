@@ -51,6 +51,7 @@ func Probe(ctx context.Context, rawURL string, timeout time.Duration) error {
 	if err != nil {
 		return probeFailure{cause: err}
 	}
+	//paperboat:allow-source-policy default-http owner=jobmonitor reason=owned_clone_bounded_timeout_proxy_disabled
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
 	defer transport.CloseIdleConnections()

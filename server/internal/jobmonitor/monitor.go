@@ -82,6 +82,7 @@ func New(c Config) (*Monitor, error) {
 	m := &Monitor{slug: c.Slug, logger: logger}
 	transport := sentry.NewHTTPTransport()
 	transport.BufferSize, transport.Timeout = 4, 2*time.Second
+	//paperboat:allow-source-policy default-http owner=jobmonitor reason=sdk_http_client_timeout_2s
 	client, err := sentry.NewClient(sentry.ClientOptions{Dsn: c.DSN, Release: c.Release, Environment: c.Environment, Transport: transport, HTTPTransport: deliveryTransport{monitor: m, base: http.DefaultTransport}, MaxBreadcrumbs: -1,
 		Integrations: func([]sentry.Integration) []sentry.Integration { return nil },
 		BeforeSend:   cleanBackupEvent,

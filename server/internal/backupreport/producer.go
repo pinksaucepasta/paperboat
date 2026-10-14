@@ -123,6 +123,7 @@ func NewProducer(cfg ProducerConfig) (*Producer, error) {
 	if !info.IsDir() || info.Mode().Perm()&0077 != 0 {
 		return nil, producerError("unsafe_storage")
 	}
+	//paperboat:allow-source-policy default-http owner=backupreport reason=owned_clone_bounded_timeout_proxy_disabled
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
 	p := &Producer{cfg: cfg, now: func() time.Time { return time.Now().UTC() }, client: &http.Client{Transport: transport, Timeout: cfg.ReportTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
