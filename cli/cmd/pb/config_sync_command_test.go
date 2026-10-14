@@ -253,7 +253,7 @@ func TestConfigSyncSourceCommandPreviewConsentAndStaleConfirmation(t *testing.T)
 		}
 		switch r.Method + " " + r.URL.Path {
 		case "GET /v1/config-repositories":
-			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "repo", "display_name": "Source", "provider": "git", "external_ref": bare}}})
+			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "repo", "display_name": "Source", "provider": "git", "external_ref": bare}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil}})
 		case "POST /v1/config-repositories/repo/read-access":
 			writeAPIData(t, w, configsync.RepositoryReadAccess{RepositoryID: "repo", CloneURL: bare, Branch: "main", Transport: "local", Capability: "repository_contents_read", ExpiresAt: time.Now().Add(5 * time.Minute)})
 		case "GET /v1/machines/machine/config-assignment":

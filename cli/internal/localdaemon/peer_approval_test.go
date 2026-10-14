@@ -269,7 +269,7 @@ func TestApproveOwnedMachineEnrollmentRequiresExactOwnedPendingMachine(t *testin
 				w.Header().Set("Content-Type", "application/json")
 				switch r.URL.Path {
 				case "/v1/machines":
-					_ = json.NewEncoder(w).Encode(map[string]any{"data": api.UserMachinePage{Items: test.machines}})
+					_ = json.NewEncoder(w).Encode(map[string]any{"data": api.UserMachinePage{Items: test.machines, Pagination: api.Pagination{Limit: 200, Total: len(test.machines)}}})
 				case "/v1/e2ee/pending-endpoints":
 					_ = json.NewEncoder(w).Encode(map[string]any{"data": test.pending})
 				default:
@@ -281,6 +281,10 @@ func TestApproveOwnedMachineEnrollmentRequiresExactOwnedPendingMachine(t *testin
 			store := config.ProfileStore{Path: rootDir, Secrets: config.FileSecretStore{Dir: filepath.Join(rootDir, "secrets")}}
 			profile := config.Profile{Issuer: server.URL, Account: config.Account{ID: "account_1"}, CLIClientSessionID: "cli_daemon"}
 			err := ApproveOwnedMachineEnrollment(t.Context(), store, profile, api.New(server.URL, config.Credential{AccessToken: "token"}, server.Client()), "machine_1")
+			var inventoryFailure *inventorySourceError
+			if errors.As(err, &inventoryFailure) {
+				t.Fatal("fixture did not reach the enrollment ownership check")
+			}
 			var unavailable *PeerApprovalSignerUnavailableError
 			if got := errors.As(err, &unavailable); got != test.wantSigner {
 				t.Fatalf("signer unavailable=%v want=%v err=%v", got, test.wantSigner, err)

@@ -64,13 +64,13 @@ func TestSessionDeleteAllTokenScopeExpiryAndReplay(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/machines":
-			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "demo", "state": "ready", "online": true, "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"next_offset": nil}})
+			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "demo", "state": "ready", "online": true, "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil}})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/machines/um_1/terminal-sessions":
 			items := make([]map[string]any, 0, len(ids))
 			for _, id := range ids {
 				items = append(items, map[string]any{"id": id, "name": id, "state": "closed"})
 			}
-			writeAPIData(t, w, map[string]any{"items": items, "pagination": map[string]any{"next_offset": nil}})
+			writeAPIData(t, w, map[string]any{"items": items, "pagination": map[string]any{"limit": 200, "offset": 0, "total": len(items), "next_offset": nil}})
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1/machines/um_1/terminal-sessions/"):
 			deletes++
 			writeAPIData(t, w, map[string]any{})

@@ -193,7 +193,7 @@ func TestWorkspaceScopeIsCapturedOnceForResourceRequests(t *testing.T) {
 		if r.Method != http.MethodGet || r.URL.Path != "/v1/machines" || r.URL.Query().Get("workspace") != "team-a" {
 			t.Fatalf("machine request = %s %s, want captured team-a scope", r.Method, r.URL.RequestURI())
 		}
-		writeAPIData(t, w, map[string]any{"items": []any{}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 0}})
+		writeAPIData(t, w, map[string]any{"items": []any{}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 0, "next_offset": nil}})
 	}))
 	defer server.Close()
 

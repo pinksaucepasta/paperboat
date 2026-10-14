@@ -237,6 +237,7 @@ func TestPreviewForegroundPublishesCanonicalResourceOnlyAfterReadiness(t *testin
 }
 
 func TestPreviewForegroundProductionOwnerLeaseBindsCreateAndReleasesOnExit(t *testing.T) {
+	var leaseOwner string
 	apiServer := newPreviewCommandServer(t, func(r *http.Request, body map[string]any) (any, string, int) {
 		switch r.Method + " " + r.URL.Path {
 		case http.MethodPost + " /v1/previews":
@@ -244,9 +245,10 @@ func TestPreviewForegroundProductionOwnerLeaseBindsCreateAndReleasesOnExit(t *te
 			if !ok || !strings.HasPrefix(owner, "session_") || body["owner_session_kind"] != "local_lease" {
 				t.Fatalf("create was not bound to a hostd-minted owner session: %#v", body["owner_session_id"])
 			}
+			leaseOwner = owner
 			return previewCommandLease("prv_owner_1", "machine_cli", owner, "local_lease", "http", "127.0.0.1:3000", "connecting"), `"ptv1:preview_lease:cHJ2X293bmVyXzE:1"`, http.StatusOK
 		case http.MethodDelete + " /v1/previews/prv_owner_1":
-			value := previewCommandLease("prv_owner_1", "machine_cli", "session_unused", "local_lease", "http", "127.0.0.1:3000", "stopped")
+			value := previewCommandLease("prv_owner_1", "machine_cli", leaseOwner, "local_lease", "http", "127.0.0.1:3000", "stopped")
 			value["allocation_state"], value["edge_state"] = "released", "down"
 			return value, `"ptv1:preview_lease:cHJ2X293bmVyXzE:2"`, http.StatusOK
 		default:

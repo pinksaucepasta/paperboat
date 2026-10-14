@@ -1555,7 +1555,7 @@ func TestTunnelRouteMutationReportsTerminalFailureWithoutWait(t *testing.T) {
 	command.SetArgs([]string{"route", "add", "tun_1", "--name", "api", "--to", "http://127.0.0.1:8080"})
 	err := command.Execute()
 	var outcome *TunnelOperationOutcomeError
-	if !errors.As(err, &outcome) || outcome.Operation.State != "failed" || !strings.Contains(err.Error(), "operation operation_1") {
+	if !errors.As(err, &outcome) || outcome.Operation.State != "failed" || outcome.Operation.ID != "operation_1" {
 		t.Fatalf("error=%#v outcome=%#v", err, outcome)
 	}
 }

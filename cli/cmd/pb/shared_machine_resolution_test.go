@@ -15,7 +15,7 @@ import (
 func TestSharedMachineSSHAliasRequiresUnambiguousTarget(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"items":[{"id":"machine_first","alias":"dev"},{"id":"machine_second","alias":"dev"}],"total":2}}`))
+		_, _ = w.Write([]byte(`{"data":{"items":[{"id":"machine_first","alias":"dev"},{"id":"machine_second","alias":"dev"}],"pagination":{"limit":200,"offset":0,"total":2,"next_offset":null}}}`))
 	}))
 	defer server.Close()
 	client := api.New(server.URL, config.Credential{AccessToken: "token"}, server.Client())

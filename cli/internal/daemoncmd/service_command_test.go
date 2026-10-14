@@ -3,6 +3,8 @@ package daemoncmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,7 +72,8 @@ func TestRunCommandDelegatesToLocalDaemonAndPreservesStartupFailure(t *testing.T
 		t.Fatal(err)
 	}
 	command.SetArgs([]string{"run", "--config", invalid, "--server", "https://api.example.test"})
-	if err := command.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), "parse config "+invalid) {
+	var syntax *json.SyntaxError
+	if err := command.ExecuteContext(t.Context()); !errors.As(err, &syntax) || strings.Contains(err.Error(), invalid) {
 		t.Fatalf("daemon configuration error = %v", err)
 	}
 }

@@ -91,7 +91,7 @@ func (d *connectedMachineAccess) control(r *http.Request, identity clientauthori
 	var data any
 	switch r.URL.Path {
 	case "/v1/machines":
-		data = map[string]any{"items": []any{}, "pagination": map[string]any{}}
+		data = map[string]any{"items": []any{}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 0, "next_offset": nil}}
 	case "/v1/machine-services":
 		d.discoveries.Add(1)
 		data = map[string]any{"items": []api.MachineServicesMachine{{MachineID: "machine_connected", InstallationGeneration: 1, ExpiresAt: time.Now().Add(time.Minute)}}}

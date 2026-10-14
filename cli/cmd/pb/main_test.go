@@ -1734,7 +1734,7 @@ func TestSelectTerminalSessionRejectsAmbiguousMachineAlias(t *testing.T) {
 		if r.URL.Path != "/v1/machines" {
 			t.Fatalf("unexpected route %s", r.URL.Path)
 		}
-		_, _ = w.Write([]byte(`{"data":{"items":[{"id":"um_1","alias":"studio"},{"id":"um_2","alias":"Studio"}],"pagination":{"next_offset":null}}}`))
+		_, _ = w.Write([]byte(`{"data":{"items":[{"id":"um_1","alias":"studio"},{"id":"um_2","alias":"Studio"}],"pagination":{"limit":200,"offset":0,"total":2,"next_offset":null}}}`))
 	}))
 	defer server.Close()
 
@@ -1749,7 +1749,7 @@ func TestSelectTerminalSessionCreatesFreshSessionByDefault(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/machines":
-			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "studio", "state": "ready"}}, "pagination": map[string]any{"next_offset": nil}})
+			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "studio", "state": "ready"}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil}})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/machines/um_1/terminal-sessions":
 			created = true
 			writeAPIData(t, w, map[string]any{"id": "pts_1", "name": "quiet-harbor", "state": "open", "created_at": time.Now(), "updated_at": time.Now()})
@@ -1885,21 +1885,17 @@ func TestMachineTransportSnapshotRetainsAutoMarkerForMixedPaths(t *testing.T) {
 
 func TestCanonicalCommandsAreDiscoverable(t *testing.T) {
 	root := newRootCommand()
-	for _, path := range [][]string{{"auth", "login"}, {"logout"}, {"pair"}, {"session", "attach"}, {"session", "list"}, {"machine", "add"}, {"machine", "list"}, {"machine", "rename"}, {"machine", "revoke"}, {"machine", "availability"}, {"preview", "list"}, {"preview", "stop"}} {
+	for _, path := range [][]string{{"login"}, {"auth", "login"}, {"auth", "switch"}, {"logout"}, {"pair"}, {"session", "attach"}, {"session", "list"}, {"machine", "add"}, {"machine", "list"}, {"machine", "rename"}, {"machine", "revoke"}, {"machine", "availability"}, {"preview", "list"}, {"preview", "stop"}} {
 		command, remaining, err := root.Find(path)
 		if err != nil || len(remaining) != 0 || command == root {
 			t.Fatalf("command %q not discoverable: command=%v remaining=%q err=%v", path, command, remaining, err)
 		}
 	}
-	for _, removed := range []string{"create", "projects", "login"} {
+	for _, removed := range []string{"create", "projects"} {
 		command, remaining, err := root.Find([]string{removed})
 		if err != nil || command != root || len(remaining) != 1 {
 			t.Fatalf("removed command %q is still discoverable: command=%v remaining=%q err=%v", removed, command, remaining, err)
 		}
-	}
-	auth, remaining, err := root.Find([]string{"auth", "switch"})
-	if err != nil || auth.CommandPath() != "pb auth" || len(remaining) != 1 {
-		t.Fatalf("deferred auth switch command is still discoverable: command=%v remaining=%q err=%v", auth, remaining, err)
 	}
 }
 
@@ -1953,7 +1949,7 @@ func TestMachineAvailabilityRequiresConfirmationAndReturnsAppliedJSON(t *testing
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method + " " + r.URL.Path {
 		case "GET /v1/machines":
-			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "studio", "availability": map[string]any{"schema": "paperboat.availability-policy/v1", "desired_mode": "allow_sleep", "desired_version": 3, "observed_version": 3, "status": "applied"}}}, "pagination": map[string]any{"next_offset": nil}})
+			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "studio", "availability": map[string]any{"schema": "paperboat.availability-policy/v1", "desired_mode": "allow_sleep", "desired_version": 3, "observed_version": 3, "status": "applied"}}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil}})
 		case "PUT /v1/machines/um_1/availability-policy":
 			if r.Header.Get("Idempotency-Key") == "" {
 				t.Fatal("missing idempotency key")
@@ -2012,9 +2008,9 @@ func TestSessionCloseRequiresConfirmationBeforeBackend(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case r.Method == http.MethodGet && r.URL.Path == "/v1/machines":
-					writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "demo", "state": "ready", "online": true, "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"next_offset": nil}})
+					writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "demo", "state": "ready", "online": true, "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil}})
 				case r.Method == http.MethodGet && r.URL.Path == "/v1/machines/um_1/terminal-sessions":
-					writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "ses_1", "name": "task", "state": "running"}}, "pagination": map[string]any{"next_offset": nil}})
+					writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "ses_1", "name": "task", "state": "running"}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil}})
 				case r.Method == http.MethodPost && r.URL.Path == "/v1/machines/um_1/terminal-sessions/ses_1/close":
 					closes++
 					w.WriteHeader(tc.status)
@@ -2061,9 +2057,9 @@ func TestSessionCloseAllRequiresConfirmationAndRejectsSessionArgument(t *testing
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/machines":
-			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "demo", "state": "ready", "online": true, "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"next_offset": nil}})
+			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "demo", "state": "ready", "online": true, "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil}})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/machines/um_1/terminal-sessions":
-			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "ses_1", "name": "default", "state": "open"}}, "pagination": map[string]any{"next_offset": nil}})
+			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "ses_1", "name": "default", "state": "open"}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil}})
 		default:
 			mutated = true
 			t.Fatalf("unexpected request before confirmation: %s %s", r.Method, r.URL.Path)
@@ -2126,9 +2122,9 @@ func TestSessionCloseAllClosesEveryOpenSession(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/machines":
-			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "demo", "state": "ready", "online": true, "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"next_offset": nil}})
+			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "demo", "state": "ready", "online": true, "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil}})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/machines/um_1/terminal-sessions":
-			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "ses_1", "name": "default", "state": "open"}, {"id": "ses_2", "name": "api", "state": "open"}, {"id": "ses_3", "name": "old", "state": "closed"}}, "pagination": map[string]any{"next_offset": nil}})
+			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "ses_1", "name": "default", "state": "open"}, {"id": "ses_2", "name": "api", "state": "open"}, {"id": "ses_3", "name": "old", "state": "closed"}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 3, "next_offset": nil}})
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/close"):
 			closed = append(closed, r.URL.Path)
 			operation := "applied"
@@ -2167,9 +2163,9 @@ func TestSessionsCloseAllClosesEveryOpenSessionAndRetainsHistory(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/machines":
-			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "demo", "state": "ready", "online": true, "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"next_offset": nil}})
+			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "demo", "state": "ready", "online": true, "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil}})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/machines/um_1/terminal-sessions":
-			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "ses_1", "name": "default", "state": "open"}, {"id": "ses_2", "name": "api", "state": "open"}, {"id": "ses_3", "name": "old", "state": "closed"}}, "pagination": map[string]any{"next_offset": nil}})
+			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "ses_1", "name": "default", "state": "open"}, {"id": "ses_2", "name": "api", "state": "open"}, {"id": "ses_3", "name": "old", "state": "closed"}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 3, "next_offset": nil}})
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/close"):
 			closed = append(closed, r.URL.Path)
 			writeAPIData(t, w, map[string]any{"operation_state": "applied"})
@@ -2201,9 +2197,9 @@ func TestSessionDeleteAllRequiresConfirmationAndRejectsSessionArgument(t *testin
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/machines":
-			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "demo", "state": "ready", "online": true, "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"next_offset": nil}})
+			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "demo", "state": "ready", "online": true, "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil}})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/machines/um_1/terminal-sessions":
-			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "ses_1", "name": "default", "state": "open", "is_default": true}, {"id": "ses_2", "name": "work", "state": "closed"}}, "pagination": map[string]any{"next_offset": nil}})
+			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "ses_1", "name": "default", "state": "open", "is_default": true}, {"id": "ses_2", "name": "work", "state": "closed"}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 2, "next_offset": nil}})
 		default:
 			mutated = true
 			t.Fatalf("unexpected request before confirmation: %s %s", r.Method, r.URL.Path)
@@ -2231,9 +2227,9 @@ func TestSessionDeleteAllDeletesOnlyClosedNonDefaultSessions(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/machines":
-			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "demo", "state": "ready", "online": true, "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"next_offset": nil}})
+			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "demo", "state": "ready", "online": true, "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil}})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/machines/um_1/terminal-sessions":
-			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "ses_1", "name": "default", "state": "open", "is_default": true}, {"id": "ses_2", "name": "work", "state": "open"}, {"id": "ses_3", "name": "old", "state": "closed"}}, "pagination": map[string]any{"next_offset": nil}})
+			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "ses_1", "name": "default", "state": "open", "is_default": true}, {"id": "ses_2", "name": "work", "state": "open"}, {"id": "ses_3", "name": "old", "state": "closed"}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 3, "next_offset": nil}})
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1/machines/um_1/terminal-sessions/"):
 			deleted = append(deleted, r.URL.Path)
 			writeAPIData(t, w, map[string]any{})
@@ -2265,9 +2261,9 @@ func TestSessionDeleteOpenSessionRequiresClose(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/machines":
-			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "demo", "state": "ready", "online": true, "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"next_offset": nil}})
+			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "demo", "state": "ready", "online": true, "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil}})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/machines/um_1/terminal-sessions":
-			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "ses_2", "name": "work", "state": "open"}}, "pagination": map[string]any{"next_offset": nil}})
+			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "ses_2", "name": "work", "state": "open"}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil}})
 		case r.Method == http.MethodDelete && r.URL.Path == "/v1/machines/um_1/terminal-sessions/ses_2":
 			deleted = true
 			writeAPIData(t, w, map[string]any{})
@@ -2299,7 +2295,7 @@ func TestResolveMachineTargetRejectsAmbiguousNames(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeAPIData(t, w, map[string]any{"items": []map[string]any{
 			{"id": "um_1", "alias": "studio"}, {"id": "um_2", "alias": "studio"},
-		}, "pagination": map[string]any{"next_offset": nil}})
+		}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 2, "next_offset": nil}})
 	}))
 	defer srv.Close()
 	_, _, err := resolveUserMachineTarget(context.Background(), api.New(srv.URL, config.Credential{AccessToken: "token"}, srv.Client()), "studio")
@@ -2705,7 +2701,7 @@ func TestMachineRevokeJSONOutputContract(t *testing.T) {
 		}
 		switch r.Method + " " + r.URL.Path {
 		case "GET /v1/machines":
-			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "studio"}}, "pagination": map[string]any{"next_offset": nil}})
+			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "studio"}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil}})
 		case "POST /v1/machines/um_1/disconnect":
 			disconnected = true
 			writeAPIData(t, w, map[string]bool{"ok": true})
@@ -2775,7 +2771,7 @@ func TestDefaultEnvironmentRevalidatesRememberedIDWithinSelectedWorkspace(t *tes
 		if r.Method != http.MethodGet || r.URL.Path != "/v1/machines" || r.URL.Query().Get("workspace") != "team-a" {
 			t.Fatalf("request = %s %s, want machine inventory scoped to team-a", r.Method, r.URL.RequestURI())
 		}
-		writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "studio", "online": true, "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 1}})
+		writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "studio", "online": true, "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil}})
 	}))
 	defer server.Close()
 	client := api.New(server.URL, config.Credential{AccessToken: "token"}, server.Client())
@@ -2792,7 +2788,7 @@ func TestDefaultEnvironmentSelectsOnlyAvailableTarget(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/machines":
-			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "studio", "online": true, "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 1}})
+			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "um_1", "alias": "studio", "online": true, "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil}})
 		default:
 			http.NotFound(w, r)
 		}
@@ -2836,7 +2832,7 @@ func TestConnectDoesNotExposeSessionOverrides(t *testing.T) {
 	for _, flag := range []string{"--size", "--agent"} {
 		t.Run(flag, func(t *testing.T) {
 			err := newApp().Run([]string{"pb", flag, "value", "demo"})
-			if err == nil || !strings.Contains(err.Error(), "unknown flag") {
+			if err == nil || classifyCommandFailure(err).kind != commandUsage {
 				t.Fatalf("err = %v", err)
 			}
 		})
@@ -3879,7 +3875,7 @@ func TestResolveSSHCommandTargetFastUsesWarmSnapshotAndCache(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/machines":
 			atomic.AddInt32(&machineListCalls, 1)
-			writeAPIData(t, w, map[string]any{"items": []map[string]any{}, "pagination": map[string]any{"next_offset": nil}})
+			writeAPIData(t, w, map[string]any{"items": []map[string]any{}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 0, "next_offset": nil}})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/machines/mch_1/ssh-target":
 			atomic.AddInt32(&sshTargetCalls, 1)
 			if r.URL.Query().Get("machine_generation") != "4" {
@@ -4042,7 +4038,7 @@ func TestResolveSSHCommandTargetFastFallsBackWithoutWarmSnapshot(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/machines":
 			atomic.AddInt32(&machineListCalls, 1)
-			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "mch_1", "alias": "machine-ready", "state": "online", "online": true, "installation_generation": 4, "environment_id": "env_1", "workspace_root": "/root", "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"next_offset": nil}})
+			writeAPIData(t, w, map[string]any{"items": []map[string]any{{"id": "mch_1", "alias": "machine-ready", "state": "online", "online": true, "installation_generation": 4, "environment_id": "env_1", "workspace_root": "/root", "capabilities": map[string]any{"terminal_host": map[string]any{"configured": true, "observed": true}}}}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 1, "next_offset": nil}})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/machines/mch_1/ssh-target":
 			atomic.AddInt32(&sshTargetCalls, 1)
 			writeAPIData(t, w, map[string]any{"type": "machine_target", "version": 1, "machine_id": "mch_1", "machine_generation": 4, "os_user": "root", "port": 2222, "reconciliation_version": 1})

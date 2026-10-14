@@ -70,7 +70,7 @@ func TestInteractiveCatalogCoversProductCommands(t *testing.T) {
 		}
 	}
 	for _, item := range interactiveCommandItems(newRootCommand(), []string{"team"}) {
-		if !strings.HasPrefix(item.ID, "team ") {
+		if item.ID != "team" && !strings.HasPrefix(item.ID, "team ") {
 			t.Errorf("wrong group %s", item.ID)
 		}
 	}

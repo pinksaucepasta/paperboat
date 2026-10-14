@@ -35,7 +35,7 @@ func TestManagedSSHAliasTargetsReconcilesChangedAndRemovedMachines(t *testing.T)
 		writer.Header().Set("Content-Type", "application/json")
 		switch {
 		case request.URL.Path == "/v1/machines":
-			writeManagedSSHTestResponse(writer, api.UserMachinePage{Items: append([]api.UserMachine(nil), state.machines...), Pagination: api.Pagination{}})
+			writeManagedSSHTestResponse(writer, api.UserMachinePage{Items: append([]api.UserMachine{}, state.machines...), Pagination: api.Pagination{Limit: 200, Total: len(state.machines)}})
 		case strings.HasPrefix(request.URL.Path, "/v1/machines/") && strings.HasSuffix(request.URL.Path, "/ssh-target"):
 			machineID, err := url.PathUnescape(strings.TrimSuffix(strings.TrimPrefix(request.URL.Path, "/v1/machines/"), "/ssh-target"))
 			if err != nil {

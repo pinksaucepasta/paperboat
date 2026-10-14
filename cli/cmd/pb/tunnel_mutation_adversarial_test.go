@@ -291,7 +291,8 @@ func TestTunnelMutationRejectsSecretBearingUnknownSuccessFields(t *testing.T) {
 		}})
 	})
 	stdout, stderr, err := executeAdversarialTunnelCommand(t, "route", "add", "tun_1", "--name", "api", "--to", "http://127.0.0.1:8080", "--json")
-	if err == nil || !strings.Contains(err.Error(), "unknown field") || stdout != "" || stderr != "" {
+	var decodeFailure *api.ResponseDecodeError
+	if !errors.As(err, &decodeFailure) || !strings.Contains(decodeFailure.Err.Error(), "unknown field") || stdout != "" || stderr != "" {
 		t.Fatalf("error=%v stdout=%q stderr=%q", err, stdout, stderr)
 	}
 	assertNoTunnelMutationSecret(t, stdout, stderr, err.Error())

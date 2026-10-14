@@ -323,7 +323,7 @@ func TestCoordinatorGuardedNamesFollowFullSnapshots(t *testing.T) {
 		t.Fatal("reachable guarded name missing")
 	}
 	names.mu.Lock()
-	names.failAcquire = true
+	names.failAcquire = errors.New("guard unavailable")
 	names.mu.Unlock()
 	replacement := &pbSync.PeerUpdate{PeerId: "other", Alias: "other", AssignedIp: "127.100.0.23", Approved: true, Online: true, ExportedPorts: []int32{9090}}
 	coordinator.applySnapshot([]*pbSync.PeerUpdate{replacement}, 2)
@@ -331,7 +331,7 @@ func TestCoordinatorGuardedNamesFollowFullSnapshots(t *testing.T) {
 	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
 		names.mu.Lock()
 		remainingAfterFailure = len(names.names)
-		names.failAcquire = false
+		names.failAcquire = nil
 		names.mu.Unlock()
 		if remainingAfterFailure == 0 {
 			break
@@ -591,7 +591,7 @@ func TestCoordinatorNativePortPreservesApplicationTLSAndALPN(t *testing.T) {
 type coordinatorNameClient struct {
 	mu            sync.Mutex
 	names         map[string]netip.Addr
-	failAcquire   bool
+	failAcquire   error
 	conflictPorts map[int]bool
 	blockAcquire  bool
 	addresses     map[int]string
@@ -605,8 +605,8 @@ func (c *coordinatorNameClient) Acquire(ctx context.Context, _ string, _ netip.A
 	conflict := c.conflictPorts[requestedPort]
 	block := c.blockAcquire
 	c.mu.Unlock()
-	if fail {
-		return nil, errors.New("guard unavailable")
+	if fail != nil {
+		return nil, fail
 	}
 	if conflict {
 		return nil, machineguard.ErrPortInUse
@@ -1281,7 +1281,8 @@ func testBrowserHostname(t *testing.T, machine string, port int) string {
 }
 
 func TestCoordinatorReportsFailedReconciliationAndWithdraws(t *testing.T) {
-	names := &coordinatorNameClient{failAcquire: true}
+	guardErr := errors.New("guard unavailable")
+	names := &coordinatorNameClient{failAcquire: guardErr}
 	var reported error
 	c, err := NewCoordinator(CoordinatorConfig{NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unexpected dial") }, ReportReconcileError: func(err error) { reported = err }})
 	if err != nil {
@@ -1290,7 +1291,7 @@ func TestCoordinatorReportsFailedReconciliationAndWithdraws(t *testing.T) {
 	c.ctx, c.cancel = context.WithCancel(t.Context())
 	defer c.Stop()
 	c.applySnapshot([]*pbSync.PeerUpdate{{PeerId: "machine", Alias: "hp", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{35173}}}, 1)
-	if reported == nil || !strings.Contains(reported.Error(), "guard unavailable") {
+	if !errors.Is(reported, guardErr) || strings.Contains(reported.Error(), guardErr.Error()) {
 		t.Fatalf("readiness failure not reported: %v", reported)
 	}
 	if len(c.routes) != 0 || len(c.webRoutes) != 0 || !names.closed {
