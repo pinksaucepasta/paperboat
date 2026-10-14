@@ -46,7 +46,8 @@ SELECT n.id, COALESCE(n.region,''),
   n.last_heartbeat_at
 FROM control_tunnel_nodes n
 WHERE n.roles @> ARRAY['edge']::text[] AND n.id>$2
-  AND NOT EXISTS (SELECT 1 FROM selfhost_installations i WHERE i.node_id=n.id)
+  AND NOT EXISTS (SELECT 1 FROM selfhost_installations i WHERE i.node_id=n.id
+      AND (i.scope_kind <> 'global' OR i.state <> 'active' OR NOT i.claim_complete))
   AND (n.allowed_account_ids IS NULL OR $1=ANY(n.allowed_account_ids))
   AND (NOT EXISTS (SELECT 1 FROM managed_node_authority m WHERE m.node_id=n.id)
        OR EXISTS (SELECT 1 FROM managed_node_authority m JOIN operator_regions r ON r.id=m.region_id

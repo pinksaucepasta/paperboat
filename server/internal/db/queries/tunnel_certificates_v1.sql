@@ -861,7 +861,8 @@ SELECT id, process_epoch
 FROM control_tunnel_nodes
 WHERE state = 'ready'
   AND roles @> ARRAY['edge']::text[]
-  AND NOT EXISTS (SELECT 1 FROM selfhost_installations i WHERE i.node_id=control_tunnel_nodes.id)
+  AND NOT EXISTS (SELECT 1 FROM selfhost_installations i WHERE i.node_id=control_tunnel_nodes.id
+      AND (i.scope_kind <> 'global' OR i.state <> 'active' OR NOT i.claim_complete))
   AND ready = true
   AND last_heartbeat_at IS NOT NULL
   AND last_heartbeat_at > sqlc.arg(cutoff)
