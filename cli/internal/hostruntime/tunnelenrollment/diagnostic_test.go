@@ -20,6 +20,7 @@ func TestActivationDiagnosticCodeOfUsesOnlyTypedFailures(t *testing.T) {
 		{name: "rotation store failure", err: &connectorprotocol.Error{Code: connectorprotocol.CodeCredentialRotationFailed, Cause: syscall.EIO}, want: ""},
 		{name: "authentication wrapper with IO", err: &connectorprotocol.Error{Code: connectorprotocol.CodeAuthenticationFailed, Cause: syscall.EIO}, want: ""},
 		{name: "mixed config and IO", err: errors.Join(connectorprotocol.ErrIdentityMismatch, syscall.EIO), want: ""},
+		{name: "activation marker with IO", err: errors.Join(ErrActivation, tunnelmanager.ErrProductionControlMissing, syscall.EIO), want: ""},
 		{name: "unknown", err: errors.New("wss://control.example/?token=secret"), want: ""},
 	}
 	for _, test := range tests {

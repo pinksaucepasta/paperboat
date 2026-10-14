@@ -91,6 +91,18 @@ func activationDiagnosticCodeOf(err error) (code string) {
 		}
 		if joined, ok := err.(interface{ Unwrap() []error }); ok {
 			children := joined.Unwrap()
+			if len(children) > 32 {
+				return ""
+			}
+			// Manager and activator outcome markers annotate the same failure;
+			// they are not independent provider or cleanup causes.
+			causes := make([]error, 0, len(children))
+			for _, child := range children {
+				if child != ErrActivation && child != ErrConflict {
+					causes = append(causes, child)
+				}
+			}
+			children = causes
 			if len(children) != 1 {
 				return ""
 			}
