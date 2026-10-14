@@ -460,7 +460,8 @@ WHERE d.id = $1
   AND lease.generation = d.preview_generation
   AND lease.lease_deadline > $2
   AND (lease.user_deadline IS NULL OR lease.user_deadline > $2)
-ORDER BY a.edge_node_id, a.edge_process_epoch, a.attachment_generation;`
+ORDER BY a.edge_node_id, a.edge_process_epoch, a.attachment_generation
+`
 
 type ListReadyPreviewCertificateEdgesV1Params struct {
 	DomainID string
