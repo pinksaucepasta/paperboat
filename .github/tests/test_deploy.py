@@ -39,6 +39,8 @@ class DeploymentCompositionTest(unittest.TestCase):
             secret_mount = next(v for v in services["server"]["volumes"] if v["target"] == "/run/secrets")
             self.assertTrue(secret_mount["read_only"])
             self.assertEqual(services["proxy"]["environment"]["PAPERBOAT_API_HOST"], "api.example.test")
+            release_mount = next(v for v in services["proxy"]["volumes"] if v["target"] == "/srv/paperboat-releases")
+            self.assertTrue(release_mount["read_only"])
 
 
 if __name__ == "__main__":

@@ -19,8 +19,11 @@ environment or server secrets.
 starts the server only after migrations succeed. Caddy owns API/download/object-store
 TLS; the server certificate coordinator owns the public/runtime edge wildcards.
 Configure DNS before starting the proxy. Keep releases in `releases/` and publish
-through its atomic `current` directory. Missing release/signing decisions do not
-make an installer artifact available.
+through its atomic `current` directory. The proxy serves only `/tuf/targets/*`
+from that read-only release mount on the configured download host; API requests,
+installer scripts and TUF metadata still reach the server. Publish target files
+under `releases/tuf/targets/` before activating metadata that references them.
+Missing qualified artifacts do not make an installer available.
 
 PostgreSQL is reachable only on VPS loopback and the private Compose network.
 Preserve the named volumes and protected secret files during upgrades; do not use

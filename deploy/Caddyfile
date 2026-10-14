@@ -1,5 +1,16 @@
-{$PAPERBOAT_API_HOST}, {$PAPERBOAT_DOWNLOAD_HOST} {
+{$PAPERBOAT_API_HOST} {
 	reverse_proxy server:8080
+}
+{$PAPERBOAT_DOWNLOAD_HOST} {
+	@targets path /tuf/targets/*
+	handle @targets {
+		root * /srv/paperboat-releases
+		header Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+	handle {
+		reverse_proxy server:8080
+	}
 }
 {$PAPERBOAT_DIAGNOSTICS_HOST} {
 	reverse_proxy diagnostics:9000

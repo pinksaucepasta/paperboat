@@ -59,6 +59,7 @@ services:
     ports: ["80:80", "443:443", "443:443/udp"]
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./releases:/srv/paperboat-releases:ro
       - proxy_data:/data
       - proxy_config:/config
     depends_on: [server, diagnostics]
