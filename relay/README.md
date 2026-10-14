@@ -8,7 +8,7 @@ lifecycle integrates startup, registry health/capacity, drain and endpoint revoc
 The current library and runtime fixtures are not a production deployment.
 
 For native relay-only, tunnel-only, or combined installation and dashboard ownership,
-see [self-host installation](deploy/README.md). `pbh` installs the service before
+see [self-host installation](../helper/deploy/README.md). `pbh` installs the service before
 any account, team, or global pool is assigned.
 
 Build from this directory into the ignored build directory:
