@@ -129,10 +129,10 @@ ARM builds must compile, pass unit tests and be included in every release.
   installer, signed TUF metadata, installed by the `get.pprbt.dev` one-liners.
 - **Server, relay and tunnel** are released as Docker images for **linux/amd64 and
   linux/arm64** (`ghcr.io/pinksaucepasta/paperboat-server`, `…-relay`, `…-tunnel`).
-- **The server is not self-hostable and has no curl installer.** We run it ourselves on the
+- **The server has no curl installer and is not installed by `pbh`.** We run it ourselves on the
   coolify VPS from its image with a compose file in `deploy/` (server, PostgreSQL 17, its
   edge/proxy), using config/env for every domain.
-- **Self-hosting is relay and tunnel only, through `pbh`**, its own top-level module `helper/`
+- **`pbh` self-hosts relay and tunnel only**, its own top-level module `helper/`
   in `go.work` (the command stays `pbh`) (today misplaced in `relay/cmd/pbh`, `relay/deploy/install.sh`,
   `relay/deploy/package-selfhost.sh`, `relay/deploy/README.md`; S4-00 moves it). The one-liner, modelled
   on `curl -fsSL https://cdn.coollabs.io/coolify/install.sh | sudo bash` (read it first), is
