@@ -106,8 +106,12 @@ ARM builds must compile, pass unit tests and be included in every release.
   Lane B itself: generate the root key on apple over Tailscale SSH (key never leaves apple,
   never printed; backed up in apple's keychain/owner-only file), generate the online key and
   store it with `gh secret set`. No user step needed.
-- Relays currently run on other machines (oracle and one more); they are rebuilt from this
-  repo and re-registered with the new server.
+- **Relay and edge hosts** (user decision 2026-10-14): both run on two machines, installed with
+  `pbh`: **oracle** (this machine, Ubuntu 24.04 arm64, 140.245.11.41) and **anvit**
+  (`ssh ubuntu@anvit`, Ubuntu 22.04 arm64, 152.67.0.60). Not on coolify. `*.pprbt.app` has an
+  A record for each IP. The records are Cloudflare-proxied today; the edge terminates TLS with
+  its own wildcard certificate, so they must be DNS-only (needs the pprbt.app DNS Edit token,
+  S1-08). Lane B owns these hosts' relay/edge services; Lane A still owns the test devices.
 - Where the console and marketing site are hosted in production: **USER DECIDES** (marketing
   probably Vercel). Until then the console runs as today (dev server behind the Tailscale
   Funnel at https://oracle.newt-mermaid.ts.net).
