@@ -107,12 +107,21 @@ ARM builds must compile, pass unit tests and be included in every release.
   never printed; backed up in apple's keychain/owner-only file), generate the online key and
   store it with `gh secret set`. No user step needed.
 - **The CLI binary is independent of the server** (user decision 2026-10-14). `pb` is
-  self-contained: anyone can compile it or download it from GitHub releases and sign in and
-  pair with it. Pairing and installation material never depend on a server-published `pb`
-  artifact or release record, and the server never selects, pins or serves the binary a
-  machine runs. Remove the artifact requirement from pairing (`machineArtifact`,
-  `ErrArtifactUnavailable`, the artifact in installation material) and the dev-release
-  publisher; updates come from GitHub releases (minimal TUF), not from the server.
+  self-contained: anyone can compile it or download it and sign in and pair with it. Today pairing
+  requires a server-published release record (`machineArtifact`; server
+  `usermachines/service_04.go:430`, CLI `hostruntime/bootstrap/bootstrap.go:191`), so a fresh
+  server with nothing published cannot pair anything. Changes:
+  - Lane B: installation material carries only credentials, session and server address. Remove
+    the release record from pairing, `ErrArtifactUnavailable`, `release_publication.go` and the
+    dev-release publisher. No `pb` binary is selected, pinned or served by the server.
+  - Lane A: setup accepts material without a release record. `pb pair` keeps installing the
+    running binary (it already does). Official builds take their update/repair source from the
+    build setting `DefaultReleaseURL` = our release host (TUF metadata on the download host, files
+    on GitHub releases), verified with the embedded TUF root, whatever server they pair with.
+    Custom builds have no update source and do not auto-update (as today). Windows repair
+    (`hostinstall/install_windows.go:3436`) uses the same build-time source.
+  - Kept: the console's update approval (server policy for which version machines may update
+    to); it gates the version only.
 - **Relay and edge hosts** (user decision 2026-10-14): both run on two machines, installed with
   `pbh`: **oracle** (this machine, Ubuntu 24.04 arm64, 140.245.11.41) and **anvit**
   (`ssh ubuntu@anvit`, Ubuntu 22.04 arm64, 152.67.0.60). Not on coolify. `*.pprbt.app` has an
