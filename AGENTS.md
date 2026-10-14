@@ -151,8 +151,11 @@ only when all its rows across lanes are done; Lane A runs its device verificatio
   on a paired machine (use the Windows token for Windows).
 - Leave every device either fully working or cleanly uninstalled at the end of a step.
   Remove temporary files, processes and test binaries you created, locally and remotely.
-- Console development is served at https://oracle.newt-mermaid.ts.net (Tailscale Funnel).
-  Use that origin for sign-in; do not change WorkOS settings or create other public tunnels.
+- The live console (dashboard) is served at https://oracle.newt-mermaid.ts.net, a Tailscale
+  Funnel to `next dev` on http://100.95.70.63:3000 (systemd user unit
+  `paperboat-console.service`, running from `~/paperboat/console`). WorkOS redirects to
+  this origin, so sign in there; do not change WorkOS settings, the Funnel, or create other
+  public tunnels. Console changes go live on save; restart the unit after dependency changes.
 
 ## Security and privacy
 

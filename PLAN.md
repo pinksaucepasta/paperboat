@@ -486,3 +486,4 @@ The coolify format (S1) also removes the old dev deployment and its test backups
 One line per completed section or notable event: `date | section | commit | smoke results
 file | note`. Row-level evidence goes in CHECKLIST.md.
 2026-10-14 | S0 handoff merge + initial import | 75a0130 | — | old repos read-only from here
+2026-10-14 | S0 Lane C → Lane A request | — | — | delete `cli/cmd/browserterminal-wasm/build-dashboard-assets.sh` (points at the old paperboat-dashboard repo); the console now builds the wasm itself via `console/scripts/build-terminal-wasm.sh`

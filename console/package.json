@@ -3,13 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "terminal:wasm": "scripts/build-terminal-wasm.sh",
+    "predev": "bun run terminal:wasm",
     "dev": "next dev",
+    "prebuild": "bun run terminal:wasm",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "api:types": "openapi-typescript ../paperboat-server/docs/openapi.json -o lib/api-schema.d.ts"
+    "api:types": "openapi-typescript ../server/docs/openapi.json -o lib/api-schema.d.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
