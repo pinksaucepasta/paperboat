@@ -168,13 +168,16 @@ func TestSelfhostCarrierUsesClaimedInfrastructureIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	deployment := config.Deployment{SelfHosted: true, InfrastructureTLSCertFile: certPath, InfrastructureTLSKeyFile: keyPath, PublicHTTPSCertFile: "/unused-public-cert", PublicHTTPSKeyFile: "/unused-public-key"}
-	for _, epoch := range []string{"first", "replacement"} {
-		trust, err := carrierServerTrust(deployment, "node", epoch, "127.0.0.1", now)
-		if _, ok := trust.Certificate.PrivateKey.(ed25519.PrivateKey); !ok {
-			t.Fatal("carrier identity no longer signs distribution proofs with Ed25519")
-		}
-		if err != nil || trust.SPKISHA256 != infrastructure.SPKISHA256 || trust.CertificateChainPEM != infrastructure.CertificateChainPEM {
-			t.Fatalf("claimed identity changed: %v", err)
+	for _, customerOwned := range []bool{true, false} {
+		deployment.SelfHosted = customerOwned
+		for _, epoch := range []string{"first", "replacement"} {
+			trust, err := carrierServerTrust(deployment, "node", epoch, "127.0.0.1", now)
+			if _, ok := trust.Certificate.PrivateKey.(ed25519.PrivateKey); !ok {
+				t.Fatal("carrier identity no longer signs distribution proofs with Ed25519")
+			}
+			if err != nil || trust.SPKISHA256 != infrastructure.SPKISHA256 || trust.CertificateChainPEM != infrastructure.CertificateChainPEM {
+				t.Fatalf("claimed identity changed: %v", err)
+			}
 		}
 	}
 	if _, err = carrierServerTrust(deployment, "node", "epoch", "wrong.example.test", now); err == nil {

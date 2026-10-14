@@ -107,7 +107,7 @@ func infrastructureTLS(d config.Deployment, base *tls.Config) (*tls.Config, erro
 // carrierServerTrust binds self-hosted H2/H3 carriers to the identity claimed
 // during enrollment. Process epochs and signed admissions fence restarts.
 func carrierServerTrust(d config.Deployment, nodeID, epoch, host string, now time.Time) (control.ProcessCarrierServerTrust, error) {
-	if !d.SelfHosted {
+	if d.InfrastructureTLSCertFile == "" && d.InfrastructureTLSKeyFile == "" {
 		return control.NewProcessCarrierServerTrust(nodeID, epoch, host, now, control.DefaultProcessCarrierServerCertificateLifetime)
 	}
 	certificate, err := tls.LoadX509KeyPair(d.InfrastructureTLSCertFile, d.InfrastructureTLSKeyFile)
