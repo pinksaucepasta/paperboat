@@ -48,4 +48,11 @@ func TestOpenAPIConsoleIdentityAndMachineResponses(t *testing.T) {
 			}
 		}
 	}
+	machineProperties := doc.Components.Schemas["Machine"]["properties"].(map[string]any)
+	versions := machineProperties["runtime_versions"].(map[string]any)
+	values, _ := versions["additionalProperties"].(map[string]any)
+	if versions["type"] != "object" || values["type"] != "string" {
+		t.Fatal("machine runtime versions must expose component-to-version strings")
+	}
+
 }

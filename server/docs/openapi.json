@@ -14476,7 +14476,12 @@
             "type": "integer",
             "format": "int64"
           },
-          "runtime_versions": {},
+          "runtime_versions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
           "capabilities": {
             "$ref": "#/components/schemas/MachineCapabilities"
           },
