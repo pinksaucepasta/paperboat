@@ -18,8 +18,9 @@ func TestDockerTeardownPreservesForeignContainerAndRemovesOwnedContainer(t *test
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	name := "paperboat-container-test-" + installationOwner(t.TempDir())
-	owner := "integration-owner"
+	dir := t.TempDir()
+	owner := installationOwner(dir)
+	name := "paperboat-pbh-" + owner + "-relay"
 	if _, err := docker(ctx, "create", "--name", name, "--label", ownerLabel+"=foreign-owner", image, "--version"); err != nil {
 		t.Fatal("create integration container failed")
 	}
@@ -28,7 +29,7 @@ func TestDockerTeardownPreservesForeignContainerAndRemovesOwnedContainer(t *test
 		defer stop()
 		docker(cleanup, "rm", name)
 	})
-	if err := removeOwned(ctx, name, owner); err == nil {
+	if err := Teardown(ctx, dir); err == nil {
 		t.Fatal("foreign container was accepted as owned")
 	}
 	info, exists, err := inspectContainer(ctx, name)
@@ -41,8 +42,20 @@ func TestDockerTeardownPreservesForeignContainerAndRemovesOwnedContainer(t *test
 	if _, err := docker(ctx, "create", "--name", name, "--label", ownerLabel+"="+owner, image, "--version"); err != nil {
 		t.Fatal("create owned integration container failed")
 	}
-	if err := removeOwned(ctx, name, owner); err != nil {
+	tunnelName := "paperboat-pbh-" + owner + "-tunnel"
+	if _, err := docker(ctx, "create", "--name", tunnelName, "--label", ownerLabel+"="+owner, image, "--version"); err != nil {
+		t.Fatal("create owned tunnel fixture failed")
+	}
+	t.Cleanup(func() {
+		cleanup, stop := context.WithTimeout(context.Background(), 10*time.Second)
+		defer stop()
+		docker(cleanup, "rm", tunnelName)
+	})
+	if err := Teardown(ctx, dir); err != nil {
 		t.Fatal("owned teardown failed")
+	}
+	if _, exists, err := inspectContainer(ctx, tunnelName); err != nil || exists {
+		t.Fatal("owned tunnel survived teardown")
 	}
 	_, exists, err = inspectContainer(ctx, name)
 	if err != nil || exists {

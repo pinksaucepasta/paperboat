@@ -48,3 +48,12 @@ func TestPbhDisabledReporterKeepsSafeFailureAndProcessReference(t *testing.T) {
 		t.Fatal("owned command guidance lost")
 	}
 }
+
+func TestUninstallRequiresSeparateDataConfirmationBeforeMutation(t *testing.T) {
+	for _, args := range [][]string{{"uninstall", "--remove-data"}, {"uninstall", "--confirm-remove-data"}} {
+		err := run(context.Background(), args, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "requires both") {
+			t.Fatal("unconfirmed data deletion reached privileged teardown")
+		}
+	}
+}

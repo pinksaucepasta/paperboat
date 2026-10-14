@@ -80,9 +80,12 @@ Default inbound ports:
 A connected process is not readiness. Dashboard node status reports actual
 control-plane registration, health, and tunnel ingress verification. The service
 starts component runtimes after durable claim configuration and retries runtime
-crashes. `pbh status` shows service status. `pbh uninstall` stops the service and
-removes protected local state; remove the node in Network to revoke its registry
-entry. The helper executable stays available for a future install.
+crashes. `pbh status` shows service status. `pbh uninstall` stops the service,
+removes its owned containers and helper executables, and retains protected local
+identity, credentials and configuration for reinstall. To permanently delete that
+data, explicitly run `pbh uninstall --remove-data --confirm-remove-data`. Remove
+the node in Network to revoke its registry entry. Docker and unrelated containers
+are retained.
 
 Release owners set `PAPERBOAT_SELFHOST_ADDRESS_URL` to the configured HTTPS
 `/selfhost/address` endpoint before packaging. The helper binary embeds that

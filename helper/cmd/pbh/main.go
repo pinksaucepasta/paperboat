@@ -146,31 +146,7 @@ func runObserved(ctx context.Context, args []string, out io.Writer, observe func
 		cmd.Stderr = out
 		return cmd.Run()
 	case "uninstall":
-		if len(args) > 1 {
-			return commandError("unexpected arguments")
-		}
-		if os.Geteuid() != 0 {
-			return elevated(ctx, args, out)
-		}
-		cmd := exec.CommandContext(ctx, "systemctl", "stop", "paperboat-selfhost.service")
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("%w: %w", commandError("could not stop self-host service; nothing removed"), err)
-		}
-		_ = exec.CommandContext(ctx, "systemctl", "disable", "paperboat-selfhost.service").Run()
-		if err := selfhost.RemoveLocal(defaultState); err != nil {
-			return err
-		}
-		if err := os.Remove("/etc/systemd/system/paperboat-selfhost.service"); err != nil {
-			return err
-		}
-		if err := exec.CommandContext(ctx, "systemctl", "daemon-reload").Run(); err != nil {
-			return err
-		}
-		if err := os.RemoveAll(defaultBinaries); err != nil {
-			return err
-		}
-		fmt.Fprintln(out, "Local self-host installation removed. Remove the node from Dashboard → Network to revoke its registry entry.")
-		return nil
+		return uninstall(ctx, args[1:], out)
 	default:
 		return commandError("unknown command; use pbh install, pbh configure-tls, pbh selfhost code, pbh status, or pbh uninstall")
 	}
