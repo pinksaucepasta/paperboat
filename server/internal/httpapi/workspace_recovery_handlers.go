@@ -135,8 +135,8 @@ func adminRetireWorkspaceBillingOperation(service workspaceRecoveryAPI) http.Han
 			writeError(w, r, http.StatusConflict, "operation_retry_window_active", "The payment operation is still within its safe retry window. Retry the original operation.")
 		case errors.Is(err, billing.ErrBillingOperationNotUncertain):
 			writeError(w, r, http.StatusConflict, "operation_not_recoverable", "The payment operation is no longer uncertain.")
-	default:
-		writeError(w, r, http.StatusServiceUnavailable, "recovery_unavailable", "Payment recovery could not be confirmed. Retry with the same recovery key.", err)
+		default:
+			writeError(w, r, http.StatusServiceUnavailable, "recovery_unavailable", "Payment recovery could not be confirmed. Retry with the same recovery key.", err)
 		}
 	})
 }
