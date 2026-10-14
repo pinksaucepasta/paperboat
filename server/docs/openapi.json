@@ -14349,6 +14349,328 @@
           "state",
           "created_by"
         ]
+      },
+      "Me": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "email",
+          "display_name",
+          "status",
+          "role",
+          "workos_subject"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "workos_subject": {
+            "type": "string"
+          }
+        }
+      },
+      "Machine": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ownership",
+          "id",
+          "environment_id",
+          "alias",
+          "platform",
+          "architecture",
+          "workspace_root",
+          "state",
+          "seat_state",
+          "public_identity_key",
+          "can_manage",
+          "shared",
+          "online",
+          "network_approved",
+          "permissions",
+          "installation_generation",
+          "runtime_versions",
+          "capabilities",
+          "availability",
+          "runtime_diagnostics",
+          "machine_capabilities"
+        ],
+        "properties": {
+          "ownership": {
+            "type": "string"
+          },
+          "owner_account": {
+            "type": "string"
+          },
+          "owner_team_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "environment_id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "alias": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "architecture": {
+            "type": "string"
+          },
+          "workspace_root": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "seat_state": {
+            "type": "string"
+          },
+          "public_identity_key": {
+            "type": "string"
+          },
+          "assigned_ip": {
+            "type": "string"
+          },
+          "can_manage": {
+            "type": "boolean"
+          },
+          "shared": {
+            "type": "boolean"
+          },
+          "online": {
+            "type": "boolean"
+          },
+          "network_approved": {
+            "type": "boolean"
+          },
+          "permissions": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "installation_generation": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "runtime_versions": {},
+          "capabilities": {
+            "$ref": "#/components/schemas/MachineCapabilities"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/AvailabilityPolicy"
+          },
+          "runtime_diagnostics": {
+            "$ref": "#/components/schemas/UserMachineRuntimeDiagnostics"
+          },
+          "enrolled_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "machine_capabilities": {
+            "type": "object",
+            "required": [
+              "schema",
+              "desired",
+              "desired_version",
+              "applied",
+              "applied_version",
+              "status"
+            ],
+            "properties": {
+              "schema": {
+                "const": "paperboat.machine-capabilities/v1"
+              },
+              "desired": {
+                "type": "object",
+                "required": [
+                  "terminal",
+                  "managed_ssh",
+                  "file_receive",
+                  "preview_tunnel"
+                ],
+                "properties": {
+                  "terminal": {
+                    "type": "boolean"
+                  },
+                  "managed_ssh": {
+                    "type": "boolean"
+                  },
+                  "file_receive": {
+                    "type": "boolean"
+                  },
+                  "preview_tunnel": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "applied": {
+                "type": "object",
+                "required": [
+                  "terminal",
+                  "managed_ssh",
+                  "file_receive",
+                  "preview_tunnel"
+                ],
+                "properties": {
+                  "terminal": {
+                    "type": "boolean"
+                  },
+                  "managed_ssh": {
+                    "type": "boolean"
+                  },
+                  "file_receive": {
+                    "type": "boolean"
+                  },
+                  "preview_tunnel": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "desired_version": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "applied_version": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "status": {
+                "type": "string"
+              },
+              "error_code": {
+                "type": "string"
+              }
+            }
+          },
+          "installation": {
+            "type": "object",
+            "required": [
+              "control_url",
+              "helper_listen_address",
+              "artifact"
+            ],
+            "properties": {
+              "control_url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "helper_listen_address": {
+                "type": "string"
+              },
+              "artifact": {
+                "type": "object",
+                "required": [
+                  "schema",
+                  "kind",
+                  "version",
+                  "platform",
+                  "architecture",
+                  "repository_url",
+                  "target_path"
+                ],
+                "properties": {
+                  "schema": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "platform": {
+                    "type": "string"
+                  },
+                  "architecture": {
+                    "type": "string"
+                  },
+                  "repository_url": {
+                    "type": "string"
+                  },
+                  "target_path": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "MeResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Me"
+          }
+        }
+      },
+      "MachineResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Machine"
+          }
+        }
+      },
+      "MachineListResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "items",
+              "pagination"
+            ],
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Machine"
+                }
+              },
+              "pagination": {
+                "$ref": "#/components/schemas/InventoryOffsetPagination"
+              }
+            }
+          }
+        }
       }
     },
     "responses": {
@@ -23026,7 +23348,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
+                  "$ref": "#/components/schemas/MeResponse"
                 }
               }
             }
@@ -24729,7 +25051,14 @@
         ],
         "responses": {
           "200": {
-            "description": "User machine page."
+            "description": "User machine page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineListResponse"
+                }
+              }
+            }
           }
         },
         "operationId": "get_v1_user_machines",
@@ -25219,7 +25548,14 @@
         "summary": "Read machine",
         "responses": {
           "200": {
-            "description": "User machine."
+            "description": "User machine.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineResponse"
+                }
+              }
+            }
           },
           "404": {
             "$ref": "#/components/responses/Error"
@@ -25281,7 +25617,14 @@
         },
         "responses": {
           "200": {
-            "description": "Machine renamed."
+            "description": "Machine renamed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineResponse"
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/Error"

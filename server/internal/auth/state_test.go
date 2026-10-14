@@ -28,9 +28,9 @@ func TestOAuthStateExpiresServerSide(t *testing.T) {
 	}
 }
 
-func TestOAuthStateBindsSafeDashboardReturnPath(t *testing.T) {
+func TestOAuthStateBindsSafeConsoleReturnPath(t *testing.T) {
 	service := NewService(nil, nil, nil, []string{"test-session-signing-key"}, false)
-	for _, path := range []string{"/dashboard", "/dashboard/terminals/term_123/console"} {
+	for _, path := range []string{"/", "/machines", "/terminals/term_123/console", "/cli/authorize"} {
 		state, err := service.NewOAuthState(path)
 		if err != nil {
 			t.Fatal(err)

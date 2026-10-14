@@ -185,11 +185,11 @@ func (s *Service) VerifyCallback(ctx context.Context, input CallbackInput) (User
 }
 
 func (s *Service) NewOAuthState(returnTo ...string) (string, error) {
-	target := "/dashboard"
+	target := "/"
 	if len(returnTo) > 0 && returnTo[0] != "" {
 		target = returnTo[0]
 	}
-	if !validDashboardReturnTo(target) {
+	if !validConsoleReturnTo(target) {
 		return "", ErrOAuthState
 	}
 	payload := "login:" + newToken() + ":" + base64.RawURLEncoding.EncodeToString([]byte(target)) + "." + strconv.FormatInt(s.now().Add(10*time.Minute).Unix(), 10)
@@ -200,8 +200,8 @@ func (s *Service) NewOAuthState(returnTo ...string) (string, error) {
 	return signed, nil
 }
 
-// OAuthReturnTo extracts only the signed same-origin dashboard destination.
-// The browser must still use its configured dashboard origin when redirecting.
+// OAuthReturnTo extracts only the signed same-origin console destination.
+// The browser must still use its configured console origin when redirecting.
 func (s *Service) OAuthReturnTo(state string) (string, error) {
 	if !s.validSignedValue(state) {
 		return "", ErrOAuthState
@@ -212,19 +212,17 @@ func (s *Service) OAuthReturnTo(state string) (string, error) {
 	}
 	_, encoded, hasTarget := strings.Cut(strings.TrimPrefix(nonce, "login:"), ":")
 	if !hasTarget {
-		// States issued before return destinations were added have the same
-		// harmless default as a normal dashboard login.
-		return "/dashboard", nil
+		return "", ErrOAuthState
 	}
 	decoded, err := base64.RawURLEncoding.DecodeString(encoded)
-	if err != nil || !validDashboardReturnTo(string(decoded)) {
+	if err != nil || !validConsoleReturnTo(string(decoded)) {
 		return "", ErrOAuthState
 	}
 	return string(decoded), nil
 }
 
-func validDashboardReturnTo(target string) bool {
-	if target != "/dashboard" && !strings.HasPrefix(target, "/dashboard/") {
+func validConsoleReturnTo(target string) bool {
+	if !strings.HasPrefix(target, "/") {
 		return false
 	}
 	if len(target) > 1024 || strings.ContainsAny(target, "\\?#%") || strings.Contains(target, "//") || strings.Contains(target, "..") {

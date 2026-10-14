@@ -64,7 +64,7 @@ that use them; say which in Evidence.
 | S1-11 | WorkOS sign-in through the console dev origin; new account creation works. | [ ] | — | — |  |
 | S1-12 | Daily database backup runs; one restore into a scratch database tested. | [x] | — | — | deploy/backup-database.sh success/failure publication unit checks PASS (BackupPublicationTest); owner-only VPS backup completed, deploy/verify-backup.sh restored to new scratch DB and verified schema count + migration64, then removed scratch (PASS, 2026-10-14). paperboat-backup.timer enabled and active for daily runs. Dumps/secret files not printed; previous backups preserved. |
 | S1-13 | Server `/healthz` and Sentry error reporting (if configured in the backup) work. | [ ] | — | — |  |
-| S1-14 | Console ↔ server contract fixes from console/NOTES.md that every feature depends on: unknown `/v1/` paths return 404 (not 401); OpenAPI response schemas for `/v1/me` and machine endpoints; sign-in return path. | [ ] | — | — |  |
+| S1-14 | Console ↔ server contract fixes from console/NOTES.md that every feature depends on: unknown `/v1/` paths return 404 (not 401); OpenAPI response schemas for `/v1/me` and machine endpoints; sign-in return path. | [x] | — | — | TestUnknownEndpointIsStructuredError PASS (404 not_found); TestOpenAPIConsoleIdentityAndMachineResponses enforces typed /v1/me and GET/PATCH machine response schemas; TestOAuthStateBindsSafeConsoleReturnPath accepts current console paths and rejects external/traversal/tampered destinations. New schema/path checks fail before and PASS after; targeted race and make gate PASS. Producer pushed before frontend regeneration; no WorkOS settings changed. |
 
 ---
 
