@@ -516,3 +516,41 @@ func TestRuntimeStackRetainsSafeSourceFilename(t *testing.T) {
 		t.Fatal("real SDK runtime stack lost source filename")
 	}
 }
+
+type cancelOnSaveStore struct {
+	memoryStore
+	cancel context.CancelFunc
+}
+
+func (s *cancelOnSaveStore) Save(ctx context.Context, record Record) error {
+	s.cancel()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.memoryStore.Save(ctx, record)
+}
+
+func TestAcceptedReportSurvivesCancellationDuringSave(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	store := &cancelOnSaveStore{cancel: cancel}
+	reporter, err := New(store, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reporter.Close()
+	fault := reporter.ObserveFailure(context.Background(), "paperboat-server", "worker_edge_dns", "reconciliation", "edge_dns_reconcile_failed", syscall.ECONNRESET)
+	done := make(chan error, 1)
+	go func() { done <- reporter.Run(ctx) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("reporter failed to stop after accepted save")
+	}
+	if len(store.records) != 1 || store.records[0].Reference != fault.SupportReference || store.records[0].Cause != "connection_reset" {
+		t.Fatalf("accepted observation lost during cancellation: saved=%d", len(store.records))
+	}
+}

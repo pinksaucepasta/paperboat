@@ -549,23 +549,12 @@ func (s *Service) Run(ctx context.Context) error {
 	cleanupReference := NewReference()
 	cleanupFailed := false
 	for {
+		if ctx.Err() != nil {
+			return s.drainShutdown()
+		}
 		select {
 		case <-ctx.Done():
-			s.snapshotMetrics()
-			s.stopAdmission()
-			shutdown, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			defer s.close(shutdown)
-			for shutdown.Err() == nil {
-				select {
-				case value := <-s.queue:
-					s.process(shutdown, value)
-				default:
-					return nil
-				}
-			}
-			s.dropped.Add(uint64(len(s.queue)))
-			return nil
+			return s.drainShutdown()
 		case <-snapshotTicker.C:
 			s.snapshotMetrics()
 		case <-ticker.C:
@@ -574,9 +563,28 @@ func (s *Service) Run(ctx context.Context) error {
 			cancel()
 			s.observeCleanup(ctx, cleanupReference, &cleanupFailed, err)
 		case value := <-s.queue:
-			s.process(ctx, value)
+			// Once dequeued, persistence owns its bounded lifetime even if Run stops.
+			s.process(context.WithoutCancel(ctx), value)
 		}
 	}
+}
+
+func (s *Service) drainShutdown() error {
+	s.snapshotMetrics()
+	s.stopAdmission()
+	shutdown, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	defer s.close(shutdown)
+	for shutdown.Err() == nil {
+		select {
+		case value := <-s.queue:
+			s.process(shutdown, value)
+		default:
+			return nil
+		}
+	}
+	s.dropped.Add(uint64(len(s.queue)))
+	return nil
 }
 
 func (s *Service) observeCleanup(ctx context.Context, reference string, failed *bool, err error) {
