@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -121,8 +120,7 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 	if result.Message == "" {
 		result.Message = "The operation failed."
 	}
-	var updaterFailure *updated.ControlError
-	if errors.As(err, &updaterFailure) {
+	if updaterFailure := updaterControlFailure(err); updaterFailure != nil {
 		result = classifyUpdaterControlJSONError(result, updaterFailure)
 	}
 	owner := soleCommandOwner(err)
@@ -330,6 +328,37 @@ func safeTunnelCreateRecoveryCommand(tunnelID, recovery string) string {
 	default:
 		return ""
 	}
+}
+
+// Match updater diagnostics without following an unbounded or cyclic cause tree.
+func updaterControlFailure(err error) (failure *updated.ControlError) {
+	defer func() {
+		if recover() != nil {
+			failure = nil
+		}
+	}()
+	pending := []error{err}
+	for visited := 0; len(pending) > 0 && visited < 32; visited++ {
+		current := pending[0]
+		pending = pending[1:]
+		if current == nil {
+			continue
+		}
+		if control, ok := current.(*updated.ControlError); ok {
+			return control
+		}
+		switch wrapped := current.(type) {
+		case interface{ Unwrap() []error }:
+			children := wrapped.Unwrap()
+			if len(pending)+len(children) > 32-visited {
+				return nil
+			}
+			pending = append(slices.Clone(children), pending...)
+		case interface{ Unwrap() error }:
+			pending = append([]error{wrapped.Unwrap()}, pending...)
+		}
+	}
+	return nil
 }
 
 func classifyUpdaterControlJSONError(result cliJSONError, failure *updated.ControlError) cliJSONError {

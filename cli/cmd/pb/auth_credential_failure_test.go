@@ -32,6 +32,7 @@ func TestAccountCredentialFailureKeepsPurposeAndIndependentCauses(t *testing.T) 
 		{"missing profile", &sessionauth.CredentialFailure{Cause: config.ErrNoCredentials}, commandRejected, true},
 		{"missing account token and IO", &sessionauth.CredentialFailure{Cause: errors.Join(config.ErrSecretNotFound, syscall.EIO)}, commandUnexpected, false},
 		{"cycle", &sessionauth.CredentialFailure{Cause: cycle}, commandUnexpected, false},
+		{"joined cycle", errors.Join(&sessionauth.CredentialFailure{Cause: cycle}, syscall.EIO), commandUnexpected, false},
 		{"missing cause", &sessionauth.CredentialFailure{}, commandUnexpected, false},
 		{"nil owner", nilFailure, commandUnexpected, false},
 		{"private pairing token", config.ErrSecretNotFound, commandRejected, false},
