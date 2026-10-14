@@ -25,6 +25,7 @@ import (
 	"unsafe"
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/binarytarget"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
@@ -221,9 +222,13 @@ func installStandaloneBinary(ctx context.Context, source, version string, fresh 
 	if !isAdministratorForStandaloneInstall() || ctx == nil || !safeAbsolute(source) || !standaloneVersionPattern.MatchString(version) {
 		return ErrInvalidRequest
 	}
+	repository, err := buildinfo.ReleaseRepository()
+	if err != nil {
+		return err
+	}
 	artifact := bootstrap.ArtifactTarget{
 		Schema: bootstrap.ArtifactTargetSchemaV1, Kind: bootstrap.ArtifactKindPB, Version: version,
-		Platform: "windows", Architecture: runtime.GOARCH, RepositoryURL: "https://get.pprbt.dev/tuf",
+		Platform: "windows", Architecture: runtime.GOARCH, RepositoryURL: repository,
 		TargetPath: releaseindex.AssetName("windows", runtime.GOARCH),
 	}
 	var verifiedTarget releaseindex.Target
@@ -2697,7 +2702,7 @@ func Validate(request Request, _ int) error {
 	if listenErr != nil || listenPort == "" || net.ParseIP(listenHost) == nil || !net.ParseIP(listenHost).IsLoopback() {
 		return hostInstallFailure("helper listen address", ErrInvalidRequest)
 	}
-	if err := bootstrap.VerifyArtifactTarget(request.Artifact); err != nil || request.Artifact.Platform != "windows" {
+	if err := bootstrap.VerifyArtifactTarget(request.Artifact); request.Source.Distribution == installsource.Official && (err != nil || request.Artifact.Platform != "windows") {
 		return hostInstallFailure("artifact descriptor", ErrInvalidRequest, err)
 	}
 	if err := request.Source.Validate(); err != nil || request.Source.Platform != "windows" || request.Source.Architecture != runtime.GOARCH {
@@ -2750,7 +2755,7 @@ func validWindowsConfig(config WindowsRuntimeConfig) bool {
 		token, tokenErr := WindowsInstanceTokenPath(config.Instance)
 		tokenValid = err == nil && tokenErr == nil && want == config.Instance && config.TokenFile == token
 	}
-	bound := config.MachineID != "" && !config.EnrollmentPending && bootstrap.VerifyArtifactTarget(config.Artifact) == nil && config.Artifact.Platform == "windows" && config.Artifact.Architecture == runtime.GOARCH
+	bound := config.MachineID != "" && !config.EnrollmentPending && (config.Source.Distribution == installsource.Custom || bootstrap.VerifyArtifactTarget(config.Artifact) == nil && config.Artifact.Platform == "windows" && config.Artifact.Architecture == runtime.GOARCH)
 	unbound := config.MachineID == "" && config.EnrollmentPending
 	rollbackValid := (config.RollbackSource == nil && !config.RollbackSigned) || config.RollbackSource != nil && config.RollbackSource.Validate() == nil && config.RollbackSource.Platform == "windows" && config.RollbackSource.Architecture == runtime.GOARCH && (!config.RollbackSigned || config.RollbackSource.Distribution == installsource.Official)
 	return config.Schema == windowsConfigSchema && validSID(config.OwnerSID) && tokenValid && config.User != "" && safeAbsolute(config.StateRoot) && safeAbsolute(config.Workspace) && (bound || unbound) && config.Source.Validate() == nil && config.Source.Platform == "windows" && config.Source.Architecture == runtime.GOARCH && rollbackValid && listenErr == nil && port != "" && net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback()
@@ -3433,7 +3438,8 @@ func repairWindowsRuntimeBinary(ctx context.Context, config WindowsRuntimeConfig
 		return hostInstallFailure("custom Paperboat runtime has no verified local recovery slot", ErrInvalidRequest, currentErr, rollbackErr, restoreCurrent())
 	}
 	repairState := filepath.Join(layout.UpdateStateRoot, "repair-tuf")
-	artifactPath, err := bootstrap.FetchVerifiedArtifact(ctx, config.Artifact, repairState, nil)
+	repairTarget := InstallationTarget(config.Source)
+	artifactPath, err := bootstrap.FetchVerifiedArtifact(ctx, repairTarget, repairState, nil)
 	if err != nil {
 		return hostInstallFailure("Windows runtime recovery failed", currentErr, rollbackErr, err, restoreCurrent())
 	}

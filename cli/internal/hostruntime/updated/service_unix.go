@@ -96,7 +96,7 @@ type Service struct {
 }
 
 func New(config Config) (*Service, error) {
-	if !filepath.IsAbs(config.StateRoot) || !filepath.IsAbs(config.ControlSocket) || !validUnixWorkerIdentity(config.WorkerUID, config.WorkerGID) || len(config.Token) != 32 || config.SocketPath == "" || config.RepositoryURL == "" || config.MachineID == "" || config.Health == nil || config.ActivationController == nil || config.Participants == nil {
+	if !filepath.IsAbs(config.StateRoot) || !filepath.IsAbs(config.ControlSocket) || !validUnixWorkerIdentity(config.WorkerUID, config.WorkerGID) || len(config.Token) != 32 || config.SocketPath == "" || config.RepositoryURL == "" && (config.Active.LocalSource == nil || config.Active.LocalSource.Distribution != installsource.Custom) || config.MachineID == "" || config.Health == nil || config.ActivationController == nil || config.Participants == nil {
 		return nil, ErrInvalidConfig
 	}
 	if config.ApplyPrepared == nil || config.LoadInstalledSource == nil {

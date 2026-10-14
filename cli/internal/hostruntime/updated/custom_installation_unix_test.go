@@ -44,7 +44,7 @@ func TestCustomInstallationPreservesScheduleWithoutOfficialUpdateOperations(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := New(nativeFixtureConfig(Config{StateRoot: root, Binary: binary, BinaryRollback: filepath.Join(root, "previous"), BinaryStaged: filepath.Join(root, "next"), Active: active, WorkerUID: 0, WorkerGID: 0, SocketPath: filepath.Join(root, "hostd.sock"), Token: make([]byte, 32), RepositoryURL: "https://127.0.0.1:1/tuf", MachineID: "machine_test", Health: HTTPHealth{Endpoint: "http://127.0.0.1:1/healthz"}, ActivationGate: &gateFixture{}, ControlSocket: filepath.Join(root, "control.sock"), ActivationController: &controllerFixture{}, Participants: &participantFixture{}}))
+	s, err := New(nativeFixtureConfig(Config{StateRoot: root, Binary: binary, BinaryRollback: filepath.Join(root, "previous"), BinaryStaged: filepath.Join(root, "next"), Active: active, WorkerUID: 0, WorkerGID: 0, SocketPath: filepath.Join(root, "hostd.sock"), Token: make([]byte, 32), RepositoryURL: "", MachineID: "machine_test", Health: HTTPHealth{Endpoint: "http://127.0.0.1:1/healthz"}, ActivationGate: &gateFixture{}, ControlSocket: filepath.Join(root, "control.sock"), ActivationController: &controllerFixture{}, Participants: &participantFixture{}}))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1491,7 +1491,7 @@ func Validate(request Request, sudoUID int) error {
 	if group.Gid != strconv.Itoa(request.GID) {
 		return hostInstallFailure("user group", ErrInvalidRequest)
 	}
-	if err := bootstrap.VerifyArtifactTarget(request.Artifact); err != nil || request.Artifact.Platform != request.Platform {
+	if err := bootstrap.VerifyArtifactTarget(request.Artifact); request.Source.Distribution == installsource.Official && (err != nil || request.Artifact.Platform != request.Platform) {
 		return hostInstallFailure("TUF target descriptor", ErrInvalidRequest, err)
 	}
 	if err := verifyArtifact(request.Executable, request.UID, request.Platform); err != nil {

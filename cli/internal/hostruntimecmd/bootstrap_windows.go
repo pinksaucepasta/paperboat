@@ -303,7 +303,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		return err
 	}
 
-	request := hostinstall.Request{Schema: hostinstall.SchemaV1, Platform: runtime.GOOS, User: windowsAccountName(account.Username), Group: "Paperboat", OwnerSID: sid, Executable: artifactPath, Artifact: *material.Artifact, Source: sourceIdentity, Home: home, Path: os.Getenv("PATH"), StateRoot: *stateRoot, WorkspaceRoot: home, ControlURL: material.ControlURL, UserMachineID: material.UserMachineID, Shell: filepath.Join(os.Getenv("WINDIR"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), HelperListenAddress: material.HelperListenAddress}
+	request := hostinstall.Request{Schema: hostinstall.SchemaV1, Platform: runtime.GOOS, User: windowsAccountName(account.Username), Group: "Paperboat", OwnerSID: sid, Executable: artifactPath, Artifact: hostinstall.InstallationTarget(sourceIdentity), Source: sourceIdentity, Home: home, Path: os.Getenv("PATH"), StateRoot: *stateRoot, WorkspaceRoot: home, ControlURL: material.ControlURL, UserMachineID: material.UserMachineID, Shell: filepath.Join(os.Getenv("WINDIR"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), HelperListenAddress: material.HelperListenAddress}
 	if err := hostinstall.Validate(request, 0); err != nil {
 		return fmt.Errorf("validate Windows host installation request: %w", err)
 	}

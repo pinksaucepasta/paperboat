@@ -19,7 +19,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -190,7 +189,7 @@ func TestFailedUnifiedSetupPreservesMachineControlCapabilitiesAndRecovery(t *tes
 					_ = json.NewEncoder(w).Encode(map[string]any{"data": api.UserMachine{
 						ID: "machine_preserved", EnvironmentID: "machine_preserved", Alias: "studio", PublicIdentityKey: publicKey, InstallationGeneration: 5,
 						MachineCapabilities: api.MachineCapabilityPolicy{Desired: desired, DesiredVersion: 3},
-						Installation:        &api.ClientInstallation{Artifact: api.MachineArtifact{Schema: bootstrap.ArtifactTargetSchemaV1, Kind: bootstrap.ArtifactKindPB, Version: "test", Platform: runtime.GOOS, Architecture: runtime.GOARCH, RepositoryURL: "https://updates.example.test", TargetPath: "pb-linux-amd64"}},
+						Installation:        &api.ClientInstallation{ControlURL: "https://control.example.test", HelperListenAddress: "127.0.0.1:38080"},
 					}})
 				case r.Method == http.MethodPost && r.URL.Path == "/v1/machines/machine_preserved/control-credentials":
 					controlCalls.Add(1)

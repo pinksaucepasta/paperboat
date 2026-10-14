@@ -57,20 +57,19 @@ type Pairing struct {
 }
 
 type Material struct {
-	Schema                 string          `json:"schema"`
-	UserMachineID          string          `json:"user_machine_id"`
-	PairingID              string          `json:"pairing_id"`
-	EnvironmentID          string          `json:"environment_id"`
-	ControlURL             string          `json:"control_url"`
-	HelperID               string          `json:"helper_id"`
-	EnrollmentID           string          `json:"enrollment_id"`
-	EnrollmentCredential   string          `json:"enrollment_credential"`
-	ReuseIdentity          bool            `json:"reuse_identity,omitempty"`
-	ExpiresAt              time.Time       `json:"expires_at"`
-	Artifact               *ArtifactTarget `json:"artifact,omitempty"`
-	HelperListenAddress    string          `json:"helper_listen_address"`
-	InstallationGeneration int64           `json:"installation_generation"`
-	ClientSession          *ClientSession  `json:"client_session,omitempty"`
+	Schema                 string         `json:"schema"`
+	UserMachineID          string         `json:"user_machine_id"`
+	PairingID              string         `json:"pairing_id"`
+	EnvironmentID          string         `json:"environment_id"`
+	ControlURL             string         `json:"control_url"`
+	HelperID               string         `json:"helper_id"`
+	EnrollmentID           string         `json:"enrollment_id"`
+	EnrollmentCredential   string         `json:"enrollment_credential"`
+	ReuseIdentity          bool           `json:"reuse_identity,omitempty"`
+	ExpiresAt              time.Time      `json:"expires_at"`
+	HelperListenAddress    string         `json:"helper_listen_address"`
+	InstallationGeneration int64          `json:"installation_generation"`
+	ClientSession          *ClientSession `json:"client_session,omitempty"`
 }
 
 type ClientSession struct {
@@ -188,15 +187,11 @@ func validateMaterialFreshness(material Material, requireFresh bool) error {
 		{material.InstallationGeneration < 1, "installation generation"},
 		{!validClientSession, "client session"},
 		{requireFresh && !time.Now().UTC().Before(material.ExpiresAt), "expiration"},
-		{material.Artifact == nil, "artifact"},
 	}
 	for _, check := range checks {
 		if check.invalid {
 			return fmt.Errorf("%w: %s", ErrInvalid, check.reason)
 		}
-	}
-	if err := VerifyArtifactTarget(*material.Artifact); err != nil {
-		return fmt.Errorf("%w: artifact target: %w", ErrInvalid, err)
 	}
 	return nil
 }

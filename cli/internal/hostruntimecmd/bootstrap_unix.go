@@ -233,7 +233,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	}
 	installRequest := hostinstall.Request{
 		Schema: hostinstall.SchemaV1, Platform: runtime.GOOS, User: account.Username, UID: uid, Group: group.Name, GID: gid,
-		Executable: executable, Artifact: *material.Artifact, Source: source,
+		Executable: executable, Artifact: hostinstall.InstallationTarget(source), Source: source,
 		Home: home, Path: servicePath, StateRoot: *stateRoot, WorkspaceRoot: workspace, ControlURL: material.ControlURL,
 		UserMachineID: material.UserMachineID, Shell: resolvedShell, HelperListenAddress: material.HelperListenAddress,
 		InstallationGeneration: material.InstallationGeneration,

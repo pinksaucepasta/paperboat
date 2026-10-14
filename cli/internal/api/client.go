@@ -503,20 +503,9 @@ type ManagedSSHClientKey struct {
 	ReconciliationVersion uint64 `json:"reconciliation_version"`
 }
 
-type MachineArtifact struct {
-	Schema        string `json:"schema"`
-	Kind          string `json:"kind"`
-	Version       string `json:"version"`
-	Platform      string `json:"platform"`
-	Architecture  string `json:"architecture"`
-	RepositoryURL string `json:"repository_url"`
-	TargetPath    string `json:"target_path"`
-}
-
 type ClientInstallation struct {
-	ControlURL          string          `json:"control_url"`
-	HelperListenAddress string          `json:"helper_listen_address"`
-	Artifact            MachineArtifact `json:"artifact"`
+	ControlURL          string `json:"control_url"`
+	HelperListenAddress string `json:"helper_listen_address"`
 }
 
 type MachineCapability struct {
@@ -579,10 +568,9 @@ type AuthenticatedMachineInstallationInput struct {
 	PublicIdentityKey      string `json:"public_identity_key"`
 	InstallationGeneration int64  `json:"installation_generation"`
 
-	Artifact                MachineArtifact `json:"artifact"`
-	SSHUser                 string          `json:"ssh_user,omitempty"`
-	SSHPort                 uint16          `json:"ssh_port,omitempty"`
-	CanReuseRuntimeIdentity bool            `json:"can_reuse_runtime_identity,omitempty"`
+	SSHUser                 string `json:"ssh_user,omitempty"`
+	SSHPort                 uint16 `json:"ssh_port,omitempty"`
+	CanReuseRuntimeIdentity bool   `json:"can_reuse_runtime_identity,omitempty"`
 }
 
 type AuthenticatedMachineInstallation struct {

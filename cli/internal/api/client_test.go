@@ -101,12 +101,12 @@ func TestPrepareAuthenticatedMachineInstallationBindsMachineOperationAndGenerati
 			Verifier                string          `json:"verifier"`
 			PublicIdentityKey       string          `json:"public_identity_key"`
 			InstallationGeneration  int64           `json:"installation_generation"`
-			Artifact                MachineArtifact `json:"artifact"`
+			Artifact                json.RawMessage `json:"artifact"`
 			SSHUser                 string          `json:"ssh_user"`
 			SSHPort                 uint16          `json:"ssh_port"`
 			CanReuseRuntimeIdentity bool            `json:"can_reuse_runtime_identity"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input.InstallationGeneration != 7 || input.PublicIdentityKey != "public-key" || input.Verifier != "verifier-012345678901234567890123" || input.Artifact.Version != "2026.08.24.1" || input.Artifact.TargetPath != "pb-windows-amd64" || input.SSHUser != "pujan" || input.SSHPort != 22 || !input.CanReuseRuntimeIdentity {
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input.InstallationGeneration != 7 || input.PublicIdentityKey != "public-key" || input.Verifier != "verifier-012345678901234567890123" || input.Artifact != nil || input.SSHUser != "pujan" || input.SSHPort != 22 || !input.CanReuseRuntimeIdentity {
 			t.Fatalf("input=%+v err=%v", input, err)
 		}
 		writeData(w, http.StatusCreated, AuthenticatedMachineInstallation{ExpiresAt: expiresAt})
@@ -115,7 +115,6 @@ func TestPrepareAuthenticatedMachineInstallationBindsMachineOperationAndGenerati
 	result, err := New(server.URL, config.Credential{AccessToken: "token"}, server.Client()).PrepareAuthenticatedMachineInstallation(context.Background(), "mch_1", "machine-installation-operation-1", AuthenticatedMachineInstallationInput{
 		Verifier: "verifier-012345678901234567890123", PublicIdentityKey: "public-key",
 		InstallationGeneration: 7, SSHUser: "pujan", SSHPort: 22, CanReuseRuntimeIdentity: true,
-		Artifact: MachineArtifact{Schema: "paperboat.tuf-target/v1", Kind: "pb", Version: "2026.08.24.1", Platform: "windows", Architecture: "amd64", RepositoryURL: "https://updates.example.test/paperboat", TargetPath: "pb-windows-amd64"},
 	})
 	if err != nil || !result.ExpiresAt.Equal(expiresAt) {
 		t.Fatalf("result=%+v err=%v", result, err)

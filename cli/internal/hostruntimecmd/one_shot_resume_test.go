@@ -8,12 +8,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseindex"
 )
 
 func TestOneShotResumeRecoversAmbiguousPairingCommitWithoutToken(t *testing.T) {
@@ -410,7 +408,7 @@ func testClientBootstrapMaterial(server string, expiresAt time.Time) bootstrap.M
 	return bootstrap.Material{
 		Schema: "paperboat.machine-installation/v1", UserMachineID: "mch_client", PairingID: "ume_client", EnvironmentID: "env_client",
 		ControlURL: server, HelperID: "helper_client", EnrollmentID: "henr_client", EnrollmentCredential: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP",
-		ExpiresAt: expiresAt, Artifact: &bootstrap.ArtifactTarget{Schema: bootstrap.ArtifactTargetSchemaV1, Kind: bootstrap.ArtifactKindPB, Version: "2026.08.24.1", Platform: runtime.GOOS, Architecture: runtime.GOARCH, RepositoryURL: server, TargetPath: releaseindex.AssetName(runtime.GOOS, runtime.GOARCH)},
+		ExpiresAt:           expiresAt,
 		HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 1, ClientSession: &bootstrap.ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cli_client", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600, Scope: "machines:read machines:connect"},
 	}
 }

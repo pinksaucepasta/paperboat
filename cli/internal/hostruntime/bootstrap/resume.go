@@ -113,12 +113,6 @@ type ResumeRecord struct {
 	SetupOperationID      string `json:"setup_operation_id,omitempty"`
 	ExpectedUserMachineID string `json:"expected_user_machine_id,omitempty"`
 	ExpectedGeneration    int64  `json:"expected_installation_generation,omitempty"`
-	// RequestedArtifact binds an authenticated setup operation to the signed
-	// release target that the server was asked to issue. Material.Artifact is
-	// retained as the authoritative binding after issuance; this field closes
-	// the pre-material window where reusing an operation for a different target
-	// would otherwise create an idempotency conflict or cross-release replay.
-	RequestedArtifact *ArtifactTarget `json:"requested_artifact,omitempty"`
 }
 
 func ResumePath(stateRoot string) string {
@@ -213,14 +207,11 @@ func ResumeMatchesEnrollmentToken(stateRoot, enrollmentToken string) (bool, erro
 // journal for an authenticated Host setup. It replaces an older journal only
 // when every immutable machine binding matches and the journal is expired with
 // no material or locally committed installation progress.
-func PrepareAuthenticatedSetupResume(stateRoot, serverURL, publicIdentityKey, alias, machineID string, installationGeneration int64, artifact ArtifactTarget, now time.Time) (ResumeRecord, error) {
+func PrepareAuthenticatedSetupResume(stateRoot, serverURL, publicIdentityKey, alias, machineID string, installationGeneration int64, now time.Time) (ResumeRecord, error) {
 	serverURL = strings.TrimRight(strings.TrimSpace(serverURL), "/")
 	publicIdentityKey, alias, machineID = strings.TrimSpace(publicIdentityKey), strings.TrimSpace(alias), strings.TrimSpace(machineID)
 	if !filepath.IsAbs(stateRoot) || !validResumeServer(serverURL) || publicIdentityKey == "" || alias == "" || machineID == "" || installationGeneration < 1 || now.IsZero() {
 		return ResumeRecord{}, ErrResumeBinding
-	}
-	if err := VerifyArtifactTarget(artifact); err != nil {
-		return ResumeRecord{}, resumeBindingError(err)
 	}
 	existing, err := loadResumeDocument(stateRoot)
 	if err == nil {
@@ -235,27 +226,11 @@ func PrepareAuthenticatedSetupResume(stateRoot, serverURL, publicIdentityKey, al
 				return ResumeRecord{}, ErrResumeBinding
 			}
 			progress := existing.RuntimeEnrolled || existing.ClientInstalled
-			if !authenticatedSetupArtifactMatches(existing, artifact) {
-				// A target change must never replay the old verifier and
-				// idempotency operation. Only an expired journal with no local
-				// installation progress may be replaced with a new operation.
-				if progress || !expired {
-					return ResumeRecord{}, ErrResumeBinding
-				}
-			} else {
-				if !expired {
-					return existing, nil
-				}
-				// A server-issued material response is durable recovery
-				// authority. Reuse the exact operation only when the signed
-				// artifact is unchanged and no local installation checkpoint
-				// has been committed.
-				if existing.Material != nil && !progress {
-					return existing, nil
-				}
-				if progress {
-					return ResumeRecord{}, ErrResumeBinding
-				}
+			if !expired || existing.Material != nil && !progress {
+				return existing, nil
+			}
+			if progress {
+				return ResumeRecord{}, ErrResumeBinding
 			}
 		} else if !exactBase || !existing.PairingStarted || !expired || existing.Material != nil || existing.RuntimeEnrolled || existing.ClientInstalled {
 			return ResumeRecord{}, ErrResumeBinding
@@ -279,24 +254,10 @@ func PrepareAuthenticatedSetupResume(stateRoot, serverURL, publicIdentityKey, al
 	record.SetupOperationID = "operation_" + operation.String()
 	record.ExpectedUserMachineID = machineID
 	record.ExpectedGeneration = installationGeneration
-	record.RequestedArtifact = cloneArtifactTarget(artifact)
 	if err := SaveResume(stateRoot, record); err != nil {
 		return ResumeRecord{}, err
 	}
 	return record, nil
-}
-
-func authenticatedSetupArtifactMatches(record ResumeRecord, requested ArtifactTarget) bool {
-	bound := record.RequestedArtifact
-	if bound == nil && record.Material != nil {
-		bound = record.Material.Artifact
-	}
-	return bound != nil && *bound == requested
-}
-
-func cloneArtifactTarget(target ArtifactTarget) *ArtifactTarget {
-	copy := target
-	return &copy
 }
 
 func loadResumeDocument(stateRoot string) (ResumeRecord, error) {
@@ -351,7 +312,7 @@ func ClearResume(stateRoot string) error {
 
 // ValidateRecoveredMaterial binds renewed/replayed credentials to the exact
 // machine installation already stored in the protected journal. Credentials
-// and release artifacts may rotate, but machine ownership and installation
+// may rotate, but machine ownership and installation
 // generation must not change under the same verifier.
 func ValidateRecoveredMaterial(previous, recovered Material, runtimeEnrolled bool) error {
 	if previous.UserMachineID != recovered.UserMachineID ||
@@ -366,8 +327,7 @@ func ValidateRecoveredMaterial(previous, recovered Material, runtimeEnrolled boo
 }
 
 // ValidateAuthenticatedSetupMaterial binds authenticated machine material to the
-// exact setup transition and, on recovery, to the artifact that was verified
-// before the one-shot installation authority was issued.
+// exact machine and generation before one-shot installation authority was issued.
 func ValidateAuthenticatedSetupMaterial(record ResumeRecord, material Material) error {
 	if !record.AuthenticatedSetup || material.UserMachineID != record.ExpectedUserMachineID || material.InstallationGeneration != record.ExpectedGeneration {
 		return ErrResumeBinding
@@ -377,9 +337,6 @@ func ValidateAuthenticatedSetupMaterial(record ResumeRecord, material Material) 
 	}
 	if err := ValidateRecoveredMaterial(*record.Material, material, record.RuntimeEnrolled); err != nil {
 		return err
-	}
-	if record.Material.Artifact == nil || material.Artifact == nil || *record.Material.Artifact != *material.Artifact {
-		return fmt.Errorf("%w: authenticated Host recovery changed the verified artifact", ErrResumeBinding)
 	}
 	return nil
 }
@@ -424,11 +381,6 @@ func validateResumeRecord(record ResumeRecord, loaded bool) error {
 	if record.AuthenticatedSetup {
 		if record.requiresEnrollmentToken() || len(record.SetupOperationID) < 8 || len(record.SetupOperationID) > 128 || record.ExpectedUserMachineID == "" || record.ExpectedGeneration < 1 {
 			return ErrResumeBinding
-		}
-		if record.RequestedArtifact != nil {
-			if err := VerifyArtifactTarget(*record.RequestedArtifact); err != nil {
-				return resumeBindingError(err)
-			}
 		}
 	} else if record.SetupOperationID != "" || record.ExpectedUserMachineID != "" || record.ExpectedGeneration != 0 {
 		return ErrResumeBinding

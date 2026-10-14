@@ -2461,12 +2461,6 @@ func setupCommand() *cobra.Command {
 			if machine.Installation == nil {
 				return setupFailure(errors.New("server did not return installation material"))
 			}
-			artifact := bootstrap.ArtifactTarget{
-				Schema: machine.Installation.Artifact.Schema, Kind: machine.Installation.Artifact.Kind,
-				Version: machine.Installation.Artifact.Version, Platform: machine.Installation.Artifact.Platform,
-				Architecture: machine.Installation.Artifact.Architecture, RepositoryURL: machine.Installation.Artifact.RepositoryURL,
-				TargetPath: machine.Installation.Artifact.TargetPath,
-			}
 			if err := verifySetupInstallSource(); err != nil {
 				return setupFailure(fmt.Errorf("verify supplied installation executable: %w", err))
 			}
@@ -2477,7 +2471,7 @@ func setupCommand() *cobra.Command {
 			if err := identityStore.SaveRegistration(registration); err != nil {
 				return setupFailure(fmt.Errorf("save registered SSH target: %w", err))
 			}
-			resume, err := bootstrap.PrepareAuthenticatedSetupResume(stateRoot, d.cfg.ServerURL, publicIdentityKey, strings.TrimSpace(name), machine.ID, machine.InstallationGeneration, artifact, time.Now().UTC())
+			resume, err := bootstrap.PrepareAuthenticatedSetupResume(stateRoot, d.cfg.ServerURL, publicIdentityKey, strings.TrimSpace(name), machine.ID, machine.InstallationGeneration, time.Now().UTC())
 			if err != nil {
 				if errors.Is(err, bootstrap.ErrResumeBinding) {
 					return fmt.Errorf("machine setup cannot replace the protected unfinished installation: %w; run `pb bootstrap --state-root %s` to recover that installation before starting setup again", err, stateRoot)
@@ -2487,8 +2481,8 @@ func setupCommand() *cobra.Command {
 			reusableIdentity, reusableIdentityErr := enrollment.LoadRuntimeIdentityForRenewal(stateRoot, time.Now().UTC())
 			prepared, err := client.PrepareAuthenticatedMachineInstallation(command.Context(), machine.ID, resume.SetupOperationID, api.AuthenticatedMachineInstallationInput{
 				Verifier: resume.Verifier, PublicIdentityKey: publicIdentityKey,
-				InstallationGeneration: machine.InstallationGeneration, Artifact: machine.Installation.Artifact,
-				SSHUser: account.Username, SSHPort: uint16(sshPortValue),
+				InstallationGeneration: machine.InstallationGeneration,
+				SSHUser:                account.Username, SSHPort: uint16(sshPortValue),
 				CanReuseRuntimeIdentity: reusableIdentityErr == nil && reusableIdentity.MachineID == machine.ID && reusableIdentity.EnvironmentID == machine.ID,
 			})
 			if err != nil {

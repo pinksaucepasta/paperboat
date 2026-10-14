@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
@@ -37,7 +38,12 @@ func ResolveUpdateBundle(ctx context.Context, request Request, updateState strin
 		return Request{}, noop, err
 	}
 	cleanup := func() { os.RemoveAll(staging) }
-	verified, err := bootstrap.ImportUpdateBundle(ctx, "https://get.pprbt.dev/tuf", filepath.Join(updateState, "tuf", "index"), request.UpdateBundle, staging, time.Now())
+	repository, err := buildinfo.ReleaseRepository()
+	if err != nil {
+		cleanup()
+		return Request{}, noop, err
+	}
+	verified, err := bootstrap.ImportUpdateBundle(ctx, repository, filepath.Join(updateState, "tuf", "index"), request.UpdateBundle, staging, time.Now())
 	if err != nil {
 		cleanup()
 		if bundleProofFailure(err) {
@@ -75,7 +81,7 @@ func ResolveUpdateBundle(ctx context.Context, request Request, updateState strin
 	source.Distribution = installsource.Official
 	source.AutomaticUpdates = true
 	request.Executable, request.Source = executable, source
-	request.Artifact = bootstrap.ArtifactTarget{Schema: bootstrap.ArtifactTargetSchemaV1, Kind: bootstrap.ArtifactKindPB, Version: source.Version, Platform: source.Platform, Architecture: source.Architecture, RepositoryURL: "https://get.pprbt.dev/tuf", TargetPath: verified.Index.Targets[0].TargetPath}
+	request.Artifact = bootstrap.ArtifactTarget{Schema: bootstrap.ArtifactTargetSchemaV1, Kind: bootstrap.ArtifactKindPB, Version: source.Version, Platform: source.Platform, Architecture: source.Architecture, RepositoryURL: repository, TargetPath: verified.Index.Targets[0].TargetPath}
 	request.UpdateBundle = ""
 	return request, cleanup, nil
 }

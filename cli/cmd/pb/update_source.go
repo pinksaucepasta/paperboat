@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
@@ -103,7 +104,11 @@ func updateBundleCommand() *cobra.Command {
 			return err
 		}
 		defer os.RemoveAll(state)
-		index, err := bootstrap.ExportUpdateBundle(ctx, "https://get.pprbt.dev/tuf", state, output, nil, time.Now())
+		repository, err := buildinfo.ReleaseRepository()
+		if err != nil {
+			return err
+		}
+		index, err := bootstrap.ExportUpdateBundle(ctx, repository, state, output, nil, time.Now())
 		if err != nil {
 			return err
 		}
@@ -123,7 +128,11 @@ func actionForceOfficial(command *cobra.Command, ctx context.Context) error {
 	}
 	defer os.RemoveAll(directory)
 	bundle := filepath.Join(directory, "release.pb-update")
-	_, err = bootstrap.ExportUpdateBundle(ctx, "https://get.pprbt.dev/tuf", filepath.Join(directory, "proof"), bundle, nil, time.Now())
+	repository, err := buildinfo.ReleaseRepository()
+	if err != nil {
+		return err
+	}
+	_, err = bootstrap.ExportUpdateBundle(ctx, repository, filepath.Join(directory, "proof"), bundle, nil, time.Now())
 	if err != nil {
 		return err
 	}

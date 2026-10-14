@@ -33,7 +33,7 @@ func (e *runtimeEnrollmentCheckpointError) Unwrap() error {
 // the matching durable identity and records progress without replaying the
 // one-shot credential.
 func prepareUnixBootstrapRuntime(ctx context.Context, material *bootstrap.Material, stateRoot string, client enrollmentClient, runtimeEnrolled bool, recordRuntime func() error) (string, error) {
-	if material == nil || material.Artifact == nil || client == nil || recordRuntime == nil {
+	if material == nil || client == nil || recordRuntime == nil {
 		return "", bootstrap.ErrInvalid
 	}
 	if material.ReuseIdentity {

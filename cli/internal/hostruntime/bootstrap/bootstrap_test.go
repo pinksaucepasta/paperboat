@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseindex"
 )
 
 var testPublicIdentityKey = base64.RawURLEncoding.EncodeToString(make([]byte, ed25519.PublicKeySize))
@@ -49,8 +48,7 @@ func TestDashboardTokenPairingAndMaterialExchange(t *testing.T) {
 				_ = json.NewEncoder(writer).Encode(map[string]any{"error": map[string]string{"code": "user_machine_approval_pending", "message": "Machine approval is pending."}})
 				return
 			}
-			manifest := descriptor(server.URL, "0.0.0-development")
-			_ = json.NewEncoder(writer).Encode(map[string]any{"data": Material{Schema: "paperboat.machine-installation/v1", UserMachineID: "um_1", PairingID: "ume_1", EnvironmentID: "env_1", ControlURL: server.URL, HelperID: "helper_1", EnrollmentID: "enroll_1", EnrollmentCredential: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", ExpiresAt: expires, Artifact: &manifest, HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 1, ClientSession: &ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cls_1", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600}}})
+			_ = json.NewEncoder(writer).Encode(map[string]any{"data": Material{Schema: "paperboat.machine-installation/v1", UserMachineID: "um_1", PairingID: "ume_1", EnvironmentID: "env_1", ControlURL: server.URL, HelperID: "helper_1", EnrollmentID: "enroll_1", EnrollmentCredential: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", ExpiresAt: expires, HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 1, ClientSession: &ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cls_1", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600}}})
 		default:
 			http.NotFound(writer, request)
 		}
@@ -246,8 +244,7 @@ func TestWaitForMaterialRetriesTransientResponseReadAndKeepsCause(t *testing.T) 
 	var server *httptest.Server
 	server = httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
-		manifest := descriptor(server.URL, "0.0.0-development")
-		_ = json.NewEncoder(writer).Encode(map[string]any{"data": Material{Schema: "paperboat.machine-installation/v1", UserMachineID: "um_1", PairingID: "ume_1", EnvironmentID: "env_1", ControlURL: server.URL, HelperID: "helper_1", EnrollmentID: "enroll_1", EnrollmentCredential: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", ExpiresAt: expires, Artifact: &manifest, HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 1, ClientSession: &ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cls_1", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600}}})
+		_ = json.NewEncoder(writer).Encode(map[string]any{"data": Material{Schema: "paperboat.machine-installation/v1", UserMachineID: "um_1", PairingID: "ume_1", EnvironmentID: "env_1", ControlURL: server.URL, HelperID: "helper_1", EnrollmentID: "enroll_1", EnrollmentCredential: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", ExpiresAt: expires, HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 1, ClientSession: &ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cls_1", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600}}})
 	}))
 	defer server.Close()
 	base := server.Client().Transport
@@ -396,8 +393,7 @@ func TestWaitForMaterialToleratesTransientNetworkErrors(t *testing.T) {
 		case 2:
 			panic(http.ErrAbortHandler)
 		default:
-			manifest := descriptor(server.URL, "0.0.0-development")
-			_ = json.NewEncoder(writer).Encode(map[string]any{"data": Material{Schema: "paperboat.machine-installation/v1", UserMachineID: "um_1", PairingID: "ume_1", EnvironmentID: "env_1", ControlURL: server.URL, HelperID: "helper_1", EnrollmentID: "enroll_1", EnrollmentCredential: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", ExpiresAt: expires, Artifact: &manifest, HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 1, ClientSession: &ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cls_1", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600}}})
+			_ = json.NewEncoder(writer).Encode(map[string]any{"data": Material{Schema: "paperboat.machine-installation/v1", UserMachineID: "um_1", PairingID: "ume_1", EnvironmentID: "env_1", ControlURL: server.URL, HelperID: "helper_1", EnrollmentID: "enroll_1", EnrollmentCredential: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", ExpiresAt: expires, HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 1, ClientSession: &ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cls_1", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600}}})
 		}
 	}))
 	defer server.Close()
@@ -446,11 +442,10 @@ func TestRecoverMaterialIgnoresLocalPairingExpiry(t *testing.T) {
 			t.Fatalf("recovery body=%v", body)
 		}
 		writer.Header().Set("Content-Type", "application/json")
-		manifest := descriptor(server.URL, "0.0.0-development")
 		_ = json.NewEncoder(writer).Encode(map[string]any{"data": Material{
 			Schema: "paperboat.machine-installation/v1", UserMachineID: "um_1", PairingID: "ume_1", EnvironmentID: "env_1", ControlURL: server.URL,
 			HelperID: "helper_1", EnrollmentID: "enroll_1", EnrollmentCredential: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", ExpiresAt: materialExpiry,
-			Artifact: &manifest, HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 1, ClientSession: &ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cls_1", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600},
+			HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 1, ClientSession: &ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cls_1", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600},
 		}})
 	}))
 	defer server.Close()
@@ -488,7 +483,7 @@ func TestValidateMaterialAcceptsClientCLISetup(t *testing.T) {
 		Schema: "paperboat.machine-installation/v1", UserMachineID: "um_1", PairingID: "ume_1",
 		EnvironmentID: "env_1", ControlURL: "https://example.test", HelperID: "helper_1", EnrollmentID: "enroll_1",
 		EnrollmentCredential: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", ExpiresAt: time.Now().UTC().Add(time.Minute),
-		Artifact:            &ArtifactTarget{Schema: ArtifactTargetSchemaV1, Kind: ArtifactKindPB, Version: "2026.01.01.0", Platform: runtime.GOOS, Architecture: runtime.GOARCH, RepositoryURL: "https://example.test/tuf", TargetPath: releaseindex.AssetName(runtime.GOOS, runtime.GOARCH)},
+
 		HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 1, ClientSession: &ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cls_1", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600},
 	}
 	if err := validateMaterial(material); err != nil {

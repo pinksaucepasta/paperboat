@@ -29,6 +29,6 @@ var ProtocolVersion = "1"
 // may replace it with -ldflags, but official binaries work without setup.
 var DefaultServerURL = "https://api.pprbt.dev"
 
-// DefaultReleaseURL is retained for source compatibility. Release builds set
-// it to DefaultServerURL; the control plane is the sole update origin.
-var DefaultReleaseURL = DefaultServerURL
+// DefaultReleaseURL is the independent official release host, set by release
+// builds. Source builds have no update origin.
+var DefaultReleaseURL = ""
