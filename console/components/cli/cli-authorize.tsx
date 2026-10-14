@@ -2,6 +2,7 @@
 
 import { CheckCircleIcon, CircleNotchIcon, XCircleIcon } from "@phosphor-icons/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useState } from "react"
 import { api, ApiError, type Data } from "@/lib/api"
@@ -27,9 +28,19 @@ const requestPath = (code: string) => `auth/device/requests/${encodeURIComponent
 export function CliAuthorize() {
   const code = useSearchParams().get("code")?.trim().toUpperCase() ?? ""
   return (
-    <main className="flex min-h-svh flex-col items-center justify-center gap-8 px-6">
-      <Logo className="h-6" />
-      <div className="flex w-full max-w-sm flex-col gap-5">{code ? <Request code={code} /> : <CodeForm />}</div>
+    <main className="brand-bar min-h-svh text-white">
+      {/* .brand-bar makes its children position: relative (for its texture), so the layers live in one. */}
+      <div className="flex min-h-svh flex-col items-center justify-center px-6 py-24">
+        <Link
+          href="/"
+          aria-label="Paperboat home"
+          className="absolute top-6 left-6 flex items-center gap-3 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+        >
+          <Logo className="h-[18px]" />
+          <span className="font-heading text-[18px] leading-none font-medium tracking-[-0.025em]">paperboat</span>
+        </Link>
+        <div className="flex w-full max-w-md flex-col gap-6">{code ? <Request code={code} /> : <CodeForm />}</div>
+      </div>
     </main>
   )
 }
@@ -47,18 +58,20 @@ function CodeForm() {
     >
       <Heading title="Sign in the Paperboat CLI" text="Enter the code shown in your terminal by pb login." />
       <Field>
-        <FieldLabel htmlFor="cli-code">Code</FieldLabel>
+        <FieldLabel htmlFor="cli-code" className="text-white/85">
+          Code
+        </FieldLabel>
         <Input
           id="cli-code"
           autoFocus
           autoComplete="off"
           spellCheck={false}
-          className="font-mono uppercase"
+          className="border-white/30 bg-white/10 font-mono text-white uppercase placeholder:text-white/50"
           value={value}
           onChange={(event) => setValue(event.target.value)}
         />
       </Field>
-      <Button type="submit" size="lg" disabled={!value.trim()}>
+      <Button type="submit" size="lg" className="bg-white text-[#0f3dd8] hover:bg-white/90" disabled={!value.trim()}>
         Continue
       </Button>
     </form>
@@ -79,20 +92,20 @@ function Request({ code }: { code: string }) {
     onSuccess: (data) => client.setQueryData(key, data),
   })
 
-  if (request.isPending) return <CircleNotchIcon className="mx-auto size-5 animate-spin text-muted-foreground" />
+  if (request.isPending) return <CircleNotchIcon className="mx-auto size-5 animate-spin text-white/75" />
   if (request.isError) return <Failure error={request.error} />
 
   const data = request.data
   if (data.state === "approved" || data.state === "consumed") {
     return (
-      <Outcome icon={<CheckCircleIcon className="size-6 text-primary" />} title="CLI signed in">
+      <Outcome icon={<CheckCircleIcon className="size-8 text-white" />} title="CLI signed in">
         Return to your terminal; pb is signed in as {data.account.email}. You can close this tab.
       </Outcome>
     )
   }
   if (data.state === "denied") {
     return (
-      <Outcome icon={<XCircleIcon className="size-6 text-destructive" />} title="Sign-in denied">
+      <Outcome icon={<XCircleIcon className="size-8 text-white" />} title="Sign-in denied">
         The CLI was not signed in. Run pb login again if this was a mistake.
       </Outcome>
     )
@@ -105,26 +118,33 @@ function Request({ code }: { code: string }) {
         title="Sign in the Paperboat CLI?"
         text={
           <>
-            <span className="font-medium text-foreground">{data.client_label}</span> on a {data.os}{" "}
+            <span className="font-medium text-white">{data.client_label}</span> on a {data.os}{" "}
             {deviceTypes[data.device_type]} asks to use your account{" "}
-            <span className="font-medium text-foreground">{data.account.email}</span>.
+            <span className="font-medium text-white">{data.account.email}</span>.
           </>
         }
       />
       <Field>
-        <FieldLabel>Code</FieldLabel>
-        <p className="font-mono text-lg tracking-widest">{data.user_code}</p>
-        <FieldDescription>Approve only if this matches the code in your terminal.</FieldDescription>
+        <FieldLabel className="text-white/85">Code</FieldLabel>
+        <p className="font-mono text-2xl tracking-[0.2em]">{data.user_code}</p>
+        <FieldDescription className="text-white/75">
+          Approve only if this matches the code in your terminal.
+        </FieldDescription>
       </Field>
-      {decide.isError && <p className="text-sm text-destructive">{decide.error.message}</p>}
+      {decide.isError && <p className="text-sm font-medium text-white">{decide.error.message}</p>}
       <div className="flex gap-2">
-        <Button size="lg" className="flex-1" disabled={decide.isPending} onClick={() => decide.mutate("approve")}>
+        <Button
+          size="lg"
+          className="flex-1 bg-white text-[#0f3dd8] hover:bg-white/90"
+          disabled={decide.isPending}
+          onClick={() => decide.mutate("approve")}
+        >
           Approve
         </Button>
         <Button
           size="lg"
-          variant="outline"
-          className="flex-1"
+          variant="secondary"
+          className="flex-1 bg-white/15 text-white hover:bg-white/25"
           disabled={decide.isPending}
           onClick={() => decide.mutate("deny")}
         >
@@ -140,13 +160,13 @@ function Failure({ error }: { error: Error }) {
   if (status === 410) return <Expired />
   if (status === 404) {
     return (
-      <Outcome icon={<XCircleIcon className="size-6 text-destructive" />} title="Code not found">
+      <Outcome icon={<XCircleIcon className="size-8 text-white" />} title="Code not found">
         Check the code in your terminal, or run pb login again for a new one.
       </Outcome>
     )
   }
   return (
-    <Outcome icon={<XCircleIcon className="size-6 text-destructive" />} title="Couldn’t load the request">
+    <Outcome icon={<XCircleIcon className="size-8 text-white" />} title="Couldn’t load the request">
       {error.message} Reload the page to try again.
     </Outcome>
   )
@@ -154,7 +174,7 @@ function Failure({ error }: { error: Error }) {
 
 function Expired() {
   return (
-    <Outcome icon={<XCircleIcon className="size-6 text-muted-foreground" />} title="This code expired">
+    <Outcome icon={<XCircleIcon className="size-8 text-white/75" />} title="This code expired">
       Run pb login again for a new code.
     </Outcome>
   )
@@ -163,8 +183,10 @@ function Expired() {
 function Heading({ title, text }: { title: string; text: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <h1 className="font-heading text-xl font-semibold">{title}</h1>
-      <p className="text-sm text-muted-foreground">{text}</p>
+      <h1 className="font-heading text-[clamp(1.75rem,4vw,2.5rem)] leading-[1.1] font-semibold tracking-[-0.03em] text-balance">
+        {title}
+      </h1>
+      <p className="text-base text-white/75">{text}</p>
     </div>
   )
 }
@@ -173,8 +195,8 @@ function Outcome({ icon, title, children }: { icon: React.ReactNode; title: stri
   return (
     <div className="flex flex-col items-center gap-3 text-center">
       {icon}
-      <h1 className="font-heading text-lg font-semibold">{title}</h1>
-      <p className="text-sm text-muted-foreground">{children}</p>
+      <h1 className="font-heading text-2xl font-semibold tracking-[-0.02em]">{title}</h1>
+      <p className="text-base text-white/75">{children}</p>
     </div>
   )
 }
