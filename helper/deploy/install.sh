@@ -10,7 +10,7 @@ esac
 case "$package_url" in https://*) ;; *) echo 'Self-host release is not configured.' >&2; exit 1;; esac
 if [ ${#package_sha256} -ne 64 ]; then echo 'Self-host release digest is not configured.' >&2; exit 1; fi
 case "$package_sha256" in *[!0-9a-f]*) echo 'Invalid release digest.' >&2; exit 1;; esac
-for tool in curl tar sha256sum install systemctl; do command -v "$tool" >/dev/null 2>&1 || { echo "Required tool unavailable: $tool" >&2; exit 1; }; done
+for tool in curl tar sha256sum install systemctl timeout; do command -v "$tool" >/dev/null 2>&1 || { echo "Required tool unavailable: $tool" >&2; exit 1; }; done
 if [ "$(id -u)" -eq 0 ]; then elevate=''; else command -v sudo >/dev/null 2>&1 || { echo 'sudo is required to install the system service.' >&2; exit 1; }; elevate=sudo; $elevate -v; fi
 install_tmp=$(mktemp -d)
 previous_active=false
@@ -21,6 +21,7 @@ cleanup() {
  trap - EXIT HUP INT TERM
  if [ "$mutation_started" = true ] && [ "$installation_complete" = false ]; then
   echo 'Installation failed; restoring previous executable, image configuration and service.' >&2
+  $elevate timeout 30 systemctl stop paperboat-selfhost.service >/dev/null 2>&1 || true
   if [ -f "$install_tmp/previous-images" ]; then $elevate install -m 0600 "$install_tmp/previous-images" /var/lib/paperboat-selfhost/images.json || true; fi
   for binary in pbh; do
    if [ -f "$install_tmp/previous-$binary" ]; then
@@ -45,7 +46,7 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
-curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 "$package_url" -o "$install_tmp/package.tar.gz"
+curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 --proto-redir '=https' --connect-timeout 10 --max-time 120 --max-filesize 134217728 "$package_url" -o "$install_tmp/package.tar.gz"
 printf '%s  %s\n' "$package_sha256" "$install_tmp/package.tar.gz" | sha256sum --check --status || { echo 'Release integrity check failed; installation unchanged.' >&2; exit 1; }
 # Accept only the exact package members, even though the digest binds the archive.
 tar -tzf "$install_tmp/package.tar.gz" > "$install_tmp/members"
@@ -70,8 +71,8 @@ if [ -f /usr/local/bin/pbh ]; then cp /usr/local/bin/pbh "$install_tmp/previous-
 if [ -f /var/lib/paperboat-selfhost/images.json ]; then $elevate cp /var/lib/paperboat-selfhost/images.json "$install_tmp/previous-images"; fi
 if [ -f /etc/systemd/system/paperboat-selfhost.service ]; then cp /etc/systemd/system/paperboat-selfhost.service "$install_tmp/previous-unit"; fi
 # Stop an existing installation before atomically replacing executable files.
-if systemctl is-active --quiet paperboat-selfhost.service; then previous_active=true; $elevate systemctl stop paperboat-selfhost.service; fi
 mutation_started=true
+if systemctl is-active --quiet paperboat-selfhost.service; then previous_active=true; $elevate timeout 30 systemctl stop paperboat-selfhost.service; fi
 $elevate install -d -m 0755 /usr/local/lib/paperboat-selfhost
 for binary in pbh; do
  $elevate install -m 0755 "$install_tmp/$binary" "/usr/local/lib/paperboat-selfhost/$binary.new"
@@ -81,3 +82,7 @@ $elevate install -m 0755 "$install_tmp/pbh" /usr/local/bin/pbh
 $elevate /usr/local/lib/paperboat-selfhost/pbh install "$@"
 
 installation_complete=true
+# A successful Docker transition no longer needs the retired host runtimes.
+for binary in paperboat-relay paperboat-tunnel; do
+ $elevate rm -f "/usr/local/lib/paperboat-selfhost/$binary"
+done

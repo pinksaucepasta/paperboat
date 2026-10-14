@@ -30,7 +30,12 @@ func Serve(ctx context.Context, dir string, out io.Writer, observe func(context.
 	if err != nil {
 		return err
 	}
-	return selfhost.RunWithLauncher(ctx, dir, &Launcher{StateDir: dir, Images: images}, out, observe)
+	config, err := selfhost.ReadConfig(dir)
+	if err != nil {
+		return err
+	}
+	launcher := &Launcher{StateDir: dir, Images: images, ReadOnlyFiles: []string{config.ControlCA, config.PublicHTTPSCertFile, config.PublicHTTPSKeyFile}}
+	return selfhost.RunWithLauncher(ctx, dir, launcher, out, observe)
 }
 
 // Teardown requires the same exclusive lifecycle ownership as Serve, and

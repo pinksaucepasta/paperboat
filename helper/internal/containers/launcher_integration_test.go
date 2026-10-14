@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -84,18 +83,9 @@ func TestLiveDockerSupervisorReadinessAndBoundedDrain(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	roles := []string{"relay", "tunnel"}
-	previous := map[string]string{}
-	for _, role := range roles {
-		client, err := newNodeClient(role, filepath.Join(dir, role))
-		if err != nil {
-			t.Fatal("read node control configuration failed")
-		}
-		state, err := client.readiness(ctx)
-		client.http.CloseIdleConnections()
-		if err != nil {
-			t.Fatal("read previous node epoch failed")
-		}
-		previous[role] = state.ProcessEpoch
+	previous, err := InstallationEpochs(ctx, dir)
+	if err != nil {
+		t.Fatal("read previous node epochs failed")
 	}
 	done := make(chan error, 1)
 	go func() { done <- Serve(ctx, dir, io.Discard, nil) }()
@@ -107,27 +97,8 @@ func TestLiveDockerSupervisorReadinessAndBoundedDrain(t *testing.T) {
 			t.Error("supervisor cleanup exceeded bound")
 		}
 	})
-	ready := map[string]bool{}
-	for len(ready) < len(roles) {
-		for _, role := range roles {
-			client, err := newNodeClient(role, filepath.Join(dir, role))
-			if err != nil {
-				t.Fatal("read launched node configuration failed")
-			}
-			state, err := client.readiness(ctx)
-			client.http.CloseIdleConnections()
-			if err == nil && state.Ready && state.ProcessEpoch != previous[role] {
-				ready[role] = true
-			}
-		}
-		select {
-		case err := <-done:
-			done <- err
-			t.Fatal("supervisor exited before new authenticated readiness")
-		case <-ctx.Done():
-			t.Fatal("nodes did not reach readiness within the bound")
-		case <-time.After(250 * time.Millisecond):
-		}
+	if err := WaitInstallationReady(ctx, dir, previous); err != nil {
+		t.Fatal("new owned runtimes did not reach authenticated readiness")
 	}
 	owner := installationOwner(dir)
 	for _, role := range roles {

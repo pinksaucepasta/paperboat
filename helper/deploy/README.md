@@ -141,3 +141,17 @@ report a new process epoch and a fresh ready heartbeat at
 Shutdown drains and removes only containers labelled for that installation and
 keeps its protected state. A foreign container with a colliding name is refused.
 No Docker daemon network configuration is changed when Docker is already present.
+
+Re-run the installer to upgrade images. Existing roles, custom ports, domains,
+region, name, TLS paths, claim and private identity are read from the protected
+installation; they do not need to be repeated. Conflicting settings flags are
+refused before the upgrade. Externally managed trust and certificate files are
+mounted at their original absolute paths with read-only access.
+
+For a claimed node, installation succeeds only after every owned container has a
+new process epoch and a fresh authenticated ready heartbeat. A failed image
+startup restores the previous image configuration and restarts it; the package
+installer also restores its previous helper and unit on failure. Data is retained
+for recovery. Successful Docker migration removes the retired host runtime
+executables. The initial unclaimed installation verifies its pinned claim TLS
+listener; runtimes start after authenticated enrollment.

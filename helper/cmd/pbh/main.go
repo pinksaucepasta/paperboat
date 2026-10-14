@@ -166,16 +166,16 @@ func install(ctx context.Context, args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	enable := fs.String("enable", "relay", "relay, tunnel, or both")
-	host := fs.String("endpoint-host", "", "public IP or DNS name (auto-detected when omitted)")
-	name := fs.String("name", "", "installation name")
-	region := fs.String("region", "selfhost", "selection region")
-	failure := fs.String("failure-domain", "", "independent failure domain (defaults to endpoint host)")
-	listen := fs.String("claim-listen", "0.0.0.0:8443", "local claim HTTPS listen address")
-	preview := fs.String("preview-domain", "", "preview base domain")
-	tunnel := fs.String("tunnel-domain", "", "durable tunnel base domain")
-	runtime := fs.String("runtime-domain", "", "runtime base domain")
-	httpsCert := fs.String("https-cert", "", "browser-trusted HTTPS certificate file for the endpoint hostname")
-	httpsKey := fs.String("https-key", "", "owner-only private key file for browser HTTPS")
+	fs.String("endpoint-host", "", "public IP or DNS name (auto-detected when omitted)")
+	fs.String("name", "", "installation name")
+	fs.String("region", "selfhost", "selection region")
+	fs.String("failure-domain", "", "independent failure domain (defaults to endpoint host)")
+	fs.String("claim-listen", "0.0.0.0:8443", "local claim HTTPS listen address")
+	fs.String("preview-domain", "", "preview base domain")
+	fs.String("tunnel-domain", "", "durable tunnel base domain")
+	fs.String("runtime-domain", "", "runtime base domain")
+	fs.String("https-cert", "", "browser-trusted HTTPS certificate file for the endpoint hostname")
+	fs.String("https-key", "", "owner-only private key file for browser HTTPS")
 	dir := fs.String("state-dir", defaultState, "protected installation directory")
 	noService := fs.Bool("no-service", false, "initialize without systemd (isolated testing)")
 	relayImage := fs.String("relay-image", defaultRelayImage, "configured relay container image")
@@ -197,6 +197,19 @@ func install(ctx context.Context, args []string, out io.Writer) error {
 	if err := containers.CheckHost(); err != nil {
 		return fmt.Errorf("%w: %w", commandError("unsupported self-host operating system"), err)
 	}
+	if !*noService && os.Geteuid() != 0 {
+		return elevated(ctx, append([]string{"install"}, args...), out)
+	}
+	if !*noService && *dir != defaultState {
+		return commandError("system service requires default state directory")
+	}
+	c, existing, err := existingInstallConfig(*dir, fs)
+	if err != nil {
+		return err
+	}
+	if existing {
+		*enable = installationMode(c)
+	}
 	images := containers.Images{Relay: *relayImage, Tunnel: *tunnelImage}
 	for _, capability := range strings.Split(strings.ReplaceAll(*enable, "both", "relay,tunnel"), ",") {
 		if _, err := images.Image(capability); err != nil {
@@ -206,46 +219,17 @@ func install(ctx context.Context, args []string, out io.Writer) error {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return commandError("Docker is required; run the self-host installer first")
 	}
-	if !*noService && os.Geteuid() != 0 {
-		return elevated(ctx, append([]string{"install"}, args...), out)
-	}
-	if *host == "" {
-		value, err := publicAddress(ctx)
+	if !existing {
+		c, err = freshInstallConfig(ctx, fs)
 		if err != nil {
 			return err
 		}
-		*host = value
-	}
-	if *name == "" {
-		*name = *host
-	}
-	if *failure == "" {
-		*failure = *host
-	}
-	c := selfhost.Config{Name: *name, EndpointHost: *host, Listen: *listen, PreviewDomain: *preview, TunnelDomain: *tunnel, RuntimeDomain: *runtime, PublicHTTPSCertFile: *httpsCert, PublicHTTPSKeyFile: *httpsKey}
-	if *enable == "relay" || *enable == "both" {
-		tcp := 443
-		if *enable == "both" {
-			tcp = 27445
-		}
-		c.Components = append(c.Components, selfhost.Component{Capability: "relay", TCPPort: tcp, QUICPort: 27446, Region: *region, FailureDomain: *failure, CapacityLimit: 256})
-	}
-	if *enable == "tunnel" || *enable == "both" {
-		c.Components = append(c.Components, selfhost.Component{Capability: "tunnel", TCPPort: 27443, QUICPort: 27444, Region: *region, FailureDomain: *failure, CapacityLimit: 256})
 	}
 	if err := selfhost.Initialize(*dir, c); err != nil {
 		return err
 	}
-	if err := containers.SaveImages(*dir, images); err != nil {
+	if err := installRuntimeImages(ctx, *dir, c, images, *noService); err != nil {
 		return err
-	}
-	if !*noService {
-		if *dir != defaultState {
-			return commandError("system service requires default state directory")
-		}
-		if err := installService(ctx); err != nil {
-			return err
-		}
 	}
 	ready, err := selfhost.RuntimeReady(*dir)
 	if err != nil {
@@ -256,7 +240,7 @@ func install(ctx context.Context, args []string, out io.Writer) error {
 		return nil
 	}
 	fmt.Fprintln(out, "Paperboat self-host installed. No account or workspace is assigned yet.")
-	if (*enable == "tunnel" || *enable == "both") && *httpsCert == "" {
+	if (*enable == "tunnel" || *enable == "both") && c.PublicHTTPSCertFile == "" {
 		fmt.Fprintln(out, "Browser HTTPS requires a certificate trusted by your clients covering --endpoint-host. Configure it with pbh configure-tls --https-cert /absolute/fullchain.pem --https-key /absolute/private-key.pem; the private key needs owner-only permissions.")
 	}
 	return run(ctx, []string{"selfhost", "code", "--state-dir", *dir}, out)
@@ -326,8 +310,10 @@ WantedBy=multi-user.target
 	if err := os.WriteFile("/etc/systemd/system/paperboat-selfhost.service", []byte(service), 0644); err != nil {
 		return err
 	}
-	for _, args := range [][]string{{"daemon-reload"}, {"enable", "--now", "paperboat-selfhost.service"}} {
-		cmd := exec.CommandContext(ctx, "systemctl", args...)
+	bounded, cancel := context.WithTimeout(ctx, serviceCommandTimeout)
+	defer cancel()
+	for _, args := range [][]string{{"daemon-reload"}, {"enable", "paperboat-selfhost.service"}, {"restart", "paperboat-selfhost.service"}} {
+		cmd := exec.CommandContext(bounded, "systemctl", args...)
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("%w: %w", commandError("systemd configuration failed; state preserved for retry"), err)
 		}

@@ -17,12 +17,13 @@ import (
 )
 
 const ownerLabel = "io.paperboat.pbh-owner"
-const startupTimeout = 45 * time.Second
+const StartupTimeout = 45 * time.Second
 const commandTimeout = 15 * time.Second
 
 type Launcher struct {
-	StateDir string
-	Images   Images
+	StateDir      string
+	Images        Images
+	ReadOnlyFiles []string
 }
 
 func (l *Launcher) Validate(ctx context.Context, capability, componentDir string) error {
@@ -83,10 +84,8 @@ func (l *Launcher) Run(ctx context.Context, capability, componentDir string, out
 	if err := removeOwned(ctx, name, owner); err != nil {
 		return err
 	}
-	args := []string{"run", "-d", "--name", name, "--label", ownerLabel + "=" + owner, "--network", "host", "--user", "0:0", "--cap-drop", "ALL", "--cap-add", "NET_BIND_SERVICE", "--security-opt", "no-new-privileges", "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=16m", "--mount", "type=bind,src=" + l.StateDir + ",dst=" + l.StateDir}
-	args = append(args, image, "run", "--state-dir", componentDir)
-	if _, err := docker(ctx, args...); err != nil {
-		return errors.New("start runtime container failed; installation state retained")
+	if err := l.startContainer(ctx, capability, image); err != nil {
+		return err
 	}
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), 12*time.Second)
@@ -106,7 +105,7 @@ func (l *Launcher) Run(ctx context.Context, capability, componentDir string, out
 	logsDone := make(chan error, 1)
 	go func() { logsDone <- logs.Wait() }()
 	defer func() { stopLogs(); <-logsDone }()
-	ready, cancel := context.WithTimeout(ctx, startupTimeout)
+	ready, cancel := context.WithTimeout(ctx, StartupTimeout)
 	err = waitReady(ready, name, owner, client, before.ProcessEpoch)
 	cancel()
 	if err != nil {
