@@ -34,8 +34,8 @@ func TestAuthLoginMeCSRFLogoutAndAudit(t *testing.T) {
 	if login.Code != http.StatusOK {
 		t.Fatalf("login status = %d, body = %s", login.Code, login.Body.String())
 	}
-	if !strings.Contains(login.Body.String(), `"return_to":"/dashboard"`) {
-		t.Fatalf("login did not return signed dashboard destination: %s", login.Body.String())
+	if strings.Contains(login.Body.String(), `"return_to"`) {
+		t.Fatal("callback unexpectedly owns console navigation")
 	}
 	cookies := login.Result().Cookies()
 

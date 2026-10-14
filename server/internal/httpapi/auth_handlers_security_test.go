@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -100,15 +101,29 @@ func TestRequireAuthRejectsUnsafeRequestWithoutTrustedOrigin(t *testing.T) {
 	}
 }
 
-func TestWorkOSStateRejectsExternalReturnDestination(t *testing.T) {
+func TestWorkOSStateLeavesConsoleNavigationToConsole(t *testing.T) {
 	service := auth.NewService(nil, nil, nil, []string{"test-key"}, false)
 	handler := workOSState(service)
-	for _, target := range []string{"//attacker.example", "https://attacker.example/", "/dashboard/../admin"} {
+	for _, target := range []string{"/cli/authorize?code=ABCD", "//attacker.example", "https://attacker.example/"} {
 		recorder := httptest.NewRecorder()
 		request := httptest.NewRequest(http.MethodGet, "/v1/auth/workos/state?return_to="+url.QueryEscape(target), nil)
 		handler.ServeHTTP(recorder, request)
-		if recorder.Code != http.StatusBadRequest || len(recorder.Result().Cookies()) != 0 {
-			t.Fatalf("target=%q status=%d cookies=%v", target, recorder.Code, recorder.Result().Cookies())
+		if recorder.Code != http.StatusOK || len(recorder.Result().Cookies()) != 1 {
+			t.Fatalf("state issuance unexpectedly owns console navigation: status=%d", recorder.Code)
+		}
+		var response struct {
+			Data map[string]string `json:"data"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		if len(response.Data) != 1 || response.Data["state"] == "" {
+			t.Fatal("state response must contain only login state")
+		}
+		validate := httptest.NewRequest(http.MethodPost, "/v1/auth/workos/callback", nil)
+		validate.AddCookie(recorder.Result().Cookies()[0])
+		if err := service.ValidateOAuthState(validate, response.Data["state"]); err != nil {
+			t.Fatal(err)
 		}
 	}
 }

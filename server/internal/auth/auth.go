@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -184,56 +183,9 @@ func (s *Service) VerifyCallback(ctx context.Context, input CallbackInput) (User
 	return user, Session{ID: sessionID, UserID: user.ID, Token: sessionToken, CSRFToken: csrfToken, ExpiresAt: expiresAt, WorkOSSessionID: profile.SessionID}, nil
 }
 
-func (s *Service) NewOAuthState(returnTo ...string) (string, error) {
-	target := "/"
-	if len(returnTo) > 0 && returnTo[0] != "" {
-		target = returnTo[0]
-	}
-	if !validConsoleReturnTo(target) {
-		return "", ErrOAuthState
-	}
-	payload := "login:" + newToken() + ":" + base64.RawURLEncoding.EncodeToString([]byte(target)) + "." + strconv.FormatInt(s.now().Add(10*time.Minute).Unix(), 10)
-	signed, err := s.signValue(payload)
-	if err != nil {
-		return "", err
-	}
-	return signed, nil
-}
-
-// OAuthReturnTo extracts only the signed same-origin console destination.
-// The browser must still use its configured console origin when redirecting.
-func (s *Service) OAuthReturnTo(state string) (string, error) {
-	if !s.validSignedValue(state) {
-		return "", ErrOAuthState
-	}
-	nonce, expiresAt, ok := parseExpiringSignedValue(state)
-	if !ok || !s.now().Before(expiresAt) || !strings.HasPrefix(nonce, "login:") {
-		return "", ErrOAuthState
-	}
-	_, encoded, hasTarget := strings.Cut(strings.TrimPrefix(nonce, "login:"), ":")
-	if !hasTarget {
-		return "", ErrOAuthState
-	}
-	decoded, err := base64.RawURLEncoding.DecodeString(encoded)
-	if err != nil || !validConsoleReturnTo(string(decoded)) {
-		return "", ErrOAuthState
-	}
-	return string(decoded), nil
-}
-
-func validConsoleReturnTo(target string) bool {
-	if !strings.HasPrefix(target, "/") {
-		return false
-	}
-	if len(target) > 1024 || strings.ContainsAny(target, "\\?#%") || strings.Contains(target, "//") || strings.Contains(target, "..") {
-		return false
-	}
-	for _, ch := range target {
-		if ch < 0x21 || ch > 0x7e {
-			return false
-		}
-	}
-	return true
+func (s *Service) NewOAuthState() (string, error) {
+	payload := "login:" + newToken() + "." + strconv.FormatInt(s.now().Add(10*time.Minute).Unix(), 10)
+	return s.signValue(payload)
 }
 
 func (s *Service) ValidateOAuthState(r *http.Request, state string) error {

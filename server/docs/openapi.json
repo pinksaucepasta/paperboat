@@ -24271,18 +24271,8 @@
     "/v1/auth/workos/state": {
       "get": {
         "summary": "Create a WorkOS OAuth state token",
-        "description": "Optionally binds a same-origin /dashboard path to the signed login state. The callback returns it as data.return_to after successful sign-in; arbitrary URLs are rejected.",
+        "description": "Issues expiring cookie-bound signed OAuth login state. Console navigation stays in the console-owned return cookie.",
         "security": [],
-        "parameters": [
-          {
-            "name": "return_to",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "WorkOS login state.",
@@ -24301,7 +24291,7 @@
     "/v1/auth/workos/callback": {
       "post": {
         "summary": "Complete WorkOS login",
-        "description": "Creates or updates a Paperboat account and browser session. Successful data includes the signed same-origin return_to path, defaulting to /dashboard.",
+        "description": "Creates or updates a Paperboat account and browser session after validating expiring cookie-bound OAuth state. Returns the authenticated identity.",
         "security": [],
         "responses": {
           "200": {

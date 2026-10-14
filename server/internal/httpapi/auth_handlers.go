@@ -20,12 +20,8 @@ type principal struct {
 
 func workOSState(service *auth.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		state, err := service.NewOAuthState(r.URL.Query().Get("return_to"))
+		state, err := service.NewOAuthState()
 		if err != nil {
-			if errors.Is(err, auth.ErrOAuthState) {
-				writeError(w, r, http.StatusBadRequest, "invalid_return_to", "Return destination must be a dashboard path.")
-				return
-			}
 			writeError(w, r, http.StatusInternalServerError, "internal_error", "Internal server error.", err)
 			return
 		}
@@ -54,11 +50,6 @@ func workOSCallback(service *auth.Service) http.HandlerFunc {
 			writeError(w, r, http.StatusForbidden, "oauth_state_failed", "OAuth state validation failed.")
 			return
 		}
-		returnTo, err := service.OAuthReturnTo(body.State)
-		if err != nil {
-			writeError(w, r, http.StatusForbidden, "oauth_state_failed", "OAuth state validation failed.")
-			return
-		}
 		user, session, err := service.VerifyCallback(r.Context(), auth.CallbackInput{
 			Code:        body.Code,
 			RedirectURI: body.RedirectURI,
@@ -70,9 +61,7 @@ func workOSCallback(service *auth.Service) http.HandlerFunc {
 		}
 		service.ClearOAuthStateCookie(w)
 		service.SetSessionCookies(w, session)
-		payload := mePayload(user)
-		payload["return_to"] = returnTo
-		writeJSON(w, http.StatusOK, SuccessResponse{Data: payload})
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: mePayload(user)})
 	}
 }
 
