@@ -107,8 +107,13 @@ func TestLogoutFailedRevocationIsUnconfirmedThenFreshSessionCompletes(t *testing
 }
 
 func TestLogoutDeadlineReturnsAfterRequestStopsAndDoesNotClaimReceipt(t *testing.T) {
+	started := make(chan struct{})
 	stopped := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done(); close(stopped) }))
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+		close(stopped)
+	}))
 	defer server.Close()
 	dir := t.TempDir()
 	cfgPath := dir + "/config.json"
@@ -124,9 +129,9 @@ func TestLogoutDeadlineReturnsAfterRequestStopsAndDoesNotClaimReceipt(t *testing
 	set := flag.NewFlagSet("logout", flag.ContinueOnError)
 	set.Bool("json", true, "")
 	action := command.NewContext(set)
-	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
-	defer cancel()
-	action.Context = ctx
+	// Exercise the production revocation deadline, which starts after local
+	// credential removal, rather than expiring before a request can start.
+	action.Context = t.Context()
 	var out bytes.Buffer
 	action.Writer = &out
 	action.ErrWriter = io.Discard
@@ -135,6 +140,11 @@ func TestLogoutDeadlineReturnsAfterRequestStopsAndDoesNotClaimReceipt(t *testing
 	}
 	if !strings.Contains(out.String(), `"server_revocation":"unconfirmed"`) {
 		t.Fatal("deadline falsely claimed completed revocation")
+	}
+	select {
+	case <-started:
+	default:
+		t.Fatal("revocation deadline was not exercised by a real request")
 	}
 	select {
 	case <-stopped:

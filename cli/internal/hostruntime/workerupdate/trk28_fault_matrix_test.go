@@ -171,8 +171,15 @@ func TestTRK28DrainDeadlineIsBoundedAndDowngradeIsRejected(t *testing.T) {
 	gate := &scriptedGate{drainErr: context.DeadlineExceeded}
 	fixture.manager.config.Gate = gate
 	fixture.manager.config.DrainTimeout = 2 * time.Millisecond
+	candidate, err := fixture.manager.Prepare(context.Background(), fixture.candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.manager.Approve(context.Background(), candidate.ID); err != nil {
+		t.Fatal(err)
+	}
 	started := time.Now()
-	_, err := activatePrepared(context.Background(), fixture.manager, fixture.candidate)
+	_, err = fixture.manager.Activate(context.Background(), fixture.candidate)
 	if !errors.Is(err, context.DeadlineExceeded) || gate.drain != 1 || gate.rollback != 1 || fixture.hostd.activations != 0 {
 		t.Fatalf("drain result error=%v gate=%+v activations=%d", err, gate, fixture.hostd.activations)
 	}
