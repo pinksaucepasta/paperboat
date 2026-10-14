@@ -5,7 +5,12 @@ import sys
 
 
 def windows_executable(receipt):
-    value = receipt.get('executable')
+    if not isinstance(receipt, dict) or receipt.get('schema_version') != '1.0' or receipt.get('ok') is not True:
+        raise ValueError('install receipt must be a successful CLI JSON envelope')
+    data = receipt.get('data')
+    if not isinstance(data, dict):
+        raise ValueError('install receipt requires result data')
+    value = data.get('executable')
     if not isinstance(value, str) or not value or '\n' in value or '\r' in value:
         raise ValueError('install receipt requires an executable path')
     path = pathlib.PureWindowsPath(value)

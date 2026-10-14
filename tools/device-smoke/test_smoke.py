@@ -122,11 +122,13 @@ class TerminalDriver(unittest.TestCase):
 class WindowsInstallReceipt(unittest.TestCase):
     def test_custom_install_directory_is_preserved(self):
         path = "D:\\Owner's tools\\pb.exe"
-        self.assertEqual(windows_executable({'executable': path}), path)
+        self.assertEqual(windows_executable({'schema_version': '1.0', 'ok': True, 'data': {'executable': path}}), path)
 
     def test_missing_relative_and_malformed_paths_fail(self):
-        for receipt in [{}, {'executable': 'pb.exe'}, {'executable': 'C:\\tools\\other.exe'},
-                        {'executable': 'C:\\tools\\pb.exe\nignored'}, {'executable': 7}]:
+        for receipt in [{}, {'ok': False, 'data': {'executable': 'C:\\tools\\pb.exe'}},
+                        {'schema_version': '2.0', 'ok': True, 'data': {'executable': 'C:\\tools\\pb.exe'}},
+                        *({'schema_version': '1.0', 'ok': True, 'data': {'executable': value}}
+                          for value in ['pb.exe', 'C:\\tools\\other.exe', 'C:\\tools\\pb.exe\nignored', 7])]:
             with self.subTest(receipt=receipt), self.assertRaises(ValueError):
                 windows_executable(receipt)
 
