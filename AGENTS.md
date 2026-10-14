@@ -83,6 +83,21 @@ PLAN.md (section 5) and done by that lane. **Only Lane A uses the test devices.*
 finishes and pushes the Go/API side, then writes the frontend request (API, fields, states,
 errors) in the PLAN.md Log; Claude does it. Go changes the frontend needs are done by Codex.
 
+**Keep going until done.** A lane works its rows in PLAN.md order and does not stop until every
+row it owns is `[x]` or `[!]`. Do not ask the user to confirm routine choices. When a row is
+blocked, log it in PLAN.md section 5, mark it `[!]` with the reason, continue with the next row,
+and return when the blocker clears:
+- needs another lane's code or the server: write the request in the Log;
+- needs frontend work: finish the Go/API side, then log the request (endpoint, fields, states,
+  errors, which page);
+- needs credentials or a **USER DECIDES** item: log exactly what is needed;
+- two failed attempts at the same thing: log what you know and what you tried.
+At the end of a session, report a short table: rows done, rows `[!]` with reasons, commits.
+
+**Shared branch.** All lanes push to `main`. If a push is rejected because another lane pushed,
+run `git pull --rebase`, re-run `make gate` if the incoming changes touch your paths or shared code,
+then push. Never force-push.
+
 Contracts between lanes (server API, discovery response) are changed by the lane that owns
 the producer first, committed and pushed, then consumers update. A feature becomes `[x]`
 only when all its rows across lanes are done; Lane A runs its device verification last.
