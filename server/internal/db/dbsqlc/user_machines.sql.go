@@ -4910,16 +4910,18 @@ const renewPairingInstallationRecovery = `-- name: RenewPairingInstallationRecov
 UPDATE user_machine_pairings
 SET expires_at = $1, updated_at = now()
 WHERE id = $2
-  AND installation_state IN ('material_issued','installing','connecting')
+  AND (installation_state IN ('material_issued','installing','connecting')
+       OR (installation_state='ready' AND $3::boolean))
 `
 
 type RenewPairingInstallationRecoveryParams struct {
-	ExpiresAt time.Time
-	PairingID string
+	ExpiresAt       time.Time
+	PairingID       string
+	RuntimeEnrolled bool
 }
 
 func (q *Queries) RenewPairingInstallationRecovery(ctx context.Context, arg RenewPairingInstallationRecoveryParams) (int64, error) {
-	result, err := q.db.Exec(ctx, renewPairingInstallationRecovery, arg.ExpiresAt, arg.PairingID)
+	result, err := q.db.Exec(ctx, renewPairingInstallationRecovery, arg.ExpiresAt, arg.PairingID, arg.RuntimeEnrolled)
 	if err != nil {
 		return 0, err
 	}

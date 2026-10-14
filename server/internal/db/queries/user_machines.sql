@@ -795,7 +795,8 @@ RETURNING *;
 UPDATE user_machine_pairings
 SET expires_at = sqlc.arg(expires_at), updated_at = now()
 WHERE id = sqlc.arg(pairing_id)
-  AND installation_state IN ('material_issued','installing','connecting');
+  AND (installation_state IN ('material_issued','installing','connecting')
+       OR (installation_state='ready' AND sqlc.arg(runtime_enrolled)::boolean));
 
 -- name: CompleteUserMachineInstallationRecovery :execrows
 UPDATE user_machine_pairings

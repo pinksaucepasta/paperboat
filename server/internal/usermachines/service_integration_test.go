@@ -2156,8 +2156,20 @@ func TestExpiredInstallationRecoveryIsCrashSafeConcurrentAndIdentityBound(t *tes
 	// against the exact helper bound into its original signed material. This
 	// path rotates the CLI access and refresh tokens without issuing a replacement helper.
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machine_pairings
-SET expires_at=now()-interval '1 minute', installation_config_consumed_at=now()-interval '1 hour'
+SET expires_at=now()-interval '1 minute', installation_config_consumed_at=now()-interval '1 hour', installation_state='ready'
 WHERE id=$1`, pairing.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConsumeInstallationForIdentityState(ctx, verifier, publicIdentityKey, false); !errors.Is(err, ErrInstallationUnavailable) {
+		t.Fatalf("ready journal without persisted runtime assertion error=%v", err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET installation_generation=installation_generation+1 WHERE id=$1`, original.UserMachineID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConsumeInstallationForIdentityState(ctx, verifier, publicIdentityKey, true); !errors.Is(err, ErrInstallationUnavailable) {
+		t.Fatal("stale ready-journal generation was accepted")
+	}
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET installation_generation=installation_generation-1 WHERE id=$1`, original.UserMachineID); err != nil {
 		t.Fatal(err)
 	}
 	reusedBody, err := service.ConsumeInstallationForIdentityState(ctx, verifier, publicIdentityKey, true)
@@ -2213,7 +2225,7 @@ WHERE id=$1`, pairing.ID); err != nil {
 	// committed but before it issued or stored replacement material. Every retry
 	// must reuse this operation key and leave old ciphertext intact until swap.
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machine_pairings
-SET expires_at=now()-interval '1 minute', installation_config_consumed_at=now()-interval '1 hour', installation_recovery_operation_key=NULL
+SET expires_at=now()-interval '1 minute', installation_config_consumed_at=now()-interval '1 hour', installation_recovery_operation_key=NULL, installation_state='installing'
 WHERE id=$1`, pairing.ID); err != nil {
 		t.Fatal(err)
 	}

@@ -558,6 +558,14 @@ func (s *Service) provisionRecoveredUserMachine(ctx context.Context, userID stri
 		if err != nil {
 			return nil, ErrInstallationUnavailable
 		}
+		if runtimeEnrolled {
+			binding, bindErr := authenticatedMachineInstallationMaterialBindingFromPlaintext([]byte(plaintext))
+			if bindErr != nil || binding.MachineID != machine.ID || binding.EnvironmentID != machine.EnvironmentID ||
+				binding.Generation != machine.InstallationGeneration || machine.PublicIdentityKey != pairing.PublicIdentityKey.String ||
+				machine.SeatState != "occupied" || machine.State == "revoked" || machine.State == "deleted" {
+				return nil, ErrInstallationUnavailable
+			}
+		}
 		existingHelperID, err := helperIDFromInstallationMaterial([]byte(plaintext))
 		if err != nil {
 			return nil, ErrInstallationUnavailable

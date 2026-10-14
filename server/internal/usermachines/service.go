@@ -165,6 +165,10 @@ func (s *Service) consumeInstallation(ctx context.Context, verifier, publicIdent
 			if pairing.State == "consumed" && publicIdentityKey != "" && pairing.PublicIdentityKey.String == publicIdentityKey && pairing.InstallationConfigConsumedAt.Valid && pairing.InstallationConfigConsumedAt.Time.After(now.Add(-installationRecoveryGrace)) {
 				switch pairing.InstallationState {
 				case "material_issued", "installing", "connecting":
+				case "ready":
+					if !runtimeEnrolled {
+						return ErrInstallationUnavailable
+					}
 				default:
 					return ErrInstallationUnavailable
 				}
@@ -188,7 +192,7 @@ func (s *Service) consumeInstallation(ctx context.Context, verifier, publicIdent
 					return err
 				}
 				{
-					if n, err := tx.Queries().RenewPairingInstallationRecovery(ctx, dbsqlc.RenewPairingInstallationRecoveryParams{PairingID: pairing.ID, ExpiresAt: now.Add(s.policy.PairingLifetime)}); err != nil {
+					if n, err := tx.Queries().RenewPairingInstallationRecovery(ctx, dbsqlc.RenewPairingInstallationRecoveryParams{PairingID: pairing.ID, ExpiresAt: now.Add(s.policy.PairingLifetime), RuntimeEnrolled: runtimeEnrolled}); err != nil {
 						return err
 					} else if n != 1 {
 						return ErrInstallationUnavailable
