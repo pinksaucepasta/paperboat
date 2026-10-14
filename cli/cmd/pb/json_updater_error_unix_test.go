@@ -48,7 +48,7 @@ func TestUpdaterControlFailureUsesFiniteJSONAndOmitsRemoteMessage(t *testing.T) 
 		})
 	}()
 
-	client, err := updated.NewClient(listener.Addr().String(), time.Second)
+	client, err := updated.NewClient(updaterFixtureRootSocket(t, listener.Addr().String()), time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

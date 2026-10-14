@@ -23,6 +23,7 @@ import (
 
 type updateSettingsControlFixture struct {
 	listener *net.UnixListener
+	socket   string
 	done     chan struct{}
 	mu       sync.Mutex
 	requests []updated.ControlRequest
@@ -42,6 +43,7 @@ func startUpdateSettingsControlFixture(t *testing.T) *updateSettingsControlFixtu
 		settings: autoupdate.DefaultPreferences(true),
 	}
 	go fixture.serve()
+	fixture.socket = updaterFixtureRootSocket(t, listener.Addr().String())
 	t.Cleanup(func() {
 		_ = fixture.listener.Close()
 		select {
@@ -125,7 +127,7 @@ func runUpdateSettingsCommand(t *testing.T, fixture *updateSettingsControlFixtur
 	t.Helper()
 	previousSocket := updateControlSocketForCommand
 	updateControlSocketForCommand = func() (string, error) {
-		return fixture.listener.Addr().String(), nil
+		return fixture.socket, nil
 	}
 	t.Cleanup(func() { updateControlSocketForCommand = previousSocket })
 

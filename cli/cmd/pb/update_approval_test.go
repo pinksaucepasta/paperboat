@@ -28,6 +28,7 @@ var updateApprovalCandidateID = strings.Repeat("a", 64)
 
 type updateApprovalControlFixture struct {
 	listener *net.UnixListener
+	socket   string
 	done     chan struct{}
 	mu       sync.Mutex
 	requests []updated.ControlRequest
@@ -42,6 +43,7 @@ func startUpdateApprovalControlFixture(t *testing.T) *updateApprovalControlFixtu
 	}
 	fixture := &updateApprovalControlFixture{listener: listener, done: make(chan struct{})}
 	go fixture.serve()
+	fixture.socket = updaterFixtureRootSocket(t, listener.Addr().String())
 	t.Cleanup(func() {
 		_ = fixture.listener.Close()
 		select {
@@ -108,7 +110,7 @@ func runUpdateApprovalCommand(t *testing.T, fixture *updateApprovalControlFixtur
 	t.Helper()
 	previousSocket := updateControlSocketForCommand
 	previousTerminal := updateInputIsTerminal
-	updateControlSocketForCommand = func() (string, error) { return fixture.listener.Addr().String(), nil }
+	updateControlSocketForCommand = func() (string, error) { return fixture.socket, nil }
 	updateInputIsTerminal = func(*cobra.Command) bool { return terminal }
 	t.Cleanup(func() {
 		updateControlSocketForCommand = previousSocket
