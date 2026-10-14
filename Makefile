@@ -1,4 +1,4 @@
-.PHONY: build test smoke
+.PHONY: build test smoke gate
 
 # Linux host binaries in ignored .build/. Cross-platform device builds: see AGENTS.md.
 build:
@@ -16,3 +16,7 @@ test:
 
 smoke:
 	tools/device-smoke/smoke.sh --expect-version "$(VERSION)"
+
+# Regression gate: run before every push (AGENTS.md).
+gate:
+	tools/gate.sh

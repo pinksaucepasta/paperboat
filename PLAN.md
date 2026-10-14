@@ -4,7 +4,7 @@ What to build and how. Progress is tracked **only** in [CHECKLIST.md](CHECKLIST.
 item below has an ID (e.g. `F3-07`) with a row there, and every `pb` command has a row in its
 Part B. Read AGENTS.md first.
 
-Work strictly in the order of section **3** (S0, S1, F1 … F15, S2, S3). For each feature:
+Work strictly in the order of section **3** (S0, S4, S1, F1 … F15, S2, S3), split into lanes as in AGENTS.md when several sessions run. For each feature:
 make every Part A row and every Part B command row of that feature `[x]` on all platforms,
 then move on. Regressions in earlier sections are fixed first.
 
@@ -93,6 +93,25 @@ ARM builds must compile, pass unit tests and be included in every release.
   probably Vercel). Until then the console runs as today (dev server behind the Tailscale
   Funnel at https://oracle.newt-mermaid.ts.net).
 
+### 1.4b Release and installation model
+
+- **`pb` CLI** is released as today: five platform binaries (1.1), macOS `.pkg`, Windows
+  installer, signed TUF metadata, installed by the `get.pprbt.dev` one-liners.
+- **Server, relay and tunnel** are released as Docker images for **linux/amd64 and
+  linux/arm64** (`ghcr.io/pinksaucepasta/paperboat-server`, `…-relay`, `…-tunnel`).
+- **One installer script** installs and upgrades them, modelled on
+  `curl -fsSL https://cdn.coollabs.io/coolify/install.sh | sudo bash` (read that script before
+  designing ours): `curl -fsSL https://get.pprbt.dev/self-host.sh | sudo bash -s -- <role>` where
+  role is `server` (server + PostgreSQL + its edge/proxy), `relay`, `tunnel`, or `all`. It
+  installs Docker if missing, creates the install directory, generates secrets on first run,
+  writes the compose file from the selected image version, starts and health-checks it, and on
+  re-run upgrades in place keeping data and secrets. It must be idempotent, print what it did,
+  and fail with a clear message on unsupported systems (supported: Ubuntu 22.04/24.04 and
+  Debian 12, amd64 and arm64).
+- **Our own infrastructure is installed with the same script** (dogfooding), so the self-host
+  path is exercised for real. Self-hosted relays/edges/servers registering with our control
+  plane or running standalone follow the existing product behaviour.
+
 ### 1.5 Repository and process
 
 - This monorepo lives at github.com/pinksaucepasta/paperboat (**private**; licence later,
@@ -129,7 +148,7 @@ console frontend: **USER DECIDES**. Inspector capture/replay: ships only if it a
 
 ## 3. Work, in order
 
-Order: **S0 → S1 → F1 … F15 → S2 → S3.** S-sections are groundwork and release; F-sections
+Order: **S0 → S4 → S1 → F1 … F15 → S2 → S3** (lanes may run in parallel, see AGENTS.md). S-sections are groundwork and release; F-sections
 are product features. For each feature, everything a user can do with it is in scope: its
 `pb` commands (CHECKLIST.md Part B lists them under the feature), its console screens, its
 server side, its failure and recovery behaviour, on L, M and W. Finish a feature completely
@@ -160,15 +179,24 @@ Prerequisite: the user has formatted coolify and said so.
 - S1-03: Previews and tunnels at `<name>.pprbt.app`; names from the existing name generator; preview names immutable; tunnel rename in server, CLI and console; global uniqueness.
 - S1-04: Console origin `app.paperboat.cloud` and marketing `paperboat.cloud` configured for production (links, CORS/allowed origins, WorkOS redirects) while the dev console keeps https://oracle.newt-mermaid.ts.net — configuration only.
 - S1-05: Unit tests use the configured test domain; switching the deployment's domains in configuration works without a code change (verify once).
-- S1-06: Server image from this repo; PostgreSQL 17; migrations from zero; diagnostics store; edge/proxy for `api.pprbt.dev` and `get.pprbt.dev`. Exact from-scratch deploy commands written in `server/README.md`.
+- S1-06: Server stack (server, PostgreSQL 17 with migrations from zero, diagnostics store, edge/proxy for `api.pprbt.dev` and `get.pprbt.dev`) installed on the formatted coolify **with the S4 installer** (`self-host.sh server`), using images built from this repo.
 - S1-07: Secrets restored from `~/paperboat-archive/coolify-backup/` into the deployment (never printed or committed).
 - S1-08: DNS records for all of 1.2; TLS certificates issued and renewing (`*.pprbt.app` wildcard, `api`/`get.pprbt.dev`).
 - S1-09: Tunnel edge serving `*.pprbt.app` (HTTP/1.1, HTTP/2, HTTP/3, WebSocket).
-- S1-10: Relays rebuilt from this repo, registered, reported ready by the server.
+- S1-10: Relays and the tunnel edge installed with the S4 installer (`relay`, `tunnel` roles), registered, reported ready by the server.
 - S1-11: WorkOS sign-in through the console dev origin; new account creation works.
 - S1-12: Daily database backup runs; one restore into a scratch database tested.
 - S1-13: Server `/healthz` and Sentry error reporting (if configured in the backup) work.
 - S1-14: Console ↔ server contract fixes from console/NOTES.md that every feature depends on: unknown `/v1/` paths return 404 (not 401); OpenAPI response schemas for `/v1/me` and machine endpoints; sign-in return path.
+
+### S4. Self-host installer and images (Lane B; needed by S1)
+
+- S4-01: Docker images for server, relay and tunnel build for linux/amd64 and linux/arm64 from this repo (multi-arch manifests), tagged with the release version.
+- S4-02: `self-host.sh` implements 1.4b on a fresh Ubuntu 24.04 VPS: installs Docker, generates secrets, starts the selected role(s), health-checks them, prints the result.
+- S4-03: Re-running it upgrades in place to a newer image version, keeping data and secrets; a failed upgrade leaves the previous version running.
+- S4-04: Works on amd64 and arm64 (arm64: build-only plus one run in an arm64 container/VM if available), and on Debian 12; unsupported systems get a clear refusal.
+- S4-05: Uninstall/teardown option removes containers and (only with explicit confirmation) data.
+- S4-06: Self-host documentation: how to run your own server/relay/tunnel and connect `pb` to it (`--server`), written from the actual script behaviour.
 
 ### F1. Install and setup
 
@@ -424,7 +452,7 @@ console Activity feed.
 
 - S3-01: CI release from a tag builds all five binaries, the macOS `.pkg` and the Windows installer, signs them, publishes TUF metadata, and publishes downloads to a **public** location (agree the host with the user).
 - S3-02: The installer one-liners install the release.
-- S3-03: Server, relay and tunnel images built from the release commit and deployed.
+- S3-03: Server, relay and tunnel multi-arch images built from the release commit, published, and deployed to our infrastructure with the installer's upgrade path.
 - S3-04: Full smoke suite (every feature F1–F15) green on the release build on L, M, W.
 - S3-05: User and operator docs (`cli/docs`, `server/docs`, READMEs) match behaviour (each feature's docs fixed when the feature is verified).
 - S3-06: Operator admin frontend: **USER DECIDES**.

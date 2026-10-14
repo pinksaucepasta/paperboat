@@ -48,6 +48,41 @@ component directory. Go 1.27.1.
 7. **Mark CHECKLIST.md as you go** (cell + evidence) and commit it with the work. Do not
    create other plan, tracker, handoff or report files.
 
+## Regression gate (mandatory before every push)
+
+Regressions are the most expensive failure in this project. They are prevented mechanically:
+
+1. **Every `[x]` row in CHECKLIST.md has an automated check**: a smoke-suite test id or a
+   named unit/integration test. A row that can only be checked by hand cannot be `[x]`
+   (console UI rows use a scripted browser check or a recorded manual step re-run at each
+   feature completion; say which).
+2. **`make gate` before every push.** It runs vet and unit tests for every Go module, the
+   console lint/build, and, when anything under `cli/`, `relay/`, `tunnel/` or `server/`
+   changed, the device smoke suite for **every feature already `[x]`** (not only the one
+   being worked on).
+3. **A previously green check that fails blocks the push.** Fix it in this lane, or revert
+   the change that broke it. Never push with a known regression, never mark it `n/a`, never
+   weaken the check.
+4. Before changing shared code (transport, daemon, auth, server APIs used by several
+   features), list the features that use it and include their checks in the run.
+
+## Lanes (parallel sessions)
+
+Several sessions may work at once only in separate lanes. A lane only edits the paths it
+owns; a change needed in another lane's paths is written as a short request in the Log of
+PLAN.md (section 5) and done by that lane. **Only Lane A uses the test devices.**
+
+| Lane | Owns | Works on (PLAN.md) |
+|---|---|---|
+| A — CLI & devices | `cli/`, `relay/`, `tools/device-smoke/` | S0 (except console/CI rows), F1–F12, F14, F15 device and CLI parts |
+| B — Server & infrastructure | `server/`, `tunnel/`, `deploy/`, `.github/` | S0 CI rows, S1, S4 installer, F13, server parts of every feature, S3 |
+| C — Console & marketing | `console/`, `marketing/` | console parts of every feature, S2 |
+
+Contracts between lanes (server API, discovery response) are changed by the lane that owns
+the producer first, committed and pushed, then consumers update. A feature becomes `[x]`
+only when all its rows across lanes are done; Lane A runs its device verification last.
+With a single session, that session works all lanes in PLAN.md order.
+
 ## Code quality
 
 - Simple and small beats clever and defensive. Prefer deleting code to adding it. Remove
