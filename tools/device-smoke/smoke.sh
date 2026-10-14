@@ -273,17 +273,30 @@ test_transfer() {
 }
 
 test_preview() { # on a Unix device: serve a marker on loopback, publish, fetch from the workspace
-  local d=$1 port=$(( 18000 + RANDOM % 1000 )) marker="pv-$RUN_ID" t0 out url
+  local d=$1 port=$(( 18000 + RANDOM % 1000 )) marker="pv-$RUN_ID" t0 out url id status stopped
   t0=$(now)
   out=$(on "$d" "mkdir -p /tmp/$RUN_ID-pv && cd /tmp/$RUN_ID-pv && echo $marker > index.html && (nohup python3 -m http.server $port --bind 127.0.0.1 >/dev/null 2>&1 & echo \$! > srv.pid) && sleep 1 && \
     $( [ "$d" = apple ] && echo "$PB_APPLE" || echo "$PB_HP" ) preview $port --background --ttl 10m --json" 2>&1)
-  url=$(grep -oE 'https://[^"]+' <<<"$out" | head -1)
-  if [ -z "$url" ]; then record "preview:$d" FAIL $(( $(now)-t0 )) "no URL: $(tr '\n' ' ' <<<"$out" | tail -c 200)"
+  status=$?
+  id=$(python3 "$HERE/preview_receipt.py" id <<<"$out" 2>/dev/null)
+  url=$(python3 "$HERE/preview_receipt.py" endpoint <<<"$out" 2>/dev/null)
+  if [ "$status" != 0 ] || [ -z "$id" ] || [ -z "$url" ]; then record "preview:$d" FAIL $(( $(now)-t0 )) "preview creation failed or returned no canonical resource; output withheld"
   else
     local body=""
     for _ in $(seq 1 12); do body=$(curl -fsS --max-time 10 "$url" 2>/dev/null) && grep -q "$marker" <<<"$body" && break; sleep 5; done
     if grep -q "$marker" <<<"$body"; then record "preview:$d" PASS $(( $(now)-t0 ))
     else record "preview:$d" FAIL $(( $(now)-t0 )) "URL did not serve marker"; fi
+  fi
+  if [ -n "$id" ]; then
+    stopped=$(pb_on "$d" preview stop "$id" --json 2>/dev/null)
+    status=$?
+    if [ "$status" = 0 ] && python3 "$HERE/preview_receipt.py" stopped "$id" <<<"$stopped" >/dev/null 2>&1; then
+      record "cleanup-preview:$d" PASS $(( $(now)-t0 ))
+    else
+      record "cleanup-preview:$d" FAIL $(( $(now)-t0 )) "exact preview stop was not acknowledged; output withheld"
+    fi
+  else
+    record "cleanup-preview:$d" FAIL $(( $(now)-t0 )) "could not identify the created preview for cleanup"
   fi
   on "$d" "kill \$(cat /tmp/$RUN_ID-pv/srv.pid) 2>/dev/null; rm -rf /tmp/$RUN_ID-pv" >/dev/null 2>&1
 }

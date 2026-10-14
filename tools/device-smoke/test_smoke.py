@@ -11,6 +11,45 @@ HERE = pathlib.Path(__file__).resolve().parent
 
 
 class SmokeReceipts(unittest.TestCase):
+    def test_preview_stops_its_exact_lease_and_cleanup_failure_fails_run(self):
+        prefix = (HERE / 'smoke.sh').read_text().split('# ---------------------------------------------------------------- run')[0]
+        for stop_exit, stop_id, stop_state, create_exit in [(0, "preview_owned", "stopped", 0), (7, "preview_owned", "stopped", 0),
+                                                              (0, "preview_other", "stopped", 0), (0, "preview_owned", "ready", 0),
+                                                              (0, "preview_owned", "stopped", 7)]:
+            with self.subTest(stop_exit=stop_exit, stop_id=stop_id, stop_state=stop_state, create_exit=create_exit), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                curl = root / 'curl'
+                curl.write_text('#!/bin/sh\necho pv-owned\n')
+                curl.chmod(0o700)
+                script = root / 'smoke.sh'
+                script.write_text(prefix + '\nHERE=' + str(HERE) + r'''
+RUN_ID=owned
+on() {
+  shift
+  case "$*" in
+    *'preview stop '*)
+      printf '%s' "$*" > "$STOP_COMMAND"
+      printf '{"schema":"paperboat.preview-tunnel/v1","kind":"preview_lease","id":"%s","state":"%s"}\n' "$STOP_ID" "$STOP_STATE"
+      return "$STOP_EXIT" ;;
+    *'--background'*)
+      printf '%s\n' '{"schema":"paperboat.preview-tunnel/v1","kind":"preview_lease","id":"preview_owned","endpoint":"https://preview.example.test","state":"ready"}'
+      return "$CREATE_EXIT" ;;
+    *) return 0 ;;
+  esac
+}
+test_preview hp
+exit "$FAILED"
+''')
+                stopped = root / 'stop-command'
+                result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'hp'],
+                                        env=dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'],
+                                                 STOP_COMMAND=str(stopped), STOP_EXIT=str(stop_exit), STOP_ID=stop_id, STOP_STATE=stop_state, CREATE_EXIT=str(create_exit)),
+                                        capture_output=True, text=True, timeout=10)
+                self.assertTrue(stopped.exists(), 'preview lease was left active')
+                self.assertIn('preview stop preview_owned --json', stopped.read_text())
+                self.assertEqual(result.returncode, int(stop_exit != 0 or stop_id != "preview_owned" or stop_state != "stopped" or create_exit != 0), result.stdout + result.stderr)
+                self.assertIn('preview:hp', result.stdout)
+
     def run_exec(self, exit_code, forged_receipt=False, transport_failure=False):
         # Exercise the smoke owner through a local shell transport; the command
         # really runs and returns the requested status, including a forged stdout receipt.
