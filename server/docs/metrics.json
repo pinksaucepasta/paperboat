@@ -2,19 +2,11 @@
   "schema_version": 1,
   "metrics": [
     {
-      "name": "billing_auto_topup_uncertain_depth",
-      "kind": "gauge"
-    },
-    {
       "name": "billing_checkout_uncertain_depth",
       "kind": "gauge"
     },
     {
       "name": "billing_portal_uncertain_depth",
-      "kind": "gauge"
-    },
-    {
-      "name": "billing_subscription_update_uncertain_depth",
       "kind": "gauge"
     },
     {
@@ -122,56 +114,20 @@
       "kind": "counter"
     },
     {
-      "name": "machine_completed_total",
+      "name": "device_completed_total",
       "kind": "counter"
     },
     {
-      "name": "machine_login_latency_ms_max",
+      "name": "device_login_latency_ms_max",
       "kind": "gauge"
     },
     {
-      "name": "machine_login_latency_ms_total",
+      "name": "device_login_latency_ms_total",
       "kind": "counter"
     },
     {
-      "name": "machine_requested_total",
+      "name": "device_requested_total",
       "kind": "counter"
-    },
-    {
-      "name": "hosted_orchestration_expired_lease_depth",
-      "kind": "gauge"
-    },
-    {
-      "name": "hosted_orchestration_oldest_age_seconds",
-      "kind": "gauge"
-    },
-    {
-      "name": "hosted_orchestration_queue_depth",
-      "kind": "gauge"
-    },
-    {
-      "name": "hosted_orphan_review_depth",
-      "kind": "gauge"
-    },
-    {
-      "name": "hosted_provider_oldest_age_seconds",
-      "kind": "gauge"
-    },
-    {
-      "name": "hosted_provider_retryable_depth",
-      "kind": "gauge"
-    },
-    {
-      "name": "hosted_provider_uncertain_depth",
-      "kind": "gauge"
-    },
-    {
-      "name": "hosted_readiness_failure_depth",
-      "kind": "gauge"
-    },
-    {
-      "name": "hosted_readiness_recent_failure_age_seconds",
-      "kind": "gauge"
     },
     {
       "name": "paperboat_runtime_update_rollbacks_total",
@@ -210,22 +166,6 @@
       "kind": "counter"
     },
     {
-      "name": "provider_stripe_errors_total",
-      "kind": "counter"
-    },
-    {
-      "name": "provider_stripe_latency_ms_max",
-      "kind": "gauge"
-    },
-    {
-      "name": "provider_stripe_latency_ms_total",
-      "kind": "counter"
-    },
-    {
-      "name": "provider_stripe_requests_total",
-      "kind": "counter"
-    },
-    {
       "name": "provider_provider_route_errors_total",
       "kind": "counter"
     },
@@ -239,6 +179,22 @@
     },
     {
       "name": "provider_provider_route_requests_total",
+      "kind": "counter"
+    },
+    {
+      "name": "provider_stripe_errors_total",
+      "kind": "counter"
+    },
+    {
+      "name": "provider_stripe_latency_ms_max",
+      "kind": "gauge"
+    },
+    {
+      "name": "provider_stripe_latency_ms_total",
+      "kind": "counter"
+    },
+    {
+      "name": "provider_stripe_requests_total",
       "kind": "counter"
     },
     {
