@@ -1,11 +1,15 @@
 name: CI
 
-# Manual only until adjusted to the monorepo layout (PLAN.md P0).
+# Manual only until S0-07 is verified.
 on:
   workflow_dispatch:
 
 permissions:
   contents: read
+
+defaults:
+  run:
+    working-directory: server
 
 concurrency:
   group: ci-${{ github.repository }}-${{ github.ref }}
@@ -14,10 +18,17 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version-file: go.mod
+          go-version-file: server/go.mod
           cache: true
+          cache-dependency-path: |
+            server/go.sum
+            cli/go.sum
+            relay/go.sum
+            tunnel/go.sum
+            go.work.sum
       - run: make check race reproducible-builds binary-size-check static-analysis vulnerability-check license-check

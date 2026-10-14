@@ -58,10 +58,10 @@ generate-check:
 check: verify-toolchain dependencies source-policy metrics-check scenario-matrix-check fmt-check generate-check vet test build
 
 scenario-matrix-generate:
-	$(GO) run ./tools/scenario-matrix testdata/topology/scenarios.json internal/testtopology/topology_test.go .github/generated/topology-matrix.json
+	$(GO) run ./tools/scenario-matrix testdata/topology/scenarios.json internal/testtopology/topology_test.go ../.github/server-generated/topology-matrix.json
 
 scenario-matrix-check:
-	$(GO) run ./tools/scenario-matrix -check testdata/topology/scenarios.json internal/testtopology/topology_test.go .github/generated/topology-matrix.json
+	$(GO) run ./tools/scenario-matrix -check testdata/topology/scenarios.json internal/testtopology/topology_test.go ../.github/server-generated/topology-matrix.json
 
 ## test: run the test suite
 test:
