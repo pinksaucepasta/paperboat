@@ -29,6 +29,7 @@ var operatorPolicies = map[string]operatorPolicy{
 	"PUT /v1/admin/client-update-policy":                       {"admin", "", "client-update-policy"},
 	"POST /v1/admin/selfhost/enrollments":                      {"admin", "body:address", "selfhost"},
 	"GET /v1/admin/selfhost/installations":                     {"operations", "", "selfhost"},
+	"GET /v1/admin/selfhost/installations/{installationID}":    {"operations", "installationID", ""},
 	"DELETE /v1/admin/selfhost/installations/{installationID}": {"admin", "installationID", "selfhost"},
 	"GET /v1/admin/regions":                                    {"operations", "", "regions"},
 	"GET /v1/admin/nodes":                                      {"operations", "", "nodes"},

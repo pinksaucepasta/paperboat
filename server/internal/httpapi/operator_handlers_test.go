@@ -63,12 +63,19 @@ func TestOperatorCapability(t *testing.T) {
 		{"admin_read", "GET", "GET /v1/admin/accounts/{account_id}", auth.RoleAdmin, now, 200},
 		{"admin_write", "POST", "POST /v1/admin/control-operations/{operation_id}/recover", auth.RoleAdmin, now, 200},
 		{"unknown_denied", "GET", "GET /v1/admin/new-route", auth.RoleAdmin, now, 403},
+		{"operations_read_installation", "GET", "GET /v1/admin/selfhost/installations/{installationID}", auth.RoleOperations, now, 200},
+		{"admin_read_installation", "GET", "GET /v1/admin/selfhost/installations/{installationID}", auth.RoleAdmin, now, 200},
+		{"support_no_installation", "GET", "GET /v1/admin/selfhost/installations/{installationID}", auth.RoleSupport, now, 403},
+		{"billing_no_installation", "GET", "GET /v1/admin/selfhost/installations/{installationID}", auth.RoleBilling, now, 403},
+		{"user_no_installation", "GET", "GET /v1/admin/selfhost/installations/{installationID}", auth.RoleUser, now, 403},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := &operatorAuditFake{}
 			called := false
 			w := httptest.NewRecorder()
-			operatorGuard(a, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true; w.Write([]byte("safe")) })).ServeHTTP(w, operatorTestRequest(tc.method, tc.route, tc.role, tc.at))
+			r := operatorTestRequest(tc.method, tc.route, tc.role, tc.at)
+			r.SetPathValue("installationID", "installation_test")
+			operatorGuard(a, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true; w.Write([]byte("safe")) })).ServeHTTP(w, r)
 			if w.Code != tc.want || called != (tc.want == 200) {
 				t.Fatalf("status %d called %t", w.Code, called)
 			}
