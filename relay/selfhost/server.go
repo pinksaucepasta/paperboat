@@ -262,7 +262,7 @@ func applyClaim(ctx context.Context, dir string, s *state) error {
 			}
 		}
 		listenHost, _, _ := net.SplitHostPort(s.Config.Listen)
-		setup := Setup{ListenHost: listenHost, ControlURL: s.Claim.ControlURL, Name: s.Config.Name, Capability: comp.Capability, EndpointHost: s.Config.EndpointHost, Region: comp.Region, FailureDomain: comp.FailureDomain, TCPPort: comp.TCPPort, QUICPort: comp.QUICPort, CapacityLimit: comp.CapacityLimit, TLSCert: filepath.Join(dir, "tls.crt"), TLSKey: filepath.Join(dir, "tls.key"), ControlCA: s.Config.ControlCA, PreviewDomain: s.Config.PreviewDomain, TunnelDomain: s.Config.TunnelDomain, RuntimeDomain: s.Config.RuntimeDomain, PublicHTTPSCertFile: s.Config.PublicHTTPSCertFile, PublicHTTPSKeyFile: s.Config.PublicHTTPSKeyFile}
+		setup := Setup{ScopeType: s.Claim.ScopeType, ListenHost: listenHost, ControlURL: s.Claim.ControlURL, Name: s.Config.Name, Capability: comp.Capability, EndpointHost: s.Config.EndpointHost, Region: comp.Region, FailureDomain: comp.FailureDomain, TCPPort: comp.TCPPort, QUICPort: comp.QUICPort, CapacityLimit: comp.CapacityLimit, TLSCert: filepath.Join(dir, "tls.crt"), TLSKey: filepath.Join(dir, "tls.key"), ControlCA: s.Config.ControlCA, PreviewDomain: s.Config.PreviewDomain, TunnelDomain: s.Config.TunnelDomain, RuntimeDomain: s.Config.RuntimeDomain, PublicHTTPSCertFile: s.Config.PublicHTTPSCertFile, PublicHTTPSKeyFile: s.Config.PublicHTTPSKeyFile}
 		componentDir := filepath.Join(dir, comp.Capability)
 		if err := ExportRuntime(ctx, componentDir, setup, registered.Registration, usage, s.Claim.JWKS, s.Claim.Revocations); err != nil {
 			return err
@@ -282,7 +282,7 @@ func Serve(ctx context.Context, dir string, onClaim func(), observe func(context
 		return err
 	}
 	s, err := load(dir)
-	if err == nil && s.Claim != nil && !s.RuntimeReady {
+	if err == nil && s.Claim != nil {
 		err = applyClaim(ctx, dir, &s)
 	}
 	lock.Close()

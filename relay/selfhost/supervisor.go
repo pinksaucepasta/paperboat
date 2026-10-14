@@ -72,6 +72,9 @@ func runWithLauncher(ctx context.Context, dir string, launcher RuntimeLauncher, 
 		if !ready {
 			return nil
 		}
+		if err := syncPublicHTTPSDeployment(dir); err != nil {
+			return err
+		}
 		dirs, err := ComponentDirectories(dir)
 		if err != nil {
 			return err
@@ -90,12 +93,6 @@ func runWithLauncher(ctx context.Context, dir string, launcher RuntimeLauncher, 
 		}
 		started = true
 		return nil
-	}
-	if err := syncPublicHTTPSDeployment(dir); err != nil {
-		return err
-	}
-	if err := start(); err != nil {
-		return err
 	}
 	serverDone := make(chan error, 1)
 	go func() { serverDone <- Serve(ctx, dir, notify, observe) }()

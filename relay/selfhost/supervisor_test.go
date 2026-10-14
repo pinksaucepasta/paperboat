@@ -157,7 +157,7 @@ wait "$child"
 			if time.Now().After(deadline) {
 				cancel()
 				<-done
-				t.Fatal("runtime did not start/restart")
+				t.Fatalf("runtime did not start/restart: previous=%d logs=%q", previous, logs.String())
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
