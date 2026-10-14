@@ -85,7 +85,9 @@ finishes and pushes the Go/API side, then writes the frontend request (API, fiel
 errors) in the PLAN.md Log; Claude does it. Go changes the frontend needs are done by Codex.
 
 **Keep going until done.** A lane works its rows in PLAN.md order and does not stop until every
-row it owns is `[x]` or `[!]`. Do not ask the user to confirm routine choices. When a row is
+row it owns is `[x]` or `[!]`. Do not ask the user to confirm routine choices. `[!]` means blocked on something
+specific (named in Evidence); rows that simply come later in PLAN.md order stay `[ ]`; one Log
+line says which section the lane is waiting for. When a row is
 blocked, log it in PLAN.md section 5, mark it `[!]` with the reason, continue with the next row,
 and return when the blocker clears:
 - needs another lane's code or the server: write the request in the Log;
@@ -94,7 +96,8 @@ and return when the blocker clears:
 - needs credentials or a **USER DECIDES** item: log exactly what is needed;
 - two failed attempts at the same thing: log what you know and what you tried.
 A commit, push, fixed blocker or finished row is never a stopping point: continue with the next
-row in the same turn. End the turn only when every owned row is `[x]` or `[!]`, then report a
+row in the same turn. End the turn only when every owned row is `[x]` or `[!]`, or every
+remaining row waits on an earlier section another lane is still doing; then report a
 short table: rows done, rows `[!]` with reasons, commits. Root files no lane owns (`go.work`,
 `Makefile`, `tools/gate.sh`) are edited by the lane whose change needs them, with `make gate`;
 do not ask.
