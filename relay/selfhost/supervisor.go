@@ -5,12 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -22,6 +18,32 @@ func Run(ctx context.Context, dir, binaryDir string, output io.Writer, observe f
 	return run(ctx, dir, binaryDir, output, ticker.C, observe)
 }
 func run(ctx context.Context, dir, binaryDir string, output io.Writer, renewals <-chan time.Time, observe func(context.Context, string, error)) error {
+	return runWithLauncher(ctx, dir, binaryLauncher{directory: binaryDir}, output, renewals, observe)
+}
+
+// RuntimeLauncher runs exactly one selected component until it exits or ctx is
+// canceled. Implementations own readiness and bounded cleanup of their runtime
+// (including containers); they must finish cleanup before Run returns. Generated
+// state paths must be mounted at the same absolute paths inside containers.
+// The installation remains the sole enrollment and certificate owner.
+type RuntimeLauncher interface {
+	Validate(context.Context, string, string) error
+	Run(context.Context, string, string, io.Writer) error
+}
+
+// RunWithLauncher lets pbh use its Docker lifecycle without a second supervisor.
+// All components are validated before any is launched; crashes and certificate
+// replacement use the same cancellation, drain and restart path.
+func RunWithLauncher(ctx context.Context, dir string, launcher RuntimeLauncher, output io.Writer, observe func(context.Context, string, error)) error {
+	if launcher == nil {
+		return errors.New("runtime launcher is required")
+	}
+	ticker := time.NewTicker(certificateCheckInterval)
+	defer ticker.Stop()
+	return runWithLauncher(ctx, dir, launcher, output, ticker.C, observe)
+}
+
+func runWithLauncher(ctx context.Context, dir string, launcher RuntimeLauncher, output io.Writer, renewals <-chan time.Time, observe func(context.Context, string, error)) error {
 	output = &synchronizedWriter{writer: output}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -55,21 +77,15 @@ func run(ctx context.Context, dir, binaryDir string, output io.Writer, renewals 
 			return err
 		}
 		for _, componentDir := range dirs {
-			capability := filepath.Base(componentDir)
-			binary := filepath.Join(binaryDir, "paperboat-"+capability)
-			info, err := os.Stat(binary)
-			if err != nil {
-				return fmt.Errorf("runtime binary unavailable: %w", err)
-			}
-			if !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
-				return fmt.Errorf("%s runtime binary unavailable", capability)
+			if err := launcher.Validate(childContext, filepath.Base(componentDir), componentDir); err != nil {
+				return fmt.Errorf("prepare %s runtime: %w", filepath.Base(componentDir), err)
 			}
 		}
 		for _, componentDir := range dirs {
 			wg.Add(1)
 			go func(componentDir string) {
 				defer wg.Done()
-				supervise(childContext, filepath.Join(binaryDir, "paperboat-"+filepath.Base(componentDir)), componentDir, output, observe)
+				supervise(childContext, launcher, filepath.Base(componentDir), componentDir, output, observe)
 			}(componentDir)
 		}
 		started = true
@@ -130,35 +146,15 @@ func run(ctx context.Context, dir, binaryDir string, output io.Writer, renewals 
 		}
 	}
 }
-func supervise(ctx context.Context, binary, dir string, output io.Writer, observe func(context.Context, string, error)) {
+func supervise(ctx context.Context, launcher RuntimeLauncher, capability, dir string, output io.Writer, observe func(context.Context, string, error)) {
 	delay := time.Second
 	for ctx.Err() == nil {
-		cmd := exec.CommandContext(ctx, binary, "run", "--state-dir", dir)
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		cmd.Stdout = output
-		cmd.Stderr = output
-		cmd.Cancel = func() error {
-			if cmd.Process == nil {
-				return nil
-			}
-			err := syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-			if errors.Is(err, syscall.ESRCH) {
-				return os.ErrProcessDone
-			}
-			return err
-		}
-		cmd.WaitDelay = 6 * time.Second
 		started := time.Now()
-		err := cmd.Run()
-		// The group belongs to this runtime alone. Retire descendants even if
-		// the parent crashed or exited before cancellation finished.
-		if cmd.Process != nil {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		}
+		err := launcher.Run(ctx, capability, dir, output)
 		if ctx.Err() != nil {
 			return
 		}
-		fmt.Fprintf(output, "%s stopped; restarting in %s\n", strings.TrimPrefix(filepath.Base(binary), "paperboat-"), delay)
+		fmt.Fprintf(output, "%s stopped; restarting in %s\n", capability, delay)
 		if observe != nil && err != nil {
 			observe(ctx, "selfhost_child", err)
 		}
