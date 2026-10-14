@@ -94,6 +94,8 @@ type AuthorityOptions struct {
 // Authority owns verified configuration and every engine attached through it.
 // Application operation credentials and QUIC certificate validation remain mandatory.
 type Authority struct {
+	streamScopes bool
+	scopeChanges chan struct{}
 	// expiresAt fences packet I/O independently of timer scheduling and teardown.
 	expiresAt       atomic.Int64
 	mu              sync.Mutex
@@ -468,6 +470,7 @@ func (a *Authority) dropLocked() {
 		a.clientEngine = nil
 	}
 	a.current = nil
+	a.notifyScopeChangesLocked()
 	a.private = key.NodePrivate{}
 }
 func (a *Authority) Close() error {

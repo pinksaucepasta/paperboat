@@ -19,15 +19,19 @@ import (
 )
 
 type Session struct {
-	owner    *Owner
-	peerID   string
-	binding  tailnet.NetworkBinding
-	quic     *peerquic.Session
-	router   *peerquic.StreamRouter
-	routerMu sync.Mutex
-	once     sync.Once
-	closing  atomic.Bool
-	err      error
+	owner      *Owner
+	peerID     string
+	binding    tailnet.NetworkBinding
+	quic       *peerquic.Session
+	router     *peerquic.StreamRouter
+	routerMu   sync.Mutex
+	once       sync.Once
+	closing    atomic.Bool
+	err        error
+	scopeMu    sync.Mutex
+	scopeConns map[*scopeConn]struct{}
+	http3Scope *scopeKey
+	scopeDone  chan struct{}
 }
 
 // MeterBinding contains only verified accounting metadata, never credentials.
@@ -62,6 +66,9 @@ func (s *Session) OpenAuthorizedHTTP3(ctx context.Context, header streamauth.Hea
 	if ctx == nil || header.Consumer != "private_http" || !s.IsPrivateHTTP3() || !s.owner.authority.Allows(s.peerID, accessSessionID, "private_access", "dial") {
 		return nil, tailnet.ErrAdmission
 	}
+	if err := s.bindHTTP3Scope(accessSessionID, "dial"); err != nil {
+		return nil, err
+	}
 	return (&http3.Transport{}).NewClientConn(s.quic.Connection), nil
 }
 
@@ -81,7 +88,16 @@ func (s *Session) AuthorizeHTTP3(ctx context.Context, header streamauth.Header, 
 	if !s.IsPrivateHTTP3() || authorize == nil {
 		return ErrInvalid
 	}
-	return s.authorizeIncoming(ctx, header, "private_access", authorize)
+	var resource string
+	err := s.authorizeIncoming(ctx, header, "private_access", func(ctx context.Context, h streamauth.Header) (string, error) {
+		var err error
+		resource, err = authorize(ctx, h)
+		return resource, err
+	})
+	if err != nil {
+		return err
+	}
+	return s.bindHTTP3Scope(resource, "accept")
 }
 
 var ErrStreamRejected = errors.New("native application stream rejected")
@@ -89,7 +105,8 @@ var ErrStreamRejected = errors.New("native application stream rejected")
 var _ http.RoundTripper = (*http3.ClientConn)(nil)
 
 func newSession(owner *Owner, peerID string, binding tailnet.NetworkBinding, session *peerquic.Session) *Session {
-	return &Session{owner: owner, peerID: peerID, binding: binding, quic: session}
+	s := &Session{owner: owner, peerID: peerID, binding: binding, quic: session, scopeConns: make(map[*scopeConn]struct{})}
+	return s
 }
 func (s *Session) PeerID() string { return s.peerID }
 
@@ -152,7 +169,7 @@ func (s *Session) OpenAuthorized(ctx context.Context, header streamauth.Header, 
 		_ = connection.Close()
 		return nil, err
 	}
-	return newLimitedConn(connection, header.MaximumBytes), nil
+	return s.bindScope(newLimitedConn(connection, header.MaximumBytes), accessSessionID, capability, "dial")
 }
 
 // AcceptAuthorized validates the operation credential first, then requires
@@ -187,7 +204,11 @@ func (s *Session) AcceptAuthorized(ctx context.Context, authorize func(context.C
 		_ = connection.Close()
 		return nil, streamauth.Header{}, errors.Join(ErrStreamRejected, err)
 	}
-	return s.MeterIncoming(newLimitedConn(connection, header.MaximumBytes), header, accessSessionID, false), header, nil
+	scoped, err := s.bindScope(newLimitedConn(connection, header.MaximumBytes), accessSessionID, capability, "accept")
+	if err != nil {
+		return nil, streamauth.Header{}, err
+	}
+	return s.MeterIncoming(scoped, header, accessSessionID, false), header, nil
 }
 
 func capabilityForConsumer(consumer string) string {
@@ -261,6 +282,9 @@ func (s *Session) Close() error {
 		}
 		s.routerMu.Unlock()
 		s.err = errors.Join(s.err, s.quic.Close())
+		if s.scopeDone != nil {
+			<-s.scopeDone
+		}
 		s.owner.remove(s)
 		s.owner.emit(Event{Kind: "closed", PeerID: s.peerID, Err: s.err})
 	})

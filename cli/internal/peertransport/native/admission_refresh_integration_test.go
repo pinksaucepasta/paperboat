@@ -154,4 +154,21 @@ func TestNativeNewResourceRefreshAndRejectedStreamIsolation(t *testing.T) {
 		t.Fatalf("refresh attempts=%d", refreshes.Load())
 	}
 	echo(existing)
+	// Ending one operation must revoke its stream without dropping another
+	// still-authorized operation sharing the same native peer connection.
+	serverConfig.Generation++
+	serverConfig.Peers[0].Scopes = serverConfig.Peers[0].Scopes[:1]
+	applyTestConfiguration(t, serverAuthority, signerPrivate, serverConfig)
+	if err := existing.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	echo(existing)
+	if err := fresh.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fresh.Read(b[:]); err == nil {
+		t.Fatal("withdrawn operation retained its stream")
+	} else if timeout, ok := err.(net.Error); ok && timeout.Timeout() {
+		t.Fatal("withdrawn stream was not actively closed")
+	}
 }

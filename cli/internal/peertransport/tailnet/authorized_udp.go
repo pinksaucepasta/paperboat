@@ -25,10 +25,13 @@ func (a *Authority) peersLocked() (map[key.NodePublic]netip.Addr, map[netip.Addr
 		pub, _ := publicKey(p.Identity.WireGuardPublicKey)
 		address := netip.MustParseAddr(p.Identity.VirtualAddress)
 		peers[pub] = address
-		// Include exact scopes in the opaque admission fence. A refresh that
-		// withdraws one peer capability closes that peer's active flows while
-		// leaving unrelated peer sessions intact.
-		raw, _ := json.Marshal(p)
+		// Raw UDP fences include scopes. Native owners revoke individual
+		// authorized streams; their shared carrier fences only peer identity.
+		var fence any = p
+		if a.streamScopes {
+			fence = p.Identity
+		}
+		raw, _ := json.Marshal(fence)
 		admitted[address] = string(raw)
 	}
 	return peers, admitted
@@ -74,7 +77,7 @@ func (a *Authority) replaceLocked() error {
 	}
 	for id, lease := range a.clients {
 		peer := allowed[id]
-		if peer.binding != lease.peer || !scopesRetained(lease.scopes, peer.scopes) {
+		if peer.binding != lease.peer || !a.streamScopes && !scopesRetained(lease.scopes, peer.scopes) {
 			_ = lease.client.Close()
 			if a.clientEngine != nil {
 				a.clientEngine.InvalidateAuthorizedPeer(lease.node)
@@ -92,6 +95,7 @@ func (a *Authority) replaceLocked() error {
 		}
 	}
 	if a.server == nil {
+		a.notifyScopeChangesLocked()
 		return nil
 	}
 	peers, admitted := a.peersLocked()
@@ -103,7 +107,7 @@ func (a *Authority) replaceLocked() error {
 			continue
 		}
 		var oldPeer, newPeer NetworkPeer
-		if json.Unmarshal([]byte(oldFence), &oldPeer) == nil && json.Unmarshal([]byte(newFence), &newPeer) == nil && oldPeer.Identity == newPeer.Identity && scopesRetained(oldPeer.Scopes, newPeer.Scopes) {
+		if !a.streamScopes && json.Unmarshal([]byte(oldFence), &oldPeer) == nil && json.Unmarshal([]byte(newFence), &newPeer) == nil && oldPeer.Identity == newPeer.Identity && scopesRetained(oldPeer.Scopes, newPeer.Scopes) {
 			admitted[address] = oldFence
 		}
 	}
@@ -127,6 +131,7 @@ func (a *Authority) replaceLocked() error {
 	for _, p := range removed {
 		_ = p.Close()
 	}
+	a.notifyScopeChangesLocked()
 	return nil
 }
 
@@ -246,7 +251,7 @@ func (a *Authority) Client(descriptor mesh.Addr, peerID string) (*UDPClient, err
 			lease.client.mu.Lock()
 			closed := lease.client.closed
 			lease.client.mu.Unlock()
-			if !closed && lease.peer == p.Identity && lease.descriptor == digest && scopesRetained(lease.scopes, p.Scopes) {
+			if !closed && lease.peer == p.Identity && lease.descriptor == digest && (a.streamScopes || scopesRetained(lease.scopes, p.Scopes)) {
 				return lease.client, nil
 			}
 			_ = lease.client.Close()

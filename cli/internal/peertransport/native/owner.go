@@ -207,6 +207,9 @@ func NewOwner(config Config) (*Owner, error) {
 	if config.Authority == nil || config.TLS == nil || len(config.TLS.Certificates) == 0 {
 		return nil, ErrInvalid
 	}
+	if err := config.Authority.UseStreamScopeFences(); err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Owner{authority: config.Authority, tls: config.TLS.Clone(), observe: config.Observe, refreshAuthority: config.RefreshAuthority, meterIncoming: config.MeterIncoming, ctx: ctx, cancel: cancel, sessions: make(map[*Session]struct{})}, nil
 }
@@ -383,6 +386,8 @@ func (o *Owner) add(session *Session) error {
 		return net.ErrClosed
 	}
 	o.sessions[session] = struct{}{}
+	session.scopeDone = make(chan struct{})
+	go session.watchScopes()
 	return nil
 }
 func (o *Owner) remove(session *Session) { o.mu.Lock(); delete(o.sessions, session); o.mu.Unlock() }
