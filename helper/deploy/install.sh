@@ -20,8 +20,9 @@ cleanup() {
  result=$?
  trap - EXIT HUP INT TERM
  if [ "$mutation_started" = true ] && [ "$installation_complete" = false ]; then
-  echo 'Installation failed; restoring previous executables and service.' >&2
-  for binary in pbh paperboat-relay paperboat-tunnel; do
+  echo 'Installation failed; restoring previous executable, image configuration and service.' >&2
+  if [ -f "$install_tmp/previous-images" ]; then $elevate install -m 0600 "$install_tmp/previous-images" /var/lib/paperboat-selfhost/images.json || true; fi
+  for binary in pbh; do
    if [ -f "$install_tmp/previous-$binary" ]; then
     $elevate install -m 0755 "$install_tmp/previous-$binary" "/usr/local/lib/paperboat-selfhost/$binary" || true
    else
@@ -48,20 +49,31 @@ curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 "$packag
 printf '%s  %s\n' "$package_sha256" "$install_tmp/package.tar.gz" | sha256sum --check --status || { echo 'Release integrity check failed; installation unchanged.' >&2; exit 1; }
 # Accept only the exact package members, even though the digest binds the archive.
 tar -tzf "$install_tmp/package.tar.gz" > "$install_tmp/members"
-while IFS= read -r member; do case "$member" in pbh|paperboat-relay|paperboat-tunnel|LICENSE|tailscale.LICENSE|manifest.json) ;; *) echo 'Invalid package member; installation unchanged.' >&2; exit 1;; esac; done < "$install_tmp/members"
+while IFS= read -r member; do case "$member" in pbh|LICENSE|tailscale.LICENSE|manifest.json) ;; *) echo 'Invalid package member; installation unchanged.' >&2; exit 1;; esac; done < "$install_tmp/members"
 tar -xzf "$install_tmp/package.tar.gz" --no-same-owner --no-same-permissions -C "$install_tmp"
-for binary in pbh paperboat-relay paperboat-tunnel; do [ -f "$install_tmp/$binary" ] && [ ! -L "$install_tmp/$binary" ] || { echo 'Incomplete release package; installation unchanged.' >&2; exit 1; }; done
+for binary in pbh; do [ -f "$install_tmp/$binary" ] && [ ! -L "$install_tmp/$binary" ] || { echo 'Incomplete release package; installation unchanged.' >&2; exit 1; }; done
+# The helper owns the supported-host policy; refuse before privileged changes.
+"$install_tmp/pbh" check-host
+if ! command -v docker >/dev/null 2>&1; then
+ docker_install_url='{{DOCKER_INSTALL_URL}}'
+ case "$docker_install_url" in https://*) ;; *) echo 'Docker installer source is not configured; installation unchanged.' >&2; exit 1;; esac
+ curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 --max-filesize 1048576 "$docker_install_url" -o "$install_tmp/docker-install.sh"
+ echo 'Installing Docker from the configured official source.'
+ $elevate sh "$install_tmp/docker-install.sh"
+fi
+$elevate docker info >/dev/null || { echo 'Docker daemon is unavailable; start Docker and rerun.' >&2; exit 1; }
 # Preserve executable provenance before changing an existing installation.
-for binary in pbh paperboat-relay paperboat-tunnel; do
+for binary in pbh; do
  if [ -f "/usr/local/lib/paperboat-selfhost/$binary" ]; then cp "/usr/local/lib/paperboat-selfhost/$binary" "$install_tmp/previous-$binary"; fi
 done
 if [ -f /usr/local/bin/pbh ]; then cp /usr/local/bin/pbh "$install_tmp/previous-command"; fi
+if [ -f /var/lib/paperboat-selfhost/images.json ]; then $elevate cp /var/lib/paperboat-selfhost/images.json "$install_tmp/previous-images"; fi
 if [ -f /etc/systemd/system/paperboat-selfhost.service ]; then cp /etc/systemd/system/paperboat-selfhost.service "$install_tmp/previous-unit"; fi
 # Stop an existing installation before atomically replacing executable files.
 if systemctl is-active --quiet paperboat-selfhost.service; then previous_active=true; $elevate systemctl stop paperboat-selfhost.service; fi
 mutation_started=true
 $elevate install -d -m 0755 /usr/local/lib/paperboat-selfhost
-for binary in pbh paperboat-relay paperboat-tunnel; do
+for binary in pbh; do
  $elevate install -m 0755 "$install_tmp/$binary" "/usr/local/lib/paperboat-selfhost/$binary.new"
  $elevate mv "/usr/local/lib/paperboat-selfhost/$binary.new" "/usr/local/lib/paperboat-selfhost/$binary"
 done

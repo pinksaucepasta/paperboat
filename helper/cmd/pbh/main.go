@@ -14,9 +14,11 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat-helper/internal/containers"
 	"github.com/pinksaucepasta/paperboat-helper/internal/reporting"
 	"github.com/pinksaucepasta/paperboat-relay/selfhost"
 )
@@ -25,6 +27,8 @@ var version = "development"
 
 // Official helper packages receive the configured address endpoint at build time.
 var defaultAddressURL string
+var defaultRelayImage string
+var defaultTunnelImage string
 
 const defaultState = "/var/lib/paperboat-selfhost"
 const defaultBinaries = "/usr/local/lib/paperboat-selfhost"
@@ -77,6 +81,15 @@ func runObserved(ctx context.Context, args []string, out io.Writer, observe func
 		return commandError("use pbh install, pbh configure-tls, pbh selfhost code, pbh status, or pbh uninstall")
 	}
 	switch args[0] {
+	case "check-host":
+		if len(args) != 1 {
+			return commandError("check-host accepts no arguments")
+		}
+		if err := containers.CheckHost(); err != nil {
+			return fmt.Errorf("%w: %w", commandError("unsupported self-host operating system"), err)
+		}
+		fmt.Fprintln(out, "Supported self-host operating system and architecture.")
+		return nil
 	case "version", "--version":
 		fmt.Fprintf(out, "pbh %s\n", version)
 		return nil
@@ -115,7 +128,6 @@ func runObserved(ctx context.Context, args []string, out io.Writer, observe func
 		fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 		fs.SetOutput(io.Discard)
 		dir := fs.String("state-dir", defaultState, "installation state directory")
-		binaries := fs.String("binary-dir", defaultBinaries, "runtime binaries directory")
 		if err := fs.Parse(args[1:]); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
 				fs.SetOutput(out)
@@ -127,7 +139,7 @@ func runObserved(ctx context.Context, args []string, out io.Writer, observe func
 		if fs.NArg() != 0 {
 			return commandError("unexpected arguments")
 		}
-		return selfhost.Run(ctx, *dir, *binaries, out, observe)
+		return containers.Serve(ctx, *dir, out, observe)
 	case "status":
 		cmd := exec.CommandContext(ctx, "systemctl", "status", "--no-pager", "paperboat-selfhost.service")
 		cmd.Stdout = out
@@ -190,6 +202,8 @@ func install(ctx context.Context, args []string, out io.Writer) error {
 	httpsKey := fs.String("https-key", "", "owner-only private key file for browser HTTPS")
 	dir := fs.String("state-dir", defaultState, "protected installation directory")
 	noService := fs.Bool("no-service", false, "initialize without systemd (isolated testing)")
+	relayImage := fs.String("relay-image", defaultRelayImage, "configured relay container image")
+	tunnelImage := fs.String("tunnel-image", defaultTunnelImage, "configured tunnel container image")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fs.SetOutput(out)
@@ -203,6 +217,18 @@ func install(ctx context.Context, args []string, out io.Writer) error {
 	}
 	if *enable != "relay" && *enable != "tunnel" && *enable != "both" {
 		return commandError("--enable must be relay, tunnel, or both")
+	}
+	if err := containers.CheckHost(); err != nil {
+		return fmt.Errorf("%w: %w", commandError("unsupported self-host operating system"), err)
+	}
+	images := containers.Images{Relay: *relayImage, Tunnel: *tunnelImage}
+	for _, capability := range strings.Split(strings.ReplaceAll(*enable, "both", "relay,tunnel"), ",") {
+		if _, err := images.Image(capability); err != nil {
+			return fmt.Errorf("%w: %w", commandError("configure the selected runtime image; use the release installer"), err)
+		}
+	}
+	if _, err := exec.LookPath("docker"); err != nil {
+		return commandError("Docker is required; run the self-host installer first")
 	}
 	if !*noService && os.Geteuid() != 0 {
 		return elevated(ctx, append([]string{"install"}, args...), out)
@@ -232,6 +258,9 @@ func install(ctx context.Context, args []string, out io.Writer) error {
 		c.Components = append(c.Components, selfhost.Component{Capability: "tunnel", TCPPort: 27443, QUICPort: 27444, Region: *region, FailureDomain: *failure, CapacityLimit: 256})
 	}
 	if err := selfhost.Initialize(*dir, c); err != nil {
+		return err
+	}
+	if err := containers.SaveImages(*dir, images); err != nil {
 		return err
 	}
 	if !*noService {
@@ -286,7 +315,7 @@ func installService(ctx context.Context) error {
 	if _, err := exec.LookPath("systemctl"); err != nil {
 		return fmt.Errorf("%w: %w", commandError("systemd is required for automatic service startup"), err)
 	}
-	for _, name := range []string{"pbh", "paperboat-relay", "paperboat-tunnel"} {
+	for _, name := range []string{"pbh"} {
 		path := filepath.Join(defaultBinaries, name)
 		info, err := os.Stat(path)
 		if err != nil {

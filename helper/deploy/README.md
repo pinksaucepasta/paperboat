@@ -1,6 +1,6 @@
 # Install a self-hosted node
 
-A Linux machine with systemd and public inbound connectivity is required. Install
+Ubuntu 22.04/24.04 or Debian 12 on amd64/arm64, systemd and public inbound connectivity are required. Install
 first; no account, team, or global scope is assigned by installation.
 
 ```sh
@@ -11,7 +11,7 @@ curl -fsSL https://get.pprbt.dev/selfhost/install | sh -s -- --enable both
 ```
 
 The installer downloads the configured immutable package, verifies its SHA256,
-installs `pbh` and the runtime binaries, and enables a protected system service.
+installs `pbh`, installs Docker from the configured official source when missing, and enables a protected system service. The helper runs the configured relay/tunnel images with host networking and a protected state mount. Runtime binaries are not installed on the host.
 An optional `--endpoint-host` accepts a public IP or DNS name; otherwise configure `PAPERBOAT_SELFHOST_ADDRESS_URL` with the deployment's
 public-address endpoint before running `pbh`. Address detection has no embedded
 Paperboat domain. No domain is required to
@@ -21,7 +21,7 @@ domain for a self-hosted route.
 
 Paste the printed claim address and expiring code into **Dashboard → Network →
 Add self-hosted node**, then choose the owning personal workspace or team.
-Paperboat global nodes use the separate authenticated operator enrollment API. The bootstrap TLS key is pinned by the code; ownership
+Paperboat global nodes use the separate authenticated operator enrollment API with Operator-Target set to the claim address, an opaque Operator-Reason reference and an Idempotency-Key. The bootstrap TLS key is pinned by the code; ownership
 is assigned only by the authenticated control-plane claim. The code lasts fifteen
 minutes, is single-use, and contains no account or team identity. Treat it as a
 secret. Generate a fresh unclaimed code with `pbh selfhost code`.
@@ -120,3 +120,18 @@ explicitly configured with `PAPERBOAT_SENTRY_ENABLED`, `PAPERBOAT_SENTRY_DSN`, a
 `PAPERBOAT_SENTRY_ENABLED=false` to disable reporting. Runtime reporting excludes
 private traffic, credential values, headers, URLs, raw errors, locals, and command
 arguments; public browser traffic still has the edge trust boundary described above.
+
+Container image references are supplied by the package build using
+`PAPERBOAT_SELFHOST_RELAY_IMAGE` and `PAPERBOAT_SELFHOST_TUNNEL_IMAGE`; the
+initial public-address API uses `PAPERBOAT_SELFHOST_ADDRESS_URL`. The installer
+renderer supplies `DOCKER_INSTALL_URL` alongside package URLs and SHA256 values.
+An operator can explicitly pass `--relay-image` and `--tunnel-image` to `pbh install`.
+Image configuration is atomic and owner-only; the claim and certificate identity
+remain owned by the shared installation supervisor.
+
+After a claim, the launcher waits for the exact runtime credential's node to
+report a new process epoch and a fresh ready heartbeat at
+`GET /v1/selfhost/runtime-readiness`. A running container alone is insufficient.
+Shutdown drains and removes only containers labelled for that installation and
+keeps its protected state. A foreign container with a colliding name is refused.
+No Docker daemon network configuration is changed when Docker is already present.
