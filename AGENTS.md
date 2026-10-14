@@ -18,6 +18,7 @@ Machine access and credentials are in `REMOTE_TESTING.md` (local only, never com
 | `cli/` | `pb` CLI and the endpoint runtime (`pb daemon`), Go |
 | `server/` | control plane: identity, authorization, product state, Go + PostgreSQL |
 | `relay/` | peer relay service (fallback when P2P fails), Go |
+| `pbh/` | self-host installer/manager for relay and tunnel (moving here from `relay/` in S4-00), Go |
 | `tunnel/` | public/browser edge for previews and tunnels, Go |
 | `console/` | web console (Next.js; read `console/AGENTS.md`, `DESIGN.md`, `NOTES.md`) |
 | `marketing/` | marketing site (Astro) |
@@ -74,8 +75,8 @@ PLAN.md (section 5) and done by that lane. **Only Lane A uses the test devices.*
 
 | Lane | Who | Owns | Works on (PLAN.md) |
 |---|---|---|---|
-| A — CLI & devices | Codex | `cli/`, `relay/`, `tools/device-smoke/` | S0 (except CI rows), F1–F12, F14, F15 device and CLI parts, `pbh` |
-| B — Server & infrastructure | Codex | `server/`, `tunnel/`, `deploy/`, `.github/` | S0 CI rows, S1, S4, F13, server parts of every feature, S3 |
+| A — CLI & devices | Codex | `cli/`, `relay/`, `tools/device-smoke/` | S0 (except CI rows), F1–F12, F14, F15 device and CLI parts |
+| B — Server & infrastructure | Codex | `server/`, `tunnel/`, `pbh/`, `deploy/`, `.github/` | S0 CI rows, S1, S4, F13, server parts of every feature, S3 |
 | C — Console & marketing | Claude only | `console/`, `marketing/` | all frontend work: console parts of every feature, S2 |
 
 **Codex never edits `console/` or `marketing/`.** When a feature needs frontend work, Codex
