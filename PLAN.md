@@ -97,8 +97,12 @@ ARM builds must compile, pass unit tests and be included in every release.
   `github-variables.txt` holds the old repos' variables (Sentry DSNs, now also set on the new
   repo as `SENTRY_DSN`, `SENTRY_DSN_SERVER`, `SENTRY_DSN_TUNNEL`, `SENTRY_DSN_RELAY`).
 - **TUF: start fresh with new keys** (user decision 2026-10-14); the old root chain is not
-  continued. The update-trust design (keep TUF or replace it) is still to be discussed with
-  the user before F14 changes it.
+  continued. **Minimal TUF** (user decision 2026-10-14): one offline root key kept on apple
+  (used only to set up and to replace a key), one online key in GitHub secrets signing
+  targets, snapshot and timestamp; the scheduled refresh re-signs timestamp before expiry.
+  No signing-state, automated rotation or separate metadata repo; delete that machinery.
+  Client verification (hashes, rollback, expiry, root-signed key replacement) is unchanged.
+  Lane A: F14 client side. Lane B: release/refresh workflows and key setup (S3).
 - Relays currently run on other machines (oracle and one more); they are rebuilt from this
   repo and re-registered with the new server.
 - Where the console and marketing site are hosted in production: **USER DECIDES** (marketing
