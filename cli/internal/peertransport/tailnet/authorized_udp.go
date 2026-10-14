@@ -2,7 +2,6 @@ package tailnet
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"net/netip"
 	"sort"
@@ -246,12 +245,13 @@ func (a *Authority) Client(descriptor mesh.Addr, peerID string) (*UDPClient, err
 				return nil, ErrAuthority
 			}
 		}
-		digest := sha256.Sum256([]byte(descriptor))
+		// Bootstrap hints may change without changing signed peer authority.
+		// Keep live flows until identity, scopes or expiry actually withdraw them.
 		if lease, ok := a.clients[peerID]; ok {
 			lease.client.mu.Lock()
 			closed := lease.client.closed
 			lease.client.mu.Unlock()
-			if !closed && lease.peer == p.Identity && lease.descriptor == digest && (a.streamScopes || scopesRetained(lease.scopes, p.Scopes)) {
+			if !closed && lease.peer == p.Identity && (a.streamScopes || scopesRetained(lease.scopes, p.Scopes)) {
 				return lease.client, nil
 			}
 			_ = lease.client.Close()
@@ -302,7 +302,7 @@ func (a *Authority) Client(descriptor mesh.Addr, peerID string) (*UDPClient, err
 		client := &UDPClient{expiresAt: &a.expiresAt, dial: func(ctx context.Context) (mesh.ConnPacketConn, error) {
 			return a.clientEngine.DialAuthorizedUDP(ctx, pub, disco, peerAddr)
 		}, slots: a.clientSlots, port: NetworkPort, flows: make(map[*Packet]struct{}), ctx: ctx, cancel: cancel}
-		a.clients[peerID] = authorizedClient{client: client, peer: p.Identity, descriptor: digest, scopes: append([]NetworkScope(nil), p.Scopes...), node: pub}
+		a.clients[peerID] = authorizedClient{client: client, peer: p.Identity, scopes: append([]NetworkScope(nil), p.Scopes...), node: pub}
 		return client, nil
 	}
 	return nil, ErrAdmission

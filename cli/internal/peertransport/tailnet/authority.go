@@ -121,11 +121,10 @@ type Authority struct {
 }
 
 type authorizedClient struct {
-	client     *UDPClient
-	peer       NetworkBinding
-	descriptor [sha256.Size]byte
-	scopes     []NetworkScope
-	node       key.NodePublic
+	client *UDPClient
+	peer   NetworkBinding
+	scopes []NetworkScope
+	node   key.NodePublic
 }
 
 func (a *Authority) EligibleRegionalNodes(role, transport string, allowedRegions map[string]bool, now time.Time) ([]RegionalNode, Redundancy, error) {

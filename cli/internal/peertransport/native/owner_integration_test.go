@@ -148,6 +148,29 @@ func TestAuthorizedTerminalAndLiveTransferRevocationReconnect(t *testing.T) {
 	if _, err = io.ReadFull(sshConn, sshResponse); err != nil || string(sshResponse) != string(sshPayload) {
 		t.Fatalf("SSH response=%q err=%v", sshResponse, err)
 	}
+	t.Run("BootstrapHintRefreshPreservesLiveSSHStream", func(t *testing.T) {
+		info, err := mesh.ParseAddr(descriptor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A relay's STUN endpoint is a bootstrap hint, not peer identity.
+		info.Region[0].Nodes[0].STUNPort++
+		refreshed, err := clientOwner.Dial(t.Context(), info.Addr(), "machine_test", peerquic.ClassInteractive)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer refreshed.Close()
+		timer := time.AfterFunc(3*time.Second, func() { sshConn.Close() })
+		defer timer.Stop()
+		payload := []byte("ssh-after-bootstrap-refresh")
+		if _, err := sshConn.Write(payload); err != nil {
+			t.Fatal("live SSH write after bootstrap refresh:", err)
+		}
+		response := make([]byte, len(payload))
+		if _, err := io.ReadFull(sshConn, response); err != nil || string(response) != string(payload) {
+			t.Fatal("live SSH stream was lost after bootstrap refresh:", err)
+		}
+	})
 	t.Run("FailedNewHandshakePreservesLiveSSHStream", func(t *testing.T) {
 		rejectHandshake.Store(true)
 		defer rejectHandshake.Store(false)
