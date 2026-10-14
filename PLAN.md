@@ -92,6 +92,13 @@ ARM builds must compile, pass unit tests and be included in every release.
   compose file, Caddyfile, public key, manifest; `container-config.txt`: container env,
   binds, ports). Reuse WorkOS, GitHub app, Cloudflare and other external credentials from
   there; regenerate internal signing/encryption keys only if they cannot be reused.
+  `coolify-full-state.tgz` (2026-10-14) adds every container's `docker inspect`, a `pg_dumpall`,
+  deploy compose/env/Caddy/keys, tunnel and diagnostics volumes, and release TUF metadata.
+  `github-variables.txt` holds the old repos' variables (Sentry DSNs, now also set on the new
+  repo as `SENTRY_DSN`, `SENTRY_DSN_SERVER`, `SENTRY_DSN_TUNNEL`, `SENTRY_DSN_RELAY`).
+- **TUF: start fresh with new keys** (user decision 2026-10-14); the old root chain is not
+  continued. The update-trust design (keep TUF or replace it) is still to be discussed with
+  the user before F14 changes it.
 - Relays currently run on other machines (oracle and one more); they are rebuilt from this
   repo and re-registered with the new server.
 - Where the console and marketing site are hosted in production: **USER DECIDES** (marketing
