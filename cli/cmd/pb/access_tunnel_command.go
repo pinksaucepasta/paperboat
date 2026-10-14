@@ -205,7 +205,7 @@ func (c *localAccessTunnelClient) Start(ctx context.Context, selector, listen st
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&out); err != nil {
-		return accessTunnelSession{}, accessTunnelFailure(ErrAccessTunnelUnavailable, err)
+		return accessTunnelSession{}, accessTunnelFailure(ErrAccessTunnelInvalid, err)
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		if err != nil {

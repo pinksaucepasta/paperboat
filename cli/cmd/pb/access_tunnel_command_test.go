@@ -173,7 +173,7 @@ func TestLocalAccessTunnelClientStrictlyBoundsAndDecodesResponse(t *testing.T) {
 			defer server.Close()
 			base, _ := url.Parse(server.URL)
 			client := &localAccessTunnelClient{base: base, token: "local-token", client: server.Client()}
-			if _, err := client.Start(context.Background(), "tun_1", "127.0.0.1:0"); !errors.Is(err, ErrAccessTunnelInvalid) {
+			if _, err := client.Start(context.Background(), "tun_1", "127.0.0.1:0"); !errors.Is(err, ErrAccessTunnelInvalid) || errors.Is(err, ErrAccessTunnelUnavailable) {
 				t.Fatalf("error=%v", err)
 			}
 		})
