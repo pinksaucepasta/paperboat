@@ -41,7 +41,8 @@ component directory. Go 1.27.1.
    fixed before any other work. Never call a regression a "remaining issue".
 4. **No guessing.** Read the code path in execution order before changing it. Reproduce,
    find the cause, then fix. Never retry an unchanged command hoping for a different result.
-   After two failed attempts at the same thing, stop and write down what you know.
+   After two failed attempts at the same thing, write down what you know, mark the row `[!]`
+   and move on to the next row.
 5. **One session on the devices at a time.** Only the session that owns PLAN.md's current
    step installs builds on or tests against the test machines.
 6. **Report results, not prose.** Lead with what works and what doesn't, with evidence
@@ -92,7 +93,11 @@ and return when the blocker clears:
   errors, which page);
 - needs credentials or a **USER DECIDES** item: log exactly what is needed;
 - two failed attempts at the same thing: log what you know and what you tried.
-At the end of a session, report a short table: rows done, rows `[!]` with reasons, commits.
+A commit, push, fixed blocker or finished row is never a stopping point: continue with the next
+row in the same turn. End the turn only when every owned row is `[x]` or `[!]`, then report a
+short table: rows done, rows `[!]` with reasons, commits. Root files no lane owns (`go.work`,
+`Makefile`, `tools/gate.sh`) are edited by the lane whose change needs them, with `make gate`;
+do not ask.
 
 **Shared branch.** All lanes push to `main`. If a push is rejected because another lane pushed,
 run `git pull --rebase`, re-run `make gate` if the incoming changes touch your paths or shared code,
