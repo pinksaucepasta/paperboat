@@ -6,7 +6,7 @@ Inspect tunnel edges
 
 Inspect tunnel edges
 
-List edges in the active workspace according to its tunnel pool. Managed-only lists Paperboat-managed edges; self-hosted-only lists only the selected self-hosted edges and never falls back to managed edges. Self-hosted browser publications require a verified customer domain and ready certificate.
+List tunnel edges and their observed state for the active workspace. Managed-only lists Paperboat-managed edges; self-hosted-only lists only selected self-hosted edges and never falls back to managed infrastructure.
 
 With --json, this command group lists its available commands.
 
@@ -33,5 +33,5 @@ pb edge [flags]
 ### SEE ALSO
 
 * [pb](pb.md)	 - Open Paperboat or connect to an environment terminal
-* [pb edge list](pb_edge_list.md)	 - List hosted and self-hosted tunnel edges
+* [pb edge list](pb_edge_list.md)	 - List managed or selected self-hosted tunnel edges
 

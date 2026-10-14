@@ -83,7 +83,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb daemon run](pb_daemon_run.md) | Run Paperboat daemon under service supervision |
 | [pb doctor](pb_doctor.md) | Check Paperboat connectivity and readiness |
 | [pb edge](pb_edge.md) | Inspect tunnel edges |
-| [pb edge list](pb_edge_list.md) | List hosted and self-hosted tunnel edges |
+| [pb edge list](pb_edge_list.md) | List managed or selected self-hosted tunnel edges |
 | [pb env](pb_env.md) | Manage automatic global ENV and device overrides |
 | [pb env grants](pb_env_grants.md) | Reconcile encrypted ENV team grants |
 | [pb env grants sync](pb_env_grants_sync.md) | Accept pending team grants into this account's encrypted vault |

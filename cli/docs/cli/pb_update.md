@@ -6,7 +6,7 @@ Update pb from the signed Paperboat release
 
 Update pb from the signed Paperboat release
 
-Download and verify a signed Paperboat release, then review and approve its exact candidate before installation. Check and status are read-only; download never restarts services. Ordinary updates defer if replacing the process owner would interrupt protected work. --force explicitly permits interruption, while retaining signed verification and recovery. --from installs a local or HTTPS executable, package, or authenticated offline bundle. Bare supplied builds are custom; bundles retain official provenance.
+Download and verify a signed Paperboat release, then review and approve its exact candidate before installation. Check and status are read-only; download never restarts services. Updates preserve existing terminal sessions and established managed SSH connections, wait for finite operations to finish, and restart previews and tunnels. The first migration from an older runtime requires its work to stop. --force permits interrupting work that cannot be preserved; artifact verification and rollback protection still apply. --from installs a local or HTTPS executable, package, or authenticated offline bundle. Bare supplied builds are custom; bundles retain official provenance.
 
 JSON output is supported with --json.
 
@@ -18,7 +18,7 @@ pb update [flags]
 
 ```
       --approve string   install the exact downloaded candidate ID after reviewing it
-      --force            install the signed update even if active sessions must be interrupted
+      --force            install now, allowing interruption of work that cannot be preserved
       --from string      install an executable, package, or verified offline bundle from a local path or HTTPS URL
   -h, --help             help for update
       --json             print JSON

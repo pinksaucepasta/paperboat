@@ -8,6 +8,10 @@ Manage teams and explicit resource permissions. Owners appoint admins, transfer 
 
 With --json, this command group lists its available commands.
 
+```
+pb team [flags]
+```
+
 ### Options
 
 ```

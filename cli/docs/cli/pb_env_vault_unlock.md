@@ -6,9 +6,9 @@ Unlock this account's ENV vault on this machine
 
 Unlock this account's ENV vault on this machine
 
-Unlock encrypted local custody with the password supplied interactively, by stdin, or from a private file. Authorized workspace layers refresh automatically after unlock; locked keys never publish a delivery. No ENV value is printed by unlocking.
+Unlock encrypted local custody with the password supplied interactively, by stdin, or from a private file. Authorized workspace layers refresh automatically after unlock. On headless Linux without a persistent secure store, keys remain in the user daemon memory for 15 minutes; lock or daemon restart clears them. Locked keys never publish a delivery. No ENV value is printed by unlocking.
 
-The local vault protects ENV key custody with a password and optional recovery code. Locking clears unlocked keys from this machine; removing local custody differs from resetting and deleting account values. Never place a password or recovery code in shell arguments.
+The local vault protects ENV key custody with a password and optional recovery code. Without a persistent Linux secure store, unlocked keys stay in the user daemon memory for 15 minutes and disappear on daemon restart. Locking clears unlocked keys from this machine; removing local custody differs from resetting and deleting account values. Never place a password or recovery code in shell arguments.
 
 JSON output is supported with --json.
 

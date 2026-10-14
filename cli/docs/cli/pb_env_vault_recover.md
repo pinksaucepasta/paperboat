@@ -8,7 +8,7 @@ Recover vault access and replace the password and recovery code
 
 Use the recovery code to regain vault access and replace the password and recovery code. Store the newly generated code in a new owner-only file.
 
-The local vault protects ENV key custody with a password and optional recovery code. Locking clears unlocked keys from this machine; removing local custody differs from resetting and deleting account values. Never place a password or recovery code in shell arguments.
+The local vault protects ENV key custody with a password and optional recovery code. Without a persistent Linux secure store, unlocked keys stay in the user daemon memory for 15 minutes and disappear on daemon restart. Locking clears unlocked keys from this machine; removing local custody differs from resetting and deleting account values. Never place a password or recovery code in shell arguments.
 
 JSON output is supported with --json.
 
