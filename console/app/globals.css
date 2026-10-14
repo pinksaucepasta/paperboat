@@ -1,0 +1,289 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  /* Body 15px and secondary lines 13px (Tailscale sits at 16px, most dashboards at 14px/12px);
+     monospace values are set a step below body because the mono face runs large. */
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.125rem;
+  --text-sm: 0.9375rem;
+  --text-sm--line-height: 1.375rem;
+  --text-code: 0.875rem;
+  --text-code--line-height: 1.25rem;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-jetbrains-mono);
+  --font-heading: var(--font-heading);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-path-direct: var(--path-direct);
+  --color-path-relay: var(--path-relay);
+  --color-path-edge: var(--path-edge);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-divider: var(--divider);
+  --color-surface: var(--surface);
+  --color-brand: var(--brand);
+  --color-brand-from: var(--brand-from);
+  --color-brand-to: var(--brand-to);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/*
+ * Paperboat theme. Neutrals are pure greys; blue appears only where it means something. Brand stops come from the logo gradient.
+ */
+:root {
+  --brand-from: oklch(0.601 0.204 264.9);
+  --brand: oklch(0.513 0.236 264.4);
+  --brand-to: oklch(0.457 0.238 264.5);
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.16 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.16 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.16 0 0);
+  --primary: var(--brand);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.967 0 0);
+  --secondary-foreground: oklch(0.21 0 0);
+  --muted: oklch(0.967 0 0);
+  --muted-foreground: oklch(0.53 0 0);
+  --accent: oklch(0.955 0 0);
+  --accent-foreground: oklch(0.21 0 0);
+  --destructive: oklch(0.577 0.215 27);
+  --success: oklch(0.66 0.16 155);
+  /* Traffic paths on the bandwidth chart: direct (peer-to-peer), relayed, via an edge. */
+  --path-direct: var(--success);
+  --path-relay: var(--brand);
+  --path-edge: oklch(0.72 0.15 65);
+  --border: oklch(0.928 0 0);
+  --divider: oklch(0.95 0 0);
+  --surface: oklch(0.977 0 0);
+  /*
+   * Faint diagonal stripes for large panels (surface-pattern). Each theme's alpha is set so the
+   * stripes differ from the surface by ΔL* = 1.0 (CIELAB), about one just-noticeable difference,
+   * computed for compositing in gamma-encoded sRGB: 1.16% black on the light surface (L* 97.3),
+   * 0.86% white on the dark one (L* 8.9). Same perceived strength in both themes.
+   */
+  --surface-pattern: url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23000000' fill-opacity='0.0116' fill-rule='evenodd'%3E%3Cpath d='M0 40L40 0H20L0 20M40 40V20L20 40'/%3E%3C/g%3E%3C/svg%3E");
+  --input: oklch(0.918 0 0);
+  --ring: var(--brand-from);
+  --chart-1: oklch(0.809 0.105 262);
+  --chart-2: oklch(0.68 0.17 263);
+  --chart-3: var(--brand-from);
+  --chart-4: var(--brand);
+  --chart-5: var(--brand-to);
+  --radius: 0.625rem;
+  /* Shared by the page header and the sidebar header, including the mobile sidebar, which
+     renders outside the sidebar wrapper. */
+  --header-height: 3rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.16 0 0);
+  --sidebar-primary: var(--brand);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.945 0 0);
+  --sidebar-accent-foreground: oklch(0.16 0 0);
+  --sidebar-border: oklch(0.928 0 0);
+  --sidebar-ring: var(--brand-from);
+}
+
+.dark {
+  --background: oklch(0.18 0 0);
+  --foreground: oklch(0.97 0 0);
+  --card: oklch(0.215 0 0);
+  --card-foreground: oklch(0.97 0 0);
+  --popover: oklch(0.225 0 0);
+  --popover-foreground: oklch(0.97 0 0);
+  --primary: var(--brand);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.25 0 0);
+  --secondary-foreground: oklch(0.97 0 0);
+  --muted: oklch(0.25 0 0);
+  --muted-foreground: oklch(0.69 0 0);
+  --accent: oklch(0.26 0 0);
+  --accent-foreground: oklch(0.97 0 0);
+  --destructive: oklch(0.68 0.19 24);
+  --success: oklch(0.72 0.17 155);
+  --path-direct: var(--success);
+  --path-relay: oklch(0.65 0.19 264);
+  --path-edge: oklch(0.8 0.14 70);
+  --border: oklch(1 0 0 / 8%);
+  --divider: oklch(0.235 0 0);
+  --surface: oklch(0.215 0 0);
+  --surface-pattern: url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23ffffff' fill-opacity='0.0086' fill-rule='evenodd'%3E%3Cpath d='M0 40L40 0H20L0 20M40 40V20L20 40'/%3E%3C/g%3E%3C/svg%3E");
+  --input: oklch(1 0 0 / 10%);
+  --ring: var(--brand-from);
+  --sidebar: oklch(0.165 0 0);
+  --sidebar-foreground: oklch(0.97 0 0);
+  --sidebar-primary: var(--brand);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.22 0 0);
+  --sidebar-accent-foreground: oklch(0.97 0 0);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-ring: var(--brand-from);
+}
+
+/* Panels are filled, not outlined: one quiet tone step instead of another line. */
+/*
+ * Text that sits beside an icon, dot or badge in a centered row: trims the text's box to its cap
+ * height and baseline, so centering lines the other item up with the letters rather than the
+ * line box (whose padding differs by font and browser). Pair with truncate-x, not truncate:
+ * overflow: hidden would clip descenders that now hang outside the box.
+ */
+@utility trim-cap {
+  text-box: trim-both cap alphabetic;
+}
+
+/* `truncate` that clips sideways only, so trimmed text keeps its descenders. */
+@utility truncate-x {
+  overflow-x: clip;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Scrolls without showing a scrollbar (tab rows, the sidebar). */
+@utility no-scrollbar {
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@utility surface {
+  @apply rounded-lg bg-surface;
+}
+
+/*
+ * A large panel (stat cards, edge tiles): the surface fill with faint stripes drifting slowly
+ * across the stripes (one 40px tile every 20s, 2px/s: ambient, below the speed that pulls the eye).
+ * The stripes live on a pseudo-element moved with transform, which the compositor animates
+ * without repainting. Reduced motion keeps them still. Not for controls.
+ */
+@utility surface-pattern {
+  @apply rounded-lg bg-surface;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  /* Safari ignores overflow + border-radius for composited children (the drifting stripes, the
+     chart), so content spilled past the rounded corners; clip-path clips them everywhere. */
+  clip-path: inset(0 round var(--radius-lg));
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: -40px 0 0 -40px;
+    z-index: -1;
+    pointer-events: none;
+    background-image: var(--surface-pattern);
+    animation: surface-drift 20s linear infinite;
+    will-change: transform;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    &::before {
+      animation: none;
+    }
+  }
+}
+
+/*
+ * Brand bar (sidebar header): the app icon's gradient, bright blue at the top to deep blue, with
+ * a faint topography pattern on the lower part as water under the boat (static, behind the
+ * content, fading out toward the top so the sky stays clean).
+ */
+.brand-bar {
+  position: relative;
+  background: linear-gradient(to bottom, #4275f8 0%, #1d52eb 55%, #0f3dd8 100%);
+  /* The bottom border is the header divider; keep the blue off it so it matches the page header. */
+  background-clip: padding-box;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: url("/patterns/topography.svg") 0 0 / 180px 180px;
+    opacity: 0.1;
+    mask-image: linear-gradient(to bottom, transparent 25%, #000 85%);
+  }
+
+  & > * {
+    position: relative;
+  }
+}
+
+/* wterm ships as a floating card; in the console the terminal fills its pane. Colours come from
+   the theme's variables (lib/terminal/themes.ts), set inline on the same element. */
+.terminal-host.wterm {
+  --term-font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+  --term-font-size: 14px;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--term-fg) 25%, transparent) transparent;
+}
+
+@keyframes surface-drift {
+  to {
+    transform: translate(40px, 40px);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  html {
+    @apply font-sans;
+    /* Numbers line up everywhere: addresses, versions, counts, sizes. */
+    font-variant-numeric: tabular-nums;
+  }
+}

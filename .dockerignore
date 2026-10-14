@@ -1,0 +1,13 @@
+.git
+**/.git
+**/.env
+**/.env.*
+**/.build
+**/.codex-build
+**/bin
+**/build
+**/dist
+**/__pycache__
+**/node_modules
+**/.next
+REMOTE_TESTING.md

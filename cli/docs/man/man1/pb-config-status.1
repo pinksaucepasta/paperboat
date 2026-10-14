@@ -1,0 +1,52 @@
+.nh
+.TH "PB-CONFIG-STATUS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-status - Show configuration synchronization status
+
+
+.SH SYNOPSIS
+\fBpb config status [environment] [flags]\fP
+
+
+.SH DESCRIPTION
+Show configuration synchronization status
+
+.PP
+Report synchronization state and any pending review or conflict for one environment or all assignments. Use this before approving or forcing a direction.
+
+.PP
+Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for status
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config(1)\fP

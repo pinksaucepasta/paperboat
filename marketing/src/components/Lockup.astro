@@ -1,0 +1,34 @@
+---
+import Mark from "./Mark.astro"
+/** Full-colour lockup: Cobalt mark, ink wordmark in Figtree 600, gap ⅔ of the mark (brand guidelines 03, 04). */
+interface Props {
+  size?: number
+}
+const { size = 18 } = Astro.props
+---
+
+<a href="/" class="lockup" aria-label="Paperboat home" style={`--h: ${size}px`}>
+  <Mark height={size} class="lockup-mark" />
+  <span class="lockup-name">paperboat</span>
+</a>
+
+<style>
+  .lockup {
+    display: inline-flex;
+    align-items: center;
+    gap: calc(var(--h) * 2 / 3);
+  }
+
+  .lockup :global(.lockup-mark) {
+    color: var(--cobalt);
+  }
+
+  .lockup-name {
+    font-family: var(--font-brand);
+    font-size: var(--h);
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -0.025em;
+    color: var(--ink);
+  }
+</style>

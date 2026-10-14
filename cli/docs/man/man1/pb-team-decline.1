@@ -1,0 +1,52 @@
+.nh
+.TH "PB-TEAM-DECLINE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-decline - Decline an invitation bound to this account
+
+
+.SH SYNOPSIS
+\fBpb team decline <invitation> [flags]\fP
+
+
+.SH DESCRIPTION
+Decline an invitation bound to this account
+
+.PP
+Decline a pending invitation explicitly addressed to this account without joining the team. The invitation is cancelled; completed or changed invitations require reloading their current status. Invitations for other accounts cannot be declined.
+
+.PP
+Teams use explicit membership and resource grants. Membership alone does not grant machine use, ENV values, previews, or tunnels. Mutations use the current team generation to reject stale edits; read pb team get before retrying a conflicting change.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for decline
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-team(1)\fP

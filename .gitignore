@@ -1,0 +1,26 @@
+# Credentials and local machine access (never commit)
+REMOTE_TESTING.md
+**/.env
+**/.env.*
+!**/.env.example
+**/config.local.json
+
+# Build output
+**/.build/
+**/.codex-build/
+**/bin/
+**/build/
+**/dist/
+*.exe
+*.out
+*.tsbuildinfo
+coverage.*
+
+# Dependencies and framework output
+**/node_modules/
+**/.next/
+**/.astro/
+**/__pycache__/
+
+# Device smoke results (local evidence)
+tools/device-smoke/results/

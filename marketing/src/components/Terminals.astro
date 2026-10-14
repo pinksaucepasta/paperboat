@@ -1,0 +1,71 @@
+---
+import Section from "./Section.astro"
+import TerminalRoom from "./TerminalRoom.astro"
+---
+
+<Section id="terminals" title="Terminals that keep running.">
+  <Fragment slot="text">
+    <p>
+      Shells live on the machine, so a dropped connection is just a pause. Open the same terminal from your
+      terminal app, a browser or your phone, and share it like a meeting link when you want company.
+    </p>
+  </Fragment>
+  <div data-reveal>
+    <TerminalRoom />
+  </div>
+
+  <div class="ssh" data-reveal>
+    <div>
+      <h3 class="subtitle">And plain SSH, for everything else.</h3>
+      <p class="body">
+        Every machine gets an SSH name that works in VS Code, Cursor, Zed or any tool that speaks SSH. Paperboat
+        looks after the keys.
+      </p>
+    </div>
+    <div class="ssh-lines">
+      <code><span class="dollar">$</span> ssh studio.local.pprbt.dev</code>
+      <code><span class="dollar">$</span> rsync -a ./site homelab.local.pprbt.dev:/srv</code>
+    </div>
+  </div>
+</Section>
+
+<style>
+  .ssh {
+    display: grid;
+    gap: 24px 64px;
+    margin-top: clamp(56px, 7vw, 88px);
+    padding-top: 32px;
+    border-top: 1px solid var(--rule);
+  }
+
+  .ssh .body {
+    margin-top: 10px;
+    max-width: 46ch;
+  }
+
+  .ssh-lines {
+    display: grid;
+    gap: 8px;
+    align-content: start;
+    padding: 18px 20px;
+    border-radius: 10px;
+    background: var(--surface);
+    overflow-x: auto;
+  }
+
+  code {
+    font-size: 0.875rem;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+
+  .dollar {
+    color: var(--faint);
+  }
+
+  @media (min-width: 900px) {
+    .ssh {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+</style>

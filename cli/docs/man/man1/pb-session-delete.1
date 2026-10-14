@@ -1,0 +1,60 @@
+.nh
+.TH "PB-SESSION-DELETE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-session-delete - Delete a closed terminal session record
+
+
+.SH SYNOPSIS
+\fBpb session delete [flags]\fP
+
+
+.SH DESCRIPTION
+Delete a closed terminal session record
+
+.PP
+Delete a closed non-default terminal session record, or use --all for all such records in the environment. Close a running terminal first. With --all, run the command once to receive a short-lived confirmation token, then run the displayed command to proceed. the confirmation code confirms only single-session deletion.
+
+.PP
+Terminal sessions persist independently of a single connection and can be reattached after a disconnect. Sharing grants explicit access to a named session. Closing, deleting, and removing a participant have different effects; inspect the selected session before acting.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--all\fP[=false]
+	delete all sessions in the environment
+
+.PP
+\fB--confirm\fP=""
+	six-character confirmation code from the preview
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for delete
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-session(1)\fP

@@ -1,0 +1,4 @@
+-- +goose Up
+ALTER TABLE paperboat.tunnel_connector_credential_generations DROP COLUMN id;
+ALTER TABLE paperboat.tunnel_connector_credential_generations DROP CONSTRAINT tunnel_connector_credential_generat_connector_id_generation_key;
+ALTER TABLE paperboat.tunnel_connector_credential_generations ADD PRIMARY KEY(connector_id,generation);

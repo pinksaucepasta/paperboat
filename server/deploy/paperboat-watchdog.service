@@ -1,0 +1,31 @@
+[Unit]
+Description=Paperboat independent availability watchdog
+Documentation=file:/usr/share/doc/paperboat/sentry-operations.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+DynamicUser=yes
+EnvironmentFile=/etc/paperboat-diagnostics/watchdog.env
+ExecStart=/opt/paperboat/diagnostics/paperboat-watchdog /etc/paperboat-diagnostics/watchdog.json
+TimeoutStartSec=50s
+UMask=0077
+NoNewPrivileges=yes
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectHome=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectSystem=strict
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+

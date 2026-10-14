@@ -1,0 +1,72 @@
+.nh
+.TH "PB-TUNNEL-POLICY-ALLOW" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel-policy-allow - Allow on-demand access to an exact machine port
+
+
+.SH SYNOPSIS
+\fBpb tunnel policy allow <machine> <port|url> [flags]\fP
+
+
+.SH DESCRIPTION
+Allow on-demand access to an exact machine port
+
+.PP
+Authorize on-demand access to one machine port or URL with an exact access audience and optional expiry. --generation protects updates to an existing policy.
+
+.PP
+An on-demand policy authorizes an exact machine port for private or team access. A policy does not publish a public URL or grant every port on the machine. Revocation fences subsequent activation.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--access\fP="private"
+	access audience: private or team
+
+.PP
+\fB--expires\fP=8h0m0s
+	policy lifetime
+
+.PP
+\fB--generation\fP=0
+	expected existing policy generation
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for allow
+
+.PP
+\fB--id\fP=""
+	existing policy ID to update
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-tunnel-policy(1)\fP

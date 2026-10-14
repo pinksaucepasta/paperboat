@@ -1,0 +1,4 @@
+# schema: paperboat.upstream-foundations/v1
+# name	repository	module	module_version	commit	license_notice	go_version
+tailcat	https://github.com/tailscale/tailcat.git	github.com/tailscale/tailcat	v0.6.1-0.20260905044447-5a83b9f9e119	5a83b9f9e119aad6b558cbc122d94efdca87452d	BSD-3-Clause	1.27.1
+tailscale-derp	https://github.com/tailscale/tailscale.git	tailscale.com	v1.103.0-pre.0.20260904030409-31d8badb3bfb	31d8badb3bfb88618dc8ea8e6a5c3bce0cd6cc9f	BSD-3-Clause+PATENTS	1.27.1

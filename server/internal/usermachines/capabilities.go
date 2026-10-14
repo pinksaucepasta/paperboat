@@ -1,0 +1,186 @@
+package usermachines
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/pinksaucepasta/paperboat-server/internal/audit"
+	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat-server/internal/teams"
+)
+
+const MachineCapabilitiesSchemaV1 = "paperboat.machine-capabilities/v1"
+
+var (
+	ErrCapabilitiesInvalid             = errors.New("machine capabilities are invalid")
+	ErrCapabilitiesVersionConflict     = errors.New("machine capabilities version conflict")
+	ErrCapabilitiesIdempotencyConflict = errors.New("machine capabilities idempotency conflict")
+	ErrCapabilitiesObservationStale    = errors.New("machine capabilities observation is stale")
+)
+
+type MachineCapabilitySelection struct {
+	Terminal      bool `json:"terminal"`
+	ManagedSSH    bool `json:"managed_ssh"`
+	FileReceive   bool `json:"file_receive"`
+	PreviewTunnel bool `json:"preview_tunnel"`
+}
+
+type MachineCapabilityPolicy struct {
+	Schema         string                     `json:"schema"`
+	Desired        MachineCapabilitySelection `json:"desired"`
+	DesiredVersion int64                      `json:"desired_version"`
+	Applied        MachineCapabilitySelection `json:"applied"`
+	AppliedVersion int64                      `json:"applied_version"`
+	Status         string                     `json:"status"`
+	ErrorCode      string                     `json:"error_code,omitempty"`
+}
+
+type CapabilitiesVersionError struct{ CurrentVersion int64 }
+
+func (e *CapabilitiesVersionError) Error() string { return ErrCapabilitiesVersionConflict.Error() }
+func (e *CapabilitiesVersionError) Unwrap() error { return ErrCapabilitiesVersionConflict }
+
+func (s *Service) MachineCapabilitiesEnabled() bool { return s != nil && s.db != nil }
+
+func (s *Service) SetMachineCapabilities(ctx context.Context, userID, machineID, idempotencyKey string, desired MachineCapabilitySelection, expectedVersion int64) (MachineCapabilityPolicy, error) {
+	userID, machineID, idempotencyKey = strings.TrimSpace(userID), strings.TrimSpace(machineID), strings.TrimSpace(idempotencyKey)
+	if userID == "" || machineID == "" || len(idempotencyKey) < 8 || len(idempotencyKey) > 128 || expectedVersion < 1 {
+		return MachineCapabilityPolicy{}, ErrCapabilitiesInvalid
+	}
+	names := capabilityNames(desired)
+	body, _ := json.Marshal(struct {
+		ExpectedVersion int64                      `json:"expected_version"`
+		Desired         MachineCapabilitySelection `json:"desired"`
+	}{expectedVersion, desired})
+	hash := sha256.Sum256(body)
+	var result MachineCapabilityPolicy
+	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if err := teams.Lock(ctx, tx); err != nil {
+			return err
+		}
+		machine, err := tx.Queries().GetUserMachineForUpdate(ctx, dbsqlc.GetUserMachineForUpdateParams{ID: machineID, UserID: userID})
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		op, err := tx.Queries().GetUserMachineCapabilityOperation(ctx, dbsqlc.GetUserMachineCapabilityOperationParams{UserID: userID, UserMachineID: machineID, IdempotencyKey: idempotencyKey})
+		if err == nil {
+			if !bytes.Equal(op.RequestHash, hash[:]) || json.Unmarshal(op.Result, &result) != nil {
+				return ErrCapabilitiesIdempotencyConflict
+			}
+			return nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if machine.CapabilitiesDesiredVersion != expectedVersion {
+			return &CapabilitiesVersionError{CurrentVersion: machine.CapabilitiesDesiredVersion}
+		}
+		// Preserve capabilities owned by other tasks (ENV and availability).
+		for _, name := range machine.ConfiguredCapabilities {
+			if name == "environment_injection" || name == "keep_awake" {
+				names = append(names, name)
+			}
+		}
+		slices.Sort(names)
+		names = slices.Compact(names)
+		rows, err := tx.Queries().SetUserMachineCapabilities(ctx, dbsqlc.SetUserMachineCapabilitiesParams{ConfiguredCapabilities: names, ID: machineID, UserID: userID, ExpectedVersion: expectedVersion})
+		if err != nil {
+			return err
+		}
+		if rows != 1 {
+			return &CapabilitiesVersionError{CurrentVersion: machine.CapabilitiesDesiredVersion}
+		}
+		machine.ConfiguredCapabilities = names
+		machine.CapabilitiesDesiredVersion++
+		if machine.Online {
+			machine.CapabilitiesStatus = "pending"
+		} else {
+			machine.CapabilitiesStatus = "offline"
+		}
+		machine.CapabilitiesErrorCode = sql.NullString{}
+		result = mapMachineCapabilityPolicy(machine)
+		encoded, err := json.Marshal(result)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Queries().CreateUserMachineCapabilityOperation(ctx, dbsqlc.CreateUserMachineCapabilityOperationParams{UserMachineID: machineID, UserID: userID, IdempotencyKey: idempotencyKey, RequestHash: hash[:], ExpectedVersion: expectedVersion, ResultingVersion: expectedVersion + 1, ConfiguredCapabilities: names, Result: encoded})
+		if err != nil {
+			return err
+		}
+		if s.audit == nil {
+			return nil
+		}
+		return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: userID, ActorType: audit.ActorUser, EventType: "user_machine.capabilities_updated", ResourceType: "user_machine", ResourceID: machineID, IdempotencyKey: "user_machine.capabilities_updated:" + machineID + ":" + idempotencyKey, Metadata: map[string]any{"version": expectedVersion + 1}})
+	})
+	return result, err
+}
+
+func (s *Service) ResolveMachineCapabilities(ctx context.Context, machineID, environmentID string) (MachineCapabilityPolicy, error) {
+	machine, err := s.db.Queries().GetUserMachineForEnvironmentBandwidthUpdate(ctx, environmentID)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && machine.ID != machineID {
+		return MachineCapabilityPolicy{}, ErrNotFound
+	}
+	if err != nil {
+		return MachineCapabilityPolicy{}, err
+	}
+	return mapMachineCapabilityPolicy(machine), nil
+}
+
+type MachineCapabilitiesObservation struct {
+	Schema     string                     `json:"schema"`
+	Version    int64                      `json:"version"`
+	Applied    MachineCapabilitySelection `json:"applied"`
+	Status     string                     `json:"status"`
+	ErrorCode  string                     `json:"error_code,omitempty"`
+	ObservedAt time.Time                  `json:"observed_at"`
+}
+
+func (s *Service) RecordMachineCapabilitiesObservation(ctx context.Context, machineID, environmentID string, in MachineCapabilitiesObservation) error {
+	if machineID == "" || environmentID == "" || in.Schema != MachineCapabilitiesSchemaV1 || in.Version < 1 || in.ObservedAt.IsZero() || !slices.Contains([]string{"applied", "error"}, in.Status) || in.Status == "applied" && in.ErrorCode != "" || in.Status == "error" && !safeAvailabilityCode.MatchString(in.ErrorCode) {
+		return ErrCapabilitiesInvalid
+	}
+	rows, err := s.db.Queries().RecordUserMachineCapabilitiesObservation(ctx, dbsqlc.RecordUserMachineCapabilitiesObservationParams{ObservedCapabilities: capabilityNames(in.Applied), ObservedVersion: in.Version, Status: in.Status, ErrorCode: sql.NullString{String: in.ErrorCode, Valid: in.ErrorCode != ""}, ID: machineID, EnvironmentID: environmentID})
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return ErrCapabilitiesObservationStale
+	}
+	return nil
+}
+
+func capabilityNames(value MachineCapabilitySelection) []string {
+	var result []string
+	if value.FileReceive {
+		result = append(result, "file_receive")
+	}
+	if value.PreviewTunnel {
+		result = append(result, "preview_launch")
+	}
+	if value.Terminal {
+		result = append(result, "terminal_host", "session_host")
+	}
+	if value.ManagedSSH {
+		result = append(result, "ssh_host")
+	}
+	return result
+}
+
+func selectionFromNames(names []string) MachineCapabilitySelection {
+	return MachineCapabilitySelection{Terminal: slices.Contains(names, "terminal_host"), ManagedSSH: slices.Contains(names, "ssh_host"), FileReceive: slices.Contains(names, "file_receive"), PreviewTunnel: slices.Contains(names, "preview_launch")}
+}
+
+func mapMachineCapabilityPolicy(machine dbsqlc.UserMachine) MachineCapabilityPolicy {
+	return MachineCapabilityPolicy{Schema: MachineCapabilitiesSchemaV1, Desired: selectionFromNames(machine.ConfiguredCapabilities), DesiredVersion: machine.CapabilitiesDesiredVersion, Applied: selectionFromNames(machine.ObservedCapabilities), AppliedVersion: machine.CapabilitiesObservedVersion, Status: machine.CapabilitiesStatus, ErrorCode: machine.CapabilitiesErrorCode.String}
+}

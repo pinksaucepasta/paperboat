@@ -1,0 +1,94 @@
+// Package accessdescriptor defines the provider-neutral CLI connection contract.
+package accessdescriptor
+
+import "time"
+
+const SchemaV1 = "paperboat.environment-connection/v1"
+
+const (
+	EnvironmentMachine = "machine"
+
+	CapabilityTerminal     = "terminal"
+	CapabilityFileTransfer = "file_transfer"
+	CapabilityPreview      = "preview"
+)
+
+type Descriptor struct {
+	Schema            string        `json:"schema"`
+	Issuer            string        `json:"issuer"`
+	Connectable       bool          `json:"connectable"`
+	ExpiresAt         time.Time     `json:"expires_at"`
+	Environment       Environment   `json:"environment"`
+	Helper            *Helper       `json:"helper,omitempty"`
+	Capabilities      []string      `json:"capabilities,omitempty"`
+	Terminal          *Terminal     `json:"terminal,omitempty"`
+	FileTransfer      *FileTransfer `json:"file_transfer,omitempty"`
+	Preview           *Preview      `json:"preview,omitempty"`
+	Status            string        `json:"status"`
+	Reason            string        `json:"reason"`
+	RetryAfterSeconds int           `json:"retry_after_seconds"`
+}
+
+type Environment struct {
+	ID         string `json:"id"`
+	Kind       string `json:"kind"`
+	ResourceID string `json:"resource_id"`
+	Alias      string `json:"alias"`
+	State      string `json:"state"`
+	Root       string `json:"root,omitempty"`
+}
+
+type Helper struct {
+	ID         string `json:"id"`
+	Generation int64  `json:"generation"`
+}
+
+type Auth struct {
+	Method          string    `json:"method"`
+	Ticket          string    `json:"ticket,omitempty"`
+	Token           string    `json:"token,omitempty"`
+	ExpiresAt       time.Time `json:"expires_at"`
+	Scopes          []string  `json:"scopes"`
+	AccessSessionID string    `json:"access_session_id,omitempty"`
+}
+
+type Terminal struct {
+	Protocol  string            `json:"protocol"`
+	Endpoints TerminalEndpoints `json:"endpoints"`
+	Auth      Auth              `json:"auth"`
+	SessionID string            `json:"session_id"`
+	CWD       string            `json:"cwd"`
+}
+
+type TerminalEndpoints struct {
+	QUIC string `json:"quic"`
+	WSS  string `json:"wss"`
+}
+
+type FileTransferPolicy struct {
+	Revision               string `json:"revision"`
+	MaxFileBytes           int64  `json:"max_file_bytes"`
+	MaxBatchFiles          int    `json:"max_batch_files"`
+	MaxBatchBytes          int64  `json:"max_batch_bytes"`
+	MaxConcurrentTransfers int    `json:"max_concurrent_transfers"`
+	RetentionSeconds       int64  `json:"retention_seconds"`
+	DeliveryTimeoutSeconds int64  `json:"delivery_timeout_seconds"`
+	MaxPendingSpoolBytes   int64  `json:"max_pending_spool_bytes"`
+}
+
+type FileTransfer struct {
+	Endpoint             string             `json:"endpoint"`
+	SourceMachineID      string             `json:"source_machine_id"`
+	DestinationMachineID string             `json:"destination_machine_id"`
+	InitiatingUserID     string             `json:"initiating_user_id"`
+	Auth                 Auth               `json:"auth"`
+	Policy               FileTransferPolicy `json:"policy"`
+}
+
+type Preview struct {
+	Endpoint  string    `json:"endpoint"`
+	Auth      Auth      `json:"auth"`
+	ExpiresAt time.Time `json:"expires_at"`
+	PublicURL string    `json:"public_url,omitempty"`
+	State     string    `json:"state"`
+}

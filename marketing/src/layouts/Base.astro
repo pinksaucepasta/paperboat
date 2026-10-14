@@ -1,0 +1,56 @@
+---
+import "../styles/global.css"
+interface Props {
+  title?: string
+  description?: string
+}
+const {
+  title = "Paperboat",
+  description = "Install Paperboat once per machine. Then terminals, SSH, previews and files just work, for you and your team.",
+} = Astro.props
+---
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#ffffff" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <script is:inline>document.documentElement.classList.remove("no-js")</script>
+  </head>
+  <body>
+    <slot />
+    <script>
+      const reveal = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) continue
+            entry.target.classList.add("is-in")
+            reveal.unobserve(entry.target)
+          }
+        },
+        { rootMargin: "0px 0px -8% 0px" },
+      )
+      document.querySelectorAll("[data-reveal]").forEach((el) => reveal.observe(el))
+
+      // Anything copyable copies when clicked (console design rules); the icon shows the result.
+      document.querySelectorAll<HTMLElement>("[data-copy]").forEach((el) => {
+        el.addEventListener("click", async () => {
+          const text = el.dataset.copy ?? el.querySelector("[data-copy-text]")?.textContent ?? ""
+          try {
+            await navigator.clipboard.writeText(text)
+            el.dataset.copied = ""
+            setTimeout(() => delete el.dataset.copied, 1600)
+          } catch {
+            // Clipboard blocked: the command stays selectable.
+          }
+        })
+      })
+    </script>
+  </body>
+</html>

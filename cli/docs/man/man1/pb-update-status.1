@@ -1,0 +1,52 @@
+.nh
+.TH "PB-UPDATE-STATUS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-update-status - Show installed Paperboat update state
+
+
+.SH SYNOPSIS
+\fBpb update status [flags]\fP
+
+
+.SH DESCRIPTION
+Show installed Paperboat update state
+
+.PP
+Show the installed release and updater state, including any pending or failed transition. This reads local update state rather than downloading and installing a new release.
+
+.PP
+Updates use signed release metadata and preserve artifact authenticity and rollback protection. Check inspects an available release; status reports the installed updater state. A failed update should leave the known installation usable and report a recovery action.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for status
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-update(1)\fP

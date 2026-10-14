@@ -1,0 +1,1 @@
+{"version":"1.0.0","capabilities":{"terminal.v1":{"required":true},"health.v1":{"required":true},"config.apply.v1":{"required":false},"update.signed.v1":{"required":false}},"required":["terminal.v1","health.v1"],"allowed":["update.signed.v1"],"conditional":{"config.apply.v1":"active assignment and current warning consent"}}

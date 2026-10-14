@@ -1,0 +1,73 @@
+import { formatPlatform } from "@/lib/format"
+import { machineOwner, type Machine, type Me } from "@/lib/api"
+
+/**
+ * The machines search box is the one source of truth for filtering, as in Tailscale: typed
+ * `key:value` tokens filter, everything else is free text, and the Filter menu and its chips
+ * only add, change and remove tokens in that text.
+ */
+export const filterKeys = {
+  status: {
+    label: "Status",
+    options: { online: "Online", offline: "Offline" },
+    test: (machine: Machine, value: string) => machine.online === (value === "online"),
+  },
+  os: {
+    label: "OS",
+    options: { macos: "macOS", linux: "Linux", windows: "Windows" },
+    test: (machine: Machine, value: string) => platformToken(machine.platform) === value,
+  },
+  owner: {
+    label: "Owner",
+    options: { me: "You", shared: "Shared with you" },
+    test: (machine: Machine, value: string, me?: Me) =>
+      machineOwner(machine, me) === (value === "me" ? "you" : "shared"),
+  },
+} as const
+
+export type FilterKey = keyof typeof filterKeys
+export type Filters = Partial<Record<FilterKey, string>>
+
+/** The `os:` filter value for a machine platform (darwin → macos). */
+export function platformToken(platform: string | undefined): string | undefined {
+  if (!platform) return
+  return platform === "darwin" ? "macos" : platform.toLowerCase()
+}
+
+function asFilter(token: string): [FilterKey, string] | undefined {
+  const match = /^([a-z]+):(\S+)$/i.exec(token)
+  if (!match) return
+  const key = match[1].toLowerCase() as FilterKey
+  const value = match[2].toLowerCase()
+  const spec = filterKeys[key]
+  if (spec && value in spec.options) return [key, value]
+}
+
+/** Splits the search text into filters (last token of a key wins) and the remaining words. */
+export function parseQuery(query: string): { filters: Filters; text: string } {
+  const filters: Filters = {}
+  const words: string[] = []
+  for (const token of query.split(/\s+/).filter(Boolean)) {
+    const filter = asFilter(token)
+    if (filter) filters[filter[0]] = filter[1]
+    else words.push(token)
+  }
+  return { filters, text: words.join(" ").toLowerCase() }
+}
+
+/** Sets (or, with no value, removes) one key's token, leaving the rest of the text as typed. */
+export function withFilter(query: string, key: FilterKey, value?: string): string {
+  const kept = query.split(/\s+/).filter((token) => token && asFilter(token)?.[0] !== key)
+  if (value) kept.push(`${key}:${value}`)
+  return kept.join(" ")
+}
+
+export function matchesQuery(machine: Machine, { filters, text }: ReturnType<typeof parseQuery>, me?: Me): boolean {
+  for (const [key, value] of Object.entries(filters) as [FilterKey, string][]) {
+    if (!filterKeys[key].test(machine, value, me)) return false
+  }
+  if (!text) return true
+  return [machine.alias, machine.description, machine.assigned_ip, formatPlatform(machine.platform), machine.id]
+    .filter(Boolean)
+    .some((field) => field!.toLowerCase().includes(text))
+}

@@ -1,0 +1,53 @@
+.nh
+.TH "PB-INSTALL" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-install - Install this executable and its local service
+
+
+.SH SYNOPSIS
+\fBpb install [flags]\fP
+
+
+.SH DESCRIPTION
+Install this executable and its local service
+
+.PP
+Install this executable and its local background service on the current machine. --install-dir selects the binary location; use pb service status after installation to inspect the supervised daemon.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for install
+
+.PP
+\fB--install-dir\fP=""
+	absolute directory for the Unix pb command
+
+.PP
+\fB--json\fP[=false]
+	print installation result as JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb(1)\fP

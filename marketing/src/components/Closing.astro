@@ -1,0 +1,69 @@
+---
+import Install from "./Install.astro"
+import Mark from "./Mark.astro"
+import { consoleUrl } from "../site"
+---
+
+<section class="closing sea" aria-labelledby="closing-title">
+  <div class="wrap closing-inner">
+    <Mark height={48} class="closing-mark" />
+    <h2 class="title closing-title" id="closing-title">Install Paperboat on every machine you want to reach.</h2>
+    <div class="closing-install">
+      <Install tone="sea" />
+      <p class="closing-after">
+        macOS, Linux and Windows. Already installed somewhere? <a href={consoleUrl}>Open the console</a>
+      </p>
+    </div>
+  </div>
+</section>
+
+<style>
+  .closing {
+    padding-block: clamp(112px, 14vw, 208px) clamp(96px, 12vw, 176px);
+    overflow: hidden;
+  }
+
+  .closing-inner {
+    display: grid;
+    gap: 36px;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .closing :global(.closing-mark) {
+    color: #fff;
+    filter: drop-shadow(0 1px 1px rgb(0 0 40 / 0.25));
+  }
+
+  .closing-title {
+    color: #fff;
+    max-width: 20ch;
+  }
+
+  .closing-install :global(.install-tabs) {
+    justify-content: center;
+  }
+
+  .closing-install {
+    display: grid;
+    gap: 14px;
+    width: 100%;
+    max-width: 560px;
+  }
+
+  .closing-after {
+    font-size: 0.875rem;
+    color: rgb(255 255 255 / 0.75);
+  }
+
+  .closing-after a {
+    color: #fff;
+    text-decoration: underline;
+    text-decoration-color: rgb(255 255 255 / 0.4);
+    text-underline-offset: 3px;
+  }
+
+  .closing-after a:hover {
+    text-decoration-color: #fff;
+  }
+</style>

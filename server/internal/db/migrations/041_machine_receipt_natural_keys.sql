@@ -1,0 +1,10 @@
+-- +goose Up
+ALTER TABLE paperboat.user_machine_availability_operations DROP COLUMN id;
+ALTER TABLE paperboat.user_machine_availability_operations DROP CONSTRAINT user_machine_availability_ope_user_id_user_machine_id_idemp_key;
+ALTER TABLE paperboat.user_machine_availability_operations ADD PRIMARY KEY(user_id,user_machine_id,idempotency_key);
+ALTER TABLE paperboat.user_machine_capability_operations DROP COLUMN id;
+ALTER TABLE paperboat.user_machine_capability_operations DROP CONSTRAINT user_machine_capability_opera_user_id_user_machine_id_idemp_key;
+ALTER TABLE paperboat.user_machine_capability_operations ADD PRIMARY KEY(user_id,user_machine_id,idempotency_key);
+ALTER TABLE paperboat.user_machine_bandwidth_periods DROP COLUMN id;
+ALTER TABLE paperboat.user_machine_bandwidth_periods DROP CONSTRAINT user_machine_bandwidth_periods_user_machine_id_period_start_key;
+ALTER TABLE paperboat.user_machine_bandwidth_periods ADD PRIMARY KEY(user_machine_id,period_start);

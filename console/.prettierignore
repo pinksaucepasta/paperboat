@@ -1,0 +1,11 @@
+.next
+node_modules
+bun.lock
+# shadcn/ui components stay as the registry ships them (see DESIGN.md).
+components/ui
+# Generated from paperboat-server's OpenAPI document by `bun run api:types`.
+lib/api-schema.d.ts
+# Notes and docs are wrapped by hand.
+*.md
+# The browser terminal runtime, copied as built (README: Browser terminal).
+public/terminal

@@ -1,0 +1,620 @@
+package controlplane
+
+import (
+	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat-server/internal/mint"
+)
+
+func TestConfigAssignmentOwnershipConcurrencyAndMachineConsent(t *testing.T) {
+	store := openControlPlaneTestDB(t)
+	ctx := context.Background()
+	suffix := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
+	userA, userB := "cfg_a_"+suffix, "cfg_b_"+suffix
+	env := "cfg_env_" + suffix
+	machineID := "cfg_machine_" + suffix
+	for _, user := range []string{userA, userB} {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active') ON CONFLICT (id) DO NOTHING`, user, "workos_"+user, user+"@example.test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$2,$3) ON CONFLICT (id) DO UPDATE SET owner_user_id=EXCLUDED.owner_user_id, desired_state='active'`, env, "workspace_"+suffix, userA); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,description,platform,architecture,workspace_root) VALUES ($1,$2,$3,'machine','Machine','linux','arm64','/workspace')`, machineID, userA, env); err != nil {
+		t.Fatal(err)
+	}
+	service := NewConfigAssignmentService(store, nil, "warning-1")
+	service.SetRepositoryResolver(testConfigRepositoryResolver())
+	repoA, err := service.ConnectRepository(ctx, userA, "github", "repo-a", "A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConnectRepository(ctx, userB, "github", "repo-b", "B"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Assignment(ctx, userB, machineID); !errors.Is(err, ErrAssignmentForbidden) {
+		t.Fatalf("cross-user assignment error = %v", err)
+	}
+	unassigned, err := service.Assignment(ctx, userA, machineID)
+	if err != nil || unassigned.MachineID != machineID || unassigned.EnvironmentID != env || unassigned.RepositoryID.Valid || unassigned.PushRepositoryID.Valid || unassigned.Version != 0 {
+		t.Fatalf("owned unassigned machine must have an explicit disabled assignment: %+v %v", unassigned, err)
+	}
+	assignment, err := assignConfigTestProjection(service, ctx, userA, machineID, repoA.ID, ConfigModePushOnly, "warning-1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assignment.ConsentState != "pending" || assignment.Mode != ConfigModePushOnly || assignment.Version != 1 {
+		t.Fatalf("assignment = %#v", assignment)
+	}
+	if _, err := service.AcceptConsent(ctx, userA, machineID, "warning-wrong", assignment.Version); !errors.Is(err, ErrAssignmentConflict) {
+		t.Fatalf("wrong warning error = %v", err)
+	}
+	accepted, err := service.AcceptConsent(ctx, userA, machineID, "warning-1", assignment.Version)
+	if err != nil || accepted.ConsentState != "accepted" {
+		t.Fatalf("accepted = %#v, %v", accepted, err)
+	}
+	warning, err := service.Warning(ctx, userA, machineID)
+	if err != nil || warning.Revision != "warning-1" || warning.MachineName != "machine" || warning.RepositoryName != "R" || warning.CanonicalScope != "/workspace" || !strings.Contains(warning.RepositoryVisibility, "ordinary plaintext") || !strings.Contains(warning.HistoryRetention, "Git history") || !strings.Contains(warning.AccessConsequence, "may read") {
+		t.Fatalf("warning = %#v, %v", warning, err)
+	}
+	pending, err := service.RemoveConsent(ctx, userA, machineID, accepted.Version)
+	if err != nil || pending.ConsentState != "pending" || pending.AcceptedAt.Valid {
+		t.Fatalf("removed consent = %#v, %v", pending, err)
+	}
+	accepted, err = service.AcceptConsent(ctx, userA, machineID, "warning-1", pending.Version)
+	if err != nil || accepted.ConsentState != "accepted" {
+		t.Fatalf("reaccepted = %#v, %v", accepted, err)
+	}
+	if err := service.Clear(ctx, userA, machineID, assignment.Version); !errors.Is(err, ErrAssignmentConflict) {
+		t.Fatalf("stale clear error = %v", err)
+	}
+	if err := service.Clear(ctx, userA, machineID, accepted.Version); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	if err := store.SQL().QueryRowContext(ctx, `SELECT consent_state FROM paperboat.control_config_assignments WHERE environment_id=$1`, env).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "revoked" {
+		t.Fatalf("consent state = %q", state)
+	}
+}
+
+func TestConfigAssignmentPreservesDatabaseFailuresInsteadOfForbidden(t *testing.T) {
+	store := openControlPlaneTestDB(t)
+	service := NewConfigAssignmentService(store, nil, "warning-1")
+	service.SetRepositoryResolver(testConfigRepositoryResolver())
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	calls := []struct {
+		name string
+		call func() error
+	}{
+		{"repository list", func() error { _, err := service.ListRepositories(ctx, "user", 100, 0); return err }},
+		{"repository connect", func() error {
+			_, err := service.ConnectRepository(ctx, "user", "git", "/srv/repository.git", "Repository")
+			return err
+		}},
+		{"repository disconnect", func() error { return service.DisconnectRepository(ctx, "user", "repository") }},
+		{"assignment read", func() error { _, err := service.Assignment(ctx, "user", "machine"); return err }},
+		{"assignment write", func() error {
+			_, err := service.ConfigureProjection(ctx, "user", "machine", "repository", "", ConfigModePullOnly, false, "warning-1", 1, nil, nil, testConfigurationRevision)
+			return err
+		}},
+		{"consent accept", func() error { _, err := service.AcceptConsent(ctx, "user", "machine", "warning-1", 1); return err }},
+		{"revision approval", func() error {
+			_, err := service.ApprovePullRevision(ctx, "user", "machine", strings.Repeat("a", 40), 1)
+			return err
+		}},
+		{"warning read", func() error { _, err := service.Warning(ctx, "user", "machine"); return err }},
+		{"consent remove", func() error { _, err := service.RemoveConsent(ctx, "user", "machine", 1); return err }},
+		{"assignment clear", func() error { return service.Clear(ctx, "user", "machine", 1) }},
+	}
+	for _, tc := range calls {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.call()
+			if err == nil || errors.Is(err, ErrAssignmentForbidden) {
+				t.Fatalf("closed database was not preserved as an operational failure: %v", err)
+			}
+		})
+	}
+}
+
+func TestRepositoryCandidateCatalogPreservesFailureCause(t *testing.T) {
+	want := errors.New("catalog unavailable")
+	service := NewConfigAssignmentService(nil, nil, "warning-1")
+	service.SetRepositoryCatalog(ConfigRepositoryCatalogFunc(func(context.Context, string) ([]ConfigRepositoryCandidate, error) {
+		return nil, want
+	}))
+	if _, err := service.RepositoryCandidates(context.Background(), "user"); !errors.Is(err, want) {
+		t.Fatalf("repository catalog cause was collapsed: %v", err)
+	}
+}
+
+func TestConfigCredentialIsBoundReplaySafeAndRevokedWithAssignment(t *testing.T) {
+	store := openControlPlaneTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	suffix := strings.ReplaceAll(t.Name(), "/", "_")
+	user, environmentID := "cfg_credential_user_"+suffix, "cfg_credential_env_"+suffix
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, user, "workos_"+user, user+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$2,$3)`, environmentID, "workspace_"+suffix, user); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,description,platform,architecture,workspace_root) VALUES ($1,$2,$3,'machine','Machine','linux','arm64','/workspace')`, "cfg_credential_machine_"+suffix, user, environmentID); err != nil {
+		t.Fatal(err)
+	}
+	privateKey := ed25519.NewKeyFromSeed([]byte(strings.Repeat("c", ed25519.SeedSize)))
+	signer, err := mint.New([]mint.Key{{ID: "config-test", PrivateKey: privateKey}}, "config-test", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enrollment := NewEnrollmentService(store, signer, nil, "https://api.example.test", "config-credential-encryption-key")
+	enrollment.clock = func() time.Time { return now }
+	grant, err := enrollment.Issue(ctx, user, "config-enrollment-01", environmentID, 5*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	helperPrivate := enrollmentTestPrivateKey(environmentID)
+	identity, err := enrollment.Exchange(ctx, grant.Credential, helperPrivate.Public().(ed25519.PublicKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignments := NewConfigAssignmentService(store, nil, "warning-7")
+	assignments.SetRepositoryResolver(testConfigRepositoryResolver())
+	assignments.clock = func() time.Time { return now }
+	repository, err := assignments.ConnectRepository(ctx, user, "github", "config-repo", "Config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignment, err := assignConfigTestProjection(assignments, ctx, user, identity.MachineID, repository.ID, ConfigModeBidirectional, "warning-7", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignment, err = assignments.AcceptConsent(ctx, user, identity.MachineID, "warning-7", assignment.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{}`)
+	bodyHash := sha256.Sum256(body)
+	proofClaims := HelperProofClaims{HelperID: identity.HelperID, EnvironmentID: environmentID, OperationID: "config-credential-operation-01", Method: "POST", Path: "/v1/config/credentials", BodySHA256: base64.RawURLEncoding.EncodeToString(bodyHash[:]), IssuedAt: now, ExpiresAt: now.Add(time.Minute)}
+	payload, _ := json.Marshal(proofClaims)
+	proof, _ := json.Marshal(helperProofEnvelope{Algorithm: "EdDSA", Payload: base64.RawURLEncoding.EncodeToString(payload), Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(helperPrivate, payload))})
+	credentials := NewConfigCredentialService(store, signer, "https://api.example.test", "config-credential-encryption-key")
+	credentials.clock = func() time.Time { return now }
+	credentials.SetWarningRevision("warning-7")
+	credentials.SetMode("leased_writes")
+	issued, err := credentials.Issue(ctx, identity.Credential, proof, body, "POST", "/v1/config/credentials")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := signer.VerifyCredential(issued.Credential, "https://api.example.test", "config_sync", now)
+	if err != nil || claims.AssignmentID != assignment.ID || claims.WarningRevision != "warning-7" || claims.MachineID != identity.MachineID {
+		t.Fatalf("claims = %#v, %v", claims, err)
+	}
+	replay, err := credentials.Issue(ctx, identity.Credential, proof, body, "POST", "/v1/config/credentials")
+	if err != nil || replay.Credential != issued.Credential {
+		t.Fatalf("replay = %#v, %v", replay, err)
+	}
+	updatedAssignments := NewConfigAssignmentService(store, nil, "warning-8")
+	updatedAssignments.clock = func() time.Time { return now }
+	replacement, err := assignConfigTestProjection(updatedAssignments, ctx, user, identity.MachineID, repository.ID, ConfigModePullOnly, "warning-8", assignment.Version)
+	if err != nil || replacement.ID == assignment.ID {
+		t.Fatalf("replacement = %#v, %v", replacement, err)
+	}
+	if _, err := credentials.Issue(ctx, identity.Credential, proof, body, "POST", "/v1/config/credentials"); !errors.Is(err, ErrConfigCredentialReplay) {
+		t.Fatalf("replaced assignment replay error = %v", err)
+	}
+	if err := assignments.Clear(ctx, user, identity.MachineID, replacement.Version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := credentials.Issue(ctx, identity.Credential, proof, body, "POST", "/v1/config/credentials"); !errors.Is(err, ErrConfigCredentialReplay) {
+		t.Fatalf("revoked replay error = %v", err)
+	}
+	edge := NewEdgeService(store, "edge-control-test")
+	edge.clock = func() time.Time { return now }
+	document, err := edge.Revocations(ctx)
+	if err != nil || !containsString(document.JTIs, claims.JTI) {
+		t.Fatalf("revocation document = %#v, %v", document, err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.users SET role='admin' WHERE id=$1`, user); err != nil {
+		t.Fatal(err)
+	}
+	if err := edge.RevokeSigningKey(ctx, user, "revoke-signing-key-01", "config-test", "compromise", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := edge.RevokeSigningKey(ctx, user, "revoke-signing-key-01", "config-test", "compromise", now.Add(time.Minute)); err != nil {
+		t.Fatalf("exact signing-key revocation replay = %v", err)
+	}
+	if err := edge.RevokeSigningKey(ctx, user, "revoke-signing-key-01", "other-key", "compromise", now); !errors.Is(err, ErrUsageOperationConflict) {
+		t.Fatalf("signing-key revocation conflict = %v", err)
+	}
+	if err := edge.RevokeSigningKey(ctx, user, "revoke-signing-key-02", "config-test", "confirmed compromise", now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	var persistedRevokedAt time.Time
+	if err := store.SQL().QueryRowContext(ctx, `SELECT revoked_at FROM paperboat.control_signing_key_revocations WHERE key_id='config-test'`).Scan(&persistedRevokedAt); err != nil || !persistedRevokedAt.Equal(now) {
+		t.Fatalf("persisted signing key revocation = %v, %v", persistedRevokedAt, err)
+	}
+	document, err = edge.Revocations(ctx)
+	if err != nil || !containsString(document.KeyIDs, "config-test") {
+		t.Fatalf("signing key revocation document = %#v, %v", document, err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.users SET role='support' WHERE id=$1`, user); err != nil {
+		t.Fatal(err)
+	}
+	if err := edge.RevokeSigningKey(ctx, user, "revoke-signing-key-01", "config-test", "compromise", now); !errors.Is(err, ErrAdminMutationForbidden) {
+		t.Fatalf("support replay error = %v, want ErrAdminMutationForbidden", err)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestConfigAssignmentEveryMachineRequiresConsent(t *testing.T) {
+	store := openControlPlaneTestDB(t)
+	ctx := context.Background()
+	suffix := strings.ReplaceAll(t.Name(), "/", "_")
+	user := "cfg_machine_a_" + suffix
+	env := "cfg_machine_a_env_" + suffix
+	machineID := "cfg_machine_a_machine_" + suffix
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active') ON CONFLICT (id) DO NOTHING`, user, "workos_"+user, user+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$2,$3) ON CONFLICT (id) DO UPDATE SET owner_user_id=EXCLUDED.owner_user_id, desired_state='active'`, env, "workspace_"+suffix, user); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root) VALUES ($1,$2,$3,'Machine','linux','unknown','/workspace')`, machineID, user, env); err != nil {
+		t.Fatal(err)
+	}
+	cleanupConfigTeamLifecycleFixture(t, store, []string{user}, nil, []string{env}, []string{machineID})
+	service := NewConfigAssignmentService(store, nil, "warning-1")
+	service.SetRepositoryResolver(testConfigRepositoryResolver())
+	repo, err := service.ConnectRepository(ctx, user, "gitlab", "repo", "Machine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignment, err := assignConfigTestProjection(service, ctx, user, machineID, repo.ID, "", "", 0)
+	if err != nil || assignment.ConsentState != "pending" || assignment.WarningRevision.String != "warning-1" || assignment.Mode != ConfigModePullOnly {
+		t.Fatalf("assignment = %#v, %v", assignment, err)
+	}
+
+	eligibility := dbsqlc.GetEligibleControlConfigAssignmentParams{EnvironmentID: env, MachineID: machineID, InstallationGeneration: 1}
+	if _, err := store.Queries().GetEligibleControlConfigAssignment(ctx, eligibility); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("pending assignment unexpectedly eligible: %v", err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.control_config_assignments SET consent_state='not_required' WHERE id=$1`, assignment.ID); err == nil {
+		t.Fatal("database accepted a consent bypass")
+	}
+	accepted, err := service.AcceptConsent(ctx, user, machineID, "warning-1", assignment.Version)
+	if err != nil || accepted.ConsentState != "accepted" {
+		t.Fatalf("accept consent = %#v, %v", accepted, err)
+	}
+	if _, err := store.Queries().GetEligibleControlConfigAssignment(ctx, eligibility); err != nil {
+		t.Fatalf("accepted assignment is ineligible: %v", err)
+	}
+}
+
+func TestTeamConfigDefaultUsesMemberProviderConnectionAndExplicitReplacement(t *testing.T) {
+	store := openControlPlaneTestDB(t)
+	ctx := context.Background()
+	suffix := strings.ReplaceAll(t.Name(), "/", "_")
+	owner, member, outsider, teamID := "cfg_owner_"+suffix, "cfg_member_"+suffix, "cfg_out_"+suffix, "cfg_team_"+suffix
+	teamID2, environmentID, machineID := teamID+"_two", "cfg_env_"+suffix, "cfg_machine_"+suffix
+	cleanupConfigTeamLifecycleFixture(t, store, []string{owner, member, outsider}, []string{teamID, teamID2}, []string{environmentID}, []string{machineID})
+	for _, user := range []string{owner, member, outsider} {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, user, "workos_"+user, user+"@example.test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.teams (team_id,owner_account,generation) VALUES ($1,$2,1)`, teamID, owner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.teams (team_id,owner_account,generation) VALUES ($1,$2,1)`, teamID2, owner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.team_members (team_id,account_id,membership_generation,role,active) VALUES ($1,$2,1,'member',true)`, teamID, member); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.team_members (team_id,account_id,membership_generation,role,active) VALUES ($1,$2,1,'member',true)`, teamID2, member); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$2,$3)`, environmentID, "workspace_"+suffix, member); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,description,platform,architecture,workspace_root) VALUES ($1,$2,$3,'machine','Machine','linux','arm64','/workspace')`, machineID, member, environmentID); err != nil {
+		t.Fatal(err)
+	}
+	service := NewConfigAssignmentService(store, nil, "warning")
+	service.SetRepositoryResolver(ConfigRepositoryResolverFunc(func(_ context.Context, userID, _, externalID string) (ConfigRepositoryConnection, error) {
+		return ConfigRepositoryConnection{ProviderAccountID: userID, ExternalRepositoryID: externalID, DisplayName: "org/config", CloneURL: "https://github.example/org/config.git", PublishURL: "https://github.example/org/config.git", DefaultBranch: "main", AuthorizationRef: "github-user:" + userID, CredentialCapability: "provider_user_repository"}, nil
+	}))
+	ownerRepo, err := service.ConnectRepository(ctx, owner, "github", "provider-repo", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SetTeamDefault(ctx, member, teamID, ownerRepo.ID, 0); !errors.Is(err, ErrAssignmentForbidden) {
+		t.Fatalf("member set error=%v", err)
+	}
+	defaultValue, err := service.SetTeamDefault(ctx, owner, teamID, ownerRepo.ID, 0)
+	if err != nil || defaultValue.Version != 1 {
+		t.Fatalf("default=%+v err=%v", defaultValue, err)
+	}
+	if _, err := service.AdoptTeamDefault(ctx, member, teamID, 1); !errors.Is(err, ErrAssignmentConflict) {
+		t.Fatalf("adoption without provider connection=%v", err)
+	}
+	memberRepo, err := service.ConnectRepository(ctx, member, "github", "provider-repo", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adoption, err := service.AdoptTeamDefault(ctx, member, teamID, 1)
+	if err != nil || adoption.RepositoryID != memberRepo.ID || adoption.UpdatePending {
+		t.Fatalf("adoption=%+v err=%v", adoption, err)
+	}
+	assignment, err := store.Queries().GetControlConfigAssignment(ctx, environmentID)
+	if err != nil || !assignment.AdoptedTeamID.Valid || assignment.AdoptedTeamID.String != teamID || assignment.Mode != ConfigModePullOnly {
+		t.Fatalf("adopted assignment=%+v err=%v", assignment, err)
+	}
+	ownerRepo2, err := service.ConnectRepository(ctx, owner, "github", "provider-repo-two", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberRepo2, err := service.ConnectRepository(ctx, member, "github", "provider-repo-two", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SetTeamDefault(ctx, owner, teamID2, ownerRepo2.ID, 0); err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := service.AdoptTeamDefault(ctx, member, teamID2, 1)
+	if err != nil || replacement.RepositoryID != memberRepo2.ID {
+		t.Fatalf("replacement=%+v err=%v", replacement, err)
+	}
+	assignment, err = store.Queries().GetControlConfigAssignment(ctx, environmentID)
+	if err != nil || assignment.RepositoryID.String != memberRepo2.ID || assignment.AdoptedTeamID.String != teamID2 || assignment.PushRepositoryID.Valid {
+		t.Fatalf("replacement assignment=%+v err=%v", assignment, err)
+	}
+	updated, err := service.SetTeamDefault(ctx, owner, teamID2, ownerRepo2.ID, 1)
+	if err != nil || updated.Version != 2 {
+		t.Fatalf("updated=%+v err=%v", updated, err)
+	}
+	adoption, err = service.TeamDefaultAdoption(ctx, member)
+	if err != nil || !adoption.UpdatePending || adoption.AdoptedVersion != 1 {
+		t.Fatalf("pending adoption=%+v err=%v", adoption, err)
+	}
+	if _, err := service.TeamDefault(ctx, outsider, teamID); !errors.Is(err, ErrAssignmentForbidden) {
+		t.Fatalf("outsider read=%v", err)
+	}
+	if err := service.UnadoptTeamDefault(ctx, member); err != nil {
+		t.Fatal(err)
+	}
+	assignment, err = service.Assignment(ctx, member, machineID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	personal, err := assignConfigTestProjection(service, ctx, member, machineID, memberRepo2.ID, ConfigModePushOnly, "warning", assignment.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Clear(ctx, member, machineID, personal.Version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.AdoptTeamDefault(ctx, member, teamID2, updated.Version); err != nil {
+		t.Fatalf("re-adoption after personal clear failed: %v", err)
+	}
+	restored, err := service.Assignment(ctx, member, machineID)
+	if err != nil || restored.ConsentState != "pending" || restored.WarningRevision.String != "warning" || restored.AcceptedAt.Valid {
+		t.Fatalf("re-adoption did not restore pending warning: %v", err)
+	}
+	accepted, err := service.AcceptConsent(ctx, member, machineID, "warning", restored.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.AdoptTeamDefault(ctx, member, teamID2, updated.Version); err != nil {
+		t.Fatal(err)
+	}
+	unchanged, err := service.Assignment(ctx, member, machineID)
+	if err != nil || unchanged.ConsentState != "accepted" || unchanged.AcceptedAt != accepted.AcceptedAt {
+		t.Fatalf("same warning lost explicit consent: %v", err)
+	}
+	service.warningRevision = "warning-next"
+	if _, err := service.AdoptTeamDefault(ctx, member, teamID2, updated.Version); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := service.Assignment(ctx, member, machineID)
+	if err != nil || changed.ConsentState != "pending" || changed.WarningRevision.String != "warning-next" || changed.AcceptedAt.Valid {
+		t.Fatalf("new warning retained old consent: %v", err)
+	}
+	if _, err := service.AcceptConsent(ctx, member, machineID, "warning", changed.Version); !errors.Is(err, ErrAssignmentConflict) {
+		t.Fatalf("old warning consent accepted: %v", err)
+	}
+	if _, err := service.AcceptConsent(ctx, member, machineID, "warning-next", changed.Version); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testConfigRepositoryResolver() ConfigRepositoryResolver {
+	return ConfigRepositoryResolverFunc(func(_ context.Context, userID, provider, externalID string) (ConfigRepositoryConnection, error) {
+		return ConfigRepositoryConnection{
+			ProviderAccountID: userID, ExternalRepositoryID: externalID, DisplayName: strings.ToUpper(externalID[:1]),
+			CloneURL:      "https://github.example/" + userID + "/" + externalID + ".git",
+			PublishURL:    "https://github.example/" + userID + "/" + externalID + ".git",
+			DefaultBranch: "main", AuthorizationRef: provider + ":" + userID, CredentialCapability: "repository_rw",
+		}, nil
+	})
+}
+
+func TestConfigUpdatePolicyPreservesBaselineIdentity(t *testing.T) {
+	store := openControlPlaneTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	suffix := strings.ReplaceAll(t.Name(), "/", "_") + "_" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	user, environmentID := "cfg_credential_user_"+suffix, "cfg_credential_env_"+suffix
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, user, "workos_"+user, user+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$2,$3)`, environmentID, "workspace_"+suffix, user); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,alias,description,platform,architecture,workspace_root) VALUES ($1,$2,$3,'machine','Machine','linux','arm64','/workspace')`, "cfg_credential_machine_"+suffix, user, environmentID); err != nil {
+		t.Fatal(err)
+	}
+	privateKey := ed25519.NewKeyFromSeed([]byte(strings.Repeat("c", ed25519.SeedSize)))
+	signer, err := mint.New([]mint.Key{{ID: "config-test", PrivateKey: privateKey}}, "config-test", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enrollment := NewEnrollmentService(store, signer, nil, "https://api.example.test", "config-credential-encryption-key")
+	enrollment.clock = func() time.Time { return now }
+	grant, err := enrollment.Issue(ctx, user, "config-enrollment-01", environmentID, 5*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	helperPrivate := enrollmentTestPrivateKey(environmentID)
+	identity, err := enrollment.Exchange(ctx, grant.Credential, helperPrivate.Public().(ed25519.PublicKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignments := NewConfigAssignmentService(store, nil, "warning-7")
+	assignments.SetRepositoryResolver(testConfigRepositoryResolver())
+	assignments.clock = func() time.Time { return now }
+	repository, err := assignments.ConnectRepository(ctx, user, "github", "config-repo", "Config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignment, err := assignConfigTestProjection(assignments, ctx, user, identity.MachineID, repository.ID, ConfigModeBidirectional, "warning-7", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignment, err = assignments.AcceptConsent(ctx, user, identity.MachineID, "warning-7", assignment.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{}`)
+	bodyHash := sha256.Sum256(body)
+	proofClaims := HelperProofClaims{HelperID: identity.HelperID, EnvironmentID: environmentID, OperationID: "config-credential-operation-01", Method: "POST", Path: "/v1/config/credentials", BodySHA256: base64.RawURLEncoding.EncodeToString(bodyHash[:]), IssuedAt: now, ExpiresAt: now.Add(time.Minute)}
+	payload, _ := json.Marshal(proofClaims)
+	proof, _ := json.Marshal(helperProofEnvelope{Algorithm: "EdDSA", Payload: base64.RawURLEncoding.EncodeToString(payload), Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(helperPrivate, payload))})
+	credentials := NewConfigCredentialService(store, signer, "https://api.example.test", "config-credential-encryption-key")
+	credentials.clock = func() time.Time { return now }
+	credentials.SetWarningRevision("warning-7")
+	credentials.SetMode("leased_writes")
+	issued, err := credentials.Issue(ctx, identity.Credential, proof, body, "POST", "/v1/config/credentials")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := signer.VerifyCredential(issued.Credential, "https://api.example.test", "config_sync", now)
+	if err != nil || claims.AssignmentID != assignment.ID || claims.WarningRevision != "warning-7" || claims.MachineID != identity.MachineID {
+		t.Fatalf("claims = %#v, %v", claims, err)
+	}
+	replay, err := credentials.Issue(ctx, identity.Credential, proof, body, "POST", "/v1/config/credentials")
+	if err != nil || replay.Credential != issued.Credential {
+		t.Fatalf("replay = %#v, %v", replay, err)
+	}
+	for _, automatic := range []bool{true, false} {
+		previous := assignment
+		assignment, err = assignConfigTestTargets(assignments, ctx, user, identity.MachineID, repository.ID, repository.ID, ConfigModeBidirectional, automatic, "warning-7", previous.Version)
+		if err != nil || assignment.ID != previous.ID || assignment.Version != previous.Version+1 || assignment.AutomaticUpdates != automatic || assignment.ConsentState != "pending" {
+			t.Fatalf("policy change lost baseline identity or consent fence: %+v, %v", assignment, err)
+		}
+		if _, err := assignConfigTestTargets(assignments, ctx, user, identity.MachineID, repository.ID, repository.ID, ConfigModeBidirectional, !automatic, "warning-7", previous.Version); !errors.Is(err, ErrAssignmentConflict) {
+			t.Fatalf("stale policy change = %v", err)
+		}
+		if _, err := credentials.Issue(ctx, identity.Credential, proof, body, "POST", "/v1/config/credentials"); !errors.Is(err, ErrConfigCredentialReplay) {
+			t.Fatalf("policy change failed credential revocation: %v", err)
+		}
+		assignment, err = assignments.AcceptConsent(ctx, user, identity.MachineID, "warning-7", assignment.Version)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	updatedAssignments := NewConfigAssignmentService(store, nil, "warning-8")
+	updatedAssignments.clock = func() time.Time { return now }
+	replacement, err := assignConfigTestProjection(updatedAssignments, ctx, user, identity.MachineID, repository.ID, ConfigModePullOnly, "warning-8", assignment.Version)
+	if err != nil || replacement.ID == assignment.ID {
+		t.Fatalf("replacement = %#v, %v", replacement, err)
+	}
+	if _, err := credentials.Issue(ctx, identity.Credential, proof, body, "POST", "/v1/config/credentials"); !errors.Is(err, ErrConfigCredentialReplay) {
+		t.Fatalf("replaced assignment replay error = %v", err)
+	}
+	if err := assignments.Clear(ctx, user, identity.MachineID, replacement.Version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := credentials.Issue(ctx, identity.Credential, proof, body, "POST", "/v1/config/credentials"); !errors.Is(err, ErrConfigCredentialReplay) {
+		t.Fatalf("revoked replay error = %v", err)
+	}
+	reenabled, err := assignConfigTestProjection(updatedAssignments, ctx, user, identity.MachineID, repository.ID, ConfigModePullOnly, "warning-8", replacement.Version+1)
+	if err != nil || reenabled.ID == replacement.ID {
+		t.Fatalf("revoked identity reused: %+v, %v", reenabled, err)
+	}
+}
+
+func TestConfigPendingBootstrapCannotConsentAndProjectionDigestFencesIdentity(t *testing.T) {
+	store := openControlPlaneTestDB(t)
+	ctx := context.Background()
+	suffix := strings.ReplaceAll(t.Name(), "/", "_")
+	user, machine, env := "projection_user_"+suffix, "projection_machine_"+suffix, "projection_env_"+suffix
+	for _, fixture := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$2,'active')`, []any{user, user + "@example.test"}},
+		{`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, []any{env, user}},
+		{`INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root) VALUES($1,$2,$3,'Machine','linux','arm64','/workspace')`, []any{machine, user, env}},
+	} {
+		if _, err := store.SQL().ExecContext(ctx, fixture.sql, fixture.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cleanupConfigTeamLifecycleFixture(t, store, []string{user}, nil, []string{env}, []string{machine})
+	service := NewConfigAssignmentService(store, nil, "warning-1")
+	repository, err := service.ConnectRepository(ctx, user, "git", "/srv/projection.git", "Projection")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := service.Assign(ctx, user, machine, repository.ID, ConfigModePullOnly, "warning-1", 0)
+	if err != nil || pending.ConfigurationRevision != "" || pending.ConsentState != "pending" {
+		t.Fatal("bootstrap metadata invalid")
+	}
+	if _, err := service.AcceptConsent(ctx, user, machine, "warning-1", pending.Version); !errors.Is(err, ErrAssignmentConflict) {
+		t.Fatal("bootstrap metadata accepted consent")
+	}
+	if _, err := service.ConfigureProjection(ctx, user, machine, repository.ID, "", ConfigModePullOnly, false, "warning-1", pending.Version, nil, nil, ""); !errors.Is(err, ErrAssignmentInvalid) {
+		t.Fatal("empty projection revision accepted")
+	}
+	approved, err := service.ConfigureProjection(ctx, user, machine, repository.ID, "", ConfigModePullOnly, false, "warning-1", pending.Version, nil, nil, testConfigurationRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := service.AcceptConsent(ctx, user, machine, "warning-1", approved.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed, err := service.ConfigureProjection(ctx, user, machine, repository.ID, "", ConfigModePullOnly, false, "warning-1", accepted.Version, nil, nil, strings.Repeat("b", 64))
+	if err != nil || changed.ID == accepted.ID || changed.ConsentState != "pending" || changed.AcceptedAt.Valid || changed.ConfigurationRevision != strings.Repeat("b", 64) {
+		t.Fatal("file configuration digest change failed authority fence")
+	}
+}

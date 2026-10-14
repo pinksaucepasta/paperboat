@@ -1,0 +1,52 @@
+.nh
+.TH "PB-CONFIG-REPOSITORY" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-repository - Connect custom Git repositories and manage machine credentials
+
+
+.SH SYNOPSIS
+\fBpb config repository [flags]\fP
+
+
+.SH DESCRIPTION
+Connect custom Git repositories and manage machine credentials
+
+.PP
+Connect a Git repository to your account, inspect registered repositories, and configure authentication separately on this machine. Connecting a repository does not select local files; define explicit machine path rules before enabling synchronization.
+
+.PP
+Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for repository
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config(1)\fP, \fBpb-config-repository-connect(1)\fP, \fBpb-config-repository-credentials(1)\fP, \fBpb-config-repository-list(1)\fP

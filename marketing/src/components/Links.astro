@@ -1,0 +1,162 @@
+---
+import Section from "./Section.astro"
+import Icon from "./Icon.astro"
+---
+
+<Section id="links" title="Share what you’re running.">
+  <Fragment slot="text">
+    <p>
+      Turn a port into a link with one command. Keep it for an afternoon, or give a service a permanent address
+      on your own domain. It’s served straight from your machine; nothing gets deployed.
+    </p>
+  </Fragment>
+
+  <div class="cards" data-reveal>
+    <article class="card surface-pattern">
+      <div class="card-head">
+        <h3 class="subtitle">Previews</h3>
+        <p class="body">A link for an hour, a day, or until you stop it. Open to anyone, just you, or your team.</p>
+      </div>
+      <pre class="out"><span class="dollar">$</span> pb preview 3000
+Preview ready
+<span class="url">https://q7f2kd.preview.pprbt.dev</span> -&gt; http://127.0.0.1:3000
+
+<span class="dim">Press Ctrl+C to stop</span></pre>
+    </article>
+
+    <article class="card surface-pattern">
+      <div class="card-head">
+        <h3 class="subtitle">Tunnels</h3>
+        <p class="body">An address that stays put. Add your own domains, wildcards included, and the certificates are handled for you.</p>
+      </div>
+      <pre class="out"><span class="dollar">$</span> pb tunnel create api --port 8080
+Created tunnel api (tun_4kq81zc2)
+Connector con_9d2f7a is ready
+<span class="url">https://8f3c1d2e.tunnels.pprbt.dev</span> -&gt; http://127.0.0.1:8080</pre>
+    </article>
+  </div>
+
+  <div class="extras" data-reveal>
+    <div class="extra">
+      <Icon name="file-arrow-up" size={20} class="extra-icon" />
+      <div>
+        <h3 class="extra-title">Drop a file, get a link.</h3>
+        <p class="body">
+          Drag a file onto the console and one of your machines serves it. Or send it straight to another machine
+          with <code>pb send</code>.
+        </p>
+      </div>
+    </div>
+    <div class="extra">
+      <Icon name="hard-drives" size={20} class="extra-icon" />
+      <div>
+        <h3 class="extra-title">Host the tunnels yourself.</h3>
+        <p class="body">
+          Serve previews and tunnels from your own servers, on your own domains.
+        </p>
+        <a class="more" href="/#selfhost">Set one up <span aria-hidden="true">→</span></a>
+      </div>
+    </div>
+  </div>
+</Section>
+
+<style>
+  .cards {
+    display: grid;
+    gap: 16px;
+  }
+
+  .card {
+    display: grid;
+    gap: 28px;
+    align-content: space-between;
+    padding: clamp(24px, 3.2vw, 36px);
+  }
+
+  .card-head {
+    display: grid;
+    gap: 8px;
+  }
+
+  .card .body {
+    font-size: 1rem;
+    max-width: 40ch;
+  }
+
+  .out {
+    margin: 0;
+    padding: 18px 20px;
+    border-radius: 10px;
+    background: var(--background);
+    box-shadow: 0 0 0 1px var(--rule);
+    font-size: 0.8125rem;
+    line-height: 1.7;
+    color: var(--ink);
+    overflow-x: auto;
+  }
+
+  .dollar,
+  .dim {
+    color: var(--faint);
+  }
+
+  .url {
+    color: var(--cobalt);
+  }
+
+  .extras {
+    display: grid;
+    gap: 32px 48px;
+    margin-top: clamp(40px, 5vw, 56px);
+  }
+
+  .extra {
+    display: flex;
+    gap: 16px;
+  }
+
+  .extra :global(.extra-icon) {
+    flex-shrink: 0;
+    margin-top: 2px;
+    color: var(--cobalt);
+  }
+
+  .extra-title {
+    font-family: var(--font-brand);
+    font-weight: 600;
+    font-size: 1.125rem;
+    letter-spacing: -0.015em;
+    color: var(--ink);
+  }
+
+  .extra .body {
+    margin-top: 6px;
+    font-size: 1rem;
+    max-width: 46ch;
+  }
+
+  .extra code {
+    font-size: 0.875em;
+    color: var(--ink);
+  }
+
+  .more {
+    display: inline-block;
+    margin-top: 10px;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--cobalt);
+  }
+
+  .more:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  @media (min-width: 900px) {
+    .cards,
+    .extras {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+</style>

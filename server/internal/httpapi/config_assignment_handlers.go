@@ -1,0 +1,387 @@
+package httpapi
+
+import (
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
+)
+
+type configRepositoryResponse struct {
+	ID          string `json:"id"`
+	Provider    string `json:"provider"`
+	ExternalRef string `json:"external_ref"`
+	DisplayName string `json:"display_name"`
+	State       string `json:"state"`
+}
+
+type configAssignmentResponse struct {
+	ID                    string                                 `json:"id"`
+	MachineID             string                                 `json:"machine_id"`
+	EnvironmentID         string                                 `json:"environment_id"`
+	RepositoryID          *string                                `json:"repository_id,omitempty"`
+	PullRepositoryID      *string                                `json:"pull_repository_id,omitempty"`
+	PushRepositoryID      *string                                `json:"push_repository_id,omitempty"`
+	AutomaticUpdates      bool                                   `json:"automatic_updates"`
+	ConsentState          string                                 `json:"consent_state"`
+	Mode                  string                                 `json:"mode"`
+	WarningRevision       *string                                `json:"warning_revision,omitempty"`
+	ConfigurationRevision string                                 `json:"configuration_revision"`
+	Version               int64                                  `json:"version"`
+	PathRules             []controlplane.ConfigPathRule          `json:"path_rules"`
+	RepositoryBindings    []controlplane.ConfigRepositoryBinding `json:"repository_bindings"`
+}
+
+func repositoryResponse(item dbsqlc.ControlConfigRepository) configRepositoryResponse {
+	return configRepositoryResponse{ID: item.ID, Provider: item.Provider, ExternalRef: item.ExternalRef, DisplayName: item.DisplayName, State: item.State}
+}
+func assignmentResponse(item dbsqlc.ControlConfigAssignment) configAssignmentResponse {
+	var repo, warning *string
+	if item.RepositoryID.Valid {
+		value := item.RepositoryID.String
+		repo = &value
+	}
+	if item.WarningRevision.Valid {
+		value := item.WarningRevision.String
+		warning = &value
+	}
+	pull := repo
+	if item.Mode == controlplane.ConfigModePushOnly {
+		pull = nil
+	}
+	var push *string
+	if item.PushRepositoryID.Valid {
+		value := item.PushRepositoryID.String
+		push = &value
+	}
+	return configAssignmentResponse{ID: item.ID, MachineID: item.MachineID, EnvironmentID: item.EnvironmentID, RepositoryID: repo, PullRepositoryID: pull, PushRepositoryID: push, AutomaticUpdates: item.AutomaticUpdates, Mode: item.Mode, ConsentState: item.ConsentState, WarningRevision: warning, Version: item.Version, ConfigurationRevision: item.ConfigurationRevision, PathRules: controlplane.ConfigAssignmentRules(item.PathRules), RepositoryBindings: controlplane.ConfigAssignmentBindings(item.RepositoryBindings)}
+}
+
+func writeConfigAssignmentFailure(w http.ResponseWriter, r *http.Request, err error, message string) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, controlplane.ErrAssignmentUnavailable) ||
+		!errors.Is(err, controlplane.ErrAssignmentInvalid) &&
+			!errors.Is(err, controlplane.ErrAssignmentConflict) &&
+			!errors.Is(err, controlplane.ErrAssignmentForbidden) {
+		writeError(w, r, http.StatusServiceUnavailable, "configuration_unavailable", message, err)
+		return true
+	}
+	return false
+}
+
+func configRepositories(service *controlplane.ConfigAssignmentService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principalFromContext(r.Context())
+		if !ok {
+			writeError(w, r, 401, "unauthenticated", "Authentication is required.")
+			return
+		}
+		query, valid := readInventoryQuery(w, r, []string{"active"}, false)
+		if !valid {
+			return
+		}
+		items, total, err := service.RepositoryInventory(r.Context(), p.User.ID, query.Q, query.State, query.Owner, query.Limit, query.Offset)
+		if err != nil {
+			if writeConfigAssignmentFailure(w, r, err, "Repositories could not be listed.") {
+				return
+			}
+			writeError(w, r, 400, "validation_failed", "Repositories could not be listed.")
+			return
+		}
+		out := make([]configRepositoryResponse, 0, len(items))
+		for _, item := range items {
+			out = append(out, repositoryResponse(item))
+		}
+		writeJSON(w, 200, SuccessResponse{Data: map[string]any{"items": out, "pagination": inventoryPagination(query.Limit, query.Offset, total, len(out))}})
+	}
+}
+
+func configRepositoryCandidates(service *controlplane.ConfigAssignmentService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principalFromContext(r.Context())
+		if !ok {
+			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "Authentication is required.")
+			return
+		}
+		query, valid := readCursorInventoryQuery(w, r, nil)
+		if !valid {
+			return
+		}
+		if query.Limit > 100 || query.Q != "" || query.Owner != "" || r.URL.Query().Has("offset") {
+			writeError(w, r, 400, "invalid_inventory_query", "Use cursor and limit between 1 and 100.")
+			return
+		}
+		items, next, err := service.RepositoryCandidateInventory(r.Context(), p.User.ID, r.URL.Query().Get("cursor"), query.Limit)
+		if err != nil {
+			if writeConfigAssignmentFailure(w, r, err, "Repository candidates are unavailable.") {
+				return
+			}
+			writeError(w, r, http.StatusBadRequest, "repository_candidates_unavailable", "Repository candidates are unavailable.")
+			return
+		}
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: map[string]any{"items": items, "next_cursor": next}})
+	}
+}
+
+func configRepositoryConnect(service *controlplane.ConfigAssignmentService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principalFromContext(r.Context())
+		if !ok {
+			writeError(w, r, 401, "unauthenticated", "Authentication is required.")
+			return
+		}
+		var in struct {
+			Provider    string `json:"provider"`
+			ExternalRef string `json:"external_ref"`
+			DisplayName string `json:"display_name"`
+			Branch      string `json:"branch"`
+		}
+		if !decodeStrictJSON(w, r, &in) {
+			return
+		}
+		item, err := service.ConnectRepository(r.Context(), p.User.ID, in.Provider, in.ExternalRef, in.DisplayName, in.Branch)
+		if err != nil {
+			if writeConfigAssignmentFailure(w, r, err, "Repository is temporarily unavailable.") {
+				return
+			}
+			writeError(w, r, 400, "validation_failed", "Repository is invalid.")
+			return
+		}
+		writeJSON(w, 201, SuccessResponse{Data: repositoryResponse(item)})
+	}
+}
+
+func configRepositoryDisconnect(service *controlplane.ConfigAssignmentService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principalFromContext(r.Context())
+		if !ok {
+			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "Authentication is required.")
+			return
+		}
+		if err := service.DisconnectRepository(r.Context(), p.User.ID, r.PathValue("repository_id")); err != nil {
+			if writeConfigAssignmentFailure(w, r, err, "Configuration repository could not be disconnected.") {
+				return
+			}
+			writeError(w, r, http.StatusNotFound, "not_found_or_forbidden", "Configuration repository was not found or is unavailable.")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func configAssignmentGet(service *controlplane.ConfigAssignmentService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principalFromContext(r.Context())
+		if !ok {
+			writeError(w, r, 401, "unauthenticated", "Authentication is required.")
+			return
+		}
+		item, err := service.Assignment(r.Context(), p.User.ID, r.PathValue("machine_id"))
+		if errors.Is(err, controlplane.ErrAssignmentForbidden) {
+			writeError(w, r, 404, "not_found_or_forbidden", "Machine was not found or is unavailable.")
+			return
+		}
+		if err != nil {
+			writeError(w, r, 503, "configuration_unavailable", "Configuration assignment could not be checked. Retry when the control plane is available.", err)
+			return
+		}
+		writeJSON(w, 200, SuccessResponse{Data: assignmentResponse(item)})
+	}
+}
+
+func configAssignmentSet(service *controlplane.ConfigAssignmentService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principalFromContext(r.Context())
+		if !ok {
+			writeError(w, r, 401, "unauthenticated", "Authentication is required.")
+			return
+		}
+		var in struct {
+			PullRepositoryID      string                                 `json:"pull_repository_id"`
+			PushRepositoryID      string                                 `json:"push_repository_id"`
+			AutomaticUpdates      bool                                   `json:"automatic_updates"`
+			Mode                  string                                 `json:"mode"`
+			WarningRevision       string                                 `json:"warning_revision"`
+			ConfigurationRevision string                                 `json:"configuration_revision"`
+			ExpectedVersion       int64                                  `json:"expected_version"`
+			PathRules             []controlplane.ConfigPathRule          `json:"path_rules"`
+			RepositoryBindings    []controlplane.ConfigRepositoryBinding `json:"repository_bindings"`
+		}
+		if !decodeStrictJSON(w, r, &in) {
+			return
+		}
+		item, err := service.ConfigureProjection(r.Context(), p.User.ID, r.PathValue("machine_id"), in.PullRepositoryID, in.PushRepositoryID, in.Mode, in.AutomaticUpdates, in.WarningRevision, in.ExpectedVersion, in.PathRules, in.RepositoryBindings, in.ConfigurationRevision)
+		if err != nil {
+			if writeConfigAssignmentFailure(w, r, err, "Config assignment could not be changed.") {
+				return
+			}
+			status, code := 400, "validation_failed"
+			if errors.Is(err, controlplane.ErrAssignmentConflict) {
+				status, code = 409, "version_conflict"
+			}
+			if errors.Is(err, controlplane.ErrAssignmentForbidden) {
+				status, code = 404, "not_found_or_forbidden"
+			}
+			writeError(w, r, status, code, "Config assignment could not be changed.")
+			return
+		}
+		writeJSON(w, 200, SuccessResponse{Data: assignmentResponse(item)})
+	}
+}
+
+func configConsent(service *controlplane.ConfigAssignmentService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principalFromContext(r.Context())
+		if !ok {
+			writeError(w, r, 401, "unauthenticated", "Authentication is required.")
+			return
+		}
+		var in struct {
+			WarningRevision string `json:"warning_revision"`
+			ExpectedVersion int64  `json:"expected_version"`
+		}
+		if !decodeStrictJSON(w, r, &in) {
+			return
+		}
+		item, err := service.AcceptConsent(r.Context(), p.User.ID, r.PathValue("machine_id"), strings.TrimSpace(in.WarningRevision), in.ExpectedVersion)
+		if err != nil {
+			if writeConfigAssignmentFailure(w, r, err, "Config consent could not be accepted.") {
+				return
+			}
+			status, code := 400, "validation_failed"
+			if errors.Is(err, controlplane.ErrAssignmentConflict) {
+				status, code = 409, "version_conflict"
+			}
+			writeError(w, r, status, code, "Config consent could not be accepted.")
+			return
+		}
+		writeJSON(w, 200, SuccessResponse{Data: assignmentResponse(item)})
+	}
+}
+
+func configWarning(service *controlplane.ConfigAssignmentService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principalFromContext(r.Context())
+		if !ok {
+			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "Authentication is required.")
+			return
+		}
+		facts, err := service.Warning(r.Context(), p.User.ID, r.PathValue("machine_id"))
+		if err != nil {
+			if writeConfigAssignmentFailure(w, r, err, "Configuration warning is temporarily unavailable.") {
+				return
+			}
+			writeError(w, r, http.StatusNotFound, "not_found_or_forbidden", "Configuration warning is unavailable.")
+			return
+		}
+		noStore(w)
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: facts})
+	}
+}
+
+func configConsentRemove(service *controlplane.ConfigAssignmentService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principalFromContext(r.Context())
+		if !ok {
+			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "Authentication is required.")
+			return
+		}
+		expectedVersion, _ := strconv.ParseInt(r.URL.Query().Get("expected_version"), 10, 64)
+		item, err := service.RemoveConsent(r.Context(), p.User.ID, r.PathValue("machine_id"), expectedVersion)
+		if err != nil {
+			if writeConfigAssignmentFailure(w, r, err, "Configuration consent could not be removed.") {
+				return
+			}
+			status, code := http.StatusBadRequest, "consent_remove_failed"
+			if errors.Is(err, controlplane.ErrAssignmentConflict) {
+				status, code = http.StatusConflict, "version_conflict"
+			} else if errors.Is(err, controlplane.ErrAssignmentForbidden) {
+				status, code = http.StatusNotFound, "not_found_or_forbidden"
+			}
+			writeError(w, r, status, code, "Configuration consent could not be removed.")
+			return
+		}
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: assignmentResponse(item)})
+	}
+}
+
+func configAssignmentClear(service *controlplane.ConfigAssignmentService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principalFromContext(r.Context())
+		if !ok {
+			writeError(w, r, 401, "unauthenticated", "Authentication is required.")
+			return
+		}
+		v, _ := strconv.ParseInt(r.URL.Query().Get("expected_version"), 10, 64)
+		if err := service.Clear(r.Context(), p.User.ID, r.PathValue("machine_id"), v); err != nil {
+			if writeConfigAssignmentFailure(w, r, err, "Config assignment could not be cleared.") {
+				return
+			}
+			status := 400
+			if errors.Is(err, controlplane.ErrAssignmentConflict) {
+				status = 409
+			}
+			writeError(w, r, status, "assignment_clear_failed", "Config assignment could not be cleared.")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func configPullRevisionApprove(service *controlplane.ConfigAssignmentService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principalFromContext(r.Context())
+		if !ok {
+			writeError(w, r, 401, "unauthenticated", "Authentication is required.")
+			return
+		}
+		var in struct {
+			RemoteRevision  string `json:"remote_revision"`
+			ExpectedVersion int64  `json:"expected_version"`
+		}
+		if !decodeStrictJSON(w, r, &in) {
+			return
+		}
+		item, err := service.ApprovePullRevision(r.Context(), p.User.ID, r.PathValue("machine_id"), in.RemoteRevision, in.ExpectedVersion)
+		if err != nil {
+			if writeConfigAssignmentFailure(w, r, err, "Configuration revision approval is temporarily unavailable.") {
+				return
+			}
+			status, code := 400, "validation_failed"
+			if errors.Is(err, controlplane.ErrAssignmentConflict) {
+				status, code = 409, "stale_revision"
+			}
+			if errors.Is(err, controlplane.ErrAssignmentForbidden) {
+				status, code = 404, "not_found_or_forbidden"
+			}
+			writeError(w, r, status, code, "Configuration revision approval could not be recorded.")
+			return
+		}
+		writeJSON(w, 200, SuccessResponse{Data: assignmentResponse(item)})
+	}
+}
+
+func configRepositoryGet(service *controlplane.ConfigAssignmentService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principalFromContext(r.Context())
+		if !ok {
+			writeError(w, r, 401, "unauthenticated", "Authentication is required.")
+			return
+		}
+		item, err := service.Repository(r.Context(), p.User.ID, r.PathValue("repository_id"))
+		if errors.Is(err, controlplane.ErrAssignmentForbidden) {
+			writeError(w, r, 404, "not_found_or_forbidden", "Repository was not found.")
+			return
+		}
+		if err != nil {
+			writeError(w, r, 503, "configuration_unavailable", "Repository could not be loaded.", err)
+			return
+		}
+		writeJSON(w, 200, SuccessResponse{Data: map[string]any{"id": item.ID, "provider": item.Provider, "external_ref": item.ExternalRef, "display_name": item.DisplayName, "state": item.State, "default_branch": item.DefaultBranch.String, "observed_revision": item.ObservedRevision.String, "version": item.Version}})
+	}
+}

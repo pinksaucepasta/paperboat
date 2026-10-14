@@ -1,0 +1,72 @@
+.nh
+.TH "PB-PREVIEW-LIST" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-preview-list - List temporary previews
+
+
+.SH SYNOPSIS
+\fBpb preview list [flags]\fP
+
+
+.SH DESCRIPTION
+List temporary previews
+
+.PP
+List account-visible temporary previews and their state. Select an exact preview identity for status, inspect, replay, stop, or delete.
+
+.PP
+A preview exposes a local target through a temporary Paperboat URL or private/team access policy. Inspect its status before sharing the URL, and stop or delete it when no longer needed. Browser HTTP terminates TLS at the edge.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--cursor\fP=""
+	continue a previous page
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for list
+
+.PP
+\fB--json\fP[=false]
+	print canonical preview resources as JSON
+
+.PP
+\fB--limit\fP=100
+	maximum results (1-200)
+
+.PP
+\fB--owner\fP=""
+	filter owner: mine, shared, or an authorized account ID
+
+.PP
+\fB--q\fP=""
+	filter by resource name or ID
+
+.PP
+\fB--state\fP=""
+	filter by resource state
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-preview(1)\fP

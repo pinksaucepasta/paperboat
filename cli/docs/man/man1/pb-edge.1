@@ -1,0 +1,49 @@
+.nh
+.TH "PB-EDGE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-edge - Inspect tunnel edges
+
+
+.SH SYNOPSIS
+\fBpb edge [flags]\fP
+
+
+.SH DESCRIPTION
+Inspect tunnel edges
+
+.PP
+List edges in the active workspace according to its tunnel pool. Managed-only lists Paperboat-managed edges; self-hosted-only lists only the selected self-hosted edges and never falls back to managed edges. Self-hosted browser publications require a verified customer domain and ready certificate.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for edge
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb(1)\fP, \fBpb-edge-list(1)\fP

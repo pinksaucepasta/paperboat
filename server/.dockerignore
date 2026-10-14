@@ -1,0 +1,11 @@
+**
+!go.mod
+!go.sum
+!LICENSE
+!cmd/
+!cmd/paperboat-server/
+!cmd/paperboat-server/**
+!internal/
+!internal/**
+**/*_test.go
+

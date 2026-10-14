@@ -1,0 +1,60 @@
+.nh
+.TH "PB-SESSION-CLOSE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-session-close - Close one or all terminal sessions
+
+
+.SH SYNOPSIS
+\fBpb session close [flags]\fP
+
+
+.SH DESCRIPTION
+Close one or all terminal sessions
+
+.PP
+Close one selected terminal session or every applicable session with --all. Closing ends the remote process and deletes its recent output; the closed record remains temporarily. With --all, run the command once to receive a short-lived confirmation token, then run the displayed command to proceed. The same code flow applies to one session.
+
+.PP
+Terminal sessions persist independently of a single connection and can be reattached after a disconnect. Sharing grants explicit access to a named session. Closing, deleting, and removing a participant have different effects; inspect the selected session before acting.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--all\fP[=false]
+	close all sessions in the environment
+
+.PP
+\fB--confirm\fP=""
+	six-character confirmation code from the preview
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for close
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-session(1)\fP

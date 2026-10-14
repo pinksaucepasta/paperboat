@@ -1,0 +1,65 @@
+---
+import Install from "./Install.astro"
+import GridBoat from "./GridBoat.astro"
+---
+
+<section class="hero" id="top">
+  <GridBoat class="hero-boat" />
+  <div class="wrap hero-inner">
+    <h1 class="display">Reach every machine you own, from&nbsp;anywhere.</h1>
+    <p class="lede hero-lede">
+      Install Paperboat once per machine. Then terminals, SSH, previews and files just work, for you and your
+      team.
+    </p>
+    <div class="hero-install" id="install">
+      <Install />
+    </div>
+  </div>
+</section>
+
+<style>
+  .hero {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    padding-block: clamp(72px, 12vw, 168px) clamp(140px, 13vw, 184px);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  /* Big, faint and cut off by the edges: only the sail and part of the hull show. */
+  .hero :global(.hero-boat) {
+    position: absolute;
+    z-index: -1;
+    width: clamp(720px, 64vw, 1040px);
+    right: clamp(-260px, -16vw, -120px);
+    bottom: clamp(-110px, -6vw, -60px);
+    fill: #f1f2f4;
+    pointer-events: none;
+  }
+
+  .hero-inner {
+    position: relative;
+  }
+
+  .display {
+    max-width: 13ch;
+  }
+
+  .hero-lede {
+    margin-top: clamp(20px, 2.4vw, 28px);
+    max-width: 40ch;
+    color: var(--fog);
+  }
+
+  .hero-install {
+    margin-top: clamp(32px, 4vw, 44px);
+  }
+
+  @media (max-width: 720px) {
+    .hero :global(.hero-boat) {
+      width: 340px;
+      right: -120px;
+      bottom: -44px;
+    }
+  }
+</style>

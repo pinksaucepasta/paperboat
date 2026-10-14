@@ -1,0 +1,52 @@
+.nh
+.TH "PB-SSH-DOCTOR" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-ssh-doctor - Check SSH integration for a machine
+
+
+.SH SYNOPSIS
+\fBpb ssh doctor <machine> [flags]\fP
+
+
+.SH DESCRIPTION
+Check SSH integration for a machine
+
+.PP
+Check the selected machine's managed SSH configuration and local integration. It reports actionable findings without approving a changed host identity.
+
+.PP
+Managed SSH resolves the Paperboat machine and then runs OpenSSH with the selected target. Host identity checks remain in force. Standard SSH, SCP, SFTP, and rsync behavior is preserved while Paperboat supplies machine resolution and authorized connectivity.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for doctor
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-ssh(1)\fP

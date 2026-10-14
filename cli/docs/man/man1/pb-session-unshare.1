@@ -1,0 +1,52 @@
+.nh
+.TH "PB-SESSION-UNSHARE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-session-unshare - End sharing while preserving the owner's terminal
+
+
+.SH SYNOPSIS
+\fBpb session unshare <session-id> [flags]\fP
+
+
+.SH DESCRIPTION
+End sharing while preserving the owner's terminal
+
+.PP
+End sharing for one session while preserving the owner's terminal and history. Existing participants lose the shared grant according to the resulting authorization state.
+
+.PP
+Terminal sessions persist independently of a single connection and can be reattached after a disconnect. Sharing grants explicit access to a named session. Closing, deleting, and removing a participant have different effects; inspect the selected session before acting.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for unshare
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-session(1)\fP

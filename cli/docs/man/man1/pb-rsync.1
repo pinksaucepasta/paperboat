@@ -1,0 +1,49 @@
+.nh
+.TH "PB-RSYNC" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-rsync - Run rsync with Paperboat machine resolution
+
+
+.SH SYNOPSIS
+\fBpb rsync <standard rsync arguments...> [flags]\fP
+
+
+.SH DESCRIPTION
+Run rsync with Paperboat machine resolution
+
+.PP
+Run standard rsync arguments with Paperboat machine-name resolution and authorized connectivity. File selection, deletion flags, and exit behavior remain rsync's responsibility; inspect its command line before synchronizing.
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for rsync
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb(1)\fP

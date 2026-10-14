@@ -1,0 +1,61 @@
+.nh
+.TH "PB-ENVIRONMENTS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-environments - List enrolled machines available to this account
+
+
+.SH SYNOPSIS
+\fBpb environments [flags]\fP
+
+
+.SH DESCRIPTION
+List enrolled machines available to this account
+
+.PP
+List enrolled machines available to this account as terminal environments. Use the displayed name or ID with pb connect; visibility does not imply a machine is ready.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for environments
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--owner\fP=""
+	filter owner: mine, shared, or an authorized account ID
+
+.PP
+\fB--q\fP=""
+	filter by resource name or ID
+
+.PP
+\fB--state\fP=""
+	filter by resource state
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb(1)\fP

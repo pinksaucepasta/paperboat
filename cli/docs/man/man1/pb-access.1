@@ -1,0 +1,49 @@
+.nh
+.TH "PB-ACCESS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-access - Open authenticated private access
+
+
+.SH SYNOPSIS
+\fBpb access [flags]\fP
+
+
+.SH DESCRIPTION
+Open authenticated private access
+
+.PP
+Choose machine access for an enrolled machine service or tunnel access for an existing private tunnel route. Each child command opens a local listener and keeps the forwarding process alive until it exits.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for access
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb(1)\fP, \fBpb-access-machine(1)\fP, \fBpb-access-tunnel(1)\fP

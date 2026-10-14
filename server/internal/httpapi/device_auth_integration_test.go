@@ -1,0 +1,607 @@
+package httpapi
+
+import (
+	"bytes"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/pinksaucepasta/paperboat-server/internal/auth"
+	"github.com/pinksaucepasta/paperboat-server/internal/config"
+)
+
+var cliScopes = config.Default().CLIAuth.AllowedScopes
+
+func TestDeviceAuthorizationApprovalBearerRefreshAndReplay(t *testing.T) {
+	store, router := newAuthIntegrationRouter(t)
+	cookies := loginCookies(t, router, "workos_device:device@example.com:Device User")
+	if _, err := store.SQL().Exec(`INSERT INTO paperboat.auth_rate_limits(bucket_key,window_start,request_count) VALUES('expired-test',now()-interval '10 minutes',1)`); err != nil {
+		t.Fatal(err)
+	}
+	grant := authorizeDevice(t, router)
+	var expiredRateRows int
+	if err := store.SQL().QueryRow(`SELECT count(*) FROM paperboat.auth_rate_limits WHERE bucket_key='expired-test'`).Scan(&expiredRateRows); err != nil {
+		t.Fatal(err)
+	}
+	if expiredRateRows != 0 {
+		t.Fatal("expired rate-limit window was not deleted")
+	}
+	requestDetails := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/auth/device/requests/"+grant.UserCode, nil)
+	addCookies(req, cookies)
+	router.ServeHTTP(requestDetails, req)
+	if requestDetails.Code != http.StatusOK {
+		t.Fatalf("device request status=%d body=%s", requestDetails.Code, requestDetails.Body.String())
+	}
+	if requestDetails.Header().Get("Cache-Control") != "no-store" || requestDetails.Header().Get("Pragma") != "no-cache" {
+		t.Fatalf("device request cache headers=%q/%q", requestDetails.Header().Get("Cache-Control"), requestDetails.Header().Get("Pragma"))
+	}
+	if !strings.Contains(requestDetails.Body.String(), `"issuer":"http://127.0.0.1:8080"`) || !strings.Contains(requestDetails.Body.String(), `"email":"device@example.com"`) {
+		t.Fatalf("device request omitted approval authority: %s", requestDetails.Body.String())
+	}
+
+	approve := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/v1/auth/device/requests/"+grant.UserCode+"/approve", nil)
+	addCookies(req, cookies)
+	req.Header.Set(auth.CSRFHeaderName, csrfCookie(t, cookies))
+	router.ServeHTTP(approve, req)
+	if approve.Code != http.StatusOK {
+		t.Fatalf("approve status=%d body=%s", approve.Code, approve.Body.String())
+	}
+
+	tokens := pollDevice(t, router, grant.DeviceCode, http.StatusOK)
+	me := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	router.ServeHTTP(me, req)
+	if me.Code != http.StatusOK {
+		t.Fatalf("me status=%d body=%s", me.Code, me.Body.String())
+	}
+	if !bytes.Contains(me.Body.Bytes(), []byte(`"email":"device@example.com"`)) {
+		t.Fatalf("me body missing authenticated CLI user: %s", me.Body.String())
+	}
+
+	invalidMe := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer invalid-token")
+	router.ServeHTTP(invalidMe, req)
+	if invalidMe.Code != http.StatusUnauthorized {
+		t.Fatalf("invalid bearer me status=%d body=%s", invalidMe.Code, invalidMe.Body.String())
+	}
+
+	list := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/v1/auth/cli-client-sessions", nil)
+	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	router.ServeHTTP(list, req)
+	if list.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", list.Code, list.Body.String())
+	}
+	if bytes.Contains(list.Body.Bytes(), []byte(tokens.AccessToken)) || bytes.Contains(list.Body.Bytes(), []byte(tokens.RefreshToken)) {
+		t.Fatal("client list leaked a token")
+	}
+
+	refreshed := refreshDevice(t, router, tokens.RefreshToken, http.StatusOK)
+	refreshDevice(t, router, tokens.RefreshToken, http.StatusUnauthorized)
+	revoked := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/v1/auth/cli-client-sessions", nil)
+	req.Header.Set("Authorization", "Bearer "+refreshed.AccessToken)
+	router.ServeHTTP(revoked, req)
+	if revoked.Code != http.StatusUnauthorized {
+		t.Fatalf("replayed family access status=%d body=%s", revoked.Code, revoked.Body.String())
+	}
+
+	var rawSecrets int
+	if err := store.SQL().QueryRow(`SELECT count(*) FROM paperboat.device_grants WHERE device_code_hash=$1 OR user_code_hash=$2`, grant.DeviceCode, grant.UserCode).Scan(&rawSecrets); err != nil {
+		t.Fatal(err)
+	}
+	if rawSecrets != 0 {
+		t.Fatal("raw device or user code was persisted")
+	}
+}
+
+func TestDeviceGrantConcurrentRecoveryCreatesOneSession(t *testing.T) {
+	store, router := newAuthIntegrationRouter(t)
+	cookies := loginCookies(t, router, "workos_race:race@example.com:Race User")
+	grant := authorizeDevice(t, router)
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/device/requests/"+grant.UserCode+"/approve", nil)
+	addCookies(req, cookies)
+	req.Header.Set(auth.CSRFHeaderName, csrfCookie(t, cookies))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("approve status=%d", rec.Code)
+	}
+	var wg sync.WaitGroup
+	statuses := make(chan int, 2)
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			body, _ := json.Marshal(map[string]any{"client_id": "paperboat", "device_code": grant.DeviceCode})
+			r := httptest.NewRequest(http.MethodPost, "/v1/auth/device/token", bytes.NewReader(body))
+			r.RemoteAddr = "198.51.100.20:1234"
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, r)
+			statuses <- w.Code
+		}()
+	}
+	wg.Wait()
+	close(statuses)
+	success := 0
+	failure := 0
+	for status := range statuses {
+		if status == http.StatusOK {
+			success++
+		} else if status == http.StatusBadRequest {
+			failure++
+		}
+	}
+	if success != 2 || failure != 0 {
+		t.Fatalf("success=%d failure=%d", success, failure)
+	}
+	var sessions int
+	if err := store.SQL().QueryRow(`SELECT count(*) FROM paperboat.cli_client_sessions`).Scan(&sessions); err != nil {
+		t.Fatal(err)
+	}
+	if sessions != 1 {
+		t.Fatalf("sessions=%d, want exactly one issuance", sessions)
+	}
+}
+
+func TestApprovedDevicePollEnforcesAccountRateLimit(t *testing.T) {
+	store, router := newAuthIntegrationRouter(t)
+	cookies := loginCookies(t, router, "workos_account_rate:account-rate@example.com:Account Rate")
+	grant := authorizeDevice(t, router)
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/device/requests/"+grant.UserCode+"/approve", nil)
+	addCookies(req, cookies)
+	req.Header.Set(auth.CSRFHeaderName, csrfCookie(t, cookies))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("approve status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := store.SQL().Exec(`UPDATE paperboat.auth_rate_limits SET request_count=30 WHERE bucket_key LIKE 'account:%'`); err != nil {
+		t.Fatal(err)
+	}
+	pollDevice(t, router, grant.DeviceCode, http.StatusTooManyRequests)
+	var sessions int
+	if err := store.SQL().QueryRow(`SELECT count(*) FROM paperboat.cli_client_sessions`).Scan(&sessions); err != nil {
+		t.Fatal(err)
+	}
+	if sessions != 0 {
+		t.Fatalf("client sessions=%d, want 0 after rate-limited poll", sessions)
+	}
+}
+
+func TestApprovedGrantCannotCreateSessionAfterAccountSuspension(t *testing.T) {
+	store, router := newAuthIntegrationRouter(t)
+	cookies := loginCookies(t, router, "workos_grant_suspend:grant-suspend@example.com:Grant Suspend")
+	grant := authorizeDevice(t, router)
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/device/requests/"+grant.UserCode+"/approve", nil)
+	addCookies(req, cookies)
+	req.Header.Set(auth.CSRFHeaderName, csrfCookie(t, cookies))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("approve status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	userID := userIDByEmail(t, store, "grant-suspend@example.com")
+	if _, err := store.SQL().Exec(`UPDATE paperboat.users SET status='suspended' WHERE id=$1`, userID); err != nil {
+		t.Fatal(err)
+	}
+	pollDevice(t, router, grant.DeviceCode, http.StatusBadRequest)
+	if _, err := store.SQL().Exec(`UPDATE paperboat.users SET status='active' WHERE id=$1`, userID); err != nil {
+		t.Fatal(err)
+	}
+	pollDevice(t, router, grant.DeviceCode, http.StatusBadRequest)
+	var sessions int
+	if err := store.SQL().QueryRow(`SELECT count(*) FROM paperboat.cli_client_sessions WHERE user_id=$1`, userID).Scan(&sessions); err != nil {
+		t.Fatal(err)
+	}
+	if sessions != 0 {
+		t.Fatalf("client sessions=%d want=0", sessions)
+	}
+	var state string
+	if err := store.SQL().QueryRow(`SELECT state FROM paperboat.device_grants WHERE user_id=$1`, userID).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "denied" {
+		t.Fatalf("grant state=%q want denied", state)
+	}
+}
+
+func TestUnknownRevokeTokenAndApprovalCodeMatchContract(t *testing.T) {
+	_, router := newAuthIntegrationRouter(t)
+	cookies := loginCookies(t, router, "workos_unknown_device:unknown-device@example.com:Unknown Device")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/token/revoke", nil)
+	req.Header.Set("Authorization", "Bearer unknown-token")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unknown revoke token status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/v1/auth/device/requests/NOPE-CODE", nil)
+	addCookies(req, cookies)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown approval code status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestBrowserLogoutKeepsCLIClientActiveAndDeleteReturnsNoContent(t *testing.T) {
+	store, router := newAuthIntegrationRouter(t)
+	cookies := loginCookies(t, router, "workos_logout_scope:logout-scope@example.com:Logout Scope")
+	grant := authorizeDevice(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/device/requests/"+grant.UserCode+"/approve", nil)
+	addCookies(req, cookies)
+	req.Header.Set(auth.CSRFHeaderName, csrfCookie(t, cookies))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("approve status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	tokens := pollDevice(t, router, grant.DeviceCode, http.StatusOK)
+	accountID := userIDByEmail(t, store, "logout-scope@example.com")
+	// This opaque row marks initialized custody; envelope crypto has separate tests.
+	if _, err := store.SQL().Exec(`INSERT INTO paperboat.environment_password_vaults(account_id,generation,document_id,envelope) VALUES($1,1,'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','opaque-test-envelope')`, accountID); err != nil {
+		t.Fatal(err)
+	}
+	teamID := "team_logout_hook"
+	for _, q := range []string{`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, `INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true)`} {
+		if _, err := store.SQL().Exec(q, teamID, accountID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.SQL().Exec(`INSERT INTO paperboat.environment_vault_teams(team_id,key_epoch) SELECT $1,1 WHERE $2<>''`, teamID, accountID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().Exec(`INSERT INTO paperboat.environment_vault_team_members(team_id,account_id,grant_epoch) VALUES($1,$2,1)`, teamID, accountID); err != nil {
+		t.Fatal(err)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/auth/logout", nil)
+	addCookies(req, cookies)
+	req.Header.Set(auth.CSRFHeaderName, csrfCookie(t, cookies))
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("browser logout status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/v1/auth/cli-client-sessions", nil)
+	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("CLI after browser logout status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	survivor := authorizeCLI(t, router, loginCookies(t, router, "workos_logout_scope:logout-scope@example.com:Logout Scope"))
+	var rotationRequired bool
+	if err := store.SQL().QueryRow(`SELECT COALESCE((SELECT COALESCE((SELECT rotation_required FROM paperboat.environment_vault_personal_epochs WHERE account_id=$1),false)),false)`, accountID).Scan(&rotationRequired); err != nil || rotationRequired {
+		t.Fatal("routine browser logout required key rotation", err)
+	}
+	req = httptest.NewRequest(http.MethodDelete, "/v1/auth/cli-client-sessions/"+tokens.CLIClientSessionID, nil)
+	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
+		t.Fatalf("delete status=%d body=%q, want empty 204", rec.Code, rec.Body.String())
+	}
+	if err := store.SQL().QueryRow(`SELECT COALESCE((SELECT rotation_required FROM paperboat.environment_vault_personal_epochs WHERE account_id=$1),false)`, accountID).Scan(&rotationRequired); err != nil || rotationRequired {
+		t.Fatal("CLI session revocation required personal key rotation", err)
+	}
+	if err := store.SQL().QueryRow(`SELECT rotation_required FROM paperboat.environment_vault_teams WHERE team_id=$1`, teamID).Scan(&rotationRequired); err != nil || rotationRequired {
+		t.Fatal("CLI session revocation required team key rotation", err)
+	}
+
+	for _, credential := range []struct {
+		token  string
+		status int
+	}{{tokens.AccessToken, http.StatusUnauthorized}, {survivor.AccessToken, http.StatusOK}} {
+		req = httptest.NewRequest(http.MethodGet, "/v1/environment/scopes?workspace=personal", nil)
+		req.Header.Set("Authorization", "Bearer "+credential.token)
+		rec = httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != credential.status {
+			t.Fatalf("access after session revocation status=%d want=%d", rec.Code, credential.status)
+		}
+	}
+	refreshDevice(t, router, tokens.RefreshToken, http.StatusUnauthorized)
+	refreshDevice(t, router, survivor.RefreshToken, http.StatusOK)
+}
+
+func TestUserMachineMutationsAcceptScopedBearerAndRequireCookieCSRF(t *testing.T) {
+	store, router := newAuthIntegrationRouter(t)
+	cookies := loginCookies(t, router, "workos_machine_revoke:machine-revoke@example.com:Machine Revoke")
+	tokens := authorizeCLI(t, router, cookies)
+	userID := userIDByEmail(t, store, "machine-revoke@example.com")
+	for _, machineID := range []string{"um_disconnect", "um_delete", "um_cookie"} {
+		if _, err := store.SQL().Exec(`
+INSERT INTO paperboat.user_machines
+  (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online)
+VALUES ($1,$2,$3,$4,'linux','amd64','/home/paperboat','online','occupied',true)`, machineID, userID, "env_"+machineID, machineID); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := store.SQL().Exec(`UPDATE paperboat.cli_client_sessions SET user_machine_id='um_delete' WHERE id=$1`, tokens.CLIClientSessionID); err != nil {
+		t.Fatal(err)
+	}
+	survivor := authorizeCLI(t, router, cookies)
+	readENV := func(token string, want int) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/v1/environment/scopes?workspace=personal", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("machine-bound ENV credential status=%d want=%d", rec.Code, want)
+		}
+	}
+	readENV(tokens.AccessToken, http.StatusOK)
+
+	for _, mutation := range []struct{ method, path string }{
+		{http.MethodPost, "/v1/machines/um_disconnect/disconnect"},
+		{http.MethodDelete, "/v1/machines/um_delete"},
+	} {
+		req := httptest.NewRequest(mutation.method, mutation.path, nil)
+		req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s %s status=%d body=%s", mutation.method, mutation.path, rec.Code, rec.Body.String())
+		}
+	}
+
+	readENV(tokens.AccessToken, http.StatusUnauthorized)
+	readENV(survivor.AccessToken, http.StatusOK)
+	refreshDevice(t, router, tokens.RefreshToken, http.StatusUnauthorized)
+	refreshDevice(t, router, survivor.RefreshToken, http.StatusOK)
+
+	grantBody, _ := json.Marshal(map[string]any{"client_id": "paperboat", "client_label": "Read-only CLI", "device_type": "desktop", "os": "linux", "scopes": cliScopes})
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/device/authorize", bytes.NewReader(grantBody))
+	req.RemoteAddr = "198.51.100.30:1234"
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("read-only authorize status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var grantEnvelope struct {
+		Data deviceGrant `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &grantEnvelope); err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/v1/auth/device/requests/"+grantEnvelope.Data.UserCode+"/approve", nil)
+	addCookies(req, cookies)
+	req.Header.Set(auth.CSRFHeaderName, csrfCookie(t, cookies))
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("read-only approve status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	readOnly := pollDevice(t, router, grantEnvelope.Data.DeviceCode, http.StatusOK)
+	if _, err := store.SQL().Exec(`UPDATE paperboat.cli_client_sessions SET scopes=ARRAY['machines:read']::text[] WHERE id=$1`, readOnly.CLIClientSessionID); err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/v1/machines/um_cookie/disconnect", nil)
+	req.Header.Set("Authorization", "Bearer "+readOnly.AccessToken)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("insufficient scope status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/machines/um_cookie/disconnect", nil)
+	addCookies(req, cookies)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "csrf_failed") {
+		t.Fatalf("missing CSRF status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestMachineEnrollmentRoutesAcceptScopedBearerAndRequireCookieCSRF(t *testing.T) {
+	store, router := newAuthIntegrationRouter(t)
+	cookies := loginCookies(t, router, "workos_machine_enrollment:machine-enrollment@example.com:Machine Enrollment")
+	tokens := authorizeCLI(t, router, cookies)
+
+	start := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/machine-enrollments", strings.NewReader(`{"shell":"posix"}`))
+	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	req.Header.Set("Idempotency-Key", "machine-enrollment-bearer")
+	router.ServeHTTP(start, req)
+	if start.Code != http.StatusCreated {
+		t.Fatalf("bearer enrollment start status=%d body=%s", start.Code, start.Body.String())
+	}
+	var started struct {
+		Data struct {
+			ID             string `json:"id"`
+			State          string `json:"state"`
+			BootstrapToken string `json:"bootstrap_token"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(start.Body.Bytes(), &started); err != nil {
+		t.Fatal(err)
+	}
+	if started.Data.ID == "" || started.Data.State != "awaiting_bootstrap" || started.Data.BootstrapToken == "" {
+		t.Fatalf("unexpected enrollment start response: %s", start.Body.String())
+	}
+
+	status := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/v1/machine-enrollments/"+started.Data.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	router.ServeHTTP(status, req)
+	if status.Code != http.StatusOK || !strings.Contains(status.Body.String(), `"state":"awaiting_bootstrap"`) {
+		t.Fatalf("bearer enrollment status=%d body=%s", status.Code, status.Body.String())
+	}
+
+	missingCSRF := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/v1/machine-enrollments", strings.NewReader(`{"shell":"posix"}`))
+	addCookies(req, cookies)
+	req.Header.Set("Idempotency-Key", "machine-enrollment-cookie")
+	router.ServeHTTP(missingCSRF, req)
+	if missingCSRF.Code != http.StatusForbidden || !strings.Contains(missingCSRF.Body.String(), `"code":"csrf_failed"`) {
+		t.Fatalf("cookie enrollment without csrf status=%d body=%s", missingCSRF.Code, missingCSRF.Body.String())
+	}
+
+	cancel := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/v1/machine-enrollments/"+started.Data.ID+"/cancel", nil)
+	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	router.ServeHTTP(cancel, req)
+	if cancel.Code != http.StatusOK {
+		t.Fatalf("bearer enrollment cancel status=%d body=%s", cancel.Code, cancel.Body.String())
+	}
+
+	retry := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/v1/machine-enrollments/"+started.Data.ID+"/retry", nil)
+	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	router.ServeHTTP(retry, req)
+	if retry.Code != http.StatusOK {
+		t.Fatalf("bearer enrollment retry status=%d body=%s", retry.Code, retry.Body.String())
+	}
+
+	if _, err := store.SQL().Exec(`UPDATE paperboat.cli_client_sessions SET scopes=ARRAY['machines:read']::text[] WHERE id=$1`, tokens.CLIClientSessionID); err != nil {
+		t.Fatal(err)
+	}
+	readOnlyStatus := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/v1/machine-enrollments/"+started.Data.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	router.ServeHTTP(readOnlyStatus, req)
+	if readOnlyStatus.Code != http.StatusOK {
+		t.Fatalf("read-only bearer enrollment status=%d body=%s", readOnlyStatus.Code, readOnlyStatus.Body.String())
+	}
+	readOnlyRetry := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/v1/machine-enrollments/"+started.Data.ID+"/retry", nil)
+	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	router.ServeHTTP(readOnlyRetry, req)
+	if readOnlyRetry.Code != http.StatusForbidden || !strings.Contains(readOnlyRetry.Body.String(), `"code":"insufficient_scope"`) {
+		t.Fatalf("read-only bearer enrollment retry status=%d body=%s", readOnlyRetry.Code, readOnlyRetry.Body.String())
+	}
+}
+
+func TestAccountSuspensionPermanentlyRevokesCLIClients(t *testing.T) {
+	store, router := newAuthIntegrationRouter(t)
+	cookies := loginCookies(t, router, "workos_suspension:suspension@example.com:Suspension")
+	grant := authorizeDevice(t, router)
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/device/requests/"+grant.UserCode+"/approve", nil)
+	addCookies(req, cookies)
+	req.Header.Set(auth.CSRFHeaderName, csrfCookie(t, cookies))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("approve status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	tokens := pollDevice(t, router, grant.DeviceCode, http.StatusOK)
+	userID := userIDByEmail(t, store, "suspension@example.com")
+	if _, err := store.SQL().Exec(`UPDATE paperboat.users SET status='suspended' WHERE id=$1`, userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().Exec(`UPDATE paperboat.users SET status='active' WHERE id=$1`, userID); err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/v1/auth/cli-client-sessions", nil)
+	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("reactivated account reused old CLI token: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var state, reason string
+	if err := store.SQL().QueryRow(`SELECT state,coalesce(revocation_reason,'') FROM paperboat.cli_client_sessions WHERE id=$1`, tokens.CLIClientSessionID).Scan(&state, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if state != "revoked" || reason != "account_suspended" {
+		t.Fatalf("client state=%q reason=%q", state, reason)
+	}
+}
+
+type deviceGrant struct {
+	DeviceCode string `json:"device_code"`
+	UserCode   string `json:"user_code"`
+}
+type tokenResponse struct {
+	ExpiresIn          int    `json:"expires_in"`
+	AccessToken        string `json:"access_token"`
+	RefreshToken       string `json:"refresh_token"`
+	CLIClientSessionID string `json:"cli_client_session_id"`
+}
+
+func authorizeDevice(t *testing.T, router http.Handler) deviceGrant {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{"client_id": "paperboat", "client_label": "Test CLI", "device_type": "desktop", "os": "darwin", "scopes": cliScopes})
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/device/authorize", bytes.NewReader(body))
+	req.RemoteAddr = "198.51.100.10:1234"
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("authorize status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var envelope struct {
+		Data deviceGrant `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	return envelope.Data
+}
+func pollDevice(t *testing.T, router http.Handler, code string, want int) tokenResponse {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"client_id": "paperboat", "device_code": code})
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/device/token", bytes.NewReader(body))
+	req.RemoteAddr = "198.51.100.11:1234"
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != want {
+		t.Fatalf("poll status=%d want=%d body=%s", rec.Code, want, rec.Body.String())
+	}
+	var envelope struct {
+		Data tokenResponse `json:"data"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &envelope)
+	return envelope.Data
+}
+func refreshDevice(t *testing.T, router http.Handler, token string, want int) tokenResponse {
+	t.Helper()
+	var nonce [32]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]string{"attempt_id": hex.EncodeToString(nonce[:])})
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/token/refresh", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != want {
+		t.Fatalf("refresh status=%d want=%d body=%s", rec.Code, want, rec.Body.String())
+	}
+	var envelope struct {
+		Data tokenResponse `json:"data"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &envelope)
+	return envelope.Data
+}
+
+func authorizeCLI(t *testing.T, router http.Handler, cookies []*http.Cookie) tokenResponse {
+	t.Helper()
+	grant := authorizeDevice(t, router)
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/device/requests/"+grant.UserCode+"/approve", nil)
+	addCookies(req, cookies)
+	req.Header.Set(auth.CSRFHeaderName, csrfCookie(t, cookies))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("approve CLI status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	return pollDevice(t, router, grant.DeviceCode, http.StatusOK)
+}

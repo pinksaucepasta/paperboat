@@ -1,0 +1,29 @@
+---
+/**
+ * The mark as the brand guidelines draw it on page 02: square cells on the 10 × 6 grid, the sail
+ * and mast offset half a cell. Used large and cropped as a quiet background, so it is drawn in a
+ * neutral, never a tint of the blue.
+ */
+interface Props {
+  class?: string
+}
+const { class: className } = Astro.props
+const cell = 60
+// [row, first column, last column, offset in cells]
+const runs: [number, number, number, number][] = [
+  [0, 4, 4, 0.5],
+  [1, 3, 5, 0.5],
+  [2, 2, 6, 0.5],
+  [3, 0, 1, 0],
+  [3, 8, 9, 0],
+  [4, 1, 8, 0],
+  [5, 2, 7, 0],
+]
+const cells = runs.flatMap(([row, from, to, offset]) =>
+  Array.from({ length: to - from + 1 }, (_, i) => ({ x: (from + i + offset) * cell, y: row * cell })),
+)
+---
+
+<svg viewBox="-1 -1 602 362" class={className} aria-hidden="true" focusable="false">
+  {cells.map((c) => <rect x={c.x + 0.75} y={c.y + 0.75} width={cell - 1.5} height={cell - 1.5} />)}
+</svg>

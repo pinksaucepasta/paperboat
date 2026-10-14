@@ -1,0 +1,173 @@
+diff --git a/node_modules/@wterm/dom/.bun-tag-cbc99c4a892b5200 b/.bun-tag-cbc99c4a892b5200
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/dist/wterm.js b/dist/wterm.js
+--- a/dist/wterm.js
++++ b/dist/wterm.js
+@@ -117,9 +117,17 @@
+         this._onWindowBlur = () => {
+             this.element.classList.remove("link-modifier-active");
+         };
++        this._onWindowResize = () => {
++            if (this._destroyed || !this.bridge)
++                return;
++            this._setRowHeight();
++            this._measureCharSize();
++            this._scheduleRender();
++        };
+         this.element.ownerDocument.addEventListener("keydown", this._onModifierChange);
+         this.element.ownerDocument.addEventListener("keyup", this._onModifierChange);
+         this.element.ownerDocument.defaultView?.addEventListener("blur", this._onWindowBlur);
++        this.element.ownerDocument.defaultView?.addEventListener("resize", this._onWindowResize);
+         this._onScroll = () => {
+             if (this._pendingResizeScrollTop !== null)
+                 return;
+@@ -589,9 +597,18 @@
+         if (discardedCount !== undefined) {
+             this._scrollbackDiscardedCount = discardedCount;
+         }
++        // Read geometry before changing rows. Reading scrollHeight after their
++        // replacement forces layout on every animated terminal frame.
++        let currentScrollTop = this.element.scrollTop;
++        const clientHeight = this.element.clientHeight;
++        const style = getComputedStyle(this.element);
++        const verticalPadding = (parseFloat(style.paddingTop) || 0) +
++            (parseFloat(style.paddingBottom) || 0);
++        const fixedBottom = Math.max(0, (scrollbackCount + this.rows) * rowHeight +
++            verticalPadding - clientHeight);
+         let scrollTop = this._pendingResizeScrollTop !== null
+             ? this._pendingResizeScrollTop
+-            : this.element.scrollTop;
++            : currentScrollTop;
+         if (!this._shouldScrollToBottom && discardedDelta > 0) {
+             scrollTop = Math.max(0, scrollTop - discardedDelta * rowHeight);
+             if (this._pendingResizeScrollTop !== null) {
+@@ -599,14 +616,14 @@
+             }
+             else {
+                 this._setScrollTop(scrollTop);
++                currentScrollTop = this.element.scrollTop;
+             }
+         }
+         this.renderer.render(this.bridge, {
+             scrollTop: this._shouldScrollToBottom
+-                ? Math.max(0, (scrollbackCount + this.rows) * rowHeight -
+-                    this.element.clientHeight)
++                ? fixedBottom
+                 : scrollTop,
+-            clientHeight: this.element.clientHeight,
++            clientHeight,
+             rowHeight,
+             scrollbackDiscardedCount: discardedCount,
+             charWidth: this._charWidth,
+@@ -616,16 +633,29 @@
+         }
+         const hasScrollback = scrollbackCount > 0 || this.renderer.hasImageFlow;
+         this.element.classList.toggle("has-scrollback", hasScrollback);
+-        if (this._shouldScrollToBottom) {
+-            this._scrollToBottom();
+-        }
+-        else if (this._pendingResizeScrollTop !== null) {
+-            const pendingScrollTop = this._pendingResizeScrollTop;
+-            this._pendingResizeScrollTop = null;
+-            this._setScrollTop(pendingScrollTop);
+-        }
+-        else if (!hasScrollback && this.element.scrollTop !== 0) {
+-            this._setScrollTop(0);
++        if (this.renderer.hasImageFlow || this.renderer.graphics?.canvases?.size > 0) {
++            // Image reservations can change row height; use actual geometry.
++            if (this._shouldScrollToBottom) {
++                this._scrollToBottom();
++            }
++            else if (this._pendingResizeScrollTop !== null) {
++                const pendingScrollTop = this._pendingResizeScrollTop;
++                this._pendingResizeScrollTop = null;
++                this._setScrollTop(pendingScrollTop);
++            }
++        }
++        else {
++            const target = this._shouldScrollToBottom ? fixedBottom :
++                this._pendingResizeScrollTop !== null ? Math.min(fixedBottom, Math.max(0, this._pendingResizeScrollTop)) :
++                    !hasScrollback ? 0 : null;
++            if (!this._shouldScrollToBottom)
++                this._pendingResizeScrollTop = null;
++            // Native scroll extents round fractional CSS pixels. Avoid repeated
++            // assignments within the same tolerance used by the scroll handler.
++            if (target !== null && Math.abs(target - currentScrollTop) > PROGRAMMATIC_SCROLL_TOLERANCE) {
++                this._programmaticScrollTop = target;
++                this.element.scrollTop = target;
++            }
+         }
+         this.input?.syncInputPosition();
+         if (this._searchReveal) {
+@@ -756,15 +786,26 @@
+         probe.className = "term-row";
+         probe.style.visibility = "hidden";
+         probe.style.position = "absolute";
++        probe.style.height = "auto";
++        probe.style.lineHeight = getComputedStyle(this.element).lineHeight;
+         probe.textContent = "W";
+         this._container.appendChild(probe);
+         const h = probe.getBoundingClientRect().height;
+         probe.remove();
+         if (h > 0) {
+-            const rh = Math.ceil(h);
++            const dpr = this.element.ownerDocument.defaultView?.devicePixelRatio || 1;
++            const rh = Math.ceil(h * dpr) / dpr;
+             this._rowHeight = rh;
+             this.element.style.setProperty("--term-row-height", `${rh}px`);
+         }
++    }
++    _alignGridToDevicePixels() {
++        const dpr = this.element.ownerDocument.defaultView?.devicePixelRatio || 1;
++        const rect = this._container.getBoundingClientRect();
++        const baseX = rect.left - (parseFloat(this._container.style.left) || 0);
++        const baseY = rect.top - (parseFloat(this._container.style.top) || 0);
++        this._container.style.left = `${Math.ceil(baseX * dpr - 1e-6) / dpr - baseX}px`;
++        this._container.style.top = `${Math.ceil(baseY * dpr - 1e-6) / dpr - baseY}px`;
+     }
+     _measureCharSize() {
+         const row = document.createElement("div");
+@@ -774,17 +815,24 @@
+         const probe = document.createElement("span");
+         // Measure the font itself, not the cell width from an earlier measurement.
+         probe.style.width = "auto";
++        probe.style.letterSpacing = "0px";
+         probe.textContent = "W";
+         row.appendChild(probe);
+         this._container.appendChild(row);
+-        const charWidth = probe.getBoundingClientRect().width;
++        const rawCharWidth = probe.getBoundingClientRect().width;
+         const rowHeight = row.getBoundingClientRect().height;
+         row.remove();
+-        if (charWidth === 0 || rowHeight === 0)
++        if (rawCharWidth === 0 || rowHeight === 0)
+             return null;
++        const dpr = this.element.ownerDocument.defaultView?.devicePixelRatio || 1;
++        const charWidth = Math.max(1, Math.round(rawCharWidth * dpr)) / dpr;
++        // Match ordinary text advance to the same physical-pixel cell pitch
++        // used by block backgrounds, cursor placement and pointer hit-testing.
++        this.element.style.letterSpacing = `${charWidth - rawCharWidth}px`;
+         this._charWidth = charWidth;
+         this._rowHeight = rowHeight;
+         this.element.style.setProperty("--term-cell-width", `${charWidth}px`);
++        this._alignGridToDevicePixels();
+         return { charWidth, rowHeight };
+     }
+     _setupResizeObserver() {
+@@ -803,6 +851,7 @@
+                 if (entry.target === this.element)
+                     containerRect = entry.contentRect;
+             }
++            this._setRowHeight();
+             const measured = this._measureCharSize();
+             if (!measured || !this.autoResize || !containerRect)
+                 return;
+@@ -840,6 +889,7 @@
+         this.element.ownerDocument.removeEventListener("keydown", this._onModifierChange);
+         this.element.ownerDocument.removeEventListener("keyup", this._onModifierChange);
+         this.element.ownerDocument.defaultView?.removeEventListener("blur", this._onWindowBlur);
++        this.element.ownerDocument.defaultView?.removeEventListener("resize", this._onWindowResize);
+         this.element.classList.remove("link-modifier-active");
+         this.element.innerHTML = "";
+         if (this.debug &&

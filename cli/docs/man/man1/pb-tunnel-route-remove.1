@@ -1,0 +1,68 @@
+.nh
+.TH "PB-TUNNEL-ROUTE-REMOVE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel-route-remove - Remove a tunnel route
+
+
+.SH SYNOPSIS
+\fBpb tunnel route remove <tunnel> <route> [flags]\fP
+
+
+.SH DESCRIPTION
+Remove a tunnel route
+
+.PP
+Remove one route from a durable tunnel after confirmation. The tunnel and its other routes and connectors remain available.
+
+.PP
+Routes map a public or private match to a specific origin and protocol. TLS and host-header options affect the trust boundary and should match the origin. Adding or updating a route may return an operation whose readiness must be checked separately.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--confirm\fP=""
+	six-character confirmation code from the preview
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for remove
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+.PP
+\fB--timeout\fP=2m0s
+	maximum time to wait for operation completion
+
+.PP
+\fB--wait\fP[=false]
+	wait for the operation to reach a terminal state
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-tunnel-route(1)\fP

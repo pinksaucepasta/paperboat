@@ -1,0 +1,64 @@
+.nh
+.TH "PB-TUNNEL-ROUTE-LIST" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel-route-list - List tunnel routes
+
+
+.SH SYNOPSIS
+\fBpb tunnel route list <tunnel> [flags]\fP
+
+
+.SH DESCRIPTION
+List tunnel routes
+
+.PP
+List routes and their identifiers for one durable tunnel with pagination. Inspect the exact route before updating or removing it.
+
+.PP
+Routes map a public or private match to a specific origin and protocol. TLS and host-header options affect the trust boundary and should match the origin. Adding or updating a route may return an operation whose readiness must be checked separately.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--cursor\fP=""
+	continue a previous page
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for list
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+.PP
+\fB--limit\fP=100
+	maximum results (1-200)
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-tunnel-route(1)\fP

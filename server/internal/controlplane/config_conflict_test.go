@@ -1,0 +1,124 @@
+package controlplane
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestConfigConflictResolutionRequiresCurrentAssignmentHeadAndConflictRevision(t *testing.T) {
+	store := openControlPlaneTestDB(t)
+	ctx := context.Background()
+	suffix := strings.ReplaceAll(t.Name(), "/", "_")
+	user := "conflict_user_" + suffix
+	environment := "conflict_env_" + suffix
+	repository := "conflict_repo_" + suffix
+	assignment := "conflict_assignment_" + suffix
+	helper := "conflict_helper_" + suffix
+	revision := strings.Repeat("a", 64)
+	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	statements := []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, []any{user, "workos_" + user, user + "@example.test"}},
+		{`INSERT INTO paperboat.control_config_repositories (id,owner_user_id,provider,external_ref,display_name,state) VALUES ($1,$2,'github',$1,'owner/config','active')`, []any{repository, user}},
+		{`INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$1,$2)`, []any{environment, user}},
+		{`INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root) VALUES ($1,$2,$3,'Conflict host','linux','unknown','/workspace')`, []any{"machine_" + suffix, user, environment}},
+		{`INSERT INTO paperboat.control_helpers (id,environment_id,state,generation) VALUES ($1,$2,'active',1)`, []any{helper, environment}},
+		{`INSERT INTO paperboat.control_config_assignments (id,machine_id,environment_id,repository_id,mode,consent_state,warning_revision,version,accepted_at,configuration_revision) VALUES ($1,$2,$3,$4,'bidirectional','accepted','warning-1',3,now(),repeat('a',64))`, []any{assignment, "machine_" + suffix, environment, repository}},
+		{`INSERT INTO paperboat.control_config_sync_statuses
+		  (environment_id,repository_id,assignment_id,machine_id,installation_generation,
+		   warning_revision,policy_revision,sync_revision,state,remote_revision,
+		   pending_clean_path_count,conflicts,machine_updated_at,observed_at)
+		  VALUES ($1,$2,$3,$4,1,'warning-1','policy-1',2,'conflict','head-2',0,
+		          jsonb_build_array(jsonb_build_object('path','.config/tool','reason','concurrent_update','revision',$5::text)),$6,$6)`,
+			[]any{environment, repository, assignment, helper, revision, now}},
+	}
+	for _, statement := range statements {
+		if _, err := store.SQL().ExecContext(ctx, statement.query, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, user)
+	})
+	service := NewConfigConflictService(store, nil, nil)
+	request := ConfigConflictResolution{
+		Path: ".config/tool", ConflictRevision: revision,
+		ExpectedRemoteRevision: "head-2", Scope: "path", Action: "keep_local",
+	}
+	created, err := service.Request(ctx, user, environment, 3, request)
+	if err != nil || created.ID == "" || created.Action != "keep_local" {
+		t.Fatalf("resolution = %#v, %v", created, err)
+	}
+	request.Action = "externally_resolved"
+	if _, err := service.Request(ctx, user, environment, 3, request); !errors.Is(err, ErrConfigConflictResolutionInvalid) {
+		t.Fatalf("removed action error = %v", err)
+	}
+	request.Action = "keep_local"
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.control_config_assignments SET mode='pull_only' WHERE id=$1`, assignment); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Request(ctx, user, environment, 3, request); !errors.Is(err, ErrConfigConflictResolutionMode) {
+		t.Fatalf("pull-only action error = %v", err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.control_config_assignments SET mode='bidirectional' WHERE id=$1`, assignment); err != nil {
+		t.Fatal(err)
+	}
+	request.ExpectedRemoteRevision = "head-stale"
+	if _, err := service.Request(ctx, user, environment, 3, request); !errors.Is(err, ErrConfigConflictResolutionStale) {
+		t.Fatalf("stale head error = %v", err)
+	}
+	request.ExpectedRemoteRevision = "head-2"
+	request.ConflictRevision = strings.Repeat("b", 64)
+	if _, err := service.Request(ctx, user, environment, 3, request); !errors.Is(err, ErrConfigConflictResolutionStale) {
+		t.Fatalf("stale conflict error = %v", err)
+	}
+	force := ConfigConflictResolution{
+		Scope: "config", ExpectedRemoteRevision: "head-2", Action: "force_pull",
+		Confirmation: "wrong",
+	}
+	if _, err := service.Request(ctx, user, environment, 3, force); !errors.Is(err, ErrConfigConflictResolutionInvalid) {
+		t.Fatalf("confirmation error = %v", err)
+	}
+	force.Confirmation = "FORCE PULL"
+	created, err = service.Request(ctx, user, environment, 3, force)
+	if err != nil || created.Scope != "config" || created.Path != "." ||
+		!conflictRevisionPattern.MatchString(created.ConflictRevision) {
+		t.Fatalf("config force = %#v, %v", created, err)
+	}
+	force.Action, force.Confirmation = "force_push", "FORCE PUSH"
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.control_config_assignments SET mode='pull_only' WHERE id=$1`, assignment); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Request(ctx, user, environment, 3, force); !errors.Is(err, ErrConfigConflictResolutionMode) {
+		t.Fatalf("pull-only force push error = %v", err)
+	}
+}
+
+func TestConfigConflictRequestPreservesDatabaseQueryFailure(t *testing.T) {
+	store := openControlPlaneTestDB(t)
+	ctx := context.Background()
+	if _, err := store.SQL().ExecContext(ctx, `ALTER TABLE paperboat.control_config_sync_statuses RENAME TO control_config_sync_statuses_hidden`); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if _, err := store.SQL().ExecContext(context.Background(), `ALTER TABLE paperboat.control_config_sync_statuses_hidden RENAME TO control_config_sync_statuses`); err != nil {
+			t.Errorf("restore temporary test schema: %v", err)
+		}
+	}()
+	service := NewConfigConflictService(store, nil, nil)
+	request := ConfigConflictResolution{
+		Path: "settings.json", ConflictRevision: strings.Repeat("a", 64),
+		ExpectedRemoteRevision: "head-1", Scope: "path", Action: "keep_remote",
+	}
+	_, err := service.Request(ctx, "owner", "environment", 1, request)
+	if err == nil || errors.Is(err, ErrConfigConflictResolutionInvalid) ||
+		errors.Is(err, ErrConfigConflictResolutionStale) || errors.Is(err, ErrConfigConflictResolutionMode) ||
+		errors.Is(err, ErrAssignmentForbidden) {
+		t.Fatalf("database query failure was collapsed into an expected rejection: %v", err)
+	}
+}

@@ -1,0 +1,46 @@
+.nh
+.TH "PB-CONFIG-LOCAL-ACCESS-ALIAS-SET" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-local-access-alias-set - Set and apply a service alias
+
+
+.SH SYNOPSIS
+\fBpb config local-access alias set <machine-alias> <name> <port> [flags]\fP
+
+
+.SH DESCRIPTION
+Map a nonnumeric DNS service name on one machine alias to an already authorized port. Paperboat validates and applies the local mapping before reporting success, without creating or expanding machine access grants.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for set
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config-local-access-alias(1)\fP

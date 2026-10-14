@@ -1,0 +1,56 @@
+.nh
+.TH "PB-UPDATE-BUNDLE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-update-bundle - Save an official update and its signed proof for offline installation
+
+
+.SH SYNOPSIS
+\fBpb update bundle --output <file.pb-update> [flags]\fP
+
+
+.SH DESCRIPTION
+Save an official update and its signed proof for offline installation
+
+.PP
+Save the official release for this platform together with its existing signed metadata to a new .pb-update file. Transfer that file to an offline machine and install with pb update --from. The receiver verifies signatures, expiration, artifact integrity and its retained rollback floors; no extra release asset is published. An interrupted signed update must finish its online recovery before offline installation.
+
+.PP
+Updates use signed release metadata and preserve artifact authenticity and rollback protection. Check inspects an available release; status reports the installed updater state. A failed update should leave the known installation usable and report a recovery action.
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for bundle
+
+.PP
+\fB--output\fP=""
+	new .pb-update file for this platform
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-update(1)\fP

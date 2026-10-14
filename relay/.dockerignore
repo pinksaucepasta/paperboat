@@ -1,0 +1,16 @@
+**
+!go.mod
+!go.sum
+!cmd/
+!cmd/paperboat-relay/
+!cmd/paperboat-relay/**
+!derpquic/
+!derpquic/**
+!nodelifecycle/
+!nodelifecycle/**
+!operator/
+!operator/**
+!peerrelay/
+!peerrelay/**
+**/*_test.go
+

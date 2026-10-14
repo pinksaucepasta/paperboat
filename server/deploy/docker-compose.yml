@@ -1,0 +1,44 @@
+x-server-env-file: &server-env-file
+  # Keep the same production overlay on the migration and serving paths. The
+  # explicit service entries below are intentional: a YAML merge must not make
+  # certificate settings disappear from one phase of the rollout.
+  - ${PAPERBOAT_ENV_FILE:-.env}
+
+x-server: &server
+  image: ${PAPERBOAT_SERVER_IMAGE:?set PAPERBOAT_SERVER_IMAGE}
+  env_file: *server-env-file
+  environment:
+    # This destination is an invariant of the parent mount below. Do not let
+    # an older env file redirect the server to the parent directory.
+    PAPERBOAT_RELEASE_DIRECTORY: /srv/paperboat-releases/current
+  volumes:
+    - ./secrets:/run/secrets:ro
+    # Mount the releases parent, not its current child. The release publisher
+    # atomically exchanges the current directory; binding the child itself
+    # would pin the container to the old inode after activation.
+    # PAPERBOAT_RELEASES_PATH remains a variable-name compatibility fallback,
+    # but its value must also identify the parent directory.
+    - ${PAPERBOAT_RELEASES_ROOT_PATH:-${PAPERBOAT_RELEASES_PATH:-/opt/paperboat/releases}}:/srv/paperboat-releases:ro
+
+services:
+  migrate:
+    <<: *server
+    env_file: *server-env-file
+    restart: "no"
+    command: ["paperboat-server", "migrate"]
+
+  server:
+    <<: *server
+    env_file: *server-env-file
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: ["paperboat-server", "serve"]
+    ports:
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6

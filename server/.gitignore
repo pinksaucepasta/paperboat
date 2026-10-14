@@ -1,0 +1,27 @@
+# Binaries & build output
+*.exe
+*.dll
+*.so
+*.dylib
+/bin/
+/dist/
+/.codex-build/
+/.build/
+
+# Test & coverage
+*.out
+coverage.*
+
+# Go workspace
+go.work
+go.work.sum
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+config/*.local.json
+
+# OS & editor
+.DS_Store
+*.swp

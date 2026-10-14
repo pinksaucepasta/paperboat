@@ -1,0 +1,56 @@
+.nh
+.TH "PB-ENV-HOST-SHOW" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-env-host-show - Show published ENV delivery and observed application on a host
+
+
+.SH SYNOPSIS
+\fBpb env host show [flags]\fP
+
+
+.SH DESCRIPTION
+Show published ENV delivery and observed application on a host
+
+.PP
+Inspect the current published encrypted delivery separately from the host's observed application. Use --machine or this enrolled machine by default. JSON includes delivery metadata and observation only, without ciphertext or values; stale or absent observations do not mean applied.
+
+.PP
+ENV sync is automatic for authorized devices. Personal global values have device overrides. Team launches combine Team global values, the actor's member global values, and their device overrides. Values remain isolated by workspace.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for show
+
+.PP
+\fB--json\fP[=false]
+	print host delivery metadata without ciphertext or keys
+
+.PP
+\fB--machine\fP=""
+	machine name or ID; defaults to this enrolled machine
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-env-host(1)\fP

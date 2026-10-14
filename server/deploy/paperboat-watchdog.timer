@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Paperboat availability watchdog every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00 UTC
+Persistent=true
+AccuracySec=1s
+Unit=paperboat-watchdog.service
+
+[Install]
+WantedBy=timers.target

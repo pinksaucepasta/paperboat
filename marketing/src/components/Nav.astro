@@ -1,0 +1,78 @@
+---
+import Lockup from "./Lockup.astro"
+import { consoleUrl } from "../site"
+const links = [
+  { href: "/#terminals", label: "Terminals" },
+  { href: "/#links", label: "Previews" },
+  { href: "/#teams", label: "Teams" },
+  { href: "/#network", label: "Network" },
+]
+---
+
+<header class="nav">
+  <div class="wrap nav-inner">
+    <Lockup />
+    <nav class="nav-links" aria-label="Main">
+      {links.map((link) => <a href={link.href}>{link.label}</a>)}
+    </nav>
+    <div class="nav-actions">
+      <a class="nav-signin" href={consoleUrl}>Sign in</a>
+      <a class="button button-primary nav-cta" href="/#install">Install</a>
+    </div>
+  </div>
+</header>
+
+<style>
+  .nav {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    height: var(--header);
+    background: rgb(255 255 255 / 0.86);
+    backdrop-filter: saturate(1.6) blur(14px);
+    -webkit-backdrop-filter: saturate(1.6) blur(14px);
+    box-shadow: 0 1px 0 var(--rule);
+  }
+
+  .nav-inner {
+    display: flex;
+    align-items: center;
+    height: 100%;
+  }
+
+  .nav-links {
+    display: none;
+    gap: 28px;
+    margin-left: 48px;
+    font-size: 0.9375rem;
+    color: var(--fog);
+  }
+
+  .nav-links a:hover,
+  .nav-signin:hover {
+    color: var(--ink);
+  }
+
+  .nav-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .nav-signin {
+    font-size: 0.9375rem;
+    color: var(--fog);
+  }
+
+  .nav-cta {
+    height: 34px;
+    padding-inline: 14px;
+  }
+
+  @media (min-width: 860px) {
+    .nav-links {
+      display: flex;
+    }
+  }
+</style>

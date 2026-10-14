@@ -1,0 +1,52 @@
+.nh
+.TH "PB-CONFIG-SYNC-INIT" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-sync-init - Create an empty machine configuration without overwriting existing files
+
+
+.SH SYNOPSIS
+\fBpb config sync init [flags]\fP
+
+
+.SH DESCRIPTION
+Create an empty machine configuration without overwriting existing files
+
+.PP
+Create a protected empty machine configuration at its authoritative local path. An existing file is preserved and reported as an error. Edit the created file to define repository choices and explicit synchronization path rules.
+
+.PP
+Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for init
+
+.PP
+\fB--json\fP[=false]
+	print the initialized path as JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config-sync(1)\fP

@@ -1,0 +1,199 @@
+---
+import Section from "./Section.astro"
+import { selfhostInstallUrl } from "../site"
+const paths = [
+  { key: "direct", label: "Direct", nodes: ["studio", "homelab"] },
+  { key: "relay", label: "Relayed", nodes: ["thinkpad", "relay", "build-01"] },
+]
+---
+
+<Section id="network" title="Peer to peer, end to end.">
+  <Fragment slot="text">
+    <p>
+      Your machines talk to each other directly whenever they can, and through a relay when they can’t. Either
+      way, only your machines can read what they send.
+    </p>
+  </Fragment>
+
+  <div class="paths" data-reveal aria-hidden="true">
+    {
+      paths.map((path) => (
+        <div class={`path path-${path.key}`}>
+          <span class="label">
+            <span class="dot" />
+            {path.label}
+          </span>
+          <span class="route">
+            {path.nodes.map((node, index) => (
+              <>
+                {index > 0 && (
+                  <span class="wire">
+                    <span class="packet" style={`animation-delay: ${index * 0.4}s`} />
+                  </span>
+                )}
+                <span class:list={["node", { hop: node === "relay" }]}>{node}</span>
+              </>
+            ))}
+          </span>
+        </div>
+      ))
+    }
+  </div>
+
+  <div class="selfhost surface-pattern" id="selfhost" data-reveal>
+    <div>
+      <h3 class="subtitle">Run your own relays.</h3>
+      <p class="body">
+        Put a relay, a tunnel server or both on any Linux box you control and pair it from the console. Your
+        traffic, your servers.
+      </p>
+    </div>
+    <code class="selfhost-cmd" data-copy={`curl -fsSL ${selfhostInstallUrl} | sh`}>
+      <span class="dollar">$</span> curl -fsSL {selfhostInstallUrl} | sh
+    </code>
+  </div>
+</Section>
+
+<style>
+  .paths {
+    display: grid;
+    border-top: 1px solid var(--rule);
+  }
+
+  .path {
+    --c: var(--success);
+    display: grid;
+    gap: 16px 48px;
+    align-items: center;
+    padding-block: 28px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .path-relay {
+    --c: var(--cobalt);
+  }
+
+  .label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--font-brand);
+    font-weight: 600;
+    font-size: 1.25rem;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--c);
+  }
+
+  .route {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+  }
+
+  .node {
+    flex-shrink: 0;
+    padding: 7px 12px;
+    border-radius: 8px;
+    background: var(--surface);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--ink);
+  }
+
+  .node.hop {
+    background: transparent;
+    box-shadow: inset 0 0 0 1px var(--rule);
+    color: var(--fog);
+  }
+
+  .wire {
+    position: relative;
+    flex: 1;
+    min-width: 24px;
+    height: 2px;
+    background: color-mix(in srgb, var(--c) 65%, transparent);
+  }
+
+  .packet {
+    position: absolute;
+    top: -2px;
+    left: 0;
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--c);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 18%, transparent);
+    animation: travel 2.8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  }
+
+  @keyframes travel {
+    0% {
+      left: 0;
+      opacity: 0;
+    }
+    12%,
+    88% {
+      opacity: 1;
+    }
+    100% {
+      left: calc(100% - 6px);
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .packet {
+      display: none;
+    }
+  }
+
+  .selfhost {
+    display: grid;
+    gap: 24px 48px;
+    align-items: center;
+    margin-top: clamp(48px, 6vw, 72px);
+    padding: clamp(24px, 3.4vw, 40px);
+  }
+
+  .selfhost .body {
+    margin-top: 8px;
+    font-size: 1rem;
+    max-width: 48ch;
+  }
+
+  .selfhost-cmd {
+    display: block;
+    padding: 16px 18px;
+    border-radius: 10px;
+    background: var(--background);
+    box-shadow: 0 0 0 1px var(--rule);
+    font-size: 0.8125rem;
+    color: var(--ink);
+    white-space: nowrap;
+    overflow-x: auto;
+    cursor: copy;
+  }
+
+  .dollar {
+    color: var(--faint);
+  }
+
+  @media (min-width: 960px) {
+    .selfhost {
+      grid-template-columns: 1fr auto;
+    }
+  }
+
+  @media (min-width: 860px) {
+    .path {
+      grid-template-columns: 200px 1fr;
+    }
+  }
+</style>

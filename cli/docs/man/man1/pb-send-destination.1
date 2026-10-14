@@ -1,0 +1,56 @@
+.nh
+.TH "PB-SEND-DESTINATION" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-send-destination - Show the default transfer destination
+
+
+.SH SYNOPSIS
+\fBpb send destination [flags]\fP
+
+
+.SH DESCRIPTION
+Show the default transfer destination
+
+.PP
+Show the saved default machine for outgoing sends. This setting does not affect the Inbox receiving directory and can be overridden for one send with --to.
+
+.PP
+Send publishes a batch to a machine's Paperboat Inbox. Completion means the receiver verified and recorded the files; status and cancel act on a transfer ID. A default destination can be set separately, while --to chooses one for the current send.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for destination
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--session\fP=""
+	terminal session ID for a session-specific destination
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-send(1)\fP, \fBpb-send-destination-clear(1)\fP, \fBpb-send-destination-set(1)\fP

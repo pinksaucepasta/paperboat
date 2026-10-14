@@ -1,0 +1,212 @@
+---
+import Section from "./Section.astro"
+import Icon from "./Icon.astro"
+const workspaces = [
+  { name: "Personal", detail: "You" },
+  { name: "Northwind", detail: "Owner", current: true },
+  { name: "Weekend project", detail: "Member" },
+]
+const shared = [
+  { icon: "laptop", name: "build-01", detail: "Machine" },
+  { icon: "terminal-window", name: "api-build", detail: "Terminal" },
+  { icon: "plugs", name: "api.northwind.dev", detail: "Tunnel" },
+  { icon: "eye", name: "q7f2kd.preview.pprbt.dev", detail: "Preview" },
+  { icon: "key", name: "staging", detail: "Secrets" },
+]
+---
+
+<Section id="teams" title="Bring your team along." tone="surface">
+  <Fragment slot="text">
+    <p>
+      Everyone has a personal workspace for their own machines. Start a team and share exactly what it needs: a
+      build box, a terminal, a preview, the staging secrets. Your laptop stays yours.
+    </p>
+  </Fragment>
+
+  <div class="teams" data-reveal aria-hidden="true">
+    <div class="card picker">
+      <div class="search">
+        <Icon name="magnifying-glass" size={14} />
+        Search workspaces
+      </div>
+      <ul>
+        {
+          workspaces.map((w) => (
+            <li class:list={{ current: w.current }}>
+              <span class="tile">{w.name[0]}</span>
+              <span class="name">{w.name}</span>
+              <span class="detail">{w.detail}</span>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+
+    <div class="card list">
+      <div class="list-head">Shared with Northwind</div>
+      <ul>
+        {
+          shared.map((s) => (
+            <li>
+              <Icon name={s.icon} size={16} class="item-icon" />
+              <span class="name mono-name">{s.name}</span>
+              <span class="detail">{s.detail}</span>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </div>
+
+  <div class="org" data-reveal>
+    <div class="org-item">
+      <h3 class="org-title">Shared secrets</h3>
+      <p class="body">
+        Environment variables for each team, encrypted end to end and delivered to the machines that need them.
+        Rotate a key without retyping a value.
+      </p>
+    </div>
+    <div class="org-item">
+      <h3 class="org-title">Config that stays in sync</h3>
+      <p class="body">
+        Keep dotfiles and settings the same on every machine from a Git repository, so a new machine is ready
+        the moment it joins.
+      </p>
+    </div>
+  </div>
+</Section>
+
+<style>
+  .teams {
+    display: grid;
+    gap: 16px;
+    align-items: start;
+  }
+
+  .card {
+    background: var(--background);
+    border-radius: 12px;
+    box-shadow: 0 0 0 1px var(--rule), 0 16px 40px -24px rgb(16 24 64 / 0.18);
+    font-size: 14px;
+    color: var(--ink);
+  }
+
+  .picker {
+    padding: 6px;
+  }
+
+  .search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding-inline: 10px;
+    margin-bottom: 4px;
+    color: var(--fog);
+    border-bottom: 1px solid var(--divider);
+  }
+
+  .picker li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 40px;
+    padding-inline: 8px;
+    border-radius: 6px;
+  }
+
+  .picker li.current {
+    background: var(--surface);
+  }
+
+  .picker li.current .name {
+    font-weight: 600;
+  }
+
+  .tile {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    background: #e3eafd;
+    color: var(--cobalt);
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mono-name {
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+
+  .detail {
+    color: var(--fog);
+    font-size: 13px;
+  }
+
+  .list-head {
+    padding: 14px 18px;
+    font-weight: 500;
+    border-bottom: 1px solid var(--divider);
+  }
+
+  .list li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 52px;
+    padding-inline: 18px;
+    border-bottom: 1px solid var(--divider);
+  }
+
+  .list li:last-child {
+    border-bottom: 0;
+  }
+
+  .list :global(.item-icon) {
+    color: var(--fog);
+    flex-shrink: 0;
+  }
+
+  .org {
+    display: grid;
+    gap: 28px 48px;
+    margin-top: clamp(48px, 6vw, 72px);
+    padding-top: 32px;
+    border-top: 1px solid var(--rule);
+  }
+
+  .org-title {
+    font-family: var(--font-brand);
+    font-weight: 600;
+    font-size: 1.125rem;
+    letter-spacing: -0.015em;
+    color: var(--ink);
+  }
+
+  .org .body {
+    margin-top: 6px;
+    font-size: 1rem;
+    max-width: 48ch;
+  }
+
+  @media (min-width: 900px) {
+    .org {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .teams {
+      grid-template-columns: 340px 1fr;
+      gap: 24px;
+    }
+  }
+</style>

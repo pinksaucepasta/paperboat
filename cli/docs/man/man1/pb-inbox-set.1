@@ -1,0 +1,48 @@
+.nh
+.TH "PB-INBOX-SET" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-inbox-set -
+
+
+.SH SYNOPSIS
+\fBpb inbox set <directory> [flags]\fP
+
+
+.SH DESCRIPTION
+Set an explicit local directory for future received files. The command configures the receiving side; it does not move already delivered files.
+
+.PP
+The Paperboat Inbox receives verified files and exact team requests. Files remain until removed by the user. The receiving path is a local machine setting; team request acceptance is an account policy. A sender manages outgoing batches with pb send.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for set
+
+.PP
+\fB--json\fP[=false]
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-inbox(1)\fP

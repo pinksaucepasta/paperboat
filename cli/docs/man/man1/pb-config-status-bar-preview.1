@@ -1,0 +1,56 @@
+.nh
+.TH "PB-CONFIG-STATUS-BAR-PREVIEW" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-status-bar-preview - Preview the configured status bar
+
+
+.SH SYNOPSIS
+\fBpb config status-bar preview [flags]\fP
+
+
+.SH DESCRIPTION
+Preview the configured status bar
+
+.PP
+Render the current status bar at the requested width without opening a remote session. Use it to check truncation and theme choices before connecting.
+
+.PP
+The status bar is rendered by the interactive terminal client. Preferences affect local presentation and do not change remote sessions. Use preview to inspect the result before relying on a theme or width setting.
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for preview
+
+.PP
+\fB--width\fP=0
+	preview width (20-500 columns)
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config-status-bar(1)\fP

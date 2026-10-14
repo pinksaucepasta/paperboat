@@ -1,0 +1,201 @@
+package tailnet
+
+import (
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
+	"testing"
+	"time"
+)
+
+func regionalToken(t *testing.T, private ed25519.PrivateKey, candidates RegionalCandidates) string {
+	t.Helper()
+	header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-regional-candidates+jwt", "kid": "network_test"})
+	body, err := json.Marshal(candidates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signed := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)
+	return signed + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(private, []byte(signed)))
+}
+
+func TestRegionalCandidatesSignedEndpointAndGenerationBinding(t *testing.T) {
+	a, network, signer, _ := networkTestAuthority(t)
+	if err := a.Apply(t.Context(), networkToken(t, signer, network)); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	candidates := RegionalCandidates{Schema: "paperboat.regional-candidates.v1", Issuer: network.Issuer, Audience: "paperboat-regional-candidates", AccountID: network.Self.AccountID, EndpointID: network.Self.EndpointID, AuthorizationGeneration: network.Generation, Generation: 1, IssuedAt: now, ExpiresAt: now + 60, Nodes: []RegionalNode{}}
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, candidates)); err != nil {
+		t.Fatal(err)
+	}
+	candidates.EndpointID = "another_endpoint"
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, candidates)); !errors.Is(err, ErrRegionalAuthority) {
+		t.Fatalf("cross-endpoint candidates error = %v", err)
+	}
+	candidates.EndpointID = network.Self.EndpointID
+	candidates.AuthorizationGeneration++
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, candidates)); !errors.Is(err, ErrRegionalAuthority) {
+		t.Fatalf("wrong authorization generation error = %v", err)
+	}
+}
+
+func TestRegionalCandidatesEligibilityExpiryAndReducedRedundancy(t *testing.T) {
+	now := time.Unix(2_000_000_000, 0)
+	drain := now.Add(20 * time.Second).Unix()
+	node := func(id, region, domain, state string, used uint64) RegionalNode {
+		return RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: "epoch-1", Region: region, FailureDomain: domain,
+			Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: id + ".example.test", EndpointQUICPort: 443,
+			State: state, ObservedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), CapacityLimit: 100, CapacityUsed: used, CapacityObservedAt: now.Unix()}
+	}
+	ready := node("ready", "hel", "hel-a", "ready", 20)
+	excluded := node("excluded", "bom", "bom-a", "ready", 20)
+	draining := node("draining", "hel", "hel-b", "ready", 20)
+	draining.DrainDeadline = &drain
+	stale := node("stale", "hel", "hel-c", "ready", 20)
+	stale.ObservedAt = now.Add(-16 * time.Second).Unix()
+	overloaded := node("overloaded", "hel", "hel-d", "ready", 90)
+	candidates := RegionalCandidates{ExpiresAt: now.Add(time.Minute).Unix(), Nodes: []RegionalNode{excluded, draining, stale, overloaded, ready}}
+
+	got, redundancy, err := candidates.Eligible("relay", "derp_quic", map[string]bool{"hel": true}, now)
+	if err != nil || len(got) != 1 || got[0].NodeID != "ready" || redundancy != RedundancyReduced {
+		t.Fatalf("eligible = %#v, redundancy = %q, err = %v", got, redundancy, err)
+	}
+	if _, _, err := candidates.Eligible("relay", "derp_quic", nil, now.Add(61*time.Second)); !errors.Is(err, ErrRegionalAuthority) {
+		t.Fatalf("expired candidates error = %v", err)
+	}
+}
+
+func TestRegionalCandidatesDifferentFailureDomainIsObservable(t *testing.T) {
+	now := time.Unix(2_000_000_000, 0)
+	node := func(id, domain string) RegionalNode {
+		return RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: "epoch", Region: "hel", FailureDomain: domain, Roles: []string{"edge"}, Transports: []string{"http3"}, EndpointHost: id + ".example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), CapacityLimit: 10, CapacityObservedAt: now.Unix()}
+	}
+	candidates := RegionalCandidates{ExpiresAt: now.Add(time.Minute).Unix(), Nodes: []RegionalNode{node("a", "rack-a"), node("b", "rack-b")}}
+	got, redundancy, err := candidates.Eligible("edge", "http3", nil, now)
+	if err != nil || len(got) != 2 || redundancy != RedundancyAvailable {
+		t.Fatalf("eligible = %#v, redundancy = %q, err = %v", got, redundancy, err)
+	}
+}
+
+func TestRegionalCandidateRefreshJitterIsBounded(t *testing.T) {
+	for range 256 {
+		delay := regionalRefreshDelay()
+		if delay < 24*time.Second || delay > 36*time.Second {
+			t.Fatalf("refresh delay = %s", delay)
+		}
+	}
+}
+
+func TestSignedSTUNConfigurationRejectsInvalidAndWrongEndpoint(t *testing.T) {
+	a, network, signer, _ := networkTestAuthority(t)
+	if err := a.Apply(t.Context(), networkToken(t, signer, network)); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	c := RegionalCandidates{Schema: "paperboat.regional-candidates.v1", Issuer: network.Issuer, Audience: "paperboat-regional-candidates", AccountID: network.Self.AccountID, EndpointID: network.Self.EndpointID, AuthorizationGeneration: network.Generation, Generation: 1, IssuedAt: now, ExpiresAt: now + 60, STUNServers: []string{"stun.example.com:3478"}}
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, c)); err != nil {
+		t.Fatal(err)
+	}
+	c.STUNServers = []string{"127.0.0.1:3478"}
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, c)); !errors.Is(err, ErrRegionalAuthority) {
+		t.Fatalf("invalid discovery: %v", err)
+	}
+	if a.regional.STUNServers[0] != "stun.example.com:3478" {
+		t.Fatal("invalid update replaced configuration")
+	}
+	c.STUNServers = []string{"other.example.com:3478"}
+	c.EndpointID = "other"
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, c)); !errors.Is(err, ErrRegionalAuthority) {
+		t.Fatalf("cross-endpoint discovery: %v", err)
+	}
+	c.EndpointID = network.Self.EndpointID
+	c.STUNServers = nil
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, c)); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.regional.STUNServers) != 0 {
+		t.Fatal("discovery withdrawal ignored")
+	}
+}
+
+func TestSTUNConfigurationExpiresOnLiveEngine(t *testing.T) {
+	a, network, signer, _ := networkTestAuthority(t)
+	if err := a.Apply(t.Context(), networkToken(t, signer, network)); err != nil {
+		t.Fatal(err)
+	}
+	a.clientEngine = &mesh.Server{}
+	now := time.Now().Unix()
+	c := RegionalCandidates{Schema: "paperboat.regional-candidates.v1", Issuer: network.Issuer, Audience: "paperboat-regional-candidates", AccountID: network.Self.AccountID, EndpointID: network.Self.EndpointID, AuthorizationGeneration: network.Generation, Generation: 1, IssuedAt: now, ExpiresAt: now + 2, STUNServers: []string{"stun.example.com:3478"}}
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, c)); err != nil {
+		t.Fatal(err)
+	}
+	a.mu.Lock()
+	installed := len(a.clientEngine.STUNServers) == 1
+	a.mu.Unlock()
+	if !installed {
+		t.Fatal("live discovery not installed")
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		a.mu.Lock()
+		empty := a.clientEngine == nil || len(a.clientEngine.STUNServers) == 0
+		a.mu.Unlock()
+		if empty {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("expired discovery remains installed")
+}
+
+func TestRegionalIssuedAtToleratesBoundedClockSkew(t *testing.T) {
+	a, network, signer, _ := networkTestAuthority(t)
+	if err := a.Apply(t.Context(), networkToken(t, signer, network)); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	c := RegionalCandidates{Schema: "paperboat.regional-candidates.v1", Issuer: network.Issuer, Audience: "paperboat-regional-candidates", AccountID: network.Self.AccountID, EndpointID: network.Self.EndpointID, AuthorizationGeneration: network.Generation, Generation: 1, IssuedAt: now + 3, ExpiresAt: now + 60, Nodes: []RegionalNode{}}
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, c)); err != nil {
+		t.Fatal("small clock skew rejected", err)
+	}
+	c.Generation++
+	c.IssuedAt = now + 65
+	c.ExpiresAt = now + 125
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, c)); err == nil {
+		t.Fatal("excessive clock skew accepted")
+	}
+}
+
+func TestRegionalCandidateTLSPinValidation(t *testing.T) {
+	a, network, signer, _ := networkTestAuthority(t)
+	if err := a.Apply(t.Context(), networkToken(t, signer, network)); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	c := RegionalCandidates{Schema: "paperboat.regional-candidates.v1", Issuer: network.Issuer, Audience: "paperboat-regional-candidates", AccountID: network.Self.AccountID, EndpointID: network.Self.EndpointID, AuthorizationGeneration: network.Generation, Generation: 1, IssuedAt: now, ExpiresAt: now + 60, Nodes: []RegionalNode{{TLSSPKISHA256: "bad"}}}
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, c)); !errors.Is(err, ErrRegionalAuthority) {
+		t.Fatalf("malformed pin: %v", err)
+	}
+	c.Nodes[0].TLSSPKISHA256 = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, c)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRegionalIdentityIncludesTLSPin(t *testing.T) {
+	node := RegionalNode{NodeID: "node", NodeGeneration: 1, ProcessEpoch: "epoch", TLSSPKISHA256: base64.RawURLEncoding.EncodeToString(make([]byte, 32))}
+	if !sameRegionalNode([]RegionalNode{node}, node) {
+		t.Fatal("same pinned node rejected")
+	}
+	other := node
+	other.TLSSPKISHA256 = base64.RawURLEncoding.EncodeToString([]byte("12345678901234567890123456789012"))
+	if sameRegionalNode([]RegionalNode{other}, node) {
+		t.Fatal("rotated pin retained old node identity")
+	}
+	if sameRegionalNode(nil, node) {
+		t.Fatal("withdrawn node retained identity")
+	}
+}

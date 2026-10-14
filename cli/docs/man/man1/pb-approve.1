@@ -1,0 +1,53 @@
+.nh
+.TH "PB-APPROVE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-approve - Approve or revoke a peer machine over gRPC IPC
+
+
+.SH SYNOPSIS
+\fBpb approve <machine-id> [flags]\fP
+
+
+.SH DESCRIPTION
+Approve or revoke a peer machine over gRPC IPC
+
+.PP
+Approve an exact peer machine ID for local access, or use --revoke to withdraw that approval. This changes the local daemon's machine trust decision; inspect the ID before approving an unfamiliar peer.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for approve
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--revoke\fP[=false]
+	revoke peer admission
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb(1)\fP

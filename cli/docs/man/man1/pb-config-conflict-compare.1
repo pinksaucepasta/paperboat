@@ -1,0 +1,52 @@
+.nh
+.TH "PB-CONFIG-CONFLICT-COMPARE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-conflict-compare - Read current machine and repository conflict contents through an encrypted connection
+
+
+.SH SYNOPSIS
+\fBpb config conflict compare <environment> <path> [flags]\fP
+
+
+.SH DESCRIPTION
+Read current machine and repository conflict contents through an encrypted connection
+
+.PP
+Read both current versions of one exact conflict from the target machine through its encrypted peer connection. Content streams in bounded chunks and complete hashes are verified before display. Changed conflict or repository revisions require refreshed status. JSON output returns each verified side as base64 content; this command applies no resolution.
+
+.PP
+Conflicts identify exact paths whose local and repository versions cannot be merged automatically. Review the affected path before choosing a side; resolution records a deliberate decision for the next synchronization step.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for compare
+
+.PP
+\fB--json\fP[=false]
+	print comparison content as base64 JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config-conflict(1)\fP

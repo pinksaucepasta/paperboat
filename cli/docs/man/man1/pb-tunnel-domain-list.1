@@ -1,0 +1,64 @@
+.nh
+.TH "PB-TUNNEL-DOMAIN-LIST" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-tunnel-domain-list - List tunnel domains
+
+
+.SH SYNOPSIS
+\fBpb tunnel domain list <tunnel> [flags]\fP
+
+
+.SH DESCRIPTION
+List tunnel domains
+
+.PP
+List domains for one durable tunnel with pagination. The returned state distinguishes registration from verified ownership and serving readiness.
+
+.PP
+Custom domains require DNS ownership verification before they can serve a route. Domain changes are scoped to one tunnel, and verification status is separate from route readiness. The instructions command returns the required authoritative DNS records.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--cursor\fP=""
+	continue a previous page
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for list
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+.PP
+\fB--limit\fP=100
+	maximum results (1-200)
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--ephemeral\fP[=false]
+	use the temporary preview lifecycle
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-tunnel-domain(1)\fP

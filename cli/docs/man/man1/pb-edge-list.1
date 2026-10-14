@@ -1,0 +1,65 @@
+.nh
+.TH "PB-EDGE-LIST" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-edge-list - List hosted and self-hosted tunnel edges
+
+
+.SH SYNOPSIS
+\fBpb edge list [flags]\fP
+
+
+.SH DESCRIPTION
+List tunnel edge nodes in the active workspace. Managed-only mode lists
+Paperboat-managed edges. Self-hosted-only mode lists only selected self-hosted
+edges, including ones that are currently unavailable, and never falls back to
+managed edges. Self-hosted browser publications require a verified customer
+domain and a ready certificate. Listing an edge never guarantees admission
+for a particular route; domain and route authorization still apply.
+
+.PP
+The table identifies each edge's source, region, status, and last heartbeat.
+Self-hosted readiness comes from the control plane; hosted status is an
+observed node state. Use --json for paperboat.edge-list/v1 output with the
+active workspace's pool mode and edge list.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for list
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb edge list
+  pb edge list --workspace acme
+  pb edge list --json
+.EE
+
+
+.SH SEE ALSO
+\fBpb-edge(1)\fP

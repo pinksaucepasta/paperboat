@@ -1,0 +1,76 @@
+.nh
+.TH "PB-SEND-LIST" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-send-list - List file transfers
+
+
+.SH SYNOPSIS
+\fBpb send list [flags]\fP
+
+
+.SH DESCRIPTION
+List file transfers
+
+.PP
+List outgoing transfer batches, optionally limited by machine, terminal session, or result count. Use a returned transfer ID with status or cancel.
+
+.PP
+Send publishes a batch to a machine's Paperboat Inbox. Completion means the receiver verified and recorded the files; status and cancel act on a transfer ID. A default destination can be set separately, while --to chooses one for the current send.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for list
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--limit\fP=50
+	maximum transfers to return
+
+.PP
+\fB--offset\fP=0
+	continue at a transfer history offset
+
+.PP
+\fB--on\fP=""
+	destination machine name or ID
+
+.PP
+\fB--q\fP=""
+	filter by file basename or transfer ID
+
+.PP
+\fB--session\fP=""
+	terminal session ID for destination context
+
+.PP
+\fB--state\fP=""
+	filter by transfer state
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-send(1)\fP

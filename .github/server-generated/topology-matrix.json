@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "include": [
+    {
+      "name": "harness",
+      "platform": "linux",
+      "timeout_seconds": 300,
+      "run": "^(TestSplitDigestImageRequiresExactSHA256|TestRunIDsAndRolesAreBounded|TestClearingInactiveNetworkImpairmentIsNoop|TestBoundedLogsAndResourceValidators|TestConcurrentScopesOwnAndCleanOnlyTheirResources|TestNetworkFaultInjectionAffectsOwnedUDPAndRecovers)$"
+    }
+  ]
+}

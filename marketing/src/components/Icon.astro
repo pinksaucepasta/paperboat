@@ -1,0 +1,36 @@
+---
+/** Phosphor, the console's icon set: regular by default, fill for a selected item. */
+interface Props {
+  name: string
+  weight?: "regular" | "fill"
+  size?: number
+  class?: string
+}
+const { name, weight = "regular", size = 16, class: className } = Astro.props
+const regular = import.meta.glob<string>("/node_modules/@phosphor-icons/core/assets/regular/*.svg", {
+  query: "?raw",
+  import: "default",
+})
+const fill = import.meta.glob<string>("/node_modules/@phosphor-icons/core/assets/fill/*.svg", {
+  query: "?raw",
+  import: "default",
+})
+const file =
+  weight === "fill"
+    ? fill[`/node_modules/@phosphor-icons/core/assets/fill/${name}-fill.svg`]
+    : regular[`/node_modules/@phosphor-icons/core/assets/regular/${name}.svg`]
+if (!file) throw new Error(`Unknown icon: ${name} (${weight})`)
+const raw = await file()
+const inner = raw.replace(/^[\s\S]*?<svg[^>]*>/, "").replace(/<\/svg>\s*$/, "")
+---
+
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 256 256"
+  width={size}
+  height={size}
+  fill="currentColor"
+  aria-hidden="true"
+  class={className}
+  set:html={inner}
+/>

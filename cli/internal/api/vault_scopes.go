@@ -1,0 +1,299 @@
+package api
+
+import (
+	"context"
+	"encoding/base64"
+	"errors"
+	"net/http"
+	"net/url"
+
+	"github.com/pinksaucepasta/paperboat/internal/environmente2ee"
+)
+
+type VaultScopeState struct {
+	WorkspaceID  string `json:"workspace_id"`
+	OwnerKind    string `json:"owner_kind"`
+	OwnerID      string `json:"owner_id"`
+	MachineID    string `json:"machine_id"`
+	KeyEpoch     uint64 `json:"key_epoch"`
+	Revision     uint64 `json:"revision"`
+	DocumentID   string `json:"document_id"`
+	Envelope     string `json:"envelope"`
+	WriterPublic string `json:"writer_public"`
+}
+
+func (s VaultScopeState) Decode() (environmente2ee.VaultScope, error) {
+	invalid := &envStateDecodeFailure{message: "server returned invalid encrypted ENV scope", cause: environmente2ee.ErrInvalid}
+	if len(s.Envelope) > base64.RawURLEncoding.EncodedLen(environmente2ee.MaximumVaultScopeBytes) {
+		return environmente2ee.VaultScope{}, invalid
+	}
+	raw, err := base64.RawURLEncoding.Strict().DecodeString(s.Envelope)
+	if err != nil {
+		invalid.cause = err
+		return environmente2ee.VaultScope{}, invalid
+	}
+	public, err := base64.RawURLEncoding.Strict().DecodeString(s.WriterPublic)
+	if err != nil {
+		invalid.cause = err
+		return environmente2ee.VaultScope{}, invalid
+	}
+	scope, err := environmente2ee.ParseVaultScope(raw, public)
+	if err != nil {
+		invalid.cause = err
+		return environmente2ee.VaultScope{}, invalid
+	}
+	c := scope.Claims
+	if c.WorkspaceID != s.WorkspaceID || c.OwnerKind != s.OwnerKind || c.OwnerID != s.OwnerID || c.MachineID != s.MachineID || c.KeyEpoch != s.KeyEpoch || c.Revision != s.Revision || scope.ID.String() != s.DocumentID {
+		return environmente2ee.VaultScope{}, invalid
+	}
+	return scope, nil
+}
+
+type VaultScopePut struct {
+	OperationID string `json:"operation_id"`
+	Envelope    string `json:"envelope"`
+}
+type VaultSharingState struct {
+	AccountID       string `json:"account_id"`
+	VaultGeneration uint64 `json:"vault_generation"`
+	WriterPublic    string `json:"writer_public"`
+	SharingPublic   string `json:"sharing_public"`
+}
+type VaultTeamMember struct {
+	AccountID            string `json:"account_id"`
+	MembershipGeneration uint64 `json:"membership_generation"`
+	Role                 string `json:"role"`
+	Active               bool   `json:"active"`
+	GrantEpoch           uint64 `json:"grant_epoch"`
+	EnvPermission        string `json:"env_permission"`
+}
+type VaultTeamState struct {
+	RecordSequence   uint64            `json:"record_sequence"`
+	Entitled         bool              `json:"entitled"`
+	RotationRequired bool              `json:"rotation_required"`
+	TeamID           string            `json:"team_id"`
+	OwnerAccount     string            `json:"owner_account"`
+	Generation       uint64            `json:"generation"`
+	KeyEpoch         uint64            `json:"key_epoch"`
+	Members          []VaultTeamMember `json:"members"`
+	Scope            VaultScopeState   `json:"scope"`
+}
+type VaultTeamCreate struct {
+	VaultEnvelope          string `json:"vault_envelope"`
+	OperationID            string `json:"operation_id"`
+	TeamID                 string `json:"team_id"`
+	ScopeEnvelope          string `json:"scope_envelope"`
+	GrantEnvelope          string `json:"grant_envelope"`
+	ExpectedTeamGeneration uint64 `json:"expected_team_generation"`
+}
+type VaultMemberGrant struct {
+	OperationID                  string `json:"operation_id"`
+	AccountID                    string `json:"account_id"`
+	ExpectedTeamGeneration       uint64 `json:"expected_team_generation"`
+	ExpectedMembershipGeneration uint64 `json:"expected_membership_generation"`
+	GrantEnvelope                string `json:"grant_envelope"`
+}
+type VaultTeamRotate struct {
+	Records                VaultRecordReplacement `json:"records"`
+	ConfirmTotalLoss       bool                   `json:"confirm_total_loss"`
+	VaultEnvelope          string                 `json:"vault_envelope"`
+	OperationID            string                 `json:"operation_id"`
+	ExpectedTeamGeneration uint64                 `json:"expected_team_generation"`
+	RemoveAccountIDs       []string               `json:"remove_account_ids"`
+	ScopeEnvelope          string                 `json:"scope_envelope"`
+	GrantEnvelopes         []string               `json:"grant_envelopes"`
+}
+type VaultGrantState struct {
+	Acknowledged         bool   `json:"acknowledged"`
+	TeamID               string `json:"team_id"`
+	MembershipGeneration uint64 `json:"membership_generation"`
+	TeamEpoch            uint64 `json:"team_epoch"`
+	DocumentID           string `json:"document_id"`
+	Envelope             string `json:"envelope"`
+	SenderWriterPublic   string `json:"sender_writer_public"`
+}
+
+func (c *Client) vaultDataRequest(ctx context.Context, method, path string, body, out any) error {
+	var headers http.Header
+	if err := c.doRequestMeta(ctx, method, path, body, out, environmentNoStoreRequestHeaders(nil), true, &headers); err != nil {
+		return err
+	}
+	return validateEnvironmentNoStore(headers)
+}
+func vaultScopePath(kind, owner, machine string) string {
+	return "/v1/environment/scopes/" + url.PathEscape(kind) + "/" + url.PathEscape(owner) + "?machine_id=" + url.QueryEscape(machine)
+}
+func (c *Client) GetVaultScope(ctx context.Context, kind, owner, machine string) (VaultScopeState, error) {
+	var out VaultScopeState
+	err := c.vaultDataRequest(ctx, http.MethodGet, vaultScopePath(kind, owner, machine), nil, &out)
+	if err == nil {
+		_, err = out.Decode()
+		if err == nil && (out.WorkspaceID != c.Workspace() || out.OwnerKind != kind || out.OwnerID != owner || out.MachineID != machine) {
+			err = errors.New("server returned wrong ENV source coordinate")
+		}
+	}
+	return out, err
+}
+func (c *Client) PutVaultScope(ctx context.Context, kind, owner, machine string, in VaultScopePut) (VaultScopeState, error) {
+	var out VaultScopeState
+	err := c.vaultDataRequest(ctx, http.MethodPut, vaultScopePath(kind, owner, machine), in, &out)
+	if err == nil {
+		_, err = out.Decode()
+		if err == nil && (out.WorkspaceID != c.Workspace() || out.OwnerKind != kind || out.OwnerID != owner || out.MachineID != machine) {
+			err = errors.New("server returned wrong ENV source coordinate")
+		}
+	}
+	return out, err
+}
+func (c *Client) GetVaultSharing(ctx context.Context, account string) (VaultSharingState, error) {
+	scoped := *c
+	scoped.workspace = "personal"
+	var out VaultSharingState
+	err := scoped.vaultDataRequest(ctx, http.MethodGet, "/v1/environment/users/"+url.PathEscape(account)+"/sharing", nil, &out)
+	return out, err
+}
+func (c *Client) GetVaultTeam(ctx context.Context, team string) (VaultTeamState, error) {
+	scoped := *c
+	if err := scoped.SetWorkspace(team); err != nil {
+		return VaultTeamState{}, err
+	}
+	var out VaultTeamState
+	err := scoped.vaultDataRequest(ctx, http.MethodGet, "/v1/environment/teams/"+url.PathEscape(team), nil, &out)
+	return out, err
+}
+func (c *Client) CreateVaultTeam(ctx context.Context, in VaultTeamCreate) (VaultTeamState, error) {
+	var out VaultTeamState
+	err := c.vaultDataRequest(ctx, http.MethodPost, "/v1/environment/teams", in, &out)
+	return out, err
+}
+func (c *Client) GrantVaultTeamMember(ctx context.Context, team string, in VaultMemberGrant) (VaultTeamState, error) {
+	var out VaultTeamState
+	err := c.vaultDataRequest(ctx, http.MethodPost, "/v1/environment/teams/"+url.PathEscape(team)+"/members", in, &out)
+	return out, err
+}
+func (c *Client) RotateVaultTeam(ctx context.Context, team string, in VaultTeamRotate) (VaultTeamState, error) {
+	var out VaultTeamState
+	err := c.vaultDataRequest(ctx, http.MethodPost, "/v1/environment/teams/"+url.PathEscape(team)+"/rotate", in, &out)
+	return out, err
+}
+func (c *Client) GetVaultGrants(ctx context.Context) ([]VaultGrantState, error) {
+	scoped := *c
+	scoped.workspace = "personal"
+	var out struct {
+		Grants []VaultGrantState `json:"grants"`
+	}
+	err := scoped.vaultDataRequest(ctx, http.MethodGet, "/v1/environment/grants", nil, &out)
+	return out.Grants, err
+}
+func (c *Client) AckVaultGrant(ctx context.Context, digest, vaultID string) error {
+	scoped := *c
+	scoped.workspace = "personal"
+	return scoped.vaultDataRequest(ctx, http.MethodPost, "/v1/environment/grants/"+url.PathEscape(digest)+"/ack", struct {
+		VaultDocumentID string `json:"vault_document_id"`
+	}{vaultID}, nil)
+}
+
+type VaultPersonalInventory struct {
+	RotationRequired bool              `json:"rotation_required"`
+	KeyEpoch         uint64            `json:"key_epoch"`
+	Scopes           []VaultScopeState `json:"scopes"`
+}
+type VaultReset struct {
+	OperationID             string   `json:"operation_id"`
+	ExpectedVaultDocumentID string   `json:"expected_vault_document_id"`
+	VaultEnvelope           string   `json:"vault_envelope"`
+	ScopeEnvelopes          []string `json:"scope_envelopes"`
+	ConfirmTotalLoss        bool     `json:"confirm_total_loss"`
+}
+
+func (c *Client) GetVaultPersonalScopes(ctx context.Context) (VaultPersonalInventory, error) {
+	personal := *c
+	personal.workspace = "personal"
+	c = &personal
+
+	var out VaultPersonalInventory
+	err := c.vaultDataRequest(ctx, http.MethodGet, "/v1/environment/scopes", nil, &out)
+	return out, err
+}
+func (c *Client) ResetVault(ctx context.Context, in VaultReset) (PasswordVaultState, error) {
+	personal := *c
+	personal.workspace = "personal"
+	c = &personal
+
+	var out PasswordVaultState
+	err := c.vaultDataRequest(ctx, http.MethodPost, "/v1/environment-vault/reset", in, &out)
+	if err == nil {
+		_, _, err = out.Decode()
+	}
+	return out, err
+}
+
+type VaultPersonalRotate struct {
+	OperationID             string               `json:"operation_id"`
+	ExpectedVaultDocumentID string               `json:"expected_vault_document_id"`
+	VaultEnvelope           string               `json:"vault_envelope"`
+	ScopeDocuments          []VaultScopeDocument `json:"scope_documents"`
+}
+type VaultScopeDocument struct {
+	WorkspaceID string `json:"workspace_id"`
+	MachineID   string `json:"machine_id"`
+	DocumentID  string `json:"document_id"`
+}
+type VaultPersonalScopeStage struct {
+	Records                 VaultRecordReplacement `json:"records"`
+	WorkspaceID             string                 `json:"workspace_id"`
+	ExpectedVaultDocumentID string                 `json:"expected_vault_document_id"`
+	MachineID               string                 `json:"machine_id"`
+	Envelope                string                 `json:"envelope"`
+}
+
+type VaultRecordReplacement struct {
+	ExpectedSequence uint64   `json:"expected_sequence"`
+	DocumentIDs      []string `json:"document_ids"`
+	Envelopes        []string `json:"envelopes"`
+}
+
+func (c *Client) StageVaultPersonalScope(ctx context.Context, operation string, in VaultPersonalScopeStage) (VaultScopeDocument, error) {
+	personal := *c
+	personal.workspace = "personal"
+	c = &personal
+
+	var out VaultScopeDocument
+	err := c.vaultDataRequest(ctx, http.MethodPut, "/v1/environment/rotate-personal/"+url.PathEscape(operation)+"/scopes", in, &out)
+	return out, err
+}
+func (c *Client) AbortVaultPersonalRotation(ctx context.Context, operation string) error {
+	personal := *c
+	personal.workspace = "personal"
+	c = &personal
+
+	return c.vaultDataRequest(ctx, http.MethodDelete, "/v1/environment/rotate-personal/"+url.PathEscape(operation), nil, nil)
+}
+
+func (c *Client) RotateVaultPersonal(ctx context.Context, in VaultPersonalRotate) (PasswordVaultState, error) {
+	personal := *c
+	personal.workspace = "personal"
+	c = &personal
+
+	var out PasswordVaultState
+	err := c.vaultDataRequest(ctx, http.MethodPost, "/v1/environment/rotate-personal", in, &out)
+	if err == nil {
+		_, _, err = out.Decode()
+	}
+	return out, err
+}
+
+func (c *Client) GetVaultScopeInWorkspace(ctx context.Context, workspace, kind, owner, machine string) (VaultScopeState, error) {
+	scoped := *c
+	if err := scoped.SetWorkspace(workspace); err != nil {
+		return VaultScopeState{}, err
+	}
+	return scoped.GetVaultScope(ctx, kind, owner, machine)
+}
+func (c *Client) PutVaultScopeInWorkspace(ctx context.Context, workspace, kind, owner, machine string, in VaultScopePut) (VaultScopeState, error) {
+	scoped := *c
+	if err := scoped.SetWorkspace(workspace); err != nil {
+		return VaultScopeState{}, err
+	}
+	return scoped.PutVaultScope(ctx, kind, owner, machine, in)
+}

@@ -1,0 +1,46 @@
+.nh
+.TH "PB-CONFIG-LOCAL-ACCESS-APPLY" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-local-access-apply - Apply local browser settings from the config file
+
+
+.SH SYNOPSIS
+\fBpb config local-access apply [flags]\fP
+
+
+.SH DESCRIPTION
+Validate and apply local browser settings after editing the configuration file directly. Domain changes use the ordinary privileged trust workflow; aliases remain bounded to already authorized machine ports, and errors leave success unreported.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for apply
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config-local-access(1)\fP

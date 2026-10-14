@@ -1,0 +1,46 @@
+.nh
+.TH "PB-CONFIG-LOCAL-ACCESS-ALIAS-UNSET" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-local-access-alias-unset - Remove a service alias
+
+
+.SH SYNOPSIS
+\fBpb config local-access alias unset <machine-alias> <name> [flags]\fP
+
+
+.SH DESCRIPTION
+Remove one named browser mapping for the selected machine. Paperboat withdraws the local name while preserving its machine authorization and other service aliases, then confirms only after applying the updated configuration.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for unset
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config-local-access-alias(1)\fP

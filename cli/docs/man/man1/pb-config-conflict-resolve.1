@@ -1,0 +1,56 @@
+.nh
+.TH "PB-CONFIG-CONFLICT-RESOLVE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-conflict-resolve - Choose the machine or repository version
+
+
+.SH SYNOPSIS
+\fBpb config conflict resolve <environment> <path> [flags]\fP
+
+
+.SH DESCRIPTION
+Choose the machine or repository version
+
+.PP
+Resolve one exact path with --keep to select the machine or repository version. Use compare first to inspect both sides; the chosen direction is recorded for the next synchronization step.
+
+.PP
+Conflicts identify exact paths whose local and repository versions cannot be merged automatically. Review the affected path before choosing a side; resolution records a deliberate decision for the next synchronization step.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for resolve
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--keep\fP=""
+	version to keep: machine or repository
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config-conflict(1)\fP

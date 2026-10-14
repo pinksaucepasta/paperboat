@@ -1,0 +1,46 @@
+.nh
+.TH "PB-CONFIG-LOCAL-ACCESS-PROXY-UNSET" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-local-access-proxy-unset - Restore the default reverse-proxy port
+
+
+.SH SYNOPSIS
+\fBpb config local-access proxy unset <machine-alias> [flags]\fP
+
+
+.SH DESCRIPTION
+Remove the machine reverse-proxy override and restore automatic app-name routing through authorized port 80. Numeric URLs and explicit aliases retain their destinations. The running gateway is updated before success is reported.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for unset
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config-local-access-proxy(1)\fP

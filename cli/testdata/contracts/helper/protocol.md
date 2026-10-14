@@ -1,0 +1,106 @@
+# Helper Application Protocol 1.0
+
+The application protocol runs through the Paperboat edge over either WSS or native QUIC.
+The bearer credential is authenticated once on the native control stream or WSS connection.
+Lifecycle operations are authorized against their advertised capability; terminal data
+frames use the connection-local stream binding established by attach.
+
+## Negotiation
+
+The client sends `hello` for exactly version `1.0` before any operation and the helper
+replies with `welcome`. Failure returns `protocol_incompatible` and closes without creating
+or changing runtime state. Protocol 1.x is not supported. Required capabilities must be
+selected exactly; optional unknown capabilities are ignored.
+
+## Limits
+
+- Structured JSON application frame: 64 KiB encoded.
+- Binary terminal application frame: 256 KiB.
+- Native QUIC records are bounded per frame; streams have no cumulative byte ceiling.
+- Other HTTP bodies are operation-specific and bounded.
+- Pending outbound data per attachment: 1 MiB.
+- Heartbeat interval: 15 seconds; peer timeout: 45 seconds.
+- Operation deadline: required for mutations, at most 5 minutes.
+
+WSS maps each text or binary message to exactly one application frame. Native QUIC uses
+one connection with independently flow-controlled control, input, and output streams.
+Each begins with a bounded `PBT1` preface containing version, role, a 16-byte connection
+ID, and bounded binding/token lengths. Control carries the bearer token. Its welcome
+returns a random 32-byte binding secret required by input and output.
+
+Control records use:
+
+```text
++----------+----------------+------------------+
+| kind u8  | length u32 BE  | payload          |
++----------+----------------+------------------+
+```
+
+Kind `1` is a nonempty structured JSON frame. Kind `2` is a control binary frame such as
+ACK or resize. Input and output use the same big-endian length without a kind byte because
+their roles are fixed. Unknown kinds, zero or oversized lengths, malformed JSON, and
+truncated records are protocol errors. Fragmentation does not alter record boundaries.
+
+Native QUIC uses ALPN `paperboat-terminal/1` on UDP 443. WSS continues at `/v1/runtime`
+with subprotocol `paperboat.terminal.v1`. Both transports use the same scoped bearer
+credential, negotiation, application frames, limits, authorization, session state, and
+close semantics. Auxiliary streams are usable only after control authorization succeeds;
+duplicates, incorrect roles or bindings, and incomplete sets are rejected. Control loss
+closes the attachment, and uncertain input is never replayed.
+
+Structured lifecycle frames are UTF-8 JSON. Attach returns a nonzero connection-local
+`uint32 stream_id`.
+Terminal input, output, cumulative ACK and resize are fixed-header binary messages defined
+by `fixtures/helper/terminal-v1.json`; they carry the stream ID rather than string session
+or attachment identifiers. Input and resize sequences start at one for each attached stream
+and remain contiguous. Input frames receive no per-frame response and are never replayed.
+
+Terminal output uses the big-endian fields `opcode:u8`, `channel:u8`, `encoding:u8`,
+`stream_id:u32`, `start_sequence:u64`, `uncompressed_length:u32`, and payload. Encoding
+`0` is raw and `1` is one independent Zstandard frame. Raw payload length must equal the
+declared length; Zstandard must decode to exactly that length without a dictionary,
+concatenated frame, or trailing content. The declared length is bounded by the terminal
+frame limit before decoding. Sequences and ACKs always count decoded PTY bytes.
+
+After all queued terminal bytes have been delivered, an exited or closed terminal emits
+a structured `event` frame with `event: terminal_stream_end`, the session ID, final
+sequence, state, and exit result when present. Clients use this event for exact remote
+exit status; transport closure alone never implies process success.
+
+Lifecycle mutations carry `operation_id`. A duplicate operation ID with the same canonical
+request returns the recorded result; reuse with different content returns
+`operation_id_conflict`. Terminal input is intentionally outside the operation journal.
+Cancellation is explicit and idempotent. A disconnect neither cancels nor repeats an
+operation unless its operation contract says so.
+
+Slow consumers receive `slow_consumer` before close code `4408` when the control frame can
+still be delivered. Authentication uses `4401`, authorization `4403`, protocol/version
+failure `4406`, malformed or oversized frames `4409`, deadline/cancellation `4410`, and
+internal unavailable `4503`. Normal detach uses `1000`.
+
+Errors use `common.error-envelope`. Error details never contain tokens, terminal content,
+config contents, staged paths outside their scoped display form, or provider identifiers.
+
+## Terminal identification metadata
+
+Authorized runtime snapshots expose `title` (application-reported OSC 0/2),
+`current_directory` (live foreground directory or OSC 7/Windows OSC 9;9 report), and
+`foreground_process` (native foreground executable name where available). `cwd`
+remains the launch directory; it must never be presented as a live directory.
+The editable catalog name is independent of these observations and the immutable
+session ID. Empty title falls back to foreground process only for display.
+
+Metadata parsing preserves all PTY/replay bytes. OSC bodies are bounded at 8192
+bytes; titles/process names at 128 Unicode characters and displayed paths at 1024.
+Control and directional-formatting characters are removed. Observations never
+authorize access, trigger path probes, or prove task progress. A new process
+generation clears prior application metadata; closed/offline sessions have no
+live directory/process observation. Native queries run only for requested
+snapshots, outside the session lock, with process/generation fencing.
+
+PowerShell prompts report filesystem location while preserving normal profiles
+and the existing prompt; CMD reports its directory through process-local PROMPT.
+Neither modifies profile files. Windows has no native foreground-process query;
+applications must report their title. Darwin/Linux query the terminal foreground
+group. Catalogs refresh observations while visible; unavailable current metadata
+may show the separately labeled launch “Started in” directory.

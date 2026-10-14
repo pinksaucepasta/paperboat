@@ -1,0 +1,52 @@
+.nh
+.TH "PB-CONFIG-STATUS-BAR" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-status-bar - Configure the interactive terminal status bar
+
+
+.SH SYNOPSIS
+\fBpb config status-bar [flags]\fP
+
+
+.SH DESCRIPTION
+Configure the interactive terminal status bar
+
+.PP
+Inspect, set, preview, or reset local status-bar preferences. These settings affect interactive terminal display and do not modify remote shell state.
+
+.PP
+Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for status-bar
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config(1)\fP, \fBpb-config-status-bar-preview(1)\fP, \fBpb-config-status-bar-reset(1)\fP, \fBpb-config-status-bar-set(1)\fP, \fBpb-config-status-bar-show(1)\fP

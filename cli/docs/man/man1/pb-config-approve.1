@@ -1,0 +1,51 @@
+.nh
+.TH "PB-CONFIG-APPROVE" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-config-approve - Approve the currently reviewed pull revision
+
+
+.SH SYNOPSIS
+\fBpb config approve <environment> [flags]\fP
+
+
+.SH DESCRIPTION
+Approve the currently reviewed pull revision
+
+.PP
+Approve the pull revision currently under review for the selected environment. This applies the reviewed revision; it does not approve an unrelated later repository change.
+
+.PP
+Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for approve
+
+.PP
+\fB--json\fP[=false]
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-config(1)\fP

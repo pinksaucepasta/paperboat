@@ -1,0 +1,51 @@
+.nh
+.TH "PB-AUTH-STATUS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-auth-status - Show the active Paperboat account
+
+
+.SH SYNOPSIS
+\fBpb auth status [flags]\fP
+
+
+.SH DESCRIPTION
+Show the active Paperboat account
+
+.PP
+Report the active account and session for the configured server. Use this before an account-scoped operation to check which identity the CLI will use.
+
+.PP
+Sign-in credentials are stored in the selected local profile for its configured Paperboat server. Account commands use that profile; a missing or rejected session must be repaired with pb auth login before protected resources can be used.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for status
+
+.PP
+\fB--json\fP[=false]
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-auth(1)\fP

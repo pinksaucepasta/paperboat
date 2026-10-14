@@ -1,0 +1,41 @@
+---
+/** A section: a short title and a line or two under it, then whatever shows it. */
+interface Props {
+  id: string
+  title: string
+  tone?: "plain" | "surface"
+}
+const { id, title, tone = "plain" } = Astro.props
+---
+
+<section class:list={["section", `section-${tone}`]} id={id} aria-labelledby={`${id}-title`}>
+  <div class="wrap">
+    <header class="section-head" data-reveal>
+      <h2 class="title" id={`${id}-title`}>{title}</h2>
+      <div class="lede section-text"><slot name="text" /></div>
+    </header>
+    <slot />
+  </div>
+</section>
+
+<style>
+  .section {
+    padding-block: clamp(88px, 11vw, 152px);
+  }
+
+  .section-surface {
+    background: var(--surface);
+  }
+
+  .section-head {
+    display: grid;
+    gap: 18px;
+    max-width: 640px;
+    margin-bottom: clamp(44px, 5.5vw, 72px);
+  }
+
+  .section-text {
+    display: grid;
+    gap: 12px;
+  }
+</style>

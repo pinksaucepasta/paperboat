@@ -1,0 +1,5 @@
+{"case":"server-pb-http-v1","valid":true,"producer":"paperboat-server","consumer":"paperboat","interface":"server_http","offered":["1.0"],"selected":"1.0"}
+{"case":"pb-runtime-v1","valid":true,"producer":"paperboat","consumer":"paperboat","interface":"runtime_application","offered":["1.0"],"selected":"1.0"}
+{"case":"runtime-major-v0-rejected","valid":false,"producer":"paperboat","consumer":"paperboat","interface":"runtime_application","offered":["0.0"],"error":"protocol_incompatible","mutated":false}
+{"case":"server-http-major-v0-rejected","valid":false,"producer":"paperboat-server","consumer":"paperboat","interface":"server_http","offered":["0.0"],"error":"protocol_incompatible","mutated":false}
+{"case":"required-capability-missing","valid":false,"producer":"paperboat","consumer":"paperboat","interface":"runtime_application","offered":["1.0"],"missing_capability":"terminal.v1","error":"capability_required","mutated":false}

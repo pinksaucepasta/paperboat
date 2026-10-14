@@ -1,0 +1,13 @@
+---
+import { boatPath } from "../site"
+/** The mark alone. Render at heights divisible by 6 px. */
+interface Props {
+  height?: number
+  class?: string
+}
+const { height = 18, class: className } = Astro.props
+---
+
+<svg viewBox="0 0 600 360" height={height} width={(height * 5) / 3} fill="currentColor" aria-hidden="true" class={className}>
+  <path fill-rule="evenodd" d={boatPath}></path>
+</svg>

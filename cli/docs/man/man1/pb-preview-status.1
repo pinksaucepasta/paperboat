@@ -1,0 +1,52 @@
+.nh
+.TH "PB-PREVIEW-STATUS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-preview-status - Show temporary preview status
+
+
+.SH SYNOPSIS
+\fBpb preview status <preview> [flags]\fP
+
+
+.SH DESCRIPTION
+Show temporary preview status
+
+.PP
+Show the selected preview's current publication and connector state. A URL existing in the account is distinct from a ready, reachable origin.
+
+.PP
+A preview exposes a local target through a temporary Paperboat URL or private/team access policy. Inspect its status before sharing the URL, and stop or delete it when no longer needed. Browser HTTP terminates TLS at the edge.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for status
+
+.PP
+\fB--json\fP[=false]
+	print the canonical preview resource as JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-preview(1)\fP

@@ -1,0 +1,137 @@
+{
+  "schema": "paperboat.sentry-operations/v1",
+  "api_base": "https://de.sentry.io/api/0",
+  "organization": "pprbt",
+  "environment": "production",
+  "cron_monitors": [
+    {
+      "slug": "pb-control-availability",
+      "name": "pb-control-availability",
+      "project": "go",
+      "status": "active",
+      "producer_configured": true,
+      "schedule": {
+        "type": "interval",
+        "value": 1,
+        "unit": "minute"
+      },
+      "checkin_margin": 2,
+      "max_runtime": 2,
+      "failure_issue_threshold": 2,
+      "recovery_threshold": 1
+    },
+    {
+      "slug": "pb-backup-daily",
+      "name": "pb-backup-daily",
+      "project": "go",
+      "status": "disabled",
+      "producer_configured": false,
+      "schedule": {
+        "type": "interval",
+        "value": 1,
+        "unit": "day"
+      },
+      "checkin_margin": 60,
+      "max_runtime": 240,
+      "failure_issue_threshold": 1,
+      "recovery_threshold": 1
+    },
+    {
+      "slug": "pb-restore-weekly",
+      "name": "pb-restore-weekly",
+      "project": "go",
+      "status": "disabled",
+      "producer_configured": false,
+      "schedule": {
+        "type": "interval",
+        "value": 1,
+        "unit": "week"
+      },
+      "checkin_margin": 240,
+      "max_runtime": 480,
+      "failure_issue_threshold": 1,
+      "recovery_threshold": 1
+    },
+    {
+      "slug": "pb-operational-health",
+      "name": "pb-operational-health",
+      "project": "go",
+      "status": "disabled",
+      "producer_configured": false,
+      "schedule": {
+        "type": "interval",
+        "value": 1,
+        "unit": "minute"
+      },
+      "checkin_margin": 30,
+      "max_runtime": 2,
+      "failure_issue_threshold": 2,
+      "recovery_threshold": 1
+    }
+  ],
+  "detectors": [
+    {
+      "name": "pb-server-errors",
+      "project": "go",
+      "enabled": true,
+      "kind": "error_count",
+      "component": "paperboat-server",
+      "threshold": 10,
+      "recovery_threshold": 2
+    },
+    {
+      "name": "pb-cli-errors",
+      "project": "go",
+      "enabled": true,
+      "kind": "error_count",
+      "component": "paperboat-cli",
+      "threshold": 10,
+      "recovery_threshold": 2
+    },
+    {
+      "name": "pb-daemon-errors",
+      "project": "go",
+      "enabled": true,
+      "kind": "error_count",
+      "component": "paperboat-daemon",
+      "threshold": 10,
+      "recovery_threshold": 2
+    },
+    {
+      "name": "pb-relay-errors",
+      "project": "go",
+      "enabled": true,
+      "kind": "error_count",
+      "component": "paperboat-relay",
+      "threshold": 10,
+      "recovery_threshold": 2
+    },
+    {
+      "name": "pb-tunnel-errors",
+      "project": "go",
+      "enabled": true,
+      "kind": "error_count",
+      "component": "paperboat-tunnel",
+      "threshold": 10,
+      "recovery_threshold": 2
+    },
+    {
+      "name": "pb-server-latency",
+      "project": "go",
+      "enabled": true,
+      "kind": "span_latency_p95",
+      "component": "paperboat-server",
+      "threshold": 500,
+      "recovery_threshold": 400
+    },
+    {
+      "name": "pb-edge-latency",
+      "project": "go",
+      "enabled": true,
+      "kind": "span_latency_p95",
+      "component": "paperboat-tunnel",
+      "threshold": 500,
+      "recovery_threshold": 400
+    }
+  ]
+}
