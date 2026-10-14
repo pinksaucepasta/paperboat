@@ -1,9 +1,7 @@
 name: TUF metadata refresh
 
+# Manual only until adjusted to the monorepo layout (PLAN.md P0).
 on:
-  schedule:
-    # Refresh at an off-peak minute every six hours (UTC).
-    - cron: '17 */6 * * *'
   workflow_dispatch:
 
 concurrency:

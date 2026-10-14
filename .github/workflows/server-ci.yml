@@ -1,9 +1,8 @@
 name: CI
 
+# Manual only until adjusted to the monorepo layout (PLAN.md P0).
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read

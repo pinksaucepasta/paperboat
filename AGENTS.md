@@ -32,7 +32,8 @@ component directory. Go 1.27.1.
    failures and recovery, before moving to the next. A feature is done only when its PLAN
    checklist is green on real devices.
 2. **One commit per fix.** Message: what broke, root cause, the change, the test that proves
-   it. Never leave work uncommitted at the end of a step. Do not push unless asked. Do not
+   it. Push `main` to `origin` (github.com/pinksaucepasta/paperboat, private) after every
+   commit. Never leave work uncommitted or unpushed at the end of a step. Never force-push or
    rewrite history.
 3. **Regressions first.** Anything that worked on the last accepted build and fails now is
    fixed before any other work. Never call a regression a "remaining issue".

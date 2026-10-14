@@ -93,8 +93,9 @@ ARM builds must compile, pass unit tests and be included in every release.
 
 ### 1.5 Repository and process
 
-- This monorepo is pushed to one **private** GitHub repo (licence later, **USER DECIDES**).
-  Push only when the user says. Release binaries need a public download host — see P13.
+- This monorepo lives at github.com/pinksaucepasta/paperboat (**private**; licence later,
+  **USER DECIDES**). Push `main` after every commit. Release binaries need a public download
+  host — see P13.
 - One commit per fix; device builds only from a clean committed tree; device smoke suite
   after every device build (AGENTS.md).
 
@@ -147,7 +148,8 @@ console frontend: **USER DECIDES**. Inspector capture/replay: ships only if it a
       `tuf-refresh.yml` (from the CLI repo) and `server-ci.yml`, `server-container.yml`
       (from the server repo; `.github/server-generated/` holds their generated inputs).
       Fix paths, working directories, Docker contexts; add linux/arm64 and windows/arm64
-      to the release matrix. Do not push or run them on GitHub until the user says.
+      to the release matrix. Until they are fixed, keep them from running on pushes (they
+      are pushed with the repo); release and signing workflows run only when the user says.
 - [ ] Console dev service `paperboat-console.service` (systemd user unit; Funnel backend
       http://100.95.70.63:3000) runs from `~/paperboat/console`. Sign-in at
       https://oracle.newt-mermaid.ts.net still works.
