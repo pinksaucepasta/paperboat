@@ -102,7 +102,10 @@ ARM builds must compile, pass unit tests and be included in every release.
   targets, snapshot and timestamp; the scheduled refresh re-signs timestamp before expiry.
   No signing-state, automated rotation or separate metadata repo; delete that machinery.
   Client verification (hashes, rollback, expiry, root-signed key replacement) is unchanged.
-  Lane A: F14 client side. Lane B: release/refresh workflows and key setup (S3).
+  Lane A: F14 client side. Lane B: release/refresh workflows and key setup (S3), done by
+  Lane B itself: generate the root key on apple over Tailscale SSH (key never leaves apple,
+  never printed; backed up in apple's keychain/owner-only file), generate the online key and
+  store it with `gh secret set`. No user step needed.
 - Relays currently run on other machines (oracle and one more); they are rebuilt from this
   repo and re-registered with the new server.
 - Where the console and marketing site are hosted in production: **USER DECIDES** (marketing
