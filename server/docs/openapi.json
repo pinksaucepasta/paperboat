@@ -68,6 +68,11 @@
         "type": "apiKey",
         "in": "cookie",
         "name": "pb-operator-session"
+      },
+      "bearerSelfhostRuntime": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Opaque runtime credential issued for exactly one completed active pbh node."
       }
     },
     "schemas": {
@@ -14638,6 +14643,60 @@
                 "$ref": "#/components/schemas/InventoryOffsetPagination"
               }
             }
+          }
+        }
+      },
+      "SelfhostRuntimeReadiness": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "node_id",
+          "state",
+          "process_epoch",
+          "capability",
+          "ready",
+          "last_heartbeat_at",
+          "valid_until",
+          "server_time"
+        ],
+        "properties": {
+          "node_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "process_epoch": {
+            "type": "string"
+          },
+          "capability": {
+            "type": "string",
+            "enum": [
+              "relay",
+              "tunnel"
+            ]
+          },
+          "ready": {
+            "type": "boolean",
+            "description": "Ready state, a nonempty current process epoch and heartbeat within the server readiness deadline."
+          },
+          "last_heartbeat_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "valid_until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       }
@@ -43898,6 +43957,47 @@
           }
         },
         "description": "Browser mutations require CSRF. Reuse the same operation_id for an uncertain outcome; accepted or changed invitations require refresh."
+      }
+    },
+    "/v1/selfhost/runtime-readiness": {
+      "get": {
+        "operationId": "get_selfhost_runtime_readiness",
+        "summary": "Read the authenticated pbh node readiness",
+        "description": "The runtime credential selects the exact node. No resource selector, query parameters or request body is accepted. This read-only response carries no credential or signing material; registered/offline/stale nodes return ready=false. Responses are not cached.",
+        "security": [
+          {
+            "bearerSelfhostRuntime": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current authenticated node readiness.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SelfhostRuntimeReadiness"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A query parameter or request body was supplied."
+          },
+          "401": {
+            "description": "runtime_unauthorized: missing/invalid credential or incomplete, removed or expired installation."
+          },
+          "503": {
+            "description": "runtime_readiness_unavailable: configuration/database unavailable; retry shortly."
+          }
+        }
       }
     }
   }
