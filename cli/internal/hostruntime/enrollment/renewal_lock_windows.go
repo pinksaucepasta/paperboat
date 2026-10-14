@@ -16,8 +16,9 @@ import (
 const runtimeIdentityRenewalLockFile = ".runtime-identity-renewal.lock"
 
 type runtimeIdentityRenewalLock struct {
-	file   *os.File
-	region windows.Overlapped
+	file     *os.File
+	region   windows.Overlapped
+	acquired bool
 }
 
 func openRuntimeIdentityRenewalLock(stateRoot string) (*runtimeIdentityRenewalLock, error) {
@@ -46,12 +47,12 @@ func openRuntimeIdentityRenewalLock(stateRoot string) (*runtimeIdentityRenewalLo
 		return nil, err
 	}
 	acl := runtimeIdentityRenewalFileDACL(user.User.Sid.String())
-	descriptor, err := windows.SecurityDescriptorFromString(acl)
+	descriptor, err := windows.SecurityDescriptorFromString("O:" + user.User.Sid.String() + acl)
 	if err != nil {
 		return nil, err
 	}
 	attributes := &windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: descriptor}
-	access := uint32(windows.GENERIC_READ | windows.GENERIC_WRITE | windows.READ_CONTROL)
+	access := uint32(windows.GENERIC_READ | windows.GENERIC_WRITE | windows.READ_CONTROL | windows.WRITE_OWNER)
 	share := uint32(windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE)
 	flags := uint32(windows.FILE_ATTRIBUTE_NORMAL | windows.FILE_FLAG_OPEN_REPARSE_POINT)
 	handle, err := windows.CreateFile(nativePath, access, share, attributes, windows.CREATE_NEW, flags, 0)
@@ -68,10 +69,6 @@ func openRuntimeIdentityRenewalLock(stateRoot string) (*runtimeIdentityRenewalLo
 	}
 	closeWith := func(cause error) (*runtimeIdentityRenewalLock, error) {
 		return nil, errors.Join(cause, file.Close())
-	}
-
-	if user == nil || user.User.Sid == nil || !user.User.Sid.IsValid() || !windowssecurity.HandleOwnerMatchesSID(handle, user.User.Sid) {
-		return closeWith(ErrInvalid)
 	}
 
 	var info windows.ByHandleFileInformation
@@ -95,6 +92,27 @@ func openRuntimeIdentityRenewalLock(stateRoot string) (*runtimeIdentityRenewalLo
 
 	if !windowssecurity.ProtectedHandleDACLMatches(handle, acl) {
 		return closeWith(ErrInvalid)
+	}
+	if !windowssecurity.HandleOwnerMatchesSID(handle, user.User.Sid) {
+		// Earlier lock creation inherited the administrator or service owner.
+		// Converge only this verified file, preserving its inode and lock region.
+		trustedOwner := false
+		for _, kind := range []windows.WELL_KNOWN_SID_TYPE{windows.WinBuiltinAdministratorsSid, windows.WinLocalSystemSid} {
+			sid, err := windows.CreateWellKnownSid(kind)
+			if err != nil {
+				return closeWith(err)
+			}
+			trustedOwner = trustedOwner || windowssecurity.HandleOwnerMatchesSID(handle, sid)
+		}
+		if !trustedOwner {
+			return closeWith(ErrInvalid)
+		}
+		if err := windows.SetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION, user.User.Sid, nil, nil, nil); err != nil {
+			return closeWith(err)
+		}
+		if !windowssecurity.HandleOwnerMatchesSID(handle, user.User.Sid) {
+			return closeWith(ErrInvalid)
+		}
 	}
 	return &runtimeIdentityRenewalLock{file: file}, nil
 }
@@ -222,6 +240,9 @@ func (lock *runtimeIdentityRenewalLock) Try() (bool, error) {
 	if errors.Is(err, windows.ERROR_LOCK_VIOLATION) {
 		return false, nil
 	}
+	if err == nil {
+		lock.acquired = true
+	}
 	return err == nil, err
 }
 
@@ -231,5 +252,9 @@ func (lock *runtimeIdentityRenewalLock) Close() error {
 	}
 	file := lock.file
 	lock.file = nil
-	return errors.Join(windows.UnlockFileEx(windows.Handle(file.Fd()), 0, 1, 0, &lock.region), file.Close())
+	var unlockErr error
+	if lock.acquired {
+		unlockErr = windows.UnlockFileEx(windows.Handle(file.Fd()), 0, 1, 0, &lock.region)
+	}
+	return errors.Join(unlockErr, file.Close())
 }
