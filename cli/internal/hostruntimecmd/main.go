@@ -168,6 +168,10 @@ func runtimeFailureMessage(err error) string {
 	case errors.Is(err, bootstrap.ErrPairingDenied):
 		return "The machine pairing was denied. Create a new enrollment with Add machine if this machine should be added."
 	}
+	var request bootstrap.RequestError
+	if errors.As(err, &request) {
+		return fmt.Sprintf("Machine pairing request failed: %s. Check the server connection and retry pairing.", request.Error())
+	}
 	var stage *installationStageError
 	if errors.As(err, &stage) && stage != nil {
 		return stage.Error()

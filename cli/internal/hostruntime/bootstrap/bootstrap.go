@@ -453,12 +453,14 @@ func request(ctx context.Context, client *http.Client, method, target string, bo
 	return nil
 }
 
-type bootstrapRequestError struct {
+// RequestError retains the safe pairing outcome and HTTP status while keeping
+// response bodies and underlying transport details private.
+type RequestError struct {
 	kind  error
 	cause error
 }
 
-func (failure bootstrapRequestError) Error() string {
+func (failure RequestError) Error() string {
 	if failure.kind != nil {
 		var status interface{ DiagnosticStatus() int }
 		if errors.As(failure.cause, &status) {
@@ -469,22 +471,22 @@ func (failure bootstrapRequestError) Error() string {
 	return "machine pairing request failed"
 }
 
-func (failure bootstrapRequestError) Unwrap() error { return failure.cause }
+func (failure RequestError) Unwrap() error { return failure.cause }
 
-func (failure bootstrapRequestError) Is(target error) bool {
+func (failure RequestError) Is(target error) bool {
 	return sameBootstrapError(failure.kind, target)
 }
 
-func (bootstrapRequestError) DiagnosticStage() string         { return "control_request" }
-func (bootstrapRequestError) DiagnosticCode() string          { return "control_request_failed" }
-func (failure bootstrapRequestError) bootstrapOutcome() error { return failure.kind }
+func (RequestError) DiagnosticStage() string         { return "control_request" }
+func (RequestError) DiagnosticCode() string          { return "control_request_failed" }
+func (failure RequestError) bootstrapOutcome() error { return failure.kind }
 
 func bootstrapRequestFailure(cause error) error {
-	return bootstrapRequestError{cause: cause}
+	return RequestError{cause: cause}
 }
 
 func bootstrapServerError(kind error, response *http.Response) error {
-	return bootstrapRequestError{kind: kind, cause: errorreport.HTTPStatusFailure(response)}
+	return RequestError{kind: kind, cause: errorreport.HTTPStatusFailure(response)}
 }
 
 func closeBootstrapResponse(response *http.Response) error {
