@@ -120,7 +120,7 @@ func NewUpdaterInstallerPending(config ComponentConfig) (*Installer, error) {
 }
 
 func newUpdaterInstaller(config ComponentConfig, allowMissingExecutable bool) (*Installer, error) {
-	if err := config.Layout.Validate(); err != nil || !validEnrolledIdentity(config.User, config.Group, config.UID, config.GID) || !filepath.IsAbs(config.HostdTokenFile) || strings.TrimSpace(config.ReleaseRepository) == "" || strings.TrimSpace(config.MachineID) == "" || strings.TrimSpace(config.HealthURL) == "" {
+	if err := config.Layout.Validate(); err != nil || !validEnrolledIdentity(config.User, config.Group, config.UID, config.GID) || !filepath.IsAbs(config.HostdTokenFile) || strings.TrimSpace(config.ReleaseRepository) == "" && config.Source.Distribution != installsource.Custom || strings.TrimSpace(config.MachineID) == "" || strings.TrimSpace(config.HealthURL) == "" {
 		return nil, ErrInvalidDefinition
 	}
 	group := "root"
@@ -136,7 +136,11 @@ func newUpdaterInstaller(config ComponentConfig, allowMissingExecutable bool) (*
 	environment["PAPERBOAT_RELEASE_ROOT"] = config.Layout.ReleasesRoot
 	environment["PAPERBOAT_HOSTD_SOCKET"] = config.Layout.HostdSocket
 	environment["PAPERBOAT_HOSTD_TOKEN_FILE"] = config.HostdTokenFile
-	environment["PAPERBOAT_RELEASE_REPOSITORY"] = config.ReleaseRepository
+	if config.ReleaseRepository != "" {
+		environment["PAPERBOAT_RELEASE_REPOSITORY"] = config.ReleaseRepository
+	} else {
+		delete(environment, "PAPERBOAT_RELEASE_REPOSITORY")
+	}
 	environment["PAPERBOAT_MACHINE_ID"] = config.MachineID
 	environment["PAPERBOAT_UPDATE_HEALTH_URL"] = config.HealthURL
 	environment["PAPERBOAT_ENROLLED_UID"] = strconv.Itoa(config.UID)

@@ -113,7 +113,7 @@ func TestHostdAndUpdaterInstallersUseStableDaemon(t *testing.T) {
 		t.Run(platform, func(t *testing.T) {
 			layout := canonicalLayout(t, platform)
 			control := &controller{}
-			config := ComponentConfig{Source: installsource.Source{Version: "custom-build", Platform: platform, Architecture: "arm64", SHA256: strings.Repeat("a", 64), Length: 1, Distribution: installsource.Custom}, Layout: layout, User: "alice", Group: "staff", UID: 501, GID: 20, HostdTokenFile: filepath.Join(t.TempDir(), "hostd.token"), ReleaseRepository: "https://releases.paperboat.test", MachineID: "machine_1", HealthURL: "http://127.0.0.1:38080/healthz", Controller: control}
+			config := ComponentConfig{Source: installsource.Source{Version: "custom-build", Platform: platform, Architecture: "arm64", SHA256: strings.Repeat("a", 64), Length: 1, Distribution: installsource.Custom}, Layout: layout, User: "alice", Group: "staff", UID: 501, GID: 20, HostdTokenFile: filepath.Join(t.TempDir(), "hostd.token"), ReleaseRepository: "", MachineID: "machine_1", HealthURL: "http://127.0.0.1:38080/healthz", Controller: control}
 			hostd, err := NewHostdInstaller(config)
 			if err != nil {
 				t.Fatal(err)
