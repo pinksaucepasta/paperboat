@@ -22,7 +22,7 @@ require (
 	github.com/pressly/goose/v3 v3.26.0
 	github.com/realclientip/realclientip-go v1.0.0
 	github.com/xeipuuv/gojsonschema v1.2.0
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.57.0
 	golang.org/x/net v0.58.0
 )
 
