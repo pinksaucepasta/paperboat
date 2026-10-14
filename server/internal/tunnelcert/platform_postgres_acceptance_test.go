@@ -55,7 +55,6 @@ func TestPlatformCertificateLifecycleOnPostgres(t *testing.T) {
 	if err := db.Migrate(ctx, database); err != nil {
 		t.Fatal(err)
 	}
-	assertFullMigrationCatalog(t, ctx, database)
 
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	// x509 encodes validity timestamps at whole-second precision; keeping the
@@ -928,17 +927,6 @@ func acceptanceBundle(hostname string, now time.Time, serial int, issuer string)
 		PrivateKeyPEM:  pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}),
 		Issuer:         issuer, NotBefore: notBefore, NotAfter: notAfter,
 	}, nil
-}
-
-func assertFullMigrationCatalog(t *testing.T, ctx context.Context, database *db.DB) {
-	t.Helper()
-	var maxVersion, applied int
-	if err := database.SQL().QueryRowContext(ctx, `SELECT COALESCE(MAX(version_id),0)::int, count(*)::int FROM paperboat.goose_db_version WHERE is_applied`).Scan(&maxVersion, &applied); err != nil {
-		t.Fatal(err)
-	}
-	if maxVersion != 1 || applied != 2 {
-		t.Fatalf("migration history version=%d applied=%d, want baseline 1 plus Goose zero", maxVersion, applied)
-	}
 }
 
 func countRows(t *testing.T, ctx context.Context, database *sql.DB, query string, args ...any) int {

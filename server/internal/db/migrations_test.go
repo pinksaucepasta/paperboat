@@ -36,8 +36,8 @@ func TestBaselineSchema(t *testing.T) {
 	if err := store.SQL().QueryRowContext(ctx, `SELECT max(version_id) FROM paperboat.goose_db_version WHERE is_applied`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 61 {
-		t.Fatalf("schema version = %d, want current schema version 61", version)
+	if version != 64 {
+		t.Fatalf("schema version = %d, want current schema version 64", version)
 	}
 	for _, object := range []string{"users", "teams", "user_machines", "peer_endpoint_certificates", "tunnels", "tunnel_config_generations", "environment_password_vaults", "selfhost_installations", "selfhost_pool_policies", "selfhost_placements"} {
 		var exists bool
@@ -308,7 +308,7 @@ func TestPopulatedSchema45To61Upgrade(t *testing.T) {
 	}
 	var valid bool
 	err = store.SQL().QueryRowContext(ctx, `SELECT
- (SELECT max(version_id)=61 FROM paperboat.goose_db_version WHERE is_applied)
+ (SELECT max(version_id)=64 FROM paperboat.goose_db_version WHERE is_applied)
  AND (SELECT display_name IS NULL FROM paperboat.teams WHERE team_id='upgrade-team')
  AND to_regclass('paperboat.account_network_preferences') IS NULL
  AND to_regclass('paperboat.team_network_preferences') IS NULL
