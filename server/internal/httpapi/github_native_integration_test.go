@@ -56,7 +56,7 @@ func TestGitHubNativeLinkAuthenticatedLifecycle(t *testing.T) {
 	cfg.Secrets.GitHubClientID = "native-test-client"
 	cfg.Secrets.EncryptionKey = "native-test-encryption-key"
 	writer := audit.NewWriter(store)
-	accounts := auth.NewService(store, writer, testauth.FakeWorkOSVerifier{}, []string{"native-github-session"}, true, "https://login.pprbt.dev")
+	accounts := auth.NewService(store, writer, testauth.FakeWorkOSVerifier{}, []string{"native-github-session"}, true, "https://login.example.test")
 	cliAuth := auth.NewDeviceService(store, writer, cfg.CLIAuth, []string{"native-github-machine"})
 	cliAuth.ConfigureAuthorizationEncryptionKey("test-device-recovery-key")
 	provider := &nativeGitHubTestProvider{FakeClient: &pbgithub.FakeClient{Token: pbgithub.OAuthToken{AccessToken: "native-provider-secret", Scopes: []string{"repo"}}, User: pbgithub.GitHubUser{Login: "native-test-provider"}}}

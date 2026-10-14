@@ -43,7 +43,7 @@ func TestConfigNativeRepositoryAndConsentAuthorization(t *testing.T) {
 	}
 	cfg := config.Default()
 	writer := audit.NewWriter(store)
-	accounts := auth.NewService(store, writer, testauth.FakeWorkOSVerifier{}, []string{"config-native-session"}, true, "https://login.pprbt.dev")
+	accounts := auth.NewService(store, writer, testauth.FakeWorkOSVerifier{}, []string{"config-native-session"}, true, "https://login.example.test")
 	cliAuth := auth.NewDeviceService(store, writer, cfg.CLIAuth, []string{"config-native-machine"})
 	cliAuth.ConfigureAuthorizationEncryptionKey("test-device-recovery-key")
 	assignments := controlplane.NewConfigAssignmentService(store, writer, "native-warning")

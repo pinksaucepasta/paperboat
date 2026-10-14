@@ -257,7 +257,7 @@ func TestVerifierAcceptsPreviewLaunchWithoutCLIClientSession(t *testing.T) {
 		claims["target_scheme"] = "http"
 		claims["target_address"] = "127.0.0.1:43871"
 		claims["access_mode"] = "public"
-		claims["endpoint"] = "https://preview-1.preview.pprbt.dev"
+		claims["endpoint"] = "https://preview-1.preview.example.test"
 		claims["lease_deadline"] = int64(1100)
 		claims["lease_etag"] = `"ptv1:preview_lease:` + base64.RawURLEncoding.EncodeToString([]byte(claims["preview_id"].(string))) + `:1"`
 		claims["state"] = "connecting"

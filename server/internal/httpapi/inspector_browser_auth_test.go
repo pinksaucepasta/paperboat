@@ -42,7 +42,7 @@ func TestInspectorBrowserCredentialRouteAuthAndCSRFPostgres(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	suffix := fmt.Sprint(now.UnixNano())
 	owner, _, lease, _, _, _ := inspectorHTTPFixture(t, context.Background(), database, now, suffix)
-	authService := auth.NewService(database, audit.NewWriter(database), testauth.FakeWorkOSVerifier{}, []string{"inspector-browser-session-key"}, true, "https://login.pprbt.dev")
+	authService := auth.NewService(database, audit.NewWriter(database), testauth.FakeWorkOSVerifier{}, []string{"inspector-browser-session-key"}, true, "https://login.example.test")
 	router := NewRouter(Options{
 		Config: config.Default(), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Auth: authService,
 		Inspector: &InspectorHandlers{Access: inspectaccess.NewService(database)},
@@ -76,7 +76,7 @@ func TestInspectorBrowserCredentialRouteAuthAndCSRFPostgres(t *testing.T) {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodDelete, "/v1/inspector/credentials/"+id, nil)
 		addCookies(req, ownerCookies)
-		req.Header.Set("Origin", "https://login.pprbt.dev")
+		req.Header.Set("Origin", "https://login.example.test")
 		req.Header.Set(auth.CSRFHeaderName, ownerCSRF)
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
@@ -95,21 +95,21 @@ func TestInspectorBrowserCredentialRouteAuthAndCSRFPostgres(t *testing.T) {
 		return envelope.Data.CredentialID
 	}
 
-	success := issue(ownerCookies, "https://login.pprbt.dev", ownerCSRF)
+	success := issue(ownerCookies, "https://login.example.test", ownerCSRF)
 	if success.Code != http.StatusOK || credentialID(success) == "" {
 		t.Fatalf("owner issue=%d body=%s", success.Code, success.Body.String())
 	}
 	if rec := revoke(credentialID(success)); rec.Code != http.StatusOK {
 		t.Fatalf("owner revoke=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if rec := issue(viewerCookies, "https://login.pprbt.dev", csrfCookie(t, viewerCookies)); rec.Code != http.StatusForbidden {
+	if rec := issue(viewerCookies, "https://login.example.test", csrfCookie(t, viewerCookies)); rec.Code != http.StatusForbidden {
 		t.Fatalf("viewer issue=%d body=%s", rec.Code, rec.Body.String())
 	}
 	for name, values := range map[string][2]string{
 		"missing origin": {"", ownerCSRF},
 		"wrong origin":   {"https://attacker.invalid", ownerCSRF},
-		"missing csrf":   {"https://login.pprbt.dev", ""},
-		"wrong csrf":     {"https://login.pprbt.dev", "wrong-token"},
+		"missing csrf":   {"https://login.example.test", ""},
+		"wrong csrf":     {"https://login.example.test", "wrong-token"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			rec := issue(ownerCookies, values[0], values[1])
@@ -129,7 +129,7 @@ func TestInspectorBrowserCredentialRouteAuthAndCSRFPostgres(t *testing.T) {
 	// The service caps active credentials at 128. Sequential issue/revoke must
 	// release capacity rather than accumulating expired or revoked active rows.
 	for i := 0; i < 129; i++ {
-		rec := issue(ownerCookies, "https://login.pprbt.dev", ownerCSRF)
+		rec := issue(ownerCookies, "https://login.example.test", ownerCSRF)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("sequential issue %d=%d body=%s", i, rec.Code, rec.Body.String())
 		}

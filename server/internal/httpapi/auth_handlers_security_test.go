@@ -66,7 +66,7 @@ func TestDeviceAuthenticationRejectStillReturnsUnauthorized(t *testing.T) {
 }
 
 func TestWorkOSCallbackRequiresExactTrustedOriginBeforeProcessing(t *testing.T) {
-	service := auth.NewService(nil, nil, nil, []string{"test-key"}, true, "https://login.pprbt.dev")
+	service := auth.NewService(nil, nil, nil, []string{"test-key"}, true, "https://login.example.test")
 	handler := workOSCallback(service)
 	for _, tc := range []struct {
 		name   string
@@ -75,7 +75,7 @@ func TestWorkOSCallbackRequiresExactTrustedOriginBeforeProcessing(t *testing.T) 
 	}{
 		{name: "missing", code: http.StatusForbidden},
 		{name: "different", origin: "https://evil.example", code: http.StatusForbidden},
-		{name: "exact reaches body validation", origin: "https://login.pprbt.dev", code: http.StatusBadRequest},
+		{name: "exact reaches body validation", origin: "https://login.example.test", code: http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
@@ -90,7 +90,7 @@ func TestWorkOSCallbackRequiresExactTrustedOriginBeforeProcessing(t *testing.T) 
 }
 
 func TestRequireAuthRejectsUnsafeRequestWithoutTrustedOrigin(t *testing.T) {
-	service := auth.NewService(nil, nil, nil, nil, true, "https://login.pprbt.dev")
+	service := auth.NewService(nil, nil, nil, nil, true, "https://login.example.test")
 	handler := requireAuth(service, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("protected handler ran")
 	}))

@@ -41,7 +41,7 @@ func TestConfigNativeConflictResolutionAuthorization(t *testing.T) {
 	}
 	cfg := config.Default()
 	writer := audit.NewWriter(store)
-	accounts := auth.NewService(store, writer, testauth.FakeWorkOSVerifier{}, []string{"conflict-native-session"}, true, "https://login.pprbt.dev")
+	accounts := auth.NewService(store, writer, testauth.FakeWorkOSVerifier{}, []string{"conflict-native-session"}, true, "https://login.example.test")
 	cliAuth := auth.NewDeviceService(store, writer, cfg.CLIAuth, []string{"conflict-native-machine"})
 	cliAuth.ConfigureAuthorizationEncryptionKey("test-device-recovery-key")
 	conflicts := controlplane.NewConfigConflictService(store, nil, writer)
@@ -125,7 +125,7 @@ func TestConfigNativeConflictResolutionAuthorization(t *testing.T) {
 	}{{base + "/conflict-resolutions", request, "conflict_resolution_stale"}, {base + "/force", force, "force_request_stale"}} {
 		call(route.path, "", "", cookies, route.body, http.StatusForbidden, "origin_failed")
 		call(route.path, "", "https://evil.example", cookies, route.body, http.StatusForbidden, "origin_failed")
-		call(route.path, "", "https://login.pprbt.dev", cookies, route.body, http.StatusForbidden, "csrf_failed")
+		call(route.path, "", "https://login.example.test", cookies, route.body, http.StatusForbidden, "csrf_failed")
 		call(route.path, "invalid-token", "", cookies, route.body, http.StatusUnauthorized, "unauthenticated")
 		call(route.path, otherToken, "", nil, route.body, http.StatusConflict, route.staleCode)
 		if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.cli_client_sessions SET scopes=ARRAY['machines:read']::text[] WHERE id=$1`, clientID); err != nil {
@@ -138,7 +138,7 @@ func TestConfigNativeConflictResolutionAuthorization(t *testing.T) {
 		call(route.path, ownerToken, "", nil, route.body, http.StatusAccepted, "")
 	}
 	browserCSRF = csrfCookie(t, cookies)
-	call(base+"/conflict-resolutions", "", "https://login.pprbt.dev", cookies, request, http.StatusAccepted, "")
+	call(base+"/conflict-resolutions", "", "https://login.example.test", cookies, request, http.StatusAccepted, "")
 	call(base+"/conflict-resolutions", "", "", cookies, request, http.StatusForbidden, "origin_failed")
 	browserCSRF = ""
 	request["expected_remote_revision"] = "stale-head"

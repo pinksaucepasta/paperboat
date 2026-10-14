@@ -115,7 +115,7 @@ func TestTask44ConnectedCollaboration(t *testing.T) {
 	}
 	writer := audit.NewWriter(store)
 	cfg := config.Default()
-	accounts := auth.NewService(store, writer, testauth.FakeWorkOSVerifier{}, []string{"task44-isolated-session-key"}, true, "https://login.pprbt.dev")
+	accounts := auth.NewService(store, writer, testauth.FakeWorkOSVerifier{}, []string{"task44-isolated-session-key"}, true, "https://login.example.test")
 	cliAuth := auth.NewDeviceService(store, writer, cfg.CLIAuth, []string{"task44-isolated-machine-key"})
 	cliAuth.ConfigureAuthorizationEncryptionKey("test-device-recovery-key")
 	authority := teams.NewService(store)

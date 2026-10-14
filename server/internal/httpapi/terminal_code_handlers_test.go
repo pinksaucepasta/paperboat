@@ -43,9 +43,9 @@ func TestTerminalCodeBrowserAuthorizationPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	writer := audit.NewWriter(store)
-	accounts := auth.NewService(store, writer, testauth.FakeWorkOSVerifier{}, []string{"terminal-code-session"}, true, "https://login.pprbt.dev")
+	accounts := auth.NewService(store, writer, testauth.FakeWorkOSVerifier{}, []string{"terminal-code-session"}, true, "https://login.example.test")
 	machines := usermachines.New(store, writer, usermachines.Policy{}, nil)
-	gateway := &browserterminal.Gateway{Tickets: browserterminal.TicketStore{DB: store}, Authorizer: browserterminal.MachineAuthorizer{Service: machines}, AllowedOrigins: []string{"https://login.pprbt.dev"}}
+	gateway := &browserterminal.Gateway{Tickets: browserterminal.TicketStore{DB: store}, Authorizer: browserterminal.MachineAuthorizer{Service: machines}, AllowedOrigins: []string{"https://login.example.test"}}
 	router := NewRouter(Options{Config: config.Default(), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Auth: accounts, DeviceAuth: auth.NewDeviceService(store, writer, config.Default().CLIAuth, []string{"terminal-code-machine"}), Machines: machines, BrowserTerminal: gateway})
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	ownerEmail := "code-http-owner-" + suffix + "@example.test"
@@ -106,10 +106,10 @@ func TestTerminalCodeBrowserAuthorizationPostgres(t *testing.T) {
 		}
 	}
 	enable := map[string]any{"expected_generation": 0, "enabled": true, "role": "viewer", "expires_in_seconds": 3600, "reset": false, "confirm_interactive_access": false}
-	check(call("PUT", path+"/code-access", enable, nil, "https://login.pprbt.dev", ""), 401)
-	check(call("PUT", path+"/code-access", enable, ownerCookies, "https://login.pprbt.dev", ""), 403)
-	check(call("PUT", path+"/code-access", enable, otherCookies, "https://login.pprbt.dev", csrfCookie(t, otherCookies)), 404)
-	activated := call("PUT", path+"/code-access", enable, ownerCookies, "https://login.pprbt.dev", csrfCookie(t, ownerCookies))
+	check(call("PUT", path+"/code-access", enable, nil, "https://login.example.test", ""), 401)
+	check(call("PUT", path+"/code-access", enable, ownerCookies, "https://login.example.test", ""), 403)
+	check(call("PUT", path+"/code-access", enable, otherCookies, "https://login.example.test", csrfCookie(t, otherCookies)), 404)
+	activated := call("PUT", path+"/code-access", enable, ownerCookies, "https://login.example.test", csrfCookie(t, ownerCookies))
 	check(activated, 200)
 	var state usermachines.TerminalCodeAccess
 	decode(activated, &state)
@@ -136,7 +136,7 @@ func TestTerminalCodeBrowserAuthorizationPostgres(t *testing.T) {
 	defer store.SQL().ExecContext(context.Background(), "DROP FUNCTION IF EXISTS paperboat."+functionName+"() CASCADE")
 	exec(fmt.Sprintf(`CREATE TRIGGER %s AFTER INSERT ON paperboat.terminal_guest_sessions
       FOR EACH ROW WHEN (NEW.terminal_session_id='%s') EXECUTE FUNCTION paperboat.%s()`, triggerName, terminal, functionName))
-	failedJoin := call("POST", path+"/code-join", joinBody, nil, "https://login.pprbt.dev", "")
+	failedJoin := call("POST", path+"/code-join", joinBody, nil, "https://login.example.test", "")
 	check(failedJoin, 404)
 	if len(failedJoin.Result().Cookies()) != 0 {
 		t.Fatal("failed join transferred a guest grant")
@@ -151,7 +151,7 @@ func TestTerminalCodeBrowserAuthorizationPostgres(t *testing.T) {
 	exec("DROP TRIGGER " + triggerName + " ON paperboat.terminal_guest_sessions")
 	exec("DROP FUNCTION paperboat." + functionName + "()")
 	exec(`UPDATE user_machine_terminal_sessions SET desired_state='open',runtime_state='running' WHERE id=$1`, terminal)
-	joined := call("POST", path+"/code-join", joinBody, nil, "https://login.pprbt.dev", "")
+	joined := call("POST", path+"/code-join", joinBody, nil, "https://login.example.test", "")
 	check(joined, 200)
 	cookies := joined.Result().Cookies()
 	if len(cookies) != 1 {
@@ -189,7 +189,7 @@ func TestTerminalCodeBrowserAuthorizationPostgres(t *testing.T) {
 	check(call("GET", "/v1/terminal-sessions/"+second+"/browser-session", nil, cookies, "", ""), 404)
 	check(call("GET", path+"/browser-session", nil, append(append([]*http.Cookie{}, cookies...), cookies...), "", ""), 404)
 	// Signed-in users without an account grant can enter via the separate code grant.
-	joinedOther := call("POST", path+"/code-join", joinBody, otherCookies, "https://login.pprbt.dev", "")
+	joinedOther := call("POST", path+"/code-join", joinBody, otherCookies, "https://login.example.test", "")
 	check(joinedOther, 200)
 	combined := append(append([]*http.Cookie{}, otherCookies...), joinedOther.Result().Cookies()...)
 	allowedByCode := call("GET", path+"/browser-session", nil, combined, "", "")
@@ -198,14 +198,14 @@ func TestTerminalCodeBrowserAuthorizationPostgres(t *testing.T) {
 		t.Fatal("unlisted account did not use guest branch")
 	}
 	ticketBody := map[string]string{"browser_public_key_sha256": strings.Repeat("A", 43)}
-	check(call("POST", path+"/browser-ticket", ticketBody, cookies, "https://login.pprbt.dev", ""), 401)
+	check(call("POST", path+"/browser-ticket", ticketBody, cookies, "https://login.example.test", ""), 401)
 	check(call("POST", path+"/guest-browser-ticket", ticketBody, cookies, "https://other.test", ""), 403)
-	check(call("POST", path+"/guest-browser-ticket", ticketBody, nil, "https://login.pprbt.dev", ""), 404)
+	check(call("POST", path+"/guest-browser-ticket", ticketBody, nil, "https://login.example.test", ""), 404)
 	stop := map[string]any{"expected_generation": state.Generation, "enabled": false, "role": "viewer", "expires_in_seconds": 3600, "reset": false, "confirm_interactive_access": false}
-	check(call("PUT", path+"/code-access", stop, ownerCookies, "https://login.pprbt.dev", csrfCookie(t, ownerCookies)), 200)
+	check(call("PUT", path+"/code-access", stop, ownerCookies, "https://login.example.test", csrfCookie(t, ownerCookies)), 200)
 	check(call("GET", path+"/browser-session", nil, cookies, "", ""), 404)
-	check(call("POST", path+"/guest-browser-ticket", ticketBody, cookies, "https://login.pprbt.dev", ""), 404)
-	check(call("POST", path+"/code-join", joinBody, nil, "https://login.pprbt.dev", ""), 404)
+	check(call("POST", path+"/guest-browser-ticket", ticketBody, cookies, "https://login.example.test", ""), 404)
+	check(call("POST", path+"/code-join", joinBody, nil, "https://login.example.test", ""), 404)
 	check(call("GET", path+"/browser-session", nil, ownerCookies, "", ""), 200)
 }
 

@@ -163,7 +163,7 @@ func TestWorkOSCallbackRejectsMissingState(t *testing.T) {
 func TestCookieWriteRequiresCSRFButPersonalFreeNeedsNoSubscription(t *testing.T) {
 	store, router := newAuthIntegrationRouter(t)
 	cookies := loginCookies(t, router, "workos_free:free@example.com:Free User")
-	accounts := auth.NewService(store, audit.NewWriter(store), testauth.FakeWorkOSVerifier{}, []string{"test-session-key"}, true, "https://login.pprbt.dev")
+	accounts := auth.NewService(store, audit.NewWriter(store), testauth.FakeWorkOSVerifier{}, []string{"test-session-key"}, true, "https://login.example.test")
 	protected := authTestOriginHandler{next: requireAuth(accounts, requireCSRF(accounts, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })))}
 	for _, withCSRF := range []bool{false, true} {
 		r := httptest.NewRequest(http.MethodPost, "/personal-action", strings.NewReader(`{}`))
@@ -286,7 +286,7 @@ func newAuthIntegrationRouter(t *testing.T) (*db.DB, http.Handler) {
 	}
 	resetIntegrationTables(t, store)
 	auditWriter := audit.NewWriter(store)
-	service := auth.NewService(store, auditWriter, testauth.FakeWorkOSVerifier{}, []string{"test-session-key"}, true, "https://login.pprbt.dev")
+	service := auth.NewService(store, auditWriter, testauth.FakeWorkOSVerifier{}, []string{"test-session-key"}, true, "https://login.example.test")
 	machineService := auth.NewDeviceService(store, auditWriter, config.Default().CLIAuth, []string{"test-machine-hash-key"})
 	machineService.ConfigureAuthorizationEncryptionKey("test-enrollment-key")
 	billingService := billing.NewWorkspaceService(store, nil, "test-billing-key")
@@ -314,7 +314,7 @@ type authTestOriginHandler struct{ next http.Handler }
 
 func (h authTestOriginHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if unsafeMethod(r.Method) && r.Header.Get("Origin") == "" {
-		r.Header.Set("Origin", "https://login.pprbt.dev")
+		r.Header.Set("Origin", "https://login.example.test")
 	}
 	h.next.ServeHTTP(w, r)
 }

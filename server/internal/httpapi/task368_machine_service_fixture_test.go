@@ -96,7 +96,7 @@ func TestTask368ServeMachineServices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	accounts := auth.NewService(database, writer, testauth.FakeWorkOSVerifier{}, []string{secret}, true, "https://login.pprbt.dev")
+	accounts := auth.NewService(database, writer, testauth.FakeWorkOSVerifier{}, []string{secret}, true, "https://login.example.test")
 	cliAuth := auth.NewDeviceService(database, writer, cfg.CLIAuth, []string{secret})
 	cliAuth.ConfigureAuthorizationEncryptionKey("test-device-recovery-key")
 	billingService := billing.NewWorkspaceService(database, nil, secret)
@@ -179,7 +179,7 @@ func TestTask368ServeMachineServices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	browser, err := browseraccess.NewService(database, "https://login.pprbt.dev")
+	browser, err := browseraccess.NewService(database, "https://login.example.test")
 	if err != nil {
 		t.Fatal(err)
 	}

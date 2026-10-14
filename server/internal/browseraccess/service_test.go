@@ -6,7 +6,7 @@ import (
 )
 
 func TestBrowserInputValidation(t *testing.T) {
-	for _, host := range []string{"app.preview.pprbt.dev", "opaque.tunnels.pprbt.dev"} {
+	for _, host := range []string{"app.preview.example.test", "opaque.tunnels.example.test"} {
 		if got, err := validHost(host); err != nil || got != host {
 			t.Fatalf("validHost(%q)=(%q,%v)", host, got, err)
 		}

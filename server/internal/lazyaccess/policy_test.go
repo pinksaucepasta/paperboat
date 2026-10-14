@@ -32,7 +32,7 @@ func TestValidateUpsert(t *testing.T) {
 }
 
 func TestDNSValidation(t *testing.T) {
-	for _, v := range []string{"preview.pprbt.dev", "a-b.example.test"} {
+	for _, v := range []string{"preview.example.test", "a-b.example.test"} {
 		if !validDNSName(v) {
 			t.Errorf("rejected %q", v)
 		}

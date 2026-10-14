@@ -356,7 +356,7 @@ func TestLegacyEdgeRouteJSONProjectsAppliedReadiness(t *testing.T) {
 		RouteID: "rte_runtime_01", RouteRevision: 2, EnvironmentID: "env_01",
 		ConnectorID: "runtime", ConnectorGeneration: 4,
 		EdgeNodeID: sql.NullString{String: "edge_01", Valid: true},
-		Kind:       "runtime_https_wss", PublicHost: "machine.runtime.pprbt.dev",
+		Kind:       "runtime_https_wss", PublicHost: "machine.runtime.example.test",
 		TargetHost: "127.0.0.1", TargetPort: 38080,
 		PreviewState: "ready", PreviewReason: "",
 	})

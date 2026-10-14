@@ -10,7 +10,7 @@ import (
 )
 
 func TestProductionSessionCookiesUseHostPrefixAndRequiredAttributes(t *testing.T) {
-	service := NewService(nil, nil, nil, nil, true, "https://login.pprbt.dev")
+	service := NewService(nil, nil, nil, nil, true, "https://login.example.test")
 	recorder := httptest.NewRecorder()
 	service.SetSessionCookies(recorder, Session{Token: "session", CSRFToken: "csrf", ExpiresAt: time.Now().Add(time.Hour)})
 	cookies := recorder.Result().Cookies()
@@ -43,8 +43,8 @@ func TestDevelopmentCookiesUseSeparateHTTPNames(t *testing.T) {
 }
 
 func TestValidateBrowserRequestRequiresExactOriginAndRejectsDuplicateReservedCookies(t *testing.T) {
-	service := NewService(nil, nil, nil, nil, true, "https://login.pprbt.dev/")
-	for _, origin := range []string{"", "https://LOGIN.pprbt.dev", "https://login.pprbt.dev/", "https://evil.example"} {
+	service := NewService(nil, nil, nil, nil, true, "https://login.example.test/")
+	for _, origin := range []string{"", "https://LOGIN.example.test", "https://login.example.test/", "https://evil.example"} {
 		request := httptest.NewRequest(http.MethodPost, "/v1/resource", nil)
 		request.Header.Set("Origin", origin)
 		if !errors.Is(service.ValidateBrowserRequest(request), ErrOrigin) {
@@ -52,13 +52,13 @@ func TestValidateBrowserRequestRequiresExactOriginAndRejectsDuplicateReservedCoo
 		}
 	}
 	request := httptest.NewRequest(http.MethodPost, "/v1/resource", nil)
-	request.Header.Set("Origin", "https://login.pprbt.dev")
+	request.Header.Set("Origin", "https://login.example.test")
 	request.Header.Set("Cookie", strings.Join([]string{SessionCookieName + "=one", SessionCookieName + "=two"}, "; "))
 	if !errors.Is(service.ValidateBrowserRequest(request), ErrDuplicateCookie) {
 		t.Fatalf("duplicate cookie error = %v", service.ValidateBrowserRequest(request))
 	}
 	request = httptest.NewRequest(http.MethodPost, "/v1/resource", nil)
-	request.Header.Add("Origin", "https://login.pprbt.dev")
+	request.Header.Add("Origin", "https://login.example.test")
 	request.Header.Add("Origin", "https://evil.example")
 	if !errors.Is(service.ValidateBrowserRequest(request), ErrOrigin) {
 		t.Fatalf("multiple origin error = %v", service.ValidateBrowserRequest(request))

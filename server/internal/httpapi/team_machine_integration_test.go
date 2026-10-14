@@ -42,7 +42,7 @@ func TestTeamMachineAuthenticatedHTTPLifecycle(t *testing.T) {
 	}
 	cfg := config.Default()
 	writer := audit.NewWriter(store)
-	authService := auth.NewService(store, writer, testauth.FakeWorkOSVerifier{}, []string{"test-session-key"}, true, "https://login.pprbt.dev")
+	authService := auth.NewService(store, writer, testauth.FakeWorkOSVerifier{}, []string{"test-session-key"}, true, "https://login.example.test")
 	cliAuth := auth.NewDeviceService(store, writer, cfg.CLIAuth, []string{"test-cliAuth-hash-key"})
 	cliAuth.ConfigureAuthorizationEncryptionKey("test-device-recovery-key")
 	router := authTestOriginHandler{next: NewRouter(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Auth: authService, DeviceAuth: cliAuth, Teams: teams.NewService(store), Machines: usermachines.New(store, writer, usermachines.Policy{}, nil)})}

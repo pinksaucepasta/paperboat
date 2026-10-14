@@ -198,7 +198,7 @@ func TestInspectorLinkedAuthorityProductionPostgres(t *testing.T) {
 	suffix := fmt.Sprint(now.UnixNano())
 	owner, _, lease, tunnel, route, node := inspectorHTTPFixture(t, t.Context(), database, now, suffix)
 	linked := newInspectorLinkedAuthority(t, database, now, suffix, owner, lease, tunnel, route, node)
-	authService := auth.NewService(database, audit.NewWriter(database), testauth.FakeWorkOSVerifier{}, []string{"inspector-linked-session-key"}, true, "https://login.pprbt.dev")
+	authService := auth.NewService(database, audit.NewWriter(database), testauth.FakeWorkOSVerifier{}, []string{"inspector-linked-session-key"}, true, "https://login.example.test")
 	opts := Options{Config: config.Default(), Auth: authService, EdgeControl: linked.EdgeService.Handler(), Inspector: &InspectorHandlers{Access: inspectaccess.NewService(database), Machine: linked.MachineVerifier}}
 	configureInspectorNativeAuthority(t, database, linked, "https://inspector-linked.test", &opts)
 	router := NewRouter(opts)

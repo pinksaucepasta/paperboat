@@ -119,7 +119,7 @@ func TestTask368BrowserEdge(t *testing.T) {
 		t.Fatal(err)
 	}
 	browser := &control.BrowserAccessClient{HTTP: source, NodeID: node, ProcessEpoch: epoch}
-	gateway, err := edgehttp.NewGatewayWithTransports(edgehttp.Config{BrowserAccess: &edgehttp.BrowserAccess{Authority: browser, LazyAuthority: browser, LoginOrigin: "https://login.pprbt.dev"}, PreviewBaseDomain: fixture.Domain, TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test", MaxHeaderBytes: 16 << 10, MaxBodyBytes: 1 << 20, Routes: edgehttp.NewCompositeRouteMatcher(edgehttp.NewPreviewCarrierRouteMatcher(registry))}, "", transport, nil)
+	gateway, err := edgehttp.NewGatewayWithTransports(edgehttp.Config{BrowserAccess: &edgehttp.BrowserAccess{Authority: browser, LazyAuthority: browser, LoginOrigin: "https://login.example.test"}, PreviewBaseDomain: fixture.Domain, TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test", MaxHeaderBytes: 16 << 10, MaxBodyBytes: 1 << 20, Routes: edgehttp.NewCompositeRouteMatcher(edgehttp.NewPreviewCarrierRouteMatcher(registry))}, "", transport, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

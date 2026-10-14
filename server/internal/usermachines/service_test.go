@@ -247,7 +247,7 @@ func TestConfigureMachineArtifactsBuildsTUFDescriptor(t *testing.T) {
 
 func TestMachineArtifactUsesCurrentReleaseResolver(t *testing.T) {
 	service := New(nil, nil, Policy{}, nil)
-	if err := service.ConfigureMachineArtifacts("https://pprbt.dev/tuf", "bootstrap"); err != nil {
+	if err := service.ConfigureMachineArtifacts("https://example.test/tuf", "bootstrap"); err != nil {
 		t.Fatal(err)
 	}
 	service.ConfigureMachineArtifactVersionResolver(func(platform, architecture string) string {
@@ -260,7 +260,7 @@ func TestMachineArtifactUsesCurrentReleaseResolver(t *testing.T) {
 		return ""
 	})
 	artifact, ok := service.machineArtifact("linux", "arm64")
-	if !ok || artifact.Version != "2026.08.17.1" || artifact.RepositoryURL != "https://pprbt.dev/tuf" {
+	if !ok || artifact.Version != "2026.08.17.1" || artifact.RepositoryURL != "https://example.test/tuf" {
 		t.Fatalf("artifact = %#v, %v", artifact, ok)
 	}
 	artifact, ok = service.machineArtifact("linux", "amd64")
