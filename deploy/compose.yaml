@@ -1,0 +1,73 @@
+name: paperboat
+services:
+  postgres:
+    image: ${PAPERBOAT_POSTGRES_IMAGE:?set PAPERBOAT_POSTGRES_IMAGE}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: paperboat
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    ports: ["127.0.0.1:5432:5432"]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres -d paperboat"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+  migrate:
+    image: ${PAPERBOAT_SERVER_IMAGE:?set PAPERBOAT_SERVER_IMAGE}
+    env_file: [server.env]
+    volumes:
+      - ./secrets:/run/secrets:ro
+      - ./releases:/srv/paperboat-releases:ro
+    command: [paperboat-server, migrate]
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: "no"
+  server:
+    image: ${PAPERBOAT_SERVER_IMAGE:?set PAPERBOAT_SERVER_IMAGE}
+    restart: unless-stopped
+    env_file: [server.env]
+    volumes:
+      - ./secrets:/run/secrets:ro
+      - ./releases:/srv/paperboat-releases:ro
+    command: [paperboat-server, serve]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, curl, -fsS, "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+  diagnostics:
+    image: ${PAPERBOAT_DIAGNOSTICS_IMAGE:?set PAPERBOAT_DIAGNOSTICS_IMAGE}
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER_FILE: /run/secrets/diagnostics_access_key
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/diagnostics_secret_key
+    secrets: [diagnostics_access_key, diagnostics_secret_key]
+    command: [server, /data, --console-address, ":9001"]
+    volumes: [diagnostics_data:/data]
+  proxy:
+    image: ${PAPERBOAT_PROXY_IMAGE:?set PAPERBOAT_PROXY_IMAGE}
+    restart: unless-stopped
+    environment:
+      PAPERBOAT_API_HOST: ${PAPERBOAT_API_HOST:?set PAPERBOAT_API_HOST}
+      PAPERBOAT_DOWNLOAD_HOST: ${PAPERBOAT_DOWNLOAD_HOST:?set PAPERBOAT_DOWNLOAD_HOST}
+      PAPERBOAT_DIAGNOSTICS_HOST: ${PAPERBOAT_DIAGNOSTICS_HOST:?set PAPERBOAT_DIAGNOSTICS_HOST}
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - proxy_data:/data
+      - proxy_config:/config
+    depends_on: [server, diagnostics]
+secrets:
+  postgres_password: {file: ./secrets/postgres_password}
+  diagnostics_access_key: {file: ./secrets/diagnostics_access_key}
+  diagnostics_secret_key: {file: ./secrets/diagnostics_secret_key}
+volumes:
+  postgres_data:
+  diagnostics_data:
+  proxy_data:
+  proxy_config:

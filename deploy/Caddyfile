@@ -1,0 +1,6 @@
+{$PAPERBOAT_API_HOST}, {$PAPERBOAT_DOWNLOAD_HOST} {
+	reverse_proxy server:8080
+}
+{$PAPERBOAT_DIAGNOSTICS_HOST} {
+	reverse_proxy diagnostics:9000
+}
