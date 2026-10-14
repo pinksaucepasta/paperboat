@@ -106,6 +106,13 @@ ARM builds must compile, pass unit tests and be included in every release.
   Lane B itself: generate the root key on apple over Tailscale SSH (key never leaves apple,
   never printed; backed up in apple's keychain/owner-only file), generate the online key and
   store it with `gh secret set`. No user step needed.
+- **The CLI binary is independent of the server** (user decision 2026-10-14). `pb` is
+  self-contained: anyone can compile it or download it from GitHub releases and sign in and
+  pair with it. Pairing and installation material never depend on a server-published `pb`
+  artifact or release record, and the server never selects, pins or serves the binary a
+  machine runs. Remove the artifact requirement from pairing (`machineArtifact`,
+  `ErrArtifactUnavailable`, the artifact in installation material) and the dev-release
+  publisher; updates come from GitHub releases (minimal TUF), not from the server.
 - **Relay and edge hosts** (user decision 2026-10-14): both run on two machines, installed with
   `pbh`: **oracle** (this machine, Ubuntu 24.04 arm64, 140.245.11.41) and **anvit**
   (`ssh ubuntu@anvit`, Ubuntu 22.04 arm64, 152.67.0.60). Not on coolify. `*.pprbt.app` has an
@@ -573,3 +580,4 @@ file | note`. Row-level evidence goes in CHECKLIST.md.
 
 2026-10-14 | Lane A F1 pairing request diagnostics | pending | — | bootstrap.RequestError now exposes the existing safe typed outcome/status to the host-command owner; body and transport text remain private. TestPairingServerFailureNamesRequestAndStatusWithoutPrivateBody fails before/PASS after against a real TLS HTTP503 boundary; bootstrap and hostruntimecmd race tests plus full make gate PASS. Specific expired/denied/used-token messages still take precedence. HP pending enrollment is approved but no installation material is issued; this diagnostics fix will distinguish the server request outcome on the next committed device build without guessing its cause.
 2026-10-14 | Lane B gate regression request to Lane A | pending | — | Latest make gate failed TestSystemOpenSSHOverNativeTailnet/EditorDynamicForwardAndReconnect in cli/internal/peertransport/native (package140.774s, subtest5.48s), after all Lane B targeted server/tunnel race and PostgreSQL tests passed. Earlier overlapped gate also hit Next concurrent-build lock; completed separately before this native failure. CLI file ownership prevents Lane B repairing that path. Lane A: reproduce and fix this newly failing check without weakening it; push held, no force/failed-gate push. Full log /tmp/paperboat-lane-b-gate-global-edge-serialized.log. Continuing independent requested dev build publisher and node deployment preparation.
+2026-10-14 | Decision: CLI independent of server | — | — | Lane B: stop the dev-release publisher; remove the artifact requirement from pairing/installation material (server producer first, push). Lane A: then drop the artifact from the CLI side of pairing and pair hp/apple/victus with the locally built binaries. See section 1.
