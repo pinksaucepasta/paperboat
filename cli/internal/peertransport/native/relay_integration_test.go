@@ -174,6 +174,10 @@ func TestNativeSessionOverAuthenticatedDERPQUIC(t *testing.T) {
 	clientConfig.Peers = testPeers(serverBinding, "dial", clientConfig.ExpiresAt)
 	applyTestConfiguration(t, clientAuthority, signerPrivate, clientConfig)
 	applyRelayAuthority(t, clientAuthority, signerPrivate, clientConfig, clientTLS, node)
+	if probe, probeErr := session.Open(ctx); probeErr == nil {
+		_ = probe.Close()
+		t.Fatal("revoked session reopened after a new relay grant")
+	}
 	reconnected, err := clientOwner.Dial(ctx, descriptor, "machine_relay", peerquic.ClassInteractive)
 	if err != nil {
 		t.Fatal(err)

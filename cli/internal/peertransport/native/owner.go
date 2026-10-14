@@ -262,7 +262,7 @@ func (o *Owner) Dial(ctx context.Context, descriptor mesh.Addr, peerID string, c
 		}
 		return nil, o.dialFailure(ctx, peerID, "peer_authority", "peer_authority_failed", tailnet.ErrAdmission)
 	}
-	session := newSession(o, peerID, quicSession)
+	session := newSession(o, peerID, peer, quicSession)
 	if err := o.add(session); err != nil {
 		_ = session.Close()
 		return nil, err
@@ -329,7 +329,7 @@ func (o *Owner) Listen(ctx context.Context, region *tailcfg.DERPRegion, serve fu
 				}
 				return
 			}
-			session := newSession(o, peer.EndpointID, quicSession)
+			session := newSession(o, peer.EndpointID, peer, quicSession)
 			if o.add(session) != nil {
 				_ = session.Close()
 				return

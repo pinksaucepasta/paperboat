@@ -21,6 +21,7 @@ import (
 type Session struct {
 	owner    *Owner
 	peerID   string
+	binding  tailnet.NetworkBinding
 	quic     *peerquic.Session
 	router   *peerquic.StreamRouter
 	routerMu sync.Mutex
@@ -87,12 +88,27 @@ var ErrStreamRejected = errors.New("native application stream rejected")
 
 var _ http.RoundTripper = (*http3.ClientConn)(nil)
 
-func newSession(owner *Owner, peerID string, session *peerquic.Session) *Session {
-	return &Session{owner: owner, peerID: peerID, quic: session}
+func newSession(owner *Owner, peerID string, binding tailnet.NetworkBinding, session *peerquic.Session) *Session {
+	return &Session{owner: owner, peerID: peerID, binding: binding, quic: session}
 }
 func (s *Session) PeerID() string { return s.peerID }
 
 func (s *Session) Open(ctx context.Context) (net.Conn, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.quic.Connection.Context().Err(); err != nil {
+		return nil, reconnectRequired(s.peerID, context.Cause(s.quic.Connection.Context()), s.closing.Load())
+	}
+	peer, err := s.owner.authority.Peer(s.peerID)
+	if err != nil {
+		_ = s.Close()
+		return nil, err
+	}
+	if peer != s.binding {
+		_ = s.Close()
+		return nil, tailnet.ErrAdmission
+	}
 	stream, err := s.quic.Connection.OpenStreamSync(ctx)
 	if err != nil {
 		return nil, reconnectRequired(s.peerID, err, s.closing.Load())

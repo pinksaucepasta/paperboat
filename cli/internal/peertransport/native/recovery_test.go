@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/quic-go/quic-go"
 )
 
@@ -113,7 +114,7 @@ func TestEstablishedPeerCloseRequiresReconnectOnOpen(t *testing.T) {
 		t.Fatalf("client did not observe peer close: %v", ctx.Err())
 	}
 
-	session := newSession(nil, "peer_remote", clientQUIC)
+	session := newSession(nil, "peer_remote", tailnet.NetworkBinding{}, clientQUIC)
 	_, err = session.Open(ctx)
 	var reconnect *ReconnectRequiredError
 	if !errors.As(err, &reconnect) || reconnect.PeerID != "peer_remote" {
