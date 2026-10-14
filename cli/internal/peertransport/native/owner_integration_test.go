@@ -148,6 +148,42 @@ func TestAuthorizedTerminalAndLiveTransferRevocationReconnect(t *testing.T) {
 	if _, err = io.ReadFull(sshConn, sshResponse); err != nil || string(sshResponse) != string(sshPayload) {
 		t.Fatalf("SSH response=%q err=%v", sshResponse, err)
 	}
+	t.Run("FlowLimitPreservesLiveSSHStream", func(t *testing.T) {
+		client, err := clientAuthority.Client(descriptor, "machine_test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var packets []*tailnet.Packet
+		defer func() {
+			for _, packet := range packets {
+				packet.Close()
+			}
+		}()
+		for range tailnet.MaxFlows - 1 {
+			packet, err := client.Dial(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			packets = append(packets, packet)
+		}
+		failed, err := clientOwner.Dial(t.Context(), descriptor, "machine_test", peerquic.ClassInteractive)
+		if failed != nil {
+			failed.Close()
+		}
+		if !errors.Is(err, tailnet.ErrFlowLimit) {
+			t.Fatalf("extra dial did not preserve the flow limit: %v", err)
+		}
+		timer := time.AfterFunc(3*time.Second, func() { sshConn.Close() })
+		defer timer.Stop()
+		payload := []byte("ssh-after-refused-extra-flow")
+		if _, err := sshConn.Write(payload); err != nil {
+			t.Fatal("live SSH write after flow limit:", err)
+		}
+		response := make([]byte, len(payload))
+		if _, err := io.ReadFull(sshConn, response); err != nil || string(response) != string(payload) {
+			t.Fatal("flow limit closed already admitted SSH stream:", err)
+		}
+	})
 	t.Run("BootstrapHintRefreshPreservesLiveSSHStream", func(t *testing.T) {
 		info, err := mesh.ParseAddr(descriptor)
 		if err != nil {

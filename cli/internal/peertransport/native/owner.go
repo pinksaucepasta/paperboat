@@ -242,7 +242,7 @@ func (o *Owner) Dial(ctx context.Context, descriptor mesh.Addr, peerID string, c
 	}
 	socket, err := client.Dial(ctx)
 	if err != nil {
-		if ctx.Err() == nil {
+		if ctx.Err() == nil && !errors.Is(err, tailnet.ErrFlowLimit) {
 			o.authority.InvalidateClient(client)
 		}
 		return nil, o.dialFailure(ctx, peerID, "peer_connect", "native_private_failed", err)
