@@ -11,6 +11,7 @@
 #   APPLE_PASS=... VICTUS_PASS=... tools/device-smoke/smoke.sh --expect-version <version> [options]
 # Options:
 #   --expect-version V   version every device must report (required)
+#   --windows-install-json FILE  saved Windows pb install --json output (required for victus)
 #   --targets LIST       comma list of targets (default hp,apple,victus)
 #   --long-seconds N     duration of long exec / held SSH (default 420 / 200)
 #   --skip LIST          comma list of test ids to skip (e.g. preview,transfer)
@@ -21,7 +22,7 @@
 #   --update-version V   version the --update build reports (required with --update)
 #
 # Output: a PASS/FAIL table and .build-free JSON at
-#   /home/ubuntu/pinksaucepasta/tools/device-smoke/results/<UTC timestamp>.json
+#   tools/device-smoke/results/<UTC timestamp>.json
 # Exit status is non-zero when any test fails.
 #
 # Credentials: HP uses key SSH. APPLE_PASS and VICTUS_PASS must be exported by
@@ -41,10 +42,12 @@ LONG_SSH=200
 SKIP=""
 UPDATE_DIR=""
 UPDATE_VERSION=""
+WINDOWS_INSTALL_JSON=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --expect-version) EXPECT_VERSION=$2; shift 2 ;;
+    --windows-install-json) WINDOWS_INSTALL_JSON=$2; shift 2 ;;
     --targets) TARGETS=$2; shift 2 ;;
     --long-seconds) LONG_EXEC=$2; shift 2 ;;
     --skip) SKIP=$2; shift 2 ;;
@@ -64,7 +67,10 @@ mkdir -p "$RESULTS_DIR"
 # ---------------------------------------------------------------- devices
 PB_HP='$HOME/.local/bin/pb'
 PB_APPLE='/Library/PrivilegedHelperTools/Paperboat/users/u501/bin/pb'
-PB_VICTUS="${PB_VICTUS:-C:\\Program Files\\Paperboat\\bin\\pb.exe}"
+PB_VICTUS=""
+if [[ ",$TARGETS," == *,victus,* ]]; then
+  PB_VICTUS=$(python3 "$HERE/install_path.py" "$WINDOWS_INSTALL_JSON") || exit 2
+fi
 SSH_OPTS=(-o ConnectTimeout=15 -o ServerAliveInterval=30 -o StrictHostKeyChecking=accept-new)
 
 # on DEVICE CMD... : run a POSIX shell command (hp, apple) or a PowerShell
@@ -87,7 +93,7 @@ pb_on() { # pb_on DEVICE ARGS... (args are already quoted for the remote shell)
   case "$device" in
     hp) on hp "$PB_HP $*" ;;
     apple) on apple "$PB_APPLE $*" ;;
-    victus) on victus "& '$PB_VICTUS' $*" ;;
+    victus) on victus "& '${PB_VICTUS//\'/\'\'}' $*" ;;
   esac
 }
 
@@ -102,6 +108,12 @@ record() { # record ID STATUS SECONDS DETAIL
 }
 skipped() { [[ ",$SKIP," == *",$1,"* ]]; }
 now() { date +%s; }
+# Only the final receipt belongs to the remote wrapper; command stdout may
+# contain a misleading rc=0. The SSH transport must also have succeeded.
+command_ok() {
+  [ "$1" = 0 ] && [ "$(tr -d '\r' <<<"$2" | tail -n 1)" = rc=0 ]
+}
+marker_present() { grep -Fxq -- "$2" <<<"$(tr -d '\r' <<<"$1")"; }
 
 # ---------------------------------------------------------------- tests
 check_device() { # doctor + version on the device itself
@@ -119,10 +131,10 @@ remote_echo_cmd() { # command that prints $2 on target $1
 }
 
 test_exec() { # test_exec TARGET [ID-PREFIX]
-  local t=$1 prefix=${2:-exec} marker="ex-$RUN_ID" t0 out
-  t0=$(now); out=$(on hp "timeout 120 $PB_HP exec $t -- $(remote_echo_cmd "$t" "$marker"); echo rc=\$?" 2>&1)
-  if grep -q "$marker" <<<"$out" && grep -q "rc=0" <<<"$out"; then record "$prefix:$t" PASS $(( $(now)-t0 ))
-  else record "$prefix:$t" FAIL $(( $(now)-t0 )) "$(tr '\n' ' ' <<<"$out" | tail -c 200)"; fi
+  local t=$1 prefix=${2:-exec} marker="ex-$RUN_ID" t0 out status
+  t0=$(now); out=$(on hp "timeout 120 $PB_HP exec $t -- $(remote_echo_cmd "$t" "$marker"); echo rc=\$?" 2>&1); status=$?
+  if command_ok "$status" "$out" && marker_present "$out" "$marker"; then record "$prefix:$t" PASS $(( $(now)-t0 ))
+  else record "$prefix:$t" FAIL $(( $(now)-t0 )) "command or transport failed; output withheld"; fi
 }
 
 # Long work runs on HP in the background as uploaded job scripts, so remote
@@ -149,22 +161,25 @@ start_long_ssh() {
   fi
 }
 collect() { # collect ID TAG EXPECT-MARKER : waits for the background job
-  local id=$1 tag=$2 want=$3 out
+  local id=$1 tag=$2 want=$3 minimum=${4:-0} out status completed=0
   for _ in $(seq 1 200); do
-    on hp "test -f /tmp/$RUN_ID/$tag.end" && break
+    if on hp "test -f /tmp/$RUN_ID/$tag.end"; then completed=1; break; fi
     sleep 15
   done
+  [ "$completed" = 1 ] || { record "$id" FAIL 3000 "job did not finish before deadline"; return; }
   out=$(on hp "cat /tmp/$RUN_ID/$tag.out; echo; echo dur=\$(( \$(cat /tmp/$RUN_ID/$tag.end 2>/dev/null || date +%s) - \$(cat /tmp/$RUN_ID/$tag.start) ))" 2>&1)
+  status=$?
   local dur; dur=$(grep -oE 'dur=[0-9]+' <<<"$out" | cut -d= -f2)
-  if grep -q "$want" <<<"$out" && grep -q "rc=0" <<<"$out"; then record "$id" PASS "${dur:-?}"
-  else record "$id" FAIL "${dur:-?}" "$(grep -v '^dur=' <<<"$out" | tr '\n' ' ' | tail -c 220)"; fi
+  if [ "$status" = 0 ] && marker_present "$out" "$want" && [ "$(grep -v '^dur=' <<<"$out" | sed '/^$/d' | tail -1)" = rc=0 ] && [[ "$dur" =~ ^[0-9]+$ ]] \
+      && [ "$dur" -ge "$minimum" ]; then record "$id" PASS "${dur:-?}"
+  else record "$id" FAIL "${dur:-?}" "job failed, ran too briefly, or transport failed; output withheld"; fi
 }
 
 test_ssh_short() {
-  local t=$1 marker="ssh-$RUN_ID" t0 out
-  t0=$(now); out=$(on hp "timeout 120 $PB_HP ssh $t -- $(remote_echo_cmd "$t" "$marker") < /dev/null; echo rc=\$?" 2>&1)
-  if grep -q "$marker" <<<"$out" && grep -q "rc=0" <<<"$out"; then record "ssh:$t" PASS $(( $(now)-t0 ))
-  else record "ssh:$t" FAIL $(( $(now)-t0 )) "$(tr '\n' ' ' <<<"$out" | tail -c 200)"; fi
+  local t=$1 marker="ssh-$RUN_ID" t0 out status
+  t0=$(now); out=$(on hp "timeout 120 $PB_HP ssh $t -- $(remote_echo_cmd "$t" "$marker") < /dev/null; echo rc=\$?" 2>&1); status=$?
+  if command_ok "$status" "$out" && marker_present "$out" "$marker"; then record "ssh:$t" PASS $(( $(now)-t0 ))
+  else record "ssh:$t" FAIL $(( $(now)-t0 )) "command or transport failed; output withheld"; fi
 }
 
 # Terminal: a real PTY session from HP. The driver is uploaded once; it sends
@@ -194,36 +209,60 @@ def read_until(tok, deadline):
 time.sleep(8)
 os.write(fd, (line + "\r").encode())
 ok = read_until(token.encode(), time.time() + 90)
+if ok and len(sys.argv) == 10:
+    ready, resume, next_line, next_token = sys.argv[6:10]
+    with open(ready, "w") as receipt:
+        receipt.write("ready")
+    deadline = time.monotonic() + 600
+    while not os.path.exists(resume) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    ok = os.path.exists(resume)
+    if ok:
+        buf = b""
+        os.write(fd, (next_line + "\r").encode())
+        ok = read_until(next_token.encode(), time.time() + 90)
 os.write(fd, b"exit\r")
 time.sleep(3)
 try:
     os.kill(pid, signal.SIGTERM)
 except OSError:
     pass
-print("TERMINAL_OK" if ok else "TERMINAL_FAIL " + buf[-300:].decode(errors="replace").replace("\n", " "))
+# Reap the owned child on success and failure; do not expose terminal contents.
+try:
+    deadline = time.monotonic() + 3
+    while os.waitpid(pid, os.WNOHANG)[0] == 0:
+        if time.monotonic() >= deadline:
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+            break
+        time.sleep(0.05)
+finally:
+    os.close(fd)
+print("TERMINAL_OK" if ok else "TERMINAL_FAIL")
+sys.exit(0 if ok else 1)
 PY
 )
 DRIVER_UPLOADED=0
 test_terminal() { # test_terminal TARGET [ID-PREFIX]
-  local t=$1 prefix=${2:-terminal} t0 out marker="tm$RUN_ID$RANDOM" line
+  local t=$1 prefix=${2:-terminal} t0 out status marker="tm$RUN_ID$RANDOM" line
   if [ $DRIVER_UPLOADED = 0 ]; then
     printf '%s\n' "$TERM_DRIVER" | on hp "mkdir -p /tmp/$RUN_ID && cat > /tmp/$RUN_ID/term.py" && DRIVER_UPLOADED=1
   fi
   # POSIX shells and PowerShell both print MARKER-42 for these lines.
   if [ "$t" = victus ]; then line="echo $marker-\$(6*7)"; else line="echo $marker-\$((6*7))"; fi
   t0=$(now)
-  out=$(on hp "python3 /tmp/$RUN_ID/term.py $PB_HP $t smoke-$marker '$line' $marker-42" 2>&1)
-  if grep -q TERMINAL_OK <<<"$out"; then record "$prefix:$t" PASS $(( $(now)-t0 ))
-  else record "$prefix:$t" FAIL $(( $(now)-t0 )) "$(tr '\n' ' ' <<<"$out" | tail -c 220)"; fi
+  out=$(on hp "python3 /tmp/$RUN_ID/term.py $PB_HP $t smoke-$marker '$line' $marker-42" 2>&1); status=$?
+  if [ "$status" = 0 ] && marker_present "$out" TERMINAL_OK; then record "$prefix:$t" PASS $(( $(now)-t0 ))
+  else record "$prefix:$t" FAIL $(( $(now)-t0 )) "terminal or transport failed; output withheld"; fi
 }
 
 test_transfer() {
   local t=$1
-  local name="smoke-$RUN_ID-$t.bin" t0 src_sha out dst_sha
+  local name="smoke-$RUN_ID-$t.bin" t0 src_sha out dst_sha status
   t0=$(now)
   src_sha=$(on hp "mkdir -p /tmp/$RUN_ID && head -c 52428800 /dev/urandom > /tmp/$RUN_ID/$name && sha256sum /tmp/$RUN_ID/$name | cut -d' ' -f1")
-  out=$(on hp "timeout 900 $PB_HP send /tmp/$RUN_ID/$name --to $t; echo rc=\$?" 2>&1)
-  if ! grep -q "rc=0" <<<"$out"; then record "transfer:$t" FAIL $(( $(now)-t0 )) "$(tr '\n' ' ' <<<"$out" | tail -c 200)"; return; fi
+  out=$(on hp "timeout 900 $PB_HP send /tmp/$RUN_ID/$name --to $t; echo rc=\$?" 2>&1); status=$?
+  if ! command_ok "$status" "$out"; then record "transfer:$t" FAIL $(( $(now)-t0 )) "transfer command or transport failed; output withheld"; return; fi
   case "$t" in
     victus) dst_sha=$(on victus "\$f = Get-ChildItem -Path \$HOME -Recurse -Filter '$name' -ErrorAction SilentlyContinue -Depth 3 | Select-Object -First 1; if (\$f) { (Get-FileHash \$f.FullName -Algorithm SHA256).Hash.ToLower(); Remove-Item \$f.FullName }" | tr -d '\r') ;;
     apple) dst_sha=$(on apple "f=\$(find ~ -maxdepth 3 -name '$name' 2>/dev/null | head -1); [ -n \"\$f\" ] && shasum -a 256 \"\$f\" | cut -d' ' -f1 && rm -f \"\$f\"") ;;
@@ -249,6 +288,29 @@ test_preview() { # on a Unix device: serve a marker on loopback, publish, fetch 
   on "$d" "kill \$(cat /tmp/$RUN_ID-pv/srv.pid) 2>/dev/null; rm -rf /tmp/$RUN_ID-pv" >/dev/null 2>&1
 }
 
+start_update_terminal() {
+  local t=$1
+  local before="before-$RUN_ID-$t" after="after-$RUN_ID-$t" line next
+  if [ "$DRIVER_UPLOADED" = 0 ]; then
+    printf '%s\n' "$TERM_DRIVER" | on hp "mkdir -p /tmp/$RUN_ID && cat > /tmp/$RUN_ID/term.py" || return 1
+    DRIVER_UPLOADED=1
+  fi
+  if [ "$t" = victus ]; then
+    line="\$pbSmoke = \$PID; echo $before-\$(6*7)"
+    next="if (\$pbSmoke -eq \$PID) { echo $after-\$(6*7) }"
+  else
+    line="pb_smoke=\$\$; echo $before-\$((6*7))"
+    next="[ \"\$pb_smoke\" = \"\$\$\" ] && echo $after-\$((6*7))"
+  fi
+  printf '%s\n' "python3 /tmp/$RUN_ID/term.py $PB_HP $t smoke-update-$RUN_ID '$line' $before-42 /tmp/$RUN_ID/upd-term-$t.ready /tmp/$RUN_ID/upd-term-$t.resume '$next' $after-42" | hp_job "upd-term-$t"
+  local deadline=$(( $(now) + 120 ))
+  while [ "$(now)" -lt "$deadline" ]; do
+    on hp "test -f /tmp/$RUN_ID/upd-term-$t.ready" && return 0
+    sleep 1
+  done
+  return 1
+}
+
 update_target() { # update TARGET with the build in UPDATE_DIR while work is live
   local t=$1 bin dst t0 out
   case "$t" in
@@ -262,7 +324,14 @@ update_target() { # update TARGET with the build in UPDATE_DIR while work is liv
     apple) SSHPASS="$APPLE_PASS" sshpass -e scp -q "${SSH_OPTS[@]}" "$UPDATE_DIR/$bin" "pujan.pm@apple:$dst" ;;
     victus) SSHPASS="$VICTUS_PASS" sshpass -e scp -q "${SSH_OPTS[@]}" "$UPDATE_DIR/$bin" "pujan@victus:$dst" ;;
   esac
-  # Live work during the update: a long exec from HP and a held terminal.
+  # Verify shell identity before activation, then query that same PTY after it.
+  if ! start_update_terminal "$t"; then
+    record "during-update-terminal:$t" FAIL 120 "terminal did not become ready before update"
+    on hp "touch /tmp/$RUN_ID/upd-term-$t.resume" >/dev/null
+    collect "cleanup-update-terminal:$t" "upd-term-$t" TERMINAL_OK
+    return
+  fi
+  start_long_ssh "$t" "upd-ssh-$t" 240
   start_long_exec "$t" "upd-exec-$t" 240
   sleep 20
   t0=$(now)
@@ -273,9 +342,12 @@ update_target() { # update TARGET with the build in UPDATE_DIR while work is liv
   local ver; ver=$(pb_on "$t" --version 2>&1)
   if grep -q "$UPDATE_VERSION" <<<"$ver"; then record "update:$t" PASS $(( $(now)-t0 ))
   else record "update:$t" FAIL $(( $(now)-t0 )) "$(tr '\n' ' ' <<<"$out" | tail -c 200)"; fi
+  on hp "touch /tmp/$RUN_ID/upd-term-$t.resume" >/dev/null
+  collect "during-update-terminal:$t" "upd-term-$t" TERMINAL_OK
+  collect "during-update-ssh:$t" "upd-ssh-$t" SSHFINAL 240
   test_terminal "$t" after-update-terminal
   test_exec "$t" after-update-exec
-  collect "during-update-exec:$t" "upd-exec-$t" FINAL
+  collect "during-update-exec:$t" "upd-exec-$t" FINAL 240
 }
 
 # ---------------------------------------------------------------- run
@@ -302,8 +374,8 @@ for d in "${TLIST[@]}"; do
   skipped preview || test_preview "$d"
 done
 for t in "${TLIST[@]}"; do
-  skipped ssh-long || collect "ssh-long:$t" "long-ssh-$t" SSHFINAL
-  skipped exec-long || collect "exec-long:$t" "long-exec-$t" FINAL
+  skipped ssh-long || collect "ssh-long:$t" "long-ssh-$t" SSHFINAL "$LONG_SSH"
+  skipped exec-long || collect "exec-long:$t" "long-exec-$t" FINAL "$LONG_EXEC"
 done
 
 if [ -n "$UPDATE_DIR" ]; then
