@@ -129,7 +129,7 @@ that use them; say which in Evidence.
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
 | F2-01 | `pb login` with browser approval on L, M, W, and from a headless VPS via the printed link; `pb logout`; `pb auth status`. | [ ] | [ ] | [ ] | — |
-| F2-02 | The console CLI-approval page exists and works end to end. | [ ] | [ ] | [ ] |  |
+| F2-02 | The console CLI-approval page exists and works end to end. | [ ] | [ ] | [ ] | Console part done (Lane C, 2026-10-14): /cli/authorize shows the request (client, OS, account, code) with approve/deny, expired/404/denied/approved states; manual step against the live server with a real device code (deny verified). Needs Lane A `pb login` end to end on L/M/W. |
 | F2-03 | `pb switch` / `pb auth switch` between personal and each team workspace; everything afterwards uses the selected workspace. | [ ] | [ ] | [ ] | — |
 | F2-04 | `pb environments`, `pb machine list/add/rename/revoke`, `pb status` correct on L, M, W. | [ ] | [ ] | [ ] | — |
 | F2-05 | A revoked machine loses access immediately and says so; credential refresh failures back off and stop at a clear "signed out" state (no tight retry loops). | [ ] | [ ] | [ ] | — |
