@@ -77,6 +77,7 @@ func TestCertificateRuntimePreservesSecretResolutionCancellation(t *testing.T) {
 		MasterKeyReference:              "secret://test/master",
 		DNSProvider:                     "cloudflare",
 		DNSZoneID:                       "zone-test",
+		PublicDNSZoneID:                 "zone-test",
 		DNSTokenReference:               "secret://test/dns",
 		ChallengeZone:                   "challenge.example",
 		CAAResolver:                     "127.0.0.1:53",

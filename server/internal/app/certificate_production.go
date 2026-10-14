@@ -105,6 +105,21 @@ func newPublicCertificateIssuer(cfg config.Config) (*tunnelcert.ACMEIssuer, tunn
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: DNS provider configuration: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
 	}
+	publicDNS, err := tunnelcert.NewCloudflareDNSProvider(tunnelcert.CloudflareDNSConfig{
+		ZoneID: certificateConfig.PublicDNSZoneID, TokenReference: certificateConfig.DNSTokenReference,
+		TokenSource: secrets, HTTPClient: providerHTTPClient("cloudflare-public-dns", cfg.HTTP.RequestTimeout),
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: public DNS provider configuration: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
+	}
+	dnsZones, err := tunnelcert.NewDNS01Zones(map[string]tunnelcert.DNS01Provider{
+		cfg.Preview.BaseDomain:          publicDNS,
+		cfg.RuntimeBaseDomain:           dnsProvider,
+		certificateConfig.ChallengeZone: dnsProvider,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: configured DNS zones: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
+	}
 	caaInspector, err := tunnelcert.NewDNSCAAInspector(tunnelcert.DNSCAAInspectorConfig{Server: certificateConfig.CAAResolver, Timeout: cfg.HTTP.RequestTimeout})
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: CAA resolver configuration: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
@@ -115,7 +130,7 @@ func newPublicCertificateIssuer(cfg config.Config) (*tunnelcert.ACMEIssuer, tunn
 		AccountEmail:        certificateConfig.AccountEmail,
 		AccountKeys:         signerSource,
 		AccountKeyReference: certificateConfig.AccountKeyReference,
-		DNS:                 dnsProvider,
+		DNS:                 dnsZones,
 		HTTPClient:          providerHTTPClient("acme", cfg.HTTP.RequestTimeout),
 		Timeout:             certificateConfig.ACMETimeout,
 		PropagationTimeout:  certificateConfig.PropagationTimeout,

@@ -166,6 +166,7 @@ type Certificates struct {
 	MasterKeyReference              string        `json:"master_key_reference"`
 	DNSProvider                     string        `json:"dns_provider"`
 	DNSZoneID                       string        `json:"dns_zone_id"`
+	PublicDNSZoneID                 string        `json:"public_dns_zone_id"`
 	DNSTokenReference               string        `json:"dns_token_reference"`
 	ChallengeZone                   string        `json:"challenge_zone"`
 	CAAResolver                     string        `json:"caa_resolver"`
@@ -747,6 +748,9 @@ func (c Certificates) Validate(environment Environment) error {
 	}
 	if !validConfigMetadata(c.DNSZoneID, 128) {
 		errs = append(errs, fmt.Errorf("certificates.dns_zone_id is required"))
+	}
+	if !validConfigMetadata(c.PublicDNSZoneID, 128) {
+		errs = append(errs, fmt.Errorf("certificates.public_dns_zone_id is required"))
 	}
 	if !validEndpointBaseDomain(c.ChallengeZone) {
 		errs = append(errs, fmt.Errorf("certificates.challenge_zone must be a DNS hostname"))

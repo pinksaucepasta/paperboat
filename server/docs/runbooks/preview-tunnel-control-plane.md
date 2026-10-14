@@ -82,10 +82,12 @@ distribution handler, and edge broker must all be composed together.
    Never set it to `false` while waiting for a reference, issuance, or
    distribution to recover. A missing reference or a startup error is a
    rollout blocker, not a reason to add a plaintext fallback.
-5. The configured DNS zone must authoritatively contain both platform base
-   domains and the delegated challenge zone. Its token needs only the bounded
-   TXT create/delete permission used by the certificate worker. Do not add
-   platform `_acme-challenge` CNAMEs or grant DNS credentials to an edge.
+5. Configure `PAPERBOAT_CERTIFICATES_PUBLIC_DNS_ZONE_ID` for the shared preview/tunnel
+   base and `PAPERBOAT_CERTIFICATES_DNS_ZONE_ID` for the runtime base and delegated
+   challenge zone. The server routes TXT issuance/cleanup and owned address
+   publication to their matching authoritative zone; unknown suffixes fail closed.
+   Grant the token DNS Edit on these zones, plus Zone Read for deployment discovery.
+   Do not add platform `_acme-challenge` CNAMEs or grant DNS credentials to an edge.
 
 ### Read-only rollout gates
 

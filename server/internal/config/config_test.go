@@ -213,6 +213,7 @@ func validProductionConfig() Config {
 		MasterKeyReference:              "secret://paperboat/master",
 		DNSProvider:                     "cloudflare",
 		DNSZoneID:                       "zone_01",
+		PublicDNSZoneID:                 "zone_01",
 		DNSTokenReference:               "secret://cloudflare/dns",
 		ChallengeZone:                   "challenges.example.test",
 		CAAResolver:                     "127.0.0.1:53",
@@ -391,6 +392,7 @@ func TestCertificatesValidationRequiresReferenceOnlyProductionInputs(t *testing.
 		MasterKeyReference:              "secret://paperboat/master",
 		DNSProvider:                     "cloudflare",
 		DNSZoneID:                       "zone_01",
+		PublicDNSZoneID:                 "zone_01",
 		DNSTokenReference:               "secret://cloudflare/dns",
 		ChallengeZone:                   "challenges.example.test",
 		CAAResolver:                     "127.0.0.1:53",
@@ -417,6 +419,7 @@ func TestCertificatesEnvironmentReferencesOverlayWithoutSecretFields(t *testing.
 				"PAPERBOAT_CERTIFICATES_MASTER_KEY_REFERENCE":              "secret://paperboat/master",
 				"PAPERBOAT_CERTIFICATES_DNS_PROVIDER":                      "cloudflare",
 				"PAPERBOAT_CERTIFICATES_DNS_ZONE_ID":                       "zone_01",
+				"PAPERBOAT_CERTIFICATES_PUBLIC_DNS_ZONE_ID":                "zone_public",
 				"PAPERBOAT_CERTIFICATES_DNS_TOKEN_REFERENCE":               "secret://cloudflare/dns",
 				"PAPERBOAT_CERTIFICATES_CHALLENGE_ZONE":                    "challenges.example.test",
 				"PAPERBOAT_CERTIFICATES_CAA_RESOLVER":                      "127.0.0.1:53",
@@ -432,6 +435,9 @@ func TestCertificatesEnvironmentReferencesOverlayWithoutSecretFields(t *testing.
 	}
 	if !cfg.Certificates.Enabled || cfg.Certificates.MasterKeyReference != "secret://paperboat/master" {
 		t.Fatalf("certificate references were not overlaid: %#v", cfg.Certificates)
+	}
+	if !strings.Contains(cfg.RedactedJSON(), `"public_dns_zone_id": "zone_public"`) {
+		t.Fatal("public zone must be independently configured")
 	}
 	if strings.Contains(cfg.RedactedJSON(), "secret-value") {
 		t.Fatal("certificate configuration unexpectedly exposed a secret value")

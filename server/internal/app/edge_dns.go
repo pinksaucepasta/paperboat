@@ -25,26 +25,33 @@ import (
 // Deployment-owned verified public address metadata is required before the
 // first write. Registration/heartbeats cannot populate that metadata.
 func newEdgeDNSWorker(database *db.DB, cfg config.Config) (func(context.Context) error, error) {
-	admission, err := tunnelcert.NewDatabaseCloudflareAddressAdmission(database, cfg.Certificates.DNSZoneID)
+	newReconciler := func(zoneID string) (*tunnelcert.AddressReconciler, error) {
+		admission, err := tunnelcert.NewDatabaseCloudflareAddressAdmission(database, zoneID)
+		if err != nil {
+			return nil, err
+		}
+		provider, err := tunnelcert.NewCloudflareDNSProvider(tunnelcert.CloudflareDNSConfig{
+			AddressAdmission: admission, ZoneID: zoneID, TokenReference: cfg.Certificates.DNSTokenReference,
+			TokenSource: tunnelcert.EnvironmentReferenceSource{Prefix: "PAPERBOAT_CERT_SECRET_", LookupEnv: os.LookupEnv},
+			HTTPClient:  providerHTTPClient("cloudflare-edge-dns", 5*time.Second),
+		})
+		if err != nil {
+			return nil, err
+		}
+		return tunnelcert.NewAddressReconciler(database, provider, net.DefaultResolver)
+	}
+	public, err := newReconciler(cfg.Certificates.PublicDNSZoneID)
 	if err != nil {
 		return nil, err
 	}
-	provider, err := tunnelcert.NewCloudflareDNSProvider(tunnelcert.CloudflareDNSConfig{
-		AddressAdmission: admission, ZoneID: cfg.Certificates.DNSZoneID, TokenReference: cfg.Certificates.DNSTokenReference,
-		TokenSource: tunnelcert.EnvironmentReferenceSource{Prefix: "PAPERBOAT_CERT_SECRET_", LookupEnv: os.LookupEnv},
-		HTTPClient:  providerHTTPClient("cloudflare-edge-dns", 5*time.Second),
-	})
+	runtime, err := newReconciler(cfg.Certificates.DNSZoneID)
 	if err != nil {
 		return nil, err
 	}
-	reconciler, err := tunnelcert.NewAddressReconciler(database, provider, net.DefaultResolver)
-	if err != nil {
-		return nil, err
-	}
-	return edgeDNSWorker(database, reconciler), nil
+	return edgeDNSWorker(database, public, runtime), nil
 }
 
-func edgeDNSWorker(database *db.DB, reconciler *tunnelcert.AddressReconciler) func(context.Context) error {
+func edgeDNSWorker(database *db.DB, public, runtime *tunnelcert.AddressReconciler) func(context.Context) error {
 	return func(ctx context.Context) error {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
@@ -58,7 +65,7 @@ func edgeDNSWorker(database *db.DB, reconciler *tunnelcert.AddressReconciler) fu
 				}
 				for _, owner := range rows {
 					cursor = owner.ID
-					err = reconcileEdgeDNSOwner(ctx, database, reconciler, owner.ID, uint64(owner.Generation))
+					err = reconcileEdgeDNSOwner(ctx, database, public, runtime, owner.ID, uint64(owner.Generation))
 					if err != nil {
 						break
 					}
@@ -80,10 +87,14 @@ func edgeDNSWorker(database *db.DB, reconciler *tunnelcert.AddressReconciler) fu
 	}
 }
 
-func reconcileEdgeDNSOwner(ctx context.Context, database *db.DB, reconciler *tunnelcert.AddressReconciler, owner string, generation uint64) error {
+func reconcileEdgeDNSOwner(ctx context.Context, database *db.DB, public, runtime *tunnelcert.AddressReconciler, owner string, generation uint64) error {
 	var runtimeRoute bool
 	if err := database.Pool().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.control_routes WHERE id=$1 AND kind='runtime_https_wss')`, owner).Scan(&runtimeRoute); err != nil {
 		return err
+	}
+	reconciler := public
+	if runtimeRoute {
+		reconciler = runtime
 	}
 	names, err := database.Queries().ListEdgeDNSPublicationNamesV1(ctx, owner)
 	if err != nil {

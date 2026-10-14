@@ -196,6 +196,7 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 	setString("PAPERBOAT_CERTIFICATES_MASTER_KEY_REFERENCE", &c.Certificates.MasterKeyReference)
 	setString("PAPERBOAT_CERTIFICATES_DNS_PROVIDER", &c.Certificates.DNSProvider)
 	setString("PAPERBOAT_CERTIFICATES_DNS_ZONE_ID", &c.Certificates.DNSZoneID)
+	setString("PAPERBOAT_CERTIFICATES_PUBLIC_DNS_ZONE_ID", &c.Certificates.PublicDNSZoneID)
 	setString("PAPERBOAT_CERTIFICATES_DNS_TOKEN_REFERENCE", &c.Certificates.DNSTokenReference)
 	setString("PAPERBOAT_CERTIFICATES_CHALLENGE_ZONE", &c.Certificates.ChallengeZone)
 	setString("PAPERBOAT_CERTIFICATES_CAA_RESOLVER", &c.Certificates.CAAResolver)
