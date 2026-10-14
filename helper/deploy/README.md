@@ -2,6 +2,9 @@
 
 Ubuntu 22.04/24.04 or Debian 12 on amd64/arm64, systemd and public inbound connectivity are required. Install
 first; no account, team, or global scope is assigned by installation.
+The public helper installer/package publication is still pending; these one-liners
+require that qualified release publication. The local package and Docker supervisor
+have been exercised on the configured ARM64 infrastructure.
 
 ```sh
 curl -fsSL https://get.pprbt.dev/selfhost/install | sh
@@ -93,7 +96,7 @@ initial endpoint, so the installer preserves automatic public-address detection
 without a domain literal in source. Runtime configuration can override it.
 Build one required artifact with
 `helper/deploy/package-selfhost.sh VERSION amd64 ABSOLUTE_IGNORED_BUILD_DIRECTORY`.
-The install endpoint renders `install.sh` with the configured immutable
+The release publisher must render `install.sh` with the configured immutable
 architecture-specific `PACKAGE_URL_AMD64`, `PACKAGE_SHA256_AMD64`,
 `PACKAGE_URL_ARM64`, and `PACKAGE_SHA256_ARM64` values. An unconfigured endpoint must
 not claim an installation is available. Packages include Paperboat and upstream
