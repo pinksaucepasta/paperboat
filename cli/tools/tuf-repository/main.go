@@ -2,11 +2,7 @@ package main
 
 import (
 	"bytes"
-	"crypto"
-	"crypto/ed25519"
-	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -18,7 +14,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
@@ -26,11 +21,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releasepolicy"
 	"github.com/pinksaucepasta/paperboat/internal/selfupdate"
 	"github.com/pinksaucepasta/paperboat/tools/releaseplan"
-	"github.com/sigstore/sigstore/pkg/signature"
 	"github.com/theupdateframework/go-tuf/v2/metadata"
 )
 
-const keychainService = "com.pinksaucepasta.paperboat.tuf.production"
 const windowsNativeQualificationSchema = "paperboat.windows-native-qualification/v1"
 
 var releaseVersionPattern = regexp.MustCompile(`^20[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.(0|[1-9][0-9]*)$`)
@@ -62,8 +55,6 @@ func releaseAssetFormat(platform string) string {
 		return ""
 	}
 }
-
-var roles = []string{"root-1", "root-2", "root-3", "targets-1", "targets-2", "snapshot-1", "timestamp-1"}
 
 // Keep the publisher's release-index wire model exactly aligned with the
 // runtime verifier. In particular, the policy digests and deployment plan are
@@ -100,10 +91,6 @@ type assetTargetCustom struct {
 	Length       int64        `json:"length"`
 	ReleaseIndex releaseIndex `json:"release_index"`
 }
-type signingState struct {
-	Schema string              `json:"schema"`
-	Roles  map[string][]string `json:"roles"`
-}
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -117,16 +104,17 @@ func run(args []string) error {
 		return errors.New("production signing is restricted to the macOS release workstation")
 	}
 	if len(args) == 0 {
-		return errors.New("usage: paperboat-tuf <init|publish|promote|pause|quarantine|refresh|rotate|status|validate-signers|verify-published>")
+		return errors.New("usage: paperboat-tuf <init|publish|promote|pause|quarantine|refresh|status|validate-signers|verify-published>")
 	}
 	switch args[0] {
 	case "init":
 		fs := flag.NewFlagSet("init", flag.ContinueOnError)
 		repo := fs.String("repository", "", "repository directory")
+		root := fs.String("trusted-root", "", "offline-signed initial root metadata")
 		if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
-			return errors.New("usage: paperboat-tuf init -repository DIR")
+			return errors.New("usage: paperboat-tuf init -repository DIR -trusted-root FILE")
 		}
-		return initialize(*repo)
+		return initialize(*repo, *root)
 	case "publish":
 		fs := flag.NewFlagSet("publish", flag.ContinueOnError)
 		repo := fs.String("repository", "", "repository directory")
@@ -162,14 +150,6 @@ func run(args []string) error {
 			return fmt.Errorf("usage: paperboat-tuf %s -repository DIR -rollout-revision N%s", args[0], map[bool]string{true: " -percentage 0..100"}[args[0] == "promote"])
 		}
 		return mutateRollout(*repo, args[0], *revision, uint8(*percentage))
-	case "rotate":
-		fs := flag.NewFlagSet("rotate", flag.ContinueOnError)
-		repo := fs.String("repository", "", "repository directory")
-		role := fs.String("role", "", "root, targets, snapshot, or timestamp")
-		if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
-			return errors.New("usage: paperboat-tuf rotate -repository DIR -role ROLE")
-		}
-		return rotate(*repo, *role)
 	case "status":
 		fs := flag.NewFlagSet("status", flag.ContinueOnError)
 		repo := fs.String("repository", "", "repository directory")
@@ -244,286 +224,12 @@ func validateSigners(repo, trustedRootPath string) error {
 	if served.Signed.Version != current.Signed.Version || !bytes.Equal(mustMetadataBytes(served), mustMetadataBytes(current)) {
 		return errors.New("served root does not match the trusted numbered root chain")
 	}
-	state, err := loadSigningState(repo, current, "targets", "snapshot", "timestamp")
+	err = validateOnlineSigner(current)
 	if err != nil {
 		return err
 	}
-	count := len(state.Roles["targets"]) + len(state.Roles["snapshot"]) + len(state.Roles["timestamp"])
-	fmt.Printf("root=%d online_signers=%d validated\n", current.Signed.Version, count)
+	fmt.Printf("root=%d online_signers=1 validated\n", current.Signed.Version)
 	return nil
-}
-
-// verifyPublished checks the complete metadata set as it will be served. In
-// particular, it catches a partial publication that leaves timestamp.json or
-// snapshot.json present while omitting the versioned files they reference.
-func verifyPublished(repo string) error {
-	root, targets, snapshot, timestamp, err := loadSet(repo)
-	if err != nil {
-		return fmt.Errorf("load published metadata: %w", err)
-	}
-	if err := verifyRoot(root); err != nil {
-		return fmt.Errorf("verify root: %w", err)
-	}
-	if err := root.VerifyDelegate("targets", targets); err != nil {
-		return fmt.Errorf("verify targets: %w", err)
-	}
-	if err := root.VerifyDelegate("snapshot", snapshot); err != nil {
-		return fmt.Errorf("verify snapshot: %w", err)
-	}
-	if err := root.VerifyDelegate("timestamp", timestamp); err != nil {
-		return fmt.Errorf("verify timestamp: %w", err)
-	}
-	if err := verifyPublishedDeploymentPolicies(targets); err != nil {
-		return err
-	}
-	for _, item := range []struct {
-		name string
-		body []byte
-	}{
-		{fmt.Sprintf("%d.root.json", root.Signed.Version), mustMetadataBytes(root)},
-		{fmt.Sprintf("%d.targets.json", targets.Signed.Version), mustMetadataBytes(targets)},
-		{fmt.Sprintf("%d.snapshot.json", snapshot.Signed.Version), mustMetadataBytes(snapshot)},
-	} {
-		if err := verifyPublishedFile(filepath.Join(repo, "metadata", item.name), item.body); err != nil {
-			return err
-		}
-	}
-	if err := verifyPublishedFile(filepath.Join(repo, "metadata", "timestamp.json"), mustMetadataBytes(timestamp)); err != nil {
-		return err
-	}
-	if meta, ok := timestamp.Signed.Meta["snapshot.json"]; ok {
-		if err := verifyMetaReference(repo, fmt.Sprintf("%d.snapshot.json", meta.Version), meta); err != nil {
-			return err
-		}
-	} else {
-		return errors.New("timestamp does not reference snapshot.json")
-	}
-	for name, meta := range snapshot.Signed.Meta {
-		if err := verifyMetaReference(repo, fmt.Sprintf("%d.%s", meta.Version, name), meta); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// decodeAndValidateAssetTargetCustom validates the exact custom metadata
-// bytes that will be signed or served. Decoding into the runtime release-index
-// type is intentional: it catches omitted required fields at the JSON boundary
-// instead of trusting a publisher-side struct that may have silently supplied
-// zero values. The same preflight is used before signing and after publication.
-func decodeAndValidateAssetTargetCustom(body []byte, now time.Time) (assetTargetCustom, error) {
-	if len(body) == 0 {
-		return assetTargetCustom{}, errors.New("signed asset custom metadata is empty")
-	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	var custom assetTargetCustom
-	var extra any
-	if err := decoder.Decode(&custom); err != nil {
-		return assetTargetCustom{}, fmt.Errorf("decode signed asset custom metadata: %w", err)
-	}
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err == nil {
-			return assetTargetCustom{}, errors.New("signed asset custom metadata has trailing JSON")
-		}
-		return assetTargetCustom{}, fmt.Errorf("decode signed asset custom metadata trailer: %w", err)
-	}
-	if custom.Schema != "paperboat.tuf-asset/v1" || custom.Kind != "github-release-asset" {
-		return assetTargetCustom{}, errors.New("signed asset custom metadata has an invalid schema")
-	}
-	indexBody, err := json.Marshal(custom.ReleaseIndex)
-	if err != nil {
-		return assetTargetCustom{}, fmt.Errorf("encode signed release index: %w", err)
-	}
-	index, err := releaseindex.Decode(bytes.NewReader(indexBody), now)
-	if err != nil {
-		return assetTargetCustom{}, fmt.Errorf("signed release index is invalid: %w", err)
-	}
-	target, ok := index.Component("pb")
-	if !ok || custom.Version != index.Version || custom.Platform != index.Platform || custom.Architecture != index.Architecture || custom.Format != index.BinaryFormat || custom.AssetName != target.AssetName || custom.Repository != target.Repository || custom.URL != target.DownloadURL || custom.SHA256 != target.SHA256 || custom.Length != target.Length {
-		return assetTargetCustom{}, errors.New("signed asset custom metadata does not match its release index")
-	}
-	return custom, nil
-}
-
-func verifyPublishedDeploymentPolicies(targets *metadata.Metadata[metadata.TargetsType]) error {
-	return verifyPublishedDeploymentPoliciesAt(targets, time.Now().UTC())
-}
-
-func verifyPublishedDeploymentPoliciesAt(targets *metadata.Metadata[metadata.TargetsType], now time.Time) error {
-	if targets == nil || len(targets.Signed.Targets) == 0 || len(targets.Signed.Targets) > len(supportedReleaseTargets()) {
-		return errors.New("published TUF targets contain an invalid release set")
-	}
-	type binding struct{ manifest, plan string }
-	versions := make(map[string]binding)
-	for name, info := range targets.Signed.Targets {
-		known := false
-		for _, target := range supportedReleaseTargets() {
-			if name == releaseAssetName(target.platform, target.architecture) {
-				known = true
-				break
-			}
-		}
-		if !known {
-			return fmt.Errorf("unsupported published TUF target %s", name)
-		}
-		if info == nil || info.Custom == nil {
-			return fmt.Errorf("published TUF target %s has no signed custom metadata", name)
-		}
-		custom, err := decodeAndValidateAssetTargetCustom(*info.Custom, now)
-		if err != nil {
-			return fmt.Errorf("published TUF target %s has invalid deployment policy: %w", name, err)
-		}
-		target, ok := custom.ReleaseIndex.Component("pb")
-		digest, hasDigest := info.Hashes["sha256"]
-		if !ok || custom.AssetName != name || target.AssetName != name || !hasDigest || len(digest) != sha256.Size || info.Length != target.Length || hex.EncodeToString(digest) != target.SHA256 {
-			return fmt.Errorf("published TUF target %s does not match its signed release index", name)
-		}
-		plan := custom.ReleaseIndex.DeploymentPlan
-		if err := plan.Validate(); err != nil || plan.Version != custom.Version || plan.ManifestSHA256 != custom.ReleaseIndex.ManifestSHA256 || custom.ReleaseIndex.DeploymentPlanSHA256 == "" {
-			return fmt.Errorf("published TUF target %s has an invalid deployment policy binding", name)
-		}
-		actualPlanDigest, err := plan.PlanSHA256()
-		if err != nil || actualPlanDigest != custom.ReleaseIndex.DeploymentPlanSHA256 {
-			return fmt.Errorf("published TUF target %s has a deployment policy digest mismatch", name)
-		}
-		identity := binding{custom.ReleaseIndex.ManifestSHA256, custom.ReleaseIndex.DeploymentPlanSHA256}
-		if prior, ok := versions[custom.Version]; ok && prior != identity {
-			return errors.New("published targets for one version have inconsistent manifest or policy")
-		}
-		versions[custom.Version] = identity
-		if len(custom.ReleaseIndex.ManifestSHA256) != sha256.Size*2 || !lowerHex(custom.ReleaseIndex.ManifestSHA256) {
-			return fmt.Errorf("published TUF target %s has an invalid manifest digest", name)
-		}
-
-	}
-	return nil
-}
-
-// validateTargetsForPublication is the write/signing boundary for release
-// targets. An empty target set is valid only for a newly initialized
-// repository; once targets exist, every selected platform contract must pass
-// the same validation used by verify-published.
-func validateTargetsForPublication(targets *metadata.Metadata[metadata.TargetsType], now time.Time) error {
-	if targets == nil {
-		return errors.New("TUF targets metadata is nil")
-	}
-	if len(targets.Signed.Targets) == 0 {
-		return nil
-	}
-	return verifyPublishedDeploymentPoliciesAt(targets, now)
-}
-
-func verifyMetaReference(repo, name string, meta *metadata.MetaFiles) error {
-	body, err := os.ReadFile(filepath.Join(repo, "metadata", name))
-	if err != nil {
-		return fmt.Errorf("missing referenced metadata %s: %w", name, err)
-	}
-	if meta.Length != 0 && int64(len(body)) != meta.Length {
-		return fmt.Errorf("metadata length mismatch %s", name)
-	}
-	if digest, ok := meta.Hashes["sha256"]; ok {
-		sum := sha256.Sum256(body)
-		if !bytes.Equal(sum[:], digest) {
-			return fmt.Errorf("metadata hash mismatch %s", name)
-		}
-	}
-	return nil
-}
-
-func mustMetadataBytes[T metadata.Roles](value *metadata.Metadata[T]) []byte {
-	body, err := value.ToBytes(false)
-	if err != nil {
-		panic(err)
-	}
-	return body
-}
-
-func verifyPublishedFile(path string, expected []byte) error {
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("missing published metadata %s: %w", filepath.Base(path), err)
-	}
-	if !bytes.Equal(body, expected) {
-		return fmt.Errorf("published metadata differs from signed set: %s", filepath.Base(path))
-	}
-	return nil
-}
-
-func initialize(repo string) error {
-	repo, err := validateRepository(repo, false)
-	if err != nil {
-		return err
-	}
-	if _, err := os.Stat(filepath.Join(repo, "metadata", "1.root.json")); err == nil {
-		if _, stateErr := os.Stat(signingStatePath(repo)); stateErr == nil {
-			return errors.New("repository is already initialized")
-		}
-		root, loadErr := metadata.Root().FromFile(filepath.Join(repo, "metadata", "root.json"))
-		if loadErr != nil {
-			return loadErr
-		}
-		state := initialSigningState()
-		if matchErr := validateSigningState(root, state); matchErr != nil {
-			return matchErr
-		}
-		return writeSigningState(repo, state)
-	}
-	for _, name := range roles {
-		if _, err := loadKey(name); err == nil {
-			continue
-		}
-		if keyExists(name) {
-			return fmt.Errorf("Keychain item %q exists but cannot be loaded", name)
-		}
-		if err := createKey(name); err != nil {
-			return err
-		}
-	}
-	root := metadata.Root(time.Now().UTC().Add(730 * 24 * time.Hour))
-	root.Signed.ConsistentSnapshot = true
-	for _, name := range roles {
-		private, err := loadKey(name)
-		if err != nil {
-			return err
-		}
-		role := strings.TrimSuffix(name, "-1")
-		role = strings.TrimSuffix(role, "-2")
-		role = strings.TrimSuffix(role, "-3")
-		key, err := metadata.KeyFromPublicKey(private.Public())
-		if err != nil {
-			return err
-		}
-		if err := root.Signed.AddKey(key, role); err != nil {
-			return err
-		}
-	}
-	root.Signed.Roles["root"].Threshold = 2
-	root.Signed.Roles["targets"].Threshold = 2
-	if err := sign(root, "root-1", "root-2"); err != nil {
-		return err
-	}
-	if err := verifyRoot(root); err != nil {
-		return err
-	}
-	targets := metadata.Targets(time.Now().UTC().Add(90 * 24 * time.Hour))
-	if err := sign(targets, "targets-1", "targets-2"); err != nil {
-		return err
-	}
-	snapshot := metadata.Snapshot(time.Now().UTC().Add(7 * 24 * time.Hour))
-	snapshot.Signed.Meta["targets.json"] = metadata.MetaFile(targets.Signed.Version)
-	if err := sign(snapshot, "snapshot-1"); err != nil {
-		return err
-	}
-	timestamp := metadata.Timestamp(time.Now().UTC().Add(24 * time.Hour))
-	timestamp.Signed.Meta["snapshot.json"] = metadata.MetaFile(snapshot.Signed.Version)
-	if err := sign(timestamp, "timestamp-1"); err != nil {
-		return err
-	}
-	if err := writeSet(repo, root, targets, snapshot, timestamp); err != nil {
-		return err
-	}
-	return writeSigningState(repo, initialSigningState())
 }
 
 func publish(repo, version, artifacts string, qualificationEvidencePaths map[string]string, rolloutRevision uint64, severity string, supervisorMaintenance bool) error {
@@ -588,7 +294,7 @@ func publishWithPolicy(repo, version, artifacts string, qualificationEvidencePat
 	if err := validateTargetsForPublication(targets, time.Now().UTC()); err != nil {
 		return err
 	}
-	state, err := loadSigningState(repo, root, "targets", "snapshot", "timestamp")
+	err = validateOnlineSigner(root)
 	if err != nil {
 		return err
 	}
@@ -656,21 +362,21 @@ func publishWithPolicy(repo, version, artifacts string, qualificationEvidencePat
 	targets.Signed.Version++
 	targets.Signed.Expires = time.Now().UTC().Add(90 * 24 * time.Hour)
 	targets.ClearSignatures()
-	if err := sign(targets, state.Roles["targets"]...); err != nil {
+	if err := sign(targets); err != nil {
 		return err
 	}
 	snapshot.Signed.Version++
 	snapshot.Signed.Expires = time.Now().UTC().Add(7 * 24 * time.Hour)
 	snapshot.Signed.Meta["targets.json"] = metadata.MetaFile(targets.Signed.Version)
 	snapshot.ClearSignatures()
-	if err := sign(snapshot, state.Roles["snapshot"]...); err != nil {
+	if err := sign(snapshot); err != nil {
 		return err
 	}
 	timestamp.Signed.Version++
 	timestamp.Signed.Expires = time.Now().UTC().Add(24 * time.Hour)
 	timestamp.Signed.Meta["snapshot.json"] = metadata.MetaFile(snapshot.Signed.Version)
 	timestamp.ClearSignatures()
-	if err := sign(timestamp, state.Roles["timestamp"]...); err != nil {
+	if err := sign(timestamp); err != nil {
 		return err
 	}
 	return writeSet(repo, root, targets, snapshot, timestamp)
@@ -848,7 +554,7 @@ func refresh(repo string) error {
 	if err := validateTargetsForPublication(targets, now); err != nil {
 		return fmt.Errorf("release publication preflight failed: %w", err)
 	}
-	state, err := loadSigningState(repo, root, "snapshot", "timestamp")
+	err = validateOnlineSigner(root)
 	if err != nil {
 		return err
 	}
@@ -856,14 +562,14 @@ func refresh(repo string) error {
 	snapshot.Signed.Expires = now.Add(7 * 24 * time.Hour)
 	snapshot.Signed.Meta["targets.json"] = metadata.MetaFile(targets.Signed.Version)
 	snapshot.ClearSignatures()
-	if err := sign(snapshot, state.Roles["snapshot"]...); err != nil {
+	if err := sign(snapshot); err != nil {
 		return err
 	}
 	timestamp.Signed.Version++
 	timestamp.Signed.Expires = now.Add(24 * time.Hour)
 	timestamp.Signed.Meta["snapshot.json"] = metadata.MetaFile(snapshot.Signed.Version)
 	timestamp.ClearSignatures()
-	if err := sign(timestamp, state.Roles["timestamp"]...); err != nil {
+	if err := sign(timestamp); err != nil {
 		return err
 	}
 	return writeSet(repo, root, targets, snapshot, timestamp)
@@ -910,7 +616,7 @@ func mutateRollout(repo, operation string, revision uint64, percentage uint8) er
 	if err := verifyPublishedDeploymentPolicies(targets); err != nil {
 		return err
 	}
-	state, err := loadSigningState(repo, root, "targets", "snapshot", "timestamp")
+	err = validateOnlineSigner(root)
 	if err != nil {
 		return err
 	}
@@ -959,7 +665,7 @@ func mutateRollout(repo, operation string, revision uint64, percentage uint8) er
 		raw := item.raw
 		item.info.Custom, item.info.Path = &raw, item.name
 	}
-	return signTargetsSet(repo, root, targets, snapshot, timestamp, state)
+	return signTargetsSet(repo, root, targets, snapshot, timestamp)
 }
 
 type releaseTargetPlatform struct {
@@ -1012,7 +718,7 @@ func applyDeploymentMutation(plan *releasepolicy.Plan, operation string, revisio
 	return nil
 }
 
-func signTargetsSet(repo string, root *metadata.Metadata[metadata.RootType], targets *metadata.Metadata[metadata.TargetsType], snapshot *metadata.Metadata[metadata.SnapshotType], timestamp *metadata.Metadata[metadata.TimestampType], state signingState) error {
+func signTargetsSet(repo string, root *metadata.Metadata[metadata.RootType], targets *metadata.Metadata[metadata.TargetsType], snapshot *metadata.Metadata[metadata.SnapshotType], timestamp *metadata.Metadata[metadata.TimestampType]) error {
 	now := time.Now().UTC()
 	if err := validateTargetsForPublication(targets, now); err != nil {
 		return fmt.Errorf("release publication preflight failed: %w", err)
@@ -1020,136 +726,24 @@ func signTargetsSet(repo string, root *metadata.Metadata[metadata.RootType], tar
 	targets.Signed.Version++
 	targets.Signed.Expires = now.Add(90 * 24 * time.Hour)
 	targets.ClearSignatures()
-	if err := sign(targets, state.Roles["targets"]...); err != nil {
+	if err := sign(targets); err != nil {
 		return err
 	}
 	snapshot.Signed.Version++
 	snapshot.Signed.Expires = now.Add(7 * 24 * time.Hour)
 	snapshot.Signed.Meta["targets.json"] = metadata.MetaFile(targets.Signed.Version)
 	snapshot.ClearSignatures()
-	if err := sign(snapshot, state.Roles["snapshot"]...); err != nil {
+	if err := sign(snapshot); err != nil {
 		return err
 	}
 	timestamp.Signed.Version++
 	timestamp.Signed.Expires = now.Add(24 * time.Hour)
 	timestamp.Signed.Meta["snapshot.json"] = metadata.MetaFile(snapshot.Signed.Version)
 	timestamp.ClearSignatures()
-	if err := sign(timestamp, state.Roles["timestamp"]...); err != nil {
+	if err := sign(timestamp); err != nil {
 		return err
 	}
 	return writeSet(repo, root, targets, snapshot, timestamp)
-}
-
-func rotate(repo, role string) error {
-	repo, err := validateRepository(repo, true)
-	if err != nil {
-		return err
-	}
-	if role != "root" && role != "targets" && role != "snapshot" && role != "timestamp" {
-		return errors.New("role must be root, targets, snapshot, or timestamp")
-	}
-	root, targets, snapshot, timestamp, err := loadSet(repo)
-	if err != nil {
-		return err
-	}
-	if err := validateTargetsForPublication(targets, time.Now().UTC()); err != nil {
-		return fmt.Errorf("release publication preflight failed: %w", err)
-	}
-	state, err := loadSigningState(repo, root)
-	if err != nil {
-		return err
-	}
-	oldNames := append([]string(nil), state.Roles[role]...)
-	newName := nextKeyName(role)
-	if err := createKey(newName); err != nil {
-		return err
-	}
-	private, err := loadKey(newName)
-	if err != nil {
-		return err
-	}
-	key, err := metadata.KeyFromPublicKey(private.Public())
-	if err != nil {
-		return err
-	}
-	oldKey, err := loadKey(oldNames[0])
-	if err != nil {
-		return err
-	}
-	oldTUF, _ := metadata.KeyFromPublicKey(oldKey.Public())
-	oldID, _ := oldTUF.ID()
-	if err := root.Signed.RevokeKey(oldID, role); err != nil {
-		return err
-	}
-	if err := root.Signed.AddKey(key, role); err != nil {
-		return err
-	}
-	root.Signed.Version++
-	root.Signed.Expires = time.Now().UTC().Add(730 * 24 * time.Hour)
-	root.ClearSignatures()
-	rootSigners := append([]string(nil), state.Roles["root"]...)
-	if role == "root" {
-		state.Roles["root"] = append(append([]string(nil), oldNames[1:]...), newName)
-		rootSigners = append(rootSigners, newName) // Old and new thresholds must both verify.
-	}
-	if err := sign(root, rootSigners...); err != nil {
-		return err
-	}
-	if err := verifyRoot(root); err != nil {
-		return err
-	}
-	if role == "targets" {
-		state.Roles["targets"] = append(append([]string(nil), oldNames[1:]...), newName)
-		targets.Signed.Version++
-		targets.Signed.Expires = time.Now().UTC().Add(90 * 24 * time.Hour)
-		targets.ClearSignatures()
-		if err := sign(targets, state.Roles["targets"]...); err != nil {
-			return err
-		}
-		snapshot.Signed.Version++
-		snapshot.Signed.Expires = time.Now().UTC().Add(7 * 24 * time.Hour)
-		snapshot.Signed.Meta["targets.json"] = metadata.MetaFile(targets.Signed.Version)
-		snapshot.ClearSignatures()
-		if err := sign(snapshot, state.Roles["snapshot"]...); err != nil {
-			return err
-		}
-		timestamp.Signed.Version++
-		timestamp.Signed.Expires = time.Now().UTC().Add(24 * time.Hour)
-		timestamp.Signed.Meta["snapshot.json"] = metadata.MetaFile(snapshot.Signed.Version)
-		timestamp.ClearSignatures()
-		if err := sign(timestamp, state.Roles["timestamp"]...); err != nil {
-			return err
-		}
-	}
-	if role == "snapshot" {
-		state.Roles["snapshot"] = []string{newName}
-		snapshot.Signed.Version++
-		snapshot.Signed.Expires = time.Now().UTC().Add(7 * 24 * time.Hour)
-		snapshot.ClearSignatures()
-		if err := sign(snapshot, newName); err != nil {
-			return err
-		}
-		timestamp.Signed.Version++
-		timestamp.Signed.Expires = time.Now().UTC().Add(24 * time.Hour)
-		timestamp.Signed.Meta["snapshot.json"] = metadata.MetaFile(snapshot.Signed.Version)
-		timestamp.ClearSignatures()
-		if err := sign(timestamp, state.Roles["timestamp"]...); err != nil {
-			return err
-		}
-	}
-	if role == "timestamp" {
-		state.Roles["timestamp"] = []string{newName}
-		timestamp.Signed.Version++
-		timestamp.Signed.Expires = time.Now().UTC().Add(24 * time.Hour)
-		timestamp.ClearSignatures()
-		if err := sign(timestamp, newName); err != nil {
-			return err
-		}
-	}
-	if err := writeSet(repo, root, targets, snapshot, timestamp); err != nil {
-		return err
-	}
-	return writeSigningState(repo, state)
 }
 
 func status(repo string) error {
@@ -1178,75 +772,6 @@ func status(repo string) error {
 	return nil
 }
 
-func createKey(name string) error {
-	_, private, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return err
-	}
-	secret := base64.RawStdEncoding.EncodeToString(private.Seed())
-	cmd := exec.Command("/usr/bin/security", "add-generic-password", "-a", name, "-s", keychainService, "-l", "Paperboat TUF production "+name, "-T", "", "-w", secret)
-	if _, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("store TUF signing key in Keychain failed: %w", err)
-	}
-	return nil
-}
-
-func loadKey(name string) (ed25519.PrivateKey, error) {
-	if encoded := strings.TrimSpace(os.Getenv(tufKeyEnvironmentName(name))); encoded != "" {
-		seed, err := base64.RawStdEncoding.DecodeString(encoded)
-		if err != nil || len(seed) != ed25519.SeedSize {
-			return nil, fmt.Errorf("environment key %s is invalid", name)
-		}
-		return ed25519.NewKeyFromSeed(seed), nil
-	}
-	output, err := exec.Command("/usr/bin/security", "find-generic-password", "-a", name, "-s", keychainService, "-w").Output()
-	if err != nil {
-		return nil, fmt.Errorf("load %s from Keychain: %w", name, err)
-	}
-	seed, err := base64.RawStdEncoding.DecodeString(strings.TrimSpace(string(output)))
-	if err != nil || len(seed) != ed25519.SeedSize {
-		return nil, fmt.Errorf("Keychain item %s is invalid", name)
-	}
-	return ed25519.NewKeyFromSeed(seed), nil
-}
-
-func tufKeyEnvironmentName(name string) string {
-	return "PAPERBOAT_TUF_KEY_" + strings.ToUpper(strings.NewReplacer("-", "_", ".", "_").Replace(name))
-}
-
-func keyExists(name string) bool {
-	if strings.TrimSpace(os.Getenv(tufKeyEnvironmentName(name))) != "" {
-		return true
-	}
-	return exec.Command("/usr/bin/security", "find-generic-password", "-a", name, "-s", keychainService).Run() == nil
-}
-
-func nextKeyName(role string) string {
-	for generation := int64(1); ; generation++ {
-		name := role + "-" + strconv.FormatInt(generation, 10)
-		if !keyExists(name) {
-			return name
-		}
-	}
-}
-
-func sign[T metadata.Roles](value *metadata.Metadata[T], names ...string) error {
-	for _, name := range names {
-		private, err := loadKey(name)
-		if err != nil {
-			return err
-		}
-		signer, err := signature.LoadSigner(private, crypto.Hash(0))
-		if err != nil {
-			return err
-		}
-		if _, err := value.Sign(signer); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func validateRepository(path string, existing bool) (string, error) {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return "", errors.New("repository path must be absolute and clean")
@@ -1257,88 +782,6 @@ func validateRepository(path string, existing bool) (string, error) {
 		}
 	}
 	return path, nil
-}
-
-func initialSigningState() signingState {
-	return signingState{Schema: "paperboat.tuf-signing-state/v1", Roles: map[string][]string{
-		"root":      {"root-1", "root-2", "root-3"},
-		"targets":   {"targets-1", "targets-2"},
-		"snapshot":  {"snapshot-1"},
-		"timestamp": {"timestamp-1"},
-	}}
-}
-
-func signingStatePath(repo string) string { return filepath.Join(repo, ".signing-state.json") }
-
-func loadSigningState(repo string, root *metadata.Metadata[metadata.RootType], requiredRoles ...string) (signingState, error) {
-	body, err := os.ReadFile(signingStatePath(repo))
-	if err != nil {
-		return signingState{}, err
-	}
-	var state signingState
-	decoder := json.NewDecoder(strings.NewReader(string(body)))
-	decoder.DisallowUnknownFields()
-	var extra any
-	if decoder.Decode(&state) != nil || decoder.Decode(&extra) != io.EOF || state.Schema != "paperboat.tuf-signing-state/v1" {
-		return signingState{}, errors.New("TUF signing state is invalid")
-	}
-	if err := validateSigningState(root, state, requiredRoles...); err != nil {
-		return signingState{}, err
-	}
-	return state, nil
-}
-
-func validateSigningState(root *metadata.Metadata[metadata.RootType], state signingState, requiredRoles ...string) error {
-	if len(requiredRoles) == 0 {
-		requiredRoles = []string{"root", "targets", "snapshot", "timestamp"}
-	}
-	for _, role := range requiredRoles {
-		if role != "root" && role != "targets" && role != "snapshot" && role != "timestamp" {
-			return fmt.Errorf("unknown TUF signing role %q", role)
-		}
-		configured := root.Signed.Roles[role]
-		if configured == nil || len(state.Roles[role]) < configured.Threshold {
-			return errors.New("TUF signing state does not satisfy role thresholds")
-		}
-		authorizedKeyIDs := make(map[string]struct{}, len(state.Roles[role]))
-		for _, name := range state.Roles[role] {
-			private, err := loadKey(name)
-			if err != nil {
-				return err
-			}
-			key, err := metadata.KeyFromPublicKey(private.Public())
-			if err != nil {
-				return err
-			}
-			id, err := key.ID()
-			if err != nil {
-				return err
-			}
-			found := false
-			for _, allowed := range configured.KeyIDs {
-				if id == allowed {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return fmt.Errorf("Keychain item %s is not authorized for %s", name, role)
-			}
-			authorizedKeyIDs[id] = struct{}{}
-		}
-		if len(authorizedKeyIDs) < configured.Threshold {
-			return errors.New("TUF signing state does not satisfy role thresholds with unique authorized keys")
-		}
-	}
-	return nil
-}
-
-func writeSigningState(repo string, state signingState) error {
-	body, err := json.Marshal(state)
-	if err != nil {
-		return err
-	}
-	return atomicWrite(signingStatePath(repo), append(body, '\n'), 0o600)
 }
 
 func loadSet(repo string) (*metadata.Metadata[metadata.RootType], *metadata.Metadata[metadata.TargetsType], *metadata.Metadata[metadata.SnapshotType], *metadata.Metadata[metadata.TimestampType], error) {

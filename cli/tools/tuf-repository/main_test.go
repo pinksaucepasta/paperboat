@@ -19,8 +19,8 @@ import (
 
 func TestCIKeyEnvironmentAndSupportedTargets(t *testing.T) {
 	seed := bytes.Repeat([]byte{7}, ed25519.SeedSize)
-	t.Setenv(tufKeyEnvironmentName("targets-1"), base64.RawStdEncoding.EncodeToString(seed))
-	key, err := loadKey("targets-1")
+	t.Setenv("PAPERBOAT_TUF_ONLINE_KEY", base64.RawStdEncoding.EncodeToString(seed))
+	key, err := loadOnlineKey()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,19 +47,12 @@ func TestCIKeyEnvironmentAndSupportedTargets(t *testing.T) {
 
 func TestCISigningPublishesCompleteSupportedRelease(t *testing.T) {
 	t.Setenv("PAPERBOAT_TUF_CI", "1")
-	for index, name := range roles {
-		seed := bytes.Repeat([]byte{byte(index + 1)}, ed25519.SeedSize)
-		t.Setenv(tufKeyEnvironmentName(name), base64.RawStdEncoding.EncodeToString(seed))
-	}
 	repository := filepath.Join(t.TempDir(), "repository")
-	if err := initialize(repository); err != nil {
+	if err := initializeTestRepository(t, repository); err != nil {
 		t.Fatal(err)
 	}
 	// Online publication must not require the offline root keys after the
-	// repository and signing state have been initialized.
-	for _, name := range []string{"root-1", "root-2", "root-3"} {
-		t.Setenv(tufKeyEnvironmentName(name), "not-an-offline-root-key")
-	}
+	// repository has been initialized from offline-signed root metadata.
 	artifacts := t.TempDir()
 	version := "2026.08.22.13"
 	for _, target := range supportedReleaseTargets() {
@@ -221,11 +214,8 @@ func TestRefreshRejectsExpiredTargetsWithoutChangingMetadata(t *testing.T) {
 func newPublishedTestRepository(t *testing.T, version string) string {
 	t.Helper()
 	t.Setenv("PAPERBOAT_TUF_CI", "1")
-	for index, name := range roles {
-		t.Setenv(tufKeyEnvironmentName(name), base64.RawStdEncoding.EncodeToString(bytes.Repeat([]byte{byte(index + 31)}, ed25519.SeedSize)))
-	}
 	repository := filepath.Join(t.TempDir(), "repository")
-	if err := initialize(repository); err != nil {
+	if err := initializeTestRepository(t, repository); err != nil {
 		t.Fatal(err)
 	}
 	artifacts := t.TempDir()
@@ -261,25 +251,18 @@ func readTestMetadata(t *testing.T, path string) []byte {
 
 func TestCIOnlineSigningRejectsUnauthorizedKeyWithoutLoadingRootKeys(t *testing.T) {
 	t.Setenv("PAPERBOAT_TUF_CI", "1")
-	for index, name := range roles {
-		seed := bytes.Repeat([]byte{byte(index + 1)}, ed25519.SeedSize)
-		t.Setenv(tufKeyEnvironmentName(name), base64.RawStdEncoding.EncodeToString(seed))
-	}
 	repository := filepath.Join(t.TempDir(), "repository")
-	if err := initialize(repository); err != nil {
+	if err := initializeTestRepository(t, repository); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"root-1", "root-2", "root-3"} {
-		t.Setenv(tufKeyEnvironmentName(name), "not-an-offline-root-key")
-	}
 	unauthorizedSeed := bytes.Repeat([]byte{99}, ed25519.SeedSize)
-	t.Setenv(tufKeyEnvironmentName("targets-1"), base64.RawStdEncoding.EncodeToString(unauthorizedSeed))
+	t.Setenv("PAPERBOAT_TUF_ONLINE_KEY", base64.RawStdEncoding.EncodeToString(unauthorizedSeed))
 	root, _, _, _, err := loadSet(repository)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = loadSigningState(repository, root, "targets", "snapshot", "timestamp")
-	if err == nil || !strings.Contains(err.Error(), "targets-1 is not authorized for targets") {
+	err = validateOnlineSigner(root)
+	if err == nil || !strings.Contains(err.Error(), "online key is not the sole authorized signer for targets") {
 		t.Fatalf("unauthorized online key error = %v", err)
 	}
 }
@@ -288,12 +271,8 @@ func TestVerifyPublishedRejectsTamperedSignedDeploymentPolicy(t *testing.T) {
 	t.Setenv("PAPERBOAT_TUF_CI", "1")
 	t.Setenv("PAPERBOAT_RELEASE_SOURCE_COMMIT", strings.Repeat("c", 40))
 	t.Setenv("PAPERBOAT_RELEASE_TOOLCHAIN", "go1.27.1")
-	for index, name := range roles {
-		seed := bytes.Repeat([]byte{byte(index + 11)}, ed25519.SeedSize)
-		t.Setenv(tufKeyEnvironmentName(name), base64.RawStdEncoding.EncodeToString(seed))
-	}
 	repository := filepath.Join(t.TempDir(), "repository")
-	if err := initialize(repository); err != nil {
+	if err := initializeTestRepository(t, repository); err != nil {
 		t.Fatal(err)
 	}
 	artifacts := t.TempDir()
@@ -409,35 +388,29 @@ func validAssetTargetCustomFixture(t *testing.T, now time.Time) assetTargetCusto
 	return assetTargetCustom{Schema: "paperboat.tuf-asset/v1", Kind: "github-release-asset", Version: version, Platform: "linux", Architecture: "amd64", Format: "elf", AssetName: name, Repository: component.Repository, URL: component.DownloadURL, SHA256: digest, Length: component.Length, ReleaseIndex: index}
 }
 
-func TestSigningStateThresholdRequiresUniqueAuthorizedKeys(t *testing.T) {
+func TestOnlineSignerRejectsDuplicateThresholdKeys(t *testing.T) {
 	t.Setenv("PAPERBOAT_TUF_CI", "1")
-	for index, name := range roles {
-		seed := bytes.Repeat([]byte{byte(index + 1)}, ed25519.SeedSize)
-		t.Setenv(tufKeyEnvironmentName(name), base64.RawStdEncoding.EncodeToString(seed))
-	}
 	repository := filepath.Join(t.TempDir(), "repository")
-	if err := initialize(repository); err != nil {
+	if err := initializeTestRepository(t, repository); err != nil {
 		t.Fatal(err)
 	}
 	root, _, _, _, err := loadSet(repository)
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := initialSigningState()
-	state.Roles["targets"] = []string{"targets-1", "targets-1"}
-	if err := validateSigningState(root, state, "targets"); err == nil || !strings.Contains(err.Error(), "unique authorized keys") {
-		t.Fatalf("duplicate threshold error = %v", err)
+	root.Signed.Roles["targets"].Threshold = 2
+	root.Signed.Roles["targets"].KeyIDs = append(root.Signed.Roles["targets"].KeyIDs, root.Signed.Roles["targets"].KeyIDs[0])
+	root.ClearSignatures()
+	signTestRoot(t, root, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{1}, ed25519.SeedSize)))
+	if err := validateOnlineSigner(root); err == nil {
+		t.Fatal("duplicate online key satisfied a threshold of two")
 	}
 }
 
 func TestValidateSignersTrustsRootChainAndDoesNotMutateRepository(t *testing.T) {
 	t.Setenv("PAPERBOAT_TUF_CI", "1")
-	for index, name := range roles {
-		seed := bytes.Repeat([]byte{byte(index + 1)}, ed25519.SeedSize)
-		t.Setenv(tufKeyEnvironmentName(name), base64.RawStdEncoding.EncodeToString(seed))
-	}
 	repository := filepath.Join(t.TempDir(), "repository")
-	if err := initialize(repository); err != nil {
+	if err := initializeTestRepository(t, repository); err != nil {
 		t.Fatal(err)
 	}
 	trustedRoot := filepath.Join(repository, "metadata", "1.root.json")
@@ -446,37 +419,28 @@ func TestValidateSignersTrustsRootChainAndDoesNotMutateRepository(t *testing.T) 
 		t.Fatal(err)
 	}
 	timestamp2Seed := bytes.Repeat([]byte{88}, ed25519.SeedSize)
-	t.Setenv(tufKeyEnvironmentName("timestamp-2"), base64.RawStdEncoding.EncodeToString(timestamp2Seed))
+	t.Setenv("PAPERBOAT_TUF_ONLINE_KEY", base64.RawStdEncoding.EncodeToString(timestamp2Seed))
 	timestamp2, err := metadata.KeyFromPublicKey(ed25519.NewKeyFromSeed(timestamp2Seed).Public())
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldTimestampID := root.Signed.Roles["timestamp"].KeyIDs[0]
-	if err := root.Signed.RevokeKey(oldTimestampID, "timestamp"); err != nil {
-		t.Fatal(err)
-	}
-	if err := root.Signed.AddKey(timestamp2, "timestamp"); err != nil {
-		t.Fatal(err)
+	for _, role := range []string{"targets", "snapshot", "timestamp"} {
+		oldID := root.Signed.Roles[role].KeyIDs[0]
+		if err := root.Signed.RevokeKey(oldID, role); err != nil {
+			t.Fatal(err)
+		}
+		if err := root.Signed.AddKey(timestamp2, role); err != nil {
+			t.Fatal(err)
+		}
 	}
 	root.Signed.Version = 2
 	root.ClearSignatures()
-	if err := sign(root, "root-1", "root-2", "root-3"); err != nil {
-		t.Fatal(err)
-	}
+	signTestRoot(t, root, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{1}, ed25519.SeedSize)))
 	rootBody := mustMetadataBytes(root)
 	if err := os.WriteFile(filepath.Join(repository, "metadata", "2.root.json"), rootBody, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(repository, "metadata", "root.json"), rootBody, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	state := initialSigningState()
-	state.Roles["timestamp"] = []string{"timestamp-2"}
-	if err := writeSigningState(repository, state); err != nil {
-		t.Fatal(err)
-	}
-	stateBefore, err := os.ReadFile(signingStatePath(repository))
-	if err != nil {
 		t.Fatal(err)
 	}
 	rootBefore, err := os.ReadFile(filepath.Join(repository, "metadata", "root.json"))
@@ -486,25 +450,20 @@ func TestValidateSignersTrustsRootChainAndDoesNotMutateRepository(t *testing.T) 
 	if err := validateSigners(repository, trustedRoot); err != nil {
 		t.Fatal(err)
 	}
-	stateAfter, _ := os.ReadFile(signingStatePath(repository))
 	rootAfter, _ := os.ReadFile(filepath.Join(repository, "metadata", "root.json"))
-	if !bytes.Equal(stateBefore, stateAfter) || !bytes.Equal(rootBefore, rootAfter) {
+	if !bytes.Equal(rootBefore, rootAfter) {
 		t.Fatal("signer validation mutated the repository")
 	}
-	t.Setenv(tufKeyEnvironmentName("timestamp-2"), base64.RawStdEncoding.EncodeToString(bytes.Repeat([]byte{99}, ed25519.SeedSize)))
-	if err := validateSigners(repository, trustedRoot); err == nil || !strings.Contains(err.Error(), "timestamp-2 is not authorized for timestamp") {
+	t.Setenv("PAPERBOAT_TUF_ONLINE_KEY", base64.RawStdEncoding.EncodeToString(bytes.Repeat([]byte{99}, ed25519.SeedSize)))
+	if err := validateSigners(repository, trustedRoot); err == nil || !strings.Contains(err.Error(), "online key is not the sole authorized signer for targets") {
 		t.Fatalf("unauthorized rotated timestamp key error = %v", err)
 	}
 }
 
 func TestValidateSignersRejectsUnchainedServedRoot(t *testing.T) {
 	t.Setenv("PAPERBOAT_TUF_CI", "1")
-	for index, name := range roles {
-		seed := bytes.Repeat([]byte{byte(index + 1)}, ed25519.SeedSize)
-		t.Setenv(tufKeyEnvironmentName(name), base64.RawStdEncoding.EncodeToString(seed))
-	}
 	repository := filepath.Join(t.TempDir(), "repository")
-	if err := initialize(repository); err != nil {
+	if err := initializeTestRepository(t, repository); err != nil {
 		t.Fatal(err)
 	}
 	trustedRoot := filepath.Join(repository, "metadata", "1.root.json")
@@ -514,9 +473,7 @@ func TestValidateSignersRejectsUnchainedServedRoot(t *testing.T) {
 	}
 	served.Signed.Version++
 	served.ClearSignatures()
-	if err := sign(served, "root-1", "root-2", "root-3"); err != nil {
-		t.Fatal(err)
-	}
+	signTestRoot(t, served, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{1}, ed25519.SeedSize)))
 	if err := os.WriteFile(filepath.Join(repository, "metadata", "root.json"), mustMetadataBytes(served), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -608,11 +565,8 @@ func TestQualifiedSubsetPublicationRetainsOtherPlatformTargets(t *testing.T) {
 	t.Setenv("PAPERBOAT_TUF_CI", "1")
 	t.Setenv("PAPERBOAT_RELEASE_SOURCE_COMMIT", strings.Repeat("c", 40))
 	t.Setenv("PAPERBOAT_RELEASE_TOOLCHAIN", "go1.27.1")
-	for index, name := range roles {
-		t.Setenv(tufKeyEnvironmentName(name), base64.RawStdEncoding.EncodeToString(bytes.Repeat([]byte{byte(index + 31)}, ed25519.SeedSize)))
-	}
 	repository := filepath.Join(t.TempDir(), "repository")
-	if err := initialize(repository); err != nil {
+	if err := initializeTestRepository(t, repository); err != nil {
 		t.Fatal(err)
 	}
 	makeAssets := func(version string, selected []releaseTargetPlatform) (string, map[string]string) {
