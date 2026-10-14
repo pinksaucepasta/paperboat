@@ -72,16 +72,19 @@ Several sessions may work at once only in separate lanes. A lane only edits the 
 owns; a change needed in another lane's paths is written as a short request in the Log of
 PLAN.md (section 5) and done by that lane. **Only Lane A uses the test devices.**
 
-| Lane | Owns | Works on (PLAN.md) |
-|---|---|---|
-| A — CLI & devices | `cli/`, `relay/`, `tools/device-smoke/` | S0 (except console/CI rows), F1–F12, F14, F15 device and CLI parts |
-| B — Server & infrastructure | `server/`, `tunnel/`, `deploy/`, `.github/` | S0 CI rows, S1, S4 installer, F13, server parts of every feature, S3 |
-| C — Console & marketing | `console/`, `marketing/` | console parts of every feature, S2 |
+| Lane | Who | Owns | Works on (PLAN.md) |
+|---|---|---|---|
+| A — CLI & devices | Codex | `cli/`, `relay/`, `tools/device-smoke/` | S0 (except CI rows), F1–F12, F14, F15 device and CLI parts, `pbh` |
+| B — Server & infrastructure | Codex | `server/`, `tunnel/`, `deploy/`, `.github/` | S0 CI rows, S1, S4, F13, server parts of every feature, S3 |
+| C — Console & marketing | Claude only | `console/`, `marketing/` | all frontend work: console parts of every feature, S2 |
+
+**Codex never edits `console/` or `marketing/`.** When a feature needs frontend work, Codex
+finishes and pushes the Go/API side, then writes the frontend request (API, fields, states,
+errors) in the PLAN.md Log; Claude does it. Go changes the frontend needs are done by Codex.
 
 Contracts between lanes (server API, discovery response) are changed by the lane that owns
 the producer first, committed and pushed, then consumers update. A feature becomes `[x]`
 only when all its rows across lanes are done; Lane A runs its device verification last.
-With a single session, that session works all lanes in PLAN.md order.
 
 ## Code quality
 

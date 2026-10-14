@@ -99,18 +99,19 @@ ARM builds must compile, pass unit tests and be included in every release.
   installer, signed TUF metadata, installed by the `get.pprbt.dev` one-liners.
 - **Server, relay and tunnel** are released as Docker images for **linux/amd64 and
   linux/arm64** (`ghcr.io/pinksaucepasta/paperboat-server`, `…-relay`, `…-tunnel`).
-- **One installer script** installs and upgrades them, modelled on
-  `curl -fsSL https://cdn.coollabs.io/coolify/install.sh | sudo bash` (read that script before
-  designing ours): `curl -fsSL https://get.pprbt.dev/self-host.sh | sudo bash -s -- <role>` where
-  role is `server` (server + PostgreSQL + its edge/proxy), `relay`, `tunnel`, or `all`. It
-  installs Docker if missing, creates the install directory, generates secrets on first run,
-  writes the compose file from the selected image version, starts and health-checks it, and on
-  re-run upgrades in place keeping data and secrets. It must be idempotent, print what it did,
-  and fail with a clear message on unsupported systems (supported: Ubuntu 22.04/24.04 and
-  Debian 12, amd64 and arm64).
-- **Our own infrastructure is installed with the same script** (dogfooding), so the self-host
-  path is exercised for real. Self-hosted relays/edges/servers registering with our control
-  plane or running standalone follow the existing product behaviour.
+- **The server is not self-hostable and has no curl installer.** We run it ourselves on the
+  coolify VPS from its image with a compose file in `deploy/` (server, PostgreSQL 17, its
+  edge/proxy), using config/env for every domain.
+- **Self-hosting is relay and tunnel only, through `pbh`** (`relay/cmd/pbh`, existing
+  installer `relay/deploy/install.sh`, docs `relay/deploy/README.md`). The one-liner, modelled
+  on `curl -fsSL https://cdn.coollabs.io/coolify/install.sh | sudo bash` (read it first), is
+  `curl -fsSL <get domain>/selfhost/install | sh -s -- --enable relay|tunnel|both`. It installs
+  Docker if missing, installs `pbh`, runs the selected relay/tunnel images, health-checks them,
+  prints the claim code, and on re-run upgrades in place keeping state. Idempotent, prints what
+  it did, clear refusal on unsupported systems (Ubuntu 22.04/24.04, Debian 12; amd64, arm64).
+  Rework the existing binary+systemd installer to this; do not keep both.
+- **Our own relays and tunnel edge are installed with the same `pbh` installer** (dogfooding),
+  then enrolled as Paperboat global nodes through the operator enrollment API.
 
 ### 1.5 Repository and process
 
@@ -175,28 +176,28 @@ Each feature lists: **What** (the user-facing capability), **Surfaces** (CLI, co
 Prerequisite: the user has formatted coolify and said so.
 
 - S1-01: **No domain is hardcoded anywhere** (AGENTS.md). Remove every domain literal from code in all modules. Find them with `grep -rnE "pprbt\.dev|pprbt\.app|ppr\.boats|paperboat\.cloud"` (today `local.pprbt.dev` ~43 files, `get.pprbt.dev` ~19, `api.pprbt.dev` ~12, `preview.pprbt.dev`/`tunnels.pprbt.dev` ~7 each). Sources: server/tunnel/relay = deployment configuration; CLI/daemon = API address from build config (`DefaultServerURL`, overridable with `--server`), all other domains from a server discovery response fetched at login/pair and cached; console = environment config + the same discovery response; marketing = site config; tests = `example.test`. Afterwards the grep returns nothing in code.
-- S1-02: Local access names: `<machine>.ppr.boats`, `<port>.<machine>.ppr.boats` (lazy URL), `<machine>.ppr.boats:<port>`; local CA name constraint and leaves use the configured local domain; OpenSSH aliases `<machine>.<local domain>`; DNS `*.ppr.boats` and `*.*.ppr.boats` → `127.100.0.1` (Cloudflare).
+- S1-02: Local access names: `<machine>.ppr.boats`, `<port>.<machine>.ppr.boats` (lazy URL), `<machine>.ppr.boats:<port>`; local CA name constraint and leaves use the configured local domain; OpenSSH aliases `<machine>.<local domain>`. DNS is done (not on Cloudflare; already verified 2026-10-14: `x.ppr.boats` and `3000.x.ppr.boats` → `127.100.0.1`); never automate ppr.boats DNS.
 - S1-03: Previews and tunnels at `<name>.pprbt.app`; names from the existing name generator; preview names immutable; tunnel rename in server, CLI and console; global uniqueness.
 - S1-04: Console origin `app.paperboat.cloud` and marketing `paperboat.cloud` configured for production (links, CORS/allowed origins, WorkOS redirects) while the dev console keeps https://oracle.newt-mermaid.ts.net — configuration only.
 - S1-05: Unit tests use the configured test domain; switching the deployment's domains in configuration works without a code change (verify once).
-- S1-06: Server stack (server, PostgreSQL 17 with migrations from zero, diagnostics store, edge/proxy for `api.pprbt.dev` and `get.pprbt.dev`) installed on the formatted coolify **with the S4 installer** (`self-host.sh server`), using images built from this repo.
+- S1-06: Server stack (server, PostgreSQL 17 with migrations from zero, diagnostics store, edge/proxy for the API and get domains) deployed on the formatted coolify from the server image with the `deploy/` compose file; all domains from env.
 - S1-07: Secrets restored from `~/paperboat-archive/coolify-backup/` into the deployment (never printed or committed).
 - S1-08: DNS records for all of 1.2; TLS certificates issued and renewing (`*.pprbt.app` wildcard, `api`/`get.pprbt.dev`).
 - S1-09: Tunnel edge serving `*.pprbt.app` (HTTP/1.1, HTTP/2, HTTP/3, WebSocket).
-- S1-10: Relays and the tunnel edge installed with the S4 installer (`relay`, `tunnel` roles), registered, reported ready by the server.
+- S1-10: Our relays and tunnel edge installed with the `pbh` installer (S4), enrolled as global nodes, reported ready by the server.
 - S1-11: WorkOS sign-in through the console dev origin; new account creation works.
 - S1-12: Daily database backup runs; one restore into a scratch database tested.
 - S1-13: Server `/healthz` and Sentry error reporting (if configured in the backup) work.
 - S1-14: Console ↔ server contract fixes from console/NOTES.md that every feature depends on: unknown `/v1/` paths return 404 (not 401); OpenAPI response schemas for `/v1/me` and machine endpoints; sign-in return path.
 
-### S4. Self-host installer and images (Lane B; needed by S1)
+### S4. Images and the pbh self-host installer (Lane B; needed by S1)
 
 - S4-01: Docker images for server, relay and tunnel build for linux/amd64 and linux/arm64 from this repo (multi-arch manifests), tagged with the release version.
-- S4-02: `self-host.sh` implements 1.4b on a fresh Ubuntu 24.04 VPS: installs Docker, generates secrets, starts the selected role(s), health-checks them, prints the result.
+- S4-02: The `pbh` installer implements 1.4b on a fresh Ubuntu 24.04 VPS for `relay`, `tunnel` and `both`: installs Docker, runs the images, health-checks, prints the claim code. The server image deploys from `deploy/` compose and is not part of this installer.
 - S4-03: Re-running it upgrades in place to a newer image version, keeping data and secrets; a failed upgrade leaves the previous version running.
 - S4-04: Works on amd64 and arm64 (arm64: build-only plus one run in an arm64 container/VM if available), and on Debian 12; unsupported systems get a clear refusal.
 - S4-05: Uninstall/teardown option removes containers and (only with explicit confirmation) data.
-- S4-06: Self-host documentation: how to run your own server/relay/tunnel and connect `pb` to it (`--server`), written from the actual script behaviour.
+- S4-06: Self-host documentation (`relay/deploy/README.md`): run your own relay/tunnel with `pbh`, claim it in the console, use it from `pb`; written from the actual script behaviour.
 
 ### F1. Install and setup
 
