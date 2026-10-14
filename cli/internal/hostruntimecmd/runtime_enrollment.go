@@ -76,17 +76,21 @@ func prepareWindowsBootstrapRuntime(ctx context.Context, reuseIdentity, runtimeE
 		var err error
 		artifactPath, err = fetchArtifact(ctx)
 		if err != nil {
-			return "", err
+			return "", runtimeFailure("Machine pairing failed while preparing the installation executable. Run pb doctor, then retry pairing with the same enrollment token file.", err)
 		}
 	}
 	if err := reconcileRuntimeEnrollment(ctx, runtimeEnrolled, ensureRuntime, recordRuntime); err != nil {
-		return "", err
+		return "", runtimeFailure("Machine pairing failed while preparing runtime credentials. Run pb doctor, then retry pairing with the same enrollment token file.", err)
 	}
 	if err := ensureMachineControl(ctx); err != nil {
-		return "", err
+		return "", runtimeFailure("Machine pairing failed while preparing machine-control credentials. Run pb doctor, then retry pairing with the same enrollment token file.", err)
 	}
 	if reuseIdentity {
-		return fetchArtifact(ctx)
+		path, err := fetchArtifact(ctx)
+		if err != nil {
+			return "", runtimeFailure("Machine pairing failed while preparing the installation executable. Run pb doctor, then retry pairing with the same enrollment token file.", err)
+		}
+		return path, nil
 	}
 	return artifactPath, nil
 }
