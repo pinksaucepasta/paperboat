@@ -165,8 +165,14 @@ func TestTRK35IntegratedRouteLifecycleFaultHarness(t *testing.T) {
 	if got := secondPair.probes.Load(); got != 1 {
 		t.Fatalf("replayed origin probes = %d, want 1", got)
 	}
-	if got := len(observer.snapshot()); got != 1 || observer.snapshot()[0].AssignmentID != oldAssignment.AssignmentID {
-		t.Fatalf("replayed ACK observations = %+v", observer.snapshot())
+	observations := observer.snapshot()
+	if len(observations) != 2 {
+		t.Fatalf("replayed ACK observations = %+v", observations)
+	}
+	for index, want := range []string{"prepared", "ready"} {
+		if observations[index].AssignmentID != oldAssignment.AssignmentID || observations[index].ObservedState != want {
+			t.Fatalf("replayed observation %d = %+v, want exact assignment %s", index, observations[index], want)
+		}
 	}
 
 	// A real route lease and carrier stream consume the one-stream budget. The

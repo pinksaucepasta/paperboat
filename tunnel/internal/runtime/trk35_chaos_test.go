@@ -59,8 +59,20 @@ func TestTRK35RouteWorkerLostAckRestartAndIdempotentReconcile(t *testing.T) {
 	if _, err := canonical.Match(assignment.PublicHost, "/"); err != nil {
 		t.Fatalf("restart did not activate canonical route: %v", err)
 	}
-	if got := observer.calls.Load(); got != 2 {
-		t.Fatalf("route ACK calls after restart = %d, want 2", got)
+	if got := observer.calls.Load(); got != 3 {
+		t.Fatalf("route ACK calls after restart = %d, want 3", got)
+	}
+
+	observer.mu.Lock()
+	observations := append([]control.RouteObservation(nil), observer.observed...)
+	observer.mu.Unlock()
+	if len(observations) != 2 {
+		t.Fatalf("accepted restart observations = %+v", observations)
+	}
+	for index, want := range []string{"prepared", "ready"} {
+		if observations[index].AssignmentID != assignment.AssignmentID || observations[index].ObservedState != want {
+			t.Fatalf("restart observation %d = %+v, want exact assignment %s", index, observations[index], want)
+		}
 	}
 
 	// Replaying the unchanged complete snapshot is an idempotent reconciliation:
@@ -71,8 +83,14 @@ func TestTRK35RouteWorkerLostAckRestartAndIdempotentReconcile(t *testing.T) {
 	if got := canonical.Generation(); got != 1 {
 		t.Fatalf("idempotent reconcile changed generation to %d", got)
 	}
-	if got := observer.calls.Load(); got != 3 {
-		t.Fatalf("route ACK calls after replay = %d, want 3", got)
+	if got := observer.calls.Load(); got != 4 {
+		t.Fatalf("route ACK calls after replay = %d, want 4", got)
+	}
+	observer.mu.Lock()
+	observations = append([]control.RouteObservation(nil), observer.observed...)
+	observer.mu.Unlock()
+	if len(observations) != 3 || observations[2].AssignmentID != assignment.AssignmentID || observations[2].ObservedState != "ready" {
+		t.Fatalf("unchanged replay must refresh ready without preparing again: %+v", observations)
 	}
 	if got := len(durable.Snapshot()); got != 1 || durable.Snapshot()[0].AssignmentID != assignment.AssignmentID {
 		t.Fatalf("idempotent reconcile changed admissions: %+v", durable.Snapshot())
