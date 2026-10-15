@@ -15,6 +15,7 @@ import (
 
 var ErrDenied = errors.New("native private access denied")
 var ErrInvalid = errors.New("native private access request invalid")
+var ErrAuthorityUnavailable = errors.New("machine service current announcement is unavailable")
 
 type Target struct {
 	CLIClientSessionID string `json:"cli_client_session_id,omitempty"`

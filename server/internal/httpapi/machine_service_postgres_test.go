@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat-server/internal/auth"
 	"github.com/pinksaucepasta/paperboat-server/internal/config"
@@ -128,6 +129,15 @@ func TestMachineServiceSignedRuntimePostgres(t *testing.T) {
 	}
 	if !afterExpiry.Equal(originalExpiry) {
 		t.Fatal("current-authority check renewed an admission credential")
+	}
+	// An observation outage is not an authoritative access withdrawal.
+	exec(`UPDATE machine_service_snapshots SET expires_at=now()-interval '1 second' WHERE machine_id=$1`, machine)
+	if _, err := resolver.ResolveNativePrivate(ctx, nativeprivateaccess.Request{AccountID: owner, UserID: owner, CLIClientSessionID: owner, OperationID: "stale-fresh-test", ResourceKind: "machine_service", ResourceID: machine, RouteID: "tcp:5432", Protocol: "tcp"}); !errors.Is(err, nativeprivateaccess.ErrDenied) {
+		t.Fatalf("new admission accepted stale service announcement: %v", err)
+	}
+	w = request("/v1/runtime-machine-services/authorize", body)
+	if w.Code != 503 {
+		t.Fatalf("stale observation falsely revoked admitted work: status=%d", w.Code)
 	}
 	exec(`UPDATE paperboat.cli_client_sessions SET state='revoked',revoked_at=now() WHERE id=$1`, owner)
 	w = request("/v1/runtime-machine-services/authorize", body)

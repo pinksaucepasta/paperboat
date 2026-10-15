@@ -228,7 +228,7 @@ that use them; say which in Evidence.
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
 | F5-01 | Interactive `pb ssh <m>` and `pb ssh <m> -- cmd` work on the first attempt every time — all pairs. | [ ] | [ ] | [ ] | — |
-| F5-02 | SSH sessions held 1+ hour stay connected. | [ ] | [ ] | [ ] | 1.4c machine-service current authority survives original credential TTL without renewing stored credential expiry; TestMachineServiceSignedRuntimePostgres PASS0.14s; current CLI-session revoke still denied. Full smoke pending. |
+| F5-02 | SSH sessions held 1+ hour stay connected. | [ ] | [ ] | [ ] | 1.4c machine-service current authority survives original credential TTL without renewing stored credential expiry; TestMachineServiceSignedRuntimePostgres PASS0.14s; current CLI-session revoke still denied. Full smoke pending.  Stale-announcement HTTP regression fails old403/PASS0.18s with503; explicit caller revoke stays403, new stale admission denied. Private actor SQL TTL/offline/current-binding/revocation test PASS0.18s. Final L/M smoke pending. |
 | F5-03 | `pb scp`, `pb sftp`, `pb rsync` both directions, large trees, resume after interruption. | [ ] | [ ] | [ ] | — |
 | F5-04 | Plain `ssh <m>.<local domain>` and VS Code Remote-SSH connect through the generated aliases; host-key verification normal; `pb ssh trust-host` handles a changed key. | [ ] | [ ] | [ ] | Server TestSQLRepositoryManagedSSHAuthorityLifecycle PostgreSQL PASS0.57s: exact ownership/generation, pending key promotion, team use versus administration, withdrawal, replay conflict and audit privacy. Key bounds/session/account revocation PASS0.28s/0.14s. Device integration pending Lane A. |
 | F5-05 | `pb ssh doctor` finds and explains broken integration. | [ ] | [ ] | [ ] | — |

@@ -109,10 +109,10 @@ func (r *SQLResolver) MachineServiceCurrent(ctx context.Context, in Request, ses
 	if e != nil {
 		return time.Time{}, ErrDenied
 	}
-	var current bool
+	var current, online bool
 	var expiry time.Time
 	var services []byte
-	e = r.database.QueryRowContext(ctx, `SELECT paperboat.machine_service_session_allowed(a.id),s.expires_at,s.services FROM paperboat.user_machine_access_sessions a JOIN paperboat.user_machines m ON m.id=a.user_machine_id JOIN paperboat.machine_service_snapshots s ON s.machine_id=m.id WHERE a.id=$1 AND a.user_id=$2 AND a.cli_client_session_id=$3 AND a.user_machine_id=$4 AND a.machine_service_port=$5 AND a.machine_service_source_generation=$6 AND m.environment_id=$7 AND m.installation_generation=$8 AND s.installation_generation=$8 AND s.boot_id=$9 AND s.generation=$10 AND m.state='online' AND m.online AND s.expires_at>now()`, session, in.UserID, in.CLIClientSessionID, in.ResourceID, port, expected.PolicyGeneration, expected.EnvironmentID, expected.InstallationGeneration, expected.BootID, expected.AnnouncementGeneration).Scan(&current, &expiry, &services)
+	e = r.database.QueryRowContext(ctx, `SELECT paperboat.machine_service_session_allowed(a.id),s.expires_at,s.services,m.online FROM paperboat.user_machine_access_sessions a JOIN paperboat.user_machines m ON m.id=a.user_machine_id JOIN paperboat.machine_service_snapshots s ON s.machine_id=m.id WHERE a.id=$1 AND a.user_id=$2 AND a.cli_client_session_id=$3 AND a.user_machine_id=$4 AND a.machine_service_port=$5 AND a.machine_service_source_generation=$6 AND m.environment_id=$7 AND m.installation_generation=$8 AND s.installation_generation=$8 AND s.boot_id=$9 AND s.generation=$10`, session, in.UserID, in.CLIClientSessionID, in.ResourceID, port, expected.PolicyGeneration, expected.EnvironmentID, expected.InstallationGeneration, expected.BootID, expected.AnnouncementGeneration).Scan(&current, &expiry, &services, &online)
 	if pureNativeRejection(e, sql.ErrNoRows) {
 		return time.Time{}, ErrDenied
 	}
@@ -136,5 +136,8 @@ func (r *SQLResolver) MachineServiceCurrent(ctx context.Context, in Request, ses
 		return time.Time{}, ErrDenied
 	}
 
+	if !online || !expiry.After(r.now()) {
+		return time.Time{}, ErrAuthorityUnavailable
+	}
 	return expiry, nil
 }

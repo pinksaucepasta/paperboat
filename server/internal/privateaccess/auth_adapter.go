@@ -34,7 +34,7 @@ func (v *SQLMachineStateVerifier) verifyMachine(ctx context.Context, identity Id
 		WHERE machines.id=$1 AND machines.user_id=$2 AND machines.installation_generation=$3
 		  AND control.installation_generation=machines.installation_generation
 		  AND ($6 OR (control.credential_jti=$4 AND control.expires_at > $5))
-		  AND machines.state='online' AND machines.online
+		  AND (($6 AND machines.state IN ('online','offline')) OR (machines.state='online' AND machines.online))
 		  AND machines.deleted_at IS NULL AND machines.revoked_at IS NULL
 	)`, identity.MachineID, identity.AccountID, int64(identity.InstallationGeneration), identity.SessionID, now.UTC(), admitted).Scan(&ok)
 	if err != nil {
