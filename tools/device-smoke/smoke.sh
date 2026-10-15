@@ -243,6 +243,21 @@ sys.exit(0 if ok else 1)
 PY
 )
 DRIVER_UPLOADED=0
+cleanup_terminal() { # cleanup_terminal TARGET EXACT-NAME CHECK-ID
+  local t=$1 name=$2 id=$3 t0 out status
+  t0=$(now)
+  if ! on hp "mkdir -p /tmp/$RUN_ID && cat > /tmp/$RUN_ID/session_cleanup.py" < "$HERE/session_cleanup.py"; then
+    record "$id:$t" FAIL 0 "could not upload exact session cleanup helper"
+    return
+  fi
+  out=$(on hp "python3 /tmp/$RUN_ID/session_cleanup.py $PB_HP $t $name" 2>&1); status=$?
+  if [ "$status" = 0 ] && marker_present "$out" SESSION_CLEANUP_OK; then
+    record "$id:$t" PASS $(( $(now)-t0 ))
+  else
+    record "$id:$t" FAIL $(( $(now)-t0 )) "exact terminal session cleanup was not acknowledged; output withheld"
+  fi
+}
+
 test_terminal() { # test_terminal TARGET [ID-PREFIX]
   local t=$1 prefix=${2:-terminal} t0 out status marker="tm$RUN_ID$RANDOM" line
   if [ $DRIVER_UPLOADED = 0 ]; then
@@ -254,6 +269,7 @@ test_terminal() { # test_terminal TARGET [ID-PREFIX]
   out=$(on hp "python3 /tmp/$RUN_ID/term.py $PB_HP $t smoke-$marker '$line' $marker-42" 2>&1); status=$?
   if [ "$status" = 0 ] && marker_present "$out" TERMINAL_OK; then record "$prefix:$t" PASS $(( $(now)-t0 ))
   else record "$prefix:$t" FAIL $(( $(now)-t0 )) "terminal or transport failed; output withheld"; fi
+  cleanup_terminal "$t" "smoke-$marker" "cleanup-$prefix"
 }
 
 test_transfer() {
@@ -341,7 +357,8 @@ update_target() { # update TARGET with the build in UPDATE_DIR while work is liv
   if ! start_update_terminal "$t"; then
     record "during-update-terminal:$t" FAIL 120 "terminal did not become ready before update"
     on hp "touch /tmp/$RUN_ID/upd-term-$t.resume" >/dev/null
-    collect "cleanup-update-terminal:$t" "upd-term-$t" TERMINAL_OK
+    collect "reap-update-terminal:$t" "upd-term-$t" TERMINAL_OK
+    cleanup_terminal "$t" "smoke-update-$RUN_ID" cleanup-update-terminal
     return
   fi
   start_long_ssh "$t" "upd-ssh-$t" 240
@@ -357,6 +374,7 @@ update_target() { # update TARGET with the build in UPDATE_DIR while work is liv
   else record "update:$t" FAIL $(( $(now)-t0 )) "$(tr '\n' ' ' <<<"$out" | tail -c 200)"; fi
   on hp "touch /tmp/$RUN_ID/upd-term-$t.resume" >/dev/null
   collect "during-update-terminal:$t" "upd-term-$t" TERMINAL_OK
+  cleanup_terminal "$t" "smoke-update-$RUN_ID" cleanup-update-terminal
   collect "during-update-ssh:$t" "upd-ssh-$t" SSHFINAL 240
   test_terminal "$t" after-update-terminal
   test_exec "$t" after-update-exec

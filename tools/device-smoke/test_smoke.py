@@ -1,4 +1,5 @@
 import os
+import json
 import pathlib
 import subprocess
 import tempfile
@@ -11,6 +12,51 @@ HERE = pathlib.Path(__file__).resolve().parent
 
 
 class SmokeReceipts(unittest.TestCase):
+    def test_terminal_removes_only_its_exact_session_and_preserves_primary_failure(self):
+        prefix = (HERE / 'smoke.sh').read_text().split('# ---------------------------------------------------------------- run')[0]
+        for terminal_exit, fault in [(0, ""), (7, ""), (0, "foreign_scope"), (0, "failed_delete"), (0, "foreign_ack")]:
+            with self.subTest(terminal_exit=terminal_exit, fault=fault), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                state = root / "state.json"
+                state.write_text(json.dumps({"sessions": [], "mutations": []}))
+                pb = root / "pb"
+                pb.write_text(SESSION_PB_FIXTURE)
+                pb.chmod(0o700)
+                harness = root / "boundary.py"
+                harness.write_text(SESSION_BOUNDARY_FIXTURE)
+                script = root / "smoke.sh"
+                script.write_text(prefix + r'''
+HERE="$SUITE_DIR"
+PB_HP="$FIXTURE_PB"
+on() {
+  shift
+  case "$*" in
+    python3*term.py*) REMOTE_COMMAND="$*" python3 "$BOUNDARY" terminal ;;
+    python3*session_cleanup.py*) REMOTE_COMMAND="$*" python3 "$BOUNDARY" cleanup ;;
+    *) cat >/dev/null ;;
+  esac
+}
+test_terminal hp
+exit "$FAILED"
+''')
+                result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'hp'],
+                    env=dict(os.environ, SUITE_DIR=str(HERE), FIXTURE_PB=str(pb), BOUNDARY=str(harness),
+                             FIXTURE_STATE=str(state), TERMINAL_EXIT=str(terminal_exit), SESSION_FAULT=fault),
+                    capture_output=True, text=True, timeout=15)
+                self.assertEqual(result.returncode, int(bool(terminal_exit or fault)), result.stdout + result.stderr)
+                self.assertIn('cleanup-terminal:hp', result.stdout)
+                final = json.loads(state.read_text())
+                self.assertEqual([x['id'] for x in final['sessions'] if x['id'] != 'session_owned'],
+                                 ['session_foreign', 'session_default'])
+                if fault:
+                    self.assertIn('FAIL', result.stdout)
+                else:
+                    self.assertNotIn('session_owned', [x['id'] for x in final['sessions']])
+                    self.assertIn('delete:session_owned', final['mutations'])
+                if fault == 'foreign_scope':
+                    self.assertEqual(final['mutations'], [])
+                self.assertNotIn('PRIVATE_SESSION_DETAIL', result.stdout + result.stderr)
+
     def test_preview_stops_its_exact_lease_and_cleanup_failure_fails_run(self):
         prefix = (HERE / 'smoke.sh').read_text().split('# ---------------------------------------------------------------- run')[0]
         for stop_exit, stop_id, stop_state, create_exit in [(0, "preview_owned", "stopped", 0), (7, "preview_owned", "stopped", 0),
@@ -171,6 +217,57 @@ class WindowsInstallReceipt(unittest.TestCase):
             with self.subTest(receipt=receipt), self.assertRaises(ValueError):
                 windows_executable(receipt)
 
+
+
+
+SESSION_BOUNDARY_FIXTURE = r'''
+import json, os, shlex, subprocess, sys
+from pathlib import Path
+path=Path(os.environ['FIXTURE_STATE'])
+args=shlex.split(os.environ['REMOTE_COMMAND'])
+if sys.argv[1]=='terminal':
+    path.write_text(json.dumps({'sessions':[
+      {'id':'session_owned','name':args[4],'state':'running','is_default':False},
+      {'id':'session_foreign','name':'unrelated','state':'running','is_default':False},
+      {'id':'session_default','name':'default','state':'running','is_default':True}], 'mutations':[]}))
+    print('TERMINAL_FAIL' if int(os.environ['TERMINAL_EXIT']) else 'TERMINAL_OK')
+    sys.exit(int(os.environ['TERMINAL_EXIT']))
+sys.exit(subprocess.run([sys.executable,os.environ['SUITE_DIR']+'/session_cleanup.py',*args[2:]]).returncode)
+'''
+
+SESSION_PB_FIXTURE = r'''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+path=Path(os.environ['FIXTURE_STATE'])
+state=json.loads(path.read_text())
+action=sys.argv[2]
+fault=os.environ['SESSION_FAULT']
+environment={'id':'machine_owned'}
+if action=='list':
+    print(json.dumps({'version':'1','environment':environment,'sessions':state['sessions']}))
+    sys.exit(0)
+session=sys.argv[4]
+if session!='session_owned':
+    print('PRIVATE_SESSION_DETAIL',file=sys.stderr)
+    sys.exit(9)
+if '--confirm' not in sys.argv:
+    scope='session-'+action+':machine_owned:'+session
+    if fault=='foreign_scope': scope='session-close:machine_foreign:session_other'
+    print(json.dumps({'ok':False,'data':{'outcome':'confirmation_required','scope':scope,'confirmation_token':'ABC123'},
+                      'error':{'code':'confirmation_required'}}))
+    sys.exit(2)
+state['mutations'].append(action+':'+session)
+if action=='close':
+    state['sessions'][0]['state']='closed'
+    receipt={'state':'closed'}
+else:
+    receipt={'deleted':True}
+    if fault!='failed_delete': state['sessions']=[s for s in state['sessions'] if s['id']!=session]
+path.write_text(json.dumps(state))
+print(json.dumps({'version':'1','environment':environment,
+                  'session_id':'session_other' if fault=='foreign_ack' else session,**receipt}))
+sys.exit(7 if action=='delete' and fault=='failed_delete' else 0)
+'''
 
 if __name__ == '__main__':
     unittest.main()
