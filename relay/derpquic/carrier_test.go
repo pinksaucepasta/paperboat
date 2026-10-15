@@ -591,7 +591,7 @@ func testExpiredLeaseRecovers(t *testing.T, fallback bool) {
 }
 
 func TestRelayReceiptRetainsAdmittedExpiryAndValidatesScopeShape(t *testing.T) {
-	for _, invalid := range []string{"", "expired_invalid_shape", "expired_scope_overflow"} {
+	for _, invalid := range []string{"", "expired_invalid_shape", "expired_scope_overflow", "missing_scope_expiry"} {
 		t.Run(invalid, func(t *testing.T) {
 			f := newFixture(t)
 			cert := certificate(t)
@@ -611,6 +611,9 @@ func TestRelayReceiptRetainsAdmittedExpiryAndValidatesScopeShape(t *testing.T) {
 			a.Peers = append(a.Peers, Peer{WireGuardPublicKey: KeyString(key.NewNode().Public()), Scopes: []Scope{old}})
 			if invalid == "expired_invalid_shape" {
 				a.Peers[1].Scopes[0].Port = 22
+			}
+			if invalid == "missing_scope_expiry" {
+				a.Peers[1].Scopes[0].ExpiresAt = 0
 			}
 			if invalid == "expired_scope_overflow" {
 				for i := 0; i < 129; i++ {
