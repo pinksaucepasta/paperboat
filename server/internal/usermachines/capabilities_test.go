@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
 )
@@ -58,5 +59,48 @@ func TestMachineCapabilityMutationRejectsInvalidAuthorityBeforeStorage(t *testin
 		if _, err := service.SetMachineCapabilities(context.Background(), input.user, input.machine, input.key, MachineCapabilitySelection{}, input.version); !errors.Is(err, ErrCapabilitiesInvalid) {
 			t.Fatalf("input=%+v error=%v", input, err)
 		}
+	}
+}
+
+func TestMachineCapabilityApplicationMatchesDesiredPostgres(t *testing.T) {
+	f := newWorkspaceMachineFixture(t)
+	environmentID := "env_" + f.suffix
+	initial, err := f.service.ResolveMachineCapabilities(f.ctx, f.machine, environmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	desired := MachineCapabilitySelection{ManagedSSH: true}
+	policy, err := f.service.SetMachineCapabilities(f.ctx, f.account, f.machine, "capability-observation-"+f.suffix, desired, initial.DesiredVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := MachineCapabilitiesObservation{Schema: MachineCapabilitiesSchemaV1, Version: policy.DesiredVersion, Applied: initial.Desired, Status: "applied", ObservedAt: time.Now().UTC()}
+	if err := f.service.RecordMachineCapabilitiesObservation(f.ctx, f.machine, environmentID, observed); !errors.Is(err, ErrCapabilitiesObservationStale) {
+		t.Fatalf("different desired capabilities reported applied: %v", err)
+	}
+	unchanged, err := f.service.ResolveMachineCapabilities(f.ctx, f.machine, environmentID)
+	if err != nil || unchanged.AppliedVersion != initial.AppliedVersion || unchanged.Applied != initial.Applied || unchanged.Status != "pending" {
+		t.Fatal("rejected capability acknowledgement changed observed state")
+	}
+	observed.Status, observed.ErrorCode = "error", "apply_failed"
+	if err := f.service.RecordMachineCapabilitiesObservation(f.ctx, f.machine, environmentID, observed); err != nil {
+		t.Fatalf("actual previous capabilities on application failure: %v", err)
+	}
+	observed.Status, observed.ErrorCode, observed.Applied = "applied", "", desired
+	if err := f.service.RecordMachineCapabilitiesObservation(f.ctx, f.machine, environmentID, observed); err != nil {
+		t.Fatalf("successful application after failure: %v", err)
+	}
+	final, err := f.service.ResolveMachineCapabilities(f.ctx, f.machine, environmentID)
+	if err != nil || final.Applied != desired || final.AppliedVersion != policy.DesiredVersion || final.Status != "applied" {
+		t.Fatal("successful acknowledgement did not publish exact desired state")
+	}
+	if err := f.service.RecordMachineCapabilitiesObservation(f.ctx, f.machine, environmentID+"-foreign", observed); !errors.Is(err, ErrCapabilitiesObservationStale) {
+		t.Fatalf("foreign environment changed capabilities: %v", err)
+	}
+	if _, err := f.store.SQL().ExecContext(f.ctx, `UPDATE paperboat.user_machines SET state='revoked' WHERE id=$1`, f.machine); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.service.RecordMachineCapabilitiesObservation(f.ctx, f.machine, environmentID, observed); !errors.Is(err, ErrCapabilitiesObservationStale) {
+		t.Fatalf("revoked machine published applied capabilities: %v", err)
 	}
 }

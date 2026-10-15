@@ -150,14 +150,26 @@ func (s *Service) RecordMachineCapabilitiesObservation(ctx context.Context, mach
 	if machineID == "" || environmentID == "" || in.Schema != MachineCapabilitiesSchemaV1 || in.Version < 1 || in.ObservedAt.IsZero() || !slices.Contains([]string{"applied", "error"}, in.Status) || in.Status == "applied" && in.ErrorCode != "" || in.Status == "error" && !safeAvailabilityCode.MatchString(in.ErrorCode) {
 		return ErrCapabilitiesInvalid
 	}
-	rows, err := s.db.Queries().RecordUserMachineCapabilitiesObservation(ctx, dbsqlc.RecordUserMachineCapabilitiesObservationParams{ObservedCapabilities: capabilityNames(in.Applied), ObservedVersion: in.Version, Status: in.Status, ErrorCode: sql.NullString{String: in.ErrorCode, Valid: in.ErrorCode != ""}, ID: machineID, EnvironmentID: environmentID})
-	if err != nil {
-		return err
-	}
-	if rows != 1 {
-		return ErrCapabilitiesObservationStale
-	}
-	return nil
+	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		machine, err := tx.Queries().GetUserMachineForEnvironmentBandwidthUpdate(ctx, environmentID)
+		if errors.Is(err, sql.ErrNoRows) || err == nil && machine.ID != machineID {
+			return ErrCapabilitiesObservationStale
+		}
+		if err != nil {
+			return err
+		}
+		if in.Status == "applied" && in.Applied != selectionFromNames(machine.ConfiguredCapabilities) {
+			return ErrCapabilitiesObservationStale
+		}
+		rows, err := tx.Queries().RecordUserMachineCapabilitiesObservation(ctx, dbsqlc.RecordUserMachineCapabilitiesObservationParams{ObservedCapabilities: capabilityNames(in.Applied), ObservedVersion: in.Version, Status: in.Status, ErrorCode: sql.NullString{String: in.ErrorCode, Valid: in.ErrorCode != ""}, ID: machineID, EnvironmentID: environmentID})
+		if err != nil {
+			return err
+		}
+		if rows != 1 {
+			return ErrCapabilitiesObservationStale
+		}
+		return nil
+	})
 }
 
 func capabilityNames(value MachineCapabilitySelection) []string {
