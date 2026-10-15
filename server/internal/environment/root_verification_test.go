@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
+	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"testing"
 	"time"
 
@@ -25,7 +26,7 @@ func testVerificationRoot(t *testing.T, seedByte byte) (peeridentity.AccountKey,
 	t.Helper()
 	private := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{seedByte}, ed25519.SeedSize))
 	public := private.Public().(ed25519.PublicKey)
-	fingerprint, err := peeridentity.RootFingerprint(public)
+	fingerprint, err := wire.RootFingerprint(public)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +67,7 @@ func signTestEndpointCertificate(t *testing.T, private ed25519.PrivateKey, accou
 		payload.WriteString(value)
 	}
 	writeString(account)
-	payload.WriteByte(byte(peeridentity.RoleMachine))
+	payload.WriteByte(byte(wire.RoleMachine))
 	writeString(endpoint)
 	payload.Write(bytes.Repeat([]byte{1}, 32))
 	for _, value := range []uint64{generation, 1, uint64(issued.Unix()), uint64(expires.Unix())} {

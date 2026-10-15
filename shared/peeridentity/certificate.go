@@ -1,5 +1,4 @@
-// Package peeridentity validates account-rooted endpoint certificates at the
-// server trust boundary.
+// Package peeridentity owns the account-rooted endpoint certificate wire format.
 package peeridentity
 
 import (
@@ -14,8 +13,8 @@ import (
 )
 
 const (
-	protocolVersion = 1
-	maximumInteger  = 9007199254740991
+	ProtocolVersion = 1
+	MaximumInteger  = 9007199254740991
 	minimumBytes    = 4 + 1 + 2 + 1 + 1 + 2 + 1 + 32 + 8*4 + ed25519.SignatureSize
 	maximumBytes    = 4 + 1 + 2 + 128 + 1 + 2 + 128 + 32 + 8*4 + ed25519.SignatureSize
 )
@@ -107,7 +106,7 @@ func parse(raw []byte) (Certificate, []byte, []byte, error) {
 		return Certificate{}, nil, nil, ErrInvalid
 	}
 	payload := raw[:len(raw)-ed25519.SignatureSize]
-	if len(payload) < 5 || string(payload[:4]) != "PBEC" || payload[4] != protocolVersion {
+	if len(payload) < 5 || string(payload[:4]) != "PBEC" || payload[4] != ProtocolVersion {
 		return Certificate{}, nil, nil, ErrInvalid
 	}
 	offset := 5
@@ -143,8 +142,8 @@ func parse(raw []byte) (Certificate, []byte, []byte, error) {
 
 func validCertificate(value Certificate) bool {
 	if !identifierExpr.MatchString(value.AccountID) || !identifierExpr.MatchString(value.EndpointID) ||
-		value.Role.String() == "" || value.Generation == 0 || value.Generation > maximumInteger ||
-		value.Serial == 0 || value.Serial > maximumInteger ||
+		value.Role.String() == "" || value.Generation == 0 || value.Generation > MaximumInteger ||
+		value.Serial == 0 || value.Serial > MaximumInteger ||
 		value.IssuedAt.IsZero() || !value.ExpiresAt.After(value.IssuedAt) {
 		return false
 	}
@@ -169,3 +168,41 @@ func readString(payload []byte, offset *int) (string, error) {
 func constantString(left, right string) bool {
 	return subtle.ConstantTimeCompare([]byte(left), []byte(right)) == 1
 }
+
+// ValidIdentifier reports whether an opaque endpoint/account identifier fits the wire contract.
+func ValidIdentifier(value string) bool { return identifierExpr.MatchString(value) }
+
+// Parse decodes canonical certificate bytes without granting signature or time authority.
+func Parse(raw []byte) (Certificate, error) { value, _, _, err := parse(raw); return value, err }
+
+// Sign encodes exactly one canonical endpoint identity and signs it with its account key.
+func Sign(private ed25519.PrivateKey, value Certificate) (Certificate, error) {
+	if len(private) != ed25519.PrivateKeySize {
+		return Certificate{}, ErrInvalid
+	}
+	value.IssuedAt = value.IssuedAt.UTC().Truncate(time.Second)
+	value.ExpiresAt = value.ExpiresAt.UTC().Truncate(time.Second)
+	if !validCertificate(value) {
+		return Certificate{}, ErrInvalid
+	}
+	payload := []byte{'P', 'B', 'E', 'C', ProtocolVersion}
+	payload = binary.BigEndian.AppendUint16(payload, uint16(len(value.AccountID)))
+	payload = append(payload, value.AccountID...)
+	payload = append(payload, byte(value.Role))
+	payload = binary.BigEndian.AppendUint16(payload, uint16(len(value.EndpointID)))
+	payload = append(payload, value.EndpointID...)
+	payload = append(payload, value.QUICPublicKey[:]...)
+	payload = binary.BigEndian.AppendUint64(payload, value.Generation)
+	payload = binary.BigEndian.AppendUint64(payload, value.Serial)
+	payload = binary.BigEndian.AppendUint64(payload, uint64(value.IssuedAt.Unix()))
+	payload = binary.BigEndian.AppendUint64(payload, uint64(value.ExpiresAt.Unix()))
+	return Parse(append(payload, ed25519.Sign(private, payload)...))
+}
+
+func (c Certificate) MarshalBinary() ([]byte, error) {
+	if len(c.Raw) == 0 {
+		return nil, ErrInvalid
+	}
+	return append([]byte(nil), c.Raw...), nil
+}
+func (c Certificate) FingerprintHex() string { return hex.EncodeToString(c.Fingerprint[:]) }

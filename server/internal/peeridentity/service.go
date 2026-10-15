@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"github.com/google/uuid"
+	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 
 	"crypto/sha256"
 	"encoding/binary"
@@ -26,7 +27,7 @@ type RegisterRequest struct {
 	UserID                         string
 	KeyID                          string
 	Certificate                    []byte
-	Expected                       Expected
+	Expected                       wire.Expected
 	ExpectedRootFingerprint        [sha256.Size]byte
 	ExpectedCertificateFingerprint [sha256.Size]byte
 	ExpectedIssuedAt               time.Time
@@ -57,7 +58,7 @@ type EndpointEnrollmentRequest struct {
 	UserID        string
 	EndpointID    string
 	Generation    uint64
-	Role          Role
+	Role          wire.Role
 	State         string
 	QUICPublicKey [32]byte
 	CreatedAt     time.Time
@@ -67,7 +68,7 @@ type EndpointEnrollmentRequest struct {
 func (r EndpointEnrollmentRequest) SafetyCode() string {
 	buffer := make([]byte, 0, 64+len(r.EndpointID))
 	domain := "paperboat-machine-endpoint-v1"
-	if r.Role == RoleCLI {
+	if r.Role == wire.RoleCLI {
 		domain = "paperboat-cli-endpoint-v1"
 	}
 	buffer = append(buffer, domain...)
@@ -112,53 +113,53 @@ type MachineRegistrationRequest struct {
 	Now         time.Time
 }
 
-func (s *Service) RegisterMachine(ctx context.Context, request MachineRegistrationRequest) (Certificate, error) {
+func (s *Service) RegisterMachine(ctx context.Context, request MachineRegistrationRequest) (wire.Certificate, error) {
 	if s == nil || ctx == nil || len(request.OperationID) < 8 || len(request.OperationID) > 128 ||
-		!identifierExpr.MatchString(request.UserID) || !identifierExpr.MatchString(request.MachineID) ||
-		request.Generation == 0 || request.Generation > maximumInteger || request.Now.IsZero() {
-		return Certificate{}, ErrInvalid
+		!wire.ValidIdentifier(request.UserID) || !wire.ValidIdentifier(request.MachineID) ||
+		request.Generation == 0 || request.Generation > wire.MaximumInteger || request.Now.IsZero() {
+		return wire.Certificate{}, wire.ErrInvalid
 	}
-	parsed, _, _, err := parse(request.Certificate)
+	parsed, err := wire.Parse(request.Certificate)
 	if err != nil {
-		return Certificate{}, err
+		return wire.Certificate{}, err
 	}
-	if parsed.Role != RoleMachine || parsed.AccountID != request.UserID || parsed.EndpointID != request.MachineID ||
-		parsed.Generation != request.Generation || parsed.Serial == 0 || parsed.Serial > maximumInteger ||
+	if parsed.Role != wire.RoleMachine || parsed.AccountID != request.UserID || parsed.EndpointID != request.MachineID ||
+		parsed.Generation != request.Generation || parsed.Serial == 0 || parsed.Serial > wire.MaximumInteger ||
 		parsed.IssuedAt.Before(request.Now.Add(-2*time.Minute)) || parsed.IssuedAt.After(request.Now.Add(time.Minute)) ||
 		parsed.ExpiresAt.After(request.Now.Add(90*24*time.Hour)) || parsed.ExpiresAt.Before(request.Now.Add(time.Hour)) {
-		return Certificate{}, ErrIdentity
+		return wire.Certificate{}, wire.ErrIdentity
 	}
 	// The machine's existing, locally held QUIC key signs its own endpoint
 	// claim. Its separate machine-control proof authorizes registration.
 	public := ed25519.PublicKey(parsed.QUICPublicKey[:])
-	certificate, err := Verify(request.Certificate, public, Expected{
-		AccountID: request.UserID, Role: RoleMachine, EndpointID: request.MachineID,
+	certificate, err := wire.Verify(request.Certificate, public, wire.Expected{
+		AccountID: request.UserID, Role: wire.RoleMachine, EndpointID: request.MachineID,
 		Generation: request.Generation, Serial: parsed.Serial,
 	}, request.Now)
 	if err != nil {
-		return Certificate{}, err
+		return wire.Certificate{}, err
 	}
 	certificate.RootFingerprint = sha256.Sum256(public)
 	certificate.KeyID = keyIDForFingerprint(certificate.RootFingerprint)
 	repository, ok := s.repository.(interface {
-		RegisterMachine(context.Context, MachineRegistrationRequest, Certificate) (Certificate, error)
+		RegisterMachine(context.Context, MachineRegistrationRequest, wire.Certificate) (wire.Certificate, error)
 	})
 	if !ok {
-		return Certificate{}, ErrUnavailable
+		return wire.Certificate{}, ErrUnavailable
 	}
 	return repository.RegisterMachine(ctx, request, certificate)
 }
 
 func (s *Service) Root(ctx context.Context, userID string) (AccountRoot, error) {
-	if s == nil || ctx == nil || !identifierExpr.MatchString(userID) {
-		return AccountRoot{}, ErrInvalid
+	if s == nil || ctx == nil || !wire.ValidIdentifier(userID) {
+		return AccountRoot{}, wire.ErrInvalid
 	}
 	return s.repository.ResolveAccountRoot(ctx, userID)
 }
 
 func (s *Service) TransportKeys(ctx context.Context, userID string, now time.Time) (AccountRoot, error) {
-	if s == nil || ctx == nil || !identifierExpr.MatchString(userID) || now.IsZero() {
-		return AccountRoot{}, ErrInvalid
+	if s == nil || ctx == nil || !wire.ValidIdentifier(userID) || now.IsZero() {
+		return AccountRoot{}, wire.ErrInvalid
 	}
 	repository, ok := s.repository.(interface {
 		ResolveTransportKeys(context.Context, string, time.Time) (AccountRoot, error)
@@ -170,8 +171,8 @@ func (s *Service) TransportKeys(ctx context.Context, userID string, now time.Tim
 }
 
 func (s *Service) MachineTransportSigner(ctx context.Context, userID, machineID string, now time.Time) (AccountKey, error) {
-	if s == nil || ctx == nil || !identifierExpr.MatchString(userID) || !identifierExpr.MatchString(machineID) || now.IsZero() {
-		return AccountKey{}, ErrInvalid
+	if s == nil || ctx == nil || !wire.ValidIdentifier(userID) || !wire.ValidIdentifier(machineID) || now.IsZero() {
+		return AccountKey{}, wire.ErrInvalid
 	}
 	repository, ok := s.repository.(interface {
 		MachineTransportSigner(context.Context, string, string, time.Time) (AccountKey, error)
@@ -183,18 +184,18 @@ func (s *Service) MachineTransportSigner(ctx context.Context, userID, machineID 
 }
 
 type Repository interface {
-	Bootstrap(context.Context, string, string, ed25519.PublicKey, Certificate, time.Time) (Certificate, error)
+	Bootstrap(context.Context, string, string, ed25519.PublicKey, wire.Certificate, time.Time) (wire.Certificate, error)
 	ResolveAccountRoot(context.Context, string) (AccountRoot, error)
-	Register(context.Context, string, string, Certificate, time.Time) (Certificate, error)
-	Get(context.Context, string, string, uint64, time.Time) (Certificate, error)
-	Revoke(context.Context, string, string, string, uint64, uint64, string, time.Time) (Certificate, error)
+	Register(context.Context, string, string, wire.Certificate, time.Time) (wire.Certificate, error)
+	Get(context.Context, string, string, uint64, time.Time) (wire.Certificate, error)
+	Revoke(context.Context, string, string, string, uint64, uint64, string, time.Time) (wire.Certificate, error)
 	RequestMachineEndpoint(context.Context, MachineEndpointRequest, string, [sha256.Size]byte, time.Time) (EndpointEnrollmentRequest, error)
 	ListPendingEndpoints(context.Context, string, time.Time, int32) ([]EndpointEnrollmentRequest, error)
 }
 
 func (s *Service) RequestMachineEndpoint(ctx context.Context, request MachineEndpointRequest) (EndpointEnrollmentRequest, error) {
-	if s == nil || ctx == nil || len(request.OperationID) < 8 || len(request.OperationID) > 128 || !identifierExpr.MatchString(request.UserID) || !identifierExpr.MatchString(request.EndpointID) || request.Generation == 0 || request.Generation > maximumInteger || request.Now.IsZero() || zeroKey(request.QUICPublicKey) {
-		return EndpointEnrollmentRequest{}, ErrInvalid
+	if s == nil || ctx == nil || len(request.OperationID) < 8 || len(request.OperationID) > 128 || !wire.ValidIdentifier(request.UserID) || !wire.ValidIdentifier(request.EndpointID) || request.Generation == 0 || request.Generation > wire.MaximumInteger || request.Now.IsZero() || zeroKey(request.QUICPublicKey) {
+		return EndpointEnrollmentRequest{}, wire.ErrInvalid
 	}
 	id, err := randomEndpointRequestID()
 	if err != nil {
@@ -205,8 +206,8 @@ func (s *Service) RequestMachineEndpoint(ctx context.Context, request MachineEnd
 }
 
 func (s *Service) RequestCLIEndpoint(ctx context.Context, request CLIEndpointRequest) (EndpointEnrollmentRequest, error) {
-	if s == nil || ctx == nil || len(request.OperationID) < 8 || len(request.OperationID) > 128 || !identifierExpr.MatchString(request.UserID) || !identifierExpr.MatchString(request.EndpointID) || request.Generation != 1 || request.Now.IsZero() || zeroKey(request.QUICPublicKey) {
-		return EndpointEnrollmentRequest{}, ErrInvalid
+	if s == nil || ctx == nil || len(request.OperationID) < 8 || len(request.OperationID) > 128 || !wire.ValidIdentifier(request.UserID) || !wire.ValidIdentifier(request.EndpointID) || request.Generation != 1 || request.Now.IsZero() || zeroKey(request.QUICPublicKey) {
+		return EndpointEnrollmentRequest{}, wire.ErrInvalid
 	}
 	id, err := randomEndpointRequestID()
 	if err != nil {
@@ -223,8 +224,8 @@ func (s *Service) RequestCLIEndpoint(ctx context.Context, request CLIEndpointReq
 }
 
 func (s *Service) PendingEndpoints(ctx context.Context, userID string, now time.Time) ([]EndpointEnrollmentRequest, error) {
-	if s == nil || ctx == nil || !identifierExpr.MatchString(userID) || now.IsZero() {
-		return nil, ErrInvalid
+	if s == nil || ctx == nil || !wire.ValidIdentifier(userID) || now.IsZero() {
+		return nil, wire.ErrInvalid
 	}
 	return s.repository.ListPendingEndpoints(ctx, userID, now.UTC(), 100)
 }
@@ -245,44 +246,44 @@ func zeroKey(value [32]byte) bool {
 	return combined == 0
 }
 
-func (s *Service) Bootstrap(ctx context.Context, request BootstrapRequest) (Certificate, error) {
-	if s == nil || ctx == nil || !identifierExpr.MatchString(request.CLIClientSessionID) || request.Expected.Role != RoleCLI || request.Expected.EndpointID != request.CLIClientSessionID || len(request.RootPublicKey) != ed25519.PublicKeySize {
-		return Certificate{}, ErrInvalid
+func (s *Service) Bootstrap(ctx context.Context, request BootstrapRequest) (wire.Certificate, error) {
+	if s == nil || ctx == nil || !wire.ValidIdentifier(request.CLIClientSessionID) || request.Expected.Role != wire.RoleCLI || request.Expected.EndpointID != request.CLIClientSessionID || len(request.RootPublicKey) != ed25519.PublicKeySize {
+		return wire.Certificate{}, wire.ErrInvalid
 	}
 	rootFingerprint := sha256.Sum256(request.RootPublicKey)
 	if request.ExpectedRootFingerprint != rootFingerprint || request.KeyID != keyIDForFingerprint(rootFingerprint) {
-		return Certificate{}, ErrIdentity
+		return wire.Certificate{}, wire.ErrIdentity
 	}
 	certificate, err := validateRegistration(request.RegisterRequest, request.RootPublicKey)
 	if err != nil {
-		return Certificate{}, err
+		return wire.Certificate{}, err
 	}
 	certificate.KeyID = keyIDForFingerprint(rootFingerprint)
 	certificate.RootFingerprint = rootFingerprint
 	if request.AllowRootReplacement {
 		fresh, ok := s.repository.(interface {
-			BootstrapFresh(context.Context, string, string, string, ed25519.PublicKey, Certificate, time.Time) (Certificate, error)
+			BootstrapFresh(context.Context, string, string, string, ed25519.PublicKey, wire.Certificate, time.Time) (wire.Certificate, error)
 		})
 		if !ok {
-			return Certificate{}, ErrUnavailable
+			return wire.Certificate{}, ErrUnavailable
 		}
 		return fresh.BootstrapFresh(ctx, request.OperationID, request.UserID, request.CLIClientSessionID, append(ed25519.PublicKey(nil), request.RootPublicKey...), certificate, request.Now)
 	}
 	return s.repository.Bootstrap(ctx, request.OperationID, request.UserID, append(ed25519.PublicKey(nil), request.RootPublicKey...), certificate, request.Now)
 }
 
-func (s *Service) Get(ctx context.Context, userID, endpointID string, generation uint64, now time.Time) (Certificate, error) {
-	if s == nil || ctx == nil || !identifierExpr.MatchString(userID) || !identifierExpr.MatchString(endpointID) || generation == 0 || generation > maximumInteger || now.IsZero() {
-		return Certificate{}, ErrInvalid
+func (s *Service) Get(ctx context.Context, userID, endpointID string, generation uint64, now time.Time) (wire.Certificate, error) {
+	if s == nil || ctx == nil || !wire.ValidIdentifier(userID) || !wire.ValidIdentifier(endpointID) || generation == 0 || generation > wire.MaximumInteger || now.IsZero() {
+		return wire.Certificate{}, wire.ErrInvalid
 	}
 	return s.repository.Get(ctx, userID, endpointID, generation, now.UTC())
 }
 
-func (s *Service) Revoke(ctx context.Context, operationID, userID, endpointID string, generation, serial uint64, reason string, now time.Time) (Certificate, error) {
-	if s == nil || ctx == nil || len(operationID) < 16 || len(operationID) > 256 || !identifierExpr.MatchString(userID) ||
-		!identifierExpr.MatchString(endpointID) || generation == 0 || generation > maximumInteger || serial == 0 || serial > maximumInteger ||
+func (s *Service) Revoke(ctx context.Context, operationID, userID, endpointID string, generation, serial uint64, reason string, now time.Time) (wire.Certificate, error) {
+	if s == nil || ctx == nil || len(operationID) < 16 || len(operationID) > 256 || !wire.ValidIdentifier(userID) ||
+		!wire.ValidIdentifier(endpointID) || generation == 0 || generation > wire.MaximumInteger || serial == 0 || serial > wire.MaximumInteger ||
 		(reason != "endpoint_removed" && reason != "key_compromise") || now.IsZero() {
-		return Certificate{}, ErrInvalid
+		return wire.Certificate{}, wire.ErrInvalid
 	}
 	return s.repository.Revoke(ctx, operationID, userID, endpointID, generation, serial, reason, now.UTC())
 }
@@ -291,48 +292,48 @@ type Service struct{ repository Repository }
 
 func NewService(repository Repository) (*Service, error) {
 	if nilRepository(repository) {
-		return nil, ErrInvalid
+		return nil, wire.ErrInvalid
 	}
 	return &Service{repository: repository}, nil
 }
 
-func (s *Service) Register(ctx context.Context, request RegisterRequest) (Certificate, error) {
+func (s *Service) Register(ctx context.Context, request RegisterRequest) (wire.Certificate, error) {
 	if s == nil || ctx == nil || len(request.OperationID) < 16 || len(request.OperationID) > 256 ||
-		!identifierExpr.MatchString(request.UserID) || request.Expected.AccountID != request.UserID ||
-		request.Expected.EndpointID == "" || request.Expected.Role != RoleMachine ||
+		!wire.ValidIdentifier(request.UserID) || request.Expected.AccountID != request.UserID ||
+		request.Expected.EndpointID == "" || request.Expected.Role != wire.RoleMachine ||
 		request.Expected.Generation == 0 || request.Now.IsZero() {
-		return Certificate{}, ErrInvalid
+		return wire.Certificate{}, wire.ErrInvalid
 	}
 	root, err := s.repository.ResolveAccountRoot(ctx, request.UserID)
 	if err != nil {
-		return Certificate{}, err
+		return wire.Certificate{}, err
 	}
 	key, ok := root.key(request.ExpectedRootFingerprint)
 	if !ok || len(key.PublicKey) != ed25519.PublicKeySize || key.Generation == 0 || key.Fingerprint != sha256.Sum256(key.PublicKey) || key.KeyID != request.KeyID {
-		return Certificate{}, ErrUnavailable
+		return wire.Certificate{}, ErrUnavailable
 	}
 	certificate, err := validateRegistration(request, key.PublicKey)
 	if err != nil {
-		return Certificate{}, err
+		return wire.Certificate{}, err
 	}
 	if request.ExpectedRootFingerprint != key.Fingerprint {
-		return Certificate{}, ErrIdentity
+		return wire.Certificate{}, wire.ErrIdentity
 	}
 	certificate.KeyID = key.KeyID
 	certificate.RootFingerprint = key.Fingerprint
 	return s.repository.Register(ctx, request.OperationID, request.UserID, certificate, request.Now)
 }
 
-func validateRegistration(request RegisterRequest, rootPublic ed25519.PublicKey) (Certificate, error) {
-	if len(request.OperationID) < 16 || len(request.OperationID) > 256 || !identifierExpr.MatchString(request.UserID) || !identifierExpr.MatchString(request.KeyID) || request.Expected.AccountID != request.UserID || request.Expected.EndpointID == "" || request.Expected.Role.String() == "" || request.Expected.Generation == 0 || request.Now.IsZero() {
-		return Certificate{}, ErrInvalid
+func validateRegistration(request RegisterRequest, rootPublic ed25519.PublicKey) (wire.Certificate, error) {
+	if len(request.OperationID) < 16 || len(request.OperationID) > 256 || !wire.ValidIdentifier(request.UserID) || !wire.ValidIdentifier(request.KeyID) || request.Expected.AccountID != request.UserID || request.Expected.EndpointID == "" || request.Expected.Role.String() == "" || request.Expected.Generation == 0 || request.Now.IsZero() {
+		return wire.Certificate{}, wire.ErrInvalid
 	}
-	certificate, err := Verify(request.Certificate, rootPublic, request.Expected, request.Now)
+	certificate, err := wire.Verify(request.Certificate, rootPublic, request.Expected, request.Now)
 	if err != nil {
-		return Certificate{}, err
+		return wire.Certificate{}, err
 	}
 	if request.ExpectedCertificateFingerprint != certificate.Fingerprint || !request.ExpectedIssuedAt.Equal(certificate.IssuedAt) || !request.ExpectedExpiresAt.Equal(certificate.ExpiresAt) {
-		return Certificate{}, ErrIdentity
+		return wire.Certificate{}, wire.ErrIdentity
 	}
 	return certificate, nil
 }
@@ -368,7 +369,7 @@ func keyIDForFingerprint(fingerprint [sha256.Size]byte) string {
 // cannot smuggle an unrelated key identifier into a certificate document.
 func KeyID(publicKey ed25519.PublicKey) (string, error) {
 	if len(publicKey) != ed25519.PublicKeySize {
-		return "", ErrInvalid
+		return "", wire.ErrInvalid
 	}
 	return keyIDForFingerprint(sha256.Sum256(publicKey)), nil
 }
@@ -379,16 +380,16 @@ func KeyID(publicKey ed25519.PublicKey) (string, error) {
 // fingerprint field from the wire.
 func FingerprintForKeyID(keyID string) ([sha256.Size]byte, error) {
 	var fingerprint [sha256.Size]byte
-	if len(keyID) != len("aek_")+sha256.Size*2 || !identifierExpr.MatchString(keyID) || !strings.HasPrefix(keyID, "aek_") {
-		return fingerprint, ErrInvalid
+	if len(keyID) != len("aek_")+sha256.Size*2 || !wire.ValidIdentifier(keyID) || !strings.HasPrefix(keyID, "aek_") {
+		return fingerprint, wire.ErrInvalid
 	}
 	decoded, err := hex.DecodeString(keyID[len("aek_"):])
 	if err != nil || len(decoded) != len(fingerprint) {
-		return fingerprint, ErrInvalid
+		return fingerprint, wire.ErrInvalid
 	}
 	copy(fingerprint[:], decoded)
 	if keyIDForFingerprint(fingerprint) != keyID {
-		return [sha256.Size]byte{}, ErrInvalid
+		return [sha256.Size]byte{}, wire.ErrInvalid
 	}
 	return fingerprint, nil
 }

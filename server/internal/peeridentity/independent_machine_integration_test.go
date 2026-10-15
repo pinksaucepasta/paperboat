@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"errors"
+	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"os"
 	"strings"
 	"testing"
@@ -48,7 +49,7 @@ func TestIndependentMachineEnrollmentWithoutAccountRootPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := signedFixture(t, private, accountID, RoleMachine, machineID, 3, 1, now.Add(-time.Minute), now.Add(time.Hour))
+	raw := signedFixture(t, private, accountID, wire.RoleMachine, machineID, 3, 1, now.Add(-time.Minute), now.Add(time.Hour))
 	quicOffset := 5 + 2 + len(accountID) + 1 + 2 + len(machineID)
 	copy(raw[quicOffset:quicOffset+32], public)
 	payload := raw[:len(raw)-ed25519.SignatureSize]
@@ -66,8 +67,8 @@ func TestIndependentMachineEnrollmentWithoutAccountRootPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cliRaw := signedFixture(t, cliPrivate, accountID, RoleCLI, cliID, 1, 1, now.Add(-time.Minute), now.Add(time.Hour))
-	cliCertificate, err := Verify(cliRaw, cliPublic, Expected{AccountID: accountID, Role: RoleCLI, EndpointID: cliID, Generation: 1, Serial: 1}, now)
+	cliRaw := signedFixture(t, cliPrivate, accountID, wire.RoleCLI, cliID, 1, 1, now.Add(-time.Minute), now.Add(time.Hour))
+	cliCertificate, err := wire.Verify(cliRaw, cliPublic, wire.Expected{AccountID: accountID, Role: wire.RoleCLI, EndpointID: cliID, Generation: 1, Serial: 1}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,8 +78,8 @@ func TestIndependentMachineEnrollmentWithoutAccountRootPostgres(t *testing.T) {
 		t.Fatalf("new CLI needs no account root: %v", err)
 	}
 	cliRenewAt := time.Now().UTC().Add(2 * time.Second).Truncate(time.Second)
-	cliRenewRaw := signedFixture(t, cliPrivate, accountID, RoleCLI, cliID, 1, 2, cliRenewAt.Add(-time.Minute), cliRenewAt.Add(2*time.Hour))
-	cliRenew, err := Verify(cliRenewRaw, cliPublic, Expected{AccountID: accountID, Role: RoleCLI, EndpointID: cliID, Generation: 1, Serial: 2}, cliRenewAt)
+	cliRenewRaw := signedFixture(t, cliPrivate, accountID, wire.RoleCLI, cliID, 1, 2, cliRenewAt.Add(-time.Minute), cliRenewAt.Add(2*time.Hour))
+	cliRenew, err := wire.Verify(cliRenewRaw, cliPublic, wire.Expected{AccountID: accountID, Role: wire.RoleCLI, EndpointID: cliID, Generation: 1, Serial: 2}, cliRenewAt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,11 +113,11 @@ func TestIndependentMachineEnrollmentWithoutAccountRootPostgres(t *testing.T) {
 	}
 	stale := request
 	stale.Generation = 2
-	if _, err := service.RegisterMachine(ctx, stale); !errors.Is(err, ErrIdentity) {
+	if _, err := service.RegisterMachine(ctx, stale); !errors.Is(err, wire.ErrIdentity) {
 		t.Fatalf("stale installation generation accepted: %v", err)
 	}
 	renewalNow := time.Now().UTC().Add(2 * time.Second).Truncate(time.Second)
-	renewalRaw := signedFixture(t, private, accountID, RoleMachine, machineID, 3, 2, renewalNow.Add(-time.Minute), renewalNow.Add(2*time.Hour))
+	renewalRaw := signedFixture(t, private, accountID, wire.RoleMachine, machineID, 3, 2, renewalNow.Add(-time.Minute), renewalNow.Add(2*time.Hour))
 	copy(renewalRaw[quicOffset:quicOffset+32], public)
 	renewalPayload := renewalRaw[:len(renewalRaw)-ed25519.SignatureSize]
 	copy(renewalRaw[len(renewalPayload):], ed25519.Sign(private, renewalPayload))

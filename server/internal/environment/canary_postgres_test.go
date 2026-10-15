@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"os"
 	"strings"
 	"testing"
@@ -45,7 +46,7 @@ func TestPostgresOpaqueCanaryNeverAppearsInServerSurfaces(t *testing.T) {
 	rootRaw, _ := base64.RawURLEncoding.DecodeString(vector.RootPublic)
 	authorityRaw, _ := base64.RawURLEncoding.DecodeString(vector.Authority)
 	manifestRaw, _ := base64.RawURLEncoding.DecodeString(vector.SetManifest)
-	rootID, _ := peeridentity.RootFingerprint(ed25519.PublicKey(rootRaw))
+	rootID, _ := wire.RootFingerprint(ed25519.PublicKey(rootRaw))
 	authorityDocument, err := ParseAuthority(authorityRaw, peeridentity.AccountRoot{Keys: []peeridentity.AccountKey{{KeyID: "aek_" + rootID, PublicKey: ed25519.PublicKey(rootRaw)}}})
 	if err != nil {
 		t.Fatal(err)

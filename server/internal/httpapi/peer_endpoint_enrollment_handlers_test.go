@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -31,8 +32,8 @@ func TestMachineEndpointRequestClassifiesUnexpectedRepositoryFailure(t *testing.
 		return controlplane.MachineRequestClaims{UserID: "account_01", MachineID: "machine_01", InstallationGeneration: 1, OperationID: "operation_machine_01"}, nil
 	})
 	response := httptest.NewRecorder()
-	machineEndpointRequest(machineEndpointRequesterFunc(func(context.Context, peeridentity.MachineRegistrationRequest) (peeridentity.Certificate, error) {
-		return peeridentity.Certificate{}, errors.New("database unavailable")
+	machineEndpointRequest(machineEndpointRequesterFunc(func(context.Context, peeridentity.MachineRegistrationRequest) (wire.Certificate, error) {
+		return wire.Certificate{}, errors.New("database unavailable")
 	}), verifier).ServeHTTP(response, request)
 	var envelope ErrorResponse
 	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil || response.Code != http.StatusServiceUnavailable || envelope.Error.Code != "temporarily_unavailable" {
@@ -40,9 +41,9 @@ func TestMachineEndpointRequestClassifiesUnexpectedRepositoryFailure(t *testing.
 	}
 }
 
-type machineEndpointRequesterFunc func(context.Context, peeridentity.MachineRegistrationRequest) (peeridentity.Certificate, error)
+type machineEndpointRequesterFunc func(context.Context, peeridentity.MachineRegistrationRequest) (wire.Certificate, error)
 
-func (f machineEndpointRequesterFunc) RegisterMachine(ctx context.Context, request peeridentity.MachineRegistrationRequest) (peeridentity.Certificate, error) {
+func (f machineEndpointRequesterFunc) RegisterMachine(ctx context.Context, request peeridentity.MachineRegistrationRequest) (wire.Certificate, error) {
 	return f(ctx, request)
 }
 
@@ -63,7 +64,7 @@ func TestCLIEndpointRequestBindsAuthenticatedSessionAndKeys(t *testing.T) {
 	response := httptest.NewRecorder()
 	cliEndpointRequest(cliEndpointRequesterFunc(func(_ context.Context, value peeridentity.CLIEndpointRequest) (peeridentity.EndpointEnrollmentRequest, error) {
 		got = value
-		return peeridentity.EndpointEnrollmentRequest{ID: "per_0123456789abcdef", UserID: value.UserID, EndpointID: value.EndpointID, Generation: value.Generation, Role: peeridentity.RoleCLI, State: "pending", QUICPublicKey: value.QUICPublicKey, CreatedAt: value.Now, ExpiresAt: value.Now.Add(time.Minute)}, nil
+		return peeridentity.EndpointEnrollmentRequest{ID: "per_0123456789abcdef", UserID: value.UserID, EndpointID: value.EndpointID, Generation: value.Generation, Role: wire.RoleCLI, State: "pending", QUICPublicKey: value.QUICPublicKey, CreatedAt: value.Now, ExpiresAt: value.Now.Add(time.Minute)}, nil
 	})).ServeHTTP(response, request)
 	if response.Code != http.StatusCreated || got.UserID != "account_01" || got.EndpointID != "cli_session_01" || got.Generation != 1 || !bytes.Equal(got.QUICPublicKey[:], quic) {
 		t.Fatalf("status=%d request=%+v body=%s", response.Code, got, response.Body.String())
@@ -89,10 +90,10 @@ func TestCLIEndpointRequestReturnsFulfilledReplayState(t *testing.T) {
 	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, principal{User: auth.User{ID: "account_01"}, Client: &auth.ClientPrincipal{SessionID: "cli_session_01"}}))
 	response := httptest.NewRecorder()
 	cliEndpointRequest(cliEndpointRequesterFunc(func(_ context.Context, value peeridentity.CLIEndpointRequest) (peeridentity.EndpointEnrollmentRequest, error) {
-		return peeridentity.EndpointEnrollmentRequest{ID: "per_0123456789abcdef", UserID: value.UserID, EndpointID: value.EndpointID, Generation: value.Generation, Role: peeridentity.RoleCLI, State: "fulfilled", QUICPublicKey: value.QUICPublicKey, CreatedAt: value.Now.Add(-10 * time.Minute), ExpiresAt: value.Now.Add(-5 * time.Minute)}, nil
+		return peeridentity.EndpointEnrollmentRequest{ID: "per_0123456789abcdef", UserID: value.UserID, EndpointID: value.EndpointID, Generation: value.Generation, Role: wire.RoleCLI, State: "fulfilled", QUICPublicKey: value.QUICPublicKey, CreatedAt: value.Now.Add(-10 * time.Minute), ExpiresAt: value.Now.Add(-5 * time.Minute)}, nil
 	})).ServeHTTP(response, request)
 	var envelope struct {
-		Data endpointEnrollmentDocument `json:"data"`
+		Data wire.EnrollmentDocument `json:"data"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil || response.Code != http.StatusCreated || envelope.Data.State != "fulfilled" {
 		t.Fatalf("status=%d data=%+v err=%v body=%s", response.Code, envelope.Data, err, response.Body.String())
@@ -132,12 +133,12 @@ func (f machineProofVerifierFunc) VerifyMachineRequest(ctx context.Context, cred
 }
 
 type machineStatusReader struct {
-	certificate peeridentity.Certificate
+	certificate wire.Certificate
 	root        peeridentity.AccountRoot
 	err         error
 }
 
-func (s machineStatusReader) Get(context.Context, string, string, uint64, time.Time) (peeridentity.Certificate, error) {
+func (s machineStatusReader) Get(context.Context, string, string, uint64, time.Time) (wire.Certificate, error) {
 	return s.certificate, s.err
 }
 func (s machineStatusReader) TransportKeys(context.Context, string, time.Time) (peeridentity.AccountRoot, error) {
@@ -151,7 +152,7 @@ func TestMachineEndpointStatusReturnsOnlyApprovedPublicAuthority(t *testing.T) {
 	rootFingerprint := sha256.Sum256(rootPublic)
 	keyID, _ := peeridentity.KeyID(rootPublic)
 	fingerprint := sha256.Sum256(raw)
-	reader := machineStatusReader{root: peeridentity.AccountRoot{Keys: []peeridentity.AccountKey{{KeyID: keyID, PublicKey: rootPublic, Fingerprint: rootFingerprint, Generation: 1}}}, certificate: peeridentity.Certificate{AccountID: "account_01", KeyID: keyID, Role: peeridentity.RoleMachine, EndpointID: "machine_01", Generation: 3, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour), RootFingerprint: rootFingerprint, Fingerprint: fingerprint, Raw: raw}}
+	reader := machineStatusReader{root: peeridentity.AccountRoot{Keys: []peeridentity.AccountKey{{KeyID: keyID, PublicKey: rootPublic, Fingerprint: rootFingerprint, Generation: 1}}}, certificate: wire.Certificate{AccountID: "account_01", KeyID: keyID, Role: wire.RoleMachine, EndpointID: "machine_01", Generation: 3, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour), RootFingerprint: rootFingerprint, Fingerprint: fingerprint, Raw: raw}}
 	body := []byte(`{"operation_id":"operation_status_01","generation":3}`)
 	verifier := machineProofVerifierFunc(func(_ context.Context, credential string, proof []byte, method, path string, exactBody []byte) (controlplane.MachineRequestClaims, error) {
 		if credential != strings.Repeat("t", 32) || string(proof) != "proof" || method != http.MethodPost || path != "/v1/machine-peer-identity/status" || !bytes.Equal(exactBody, body) {
@@ -170,8 +171,8 @@ func TestMachineEndpointStatusReturnsOnlyApprovedPublicAuthority(t *testing.T) {
 	var envelope struct {
 		Data struct {
 			State       string                      `json:"state"`
-			TrustedKeys []trustedKeyDocument        `json:"trusted_keys"`
-			Certificate endpointCertificateDocument `json:"certificate"`
+			TrustedKeys []wire.TrustedKeyDocument        `json:"trusted_keys"`
+			Certificate wire.CertificateDocument `json:"certificate"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil || envelope.Data.State != "approved" || len(envelope.Data.TrustedKeys) != 1 || envelope.Data.TrustedKeys[0].KeyID != keyID || envelope.Data.Certificate.Certificate != base64.RawURLEncoding.EncodeToString(raw) {
@@ -264,9 +265,9 @@ func TestMachineEndpointRequestReadFailurePreservesCauseAndPureCancellationIsQui
 			request.Method = http.MethodPost
 			request.Body = failingMachineEndpointBody{err: test.err}
 			response := httptest.NewRecorder()
-			machineEndpointRequest(machineEndpointRequesterFunc(func(context.Context, peeridentity.MachineRegistrationRequest) (peeridentity.Certificate, error) {
+			machineEndpointRequest(machineEndpointRequesterFunc(func(context.Context, peeridentity.MachineRegistrationRequest) (wire.Certificate, error) {
 				t.Fatal("body failure reached registration")
-				return peeridentity.Certificate{}, nil
+				return wire.Certificate{}, nil
 			}), machineProofVerifierFunc(func(context.Context, string, []byte, string, string, []byte) (controlplane.MachineRequestClaims, error) {
 				t.Fatal("body failure reached proof verification")
 				return controlplane.MachineRequestClaims{}, nil

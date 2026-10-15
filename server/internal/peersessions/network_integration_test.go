@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"math/big"
 	"net/http"
 	"os"
@@ -91,8 +92,8 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	cliTLSDER, cliTLSPrivate, cliQUICPublic := networkEndpointTLS(t, "cli", now)
-	cliRaw, cliFingerprint := networkCertificateWithKeys(t, rootPrivate, userID, peeridentity.RoleCLI, cliID, 1, 1, cliQUICPublic, now, now.Add(time.Hour))
-	_, err = identityService.Bootstrap(ctx, peeridentity.BootstrapRequest{CLIClientSessionID: cliID, RootPublicKey: rootPublic, RegisterRequest: peeridentity.RegisterRequest{OperationID: "operation_bootstrap_" + suffix, UserID: userID, KeyID: keyID, Certificate: cliRaw, Expected: peeridentity.Expected{AccountID: userID, Role: peeridentity.RoleCLI, EndpointID: cliID, Generation: 1, Serial: 1}, ExpectedRootFingerprint: rootFingerprint, ExpectedCertificateFingerprint: cliFingerprint, ExpectedIssuedAt: now, ExpectedExpiresAt: now.Add(time.Hour), Now: now}})
+	cliRaw, cliFingerprint := networkCertificateWithKeys(t, rootPrivate, userID, wire.RoleCLI, cliID, 1, 1, cliQUICPublic, now, now.Add(time.Hour))
+	_, err = identityService.Bootstrap(ctx, peeridentity.BootstrapRequest{CLIClientSessionID: cliID, RootPublicKey: rootPublic, RegisterRequest: peeridentity.RegisterRequest{OperationID: "operation_bootstrap_" + suffix, UserID: userID, KeyID: keyID, Certificate: cliRaw, Expected: wire.Expected{AccountID: userID, Role: wire.RoleCLI, EndpointID: cliID, Generation: 1, Serial: 1}, ExpectedRootFingerprint: rootFingerprint, ExpectedCertificateFingerprint: cliFingerprint, ExpectedIssuedAt: now, ExpectedExpiresAt: now.Add(time.Hour), Now: now}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,8 +102,8 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	machineRaw, machineFingerprint := networkCertificateWithKeys(t, rootPrivate, userID, peeridentity.RoleMachine, machineID, 1, 1, request.QUICPublicKey, now, now.Add(time.Hour))
-	_, err = identityService.Register(ctx, peeridentity.RegisterRequest{OperationID: "operation_machine_certificate_" + suffix, UserID: userID, KeyID: keyID, Certificate: machineRaw, Expected: peeridentity.Expected{AccountID: userID, Role: peeridentity.RoleMachine, EndpointID: machineID, Generation: 1, Serial: 1}, ExpectedRootFingerprint: rootFingerprint, ExpectedCertificateFingerprint: machineFingerprint, ExpectedIssuedAt: now, ExpectedExpiresAt: now.Add(time.Hour), Now: now})
+	machineRaw, machineFingerprint := networkCertificateWithKeys(t, rootPrivate, userID, wire.RoleMachine, machineID, 1, 1, request.QUICPublicKey, now, now.Add(time.Hour))
+	_, err = identityService.Register(ctx, peeridentity.RegisterRequest{OperationID: "operation_machine_certificate_" + suffix, UserID: userID, KeyID: keyID, Certificate: machineRaw, Expected: wire.Expected{AccountID: userID, Role: wire.RoleMachine, EndpointID: machineID, Generation: 1, Serial: 1}, ExpectedRootFingerprint: rootFingerprint, ExpectedCertificateFingerprint: machineFingerprint, ExpectedIssuedAt: now, ExpectedExpiresAt: now.Add(time.Hour), Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,8 +271,8 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	sharedRootFingerprint := sha256.Sum256(sharedRootPublic)
 	sharedKeyID, _ := peeridentity.KeyID(sharedRootPublic)
 	sharedTLSDER, sharedTLSPrivate, sharedQUICPublic := networkEndpointTLS(t, "shared", now)
-	sharedRaw, sharedFingerprint := networkCertificateWithKeys(t, sharedRootPrivate, sharedUser, peeridentity.RoleCLI, sharedCLI, 1, 1, sharedQUICPublic, now, now.Add(time.Hour))
-	if _, err = identityService.Bootstrap(ctx, peeridentity.BootstrapRequest{CLIClientSessionID: sharedCLI, RootPublicKey: sharedRootPublic, RegisterRequest: peeridentity.RegisterRequest{OperationID: "operation_shared_bootstrap_" + suffix, UserID: sharedUser, KeyID: sharedKeyID, Certificate: sharedRaw, Expected: peeridentity.Expected{AccountID: sharedUser, Role: peeridentity.RoleCLI, EndpointID: sharedCLI, Generation: 1, Serial: 1}, ExpectedRootFingerprint: sharedRootFingerprint, ExpectedCertificateFingerprint: sharedFingerprint, ExpectedIssuedAt: now, ExpectedExpiresAt: now.Add(time.Hour), Now: now}}); err != nil {
+	sharedRaw, sharedFingerprint := networkCertificateWithKeys(t, sharedRootPrivate, sharedUser, wire.RoleCLI, sharedCLI, 1, 1, sharedQUICPublic, now, now.Add(time.Hour))
+	if _, err = identityService.Bootstrap(ctx, peeridentity.BootstrapRequest{CLIClientSessionID: sharedCLI, RootPublicKey: sharedRootPublic, RegisterRequest: peeridentity.RegisterRequest{OperationID: "operation_shared_bootstrap_" + suffix, UserID: sharedUser, KeyID: sharedKeyID, Certificate: sharedRaw, Expected: wire.Expected{AccountID: sharedUser, Role: wire.RoleCLI, EndpointID: sharedCLI, Generation: 1, Serial: 1}, ExpectedRootFingerprint: sharedRootFingerprint, ExpectedCertificateFingerprint: sharedFingerprint, ExpectedIssuedAt: now, ExpectedExpiresAt: now.Add(time.Hour), Now: now}}); err != nil {
 		t.Fatal(err)
 	}
 	sharedPrivate, sharedPublic := networkX25519Key(t)
@@ -864,7 +865,7 @@ func networkEndpointTLS(t *testing.T, label string, now time.Time) ([]byte, ed25
 	copy(key[:], public)
 	return der, private, key
 }
-func networkCertificateWithKeys(t *testing.T, root ed25519.PrivateKey, account string, role peeridentity.Role, endpoint string, generation, serial uint64, quic [32]byte, issued, expires time.Time) ([]byte, [32]byte) {
+func networkCertificateWithKeys(t *testing.T, root ed25519.PrivateKey, account string, role wire.Role, endpoint string, generation, serial uint64, quic [32]byte, issued, expires time.Time) ([]byte, [32]byte) {
 	t.Helper()
 	payload := []byte{'P', 'B', 'E', 'C', 1}
 	payload = binary.BigEndian.AppendUint16(payload, uint16(len(account)))

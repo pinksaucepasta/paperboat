@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"os"
 	"strings"
 	"testing"
@@ -45,7 +46,7 @@ func TestPostgresRuntimeSuspendsReinstalledHostAndOnlyRoutesRevocationToRetiredK
 	}
 	rootRaw, _ := base64.RawURLEncoding.DecodeString(vector.RootPublic)
 	authorityRaw, _ := base64.RawURLEncoding.DecodeString(vector.Authority)
-	rootID, err := peeridentity.RootFingerprint(ed25519.PublicKey(rootRaw))
+	rootID, err := wire.RootFingerprint(ed25519.PublicKey(rootRaw))
 	if err != nil {
 		t.Fatal(err)
 	}

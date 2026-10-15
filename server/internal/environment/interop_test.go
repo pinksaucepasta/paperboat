@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"os"
 	"testing"
 	"time"
@@ -36,7 +37,7 @@ func TestSharedVectorInterop(t *testing.T) {
 	root, _ := base64.RawURLEncoding.DecodeString(vector.RootPublic)
 	authorityRaw, _ := base64.RawURLEncoding.DecodeString(vector.Authority)
 	manifestRaw, _ := base64.RawURLEncoding.DecodeString(vector.Manifest)
-	rootID, _ := peeridentity.RootFingerprint(ed25519.PublicKey(root))
+	rootID, _ := wire.RootFingerprint(ed25519.PublicKey(root))
 	authority, err := ParseAuthority(authorityRaw, peeridentity.AccountRoot{Keys: []peeridentity.AccountKey{{KeyID: "aek_" + rootID, PublicKey: ed25519.PublicKey(root)}}})
 	if err != nil {
 		t.Fatalf("authority: %v", err)

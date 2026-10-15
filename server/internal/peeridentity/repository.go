@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-server/internal/audit"
@@ -20,15 +21,15 @@ type SQLRepository struct {
 	audit *audit.Writer
 }
 
-func (r *SQLRepository) Bootstrap(ctx context.Context, operationID, userID string, rootPublic ed25519.PublicKey, proposed Certificate, now time.Time) (Certificate, error) {
-	if r == nil || ctx == nil || now.IsZero() || len(operationID) < 16 || len(operationID) > 256 || !identifierExpr.MatchString(userID) || len(rootPublic) != ed25519.PublicKeySize || proposed.Role != RoleCLI || proposed.EndpointID == "" || proposed.AccountID != userID {
-		return Certificate{}, ErrInvalid
+func (r *SQLRepository) Bootstrap(ctx context.Context, operationID, userID string, rootPublic ed25519.PublicKey, proposed wire.Certificate, now time.Time) (wire.Certificate, error) {
+	if r == nil || ctx == nil || now.IsZero() || len(operationID) < 16 || len(operationID) > 256 || !wire.ValidIdentifier(userID) || len(rootPublic) != ed25519.PublicKeySize || proposed.Role != wire.RoleCLI || proposed.EndpointID == "" || proposed.AccountID != userID {
+		return wire.Certificate{}, wire.ErrInvalid
 	}
 	rootFingerprint := sha256.Sum256(rootPublic)
 	if proposed.RootFingerprint != rootFingerprint {
-		return Certificate{}, ErrIdentity
+		return wire.Certificate{}, wire.ErrIdentity
 	}
-	var result Certificate
+	var result wire.Certificate
 	err := r.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		q := tx.Queries()
 		root, err := q.CreateAccountE2EERoot(ctx, dbsqlc.CreateAccountE2EERootParams{UserID: userID, PublicKey: rootPublic, Fingerprint: rootFingerprint[:]})
@@ -82,15 +83,15 @@ func (r *SQLRepository) Bootstrap(ctx context.Context, operationID, userID strin
 // session. The v1 name is retained for compatibility. Active CLI sessions are
 // already the result of account authentication and any required setup
 // approval. Existing identities remain valid until explicitly revoked.
-func (r *SQLRepository) BootstrapFresh(ctx context.Context, operationID, userID, cliSessionID string, rootPublic ed25519.PublicKey, proposed Certificate, now time.Time) (Certificate, error) {
-	if r == nil || ctx == nil || now.IsZero() || len(operationID) < 16 || len(operationID) > 256 || !identifierExpr.MatchString(userID) || !identifierExpr.MatchString(cliSessionID) || len(rootPublic) != ed25519.PublicKeySize || proposed.Role != RoleCLI || proposed.EndpointID != cliSessionID || proposed.AccountID != userID {
-		return Certificate{}, ErrInvalid
+func (r *SQLRepository) BootstrapFresh(ctx context.Context, operationID, userID, cliSessionID string, rootPublic ed25519.PublicKey, proposed wire.Certificate, now time.Time) (wire.Certificate, error) {
+	if r == nil || ctx == nil || now.IsZero() || len(operationID) < 16 || len(operationID) > 256 || !wire.ValidIdentifier(userID) || !wire.ValidIdentifier(cliSessionID) || len(rootPublic) != ed25519.PublicKeySize || proposed.Role != wire.RoleCLI || proposed.EndpointID != cliSessionID || proposed.AccountID != userID {
+		return wire.Certificate{}, wire.ErrInvalid
 	}
 	rootFingerprint := sha256.Sum256(rootPublic)
 	if proposed.RootFingerprint != rootFingerprint {
-		return Certificate{}, ErrIdentity
+		return wire.Certificate{}, wire.ErrIdentity
 	}
-	var result Certificate
+	var result wire.Certificate
 	err := r.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		q := tx.Queries()
 		if _, err := q.GetMachineEnrollmentClientSession(ctx, dbsqlc.GetMachineEnrollmentClientSessionParams{ID: cliSessionID, UserID: userID}); err != nil {
@@ -108,14 +109,14 @@ func (r *SQLRepository) BootstrapFresh(ctx context.Context, operationID, userID,
 
 func NewSQLRepository(store *db.DB, writer *audit.Writer) (*SQLRepository, error) {
 	if store == nil || writer == nil {
-		return nil, ErrInvalid
+		return nil, wire.ErrInvalid
 	}
 	return &SQLRepository{store: store, audit: writer}, nil
 }
 
 func (r *SQLRepository) ResolveAccountRoot(ctx context.Context, userID string) (AccountRoot, error) {
-	if r == nil || ctx == nil || !identifierExpr.MatchString(userID) {
-		return AccountRoot{}, ErrInvalid
+	if r == nil || ctx == nil || !wire.ValidIdentifier(userID) {
+		return AccountRoot{}, wire.ErrInvalid
 	}
 	row, err := r.store.Queries().GetActiveAccountE2EERoot(ctx, userID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -148,8 +149,8 @@ func (r *SQLRepository) ResolveAccountRoot(ctx context.Context, userID string) (
 // ResolveTransportKeys returns only signers of currently authorized endpoint
 // certificates. ENV authority is intentionally separate from this list.
 func (r *SQLRepository) ResolveTransportKeys(ctx context.Context, userID string, now time.Time) (AccountRoot, error) {
-	if r == nil || ctx == nil || !identifierExpr.MatchString(userID) || now.IsZero() {
-		return AccountRoot{}, ErrInvalid
+	if r == nil || ctx == nil || !wire.ValidIdentifier(userID) || now.IsZero() {
+		return AccountRoot{}, wire.ErrInvalid
 	}
 	rows, err := r.store.Queries().ListActivePeerTransportSigners(ctx, dbsqlc.ListActivePeerTransportSignersParams{UserID: userID, Now: now})
 	if err != nil {
@@ -173,8 +174,8 @@ func (r *SQLRepository) ResolveTransportKeys(ctx context.Context, userID string,
 }
 
 func (r *SQLRepository) MachineTransportSigner(ctx context.Context, userID, machineID string, now time.Time) (AccountKey, error) {
-	if r == nil || ctx == nil || !identifierExpr.MatchString(userID) || !identifierExpr.MatchString(machineID) || now.IsZero() {
-		return AccountKey{}, ErrInvalid
+	if r == nil || ctx == nil || !wire.ValidIdentifier(userID) || !wire.ValidIdentifier(machineID) || now.IsZero() {
+		return AccountKey{}, wire.ErrInvalid
 	}
 	var keyID string
 	var public []byte
@@ -203,8 +204,8 @@ func (r *SQLRepository) MachineTransportSigner(ctx context.Context, userID, mach
 }
 
 func (r *SQLRepository) RequestMachineEndpoint(ctx context.Context, request MachineEndpointRequest, id string, hash [sha256.Size]byte, expiresAt time.Time) (EndpointEnrollmentRequest, error) {
-	if r == nil || ctx == nil || !identifierExpr.MatchString(id) || !expiresAt.After(request.Now) {
-		return EndpointEnrollmentRequest{}, ErrInvalid
+	if r == nil || ctx == nil || !wire.ValidIdentifier(id) || !expiresAt.After(request.Now) {
+		return EndpointEnrollmentRequest{}, wire.ErrInvalid
 	}
 	var result EndpointEnrollmentRequest
 	err := r.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
@@ -267,8 +268,8 @@ func (r *SQLRepository) RequestMachineEndpoint(ctx context.Context, request Mach
 }
 
 func (r *SQLRepository) RequestCLIEndpoint(ctx context.Context, request CLIEndpointRequest, id string, hash [sha256.Size]byte, expiresAt time.Time) (EndpointEnrollmentRequest, error) {
-	if r == nil || ctx == nil || !identifierExpr.MatchString(id) || !expiresAt.After(request.Now) {
-		return EndpointEnrollmentRequest{}, ErrInvalid
+	if r == nil || ctx == nil || !wire.ValidIdentifier(id) || !expiresAt.After(request.Now) {
+		return EndpointEnrollmentRequest{}, wire.ErrInvalid
 	}
 	var result EndpointEnrollmentRequest
 	err := r.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
@@ -415,8 +416,8 @@ func classifyCLIRenewalNoRows(ctx context.Context, q *dbsqlc.Queries, request CL
 }
 
 func (r *SQLRepository) ListPendingEndpoints(ctx context.Context, userID string, now time.Time, limit int32) ([]EndpointEnrollmentRequest, error) {
-	if r == nil || ctx == nil || !identifierExpr.MatchString(userID) || now.IsZero() || limit < 1 || limit > 100 {
-		return nil, ErrInvalid
+	if r == nil || ctx == nil || !wire.ValidIdentifier(userID) || now.IsZero() || limit < 1 || limit > 100 {
+		return nil, wire.ErrInvalid
 	}
 	rows, err := r.store.Queries().ListPendingPeerEndpointEnrollmentRequests(ctx, dbsqlc.ListPendingPeerEndpointEnrollmentRequestsParams{UserID: userID, Now: now.UTC(), RowLimit: limit})
 	if err != nil {
@@ -433,12 +434,12 @@ func (r *SQLRepository) ListPendingEndpoints(ctx context.Context, userID string,
 	return result, nil
 }
 
-func (r *SQLRepository) Register(ctx context.Context, operationID, userID string, proposed Certificate, now time.Time) (Certificate, error) {
+func (r *SQLRepository) Register(ctx context.Context, operationID, userID string, proposed wire.Certificate, now time.Time) (wire.Certificate, error) {
 	if r == nil || ctx == nil || now.IsZero() || len(operationID) < 16 || len(operationID) > 256 ||
-		!identifierExpr.MatchString(userID) || proposed.AccountID != userID || len(proposed.Raw) == 0 {
-		return Certificate{}, ErrInvalid
+		!wire.ValidIdentifier(userID) || proposed.AccountID != userID || len(proposed.Raw) == 0 {
+		return wire.Certificate{}, wire.ErrInvalid
 	}
-	var result Certificate
+	var result wire.Certificate
 	err := r.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		q := tx.Queries()
 		root, err := q.GetAccountE2EERootForUpdate(ctx, userID)
@@ -467,13 +468,13 @@ func (r *SQLRepository) Register(ctx context.Context, operationID, userID string
 // RegisterMachine commits the key proven by the machine-control credential and
 // the endpoint's self-signature in the same transaction as the certificate.
 // No other endpoint signs or approves this machine's transport identity.
-func (r *SQLRepository) RegisterMachine(ctx context.Context, request MachineRegistrationRequest, proposed Certificate) (Certificate, error) {
+func (r *SQLRepository) RegisterMachine(ctx context.Context, request MachineRegistrationRequest, proposed wire.Certificate) (wire.Certificate, error) {
 	if r == nil || ctx == nil || proposed.AccountID != request.UserID || proposed.EndpointID != request.MachineID ||
-		proposed.Role != RoleMachine || proposed.Generation != request.Generation ||
+		proposed.Role != wire.RoleMachine || proposed.Generation != request.Generation ||
 		proposed.Fingerprint != sha256.Sum256(request.Certificate) || !bytes.Equal(proposed.Raw, request.Certificate) {
-		return Certificate{}, ErrInvalid
+		return wire.Certificate{}, wire.ErrInvalid
 	}
-	var result Certificate
+	var result wire.Certificate
 	err := r.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		_, err := tx.Queries().GetMachineForPeerEnrollment(ctx, dbsqlc.GetMachineForPeerEnrollmentParams{
 			MachineID: request.MachineID, UserID: request.UserID, InstallationGeneration: int64(request.Generation),
@@ -490,45 +491,45 @@ func (r *SQLRepository) RegisterMachine(ctx context.Context, request MachineRegi
 	return result, err
 }
 
-func (r *SQLRepository) registerTx(ctx context.Context, tx *db.Tx, operationID, userID string, proposed Certificate, signer ed25519.PublicKey, requireEnrollment bool, now time.Time) (Certificate, error) {
+func (r *SQLRepository) registerTx(ctx context.Context, tx *db.Tx, operationID, userID string, proposed wire.Certificate, signer ed25519.PublicKey, requireEnrollment bool, now time.Time) (wire.Certificate, error) {
 	if len(signer) != ed25519.PublicKeySize || proposed.KeyID != keyIDForFingerprint(sha256.Sum256(signer)) {
-		return Certificate{}, ErrIdentity
+		return wire.Certificate{}, wire.ErrIdentity
 	}
 	q := tx.Queries()
 	requestHash := sha256.Sum256(proposed.Raw)
-	var result Certificate
+	var result wire.Certificate
 	existingOperation, err := q.GetPeerEndpointCertificateOperationForUpdate(ctx, operationID)
 	if err == nil {
 		if existingOperation.UserID != userID || !bytes.Equal(existingOperation.RequestHash, requestHash[:]) || !bytes.Equal(existingOperation.CertificateFingerprint, proposed.Fingerprint[:]) {
-			return Certificate{}, ErrConflict
+			return wire.Certificate{}, ErrConflict
 		}
 		row, getErr := q.GetPeerEndpointCertificateByFingerprint(ctx, existingOperation.CertificateFingerprint)
 		if getErr != nil {
-			return Certificate{}, getErr
+			return wire.Certificate{}, getErr
 		}
 		return certificateFromRow(row, now)
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return Certificate{}, err
+		return wire.Certificate{}, err
 	}
 	// The signed not-before time includes clock-skew allowance. Enrollment
 	// freshness and lifecycle timestamps belong to the server request clock,
 	// never to that deliberately backdated certificate field.
 	var enrollment dbsqlc.PeerEndpointEnrollmentRequest
-	if requireEnrollment && (proposed.Role == RoleMachine || proposed.Role == RoleCLI) {
+	if requireEnrollment && (proposed.Role == wire.RoleMachine || proposed.Role == wire.RoleCLI) {
 		enrollment, err = q.GetMatchingPeerEndpointEnrollmentRequestForUpdate(ctx, dbsqlc.GetMatchingPeerEndpointEnrollmentRequestForUpdateParams{UserID: userID, EndpointID: proposed.EndpointID, Generation: int64(proposed.Generation), Now: now})
 		if errors.Is(err, sql.ErrNoRows) {
-			return Certificate{}, ErrUnavailable
+			return wire.Certificate{}, ErrUnavailable
 		}
 		if err != nil {
-			return Certificate{}, err
+			return wire.Certificate{}, err
 		}
 		if roleFromString(enrollment.Role) != proposed.Role || !bytes.Equal(enrollment.QuicPublicKey, proposed.QUICPublicKey[:]) || now.Before(enrollment.CreatedAt) {
-			return Certificate{}, ErrConflict
+			return wire.Certificate{}, ErrConflict
 		}
 	}
 	if _, err := q.RevokeSupersededPeerEndpointCertificates(ctx, dbsqlc.RevokeSupersededPeerEndpointCertificatesParams{Now: sql.NullTime{Time: now, Valid: true}, UserID: userID, EndpointID: proposed.EndpointID, Generation: int64(proposed.Generation), Serial: int64(proposed.Serial)}); err != nil {
-		return Certificate{}, err
+		return wire.Certificate{}, err
 	}
 	row, err := q.CreatePeerEndpointCertificate(ctx, dbsqlc.CreatePeerEndpointCertificateParams{
 		Fingerprint: proposed.Fingerprint[:], UserID: userID, KeyID: proposed.KeyID, EndpointID: proposed.EndpointID,
@@ -538,29 +539,29 @@ func (r *SQLRepository) registerTx(ctx context.Context, tx *db.Tx, operationID, 
 		IssuedAt:        proposed.IssuedAt, ExpiresAt: proposed.ExpiresAt,
 	})
 	if errors.Is(err, sql.ErrNoRows) {
-		return Certificate{}, ErrConflict
+		return wire.Certificate{}, ErrConflict
 	}
 	if err != nil {
-		return Certificate{}, err
+		return wire.Certificate{}, err
 	}
 	if _, err := q.CreatePeerEndpointCertificateOperation(ctx, dbsqlc.CreatePeerEndpointCertificateOperationParams{OperationID: operationID, UserID: userID, RequestHash: requestHash[:], CertificateFingerprint: proposed.Fingerprint[:], CreatedAt: now}); err != nil {
-		return Certificate{}, err
+		return wire.Certificate{}, err
 	}
-	if requireEnrollment && (proposed.Role == RoleMachine || proposed.Role == RoleCLI) {
+	if requireEnrollment && (proposed.Role == wire.RoleMachine || proposed.Role == wire.RoleCLI) {
 		if _, err := q.FulfillPeerEndpointEnrollmentRequest(ctx, dbsqlc.FulfillPeerEndpointEnrollmentRequestParams{CertificateFingerprint: proposed.Fingerprint[:], Now: sql.NullTime{Time: now, Valid: true}, ID: enrollment.ID}); err != nil {
-			return Certificate{}, err
+			return wire.Certificate{}, err
 		}
 	}
 	result, err = certificateFromRow(row, now)
 	if err != nil {
-		return Certificate{}, err
+		return wire.Certificate{}, err
 	}
 	if err := r.audit.WriteTx(ctx, tx, audit.Event{
 		ActorUserID: userID, ActorType: audit.ActorUser, EventType: "peer_endpoint.certificate_registered",
 		ResourceType: "peer_endpoint_certificate", ResourceID: hex.EncodeToString(proposed.Fingerprint[:]),
 		IdempotencyKey: operationID, Metadata: map[string]any{"endpoint_id": proposed.EndpointID, "role": proposed.Role.String(), "generation": proposed.Generation, "serial": proposed.Serial},
 	}); err != nil {
-		return Certificate{}, err
+		return wire.Certificate{}, err
 	}
 	return result, nil
 }
@@ -576,18 +577,18 @@ func endpointRequestFromRow(row dbsqlc.PeerEndpointEnrollmentRequest) (EndpointE
 	// CLI identities are intentionally single-generation. Reject malformed
 	// rows rather than exposing a request that cannot produce the certificate
 	// contract enforced by Bootstrap (role=cli, generation=1).
-	if result.Role == RoleCLI && result.Generation != 1 {
+	if result.Role == wire.RoleCLI && result.Generation != 1 {
 		return EndpointEnrollmentRequest{}, ErrUnavailable
 	}
 	copy(result.QUICPublicKey[:], row.QuicPublicKey)
 	return result, nil
 }
 
-func (r *SQLRepository) Get(ctx context.Context, userID, endpointID string, generation uint64, now time.Time) (Certificate, error) {
-	if r == nil || ctx == nil || !identifierExpr.MatchString(userID) || !identifierExpr.MatchString(endpointID) || generation == 0 || generation > maximumInteger || now.IsZero() {
-		return Certificate{}, ErrInvalid
+func (r *SQLRepository) Get(ctx context.Context, userID, endpointID string, generation uint64, now time.Time) (wire.Certificate, error) {
+	if r == nil || ctx == nil || !wire.ValidIdentifier(userID) || !wire.ValidIdentifier(endpointID) || generation == 0 || generation > wire.MaximumInteger || now.IsZero() {
+		return wire.Certificate{}, wire.ErrInvalid
 	}
-	var result Certificate
+	var result wire.Certificate
 	err := r.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		row, err := tx.Queries().GetActivePeerEndpointCertificateForUpdate(ctx, dbsqlc.GetActivePeerEndpointCertificateForUpdateParams{UserID: userID, EndpointID: endpointID, Generation: int64(generation), Now: now.UTC()})
 		if errors.Is(err, sql.ErrNoRows) {
@@ -602,11 +603,11 @@ func (r *SQLRepository) Get(ctx context.Context, userID, endpointID string, gene
 	return result, err
 }
 
-func (r *SQLRepository) Revoke(ctx context.Context, operationID, userID, endpointID string, generation, serial uint64, reason string, now time.Time) (Certificate, error) {
+func (r *SQLRepository) Revoke(ctx context.Context, operationID, userID, endpointID string, generation, serial uint64, reason string, now time.Time) (wire.Certificate, error) {
 	if r == nil || ctx == nil {
-		return Certificate{}, ErrInvalid
+		return wire.Certificate{}, wire.ErrInvalid
 	}
-	var result Certificate
+	var result wire.Certificate
 	err := r.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		q := tx.Queries()
 		replay, err := q.GetPeerEndpointCertificateRevocationForUpdate(ctx, operationID)
@@ -650,20 +651,20 @@ func (r *SQLRepository) Revoke(ctx context.Context, operationID, userID, endpoin
 	return result, err
 }
 
-func certificateFromRow(row dbsqlc.PeerEndpointCertificate, now time.Time) (Certificate, error) {
+func certificateFromRow(row dbsqlc.PeerEndpointCertificate, now time.Time) (wire.Certificate, error) {
 	if len(row.SignerPublicKey) != ed25519.PublicKeySize {
-		return Certificate{}, ErrUnavailable
+		return wire.Certificate{}, ErrUnavailable
 	}
 	keyFingerprint := sha256.Sum256(row.SignerPublicKey)
 	if row.KeyID != keyIDForFingerprint(keyFingerprint) {
-		return Certificate{}, ErrConflict
+		return wire.Certificate{}, ErrConflict
 	}
-	certificate, err := Verify(row.Certificate, row.SignerPublicKey, Expected{AccountID: row.UserID, EndpointID: row.EndpointID, Role: roleFromString(row.Role), Generation: uint64(row.Generation), Serial: uint64(row.Serial)}, now)
+	certificate, err := wire.Verify(row.Certificate, row.SignerPublicKey, wire.Expected{AccountID: row.UserID, EndpointID: row.EndpointID, Role: roleFromString(row.Role), Generation: uint64(row.Generation), Serial: uint64(row.Serial)}, now)
 	if err != nil {
-		return Certificate{}, err
+		return wire.Certificate{}, err
 	}
 	if !bytes.Equal(row.Fingerprint, certificate.Fingerprint[:]) || !bytes.Equal(row.QuicPublicKey, certificate.QUICPublicKey[:]) || !row.IssuedAt.Equal(certificate.IssuedAt) || !row.ExpiresAt.Equal(certificate.ExpiresAt) {
-		return Certificate{}, ErrConflict
+		return wire.Certificate{}, ErrConflict
 	}
 	certificate.KeyID = row.KeyID
 	certificate.RootFingerprint = keyFingerprint
@@ -682,12 +683,12 @@ func accountKeyFromRow(row dbsqlc.AccountE2eeKey) (AccountKey, error) {
 	return AccountKey{KeyID: row.KeyID, PublicKey: append(ed25519.PublicKey(nil), row.PublicKey...), Fingerprint: fingerprint, Generation: uint64(row.Generation)}, nil
 }
 
-func roleFromString(value string) Role {
+func roleFromString(value string) wire.Role {
 	switch value {
 	case "cli":
-		return RoleCLI
+		return wire.RoleCLI
 	case "machine":
-		return RoleMachine
+		return wire.RoleMachine
 	default:
 		return 0
 	}

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat-server/internal/admission"
+	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"os"
 	"strings"
 	"testing"
@@ -20,7 +21,6 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/mint"
-	"github.com/pinksaucepasta/paperboat-server/internal/peeridentity"
 )
 
 func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
@@ -69,15 +69,15 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 	service.now = func() time.Time { return now.Add(250 * time.Millisecond) }
 	for _, endpoint := range []struct {
 		id       string
-		role     peeridentity.Role
+		role     wire.Role
 		roleName string
-	}{{cli, peeridentity.RoleCLI, "cli"}, {machine, peeridentity.RoleMachine, "machine"}} {
+	}{{cli, wire.RoleCLI, "cli"}, {machine, wire.RoleMachine, "machine"}} {
 		_, _, quic := networkEndpointTLS(t, endpoint.id, now)
 		certificate, fingerprint := networkCertificateWithKeys(t, private, account, endpoint.role, endpoint.id, 1, 1, quic, now, now.Add(time.Hour))
 		execute(`INSERT INTO paperboat.peer_endpoint_certificates(fingerprint,user_id,endpoint_id,role,generation,serial,certificate,quic_public_key,issued_at,expires_at,key_id,signer_public_key) VALUES($1,$2,$3,$4,1,1,$5,$6,$7,$8,'expiry-test',$9)`, fingerprint[:], account, endpoint.id, endpoint.roleName, certificate, quic[:], now, now.Add(time.Hour), public)
 		key, wireguard := networkX25519Key(t)
 		registration := NetworkRegistration{OperationID: "register_" + endpoint.id, UserID: account, EndpointID: endpoint.id, Role: endpoint.roleName, EndpointGeneration: 1, WireGuardPublicKey: wireguard, DiscoPublicKey: networkDiscoPublic(t, key), QUICCertificateFingerprint: fingerprint[:]}
-		if endpoint.role == peeridentity.RoleMachine {
+		if endpoint.role == wire.RoleMachine {
 			registration.MachineID, registration.MachineGeneration = machine, 1
 		}
 		if _, err := service.Register(ctx, registration); err != nil {
@@ -248,7 +248,7 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 	}
 	var quic [32]byte
 	copy(quic[:], quicBytes)
-	renewed, renewedFingerprint := networkCertificateWithKeys(t, private, account, peeridentity.RoleCLI, cli, 1, 2, quic, now.Add(2*time.Hour), now.Add(4*time.Hour))
+	renewed, renewedFingerprint := networkCertificateWithKeys(t, private, account, wire.RoleCLI, cli, 1, 2, quic, now.Add(2*time.Hour), now.Add(4*time.Hour))
 	execute(`UPDATE peer_endpoint_certificates SET revoked_at=$2,revocation_reason='certificate_superseded' WHERE endpoint_id=$1`, cli, now.Add(2*time.Hour))
 	execute(`INSERT INTO peer_endpoint_certificates(fingerprint,user_id,endpoint_id,role,generation,serial,certificate,quic_public_key,issued_at,expires_at,key_id,signer_public_key) VALUES($1,$2,$3,'cli',1,2,$4,$5,$6,$7,'expiry-test',$8)`, renewedFingerprint[:], account, cli, renewed, quic[:], now.Add(2*time.Hour), now.Add(4*time.Hour), public)
 	for _, endpoint := range []string{cli, machine} {

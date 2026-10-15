@@ -1,6 +1,7 @@
 package peeridentity
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
@@ -14,7 +15,7 @@ import (
 )
 
 func TestApprovedEndpointCertificateVector(t *testing.T) {
-	raw, err := os.ReadFile("../../testdata/contracts/p2p-v1/fixtures/endpoint-certificate.json")
+	raw, err := os.ReadFile("../../server/testdata/contracts/p2p-v1/fixtures/endpoint-certificate.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,4 +94,24 @@ func signedFixture(t *testing.T, root ed25519.PrivateKey, account string, role R
 	payload = binary.BigEndian.AppendUint64(payload, uint64(issued.Unix()))
 	payload = binary.BigEndian.AppendUint64(payload, uint64(expires.Unix()))
 	return append(payload, ed25519.Sign(root, payload)...)
+}
+
+func TestSignMatchesCanonicalEndpointWireEncoding(t *testing.T) {
+	_, private, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issued := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	expected := signedFixture(t, private, "account_01", RoleMachine, "machine_01", 3, 7, issued, issued.Add(time.Hour))
+	value, err := Sign(private, Certificate{AccountID: "account_01", Role: RoleMachine, EndpointID: "machine_01", QUICPublicKey: [32]byte{2}, Generation: 3, Serial: 7, IssuedAt: issued.Add(123 * time.Millisecond), ExpiresAt: issued.Add(time.Hour + 123*time.Millisecond)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := value.MarshalBinary()
+	if err != nil || !bytes.Equal(raw, expected) {
+		t.Fatal("signer differs from canonical PBEC wire encoding", err)
+	}
+	if value.Fingerprint != sha256.Sum256(expected) {
+		t.Fatal("signer fingerprint differs from encoded bytes")
+	}
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/binary"
+	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"os"
 	"strings"
 	"testing"
@@ -61,7 +62,7 @@ func TestNetworkCertificateRebindKeepsWireGuardKeyPostgres(t *testing.T) {
 		payload := []byte{'P', 'B', 'E', 'C', 1}
 		payload = binary.BigEndian.AppendUint16(payload, uint16(len(userID)))
 		payload = append(payload, userID...)
-		payload = append(payload, byte(peeridentity.RoleCLI))
+		payload = append(payload, byte(wire.RoleCLI))
 		payload = binary.BigEndian.AppendUint16(payload, uint16(len(cliID)))
 		payload = append(payload, cliID...)
 		payload = append(payload, quic[:]...)
@@ -71,7 +72,7 @@ func TestNetworkCertificateRebindKeepsWireGuardKeyPostgres(t *testing.T) {
 		payload = binary.BigEndian.AppendUint64(payload, uint64(now.Add(time.Hour).Unix()))
 		raw := append(payload, ed25519.Sign(private, payload)...)
 		fingerprint := sha256.Sum256(raw)
-		parsed, err := peeridentity.Verify(raw, signer, peeridentity.Expected{AccountID: userID, Role: peeridentity.RoleCLI, EndpointID: cliID, Generation: 1, Serial: uint64(serial)}, now)
+		parsed, err := wire.Verify(raw, signer, wire.Expected{AccountID: userID, Role: wire.RoleCLI, EndpointID: cliID, Generation: 1, Serial: uint64(serial)}, now)
 		if err != nil {
 			t.Fatal(err)
 		}

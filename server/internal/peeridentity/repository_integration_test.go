@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"errors"
+	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"os"
 	"strings"
 	"testing"
@@ -48,9 +49,9 @@ func TestSQLRepositoryBootstrapsRootAndCertificateAtomically(t *testing.T) {
 	}
 	service, _ := NewService(repository)
 	rootPublic, rootPrivate, _ := ed25519.GenerateKey(nil)
-	raw := signedFixture(t, rootPrivate, userID, RoleCLI, clientID, 1, 1, now, now.Add(time.Hour))
+	raw := signedFixture(t, rootPrivate, userID, wire.RoleCLI, clientID, 1, 1, now, now.Add(time.Hour))
 	rootFingerprint := sha256.Sum256(rootPublic)
-	request := BootstrapRequest{RegisterRequest: RegisterRequest{OperationID: "operation_bootstrap_" + suffix, UserID: userID, KeyID: keyIDForFingerprint(rootFingerprint), Certificate: raw, Expected: Expected{AccountID: userID, Role: RoleCLI, EndpointID: clientID, Generation: 1, Serial: 1}, ExpectedRootFingerprint: rootFingerprint, ExpectedCertificateFingerprint: sha256.Sum256(raw), ExpectedIssuedAt: now, ExpectedExpiresAt: now.Add(time.Hour), Now: now}, CLIClientSessionID: clientID, RootPublicKey: rootPublic}
+	request := BootstrapRequest{RegisterRequest: RegisterRequest{OperationID: "operation_bootstrap_" + suffix, UserID: userID, KeyID: keyIDForFingerprint(rootFingerprint), Certificate: raw, Expected: wire.Expected{AccountID: userID, Role: wire.RoleCLI, EndpointID: clientID, Generation: 1, Serial: 1}, ExpectedRootFingerprint: rootFingerprint, ExpectedCertificateFingerprint: sha256.Sum256(raw), ExpectedIssuedAt: now, ExpectedExpiresAt: now.Add(time.Hour), Now: now}, CLIClientSessionID: clientID, RootPublicKey: rootPublic}
 	first, err := service.Bootstrap(ctx, request)
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +61,7 @@ func TestSQLRepositoryBootstrapsRootAndCertificateAtomically(t *testing.T) {
 		t.Fatalf("replay=%+v err=%v", replay, err)
 	}
 	otherPublic, otherPrivate, _ := ed25519.GenerateKey(nil)
-	otherRaw := signedFixture(t, otherPrivate, userID, RoleCLI, clientID, 1, 1, now, now.Add(time.Hour))
+	otherRaw := signedFixture(t, otherPrivate, userID, wire.RoleCLI, clientID, 1, 1, now, now.Add(time.Hour))
 	conflict := request
 	conflict.OperationID = "operation_bootstrap_conflict_" + suffix
 	conflict.RootPublicKey = otherPublic
@@ -131,9 +132,9 @@ func TestSQLRepositoryAuthenticatedMachineEnrollmentBindsSignerWithoutChangingAc
 	}
 	service, _ := NewService(repository)
 	freshPublic, freshPrivate, _ := ed25519.GenerateKey(nil)
-	raw := signedFixture(t, freshPrivate, userID, RoleCLI, freshClientID, 1, 1, now, now.Add(time.Hour))
+	raw := signedFixture(t, freshPrivate, userID, wire.RoleCLI, freshClientID, 1, 1, now, now.Add(time.Hour))
 	freshFingerprint := sha256.Sum256(freshPublic)
-	request := BootstrapRequest{RegisterRequest: RegisterRequest{OperationID: "operation_fresh_bootstrap_" + suffix, UserID: userID, KeyID: keyIDForFingerprint(freshFingerprint), Certificate: raw, Expected: Expected{AccountID: userID, Role: RoleCLI, EndpointID: freshClientID, Generation: 1, Serial: 1}, ExpectedRootFingerprint: freshFingerprint, ExpectedCertificateFingerprint: sha256.Sum256(raw), ExpectedIssuedAt: now, ExpectedExpiresAt: now.Add(time.Hour), Now: now}, CLIClientSessionID: freshClientID, RootPublicKey: freshPublic, AllowRootReplacement: true}
+	request := BootstrapRequest{RegisterRequest: RegisterRequest{OperationID: "operation_fresh_bootstrap_" + suffix, UserID: userID, KeyID: keyIDForFingerprint(freshFingerprint), Certificate: raw, Expected: wire.Expected{AccountID: userID, Role: wire.RoleCLI, EndpointID: freshClientID, Generation: 1, Serial: 1}, ExpectedRootFingerprint: freshFingerprint, ExpectedCertificateFingerprint: sha256.Sum256(raw), ExpectedIssuedAt: now, ExpectedExpiresAt: now.Add(time.Hour), Now: now}, CLIClientSessionID: freshClientID, RootPublicKey: freshPublic, AllowRootReplacement: true}
 	result, err := service.Bootstrap(ctx, request)
 	if err != nil {
 		t.Fatal(err)
@@ -146,7 +147,7 @@ func TestSQLRepositoryAuthenticatedMachineEnrollmentBindsSignerWithoutChangingAc
 		t.Fatalf("exact retry=%+v err=%v", replayed, err)
 	}
 	otherPublic, otherPrivate, _ := ed25519.GenerateKey(nil)
-	otherRaw := signedFixture(t, otherPrivate, userID, RoleCLI, freshClientID, 1, 1, now, now.Add(time.Hour))
+	otherRaw := signedFixture(t, otherPrivate, userID, wire.RoleCLI, freshClientID, 1, 1, now, now.Add(time.Hour))
 	otherFingerprint := sha256.Sum256(otherPublic)
 	conflict := request
 	conflict.OperationID = "operation_other_machine_key_" + suffix
@@ -231,7 +232,7 @@ func TestSQLRepositoryCLIEndpointEnrollmentReplaysOnlyBoundActiveRequests(t *tes
 	}
 	request := CLIEndpointRequest{OperationID: "operation_cli_enrollment_" + suffix, UserID: userID, EndpointID: "peer_cli_endpoint_" + suffix, Generation: 1, QUICPublicKey: [32]byte{2}, Now: now}
 	first, err := service.RequestCLIEndpoint(ctx, request)
-	if err != nil || first.State != "pending" || first.Role != RoleCLI {
+	if err != nil || first.State != "pending" || first.Role != wire.RoleCLI {
 		t.Fatalf("first request=%+v err=%v", first, err)
 	}
 	replay, err := service.RequestCLIEndpoint(ctx, request)
@@ -249,9 +250,9 @@ func TestSQLRepositoryCLIEndpointEnrollmentReplaysOnlyBoundActiveRequests(t *tes
 		t.Fatalf("wrong account conflict=%v", err)
 	}
 
-	raw := signedFixture(t, rootPrivate, userID, RoleCLI, request.EndpointID, 1, 1, now, now.Add(time.Hour))
+	raw := signedFixture(t, rootPrivate, userID, wire.RoleCLI, request.EndpointID, 1, 1, now, now.Add(time.Hour))
 	rootFingerprint := sha256.Sum256(rootPublic)
-	certificate, err := Verify(raw, rootPublic, Expected{AccountID: userID, Role: RoleCLI, EndpointID: request.EndpointID, Generation: 1, Serial: 1}, now)
+	certificate, err := wire.Verify(raw, rootPublic, wire.Expected{AccountID: userID, Role: wire.RoleCLI, EndpointID: request.EndpointID, Generation: 1, Serial: 1}, now)
 	if err != nil {
 		t.Fatal(err)
 	}

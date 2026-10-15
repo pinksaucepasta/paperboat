@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"regexp"
 	"slices"
 	"sort"
@@ -387,14 +388,14 @@ func parseBinding(raw []byte, environmentRoots, endpointRoots peeridentity.Accou
 		return Binding{}, ErrProtocolInvalid
 	}
 	if len(endpoint) > 0 {
-		role := peeridentity.RoleCLI
+		role := wire.RoleCLI
 		if subjectKind == 3 {
-			role = peeridentity.RoleMachine
+			role = wire.RoleMachine
 		}
-		expected := peeridentity.Expected{AccountID: account, Role: role, EndpointID: subjectID, Generation: subjectGen}
+		expected := wire.Expected{AccountID: account, Role: role, EndpointID: subjectID, Generation: subjectGen}
 		verified := false
 		for _, rootPublic := range endpointKeys {
-			if _, verifyErr := peeridentity.Verify(endpoint, rootPublic, expected, issued); verifyErr == nil {
+			if _, verifyErr := wire.Verify(endpoint, rootPublic, expected, issued); verifyErr == nil {
 				verified = true
 				break
 			}

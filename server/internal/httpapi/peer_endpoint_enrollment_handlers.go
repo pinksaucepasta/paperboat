@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"io"
 	"net/http"
 	"strings"
@@ -19,7 +20,7 @@ type machineEndpointProofVerifier interface {
 }
 
 type machineEndpointRequester interface {
-	RegisterMachine(context.Context, peeridentity.MachineRegistrationRequest) (peeridentity.Certificate, error)
+	RegisterMachine(context.Context, peeridentity.MachineRegistrationRequest) (wire.Certificate, error)
 }
 
 type cliEndpointRequester interface {
@@ -31,20 +32,8 @@ type pendingEndpointReader interface {
 }
 
 type machineEndpointStatusReader interface {
-	Get(context.Context, string, string, uint64, time.Time) (peeridentity.Certificate, error)
+	Get(context.Context, string, string, uint64, time.Time) (wire.Certificate, error)
 	TransportKeys(context.Context, string, time.Time) (peeridentity.AccountRoot, error)
-}
-
-type endpointEnrollmentDocument struct {
-	RequestID     string `json:"request_id"`
-	EndpointID    string `json:"endpoint_id"`
-	Role          string `json:"role"`
-	State         string `json:"state"`
-	Generation    uint64 `json:"generation"`
-	QUICPublicKey string `json:"quic_public_key"`
-	CreatedAt     string `json:"created_at"`
-	ExpiresAt     string `json:"expires_at"`
-	SafetyCode    string `json:"safety_code"`
 }
 
 func machineEndpointRequest(service machineEndpointRequester, verifier machineEndpointProofVerifier) http.HandlerFunc {
@@ -93,7 +82,7 @@ func machineEndpointRequest(service machineEndpointRequester, verifier machineEn
 		if err != nil {
 			status, code := http.StatusServiceUnavailable, "temporarily_unavailable"
 			switch {
-			case expectedHTTPErrorOnly(err, peeridentity.ErrInvalid):
+			case expectedHTTPErrorOnly(err, wire.ErrInvalid):
 				status, code = http.StatusBadRequest, "invalid_request"
 			case expectedHTTPErrorOnly(err, peeridentity.ErrConflict):
 				status, code = http.StatusConflict, "operation_conflict"
@@ -113,12 +102,7 @@ func cliEndpointRequest(service cliEndpointRequester) http.HandlerFunc {
 			writeError(w, r, http.StatusUnauthorized, "authentication_required", "CLI authentication is required.")
 			return
 		}
-		var document struct {
-			OperationID   string `json:"operation_id"`
-			EndpointID    string `json:"endpoint_id"`
-			Generation    uint64 `json:"generation"`
-			QUICPublicKey string `json:"quic_public_key"`
-		}
+		var document wire.CLIEndpointRequestDocument
 		body, err := io.ReadAll(io.LimitReader(r.Body, maxMachineControlRequest+1))
 		if err != nil {
 			if expectedHTTPErrorOnly(err, context.Canceled) {
@@ -152,7 +136,7 @@ func cliEndpointRequest(service cliEndpointRequester) http.HandlerFunc {
 		if err != nil {
 			status, code := http.StatusServiceUnavailable, "temporarily_unavailable"
 			switch {
-			case expectedHTTPErrorOnly(err, peeridentity.ErrInvalid):
+			case expectedHTTPErrorOnly(err, wire.ErrInvalid):
 				status, code = http.StatusBadRequest, "invalid_request"
 			case expectedHTTPErrorOnly(err, peeridentity.ErrConflict):
 				status, code = http.StatusConflict, "operation_conflict"
@@ -232,7 +216,7 @@ func pendingEndpoints(service pendingEndpointReader) http.HandlerFunc {
 			writeError(w, r, http.StatusServiceUnavailable, "temporarily_unavailable", "Pending endpoint identities could not be retrieved.", err)
 			return
 		}
-		documents := make([]endpointEnrollmentDocument, 0, len(values))
+		documents := make([]wire.EnrollmentDocument, 0, len(values))
 		for _, value := range values {
 			documents = append(documents, endpointEnrollmentResponse(value))
 		}
@@ -240,6 +224,6 @@ func pendingEndpoints(service pendingEndpointReader) http.HandlerFunc {
 	}
 }
 
-func endpointEnrollmentResponse(value peeridentity.EndpointEnrollmentRequest) endpointEnrollmentDocument {
-	return endpointEnrollmentDocument{RequestID: value.ID, EndpointID: value.EndpointID, Role: value.Role.String(), State: value.State, Generation: value.Generation, QUICPublicKey: base64.RawURLEncoding.EncodeToString(value.QUICPublicKey[:]), CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339), ExpiresAt: value.ExpiresAt.UTC().Format(time.RFC3339), SafetyCode: value.SafetyCode()}
+func endpointEnrollmentResponse(value peeridentity.EndpointEnrollmentRequest) wire.EnrollmentDocument {
+	return wire.EnrollmentDocument{RequestID: value.ID, EndpointID: value.EndpointID, Role: value.Role.String(), State: value.State, Generation: value.Generation, QUICPublicKey: base64.RawURLEncoding.EncodeToString(value.QUICPublicKey[:]), CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339), ExpiresAt: value.ExpiresAt.UTC().Format(time.RFC3339), SafetyCode: value.SafetyCode()}
 }

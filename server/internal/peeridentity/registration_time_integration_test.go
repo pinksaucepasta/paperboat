@@ -9,6 +9,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/audit"
 	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"os"
 	"testing"
 	"time"
@@ -51,7 +52,7 @@ func TestFreshEndpointApprovalUsesServerRegistrationTimeOnPostgres(t *testing.T)
 	service, _ := NewService(repo)
 	quic := make([]byte, 32)
 	quic[0] = 2
-	register := func(generation uint64, created, expires, serverNow time.Time) (Certificate, error) {
+	register := func(generation uint64, created, expires, serverNow time.Time) (wire.Certificate, error) {
 		t.Helper()
 		id := fmt.Sprintf("per_%s_%d", suffix, generation)
 		hash := sha256.Sum256([]byte(id))
@@ -60,8 +61,8 @@ func TestFreshEndpointApprovalUsesServerRegistrationTimeOnPostgres(t *testing.T)
 		}
 		issued := serverNow.Add(-time.Minute).Truncate(time.Second)
 		end := issued.Add(time.Hour)
-		raw := signedFixture(t, private, user, RoleMachine, endpoint, generation, 1, issued, end)
-		return service.Register(ctx, RegisterRequest{OperationID: "operation_" + id, UserID: user, KeyID: key, Certificate: raw, Expected: Expected{AccountID: user, Role: RoleMachine, EndpointID: endpoint, Generation: generation, Serial: 1}, ExpectedRootFingerprint: rootHash, ExpectedCertificateFingerprint: sha256.Sum256(raw), ExpectedIssuedAt: issued, ExpectedExpiresAt: end, Now: serverNow})
+		raw := signedFixture(t, private, user, wire.RoleMachine, endpoint, generation, 1, issued, end)
+		return service.Register(ctx, RegisterRequest{OperationID: "operation_" + id, UserID: user, KeyID: key, Certificate: raw, Expected: wire.Expected{AccountID: user, Role: wire.RoleMachine, EndpointID: endpoint, Generation: generation, Serial: 1}, ExpectedRootFingerprint: rootHash, ExpectedCertificateFingerprint: sha256.Sum256(raw), ExpectedIssuedAt: issued, ExpectedExpiresAt: end, Now: serverNow})
 	}
 	firstNow := time.Now().UTC()
 	first, err := register(1, firstNow.Add(-time.Millisecond), firstNow.Add(time.Minute), firstNow)
