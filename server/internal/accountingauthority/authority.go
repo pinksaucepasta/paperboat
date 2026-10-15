@@ -34,7 +34,7 @@ type QuotaChecker interface {
 }
 
 func Record(ctx context.Context, store *db.DB, b Binding, policy ...QuotaChecker) error {
-	if b.ID == "" || b.Node == "" || b.Environment == "" || b.Route == "" || b.User == "" || b.Revision < 1 || b.ExpiresAt.Before(b.IssuedAt) {
+	if b.ID == "" || b.Node == "" || b.Environment == "" || b.Route == "" || b.User == "" || len(b.User) > 256 || b.Revision < 1 || b.ExpiresAt.Before(b.IssuedAt) {
 		return ErrUnavailable
 	}
 	return store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
@@ -86,20 +86,35 @@ func Record(ctx context.Context, store *db.DB, b Binding, policy ...QuotaChecker
 				return ErrQuotaExhausted
 			}
 		}
-		var capacity bool
-		if err = tx.QueryRow(ctx, `SELECT count(*)<$6 OR coalesce(bool_or(authority_id=$2 AND environment_id=$3 AND route_id=$4 AND route_revision=$5),false) FROM usage_accounting_authorities WHERE edge_node_id=$1`, b.Node, b.ID, b.Environment, b.Route, b.Revision, MaximumPerNode).Scan(&capacity); err != nil {
-			return err
-		}
-		if !capacity {
-			return ErrUnavailable
-		}
-		result, err := tx.Exec(ctx, `INSERT INTO usage_accounting_authorities(authority_id,edge_node_id,environment_id,route_id,route_revision,workspace_id,admitted_at,admission_expires_at,retain_until) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(authority_id,edge_node_id,environment_id,route_id,route_revision) DO UPDATE SET admission_expires_at=greatest(usage_accounting_authorities.admission_expires_at,EXCLUDED.admission_expires_at),retain_until=greatest(usage_accounting_authorities.retain_until,EXCLUDED.retain_until) WHERE usage_accounting_authorities.workspace_id=EXCLUDED.workspace_id`, b.ID, b.Node, b.Environment, b.Route, b.Revision, workspace, b.IssuedAt, b.ExpiresAt, b.ExpiresAt.Add(2*DeliveryWindow))
-		if err != nil {
-			return err
-		}
-		if result.RowsAffected() != 1 {
-			return ErrUnavailable
-		}
-		return nil
+		return retainBindingTx(ctx, tx, b, workspace)
 	})
+}
+
+func retainBindingTx(ctx context.Context, tx *db.Tx, b Binding, workspace string) error {
+	var capacity bool
+	if err := tx.QueryRow(ctx, `SELECT count(*)<$6 OR coalesce(bool_or(authority_id=$2 AND environment_id=$3 AND route_id=$4 AND route_revision=$5),false) FROM usage_accounting_authorities WHERE edge_node_id=$1`, b.Node, b.ID, b.Environment, b.Route, b.Revision, MaximumPerNode).Scan(&capacity); err != nil {
+		return err
+	}
+	if !capacity {
+		return ErrUnavailable
+	}
+	result, err := tx.Exec(ctx, `INSERT INTO usage_accounting_authorities(
+ authority_id,edge_node_id,environment_id,route_id,route_revision,workspace_id,
+ admitted_at,admission_expires_at,retain_until,actor_account_id
+) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+ON CONFLICT(authority_id,edge_node_id,environment_id,route_id,route_revision)
+DO UPDATE SET
+ actor_account_id=EXCLUDED.actor_account_id,
+ admission_expires_at=greatest(usage_accounting_authorities.admission_expires_at,EXCLUDED.admission_expires_at),
+ retain_until=greatest(usage_accounting_authorities.retain_until,EXCLUDED.retain_until)
+WHERE usage_accounting_authorities.workspace_id=EXCLUDED.workspace_id
+ AND (usage_accounting_authorities.actor_account_id IS NULL
+      OR usage_accounting_authorities.actor_account_id=EXCLUDED.actor_account_id)`, b.ID, b.Node, b.Environment, b.Route, b.Revision, workspace, b.IssuedAt, b.ExpiresAt, b.ExpiresAt.Add(2*DeliveryWindow), b.User)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return ErrUnavailable
+	}
+	return nil
 }

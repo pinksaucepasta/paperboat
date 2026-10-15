@@ -94,19 +94,32 @@ func (s *Service) Resolve(ctx context.Context, a browseraccess.Authorization, no
 	if err = d.Validate(time.Now().UTC()); err != nil {
 		return wire.IngressDecision{}, err
 	}
-	team := a.TeamID
-	if team == "" {
-		if err = s.DB.SQL().QueryRowContext(ctx, `SELECT coalesce(owner_team_id,'') FROM user_machines WHERE id=$1 AND environment_id=$2 AND user_id=$3`, b.HostID, b.EnvironmentID, b.AccountID).Scan(&team); err != nil {
-			if err == sql.ErrNoRows {
-				return wire.IngressDecision{}, wire.ErrIngressDenied
-			}
-			return wire.IngressDecision{}, err
-		}
-	}
-	if err = accountingauthority.Record(ctx, s.DB, accountingauthority.Binding{ID: "grant:" + a.GrantID, Node: node, Environment: b.EnvironmentID, Route: b.RouteID, Revision: int64(b.RouteGeneration), User: a.OwnerAccountID, Team: team, IssuedAt: d.IssuedAt, ExpiresAt: d.ExpiresAt}, s.Quota); err != nil {
+	if err := s.recordUsage(ctx, a, d); err != nil {
 		return wire.IngressDecision{}, err
 	}
 	return d, nil
+}
+
+func (s *Service) recordUsage(ctx context.Context, a browseraccess.Authorization, d wire.IngressDecision) error {
+	b := d.Binding
+	team := a.TeamID
+	if team == "" {
+		if err := s.DB.SQL().QueryRowContext(ctx, `SELECT coalesce(owner_team_id,'') FROM user_machines WHERE id=$1 AND environment_id=$2 AND user_id=$3`, b.HostID, b.EnvironmentID, b.AccountID).Scan(&team); err != nil {
+			if err == sql.ErrNoRows {
+				return wire.ErrIngressDenied
+			}
+			return err
+		}
+	}
+	actor := a.OwnerAccountID
+	if team != "" {
+		actor = a.AccountID
+	}
+	return accountingauthority.Record(ctx, s.DB, accountingauthority.Binding{
+		ID: "grant:" + a.GrantID, Node: d.EdgeNodeID, Environment: b.EnvironmentID,
+		Route: b.RouteID, Revision: int64(b.RouteGeneration), User: actor, Team: team,
+		IssuedAt: d.IssuedAt, ExpiresAt: d.ExpiresAt,
+	}, s.Quota)
 }
 
 func (s *Service) preview(ctx context.Context, a browseraccess.Authorization, node, epoch string) (wire.IngressDecision, error) {

@@ -2610,6 +2610,7 @@ type UsageAccountingAuthority struct {
 	AdmittedAt         time.Time
 	AdmissionExpiresAt time.Time
 	RetainUntil        time.Time
+	ActorAccountID     sql.NullString
 }
 
 type User struct {

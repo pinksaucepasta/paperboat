@@ -12,12 +12,23 @@ import (
 // external tests, avoiding the previewv1/previewdomain production import cycle.
 type LazyActivationFixture struct {
 	AccountID, MachineID, EnvironmentID, NodeID, Epoch, EpochTwo, Suffix string
+	SecondPreviewTeam                                                    string
 	LazyPolicyID, LazyHostname, OwnerSessionID                           string
 	fixture                                                              previewCarrierPostgresFixture
 }
 
 func NewLazyActivationFixture(ctx context.Context, database *db.DB, suffix string) (LazyActivationFixture, error) {
 	f := previewCarrierPostgresFixture{suffix: suffix}
+	if err := f.insert(ctx, database, time.Now().UTC()); err != nil {
+		return LazyActivationFixture{}, err
+	}
+	return lazyActivationFixture(f), nil
+}
+
+// NewBrowserAccountingFixture creates the second publication in its team at
+// INSERT time, preserving the same immutable payer rule as the production query.
+func NewBrowserAccountingFixture(ctx context.Context, database *db.DB, suffix string) (LazyActivationFixture, error) {
+	f := previewCarrierPostgresFixture{suffix: suffix, secondPreviewTeam: "browser-accounting-" + suffix}
 	if err := f.insert(ctx, database, time.Now().UTC()); err != nil {
 		return LazyActivationFixture{}, err
 	}
@@ -40,7 +51,7 @@ func lazyActivationFixture(f previewCarrierPostgresFixture) LazyActivationFixtur
 		AccountID: f.accountID, MachineID: f.machineID, EnvironmentID: f.envID,
 		NodeID: f.nodeID, Epoch: f.epochOne, EpochTwo: f.epochTwo, Suffix: f.suffix,
 		LazyPolicyID: f.lazyPolicyID, LazyHostname: f.lazyHostname, OwnerSessionID: f.sessionID,
-		fixture: f,
+		fixture: f, SecondPreviewTeam: f.secondPreviewTeam,
 	}
 }
 

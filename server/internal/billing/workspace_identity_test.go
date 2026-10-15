@@ -105,6 +105,18 @@ func TestWorkspaceIdentityPreservesExistingOwnerRowOnPostgres(t *testing.T) {
 	if err := store.SQL().QueryRowContext(ctx, `SELECT workspace_id FROM paperboat.usage_accounting_authorities WHERE authority_id=$1`, binding.ID).Scan(&payer); err != nil || payer != teamRow {
 		t.Fatalf("retained team payer=%s err=%v", payer, err)
 	}
+	binding.User = member
+	if err := accountingauthority.Record(ctx, store, binding); !errors.Is(err, accountingauthority.ErrUnavailable) {
+		t.Fatalf("retained authority actor changed inside same team: %v", err)
+	}
+	binding.User = owner
+	if err := accountingauthority.Record(ctx, store, binding); err != nil {
+		t.Fatalf("identical actor retry: %v", err)
+	}
+	var actor string
+	if err := store.SQL().QueryRowContext(ctx, `SELECT actor_account_id FROM paperboat.usage_accounting_authorities WHERE authority_id=$1`, binding.ID).Scan(&actor); err != nil || actor != owner {
+		t.Fatalf("retained actor changed after denied rebind: %v", err)
+	}
 	binding.Team = ""
 	if err := accountingauthority.Record(ctx, store, binding); !errors.Is(err, accountingauthority.ErrUnavailable) {
 		t.Fatalf("retained authority payer changed: %v", err)

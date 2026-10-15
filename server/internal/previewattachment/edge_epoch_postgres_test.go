@@ -316,21 +316,22 @@ WHERE account_id=$2 AND operation_id=$3`, fixture.epochOne, admitted.AccountID, 
 }
 
 type previewCarrierPostgresFixture struct {
-	suffix           string
-	accountID        string
-	machineID        string
-	envID            string
-	nodeID           string
-	previewID        [2]string
-	operation        [2]string
-	sessionID        string
-	ownerSessionKind string
-	lazyPolicyID     string
-	lazyHostname     string
-	publicKey        string
-	thumbprint       string
-	epochOne         string
-	epochTwo         string
+	suffix            string
+	accountID         string
+	machineID         string
+	envID             string
+	nodeID            string
+	secondPreviewTeam string
+	previewID         [2]string
+	operation         [2]string
+	sessionID         string
+	ownerSessionKind  string
+	lazyPolicyID      string
+	lazyHostname      string
+	publicKey         string
+	thumbprint        string
+	epochOne          string
+	epochTwo          string
 }
 
 func (f *previewCarrierPostgresFixture) initialize() {
@@ -380,6 +381,11 @@ VALUES ($1, 'test', '1.0', $2, 'edge.example.test', 24001, 24002,
         'sha256:' || repeat('b',64), 'test-public-certificate-chain', 'ready', true, '{}', $3)`, f.nodeID, f.epochOne, now); err != nil {
 		return err
 	}
+	if f.secondPreviewTeam != "" {
+		if _, err := database.SQL().ExecContext(ctx, `INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, f.secondPreviewTeam, f.accountID); err != nil {
+			return err
+		}
+	}
 	for index := range f.previewID {
 		// One machine/port lazy policy has one active publication. Foreground
 		// cases retain independent previews for their lifecycle scenarios.
@@ -398,13 +404,17 @@ VALUES ($1, 'test', '1.0', $2, 'edge.example.test', 24001, 24002,
 			}
 			previewEndpoint = "https://" + f.lazyHostname
 		}
+		var ownerTeam any
+		if index == 1 && f.secondPreviewTeam != "" {
+			ownerTeam = f.secondPreviewTeam
+		}
 		if _, err := database.SQL().ExecContext(ctx, `
 INSERT INTO paperboat.preview_leases
   (owner_session_kind,id, endpoint, account_id, actor_id, owner_machine_id, owner_session_id,
-   target_scheme, target_address, access_mode, lease_deadline, allocation_state,
+   target_scheme, target_address, access_mode, owner_team_id, lease_deadline, allocation_state,
    edge_state, origin_state, terminal_state, created_at, last_renewed_at)
 VALUES ($8,$1, $2, $3, $3, $4, $5, 'http', '127.0.0.1:3000', 'public',
-        $6, 'pending', 'pending', 'unknown', 'active', $7, $7)`, f.previewID[index], previewEndpoint, f.accountID, f.machineID, f.sessionID, now.Add(30*time.Minute), now, f.ownerSessionKind); err != nil {
+         $9, $6, 'pending', 'pending', 'unknown', 'active', $7, $7)`, f.previewID[index], previewEndpoint, f.accountID, f.machineID, f.sessionID, now.Add(30*time.Minute), now, f.ownerSessionKind, ownerTeam); err != nil {
 			return err
 		}
 		requestHash := sha256.Sum256([]byte("carrier-epoch-operation:" + f.operation[index]))

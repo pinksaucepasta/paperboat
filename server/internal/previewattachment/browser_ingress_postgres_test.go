@@ -34,28 +34,39 @@ func TestBrowserPreviewIngressPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() { _ = database.Close() })
 	if os.Getenv("PAPERBOAT_TEST_SCHEMA_READY") != "1" {
 		if err = db.Migrate(ctx, database); err != nil {
 			t.Fatal(err)
 		}
 	}
-	f, err := previewattachment.NewLazyActivationFixture(ctx, database, fmt.Sprint(time.Now().UnixNano()))
+	f, err := previewattachment.NewBrowserAccountingFixture(ctx, database, fmt.Sprint(time.Now().UnixNano()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	defer func() {
+	t.Cleanup(func() {
 		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM usage_accounting_authorities WHERE environment_id=$1`, f.EnvironmentID)
 		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM billing_workspaces WHERE user_id=$1`, f.AccountID)
 		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM sessions WHERE user_id=$1`, f.AccountID)
+		for _, statement := range []struct {
+			query string
+			args  []any
+		}{
+			{`DELETE FROM preview_leases WHERE id=$1`, []any{f.PreviewID(1)}},
+			{`DELETE FROM teams WHERE team_id=$1`, []any{f.SecondPreviewTeam}},
+		} {
+			if _, e := database.SQL().ExecContext(context.Background(), statement.query, statement.args...); e != nil {
+				t.Error(e)
+			}
+		}
 		if _, e := database.SQL().ExecContext(context.Background(), `DELETE FROM users WHERE id=$1`, f.AccountID); e != nil {
 			t.Error(e)
 		}
 		if _, e := database.SQL().ExecContext(context.Background(), `DELETE FROM control_tunnel_nodes WHERE id=$1`, f.NodeID); e != nil {
 			t.Error(e)
 		}
-	}()
+	})
 	exec := func(q string, args ...any) {
 		t.Helper()
 		if _, e := database.SQL().ExecContext(ctx, q, args...); e != nil {
@@ -105,6 +116,7 @@ func TestBrowserPreviewIngressPostgres(t *testing.T) {
 	if d.Authorize(d, open, f.NodeID, f.Epoch, time.Now().UTC()) != nil || d.Binding.PublicationID != attachment.PreviewID || d.Binding.OriginAddress != "127.0.0.1:3000" {
 		t.Fatal("incorrect complete browser binding")
 	}
+	assertTeamBrowserPreviewAccounting(t, database, f, repo, access, now)
 	// Heartbeat revision does not change the viewer's authority dimensions.
 	exec(`UPDATE preview_leases SET generation=generation+1,lease_deadline=lease_deadline+interval '1 minute' WHERE id=$1`, attachment.PreviewID)
 	exec(`UPDATE preview_lease_carrier_attachments SET lease_generation=lease_generation+1,expires_at=expires_at+interval '1 minute' WHERE preview_id=$1`, attachment.PreviewID)
