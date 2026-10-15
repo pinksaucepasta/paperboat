@@ -378,9 +378,16 @@ func testPreviewRouteReplacementRetry(t *testing.T, duringOpen bool) {
 			newServed <- acceptErr
 			return
 		}
-		_, writeErr := io.WriteString(stream, "HTTP/1.1 200 OK\r\nContent-Length: 7\r\n\r\nhealthy")
-		_ = stream.Close()
-		newServed <- writeErr
+		newServed <- datacarrier.ServeHTTPStream(context.Background(), stream,
+			http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if request.Method != http.MethodGet || request.Host != "app.preview.example.test" || request.URL.Path != "/" {
+					t.Error("retry did not deliver the exact request to the replacement")
+					http.Error(writer, "invalid retry", http.StatusBadGateway)
+					return
+				}
+				writer.WriteHeader(http.StatusOK)
+				_, _ = io.WriteString(writer, "healthy")
+			}), 4096, time.Second)
 	}()
 
 	result := make(chan struct {
