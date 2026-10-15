@@ -45,3 +45,18 @@ func TestCanceledRecoveryDoesNotAttemptDial(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestBackoffCapsWithoutOverflow(t *testing.T) {
+	backoff := Backoff(100*time.Millisecond, time.Second)
+	for i, want := range []time.Duration{100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond, 800 * time.Millisecond, time.Second, time.Second} {
+		if got := backoff(i + 1); got != want {
+			t.Fatalf("attempt%d got=%v want=%v", i+1, got, want)
+		}
+	}
+	if got := Backoff(2, 5)(2); got != 4 {
+		t.Fatalf("odd ceiling rounded early: %v", got)
+	}
+	if got := Backoff(1<<62, 1<<63-1)(2); got != 1<<63-1 {
+		t.Fatalf("backoff overflowed: %v", got)
+	}
+}

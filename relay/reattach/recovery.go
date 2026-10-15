@@ -95,3 +95,23 @@ func Wait(ctx context.Context, delay time.Duration) error {
 		return nil
 	}
 }
+
+// Backoff returns a capped exponential policy. Attempts are numbered from one.
+func Backoff(initial, maximum time.Duration) func(int) time.Duration {
+	return func(attempt int) time.Duration {
+		if initial <= 0 || maximum <= 0 {
+			return 0
+		}
+		delay := initial
+		if delay >= maximum {
+			return maximum
+		}
+		for i := 1; i < attempt; i++ {
+			if delay > maximum/2 {
+				return maximum
+			}
+			delay *= 2
+		}
+		return delay
+	}
+}
