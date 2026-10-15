@@ -12,6 +12,18 @@ HERE = pathlib.Path(__file__).resolve().parent
 
 
 class SmokeReceipts(unittest.TestCase):
+    def test_launch_rejects_windows_target_before_credentials_or_device_access(self):
+        environment = dict(os.environ)
+        environment.pop("APPLE_PASS", None)
+        environment.pop("VICTUS_PASS", None)
+        for targets in ("victus", "hp,victus"):
+            with self.subTest(targets=targets):
+                result = subprocess.run(
+                    ["bash", str(HERE / "smoke.sh"), "--expect-version", "fixture", "--targets", targets],
+                    env=environment, capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("Windows device smoke is deferred until after launch", result.stderr)
+
     def test_terminal_removes_only_its_exact_session_and_preserves_primary_failure(self):
         prefix = (HERE / 'smoke.sh').read_text().split('# ---------------------------------------------------------------- run')[0]
         for terminal_exit, fault in [(0, ""), (7, ""), (0, "foreign_scope"), (0, "failed_delete"), (0, "foreign_ack")]:

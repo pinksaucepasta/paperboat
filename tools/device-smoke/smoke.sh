@@ -3,16 +3,16 @@
 #
 # Runs the user-visible baseline on the real test machines after every build:
 # doctor and version on every device, then from the HP client against every
-# target (hp, apple, victus): short exec, long exec, terminal input, managed
+# launch target (hp, apple): short exec, long exec, terminal input, managed
 # SSH (short and held), 50 MiB transfer with hash check; previews on the Unix
 # devices. Optional `--update <dir>` adds the update-continuity check.
 #
 # Usage:
-#   APPLE_PASS=... VICTUS_PASS=... tools/device-smoke/smoke.sh --expect-version <version> [options]
+#   APPLE_PASS=... tools/device-smoke/smoke.sh --expect-version <version> [options]
 # Options:
 #   --expect-version V   version every device must report (required)
 #   --windows-install-json FILE  saved Windows pb install --json output (required for victus)
-#   --targets LIST       comma list of targets (default hp,apple,victus)
+#   --targets LIST       comma list of launch targets (default hp,apple)
 #   --long-seconds N     duration of long exec / held SSH (default 420 / 200)
 #   --skip LIST          comma list of test ids to skip (e.g. preview,transfer)
 #   --update DIR         after the baseline, update each target with the build in DIR
@@ -36,7 +36,7 @@ STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 RUN_ID="smoke$(date -u +%H%M%S)$RANDOM"
 
 EXPECT_VERSION=""
-TARGETS="hp,apple,victus"
+TARGETS="hp,apple"
 LONG_EXEC=420
 LONG_SSH=200
 SKIP=""
@@ -57,6 +57,11 @@ while [ $# -gt 0 ]; do
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
+# PLAN.md 1.1: Windows device work resumes after launch.
+if [[ ",$TARGETS," == *,victus,* ]]; then
+  echo "Windows device smoke is deferred until after launch (PLAN.md 1.1)." >&2
+  exit 2
+fi
 [ -n "$EXPECT_VERSION" ] || { echo "--expect-version is required" >&2; exit 2; }
 [ -z "$UPDATE_DIR" ] || [ -n "$UPDATE_VERSION" ] || { echo "--update requires --update-version" >&2; exit 2; }
 [ -n "${APPLE_PASS:-}" ] || [[ ",$TARGETS," != *,apple,* ]] || { echo "export APPLE_PASS (see REMOTE_TESTING.md)" >&2; exit 2; }
