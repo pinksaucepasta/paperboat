@@ -93,8 +93,9 @@ uninstall:
 test:
 	$(GO) test -count=1 -timeout 12m ./...
 
+# Keep timed native workloads clear of other package compilers and race processes.
 race:
-	$(GO) test -race -count=1 -timeout 12m ./...
+	$(GO) test -race -p 1 -count=1 -timeout 12m ./...
 
 fuzz: verify-toolchain
 	@./tools/run-fuzz-targets.sh
