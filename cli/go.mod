@@ -1,6 +1,6 @@
 module github.com/pinksaucepasta/paperboat
 
-go 1.27.1
+go 1.27.2
 
 replace tailscale.com => github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20260928002927-8c8b2e0dc313
 
@@ -29,7 +29,7 @@ require (
 	github.com/google/renameio/v2 v2.0.2
 	github.com/hashicorp/yamux v0.1.1
 	github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02
-	github.com/junegunn/fzf v0.72.0
+	github.com/junegunn/fzf v0.73.1
 	github.com/klauspost/compress v1.20.0
 	github.com/libp2p/go-yamux/v5 v5.1.0
 	github.com/miekg/dns v1.1.73
@@ -49,7 +49,7 @@ require (
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745
 	go4.org/netipx v0.0.0-20260823151212-3075585bcbeb
 	golang.org/x/crypto v0.57.0
-	golang.org/x/net v0.59.0
+	golang.org/x/net v0.60.0
 	golang.org/x/sys v0.48.0
 	golang.org/x/term v0.46.0
 	google.golang.org/grpc v1.80.0
