@@ -73,14 +73,22 @@ func ServeNativePrivateTCP(ctx context.Context, header streamauth.Header, client
 func bridgeNativePrivateTCP(left, right net.Conn) error {
 	results := make(chan error, 2)
 	var once sync.Once
+	closeBoth := func() { once.Do(func() { _ = left.Close(); _ = right.Close() }) }
 	copyOne := func(destination, source net.Conn) {
 		_, err := io.Copy(destination, source)
-		if closer, ok := destination.(interface{ CloseWrite() error }); ok {
-			err = errors.Join(err, closer.CloseWrite())
-		} else {
-			once.Do(func() { _ = destination.Close() })
+		if err == nil {
+			if closer, ok := destination.(interface{ CloseWrite() error }); ok {
+				err = closer.CloseWrite()
+			} else {
+				closeBoth()
+			}
 		}
+		// Record the primary failure before closing the other direction can
+		// produce a secondary closed-connection error.
 		results <- err
+		if err != nil {
+			closeBoth()
+		}
 	}
 	go copyOne(left, right)
 	go copyOne(right, left)
