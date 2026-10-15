@@ -1,7 +1,6 @@
 package hostruntimecmd
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -68,7 +67,7 @@ func rejectFreshBootstrapOverEnrollment(store *identity.Store, resumeErr error) 
 		return fmt.Errorf("inspect existing machine enrollment: %w", err)
 	}
 	if registration.MachineID != "" {
-		return errors.New("this OS user already has a Paperboat machine enrollment; to complete or repair this machine, sign in to the same account and run `pb setup --name <machine-alias>`; run `pb uninstall` only before enrolling another account")
+		return runtimeFailure("this OS user already has a Paperboat machine enrollment; to complete or repair this machine, sign in to the same account and run `pb setup --name <machine-alias>`; run `pb uninstall` only before enrolling another account")
 	}
 	return nil
 }

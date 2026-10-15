@@ -1,6 +1,7 @@
 package hostruntimecmd
 
 import (
+	"bytes"
 	"encoding/base64"
 	"net"
 	"path/filepath"
@@ -25,6 +26,15 @@ func TestFreshBootstrapCannotReplaceExistingEnrollment(t *testing.T) {
 	}
 	if err := rejectFreshBootstrapOverEnrollment(store, bootstrap.ErrResumeNotFound); err == nil || !strings.Contains(err.Error(), "pb uninstall") || !strings.Contains(err.Error(), "pb setup --name <machine-alias>") {
 		t.Fatalf("guard error=%v", err)
+	}
+	var output, failure bytes.Buffer
+	code := Execute(t.Context(), []string{"bootstrap", "--server", "https://api.example.test", "--name", "test-machine", "--state-root", root}, strings.NewReader(""), &output, &failure)
+	if code == 0 || !strings.Contains(failure.String(), "pb setup --name <machine-alias>") {
+		t.Fatalf("existing enrollment refusal lost recovery: code=%d output=%q", code, failure.String())
+	}
+	registration, err := store.Registration()
+	if err != nil || registration.MachineID != "machine_1" || registration.PublicKeyID != key.ID {
+		t.Fatal("refused pairing changed existing enrollment")
 	}
 	if err := rejectFreshBootstrapOverEnrollment(store, nil); err != nil {
 		t.Fatalf("resume was blocked: %v", err)
