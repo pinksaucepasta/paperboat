@@ -35,20 +35,16 @@ func actionUpdateFrom(command *cobra.Command, input string, force bool) error {
 	if err != nil {
 		return err
 	}
-	return installStagedUpdateSource(command, ctx, staged.Path, directory, force)
+	return installStagedUpdateSource(command, ctx, staged.Path, force)
 }
 
-func installStagedUpdateSource(command *cobra.Command, ctx context.Context, stagedPath, directory string, force bool) error {
+func installStagedUpdateSource(command *cobra.Command, ctx context.Context, stagedPath string, force bool) error {
 	var source installsource.Source
 	var err error
 	executable, bundle := stagedPath, ""
 	if strings.EqualFold(filepath.Ext(stagedPath), ".pb-update") {
 		executable, bundle = "", stagedPath
 	} else {
-		executable, err = manualUpdateExecutable(ctx, stagedPath, directory)
-		if err != nil {
-			return err
-		}
 		if err = os.Chmod(executable, 0700); err != nil {
 			return err
 		}
@@ -136,5 +132,5 @@ func actionForceOfficial(command *cobra.Command, ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return installStagedUpdateSource(command, ctx, bundle, directory, true)
+	return installStagedUpdateSource(command, ctx, bundle, true)
 }
