@@ -118,7 +118,8 @@ func (f *fixture) start(address string) (*Server, string, func()) {
 	return server, socket.LocalAddr().String(), stop
 }
 func (f *fixture) client(address string, cert tls.Certificate, g Grant) *Client {
-	c := NewClient(ClientConfig{Address: address, TLS: &tls.Config{RootCAs: f.roots, ServerName: "localhost", Certificates: []tls.Certificate{cert}}, Credential: func(context.Context) (string, error) { return f.token(g), nil }})
+	token := f.token(g)
+	c := NewClient(ClientConfig{Address: address, TLS: &tls.Config{RootCAs: f.roots, ServerName: "localhost", Certificates: []tls.Certificate{cert}}, Credential: func(context.Context) (string, error) { return token, nil }})
 	f.t.Cleanup(func() { c.Close() })
 	return c
 }
@@ -385,7 +386,7 @@ func TestCancellationAndPacketBounds(t *testing.T) {
 	}
 }
 
-func TestLiveExpiryAndDrain(t *testing.T) {
+func TestAdmittedLifetimeRevocationAndDrain(t *testing.T) {
 	for _, mode := range []string{"expiry", "drain"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newFixture(t)
@@ -412,12 +413,25 @@ func TestLiveExpiryAndDrain(t *testing.T) {
 			c.mu.Lock()
 			cc := c.current
 			c.mu.Unlock()
+			if mode == "expiry" {
+				time.Sleep(time.Until(time.Unix(g.ExpiresAt, 0)) + 350*time.Millisecond)
+				if err := c.Ping(t.Context()); err != nil {
+					t.Fatal("expiry closed admitted carrier", err)
+				}
+				fresh := f.client(address, cert, g)
+				if err := fresh.Connect(t.Context()); !errors.Is(err, ErrExpired) {
+					t.Fatal("expired grant admitted a replacement", err)
+				}
+				if err := s.Revoke(g.AccountID, g.EndpointID, g.Generation+1); err != nil {
+					t.Fatal(err)
+				}
+			}
 			select {
 			case <-cc.conn.Context().Done():
 			case <-time.After(3 * time.Second):
 				t.Fatal("expired or drained connection remains live")
 			}
-			want := ErrExpired
+			want := ErrAdmission
 			if mode == "drain" {
 				want = ErrOverload
 			}
@@ -511,8 +525,10 @@ func TestReconnectSupersedesLiveConnection(t *testing.T) {
 
 // Expiry withdraws forwarding until fresh signed authority arrives, but must not
 // permanently fence the carrier like an explicit revocation does.
-func TestExpiredLeaseRecoversWithFreshAuthority(t *testing.T) { testExpiredLeaseRecovers(t, false) }
-func TestFallbackExpiredLeaseRecoversWithFreshAuthority(t *testing.T) {
+func TestLostCarrierRequiresFreshAdmissionAfterExpiry(t *testing.T) {
+	testExpiredLeaseRecovers(t, false)
+}
+func TestLostFallbackCarrierRequiresFreshAdmissionAfterExpiry(t *testing.T) {
 	testExpiredLeaseRecovers(t, true)
 }
 func testExpiredLeaseRecovers(t *testing.T, fallback bool) {
@@ -543,11 +559,15 @@ func testExpiredLeaseRecovers(t *testing.T, fallback bool) {
 	a.mu.Lock()
 	old := a.current
 	a.mu.Unlock()
+	time.Sleep(time.Until(time.Unix(ga.ExpiresAt, 0)) + 350*time.Millisecond)
 	select {
 	case <-old.conn.Context().Done():
-	case <-time.After(3 * time.Second):
-		t.Fatal("expired lease remained connected")
+		t.Fatal("expiry closed admitted carrier")
+	default:
 	}
+	// Recovery is required for an actual lost connection, not expiry.
+	old.conn.CloseWithError(0, "fixture transport disconnected")
+	<-old.conn.Context().Done()
 	before := server.Snapshot().Forwarded
 	// Re-presenting expired signed authority remains denied and forwards nothing.
 	if err := carrier.Send(kb, []byte("expired")); !errors.Is(err, ErrExpired) {

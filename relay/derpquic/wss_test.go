@@ -210,8 +210,8 @@ func TestRealWSSFallsBackThenRecoversToQUIC(t *testing.T) {
 	s.Wait()
 }
 
-func TestWSSExpiredLeaseRecoversWithFreshAuthority(t *testing.T) { testWSSExpiredLease(t, false) }
-func TestWSSRefreshCredentialExpiryRecovers(t *testing.T)        { testWSSExpiredLease(t, true) }
+func TestLostWSSCarrierRequiresFreshAdmissionAfterExpiry(t *testing.T) { testWSSExpiredLease(t, false) }
+func TestWSSCredentialRefreshExpiryKeepsAdmittedCarrier(t *testing.T)  { testWSSExpiredLease(t, true) }
 func testWSSExpiredLease(t *testing.T, callback bool) {
 	f := newFixture(t)
 	server, address, _ := f.start("127.0.0.1:0")
@@ -245,11 +245,18 @@ func testWSSExpiredLease(t *testing.T, callback bool) {
 	a.mu.Lock()
 	old := a.current
 	a.mu.Unlock()
+	if callback {
+		time.Sleep(16 * time.Second)
+	} else {
+		time.Sleep(time.Until(time.Unix(ga.ExpiresAt, 0)) + 350*time.Millisecond)
+	}
 	select {
 	case <-old.ctx.Done():
-	case <-time.After(18 * time.Second):
-		t.Fatal("expired WSS lease remained connected")
+		t.Fatal("credential expiry closed admitted WSS")
+	default:
 	}
+	old.cancel() // An actual disconnect requires a fresh admission proof.
+	<-old.ctx.Done()
 	if err := a.Connect(t.Context()); !errors.Is(err, ErrExpired) {
 		t.Fatalf("expired WSS grant: %v", err)
 	}

@@ -219,10 +219,27 @@ func allowed(a, b Grant, now time.Time) bool { return allowedPairExpiry(a, b, no
 // A pair can continue while any exact reciprocal scope remains live. Its
 // lifetime never exceeds either endpoint's signed grant.
 func allowedPairExpiry(a, b Grant, now time.Time) int64 {
-	latest := int64(0)
 	if a.ExpiresAt <= now.Unix() || b.ExpiresAt <= now.Unix() {
 		return 0
 	}
+	var latest int64
+	reciprocalScopes(a, b, func(s, t Scope) {
+		if s.ExpiresAt > now.Unix() && t.ExpiresAt > now.Unix() {
+			latest = max(latest, min(s.ExpiresAt, t.ExpiresAt, a.ExpiresAt, b.ExpiresAt))
+		}
+	})
+	return latest
+}
+
+func allowedAdmitted(a, b Grant) bool {
+	matched := false
+	reciprocalScopes(a, b, func(Scope, Scope) { matched = true })
+	return matched
+}
+func controlAdmitted(a, b Grant) bool {
+	return a.AccountID == b.AccountID && slices.Contains(a.RelayControlPeers, b.WireGuardPublicKey) && slices.Contains(b.RelayControlPeers, a.WireGuardPublicKey)
+}
+func reciprocalScopes(a, b Grant, match func(Scope, Scope)) {
 	for _, p := range a.Peers {
 		if p.WireGuardPublicKey != b.WireGuardPublicKey {
 			continue
@@ -233,14 +250,13 @@ func allowedPairExpiry(a, b Grant, now time.Time) int64 {
 			}
 			for _, s := range p.Scopes {
 				for _, t := range q.Scopes {
-					if (s.ResourceKind != "machine_network" || a.AccountID == b.AccountID) && s.ResourceKind == t.ResourceKind && s.ResourceID == t.ResourceID && s.ResourceGeneration == t.ResourceGeneration && s.Capability == t.Capability && s.Port == t.Port && s.Direction != t.Direction && s.ExpiresAt > now.Unix() && t.ExpiresAt > now.Unix() {
-						latest = max(latest, min(s.ExpiresAt, t.ExpiresAt, a.ExpiresAt, b.ExpiresAt))
+					if (s.ResourceKind != "machine_network" || a.AccountID == b.AccountID) && s.ResourceKind == t.ResourceKind && s.ResourceID == t.ResourceID && s.ResourceGeneration == t.ResourceGeneration && s.Capability == t.Capability && s.Port == t.Port && s.Direction != t.Direction {
+						match(s, t)
 					}
 				}
 			}
 		}
 	}
-	return latest
 }
 
 func ParseDiscoKey(value string) (key.DiscoPublic, error) {

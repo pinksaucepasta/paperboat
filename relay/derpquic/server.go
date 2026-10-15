@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/tls"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"io"
 	"net"
 	"sync"
@@ -214,13 +215,35 @@ func (s *Server) servePeer(p *peerConn) {
 	}
 	stream.SetWriteDeadline(time.Time{})
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(1)
 	if c != nil {
 		wg.Add(1)
 		go func() { defer wg.Done(); s.readDatagrams(p) }()
 	}
 	go func() { defer wg.Done(); s.writePackets(p) }()
-	go func() { defer wg.Done(); s.expire(p) }()
+	lease, err := admission.Admit(p.context(), time.Unix(p.grant.ExpiresAt, 0), nil)
+	if err != nil {
+		s.reject(p, ErrExpired)
+		return
+	}
+	defer lease.Close()
+	stop := lease.Bind(p)
+	defer stop()
+	stopWatch := lease.Poll(func(context.Context) error {
+		s.mu.Lock()
+		current := s.peers[p.key] == p
+		drained := s.draining && !time.Now().Before(s.deadline)
+		s.mu.Unlock()
+		if drained {
+			s.reject(p, ErrOverload)
+			return admission.ErrRevoked
+		}
+		if !current {
+			return admission.ErrRevoked
+		}
+		return nil
+	})
+	defer stopWatch()
 	defer func() { p.close(0, "relay closed"); wg.Wait() }()
 	for {
 		kind, b, err = readFrame(stream)
@@ -239,7 +262,9 @@ func (s *Server) servePeer(p *peerConn) {
 		}
 		switch kind {
 		case frameAuth:
-			if err = s.admit(p, string(b)); err != nil {
+			if err = s.admit(p, string(b)); errors.Is(err, ErrExpired) {
+				continue
+			} else if err != nil {
 				s.reject(p, err)
 				return
 			}
@@ -308,7 +333,9 @@ func (s *Server) admit(p *peerConn, token string) error {
 	}
 	id := g.AccountID + "\x00" + g.EndpointID
 	for id, old := range s.fences {
-		if old.ExpiresAt <= now.Unix() {
+		k, _ := ParseKey(old.WireGuardPublicKey)
+		live := s.peers[k]
+		if old.ExpiresAt <= now.Unix() && (live == nil || grantID(live.grant) != id) {
 			delete(s.fences, id)
 		}
 	}
@@ -372,7 +399,7 @@ func (s *Server) admit(p *peerConn, token string) error {
 	return nil
 }
 func (s *Server) authorizedLocked(p, q *peerConn, now time.Time) bool {
-	return p != nil && q != nil && s.peers[p.key] == p && s.peers[q.key] == q && (!s.draining || now.Before(s.deadline)) && allowed(p.grant, q.grant, now)
+	return p != nil && q != nil && s.peers[p.key] == p && s.peers[q.key] == q && (!s.draining || now.Before(s.deadline)) && allowedAdmitted(p.grant, q.grant)
 }
 func (s *Server) route(p *peerConn, msg packet) {
 	s.mu.Lock()
@@ -380,7 +407,7 @@ func (s *Server) route(p *peerConn, msg packet) {
 	q := s.peers[msg.peer]
 	authorized := s.authorizedLocked(p, q, time.Now())
 	if msg.control {
-		authorized = authorized || p != nil && q != nil && s.peers[p.key] == p && s.peers[q.key] == q && controlAllowed(p.grant, q.grant, time.Now())
+		authorized = authorized || p != nil && q != nil && s.peers[p.key] == p && s.peers[q.key] == q && controlAdmitted(p.grant, q.grant)
 	}
 	if !authorized {
 		s.dropped.Add(1)
@@ -438,7 +465,7 @@ func (s *Server) writePackets(p *peerConn) {
 			s.mu.Lock()
 			valid := s.authorizedLocked(msg.source, p, time.Now())
 			if msg.control && !msg.service {
-				valid = valid || msg.source != nil && s.peers[msg.source.key] == msg.source && s.peers[p.key] == p && controlAllowed(msg.source.grant, p.grant, time.Now())
+				valid = valid || msg.source != nil && s.peers[msg.source.key] == msg.source && s.peers[p.key] == p && controlAdmitted(msg.source.grant, p.grant)
 			}
 			if msg.service {
 				valid = msg.source == p && s.serviceAllowedLocked(p) && s.service != nil && msg.peer == s.service.key && msg.lease != nil
@@ -465,34 +492,6 @@ func (s *Server) writePackets(p *peerConn) {
 				return
 			}
 			s.forwarded.Add(1)
-		}
-	}
-}
-func (s *Server) expire(p *peerConn) {
-	ticker := time.NewTicker(250 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-p.context().Done():
-			return
-		case now := <-ticker.C:
-			s.mu.Lock()
-			current := s.peers[p.key] == p
-			expired := p.grant.ExpiresAt <= now.Unix()
-			drained := s.draining && !now.Before(s.deadline)
-			s.mu.Unlock()
-			if drained {
-				s.reject(p, ErrOverload)
-				return
-			}
-			if !current {
-				s.reject(p, ErrAdmission)
-				return
-			}
-			if expired {
-				s.reject(p, ErrExpired)
-				return
-			}
 		}
 	}
 }
@@ -561,3 +560,5 @@ func (s *Server) Close() error {
 	return nil
 }
 func (s *Server) Wait() { s.workers.Wait() }
+
+func (p *peerConn) Close() error { p.close(ErrAdmission.Code, "relay authority revoked"); return nil }

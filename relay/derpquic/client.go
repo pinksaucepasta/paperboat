@@ -353,27 +353,7 @@ func (c *Client) readData(cc *clientConn) {
 }
 func (c *Client) refresh(cc *clientConn) {
 	defer cc.workers.Done()
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-cc.conn.Context().Done():
-			return
-		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(cc.conn.Context(), 5*time.Second)
-			token, err := c.config.Credential(ctx)
-			cancel()
-			if err != nil || token == "" {
-				code := ErrAdmission.Code
-				if errors.Is(err, ErrExpired) {
-					code = ErrExpired.Code
-				}
-				cc.conn.CloseWithError(quic.ApplicationErrorCode(code), "relay authority unavailable")
-				return
-			}
-			if cc.frame(frameAuth, []byte(token)) != nil {
-				return
-			}
-		}
-	}
+	watchCarrierAuthority(cc.conn.Context(), c.config.Credential, func(token string) error { return cc.frame(frameAuth, []byte(token)) }, func() {
+		cc.conn.CloseWithError(quic.ApplicationErrorCode(ErrAdmission.Code), "relay authority revoked")
+	})
 }

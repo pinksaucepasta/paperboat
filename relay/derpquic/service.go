@@ -39,7 +39,7 @@ func (s *Server) SetControlService(identity ServiceDescriptor, handler ControlHa
 	return nil
 }
 func (s *Server) serviceAllowedLocked(p *peerConn) bool {
-	return s.service != nil && p != nil && s.peers[p.key] == p && p.grant.ExpiresAt > time.Now().Unix() && p.grant.PeerRelay != nil && *p.grant.PeerRelay == s.service.identity && (!s.draining || time.Now().Before(s.deadline))
+	return s.service != nil && p != nil && s.peers[p.key] == p && p.grant.PeerRelay != nil && *p.grant.PeerRelay == s.service.identity && (!s.draining || time.Now().Before(s.deadline))
 }
 func (r ControlRequest) SourceDisco() (key.DiscoPublic, error) {
 	r.server.mu.Lock()

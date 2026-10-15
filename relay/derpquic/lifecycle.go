@@ -15,7 +15,9 @@ func (s *Server) AuthoritySubjects() []AuthoritySubject {
 	out := make([]AuthoritySubject, 0, len(s.fences))
 	for _, f := range s.fences {
 		g := f.Grant
-		if g.ExpiresAt > time.Now().Unix() && g.AccountID != "" {
+		k, _ := ParseKey(g.WireGuardPublicKey)
+		live := s.peers[k]
+		if g.AccountID != "" && (g.ExpiresAt > time.Now().Unix() || live != nil && grantID(live.grant) == grantID(g)) {
 			out = append(out, AuthoritySubject{g.AccountID, g.EndpointID, g.Generation})
 		}
 	}

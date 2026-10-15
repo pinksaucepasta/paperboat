@@ -352,20 +352,5 @@ func (c *WSSClient) read(cc *wssClientConn) {
 }
 func (c *WSSClient) refresh(cc *wssClientConn) {
 	defer cc.workers.Done()
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-cc.ctx.Done():
-			return
-		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(cc.ctx, 5*time.Second)
-			token, e := c.config.Credential(ctx)
-			cancel()
-			if e != nil || token == "" || cc.frame(frameAuth, []byte(token)) != nil {
-				cc.cancel()
-				return
-			}
-		}
-	}
+	watchCarrierAuthority(cc.ctx, c.config.Credential, func(token string) error { return cc.frame(frameAuth, []byte(token)) }, cc.cancel)
 }
