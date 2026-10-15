@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"sync"
 	"testing"
 	"time"
@@ -14,27 +15,27 @@ import (
 
 type runtimeSourceFake struct {
 	mu           sync.Mutex
-	admissions   []control.RuntimeCarrierAdmission
+	admissions   []runtimewire.Admission
 	err          error
-	observations []control.RuntimeCarrierObservation
+	observations []runtimewire.Observation
 }
 
-func (s *runtimeSourceFake) RuntimeCarrierAdmissions(context.Context, string, string) ([]control.RuntimeCarrierAdmission, error) {
+func (s *runtimeSourceFake) RuntimeCarrierAdmissions(context.Context, string, string) ([]runtimewire.Admission, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]control.RuntimeCarrierAdmission(nil), s.admissions...), s.err
+	return append([]runtimewire.Admission(nil), s.admissions...), s.err
 }
-func (s *runtimeSourceFake) ObserveRuntimeCarriers(_ context.Context, _, _ string, o []control.RuntimeCarrierObservation) error {
+func (s *runtimeSourceFake) ObserveRuntimeCarriers(_ context.Context, _, _ string, o []runtimewire.Observation) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.observations = append(s.observations, o...)
 	return nil
 }
-func runtimeAdmission(t *testing.T) control.RuntimeCarrierAdmission {
+func runtimeAdmission(t *testing.T) runtimewire.Admission {
 	t.Helper()
 	p := testPreviewCarrierAdmission("preview", "operation", "runtime_route", "machine.runtime.example.test", time.Now().Add(time.Hour))
 	b := p.Binding
-	return control.RuntimeCarrierAdmission{Schema: datacarrier.RuntimeCarrierSchema, Binding: control.RuntimeCarrierBinding{AccountID: b.AccountID, HostID: b.HostID, TunnelID: b.TunnelID, ConnectorID: b.ConnectorID, SessionID: b.SessionID, ProcessGeneration: b.ProcessGeneration, ConfigGeneration: b.ConfigGeneration, InstallationGeneration: 1, RouteID: b.RouteID, RouteGeneration: b.RouteGeneration, EdgeNodeID: b.EdgeNodeID, EdgeProcessEpoch: b.EdgeProcessEpoch, EdgeCarrierServerSPKISHA256: b.EdgeCarrierServerSPKISHA256, EdgeCarrierServerCertificateChainPEM: b.EdgeCarrierServerCertificateChainPEM, MachineIdentityPublicKey: b.MachineIdentityPublicKey, MachineIdentityThumbprint: b.MachineIdentityThumbprint}, AttachmentGeneration: p.AttachmentGeneration, ConfigContentHash: p.ConfigContentHash, EdgeEndpoints: p.EdgeEndpoints, Hostname: "machine.runtime.example.test", RouteKind: datacarrier.RuntimeCarrierRoute, RouteRevision: 1, ExpiresAt: p.ExpiresAt}
+	return runtimewire.Admission{Schema: runtimewire.Schema, Binding: runtimewire.Binding{AccountID: b.AccountID, HostID: b.HostID, TunnelID: b.TunnelID, ConnectorID: b.ConnectorID, SessionID: b.SessionID, ProcessGeneration: b.ProcessGeneration, ConfigGeneration: b.ConfigGeneration, InstallationGeneration: 1, RouteID: b.RouteID, RouteGeneration: b.RouteGeneration, EdgeNodeID: b.EdgeNodeID, EdgeProcessEpoch: b.EdgeProcessEpoch, EdgeCarrierServerSPKISHA256: b.EdgeCarrierServerSPKISHA256, EdgeCarrierServerCertificateChainPEM: b.EdgeCarrierServerCertificateChainPEM, MachineIdentityPublicKey: b.MachineIdentityPublicKey, MachineIdentityThumbprint: b.MachineIdentityThumbprint}, AttachmentGeneration: p.AttachmentGeneration, ConfigContentHash: p.ConfigContentHash, EdgeEndpoints: p.EdgeEndpoints, Hostname: "machine.runtime.example.test", RouteKind: runtimewire.RouteKind, RouteRevision: 1, ExpiresAt: p.ExpiresAt}
 }
 func waitRuntime(t *testing.T, f func() bool) {
 	t.Helper()
@@ -54,7 +55,7 @@ func TestRuntimeCarrierReadinessRevocationExpiryAndRecovery(t *testing.T) {
 			if mode == "expiry" {
 				a.ExpiresAt = time.Now().Add(700 * time.Millisecond)
 			}
-			source := &runtimeSourceFake{admissions: []control.RuntimeCarrierAdmission{a}}
+			source := &runtimeSourceFake{admissions: []runtimewire.Admission{a}}
 			expected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: a.Binding.EdgeNodeID, ProcessEpoch: a.Binding.EdgeProcessEpoch})
 			if err != nil {
 				t.Fatal(err)
@@ -82,7 +83,7 @@ func TestRuntimeCarrierReadinessRevocationExpiryAndRecovery(t *testing.T) {
 				}
 			}
 			source.mu.Unlock()
-			ea, err := a.Expected(a.Binding.EdgeNodeID, a.Binding.EdgeProcessEpoch, time.Now())
+			ea, err := control.ExpectedRuntimeAdmission(a, a.Binding.EdgeNodeID, a.Binding.EdgeProcessEpoch, time.Now())
 			if err != nil {
 				t.Fatal(err)
 			}

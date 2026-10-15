@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"os"
 	"os/exec"
 	"strings"
@@ -37,18 +38,18 @@ func TestWorkerFailuresAreSafeAndRecoveryRetainsAuthority(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer routes.Close()
-		source := &runtimeSourceFake{admissions: []control.RuntimeCarrierAdmission{a}}
+		source := &runtimeSourceFake{admissions: []runtimewire.Admission{a}}
 		worker := &RuntimeCarrierWorker{Reporter: reporter, Source: source, Expected: expected, Routes: routes, Timeout: time.Second}
 		if err := worker.reconcile(ctx); err != nil || len(expected.Snapshot()) != 1 {
 			t.Fatal("initial runtime authority was not installed")
 		}
 		invalid := a
 		invalid.RouteKind = "PRIVATE_PAYLOAD"
-		source.admissions = []control.RuntimeCarrierAdmission{invalid}
+		source.admissions = []runtimewire.Admission{invalid}
 		if err := worker.reconcile(ctx); err == nil || len(expected.Snapshot()) != 1 {
 			t.Fatal("invalid pull replaced authority")
 		}
-		source.admissions = []control.RuntimeCarrierAdmission{a}
+		source.admissions = []runtimewire.Admission{a}
 		if err := worker.reconcile(ctx); err != nil || len(expected.Snapshot()) != 1 {
 			t.Fatal("runtime recovery failed")
 		}

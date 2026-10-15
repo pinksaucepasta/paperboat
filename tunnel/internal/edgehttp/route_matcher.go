@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
@@ -137,7 +137,7 @@ func (m *PreviewCarrierRouteMatcher) lookup(host, requestPath string) (DataCarri
 		return DataCarrierPreviewRoute{}, nil, false
 	}
 	preview, entryDone, ok := m.registry.acquire(host)
-	if !ok || preview.Server == nil || preview.Kind != dataCarrierPreviewRouteKind && preview.Kind != dataCarrierPreviewPrivateRouteKind && preview.Kind != datacarrier.RuntimeCarrierRoute {
+	if !ok || preview.Server == nil || preview.Kind != dataCarrierPreviewRouteKind && preview.Kind != dataCarrierPreviewPrivateRouteKind && preview.Kind != runtimewire.RouteKind {
 		return DataCarrierPreviewRoute{}, nil, false
 	}
 	select {
@@ -158,8 +158,8 @@ func previewRouteMatch(preview DataCarrierPreviewRoute) route.RouteMatch {
 		kind = route.Kind(dataCarrierPreviewPrivateRouteKind)
 	}
 	rule := route.RouteRule{ID: preview.RouteID, RouteID: preview.RouteID, RouteGeneration: preview.Revision, Revision: preview.Revision, Generation: generation, AssignmentID: preview.OperationID, AssignmentGeneration: preview.LeaseGeneration, ResourceKind: "preview", SessionGeneration: preview.LeaseGeneration, Environment: preview.PreviewID, AccountID: preview.Identity.AccountID, HostID: preview.Identity.HostID, TunnelID: preview.PreviewID, ConnectorID: preview.Identity.ConnectorID, ConnectorSessionID: preview.Identity.SessionID, ConnectorProcessGeneration: preview.Identity.ProcessGeneration, ConfigGeneration: preview.Identity.Generation, Node: preview.EdgeNodeID, EdgeProcessEpoch: preview.EdgeProcessEpoch, Kind: kind, MatchType: route.MatchExact, Hostname: preview.Hostname, PathPrefix: "/", Target: preview.Endpoint, Protocol: "https", OriginScheme: "http", AccessMode: preview.AccessMode, PreserveHost: true, DesiredState: "active", ObservedState: "ready"}
-	if preview.Kind == datacarrier.RuntimeCarrierRoute {
-		rule.Kind = route.Kind(datacarrier.RuntimeCarrierRoute)
+	if preview.Kind == runtimewire.RouteKind {
+		rule.Kind = route.Kind(runtimewire.RouteKind)
 		rule.ResourceKind = "runtime"
 		rule.TunnelID = preview.Identity.TunnelID
 		rule.Target = ""
@@ -190,7 +190,7 @@ func (m *PreviewCarrierRouteMatcher) HasHTTPSHostname(host string) bool {
 // HasRuntimeHTTPSHostname requires an unexpired, live, exact admitted runtime carrier.
 func (m *PreviewCarrierRouteMatcher) HasRuntimeHTTPSHostname(host string) bool {
 	value, _, ok := m.lookup(host, "/")
-	return ok && value.Kind == datacarrier.RuntimeCarrierRoute
+	return ok && value.Kind == runtimewire.RouteKind
 }
 
 // AuthorizePublicHTTPS refreshes only an exact live public preview admission.

@@ -15,19 +15,17 @@ import (
 	"fmt"
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat-server/internal/admission"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"io"
 	"net"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/edgeplacement"
 	"github.com/pinksaucepasta/paperboat-server/internal/previewattachment"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
-
-const Schema = "paperboat.runtime-carrier/v1"
-const MaximumAdmissions = 4096
 
 var ErrInvalid = errors.New("invalid runtime carrier request")
 var ErrUnavailable = errors.New("runtime carrier unavailable")
@@ -43,69 +41,17 @@ func (e staticFailure) Error() string { return e.message }
 
 func (e staticFailure) Unwrap() error { return e.cause }
 
-type Request struct {
-	OperationID            string                    `json:"operation_id"`
-	ProcessID              string                    `json:"process_id"`
-	WorkerGeneration       uint64                    `json:"worker_generation"`
-	InstallationGeneration uint64                    `json:"installation_generation"`
-	RuntimeListenPort      int32                     `json:"runtime_listen_port"`
-	EdgePreference         *edgeplacement.Preference `json:"edge_preference,omitempty"`
-	ActiveEdgeNodeID       string                    `json:"active_edge_node_id,omitempty"`
-	ActiveEdgeProcessEpoch string                    `json:"active_edge_process_epoch,omitempty"`
-}
-type Binding struct {
-	AccountID                            string `json:"account_id"`
-	HostID                               string `json:"host_id"`
-	TunnelID                             string `json:"tunnel_id"`
-	ConnectorID                          string `json:"connector_id"`
-	SessionID                            string `json:"session_id"`
-	ProcessGeneration                    uint64 `json:"process_generation"`
-	ConfigGeneration                     uint64 `json:"config_generation"`
-	RouteID                              string `json:"route_id"`
-	RouteGeneration                      uint64 `json:"route_generation"`
-	InstallationGeneration               uint64 `json:"installation_generation"`
-	EdgeNodeID                           string `json:"edge_node_id"`
-	EdgeProcessEpoch                     string `json:"edge_process_epoch"`
-	EdgeCarrierServerSPKISHA256          string `json:"edge_carrier_server_spki_sha256"`
-	EdgeCarrierServerCertificateChainPEM string `json:"edge_carrier_server_certificate_chain_pem"`
-	MachineIdentityPublicKey             string `json:"machine_identity_public_key"`
-	MachineIdentityThumbprint            string `json:"machine_identity_thumbprint"`
-}
-type Admission struct {
-	Schema               string    `json:"schema"`
-	Binding              Binding   `json:"binding"`
-	AttachmentGeneration uint64    `json:"attachment_generation"`
-	ConfigContentHash    string    `json:"config_content_hash"`
-	EdgeEndpoints        []string  `json:"edge_endpoints"`
-	Hostname             string    `json:"hostname"`
-	RouteKind            string    `json:"route_kind"`
-	RouteRevision        uint64    `json:"route_revision"`
-	ExpiresAt            time.Time `json:"expires_at"`
-}
-type HostAdmission struct {
-	Admission
-	EdgeCandidates         []edgeplacement.Candidate `json:"edge_candidates"`
-	Backup                 *Admission                `json:"backup,omitempty"`
-	ActiveEdgeNodeID       string                    `json:"active_edge_node_id,omitempty"`
-	ActiveEdgeProcessEpoch string                    `json:"active_edge_process_epoch,omitempty"`
-}
-type Observation struct {
-	RouteID              string `json:"route_id"`
-	AttachmentGeneration uint64 `json:"attachment_generation"`
-	SessionID            string `json:"session_id"`
-	Ready                bool   `json:"ready"`
-}
 type Service struct {
 	DB                *db.DB
 	AdmissionLifetime time.Duration
 }
 
-func validRequest(p previewattachment.MachineProof, r Request) bool {
+func validRequest(p previewattachment.MachineProof, r runtimewire.Request) bool {
 	return p.Validate() == nil && r.OperationID == p.OperationID && connectorprotocol.ValidateOpaqueEpoch(r.ProcessID) == nil && r.WorkerGeneration > 0 && r.WorkerGeneration <= 1<<62 && r.InstallationGeneration == p.InstallationGeneration && r.RuntimeListenPort >= 1024 && r.RuntimeListenPort <= 65535 && ((r.ActiveEdgeNodeID == "" && r.ActiveEdgeProcessEpoch == "") || (connectorprotocol.ValidateIdentifier(r.ActiveEdgeNodeID) == nil && connectorprotocol.ValidateOpaqueEpoch(r.ActiveEdgeProcessEpoch) == nil))
 }
 
-func (s *Service) Attach(ctx context.Context, proof previewattachment.MachineProof, request Request) (HostAdmission, error) {
-	var out HostAdmission
+func (s *Service) Attach(ctx context.Context, proof previewattachment.MachineProof, request runtimewire.Request) (runtimewire.HostAdmission, error) {
+	var out runtimewire.HostAdmission
 	if !validRequest(proof, request) {
 		return out, ErrInvalid
 	}
@@ -139,7 +85,7 @@ ORDER BY r.id LIMIT 1 FOR UPDATE OF m,r`, proof.MachineID, proof.UserID, proof.I
 		if len(key) != 32 {
 			return staticFailure{message: ErrUnavailable.Error(), cause: errors.Join(ErrUnavailable, errInvalidMachineIdentityKeySize)}
 		}
-		previous := map[string]Admission{}
+		previous := map[string]runtimewire.Admission{}
 		previewSessions := map[string]string{}
 		var generation uint64
 		var activeNode, activeEpoch string
@@ -155,7 +101,7 @@ ORDER BY r.id LIMIT 1 FOR UPDATE OF m,r`, proof.MachineID, proof.UserID, proof.I
 			if err = previousRows.Scan(&nodeID, &raw, &processID, &priorGeneration, &active, &previewSessionID); err != nil {
 				break
 			}
-			var a Admission
+			var a runtimewire.Admission
 			if err = json.Unmarshal(raw, &a); err != nil {
 				break
 			}
@@ -285,10 +231,10 @@ WHEN n.id=$2 THEN 2 ELSE 3 END,n.id LIMIT 32 FOR SHARE OF n`, proof.UserID, acti
 					return err
 				}
 			}
-			binding := Binding{AccountID: proof.UserID, HostID: proof.MachineID, TunnelID: route, ConnectorID: proof.MachineID, SessionID: sessionID, ProcessGeneration: request.WorkerGeneration, ConfigGeneration: uint64(revision), RouteID: route, RouteGeneration: uint64(revision), InstallationGeneration: request.InstallationGeneration, EdgeNodeID: edge.node, EdgeProcessEpoch: edge.epoch, EdgeCarrierServerSPKISHA256: edge.pin, EdgeCarrierServerCertificateChainPEM: edge.chain, MachineIdentityPublicKey: publicKey, MachineIdentityThumbprint: thumb}
+			binding := runtimewire.Binding{AccountID: proof.UserID, HostID: proof.MachineID, TunnelID: route, ConnectorID: proof.MachineID, SessionID: sessionID, ProcessGeneration: request.WorkerGeneration, ConfigGeneration: uint64(revision), RouteID: route, RouteGeneration: uint64(revision), InstallationGeneration: request.InstallationGeneration, EdgeNodeID: edge.node, EdgeProcessEpoch: edge.epoch, EdgeCarrierServerSPKISHA256: edge.pin, EdgeCarrierServerCertificateChainPEM: edge.chain, MachineIdentityPublicKey: publicKey, MachineIdentityThumbprint: thumb}
 			encoded, _ := json.Marshal(binding)
 			hash := sha256.Sum256(encoded)
-			admission := Admission{Schema: Schema, Binding: binding, AttachmentGeneration: rowGeneration, ConfigContentHash: "sha256:" + hex.EncodeToString(hash[:]), EdgeEndpoints: []string{"h2://" + net.JoinHostPort(edge.endpoint, fmt.Sprint(edge.tcp)), "h3://" + net.JoinHostPort(edge.endpoint, fmt.Sprint(edge.quic))}, Hostname: host, RouteKind: "runtime_https_wss", RouteRevision: uint64(revision), ExpiresAt: admission.Deadline(time.Now(), s.AdmissionLifetime)}
+			admission := runtimewire.Admission{Schema: runtimewire.Schema, Binding: binding, AttachmentGeneration: rowGeneration, ConfigContentHash: "sha256:" + hex.EncodeToString(hash[:]), EdgeEndpoints: []string{"h2://" + net.JoinHostPort(edge.endpoint, fmt.Sprint(edge.tcp)), "h3://" + net.JoinHostPort(edge.endpoint, fmt.Sprint(edge.quic))}, Hostname: host, RouteKind: "runtime_https_wss", RouteRevision: uint64(revision), ExpiresAt: admission.Deadline(time.Now(), s.AdmissionLifetime)}
 			encoded, err = json.Marshal(admission)
 			if err != nil {
 				return err
@@ -366,17 +312,17 @@ ON CONFLICT(route_id,edge_node_id) DO UPDATE SET machine_id=EXCLUDED.machine_id,
 	return out, err
 }
 
-func (s *Service) Pull(ctx context.Context, edge previewattachment.PreviewEdgeIdentity) ([]Admission, error) {
-	rows, err := s.DB.Pool().Query(ctx, `SELECT admission FROM runtime_carrier_attachments WHERE edge_node_id=$1 AND edge_process_epoch=$2 AND paperboat.runtime_carrier_valid(route_id,edge_node_id,edge_process_epoch,false) ORDER BY route_id LIMIT $3`, edge.NodeID, edge.ProcessEpoch, MaximumAdmissions+1)
+func (s *Service) Pull(ctx context.Context, edge previewattachment.PreviewEdgeIdentity) ([]runtimewire.Admission, error) {
+	rows, err := s.DB.Pool().Query(ctx, `SELECT admission FROM runtime_carrier_attachments WHERE edge_node_id=$1 AND edge_process_epoch=$2 AND paperboat.runtime_carrier_valid(route_id,edge_node_id,edge_process_epoch,false) ORDER BY route_id LIMIT $3`, edge.NodeID, edge.ProcessEpoch, runtimewire.MaximumAdmissions+1)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []Admission{}
+	out := []runtimewire.Admission{}
 	totalBytes := 0
 	for rows.Next() {
 		var raw []byte
-		var a Admission
+		var a runtimewire.Admission
 		if err := rows.Scan(&raw); err != nil {
 			return nil, err
 		}
@@ -389,15 +335,15 @@ func (s *Service) Pull(ctx context.Context, edge previewattachment.PreviewEdgeId
 		}
 		a.ExpiresAt = admission.Deadline(time.Now(), s.AdmissionLifetime)
 		out = append(out, a)
-		if len(out) > MaximumAdmissions {
+		if len(out) > runtimewire.MaximumAdmissions {
 			return nil, ErrUnavailable
 		}
 	}
 	return out, rows.Err()
 }
 
-func (s *Service) Observe(ctx context.Context, edge previewattachment.PreviewEdgeIdentity, observations []Observation) error {
-	if len(observations) > MaximumAdmissions {
+func (s *Service) Observe(ctx context.Context, edge previewattachment.PreviewEdgeIdentity, observations []runtimewire.Observation) error {
+	if len(observations) > runtimewire.MaximumAdmissions {
 		return ErrInvalid
 	}
 	return s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {

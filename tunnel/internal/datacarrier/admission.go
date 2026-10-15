@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"net/url"
 	"sort"
 	"strings"
@@ -19,8 +20,6 @@ import (
 )
 
 const (
-	RuntimeCarrierSchema        = "paperboat.runtime-carrier/v1"
-	RuntimeCarrierRoute         = "runtime_https_wss"
 	PreviewCarrierSchema        = "paperboat.preview-tunnel/v1"
 	PreviewCarrierKind          = "preview_carrier_attachment"
 	PreviewCarrierRoute         = "preview_public_https_wss"
@@ -76,7 +75,7 @@ type ExpectedAdmission struct {
 }
 
 func (a ExpectedAdmission) Validate(now time.Time, nodeID string) error {
-	runtime := a.Schema == RuntimeCarrierSchema && a.Kind == "" && a.RouteKind == RuntimeCarrierRoute
+	runtime := a.Schema == runtimewire.Schema && a.Kind == "" && a.RouteKind == runtimewire.RouteKind
 	if !runtime && (a.Schema != PreviewCarrierSchema || a.Kind != PreviewCarrierKind) {
 		return fmt.Errorf("%w: schema or kind is invalid", ErrAdmissionNotExpected)
 	}
@@ -116,7 +115,7 @@ func (a ExpectedAdmission) Validate(now time.Time, nodeID string) error {
 		wantRoute = PreviewCarrierPrivateRoute
 	}
 	if runtime {
-		wantRoute = RuntimeCarrierRoute
+		wantRoute = runtimewire.RouteKind
 	}
 	if a.RouteKind != wantRoute || !validAdmissionHost(a.Hostname) {
 		return fmt.Errorf("%w: route binding is invalid", ErrAdmissionNotExpected)

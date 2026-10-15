@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"io"
 	"net/http"
 
@@ -12,19 +13,10 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
 )
 
-const HostPath = "/v1/runtime/carrier-attachment"
-const EdgePullPath = "/v1/edge/runtime/carrier-admissions"
-const EdgeObservePath = "/v1/edge/runtime/carrier-observations"
-
 type Handler struct {
 	Service *Service
 	Machine previewattachment.MachineProofVerifier
 	Edge    previewattachment.PreviewEdgeRequestVerifier
-}
-type edgeRequest struct {
-	NodeID       string        `json:"edge_node_id"`
-	ProcessEpoch string        `json:"process_epoch"`
-	Observations []Observation `json:"observations,omitempty"`
 }
 
 func decode(raw []byte, out any) error {
@@ -49,7 +41,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	maximum := int64(1 << 20)
-	if r.URL.Path == HostPath {
+	if r.URL.Path == runtimewire.HostPath {
 		maximum = 4096
 	}
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maximum))
@@ -57,8 +49,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request")
 		return
 	}
-	if r.URL.Path == HostPath {
-		var request Request
+	if r.URL.Path == runtimewire.HostPath {
+		var request runtimewire.Request
 		if decode(raw, &request) != nil {
 			writeError(w, 400, "invalid_request")
 			return
@@ -80,11 +72,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": admission})
 		return
 	}
-	if r.URL.Path != EdgePullPath && r.URL.Path != EdgeObservePath {
+	if r.URL.Path != runtimewire.EdgePullPath && r.URL.Path != runtimewire.EdgeObservePath {
 		writeError(w, 404, "not_found")
 		return
 	}
-	var request edgeRequest
+	var request runtimewire.EdgeRequest
 	if decode(raw, &request) != nil {
 		writeError(w, 400, "invalid_request")
 		return
@@ -109,7 +101,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 401, "edge_identity_invalid")
 		return
 	}
-	if r.URL.Path == EdgePullPath {
+	if r.URL.Path == runtimewire.EdgePullPath {
 		if len(request.Observations) != 0 {
 			writeError(w, 400, "invalid_request")
 			return
@@ -119,7 +111,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			serviceError(w, r, err)
 			return
 		}
-		encoded, err := json.Marshal(map[string]any{"schema": Schema, "complete": true, "admissions": admissions})
+		encoded, err := json.Marshal(runtimewire.Snapshot{Schema: runtimewire.Schema, Complete: true, Admissions: &admissions})
 		if err != nil {
 			serviceError(w, r, err)
 			return
@@ -151,7 +143,7 @@ func serviceError(w http.ResponseWriter, r *http.Request, err error) {
 			statusErr = supportreport.WithExpectedRetryableStatus(http.StatusServiceUnavailable, err)
 		}
 		operation := "http_other"
-		if r.URL.Path == EdgePullPath || r.URL.Path == EdgeObservePath {
+		if r.URL.Path == runtimewire.EdgePullPath || r.URL.Path == runtimewire.EdgeObservePath {
 			operation = "http_edge"
 		}
 		supportreport.CaptureFromContext(r.Context(), "paperboat-server", operation, "service_error", "carrier_unavailable", statusErr)

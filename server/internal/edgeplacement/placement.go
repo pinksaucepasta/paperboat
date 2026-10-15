@@ -7,35 +7,19 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"net"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
-
-const MaximumCandidates = 32
 
 var ErrInvalid = errors.New("invalid edge placement")
 
-type Candidate struct {
-	NodeID        string `json:"node_id"`
-	ProcessEpoch  string `json:"process_epoch"`
-	Region        string `json:"region"`
-	FailureDomain string `json:"failure_domain"`
-	ProbeAddress  string `json:"probe_address"`
-}
-
-type Preference struct {
-	PrimaryNodeID         string `json:"primary_node_id"`
-	PrimaryProcessEpoch   string `json:"primary_process_epoch"`
-	SecondaryNodeID       string `json:"secondary_node_id,omitempty"`
-	SecondaryProcessEpoch string `json:"secondary_process_epoch,omitempty"`
-}
-
 // Candidates returns only currently usable edges in the owning workspace's
 // browser-edge pool. Addresses are for bounded latency probes, never bearer authority.
-func Candidates(ctx context.Context, tx *db.Tx, accountID string, teamID sql.NullString, now time.Time) ([]Candidate, error) {
+func Candidates(ctx context.Context, tx *db.Tx, accountID string, teamID sql.NullString, now time.Time) ([]runtimewire.EdgeCandidate, error) {
 	if ctx == nil || tx == nil || connectorprotocol.ValidateIdentifier(accountID) != nil || now.IsZero() {
 		return nil, ErrInvalid
 	}
@@ -49,14 +33,14 @@ AND n.capacity_used<n.capacity_limit-n.capacity_limit/10
 AND n.drain_deadline IS NULL AND paperboat.node_workspace_edge_eligible(n.id,$1,$4)
 AND n.carrier_endpoint_host IS NOT NULL AND n.carrier_endpoint_tcp_port IS NOT NULL
 AND n.carrier_server_spki_sha256 IS NOT NULL AND n.carrier_server_certificate_chain_pem IS NOT NULL
-ORDER BY n.id LIMIT $3`, accountID, now, MaximumCandidates, teamID)
+ORDER BY n.id LIMIT $3`, accountID, now, runtimewire.MaximumEdgeCandidates, teamID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]Candidate, 0, MaximumCandidates)
+	result := make([]runtimewire.EdgeCandidate, 0, runtimewire.MaximumEdgeCandidates)
 	for rows.Next() {
-		var item Candidate
+		var item runtimewire.EdgeCandidate
 		var host string
 		var port int32
 		if err := rows.Scan(&item.NodeID, &item.ProcessEpoch, &item.Region, &item.FailureDomain, &host, &port); err != nil {
@@ -81,11 +65,11 @@ ORDER BY n.id LIMIT $3`, accountID, now, MaximumCandidates, teamID)
 
 // Save accepts only a pair from the current server-issued candidate set. A
 // stale report is ignored so a network change cannot strand the machine.
-func Save(ctx context.Context, tx *db.Tx, accountID, machineID string, installationGeneration, workerGeneration uint64, preference Preference, candidates []Candidate, now time.Time) (bool, error) {
+func Save(ctx context.Context, tx *db.Tx, accountID, machineID string, installationGeneration, workerGeneration uint64, preference runtimewire.EdgePreference, candidates []runtimewire.EdgeCandidate, now time.Time) (bool, error) {
 	if ctx == nil || tx == nil || connectorprotocol.ValidateIdentifier(accountID) != nil || connectorprotocol.ValidateIdentifier(machineID) != nil || installationGeneration == 0 || workerGeneration == 0 || now.IsZero() {
 		return false, ErrInvalid
 	}
-	lookup := make(map[string]Candidate, len(candidates))
+	lookup := make(map[string]runtimewire.EdgeCandidate, len(candidates))
 	for _, candidate := range candidates {
 		lookup[candidate.NodeID+"\x00"+candidate.ProcessEpoch] = candidate
 	}

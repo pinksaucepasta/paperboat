@@ -2,51 +2,18 @@ package control
 
 import (
 	"context"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"net/url"
 	"strconv"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
-const RuntimeCarrierAdmissionsPath = "/v1/edge/runtime/carrier-admissions"
-const RuntimeCarrierObservationsPath = "/v1/edge/runtime/carrier-observations"
-
-type RuntimeCarrierBinding struct {
-	AccountID                            string `json:"account_id"`
-	HostID                               string `json:"host_id"`
-	TunnelID                             string `json:"tunnel_id"`
-	ConnectorID                          string `json:"connector_id"`
-	SessionID                            string `json:"session_id"`
-	ProcessGeneration                    uint64 `json:"process_generation"`
-	ConfigGeneration                     uint64 `json:"config_generation"`
-	InstallationGeneration               uint64 `json:"installation_generation"`
-	RouteID                              string `json:"route_id"`
-	RouteGeneration                      uint64 `json:"route_generation"`
-	EdgeNodeID                           string `json:"edge_node_id"`
-	EdgeProcessEpoch                     string `json:"edge_process_epoch"`
-	EdgeCarrierServerSPKISHA256          string `json:"edge_carrier_server_spki_sha256"`
-	EdgeCarrierServerCertificateChainPEM string `json:"edge_carrier_server_certificate_chain_pem"`
-	MachineIdentityPublicKey             string `json:"machine_identity_public_key"`
-	MachineIdentityThumbprint            string `json:"machine_identity_thumbprint"`
-}
-
-type RuntimeCarrierAdmission struct {
-	Schema               string                `json:"schema"`
-	Binding              RuntimeCarrierBinding `json:"binding"`
-	AttachmentGeneration uint64                `json:"attachment_generation"`
-	ConfigContentHash    string                `json:"config_content_hash"`
-	EdgeEndpoints        []string              `json:"edge_endpoints"`
-	Hostname             string                `json:"hostname"`
-	RouteKind            string                `json:"route_kind"`
-	RouteRevision        uint64                `json:"route_revision"`
-	ExpiresAt            time.Time             `json:"expires_at"`
-}
-
-func (a RuntimeCarrierAdmission) Expected(nodeID, epoch string, now time.Time) (datacarrier.ExpectedAdmission, error) {
+func ExpectedRuntimeAdmission(a runtimewire.Admission, nodeID, epoch string, now time.Time) (datacarrier.ExpectedAdmission, error) {
 	b := a.Binding
-	if a.Schema != datacarrier.RuntimeCarrierSchema || a.RouteKind != datacarrier.RuntimeCarrierRoute || b.EdgeProcessEpoch != epoch || a.RouteRevision != b.RouteGeneration || len(a.EdgeEndpoints) != 2 {
+	if a.Schema != runtimewire.Schema || a.RouteKind != runtimewire.RouteKind || b.EdgeProcessEpoch != epoch || a.RouteRevision != b.RouteGeneration || len(a.EdgeEndpoints) != 2 {
 		return datacarrier.ExpectedAdmission{}, ErrControlInvalid
 	}
 	seen := map[string]bool{}
@@ -79,47 +46,33 @@ func (a RuntimeCarrierAdmission) Expected(nodeID, epoch string, now time.Time) (
 	return value, nil
 }
 
-type RuntimeCarrierObservation struct {
-	RouteID              string `json:"route_id"`
-	AttachmentGeneration uint64 `json:"attachment_generation"`
-	SessionID            string `json:"session_id"`
-	Ready                bool   `json:"ready"`
-}
-
 type RuntimeCarrierSource interface {
-	RuntimeCarrierAdmissions(context.Context, string, string) ([]RuntimeCarrierAdmission, error)
-	ObserveRuntimeCarriers(context.Context, string, string, []RuntimeCarrierObservation) error
+	RuntimeCarrierAdmissions(context.Context, string, string) ([]runtimewire.Admission, error)
+	ObserveRuntimeCarriers(context.Context, string, string, []runtimewire.Observation) error
 }
 
-func (c *HTTPClient) RuntimeCarrierAdmissions(ctx context.Context, nodeID, epoch string) ([]RuntimeCarrierAdmission, error) {
+func (c *HTTPClient) RuntimeCarrierAdmissions(ctx context.Context, nodeID, epoch string) ([]runtimewire.Admission, error) {
 	if connectorprotocol.ValidateIdentifier(nodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(epoch) != nil {
 		return nil, ErrControlInvalid
 	}
-	var result struct {
-		Schema     string                     `json:"schema"`
-		Complete   bool                       `json:"complete"`
-		Admissions *[]RuntimeCarrierAdmission `json:"admissions"`
-	}
-	if err := c.postNodeWithMaximumAndIdentity(ctx, RuntimeCarrierAdmissionsPath, nodeID, epoch, struct {
-		NodeID       string `json:"edge_node_id"`
-		ProcessEpoch string `json:"process_epoch"`
-	}{nodeID, epoch}, &result, maxPreviewCarrierSnapshotBytes); err != nil {
+	var result runtimewire.Snapshot
+	if err := c.postNodeWithMaximumAndIdentity(ctx, runtimewire.EdgePullPath, nodeID, epoch, runtimewire.EdgeRequest{NodeID: nodeID, ProcessEpoch: epoch}, &result, maxPreviewCarrierSnapshotBytes); err != nil {
 		return nil, err
 	}
-	if result.Schema != datacarrier.RuntimeCarrierSchema || !result.Complete || result.Admissions == nil || len(*result.Admissions) > maxPreviewCarrierAdmissions {
+	if result.Schema != runtimewire.Schema || !result.Complete || result.Admissions == nil || len(*result.Admissions) > runtimewire.MaximumAdmissions {
 		return nil, ErrControlUnavailable
 	}
 	now := time.Now().UTC()
 	for _, a := range *result.Admissions {
-		if _, err := a.Expected(nodeID, epoch, now); err != nil {
+		if _, err := ExpectedRuntimeAdmission(a, nodeID, epoch, now); err != nil {
 			return nil, documentFailure{sentinel: ErrControlUnavailable, cause: err}
 		}
 	}
 	return *result.Admissions, nil
 }
 
-func (c *HTTPClient) ObserveRuntimeCarriers(ctx context.Context, nodeID, epoch string, observations []RuntimeCarrierObservation) error {
-	if connectorprotocol.ValidateIdentifier(nodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(epoch) != nil || len(observations) > maxPreviewCarrierAdmissions {
+func (c *HTTPClient) ObserveRuntimeCarriers(ctx context.Context, nodeID, epoch string, observations []runtimewire.Observation) error {
+	if connectorprotocol.ValidateIdentifier(nodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(epoch) != nil || len(observations) > runtimewire.MaximumAdmissions {
 		return ErrControlInvalid
 	}
 	for _, o := range observations {
@@ -130,9 +83,5 @@ func (c *HTTPClient) ObserveRuntimeCarriers(ctx context.Context, nodeID, epoch s
 	if len(observations) == 0 {
 		return nil
 	}
-	return c.postNodeWithMaximumAndIdentity(ctx, RuntimeCarrierObservationsPath, nodeID, epoch, struct {
-		NodeID       string                      `json:"edge_node_id"`
-		ProcessEpoch string                      `json:"process_epoch"`
-		Observations []RuntimeCarrierObservation `json:"observations"`
-	}{nodeID, epoch, observations}, nil, maxPreviewCarrierSnapshotBytes)
+	return c.postNodeWithMaximumAndIdentity(ctx, runtimewire.EdgeObservePath, nodeID, epoch, runtimewire.EdgeRequest{NodeID: nodeID, ProcessEpoch: epoch, Observations: observations}, nil, maxPreviewCarrierSnapshotBytes)
 }

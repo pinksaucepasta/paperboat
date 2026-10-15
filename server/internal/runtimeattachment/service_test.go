@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"io"
 	"log/slog"
 	"net/http"
@@ -25,7 +26,6 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
-	"github.com/pinksaucepasta/paperboat-server/internal/edgeplacement"
 	"github.com/pinksaucepasta/paperboat-server/internal/previewattachment"
 	"github.com/pinksaucepasta/paperboat-server/internal/supportreport"
 )
@@ -59,7 +59,7 @@ func TestRuntimeCarrierVerifierFailuresKeepExpectedDenialsAndReportOutages(t *te
 	}{
 		{
 			name: "machine proof outage",
-			path: HostPath,
+			path: runtimewire.HostPath,
 			body: `{}`,
 			handler: &Handler{Machine: machineVerifierFunc(func(context.Context, *http.Request, []byte) (previewattachment.MachineProof, error) {
 				return previewattachment.MachineProof{}, outage
@@ -70,7 +70,7 @@ func TestRuntimeCarrierVerifierFailuresKeepExpectedDenialsAndReportOutages(t *te
 		},
 		{
 			name: "edge verifier outage",
-			path: EdgePullPath,
+			path: runtimewire.EdgePullPath,
 			body: `{"edge_node_id":"edge_1","process_epoch":"epoch_1"}`,
 			handler: &Handler{Edge: edgeVerifierFunc(func(context.Context, *http.Request, []byte) (previewattachment.PreviewEdgeIdentity, error) {
 				return previewattachment.PreviewEdgeIdentity{}, outage
@@ -81,7 +81,7 @@ func TestRuntimeCarrierVerifierFailuresKeepExpectedDenialsAndReportOutages(t *te
 		},
 		{
 			name: "expected machine denial",
-			path: HostPath,
+			path: runtimewire.HostPath,
 			body: `{}`,
 			handler: &Handler{Machine: machineVerifierFunc(func(context.Context, *http.Request, []byte) (previewattachment.MachineProof, error) {
 				return previewattachment.MachineProof{}, previewattachment.ErrUnauthorized
@@ -91,7 +91,7 @@ func TestRuntimeCarrierVerifierFailuresKeepExpectedDenialsAndReportOutages(t *te
 		},
 		{
 			name: "expected edge denial",
-			path: EdgePullPath,
+			path: runtimewire.EdgePullPath,
 			body: `{"edge_node_id":"edge_1","process_epoch":"epoch_1"}`,
 			handler: &Handler{Edge: edgeVerifierFunc(func(context.Context, *http.Request, []byte) (previewattachment.PreviewEdgeIdentity, error) {
 				return previewattachment.PreviewEdgeIdentity{}, previewattachment.ErrUnauthorized
@@ -157,13 +157,13 @@ func TestRuntimeCarrierVerifierFailuresKeepExpectedDenialsAndReportOutages(t *te
 
 func TestRuntimeAttachmentRejectsAmbiguousRequests(t *testing.T) {
 	for _, body := range []string{`{"operation_id":"a","operation_id":"b"}`, `{"operation_id":"a","target":"127.0.0.1:22"}`, `{} {}`} {
-		var request Request
+		var request runtimewire.Request
 		if decode([]byte(body), &request) == nil {
 			t.Fatalf("accepted ambiguous request %s", body)
 		}
 	}
 	p := previewattachment.MachineProof{UserID: "account_1", MachineID: "machine_1", OperationID: "operation_1", InstallationGeneration: 1}
-	r := Request{OperationID: p.OperationID, ProcessID: "process_1", WorkerGeneration: 1, InstallationGeneration: 1, RuntimeListenPort: 38080}
+	r := runtimewire.Request{OperationID: p.OperationID, ProcessID: "process_1", WorkerGeneration: 1, InstallationGeneration: 1, RuntimeListenPort: 38080}
 	if !validRequest(p, r) {
 		t.Fatal("valid request rejected")
 	}
@@ -234,7 +234,7 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 	exec(`UPDATE control_tunnel_nodes SET public_ingress_ipv4=CASE WHEN id=$1 THEN '192.0.2.10'::inet ELSE '192.0.2.11'::inet END,public_ingress_verified_at=now() WHERE id IN ($1,$2)`, node, backupNode)
 	service := &Service{DB: database}
 	proof := previewattachment.MachineProof{UserID: account, MachineID: machine, OperationID: "operation_runtime", InstallationGeneration: 1}
-	request := Request{OperationID: proof.OperationID, ProcessID: "process_runtime", WorkerGeneration: 1, InstallationGeneration: 1, RuntimeListenPort: 48080}
+	request := runtimewire.Request{OperationID: proof.OperationID, ProcessID: "process_runtime", WorkerGeneration: 1, InstallationGeneration: 1, RuntimeListenPort: 48080}
 	edge := previewattachment.PreviewEdgeIdentity{NodeID: node, ProcessEpoch: "epoch_runtime"}
 	a, err := service.Attach(ctx, proof, request)
 	if err == nil && (a.Backup == nil || a.Backup.Binding.EdgeNodeID != backupNode) {
@@ -276,7 +276,7 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 		status            int
 	}{{"wrong", "epoch_runtime", 401}, {"runtime-test-edge-credential-0000000000000000", "old_epoch", 401}, {"runtime-test-edge-credential-0000000000000000", "epoch_runtime", 200}} {
 		body, _ := json.Marshal(map[string]string{"edge_node_id": node, "process_epoch": test.epoch})
-		req := httptest.NewRequest(http.MethodPost, EdgePullPath, bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, runtimewire.EdgePullPath, bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+test.credential)
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, req)
@@ -285,11 +285,11 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 		}
 		if response.Code == 200 {
 			var snapshot struct {
-				Schema     string      `json:"schema"`
-				Complete   bool        `json:"complete"`
-				Admissions []Admission `json:"admissions"`
+				Schema     string                  `json:"schema"`
+				Complete   bool                    `json:"complete"`
+				Admissions []runtimewire.Admission `json:"admissions"`
 			}
-			if err := json.Unmarshal(response.Body.Bytes(), &snapshot); err != nil || snapshot.Schema != Schema || !snapshot.Complete || len(snapshot.Admissions) != 1 {
+			if err := json.Unmarshal(response.Body.Bytes(), &snapshot); err != nil || snapshot.Schema != runtimewire.Schema || !snapshot.Complete || len(snapshot.Admissions) != 1 {
 				t.Fatal("incomplete runtime snapshot")
 			}
 		}
@@ -303,8 +303,8 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 	if strings.Contains(string(raw), "127.0.0.1") || strings.Contains(string(raw), `"target"`) {
 		t.Fatal("edge received local origin")
 	}
-	observation := Observation{RouteID: route, AttachmentGeneration: a.AttachmentGeneration, SessionID: a.Binding.SessionID, Ready: true}
-	if err = service.Observe(ctx, edge, []Observation{observation}); err != nil {
+	observation := runtimewire.Observation{RouteID: route, AttachmentGeneration: a.AttachmentGeneration, SessionID: a.Binding.SessionID, Ready: true}
+	if err = service.Observe(ctx, edge, []runtimewire.Observation{observation}); err != nil {
 		t.Fatal(err)
 	}
 	ready(true)
@@ -316,8 +316,8 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 	if err != nil || len(backupAdmissions) != 1 || backupAdmissions[0].Binding.EdgeNodeID != backupNode {
 		t.Fatalf("backup pull count=%d error=%v", len(backupAdmissions), err)
 	}
-	backupObservation := Observation{RouteID: route, AttachmentGeneration: a.Backup.AttachmentGeneration, SessionID: a.Backup.Binding.SessionID, Ready: true}
-	if err = service.Observe(ctx, backupEdge, []Observation{backupObservation}); err != nil {
+	backupObservation := runtimewire.Observation{RouteID: route, AttachmentGeneration: a.Backup.AttachmentGeneration, SessionID: a.Backup.Binding.SessionID, Ready: true}
+	if err = service.Observe(ctx, backupEdge, []runtimewire.Observation{backupObservation}); err != nil {
 		t.Fatal(err)
 	}
 	if publication, err := database.Queries().GetReadyRuntimeEdgeDNSAddressV1(ctx, dnsArgs); err != nil || publication.ID != node {
@@ -350,7 +350,7 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 	}
 	ready(true)
 	observation.Ready = false
-	if err = service.Observe(ctx, edge, []Observation{observation}); err != nil {
+	if err = service.Observe(ctx, edge, []runtimewire.Observation{observation}); err != nil {
 		t.Fatal(err)
 	}
 	var primaryReady bool
@@ -360,7 +360,7 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 	// The independently observed standby still provides route readiness.
 	ready(true)
 	observation.Ready = true
-	if err = service.Observe(ctx, edge, []Observation{observation}); err != nil {
+	if err = service.Observe(ctx, edge, []runtimewire.Observation{observation}); err != nil {
 		t.Fatal(err)
 	}
 	exec(`UPDATE runtime_carrier_attachments SET observed_at=now()-interval '31 seconds' WHERE route_id=$1`, route)
@@ -399,17 +399,17 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 	if reboundPreviewSessionID != previewSessionID {
 		t.Fatal("same worker edge epoch renewal replaced shared preview session")
 	}
-	if err = service.Observe(ctx, edge, []Observation{observation}); !errors.Is(err, ErrStale) {
+	if err = service.Observe(ctx, edge, []runtimewire.Observation{observation}); !errors.Is(err, ErrStale) {
 		t.Fatal("old edge observation accepted")
 	}
 	edge.ProcessEpoch = "epoch_replacement"
 	observation.AttachmentGeneration = replacement.AttachmentGeneration
 	observation.SessionID = replacement.Binding.SessionID
-	if err = service.Observe(ctx, edge, []Observation{observation}); err != nil {
+	if err = service.Observe(ctx, edge, []runtimewire.Observation{observation}); err != nil {
 		t.Fatal(err)
 	}
 	ready(true)
-	if err = service.Observe(ctx, backupEdge, []Observation{backupObservation}); err != nil {
+	if err = service.Observe(ctx, backupEdge, []runtimewire.Observation{backupObservation}); err != nil {
 		t.Fatal(err)
 	}
 	request.ActiveEdgeNodeID, request.ActiveEdgeProcessEpoch = backupNode, "epoch_backup"
@@ -427,7 +427,7 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 		t.Fatalf("promoted DNS address node=%q IPv4=%q error=%v", publication.ID, publication.Ipv4, err)
 	}
 	observation.Ready = false
-	if err = service.Observe(ctx, edge, []Observation{observation}); err != nil {
+	if err = service.Observe(ctx, edge, []runtimewire.Observation{observation}); err != nil {
 		t.Fatal(err)
 	}
 	if err = database.SQL().QueryRowContext(ctx, `SELECT applied_node_id FROM control_routes WHERE id=$1`, route).Scan(&appliedNode); err != nil || appliedNode != backupNode {
@@ -441,7 +441,7 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 	if _, err := database.Queries().GetReadyRuntimeEdgeDNSAddressV1(ctx, dnsArgs); err != nil {
 		t.Fatal("admitted runtime edge lost DNS on credential expiry")
 	}
-	if err = service.Observe(ctx, backupEdge, []Observation{backupObservation}); err != nil {
+	if err = service.Observe(ctx, backupEdge, []runtimewire.Observation{backupObservation}); err != nil {
 		t.Fatal("admitted runtime edge heartbeat rejected after credential expiry")
 	}
 	values, err := service.Pull(ctx, backupEdge)
@@ -452,7 +452,7 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 	if _, err = service.Attach(ctx, proof, request); err != nil {
 		t.Fatal(err)
 	}
-	if err = service.Observe(ctx, backupEdge, []Observation{backupObservation}); err != nil {
+	if err = service.Observe(ctx, backupEdge, []runtimewire.Observation{backupObservation}); err != nil {
 		t.Fatal(err)
 	}
 	ready(true)
@@ -469,12 +469,12 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 		t.Fatal("revoked machine remains in edge snapshot")
 	}
 	observation.Ready = true
-	if err = service.Observe(ctx, edge, []Observation{observation}); !errors.Is(err, ErrStale) {
+	if err = service.Observe(ctx, edge, []runtimewire.Observation{observation}); !errors.Is(err, ErrStale) {
 		t.Fatal("revoked machine became ready")
 	}
 	// A current machine report changes the server's chosen edge, while a revoked
 	// machine cannot report a placement or renew a carrier.
-	request.EdgePreference = &edgeplacement.Preference{PrimaryNodeID: backupNode, PrimaryProcessEpoch: "epoch_backup", SecondaryNodeID: node, SecondaryProcessEpoch: "epoch_replacement"}
+	request.EdgePreference = &runtimewire.EdgePreference{PrimaryNodeID: backupNode, PrimaryProcessEpoch: "epoch_backup", SecondaryNodeID: node, SecondaryProcessEpoch: "epoch_replacement"}
 	if _, err = service.Attach(ctx, proof, request); !errors.Is(err, ErrUnavailable) {
 		t.Fatal("revoked machine changed edge placement")
 	}
@@ -537,7 +537,7 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 	if _, err := IngressURL(ctx, database, env, customer.Hostname); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("unready customer carrier advertised: %v", err)
 	}
-	if err := service.Observe(ctx, backupEdge, []Observation{{RouteID: route, AttachmentGeneration: customer.AttachmentGeneration, SessionID: customer.Binding.SessionID, Ready: true}}); err != nil {
+	if err := service.Observe(ctx, backupEdge, []runtimewire.Observation{{RouteID: route, AttachmentGeneration: customer.AttachmentGeneration, SessionID: customer.Binding.SessionID, Ready: true}}); err != nil {
 		t.Fatal(err)
 	}
 	if actual, err := IngressURL(ctx, database, env, customer.Hostname); err != nil || actual != "https://backup.example.test/v1/runtime/"+customer.Hostname {

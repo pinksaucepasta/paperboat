@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"sync"
 	"time"
 
@@ -84,7 +85,7 @@ func (w *RuntimeCarrierWorker) reconcile(parent context.Context) (failure error)
 	if err == nil {
 		expected := make([]datacarrier.ExpectedAdmission, 0, len(values))
 		for _, value := range values {
-			a, e := value.Expected(w.Expected.NodeID(), w.Expected.ProcessEpoch(), time.Now().UTC())
+			a, e := control.ExpectedRuntimeAdmission(value, w.Expected.NodeID(), w.Expected.ProcessEpoch(), time.Now().UTC())
 			if e != nil {
 				return e
 			}
@@ -117,7 +118,7 @@ func (w *RuntimeCarrierWorker) reconcile(parent context.Context) (failure error)
 
 func (w *RuntimeCarrierWorker) observe(parent context.Context) (failure error) {
 	defer func() { observeWorkerFailure(parent, w.Reporter, "runtime_observation", failure) }()
-	observations := make([]control.RuntimeCarrierObservation, 0)
+	observations := make([]runtimewire.Observation, 0)
 	for _, a := range w.Expected.Snapshot() {
 		r, ok := w.Routes.Route(a.RouteID)
 		ready := ok && r.Identity == a.Identity && r.AttachmentGeneration == a.AttachmentGeneration && r.Revision == a.RouteRevision
@@ -128,7 +129,7 @@ func (w *RuntimeCarrierWorker) observe(parent context.Context) (failure error) {
 			default:
 			}
 		}
-		observations = append(observations, control.RuntimeCarrierObservation{RouteID: a.RouteID, SessionID: a.Identity.SessionID, AttachmentGeneration: a.AttachmentGeneration, Ready: ready})
+		observations = append(observations, runtimewire.Observation{RouteID: a.RouteID, SessionID: a.Identity.SessionID, AttachmentGeneration: a.AttachmentGeneration, Ready: ready})
 	}
 	ctx, cancel := context.WithTimeout(parent, w.Timeout)
 	defer cancel()
@@ -241,9 +242,9 @@ func (w *RuntimeCarrierWorker) Shutdown(ctx context.Context) error {
 	if w.BrowserTerminalHub != nil {
 		err = errors.Join(err, w.BrowserTerminalHub.Close())
 	}
-	observations := make([]control.RuntimeCarrierObservation, 0, len(admissions))
+	observations := make([]runtimewire.Observation, 0, len(admissions))
 	for _, a := range admissions {
-		observations = append(observations, control.RuntimeCarrierObservation{RouteID: a.RouteID, SessionID: a.Identity.SessionID, AttachmentGeneration: a.AttachmentGeneration})
+		observations = append(observations, runtimewire.Observation{RouteID: a.RouteID, SessionID: a.Identity.SessionID, AttachmentGeneration: a.AttachmentGeneration})
 	}
 	observeCtx, cancelObserve := context.WithTimeout(ctx, w.Timeout)
 	defer cancelObserve()

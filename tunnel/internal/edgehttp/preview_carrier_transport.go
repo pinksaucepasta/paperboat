@@ -7,6 +7,7 @@ import (
 	"fmt"
 	yamux "github.com/libp2p/go-yamux/v5"
 	runtimeadmission "github.com/pinksaucepasta/paperboat-relay/admission"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"io"
 	"net"
 	"net/http"
@@ -148,7 +149,7 @@ func (r *DataCarrierPreviewRegistry) Attach(route DataCarrierPreviewRoute) error
 		// and active streams; renewal is not an attachment replacement.
 		previous := old.route
 		previous.ExpiresAt = validated.ExpiresAt
-		if validated.Kind == datacarrier.RuntimeCarrierRoute && sameDataCarrierPreviewRoute(previous, validated) {
+		if validated.Kind == runtimewire.RouteKind && sameDataCarrierPreviewRoute(previous, validated) {
 			old.route.ExpiresAt = validated.ExpiresAt
 			r.mu.Unlock()
 			return nil
@@ -214,25 +215,25 @@ func (r *DataCarrierPreviewRegistry) AttachAdmission(admission datacarrier.Expec
 }
 
 func (r *DataCarrierPreviewRegistry) validateRoute(route DataCarrierPreviewRoute) (DataCarrierPreviewRoute, error) {
-	if route.Server == nil || connectorprotocol.ValidateIdentifier(route.RouteID) != nil || route.Revision == 0 || route.Kind != dataCarrierPreviewRouteKind && route.Kind != dataCarrierPreviewPrivateRouteKind && route.Kind != datacarrier.RuntimeCarrierRoute {
+	if route.Server == nil || connectorprotocol.ValidateIdentifier(route.RouteID) != nil || route.Revision == 0 || route.Kind != dataCarrierPreviewRouteKind && route.Kind != dataCarrierPreviewPrivateRouteKind && route.Kind != runtimewire.RouteKind {
 		return DataCarrierPreviewRoute{}, ErrDataCarrierPreviewRegistryInvalid
 	}
 	if route.Kind == dataCarrierPreviewPrivateRouteKind && route.AccessMode != "private" && route.AccessMode != "team" || route.Kind == dataCarrierPreviewRouteKind && route.AccessMode != "" && route.AccessMode != "public" {
 		return DataCarrierPreviewRoute{}, ErrDataCarrierPreviewRegistryInvalid
 	}
-	if route.Kind == datacarrier.RuntimeCarrierRoute && (route.AccessMode != "" || route.AttachmentGeneration == 0) {
+	if route.Kind == runtimewire.RouteKind && (route.AccessMode != "" || route.AttachmentGeneration == 0) {
 		return DataCarrierPreviewRoute{}, ErrDataCarrierPreviewRegistryInvalid
 	}
-	if route.AccessMode == "" && route.Kind != datacarrier.RuntimeCarrierRoute {
+	if route.AccessMode == "" && route.Kind != runtimewire.RouteKind {
 		if route.Kind == dataCarrierPreviewPrivateRouteKind {
 			return DataCarrierPreviewRoute{}, ErrDataCarrierPreviewRegistryInvalid
 		}
 		route.AccessMode = "public"
 	}
-	if route.Kind != datacarrier.RuntimeCarrierRoute && route.AccessMode != "public" && route.AccessMode != "private" && route.AccessMode != "team" {
+	if route.Kind != runtimewire.RouteKind && route.AccessMode != "public" && route.AccessMode != "private" && route.AccessMode != "team" {
 		return DataCarrierPreviewRoute{}, ErrDataCarrierPreviewRegistryInvalid
 	}
-	if route.Kind != dataCarrierPreviewRouteKind && route.Kind != dataCarrierPreviewPrivateRouteKind && route.Kind != datacarrier.RuntimeCarrierRoute {
+	if route.Kind != dataCarrierPreviewRouteKind && route.Kind != dataCarrierPreviewPrivateRouteKind && route.Kind != runtimewire.RouteKind {
 		return DataCarrierPreviewRoute{}, ErrDataCarrierPreviewRegistryInvalid
 	}
 	if connectorprotocol.ValidateOpaqueEpoch(route.EdgeProcessEpoch) != nil || route.EdgeProcessEpoch != r.processEpoch {
@@ -251,7 +252,7 @@ func (r *DataCarrierPreviewRegistry) validateRoute(route DataCarrierPreviewRoute
 	}
 	route.Hostname = host
 	route.Identity = identity
-	if route.AttachmentGeneration != 0 && route.Kind != datacarrier.RuntimeCarrierRoute {
+	if route.AttachmentGeneration != 0 && route.Kind != runtimewire.RouteKind {
 		if connectorprotocol.ValidateIdentifier(route.OperationID) != nil || connectorprotocol.ValidateIdentifier(route.PreviewID) != nil || connectorprotocol.ValidateIdentifier(route.OwnerMachineID) != nil || connectorprotocol.ValidateIdentifier(route.OwnerSessionID) != nil || route.OwnerMachineID != identity.HostID || route.LeaseGeneration == 0 || route.ConfigContentHash == "" || route.Endpoint == "" || route.ExpiresAt.IsZero() || !route.ExpiresAt.After(time.Now().UTC()) {
 			return DataCarrierPreviewRoute{}, ErrDataCarrierPreviewRegistryInvalid
 		}
@@ -313,7 +314,7 @@ func (r *DataCarrierPreviewRegistry) Detach(routeID string, identity datacarrier
 // callback from a released or replaced attachment cannot remove the current
 // route, even if it reuses the same route ID.
 func (r *DataCarrierPreviewRegistry) DetachAdmission(admission datacarrier.ExpectedAdmission) error {
-	if r == nil || connectorprotocol.ValidateIdentifier(admission.RouteID) != nil || (admission.RouteKind != datacarrier.RuntimeCarrierRoute && connectorprotocol.ValidateIdentifier(admission.OperationID) != nil) || admission.AttachmentGeneration == 0 {
+	if r == nil || connectorprotocol.ValidateIdentifier(admission.RouteID) != nil || (admission.RouteKind != runtimewire.RouteKind && connectorprotocol.ValidateIdentifier(admission.OperationID) != nil) || admission.AttachmentGeneration == 0 {
 		return ErrDataCarrierPreviewRegistryInvalid
 	}
 	r.mu.Lock()

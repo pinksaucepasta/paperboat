@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -39,7 +40,7 @@ func TestRuntimeBrowserTerminalReplacesTicketWithHostCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer registry.Close()
-	value := DataCarrierPreviewRoute{RouteID: "runtime_browser", Hostname: "machine.runtime.example.test", Kind: datacarrier.RuntimeCarrierRoute, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, AttachmentGeneration: 1, Identity: identity, Server: server, ExpiresAt: time.Now().Add(time.Minute)}
+	value := DataCarrierPreviewRoute{RouteID: "runtime_browser", Hostname: "machine.runtime.example.test", Kind: runtimewire.RouteKind, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, AttachmentGeneration: 1, Identity: identity, Server: server, ExpiresAt: time.Now().Add(time.Minute)}
 	if err := registry.Attach(value); err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +214,7 @@ func TestRuntimeCarrierGatewayRequiresHelperAuthAndPreservesRenewedStream(t *tes
 				t.Fatal(err)
 			}
 			defer registry.Close()
-			value := DataCarrierPreviewRoute{RouteID: "runtime_route", Hostname: hostname, Kind: datacarrier.RuntimeCarrierRoute, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, AttachmentGeneration: 1, Server: server, ExpiresAt: time.Now().Add(time.Minute)}
+			value := DataCarrierPreviewRoute{RouteID: "runtime_route", Hostname: hostname, Kind: runtimewire.RouteKind, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, AttachmentGeneration: 1, Server: server, ExpiresAt: time.Now().Add(time.Minute)}
 			if err = registry.Attach(value); err != nil {
 				t.Fatal(err)
 			}
@@ -223,7 +224,7 @@ func TestRuntimeCarrierGatewayRequiresHelperAuthAndPreservesRenewedStream(t *tes
 				t.Fatal(err)
 			}
 			defer lease.Close()
-			if string(match.Rule.Kind) != datacarrier.RuntimeCarrierRoute || match.Rule.Target != "" || !matcher.HasHTTPSHostname(value.Hostname) {
+			if string(match.Rule.Kind) != runtimewire.RouteKind || match.Rule.Target != "" || !matcher.HasHTTPSHostname(value.Hostname) {
 				t.Fatal("runtime carrier acquired public/raw route")
 			}
 			value.ExpiresAt = value.ExpiresAt.Add(time.Minute)
@@ -321,7 +322,7 @@ func TestRuntimeCarrierTransportPreservesWebSocketUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer registry.Close()
-	value := DataCarrierPreviewRoute{RouteID: "runtime_ws", Hostname: "machine.runtime.example.test", Kind: datacarrier.RuntimeCarrierRoute, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, AttachmentGeneration: 1, Server: server, ExpiresAt: time.Now().Add(time.Minute)}
+	value := DataCarrierPreviewRoute{RouteID: "runtime_ws", Hostname: "machine.runtime.example.test", Kind: runtimewire.RouteKind, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, AttachmentGeneration: 1, Server: server, ExpiresAt: time.Now().Add(time.Minute)}
 	if err := registry.Attach(value); err != nil {
 		t.Fatal(err)
 	}

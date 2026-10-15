@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"io"
 	"net"
 	"net/http"
@@ -17,7 +18,6 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
 )
 
 func TestSharedTLSBrowserAuthorization(t *testing.T) {
@@ -233,7 +233,7 @@ func TestSharedTLSRuntimeCarrierAuthority(t *testing.T) {
 	defer registry.Close()
 	identity := testEdgePreviewIdentity(1, 1)
 	carrier, _ := testEdgePreviewCarrierPair(t, identity)
-	value := DataCarrierPreviewRoute{RouteID: "runtime_route", Hostname: host, Kind: datacarrier.RuntimeCarrierRoute, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, AttachmentGeneration: 1, Identity: identity, Server: carrier, ExpiresAt: time.Now().Add(time.Minute)}
+	value := DataCarrierPreviewRoute{RouteID: "runtime_route", Hostname: host, Kind: runtimewire.RouteKind, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, AttachmentGeneration: 1, Identity: identity, Server: carrier, ExpiresAt: time.Now().Add(time.Minute)}
 	if err = registry.Attach(value); err != nil {
 		t.Fatal(err)
 	}
