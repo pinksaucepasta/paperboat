@@ -464,6 +464,7 @@ func TestCleanupWorkerReportsFailureOnceUntilRecovery(t *testing.T) {
 	})
 	defer restore()
 	parent, cancel := context.WithCancel(supportref.WithContext(context.Background(), reference))
+	defer cancel()
 	worker := &CleanupWorker{Service: service, Interval: 20 * time.Millisecond}
 	if err := worker.Start(parent); err != nil {
 		cancel()
@@ -491,9 +492,7 @@ func TestCleanupWorkerReportsFailureOnceUntilRecovery(t *testing.T) {
 	if err := os.Remove(filepath.Join(blockedPath, "private-payload-marker")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(blockedPath); err != nil {
-		t.Fatal(err)
-	}
+	// Removing the marker lets the worker own payload removal and record expiry.
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		manifest, err := durable.FileTransfer(context.Background(), transfer.ID)
@@ -510,6 +509,10 @@ func TestCleanupWorkerReportsFailureOnceUntilRecovery(t *testing.T) {
 		cancel()
 		t.Fatalf("worker did not recover after unlink succeeded: manifest=%#v err=%v", manifest, err)
 	}
+	if _, err := os.Stat(blockedPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("worker left expired payload behind: %v", err)
+	}
+
 	time.Sleep(60 * time.Millisecond)
 	select {
 	case fault := <-observed:
