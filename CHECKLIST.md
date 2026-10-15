@@ -97,7 +97,7 @@ that use them; say which in Evidence.
 | F1-09 | `pb uninstall` (prompts, and `--confirmation 'UNINSTALL PAPERBOAT' --hostname <h>`) removes **everything** (services, processes, files, accounts, CA trust, nft/PF/WFP rules, scheduled tasks, PATH entries, credentials); Inbox preserved; works on a broken or half-installed machine; the smoke suite's uninstall inventory check reports zero leftovers on L, M, W. | [ ] | [ ] | [ ] | — |
 | F1-10 | `pb reset` + pair again on the same machine works; the old machine record is replaced. | [ ] | [ ] | [ ] | — |
 | F1-11 | `pb service install/start/stop/restart/status/uninstall` behave as documented; the daemon restarts itself after a crash and after a reboot. | [ ] | [ ] | [ ] | — |
-| F1-12 | Console install dialog shows correct commands for every platform and live-updates when the machine connects. | [ ] | [ ] | [ ] |  |
+| F1-12 | Console install dialog shows correct commands for every platform and live-updates when the machine connects. | [!] | [!] | [!] | Console part checked 2026-10-15 on live console: dialog creates an enrollment and shows the POSIX `curl … \| bash` and Windows `powershell … irm` commands for get.pprbt.dev/install with the token; closing cancels it; status polls every 2s. Live update on connect needs a pairing through this command, blocked by the installer 404 (F1-01, S3-01/02). |
 
 **Commands**
 
