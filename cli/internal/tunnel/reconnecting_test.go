@@ -259,3 +259,21 @@ func TestReconnectingConnCoordinatesWriteFailureWithReconnect(t *testing.T) {
 	}
 	_ = c.Close()
 }
+
+func TestTerminalRecoveryBudgetDoesNotRestartAfterSuccessfulReattach(t *testing.T) {
+	first := &reconnectTestConn{Reader: bytes.NewReader([]byte("first")), err: ErrTransportLost}
+	calls := 0
+	connection := NewReconnectingConn(t.Context(), first, 1, 0, func(context.Context) (Conn, error) {
+		calls++
+		if calls > 2 {
+			return &reconnectTestConn{Reader: bytes.NewReader(nil)}, nil
+		}
+		return &reconnectTestConn{Reader: bytes.NewReader([]byte("recovered")), err: ErrTransportLost}, nil
+	})
+	defer connection.Close()
+	_, _ = io.ReadAll(connection)
+	_, err := connection.Wait()
+	if calls != 1 || !errors.Is(err, ErrTransportLost) {
+		t.Fatalf("recovery budget restarted: calls=%d err=%v", calls, err)
+	}
+}

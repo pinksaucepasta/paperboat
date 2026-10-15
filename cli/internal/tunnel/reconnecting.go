@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat-relay/reattach"
 	"github.com/pinksaucepasta/paperboat/internal/telemetry"
 )
 
@@ -78,6 +79,7 @@ const flowControlStallThreshold = 50 * time.Millisecond
 // loop retains ownership of stdin. Failed writes are never replayed.
 type ReconnectingConn struct {
 	ctx               context.Context
+	cancel            context.CancelFunc
 	mu                sync.RWMutex
 	current           Conn
 	available         chan struct{}
@@ -144,12 +146,14 @@ func NewObservedReconnectingConn(ctx context.Context, initial Conn, maxRetries i
 	for _, option := range opts {
 		option(&options)
 	}
-	c := &ReconnectingConn{ctx: ctx, current: initial, available: available, reconnect: reconnect, maxRetries: maxRetries, delay: delay, out: make(chan []byte, options.outputQueueChunks), done: make(chan reconnectResult, 1), closed: make(chan struct{}), telemetry: sink, now: now, started: now(), correlation: correlation, outputBatchWindow: options.outputBatchWindow, observer: options.observer}
+	runCtx, cancel := context.WithCancel(ctx)
+	c := &ReconnectingConn{ctx: runCtx, cancel: cancel, current: initial, available: available, reconnect: reconnect, maxRetries: maxRetries, delay: delay, out: make(chan []byte, options.outputQueueChunks), done: make(chan reconnectResult, 1), closed: make(chan struct{}), telemetry: sink, now: now, started: now(), correlation: correlation, outputBatchWindow: options.outputBatchWindow, observer: options.observer}
 	go c.supervise(initial)
 	return c
 }
 
 func (c *ReconnectingConn) supervise(conn Conn) {
+	recovery := reattach.New(reattach.Policy{Attempts: c.maxRetries, Backoff: reattach.Backoff(c.delay, 30*time.Second), Retryable: func(err error) bool { var stopped stopReconnectError; return !errors.As(err, &stopped) }})
 	defer close(c.out)
 	lifetimeOutcome := "failure"
 	defer func() {
@@ -192,52 +196,41 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 		}
 		c.setUnavailable(conn)
 		c.notify(ReconnectStarted)
-		reconnected := false
-		for attempt := 0; attempt < c.maxRetries; attempt++ {
-			attemptStarted := time.Now()
-			if c.now != nil {
-				attemptStarted = c.now()
-			}
-			if waitErr := c.waitDelay(attempt); waitErr != nil {
-				c.record("terminal.reconnect", "cancelled", attemptStarted)
-				lifetimeOutcome = "cancelled"
-				c.done <- reconnectResult{130, nil}
-				return
-			}
-			next, dialErr := c.reconnect(c.ctx)
+		recoveryErr := recovery.Run(c.ctx, func(dialCtx context.Context) error {
+			attemptStarted := c.now()
+			next, dialErr := c.reconnect(dialCtx)
 			if dialErr != nil {
 				c.record("terminal.reconnect", "failure", attemptStarted)
 				err = errors.Join(err, dialErr)
-				var terminal stopReconnectError
-				if errors.As(dialErr, &terminal) {
-					break
-				}
-				continue
+				return dialErr
 			}
 			if next == nil {
+				dialErr = errors.New("reconnect returned no connection")
 				c.record("terminal.reconnect", "failure", attemptStarted)
-				err = errors.Join(err, errors.New("reconnect returned no connection"))
-				continue
+				err = errors.Join(err, dialErr)
+				return dialErr
 			}
 			select {
 			case <-c.closed:
 				_ = next.Close()
 				c.record("terminal.reconnect", "cancelled", attemptStarted)
-				lifetimeOutcome = "cancelled"
-				c.done <- reconnectResult{130, nil}
-				return
+				return context.Canceled
 			default:
 			}
 			conn = next
 			c.setCurrent(next)
 			c.notify(ReconnectRecovered)
 			c.record("terminal.reconnect", "success", attemptStarted)
-			reconnected = true
-			break
-		}
-		if !reconnected {
+			return nil
+		})
+		if recoveryErr != nil {
+			if c.ctx.Err() != nil || errors.Is(recoveryErr, context.Canceled) {
+				lifetimeOutcome = "cancelled"
+				c.done <- reconnectResult{130, nil}
+				return
+			}
 			c.notify(ReconnectFailed)
-			c.done <- reconnectResult{1, err}
+			c.done <- reconnectResult{1, errors.Join(err, recoveryErr)}
 			return
 		}
 	}
@@ -279,25 +272,6 @@ func (c *ReconnectingConn) waitCurrent(ctx context.Context) (Conn, error) {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
-	}
-}
-func (c *ReconnectingConn) waitDelay(attempt int) error {
-	delay := c.delay
-	for i := 0; i < attempt && delay < 30*time.Second; i++ {
-		delay *= 2
-		if delay > 30*time.Second {
-			delay = 30 * time.Second
-		}
-	}
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-		return nil
-	case <-c.closed:
-		return io.ErrClosedPipe
-	case <-c.ctx.Done():
-		return c.ctx.Err()
 	}
 }
 func (c *ReconnectingConn) Read(p []byte) (int, error) {
@@ -458,6 +432,9 @@ func (c *ReconnectingConn) Close() error {
 	var err error
 	c.closeOnce.Do(func() {
 		close(c.closed)
+		if c.cancel != nil {
+			c.cancel()
+		}
 		c.mu.RLock()
 		conn := c.current
 		c.mu.RUnlock()
