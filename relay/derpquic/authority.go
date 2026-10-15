@@ -184,8 +184,8 @@ func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time)
 		}
 		for _, s := range p.Scopes {
 			scopes++
-			validResource := s.ResourceKind == "machine_network" && s.Capability == "connect" || s.ResourceKind == "inspector" && s.Capability == "inspector" || s.ResourceKind == "machine_access" && (s.Capability == "terminal" || s.Capability == "exec" || s.Capability == "managed_ssh" || s.Capability == "file_transfer" || s.Capability == "private_access") || s.ResourceKind == "codex_session" && s.Capability == "codex"
-			if scopes > 128 || !validResource || s.ResourceID == "" || len(s.ResourceID) > 256 || s.ResourceGeneration == 0 || s.Port != 443 || (s.Direction != "dial" && s.Direction != "accept") || s.ExpiresAt <= g.IssuedAt {
+			validResource := s.ResourceKind == "config_compare" && s.Capability == "config_compare" || s.ResourceKind == "machine_network" && s.Capability == "connect" || s.ResourceKind == "inspector" && s.Capability == "inspector" || s.ResourceKind == "machine_access" && (s.Capability == "terminal" || s.Capability == "exec" || s.Capability == "managed_ssh" || s.Capability == "file_transfer" || s.Capability == "private_access") || s.ResourceKind == "codex_session" && s.Capability == "codex"
+			if scopes > 128 || !validResource || s.ResourceID == "" || len(s.ResourceID) > 256 || s.ResourceGeneration == 0 || s.Port != 443 || (s.Direction != "dial" && s.Direction != "accept") || s.ExpiresAt <= 0 {
 				return Grant{}, ErrAdmission
 			}
 		}
@@ -194,20 +194,6 @@ func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time)
 		return Grant{}, ErrExpired
 	}
 	g.signedHash = sha256.Sum256(b)
-	peers := make([]Peer, 0, len(g.Peers))
-	for _, peer := range g.Peers {
-		scopes := make([]Scope, 0, len(peer.Scopes))
-		for _, scope := range peer.Scopes {
-			if scope.ExpiresAt > now.Unix() {
-				scopes = append(scopes, scope)
-			}
-		}
-		if len(scopes) != 0 {
-			peer.Scopes = scopes
-			peers = append(peers, peer)
-		}
-	}
-	g.Peers = peers
 	return g, nil
 }
 

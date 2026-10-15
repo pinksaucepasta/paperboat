@@ -590,7 +590,7 @@ func testExpiredLeaseRecovers(t *testing.T, fallback bool) {
 	receive(t, b, ka, payload)
 }
 
-func TestRelayReceiptValidatesThenPrunesExpiredScopes(t *testing.T) {
+func TestRelayReceiptRetainsAdmittedExpiryAndValidatesScopeShape(t *testing.T) {
 	for _, invalid := range []string{"", "expired_invalid_shape", "expired_scope_overflow"} {
 		t.Run(invalid, func(t *testing.T) {
 			f := newFixture(t)
@@ -599,7 +599,7 @@ func TestRelayReceiptValidatesThenPrunesExpiredScopes(t *testing.T) {
 			b := f.grant(key.NewNode().Public(), certificate(t), "b")
 			pairScopes(&a, &b)
 			now := time.Now()
-			a.IssuedAt = now.Unix() - 5
+			a.IssuedAt = now.Unix()
 			a.ExpiresAt = a.IssuedAt + 60
 			old := a.Peers[0].Scopes[0]
 			old.ExpiresAt = now.Unix() - 1
@@ -629,8 +629,8 @@ func TestRelayReceiptValidatesThenPrunesExpiredScopes(t *testing.T) {
 			if err != nil {
 				t.Fatal("delayed valid signed grant rejected", err)
 			}
-			if len(projected.Peers) != 1 || len(projected.Peers[0].Scopes) != 1 || projected.Peers[0].Scopes[0] != live {
-				t.Fatal("expired receipt scopes retained or unrelated live authority removed")
+			if len(projected.Peers) != 2 || len(projected.Peers[0].Scopes) != 2 || projected.Peers[0].Scopes[0] != old || projected.Peers[0].Scopes[1] != live || projected.Peers[1].Scopes[0] != old {
+				t.Fatal("signed live-operation scopes or original expiry were discarded")
 			}
 			if projected.ExpiresAt != a.ExpiresAt || projected.Generation != a.Generation {
 				t.Fatal("projection changed signed grant lifetime or generation")
