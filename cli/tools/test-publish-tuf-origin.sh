@@ -849,4 +849,89 @@ PY
   fi
   test ! -e "$transaction"
   test "$live_before_stale" = "$(snapshot)"
+
+  # The initial release has no signed predecessor. Empty deployment-created
+  # TUF directories are also fresh; partial or unsafe trees are never fresh.
+  previous="$temporary/previous-initialized-current"
+  mv "$release_root/current" "$previous"
+  previous_snapshot=$(snapshot_directory "$previous")
+  for initial in absent empty partial malformed installer-only symlink orphan-target mixed-products invalid-version; do
+    mkdir "$release_root/current"
+    cp -R "$previous/selfhost" "$release_root/current/selfhost"
+    case "$initial" in
+      empty) mkdir -p "$release_root/current/tuf/metadata" "$release_root/current/tuf/targets" ;;
+      partial)
+        mkdir -p "$release_root/current/tuf/metadata" "$release_root/current/tuf/targets"
+        cp "$next/tuf/metadata/targets.json" "$release_root/current/tuf/metadata/targets.json" ;;
+      malformed)
+        mkdir -p "$release_root/current/tuf/metadata" "$release_root/current/tuf/targets"
+        printf 'invalid metadata\n' > "$release_root/current/tuf/metadata/targets.json" ;;
+      installer-only) printf 'existing installer\n' > "$release_root/current/install" ;;
+      symlink)
+        mkdir "$temporary/tuf-sentinel"
+        printf 'unmodified sentinel\n' > "$temporary/tuf-sentinel/marker"
+        ln -s "$temporary/tuf-sentinel" "$release_root/current/tuf" ;;
+      orphan-target)
+        mkdir -p "$release_root/current/tuf/metadata" "$release_root/current/tuf/targets"
+        printf 'orphan target\n' > "$release_root/current/tuf/targets/orphan" ;;
+    esac
+    initial_bundle=$next_bundle
+    initial_digest=$next_digest
+    case "$initial" in
+      mixed-products|invalid-version)
+        invalid="$temporary/initial-candidate-$initial"
+        cp -R "$next" "$invalid"
+        python3 - "$invalid/tuf/metadata" "$previous/tuf/metadata/targets.json" "$initial" <<'PY_INITIAL'
+from pathlib import Path
+import json, sys
+metadata, previous, scenario = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+if scenario == "mixed-products":
+    path = metadata / "targets.json"
+    document = json.loads(path.read_text())
+    document["signed"]["targets"]["pb-linux-arm64"] = json.loads(previous.read_text())["signed"]["targets"]["pb-linux-arm64"]
+else:
+    path = metadata / "snapshot.json"
+    document = json.loads(path.read_text())
+    document["signed"]["version"] = 0
+path.write_text(json.dumps(document))
+PY_INITIAL
+        write_installers "$invalid"
+        initial_bundle="$temporary/initial-candidate-$initial.tgz"
+        tar -C "$invalid" -czf "$initial_bundle" install tuf
+        initial_digest=$(run_checksum "$checksum_backend" "$initial_bundle" | awk '{print $1}') ;;
+    esac
+    initial_snapshot=$(snapshot)
+    if PATH="$temporary/bin:$PATH" PAPERBOAT_TEST_DOCKER_MODE=good PAPERBOAT_TEST_RELEASE_ROOT="$release_root" run_test_publisher "$initial_bundle" "$release_root" 2026.08.22.24 "$initial_digest" >"$temporary/initial-$initial-output" 2>&1; then
+      case "$initial" in
+        absent|empty)
+          for role in root targets snapshot timestamp; do
+            test -s "$release_root/current/tuf/metadata/$role.json"
+          done
+          test -s "$release_root/current/install"
+          test "$(snapshot_directory "$previous/selfhost")" = "$(snapshot_directory "$release_root/current/selfhost")"
+          set -- "$release_root"/staging/activation-*
+          test "$#" -eq 1
+          test "$initial_snapshot" = "$(snapshot_directory "$1/next")" ;;
+        *) echo "unsafe initial release accepted: $initial" >&2; exit 1 ;;
+      esac
+    else
+      case "$initial" in
+        absent|empty)
+          cat "$temporary/initial-$initial-output" >&2
+          echo "fresh release rejected: $initial" >&2
+          exit 1 ;;
+        *) test "$initial_snapshot" = "$(snapshot)" ;;
+      esac
+      case "$initial" in
+        mixed-products) grep -q 'initial publication must select every launch target' "$temporary/initial-$initial-output" ;;
+        invalid-version) grep -q 'TUF snapshot:' "$temporary/initial-$initial-output" ;;
+      esac
+    fi
+    if test "$initial" = symlink; then
+      test "$(cat "$temporary/tuf-sentinel/marker")" = 'unmodified sentinel'
+    fi
+    mv "$release_root/current" "$temporary/initial-result-$initial"
+  done
+  test "$previous_snapshot" = "$(snapshot_directory "$previous")"
+
 fi

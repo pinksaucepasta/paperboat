@@ -25,8 +25,10 @@ verify_live_mount_contract() {
   [[ -d "$release_root" && ! -L "$release_root" ]] || { echo "release root is unavailable" >&2; return 1; }
   [[ -d "$live" && ! -L "$live" ]] || { echo "live release is unavailable" >&2; return 1; }
   [[ -d "$staging" && ! -L "$staging" ]] || { echo "release staging directory is unavailable" >&2; return 1; }
-  [[ -d "$live/tuf/metadata" && ! -L "$live/tuf/metadata" ]] || { echo "live TUF metadata is unavailable" >&2; return 1; }
-  [[ -d "$live/tuf/targets" && ! -L "$live/tuf/targets" ]] || { echo "live TUF targets are unavailable" >&2; return 1; }
+  if [[ "$live_state" != fresh ]]; then
+    [[ -d "$live/tuf/metadata" && ! -L "$live/tuf/metadata" ]] || { echo "live TUF metadata is unavailable" >&2; return 1; }
+    [[ -d "$live/tuf/targets" && ! -L "$live/tuf/targets" ]] || { echo "live TUF targets are unavailable" >&2; return 1; }
+  fi
   mapfile -t containers < <(docker ps -q)
   ((${#containers[@]} > 0)) || { echo "no running containers are available to verify the release mount" >&2; return 1; }
   local inspect
@@ -100,6 +102,32 @@ staging="$release_root/staging"
 exec 9>"$release_root/.publish-tuf-origin.lock"
 flock -x 9
 
+# One explicit initial state: no installer or metadata, and only empty,
+# regular TUF directories if deployment has created them. Partial metadata
+# is an initialized release that must pass every ordinary predecessor check.
+live_state=$(python3 - "$live" <<'PY_STATE'
+from pathlib import Path
+import sys
+live = Path(sys.argv[1])
+tuf = live / "tuf"
+for directory in (tuf, tuf / "metadata", tuf / "targets"):
+    if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
+        raise SystemExit("live TUF directory is unsafe; restore regular directories before publishing")
+metadata = tuf / "metadata"
+entries = list(metadata.iterdir()) if metadata.exists() else []
+installer = live / "install"
+if installer.exists() or installer.is_symlink() or entries:
+    print("initialized")
+else:
+    if tuf.exists() and {p.name for p in tuf.iterdir()} - {"metadata", "targets"}:
+        raise SystemExit("uninitialized release has unexpected TUF entries")
+    targets = tuf / "targets"
+    if targets.exists() and any(targets.iterdir()):
+        raise SystemExit("uninitialized release contains target blobs; restore the origin before publishing")
+    print("fresh")
+PY_STATE
+)
+
 # A successful prior activation deliberately retains its exchanged-out tree.
 # It is safe to remove only now, before this release creates its transaction.
 find "$staging" -mindepth 1 -maxdepth 1 -type d -name 'activation-*' -print0 | while IFS= read -r -d '' previous; do
@@ -114,7 +142,7 @@ tar -xzf "$bundle" -C "$next" --no-same-owner --no-same-permissions
 [[ -z "$(find "$next" -type l -print -quit)" ]] || { echo "staged release contains a symlink" >&2; exit 1; }
 [[ "$(find "$next" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)" == $'install\ntuf' ]] || { echo "staged release has an unexpected top-level file" >&2; exit 1; }
 
-python3 - "$next/tuf/metadata" "$live/tuf/metadata" <<'PY_METADATA'
+python3 - "$next/tuf/metadata" "$live/tuf/metadata" "$live_state" <<'PY_METADATA'
 import json
 import pathlib
 import sys
@@ -140,13 +168,14 @@ def version(directory, role):
         raise ValueError("metadata version must be a positive integer")
     return value
 
-candidate, live = map(pathlib.Path, sys.argv[1:])
+candidate, live = map(pathlib.Path, sys.argv[1:3])
+fresh = sys.argv[3] == "fresh"
 try:
     candidate_targets = version(candidate, "targets")
-    live_targets = version(live, "targets")
-    if candidate_targets < live_targets:
+    live_targets = version(live, "targets") if not fresh else None
+    if not fresh and candidate_targets < live_targets:
         raise ValueError("metadata version rolls back live")
-    if candidate_targets == live_targets:
+    if not fresh and candidate_targets == live_targets:
         # Snapshot/timestamp refresh owns no target, policy, root or installer
         # change. Compare exact bytes under the same publication lock.
         for relative in ("tuf/metadata/root.json", "tuf/metadata/targets.json", "install"):
@@ -159,14 +188,15 @@ except (OSError, ValueError, TypeError, AttributeError) as error:
 
 for role in ("snapshot", "timestamp"):
     try:
-        if version(candidate, role) <= version(live, role):
+        candidate_version = version(candidate, role)
+        if not fresh and candidate_version <= version(live, role):
             raise ValueError("metadata version does not advance live")
     except (OSError, ValueError, TypeError, AttributeError) as error:
         raise SystemExit(f"TUF {role}: {error}")
 
 PY_METADATA
 
-python3 - "$next/tuf/metadata/targets.json" "$live/tuf/metadata/targets.json" "$version" <<'PY'
+python3 - "$next/tuf/metadata/targets.json" "$live/tuf/metadata/targets.json" "$version" "$live_state" <<'PY'
 import datetime
 import hashlib
 import json
@@ -177,6 +207,7 @@ import sys
 targets_path = pathlib.Path(sys.argv[1])
 live_targets_path = pathlib.Path(sys.argv[2])
 version = sys.argv[3]
+fresh = sys.argv[4] == "fresh"
 expected = {
     "pb-darwin-arm64": ("darwin", "arm64", "macho"),
     "pb-linux-amd64": ("linux", "amd64", "elf"),
@@ -332,22 +363,27 @@ def require_equal(actual, wanted, message):
 
 try:
     candidate_targets = read_targets(targets_path, "candidate")
-    live_targets = read_targets(live_targets_path, "live")
+    live_targets = read_targets(live_targets_path, "live") if not fresh else {}
 except (OSError, ValueError) as error:
     raise SystemExit(f"TUF targets metadata is invalid: {error}")
 
-refresh = targets_path.read_bytes() == live_targets_path.read_bytes()
+refresh = not fresh and targets_path.read_bytes() == live_targets_path.read_bytes()
 requested_version_parts = version_parts(version, "candidate")
 candidate_repositories = set()
 live_repositories = set()
 selected = []
 candidate_product_pins = {}
 for name in expected:
-    live_version_parts, _, live_repository, _, _, _ = validate_target(name, live_targets[name])
     candidate_version_parts, candidate_version, candidate_repository, url, digest, length = validate_target(name, candidate_targets[name])
     candidate_product_pins[name] = (candidate_version, url, digest, length)
-    live_repositories.add(live_repository)
     candidate_repositories.add(candidate_repository)
+    if fresh:
+        if candidate_version_parts != requested_version_parts:
+            raise SystemExit("initial publication must select every launch target at the requested version")
+        selected.append(name)
+        continue
+    live_version_parts, _, live_repository, _, _, _ = validate_target(name, live_targets[name])
+    live_repositories.add(live_repository)
     if candidate_version_parts == requested_version_parts:
         if not refresh and compare_versions(candidate_version_parts, live_version_parts) <= 0:
             raise SystemExit(f"selected TUF target version does not advance the live target for {name}")
@@ -359,7 +395,7 @@ if refresh and len(selected) != len(expected):
     raise SystemExit("refreshed TUF targets must all retain the requested release version")
 if len(selected) == 0:
     raise SystemExit("TUF targets metadata does not select any target at the requested release version")
-if len(live_repositories) != 1 or len(candidate_repositories) != 1 or live_repositories != candidate_repositories:
+if len(candidate_repositories) != 1 or (not fresh and (len(live_repositories) != 1 or live_repositories != candidate_repositories)):
     raise SystemExit("TUF targets disagree on the immutable GitHub repository")
 
 root = targets_path.parent.parent.parent
