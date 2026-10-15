@@ -34,27 +34,46 @@ func (a *Authority) TrackAdmittedScope(peerID, resourceID, capability, direction
 	return nil, ErrAdmission
 }
 
-// TrackAdmittedCarrier retains an explicitly signed personal-network carrier
-// scope, including while no application streams are active. Resource-only peers
-// have no personal-network authority and retain their operation scopes instead.
-func (a *Authority) TrackAdmittedCarrier(peerID string) (func(), error) {
+// TrackAdmittedCarrier retains the exact signed authority that admits a
+// carrier. Personal-network authority takes precedence; resource-only peers
+// retain their first eligible application authority until actual disconnect.
+func (a *Authority) TrackAdmittedCarrier(peerID string) (func(), NetworkScope, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if !a.usableLocked() {
-		return nil, ErrAdmission
+		return nil, NetworkScope{}, ErrAdmission
 	}
 	for _, peer := range a.current.Peers {
 		if peer.Identity.EndpointID != peerID {
 			continue
 		}
+		var backing NetworkScope
 		for _, scope := range peer.Scopes {
-			if scope.ResourceKind == "machine_network" && scope.Capability == "connect" && scope.ExpiresAt > time.Now().Unix() {
-				return a.retainScopeLocked(scope)
+			if scope.ExpiresAt <= time.Now().Unix() {
+				continue
+			}
+			switch scope.ResourceKind {
+			case "machine_network":
+				if scope.Capability == "connect" {
+					backing = scope
+					break
+				}
+			case "machine_access", "inspector", "config_compare":
+				if backing.ResourceID == "" {
+					backing = scope
+				}
+			}
+			if backing.ResourceKind == "machine_network" {
+				break
 			}
 		}
-		return nil, nil
+		if backing.ResourceID == "" {
+			return nil, NetworkScope{}, ErrAdmission
+		}
+		release, err := a.retainScopeLocked(backing)
+		return release, backing, err
 	}
-	return nil, ErrAdmission
+	return nil, NetworkScope{}, ErrAdmission
 }
 
 func (a *Authority) retainScopeLocked(scope NetworkScope) (func(), error) {
@@ -82,7 +101,7 @@ func (a *Authority) retainScopeLocked(scope NetworkScope) (func(), error) {
 
 // AllowsAdmittedCarrier checks current signed peer identity without reapplying
 // snapshot or certificate credential expiry to an accepted carrier.
-func (a *Authority) AllowsAdmittedCarrier(peerID string, binding NetworkBinding) bool {
+func (a *Authority) AllowsAdmittedCarrier(peerID string, binding NetworkBinding, backing NetworkScope) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.closed || a.current == nil {
@@ -90,7 +109,15 @@ func (a *Authority) AllowsAdmittedCarrier(peerID string, binding NetworkBinding)
 	}
 	for _, peer := range a.current.Peers {
 		if peer.Identity.EndpointID == peerID {
-			return peer.Identity == binding
+			if peer.Identity != binding {
+				return false
+			}
+			for _, scope := range peer.Scopes {
+				if scope.ResourceKind == backing.ResourceKind && scope.ResourceID == backing.ResourceID && scope.ResourceGeneration == backing.ResourceGeneration && scope.Capability == backing.Capability && scope.Direction == backing.Direction && scope.Port == backing.Port {
+					return true
+				}
+			}
+			return false
 		}
 	}
 	return false

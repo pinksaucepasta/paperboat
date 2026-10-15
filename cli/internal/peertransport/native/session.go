@@ -106,12 +106,9 @@ var _ http.RoundTripper = (*http3.ClientConn)(nil)
 
 func newSession(owner *Owner, peerID string, binding tailnet.NetworkBinding, session *peerquic.Session) (*Session, error) {
 	s := &Session{owner: owner, peerID: peerID, binding: binding, quic: session}
-	release, err := owner.authority.TrackAdmittedCarrier(peerID)
+	release, backing, err := owner.authority.TrackAdmittedCarrier(peerID)
 	if err != nil {
 		return nil, err
-	}
-	if release == nil {
-		return s, nil
 	}
 	lease, err := admission.Admit(session.Connection.Context(), time.Time{}, nil)
 	if err != nil {
@@ -119,7 +116,7 @@ func newSession(owner *Owner, peerID string, binding tailnet.NetworkBinding, ses
 		return nil, err
 	}
 	lease.OnDone(release)
-	if err := lease.Watch(owner.authority.ScopeChanges, func() bool { return owner.authority.AllowsAdmittedCarrier(peerID, binding) }); err != nil {
+	if err := lease.Watch(owner.authority.ScopeChanges, func() bool { return owner.authority.AllowsAdmittedCarrier(peerID, binding, backing) }); err != nil {
 		lease.Close()
 		return nil, err
 	}

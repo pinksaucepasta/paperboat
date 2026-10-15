@@ -19,6 +19,12 @@ import (
 )
 
 func TestAdmittedNativeStreamsOutliveCredentialsAndCloseOnRevocation(t *testing.T) {
+	for _, personal := range []bool{true, false} {
+		t.Run(map[bool]string{true: "personal", false: "cross_account"}[personal], func(t *testing.T) { testAdmittedNativeLifetime(t, personal) })
+	}
+}
+
+func testAdmittedNativeLifetime(t *testing.T, personal bool) {
 	t.Setenv("IN_TS_TEST", "true")
 	dm := integration.RunDERPAndSTUN(t, func(string, ...any) {}, "127.0.0.1")
 	pub, signer, _ := ed25519.GenerateKey(rand.Reader)
@@ -26,6 +32,9 @@ func TestAdmittedNativeStreamsOutliveCredentialsAndCloseOnRevocation(t *testing.
 	serverTLS, serverFP := testTLS(t, "machine")
 	cb := tailnet.NetworkBinding{AccountID: "account_test", EndpointID: "cli_test", Role: "cli", EndpointGeneration: 1, QUICCertificateFingerprint: clientFP, VirtualAddress: "fd7a:115c:a1e0::1"}
 	sb := tailnet.NetworkBinding{AccountID: "account_test", EndpointID: "machine_test", Role: "machine", MachineID: "machine_test", EndpointGeneration: 1, MachineGeneration: 1, QUICCertificateFingerprint: serverFP, VirtualAddress: "fd7a:115c:a1e0::2"}
+	if !personal {
+		sb.AccountID = "account_other"
+	}
 	ca := testAuthority(t, cb, testKeys{"native_test": pub})
 	sa := testAuthority(t, sb, testKeys{"native_test": pub})
 	cb.WireGuardPublicKey, cb.KeyGeneration = prepareBinding(t, ca)
@@ -37,7 +46,9 @@ func TestAdmittedNativeStreamsOutliveCredentialsAndCloseOnRevocation(t *testing.
 	expires := now + 4
 	for _, cfg := range []*tailnet.NetworkConfiguration{&cc, &sc} {
 		cfg.ExpiresAt = expires
-		cfg.Peers[0].Scopes = append(cfg.Peers[0].Scopes, tailnet.NetworkScope{ResourceKind: "machine_network", ResourceID: "network_pair", ResourceGeneration: 1, Capability: "connect", Direction: cfg.Peers[0].Scopes[0].Direction, Port: tailnet.NetworkPort})
+		if personal {
+			cfg.Peers[0].Scopes = append(cfg.Peers[0].Scopes, tailnet.NetworkScope{ResourceKind: "machine_network", ResourceID: "network_pair", ResourceGeneration: 1, Capability: "connect", Direction: cfg.Peers[0].Scopes[0].Direction, Port: tailnet.NetworkPort})
+		}
 		cfg.Peers[0].Scopes = append(cfg.Peers[0].Scopes, tailnet.NetworkScope{ResourceKind: "config_compare", ResourceID: "grant_test", ResourceGeneration: 1, Capability: "config_compare", Direction: cfg.Peers[0].Scopes[0].Direction, Port: tailnet.NetworkPort})
 		cfg.Peers[0].Scopes = append(cfg.Peers[0].Scopes, tailnet.NetworkScope{ResourceKind: "inspector", ResourceID: "grant_test", ResourceGeneration: 1, Capability: "inspector", Direction: cfg.Peers[0].Scopes[0].Direction, Port: tailnet.NetworkPort})
 		for i := range cfg.Peers[0].Scopes {
@@ -94,8 +105,8 @@ func TestAdmittedNativeStreamsOutliveCredentialsAndCloseOnRevocation(t *testing.
 		lifetimeEcho(t, streams[i], p.consumer)
 	}
 	for _, authority := range []*tailnet.Authority{ca, sa} {
-		if refs := authority.AdmittedScopes(); len(refs) != 4 {
-			t.Fatalf("live native lease refs=%d want4", len(refs))
+		if refs := authority.AdmittedScopes(); len(refs) != map[bool]int{true: 4, false: 3}[personal] {
+			t.Fatalf("live native lease refs=%d unexpected", len(refs))
 		}
 	}
 	time.Sleep(time.Until(time.Unix(expires, 0)) + 30*time.Millisecond)
@@ -119,6 +130,24 @@ func TestAdmittedNativeStreamsOutliveCredentialsAndCloseOnRevocation(t *testing.
 	if c, e := session.OpenAuthorized(ctx, h, "grant_test", "exec"); e == nil {
 		c.Close()
 		t.Fatal("expired scope admitted new work")
+	}
+	if !personal {
+		// Resource-only carriers retain the actual signed backing authority even
+		// after every application stream closes. A different remaining resource
+		// must not hide withdrawal of the carrier's original authority.
+		for _, stream := range streams {
+			_ = stream.Close()
+		}
+		for _, authority := range []*tailnet.Authority{ca, sa} {
+			waitNativeScopeRefs(t, authority, 1)
+		}
+		sc.Generation++
+		sc.Peers[0].Scopes = []tailnet.NetworkScope{{ResourceKind: "config_compare", ResourceID: "other_assignment", ResourceGeneration: 1, Capability: "config_compare", Direction: "accept", Port: tailnet.NetworkPort, ExpiresAt: sc.ExpiresAt}}
+		applyTestConfiguration(t, sa, signer, sc)
+		for _, authority := range []*tailnet.Authority{ca, sa} {
+			waitNativeScopeRefs(t, authority, 0)
+		}
+		return
 	}
 	// A newer signed snapshot explicitly withdraws the resource.
 	sc.Generation++
