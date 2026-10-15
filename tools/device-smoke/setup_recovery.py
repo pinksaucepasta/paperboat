@@ -62,6 +62,7 @@ def main():
     proxy = None
     environment = None
     started = time.monotonic()
+    failure = None
     try:
         if args.fault == 'sigint':
             interrupt_admitted(binary, arguments, root)
@@ -71,11 +72,21 @@ def main():
                 raise RuntimeError('network fault requires end-to-end TLS')
             proxy = PairingFaultProxy(origin.hostname, origin.port or 443)
             environment = interrupt_pair(binary, arguments, root, 'network', proxy)
-        # Retry the exact command and protected journal, without enrollment or edits.
+    except Exception as error:
+        failure = error
+    try:
+        # Recover even when fault observation failed; preserve that primary failure.
+        # Exact command and protected journal, without enrollment or manual edits.
         invoke(binary, *arguments, env=environment, terminal=True, password=password)
+    except Exception as error:
+        if failure is not None:
+            raise failure from error
+        raise
     finally:
         if proxy is not None:
             proxy.close()
+    if failure is not None:
+        raise failure
     if binding(json.loads(registration.read_text())) != binding(before):
         raise RuntimeError('recovery changed original enrollment or Inbox')
     if (root / 'bootstrap-resume.json').exists():
