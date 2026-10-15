@@ -100,6 +100,31 @@ class PairingNetworkFault(unittest.TestCase):
             thread.join(timeout=3)
 
 
+class PFFirewallInventory(unittest.TestCase):
+    def test_empty_anchor_names_are_not_rules_and_query_errors_fail(self):
+        anchors = '000.paperboat-machineguard\n000.paperboat-deviceguard\nforeign\n'
+        responses = {}
+        for name in ['000.paperboat-machineguard', '000.paperboat-deviceguard']:
+            for kind in ['rules', 'nat']:
+                responses[(name, kind)] = ''
+
+        def run(arguments):
+            if arguments == ['/sbin/pfctl', '-a', 'com.apple', '-s', 'Anchors']:
+                return subprocess.CompletedProcess(arguments, 0, anchors, '')
+            name, kind = arguments[2].removeprefix('com.apple/'), arguments[4]
+            value = responses[(name, kind)]
+            return subprocess.CompletedProcess(arguments, int(value is None), value or '', '')
+
+        with patch.object(uninstall_inventory, 'run', run):
+            self.assertEqual(uninstall_inventory.darwin_pf_rule_count(), 0)
+            responses[('000.paperboat-machineguard', 'rules')] = 'block drop quick on lo0 all\n'
+            responses[('000.paperboat-deviceguard', 'nat')] = 'rdr pass on lo0 inet proto tcp to any -> 127.0.0.1\n'
+            self.assertEqual(uninstall_inventory.darwin_pf_rule_count(), 2)
+            responses[('000.paperboat-deviceguard', 'nat')] = None
+            with self.assertRaises(RuntimeError):
+                uninstall_inventory.darwin_pf_rule_count()
+
+
 class UninstallInventoryPreservation(unittest.TestCase):
     def test_inventory_detects_owned_hosts_and_resolvers_among_clean_os_metadata(self):
         cases = [('Linux', 'hosts'), ('Darwin', 'hosts'), ('Darwin', 'resolver'),

@@ -149,6 +149,25 @@ def linux_os_inventory(account, home, add):
     return paths, patterns, users
 
 
+def darwin_pf_rule_count():
+    result = run(['/sbin/pfctl', '-a', 'com.apple', '-s', 'Anchors'])
+    if result.returncode:
+        raise RuntimeError('could not inspect PF anchors')
+    count = 0
+    # PF retains empty anchor names; uninstall must remove their filtering/NAT rules.
+    for name in result.stdout.splitlines():
+        name = name.strip()
+        if 'paperboat' not in name.lower():
+            continue
+        anchor = name if name.startswith('com.apple/') else 'com.apple/' + name
+        for kind in ('rules', 'nat'):
+            rules = run(['/sbin/pfctl', '-a', anchor, '-s', kind])
+            if rules.returncode:
+                raise RuntimeError('could not inspect owned PF rules')
+            count += len(rules.stdout.splitlines())
+    return count
+
+
 def darwin_os_inventory(account, home, add):
     uid = account.pw_uid
     paths = ['/Library/PrivilegedHelperTools/Paperboat',
@@ -177,11 +196,7 @@ def darwin_os_inventory(account, home, add):
     if result.returncode:
         raise RuntimeError('could not inspect guard accounts')
     add('accounts', len(result.stdout.splitlines()))
-    result = run(['/sbin/pfctl', '-a', 'com.apple', '-s', 'Anchors'])
-    if result.returncode:
-        raise RuntimeError('could not inspect PF anchors')
-    add('firewall', sum('paperboat' in line.lower()
-                        for line in result.stdout.splitlines()))
+    add('firewall', darwin_pf_rule_count())
     result = run(['sudo', '-u', account.pw_name, '--', 'security',
                   'find-generic-password', '-s', 'paperboat',
                   str(home / 'Library/Keychains/login.keychain-db')])
