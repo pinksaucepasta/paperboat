@@ -27,11 +27,15 @@ import (
 )
 
 var (
-	ErrInvalid                 = errors.New("invalid machine bootstrap")
-	ErrApprovalPending         = errors.New("machine pairing approval is pending")
-	ErrPairingDenied           = errors.New("machine pairing was denied")
-	ErrPairingExpired          = errors.New("machine pairing expired")
-	ErrInstallationUnavailable = errors.New("machine installation material is unavailable")
+	ErrInvalid                    = errors.New("invalid machine bootstrap")
+	ErrApprovalPending            = errors.New("machine pairing approval is pending")
+	ErrPairingDenied              = errors.New("machine pairing was denied")
+	ErrPairingExpired             = errors.New("machine pairing expired")
+	ErrInstallationUnavailable    = errors.New("machine installation material is unavailable")
+	ErrEnrollmentTokenExpired     = errors.New("enrollment token expired")
+	ErrEnrollmentTokenUsed        = errors.New("enrollment token already used")
+	ErrEnrollmentTokenInvalid     = errors.New("enrollment token revoked or invalid")
+	ErrPairingPlatformUnsupported = errors.New("pairing operating system unsupported")
 )
 
 const (
@@ -407,19 +411,34 @@ func request(ctx context.Context, client *http.Client, method, target string, bo
 			} `json:"error"`
 		}
 		_ = json.Unmarshal(encoded, &envelope)
-		var failure error
+		outcome := ErrInvalid
 		switch envelope.Error.Code {
+		case "enrollment_token_expired":
+			if response.StatusCode == http.StatusGone {
+				outcome = ErrEnrollmentTokenExpired
+			}
+		case "enrollment_token_used":
+			if response.StatusCode == http.StatusConflict {
+				outcome = ErrEnrollmentTokenUsed
+			}
+		case "enrollment_token_invalid":
+			if response.StatusCode == http.StatusBadRequest {
+				outcome = ErrEnrollmentTokenInvalid
+			}
+		case "pairing_platform_unsupported":
+			if response.StatusCode == http.StatusBadRequest {
+				outcome = ErrPairingPlatformUnsupported
+			}
 		case "machine_approval_pending", "user_machine_approval_pending":
-			failure = bootstrapServerError(ErrApprovalPending, response)
+			outcome = ErrApprovalPending
 		case "machine_pairing_denied", "user_machine_pairing_denied":
-			failure = bootstrapServerError(ErrPairingDenied, response)
+			outcome = ErrPairingDenied
 		case "machine_pairing_expired", "user_machine_pairing_expired":
-			failure = bootstrapServerError(ErrPairingExpired, response)
+			outcome = ErrPairingExpired
 		case "machine_installation_unavailable", "user_machine_installation_unavailable":
-			failure = bootstrapServerError(ErrInstallationUnavailable, response)
-		default:
-			failure = bootstrapServerError(ErrInvalid, response)
+			outcome = ErrInstallationUnavailable
 		}
+		failure := bootstrapServerError(outcome, response)
 		closeErr := closeBootstrapResponse(response)
 		if closeErr != nil {
 			failure = bootstrapRequestFailure(joinBootstrapErrors(failure, closeErr))

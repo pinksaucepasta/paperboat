@@ -156,29 +156,7 @@ func resumeOneShotEnrollment(ctx context.Context, input oneShotResumeInput, oper
 		if resume.RequiresEnrollmentTokenForRetry(config.EnrollmentToken) {
 			return bootstrap.Material{}, resume, bootstrap.ErrResumeTokenRequired
 		}
-		// Persist the possible commit before the request. On an ambiguous
-		// CreatePairing error, the next process must poll this verifier first.
-		resume.PairingStarted = true
-		if err := operations.SaveResume(input.StateRoot, resume); err != nil {
-			return bootstrap.Material{}, resume, fmt.Errorf("persist machine pairing state: %w", err)
-		}
-		pairing, pairErr := operations.CreatePairing(ctx, config)
-		if pairErr != nil {
-			return bootstrap.Material{}, resume, pairErr
-		}
-		resume.PairingExpiresAt = pairing.ExpiresAt
-		if err := operations.SaveResume(input.StateRoot, resume); err != nil {
-			return bootstrap.Material{}, resume, fmt.Errorf("persist machine pairing state: %w", err)
-		}
-		if input.TokenFile != "" && input.TokenFileErr == nil {
-			if err := operations.ConsumeTokenFile(input.TokenFile); err != nil {
-				return bootstrap.Material{}, resume, fmt.Errorf("consume enrollment token file: %w", err)
-			}
-		}
-		if input.Status != nil {
-			fmt.Fprintln(input.Status, "Completing one-shot machine enrollment...")
-		}
-		material, err = operations.WaitForMaterial(ctx, config, pairing.ExpiresAt, input.PollInterval)
+		material, resume, err = createOneShotEnrollment(ctx, input, config, resume, operations)
 	}
 	if err != nil {
 		return bootstrap.Material{}, resume, err
@@ -208,6 +186,47 @@ func resumeOneShotEnrollment(ctx context.Context, input oneShotResumeInput, oper
 		}
 	}
 	return material, resume, nil
+}
+
+func createOneShotEnrollment(
+	ctx context.Context, input oneShotResumeInput, config bootstrap.Config,
+	resume bootstrap.ResumeRecord, operations oneShotResumeOperations,
+) (bootstrap.Material, bootstrap.ResumeRecord, error) {
+	previouslyStarted := resume.PairingStarted
+	// Persist the possible commit before the request. On an ambiguous
+	// CreatePairing error, the next process must poll this verifier first.
+	resume.PairingStarted = true
+	if err := operations.SaveResume(input.StateRoot, resume); err != nil {
+		return bootstrap.Material{}, resume, fmt.Errorf("persist machine pairing state: %w", err)
+	}
+	pairing, pairErr := operations.CreatePairing(ctx, config)
+	if pairErr != nil {
+		if !previouslyStarted && bootstrap.OnlyOutcome(pairErr,
+			bootstrap.ErrEnrollmentTokenExpired, bootstrap.ErrEnrollmentTokenUsed,
+			bootstrap.ErrEnrollmentTokenInvalid, bootstrap.ErrPairingPlatformUnsupported) {
+			if clearErr := operations.ClearResume(input.StateRoot); clearErr != nil {
+				return bootstrap.Material{}, resume, runtimeFailure(
+					runtimeFailureMessage(pairErr)+" Paperboat could not remove fresh recovery state. Check its directory permissions and retry the same pairing command.",
+					pairErr, clearErr)
+			}
+			return bootstrap.Material{}, bootstrap.ResumeRecord{}, pairErr
+		}
+		return bootstrap.Material{}, resume, pairErr
+	}
+	resume.PairingExpiresAt = pairing.ExpiresAt
+	if err := operations.SaveResume(input.StateRoot, resume); err != nil {
+		return bootstrap.Material{}, resume, fmt.Errorf("persist machine pairing state: %w", err)
+	}
+	if input.TokenFile != "" && input.TokenFileErr == nil {
+		if err := operations.ConsumeTokenFile(input.TokenFile); err != nil {
+			return bootstrap.Material{}, resume, fmt.Errorf("consume enrollment token file: %w", err)
+		}
+	}
+	if input.Status != nil {
+		fmt.Fprintln(input.Status, "Completing one-shot machine enrollment...")
+	}
+	material, err := operations.WaitForMaterial(ctx, config, pairing.ExpiresAt, input.PollInterval)
+	return material, resume, err
 }
 
 func completeBootstrapCLIResume(ctx context.Context, stateRoot, serverURL string, material bootstrap.Material, resume *bootstrap.ResumeRecord, install func(context.Context, *bootstrap.ClientSession, string) error, save func(string, bootstrap.ResumeRecord) error) error {

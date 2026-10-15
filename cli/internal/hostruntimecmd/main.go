@@ -159,6 +159,14 @@ func runtimeFailureMessage(err error) string {
 		}
 	}
 	switch {
+	case errors.Is(err, bootstrap.ErrEnrollmentTokenExpired):
+		return "The enrollment token expired. Create a new enrollment with Add machine and retry."
+	case errors.Is(err, bootstrap.ErrEnrollmentTokenUsed):
+		return "The enrollment token was already used. Rerun the original pairing command on its machine to resume it, or create a new enrollment with Add machine."
+	case errors.Is(err, bootstrap.ErrEnrollmentTokenInvalid):
+		return "The enrollment token was revoked or invalid. Create a new enrollment with Add machine and retry."
+	case errors.Is(err, bootstrap.ErrPairingPlatformUnsupported):
+		return "This enrollment command does not support this operating system. Create a new enrollment with Add machine and choose its command for this operating system."
 	case errors.Is(err, bootstrap.ErrPairingExpired):
 		return "The machine pairing expired. Create a new enrollment with Add machine and retry."
 	case errors.Is(err, bootstrap.ErrInstallationUnavailable):
