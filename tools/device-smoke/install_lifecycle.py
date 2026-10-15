@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Run bounded installation checks as the enrolled Unix user; emit no identities."""
 import argparse
+import fcntl
+import signal
+import shlex
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import time
@@ -23,19 +27,103 @@ def command(pb, *args, timeout=45, env=None):
         receipt = json.loads(result.stdout)
     except ValueError:
         raise RuntimeError('command did not return a JSON receipt') from None
+    if args == ('doctor', '--json'):
+        if result.returncode or receipt.get('overall') != 'healthy':
+            raise RuntimeError('doctor did not report healthy after daemon recovery')
+        return receipt
     if result.returncode or receipt.get('ok') is not True:
-        raise RuntimeError('command failed; private output withheld')
+        raise RuntimeError(' '.join(args[:2]) + ' failed; code=' +
+                           str(receipt.get('error', {}).get('code', 'unknown')))
     return receipt.get('data', {})
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('check', choices=['reinstall', 'pair-refusal', 'service'])
+    parser.add_argument('check', choices=['reinstall', 'pair-refusal', 'service', 'interrupt-install', 'crash-service', 'shell-install'])
+    parser.add_argument('--shell')
     args = parser.parse_args()
     pb = Path.home() / '.local/bin/pb'
     before = registration()
     started = time.monotonic()
-    if args.check == 'reinstall':
+    if args.check == 'shell-install':
+        if not args.shell or not Path(args.shell).is_absolute():
+            raise RuntimeError('shell must be an absolute installed executable')
+        previous = os.umask(0o077)
+        try:
+            result = subprocess.run([args.shell, '-l', '-c', shlex.quote(str(pb)) +
+                                     ' install --json'], capture_output=True, text=True,
+                                    stdin=subprocess.DEVNULL, timeout=180,
+                                    env=dict(os.environ, SHELL=args.shell,
+                                             PATH='/usr/bin:/bin:/usr/sbin:/sbin'))
+        finally:
+            os.umask(previous)
+        receipt = json.loads(result.stdout)
+        if result.returncode or receipt.get('ok') is not True:
+            raise RuntimeError('install from login shell failed; output withheld')
+    elif args.check == 'crash-service':
+        def service_pid():
+            if os.uname().sysname == 'Linux':
+                query = ['systemctl', '--user', 'show', 'paperboatd.service',
+                         '--property=MainPID', '--value']
+                result = subprocess.run(query, capture_output=True, text=True, timeout=5)
+                return int(result.stdout.strip() or '0')
+            query = ['launchctl', 'print', 'gui/' + str(os.getuid()) +
+                     '/com.pinksaucepasta.paperboatd']
+            result = subprocess.run(query, capture_output=True, text=True, timeout=5)
+            match = re.search(r'^\s*pid = (\d+)$', result.stdout, re.MULTILINE)
+            return int(match.group(1)) if match else 0
+        previous_pid = service_pid()
+        if previous_pid < 2:
+            raise RuntimeError('could not identify the supervised daemon')
+        try:
+            os.kill(previous_pid, signal.SIGKILL)
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                current = service_pid()
+                if current > 1 and current != previous_pid:
+                    try:
+                        command(pb, 'doctor', '--json')
+                        break
+                    except RuntimeError:
+                        # A new OS process is not yet an initialized API.
+                        # Require healthy recovery within the SAME30-second bound.
+                        pass
+                time.sleep(0.2)
+            else:
+                raise RuntimeError('supervisor did not restore the crashed daemon')
+        finally:
+            command(pb, 'service', 'start', '--json')
+    elif args.check == 'interrupt-install':
+        state = Path.home() / ('.local/state/paperboat' if os.uname().sysname == 'Linux'
+                               else 'Library/Application Support/Paperboat/state')
+        lock = state / 'install.lock'
+        process = subprocess.Popen([str(pb), 'install', '--json'], stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
+                                   start_new_session=True)
+        interrupted = False
+        try:
+            deadline = time.monotonic() + 15
+            while process.poll() is None and time.monotonic() < deadline:
+                if lock.exists():
+                    with lock.open('rb') as handle:
+                        try:
+                            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            fcntl.flock(handle, fcntl.LOCK_UN)
+                        except BlockingIOError:
+                            os.killpg(process.pid, signal.SIGINT)
+                            interrupted = True
+                            break
+                time.sleep(0.01)
+            process.communicate(timeout=90)
+            if not interrupted or process.returncode == 0:
+                raise RuntimeError('did not interrupt a running installation transaction')
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate(timeout=10)
+            # Retry the exact same command, without deleting locks or journals.
+            command(pb, 'install', '--json', timeout=180)
+    elif args.check == 'reinstall':
         previous = os.umask(0o077)
         try:
             receipt = command(pb, 'install', '--json', timeout=180,
