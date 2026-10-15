@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+ wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -18,7 +19,7 @@ func TestManagedSSHErrorPreservesPureResponsesAndReportsOperationalFailures(t *t
 		status int
 		code   string
 	}{
-		{"invalid", managedssh.ErrInvalid, 400, "invalid_request"},
+		{"invalid", wire.ErrInvalid, 400, "invalid_request"},
 		{"conflict", managedssh.ErrConflict, 409, "operation_conflict"},
 		{"capacity", managedssh.ErrMachineKeyCapacity, 409, "managed_ssh_key_capacity"},
 		{"unavailable", managedssh.ErrUnavailable, 404, "not_found"},

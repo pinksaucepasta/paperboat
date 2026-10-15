@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 	"io"
 	"net/http"
 	"strconv"
@@ -36,52 +37,6 @@ type machineRequestVerifier interface {
 	VerifyMachineRequest(context.Context, string, []byte, string, string, []byte) (controlplane.MachineRequestClaims, error)
 }
 
-type managedSSHClientKeyDocument struct {
-	Type                  string `json:"type"`
-	Version               int    `json:"version"`
-	Fingerprint           string `json:"fingerprint"`
-	PublicKey             string `json:"public_key"`
-	State                 string `json:"state"`
-	ReconciliationVersion uint64 `json:"reconciliation_version"`
-	CreatedAt             string `json:"created_at"`
-	RevokedAt             string `json:"revoked_at,omitempty"`
-}
-
-type managedSSHTargetDocument struct {
-	Type                  string `json:"type"`
-	Version               int    `json:"version"`
-	MachineID             string `json:"machine_id"`
-	MachineGeneration     uint64 `json:"machine_generation"`
-	OSUser                string `json:"os_user"`
-	Port                  uint16 `json:"port"`
-	ReconciliationVersion uint64 `json:"reconciliation_version"`
-	CreatedAt             string `json:"created_at"`
-	UpdatedAt             string `json:"updated_at"`
-}
-
-type managedSSHHostKeySetDocument struct {
-	Type                  string   `json:"type"`
-	Version               int      `json:"version"`
-	SetID                 string   `json:"set_id"`
-	MachineID             string   `json:"machine_id"`
-	MachineGeneration     uint64   `json:"machine_generation"`
-	ObservationGeneration uint64   `json:"observation_generation"`
-	Fingerprint           string   `json:"fingerprint"`
-	Keys                  []string `json:"keys"`
-	State                 string   `json:"state"`
-	ReconciliationVersion uint64   `json:"reconciliation_version"`
-	ObservedAt            string   `json:"observed_at"`
-	PromotedAt            string   `json:"promoted_at,omitempty"`
-}
-
-type managedSSHAuthorizedKeysDocument struct {
-	Type              string   `json:"type"`
-	Version           int      `json:"version"`
-	MachineID         string   `json:"machine_id"`
-	MachineGeneration uint64   `json:"machine_generation"`
-	Keys              []string `json:"keys"`
-}
-
 func managedSSHClientKeyPut(service managedSSHService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := principalFromContext(r.Context())
@@ -99,8 +54,8 @@ func managedSSHClientKeyPut(service managedSSHService) http.HandlerFunc {
 		if !decodeManagedSSHJSON(w, r, &body) {
 			return
 		}
-		fingerprint, err := managedssh.ClientFingerprint(body.PublicKey)
-		if err != nil || encodeSSHFingerprint(fingerprint) != r.PathValue("fingerprint") {
+		key, err := wire.ParsePublicKey(body.PublicKey, true)
+		if err != nil || encodeSSHFingerprint(key.Fingerprint) != r.PathValue("fingerprint") {
 			writeManagedSSHInvalid(w, r)
 			return
 		}
@@ -248,7 +203,7 @@ func managedSSHAuthorizedKeys(service managedSSHService, identities machineReque
 		for index := range set.Keys {
 			keys[index] = set.Keys[index].PublicKey
 		}
-		writeJSON(w, http.StatusOK, SuccessResponse{Data: managedSSHAuthorizedKeysDocument{Type: "authorized_key_set", Version: 1, MachineID: set.UserMachineID, MachineGeneration: set.MachineGeneration, Keys: keys}})
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: wire.AuthorizedKeysDocument{Type: "authorized_key_set", Version: 1, MachineID: set.UserMachineID, MachineGeneration: set.MachineGeneration, Keys: keys}})
 	}
 }
 
@@ -301,24 +256,24 @@ func managedSSHHostKeysPromote(service managedSSHService) http.HandlerFunc {
 	}
 }
 
-func managedSSHClientKeyResponse(value managedssh.ClientKey) managedSSHClientKeyDocument {
-	result := managedSSHClientKeyDocument{Type: "client_key", Version: 1, Fingerprint: encodeSSHFingerprint(value.Fingerprint), PublicKey: value.PublicKey, State: value.State, ReconciliationVersion: value.ReconciliationVersion, CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339)}
+func managedSSHClientKeyResponse(value managedssh.ClientKey) wire.ClientKeyDocument {
+	result := wire.ClientKeyDocument{Type: "client_key", Version: 1, Fingerprint: encodeSSHFingerprint(value.Fingerprint), PublicKey: value.PublicKey, State: value.State, ReconciliationVersion: value.ReconciliationVersion, CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339)}
 	if !value.RevokedAt.IsZero() {
 		result.RevokedAt = value.RevokedAt.UTC().Format(time.RFC3339)
 	}
 	return result
 }
 
-func managedSSHTargetResponse(value managedssh.MachineTarget) managedSSHTargetDocument {
-	return managedSSHTargetDocument{Type: "machine_target", Version: 1, MachineID: value.UserMachineID, MachineGeneration: value.MachineGeneration, OSUser: value.OSUser, Port: value.TargetPort, ReconciliationVersion: value.ReconciliationVersion, CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339), UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339)}
+func managedSSHTargetResponse(value managedssh.MachineTarget) wire.TargetDocument {
+	return wire.TargetDocument{Type: "machine_target", Version: 1, MachineID: value.UserMachineID, MachineGeneration: value.MachineGeneration, OSUser: value.OSUser, Port: value.TargetPort, ReconciliationVersion: value.ReconciliationVersion, CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339), UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339)}
 }
 
-func managedSSHHostKeySetResponse(value managedssh.HostKeySet) managedSSHHostKeySetDocument {
+func managedSSHHostKeySetResponse(value managedssh.HostKeySet) wire.HostKeySetDocument {
 	keys := make([]string, len(value.Keys))
 	for i := range value.Keys {
 		keys[i] = value.Keys[i].PublicKey
 	}
-	result := managedSSHHostKeySetDocument{Type: "host_key_set", Version: 1, SetID: value.ID, MachineID: value.UserMachineID, MachineGeneration: value.MachineGeneration, ObservationGeneration: value.ObservationGeneration, Fingerprint: encodeSSHFingerprint(value.Fingerprint), Keys: keys, State: value.State, ReconciliationVersion: value.ReconciliationVersion, ObservedAt: value.ObservedAt.UTC().Format(time.RFC3339)}
+	result := wire.HostKeySetDocument{Type: "host_key_set", Version: 1, SetID: value.ID, MachineID: value.UserMachineID, MachineGeneration: value.MachineGeneration, ObservationGeneration: value.ObservationGeneration, Fingerprint: encodeSSHFingerprint(value.Fingerprint), Keys: keys, State: value.State, ReconciliationVersion: value.ReconciliationVersion, ObservedAt: value.ObservedAt.UTC().Format(time.RFC3339)}
 	if !value.PromotedAt.IsZero() {
 		result.PromotedAt = value.PromotedAt.UTC().Format(time.RFC3339)
 	}
@@ -390,7 +345,7 @@ func managedSSHError(w http.ResponseWriter, r *http.Request, err error) bool {
 	}
 	status, code := http.StatusBadRequest, "invalid_request"
 	switch {
-	case expectedHTTPErrorOnly(err, managedssh.ErrInvalid):
+	case expectedHTTPErrorOnly(err, wire.ErrInvalid):
 	case expectedHTTPErrorOnly(err, managedssh.ErrConflict):
 		status, code = http.StatusConflict, "operation_conflict"
 	case expectedHTTPErrorOnly(err, managedssh.ErrMachineKeyCapacity):

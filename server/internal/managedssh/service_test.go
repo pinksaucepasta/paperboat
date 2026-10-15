@@ -7,6 +7,7 @@ import (
 	"crypto/rsa"
 	"errors"
 	"github.com/google/uuid"
+	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 	"io"
 	"strings"
 	"testing"
@@ -73,10 +74,10 @@ func TestServiceCanonicalizesManagedClientEd25519Key(t *testing.T) {
 	if result.Algorithm != ssh.KeyAlgoED25519 || result.PublicKey == line || strings.Contains(result.PublicKey, "comment") || result.Fingerprint == [32]byte{} || result.State != "active" || result.ReconciliationVersion != 1 || result.CreatedAt != now {
 		t.Fatalf("key=%+v", result)
 	}
-	if _, err := service.RegisterClient(context.Background(), RegisterClientRequest{OperationID: "operation_managed_ssh_01", UserID: "user_01", CLIClientSessionID: "client_01", PublicKey: publicLine(t, "rsa"), Now: now}); !errors.Is(err, ErrInvalid) {
+	if _, err := service.RegisterClient(context.Background(), RegisterClientRequest{OperationID: "operation_managed_ssh_01", UserID: "user_01", CLIClientSessionID: "client_01", PublicKey: publicLine(t, "rsa"), Now: now}); !errors.Is(err, wire.ErrInvalid) {
 		t.Fatalf("RSA client key error=%v", err)
 	}
-	if _, err := service.RegisterClient(context.Background(), RegisterClientRequest{OperationID: "operation_managed_ssh_01", UserID: "user_01", CLIClientSessionID: "client_01", PublicKey: "command=\"id\" " + publicLine(t, "ed25519"), Now: now}); !errors.Is(err, ErrInvalid) {
+	if _, err := service.RegisterClient(context.Background(), RegisterClientRequest{OperationID: "operation_managed_ssh_01", UserID: "user_01", CLIClientSessionID: "client_01", PublicKey: "command=\"id\" " + publicLine(t, "ed25519"), Now: now}); !errors.Is(err, wire.ErrInvalid) {
 		t.Fatalf("authorized_keys option error=%v", err)
 	}
 }
@@ -106,7 +107,7 @@ func TestServiceHostSetFingerprintIsOrderIndependentAndRejectsDuplicates(t *test
 		t.Fatalf("left=%+v right=%+v", left, right)
 	}
 	request.PublicKeys = []string{first, first}
-	if _, err := service.ObserveHost(context.Background(), request); !errors.Is(err, ErrInvalid) {
+	if _, err := service.ObserveHost(context.Background(), request); !errors.Is(err, wire.ErrInvalid) {
 		t.Fatalf("duplicate error=%v", err)
 	}
 }
@@ -115,10 +116,10 @@ func TestServiceValidatesRevocationAndPromotion(t *testing.T) {
 	repository := &fakeRepository{}
 	service, _ := NewService(repository)
 	now := time.Now().UTC()
-	if _, err := service.RevokeClient(context.Background(), RevokeClientRequest{OperationID: "operation_managed_ssh_01", ActorUserID: "user_01", Fingerprint: [32]byte{1}, Reason: "unknown", Now: now}); !errors.Is(err, ErrInvalid) {
+	if _, err := service.RevokeClient(context.Background(), RevokeClientRequest{OperationID: "operation_managed_ssh_01", ActorUserID: "user_01", Fingerprint: [32]byte{1}, Reason: "unknown", Now: now}); !errors.Is(err, wire.ErrInvalid) {
 		t.Fatalf("revocation error=%v", err)
 	}
-	if _, err := service.PromoteHost(context.Background(), PromoteHostRequest{OperationID: "operation_managed_ssh_01", ActorUserID: "user_01", UserMachineID: "machine_01", MachineGeneration: 1, SetID: "keyset_01234567-89ab-4cde-8fab-0123456789ab", Now: now}); !errors.Is(err, ErrInvalid) {
+	if _, err := service.PromoteHost(context.Background(), PromoteHostRequest{OperationID: "operation_managed_ssh_01", ActorUserID: "user_01", UserMachineID: "machine_01", MachineGeneration: 1, SetID: "keyset_01234567-89ab-4cde-8fab-0123456789ab", Now: now}); !errors.Is(err, wire.ErrInvalid) {
 		t.Fatalf("promotion error=%v", err)
 	}
 
@@ -133,11 +134,11 @@ func TestServiceValidatesMachineTarget(t *testing.T) {
 		t.Fatalf("target=%+v error=%v", target, err)
 	}
 	for _, user := range []string{"", "-root", "bad user", "user@host", "bad\nuser"} {
-		if _, err := service.RegisterTarget(context.Background(), RegisterTargetRequest{OperationID: "operation_managed_ssh_01", ActorUserID: "user_01", UserMachineID: "machine_01", MachineGeneration: 2, OSUser: user, TargetPort: 22, Now: now}); !errors.Is(err, ErrInvalid) {
+		if _, err := service.RegisterTarget(context.Background(), RegisterTargetRequest{OperationID: "operation_managed_ssh_01", ActorUserID: "user_01", UserMachineID: "machine_01", MachineGeneration: 2, OSUser: user, TargetPort: 22, Now: now}); !errors.Is(err, wire.ErrInvalid) {
 			t.Fatalf("OS user %q error=%v", user, err)
 		}
 	}
-	if _, err := service.UpdateTargetPort(context.Background(), UpdateTargetPortRequest{OperationID: "operation_managed_ssh_01", ActorUserID: "user_01", UserMachineID: "machine_01", MachineGeneration: 2, TargetPort: 22, Now: now}); !errors.Is(err, ErrInvalid) {
+	if _, err := service.UpdateTargetPort(context.Background(), UpdateTargetPortRequest{OperationID: "operation_managed_ssh_01", ActorUserID: "user_01", UserMachineID: "machine_01", MachineGeneration: 2, TargetPort: 22, Now: now}); !errors.Is(err, wire.ErrInvalid) {
 		t.Fatalf("missing reconciliation version error=%v", err)
 	}
 }

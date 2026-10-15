@@ -5,22 +5,17 @@ package managedssh
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/binary"
 	"errors"
 	"github.com/google/uuid"
+	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 	"io"
 	"math"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
-
-	"golang.org/x/crypto/ssh"
 )
 
 var (
-	ErrInvalid            = errors.New("managed SSH request is invalid")
 	ErrConflict           = errors.New("managed SSH key conflicts with current authority")
 	ErrUnavailable        = errors.New("managed SSH authority is unavailable")
 	ErrMachineKeyCapacity = errors.New("machine exceeds the managed SSH client-key limit")
@@ -103,12 +98,6 @@ type GetTargetRequest struct {
 	MachineGeneration uint64
 }
 
-type HostKey struct {
-	Fingerprint [32]byte
-	Algorithm   string
-	PublicKey   string
-}
-
 type HostKeySet struct {
 	ID                    string
 	UserMachineID         string
@@ -117,7 +106,7 @@ type HostKeySet struct {
 	Fingerprint           [32]byte
 	State                 string
 	ReconciliationVersion uint64
-	Keys                  []HostKey
+	Keys                  []wire.PublicKey
 	ObservedAt            time.Time
 	PromotedAt            time.Time
 }
@@ -163,7 +152,7 @@ type Repository interface {
 
 func (s *Service) RegisterTarget(ctx context.Context, request RegisterTargetRequest) (MachineTarget, error) {
 	if s == nil || s.repository == nil || ctx == nil || !validOperationID(request.OperationID) || !bounded(request.ActorUserID) || !bounded(request.UserMachineID) || request.MachineGeneration == 0 || request.MachineGeneration > math.MaxInt64 || !validOSUser(request.OSUser) || request.TargetPort == 0 || request.Now.IsZero() {
-		return MachineTarget{}, ErrInvalid
+		return MachineTarget{}, wire.ErrInvalid
 	}
 	request.Now = request.Now.UTC()
 	return s.repository.RegisterTarget(ctx, request)
@@ -171,7 +160,7 @@ func (s *Service) RegisterTarget(ctx context.Context, request RegisterTargetRequ
 
 func (s *Service) UpdateTargetPort(ctx context.Context, request UpdateTargetPortRequest) (MachineTarget, error) {
 	if s == nil || s.repository == nil || ctx == nil || !validOperationID(request.OperationID) || !bounded(request.ActorUserID) || !bounded(request.UserMachineID) || request.MachineGeneration == 0 || request.MachineGeneration > math.MaxInt64 || request.TargetPort == 0 || request.ExpectedReconciliationVersion == 0 || request.ExpectedReconciliationVersion > math.MaxInt64 || request.Now.IsZero() {
-		return MachineTarget{}, ErrInvalid
+		return MachineTarget{}, wire.ErrInvalid
 	}
 	request.Now = request.Now.UTC()
 	return s.repository.UpdateTargetPort(ctx, request)
@@ -179,7 +168,7 @@ func (s *Service) UpdateTargetPort(ctx context.Context, request UpdateTargetPort
 
 func (s *Service) GetTarget(ctx context.Context, request GetTargetRequest) (MachineTarget, error) {
 	if s == nil || s.repository == nil || ctx == nil || !bounded(request.ActorUserID) || !bounded(request.UserMachineID) || request.MachineGeneration == 0 || request.MachineGeneration > math.MaxInt64 {
-		return MachineTarget{}, ErrInvalid
+		return MachineTarget{}, wire.ErrInvalid
 	}
 	return s.repository.GetTarget(ctx, request)
 }
@@ -191,27 +180,29 @@ type Service struct {
 
 func NewService(repository Repository) (*Service, error) {
 	if repository == nil {
-		return nil, ErrInvalid
+		return nil, wire.ErrInvalid
 	}
 	return &Service{repository: repository, random: rand.Reader}, nil
 }
 
 func (s *Service) RegisterClient(ctx context.Context, request RegisterClientRequest) (ClientKey, error) {
 	if s == nil || s.repository == nil || ctx == nil || !validOperationID(request.OperationID) || !bounded(request.UserID) || !bounded(request.CLIClientSessionID) || request.Now.IsZero() {
-		return ClientKey{}, ErrInvalid
+		return ClientKey{}, wire.ErrInvalid
 	}
-	key, err := parsePublicKey(request.PublicKey, true)
+	key, err := wire.ParsePublicKey(request.PublicKey, true)
 	if err != nil {
 		return ClientKey{}, err
 	}
-	key.UserID, key.CLIClientSessionID, key.State = request.UserID, request.CLIClientSessionID, "active"
-	key.ReconciliationVersion, key.CreatedAt = 1, request.Now.UTC()
-	return s.repository.RegisterClient(ctx, request, key)
+	return s.repository.RegisterClient(ctx, request, ClientKey{
+		Fingerprint: key.Fingerprint, Algorithm: key.Algorithm, PublicKey: key.PublicKey,
+		UserID: request.UserID, CLIClientSessionID: request.CLIClientSessionID,
+		State: "active", ReconciliationVersion: 1, CreatedAt: request.Now.UTC(),
+	})
 }
 
 func (s *Service) RevokeClient(ctx context.Context, request RevokeClientRequest) (ClientKey, error) {
 	if s == nil || s.repository == nil || ctx == nil || !validOperationID(request.OperationID) || !bounded(request.ActorUserID) || request.Fingerprint == [32]byte{} || !validClientRevocation(request.Reason) || request.Now.IsZero() {
-		return ClientKey{}, ErrInvalid
+		return ClientKey{}, wire.ErrInvalid
 	}
 	request.Now = request.Now.UTC()
 	return s.repository.RevokeClient(ctx, request)
@@ -219,37 +210,30 @@ func (s *Service) RevokeClient(ctx context.Context, request RevokeClientRequest)
 
 func (s *Service) ListClientKeys(ctx context.Context, request ListClientKeysRequest) (ClientKeySet, error) {
 	if s == nil || s.repository == nil || ctx == nil || !bounded(request.ActorUserID) || !bounded(request.UserMachineID) || request.MachineGeneration == 0 || request.MachineGeneration > math.MaxInt64 {
-		return ClientKeySet{}, ErrInvalid
+		return ClientKeySet{}, wire.ErrInvalid
 	}
 	return s.repository.ListClientKeys(ctx, request)
 }
 
 func (s *Service) ObserveHost(ctx context.Context, request ObserveHostRequest) (HostKeySet, error) {
-	if s == nil || s.repository == nil || ctx == nil || !validOperationID(request.OperationID) || !bounded(request.UserID) || !bounded(request.UserMachineID) || request.MachineGeneration == 0 || request.MachineGeneration > math.MaxInt64 || request.ObservationGeneration == 0 || request.ObservationGeneration > math.MaxInt64 || len(request.PublicKeys) == 0 || len(request.PublicKeys) > 8 || request.Now.IsZero() {
-		return HostKeySet{}, ErrInvalid
+	if s == nil || s.repository == nil || ctx == nil || !validOperationID(request.OperationID) || !bounded(request.UserID) || !bounded(request.UserMachineID) || request.MachineGeneration == 0 || request.MachineGeneration > math.MaxInt64 || request.ObservationGeneration == 0 || request.ObservationGeneration > math.MaxInt64 || request.Now.IsZero() {
+		return HostKeySet{}, wire.ErrInvalid
 	}
-	keys := make([]HostKey, 0, len(request.PublicKeys))
-	seen := make(map[[32]byte]bool, len(request.PublicKeys))
-	for _, raw := range request.PublicKeys {
-		key, err := parsePublicKey(raw, false)
-		if err != nil || seen[key.Fingerprint] {
-			return HostKeySet{}, ErrInvalid
-		}
-		seen[key.Fingerprint] = true
-		keys = append(keys, HostKey{Fingerprint: key.Fingerprint, Algorithm: key.Algorithm, PublicKey: key.PublicKey})
+	inventory, err := wire.ParseHostPublicKeys(request.PublicKeys)
+	if err != nil {
+		return HostKeySet{}, err
 	}
-	slices.SortFunc(keys, func(a, b HostKey) int { return strings.Compare(string(a.Fingerprint[:]), string(b.Fingerprint[:])) })
 	id, err := uuid.NewRandomFromReader(s.random)
 	if err != nil {
 		return HostKeySet{}, err
 	}
-	set := HostKeySet{ID: "keyset_" + id.String(), UserMachineID: request.UserMachineID, MachineGeneration: request.MachineGeneration, ObservationGeneration: request.ObservationGeneration, Fingerprint: fingerprintSet(keys), ReconciliationVersion: 1, Keys: keys, ObservedAt: request.Now.UTC()}
+	set := HostKeySet{ID: "keyset_" + id.String(), UserMachineID: request.UserMachineID, MachineGeneration: request.MachineGeneration, ObservationGeneration: request.ObservationGeneration, Fingerprint: inventory.Fingerprint, ReconciliationVersion: 1, Keys: inventory.Keys, ObservedAt: request.Now.UTC()}
 	return s.repository.ObserveHost(ctx, request, set)
 }
 
 func (s *Service) PromoteHost(ctx context.Context, request PromoteHostRequest) (HostKeySet, error) {
 	if s == nil || s.repository == nil || ctx == nil || !validOperationID(request.OperationID) || !bounded(request.ActorUserID) || !bounded(request.UserMachineID) || request.MachineGeneration == 0 || request.MachineGeneration > math.MaxInt64 || !validHostKeySetID(request.SetID) || request.ExpectedFingerprint == [32]byte{} || request.Now.IsZero() {
-		return HostKeySet{}, ErrInvalid
+		return HostKeySet{}, wire.ErrInvalid
 	}
 	request.Now = request.Now.UTC()
 	return s.repository.PromoteHost(ctx, request)
@@ -257,14 +241,14 @@ func (s *Service) PromoteHost(ctx context.Context, request PromoteHostRequest) (
 
 func (s *Service) GetActiveHost(ctx context.Context, request GetHostKeySetRequest) (HostKeySet, error) {
 	if s == nil || s.repository == nil || ctx == nil || !bounded(request.ActorUserID) || !bounded(request.UserMachineID) || request.MachineGeneration == 0 || request.MachineGeneration > math.MaxInt64 {
-		return HostKeySet{}, ErrInvalid
+		return HostKeySet{}, wire.ErrInvalid
 	}
 	return s.repository.GetActiveHost(ctx, request)
 }
 
 func (s *Service) GetPendingHost(ctx context.Context, request GetHostKeySetRequest) (HostKeySet, error) {
 	if s == nil || s.repository == nil || ctx == nil || !bounded(request.ActorUserID) || !bounded(request.UserMachineID) || request.MachineGeneration == 0 || request.MachineGeneration > math.MaxInt64 {
-		return HostKeySet{}, ErrInvalid
+		return HostKeySet{}, wire.ErrInvalid
 	}
 	return s.repository.GetPendingHost(ctx, request)
 }
@@ -283,52 +267,6 @@ func validOperationID(value string) bool {
 		}
 	}
 	return true
-}
-
-func parsePublicKey(raw string, client bool) (ClientKey, error) {
-	if len(raw) < 32 || len(raw) > 8192 || strings.ContainsAny(raw, "\r\x00") {
-		return ClientKey{}, ErrInvalid
-	}
-	public, comment, options, rest, err := ssh.ParseAuthorizedKey([]byte(raw))
-	if err != nil || len(options) != 0 || len(strings.TrimSpace(string(rest))) != 0 || strings.ContainsAny(comment, "\r\n\x00") {
-		return ClientKey{}, ErrInvalid
-	}
-	algorithm := public.Type()
-	if client && algorithm != ssh.KeyAlgoED25519 || !client && !validHostAlgorithm(algorithm) {
-		return ClientKey{}, ErrInvalid
-	}
-	canonical := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(public)))
-	return ClientKey{Fingerprint: sha256.Sum256(public.Marshal()), Algorithm: algorithm, PublicKey: canonical}, nil
-}
-
-// ClientFingerprint validates a managed SSH client key and returns the
-// canonical resource fingerprint used by the HTTP contract.
-func ClientFingerprint(raw string) ([32]byte, error) {
-	key, err := parsePublicKey(raw, true)
-	return key.Fingerprint, err
-}
-
-func fingerprintSet(keys []HostKey) [32]byte {
-	hash := sha256.New()
-	_, _ = hash.Write([]byte("paperboat-ssh-host-key-set-v1"))
-	for _, key := range keys {
-		var length [2]byte
-		binary.BigEndian.PutUint16(length[:], uint16(len(key.PublicKey)))
-		_, _ = hash.Write(length[:])
-		_, _ = hash.Write([]byte(key.PublicKey))
-	}
-	var result [32]byte
-	copy(result[:], hash.Sum(nil))
-	return result
-}
-
-func validHostAlgorithm(value string) bool {
-	switch value {
-	case ssh.KeyAlgoED25519, ssh.KeyAlgoECDSA256, ssh.KeyAlgoECDSA384, ssh.KeyAlgoECDSA521, ssh.KeyAlgoRSA:
-		return true
-	default:
-		return false
-	}
 }
 
 func validClientRevocation(value string) bool {

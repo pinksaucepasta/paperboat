@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 	"math"
 	"reflect"
 	"time"
@@ -28,7 +29,7 @@ type SQLRepository struct {
 
 func NewSQLRepository(store *db.DB, writer *audit.Writer) (*SQLRepository, error) {
 	if store == nil || writer == nil {
-		return nil, ErrInvalid
+		return nil, wire.ErrInvalid
 	}
 	return &SQLRepository{store: store, audit: writer}, nil
 }
@@ -581,13 +582,13 @@ func loadHostKeySet(ctx context.Context, q *dbsqlc.Queries, row dbsqlc.MachineSs
 	if err != nil {
 		return HostKeySet{}, err
 	}
-	result.Keys = make([]HostKey, 0, len(members))
+	result.Keys = make([]wire.PublicKey, 0, len(members))
 	for _, member := range members {
 		fingerprint, err := fingerprintFromBytes(member.Fingerprint)
 		if err != nil {
 			return HostKeySet{}, err
 		}
-		result.Keys = append(result.Keys, HostKey{Fingerprint: fingerprint, Algorithm: member.Algorithm, PublicKey: member.PublicKey})
+		result.Keys = append(result.Keys, wire.PublicKey{Fingerprint: fingerprint, Algorithm: member.Algorithm, PublicKey: member.PublicKey})
 	}
 	return result, nil
 }
@@ -693,7 +694,7 @@ func managedOperationReplay(ctx context.Context, q *dbsqlc.Queries, operationID,
 
 func createManagedOperation(ctx context.Context, q *dbsqlc.Queries, operationID, userID, kind string, requestHash [sha256.Size]byte, resourceID string, revision uint64, now time.Time) error {
 	if revision == 0 || revision > math.MaxInt64 {
-		return ErrInvalid
+		return wire.ErrInvalid
 	}
 	_, err := q.CreateManagedSSHOperation(ctx, dbsqlc.CreateManagedSSHOperationParams{
 		OperationID: operationID, UserID: userID, OperationKind: kind, RequestHash: requestHash[:],
