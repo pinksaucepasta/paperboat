@@ -1,8 +1,9 @@
 name: TUF metadata refresh
 
-# Manual only until adjusted to the monorepo layout (PLAN.md P0).
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '17 */6 * * *'
 
 concurrency:
   group: paperboat-release-${{ github.repository }}
@@ -120,11 +121,10 @@ jobs:
           live_bundle="$RUNNER_TEMP/paperboat-live-release.tgz"
           staged="$RUNNER_TEMP/paperboat-tuf-refresh"
           ssh -i "$HOME/.ssh/paperboat-release" -o BatchMode=yes -o StrictHostKeyChecking=yes "root@$RELEASE_HOST" \
-            'tar -C /opt/paperboat/releases/current -czf - install windows tuf' > "$live_bundle"
+            'tar -C /opt/paperboat/releases/current -czf - install tuf' > "$live_bundle"
           mkdir -p "$staged"
           tar -C "$staged" -xzf "$live_bundle"
           test -f "$staged/install"
-          test -f "$staged/windows"
           test -d "$staged/tuf/metadata"
           test -d "$staged/tuf/targets"
           test -z "$(find "$staged/tuf/targets" -mindepth 1 -print -quit)"
@@ -153,7 +153,7 @@ jobs:
           value = json.loads(pathlib.Path(sys.argv[1]).read_text())
           targets = value.get('signed', {}).get('targets', {})
           versions = {target.get('custom', {}).get('version') for target in targets.values()}
-          if len(targets) != 5 or len(versions) != 1:
+          if len(targets) != 3 or len(versions) != 1:
               raise SystemExit('live TUF targets have an invalid release identity')
           version = versions.pop()
           if not isinstance(version, str) or not re.fullmatch(r'20[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.(0|[1-9][0-9]*)', version):
@@ -162,7 +162,7 @@ jobs:
           PY
           )
           bundle="$RUNNER_TEMP/paperboat-tuf-refresh-$release_version.tgz"
-          tar -C "$staged" -czf "$bundle" install windows tuf
+          tar -C "$staged" -czf "$bundle" install tuf
           digest=$(sha256sum "$bundle" | awk '{print $1}')
           {
             printf 'PAPERBOAT_REFRESH_VERSION=%s\n' "$release_version"

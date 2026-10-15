@@ -73,6 +73,32 @@ class TUFWorkflowSignerTest(unittest.TestCase):
                 metadata = runner / "tuf-candidate/metadata/root.json"
                 self.assertEqual(metadata.is_file(), status == 42)
 
+    def test_launch_candidate_accepts_three_binaries_and_rejects_incomplete_or_extra_products(self):
+        publication = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
+        step = next(s for s in publication["jobs"]["release-publication"]["steps"]
+                    if s.get("name", "").startswith("Validate the exact"))
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            artifacts = directory / "candidate-artifacts"
+            artifacts.mkdir()
+            products = ["pb-linux-amd64", "pb-linux-arm64", "pb-darwin-arm64"]
+            for name in products:
+                (artifacts / name).write_bytes(b"qualified product bytes")
+            environment = dict(os.environ, RUNNER_TEMP=str(directory))
+            def validate():
+                return subprocess.run(["bash", "-c", step["run"]], env=environment,
+                                      capture_output=True, timeout=10).returncode
+            self.assertEqual(validate(), 0, "launch binaries cannot reach signing")
+            (artifacts / products[0]).unlink()
+            self.assertNotEqual(validate(), 0, "missing launch product accepted")
+            (artifacts / products[0]).write_bytes(b"qualified product bytes")
+            extra = artifacts / "pb-windows-amd64.exe"
+            extra.write_bytes(b"post-launch product")
+            self.assertNotEqual(validate(), 0, "unqualified extra product accepted")
+            extra.unlink()
+            (artifacts / products[1]).write_bytes(b"")
+            self.assertNotEqual(validate(), 0, "empty product accepted")
+
     def test_publication_and_refresh_authorize_the_configured_online_secret(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
