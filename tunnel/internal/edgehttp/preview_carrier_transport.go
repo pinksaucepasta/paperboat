@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	yamux "github.com/libp2p/go-yamux/v5"
-	runtimeadmission "github.com/pinksaucepasta/paperboat-relay/admission"
+	runtimeadmission "github.com/pinksaucepasta/paperboat/shared/admission"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"io"
 	"net"

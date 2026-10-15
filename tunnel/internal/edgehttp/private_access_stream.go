@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	yamux "github.com/libp2p/go-yamux/v5"
-	runtimeadmission "github.com/pinksaucepasta/paperboat-relay/admission"
+	runtimeadmission "github.com/pinksaucepasta/paperboat/shared/admission"
 	"io"
 	"net"
 	"net/http"

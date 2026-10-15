@@ -3,7 +3,7 @@ package edgehttp
 import (
 	"context"
 	"errors"
-	runtimeadmission "github.com/pinksaucepasta/paperboat-relay/admission"
+	runtimeadmission "github.com/pinksaucepasta/paperboat/shared/admission"
 	"net/http"
 	"net/url"
 	"strings"

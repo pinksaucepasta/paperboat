@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-relay/admission"
+	"github.com/pinksaucepasta/paperboat/shared/admission"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"golang.org/x/time/rate"
 )
