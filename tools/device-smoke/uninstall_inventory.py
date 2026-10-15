@@ -92,6 +92,15 @@ def owned_dns_configuration(linux):
     return count
 
 
+def systemd_service_count(command):
+    # A filtered list exits1 when no units match; enumerate successfully, then count.
+    result = run([*command, 'list-unit-files', '--no-pager', '--no-legend'])
+    if result.returncode:
+        raise RuntimeError('could not inspect installed service declarations')
+    return sum(line.split()[0].startswith('paperboat')
+               for line in result.stdout.splitlines() if line.strip())
+
+
 def linux_os_inventory(account, home, add):
     uid = account.pw_uid
     paths = ['/usr/local/libexec/paperboat', '/var/lib/paperboat',
@@ -110,11 +119,7 @@ def linux_os_inventory(account, home, add):
     for scope in ([], ['--user']):
         prefix = (['sudo', '-u', account.pw_name, '--', 'env',
                    'XDG_RUNTIME_DIR=/run/user/' + str(uid)] if scope else [])
-        result = run(prefix + ['systemctl', *scope, 'list-unit-files',
-                     '--no-pager', '--no-legend', 'paperboat*'])
-        if result.returncode:
-            raise RuntimeError('could not inspect installed service declarations')
-        add('services', len(result.stdout.splitlines()))
+        add('services', systemd_service_count(prefix + ['systemctl', *scope]))
     certificates = ssl.create_default_context().get_ca_certs()
     add('ca_trust', sum(any(value.startswith('Paperboat Local Root CA')
                            for group in cert.get('subject', ())
