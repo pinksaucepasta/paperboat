@@ -170,9 +170,7 @@ var currentLocalDaemonPaths = localdaemon.CurrentUserPaths
 // Go test executable must never be registered as a detached daemon service.
 var installLocalDaemonService localDaemonServiceInstaller = localdaemon.InstallCurrentUserService
 
-// removeLocalDaemonService is the matching ownership boundary used when setup
-// changes the machine identity that the daemon must present. Rebinding stops
-// the exact owner process before installing the replacement service.
+// removeLocalDaemonService removes the current owner daemon during a fresh reset.
 var removeLocalDaemonService localDaemonServiceRemover = localdaemon.RemoveCurrentUserService
 
 var verifySetupInstallSource = hostruntimecmd.VerifyInstallSource
@@ -1914,28 +1912,6 @@ func requireLocalDaemonService(ctx context.Context, cfg *config.Config) error {
 	return err
 }
 
-// rebindLocalDaemonService restarts the owner daemon only after setup has
-// committed the new machine registration. This prevents a still-running
-// daemon from retaining a previous machine or server identity.
-func rebindLocalDaemonService(ctx context.Context, cfg *config.Config) error {
-	matches, err := localDaemonRegistrationMatches(cfg)
-	if err != nil {
-		return err
-	}
-	if !matches {
-		return errors.New("Client machine registration is unavailable for the active Paperboat server")
-	}
-	executable, _, _, err := localDaemonLaunchValues(cfg)
-	if err != nil {
-		return err
-	}
-	if err := removeLocalDaemonService(ctx, executable); err != nil {
-		return fmt.Errorf("stop previous local daemon: %w", err)
-	}
-	_, _, err = startLocalDaemonAndWait(ctx, cfg, installLocalDaemonService)
-	return err
-}
-
 func localDaemonSnapshot(command *cobra.Command, install localDaemonServiceInstaller) (*localapi.Client, localapi.Snapshot, error) {
 	if command == nil || install == nil {
 		return nil, localapi.Snapshot{}, errors.New("invalid local daemon client configuration")
@@ -2335,31 +2311,7 @@ func setupCommand() *cobra.Command {
 			if code := hostruntimecmd.Execute(command.Context(), arguments, command.InOrStdin(), operationOut, operationErr); code != 0 {
 				return setupFailure(exitCodeError{code: code})
 			}
-			if err := rebindLocalDaemonService(command.Context(), d.cfg); err != nil {
-				return setupFailure(fmt.Errorf("start machine local daemon: %w", err))
-			}
-			machine, err = doctorUserMachine(command.Context(), client, machine.ID)
-			if err != nil {
-				return setupFailure(fmt.Errorf("verify machine readiness: %w", err))
-			}
-			registration, err = identityStore.Registration()
-			if err != nil {
-				return setupFailure(fmt.Errorf("read completed machine registration: %w", err))
-			}
-			registration.InstallationGeneration, registration.UpdatedAt = machine.InstallationGeneration, time.Now().UTC()
-			if err := identityStore.SaveRegistration(registration); err != nil {
-				return setupFailure(fmt.Errorf("save machine registration: %w", err))
-			}
-
-			if err := exportSetupRecoveryKey(command); err != nil {
-				return setupFailure(err)
-			}
-			if jsonOutput {
-				recoveryOutput, _ := command.Flags().GetString("recovery-output")
-				return writeCLIJSON(command.OutOrStdout(), map[string]any{"machine": machine, "inbox_path": inboxPath, "recovery_output": strings.TrimSpace(recoveryOutput)})
-			}
-			fmt.Fprintf(command.OutOrStdout(), "Set up %s (%s)\n", machine.Alias, machine.ID)
-			return nil
+			return finishMachineSetup(command, client, identityStore, machine.ID, inboxPath, jsonOutput)
 		},
 		SilenceUsage: true, SilenceErrors: true,
 	}

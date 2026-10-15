@@ -24,7 +24,6 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -33,70 +32,7 @@ import (
 	"time"
 )
 
-func TestRebindLocalDaemonStopsStartsAndWaitsForReadySnapshot(t *testing.T) {
-	cfg, configPath := localDaemonReadinessTestConfig(t, true)
-	paths, err := currentLocalDaemonPaths()
-	if err != nil {
-		t.Fatal(err)
-	}
-	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
-	snapshot := localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now, DaemonState: "ready", DaemonVersion: "dev", Machines: []localapi.MachineStatus{}}
-	store, err := localapi.NewSnapshotStore(&snapshot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	serverConfig, err := commandLocalAPIServerConfig(paths.SocketPath, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	localServer, err := localapi.NewServer(serverConfig)
-	if err != nil {
-		t.Fatal(err)
-	}
-	serverCtx, cancelServer := context.WithCancel(context.Background())
-	defer cancelServer()
-	done := make(chan error, 1)
-
-	previousInstall, previousRemove := installLocalDaemonService, removeLocalDaemonService
-	var lifecycle []string
-	removeLocalDaemonService = func(_ context.Context, executable string) error {
-		if !strings.HasSuffix(strings.ToLower(executable), ".test") && !strings.HasSuffix(strings.ToLower(executable), ".test.exe") {
-			t.Fatalf("expected test executable, got %q", executable)
-		}
-		lifecycle = append(lifecycle, "stop")
-		return nil
-	}
-	installLocalDaemonService = func(_ context.Context, _ string, gotConfigPath, server string) error {
-		if gotConfigPath != configPath || server != "https://api.paperboat.test" {
-			t.Fatalf("config=%q server=%q", gotConfigPath, server)
-		}
-		lifecycle = append(lifecycle, "start")
-		go func() { done <- localServer.Run(serverCtx) }()
-		return nil
-	}
-	t.Cleanup(func() {
-		installLocalDaemonService, removeLocalDaemonService = previousInstall, previousRemove
-	})
-
-	if err := rebindLocalDaemonService(context.Background(), cfg); err != nil {
-		t.Fatalf("rebind error=%v", err)
-	}
-	if !slices.Equal(lifecycle, []string{"stop", "start"}) {
-		t.Fatalf("daemon lifecycle=%v", lifecycle)
-	}
-	if err := ensureLocalDaemonService(context.Background(), cfg); err != nil {
-		t.Fatalf("ready daemon check=%v", err)
-	}
-	if !slices.Equal(lifecycle, []string{"stop", "start"}) {
-		t.Fatalf("ready daemon was reinstalled: %v", lifecycle)
-	}
-	cancelServer()
-	if err := <-done; !errors.Is(err, context.Canceled) {
-		t.Fatalf("server err=%v", err)
-	}
-}
-
-func TestMachineSetupAndPeerCommandsWireBoundedLocalDaemonReadiness(t *testing.T) {
+func TestPeerCommandsWireBoundedLocalDaemonReadiness(t *testing.T) {
 	_, testFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("resolve test source path")
@@ -108,7 +44,6 @@ func TestMachineSetupAndPeerCommandsWireBoundedLocalDaemonReadiness(t *testing.T
 		t.Fatal(err)
 	}
 	want := map[string]string{
-		"setupCommand":     "rebindLocalDaemonService",
 		"sendCommand":      "requireLocalDaemonService",
 		"actionPing":       "requireLocalDaemonService",
 		"actionRemoteExec": "requireLocalDaemonService",
