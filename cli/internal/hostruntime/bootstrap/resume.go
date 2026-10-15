@@ -398,7 +398,7 @@ func validateResumeRecord(record ResumeRecord, loaded bool) error {
 		if !record.PairingStarted {
 			return fmt.Errorf("%w: material exists before pairing started", ErrResumeBinding)
 		}
-		if err := validateMaterialFreshness(*record.Material, !loaded && !record.RuntimeReady); err != nil {
+		if err := validateMaterialFreshness(*record.Material, !loaded && !record.RuntimeReady, record.RuntimeEnrolled); err != nil {
 			return resumeBindingError(err)
 		}
 

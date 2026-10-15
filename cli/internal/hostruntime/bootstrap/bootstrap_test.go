@@ -430,6 +430,7 @@ func TestRecoverMaterialIgnoresLocalPairingExpiry(t *testing.T) {
 	}
 	materialExpiry := time.Now().UTC().Add(time.Hour)
 	calls := 0
+	admitted, includeProfile := true, false
 	var server *httptest.Server
 	server = httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		calls++
@@ -438,21 +439,38 @@ func TestRecoverMaterialIgnoresLocalPairingExpiry(t *testing.T) {
 			PublicIdentityKey string `json:"public_identity_key"`
 			RuntimeEnrolled   bool   `json:"runtime_enrolled"`
 		}
-		if json.NewDecoder(request.Body).Decode(&body) != nil || body.Verifier != "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP" || body.PublicIdentityKey != testPublicIdentityKey || !body.RuntimeEnrolled {
+		if json.NewDecoder(request.Body).Decode(&body) != nil || body.Verifier != "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP" || body.PublicIdentityKey != testPublicIdentityKey || body.RuntimeEnrolled != admitted {
 			t.Fatalf("recovery body=%v", body)
 		}
 		writer.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(writer).Encode(map[string]any{"data": Material{
+		material := Material{
 			Schema: "paperboat.machine-installation/v1", UserMachineID: "um_1", PairingID: "ume_1", EnvironmentID: "env_1", ControlURL: server.URL,
 			HelperID: "helper_1", EnrollmentID: "enroll_1", EnrollmentCredential: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", ExpiresAt: materialExpiry,
 			HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 1, ClientSession: &ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cls_1", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600},
-		}})
+		}
+		if admitted {
+			material.ReuseIdentity = true
+			material.EnrollmentID = ""
+			material.EnrollmentCredential = ""
+		}
+		if !includeProfile {
+			material.ClientSession = nil
+		}
+		_ = json.NewEncoder(writer).Encode(map[string]any{"data": material})
 	}))
 	defer server.Close()
 	config := Config{ServerURL: server.URL, EnrollmentToken: "", Alias: "Studio", WorkspaceRoot: workspace, Verifier: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", PublicIdentityKey: testPublicIdentityKey, HTTP: server.Client()}
-	material, err := RecoverMaterial(context.Background(), config, true)
-	if err != nil || calls != 1 || !material.ExpiresAt.Equal(materialExpiry) {
-		t.Fatalf("material=%+v requests=%d err=%v", material, calls, err)
+	for _, scenario := range []struct{ admitted, profile, valid bool }{{true, false, true}, {true, true, false}, {false, false, false}, {false, true, true}} {
+		admitted, includeProfile = scenario.admitted, scenario.profile
+		before := calls
+		material, err := RecoverMaterial(context.Background(), config, admitted)
+		if scenario.valid {
+			if err != nil || calls != before+1 || !material.ExpiresAt.Equal(materialExpiry) {
+				t.Fatalf("admitted=%t profile=%t calls=%d err=%v", admitted, includeProfile, calls-before, err)
+			}
+		} else if !errors.Is(err, ErrInvalid) {
+			t.Fatalf("invalid credential context accepted: admitted=%t profile=%t err=%v", admitted, includeProfile, err)
+		}
 	}
 }
 
@@ -486,7 +504,7 @@ func TestValidateMaterialAcceptsClientCLISetup(t *testing.T) {
 
 		HelperListenAddress: "127.0.0.1:38080", InstallationGeneration: 1, ClientSession: &ClientSession{Schema: "paperboat.cli-session/v1", SessionID: "cls_1", AccessToken: "access-012345678901234567890123456789", RefreshToken: "refresh-012345678901234567890123456789", TokenType: "Bearer", ExpiresIn: 3600},
 	}
-	if err := validateMaterial(material); err != nil {
+	if err := validateMaterial(material, false); err != nil {
 		t.Fatalf("client material rejected: %v", err)
 	}
 }

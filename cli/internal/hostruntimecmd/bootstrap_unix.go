@@ -132,6 +132,11 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	if resume.AuthenticatedSetup && !authenticatedResume {
 		return bootstrap.ErrResumeExpired
 	}
+	if resume.RuntimeEnrolled && !resume.RuntimeReady && (resumeErr == nil || runtimeCausesOnly(resumeErr, bootstrap.ErrResumeExpired)) {
+		if err := validateBootstrapRecovery(ctx, identityStore, resume); err != nil {
+			return err
+		}
+	}
 	var material bootstrap.Material
 	if resume.RuntimeReady && (resumeErr == nil || runtimeCausesOnly(resumeErr, bootstrap.ErrResumeExpired)) {
 		if err := validateBootstrapFinalization(identityStore, resume); err != nil {

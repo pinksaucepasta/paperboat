@@ -257,7 +257,7 @@ func TestExpiredOneShotResumeInstallsRotatedSameSession(t *testing.T) {
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	previous := testClientBootstrapMaterial(server, now.Add(time.Hour))
 	record := bootstrap.NewResumeRecord(server, publicKey, "token", "Laptop", "verifier-012345678901234567890123456789", now.Add(-time.Minute))
-	record.PairingStarted, record.Material, record.ClientInstalled, record.RuntimeEnrolled = true, &previous, true, true
+	record.PairingStarted, record.Material, record.ClientInstalled, record.RuntimeEnrolled = true, &previous, true, false
 	if err := bootstrap.SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}
@@ -270,8 +270,8 @@ func TestExpiredOneShotResumeInstallsRotatedSameSession(t *testing.T) {
 	recovered.ClientSession.RefreshToken = "rotated-refresh-012345678901234567890123456789"
 	operations := testOneShotResumeOperations(loadNow)
 	operations.RecoverMaterial = func(_ context.Context, _ bootstrap.Config, runtimeEnrolled bool) (bootstrap.Material, error) {
-		if !runtimeEnrolled {
-			t.Fatal("lost runtime enrollment progress")
+		if runtimeEnrolled {
+			t.Fatal("unadmitted runtime unexpectedly recovered as enrolled")
 		}
 		return recovered, nil
 	}
@@ -307,7 +307,7 @@ func TestExpiredOneShotResumeRejectsDifferentClientSession(t *testing.T) {
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	previous := testClientBootstrapMaterial(server, now.Add(time.Hour))
 	record := bootstrap.NewResumeRecord(server, publicKey, "token", "Laptop", "verifier-012345678901234567890123456789", now.Add(-time.Minute))
-	record.PairingStarted, record.Material, record.ClientInstalled, record.RuntimeEnrolled = true, &previous, true, true
+	record.PairingStarted, record.Material, record.ClientInstalled, record.RuntimeEnrolled = true, &previous, true, false
 	if err := bootstrap.SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}

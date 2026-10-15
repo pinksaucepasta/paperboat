@@ -121,7 +121,7 @@ func WaitForMaterial(ctx context.Context, config Config, expiresAt time.Time, in
 	}
 	body, _ := json.Marshal(map[string]string{"verifier": config.Verifier, "public_identity_key": config.PublicIdentityKey})
 	for time.Now().UTC().Before(expiresAt) {
-		material, err := requestMaterial(ctx, config, base, body)
+		material, err := requestMaterial(ctx, config, base, body, false)
 		if err == nil {
 			return material, nil
 		}
@@ -149,15 +149,15 @@ func RecoverMaterial(ctx context.Context, config Config, runtimeEnrolled bool) (
 		return Material{}, err
 	}
 	body, _ := json.Marshal(map[string]any{"verifier": config.Verifier, "public_identity_key": config.PublicIdentityKey, "runtime_enrolled": runtimeEnrolled})
-	return requestMaterial(ctx, config, base, body)
+	return requestMaterial(ctx, config, base, body, runtimeEnrolled)
 }
 
-func requestMaterial(ctx context.Context, config Config, base string, body []byte) (Material, error) {
+func requestMaterial(ctx context.Context, config Config, base string, body []byte, runtimeEnrolled bool) (Material, error) {
 	var material Material
 	if err := request(ctx, client(config), http.MethodPost, base+"/v1/machines/pairings/installation", body, &material); err != nil {
 		return Material{}, err
 	}
-	if err := validateMaterial(material); err != nil {
+	if err := validateMaterial(material, runtimeEnrolled); err != nil {
 		return Material{}, bootstrapRequestFailure(err)
 	}
 	if normalizeBootstrapURL(material.ControlURL) != normalizeBootstrapURL(config.ServerURL) {
@@ -166,16 +166,20 @@ func requestMaterial(ctx context.Context, config Config, base string, body []byt
 	return material, nil
 }
 
-func validateMaterial(material Material) error {
-	return validateMaterialFreshness(material, true)
+func validateMaterial(material Material, runtimeEnrolled bool) error {
+	if runtimeEnrolled && (!material.ReuseIdentity || material.ClientSession != nil) {
+		return fmt.Errorf("%w: enrolled runtime recovery must preserve existing CLI credentials", ErrInvalid)
+	}
+	return validateMaterialFreshness(material, true, runtimeEnrolled)
 }
 
 // validateMaterialFreshness validates all server material fields. Resume
 // loading skips only freshness so an expired, securely bound journal can ask
 // the server for renewed material instead of being mistaken for corruption.
-func validateMaterialFreshness(material Material, requireFresh bool) error {
+func validateMaterialFreshness(material Material, requireFresh, runtimeEnrolled bool) error {
 	validEnrollment := material.ReuseIdentity && material.EnrollmentID == "" && material.EnrollmentCredential == "" || !material.ReuseIdentity && material.EnrollmentID != "" && len(material.EnrollmentCredential) >= 32
-	validClientSession := material.ClientSession != nil && validBootstrapClientSession(*material.ClientSession)
+	validClientSession := material.ClientSession == nil && runtimeEnrolled && material.ReuseIdentity ||
+		material.ClientSession != nil && validBootstrapClientSession(*material.ClientSession)
 	checks := []struct {
 		invalid bool
 		reason  string

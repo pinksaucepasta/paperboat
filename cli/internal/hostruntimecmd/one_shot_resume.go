@@ -124,7 +124,10 @@ func resumeOneShotEnrollment(ctx context.Context, input oneShotResumeInput, oper
 		}
 	}
 
-	if resume.Material != nil && !resumeExpired {
+	if resume.RuntimeEnrolled && !resume.ClientInstalled {
+		return bootstrap.Material{}, resume, bootstrap.ErrResumeBinding
+	}
+	if resume.Material != nil && !resumeExpired && !resume.RuntimeEnrolled {
 		if input.TokenFile != "" && input.TokenFileErr == nil {
 			if err := operations.ConsumeTokenFile(input.TokenFile); err != nil {
 				return bootstrap.Material{}, resume, fmt.Errorf("consume enrollment token file: %w", err)
@@ -142,7 +145,7 @@ func resumeOneShotEnrollment(ctx context.Context, input oneShotResumeInput, oper
 
 	var material bootstrap.Material
 	var err error
-	if resumeExpired {
+	if resumeExpired || resume.RuntimeEnrolled {
 		material, err = operations.RecoverMaterial(ctx, config, resume.RuntimeEnrolled)
 	} else {
 		// Polling before CreatePairing closes the response-loss window after a
@@ -152,6 +155,9 @@ func resumeOneShotEnrollment(ctx context.Context, input oneShotResumeInput, oper
 	if bootstrap.OnlyOutcome(err, bootstrap.ErrInstallationUnavailable) {
 		if resumeExpired && resume.PairingStarted {
 			return bootstrap.Material{}, resume, bootstrap.ErrResumeExpired
+		}
+		if resume.RuntimeEnrolled {
+			return bootstrap.Material{}, resume, err
 		}
 		if resume.RequiresEnrollmentTokenForRetry(config.EnrollmentToken) {
 			return bootstrap.Material{}, resume, bootstrap.ErrResumeTokenRequired
@@ -165,10 +171,10 @@ func resumeOneShotEnrollment(ctx context.Context, input oneShotResumeInput, oper
 		if err := bootstrap.ValidateRecoveredMaterial(*resume.Material, material, resume.RuntimeEnrolled); err != nil {
 			return bootstrap.Material{}, resume, err
 		}
-		if resume.ClientInstalled && !sameBoundClientSession(resume.Material.ClientSession, material.ClientSession) {
+		if !resume.RuntimeEnrolled && resume.ClientInstalled && !sameBoundClientSession(resume.Material.ClientSession, material.ClientSession) {
 			return bootstrap.Material{}, resume, bootstrap.ErrResumeBinding
 		}
-		if resume.ClientInstalled && !sameClientCredentials(resume.Material.ClientSession, material.ClientSession) {
+		if !resume.RuntimeEnrolled && resume.ClientInstalled && !sameClientCredentials(resume.Material.ClientSession, material.ClientSession) {
 			// The server may rotate both tokens when recovering an expired
 			// pairing. Persist the new material and the pending CLI install in
 			// one journal write so a crash retries the same-session refresh.
@@ -277,6 +283,9 @@ func sameBoundClientSession(previous, recovered *bootstrap.ClientSession) bool {
 }
 
 func sameClientCredentials(previous, recovered *bootstrap.ClientSession) bool {
+	if previous == nil || recovered == nil {
+		return previous == nil && recovered == nil
+	}
 	return sameBoundClientSession(previous, recovered) && previous.AccessToken == recovered.AccessToken && previous.RefreshToken == recovered.RefreshToken
 }
 
