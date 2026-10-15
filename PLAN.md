@@ -164,6 +164,12 @@ and revocation ends it immediately. Renewal and reattach exist for lost connecti
 a workaround for expiry. Each lane audits its own code for any timer, deadline or check that
 ties an admitted connection to credential expiry, removes it, and adds a test per path: short
 credential TTL, connection outlives it; revocation still cuts it.
+One shared implementation per side, adopted path by path while fixing (no big-bang rewrite):
+the CLI/runtime has one package for "admit with a short credential, keep until done,
+disconnected or revoked, watch revocation" and one for reattach after a lost connection; the
+server has one place that issues admission credentials, with the lifetime as one
+configuration value. Every path above uses them; per-path timers, reattach loops and
+5-minute literals are deleted as each path moves over.
 
 ### 1.5 Repository and process
 
@@ -832,3 +838,5 @@ file | note`. Row-level evidence goes in CHECKLIST.md.
 2026-10-15 | Lane A waits for Lane B credential-lifetime producer | PLAN1.4c; HP exec/shared native streams | — | B: peersessions/network.go drops access-session scopes at a.expires_at>$now (also inspector/config comparison admissions), while native accepted streams currently treat scope disappearance as revocation. Separate admission expiry from explicit revocation in the signed network contract: retain active/unrevoked resource scopes after credential TTL, or publish explicit resource revocations; preserve machine/member/CLI-session/policy revocation. Network/certificate snapshot TTL must not revoke admitted flows. A is repairing native stream lifetime and auditing cli/relay expiry paths; needs producer committed/pushed/deployed before final consumer qualification. No longer use reattach to work around five-minute expiry.
 
 2026-10-15 | Lane C 1.4c console audit | done; Lane A request | — | Console (console/) only checks ticket expiry before connecting and reconnects with a fresh ticket; no live connection is bounded by expiry. Lane A: browser-terminal file upload in an open session can get credential_expired from the machine (cli/cmd/browserterminal-wasm/files_js.go:156 forces a reconnect mid-upload); under 1.4c the admitted terminal session must accept uploads until it ends or is revoked. Also audit connectorprotocol ReasonCredentialExpired (cli/internal/connectorprotocol/protocol.go:102) for disconnects of admitted connectors.
+
+2026-10-15 | Lane B 1.4c admitted-session audit | in progress; batch before smoke | — | User priority replaces the old frozen-candidate pause: auditing server/tunnel/helper for credential-driven teardown across F3-F9/F12/F14. Admission expiry checks remain; admitted lifetimes must survive TTL and retain exact revocation. Initial findings: connector lease/credential active checks, private-stream deadlines, browser-authority refresh timer, metering delivery-window deadline and expired access-scope withdrawal. A: prepare CLI/relay consumers for retained expired access scopes (expiry still rejects new operations; presence is not extended credential authority), and explicit signed scope withdrawal/revocation closes existing work. B will log exact producer fields/notification paths and request one final HEAD smoke after its runtime batch; do not use an earlier HEAD result for the new batch. Token-error draft remains isolated and deferred.
