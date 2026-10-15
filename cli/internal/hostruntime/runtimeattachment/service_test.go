@@ -3,12 +3,17 @@ package runtimeattachment
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -18,6 +23,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/internal/supportref"
@@ -268,4 +274,87 @@ func newRuntimeAttachmentTestService(t *testing.T, transport http.RoundTripper) 
 		t.Fatal(err)
 	}
 	return service
+}
+
+func TestRuntimeAttachmentOutlivesCredentialOutageAndRevokes(t *testing.T) {
+	var calls atomic.Int32
+	var revoked atomic.Bool
+	var document admission
+	transport := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		status := http.StatusOK
+		if revoked.Load() {
+			status = http.StatusForbidden
+		} else if calls.Add(1) > 1 {
+			status = http.StatusServiceUnavailable
+		}
+		payload, err := json.Marshal(struct {
+			Data admission `json:"data"`
+		}{document})
+		if err != nil {
+			return nil, err
+		}
+		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(payload)), Request: request}, nil
+	})
+	service := newRuntimeAttachmentTestService(t, transport)
+	store, err := identity.Open(identity.Config{StateRoot: service.config.StateRoot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	public := store.Current().Public()
+	digest := sha256.Sum256(public)
+	trust := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer trust.Close()
+	pin := sha256.Sum256(trust.Certificate().RawSubjectPublicKeyInfo)
+	expiry := time.Now().Add(2 * time.Second)
+	document = admission{Schema: "paperboat.runtime-carrier/v1", RouteKind: "runtime_https_wss", Hostname: "runtime.example.test", EdgeEndpoints: []string{"h2://edge.example.test:8443"}, ExpiresAt: expiry,
+		ActiveEdgeNodeID: "edge-test", ActiveEdgeProcessEpoch: "epoch-1234567890123456789012345678",
+		Binding: binding{AccountID: "account-test", HostID: "machine-test", TunnelID: "machine-test", ConnectorID: "machine-test", SessionID: "session-test", ProcessGeneration: 1, ConfigGeneration: 1, InstallationGeneration: 1, RouteID: "route-test", EdgeNodeID: "edge-test", EdgeProcessEpoch: "epoch-1234567890123456789012345678", MachineIdentityPublicKey: base64.RawURLEncoding.EncodeToString(public), MachineIdentityThumbprint: "sha256:" + base64.RawURLEncoding.EncodeToString(digest[:]), EdgeCarrierServerSPKISHA256: "sha256:" + hex.EncodeToString(pin[:]), EdgeCarrierServerCertificateChainPEM: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: trust.Certificate().Raw}))}}
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+	defer cancel()
+	connected := make(chan *connector.DataCarrier, 1)
+	source, err := preview.NewMachineAttachmentSessionSource(preview.MachineAttachmentSessionSourceConfig{StateRoot: service.config.StateRoot, SessionFactory: func(got connector.DataCarrierIdentity, config connector.DataCarrierPoolConfig, _ connector.NetworkDialerConfig) (connector.DataCarrierSessionSource, error) {
+		local, remote := net.Pipe()
+		edge, err := connector.NewDataCarrierServer(ctx, remote, config.Carrier, connector.DataCarrierAdmission{Identity: got, Authorize: func(context.Context, connector.StreamOpen) error { return nil }})
+		if err != nil {
+			local.Close()
+			remote.Close()
+			return connector.DataCarrierSessionSource{}, err
+		}
+		connected <- edge
+		return connector.NewDataCarrierSessionSource(got, config, func(_ context.Context, request connector.DataCarrierDialRequest) (connector.DataCarrierDialResult, error) {
+			return connector.DataCarrierDialResult{Link: local, PeerIdentity: got, Transport: request.Transport, EdgeID: request.EdgeID, FailureDomain: request.FailureDomain}, nil
+		})
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.sessions = source
+	if err := service.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { cancel(); _ = service.Shutdown(context.Background()) }()
+	var edge *connector.DataCarrier
+	select {
+	case edge = <-connected:
+	case <-ctx.Done():
+		t.Fatal("runtime carrier was not admitted")
+	}
+	defer edge.Close()
+	if err := edge.Ping(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-edge.Done():
+		t.Fatal("credential expiry/outage closed admitted runtime carrier")
+	case <-time.After(time.Until(expiry) + 100*time.Millisecond):
+	}
+	if err := edge.Ping(ctx); err != nil {
+		t.Fatal("runtime carrier unusable after expiry", err)
+	}
+	revoked.Store(true)
+	select {
+	case <-edge.Done():
+	case <-ctx.Done():
+		t.Fatal("explicit runtime revocation did not close carrier")
+	}
 }

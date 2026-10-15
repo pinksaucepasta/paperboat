@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	lifetimeadmission "github.com/pinksaucepasta/paperboat-relay/admission"
 
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
@@ -110,12 +111,11 @@ type admissionBinding struct {
 	ExpiresAt     time.Time `json:"expires_at"`
 }
 type live struct {
-	key       string
-	expiresAt time.Time
-	active    *connector.ActiveDataCarrier
-	streams   *tunnelmanager.RunningOriginStreams
-	release   func(context.Context) error
-	open      browserbroadcastserver.OpenPublisher
+	key     string
+	active  *connector.ActiveDataCarrier
+	streams *tunnelmanager.RunningOriginStreams
+	release func(context.Context) error
+	open    browserbroadcastserver.OpenPublisher
 }
 
 type retryState struct {
@@ -196,6 +196,12 @@ func (s *Service) Shutdown(ctx context.Context) error {
 }
 
 func (s *Service) run(ctx context.Context) {
+	lifetime, err := lifetimeadmission.Admit(ctx, time.Time{}, nil)
+	if err != nil {
+		return
+	}
+	defer lifetime.Close()
+	ctx = lifetime.Context()
 	lives := map[string]*live{}
 	retries := map[string]retryState{}
 	publisherKey := ""
@@ -219,10 +225,10 @@ func (s *Service) run(ctx context.Context) {
 			}
 		}
 	}()
-	for ctx.Err() == nil {
-		response, err := s.fetch(ctx, "", "")
+	stopPoll := lifetime.Poll(func(checkCtx context.Context) error {
+		response, err := s.fetch(checkCtx, "", "")
 		if err == nil && len(response.EdgeCandidates) != 0 && (s.lastProbe.IsZero() || time.Since(s.lastProbe) >= 30*time.Second) {
-			measurements, probeErr := edgeplacement.Probe(ctx, response.EdgeCandidates, nil)
+			measurements, probeErr := edgeplacement.Probe(checkCtx, response.EdgeCandidates, nil)
 			s.lastProbe = time.Now()
 			if probeErr != nil {
 				err = peerConnectFailure(probeErr)
@@ -248,7 +254,7 @@ func (s *Service) run(ctx context.Context) {
 					err = classifyFailure(selectErr, "reconciliation", "service_failed")
 				} else if s.preference == nil || *s.preference != selected {
 					s.preference = &selected
-					response, err = s.fetch(ctx, "", "")
+					response, err = s.fetch(checkCtx, "", "")
 				}
 			}
 		}
@@ -263,7 +269,7 @@ func (s *Service) run(ctx context.Context) {
 				wanted[key] = true
 			}
 			for key, item := range lives {
-				if !wanted[key] || item.active.Pool().State() != connector.DataCarrierPoolReady || time.Now().After(item.expiresAt) {
+				if !wanted[key] || item.active.Pool().State() != connector.DataCarrierPoolReady {
 					if publisherKey == key && s.broadcaster != nil {
 						s.broadcaster.SetPublisher(nil)
 						publisherKey = ""
@@ -277,7 +283,6 @@ func (s *Service) run(ctx context.Context) {
 			for _, admission := range ordered {
 				key := carrierKey(admission)
 				if item := lives[key]; item != nil {
-					item.expiresAt = admission.ExpiresAt
 					continue
 				}
 				if retry := retries[key]; time.Now().Before(retry.next) {
@@ -307,7 +312,7 @@ func (s *Service) run(ctx context.Context) {
 			}
 			chosen, chosenAdmission := chooseLive(ordered, lives, response.ActiveEdgeNodeID, response.ActiveEdgeProcessEpoch)
 			if chosen != nil && (response.ActiveEdgeNodeID != chosenAdmission.Binding.EdgeNodeID || response.ActiveEdgeProcessEpoch != chosenAdmission.Binding.EdgeProcessEpoch) {
-				updated, updateErr := s.fetch(ctx, chosenAdmission.Binding.EdgeNodeID, chosenAdmission.Binding.EdgeProcessEpoch)
+				updated, updateErr := s.fetch(checkCtx, chosenAdmission.Binding.EdgeNodeID, chosenAdmission.Binding.EdgeProcessEpoch)
 				if updateErr == nil {
 					response = updated
 				} else {
@@ -336,7 +341,7 @@ func (s *Service) run(ctx context.Context) {
 			}
 		}
 		for key, item := range lives {
-			if time.Now().Before(item.expiresAt) && item.active.Pool().State() == connector.DataCarrierPoolReady {
+			if item.active.Pool().State() == connector.DataCarrierPoolReady {
 				continue
 			}
 			if publisherKey == key && s.broadcaster != nil {
@@ -355,27 +360,10 @@ func (s *Service) run(ctx context.Context) {
 			errorreport.Current().Lifecycle(ctx, "edge", "preview_attachment", "recovered", "success")
 			lastFailure = nil
 		}
-		wait := 20 * time.Second
-		if err != nil {
-			wait = 5 * time.Second
-		}
-		wait += time.Duration(jitterrand.Int64N(int64(time.Second)))
-		for _, item := range lives {
-			if until := time.Until(item.expiresAt); until < wait {
-				wait = until
-			}
-		}
-		if wait < time.Second {
-			wait = time.Second
-		}
-		timer := time.NewTimer(wait)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return
-		case <-timer.C:
-		}
-	}
+		return err
+	})
+	defer stopPoll()
+	<-ctx.Done()
 }
 
 func chooseLive(ordered []admissionBinding, lives map[string]*live, activeNode, activeEpoch string) (*live, admissionBinding) {
@@ -477,6 +465,9 @@ func (s *Service) fetch(ctx context.Context, activeNode, activeEpoch string) (ou
 		if drainErr != nil {
 			statusErr = errors.Join(statusErr, drainErr)
 		}
+		if res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden || res.StatusCode == http.StatusNotFound {
+			statusErr = errors.Join(lifetimeadmission.ErrRevoked, statusErr)
+		}
 		return out, controlFailure(statusErr)
 	}
 	var envelope struct {
@@ -529,7 +520,7 @@ func (s *Service) connect(ctx context.Context, a admissionBinding, key string) (
 			RouteID: b.RouteID, RequestID: terminalSessionID, Kind: "browser_terminal_output",
 		})
 	})
-	return &live{key: key, expiresAt: a.ExpiresAt, active: carrier.Active, streams: streams, release: carrier.Release, open: opener}, nil
+	return &live{key: key, active: carrier.Active, streams: streams, release: carrier.Release, open: opener}, nil
 }
 
 func closeLive(l *live) error {
