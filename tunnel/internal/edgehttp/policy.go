@@ -21,9 +21,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat-relay/reattach"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/admission"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
+	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
 	"github.com/realclientip/realclientip-go"
 )
 
@@ -272,11 +272,11 @@ func retryablePreviewRequest(request *http.Request) bool {
 }
 
 func retryablePreviewTransportError(err error) bool {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return false
-	}
 	if errors.Is(err, errPreviewRouteReplaced) {
 		return true
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
 	}
 	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, net.ErrClosed) {
 		return true

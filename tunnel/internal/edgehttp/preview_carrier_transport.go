@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
+	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
 )
 
 var (
@@ -669,6 +669,9 @@ func (t *DataCarrierPreviewTransport) RoundTrip(request *http.Request) (*http.Re
 	cancelOpen()
 	if err != nil {
 		stopPreviewStreamLifetime(lifetimeCancel)
+		if t.routeReplaced(request, host, route) {
+			return nil, errors.Join(ErrDataCarrierPreviewTransport, errPreviewRouteReplaced, err)
+		}
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, err
 		}
@@ -733,8 +736,7 @@ func (t *DataCarrierPreviewTransport) RoundTrip(request *http.Request) (*http.Re
 		_ = application.Close()
 		requestCloseErr := closeRequestBody()
 		writeErr := <-writeDone
-		if current, _, ready := t.registry.acquire(host); ready && current.RouteID == route.RouteID &&
-			(current.Server != route.Server || current.Revision != route.Revision) && request.Context().Err() == nil {
+		if t.routeReplaced(request, host, route) {
 			return nil, errors.Join(ErrDataCarrierPreviewTransport, errPreviewRouteReplaced, err, writeErr, requestCloseErr)
 		}
 		if headerTimedOut {
@@ -895,4 +897,11 @@ func joinPrivateStreamError(existing, err error) error {
 		return existing
 	}
 	return errors.Join(existing, err)
+}
+
+// routeReplaced distinguishes local carrier withdrawal from caller cancellation.
+func (t *DataCarrierPreviewTransport) routeReplaced(request *http.Request, host string, route DataCarrierPreviewRoute) bool {
+	current, _, ready := t.registry.acquire(host)
+	return request.Context().Err() == nil && ready && current.RouteID == route.RouteID &&
+		(current.Server != route.Server || current.Revision != route.Revision)
 }

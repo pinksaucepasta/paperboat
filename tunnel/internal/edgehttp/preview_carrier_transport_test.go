@@ -309,6 +309,19 @@ func TestDataCarrierPreviewTransportStreamsHTTPAndTrailers(t *testing.T) {
 }
 
 func TestDataCarrierPreviewTransportRetriesAfterStaleResponseHeaderTimeout(t *testing.T) {
+	for _, duringOpen := range []bool{false, true} {
+		name := "response_headers"
+		if duringOpen {
+			name = "stream_open"
+		}
+		t.Run(name, func(t *testing.T) { testPreviewRouteReplacementRetry(t, duringOpen) })
+	}
+}
+
+func testPreviewRouteReplacementRetry(t *testing.T, duringOpen bool) {
+	t.Helper()
+	oldAccepted := make(chan struct{})
+	oldClosed := make(chan struct{})
 	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{
 		BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1", MaximumRoutes: 4,
 	})
@@ -317,7 +330,15 @@ func TestDataCarrierPreviewTransportRetriesAfterStaleResponseHeaderTimeout(t *te
 	}
 	defer registry.Close()
 	identityOne := testEdgePreviewIdentity(1, 1)
-	serverOne, clientOne := testEdgePreviewCarrierPair(t, identityOne)
+	var authorize datacarrier.Authorizer
+	if duringOpen {
+		authorize = datacarrier.AuthorizerFunc(func(ctx context.Context, _ datacarrier.Identity, _ datacarrier.StreamOpen) error {
+			close(oldAccepted)
+			<-ctx.Done()
+			return ctx.Err()
+		})
+	}
+	serverOne, clientOne := testEdgePreviewCarrierPair(t, identityOne, authorize)
 	identityTwo := testEdgePreviewIdentity(2, 2)
 	serverTwo, clientTwo := testEdgePreviewCarrierPair(t, identityTwo)
 	route := DataCarrierPreviewRoute{
@@ -334,19 +355,21 @@ func TestDataCarrierPreviewTransportRetriesAfterStaleResponseHeaderTimeout(t *te
 		t.Fatal(err)
 	}
 
-	oldAccepted := make(chan struct{})
-	oldClosed := make(chan struct{})
-	go func() {
-		stream, _, acceptErr := clientOne.AcceptStream(context.Background())
-		if acceptErr != nil {
-			close(oldClosed)
-			return
-		}
-		close(oldAccepted)
-		_, _ = io.Copy(io.Discard, stream)
-		_ = stream.Close()
+	if duringOpen {
 		close(oldClosed)
-	}()
+	} else {
+		go func() {
+			stream, _, acceptErr := clientOne.AcceptStream(context.Background())
+			if acceptErr != nil {
+				close(oldClosed)
+				return
+			}
+			close(oldAccepted)
+			_, _ = io.Copy(io.Discard, stream)
+			_ = stream.Close()
+			close(oldClosed)
+		}()
+	}
 
 	newServed := make(chan error, 1)
 	go func() {
@@ -557,7 +580,7 @@ func testEdgePreviewIdentity(generation, processGeneration uint64) datacarrier.I
 	return datacarrier.Identity{AccountID: "account_01", HostID: "host_01", TunnelID: "tunnel_01", ConnectorID: "connector_01", SessionID: "session_01", ProcessGeneration: processGeneration, Generation: generation}
 }
 
-func testEdgePreviewCarrierPair(t *testing.T, identity datacarrier.Identity) (*datacarrier.Server, *datacarrier.Client) {
+func testEdgePreviewCarrierPair(t *testing.T, identity datacarrier.Identity, authorizers ...datacarrier.Authorizer) (*datacarrier.Server, *datacarrier.Client) {
 	t.Helper()
 	local, remote := net.Pipe()
 	config := datacarrier.DefaultConfig()
@@ -566,6 +589,9 @@ func testEdgePreviewCarrierPair(t *testing.T, identity datacarrier.Identity) (*d
 	config.QueueDepth = 4
 	config.Identity = identity
 	config.Authorize = datacarrier.AuthorizerFunc(func(context.Context, datacarrier.Identity, datacarrier.StreamOpen) error { return nil })
+	if len(authorizers) > 0 && authorizers[0] != nil {
+		config.Authorize = authorizers[0]
+	}
 	server, err := datacarrier.NewServer(context.Background(), remote, config)
 	if err != nil {
 		_ = local.Close()
