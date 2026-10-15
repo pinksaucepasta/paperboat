@@ -116,7 +116,7 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 					return hostinstall.ErrLegacyCarrierRunning
 				}
 			}
-			return runtimeFailure("installing the supplied Paperboat executable failed", err, runtimeContextFailure(callCtx))
+			return runtimeFailure("installing the supplied Paperboat executable failed; approve administrator access when prompted, then rerun `pb install`", err, runtimeContextFailure(callCtx))
 		}
 		return nil
 	}

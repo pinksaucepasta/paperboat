@@ -12,18 +12,20 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 )
 
-type runtimeCommandFailure struct {
+// CommandFailure carries only package-authored public prose; diagnostic causes remain inspectable.
+// Its fields stay private so callers cannot promote arbitrary process output to a public message.
+type CommandFailure struct {
 	message string
 	causes  []error
 }
 
-func (e *runtimeCommandFailure) Error() string {
+func (e *CommandFailure) Error() string {
 	if e == nil {
 		return "host runtime command failed"
 	}
 	return e.message
 }
-func (e *runtimeCommandFailure) Unwrap() []error {
+func (e *CommandFailure) Unwrap() []error {
 	if e == nil {
 		return nil
 	}
@@ -39,7 +41,7 @@ func runtimeFailure(message string, causes ...error) error {
 			retained = append(retained, cause)
 		}
 	}
-	return &runtimeCommandFailure{message: message, causes: retained}
+	return &CommandFailure{message: message, causes: retained}
 }
 
 func runtimeContextFailure(ctx context.Context) error {
@@ -206,7 +208,7 @@ func unreportedRuntimeFailure(err error) error {
 			if before == ownedCount {
 				return current, true
 			}
-			if failure, ok := current.(*runtimeCommandFailure); ok && len(pending) > 0 {
+			if failure, ok := current.(*CommandFailure); ok && len(pending) > 0 {
 				return runtimeFailure(failure.message, pending...), true
 			}
 			return errors.Join(pending...), true
@@ -262,12 +264,12 @@ func FailureMessage(err error) (string, bool) {
 	if message, ok := hostinstall.FailureMessage(err); ok {
 		return message, true
 	}
-	var failure *runtimeCommandFailure
+	var failure *CommandFailure
 	if !errors.As(err, &failure) || failure == nil || failure.message == "" {
 		return "", false
 	}
 	for len(failure.causes) > 0 {
-		var inner *runtimeCommandFailure
+		var inner *CommandFailure
 		if !errors.As(failure.causes[0], &inner) || inner == nil || inner.message == "" {
 			break
 		}

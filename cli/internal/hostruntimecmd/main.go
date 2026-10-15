@@ -149,7 +149,7 @@ func runtimeFailureMessage(err error) string {
 	if runtimeCausesOnly(err, hostinstall.ErrLegacyCarrierRunning) {
 		return hostinstall.ErrLegacyCarrierRunning.Error()
 	}
-	if failure, ok := err.(*runtimeCommandFailure); ok && failure != nil {
+	if failure, ok := err.(*CommandFailure); ok && failure != nil {
 		return failure.message
 	}
 	var remote *elevation.RemoteError
