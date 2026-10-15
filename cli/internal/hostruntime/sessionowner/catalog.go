@@ -192,6 +192,9 @@ func (c Catalog) Install(ctx context.Context, d Descriptor) error {
 	if err := c.Publish(ctx, d); err != nil {
 		return err
 	}
+	if err := PrepareNativeEndpoint(d); err != nil {
+		return err
+	}
 	installer, err := c.Installer(d)
 	if err != nil {
 		return err

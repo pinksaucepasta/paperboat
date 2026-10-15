@@ -192,6 +192,12 @@ func (c Coordinator) Reconcile(ctx context.Context) error {
 			result = errors.Join(result, err)
 			continue
 		}
+		// A registered KeepAlive job can outlive retirement's IPC cleanup.
+		// Restore its exact private endpoint before authenticating quiescence.
+		if err := PrepareNativeEndpoint(d); err != nil {
+			result = errors.Join(result, err)
+			continue
+		}
 		client, err := connectOwner(ctx, d, true)
 		if err != nil {
 			result = errors.Join(result, err)

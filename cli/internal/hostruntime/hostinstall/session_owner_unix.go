@@ -60,25 +60,13 @@ func NativeSessionOwnerConfig(ctx context.Context, request Request) (sessionowne
 		}
 		endpointRoot = filepath.Join(ipcParent, instance+"-"+generation)
 	}
-	info, err := os.Lstat(endpointRoot)
-	if installNotExistOnly(err) {
-		if err := os.Mkdir(endpointRoot, 0700); err != nil {
-			return c, sessionowner.Descriptor{}, err
-		}
-		if err := os.Chown(endpointRoot, request.UID, request.GID); err != nil {
-			return c, sessionowner.Descriptor{}, err
-		}
-	} else if err != nil {
-		return c, sessionowner.Descriptor{}, err
-	} else if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || ownerUID(info) != request.UID || info.Mode().Perm() != 0700 {
-		return c, sessionowner.Descriptor{}, ErrInvalidRequest
-	}
+
 	d := sessionowner.Descriptor{Schema: sessionowner.Schema, Generation: generation, Instance: instance, Source: request.Source, Executable: pin, RuntimeRoot: request.StateRoot, Endpoint: filepath.Join(endpointRoot, "control.sock"), UID: request.UID, GID: request.GID, Workspace: request.WorkspaceRoot, Shell: request.Shell}
 	d, err = bindInitialSessionStore(ctx, c, d, request.SessionOwnerGeneration)
 	if err != nil {
 		return c, d, err
 	}
-	return c, d, d.Validate()
+	return c, d, sessionowner.PrepareNativeEndpoint(d)
 }
 func PrepareSessionOwner(ctx context.Context, request Request) error {
 	c, d, err := NativeSessionOwnerConfig(ctx, request)
