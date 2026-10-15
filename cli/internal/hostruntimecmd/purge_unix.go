@@ -128,6 +128,7 @@ func newUnixPurgePlan(platform string, uid int) (unixPurgePlan, error) {
 				"/var/run/paperboat-updated-" + instance,
 			},
 			payloadGlobs: []string{
+				"/var/lib/paperboat*-" + instance + "*",
 				"/run/paperboat-*-" + instance + "*",
 				"/var/run/paperboat-*-" + instance + "*",
 				"/var/cache/paperboat*-" + instance + "*",

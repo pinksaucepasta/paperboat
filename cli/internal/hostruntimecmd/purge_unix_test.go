@@ -217,6 +217,12 @@ func plantLinuxAccount(t *testing.T, root string) {
 func TestLinuxSweepRemovesEveryGenerationOfOneAccount(t *testing.T) {
 	root := t.TempDir()
 	plantLinuxAccount(t, root)
+	// Retired generation definitions may be gone while systemd StateDirectory remains.
+	const retired = "var/lib/paperboat-session-owner-u1001-8f704253/state.json"
+	const neighbour = "var/lib/paperboat-session-owner-u10010-8f704253/state.json"
+	plantFile(t, root, retired)
+	plantFile(t, root, neighbour)
+	plantFile(t, root, "var/lib/paperboat-u1001/state.json")
 	plan, err := newUnixPurgePlan("linux", 1001)
 	if err != nil {
 		t.Fatal(err)
@@ -263,7 +269,7 @@ func TestLinuxSweepRemovesEveryGenerationOfOneAccount(t *testing.T) {
 	if !containsCommand(fake.commands, "/usr/bin/systemctl daemon-reload") {
 		t.Fatalf("daemon-reload not run: %v", fake.commands)
 	}
-	assertGone(t, root,
+	assertGone(t, root, retired, "var/lib/paperboat-u1001",
 		"etc/systemd/system/paperboat-runtime-privileged-u1001.service",
 		"etc/systemd/system/paperboat-hostd-u1001.service",
 		"etc/systemd/system/paperboat-hostd-u1001.service.d",
@@ -281,7 +287,7 @@ func TestLinuxSweepRemovesEveryGenerationOfOneAccount(t *testing.T) {
 		"var/cache/paperboat-u1001-cache",
 	)
 	// The neighbours u10010 and u1002 must not be claimed by u1001's globs.
-	assertPresent(t, root,
+	assertPresent(t, root, neighbour,
 		"etc/systemd/system/paperboat-hostd-u10010.service",
 		"etc/systemd/system/paperboat-hostd-u1002.service",
 		"usr/local/libexec/paperboat/users/u10010/bin/pb",
