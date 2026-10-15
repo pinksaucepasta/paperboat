@@ -152,7 +152,7 @@ func TestServeNativePrivateTCPRevocationClosesActiveStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	binding := nativeprivate.Binding{Schema: nativeprivate.SchemaV1, ResourceKind: "tunnel", ResourceID: "tun_1", ResourceGeneration: 2, RouteID: "route_1", RouteGeneration: 3, TargetGeneration: 4, OwnerEndpointID: "machine_1", Protocol: "tcp", TargetScheme: "tcp", TargetAddress: originListener.Addr().String(), ExpiresAt: now.Add(time.Minute)}
+	binding := nativeprivate.Binding{Schema: nativeprivate.SchemaV1, ResourceKind: "tunnel", ResourceID: "tun_1", ResourceGeneration: 2, RouteID: "route_1", RouteGeneration: 3, TargetGeneration: 4, OwnerEndpointID: "machine_1", Protocol: "tcp", TargetScheme: "tcp", TargetAddress: originListener.Addr().String(), ExpiresAt: now.Add(time.Second)}
 	target, _ := json.Marshal(binding)
 	header, err := streamauth.NewNativePrivate("operation_2", "private_tcp", "stream_2", "credential", binding.ExpiresAt, 1<<20, target)
 	if err != nil {
@@ -173,6 +173,15 @@ func TestServeNativePrivateTCPRevocationClosesActiveStream(t *testing.T) {
 	}
 	origin := <-originAccepted
 	defer origin.Close()
+	time.Sleep(time.Until(binding.ExpiresAt) + 20*time.Millisecond)
+	user.SetDeadline(time.Now().Add(time.Second))
+	origin.SetDeadline(time.Now().Add(time.Second))
+	if _, err := user.Write([]byte{42}); err != nil {
+		t.Fatal("credential expiry closed admitted private TCP", err)
+	}
+	if _, err := io.ReadFull(origin, ready[:]); err != nil || ready[0] != 42 {
+		t.Fatal("credential expiry stopped private TCP delivery", err)
+	}
 	close(revoked)
 	_ = user.SetReadDeadline(time.Now().Add(time.Second))
 	if _, err = user.Read(ready[:]); err == nil {

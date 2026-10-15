@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"io"
 	"net"
 	"sync"
@@ -17,7 +18,7 @@ type NativePrivateTCPDial func(context.Context, string, string) (net.Conn, error
 
 // ServeNativePrivateTCP checks host-owned current state immediately before
 // dialing the exact signed loopback target, then closes both directions when
-// that authority expires or is revoked.
+// access is revoked or the connection disconnects.
 func ServeNativePrivateTCP(ctx context.Context, header streamauth.Header, client net.Conn, current NativePrivateTCPCurrent, dial NativePrivateTCPDial) error {
 	if ctx == nil || client == nil || current == nil || dial == nil || header.Consumer != "private_tcp" {
 		return ErrNativePrivateBinding
@@ -26,9 +27,7 @@ func ServeNativePrivateTCP(ctx context.Context, header streamauth.Header, client
 	if err != nil || binding.Protocol != "tcp" || binding.TargetScheme != "tcp" {
 		return ErrNativePrivateBinding
 	}
-	runCtx, cancel := context.WithDeadline(ctx, binding.ExpiresAt)
-	defer cancel()
-	validUntil, revoked, err := current(runCtx, binding)
+	validUntil, revoked, err := current(ctx, binding)
 	if err != nil {
 		return classifyNativePrivateFailure("peer_authority", "peer_authority_failed", err)
 	}
@@ -38,16 +37,13 @@ func ServeNativePrivateTCP(ctx context.Context, header streamauth.Header, client
 	if binding.ExpiresAt.Before(validUntil) {
 		validUntil = binding.ExpiresAt
 	}
-	deadlineCtx, deadlineCancel := context.WithDeadline(runCtx, validUntil)
-	defer deadlineCancel()
-	go func() {
-		select {
-		case <-deadlineCtx.Done():
-		case <-revoked:
-			cancel()
-		}
-	}()
-	stopClient := context.AfterFunc(deadlineCtx, func() { _ = client.Close() })
+	lease, err := admission.Admit(ctx, validUntil, revoked)
+	if err != nil {
+		return classifyNativePrivateFailure("peer_authority", "peer_authority_failed", err)
+	}
+	defer lease.Close()
+	deadlineCtx := lease.Context()
+	stopClient := lease.Bind(client)
 	defer stopClient()
 	select {
 	case <-revoked:
@@ -62,7 +58,7 @@ func ServeNativePrivateTCP(ctx context.Context, header streamauth.Header, client
 		return classifyNativePrivateFailure("target_connect", "native_private_failed", err)
 	}
 	defer origin.Close()
-	stopOrigin := context.AfterFunc(deadlineCtx, func() { _ = origin.Close() })
+	stopOrigin := lease.Bind(origin)
 	defer stopOrigin()
 	if _, err = client.Write([]byte{0}); err != nil {
 		return classifyNativePrivateFailure("stream_open", "native_private_failed", err)

@@ -34,16 +34,25 @@ func TestBindingRequiresExactCurrentLoopbackTarget(t *testing.T) {
 	}
 }
 
-func TestBindingLifetimeAllowsBoundedClockSkew(t *testing.T) {
+func TestBindingExpiryGatesAdmissionButNotAdmittedShape(t *testing.T) {
 	now := time.Now().UTC()
 	binding := validBinding(now)
-	binding.ExpiresAt = now.Add(5*time.Minute + 3*time.Second)
+	// The trusted issuer configures credential TTL. The client does not impose
+	// another independently copied lifetime limit.
+	binding.ExpiresAt = now.Add(time.Hour)
 	if err := binding.Validate(now); err != nil {
-		t.Fatal("small client clock skew rejected:", err)
+		t.Fatal("issuer lifetime rejected", err)
 	}
-	binding.ExpiresAt = now.Add(5*time.Minute + 31*time.Second)
-	if !errors.Is(binding.Validate(now), ErrInvalid) {
-		t.Fatal("overlong grant accepted")
+	after := binding.ExpiresAt.Add(time.Second)
+	if err := binding.Validate(after); !errors.Is(err, ErrInvalid) {
+		t.Fatal("expired binding admitted new work", err)
+	}
+	if err := binding.ValidateShape(); err != nil {
+		t.Fatal("expiry invalidated admitted target shape", err)
+	}
+	binding.TargetAddress = "192.0.2.1:22"
+	if err := binding.ValidateShape(); !errors.Is(err, ErrInvalid) {
+		t.Fatal("admitted shape permitted target substitution", err)
 	}
 }
 

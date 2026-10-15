@@ -46,7 +46,16 @@ type Binding struct {
 }
 
 func (b Binding) Validate(now time.Time) error {
-	if b.Schema != SchemaV1 || !id(b.ResourceID) || !id(b.RouteID) || !id(b.OwnerEndpointID) || b.ResourceGeneration == 0 || b.RouteGeneration == 0 || b.TargetGeneration == 0 || !b.ExpiresAt.After(now) || b.ExpiresAt.Sub(now) > 5*time.Minute+30*time.Second {
+	if !b.ExpiresAt.After(now) {
+		return ErrInvalid
+	}
+	return b.ValidateShape()
+}
+
+// ValidateShape checks a previously admitted binding without reapplying its
+// credential deadline during live resource/revocation checks.
+func (b Binding) ValidateShape() error {
+	if b.Schema != SchemaV1 || !id(b.ResourceID) || !id(b.RouteID) || !id(b.OwnerEndpointID) || b.ResourceGeneration == 0 || b.RouteGeneration == 0 || b.TargetGeneration == 0 || b.ExpiresAt.IsZero() {
 		return ErrInvalid
 	}
 	if b.ResourceKind != "preview" && b.ResourceKind != "tunnel" && b.ResourceKind != "machine_service" || b.Protocol != "http" && b.Protocol != "tcp" {

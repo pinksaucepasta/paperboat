@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-relay/admission"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
 	"io"
 	"net/http"
@@ -17,16 +19,16 @@ import (
 // authoritative server before probing the origin and throughout the live flow.
 func (s *runtimeObservationSender) validateMachineService(ctx context.Context, binding nativeprivate.Binding) error {
 	if binding.ResourceKind != "machine_service" || binding.OwnerEndpointID != s.machineID || binding.InstallationGeneration != int64(s.installationGeneration) || binding.BootID != s.lazyBootID {
-		return errors.New("machine service runtime identity changed")
+		return admission.ErrRevoked
 	}
-	if err := binding.Validate(time.Now().UTC()); err != nil {
-		return err
+	if err := binding.ValidateShape(); err != nil {
+		return errors.Join(admission.ErrRevoked, err)
 	}
 	s.machineServicesMu.Lock()
 	announced := binding.AnnouncementGeneration == int64(s.machineServicesGeneration)
 	s.machineServicesMu.Unlock()
 	if !announced {
-		return errors.New("machine service snapshot or policy changed")
+		return admission.ErrRevoked
 	}
 	// Outer fields identify the authenticated accessor; the expected target uses
 	// the existing runtime authorization schema, without the duplicated actor IDs.
@@ -78,8 +80,11 @@ func (s *runtimeObservationSender) validateMachineService(ctx context.Context, b
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusNotFound {
+		return admission.ErrRevoked
+	}
 	if resp.StatusCode != http.StatusOK {
-		return errors.New("machine service authority unavailable or revoked")
+		return errorreport.HTTPStatusFailure(resp)
 	}
 	var result struct {
 		Data struct {
@@ -87,8 +92,8 @@ func (s *runtimeObservationSender) validateMachineService(ctx context.Context, b
 		} `json:"data"`
 	}
 	decoder := json.NewDecoder(io.LimitReader(resp.Body, 4097))
-	if decoder.Decode(&result) != nil || decoder.Decode(&struct{}{}) != io.EOF || !result.Data.ExpiresAt.After(time.Now().UTC()) {
-		return errors.New("machine service authority expired")
+	if decoder.Decode(&result) != nil || decoder.Decode(&struct{}{}) != io.EOF || result.Data.ExpiresAt.IsZero() {
+		return errors.New("machine service authority response invalid")
 	}
 	return nil
 }

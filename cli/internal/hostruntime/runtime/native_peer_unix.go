@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -75,7 +76,6 @@ type productionNativePeerGeneration struct {
 }
 
 const productionNativePeerRestartDelay = time.Second
-const productionNativePrivateCurrentInterval = time.Second
 
 var errNativePeerPending = errors.New("machine endpoint certificate is pending")
 
@@ -92,7 +92,10 @@ func localNativePrivateValidator(target interface {
 	ValidateNativePrivateTarget(nativeprivate.Binding) error
 }) productionNativePrivateValidator {
 	return func(_ context.Context, binding nativeprivate.Binding) error {
-		return target.ValidateNativePrivateTarget(binding)
+		if err := target.ValidateNativePrivateTarget(binding); err != nil {
+			return errors.Join(server.ErrNativePrivateBinding, err)
+		}
+		return nil
 	}
 }
 
@@ -101,38 +104,43 @@ func productionNativeCurrent(validators ...productionNativePrivateValidator) ser
 		return nil
 	}
 	validate := func(ctx context.Context, binding nativeprivate.Binding) error {
+		var unavailable error
 		for _, validator := range validators {
-			if validator != nil && validator(ctx, binding) == nil {
+			if validator == nil {
+				continue
+			}
+			err := validator(ctx, binding)
+			if err == nil {
 				return nil
 			}
+			if !errors.Is(err, server.ErrNativePrivateBinding) && !errors.Is(err, admission.ErrRevoked) {
+				unavailable = errors.Join(unavailable, err)
+			}
+		}
+		if unavailable != nil {
+			return unavailable
 		}
 		return server.ErrNativePrivateBinding
 	}
 	return func(ctx context.Context, binding nativeprivate.Binding) (time.Time, <-chan struct{}, error) {
-		if ctx == nil || validate(ctx, binding) != nil {
+		if ctx == nil {
 			return time.Time{}, nil, server.ErrNativePrivateBinding
 		}
-		revoked := make(chan struct{})
-		go func() {
-			timer := time.NewTicker(productionNativePrivateCurrentInterval)
-			expiry := time.NewTimer(time.Until(binding.ExpiresAt))
-			defer timer.Stop()
-			defer expiry.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-expiry.C:
-					close(revoked)
-					return
-				case <-timer.C:
-					if validate(ctx, binding) != nil {
-						close(revoked)
-						return
-					}
-				}
+		if err := validate(ctx, binding); err != nil {
+			return time.Time{}, nil, err
+		}
+		lease, err := admission.Admit(ctx, time.Time{}, nil)
+		if err != nil {
+			return time.Time{}, nil, err
+		}
+		lease.Poll(func(checkCtx context.Context) error {
+			err := validate(checkCtx, binding)
+			if errors.Is(err, server.ErrNativePrivateBinding) || errors.Is(err, admission.ErrRevoked) {
+				return admission.ErrRevoked
 			}
-		}()
+			return err
+		})
+		revoked := lease.Context().Done()
 		return binding.ExpiresAt, revoked, nil
 	}
 }

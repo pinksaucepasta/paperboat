@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"io"
 	"net"
 	"net/http"
@@ -116,17 +117,16 @@ func ServeNativePrivateHTTP3WithBindingDial(ctx context.Context, session *native
 		}
 		origin = session.MeterIncoming(origin, header, accessSessionID, true)
 		defer origin.Close()
-		lifetime, cancel := context.WithDeadline(request.Context(), validUntil)
-		defer cancel()
-		go func() {
-			select {
-			case <-lifetime.Done():
-				_ = origin.Close()
-			case <-revoked:
-				_ = origin.Close()
-			case <-request.Context().Done():
-			}
-		}()
+		lease, err := admission.Admit(request.Context(), validUntil, revoked)
+		if err != nil {
+			http.Error(writer, "private HTTP access denied", http.StatusForbidden)
+			return
+		}
+		defer lease.Close()
+		stopOrigin := lease.Bind(origin)
+		defer stopOrigin()
+		stopBody := lease.Bind(request.Body)
+		defer stopBody()
 		writer.WriteHeader(http.StatusOK)
 		if flusher, ok := writer.(http.Flusher); ok {
 			flusher.Flush()

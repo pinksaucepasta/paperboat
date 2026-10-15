@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/machineservices"
@@ -95,7 +96,8 @@ func TestMachineServiceAnnouncementPolicyAndWithdrawal(t *testing.T) {
 
 func TestMachineServiceCurrentAuthorityExactBinding(t *testing.T) {
 	calls := 0
-	denied := false
+	status := http.StatusOK
+	deadline := time.Now().Add(time.Minute)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		if r.URL.Path != "/v1/runtime-machine-services/authorize" || r.Header.Get("Authorization") != "Bearer runtime-observation-token" || r.Header.Get("X-Paperboat-Machine-Proof") == "" {
@@ -110,11 +112,11 @@ func TestMachineServiceCurrentAuthorityExactBinding(t *testing.T) {
 		if json.NewDecoder(r.Body).Decode(&body) != nil || body.UserID != "user_a" || body.CLI != "cli_a" || body.Access != "access_a" || body.Expected.TargetAddress != "127.0.0.1:3000" || body.Expected.UserID != "" {
 			t.Error("wrong exact actor/target body", body)
 		}
-		if denied {
-			w.WriteHeader(http.StatusForbidden)
+		if status != http.StatusOK {
+			w.WriteHeader(status)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"expires_at": time.Now().Add(time.Minute)}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"expires_at": deadline}})
 	}))
 	defer server.Close()
 	s := &runtimeObservationSender{endpoint: server.URL + "/v1/runtime-observations", machineID: "machine_a", environmentID: "env_a", installationGeneration: 7, lazyBootID: "boot_a", machineServicesGeneration: 3, tokens: livenessObservationTokenSource{}, proofs: livenessObservationProofSource{}, operationID: func() (string, error) { return "operation_a", nil }, client: server.Client()}
@@ -122,12 +124,20 @@ func TestMachineServiceCurrentAuthorityExactBinding(t *testing.T) {
 	if err := s.validateMachineService(context.Background(), b); err != nil {
 		t.Fatal(err)
 	}
-	denied = true
-	if err := s.validateMachineService(context.Background(), b); err == nil {
+	deadline = time.Now().Add(-time.Second)
+	if err := s.validateMachineService(context.Background(), b); err != nil {
+		t.Fatal("accepted flow treated credential metadata expiry as revocation", err)
+	}
+	status = http.StatusServiceUnavailable
+	if err := s.validateMachineService(context.Background(), b); err == nil || errors.Is(err, admission.ErrRevoked) {
+		t.Fatal("authority outage became explicit revocation", err)
+	}
+	status = http.StatusForbidden
+	if err := s.validateMachineService(context.Background(), b); !errors.Is(err, admission.ErrRevoked) {
 		t.Fatal("revocation accepted")
 	}
 	b.AnnouncementGeneration--
-	if err := s.validateMachineService(context.Background(), b); err == nil || calls != 2 {
+	if err := s.validateMachineService(context.Background(), b); err == nil || calls != 4 {
 		t.Fatal("stale snapshot reached authority", err, calls)
 	}
 }

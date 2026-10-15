@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"io"
 	"net"
 	"net/http"
@@ -194,24 +195,17 @@ func (c *NativeDispatchClient) Current(ctx context.Context, binding nativeprivat
 	if !response.ValidUntil.After(time.Now()) {
 		return time.Time{}, nil, ErrNativePrivateBinding
 	}
-	revoked := make(chan struct{})
-	lifetime, cancel := context.WithDeadline(ctx, response.ValidUntil)
-	go func() {
-		defer cancel()
-		defer close(revoked)
-		tick := time.NewTicker(time.Second)
-		defer tick.Stop()
-		for {
-			select {
-			case <-lifetime.Done():
-				return
-			case <-tick.C:
-				_, next, err := c.call(lifetime, "current", nil, &binding, false)
-				if err != nil || !next.ValidUntil.After(time.Now()) {
-					return
-				}
-			}
+	lease, err := admission.Admit(ctx, response.ValidUntil, nil)
+	if err != nil {
+		return time.Time{}, nil, err
+	}
+	lease.Poll(func(checkCtx context.Context) error {
+		_, _, err := c.call(checkCtx, "current", nil, &binding, false)
+		if errors.Is(err, ErrStreamAuthorization) || errors.Is(err, hostdproto.ErrFenced) {
+			return admission.ErrRevoked
 		}
-	}()
+		return err
+	})
+	revoked := lease.Context().Done()
 	return response.ValidUntil, revoked, nil
 }

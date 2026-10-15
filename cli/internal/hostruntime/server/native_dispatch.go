@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
 	"io"
 	"net"
@@ -238,13 +239,21 @@ func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandl
 			// a caller-selected network, hostname or filesystem path.
 			encoded, encodeErr := json.Marshal(binding)
 			verified, verifyErr := nativeprivate.Decode(encoded, time.Now().UTC())
+			if operation == "current" {
+				verified = binding
+				verifyErr = binding.ValidateShape()
+			}
 			if encodeErr != nil || verifyErr != nil {
 				http.Error(w, "invalid dispatch binding", http.StatusBadRequest)
 				return
 			}
 			var revoked <-chan struct{}
 			response.ValidUntil, revoked, err = config.Current(r.Context(), verified)
-			if err != nil || !response.ValidUntil.After(time.Now()) {
+			if err != nil && !errors.Is(err, ErrNativePrivateBinding) && !errors.Is(err, admission.ErrRevoked) {
+				http.Error(w, "dispatch authority unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			if err != nil || operation == "private" && !response.ValidUntil.After(time.Now()) {
 				http.Error(w, "dispatch binding denied", http.StatusForbidden)
 				return
 			}
@@ -262,8 +271,13 @@ func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandl
 					http.Error(w, "dispatch unavailable", http.StatusServiceUnavailable)
 					return
 				}
-				lifetime, cancel := context.WithDeadline(r.Context(), response.ValidUntil)
-				defer cancel()
+				lease, err := admission.Admit(r.Context(), response.ValidUntil, revoked)
+				if err != nil {
+					http.Error(w, "dispatch binding denied", http.StatusForbidden)
+					return
+				}
+				defer lease.Close()
+				lifetime := lease.Context()
 				if config.CaptureStore != nil && verified.Protocol == "http" {
 					resourceID := verified.RouteID
 					if verified.ResourceKind == "preview" {
