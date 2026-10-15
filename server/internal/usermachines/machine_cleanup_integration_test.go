@@ -157,7 +157,7 @@ VALUES ($1, $2, $3, $4, $5, 1, 1, $6, $7, $8, $9, $10)`, certificate.fingerprint
 	}
 	// Enrolled network identities replaced retired per-attempt peer intents.
 	// Keep both machines registered so deletion must fence the target only.
-	for index, peer := range []struct {
+	for _, peer := range []struct {
 		machine     string
 		certificate [sha256.Size]byte
 	}{
@@ -168,7 +168,7 @@ VALUES ($1, $2, $3, $4, $5, 1, 1, $6, $7, $8, $9, $10)`, certificate.fingerprint
 		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.peer_network_identities
  (user_id,endpoint_id,role,machine_id,endpoint_generation,machine_generation,key_generation,
  wireguard_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at)
- VALUES($1,$2,'machine',$2,1,1,1,$3,$4,$5,$6,$6)`, userID, peer.machine, wireguard[:], peer.certificate[:], fmt.Sprintf("127.100.254.%d", index+1), now); err != nil {
+ VALUES($1,$2,'machine',$2,1,1,1,$3,$4,('fd7a:115c:a1e0::'::inet + nextval('paperboat.peer_network_virtual_address_seq')),$5,$5)`, userID, peer.machine, wireguard[:], peer.certificate[:], now); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -191,7 +191,7 @@ INSERT INTO paperboat.machine_ssh_host_key_owners
 VALUES ($1, $2, 'ssh-ed25519', $3, $4)`, sshHostFingerprint[:], machineID, hostSSHPublicKey, now); err != nil {
 		t.Fatal(err)
 	}
-	sshSetID := "sshks_" + suffix
+	sshSetID := newID("keyset")
 	if _, err := store.SQL().ExecContext(ctx, `
 INSERT INTO paperboat.machine_ssh_host_key_sets
   (id, user_machine_id, machine_generation, observation_generation, set_fingerprint,
