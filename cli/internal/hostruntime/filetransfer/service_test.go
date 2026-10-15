@@ -729,6 +729,11 @@ func TestCancelActiveWaitsForAppendBeforeRemovingPartial(t *testing.T) {
 			cancelDone := make(chan error, 1)
 			go func() { cancelDone <- service.CancelActive(context.Background()) }()
 			select {
+			case <-service.CancellationSignal(id):
+			case <-time.After(time.Second):
+				t.Fatal("cancel did not signal the active append")
+			}
+			select {
 			case err := <-cancelDone:
 				t.Fatalf("cancel returned before active append closed: %v", err)
 			case <-time.After(50 * time.Millisecond):
