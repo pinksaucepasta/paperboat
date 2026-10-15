@@ -145,9 +145,8 @@ works on Windows-only failures until after launch.
   the `get.pprbt.dev` one-liners. **Launch has no Apple certificate (user decision 2026-10-15):**
   no macOS `.pkg` and no notarization; the one-liner downloads the ad-hoc-signed darwin binary
   with curl (no quarantine attribute), verifies it against TUF and runs `pb install`. Windows
-  installer is after launch (1.1). Publishing to the public download repo uses the `gh`
-  authentication already on this machine or a write deploy key Lane B creates with it; the
-  user creates no tokens. `.pkg` + notarization come when there is an Apple Developer account.
+  installer is after launch (1.1). Releases publish to this repo's GitHub Releases (1.5) with the
+  workflow's own token; the user creates no tokens. `.pkg` + notarization come when there is an Apple Developer account.
 - **Server, relay and tunnel** are released as Docker images for **linux/amd64 and
   linux/arm64** (`ghcr.io/pinksaucepasta/paperboat-server`, `…-relay`, `…-tunnel`).
 - **The server has no curl installer and is not installed by `pbh`.** We run it ourselves on the
@@ -201,9 +200,10 @@ consumers. 1.4c's shared admission/reattach packages also move into `shared/`.
 
 ### 1.5 Repository and process
 
-- This monorepo lives at github.com/pinksaucepasta/paperboat (**private**; licence later,
-  **USER DECIDES**). Push `main` after every commit. Release binaries need a public download
-  host — see S3.
+- This monorepo lives at github.com/pinksaucepasta/paperboat and **becomes public (user decision
+  2026-10-15)**, after a full-history secret scan comes back clean; licence **USER DECIDES**.
+  Releases are published on this repo's GitHub Releases (no separate download repo).
+  Push `main` after every commit.
 - One commit per fix; device builds only from a clean committed tree; device smoke suite
   after every device build (AGENTS.md).
 
