@@ -8,6 +8,9 @@ import unittest
 import socket
 import socketserver
 import threading
+from types import SimpleNamespace
+from unittest.mock import patch
+import uninstall_inventory
 
 from install_path import windows_executable
 from uninstall_inventory import retained
@@ -71,6 +74,101 @@ class PairingNetworkFault(unittest.TestCase):
 
 
 class UninstallInventoryPreservation(unittest.TestCase):
+    def test_inventory_detects_owned_hosts_and_resolvers_among_clean_os_metadata(self):
+        cases = [('Linux', 'hosts'), ('Darwin', 'hosts'), ('Darwin', 'resolver'),
+                 ('Linux', 'none'), ('Darwin', 'none')]
+        for platform, kind in cases:
+            with self.subTest(platform=platform, kind=kind), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                hosts = root / 'hosts'
+                hosts.write_text('127.0.0.1 localhost\n# PaperboatHostsSectionStartSuffix\n' +
+                                 ('# PaperboatHostsSectionStart\n127.100.1.2 fixture.example.test\n'
+                                  '# PaperboatHostsSectionEnd\n' if kind == 'hosts' else ''))
+                resolver = root / 'resolver'
+                resolver.mkdir()
+                if kind == 'resolver':
+                    (resolver / 'owned.example.test').write_text(
+                        '# Managed by Paperboat machine guard\nnameserver 127.0.0.1\n')
+                (resolver / 'unowned.example.test').write_text(
+                    'nameserver 192.0.2.1\n# Managed by Paperboat machine guard\n')
+                before = {item: item.read_bytes() for item in [hosts, *resolver.iterdir()]}
+                account = SimpleNamespace(pw_dir=str(root / 'home'), pw_uid=65432, pw_name='fixture')
+                leftovers = self.inventory_with_other_os_state_clean(
+                    account, {'/etc/hosts': hosts, '/etc/resolver': resolver}, platform)
+                if kind == 'none':
+                    self.assertEqual(leftovers, {})
+                else:
+                    self.assertTrue(leftovers, 'inventory missed owned DNS configuration')
+                for item, contents in before.items():
+                    self.assertEqual(item.read_bytes(), contents, 'inventory changed system configuration')
+
+    @staticmethod
+    def inventory_with_other_os_state_clean(account, paths, platform='Linux'):
+        # Only unrelated OS metadata is simulated. Ownership checks read actual
+        # fixture files at the same inventory boundary used on real devices.
+        real_glob = uninstall_inventory.glob.glob
+        def run(arguments):
+            absent_secret = arguments[0] == 'sudo' and 'security' in arguments
+            return subprocess.CompletedProcess(arguments, 44 if absent_secret else 0,
+                                               'COMMAND\n' if arguments[:2] == ['ps', '-axo'] else '', '')
+
+        def path(value):
+            return paths.get(str(value), pathlib.Path(value))
+
+        def glob(pattern):
+            parent = str(pathlib.Path(pattern).parent)
+            return real_glob(str(paths[parent] / pathlib.Path(pattern).name)) if parent in paths else []
+
+        trust = SimpleNamespace(get_ca_certs=lambda: [])
+        with patch.object(uninstall_inventory, 'run', run), \
+             patch.object(uninstall_inventory, 'Path', path), \
+             patch.object(uninstall_inventory.glob, 'glob', glob), \
+             patch.object(uninstall_inventory.ssl, 'create_default_context', return_value=trust), \
+             patch.object(uninstall_inventory.os, 'uname', return_value=SimpleNamespace(sysname=platform)):
+            return uninstall_inventory.inventory(account, pathlib.Path(account.pw_dir) / 'Inbox')
+
+    def test_inventory_counts_only_owned_system_and_user_manual_pages(self):
+        for location in ('system', 'user'):
+            for owned in (False, True):
+                with self.subTest(location=location, owned=owned), tempfile.TemporaryDirectory() as directory:
+                    root = pathlib.Path(directory)
+                    home = root / 'home'
+                    system = root / 'system-man1'
+                    section = system if location == 'system' else home / '.local/share/man/man1'
+                    section.mkdir(parents=True)
+                    page = section / 'pb-personal.1'
+                    marker = b'.\\" Paperboat managed manual v1\n'
+                    content = (marker if owned else b'') + b'synthetic manual fixture\n'
+                    page.write_bytes(content)
+                    hosts = root / 'hosts'
+                    hosts.write_bytes(b'127.0.0.1 localhost\n')
+                    account = SimpleNamespace(pw_dir=str(home), pw_uid=65432, pw_name='fixture')
+                    leftovers = self.inventory_with_other_os_state_clean(
+                        account, {'/etc/hosts': hosts, '/usr/local/share/man/man1': system})
+                    self.assertEqual(bool(leftovers), owned, 'manual inventory ignored ownership')
+                    self.assertEqual(page.read_bytes(), content, 'inventory changed a manual page')
+
+    def test_inventory_finds_legacy_ssh_blocks_but_not_unowned_comments(self):
+        for kind in ('legacy', 'include', 'unowned'):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                home = root / 'home'
+                ssh = home / '.ssh/config'
+                ssh.parent.mkdir(parents=True)
+                contents = {
+                    'legacy': b'# BEGIN paperboat-managed-ssh-v1\nHost fixture\n# END paperboat-managed-ssh-v1\n',
+                    'include': b'Include "paperboat_config" # paperboat-managed-ssh-include-v1\n',
+                    'unowned': b'# Discuss paperboat-managed-ssh-include-v1\nHost fixture\n',
+                }[kind]
+                ssh.write_bytes(contents)
+                hosts = root / 'hosts'
+                hosts.write_bytes(b'127.0.0.1 localhost\n')
+                account = SimpleNamespace(pw_dir=str(home), pw_uid=65432, pw_name='fixture')
+                leftovers = self.inventory_with_other_os_state_clean(account, {'/etc/hosts': hosts})
+                self.assertEqual(bool(leftovers), kind != 'unowned', 'SSH inventory ignored ownership')
+                self.assertEqual(ssh.read_bytes(), contents, 'inventory changed SSH configuration')
+
+
     def test_preserved_inbox_does_not_hide_owned_state_or_symlinks(self):
         with tempfile.TemporaryDirectory() as directory:
             owned = pathlib.Path(directory) / "product"
