@@ -490,7 +490,7 @@ that use them; say which in Evidence.
 |---|---|---|---|---|---|
 | F12-01 | Create, get, list, delete a team (payment handled in F13). | [ ] | [ ] | [ ] | — |
 | F12-02 | Invite by email (also people without an account), accept, decline, cancel, invitations listing. | [ ] | [ ] | [ ] | — |
-| F12-03 | Roles owner/admin/member; change role; remove member; leave; transfer ownership. | [ ] | [ ] | [ ] | — |
+| F12-03 | Roles owner/admin/member; change role; remove member; leave; transfer ownership. | [ ] | [ ] | [ ] | —  Server TestPostgresUnifiedLifecycleNoRevivedAuthority: isolated VPS PG PASS0.51s after typed-endpoint fixture repair; device qualification pending. |
 | F12-04 | Team machines: enroll into team, share personal machine, grant, unshare, transfer-to-team, remove; default access shown while enrolling. | [ ] | [ ] | [ ] | — |
 | F12-05 | Explicit resource grants and `pb team attach`; `pb team activity`. | [ ] | [ ] | [ ] | — |
 | F12-06 | Suspension and recovery behave as documented. | [ ] | [ ] | [ ] | — |
