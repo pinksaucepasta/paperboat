@@ -91,7 +91,8 @@ come before everything else you own, including later rows, tidy-ups and other la
 and you work them until they are `[x]` or truly `[!]`. A lane that waits writes exactly one such
 line naming the rows it needs.
 
-**Keep going until done.** A lane works its rows in PLAN.md order and does not stop until every
+**Feature rows first** (PLAN.md section 3): no S-row or code reorganization unless a feature row
+needs it. **Keep going until done.** A lane works its rows in PLAN.md order and does not stop until every
 row it owns is `[x]` or `[!]`. Do not ask the user to confirm routine choices. `[!]` means blocked on something
 specific (named in Evidence); rows that simply come later in PLAN.md order stay `[ ]`; one Log
 line says which section the lane is waiting for. When a row is
