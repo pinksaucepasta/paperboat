@@ -23,7 +23,7 @@ func qualifiedSubsetBundle(t *testing.T) (string, map[string]any) {
 		t.Fatal(err)
 	}
 	targets := document["signed"].(map[string]any)["targets"].(map[string]any)
-	target := targets["pb-windows-arm64.exe"].(map[string]any)
+	target := targets["pb-linux-arm64"].(map[string]any)
 	customBody, _ := json.Marshal(target["custom"])
 	customBody = []byte(strings.ReplaceAll(string(customBody), testVersion, "2026.08.24.0"))
 	var custom map[string]any
@@ -56,7 +56,7 @@ func TestReadCurrentQualifiedSubset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("legitimate omitted platform version rejected: %v", err)
 	}
-	if current.Version != testVersion || current.Assets["pb-windows-arm64.exe"].Version != "2026.08.24.0" || current.Assets["pb-linux-amd64"].Version != testVersion {
+	if current.Version != testVersion || current.Assets["pb-linux-arm64"].Version != "2026.08.24.0" || current.Assets["pb-linux-amd64"].Version != testVersion {
 		t.Fatal("per-platform publication versions were not preserved")
 	}
 	if err := Ready(directory); err != nil {
@@ -69,7 +69,7 @@ func TestReadCurrentQualifiedSubsetRejectsTampering(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			directory, document := qualifiedSubsetBundle(t)
 			targets := document["signed"].(map[string]any)["targets"].(map[string]any)
-			target := targets["pb-windows-arm64.exe"].(map[string]any)
+			target := targets["pb-linux-arm64"].(map[string]any)
 			custom := target["custom"].(map[string]any)
 			switch kind {
 			case "hash":
@@ -81,7 +81,7 @@ func TestReadCurrentQualifiedSubsetRejectsTampering(t *testing.T) {
 			case "index":
 				custom["release_index"].(map[string]any)["version"] = testVersion
 			case "missing_platform":
-				delete(targets, "pb-windows-arm64.exe")
+				delete(targets, "pb-linux-arm64")
 			}
 			writeSubsetMetadata(t, directory, document)
 			if _, err := ReadCurrent(directory); err == nil {
