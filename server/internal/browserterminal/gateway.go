@@ -154,7 +154,7 @@ func (g *Gateway) release(browserSessionID string) {
 	}
 }
 
-// Account and code guests resolve through distinct authoritative boundaries.
+// GuestAuthorizer resolves account and code guests through distinct authoritative boundaries.
 type GuestAuthorizer interface {
 	ResolveGuestRole(context.Context, string, string) (Decision, error)
 }

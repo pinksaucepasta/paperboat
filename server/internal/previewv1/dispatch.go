@@ -26,10 +26,7 @@ var (
 	ErrDispatchRejected    = errors.New("preview dispatch rejected")
 )
 
-// DispatchRequest is the secret-free, operation-bound lease projection sent
-// to the selected host. Its field order and canonical hash are part of the
-// host/server protocol. RequestHash excludes itself and covers every other
-// field, including LeaseETag.
+// LazyBinding pins activation to the current policy, installation and runtime boot.
 type LazyBinding struct {
 	PolicyID               string `json:"policy_id"`
 	PolicyGeneration       int64  `json:"policy_generation"`
@@ -37,6 +34,10 @@ type LazyBinding struct {
 	BootID                 string `json:"boot_id"`
 }
 
+// DispatchRequest is the secret-free, operation-bound lease projection sent
+// to the selected host. Its field order and canonical hash are part of the
+// host/server protocol. RequestHash excludes itself and covers every other
+// field, including LeaseETag.
 type DispatchRequest struct {
 	Lazy               *LazyBinding `json:"lazy,omitempty"`
 	Schema             string       `json:"schema"`

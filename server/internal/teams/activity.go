@@ -11,7 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 )
 
-// Team activity is administrative metadata. The fixed 90-day retention boundary
+// DefaultActivityLimit bounds administrative metadata pages. The fixed 90-day retention boundary
 // in queries below matches migration 185's audit-integrity trigger; it is not
 // a runtime setting or a resource lifetime.
 const DefaultActivityLimit = 50

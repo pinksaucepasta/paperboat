@@ -126,7 +126,7 @@ func RevokeMachineEnvironmentTx(ctx context.Context, tx *Tx, environmentID strin
 	return nil
 }
 
-// Device removal fences delivery so removed and still-connected devices stop receiving ENV; it never requires key rotation.
+// FenceRemovedMachineVaultTx fences delivery so removed and still-connected devices stop receiving ENV; it never requires key rotation.
 func FenceRemovedMachineVaultTx(ctx context.Context, tx *Tx, account string) error {
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(160235)`); err != nil {
 		return err

@@ -138,10 +138,6 @@ func (s *Service) reserveBandwidthForMachineTx(ctx context.Context, tx *db.Tx, m
 	return reservation, nil
 }
 
-func (s *Service) ensureCurrentBandwidthPeriod(ctx context.Context, tx *db.Tx, machine dbsqlc.UserMachine) (dbsqlc.UserMachineBandwidthPeriod, error) {
-	return s.ensureCurrentBandwidthPeriodAt(ctx, tx, machine, s.now().UTC())
-}
-
 func (s *Service) ensureCurrentBandwidthPeriodAt(ctx context.Context, tx *db.Tx, machine dbsqlc.UserMachine, now time.Time) (dbsqlc.UserMachineBandwidthPeriod, error) {
 	entitlement, err := tx.Queries().GetUserMachineEntitlementForUpdate(ctx, machine.UserID)
 	if errors.Is(err, sql.ErrNoRows) {

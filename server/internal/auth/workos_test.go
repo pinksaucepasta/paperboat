@@ -212,7 +212,7 @@ func (workosReadFailureBody) Close() error               { return nil }
 type workosReadFailureRoundTripper struct{ err error }
 
 func (t workosReadFailureRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
-	return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: workosReadFailureBody{err: t.err}}, nil
+	return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: workosReadFailureBody(t)}, nil
 }
 
 func TestHTTPWorkOSVerifierPreservesResponseReadCause(t *testing.T) {

@@ -103,7 +103,7 @@ func (s *Service) NativeLinkStatus(ctx context.Context, user, client, id string,
 	return item, err
 }
 
-// Launch consumes the one-use launch capability and binds the operation to the
+// LaunchNativeLink consumes the one-use launch capability and binds the operation to the
 // browser before showing its explicit account confirmation page.
 func (s *Service) LaunchNativeLink(ctx context.Context, id, token, browser string) (string, error) {
 	var email string

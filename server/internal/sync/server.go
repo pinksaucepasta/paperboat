@@ -34,7 +34,7 @@ func (s *Server) Addr() string       { return s.listener.Addr().String() }
 func (s *Server) Done() <-chan error { return s.done }
 func (s *Server) Stop()              { s.grpcServer.Stop(); _ = s.listener.Close() }
 
-// Persistent streams cannot gracefully drain without client cooperation.
+// GracefulStop bounds shutdown because persistent streams require client cooperation.
 func (s *Server) GracefulStop() {
 	done := make(chan struct{})
 	go func() { s.grpcServer.GracefulStop(); close(done) }()

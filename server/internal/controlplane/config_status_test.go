@@ -126,28 +126,28 @@ func TestConfigAccountStatusUsesCanonicalAssignmentsConsentAndStatus(t *testing.
 	ctx := context.Background()
 	suffix := strings.ReplaceAll(t.Name(), "/", "_")
 	user := "status_user_" + suffix
-	machine_aEnvironment := "status_machine_a_" + suffix
+	machineAEnvironment := "status_machine_a_" + suffix
 	machineEnvironment := "status_machine_" + suffix
 	repository := "status_repo_" + suffix
 	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
-	machine_aHelper, machineHelper := "helper_machine_a_"+suffix, "helper_machine_"+suffix
-	machine_aAssignment, machineAssignment := "assignment_machine_a_"+suffix, "assignment_machine_"+suffix
+	machineAHelper, machineHelper := "helper_machine_a_"+suffix, "helper_machine_"+suffix
+	machineAAssignment, machineAssignment := "assignment_machine_a_"+suffix, "assignment_machine_"+suffix
 	statements := []struct {
 		query string
 		args  []any
 	}{
 		{`INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, []any{user, "workos_" + user, user + "@example.test"}},
 		{`INSERT INTO paperboat.control_config_repositories (id,owner_user_id,provider,external_ref,display_name,state) VALUES ($1,$2,'github',$1,'owner/config','active')`, []any{repository, user}},
-		{`INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$1,$3),($2,$2,$3)`, []any{machine_aEnvironment, machineEnvironment, user}},
-		{`INSERT INTO paperboat.control_helpers (id,environment_id,state,generation) VALUES ($1,$2,'active',1),($3,$4,'active',1)`, []any{machine_aHelper, machine_aEnvironment, machineHelper, machineEnvironment}},
-		{`INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state) VALUES ($1,$3,$4,'Machine','linux','unknown','/workspace','online'),($2,$3,$5,'Laptop','darwin','arm64','/Users/test','online')`, []any{"machine_a_machine_" + suffix, "machine_" + suffix, user, machine_aEnvironment, machineEnvironment}},
-		{`INSERT INTO paperboat.control_config_assignments (id,machine_id,environment_id,repository_id,consent_state,warning_revision,accepted_at,configuration_revision) VALUES ($1,$2,$3,$4,'accepted','warning-1',now(),repeat('a',64)),($5,$6,$7,$4,'pending','warning-1',NULL,repeat('a',64))`, []any{machine_aAssignment, "machine_a_machine_" + suffix, machine_aEnvironment, repository, machineAssignment, "machine_" + suffix, machineEnvironment}},
+		{`INSERT INTO paperboat.control_environments (id,workspace_id,owner_user_id) VALUES ($1,$1,$3),($2,$2,$3)`, []any{machineAEnvironment, machineEnvironment, user}},
+		{`INSERT INTO paperboat.control_helpers (id,environment_id,state,generation) VALUES ($1,$2,'active',1),($3,$4,'active',1)`, []any{machineAHelper, machineAEnvironment, machineHelper, machineEnvironment}},
+		{`INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state) VALUES ($1,$3,$4,'Machine','linux','unknown','/workspace','online'),($2,$3,$5,'Laptop','darwin','arm64','/Users/test','online')`, []any{"machine_a_machine_" + suffix, "machine_" + suffix, user, machineAEnvironment, machineEnvironment}},
+		{`INSERT INTO paperboat.control_config_assignments (id,machine_id,environment_id,repository_id,consent_state,warning_revision,accepted_at,configuration_revision) VALUES ($1,$2,$3,$4,'accepted','warning-1',now(),repeat('a',64)),($5,$6,$7,$4,'pending','warning-1',NULL,repeat('a',64))`, []any{machineAAssignment, "machine_a_machine_" + suffix, machineAEnvironment, repository, machineAssignment, "machine_" + suffix, machineEnvironment}},
 		{`INSERT INTO paperboat.control_config_sync_statuses
 		  (environment_id,repository_id,assignment_id,machine_id,installation_generation,
 		   warning_revision,policy_revision,sync_revision,state,
 		   pending_clean_path_count,machine_updated_at,observed_at)
 		  VALUES ($1,$2,$3,$4,1,'warning-1','policy-1',2,'healthy',0,$5,$5)`,
-			[]any{machine_aEnvironment, repository, machine_aAssignment, "machine_a_machine_" + suffix, now}},
+			[]any{machineAEnvironment, repository, machineAAssignment, "machine_a_machine_" + suffix, now}},
 	}
 	for _, statement := range statements {
 		if _, err := store.SQL().ExecContext(ctx, statement.query, statement.args...); err != nil {
@@ -188,7 +188,7 @@ func TestConfigAccountStatusUsesCanonicalAssignmentsConsentAndStatus(t *testing.
 			t.Fatal("filter applied after limit")
 		}
 	}
-	for _, environment := range []string{machine_aEnvironment, machineEnvironment, "unrelated_environment"} {
+	for _, environment := range []string{machineAEnvironment, machineEnvironment, "unrelated_environment"} {
 		page, err := service.AccountInventory(ctx, user, ConfigStatusInventoryOptions{Limit: 1, EnvironmentID: environment})
 		if err != nil {
 			t.Fatal(err)
@@ -205,7 +205,7 @@ func TestConfigAccountStatusUsesCanonicalAssignmentsConsentAndStatus(t *testing.
 	for _, environment := range status.Environments {
 		states[environment.EnvironmentID] = environment.State
 	}
-	if states[machine_aEnvironment] != "healthy" || states[machineEnvironment] != "consent_required" {
+	if states[machineAEnvironment] != "healthy" || states[machineEnvironment] != "consent_required" {
 		t.Fatalf("states = %#v", states)
 	}
 }

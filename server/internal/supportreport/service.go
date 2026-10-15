@@ -501,8 +501,7 @@ func (s *Service) SDKSubmissionsDropped() uint64 {
 	return s.sdkSubmissionsDropped.Load()
 }
 
-// SDKSubmissionsDropped counts known server-side admission and SDK processor
-// rejections. The SDK's internal HTTP batch queue does not expose a drop count.
+// FlushStatus reports local SDK shutdown progress, not proof of delivery.
 func (s *Service) FlushStatus() string {
 	if s == nil || s.client == nil {
 		return "disabled"

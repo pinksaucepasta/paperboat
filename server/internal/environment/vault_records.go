@@ -330,7 +330,7 @@ func (s *Service) GetVaultRecord(ctx context.Context, account string, c VaultLay
 	return out, err
 }
 
-// Machine records are selected from the same fresh authorized launch context;
+// ListVaultHostRecords selects records from the same fresh authorized launch context;
 // callers cannot name another member's private coordinate.
 func (s *Service) ListVaultHostRecords(ctx context.Context, machineOwner, machine, actor, workspace string, c VaultLayerCoordinate, q VaultRecordsQuery) (VaultRecordsPage, error) {
 	var out VaultRecordsPage

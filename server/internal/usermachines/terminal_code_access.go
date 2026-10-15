@@ -271,7 +271,7 @@ func (s *Service) ResolveTerminalGuestRole(ctx context.Context, guestID, session
 	return s.completeTerminalBrowserRoute(ctx, decision)
 }
 
-// Browser metadata is read only after an exact current grant; guests never receive inventory.
+// TerminalBrowserSession reads metadata after an exact current grant; guests receive no inventory.
 func (s *Service) TerminalBrowserSession(ctx context.Context, accountID, guestID, sessionID string) (SharedTerminalSession, error) {
 	var decision TerminalBrowserDecision
 	var err error

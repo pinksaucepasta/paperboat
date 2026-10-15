@@ -191,14 +191,13 @@ func TestPackagedHelperTeamEnrollmentAndPlacementOnPostgres(t *testing.T) {
 			t.Fatalf("enrolled runtime state epoch=%q state=%s ready=%t generation=%d", epoch, state, ready, generation)
 		}
 	}
-	installations := append([]Installation(nil), ownerInstalls...)
 	adminAddress, adminCode := startTeamEnrollmentHelper(t, binary, "relay")
 	service.DialAddress = func(context.Context, string) (string, error) { dials.Add(1); return adminAddress, nil }
 	adminInstalls, err := service.Enroll(ctx, admin, EnrollRequest{Address: adminAddress, Code: adminCode, Scope: scope}, false)
 	if err != nil || len(adminInstalls) != 3 {
 		t.Fatalf("admin enrollment: %v", err)
 	}
-	installations = adminInstalls
+	installations := adminInstalls
 	for _, installation := range installations {
 		if installation.ScopeKind != "team" || installation.ScopeID != team {
 			t.Fatal("claim escaped team scope")

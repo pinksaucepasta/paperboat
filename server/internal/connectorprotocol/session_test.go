@@ -79,39 +79,6 @@ type stagedApplier struct {
 	events              chan string
 }
 
-type testDrainer struct {
-	mu         sync.Mutex
-	active     uint32
-	stopCalls  int
-	forceCalls int
-	stopErr    error
-	activeErr  error
-	forceErr   error
-}
-
-func (d *testDrainer) StopNewStreams(context.Context) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.stopCalls++
-	return d.stopErr
-}
-
-func (d *testDrainer) ActiveStreams(context.Context) (uint32, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.active, d.activeErr
-}
-
-func (d *testDrainer) ForceClose(context.Context) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.forceCalls++
-	if d.forceErr == nil {
-		d.active = 0
-	}
-	return d.forceErr
-}
-
 func (a *stagedApplier) PrepareSnapshot(context.Context, wire.Snapshot) (wire.PreparedConfig, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -183,49 +150,4 @@ func testSessionPair(t *testing.T) (*wire.ServerSession, *wire.ClientSession, *t
 	}
 	_ = private
 	return serverSession, client, clock, applier, snapshot
-}
-
-func testPendingSessionPair(t *testing.T) (*wire.ServerSession, *wire.ClientSession, *testClock, wire.Snapshot) {
-	t.Helper()
-	now := time.Date(2026, 8, 30, 10, 0, 0, 0, time.UTC)
-	clock := &testClock{now: now}
-	auth, _ := testAuth(t, now, 1)
-	snapshot, err := wire.NewSnapshot("tunnel_1", 1, testConfigPayload(1, "preview.example.test"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	server, err := wire.NewServer(wire.ServerConfig{
-		Authenticator: wire.AuthenticatorFuncs{AuthenticateFunc: func(context.Context, wire.AuthRequest) (wire.AuthResult, error) {
-			return wire.AuthResult{AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, HostID: auth.HostID, IdentityKeyID: auth.IdentityKeyID, IdentityKeyThumbprint: auth.IdentityKeyThumbprint, ProcessGeneration: auth.ProcessGeneration, CredentialGeneration: auth.CredentialGeneration, CredentialExpiresAt: now.Add(time.Hour), LeaseExpiresAt: now.Add(time.Hour)}, nil
-		}},
-		Snapshots:    wire.SnapshotSourceFunc(func(context.Context, string) (wire.Snapshot, error) { return snapshot, nil }),
-		Capabilities: requiredCapabilityList(), Clock: clock, LeaseDuration: time.Minute, HeartbeatInterval: 10 * time.Second,
-		SessionIDs: func() (string, error) { return "sess_pending", nil },
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	serverSession, welcome, first, err := server.Accept(context.Background(), wire.Hello{Protocol: wire.ProtocolName, MinVersion: "1.0", MaxVersion: "1.0", AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, HostID: auth.HostID, ProcessGeneration: auth.ProcessGeneration, Capabilities: requiredCapabilityList(), Auth: auth})
-	if err != nil {
-		t.Fatal(err)
-	}
-	applier := &stagedApplier{}
-	client, err := wire.NewClientSession(wire.ClientSessionConfig{Hello: wire.Hello{Protocol: wire.ProtocolName, MinVersion: "1.0", MaxVersion: "1.0", AccountID: auth.AccountID, TunnelID: auth.TunnelID, ConnectorID: auth.ConnectorID, HostID: auth.HostID, ProcessGeneration: auth.ProcessGeneration, Capabilities: requiredCapabilityList(), Auth: auth}, Applier: applier, Clock: clock})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := client.AcceptWelcome(welcome); err != nil {
-		t.Fatal(err)
-	}
-	ack, err := client.ApplySnapshot(context.Background(), first)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := serverSession.HandleAck(context.Background(), ack); err != nil {
-		t.Fatal(err)
-	}
-	if serverSession.State() != wire.SessionAwaitingReady || client.State() != wire.SessionAwaitingReady {
-		t.Fatalf("pending states server=%s client=%s", serverSession.State(), client.State())
-	}
-	return serverSession, client, clock, snapshot
 }

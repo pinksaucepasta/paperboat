@@ -12,8 +12,6 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 )
 
-// ResolveTx must run while the caller holds the resource row lock, shared with
-// placement changes. Self-hosted workspaces never fall back to a managed endpoint.
 // ResolveTargetsTx returns the complete DNS address set for at most two selected
 // self-hosted edges. Observed ingress addresses, rather than operator claims,
 // own public DNS. The resource lock fences this selection against mode changes.

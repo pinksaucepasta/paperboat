@@ -1,10 +1,10 @@
 package httpapi
 
 import (
- wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"io"
 	"mime"
 	"net/http"

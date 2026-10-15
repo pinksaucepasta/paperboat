@@ -20,11 +20,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat-server/internal/previewtunnelapi"
 	"github.com/pinksaucepasta/paperboat-server/internal/publicationdns"
 	"github.com/pinksaucepasta/paperboat-server/internal/tunnelcert"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"golang.org/x/net/idna"
 	"golang.org/x/net/publicsuffix"
 )

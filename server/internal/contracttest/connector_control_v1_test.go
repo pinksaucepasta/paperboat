@@ -1,9 +1,9 @@
 package contracttest
 
 import (
- wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"bufio"
 	"encoding/json"
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"os"
 	"path/filepath"
 	"testing"

@@ -35,9 +35,7 @@ var (
 
 const previewDomainQuarantine = 7 * 24 * time.Hour
 
-// PreviewLeaseRecord combines the stable lease row with its lifecycle sidecar.
-// Generation is deliberately not exposed by the v1 resource schema, but is
-// required for strong HTTP ETags and all lease mutations.
+// EdgeMode selects managed or self-hosted publication edges.
 type EdgeMode string
 
 const (
@@ -45,6 +43,9 @@ const (
 	EdgeModeSelfhost EdgeMode = "self-hosted-only"
 )
 
+// PreviewLeaseRecord combines the stable lease row with its lifecycle sidecar.
+// Generation is deliberately not exposed by the v1 resource schema, but is
+// required for strong HTTP ETags and all lease mutations.
 type PreviewLeaseRecord struct {
 	dbsqlc.PreviewLease
 	// PublicEndpoint is a presentation projection; Endpoint remains activation identity.

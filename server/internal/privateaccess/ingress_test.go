@@ -3,8 +3,8 @@ package privateaccess
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"syscall"
 	"testing"
 	"time"

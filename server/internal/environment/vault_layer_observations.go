@@ -48,7 +48,7 @@ func layerObservationMatches(o VaultLayerObservation, d VaultLayerDelivery) bool
 	return err == nil && len(public) == 32 && d.State == "ready" && o.coordinate() == d.Source.VaultLayerCoordinate && o.DeliveryGeneration == d.Recipient.DeliveryGeneration && o.DocumentID == d.Recipient.DocumentID && o.FenceGeneration == d.Recipient.FenceGeneration && o.HostRecipientKeyID == vaultHostKeyID(public)
 }
 
-// Reports are metadata only. Authenticate the current recipient before replaying
+// RecordVaultLayerObservations records metadata only. Authenticate the current recipient before replaying
 // a receipt; an old successful operation cannot restore a revoked host's access.
 func (s *Service) RecordVaultLayerObservations(ctx context.Context, account, machine string, in VaultLayerObservationsPut) (VaultLayerObservationsAck, error) {
 	out := VaultLayerObservationsAck{OperationID: in.OperationID, Accepted: true}

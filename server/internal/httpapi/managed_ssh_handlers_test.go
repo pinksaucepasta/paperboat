@@ -1,9 +1,9 @@
 package httpapi
 
 import (
- wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 	"encoding/json"
 	"errors"
+	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 	"net/http"
 	"net/http/httptest"
 	"syscall"

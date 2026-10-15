@@ -14,9 +14,9 @@ import (
 
 type vaultScopesHTTPStub struct {
 	*environment.Service
-	account, workspaceID, kind, owner, machine string
-	calls                                      int
-	err                                        error
+	account, kind, owner, machine string
+	calls                         int
+	err                           error
 }
 
 func (s *vaultScopesHTTPStub) PutVaultScope(_ context.Context, account, workspaceID, kind, owner, machine string, _ environment.VaultScopePut) (environment.VaultScopeState, error) {

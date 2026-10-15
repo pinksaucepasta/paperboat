@@ -170,13 +170,8 @@ func (g *Gateway) ServeEdgeControl(w http.ResponseWriter, r *http.Request, nodeI
 	disconnected := make(chan struct{})
 	go func() {
 		defer close(disconnected)
-		for {
-			if _, _, err := connection.Read(r.Context()); err != nil {
-				return
-			}
-			// The edge never sends terminal data on the control connection.
-			return
-		}
+		// A read error or any unsolicited terminal data ends control ownership.
+		_, _, _ = connection.Read(r.Context())
 	}()
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()

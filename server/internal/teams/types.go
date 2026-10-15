@@ -26,7 +26,7 @@ const MaximumMembers = 128
 const MaximumInvitations = 128
 const MaximumResources = 128
 
-// Exact stored-result/digest reconciliation covers the latest 4096 operations
+// MaximumOperationReceipts bounds exact stored-result/digest reconciliation to 4096 operations
 // per account. Older requests still cannot repeat effects: team generations,
 // permanent team IDs and single-use invitations reject stale requests. Clients
 // refresh current team state after Conflict, Expired or NotFound.

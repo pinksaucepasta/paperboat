@@ -1,9 +1,9 @@
 package browseringress
 
 import (
- wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"context"
 	"database/sql"
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"net"
 	"time"
 

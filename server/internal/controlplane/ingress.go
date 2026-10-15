@@ -1,8 +1,8 @@
 package controlplane
 
 import (
- wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-server/internal/accountingauthority"
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"net/http"
 
 	"github.com/pinksaucepasta/paperboat-server/internal/connectorprotocol"

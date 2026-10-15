@@ -1,7 +1,6 @@
 package app
 
 import (
- wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -64,6 +63,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
 	"github.com/pinksaucepasta/paperboat-server/internal/workers"
 	"github.com/pinksaucepasta/paperboat-server/internal/workspace"
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"log/slog"
 	"net/http"
 	"runtime"

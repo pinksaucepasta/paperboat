@@ -760,7 +760,7 @@ func validReturn(v string) bool {
 		}
 	}
 	u, e := url.Parse(v)
-	return e == nil && u.IsAbs() == false && u.Host == "" && u.User == nil
+	return e == nil && !u.IsAbs() && u.Host == "" && u.User == nil
 }
 func secret(prefix string) (string, error) {
 	var b [32]byte

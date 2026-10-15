@@ -170,9 +170,9 @@ func TestMachineEndpointStatusReturnsOnlyApprovedPublicAuthority(t *testing.T) {
 	}
 	var envelope struct {
 		Data struct {
-			State       string                      `json:"state"`
-			TrustedKeys []wire.TrustedKeyDocument        `json:"trusted_keys"`
-			Certificate wire.CertificateDocument `json:"certificate"`
+			State       string                    `json:"state"`
+			TrustedKeys []wire.TrustedKeyDocument `json:"trusted_keys"`
+			Certificate wire.CertificateDocument  `json:"certificate"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil || envelope.Data.State != "approved" || len(envelope.Data.TrustedKeys) != 1 || envelope.Data.TrustedKeys[0].KeyID != keyID || envelope.Data.Certificate.Certificate != base64.RawURLEncoding.EncodeToString(raw) {

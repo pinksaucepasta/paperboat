@@ -48,12 +48,3 @@ func rotationVerifier(keys map[string]ed25519.PrivateKey) wire.RotationOldProofV
 		return nil
 	}
 }
-
-type recoveryRotationStore struct {
-	*wire.MemoryRotationPersistence
-	loaded wire.RotationResume
-}
-
-func (s *recoveryRotationStore) LoadCredentialRotation(context.Context, wire.RotationPlan) (wire.RotationResume, error) {
-	return s.loaded, nil
-}

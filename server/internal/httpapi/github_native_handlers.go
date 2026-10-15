@@ -100,22 +100,22 @@ func githubNativeLaunch(service *pbgithub.Service) http.HandlerFunc {
 		}
 		origin := service.NativeBrowserOrigin()
 		if origin == "" || r.Header.Get("Origin") != origin {
-			http.Error(w, "GitHub connection origin was not verified.", 403)
+			http.Error(w, "GitHub connection origin was not verified.", http.StatusForbidden)
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, 4096)
 		if err := r.ParseForm(); err != nil {
-			http.Error(w, "Invalid request.", 400)
+			http.Error(w, "Invalid request.", http.StatusBadRequest)
 			return
 		}
 		cookie, err := nativeGitHubBrowserCookie(r)
 		if err != nil || !hmac.Equal([]byte(cookie), []byte(r.PostForm.Get("csrf"))) {
-			http.Error(w, "GitHub connection browser was not verified.", 403)
+			http.Error(w, "GitHub connection browser was not verified.", http.StatusForbidden)
 			return
 		}
 		action := r.PostForm.Get("action")
 		if action != "continue" && action != "cancel" {
-			http.Error(w, "Invalid action.", 400)
+			http.Error(w, "Invalid action.", http.StatusBadRequest)
 			return
 		}
 		redirect, err := service.AuthorizeNativeLink(r.Context(), r.PathValue("link_id"), cookie, action == "cancel")
@@ -180,7 +180,7 @@ func githubCallbackDispatch(service *pbgithub.Service, browser http.Handler) htt
 		githubNativeHeaders(w, service)
 		binding, err := nativeGitHubBrowserCookie(r)
 		if err != nil {
-			http.Error(w, "GitHub connection browser was not verified. Return to Paperboat and retry.", 403)
+			http.Error(w, "GitHub connection browser was not verified. Return to Paperboat and retry.", http.StatusForbidden)
 			return
 		}
 		if err := service.CompleteNativeLink(r.Context(), state, binding, r.URL.Query().Get("code")); err != nil {

@@ -11,7 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 )
 
-// Machine grants are typed details of the team's existing resource binding.
+// MachineGrant describes the team's existing resource binding.
 // Administrative roles govern mutations; they never imply use capabilities.
 type MachineGrant struct {
 	MachineID    string   `json:"machine_id"`

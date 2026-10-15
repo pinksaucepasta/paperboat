@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 func testClock() time.Time { return time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC) }

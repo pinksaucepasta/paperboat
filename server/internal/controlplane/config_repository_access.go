@@ -308,14 +308,6 @@ func safeRepositoryCoordinate(raw string) bool {
 		parsed.RawQuery == "" && parsed.Fragment == "" && strings.HasSuffix(parsed.Path, ".git")
 }
 
-func currentWarningRevision(ctx context.Context, store *db.DB, environmentID string) string {
-	assignment, err := store.Queries().GetControlConfigAssignment(ctx, environmentID)
-	if err != nil || !assignment.WarningRevision.Valid {
-		return ""
-	}
-	return assignment.WarningRevision.String
-}
-
 func (s *ConfigRepositoryAccessService) RevocationWorker(interval time.Duration, batchSize int32) func(context.Context) error {
 	if interval <= 0 {
 		interval = time.Minute

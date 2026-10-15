@@ -125,11 +125,11 @@ func TestSelfhostRegisteredRelayProcessOnPostgres(t *testing.T) {
 	api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/test/native-relay/revoke" {
 			if r.Method != "POST" || r.Header.Get("Authorization") != "Bearer "+installed.RuntimeCredential {
-				http.Error(w, "denied", 403)
+				http.Error(w, "denied", http.StatusForbidden)
 				return
 			}
 			if _, e := s.SetPool(r.Context(), account, "relay", selfhost.Policy{Mode: "mixed", InstallationIDs: []string{}}); e != nil {
-				http.Error(w, "revocation failed", 503)
+				http.Error(w, "revocation failed", http.StatusServiceUnavailable)
 				return
 			}
 			w.WriteHeader(204)
