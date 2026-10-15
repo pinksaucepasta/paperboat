@@ -4629,10 +4629,10 @@ SET availability_observed_mode=$1,
     host_update_rollbacks=greatest(host_update_rollbacks, $8),
     update_health=$9, updated_at=now()
 WHERE id=$10 AND environment_id=$11 AND deleted_at IS NULL
-  AND $2 <= availability_desired_version
+  AND $2 = availability_desired_version
+  AND ($4 <> 'applied' OR $1 = availability_mode)
   AND (availability_observed_at IS NULL OR $2 > availability_observed_version OR (
     $2 = availability_observed_version
-    AND availability_observed_mode IS NOT DISTINCT FROM $1
     AND $3 >= availability_observed_at
     AND $8 >= host_update_rollbacks
   ))

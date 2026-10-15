@@ -154,14 +154,14 @@ func (s *Service) RecordAvailabilityObservation(ctx context.Context, environment
 		if err != nil {
 			return err
 		}
-		if observation.Version != machine.AvailabilityDesiredVersion || observation.Version < machine.AvailabilityObservedVersion {
+		if observation.Version != machine.AvailabilityDesiredVersion || observation.Version < machine.AvailabilityObservedVersion || observation.Status == "applied" && observation.Mode != machine.AvailabilityMode {
 			return ErrAvailabilityObservationStale
 		}
 		if observation.Version == machine.AvailabilityObservedVersion && machine.AvailabilityObservedAt.Valid {
-			if machine.AvailabilityObservedMode.String != observation.Mode || observation.UpdateRollbacks < machine.HostUpdateRollbacks || observation.ObservedAt.Before(machine.AvailabilityObservedAt.Time) {
+			if observation.UpdateRollbacks < machine.HostUpdateRollbacks || observation.ObservedAt.Before(machine.AvailabilityObservedAt.Time) {
 				return ErrAvailabilityObservationStale
 			}
-			if machine.AvailabilityStatus == observation.Status && machine.AvailabilityErrorCode.String == observation.ErrorCode && machine.HostServiceVersion.String == observation.HostServiceVersion && machine.HostServiceScope.String == observation.HostServiceScope && machine.HostUpdateRollbacks == observation.UpdateRollbacks && machine.UpdateHealth == observation.UpdateHealth {
+			if machine.AvailabilityObservedMode.String == observation.Mode && machine.AvailabilityStatus == observation.Status && machine.AvailabilityErrorCode.String == observation.ErrorCode && machine.HostServiceVersion.String == observation.HostServiceVersion && machine.HostServiceScope.String == observation.HostServiceScope && machine.HostUpdateRollbacks == observation.UpdateRollbacks && machine.UpdateHealth == observation.UpdateHealth {
 				return nil
 			}
 		}

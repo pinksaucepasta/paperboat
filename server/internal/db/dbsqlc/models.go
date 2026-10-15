@@ -2852,6 +2852,16 @@ type UserMachinePairing struct {
 	CancelledAt                          sql.NullTime
 }
 
+type UserMachinePairingReset struct {
+	EnrollmentID         string
+	EnrollmentGeneration int64
+	AccountID            string
+	VerifierHash         []byte
+	RequestHash          []byte
+	RetiredMachineIds    []byte
+	CompletedAt          time.Time
+}
+
 type UserMachineTerminalSession struct {
 	ID                           string
 	UserMachineID                string

@@ -569,10 +569,10 @@ SET availability_observed_mode=sqlc.arg(observed_mode),
     host_update_rollbacks=greatest(host_update_rollbacks, sqlc.arg(update_rollbacks)),
     update_health=sqlc.arg(update_health), updated_at=now()
 WHERE id=sqlc.arg(id) AND environment_id=sqlc.arg(environment_id) AND deleted_at IS NULL
-  AND sqlc.arg(observed_version) <= availability_desired_version
+  AND sqlc.arg(observed_version) = availability_desired_version
+  AND (sqlc.arg(status) <> 'applied' OR sqlc.arg(observed_mode) = availability_mode)
   AND (availability_observed_at IS NULL OR sqlc.arg(observed_version) > availability_observed_version OR (
     sqlc.arg(observed_version) = availability_observed_version
-    AND availability_observed_mode IS NOT DISTINCT FROM sqlc.arg(observed_mode)
     AND sqlc.arg(observed_at) >= availability_observed_at
     AND sqlc.arg(update_rollbacks) >= host_update_rollbacks
   ));

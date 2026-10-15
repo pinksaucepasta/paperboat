@@ -1464,6 +1464,40 @@ func TestAvailabilityPolicyLifecycle(t *testing.T) {
 	if first.DesiredMode != "keep_awake" || first.DesiredVersion != 1 || first.Status != "pending" {
 		t.Fatalf("first policy = %+v", first)
 	}
+	mismatched := initialObservation
+	mismatched.Version = first.DesiredVersion
+	mismatched.ObservedAt = initialObservedAt.Add(time.Millisecond)
+	if err := service.RecordAvailabilityObservation(ctx, environmentID, machineID, mismatched); !errors.Is(err, ErrAvailabilityObservationStale) {
+		t.Fatalf("applied observation for a different desired mode: %v", err)
+	}
+	var observedMode, observedStatus string
+	var observedVersion int64
+	if err := store.SQL().QueryRowContext(ctx, `SELECT availability_observed_mode,availability_observed_version,availability_status FROM paperboat.user_machines WHERE id=$1`, machineID).Scan(&observedMode, &observedVersion, &observedStatus); err != nil {
+		t.Fatal(err)
+	}
+	if observedMode != initialObservation.Mode || observedVersion != initialObservation.Version || observedStatus != "pending" {
+		t.Fatal("rejected availability acknowledgement changed observed state")
+	}
+	failedObservation := mismatched
+	failedObservation.Status, failedObservation.ErrorCode = "error", "keep_awake_failed"
+	if err := service.RecordAvailabilityObservation(ctx, environmentID, machineID, failedObservation); err != nil {
+		t.Fatalf("failed application must report actual old mode: %v", err)
+	}
+	changedActual := failedObservation
+	changedActual.Mode = first.DesiredMode
+	changedActual.ObservedAt = failedObservation.ObservedAt.Add(time.Millisecond)
+	if err := service.RecordAvailabilityObservation(ctx, environmentID, machineID, changedActual); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SQL().QueryRowContext(ctx, `SELECT availability_observed_mode FROM paperboat.user_machines WHERE id=$1`, machineID).Scan(&observedMode); err != nil || observedMode != changedActual.Mode {
+		t.Fatal("changed actual mode was mistaken for an identical failed observation")
+	}
+	recoveredObservation := failedObservation
+	recoveredObservation.Mode, recoveredObservation.Status, recoveredObservation.ErrorCode = first.DesiredMode, "applied", ""
+	recoveredObservation.ObservedAt = changedActual.ObservedAt.Add(time.Millisecond)
+	if err := service.RecordAvailabilityObservation(ctx, environmentID, machineID, recoveredObservation); err != nil {
+		t.Fatalf("same desired version cannot recover from failed application: %v", err)
+	}
 	second, err := service.SetAvailabilityPolicy(ctx, userID, machineID, "availability-second", "allow_sleep", 1)
 	if err != nil {
 		t.Fatal(err)
