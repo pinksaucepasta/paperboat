@@ -1,31 +1,6 @@
 module github.com/pinksaucepasta/paperboat-server
 
-go 1.27.1
-
-require (
-	github.com/aws/aws-sdk-go-v2 v1.41.5
-	github.com/aws/aws-sdk-go-v2/config v1.32.11
-	github.com/aws/aws-sdk-go-v2/credentials v1.19.11
-	github.com/aws/aws-sdk-go-v2/service/s3 v1.97.3
-	github.com/aws/smithy-go v1.24.2
-	github.com/coder/websocket v1.8.14
-	github.com/felixge/httpsnoop v1.0.4
-	github.com/fxamacker/cbor/v2 v2.9.3
-	github.com/getsentry/sentry-go v0.49.0
-	github.com/google/go-github/v88 v88.0.0
-	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.9.2
-	github.com/jackc/puddle/v2 v2.2.2
-	github.com/miekg/dns v1.1.68
-	github.com/ory/dockertest/v3 v3.12.0
-	github.com/pressly/goose/v3 v3.26.0
-	github.com/realclientip/realclientip-go v1.0.0
-	github.com/xeipuuv/gojsonschema v1.2.0
-	golang.org/x/crypto v0.57.0
-	golang.org/x/net v0.58.0
-	google.golang.org/grpc v1.83.2
-	google.golang.org/protobuf v1.36.12
-)
+go 1.27.2
 
 require (
 	dario.cat/mergo v1.0.0 // indirect
@@ -82,6 +57,30 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
-require github.com/pinksaucepasta/paperboat/shared v0.0.0
+require (
+	github.com/aws/aws-sdk-go-v2 v1.41.5
+	github.com/aws/aws-sdk-go-v2/config v1.32.11
+	github.com/aws/aws-sdk-go-v2/credentials v1.19.11
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.97.3
+	github.com/aws/smithy-go v1.24.2
+	github.com/coder/websocket v1.8.14
+	github.com/felixge/httpsnoop v1.0.4
+	github.com/fxamacker/cbor/v2 v2.9.3
+	github.com/getsentry/sentry-go v0.49.0
+	github.com/google/go-github/v88 v88.0.0
+	github.com/google/uuid v1.6.0
+	github.com/jackc/pgx/v5 v5.9.2
+	github.com/jackc/puddle/v2 v2.2.2
+	github.com/miekg/dns v1.1.68
+	github.com/ory/dockertest/v3 v3.12.0
+	github.com/pinksaucepasta/paperboat/shared v0.0.0
+	github.com/pressly/goose/v3 v3.26.0
+	github.com/realclientip/realclientip-go v1.0.0
+	github.com/xeipuuv/gojsonschema v1.2.0
+	golang.org/x/crypto v0.57.0
+	golang.org/x/net v0.60.0
+	google.golang.org/grpc v1.83.2
+	google.golang.org/protobuf v1.36.12
+)
 
 replace github.com/pinksaucepasta/paperboat/shared => ../shared

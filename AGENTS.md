@@ -26,7 +26,7 @@ Machine access and credentials are in `REMOTE_TESTING.md` (local only, never com
 | `tools/device-smoke/` | device smoke suite (see below) |
 
 Go modules are bound by the root `go.work`; build and test from the repo root or a
-component directory. Go 1.27.1.
+component directory. Go 1.27.2.
 
 ## How we work
 
