@@ -229,7 +229,7 @@ func TestOpenSSHExecutorInheritsForegroundTTYAndRestoresTerminal(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, shell, "--noprofile", "--norc", "-i")
+	command := exec.CommandContext(ctx, shell, "--noprofile", "--norc", "--noediting", "-i")
 	command.Env = append(os.Environ(), "PB_EXECUTOR_HELPER=terminal_parent", "PS1=PB_PROMPT> ")
 	terminal, err := pty.Start(command)
 	if err != nil {
