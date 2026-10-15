@@ -51,7 +51,7 @@ type TicketAuthority interface {
 
 type Gateway struct {
 	AdmissionLifetime    time.Duration
-	RecordUsageAdmission func(context.Context, string, string, string, string, time.Time) error
+	RecordUsageAdmission func(context.Context, string, string, string, string, string, time.Time) error
 	Tickets              TicketAuthority
 	Authorizer           Authorizer
 	Signer               *mint.Provider

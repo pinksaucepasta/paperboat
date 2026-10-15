@@ -32,7 +32,7 @@ func resourceUsageGet(service *resourceusage.Service) http.HandlerFunc {
 			scope = workspace.Scope{ID: "personal"}
 		}
 		values := r.URL.Query()
-		allowed := map[string]bool{"workspace": true, "start": true, "end": true, "resource_id": true, "resource_kind": true, "resource_route_id": true, "machine_id": true, "mode": true, "hosting": true, "limit": true, "offset": true, "path_limit": true, "path_offset": true}
+		allowed := map[string]bool{"workspace": true, "actor_account_id": true, "start": true, "end": true, "resource_id": true, "resource_kind": true, "resource_route_id": true, "machine_id": true, "mode": true, "hosting": true, "limit": true, "offset": true, "path_limit": true, "path_offset": true}
 		for key, entries := range values {
 			if !allowed[key] || len(entries) != 1 {
 				writeError(w, r, 400, "invalid_usage_query", "Usage filters must be supported and occur once.")
@@ -70,7 +70,12 @@ func resourceUsageGet(service *resourceusage.Service) http.HandlerFunc {
 			writeError(w, r, http.StatusBadRequest, "invalid_usage_query", "Choose RFC3339 start and end timestamps within a 90-day window.")
 			return
 		}
-		result, err := service.Get(r.Context(), p.User.ID, scope, resourceusage.Query{Start: start, End: end, ResourceID: values.Get("resource_id"), Mode: values.Get("mode"), Hosting: values.Get("hosting"), ResourceKind: values.Get("resource_kind"), RouteID: route, MachineID: machine, Limit: limit, Offset: offset, PathLimit: pathLimit, PathOffset: pathOffset})
+		query := resourceusage.Query{ActorAccountID: values.Get("actor_account_id"), Start: start, End: end, ResourceID: values.Get("resource_id"), Mode: values.Get("mode"), Hosting: values.Get("hosting"), ResourceKind: values.Get("resource_kind"), RouteID: route, MachineID: machine, Limit: limit, Offset: offset, PathLimit: pathLimit, PathOffset: pathOffset}
+		if query.Validate(time.Now().UTC()) != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_usage_query", "Choose valid usage filters and a time window of at most 90 days.")
+			return
+		}
+		result, err := service.Get(r.Context(), p.User.ID, scope, query)
 		switch {
 		case errors.Is(err, resourceusage.ErrInvalid):
 			writeError(w, r, http.StatusBadRequest, "invalid_usage_query", "Choose valid usage filters and a time window of at most 90 days.")

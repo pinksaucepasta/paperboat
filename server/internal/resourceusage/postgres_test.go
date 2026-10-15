@@ -161,7 +161,7 @@ func TestPostgresBandwidthHistory(t *testing.T) {
 	}()
 	browserEnd := time.Now().UTC().Add(time.Second)
 	browserStart := browserEnd.Truncate(time.Minute)
-	if err := service.RecordBrowserAdmission(ctx, attachment, machine, terminal, edgeNode, browserEnd.Add(5*time.Minute)); err != nil {
+	if err := service.RecordBrowserAdmission(ctx, attachment, machine, terminal, edgeNode, a, browserEnd.Add(5*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	browser := NativeReport{AccessSessionID: attachment, StreamID: attachment, Consumer: "terminal", Mode: "edge", IntervalStart: browserStart, IntervalEnd: browserEnd, Upload: 17, Download: 19}
@@ -290,6 +290,7 @@ func TestPostgresBandwidthHistory(t *testing.T) {
 		}
 	})
 
+	assertTeamMemberHistory(t, store, service, suffix, a, b, now)
 }
 
 func TestUsageBounds(t *testing.T) {

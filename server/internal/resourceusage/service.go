@@ -22,6 +22,7 @@ const MaxPaths = 32
 var ErrInvalid = errors.New("invalid usage window or filter")
 
 type Query struct {
+	ActorAccountID                          string
 	Start, End                              time.Time
 	ResourceID, ResourceKind, Mode, Hosting string
 	RouteID, MachineID                      *string
@@ -91,6 +92,9 @@ type Service struct {
 
 func New(store *db.DB) *Service { return &Service{Store: store} }
 func (q Query) Validate(now time.Time) error {
+	if len(q.ActorAccountID) > 256 || strings.TrimSpace(q.ActorAccountID) != q.ActorAccountID || !utf8.ValidString(q.ActorAccountID) {
+		return ErrInvalid
+	}
 	if q.Start.IsZero() || !q.End.After(q.Start) || q.End.Sub(q.Start) > MaxWindow || q.End.After(now.Add(time.Minute)) || len(q.ResourceID) > 256 {
 		return ErrInvalid
 	}
@@ -120,7 +124,7 @@ func (q Query) Validate(now time.Time) error {
 	return nil
 }
 
-const predicate = ` e.workspace_id=$1 AND e.interval_end>=$2 AND e.interval_end<$3 AND ($4='' OR e.resource_id=$4) AND ($5='' OR e.mode=$5) AND ($6='' OR e.hosting=$6) AND ($7='' OR e.resource_kind=$7) AND (NOT $8::boolean OR e.resource_route_id=$9) AND (NOT $10::boolean OR e.machine_id=$11) `
+const predicate = ` e.workspace_id=$1 AND e.interval_end>=$2 AND e.interval_end<$3 AND ($4='' OR e.resource_id=$4) AND ($5='' OR e.mode=$5) AND ($6='' OR e.hosting=$6) AND ($7='' OR e.resource_kind=$7) AND (NOT $8::boolean OR e.resource_route_id=$9) AND (NOT $10::boolean OR e.machine_id=$11) AND ($12='' OR e.actor_account_id=$12) `
 
 func (s *Service) Get(ctx context.Context, account string, scope workspace.Scope, q Query) (Result, error) {
 	now := time.Now().UTC()
@@ -128,6 +132,9 @@ func (s *Service) Get(ctx context.Context, account string, scope workspace.Scope
 		now = s.Now().UTC()
 	}
 	out := Result{Start: q.Start.UTC(), End: q.End.UTC(), Resources: []Resource{}, Series: []Point{}, Coverage: Coverage{Edge: true, Native: true, Note: "History covers the past 90 days. Native traffic appears after a machine is updated; some earlier traffic may be missing. Traffic is grouped by the time each report ended."}}
+	if q.ActorAccountID != "" {
+		out.Coverage.Note += " Member totals include only traffic with a retained actor."
+	}
 	if err := q.Validate(now); err != nil {
 		return out, err
 	}
@@ -148,7 +155,7 @@ func (s *Service) Get(ctx context.Context, account string, scope workspace.Scope
 	if q.MachineID != nil {
 		machine = *q.MachineID
 	}
-	args := []any{ws, q.Start, q.End, q.ResourceID, q.Mode, q.Hosting, q.ResourceKind, q.RouteID != nil, route, q.MachineID != nil, machine}
+	args := []any{ws, q.Start, q.End, q.ResourceID, q.Mode, q.Hosting, q.ResourceKind, q.RouteID != nil, route, q.MachineID != nil, machine, q.ActorAccountID}
 	err := s.Store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if err := workspace.ValidateTx(ctx, tx, account, scope); err != nil {
 			return err
@@ -192,7 +199,7 @@ func (s *Service) Get(ctx context.Context, account string, scope workspace.Scope
 			bucket = "day"
 		}
 		seriesArgs := append(append([]any{}, args...), bucket)
-		rows, err := tx.Query(ctx, `SELECT date_trunc($12,interval_end AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',sum(upload_bytes)::bigint,sum(download_bytes)::bigint FROM resource_bandwidth_events e WHERE `+predicate+` GROUP BY 1 ORDER BY 1`, seriesArgs...)
+		rows, err := tx.Query(ctx, `SELECT date_trunc($13,interval_end AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',sum(upload_bytes)::bigint,sum(download_bytes)::bigint FROM resource_bandwidth_events e WHERE `+predicate+` GROUP BY 1 ORDER BY 1`, seriesArgs...)
 		if err != nil {
 			return err
 		}
@@ -217,13 +224,13 @@ func (s *Service) Get(ctx context.Context, account string, scope workspace.Scope
 		detailArgs := append(append([]any{}, args...), q.Limit, q.Offset, q.PathLimit, q.PathOffset)
 		rows, err = tx.Query(ctx, `WITH selected AS (
           SELECT resource_kind,resource_id,resource_route_id,machine_id,max(resource_name) resource_name,max(machine_name) machine_name,sum(upload_bytes)::bigint upload,sum(download_bytes)::bigint download FROM resource_bandwidth_events e WHERE `+predicate+`
-          GROUP BY resource_kind,resource_id,resource_route_id,machine_id ORDER BY resource_kind,resource_id,resource_route_id,machine_id LIMIT $12 OFFSET $13
+          GROUP BY resource_kind,resource_id,resource_route_id,machine_id ORDER BY resource_kind,resource_id,resource_route_id,machine_id LIMIT $13 OFFSET $14
         ) SELECT r.resource_kind,r.resource_id,r.resource_route_id,r.resource_name,r.machine_id,r.machine_name,r.upload,r.download,c.total,p.mode,p.hosting,p.node_id,p.node_name,p.upload,p.download
         FROM selected r CROSS JOIN LATERAL (
           SELECT count(*) total FROM (SELECT 1 FROM resource_bandwidth_events e WHERE `+predicate+` AND e.resource_kind=r.resource_kind AND e.resource_id=r.resource_id AND e.resource_route_id=r.resource_route_id AND e.machine_id=r.machine_id GROUP BY mode,hosting,node_id) paths
         ) c LEFT JOIN LATERAL (
           SELECT mode,hosting,node_id,max(node_name) node_name,sum(upload_bytes)::bigint upload,sum(download_bytes)::bigint download FROM resource_bandwidth_events e WHERE `+predicate+` AND e.resource_kind=r.resource_kind AND e.resource_id=r.resource_id AND e.resource_route_id=r.resource_route_id AND e.machine_id=r.machine_id
-          GROUP BY mode,hosting,node_id ORDER BY mode,hosting,node_id LIMIT $14 OFFSET $15
+          GROUP BY mode,hosting,node_id ORDER BY mode,hosting,node_id LIMIT $15 OFFSET $16
         ) p ON true ORDER BY r.resource_kind,r.resource_id,r.resource_route_id,r.machine_id,p.mode,p.hosting,p.node_id`, detailArgs...)
 		if err != nil {
 			return err

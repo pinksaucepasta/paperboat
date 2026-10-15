@@ -117,7 +117,7 @@ func (g *Gateway) admitEdge(ctx context.Context, input EdgeControlRequest, nodeI
 		return edgeAdmission{}, nil, err
 	}
 	if g.RecordUsageAdmission != nil {
-		if err := g.RecordUsageAdmission(ctx, attachmentID, decision.MachineID, ticket.TerminalSessionID, nodeID, credential.ExpiresAt); err != nil {
+		if err := g.RecordUsageAdmission(ctx, attachmentID, decision.MachineID, ticket.TerminalSessionID, nodeID, actorAccountID, credential.ExpiresAt); err != nil {
 			release()
 			return edgeAdmission{}, nil, err
 		}

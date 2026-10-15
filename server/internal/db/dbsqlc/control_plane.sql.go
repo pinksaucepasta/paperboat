@@ -2786,7 +2786,7 @@ func (q *Queries) GetControlUsageCounterForUpdate(ctx context.Context, arg GetCo
 }
 
 const getControlUsageReceipt = `-- name: GetControlUsageReceipt :one
-SELECT operation_id, edge_node_id, counter_epoch, environment_id, route_id, route_revision, direction, observed_bytes, delta_bytes, interval_start, interval_end, acknowledged_at, created_at, authority_id, workspace_id, disposition, quota_exhausted FROM control_usage_receipts WHERE operation_id = $1
+SELECT operation_id, edge_node_id, counter_epoch, environment_id, route_id, route_revision, direction, observed_bytes, delta_bytes, interval_start, interval_end, acknowledged_at, created_at, authority_id, workspace_id, disposition, quota_exhausted, actor_account_id FROM control_usage_receipts WHERE operation_id = $1
 `
 
 func (q *Queries) GetControlUsageReceipt(ctx context.Context, operationID string) (ControlUsageReceipt, error) {
@@ -2810,6 +2810,7 @@ func (q *Queries) GetControlUsageReceipt(ctx context.Context, operationID string
 		&i.WorkspaceID,
 		&i.Disposition,
 		&i.QuotaExhausted,
+		&i.ActorAccountID,
 	)
 	return i, err
 }
@@ -3629,7 +3630,7 @@ VALUES
    $7, $8, $9, $10,
    $11, $12)
 ON CONFLICT (operation_id) DO NOTHING
-RETURNING operation_id, edge_node_id, counter_epoch, environment_id, route_id, route_revision, direction, observed_bytes, delta_bytes, interval_start, interval_end, acknowledged_at, created_at, authority_id, workspace_id, disposition, quota_exhausted
+RETURNING operation_id, edge_node_id, counter_epoch, environment_id, route_id, route_revision, direction, observed_bytes, delta_bytes, interval_start, interval_end, acknowledged_at, created_at, authority_id, workspace_id, disposition, quota_exhausted, actor_account_id
 `
 
 type InsertControlUsageReceiptParams struct {
@@ -3681,6 +3682,7 @@ func (q *Queries) InsertControlUsageReceipt(ctx context.Context, arg InsertContr
 		&i.WorkspaceID,
 		&i.Disposition,
 		&i.QuotaExhausted,
+		&i.ActorAccountID,
 	)
 	return i, err
 }

@@ -397,13 +397,17 @@ privacy policy, reporting configuration and retention are documented in
 
 `GET /v1/usage?start=<RFC3339>&end=<RFC3339>&workspace=<personal-or-team>`
 returns accepted upload/download measurements for the authenticated active workspace.
-Optional `resource_id`, `mode` (`direct`, `relay`, `edge`, `unknown`) and `hosting`
+Optional `actor_account_id`, `resource_id`, `mode` (`direct`, `relay`, `edge`, `unknown`) and `hosting`
 (`managed`, `self_hosted`, `none`, `unknown`) filter both totals and details. Windows
 span at most 90 days; history retains the past 90 days. Measurement interval ends
 fall in the half-open `[start,end)` window. Series use UTC hours through 48 hours
 and UTC days thereafter. Detail limits are 200 resources and 32 paths per resource;
 `truncated` exposes omissions while totals and series retain all matching bytes.
 `resource_route_id` distinguishes machine service ports without inventing resource IDs.
+`actor_account_id` selects the retained member responsible for traffic inside that exact workspace;
+it filters totals, series and both detail pages together. Native reporting never accepts an actor
+from the machine: the server snapshots it from admitted authority. Earlier unattributed team traffic
+remains in workspace totals and is omitted from member-filtered results.
 `updated_at` is the latest actual workspace report/measurement (year 0001 when absent).
 
 `POST /v1/usage/native` uses the current signed machine identity and exact-body

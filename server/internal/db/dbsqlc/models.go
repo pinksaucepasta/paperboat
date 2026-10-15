@@ -863,6 +863,7 @@ type ControlUsageReceipt struct {
 	WorkspaceID    sql.NullString
 	Disposition    string
 	QuotaExhausted bool
+	ActorAccountID sql.NullString
 }
 
 type ControlUsageVerificationKey struct {
@@ -1559,6 +1560,7 @@ type NativeUsageAuthority struct {
 	AdmittedAt             time.Time
 	ExpiresAt              time.Time
 	RetainUntil            time.Time
+	ActorAccountID         sql.NullString
 }
 
 type NativeUsageReportingStatus struct {
@@ -1947,6 +1949,7 @@ type ResourceBandwidthEvent struct {
 	IntervalStart   time.Time
 	IntervalEnd     time.Time
 	CreatedAt       time.Time
+	ActorAccountID  sql.NullString
 }
 
 type RuntimeCarrierAttachment struct {

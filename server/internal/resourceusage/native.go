@@ -104,7 +104,8 @@ func (s *Service) RecordNative(ctx context.Context, machine string, generation i
 		for index, r := range batch.Reports {
 			var ws, kind, id, name, machineName, admittedNode, resourceRoute string
 			var allowed bool
-			err := tx.QueryRow(ctx, `SELECT workspace_id,resource_kind,resource_id,resource_name,machine_name,$4=ANY(capabilities),edge_node_id,resource_route_id FROM native_usage_authorities WHERE access_session_id=$1 AND machine_id=$2 AND installation_generation=$3 AND retain_until>$5 AND admitted_at<=$6 AND expires_at>=$6 AND ($7<>'edge' OR (edge_node_id<>'' AND ($8='' OR edge_node_id=$8))) FOR SHARE`, r.AccessSessionID, machine, generation, consumerCapability(r.Consumer), now, r.IntervalEnd, r.Mode, r.NodeID).Scan(&ws, &kind, &id, &name, &machineName, &allowed, &admittedNode, &resourceRoute)
+			var actor sql.NullString
+			err := tx.QueryRow(ctx, `SELECT workspace_id,resource_kind,resource_id,resource_name,machine_name,$4=ANY(capabilities),edge_node_id,resource_route_id,actor_account_id FROM native_usage_authorities WHERE access_session_id=$1 AND machine_id=$2 AND installation_generation=$3 AND retain_until>$5 AND admitted_at<=$6 AND expires_at>=$6 AND ($7<>'edge' OR (edge_node_id<>'' AND ($8='' OR edge_node_id=$8))) FOR SHARE`, r.AccessSessionID, machine, generation, consumerCapability(r.Consumer), now, r.IntervalEnd, r.Mode, r.NodeID).Scan(&ws, &kind, &id, &name, &machineName, &allowed, &admittedNode, &resourceRoute, &actor)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return err
 			}
@@ -158,7 +159,7 @@ func (s *Service) RecordNative(ctx context.Context, machine string, generation i
 				receipt.RejectedIndices = append(receipt.RejectedIndices, index)
 				continue
 			}
-			_, err = tx.Exec(ctx, `INSERT INTO resource_bandwidth_events(operation_id,workspace_id,resource_kind,resource_id,resource_name,machine_id,machine_name,mode,hosting,node_id,node_name,upload_bytes,download_bytes,interval_start,interval_end,resource_route_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT(operation_id) DO UPDATE SET upload_bytes=greatest(resource_bandwidth_events.upload_bytes,EXCLUDED.upload_bytes),download_bytes=greatest(resource_bandwidth_events.download_bytes,EXCLUDED.download_bytes),interval_end=greatest(resource_bandwidth_events.interval_end,EXCLUDED.interval_end)`, operation, ws, kind, id, name, machine, machineName, r.Mode, hosting, r.NodeID, nodeName, r.Upload, r.Download, r.IntervalStart, r.IntervalEnd, resourceRoute)
+			_, err = tx.Exec(ctx, `INSERT INTO resource_bandwidth_events(operation_id,workspace_id,resource_kind,resource_id,resource_name,machine_id,machine_name,mode,hosting,node_id,node_name,upload_bytes,download_bytes,interval_start,interval_end,resource_route_id,actor_account_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT(operation_id) DO UPDATE SET actor_account_id=coalesce(resource_bandwidth_events.actor_account_id,EXCLUDED.actor_account_id),upload_bytes=greatest(resource_bandwidth_events.upload_bytes,EXCLUDED.upload_bytes),download_bytes=greatest(resource_bandwidth_events.download_bytes,EXCLUDED.download_bytes),interval_end=greatest(resource_bandwidth_events.interval_end,EXCLUDED.interval_end)`, operation, ws, kind, id, name, machine, machineName, r.Mode, hosting, r.NodeID, nodeName, r.Upload, r.Download, r.IntervalStart, r.IntervalEnd, resourceRoute, actor)
 			if err != nil {
 				return fmt.Errorf("persist native usage: %w", err)
 			}
@@ -183,8 +184,8 @@ func (s *Service) RecordNative(ctx context.Context, machine string, generation i
 
 // RecordBrowserAdmission snapshots the exact issued browser attachment. A
 // revoked/deleted grant can still report earlier bytes but cannot grant access.
-func (s *Service) RecordBrowserAdmission(ctx context.Context, attachment, machine, terminal, node string, expires time.Time) error {
-	result, err := s.Store.SQL().ExecContext(ctx, `INSERT INTO native_usage_authorities(access_session_id,machine_id,installation_generation,workspace_id,resource_kind,resource_id,resource_name,machine_name,capabilities,admitted_at,expires_at,retain_until,edge_node_id) SELECT $1,m.id,m.installation_generation,coalesce('team:'||t.owner_team_id,'personal:'||t.owner_account),'terminal',t.id,coalesce(t.title,t.name),m.alias,ARRAY['terminal'],now(),$4::timestamptz,$4::timestamptz+interval '7 days',$5 FROM user_machine_terminal_sessions t JOIN user_machines m ON m.id=t.user_machine_id WHERE t.id=$3 AND m.id=$2 ON CONFLICT(access_session_id) DO NOTHING`, attachment, machine, terminal, expires, node)
+func (s *Service) RecordBrowserAdmission(ctx context.Context, attachment, machine, terminal, node, actor string, expires time.Time) error {
+	result, err := s.Store.SQL().ExecContext(ctx, `INSERT INTO native_usage_authorities(access_session_id,machine_id,installation_generation,workspace_id,resource_kind,resource_id,resource_name,machine_name,capabilities,admitted_at,expires_at,retain_until,edge_node_id,actor_account_id) SELECT $1,m.id,m.installation_generation,coalesce('team:'||t.owner_team_id,'personal:'||t.owner_account),'terminal',t.id,coalesce(t.title,t.name),m.alias,ARRAY['terminal'],now(),$4::timestamptz,$4::timestamptz+interval '7 days',$5,coalesce(nullif($6,''),t.owner_account) FROM user_machine_terminal_sessions t JOIN user_machines m ON m.id=t.user_machine_id WHERE t.id=$3 AND m.id=$2 ON CONFLICT(access_session_id) DO NOTHING`, attachment, machine, terminal, expires, node, actor)
 	if err != nil {
 		return err
 	}

@@ -111,13 +111,14 @@ func reconcileUsage(ctx context.Context, store *db.DB, report UsageReport, now t
 			}
 		} else if scoped != nil {
 			var workspace string
+			var actor sql.NullString
 			if report.AuthorityID == "" || len(report.AuthorityID) > 512 || report.IntervalEnd.After(now) {
 				return ErrInvalidUsageReport
 			}
-			if err := tx.QueryRow(ctx, `SELECT workspace_id FROM usage_accounting_authorities WHERE authority_id=$1 AND edge_node_id=$2 AND environment_id=$3 AND route_id=$4 AND route_revision=$5 AND admitted_at<=$6 AND retain_until>$7`, report.AuthorityID, report.EdgeNodeID, report.EnvironmentID, report.RouteID, report.RouteRevision, report.IntervalEnd, now).Scan(&workspace); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT workspace_id,actor_account_id FROM usage_accounting_authorities WHERE authority_id=$1 AND edge_node_id=$2 AND environment_id=$3 AND route_id=$4 AND route_revision=$5 AND admitted_at<=$6 AND retain_until>$7`, report.AuthorityID, report.EdgeNodeID, report.EnvironmentID, report.RouteID, report.RouteRevision, report.IntervalEnd, now).Scan(&workspace, &actor); err != nil {
 				return ErrInvalidUsageReport
 			}
-			if _, err := tx.Exec(ctx, `UPDATE control_usage_receipts SET workspace_id=$2 WHERE operation_id=$1`, report.OperationID, workspace); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE control_usage_receipts SET workspace_id=$2,actor_account_id=$3 WHERE operation_id=$1`, report.OperationID, workspace, actor); err != nil {
 				return err
 			}
 			if delta > 0 {

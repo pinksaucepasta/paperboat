@@ -35,6 +35,7 @@ func TestScopedUsageSharedRouteDelayedCredentialAndReplay(t *testing.T) {
 		}{
 			{`DELETE FROM usage_accounting_authorities WHERE environment_id=$1`, []any{"env_" + suffix}},
 			{`DELETE FROM browser_machine_credentials WHERE route_id=$1`, []any{"route_" + suffix}},
+			{`DELETE FROM resource_bandwidth_events WHERE workspace_id IN ($1,$2)`, []any{"team:" + teams[0], "team:" + teams[1]}},
 			{`DELETE FROM billing_workspace_usage_periods WHERE workspace_id IN ($1,$2)`, []any{"team:" + teams[0], "team:" + teams[1]}},
 			{`DELETE FROM billing_workspaces WHERE id IN ($1,$2)`, []any{"team:" + teams[0], "team:" + teams[1]}},
 			{`DELETE FROM teams WHERE team_id IN ($1,$2)`, []any{teams[0], teams[1]}},
@@ -75,6 +76,16 @@ func TestScopedUsageSharedRouteDelayedCredentialAndReplay(t *testing.T) {
 		receipt, err := ReconcileScopedUsage(ctx, store, report, now.Add(2*time.Hour), scopedTestDebiter{})
 		if err != nil || receipt.DeltaBytes != 100 || !receipt.QuotaExhausted {
 			t.Fatalf("delayed team %d receipt=%+v err=%v", i, receipt, err)
+		}
+
+		var retainedActor, projectedActor string
+		if err := store.SQL().QueryRowContext(ctx,
+			"SELECT coalesce(r.actor_account_id,''),coalesce(e.actor_account_id,'') FROM control_usage_receipts r JOIN resource_bandwidth_events e ON e.operation_id='edge:'||r.operation_id WHERE r.operation_id=$1",
+			report.OperationID).Scan(&retainedActor, &projectedActor); err != nil {
+			t.Fatal(err)
+		}
+		if retainedActor != user || projectedActor != user {
+			t.Fatal("edge receipt and history lost their authenticated member")
 		}
 		receipt, err = ReconcileScopedUsage(ctx, store, report, now.Add(3*time.Hour), scopedTestDebiter{})
 		if err != nil || !receipt.Duplicate || !receipt.QuotaExhausted {
