@@ -46,7 +46,13 @@ func TestManagedSSHProxyPreservesQualifiedWindowsUsername(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, ssh, "-F", "/dev/null", "-o", "ProxyCommand="+managedSSHProxyCommand(strconv.Quote(proxy)), "-o", "ConnectTimeout=2", "-l", `VICTUS\Pujan`, "fixture.local.pprbt.dev")
+	// OpenSSH rejects qualified users supplied on its command line before
+	// invoking any proxy. Literal User configuration is its supported form.
+	config := filepath.Join(root, "ssh_config")
+	if err := os.WriteFile(config, []byte("Host fixture.example.test\n    User VICTUS\\Pujan\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.CommandContext(ctx, ssh, "-F", config, "-o", "ProxyCommand="+managedSSHProxyCommand(strconv.Quote(proxy)), "-o", "ConnectTimeout=2", "fixture.example.test")
 	// The capture proxy deliberately ends before SSH authentication.
 	_ = command.Run()
 	if ctx.Err() != nil {
