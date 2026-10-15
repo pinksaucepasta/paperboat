@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 )
 
@@ -22,7 +23,12 @@ func (s *LocalSender) SendNativeBatch(ctx context.Context, batchID, sourceMachin
 	if s == nil || ctx == nil || s.Endpoint == "" || len(s.Token) < 32 || batchID == "" || sourceMachineID == "" || destinationMachineID == "" || sourceMachineID == destinationMachineID || initiatingUserID == "" || sessionID == "" || len(sources) == 0 || len(sources) > 10 || !expiresAt.After(time.Now().UTC()) || expiresAt.Nanosecond() != 0 {
 		return Batch{}, errors.New("invalid local native file transfer")
 	}
-	return s.sendBatch(ctx, batchID, sourceMachineID, destinationMachineID, initiatingUserID, sessionID, sources, expiresAt)
+	lease, err := admission.Admit(ctx, expiresAt, nil)
+	if err != nil {
+		return Batch{}, err
+	}
+	defer lease.Close()
+	return s.sendBatch(lease.Context(), batchID, sourceMachineID, destinationMachineID, initiatingUserID, sessionID, sources, expiresAt)
 }
 
 func (s *LocalSender) sendBatch(ctx context.Context, batchID, sourceMachineID, destinationMachineID, initiatingUserID, sessionID string, sources []Source, expiresAt time.Time) (result Batch, resultErr error) {
@@ -83,8 +89,6 @@ func (s *LocalSender) sendBatch(ctx context.Context, batchID, sourceMachineID, d
 	}
 	results := make([]Manifest, len(created.Transfers))
 	pollErrors := make([]error, len(created.Transfers))
-	deadline := time.NewTimer(time.Until(expiresAt))
-	defer deadline.Stop()
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -96,6 +100,10 @@ func (s *LocalSender) sendBatch(ctx context.Context, batchID, sourceMachineID, d
 			remaining++
 			current, err := client.Status(ctx, transfer.TransferID)
 			if err != nil {
+				var denied *Error
+				if errors.As(err, &denied) && (denied.StatusCode == http.StatusUnauthorized || denied.StatusCode == http.StatusForbidden) {
+					return Batch{}, fileTransferPhaseFailure("delivery", err)
+				}
 				if substantiveDeliveryPollError(ctx, err) {
 					pollErrors[index] = err
 				}
@@ -110,8 +118,6 @@ func (s *LocalSender) sendBatch(ctx context.Context, batchID, sourceMachineID, d
 		select {
 		case <-ctx.Done():
 			return Batch{}, deliveryErrorWithPollCauses(deliveryContextError(ctx), pollErrors)
-		case <-deadline.C:
-			return Batch{}, deliveryErrorWithPollCauses(fileTransferPhaseFailure("delivery", context.DeadlineExceeded), pollErrors)
 		case <-ticker.C:
 		}
 	}

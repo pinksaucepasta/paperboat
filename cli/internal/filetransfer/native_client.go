@@ -11,10 +11,10 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
-	"sync"
 	"syscall"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat-relay/reattach"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 )
@@ -144,26 +144,19 @@ const nativeRecoveryWindow = 32 * time.Minute
 type nativeRecoveryKey struct{}
 type nativeRecovery struct {
 	context  context.Context
-	mu       sync.Mutex
-	deadline time.Time
+	recovery *reattach.Recovery
 }
 
 func newNativeRecovery(ctx context.Context) *nativeRecovery {
 	if state, ok := ctx.Value(nativeRecoveryKey{}).(*nativeRecovery); ok {
 		return state
 	}
-	state := &nativeRecovery{}
+	state := &nativeRecovery{recovery: reattach.New(reattach.Policy{Window: nativeRecoveryWindow})}
 	state.context = context.WithValue(ctx, nativeRecoveryKey{}, state)
 	return state
 }
 func (s *nativeRecovery) afterFailure(ctx context.Context) (context.Context, context.CancelFunc) {
-	s.mu.Lock()
-	if s.deadline.IsZero() {
-		s.deadline = time.Now().Add(nativeRecoveryWindow)
-	}
-	deadline := s.deadline
-	s.mu.Unlock()
-	return context.WithDeadline(ctx, deadline)
+	return s.recovery.AfterFailure(ctx)
 }
 
 type nativeSourceFailure struct{ cause error }
@@ -222,11 +215,5 @@ func retryableTransferFailure(err error) bool {
 }
 
 func (s *nativeRecovery) requestContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	s.mu.Lock()
-	deadline := s.deadline
-	s.mu.Unlock()
-	if deadline.IsZero() {
-		return ctx, func() {}
-	}
-	return context.WithDeadline(ctx, deadline)
+	return s.recovery.RequestContext(ctx)
 }

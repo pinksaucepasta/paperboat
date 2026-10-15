@@ -403,7 +403,7 @@ func (c *Client) Receipt(ctx context.Context, id, resultCode, path string) error
 
 func (c *Client) requestWithHeaders(ctx context.Context, method, target, operation string, headers http.Header) (*http.Response, error) {
 	for attempt := 0; attempt < 2; attempt++ {
-		if err := c.refreshIfExpiring(ctx); err != nil {
+		if err := c.refreshRequestAdmission(ctx); err != nil {
 			return nil, err
 		}
 		request, err := http.NewRequestWithContext(ctx, method, target, nil)
@@ -414,7 +414,8 @@ func (c *Client) requestWithHeaders(ctx context.Context, method, target, operati
 		if request.Header == nil {
 			request.Header = make(http.Header)
 		}
-		request.Header.Set("Authorization", "Bearer "+c.currentAuth().Token)
+		credential := c.currentAuth()
+		request.Header.Set("Authorization", "Bearer "+credential.Token)
 		request.Header.Set("X-Paperboat-Request-ID", operation)
 		request.Header.Set("X-Paperboat-Operation-ID", operation)
 		response, err := c.HTTPClient.Do(request)
@@ -422,7 +423,7 @@ func (c *Client) requestWithHeaders(ctx context.Context, method, target, operati
 			if attempt == 0 && errors.Is(err, errNativeAuthorizationChanged) {
 				continue
 			}
-			return nil, err
+			return nil, c.afterTransportLoss(ctx, credential, err)
 		}
 		if response.StatusCode >= 200 && response.StatusCode < 300 {
 			return response, nil
@@ -708,7 +709,7 @@ func (c *Client) request(ctx context.Context, method, url, operation, mediaType 
 
 func (c *Client) requestWithBody(ctx context.Context, method, url, operation, mediaType string, offset int64, body func() (io.Reader, error), headers ...http.Header) (*http.Response, error) {
 	for attempt := 0; attempt < 2; attempt++ {
-		if err := c.refreshIfExpiring(ctx); err != nil {
+		if err := c.refreshRequestAdmission(ctx); err != nil {
 			return nil, err
 		}
 		requestBody, err := body()
@@ -719,7 +720,8 @@ func (c *Client) requestWithBody(ctx context.Context, method, url, operation, me
 		if err != nil {
 			return nil, err
 		}
-		request.Header.Set("Authorization", "Bearer "+c.currentAuth().Token)
+		credential := c.currentAuth()
+		request.Header.Set("Authorization", "Bearer "+credential.Token)
 		request.Header.Set("X-Paperboat-Request-ID", operation)
 		request.Header.Set("X-Paperboat-Operation-ID", operation)
 		for _, values := range headers {
@@ -738,7 +740,7 @@ func (c *Client) requestWithBody(ctx context.Context, method, url, operation, me
 			if attempt == 0 && errors.Is(err, errNativeAuthorizationChanged) {
 				continue
 			}
-			return nil, err
+			return nil, c.afterTransportLoss(ctx, credential, err)
 		}
 		if response.StatusCode >= 200 && response.StatusCode < 300 {
 			return response, nil
@@ -763,26 +765,23 @@ func (c *Client) requestWithBody(ctx context.Context, method, url, operation, me
 	return nil, errors.New("file transfer authorization retry exhausted")
 }
 
-func (c *Client) refreshIfExpiring(ctx context.Context) error {
-	if c.RefreshAuth == nil {
-		return nil
-	}
-	current := c.currentAuth()
-	if current.ExpiresAt.IsZero() || time.Until(current.ExpiresAt) > 30*time.Second {
-		return nil
+// Healthy admitted transfers never renew based on wall-clock TTL. A failed
+// native connection needs fresh admission before the durable operation resumes.
+func (c *Client) afterTransportLoss(ctx context.Context, previous Auth, err error) error {
+	if !c.native || c.RefreshAuth == nil || !retryableTransferFailure(err) {
+		return err
 	}
 	c.refreshMu.Lock()
 	defer c.refreshMu.Unlock()
-	current = c.currentAuth()
-	if current.ExpiresAt.IsZero() || time.Until(current.ExpiresAt) > 30*time.Second {
-		return nil
-	}
-	fresh, err := c.RefreshAuth(ctx)
-	if err != nil {
+	if c.currentAuth() != previous {
 		return err
 	}
+	fresh, refreshErr := c.RefreshAuth(ctx)
+	if refreshErr != nil {
+		return errors.Join(err, refreshErr)
+	}
 	c.setAuth(fresh)
-	return nil
+	return err
 }
 
 func decodeError(response *http.Response) error {
@@ -829,4 +828,28 @@ func (c *Client) setAuth(auth Auth) { c.authMu.Lock(); c.auth = auth; c.authMu.U
 func operationID(kind, value string) string {
 	sum := sha256.Sum256([]byte(kind + "\x00" + value))
 	return "ft_" + kind + "_" + hex.EncodeToString(sum[:16])
+}
+
+// Standalone HTTP requests require their own admission proof. Native streams
+// keep the proof accepted by their connection until transport loss.
+func (c *Client) refreshRequestAdmission(ctx context.Context) error {
+	if c.native || c.RefreshAuth == nil {
+		return nil
+	}
+	current := c.currentAuth()
+	if current.ExpiresAt.IsZero() || time.Until(current.ExpiresAt) > 30*time.Second {
+		return nil
+	}
+	c.refreshMu.Lock()
+	defer c.refreshMu.Unlock()
+	current = c.currentAuth()
+	if current.ExpiresAt.IsZero() || time.Until(current.ExpiresAt) > 30*time.Second {
+		return nil
+	}
+	fresh, err := c.RefreshAuth(ctx)
+	if err != nil {
+		return err
+	}
+	c.setAuth(fresh)
+	return nil
 }

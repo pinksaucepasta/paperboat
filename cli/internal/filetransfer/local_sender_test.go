@@ -79,12 +79,16 @@ func TestLocalSenderClassifiesDeliveryDeadlineAtReceiptBoundary(t *testing.T) {
 		pollStatus     int
 		recover        bool
 		recoverPending bool
+		outlive        bool
+		revoked        bool
 		wantMessage    string
 	}{
 		{name: "pure deadline", wantMessage: "file delivery timed out"},
 		{name: "deadline with independent io failure", cause: syscall.EIO, wantMessage: "file delivery failed"},
 		{name: "poll status preserved through deadline", pollStatus: http.StatusInternalServerError, wantMessage: "file delivery failed"},
 		{name: "poll status recovers", pollStatus: http.StatusInternalServerError, recover: true},
+		{name: "admitted delivery outlives descriptor", pollStatus: http.StatusInternalServerError, recover: true, outlive: true},
+		{name: "explicit denial stops admitted delivery", pollStatus: http.StatusForbidden, revoked: true},
 		{name: "fresh status clears prior poll failure", pollStatus: http.StatusInternalServerError, recoverPending: true, wantMessage: "file delivery timed out"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -93,6 +97,9 @@ func TestLocalSenderClassifiesDeliveryDeadlineAtReceiptBoundary(t *testing.T) {
 			var statusStartedOnce sync.Once
 			digest := sha256.Sum256([]byte("data"))
 			expires := time.Now().UTC().Truncate(time.Second).Add(time.Minute)
+			if tc.outlive {
+				expires = time.Now().UTC().Truncate(time.Second).Add(2 * time.Second)
+			}
 			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 				switch {
 				case request.Method == http.MethodPost && request.URL.Path == "/v1/local-file-transfers":
@@ -113,6 +120,13 @@ func TestLocalSenderClassifiesDeliveryDeadlineAtReceiptBoundary(t *testing.T) {
 						return
 					}
 					if getCalls == 3 && tc.recover {
+						if tc.outlive {
+							select {
+							case <-time.After(time.Until(expires) + 100*time.Millisecond):
+							case <-request.Context().Done():
+								return
+							}
+						}
 						writeJSONTest(writer, http.StatusOK, Manifest{TransferID: "ft_generated", State: "delivered", ResultCode: "stored", ReceiptPath: "/Paperboat Inbox/data.bin", ExpiresAt: expires})
 						return
 					}
@@ -129,7 +143,7 @@ func TestLocalSenderClassifiesDeliveryDeadlineAtReceiptBoundary(t *testing.T) {
 			if tc.recoverPending {
 				timeout = 750 * time.Millisecond
 			} else if tc.recover {
-				timeout = 2 * time.Second
+				timeout = 4 * time.Second
 			}
 			deadline := time.Now().Add(timeout)
 			var ctx context.Context
@@ -157,6 +171,13 @@ func TestLocalSenderClassifiesDeliveryDeadlineAtReceiptBoundary(t *testing.T) {
 				t.Fatal("delivery receipt polling did not start")
 			}
 			result := <-done
+			if tc.revoked {
+				var denied *Error
+				if !errors.As(result.err, &denied) || denied.StatusCode != http.StatusForbidden || errors.Is(result.err, context.DeadlineExceeded) {
+					t.Fatal("explicit denial did not stop delivery", result.err)
+				}
+				return
+			}
 			if tc.recover {
 				if result.err != nil || result.batch.BatchID != "native_batch" || len(result.batch.Paths) != 1 || result.batch.Paths[0] != "/Paperboat Inbox/data.bin" {
 					t.Fatalf("delivery did not recover after transient receipt status: batch=%+v err=%v", result.batch, result.err)

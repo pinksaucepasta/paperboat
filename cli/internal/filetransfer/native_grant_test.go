@@ -39,7 +39,7 @@ func (l *nativeTestLease) OpenTransferStream(ctx context.Context) (net.Conn, err
 }
 func (l *nativeTestLease) Close() error { l.closed.Store(true); return l.closeErr }
 
-func TestRenewableNativeTransferReauthorizesExpiredGrantWithoutNewBatch(t *testing.T) {
+func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 	for _, denied := range []bool{false, true} {
 		t.Run(strconv.FormatBool(denied), func(t *testing.T) {
 			data := bytes.Repeat([]byte("bounded"), protocol.FileTransferChunkBytes/7+17)
@@ -49,6 +49,7 @@ func TestRenewableNativeTransferReauthorizesExpiredGrantWithoutNewBatch(t *testi
 			var mu sync.Mutex
 			var content []byte
 			var client *NativeClient
+			var first *nativeTestLease
 			creates, renewals := 0, 0
 			oldExpired := false
 			maintenanceResponses := 0
@@ -101,9 +102,15 @@ func TestRenewableNativeTransferReauthorizesExpiredGrantWithoutNewBatch(t *testi
 					content = append(content, chunk...)
 					if !oldExpired {
 						oldExpired = true
-						// Expiry notification shortens local authority; the receiver revokes the
-						// old fixture grant independently. Only a new authorized grant can resume.
-						client.UpdateAuth(Auth{Token: "original", ExpiresAt: time.Now().Add(-time.Second)})
+						// Commit the chunk, then lose the response and original carrier.
+						first.closed.Store(true)
+						connection, _, hijackErr := w.(http.Hijacker).Hijack()
+						if hijackErr != nil {
+							t.Error(hijackErr)
+							return
+						}
+						connection.Close()
+						return
 					}
 					w.WriteHeader(204)
 				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/complete"):
@@ -118,7 +125,7 @@ func TestRenewableNativeTransferReauthorizesExpiredGrantWithoutNewBatch(t *testi
 				}
 			}))
 			defer server.Close()
-			first := &nativeTestLease{address: server.Listener.Addr().String(), expires: time.Now().Add(5 * time.Minute)}
+			first = &nativeTestLease{address: server.Listener.Addr().String(), expires: time.Now().Add(5 * time.Minute)}
 			var replacement *nativeTestLease
 			initial := NativeGrant{Endpoint: server.URL + "/v1/file-transfers", Auth: Auth{Token: "original", ExpiresAt: first.expires}, Binding: testBinding(), Policy: policy, Lease: first}
 			var err error
@@ -199,7 +206,9 @@ func TestRenewableNativeGrantRejectsChangedAuthorityAndExpiredInitialLease(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = client.refreshIfExpiring(t.Context()); err == nil || !changed.closed.Load() {
+	first.closed.Store(true) // A lost native connection requires fresh admission.
+	_, err = client.Status(t.Context(), "fixture_transfer")
+	if err == nil || !changed.closed.Load() {
 		t.Fatal("foreign renewed grant retained authority or lease", err)
 	}
 	if err = client.Close(); err != nil {
@@ -212,8 +221,18 @@ func TestRenewableNativeGrantRejectsChangedAuthorityAndExpiredInitialLease(t *te
 
 func TestNativeGrantRenewalRetainsInFlightResponseUntilClose(t *testing.T) {
 	cleanupFailure := errors.New("fixture lease cleanup failure")
+	var lost atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodHead {
+			if lost.CompareAndSwap(false, true) {
+				connection, _, err := w.(http.Hijacker).Hijack()
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				_ = connection.Close()
+				return
+			}
 			w.Header().Set("Upload-Offset", "0")
 			return
 		}
@@ -236,7 +255,9 @@ func TestNativeGrantRenewalRetainsInFlightResponseUntilClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client.UpdateAuth(Auth{Token: "first", ExpiresAt: time.Now()})
+	if _, err = client.Offset(t.Context(), "ft_body"); err == nil {
+		t.Fatal("lost response was not reported")
+	}
 	if _, err = client.Offset(t.Context(), "ft_body"); err != nil {
 		t.Fatal(err)
 	}
@@ -275,5 +296,43 @@ func TestNativeMaintenanceRecoveryKeepsDeadlineAndRejectsMixedFaults(t *testing.
 		if retryableTransferFailure(err) {
 			t.Fatal("mixed fault entered planned-maintenance recovery")
 		}
+	}
+}
+
+func TestAdmittedNativeTransferDoesNotRenewHealthyConnectionAtCredentialExpiry(t *testing.T) {
+	var admitted atomic.Bool
+	var renewals atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer initial" && r.Header.Get("Authorization") != "Bearer early" {
+			w.WriteHeader(401)
+			return
+		}
+		admitted.Store(true)
+		_ = json.NewEncoder(w).Encode(Manifest{TransferID: "transfer_live"})
+	}))
+	defer server.Close()
+	makeGrant := func(token string) NativeGrant {
+		return NativeGrant{Endpoint: server.URL + "/v1/file-transfers", Auth: Auth{Token: token, ExpiresAt: time.Now().Add(50 * time.Millisecond)}, Binding: testBinding(), Lease: &nativeTestLease{address: server.Listener.Addr().String(), expires: time.Now().Add(time.Minute)}}
+	}
+	client, err := NewRenewableNativeClient(makeGrant("initial"), func(context.Context) (NativeGrant, error) {
+		renewals.Add(1)
+		if admitted.Load() {
+			return NativeGrant{}, errors.New("credential issuer temporarily unavailable")
+		}
+		return makeGrant("early"), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	if _, err := client.Status(t.Context(), "transfer_live"); err != nil {
+		t.Fatal("initial admission failed", err)
+	}
+	time.Sleep(80 * time.Millisecond)
+	if _, err := client.Status(t.Context(), "transfer_live"); err != nil {
+		t.Fatal("credential expiry interrupted healthy transfer", err)
+	}
+	if renewals.Load() != 0 {
+		t.Fatal("healthy transfer renewed admission without disconnect")
 	}
 }
