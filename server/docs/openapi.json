@@ -25394,6 +25394,14 @@
           },
           "400": {
             "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error",
+            "description": "Enrollment token already claimed (enrollment_token_used)."
+          },
+          "410": {
+            "$ref": "#/components/responses/Error",
+            "description": "Unclaimed enrollment token expired (enrollment_token_expired)."
           }
         },
         "operationId": "post_v1_user_machines_pairings",
@@ -25408,7 +25416,8 @@
             },
             "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
           }
-        ]
+        ],
+        "description": "Enrollment-token rejections do not claim or modify the enrollment. HTTP 410 enrollment_token_expired means a fresh unclaimed command expired; create a new command. HTTP 409 enrollment_token_used means the command was already claimed, including a claimed journal past expiry; resume only on its original machine. HTTP 400 enrollment_token_invalid covers malformed, unknown and revoked commands. HTTP 400 pairing_platform_unsupported covers unsupported platform/architecture pairs or platforms disabled by policy. Existing verifier- and identity-bound installation recovery remains separate."
       }
     },
     "/v1/machines/pairings/installation": {

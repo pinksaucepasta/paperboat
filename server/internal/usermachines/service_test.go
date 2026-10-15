@@ -209,7 +209,7 @@ func TestSetupAndPairingRejectDarwinAMD64BeforePersistence(t *testing.T) {
 		t.Fatalf("darwin amd64 setup error = %v", err)
 	}
 	pairing := PairingInput{Verifier: "verifier", Alias: "intel-mac", Platform: "darwin", Architecture: "amd64", WorkspaceRoot: "/Users/paperboat", PublicIdentityKey: publicIdentityKey}
-	if err := service.validatePairing(pairing); !errors.Is(err, ErrInvalidPairing) {
+	if err := service.validatePairing(pairing); !errors.Is(err, ErrPairingPlatformUnsupported) {
 		t.Fatalf("darwin amd64 pairing error = %v", err)
 	}
 }

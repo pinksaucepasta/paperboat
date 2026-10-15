@@ -160,6 +160,13 @@ func compactSessionIDs(values ...string) []string {
 
 func (s *Service) validatePairing(in PairingInput) error {
 	token := strings.TrimSpace(in.EnrollmentToken)
+	if token != "" && !validEnrollmentToken(token) {
+		return ErrEnrollmentTokenInvalid
+	}
+	platform, architecture := strings.ToLower(strings.TrimSpace(in.Platform)), strings.ToLower(strings.TrimSpace(in.Architecture))
+	if !releases.SupportedPlatformArchitecture(platform, architecture) || !slices.Contains(s.policy.AllowedPlatforms, platform) {
+		return ErrPairingPlatformUnsupported
+	}
 	_, validWorkspace := canonicalWorkspaceRoot(in.Platform, in.WorkspaceRoot)
 	publicKey, keyErr := base64.RawURLEncoding.DecodeString(strings.TrimSpace(in.PublicIdentityKey))
 	checks := []struct {
@@ -170,11 +177,7 @@ func (s *Service) validatePairing(in PairingInput) error {
 		{strings.TrimSpace(in.Verifier) == "", "verifier"},
 		{invalidMachineAlias(in.Alias), "alias"},
 		{invalidMachineDescription(in.Description), "description"},
-		{!validMachineArchitecture(in.Architecture), "architecture"},
-		{!releases.SupportedPlatformArchitecture(strings.ToLower(strings.TrimSpace(in.Platform)), strings.ToLower(strings.TrimSpace(in.Architecture))), "platform architecture"},
 		{!validWorkspace, "workspace root"},
-		{!slices.Contains(s.policy.AllowedPlatforms, strings.ToLower(strings.TrimSpace(in.Platform))), "platform"},
-		{token != "" && !validEnrollmentToken(token), "enrollment token shape"},
 		{keyErr != nil || len(publicKey) != ed25519.PublicKeySize, "public identity key"},
 		{(in.SSHUser == "") != (in.SSHPort == 0), "SSH target completeness"},
 		{in.SSHUser != "" && !validPairingSSHUser(in.SSHUser), "SSH user"},

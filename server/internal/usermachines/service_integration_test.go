@@ -1665,14 +1665,14 @@ func TestDashboardEnrollmentIsIdempotentSingleClaimAndIssuesMaterial(t *testing.
 	if replayed.ID != first.ID || replayed.BootstrapToken != first.BootstrapToken || replayed.OperationID != first.OperationID {
 		t.Fatalf("idempotent replay changed result: first=%+v replay=%+v", first, replayed)
 	}
-	pairing, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: first.BootstrapToken, Verifier: "verifier-1", Alias: "studio", Platform: "darwin", Architecture: "arm64", WorkspaceRoot: "/Users/paperboat", RuntimeVersions: json.RawMessage(`{"pb":"test"}`), PublicIdentityKey: integrationPublicIdentityKey})
+	pairing, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: first.BootstrapToken, Verifier: "verifier-1-" + suffix, Alias: "studio", Platform: "darwin", Architecture: "arm64", WorkspaceRoot: "/Users/paperboat", RuntimeVersions: json.RawMessage(`{"pb":"test"}`), PublicIdentityKey: integrationPublicIdentityKey})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if pairing.ID != first.ID {
 		t.Fatalf("bootstrap claim changed pairing identity: %q != %q", pairing.ID, first.ID)
 	}
-	if _, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: first.BootstrapToken, Verifier: "verifier-2", Alias: "replay", Platform: "darwin", Architecture: "arm64", WorkspaceRoot: "/Users/paperboat", PublicIdentityKey: integrationPublicIdentityKey}); !errors.Is(err, ErrEnrollmentState) {
+	if _, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: first.BootstrapToken, Verifier: "verifier-2-" + suffix, Alias: "replay", Platform: "darwin", Architecture: "arm64", WorkspaceRoot: "/Users/paperboat", PublicIdentityKey: integrationPublicIdentityKey}); !errors.Is(err, ErrEnrollmentTokenUsed) {
 		t.Fatalf("consumed bootstrap claim error=%v", err)
 	}
 	status, err := service.Enrollment(ctx, userID, first.ID)
@@ -1763,8 +1763,8 @@ func TestDashboardEnrollmentsStayBoundToTheirOwnTokenAndInstallation(t *testing.
 	}
 
 	tamperedToken := "11" + first.BootstrapToken[2:]
-	if _, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: tamperedToken, Verifier: "verifier-enrollment-isolation-tampered-" + suffix, Alias: "tampered", Platform: "linux", Architecture: "amd64", WorkspaceRoot: "/workspace-tampered", PublicIdentityKey: integrationPublicIdentityKey}); !errors.Is(err, ErrEnrollmentNotFound) {
-		t.Fatalf("metadata-tampered token error = %v, want ErrEnrollmentNotFound", err)
+	if _, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: tamperedToken, Verifier: "verifier-enrollment-isolation-tampered-" + suffix, Alias: "tampered", Platform: "linux", Architecture: "amd64", WorkspaceRoot: "/workspace-tampered", PublicIdentityKey: integrationPublicIdentityKey}); !errors.Is(err, ErrEnrollmentTokenInvalid) {
+		t.Fatalf("metadata-tampered token error = %v, want ErrEnrollmentTokenInvalid", err)
 	}
 
 	firstPublic, _, err := ed25519.GenerateKey(rand.Reader)
@@ -1952,7 +1952,7 @@ func TestDashboardEnrollmentExpiryIsAtomicAndRetryable(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = service.CreatePairing(ctx, PairingInput{EnrollmentToken: first.BootstrapToken, Verifier: "verifier-expiry-" + suffix, Alias: "expired-host", Platform: "linux", Architecture: "amd64", WorkspaceRoot: "/workspace", PublicIdentityKey: integrationPublicIdentityKey})
-	if !errors.Is(err, ErrEnrollmentState) {
+	if !errors.Is(err, ErrEnrollmentTokenExpired) {
 		t.Fatalf("expired bootstrap claim error=%v", err)
 	}
 	status, err := service.Enrollment(ctx, userID, first.ID)

@@ -307,13 +307,25 @@ func (s *Service) CreatePairing(ctx context.Context, in PairingInput) (Pairing, 
 		err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 			enrollment, err := tx.Queries().GetBootstrapPairingForTokenUpdate(ctx, tokenHash[:])
 			if errors.Is(err, sql.ErrNoRows) {
-				return ErrEnrollmentNotFound
+				return ErrEnrollmentTokenInvalid
 			}
 			if err != nil {
 				return err
 			}
-			if enrollment.InstallationState != "awaiting_bootstrap" || !s.now().UTC().Before(enrollment.ExpiresAt) {
-				return ErrEnrollmentState
+			switch enrollment.InstallationState {
+			case "cancelled", "revoked", "deleted":
+				return ErrEnrollmentTokenInvalid
+			}
+			// A claimed verifier identifies a protected installation journal even
+			// after expiry; never tell its owner this is a fresh expired grant.
+			if len(enrollment.VerifierHash) != 0 {
+				return ErrEnrollmentTokenUsed
+			}
+			if enrollment.InstallationState == "expired" || !s.now().UTC().Before(enrollment.ExpiresAt) {
+				return ErrEnrollmentTokenExpired
+			}
+			if enrollment.InstallationState != "awaiting_bootstrap" {
+				return ErrEnrollmentTokenUsed
 			}
 			enrollmentUserID = enrollment.BootstrapOwnerAccount.String
 			enrollmentID = enrollment.ID
@@ -329,7 +341,7 @@ func (s *Service) CreatePairing(ctx context.Context, in PairingInput) (Pairing, 
 				CanReuseRuntimeIdentity: params.CanReuseRuntimeIdentity, KeepAwake: params.KeepAwake,
 			})
 			if errors.Is(err, sql.ErrNoRows) {
-				return ErrEnrollmentState
+				return ErrEnrollmentTokenExpired
 			}
 			if err != nil {
 				return err

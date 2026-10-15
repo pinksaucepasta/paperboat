@@ -40,6 +40,14 @@ func userMachinePairings(service *usermachines.Service) http.HandlerFunc {
 		pairing, err := service.CreatePairing(r.Context(), usermachines.PairingInput{Verifier: body.Verifier, EnrollmentToken: body.EnrollmentToken, Alias: body.Alias, Description: body.Description, Platform: body.Platform, Architecture: body.Architecture, WorkspaceRoot: body.WorkspaceRoot, RuntimeVersions: body.RuntimeVersions, PublicIdentityKey: body.PublicIdentityKey, AcceptBetaPlatform: body.AcceptBetaPlatform, SSHUser: body.SSHUser, SSHPort: body.SSHPort, CanReuseRuntimeIdentity: body.CanReuseRuntimeIdentity, KeepAwake: body.KeepAwake})
 		if err != nil {
 			switch {
+			case expectedHTTPErrorOnly(err, usermachines.ErrEnrollmentTokenExpired):
+				writeError(w, r, http.StatusGone, "enrollment_token_expired", "This install command has expired. Create a new install command.")
+			case expectedHTTPErrorOnly(err, usermachines.ErrEnrollmentTokenUsed):
+				writeError(w, r, http.StatusConflict, "enrollment_token_used", "This install command has already been used. Resume the existing installation on its original machine.")
+			case expectedHTTPErrorOnly(err, usermachines.ErrEnrollmentTokenInvalid):
+				writeError(w, r, http.StatusBadRequest, "enrollment_token_invalid", "This install command is invalid or revoked. Create a new install command.")
+			case expectedHTTPErrorOnly(err, usermachines.ErrPairingPlatformUnsupported):
+				writeError(w, r, http.StatusBadRequest, "pairing_platform_unsupported", "This platform or architecture is unsupported. Use a supported platform with its matching install command.")
 			case errors.Is(err, billing.ErrWorkspaceQuota):
 				writeError(w, r, http.StatusConflict, "machine_quota_exhausted", "The configured personal machine quota is exhausted.")
 			case errors.Is(err, usermachines.ErrBandwidthDenied):
