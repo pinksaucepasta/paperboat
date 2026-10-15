@@ -46,6 +46,7 @@ func TestExistingSharedPreviewManagementOnPostgres(t *testing.T) {
 			args  []any
 		}{
 			{`DELETE FROM paperboat.user_machines WHERE id=$1`, []any{machine}},
+			{`DELETE FROM paperboat.billing_workspaces WHERE team_id=$1`, []any{team}},
 			{`DELETE FROM paperboat.teams WHERE team_id=$1`, []any{team}},
 		} {
 			if _, err := database.Pool().Exec(cleanup, statement.query, statement.args...); err != nil {
@@ -61,6 +62,7 @@ func TestExistingSharedPreviewManagementOnPostgres(t *testing.T) {
 	}
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@invalid.test','active'),($2,$2,$2||'@invalid.test','active')`, owner, member)
 	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, owner)
+	exec(`INSERT INTO paperboat.billing_workspaces(id,team_id,state,product_code,quantity,period_start,period_end) VALUES($1,$2,'active','team-pro',2,now()-interval '1 hour',now()+interval '1 hour')`, "bw_"+suffix, team)
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true),($1,$3,1,'member',true)`, team, owner, member)
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,description,platform,architecture,workspace_root,state,online,configured_capabilities) VALUES($1,$2,$1,$1,'linux','amd64','/workspace','online',true,ARRAY['preview_launch']::text[])`, machine, owner)
 	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'machine',$2,$3)`, team, machine, owner)
@@ -77,6 +79,11 @@ func TestExistingSharedPreviewManagementOnPostgres(t *testing.T) {
 	if err != nil || account != owner {
 		t.Fatalf("existing shared preview resolution account=%q err=%v", account, err)
 	}
+	exec(`UPDATE paperboat.billing_workspaces SET state='unpaid' WHERE team_id=$1`, team)
+	if _, err := store.ResolvePreviewManagementAccountV1(ctx, member, created.Lease.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unpaid team retained preview management: %v", err)
+	}
+	exec(`UPDATE paperboat.billing_workspaces SET state='active' WHERE team_id=$1`, team)
 	rows, err := store.ListPreviewLeasesV1(ctx, ListPreviewLeasesV1Input{AccountID: member, Limit: 10})
 	if err != nil || len(rows) != 1 || rows[0].ID != created.Lease.ID {
 		t.Fatalf("shared preview list count=%d err=%v", len(rows), err)
