@@ -800,7 +800,6 @@ func (s *Service) Delete(ctx context.Context, userID, userMachineID string) erro
 }
 
 func (s *Service) revokeUserMachineControl(ctx context.Context, userID, userMachineID string, deleted bool) error {
-	now := s.now().UTC()
 	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if err := environment.LockVaultMutationsTx(ctx, tx); err != nil {
 			return err
@@ -812,33 +811,42 @@ func (s *Service) revokeUserMachineControl(ctx context.Context, userID, userMach
 		if err != nil {
 			return err
 		}
-		var changed int64
-		if deleted {
-			changed, err = tx.Queries().DeleteUserMachine(ctx, dbsqlc.DeleteUserMachineParams{ID: userMachineID, UserID: userID})
-		} else {
-			changed, err = tx.Queries().RevokeUserMachine(ctx, dbsqlc.RevokeUserMachineParams{ID: userMachineID, UserID: userID, State: "disconnected", SeatState: "released"})
-		}
-		if err != nil {
-			return err
-		}
-		if changed != 1 {
-			return ErrNotFound
-		}
-		if machine.State != "disconnected" && machine.State != "deleted" && machine.State != "revoked" {
-			if err := db.FenceRemovedMachineVaultTx(ctx, tx, machine.UserID); err != nil {
-				return err
-			}
-		}
-		if deleted {
-			if err := db.CleanupMachineMachineTx(ctx, tx, machine.UserID, machine.ID, now); err != nil {
-				return err
-			}
-		}
-		if err := expireAuthenticatedMachineInstallationPairingsTx(ctx, tx, machine.ID, now); err != nil {
-			return err
-		}
-		return db.RevokeMachineEnvironmentTx(ctx, tx, machine.EnvironmentID, now)
+		return s.revokeUserMachineControlTx(ctx, tx, userID, machine, deleted)
 	})
+}
+
+func (s *Service) revokeUserMachineControlTx(ctx context.Context, tx *db.Tx, userID string, machine dbsqlc.UserMachine, deleted bool) error {
+	now := s.now().UTC()
+	var err error
+	var changed int64
+	if deleted {
+		changed, err = tx.Queries().DeleteUserMachine(ctx, dbsqlc.DeleteUserMachineParams{ID: machine.ID, UserID: userID})
+	} else {
+		changed, err = tx.Queries().RevokeUserMachine(ctx, dbsqlc.RevokeUserMachineParams{ID: machine.ID, UserID: userID, State: "disconnected", SeatState: "released"})
+	}
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return ErrNotFound
+	}
+	if machine.State != "disconnected" && machine.State != "deleted" && machine.State != "revoked" {
+		if err := db.FenceRemovedMachineVaultTx(ctx, tx, machine.UserID); err != nil {
+			return err
+		}
+	}
+	if deleted {
+		if _, err := tx.Queries().RevokeUserMachineAccessSessions(ctx, dbsqlc.RevokeUserMachineAccessSessionsParams{UserMachineID: machine.ID, Reason: sql.NullString{String: "user_machine_deleted", Valid: true}}); err != nil {
+			return err
+		}
+		if err := db.CleanupMachineMachineTx(ctx, tx, machine.UserID, machine.ID, now); err != nil {
+			return err
+		}
+	}
+	if err := expireAuthenticatedMachineInstallationPairingsTx(ctx, tx, machine.ID, now); err != nil {
+		return err
+	}
+	return db.RevokeMachineEnvironmentTx(ctx, tx, machine.EnvironmentID, now)
 }
 
 // RevokeUserMachineSessions records revocation before attempting the downstream

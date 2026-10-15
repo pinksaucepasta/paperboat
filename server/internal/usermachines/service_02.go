@@ -316,6 +316,9 @@ func (s *Service) CreatePairing(ctx context.Context, in PairingInput) (Pairing, 
 			case "cancelled", "revoked", "deleted":
 				return ErrEnrollmentTokenInvalid
 			}
+			if err := authorizeResetPairingTx(ctx, tx, enrollment.ID, enrollment.Generation, verifierHash[:]); err != nil {
+				return err
+			}
 			// A claimed verifier identifies a protected installation journal even
 			// after expiry; never tell its owner this is a fresh expired grant.
 			if len(enrollment.VerifierHash) != 0 {

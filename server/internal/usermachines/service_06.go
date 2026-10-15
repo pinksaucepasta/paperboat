@@ -159,14 +159,8 @@ func compactSessionIDs(values ...string) []string {
 }
 
 func (s *Service) validatePairing(in PairingInput) error {
-	token := strings.TrimSpace(in.EnrollmentToken)
-	if token != "" && !validEnrollmentToken(token) {
-		return ErrEnrollmentTokenInvalid
-	}
-	platform, architecture := strings.ToLower(strings.TrimSpace(in.Platform)), strings.ToLower(strings.TrimSpace(in.Architecture))
-	if !releases.SupportedPlatformArchitecture(platform, architecture) || !slices.Contains(s.policy.AllowedPlatforms, platform) ||
-		token != "" && EnrollmentTokenUsesPowerShell(token) != (platform == "windows") {
-		return ErrPairingPlatformUnsupported
+	if err := s.validatePairingPlatform(in.EnrollmentToken, in.Platform, in.Architecture); err != nil {
+		return err
 	}
 	_, validWorkspace := canonicalWorkspaceRoot(in.Platform, in.WorkspaceRoot)
 	publicKey, keyErr := base64.RawURLEncoding.DecodeString(strings.TrimSpace(in.PublicIdentityKey))
@@ -187,6 +181,19 @@ func (s *Service) validatePairing(in PairingInput) error {
 		if check.invalid {
 			return fmt.Errorf("%w: %s", ErrInvalidPairing, check.reason)
 		}
+	}
+	return nil
+}
+
+func (s *Service) validatePairingPlatform(token, platform, architecture string) error {
+	token = strings.TrimSpace(token)
+	if token != "" && !validEnrollmentToken(token) {
+		return ErrEnrollmentTokenInvalid
+	}
+	platform, architecture = strings.ToLower(strings.TrimSpace(platform)), strings.ToLower(strings.TrimSpace(architecture))
+	if !releases.SupportedPlatformArchitecture(platform, architecture) || !slices.Contains(s.policy.AllowedPlatforms, platform) ||
+		token != "" && EnrollmentTokenUsesPowerShell(token) != (platform == "windows") {
+		return ErrPairingPlatformUnsupported
 	}
 	return nil
 }

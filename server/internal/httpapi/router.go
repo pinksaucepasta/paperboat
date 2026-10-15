@@ -532,6 +532,7 @@ func NewRouter(opts Options) http.Handler {
 				return requireAuth(opts.Auth, next)
 			}
 			mux.HandleFunc("POST /v1/machines/pairings", userMachinePairings(opts.Machines))
+			mux.HandleFunc("POST /v1/machines/pairings/reset", userMachinePairingReset(opts.Machines))
 			if opts.DeviceAuth != nil {
 				if opts.NativePrivateAccess != nil {
 					mux.Handle("POST /v1/native-private-access/grants", requireBearerAuth(opts.DeviceAuth, requireScope("machines:connect", nativePrivateGrant(opts.NativePrivateAccess))))

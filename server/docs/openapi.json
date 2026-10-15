@@ -44085,6 +44085,151 @@
           }
         }
       }
+    },
+    "/v1/machines/pairings/reset": {
+      "post": {
+        "operationId": "post_v1_machines_pairings_reset",
+        "summary": "Atomically retire exact original machine identities before replacement pairing",
+        "description": "Authority is the fresh enrollment token original account, never a hostname or a soon-to-be-revoked CLI token. Retires all requested machines, aliases, seats, current sessions, access/refresh credentials and server-side authorities in one transaction. Returns an immutable retirement receipt bound to this enrollment generation, verifier and exact sorted request. Retry the same token/verifier/request after a lost response even after original token expiry; explicit cancellation/revocation still denies recovery. Follow-up pairing must use the same verifier and a currently valid enrollment token. A reset receipt does not renew token expiry or authorize new pairing. Client preserves local state until receipt is confirmed; it then follows normal pairing and identity-bound installation recovery. A new enrollment generation cannot read or reuse a prior generation receipt. Each resource requires proof by its stored old Ed25519 identity; account enrollment authority alone cannot substitute for possession of that identity.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "enrollment_token",
+                  "verifier",
+                  "platform",
+                  "architecture",
+                  "machines"
+                ],
+                "properties": {
+                  "enrollment_token": {
+                    "type": "string",
+                    "writeOnly": true
+                  },
+                  "verifier": {
+                    "type": "string",
+                    "minLength": 16,
+                    "maxLength": 256,
+                    "writeOnly": true
+                  },
+                  "platform": {
+                    "type": "string"
+                  },
+                  "architecture": {
+                    "type": "string"
+                  },
+                  "machines": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 16,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "public_identity_key",
+                        "installation_generation",
+                        "identity_signature"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        "public_identity_key": {
+                          "type": "string"
+                        },
+                        "installation_generation": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "identity_signature": {
+                          "type": "string",
+                          "description": "Unpadded base64url Ed25519 signature by this exact OLD machine identity key over UTF-8 lines (including final LF): paperboat.machine-reset/v1, lowercase hex SHA256(trimmed enrollment_token), lowercase hex SHA256(verifier), normalized platform, normalized architecture, exact id, exact public_identity_key, decimal installation_generation. No private key leaves the machine."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Retired receipt; identical state on exact recovery. No credentials returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "state",
+                        "enrollment_id",
+                        "retired_machine_ids",
+                        "completed_at"
+                      ],
+                      "properties": {
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "retired"
+                          ]
+                        },
+                        "enrollment_id": {
+                          "type": "string"
+                        },
+                        "retired_machine_ids": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "completed_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "pairing_reset_invalid, enrollment_token_invalid or pairing_platform_unsupported.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "pairing_reset_denied: account, exact key/generation or current management authority mismatch."
+          },
+          "409": {
+            "description": "pairing_reset_conflict for changed protected request/verifier or non-fresh linked enrollment; enrollment_token_used for already-claimed enrollment."
+          },
+          "410": {
+            "description": "enrollment_token_expired for a reset not yet admitted."
+          },
+          "503": {
+            "description": "pairing_reset_unavailable: outcome uncertain; retain saved recovery state and retry identical request."
+          }
+        }
+      }
     }
   }
 }
