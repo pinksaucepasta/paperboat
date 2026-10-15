@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 type privateTCPAccessTestProxy struct {
 	mu     sync.Mutex
 	closed int
+	done   chan struct{}
 	rawURL string
 }
 
@@ -25,6 +27,9 @@ func (p *privateTCPAccessTestProxy) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.closed++
+	if p.done != nil && p.closed == 1 {
+		close(p.done)
+	}
 	return nil
 }
 func (p *privateTCPAccessTestProxy) AccessURL() string { return p.rawURL }
@@ -215,29 +220,31 @@ func TestPrivateTCPAccessManagerShutdownClosesEverySessionAndRejectsNew(t *testi
 	}
 }
 
-func TestPrivateTCPAccessManagerReconcilesDefinitiveDenialAndOutageExpiry(t *testing.T) {
+func TestPrivateTCPAccessManagerOutlivesExpiryAndKeepsDefinitiveRevocation(t *testing.T) {
 	for name, testCase := range map[string]struct {
 		secondError error
-		reconcileAt time.Duration
 	}{
-		"paused or deleted":            {ErrPrivateTCPAccessForbidden, time.Second},
-		"outage past authority expiry": {ErrPrivateTCPAccessUnavailable, 2 * time.Minute},
+		"paused or deleted":            {ErrPrivateTCPAccessForbidden},
+		"outage past authority expiry": {ErrPrivateTCPAccessUnavailable},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			proxy := &privateTCPAccessTestProxy{rawURL: "http://127.0.0.1:24001"}
-			calls := 0
+			proxy := &privateTCPAccessTestProxy{rawURL: "http://127.0.0.1:24001", done: make(chan struct{})}
+			var calls atomic.Int32
+			var forceDenied atomic.Bool
 			now := time.Now().UTC()
-			manager, err := NewPrivateTCPAccessManager(PrivateTCPAccessManagerConfig{ControlToken: "local-token", RunContext: ctx, ReconcileInterval: time.Minute,
-				resolve: func(context.Context, string) (string, string, error) { return "route_1", "tun_1", nil },
-				start:   func(context.Context, PrivateTCPAccessRequest) (privateTCPAccessProxy, error) { return proxy, nil },
+			manager, err := NewPrivateTCPAccessManager(PrivateTCPAccessManagerConfig{ControlToken: "local-token", RunContext: ctx, resolve: func(context.Context, string) (string, string, error) { return "route_1", "tun_1", nil },
+				start: func(context.Context, PrivateTCPAccessRequest) (privateTCPAccessProxy, error) { return proxy, nil },
 				validate: func(context.Context, string, string) (time.Time, error) {
-					calls++
-					if calls > 1 {
+					call := calls.Add(1)
+					if forceDenied.Load() {
+						return time.Time{}, ErrPrivateTCPAccessForbidden
+					}
+					if call > 1 {
 						return time.Time{}, testCase.secondError
 					}
-					return now.Add(time.Minute), nil
+					return now.Add(50 * time.Millisecond), nil
 				}, newID: func() (string, error) { return "reconcile", nil }})
 			if err != nil {
 				t.Fatal(err)
@@ -246,12 +253,40 @@ func TestPrivateTCPAccessManagerReconcilesDefinitiveDenialAndOutageExpiry(t *tes
 			if response := privateTCPAccessRequest(t, manager, http.MethodPost, "/v1/private-tcp-access", "local-token", validPrivateTCPAccessBody("tun_1")); response.Code != http.StatusCreated {
 				t.Fatalf("create=%d %s", response.Code, response.Body.String())
 			}
-			manager.reconcileOnce(ctx, now.Add(testCase.reconcileAt))
+			if errors.Is(testCase.secondError, ErrPrivateTCPAccessForbidden) {
+				select {
+				case <-proxy.done:
+				case <-time.After(2 * time.Second):
+					t.Fatal("explicit denial did not close listener")
+				}
+			} else {
+				select {
+				case <-proxy.done:
+					t.Fatal("credential expiry/outage closed listener")
+				case <-time.After(80 * time.Millisecond):
+				}
+			}
 			proxy.mu.Lock()
 			closed := proxy.closed
 			proxy.mu.Unlock()
+			wantClosed := 1
+			if errors.Is(testCase.secondError, ErrPrivateTCPAccessUnavailable) {
+				wantClosed = 0
+			}
+			if closed != wantClosed {
+				t.Fatalf("closed=%d want=%d", closed, wantClosed)
+			}
+			forceDenied.Store(true)
+			select {
+			case <-proxy.done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("explicit revocation did not close listener")
+			}
+			proxy.mu.Lock()
+			closed = proxy.closed
+			proxy.mu.Unlock()
 			if closed != 1 {
-				t.Fatalf("closed=%d", closed)
+				t.Fatalf("explicit revocation closed=%d", closed)
 			}
 		})
 	}
@@ -262,13 +297,12 @@ func TestPrivateTCPAccessManagerRetainsListenerDuringBoundedOutage(t *testing.T)
 	defer cancel()
 	proxy := &privateTCPAccessTestProxy{rawURL: "http://127.0.0.1:24002"}
 	now := time.Now().UTC()
-	calls := 0
-	manager, err := NewPrivateTCPAccessManager(PrivateTCPAccessManagerConfig{ControlToken: "local-token", RunContext: ctx, ReconcileInterval: time.Minute,
-		resolve: func(context.Context, string) (string, string, error) { return "route_1", "tun_1", nil },
-		start:   func(context.Context, PrivateTCPAccessRequest) (privateTCPAccessProxy, error) { return proxy, nil },
+	var calls atomic.Int32
+	manager, err := NewPrivateTCPAccessManager(PrivateTCPAccessManagerConfig{ControlToken: "local-token", RunContext: ctx, resolve: func(context.Context, string) (string, string, error) { return "route_1", "tun_1", nil },
+		start: func(context.Context, PrivateTCPAccessRequest) (privateTCPAccessProxy, error) { return proxy, nil },
 		validate: func(context.Context, string, string) (time.Time, error) {
-			calls++
-			if calls > 1 {
+			call := calls.Add(1)
+			if call > 1 {
 				return time.Time{}, ErrPrivateTCPAccessUnavailable
 			}
 			return now.Add(time.Minute), nil
@@ -280,7 +314,15 @@ func TestPrivateTCPAccessManagerRetainsListenerDuringBoundedOutage(t *testing.T)
 	if response := privateTCPAccessRequest(t, manager, http.MethodPost, "/v1/private-tcp-access", "local-token", validPrivateTCPAccessBody("tun_1")); response.Code != http.StatusCreated {
 		t.Fatalf("create=%d %s", response.Code, response.Body.String())
 	}
-	manager.reconcileOnce(ctx, now.Add(30*time.Second))
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	for calls.Load() < 2 {
+		select {
+		case <-deadline.C:
+			t.Fatal("authority poll did not run")
+		case <-time.After(time.Millisecond):
+		}
+	}
 	proxy.mu.Lock()
 	closed := proxy.closed
 	proxy.mu.Unlock()

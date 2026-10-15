@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat-relay/reattach"
 	"io"
 	"net"
 	"net/url"
@@ -610,29 +611,10 @@ func retryableLeaseError(err error) bool {
 }
 
 func reconnectDelay(initial, maximum time.Duration, attempt int) time.Duration {
-	delay := initial
-	for i := 0; i < attempt && delay < maximum; i++ {
-		if delay > maximum/2 {
-			return maximum
-		}
-		delay *= 2
-	}
-	if delay > maximum {
-		return maximum
-	}
-	return delay
+	return reattach.Backoff(initial, maximum)(attempt + 1)
 }
 
-func waitReconnect(ctx context.Context, delay time.Duration) error {
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
+func waitReconnect(ctx context.Context, delay time.Duration) error { return reattach.Wait(ctx, delay) }
 
 func (s *Session) renewLoop(ctx context.Context) error {
 	attempt := 0
@@ -846,6 +828,9 @@ func (s *Session) rekeyManagers(lease Lease) error {
 	for _, manager := range managers {
 		if err := manager.rekey(s, lease); err != nil {
 			s.cancel()
+			if errors.Is(err, ErrSessionManagerStopped) {
+				return context.Canceled
+			}
 			return fmt.Errorf("%w: manager rejected ready lease: %v", ErrLeaseLost, err)
 		}
 	}

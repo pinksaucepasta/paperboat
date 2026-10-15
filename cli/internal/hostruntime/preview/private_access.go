@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	lifetime "github.com/pinksaucepasta/paperboat-relay/admission"
 	"io"
 	"net"
 	"net/http"
@@ -173,6 +174,8 @@ type privateAccessRoute struct {
 // publishes only currently attached private names and reauthorizes every
 // opened stream with the renewable machine credential.
 type PrivateAccessSource struct {
+	revoked chan struct{}
+
 	grants    *privateAccessGrantClient
 	discovery *accessorDiscoveryClient
 	sessions  *MachineAttachmentSessionSource
@@ -462,7 +465,7 @@ func (s *PrivateAccessSource) Open(ctx context.Context, host string) (io.ReadWri
 			_ = stream.Close()
 			return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
 		}
-		return newPrivateAccessorStream(stream, result.ExpiresAt, nil), nil
+		return newPrivateAccessorStream(ctx, stream, s.revocation(), nil)
 	case http.StatusUnauthorized:
 		_ = stream.Close()
 		return nil, privatepreviewproxy.ErrAccessAuthentication
@@ -565,41 +568,52 @@ func (s *PrivateAccessSource) openAccessorProtocol(ctx context.Context, host str
 		}
 		return nil, privateAccessStageFailure(ctx, "stream_result", err, result.Status)
 	}
-	return newPrivateAccessorStream(stream, result.ExpiresAt, session.Release), nil
+	return newPrivateAccessorStream(ctx, stream, s.revocation(), session.Release)
 }
 
 type privateAccessorStream struct {
 	io.ReadWriteCloser
-	once     sync.Once
-	release  func(context.Context) error
-	expiryMu sync.Mutex
-	expiry   *time.Timer
+	once    sync.Once
+	release func(context.Context) error
+	lease   *lifetime.Lease
+	err     error
 }
 
-func newPrivateAccessorStream(stream io.ReadWriteCloser, expires time.Time, release func(context.Context) error) *privateAccessorStream {
-	s := &privateAccessorStream{ReadWriteCloser: stream, release: release}
-	s.expiryMu.Lock()
-	s.expiry = time.AfterFunc(time.Until(expires), func() { _ = s.Close() })
-	s.expiryMu.Unlock()
-	return s
+func newPrivateAccessorStream(ctx context.Context, stream io.ReadWriteCloser, revoked <-chan struct{}, release func(context.Context) error) (*privateAccessorStream, error) {
+	// The remote acceptance reply already checked credential validity. The
+	// opening request's setup context does not own the accepted connection.
+	lease, err := lifetime.Admit(context.WithoutCancel(ctx), time.Time{}, revoked)
+	s := &privateAccessorStream{ReadWriteCloser: stream, release: release, lease: lease}
+	if err != nil {
+		return nil, errors.Join(err, s.Close())
+	}
+	lease.Bind(s)
+	return s, nil
 }
-
 func (s *privateAccessorStream) Close() error {
-	var result error
 	s.once.Do(func() {
-		s.expiryMu.Lock()
-		if s.expiry != nil {
-			s.expiry.Stop()
+		if s.lease != nil {
+			s.lease.Close()
 		}
-		s.expiryMu.Unlock()
-		result = s.ReadWriteCloser.Close()
+		s.err = s.ReadWriteCloser.Close()
 		if s.release != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			result = errors.Join(result, s.release(ctx))
+			s.err = errors.Join(s.err, s.release(ctx))
 		}
 	})
-	return result
+	return s.err
+}
+func (s *PrivateAccessSource) revocation() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.revoked == nil {
+		s.revoked = make(chan struct{})
+		if s.closed {
+			close(s.revoked)
+		}
+	}
+	return s.revoked
 }
 
 func (s *PrivateAccessSource) Close() {
@@ -607,6 +621,9 @@ func (s *PrivateAccessSource) Close() {
 		return
 	}
 	s.mu.Lock()
+	if !s.closed && s.revoked != nil {
+		close(s.revoked)
+	}
 	s.closed = true
 	s.ownerRoutes = make(map[string]privateAccessRoute)
 	s.discoveredRoutes = make(map[string]privateAccessRoute)

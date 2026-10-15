@@ -363,7 +363,7 @@ func TestPrivateTCPAdmissionRejectsDuplicateStaleAndClosedSource(t *testing.T) {
 	}
 }
 
-func TestPrivateAccessorPreviewHTTPGrantMatchesProtocol(t *testing.T) {
+func TestPrivateAccessorPreviewHTTPOutlivesGrantAndRevokes(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	now := time.Now().UTC().Truncate(time.Second)
@@ -464,7 +464,7 @@ func TestPrivateAccessorPreviewHTTPGrantMatchesProtocol(t *testing.T) {
 			edgeResult <- errors.New("wrong access binding")
 			return
 		}
-		if writeErr := connectorprotocol.WritePrivateAccessResult(stream, connectorprotocol.PrivateAccessResult{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Status: http.StatusOK, ExpiresAt: accessOpen.Request.ExpiresAt}); writeErr != nil {
+		if writeErr := connectorprotocol.WritePrivateAccessResult(stream, connectorprotocol.PrivateAccessResult{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Status: http.StatusOK, ExpiresAt: time.Now().Add(100 * time.Millisecond)}); writeErr != nil {
 			edgeResult <- writeErr
 			return
 		}
@@ -474,7 +474,17 @@ func TestPrivateAccessorPreviewHTTPGrantMatchesProtocol(t *testing.T) {
 			return
 		}
 		_, writeErr := stream.Write(payload)
-		edgeResult <- writeErr
+		if writeErr != nil {
+			edgeResult <- writeErr
+			return
+		}
+		var extra [1]byte
+		_, readErr = stream.Read(extra[:])
+		if readErr == nil {
+			edgeResult <- errors.New("revoked stream remained readable")
+			return
+		}
+		edgeResult <- nil
 	}()
 
 	proxy, err := privatepreviewproxy.StartAccessProxy(ctx, privatepreviewproxy.AccessProxyConfig{Source: source, OpenTimeout: 40 * time.Millisecond})
@@ -495,7 +505,7 @@ func TestPrivateAccessorPreviewHTTPGrantMatchesProtocol(t *testing.T) {
 	if err != nil || response.StatusCode != 200 {
 		t.Fatalf("CONNECT response=%v err=%v", response, err)
 	}
-	time.Sleep(80 * time.Millisecond) // Exceed opening bound after the carrier was admitted.
+	time.Sleep(150 * time.Millisecond) // Outlive both setup timeout and credential TTL.
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -506,6 +516,14 @@ func TestPrivateAccessorPreviewHTTPGrantMatchesProtocol(t *testing.T) {
 	payload := make([]byte, len("tls-canary"))
 	if _, err := io.ReadFull(stream, payload); err != nil || string(payload) != "tls-canary" {
 		t.Fatalf("payload=%q err=%v", payload, err)
+	}
+	source.Close()
+	stream.SetReadDeadline(time.Now().Add(time.Second))
+	var extra [1]byte
+	if _, err := stream.Read(extra[:]); err == nil {
+		t.Fatal("revoked accessor stayed open")
+	} else if timeout, ok := err.(net.Error); ok && timeout.Timeout() {
+		t.Fatal("revocation failed to interrupt accessor")
 	}
 	if err := <-edgeResult; err != nil {
 		t.Fatal(err)
@@ -526,26 +544,31 @@ func TestPrivateAccessorPreviewHTTPGrantMatchesProtocol(t *testing.T) {
 	}
 }
 
-func TestPrivateAccessorStreamGrantExpiryReleasesCarrier(t *testing.T) {
+func TestPrivateAccessorRevocationReleasesCarrierOnce(t *testing.T) {
 	client, peer := net.Pipe()
 	defer peer.Close()
 	var releases atomic.Int32
-	stream := newPrivateAccessorStream(client, time.Now().Add(30*time.Millisecond), func(context.Context) error { releases.Add(1); return nil })
+	revoked := make(chan struct{})
+	stream, err := newPrivateAccessorStream(t.Context(), client, revoked, func(context.Context) error { releases.Add(1); return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer stream.Close()
 	done := make(chan error, 1)
 	go func() { var b [1]byte; _, err := peer.Read(b[:]); done <- err }()
+	close(revoked)
 	select {
 	case err := <-done:
 		if err == nil {
-			t.Fatal("expired grant retained readable carrier")
+			t.Fatal("revoked grant retained readable carrier")
 		}
 	case <-time.After(time.Second):
-		t.Fatal("grant expiry did not close stream")
+		t.Fatal("revocation did not close stream")
 	}
 	deadline := time.Now().Add(time.Second)
 	for releases.Load() != 1 {
 		if time.Now().After(deadline) {
-			t.Fatal("expired grant did not release carrier")
+			t.Fatal("revocation did not release carrier")
 		}
 		time.Sleep(time.Millisecond)
 	}
