@@ -493,7 +493,7 @@ that use them; say which in Evidence.
 | F12-03 | Roles owner/admin/member; change role; remove member; leave; transfer ownership. | [ ] | [ ] | [ ] | —  Server TestPostgresUnifiedLifecycleNoRevivedAuthority: isolated VPS PG PASS0.51s after typed-endpoint fixture repair; device qualification pending. |
 | F12-04 | Team machines: enroll into team, share personal machine, grant, unshare, transfer-to-team, remove; default access shown while enrolling. | [ ] | [ ] | [ ] | — |
 | F12-05 | Explicit resource grants and `pb team attach`; `pb team activity`. | [ ] | [ ] | [ ] | — |
-| F12-06 | Suspension and recovery behave as documented. | [ ] | [ ] | [ ] | — |
+| F12-06 | Suspension and recovery behave as documented. | [ ] | [ ] | [ ] | —  Server TestOperatorTeamSuspensionFencesAuthorityAndResumesAtNewGeneration isolated VPS PG PASS0.10s; teams vet/race PASS1.031s; devices pending. |
 | F12-07 | Console Teams screens per console/NOTES.md "Teams". | [ ] | [ ] | [ ] |  |
 
 **Commands**

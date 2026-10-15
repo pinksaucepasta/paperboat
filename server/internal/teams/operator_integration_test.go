@@ -2,6 +2,8 @@ package teams
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"os"
 	"strings"
@@ -30,12 +32,18 @@ func TestOperatorTeamSuspensionFencesAuthorityAndResumesAtNewGeneration(t *testi
 		t.Fatal(err)
 	}
 	suffix := strings.ReplaceAll(time.Now().UTC().Format("150405.000000000"), ".", "")
-	admin, owner, memberID, team := "usr_admin_"+suffix, "usr_owner_"+suffix, "usr_member_"+suffix, "team-suspend-"+suffix
+	var actorBytes [16]byte
+	if _, err := rand.Read(actorBytes[:]); err != nil {
+		t.Fatal(err)
+	}
+	admin := "opr_" + hex.EncodeToString(actorBytes[:])
+	owner, memberID, team := "usr_owner_"+suffix, "usr_member_"+suffix, "team-suspend-"+suffix
 	for _, statement := range []struct {
 		q    string
 		args []any
 	}{
-		{`INSERT INTO users(id,workos_subject,primary_email,status,role) VALUES($1,$1,$1||'@test','active','admin'),($2,$2,$2||'@test','active','user'),($3,$3,$3||'@test','active','user')`, []any{admin, owner, memberID}},
+		{`INSERT INTO operator_accounts(id,email,password_hash,status,role) VALUES($1,$1||'@example.test','unused test login','active','admin')`, []any{admin}},
+		{`INSERT INTO users(id,workos_subject,primary_email,status,role) VALUES($1,$1,$1||'@example.test','active','user'),($2,$2,$2||'@example.test','active','user')`, []any{owner, memberID}},
 		{`INSERT INTO teams(team_id,owner_account,generation) VALUES($1,$2,1)`, []any{team, owner}},
 		{`INSERT INTO team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true),($1,$3,1,'member',true)`, []any{team, owner, memberID}},
 		{`INSERT INTO team_resource_bindings(team_id,resource_kind,resource_id,owner_account,generation,active) VALUES($1,'env',$1,$2,1,true)`, []any{team, owner}},
@@ -50,7 +58,8 @@ func TestOperatorTeamSuspensionFencesAuthorityAndResumesAtNewGeneration(t *testi
 		for _, q := range []string{`DELETE FROM billing_workspaces WHERE team_id=$1`, `DELETE FROM team_resource_grants WHERE team_id=$1`, `DELETE FROM team_resource_bindings WHERE team_id=$1`, `DELETE FROM team_members WHERE team_id=$1`, `DELETE FROM teams WHERE team_id=$1`} {
 			store.Pool().Exec(context.Background(), q, team)
 		}
-		store.Pool().Exec(context.Background(), `DELETE FROM users WHERE id=ANY($1)`, []string{admin, owner, memberID})
+		store.Pool().Exec(context.Background(), `DELETE FROM users WHERE id=ANY($1)`, []string{owner, memberID})
+		store.Pool().Exec(context.Background(), `DELETE FROM operator_accounts WHERE id=$1`, admin)
 	})
 	service := NewService(store)
 	before, err := service.Authorize(ctx, memberID, team, "env", team, "read")
