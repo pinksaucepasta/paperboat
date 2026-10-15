@@ -404,7 +404,7 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F10-01 | Set/unset/list for personal, team and per-machine overrides; values appear in new terminals and execs on L, M, W targets; never in logs or diagnostics. | [ ] | [ ] | [ ] | — |
+| F10-01 | Set/unset/list for personal, team and per-machine overrides; values appear in new terminals and execs on L, M, W targets; never in logs or diagnostics. | [ ] | [ ] | [ ] | —  Server ENV PostgreSQL qualification:10 existing owners PASS including opaque-canary privacy and scope isolation; devices pending. |
 | F10-02 | Vault init/unlock/lock/password/recovery/recover/remove/reset/resume with the OS keychain (M, W, L desktop) and on headless Linux (password unlock, 15-minute memory key). | [ ] | [ ] | [ ] | — |
 | F10-03 | No ENV assigned → commands run normally; pending → clear message; undeliverable → the specific error. | [ ] | [ ] | [ ] | — |
 | F10-04 | Team scopes: create, grant, revoke, rotate, reset; `pb env grants sync`; access follows roles. | [ ] | [ ] | [ ] | — |
@@ -448,7 +448,7 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F11-01 | Connect HTTPS, SSH and local repositories; store/remove credentials privately. | [ ] | [ ] | [ ] | — |
+| F11-01 | Connect HTTPS, SSH and local repositories; store/remove credentials privately. | [ ] | [ ] | [ ] | —  Server lease/tag authority PG PASS0.21s; custom-repository authorization/revocation PG PASS0.25s; devices pending. |
 | F11-02 | Assign, sync, apply and validate on L, M, W. | [ ] | [ ] | [ ] | — |
 | F11-03 | Conflicts listed, shown, compared and resolved both ways; consent and approve flow. | [ ] | [ ] | [ ] | — |
 | F11-04 | Force direction, unassign, team defaults set/adopt/unadopt. | [ ] | [ ] | [ ] | — |
@@ -534,7 +534,7 @@ that use them; say which in Evidence.
 | F13-01 | Free plan: new accounts pair machines with no subscription or trial; the old "active subscription required" gates are replaced by the allowance model. | [ ] | [ ] | [ ] |  Server producer: TestFreeAccountSetupWithoutSubscription PASS on isolated VPS PostgreSQL with no published artifact/subscription; installation release dependency removed per 92b5ad9. Lane A device and full allowance verification pending. |
 | F13-02 | Metering of relay and edge bytes per workspace (personal) and per member + pool (team); direct P2P never metered. | [ ] | [ ] | [ ] |  |
 | F13-03 | Caps enforced as in 1.3; CLI and console messages with upgrade/top-up links; team owners/admins notified. | [ ] | [ ] | [ ] |  |
-| F13-04 | Stripe test mode: Pro monthly/yearly, upgrade/downgrade/cancel, top-ups, Team seats monthly/yearly, seat changes mid-cycle (charged immediately, billing date fixed), failed payment → grace → suspension → recovery, invoices. | [ ] | [ ] | [ ] |  |
+| F13-04 | Stripe test mode: Pro monthly/yearly, upgrade/downgrade/cancel, top-ups, Team seats monthly/yearly, seat changes mid-cycle (charged immediately, billing date fixed), failed payment → grace → suspension → recovery, invoices. | [ ] | [ ] | [ ] |   Nine billing PostgreSQL owners PASS using fake Stripe boundary; actual Stripe test-mode account flows still pending. |
 | F13-05 | Stripe live: products/prices via API, webhook verified, one real $8 purchase and refund done by the user. | [!] | [!] | [!] | Blocked: restricted Stripe live key absent from archived server configuration/secrets and current repository secret inventory. Needs live key plus user real $8 purchase/refund after test-mode verification. |
 | F13-06 | Console billing, bandwidth card (per-path series: direct/relay/edge), usage and plan screens. | [ ] | [ ] | [ ] |  |
 
@@ -572,7 +572,7 @@ that use them; say which in Evidence.
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
 | F15-01 | `pb doctor` is healthy only when terminal and exec actually work; every failing check says what to do; `--repair` fixes what it claims. | [ ] | [ ] | [ ] | — |
-| F15-02 | `pb bugreport` produces a bundle with no secrets; support references resolve in the server support lookup. | [ ] | [ ] | [ ] | — |
+| F15-02 | `pb bugreport` produces a bundle with no secrets; support references resolve in the server support lookup. | [ ] | [ ] | [ ] | —  Server TestSupportPostgresIsolationRetentionAndAudit isolated VPS PG PASS0.41s after schema-valid fixture repair; vet/race PASS3.422s. Device bugreport verification pending. |
 | F15-03 | Diagnostics are written on L, M, W (confirm the Windows location) and never contain credentials, ENV values, terminal or file content. | [ ] | [ ] | [ ] | — |
 | F15-04 | `pb config customize` (shortcuts, defaults, TUI), `status-bar`, `set/unset/show/path` work and survive updates. | [ ] | [ ] | [ ] | — |
 | F15-05 | Shell completion for bash, zsh, fish, PowerShell installs and completes commands and machine names. | [ ] | [ ] | [ ] | — |

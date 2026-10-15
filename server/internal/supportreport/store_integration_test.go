@@ -6,6 +6,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -30,7 +31,7 @@ func TestSupportPostgresIsolationRetentionAndAudit(t *testing.T) {
 	ref := NewReference()
 	ownerA := "user_" + uuid.NewString()
 	ownerB := "user_" + uuid.NewString()
-	operator := "operator_" + uuid.NewString()
+	operator := "opr_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	for _, user := range []string{ownerA, ownerB} {
 		if _, err = database.Pool().Exec(ctx, `INSERT INTO users(id,workos_subject,primary_email,status) VALUES($1,$1,$2,'active')`, user, user+"@example.test"); err != nil {
 			t.Fatal(err)
@@ -44,7 +45,7 @@ func TestSupportPostgresIsolationRetentionAndAudit(t *testing.T) {
 	}()
 	store, _ := NewSQLStore(database)
 	service, _ := New(store, Config{})
-	first := Record{ID: NewReference(), Reference: ref, OwnerID: ownerA, RequestID: "req_a", Component: "paperboat-server", Release: "test", Stage: "authorize", Code: "internal_error", At: time.Now().UTC(), ExpiresAt: time.Now().Add(time.Hour), Reporting: "disabled"}
+	first := Record{ID: NewReference(), Reference: ref, OwnerID: ownerA, RequestID: "req_a", Component: "paperboat-server", Release: "test", Stage: "authorize", Code: "internal_error", At: time.Now().UTC(), ExpiresAt: time.Now().Add(time.Hour), Reporting: "disabled", Operation: "http_other", Cause: "internal", ErrorType: "none", ErrorChain: []string{}, Outcome: "failed", Severity: "error"}
 	if err = store.Save(ctx, first); err != nil {
 		t.Fatal(err)
 	}
