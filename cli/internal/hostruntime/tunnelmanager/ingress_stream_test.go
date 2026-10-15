@@ -16,7 +16,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 )
 
-func TestIngressForwarderDeniesBeforeOriginAndExpiresActiveBody(t *testing.T) {
+func TestIngressForwarderOutlivesAdmissionAndRevokesActiveBody(t *testing.T) {
 	testIngressForwarderAuthority(t, time.Second, false)
 }
 func TestIngressForwarderRevocationClosesActiveOrigin(t *testing.T) {
@@ -116,9 +116,14 @@ func testIngressForwarderAuthority(t *testing.T, lifetime time.Duration, revoke 
 	case <-ctx.Done():
 		t.Fatal("origin did not start")
 	}
-	if revoke {
-		revoked.Store(true)
+	if !revoke {
+		select {
+		case <-stopped:
+			t.Fatal("credential expiry canceled admitted origin")
+		case <-time.After(time.Until(d.ExpiresAt) + 100*time.Millisecond):
+		}
 	}
+	revoked.Store(true)
 	go func() {
 		response, err := http.ReadResponse(bufio.NewReader(s), nil)
 		if err == nil {
@@ -129,7 +134,7 @@ func testIngressForwarderAuthority(t *testing.T, lifetime time.Duration, revoke 
 	select {
 	case <-stopped:
 	case <-ctx.Done():
-		t.Fatal("withdrawn or expired authority did not cancel active origin")
+		t.Fatal("revoked authority did not cancel active origin")
 	}
 	if hits.Load() != 1 {
 		t.Fatalf("origin hits=%d", hits.Load())

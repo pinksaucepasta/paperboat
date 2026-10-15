@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
@@ -66,33 +67,27 @@ func (f OriginStreamForwarder) admitIngress(parent context.Context, stream io.Re
 	}
 	ctx = context.WithValue(ctx, ingressBindingKey{}, current.Binding)
 	ctx = context.WithValue(ctx, ingressExpiryKey{}, current.ExpiresAt)
-	terminate := ingressTermination(ctx, cancelCause, stream)
-	expire := time.AfterFunc(time.Until(current.ExpiresAt), func() { terminate(nil) })
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		defer expire.Stop()
-		tick := time.NewTicker(connectorprotocol.IngressRefreshInterval)
-		defer tick.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-tick.C:
-				next, err := f.refreshIngress(ctx, open, decision, current)
-				if err != nil {
-					terminate(err)
-					return
-				}
-				if ctx.Err() != nil {
-					return
-				}
-				current = next
-				expire.Reset(time.Until(next.ExpiresAt))
-			}
+	lease, err := admission.Admit(ctx, current.ExpiresAt, nil)
+	if err != nil {
+		return fail(err)
+	}
+	stopIO := lease.Bind(stream)
+	stopWatch := lease.Poll(func(check context.Context) error {
+		_, err := f.refreshIngress(check, open, decision, current)
+		if ingressDenialOnly(err) {
+			return admission.ErrRevoked
 		}
-	}()
-	return ctx, func() { cancel(); <-done }, nil
+		if err != nil {
+			captureIngressFailure(check, "peer_authority", err)
+		}
+		return err
+	})
+	return lease.Context(), func() {
+		cancel()
+		stopWatch()
+		stopIO()
+		lease.Close()
+	}, nil
 }
 
 // ingressOperationFailure keeps operational causes distinct from a proven
@@ -192,16 +187,13 @@ func ingressExpectedOnly(err error, lifecycle bool) bool {
 }
 
 func (f OriginStreamForwarder) refreshIngress(ctx context.Context, open connectorprotocol.StreamOpen, decision, current connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error) {
-	refresh, stop := context.WithDeadline(ctx, current.ExpiresAt)
-	defer stop()
-	next, err := f.IngressAuthority(refresh, open, decision)
+	next, err := f.IngressAuthority(ctx, open, decision)
 	if err != nil {
 		return next, ingressOperationFailure{cause: err}
 	}
 	// Refresh grants time only; all independent authority dimensions remain
 	// identical for the existing application stream.
-	current.IssuedAt, current.ExpiresAt = next.IssuedAt, next.ExpiresAt
-	if err := current.Authorize(next, open, next.EdgeNodeID, next.EdgeProcessEpoch, time.Now().UTC()); err != nil {
+	if err := current.Revalidate(next, open, next.EdgeNodeID, next.EdgeProcessEpoch, time.Now().UTC()); err != nil {
 		return next, err
 	}
 	return next, nil

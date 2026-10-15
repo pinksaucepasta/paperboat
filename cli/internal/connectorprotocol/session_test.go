@@ -762,3 +762,33 @@ func TestNewSnapshotReplacesUnreadyCandidateWithoutLosingServingSession(t *testi
 		t.Fatal("recovery did not use original session")
 	}
 }
+
+func TestAdmittedConnectorSessionOutlivesCredentialAndLeaseButRevokes(t *testing.T) {
+	_, client, clock, _, snapshot := testSessionPair(t)
+	client.mu.Lock()
+	client.auth.ExpiresAt = clock.Now().Add(time.Second)
+	client.lease.ExpiresAt = clock.Now().Add(time.Second)
+	client.mu.Unlock()
+	clock.Advance(2 * time.Second)
+	if err := client.CheckLease(clock.Now()); err != nil {
+		t.Fatal("admission expiry closed live connector", err)
+	}
+	if current, ready := client.Active(); !ready || current.Generation != snapshot.Generation || current.ContentHash != snapshot.ContentHash {
+		t.Fatal("admission expiry withdrew live configuration")
+	}
+	// This is a new hello, so expiry remains an admission rejection.
+	hello := client.Hello()
+	hello.Auth.ExpiresAt = clock.Now().Add(-time.Second)
+	if _, err := NewClientSession(ClientSessionConfig{Hello: hello, Clock: clock}); err == nil {
+		t.Fatal("expired credential admitted a new connector")
+	}
+	if err := client.Close(ReasonAuthentication); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.CheckLease(clock.Now()); !errors.Is(err, ErrSessionClosed) {
+		t.Fatal("revoked connector stayed live", err)
+	}
+	if _, err := client.Heartbeat(clock.Now()); !errors.Is(err, ErrSessionClosed) {
+		t.Fatal("revoked connector accepted heartbeat", err)
+	}
+}

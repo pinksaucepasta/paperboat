@@ -45,7 +45,7 @@ func NewBrowserIngressAuthority(controlURL string, auth IngressMachineAuth, tran
 		denied := connectorprotocol.IngressDecision{}
 		// The original claim may have expired while an active stream refreshes.
 		// Only the independently returned authority can extend that stream's life.
-		if ctx == nil || open.Validate() != nil || decision.Validate(decision.IssuedAt) != nil || decision.Binding.Audience == "public" {
+		if ctx == nil || open.Validate() != nil || decision.ValidateAdmitted(time.Now().UTC()) != nil || decision.Binding.Audience == "public" {
 			return denied, connectorprotocol.ErrIngressDenied
 		}
 		body, err := json.Marshal(struct {
@@ -149,14 +149,12 @@ func NewBrowserIngressAuthority(controlURL string, auth IngressMachineAuth, tran
 		binary.BigEndian.PutUint32(length[:], uint32(len(payload)))
 		wire.Write(length[:])
 		wire.Write(payload)
-		current, err = connectorprotocol.ReadIngressDecision(&wire, time.Now().UTC())
+		current, err = connectorprotocol.ReadAdmittedIngressDecision(&wire, time.Now().UTC())
 		if err != nil {
 			return denied, ingressOperationFailure{cause: err}
 		}
 
-		expected := decision
-		expected.IssuedAt, expected.ExpiresAt = current.IssuedAt, current.ExpiresAt
-		if expected.Authorize(current, open, decision.EdgeNodeID, decision.EdgeProcessEpoch, time.Now().UTC()) != nil {
+		if decision.Revalidate(current, open, decision.EdgeNodeID, decision.EdgeProcessEpoch, time.Now().UTC()) != nil {
 			return denied, connectorprotocol.ErrIngressDenied
 		}
 		return current, nil

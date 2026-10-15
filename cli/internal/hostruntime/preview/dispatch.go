@@ -171,7 +171,7 @@ type dispatchOperation struct {
 // foreground preview. The in-memory session is the authoritative owner; a
 // stopped or replaced session cannot be revived by an unexpired grant.
 func (m *DispatchManager) ValidateNativePrivateTarget(binding nativeprivate.Binding) error {
-	if m == nil || binding.Validate(m.config.Now()) != nil || binding.ResourceKind != "preview" || binding.OwnerEndpointID != m.config.MachineID || binding.ResourceID != binding.RouteID || binding.ResourceGeneration != binding.RouteGeneration || binding.RouteGeneration != binding.TargetGeneration {
+	if m == nil || binding.ValidateShape() != nil || binding.ResourceKind != "preview" || binding.OwnerEndpointID != m.config.MachineID || binding.ResourceID != binding.RouteID || binding.ResourceGeneration != binding.RouteGeneration || binding.RouteGeneration != binding.TargetGeneration {
 		return ErrDispatchUnavailable
 	}
 	m.mu.Lock()

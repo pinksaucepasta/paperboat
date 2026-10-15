@@ -806,7 +806,7 @@ func (m *Manager) ActiveForTunnel(tunnelID string) (Active, bool) {
 // both durable last-known-good state and the exact currently published
 // runtime. A grant alone never makes an obsolete origin current.
 func (m *Manager) ValidateNativePrivateTarget(binding nativeprivate.Binding) error {
-	if m == nil || binding.Validate(m.config.Clock()) != nil || binding.ResourceKind != "tunnel" || binding.OwnerEndpointID != m.config.HostID || binding.TargetGeneration != binding.RouteGeneration {
+	if m == nil || binding.ValidateShape() != nil || binding.ResourceKind != "tunnel" || binding.OwnerEndpointID != m.config.HostID || binding.TargetGeneration != binding.RouteGeneration {
 		return ErrOriginUnavailable
 	}
 	active, ok := m.ActiveForTunnel(binding.ResourceID)

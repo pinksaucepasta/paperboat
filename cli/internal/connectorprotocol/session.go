@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"sync"
 	"time"
 )
@@ -68,6 +69,8 @@ func (noopDrainer) ActiveStreams(context.Context) (uint32, error) { return 0, ni
 func (noopDrainer) ForceClose(context.Context) error              { return nil }
 
 type ClientSession struct {
+	lifetime *admission.Lease
+
 	mu               sync.RWMutex
 	applyMu          sync.Mutex
 	config           ClientSessionConfig
@@ -156,6 +159,11 @@ func (c *ClientSession) AcceptWelcome(welcome Welcome) error {
 	if _, err := NegotiateCapabilities(c.config.Hello.Capabilities, welcome.Capabilities); err != nil {
 		return err
 	}
+	lifetime, err := admission.Admit(context.Background(), time.Time{}, nil)
+	if err != nil {
+		return err
+	}
+	c.lifetime = lifetime
 	c.welcome = welcome
 	c.lease = welcome.Lease
 	c.state = SessionAwaitingSnapshot
@@ -170,10 +178,8 @@ func (c *ClientSession) ensureActiveLocked(now time.Time) error {
 	if c.state == SessionNew {
 		return codeError(ErrSessionConflict, ReasonProtocolClosed, false, nil)
 	}
-	if !c.lease.ExpiresAt.After(now) {
-		c.state = SessionClosed
-		c.disconnectReason = ReasonLeaseExpired
-		return codeError(ErrLeaseExpired, ReasonLeaseExpired, true, nil)
+	if c.lifetime == nil || c.lifetime.Check() != nil {
+		return codeError(ErrSessionClosed, c.disconnectReason, false, nil)
 	}
 	if !c.lastHeartbeatAck.IsZero() && now.Sub(c.lastHeartbeatAck) > 2*time.Duration(c.lease.HeartbeatIntervalMS)*time.Millisecond {
 		c.state = SessionClosed
@@ -759,8 +765,8 @@ func (c *ClientSession) ensureActiveReadLocked(now time.Time) error {
 	if c.state == SessionNew {
 		return codeError(ErrSessionConflict, ReasonProtocolClosed, false, nil)
 	}
-	if !c.lease.ExpiresAt.After(now) {
-		return codeError(ErrLeaseExpired, ReasonLeaseExpired, true, nil)
+	if c.lifetime == nil || c.lifetime.Check() != nil {
+		return codeError(ErrSessionClosed, c.disconnectReason, false, nil)
 	}
 	return nil
 }
@@ -905,6 +911,9 @@ func (c *ClientSession) Close(reason DisconnectReason) error {
 		return nil
 	}
 	c.state = SessionClosed
+	if c.lifetime != nil {
+		c.lifetime.Revoke()
+	}
 	c.disconnectReason = reason
 	prepared := c.prepared
 	c.prepared = nil

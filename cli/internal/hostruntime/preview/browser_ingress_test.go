@@ -18,12 +18,13 @@ import (
 	"time"
 )
 
-func TestBrowserPreviewAdmissionBeforeDialAndActiveExpiry(t *testing.T) {
-	for _, mode := range []string{"allowed", "viewer", "host", "path", "target", "publication", "control-loss", "expiry", "unix", "team", "team-raw", "renewal"} {
+func TestBrowserPreviewAdmissionAndAdmittedLifetime(t *testing.T) {
+	for _, mode := range []string{"allowed", "viewer", "host", "path", "target", "publication", "control-loss", "lifetime", "unix", "team", "team-raw", "renewal"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 			defer cancel()
 			var hits, dials, lookups atomic.Int32
+			var revoked atomic.Bool
 			refreshed := make(chan struct{})
 			originStopped := make(chan struct{}, 1)
 			origin := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -38,7 +39,7 @@ func TestBrowserPreviewAdmissionBeforeDialAndActiveExpiry(t *testing.T) {
 					}
 					return
 				}
-				if mode == "expiry" {
+				if mode == "lifetime" {
 					w.WriteHeader(200)
 					w.(http.Flusher).Flush()
 					<-r.Context().Done()
@@ -88,7 +89,7 @@ func TestBrowserPreviewAdmissionBeforeDialAndActiveExpiry(t *testing.T) {
 			if lease.AccessMode == "team" {
 				d.MembershipGeneration = 1
 			}
-			if mode == "expiry" {
+			if mode == "lifetime" {
 				d.ExpiresAt = now.Add(time.Second)
 			}
 			authority := d
@@ -111,6 +112,9 @@ func TestBrowserPreviewAdmissionBeforeDialAndActiveExpiry(t *testing.T) {
 				}
 				return (&net.Dialer{}).DialContext(ctx, network, target.Address)
 			}, BrowserIngress: func(context.Context, connectorprotocol.StreamOpen, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error) {
+				if revoked.Load() {
+					return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
+				}
 				if mode == "control-loss" {
 					return connectorprotocol.IngressDecision{}, errors.New("unavailable")
 				}
@@ -171,7 +175,7 @@ func TestBrowserPreviewAdmissionBeforeDialAndActiveExpiry(t *testing.T) {
 			}
 			_, _ = fmt.Fprintf(stream, "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", path, host)
 			response, err := http.ReadResponse(bufio.NewReader(stream), nil)
-			allowed := mode == "allowed" || mode == "expiry" || mode == "unix" || mode == "team" || mode == "renewal"
+			allowed := mode == "allowed" || mode == "lifetime" || mode == "unix" || mode == "team" || mode == "renewal"
 			if !allowed {
 				if err == nil {
 					response.Body.Close()
@@ -192,11 +196,17 @@ func TestBrowserPreviewAdmissionBeforeDialAndActiveExpiry(t *testing.T) {
 					t.Fatalf("body=%q error=%v", body, err)
 				}
 			} else {
+				select {
+				case <-originStopped:
+					t.Fatal("credential expiry canceled admitted browser origin")
+				case <-time.After(time.Until(d.ExpiresAt) + 100*time.Millisecond):
+				}
+				revoked.Store(true)
 				_, _ = io.ReadAll(response.Body)
 				select {
 				case <-originStopped:
 				case <-ctx.Done():
-					t.Fatal("expiry did not cancel origin")
+					t.Fatal("revocation did not cancel origin")
 				}
 			}
 		})
