@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	serverconfig "github.com/pinksaucepasta/paperboat-server/internal/config"
 	"strings"
 	"testing"
 	"time"
@@ -68,7 +69,7 @@ func TestPostgresInboxLifecycleActivityAndCurrentAuthority(t *testing.T) {
 	}
 	grant(true, "grant_")
 
-	service, err := New(store)
+	service, err := New(store, serverconfig.Default().Access.FileTransfer)
 	if err != nil {
 		t.Fatal(err)
 	}

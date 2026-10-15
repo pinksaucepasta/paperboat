@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	serverconfig "github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat-server/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat-server/internal/teams"
 )
 
 const (
-	MaximumFiles         = 10
 	MaximumManifestBytes = 16 << 10
 	MaximumPending       = 128
 	MaximumLifetime      = 24 * time.Hour
@@ -80,6 +80,7 @@ type Page struct {
 }
 
 type Service struct {
+	transfer      serverconfig.FileTransferPolicy
 	db            *db.DB
 	now           func() time.Time
 	encryptionKey string
@@ -94,11 +95,11 @@ type Policy struct {
 	Generation   uint64 `json:"generation"`
 }
 
-func New(store *db.DB) (*Service, error) {
-	if store == nil {
+func New(store *db.DB, transfer serverconfig.FileTransferPolicy) (*Service, error) {
+	if store == nil || transfer.MaxFileBytes < 1 || transfer.MaxBatchFiles < 1 || transfer.MaxBatchBytes < transfer.MaxFileBytes {
 		return nil, ErrInvalid
 	}
-	return &Service{db: store, now: func() time.Time { return time.Now().UTC() }, smtpFactory: func(config SMTPConfig) (ReceiptSender, error) { return NewSMTPReceiptSender(config) }}, nil
+	return &Service{db: store, transfer: transfer, now: func() time.Time { return time.Now().UTC() }, smtpFactory: func(config SMTPConfig) (ReceiptSender, error) { return NewSMTPReceiptSender(config) }}, nil
 }
 
 func (s *Service) SetPolicy(ctx context.Context, account string, policy Policy, expected uint64) (Policy, error) {
@@ -221,11 +222,21 @@ func (s *Service) SetSenderPolicy(ctx context.Context, recipient, sender, accept
 	})
 }
 
-func canonicalFiles(files []File) ([]byte, string, error) {
-	if len(files) < 1 || len(files) > MaximumFiles {
+func canonicalFiles(files []File, transfer serverconfig.FileTransferPolicy) ([]byte, string, error) {
+	if len(files) < 1 {
 		return nil, "", ErrInvalid
 	}
+	if len(files) > transfer.MaxBatchFiles {
+		return nil, "", newManifestLimitError(transfer)
+	}
+	var total int64
 	for _, file := range files {
+		if file.Size >= 0 && (file.Size > transfer.MaxFileBytes || file.Size > transfer.MaxBatchBytes-total) {
+			return nil, "", newManifestLimitError(transfer)
+		}
+		if file.Size >= 0 {
+			total += file.Size
+		}
 		if file.Basename == "" || file.Basename != strings.TrimSpace(file.Basename) || strings.ContainsAny(file.Basename, "/\\\x00\r\n") || len(file.Basename) > 255 || file.Size < 0 || len(file.SHA256) != 64 {
 			return nil, "", ErrInvalid
 		}
@@ -269,8 +280,11 @@ func auditLifecycleTx(ctx context.Context, tx *db.Tx, actor string, request Requ
 // Exact machine capability is checked under the same team lock used by Task 39.
 func (s *Service) Create(ctx context.Context, in RequestInput) (Request, error) {
 	now := s.now().UTC()
-	manifest, digest, err := canonicalFiles(in.Files)
-	if err != nil || !validInput(in, now) {
+	manifest, digest, err := canonicalFiles(in.Files, s.transfer)
+	if err != nil {
+		return Request{}, err
+	}
+	if !validInput(in, now) {
 		return Request{}, ErrInvalid
 	}
 	var result Request
@@ -541,7 +555,7 @@ func (s *Service) Complete(ctx context.Context, recipient, requestID, digest str
 }
 
 func ManifestDigest(files []File) (string, error) {
-	_, digest, err := canonicalFiles(files)
+	_, digest, err := canonicalFiles(files, serverconfig.Default().Access.FileTransfer)
 	return digest, err
 }
 

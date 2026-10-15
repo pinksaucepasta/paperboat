@@ -579,7 +579,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		}
 		return
 	}
-	inbox, err := teaminbox.New(store)
+	inbox, err := teaminbox.New(store, config.Default().Access.FileTransfer)
 	if err != nil {
 		t.Fatal(err)
 	}

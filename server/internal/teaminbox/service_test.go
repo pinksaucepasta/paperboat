@@ -2,6 +2,7 @@ package teaminbox
 
 import (
 	"errors"
+	serverconfig "github.com/pinksaucepasta/paperboat-server/internal/config"
 	"strings"
 	"testing"
 	"time"
@@ -28,6 +29,9 @@ func TestManifestDigestBindsImmutableMetadata(t *testing.T) {
 	if first == third {
 		t.Fatal("substituted size retained the approval digest")
 	}
+	if _, err := ManifestDigest([]File{{Basename: "boundary", Size: serverconfig.Default().Access.FileTransfer.MaxFileBytes, SHA256: digest}}); err != nil {
+		t.Fatalf("configured exact file limit denied: %v", err)
+	}
 }
 
 func TestManifestRejectsUnsafeOrUnboundedMetadata(t *testing.T) {
@@ -37,13 +41,15 @@ func TestManifestRejectsUnsafeOrUnboundedMetadata(t *testing.T) {
 		{{Basename: "../secret", Size: 1, SHA256: validDigest}},
 		{{Basename: "secret\nname", Size: 1, SHA256: validDigest}},
 		{{Basename: "secret", Size: -1, SHA256: validDigest}},
+		{{Basename: "oversized", Size: serverconfig.Default().Access.FileTransfer.MaxFileBytes + 1, SHA256: validDigest}},
+		{{Basename: "overflow", Size: 1<<63 - 1, SHA256: validDigest}},
 		{{Basename: "secret", Size: 1, SHA256: "not-a-digest"}},
 	} {
 		if _, err := ManifestDigest(files); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("ManifestDigest(%+v) error = %v", files, err)
 		}
 	}
-	tooMany := make([]File, MaximumFiles+1)
+	tooMany := make([]File, serverconfig.Default().Access.FileTransfer.MaxBatchFiles+1)
 	for i := range tooMany {
 		tooMany[i] = File{Basename: "file", SHA256: validDigest}
 	}

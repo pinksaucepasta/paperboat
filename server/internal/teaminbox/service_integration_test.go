@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	serverconfig "github.com/pinksaucepasta/paperboat-server/internal/config"
 	"os"
 	"strings"
 	"sync"
@@ -99,7 +100,7 @@ func TestPostgresExactApprovalRevocationAndReceiptDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	service, _ := New(store)
+	service, _ := New(store, serverconfig.Default().Access.FileTransfer)
 	service.ConfigureEncryptionKey("task41-team-smtp-encryption-key")
 	smtpConfig, err := service.TeamSMTP(ctx, recipient, team)
 	if err != nil || smtpConfig.Generation != 1 || smtpConfig.PasswordStored {

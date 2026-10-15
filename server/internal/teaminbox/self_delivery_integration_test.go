@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	serverconfig "github.com/pinksaucepasta/paperboat-server/internal/config"
 	"strings"
 	"testing"
 	"time"
@@ -35,7 +36,7 @@ func TestPostgresSameMachineInboxDeliveryRequiresCurrentOwnerAndFileCapability(t
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities) VALUES($1,$2,$1,'linux','amd64','/workspace','online','occupied',true,ARRAY['file_receive'],ARRAY['file_receive'])`, machine, owner); err != nil {
 		t.Fatal(err)
 	}
-	service, err := New(store)
+	service, err := New(store, serverconfig.Default().Access.FileTransfer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,6 +44,32 @@ func TestPostgresSameMachineInboxDeliveryRequiresCurrentOwnerAndFileCapability(t
 	request, err := service.Create(ctx, input)
 	if err != nil || request.Status != "not_required" || request.SenderAccount != owner || request.RecipientAccount != owner || request.SourceMachineID != machine || request.DestinationMachineID != machine || request.BatchID != input.BatchID || request.RequestID != input.RequestID || request.ManifestDigest == "" {
 		t.Fatalf("authorized self delivery rejected or binding changed: %v", err)
+	}
+	limits := serverconfig.Default().Access.FileTransfer
+	limits.MaxFileBytes, limits.MaxBatchBytes, limits.MaxBatchFiles = 10, 12, 2
+	limited, err := New(store, limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	limitInput := input
+	limitInput.Files = []File{{Basename: "boundary", Size: limits.MaxFileBytes, SHA256: strings.Repeat("a", 64)}}
+	if _, err := limited.Create(ctx, limitInput); err != nil {
+		t.Fatalf("exact configured file boundary denied: %v", err)
+	}
+	limitInput.Files = []File{{Basename: "first", Size: 6, SHA256: strings.Repeat("a", 64)}, {Basename: "second", Size: 6, SHA256: strings.Repeat("b", 64)}}
+	if _, err := limited.Create(ctx, limitInput); err != nil {
+		t.Fatalf("exact configured batch boundary denied: %v", err)
+	}
+	for _, sizes := range [][]int64{{11}, {7, 7}, {1, 1, 1}, {1<<63 - 1}} {
+		limitInput.Files = nil
+		for i, size := range sizes {
+			limitInput.Files = append(limitInput.Files, File{Basename: fmt.Sprintf("bounded-%d", i), Size: size, SHA256: strings.Repeat("a", 64)})
+		}
+		_, err := limited.Create(ctx, limitInput)
+		var bound *ManifestLimitError
+		if !errors.As(err, &bound) || bound.MaxFileBytes != limits.MaxFileBytes || bound.MaxBatchFiles != limits.MaxBatchFiles || bound.MaxBatchBytes != limits.MaxBatchBytes {
+			t.Fatal("Inbox admission ignored configured transfer bounds or lost typed limits")
+		}
 	}
 	foreign := input
 	foreign.SenderAccount = other

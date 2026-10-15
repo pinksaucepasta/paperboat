@@ -255,7 +255,7 @@ that use them; say which in Evidence.
 | F6-02 | Interrupted transfer resumes from the committed offset; no corruption or duplicates. | [ ] | [ ] | [ ] | — |
 | F6-03 | `pb send list/status/cancel/destination set/clear`. | [ ] | [ ] | [ ] | — |
 | F6-04 | `pb inbox` (path, set, reset, requests, approve, decline, policy) and team file requests expire correctly. | [ ] | [ ] | [ ] | Server TestPostgresInboxLifecycleActivityAndCurrentAuthority race PASS with valid paid workspace and current team generation; all activity, departure, consumed authorization and receipt privacy checks retained. Device/console qualification pending. |
-| F6-05 | Over-limit, offline target, full disk → clear messages. | [ ] | [ ] | [ ] | — |
+| F6-05 | Over-limit, offline target, full disk → clear messages. | [ ] | [ ] | [ ] | —  Server over-limit producer: same configured descriptor/runtime transfer policy now bounds Inbox count/per-file/total bytes, including integer-overflow attempts, before approval. Existing manifest owner red0.016s; exact/custom boundary and typed413 file_transfer_limit_exceeded/details tests pass. Inbox PG lifecycle/activity0.35s/self-delivery authority0.20s/approval+revocation+receipt0.55s PASS; vet/race and full server vet PASS. Held for API producer push/full smoke; deployment frozen for A bisection. Full-disk/target offline actual device behavior remains Lane A. |
 | F6-06 | Console Files screens list, download and remove Inbox items; team requests can be approved there. | [ ] | [ ] | [ ] |  |
 
 **Commands**

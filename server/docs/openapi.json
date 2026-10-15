@@ -31404,6 +31404,7 @@
       "post": {
         "operationId": "create_team_inbox_request",
         "summary": "Create an exact cross-account Team Inbox request",
+        "description": "Manifest file count, each declared file size and aggregate bytes must fit the configured transfer policy. Over-limit requests return 413 file_transfer_limit_exceeded with error.details.max_file_bytes, max_batch_files and max_batch_bytes; reduce the number or size of files and retry. No approval or payload stream is admitted for an over-limit manifest.",
         "requestBody": {
           "required": true,
           "content": {
@@ -31481,6 +31482,9 @@
             "$ref": "#/components/responses/Error"
           },
           "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
             "$ref": "#/components/responses/Error"
           },
           "429": {
