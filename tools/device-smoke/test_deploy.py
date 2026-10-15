@@ -2,6 +2,7 @@ import hashlib
 import json
 import lzma
 import os
+import signal
 from pathlib import Path
 import subprocess
 import sys
@@ -15,6 +16,43 @@ HERE = Path(__file__).resolve().parent
 
 
 class DeviceDeployment(unittest.TestCase):
+    def test_disconnected_remote_installer_reaps_candidate_and_cleans_archive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ready = root / 'ready'
+            binary = ('#!/usr/bin/env python3\nimport os,time\nfrom pathlib import Path\n'
+                      'Path(' + repr(str(ready)) + ').write_text(str(os.getpid()))\ntime.sleep(60)\n').encode()
+            archive = root / 'candidate.xz'
+            archive.write_bytes(lzma.compress(binary))
+            request = dict(archive=str(archive), sha256=hashlib.sha256(binary).hexdigest(),
+                           version='dev-fixture', install_timeout=3)
+            process = subprocess.Popen([sys.executable, str(HERE / 'device_install.py')],
+                                       stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL)
+            child = None
+            try:
+                process.stdin.write(json.dumps(request).encode())
+                process.stdin.close()
+                deadline = time.monotonic() + 3
+                while not ready.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertTrue(ready.exists(), 'candidate must be running before disconnect')
+                child = int(ready.read_text())
+                process.send_signal(signal.SIGHUP)
+                process.wait(timeout=3)
+                self.assertFalse(archive.exists(), 'SSH disconnect must run staging cleanup')
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(child, 0)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+                if child:
+                    try:
+                        os.kill(child, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+
     def test_verified_compressed_candidate_and_failures_clean_staging(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

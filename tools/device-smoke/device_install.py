@@ -6,6 +6,7 @@ import lzma
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -43,4 +44,11 @@ def install(request):
 
 
 if __name__ == '__main__':
+    def disconnected(signum, frame):
+        # subprocess.run kills/reaps its child when interrupted; then the
+        # transaction's finally blocks remove both decompressed and uploaded bytes.
+        raise RuntimeError('remote install transport disconnected')
+
+    for signum in (signal.SIGHUP, signal.SIGTERM):
+        signal.signal(signum, disconnected)
     install(json.load(sys.stdin))
