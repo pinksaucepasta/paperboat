@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"github.com/pinksaucepasta/paperboat-server/internal/admission"
 	"net/netip"
+	"slices"
 	"sort"
 	"time"
 
@@ -239,7 +240,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		return NetworkConfigResult{}, err
 	}
 	defer tx.Rollback()
-	self, certExpiry, err := loadNetworkBinding(ctx, tx, in.UserID, in.EndpointID, now)
+	self, certExpiry, err := loadNetworkBinding(ctx, tx, in.UserID, in.EndpointID, now, len(in.AdmittedScopes) > 0)
 	if err == sql.ErrNoRows || err == ErrUnavailable {
 		return NetworkConfigResult{}, ErrDenied
 	}
@@ -382,9 +383,10 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		return NetworkConfigResult{}, ErrResourceLimit
 	}
 	byPeer := map[string]*networkPeer{}
+	admittedPeers := map[string]bool{}
 	scopes := 0
 	expiry := admission.Expiry(s.signer, now)
-	if certExpiry.Before(expiry) {
+	if certExpiry.After(now) && certExpiry.Before(expiry) {
 		expiry = certExpiry
 	}
 	for _, g := range grants {
@@ -398,9 +400,13 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		if in.EndpointID == g.machine {
 			peerID, peerAccount, direction = g.cli, g.cliAccount, "accept"
 		}
+		admitted := slices.Contains(live[g.kind], g.id)
+		if admitted {
+			admittedPeers[peerID] = true
+		}
 		p := byPeer[peerID]
 		if p == nil {
-			binding, peerCertExpiry, e := loadNetworkBinding(ctx, tx, peerAccount, peerID, now)
+			binding, peerCertExpiry, e := loadNetworkBinding(ctx, tx, peerAccount, peerID, now, admitted)
 			if e == sql.ErrNoRows || e == ErrUnavailable {
 				continue
 			}
@@ -410,7 +416,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 			if len(byPeer) >= 64 {
 				return NetworkConfigResult{}, ErrResourceLimit
 			}
-			if peerCertExpiry.Before(expiry) {
+			if peerCertExpiry.After(now) && peerCertExpiry.Before(expiry) {
 				expiry = peerCertExpiry
 			}
 			p = &networkPeer{Identity: binding}
@@ -426,7 +432,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	}
 	// Durable personal-machine connectivity is distinct from application access.
 	// Exact access-session scopes above still authorize every application stream.
-	mesh, err := personalNetworkPeers(ctx, tx, self, now, &expiry)
+	mesh, err := personalNetworkPeers(ctx, tx, self, now, &expiry, admittedPeers, live["machine_network"])
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
@@ -486,20 +492,24 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	return NetworkConfigResult{Configuration: token, CandidateSet: candidates, RelayGrants: relayGrants}, nil
 }
 
-func personalNetworkScope(self, peer networkBinding, expiry time.Time) networkScope {
+func personalNetworkScopeID(self, peer networkBinding) string {
 	first, second := self.EndpointID, peer.EndpointID
 	if second < first {
 		first, second = second, first
 	}
 	hash := sha256.Sum256([]byte(self.AccountID + "\x00" + first + "\x00" + second))
+	return "network_" + hex.EncodeToString(hash[:])
+}
+
+func personalNetworkScope(self, peer networkBinding, expiry time.Time) networkScope {
 	direction := "dial"
 	if self.Role == "machine" && (peer.Role == "cli" || self.EndpointID > peer.EndpointID) {
 		direction = "accept"
 	}
-	return networkScope{"machine_network", "network_" + hex.EncodeToString(hash[:]), 1, "connect", direction, 443, expiry.Unix()}
+	return networkScope{"machine_network", personalNetworkScopeID(self, peer), 1, "connect", direction, 443, expiry.Unix()}
 }
 
-func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, now time.Time, expiry *time.Time) ([]networkBinding, error) {
+func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, now time.Time, expiry *time.Time, admittedPeers map[string]bool, admittedNetworks []string) ([]networkBinding, error) {
 	if self.Role == "machine" {
 		var personal bool
 		if err := tx.QueryRowContext(ctx, `SELECT owner_team_id IS NULL FROM paperboat.user_machines WHERE id=$1 AND user_id=$2`, self.EndpointID, self.AccountID).Scan(&personal); err != nil {
@@ -536,14 +546,14 @@ func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, 
 	}
 	peers := make([]networkBinding, 0, len(ids))
 	for _, id := range ids {
-		binding, certExpiry, err := loadNetworkBinding(ctx, tx, self.AccountID, id, now)
+		binding, certExpiry, err := loadNetworkBinding(ctx, tx, self.AccountID, id, now, admittedPeers[id] || slices.Contains(admittedNetworks, personalNetworkScopeID(self, networkBinding{EndpointID: id})))
 		if err == sql.ErrNoRows || err == ErrUnavailable {
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
-		if certExpiry.Before(*expiry) {
+		if certExpiry.After(now) && certExpiry.Before(*expiry) {
 			*expiry = certExpiry
 		}
 		peers = append(peers, binding)
@@ -722,15 +732,15 @@ func (s *NetworkService) signRegionalCandidates(claims map[string]any) (string, 
 	return s.signer.SignRegionalCandidates(claims)
 }
 
-func loadNetworkBinding(ctx context.Context, tx *sql.Tx, userID, endpointID string, now time.Time) (networkBinding, time.Time, error) {
+func loadNetworkBinding(ctx context.Context, tx *sql.Tx, userID, endpointID string, now time.Time, admitted bool) (networkBinding, time.Time, error) {
 	var b networkBinding
 	var key, disco, fingerprint, quicPublic []byte
 	var expiry time.Time
-	err := tx.QueryRowContext(ctx, `SELECT n.user_id,n.endpoint_id,n.role,coalesce(n.machine_id,''),n.endpoint_generation,n.machine_generation,n.key_generation,n.wireguard_public_key,n.disco_public_key,n.quic_certificate_fingerprint,c.quic_public_key,host(n.virtual_address),c.expires_at FROM paperboat.peer_network_identities n JOIN paperboat.users u ON u.id=n.user_id AND u.status='active' JOIN paperboat.peer_endpoint_certificates c ON c.fingerprint=n.quic_certificate_fingerprint AND c.user_id=n.user_id AND c.endpoint_id=n.endpoint_id AND c.generation=n.endpoint_generation AND c.role=n.role AND c.revoked_at IS NULL AND c.issued_at<=$3 AND c.expires_at>$3 WHERE n.user_id=$1 AND n.endpoint_id=$2 AND n.revoked_at IS NULL`, userID, endpointID, now).Scan(&b.AccountID, &b.EndpointID, &b.Role, &b.MachineID, &b.EndpointGeneration, &b.MachineGeneration, &b.KeyGeneration, &key, &disco, &fingerprint, &quicPublic, &b.VirtualAddress, &expiry)
+	err := tx.QueryRowContext(ctx, `SELECT n.user_id,n.endpoint_id,n.role,coalesce(n.machine_id,''),n.endpoint_generation,n.machine_generation,n.key_generation,n.wireguard_public_key,n.disco_public_key,n.quic_certificate_fingerprint,c.quic_public_key,host(n.virtual_address),c.expires_at FROM paperboat.peer_network_identities n JOIN paperboat.users u ON u.id=n.user_id AND u.status='active' JOIN paperboat.peer_endpoint_certificates c ON c.fingerprint=n.quic_certificate_fingerprint AND c.user_id=n.user_id AND c.endpoint_id=n.endpoint_id AND c.generation=n.endpoint_generation AND c.role=n.role AND c.revoked_at IS NULL AND c.issued_at<=$3 AND (c.expires_at>$3 OR $4) WHERE n.user_id=$1 AND n.endpoint_id=$2 AND n.revoked_at IS NULL`, userID, endpointID, now, admitted).Scan(&b.AccountID, &b.EndpointID, &b.Role, &b.MachineID, &b.EndpointGeneration, &b.MachineGeneration, &b.KeyGeneration, &key, &disco, &fingerprint, &quicPublic, &b.VirtualAddress, &expiry)
 	if err != nil {
 		return b, time.Time{}, err
 	}
-	if expiry.Unix() <= now.Unix() {
+	if !admitted && expiry.Unix() <= now.Unix() {
 		return b, time.Time{}, ErrUnavailable
 	}
 	if b.Role == "cli" {

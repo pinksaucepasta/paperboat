@@ -11,7 +11,7 @@ func admittedScopeIDs(scopes []AdmittedScope) (map[string][]string, error) {
 	if len(scopes) > 128 {
 		return nil, ErrInvalid
 	}
-	ids := map[string][]string{"machine_access": {}, "inspector": {}, "config_compare": {}}
+	ids := map[string][]string{"machine_access": {}, "inspector": {}, "config_compare": {}, "machine_network": {}}
 	seen := map[AdmittedScope]bool{}
 	for _, scope := range scopes {
 		if _, ok := ids[scope.ResourceKind]; !ok || !bounded(scope.ResourceID, 1, 256) || seen[scope] {

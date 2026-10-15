@@ -171,6 +171,32 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 		t.Fatal("invalid continuation request changed network authority")
 	}
 
+	// Expired endpoint certificates gate a new transport, not admitted authority.
+	service.now = func() time.Time { return now.Add(2 * time.Hour) }
+	var networkID string
+	for _, endpoint := range []string{cli, machine} {
+		if _, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "fresh_expired_cert_" + suffix, UserID: account, EndpointID: endpoint}); !errors.Is(err, ErrDenied) {
+			t.Fatalf("new transport accepted expired certificate: %v", err)
+		}
+		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "admitted_expired_cert_" + suffix, UserID: account, EndpointID: endpoint, AdmittedScopes: live})
+		if err != nil {
+			t.Fatalf("admitted authority ended at endpoint certificate TTL: %v", err)
+		}
+		assertNetworkScope(t, result.Configuration, "machine_access", access, "terminal")
+		for _, peer := range networkClaims(t, result.Configuration)["peers"].([]any) {
+			for _, raw := range peer.(map[string]any)["scopes"].([]any) {
+				scope := raw.(map[string]any)
+				if scope["resource_kind"] == "machine_network" {
+					networkID = scope["resource_id"].(string)
+				}
+			}
+		}
+		if networkID == "" {
+			t.Fatal("admitted peer carrier lost authority at certificate TTL")
+		}
+	}
+	service.now = func() time.Time { return now.Add(250 * time.Millisecond) }
+
 	execute(`UPDATE inspector_credentials SET revoked_at=now() WHERE credential_id=$1`, inspector)
 	execute(`UPDATE control_config_assignments SET version=version+1 WHERE id=$1`, assignment)
 	// Explicit withdrawal reaches both the caller and the machine even after TTL.
@@ -186,6 +212,25 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 		assertNoNetworkScope(t, result.Configuration, "inspector", inspector, "inspector")
 		assertNoNetworkScope(t, result.Configuration, "config_compare", assignment, "config_compare")
 	}
+	// The idle admitted carrier also survives certificate TTL after app work ends.
+	service.now = func() time.Time { return now.Add(2 * time.Hour) }
+	carrierRef := []AdmittedScope{{ResourceKind: "machine_network", ResourceID: networkID}}
+	for _, endpoint := range []string{cli, machine} {
+		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "idle_carrier_" + suffix, UserID: account, EndpointID: endpoint, AdmittedScopes: carrierRef})
+		if err != nil {
+			t.Fatalf("idle admitted carrier expired: %v", err)
+		}
+		assertNetworkScope(t, result.Configuration, "machine_network", networkID, "connect")
+	}
+	execute(`UPDATE peer_endpoint_certificates SET revoked_at=now(),revocation_reason='key_compromise' WHERE endpoint_id=$1`, cli)
+	if _, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "revoked_cert_" + suffix, UserID: account, EndpointID: cli, AdmittedScopes: carrierRef}); !errors.Is(err, ErrDenied) {
+		t.Fatalf("revoked endpoint certificate retained authority: %v", err)
+	}
+	result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "revoked_peer_cert_" + suffix, UserID: account, EndpointID: machine, AdmittedScopes: carrierRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoNetworkScope(t, result.Configuration, "machine_network", networkID, "connect")
 
 }
 
