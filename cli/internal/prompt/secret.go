@@ -45,6 +45,9 @@ func Secret(options SecretOptions) ([]byte, error) {
 	if err := selector.RequireTerminal(options.Stdin); err != nil {
 		return nil, err
 	}
+	if err := canceledBeforeRun(options.Context, "run hidden input failed"); err != nil {
+		return nil, err
+	}
 	if options.Output == nil {
 		options.Output = os.Stderr
 	}

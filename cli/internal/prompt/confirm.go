@@ -36,6 +36,9 @@ func Confirm(options ConfirmOptions) (bool, error) {
 	if err := selector.RequireTerminal(options.Stdin); err != nil {
 		return false, err
 	}
+	if err := canceledBeforeRun(options.Context, "run confirmation failed"); err != nil {
+		return false, err
+	}
 	if options.Output == nil {
 		options.Output = os.Stderr
 	}

@@ -44,6 +44,9 @@ func Text(options TextOptions) (string, error) {
 	if err := selector.RequireTerminal(options.Stdin); err != nil {
 		return "", err
 	}
+	if err := canceledBeforeRun(options.Context, "run input failed"); err != nil {
+		return "", err
+	}
 	if options.Output == nil {
 		options.Output = os.Stderr
 	}

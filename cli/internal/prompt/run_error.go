@@ -15,6 +15,14 @@ type promptRunFailure struct {
 func (e promptRunFailure) Error() string { return e.message }
 func (e promptRunFailure) Unwrap() error { return e.cause }
 
+// canceledBeforeRun avoids starting terminal I/O for work already canceled.
+func canceledBeforeRun(ctx context.Context, message string) error {
+	if ctx == nil || ctx.Err() == nil {
+		return nil
+	}
+	return runFailure(ctx, errors.Join(tea.ErrProgramKilled, ctx.Err()), message)
+}
+
 func runFailure(ctx context.Context, err error, message string) error {
 	if ctx != nil && ctx.Err() != nil {
 		status, cause := ctx.Err(), context.Cause(ctx)
