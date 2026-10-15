@@ -3,7 +3,6 @@ package managedssh
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -16,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat-server/internal/config"
 	"github.com/pinksaucepasta/paperboat-server/internal/db"
 	"github.com/pinksaucepasta/paperboat-server/internal/teams"
+	"golang.org/x/crypto/ssh"
 )
 
 func TestSQLRepositoryManagedSSHAuthorityLifecycle(t *testing.T) {
@@ -320,7 +320,7 @@ func TestSQLRepositoryManagedSSHClientKeySetIsBounded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { _ = store.Close() })
 	ctx := t.Context()
 	if err := db.Migrate(ctx, store); err != nil {
 		t.Fatal(err)
@@ -328,22 +328,35 @@ func TestSQLRepositoryManagedSSHClientKeySetIsBounded(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	suffix := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_")) + strings.ReplaceAll(now.Format("150405.000000000"), ".", "")
 	userID, machineID := "ssh_bounded_user_"+suffix, "ssh_bounded_machine_"+suffix
+	t.Cleanup(func() {
+		clean, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		for _, query := range []string{`DELETE FROM paperboat.managed_ssh_client_keys WHERE user_id=$1`, `DELETE FROM paperboat.user_machines WHERE user_id=$1`, `DELETE FROM paperboat.cli_client_sessions WHERE user_id=$1`, `DELETE FROM paperboat.users WHERE id=$1`} {
+			if _, err := store.SQL().ExecContext(clean, query, userID); err != nil {
+				t.Error(err)
+			}
+		}
+	})
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, userID, "workos_"+userID, userID+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,description,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES ($1,$2,$3,$4,'windows','amd64','C:\\workspace','online','occupied',true,1)`, machineID, userID, "env_"+machineID, machineID); err != nil {
 		t.Fatal(err)
 	}
-	prefix := "ssh-ed25519 " + base64.StdEncoding.EncodeToString(append([]byte{0, 0, 0, 11}, []byte("ssh-ed25519")...))
-	prefix += strings.Repeat("A", 80-len(prefix))
+	publicKeys := make([]string, 65)
 	for index := 0; index < 65; index++ {
 		sessionID := fmt.Sprintf("ssh_bounded_cli_%02d_%s", index, suffix)
 		createdAt := now.Add(time.Duration(index) * time.Second)
 		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.cli_client_sessions (id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES ($1,$2,$3,'bounded key','desktop','windows',ARRAY['account:read'],'active',$4,$4)`, sessionID, userID, "client_"+sessionID, createdAt); err != nil {
 			t.Fatal(err)
 		}
-		fingerprint := sha256.Sum256([]byte(sessionID))
-		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.managed_ssh_client_keys (fingerprint,user_id,cli_client_session_id,algorithm,public_key,reconciliation_version,created_at) VALUES ($1,$2,$3,'ssh-ed25519',$4,1,$5)`, fingerprint[:], userID, sessionID, prefix+fmt.Sprintf("%02d", index), createdAt); err != nil {
+		publicKeys[index] = publicLine(t, "ed25519")
+		public, _, _, _, err := ssh.ParseAuthorizedKey([]byte(publicKeys[index]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint := sha256.Sum256(public.Marshal())
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.managed_ssh_client_keys (fingerprint,user_id,cli_client_session_id,algorithm,public_key,reconciliation_version,created_at) VALUES ($1,$2,$3,'ssh-ed25519',$4,1,$5)`, fingerprint[:], userID, sessionID, publicKeys[index], createdAt); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -366,8 +379,8 @@ func TestSQLRepositoryManagedSSHClientKeySetIsBounded(t *testing.T) {
 	if err != nil || len(set.Keys) != 64 {
 		t.Fatalf("keys=%d err=%v", len(set.Keys), err)
 	}
-	if !strings.HasSuffix(set.Keys[0].PublicKey, "64") || !strings.HasSuffix(set.Keys[63].PublicKey, "01") {
-		t.Fatalf("unexpected bounded order first=%q last=%q", set.Keys[0].PublicKey, set.Keys[63].PublicKey)
+	if set.Keys[0].PublicKey != publicKeys[64] || set.Keys[63].PublicKey != publicKeys[1] {
+		t.Fatal("bounded client-key order does not match creation times")
 	}
 	registrationSession := "ssh_bounded_cli_registration_" + suffix
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.cli_client_sessions (id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES ($1,$2,$3,'bounded registration','desktop','windows',ARRAY['machines:connect'],'active',$4,$4)`, registrationSession, userID, "client_"+registrationSession, now.Add(65*time.Second)); err != nil {
