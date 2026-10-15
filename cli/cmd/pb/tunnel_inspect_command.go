@@ -183,12 +183,12 @@ func productionInspectorClients(command *cobra.Command) (*inspectorClients, erro
 	if peer == nil {
 		return nil, errInspectorDaemonUnavailable
 	}
-	credential, err := d.auth.Credential()
+	_, err = d.auth.Credential()
 	if err != nil {
 		_ = peer.Close()
 		return nil, err
 	}
-	server, err := newWorkspaceAPIClient(actionContext(command, nil), d.cfg.ServerURL, credential)
+	server, err := newWorkspaceAPIClient(actionContext(command, nil), d.cfg.ServerURL, d.auth)
 	if err != nil {
 		_ = peer.Close()
 		return nil, err

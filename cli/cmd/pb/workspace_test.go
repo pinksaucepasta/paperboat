@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -189,9 +190,21 @@ func TestPersistedWorkspaceDefaultIsFallbackForItsAccountAndServer(t *testing.T)
 
 func TestWorkspaceScopeIsCapturedOnceForResourceRequests(t *testing.T) {
 	t.Setenv("PAPERBOAT_WORKSPACE", "team-a")
+	source := &workspaceCredentialSource{}
+	source.current.Store(&config.Credential{AccessToken: "workspace-test-token"})
+	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/v1/machines" || r.URL.Query().Get("workspace") != "team-a" {
 			t.Fatalf("machine request = %s %s, want captured team-a scope", r.Method, r.URL.RequestURI())
+		}
+		n := requests.Add(1)
+		expected := "Bearer workspace-test-token"
+		if n > 1 {
+			expected = "Bearer renewed-workspace-token"
+		}
+		if r.Header.Get("Authorization") != expected {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
 		}
 		writeAPIData(t, w, map[string]any{"items": []any{}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 0, "next_offset": nil}})
 	}))
@@ -203,7 +216,7 @@ func TestWorkspaceScopeIsCapturedOnceForResourceRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PAPERBOAT_WORKSPACE", "team-b")
-	client, err := newWorkspaceAPIClient(actionContext(root, nil), server.URL, config.Credential{AccessToken: "workspace-test-token"})
+	client, err := newWorkspaceAPIClient(actionContext(root, nil), server.URL, source)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,6 +225,10 @@ func TestWorkspaceScopeIsCapturedOnceForResourceRequests(t *testing.T) {
 	}
 	if _, err := client.ListUserMachines(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+	source.current.Store(&config.Credential{AccessToken: "renewed-workspace-token"})
+	if _, err := client.ListUserMachines(context.Background()); err != nil {
+		t.Fatalf("retained client did not renew account credential: %v", err)
 	}
 }
 
@@ -362,4 +379,12 @@ func TestManagedSSHWorkspaceCallbackSelection(t *testing.T) {
 			}
 		})
 	}
+}
+
+type workspaceCredentialSource struct {
+	current atomic.Pointer[config.Credential]
+}
+
+func (s *workspaceCredentialSource) Credential() (config.Credential, error) {
+	return *s.current.Load(), nil
 }

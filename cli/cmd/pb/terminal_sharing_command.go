@@ -194,11 +194,11 @@ func joinSharedTerminal(c *cobra.Command, args []string) (result error) {
 	attachment := "attachment_" + uuid.NewString()
 	inputQueue := resolver.NewTerminalInputQueue(256)
 	resolve := func(ctx context.Context) (resolver.ConnectInfo, error) {
-		credential, err := d.auth.Credential()
+		_, err = d.auth.Credential()
 		if err != nil {
 			return resolver.ConnectInfo{}, err
 		}
-		client, err := newWorkspaceAPIClient(actionContext(c, nil), d.cfg.ServerURL, credential)
+		client, err := newWorkspaceAPIClient(actionContext(c, nil), d.cfg.ServerURL, d.auth)
 		if err != nil {
 			return resolver.ConnectInfo{}, err
 		}

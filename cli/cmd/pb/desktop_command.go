@@ -342,12 +342,12 @@ func desktopBackend(c *cobra.Command) (*api.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	credential, err := source.WithContext(c.Context()).Credential()
+	_, err = source.WithContext(c.Context()).Credential()
 	if errors.Is(err, config.ErrNoCredentials) || errors.Is(err, config.ErrSecretNotFound) {
 		return nil, api.ErrUnauthenticated
 	}
 	if err != nil {
 		return nil, err
 	}
-	return newWorkspaceAPIClient(actionContext(c, nil), cfg.ServerURL, credential)
+	return newWorkspaceAPIClient(actionContext(c, nil), cfg.ServerURL, source.WithContext(c.Context()))
 }

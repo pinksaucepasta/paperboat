@@ -282,8 +282,13 @@ func workspaceForCommandContext(commandContext *command.Context) (string, error)
 	return validateWorkspaceSelection(selected, "saved workspace")
 }
 
-func newWorkspaceAPIClient(commandContext *command.Context, server string, credential config.Credential) (*api.Client, error) {
+func newWorkspaceAPIClient(commandContext *command.Context, server string, source config.AuthSource) (*api.Client, error) {
+	credential, err := source.Credential()
+	if err != nil {
+		return nil, err
+	}
 	client := api.New(server, credential, nil)
+	client.SetCredentialSource(source)
 	selected, err := workspaceForCommandContext(commandContext)
 	if err != nil {
 		return nil, err

@@ -5069,11 +5069,7 @@ func backendForCommand(command *cobra.Command) (*api.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	credential, err := d.auth.Credential()
-	if err != nil {
-		return nil, err
-	}
-	return newWorkspaceAPIClient(ctx, d.cfg.ServerURL, credential)
+	return newWorkspaceAPIClient(ctx, d.cfg.ServerURL, d.auth)
 }
 
 func executeInteractiveCommand(parent *cobra.Command, args []string) error {
@@ -5439,11 +5435,7 @@ func sessionCobraCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		credential, err := d.auth.Credential()
-		if err != nil {
-			return err
-		}
-		client, err := newWorkspaceAPIClient(ctx, d.cfg.ServerURL, credential)
+		client, err := newWorkspaceAPIClient(ctx, d.cfg.ServerURL, d.auth)
 		if err != nil {
 			return err
 		}
@@ -5716,11 +5708,7 @@ func e2eeClient(c *command.Context) (*api.Client, config.ProfileStore, config.Pr
 		return nil, config.ProfileStore{}, config.Profile{}, err
 	}
 	source := (&sessionauth.Source{Store: store, Issuer: cfg.ServerURL}).WithContext(c.Context)
-	credential, err := source.Credential()
-	if err != nil {
-		return nil, config.ProfileStore{}, config.Profile{}, err
-	}
-	client, err := newWorkspaceAPIClient(c, cfg.ServerURL, credential)
+	client, err := newWorkspaceAPIClient(c, cfg.ServerURL, source)
 	if err != nil {
 		return nil, config.ProfileStore{}, config.Profile{}, err
 	}
@@ -5893,15 +5881,10 @@ func backendClient(c *command.Context) (*api.Client, error) {
 	if d.cfg.ServerURL == "" {
 		return nil, commandRejection{reason: commandRejectMissingServer}
 	}
-	cred, err := d.auth.Credential()
+	client, err := newWorkspaceAPIClient(c, d.cfg.ServerURL, d.auth)
 	if err != nil {
 		return nil, err
 	}
-	client, err := newWorkspaceAPIClient(c, d.cfg.ServerURL, cred)
-	if err != nil {
-		return nil, err
-	}
-	client.SetCredentialSource(d.auth)
 	return client, nil
 }
 
@@ -7518,11 +7501,7 @@ func observeSSHTargetCacheFailure(ctx context.Context, err error) {
 }
 
 func sshAPIClient(ctx *command.Context, d *deps) (*api.Client, error) {
-	credential, err := d.auth.Credential()
-	if err != nil {
-		return nil, err
-	}
-	client, err := newWorkspaceAPIClient(ctx, d.cfg.ServerURL, credential)
+	client, err := newWorkspaceAPIClient(ctx, d.cfg.ServerURL, d.auth)
 	if err != nil {
 		return nil, err
 	}
@@ -7622,7 +7601,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		err = errors.New("Paperboat server and peer transport are required for remote execution")
 		return fail(255, "local_configuration", false, false, err)
 	}
-	credential, err := d.auth.Credential()
+	_, err = d.auth.Credential()
 	if onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return leaf == config.ErrNoCredentials }) {
 		err = fmt.Errorf("authentication required: %w", err)
 		return fail(255, "authentication_required", false, false, err)
@@ -7630,7 +7609,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 	if err != nil {
 		return fail(255, "authentication_unavailable", false, false, err)
 	}
-	client, err := newWorkspaceAPIClient(c, d.cfg.ServerURL, credential)
+	client, err := newWorkspaceAPIClient(c, d.cfg.ServerURL, d.auth)
 	if err != nil {
 		return fail(255, "workspace_unavailable", false, false, err)
 	}
@@ -8500,7 +8479,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 	if err != nil {
 		return err
 	}
-	backend, err := newWorkspaceAPIClient(c, d.cfg.ServerURL, cred)
+	backend, err := newWorkspaceAPIClient(c, d.cfg.ServerURL, d.auth)
 	if err != nil {
 		return err
 	}
@@ -8590,8 +8569,8 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		terminalSessionName = sessionName
 	}
 	bar.SetIdentity(machineRef, terminalSessionName)
-	newResolver := func(credential config.Credential) (*resolver.APIResolver, error) {
-		client, err := newWorkspaceAPIClient(c, d.cfg.ServerURL, credential)
+	newResolver := func() (*resolver.APIResolver, error) {
+		client, err := newWorkspaceAPIClient(c, d.cfg.ServerURL, d.auth)
 		if err != nil {
 			return nil, err
 		}
@@ -8600,7 +8579,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		apiResolver.Telemetry = d.telemetry
 		return apiResolver, nil
 	}
-	d.resolver, err = newResolver(cred)
+	d.resolver, err = newResolver()
 	if err != nil {
 		return err
 	}
@@ -8827,7 +8806,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		if credErr != nil {
 			return nil, credErr
 		}
-		freshResolver, resolverErr := newResolver(freshCred)
+		freshResolver, resolverErr := newResolver()
 		if resolverErr != nil {
 			return nil, resolverErr
 		}

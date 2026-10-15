@@ -39,15 +39,10 @@ func sendCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			credential, err := dependencies.auth.Credential()
+			client, err := newWorkspaceAPIClient(ctx, dependencies.cfg.ServerURL, dependencies.auth)
 			if err != nil {
 				return err
 			}
-			client, err := newWorkspaceAPIClient(ctx, dependencies.cfg.ServerURL, credential)
-			if err != nil {
-				return err
-			}
-			client.SetCredentialSource(dependencies.auth)
 			sourceMachineID, err := configuredMachineID()
 			if err != nil {
 				return err

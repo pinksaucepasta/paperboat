@@ -62,7 +62,7 @@ func newProductionAccessMachineRuntime(command *cobra.Command, selector string) 
 	if dependencies.peerTunnel == nil {
 		return nil, "", errors.New("Paperboat server is not configured; set server_url or use --server")
 	}
-	credential, err := dependencies.auth.Credential()
+	_, err = dependencies.auth.Credential()
 	if err != nil {
 		_ = dependencies.peerTunnel.Close()
 		if errors.Is(err, config.ErrNoCredentials) || errors.Is(err, config.ErrSecretNotFound) {
@@ -70,7 +70,7 @@ func newProductionAccessMachineRuntime(command *cobra.Command, selector string) 
 		}
 		return nil, "", fmt.Errorf("load Paperboat sign-in credentials: %w", err)
 	}
-	client, err := newWorkspaceAPIClient(commandContext, dependencies.cfg.ServerURL, credential)
+	client, err := newWorkspaceAPIClient(commandContext, dependencies.cfg.ServerURL, dependencies.auth)
 	if err != nil {
 		_ = dependencies.peerTunnel.Close()
 		return nil, "", err
