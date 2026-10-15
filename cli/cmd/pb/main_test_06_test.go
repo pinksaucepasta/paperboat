@@ -101,8 +101,9 @@ func TestMachineSetupAndPeerCommandsWireBoundedLocalDaemonReadiness(t *testing.T
 	if !ok {
 		t.Fatal("resolve test source path")
 	}
-	mainPath := filepath.Join(filepath.Dir(testFile), "main.go")
-	parsed, err := parser.ParseFile(token.NewFileSet(), mainPath, nil, 0)
+	packages, err := parser.ParseDir(token.NewFileSet(), filepath.Dir(testFile), func(info os.FileInfo) bool {
+		return !strings.HasSuffix(info.Name(), "_test.go")
+	}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,26 +114,28 @@ func TestMachineSetupAndPeerCommandsWireBoundedLocalDaemonReadiness(t *testing.T
 		"actionRemoteExec": "requireLocalDaemonService",
 	}
 	found := make(map[string]int, len(want))
-	for _, declaration := range parsed.Decls {
-		function, ok := declaration.(*ast.FuncDecl)
-		if !ok {
-			continue
-		}
-		callee, tracked := want[function.Name.Name]
-		if !tracked {
-			continue
-		}
-		ast.Inspect(function.Body, func(node ast.Node) bool {
-			call, ok := node.(*ast.CallExpr)
+	for _, parsed := range packages["main"].Files {
+		for _, declaration := range parsed.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
 			if !ok {
+				continue
+			}
+			callee, tracked := want[function.Name.Name]
+			if !tracked {
+				continue
+			}
+			ast.Inspect(function.Body, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				identifier, ok := call.Fun.(*ast.Ident)
+				if ok && identifier.Name == callee {
+					found[function.Name.Name]++
+				}
 				return true
-			}
-			identifier, ok := call.Fun.(*ast.Ident)
-			if ok && identifier.Name == callee {
-				found[function.Name.Name]++
-			}
-			return true
-		})
+			})
+		}
 	}
 	for function, callee := range want {
 		if found[function] != 1 {
