@@ -76,7 +76,7 @@ PLAN.md (section 5) and done by that lane. **Only Lane A uses the test devices.*
 
 | Lane | Who | Owns | Works on (PLAN.md) |
 |---|---|---|---|
-| A — CLI & devices | Codex | `cli/`, `relay/`, `tools/device-smoke/` | S0 (except CI rows), F1–F12, F14, F15 device and CLI parts |
+| A — CLI & devices | Codex | `cli/`, `relay/`, `tools/device-smoke/`, the Tailscale fork (github.com/pinksaucepasta/tailscale) | S0 (except CI rows), F1–F12, F14, F15 device and CLI parts |
 | B — Server & infrastructure | Codex | `server/`, `tunnel/`, `helper/`, `deploy/`, `.github/` | S0 CI rows, S1, S4, F13, server parts of every feature, S3 |
 | C — Console & marketing | Claude only | `console/`, `marketing/` | all frontend work: console parts of every feature, S2 |
 
