@@ -34,11 +34,13 @@ class PairingTerminal(unittest.TestCase):
         import terminal_command
         with tempfile.TemporaryDirectory() as directory:
             script = pathlib.Path(directory) / 'approval.py'
-            script.write_text("import sys,termios\nassert not termios.tcgetattr(0)[3] & termios.ECHO\nsys.stdout.write('[sudo] password for device: ');sys.stdout.flush()\nassert sys.stdin.readline().rstrip('\\n') == 'fixture-secret'\nprint('approved')\n")
-            result = terminal_command.run([sys.executable, str(script)], password='fixture-secret', timeout=3)
-            self.assertEqual(0, result.returncode)
-            self.assertIn('approved', result.stdout)
-            self.assertNotIn('fixture-secret', result.stdout)
+            for prompt in ('[sudo] password for device: ', 'Password:', 'Password: '):
+                with self.subTest(prompt=prompt):
+                    script.write_text("import sys,termios\nassert not termios.tcgetattr(0)[3] & termios.ECHO\nsys.stdout.write(" + repr(prompt) + ");sys.stdout.flush()\nassert sys.stdin.readline().rstrip('\\n') == 'fixture-secret'\nprint('approved')\n")
+                    result = terminal_command.run([sys.executable, str(script)], password='fixture-secret', timeout=3)
+                    self.assertEqual(0, result.returncode)
+                    self.assertIn('approved', result.stdout)
+                    self.assertNotIn('fixture-secret', result.stdout)
             script.write_text('import os,time\nfor fd in range(3): os.close(fd)\ntime.sleep(60)\n')
             with self.assertRaises(subprocess.TimeoutExpired):
                 terminal_command.run([sys.executable, str(script)], password=None, timeout=0.1)

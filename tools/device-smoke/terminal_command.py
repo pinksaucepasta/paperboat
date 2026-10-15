@@ -45,7 +45,7 @@ def run(argv, *, password, env=None, timeout=180):
                 if len(output) > 8 << 20:
                     raise RuntimeError('terminal command exceeded output bound')
                 tail = bytes(output[-512:]).lower()
-                if not supplied and (b'[sudo] password for ' in tail or tail.endswith(b'password: ')):
+                if not supplied and (b'[sudo] password for ' in tail or tail.rstrip().endswith(b'password:')):
                     if password is None:
                         raise RuntimeError('administrator prompt needs the test credential on stdin')
                     os.write(terminal, (password + '\n').encode())
