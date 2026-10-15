@@ -36,8 +36,7 @@ for f in sorted(glob.glob('tools/device-smoke/results/*.json')):
         continue
     if d.get('expect_version') == want:
         head = (f, d.get('results') or [])
-    else:
-        passed |= {r['id'] for r in d.get('results') or [] if r['status'] == 'PASS'}
+    passed |= {r['id'] for r in d.get('results') or [] if r['status'] == 'PASS'}
 if head is None:
     print(f"FAIL: runtime code changed but no smoke result for build {want}.")
     print(f"      Build HEAD for all devices, install it, run tools/device-smoke/smoke.sh --expect-version {want}")

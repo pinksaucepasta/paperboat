@@ -76,6 +76,15 @@ esac
         result = self.run_gate("", runtime_changed=False)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_same_head_previous_pass_cannot_regress(self):
+        history = [{"expect_version": "dev-abc1234", "results": [
+            {"id": "same-build", "status": "PASS"}]}]
+        for results in [[], [{"id": "same-build", "status": "FAIL"}]]:
+            with self.subTest(results=results):
+                result = self.run_gate("", {"expect_version": "dev-abc1234", "results": results},
+                                       history=history)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_module_failure_blocks_push_with_passing_smoke(self):
         result = self.run_gate("", {"expect_version": "dev-abc1234", "results": []}, go_status=1)
         self.assertNotEqual(result.returncode, 0)
