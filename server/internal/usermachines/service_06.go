@@ -164,7 +164,8 @@ func (s *Service) validatePairing(in PairingInput) error {
 		return ErrEnrollmentTokenInvalid
 	}
 	platform, architecture := strings.ToLower(strings.TrimSpace(in.Platform)), strings.ToLower(strings.TrimSpace(in.Architecture))
-	if !releases.SupportedPlatformArchitecture(platform, architecture) || !slices.Contains(s.policy.AllowedPlatforms, platform) {
+	if !releases.SupportedPlatformArchitecture(platform, architecture) || !slices.Contains(s.policy.AllowedPlatforms, platform) ||
+		token != "" && EnrollmentTokenUsesPowerShell(token) != (platform == "windows") {
 		return ErrPairingPlatformUnsupported
 	}
 	_, validWorkspace := canonicalWorkspaceRoot(in.Platform, in.WorkspaceRoot)
@@ -344,6 +345,14 @@ func randomCode(length int) (string, error) {
 }
 
 const enrollmentTokenLength = 26
+const posixEnrollmentMetadata = "02468BDFHJLNPRTVXZ"
+const powershellEnrollmentMetadata = "13579ACEGIKMOQSUWY"
+
+// EnrollmentTokenUsesPowerShell is the installer and pairing shell contract.
+func EnrollmentTokenUsesPowerShell(token string) bool {
+	token = strings.TrimSpace(token)
+	return validEnrollmentToken(token) && strings.ContainsRune(powershellEnrollmentMetadata, rune(token[0]))
+}
 
 func validEnrollmentToken(token string) bool {
 	_, ok := enrollmentTokenSecret(strings.TrimSpace(token))
@@ -389,9 +398,9 @@ func randomEnrollmentTokenFor(shell string) (string, error) {
 	if shell != "posix" && shell != "powershell" {
 		return "", errors.New("enrollment shell is invalid")
 	}
-	chars := "13579ACEGIKMOQSUWY"
+	chars := powershellEnrollmentMetadata
 	if shell == "posix" {
-		chars = "02468BDFHJLNPRTVXZ"
+		chars = posixEnrollmentMetadata
 	}
 	metadata, err := randomCodeFromAlphabet(chars, 1)
 	if err != nil {

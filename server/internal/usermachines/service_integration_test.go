@@ -1754,7 +1754,7 @@ func TestDashboardEnrollmentsStayBoundToTheirOwnTokenAndInstallation(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := service.StartEnrollmentWithOptions(ctx, userID, "idem-enrollment-isolation-second-"+suffix, EnrollmentOptions{Shell: "powershell"})
+	second, err := service.StartEnrollmentWithOptions(ctx, userID, "idem-enrollment-isolation-second-"+suffix, EnrollmentOptions{Shell: "posix"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1762,7 +1762,10 @@ func TestDashboardEnrollmentsStayBoundToTheirOwnTokenAndInstallation(t *testing.
 		t.Fatalf("independent enrollments shared identity: first=%+v second=%+v", first, second)
 	}
 
-	tamperedToken := "11" + first.BootstrapToken[2:]
+	tamperedToken := "0" + first.BootstrapToken[1:]
+	if first.BootstrapToken[0] == '0' {
+		tamperedToken = "2" + first.BootstrapToken[1:]
+	}
 	if _, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: tamperedToken, Verifier: "verifier-enrollment-isolation-tampered-" + suffix, Alias: "tampered", Platform: "linux", Architecture: "amd64", WorkspaceRoot: "/workspace-tampered", PublicIdentityKey: integrationPublicIdentityKey}); !errors.Is(err, ErrEnrollmentTokenInvalid) {
 		t.Fatalf("metadata-tampered token error = %v, want ErrEnrollmentTokenInvalid", err)
 	}

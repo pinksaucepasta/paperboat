@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat-server/internal/machinealias"
+	"github.com/pinksaucepasta/paperboat-server/internal/usermachines"
 	"io"
 	"net"
 	"net/http"
@@ -89,10 +90,6 @@ func installScript(files http.Handler) http.HandlerFunc {
 	}
 }
 
-func enrollmentTokenUsesPowerShell(token string) bool {
-	return len(token) == 26 && strings.Contains("13579ACEGIKMOQSUWY", token[:1])
-}
-
 func serveEnrollmentScript(w http.ResponseWriter, r *http.Request, files http.Handler, path string, powershell bool) {
 	plain := r.URL.RawQuery == ""
 	token, hostname := "", ""
@@ -109,7 +106,7 @@ func serveEnrollmentScript(w http.ResponseWriter, r *http.Request, files http.Ha
 			return
 		}
 	}
-	powershell = powershell || enrollmentTokenUsesPowerShell(token)
+	powershell = powershell || usermachines.EnrollmentTokenUsesPowerShell(token)
 	if powershell {
 		path = "/windows"
 	}
