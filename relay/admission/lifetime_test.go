@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -128,5 +129,59 @@ func TestPollRetainsTransientFailureAndClosesOnAuthoritativeDenial(t *testing.T)
 	}
 	if !errors.Is(lease.Check(), ErrRevoked) {
 		t.Fatal("authoritative denial lost revocation cause")
+	}
+}
+
+func TestLeaseReleasesOwnedResourcesOnceBeforeCloseReturns(t *testing.T) {
+	lease, err := Admit(t.Context(), time.Time{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var released atomic.Int32
+	lease.OnDone(func() { released.Add(1) })
+	lease.Revoke()
+	lease.Close()
+	lease.Close()
+	if released.Load() != 1 {
+		t.Fatal("owned resource release missing or duplicated", released.Load())
+	}
+	lease.OnDone(func() { released.Add(1) })
+	if released.Load() != 2 {
+		t.Fatal("late owned resource retained after close")
+	}
+}
+
+func TestConcurrentCloseJoinsOwnedRelease(t *testing.T) {
+	lease, err := Admit(t.Context(), time.Time{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+	lease.OnDone(func() { close(entered); <-release })
+	lease.Revoke()
+	<-entered
+	done := make(chan struct{}, 2)
+	for range 2 {
+		go func() { lease.Close(); done <- struct{}{} }()
+	}
+	select {
+	case <-done:
+		t.Fatal("Close returned before owned release completed")
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(release)
+	for range 2 {
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("Close did not join owned release")
+		}
 	}
 }

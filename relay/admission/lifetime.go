@@ -16,9 +16,10 @@ var ErrRevoked = errors.New("admitted access revoked")
 // Lease owns one admitted connection or operation. Close it when work completes
 // or disconnects. Neither the credential nor descriptor is retained.
 type Lease struct {
-	mu      sync.Mutex
-	workers sync.WaitGroup
-	closed  bool
+	mu       sync.Mutex
+	workers  sync.WaitGroup
+	closed   bool
+	cleanups []func()
 
 	ctx    context.Context
 	cancel context.CancelCauseFunc
@@ -59,7 +60,12 @@ func (l *Lease) Close() {
 	l.mu.Lock()
 	l.closed = true
 	l.cancel(context.Canceled)
+	cleanups := l.cleanups
+	l.cleanups = nil
 	l.mu.Unlock()
+	for _, cleanup := range cleanups {
+		cleanup()
+	}
 	l.workers.Wait()
 }
 func (l *Lease) Revoke()      { l.cancel(ErrRevoked) }
@@ -94,6 +100,23 @@ func (l *Lease) Watch(changes func() <-chan struct{}, allowed func() bool) error
 		}
 	})
 	return nil
+}
+
+// OnDone releases lease-owned resources exactly once on any lifetime exit.
+// Close joins these releases; callbacks must not call Close on this lease.
+func (l *Lease) OnDone(release func()) {
+	l.mu.Lock()
+	if l.closed {
+		l.mu.Unlock()
+		release()
+		return
+	}
+	l.workers.Add(1)
+	var once sync.Once
+	cleanup := func() { once.Do(func() { defer l.workers.Done(); release() }) }
+	stop := context.AfterFunc(l.ctx, cleanup)
+	l.cleanups = append(l.cleanups, func() { stop(); cleanup() })
+	l.mu.Unlock()
 }
 
 func (l *Lease) start(work func()) bool {
