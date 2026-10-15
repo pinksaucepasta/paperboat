@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -41,6 +42,22 @@ type execRecoveryRemote struct {
 }
 
 func (r *execRecoveryRemote) Events() <-chan tunnel.ExecEvent { return r.events }
+
+// Signal actual CLI output before deliberately losing the initial attachment.
+// Queuing an event on the remote does not establish that the client received it.
+type execRecoveryOutput struct {
+	bytes.Buffer
+	observed chan struct{}
+	once     sync.Once
+}
+
+func (w *execRecoveryOutput) Write(p []byte) (int, error) {
+	n, err := w.Buffer.Write(p)
+	if bytes.Contains(w.Buffer.Bytes(), []byte("before")) {
+		w.once.Do(func() { close(w.observed) })
+	}
+	return n, err
+}
 
 func TestExecRecoveryKeepsItsBudgetAfterTransientReplacementHandshake(t *testing.T) {
 	for _, transient := range []bool{true, false} {
@@ -80,6 +97,7 @@ func runExecRecoveryHandshake(t *testing.T, transient bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	output := &execRecoveryOutput{observed: make(chan struct{})}
 	var operation atomic.Value
 	bridges := make(chan struct{}, 3)
 	var started atomic.Int32
@@ -92,6 +110,8 @@ func runExecRecoveryHandshake(t *testing.T, transient bool) {
 			}
 		}
 	}()
+	fixtureCtx, stopFixture := context.WithCancel(t.Context())
+	defer stopFixture()
 	cfg.PeerStreams = execRecoveryBroker(func(ctx context.Context, _ localapi.Peer, r localapi.PeerStreamRequest) (net.Conn, error) {
 		n := opens.Add(1)
 		var request tunnel.ExecRequest
@@ -105,7 +125,7 @@ func runExecRecoveryHandshake(t *testing.T, transient bool) {
 			}
 		} else {
 			if request.OperationID != operation.Load().(string) || request.FromSequence != 2 || r.Credential != fmt.Sprintf("renewed_%d", n-1) {
-				t.Error("recovery lost operation, cursor, or fresh descriptor")
+				t.Errorf("recovery binding: operation=%t cursor=%d descriptor=%t", request.OperationID == operation.Load().(string), request.FromSequence, r.Credential == fmt.Sprintf("renewed_%d", n-1))
 			}
 		}
 		if n == 2 {
@@ -127,7 +147,17 @@ func runExecRecoveryHandshake(t *testing.T, transient bool) {
 			remote.events <- tunnel.ExecEvent{OperationID: request.OperationID, EventSequence: 2, Stream: "stdout", Data: []byte("after")}
 			remote.events <- tunnel.ExecEvent{OperationID: request.OperationID, EventSequence: 3, State: "exited", Result: &tunnel.ExecResult{Code: 0}}
 		}
-		close(remote.events)
+		if n == 1 {
+			go func() {
+				select {
+				case <-output.observed:
+				case <-fixtureCtx.Done():
+				}
+				close(remote.events)
+			}()
+		} else {
+			close(remote.events)
+		}
 		started.Add(1)
 		go func() {
 			defer func() { bridges <- struct{}{} }()
@@ -145,8 +175,9 @@ func runExecRecoveryHandshake(t *testing.T, transient bool) {
 	defer stopLocalDaemonReadinessServer(t, cancel, done)
 	waitForCommandSocket(t, paths.SocketPath)
 	command := newRootCommand()
-	var out, stderr bytes.Buffer
-	command.SetOut(&out)
+	var stderr bytes.Buffer
+	out := output
+	command.SetOut(out)
 	command.SetErr(&stderr)
 	command.SetArgs([]string{"--config", configPath, "--no-customization", "exec", "target", "--", "fixture-command"})
 	commandCtx, finish := context.WithTimeout(t.Context(), 5*time.Second)
