@@ -550,7 +550,7 @@ that use them; say which in Evidence.
 | F14-04 | Old session-owner generations stop and are removed after their last session closes. | [ ] | [ ] | [ ] | — |
 | F14-05 | Real signed release → `pb update` and `--force` on L, M, W; tampered metadata or file rejected. | [ ] | [ ] | [ ] | — |
 | F14-06 | Automatic update at a configured time on L, M, W; `pb update settings` changes and disables it. | [ ] | [ ] | [ ] | — |
-| F14-07 | Minimum supported version blocks an old official build with a clear message; custom builds unaffected. | [ ] | [ ] | [ ] | —  Unchanged TestClientUpdatePolicyPostgres fresh isolated VPS PG PASS0.12s; clientupdate vet/race PASS1.031s. Device official/custom floor checks pending. |
+| F14-07 | Minimum supported version blocks an old official build with a clear message; custom builds unaffected. | [ ] | [ ] | [ ] | —  Unchanged TestClientUpdatePolicyPostgres fresh isolated VPS PG PASS0.12s; clientupdate vet/race PASS1.031s. Device official/custom floor checks pending.  HTTP operator policy PostgreSQL PASS0.30s incl CSRF/origin/role/target/logout; configured example.test fixture. |
 | F14-08 | `pb update bundle` + `--from <file.pb-update>` installs offline on L, M, W. | [ ] | [ ] | [ ] | — |
 | F14-09 | `pb update check/download/status` accurate; console update summary accurate per workspace. | [ ] | [ ] | [ ] | — |
 

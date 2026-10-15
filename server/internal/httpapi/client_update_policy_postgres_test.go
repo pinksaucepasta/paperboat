@@ -68,7 +68,7 @@ func TestClientUpdatePolicyOperatorPostgres(t *testing.T) {
 		// Retain immutable audits and their account/bootstrap references for
 		// the test lead to remove by dropping this isolated database.
 	}()
-	opts := Options{OperatorAuth: op, OperatorAudit: audit.NewWriter(store), ClientUpdatePolicy: policy, Config: config.Config{HTTP: config.HTTPConfig{AllowedOrigins: []string{"https://oracle.newt-mermaid.ts.net"}, RequestTimeout: 5 * time.Second, MaxBodyBytes: 8192}}}
+	opts := Options{OperatorAuth: op, OperatorAudit: audit.NewWriter(store), ClientUpdatePolicy: policy, Config: config.Config{HTTP: config.HTTPConfig{AllowedOrigins: []string{"https://console.example.test"}, RequestTimeout: 5 * time.Second, MaxBodyBytes: 8192}}}
 	router := NewRouter(opts)
 	request := func(method, path, body, token, csrf, origin, target, key string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -84,7 +84,7 @@ func TestClientUpdatePolicyOperatorPostgres(t *testing.T) {
 		router.ServeHTTP(w, r)
 		return w
 	}
-	origin := "https://oracle.newt-mermaid.ts.net"
+	origin := "https://console.example.test"
 	credentials, _ := json.Marshal(map[string]string{"email": email, "password": password})
 	setup := request("POST", "/v1/operator/setup", string(credentials), "", "", origin, "", "")
 	if setup.Code != 200 {
