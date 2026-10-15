@@ -2,7 +2,7 @@
 
 The **only** progress tracker. PLAN.md explains each item (decisions, scope, where to start);
 this file records whether it works. Work top to bottom, one section at a time: a feature is
-done when **all** its scenario rows and command rows are `[x]` on L, M and W. Then the next.
+done when **all** its scenario rows and command rows are `[x]` on L and M (Windows after launch, PLAN 1.1; W cells are not in the launch gate). Then the next.
 
 ## How to mark
 
