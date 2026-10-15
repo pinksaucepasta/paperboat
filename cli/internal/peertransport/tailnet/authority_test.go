@@ -658,6 +658,13 @@ func TestNetworkAllocatedUDPRotationRemovalAndAdmittedLifetime(t *testing.T) {
 		return out, in
 	}
 	out, in := exchange()
+	liveClient, err := cli.Client(server.Address(), machineBinding.EndpointID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cli.RetireIdleClient(liveClient) {
+		t.Fatal("failed extra dial retired an admitted UDP flow")
+	}
 	// Identical refresh must preserve active traffic.
 	c.Generation++
 	m.Generation++
@@ -670,17 +677,35 @@ func TestNetworkAllocatedUDPRotationRemovalAndAdmittedLifetime(t *testing.T) {
 	if _, err := in.Read(buf[:]); err != nil {
 		t.Fatal("refresh closed server flow", err)
 	}
-	// Transport restart retains authority but reacquires usable engine leases.
-	cli.InvalidateClient(cli.clients[machineBinding.EndpointID].client)
+	// Released transport retains authority but reacquires usable engine leases.
+	idleClient, err := cli.Client(server.Address(), machineBinding.EndpointID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = out.Close()
+	_ = in.Close()
+	if !cli.RetireIdleClient(idleClient) {
+		t.Fatal("released UDP client could not retire its stale route")
+	}
 	out, in = exchange()
+	if cli.RetireIdleClient(idleClient) {
+		t.Fatal("late transport failure retired a replacement client")
+	}
 	_ = server.Close()
 	server, err = machine.Listen(dm.Regions[1])
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Native QUIC owns failure detection. Once a remote engine has failed, its
-	// exact cached UDP client is discarded before the bounded reconnect.
-	cli.InvalidateClient(cli.clients[machineBinding.EndpointID].client)
+	// Native QUIC releases its failed packet before retiring the cached route.
+	restartedClient, err := cli.Client(server.Address(), machineBinding.EndpointID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = out.Close()
+	_ = in.Close()
+	if !cli.RetireIdleClient(restartedClient) {
+		t.Fatal("failed idle engine route was retained")
+	}
 	out, in = exchange()
 	// Revoke both views. An already-held lease cannot keep exchanging payloads.
 	cPeers, mPeers := c.Peers, m.Peers

@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/quic-go/quic-go"
+
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
@@ -228,7 +230,7 @@ func (o *Owner) dialFailure(ctx context.Context, peerID, stage, code string, err
 	return failure
 }
 
-func (o *Owner) Dial(ctx context.Context, descriptor mesh.Addr, peerID string, class peerquic.Class) (*Session, error) {
+func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID string, class peerquic.Class) (*Session, error) {
 	peer, err := o.authority.Peer(peerID)
 	if err != nil {
 		return nil, o.dialFailure(ctx, peerID, "peer_authority", "peer_authority_failed", err)
@@ -243,7 +245,7 @@ func (o *Owner) Dial(ctx context.Context, descriptor mesh.Addr, peerID string, c
 	socket, err := client.Dial(ctx)
 	if err != nil {
 		if ctx.Err() == nil && !errors.Is(err, tailnet.ErrFlowLimit) {
-			o.authority.InvalidateClient(client)
+			o.authority.RetireIdleClient(client)
 		}
 		return nil, o.dialFailure(ctx, peerID, "peer_connect", "native_private_failed", err)
 	}
@@ -253,9 +255,14 @@ func (o *Owner) Dial(ctx context.Context, descriptor mesh.Addr, peerID string, c
 	}
 	quicSession, err := peerquic.DialPacket(ctx, socket, tlsConfig, peerquic.DevelopmentSessionConfig(class))
 	if err != nil {
-		// DialPacket owns this socket, including failed TLS setup. A failed
-		// handshake does not invalidate other sessions on the shared client.
-		return nil, o.dialFailure(ctx, peerID, "peer_connect", "native_private_failed", err)
+		// DialPacket closes its failed socket. Retire stale learned routes only
+		// after every other flow has released the cached client.
+		failure := o.dialFailure(ctx, peerID, "peer_connect", "native_private_failed", err)
+		var idle *quic.IdleTimeoutError
+		if ctx.Err() == nil && errors.As(err, &idle) && o.authority.RetireIdleClient(client) {
+			return nil, &retiredPeerClientError{failure}
+		}
+		return nil, failure
 	}
 	if current, currentErr := o.authority.Peer(peerID); currentErr != nil || current != peer {
 		_ = quicSession.Close()

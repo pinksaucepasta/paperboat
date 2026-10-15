@@ -330,10 +330,9 @@ func scopesRetained(old, current []NetworkScope) bool {
 	return true
 }
 
-// InvalidateClient closes the exact cached client after its transport has
-// demonstrably failed. Pointer matching prevents a late failure from closing
-// a replacement created by another reconnect attempt.
-func (a *Authority) InvalidateClient(client *UDPClient) bool {
+// RetireIdleClient forgets a failed cached route only when no dial or admitted
+// packet flow still owns it. A failed extra handshake cannot evict live traffic.
+func (a *Authority) RetireIdleClient(client *UDPClient) bool {
 	if client == nil {
 		return false
 	}
@@ -343,7 +342,14 @@ func (a *Authority) InvalidateClient(client *UDPClient) bool {
 		if lease.client != client {
 			continue
 		}
-		_ = lease.client.Close()
+		client.mu.Lock()
+		if client.closed || client.count != 0 {
+			client.mu.Unlock()
+			return false
+		}
+		client.closed = true
+		client.mu.Unlock()
+		_ = client.Close()
 		if a.clientEngine != nil {
 			a.clientEngine.InvalidateAuthorizedPeer(lease.node)
 		}
@@ -353,8 +359,7 @@ func (a *Authority) InvalidateClient(client *UDPClient) bool {
 	return false
 }
 
-// Static typed reasons preserve the authority sentinel contract while allowing
-// diagnostics to distinguish lifetime failure from an authoritative peer refusal.
+// Static typed reasons preserve authority classification without private values.
 type authorityClosedError struct{}
 
 func (authorityClosedError) Error() string { return "peer network authority is closed" }
