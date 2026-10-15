@@ -168,7 +168,9 @@ func TestActualTLSHandshakeTimeoutRecoversWithoutReplayingMutation(t *testing.T)
 	defer server.Close()
 	defer close(release)
 	base := server.Client().Transport.(*http.Transport).Clone()
-	base.TLSHandshakeTimeout = 20 * time.Millisecond
+	// The first handshake is held until the request finishes, so it always
+	// expires. Allow the successful handshake enough time under the race detector.
+	base.TLSHandshakeTimeout = time.Second
 	defer base.CloseIdleConnections()
 	transport := &tlsHandshakeRetryTransport{attempts: 2, base: base}
 	req, _ := http.NewRequest(http.MethodPost, server.URL, strings.NewReader("exact-mutation"))
