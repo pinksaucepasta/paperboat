@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat-relay/admission"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
-	"github.com/pinksaucepasta/paperboat-tunnel/internal/usage"
 	"golang.org/x/time/rate"
 )
 
@@ -87,6 +87,15 @@ func (r *DataCarrierRouteRegistry) AcquireIngress(ctx context.Context, decision 
 	return r.ingressLimits.acquire(decision, r.usage)
 }
 
+// AcquireAdmittedIngress is only for a registered private connection after a
+// current server continuation check; it cannot authorize a new private grant.
+func (r *DataCarrierRouteRegistry) AcquireAdmittedIngress(ctx context.Context, d connectorprotocol.IngressDecision) (*IngressLease, error) {
+	if r == nil || ctx == nil || d.ValidateAdmitted(time.Now().UTC()) != nil || !d.ExpiresAt.After(time.Now().UTC()) || r.ingressLimits == nil {
+		return nil, ErrIngressLimitExceeded
+	}
+	return r.ingressLimits.acquire(d, r.usage)
+}
+
 func (l *IngressLimits) acquire(decision connectorprotocol.IngressDecision, usage IngressUsage) (*IngressLease, error) {
 	now := time.Now()
 	publicationKey := decision.Binding.AccountID + "\x00" + decision.Binding.PublicationID
@@ -142,9 +151,14 @@ func (l *IngressLimits) expireIdle(now time.Time) {
 }
 
 func (l *IngressLease) Wrap(ctx context.Context, stream io.ReadWriteCloser) io.ReadWriteCloser {
-	bounded, cancelDeadline := context.WithDeadline(ctx, l.decision.IssuedAt.Add(usage.DeliveryWindow))
-	streamCtx, cancelCause := context.WithCancelCause(bounded)
-	cancel := func() { cancelCause(context.Canceled); cancelDeadline() }
+	lease, err := admission.Admit(ctx, time.Time{}, nil)
+	if err != nil {
+		_ = stream.Close()
+		l.Release()
+		return stream
+	}
+	streamCtx, cancelCause := context.WithCancelCause(lease.Context())
+	cancel := func() { cancelCause(context.Canceled); lease.Close() }
 	s := &meteredIngressStream{ctx: streamCtx, stream: stream, lease: l, cancel: cancel}
 	if l.usage != nil {
 		s.unsubscribeQuota = l.usage.SubscribeQuota(ingressUsageAuthority(l.decision), l.decision.IssuedAt, func() { cancelCause(ErrIngressQuotaExhausted) })
@@ -183,9 +197,6 @@ func (s *meteredIngressStream) Write(payload []byte) (int, error) { return s.tra
 func (s *meteredIngressStream) transfer(payload []byte, ingress bool) (int, error) {
 	if errors.Is(context.Cause(s.ctx), ErrIngressQuotaExhausted) {
 		return 0, ErrIngressQuotaExhausted
-	}
-	if !time.Now().Before(s.lease.decision.IssuedAt.Add(usage.DeliveryWindow)) {
-		return 0, errors.New("ingress stream reached seven-day lifetime; reconnect to renew access")
 	}
 	total := 0
 	for len(payload) > 0 {

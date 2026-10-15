@@ -17,6 +17,7 @@ import (
 )
 
 type browserAuthorityTest struct {
+	revoked  atomic.Bool
 	calls    atomic.Int32
 	decision connectorprotocol.IngressDecision
 	failure  error
@@ -35,7 +36,13 @@ func (a *browserAuthorityTest) Redeem(_ context.Context, tx, state, handoff, hos
 }
 func (a *browserAuthorityTest) Authorize(context.Context, control.BrowserAuthorizeRequest) (connectorprotocol.IngressDecision, error) {
 	a.calls.Add(1)
-	return a.decision, a.failure
+	if a.revoked.Load() {
+		return connectorprotocol.IngressDecision{}, control.ErrBrowserDenied
+	}
+	next := a.decision
+	next.IssuedAt = time.Now().UTC()
+	next.ExpiresAt = next.IssuedAt.Add(150 * time.Millisecond)
+	return next, a.failure
 }
 
 func TestBrowserCallbackRejectsForgedReturnBeforeRedemption(t *testing.T) {
@@ -151,7 +158,7 @@ func TestBrowserDecisionRequiresExactViewerPolicyGeneration(t *testing.T) {
 	}
 }
 
-func TestBrowserAuthorizationExpiresAndDeniesBeforeForward(t *testing.T) {
+func TestBrowserAuthorizationOutlivesTTLUntilRevokedAndDeniesNewAdmissions(t *testing.T) {
 	m, d := browserTestMatch()
 	a := &browserAuthorityTest{decision: d}
 	b := BrowserAccess{Authority: a, LoginOrigin: "https://login.example.test"}
@@ -162,12 +169,19 @@ func TestBrowserAuthorizationExpiresAndDeniesBeforeForward(t *testing.T) {
 	if !ok {
 		t.Fatalf("authorize status=%d", w.Code)
 	}
-	defer finish()
 	select {
 	case <-allowed.Context().Done():
-	case <-time.After(time.Second):
-		t.Fatal("expired authority retained")
+		t.Fatal("admitted browser request expired")
+	case <-time.After(300 * time.Millisecond):
 	}
+	a.revoked.Store(true)
+	select {
+	case <-allowed.Context().Done():
+	case <-time.After(3 * time.Second):
+		t.Fatal("revocation retained browser request")
+	}
+	finish()
+	a.revoked.Store(false)
 	a.failure = control.ErrBrowserDenied
 	w = httptest.NewRecorder()
 	_, finish, ok = b.authorize(w, r, m)

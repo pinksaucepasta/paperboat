@@ -788,7 +788,6 @@ type dataCarrierRouteUpgradeBody struct {
 	writeDone        <-chan error
 	closeRequestBody func() error
 	lifetimeCancel   context.CancelFunc
-	lifetimeTimer    *time.Timer
 	once             sync.Once
 	err              error
 }
@@ -812,7 +811,7 @@ func (b *dataCarrierRouteUpgradeBody) Close() error {
 		return nil
 	}
 	b.once.Do(func() {
-		stopPreviewStreamLifetime(b.lifetimeCancel, b.lifetimeTimer)
+		stopPreviewStreamLifetime(b.lifetimeCancel)
 		if b.stopCancel != nil {
 			b.stopCancel()
 		}

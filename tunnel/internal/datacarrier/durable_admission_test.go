@@ -67,6 +67,19 @@ func TestDurableAdmissionRegistryBindsMachineKeyAndCarrierURN(t *testing.T) {
 	if err := registry.AuthorizeStream(context.Background(), identity, open); err != nil {
 		t.Fatalf("authorize route: %v", err)
 	}
+	base.ExpiresAt, second.ExpiresAt = now.Add(time.Second), now.Add(time.Second)
+	if err := registry.Replace([]DurableAdmission{base, second}, now); err != nil {
+		t.Fatal(err)
+	}
+	if !registry.HasIdentity(identity, now.Add(2*time.Second)) {
+		t.Fatal("admitted carrier withdrawn solely by credential expiry")
+	}
+	if err := registry.Replace(nil, now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if registry.HasIdentity(identity, now.Add(2*time.Second)) {
+		t.Fatal("explicitly withdrawn carrier remains authorized")
+	}
 	open.RouteID = "route_missing"
 	if err := registry.AuthorizeStream(context.Background(), identity, open); !errors.Is(err, ErrDurableAdmissionMissing) {
 		t.Fatalf("unknown route error=%v, want missing admission", err)

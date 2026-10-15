@@ -470,11 +470,11 @@ func TestHeartbeatRejectsStaleAndOutOfOrderTimestamps(t *testing.T) {
 	}
 }
 
-func TestLeaseExpiryDetachesExactRegistryGeneration(t *testing.T) {
+func TestHeartbeatLossDetachesExactRegistryGeneration(t *testing.T) {
 	serverSession, _, clock, _, _ := testSessionPair(t)
 	ref := serverSession.Reference()
 	clock.Advance(2 * time.Minute)
-	if err := serverSession.CheckLease(clock.Now()); !errors.Is(err, ErrLeaseExpired) {
+	if err := serverSession.CheckLease(clock.Now()); !errors.Is(err, ErrHeartbeatTimeout) {
 		t.Fatalf("lease error=%v", err)
 	}
 	if _, ok := serverSession.server.config.Registry.Active(ref.ConnectorID); ok {
@@ -763,5 +763,35 @@ func TestApplyPreservesOperationalFailureAlongsideCancellation(t *testing.T) {
 				t.Fatal("recovery did not promote candidate")
 			}
 		})
+	}
+}
+
+func TestAdmittedConnectorOutlivesCredentialAndLeaseUntilRevocation(t *testing.T) {
+	server, client, clock, _, _ := testSessionPair(t)
+	// Keep transport heartbeats current while the admission credentials pass TTL.
+	server.auth.CredentialExpiresAt = clock.Now().Add(time.Second)
+	server.lease.ExpiresAt = clock.Now().Add(time.Second)
+	client.lease.ExpiresAt = clock.Now().Add(time.Second)
+	clock.Advance(2 * time.Second)
+	heartbeat, err := client.Heartbeat(clock.Now())
+	if err != nil {
+		t.Fatalf("admitted client expired: %v", err)
+	}
+	ack, err := server.HandleHeartbeat(context.Background(), heartbeat)
+	if err != nil {
+		t.Fatalf("admitted server expired: %v", err)
+	}
+	if err := client.AcceptHeartbeatAck(ack); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.CheckLease(clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	ref := server.Reference()
+	if err := server.server.config.Registry.Disconnect(ref, ReasonAuthentication); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.CheckLease(clock.Now()); !errors.Is(err, ErrStaleSession) {
+		t.Fatalf("revoked connector retained: %v", err)
 	}
 }

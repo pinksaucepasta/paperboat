@@ -13,7 +13,7 @@ import (
 )
 
 // RuntimeCarrierWorker owns runtime-only admissions and routes. A successful
-// complete pull replaces authority; a failed pull retains it only until expiry.
+// complete pull replaces authority; a failed pull preserves admitted carriers until explicit withdrawal.
 // Runtime endpoints authenticate the forwarded helper credential themselves.
 type RuntimeCarrierWorker struct {
 	Reporter           *reporting.Reporter
@@ -94,10 +94,11 @@ func (w *RuntimeCarrierWorker) reconcile(parent context.Context) (failure error)
 			return err
 		}
 	}
-	// Even control failures cannot extend a lease or keep a revoked local route.
+	// A successful complete pull withdraws revoked routes. Credential expiry
+	// during an outage never revokes an admitted carrier.
 	allowed := map[string]datacarrier.ExpectedAdmission{}
 	for _, a := range w.Expected.Snapshot() {
-		if a.ExpiresAt.After(time.Now().UTC()) {
+		if a.Admitted {
 			allowed[a.RouteID] = a
 		}
 	}
@@ -119,7 +120,7 @@ func (w *RuntimeCarrierWorker) observe(parent context.Context) (failure error) {
 	observations := make([]control.RuntimeCarrierObservation, 0)
 	for _, a := range w.Expected.Snapshot() {
 		r, ok := w.Routes.Route(a.RouteID)
-		ready := ok && r.Identity == a.Identity && r.AttachmentGeneration == a.AttachmentGeneration && r.Revision == a.RouteRevision && a.ExpiresAt.After(time.Now().UTC())
+		ready := ok && r.Identity == a.Identity && r.AttachmentGeneration == a.AttachmentGeneration && r.Revision == a.RouteRevision
 		if ready {
 			select {
 			case <-r.Server.Done():

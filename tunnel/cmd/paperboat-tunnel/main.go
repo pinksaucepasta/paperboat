@@ -433,8 +433,12 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if err != nil {
 		return nil, fmt.Errorf("create private access authorizer: %w", err)
 	}
-	previewTransport, err := edgehttp.NewDataCarrierPreviewTransport(edgehttp.DataCarrierPreviewTransportConfig{Registry: previewRoutes, StreamOpenTimeout: deployment.ControlTimeout, IngressRegistry: durableRoutes, PrivateAuthority: func(ctx context.Context, evidence connectorprotocol.PrivateAccessOpen) (connectorprotocol.IngressDecision, error) {
-		result, err := privateAccessAuthorizer.AuthorizePrivateAccessGrant(ctx, evidence.Grant, evidence.Request)
+	previewTransport, err := edgehttp.NewDataCarrierPreviewTransport(edgehttp.DataCarrierPreviewTransportConfig{Registry: previewRoutes, StreamOpenTimeout: deployment.ControlTimeout, IngressRegistry: durableRoutes, PrivateAuthority: func(ctx context.Context, decision connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error) {
+		evidence := decision.NativeAuthorization
+		if evidence == nil {
+			return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
+		}
+		result, err := privateAccessAuthorizer.RevalidatePrivateAccessGrant(ctx, evidence.Grant, evidence.Request, decision.DecisionID)
 		if err != nil {
 			return connectorprotocol.IngressDecision{}, err
 		}

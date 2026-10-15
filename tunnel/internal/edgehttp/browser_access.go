@@ -3,6 +3,7 @@ package edgehttp
 import (
 	"context"
 	"errors"
+	runtimeadmission "github.com/pinksaucepasta/paperboat-relay/admission"
 	"net/http"
 	"net/url"
 	"strings"
@@ -319,7 +320,6 @@ func (b *BrowserAccess) authorize(w http.ResponseWriter, r *http.Request, m rout
 	if machine {
 		input.CredentialKind = "machine"
 	}
-	started := time.Now()
 	lookup, stop := context.WithTimeout(r.Context(), 2*time.Second)
 	d, err := b.Authority.Authorize(lookup, input)
 	stop()
@@ -331,47 +331,30 @@ func (b *BrowserAccess) authorize(w http.ResponseWriter, r *http.Request, m rout
 		http.NotFound(w, r)
 		return r, func() {}, false
 	}
-	ctx, cancel := context.WithCancel(r.Context())
-	ctx = context.WithValue(ctx, browserDecisionKey{}, d)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		deadline := started.Add(d.ExpiresAt.Sub(d.IssuedAt))
-		timer := time.NewTimer(time.Until(deadline))
-		defer timer.Stop()
-		tick := time.NewTicker(connectorprotocol.IngressRefreshInterval)
-		defer tick.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-timer.C:
-				cancel()
-				return
-			case <-tick.C:
-				start := time.Now()
-				refresh, stop := context.WithDeadline(ctx, deadline)
-				next, e := b.Authority.Authorize(refresh, input)
-				stop()
-				prior := d
-				prior.IssuedAt, prior.ExpiresAt, prior.DecisionID = next.IssuedAt, next.ExpiresAt, next.DecisionID
-				if e != nil || !browserDecisionMatches(next, m) || prior != next {
-					cancel()
-					return
-				}
-				d = next
-				deadline = start.Add(next.ExpiresAt.Sub(next.IssuedAt))
-				if !timer.Stop() {
-					select {
-					case <-timer.C:
-					default:
-					}
-				}
-				timer.Reset(time.Until(deadline))
-			}
+	lease, err := runtimeadmission.Admit(r.Context(), d.ExpiresAt, nil)
+	if err != nil {
+		browserError(w, r, err)
+		return r, func() {}, false
+	}
+	ctx := context.WithValue(lease.Context(), browserDecisionKey{}, d)
+	input.GrantID, input.Token = d.GrantID, ""
+	stopWatch := lease.Poll(func(check context.Context) error {
+		next, e := b.Authority.Authorize(check, input)
+		if errors.Is(e, control.ErrBrowserDenied) {
+			return runtimeadmission.ErrRevoked
 		}
-	}()
-	return r.WithContext(ctx), func() { cancel(); <-done }, true
+		if e != nil {
+			return e
+		}
+		prior := d
+		prior.IssuedAt, prior.ExpiresAt, prior.DecisionID = next.IssuedAt, next.ExpiresAt, next.DecisionID
+		if !browserDecisionMatches(next, m) || prior != next {
+			return runtimeadmission.ErrRevoked
+		}
+		d = next
+		return nil
+	})
+	return r.WithContext(ctx), func() { lease.Close(); stopWatch() }, true
 }
 
 func hasBrowserDecision(ctx context.Context, m route.RouteMatch) bool {

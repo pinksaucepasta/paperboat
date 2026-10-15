@@ -32,7 +32,7 @@ const (
 // set. It never turns a failed control pull into an empty set: last-known-good
 // admissions remain active until a successful pull explicitly removes them.
 // Local routes are removed immediately when the successful snapshot removes or
-// expires them, while detach observations are retried idempotently. A
+// explicitly revokes them, while detach observations are retried idempotently. A
 // successful pull is required to be complete; the control client rejects
 // incomplete or over-limit responses before this worker can commit them.
 type PreviewCarrierWorker struct {
@@ -143,7 +143,6 @@ func (w *PreviewCarrierWorker) reconcile(parent context.Context) (failure error)
 	ctx, cancel := context.WithTimeout(parent, w.timeout)
 	defer cancel()
 	now := w.now().UTC()
-	w.expireLocal(now)
 	var (
 		admissions  []control.PreviewCarrierAdmission
 		detachments []control.PreviewCarrierDetachment
@@ -205,33 +204,7 @@ func (w *PreviewCarrierWorker) reconcile(parent context.Context) (failure error)
 	}
 	w.detachRemoved(expected, now)
 	w.applyServerDetachments(ctx, detachments)
-	w.expireLocal(now)
 	return errors.Join(w.flushPending(ctx), w.flushPendingObservations(ctx))
-}
-
-// expireLocal fails closed when a lease expires while the control plane is
-// unavailable. The route is removed from the edge gateway immediately; the
-// durable detach observation is retried on later successful control calls.
-func (w *PreviewCarrierWorker) expireLocal(now time.Time) {
-	if w == nil {
-		return
-	}
-	for _, route := range w.registry.Snapshot() {
-		if route.ExpiresAt.IsZero() || route.ExpiresAt.After(now) {
-			continue
-		}
-		_ = w.registry.Detach(route.RouteID, route.Identity, route.Revision)
-		for _, admission := range w.expected.Snapshot() {
-			if admission.OperationID == route.OperationID && admission.RouteID == route.RouteID && admission.AttachmentGeneration == route.AttachmentGeneration {
-				_ = w.expected.Remove(admission)
-				break
-			}
-		}
-		key := route.OperationID + "\x00" + route.RouteID
-		w.mu.Lock()
-		w.pendingObservations[key] = observationFromRoute(route, now, "expired", "lease_expired")
-		w.mu.Unlock()
-	}
 }
 
 func (w *PreviewCarrierWorker) detachRemoved(expected []datacarrier.ExpectedAdmission, now time.Time) {
@@ -245,7 +218,7 @@ func (w *PreviewCarrierWorker) detachRemoved(expected []datacarrier.ExpectedAdmi
 	for _, route := range w.registry.Snapshot() {
 		key := route.OperationID + "\x00" + route.RouteID
 		current, exists := allowed[key]
-		if exists && current.Identity == route.Identity && current.AttachmentGeneration == route.AttachmentGeneration && current.RouteRevision == route.Revision && current.ExpiresAt.After(now) {
+		if exists && current.Identity == route.Identity && current.AttachmentGeneration == route.AttachmentGeneration && current.RouteRevision == route.Revision {
 			continue
 		}
 		_ = w.registry.Detach(route.RouteID, route.Identity, route.Revision)
@@ -581,18 +554,14 @@ func previewCarrierAdmissionKey(admission datacarrier.ExpectedAdmission) string 
 }
 
 func previewCarrierAdmissionEqual(left, right datacarrier.ExpectedAdmission) bool {
-	expiresEqual := left.ExpiresAt.Equal(right.ExpiresAt)
 	left.ExpiresAt = time.Time{}
 	right.ExpiresAt = time.Time{}
 	left.Admitted = false
 	right.Admitted = false
-	return expiresEqual && left == right
+	return left == right
 }
 
 func previewCarrierDetachState(admission datacarrier.ExpectedAdmission, now time.Time, reason string) (string, string) {
-	if !admission.ExpiresAt.After(now) {
-		return "expired", "lease_expired"
-	}
 	return "detached", reason
 }
 

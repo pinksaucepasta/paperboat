@@ -178,11 +178,17 @@ type IngressDecision struct {
 	ExpiresAt            time.Time          `json:"expires_at"`
 }
 
-func (d IngressDecision) Validate(now time.Time) error {
-	if d.NativeAuthorization != nil && d.ValidateNativeAuthorization(now) != nil {
+func (d IngressDecision) Validate(now time.Time) error { return d.validate(now, false) }
+
+// ValidateAdmitted checks an existing admission's exact shape without using its
+// credential deadline as a live-session deadline.
+func (d IngressDecision) ValidateAdmitted(now time.Time) error { return d.validate(now, true) }
+
+func (d IngressDecision) validate(now time.Time, admitted bool) error {
+	if d.NativeAuthorization != nil && d.validateNativeAuthorization(now, admitted) != nil {
 		return ErrIngressDenied
 	}
-	if d.Binding.Validate() != nil || now.IsZero() || d.IssuedAt.IsZero() || d.IssuedAt.After(now) || !d.ExpiresAt.After(now) || d.ExpiresAt.Sub(d.IssuedAt) > IngressAuthorityLifetime || d.Action != "view" {
+	if d.Binding.Validate() != nil || now.IsZero() || d.IssuedAt.IsZero() || d.IssuedAt.After(now) || !admitted && !d.ExpiresAt.After(now) || !d.ExpiresAt.After(d.IssuedAt) || d.ExpiresAt.Sub(d.IssuedAt) > IngressAuthorityLifetime || d.Action != "view" {
 		return ErrIngressDenied
 	}
 	for _, id := range []string{d.DecisionID, d.EdgeNodeID, d.ConnectorID, d.SessionID} {
@@ -209,8 +215,18 @@ func (d IngressDecision) Validate(now time.Time) error {
 }
 
 func (d IngressDecision) Authorize(authority IngressDecision, open StreamOpen, edgeNodeID, edgeEpoch string, now time.Time) error {
+	return d.authorize(authority, open, edgeNodeID, edgeEpoch, now, false)
+}
+
+// Revalidate checks exact current revocation authority for already admitted work.
+// It cannot be used to admit a new stream.
+func (d IngressDecision) Revalidate(authority IngressDecision, open StreamOpen, edgeNodeID, edgeEpoch string, now time.Time) error {
+	return d.authorize(authority, open, edgeNodeID, edgeEpoch, now, true)
+}
+
+func (d IngressDecision) authorize(authority IngressDecision, open StreamOpen, edgeNodeID, edgeEpoch string, now time.Time, admitted bool) error {
 	current := authority.Binding
-	if d.Validate(now) != nil || authority.Validate(now) != nil || d.Binding != current || open.Validate() != nil ||
+	if d.validate(now, admitted) != nil || authority.validate(now, admitted) != nil || d.Binding != current || open.Validate() != nil ||
 		d.PolicyGeneration != authority.PolicyGeneration || d.AssignmentGeneration != authority.AssignmentGeneration ||
 		d.ConnectorID != authority.ConnectorID || d.SessionID != authority.SessionID || d.ProcessGeneration != authority.ProcessGeneration || d.ConfigGeneration != authority.ConfigGeneration ||
 		d.EdgeNodeID != authority.EdgeNodeID || d.EdgeProcessEpoch != authority.EdgeProcessEpoch ||
@@ -226,8 +242,16 @@ func (d IngressDecision) Authorize(authority IngressDecision, open StreamOpen, e
 // ValidateNativeAuthorization binds the signed accessor authority to the exact
 // durable publisher assignment. Publisher identity is independently projected.
 func (d IngressDecision) ValidateNativeAuthorization(now time.Time) error {
+	return d.validateNativeAuthorization(now, false)
+}
+
+func (d IngressDecision) validateNativeAuthorization(now time.Time, admitted bool) error {
 	a := d.NativeAuthorization
-	if a == nil || a.Validate(now) != nil {
+	validationTime := now
+	if admitted {
+		validationTime = time.Time{}
+	}
+	if a == nil || a.Validate(validationTime) != nil {
 		return ErrIngressDenied
 	}
 	q := a.Request
@@ -243,7 +267,7 @@ func (d IngressDecision) ValidateNativeAuthorization(now time.Time) error {
 	if !resourceMatches || !connectorMatches || b.Audience != "private" || b.Protocol != "http" || q.Protocol != "http" ||
 		q.AccountID != b.AccountID || q.RouteID != b.RouteID || q.Host != b.Hostname || q.RouteGeneration != b.RouteGeneration ||
 		q.CarrierSessionID != d.SessionID || q.ProcessGeneration != d.ProcessGeneration || q.ConfigGeneration != d.ConfigGeneration || q.AssignmentGeneration != d.AssignmentGeneration ||
-		q.EdgeNodeID != d.EdgeNodeID || q.EdgeProcessEpoch != d.EdgeProcessEpoch || d.PrincipalID != q.MachineID || d.GrantID != q.Nonce || d.GrantGeneration != q.InstallationGeneration || d.MembershipGeneration != 0 || d.ExpiresAt.After(q.ExpiresAt) {
+		q.EdgeNodeID != d.EdgeNodeID || q.EdgeProcessEpoch != d.EdgeProcessEpoch || d.PrincipalID != q.MachineID || d.GrantID != q.Nonce || d.GrantGeneration != q.InstallationGeneration || d.MembershipGeneration != 0 || !admitted && d.ExpiresAt.After(q.ExpiresAt) {
 		return ErrIngressDenied
 	}
 	// Keep the combined envelope within the existing stream admission bound.

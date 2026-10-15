@@ -3,8 +3,10 @@ package edgehttp
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -142,5 +144,51 @@ func TestForwardPublicTCPRejectsInvalidTargetBeforeOpeningCarrier(t *testing.T) 
 	defer cancel()
 	if _, _, err := connector.AcceptStream(acceptCtx); err == nil {
 		t.Fatal("invalid decision reached daemon carrier")
+	}
+}
+
+func TestPublicTCPAdmittedStreamOutlivesTTLAndIsCutByRevocation(t *testing.T) {
+	client, accepted := net.Pipe()
+	defer client.Close()
+	defer accepted.Close()
+	stream, origin := net.Pipe()
+	defer stream.Close()
+	defer origin.Close()
+	now := time.Now().UTC()
+	decision := publicTCPDecision(now, 4001)
+	decision.IssuedAt = now
+	decision.ExpiresAt = now.Add(40 * time.Millisecond)
+	open := connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: decision.Binding.AccountID, TunnelID: decision.Binding.TunnelID, ConnectorID: decision.ConnectorID, SessionID: decision.SessionID, ProcessGeneration: decision.ProcessGeneration, Generation: decision.ConfigGeneration, RouteID: decision.Binding.RouteID, RequestID: "request_live", Kind: "tcp_public"}
+	var revoked atomic.Bool
+	current := func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error) {
+		if revoked.Load() {
+			return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
+		}
+		fresh := decision
+		fresh.IssuedAt = time.Now().UTC()
+		fresh.ExpiresAt = fresh.IssuedAt.Add(40 * time.Millisecond)
+		return fresh, nil
+	}
+	done := make(chan error, 1)
+	go func() { done <- bridgePublicTCP(t.Context(), accepted, stream, decision, open, current) }()
+	select {
+	case <-done:
+		t.Fatal("admitted TCP expired")
+	case <-time.After(100 * time.Millisecond):
+	}
+	go func() { _, _ = client.Write([]byte{1}) }()
+	_ = origin.SetReadDeadline(time.Now().Add(time.Second))
+	var b [1]byte
+	if _, err := io.ReadFull(origin, b[:]); err != nil || b[0] != 1 {
+		t.Fatal("TCP payload lost after admission expiry")
+	}
+	revoked.Store(true)
+	select {
+	case err := <-done:
+		if !errors.Is(err, connectorprotocol.ErrIngressDenied) {
+			t.Fatal("revocation cause lost")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("revocation retained admitted TCP")
 	}
 }

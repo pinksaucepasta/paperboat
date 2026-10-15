@@ -473,7 +473,7 @@ func (r *ExpectedAdmissionRegistry) ForIdentity(identity Identity, now time.Time
 	r.mu.RLock()
 	result := make([]ExpectedAdmission, 0)
 	for _, admission := range r.byKey {
-		if admission.Admitted && admission.Identity == identity && admission.ExpiresAt.After(now) {
+		if admission.Admitted && admission.Identity == identity {
 			result = append(result, admission)
 		}
 	}
@@ -585,9 +585,6 @@ func (r *ExpectedAdmissionRegistry) AuthorizeStream(ctx context.Context, identit
 	now := time.Now().UTC()
 	for _, admission := range r.byKey {
 		if admission.Admitted && admission.Identity == identity && admission.RouteID == open.RouteID {
-			if !admission.ExpiresAt.After(now) {
-				return ErrAdmissionExpired
-			}
 			if admission.AccessMode == PreviewCarrierAccessPrivate {
 				decision, ok := PrivateAccessDecisionFromContext(ctx)
 				if !ok || !decision.Allowed || decision.ExpiresAt.IsZero() || !decision.ExpiresAt.After(now) || decision.ResourceID != admission.PreviewID || decision.RouteID != admission.RouteID || decision.OperationID != admission.OperationID || decision.CarrierSessionID != admission.Identity.SessionID || decision.RouteGeneration != admission.RouteRevision || decision.ProcessGeneration != admission.Identity.ProcessGeneration || decision.ConfigGeneration != admission.Identity.Generation || decision.Protocol != "http" && decision.Protocol != "tcp" {

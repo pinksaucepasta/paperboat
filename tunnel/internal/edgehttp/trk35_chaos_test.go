@@ -187,6 +187,10 @@ func (a *trk35PrivateAccessAuthorizer) AuthorizePrivateAccessGrant(context.Conte
 	return a.decision, a.err
 }
 
+func (a *trk35PrivateAccessAuthorizer) RevalidatePrivateAccessGrant(ctx context.Context, grant string, request connectorprotocol.PrivateAccessRequest, _ string) (control.PrivateAccessGrantDecision, error) {
+	return a.AuthorizePrivateAccessGrant(ctx, grant, request)
+}
+
 func trk35WritePrivateAccessFrame(writer io.Writer, value connectorprotocol.PrivateAccessOpen) error {
 	payload, err := json.Marshal(value)
 	if err != nil {

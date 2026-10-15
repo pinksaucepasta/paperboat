@@ -584,3 +584,81 @@ func testEdgePreviewCarrierPair(t *testing.T, identity datacarrier.Identity) (*d
 	})
 	return server, client
 }
+
+func TestPreviewResponseOutlivesAdmissionTTLUntilRouteRevoked(t *testing.T) {
+	server, client := testEdgePreviewCarrierPair(t, testEdgePreviewIdentity(1, 1))
+	defer client.Close()
+	defer server.Close()
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	route := DataCarrierPreviewRoute{RouteID: "preview_01", Hostname: "app.preview.example.test", Kind: dataCarrierPreviewRouteKind, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, Server: server, ExpiresAt: time.Now().Add(50 * time.Millisecond)}
+	if err := registry.Attach(route); err != nil {
+		t.Fatal(err)
+	}
+	transport, err := NewDataCarrierPreviewTransport(DataCarrierPreviewTransportConfig{Registry: registry, StreamOpenTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	sent := make(chan error, 1)
+	go func() {
+		stream, _, err := client.AcceptStream(ctx)
+		if err != nil {
+			sent <- err
+			return
+		}
+		defer stream.Close()
+		request, err := http.ReadRequest(bufio.NewReader(stream))
+		if err != nil {
+			sent <- err
+			return
+		}
+		defer request.Body.Close()
+		if _, err = io.WriteString(stream, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n"); err != nil {
+			sent <- err
+			return
+		}
+		timer := time.NewTimer(time.Until(route.ExpiresAt.Add(50 * time.Millisecond)))
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			sent <- ctx.Err()
+			return
+		}
+		_, err = io.WriteString(stream, "a")
+		sent <- err
+		var b [1]byte
+		_, _ = stream.Read(b[:])
+	}()
+	request := httptest.NewRequest(http.MethodGet, "https://app.preview.example.test/", nil).WithContext(ctx)
+	response, err := transport.RoundTrip(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var b [1]byte
+	if _, err := io.ReadFull(response.Body, b[:]); err != nil || b[0] != 'a' {
+		t.Fatal("admitted response did not survive credential expiry", err)
+	}
+	if err := <-sent; err != nil {
+		t.Fatal(err)
+	}
+	readDone := make(chan error, 1)
+	go func() { _, err := response.Body.Read(b[:]); readDone <- err }()
+	if err := registry.Detach(route.RouteID, server.Identity(), route.Revision); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-readDone:
+		if err == nil {
+			t.Fatal("revoked response remained readable")
+		}
+	case <-ctx.Done():
+		t.Fatal("route revocation did not interrupt blocked response")
+	}
+}

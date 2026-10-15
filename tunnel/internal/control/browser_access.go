@@ -36,6 +36,7 @@ type BrowserSession struct {
 	ExpiresAt  time.Time `json:"expires_at"`
 }
 type BrowserAuthorizeRequest struct {
+	GrantID        string `json:"grant_id,omitempty"`
 	CredentialKind string `json:"credential_kind,omitempty"`
 	Token          string `json:"token"`
 	Host           string `json:"host"`

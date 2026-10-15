@@ -283,7 +283,7 @@ func TestPreviewCarrierDetachmentPreservesPreviewOwnerSession(t *testing.T) {
 
 func TestPreviewCarrierHandlerRebindsAdmissionAfterRouteEnds(t *testing.T) {
 	now := time.Now().UTC()
-	firstWire := testPreviewCarrierAdmission("preview_first", "operation_first", "route_first", "first.preview.example.test", now.Add(time.Hour))
+	firstWire := testPreviewCarrierAdmission("preview_first", "operation_first", "route_first", "first.preview.example.test", now.Add(400*time.Millisecond))
 	secondWire := testPreviewCarrierAdmission("preview_second", "operation_second", "route_second", "second.preview.example.test", now.Add(time.Hour))
 	first := admittedPreviewCarrierTestAdmission(t, firstWire, now)
 	second := admittedPreviewCarrierTestAdmission(t, secondWire, now)
@@ -302,7 +302,7 @@ func TestPreviewCarrierHandlerRebindsAdmissionAfterRouteEnds(t *testing.T) {
 	source := &previewCarrierSourceFake{observationFailures: map[string]int{second.RouteID + "\x00edge_ready": 1}}
 	handler, err := NewPreviewCarrierHandler(PreviewCarrierHandlerConfig{
 		Source: source, Expected: expected, Registry: routes, NodeID: "edge_1", ProcessEpoch: "edge_epoch_1",
-		WaitTimeout: time.Second, Clock: func() time.Time { return now },
+		WaitTimeout: time.Second, Clock: func() time.Time { return time.Now().UTC() },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -318,6 +318,10 @@ func TestPreviewCarrierHandlerRebindsAdmissionAfterRouteEnds(t *testing.T) {
 		t.Fatalf("first route was not attached")
 	}
 
+	time.Sleep(time.Until(first.ExpiresAt) + 100*time.Millisecond)
+	if _, ok := routes.Lookup(first.Hostname); !ok {
+		t.Fatal("admitted preview carrier expired")
+	}
 	if err := expected.Replace(nil, now); err != nil {
 		t.Fatal(err)
 	}

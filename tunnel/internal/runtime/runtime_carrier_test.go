@@ -106,8 +106,14 @@ func TestRuntimeCarrierReadinessRevocationExpiryAndRecovery(t *testing.T) {
 			if routes.Len() != 1 {
 				t.Fatal("failed pull removed valid route")
 			}
+			if mode == "expiry" {
+				time.Sleep(time.Until(a.ExpiresAt) + 100*time.Millisecond)
+				if routes.Len() != 1 {
+					t.Fatal("admitted runtime carrier expired during authority outage")
+				}
+			}
 			switch mode {
-			case "revocation":
+			case "revocation", "expiry":
 				source.mu.Lock()
 				source.err = nil
 				source.admissions = nil

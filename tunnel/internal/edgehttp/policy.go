@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat-relay/reattach"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/admission"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/control"
@@ -240,17 +241,22 @@ func configureProxyDiagnostics(proxy *httputil.ReverseProxy, observe func(contex
 type retryPreviewTransport struct{ next http.RoundTripper }
 
 func (t retryPreviewTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	response, err := t.next.RoundTrip(request)
 	if _, restricted := request.Context().Value(browserDecisionKey{}).(connectorprotocol.IngressDecision); restricted {
-		return response, err
+		return t.next.RoundTrip(request)
 	}
 	if _, private := request.Context().Value(privateAccessRequestContextKey{}).(connectorprotocol.PrivateAccessRequest); private {
-		return response, err
+		return t.next.RoundTrip(request)
 	}
-	if err == nil || !retryablePreviewRequest(request) || !retryablePreviewTransportError(err) {
-		return response, err
-	}
-	return t.next.RoundTrip(request.Clone(request.Context()))
+	var response *http.Response
+	recovery := reattach.New(reattach.Policy{Attempts: 2, Retryable: func(err error) bool {
+		return retryablePreviewRequest(request) && retryablePreviewTransportError(err)
+	}})
+	err := recovery.Run(request.Context(), func(ctx context.Context) error {
+		var err error
+		response, err = t.next.RoundTrip(request.Clone(ctx))
+		return err
+	})
+	return response, err
 }
 
 func retryablePreviewRequest(request *http.Request) bool {
@@ -268,6 +274,9 @@ func retryablePreviewRequest(request *http.Request) bool {
 func retryablePreviewTransportError(err error) bool {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
+	}
+	if errors.Is(err, errPreviewRouteReplaced) {
+		return true
 	}
 	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, net.ErrClosed) {
 		return true

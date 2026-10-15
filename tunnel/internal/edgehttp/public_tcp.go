@@ -3,6 +3,7 @@ package edgehttp
 import (
 	"context"
 	"errors"
+	runtimeadmission "github.com/pinksaucepasta/paperboat-relay/admission"
 	"io"
 	"net"
 	"time"
@@ -85,48 +86,31 @@ func resolvePublicTCPAuthority(ctx context.Context, current func(context.Context
 }
 
 func bridgePublicTCP(ctx context.Context, connection net.Conn, stream io.ReadWriteCloser, authority connectorprotocol.IngressDecision, open connectorprotocol.StreamOpen, current func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)) error {
-	bridgeCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	closed := make(chan struct{})
-	closeWatcherDone := make(chan struct{})
-	go func() {
-		defer close(closeWatcherDone)
-		select {
-		case <-bridgeCtx.Done():
-			_ = connection.Close()
-			_ = stream.Close()
-		case <-closed:
+	lease, err := runtimeadmission.Admit(ctx, time.Time{}, nil)
+	if err != nil {
+		return err
+	}
+	defer lease.Close()
+	stopConnection := lease.Bind(connection)
+	defer stopConnection()
+	stopStream := lease.Bind(stream)
+	defer stopStream()
+	active := authority
+	stopWatch := lease.Poll(func(check context.Context) error {
+		refreshed, err := current(check, active)
+		if err == connectorprotocol.ErrIngressDenied {
+			return runtimeadmission.ErrRevoked
 		}
-	}()
-	authorityFailed := make(chan error, 1)
-	authorityWatcherDone := make(chan struct{})
-	go func() {
-		defer close(authorityWatcherDone)
-		ticker := time.NewTicker(connectorprotocol.IngressRefreshInterval)
-		defer ticker.Stop()
-		active := authority
-		for {
-			expires := time.NewTimer(time.Until(active.ExpiresAt))
-			select {
-			case <-bridgeCtx.Done():
-				expires.Stop()
-				return
-			case <-expires.C:
-				authorityFailed <- connectorprotocol.ErrIngressDenied
-				cancel()
-				return
-			case <-ticker.C:
-				expires.Stop()
-				refreshed, err := resolvePublicTCPAuthority(bridgeCtx, current, active, open)
-				if err != nil {
-					authorityFailed <- err
-					cancel()
-					return
-				}
-				active = refreshed
-			}
+		if err != nil {
+			return err
 		}
-	}()
+		if active.Revalidate(refreshed, open, active.EdgeNodeID, active.EdgeProcessEpoch, time.Now().UTC()) != nil {
+			return runtimeadmission.ErrRevoked
+		}
+		active = refreshed
+		return nil
+	})
+	defer stopWatch()
 	results := make(chan error, 2)
 	copyDirection := func(destination io.Writer, source io.Reader, closeWrite func() error) {
 		_, copyErr := io.Copy(destination, source)
@@ -149,14 +133,10 @@ func bridgePublicTCP(ctx context.Context, connection net.Conn, stream io.ReadWri
 		_ = stream.Close()
 	}
 	second := <-results
-	close(closed)
-	cancel()
-	<-authorityWatcherDone
-	<-closeWatcherDone
-	select {
-	case err := <-authorityFailed:
-		return errors.Join(connectorprotocol.ErrIngressDenied, err, first, second)
-	default:
+	lease.Close()
+	stopWatch()
+	if errors.Is(context.Cause(lease.Context()), runtimeadmission.ErrRevoked) {
+		return errors.Join(connectorprotocol.ErrIngressDenied, first, second)
 	}
 	return errors.Join(ctx.Err(), first, second)
 }

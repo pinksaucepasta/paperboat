@@ -74,10 +74,6 @@ func (r *PrivateAccessConnectionRegistry) authorizeRequest(address string, match
 	if !ok {
 		return connectorprotocol.PrivateAccessRequest{}, 401, false
 	}
-	if !entry.expires.After(r.now()) {
-		delete(r.entries, address)
-		return connectorprotocol.PrivateAccessRequest{}, 401, false
-	}
 	q := entry.request
 	if !privateAccessRouteMatches(q, match) {
 		return connectorprotocol.PrivateAccessRequest{}, 403, false
@@ -159,7 +155,7 @@ func (r *PrivateAccessConnectionRegistry) ingress(address string, match route.Ro
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	entry, ok := r.entries[address]
-	if !ok || entry.ingress == nil || !entry.expires.After(r.now()) || !privateAccessRouteMatches(entry.request, match) || entry.ingress.Validate(entry.ingress.IssuedAt) != nil {
+	if !ok || entry.ingress == nil || !privateAccessRouteMatches(entry.request, match) || entry.ingress.Validate(entry.ingress.IssuedAt) != nil {
 		return connectorprotocol.IngressDecision{}, false
 	}
 	return *entry.ingress, true

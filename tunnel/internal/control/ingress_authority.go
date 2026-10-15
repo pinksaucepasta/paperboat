@@ -74,7 +74,7 @@ func (a *IngressAuthority) ResolveDecision(ctx context.Context, candidate connec
 	now := time.Now().UTC()
 	for _, current := range decisions {
 		open := connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: candidate.Binding.AccountID, TunnelID: candidate.Binding.TunnelID, ConnectorID: candidate.ConnectorID, SessionID: candidate.SessionID, ProcessGeneration: candidate.ProcessGeneration, Generation: candidate.ConfigGeneration, RouteID: candidate.Binding.RouteID, RequestID: "tcp-authority-refresh", Kind: "tcp_public"}
-		if candidate.Authorize(current, open, a.NodeID, a.ProcessEpoch, now) == nil {
+		if candidate.Revalidate(current, open, a.NodeID, a.ProcessEpoch, now) == nil {
 			return current, nil
 		}
 	}

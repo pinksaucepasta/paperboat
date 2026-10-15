@@ -163,7 +163,7 @@ var _ io.ReadWriteCloser = (*ingressMemoryStream)(nil)
 var _ interface{ CloseWrite() error } = (*ingressMemoryStream)(nil)
 var _ IngressUsage = (*ingressUsageRecorder)(nil)
 
-func TestIngressLifetimeClosesBlockedStreamAndReleasesCapacity(t *testing.T) {
+func TestIngressOutlivesAuthorityWindowUntilDisconnectedAndReleasesCapacity(t *testing.T) {
 	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2, IngressLimits: testIngressLimits(1, 1<<20)})
 	if err != nil {
 		t.Fatal(err)
@@ -177,18 +177,37 @@ func TestIngressLifetimeClosesBlockedStreamAndReleasesCapacity(t *testing.T) {
 	lease.decision.IssuedAt = time.Now().Add(-usage.DeliveryWindow + 20*time.Millisecond)
 	local, remote := net.Pipe()
 	defer remote.Close()
-	stream := lease.Wrap(context.Background(), local)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := lease.Wrap(ctx, local)
 	defer stream.Close()
 	done := make(chan error, 1)
 	go func() { _, err := stream.Read(make([]byte, 1)); done <- err }()
 	select {
+	case <-done:
+		t.Fatal("credential delivery window ended admitted stream")
+	case <-time.After(60 * time.Millisecond):
+	}
+	go func() { _, _ = remote.Write([]byte{1}) }()
+	select {
 	case err := <-done:
-		if err == nil {
-			t.Fatal("expired read succeeded")
+		if err != nil {
+			t.Fatal(err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("lifetime did not unblock stream")
+		t.Fatal("admitted payload blocked")
 	}
+	go func() { _, err := stream.Read(make([]byte, 1)); done <- err }()
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("disconnect did not interrupt read")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("disconnect retained stream")
+	}
+
 	// Close synchronizes the deadline callback's release before checking capacity.
 	_ = stream.Close()
 	next, err := registry.AcquireIngress(context.Background(), decision)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	yamux "github.com/libp2p/go-yamux/v5"
+	runtimeadmission "github.com/pinksaucepasta/paperboat-relay/admission"
 	"io"
 	"net"
 	"net/http"
@@ -161,7 +162,12 @@ func (b *PrivateAccessStreamBridge) serveStream(parent context.Context, stream *
 	if !decision.Allowed || !decision.ExpiresAt.After(b.clock().UTC()) {
 		return connectorprotocol.WritePrivateAccessResult(stream, connectorprotocol.PrivateAccessResult{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Status: http.StatusForbidden})
 	}
-	lifetime, cancelLifetime := context.WithDeadline(parent, decision.ExpiresAt)
+	lease, err := runtimeadmission.Admit(parent, decision.ExpiresAt, nil)
+	if err != nil {
+		return err
+	}
+	lifetime := lease.Context()
+	cancelLifetime := lease.Close
 	lifetime = context.WithValue(lifetime, privateIngressDecisionKey{}, decision.Ingress)
 	observeCtx = lifetime
 	defer cancelLifetime()
@@ -195,6 +201,37 @@ func (b *PrivateAccessStreamBridge) serveStream(parent context.Context, stream *
 	if err := connectorprotocol.WritePrivateAccessResult(stream, connectorprotocol.PrivateAccessResult{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Status: http.StatusOK, ExpiresAt: decision.ExpiresAt}); err != nil {
 		return err
 	}
+	stopStream := lease.Bind(stream)
+	defer stopStream()
+	stopTarget := lease.Bind(target)
+	defer stopTarget()
+	stopWatch := lease.Poll(func(check context.Context) error {
+		next, e := b.authorizer.RevalidatePrivateAccessGrant(check, open.Grant, open.Request, decision.DecisionID)
+		if errors.Is(e, control.ErrPrivateAccessGrantForbidden) || errors.Is(e, control.ErrPrivateAccessGrantUnauthorized) && (next.Reason == "machine_revoked" || next.Reason == "identity_invalid") {
+			return runtimeadmission.ErrRevoked
+		}
+		if e != nil {
+			return e
+		}
+		prior := decision
+		prior.ExpiresAt = next.ExpiresAt
+		if prior.Ingress != nil {
+			if next.Ingress == nil {
+				return runtimeadmission.ErrRevoked
+			}
+			d := *prior.Ingress
+			o := connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: d.Binding.AccountID, TunnelID: d.Binding.TunnelID, ConnectorID: d.ConnectorID, SessionID: d.SessionID, ProcessGeneration: d.ProcessGeneration, Generation: d.ConfigGeneration, RouteID: d.Binding.RouteID, RequestID: open.Request.RequestID, Kind: "http_browser"}
+			if d.Revalidate(*next.Ingress, o, d.EdgeNodeID, d.EdgeProcessEpoch, time.Now().UTC()) != nil {
+				return runtimeadmission.ErrRevoked
+			}
+		}
+		prior.Ingress, next.Ingress = nil, nil
+		if !next.Allowed || prior != next {
+			return runtimeadmission.ErrRevoked
+		}
+		return nil
+	})
+	defer stopWatch()
 	phase = "private_stream_copy"
 	copyDone := make(chan error, 2)
 	go func() { _, err := io.Copy(target, stream); copyDone <- err }()

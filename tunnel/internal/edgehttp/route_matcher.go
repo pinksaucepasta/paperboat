@@ -6,7 +6,6 @@ import (
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/datacarrier"
 	"strings"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat-tunnel/internal/route"
 )
@@ -138,7 +137,7 @@ func (m *PreviewCarrierRouteMatcher) lookup(host, requestPath string) (DataCarri
 		return DataCarrierPreviewRoute{}, nil, false
 	}
 	preview, entryDone, ok := m.registry.acquire(host)
-	if !ok || preview.Server == nil || preview.Kind != dataCarrierPreviewRouteKind && preview.Kind != dataCarrierPreviewPrivateRouteKind && preview.Kind != datacarrier.RuntimeCarrierRoute || !preview.ExpiresAt.IsZero() && !preview.ExpiresAt.After(time.Now().UTC()) {
+	if !ok || preview.Server == nil || preview.Kind != dataCarrierPreviewRouteKind && preview.Kind != dataCarrierPreviewPrivateRouteKind && preview.Kind != datacarrier.RuntimeCarrierRoute {
 		return DataCarrierPreviewRoute{}, nil, false
 	}
 	select {

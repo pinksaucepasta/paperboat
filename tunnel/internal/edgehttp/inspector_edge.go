@@ -211,7 +211,7 @@ func (r *DataCarrierPreviewRegistry) openInspectorStream(ctx context.Context, ac
 		return nil, ErrDataCarrierPreviewRegistryInvalid
 	}
 	route, ok := r.Route(carrier.RouteID)
-	if !ok || route.Server == nil || route.PreviewID != access.ResourceID || route.OperationID != carrier.AssignmentID || route.OwnerMachineID != carrier.OwnerMachineID || route.OwnerMachineID != access.MachineID || route.LeaseGeneration != carrier.LeaseGeneration || route.AttachmentGeneration != carrier.AttachmentGeneration || route.Revision != carrier.RouteGeneration || route.ConfigContentHash != carrier.ConfigContentHash || route.EdgeNodeID != carrier.EdgeNodeID || route.EdgeProcessEpoch != carrier.EdgeProcessEpoch || !route.ExpiresAt.After(time.Now().UTC()) {
+	if !ok || route.Server == nil || route.PreviewID != access.ResourceID || route.OperationID != carrier.AssignmentID || route.OwnerMachineID != carrier.OwnerMachineID || route.OwnerMachineID != access.MachineID || route.LeaseGeneration != carrier.LeaseGeneration || route.AttachmentGeneration != carrier.AttachmentGeneration || route.Revision != carrier.RouteGeneration || route.ConfigContentHash != carrier.ConfigContentHash || route.EdgeNodeID != carrier.EdgeNodeID || route.EdgeProcessEpoch != carrier.EdgeProcessEpoch {
 		return nil, ErrDataCarrierPreviewRegistryStale
 	}
 	identity := route.Server.Identity()

@@ -49,6 +49,7 @@ type PrivateAccessGrantDecision struct {
 
 type PrivateAccessGrantAuthorizer interface {
 	AuthorizePrivateAccessGrant(context.Context, string, connectorprotocol.PrivateAccessRequest) (PrivateAccessGrantDecision, error)
+	RevalidatePrivateAccessGrant(context.Context, string, connectorprotocol.PrivateAccessRequest, string) (PrivateAccessGrantDecision, error)
 }
 
 type PrivateAccessGrantClient struct {
@@ -64,8 +65,21 @@ func NewPrivateAccessGrantClient(httpClient *HTTPClient, nodeID, processEpoch st
 	return &PrivateAccessGrantClient{http: httpClient, nodeID: nodeID, processEpoch: processEpoch}, nil
 }
 
-func (c *PrivateAccessGrantClient) AuthorizePrivateAccessGrant(ctx context.Context, grant string, input connectorprotocol.PrivateAccessRequest) (_ PrivateAccessGrantDecision, resultErr error) {
-	if c == nil || c.http == nil || ctx == nil || len(grant) == 0 || len(grant) > 16<<10 || input.Validate(time.Now().UTC()) != nil {
+func (c *PrivateAccessGrantClient) AuthorizePrivateAccessGrant(ctx context.Context, grant string, input connectorprotocol.PrivateAccessRequest) (PrivateAccessGrantDecision, error) {
+	return c.authorize(ctx, grant, input, "")
+}
+func (c *PrivateAccessGrantClient) RevalidatePrivateAccessGrant(ctx context.Context, grant string, input connectorprotocol.PrivateAccessRequest, decisionID string) (PrivateAccessGrantDecision, error) {
+	if connectorprotocol.ValidateIdentifier(decisionID) != nil {
+		return PrivateAccessGrantDecision{}, ErrPrivateAccessGrantInvalid
+	}
+	return c.authorize(ctx, grant, input, decisionID)
+}
+func (c *PrivateAccessGrantClient) authorize(ctx context.Context, grant string, input connectorprotocol.PrivateAccessRequest, admittedID string) (_ PrivateAccessGrantDecision, resultErr error) {
+	validationTime := time.Now().UTC()
+	if admittedID != "" {
+		validationTime = time.Time{}
+	}
+	if c == nil || c.http == nil || ctx == nil || len(grant) == 0 || len(grant) > 16<<10 || input.Validate(validationTime) != nil {
 		return PrivateAccessGrantDecision{}, ErrPrivateAccessGrantInvalid
 	}
 	ctx, finish := c.http.startRequest(ctx, "connector_admission")
@@ -87,6 +101,9 @@ func (c *PrivateAccessGrantClient) AuthorizePrivateAccessGrant(ctx context.Conte
 	request.Header.Set("X-Paperboat-Edge-Node-ID", c.nodeID)
 	request.Header.Set("X-Paperboat-Edge-Process-Epoch", c.processEpoch)
 	request.Header.Set("X-Paperboat-Private-Access-Grant", grant)
+	if admittedID != "" {
+		request.Header.Set("X-Paperboat-Admitted-Decision", admittedID)
+	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
 	c.http.applyTraceHeaders(ctx, request.Header)
@@ -109,7 +126,7 @@ func (c *PrivateAccessGrantClient) AuthorizePrivateAccessGrant(ctx context.Conte
 	}
 	switch response.StatusCode {
 	case http.StatusOK:
-		if err := validatePrivateAccessGrantDecision(decision, input, time.Now().UTC()); err != nil {
+		if err := validatePrivateAccessGrantDecision(decision, input, time.Now().UTC(), admittedID); err != nil {
 			return PrivateAccessGrantDecision{}, err
 		}
 		return decision, nil
@@ -127,11 +144,17 @@ func (c *PrivateAccessGrantClient) AuthorizePrivateAccessGrant(ctx context.Conte
 	}
 }
 
-func validatePrivateAccessGrantDecision(decision PrivateAccessGrantDecision, request connectorprotocol.PrivateAccessRequest, now time.Time) error {
-	if decision.Ingress != nil && (decision.Ingress.Validate(now) != nil || decision.Ingress.NativeAuthorization == nil || decision.Ingress.NativeAuthorization.Request != request) {
+func validatePrivateAccessGrantDecision(decision PrivateAccessGrantDecision, request connectorprotocol.PrivateAccessRequest, now time.Time, admittedID string) error {
+	if admittedID != "" && decision.DecisionID != admittedID {
 		return ErrPrivateAccessGrantInvalid
 	}
-	if decision.Schema != connectorprotocol.PrivateAccessSchema || decision.Kind != "private_access_authorization" || !decision.Allowed || decision.Reason != "allowed" || decision.DecisionID == "" || decision.ExpiresAt.IsZero() || !decision.ExpiresAt.After(now) || decision.ExpiresAt.After(request.ExpiresAt) || decision.RequestID != request.RequestID || decision.CorrelationID != request.CorrelationID || decision.ResourceKind != request.ResourceKind || decision.ResourceID != request.ResourceID || decision.RouteID != request.RouteID || decision.OperationID != request.OperationID || decision.ConnectorID != request.ConnectorID || decision.CarrierSessionID != request.CarrierSessionID || decision.RouteGeneration != request.RouteGeneration || decision.SessionGeneration != request.SessionGeneration || decision.ProcessGeneration != request.ProcessGeneration || decision.ConfigGeneration != request.ConfigGeneration || decision.AssignmentGeneration != request.AssignmentGeneration || decision.Protocol != request.Protocol {
+	if decision.Ingress != nil && admittedID != "" && (decision.Ingress.ValidateAdmitted(now) != nil || !decision.Ingress.ExpiresAt.After(now)) {
+		return ErrPrivateAccessGrantInvalid
+	}
+	if decision.Ingress != nil && (admittedID == "" && decision.Ingress.Validate(now) != nil || decision.Ingress.NativeAuthorization == nil || decision.Ingress.NativeAuthorization.Request != request) {
+		return ErrPrivateAccessGrantInvalid
+	}
+	if decision.Schema != connectorprotocol.PrivateAccessSchema || decision.Kind != "private_access_authorization" || !decision.Allowed || decision.Reason != "allowed" || decision.DecisionID == "" || decision.ExpiresAt.IsZero() || !decision.ExpiresAt.After(now) || admittedID == "" && decision.ExpiresAt.After(request.ExpiresAt) || decision.RequestID != request.RequestID || decision.CorrelationID != request.CorrelationID || decision.ResourceKind != request.ResourceKind || decision.ResourceID != request.ResourceID || decision.RouteID != request.RouteID || decision.OperationID != request.OperationID || decision.ConnectorID != request.ConnectorID || decision.CarrierSessionID != request.CarrierSessionID || decision.RouteGeneration != request.RouteGeneration || decision.SessionGeneration != request.SessionGeneration || decision.ProcessGeneration != request.ProcessGeneration || decision.ConfigGeneration != request.ConfigGeneration || decision.AssignmentGeneration != request.AssignmentGeneration || decision.Protocol != request.Protocol {
 		return ErrPrivateAccessGrantInvalid
 	}
 	return nil

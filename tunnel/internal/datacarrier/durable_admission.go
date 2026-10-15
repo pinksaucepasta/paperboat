@@ -244,7 +244,7 @@ func (r *DurableAdmissionRegistry) HasIdentity(identity Identity, now time.Time)
 		return false
 	}
 	for _, admission := range entry.byRoute {
-		if (admission.State == "staged" || admission.State == "active") && (admission.ExpiresAt.IsZero() || admission.ExpiresAt.After(now)) {
+		if admission.State == "staged" || admission.State == "active" {
 			return true
 		}
 	}
@@ -262,7 +262,7 @@ func (r *DurableAdmissionRegistry) ForIdentity(identity Identity, now time.Time)
 	result := make([]DurableAdmission, 0, len(entry.byRoute))
 	if !r.closed && ok && entry.identity == identity {
 		for _, admission := range entry.byRoute {
-			if (admission.State == "staged" || admission.State == "active") && (admission.ExpiresAt.IsZero() || admission.ExpiresAt.After(now)) {
+			if admission.State == "staged" || admission.State == "active" {
 				result = append(result, admission)
 			}
 		}
@@ -290,7 +290,7 @@ func (r *DurableAdmissionRegistry) MachineBinding(identity Identity, now time.Ti
 		return "", "", false
 	}
 	for _, admission := range entry.byRoute {
-		if (admission.State == "staged" || admission.State == "active") && (admission.ExpiresAt.IsZero() || admission.ExpiresAt.After(now)) {
+		if admission.State == "staged" || admission.State == "active" {
 			return entry.machineIdentityPublicKey, entry.machineIdentityThumbprint, true
 		}
 	}
@@ -376,13 +376,7 @@ func (r *DurableAdmissionRegistry) AuthorizeStream(ctx context.Context, identity
 	if admission.State != "staged" && admission.State != "active" {
 		return ErrDurableAdmissionMissing
 	}
-	// Durable connector assignments deliberately permit zero expiry so the
-	// edge can preserve last-known-good traffic during a control-plane outage.
-	// Accessor admissions always carry a bounded nonzero expiry and are
-	// validated before conversion into this registry.
-	if !admission.ExpiresAt.IsZero() && !admission.ExpiresAt.After(time.Now().UTC()) {
-		return ErrDurableAdmissionExpired
-	}
+
 	return nil
 }
 

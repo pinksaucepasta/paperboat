@@ -29,6 +29,10 @@ func (f privateAccessGrantAuthorizerFunc) AuthorizePrivateAccessGrant(ctx contex
 	return f(ctx, grant, request)
 }
 
+func (f privateAccessGrantAuthorizerFunc) RevalidatePrivateAccessGrant(ctx context.Context, grant string, request connectorprotocol.PrivateAccessRequest, _ string) (control.PrivateAccessGrantDecision, error) {
+	return f(ctx, grant, request)
+}
+
 type privateTCPRouteSnapshot struct{ rules []route.RouteRule }
 
 func (s privateTCPRouteSnapshot) CanonicalSnapshot() (uint64, []route.RouteRule, bool) {
@@ -49,7 +53,7 @@ func TestPrivateTCPFullAuthenticatedEdgePath(t *testing.T) {
 	request.ProcessGeneration, request.ConfigGeneration = durableIdentity.ProcessGeneration, durableIdentity.Generation
 	rule := route.RouteRule{ID: request.RouteID, RouteID: request.RouteID, RouteGeneration: request.RouteGeneration, AssignmentID: "assignment_private_tcp", AssignmentGeneration: request.AssignmentGeneration, ResourceKind: "tunnel", SessionGeneration: request.SessionGeneration, AccountID: request.AccountID, HostID: durableIdentity.HostID, TunnelID: request.ResourceID, ConnectorID: request.ConnectorID, ConnectorSessionID: request.CarrierSessionID, ConnectorProcessGeneration: request.ProcessGeneration, ConfigGeneration: request.ConfigGeneration, ConfigContentHash: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", Node: request.EdgeNodeID, EdgeProcessEpoch: request.EdgeProcessEpoch, Kind: route.TunnelPrivateTCP, Protocol: "private_tcp", AccessMode: "private"}
 
-	t.Run("allow duplex", func(t *testing.T) {
+	t.Run("allow duplex beyond TTL until revocation", func(t *testing.T) {
 		accessorServer, accessorClient := testEdgePreviewCarrierPair(t, accessorIdentity)
 		durableServer, durableClient := testEdgePreviewCarrierPair(t, durableIdentity)
 		registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
@@ -65,8 +69,12 @@ func TestPrivateTCPFullAuthenticatedEdgePath(t *testing.T) {
 			t.Fatal("TCP reached Caddy target")
 			return nil, nil
 		}), Routes: privateTCPRouteSnapshot{rules: []route.RouteRule{rule}}, Carriers: registry}
+		var revoked atomic.Bool
 		bridge, err := NewPrivateAccessStreamBridge(PrivateAccessStreamBridgeConfig{Authorizer: privateAccessGrantAuthorizerFunc(func(context.Context, string, connectorprotocol.PrivateAccessRequest) (control.PrivateAccessGrantDecision, error) {
-			return control.PrivateAccessGrantDecision{Allowed: true, ExpiresAt: now.Add(30 * time.Second)}, nil
+			if revoked.Load() {
+				return control.PrivateAccessGrantDecision{}, control.ErrPrivateAccessGrantForbidden
+			}
+			return control.PrivateAccessGrantDecision{DecisionID: "decision_private_live", Allowed: true, ExpiresAt: time.Now().Add(60 * time.Millisecond)}, nil
 		}), Target: routeTarget, Clock: func() time.Time { return now }})
 		if err != nil {
 			t.Fatal(err)
@@ -120,6 +128,7 @@ func TestPrivateTCPFullAuthenticatedEdgePath(t *testing.T) {
 		if err := <-connectorReady; err != nil {
 			t.Fatal(err)
 		}
+		time.Sleep(150 * time.Millisecond)
 		go func() { _, _ = io.WriteString(stream, "client-to-origin") }()
 		got := make([]byte, len("client-to-origin"))
 		if _, err := io.ReadFull(origin, got); err != nil || string(got) != "client-to-origin" {
@@ -129,6 +138,17 @@ func TestPrivateTCPFullAuthenticatedEdgePath(t *testing.T) {
 		got = make([]byte, len("origin-to-client"))
 		if _, err := io.ReadFull(stream, got); err != nil || string(got) != "origin-to-client" {
 			t.Fatalf("client got=%q err=%v", got, err)
+		}
+		revoked.Store(true)
+		cut := make(chan error, 1)
+		go func() { var b [1]byte; _, err := stream.Read(b[:]); cut <- err }()
+		select {
+		case err := <-cut:
+			if err == nil {
+				t.Fatal("revocation did not cut private stream")
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("revocation retained private stream")
 		}
 		cancel()
 		_ = originEdge.Close()
@@ -326,6 +346,7 @@ func TestPrivatePreviewGrantReachesTLSHTTPIngress(t *testing.T) {
 	identity.AccountID, identity.TunnelID, identity.ConnectorID, identity.HostID, identity.SessionID = id("user"), id("machine"), id("machine"), id("machine"), id("session")
 	server, client := testEdgePreviewCarrierPair(t, identity)
 	request := edgePrivateAccessRequest(now)
+	request.ExpiresAt = now.Add(time.Second)
 	request.AccountID, request.MachineID, request.CarrierSessionID = identity.AccountID, identity.HostID, identity.SessionID
 	request.ResourceID, request.RouteID, request.OperationID = id("preview"), id("route"), id("operation")
 	request.SessionID, request.IdempotencyKey, request.RequestID, request.CorrelationID = id("session"), id("operation"), id("request"), id("correlation")
@@ -367,7 +388,7 @@ func TestPrivatePreviewGrantReachesTLSHTTPIngress(t *testing.T) {
 	decision.GrantGeneration = request.InstallationGeneration
 	decision.MembershipGeneration = 0
 	decision.IssuedAt = now
-	decision.ExpiresAt = now.Add(10 * time.Second)
+	decision.ExpiresAt = request.ExpiresAt
 	decision.NativeAuthorization = &connectorprotocol.PrivateAccessOpen{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Grant: "signed-grant", Request: request}
 	if err := decision.Validate(now); err != nil {
 		t.Fatal(err)
@@ -400,9 +421,10 @@ func TestPrivatePreviewGrantReachesTLSHTTPIngress(t *testing.T) {
 	}()
 	var revoked atomic.Bool
 	var reauthorizations atomic.Int32
-	transport.privateAuthority = func(_ context.Context, evidence connectorprotocol.PrivateAccessOpen) (connectorprotocol.IngressDecision, error) {
+	transport.privateAuthority = func(_ context.Context, prior connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error) {
+		evidence := prior.NativeAuthorization
 		reauthorizations.Add(1)
-		if revoked.Load() || evidence.Request != request || evidence.Grant != "signed-grant" {
+		if evidence == nil || revoked.Load() || evidence.Request != request || evidence.Grant != "signed-grant" {
 			return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
 		}
 		fresh := decision
@@ -474,6 +496,7 @@ func TestPrivatePreviewGrantReachesTLSHTTPIngress(t *testing.T) {
 		t.Fatalf("HTTP status=%d body=%q err=%v", response.StatusCode, body, err)
 	}
 	response.Body.Close()
+	time.Sleep(time.Until(request.ExpiresAt.Add(50 * time.Millisecond)))
 	// The same admitted TLS connection retains proof after its short ingress
 	// snapshot expires; every new request must obtain current server authority.
 	registry.mu.Lock()
@@ -516,7 +539,11 @@ func TestPrivatePreviewGrantReachesTLSHTTPIngress(t *testing.T) {
 	if upload == 0 || download < uint64(len("private origin reached")) {
 		t.Fatalf("native preview unmetered upload=%d download=%d", upload, download)
 	}
-	lease, err := metering.AcquireIngress(context.Background(), decision)
+	freshDecision, err := transport.privateAuthority(context.Background(), decision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := metering.AcquireAdmittedIngress(context.Background(), freshDecision)
 	if err != nil {
 		t.Fatalf("native response retained capacity: %v", err)
 	}
@@ -538,7 +565,7 @@ func TestPrivatePreviewGrantReachesTLSHTTPIngress(t *testing.T) {
 	}
 	io.Copy(io.Discard, denied.Body)
 	denied.Body.Close()
-	if denied.StatusCode != 502 || reauthorizations.Load() != 3 {
+	if denied.StatusCode != 502 || reauthorizations.Load() != 4 {
 		t.Fatalf("revoked request status=%d authorization calls=%d", denied.StatusCode, reauthorizations.Load())
 	}
 	recorder.mu.Lock()

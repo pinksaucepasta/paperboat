@@ -165,7 +165,7 @@ that use them; say which in Evidence.
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
 | F3-01 | Create, type, output, resize, colours, full-screen apps (vim, htop, less), Ctrl-C / Ctrl-D / Ctrl-Z, large paste, unicode — all pairs. | [ ] | [ ] | [ ] | — |
-| F3-02 | Detach and reattach the same session with output replay; reattach from another device. | [ ] | [ ] | [ ] | — |
+| F3-02 | Detach and reattach the same session with output replay; reattach from another device. | [ ] | [ ] | [ ] | 1.4c server browser ticket/guest authority survives bearer/code TTL; fresh admissions denied, reset/stop/session revocation still cuts. Ticket PostgreSQL tests PASS; guest lifecycle PostgreSQL PASS0.42s. Exact-HEAD full smoke pending. |
 | F3-03 | Network drop, sleep/wake, Wi-Fi switch → reconnects to the same shell; no lost or duplicated input. | [ ] | [ ] | [ ] | — |
 | F3-04 | A session idle for 8 hours is still usable. | [ ] | [ ] | [ ] | — |
 | F3-05 | `pb session list/attach/close/rename/delete`; the 20-session limit gives a clear message (closed and unavailable sessions don't count). | [ ] | [ ] | [ ] | Server TestCreateTerminalSessionEnforcesLiveCapacityWithoutEviction and TestTerminalSessionRetentionExpiresOnlyConfirmedClosedRows PostgreSQL race PASS; configured limit20 retained. Device qualification pending. |
@@ -207,7 +207,7 @@ that use them; say which in Evidence.
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
 | F4-01 | Output, exit codes, stderr, stdin, very large output, unicode — all pairs. | [ ] | [ ] | [ ] | — |
-| F4-02 | Commands running 30+ minutes return their final output and exit code. | [ ] | [ ] | [ ] | — |
+| F4-02 | Commands running 30+ minutes return their final output and exit code. | [ ] | [ ] | [ ] | 1.4c signed-network producer retains original expired scopes until explicit withdrawal; TestNetworkApplicationExpiryOnPostgres verifies signatures and caller/machine revocation, PASS0.47s on isolated VPS PostgreSQL. Long-device qualification pending. |
 | F4-03 | `--timeout` ends the remote command; Ctrl-C ends it; target reboot mid-command reports an unknown outcome clearly. | [ ] | [ ] | [ ] | — |
 | F4-04 | Target offline → clear message; ENV assigned but undeliverable → the specific ENV error. | [ ] | [ ] | [ ] | Server TestExecDescriptorPersistsExactRevocableCredential PostgreSQL PASS0.22s: disconnected target denied without issuing credentials, exact self/remote/foreign-source and revocation fences retained. Native error/ENV delivery proof pending Lane A. |
 | F4-05 | `pb ping` reports real reachability and path (direct/relay); `pb wait` waits for each documented condition. | [ ] | [ ] | [ ] | — |
@@ -228,7 +228,7 @@ that use them; say which in Evidence.
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
 | F5-01 | Interactive `pb ssh <m>` and `pb ssh <m> -- cmd` work on the first attempt every time — all pairs. | [ ] | [ ] | [ ] | — |
-| F5-02 | SSH sessions held 1+ hour stay connected. | [ ] | [ ] | [ ] | — |
+| F5-02 | SSH sessions held 1+ hour stay connected. | [ ] | [ ] | [ ] | 1.4c machine-service current authority survives original credential TTL without renewing stored credential expiry; TestMachineServiceSignedRuntimePostgres PASS0.14s; current CLI-session revoke still denied. Full smoke pending. |
 | F5-03 | `pb scp`, `pb sftp`, `pb rsync` both directions, large trees, resume after interruption. | [ ] | [ ] | [ ] | — |
 | F5-04 | Plain `ssh <m>.<local domain>` and VS Code Remote-SSH connect through the generated aliases; host-key verification normal; `pb ssh trust-host` handles a changed key. | [ ] | [ ] | [ ] | Server TestSQLRepositoryManagedSSHAuthorityLifecycle PostgreSQL PASS0.57s: exact ownership/generation, pending key promotion, team use versus administration, withdrawal, replay conflict and audit privacy. Key bounds/session/account revocation PASS0.28s/0.14s. Device integration pending Lane A. |
 | F5-05 | `pb ssh doctor` finds and explains broken integration. | [ ] | [ ] | [ ] | — |
@@ -284,7 +284,7 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F7-01 | `pb preview <port>` foreground and `--background`; URL opens in a browser from another network — on L, M, W. | [ ] | [ ] | [ ] | — |
+| F7-01 | `pb preview <port>` foreground and `--background`; URL opens in a browser from another network — on L, M, W. | [ ] | [ ] | [ ] | 1.4c preview/runtime carriers retain admitted routes through TTL/control outage, explicit complete withdrawal detaches. Datacarrier/edgehttp/runtime race PASS4.027/6.891/12.606s; TestRuntimeAttachmentAuthorityOnPostgres PASS0.91s including readiness/DNS/revocation. Full smoke pending. |
 | F7-02 | `--ttl` expiry, `stop`, `delete`, `list`, `status` behave as documented. | [ ] | [ ] | [ ] | — |
 | F7-03 | `--private` (only you) and `--team` (team grant) enforce access; others are refused. | [ ] | [ ] | [ ] | — |
 | F7-04 | Preview survives daemon restart (background) and ends cleanly when the origin stops. | [ ] | [ ] | [ ] | — |
@@ -365,7 +365,7 @@ that use them; say which in Evidence.
 
 | ID | Scenario | L | M | W | Evidence |
 |---|---|---|---|---|---|
-| F9-01 | `https://<port>.<m>.<local domain>` and `https://<m>.<local domain>:<port>` open with trusted HTTPS from every client platform — all pairs. | [ ] | [ ] | [ ] | — |
+| F9-01 | `https://<port>.<m>.<local domain>` and `https://<m>.<local domain>:<port>` open with trusted HTTPS from every client platform — all pairs. | [ ] | [ ] | [ ] | 1.4c edge browser/private/public TCP use shared admission lifetime and revocation owner; short-TTL duplex tests preserve explicit cuts and strict new admission. BrowserAccessPostgres PASS0.46s; private ingress signer tests PASS. Device qualification pending. |
 | F9-02 | Raw TCP via `127.100.x.x` and `pb access machine <m> --port <p> --listen 127.0.0.1:<q>`. | [ ] | [ ] | [ ] | — |
 | F9-03 | `pb config local-access` alias, domain and proxy settings apply and reset correctly. | [ ] | [ ] | [ ] | — |
 | F9-04 | Access is denied without permission; revoking access ends active flows. | [ ] | [ ] | [ ] | — |
