@@ -226,6 +226,24 @@ class SmokeReceipts(unittest.TestCase):
                 self.assertEqual(result.returncode, 2)
                 self.assertIn("Windows device smoke is deferred until after launch", result.stderr)
 
+    def test_exec_failure_retains_private_diagnostics_without_leaking_output(self):
+        prefix = (HERE / 'smoke.sh').read_text().split('# ---------------------------------------------------------------- run')[0]
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            script = root / 'smoke.sh'
+            script.write_text(prefix + r'''
+on() { printf 'PRIVATE_FAILURE_DETAIL\nrc=7\n'; }
+test_exec apple
+exit "$FAILED"
+''')
+            result = subprocess.run(['bash', str(script), '--expect-version', 'fixture', '--targets', 'hp'], capture_output=True, text=True, timeout=5)
+            self.assertEqual(1, result.returncode)
+            self.assertNotIn('PRIVATE_FAILURE_DETAIL', result.stdout + result.stderr)
+            files = list((root / 'results/diagnostics').glob('*'))
+            self.assertEqual(1, len(files), 'failed exec discarded its actual error')
+            self.assertEqual(0o600, files[0].stat().st_mode & 0o777)
+            self.assertEqual('PRIVATE_FAILURE_DETAIL\nrc=7', files[0].read_text())
+
     def test_terminal_removes_only_its_exact_session_and_preserves_primary_failure(self):
         prefix = (HERE / 'smoke.sh').read_text().split('# ---------------------------------------------------------------- run')[0]
         for terminal_exit, fault in [(0, ""), (7, ""), (0, "foreign_scope"), (0, "failed_delete"), (0, "foreign_ack")]:

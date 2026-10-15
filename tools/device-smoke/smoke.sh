@@ -111,6 +111,16 @@ record() { # record ID STATUS SECONDS DETAIL
   [ "$status" = PASS ] || [ "$status" = SKIP ] || FAILED=1
   printf '%-28s %-5s %6ss  %s\n' "$id" "$status" "$secs" "${detail:0:150}"
 }
+# Preserve the actual failure without exposing command output in shared receipts.
+record_command_failure() {
+  local id=$1 seconds=$2 output=$3 diagnostic
+  mkdir -p "$RESULTS_DIR/diagnostics"
+  chmod 0700 "$RESULTS_DIR/diagnostics"
+  diagnostic=$(umask 077; mktemp "$RESULTS_DIR/diagnostics/$RUN_ID.XXXXXX") || return 1
+  printf '%s' "$output" > "$diagnostic"
+  record "$id" FAIL "$seconds" "command failed; private diagnostics: $diagnostic"
+}
+
 skipped() { [[ ",$SKIP," == *",$1,"* ]]; }
 now() { date +%s; }
 # Only the final receipt belongs to the remote wrapper; command stdout may
@@ -139,7 +149,7 @@ test_exec() { # test_exec TARGET [ID-PREFIX]
   local t=$1 prefix=${2:-exec} marker="ex-$RUN_ID" t0 out status
   t0=$(now); out=$(on hp "timeout 120 $PB_HP exec $t -- $(remote_echo_cmd "$t" "$marker"); echo rc=\$?" 2>&1); status=$?
   if command_ok "$status" "$out" && marker_present "$out" "$marker"; then record "$prefix:$t" PASS $(( $(now)-t0 ))
-  else record "$prefix:$t" FAIL $(( $(now)-t0 )) "command or transport failed; output withheld"; fi
+  else record_command_failure "$prefix:$t" $(( $(now)-t0 )) "$out"; fi
 }
 
 # Long work runs on HP in the background as uploaded job scripts, so remote
@@ -177,14 +187,14 @@ collect() { # collect ID TAG EXPECT-MARKER : waits for the background job
   local dur; dur=$(grep -oE 'dur=[0-9]+' <<<"$out" | cut -d= -f2)
   if [ "$status" = 0 ] && marker_present "$out" "$want" && [ "$(grep -v '^dur=' <<<"$out" | sed '/^$/d' | tail -1)" = rc=0 ] && [[ "$dur" =~ ^[0-9]+$ ]] \
       && [ "$dur" -ge "$minimum" ]; then record "$id" PASS "${dur:-?}"
-  else record "$id" FAIL "${dur:-?}" "job failed, ran too briefly, or transport failed; output withheld"; fi
+  else record_command_failure "$id" "${dur:-?}" "$out"; fi
 }
 
 test_ssh_short() {
   local t=$1 marker="ssh-$RUN_ID" t0 out status
   t0=$(now); out=$(on hp "timeout 120 $PB_HP ssh $t -- $(remote_echo_cmd "$t" "$marker") < /dev/null; echo rc=\$?" 2>&1); status=$?
   if command_ok "$status" "$out" && marker_present "$out" "$marker"; then record "ssh:$t" PASS $(( $(now)-t0 ))
-  else record "ssh:$t" FAIL $(( $(now)-t0 )) "command or transport failed; output withheld"; fi
+  else record_command_failure "ssh:$t" $(( $(now)-t0 )) "$out"; fi
 }
 
 # Terminal: a real PTY session from HP. The driver is uploaded once; it sends
@@ -283,7 +293,7 @@ test_transfer() {
   t0=$(now)
   src_sha=$(on hp "mkdir -p /tmp/$RUN_ID && head -c 52428800 /dev/urandom > /tmp/$RUN_ID/$name && sha256sum /tmp/$RUN_ID/$name | cut -d' ' -f1")
   out=$(on hp "timeout 900 $PB_HP send /tmp/$RUN_ID/$name --to $t; echo rc=\$?" 2>&1); status=$?
-  if ! command_ok "$status" "$out"; then record "transfer:$t" FAIL $(( $(now)-t0 )) "transfer command or transport failed; output withheld"; return; fi
+  if ! command_ok "$status" "$out"; then record_command_failure "transfer:$t" $(( $(now)-t0 )) "$out"; return; fi
   case "$t" in
     victus) dst_sha=$(on victus "\$f = Get-ChildItem -Path \$HOME -Recurse -Filter '$name' -ErrorAction SilentlyContinue -Depth 3 | Select-Object -First 1; if (\$f) { (Get-FileHash \$f.FullName -Algorithm SHA256).Hash.ToLower(); Remove-Item \$f.FullName }" | tr -d '\r') ;;
     apple) dst_sha=$(on apple "f=\$(find ~ -maxdepth 3 -name '$name' 2>/dev/null | head -1); [ -n \"\$f\" ] && shasum -a 256 \"\$f\" | cut -d' ' -f1 && rm -f \"\$f\"") ;;
