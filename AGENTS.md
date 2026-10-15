@@ -30,7 +30,8 @@ component directory. Go 1.27.2.
 
 ## How we work
 
-1. **Feature by feature.** Take one feature from PLAN.md, make it work on every supported
+1. **Main paths of every feature first, then edge cases** (PLAN.md section 3 overrides the rest
+   of this point until pass 1 is done). **Feature by feature.** Take one feature from PLAN.md, make it work on every supported
    platform (Linux and macOS for launch; Windows after launch, PLAN.md 1.1) in every way a user can use it, including edge cases,
    failures and recovery, before moving to the next. A feature is done only when its PLAN
    rows in CHECKLIST.md are `[x]` on real devices.
