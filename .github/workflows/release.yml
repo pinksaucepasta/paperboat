@@ -165,18 +165,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ssh -i "$HOME/.ssh/paperboat-release" -o BatchMode=yes -o StrictHostKeyChecking=yes "root@$RELEASE_HOST" 'bash -s' <<'REMOTE'
+          origin_state=$(ssh -i "$HOME/.ssh/paperboat-release" -o BatchMode=yes -o StrictHostKeyChecking=yes "root@$RELEASE_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           root=/opt/paperboat/releases
           test -d "$root" && test ! -L "$root"
           test -d "$root/current" && test ! -L "$root/current"
           test -d "$root/staging" && test ! -L "$root/staging" && test -w "$root/staging"
+          if test ! -e "$root/current/tuf"; then
+            echo initial
+            exit 0
+          fi
           test -d "$root/current/tuf/targets" && test ! -L "$root/current/tuf/targets"
           test -d "$root/current/tuf/metadata" && test ! -L "$root/current/tuf/metadata"
+          echo published
           REMOTE
+          )
+          if test "$origin_state" = published; then
           curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
             --connect-timeout 5 --max-time 15 --max-filesize 1048576 \
             "$RELEASE_URL/metadata/root.json" -o "$RUNNER_TEMP/paperboat-root.json"
+          fi
 
   linux-amd64:
     if: github.event_name == 'push'
@@ -864,13 +872,27 @@ jobs:
         run: |
           set -euo pipefail
           repository="$RUNNER_TEMP/tuf-candidate"
-          mkdir -p "$repository/targets"
-          ssh -i "$HOME/.ssh/paperboat-release" -o BatchMode=yes -o StrictHostKeyChecking=yes "root@$RELEASE_HOST" \
-            'tar -C /opt/paperboat/releases/current/tuf -cf - metadata' | tar -C "$repository" -xf -
+          archive="$RUNNER_TEMP/tuf-current-metadata.tar"
+          initialized=false
+          if ssh -i "$HOME/.ssh/paperboat-release" -o BatchMode=yes -o StrictHostKeyChecking=yes "root@$RELEASE_HOST" \
+            'if test -d /opt/paperboat/releases/current/tuf/metadata; then tar -C /opt/paperboat/releases/current/tuf -cf - metadata; elif test -e /opt/paperboat/releases/current/tuf; then exit 43; else exit 42; fi' > "$archive"; then
+            mkdir -p "$repository/targets"
+            tar -C "$repository" -xf "$archive"
+          else
+            status=$?
+            rm -f "$archive"
+            test "$status" -eq 42 || exit "$status"
+            go run ./tools/tuf-repository init -repository "$repository" \
+              -trusted-root "$GITHUB_WORKSPACE/cli/internal/hostruntime/bootstrap/trusted-root.json"
+            initialized=true
+          fi
+          rm -f "$archive"
           go run ./tools/tuf-repository validate-signers \
             -repository "$repository" \
             -trusted-root "$GITHUB_WORKSPACE/cli/internal/hostruntime/bootstrap/trusted-root.json"
-          go run ./tools/tuf-repository verify-published -repository "$repository"
+          if test "$initialized" = false; then
+            go run ./tools/tuf-repository verify-published -repository "$repository"
+          fi
       - name: Recognize an already committed release without re-signing
         id: committed
         shell: bash

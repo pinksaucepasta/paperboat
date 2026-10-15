@@ -20,6 +20,59 @@ def canonical(value):
 
 
 class TUFWorkflowSignerTest(unittest.TestCase):
+    def assert_empty_origin_preflight(self, directory, publication):
+        origin = directory / "origin"
+        (origin / "current").mkdir(parents=True)
+        (origin / "staging").mkdir()
+        binaries = directory / "preflight-bin"
+        binaries.mkdir()
+        ssh = binaries / "ssh"
+        ssh.write_text("#!/usr/bin/env python3\nimport os,sys,subprocess\n"
+                       "body=sys.stdin.read().replace('/opt/paperboat/releases',os.environ['FIXTURE_ORIGIN'])\n"
+                       "sys.exit(subprocess.run(['bash','-c',body]).returncode)\n")
+        ssh.chmod(0o755)
+        curl = binaries / "curl"
+        curl.write_text("#!/bin/sh\nexit 77\n")
+        curl.chmod(0o755)
+        step = next(s for s in publication["jobs"]["release-authority"]["steps"]
+                    if s.get("name") == "Verify production metadata origin is readable")
+        environment = dict(os.environ, FIXTURE_ORIGIN=str(origin), RELEASE_HOST="origin.example.test",
+                           RELEASE_URL="https://get.example.test/tuf", RUNNER_TEMP=str(directory),
+                           PATH=str(binaries)+":"+os.environ["PATH"])
+        result = subprocess.run(["bash", "-c", step["run"]], env=environment,
+                                capture_output=True, timeout=20)
+        self.assertEqual(result.returncode, 0, "empty protected origin cannot qualify its first release")
+        (origin / "current/tuf").mkdir()
+        result = subprocess.run(["bash", "-c", step["run"]], env=environment,
+                                capture_output=True, timeout=20)
+        self.assertNotEqual(result.returncode, 0, "partial TUF origin was treated as a fresh installation")
+
+    def assert_empty_origin_initialization(self, directory, publication, root, secret):
+        workspace = directory / "checkout"
+        trusted = workspace / "cli/internal/hostruntime/bootstrap/trusted-root.json"
+        trusted.parent.mkdir(parents=True)
+        trusted.write_bytes(root.read_bytes())
+        binaries = directory / "bin"
+        binaries.mkdir()
+        ssh = binaries / "ssh"
+        step = next(s for s in publication["jobs"]["release-publication"]["steps"]
+                    if s.get("name", "").startswith("Read and validate current production TUF"))
+        for status, expected in [(42, 0), (255, 255)]:
+            with self.subTest(origin_status=status):
+                ssh.write_text(f"#!/bin/sh\nexit {status}\n")
+                ssh.chmod(0o755)
+                runner = directory / f"runner-{status}"
+                runner.mkdir()
+                environment = dict(os.environ, PAPERBOAT_TUF_CI="1", PAPERBOAT_TUF_ONLINE_KEY=secret,
+                                   GITHUB_WORKSPACE=str(workspace), RUNNER_TEMP=str(runner),
+                                   RELEASE_HOST="origin.example.test", PATH=str(binaries)+":"+os.environ["PATH"])
+                result = subprocess.run(["bash", "-c", step["run"]], cwd=ROOT / "cli",
+                                        env=environment, capture_output=True, timeout=60)
+                self.assertEqual(result.returncode, expected,
+                                 "first publication did not distinguish absent origin from SSH failure")
+                metadata = runner / "tuf-candidate/metadata/root.json"
+                self.assertEqual(metadata.is_file(), status == 42)
+
     def test_publication_and_refresh_authorize_the_configured_online_secret(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
@@ -74,6 +127,8 @@ class TUFWorkflowSignerTest(unittest.TestCase):
                                              "-trusted-root", str(root)], env=environment,
                                             capture_output=True, timeout=20)
                     self.assertEqual(result.returncode, 0, "workflow signer does not match offline root")
+            self.assert_empty_origin_initialization(directory, publication, root, secret)
+            self.assert_empty_origin_preflight(directory, publication)
 
 
 if __name__ == "__main__":
