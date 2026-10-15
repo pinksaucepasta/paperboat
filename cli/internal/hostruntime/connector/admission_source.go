@@ -178,7 +178,7 @@ func (s *HTTPSAdmissionSource) Admission(ctx context.Context) (Admission, error)
 	if strictJSON(body, &document) != nil || document.OperationID != operationID || document.EnvironmentID != s.config.EnvironmentID || document.MachineID != s.config.MachineID || document.ConnectorID != s.config.ConnectorID || document.EdgePool != s.config.EdgePool || !identifierPattern.MatchString(document.EdgeNodeID) || document.ProtocolVersion != "1.0" || document.Generation == 0 || len(document.Credential) < 32 || len(document.Credential) > 8192 || !validCapabilities(document.Capabilities) || !validEndpoint(document.EdgeEndpoint) || !validRelayHTTPEndpoint(document.RelayHTTPEndpoint) || !validRoutes(document.Routes) || !validFileTransferPolicy(document.FileTransferPolicy) {
 		return Admission{}, ErrAdmissionSourceInvalid
 	}
-	claims, err := s.config.Verifier.Verify(ctx, document.Credential, auth.Policy{Issuer: s.config.Issuer, Audience: "paperboat-edge", CredentialClass: "connector_admission", Scopes: []string{"connector:admit"}, EnvironmentID: s.config.EnvironmentID, MachineID: s.config.MachineID, ConnectorID: s.config.ConnectorID, ConnectorGeneration: document.Generation, EdgePool: s.config.EdgePool, EdgeNodeID: document.EdgeNodeID, MaxLifetime: 5 * time.Minute, SingleUse: true})
+	claims, err := s.config.Verifier.Verify(ctx, document.Credential, auth.Policy{Issuer: s.config.Issuer, Audience: "paperboat-edge", CredentialClass: "connector_admission", Scopes: []string{"connector:admit"}, EnvironmentID: s.config.EnvironmentID, MachineID: s.config.MachineID, ConnectorID: s.config.ConnectorID, ConnectorGeneration: document.Generation, EdgePool: s.config.EdgePool, EdgeNodeID: document.EdgeNodeID, SingleUse: true})
 	if err != nil {
 		return Admission{}, err
 	}

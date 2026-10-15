@@ -43,7 +43,7 @@ func TestStaticAuthorizerVerifiesExactFakePeerCredentialPolicies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims := auth.Claims{Issuer: "https://control.test", Audience: "paperboat-machine", Subject: "usr_test", JTI: "jti_valid", IssuedAt: now.Add(-time.Minute).Unix(), ExpiresAt: now.Add(time.Minute).Unix(), Scope: []string{"terminal:operate"}, CredentialClass: "terminal_operation", EnvironmentID: "env_test", MachineID: "machine_test", UserID: "usr_test", CLIClientSessionID: "cli_test", SessionID: "ses_test"}
+	claims := auth.Claims{Issuer: "https://control.test", Audience: "paperboat-machine", Subject: "usr_test", JTI: "jti_valid", IssuedAt: now.Add(-time.Minute).Unix(), ExpiresAt: now.Add(7 * time.Minute).Unix(), Scope: []string{"terminal:operate"}, CredentialClass: "terminal_operation", EnvironmentID: "env_test", MachineID: "machine_test", UserID: "usr_test", CLIClientSessionID: "cli_test", SessionID: "ses_test"}
 	authorizer, err := factory(signStaticCredential(t, private, "key-1", claims))
 	if err != nil {
 		t.Fatal(err)
@@ -57,6 +57,10 @@ func TestStaticAuthorizerVerifiesExactFakePeerCredentialPolicies(t *testing.T) {
 		"cross_machine":     func(value *auth.Claims) { value.MachineID = "machine_other" },
 		"wrong_scope":       func(value *auth.Claims) { value.Scope = []string{"file:stage"} },
 		"revoked":           func(value *auth.Claims) { value.JTI = "jti_revoked" },
+		"expired_admission": func(value *auth.Claims) {
+			value.ExpiresAt = now.Add(-2 * time.Minute).Unix()
+			value.IssuedAt = now.Add(-3 * time.Minute).Unix()
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			invalid := claims

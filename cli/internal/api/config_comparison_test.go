@@ -24,7 +24,7 @@ func TestConfigComparisonDescriptorChecksExactReadBinding(t *testing.T) {
 				if body["source_machine_id"] != "source" || body["cli_client_session_id"] != "cli" || body["path"] != "settings.txt" || body["expected_remote_revision"] != "remote" {
 					t.Errorf("missing exact read authority: %v", body)
 				}
-				expiry := time.Now().Add(time.Minute)
+				expiry := time.Now().Add(7 * time.Minute)
 				binding := configsync.ConflictComparisonRequest{AssignmentID: "assignment_1", AssignmentVersion: 3, Path: "settings.txt", ConflictRevision: "conflict_1", ExpectedRemoteRevision: "remote"}
 				if foreign {
 					binding.Path = "other"

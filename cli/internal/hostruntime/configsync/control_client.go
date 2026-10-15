@@ -254,7 +254,7 @@ func (c *ControlClient) Credential(ctx context.Context) (result Credential, resu
 	}
 	if envelope.Data.Credential == "" || envelope.Data.EnvironmentID == "" || envelope.Data.MachineID == "" ||
 		envelope.Data.AssignmentID == "" || envelope.Data.WarningRevision == "" ||
-		!envelope.Data.ExpiresAt.After(now) || envelope.Data.ExpiresAt.After(now.Add(5*time.Minute+time.Second)) {
+		!envelope.Data.ExpiresAt.After(now) {
 		return Credential{}, controlFailure(ErrControlClientInvalid, ErrControlClientInvalid)
 	}
 	c.credential = Credential{

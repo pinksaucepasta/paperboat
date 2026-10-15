@@ -24,7 +24,7 @@ func (c *Client) ConfigConflictConnection(ctx context.Context, environmentID, co
 	if err != nil {
 		return result, err
 	}
-	if len(result.OperationID) < 8 || len(result.OperationID) > 128 || !result.ExpiresAt.After(time.Now()) || result.ExpiresAt.Sub(time.Now()) > 5*time.Minute {
+	if len(result.OperationID) < 8 || len(result.OperationID) > 128 || !result.ExpiresAt.After(time.Now()) {
 		return ConfigComparisonDescriptor{}, errors.New("invalid conflict comparison lifetime")
 	}
 	if result.Environment == nil {

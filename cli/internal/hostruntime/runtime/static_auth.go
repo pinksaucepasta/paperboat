@@ -115,59 +115,48 @@ func (r staticPolicyResolver) Policy(frame protocol.Frame) (auth.Policy, error) 
 	if frame.Type == "ack" || frame.Type == "detach" {
 		base.CredentialClass = r.terminalCredentialClass()
 		base.AnyScopes = [][]string{{"terminal:operate"}, {"terminal:view"}, {"terminal:control"}}
-		base.MaxLifetime = 5 * time.Minute
 		return base, nil
 	}
 	switch frame.Capability {
 	case "terminal.v1":
 		base.CredentialClass = r.terminalCredentialClass()
 		base.AnyScopes = [][]string{{"terminal:operate"}, {"terminal:view"}, {"terminal:control"}}
-		base.MaxLifetime = 5 * time.Minute
 	case "health.v1":
 		base.CredentialClass = "terminal_operation"
 		base.AnyScopes = [][]string{{"terminal:operate"}, {"terminal:view"}, {"terminal:control"}}
-		base.MaxLifetime = 5 * time.Minute
 	case "exec.v1":
 		base.CredentialClass = "exec_operation"
 		base.Scopes = []string{"exec:operate"}
 		base.OperationID = frame.OperationID
-		base.MaxLifetime = 5 * time.Minute
 	case "ssh.v1":
 		base.CredentialClass = "ssh_operation"
 		base.Scopes = []string{"ssh:operate"}
 		base.OperationID = frame.OperationID
-		base.MaxLifetime = 5 * time.Minute
 	case "preview.launch.v1":
 		base.CredentialClass = "preview_launch"
 		base.Scopes = []string{"preview:launch"}
 		base.OperationID = frame.OperationID
-		base.MaxLifetime = 5 * time.Minute
 		base.SingleUse = true
 	case "private.access.v1":
 		base.CredentialClass = "native_private"
 		base.Scopes = []string{"private:native"}
 		base.OperationID = frame.OperationID
-		base.MaxLifetime = 5 * time.Minute
 	case "file-transfer.v1":
 		if r.browserTerminalOnly {
 			base.CredentialClass = "browser_terminal_operation"
 			base.Scopes = []string{"terminal:operate"}
-			base.MaxLifetime = 5 * time.Minute
 			return base, nil
 		}
 		base.CredentialClass = "file_transfer"
 		base.Scopes = []string{"file:transfer"}
-		base.MaxLifetime = 5 * time.Minute
 	case "config.compare.v1":
 		base.CredentialClass = "config_compare"
 		base.OperationID = frame.OperationID
 		base.InstallationGeneration = r.installationGeneration
 		base.Scopes = []string{"config:compare"}
-		base.MaxLifetime = 5 * time.Minute
 	case "config.apply.v1":
 		base.CredentialClass = "config_sync"
 		base.Scopes = []string{"config:pull", "config:apply", "config:report"}
-		base.MaxLifetime = 5 * time.Minute
 	default:
 		return auth.Policy{}, ErrStaticAuthInvalid
 	}

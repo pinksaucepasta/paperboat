@@ -51,7 +51,7 @@ func TestControlClientCredentialAndLeaseLifecycle(t *testing.T) {
 			}
 			writeTestJSON(t, w, map[string]any{"data": map[string]any{
 				"credential": "config-credential", "environment_id": "env-1", "machine_id": "helper-1",
-				"assignment_id": "assignment-1", "assignment_version": 1, "warning_revision": "warning-1", "expires_at": now.Add(5 * time.Minute),
+				"assignment_id": "assignment-1", "assignment_version": 1, "warning_revision": "warning-1", "expires_at": now.Add(7 * time.Minute),
 			}})
 		case "/v1/config/leases/acquire":
 			assertLeaseAuthorization(t, r)
